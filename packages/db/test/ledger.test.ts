@@ -116,8 +116,17 @@ describe('LedgerRepo (spec §5.3, §7, §8.1 parity)', () => {
         costMicroGbp: 3200,
         tiles: 0,
         cacheHits: 0,
+        scrolls: 0,
       },
-      { providerId: 'travelpayouts', stage: 'discovery', calls: 4, costMicroGbp: 0, tiles: 2, cacheHits: 1 },
+      {
+        providerId: 'travelpayouts',
+        stage: 'discovery',
+        calls: 4,
+        costMicroGbp: 0,
+        tiles: 2,
+        cacheHits: 1,
+        scrolls: 0,
+      },
     ]);
     expect(ledger.firstAttemptTiles(executionId, 'travelpayouts')).toBe(2);
     expect(ledger.firstAttemptTiles(executionId, 'searchapi')).toBe(0);

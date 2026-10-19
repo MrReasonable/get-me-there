@@ -13,6 +13,9 @@ import {
   type Execution,
   type FlightProvider,
   fixedClock,
+  GRID_HORIZON_DAYS,
+  GRID_STEP_DAYS,
+  GRID_TIMES,
   type OperatorMessage,
   type PreflightResult,
   ProviderError,
@@ -35,7 +38,9 @@ import {
   camoufoxProvider,
   classifyWorkerAnswer,
   createHttpKit,
+  gridTileEstimate,
   type HttpKit,
+  planGridTiles,
   planSingleCells,
 } from '@gmt/providers';
 import { vi } from 'vitest';
@@ -107,6 +112,8 @@ function stub(
     preflight?: PreflightResult;
     /** One preflight answer per run, in order (fix round 1, arch M3); the last repeats. */
     preflights?: PreflightResult[];
+    /** Spec §2 rev 34: plan grid pages with the run's allowances (the real planner), not one page per cell. */
+    grid?: { pageAllowance: number; scrollAllowance: number; scrollSeconds?: number };
   },
 ): Stub {
   let ctxOf: () => EngineContext = () => {
@@ -147,7 +154,18 @@ function stub(
       coveredCells: plan.coveredCells,
       fetchedAt: ctxOf().clock.now(),
       pointOfSale: id === 'camoufox' ? 'GB' : 'unknown',
-      prices: cell === undefined ? [] : [{ ...cell, amountMinor: 45_100, currency: 'GBP' }],
+      prices:
+        cell === undefined
+          ? []
+          : [
+              {
+                ...cell,
+                amountMinor: 45_100,
+                currency: 'GBP',
+                returnDateSource: 'asked',
+                vendorPriceMark: null,
+              },
+            ],
       noFares: [],
       notes: [],
     };
@@ -172,8 +190,33 @@ function stub(
     },
     discovery: {
       info: { sourceKind, maxAgeHours: sourceKind === 'scraped-self' ? 0 : 48, provenanceNote: `${id} stub` },
-      plan: planSingleCells,
+      plan:
+        o.grid === undefined
+          ? planSingleCells
+          : (q: DiscoveryQuery) => {
+              const g = o.grid ?? { pageAllowance: 0, scrollAllowance: 0 };
+              const pairs = Math.max(1, q.share?.pairs ?? 1);
+              return planGridTiles(q, {
+                stepDays: GRID_STEP_DAYS,
+                scrollCap: 30,
+                pageAllowance: Math.floor(g.pageAllowance / pairs),
+                scrollAllowance: Math.floor(g.scrollAllowance / pairs),
+                today: asIsoDate(T0.slice(0, 10)),
+                horizonDays: GRID_HORIZON_DAYS,
+                times: GRID_TIMES,
+              });
+            },
       fetchTile,
+      ...(o.grid === undefined
+        ? {}
+        : {
+            interleavePairs: true as const,
+            estimateTile: (t: TilePlan) =>
+              gridTileEstimate(t, {
+                ...GRID_TIMES,
+                scrollSeconds: o.grid?.scrollSeconds ?? GRID_TIMES.scrollSeconds,
+              }),
+          }),
       ...(preflight === undefined ? {} : { preflight }),
     },
     healthcheck: async () => ({ ok: true, detail: 'stub' }),
@@ -188,7 +231,18 @@ export const stubTravelpayouts = (o: { cells: number }): Stub =>
  * ledger row as http-kit would, then answers the next scripted worker answer (a non-200 goes through the real
  * classifyWorkerAnswer), so the engine stores exactly what the adapter makes of the worker's answers.
  */
-export function realCamoufox(answers: Array<{ status: number; body: unknown }>, cells: number): Stub {
+export function realCamoufox(
+  answers: Array<{ status: number; body: unknown }>,
+  cells: number,
+  /** WP15 fix round 1 (TS 4): the real adapter in grid mode, with the run's page and scroll caps. */
+  grid?: {
+    executionPageCap: number;
+    executionScrollCap: number;
+    scrollCap?: number;
+    scrollSpacingSeconds?: number;
+    pageTimeoutSeconds?: number;
+  },
+): Stub {
   let ctxOf: () => EngineContext = () => {
     throw new Error('stub not bound');
   };
@@ -203,12 +257,15 @@ export function realCamoufox(answers: Array<{ status: number; body: unknown }>, 
         costMicroGbp: 0,
         httpAttempt: 1,
         endpointPath: r.endpointPath,
+        ...(r.scrolls === undefined ? {} : { scrolls: r.scrolls }),
       });
+      const scrolls = Reflect.get(Object(a.body), 'scrolls');
       res.finalise({
         outcome: a.status === 200 ? 'ok' : 'error',
         httpStatus: a.status,
         durationMs: 1,
         pageClass: 'page',
+        ...(typeof scrolls === 'number' ? { scrollCount: scrolls } : {}),
       });
       if (a.status !== 200)
         throw classifyWorkerAnswer({
@@ -231,6 +288,18 @@ export function realCamoufox(answers: Array<{ status: number; body: unknown }>, 
     key: new Secret(KEY),
     workerUrl: 'http://127.0.0.1:8090',
     pointOfSale: 'GB',
+    ...(grid === undefined
+      ? {}
+      : {
+          grid: {
+            mode: 'grid' as const,
+            scrollCap: 30,
+            scrollSpacingSeconds: 5,
+            pageTimeoutSeconds: 90,
+            ...grid,
+          },
+          scrollsLeft: (executionId: string | null) => ctxOf().budget.scrollsLeft('camoufox', executionId),
+        }),
   });
   const discovery = real.discovery;
   if (discovery === undefined) throw new Error('camoufox has discovery');
@@ -250,6 +319,8 @@ export function realCamoufox(answers: Array<{ status: number; body: unknown }>, 
         queries.push(q);
         return discovery.fetchTile(plan, q, pctx);
       },
+      ...(discovery.estimateTile === undefined ? {} : { estimateTile: discovery.estimateTile }),
+      ...(discovery.interleavePairs === undefined ? {} : { interleavePairs: discovery.interleavePairs }),
     },
   };
 }
@@ -283,6 +354,8 @@ export function engineWith(
     notifierFails?: boolean;
     /** The definition's free-call cap (fix round 2: a pause for another cap while camoufox has pages left). */
     maxFreeCalls?: number;
+    /** More of the app's environment (WP15 fix round 1: STUCK_AFTER_HOURS, the scroll caps). */
+    env?: Record<string, string>;
   } = {},
 ): CamoufoxEngine {
   const parsed = parseConfig(
@@ -296,6 +369,7 @@ export function engineWith(
       CAMOUFOX_WORKER_KEY: KEY,
       CAMOUFOX_EXECUTION_PAGE_CAP: String(o.camoufoxConfigCap ?? 100),
       ...(o.monthlyCap === undefined ? {} : { CAMOUFOX_MONTHLY_PAGE_CAP: String(o.monthlyCap) }),
+      ...o.env,
     },
     { realpath: (p) => p },
   );

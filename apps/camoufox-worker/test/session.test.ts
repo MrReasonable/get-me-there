@@ -53,6 +53,7 @@ function setup(
     log?: ReturnType<typeof memoryLog>;
     /** Replaces the fake launch (fix round 1: a launch that never resolves). */
     launch?: () => Promise<FakeContext>;
+    pollMs?: number;
   } = {},
 ) {
   const dataDir = tmpDir();
@@ -100,6 +101,7 @@ function setup(
       pageTimeoutMs: 90_000,
       log: o.log ?? memoryLog(),
       versions,
+      ...(o.pollMs === undefined ? {} : { pollMs: o.pollMs }),
     });
   return {
     dataDir,
@@ -185,6 +187,19 @@ describe('PageSession (spec §2; brief Task 14.4)', () => {
     expect(page0(t).calls.closed).toBe(1);
     expect(page0(t).calls.clicks).toEqual([]);
     expect(released(t)).toBe(true);
+  });
+  it('a Best view settles at a short poll interval, on two matching polls at least 2 s apart (fix round 1, TS 8)', async () => {
+    const log = memoryLog();
+    const t = setup({ pollMs: 500, log });
+    const r = await t.session.page(REQ);
+    expect(r.answer.kind).toBe('cells');
+    const polls = log.lines.filter((l) => l.msg === 'settle poll').map((l) => l.o);
+    const get = (o: object | undefined, k: string): unknown =>
+      o === undefined ? undefined : Reflect.get(o, k);
+    expect(get(polls.at(-1), 'stable')).toBe(true);
+    expect(
+      Number(get(polls.at(-1), 'elapsedMs')) - Number(get(polls.at(-5), 'elapsedMs')),
+    ).toBeGreaterThanOrEqual(2000);
   });
   it('two pages in a row, each preceded by addCookies with SOCS', async () => {
     const t = setup();
@@ -454,14 +469,25 @@ describe('PageSession (spec §2; brief Task 14.4)', () => {
       fatal: true,
     });
   });
-  it('mode grid → mode-unavailable, nothing opened; GRID_VERIFIED is false', async () => {
+  // why: decision 70: grid pages need CAMOUFOX_MODE=grid as well as the verified flag (gridPage.test.ts has the flow)
+  it('mode grid without the worker’s grid settings → mode-unavailable, nothing opened', async () => {
     const t = setup();
-    expect(await t.session.page({ ...REQ, mode: 'grid' })).toEqual({
+    const grid: PageRequest = {
+      mode: 'grid',
+      origin: REQ.origin,
+      destination: REQ.destination,
+      gl: 'GB',
+      start: { departureDate: asIsoDate('2026-11-05'), returnDate: asIsoDate('2026-11-15') },
+      moves: [],
+      reads: [true],
+      scrollAllowance: 0,
+    };
+    expect(await t.session.page(grid)).toEqual({
       answer: { kind: 'mode-unavailable', mode: 'grid' },
       googleContacted: false,
     });
     expect(t.contexts).toEqual([]);
-    expect(SELECTORS.GRID_VERIFIED).toBe(false);
+    expect(SELECTORS.GRID_VERIFIED).toBe(true);
   });
   it('a request inside the spacing → spacing, nothing opened', async () => {
     const t = setup();

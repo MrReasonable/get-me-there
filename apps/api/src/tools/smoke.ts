@@ -312,7 +312,12 @@ export async function runSmoke(
     },
     stats: () => kit.stats(),
   };
-  const wired = providersFor(ports.config, { http, log, clock: ports.clock });
+  const wired = providersFor(ports.config, {
+    http,
+    log,
+    clock: ports.clock,
+    scrollsLeft: (providerId, executionId) => ports.budget.scrollsLeft(providerId, executionId),
+  });
   const providers = wired.filter((p) => configured.some((id) => id === p.id));
   const runStart = ports.clock.now();
   const executionId = openSmokeExecution(ports, q, worst, cli.args.budget);

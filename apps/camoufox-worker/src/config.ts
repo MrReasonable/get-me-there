@@ -20,6 +20,11 @@ export interface WorkerConfig {
   tmp: string;
   /** POINT_OF_SALE for `gl` in the recorder's own requests (the app sends its own on every page request). */
   pointOfSale: string;
+  /** Spec §2 rev 34: `grid` serves grid pages once GRID_VERIFIED; `list` (the default) answers them mode-unavailable. */
+  mode: 'list' | 'grid';
+  /** Grid pages: scroll clicks start to start (at least 5 s, never randomised), and the scrolls a page may make. */
+  gridScrollSpacingSeconds: number;
+  gridScrollCap: number;
 }
 
 export class WorkerConfigError extends Error {
@@ -59,6 +64,11 @@ export function loadWorkerConfig(env: Env): WorkerConfig {
   if (!/^\d+\.\d+(\.\d+)?-[a-z]+\.\d+$/.test(binaryBuild)) bad.push('CAMOUFOX_BINARY_BUILD');
   const pointOfSale = env.POINT_OF_SALE === undefined || env.POINT_OF_SALE === '' ? 'GB' : env.POINT_OF_SALE;
   if (!/^[A-Z]{2}$/.test(pointOfSale)) bad.push('POINT_OF_SALE');
+  const modeRaw = env.CAMOUFOX_MODE ?? '';
+  const mode = modeRaw === '' || modeRaw === 'list' ? 'list' : modeRaw === 'grid' ? 'grid' : null;
+  if (mode === null) bad.push('CAMOUFOX_MODE');
+  const gridScrollSpacingSeconds = intIn(env, 'CAMOUFOX_GRID_SCROLL_SPACING_SECONDS', 5, 30, 5, bad);
+  const gridScrollCap = intIn(env, 'CAMOUFOX_GRID_SCROLL_CAP', 0, 60, 30, bad);
   const home = env.HOME ?? '';
   if (home === '') bad.push('HOME');
   if (bad.length > 0) throw new WorkerConfigError(bad);
@@ -73,5 +83,8 @@ export function loadWorkerConfig(env: Env): WorkerConfig {
     path: env.PATH ?? '/usr/bin:/bin',
     tmp: env.TMPDIR ?? '/tmp',
     pointOfSale,
+    mode: mode ?? 'list',
+    gridScrollSpacingSeconds,
+    gridScrollCap,
   };
 }

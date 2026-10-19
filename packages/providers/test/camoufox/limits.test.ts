@@ -1,4 +1,4 @@
-import { parseConfig } from '@gmt/core';
+import { GRID_MOVE_BUDGET_MS, GRID_MOVE_RESERVE_MS, parseConfig } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
 import { camoufoxHttpLimits, camoufoxStatusHttpLimits, pageClassOf } from '../../src/camoufox/index.js';
 
@@ -20,6 +20,18 @@ function camoufox(over: Record<string, string> = {}) {
 }
 
 describe('camoufoxHttpLimits (spec §5.3 rev 32; decision 69)', () => {
+  it('in grid mode the timeout is twice the page timeout plus, per allowed scroll, the spacing and the move budget (CA M6)', () => {
+    const c = camoufox({
+      CAMOUFOX_MODE: 'grid',
+      CAMOUFOX_GRID_SCROLL_CAP: '30',
+      CAMOUFOX_GRID_SCROLL_SPACING_SECONDS: '5',
+    });
+    const move = (GRID_MOVE_BUDGET_MS + GRID_MOVE_RESERVE_MS) / 1000;
+    expect(move).toBe(60);
+    expect(camoufoxHttpLimits(c, { maxWaitSeconds: 3900 }).requestTimeoutSeconds).toBe(
+      2 * 90 + 30 * (5 + move) + 15,
+    );
+  });
   it('the worker’s origin, never billable, concurrency 1, spacing as minIntervalMs, page timeout + 15 s, no transport retries', () => {
     const l = camoufoxHttpLimits(camoufox(), { maxWaitSeconds: 3900 });
     expect(l).toMatchObject({

@@ -114,6 +114,15 @@ export const COPY = {
   fxSpoken: (detail: string) => `approximately (${detail})`,
   fxTitle: (rateDate: string, source: string) => `converted to GBP at the ${rateDate} rate (${source})`,
   constraintsNotChecked: 'constraints not checked',
+  // spec §2 rev 34: where a calendar price's return date came from, and a vendor's own mark, in the vendor's scope
+  returnDateFromGrid: 'return date: read from the grid; whole pounds',
+  returnDateAsked: 'return date: the date asked for',
+  vendorMark: {
+    cheapest: "Google's date grid marked this the cheapest of the prices shown in that view",
+    low: "Google's date grid marked this a low price among the prices shown in that view",
+  },
+  scrollsRow: (n: number) => `${n} scroll${n === 1 ? '' : 's'} in the date grid beside the pages`,
+  vendorMarkSearchApi: "SearchApi's response flagged this the lowest of the prices it returned",
   notChecked: 'not checked',
   stale: 'stale',
   vendorAgeUnknown: "vendor's cache age unknown",

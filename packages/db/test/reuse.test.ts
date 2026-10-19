@@ -219,6 +219,14 @@ describe('reuse (spec §8.1 "reuse, per cell", §7 atomic unit "each reused cell
         )
         .all(c),
     ).toEqual([{ f: T0, r: a }]);
+    // why: spec §7 rev 34 (PA-09): a reused row keeps where its return date came from and the vendor's mark
+    expect(
+      db.raw
+        .prepare(
+          'SELECT return_date_source AS s, vendor_price_mark AS m FROM calendar_prices WHERE execution_id = ?',
+        )
+        .all(c),
+    ).toEqual([{ s: 'vendor', m: null }]);
     expect(prices.fetchedBy(c)).toEqual([]); // a reused copy is not "fetched by" c
     // …but c holds it: its own view of its prices includes the copy, with the source's fetch time (decision 58)
     expect(prices.heldBy(c).map((r) => [r.fetchedAt, r.reusedFromExecutionId])).toEqual([[T0, a]]);

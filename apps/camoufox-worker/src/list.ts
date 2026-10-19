@@ -1,4 +1,4 @@
-import type { PageRequest } from '@gmt/core';
+import type { ListRequest } from '@gmt/core';
 import { airportMatches } from './airports.js';
 import type { ListFacts } from './driver.js';
 import { INTERSTITIALS, type Interstitial, parseOptionName } from './names.js';
@@ -34,7 +34,7 @@ export function tabPriceMinor(name: string): number | null {
 
 export function readList(
   f: ListFacts,
-  req: Pick<PageRequest, 'departureDate' | 'airportNames'>,
+  req: Pick<ListRequest, 'departureDate' | 'airportNames'>,
   interstitials: readonly Interstitial[] = INTERSTITIALS,
 ): ListRead {
   const dep = new Date(`${req.departureDate}T00:00:00.000Z`);

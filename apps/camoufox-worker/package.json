@@ -9,6 +9,8 @@
     "capture-socs": "node --conditions=@gmt/source --import tsx src/run.ts capture-socs",
     "clear-signed-in": "node --conditions=@gmt/source --import tsx src/run.ts clear-signed-in",
     "status": "node --conditions=@gmt/source --import tsx src/run.ts status",
+    "recordings:backup": "node --conditions=@gmt/source --import tsx src/recordings.ts backup",
+    "recordings:restore": "node --conditions=@gmt/source --import tsx src/recordings.ts restore",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit",
     "test": "vitest run --coverage",
     "mutate": "stryker run && node ../../scripts/mutation-gate.mjs reports/mutation/mutation.json"

@@ -7,7 +7,13 @@ import { freshDb, T0 } from './db.js';
 
 /** The app's env with camoufox on (synthetic key) and the caps the test names. */
 export function camoufoxEnv(
-  o: { camoufoxConfigCap?: number; monthlyCap?: number; maxFreeCalls?: number } = {},
+  o: {
+    camoufoxConfigCap?: number;
+    monthlyCap?: number;
+    maxFreeCalls?: number;
+    executionScrollCap?: number;
+    monthlyScrollCap?: number;
+  } = {},
 ): Record<string, string> {
   return {
     NODE_ENV: 'production',
@@ -21,6 +27,8 @@ export function camoufoxEnv(
     CAMOUFOX_EXECUTION_PAGE_CAP: String(o.camoufoxConfigCap ?? 100),
     CAMOUFOX_MONTHLY_PAGE_CAP: String(o.monthlyCap ?? 1500),
     EXECUTION_MAX_FREE_CALLS: String(o.maxFreeCalls ?? 2000),
+    CAMOUFOX_EXECUTION_SCROLL_CAP: String(o.executionScrollCap ?? 600),
+    CAMOUFOX_MONTHLY_SCROLL_CAP: String(o.monthlyScrollCap ?? 6000),
   };
 }
 
@@ -30,10 +38,12 @@ export function configFrom(env: Record<string, string>) {
   return r.config;
 }
 
-export function guardFor(o: {
+function build(o: {
   camoufoxConfigCap?: number;
   monthlyCap?: number;
   maxFreeCalls?: number;
+  executionScrollCap?: number;
+  monthlyScrollCap?: number;
   snapshotCaps: Record<string, Partial<Record<'camoufox', number>>>;
 }) {
   const config = configFrom(camoufoxEnv(o));
@@ -59,5 +69,29 @@ export function guardFor(o: {
       )
       .run({ id, definitionId: `d-${id}`, snapshot: JSON.stringify({ budget }), at: T0 });
   }
-  return new SqliteBudgetGuard(db, budgetConfigFromConfig(config), fixedClock(T0));
+  return { guard: new SqliteBudgetGuard(db, budgetConfigFromConfig(config), fixedClock(T0)), db };
+}
+
+export function guardFor(o: Parameters<typeof build>[0]): SqliteBudgetGuard {
+  return build(o).guard;
+}
+
+/** The same guard with its ledger rows' scroll counts, for tests that read them (WP15 Task 15.6). */
+export function guardWithDb(o: Parameters<typeof build>[0]) {
+  const { guard, db } = build(o);
+  return {
+    g: guard,
+    rows: () =>
+      db.raw
+        .prepare<[], { scrollCount: number | null }>(
+          'SELECT scroll_count AS scrollCount FROM provider_requests ORDER BY id',
+        )
+        .all(),
+  };
+}
+
+/** The guard and its database (WP15: the ledger's scroll counts). */
+export function guardWithLedger(o: Parameters<typeof build>[0]) {
+  const { guard, db } = build(o);
+  return { g: guard, db };
 }

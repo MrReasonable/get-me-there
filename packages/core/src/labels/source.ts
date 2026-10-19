@@ -12,7 +12,17 @@ export const SOURCE_LABELS: Readonly<Record<SourceKind, string>> = {
   synthetic: 'synthetic fixture data',
 };
 
-/** The source of a price in words, e.g. "Google Flights via SearchApi" (spec §11). */
-export function sourceLabel(p: Pick<Provenance, 'sourceKind'>): string {
+/** A camoufox grid price's source (spec §2 rev 34): the same source kind, read from Google's date grid. */
+export const GRID_SOURCE_LABEL = 'Google Flights date grid via Camoufox';
+
+/**
+ * The source of a price in words, e.g. "Google Flights via SearchApi" (spec §11); a camoufox price whose return date
+ * came from a grid cell is the grid's.
+ */
+export function sourceLabel(p: {
+  sourceKind: Provenance['sourceKind'];
+  returnDateSource?: Provenance['returnDateSource'] | undefined;
+}): string {
+  if (p.sourceKind === 'scraped-self' && p.returnDateSource === 'grid-cell') return GRID_SOURCE_LABEL;
   return SOURCE_LABELS[p.sourceKind];
 }

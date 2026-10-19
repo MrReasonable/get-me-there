@@ -76,7 +76,12 @@ export function classifyWorkerAnswer(f: ResponseFacts): ProviderError {
     case 'spacing':
       return error(f, 'rate-limit', 'the worker asked to wait for its spacing', 'spacing', true);
     case 'mode-unavailable':
-      return error(f, 'parse', 'grid mode is not built (decision 69)', 'mode-unavailable');
+      return error(
+        f,
+        'parse',
+        'the worker does not serve grid pages (CAMOUFOX_MODE, GRID_VERIFIED)',
+        'mode-unavailable',
+      );
     case 'not-ready':
       return error(
         f,
@@ -92,6 +97,7 @@ export function classifyWorkerAnswer(f: ResponseFacts): ProviderError {
         `browser-error:${answer.stage}`,
       );
     case 'cells':
-      return error(f, 'parse', `HTTP ${f.status} with a cells answer`, 'unexpected-status');
+    case 'grid':
+      return error(f, 'parse', `HTTP ${f.status} with a ${answer.kind} answer`, 'unexpected-status');
   }
 }

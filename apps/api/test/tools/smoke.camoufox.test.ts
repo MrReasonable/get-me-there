@@ -9,7 +9,7 @@ import {
   workerStatusSchema,
 } from '@gmt/core';
 import { AIRPORTS_DATA_DIR, loadAirportsDataset, MIGRATIONS_DIR, seedAirports } from '@gmt/db';
-import { CAMOUFOX_DISCOVERY_INFO } from '@gmt/providers';
+import { CAMOUFOX_DISCOVERY_INFO, CAMOUFOX_GRID_INFO } from '@gmt/providers';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { runSmoke, type SmokeResult } from '../../src/tools/smoke.js';
 import { type CamoufoxRun, camoufoxChecks } from '../../src/tools/smokeCamoufox.js';
@@ -399,10 +399,80 @@ describe('camoufoxChecks fail arms on a crafted run (fix round 1, TS I5)', { tim
       fetchedAt: NOW,
       pointOfSale: 'GB',
       notes: [],
-      prices: [{ ...cell, amountMinor: 45100, currency: 'GBP' }],
+      prices: [
+        { ...cell, amountMinor: 45100, currency: 'GBP', returnDateSource: 'asked', vendorPriceMark: null },
+      ],
       noFares: [],
     },
     ...o,
+  });
+  // why: WP15 Task 15.11: a grid page's rows: priced from the grid, the ledger row's scroll_count the worker's, and the
+  // grid's provenance (the assumed 24 h age)
+  const gridRun = (scrolls: number, over: Partial<CamoufoxRun> = {}): CamoufoxRun =>
+    base({
+      info: CAMOUFOX_GRID_INFO,
+      answer: null,
+      gridAnswer: {
+        kind: 'grid',
+        fetchedAt: NOW,
+        currency: 'GBP',
+        pointOfSale: 'GB',
+        views: [],
+        scrolls,
+        ended: 'complete',
+        notes: [],
+        versions: {
+          selectors: 's',
+          grammar: 'g',
+          camoufoxJs: '0.11.5',
+          binary: 'b',
+          gridGrammar: '2026-10-18',
+        },
+      },
+      tile: {
+        kind: 'tile',
+        index: 0,
+        coveredCells: [cell],
+        fetchedAt: NOW,
+        pointOfSale: 'GB',
+        notes: [],
+        prices: [
+          {
+            ...cell,
+            amountMinor: 45100,
+            currency: 'GBP',
+            returnDateSource: 'grid-cell',
+            vendorPriceMark: 'none',
+          },
+        ],
+        noFares: [],
+      },
+      ...over,
+    });
+  it('a grid page: cell, partial and provenance pass when the row holds the scrolls; a different count is FAIL', async () => {
+    const p = ports();
+    worker({});
+    const r = await smoke(p);
+    const id = r.executionId ?? '';
+    p.db.raw
+      .prepare(
+        "UPDATE provider_requests SET scroll_count = 1 WHERE execution_id = ? AND provider_id = 'camoufox'",
+      )
+      .run(id);
+    const rows = camoufoxChecks(p, gridRun(1), id, NOW);
+    for (const name of ['camoufox cell', 'camoufox partial', 'camoufox provenance'])
+      expect(rows.find((c) => c.name === name)?.status, name).toBe('pass');
+    expect(rows.find((c) => c.name === 'camoufox provenance')?.detail).toContain(
+      'Google Flights date grid via Camoufox',
+    );
+    expect(camoufoxChecks(p, gridRun(2), id, NOW).find((c) => c.name === 'camoufox cell')?.status).toBe(
+      'fail',
+    );
+    expect(
+      camoufoxChecks(p, gridRun(1, { info: CAMOUFOX_DISCOVERY_INFO }), id, NOW).find(
+        (c) => c.name === 'camoufox provenance',
+      )?.status,
+    ).toBe('fail');
   });
   it('two page rows → one page FAIL', async () => {
     const p = ports();
@@ -437,7 +507,9 @@ describe('camoufoxChecks fail arms on a crafted run (fix round 1, TS I5)', { tim
           fetchedAt: NOW,
           pointOfSale: 'GB',
           notes: [],
-          prices: [{ ...cell, amountMinor: 1, currency: 'GBP' }],
+          prices: [
+            { ...cell, amountMinor: 1, currency: 'GBP', returnDateSource: 'asked', vendorPriceMark: null },
+          ],
           noFares: [],
         },
       }),

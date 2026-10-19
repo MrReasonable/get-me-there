@@ -395,3 +395,62 @@ describe('point of sale on the full price display (spec §11; core pointOfSaleLa
     }
   });
 });
+
+// WP15 Task 15.9 (spec §2 rev 34; PA-04, PIE-11): a camoufox grid price names its source, where its return date came
+// from, that it is in whole pounds, and Google's mark in Google's own scope; a list price keeps its own line.
+describe('camoufox grid provenance', () => {
+  const grid: ProvenanceInput = {
+    providerId: 'camoufox',
+    sourceKind: 'scraped-self',
+    fetchedAt: '2026-10-14T13:00:00.000Z',
+    maxAgeHours: 24,
+    maxAgeAssumed: true,
+    fx: { converted: false },
+    pointOfSale: 'GB',
+    cabin: 'economy',
+    returnDateSource: 'grid-cell',
+    vendorPriceMark: 'cheapest',
+  };
+  it('a grid price: the grid label, the return date from the grid, whole pounds and Google’s mark in its scope', () => {
+    renderWithProviders(<Provenance provenance={grid} calendar />);
+    const p = screen.getByTestId('provenance');
+    expect(p).toHaveTextContent('Google Flights date grid via Camoufox');
+    expect(p).toHaveTextContent('return date: read from the grid');
+    expect(p).toHaveTextContent('whole pounds');
+    expect(p).toHaveTextContent(
+      "Google's date grid marked this the cheapest of the prices shown in that view",
+    );
+  });
+  it('a low-price mark is worded as Google’s too; an unmarked cell says nothing of a mark', () => {
+    renderWithProviders(<Provenance provenance={{ ...grid, vendorPriceMark: 'low' }} calendar />);
+    expect(screen.getByTestId('provenance')).toHaveTextContent(
+      "Google's date grid marked this a low price among the prices shown in that view",
+    );
+  });
+  it('a list price keeps "return date: the date asked for"; a vendor-dated price states no return line', () => {
+    const list: ProvenanceInput = { ...grid, maxAgeHours: 0, returnDateSource: 'asked' };
+    const { vendorPriceMark: _m, maxAgeAssumed: _a, ...plain } = list;
+    renderWithProviders(<Provenance provenance={plain} calendar />);
+    const p = screen.getByTestId('provenance');
+    expect(p).toHaveTextContent('Google Flights prices via Camoufox');
+    expect(p).toHaveTextContent('return date: the date asked for');
+    expect(p).not.toHaveTextContent(/marked this/);
+  });
+  it('a SearchApi calendar price with its lowest-price flag shows SearchApi’s own wording', () => {
+    renderWithProviders(
+      <Provenance
+        provenance={{
+          ...calendarProvenance,
+          providerId: 'searchapi',
+          sourceKind: 'scraped-aggregate',
+          vendorPriceMark: 'cheapest',
+          returnDateSource: 'vendor',
+        }}
+        calendar
+      />,
+    );
+    expect(screen.getByTestId('provenance')).toHaveTextContent(
+      "SearchApi's response flagged this the lowest of the prices it returned",
+    );
+  });
+});

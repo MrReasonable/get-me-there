@@ -116,7 +116,7 @@ export function finalStatus(
         patch: { resumeAfter: stop.resumeAfter },
         notice: {
           kind: 'paused_budget',
-          detail: `The cap was reached: ${breachText(e.scope, e.providerId ?? null, e.cap, e.current, e.requested, 'the next call needed')}. ${when}`,
+          detail: `The cap was reached: ${breachText(e.scope, e.providerId ?? null, e.cap, e.current, e.requested, 'the next call needed', e.unit ?? 'calls')}. ${when}`,
         },
       };
     }

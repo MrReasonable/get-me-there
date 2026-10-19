@@ -24,6 +24,12 @@ export interface LocatorLike {
   inputValue(options?: { timeout?: number }): Promise<string>;
   click(options?: { timeout?: number }): Promise<void>;
   isVisible(): Promise<boolean>;
+  /** The printed accessibility snapshot: stored by the graph exploration only, never parsed (graph.ts). */
+  ariaSnapshot(options?: { timeout?: number }): Promise<string>;
+  /** The rendered text (the graph exploration's chart region only; never HTML). */
+  innerText(options?: { timeout?: number }): Promise<string>;
+  /** Every element below this one (`*`, the graph exploration's chart region only). */
+  locator(selector: '*'): LocatorLike;
   getByRole(
     role: Role,
     options?: { name?: string | RegExp; exact?: boolean; selected?: boolean },
@@ -130,6 +136,8 @@ export interface StepOptions {
   timers: Timers;
   log?: Logger;
   startedAt?: number;
+  /** The flow the step lines name (`<flow> step`); the Cheapest flow's by default. */
+  flow?: string;
 }
 
 /** Each lookup's own bound in the Cheapest flow, inside the page deadline (ruling of 2026-10-18). */
@@ -226,15 +234,16 @@ export async function runStep<T>(
   const elapsed = (): number => o.timers.now() - started;
   const timeoutMs = Math.max(1, Math.min(ms, d.remaining()));
   const step = o.timers.deadline(timeoutMs);
-  o.log?.debug({ step: name, phase: 'start', elapsedMs: elapsed() }, 'cheapest step');
+  const flow = o.flow ?? 'cheapest';
+  o.log?.debug({ step: name, phase: 'start', elapsedMs: elapsed() }, `${flow} step`);
   try {
     const value = await d.race(step.race(fn(step)));
-    o.log?.debug({ step: name, phase: 'end', elapsedMs: elapsed() }, 'cheapest step');
+    o.log?.debug({ step: name, phase: 'end', elapsedMs: elapsed() }, `${flow} step`);
     return value;
   } catch (e) {
     if (d.expired()) throw e;
     if (step.expired()) {
-      o.log?.debug({ step: name, elapsedMs: elapsed(), timeoutMs }, 'cheapest step timed out');
+      o.log?.debug({ step: name, elapsedMs: elapsed(), timeoutMs }, `${flow} step timed out`);
       throw new CheapestStepFailed(name, 'timed-out');
     }
     // why: a failed step logs only the error class and the step, never a URL or a message holding one
@@ -245,7 +254,7 @@ export async function runStep<T>(
         ...(e instanceof LookupTimedOut ? { lookup: e.lookup, lookupMs: e.lookupMs } : {}),
         elapsedMs: elapsed(),
       },
-      'cheapest step failed',
+      `${flow} step failed`,
     );
     throw new CheapestStepFailed(name, 'failed');
   } finally {
@@ -257,20 +266,20 @@ export async function runStep<T>(
 export const CLICK_TIMEOUT_MS = 10_000;
 
 /** The deadline's remaining time as a Playwright timeout; never 0, which Playwright reads as "no timeout". */
-const timeoutOf = (d: Deadline): { timeout: number } => ({ timeout: Math.max(1, d.remaining()) });
+export const timeoutOf = (d: Deadline): { timeout: number } => ({ timeout: Math.max(1, d.remaining()) });
 /** A click's timeout: its own bound, within what the deadline has left. */
-const clickTimeoutOf = (d: Deadline): { timeout: number } => ({
+export const clickTimeoutOf = (d: Deadline): { timeout: number } => ({
   timeout: Math.max(1, Math.min(CLICK_TIMEOUT_MS, d.remaining())),
 });
 
 /** A locator's accessible name as the brief reads it: `aria-label`, else the text; `null` when neither is readable. */
-async function nameOf(l: LocatorLike, d: Deadline): Promise<string | null> {
+export async function nameOf(l: LocatorLike, d: Deadline): Promise<string | null> {
   const label = await d.race(l.getAttribute('aria-label', timeoutOf(d)));
   if (label !== null) return label;
   return d.race(l.textContent(timeoutOf(d)));
 }
 
-async function countOf(l: LocatorLike, d: Deadline): Promise<number> {
+export async function countOf(l: LocatorLike, d: Deadline): Promise<number> {
   return d.race(l.count());
 }
 
@@ -605,7 +614,11 @@ export async function pollUntilSettled(
         { view, elapsedMs, changed: changedNames(previousNames, read.names) },
         'settle names changed',
       );
-    previous = settled ? current : null;
+    // why: fix round 1 (TS 8): the first poll of a run of matching ones is kept, so a short poll interval still needs
+    // two matching polls STABLE_MS apart
+    const same: boolean =
+      previous !== null && previous.signature === current.signature && previous.links === current.links;
+    previous = !settled ? null : same ? previous : current;
     previousNames = settled ? read.names : null;
     await timers.sleep(pollMs, d.signal);
   }

@@ -21,7 +21,7 @@ Labels: VERIFIED = read on an official page; REPORTED = third-party; UNKNOWN = n
 | Trip.com, Travelfusion, Mystifly, Travelport, Sabre, airline NDC | Enterprise/IATA only | — | — | — | — | — | — | — | CLOSED |
 | Google official API | None (QPX Express shut 2018-04-10) | — | — | — | — | — | — | — | NONE |
 | fast-flights / google-flights-ts | Reverse-engineered `tfs` protobuf, direct to Google | free | — | — | — | — | — | **Unauthorised, fragile** | REJECT |
-| `camoufox`: Google Flights read by Camoufox (the operator's installed binary) that a host-side worker launches itself through `camoufox-js` | Self-scraped by this app from the operator's own IP, in the worker's own signed-out profile; no vendor account | £0 in money; the operator's IP and selector upkeep; the operator is responsible for how it is used | The page as Google showed it when it was read (`maxAgeHours` 0) | `list` mode, one day pair a page (`grid` designed, not built) | Yes | Yes (`curr=GBP`) | Google search link | Read the provider's terms before enabling it; the operator is responsible for how it is used | Discovery only, opt-in, off by default (continuity fallback); built in WP14 |
+| `camoufox`: Google Flights read by Camoufox (the operator's installed binary) that a host-side worker launches itself through `camoufox-js` | Self-scraped by this app from the operator's own IP, in the worker's own signed-out profile; no vendor account | £0 in money; the operator's IP and selector upkeep; the operator is responsible for how it is used | `list` mode: the page as Google showed it when it was read (`maxAgeHours` 0); `grid` mode: Google's date grid, age not stated (assumed ≤24h) | `list` mode, one day pair a page; `grid` mode (opt-in, `CAMOUFOX_MODE=grid`), up to 49 day pairs a view | Yes | Yes (`curr=GBP`) | Google search link | Read the provider's terms before enabling it; the operator is responsible for how it is used | Discovery only, opt-in, off by default (continuity fallback); `list` built in WP14, `grid` in WP15 |
 
 ## Key facts with sources
 
@@ -121,12 +121,22 @@ Mac) is stopped only by `CAMOUFOX_WORKER_KEY`. **Money:** none.
 
 **Coverage.** In `list` mode a page prices one day pair, so a run prices at most `CAMOUFOX_EXECUTION_PAGE_CAP` day pairs
 and a month at most `CAMOUFOX_MONTHLY_PAGE_CAP`: with the defaults, 100 a run and 1,500 a month, against 2,184 day pairs
-for one worked-example airport pair (8,736 for its four pairs).
+for one worked-example airport pair (8,736 for its four pairs). The `grid` mode (work package 15, opt-in with
+`CAMOUFOX_MODE=grid`) reads up to 49 day pairs per view of the Dates tab's 7 × 7 grid: for one worked-example pair, 78
+blocks on a lattice of 7 × 7 (26 departure columns × 3 return blocks for the 10–21-night band; 2,184 of their 3,822
+cells are in the band and stored), 312 for the four pairs. One scroll moves one day (measured 2026-10-18), so a
+block-to-block move is 7 scrolls, about 65 s, against about 30 s for a new page. With the defaults the run's estimate is
+100 pages and 588 scrolls, about 2.4 hours, reading 5,152 of the 8,736 day pairs, and a full pass takes 3 runs; with
+`CAMOUFOX_EXECUTION_PAGE_CAP=312` it is one run of 312 pages, about 2.6 hours (setup.md §14). Grid prices are whole
+pounds, their return date is read from the grid cell, and Google's "cheapest price" and "low price" marks are shown as
+Google's, for the prices in that view only.
 
 **Provenance note, exactly as the app states it:** "Google Flights prices via Camoufox: the cheapest round-trip price Google Flights listed for this day pair when this app's own Camoufox browser read the page on the operator's machine, from the operator's IP address, in the currency the page states. Return date: the date asked for, which the page's search form showed; the listed options state only the departure. The operator turned this provider on. Constraints are not checked; no return leg, seller or baggage is read."
 
 **Labels.** Display name "Google Flights via Camoufox"; source label "Google Flights prices via Camoufox"; compact mark
-`CF`; source kind `scraped-self`, `maxAgeHours` 0; vendor links to `google.com` only.
+`CF`; source kind `scraped-self`, `maxAgeHours` 0 in `list` mode; in `grid` mode the source label is "Google Flights
+date grid via Camoufox", `maxAgeHours` 24 (assumed), whole pounds, the return date from the grid cell; vendor links to
+`google.com` only.
 
 ### Ignav
 - https://ignav.com/pricing — 1000 free once, $2/1k successful, cache hits billed, spend cap. POST /api/fares/round-trip; /api/fares/booking-links; market=GB. Source undisclosed; ToS page JS-only. Markets itself as "Amadeus Self-Service replacement".

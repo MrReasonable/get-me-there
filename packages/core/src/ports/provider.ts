@@ -1,8 +1,16 @@
+import type { GridMove } from '../camoufox/protocol.js';
 import type { CellKey } from '../types/definition.js';
 import type { ErrorReason } from '../types/execution.js';
 import type { Iata, IsoDate, IsoDateTime, IsoMonth } from '../types/ids.js';
 import type { BaggageSnapshot, FareConditions, SuppliedField } from '../types/itinerary.js';
-import type { Cabin, PointOfSale, ProviderId, SourceKind } from '../types/provenance.js';
+import type {
+  Cabin,
+  PointOfSale,
+  ProviderId,
+  ReturnDateSource,
+  SourceKind,
+  VendorPriceMark,
+} from '../types/provenance.js';
 
 export { AbortedError, BudgetExceeded, ProviderError } from '../errors.js';
 export type { CellKey } from '../types/definition.js';
@@ -21,6 +29,8 @@ export interface CapabilityInfo {
    * bound the vendor states; the Providers view then words it "assumed ≤24h (undocumented)". Absent means stated.
    */
   maxAgeAssumed?: boolean | undefined;
+  /** Spec §2 rev 34: where this capability's return dates come from, when it names its own source label by it. */
+  returnDateSource?: ReturnDateSource | undefined;
 }
 
 export interface DiscoveryQuery {
@@ -39,13 +49,30 @@ export interface DiscoveryQuery {
    * provider that matches airports by name (camoufox reads names, never codes) can tell this cell's options apart.
    */
   airportNames?: { origin: string[]; destination: string[] };
+  /**
+   * Spec §2 rev 34: how many pairs the stage plans for this provider, set by the engine, so a provider whose caps are
+   * per run (camoufox grid pages and scrolls) gives each pair its share. Absent: one pair.
+   */
+  share?: { pairs: number };
 }
 /** Vendor-neutral, typed tile requests; `month` is the Travelpayouts tile. */
 export type TileRequest =
   | { kind: 'month'; month: IsoMonth }
   | { kind: 'length-month'; length: number; month: IsoMonth }
   | { kind: 'month-pair'; departMonth: IsoMonth; returnMonth: IsoMonth }
-  | { kind: 'rectangle'; departFrom: IsoDate; departTo: IsoDate; returnFrom: IsoDate; returnTo: IsoDate };
+  | { kind: 'rectangle'; departFrom: IsoDate; departTo: IsoDate; returnFrom: IsoDate; returnTo: IsoDate }
+  /**
+   * Spec §2 rev 34 (camoufox grid): one page: its first block's centre as the query, its scroll moves, and which views
+   * are read (`reads[0]` the first view, `reads[i + 1]` the view after `moves[i]`).
+   */
+  | {
+      kind: 'grid-path';
+      start: { departureDate: IsoDate; returnDate: IsoDate };
+      moves: GridMove[];
+      reads: boolean[];
+      /** The probe page past the planning horizon: its no-flights answer is the sale window's end (ruling on N1). */
+      probe?: true;
+    };
 export interface TilePlan {
   index: number;
   coveredCells: CellKey[];
@@ -70,6 +97,10 @@ export interface RawCalendarPrice extends CellKey {
   currency: string;
   providerObservedAt?: IsoDateTime;
   vendorLink?: string;
+  /** Where the return date came from (spec §7 rev 34); every adapter states it. */
+  returnDateSource: ReturnDateSource;
+  /** The vendor's own mark, or null where the vendor states no marks (PA-08); never this app's minimum. */
+  vendorPriceMark: VendorPriceMark | null;
 }
 export type DiscoveryTileResult =
   | {
@@ -179,6 +210,16 @@ export type PreflightResult =
 export interface DiscoveryCapability {
   info: CapabilityInfo;
   plan(q: DiscoveryQuery): TilePlan[];
+  /**
+   * Spec §2 rev 34 (CB-3; fix round 1, CA 5): a provider whose tiles are timed per tile (camoufox grid pages: the page
+   * time and each scroll's) states each tile's scrolls and seconds; the engine's estimate reads them from here.
+   */
+  estimateTile?(plan: TilePlan): { scrolls: number; seconds: number };
+  /**
+   * Fix round 2 (ruling 1): the engine takes the pairs' tiles in turn (round-robin) rather than pair by pair, so a run
+   * capped in pages spreads them across every pair (camoufox grid mode).
+   */
+  interleavePairs?: true;
   fetchTile(plan: TilePlan, q: DiscoveryQuery, ctx: ProviderContext): Promise<DiscoveryTileResult>;
   /** Optional, unledgered (spec §5.1 rev 32); absent for every provider but camoufox. */
   preflight?(ctx: ProviderContext): Promise<PreflightResult>;

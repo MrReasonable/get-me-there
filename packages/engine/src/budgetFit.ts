@@ -24,7 +24,7 @@ export interface MonthlyLoad {
   perRun: Estimate;
   /** The schedule's snapshot, as a scheduled run would freeze it now (its providers and refresh hours). */
   snapshot: DefinitionSnapshot;
-  perProvider: Map<ProviderId, { calls: number; costMicroGbp: number }>;
+  perProvider: Map<ProviderId, { calls: number; costMicroGbp: number; scrolls: number }>;
 }
 
 /**
@@ -39,8 +39,8 @@ export function scheduleLoad(
   snapshot: DefinitionSnapshot,
   firings: number,
   hours: number,
-): Map<ProviderId, { calls: number; costMicroGbp: number }> {
-  const load = new Map<ProviderId, { calls: number; costMicroGbp: number }>();
+): Map<ProviderId, { calls: number; costMicroGbp: number; scrolls: number }> {
+  const load = new Map<ProviderId, { calls: number; costMicroGbp: number; scrolls: number }>();
   for (const p of perRun.perProvider) {
     const factor =
       p.stage === 'discovery'
@@ -48,10 +48,11 @@ export function scheduleLoad(
           // counts whole discovery runs, never a fraction of one (cost M-3)
           Math.min(firings, Math.ceil(hours / (REUSE_TOLERANCE * refreshHoursOf(snapshot, p.providerId))))
         : firings;
-    const acc = load.get(p.providerId) ?? { calls: 0, costMicroGbp: 0 };
+    const acc = load.get(p.providerId) ?? { calls: 0, costMicroGbp: 0, scrolls: 0 };
     load.set(p.providerId, {
       calls: acc.calls + p.calls * factor,
       costMicroGbp: acc.costMicroGbp + (ctx.limitsOf(p.providerId).billed ? p.costMicroGbp * factor : 0),
+      scrolls: acc.scrolls + (p.scrolls ?? 0) * factor,
     });
   }
   return load;
@@ -144,6 +145,20 @@ export function budgetFitFor(
       estimated: own.perRun.cells,
       cap,
       fits: own.perRun.cells <= cap,
+    });
+  }
+  // why: fix round 1 (TS 4): camoufox grid's scrolls a month, against its monthly scroll cap, with every other schedule's;
+  // a warning like the coverage line (a page asks only for the scrolls the caps leave, so the cap shortens coverage
+  // and never stops a run)
+  for (const id of ids) {
+    const cap = ctx.limitsOf(id).monthlyScrollCap;
+    const scrolls = [own, ...others].reduce((a, l) => a + (l.perProvider.get(id)?.scrolls ?? 0), 0);
+    if (cap === null || scrolls === 0) continue;
+    perScope.push({
+      scope: `scrolls-per-month:${id}`,
+      estimated: Math.ceil(scrolls),
+      cap,
+      fits: scrolls <= cap,
     });
   }
   return { fits, runsPerMonth: own.runsPerMonth, perScope };

@@ -113,20 +113,28 @@ export async function runAttempt(
           costMicroGbp: limits.costPerCallMicroGbp,
           httpAttempt: ctx.attempt,
           endpointPath: r.endpointPath,
+          ...(r.scrolls === undefined ? {} : { scrolls: r.scrolls }),
         });
   // why: durations use Date.now() so vitest fake timers drive them; instants (fetchedAt) use the Clock port.
   const started = Date.now();
   // why: spec §5.3 rev 32: a pages-only provider states, per attempt, whether a page was loaded (`page_class`).
   let classOverride: 'no-page' | undefined;
   let responseFacts: { status: number | null; headers: Headers | null } = { status: null, headers: null };
-  const finalise = (outcome: 'ok' | 'error' | 'unknown', httpStatus?: number): void => {
+  const finalise = (
+    outcome: 'ok' | 'error' | 'unknown',
+    httpStatus?: number,
+    bodyText?: string | null,
+  ): void => {
     const pageClass =
       limits.pageClass === undefined ? undefined : (classOverride ?? limits.pageClass(responseFacts));
+    const scrollCount =
+      bodyText === undefined || bodyText === null ? undefined : limits.scrollCountOf?.(bodyText);
     reservation?.finalise({
       outcome,
       durationMs: Date.now() - started,
       ...(httpStatus === undefined ? {} : { httpStatus }),
       ...(pageClass === undefined ? {} : { pageClass }),
+      ...(scrollCount === undefined ? {} : { scrollCount }),
     });
   };
   // why: setTimeout + AbortController rather than AbortSignal.timeout, whose Node-internal timer vitest cannot fake.
@@ -206,7 +214,7 @@ export async function runAttempt(
 
   const ok = status >= 200 && status < 300;
   const fetchedAt = deps.clock.now();
-  finalise(ok ? 'ok' : 'error', status);
+  finalise(ok ? 'ok' : 'error', status, text);
   deps.log.debug(
     {
       providerId: r.providerId,

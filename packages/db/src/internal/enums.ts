@@ -9,11 +9,13 @@ import type {
   OperatorMessageKind,
   ProviderId,
   ResultBasis,
+  ReturnDateSource,
   SelectionReason,
   SkipReason,
   SourceKind,
   Stage,
   SuppliedField,
+  VendorPriceMark,
 } from '@gmt/core';
 
 // Typed constant lists: the only way the package enumerates a union (ruling 15: no `Object.keys(...) as`).
@@ -40,6 +42,8 @@ export const SOURCE_KINDS = exhaustive<SourceKind>()([
   'scraped-self',
   'synthetic',
 ] as const);
+export const RETURN_DATE_SOURCES = exhaustive<ReturnDateSource>()(['vendor', 'asked', 'grid-cell'] as const);
+export const VENDOR_PRICE_MARKS = exhaustive<VendorPriceMark>()(['cheapest', 'low', 'none'] as const);
 export const CABINS = exhaustive<Cabin>()(['economy', 'premium_economy', 'business', 'first'] as const);
 export const STAGES = exhaustive<Stage>()(['discovery', 'verification'] as const);
 export const OUTCOME_STATUSES = exhaustive<CellOutcomeStatus>()([

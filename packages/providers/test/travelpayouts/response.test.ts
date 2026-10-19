@@ -72,6 +72,8 @@ describe('attributeRows: cell keys from the response, filtered to the pair (spec
         returnDate: '2027-03-23',
         amountMinor: 41200,
         currency: 'GBP',
+        returnDateSource: 'vendor',
+        vendorPriceMark: null,
         vendorLink: ROW_LINK,
       },
       {
@@ -81,6 +83,8 @@ describe('attributeRows: cell keys from the response, filtered to the pair (spec
         returnDate: '2027-03-23',
         amountMinor: 39800,
         currency: 'GBP',
+        returnDateSource: 'vendor',
+        vendorPriceMark: null,
         vendorLink: ROW_LINK,
       },
       {
@@ -90,6 +94,8 @@ describe('attributeRows: cell keys from the response, filtered to the pair (spec
         returnDate: '2027-03-24',
         amountMinor: 40100,
         currency: 'GBP',
+        returnDateSource: 'vendor',
+        vendorPriceMark: null,
       },
     ]);
   });

@@ -182,7 +182,13 @@ export function httpLimitsFor(config: Config): HttpKitDeps['limits'] {
 /** Providers for this config. Same ownership rule as httpLimitsFor: WP5/WP6 each add one line. */
 export function providersFor(
   config: Config,
-  deps: { http: HttpKit; log: Logger; clock: Clock },
+  deps: {
+    http: HttpKit;
+    log: Logger;
+    clock: Clock;
+    /** Fix round 1 (CA 1): the scrolls the caps leave (the budget guard's), for camoufox's grid pages. */
+    scrollsLeft?: BudgetGuard['scrollsLeft'];
+  },
 ): FlightProvider[] {
   const out: FlightProvider[] = [];
   const cost = fixtureCost(config);
@@ -233,6 +239,21 @@ export function providersFor(
         key: cf.key,
         workerUrl: cf.workerUrl,
         pointOfSale: config.pointOfSale,
+        // why: spec §2 rev 34: grid mode plans pages and scrolls within the run's caps, split across the pairs
+        grid: {
+          mode: cf.mode,
+          executionPageCap: cf.executionPageCap,
+          executionScrollCap: cf.executionScrollCap,
+          scrollCap: cf.gridScrollCap,
+          scrollSpacingSeconds: cf.gridScrollSpacingSeconds,
+          pageTimeoutSeconds: cf.pageTimeoutSeconds,
+        },
+        ...(deps.scrollsLeft === undefined
+          ? {}
+          : {
+              scrollsLeft: (executionId: string | null) =>
+                deps.scrollsLeft?.('camoufox', executionId) ?? null,
+            }),
       }),
     );
   return out;
@@ -277,7 +298,12 @@ export function buildPorts(
         ? { inProcessHosts: { 'fixture.local': (req: Request) => Promise.resolve(router.fetch(req)) } }
         : {}),
     });
-    const providers = providersFor(config, { http, log: opts.log, clock });
+    const providers = providersFor(config, {
+      http,
+      log: opts.log,
+      clock,
+      scrollsLeft: (providerId, executionId) => budget.scrollsLeft(providerId, executionId),
+    });
     return {
       config,
       db,

@@ -48,10 +48,14 @@ WHERE provider_id IN (SELECT value FROM json_each(@billedProviders)) AND outcome
   AND started_at >= @windowStart AND started_at < @windowEnd`;
 
 const INSERT_PENDING_SQL = `
-INSERT INTO provider_requests (provider_id, execution_id, endpoint_path, tile_index, started_at, outcome, billable, cost_micro_gbp, http_attempt)
-VALUES (@providerId, @executionId, @endpointPath, @tileIndex, @startedAt, 'pending', NULL, @cost, @httpAttempt)`;
+INSERT INTO provider_requests (provider_id, execution_id, endpoint_path, tile_index, started_at, outcome, billable, cost_micro_gbp, http_attempt, scroll_count)
+VALUES (@providerId, @executionId, @endpointPath, @tileIndex, @startedAt, 'pending', NULL, @cost, @httpAttempt, @scrolls)`;
+// why: spec §7 rev 34 (CB-4): a finalised row holds the scrolls the answer stated; an `unknown` attempt with no answer
+// (a timeout or an abort after the request left) keeps its planned scrolls, so the scroll caps never undercount
+// (CodeRabbit on PR #9); any other attempt with no answer holds NULL
 const FINALISE_SQL = `
 UPDATE provider_requests SET outcome = @outcome, http_status = @httpStatus, duration_ms = @durationMs, finished_at = @finishedAt, billable = @billable, page_class = @pageClass,
+  scroll_count = CASE WHEN @scrollCount IS NULL AND @outcome = 'unknown' THEN scroll_count ELSE @scrollCount END,
   cost_micro_gbp = CASE WHEN @zeroCost = 1 THEN 0 ELSE cost_micro_gbp END
 WHERE id = @id AND outcome = 'pending'`;
 const INSERT_CACHE_HIT_SQL = `
@@ -74,6 +78,12 @@ SELECT COUNT(*) AS calls, COALESCE(SUM(cost_micro_gbp), 0) AS cost
 FROM provider_requests
 WHERE execution_id = @executionId AND provider_id = @providerId AND outcome <> 'cache_hit'
   AND (@pagesOnly = 0 OR page_class IS NOT 'no-page')`;
+/** Spec §2 rev 34: a provider's scroll clicks in one execution, and in a window (pending rows count their plan). */
+const SCROLLS_EXECUTION_SQL = `
+SELECT COALESCE(SUM(scroll_count), 0) AS n FROM provider_requests WHERE provider_id = @providerId AND execution_id = @executionId`;
+const SCROLLS_WINDOW_SQL = `
+SELECT COALESCE(SUM(scroll_count), 0) AS n FROM provider_requests
+WHERE provider_id = @providerId AND started_at >= @windowStart AND started_at < @windowEnd`;
 const PROVIDER_EXECUTION_CAP_SQL = `
 SELECT json_extract(definition_snapshot_json, '$.budget.providerMaxCalls.' || @providerId) AS cap
 FROM search_executions WHERE id = @executionId`;
@@ -104,6 +114,8 @@ interface GuardStatements {
   >;
   providerExecutionUsage: Database.Statement<Record<string, unknown>, CallsAndCost>;
   providerExecutionCap: Database.Statement<Record<string, unknown>, { cap: unknown }>;
+  scrollsExecution: Database.Statement<Record<string, unknown>, { n: number }>;
+  scrollsWindow: Database.Statement<Record<string, unknown>, { n: number }>;
 }
 function prepareStatements(db: Db): GuardStatements {
   return {
@@ -124,6 +136,8 @@ function prepareStatements(db: Db): GuardStatements {
     providerExecutionCap: db.raw.prepare<Record<string, unknown>, { cap: unknown }>(
       PROVIDER_EXECUTION_CAP_SQL,
     ),
+    scrollsExecution: db.raw.prepare<Record<string, unknown>, { n: number }>(SCROLLS_EXECUTION_SQL),
+    scrollsWindow: db.raw.prepare<Record<string, unknown>, { n: number }>(SCROLLS_WINDOW_SQL),
   };
 }
 
@@ -167,6 +181,7 @@ export class SqliteBudgetGuard implements BudgetGuard {
           startedAt: now,
           cost: p.costMicroGbp,
           httpAttempt: p.httpAttempt,
+          scrolls: p.scrolls ?? null,
         }).lastInsertRowid,
       );
     });
@@ -261,6 +276,7 @@ export class SqliteBudgetGuard implements BudgetGuard {
         if (u.calls + 1 > cap) throw this.exceeded('provider-execution', cap, u.calls, 1, p.providerId);
       }
     }
+    if (p.scrolls !== undefined && p.scrolls > 0) this.checkScrolls(p, p.scrolls, budget, now);
     if (budget.billable) {
       const g = this.globalUsage(now);
       const cap = this.config.spend.monthlyCapMicroGbp;
@@ -280,6 +296,64 @@ export class SqliteBudgetGuard implements BudgetGuard {
       if (u.calls + 1 > caps.maxFreeCalls)
         throw this.exceeded('execution-free-calls', caps.maxFreeCalls, u.calls, 1, p.providerId);
     }
+  }
+
+  /**
+   * Spec §2 rev 34 (ruling 12): a grid page's planned scrolls must fit what the run's and the month's scroll caps
+   * leave; a breach names the provider's own scope, with the scroll cap in its message.
+   */
+  private checkScrolls(p: ReserveParams, planned: number, budget: ProviderBudget, now: IsoDateTime): void {
+    const used = this.scrollUsage(p.providerId, p.executionId, now);
+    const run = budget.executionScrollCap;
+    if (p.executionId !== null && run !== undefined && used.execution + planned > run)
+      throw new BudgetExceeded({
+        scope: 'provider-execution',
+        cap: run,
+        current: used.execution,
+        requested: planned,
+        providerId: p.providerId,
+        unit: 'scrolls',
+      });
+    const month = budget.monthlyScrollCap;
+    if (month !== undefined && used.month + planned > month)
+      throw new BudgetExceeded({
+        scope: 'provider-month',
+        cap: month,
+        current: used.month,
+        requested: planned,
+        providerId: p.providerId,
+        unit: 'scrolls',
+      });
+  }
+
+  /**
+   * Fix round 1 (CA 1): the scrolls the provider's run and month scroll caps leave (the lesser, never below 0), or null
+   * when neither cap applies. A grid page asks for no more than this.
+   */
+  scrollsLeft(providerId: ProviderId, executionId: string | null): number | null {
+    const budget = this.budgetFor(providerId);
+    const used = this.scrollUsage(providerId, executionId);
+    const run = executionId === null ? undefined : budget.executionScrollCap;
+    const left = [
+      ...(run === undefined ? [] : [run - used.execution]),
+      ...(budget.monthlyScrollCap === undefined ? [] : [budget.monthlyScrollCap - used.month]),
+    ];
+    return left.length === 0 ? null : Math.max(0, Math.min(...left));
+  }
+
+  /** The provider's scroll clicks in the execution and in its current month window (spec §2 rev 34). */
+  scrollUsage(
+    providerId: ProviderId,
+    executionId: string | null,
+    now: IsoDateTime = this.clock.now(),
+  ): { execution: number; month: number } {
+    const budget = this.budgetFor(providerId);
+    const w = monthWindow(this.db, now, budget.billingDay);
+    return {
+      execution:
+        executionId === null ? 0 : (this.sql.scrollsExecution.get({ providerId, executionId })?.n ?? 0),
+      month: this.sql.scrollsWindow.get({ providerId, ...w })?.n ?? 0,
+    };
   }
 
   protected executionUsage(
@@ -417,6 +491,7 @@ export class SqliteBudgetGuard implements BudgetGuard {
           billable: billable ? 1 : 0,
           zeroCost: zeroCost ? 1 : 0,
           pageClass: r.pageClass ?? null,
+          scrollCount: r.scrollCount ?? null,
         }).changes;
         if (changes !== 1) throw new Error(`reservation ${id} is no longer pending`);
         done = true;

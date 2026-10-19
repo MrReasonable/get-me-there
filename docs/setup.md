@@ -650,6 +650,20 @@ recordings set it, with the results, Cheapest and no-flights flags. A page chang
 back. Record with the default data directory (never a `CAMOUFOX_DATA_DIR` override): the
 lock, the spacing and the cool-down are kept there, so a recording and a running worker can never load pages at once.
 
+Recordings are written under `apps/camoufox-worker/fixtures/recorded/` in the checkout or worktree that made them, and
+are never committed, so removing that worktree deletes them. Back them up after each recording session with
+`pnpm --filter @gmt/camoufox-worker recordings:backup`: it copies them (never a `.gitkeep`) into a dated
+`camoufox-<YYYY-MM-DD>` directory in your private data store outside the checkout, which it prints, with directories 0700
+and files 0600, and adds to a backup already made that day. In a fresh checkout, `pnpm --filter @gmt/camoufox-worker recordings:restore` copies the
+latest backup back (or `recordings:restore 2026-10-18` for a named day); it refuses a tree that already holds a
+recording.
+
+`record --graph-explore` (with the same `--origin`, `--destination`, `--depart` and `--return`) settles the results page
+as the other kinds do, clicks its one "Price graph" button and writes what appeared to
+`fixtures/recorded/graph-explore/<date>/<n>.json`: the region's accessibility snapshot, the names and roles of its
+controls, what was clicked, the cookie read-back and the timings. It is an exploration for building a later mode; the
+provider never clicks the graph and nothing reads these files yet.
+
 ### Point the app at it
 
 - **Docker:** add `CAMOUFOX_ENABLED=true` and the same `CAMOUFOX_WORKER_KEY=` line to `.env` with an editor, and leave
@@ -662,6 +676,43 @@ lock, the spacing and the cool-down are kept there, so a recording and a running
 
 Keep `CAMOUFOX_COOLDOWN_HOURS` and `CAMOUFOX_PAGE_TIMEOUT_SECONDS` equal on both sides (`worker.env` and the app's); the
 smoke test flags a mismatch.
+
+### Grid mode (optional)
+
+In `list` mode a page prices one day pair. In `grid` mode the worker opens the results page's "Price graph", then its
+"Dates" tab, and reads Google's 7 × 7 date grid: up to 49 day pairs a view. Each scroll moves the grid one day and
+shows 7 new day pairs; a new page opens any 7 × 7 block directly. To turn it on, add `CAMOUFOX_MODE=grid` to both
+`worker.env` and the app's settings, and restart both. The worker serves grid pages only while its selectors module
+marks the grid verified (the recordings of 2026-10-18); otherwise the app skips the provider ("grid mode not
+verified on the worker").
+
+- **Prices.** Google's own date grid, labelled "Google Flights date grid via Camoufox": whole pounds, an assumed age
+  of up to 24 hours (Google does not state it), the return date read from the grid cell. Google's "cheapest price" and
+  "low price" marks are shown as Google's, for the prices in that view only, never as this app's own minimum.
+- **Caps.** Every page still counts one page against `CAMOUFOX_EXECUTION_PAGE_CAP` and `CAMOUFOX_MONTHLY_PAGE_CAP`.
+  Scrolls have their own caps: `CAMOUFOX_EXECUTION_SCROLL_CAP` (default 600) and `CAMOUFOX_MONTHLY_SCROLL_CAP`
+  (default 6,000), at most `CAMOUFOX_GRID_SCROLL_CAP` (default 30) a page, at least
+  `CAMOUFOX_GRID_SCROLL_SPACING_SECONDS` (default 5, never randomised) between scroll clicks. Keep the grid settings
+  equal in `worker.env` and the app's settings: the worker reports its scroll cap, spacing and page timeout, and the app
+  skips the provider, naming the setting, while any of them differs. A page asks for no more scrolls than the run's and the month's
+  scroll caps leave; with none left it still reads its first block, and the blocks it did not reach stay for the next
+  run.
+- **Speed and coverage.** A page opens a block in about 30 s and a scroll takes about 9.3 s (measured 2026-10-18), so
+  a new page is the quicker way to a new block, and the planner opens pages until the page cap binds, then scrolls.
+  For the worked example's four airport pairs (312 blocks of 7 × 7, of which the 8,736 day pairs in the 10–21-night
+  band are stored), the run's estimate with the defaults is 100 pages and 588 scrolls, about 2.4 hours, reading 5,152 of
+  the 8,736 day pairs, and a full pass takes 3 runs; with `CAMOUFOX_EXECUTION_PAGE_CAP=312` it is one run of 312 pages
+  and no scrolls, about 2.6 hours. A page with its full 30 scrolls takes about 5 minutes; at the maximums (60 scrolls,
+  30 s spacing) about 30 minutes, and the estimate says when a run would pass `STUCK_AFTER_HOURS`.
+- **What a page does when something is off.** A challenge, sign-in, consent or account page on any poll stops it with
+  its cool-down, and nothing from that page is kept. A scroll whose view never changes ends the page with the views
+  already read. A view whose dates differ from the plan (near today, or at the end of the sale window) is kept and
+  ends the page. A view the worker cannot read as the grid, or whose cells no longer match the dated grammar, stops it
+  for an hour. Google's no-flights page says nothing of day pairs it did not show: on the probe page past the planning
+  horizon (the end of the sale window) its day pairs read as no data; on any other page only the pair it asked for
+  does, and the rest stay not searched yet (resumable). Day pairs the grid could not show read as issues on the cell
+  (resumable), never as prices. A 0-night stay opens its first block a day later and scrolls up once to it (with no
+  scroll left, or a per-page cap of 0, it reads the view it opens on instead).
 
 ### Choose it
 

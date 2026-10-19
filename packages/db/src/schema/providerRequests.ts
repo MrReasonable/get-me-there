@@ -26,6 +26,11 @@ export const providerRequests = sqliteTable(
      * `x-gmt-google-contacted`); `no-page` rows count toward neither page cap. NULL for every other provider.
      */
     pageClass: text('page_class'),
+    /**
+     * Spec §7 rev 34 (migration 0006): the scroll clicks a camoufox grid page made; NULL on every other row (camoufox
+     * list included) and on a grid call that ended with no answer. The scroll caps sum it.
+     */
+    scrollCount: integer('scroll_count'),
   },
   (t) => [
     check('provider_requests_provider_ck', isOneOf('provider_id', PROVIDER_IDS)),
@@ -35,6 +40,12 @@ export const providerRequests = sqliteTable(
     ),
     check('provider_requests_billable_ck', isBool('billable', true)),
     check('provider_requests_page_class_ck', isOneOf('page_class', ['page', 'no-page'], true)),
+    check(
+      'provider_requests_scroll_ck',
+      sql.raw(
+        "scroll_count IS NULL OR (provider_id = 'camoufox' AND typeof(scroll_count) = 'integer' AND scroll_count >= 0)",
+      ),
+    ),
     check('provider_requests_cost_ck', isInteger('cost_micro_gbp')),
     check('provider_requests_attempt_ck', isInteger('http_attempt')),
     check('provider_requests_tile_ck', isNullOrInteger('tile_index')),

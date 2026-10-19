@@ -56,6 +56,19 @@ function importersOf(names: readonly string[]): string[] {
         for (const el of st.importClause.namedBindings.elements) if (names.includes(el.name.text)) out.add(f);
   return [...out].sort();
 }
+/** Files importing anything from the module `spec` (as written, e.g. './gridRecord.js'). */
+function moduleImporters(spec: string): string[] {
+  const out = new Set<string>();
+  for (const { f, sf } of sources)
+    for (const st of sf.statements)
+      if (
+        ts.isImportDeclaration(st) &&
+        ts.isStringLiteral(st.moduleSpecifier) &&
+        st.moduleSpecifier.text === spec
+      )
+        out.add(f);
+  return [...out].sort();
+}
 /** A delay a reviewer can read: a number, a name, a field, or arithmetic over those; never a call (no jitter). */
 function plainDelay(e: ts.Expression): boolean {
   if (ts.isNumericLiteral(e) || ts.isIdentifier(e) || ts.isPropertyAccessExpression(e)) return true;
@@ -86,6 +99,7 @@ describe('worker rules: launch and dependencies', () => {
         'locale',
         'os',
         'serviceWorkers',
+        'window',
       ].sort(),
     );
     expect([
@@ -227,6 +241,50 @@ describe('worker rules: source facts through the compiler API', () => {
   });
   it('installProbeGuard and the probe page type are imported only by record.ts (never session.ts or server.ts)', () => {
     expect(importersOf(['installProbeGuard', 'ProbePage', 'probePage'])).toEqual(['record.ts']);
+  });
+  // why: the Price graph exploration (2026-10-18) stores a printed snapshot for reading by people; nothing parses it, and
+  // the provider path (session.ts, server.ts) never reaches it
+  it('ariaSnapshot is called only in dialogSettle.ts and graph.ts, and the explorations are reached only from record.ts', () => {
+    expect([...new Set(callsTo('ariaSnapshot').map((c) => c.f))].sort()).toEqual([
+      'dialogSettle.ts',
+      'graph.ts',
+    ]);
+    expect(importersOf(['exploreGraph', 'exploreGrid'])).toEqual(['recordDialogs.ts']);
+    expect(importersOf(['recordGraph', 'recordGrid'])).toEqual(['record.ts']);
+  });
+  // why: WP15 Task 15.11: the grid flows click only the dialog's named controls (Price graph, Dates, the four scrolls)
+  it('the grid flows find buttons and tabs only by the selectors module’s names', () => {
+    const named: string[] = [];
+    for (const { f, sf } of sources.filter((x) =>
+      ['gridPage.ts', 'gridRecord.ts', 'gridView.ts'].includes(x.f),
+    ))
+      visit(sf, (x) => {
+        if (!ts.isCallExpression(x)) return;
+        const e = x.expression;
+        if (!ts.isPropertyAccessExpression(e) || e.name.text !== 'getByRole') return;
+        const [role, opts] = x.arguments;
+        if (role === undefined || !ts.isStringLiteral(role) || !['button', 'tab'].includes(role.text)) return;
+        const name =
+          opts !== undefined && ts.isObjectLiteralExpression(opts)
+            ? opts.properties.find((p) => p.name?.getText(sf) === 'name')
+            : undefined;
+        // a button lookup without a name lists the panel's cells (it is never clicked); with one, the name is the module's
+        named.push(
+          name === undefined
+            ? `${f}: unnamed ${role.text}`
+            : `${f}: ${/S\.results\.|G\.(datesTab|scroll|grid|dialog)|name\b|nm\b/.test(name.getText(sf)) ? 'module' : name.getText(sf)}`,
+        );
+      });
+    expect(named.filter((n) => !n.endsWith(': module') && !n.endsWith(': unnamed button'))).toEqual([]);
+    expect(named.length).toBeGreaterThan(0);
+  });
+  it('the grid page is reached only from the page session, and the recorder’s flow only from record.ts', () => {
+    expect(importersOf(['gridPage'])).toEqual(['gridSession.ts']);
+    expect(importersOf(['readGrid'])).toEqual(['session.ts']);
+    expect(importersOf(['exploreGrid'])).toEqual(['recordDialogs.ts']);
+    // why: CA 6: the server process never loads the recorder's modules; the move budgets live in core
+    expect(moduleImporters('./gridRecord.js')).toEqual(['recordDialogs.ts']);
+    expect(moduleImporters('./recordDialogs.js')).toEqual(['record.ts']);
   });
   it('no route.continue with a URL option', () => {
     const bad = callsTo('continue').filter((c) =>

@@ -1,4 +1,11 @@
-import { apiContract, cabinSchema, providerIdSchema, sourceKindSchema } from '@gmt/core';
+import {
+  apiContract,
+  cabinSchema,
+  providerIdSchema,
+  returnDateSourceSchema,
+  sourceKindSchema,
+  vendorPriceMarkSchema,
+} from '@gmt/core';
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import {
   CABINS,
@@ -7,8 +14,10 @@ import {
   exhaustive,
   PROVIDER_IDS,
   RESULT_BASES,
+  RETURN_DATE_SOURCES,
   SOURCE_KINDS,
   STAGES,
+  VENDOR_PRICE_MARKS,
 } from '../src/internal/enums.js';
 
 // arch-M2: a list that re-states a core union cannot silently fall behind it.
@@ -20,6 +29,10 @@ describe('internal/enums', () => {
     expect(STAGES).toEqual(apiContract.stageSchema.options);
     expect(EXECUTION_STATUSES).toEqual(apiContract.executionStatusSchema.options);
     expect(RESULT_BASES).toEqual(apiContract.resultBasisSchema.options);
+    // why: fix round 1 (CA 7): the grid's two lists stay literal (drizzle-kit loads the schema without workspace
+    // resolution) and are pinned to core's here
+    expect(RETURN_DATE_SOURCES).toEqual(returnDateSourceSchema.options);
+    expect(VENDOR_PRICE_MARKS).toEqual(vendorPriceMarkSchema.options);
   });
 
   it('every other list must name every member of its union (compile-time check)', () => {

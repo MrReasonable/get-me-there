@@ -109,6 +109,11 @@ export function createWorkerServer(d: ServerDeps): Server {
       }
       pageCalled = true;
       const result = await d.page(r.data);
+      // why: spec §2 rev 34: a grid page asking for more scrolls than this worker allows is refused, nothing loaded
+      if (result.rejected === true) {
+        send(res, 400, { kind: 'bad-request' }, false);
+        return done(400, 'bad-request');
+      }
       const status = ANSWER_STATUS[result.answer.kind];
       const extra: Record<string, string> =
         result.answer.kind === 'spacing' ? { 'retry-after': String(result.answer.retryAfterSeconds) } : {};

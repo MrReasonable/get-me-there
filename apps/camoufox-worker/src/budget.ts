@@ -8,21 +8,33 @@ import type { Deadline, Timers } from './timers.js';
 export interface PageBudget {
   d: Deadline;
   next(): Deadline;
+  /**
+   * WP15 ruling 10: retires the current deadline and starts one of `ms` (a grid move's own budget), never past the
+   * page's overall cap from `started`.
+   */
+  nextFor(ms: number): Deadline;
   onExpire(fn: () => void): void;
 }
 
-export function pageBudget(timers: Timers, pageTimeoutMs: number, started: number): PageBudget {
+/** `capMs`: the page's overall cap from `started` (twice the page timeout unless a grid page sets its own). */
+export function pageBudget(
+  timers: Timers,
+  pageTimeoutMs: number,
+  started: number,
+  capMs: number = 2 * pageTimeoutMs,
+): PageBudget {
   const handlers: Array<() => void> = [];
+  const replace = (ms: number): Deadline => {
+    const n = timers.deadline(Math.max(1, ms));
+    for (const h of handlers) n.onExpire(h);
+    self.d.clear();
+    self.d = n;
+    return n;
+  };
   const self: PageBudget = {
     d: timers.deadline(pageTimeoutMs),
-    next: () => {
-      const left = Math.max(1, Math.min(pageTimeoutMs, 2 * pageTimeoutMs - (timers.now() - started)));
-      const n = timers.deadline(left);
-      for (const h of handlers) n.onExpire(h);
-      self.d.clear();
-      self.d = n;
-      return n;
-    },
+    next: () => replace(Math.min(pageTimeoutMs, 2 * pageTimeoutMs - (timers.now() - started))),
+    nextFor: (ms) => replace(Math.min(ms, capMs - (timers.now() - started))),
     onExpire: (fn) => {
       handlers.push(fn);
       self.d.onExpire(fn);

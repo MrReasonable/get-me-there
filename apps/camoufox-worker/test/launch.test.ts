@@ -25,6 +25,9 @@ describe('buildLaunchOptions (spec §2 limits; brief §7)', () => {
       handleSIGTERM: false,
       handleSIGINT: false,
       handleSIGHUP: false,
+      // why: ruling 7 of 2026-10-18 (WP15 round 1): a fixed window, so the date grid's layout never follows a generated
+      // screen size
+      window: [1280, 900],
       env: { HOME: '/Users/op', PATH: '/usr/bin', TMPDIR: '/tmp', LANG: 'en_GB.UTF-8' },
       firefox_user_prefs: {
         'toolkit.telemetry.enabled': false,
@@ -50,6 +53,7 @@ describe('buildLaunchOptions (spec §2 limits; brief §7)', () => {
         'handleSIGTERM',
         'handleSIGINT',
         'handleSIGHUP',
+        'window',
         'env',
         'firefox_user_prefs',
       ].sort(),

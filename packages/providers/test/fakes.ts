@@ -13,7 +13,7 @@ import {
   type Usage,
 } from '@gmt/core';
 import { classifyWorkerAnswer } from '../src/camoufox/answer.js';
-import { pageClassOf } from '../src/camoufox/limits.js';
+import { pageClassOf, scrollCountOf } from '../src/camoufox/limits.js';
 import { createHttpKit } from '../src/http/httpKit.js';
 import type {
   FixtureRecorder,
@@ -48,6 +48,9 @@ interface Row {
   httpStatus: number | undefined;
   /** camoufox's page class from finalise (spec §5.3 rev 32); undefined for every other provider. */
   pageClass: 'page' | 'no-page' | undefined;
+  /** camoufox grid (spec §7 rev 34): the planned scrolls at reserve, then the scrolls the answer stated (or none). */
+  scrolls: number | undefined;
+  scrollCount: number | undefined;
 }
 
 /** Every FakeBudget built by makeKit; test/support/setup.ts asserts none holds an open reservation after a test. */
@@ -85,6 +88,8 @@ export class FakeBudget implements BudgetGuard {
       outcome: 'pending',
       httpStatus: undefined,
       pageClass: undefined,
+      scrolls: p.scrolls,
+      scrollCount: undefined,
     };
     this.rows.push(row);
     this.events.push({ type: 'reserve', at: Date.now(), ...p });
@@ -95,6 +100,7 @@ export class FakeBudget implements BudgetGuard {
         row.outcome = r.outcome;
         row.httpStatus = r.httpStatus;
         row.pageClass = r.pageClass;
+        row.scrollCount = r.scrollCount;
         this.events.push({ type: 'finalise', at: Date.now(), ...r });
       },
     };
@@ -132,6 +138,9 @@ export class FakeBudget implements BudgetGuard {
     return { calls: rows.length, costMicroGbp: 0, cap, windowUsed: true, ...window };
   }
 
+  scrollsLeft(): number | null {
+    return null;
+  }
   recentCalls(providerId: ProviderId, since: IsoDateTime): number {
     // why: tests seed the count directly and assert the window through recentSince (WP3 filters started_at >= since).
     this.recentSince.push(since);
@@ -258,6 +267,7 @@ export function testLimits(over: LimitOverrides = {}): Record<HttpProviderId, Pr
       retryTransport: false,
       connectRefusedKind: 'provider-unavailable',
       pageClass: pageClassOf,
+      scrollCountOf,
       classifyError: classifyWorkerAnswer,
       ...over.camoufox,
     },

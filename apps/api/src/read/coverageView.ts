@@ -36,6 +36,7 @@ export function assembleCoverage(def: SearchDefinition, ports: Ports, engine: En
         cacheHits: line?.cacheHits ?? 0,
         costMicroGbp: line?.costMicroGbp ?? 0,
         planCalls,
+        ...(line !== undefined && line.scrolls > 0 ? { scrolls: line.scrolls } : {}),
       },
       overrun: overrunOf(p.stage, line, planCalls),
       parityBreak,

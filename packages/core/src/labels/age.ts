@@ -156,12 +156,33 @@ export function compareAges(a: EffectiveAge, b: EffectiveAge): number {
 /**
  * N4 (pie-007): marks a price's bound as the app's assumption when its provider's capability says the bound is assumed
  * (SearchApi's undocumented date-grid cache). Provenance is stored without the flag, so readers apply this from the
- * provider list; a bound of 0 or 'unknown' asserts nothing to qualify and is returned as is.
+ * provider list; a bound of 0 or 'unknown' asserts nothing to qualify and is returned as is. A row read from a date grid
+ * cell (camoufox grid mode) or a SearchApi calendar price is assumed from its own facts, whatever the provider runs as
+ * now, or when it is off (fix round 1, PA I2; fix round 2).
  */
-export function withAssumedBound<P extends Pick<Provenance, 'maxAgeHours' | 'maxAgeAssumed'>>(
-  p: P,
-  info: { maxAgeAssumed?: boolean | undefined } | undefined,
-): P {
-  if (info?.maxAgeAssumed !== true || p.maxAgeHours === 'unknown' || p.maxAgeHours === 0) return p;
+export function withAssumedBound<
+  P extends Pick<Provenance, 'maxAgeHours' | 'maxAgeAssumed'> & {
+    returnDateSource?: Provenance['returnDateSource'];
+    providerId?: Provenance['providerId'];
+    sourceKind?: Provenance['sourceKind'];
+  },
+>(p: P, info: { maxAgeAssumed?: boolean | undefined } | undefined): P {
+  if (p.maxAgeHours === 'unknown' || p.maxAgeHours === 0) return p;
+  if (!assumedByRow(p) && info?.maxAgeAssumed !== true) return p;
   return { ...p, maxAgeAssumed: true };
+}
+
+/**
+ * The rows whose own facts say their bound is the app's assumption, whatever the provider list holds now: a date grid
+ * cell (camoufox grid mode) and a SearchApi date-grid calendar price (fix round 2).
+ */
+function assumedByRow(p: {
+  returnDateSource?: Provenance['returnDateSource'];
+  providerId?: Provenance['providerId'];
+  sourceKind?: Provenance['sourceKind'];
+}): boolean {
+  return (
+    p.returnDateSource === 'grid-cell' ||
+    (p.providerId === 'searchapi' && p.sourceKind === 'scraped-aggregate')
+  );
 }

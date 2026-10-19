@@ -3,6 +3,7 @@ import type { Server } from 'node:http';
 import {
   CAMOUFOX_JS_VERSION,
   type Clock,
+  GRID_STEP_DAYS,
   type Logger,
   systemClock,
   type Versions,
@@ -140,6 +141,12 @@ export async function startWorker(ctx: EntryContext, deps: MainDeps): Promise<Ru
     pageTimeoutMs: cfg.pageTimeoutSeconds * 1000,
     log: deps.log,
     versions,
+    grid: {
+      mode: cfg.mode,
+      spacingMs: cfg.gridScrollSpacingSeconds * 1000,
+      scrollCap: cfg.gridScrollCap,
+      stepDays: GRID_STEP_DAYS,
+    },
   });
   let standingRefusal: boolean;
   try {
@@ -194,6 +201,11 @@ export async function startWorker(ctx: EntryContext, deps: MainDeps): Promise<Ru
       socsStable: deps.selectors.SOCS_STABLE,
       cooldownHours: cfg.cooldownHours,
       pageTimeoutSeconds: cfg.pageTimeoutSeconds,
+      // why: spec §2 rev 34: the measured step the planner uses, only while this worker serves grid pages
+      gridStepDays: deps.selectors.GRID_VERIFIED && cfg.mode === 'grid' ? { ...GRID_STEP_DAYS } : null,
+      // why: fix round 1 (CA 9): the app's preflight refuses grid mode when its settings differ from these
+      gridScrollCap: cfg.mode === 'grid' ? cfg.gridScrollCap : null,
+      gridScrollSpacingSeconds: cfg.mode === 'grid' ? cfg.gridScrollSpacingSeconds : null,
     };
   };
   let server: Server;

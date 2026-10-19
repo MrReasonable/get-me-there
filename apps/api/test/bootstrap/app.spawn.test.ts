@@ -101,6 +101,8 @@ function syntheticCalendarRow(): CalendarPriceInsert {
     maxAgeHours: 0,
     vendorLink: null,
     reusedFromExecutionId: null,
+    returnDateSource: 'vendor',
+    vendorPriceMark: null,
   };
 }
 

@@ -80,6 +80,21 @@ describe('BudgetExceeded', () => {
       }).message,
     ).toContain('searchapi');
   });
+  // why: spec §2 rev 34: the camoufox grid's scroll caps name what they count
+  it('a scroll cap names its unit', () => {
+    const e = new BudgetExceeded({
+      scope: 'provider-execution',
+      cap: 600,
+      current: 590,
+      requested: 14,
+      providerId: 'camoufox',
+      unit: 'scrolls',
+    });
+    expect([e.unit, e.message]).toEqual([
+      'scrolls',
+      'budget exceeded: provider-execution scrolls cap 600, current 590, requested 14 (camoufox)',
+    ]);
+  });
 });
 
 describe('stripUrlsInText scheme case', () => {

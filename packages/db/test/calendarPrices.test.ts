@@ -55,6 +55,7 @@ function rawInsert(db: Db, executionId: string, over: Record<string, unknown>): 
     fx_converted: 0,
     point_of_sale: 'unknown',
     fetched_at: T0,
+    return_date_source: 'vendor',
     ...over,
   };
   const cols = Object.keys(row);
@@ -66,6 +67,34 @@ function rawInsert(db: Db, executionId: string, over: Record<string, unknown>): 
 }
 
 describe('calendar_prices writes (spec §5.5, §6.3, §7)', () => {
+  // why: spec §7 rev 34: a grid price states its return-date source and Google's mark; only camoufox may say grid-cell
+  it('a camoufox grid price reads back its return-date source and mark in its provenance; another provider is refused grid-cell', () => {
+    const { repo, executionId } = setup();
+    repo.insert(executionId, [
+      calendarPrice(cell(), {
+        providerId: 'camoufox',
+        sourceKind: 'scraped-self',
+        maxAgeHours: 24,
+        returnDateSource: 'grid-cell',
+        vendorPriceMark: 'low',
+      }),
+    ]);
+    expect(repo.fetchedBy(executionId)[0]).toMatchObject({
+      returnDateSource: 'grid-cell',
+      vendorPriceMark: 'low',
+      provenance: { returnDateSource: 'grid-cell', vendorPriceMark: 'low', maxAgeHours: 24 },
+    });
+    expect(() =>
+      repo.insert(executionId, [
+        calendarPrice(cell(undefined, undefined, '2027-03-15', '2027-03-29'), {
+          returnDateSource: 'grid-cell',
+        }),
+      ]),
+    ).toThrow(/grid cell/);
+    expect(repo.fetchedBy(executionId)[0]?.provenance).toEqual(
+      expect.not.objectContaining({ vendorPriceMark: null }),
+    );
+  });
   it('stores provenance explicitly and reads it back: max_age_hours NULL ⇔ unknown, FX columns when converted', () => {
     const { repo, executionId } = setup();
     const converted = calendarPrice(cell(undefined, undefined, '2027-03-15', '2027-03-29'), {

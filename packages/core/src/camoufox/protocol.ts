@@ -5,6 +5,8 @@
  */
 import { z } from 'zod';
 import { iataSchema, isoDateSchema, isoDateTimeSchema } from '../types/ids.js';
+import { vendorPriceMarkSchema } from '../types/provenance.js';
+import { GRID_MAX_SCROLLS_PER_PAGE } from './grid.js';
 
 /** On every worker answer: `1` when the worker loaded a Google page for it, `0` when it did not (decision 69). */
 export const GOOGLE_CONTACTED_HEADER = 'x-gmt-google-contacted';
@@ -37,13 +39,10 @@ export type BlockedPage = z.infer<typeof blockedPageSchema>;
 // why: fix round 1 (prov M2): at least one name, or no option could ever match and every page would read as unrecognised
 const airportNameList = z.array(z.string().min(1).max(120)).min(1).max(8);
 
-/**
- * One page request: one cell (`mode: 'list'`), never a range. `gl` is POINT_OF_SALE. `grid` parses so the worker
- * can answer `mode-unavailable` (409) rather than `bad-request`; nothing in this work package sends it.
- */
-export const pageRequestSchema = z
+/** One list page request: one cell, never a range. `gl` is POINT_OF_SALE. */
+export const listRequestSchema = z
   .strictObject({
-    mode: z.enum(['list', 'grid']),
+    mode: z.literal('list'),
     origin: iataSchema,
     destination: iataSchema,
     departureDate: isoDateSchema,
@@ -59,6 +58,49 @@ export const pageRequestSchema = z
     message: 'origin and destination must differ',
     path: ['destination'],
   });
+export type ListRequest = z.infer<typeof listRequestSchema>;
+
+/** The grid's four scroll directions (spec §2 rev 34): left and right move the departures, up and down the returns. */
+export const GRID_MOVES = ['left', 'right', 'up', 'down'] as const;
+export const gridMoveSchema = z.enum(GRID_MOVES);
+export type GridMove = z.infer<typeof gridMoveSchema>;
+
+/**
+ * One grid page request (spec §2 rev 34; WP15 §5): the first block's centre as the page's query, the moves, which views
+ * are read (`reads[0]` the first view, `reads[i + 1]` the view after `moves[i]`), and how many scrolls the run's and
+ * the month's scroll caps leave (the worker never scrolls past it).
+ */
+export const gridRequestSchema = z
+  .strictObject({
+    mode: z.literal('grid'),
+    origin: iataSchema,
+    destination: iataSchema,
+    gl: z.string().regex(/^[A-Z]{2}$/),
+    start: z.strictObject({ departureDate: isoDateSchema, returnDate: isoDateSchema }),
+    moves: z.array(gridMoveSchema).max(GRID_MAX_SCROLLS_PER_PAGE),
+    reads: z.array(z.boolean()),
+    scrollAllowance: z.number().int().min(0),
+  })
+  .refine((r) => r.reads.length === r.moves.length + 1, {
+    message: 'reads names the first view and each move',
+    path: ['reads'],
+  })
+  .refine((r) => r.scrollAllowance <= r.moves.length, {
+    message: 'the allowance is at most the moves',
+    path: ['scrollAllowance'],
+  })
+  .refine((r) => r.start.returnDate > r.start.departureDate, {
+    message: 'the first block centre is a round trip',
+    path: ['start'],
+  })
+  .refine((r) => r.origin !== r.destination, {
+    message: 'origin and destination must differ',
+    path: ['destination'],
+  });
+export type GridRequest = z.infer<typeof gridRequestSchema>;
+
+/** Either page request; the worker answers a grid one `mode-unavailable` until its grid flag and step are set. */
+export const pageRequestSchema = z.union([listRequestSchema, gridRequestSchema]);
 export type PageRequest = z.infer<typeof pageRequestSchema>;
 
 const count = z.number().int().min(0);
@@ -68,6 +110,8 @@ export const versionsSchema = z.strictObject({
   grammar: z.string().min(1),
   camoufoxJs: z.string().min(1),
   binary: z.string().min(1),
+  /** The grid's cell grammar date, on grid answers (PIE-15). */
+  gridGrammar: z.string().min(1).exactOptional(),
 });
 export type Versions = z.infer<typeof versionsSchema>;
 
@@ -96,6 +140,38 @@ export const pageCellSchema = z.discriminatedUnion('status', [
 ]);
 export type PageCell = z.infer<typeof pageCellSchema>;
 
+/**
+ * One priced grid cell (spec §2 rev 34): both dates from the cell's own name (a same-day pair is shown), the price in
+ * pence (the grid states whole pounds), and Google's mark relative to that view. An unpriced cell has no shape until a
+ * recording pins Google's form (PA-13): the worker counts it unparsed.
+ */
+export const gridCellSchema = z
+  .strictObject({
+    status: z.literal('price'),
+    departureDate: isoDateSchema,
+    returnDate: isoDateSchema,
+    amountMinor: z.number().int().min(1),
+    mark: vendorPriceMarkSchema,
+  })
+  .refine((c) => c.returnDate >= c.departureDate, {
+    message: 'a cell returns on or after it departs',
+    path: ['returnDate'],
+  });
+export type GridCell = z.infer<typeof gridCellSchema>;
+/** One settled, read view of the grid. `structural: 'unparsed'`: nothing from it is stored (duplicates, a set mismatch). */
+export const gridViewSchema = z.strictObject({
+  index: count,
+  departures: z.array(isoDateSchema).max(7),
+  returns: z.array(isoDateSchema).max(7),
+  cells: z.array(gridCellSchema).max(49),
+  unparsed: count,
+  structural: z.enum(['ok', 'unparsed']),
+  offPlan: z.enum(['near-today', 'sale-window-end', 'shifted', 'short-move']).nullable(),
+});
+export type GridView = z.infer<typeof gridViewSchema>;
+/** How a grid page ended: every move made, a scroll that did not settle, an off-plan view, the allowance, no flights. */
+export const GRID_ENDS = ['complete', 'scroll-not-settled', 'off-plan', 'allowance', 'no-flights'] as const;
+
 /** Every answer of `POST /v1/page`, discriminated on `kind`; the status codes are brief §6's table. */
 export const workerAnswerSchema = z.discriminatedUnion('kind', [
   z.strictObject({
@@ -107,7 +183,24 @@ export const workerAnswerSchema = z.discriminatedUnion('kind', [
     notes: z.array(z.string()),
     versions: versionsSchema,
   }),
-  z.strictObject({ kind: z.literal('blocked'), page: blockedPageSchema, cooldownUntil: isoDateTimeSchema }),
+  z.strictObject({
+    kind: z.literal('grid'),
+    fetchedAt: isoDateTimeSchema,
+    currency: z.literal('GBP'),
+    pointOfSale: z.string().regex(/^([A-Z]{2}|unknown)$/),
+    views: z.array(gridViewSchema),
+    scrolls: count,
+    ended: z.enum(GRID_ENDS),
+    notes: z.array(z.string()),
+    versions: versionsSchema,
+  }),
+  // why: CB-4: an answer to a grid request that reached Google carries the scroll clicks it made
+  z.strictObject({
+    kind: z.literal('blocked'),
+    page: blockedPageSchema,
+    cooldownUntil: isoDateTimeSchema,
+    scrolls: count.exactOptional(),
+  }),
   z.strictObject({
     kind: z.literal('cooling-down'),
     cause: blockedPageSchema,
@@ -115,11 +208,12 @@ export const workerAnswerSchema = z.discriminatedUnion('kind', [
   }),
   z.strictObject({ kind: z.literal('spacing'), retryAfterSeconds: z.number().int().min(1) }),
   z.strictObject({ kind: z.literal('mode-unavailable'), mode: z.literal('grid') }),
-  z.strictObject({ kind: z.literal('not-ready'), elapsedMs: count }),
+  z.strictObject({ kind: z.literal('not-ready'), elapsedMs: count, scrolls: count.exactOptional() }),
   z.strictObject({
     kind: z.literal('browser-error'),
     stage: z.enum(['launch', 'navigate', 'read']),
     detail: z.string().max(500),
+    scrolls: count.exactOptional(),
   }),
 ]);
 export type WorkerAnswer = z.infer<typeof workerAnswerSchema>;
@@ -127,6 +221,7 @@ export type WorkerAnswer = z.infer<typeof workerAnswerSchema>;
 /** The HTTP status of each answer kind (brief §6), the one table the worker serves and the adapter reads. */
 export const ANSWER_STATUS: Readonly<Record<WorkerAnswer['kind'], number>> = {
   cells: 200,
+  grid: 200,
   blocked: 423,
   'cooling-down': 423,
   spacing: 429,
@@ -157,5 +252,13 @@ export const workerStatusSchema = z.strictObject({
   socsStable: z.boolean(),
   cooldownHours: z.number().int().min(24),
   pageTimeoutSeconds: z.number().int().min(30).max(240),
+  /** The measured grid step the worker uses (spec §2 rev 34), or null when grid mode is not verified. */
+  gridStepDays: z
+    .strictObject({ departures: z.number().int().min(1), returns: z.number().int().min(1) })
+    .nullable()
+    .exactOptional(),
+  /** The worker's own CAMOUFOX_GRID_SCROLL_CAP and spacing (fix round 1, CA 9), which the app's must equal in grid mode. */
+  gridScrollCap: z.number().int().min(0).nullable().exactOptional(),
+  gridScrollSpacingSeconds: z.number().int().min(0).nullable().exactOptional(),
 });
 export type WorkerStatus = z.infer<typeof workerStatusSchema>;

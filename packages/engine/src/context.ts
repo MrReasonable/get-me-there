@@ -47,6 +47,9 @@ export interface ProviderRunLimits {
   minSpacingSeconds: number | null;
   /** The calls the provider may make in its cap window (CAMOUFOX_MONTHLY_PAGE_CAP for camoufox). */
   monthlyCallCap: number;
+  /** Spec §2 rev 34: camoufox grid's scroll caps (a run's and its month's), or null for a provider without them. */
+  executionScrollCap: number | null;
+  monthlyScrollCap: number | null;
 }
 
 /**
@@ -107,6 +110,8 @@ export function buildContext(deps: EngineDeps, options: EngineOptions = {}): Eng
       executionCallCap: b.executionCallCap ?? null,
       minSpacingSeconds: b.minSpacingSeconds ?? null,
       monthlyCallCap: b.monthlyCallCap,
+      executionScrollCap: b.executionScrollCap ?? null,
+      monthlyScrollCap: b.monthlyScrollCap ?? null,
     };
   };
   for (const id of providers.keys()) limitsOf(id); // why: a missing limit is a wiring bug; fail at construction, not mid-run

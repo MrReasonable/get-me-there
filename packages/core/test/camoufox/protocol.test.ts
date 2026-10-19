@@ -132,6 +132,7 @@ describe('worker protocol (core/src/camoufox/protocol.ts; brief §5, §6)', () =
   it('maps each kind to brief §6’s status', () => {
     expect(ANSWER_STATUS).toEqual({
       cells: 200,
+      grid: 200,
       blocked: 423,
       'cooling-down': 423,
       spacing: 429,

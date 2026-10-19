@@ -148,6 +148,46 @@ describe('an assumed bound reads as an assumption on every form (N4, pie-007)', 
     expect(withAssumedBound(zero, { maxAgeAssumed: true })).toBe(zero);
     expect(barrel.withAssumedBound).toBe(withAssumedBound);
   });
+  it('a SearchApi calendar row is assumed from its own facts, with SearchApi turned off (fix round 2)', () => {
+    const cal = {
+      fetchedAt: p.fetchedAt,
+      maxAgeHours: 24,
+      providerId: 'searchapi',
+      sourceKind: 'scraped-aggregate',
+    } as const;
+    expect(withAssumedBound(cal, undefined)).toEqual({ ...cal, maxAgeAssumed: true });
+    const itin = {
+      fetchedAt: p.fetchedAt,
+      maxAgeHours: 24,
+      providerId: 'searchapi',
+      sourceKind: 'scraped-search',
+    } as const;
+    expect(withAssumedBound(itin, undefined)).toBe(itin);
+    const tp = {
+      fetchedAt: p.fetchedAt,
+      maxAgeHours: 48,
+      providerId: 'travelpayouts',
+      sourceKind: 'authorised-cached',
+    } as const;
+    expect(withAssumedBound(tp, undefined)).toBe(tp);
+    // why: only SearchApi's date grid states no age; another provider's aggregate row is taken as stated
+    const other = {
+      fetchedAt: p.fetchedAt,
+      maxAgeHours: 24,
+      providerId: 'fixture',
+      sourceKind: 'scraped-aggregate',
+    } as const;
+    expect(withAssumedBound(other, undefined)).toBe(other);
+  });
+  it('a grid-cell row is assumed from its own facts, with camoufox in list mode or off (fix round 1, PA I2)', () => {
+    const grid = { fetchedAt: p.fetchedAt, maxAgeHours: 24, returnDateSource: 'grid-cell' } as const;
+    expect(withAssumedBound(grid, undefined)).toEqual({ ...grid, maxAgeAssumed: true });
+    expect(withAssumedBound(grid, { maxAgeAssumed: false })).toEqual({ ...grid, maxAgeAssumed: true });
+    const asked = { fetchedAt: p.fetchedAt, maxAgeHours: 24, returnDateSource: 'asked' } as const;
+    expect(withAssumedBound(asked, undefined)).toBe(asked);
+    const gridZero = { fetchedAt: p.fetchedAt, maxAgeHours: 0, returnDateSource: 'grid-cell' } as const;
+    expect(withAssumedBound(gridZero, undefined)).toBe(gridZero);
+  });
   it('short, compact and full forms say "assumed", never a plain "≤"', () => {
     const a = effectiveAge(p, now);
     expect(formatAgeShort(a)).toBe('assumed ≤26h');

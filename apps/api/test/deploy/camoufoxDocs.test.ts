@@ -1,6 +1,7 @@
 // WP14 Task 14.12 (SEC-R2-005, SEC-R2-009, ruling 2): the operator docs for the camoufox provider: the setup section
 // keeps the worker key off every command line, says nothing about Linux, and carries the costs and the provenance note
 // exactly as the app states them.
+import { GRID_SOURCE_LABEL } from '@gmt/core';
 import { CAMOUFOX_DISCOVERY_INFO } from '@gmt/providers';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { read } from './files.js';
@@ -86,6 +87,16 @@ describe('docs/providers.md and docs/api-limits.md', () => {
   it('providers.md quotes the provenance note exactly and no longer calls the provider unbuilt', () => {
     expect(providers).toContain(`"${CAMOUFOX_DISCOVERY_INFO.provenanceNote}"`);
     expect(providers).not.toContain('Phase 4 continuity fallback only (spec §2); not built');
+  });
+  it('providers.md describes grid mode as built, with its labels and the measured step (fix round 1, PA I3)', () => {
+    const f = flat(providers);
+    expect(f).not.toMatch(
+      /grid` designed|not yet built|assume a scroll moves one 7-day block|97 scrolls|388 scrolls/,
+    );
+    expect(f).toContain('`grid` mode (opt-in, `CAMOUFOX_MODE=grid`)');
+    expect(f).toContain('One scroll moves one day (measured 2026-10-18)');
+    expect(f).toContain(`the source label is "${GRID_SOURCE_LABEL}", \`maxAgeHours\` 24 (assumed)`);
+    expect(f).toContain('age not stated (assumed ≤24h)');
   });
   it('api-limits.md names both row classes', () => {
     expect(limits).toContain('class\n   `page`');

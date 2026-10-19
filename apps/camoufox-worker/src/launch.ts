@@ -48,6 +48,10 @@ export function buildLaunchOptions(o: LaunchInput) {
     handleSIGTERM: false,
     handleSIGINT: false,
     handleSIGHUP: false,
+    // why: ruling 7 of 2026-10-18 (WP15 round 1): a fixed 1280 × 900 window (camoufox-js's own `window` option, from
+    // which the context measures its viewport; an explicit viewport over a generated window can hang a second newPage,
+    // daijro/camoufox#666), so the date grid's layout never follows a generated screen size. Layout only.
+    window: [1280, 900],
     env: { HOME: o.home, PATH: o.path, TMPDIR: o.tmp, LANG: 'en_GB.UTF-8' },
     firefox_user_prefs: { ...BACKGROUND_PREFS },
   } as const;
@@ -83,6 +87,7 @@ export async function launchContext(
   return Camoufox({
     ...options,
     exclude_addons: [...options.exclude_addons],
+    window: [...options.window],
     firefox_user_prefs: { ...options.firefox_user_prefs },
     env: { ...options.env },
     user_data_dir: userDataDir,

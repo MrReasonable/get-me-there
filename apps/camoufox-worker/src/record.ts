@@ -1,7 +1,16 @@
 import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { type BlockedPage, CAMOUFOX_JS_VERSION, type Clock, type Logger, systemClock } from '@gmt/core';
+import {
+  type BlockedPage,
+  CAMOUFOX_JS_VERSION,
+  type Clock,
+  GRID_MIN_SCROLL_SPACING_SECONDS,
+  GRID_MOVE_BUDGET_MS,
+  GRID_MOVE_RESERVE_MS,
+  type Logger,
+  systemClock,
+} from '@gmt/core';
 import { checkAccountCookies } from './accountCookies.js';
 import { type PageBudget, pageBudget } from './budget.js';
 import { classifyPageWithRule } from './classify.js';
@@ -20,6 +29,7 @@ import {
   probePage,
   runStep,
   type Settled,
+  type StepOptions,
 } from './driver.js';
 import { type GuardState, installGuard, installProbeGuard, onAllowlist } from './guard.js';
 import { type LaunchOptions, launchContext, launchOptionsForMeta, prepareLaunch } from './launch.js';
@@ -29,17 +39,20 @@ import { Pacer } from './pacer.js';
 import { installDir, profileDir } from './paths.js';
 import type { View } from './ready.js';
 import {
+  type GridDirection,
   parseRecordArgs,
   RECORDED_BY,
   type RecordArgs,
   type RecordingKind,
   RecordingRefused,
 } from './recordArgs.js';
+import { type Outcome, recordGraph, recordGrid, type Seen } from './recordDialogs.js';
 import {
   type StopFacts,
   stopRecord,
   stripQuery,
   tightenRecordings,
+  writeExploration,
   writeRecording,
   writeStopRecord,
   writeUnrecorded,
@@ -48,7 +61,7 @@ import { Refusal } from './refusal.js';
 import { type Entry, type EntryContext, EX_CONFIG, EX_SOFTWARE, EX_UNAVAILABLE } from './run.js';
 import { SELECTORS, SELECTORS_VERSION, type Selectors } from './selectors.js';
 import { loadSocs, type ReadBack, readBack, type SocsCapture, socsCookie } from './socs.js';
-import { bounded, DeadlineExceeded, realTimers, type Timers } from './timers.js';
+import { bounded, type Deadline, DeadlineExceeded, realTimers, type Timers } from './timers.js';
 import { pageUrl, probeUrl } from './url.js';
 
 export { stderrLog } from './log.js';
@@ -61,8 +74,9 @@ export { stderrLog } from './log.js';
  * (bounded), the cool-down on any block, the persisted refusal on either signed-in cause, and the profile wiped on a
  * consent stop or a SOCS that is not the captured one. It writes what the locators read to
  * `fixtures/recorded/<kind>/<date>/<n>.{facts,meta}.json` (gitignored, local-only, 0600: decision 61). It never stores
- * printed ARIA text, a cookie value, the worker key, an account name or an e-mail address. The consent probe is the
- * one navigation exception, and it lives only here.
+ * a cookie value, the worker key, an account name or an e-mail address, and stores printed ARIA text only in the Price
+ * graph exploration and the date grid recording (`graph-explore/<date>/<n>.json` and `grid/<date>/<n>.json`, queries
+ * stripped, never parsed; recordDialogs.ts). The consent probe is the one navigation exception, and it lives only here.
  */
 export {
   KINDS,
@@ -94,30 +108,6 @@ export interface RecordDeps {
   pid: number;
   isAlive?: (pid: number) => boolean;
 }
-
-/** One page's outcome: the facts read (or what appeared), or the stop it met. */
-/** What the classifier saw on a page, for a stop record (diagnostics of 2026-10-18). */
-interface Seen {
-  facts: StopFacts | null;
-  clicked: string[];
-  headings: string[];
-}
-type Outcome =
-  | ({
-      kind: 'read';
-      data: Record<string, unknown>;
-      noFlights: boolean;
-      stepMs: Record<string, number>;
-    } & Seen)
-  | { kind: 'appeared'; data: Record<string, unknown>; stepMs: Record<string, number> }
-  | ({
-      kind: 'stop';
-      page: BlockedPage;
-      rule: string;
-      landing: string;
-      hops: string[];
-      stepMs: Record<string, number>;
-    } & Seen);
 
 export async function record(ctx: EntryContext, cfg: WorkerConfig, deps: RecordDeps): Promise<number> {
   let args: RecordArgs;
@@ -185,7 +175,17 @@ export async function record(ctx: EntryContext, cfg: WorkerConfig, deps: RecordD
         // why: ruling of 2026-10-18: the first view has the page timeout; the Cheapest flow the same again from its click,
         // within twice that from the start (budget.next in interact); `budget.d` is the current deadline
         const pageStart = deps.timers.now();
-        const budget = pageBudget(deps.timers, cfg.pageTimeoutSeconds * 1000, pageStart);
+        const pageMs = cfg.pageTimeoutSeconds * 1000;
+        // why: WP15 ruling 10: a grid page's overall cap is the first view's budget plus, per move, the spacing and the
+        // move's own budget
+        const budget = pageBudget(
+          deps.timers,
+          pageMs,
+          pageStart,
+          2 * pageMs +
+            args.moves.length *
+              (GRID_MIN_SCROLL_SPACING_SECONDS * 1000 + GRID_MOVE_BUDGET_MS + GRID_MOVE_RESERVE_MS),
+        );
         const d = budget.d;
         let outcome: Outcome | null = null;
         let failure: unknown = null;
@@ -224,6 +224,7 @@ export async function record(ctx: EntryContext, cfg: WorkerConfig, deps: RecordD
               deps,
               args.kind,
               pageUrl({ ...req, gl: cfg.pointOfSale }),
+              args.moves,
             );
           }
         } catch (e) {
@@ -352,6 +353,30 @@ export async function record(ctx: EntryContext, cfg: WorkerConfig, deps: RecordD
           return EX_UNAVAILABLE;
         }
         if (outcome.kind === 'stop') throw new RecordingRefused('unreachable');
+        if ((args.kind === 'graph-explore' || args.kind === 'grid') && outcome.kind === 'read') {
+          const path = writeExploration(
+            deps.root,
+            args.kind,
+            day,
+            {
+              recordedAt: deps.clock.now(),
+              recordedBy: RECORDED_BY,
+              ...outcome.data,
+              // why: ruling 7: the fixed window the grid's layout was read at
+              window: deps.launchOptions.window,
+              socsReadBack: back,
+              versions: {
+                selectors: SELECTORS_VERSION,
+                camoufoxJs: CAMOUFOX_JS_VERSION,
+                binary: deps.binary,
+              },
+              timings: outcome.stepMs,
+            },
+            secrets,
+          );
+          ctx.out(`recorded ${path}`);
+          continue;
+        }
         if (outcome.kind === 'appeared' || (args.kind === 'no-flights' && !outcome.noFlights)) {
           writeUnrecorded(deps.root, day, { data: outcome.data }, secrets);
           ctx.out(
@@ -416,6 +441,7 @@ async function interact(
   deps: RecordDeps,
   kind: RecordingKind,
   url: string,
+  moves: readonly GridDirection[],
 ): Promise<Outcome> {
   let d = budget.d;
   const poll = (S: Selectors, view: View) =>
@@ -483,33 +509,59 @@ async function interact(
   }
   if (settled.kind.kind === 'blocked') return await stop(settled.kind.page, settled.rule, settled.facts);
   stepMs.settle = deps.timers.now() - t0;
+  // why: a failed step may be a page that is no results page at all (a challenge after the click): it is classified
+  // once, under its own step, and a blocked kind is that stop, with its cool-down; otherwise null (end plainly)
+  const classifyAfterFailedStep = async (
+    cur: Deadline,
+    steps: StepOptions,
+    view: View,
+  ): Promise<Outcome | null> => {
+    const lookups = { timers: deps.timers, lookupMs: LOOKUP_TIMEOUT_MS };
+    const seen = await runStep('classify-after-failed-step', POLL_TIMEOUT_MS, cur, steps, (st) =>
+      driver.readFacts(st, lookups),
+    ).catch((err: unknown) => {
+      if (err instanceof DeadlineExceeded || cur.expired()) throw err;
+      return null;
+    });
+    if (seen === null) return null;
+    const k = classifyPageWithRule(seen.page, deps.selectors, view);
+    if (k.kind.kind === 'blocked' && k.kind.page !== 'unrecognised')
+      return await stop(k.kind.page, k.rule, { page: seen.page, settle: seen.settle });
+    return null;
+  };
+  if (kind === 'grid' || kind === 'graph-explore') {
+    // why: no-flights and results are the only kinds left after the blocked stop above
+    const shown = settled.kind.kind === 'results' ? 'results' : 'no-flights';
+    const c = {
+      driver,
+      page,
+      guard,
+      budget,
+      d,
+      pageStart,
+      t0,
+      deps,
+      stepMs,
+      clicked,
+      stop,
+      classifyAfterFailedStep,
+    };
+    return kind === 'grid' ? await recordGrid(c, shown, moves) : await recordGraph(c, shown);
+  }
   // why: rule 5: only --cheapest and --view-more click these controls before their flags are set.
   if (kind === 'cheapest' || kind === 'view-more') {
     if (kind === 'cheapest' && settled.facts.page.cheapestTabs.length === 1) {
       // why: ruling of 2026-10-18: the tab's own information pop-up closed through its exact button, then the tab
       d = budget.next();
       const steps = { timers: deps.timers, log: deps.log, startedAt: pageStart };
-      const lookups = { timers: deps.timers, lookupMs: LOOKUP_TIMEOUT_MS };
       try {
         clicked.push(...(await driver.clickCheapest(d, steps)));
         // why: rulings of 2026-10-18: every Cheapest poll is a 20 s step with 5 s lookups; an overrun is polled again
         settled = await poll(deps.selectors, 'cheapest');
       } catch (e) {
         if (e instanceof DeadlineExceeded) throw e;
-        // why: a failed step may be a page that is no results page at all (a challenge after the click): it is
-        // classified once, under its own step, and a blocked kind is that stop, with its cool-down
-        const cur = d;
-        const seen = await runStep('classify-after-failed-step', POLL_TIMEOUT_MS, cur, steps, (st) =>
-          driver.readFacts(st, lookups),
-        ).catch((err: unknown) => {
-          if (err instanceof DeadlineExceeded || cur.expired()) throw err;
-          return null;
-        });
-        if (seen !== null) {
-          const k = classifyPageWithRule(seen.page, deps.selectors, 'cheapest');
-          if (k.kind.kind === 'blocked' && k.kind.page !== 'unrecognised')
-            return await stop(k.kind.page, k.rule, { page: seen.page, settle: seen.settle });
-        }
+        const blocked = await classifyAfterFailedStep(d, steps, 'cheapest');
+        if (blocked !== null) return blocked;
         // why: otherwise the step ends the recording plainly, naming it; no cool-down (nothing stopped the page)
         const step = e instanceof CheapestStepFailed ? `${e.step} (${e.reason})` : 'click';
         // why: the budget's end is the view not settling, said as such; any other step is the click flow

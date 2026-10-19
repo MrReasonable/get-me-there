@@ -2,7 +2,10 @@ import { rmSync } from 'node:fs';
 import {
   type BlockedPage,
   type Clock,
+  GRID_MOVE_BUDGET_MS,
+  GRID_MOVE_RESERVE_MS,
   type IsoDateTime,
+  type ListRequest,
   type Logger,
   type PageRequest,
   stripUrlsInText,
@@ -25,6 +28,7 @@ import {
   type Settled,
 } from './driver.js';
 import { checkForm } from './form.js';
+import { readGrid } from './gridSession.js';
 import { installGuard } from './guard.js';
 import { readList } from './list.js';
 import type { Pacer } from './pacer.js';
@@ -48,6 +52,16 @@ export interface PageResult {
   googleContacted: boolean;
   /** The cool-down store could not be read: main answers, then exits 70 for the operator to look. */
   fatal?: true;
+  /** The request asks for more than this worker allows (a grid page past its scroll cap): the server answers 400. */
+  rejected?: true;
+}
+
+/** Grid mode's worker-side settings (spec §2 rev 34): off unless worker.env sets CAMOUFOX_MODE=grid. */
+export interface GridSettings {
+  mode: 'list' | 'grid';
+  spacingMs: number;
+  scrollCap: number;
+  stepDays: { departures: number; returns: number };
 }
 
 export interface SessionDeps {
@@ -68,6 +82,7 @@ export interface SessionDeps {
   versions: Versions;
   /** Test seam: builds the driver over a page (createDriver by default). */
   driverFor?: typeof createDriver;
+  grid?: GridSettings;
 }
 
 type Stage = 'launch' | 'navigate' | 'read';
@@ -127,8 +142,15 @@ export class PageSession {
   }
 
   async page(req: PageRequest): Promise<PageResult> {
-    if (req.mode === 'grid')
+    // why: decision 70: grid pages only once the selectors module verifies the grid and worker.env asks for it
+    if (req.mode === 'grid' && (!this.S.GRID_VERIFIED || this.d.grid?.mode !== 'grid'))
       return { answer: { kind: 'mode-unavailable', mode: 'grid' }, googleContacted: false };
+    if (req.mode === 'grid' && req.moves.length > (this.d.grid?.scrollCap ?? 0))
+      return {
+        answer: { kind: 'mode-unavailable', mode: 'grid' },
+        googleContacted: false,
+        rejected: true,
+      };
     let active: ReturnType<CooldownStore['active']>;
     let refusal: ReturnType<Refusal['active']>;
     try {
@@ -170,7 +192,17 @@ export class PageSession {
     const started = this.d.timers.now();
     // why: ruling of 2026-10-18: the first view has CAMOUFOX_PAGE_TIMEOUT_SECONDS; the Cheapest flow gets the same again
     // from its click (budget.next), never past twice that from the start. `budget.d` is whichever deadline is current.
-    const budget = pageBudget(this.d.timers, this.d.pageTimeoutMs, started);
+    // why: WP15 ruling 10: a grid page's overall cap adds, per move, the scroll spacing and the move's own budget
+    const moves = req.mode === 'grid' ? req.moves.length : 0;
+    const budget = pageBudget(
+      this.d.timers,
+      this.d.pageTimeoutMs,
+      started,
+      2 * this.d.pageTimeoutMs +
+        moves * ((this.d.grid?.spacingMs ?? 0) + GRID_MOVE_BUDGET_MS + GRID_MOVE_RESERVE_MS),
+    );
+    const counter = { scrolls: 0 };
+    const scrolls = (): { scrolls?: number } => (req.mode === 'grid' ? { scrolls: counter.scrolls } : {});
     const deadline = budget.d;
     let stage: Stage = 'launch';
     let contacted = false;
@@ -178,6 +210,8 @@ export class PageSession {
     let context: ContextLike | null = null;
     let answer: WorkerAnswer;
     let stop: BlockedPage | null = null;
+    // why: the live grid run of 2026-10-18 on 8885ba8: every stop logs the rule that made it, as the recorder does
+    let rule = 'unknown';
     let wipe = false;
     let merged = false;
     // why: fix round 1 (prov-int I1): every call before goto races the page deadline (rule 9), so a stalled browser
@@ -191,6 +225,7 @@ export class PageSession {
       const account = await deadline.race(checkAccountCookies(c, this.d.clock));
       if (account.found) {
         stop = 'signed-in';
+        rule = 'account-cookie';
         answer = this.blockedPlaceholder('signed-in');
       } else {
         const p = await deadline.race(c.newPage());
@@ -204,7 +239,20 @@ export class PageSession {
         contacted = true;
         let refused: BlockedPage | null = null;
         try {
-          await driver.goto(pageUrl(req), deadline);
+          await driver.goto(
+            pageUrl(
+              req.mode === 'grid'
+                ? {
+                    origin: req.origin,
+                    destination: req.destination,
+                    departureDate: req.start.departureDate,
+                    returnDate: req.start.returnDate,
+                    gl: req.gl,
+                  }
+                : req,
+            ),
+            deadline,
+          );
         } catch (e) {
           if (guard.refused === null) throw e;
           refused = guard.refused;
@@ -212,19 +260,36 @@ export class PageSession {
         stage = 'read';
         if (refused !== null) {
           stop = refused;
+          rule = `guard-refused:${refused}`;
           answer = this.blockedPlaceholder(refused);
         } else {
-          const r = await this.read(driver, req, budget, started);
+          const r =
+            req.mode === 'grid'
+              ? await readGrid(
+                  {
+                    driver,
+                    page: p,
+                    req,
+                    budget,
+                    started,
+                    counter,
+                    S: this.S,
+                    pollMs: this.pollMs,
+                  },
+                  this.d,
+                )
+              : await this.read(driver, req, budget, started);
           answer = r.answer;
           stop = r.stop;
+          rule = r.rule ?? 'read';
         }
       }
     } catch (e) {
       preGotoFailed = !contacted;
       answer =
         e instanceof DeadlineExceeded || budget.d.expired()
-          ? { kind: 'not-ready', elapsedMs: Math.max(0, this.d.timers.now() - started) }
-          : { kind: 'browser-error', stage, detail: detailOf(e) };
+          ? { kind: 'not-ready', elapsedMs: Math.max(0, this.d.timers.now() - started), ...scrolls() }
+          : { kind: 'browser-error', stage, detail: detailOf(e), ...scrolls() };
     } finally {
       this.d.pacer.release();
     }
@@ -237,13 +302,14 @@ export class PageSession {
       const back = await bounded(() => c.cookies(), this.finallyMs, this.d.timers);
       if (back.overran) {
         discard = true;
-        if (answer.kind === 'cells')
-          answer = { kind: 'browser-error', stage: 'read', detail: 'SOCS read-back overran' };
+        if (answer.kind === 'cells' || answer.kind === 'grid')
+          answer = { kind: 'browser-error', stage: 'read', detail: 'SOCS read-back overran', ...scrolls() };
       } else if (readBack(back.value, this.d.socs) !== 'same') {
         wipe = true;
         // why: ruling 9: a block keeps its own kind; anything else becomes consent-unhandled.
         if (stop === null) {
           stop = 'consent-unhandled';
+          rule = 'socs-read-back';
           answer = this.blockedPlaceholder('consent-unhandled');
         } else merged = true;
       }
@@ -253,8 +319,8 @@ export class PageSession {
       const closed = await bounded(() => p.close(), this.finallyMs, this.d.timers);
       if (closed.overran) {
         discard = true;
-        if (answer.kind === 'cells')
-          answer = { kind: 'browser-error', stage: 'read', detail: 'page close overran' };
+        if (answer.kind === 'cells' || answer.kind === 'grid')
+          answer = { kind: 'browser-error', stage: 'read', detail: 'page close overran', ...scrolls() };
       }
     }
     if (stop === 'consent-unhandled') wipe = true;
@@ -262,6 +328,10 @@ export class PageSession {
     this.busySince = null;
 
     if (stop !== null) {
+      this.d.log.debug(
+        { cause: stop, rule, elapsedMs: Math.max(0, this.d.timers.now() - started) },
+        'classifier decision',
+      );
       try {
         // why: one page met two causes: the longer period, the earlier cause (Task 14.4 rule 5).
         const hours = merged
@@ -269,7 +339,7 @@ export class PageSession {
           : this.d.cooldown.hoursFor(stop);
         const rec = this.d.cooldown.start(stop, hours);
         if (stop === 'signed-in') this.d.refusal.set('a signed-in account control or account cookie');
-        answer = { kind: 'blocked', page: stop, cooldownUntil: rec.until };
+        answer = { kind: 'blocked', page: stop, cooldownUntil: rec.until, ...scrolls() };
       } catch (e) {
         return {
           answer: {
@@ -292,10 +362,10 @@ export class PageSession {
 
   private async read(
     driver: Driver,
-    req: PageRequest,
+    req: ListRequest,
     budget: PageBudget,
     started: number,
-  ): Promise<{ answer: WorkerAnswer; stop: BlockedPage | null }> {
+  ): Promise<{ answer: WorkerAnswer; stop: BlockedPage | null; rule?: string }> {
     const S = this.S;
     let d = budget.d;
     const poll = (view: 'best' | 'cheapest') =>
@@ -307,11 +377,20 @@ export class PageSession {
     let settled: Settled = await poll('best');
     let fellBack = false;
     if (settled.kind.kind === 'blocked')
-      return { answer: this.blockedPlaceholder(settled.kind.page), stop: settled.kind.page };
+      return {
+        answer: this.blockedPlaceholder(settled.kind.page),
+        stop: settled.kind.page,
+        rule: settled.rule,
+      };
     if (settled.kind.kind === 'no-flights')
       return { answer: this.cells({ status: 'no-flights' }, 'unknown'), stop: null };
     const form = checkForm(await driver.formFacts(d), req);
-    if (form !== 'ok') return { answer: this.blockedPlaceholder('unrecognised'), stop: 'unrecognised' };
+    if (form !== 'ok')
+      return {
+        answer: this.blockedPlaceholder('unrecognised'),
+        stop: 'unrecognised',
+        rule: `search-form:${form}`,
+      };
     // why: the worker clicks only flows its selectors module marks verified (PIE-09), re-reading the facts after each.
     const after = async (view: 'best' | 'cheapest'): Promise<WorkerAnswer | null> => {
       settled = await poll(view);

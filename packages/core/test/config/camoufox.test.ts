@@ -54,6 +54,8 @@ describe('CAMOUFOX_* (spec §12 rev 32)', () => {
       executionCallCap: 100,
       pagesOnly: true,
       minSpacingSeconds: 30,
+      executionScrollCap: 600,
+      monthlyScrollCap: 6000,
     });
   });
   it('a 45 s spacing gives 1 a minute and 80 an hour', () => {
@@ -89,7 +91,7 @@ describe('CAMOUFOX_* (spec §12 rev 32)', () => {
     ['CAMOUFOX_WORKER_URL', 'http://127.0.0.1'],
     ['CAMOUFOX_WORKER_URL', 'http://127.0.0.1:8090/path'],
     ['CAMOUFOX_WORKER_URL', 'http://user:pw@127.0.0.1:8090'],
-    ['CAMOUFOX_MODE', 'grid'],
+    ['CAMOUFOX_MODE', 'calendar'],
     ['CAMOUFOX_ENABLED', 'yes'],
   ])('%s=%s fails boot naming the field', (name, value) => {
     expect(errors({ ...ON, [name]: value })).toContain(name);
@@ -111,7 +113,7 @@ describe('CAMOUFOX_* (spec §12 rev 32)', () => {
     );
   });
   it('a bad value fails boot even while the provider is off', () => {
-    expect(errors({ ...minimal, CAMOUFOX_MODE: 'grid' })).toContain('CAMOUFOX_MODE');
+    expect(errors({ ...minimal, CAMOUFOX_MODE: 'calendar' })).toContain('CAMOUFOX_MODE');
   });
   it.each([
     'http://127.0.0.1:8090',

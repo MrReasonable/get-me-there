@@ -102,7 +102,7 @@ describe('BudgetExceeded provider-month with another provider in the stage (spec
    * A running execution whose snapshot lists a second discovery provider. Layer A registers only the fixture, so the
    * second provider exists in the snapshot alone: blocked by the pre-start check, or still able to run.
    */
-  async function breachWithSecondProvider(blocked: ProviderId[]) {
+  async function breachWithSecondProvider(blocked: ProviderId[], unit?: 'scrolls') {
     const h = createHarness();
     await h.fixtureScenario([{ match: { path: '/calendar' }, respond: FIXTURE_RULES.hold }]);
     const ctx = buildContext(h.deps, h.options);
@@ -128,6 +128,7 @@ describe('BudgetExceeded provider-month with another provider in the stage (spec
       cap: 20,
       current: 20,
       requested: 1,
+      ...(unit === undefined ? {} : { unit }),
     });
     applyBudgetBreach(ctx, run, 'fixture', 'discovery', err);
     return { h, run };
@@ -154,6 +155,13 @@ describe('BudgetExceeded provider-month with another provider in the stage (spec
     expect(body).toContain('Its remaining discovery cells are skipped (budget) in this run');
     expect(body).toContain(
       'resume the run by hand once the cap window reopens or the cap is raised, or the next scheduled run searches them',
+    );
+  });
+
+  it('a scroll-cap breach names the monthly scroll cap in the notice, never a call cap (fix round 1, CA 2)', async () => {
+    const { run } = await breachWithSecondProvider([], 'scrolls');
+    expect(run.notices[0]?.detail).toContain(
+      "fixture's monthly scroll cap is 20 scrolls; 20 scrolls used; the next page needed 1 scroll",
     );
   });
 });
@@ -246,6 +254,39 @@ describe('BudgetExceeded global-month (spec §8.1 with decision 25)', () => {
     expect(notice?.detail).toContain('the monthly spend cap is £350; £350 used; the next call needed £0.01');
     expect(notice?.detail).toContain('Sun, 1 Nov 2026, 00:00 (Europe/London)');
     expect(notice?.detail).not.toMatch(/350000000|3200/);
+  });
+});
+
+describe('a scroll-cap breach names the scroll cap and scrolls (fix round 1, CA 2)', () => {
+  it.each([
+    [
+      'provider-execution',
+      "camoufox's scroll cap for this run is 600 scrolls; 590 scrolls used; the next page needed 30 scrolls",
+    ],
+    [
+      'provider-month',
+      "camoufox's monthly scroll cap is 6000 scrolls; 5990 scrolls used; the next page needed 30 scrolls",
+    ],
+  ] as const)('%s: the paused notice', (scope, words) => {
+    const cap = scope === 'provider-execution' ? 600 : 6000;
+    const notice = finalStatus(
+      {
+        kind: 'budget',
+        error: new BudgetExceeded({
+          scope,
+          cap,
+          current: cap - 10,
+          requested: 30,
+          providerId: 'camoufox',
+          unit: 'scrolls',
+        }),
+        resumeAfter: null,
+      },
+      asIsoDateTime('2026-10-14T09:00:00.000Z'),
+      'Europe/London',
+    ).notice;
+    expect(notice?.detail).toContain(words);
+    expect(notice?.detail).not.toMatch(/calls?\b|page cap|call cap/);
   });
 });
 

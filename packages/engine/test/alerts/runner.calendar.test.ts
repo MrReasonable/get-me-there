@@ -60,8 +60,9 @@ describe('calendar basis (spec §6.8)', () => {
     expect(body).toContain(
       'New since the last check (no earlier price within the comparison window; not a drop):',
     );
+    // why: fix round 2: a SearchApi calendar row is labelled assumed from its own row, whatever the provider list says
     expect(body).toContain(
-      '- £400 LHR→JFK 3 Nov–17 Nov (14n) · Google date grid via SearchApi · fetched just now · provider age unknown (≤7d before that) · previous £500, fetched 7d before this price',
+      '- £400 LHR→JFK 3 Nov–17 Nov (14n) · Google date grid via SearchApi · fetched just now · provider age assumed ≤7d (undocumented) before that · previous £500, fetched 7d before this price',
     );
     const listed = events.filter((e) => payloadOf(e).isNew);
     expect(listed.map((e) => [e.identityKey, e.status])).toEqual([

@@ -43,6 +43,22 @@ export const fxInfoSchema: z.ZodType<FxInfo> = z.discriminatedUnion('converted',
   }),
 ]);
 
+/**
+ * Spec §7 rev 34: where a stored price's return date came from: the vendor's response (`vendor`), the date the camoufox
+ * worker asked for and the search form showed (`asked`), or the grid cell's own name (`grid-cell`).
+ */
+export const RETURN_DATE_SOURCES = ['vendor', 'asked', 'grid-cell'] as const;
+export const returnDateSourceSchema = z.enum(RETURN_DATE_SOURCES);
+export type ReturnDateSource = z.infer<typeof returnDateSourceSchema>;
+/**
+ * Spec §7 rev 34: the vendor's own mark on a price, relative to the prices it showed with it: Google's grid "cheapest
+ * price" or "low price", SearchApi's `is_lowest_price`; `none` where the vendor marks prices and left this one unmarked.
+ * Never this app's own minimum. Absent (null when stored) where the vendor states no marks.
+ */
+export const VENDOR_PRICE_MARKS = ['cheapest', 'low', 'none'] as const;
+export const vendorPriceMarkSchema = z.enum(VENDOR_PRICE_MARKS);
+export type VendorPriceMark = z.infer<typeof vendorPriceMarkSchema>;
+
 export interface Provenance {
   providerId: ProviderId;
   sourceKind: SourceKind;
@@ -58,6 +74,10 @@ export interface Provenance {
   fx: FxInfo;
   pointOfSale: PointOfSale;
   cabin: Cabin;
+  /** Calendar prices only (spec §7 rev 34). */
+  returnDateSource?: ReturnDateSource;
+  /** Calendar prices from a vendor that marks prices (spec §7 rev 34). */
+  vendorPriceMark?: VendorPriceMark;
 }
 
 // why: `.exactOptional()` matches `providerObservedAt?: IsoDateTime` under exactOptionalPropertyTypes;
@@ -72,4 +92,6 @@ export const provenanceSchema: z.ZodType<Provenance> = z.strictObject({
   fx: fxInfoSchema,
   pointOfSale: pointOfSaleSchema,
   cabin: cabinSchema,
+  returnDateSource: returnDateSourceSchema.exactOptional(),
+  vendorPriceMark: vendorPriceMarkSchema.exactOptional(),
 });

@@ -339,6 +339,8 @@ describe('fetchTile returns raw vendor shapes (spec §2, §5.2 "Raw only")', () 
         currency: 'GBP',
         vendorLink:
           'https://www.aviasales.com/search/X?t=ZZ18146070001814617500000475LHRJFK18158511001815894900000430JFKLHR_1d1bd24f_58507',
+        returnDateSource: 'vendor',
+        vendorPriceMark: null,
       },
     ]);
     // the 13 → 24 March cell had a row, so the engine records it error (reason parse), never no_data (spec §8.1)

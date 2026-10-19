@@ -25,7 +25,18 @@ export type Role =
   | 'listitem'
   | 'combobox'
   | 'textbox'
-  | 'main';
+  | 'main'
+  // why: the Price graph exploration (2026-10-18) looks for whichever of these appeared after its click, and lists the
+  // controls inside it; nothing here assumes how the graph itself is built
+  | 'dialog'
+  | 'alertdialog'
+  | 'region'
+  | 'slider'
+  | 'option'
+  | 'tabpanel'
+  | 'grid'
+  | 'gridcell'
+  | 'img';
 
 export const FLAG_NAMES = [
   'RESULTS_VERIFIED',
@@ -70,6 +81,17 @@ export interface Selectors {
     currencyButton: RegExp;
     locationButton: RegExp;
     viewMoreButton: string;
+    /** The button that opens the price-per-departure-day graph (exact name; the exploration recorder only). */
+    priceGraphButton: string;
+    /** Inside the graph's dialog (exploration only): the chart region, the Dates tab and the forward scroll button. */
+    graphDialog: { chartRegion: string; datesTab: string; scrollForwards: string };
+    /** The date grid inside that dialog (WP15; recorder only until GRID_VERIFIED): its names, all exact. */
+    dateGrid: {
+      dialog: string;
+      datesTab: string;
+      grid: string;
+      scroll: { left: string; right: string; up: string; down: string };
+    };
     /** Google's own "no flights" line; a hypothesis until NO_FLIGHTS_VERIFIED. */
     noFlights: RegExp;
   };
@@ -127,6 +149,20 @@ export const SELECTORS: Selectors = {
     currencyButton: /^Currency /,
     locationButton: /^Location/,
     viewMoreButton: 'View more flights',
+    // why: observed 2026-10-18 (the feasibility load's results page names it); clicked only by record --graph-explore,
+    // never by the provider, until a recording shows what the graph holds
+    priceGraphButton: 'Price graph',
+    // why: observed 2026-10-18 (graph-explore/2026-10-18/1): the button opens a dialog "Price insights" holding a tablist
+    // ("Dates", "Price graph"), a region "Price graph" with no accessible children, and "Scroll forwards"
+    graphDialog: { chartRegion: 'Price graph', datesTab: 'Dates', scrollForwards: 'Scroll forwards' },
+    // why: observed 2026-10-18 (graph-explore/2026-10-18/2): the dialog "Price insights", its tab "Dates" holding an
+    // empty grid "Date grid", and the four scroll buttons around it
+    dateGrid: {
+      dialog: 'Price insights',
+      datesTab: 'Dates',
+      grid: 'Date grid',
+      scroll: { left: 'Scroll left', right: 'Scroll right', up: 'Scroll up', down: 'Scroll down' },
+    },
     noFlights: /^No (?:results|flights) (?:returned|found)/,
   },
   form: {
@@ -145,8 +181,9 @@ export const SELECTORS: Selectors = {
   NO_FLIGHTS_VERIFIED: true,
   // why: set 2026-10-18 by operator ruling: the socs-stability recording's passes 1–3 all read the cookie back `same`
   SOCS_STABLE: true,
-  // why: decision 69: grid mode is not built in WP14; this flag stays false here whatever a recording shows.
-  GRID_VERIFIED: false,
+  // why: decision 70: set 2026-10-18 from the --grid recordings (the dialog view, the cell grammar, the lines, the
+  // one-day step on both axes); grid pages still need CAMOUFOX_MODE=grid in worker.env
+  GRID_VERIFIED: true,
 };
 
 /** The recording that proved each true flag (TS-13): its date and what it was. */
@@ -161,6 +198,8 @@ export const PROOFS: Readonly<Partial<Record<FlagName, string>>> = {
     '2026-10-18 no-flights/2026-10-18/1 (a date beyond the sale window: the line visible with 0 links, form as asked)',
   SOCS_STABLE:
     '2026-10-18 socs-stability recording, passes 1–3 all read back same (operator ruling of 2026-10-18)',
+  GRID_VERIFIED:
+    '2026-10-18 grid/2026-10-18/1–4 (every cell name parses, each view’s cells name its lines’ dates, one scroll moves one day on its axis, SOCS same) and the renamed 0-explore',
 };
 
 /** The flags as `/v1/status` reports them. */

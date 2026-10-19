@@ -29,6 +29,10 @@ export interface FakeNode {
   countHang?: boolean;
   /** What `getAttribute('aria-selected')` answers, when it differs from the role state (a replaced node). */
   ariaSelectedAttr?: string;
+  /** `innerText()` on this node never answers (every other read does). */
+  innerTextHang?: boolean;
+  /** A link's target, which the printed snapshot shows as a `/url:` line (as Playwright's does). */
+  href?: string;
 }
 export const n = (
   role: string,
@@ -165,7 +169,9 @@ export class FakeLocator implements LocatorLike {
           : x.ariaLabel
         : name === 'aria-selected'
           ? (x.ariaSelectedAttr ?? String(x.selected === true))
-          : null,
+          : name === 'role'
+            ? (x.role ?? null)
+            : null,
     );
   }
   textContent(o?: { timeout?: number }): Promise<string | null> {
@@ -195,14 +201,42 @@ export class FakeLocator implements LocatorLike {
     );
   }
   getByText(t: string | RegExp, o: { exact?: boolean } = {}): FakeLocator {
-    return new FakeLocator(this.page, () =>
-      descendants(this.find()).filter((x) => textMatches(x, t, o.exact)),
+    return new FakeLocator(this.page, () => innermost(descendants(this.find()), t, o.exact));
+  }
+  innerText(o?: { timeout?: number }): Promise<string> {
+    if (this.node()?.innerTextHang === true) return this.page.hangUntilClosed<string>();
+    return this.read(o, (x) =>
+      descendants([x])
+        .map((c) => (c.text === undefined ? (c.role === 'text' ? (c.name ?? '') : '') : (c.text ?? '')))
+        .filter((t) => t !== '')
+        .join('\n'),
     );
+  }
+  /** `locator('*')`: every element below this one, in document order (the only selector the worker uses). */
+  locator(selector: '*'): FakeLocator {
+    return new FakeLocator(this.page, () =>
+      selector === '*' ? descendants(this.find()).filter((x) => x.role !== 'text') : [],
+    );
+  }
+  ariaSnapshot(o?: { timeout?: number }): Promise<string> {
+    return this.read(o, (x) => printed(x, 0).join('\n'));
   }
   isVisible(): Promise<boolean> {
     const x = this.node();
     return Promise.resolve(x !== undefined && x.hidden !== true);
   }
+}
+
+/** A synthetic printed snapshot in Playwright's YAML-like shape: `- role "name":`, children indented, a link's `/url:`. */
+function printed(x: FakeNode, depth: number): string[] {
+  const pad = '  '.repeat(depth);
+  if (x.role === 'text') return [`${pad}- text: ${x.name ?? ''}`];
+  const kids = [
+    ...(x.href === undefined ? [] : [`${pad}  - /url: ${x.href}`]),
+    ...(x.children ?? []).flatMap((c) => printed(c, depth + 1)),
+  ];
+  const head = `${pad}- ${x.role ?? 'generic'}${x.name === undefined || x.name === '' ? '' : ` "${x.name}"`}`;
+  return kids.length === 0 ? [head] : [`${head}:`, ...kids];
 }
 
 /** Playwright's role query: the role, the accessible name and, when asked, the selected state. */
@@ -218,6 +252,16 @@ function roleMatches(
 function candidates(nodes: FakeNode[], role: Role, o: { name?: string | RegExp; exact?: boolean }): boolean {
   return nodes.some(
     (x) => x.role === role && nameMatches(x.name ?? '', o.name, o.exact) && x.selectedQueryHang === true,
+  );
+}
+
+/**
+ * Playwright's text matching returns the innermost elements whose text matches: an element whose match comes from a
+ * child that matches too is left out.
+ */
+function innermost(nodes: FakeNode[], t: string | RegExp, exact: boolean | undefined): FakeNode[] {
+  return nodes.filter(
+    (x) => textMatches(x, t, exact) && !descendants([x]).some((c) => textMatches(c, t, exact)),
   );
 }
 
@@ -348,7 +392,7 @@ export class FakePage implements PageLike {
     );
   }
   getByText(t: string | RegExp, o: { exact?: boolean } = {}): FakeLocator {
-    return new FakeLocator(this, () => descendants(this.root()).filter((x) => textMatches(x, t, o.exact)));
+    return new FakeLocator(this, () => innermost(descendants(this.root()), t, o.exact));
   }
   close(): Promise<void> {
     this.calls.closed += 1;

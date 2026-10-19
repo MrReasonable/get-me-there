@@ -38,13 +38,20 @@ const BODY = {
 const URL0 =
   'https://www.google.com/travel/flights?q=Flights+from+LHR+to+JFK+on+2026-11-05+returning+2026-11-15&curr=GBP&hl=en-GB&gl=GB';
 
-function setup(o: { socs?: boolean; deps?: Partial<MainDeps>; shape?: (c: FakeContext) => void } = {}) {
+function setup(
+  o: {
+    socs?: boolean;
+    deps?: Partial<MainDeps>;
+    shape?: (c: FakeContext) => void;
+    env?: Record<string, string>;
+  } = {},
+) {
   const dataDir = tmpDir();
   if (o.socs !== false) writeFileSync(join(dataDir, 'socs.json'), JSON.stringify(CAPTURE), { mode: 0o600 });
   const out: string[] = [];
   const err: string[] = [];
   const ctx: EntryContext = {
-    env: { CAMOUFOX_WORKER_KEY: KEY, HOME: '/Users/op' },
+    env: { CAMOUFOX_WORKER_KEY: KEY, HOME: '/Users/op', ...o.env },
     dataDir,
     args: [],
     out: (l) => out.push(l),
@@ -173,6 +180,25 @@ describe('the worker’s start checks and shutdown (brief Task 14.5)', () => {
     t.shutdown();
     expect(await w.done).toBe(0);
     expect(() => acquireLock(t.dataDir).release()).not.toThrow();
+  });
+  it('in grid mode the status reports the worker’s scroll cap and spacing, for the app’s preflight (CA 9)', async () => {
+    const status = async (env: Record<string, string>) => {
+      const t = setup({ env });
+      const w = await running(t);
+      const s = await fetch(`http://127.0.0.1:${w.port}/v1/status`, { headers: { 'x-gmt-worker-key': KEY } });
+      const body: unknown = await s.json();
+      t.shutdown();
+      await w.done;
+      return body;
+    };
+    expect(
+      await status({
+        CAMOUFOX_MODE: 'grid',
+        CAMOUFOX_GRID_SCROLL_CAP: '20',
+        CAMOUFOX_GRID_SCROLL_SPACING_SECONDS: '9',
+      }),
+    ).toMatchObject({ gridScrollCap: 20, gridScrollSpacingSeconds: 9 });
+    expect(await status({})).toMatchObject({ gridScrollCap: null, gridScrollSpacingSeconds: null });
   });
   // why: fix round 1 (prov-int M7): after a wipe a status poll must not wait on a cold launch past the app's timeout
   it('a status poll whose relaunch hangs answers 500 within its bound, and the worker keeps serving', async () => {

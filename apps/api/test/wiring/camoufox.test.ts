@@ -1,4 +1,4 @@
-import { asIsoDateTime, type Config, fixedClock, parseConfig } from '@gmt/core';
+import { asIata, asIsoDate, asIsoDateTime, type Config, fixedClock, parseConfig } from '@gmt/core';
 import type { HttpKit } from '@gmt/providers';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { defaultDefinitionInput } from '../../src/defaults.js';
@@ -75,5 +75,55 @@ describe('apps/api wiring: camoufox (brief Task 14.10)', () => {
         (s) => s.kind === 'provider-execution',
       ),
     ).toBe(false);
+  });
+});
+
+describe('apps/api wiring: camoufox grid mode (fix round 1, CA 1)', () => {
+  it('a grid page asks for, and reserves, no more scrolls than the guard says the caps leave', async () => {
+    const c = config({ ...ON, CAMOUFOX_MODE: 'grid', CAMOUFOX_EXECUTION_PAGE_CAP: '1' });
+    const sent: Array<{ body: unknown; scrolls: number | undefined }> = [];
+    const capture: HttpKit = {
+      request: (r) => {
+        sent.push({ body: JSON.parse(typeof r.body === 'string' ? r.body : '{}'), scrolls: r.scrolls });
+        return Promise.reject(new Error('captured'));
+      },
+      stats: () => ({ inFlight: 0 }),
+    };
+    const asked: Array<[string, string | null]> = [];
+    const p = providersFor(c, {
+      ...deps,
+      http: capture,
+      scrollsLeft: (providerId, executionId) => {
+        asked.push([providerId, executionId]);
+        return 3;
+      },
+    }).find((x) => x.id === 'camoufox');
+    const d = p?.discovery;
+    if (d === undefined) throw new Error('camoufox discovery');
+    const q = {
+      origin: asIata('LHR'),
+      destination: asIata('JFK'),
+      departureFrom: asIsoDate('2027-03-11'),
+      departureTo: asIsoDate('2027-03-24'),
+      minNights: 10,
+      maxNights: 10,
+      cabin: 'economy' as const,
+      currency: 'GBP' as const,
+      airportNames: {
+        origin: ['London Heathrow Airport'],
+        destination: ['John F Kennedy International Airport'],
+      },
+    };
+    const [tile] = d.plan(q);
+    if (tile === undefined) throw new Error('tile');
+    await expect(
+      d.fetchTile(tile, q, {
+        executionId: 'e1',
+        signal: new AbortController().signal,
+        recordFixtures: false,
+      }),
+    ).rejects.toThrow('captured');
+    expect(asked).toEqual([['camoufox', 'e1']]);
+    expect(sent).toEqual([{ body: expect.objectContaining({ scrollAllowance: 3 }), scrolls: 3 }]);
   });
 });
