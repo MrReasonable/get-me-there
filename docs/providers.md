@@ -126,7 +126,7 @@ for one worked-example airport pair (8,736 for its four pairs). The `grid` mode 
 blocks on a lattice of 7 × 7 (26 departure columns × 3 return blocks for the 10–21-night band; 2,184 of their 3,822
 cells are in the band and stored), 312 for the four pairs. One scroll moves one day (measured 2026-10-18), so a
 block-to-block move is 7 scrolls, about 65 s, against about 30 s for a new page. With the defaults the run's estimate is
-100 pages and 294 scrolls, about 1.6 hours, reading 3,976 of the 8,736 day pairs, and a full pass takes 3 runs; with
+100 pages and 588 scrolls, about 2.4 hours, reading 5,152 of the 8,736 day pairs, and a full pass takes 3 runs; with
 `CAMOUFOX_EXECUTION_PAGE_CAP=312` it is one run of 312 pages, about 2.6 hours (setup.md §14). Grid prices are whole
 pounds, their return date is read from the grid cell, and Google's "cheapest price" and "low price" marks are shown as
 Google's, for the prices in that view only.

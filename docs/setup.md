@@ -700,7 +700,7 @@ verified on the worker").
 - **Speed and coverage.** A page opens a block in about 30 s and a scroll takes about 9.3 s (measured 2026-10-18), so
   a new page is the quicker way to a new block, and the planner opens pages until the page cap binds, then scrolls.
   For the worked example's four airport pairs (312 blocks of 7 × 7, of which the 8,736 day pairs in the 10–21-night
-  band are stored), the run's estimate with the defaults is 100 pages and 294 scrolls, about 1.6 hours, reading 3,976 of
+  band are stored), the run's estimate with the defaults is 100 pages and 588 scrolls, about 2.4 hours, reading 5,152 of
   the 8,736 day pairs, and a full pass takes 3 runs; with `CAMOUFOX_EXECUTION_PAGE_CAP=312` it is one run of 312 pages
   and no scrolls, about 2.6 hours. A page with its full 30 scrolls takes about 5 minutes; at the maximums (60 scrolls,
   30 s spacing) about 30 minutes, and the estimate says when a run would pass `STUCK_AFTER_HOURS`.

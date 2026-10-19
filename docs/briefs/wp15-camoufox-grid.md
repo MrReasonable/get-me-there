@@ -89,12 +89,12 @@ about 30 s for a page, so the planner opens pages until the page cap binds, then
 
 | Caps | The run's estimate | A full pass |
 |---|---|---|
-| Defaults (100 pages, 600 scrolls, 30 a page) | 100 pages and 294 scrolls, ≈ 5,735 s (1.6 h), 3,976 of the 8,736 day pairs | 3 runs |
+| Defaults (100 pages, 600 scrolls, 30 a page) | 100 pages and 588 scrolls, ≈ 8,469 s (2.4 h), 5,152 of the 8,736 day pairs | 3 runs |
 | Page cap 312 | 312 pages and no scrolls, ≈ 9,360 s (2.6 h) | 1 run |
 
 The planner splits each run's page and scroll allowances evenly across the stage's pairs (`DiscoveryQuery.share`, set by
 the engine): each pair's plan joins blocks by scrolls within its share (25 pages and 150 scrolls of the defaults' 100
-and 600), and the engine runs the pairs' pages in order up to the page cap. These are the estimate's own figures,
+and 600), with the pages that join blocks first, and the engine takes the pairs' grid pages in turn (round-robin) up to the page cap; list mode keeps each pair's tiles together. These are the estimate's own figures,
 pinned by the engine's docs test (Task 15.10).
 
 ## 1. Goal
@@ -492,6 +492,11 @@ pnpm --filter @gmt/camoufox-worker recordings:backup
     anchors at today, so no page opens on days already past.
   - `gridTileEstimate` gives each tile's scrolls and seconds from `GRID_TIMES`; determinism (no clock but `today`).
 - [ ] **Step 2: Implement; run; commit.**
+
+**File sizes.** `record.ts`, `session.ts` and `driver.ts` stay above the ~300-line guideline on purpose: the rules tests
+pin code to them (the consent probe and the probe guard to `record.ts`, the page flow's order to `session.ts`, the
+locator reads to `driver.ts`); the dialog recordings (`recordDialogs.ts`) and the session's grid read (`gridSession.ts`)
+are split out.
 
 ### Task 15.4: The worker's grid page
 

@@ -481,9 +481,10 @@ blocks a pair (3,822 grid cells, of which the 2,184 in the band are stored,
 move is 7 scrolls (about 65 s) against about 30 s for a new page, so the
 planner opens pages until the page cap binds and scrolls only past it, each
 pair within its share of the caps (25 pages and 150 scrolls of the defaults'
-100 and 600 for four pairs). The engine runs the pairs' pages in order up to
-the page cap, so with the defaults the run's estimate is 100 pages and 294
-scrolls, about 1.6 hours, reading 3,976 of the 8,736 day pairs, and a full
+100 and 600 for four pairs), with the pages that join blocks first. The engine
+takes the pairs' grid pages in turn up to the page cap (list mode and every
+other provider keep each pair's tiles together), so with the defaults the
+run's estimate is 100 pages and 588 scrolls, about 2.4 hours, reading 5,152 of the 8,736 day pairs, and a full
 pass takes 3 runs; with `CAMOUFOX_EXECUTION_PAGE_CAP` raised to 312 it is one
 run of 312 pages and no scrolls, about 2.6 hours. A scroll takes the measured
 9.3 s or the configured spacing when that is longer, and the estimate says
@@ -2286,8 +2287,9 @@ from what the guard says the caps leave; the preflight's check of the
 worker's scroll cap and spacing; the off-plan causes named only from what is
 known; a pair read twice failing the tile. §2's ledger paragraph and §7's
 `scroll_count`: an `unknown` call keeps its planned scrolls. §2's coverage
-paragraph states the estimate's own figures (100 pages and 294 scrolls a run
-at the defaults, 3 runs a full pass), the scroll time as the longer of the
+paragraph states the estimate's own figures (100 pages and 588 scrolls a run
+at the defaults, with each pair's joined pages first and the pairs taken in
+turn, 3 runs a full pass), the scroll time as the longer of the
 measured time and the spacing, the stuck-run note and the month's scroll
 warning. A stored grid-cell price is labelled assumed from its own row.
 
