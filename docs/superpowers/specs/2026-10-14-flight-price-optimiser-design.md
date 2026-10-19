@@ -261,8 +261,10 @@ never silently dropped.
   page with no scroll left still reads its first block, and the blocks it did
   not reach are `error` (`parse`, `scroll-allowance`), resumable. The worker
   reports its scroll cap and spacing in its status, and the preflight skips
-  the provider (`provider_disabled`, naming the setting) while they differ
-  from the app's.
+  the provider (`provider_disabled`, naming the setting) while they, or the
+  page timeout, differ from the app's. A page whose first read view lies past
+  its allowance (a 0-night lead scroll with none left) is not sent; its cells
+  stay `scroll-allowance` issues.
   **Settles and deadlines.** The first view, after the Dates click, settles by
   the two-stable-polls rule. A view after a scroll counts only when its
   departures or returns line differs from the view before the move, and then

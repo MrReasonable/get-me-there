@@ -34,7 +34,7 @@ export async function camoufoxPreflight(
     key: Secret;
     workerUrl: string;
     /** Grid mode, with the app's scroll cap and spacing, which the worker's must equal. */
-    grid?: { scrollCap: number; spacingSeconds: number };
+    grid?: { scrollCap: number; spacingSeconds: number; pageTimeoutSeconds: number };
   },
   ctx: ProviderContext,
 ): Promise<PreflightResult> {
@@ -95,6 +95,17 @@ export async function camoufoxPreflight(
       ok: false,
       skip: 'provider_disabled',
       detail: gridSettingDiffers('CAMOUFOX_GRID_SCROLL_CAP', st.gridScrollCap, o.grid.scrollCap),
+    };
+  // why: CodeRabbit on PR #9: a longer worker page timeout outlasts the app's request timeout, even with no scroll
+  if (st.pageTimeoutSeconds !== o.grid.pageTimeoutSeconds)
+    return {
+      ok: false,
+      skip: 'provider_disabled',
+      detail: gridSettingDiffers(
+        'CAMOUFOX_PAGE_TIMEOUT_SECONDS',
+        st.pageTimeoutSeconds,
+        o.grid.pageTimeoutSeconds,
+      ),
     };
   if (st.gridScrollSpacingSeconds !== o.grid.spacingSeconds)
     return {

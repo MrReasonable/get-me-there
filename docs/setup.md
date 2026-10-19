@@ -693,8 +693,8 @@ verified on the worker").
   Scrolls have their own caps: `CAMOUFOX_EXECUTION_SCROLL_CAP` (default 600) and `CAMOUFOX_MONTHLY_SCROLL_CAP`
   (default 6,000), at most `CAMOUFOX_GRID_SCROLL_CAP` (default 30) a page, at least
   `CAMOUFOX_GRID_SCROLL_SPACING_SECONDS` (default 5, never randomised) between scroll clicks. Keep the grid settings
-  equal in `worker.env` and the app's settings: the worker reports its scroll cap and spacing, and the app skips the
-  provider, naming the setting, while they differ. A page asks for no more scrolls than the run's and the month's
+  equal in `worker.env` and the app's settings: the worker reports its scroll cap, spacing and page timeout, and the app
+  skips the provider, naming the setting, while any of them differs. A page asks for no more scrolls than the run's and the month's
   scroll caps leave; with none left it still reads its first block, and the blocks it did not reach stay for the next
   run.
 - **Speed and coverage.** A page opens a block in about 30 s and a scroll takes about 9.3 s (measured 2026-10-18), so

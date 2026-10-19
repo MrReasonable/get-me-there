@@ -285,7 +285,13 @@ export function realCamoufox(
     ...(grid === undefined
       ? {}
       : {
-          grid: { mode: 'grid' as const, ...grid, scrollCap: 30, scrollSpacingSeconds: 5 },
+          grid: {
+            mode: 'grid' as const,
+            ...grid,
+            scrollCap: 30,
+            scrollSpacingSeconds: 5,
+            pageTimeoutSeconds: 90,
+          },
           scrollsLeft: (executionId: string | null) => ctxOf().budget.scrollsLeft('camoufox', executionId),
         }),
   });

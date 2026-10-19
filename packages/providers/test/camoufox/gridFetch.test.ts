@@ -120,7 +120,7 @@ function setup(
     key: SENTINELS.camoufox,
     workerUrl: 'http://127.0.0.1:8090',
     pointOfSale: 'GB',
-    grid: { mode: 'grid', scrollSpacingSeconds: 5, ...grid },
+    grid: { mode: 'grid', scrollSpacingSeconds: 5, pageTimeoutSeconds: 90, ...grid },
     ...(o.scrollsLeft === undefined ? {} : { scrollsLeft: o.scrollsLeft }),
   });
   const d = p.discovery;
@@ -200,6 +200,41 @@ describe('camoufox grid mode', () => {
       skip: 'provider_disabled',
       detail: expect.stringMatching(/CAMOUFOX_GRID_SCROLL_SPACING_SECONDS.*9.*5/),
     });
+  });
+  it('preflight refuses grid mode when the worker’s page timeout differs from the app’s (CodeRabbit)', async () => {
+    const { d } = setup();
+    server.use(
+      http.get(STATUS, () =>
+        HttpResponse.json({ ...status({ departures: 1, returns: 1 }), pageTimeoutSeconds: 240 }),
+      ),
+    );
+    expect(await d.preflight?.(ctx)).toMatchObject({
+      ok: false,
+      skip: 'provider_disabled',
+      detail: expect.stringMatching(/CAMOUFOX_PAGE_TIMEOUT_SECONDS.*240.*90/),
+    });
+  });
+  it('a 0-night page whose lead scroll the caps do not leave is never sent: its cells are scroll-allowance issues (CodeRabbit)', async () => {
+    let sent = 0;
+    server.use(
+      http.post(URL_, () => {
+        sent++;
+        return HttpResponse.json(answer({ views: [], ended: 'allowance' }), contacted);
+      }),
+    );
+    const { d, budget } = setup(undefined, { scrollsLeft: () => 0 });
+    const q = { ...Q, minNights: 0, maxNights: 0 };
+    const [tile] = d.plan(q);
+    if (tile?.request.kind !== 'grid-path') throw new Error('tile');
+    expect(tile.request.reads[0]).toBe(false);
+    const r = await d.fetchTile(tile, q, ctx);
+    expect(sent).toBe(0);
+    expect(budget.rowsOf('camoufox')).toEqual([]);
+    if (r.kind !== 'tile') throw new Error('tile');
+    expect(r.cellIssues?.map((i) => i.detail.split(' ')[0])).toEqual(
+      Array(tile.coveredCells.length).fill('scroll-allowance'),
+    );
+    expect(r.notes).toContain('scroll-allowance-before-first-read');
   });
   it('a page asks for no more scrolls than the run’s and the month’s caps leave, and reserves that many (CA 1)', async () => {
     const left: Array<string | null> = [];

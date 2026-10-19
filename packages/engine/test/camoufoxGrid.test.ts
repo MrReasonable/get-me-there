@@ -120,7 +120,8 @@ describe('camoufox grid pages across the pairs (fix round 2)', () => {
     });
     return { cf, e, def };
   }
-  it('a run capped at 8 pages loads pages for every one of the four pairs', async () => {
+  // why: CodeRabbit: the run polls on real timers, so the test states its own timeout
+  it('a run capped at 8 pages loads pages for every one of the four pairs', { timeout: 30_000 }, async () => {
     const { cf, e } = fourPairs(8);
     await e.runToEnd();
     // why: the ninth call is the one the page cap refuses at reserve

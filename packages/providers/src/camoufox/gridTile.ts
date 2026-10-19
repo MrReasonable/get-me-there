@@ -42,7 +42,7 @@ const WORDS: Readonly<Record<string, string>> = {
   'scroll-allowance': 'the run’s scroll allowance ended before the grid reached this day pair',
 };
 
-const issueOf = (cell: CellKey, code: string): CellIssue => ({
+export const issueOf = (cell: CellKey, code: string): CellIssue => ({
   cell,
   reason: 'parse',
   offersDropped: 0,

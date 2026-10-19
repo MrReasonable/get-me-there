@@ -246,6 +246,7 @@ export function providersFor(
           executionScrollCap: cf.executionScrollCap,
           scrollCap: cf.gridScrollCap,
           scrollSpacingSeconds: cf.gridScrollSpacingSeconds,
+          pageTimeoutSeconds: cf.pageTimeoutSeconds,
         },
         ...(deps.scrollsLeft === undefined
           ? {}

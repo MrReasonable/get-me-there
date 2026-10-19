@@ -32,7 +32,7 @@ import {
 import type { HttpKit } from '../http/types.js';
 import { parseError } from '../shared/errors.js';
 import { gridTileEstimate, planGridTiles } from './grid.js';
-import { gridTile } from './gridTile.js';
+import { gridTile, issueOf } from './gridTile.js';
 import { camoufoxPreflight } from './preflight.js';
 import { planSingleCells } from './tiles.js';
 
@@ -83,6 +83,8 @@ export interface CamoufoxProviderOptions {
     scrollCap: number;
     /** CAMOUFOX_GRID_SCROLL_SPACING_SECONDS, which the preflight checks against the worker's. */
     scrollSpacingSeconds: number;
+    /** CAMOUFOX_PAGE_TIMEOUT_SECONDS, which the preflight checks against the worker's in grid mode. */
+    pageTimeoutSeconds: number;
   };
   /**
    * Fix round 1 (CA 1): the scrolls the run's and the month's scroll caps leave for camoufox (the budget guard's), or
@@ -238,6 +240,21 @@ export function camoufoxProvider(o: CamoufoxProviderOptions): FlightProvider {
     // and the unreached cells are resumable issues, while a page with no scroll left still reads its first block
     const left = o.scrollsLeft?.(ctx.executionId) ?? null;
     const allowance = left === null ? path.moves.length : Math.max(0, Math.min(path.moves.length, left));
+    // why: CodeRabbit on PR #9: a page whose first read view lies past the allowance (a 0-night lead scroll) would load
+    // a page and read nothing; it is not sent, and its cells stay resumable
+    const firstRead = path.reads.indexOf(true);
+    if (firstRead > allowance)
+      return {
+        kind: 'tile',
+        index: plan.index,
+        coveredCells: plan.coveredCells,
+        fetchedAt: o.clock.now(),
+        pointOfSale: 'unknown',
+        prices: [],
+        noFares: [],
+        notes: ['scroll-allowance-before-first-read'],
+        cellIssues: plan.coveredCells.map((c) => issueOf(c, 'scroll-allowance')),
+      };
     const request = pageRequestSchema.safeParse({
       mode: 'grid',
       origin: q.origin,
@@ -334,7 +351,13 @@ export function camoufoxProvider(o: CamoufoxProviderOptions): FlightProvider {
             workerUrl: o.workerUrl,
             ...(grid === null
               ? {}
-              : { grid: { scrollCap: grid.scrollCap, spacingSeconds: grid.scrollSpacingSeconds } }),
+              : {
+                  grid: {
+                    scrollCap: grid.scrollCap,
+                    spacingSeconds: grid.scrollSpacingSeconds,
+                    pageTimeoutSeconds: grid.pageTimeoutSeconds,
+                  },
+                }),
           },
           ctx,
         ),
