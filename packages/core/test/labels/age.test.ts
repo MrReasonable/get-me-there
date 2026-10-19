@@ -148,6 +148,29 @@ describe('an assumed bound reads as an assumption on every form (N4, pie-007)', 
     expect(withAssumedBound(zero, { maxAgeAssumed: true })).toBe(zero);
     expect(barrel.withAssumedBound).toBe(withAssumedBound);
   });
+  it('a SearchApi calendar row is assumed from its own facts, with SearchApi turned off (fix round 2)', () => {
+    const cal = {
+      fetchedAt: p.fetchedAt,
+      maxAgeHours: 24,
+      providerId: 'searchapi',
+      sourceKind: 'scraped-aggregate',
+    } as const;
+    expect(withAssumedBound(cal, undefined)).toEqual({ ...cal, maxAgeAssumed: true });
+    const itin = {
+      fetchedAt: p.fetchedAt,
+      maxAgeHours: 24,
+      providerId: 'searchapi',
+      sourceKind: 'scraped-search',
+    } as const;
+    expect(withAssumedBound(itin, undefined)).toBe(itin);
+    const tp = {
+      fetchedAt: p.fetchedAt,
+      maxAgeHours: 48,
+      providerId: 'travelpayouts',
+      sourceKind: 'authorised-cached',
+    } as const;
+    expect(withAssumedBound(tp, undefined)).toBe(tp);
+  });
   it('a grid-cell row is assumed from its own facts, with camoufox in list mode or off (fix round 1, PA I2)', () => {
     const grid = { fetchedAt: p.fetchedAt, maxAgeHours: 24, returnDateSource: 'grid-cell' } as const;
     expect(withAssumedBound(grid, undefined)).toEqual({ ...grid, maxAgeAssumed: true });

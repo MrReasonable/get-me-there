@@ -46,8 +46,9 @@ describe('one digest per rule per execution (spec §6.8, §9 item 4)', () => {
       40000, 40100, 40200, 40300, 40400, 40500, 40600, 40700, 40800, 40900,
     ]);
     expect(sent?.digest.coverageCaveat).toEqual({ itinerarySearched: 3, selected: 10, expandTop: 2 });
+    // why: fix round 2: a SearchApi calendar row is labelled assumed from its own row, whatever the provider list says
     expect(sent?.subject).toBe(
-      '[get-me-there] £400 LHR→JFK 1 Nov–15 Nov (14n) · Google date grid via SearchApi · fetched just now · provider age unknown (≤24h before that) · constraints not checked',
+      '[get-me-there] £400 LHR→JFK 1 Nov–15 Nov (14n) · Google date grid via SearchApi · fetched just now · provider age assumed ≤24h (undocumented) before that · constraints not checked',
     );
     expect(sent?.body).toContain('and 40 more');
     expect(sent?.body).toContain('Coverage: itinerary-searched 3 of 10 cells, 2 outbounds each');

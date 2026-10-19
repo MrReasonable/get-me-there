@@ -368,6 +368,30 @@ describe('an assumed calendar bound reaches every price as such (N4, pie-007)', 
       maxAgeAssumed: true,
     });
   });
+  it('a stored SearchApi calendar price is assumed from its own row, with SearchApi turned off (fix round 2)', async () => {
+    const x = await createHarness();
+    h = x;
+    const s = seeder(x.ports);
+    const def = x.ports.repos.definitions.create(exampleDefinitionInput());
+    s.execution('E1', { def, status: 'completed', startedAt: at(-3), finishedAt: at(-2) });
+    s.cells('E1', [C1]);
+    s.tile('E1', C1, { status: 'priced', pricePence: 30_000, fetchedAt: at(-2) });
+    x.ports.db.raw
+      .prepare(
+        "UPDATE calendar_prices SET provider_id = 'searchapi', source_kind = 'scraped-aggregate', return_date_source = 'vendor', vendor_price_mark = 'none'",
+      )
+      .run();
+    expect(x.ports.providers.some((p) => p.id === 'searchapi')).toBe(false);
+    const provenance = (
+      await get(
+        x,
+        `/api/definitions/${def.id}/calendar`,
+        '/api/definitions/:id/calendar',
+        apiContract.calendarResponseSchema,
+      )
+    ).days.find((d) => d.date === '2026-11-02')?.cheapestCalendar?.provenance;
+    expect(provenance).toMatchObject({ providerId: 'searchapi', maxAgeHours: 24, maxAgeAssumed: true });
+  });
 });
 
 describe('superseded calendar prices on the views (decision 54, WP10 Task 10.1 shapes)', () => {
