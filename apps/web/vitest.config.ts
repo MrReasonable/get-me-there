@@ -26,6 +26,9 @@ export default defineConfig({
     exclude: ['e2e/**', 'node_modules/**'],
     // why: setup-tz first so the zone is set before anything touches Date; setup-charts sizes Recharts in jsdom.
     setupFiles: ['test/setup-tz.ts', 'test/setup.ts', 'test/setup-charts.ts'],
+    // why: review T3 — above testing-library's 5 s wait (test/setup.ts), so a findBy that never matches reports its
+    // own error rather than a test timeout, and a test with several waits has room on a loaded machine
+    testTimeout: 15_000,
     coverage: {
       provider: 'v8',
       include: ['src/**/*.tsx', 'src/**/*.ts'],
