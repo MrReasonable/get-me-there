@@ -5,9 +5,9 @@ owner: opus
 depends_on: [15]
 spec_sections: ["§2 Method (FLAGS)", "§2 Caps across callers", "§3 skipped reasons", "§6.6 row 6", "§7 search_executions", "§7 cell_outcomes", "§7 Budget windows", "§8.1 Operator notifications", "§8.2 Scheduler", "§9 mutation", "§10 GET /executions/active", "§10 GET /tools/smoke/plan", "§12 configuration block (CAMOUFOX_BROWSER_WINDOW)", "§12 Where settings live", "§13 One app per ledger", "§16", "§17 revision 36"]
 reviewers: [search-strategy-reviewer, data-model-reviewer, cost-and-budget-reviewer, code-architect, test-strategy-reviewer, provenance-auditor]
-mutate: {"@gmt/core": ["src/camoufox/builds.ts", "src/camoufox/protocol.ts", "src/camoufox/settings.ts", "src/camoufox/start.ts", "src/budget/window.ts", "src/local/movedMarker.ts", "src/local/paths.ts", "src/labels/skip.ts"], "@gmt/engine": ["src/scheduler/catchUp.ts", "src/scheduler/catchUpStart.ts", "src/scheduler/browserWindow.ts", "src/scheduler/heartbeat.ts", "src/tick.ts", "src/stages/browserGate.ts"]}
+mutate: {"@gmt/core": ["src/camoufox/builds.ts", "src/camoufox/protocol.ts", "src/camoufox/settings.ts", "src/camoufox/start.ts", "src/budget/window.ts", "src/local/movedMarker.ts", "src/local/paths.ts", "src/labels/skip.ts"], "@gmt/engine": ["src/scheduler/catchUp.ts", "src/scheduler/parseCron.ts", "src/scheduler/catchUpStart.ts", "src/scheduler/browserWindow.ts", "src/scheduler/heartbeat.ts", "src/tick.ts", "src/stages/browserGate.ts"]}
 pending: {}
-status: draft
+status: merged
 ---
 
 # WP16a: Local-mode foundations
@@ -112,9 +112,10 @@ report share.
   default data directory equals `core`'s `workerDataDir` (test).
 - Mutation wiring: this brief's front-matter `mutate` field is its scope (`core`: the camoufox builds, wire contract,
   shared settings and start checks, the billing window, the moved-marker format and the skip labels; `engine`: the
-  catch-up decision and its start side, the browser window, the heartbeat, the tick and the browser gate), and each
-  file is in its package's Stryker `mutate` list; a new `packages/engine/stryker.config.json` runs the scheduler suites
-  (`test/scheduler`, a directory, never a hand list of files); the root `mutate` script and
+  catch-up decision and its start side, the firing count that sizes schedules (`parseCron.ts`), the browser window, the
+  heartbeat, the tick and the browser gate), and each file is in its package's Stryker `mutate` list; a new
+  `packages/engine/stryker.config.json` runs the scheduler suites (`test/scheduler`, a directory, never a hand list of
+  files) and `test/parse-cron.test.ts`, whose seeded comparison checks the firing count against the stepped one; the root `mutate` script and
   `.github/workflows/mutation.yml` gain `@gmt/engine`; `scripts/check-mutation-globs.mjs` reads every brief's
   front-matter `mutate` and `pending` fields (docs/briefs/README.md) and fails when a brief has no `mutate` line
   (`mutate: {}` for none; every merged brief states its real scope, WP1, WP2, WP14 and WP15 included), when a `mutate`
