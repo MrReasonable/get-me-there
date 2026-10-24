@@ -454,6 +454,39 @@ describe('view header (spec §11)', () => {
     ).toBeInTheDocument();
   });
 
+  it('a missed firing recorded as skipped names the firing it stands for and the reason recorded with it (R17)', () => {
+    renderWithProviders(
+      <ViewHeader
+        title="History"
+        stale={false}
+        variant="span"
+        executions={[
+          summary({
+            id: 'skip',
+            status: 'skipped_missed',
+            startedAt: null,
+            finishedAt: null,
+            scheduledFor: '2026-10-19T04:00:00.000Z',
+            skipCode: 'half-cadence',
+          }),
+          summary({
+            id: 'old-skip',
+            status: 'skipped_missed',
+            startedAt: null,
+            finishedAt: null,
+            scheduledFor: null,
+            skipCode: null,
+          }),
+        ]}
+      />,
+    );
+    expect(
+      screen.getByText(
+        'showing run scheduled for 19 Oct 2026 05:00 Europe/London (skipped: missed and not caught up: the next scheduled run was less than half the gap away), run not started yet (skipped: missed and not caught up)',
+      ),
+    ).toBeInTheDocument();
+  });
+
   it('the cross-execution variant states that no single run status applies, with no banner (decision 38)', () => {
     renderWithProviders(
       <ViewHeader

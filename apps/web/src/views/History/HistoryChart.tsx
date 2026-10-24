@@ -20,7 +20,7 @@ import {
   formatIsoDate,
 } from '../../format.js';
 import { SERIES_COLOURS, seriesColour } from '../../lib/palette.js';
-import { dateOfMs } from '../../lib/time.js';
+import { dateOfMs, instantMs } from '../../lib/time.js';
 import {
   coloursRepeat,
   type PlotLine,
@@ -200,6 +200,15 @@ export function HistoryTable(props: {
   notes: Partial<Record<string, string>>;
 }) {
   const { line, destination, notes } = props;
+  // why: spec §8.2 rev 36 — a point a catch-up fetched says which missed firing it ran for; the api resolves the run
+  // whatever its definition (review R19)
+  const catchUpLabel = (p: Priced): string | null =>
+    p.catchUp === null
+      ? null
+      : H.catchUpRun(
+          formatInstantLondon(instantMs(p.catchUp.ranAt)),
+          formatInstantLondon(instantMs(p.catchUp.for)),
+        );
   const points = line.points.filter((p): p is Priced => p.kind === 'price').reverse();
   return (
     <section aria-label={H.tableScroll(line.name)} className="max-h-64 overflow-auto">
@@ -244,6 +253,7 @@ export function HistoryTable(props: {
                     </span>
                   ) : null}
                   {p.cellChanged ? <span className="block font-medium">{H.cellChanged}</span> : null}
+                  {catchUpLabel(p) === null ? null : <span className="block">{catchUpLabel(p)}</span>}
                 </td>
               </tr>
             );

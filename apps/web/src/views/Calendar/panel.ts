@@ -1,4 +1,12 @@
-import { type CellKey, generateCells, type IsoDate } from '@gmt/core';
+import {
+  type CellKey,
+  generateCells,
+  type IsoDate,
+  type LeftFor,
+  type SkipDetail,
+  scheduledOnlyPastText,
+  scheduledOnlyText,
+} from '@gmt/core';
 import type { CellDetailResponse, DefinitionResponse, ExecutionSummary } from '../../api/types.js';
 import { COPY } from '../../copy.js';
 import { formatInstantDateLondon } from '../../format.js';
@@ -55,12 +63,29 @@ export function orderOutcomes(
 const REASONS: Readonly<Record<string, string>> = P.reasons;
 
 /**
+ * What a left cell's wording reads (review R12, S6, S9): who fetches the browser provider's left cells now (the api's
+ * `browserLeftFor`), and whether the outcome is the latest parent run's; an earlier run's reads in the past tense.
+ */
+export interface LeftContext {
+  leftFor: LeftFor;
+  latest: boolean;
+}
+
+/**
  * An outcome reason in operator words (spec §3 reason lists). A priced reason is core's `;`-joined parts
  * (`pricedReason`: partial-expansion, price-unconfirmed, offers-dropped:n; decisions 19, 45, 48, 50); a reason core
  * does not know is shown as it came, marked "other".
  */
-export function reasonText(reason: string | null): string {
+export function reasonText(
+  reason: string | null,
+  skipDetail: SkipDetail | null = null,
+  left: LeftContext | null = null,
+): string {
   if (reason === null) return P.dash;
+  // why: spec §3 rev 36 — a scheduled_only cell says which run fetches it and which rule left it, in core's one text;
+  // only the latest run's cells carry that promise (review S9), an earlier run's says what that run did
+  if (reason === 'scheduled_only' && skipDetail !== null && left !== null)
+    return left.latest ? scheduledOnlyText(skipDetail, left.leftFor) : scheduledOnlyPastText(skipDetail);
   return reason.split(';').map(reasonPart).join('; ');
 }
 
