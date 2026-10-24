@@ -8,6 +8,7 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import ts from 'typescript';
 import { GENERATED_AT_PACKAGE_ROOT } from './generated-dirs.mjs';
+import { ENV_RULE, isEnvReader, toPosix } from './posix-path.mjs';
 
 const ALLOWED = {
   '@gmt/core': [],
@@ -76,17 +77,6 @@ const dirs = {
   '@gmt/camoufox-worker': 'apps/camoufox-worker',
   '@gmt/cli': 'apps/cli',
 };
-// why: the only code that may read process.env is a command-line entry point: the app and tool bootstraps under
-// exactly apps/api/src/bootstrap/ (wiring and logger take the env as an argument), and the operator scripts directly
-// under scripts/ (backup.mjs reads DATABASE_PATH as the bootstrap does; secret-scan.mjs reads the configured secret
-// values). Anchored to the path start, so a directory named bootstrap elsewhere (apps/api/src/routes/bootstrap/) or a
-// helper nested under scripts/ is not an entry point (CodeRabbit batch 3).
-// why: WP14: the camoufox worker's one launcher, run.ts, is its only environment reader (SEC-R2-006); decision 72: the
-// gmt CLI's entry module, apps/cli/src/main.ts, is its only one.
-const ENV_READER =
-  /^(?:apps\/api\/src\/bootstrap\/.+|apps\/camoufox-worker\/src\/run\.ts|apps\/cli\/src\/main\.ts|scripts\/[^/]+\.mjs)$/;
-const ENV_RULE =
-  'apps/api/src/bootstrap/, apps/camoufox-worker/src/run.ts, apps/cli/src/main.ts and scripts/*.mjs entry points';
 /**
  * Every module specifier a file imports, read from the parsed source: static imports and re-exports, bare side-effect
  * imports, `import x = require()`, `require()`, `import()` types and dynamic `import()` with a string or template
@@ -132,7 +122,8 @@ function* walk(dir, skipGeneratedHere = false) {
   }
   for (const n of names) {
     if (n === 'node_modules' || (skipGeneratedHere && GENERATED_AT_PACKAGE_ROOT.has(n))) continue;
-    const p = join(dir, n);
+    // why: U13: every rule below is written with forward slashes, and Windows joins with backslashes
+    const p = toPosix(join(dir, n));
     if (statSync(p).isDirectory()) yield* walk(p);
     else if (/\.(ts|tsx|mts|cts|js|mjs|cjs)$/.test(p)) yield p; // why: .mjs test-support files count too (arch-r3-002)
   }
@@ -168,7 +159,7 @@ for (const [name, dir] of Object.entries(dirs)) {
         bad++;
       }
     }
-    if (/process\.env/.test(src) && !ENV_READER.test(f)) {
+    if (/process\.env/.test(src) && !isEnvReader(f)) {
       console.error(`${f} reads process.env outside ${ENV_RULE}`);
       bad++;
     }
@@ -233,7 +224,7 @@ for (const f of walk('apps/camoufox-worker/test'))
 // The operator scripts are source too; their tests are not scanned, as no package's test/ tree is.
 for (const f of walk('scripts')) {
   if (/\.test\.mjs$/.test(f)) continue;
-  if (/process\.env/.test(readFileSync(f, 'utf8')) && !ENV_READER.test(f)) {
+  if (/process\.env/.test(readFileSync(f, 'utf8')) && !isEnvReader(f)) {
     console.error(`${f} reads process.env outside ${ENV_RULE}`);
     bad++;
   }
