@@ -1,6 +1,6 @@
 // Spec §1, §11, §13 and plan decisions 26, 36, 61: the operator docs carry the importable London → New York example
 // and no other route, the plan's single exit-code table as the code defines it, and no banned word.
-import { readdirSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { AUTH_MISSING, apiContract, BANNED_WORD_ALLOWLIST, findBannedWords, parseConfig } from '@gmt/core';
 import { AIRPORTS_DATA_DIR, loadAirportsDataset } from '@gmt/db';
@@ -10,13 +10,19 @@ import { EXIT } from '../../src/tools/types.js';
 import { between, REPO, read } from './files.js';
 
 /** Operator-facing docs, held to the spec §11 word list and to the worked example. */
-const OPERATOR_DOCS = ['api-limits.md', 'release-notes.md', 'scheduling.md', 'setup.md'];
+const OPERATOR_DOCS = [
+  'api-limits.md',
+  'local-quickstart.md',
+  'release-notes.md',
+  'scheduling.md',
+  'setup.md',
+];
 /** Research notes that quote vendor terminology verbatim; not operator-facing text. */
 const RESEARCH_NOTES = ['providers.md'];
 /** The worked example's airports and their metro codes: the only places the docs may name (spec §1). */
 const WORKED_EXAMPLE = ['LHR', 'LGW', 'JFK', 'EWR', 'LON', 'NYC'];
 /** Capitalised words in the docs that happen to be IATA codes too; extend only with a word, never a place. */
-const NOT_PLACES = ['API', 'DIR', 'GBP', 'GET', 'PWD', 'TLS', 'VPS', 'WAL'];
+const NOT_PLACES = ['API', 'CLI', 'DIR', 'GBP', 'GET', 'PWD', 'TLS', 'VPS', 'WAL'];
 
 /**
  * Cells in one markdown table row. Every unescaped pipe is a column break, inside inline code too (as markdown tables
@@ -123,11 +129,11 @@ describe('docs/setup.md operations rules (plan decision 63; round-1 review)', ()
     expect(flat).toContain('install -d -m 0700');
   });
 
-  it('every documented `docker compose up --wait` bounds the wait at 120 s and says what to look at then (devops-final-003, ruling 14)', () => {
+  it('every documented `docker compose up --wait` bounds the wait at 240 s (HEALTHCHECK start-period) and says what to look at then (devops-final-003, ruling 14; ts-r4-001)', () => {
     const waits = [...setup.matchAll(/docker compose up [^\n`]*--wait\b[^\n`]*/g)].map((m) => m[0]);
     expect(waits.length).toBeGreaterThanOrEqual(4);
-    for (const w of waits) expect(w).toContain('--wait --wait-timeout 120');
-    expect(flat).toContain('If it has not reported healthy after 2 minutes, run docker compose logs app');
+    for (const w of waits) expect(w).toContain('--wait --wait-timeout 240');
+    expect(flat).toContain('If it has not reported healthy after 4 minutes, run docker compose logs app');
   });
 
   it("section 1 names the two lines the refusal asks for, in the refusal's own words (devops-final-001, ruling 14)", () => {
@@ -289,8 +295,33 @@ describe('operator docs (spec §11 banned words; spec §1 worked example only)',
     const readme = read('README.md');
     expect(readme).toContain('docs/setup.md');
     expect(readme).toContain('section 1');
+    expect(readme).toContain('docs/local-quickstart.md');
+    expect(readme).toContain('Start.command');
     for (const doc of ['docs/api-limits.md', 'docs/scheduling.md', 'docs/providers.md'])
       expect(readme).toContain(doc);
+  });
+
+  it('Start.command is the Docker Desktop launcher: quiet config check, wait, no credential echo', () => {
+    const path = join(REPO, 'Start.command');
+    expect(statSync(path).mode & 0o100).not.toBe(0);
+    const content = readFileSync(path, 'utf8');
+    expect(content).toContain('docker compose config --quiet');
+    expect(content).toContain('--wait-timeout 240');
+    expect(content).toContain('docker compose up -d --build --wait');
+    expect(content).not.toMatch(/compose config(?! --quiet)/);
+    expect(content).not.toMatch(/\bcat\b|printenv|echo \$/);
+    // Mentions .env only to require and chmod it, never to print values.
+    expect(content).toMatch(/\[ ! -f \.env \]/);
+    expect(content).toMatch(/chmod 600 \.env/);
+  });
+
+  // why: pers-r4-001 / devops-r4-002 — host data/backups/ is empty under compose; point at the volume copy
+  it('local-quickstart copies backups off the volume, not a host data/backups/ folder', () => {
+    const q = read('docs/local-quickstart.md');
+    expect(q).toContain('docker compose cp app:/data/backups/.');
+    expect(q).toContain('docker compose exec -T app node scripts/backup.mjs');
+    expect(q).not.toMatch(/Copy `data\/backups\/`/);
+    expect(q).toContain('Until `pnpm gmt setup` ships');
   });
 
   // why: CodeRabbit batch 3 — a reader cannot reach the operator's notes, so a doc states what was found and points
@@ -364,7 +395,7 @@ describe('docs/setup.md warns that every checkout shares one volume (section 9)'
     const setup = read('docs/setup.md').replace(/\s+/g, ' ');
     expect(setup).toContain('One volume per project name');
     expect(setup).toContain('`get-me-there_gmt-data`');
-    expect(setup).toContain('docker compose -p gmt-trial up -d --build --wait --wait-timeout 120');
+    expect(setup).toContain('docker compose -p gmt-trial up -d --build --wait --wait-timeout 240');
     expect(setup).toContain('docker compose -p gmt-trial down -v');
     // why: both projects publish 127.0.0.1:3000 (CodeRabbit, PR #4), so the note must stop the operator's app first.
     expect(setup).toContain('Both projects publish `127.0.0.1:3000`, so stop your app first');

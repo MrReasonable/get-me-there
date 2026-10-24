@@ -4,7 +4,9 @@ import type { Context } from 'hono';
 import { ApiError } from '../errors.js';
 import { safeMessage } from '../safeMessage.js';
 import { API_TEXT } from '../text.js';
-import { NO_INPUT, route } from './define.js';
+import { smokeWorstCase } from '../tools/smokeArgs.js';
+import { smokePlan } from '../tools/toolExecution.js';
+import { NO_INPUT, plain, route } from './define.js';
 import { oneAtATime } from './shared.js';
 import type { AppEnv, HandlerTable, RouteContext, ToolRunResponse } from './types.js';
 
@@ -60,5 +62,12 @@ export const toolHandlers: HandlerTable = {
   'POST /api/tools/smoke': route(
     { request: apiContract.toolSmokeRequestSchema, query: NO_INPUT },
     async (c, { body }, ctx) => runInProcess(c, ctx, 'smoke', ctx.tools.smoke, body),
+  ),
+  /**
+   * Spec §10: the smoke's worst case, which `gmt smoke` prints before it asks. Ledgers nothing and calls no provider:
+   * it reads the configuration and the guard's own counts only.
+   */
+  'GET /api/tools/smoke/plan': plain((c, _input, ctx) =>
+    c.json(smokePlan(ctx.ports, smokeWorstCase(ctx.ports.config))),
   ),
 };

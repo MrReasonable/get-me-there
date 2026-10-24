@@ -26,7 +26,7 @@ import { parseSmokeArgs, type SmokeCli, smokeFixtureTarget } from '../tools/smok
 import { EXIT, type ToolContext, type ToolName } from '../tools/types.js';
 import { isWorkedExampleRoute, WORKED_EXAMPLE_ROUTE_ARG } from '../tools/workedExample.js';
 import { buildPorts, collectSecrets, InvalidConfigError, loadConfigFromEnv, type Ports } from '../wiring.js';
-import { backupBeforeMigrations, dataDirRefusal } from './preflight.js';
+import { backupBeforeMigrations, dataDirRefusal, movedDatabaseRefusal } from './preflight.js';
 import { seedIfNeeded } from './seed.js';
 
 export { EXIT, type ToolName } from '../tools/types.js';
@@ -169,7 +169,8 @@ function prepare(
 /**
  * Runs one tool and returns its exit code; every failure after the config parse maps to a code with a scrubbed
  * message, so nothing reaches the entry point's catch (sec2-001). Order (spec §5.5, §7, plan decision 20): config →
- * refuse NODE_ENV=test → refuse an open synthetic gate → arguments and recording target → precheck → data directory
+ * refuse NODE_ENV=test → refuse an open synthetic gate → refuse a database moved to a native install (spec §13) →
+ * arguments and recording target → precheck → data directory
  * writable → app_lock read-only → backup when migrations are pending → buildPorts (migrations) → app_lock('tool') →
  * seed airports → heartbeat → run → release on every path.
  */
@@ -218,6 +219,12 @@ async function runToolSteps(
     );
     // why: the plan's single exit-code table gives 70 to both refusals of synthetic data (NODE_ENV=test, open gate)
     return EXIT.refusedTestEnv;
+  }
+  // why: spec §13 — a database moved to a native install is never opened here again (78), before anything touches it
+  const moved = movedDatabaseRefusal(config.databasePath, config.inContainer);
+  if (moved !== null) {
+    err(moved);
+    return EXIT.badConfig;
   }
   const prepared = prepare(name, argv, config, { ...DEFAULT_RUNNERS, ...opts.runners }, opts.recording, err);
   if (!prepared.ok) return prepared.code;

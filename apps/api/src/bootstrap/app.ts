@@ -1,6 +1,7 @@
 /**
  * The app bootstrap (spec §4, §5.5, §7, §12, §13): the process that serves the API and the SPA and runs the engine.
- * Order (plan "Wiring and bootstraps", decisions 53, 58): refuse NODE_ENV=test → re-assert the auth invariants → data
+ * Order (plan "Wiring and bootstraps", decisions 53, 58): refuse NODE_ENV=test → refuse a database moved to a native
+ * install (spec §13, the MOVED-TO-NATIVE marker) → re-assert the auth invariants → data
  * directory writable → `app_lock` read-only, waiting while it is fresh → backup preflight when migrations are pending
  * (WP4b's preflight.ts, decision 32) → buildPorts (migrations) → `AppLock('app')` and the 30 s heartbeat → seed +
  * airport sanity check under the lock (as the tool bootstrap seeds) → createEngine → engine.boot() → serve. Shutdown: stop accepting → engine.shutdown() →
@@ -33,7 +34,7 @@ import { engineFor } from './engine.js';
 import { BootError } from './errors.js';
 import { waitForLockFree } from './lock.js';
 import { type AssetPaths, assetPaths } from './paths.js';
-import { backupBeforeMigrations, dataDirRefusal } from './preflight.js';
+import { backupBeforeMigrations, dataDirRefusal, movedDatabaseRefusal } from './preflight.js';
 import { seedIfNeeded } from './seed.js';
 
 /**
@@ -159,6 +160,10 @@ export async function bootApp(deps: BootDeps): Promise<RunningApp> {
   // why: spec §5.5: both bootstraps refuse NODE_ENV=test, so a test config can never serve traffic.
   if (config.nodeEnv === 'test')
     throw new BootError('the app bootstrap refuses NODE_ENV=test (spec §5.5)', EXIT.refusedTestEnv);
+  // why: spec §13 — a database moved to a native install is never opened here again: refused before migrations, the
+  // boot sweep, auto-resume and cron, as a configuration fault (78)
+  const moved = movedDatabaseRefusal(config.databasePath, config.inContainer);
+  if (moved !== null) throw new BootError(moved, EXIT.badConfig);
   assertAuthInvariants(config, log);
   const dataDir = dataDirRefusal(config.databasePath);
   if (dataDir !== null) throw new BootError(dataDir, EXIT.preflightImpossible);

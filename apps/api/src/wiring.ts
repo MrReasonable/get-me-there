@@ -188,6 +188,11 @@ export function providersFor(
     clock: Clock;
     /** Fix round 1 (CA 1): the scrolls the caps leave (the budget guard's), for camoufox's grid pages. */
     scrollsLeft?: BudgetGuard['scrollsLeft'];
+    /**
+     * Decision 82: this database's app-instance id (`repos.meta.appInstanceId()`, a random id stored with the ledger and its path),
+     * sent to the camoufox worker so it can report a second app, that is a second ledger, in a month.
+     */
+    appInstance: string;
   },
 ): FlightProvider[] {
   const out: FlightProvider[] = [];
@@ -239,6 +244,9 @@ export function providersFor(
         key: cf.key,
         workerUrl: cf.workerUrl,
         pointOfSale: config.pointOfSale,
+        // why: spec §12 — the preflight compares these effective values with the worker's own, by name
+        sharedSettings: cf.sharedSettings,
+        appInstance: deps.appInstance,
         // why: spec §2 rev 34: grid mode plans pages and scrolls within the run's caps, split across the pairs
         grid: {
           mode: cf.mode,
@@ -303,6 +311,7 @@ export function buildPorts(
       log: opts.log,
       clock,
       scrollsLeft: (providerId, executionId) => budget.scrollsLeft(providerId, executionId),
+      appInstance: repos.meta.appInstanceId(),
     });
     return {
       config,

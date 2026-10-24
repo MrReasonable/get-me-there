@@ -22,7 +22,7 @@ const http: HttpKit = {
 };
 const clock = fixedClock(asIsoDateTime('2026-10-14T12:00:00.000Z'));
 // why: providersFor takes { http, log, clock } on main (plan decision 34 removed the airports dependency).
-const deps = { http, log, clock };
+const deps = { http, log, clock, appInstance: 'test-instance' };
 
 describe('wiring: SearchApi (plan "Wiring and bootstraps")', () => {
   it('adds searchapi http limits when SEARCHAPI_KEY is set', () => {
