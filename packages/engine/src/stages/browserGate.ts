@@ -17,7 +17,7 @@ import {
   loadsBrowserPages,
   resumeLeavesBrowserCells,
 } from '../scheduler/browserWindow.js';
-import { buildSnapshot, sellsCabin } from '../snapshot.js';
+import { sellsCabin, snapshotProviders } from '../snapshot.js';
 
 /** The operator's notice when a run reaches its browser window's end (decision 83), sent once per execution. */
 export const BROWSER_WINDOW_NOTICE = 'browser pages left: this run is past its browser window';
@@ -33,7 +33,7 @@ export function windowSetting(ctx: Pick<EngineContext, 'config'>): BrowserWindow
  */
 export function browserLeftFor(ctx: EngineContext, def: SearchDefinition): LeftFor {
   const uses = (trigger: 'schedule' | 'manual') =>
-    buildSnapshot(ctx, def, trigger).snapshot.providers.discovery.some(loadsBrowserPages);
+    snapshotProviders(ctx, def, trigger).discovery.some(loadsBrowserPages);
   return leftForOf(def, { scheduled: uses('schedule'), manual: uses('manual') });
 }
 
