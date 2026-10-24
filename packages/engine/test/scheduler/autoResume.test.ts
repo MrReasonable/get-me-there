@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildContext } from '../../src/context.js';
 import { createEngine } from '../../src/index.js';
 import { createOrchestrator } from '../../src/orchestrator.js';
-import { autoResume } from '../../src/scheduler/catchUp.js';
+import { autoResume, autoResumeYields } from '../../src/scheduler/catchUp.js';
 import { SUPERSEDED_BY_FIRING } from '../../src/scheduler/catchUpStart.js';
 import { buildSnapshot } from '../../src/snapshot.js';
 import { frankfurterBody, stubFrankfurter } from '../support/fx.js';
@@ -214,5 +214,9 @@ describe('autoResume: isolated, and silent once the engine is closing (T5, T12)'
     expect(await autoResume(ctx, orch, paused(h, catchUp.id))).toBeNull();
     expect(start).toHaveBeenCalledTimes(1);
     expect(read).toHaveBeenCalledTimes(1); // the test's own read above, none after the await
+    // the decision itself answers that it yielded: the catch-up is not read, so it is not resumed
+    ctx.lifecycle.closing = false;
+    ctx.lifecycle.closed = false;
+    expect(await autoResumeYields(ctx, orch, paused(h, catchUp.id))).toBe('yielded');
   });
 });

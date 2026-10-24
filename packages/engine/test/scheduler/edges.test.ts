@@ -13,7 +13,7 @@ import { buildContext } from '../../src/context.js';
 import { createOrchestrator } from '../../src/orchestrator.js';
 import { laneFor, newRun } from '../../src/run.js';
 import { windowAnchor } from '../../src/scheduler/browserWindow.js';
-import { findMissedFiring } from '../../src/scheduler/catchUp.js';
+import { catchUpDefinition, findMissedFiring } from '../../src/scheduler/catchUp.js';
 import {
   plannedSnapshot,
   SUPERSEDED_BY_FIRING,
@@ -164,6 +164,32 @@ describe('the cabin filter covers verification too (R11)', () => {
       kind: 'catch-up',
       firing: '2027-03-01T06:00:00.000Z',
     });
+  });
+});
+
+describe('a skip row stores the scheduled run’s snapshot (T9)', () => {
+  it('a half-cadence skip keeps the providers a scheduled run takes, leaving out one excluded from schedules', async () => {
+    const { e } = world();
+    const ctx = {
+      ...e.ctx,
+      limitsOf: (id: Parameters<typeof e.ctx.limitsOf>[0]) => ({
+        ...e.ctx.limitsOf(id),
+        excludedFromSchedule: id === 'camoufox',
+      }),
+    };
+    // 03-01 06:00 missed, the next firing an hour away: a half-cadence skip
+    const found = await catchUpDefinition(
+      ctx,
+      createOrchestrator(ctx),
+      e.definition,
+      at('2027-03-02T05:00:00.000Z'),
+    );
+    expect(found).toMatchObject({ kind: 'skip', reason: 'half-cadence' });
+    const [row] = e.ctx.repos.executions.listForDefinition(e.definition.id, {
+      limit: 5,
+      includeChildren: false,
+    });
+    expect(row?.snapshot.providers.discovery).toEqual(['travelpayouts']);
   });
 });
 
