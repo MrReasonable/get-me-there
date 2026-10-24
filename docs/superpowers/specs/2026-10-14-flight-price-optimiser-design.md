@@ -1,6 +1,6 @@
 # get-me-there — Flight Price Intelligence & Flexible-Date Optimiser
 
-**Design spec, revision 36.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
+**Design spec, revision 37.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
 four full-roster reviews (145, 140, 126 and 101 findings; zero Critical since
 revision 2) and the provider spike. Revision 9 folds in the three decisions
 taken at approval (the self-scraping fallback in §2, the dashboard readings in
@@ -2330,7 +2330,7 @@ shape carries `provenance` and `stale`.
 | `GET /definitions/:id/coverage` | summary, per-provider request counts (tiles and calls), overrun and parity flags, "selected but not reached", errors with retry (only on cells that have not departed), and the on-demand children with their own buckets and calls |
 | `GET /definitions/:id/calendar-gap` | cells whose calendar price is below the cheapest class-`verified` observation (incl. children); empty when the definition has no verification provider |
 | `GET /definitions/:id/cells/:origin/:destination/:departureDate/:returnDate` | that cell's outcomes per stage and provider and its prices, each with full provenance (the View B side panel source) |
-| `POST /tools/smoke`, `POST /tools/record` | the live smoke and recording scripts run inside the app process (authenticated), for use while the app holds `app_lock` |
+| `POST /tools/smoke`, `POST /tools/record` | the live smoke and recording scripts run inside the app process (authenticated), for use while the app holds `app_lock`; the response's `searchApiCreditsLedgered` is the smoke's running total (the SearchApi credits tool runs had already ledgered in the window at its spend check, null before that check and for `record`), which `gmt smoke` prints and confirms |
 | `GET /tools/smoke/plan` | authenticated, ledgers nothing: the smoke's worst case from `smokeWorstCase` (SearchApi credits split into calendar and itinerary, Travelpayouts free calls, browser pages and, in grid mode, the scroll allowance) and the SearchApi trial credits left, which `gmt smoke` prints before it asks |
 | `GET /itineraries/:hash/history`, `GET /routes/:o/:d/history?cabin=` | series per provider and kind; the route's calendar series has one point per execution fetch (the pair's minimum across its cells, carrying the cheapest cell); reused rows excluded; the vendor's price-history series comes grouped by searched trip (`trip` = its departure and return dates, null for rows stored before the trip was recorded), each point vendor-stated GBP |
 | `GET/POST/PUT/DELETE /alerts[/:id]`, `GET /alerts/events` | |
@@ -2774,7 +2774,8 @@ daemon does not answer it says "start Docker so setup can check for an
 existing compose app, or pass --ignore-docker". `--import-docker` reads the
 container app's `GET /api/executions/active` (with the compose `.env`'s
 credentials) and refuses while a run is active, as `update` does (`--wait`
-waits for it); stops the container gracefully; takes the backup from the
+waits for it), reading again immediately before the stop; stops the container
+gracefully; takes the backup from the
 stopped volume with `docker compose run --rm --no-deps --entrypoint node app
 scripts/backup.mjs --dir /data/backups`; copies the printed file out (then
 0600, the user's own); restores it as the native database and checks it with
@@ -2783,12 +2784,28 @@ old database (`docker compose run --rm --no-deps --entrypoint sh app -c …`),
 offers `docker compose down` (the volume kept; with the marker, a later
 `docker compose up` or a reboot makes the container exit 78 in a loop until
 then), and offers to carry the compose `.env`'s settings and vendor keys into
-`app.env` with confirmation. A failed restore leaves no marker. It refuses
-over an existing native database unless `--replace-database`, which backs
-that one up first. `--import-db <path>` does the same for a database a
-checkout's `pnpm dev` or tool bootstrap used, writing the marker beside it;
-`--ignore-docker` writes the marker into the compose volume without
-importing. The app and tool bootstraps honour a `MOVED-TO-NATIVE` file beside
+`app.env` with confirmation, whole groups read through `core`'s config parse:
+the vendor lines with their caps (`SEARCHAPI_TRIAL_USED` with the SearchApi
+key: the trial's count of credits spent outside any ledger lives in the
+settings, never in a database, so no import carries it in the database), email,
+the time zone and market, and the spending caps and run settings. The import
+applies in phases, each a real plan its `--dry-run` prints (the backup's file
+name is known only after it runs): build first, prepare, the guard again, stop
+and back up, place and mark, then start; each failure says what state it left
+and how to recover (before the marker: the native database unchanged, `docker
+compose start app` brings the old app back; after it: the database is in
+place, the old one marked, and a plain `pnpm gmt setup` finishes). A failed
+restore leaves no marker. Before the native app first starts on the imported
+database, setup states what that start resumes and catches up. It refuses
+over an existing native database unless `--replace-database`, which passes
+the same run guard, says that the replaced ledger's month stops counting
+toward the caps, and backs that one up first. `--import-db <path>` does the
+same for a database a checkout's `pnpm dev` or tool bootstrap used, after
+reading its lock without taking it (`scripts/lock-state.mjs`, since the CLI
+never imports `@gmt/db`; only an absent or stale lock is free), and writes the
+marker beside it; it refuses the native database's own path.
+`--ignore-docker` stops the Docker app and writes the marker into the compose
+volume without importing, saying so where it is chosen. The app and tool bootstraps honour a `MOVED-TO-NATIVE` file beside
 whatever database they open, inside a container or not, before migrations,
 the boot sweep, auto-resume and cron: they exit 78 with "this database moved
 to a native install on <date>; see docs/setup.md section 0" (the marker's one
@@ -2811,10 +2828,11 @@ states this, and a docs test pins it).
 **The `gmt` command** (`apps/cli`, `pnpm gmt <command>`): `setup`
 (interactive; `--non-interactive --answers <file>` for CI; `--dry-run` prints
 the plan; `--reconfigure <group>` with the groups `port`, `timezone`,
-`email`, `travelpayouts`, `searchapi`, `browser` and `password`, each
-replacing only its own lines and restarting what it touches; `--import-docker`,
-`--import-db <path>`, `--ignore-docker`), `status`, `start`, `stop`, `restart`,
-`logs`, `backup`, `restore <file>`, `password`, `smoke`, `consent` (with
+`email`, `travelpayouts`, `searchapi`, `browser`, `password` and `linger`,
+each replacing only its own lines, saying what changed, and restarting the
+app only when something did; `--import-docker`, `--import-db <path>`,
+`--ignore-docker`), `status`, `start`, `stop`, `restart`, `logs`, `backup`,
+`restore <file>`, `password`, `smoke --from <IATA> --to <IATA>`, `consent` (with
 `export`, `import` and `check`), `update` and `uninstall`. Each command
 computes a plan of actions behind one `Platform` interface (its paths, its
 user id, `writeSecretFile`, and a `ServiceManager` whose facts are gathered
@@ -2839,11 +2857,13 @@ before applying the plan, it asks once "Paste a token now? (Enter to finish
 without one)", so a first run can end with a source. Each provider prompt
 states in one line what it gives, from §1's configurations table
 (Travelpayouts: cached and authorised, constraints not checked; SearchApi
-`trial`: for a smoke test and spikes, never run on a schedule, and when
-chosen without an imported database it asks how many trial credits are
-already used and writes `SEARCHAPI_TRIAL_USED`; `40usd`: about £32 a month,
-scraping-derived); the email step asks for the SMTP settings with the
-password hidden and offers the test email once the app is up; the browser
+`trial`: for a smoke test only, never run on a schedule, and when chosen it
+always asks how many trial searches are already used (default the current
+`SEARCHAPI_TRIAL_USED`, else 0) and writes `SEARCHAPI_TRIAL_USED`, a count no
+database holds; `40usd`: the $40 a month plan, Google Flights results through
+SearchApi); the email step asks for the SMTP settings with the password
+hidden (offering the test email at the end of setup is WP18's, once its route
+exists); the browser
 provider is offered only where its flags are set, and when chosen it also asks "If a run is interrupted (for example the laptop sleeps), should the browser part finish when it resumes, even outside the scheduled hours? [no]" (yes writes `CAMOUFOX_BROWSER_WINDOW=any`, §8.2), after the §2 costs
 summary, with the server sentence and a typed `yes` on a machine with no
 display, and its steps run in the order costs, consent method, download,
@@ -2860,19 +2880,33 @@ or a `.fixture.db` path. Setup ends by printing the URL, the user name,
 where the password lives and `pnpm gmt password` (which prints it to the
 terminal only, never to a log; if scrollback or a shared screen may have
 kept it, `--reconfigure password` replaces it), offers to open the browser,
-says how to reach the app from another device (an SSH tunnel, `ssh -L
-3000:127.0.0.1:3000`, or §3's Tailscale and TLS paths; the native service
-speaks plain HTTP), and says that scheduled searches run only while the
-machine is awake, with a missed firing caught up once on wake, without the
-browser provider (§8.2). Vendor keys are optional prompts with hidden input,
-and setup calls no vendor. `smoke` spends: before posting to `POST
-/api/tools/smoke` with the credentials in `app.env` it prints what it will
-use per provider from `GET /api/tools/smoke/plan`, the route's own worst
-case ("SearchApi: up to 4 calls (calendar 1, itinerary 3; trial: N left)",
-"browser provider: 1 page, up to S scrolls"), refuses before posting when
-the trial credits left are fewer than that worst case, and asks for a typed
-`yes` (`--yes` in scripts); setup, update, status and the CI jobs never run
-it. `update`
+always names the next step (open the app, choose Definitions, add a search),
+says that nothing runs on a schedule until a search is given one, says what
+keeps the app running (macOS: while the user is logged in; Linux: after logout
+only with linger), says how to reach the app from another device, labelled as
+only for that (an SSH tunnel, `ssh -L 3000:127.0.0.1:3000`, or §3's Tailscale
+and TLS paths; the native service speaks plain HTTP), and says that scheduled
+searches run only while the machine is awake, with a missed firing caught up
+once on wake, without the browser provider (§8.2). Vendor keys are optional
+prompts with hidden input, and setup calls no vendor. Every command that stops
+or restarts the app (`stop`, `restart`, `update`, every `--reconfigure` group
+but `linger`, the imports, `--replace-database` and `--ignore-docker`) passes
+one guard first: it reads `GET /api/executions/active` and refuses (75) while
+a run is active, or while the app is up and the read fails, unless `--wait` or
+`--force`, with `update`'s `--force` statement below. `smoke` spends: it takes
+the route as `--from` and `--to` (the smoke route requires one; lowercase is
+upper-cased), refuses with the no-price-source text when no provider is
+configured, and before posting to `POST /api/tools/smoke` with the
+credentials in `app.env` it prints what it will use per provider from `GET
+/api/tools/smoke/plan`, the route's own worst case ("SearchApi: up to 4 calls
+(calendar 1, itinerary 3; trial: N left)", "browser provider: 1 page, up to S
+scrolls"), refuses before posting when the trial credits left are fewer than
+that worst case, posts a dry run (ledgering nothing) and stops on its refusal,
+states the credits tool runs have already used in the window (the response's
+`searchApiCreditsLedgered`) with the running total, and asks for a typed `yes`
+for that total (`--yes` in scripts, which once earlier tool runs used credits
+also needs `--accept-total`: decision 20); setup, update, status and the CI
+jobs never run it. `update`
 refuses a checkout with local changes or not on `main`; runs `git fetch` and
 checks that `git merge --ff-only` is possible while the app still runs;
 refuses while a run is active, naming it and its estimated finish (`GET
@@ -2882,8 +2916,13 @@ the run to end) or `--force` (it says before acting that the app stops
 within 30 s, that a page or call in flight is abandoned, stays on the ledger
 and has its cells requested again, and that the run resumes from its last
 checkpoint after the restart when `AUTO_RESUME` is on, or otherwise waits
-for a manual resume). Its plan, in order: record the current commit, stop
-the app and the worker, back up into `backups/update` (keeping 5) and name
+for a manual resume). `--dry-run` prints its plan without fetching. It records
+its progress in `<state>/update.json`, so a re-run after a failed install,
+build, start or health wait carries on from that step, and it says "already up
+to date" only when the checkout matches `origin/main` and the app answers
+healthy. Its plan, in order: record the current commit, stop the app and the
+worker, back up into `backups/update` (keeping 5, the database named
+explicitly, with a `.commit` file beside the backup naming the commit) and name
 the file, `git merge --ff-only`, `pnpm install --frozen-lockfile`, `pnpm
 build`, install a new Camoufox pin when the manifest changed and that
 entry's flags are set (otherwise install nothing, keep the old bundle and
@@ -2894,23 +2933,32 @@ previous Camoufox bundle once healthy, and run `status`. A failure at any
 step after the stop prints the recorded commit, the backup and the native
 restore steps, plus the shorter path when the database was not migrated
 (`git checkout <commit>`, `pnpm install --frozen-lockfile`, `pnpm build`,
-`pnpm gmt start`), and rolls nothing back itself. **Restore (native):** `pnpm
+`pnpm gmt start`), shell-quoted, and rolls nothing back itself; a failed backup
+before the merge changes no code. **Restore (native):** `pnpm
 gmt stop`; `git checkout <commit>`; `pnpm install --frozen-lockfile`; `pnpm
 build`; `pnpm gmt restore <backup>` (it refuses a file that fails `PRAGMA
-integrity_check`, removes the database's `-wal` and `-shm`, keeps the current
-file as `<name>.before-restore`, and copies the backup into place, 0600);
-`pnpm gmt start`; `pnpm gmt setup` re-verifies the pinned Camoufox. A restored
-ledger lacks any call made after its backup, so check the vendor's dashboard.
+integrity_check` on its 0600 copy before anything moves, keeps the current
+database whole, its `-wal` and `-shm` with it, as `<name>.before-restore-<time>`,
+never over an earlier one, and puts the checked copy in place, through the same
+placement code as the imports); `pnpm gmt start`; `pnpm gmt setup` re-verifies
+the pinned Camoufox. An update's backup names its commit in the `.commit` file
+beside it. A restored ledger lacks any call made after its backup, so check the
+vendor's dashboard and raise `SEARCHAPI_TRIAL_USED` (trial) or lower
+`SEARCHAPI_MONTHLY_CALL_CAP` (`40usd`) to match; restore says which, and what
+the next start will resume and catch up (`AUTO_RESUME=false` leaves the
+resumes to the operator).
 The checkout is then on a detached commit: run `git switch main` before the
 next `update` (`gmt status` reports a detached checkout). `uninstall` stops
 and removes every service, timer and agent (with `daemon-reload` and
 `reset-failed` on Linux), removes the macOS log files, keeps
 `~/.config/get-me-there`, `~/.local/share/get-me-there` and
 `~/.local/state/get-me-there`, prints them, and offers to disable linger if
-setup enabled it; `--purge` lists what it will delete, asks for the typed
+setup enabled it (with `--purge` too, read from the setup record before it is
+deleted; without a terminal it prints the line); `--purge` lists what it will delete, asks for the typed
 word `purge`, never runs non-interactively, and deletes only those three
 directories, refusing one that is a symlink, `$HOME`, a root or not named
-`get-me-there`. `status` calls `GET /api/status`, prints the checks as a
+`get-me-there`, and names anything it leaves (the worker's directory when
+`XDG_STATE_HOME` moved the state). `status` calls `GET /api/status`, prints the checks as a
 table, exits non-zero on any `fail`, adds what only the machine can see (a
 compose `app` container beside the native one, a detached checkout, the
 worker's refusal), and, when the app does not answer, falls back to local
@@ -3014,6 +3062,19 @@ as specified in §5.3; no secrets, no full URLs.
 ---
 
 ## 17. Changelog
+
+### Revision 37: the local setup as built, after its branch review (2026-10-24)
+
+From WP16b's branch review (104 findings, every one addressed) and its rulings U1 to U13, §13 states the setup
+as built: one active-run guard for every command that stops or restarts the app; the SearchApi trial's used
+count lives in the settings and is never in a database, so an import never supplies it and the wizard always
+asks it on the trial; imports apply in phases, each a real plan, with recovery text per failure and the first
+start's resumes stated; `--import-db` reads the source's lock through `scripts/lock-state.mjs`; restore keeps
+the current database whole under a timestamped name through the imports' placement code, with plan-specific
+dashboard advice; `update --dry-run`, its progress record and its `.commit` file; `smoke --from --to` with its
+dry run first and the running total confirmed (`searchApiCreditsLedgered` on the tool route's response, §10);
+a `linger` reconfigure group; the closing screen's next step, schedule and keep-running lines; uninstall's linger
+offer under `--purge`; and the test email's offer moved to WP18. No design rule outside §10 and §13 changes.
 
 ### Revision 36: local setup, consent capture and status (2026-10-19)
 
