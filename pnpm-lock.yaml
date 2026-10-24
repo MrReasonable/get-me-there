@@ -178,6 +178,9 @@ importers:
       minimatch:
         specifier: 10.2.6
         version: 10.2.6
+      tsx:
+        specifier: 4.23.15
+        version: 4.23.15
       typescript:
         specifier: 5.9.3
         version: 5.9.3
@@ -243,6 +246,25 @@ importers:
       zod:
         specifier: 4.6.7
         version: 4.6.7
+
+  apps/cli:
+    dependencies:
+      '@gmt/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
+    devDependencies:
+      '@stryker-mutator/core':
+        specifier: 10.0.0
+        version: 10.0.0(@types/node@26.6.5)
+      fast-check:
+        specifier: 4.10.2
+        version: 4.10.2
+      tsx:
+        specifier: 4.23.15
+        version: 4.23.15
 
   apps/web:
     dependencies:

@@ -27,11 +27,13 @@ COPY apps/api/package.json ./apps/api/
 COPY apps/web/package.json ./apps/web/
 # why: WP14: the worker's manifest only, so the frozen lockfile's importer resolves; the install filters it out.
 COPY apps/camoufox-worker/package.json ./apps/camoufox-worker/
+# why: WP16b (decision 72): likewise the gmt CLI's manifest only; it runs from a checkout, never in the image.
+COPY apps/cli/package.json ./apps/cli/
 RUN corepack enable pnpm \
  && test "$(pnpm --version)" = "$(node -p "require('./package.json').packageManager.replace(/^pnpm@/, '').replace(/\\+.*$/, '')")"
-# why: WP14 (arch-002): the camoufox worker and its browser libraries never enter the image.
+# why: WP14 (arch-002): the camoufox worker and its browser libraries never enter the image; nor does the CLI (WP16b).
 RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
-    pnpm install --frozen-lockfile --filter '!@gmt/camoufox-worker' --store-dir /pnpm/store
+    pnpm install --frozen-lockfile --filter '!@gmt/camoufox-worker' --filter '!@gmt/cli' --store-dir /pnpm/store
 COPY . .
 RUN node scripts/assert-sqlite-prebuilt.mjs
 RUN pnpm build
@@ -51,6 +53,8 @@ COPY apps/api/package.json ./apps/api/
 COPY apps/web/package.json ./apps/web/
 # why: WP14: the worker's manifest only, so the frozen lockfile's importer resolves; the install filters it out.
 COPY apps/camoufox-worker/package.json ./apps/camoufox-worker/
+# why: WP16b (decision 72): likewise the gmt CLI's manifest only; it runs from a checkout, never in the image.
+COPY apps/cli/package.json ./apps/cli/
 RUN corepack enable pnpm \
  && test "$(pnpm --version)" = "$(node -p "require('./package.json').packageManager.replace(/^pnpm@/, '').replace(/\\+.*$/, '')")"
 # why: the filter keeps the SPA's React/Vite tree out of the runtime image; the SPA ships as static files.

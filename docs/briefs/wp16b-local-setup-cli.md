@@ -5,8 +5,8 @@ owner: opus
 depends_on: [16a]
 spec_sections: ["§1", "§4", "§9 item 9", "§9 CI matrix", "§12 Where settings live", "§13 Native local mode", "§13 One app per ledger", "§13 The gmt command", "§15", "§16", "§17 revision 36"]
 reviewers: [product-owner, code-architect, test-strategy-reviewer, security-reviewer, devops-reviewer, cost-and-budget-reviewer, persona-flexible-traveller]
-mutate: {}
-pending: {"@gmt/cli": ["src/plan/**", "src/services/**", "src/exec/system.ts", "src/setup/appEnv.ts", "src/setup/answers.ts", "src/setup/secrets.ts", "src/camoufox/**"]}
+mutate: {"@gmt/cli": ["src/plan/**"]}
+pending: {"@gmt/cli": ["src/services/**", "src/exec/system.ts", "src/setup/appEnv.ts", "src/setup/answers.ts", "src/setup/secrets.ts", "src/camoufox/**"]}
 status: draft
 ---
 

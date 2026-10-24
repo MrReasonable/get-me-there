@@ -25,6 +25,7 @@ const PACKAGES = [
   'apps/api',
   'apps/web',
   'apps/camoufox-worker',
+  'apps/cli',
 ];
 let scratch = null;
 
@@ -328,7 +329,7 @@ describe('scripts/check-boundaries.mjs import-graph, process.env and msw rules (
       'scripts/op.js',
     ])
       expect(r.stderr).toContain(
-        `${f} reads process.env outside apps/api/src/bootstrap/, apps/camoufox-worker/src/run.ts and scripts/*.mjs`,
+        `${f} reads process.env outside apps/api/src/bootstrap/, apps/camoufox-worker/src/run.ts, apps/cli/src/main.ts and scripts/*.mjs`,
       );
     expect(r.stderr).not.toContain('apps/api/src/bootstrap/tool.ts');
     expect(r.stderr).not.toContain('scripts/backup.mjs');
@@ -360,5 +361,54 @@ describe('scripts/check-boundaries.mjs import-graph, process.env and msw rules (
     expect(r.stderr).toContain(
       'apps/api/test/x.test.ts imports msw; apps/api tests use @gmt/providers/testing',
     );
+  });
+});
+
+// why: decision 72 (WP16b Task 16b.1): the gmt CLI imports @gmt/core only, never a browser library, and reads
+// process.env only in its entry module.
+describe('scripts/check-boundaries.mjs and @gmt/cli (decision 72)', { timeout: 60_000 }, () => {
+  it.each([
+    ['@gmt/db', "import { openDb } from '@gmt/db';\n", 'apps/cli/src/x.ts imports @gmt/db'],
+    [
+      '@gmt/camoufox-worker',
+      "import '@gmt/camoufox-worker';\n",
+      'apps/cli/src/x.ts imports @gmt/camoufox-worker; nothing may',
+    ],
+    [
+      'camoufox-js',
+      "import { launch } from 'camoufox-js';\n",
+      'apps/cli/src/x.ts imports camoufox-js; only apps/camoufox-worker/src/launch.ts and driver.ts may',
+    ],
+    [
+      'playwright-core',
+      "import { firefox } from 'playwright-core';\n",
+      'apps/cli/src/x.ts imports playwright-core; only apps/camoufox-worker/src/launch.ts and driver.ts may',
+    ],
+  ])('apps/cli importing %s fails', (_name, text, message) => {
+    const r = run(tree({ 'apps/cli/src/x.ts': text }));
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain(message);
+  });
+
+  it('apps/cli importing @gmt/core passes, and only src/main.ts may read process.env', () => {
+    const r = run(
+      tree({
+        'apps/cli/src/ok.ts': "import { workerDataDir } from '@gmt/core';\nexport const w = workerDataDir;\n",
+        'apps/cli/src/main.ts': 'export const home = process.env.HOME;\n',
+        'apps/cli/src/commands/setup.ts': 'export const home = process.env.HOME;\n',
+      }),
+    );
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('apps/cli/src/commands/setup.ts reads process.env outside');
+    expect(r.stderr).not.toContain('apps/cli/src/main.ts reads');
+    expect(r.stderr).not.toContain('apps/cli/src/ok.ts');
+  });
+
+  it('@gmt/cli listing @gmt/db in its dependencies fails', () => {
+    const r = run(
+      tree({ 'apps/cli/package.json': manifest('apps/cli', { dependencies: { '@gmt/db': 'workspace:*' } }) }),
+    );
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('@gmt/cli may not depend on @gmt/db');
   });
 });

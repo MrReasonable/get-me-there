@@ -277,3 +277,32 @@ describe('WP16a: the mutation workflow runs every package’s Stryker gate and t
     );
   });
 });
+
+// why: decision 72 (WP16b Task 16b.1): the CLI's manifest enters both install stages so the frozen lockfile's importer
+// resolves, and both installs filter it out; nothing else of apps/cli reaches the build context, so the image's
+// contents are unchanged.
+describe('WP16b: the image carries the CLI manifest only, filtered out of both installs', () => {
+  const repo = join(import.meta.dirname, '..');
+  const dockerfile = readFileSync(join(repo, 'Dockerfile'), 'utf8');
+  const stages = dockerfile.split(/^FROM /m).slice(1);
+  const stage = (name) => stages.find((s) => s.split('\n')[0].includes(` AS ${name}`)) ?? '';
+  it.each(['build', 'prod-deps'])('the %s stage copies apps/cli/package.json before its install', (name) => {
+    const s = stage(name);
+    const copy = s.indexOf('COPY apps/cli/package.json ./apps/cli/');
+    expect(copy).toBeGreaterThan(0);
+    expect(copy).toBeLessThan(s.indexOf('pnpm install --frozen-lockfile'));
+  });
+  it('the build install filters out the CLI beside the worker, and prod-deps installs only the api tree', () => {
+    expect(stage('build')).toContain(
+      "pnpm install --frozen-lockfile --filter '!@gmt/camoufox-worker' --filter '!@gmt/cli' --store-dir /pnpm/store",
+    );
+    expect(stage('prod-deps')).toContain('pnpm install --frozen-lockfile --prod --filter "@gmt/api..."');
+    expect(stage('runtime')).not.toContain('apps/cli');
+  });
+  it('.dockerignore admits only the CLI manifest', () => {
+    const ignore = readFileSync(join(repo, '.dockerignore'), 'utf8').split('\n');
+    expect(ignore).toContain('apps/cli/**');
+    expect(ignore).toContain('!apps/cli/package.json');
+    expect(ignore.indexOf('!apps/cli/package.json')).toBeGreaterThan(ignore.indexOf('apps/cli/**'));
+  });
+});

@@ -19,6 +19,8 @@ const ALLOWED = {
   // why: WP14 (decision 69, arch-009): the host-side worker speaks to the app over HTTP; it imports core only, and its
   // tests may take @gmt/providers/testing (the decision-61 skip guard) and nothing else of providers.
   '@gmt/camoufox-worker': ['@gmt/core'],
+  // why: decision 72 (WP16b): the gmt CLI reaches the app and the worker over HTTP or as child processes, never by import.
+  '@gmt/cli': ['@gmt/core'],
 };
 /** The worker's browser libraries, allowed only in its launch and driver modules (arch-009, TS-04). */
 const WORKER_BROWSER_LIBS = ['camoufox-js', 'playwright-core'];
@@ -72,16 +74,19 @@ const dirs = {
   '@gmt/api': 'apps/api',
   '@gmt/web': 'apps/web',
   '@gmt/camoufox-worker': 'apps/camoufox-worker',
+  '@gmt/cli': 'apps/cli',
 };
 // why: the only code that may read process.env is a command-line entry point: the app and tool bootstraps under
 // exactly apps/api/src/bootstrap/ (wiring and logger take the env as an argument), and the operator scripts directly
 // under scripts/ (backup.mjs reads DATABASE_PATH as the bootstrap does; secret-scan.mjs reads the configured secret
 // values). Anchored to the path start, so a directory named bootstrap elsewhere (apps/api/src/routes/bootstrap/) or a
 // helper nested under scripts/ is not an entry point (CodeRabbit batch 3).
-// why: WP14: the camoufox worker's one launcher, run.ts, is its only environment reader (SEC-R2-006).
+// why: WP14: the camoufox worker's one launcher, run.ts, is its only environment reader (SEC-R2-006); decision 72: the
+// gmt CLI's entry module, apps/cli/src/main.ts, is its only one.
 const ENV_READER =
-  /^(?:apps\/api\/src\/bootstrap\/.+|apps\/camoufox-worker\/src\/run\.ts|scripts\/[^/]+\.mjs)$/;
-const ENV_RULE = 'apps/api/src/bootstrap/, apps/camoufox-worker/src/run.ts and scripts/*.mjs entry points';
+  /^(?:apps\/api\/src\/bootstrap\/.+|apps\/camoufox-worker\/src\/run\.ts|apps\/cli\/src\/main\.ts|scripts\/[^/]+\.mjs)$/;
+const ENV_RULE =
+  'apps/api/src/bootstrap/, apps/camoufox-worker/src/run.ts, apps/cli/src/main.ts and scripts/*.mjs entry points';
 /**
  * Every module specifier a file imports, read from the parsed source: static imports and re-exports, bare side-effect
  * imports, `import x = require()`, `require()`, `import()` types and dynamic `import()` with a string or template

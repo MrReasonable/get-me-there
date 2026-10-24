@@ -29,6 +29,9 @@ fixtures/recorded/
 # manifest enters the build context, so the frozen lockfile's importer resolves; nothing else of it is copied.
 apps/camoufox-worker/**
 !apps/camoufox-worker/package.json
+# why: WP16b (decision 72): the gmt CLI runs from a checkout; only its manifest enters the context, for the lockfile.
+apps/cli/**
+!apps/cli/package.json
 # Rebuilt inside the image.
 node_modules/
 **/node_modules/
