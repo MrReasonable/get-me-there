@@ -174,9 +174,32 @@ describe('the browser gate’s own refusals, notice and logs', () => {
     const exec = await e.runToEnd();
     const run = () => newRun(e.ctx, exec, { manual: false, fresh: false, blocked: new Set() });
     const notice = (r: ReturnType<typeof run>) => browserWindowNotice(e.ctx, r).detail;
-    expect(notice(run())).toBe(
-      'browser pages left: this run is past its browser window. Its remaining browser cells are left for the next scheduled run; the other providers carry on.',
+    const STOPS =
+      'browser pages left: this run is past its browser window. Its remaining browser cells are left for the next scheduled run; the run stops its browser part with no other discovery provider left to run.';
+    // T8: Travelpayouts searched every cell of this run, so nothing else is left to carry on, lane or no lane
+    expect(notice(run())).toBe(STOPS);
+    const drained = run();
+    laneFor(drained, 'discovery', 'travelpayouts');
+    expect(notice(drained)).toBe(STOPS);
+    // a run whose Travelpayouts cells failed (retryable, so still to search) does carry on, at a resume and in a lane
+    const upstream = new ProviderError({
+      kind: 'upstream',
+      retryable: true,
+      providerId: 'travelpayouts',
+      message: 'x',
+    });
+    const pending = engineWith(
+      [stubCamoufox({ cells: 4 }), stubTravelpayouts({ cells: 4, failCalls: 4, error: upstream })],
+      { scheduleCron: '0 6 * * *', window: RELATIVE, createdAt: at('2027-03-01T00:00:00.000Z') },
     );
+    const left = await pending.runToEnd();
+    const pendingRun = () => newRun(pending.ctx, left, { manual: false, fresh: false, blocked: new Set() });
+    const carriesOn =
+      'browser pages left: this run is past its browser window. Its remaining browser cells are left for the next scheduled run; the other providers carry on.';
+    expect(browserWindowNotice(pending.ctx, pendingRun()).detail).toBe(carriesOn);
+    const working = pendingRun();
+    laneFor(working, 'discovery', 'travelpayouts').inFlight.add('a cell');
+    expect(browserWindowNotice(pending.ctx, working).detail).toBe(carriesOn);
     // Travelpayouts' lane stopped (or its line blocked, or the provider disabled): nothing else searches
     const stopped = run();
     laneFor(stopped, 'discovery', 'travelpayouts').intake.abort();
@@ -187,17 +210,11 @@ describe('the browser gate’s own refusals, notice and logs', () => {
     });
     const disabled = run();
     disabled.disabled.add('travelpayouts');
-    const healthy = run();
-    laneFor(healthy, 'discovery', 'travelpayouts'); // a lane already taking cells still searches
-    expect(notice(healthy)).toContain('; the other providers carry on.');
     const capped = run();
     laneFor(capped, 'discovery', 'travelpayouts').budgetOut = true;
     const cabin = run();
     const business = { ...cabin, snapshot: { ...cabin.snapshot, cabin: 'business' as const } };
-    for (const r of [stopped, blocked, disabled, capped, business])
-      expect(notice(r)).toBe(
-        'browser pages left: this run is past its browser window. Its remaining browser cells are left for the next scheduled run; the run stops its browser part with no other discovery provider left to run.',
-      );
+    for (const r of [stopped, blocked, disabled, capped, business]) expect(notice(r)).toBe(STOPS);
     e.ctx.repos.definitions.update(e.definition.id, { enabled: false });
     expect(notice(run())).toContain('are left for your next run of this search;');
     e.ctx.repos.definitions.update(e.definition.id, {

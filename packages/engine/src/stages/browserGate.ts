@@ -38,8 +38,9 @@ export function browserLeftFor(ctx: EngineContext, def: SearchDefinition): LeftF
 }
 
 /**
- * Review S7: the run's other discovery providers still searching: in its snapshot, selling its cabin, neither disabled
- * nor blocked for budget, and with a lane that has not stopped.
+ * Review S7, T8: the run's other discovery providers still searching: in its snapshot, selling its cabin, neither
+ * disabled nor blocked for budget, with a lane that has not stopped (or none yet, as at a resume), and with cells left:
+ * in flight in its lane, or still to fetch in this run (the resume query's own cells).
  */
 function otherDiscoveryRunning(ctx: EngineContext, run: RunState): boolean {
   return run.snapshot.providers.discovery.some((id) => {
@@ -47,15 +48,19 @@ function otherDiscoveryRunning(ctx: EngineContext, run: RunState): boolean {
       return false;
     if (run.blocked.has(lineKey('discovery', id))) return false;
     const lane = run.lanes.get(`discovery|${id}`);
-    return lane === undefined || (!lane.budgetOut && !lane.intake.signal.aborted);
+    if (lane !== undefined && (lane.budgetOut || lane.intake.signal.aborted)) return false;
+    return (
+      (lane?.inFlight.size ?? 0) > 0 ||
+      resumableCells(ctx, run.executionId, 'discovery', id, run.manual).length > 0
+    );
   });
 }
 
 /**
  * The once-per-execution notice. It has its own kind, so the per-execution and per-day dedupe of a real
  * `provider_disabled` notice never hides it, and it never hides one (spec §8.1 notices). It names who fetches the cells
- * as View D does (review R12, S6), and says the other providers carry on only when one is still searching in this run
- * (review S7).
+ * as View D does (review R12, S6), and says the other providers carry on only when one is still searching in this run,
+ * with cells left (review S7, T8).
  */
 export function browserWindowNotice(ctx: EngineContext, run: RunState): RunState['notices'][number] {
   const def = ctx.repos.definitions.get(run.definitionId);
