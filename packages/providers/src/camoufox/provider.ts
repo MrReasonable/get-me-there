@@ -6,6 +6,7 @@
  * tile-error (answer.ts). No airport is named here (spec §1).
  */
 import {
+  APP_INSTANCE_HEADER,
   CAMOUFOX_CLOCK_SKEW_MS,
   type Cabin,
   type CapabilityInfo,
@@ -24,6 +25,7 @@ import {
   ProviderError,
   pageRequestSchema,
   type Secret,
+  type SharedSettings,
   type SuppliedField,
   type TilePlan,
   WORKER_KEY_HEADER,
@@ -72,6 +74,13 @@ export interface CamoufoxProviderOptions {
   key: Secret;
   workerUrl: string;
   pointOfSale: string;
+  /** Spec §12: the app's effective shared settings, which the preflight compares with the worker's by name. */
+  sharedSettings?: SharedSettings;
+  /**
+   * Decision 82: the app's instance digest (a SHA-256 of the host name and the database's real path), sent on every
+   * request as APP_INSTANCE_HEADER so the worker can report a second app in a month.
+   */
+  appInstance?: string;
   /**
    * Spec §2 rev 34: grid mode and the run's page and scroll caps, which the planner splits across the stage's pairs
    * (`DiscoveryQuery.share`); absent or `list`: one page per cell.
@@ -133,6 +142,7 @@ export function camoufoxProvider(o: CamoufoxProviderOptions): FlightProvider {
   if (o.key.reveal().length < 32)
     throw new Error('camoufoxProvider: CAMOUFOX_WORKER_KEY must be at least 32 characters');
   const log = o.log.child({ providerId: 'camoufox' });
+  const instanceHeader = o.appInstance === undefined ? {} : { [APP_INSTANCE_HEADER]: o.appInstance };
 
   async function fetchTile(
     plan: TilePlan,
@@ -176,11 +186,13 @@ export function camoufoxProvider(o: CamoufoxProviderOptions): FlightProvider {
           [WORKER_KEY_HEADER]: o.key.reveal(),
           'content-type': 'application/json',
           accept: 'application/json',
+          ...instanceHeader,
         },
         body: JSON.stringify(request),
         cache: 'never',
         signal: ctx.signal,
         recordFixtures: ctx.recordFixtures,
+        ...(ctx.beforeSend === undefined ? {} : { beforeSend: ctx.beforeSend }),
       });
       body = res.body;
     } catch (e) {
@@ -273,6 +285,7 @@ export function camoufoxProvider(o: CamoufoxProviderOptions): FlightProvider {
           [WORKER_KEY_HEADER]: o.key.reveal(),
           'content-type': 'application/json',
           accept: 'application/json',
+          ...instanceHeader,
         },
         body: JSON.stringify(request.data),
         cache: 'never',
@@ -280,6 +293,7 @@ export function camoufoxProvider(o: CamoufoxProviderOptions): FlightProvider {
         recordFixtures: ctx.recordFixtures,
         // why: ruling 12: the reservation checks the page's allowed scrolls against the run's and the month's caps
         scrolls: allowance,
+        ...(ctx.beforeSend === undefined ? {} : { beforeSend: ctx.beforeSend }),
       });
       body = res.body;
     } catch (e) {
@@ -344,6 +358,8 @@ export function camoufoxProvider(o: CamoufoxProviderOptions): FlightProvider {
             http: o.http,
             key: o.key,
             workerUrl: o.workerUrl,
+            ...(o.sharedSettings === undefined ? {} : { sharedSettings: o.sharedSettings }),
+            ...(o.appInstance === undefined ? {} : { appInstance: o.appInstance }),
             ...(grid === null
               ? {}
               : {
