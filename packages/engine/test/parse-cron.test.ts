@@ -156,6 +156,7 @@ describe('countFirings (review S11): firingsBetween’s count without stepping c
     // why: one step a matching day, plus each offset span's first whole day and its part days stepped firing by firing,
     // and the 6 h round each clock change: under two a day, against the 8,759 a firing-by-firing count takes
     expect(meter.steps).toBeLessThan(2 * 365);
+    expect(meter.steps).toBeGreaterThanOrEqual(365); // at least one step a matching day: the meter counts every step
     expect(runsPerMonth('0 * * * *', 'Europe/London', new Date('2026-10-14T09:00:00.000Z'))).toBe(8759 / 12);
   });
 });
@@ -221,4 +222,26 @@ describe('countFirings against the stepped count, seeded (review T2)', () => {
       expect(countFirings(expr, tz, f, t)).toBe(firingsBetween(expr, tz, f, t).length);
     },
   );
+});
+
+describe('the cron text a count and a parse accept (review T2 kills)', () => {
+  it('minute 59 is the last a schedule takes; spaces around and between the fields are ignored alike', () => {
+    expect(parseCron('59 * * * *', 'Europe/London').ok).toBe(true);
+    expect(parseCron('60 * * * *', 'Europe/London').ok).toBe(false);
+    const from = new Date('2026-10-14T09:00:00.000Z');
+    expect(next('  0  6 * * 1 ', 'Europe/London', from.toISOString())).toBe(
+      next('0 6 * * 1', 'Europe/London', from.toISOString()),
+    );
+    const to = new Date(from.getTime() + 60 * 86_400_000);
+    expect(countFirings('  0  6 * * 1 ', 'Europe/London', from, to)).toBe(
+      countFirings('0 6 * * 1', 'Europe/London', from, to),
+    );
+    expect(countFirings('  0  6 * * 1 ', 'Europe/London', from, to)).toBe(8); // Mondays 19 Oct to 7 Dec 2026
+  });
+  it('an invalid schedule has no firings to list or count', () => {
+    const from = new Date('2026-10-14T09:00:00.000Z');
+    const to = new Date('2026-12-14T09:00:00.000Z');
+    expect(firingsBetween('*/5 * * * *', 'Europe/London', from, to)).toEqual([]);
+    expect(countFirings('0 6 * * *', 'No/Such_Zone', from, to)).toBe(0);
+  });
 });

@@ -169,8 +169,10 @@ describe('autoResume: isolated, and silent once the engine is closing (T5, T12)'
     vi.spyOn(ctx.repos.executions, 'coversFiring').mockImplementation(() => {
       throw new Error('a row that does not decode');
     });
+    const resume = vi.spyOn(orch, 'resume');
     const r = await autoResume(ctx, orch, paused(h, catchUp.id));
     expect(r).toMatchObject({ ok: true, executionId: catchUp.id });
+    expect(resume).toHaveBeenCalledWith(catchUp.id, { manual: false }); // an automatic resume, never a manual one
     expect(h.logs.find((l) => l.msg === 'catch-up: definition failed')?.fields).toMatchObject({
       err: expect.stringContaining('a row that does not decode'),
     });
