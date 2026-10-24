@@ -11,7 +11,7 @@ import {
 import type { EngineContext } from '../context.js';
 import { errorText } from '../errors.js';
 import type { Orchestrator } from '../orchestrator.js';
-import { buildSnapshot, sellsCabin } from '../snapshot.js';
+import { buildSnapshot, sellsCabin, snapshotProviders } from '../snapshot.js';
 import { recordSkipped } from '../start.js';
 import { formatInstant } from '../text.js';
 import { loadsBrowserPages } from './browserWindow.js';
@@ -50,7 +50,7 @@ export const SKIP_CODE_OF: Readonly<Record<Extract<MissedFiring, { kind: 'skip' 
   'scheduled-only': 'browser-only-definition',
 };
 
-/** The definition's providers as a scheduled run has them (spec §8.2: some providers are left out of scheduled runs). */
+/** The snapshot a scheduled run would store, written with a skip row (spec §8.2: some providers are left out of it). */
 const scheduledSnapshot = (ctx: EngineContext, def: SearchDefinition) =>
   buildSnapshot(ctx, def, 'schedule').snapshot;
 
@@ -100,7 +100,7 @@ export function findMissedFiring(
   // schedule"; seeding marks its cells no_data:cabin-not-offered), so it neither makes a catch-up worth starting nor
   // stops a browser-only definition being recorded as one
   const sells = (id: ProviderId) => sellsCabin(ctx, id, def.cabin);
-  const { providers } = scheduledSnapshot(ctx, def);
+  const providers = snapshotProviders(ctx, def, 'schedule');
   const discovery = providers.discovery.filter(sells);
   const verification = providers.verification.filter(sells);
   if (discovery.length + verification.length === 0) return { kind: 'none' };
