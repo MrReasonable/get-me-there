@@ -56,9 +56,8 @@ export async function restoreCommand(flags: Flags, positional: string | null, de
     ...(deps.files.size(db) !== null
       ? [{ kind: 'rename' as const, from: db, to: `${db}.before-restore` }]
       : []),
-    ...[`${db}-wal`, `${db}-shm`]
-      .filter((p) => deps.files.size(p) !== null)
-      .map((path): Action => ({ kind: 'remove', path, recursive: false })),
+    { kind: 'remove', path: `${db}-wal`, recursive: false },
+    { kind: 'remove', path: `${db}-shm`, recursive: false },
     { kind: 'rename', from: tmp, to: db },
   ];
   const plan = { command: 'restore', actions, notes: [] };

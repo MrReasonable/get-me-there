@@ -25,13 +25,13 @@ export function placeActions(
   target = databasePath(deps.platform.paths),
 ): Action[] {
   const tmp = importingPath(target);
-  const side = [`${target}-wal`, `${target}-shm`].filter(
-    (p) => deps.files.read(p) !== null || deps.files.size(p) !== null,
-  );
+  // why: always planned (a removal of nothing is no error): a step before this one, the backup of the database being
+  // replaced, can leave a -wal or -shm that was not there when the plan was made
   return [
     { kind: 'copy', from: source, to: tmp, mode: 0o600 },
     checkAction(deps, tmp),
-    ...side.map((path): Action => ({ kind: 'remove', path, recursive: false })),
+    { kind: 'remove', path: `${target}-wal`, recursive: false },
+    { kind: 'remove', path: `${target}-shm`, recursive: false },
     { kind: 'rename', from: tmp, to: target },
   ];
 }
