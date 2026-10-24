@@ -255,15 +255,47 @@ Modify: root `package.json` (`gmt` script, `tsx` devDependency, `mutate`), `pnpm
 
 ### Task 16b.0: Research (no product code; settled before Tasks 16b.3 and 16b.11)
 
-- [ ] A manually dispatched workflow on a scratch branch: on `macos-15`, write a trivial plist, `launchctl bootstrap
+- [x] A manually dispatched workflow on a scratch branch: on `macos-15`, write a trivial plist, `launchctl bootstrap
   gui/$(id -u)`, `launchctl print`, `bootout`; on `ubuntu-24.04` and `ubuntu-24.04-arm`, `sudo loginctl enable-linger
   runner`, `systemctl --user` with `XDG_RUNTIME_DIR=/run/user/$(id -u)`, a trivial unit started and stopped; check
   whether an Intel macOS runner label is available today. Record each runner's mode (`real` or `lint-only` with the
   reason), the run link and the date in this section; the matrix's literal modes come from this record.
-- [ ] Run the whole existing suite on `windows-2025` once and write `ci/windows-known-failures.txt` (one `<file
+- [x] Run the whole existing suite on `windows-2025` once and write `ci/windows-known-failures.txt` (one `<file
   relative to the repository root> > <full title>` a line, the full title being vitest's `fullName`) and the same list
   into decision 78.
-- [ ] Verify §7's notes against their sources; record dates.
+- [x] Verify §7's notes against their sources; record dates.
+
+**Research record (2026-10-24).** Scratch branch `research/wp16b-runners` (one throwaway workflow, no secrets, deleted
+after the runs). GitHub refuses `gh workflow run` for a workflow that exists only off the default branch ("workflow …
+not found on the default branch"), so the workflow also ran on a `push` to that branch alone, once: run
+https://github.com/MrReasonable/get-me-there/actions/runs/40117391189 (2026-10-24).
+
+| Runner | Service manager | Mode | What ran |
+|---|---|---|---|
+| `macos-15` (arm64, macOS 15.7.9, uid 501) | launchd | `real` | `launchctl print gui/501` ok (a GUI domain exists); `plutil -lint`; `bootstrap gui/501 <plist>`; `print` showed `state = running`; `kickstart -k`; `bootout` |
+| `macos-15-intel` (x86_64, macOS 15.7.9) | launchd | `real` | the same, all ok: an Intel macOS label is available today (for WP17's `darwin-x64`) |
+| `ubuntu-24.04` (x86_64, uid 1001) | systemd `--user` | `real` | `sudo loginctl enable-linger runner`; `show-environment` ok with `XDG_RUNTIME_DIR=/run/user/1001`; `is-system-running` `running`; `systemd-analyze --user verify` of a `.service` and a `.timer` ok; `daemon-reload`, `enable --now`, `is-active`, `restart`, `stop`, `disable` ok; `/var/log/journal` present |
+| `ubuntu-24.04-arm` (aarch64, uid 1001) | systemd `--user` | `real` | the same, all ok |
+
+No runner is `lint-only`. The runners' Node binaries are `/opt/homebrew/Cellar/node@22/…/bin/node` (macOS arm64),
+`/usr/local/Cellar/node@22/…/bin/node` (Intel) and `/usr/local/bin/node` (Ubuntu): none is a temporary or shim path.
+
+Windows baseline, `windows-2025`, the same run (`vitest run` from the root over every project): 3,406 tests, 243
+failed, and 195 files failed to load before any test ran. 150 of the load failures were one portability fault fixed in
+this package: `packages/db`, `packages/providers` and `apps/api` built their alias root with `new URL(…).pathname`,
+which reads `/D:/…` on Windows (they now use `fileURLToPath`, as `apps/web` did). The per-test failures were in the
+worker (`record`, `session`, `gridPage`, `main`, `run`, `recordings`, `cooldown`, `rules`, `paths`: POSIX modes and
+paths), `scripts/` (`check-boundaries`, `ensure-build`, `workflows`, `secret-scan`, `assert-dist-resolution`) and
+`apps/web`'s `sourceGuard`. Because the list must match the tree that lands (this package adds tests too), it is
+written from a second scratch run of the final tree in Task 16b.11, recorded there.
+
+§7 checks (2026-10-24): `util.parseEnv` on Node 26.12.0 locally (double-quoted values keep `$`, `#`, `'` and backticks
+and expand `\n`); the launchd and systemd commands and keys by the run above; `docker compose` v5.5.0's `ps -a
+--format json`, `run --rm --no-deps -T --entrypoint`, `cp` and `stop` by their `--help`; vitest 5.0.4's JSON reporter
+(`testResults[].name` an absolute path, `assertionResults[].fullName` the ancestor titles and the title joined by a
+space, `status`) and `vitest list --json` (an array of `{ name, file, projectName }`, `name` joined by ` > `) by running
+both. **Travelpayouts sign-up not verified:** the work package's rule allows no vendor call, so its page was not
+opened; the row 4 help and the closing text keep the URLs above until the operator confirms them.
 
 ### Task 16b.1: Package, root script, image manifest, boundary rule, `Action` and `apply` (first failing test)
 

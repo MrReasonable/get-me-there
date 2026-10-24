@@ -1,9 +1,11 @@
+import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vitest/config';
 import { gmtAliases } from '../../vitest.aliases.js';
 
 // Package thresholds from the design spec §9. Coverage counts src/ only; barrels are excluded.
 export default defineConfig({
-  resolve: { alias: gmtAliases(new URL('../..', import.meta.url).pathname) },
+  // why: WP16b (decision 78): fileURLToPath, not URL.pathname, which reads /D:/… on Windows and resolves nothing
+  resolve: { alias: gmtAliases(fileURLToPath(new URL('../..', import.meta.url))) },
   test: {
     name: 'api',
     include: ['test/**/*.test.ts'],
