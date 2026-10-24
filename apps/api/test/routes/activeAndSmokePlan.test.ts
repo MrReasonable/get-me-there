@@ -14,6 +14,8 @@ beforeEach(() => {
 });
 let h: Harness | undefined;
 afterEach(async () => {
+  // why: review T7 — a stub left by a failed assertion must not reach the next test
+  vi.unstubAllGlobals();
   await h?.close();
   h = undefined;
 });
@@ -182,7 +184,6 @@ describe('GET /api/tools/smoke/plan (spec §10; ledgers nothing)', () => {
     expect(plan.travelpayouts?.freeCalls ?? 0).toBe(worst.freeCalls);
     expect(ledger()).toBe(before);
     expect(fetch).not.toHaveBeenCalled();
-    vi.unstubAllGlobals();
   });
 
   it('needs auth when auth is configured', async () => {
