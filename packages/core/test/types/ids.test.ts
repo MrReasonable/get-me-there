@@ -59,6 +59,9 @@ describe('isoDateTimeSchema', () => {
     expect(isoDateTimeSchema.safeParse('2026-10-14T15:00:00.000Z').success).toBe(true);
     expect(isoDateTimeSchema.safeParse('2026-10-14T15:00:00Z').success).toBe(false);
     expect(isoDateTimeSchema.safeParse('2026-10-14T15:00:00.000+01:00').success).toBe(false);
+    // an impossible date in the right shape is refused, never thrown (WP16a review R26)
+    expect(isoDateTimeSchema.safeParse('2026-13-45T15:00:00.000Z').success).toBe(false);
+    expect(isoDateTimeSchema.safeParse('2026-02-30T15:00:00.000Z').success).toBe(false);
     expect(isoDateTimeSchema.safeParse('2026-02-30T15:00:00.000Z').success).toBe(false);
   });
   it('asIsoDateTime throws on a bad value', () =>

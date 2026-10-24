@@ -1,5 +1,13 @@
 import { z } from 'zod';
 import {
+  readSharedSettings,
+  SHARED_WORKER_SETTINGS,
+  type SharedSettings,
+  sharedInt,
+  sharedMode,
+  sharedSettingMessage,
+} from '../camoufox/settings.js';
+import {
   PENCE_TO_MICRO,
   PLAN_PRESETS,
   type PlanId,
@@ -35,6 +43,12 @@ export interface Config {
   requestTimeoutSeconds: number;
   estimateRetryFactor: number;
   fxMaxRateAgeDays: number;
+  /**
+   * Spec §8.2, §12 (decision 83): when a run may load browser pages. `scheduled` (the default): only inside its window,
+   * from its anchor to 1.5 × its estimated duration later; `any`: a resumed run keeps loading them within every cap.
+   * App side only (the engine decides), so not a shared worker setting; a catch-up loads none either way.
+   */
+  camoufoxBrowserWindow: 'scheduled' | 'any';
   spend: {
     monthlyCapMicroGbp: number;
     globalBillingDay: number;
@@ -68,6 +82,11 @@ export interface Config {
       executionScrollCap: number;
       monthlyScrollCap: number;
       limits: ProviderLimits;
+      /**
+       * Spec §12: the app's effective shared settings (core's effectiveSharedSettings over the same lines), which the
+       * provider's preflight compares with the worker's by name.
+       */
+      sharedSettings: SharedSettings;
     } | null;
     /** only outside production; the fixture provider itself is gated by syntheticAllowed */
     fixture: { costMicroGbp: number } | null;
@@ -234,22 +253,33 @@ export function camoufoxWorkerUrlOk(raw: string): boolean {
   );
 }
 
+/**
+ * Spec §12 "Where settings live" (review R27): the nine shared settings, read once through core's one rule set
+ * (readSharedSettings), whether or not camoufox is enabled; every invalid name is reported, and the typed fields below
+ * all come from the one effective record.
+ */
+function sharedSettingsOf(r: Reader): SharedSettings {
+  const shared = readSharedSettings(Object.fromEntries(SHARED_WORKER_SETTINGS.map((n) => [n, r.raw(n)])));
+  for (const n of shared.invalid) r.fail(n, sharedSettingMessage(n));
+  return shared.settings;
+}
+
 /** Spec §12 rev 32: the camoufox block; validated whether or not it is enabled, built only when it is. */
-function camoufoxConfig(r: Reader): Config['providers']['camoufox'] {
+function camoufoxConfig(r: Reader, shared: SharedSettings): Config['providers']['camoufox'] {
   const enabled = r.bool('CAMOUFOX_ENABLED') ?? false;
   // why: decision 70: grid mode is offered now that stored rows record where a return date came from; the provider
   // still skips it until the worker reports GRID_VERIFIED and its measured step
-  const mode = r.oneOf('CAMOUFOX_MODE', ['list', 'grid']) ?? 'list';
-  const gridScrollSpacingSeconds = r.int('CAMOUFOX_GRID_SCROLL_SPACING_SECONDS', 5, 30) ?? 5;
-  const gridScrollCap = r.int('CAMOUFOX_GRID_SCROLL_CAP', 0, 60) ?? 30;
+  const mode = sharedMode(shared);
+  const gridScrollSpacingSeconds = sharedInt(shared, 'CAMOUFOX_GRID_SCROLL_SPACING_SECONDS');
+  const gridScrollCap = sharedInt(shared, 'CAMOUFOX_GRID_SCROLL_CAP');
   const executionScrollCap = r.int('CAMOUFOX_EXECUTION_SCROLL_CAP', 0, 6000) ?? 600;
-  const monthlyScrollCap = r.int('CAMOUFOX_MONTHLY_SCROLL_CAP', 0) ?? 6000;
+  const monthlyScrollCap = sharedInt(shared, 'CAMOUFOX_MONTHLY_SCROLL_CAP');
   const minSpacingSeconds = r.int('CAMOUFOX_MIN_SPACING_SECONDS', 30, 600) ?? 30;
   const executionPageCap = r.int('CAMOUFOX_EXECUTION_PAGE_CAP', 1, 400) ?? 100;
-  const monthlyCallCap = r.int('CAMOUFOX_MONTHLY_PAGE_CAP', 0) ?? 1500;
-  const billingDay = r.int('CAMOUFOX_BILLING_DAY', 1, 28) ?? 1;
-  const cooldownHours = r.int('CAMOUFOX_COOLDOWN_HOURS', 24) ?? 48;
-  const pageTimeoutSeconds = r.int('CAMOUFOX_PAGE_TIMEOUT_SECONDS', 30, 240) ?? 90;
+  const monthlyCallCap = sharedInt(shared, 'CAMOUFOX_MONTHLY_PAGE_CAP');
+  const billingDay = sharedInt(shared, 'CAMOUFOX_BILLING_DAY');
+  const cooldownHours = sharedInt(shared, 'CAMOUFOX_COOLDOWN_HOURS');
+  const pageTimeoutSeconds = sharedInt(shared, 'CAMOUFOX_PAGE_TIMEOUT_SECONDS');
   if (!enabled) return null;
   const key = r.required('CAMOUFOX_WORKER_KEY');
   if (key !== '' && key.length < 32)
@@ -290,6 +320,7 @@ function camoufoxConfig(r: Reader): Config['providers']['camoufox'] {
       executionScrollCap,
       monthlyScrollCap,
     },
+    sharedSettings: shared,
   };
 }
 
@@ -321,6 +352,7 @@ export const AUTH_MISSING =
 
 export function parseConfig(env: Env, opts: ParseConfigOptions): ConfigResult {
   const r = new Reader(env);
+  const shared = sharedSettingsOf(r);
   const nodeEnv = r.oneOf('NODE_ENV', ['production', 'development', 'test']) ?? 'production';
   const databasePathRaw = r.required('DATABASE_PATH');
   const port = r.int('PORT', 1, 65535) ?? 3000;
@@ -369,9 +401,8 @@ export function parseConfig(env: Env, opts: ParseConfigOptions): ConfigResult {
     );
   }
 
-  const pointOfSale = r.str('POINT_OF_SALE') ?? 'GB';
-  if (!/^[A-Z]{2}$/.test(pointOfSale))
-    r.fail('POINT_OF_SALE', 'POINT_OF_SALE must be an ISO 3166-1 alpha-2 code');
+  // why: POINT_OF_SALE is a shared setting (the worker loads its pages with it), read by the one rule set
+  const pointOfSale = shared.POINT_OF_SALE;
   const schedulerTimezone = r.str('SCHEDULER_TIMEZONE') ?? 'Europe/London';
   if (!isValidTimeZone(schedulerTimezone))
     r.fail('SCHEDULER_TIMEZONE', `unknown IANA time zone: ${schedulerTimezone}`);
@@ -409,7 +440,7 @@ export function parseConfig(env: Env, opts: ParseConfigOptions): ConfigResult {
       `applies only to the trial's lifetime window; SEARCHAPI_PLAN=${plan} counts a monthly window, so remove SEARCHAPI_TRIAL_USED or set it to 0`,
     );
   const billedPreset = searchapi === null ? null : preset;
-  const camoufox = camoufoxConfig(r);
+  const camoufox = camoufoxConfig(r, shared);
   // why: the fixture provider is never configured in production; its cost is only read where syntheticAllowed can be true.
   const fixture = nodeEnv === 'production' ? null : { costMicroGbp: r.int('FIXTURE_COST_MICRO_GBP', 0) ?? 0 };
 
@@ -476,6 +507,7 @@ export function parseConfig(env: Env, opts: ParseConfigOptions): ConfigResult {
   const requestTimeoutSeconds = r.int('REQUEST_TIMEOUT_SECONDS', 1) ?? 60;
   const estimateRetryFactor = r.num('ESTIMATE_RETRY_FACTOR', 1, 5) ?? 1.2;
   const fxMaxRateAgeDays = r.int('FX_MAX_RATE_AGE_DAYS', 1) ?? 3;
+  const camoufoxBrowserWindow = r.oneOf('CAMOUFOX_BROWSER_WINDOW', ['scheduled', 'any']) ?? 'scheduled';
   const trustProxy = r.bool('TRUST_PROXY') ?? false;
   const inContainer = r.raw('IN_CONTAINER') !== undefined;
   const allowFixtureProvider = r.str('ALLOW_FIXTURE_PROVIDER') ?? null;
@@ -507,6 +539,7 @@ export function parseConfig(env: Env, opts: ParseConfigOptions): ConfigResult {
       requestTimeoutSeconds,
       estimateRetryFactor,
       fxMaxRateAgeDays,
+      camoufoxBrowserWindow,
       spend,
       providers: { travelpayouts, searchapi, camoufox, fixture },
       alertEmailMaxPerHour,

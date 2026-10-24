@@ -23,6 +23,11 @@ export const ACTIVE_STATUSES: readonly ExecutionStatus[] = [
   'paused_error',
   'interrupted',
 ];
+/**
+ * Active statuses with no pass running: a paused run, or one a stop left interrupted. A catch-up in one of them is a
+ * "paused catch-up", which never covers a later firing and is superseded by it (spec §8.2 rev 36, decision 79).
+ */
+export const PAUSED_STATUSES: readonly ExecutionStatus[] = ['paused_budget', 'paused_error', 'interrupted'];
 export const RESUMABLE_STATUSES: readonly ExecutionStatus[] = [
   'interrupted',
   'paused_budget',
@@ -33,13 +38,30 @@ export const RESUMABLE_STATUSES: readonly ExecutionStatus[] = [
 export type Stage = 'discovery' | 'verification';
 /** Spec §3 cell outcome statuses. */
 export type CellOutcomeStatus = 'not_run' | 'priced' | 'empty' | 'no_data' | 'error' | 'skipped';
-/** `provider_unavailable`: the camoufox worker could not be reached (spec §3 rev 32). */
+/**
+ * `provider_unavailable`: the camoufox worker could not be reached (spec §3 rev 32). `scheduled_only`: a camoufox cell
+ * left for the next scheduled run, with its detail in `CellOutcome.skipDetail` (spec §3, §8.2 rev 36); no resume,
+ * manual, automatic or at boot, ever selects it.
+ */
 export type SkipReason =
   | 'not_selected'
   | 'budget'
   | 'provider_disabled'
   | 'provider_unavailable'
+  | 'scheduled_only'
   | 'departed';
+/**
+ * Spec §3, §8.2 (migration 0007 `cell_outcomes.skip_detail`): why a cell is `skipped:scheduled_only`. A catch-up's cell
+ * reuse did not fill, or a cell a run reached past its browser window. Set only with `scheduled_only`, always with it.
+ */
+export const SKIP_DETAILS = ['catch-up-no-browser', 'outside-browser-window'] as const;
+export type SkipDetail = (typeof SKIP_DETAILS)[number];
+/**
+ * Spec §8.2 (migration 0007 `search_executions.skip_code`): why a missed firing was not caught up, stored on its
+ * `skipped_missed` row so the reason shown is the one the firing had, never one re-derived from today's settings.
+ */
+export const SKIP_CODES = ['half-cadence', 'browser-only-definition'] as const;
+export type SkipCode = (typeof SKIP_CODES)[number];
 /** A provider whose `cabins` excludes the definition's cabin: every cell no_data, no call. Spec §3. */
 export type NoDataReason = 'cabin-not-offered';
 /**
@@ -65,6 +87,8 @@ export interface CellOutcome extends CellKey {
   pointOfSale: PointOfSale | null;
   sourceKind: SourceKind | null;
   reusedFromExecutionId: string | null;
+  /** Spec §3 rev 36: set exactly when the outcome is `skipped:scheduled_only`. */
+  skipDetail: SkipDetail | null;
 }
 
 /** Spec §6.6 roll-up; a null status ↔ API 'not_applicable' (row 0). */
@@ -118,6 +142,23 @@ export interface Execution {
   errorText: string | null;
   createdAt: IsoDateTime;
   trigger: 'manual' | 'schedule' | 'tool';
+  /**
+   * Spec §7 rev 36: the firing a scheduled start or skip stands for, as croner gives it (UTC, milliseconds); null for a
+   * manual run, a child, and every row written before migration 0007.
+   */
+  scheduledFor: IsoDateTime | null;
+  /** Spec §8.2: a run started for a missed firing; it never loads browser pages. */
+  isCatchUp: boolean;
+  /** Spec §8.2 (decision 83): the end of the run's browser window, written at start and by a live-tick resume. */
+  browserWindowEnd: IsoDateTime | null;
+  /** Spec §8.2: why a `skipped_missed` firing was not caught up; null on every other row and on older rows. */
+  skipCode: SkipCode | null;
+  /**
+   * Spec §7 rev 36 (decision 79): when the row last stopped running (it entered a paused or interrupted status), kept
+   * through a cancel and cleared when a resume claims it; null while it runs, on a row that never paused, and on older
+   * rows. The coverage read uses it to tell a catch-up paused at a firing from one in flight there.
+   */
+  pausedAt: IsoDateTime | null;
 }
 
 /** Spec §3: the six coverage buckets plus the reused count shown beside them. */

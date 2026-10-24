@@ -6,7 +6,9 @@
 import { z } from 'zod';
 import { iataSchema, isoDateSchema, isoDateTimeSchema } from '../types/ids.js';
 import { vendorPriceMarkSchema } from '../types/provenance.js';
+import { OS_ARCHES } from './builds.js';
 import { GRID_MAX_SCROLLS_PER_PAGE } from './grid.js';
+import { sharedSettingsSchema } from './settings.js';
 
 /** On every worker answer: `1` when the worker loaded a Google page for it, `0` when it did not (decision 69). */
 export const GOOGLE_CONTACTED_HEADER = 'x-gmt-google-contacted';
@@ -231,8 +233,16 @@ export const ANSWER_STATUS: Readonly<Record<WorkerAnswer['kind'], number>> = {
 };
 
 /**
+ * Decision 82: the header the adapter sends on every request (the database's app-instance id, a random id stored with
+ * the ledger), so the worker can report a second app, a second ledger, in a month.
+ */
+export const APP_INSTANCE_HEADER = 'x-gmt-app-instance';
+
+/**
  * `GET /v1/status`: live values only (SEC-R2-004, TS2-17). `accountCookie` is the account-cookie check run on this
- * request (a cookie read, no page load); `flags` are the selectors module's verification flags.
+ * request (a cookie read, no page load); `flags` are the selectors module's verification flags. The optional fields
+ * below enter the schema one work package before any worker emits them (decision 76): this package's worker fills
+ * `sharedSettings`; WP17's fills the rest. An app never infers anything from one that is absent.
  */
 export const workerStatusSchema = z.strictObject({
   ok: z.boolean(),
@@ -260,5 +270,31 @@ export const workerStatusSchema = z.strictObject({
   /** The worker's own CAMOUFOX_GRID_SCROLL_CAP and spacing (fix round 1, CA 9), which the app's must equal in grid mode. */
   gridScrollCap: z.number().int().min(0).nullable().exactOptional(),
   gridScrollSpacingSeconds: z.number().int().min(0).nullable().exactOptional(),
+  /** Spec §12: the worker's effective shared settings, every name present. */
+  sharedSettings: sharedSettingsSchema.exactOptional(),
+  osArch: z.enum(OS_ARCHES).exactOptional(),
+  build: z.string().exactOptional(),
+  /** The consent record (null expiry and bound for a voided one): what bounds its expiry. */
+  consent: z
+    .strictObject({
+      kind: z.enum(['socs', 'not-shown', 'voided']),
+      expiresAt: isoDateTimeSchema.nullable(),
+      boundedBy: z.enum(['cookie', 'capture', 'check']).nullable(),
+    })
+    .exactOptional(),
+  /** Decision 82: the worker's own count over the billing month; `readable` false when its counts file refused. */
+  monthly: z
+    .strictObject({
+      windowStart: isoDateTimeSchema,
+      windowEnd: isoDateTimeSchema,
+      pages: z.number().int().min(0),
+      scrolls: z.number().int().min(0),
+      readable: z.boolean(),
+    })
+    .exactOptional(),
+  /** Decision 82: how many app instances spoke to it this month (a second one is reported, never refused). */
+  appInstances: z
+    .strictObject({ windowStart: isoDateTimeSchema, count: z.number().int().min(0) })
+    .exactOptional(),
 });
 export type WorkerStatus = z.infer<typeof workerStatusSchema>;

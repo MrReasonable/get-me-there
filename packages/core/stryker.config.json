@@ -16,7 +16,15 @@
     "src/coverage/rollUp.ts",
     "src/alerts/dedup.ts",
     "src/alerts/evaluate.ts",
-    "src/normalise/localTime.ts"
+    "src/normalise/localTime.ts",
+    "src/camoufox/builds.ts",
+    "src/camoufox/protocol.ts",
+    "src/camoufox/settings.ts",
+    "src/camoufox/start.ts",
+    "src/budget/window.ts",
+    "src/local/movedMarker.ts",
+    "src/local/paths.ts",
+    "src/labels/skip.ts"
   ],
   "thresholds": {
     "high": 90,

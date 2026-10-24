@@ -18,6 +18,7 @@ import {
   estimateResponseSchema,
 } from './definitions.js';
 import {
+  activeExecutionResponseSchema,
   executionResponseSchema,
   startExecutionRequestSchema,
   startExecutionResponseSchema,
@@ -41,6 +42,7 @@ import {
   healthResponseSchema,
   providersResponseSchema,
   schedulerJobsResponseSchema,
+  smokePlanResponseSchema,
   toolRecordRequestSchema,
   toolRunResponseSchema,
   toolSmokeRequestSchema,
@@ -94,6 +96,8 @@ export const ROUTES: readonly RouteDef[] = [
   route('POST', '/definitions/:id/executions', startExecutionResponseSchema, {
     request: startExecutionRequestSchema,
   }),
+  // why: before '/executions/:id', so the static path is never read as an execution id
+  route('GET', '/executions/active', activeExecutionResponseSchema),
   route('GET', '/executions/:id', executionResponseSchema),
   route('POST', '/executions/:id/cancel', executionResponseSchema),
   route('POST', '/executions/:id/resume', executionResponseSchema),
@@ -109,6 +113,7 @@ export const ROUTES: readonly RouteDef[] = [
     cellDetailResponseSchema,
   ),
   route('POST', '/tools/smoke', toolRunResponseSchema, { request: toolSmokeRequestSchema }),
+  route('GET', '/tools/smoke/plan', smokePlanResponseSchema),
   route('POST', '/tools/record', toolRunResponseSchema, { request: toolRecordRequestSchema }),
   route('GET', '/itineraries/:hash/history', itineraryHistoryResponseSchema),
   route('GET', '/routes/:origin/:destination/history', routeHistoryResponseSchema, {
