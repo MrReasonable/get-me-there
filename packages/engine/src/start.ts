@@ -282,8 +282,12 @@ export async function startExecution(
     if (scheduled) {
       const lost = await skip('skipped_window', null, `The ${message}; the schedule is disabled.`);
       if (lost !== null) return lost;
-      ctx.repos.definitions.update(def.id, { enabled: false }); // why: spec §6.1 "record skipped_window … and disable the schedule"
-      ctx.hooks.unregisterSchedule(def.id);
+      // why: review T6 — a notice that returned after the engine handed the database back leaves it alone; the next
+      // firing meets the same empty window and disables the schedule then
+      if (!ctx.lifecycle.closed) {
+        ctx.repos.definitions.update(def.id, { enabled: false }); // why: spec §6.1 "record skipped_window … and disable the schedule"
+        ctx.hooks.unregisterSchedule(def.id);
+      }
     }
     return refused('window', message, {
       departureFrom: snapshot.resolved.departureFrom,

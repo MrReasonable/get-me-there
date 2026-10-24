@@ -460,4 +460,34 @@ describe('zero-cell window (spec §6.1)', () => {
     expect(h.repos.definitions.get(def.id)?.enabled).toBe(false);
     expect(unregister).toHaveBeenCalledWith(def.id);
   });
+
+  it('T6: a skip whose notice returns after the engine handed the database back disables and unregisters nothing', async () => {
+    const h = createHarness();
+    const unregister = vi.fn();
+    // why: the notice's send outlives the shutdown's wait, so the engine is closed when it returns
+    const ctx = buildContext(
+      {
+        ...h.deps,
+        notifiers: [
+          {
+            id: 'slow',
+            send: async () => {
+              ctx.lifecycle.closed = true;
+              return { ok: true };
+            },
+          },
+        ],
+      },
+      h.options,
+    );
+    ctx.hooks.unregisterSchedule = unregister;
+    const orch = h.track(createOrchestrator(ctx));
+    const def = h.createDefinition({
+      window: { kind: 'absolute', from: asIsoDate('2026-09-01'), to: asIsoDate('2026-09-03') },
+      scheduleCron: '0 5 * * 1',
+    });
+    expect(await orch.start(def.id, { trigger: 'schedule' })).toMatchObject({ ok: false, code: 'window' });
+    expect(h.repos.definitions.get(def.id)?.enabled).toBe(true);
+    expect(unregister).not.toHaveBeenCalled();
+  });
 });
