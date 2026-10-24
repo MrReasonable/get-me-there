@@ -5,7 +5,8 @@ owner: sonnet
 depends_on: [0]
 spec_sections: ["§6.1", "§6.6", "§6.7", "§3", "§9 item 1"]
 reviewers: [code-architect, test-strategy-reviewer, search-strategy-reviewer, product-owner, provenance-auditor]
-status: reviewed
+mutate: {"@gmt/core": ["src/selection/select.ts", "src/coverage/rollUp.ts"]}
+status: merged
 ---
 
 # WP1 — `core`: dates, windows, space, validation, roll-up, coverage, selection

@@ -5,7 +5,8 @@ owner: sonnet
 depends_on: [1, 2, 4, 4b]
 spec_sections: ["§2", "§3", "§5.1", "§5.2", "§5.3", "§6.9", "§8.1", "§9 item 2"]
 reviewers: [code-architect, test-strategy-reviewer, provider-integration-expert, provenance-auditor, cost-and-budget-reviewer]
-status: reviewed
+mutate: {}
+status: merged
 ---
 
 # WP6: Travelpayouts adapter

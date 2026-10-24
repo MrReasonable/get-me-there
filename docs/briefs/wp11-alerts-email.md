@@ -5,7 +5,8 @@ owner: sonnet
 depends_on: [7, 8, 10]
 spec_sections: ["§3 (effective age, rev 23)", "§5.2", "§5.3", "§5.5", "§6.2", "§6.8", "§7 (alert_events)", "§8.1", "§8.3", "§11", "§12", "§14", "§9 item 4", "§9 item 6"]
 reviewers: [code-architect, test-strategy-reviewer, provenance-auditor, product-owner, persona-flexible-traveller, security-reviewer]
-status: reviewed
+mutate: {}
+status: merged
 ---
 
 # WP11: alerts runner, digest templates, EmailNotifier, Alerts UI

@@ -5,7 +5,8 @@ owner: sonnet
 depends_on: [4b, 7, 9, 10]
 spec_sections: ["§3 Effective age", "§4 Auth and request hardening", "§5.2 Vendor links", "§5.5", "§6.5", "§6.8 (storage)", "§6.9", "§7 app_lock, Migrations", "§8.1", "§8.2", "§9 item 5", "§10", "§12", "§13", "§14"]
 reviewers: [code-architect, test-strategy-reviewer, security-reviewer, provenance-auditor, product-owner, devops-reviewer]
-status: reviewed
+mutate: {}
+status: merged
 ---
 
 # WP8 — `@gmt/api`: app bootstrap, routes, auth, hardening, static, health, record tool route

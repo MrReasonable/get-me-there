@@ -5,7 +5,8 @@ owner: opus
 depends_on: [0, 1]
 spec_sections: ["§7", "§5.3 Cap predicates", "§5.3 Billable rule", "§5.3 Crash between reserve and finalise", "§5.5 repository rejections", "§6.6 (stored roll-ups via core)", "§9 item 3"]
 reviewers: [code-architect, test-strategy-reviewer, data-model-reviewer, cost-and-budget-reviewer, provenance-auditor, security-reviewer]
-status: reviewed (amended by plan decision 19 after the branch reviews: see the plan's Database contract for recordObservation, the removal of supersedeReused, insert's invariant and the closed priced-reason set)
+mutate: {}
+status: merged (amended by plan decision 19 after the branch reviews: see the plan's Database contract for recordObservation, the removal of supersedeReused, insert's invariant and the closed priced-reason set)
 ---
 
 # WP3: `@gmt/db`

@@ -5,7 +5,8 @@ owner: fable
 depends_on: [3, 4]
 spec_sections: ["§2 (spike facts 1–8)", "§5.3 Recorder", "§5.5", "§7 app_lock, Migrations, tool bootstrap", "§9 item 7", "§12", "§14", "§16 WP4b"]
 reviewers: [code-architect, test-strategy-reviewer, provider-integration-expert, security-reviewer, cost-and-budget-reviewer, provenance-auditor, product-owner]
-status: reviewed
+mutate: {}
+status: merged
 ---
 
 # WP4b — fixture recording on the example route and the wiring helper
