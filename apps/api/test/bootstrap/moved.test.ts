@@ -37,7 +37,16 @@ describe('movedDatabaseRefusal (spec §13)', () => {
   it('names the date, the docs section and, outside a container, the rm line for the marker', () => {
     const m = marked();
     expect(movedDatabaseRefusal(m.db, false)).toBe(
-      `this database moved to a native install on 2027-03-01; see docs/setup.md section 0. To open it here again, remove the marker: rm ${m.marker}`,
+      `this database moved to a native install on 2027-03-01; see docs/setup.md section 0. To open it here again, remove the marker: rm '${m.marker}'`,
+    );
+  });
+
+  it('outside a container, the rm line quotes a path with spaces and quotes so it can be pasted as it is', () => {
+    const dir = join(tempDir('gmt-moved-'), "the operator's data");
+    mkdirSync(dir);
+    writeFileSync(join(dir, MOVED_MARKER), '2027-03-01T09:30:00.000Z\n');
+    expect(movedDatabaseRefusal(join(dir, 'get-me-there.db'), false)).toMatch(
+      /remove the marker: rm '[^']*\/the operator'\\''s data\/MOVED-TO-NATIVE'$/,
     );
   });
 
@@ -97,7 +106,7 @@ function appEnv(databasePath: string, extra: Record<string, string> = {}): Recor
 
 describe('the app bootstrap honours the marker (spec §13)', { timeout: 30_000 }, () => {
   it.each([
-    ['not in a container', {}, /rm .*MOVED-TO-NATIVE$/],
+    ['not in a container', {}, /rm '.*MOVED-TO-NATIVE'$/],
     [
       'in a container',
       { IN_CONTAINER: '1' },

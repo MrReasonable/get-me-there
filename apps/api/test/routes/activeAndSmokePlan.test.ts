@@ -2,7 +2,7 @@
 // prints it before it asks; ledgers nothing). WP16a Task 16a.3. The worked example only.
 import { apiContract, type Estimate } from '@gmt/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { SMOKE_EXPAND_TOP, smokeWorstCase } from '../../src/tools/smokeArgs.js';
+import { smokeWorstCase } from '../../src/tools/smokeArgs.js';
 import { expectContract } from '../helpers/contract.js';
 import { SENTINEL_SA, SENTINEL_TP } from '../helpers/env.js';
 import { exampleDefinitionInput } from '../helpers/examples.js';
@@ -62,6 +62,20 @@ describe('GET /api/executions/active (spec §10)', () => {
     s.execution('done', { def, status: 'completed', startedAt: at(-3), finishedAt: at(-2) });
     s.execution('paused', { def, status: 'paused_budget', startedAt: at(-2) });
     expect(await (await x.request('/api/executions/active')).json()).toEqual({ execution: null });
+  });
+
+  it('of two runs in flight, the one created first is reported, not the newer one', async () => {
+    const x = await harness();
+    const s = seeder(x.ports);
+    const olderDef = x.ports.repos.definitions.create({ ...exampleDefinitionInput(), name: 'older' });
+    const newerDef = x.ports.repos.definitions.create({ ...exampleDefinitionInput(), name: 'newer' });
+    const older = s.execution('older', { def: olderDef, status: 'pending', startedAt: at(-2) });
+    s.execution('newer', { def: newerDef, status: 'running', startedAt: at(-1) });
+    expect(ACTIVE.parse(await (await x.request('/api/executions/active')).json()).execution).toMatchObject({
+      id: older,
+      definitionName: 'older',
+      startedAt: at(-2),
+    });
   });
 
   it('a running single-cell verification is in flight too (it spends credits): kind cell-verification (R15)', async () => {
@@ -138,7 +152,7 @@ describe('GET /api/tools/smoke/plan (spec §10; ledgers nothing)', () => {
       'SearchApi on the trial (24 used)',
       { SEARCHAPI_KEY: SENTINEL_SA, SEARCHAPI_PLAN: 'trial', SEARCHAPI_TRIAL_USED: '24' },
       {
-        searchApi: { calendar: 1, itinerary: 1 + 2 * SMOKE_EXPAND_TOP, trialLeft: 76 },
+        searchApi: { calendar: 1, itinerary: 3, trialLeft: 76 },
         travelpayouts: null,
         camoufox: null,
       },
@@ -147,7 +161,7 @@ describe('GET /api/tools/smoke/plan (spec §10; ledgers nothing)', () => {
       'SearchApi on 40usd',
       { SEARCHAPI_KEY: SENTINEL_SA, SEARCHAPI_PLAN: '40usd' },
       {
-        searchApi: { calendar: 1, itinerary: 1 + 2 * SMOKE_EXPAND_TOP, trialLeft: null },
+        searchApi: { calendar: 1, itinerary: 3, trialLeft: null },
         travelpayouts: null,
         camoufox: null,
       },

@@ -203,10 +203,10 @@ describe('checkMutationGlobs', () => {
   it('the command exits 1 naming a violation and 0 on this repository', { timeout: 60_000 }, () => {
     const script = join(ROOT, 'scripts', 'check-mutation-globs.mjs');
     const bad = workspace(['src/a.ts'], SCOPE);
-    const failed = spawnSync(process.execPath, [script, bad], { encoding: 'utf8' });
+    const failed = spawnSync(process.execPath, [script, bad], { encoding: 'utf8', timeout: 30_000 });
     expect(failed.status).toBe(1);
     expect(failed.stderr).toContain('src/camoufox/builds.ts (from src/camoufox/*.ts) is not in');
-    const ok = spawnSync(process.execPath, [script], { encoding: 'utf8', cwd: ROOT });
+    const ok = spawnSync(process.execPath, [script], { encoding: 'utf8', cwd: ROOT, timeout: 30_000 });
     expect(ok.status).toBe(0);
   });
 });

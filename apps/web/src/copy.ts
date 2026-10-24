@@ -396,7 +396,8 @@ export const COPY = {
     empty: 'no fares: the provider said there are no fares for this cell.',
     no_data: 'no cached data: asked, nothing returned; this is not evidence that no flights exist.',
     error: 'error: the request failed; the error list below says why.',
-    skipped: 'skipped: deliberately not asked (not selected, over budget, provider disabled, or departed).',
+    skipped:
+      'skipped: deliberately not asked (not selected, over budget, provider disabled or not reachable, left for a later run, or departed).',
     not_run: 'not searched: not asked yet. Different from no fares: nobody has looked.',
   } satisfies Record<BucketName, string>,
   searchedHelp: 'searched: priced + no fares + no cached data, the cells a provider answered.',

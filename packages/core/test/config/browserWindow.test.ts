@@ -9,8 +9,14 @@ const minimal = {
   APP_BASIC_AUTH_PASS: 'correct-horse-battery',
   IN_CONTAINER: '1',
 };
-const parse = (value: string | undefined) =>
-  parseConfig({ ...minimal, CAMOUFOX_BROWSER_WINDOW: value }, { realpath });
+const ON = {
+  ...minimal,
+  CAMOUFOX_ENABLED: 'true',
+  CAMOUFOX_WORKER_URL: 'http://host.docker.internal:8090',
+  CAMOUFOX_WORKER_KEY: 'test-camoufox-worker-key-0123456789abcdef',
+};
+const parse = (value: string | undefined, base: Record<string, string> = minimal) =>
+  parseConfig({ ...base, CAMOUFOX_BROWSER_WINDOW: value }, { realpath });
 
 describe('CAMOUFOX_BROWSER_WINDOW (spec §12, decision 83)', () => {
   it.each([
@@ -23,12 +29,14 @@ describe('CAMOUFOX_BROWSER_WINDOW (spec §12, decision 83)', () => {
     if (!r.ok) throw new Error(JSON.stringify(r.errors));
     expect(r.config.camoufoxBrowserWindow).toBe(expected);
   });
-  it.each(['Any', 'always', ' scheduled', 'scheduled ', 'SCHEDULED', 'none'])(
-    'refuses %j naming the field, with or without the provider enabled',
-    (value) => {
-      const r = parse(value);
-      if (r.ok) throw new Error('expected a refusal');
-      expect(r.errors.map((e) => e.field)).toEqual(['CAMOUFOX_BROWSER_WINDOW']);
-    },
-  );
+  it.each(
+    ['Any', 'always', ' scheduled', 'scheduled ', 'SCHEDULED', 'none'].flatMap((value) => [
+      [value, 'off', minimal] as const,
+      [value, 'on', ON] as const,
+    ]),
+  )('refuses %j naming the field, with the provider %s', (value, _provider, base) => {
+    const r = parse(value, base);
+    if (r.ok) throw new Error('expected a refusal');
+    expect(r.errors.map((e) => e.field)).toEqual(['CAMOUFOX_BROWSER_WINDOW']);
+  });
 });

@@ -3,7 +3,7 @@
 set -euo pipefail
 cd -- "$(dirname -- "$0")"
 # Finder may not inherit the terminal's PATH (Docker Desktop and Homebrew).
-export PATH="/usr/local/bin:/opt/homebrew/bin:$PATH"
+export PATH="$HOME/.docker/bin:/usr/local/bin:/opt/homebrew/bin:$PATH"
 if ! command -v docker >/dev/null 2>&1; then
   echo 'Install Docker Desktop, open it, then run Start.command again.' >&2
   exit 1

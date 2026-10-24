@@ -27,6 +27,8 @@ export function backupsDirFor(databasePath: string): string {
 }
 
 /** How the operator removes the marker from the compose volume (spec §13), named in the refusal inside a container. */
+/** `path` as one POSIX shell word, so the printed rm line can be pasted as it is (spaces and quotes included). */
+const shellQuoted = (path: string): string => `'${path.replaceAll("'", `'\\''`)}'`;
 const COMPOSE_REMOVAL = `docker compose run --rm --no-deps --entrypoint rm app /data/${MOVED_MARKER}`;
 
 /**
@@ -48,7 +50,7 @@ export function movedDatabaseRefusal(databasePath: string, inContainer: boolean)
   } catch {
     date = 'an unknown date (the marker could not be read)';
   }
-  return `this database moved to a native install on ${date}; see docs/setup.md section 0. To open it here again, remove the marker: ${inContainer ? COMPOSE_REMOVAL : `rm ${marker}`}`;
+  return `this database moved to a native install on ${date}; see docs/setup.md section 0. To open it here again, remove the marker: ${inContainer ? COMPOSE_REMOVAL : `rm ${shellQuoted(marker)}`}`;
 }
 
 /** Why the database's directory cannot take a new file or SQLite's side files, or null (73 in the tool). */

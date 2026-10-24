@@ -34,6 +34,6 @@ launcher again. Do not paste credentials into chat or commit them.
 Backups sit on the compose volume at `/data/backups`, not under a host `data/backups/`
 folder. To keep a copy off this machine, follow [`setup.md`](setup.md) section 6: run
 `docker compose exec -T app node scripts/backup.mjs`, then
-`docker compose cp app:/data/backups/.` into a private folder on another disk. The longer
+`docker compose cp app:/data/backups/. /Volumes/<other disk>/get-me-there-backups` (a private folder on another disk). The longer
 setup guide also covers optional email, scheduled backups, moving to the native path
 (`pnpm gmt setup --import-docker` once the CLI lands), and remote access.
