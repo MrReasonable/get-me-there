@@ -42,22 +42,39 @@ describe('systemRunner (the one execFile wrapper)', { timeout: 30_000 }, () => {
     expect(r).toEqual({ code: 0, stdout: '["$HOME","a b"]\n', stderr: '' });
   });
 
-  // why: macOS adds __CF_USER_TEXT_ENCODING to every process it starts; nothing the caller passed
-  // why: Windows always adds its own system variables (SYSTEMROOT, …) to a child's environment
-  it.skipIf(process.platform === 'win32')('gives the child exactly env when env is given', async () => {
-    const r = await systemRunner(
-      [
-        node,
-        '-e',
-        'console.log(Object.keys(process.env).filter((k) => !k.startsWith("__CF_")).sort().join(","))',
-      ],
-      {
+  // why: macOS adds __CF_USER_TEXT_ENCODING to every process it starts, and on Windows libuv adds the system variables a
+  // process needs (its fixed list below); nothing else, and nothing from this process, reaches the child
+  const WINDOWS_ADDED = new Set([
+    'HOMEDRIVE',
+    'HOMEPATH',
+    'LOGONSERVER',
+    'SYSTEMDRIVE',
+    'SYSTEMROOT',
+    'TEMP',
+    'USERDOMAIN',
+    'USERNAME',
+    'USERPROFILE',
+    'WINDIR',
+  ]);
+  it('gives the child exactly env when env is given, on every platform (CodeRabbit, PR #11)', async () => {
+    process.env.GMT_RUNNER_PARENT_ONLY = 'from-the-parent';
+    try {
+      const r = await systemRunner([node, '-e', 'console.log(JSON.stringify(Object.keys(process.env)))'], {
         cwd: tmp(),
         timeoutMs: 10_000,
-        env: { PATH: '/usr/bin:/bin', HOME: '/h' },
-      },
-    );
-    expect(r.stdout.trim()).toBe('HOME,PATH');
+        env: { PATH: process.platform === 'win32' ? 'C:\\Windows' : '/usr/bin:/bin', HOME: '/h' },
+      });
+      const keys: unknown = JSON.parse(r.stdout);
+      expect(Array.isArray(keys)).toBe(true);
+      const own = (Array.isArray(keys) ? keys.map(String) : [])
+        .filter((k) => !k.startsWith('__CF_'))
+        .filter((k) => process.platform !== 'win32' || !WINDOWS_ADDED.has(k.toUpperCase()))
+        .map((k) => (process.platform === 'win32' ? k.toUpperCase() : k))
+        .sort();
+      expect(own).toEqual(['HOME', 'PATH']);
+    } finally {
+      delete process.env.GMT_RUNNER_PARENT_ONLY;
+    }
   });
 
   it('a command that cannot start is 127; an empty argv is 127; a timeout is 124', async () => {
