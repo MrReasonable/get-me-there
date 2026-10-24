@@ -43,6 +43,7 @@ describe('MemoryFs, memoryRunner and memoryExecutor', () => {
     expect(runner.calls[0]).toEqual({
       argv: ['sh', '-c', 'cat'],
       cwd: '/r',
+      timeoutMs: 1000,
       stdin: 'marker',
       env: undefined,
     });

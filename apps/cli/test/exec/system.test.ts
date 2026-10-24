@@ -277,5 +277,136 @@ describe.skipIf(process.platform === 'win32')(
         late.run({ kind: 'waitHealthy', url: `${base}/api/health`, timeoutSeconds: 10 }),
       ).rejects.toThrow('did not answer healthy within 10 s');
     });
+
+    it('run passes stdin only when the action has one, and the default or given timeout', async () => {
+      const seen: Array<Record<string, unknown>> = [];
+      const spy: Runner = async (_argv, opts) => {
+        seen.push({ ...opts });
+        return { code: 0, stdout: '', stderr: '' };
+      };
+      await systemExecutor(spy).run(runAction(['x'], '/'));
+      await systemExecutor(spy, { runTimeoutMs: 5 }).run(runAction(['x'], '/', { stdin: '' }));
+      expect(seen).toEqual([
+        { cwd: '/', timeoutMs: 30 * 60_000 },
+        { cwd: '/', timeoutMs: 5, stdin: '' },
+      ]);
+    });
+
+    it('a failure shows only the last line of stderr, and nothing after the code when stderr is empty', async () => {
+      const fail =
+        (stderr: string): Runner =>
+        async () => ({ code: 2, stdout: '', stderr });
+      await expect(
+        systemExecutor(fail('first\nlast line\n')).run(runAction(['x'], '/', { describe: 'step' })),
+      ).rejects.toThrow(/^step exited with 2: last line$/);
+      await expect(systemExecutor(fail('')).run(runAction(['x'], '/', { describe: 'step' }))).rejects.toThrow(
+        /^step exited with 2$/,
+      );
+      await expect(
+        systemExecutor(fail('the secret\n')).run(
+          runAction(['x'], '/', { describe: 'step', stdin: 's', secretStdin: true }),
+        ),
+      ).rejects.toThrow(/^step exited with 2$/);
+    });
+
+    it('a write whose temporary file was never made reports the write’s own error', async () => {
+      const d = tmp();
+      await expect(
+        ex.run({
+          kind: 'writeFile',
+          path: join(d, 'missing', 'f'),
+          contents: 'x',
+          mode: 0o600,
+          secret: true,
+        }),
+      ).rejects.toMatchObject({ syscall: 'open', code: 'ENOENT' });
+    });
+
+    it('a downloaded file is 0600, and a non-2xx answer is refused by its status', async () => {
+      const d = tmp();
+      await ex.run({
+        kind: 'download',
+        url: `${base}/blob`,
+        to: join(d, 'blob'),
+        sha256: sha(BLOB),
+        bytes: BLOB.length,
+      });
+      expect(mode(join(d, 'blob'))).toBe(0o600);
+      await expect(
+        ex.run({ kind: 'download', url: `${base}/none`, to: join(d, 'x'), sha256: sha(BLOB), bytes: 0 }),
+      ).rejects.toThrow(/answered 404$/);
+    });
+
+    it('unpack checks the hash, unpacks a tar or a zip with the right argv into a fresh directory and moves it into place', async () => {
+      const d = tmp();
+      mkdirSync(join(d, 'src', 'inner'), { recursive: true });
+      writeFileSync(join(d, 'src', 'inner', 'f.txt'), 'packed');
+      const calls: Array<{ argv: readonly string[]; cwd: string }> = [];
+      const spy: Runner = (argv, opts) => {
+        calls.push({ argv, cwd: opts.cwd });
+        return systemRunner(argv, opts);
+      };
+      const e = systemExecutor(spy);
+      const tar = join(d, 'a.tar');
+      await systemRunner(['tar', '-cf', tar, '-C', join(d, 'src'), 'inner'], { cwd: d, timeoutMs: 30_000 });
+      mkdirSync(join(d, 'out.unpacking'));
+      writeFileSync(join(d, 'out.unpacking', 'stale'), 'old');
+      await e.run({ kind: 'unpack', archive: tar, sha256: sha(readFileSync(tar)), to: join(d, 'out') });
+      expect(readFileSync(join(d, 'out', 'inner', 'f.txt'), 'utf8')).toBe('packed');
+      expect(existsSync(join(d, 'out', 'stale'))).toBe(false);
+      expect(existsSync(join(d, 'out.unpacking'))).toBe(false);
+      expect(calls.at(-1)).toEqual({ argv: ['tar', '-xf', tar, '-C', join(d, 'out.unpacking')], cwd: d });
+      const zip = join(d, 'b.zip');
+      if (
+        (await systemRunner(['zip', '-qr', zip, 'inner'], { cwd: join(d, 'src'), timeoutMs: 30_000 }))
+          .code === 0
+      ) {
+        await e.run({ kind: 'unpack', archive: zip, sha256: sha(readFileSync(zip)), to: join(d, 'zout') });
+        expect(readFileSync(join(d, 'zout', 'inner', 'f.txt'), 'utf8')).toBe('packed');
+        expect(calls.at(-1)?.argv).toEqual(['unzip', '-q', zip, '-d', join(d, 'zout.unpacking')]);
+      }
+      const bad = join(d, 'c.tar');
+      writeFileSync(bad, 'not a tar at all');
+      await expect(
+        e.run({ kind: 'unpack', archive: bad, sha256: sha('not a tar at all'), to: join(d, 'cout') }),
+      ).rejects.toThrow(`unpacking ${bad} exited with`);
+      expect(existsSync(join(d, 'cout.unpacking'))).toBe(false);
+      expect(existsSync(join(d, 'cout'))).toBe(false);
+    });
+
+    it('waitHealthy sleeps 2 s between tries until its deadline, inclusive; by default with a real clock and pause', async () => {
+      health = [{ status: 503, body: '{}' }];
+      let clock = 0;
+      const sleeps: number[] = [];
+      const e = systemExecutor(systemRunner, {
+        sleep: async (ms) => {
+          sleeps.push(ms);
+          clock += ms;
+        },
+        now: () => clock,
+      });
+      await expect(
+        e.run({ kind: 'waitHealthy', url: `${base}/api/health`, timeoutSeconds: 10 }),
+      ).rejects.toThrow();
+      expect(sleeps).toEqual([2000, 2000, 2000, 2000, 2000]);
+      await expect(
+        systemExecutor(systemRunner).run({
+          kind: 'waitHealthy',
+          url: `${base}/api/health`,
+          timeoutSeconds: 0,
+        }),
+      ).rejects.toThrow('within 0 s');
+      health = [
+        { status: 503, body: '{}' },
+        { status: 200, body: '{"ok":true}' },
+      ];
+      const started = Date.now();
+      await systemExecutor(systemRunner).run({
+        kind: 'waitHealthy',
+        url: `${base}/api/health`,
+        timeoutSeconds: 30,
+      });
+      expect(Date.now() - started).toBeGreaterThanOrEqual(1900);
+    });
   },
 );

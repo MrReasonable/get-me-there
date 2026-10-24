@@ -7,7 +7,7 @@ spec_sections: ["§1", "§4", "§9 item 9", "§9 CI matrix", "§12 Where setting
 reviewers: [product-owner, code-architect, test-strategy-reviewer, security-reviewer, devops-reviewer, cost-and-budget-reviewer, persona-flexible-traveller]
 mutate: {"@gmt/cli": ["src/plan/**", "src/services/**", "src/exec/system.ts", "src/setup/appEnv.ts", "src/setup/answers.ts", "src/setup/secrets.ts"]}
 pending: {}
-status: draft
+status: merged
 ---
 
 # WP16b: Local setup (the `gmt` command, native services, imports, CI matrix)

@@ -351,12 +351,12 @@ export async function setupCommand(flags: Flags, _positional: string | null, dep
     if (moving) {
       if (importDocker)
         deps.io.out(
-          [
+          `${[
             '  then: run docker compose -p get-me-there stop app',
             `  then: run ${dockerBackupArgv().join(' ')} (prints the backup's file)`,
             `  then: copy that file out of the volume into ${join(paths.data, 'backups')}, copy it to ${nativeDb}.importing (0600), check it with PRAGMA integrity_check and move it into place`,
             '  then: write /data/MOVED-TO-NATIVE in the volume (its text on stdin), and offer docker compose down',
-          ].join('\n') + '\n',
+          ].join('\n')}\n`,
         );
       else if (importDbPath !== null)
         deps.io.out(

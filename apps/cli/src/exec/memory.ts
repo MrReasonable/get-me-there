@@ -134,6 +134,7 @@ export class MemoryFs implements Files {
 export interface RunCall {
   argv: readonly string[];
   cwd: string;
+  timeoutMs: number;
   stdin: string | undefined;
   env: Readonly<Record<string, string>> | undefined;
 }
@@ -152,7 +153,13 @@ export function memoryRunner(
 ): Runner & { calls: RunCall[] } {
   const calls: RunCall[] = [];
   const runner: Runner = async (argv, opts) => {
-    const call: RunCall = { argv, cwd: opts.cwd, stdin: opts.stdin, env: opts.env };
+    const call: RunCall = {
+      argv,
+      cwd: opts.cwd,
+      timeoutMs: opts.timeoutMs,
+      stdin: opts.stdin,
+      env: opts.env,
+    };
     calls.push(call);
     const answered = handler(argv, call);
     if (answered !== undefined)

@@ -31,13 +31,6 @@ export const GROUP_NAMES = {
   browser: ['CAMOUFOX_BROWSER_WINDOW'],
 } as const satisfies Record<ReconfigureGroup | 'base', readonly string[]>;
 export const OWNED_NAMES: readonly string[] = Object.values(GROUP_NAMES).flat();
-/** The names whose values are secrets. */
-export const SECRET_NAMES: readonly string[] = [
-  'APP_BASIC_AUTH_PASS',
-  'TRAVELPAYOUTS_TOKEN',
-  'SEARCHAPI_KEY',
-  'SMTP_PASS',
-];
 export const OPERATOR_USER = 'operator';
 
 export type Entries = ReadonlyArray<readonly [string, string]>;

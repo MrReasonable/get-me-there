@@ -1,5 +1,5 @@
 import { dirname, join, sep } from 'node:path/posix';
-import type { Os, Paths, ServiceSpec } from '../platform/types.js';
+import type { Paths, ServiceSpec } from '../platform/types.js';
 
 /** What every service spec is built from: the recorded Node binary, the checkout, the home and the platform's paths. */
 export interface SpecInput {
@@ -82,10 +82,9 @@ const TEMP_DIRS = [
 ];
 
 /** A stable Node for the OS, named in the refusal. */
-const STABLE_NODE: Record<Os, string> = {
+const STABLE_NODE: Record<'darwin' | 'linux', string> = {
   darwin: '/opt/homebrew/opt/node@22/bin/node (brew install node@22)',
   linux: '/usr/bin/node (the distribution’s or NodeSource’s nodejs package)',
-  win32: 'node.exe from the Node installer',
 };
 
 /**
@@ -93,7 +92,11 @@ const STABLE_NODE: Record<Os, string> = {
  * directory (or one of `tmpDirs`, the machine's own) or a version manager's shim directory is refused, naming a stable
  * one; null when the path is fine.
  */
-export function execPathProblem(execPath: string, os: Os, tmpDirs: readonly string[]): string | null {
+export function execPathProblem(
+  execPath: string,
+  os: 'darwin' | 'linux',
+  tmpDirs: readonly string[],
+): string | null {
   const temps = [...TEMP_DIRS, ...tmpDirs.map((d) => (d.endsWith(sep) ? d : `${d}${sep}`))];
   const where = temps.some((d) => execPath.startsWith(d))
     ? 'a temporary directory'

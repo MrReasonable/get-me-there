@@ -396,6 +396,8 @@ describe('WP16b: the workflow guard (decision 77)', () => {
   });
 
   const SHA = 'a'.repeat(40);
+  // why: assembled, so a fixture's GitHub expression is not read as a template placeholder
+  const X = ['$', '{{'].join('');
   const ok = (jobs, top = '') =>
     `name: x\non:\n  push: {}\n${top}permissions:\n  contents: read\njobs:\n${jobs}`;
   const step = (body) => `  build:\n    runs-on: ubuntu-24.04\n    steps:\n${body}`;
@@ -415,9 +417,9 @@ describe('WP16b: the workflow guard (decision 77)', () => {
     );
   });
   it.each([
-    ['secrets.X', step('      - run: echo ${{ secrets.TOKEN }}\n')],
-    ['secrets[...]', step("      - run: echo ${{ secrets['TOKEN'] }}\n")],
-    ['toJSON(secrets)', step('      - run: echo ${{ toJSON(secrets) }}\n')],
+    ['secrets.X', step(`      - run: echo ${X} secrets.TOKEN }}\n`)],
+    ['secrets[...]', step(`      - run: echo ${X} secrets['TOKEN'] }}\n`)],
+    ['toJSON(secrets)', step(`      - run: echo ${X} toJSON(secrets) }}\n`)],
   ])('fails on the secrets context: %s', (_n, jobs) => {
     expect(guardProblems(ok(jobs), ctx)).toContain('the secrets context');
   });
@@ -430,7 +432,7 @@ describe('WP16b: the workflow guard (decision 77)', () => {
     const t = ok(
       e2e(
         '          - runner: macos-15\n            E2E-MODE: real',
-        `      - run: echo ${tok === 'GITHUB_TOKEN' ? '$GITHUB_TOKEN' : '${{ github.token }}'}\n`,
+        `      - run: echo ${tok === 'GITHUB_TOKEN' ? '$GITHUB_TOKEN' : `${X} github.token }}`}\n`,
       ),
     );
     expect(guardProblems(t, ctx)).toContain('install-e2e: the GitHub token');
@@ -482,7 +484,7 @@ describe('WP16b: the workflow guard (decision 77)', () => {
   });
   it('fails on a computed E2E-MODE, on a matrix with no real entry, and on a lint-only runner the record does not name', () => {
     expect(
-      guardProblems(ok(e2e('          - runner: macos-15\n            E2E-MODE: ${{ inputs.mode }}')), ctx),
+      guardProblems(ok(e2e(`          - runner: macos-15\n            E2E-MODE: ${X} inputs.mode }}`)), ctx),
     ).toContain("install-e2e: macos-15's E2E-MODE is not a literal real or lint-only");
     const lint = ok(e2e('          - runner: macos-15\n            E2E-MODE: lint-only'));
     expect(guardProblems(lint, ctx)).toEqual([

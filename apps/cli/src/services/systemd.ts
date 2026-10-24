@@ -72,7 +72,7 @@ function stateOf(word: string, onDisk: string | null): ServiceState {
 }
 
 const missing: ServiceFacts = { onDisk: null, loaded: false, state: 'not-installed' };
-const hasInstall = (contents: string | null): boolean => contents?.includes('\n[Install]\n') === true;
+const hasInstall = (contents: string): boolean => contents.includes('\n[Install]\n');
 
 export function systemdManager(): ServiceManager {
   const sc = (...args: string[]): Action => runAction(['systemctl', '--user', ...args], '/');
@@ -84,7 +84,7 @@ export function systemdManager(): ServiceManager {
         unitName: systemdUnit(spec.name),
       };
       if (spec.calendar === null) return [service];
-      const timerName = systemdUnit(spec.name).replace(/\.service$/, '.timer');
+      const timerName = `get-me-there-${spec.name}.timer`;
       return [
         service,
         {
@@ -142,9 +142,8 @@ export function systemdManager(): ServiceManager {
       });
       if (present.length === 0) return [];
       // why: the timer goes first, so it cannot start the job between the two stops
-      const ordered = [...present].sort(
-        (a, b) => Number(b.unitName.endsWith('.timer')) - Number(a.unitName.endsWith('.timer')),
-      );
+      const isTimer = (r: RenderedService) => r.unitName.endsWith('.timer');
+      const ordered = [...present.filter(isTimer), ...present.filter((r) => !isTimer(r))];
       return [
         ...ordered.flatMap((r) => [
           sc('stop', r.unitName),
