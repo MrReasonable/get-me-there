@@ -275,6 +275,15 @@ describe('--import-db <path> and --ignore-docker', () => {
     expect(m.io.stderr).toContain('its lock is held');
     expect(m.fs.read(DB)).toBeNull();
   });
+  it('with --replace-database a held lock refuses before any stop, backup or write: only the build ran (ca-b1-003, CodeRabbit …k7Z)', async () => {
+    const m = dbMachine('fresh');
+    m.fs.file(DB, 'native db', 0o600);
+    expect(await runCli(['setup', '--import-db', SRC, '--replace-database', ...NI], m.deps)).toBe(75);
+    const done = m.executor.log.map((a) => (a.kind === 'run' ? a.argv.join(' ') : a.kind));
+    expect(done).toContain('pnpm build');
+    expect(done.every((d) => d.startsWith('pnpm install') || d.startsWith('pnpm build'))).toBe(true);
+    expect(m.fs.read(DB)).toBe('native db');
+  });
   it('refuses a path that is no file', async () => {
     const m = dbMachine('absent');
     expect(await runCli(['setup', '--import-db', '/nope.db', ...NI], m.deps)).toBe(78);

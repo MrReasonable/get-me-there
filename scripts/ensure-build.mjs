@@ -16,7 +16,12 @@ const LOCK = lockPathFor(REPO);
 // leaves a lock whose dead pid the next run takes over at once (ensure-build-lib.mjs).
 await underLock(LOCK, async (run) => {
   if (needsBuild(REPO, STAMP)) {
-    await run('pnpm', ['--filter', '@gmt/api...', 'build'], { cwd: REPO, stdio: 'ignore' });
+    // why: on Windows pnpm is pnpm.cmd, which Node starts only through a shell; the arguments are fixed words
+    await run('pnpm', ['--filter', '@gmt/api...', 'build'], {
+      cwd: REPO,
+      stdio: 'ignore',
+      shell: process.platform === 'win32',
+    });
     writeFileSync(STAMP, '');
     utimesSync(STAMP, new Date(), new Date());
     console.log('built');

@@ -344,6 +344,8 @@ describe('scripts/ensure-build-lib.mjs build lock ownership (CodeRabbit batch 3)
     const text = readFileSync(join(REPO, 'scripts', 'ensure-build.mjs'), 'utf8');
     expect(text).toContain('await underLock(LOCK,');
     expect(text).not.toContain('execFileSync');
+    // why: the Windows leg runs it before its suites; pnpm is a .cmd there
+    expect(text).toContain("shell: process.platform === 'win32'");
   });
 
   it('a build killed outright (SIGKILL) leaves a lock the next run takes at once', async () => {
