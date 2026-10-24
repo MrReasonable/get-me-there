@@ -9,15 +9,12 @@ import { smokeCommand } from './commands/smoke.js';
 import { startCommand } from './commands/start.js';
 import { statusCommand } from './commands/status.js';
 import { stopCommand } from './commands/stop.js';
+import { uninstallCommand } from './commands/uninstall.js';
+import { updateCommand } from './commands/update.js';
 import { type Deps, EXIT } from './deps.js';
 
 /** A command: its flags and positional, the injected facts, and an exit code. */
 export type Command = (flags: Flags, positional: string | null, deps: Deps) => Promise<number>;
-
-const notBuilt: Command = async (_f, _p, deps) => {
-  deps.io.err('this command is not built yet\n');
-  return EXIT.failed;
-};
 
 const COMMANDS: Record<CommandName, Command> = {
   setup: setupCommand,
@@ -30,8 +27,8 @@ const COMMANDS: Record<CommandName, Command> = {
   restore: restoreCommand,
   password: passwordCommand,
   smoke: smokeCommand,
-  update: notBuilt,
-  uninstall: notBuilt,
+  update: updateCommand,
+  uninstall: uninstallCommand,
 };
 
 /** Parses `gmt`'s arguments and runs the command; resolves the process's exit code. */
