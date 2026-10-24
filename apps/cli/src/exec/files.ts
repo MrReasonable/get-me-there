@@ -1,4 +1,4 @@
-import { lstatSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { accessSync, constants, lstatSync, readdirSync, readFileSync, statSync } from 'node:fs';
 
 /**
  * The synchronous file reads a planner makes before planning (existing settings files and their modes, what is already
@@ -19,6 +19,8 @@ export interface Files {
   isSymlink(path: string): boolean;
   /** A directory's entry names, sorted, or null when it is no directory. */
   list(dir: string): string[] | null;
+  /** Whether this user may write to the path (create entries in a directory). */
+  writable(path: string): boolean;
 }
 
 const safe = <T>(f: () => T, fallback: T): T => {
@@ -37,4 +39,9 @@ export const systemFiles: Files = {
   isDir: (p) => safe(() => statSync(p).isDirectory(), false),
   isSymlink: (p) => safe(() => lstatSync(p).isSymbolicLink(), false),
   list: (d) => safe(() => (statSync(d).isDirectory() ? readdirSync(d).sort() : null), null),
+  writable: (p) =>
+    safe(() => {
+      accessSync(p, constants.W_OK);
+      return true;
+    }, false),
 };

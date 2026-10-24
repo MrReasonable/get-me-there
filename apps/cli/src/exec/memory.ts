@@ -75,6 +75,10 @@ export class MemoryFs implements Files {
   isSymlink(path: string): boolean {
     return this.entries.get(path)?.kind === 'symlink';
   }
+  writable(path: string): boolean {
+    const e = this.resolved(path);
+    return e !== undefined && e.kind !== 'symlink' && e.owner === this.uid && (e.mode & 0o200) !== 0;
+  }
   list(dir: string): string[] | null {
     if (!this.isDir(dir)) return null;
     const prefix = `${dir}/`;

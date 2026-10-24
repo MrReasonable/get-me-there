@@ -45,6 +45,8 @@ describe.skipIf(process.platform === 'win32')('systemFiles and MemoryFs agree (P
       expect(f.isSymlink(join(d, 'sub'))).toBe(false);
       expect(f.list(d)).toEqual(['link', 'sub']);
       expect(f.list(join(d, 'sub', 'a.env'))).toBeNull();
+      expect(f.writable(join(d, 'sub'))).toBe(true);
+      expect(f.writable(join(d, 'none'))).toBe(false);
       expect(f.read(join(d, 'link', 'a.env'))).toBe(f === mem ? null : 'A=1\n');
     }
   });
