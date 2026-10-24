@@ -227,20 +227,45 @@ describe('the browser gate’s own refusals, notice and logs', () => {
     laneFor(working, 'discovery', 'travelpayouts').inFlight.add('a cell');
     expect(browserWindowNotice(pending.ctx, working).detail).toBe(carriesOn);
     // Travelpayouts' lane stopped (or its line blocked, or the provider disabled): nothing else searches
-    const stopped = run();
+    // a lane with a call in flight still searches, even with nothing left to fetch
+    const lastCall = run();
+    laneFor(lastCall, 'discovery', 'travelpayouts').inFlight.add('a cell');
+    expect(notice(lastCall)).toBe(carriesOn);
+    // with cells left, Travelpayouts' lane stopped, its line blocked, the provider disabled or capped, or a cabin it
+    // does not sell: nothing else searches
+    const pendingNotice = (r: ReturnType<typeof pendingRun>) => browserWindowNotice(pending.ctx, r).detail;
+    const stopped = pendingRun();
     laneFor(stopped, 'discovery', 'travelpayouts').intake.abort();
-    const blocked = newRun(e.ctx, exec, {
+    const blocked = newRun(pending.ctx, left, {
       manual: false,
       fresh: false,
       blocked: new Set(['discovery:travelpayouts']),
     });
-    const disabled = run();
+    const disabled = pendingRun();
     disabled.disabled.add('travelpayouts');
-    const capped = run();
+    const capped = pendingRun();
     laneFor(capped, 'discovery', 'travelpayouts').budgetOut = true;
-    const cabin = run();
+    const cabin = pendingRun();
     const business = { ...cabin, snapshot: { ...cabin.snapshot, cabin: 'business' as const } };
-    for (const r of [stopped, blocked, disabled, capped, business]) expect(notice(r)).toBe(STOPS);
+    for (const r of [stopped, blocked, disabled, capped, business]) expect(pendingNotice(r)).toBe(STOPS);
+    // only the browser provider itself has cells left: it is never "the other providers"
+    const camoufoxError = new ProviderError({
+      kind: 'upstream',
+      retryable: true,
+      providerId: 'camoufox',
+      message: 'x',
+    });
+    const browserOnly = engineWith(
+      [stubCamoufox({ cells: 4, failCalls: 4, error: camoufoxError }), stubTravelpayouts({ cells: 4 })],
+      { scheduleCron: '0 6 * * *', window: RELATIVE, createdAt: at('2027-03-01T00:00:00.000Z') },
+    );
+    const browserLeft = await browserOnly.runToEnd();
+    expect(
+      browserWindowNotice(
+        browserOnly.ctx,
+        newRun(browserOnly.ctx, browserLeft, { manual: false, fresh: false, blocked: new Set() }),
+      ).detail,
+    ).toBe(STOPS);
     e.ctx.repos.definitions.update(e.definition.id, { enabled: false });
     expect(notice(run())).toContain('are left for your next run of this search;');
     e.ctx.repos.definitions.update(e.definition.id, {
