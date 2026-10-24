@@ -2,9 +2,9 @@
 // the path it was made at, so one database file at one path is one app to the camoufox worker, however its host or
 // container changes, and a copy opened elsewhere is a second one.
 
-import { copyFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { copyFileSync, existsSync, realpathSync, symlinkSync } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { MetaRepo } from '../src/repositories/meta.js';
 import { freshDb, sqliteCode, tmpDir } from './helpers/db.js';
 
@@ -39,9 +39,45 @@ describe('MetaRepo.appInstanceId (decision 82)', () => {
       copied.raw
         .prepare<[], { value: string }>("SELECT value FROM app_meta WHERE key = 'app_instance_path'")
         .get()?.value,
-    ).toBe(copy);
+    ).toBe(realpathSync.native(copy));
     copied.close();
     expect(new MetaRepo(freshDb(original)).appInstanceId()).toBe(first);
+  });
+
+  it('T10: the same file opened through a symlinked directory is the same app; the path stored is the real one', () => {
+    const dir = tmpDir();
+    const real = join(dir, 'gmt.db');
+    const db = freshDb(real);
+    const first = new MetaRepo(db).appInstanceId();
+    db.close();
+    const link = join(tmpDir(), 'linked');
+    symlinkSync(dir, link);
+    const viaLink = freshDb(join(link, 'gmt.db'));
+    expect(new MetaRepo(viaLink).appInstanceId()).toBe(first);
+    expect(
+      viaLink.raw
+        .prepare<[], { value: string }>("SELECT value FROM app_meta WHERE key = 'app_instance_path'")
+        .get()?.value,
+    ).toBe(realpathSync.native(real));
+  });
+
+  it('T10: on a case-insensitive volume the same file opened with other letter case is the same app', (ctx) => {
+    const dir = tmpDir();
+    const real = join(dir, 'gmt.db');
+    const db = freshDb(real);
+    const first = new MetaRepo(db).appInstanceId();
+    db.close();
+    const shouted = join(dirname(real), basename(real).toUpperCase());
+    // why: only where the volume folds case (macOS's default) is GMT.DB the same file as gmt.db
+    if (!existsSync(shouted)) ctx.skip();
+    expect(new MetaRepo(freshDb(shouted)).appInstanceId()).toBe(first);
+  });
+
+  it('T10: reads and writes the id in one immediate transaction', () => {
+    const db = freshDb();
+    const immediate = vi.spyOn(db, 'immediateTransaction');
+    new MetaRepo(db).appInstanceId();
+    expect(immediate).toHaveBeenCalledTimes(1);
   });
 
   it('two databases are two apps', () => {
