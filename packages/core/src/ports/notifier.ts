@@ -55,6 +55,7 @@ export type OperatorMessageKind =
   | 'interrupted'
   | 'provider_disabled'
   | 'provider_capped'
+  | 'browser_window'
   | 'parity_break'
   | 'alerts_calendar_only'
   | 'crash_loop';

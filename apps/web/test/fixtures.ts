@@ -237,6 +237,9 @@ export function summary(over: Partial<In<typeof apiContract.executionSummarySche
     ageHours: 2,
     // the run's own policy (decision 42); the definition() fixture's current expandTop is also 2
     expandTop: 2,
+    scheduledFor: null,
+    isCatchUp: false,
+    skipCode: null,
     ...over,
   });
 }
@@ -470,6 +473,9 @@ export function execution(
     startedAt: '2026-10-14T14:00:00.000Z',
     finishedAt: null,
     errorText: null,
+    scheduledFor: null,
+    isCatchUp: false,
+    skipCode: null,
     progress: [
       { stage: 'discovery', providerId: 'travelpayouts', buckets: discoveryBuckets, total: 126 },
       { stage: 'verification', providerId: 'searchapi', buckets: buckets(0, 0, 0, 0, 116, 10), total: 126 },
@@ -538,6 +544,8 @@ export function coverageResponse(
     ],
     scheduleBlockedSince: null,
     onDemand: [],
+    scheduledOnly: [],
+    browserLeftFor: 'next-scheduled-run',
     ...over,
   });
 }

@@ -1,0 +1,45 @@
+{
+  "ok": true,
+  "coolingDownUntil": null,
+  "cooldownCause": null,
+  "signedInRefusal": false,
+  "lastPageAt": "2027-03-01T05:59:00.000Z",
+  "busySince": null,
+  "versions": {
+    "selectors": "2026-10-18-results",
+    "grammar": "2026-10-18-feasibility",
+    "camoufoxJs": "0.11.5",
+    "binary": "152.0.4-beta.28"
+  },
+  "flags": { "RESULTS_VERIFIED": true, "FORM_VERIFIED": true },
+  "accountCookie": { "found": false, "names": [], "checkedAt": "2027-03-01T06:00:00.000Z" },
+  "socsCapturedAt": "2027-02-01T06:00:00.000Z",
+  "socsStable": true,
+  "cooldownHours": 48,
+  "pageTimeoutSeconds": 90,
+  "gridStepDays": { "departures": 1, "returns": 1 },
+  "gridScrollCap": 30,
+  "gridScrollSpacingSeconds": 5,
+  "sharedSettings": {
+    "CAMOUFOX_COOLDOWN_HOURS": "48",
+    "CAMOUFOX_PAGE_TIMEOUT_SECONDS": "90",
+    "CAMOUFOX_MODE": "grid",
+    "CAMOUFOX_GRID_SCROLL_CAP": "30",
+    "CAMOUFOX_GRID_SCROLL_SPACING_SECONDS": "5",
+    "CAMOUFOX_MONTHLY_PAGE_CAP": "1500",
+    "CAMOUFOX_MONTHLY_SCROLL_CAP": "6000",
+    "CAMOUFOX_BILLING_DAY": "1",
+    "POINT_OF_SALE": "GB"
+  },
+  "osArch": "darwin-arm64",
+  "build": "152.0.4-beta.28",
+  "consent": { "kind": "socs", "expiresAt": "2028-03-01T06:00:00.000Z", "boundedBy": "cookie" },
+  "monthly": {
+    "windowStart": "2027-03-01T00:00:00.000Z",
+    "windowEnd": "2027-04-01T00:00:00.000Z",
+    "pages": 12,
+    "scrolls": 340,
+    "readable": true
+  },
+  "appInstances": { "windowStart": "2027-03-01T00:00:00.000Z", "count": 1 }
+}

@@ -10,10 +10,13 @@ const SUBJECTS: Readonly<Record<OperatorMessageKind, string>> = {
   skipped_budget: 'scheduled run skipped: it would exceed a budget cap',
   skipped_confirm: 'scheduled run skipped: the cost estimate needs your confirmation',
   skipped_window: 'scheduled run skipped: the window has no departure dates left, schedule disabled',
-  skipped_missed: 'scheduled run missed while the app was stopped',
+  // why: spec §8.2 rev 36 — a missed firing is caught up once unless its row says why not (its skip_code)
+  skipped_missed: 'scheduled run missed and not caught up',
   interrupted: 'run interrupted',
   provider_disabled: 'a provider was disabled for this run',
   provider_capped: 'a provider reached a budget cap; the others carried on',
+  // why: decision 83 — its own kind, so the notice dedupe never lets it and a provider_disabled notice hide each other
+  browser_window: 'browser pages left: this run is past its browser window',
   crash_loop: 'automatic resume stopped after repeated restarts',
   parity_break: 'request count differs from the plan',
   alerts_calendar_only: 'alerts running on calendar basis only',
@@ -45,6 +48,8 @@ const GUIDANCE: Readonly<Record<OperatorMessageKind, string>> = {
   provider_disabled: 'The other providers carried on; a manual resume retries this one.',
   provider_capped:
     'Its cells stay skipped (budget) in this run: resume the run by hand once the cap window reopens or the cap is raised, or the next scheduled run searches them.',
+  browser_window:
+    "The line above says which run fetches the browser provider's cells and whether the other providers carried on. CAMOUFOX_BROWSER_WINDOW=any lets a resumed run keep loading browser pages.",
   crash_loop: 'Check the logs for the cause, then resume it manually from the status bar.',
   parity_break: 'The plan and the ledger disagree; Coverage shows both counts.',
   alerts_calendar_only:
@@ -82,9 +87,10 @@ export function renderOperatorMessage(
   kind: OperatorMessageKind,
   p: MessageParams,
 ): { subject: string; body: string } {
-  const noProvider = kind === 'skipped_budget' && p.variant === 'no-runnable-provider';
-  const subject = `[get-me-there] ${cleanLine(p.definitionName)}: ${noProvider ? NO_RUNNABLE_PROVIDER.subject : SUBJECTS[kind]}`;
-  const lines = [cleanText(p.detail), noProvider ? NO_RUNNABLE_PROVIDER.guidance : GUIDANCE[kind]];
+  const variant =
+    kind === 'skipped_budget' && p.variant === 'no-runnable-provider' ? NO_RUNNABLE_PROVIDER : null;
+  const subject = `[get-me-there] ${cleanLine(p.definitionName)}: ${variant?.subject ?? SUBJECTS[kind]}`;
+  const lines = [cleanText(p.detail), variant?.guidance ?? GUIDANCE[kind]];
   if (p.executionId !== null) lines.push(`Execution: ${p.executionId}`);
   return { subject, body: lines.join('\n') };
 }

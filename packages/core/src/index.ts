@@ -18,8 +18,12 @@ export type {
   SchedulerJob,
 } from './api-contract/index.js';
 export * as apiContract from './api-contract/index.js';
+export * from './budget/window.js';
+export * from './camoufox/builds.js';
 export * from './camoufox/grid.js';
 export * from './camoufox/protocol.js';
+export * from './camoufox/settings.js';
+export * from './camoufox/start.js';
 export * from './config/presets.js';
 export * from './config/schema.js';
 export * from './config/secret.js';
@@ -33,8 +37,20 @@ export * from './dates/epochDay.js';
 export * from './errors.js';
 export * from './labels/age.js';
 export { pointOfSaleLabel } from './labels/pointOfSale.js';
+export {
+  LEFT_FOR,
+  LEFT_FOR_TEXT,
+  type LeftFor,
+  leftForOf,
+  SKIP_CODE_TEXT,
+  SKIP_DETAIL_TEXT,
+  scheduledOnlyPastText,
+  scheduledOnlyText,
+} from './labels/skip.js';
 export { GRID_SOURCE_LABEL, SOURCE_LABELS, sourceLabel } from './labels/source.js';
 export { isTruncated, TRUNCATED_NOTE } from './labels/truncated.js';
+export { MOVED_MARKER, movedMarkerText, parseMovedMarker } from './local/movedMarker.js';
+export { workerDataDir } from './local/paths.js';
 export { canonicalCarrier, canonicalFlightNumber } from './normalise/carrier.js';
 export { itineraryHash } from './normalise/hashing.js';
 export { type NormaliseDeps, normaliseOffer } from './normalise/itinerary.js';

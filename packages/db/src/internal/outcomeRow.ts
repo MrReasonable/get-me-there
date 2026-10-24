@@ -1,5 +1,5 @@
 import type { CellKey, CellOutcome } from '@gmt/core';
-import { CABINS, OUTCOME_STATUSES, PROVIDER_IDS, SOURCE_KINDS, STAGES } from './enums.js';
+import { CABINS, OUTCOME_STATUSES, PROVIDER_IDS, SKIP_DETAILS, SOURCE_KINDS, STAGES } from './enums.js';
 import { nullableOneOf, oneOf, readDate, readIata, readNullableTime } from './read.js';
 
 /** A `cell_outcomes` row as SQLite returns it (every enum column a plain string, narrowed by `toOutcome`). */
@@ -21,6 +21,7 @@ export interface OutcomeDbRow {
   point_of_sale: string | null;
   source_kind: string | null;
   reused_from_execution_id: string | null;
+  skip_detail: string | null;
 }
 
 const C = 'cell_outcomes';
@@ -43,6 +44,7 @@ export function toOutcome(r: OutcomeDbRow): CellOutcome {
     pointOfSale: r.point_of_sale,
     sourceKind: nullableOneOf(`${C}.source_kind`, SOURCE_KINDS, r.source_kind),
     reusedFromExecutionId: r.reused_from_execution_id,
+    skipDetail: nullableOneOf(`${C}.skip_detail`, SKIP_DETAILS, r.skip_detail),
   };
 }
 

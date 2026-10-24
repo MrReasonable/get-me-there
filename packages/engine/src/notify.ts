@@ -13,10 +13,11 @@ export interface NotifyParams extends MessageParams {
  * per London day (decision 56), so a pause-and-resume loop cannot flood the inbox. Returns true only when every notifier
  * accepted the message: false when deduplicated, when there is no notifier, or when one failed (fix round 1, arch M4: a
  * keyed notice is claimed only once it was really sent).
- * Never throws: a failing notifier is logged and recorded as failed, because a notification must not stop a run.
+ * Never throws: a failing notifier is logged and recorded as failed, because a notification must not stop a run. A send
+ * that finishes after the engine shut down is logged once and not recorded (the database is closed or closing).
  */
 export async function notifyOperator(
-  ctx: Pick<EngineContext, 'repos' | 'notifiers' | 'log' | 'clock'>,
+  ctx: Pick<EngineContext, 'repos' | 'notifiers' | 'log' | 'clock' | 'lifecycle'>,
   kind: OperatorMessageKind,
   p: NotifyParams,
 ): Promise<boolean> {
@@ -67,6 +68,15 @@ export async function notifyOperator(
         'operator notification failed',
       );
     }
+  }
+  // why: review S2 — a send that outlived the shutdown's bound resolves after the engine handed the database back:
+  // its row is not written (one line says so); the existing rules re-derive nothing from it
+  if (ctx.lifecycle.closed) {
+    ctx.log.warn(
+      { kind, executionId: p.executionId, definitionId: p.definitionId, sent: ok },
+      'operator notification finished after shutdown; not recorded',
+    );
+    return ok;
   }
   ctx.repos.notifications.record(kind, p.executionId, p.definitionId, ok ? 'sent' : 'failed');
   return ok;

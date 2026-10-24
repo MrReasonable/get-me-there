@@ -25,6 +25,7 @@ const SPEC_TABLES = [
   'operator_notice_keys',
   'route_price_history',
   'app_lock',
+  'app_meta',
 ];
 
 describe('@gmt/db public surface (plan "Database" contract)', () => {
@@ -42,6 +43,7 @@ describe('@gmt/db public surface (plan "Database" contract)', () => {
       'CalendarPricesRepo',
       'ItinerariesRepo',
       'LedgerRepo',
+      'MetaRepo',
       'AlertsRepo',
       'NotificationsRepo',
       'RoutePriceHistoryRepo',
@@ -89,6 +91,7 @@ describe('@gmt/db public surface (plan "Database" contract)', () => {
         'LOCK_STALE_AFTER_MS',
         'LedgerRepo',
         'MIGRATIONS_DIR',
+        'MetaRepo',
         'NotificationsRepo',
         'RoutePriceHistoryRepo',
         'RowCorrupt',
@@ -130,6 +133,7 @@ describe('@gmt/db public surface (plan "Database" contract)', () => {
       'fx',
       'itineraries',
       'ledger',
+      'meta',
       'notifications',
       'routeHistory',
     ]);
@@ -137,7 +141,7 @@ describe('@gmt/db public surface (plan "Database" contract)', () => {
     expect(repos.routeHistory).toBeInstanceOf(db.RoutePriceHistoryRepo);
   });
 
-  it('the migrations create exactly the spec §7 tables (0000, plus 0001 adding a column, decision 37, 0002 rebuilding alert_events, decision 56, 0003 rebuilding route_price_history, decision 67, 0004 rebuilding it with point_of_sale, CodeRabbit batch 3, 0005 widening the provider and source CHECKs with operator_notice_keys, WP14, and 0006 adding the grid columns, WP15)', () => {
+  it('the migrations create exactly the spec §7 tables (0000, plus 0001 adding a column, decision 37, 0002 rebuilding alert_events, decision 56, 0003 rebuilding route_price_history, decision 67, 0004 rebuilding it with point_of_sale, CodeRabbit batch 3, 0005 widening the provider and source CHECKs with operator_notice_keys, WP14, 0006 adding the grid columns, WP15, and 0007 the catch-up columns, the firing index and app_meta, WP16a)', () => {
     const d = freshDb();
     const tables = d.raw
       .prepare<[], { name: string }>(
@@ -146,7 +150,7 @@ describe('@gmt/db public surface (plan "Database" contract)', () => {
       .all()
       .map((r) => r.name);
     expect(tables).toEqual([...SPEC_TABLES].sort());
-    expect(d.raw.prepare('SELECT COUNT(*) AS n FROM __drizzle_migrations').get()).toEqual({ n: 7 });
+    expect(d.raw.prepare('SELECT COUNT(*) AS n FROM __drizzle_migrations').get()).toEqual({ n: 8 });
   });
 
   it('foreign keys are declared and enforced', () => {

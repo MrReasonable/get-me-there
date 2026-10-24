@@ -1,9 +1,19 @@
 import { apiContract } from '@gmt/core';
+import { getConfig } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import * as fx from './fixtures.js';
 import { drainGuards, expectConsoleErrors } from './guards.js';
 
 describe('test harness (reviews tsr-004, tsr-006, tsr2-006, tsr2-010)', () => {
+  it('waits up to 5 s in findBy* and waitFor (review S12), so a loaded machine does not fail a passing view', ({
+    task,
+  }) => {
+    expect(getConfig().asyncUtilTimeout).toBe(5_000);
+    // T3: the test's own timeout sits well above it, so a failing wait reports its own error, not a test timeout
+    expect(task.timeout).toBe(15_000);
+    expect(task.timeout).toBeGreaterThan(getConfig().asyncUtilTimeout * 2);
+  });
+
   it('the fixtures agree on one small definition: 126 cells, the run policy and the stored confirmation', () => {
     expect([
       fx.resultsResponse().coverage.total,

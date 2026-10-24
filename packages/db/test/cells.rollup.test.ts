@@ -69,6 +69,7 @@ describe('CellsRepo seeding and stored roll-ups (spec §3, §6.6, §7)', () => {
         pointOfSale: null,
         sourceKind: null,
         reusedFromExecutionId: null,
+        skipDetail: null,
       },
     ]);
     expect(repo.rollUps(executionId).get(cellKeyString(cell()))).toEqual({

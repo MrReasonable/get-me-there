@@ -5,7 +5,8 @@ owner: opus
 depends_on: [13]
 spec_sections: ["§2", "§3", "§5.1", "§5.2", "§5.3", "§8.1", "§9 items 2 and 7", "§11", "§12", "§13", "§15", "§16"]
 reviewers: [code-architect, test-strategy-reviewer, provider-integration-expert, provenance-auditor, cost-and-budget-reviewer, security-reviewer, devops-reviewer]
-status: draft
+mutate: {"@gmt/camoufox-worker": ["src/classify.ts", "src/cooldown.ts", "src/pacer.ts", "src/socs.ts", "src/names.ts", "src/guard.ts", "src/ready.ts", "src/accountCookies.ts"]}
+status: merged
 ---
 
 # WP14: Camoufox provider (self-scraped Google Flights, opt-in)

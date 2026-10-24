@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { LINK_ALLOWLIST, validateVendorUrl } from '../normalise/vendorUrl.js';
 import type { Buckets } from '../types/execution.js';
+import { SKIP_CODES } from '../types/execution.js';
 import { iataSchema, isoDateSchema, isoDateTimeSchema } from '../types/ids.js';
 import { cabinSchema, provenanceSchema, providerIdSchema, sourceKindSchema } from '../types/provenance.js';
 
@@ -103,6 +104,14 @@ export const executionSummarySchema = z.object({
   ageHours: ageHoursSchema,
   /** The run's own policy, "(E outbounds each)" in the Results header (decision 42); never the current definition's. */
   expandTop: z.number().int().min(1),
+  /**
+   * Spec §7, §8.2 rev 36: the firing a scheduled row stands for (a start, a catch-up, a skip; moved only by a live-tick
+   * resume), else null; with `isCatchUp`, the missed firing a catch-up ran for.
+   */
+  scheduledFor: isoDateTimeSchema.nullable(),
+  isCatchUp: z.boolean(),
+  /** Spec §8.2 rev 36: why a `skipped_missed` firing was not caught up, as the row recorded it; null otherwise. */
+  skipCode: z.enum(SKIP_CODES).nullable(),
 });
 export const usageSchema = z.object({
   scope: z.string(),

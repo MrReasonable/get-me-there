@@ -11,6 +11,7 @@ import {
   type ProviderId,
   type RollUp,
   type SelectionReason,
+  type SkipDetail,
   type Stage,
   stripUrlsInText,
 } from '@gmt/core';
@@ -92,8 +93,18 @@ const DATA_FIELDS = [
 const CLEARED =
   'fetched_at = NULL, min_pence = NULL, cabin = NULL, point_of_sale = NULL, source_kind = NULL, reused_from_execution_id = NULL';
 
-/** A non-terminal target and its reason, per spec §3 (ruling 4, prov-009). */
-function assertNonTerminalTarget(status: CellOutcomeStatus, reason: string | null): void {
+/** A non-terminal target, its reason and its skip detail, per spec §3 (ruling 4, prov-009; rev 36). */
+function assertNonTerminalTarget(
+  status: CellOutcomeStatus,
+  reason: string | null,
+  skipDetail: SkipDetail | null,
+): void {
+  // why: spec §3 rev 36 — a scheduled_only cell always says why, and no other outcome carries a detail
+  if ((status === 'skipped' && reason === 'scheduled_only') !== (skipDetail !== null))
+    throw new RowRejected(
+      'skip-detail',
+      `a skip detail goes with skipped:scheduled_only and only with it, got ${status}:${String(reason)} with ${String(skipDetail)}`,
+    );
   if (isTerminal(status))
     throw new RowRejected(
       'terminal-outcome',
@@ -216,7 +227,8 @@ export class CellsRepo {
         );
       const status = patch.status ?? existing.status;
       const reason = patch.reason !== undefined ? patch.reason : existing.reason;
-      assertNonTerminalTarget(status, reason);
+      const skipDetail = patch.skipDetail ?? null;
+      assertNonTerminalTarget(status, reason, skipDetail);
       if (patch.attempts !== undefined) assertInt('attempts', patch.attempts);
       const attempts = (patch.attempts ?? existing.attempts) + (patch.incrementAttempts === true ? 1 : 0);
       const lastError =
@@ -227,9 +239,9 @@ export class CellsRepo {
           : existing.lastError;
       this.db.raw
         .prepare(
-          `UPDATE cell_outcomes SET status = @status, reason = @reason, attempts = @attempts, last_error = @lastError, ${CLEARED} WHERE ${CELL_WHERE} AND stage = @stage AND provider_id = @providerId`,
+          `UPDATE cell_outcomes SET status = @status, reason = @reason, attempts = @attempts, last_error = @lastError, skip_detail = @skipDetail, ${CLEARED} WHERE ${CELL_WHERE} AND stage = @stage AND provider_id = @providerId`,
         )
-        .run({ ...key, status, reason, attempts, lastError });
+        .run({ ...key, status, reason, attempts, lastError, skipDetail });
       storeRollUps(this.db, executionId, stage, [cell]);
     });
   }
@@ -240,7 +252,7 @@ export class CellsRepo {
     stage: Stage,
     providerId: ProviderId,
     from: CellOutcomeStatus[],
-    to: { status: CellOutcomeStatus; reason: string | null; lastError?: string },
+    to: { status: CellOutcomeStatus; reason: string | null; lastError?: string; skipDetail?: SkipDetail },
   ): number {
     assertProviderAllowed(providerId, this.opts.allowSynthetic);
     if (from.some(isTerminal))
@@ -248,11 +260,11 @@ export class CellsRepo {
         'terminal-outcome',
         'priced, empty and no_data outcomes are never rewritten (spec §7)',
       );
-    assertNonTerminalTarget(to.status, to.reason);
+    assertNonTerminalTarget(to.status, to.reason, to.skipDetail ?? null);
     return this.db.transaction(() => {
       const changes = this.db.raw
         .prepare(
-          `UPDATE cell_outcomes SET status = @status, reason = @reason, last_error = COALESCE(@lastError, last_error), ${CLEARED} WHERE execution_id = @executionId AND stage = @stage AND provider_id = @providerId AND status IN (SELECT value FROM json_each(@from))`,
+          `UPDATE cell_outcomes SET status = @status, reason = @reason, last_error = COALESCE(@lastError, last_error), skip_detail = @skipDetail, ${CLEARED} WHERE execution_id = @executionId AND stage = @stage AND provider_id = @providerId AND status IN (SELECT value FROM json_each(@from))`,
         )
         .run({
           executionId,
@@ -261,6 +273,7 @@ export class CellsRepo {
           from: JSON.stringify(from),
           status: to.status,
           reason: to.reason,
+          skipDetail: to.skipDetail ?? null,
           // why: a camoufox preflight refusal says why in last_error (spec §8.1 rev 32); other callers keep the old one
           lastError: to.lastError === undefined ? null : stripUrlsInText(to.lastError),
         }).changes;
@@ -482,7 +495,7 @@ export class CellsRepo {
     return this.db.transaction(() => {
       const changes = this.db.raw
         .prepare(
-          `UPDATE cell_outcomes SET status = 'skipped', reason = 'departed' WHERE execution_id = @executionId AND departure_date <= @today AND (status IN ('not_run', 'error') OR (status = 'skipped' AND reason <> 'departed'))`,
+          `UPDATE cell_outcomes SET status = 'skipped', reason = 'departed', skip_detail = NULL WHERE execution_id = @executionId AND departure_date <= @today AND (status IN ('not_run', 'error') OR (status = 'skipped' AND reason <> 'departed'))`,
         )
         .run({ executionId, today }).changes;
       if (changes > 0) {

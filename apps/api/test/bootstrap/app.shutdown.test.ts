@@ -174,6 +174,20 @@ describe('shutdown deadline (review devops M4; compose stop_grace_period is 30 s
     expect(messages(errors).some((m) => m.includes('shutdown failed'))).toBe(false);
   });
 
+  it('T12: at the deadline the engine is marked closed before the database closes, so a late job writes nothing', async () => {
+    const { running, exit } = await booted();
+    vi.spyOn(running.engine, 'shutdown').mockReturnValue(new Promise<void>(() => undefined));
+    const order: string[] = [];
+    vi.spyOn(running.engine, 'markClosed').mockImplementation(() => order.push('engine closed'));
+    vi.spyOn(running.ports.db, 'close').mockImplementation(() => order.push('database closed'));
+    shutdownHandler(running, silentLog, [], exit)('SIGTERM');
+    await vi.advanceTimersByTimeAsync(SHUTDOWN_DEADLINE_MS);
+    expect(exit).toHaveBeenCalledWith(EXIT.failed);
+    expect(order).toEqual(['engine closed', 'database closed']);
+    vi.mocked(running.ports.db.close).mockRestore();
+    running.ports.db.close();
+  });
+
   it('a shutdown that finishes before the deadline exits 0 with no timeout line, and the timer is gone', async () => {
     const { running, errors, exit } = await booted();
     shutdownHandler(running, silentLog, [], exit)('SIGTERM');

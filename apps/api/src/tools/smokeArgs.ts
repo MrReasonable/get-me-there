@@ -105,14 +105,28 @@ export function smokeQuery(today: IsoDate, origin: Iata, destination: Iata): Dis
   };
 }
 
+/** The smoke's worst case, split per provider and stage (spec §10 `GET /tools/smoke/plan`); null when not configured. */
+export interface SmokeWorstCase extends WorstCase {
+  /** SearchApi credits: one calendar tile, then the itinerary chain's `1 + 2 × expandTop`. */
+  searchApi: { calendar: number; itinerary: number } | null;
+  /** The browser pages (one list or grid tile) and, in grid mode, the scrolls that page may make. */
+  camoufox: { pages: number; scrolls: number } | null;
+}
+
 /**
  * The run's stated worst case: SearchApi one calendar tile plus the chain's `1 + 2 × expandTop` (the adapter's own
- * estimate rule, spec §5.4); Travelpayouts one month tile at the page cap.
+ * estimate rule, spec §5.4); Travelpayouts one month tile at the page cap; camoufox one page, with up to
+ * CAMOUFOX_GRID_SCROLL_CAP scrolls in grid mode. `credits` and `freeCalls` are the totals the spend position checks.
  */
-export function smokeWorstCase(config: Config): WorstCase {
+export function smokeWorstCase(config: Config): SmokeWorstCase {
+  const sa = config.providers.searchapi;
+  const cf = config.providers.camoufox;
+  const searchApi = sa === null ? null : { calendar: 1, itinerary: 1 + 2 * SMOKE_EXPAND_TOP };
   return {
-    credits: config.providers.searchapi === null ? 0 : 1 + 1 + 2 * SMOKE_EXPAND_TOP,
+    credits: searchApi === null ? 0 : searchApi.calendar + searchApi.itinerary,
     freeCalls: config.providers.travelpayouts === null ? 0 : TP_MAX_PAGES_PER_TILE,
+    searchApi,
+    camoufox: cf === null ? null : { pages: 1, scrolls: cf.mode === 'grid' ? cf.gridScrollCap : 0 },
   };
 }
 

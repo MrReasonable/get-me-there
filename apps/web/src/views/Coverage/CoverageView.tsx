@@ -1,4 +1,10 @@
-import { type CellKey, DEFAULT_DISCOVERY_REFRESH_HOURS, hoursSince } from '@gmt/core';
+import {
+  type CellKey,
+  DEFAULT_DISCOVERY_REFRESH_HOURS,
+  hoursSince,
+  LEFT_FOR_TEXT,
+  SKIP_DETAIL_TEXT,
+} from '@gmt/core';
 import { useCoverage, useExecution, useExecutionActions } from '../../api/queries.js';
 import type { CoverageResponse, DefinitionResponse } from '../../api/types.js';
 import { LoadError, Loading } from '../../components/LoadState.js';
@@ -126,6 +132,9 @@ export function CoverageView({ definition }: { definition: DefinitionResponse })
       isChild: r.isChild,
       startedAt: r.startedAt,
       ageHours: at === null ? 'unknown' : hoursSince(at, now),
+      // why: review S8 — a skipped firing names its time and reason here as History does (ViewHeader's one formatter)
+      scheduledFor: r.scheduledFor,
+      skipCode: r.skipCode,
     },
   ];
   // why: stale means older than one refresh cycle of the definition's quickest-refreshing discovery provider;
@@ -257,6 +266,23 @@ export function CoverageView({ definition }: { definition: DefinitionResponse })
           </ul>
         )}
       </div>
+      {c.scheduledOnly.length > 0 ? (
+        <div>
+          <h3 className="font-semibold">{COPY.scheduledOnlyHeading(LEFT_FOR_TEXT[c.browserLeftFor])}</h3>
+          <ul aria-label={COPY.scheduledOnlyHeading(LEFT_FOR_TEXT[c.browserLeftFor])} className="text-sm">
+            {c.scheduledOnly.map((g) => (
+              <li key={`${g.stage}${g.providerId}${g.detail}`}>
+                {COPY.scheduledOnlyRow(
+                  COPY.provider[g.providerId],
+                  COPY.stageName[g.stage],
+                  g.cells,
+                  SKIP_DETAIL_TEXT[g.detail],
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
       <div>
         <h3 className="font-semibold">{COPY.errorsHeading}</h3>
         {c.errors.length === 0 ? (

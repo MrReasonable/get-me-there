@@ -84,10 +84,40 @@ ends; enabling a schedule whose provider month does not fit is refused.
 
 ## Missed firings
 
-The scheduler does not catch up. If the host was off or asleep at 05:00 on Monday, that run
-is skipped. On the next boot the app records an execution with status `skipped_missed` and
-sends an operator notification, so the gap is visible in the run history; the next firing
-runs normally. To run now, use "Run now" on the definition.
+A run needs the machine awake (or, in Docker, the container running). When the app misses a
+firing because the machine was asleep or the app was stopped, it catches that firing up at
+most once, never twice: on waking (a check runs every minute while the app is up), at the next
+boot, or when the definition's own timer fires late. A timer that fires more than 2 minutes
+after its firing is treated as a catch-up under the same rules. Only the latest missed firing
+counts, however many were missed.
+
+A missed firing is not caught up when the next firing is near: when the time to the next
+firing is less than half of that firing's own gap (the next firing minus the missed one, so a
+Monday-and-Thursday schedule, the 1st of each month or a daily time across a clock change each
+use their own gap). It is then recorded as `skipped_missed` with that reason, once: History
+lists it with the time it was due and the reason, and when email is configured you are sent
+one notice. It is not caught up either when a run was active at the firing or started after
+it, a manual one or a catch-up included (a catch-up that runs past the next firing counts for
+it), or when the definition was changed after it. Otherwise one run starts
+through the normal checks and caps; History shows it as "ran <time>, catch-up for <missed
+time>", and its prices keep their own fetch times.
+
+A catch-up never loads browser pages. It still copies the browser provider's prices that are
+fresh enough (no page load), leaves its other cells for the next scheduled run, and runs
+Travelpayouts and SearchApi as usual. A definition whose only discovery provider is the browser
+provider (among those that sell its cabin) is not caught up at all: the missed firing is
+recorded as `skipped_missed` with that reason, shown in History and emailed once when email is
+configured. A paused catch-up never holds up the next firing: that firing's run, or its skip,
+replaces it, and the catch-up's own automatic resume waits for that firing to be decided
+first. Resumes, at boot or after the machine wakes, follow the browser window below.
+
+## The browser window
+
+By default (CAMOUFOX_BROWSER_WINDOW=scheduled), browser pages load only inside a run's window: from its scheduled time, or its start when that is later (a manual run's start), to 1.5 times its estimated duration later. The window is checked at a run's first browser page, at a resume, or after the machine has slept, never while a run keeps going; a run that resumes or wakes after its window leaves the browser provider's remaining cells for the next scheduled run (or, when the definition has no schedule, for your next run of it), while SearchApi and Travelpayouts carry on. With CAMOUFOX_BROWSER_WINDOW=any, a resumed run keeps loading browser pages, within every cap, spacing and cool-down. A catch-up never loads browser pages either way.
+
+When the next scheduled firing of the same definition resumes a paused run on time, the window
+moves to that firing; a resume that is refused moves nothing. Two definitions that use the browser provider and fire at the same time share
+one browser and wait for each other's pages; stagger them.
 
 A run that a container restart interrupts is marked `interrupted` and resumes on boot (up to
 `MAX_AUTO_RESUMES` times without progress, default 3). `docker compose stop` gives the app

@@ -105,6 +105,9 @@ services:
       CAMOUFOX_GRID_SCROLL_CAP: "${CAMOUFOX_GRID_SCROLL_CAP:-}"
       CAMOUFOX_EXECUTION_SCROLL_CAP: "${CAMOUFOX_EXECUTION_SCROLL_CAP:-}"
       CAMOUFOX_MONTHLY_SCROLL_CAP: "${CAMOUFOX_MONTHLY_SCROLL_CAP:-}"
+      # why: decision 83 — the app decides when browser pages load (scheduled, the default, or any); compose passes
+      # only the names listed here
+      CAMOUFOX_BROWSER_WINDOW: "${CAMOUFOX_BROWSER_WINDOW:-}"
       # --- email (all or nothing) ---
       SMTP_HOST: "${SMTP_HOST:-}"
       SMTP_PORT: "${SMTP_PORT:-}"

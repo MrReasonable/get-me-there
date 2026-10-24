@@ -105,7 +105,8 @@ window's start and end with calls and cost so far.
 - Off by default (`CAMOUFOX_ENABLED=false`); a definition must also name it. Discovery only, `list` mode: one page per
   day pair, through the host-side worker on the operator's Mac (docs/setup.md section 14).
 - Caps: `CAMOUFOX_EXECUTION_PAGE_CAP` (default 100, 1 to 400) pages a run and `CAMOUFOX_MONTHLY_PAGE_CAP` (default 1,500)
-  pages a calendar month from `CAMOUFOX_BILLING_DAY`. The run's cap is frozen into the execution's snapshot when it is
+  pages a calendar month from `CAMOUFOX_BILLING_DAY`. The app's ledger enforces both; the worker reports its own month's
+  counts, and enforces the monthly caps across every caller from WP17. The run's cap is frozen into the execution's snapshot when it is
   created; the guard reads it from there, never from the configuration, and only a manual resume refreshes it with the
   rest of the budget. Reaching it skips the remaining camoufox cells for budget (`provider-execution`) while other
   providers continue, or pauses the run for a manual resume when none remains.
@@ -113,7 +114,7 @@ window's start and end with calls and cost so far.
   next; the app's limiter uses it directly as its minimum interval and the worker allows 2 seconds of arrival jitter. The
   derived rates are display figures: `max(1, floor(60 / spacing))` a minute and `floor(3600 / spacing)` an hour (2 and
   120 at the default). Concurrency is 1.
-- Cool-downs: 48 hours (`CAMOUFOX_COOLDOWN_HOURS`, at least 24) after a challenge, sign-in or consent page or a
+- Cool-downs: 48 hours (`CAMOUFOX_COOLDOWN_HOURS`, 24 to 100,000) after a challenge, sign-in or consent page or a
   signed-in profile; 1 hour after a page it does not recognise. A page that never settles is a `parse` error with no cool-down.
 - Never billable, cost 0, never cached. Camoufox pages also draw on `EXECUTION_MAX_FREE_CALLS`, the free-call cap every
   free provider shares.
@@ -142,6 +143,11 @@ Once a week (or before raising a cap), compare the app with SearchApi's dashboar
    `page` loaded a Google page (`200`, `423` blocked, `504`, and `502` after launch); rows of class `no-page` did not
    (`423` cooling-down, `429`, `409`, `400`, `401`, `502` at launch, and a refused connection). A `423` blocked row is a
    block; a `423` cooling-down row is a refusal that loaded no page. Only `page` rows count toward its page caps.
+
+## One app per key
+
+With two apps on one SearchApi key, the stop is SearchApi's own quota, not this app's ledger; the money ceiling holds only because the 40usd plan has no overage.
+Each app's caps count only the calls in its own database, so run one app per key.
 
 ## Restoring a backup resets month-to-date spend
 

@@ -5,7 +5,8 @@ owner: fable
 depends_on: [all]
 spec_sections: ["§9 item 7", "§9 item 4 layer B", "§7 app_lock and the tool bootstrap", "§10 /tools/smoke", "§11 banned words", "§12", "§13", "§15", "§16 WP13"]
 reviewers: [code-architect, test-strategy-reviewer, provenance-auditor, security-reviewer, cost-and-budget-reviewer, devops-reviewer, provider-integration-expert, product-owner, persona-flexible-traveller]
-status: reviewed
+mutate: {}
+status: merged
 ---
 
 # WP13: smoke test, layer-B engine tests, smoke documentation, final whole-branch pass

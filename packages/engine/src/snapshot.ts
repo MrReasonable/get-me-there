@@ -36,6 +36,18 @@ export function sellsCabin(ctx: EngineContext, providerId: ProviderId, cabin: Ca
 }
 
 /**
+ * The snapshot a pass plans, prices and cap-checks with `out` left out of discovery: a catch-up's browser provider
+ * (decision 79), or one a closed browser window leaves for the next scheduled run (decision 83). The stored snapshot keeps
+ * them, for reuse and for the record.
+ */
+export function withoutDiscovery(s: DefinitionSnapshot, out: readonly ProviderId[]): DefinitionSnapshot {
+  return {
+    ...s,
+    providers: { ...s.providers, discovery: s.providers.discovery.filter((id) => !out.includes(id)) },
+  };
+}
+
+/**
  * The execution's budget: the definition's, plus each discovery provider's own per-execution cap from config
  * (`providerMaxCalls`, camoufox's page cap; decision 69, arch-007). Frozen at creation, and refreshed only where a
  * manual resume refreshes the rest of the budget; the guard reads it from the snapshot, never from config.
@@ -84,10 +96,40 @@ export function buildSnapshot(
     notes.push(
       `alwaysInclude: ${dropped} ${dropped === 1 ? 'cell left the window and was dropped' : 'cells left the window and were dropped'}`,
     );
+  const providers = snapshotProviders(ctx, def, trigger);
+  for (const x of providers.excluded) notes.push(x.note);
+  const { discovery } = providers;
+  const snapshot: DefinitionSnapshot = {
+    ...def,
+    budget: snapshotBudget(ctx, def.budget, discovery),
+    verification: { ...def.verification, alwaysInclude: kept },
+    providers: {
+      ...def.providers,
+      discovery,
+      verification: providers.verification,
+    },
+    resolved,
+    resolvedAt: ctx.clock.now(),
+    windowClamped: clamped,
+    droppedAlwaysInclude: def.verification.alwaysInclude.filter((c) => !inSpace.has(cellKeyString(c))),
+  };
+  return { snapshot, cells, notes, excluded: providers.excluded };
+}
+
+/**
+ * The provider half of buildSnapshot (review T9): the definition's discovery and verification providers a run with
+ * this trigger would take, those registered with the capability and, for a scheduled run, not excluded from schedules
+ * on their plan, with each one left out and why. Builds no date grid, so a read that only asks which providers a run
+ * would use (`browserLeftFor`, the catch-up's provider set) stays cheap.
+ */
+export function snapshotProviders(
+  ctx: EngineContext,
+  def: SearchDefinition,
+  trigger: Trigger = 'manual',
+): { discovery: ProviderId[]; verification: ProviderId[]; excluded: ExcludedProvider[] } {
   const excluded: ExcludedProvider[] = [];
   const exclude = (providerId: ProviderId, stage: Stage, why: ExcludedProvider['why'], note: string) => {
     excluded.push({ providerId, stage, why, note });
-    notes.push(note);
     return false;
   };
   const usable = (id: ProviderId, capability: Stage): boolean => {
@@ -103,21 +145,8 @@ export function buildSnapshot(
     return true;
   };
   const discovery = def.providers.discovery.filter((id) => usable(id, 'discovery'));
-  const snapshot: DefinitionSnapshot = {
-    ...def,
-    budget: snapshotBudget(ctx, def.budget, discovery),
-    verification: { ...def.verification, alwaysInclude: kept },
-    providers: {
-      ...def.providers,
-      discovery,
-      verification: def.providers.verification.filter((id) => usable(id, 'verification')),
-    },
-    resolved,
-    resolvedAt: ctx.clock.now(),
-    windowClamped: clamped,
-    droppedAlwaysInclude: def.verification.alwaysInclude.filter((c) => !inSpace.has(cellKeyString(c))),
-  };
-  return { snapshot, cells, notes, excluded };
+  const verification = def.providers.verification.filter((id) => usable(id, 'verification'));
+  return { discovery, verification, excluded };
 }
 
 /**

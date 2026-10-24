@@ -1,5 +1,7 @@
 import {
   apiContract,
+  SKIP_CODES as CORE_SKIP_CODES,
+  SKIP_DETAILS as CORE_SKIP_DETAILS,
   cabinSchema,
   providerIdSchema,
   returnDateSourceSchema,
@@ -15,6 +17,8 @@ import {
   PROVIDER_IDS,
   RESULT_BASES,
   RETURN_DATE_SOURCES,
+  SKIP_CODES,
+  SKIP_DETAILS,
   SOURCE_KINDS,
   STAGES,
   VENDOR_PRICE_MARKS,
@@ -33,6 +37,10 @@ describe('internal/enums', () => {
     // resolution) and are pinned to core's here
     expect(RETURN_DATE_SOURCES).toEqual(returnDateSourceSchema.options);
     expect(VENDOR_PRICE_MARKS).toEqual(vendorPriceMarkSchema.options);
+    // why: WP16a review R32 — core owns the two skip lists (its z.enum reads them); db's copies stay literal for the
+    // same drizzle-kit reason and are pinned to core's here, value for value
+    expect(SKIP_DETAILS).toEqual(CORE_SKIP_DETAILS);
+    expect(SKIP_CODES).toEqual(CORE_SKIP_CODES);
   });
 
   it('every other list must name every member of its union (compile-time check)', () => {

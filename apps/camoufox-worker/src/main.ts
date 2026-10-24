@@ -206,6 +206,8 @@ export async function startWorker(ctx: EntryContext, deps: MainDeps): Promise<Ru
       // why: fix round 1 (CA 9): the app's preflight refuses grid mode when its settings differ from these
       gridScrollCap: cfg.mode === 'grid' ? cfg.gridScrollCap : null,
       gridScrollSpacingSeconds: cfg.mode === 'grid' ? cfg.gridScrollSpacingSeconds : null,
+      // why: spec §12 — the effective record the app's preflight compares with its own, by name
+      sharedSettings: cfg.sharedSettings,
     };
   };
   let server: Server;

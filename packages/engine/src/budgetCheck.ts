@@ -2,7 +2,7 @@ import type { BudgetScopeKind, ExecutionBudget, ProviderId, Stage } from '@gmt/c
 import { monthlyLoad, otherSchedules, scheduleLoad } from './budgetFit.js';
 import type { EngineContext } from './context.js';
 import { type LineKey, lineKey } from './lines.js';
-import { firingsBetween } from './scheduler/parseCron.js';
+import { countFirings } from './scheduler/parseCron.js';
 import { breachText } from './text.js';
 import type { Estimate } from './types.js';
 import { HOUR_MS } from './units.js';
@@ -59,12 +59,12 @@ export function reservedForSchedules(
   let reserved = 0;
   for (const d of otherSchedules(ctx, definitionId)) {
     if (d.scheduleCron === null) continue;
-    const firings = firingsBetween(
+    const firings = countFirings(
       d.scheduleCron,
       d.scheduleTz,
       new Date(now),
       new Date(Date.parse(windowEnd) - 1),
-    ).length;
+    );
     if (firings === 0) continue;
     const m = monthlyLoad(ctx, d);
     reserved += scheduleLoad(ctx, m.perRun, m.snapshot, firings, hours).get(providerId)?.calls ?? 0;

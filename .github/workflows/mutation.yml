@@ -1,5 +1,6 @@
 name: mutation
-# Ruling 10 (plan decision 67): the Stryker gate on core's hard-rule predicates (spec §9, break 80%) runs sandboxed,
+# Ruling 10 (plan decision 67): the Stryker gate on core's hard-rule predicates (spec §9, break 80%), the engine's
+# catch-up, browser-window and heartbeat rules (WP16a) and the worker's safety modules runs sandboxed,
 # fails when timed-out mutants exceed 5% of those tested, and runs on demand and weekly in a job of its own, never on
 # every push, so its load never shares a runner with another suite.
 on:
@@ -24,4 +25,5 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - run: node scripts/check-mutation-globs.mjs
       - run: pnpm mutate

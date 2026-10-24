@@ -140,7 +140,12 @@ export function CellDetailBody(props: {
                     <span className="block font-semibold">{COPY.calendarView.unconfirmedShort}</span>
                   ) : null}
                 </td>
-                <td>{reasonText(o.reason)}</td>
+                <td>
+                  {reasonText(o.reason, o.skipDetail, {
+                    leftFor: detail.browserLeftFor,
+                    latest: o.executionId === detail.latestExecutionId,
+                  })}
+                </td>
                 <td>{o.attempts}</td>
                 <td>{o.fetchedAt === null ? P.dash : formatInstantLondon(instantMs(o.fetchedAt))}</td>
                 <td>{o.lastError ?? P.dash}</td>

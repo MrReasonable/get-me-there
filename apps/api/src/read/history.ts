@@ -18,6 +18,26 @@ import { calendarThreshold, refreshHoursFor, staleness, withNights } from './row
 
 export type ItineraryHistoryResponse = z.infer<typeof apiContract.itineraryHistoryResponseSchema>;
 export type RouteHistoryResponse = z.infer<typeof apiContract.routeHistoryResponseSchema>;
+type HistoryCatchUp = z.infer<typeof apiContract.historyCatchUpSchema>;
+
+/**
+ * Spec §8.2 rev 36 (review R19): the catch-up label of each run a history point names, looked up by the run itself
+ * whatever its definition (a route's points come from every definition flying it), once per run.
+ */
+function catchUpOf(ports: Ports): (executionId: string) => HistoryCatchUp {
+  const seen = new Map<string, HistoryCatchUp>();
+  return (executionId) => {
+    const known = seen.get(executionId);
+    if (known !== undefined) return known;
+    const e = ports.repos.executions.get(executionId);
+    const label =
+      e?.isCatchUp && e.scheduledFor !== null && e.startedAt !== null
+        ? { ranAt: e.startedAt, for: e.scheduledFor }
+        : null;
+    seen.set(executionId, label);
+    return label;
+  };
+}
 
 /**
  * One series per (provider, seller, cabin), oldest first (spec §11 History), under the itinerary's own `cell` and
@@ -30,6 +50,7 @@ export function itineraryHistory(hash: string, ports: Ports): ItineraryHistoryRe
   const now = ports.clock.now();
   const it = ports.repos.itineraries.get(hash);
   if (it === null) throw new ApiError(404, 'itinerary_not_found', API_TEXT.itineraryNotFound);
+  const catchUp = catchUpOf(ports);
   return {
     itineraryHash: hash,
     cell: withNights(it),
@@ -43,6 +64,7 @@ export function itineraryHistory(hash: string, ports: Ports): ItineraryHistoryRe
         stale: staleness(p.provenance, ports.config.staleAfterHours, now).stale,
         truncated: false,
         priceConfirmed: suppliedFields.includes('price'),
+        catchUp: catchUp(p.executionId),
       })),
     })),
   };
@@ -88,6 +110,7 @@ export function routeHistory(
   const now = ports.clock.now();
   const truncated = truncationOf(ports);
   const defs = ports.repos.definitions.list();
+  const catchUp = catchUpOf(ports);
   return {
     origin,
     destination,
@@ -113,6 +136,7 @@ export function routeHistory(
             providerId: s.providerId,
             cell: p.cell,
           }),
+          catchUp: catchUp(p.executionId),
         })),
       };
     }),

@@ -1,7 +1,7 @@
 /** Spec §10 `/coverage` (View D). Separate from `coverage.ts` so `results.ts` → `coverage.ts` stays acyclic. */
-import { type apiContract, type SearchDefinition, selectedNotReached } from '@gmt/core';
+import { type apiContract, type CellOutcome, type SearchDefinition, selectedNotReached } from '@gmt/core';
 import { retriedOnResume } from '@gmt/db';
-import type { Engine } from '@gmt/engine';
+import { type Engine, loadsBrowserPages, resumeLeavesBrowserCells, windowSetting } from '@gmt/engine';
 import type { z } from 'zod';
 import { ApiError } from '../errors.js';
 import { API_TEXT } from '../text.js';
@@ -12,6 +12,22 @@ import { withNights } from './rows.js';
 import { currentSpace } from './space.js';
 
 export type CoverageResponse = z.infer<typeof apiContract.coverageResponseSchema>;
+
+/**
+ * Spec §3, §8.2 rev 36: the run's `skipped:scheduled_only` cells counted per stage × provider and detail, in that order,
+ * so View D says why each group was left and, with `browserLeftFor`, for which run (core's scheduledOnlyText).
+ */
+export function scheduledOnlyOf(outcomes: readonly CellOutcome[]): CoverageResponse['scheduledOnly'] {
+  const groups = new Map<string, CoverageResponse['scheduledOnly'][number]>();
+  for (const o of outcomes) {
+    if (o.status !== 'skipped' || o.reason !== 'scheduled_only' || o.skipDetail === null) continue;
+    const key = `${o.stage}|${o.providerId}|${o.skipDetail}`;
+    const g = groups.get(key) ?? { stage: o.stage, providerId: o.providerId, detail: o.skipDetail, cells: 0 };
+    g.cells += 1;
+    groups.set(key, g);
+  }
+  return [...groups.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([, g]) => g);
+}
 /**
  * Spec §10 `GET /coverage` (View D) for the latest parent execution: six buckets per stage × provider with request
  * counts, the overrun flag (decision 43: discovery on tiles) and the parity flag, selected-but-not-reached cells,
@@ -44,6 +60,9 @@ export function assembleCoverage(def: SearchDefinition, ports: Ports, engine: En
   });
   const outcomes = ports.repos.cells.outcomes(parent.id);
   const today = ports.clock.todayLondon();
+  // why: review R12 — a browser cell that a resume now would only leave for a later run (a catch-up's, or one past its
+  // window under CAMOUFOX_BROWSER_WINDOW=scheduled) is offered no Retry: the resume reads this same rule
+  const browserLeft = resumeLeavesBrowserCells(parent, windowSetting(ports), ports.clock.now());
   const notReached = selectedNotReached(
     ports.repos.cells.selected(parent.id).map((s) => s.cell),
     outcomes.filter((o) => o.stage === 'verification'),
@@ -65,8 +84,13 @@ export function assembleCoverage(def: SearchDefinition, ports: Ports, engine: En
         // why: what a manual resume would pick up again: WP3's retriedOnResume, the predicate the resume query is built
         // from (review arch-005), and, as resumableCells does, only a cell that has not departed (ssr-004), so View D's
         // "retry" and the resume never disagree and no dead Retry button shows.
-        retryable: retriedOnResume(o, true) && o.departureDate > today,
+        retryable:
+          retriedOnResume(o, true) &&
+          o.departureDate > today &&
+          !(browserLeft && o.stage === 'discovery' && loadsBrowserPages(o.providerId)),
       })),
+    scheduledOnly: scheduledOnlyOf(outcomes),
+    browserLeftFor: engine.browserLeftFor(def),
     scheduleBlockedSince: engine.scheduler.blockedSince(),
     // why: ruling 15 (UI-004): every on-demand child, newest first, with its own buckets and ledger calls.
     onDemand: all

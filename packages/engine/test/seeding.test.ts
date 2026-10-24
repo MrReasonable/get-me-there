@@ -1,7 +1,7 @@
 import { asIsoDate, cellKeyString, generateCells, resolveWindow } from '@gmt/core';
 import { describe, expect, it, vi } from 'vitest';
 import { buildContext } from '../src/context.js';
-import { buildSnapshot } from '../src/snapshot.js';
+import { buildSnapshot, snapshotProviders } from '../src/snapshot.js';
 import { createHarness, discoveryOf, FIXTURE_RULES, JFK, LGW, LHR, WINDOW } from './support/harness.js';
 import { withCabins } from './support/wrappers.js';
 
@@ -72,6 +72,33 @@ describe('seeding (spec §3, §7 atomic unit "seeding search_cells + discovery c
     expect(
       Array.isArray(notes) && notes.includes('alwaysInclude: 1 cell left the window and was dropped'),
     ).toBe(true);
+  });
+
+  it('T9: snapshotProviders is buildSnapshot’s provider half, for either trigger, and reads no date', () => {
+    const h = createHarness();
+    const ctx = buildContext(h.deps, h.options);
+    const excluded = {
+      ...ctx,
+      limitsOf: (id: Parameters<typeof ctx.limitsOf>[0]) => ({
+        ...ctx.limitsOf(id),
+        excludedFromSchedule: true,
+      }),
+    };
+    const def = h.createDefinition();
+    for (const c of [ctx, excluded])
+      for (const trigger of ['manual', 'schedule'] as const) {
+        const built = buildSnapshot(c, def, trigger);
+        expect(snapshotProviders(c, def, trigger)).toEqual({
+          discovery: built.snapshot.providers.discovery,
+          verification: built.snapshot.providers.verification,
+          excluded: built.excluded,
+        });
+      }
+    expect(snapshotProviders(excluded, def, 'schedule').discovery).toEqual([]);
+    expect(snapshotProviders(excluded, def).discovery).toEqual(['fixture']);
+    const today = vi.spyOn(ctx.clock, 'todayLondon');
+    snapshotProviders(ctx, def, 'schedule');
+    expect(today).not.toHaveBeenCalled();
   });
 
   it('a scheduled snapshot leaves out a provider excluded from scheduled runs (the SearchApi trial rule, spec §8.2)', () => {

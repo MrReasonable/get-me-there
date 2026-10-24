@@ -259,3 +259,21 @@ describe('WP14 fix round 1: the worker recorded suites and the image size step',
     expect(s).toContain("docker image inspect get-me-there:main --format '{{.Size}}'");
   });
 });
+
+describe('WP16a: the mutation workflow runs every package’s Stryker gate and the glob check', () => {
+  const t = () => text('mutation.yml');
+  it('runs the mutation-glob check, then pnpm mutate', () => {
+    const runs = [...t().matchAll(/^\s*- run: (.+)$/gm)].map((m) => m[1]);
+    expect(runs).toEqual([
+      'pnpm install --frozen-lockfile',
+      'node scripts/check-mutation-globs.mjs',
+      'pnpm mutate',
+    ]);
+  });
+  it('pnpm mutate runs @gmt/engine mutate beside core and the worker', () => {
+    const pkg = JSON.parse(readFileSync(join(import.meta.dirname, '..', 'package.json'), 'utf8'));
+    expect(pkg.scripts.mutate).toBe(
+      'pnpm --filter @gmt/core mutate && pnpm --filter @gmt/engine mutate && pnpm --filter @gmt/camoufox-worker mutate',
+    );
+  });
+});

@@ -1,6 +1,6 @@
 # get-me-there — Flight Price Intelligence & Flexible-Date Optimiser
 
-**Design spec, revision 35.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
+**Design spec, revision 36.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
 four full-roster reviews (145, 140, 126 and 101 findings; zero Critical since
 revision 2) and the provider spike. Revision 9 folds in the three decisions
 taken at approval (the self-scraping fallback in §2, the dashboard readings in
@@ -34,6 +34,10 @@ any specific city or country exists in application code. The worked example
 used throughout this spec and in `docs/setup.md` (importable as JSON) is
 **London → New York: LHR and LGW to JFK and EWR**, 10–21 nights over a
 182-day window; its numbers are illustrations, not defaults.
+
+**Each install has one operator.** The setup command (§13) is written for
+anyone technical who clones the public repository, not only for the
+original operator; multi-user use stays a non-goal.
 
 **Success looks like:** with provider credentials configured, scheduled
 searches keep a ranked table, a calendar heatmap and a price-vs-stay chart
@@ -105,7 +109,7 @@ Google has no public API.
 | Travelpayouts `/aviasales/v3/prices_for_dates` (`month` tiles: `departure_at=YYYY-MM`, `one_way=false`, no `return_at`; origin is always an airport code (a metro query returns one cheapest row per date pair across the whole metro and hides the definition's own fares, recorded 2026-10-15), rows attributed by `origin_airport`; paginated at 1000) | Authorised. Cached from Aviasales user searches, declared last 48h; **no** `found_at` on rows, but each row's `link` carries `search_date=DDMMYYYY` (the recordings show 4–7-day-old rows), which becomes `providerObservedAt`; `market` ignored; economy only; coverage of thin routes can be zero (spike) | Free, 600/min | Discovery baseline | `authorised-cached` | 48 |
 | SearchApi `google_flights_calendar` | Scraping-derived aggregate of Google's date grid; ≤200 combinations per call (HTTP 400 above); per airport only (city codes rejected); entries `{departure, return, price, is_lowest_price}` in the request currency; 126/126 cells priced on every probed route including a thin one (spike); 9–29 s per call | trial 100 once; $40/10k per month | Discovery, opt-in | `scraped-aggregate` | 24 (the app's own conservative assumption, flagged as assumed and shown as "assumed ≤24h (undocumented)": a repeat call answered in 3 s and was not billed, so a vendor cache exists; its window is undocumented) |
 | SearchApi `google_flights` | Scraping-derived itinerary search, three steps; some options carry no `price`; step 3 reveals OTA prices below the airline fare, so step 3 is always run (§5.4) | same plan | Verification, opt-in | `scraped-search` | `'unknown'` (the vendor may serve a cached answer of undocumented age, rev 15) |
-| `camoufox`: Google Flights read by Camoufox (the operator's installed binary) that a host-side worker launches itself through `camoufox-js` | Self-scraped by this app from the operator's own IP, in the worker's own signed-out profile; `list` mode reads one cell's cheapest round-trip total per page load from every result the page lists (structure seen in the feasibility load of 2026-10-18); `grid` mode (designed from the 2026-10-18 recordings, not built) reads up to 49 day pairs per view from the Dates tab's 7 × 7 grid; no return legs, flight numbers or sellers | £0 in money; the operator's IP and selector upkeep; the operator is responsible for how it is used | Discovery only, opt-in, off by default (continuity fallback) | `scraped-self` | 0 (the page as Google showed it when it was read) |
+| `camoufox`: Google Flights read by Camoufox (the pinned build `gmt setup` installs on the operator's machine) that a host-side worker launches itself through `camoufox-js` | Self-scraped by this app from the operator's own IP, in the worker's own signed-out profile; `list` mode reads one cell's cheapest round-trip total per page load from every result the page lists (structure seen in the feasibility load of 2026-10-18); `grid` mode (designed from the 2026-10-18 recordings, not built) reads up to 49 day pairs per view from the Dates tab's 7 × 7 grid; no return legs, flight numbers or sellers | £0 in money; the operator's IP and selector upkeep; the operator is responsible for how it is used | Discovery only, opt-in, off by default (continuity fallback) | `scraped-self` | 0 (the page as Google showed it when it was read) |
 
 **Decision (Ian, 2026-10-14):** SearchApi is accepted as an opt-in provider,
 on the understanding that its data is obtained in a way Google's terms
@@ -117,21 +121,73 @@ integrated.
 2026-10-18): the `camoufox` provider.** If SearchApi is withdrawn, re-priced
 above the ceiling or loses Google's date grid, discovery can fall back to a
 `FlightProvider` with id `'camoufox'` that reads Google Flights in Camoufox
-(a Firefox-based browser the operator has installed), behind the
+(a Firefox-based browser that `gmt setup` installs on the operator's
+machine), behind the
 same contract, ledger, caps and labels as every other provider. It is **off
 by default**: nothing runs until the operator starts the worker and sets
 `CAMOUFOX_ENABLED=true` (§12, §13), and a definition must still name it.
 
 *Method.* A host-side worker (`apps/camoufox-worker`, a Node process on the
-operator's Mac; **macOS only** in this build, refusing to start elsewhere)
-launches its own Camoufox with `camoufox-js` 0.11.5 and `playwright-core`
-1.59.1, through `camoufox-js`'s own install-directory layout, the one the
-2026-10-18 loads used: `~/Library/Caches/camoufox` holding a `Camoufox.app`
-symlink to the installed bundle and a top-level `version.json` in
-`camoufox-js`'s `{version, release}` form. At start the worker checks both
-entries and creates any that is missing, never modifies the bundle, and
-refuses to start when the bundle's own `version.json` (which names its build
-`build`) differs from the pinned build. The profile is a persistent directory
+operator's own machine, macOS or Linux; Windows is a later work package, and
+the worker refuses to start there) launches its own Camoufox, always
+headless (only the `consent` command below opens a visible window), with
+`camoufox-js` 0.11.5 and `playwright-core` 1.59.1. The pinned build and its
+archives come from one typed constant, `CAMOUFOX_BUILDS` in
+`core/camoufox/builds.ts`, keyed by `<os>-<arch>` (`darwin-arm64`,
+`darwin-x64`, `linux-arm64`, `linux-x64`): build `152.0.4-beta.28` for all
+four (release `v152.0.4-beta.28` of `daijro/camoufox`, not a prerelease),
+each entry holding its release asset's URL (only under
+`https://github.com/daijro/camoufox/releases/download/`), its SHA-256 (equal
+to GitHub's published digest, read 2026-10-19), its size and its unpacked
+size. The worker's pin is its own entry's build; there is no separate build
+setting. Only `gmt setup` and `gmt update` (§13) write the install root
+`~/.local/share/get-me-there/camoufox/`: after checking free space against
+the archive plus its unpacked size (313 MB and about 670 MB on macOS, 654 MB
+and about 1.25 GB on Linux), they download the archive over HTTPS
+(redirects followed only to `https` GitHub release-asset hosts), hash it
+while streaming, refuse a mismatch, re-hash it just before unpacking, list
+the archive and refuse any entry that is absolute, holds `..` or resolves
+outside the target, unpack with `unzip` into a 0700 temporary directory
+beside the target, write the bundle's `version.json` (`{ version, build,
+release, sha256 }`, since neither archive carries one), and rename it into
+`browsers/official/<build>-<first 8 hex of the sha256>/` in one step. The
+CLI owns `camoufox-js`'s install-directory layout: on macOS, the install
+root's `Camoufox.app` symlink to that bundle and its top-level
+`version.json` in `{ version, release }` form; on Linux, where `camoufox-js`
+expects `version.json`, `camoufox-bin`, `properties.json` and `fontconfig/`
+directly in its install directory, the bundle directory itself is the
+install directory. `update` installs a new pin only when that entry's
+verification flags are set; otherwise it installs nothing, keeps the old
+bundle and says the provider stays off on this `<os>-<arch>` until
+recordings land. When it does install, it switches the layout after the
+build step and removes the previous bundle only once the app is healthy. Nothing downloads at run time, and the
+worker only verifies: `run.ts`, the worker's one `process.env` owner, refuses
+an inherited `CAMOUFOX_INSTALL_DIR` and then sets it to its OS's install
+directory before any entry can import `camoufox-js` (which reads it once, at
+import); the launch module asserts the value before importing.
+`ensureInstallLayout` checks the layout for its OS (on Linux a `version.json`
+whose release `camoufox-js` accepts, `camoufox-bin`, `properties.json` and
+`fontconfig/macos/fonts.conf`), never modifies anything, and refuses to start
+when anything differs from the pinned entry: an empty or unsupported install
+directory would send `camoufox-js` to its own download branch, which deletes
+the directory first. On Linux the worker keeps `os: 'macos'` as on macOS and
+writes a generated `fonts.conf` outside the bundle naming the bundle's
+`fonts/macos/` by absolute path, passed as `FONTCONFIG_FILE` in the browser's
+environment, because each bundled `fonts.conf` resolves fonts relative to the
+process's working directory and `camoufox-js` 0.11.5 points
+`FONTCONFIG_PATH` at a directory the bundle does not have; Linux also needs
+Firefox's shared libraries, which `gmt setup`
+checks (`ldd` over `camoufox-bin` and every `.so` in the bundle, `libxul.so`
+included, as playwright-core's own host check does, reporting no missing
+library) and names with their install line. The verification
+flags live beside `CAMOUFOX_BUILDS` in `core/camoufox/builds.ts` (`FLAGS`,
+read by the worker's selectors module and by the CLI), per `<os>-<arch>`,
+each set bound to the build it was recorded under: a flag counts as true only while the running
+build equals that set's build. `darwin-arm64`'s come from the 2026-10-18
+recordings; the others stay false until a recording session under that
+entry's build sets them, and until then the worker refuses to start there
+(exit 78) naming the missing recording, `gmt setup` does not offer the
+provider on that machine, and the app runs without it. The profile is a persistent directory
 of the worker's own under its data directory, never shared and never seeded
 from any cookie file; service workers are blocked (`serviceWorkers:
 'block'`). The worker never calls the camofox-browser REST server, so that
@@ -354,6 +410,35 @@ spacing. At most
 400; frozen into the execution's budget snapshot at creation) and
 `CAMOUFOX_MONTHLY_PAGE_CAP` per month (default 1,500).
 
+*Caps across callers.* The worker enforces `CAMOUFOX_MONTHLY_PAGE_CAP` and
+`CAMOUFOX_MONTHLY_SCROLL_CAP` itself, for every caller together, over the
+ledger's own window: the month starting at 00:00 UTC on
+`CAMOUFOX_BILLING_DAY` (§7 "Budget windows"), computed by one pure function
+in `core` that the `db` window query is tested to agree with. The caps and
+the billing day are shared settings (§12), so the app's ledger and the
+worker count the same month against the same numbers. Under the default
+`CAMOUFOX_BROWSER_WINDOW=scheduled`, pages also load only inside a run's
+browser window (§8.2). The worker keeps the
+window's page and scroll counts in their own 0600 file beside its pacer's
+last-page time and counts every page it loads (the adapter's, the `consent`
+command's, `consent check`'s and the `consent-research` recorder's). Under
+its lock, before loading anything, it admits a page only while the page cap
+has room (a page past it is refused with the reason `monthly-cap`, which the
+adapter maps to `BudgetExceeded` at `provider-month`); it clamps a grid
+page's scroll allowance to what the monthly scroll cap leaves, so a page with
+no monthly scroll left still reads its first block and a page that reaches
+the clamp ends as `allowance` with the views it read kept and its row's
+`scroll_count` equal to the scrolls made; and it writes the page and its
+clamped allowance into the counts file before the load, settling to the
+scrolls made afterwards, so a crash over-counts and never under-counts. An
+absent counts file starts the window at zero only when the worker has never
+loaded a page (no pacer file either); a counts file that is unreadable,
+invalid, from a widened mode, or missing beside an existing pacer file
+refuses every page with `monthly-cap` and is never overwritten with zeros.
+`/v1/status` reports the counts and the window. A second app instance
+calling the worker in one window is reported in the Status view, not
+refused.
+
 *Consent: rejected, never accepted.* A fresh signed-out profile lands on
 Google's consent page ("Before you continue", "Reject all" / "Accept all";
 signed-out test, 2026-10-18). The worker never clicks anything on it. Before
@@ -362,9 +447,78 @@ consent-choice cookie `SOCS` (named in Google's cookie policy as the cookie
 that "store[s] a user's state regarding their cookies choices", read
 2026-10-18) to the operator's captured **rejection** value with
 `context.addCookies`. Google does not document the value, so the operator
-captures it once from a real "Reject all" in an ordinary private browser
-window (`capture-socs`, which stamps the time and writes the file 0600), with
-its domain, path, expiry, `secure` and `sameSite`; the worker refuses to start
+captures it from a real "Reject all" with `gmt consent` (§13), which stops
+the worker service, runs the worker's `consent` command, and afterwards
+starts the worker when the capture succeeded (clearing any `consent-*` start
+refusal) or restores its previous state otherwise. The command holds the
+worker's lock and runs under its pacer and cool-downs: it refuses during a
+cool-down, naming its end, waits out the page spacing from the persisted
+last-page time and writes that time after its one load, which the monthly
+page count includes. It opens a visible Camoufox window in a new throwaway
+profile on the landing page `https://www.google.com/travel/flights?hl=en-GB&gl=<POINT_OF_SALE>`;
+on Linux it alone receives the display variables `gmt consent` passes
+through, as two groups, `DISPLAY` with `XAUTHORITY` when `DISPLAY` is set and
+`WAYLAND_DISPLAY` with `XDG_RUNTIME_DIR` when `WAYLAND_DISPLAY` is set (never
+`DBUS_SESSION_BUS_ADDRESS`), and it refuses, pointing at export and import,
+when neither is set. It prints "Click **Reject all** in the window. Nothing
+else is needed; close the window when you're done", and never clicks, types,
+navigates after that one load or evaluates script. Its guard is the
+recorder's consent-probe guard widened by exactly document navigations and
+form POSTs to `consent.google.com` (its `/save` included) and the redirect to
+`www.google.com/travel/flights`; every other host is refused as on the server
+path, and the server path never admits `/save`. It observes read-only: the
+main frame's URL host on every navigation, the classifier's view on a
+snapshot, and `SOCS` by name and domain from `context.cookies()`, every other
+cookie dropped as it is read; a Google account cookie appearing (the worker's
+own set) fails the capture. When `SOCS` appears after the consent host was
+seen, it reads the value, domain, path, expiry, `secure` and `sameSite`,
+checks them with the parser `capture-socs` uses, computes the rejection mark
+from the value with the function work package 17's two throwaway recordings
+(one "Reject all", one "Accept all") establish, and writes the file 0600
+with the capture time only when that mark says rejection. An acceptance,
+`SOCS` with no consent host seen, a consent page left unclicked for 10
+minutes, a challenge page, a page that never loads, a first view the
+classifier does not positively recognise, or a closed window writes nothing
+and says which. The command is built only once those recordings prove a
+mark computed from the value alone; until then `capture-socs` stays the way
+to record the choice. The throwaway profile is deleted in a `finally` (the
+recorder's start-up sweep removes any left by a killed run). Where the first
+stable view is the landing view, a page kind the classifier recognises
+positively from its own dated selectors (`LANDING_VERIFIED`, set by the same
+recordings), no consent host was seen and no `SOCS` is set (a region with no
+consent screen), the command asks the operator to confirm and writes the
+record `{ consent: "not-shown", checkedAt }` at once. On a machine with no
+display there are two paths. `gmt consent export`, on a Mac or Linux desktop
+where `gmt setup` has installed the pinned Camoufox (it never installs one
+itself), runs the same capture and prints one line, `gmt-socs-v1.` followed by
+the base64url of the `SOCS` fields, `capturedAt` and the mark, as its only
+standard output; `gmt consent import` on the server reads that line from
+standard input only (at most 4 KB; an argument is refused), checks it with a
+strict schema (name exactly `SOCS`, the value's length and characters
+bounded, domain `.google.com`, path `/`, expiry no later than 13 months after
+`capturedAt`), recomputes the mark from the value and refuses a line whose
+carried mark differs or is not a rejection, and writes the same file, keeping
+`capturedAt`. `capture-socs`, the paste from an ordinary private window, is
+the lighter equal option. A server in a region with no consent screen uses
+`gmt consent check`: one headless load of the same landing page under every
+worker rule (the lock, the pacer and its monthly count, the guard, the
+classifier, the cool-downs), read-only, at most once an hour (the last
+check's time is persisted beside the pacer's last-page time, so a new process
+is refused before then with the time it may run), which writes the not-shown record only under
+the rule above and otherwise says that this server's region shows a consent
+screen and to capture on a desktop. With a not-shown record the worker sets
+no cookie, and a consent page at any step, or a `SOCS` cookie appearing after
+a page, stops it as `consent-unhandled` like any other and rewrites the
+record as `{ consent: "voided", voidedAt }`: `/v1/status` then reports kind
+`voided`, the worker refuses its next start with the reason `consent-voided`,
+and the Status view's consent check fails ("consent screen now shown: capture
+again"). A capture's expiry is the earlier of the cookie's own expiry and
+`capturedAt` plus 13 months (a not-shown record's is `checkedAt` plus 13
+months), and the summary says which bounds it (`boundedBy` `cookie`,
+`capture` or, for a not-shown record, `check`; null once voided); `gmt status` and the Status
+view (§11) warn from 30 days (as elapsed time) before it and fail after it,
+and the app sends one operator email a day while that check is not `ok`
+(§8.3); the worker refuses to start
 without a capture, or with one older than 13 months (the cookie's stated
 lifetime) or dated in the future. After every page, on every path, success
 and failure alike, the worker reads `SOCS` back with `context.cookies()` and
@@ -421,12 +575,26 @@ private window; (2) with `SOCS` pre-set, the results, Cheapest and View-more
 pages, each landing on `www.google.com/travel/flights` (the evidence that the
 pre-set rejection keeps the consent page away), and three spaced pages whose
 `SOCS` read-back stays equal; (3) a consent probe in a throwaway profile, the
-one narrow navigation exception, which lives only in the recorder, records
+one of the two narrow navigation exceptions (the other is the `consent`
+command above), which lives only in the recorder, records
 the consent page, clicks nothing, starts no cool-down and deletes its profile
 in a `finally` (a start-up sweep removes any left by a killed run); (4) a "no
 flights" page, from a valid query the operator picks at recording time for a
 pair or date with no service, or a record that none appeared, in which case
-the no-flights line stays unverified.
+the no-flights line stays unverified. For each further `<os>-<arch>`
+entry the operator repeats (2) and (4), and the `--grid` pages, under that
+entry's build, and the session sets that entry's flags only (work package
+17): `darwin-x64` on the operator's Mac under Rosetta, `linux-arm64` in a
+Linux arm64 container on the same Mac and `linux-x64` in a Linux x64
+container under emulation, all headless with the generated `fonts.conf`, so
+every load comes from the operator's own address like every other recording.
+The containers mount only the source paths the recorder needs, never `.env`,
+`data/` or any settings file. Work package 17 also records, in throwaway
+profiles, headed, with the person clicking and under the `consent`
+command's guard above, one "Reject all" and one "Accept all" capture,
+storing the two `SOCS` cookies' fields and the consent form submission's
+request path and field names (never a value beyond the one that tells the
+two apart), which settles the rejection mark.
 
 *Ledger and caps.* Every worker call through the adapter is one
 `provider_requests` row under the **free-provider rules** (never billable,
@@ -453,7 +621,7 @@ for this run is 600 scrolls; …").
 Flights prices via Camoufox"; compact mark `CF`. `provenanceNote`: "Google
 Flights prices via Camoufox: the cheapest round-trip price Google Flights
 listed for this day pair when this app's own Camoufox browser read the page
-on the operator's machine, from the operator's IP address, in the currency
+on the machine running this app's browser worker, from that machine's address, in the currency
 the page states. Return date: the date asked for, which the page's search
 form showed; the listed options state only the departure. The operator turned
 this provider on. Constraints are not checked; no return
@@ -461,7 +629,7 @@ leg, seller or baggage is read."  In `grid` mode the source label is "Google
 Flights date grid via Camoufox" and the note reads: "Google Flights date
 grid via Camoufox: the round-trip price Google's date grid showed for this
 day pair when this app's own Camoufox browser read the page on the
-operator's machine, from the operator's IP address. The grid shows whole
+machine running this app's browser worker, from that machine's address. The grid shows whole
 pounds; the exact fare may differ by under £1. Google's date grid; age not
 stated (assumed ≤24h). Return date: read from the grid cell, checked against
 the grid's return row. A "cheapest" mark means Google's date grid marked
@@ -501,7 +669,16 @@ it; the operator is responsible for how it is used. **The operator's IP and acco
 load comes from the operator's own address (no proxies), so a block, CAPTCHA
 or wider restriction lands on that address, and through it on the operator's
 other Google use from the same network; the worker's profile is never signed
-in, so the operator's account is never used. **Brittleness:** Google changes
+in, so the operator's account is never used. On a server (a VPS, or any
+machine with no display), page loads come from that server's address, not a
+home connection. `gmt setup` shows this summary of costs on every machine
+before it asks about the provider, and on a machine with no display adds,
+and requires a typed `yes` for (`acceptServerAddress: true` in an answers
+file): "Page loads will come from this server's address, not a home
+connection. A datacentre address is more likely to be refused or shown a
+verification page, and each one pauses the provider for 48 hours; any
+restriction applies to that address. If that is not acceptable, leave the
+provider off, or run the app on a machine at home." **Brittleness:** Google changes
 the page without notice; a changed page reads as unrecognised and stops the
 provider for an hour (never a silent zero), and the selectors and grammar
 must be re-dated against a new recording; `camoufox-js` is marked
@@ -515,8 +692,9 @@ minutes at the maximums (60 scrolls, 30 s spacing). **Availability:** the provid
 while the operator's machine is on and the worker is running; otherwise its
 cells read skipped ("browser worker not reachable") and every other provider
 runs. **Image size:** none in the app image, which is unchanged; Camoufox
-(several hundred megabytes) and the worker's dependencies live on the
-operator's Mac. **The worker key:** any process or container that can reach
+(313 MB to download and about 670 MB unpacked on macOS, 654 MB and about
+1.25 GB on Linux) and the worker's dependencies live on the
+operator's machine. **The worker key:** any process or container that can reach
 the worker's address (Docker Desktop forwards `host.docker.internal` to the
 Mac's loopback for every container) is stopped only by
 `CAMOUFOX_WORKER_KEY`. **Money:** none, against SearchApi's ~£32 a month.
@@ -638,7 +816,7 @@ verification as a free history source (§7 `route_price_history`).
     `currency-unsupported`, `unknown-airport-tz`, `no-return-legs`,
     `no-priced-options`, `unmappable-carrier`; the vendor's message,
     URL-stripped, is in `last_error`, never in `reason`.
-  - `skipped`: `reason ∈ not_selected | budget | provider_disabled | provider_unavailable | departed` (`provider_unavailable`: the `camoufox` worker could not be reached, §2).
+  - `skipped`: `reason ∈ not_selected | budget | provider_disabled | provider_unavailable | scheduled_only | departed` (`provider_unavailable`: the `camoufox` worker could not be reached, §2; `scheduled_only`: a `camoufox` cell left for a later run, with a detail code in `cell_outcomes.skip_detail` (migration 0007): `catch-up-no-browser`, a catch-up's cell that reuse did not fill, shown "…: a catch-up loads no browser pages", or `outside-browser-window`, a cell a run reached past its browser window, shown "…: outside this run's browser window" (§8.2); the words before the colon name who fetches it, read when it is shown: "left for the next scheduled run" only when the definition is scheduled and enabled and its scheduled runs still use the browser provider (configured and enabled), "left for your next run of this search" when only a run started by hand would, else "not fetched: this search no longer uses the browser provider" (`core`'s `leftForOf` and `scheduledOnlyText`, one text for View D, the cell panel, the notice and the Status view; the engine's `browserLeftFor` answers it and the api returns it as `browserLeftFor`); the promise is made only for the latest parent run's cells, and an earlier run's left cell reads in the past tense, "left by that run: <why>").
   - Coverage is always shown as **six buckets**: priced, no fares (`empty`),
     no cached data (`no_data`), error, skipped (reasons in the drill-down),
     not searched (`not_run`); they sum to the cell count. "Searched" as an
@@ -665,8 +843,10 @@ verification as a free history source (§7 `route_price_history`).
 
 ## 4. Architecture
 
-Single Node process (API + engine + scheduler) serving a built React SPA,
-one SQLite file, one container. Optional Mailpit for local email.
+Single Node process (API + engine + scheduler) serving a built React SPA and
+one SQLite file, run either natively as a user service, the default local path
+that the `gmt` command sets up on macOS and Linux (§13), or in one container,
+the VPS path. Optional Mailpit for local email.
 
 | Package | May import | Owns |
 |---|---|---|
@@ -676,6 +856,8 @@ one SQLite file, one container. Optional Mailpit for local email.
 | `engine` | `core`, `db`, `providers` | Orchestrator, normalisation step (calls db repositories directly), stage runners, scheduler (owns the single `parseCron` wrapper over `croner`, which `api` imports for validation), notifiers, alert runner, FX refresh (through http-kit under the never-billable id `fx`), maintenance job. |
 | `api` | all | Two entrypoints: the **app bootstrap** and the **tool bootstrap** (§7), both built on the wiring helper from WP4b and parsing `process.env` once through the `core` schema. Routes incl. the authenticated `/tools/*` routes, auth, hardening, static, health. |
 | `web` | `core` (types, `api-contract`, pure filter/rank/verdict/label functions) | SPA. |
+| `camoufox-worker` (`apps/camoufox-worker`) | `core` | The opt-in browser worker (§2): its own process on the operator's machine; `camoufox-js` and `playwright-core` only in its launch and driver modules. |
+| `cli` (`apps/cli`) | `core` | The `gmt` command (§13): setup wizard, service management behind one `Platform` interface, the Camoufox install from the manifest, the consent and status front ends, update and uninstall. Reaches the app and the worker only over HTTP or as child processes (`pnpm --filter … <command>`), never by import; no browser library; `process.env` read only in its entry module. |
 
 **Tech**: TypeScript strict, Node 22, pnpm, `better-sqlite3` + Drizzle,
 Hono + `@hono/node-server`, `zod`, `@noble/hashes`,
@@ -1195,7 +1377,7 @@ carriers, destination, max price, nights range, stale. `bandCheapest(rows,
 | 3 | any `error` | `error` |
 | 4 | any `empty` and every other ∈ {empty, no_data, skipped} | `empty` |
 | 5 | any `no_data` | `no_data` |
-| 6 | all `skipped` | `skipped`, reason by priority budget > provider_disabled > departed > not_selected |
+| 6 | all `skipped` | `skipped`, reason by priority budget > provider_disabled > provider_unavailable > scheduled_only > departed > not_selected |
 
 `no_data` outcomes whose reason is `cabin-not-offered` are ignored whenever
 any other outcome exists for the cell; a cell whose only outcomes are
@@ -1335,7 +1517,34 @@ are `toISOString()` text; booleans are integers 0/1.
   interrupted | cancelled | completed | skipped_budget | skipped_confirm |
   skipped_window | skipped_missed, stage, estimate_json, cancel_requested, resume_after NULL,
   auto_resume_count NOT NULL default 0, created_at, started_at,
-  finished_at, error_text). **Parent partial unique index** `(definition_id) WHERE
+  finished_at, error_text, scheduled_for NULL (the firing the row stands for:
+  the instant `croner` gives for that firing, as UTC ISO text with
+  milliseconds; written by a scheduled start, catch-up or skip, and moved to a
+  later firing only by that firing's punctual live-tick resume (decision 83),
+  which can also give a paused manual run one; a catch-up's never moves, since
+  History names it), is_catch_up NOT NULL default 0, browser_window_end NULL (the end
+  of the run's browser window, §8.2), skip_code NULL
+  (`half-cadence` | `browser-only-definition`, set only on a `skipped_missed`
+  row, the reason it was not caught up), paused_at NULL (the instant the
+  row last stopped running: set when it enters `paused_*` or `interrupted`,
+  kept through a cancel, cleared when a resume claims it; a run the boot
+  sweep finds lost stopped at its last ledger activity, else its start; §8.2
+  reads it to tell a catch-up paused at a firing from one in flight there);
+  migration 0007, which also adds the partial index
+  `search_executions_in_flight_idx (created_at) WHERE status IN ('pending',
+  'running')` (the one-probe read of `GET /api/executions/active`),
+  `cell_outcomes.skip_detail` NULL (`catch-up-no-browser` |
+  `outside-browser-window`, only with `skipped:scheduled_only`), the
+  `browser_window` notification kind, and `app_meta`)).
+  **Firing unique index** `(definition_id, scheduled_for) WHERE is_child = 0
+  AND scheduled_for IS NOT NULL`, so one firing can never start or skip
+  twice. A scheduled start or skip inserts with `INSERT … ON
+  CONFLICT(definition_id, scheduled_for) WHERE is_child = 0 AND scheduled_for
+  IS NOT NULL DO NOTHING` inside the start's immediate transaction (never
+  `INSERT OR IGNORE`, which would also swallow the active-parent clash and
+  CHECK or NOT NULL failures); when no row was inserted the start returns
+  `firing-taken` and seeds no cells, launches nothing and sends no notice.
+  **Parent partial unique index** `(definition_id) WHERE
   is_child = 0 AND status IN (pending, running, paused_budget, paused_error,
   interrupted)`; **child partial unique index** `(definition_id,
   child_origin, child_destination, child_departure_date, child_return_date)
@@ -1364,7 +1573,9 @@ are `toISOString()` text; booleans are integers 0/1.
   headroom exists; a **manual** resume additionally selects
   `skipped:provider_disabled` and `error` with reasons auth/quota/parse
   (re-enabling the provider for that pass); never rewrites `priced | empty
-  | no_data`. Discovery resume re-plans tiles over the resumable cells only.
+  | no_data`, and no resume, manual, automatic or at boot, ever selects
+  `skipped:scheduled_only`. Discovery resume re-plans tiles over the
+  resumable cells only.
 - `calendar_prices` (id, execution_id, provider_id, source_kind NOT NULL,
   cabin, origin, destination, departure_date, return_date, price_pence,
   price_native_minor, currency_native, fx_rate_nano NULL, fx_rate_date NULL,
@@ -1442,7 +1653,20 @@ are `toISOString()` text; booleans are integers 0/1.
   suppressed, reason, payload_json). Index (rule_id, dedup_key, fired_at),
   (rule_id, identity_key, fired_at).
 - `operator_notifications` (id, kind, execution_id NULL, definition_id,
-  sent_at, status).
+  sent_at, status); `kind` is one of `OPERATOR_MESSAGE_KINDS` (migration 0007
+  adds `browser_window`, §8.2).
+- `app_meta` (key PRIMARY KEY, value; migration 0007): facts about the
+  database itself, one row per known key. `app_instance_id` is a random id
+  the app writes the first time it needs it, kept with `app_instance_path`,
+  the database file's canonical path when the id was made (worked out by
+  the repository itself, symlinks followed and the letter case the volume
+  holds, so every opener agrees; read and written in one immediate
+  transaction), and sends the
+  `camoufox` worker as `x-gmt-app-instance` (decision 82). Opened at that
+  path again (a restart, a container recreate, whose path is always
+  `/data/…`, a host rename) it is the same app; opened at another path (a
+  copied or moved file, a backup restored into a second app) it gets a new
+  id, so a second ledger on the worker shows as a second instance.
 - `route_price_history` (origin, destination, departure_date NULL,
   return_date NULL, cabin (a cabin or 'unknown'), provider_id, date,
   lowest_price_pence, fetched_at, point_of_sale) UNIQUE (origin, destination,
@@ -1528,6 +1752,7 @@ pre-start (scheduler tick and POST): resolve window (§6.1); estimate per provid
    a scheduled run needs definition.confirmed_cost_pence × 10 000 ≥ estimateMicroGbp else skipped_confirm
    + notified; a PUT that raises the estimate above the stored confirmation returns needsConfirmation
 start: snapshot; seed search_cells + cell_outcomes(not_run) for every cell × discovery provider; status=running
+   (a catch-up, §8.2: camoufox's cells are reused as below and the rest seeded skipped:scheduled_only)
    a provider whose `cabins` excludes the snapshot's cabin is not called in either stage: its cells become
    no_data reason cabin-not-offered at seeding
 discovery, per discovery provider, per (origin, destination) pair:
@@ -1626,7 +1851,8 @@ completed
   empty` verification outcome that did not include the offer as "not seen
   in latest search (<age>)" and rank them after seen rows.
 - **Operator notifications** on `paused_*`, `skipped_*` (including
-  `skipped_missed` when a boot finds the last scheduled firing was missed),
+  `skipped_missed` when a missed firing is not caught up, §8.2; rows written
+  before revision 36 read the same),
   `interrupted`, provider disabled, parity break, "alerts on calendar basis
   only"; deduplicated per execution and kind.
 - **Single-cell verification** (`POST /cells/verify`): needs no parent;
@@ -1656,18 +1882,175 @@ completed
 `croner` with `timezone: definition.schedule_tz`. Jobs are (re)registered on
 create, `PUT`, disable, enable and delete, in the same request; a test
 covers each. A tick, in order: cancel and supersede any paused run older
-than `discoveryRefreshHours` whose `resume_after` is not in the future;
-else if an execution is `paused_error` with `resume_after ≤ now`, or
+than `discoveryRefreshHours` whose `resume_after` is not in the future, and
+any paused catch-up (the scheduled firing replaces it and starts with
+`scheduled_for` set); else if an execution is `paused_error` with `resume_after ≤ now`, or
 `paused_budget` and `estimateRemaining` now passes the cap check, **resume
 it** (through the compare-and-set); else if any execution is active, record
-nothing and show "schedule blocked since <date>" in the status bar; else
+nothing and show "schedule blocked since <date>" in the status bar (cleared
+when a run of the definition starts, by a tick, a catch-up or by hand, or
+once the blocking run is no longer active; the date is the blocking run's
+own, so another run blocking later starts a new one); else
 run the pre-start checks and start. A `paused_error` with no `resume_after`
 (every provider disabled) blocks the schedule until a manual resume or the
-supersede above. Missed firings are skipped; a boot that finds the last
-scheduled firing was missed records `skipped_missed` and notifies the
-operator, which is the laptop-asleep case for a personal install. A firing
-of a definition no configured provider can run on a schedule was refused
-at the tick, not missed, so boot records nothing for it. Cron is
+supersede above. The definition's own `croner` job is the live tick.
+`croner` 10.0.1 re-arms its timer at most 30 s ahead and, on waking from
+sleep, fires an overdue firing once, so the tick computes its firing as
+`previousFiring(expr, tz, now + 2 s)` (croner answers strictly before the
+whole second it is given, so a tick at its firing's instant, or a timer that
+fires within the second before it, counts as that firing; schedules fire at
+most hourly) and writes that instant as `scheduled_for` for its start or
+skip. When `now − firing` is over a 2-minute grace the tick is late: it still
+runs the tick order above (the stale-run supersede, the resume, which then
+does not re-anchor the browser window, and the "blocked since" record), and
+in place of the start hands the firing to the catch-up decision below, for
+which a run this tick just superseded does not cover the firing; so a late
+tick is a catch-up under the same rules, and a machine asleep at every firing
+still recovers from a stale paused run. The tick and the catch-up read the
+one grace predicate, so a firing exactly 2:00.000 old belongs to the live
+tick. A missed firing is caught up at most once. One function serves
+the boot, the late tick and a system job that runs every minute while the
+app is up (a native install keeps running through sleep, so waking is the
+common case): for each scheduled definition it takes the latest expected
+firing more than 2 minutes old (the grace lets a punctual live tick insert
+its own row first), however old, and treats it as covered when the
+definition changed after it, when a row already carries that firing in
+`scheduled_for` (read first, through the firing index), when any parent
+execution, manual and catch-up included, was active at that instant or
+started after it, except a catch-up paused at it (its stored `paused_at` at
+or before the firing), or when no configured provider that sells the
+definition's cabin, the browser provider included, could run the definition
+on a schedule (then nothing is written or sent). So a catch-up still in
+flight at the next firing covers it like any run (an hourly catch-up that
+overruns the next firing leads to no second one), and a paused catch-up
+never covers a later firing: that firing's row, whatever it is (its start,
+its catch-up or its `skipped_*` row), supersedes it in the same immediate
+transaction as its insert, and a lost insert, or a cancel that finds the
+catch-up already claimed by a resume, rolls everything back (nothing is
+logged, nothing unscheduled). An automatic resume of a paused catch-up (its
+one-shot at `resume_after`, the boot's auto-resume) first hands a firing
+since its `paused_at` to this decision, past the grace at once and inside it
+once the grace has passed (the resume is re-registered just after), and
+resumes only if the catch-up is still paused afterwards; so the outcome is
+decided from stored facts, whichever timer fires first after a wake, and
+only a manual resume can carry a paused catch-up across a firing. A throw
+while deciding is logged with the run and the resume goes ahead, so one
+run can never stop the boot; once the engine is closing nothing resumes. Otherwise it is
+judged against the catch-up's own provider set, which never loads browser
+pages: when `camoufox` is the only discovery provider that could run the
+definition on a schedule (a provider that does not sell its cabin cannot), the firing is recorded as `skipped_missed` with
+`scheduled_for` and `skip_code` `browser-only-definition` (shown "only the
+browser provider could run it, and a catch-up loads no browser pages"),
+notified once, and nothing starts (not even a
+verification-only run). A firing's cadence is the next expected firing
+minus the missed one, both from `croner`, so irregular schedules (Monday and
+Thursday, the 1st of each month, a daily time across a clock change) use
+their own gap; an uncovered firing is not caught up when (next − now) <
+(next − firing) / 2: it is recorded as `skipped_missed` with
+`scheduled_for` and `skip_code` `half-cadence` (shown "the next scheduled run
+was less than half the gap away"), shown in History with the firing and the
+reason and notified once (when a notifier is configured). The code is
+written with the row, so the Status view states the reason the firing had,
+never one re-derived from today's settings. Otherwise one run starts through
+the normal pre-start checks and caps, with `scheduled_for` the missed firing
+and `is_catch_up` set. Every scheduled start or skip, tick or catch-up,
+inserts through the firing unique index (§7), so the live tick, the boot and
+the minute job can never start two runs for one firing, and every refusal a
+catch-up can meet (a cap, a confirmation, the window, no runnable provider)
+is that firing's `skipped_*` row carrying `scheduled_for`, recorded and
+notified once and never retried. The minute job and the boot take each
+definition apart from the others: one whose catch-up throws is logged and
+the rest proceed, and the boot still registers its job. The engine's
+shutdown, in order: refuses any start, resume or verification from its
+first moment; stops every run taking new provider work (each stops as on
+SIGTERM, its calls in flight ending as they do), so no provider request
+starts while it waits; waits for the scheduler's callbacks already running,
+such as a minute job sending its notice, at most the SMTP connection and
+greeting timeouts plus 2 s (22 s, under the app's 25 s shutdown deadline);
+then hands the database back. A callback still running past the wait
+writes nothing more: a notice it sends late is logged once and its row is
+not written, a skip disables no schedule, and a system job's network call
+is aborted. The app marks the engine closed before it closes the database
+in every case, so a shutdown cut off by the app's 25 s deadline is no
+exception. A catch-up keeps the `camoufox` provider in
+its snapshot for the reuse step only: reuse copies camoufox's own outcomes
+that are still inside the refresh window with no page load, and its other
+cells are seeded `skipped` with the reason `scheduled_only` and the detail
+`catch-up-no-browser`, which no resume, manual, automatic
+or at boot, ever runs; the next scheduled run fetches them as usual. A
+catch-up therefore never loads browser pages; Travelpayouts and SearchApi
+run as usual. **The browser window** (`CAMOUFOX_BROWSER_WINDOW`, §12; the
+engine decides it, so it is not a shared worker setting; it is read live at
+every check, so a change applies at the next check, and cells already
+`scheduled_only` stay so). Under the default, `scheduled`, every other run
+loads browser pages only inside its own window, whose end is stored on the
+execution (`browser_window_end`, migration 0007). The start transaction
+writes it as the run's anchor (the later of its firing, `scheduled_for`, and
+its start, so a punctual tick that starts up to the 2-minute grace after its
+firing never finds a small run's window already closed; a manual run the
+operator starts is its own anchor, from its `started_at`) plus 1.5 × the
+start estimate's total seconds. Nothing moves the end except a resume
+performed by the definition's own punctual live tick: it re-anchors before
+its window check, worked out in memory, so that firing becomes the run's new
+anchor (the later of the firing and the resume) and the end is computed from
+the estimate of the cells still resumable; `scheduled_for` and the end are
+then written by one guarded statement inside the resume's claim transaction,
+which changes nothing when another row already holds that firing (the pass
+then carries on under the old window) and never touches a catch-up, so a
+refused resume moves neither and the firing the operator chose loads
+browser pages. A run with no stored end (one started before
+migration 0007, or with no estimate) ends at its `started_at` (else
+`created_at`) plus `STUCK_AFTER_HOURS`. The window is checked only at three moments: (a) before a run's first
+`camoufox` page, (b) at any resume (by the operator, by its `resume_after`
+job, by the boot's auto-resume, or by its definition's live tick), and (c)
+before the next `camoufox` page after the machine has slept; (a) and (c) run
+when the provider's rate limiter admits the page, immediately before it is
+sent, so a page that waited for its slot across a sleep is checked when it
+would really start and, refused, is abandoned with nothing reserved or sent.
+Sleep is
+detected, not inferred from page timing: the engine's scheduler module keeps
+one heartbeat timer (every 30 s, unreferenced so it never keeps the process
+alive, beside the minute job) that records the last wall-clock beat; a beat
+arriving more than 120 s after the previous one means the process was
+suspended, so it records `suspendedAt` (the previous beat) and `resumedAt`,
+logs one line, and marks every execution in flight as needing a window
+check. Before each `camoufox` page starts, a last beat older than 120 s also
+counts as a detected suspension, which closes the up to 30 s after a wake
+before the next beat arrives. A page in flight during the suspension finishes, its result kept with
+its provenance unchanged, and the check runs before that run's next page. A
+run is never otherwise cut mid-flight, so runs sharing the worker,
+interleaving page by page and each taking longer than its estimate, keep
+their tails. A resume checks the window
+before it prices or cap-checks anything: past the window, the provider's remaining
+cells are first written `skipped` with the reason `scheduled_only` (detail
+`outside-browser-window`), so the pass, its stored estimate and its cap check
+leave `camoufox` out, and a `camoufox` monthly cap cannot refuse a resume
+that SearchApi and Travelpayouts can run. A run past its window at check (a)
+or (c) does the same with its remaining cells; a page already loading
+finishes, and the operator is told
+once for that run, in a notice kind of its own (`browser_window`, so its
+dedupe and a `provider_disabled` notice's never hide each other): "browser
+pages left: this run is past its browser window", naming who fetches the
+cells as §3's texts do. SearchApi and Travelpayouts resume and continue as
+usual, and the next scheduled run (on a definition with no schedule, the
+operator's next run of it) fetches the browser provider's cells. A pass the
+window cut left its planned tiles unrequested on purpose, so it is no parity
+break, and View D offers no Retry on a browser error a resume would only
+leave (the resume's own rule). So browser pages load near the times the operator chose, and never
+late; the Status view warns when two definitions that use the browser
+provider share a firing time and suggests staggering them. Under `any`, a
+run resumed by the operator, by its `resume_after` job or by the boot's
+auto-resume, or carrying on after the machine slept, keeps loading browser
+pages whenever it resumes, within every cap, the spacing and the
+cool-downs, and no window check writes `scheduled_only`. A catch-up never
+loads browser pages under either value: the gate refuses a catch-up's
+browser page outright, whatever its cells' state, and a resume of a catch-up
+leaves any runnable browser cell `scheduled_only` (`catch-up-no-browser`).
+A catch-up's prices carry the usual provenance (their fetch time is when
+they were fetched), and History shows "ran <time>, catch-up for <missed
+time>" beside each price a catch-up fetched, whatever definition ran it (the
+api names each point's catch-up), and lists a skipped firing with the time it
+was due and its reason. Cron is
 a bounded string in `core/api-contract`; the single `parseCron` wrapper in
 `engine` (over `croner`) is the **sole** semantic validator, imported by
 `api` (sub-hourly rejected, tz validated); `core` has no cron parser.
@@ -1708,6 +2091,19 @@ outbounds each", the rule. Provider strings CRLF/control-stripped.
 Synthetic refused. The banned-word test (§11) runs over rendered notifier
 output and API reason strings with word-boundary matching.
 
+
+**Consent expiry.** The app's maintenance tick evaluates the Status view's
+consent check (§10) and, while it is `warn` or `fail` and the browser
+provider is enabled, sends a consent-expiry notice to every notifier at most
+once a London day: it first claims the key `consent-expiring:<London date>`
+in `operator_notice_keys`, the store the camoufox cool-down notice uses, and
+only on a successful claim sends the notice as the notifier message variant
+`{ kind: 'system', subject, body }` through one engine helper,
+`sendSystemNotice`. It is not an `OperatorMessageKind` (that union feeds
+`OPERATOR_MESSAGE_KINDS`, the `operator_notifications` kind check, and needs
+a definition id), so `operator_notifications`, its CHECK and the drizzle
+snapshot are untouched and no migration is needed; there is no separate
+reminder service.
 ---
 
 ## 9. Testing
@@ -1821,6 +2217,89 @@ or the engine. First-failing-test per WP in §16.
    induced to return them, within an explicit call budget.
 8. **Build**: a Dockerfile assertion for `NODE_ENV=production` and
    `IN_CONTAINER=1`.
+9. **Local operation** (work packages 16–18): every `gmt` command is a pure
+   planner from its inputs (OS, environment, existing files and their modes,
+   answers) to a list of actions (make a directory, write a file with its
+   mode, download and verify, unpack, rename, run an argv), run by an
+   injectable executor: an in-memory fake for unit tests and a real one
+   tested against a temporary directory. Tests assert the plans, an
+   idempotent re-run, the refusal on a differing file, stop-at-first-failure
+   with its report, and, with sentinel secrets, that no secret (raw, as
+   base64url or inside an export line) reaches any plan description,
+   rendered service file, log line, error message, standard error or output
+   other than `consent export`'s one line. Data-loss paths run for real in a
+   temporary directory: a SQLite database with rows backed up by
+   `scripts/backup.mjs`, imported or restored, reopened and counted, and
+   interrupted at each step to show the database is the old one or the new
+   one, never partial. The launchd plist and the systemd units have snapshot
+   tests plus property tests (the parsed `ProgramArguments` equals the argv;
+   `ExecStart` round-trips paths with spaces, quotes, `%` and `$`), and are
+   checked by `plutil -lint` and `systemd-analyze --user verify` in the
+   matching CI jobs. Mutation testing (break threshold 80%, in the mutation
+   workflow) covers the planners, the executors' file-mode logic, the secret
+   generator, the answers schema, the Camoufox install planner, the consent
+   line codec, the status aggregation and its state rules (`core`), the
+   catch-up rule (`engine`, its own Stryker config) and the worker's monthly
+   admission; a check fails when a file a brief names for mutation is in no
+   Stryker `mutate` glob, when a brief states no mutation scope (an empty
+   one included), or when a merged brief still lists a pending one. The
+   `consent` command runs against
+   a loopback fake consent page through a driver type exposing only launch,
+   load, read cookies, read the URL, snapshot and close: Reject all, Accept
+   all refused, `SOCS` with no consent page, a consent page left unclicked,
+   a challenge page, offline, window closed, no consent screen, an account
+   cookie. `GET /api/status` has contract, redaction and per-state tests
+   (table-driven, every row and state counted) and a route test over a
+   migrated database with global `fetch` throwing except for the worker's
+   loopback URL; the Status view a component test per state. `apps/cli`
+   holds 85% lines and 70% branches.
+
+**CI matrix.** The `test` job (lint, typecheck, the unit suites and the
+visible-skip check of recording-dependent suites) runs on `ubuntu-24.04`,
+`ubuntu-24.04-arm`, `macos-15` and `windows-2025`. On Windows, POSIX-only
+tests skip with a visible title naming the reason, and the tests known to
+fail there are listed in `ci/windows-known-failures.txt`, one
+`<relative file> > <full title>` a line: the leg runs vitest with its JSON
+reporter and a script in `scripts/` compares the results with the list
+(each listed failure still printed with its title), is not
+`continue-on-error`, and turns red on any failure outside the list or on a
+listed test that passes, so the list only shrinks; a guard over `vitest list
+--json` refuses a line naming no test, a line matching two, and a duplicate
+line. An
+`install-e2e` job on both Ubuntu runners and `macos-15` clones the checkout
+into a temporary directory on a local `main` whose `origin` is a bare
+repository, runs `gmt setup --non-interactive` there from a generated
+answers file (no vendor key, a non-default port), asserts the installed
+state (the unit or agent present and running, health 200), runs `gmt status`
+(exit 0, with `backups` `ok`, its newest backup (setup's) under 36 h old and
+no note, and the "no usable price source" warning), pushes a commit to
+the bare repository and runs `gmt update` (the served version changes), runs
+`gmt uninstall`, and asserts the listed removed paths are gone and the kept
+ones remain. Each matrix entry declares its mode as a literal, `E2E-MODE:
+real` or `lint-only`, echoed by the job and parsed by the workflow guard,
+which fails on a computed mode and when no entry is `real`; `lint-only` is
+allowed only for a runner WP16b's research records as unable to run its
+service manager, with the run link and date in the brief. The job has a
+timeout and uploads the service logs on failure. Windows runs `gmt setup
+--dry-run`, which there prints the refusal and exits 0 (a real `setup`
+exits 78). A `camoufox-install` job, on changes to `CAMOUFOX_BUILDS` or the
+install code and weekly, downloads each runner's entry (cached by its
+SHA-256, one retry, a step timeout; an Intel macOS runner covers
+`darwin-x64` if one is available, else that entry is stated as not
+exercised in CI), checks the hash, and launches it headless through the
+worker's own launch path against a loopback page, with a `fetch` spy proving
+`camoufox-js` never reached its download branch and, on Linux, the generated
+`FONTCONFIG_FILE` in place. No CI job loads a Google page, calls a vendor or
+reads a repository secret; the one outbound call a booted app makes is its
+free FX-rate fetch, which is never ledgered. `scripts/workflows.test.mjs`
+parses every workflow and fails on the `secrets` context in any form,
+`github.token` or `GITHUB_TOKEN` in the install jobs, `pull_request_target`,
+`workflow_run`, `secrets: inherit`, a self-hosted runner, a missing
+top-level `permissions: contents: read`, an action not pinned by SHA, or a
+URL whose host is off its allowlist (`registry.npmjs.org` and loopback for
+every job; `github.com` and its release-asset hosts for the two install
+jobs only), in the workflow YAML and the `ci/*.json` files its steps name;
+each ban has a fixture that fails.
 
 ---
 
@@ -1833,6 +2312,9 @@ shape carries `provenance` and `stale`.
 | Route | Purpose |
 |---|---|
 | `GET /health` | unauthenticated and exempt from the Host allowlist: `{ ok, degraded }` where `degraded` = job count ≠ enabled scheduled definitions, or an execution running past `STUCK_AFTER_HOURS`, with no detail; authenticated detail `{ db, providers, scheduler: { jobCount, nextRun, lastExecutionAt, degraded } }` |
+| `GET /status` | authenticated; never spends, never waits on a vendor, never loads a page: `{ generatedAt, mode: 'native' \| 'container' \| 'dev', version, checks }`, each check `{ id, area, providerId, state: 'ok' \| 'warn' \| 'fail' \| 'off', summary, note, offReason, fix: { text, command } \| null }` (`note` an aside on an `ok` check, such as "caught up the run missed at 01:30, ran 07:02", which never counts toward the status bar; `offReason` ∈ `not-set-up`, `not-visible`, `awaiting-verification`, only when `off`), worst first; `command` is a `pnpm gmt …` line in native mode and always null in container and dev mode, where the text names the compose action or the docs section; areas `app`, `database`, `backups`, `schedule`, `data` (per definition, its latest finished parent run's discovery coverage per cell in the six buckets with their spec labels, both ends of its priced observations' effective ages, never "fresh", "complete" or "all"), `provider` (one per provider plus `price-sources`, which warns "no usable price source" unless a non-synthetic provider can price a scheduled search), `worker` (whose card also states the app's `CAMOUFOX_BROWSER_WINDOW`), `consent`, `email`; summaries come from fixed templates and error classes, never from vendor, worker or SMTP text; the worker check reads the worker's `/v1/status` through http-kit with a 2 s timeout and picks named fields (`workerStatusSchema` gains a field one work package before any worker emits it, so an app parses the status of a worker one package newer); no field carries a key, password, database path or `SOCS` value |
+| `GET /executions/active` | authenticated: `{ execution: { id, definitionId, definitionName, kind: 'run' \| 'cell-verification', startedAt, estimatedFinishAt } \| null }`, the oldest execution with a pass in flight (pending or running), a parent run or a single-cell verification (which spends credits too), read as one row; its estimated finish is now plus the seconds its remaining cells are estimated to take (so a resumed run never reads as finished in the past), or null without an estimate; `gmt update` reads it |
+| `POST /alerts/test-email` | sends one fixed test message through the configured email notifier, inside `ALERT_EMAIL_MAX_PER_HOUR` (429 past it); 409 when email is not configured; the result's time and class (sent, refused, failed; never the server's text) is kept in the process and shown as "since the app started" |
 | `GET /airports?q=` | airport-table autocomplete: up to 20 rows `{ iata, name, city, country, tz, metro }` |
 | `GET /providers` | capabilities, plan, usage vs caps with window bounds for the one window each plan uses (the month on a monthly plan, the lifetime on the trial; the unused window is not sent, so a null cap means no cap); "verification will not run: spend cap is 0" when a provider whose calls cost money is enabled under a zero spend cap; on a billed plan whose calls cost £0, a `capNote` naming the call cap that is the hard stop |
 | `GET/POST/PUT/DELETE /definitions[/:id]` | CRUD; `POST` with no body creates the **default definition for the configured plan**; response includes `budgetFit`; `PUT` re-registers the schedule; a zero-cell window returns 422 |
@@ -1849,6 +2331,7 @@ shape carries `provenance` and `stale`.
 | `GET /definitions/:id/calendar-gap` | cells whose calendar price is below the cheapest class-`verified` observation (incl. children); empty when the definition has no verification provider |
 | `GET /definitions/:id/cells/:origin/:destination/:departureDate/:returnDate` | that cell's outcomes per stage and provider and its prices, each with full provenance (the View B side panel source) |
 | `POST /tools/smoke`, `POST /tools/record` | the live smoke and recording scripts run inside the app process (authenticated), for use while the app holds `app_lock` |
+| `GET /tools/smoke/plan` | authenticated, ledgers nothing: the smoke's worst case from `smokeWorstCase` (SearchApi credits split into calendar and itinerary, Travelpayouts free calls, browser pages and, in grid mode, the scroll allowance) and the SearchApi trial credits left, which `gmt smoke` prints before it asks |
 | `GET /itineraries/:hash/history`, `GET /routes/:o/:d/history?cabin=` | series per provider and kind; the route's calendar series has one point per execution fetch (the pair's minimum across its cells, carrying the cheapest cell); reused rows excluded; the vendor's price-history series comes grouped by searched trip (`trip` = its departure and return dates, null for rows stored before the trip was recorded), each point vendor-stated GBP |
 | `GET/POST/PUT/DELETE /alerts[/:id]`, `GET /alerts/events` | |
 | `GET /scheduler/jobs`, `GET /budget` | |
@@ -1868,7 +2351,13 @@ labelled "itinerary-search basis"; stage counts say "itinerary-searched".
 
 Layout: nav owned by WP9 for all views, its links wrapping into rows on a
 phone so every view stays in sight; definition selector; **status bar**
-on every view: stage, progress as the six-bucket breakdown per stage ×
+on every view (it reads `GET /status` through the same query as the Status
+view, every 60 s: any `fail` shows a "Status: n failing" link, any `warn` a
+quieter "Status: n to check" link, each naming the area when there is one
+("Status: consent to check"); a `degraded` app is a `fail` on `schedule`;
+after a failed refresh the bar shows "Status: stale, checked N min ago" and,
+with no report, "Status: app not answering", never a clean state from old
+data): stage, progress as the six-bucket breakdown per stage ×
 provider (never an "attempted" or "searched" umbrella), spend used / cap
 for the execution and the month, and each provider's call usage against
 its binding window, worded as the Providers view words it ("this month:
@@ -1981,6 +2470,22 @@ merged into price.
   reused rows excluded; axis titles; empty state. The route view says
   itinerary offers are shown per itinerary, from a Results row; "run"
   counts parent runs, with on-demand searches counted apart.
+- **Status**: one card per `GET /status` check, grouped by area, worst first,
+  each a labelled region whose state is written as text before its summary
+  (never colour alone); "checked N s ago" from `generatedAt`; on a failed
+  refresh the last report stays, marked stale with its age, and with no
+  report the view says the app is not answering, as `gmt status` does. Every
+  card not `ok` shows its fix; a fix command has a copy button that confirms
+  "Copied", and where the clipboard is unavailable (a non-secure origin) the
+  command is shown selected instead. `off` cards fold into one line that
+  says why each is off ("not set up: SearchApi"; "awaiting verification for
+  this build: browser provider"); container-mode backups keep a card of their
+  own ("not visible from the container: check your host's backup job,
+  docs/setup.md section 6"). Provider cards use the Providers view's wording
+  and link to it. Refreshes on focus and every 60 s; read only, except the
+  email card's "Send test" (`POST /alerts/test-email`), disabled while
+  sending, with distinct messages for sent, not configured (409), hourly
+  limit (429) and failed. Settings are not edited here.
 - **Definitions / Alerts / Providers**: forms with estimate, `budgetFit`,
   standing confirmation, onward-cost entries, plan presets shown.
 - **Accessibility**: 375px layout as above; keyboard-operable table and
@@ -2057,16 +2562,17 @@ CAMOUFOX_WORKER_URL=                     # http://127.0.0.1:8090 (pnpm dev) or h
 CAMOUFOX_WORKER_KEY=                     # ≥ 32 chars, shared by app and worker; required when CAMOUFOX_ENABLED=true
 CAMOUFOX_MIN_SPACING_SECONDS=30          # start to start; minimum 30, maximum 600; never randomised
 CAMOUFOX_EXECUTION_PAGE_CAP=100          # page loads per execution (BudgetExceeded provider-execution), frozen into the execution's budget snapshot; 1–400
-CAMOUFOX_MONTHLY_PAGE_CAP=1500           # page loads per calendar month (provider-month; no-page rows not counted)
-CAMOUFOX_BILLING_DAY=1                   # 1–28, the month boundary for the page cap
-CAMOUFOX_COOLDOWN_HOURS=48               # pause after a challenge, sign-in or consent page; minimum 24 (an unrecognised page pauses a fixed 1 h)
+CAMOUFOX_MONTHLY_PAGE_CAP=1500           # page loads per billing month (provider-month; no-page rows not counted); the app's ledger enforces it; the worker reports it (and enforces it from WP17)
+CAMOUFOX_BILLING_DAY=1                   # 1–28: the month starts 00:00 UTC that day, for both monthly caps (the ledger's, and the worker's from WP17)
+CAMOUFOX_COOLDOWN_HOURS=48               # pause after a challenge, sign-in or consent page; 24–100000 (an unrecognised page pauses a fixed 1 h)
 CAMOUFOX_PAGE_TIMEOUT_SECONDS=90         # the worker's whole-page deadline (load, settle, read), 30–240; the app's request timeout is this + 15 s
 CAMOUFOX_MODE=list                       # list (one day pair a page) or grid (the Dates tab's date grid, once the worker reports GRID_VERIFIED and its measured step)
 CAMOUFOX_GRID_SCROLL_SPACING_SECONDS=5   # grid: scroll clicks start to start; minimum 5, maximum 30; never randomised
 CAMOUFOX_GRID_SCROLL_CAP=30              # grid: scrolls a page may make; 0–60
 CAMOUFOX_EXECUTION_SCROLL_CAP=600        # grid: scrolls per execution, checked before every page's scrolls; 0–6000
-CAMOUFOX_MONTHLY_SCROLL_CAP=6000         # grid: scrolls per calendar month
-# worker side only, macOS only (its one 0600 env file <data>/worker.env, docs/setup.md §14): CAMOUFOX_WORKER_KEY, CAMOUFOX_BINARY_BUILD, CAMOUFOX_WORKER_PORT
+CAMOUFOX_MONTHLY_SCROLL_CAP=6000         # grid: scrolls per billing month; the app's ledger enforces it; the worker reports it (and enforces it from WP17)
+CAMOUFOX_BROWSER_WINDOW=scheduled        # exactly scheduled (default when unset: pages only inside a run's window, §8.2) or any (a resumed run keeps loading pages, within every cap, spacing and cool-down); any other value fails boot naming the field; app side only, not shared with the worker; a catch-up loads no browser page either way
+# worker side only (macOS; Linux from WP17; its one 0600 env file <workerData>/worker.env, written by gmt setup; docs/setup.md §14): CAMOUFOX_WORKER_KEY, CAMOUFOX_WORKER_PORT, and the shared settings named under "Where settings live" below
 # fixed, not configurable: concurrency 1, rate per hour = floor(3600 / spacing), cost 0, cache never
 # --- email (all or nothing) ---
 SMTP_HOST=
@@ -2082,6 +2588,61 @@ ALERT_EMAIL_MAX_PER_HOUR=20                # outgoing email ceiling per hour, co
 # --- never in production; development only, not passed by compose ---
 ALLOW_FIXTURE_PROVIDER=
 ```
+
+**Where settings live.** In the container, `.env` beside
+`docker-compose.yml`, as above. In native mode (§13) the app reads
+`~/.config/get-me-there/app.env` (the directory 0700, the file 0600 and the
+user's own), passed by the service as `node --env-file=<path>`, so no value
+reaches the plist, the unit or a command line; the service starts with an
+environment holding only `PATH` and `HOME`, so nothing inherited overrides
+the file. It holds the same names as `.env` plus `NODE_ENV=production`,
+`DATABASE_PATH` (the absolute path of
+`~/.local/share/get-me-there/get-me-there.db`), `BIND_ADDRESS=127.0.0.1` and
+`PORT`. `gmt setup` renders the file, parses it back with `node:util`'s
+`parseEnv` (the parser behind `--env-file`, which the worker's `run.ts`
+already uses), requires the result to equal what it meant to write, and
+checks it through the same `core` schema the app parses; generated values
+use only `[A-Za-z0-9_-]`, operator values are double-quoted, and a value
+holding `"`, `\`, CR or LF is refused. Every reader (`gmt status`, `gmt
+password`, `gmt smoke`) uses the same `parseEnv`. Lines the operator added
+by hand under names the wizard does not own are kept values, not a
+difference. The worker keeps `<workerData>/worker.env`, where `<workerData>`
+is always `~/.local/state/get-me-there/camoufox` (the CLI ignores `XDG_*`
+for the worker's two directories, so the CLI and the worker always agree);
+`gmt setup` generates one `CAMOUFOX_WORKER_KEY` and writes it to both files,
+and keeps the settings the two sides must share equal:
+`SHARED_WORKER_SETTINGS` in `core/camoufox/settings.ts`
+(`CAMOUFOX_COOLDOWN_HOURS`, `CAMOUFOX_PAGE_TIMEOUT_SECONDS`, `CAMOUFOX_MODE`,
+`CAMOUFOX_GRID_SCROLL_CAP`, `CAMOUFOX_GRID_SCROLL_SPACING_SECONDS`,
+`CAMOUFOX_MONTHLY_PAGE_CAP`, `CAMOUFOX_MONTHLY_SCROLL_CAP`,
+`CAMOUFOX_BILLING_DAY`, `POINT_OF_SALE`), beside `workerDataDir(home)`, the
+one rule for `<workerData>` that the worker, the CLI and the app's status
+check share. One rule set in `core` holds each shared setting's bounds,
+default and refusal words (`CAMOUFOX_COOLDOWN_HOURS` 24 to 100,000 on both
+sides), and the app's config, the worker's `loadWorkerConfig` and the CLI's
+file reader read these names only through it (`readSharedSettings`, with
+`effectiveSharedSettings` for a record that must be valid), deriving every
+typed field from its one record, so no second reader or default exists.
+Each side compares **effective** values: the value after its default is
+applied, integers as decimal strings, so a line left out on one side and set
+to the default on the other is not a difference. The
+worker reports its record as `sharedSettings` in `/v1/status`. One pure
+`sharedSettingDiffs(app, worker, mode)` in `core` serves the provider's
+preflight, the Status view's worker check, the CLI's writer and `gmt
+status`; it names settings, never values, and compares the two grid-only
+names (`CAMOUFOX_GRID_SCROLL_CAP`, `CAMOUFOX_GRID_SCROLL_SPACING_SECONDS`)
+only in grid mode. Any name it returns makes the preflight skip the
+provider (`provider_disabled`, "settings differ: <names>") in either mode,
+and the Status view's worker check fails naming it. A worker too old to
+report `sharedSettings` is compared on the fields it does report, as
+before. The two keys are
+compared by digest and reported only as "keys differ"; `gmt setup
+--reconfigure browser` asks whether to generate a new key (yes by default
+when they differ) and then stops both services, writes 24 random bytes as
+hex to `worker.env` and then `app.env` (each through a 0600 temporary file and
+a rename), and starts the worker and then the app; a run interrupted midway
+leaves "keys differ", which a re-run repairs. `gmt start` and `gmt status` check both files' modes and owner; a
+file readable by others is a `fail` naming the `chmod`.
 
 On subscription plans the **call cap is the hard stop**, the marginal cost
 per call is 0, and the global cap and `/budget` count
@@ -2143,23 +2704,239 @@ type with Tailscale and reverse-proxy examples, TLS termination, expected DB
 growth), `api-limits.md` (preset table, per-provider facts, reconciliation),
 `scheduling.md` (cron examples, cadence table, pausing).
 
+**Native local mode (the default local path; work packages 16a and 16b).**
+`pnpm gmt setup` in a checkout on macOS or Linux installs the app as a user
+service: a launchd agent `local.get-me-there.app` in `~/Library/LaunchAgents`
+on macOS, a systemd `--user` unit `get-me-there-app.service` on Linux. Every
+service runs the Node binary setup ran under (`process.execPath`, recorded; a
+path inside a temporary or shim directory is refused), never `pnpm` or
+`corepack`, with an environment of `PATH` and `HOME` only; the app runs as
+`<node> --env-file=<app.env> <checkout>/apps/api/dist/bootstrap/start.js`
+(`NODE_ENV=production`, bound to `127.0.0.1`, basic auth on). It restarts on
+failure no faster than once a minute (launchd `KeepAlive` on an unsuccessful
+exit and `ThrottleInterval` 60; systemd `Restart=on-failure`, `RestartSec=60`)
+and stops on SIGTERM with a 30 s grace (launchd `ExitTimeOut` 30, systemd
+`TimeoutStopSec=30`), so the app always checkpoints and releases `app_lock`.
+Installing a service is idempotent: an unchanged file plans nothing; a
+changed one is rewritten and reloaded (launchd `bootout` if loaded, then
+`bootstrap`; systemd `daemon-reload`, then `enable --now` or `restart`), and
+any change to `app.env` plans a restart. `gmt status` and `gmt start` flag a
+service whose Node binary or checkout no longer exists, with `pnpm gmt setup`
+as the fix, and `update` re-renders the units. On macOS the services run
+while the user is logged in (a Mac that must run unattended needs automatic
+login; a LaunchDaemon is out of scope), and setup detects a missing GUI
+session (`launchctl print gui/<uid>` failing, as over SSH) and says so. On
+Linux, setup probes the user manager with `systemctl --user
+show-environment`, telling "no user bus" (log in through a proper session,
+or set `XDG_RUNTIME_DIR=/run/user/<uid>`) from "no systemd"; for a machine
+nobody stays logged in to it runs `loginctl enable-linger <user>` without
+`sudo` (answers field `linger: skip | enable`), and on refusal prints the
+exact `sudo` command for the operator to run: `gmt` never runs `sudo`. Logs:
+on macOS `~/Library/Logs/get-me-there/` (0700), which `gmt status` warns
+about past 100 MB, with the `newsyslog` line to rotate it in the docs; on
+Linux the user journal, where setup notes when the journal is not persistent
+(`/var/log/journal` absent) and `gmt logs` prints a hint when it shows
+nothing (journal group membership). Data lives in
+`~/.local/share/get-me-there/` (the database 0600, `backups/` 0700,
+`camoufox/`), settings in `~/.config/get-me-there/` (§12), and the worker's
+state in `~/.local/state/get-me-there/camoufox/` as before. A daily backup
+job (a launchd calendar agent; a systemd timer with `Persistent=true`) runs
+`<node> --env-file=<app.env> scripts/backup.mjs --dir
+~/.local/share/get-me-there/backups/daily --keep 14`, in its own subdirectory
+so the app's pre-migration backups (kept at `BACKUPS_KEPT`, 5) never prune
+it; setup takes the first one before it finishes, and `gmt backup` takes one
+by hand. These backups sit on the same disk as the database: they protect
+against a bad update or a deletion, not against losing the disk, so copy the
+folder elsewhere (Time Machine includes it) for that. If the operator opts
+into the browser provider on a machine whose `<os>-<arch>` flags are set, a
+second service runs the worker (`<node> --conditions=@gmt/source --import
+tsx <checkout>/apps/camoufox-worker/src/run.ts main`, in that package's
+directory; `local.get-me-there.camoufox-worker`,
+`get-me-there-camoufox-worker.service`). It is installed and started only
+once its start checks pass (`gmt start` runs `run.ts check --json` first, a
+result in `startRefusalSchema`'s terms), and a refused start never restarts
+every minute: systemd's `RestartPreventExitStatus=78` stops it, and on macOS,
+where launchd's `KeepAlive` cannot exclude one exit code, the worker's agent
+has `ThrottleInterval` 600 and `gmt start`, `gmt status` and `gmt update` boot
+the agent out while `start-refusal.json` is present, reporting "refused, not
+retrying". The worker writes that file (0600, inside its 0700 data
+directory; `{ reason, at }` in `startRefusalSchema`, no free text) before
+exiting 78 and clears it on a successful start. There is no separate
+reminder service (§8.3).
+
+**One app per ledger.** Two apps on two databases would each enforce the
+caps against their own ledger. Docker stays the VPS path, unchanged, and
+native setup refuses while a compose project `get-me-there` exists, running
+or stopped (`docker compose -p get-me-there ps -a`), or its volume does
+(`docker volume inspect get-me-there_gmt-data`), unless `--import-docker` or
+`--ignore-docker` is given, and where the `docker` command exists but the
+daemon does not answer it says "start Docker so setup can check for an
+existing compose app, or pass --ignore-docker". `--import-docker` reads the
+container app's `GET /api/executions/active` (with the compose `.env`'s
+credentials) and refuses while a run is active, as `update` does (`--wait`
+waits for it); stops the container gracefully; takes the backup from the
+stopped volume with `docker compose run --rm --no-deps --entrypoint node app
+scripts/backup.mjs --dir /data/backups`; copies the printed file out (then
+0600, the user's own); restores it as the native database and checks it with
+`PRAGMA integrity_check`; and only then writes `MOVED-TO-NATIVE` beside the
+old database (`docker compose run --rm --no-deps --entrypoint sh app -c …`),
+offers `docker compose down` (the volume kept; with the marker, a later
+`docker compose up` or a reboot makes the container exit 78 in a loop until
+then), and offers to carry the compose `.env`'s settings and vendor keys into
+`app.env` with confirmation. A failed restore leaves no marker. It refuses
+over an existing native database unless `--replace-database`, which backs
+that one up first. `--import-db <path>` does the same for a database a
+checkout's `pnpm dev` or tool bootstrap used, writing the marker beside it;
+`--ignore-docker` writes the marker into the compose volume without
+importing. The app and tool bootstraps honour a `MOVED-TO-NATIVE` file beside
+whatever database they open, inside a container or not, before migrations,
+the boot sweep, auto-resume and cron: they exit 78 with "this database moved
+to a native install on <date>; see docs/setup.md section 0" (the marker's one
+format, `core`'s `movedMarkerText` and `parseMovedMarker`: its first line is
+the move's instant, ISO UTC; the date shown is that instant's, else the file's
+modification time's, in Europe/London; a marker that exists but cannot be
+read still refuses, its date unknown), which also
+names the line that removes the marker (`docker compose run --rm --no-deps
+--entrypoint rm app /data/MOVED-TO-NATIVE`). `gmt status` reports a compose
+`app` container running beside the native service. The worker enforces its
+own monthly page and scroll caps across every caller (§2) and reports a
+second app instance in a month: each app sends its database's own random
+`app_instance_id` (§7 `app_meta`, kept with the database's path), so a
+container recreate or a host rename is still one app, and a second ledger,
+a copied or moved database included, is a second instance. With two apps on one SearchApi key, the stop
+is the vendor's quota, not this app's ledger, and the money ceiling still
+holds only because the `40usd` plan has no overage (`docs/api-limits.md`
+states this, and a docs test pins it).
+
+**The `gmt` command** (`apps/cli`, `pnpm gmt <command>`): `setup`
+(interactive; `--non-interactive --answers <file>` for CI; `--dry-run` prints
+the plan; `--reconfigure <group>` with the groups `port`, `timezone`,
+`email`, `travelpayouts`, `searchapi`, `browser` and `password`, each
+replacing only its own lines and restarting what it touches; `--import-docker`,
+`--import-db <path>`, `--ignore-docker`), `status`, `start`, `stop`, `restart`,
+`logs`, `backup`, `restore <file>`, `password`, `smoke`, `consent` (with
+`export`, `import` and `check`), `update` and `uninstall`. Each command
+computes a plan of actions behind one `Platform` interface (its paths, its
+user id, `writeSecretFile`, and a `ServiceManager` whose facts are gathered
+once before planning and whose install, start, stop and remove return the
+literal `launchctl gui/<uid>` or `systemctl --user` argv, so `--dry-run` shows
+the real commands; `darwin` and `linux` implementations now, `win32` in a
+later work package) and applies it, stopping at the first failure with a
+report of what was and was not done; a re-run plans only what is missing,
+so it resumes without a journal. Prerequisites are checked before anything
+is written (Node ≥ 22.18, pnpm through corepack, with `corepack enable
+--install-directory ~/.local/bin` as the fix where Node's directory is not
+writable, git, the port free, the user service manager as above, the
+compose checks above, and, with the browser provider, `unzip` and on Linux
+Firefox's libraries), each failure with a one-line fix for that OS. The
+wizard asks as few questions as it can: pressing Enter through every prompt
+gives a running app with no price source, and the closing screen then says
+so first and names Travelpayouts as the no-cost source, that it needs a free
+Travelpayouts account (register at `https://www.travelpayouts.com/`, then
+open the API token page, `https://support.travelpayouts.com/hc/en-us/articles/203956083`)
+and `pnpm gmt setup --reconfigure travelpayouts`; on an interactive terminal,
+before applying the plan, it asks once "Paste a token now? (Enter to finish
+without one)", so a first run can end with a source. Each provider prompt
+states in one line what it gives, from §1's configurations table
+(Travelpayouts: cached and authorised, constraints not checked; SearchApi
+`trial`: for a smoke test and spikes, never run on a schedule, and when
+chosen without an imported database it asks how many trial credits are
+already used and writes `SEARCHAPI_TRIAL_USED`; `40usd`: about £32 a month,
+scraping-derived); the email step asks for the SMTP settings with the
+password hidden and offers the test email once the app is up; the browser
+provider is offered only where its flags are set, and when chosen it also asks "If a run is interrupted (for example the laptop sleeps), should the browser part finish when it resumes, even outside the scheduled hours? [no]" (yes writes `CAMOUFOX_BROWSER_WINDOW=any`, §8.2), after the §2 costs
+summary, with the server sentence and a typed `yes` on a machine with no
+display, and its steps run in the order costs, consent method, download,
+consent: `CAMOUFOX_ENABLED` is written only after consent succeeds, so an
+interrupted step leaves the provider off (`not-set-up`) with `pnpm gmt setup
+--reconfigure browser` to resume. Re-running is idempotent: existing values
+are kept unless the operator asks to change them, and a file that differs
+from what the plan would write is reported, never overwritten. Secrets are
+generated with `crypto.randomBytes` and written only to 0600 files; an
+answers file holding a secret must be 0600 (secrets may instead come from
+standard input or a named environment variable), and an invalid secret's
+value never appears in an error. Setup never writes `ALLOW_FIXTURE_PROVIDER`
+or a `.fixture.db` path. Setup ends by printing the URL, the user name,
+where the password lives and `pnpm gmt password` (which prints it to the
+terminal only, never to a log; if scrollback or a shared screen may have
+kept it, `--reconfigure password` replaces it), offers to open the browser,
+says how to reach the app from another device (an SSH tunnel, `ssh -L
+3000:127.0.0.1:3000`, or §3's Tailscale and TLS paths; the native service
+speaks plain HTTP), and says that scheduled searches run only while the
+machine is awake, with a missed firing caught up once on wake, without the
+browser provider (§8.2). Vendor keys are optional prompts with hidden input,
+and setup calls no vendor. `smoke` spends: before posting to `POST
+/api/tools/smoke` with the credentials in `app.env` it prints what it will
+use per provider from `GET /api/tools/smoke/plan`, the route's own worst
+case ("SearchApi: up to 4 calls (calendar 1, itinerary 3; trial: N left)",
+"browser provider: 1 page, up to S scrolls"), refuses before posting when
+the trial credits left are fewer than that worst case, and asks for a typed
+`yes` (`--yes` in scripts); setup, update, status and the CI jobs never run
+it. `update`
+refuses a checkout with local changes or not on `main`; runs `git fetch` and
+checks that `git merge --ff-only` is possible while the app still runs;
+refuses while a run is active, naming it and its estimated finish (`GET
+/executions/active`), and also when that read fails while the app service
+is active (no answer, a non-200, a timeout), unless `--wait` (it waits for
+the run to end) or `--force` (it says before acting that the app stops
+within 30 s, that a page or call in flight is abandoned, stays on the ledger
+and has its cells requested again, and that the run resumes from its last
+checkpoint after the restart when `AUTO_RESUME` is on, or otherwise waits
+for a manual resume). Its plan, in order: record the current commit, stop
+the app and the worker, back up into `backups/update` (keeping 5) and name
+the file, `git merge --ff-only`, `pnpm install --frozen-lockfile`, `pnpm
+build`, install a new Camoufox pin when the manifest changed and that
+entry's flags are set (otherwise install nothing, keep the old bundle and
+say the provider stays off on this `<os>-<arch>` until recordings land),
+re-render the units, start, wait up to 240 s for health (the compose start
+period: a stale-lock wait, backup, migrations and seeding), remove the
+previous Camoufox bundle once healthy, and run `status`. A failure at any
+step after the stop prints the recorded commit, the backup and the native
+restore steps, plus the shorter path when the database was not migrated
+(`git checkout <commit>`, `pnpm install --frozen-lockfile`, `pnpm build`,
+`pnpm gmt start`), and rolls nothing back itself. **Restore (native):** `pnpm
+gmt stop`; `git checkout <commit>`; `pnpm install --frozen-lockfile`; `pnpm
+build`; `pnpm gmt restore <backup>` (it refuses a file that fails `PRAGMA
+integrity_check`, removes the database's `-wal` and `-shm`, keeps the current
+file as `<name>.before-restore`, and copies the backup into place, 0600);
+`pnpm gmt start`; `pnpm gmt setup` re-verifies the pinned Camoufox. A restored
+ledger lacks any call made after its backup, so check the vendor's dashboard.
+The checkout is then on a detached commit: run `git switch main` before the
+next `update` (`gmt status` reports a detached checkout). `uninstall` stops
+and removes every service, timer and agent (with `daemon-reload` and
+`reset-failed` on Linux), removes the macOS log files, keeps
+`~/.config/get-me-there`, `~/.local/share/get-me-there` and
+`~/.local/state/get-me-there`, prints them, and offers to disable linger if
+setup enabled it; `--purge` lists what it will delete, asks for the typed
+word `purge`, never runs non-interactively, and deletes only those three
+directories, refusing one that is a symlink, `$HOME`, a root or not named
+`get-me-there`. `status` calls `GET /api/status`, prints the checks as a
+table, exits non-zero on any `fail`, adds what only the machine can see (a
+compose `app` container beside the native one, a detached checkout, the
+worker's refusal), and, when the app does not answer, falls back to local
+facts: the service manager's state, the last log lines, the settings files'
+presence and modes, and the worker's `start-refusal.json`.
+
 **The `camoufox` worker** (§2, opt-in) is not part of the image or of
-compose: it runs on the operator's Mac (macOS only in this build),
-launching the operator's installed Camoufox itself (`camoufox-js`,
+compose: it runs on the operator's machine (macOS or Linux; Windows in a
+later work package), launching the Camoufox `gmt setup` installed itself (`camoufox-js`,
 `playwright-core`; no camofox-browser server is needed or called). It is
 started from a checkout with `pnpm --filter @gmt/camoufox-worker start` (from
-source, like the api's `tool` script) or by a documented launchd agent that
+source, like the api's `tool` script) or as the user service `gmt setup`
+installs (a launchd agent on macOS, a systemd `--user` unit on Linux), which
 restarts it on failure no faster than once a minute. Every worker command
-loads its settings from one file, `<data>/worker.env`, where `<data>` is
+loads its settings from one file, `<workerData>/worker.env`, where `<workerData>` is
 `~/.local/state/get-me-there/camoufox` (mode 0700), checking that file's mode
 (0600, the user's own) before loading it; nothing secret is ever typed on a
-command line. It refuses to start, exiting 78, when the platform is not
-macOS, when the bundle's build or the `camoufox-js` version is not the
+command line. It refuses to start, exiting 78, when the platform is neither
+macOS nor Linux, when its `<os>-<arch>` flags are not set for the running build, when the bundle's build or the `camoufox-js` version is not the
 pinned one, when the install-directory entries cannot be verified or
 created, when its profile holds a Google account cookie, when the `SOCS`
-capture is missing, stale or future-dated, or when another worker holds the
+capture (or the "not-shown" record) is missing, stale or future-dated, or when another worker holds the
 data directory's lock. It listens on `127.0.0.1` port 8090 only; Docker
-Desktop forwards `host.docker.internal` to it. The worker persists its
+Desktop forwards `host.docker.internal` to it. On Linux it serves the native
+app only: a container there cannot reach the host's loopback, so the Docker
+path on Linux leaves the provider off. The worker persists its
 cool-downs, its signed-in refusal and its last page time in the data
 directory, so one pacer and one cool-down serve every app that calls it,
 the container and `pnpm dev` alike. The app image is built without the
@@ -2203,6 +2980,8 @@ as specified in §5.3; no secrets, no full URLs.
 | Live prices for table and alerts | Calendar basis, labelled, with search links | The £0 config must be useful |
 | Optional auth | Refused unauthenticated on non-loopback; CSRF/Host checks; security headers | The API spends money |
 | Multi-channel notifications | `Notifier` with email and log only | Premature abstraction |
+| One container | A native user service by default on a local machine (macOS, Linux), set up by `gmt`; one container for a VPS | Decision 71: an easier first run for anyone cloning the repository |
+| A personal tool | One operator per install; setup written for anyone technical who clones the public repository | Decision 71; multi-user stays a non-goal |
 
 ---
 
@@ -2227,10 +3006,70 @@ as specified in §5.3; no secrets, no full URLs.
 | 13 | `smoke:live`, layer-B engine tests (real adapters replaying recorded fixtures), the `app_lock` "tool bootstrap starts no execution" test, integration review, final pass | Fable | all | live smoke exits 0 with provenance |
 | 14 | `camoufox` provider: recordings, core widening, host-side worker (`apps/camoufox-worker`, embedding `camoufox-js`), adapter, engine rows, docs | Opus | 13 | a recognised CAPTCHA page stops the worker and starts the cool-down |
 | 15 | `camoufox` `grid` mode: the `--grid` recording, the cell grammar, the scroll planner, `return_date_source` and `scroll_count` (migration 0006), the `grid-path` tile, labels, estimate, docs | Opus | 14 | a cell whose return is not in the footer's seven dates is unparsed, never stored |
+| 16a | Local-mode foundations: migration 0007 (`scheduled_for`, `is_catch_up`, the firing unique index) and the catch-up (boot and the minute job), `GET /executions/active`, the moved-database marker in the app and tool bootstraps, `CAMOUFOX_BUILDS` and `FLAGS` with the pure start checks, `SHARED_WORKER_SETTINGS` with effective values and the worker's `sharedSettings`, `sharedSettingDiffs`, the worker status fields WP17 fills, the billing-month window in `core`, `startRefusalSchema` with `START_REFUSAL_TEXT`, `workerDataDir` and `readWorkerStatus` in `core` and `providers`, `GET /tools/smoke/plan`, the History label, the two-apps docs line, the engine's Stryker config | Opus | 15 | with the coverage read stubbed to "uncovered", a late live tick and the minute job reaching the insert with the same `scheduled_for` give one execution, and the loser seeds no cells, sends no notice and calls no provider |
+| 16b | Local setup: `apps/cli` (`gmt`) and its `Platform` layer (launchd, systemd `--user`), the native app service and backup job, `--import-docker`, `--import-db` and `--ignore-docker`, `start`/`stop`/`logs`/`backup`/`restore`/`password`/`smoke`/`update`/`uninstall`, the image's `apps/cli` manifest, the CI matrix, `install-e2e` and the workflow guard, `setup.md`'s quick start | Opus | 16a | a second `setup` over an `app.env` that differs from the plan reports the difference and writes nothing |
+| 17 | Camoufox install and consent: the verified install from `CAMOUFOX_BUILDS` with the CLI-owned layout, the worker's install directory and Linux fonts, flags per `<os>-<arch>` bound to their build, the `consent` command with export, import and check, the worker's own monthly caps, key rotation under `--reconfigure browser`, the worker service and its refusal file, the provenance notes' wording, the recording sessions for the other three entries, the `camoufox-install` CI job | Opus | 16a, 16b | a download whose SHA-256 differs from the manifest is refused and nothing is moved into place |
+| 18 | Status: `statusResponseSchema`, `GET /api/status` with every check (the worker's through http-kit), `POST /alerts/test-email`, the consent email on the maintenance tick, `gmt status`, the Status view and the status bar link, redaction tests | Sonnet | 16a, 16b | a status response holding the basic-auth password, the worker key or a `SOCS` value fails the redaction test |
 
 ---
 
 ## 17. Changelog
+
+### Revision 36: local setup, consent capture and status (2026-10-19)
+
+From the operator's local ease-of-use rulings and three reviews of the design
+(137 findings, then 65 more and 11 partly resolved, then 30 more, every one
+addressed):
+the app runs natively as a user service by default on macOS and Linux, set
+up by a new `gmt` command (`apps/cli`), and Docker stays the VPS path. §1:
+one operator per install. §2: the worker runs on macOS or Linux, always
+headless, from an install the CLI makes and owns from `CAMOUFOX_BUILDS` (one
+pin per `<os>-<arch>`, the assets and digests of release
+`v152.0.4-beta.28`), with Linux fonts made absolute, verification flags per
+`<os>-<arch>` bound to their build, and its own monthly page and scroll caps
+across every caller over the ledger's billing month; `gmt consent` captures the rejection in a visible
+throwaway window where a person clicks, observed read-only under the pacer
+and cool-downs, built only once a recording proves a rejection mark computed
+from the cookie's value, with export, import, a rate-limited server-side
+check and a voided record; the costs shown before every opt-in; provenance
+notes that hold on a server. §7: `scheduled_for`, `is_catch_up` and the
+firing unique index; the skip reason `scheduled_only`. §8.2: a missed
+firing (a late live tick included) is caught up once, unless the next is
+under half its own gap away, a catch-up never loads browser pages, and any
+other run loads them, by default (`CAMOUFOX_BROWSER_WINDOW=scheduled`), only
+inside its window (its firing to 1.5 × its estimated duration later; a
+resume or a run outside it leaves the browser cells `scheduled_only` for the
+next scheduled run), or, with `any`, whenever it resumes; `gmt setup
+--reconfigure browser` asks which in plain words; the window's end is
+stored at start and reset only by a live-tick resume, and it is checked only
+at a run's first browser page, at a resume, or after the machine has slept
+(never while a run keeps going, so runs sharing the worker keep their tails), and every skip reason is stored with its row.
+§8.3:
+the consent email on the maintenance tick. §9: the planners' tests, the real
+data-loss tests, the CI matrix with Windows' listed known failures,
+`install-e2e`, the `camoufox-install` job and the structural workflow
+guard. §10: `GET /status`, `GET /executions/active`, `GET
+/tools/smoke/plan`, `POST /alerts/test-email`. §11: the Status view and the status bar's links. §12:
+where settings live, the round-trip check, the shared settings and key
+rotation. §13: native mode, the `gmt` commands, the Docker and checkout
+imports, update, native restore and uninstall. §15: two rows. §16: work
+packages 16a, 16b, 17 and 18. Plan decisions 71–83. Windows setup is a later
+work package. WP16a's branch review (2026-10-24, rulings R1–R44) is folded
+into the sections it touches: a late live tick keeps the tick order; the
+engine's shutdown stops runs taking new work, then waits (bounded by the
+notice's SMTP timeouts) for running scheduler callbacks; a catch-up in flight
+at the next firing covers it, one paused there (`paused_at`) is superseded by
+that firing's row whatever it is, and its automatic resumes yield to the
+firing; the browser-only test is cabin-aware; the window anchors at the
+later of the firing and the start, is re-anchored inside the resume's claim,
+is checked when the limiter admits a page (a refused page hands back its
+limiter tokens), and has its own notice kind, which says the other providers
+carry on only when one still searches; a left cell names the next scheduled
+run only when the definition has one that still uses the browser provider,
+and only for the latest run; View D's header names a skipped firing;
+`GET /executions/active` reports a single-cell verification too; the
+shared settings have one rule set; `app_meta` holds the app-instance id; the
+moved marker has one format.
 
 ### Revision 30: point of sale on full price displays (2026-10-18)
 

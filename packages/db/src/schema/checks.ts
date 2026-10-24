@@ -16,8 +16,12 @@ const ISO_GLOB =
 export function isIsoTimestamp(col: string, nullable = false): SQL {
   return sql.raw(nullable ? `${col} IS NULL OR ${col} GLOB ${ISO_GLOB}` : `${col} GLOB ${ISO_GLOB}`);
 }
+/** A quoted SQL list of schema constants, for a CHECK that combines a membership test with other conditions. */
+export function sqlList(values: readonly string[]): string {
+  return values.map((v) => `'${v}'`).join(', ');
+}
 export function isOneOf(col: string, values: readonly string[], nullable = false): SQL {
-  const list = values.map((v) => `'${v}'`).join(', ');
+  const list = sqlList(values);
   return sql.raw(nullable ? `${col} IS NULL OR ${col} IN (${list})` : `${col} IN (${list})`);
 }
 export function isBool(col: string, nullable = false): SQL {

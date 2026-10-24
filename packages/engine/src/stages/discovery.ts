@@ -20,6 +20,8 @@ import type { EngineContext } from '../context.js';
 import { normaliseCalendarPrice, type RepoDeps, reduceTile } from '../normalise.js';
 import { runPool } from '../pool.js';
 import { laneFor, onFailure, type RunState, runnableCells, settleLane, stopRun } from '../run.js';
+import { loadsBrowserPages } from '../scheduler/browserWindow.js';
+import { mayLoadPage, pageGate } from './browserGate.js';
 import { applyReuse } from './reuse.js';
 
 export interface PlannedTile {
@@ -225,6 +227,9 @@ async function fetchTiles(
   log.info({ stage: 'discovery', cells: cells.length, tiles: tiles.length }, 'discovery: planned tiles');
   const lane = laneFor(run, 'discovery', providerId);
   await runPool(tiles, ctx.limitsOf(providerId).concurrency, lane.intakeSignal, async (tile) => {
+    // why: decisions 79 and 83 — a catch-up never loads a browser page, and once the window has closed the lane takes no
+    // more tiles; the window and sleep checks themselves run when the page would really start (pageGate)
+    if (!mayLoadPage(ctx, run, providerId, lane)) return;
     const keys = tile.plan.coveredCells.map(cellKeyString);
     for (const k of keys) lane.inFlight.add(k);
     try {
@@ -232,6 +237,9 @@ async function fetchTiles(
         executionId: run.executionId,
         signal: run.controller.signal,
         recordFixtures: false,
+        ...(loadsBrowserPages(providerId) && !run.isChild
+          ? { beforeSend: pageGate(ctx, run, providerId, lane) }
+          : {}),
       });
       // why: decisions 25 and 27 — a result that resolves after a stop is written (its calls were paid for); only a
       // fatal stop, where the database itself failed, writes nothing more

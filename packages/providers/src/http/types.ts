@@ -131,6 +131,11 @@ export interface HttpKitRequest {
   ledgerCacheHit?: boolean;
   /** Spec §2 rev 34 (camoufox grid): the page's planned scrolls, which the reservation checks against the scroll caps. */
   scrolls?: number;
+  /**
+   * ProviderContext.beforeSend (decision 83): run after the limiter admits each attempt and before its reservation and
+   * fetch; an AbortedError thrown from it ends the request with nothing reserved or sent.
+   */
+  beforeSend?: () => void;
 }
 
 /** `fetchedAt` is the original `storedAt` on a cache hit and the leader's on a joined request (spec §2). */

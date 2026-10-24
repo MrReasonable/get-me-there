@@ -313,6 +313,7 @@ export function outcome(
     pointOfSale: priced ? 'unknown' : null,
     sourceKind: priced ? kind : null,
     reusedFromExecutionId: null,
+    skipDetail: null,
     ...over,
   };
 }
@@ -321,6 +322,8 @@ export function cellDetail(c: Cell, over: Partial<CellDetailResponse> = {}): Cel
   return apiContract.cellDetailResponseSchema.parse({
     cell: c,
     outcomes: [],
+    browserLeftFor: 'next-scheduled-run',
+    latestExecutionId: 'exec-0001',
     calendarPrices: [],
     observations: [],
     verify: { maxCalls: 6, headroomCalls: 1840, needCalls: 6 },
@@ -345,6 +348,7 @@ export function fetchPoint(
     truncated: false,
     cell: at,
     executionId: `exec-${h}`,
+    catchUp: null,
     ...over,
   };
 }
@@ -401,6 +405,7 @@ export function offerPoint(
     truncated: false,
     priceConfirmed,
     executionId: `exec-${h}`,
+    catchUp: null,
     ...over,
   };
 }

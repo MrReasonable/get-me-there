@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import { LEFT_FOR } from '../labels/skip.js';
+import { SKIP_DETAILS } from '../types/execution.js';
 import { iataSchema, isoDateSchema, isoDateTimeSchema } from '../types/ids.js';
 import { cabinSchema, pointOfSaleSchema, provenanceSchema, sourceKindSchema } from '../types/provenance.js';
 import {
@@ -200,6 +202,20 @@ export const coverageResponseSchema = z.object({
     }),
   ),
   selectedNotReached: z.array(z.object({ cell: cellSchema, reason: z.enum(['not_run', 'skipped:budget']) })),
+  /**
+   * Spec §3, §8.2 rev 36: the run's `skipped:scheduled_only` cells per stage × provider and detail, so View D says why the
+   * browser provider's cells were left for the next scheduled run (core's SKIP_DETAIL_TEXT renders each detail).
+   */
+  scheduledOnly: z.array(
+    z.object({
+      stage: stageSchema,
+      providerId: providerIdSchema,
+      detail: z.enum(SKIP_DETAILS),
+      cells: count,
+    }),
+  ),
+  /** Review S6: who fetches the browser provider's left cells, read from the definition and config at this request. */
+  browserLeftFor: z.enum(LEFT_FOR),
   errors: z.array(
     z.object({
       cell: cellSchema,
@@ -259,10 +275,18 @@ export const cellOutcomeSchema = cellKeySchema.extend({
   pointOfSale: pointOfSaleSchema.nullable(),
   sourceKind: sourceKindSchema.nullable(),
   reusedFromExecutionId: z.string().nullable(),
+  /** Spec §3 rev 36: why a `skipped:scheduled_only` outcome was left for the next scheduled run; null otherwise. */
+  skipDetail: z.enum(SKIP_DETAILS).nullable(),
 });
 export const cellDetailResponseSchema = z.object({
   cell: cellSchema,
   outcomes: z.array(cellOutcomeSchema),
+  /**
+   * Review S6, S9: who fetches the browser provider's left cells now, and the latest parent run (null before the
+   * first): only that run's left cells are promised to a later run; an earlier run's read in the past tense.
+   */
+  browserLeftFor: z.enum(LEFT_FOR),
+  latestExecutionId: z.string().nullable(),
   /** `superseded` (decision 54): a newer parent execution found this cell empty or no_data. */
   calendarPrices: z.array(
     priceCellSchema.extend({
@@ -293,6 +317,14 @@ export const historyPointResponseSchema = historyPointSchema.extend({
   stale: z.boolean(),
   truncated: z.boolean(),
 });
+/**
+ * Spec §8.2 rev 36 (review R19): when the run that fetched a point was a catch-up, when it ran and the missed firing it
+ * ran for (History shows "ran <time>, catch-up for <missed time>"), looked up for that run whatever its definition; null
+ * for any other run.
+ */
+export const historyCatchUpSchema = z
+  .strictObject({ ranAt: isoDateTimeSchema, for: isoDateTimeSchema })
+  .nullable();
 /**
  * A point of a vendor's price-history series for one searched trip, plotted by `date` and labelled indicative (spec
  * §11). It carries the provenance every price carries (spec §3): provider, source kind, fetch time, point of sale (the
@@ -326,7 +358,11 @@ export const itineraryHistoryResponseSchema = z.object({
       cabin: cabinSchema,
       /** priceConfirmed: false for an offer whose price the final step did not confirm (decisions 27, 37) */
       points: z.array(
-        historyPointResponseSchema.extend({ priceConfirmed: z.boolean(), executionId: z.string() }),
+        historyPointResponseSchema.extend({
+          priceConfirmed: z.boolean(),
+          executionId: z.string(),
+          catchUp: historyCatchUpSchema,
+        }),
       ),
     }),
   ),
@@ -340,7 +376,13 @@ export const routeHistoryResponseSchema = z.object({
     z.object({
       providerId: providerIdSchema,
       cabin: cabinSchema,
-      points: z.array(historyPointResponseSchema.extend({ cell: cellSchema, executionId: z.string() })),
+      points: z.array(
+        historyPointResponseSchema.extend({
+          cell: cellSchema,
+          executionId: z.string(),
+          catchUp: historyCatchUpSchema,
+        }),
+      ),
     }),
   ),
   /**

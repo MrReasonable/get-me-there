@@ -1,6 +1,14 @@
 import { sql } from 'drizzle-orm';
 import { check, foreignKey, index, integer, primaryKey, sqliteTable, text } from 'drizzle-orm/sqlite-core';
-import { CABINS, OUTCOME_STATUSES, PROVIDER_IDS, SOURCE_KINDS, STAGES } from '../internal/enums.js';
+import {
+  CABINS,
+  OUTCOME_STATUSES,
+  PROVIDER_IDS,
+  SKIP_DETAILS,
+  SKIP_REASONS,
+  SOURCE_KINDS,
+  STAGES,
+} from '../internal/enums.js';
 import {
   isInteger,
   isIsoTimestamp,
@@ -8,12 +16,14 @@ import {
   isOneOf,
   isPointOfSale,
   isProviderKind,
+  sqlList,
 } from './checks.js';
 import { searchCells } from './searchCells.js';
 import { searchExecutions } from './searchExecutions.js';
 
 /**
- * Spec §7 `cell_outcomes`. `reason` never holds a vendor message. Priced, empty and fetched no_data outcomes carry
+ * Spec §7 `cell_outcomes`. `reason` never holds a vendor message. `skip_detail` (migration 0007) says why a cell is
+ * `skipped:scheduled_only`, and is set exactly then. Priced, empty and fetched no_data outcomes carry
  * their provenance columns (ruling 5); a cabin-not-offered no_data is the one data-less terminal outcome.
  */
 export const cellOutcomes = sqliteTable(
@@ -36,6 +46,7 @@ export const cellOutcomes = sqliteTable(
     pointOfSale: text('point_of_sale'),
     sourceKind: text('source_kind'),
     reusedFromExecutionId: text('reused_from_execution_id').references(() => searchExecutions.id),
+    skipDetail: text('skip_detail'),
   },
   (t) => [
     primaryKey({
@@ -57,8 +68,14 @@ export const cellOutcomes = sqliteTable(
     // why: COALESCE / IS keep a NULL reason from satisfying the CHECK (SQLite treats a NULL CHECK result as a pass, arch-r3-003).
     check(
       'cell_outcomes_skip_reason_ck',
+      sql.raw(`status <> 'skipped' OR COALESCE(reason, '') IN (${sqlList(SKIP_REASONS)})`),
+    ),
+    // why: spec §3 rev 36 (migration 0007) — a scheduled_only cell always says why, and nothing else carries a detail;
+    // `IS` keeps a NULL reason from passing the CHECK (arch-r3-003)
+    check(
+      'cell_outcomes_skip_detail_ck',
       sql.raw(
-        "status <> 'skipped' OR COALESCE(reason, '') IN ('not_selected', 'budget', 'provider_disabled', 'provider_unavailable', 'departed')",
+        `(skip_detail IS NULL AND NOT (status = 'skipped' AND reason IS 'scheduled_only')) OR (status = 'skipped' AND reason IS 'scheduled_only' AND COALESCE(skip_detail, '') IN (${sqlList(SKIP_DETAILS)}))`,
       ),
     ),
     check('cell_outcomes_attempts_ck', isInteger('attempts')),

@@ -186,6 +186,12 @@ export interface ProviderContext {
   executionId: string | null;
   signal: AbortSignal;
   recordFixtures: boolean;
+  /**
+   * Decision 83: called once the provider's rate limiter admits a call and immediately before the request is sent (a
+   * browser page's real start, however long it waited for its slot). Throwing AbortedError from it abandons the call
+   * before anything is reserved or sent; the engine passes it only for browser pages.
+   */
+  beforeSend?: () => void;
 }
 
 export interface CostEstimate {

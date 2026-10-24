@@ -3,7 +3,7 @@ import pRetry from 'p-retry';
 import { type AttemptResult, raceAbort, runAttempt } from './attempt.js';
 import { canonicalCacheKey } from './cacheKey.js';
 import { assertEgress, assertKitConfig } from './egress.js';
-import { createLimiter, HOUR_MS, type ProviderLimiter } from './limiter.js';
+import { createLimiter, HOUR_MS, NotSent, type ProviderLimiter } from './limiter.js';
 import { sleep } from './sleep.js';
 import {
   type HttpKit,
@@ -88,14 +88,19 @@ export function createHttpKit(deps: HttpKitDeps): HttpKit {
     try {
       result = await pRetry(
         (attempt) =>
-          limiter.run(
-            () =>
-              runAttempt(deps, r, limits, {
-                attempt,
-                secondsToHourRefresh: () => limiter.secondsToHourRefresh(),
-              }),
-            run,
-          ),
+          limiter.run(async () => {
+            // why: decision 83 — the caller's last check runs when the slot is really granted, however long the wait was;
+            // a refusal sent nothing, so the limiter refunds its tokens and rethrows the caller's error (review S3)
+            try {
+              r.beforeSend?.();
+            } catch (err) {
+              throw new NotSent(err);
+            }
+            return runAttempt(deps, r, limits, {
+              attempt,
+              secondsToHourRefresh: () => limiter.secondsToHourRefresh(),
+            });
+          }, run),
         {
           retries: MAX_ATTEMPTS - 1,
           minTimeout: BACKOFF_BASE_MS,

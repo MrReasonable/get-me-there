@@ -38,6 +38,8 @@ export type PlotPoint =
       cellChanged: boolean;
       /** False for an offer whose price the final step did not confirm (plan decisions 27, 37). */
       priceConfirmed: boolean;
+      /** When the fetching run was a catch-up: when it ran and the firing it ran for (spec §8.2 rev 36), from the api. */
+      catchUp: CalendarFetchPoint['catchUp'];
     }
   | { kind: 'gap'; t: number; pricePence: null };
 
@@ -167,6 +169,7 @@ export function linesFromRoute(
           cell: p.cell,
           cellChanged: false,
           priceConfirmed: true,
+          catchUp: p.catchUp,
         }),
       );
       return {
@@ -218,6 +221,7 @@ export function linesFromItinerary(resp: ItineraryHistoryResponse, order: RunOrd
       cell: null,
       cellChanged: false,
       priceConfirmed: p.priceConfirmed,
+      catchUp: p.catchUp,
     });
     const confirmed = s.points.filter((p) => p.priceConfirmed);
     const unconfirmed = s.points.filter((p) => !p.priceConfirmed);

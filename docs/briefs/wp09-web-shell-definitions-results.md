@@ -5,7 +5,8 @@ owner: sonnet
 depends_on: [8]
 spec_sections: ["§11", "§6.5", "§6.9", "§3", "§5.5", "§9 item 6"]
 reviewers: [code-architect, test-strategy-reviewer, ui-reviewer, persona-flexible-traveller, provenance-auditor, product-owner, security-reviewer]
-status: reviewed
+mutate: {}
+status: merged
 ---
 
 # WP9 — web: shell, status bar, Definitions, Results, Coverage, Providers

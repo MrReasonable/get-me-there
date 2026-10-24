@@ -5,7 +5,8 @@ owner: opus
 depends_on: [1, 2, 4, 4b, 6]
 spec_sections: ["§2", "§3", "§5.1", "§5.2", "§5.3", "§5.4", "§5.6", "§6.2", "§6.3", "§6.4", "§8.1", "§9 item 2"]
 reviewers: [code-architect, test-strategy-reviewer, provider-integration-expert, provenance-auditor, cost-and-budget-reviewer, security-reviewer]
-status: reviewed
+mutate: {}
+status: merged
 ---
 
 # WP5: SearchApi adapter

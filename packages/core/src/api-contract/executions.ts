@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { SKIP_CODES } from '../types/execution.js';
 import { isoDateTimeSchema } from '../types/ids.js';
 import {
   bucketsSchema,
@@ -26,6 +27,10 @@ export const executionResponseSchema = z.object({
   startedAt: isoDateTimeSchema.nullable(),
   finishedAt: isoDateTimeSchema.nullable(),
   errorText: z.string().nullable(),
+  /** Review S8: the firing the row stands for and, on a missed firing, why it was not caught up, as History names them. */
+  scheduledFor: isoDateTimeSchema.nullable(),
+  isCatchUp: z.boolean(),
+  skipCode: z.enum(SKIP_CODES).nullable(),
   progress: z.array(
     z.object({ stage: stageSchema, providerId: providerIdSchema, buckets: bucketsSchema, total: count }),
   ),
@@ -62,4 +67,24 @@ export const verifyCellRequestSchema = z.object({
   cell: cellKeySchema,
   confirmCostPence: moneyPenceSchema.optional(),
   confirmCalls: z.number().int().min(0).optional(),
+});
+
+/**
+ * Spec §10 `GET /api/executions/active` (decision 80: `gmt update` reads it): the oldest execution with a pass in flight,
+ * a parent run (`run`) or a single-cell verification (`cell-verification`, which spends credits too), with its estimated
+ * finish: now plus the seconds its remaining cells are estimated to take, so a resumed run never reads as finished in the
+ * past; null without an estimate. `execution` is null when nothing is in flight.
+ */
+export const activeExecutionResponseSchema = z.strictObject({
+  execution: z
+    .strictObject({
+      // why: ids are plain strings across the contract (executionResponseSchema's own), so no new id schema is minted
+      id: z.string(),
+      definitionId: z.string(),
+      definitionName: z.string(),
+      kind: z.enum(['run', 'cell-verification']),
+      startedAt: isoDateTimeSchema,
+      estimatedFinishAt: isoDateTimeSchema.nullable(),
+    })
+    .nullable(),
 });

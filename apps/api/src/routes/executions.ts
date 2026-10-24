@@ -4,7 +4,7 @@ import type { StartResult } from '@gmt/engine';
 import type { Context } from 'hono';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import { ApiError, type Details, scrubDetails } from '../errors.js';
-import { executionResponse } from '../read/executions.js';
+import { activeExecution, executionResponse } from '../read/executions.js';
 import { cellInSpace, currentSpace } from '../read/space.js';
 import { API_TEXT } from '../text.js';
 import { NO_INPUT, plain, route } from './define.js';
@@ -20,6 +20,10 @@ const START_STATUS: Record<Refusal['code'], ContentfulStatusCode> = {
   disabled: 409,
   window: 422,
   not_found: 404,
+  // why: spec §7 rev 36 — only a scheduled start can lose its firing; the API never starts one, so this is a guard
+  'firing-taken': 409,
+  // why: a request that arrives while the app is stopping is refused rather than started into a closing database
+  'shutting-down': 503,
 };
 
 /** Spec §10: 409 on an active execution or a cap breach naming the cap; 422 for a zero-cell window. */
@@ -59,6 +63,8 @@ export const executionHandlers: HandlerTable = {
       );
     },
   ),
+
+  'GET /api/executions/active': plain((c, _input, ctx) => c.json(activeExecution(ctx.ports, ctx.engine))),
 
   'GET /api/executions/:id': plain((c, input, ctx) =>
     c.json(executionResponse(ctx.ports, getExecution(ctx, param(input, 'id')))),

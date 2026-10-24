@@ -31,6 +31,7 @@ import {
   type SearchDefinition,
   type Stage,
   syntheticAllowed,
+  systemClock,
 } from '@gmt/core';
 import {
   type AirportsDataset,
@@ -316,6 +317,12 @@ export interface HarnessOptions {
    * the fixed clock; `waitForSettled` advances them (test-strategy-reviewer-003, -004).
    */
   fakeTimers?: boolean;
+  /**
+   * WP16a: the engine reads the process clock (core's systemClock), which fake timers drive, so croner's jobs, the
+   * heartbeat and the engine agree on the instant; `h.clock.set`/`advance` then move the faked system time. Needs
+   * `fakeTimers`.
+   */
+  systemClock?: boolean;
 }
 
 /** Anything with a shutdown the harness must await before it closes the database. */
@@ -445,7 +452,17 @@ export function createHarness(opts: HarnessOptions = {}): Harness {
   if (!syntheticAllowed(config)) throw new Error('harness config must satisfy syntheticAllowed');
   const fixtureCfg = config.providers.fixture;
   if (fixtureCfg === null) throw new Error('harness config has no fixture provider');
-  const clock = fixedClock(now);
+  if (opts.systemClock === true && opts.fakeTimers !== true) throw new Error('systemClock needs fakeTimers');
+  const fixed = fixedClock(now);
+  const clock: ReturnType<typeof fixedClock> =
+    opts.systemClock === true
+      ? {
+          now: () => systemClock.now(),
+          todayLondon: () => systemClock.todayLondon(),
+          advance: (ms) => vi.setSystemTime(new Date(Date.now() + ms)),
+          set: (at) => vi.setSystemTime(new Date(at)),
+        }
+      : fixed;
   const logs: LogLine[] = [];
   const log = capturingLogger(logs);
   const notifications: OperatorMessage[] = [];

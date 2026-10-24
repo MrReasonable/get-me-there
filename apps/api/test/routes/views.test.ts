@@ -5,7 +5,7 @@ import { currentSpace } from '../../src/read/space.js';
 import { errorOf, expectContract } from '../helpers/contract.js';
 import { exampleDefinitionInput } from '../helpers/examples.js';
 import { createHarness, type Harness } from '../helpers/harness.js';
-import { at, cell, seeder } from '../helpers/seed.js';
+import { at, cell, seeder, snapshotOf } from '../helpers/seed.js';
 
 const C1 = cell('LHR', 'JFK', '2026-11-02', '2026-11-12');
 const C2 = cell('LHR', 'JFK', '2026-11-03', '2026-11-13');
@@ -525,6 +525,74 @@ describe('GET /api/definitions/:id/coverage (spec §10, View D)', () => {
     ]);
     expect(cov.scheduleBlockedSince).toBeNull();
     expect(cov.onDemand).toEqual([]);
+    expect(cov.scheduledOnly).toEqual([]);
+  });
+
+  it('names the scheduled_only cells per stage × provider and detail (spec §3, §8.2 rev 36)', async () => {
+    const x = await createHarness();
+    h = x;
+    const s = seeder(x.ports);
+    const def = x.ports.repos.definitions.create(exampleDefinitionInput());
+    s.execution('E1', { def, status: 'completed', startedAt: at(-2), finishedAt: at(-1) });
+    s.cells('E1', [C1, C2, C3, C4]);
+    const leave = (c: typeof C1, detail: 'catch-up-no-browser' | 'outside-browser-window') =>
+      x.ports.repos.cells.setOutcome(s.id('E1'), c, 'discovery', 'fixture', {
+        status: 'skipped',
+        reason: 'scheduled_only',
+        skipDetail: detail,
+      });
+    leave(C1, 'outside-browser-window');
+    leave(C2, 'outside-browser-window');
+    leave(C3, 'catch-up-no-browser');
+    const cov = await get(
+      x,
+      `/api/definitions/${def.id}/coverage`,
+      '/api/definitions/:id/coverage',
+      apiContract.coverageResponseSchema,
+    );
+    expect(cov.scheduledOnly).toEqual([
+      { stage: 'discovery', providerId: 'fixture', detail: 'catch-up-no-browser', cells: 1 },
+      { stage: 'discovery', providerId: 'fixture', detail: 'outside-browser-window', cells: 2 },
+    ]);
+    const detail = await get(
+      x,
+      `/api/definitions/${def.id}/cells/LHR/JFK/2026-11-02/2026-11-12`,
+      '/api/definitions/:id/cells/:origin/:destination/:departureDate/:returnDate',
+      apiContract.cellDetailResponseSchema,
+    );
+    expect(detail.outcomes.map((o) => [o.reason, o.skipDetail])).toEqual([
+      ['scheduled_only', 'outside-browser-window'],
+    ]);
+    // S6, S9: who fetches them is read now (this app runs no browser provider, so nobody will), and only the latest
+    // parent run's left cells carry that promise
+    expect(cov.browserLeftFor).toBe('no-longer-used');
+    expect(detail.browserLeftFor).toBe('no-longer-used');
+    expect(detail.latestExecutionId).toBe(s.id('E1'));
+  });
+
+  it('S8: the execution response names the firing a row stands for and why a missed one was not caught up', async () => {
+    const x = await createHarness();
+    h = x;
+    const def = x.ports.repos.definitions.create(exampleDefinitionInput());
+    const row = x.ports.repos.executions.createForFiring({
+      definitionId: def.id,
+      isChild: false,
+      cell: null,
+      snapshot: snapshotOf(def, at(-31)),
+      estimate: null,
+      trigger: 'schedule',
+      status: 'skipped_missed',
+      scheduledFor: at(-30),
+      skipCode: 'half-cadence',
+    });
+    if (row === null) throw new Error('no row');
+    const e = await get(
+      x,
+      `/api/executions/${row.id}`,
+      '/api/executions/:id',
+      apiContract.executionResponseSchema,
+    );
+    expect([e.scheduledFor, e.isCatchUp, e.skipCode]).toEqual([at(-30), false, 'half-cadence']);
   });
 
   it('lists the on-demand children below the parent run, each with its own buckets and ledger (UI-004, ruling 15)', async () => {
@@ -568,6 +636,31 @@ describe('GET /api/definitions/:id/coverage (spec §10, View D)', () => {
       apiContract.coverageResponseSchema,
     );
     expect(cov.errors.map((e) => [e.cell.departureDate, e.retryable])).toEqual([['2026-11-05', false]]);
+  });
+
+  it('a browser-provider error that a resume would only leave for a later run is offered no Retry: a catch-up, or past the window (R12)', async () => {
+    const { x, def, s } = await world();
+    const raw = x.ports.db.raw;
+    raw.prepare("UPDATE cell_outcomes SET provider_id = 'camoufox' WHERE status = 'error'").run();
+    const retry = async () =>
+      (
+        await get(
+          x,
+          `/api/definitions/${def.id}/coverage`,
+          '/api/definitions/:id/coverage',
+          apiContract.coverageResponseSchema,
+        )
+      ).errors.map((e) => [e.providerId, e.retryable]);
+    // inside the window (no stored end: started_at + STUCK_AFTER_HOURS), a resume would fetch it again
+    expect(await retry()).toEqual([['camoufox', true]]);
+    raw.prepare('UPDATE search_executions SET browser_window_end = ? WHERE id = ?').run(at(-1), s.id('E1'));
+    expect(await retry()).toEqual([['camoufox', false]]);
+    raw
+      .prepare(
+        "UPDATE search_executions SET browser_window_end = NULL, trigger = 'schedule', scheduled_for = ?, is_catch_up = 1 WHERE id = ?",
+      )
+      .run(at(-3), s.id('E1'));
+    expect(await retry()).toEqual([['camoufox', false]]);
   });
 
   it('an error outcome with no recorded reason says so with null, never an empty string (review prov M3)', async () => {

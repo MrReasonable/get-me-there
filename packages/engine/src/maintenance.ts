@@ -20,9 +20,10 @@ export function runMaintenanceJob(ctx: EngineContext): ReturnType<typeof runMain
 }
 
 /** Runs a daily system job; failures are logged so a bad day never stops the scheduler. */
-export async function runSystemJob(ctx: EngineContext, name: SystemJob): Promise<void> {
+export async function runSystemJob(ctx: EngineContext, name: Exclude<SystemJob, 'catch-up'>): Promise<void> {
   try {
-    if (name === 'fx-refresh') await refreshFx(ctx, new AbortController().signal);
+    // why: review S2 — a refresh still waiting on the network when the engine hands the database back is aborted
+    if (name === 'fx-refresh') await refreshFx(ctx, ctx.lifecycle.abort.signal);
     else runMaintenanceJob(ctx);
   } catch (err) {
     ctx.log.error({ job: name, err: errorText(err) }, 'system job failed');

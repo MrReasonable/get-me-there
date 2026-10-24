@@ -11,6 +11,7 @@ import type {
   FlightProvider,
   IsoDate,
   IsoDateTime,
+  LeftFor,
   Logger,
   Notifier,
   ProviderId,
@@ -73,16 +74,34 @@ export interface StartOptions {
   trigger: 'manual' | 'schedule';
   confirmCostPence?: number;
   confirmCalls?: number;
+  /**
+   * Spec §7, §8.2 rev 36: the firing a scheduled start stands for (croner's instant). The start, or the skipped_* row a
+   * refusal writes, inserts through the firing unique index, so a second one for the same firing is `firing-taken`.
+   */
+  scheduledFor?: IsoDateTime;
+  /** Spec §8.2: a run started for a missed firing (decision 79); its camoufox cells are reuse only. */
+  isCatchUp?: boolean;
 }
 /** The confirmation a single-cell verification carries, as a manual start's (cost M-1). */
 export type VerifyCellOptions = Omit<StartOptions, 'trigger'>;
 
-/** Spec §8.1 pre-start outcomes; WP8 maps them to HTTP (409, 409 needsConfirmation, 422, 404, 409). */
+/**
+ * Spec §8.1 pre-start outcomes; WP8 maps them to HTTP (409, 409 needsConfirmation, 422, 404, 409). `firing-taken`
+ * (spec §7 rev 36): another row already holds the scheduled firing, so this start or skip wrote nothing.
+ */
 export type StartResult =
   | { ok: true; executionId: string }
   | {
       ok: false;
-      code: 'active' | 'cap' | 'confirm' | 'window' | 'not_found' | 'disabled';
+      code:
+        | 'active'
+        | 'cap'
+        | 'confirm'
+        | 'window'
+        | 'not_found'
+        | 'disabled'
+        | 'firing-taken'
+        | 'shutting-down';
       message: string;
       details: unknown;
     };
@@ -100,6 +119,12 @@ export type ChildCapPreview =
 export interface Engine {
   boot(): Promise<void>;
   shutdown(): Promise<void>;
+  /**
+   * Review T12: marks the engine closed at once (nothing new starts; a job still running writes nothing more and its
+   * network call is aborted), as `shutdown` does once its wait ends. The app calls it before closing the database
+   * whatever happened, so a shutdown cut off by the app's deadline never leaves a job writing to a closed handle.
+   */
+  markClosed(): void;
   start(definitionId: string, opts: StartOptions): Promise<StartResult>;
   resume(executionId: string, opts: { manual: boolean }): Promise<StartResult>;
   cancel(executionId: string): Promise<boolean>;
@@ -107,6 +132,8 @@ export interface Engine {
   verifyCell(definitionId: string, cell: CellKey, opts?: VerifyCellOptions): Promise<StartResult>;
   /** Decision 45: the cap and headroom a child of `cell` would get now, by verifyCell's own calculation. */
   childCapPreview(definitionId: string, cell: CellKey): ChildCapPreview;
+  /** Review S6: who fetches the definition's left browser cells now (its scheduled and manual runs' providers). */
+  browserLeftFor(definition: SearchDefinition): LeftFor;
   estimate(definition: DefinitionInput | SearchDefinition, todayLondon: IsoDate): Estimate;
   estimateRemaining(executionId: string): Estimate;
   budgetFit(definition: DefinitionInput | SearchDefinition): BudgetFit;

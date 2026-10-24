@@ -1,4 +1,4 @@
-import { fixedClock, parseConfig } from '@gmt/core';
+import { billingMonthWindow, fixedClock, isoDateTimeOfEpochMs, parseConfig } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
 import { MONTH_WINDOW_SQL, monthWindow } from '../src/budget/window.js';
 import { budgetConfigFromConfig, effectiveCallCap } from '../src/budgetConfig.js';
@@ -17,6 +17,31 @@ describe('budget windows (spec §7 "Budget windows")', () => {
     ['2027-03-01T00:00:00.000Z', 28, '2027-02-28T00:00:00.000Z', '2027-03-28T00:00:00.000Z'],
   ])('now %s, billing day %i → [%s, %s)', (now, day, start, end) => {
     expect(monthWindow(freshDb(), at(now), day)).toEqual({ windowStart: start, windowEnd: end });
+  });
+
+  it('agrees with core’s billingMonthWindow, the worker’s window (decision 82), over 2,800 sampled instants and every billing day', () => {
+    const db = freshDb();
+    // why: a seeded generator, so the sweep is the same on every run; instants from 2026 to 2030, every millisecond
+    // equally likely, with the billing-day midnights themselves mixed in
+    let seed = 0x5eed;
+    const next = () => {
+      seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648;
+      return seed / 2_147_483_648;
+    };
+    const from = Date.parse('2026-01-01T00:00:00.000Z');
+    const span = Date.parse('2031-01-01T00:00:00.000Z') - from;
+    let checked = 0;
+    for (let day = 1; day <= 28; day++)
+      for (let i = 0; i < 100; i++) {
+        const ms = Math.floor(from + next() * span);
+        const d = new Date(ms);
+        const now = isoDateTimeOfEpochMs(
+          i % 10 === 0 ? Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), day) : ms,
+        );
+        expect(billingMonthWindow(now, day), `${now} day ${day}`).toEqual(monthWindow(db, now, day));
+        checked++;
+      }
+    expect(checked).toBe(2800);
   });
 
   it('rejects billing days outside 1–28; the SQL is parameterised', () => {

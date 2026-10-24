@@ -5,7 +5,8 @@ owner: opus
 depends_on: [1, 2, 3, 4, 5, 6]
 spec_sections: ["§3 (cell outcome seeding)", "§5.3 (budget stops, rev 18)", "§5.6", "§6.2 (verdict classes)", "§6.7 (selection once, child executions, rev 18)", "§6.9 (results basis inputs)", "§7 (transactions, resume query, boot order, migrations)", "§8.1", "§8.2", "§8.3 (LogNotifier only)", "§9 item 4 layer A", "§14"]
 reviewers: [code-architect, test-strategy-reviewer, search-strategy-reviewer, cost-and-budget-reviewer, provenance-auditor, data-model-reviewer, product-owner]
-status: reviewed
+mutate: {}
+status: merged
 ---
 
 # WP7 — `@gmt/engine` with layer-A tests
