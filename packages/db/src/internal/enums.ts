@@ -11,6 +11,8 @@ import type {
   ResultBasis,
   ReturnDateSource,
   SelectionReason,
+  SkipCode,
+  SkipDetail,
   SkipReason,
   SourceKind,
   Stage,
@@ -59,8 +61,16 @@ export const SKIP_REASONS = exhaustive<SkipReason>()([
   'budget',
   'provider_disabled',
   'provider_unavailable',
+  'scheduled_only',
   'departed',
 ] as const);
+/** Spec §3 rev 36 (migration 0007): the detail of a `skipped:scheduled_only` outcome. */
+export const SKIP_DETAILS = exhaustive<SkipDetail>()([
+  'catch-up-no-browser',
+  'outside-browser-window',
+] as const);
+/** Spec §8.2 rev 36 (migration 0007): why a `skipped_missed` firing was not caught up. */
+export const SKIP_CODES = exhaustive<SkipCode>()(['half-cadence', 'browser-only-definition'] as const);
 export const SELECTION_REASONS = exhaustive<SelectionReason>()([
   'always_include',
   'top_n',
@@ -137,6 +147,7 @@ export const OPERATOR_MESSAGE_KINDS = exhaustive<OperatorMessageKind>()([
   'interrupted',
   'provider_disabled',
   'provider_capped',
+  'browser_window',
   'parity_break',
   'alerts_calendar_only',
   'crash_loop',

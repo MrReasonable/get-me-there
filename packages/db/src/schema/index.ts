@@ -4,6 +4,7 @@ export * from './airports.js';
 export * from './alertEvents.js';
 export * from './alertRules.js';
 export * from './appLock.js';
+export * from './appMeta.js';
 export * from './calendarPrices.js';
 export * from './cellOutcomes.js';
 export * from './fareOffers.js';

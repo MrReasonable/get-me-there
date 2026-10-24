@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { RowCorrupt } from '../src/internal/read.js';
 import { RowRejected } from '../src/internal/validate.js';
 import { DefinitionsRepo } from '../src/repositories/definitions.js';
-import { CLAIM_RESUME_SQL, ExecutionsRepo } from '../src/repositories/executions.js';
+import { CLAIM_RESUME_SQL, ExecutionsRepo, OLDEST_IN_FLIGHT_SQL } from '../src/repositories/executions.js';
 import { ACTIVE_STATUS_SQL } from '../src/schema/checks.js';
 import { at, freshDb, openTracked, T0, tmpDbPath } from './helpers/db.js';
 import { cell, EWR, exampleDefinitionInput, newExecution, snapshotOf } from './helpers/factories.js';
@@ -130,7 +130,7 @@ describe('ExecutionsRepo (spec §7 search_executions, §8.1)', () => {
     expect(sqlOf('search_executions_active_child_uq')).toMatch(/WHERE is_child = 1 AND status IN/);
   });
 
-  it('reads: activeParent, activeChild, latestCompleted, listForDefinition, listByStatus, lastScheduledFiring', () => {
+  it('reads: activeParent, activeChild, latestCompleted, listForDefinition, listByStatus', () => {
     const db = freshDb();
     const clock = fixedClock(T0);
     const repo = new ExecutionsRepo(db, clock);
@@ -161,8 +161,6 @@ describe('ExecutionsRepo (spec §7 search_executions, §8.1)', () => {
         .map((e) => e.id)
         .sort(),
     ).toEqual([second.id, child.id].sort());
-    expect(repo.lastScheduledFiring(definition.id)).toBe('2026-10-14T12:00:01.000Z');
-    expect(repo.lastScheduledFiring('none')).toBeNull();
   });
 
   it('setStatus and patch write only the keys given; error_text is URL-stripped; requestCancel and resetAutoResume', () => {
@@ -284,5 +282,65 @@ describe('ExecutionsRepo (spec §7 search_executions, §8.1)', () => {
     expect(repo.get(paused.id)).toMatchObject({ status: 'paused_budget', autoResumeCount: 0 });
     expect(repo.incrementAutoResume(running.id)).toBe(2);
     expect(() => repo.incrementAutoResume('missing')).toThrow(RowRejected);
+  });
+
+  it('paused_at (decision 79, review S1): set once when a run stops running, kept through a cancel, cleared when it runs again', () => {
+    const db = freshDb();
+    const clock = fixedClock(T0);
+    const repo = new ExecutionsRepo(db, clock);
+    const { execution } = newExecution(db, clock);
+    expect(repo.get(execution.id)?.pausedAt).toBeNull();
+    clock.advance(60_000);
+    const pausedAt = clock.now();
+    repo.setStatus(execution.id, 'paused_error', { resumeAfter: at('2027-01-01T00:00:00.000Z') });
+    expect(repo.get(execution.id)?.pausedAt).toBe(pausedAt);
+    clock.advance(60_000);
+    repo.setStatus(execution.id, 'paused_budget');
+    repo.patch(execution.id, { stage: 'verification' });
+    expect(repo.get(execution.id)?.pausedAt).toBe(pausedAt); // the first stop stands
+    expect(repo.claimResume(execution.id)).toBe(true);
+    expect(repo.get(execution.id)?.pausedAt).toBeNull();
+    clock.advance(60_000);
+    const second = clock.now();
+    repo.setStatus(execution.id, 'interrupted');
+    expect(repo.cancelPaused(execution.id, 'superseded')).toBe(true);
+    expect(repo.get(execution.id)).toMatchObject({ status: 'cancelled', pausedAt: second });
+    const other = newExecution(db, clock).execution;
+    repo.setStatus(other.id, 'paused_error');
+    repo.setStatus(other.id, 'running');
+    expect(repo.get(other.id)?.pausedAt).toBeNull();
+    repo.setStatus(other.id, 'completed');
+    expect(repo.get(other.id)?.pausedAt).toBeNull();
+  });
+
+  it('oldestInFlight is one probe of the partial in-flight index, not a table scan', () => {
+    const db = freshDb();
+    const plan = db.raw
+      .prepare<[], { detail: string }>(`EXPLAIN QUERY PLAN ${OLDEST_IN_FLIGHT_SQL}`)
+      .all()
+      .map((r) => r.detail);
+    expect(plan.join('\n')).toContain('USING INDEX search_executions_in_flight_idx');
+    expect(plan.join('\n')).not.toMatch(/TEMP B-TREE|SCAN search_executions$/m);
+  });
+
+  it('bootSweep records a lost run as stopped at its last ledger activity, else its start, not at the boot', () => {
+    const db = freshDb();
+    const clock = fixedClock(T0);
+    const repo = new ExecutionsRepo(db, clock);
+    const { definition, execution: withCalls } = newExecution(db, clock);
+    const quiet = newExecution(db, clock, { definition, cell: cell() }).execution;
+    const call = (startedAt: string, finishedAt: string | null) =>
+      db.raw
+        .prepare(
+          `INSERT INTO provider_requests (provider_id, execution_id, endpoint_path, started_at, finished_at, outcome, cost_micro_gbp, http_attempt)
+           VALUES ('searchapi', ?, '/api/v1/search', ?, ?, ?, 0, 1)`,
+        )
+        .run(withCalls.id, startedAt, finishedAt, finishedAt === null ? 'pending' : 'ok');
+    call('2026-10-14T12:05:00.000Z', '2026-10-14T12:05:02.000Z');
+    call('2026-10-14T12:06:00.000Z', null);
+    clock.advance(3_600_000);
+    repo.bootSweep(clock.now());
+    expect(repo.get(withCalls.id)?.pausedAt).toBe('2026-10-14T12:06:00.000Z');
+    expect(repo.get(quiet.id)?.pausedAt).toBe(quiet.startedAt ?? quiet.createdAt);
   });
 });

@@ -9,6 +9,7 @@ import { ExecutionsRepo } from './repositories/executions.js';
 import { FxRepo } from './repositories/fx.js';
 import { ItinerariesRepo } from './repositories/itineraries.js';
 import { LedgerRepo } from './repositories/ledger.js';
+import { MetaRepo } from './repositories/meta.js';
 import { NotificationsRepo } from './repositories/notifications.js';
 import { RoutePriceHistoryRepo } from './repositories/routePriceHistory.js';
 import type { RepoOptions } from './types.js';
@@ -26,6 +27,7 @@ export interface Repos {
   alerts: AlertsRepo;
   notifications: NotificationsRepo;
   routeHistory: RoutePriceHistoryRepo;
+  meta: MetaRepo;
 }
 
 /**
@@ -45,5 +47,6 @@ export function createRepos(db: Db, clock: Clock, opts: RepoOptions): Repos {
     alerts: new AlertsRepo(db, clock),
     notifications: new NotificationsRepo(db, clock),
     routeHistory: new RoutePriceHistoryRepo(db, opts),
+    meta: new MetaRepo(db),
   };
 }

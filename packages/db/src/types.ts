@@ -19,6 +19,7 @@ import type {
   Provenance,
   ProviderId,
   ReturnDateSource,
+  SkipCode,
   SourceKind,
   SuppliedField,
   VendorPriceMark,
@@ -56,6 +57,13 @@ export type ExecutionCreateInput = {
   estimate: Estimate | null;
   trigger: Execution['trigger'];
   status: 'pending' | 'running' | (ExecutionStatus & `skipped_${string}`);
+  /** Spec §7 rev 36: set only through `createForFiring`, which inserts through the firing unique index. */
+  scheduledFor?: IsoDateTime | null;
+  isCatchUp?: boolean;
+  /** Decision 83: the run's browser window end, written by the start transaction. */
+  browserWindowEnd?: IsoDateTime | null;
+  /** Spec §8.2: only on a `skipped_missed` row. */
+  skipCode?: SkipCode | null;
 };
 export type ExecutionPatch = Partial<
   Pick<
@@ -68,6 +76,7 @@ export type ExecutionPatch = Partial<
     | 'cancelRequested'
     | 'estimate'
     | 'snapshot'
+    | 'browserWindowEnd'
   >
 >;
 /** One discovery tile's write (spec §7 atomic unit). `discards` is validated and reported by the engine, not stored. */

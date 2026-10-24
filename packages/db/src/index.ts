@@ -27,6 +27,7 @@ export { ExecutionsRepo } from './repositories/executions.js';
 export { FxRepo } from './repositories/fx.js';
 export { ItinerariesRepo } from './repositories/itineraries.js';
 export { LedgerRepo } from './repositories/ledger.js';
+export { MetaRepo } from './repositories/meta.js';
 export { NotificationsRepo } from './repositories/notifications.js';
 export {
   type RouteHistorySeries,
