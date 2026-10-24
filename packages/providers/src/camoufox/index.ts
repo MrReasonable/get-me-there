@@ -2,7 +2,7 @@
 export { BLOCKED_WORDS, classifyWorkerAnswer, coolingDownWords } from './answer.js';
 export { gridBlocks, gridTileEstimate, planGridTiles } from './grid.js';
 export { camoufoxHttpLimits, camoufoxStatusHttpLimits, pageClassOf, scrollCountOf } from './limits.js';
-export { SIGNED_IN_REFUSED, UNREACHABLE } from './preflight.js';
+export { readWorkerStatus, SIGNED_IN_REFUSED, UNREACHABLE, type WorkerStatusRead } from './preflight.js';
 export {
   CAMOUFOX_CABINS,
   CAMOUFOX_DISCOVERY_INFO,

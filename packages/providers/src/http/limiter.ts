@@ -18,6 +18,18 @@ export interface ProviderLimiter {
   reservoirs(): Promise<{ minute: number; hour: number }>;
 }
 
+/**
+ * Thrown inside a limiter job when the attempt was refused before anything was sent (the caller's `beforeSend`, review
+ * S3): the limiter refunds the job's hour and minute tokens, as for BudgetExceeded, and rejects with `cause`, the
+ * caller's own error. Bottleneck's start-to-start spacing (`minTime`, camoufox's page spacing) cannot be handed back:
+ * it counts from the job's launch, which already happened, so the next page still waits it out.
+ */
+export class NotSent extends Error {
+  constructor(readonly refusal: unknown) {
+    super('refused before sending');
+  }
+}
+
 export const MINUTE_MS = 60_000;
 export const HOUR_MS = 3_600_000;
 const HEARTBEAT_MS = 5_000;
@@ -28,7 +40,8 @@ const HEARTBEAT_MS = 5_000;
  * The queue deadline is our own timer plus an age check at each release, because bottleneck's `expiration` bounds a
  * running job, not queue time. A job whose caller already gave up is dropped at the hourly stage (refunding its hour
  * token, never taking a per-minute launch slot) or at the per-minute stage (refunding both). An attempt refused by
- * the budget (BudgetExceeded from reserve) refunds both tokens: no call was sent (cost minor 2).
+ * the budget (BudgetExceeded from reserve) or by the caller before sending (NotSent) refunds both tokens: no call was
+ * sent (cost minor 2, review S3).
  */
 export function createLimiter(l: ProviderHttpLimits, seed: { usedThisHour: number }): ProviderLimiter {
   const createdAt = Date.now();
@@ -124,9 +137,9 @@ export function createLimiter(l: ProviderHttpLimits, seed: { usedThisHour: numbe
               try {
                 resolve(await fn());
               } catch (e) {
-                // why: reserve refused before anything was sent; the tokens go back for the next caller.
-                if (e instanceof BudgetExceeded) await refund();
-                reject(e);
+                // why: reserve, or the caller, refused before anything was sent; the tokens go back for the next caller.
+                if (e instanceof BudgetExceeded || e instanceof NotSent) await refund();
+                reject(e instanceof NotSent ? e.refusal : e);
               }
             });
           })

@@ -7,6 +7,7 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import ts from 'typescript';
+import { GENERATED_AT_PACKAGE_ROOT } from './generated-dirs.mjs';
 
 const ALLOWED = {
   '@gmt/core': [],
@@ -113,10 +114,9 @@ function importsOf(file, src) {
 }
 const isMsw = (spec) => spec === 'msw' || spec.startsWith('msw/');
 
-// why: installed dependencies are never source, at any depth. Build output and reports are generated only directly
-// under a package root, so they are skipped there by path and never by bare name (packages/core/src/coverage/ is
-// real source and must stay covered).
-const GENERATED_AT_PACKAGE_ROOT = new Set(['dist', 'coverage', 'test-results', 'playwright-report']);
+// why: installed dependencies are never source, at any depth. Build output, reports and a mutation run's sandbox are
+// generated only directly under a package root, so they are skipped there by path and never by bare name
+// (packages/core/src/coverage/ is real source and must stay covered); the list is the scripts' one copy (R37).
 
 function* walk(dir, skipGeneratedHere = false) {
   let names = [];

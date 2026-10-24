@@ -57,6 +57,7 @@ export function outcome(
     pointOfSale: null,
     sourceKind: null,
     reusedFromExecutionId: null,
+    skipDetail: null,
     ...over,
   };
 }

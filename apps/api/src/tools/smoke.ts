@@ -317,6 +317,7 @@ export async function runSmoke(
     log,
     clock: ports.clock,
     scrollsLeft: (providerId, executionId) => ports.budget.scrollsLeft(providerId, executionId),
+    appInstance: ports.repos.meta.appInstanceId(),
   });
   const providers = wired.filter((p) => configured.some((id) => id === p.id));
   const runStart = ports.clock.now();

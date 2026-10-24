@@ -4,10 +4,12 @@ import {
   type Execution,
   hoursSince,
   type IsoDateTime,
+  isoDateTimeOfEpochMs,
   microGbpToPence,
   type ProviderId,
   type Stage,
 } from '@gmt/core';
+import type { Engine } from '@gmt/engine';
 import type { z } from 'zod';
 import type { Ports } from '../wiring.js';
 import { budgetScopes, usageOf } from './usage.js';
@@ -40,6 +42,11 @@ export function executionSummary(e: Execution, now: IsoDateTime): ExecutionSumma
     finishedAt: e.finishedAt,
     ageHours: hoursSince(e.startedAt ?? e.createdAt, now),
     expandTop: e.snapshot.verification.expandTop,
+    // why: spec §8.2 rev 36 — the firing a scheduled row stands for and why a missed one was not caught up, so the
+    // views can name both (review R17)
+    scheduledFor: e.scheduledFor,
+    isCatchUp: e.isCatchUp,
+    skipCode: e.skipCode,
   };
 }
 
@@ -112,6 +119,9 @@ export function executionResponse(ports: Ports, e: Execution): ExecutionResponse
     startedAt: e.startedAt,
     finishedAt: e.finishedAt,
     errorText: e.errorText,
+    scheduledFor: e.scheduledFor,
+    isCatchUp: e.isCatchUp,
+    skipCode: e.skipCode,
     progress,
     budget: budgetScopes(ports, e.id).map((s) => usageOf(ports, s)),
     estimate: e.estimate,
@@ -132,5 +142,39 @@ export function executionResponse(ports: Ports, e: Execution): ExecutionResponse
     parityBreak: ports.repos.notifications.wasSent('parity_break', e.id, e.definitionId),
     overrun,
     disabledProviders: [...disabled].sort(),
+  };
+}
+
+export type ActiveExecutionResponse = z.infer<typeof apiContract.activeExecutionResponseSchema>;
+
+/**
+ * Spec §10 `GET /api/executions/active` (decision 80: `gmt update` reads it before it stops the app; review R15, R16):
+ * the oldest execution with a pass in flight (pending or running), a parent run or a single-cell verification (a child
+ * spends credits too, so `gmt update` must not cut it short either), read as one lean row. Its estimated finish is now
+ * plus the seconds the engine estimates its remaining cells take (the current pass's own remaining estimate; a resumed
+ * run never reads as finished in the past), or null when the run has no estimate. A paused or interrupted run has no
+ * pass in flight, so a restart cuts nothing short and it is not reported.
+ */
+export function activeExecution(
+  ports: Ports,
+  engine: Pick<Engine, 'estimateRemaining'>,
+): ActiveExecutionResponse {
+  const e = ports.repos.executions.oldestInFlight();
+  if (e === null) return { execution: null };
+  const full = ports.repos.executions.get(e.id);
+  const remaining = full === null || full.estimate === null ? null : engine.estimateRemaining(e.id).seconds;
+  return {
+    execution: {
+      id: e.id,
+      definitionId: e.definitionId,
+      definitionName:
+        ports.repos.definitions.get(e.definitionId)?.name ?? full?.snapshot.name ?? e.definitionId,
+      kind: e.isChild ? 'cell-verification' : 'run',
+      startedAt: e.startedAt ?? e.createdAt,
+      estimatedFinishAt:
+        remaining === null
+          ? null
+          : isoDateTimeOfEpochMs(Date.parse(ports.clock.now()) + Math.round(remaining * 1000)),
+    },
   };
 }

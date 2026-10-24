@@ -112,6 +112,29 @@ describe('outcome order and reason words (prov-011, ui-r1-012)', () => {
       'some outbound flights could not be expanded; price not confirmed by the final step; 2 offers could not be read and were dropped',
     );
   });
+  it('a scheduled_only outcome of the latest run says which run fetches it and its stored detail’s reason; an earlier run’s reads in the past tense; without a detail the reason alone (spec §3 rev 36, R12, S6, S9)', () => {
+    const latest = (leftFor: 'next-scheduled-run' | 'next-run' | 'no-longer-used') => ({
+      leftFor,
+      latest: true,
+    });
+    expect(reasonText('scheduled_only', 'catch-up-no-browser', latest('next-scheduled-run'))).toBe(
+      'left for the next scheduled run: a catch-up loads no browser pages',
+    );
+    expect(reasonText('scheduled_only', 'outside-browser-window', latest('next-scheduled-run'))).toBe(
+      "left for the next scheduled run: outside this run's browser window",
+    );
+    expect(reasonText('scheduled_only', 'outside-browser-window', latest('next-run'))).toBe(
+      "left for your next run of this search: outside this run's browser window",
+    );
+    expect(reasonText('scheduled_only', 'catch-up-no-browser', latest('no-longer-used'))).toBe(
+      'not fetched: this search no longer uses the browser provider; a catch-up loads no browser pages',
+    );
+    expect(
+      reasonText('scheduled_only', 'catch-up-no-browser', { leftFor: 'next-scheduled-run', latest: false }),
+    ).toBe('left by that run: a catch-up loads no browser pages');
+    expect(reasonText('scheduled_only')).toBe('left for a later run');
+    expect(reasonText('budget', null)).toBe('stopped: a budget cap was reached');
+  });
   it('no headroom: a zero cap or no calls of headroom left (WP7 childCapPreview)', () => {
     expect(noHeadroom(null)).toBe(false);
     expect(noHeadroom({ maxCalls: 0, headroomCalls: 40, needCalls: 6 })).toBe(true);
@@ -279,6 +302,85 @@ describe('View B side panel (spec §11, §10 cells route; plan decision 38)', ()
     const prices = within(getByRole('dialog')).getAllByTestId('price-cell');
     expect(prices.map((c) => c.textContent?.includes('superseded by a later search'))).toEqual([false, true]);
     expect(prices[0]).toHaveTextContent('£412');
+  });
+
+  it('a cell where one provider found no fares and the browser provider was left says so, row by row (R18)', async () => {
+    server.use(
+      http.get(cellRoute, () =>
+        HttpResponse.json({
+          ...detail,
+          outcomes: [
+            outcome(c, 'discovery', 'travelpayouts', 'empty', {
+              executionId: 'exec-0001',
+              fetchedAt: hoursBefore(2),
+            }),
+            outcome(c, 'discovery', 'camoufox', 'skipped', {
+              executionId: 'exec-0001',
+              reason: 'scheduled_only',
+              skipDetail: 'catch-up-no-browser',
+              fetchedAt: null,
+            }),
+          ],
+        }),
+      ),
+    );
+    const { findByRole } = renderPanel(definition(), slice({}));
+    const table = await findByRole('table');
+    const rows = within(table)
+      .getAllByRole('row')
+      .slice(1)
+      .map((r) => r.textContent ?? '');
+    expect(rows.some((t) => t.includes(COPY.provider.travelpayouts) && t.includes(COPY.bucket.empty))).toBe(
+      true,
+    );
+    expect(
+      rows.some(
+        (t) =>
+          t.includes(COPY.provider.camoufox) &&
+          t.includes('left for the next scheduled run: a catch-up loads no browser pages'),
+      ),
+    ).toBe(true);
+  });
+
+  it('S9: with two runs, only the latest run’s left cell is promised to a later run; the earlier one reads in the past tense', async () => {
+    server.use(
+      http.get(cellRoute, () =>
+        HttpResponse.json({
+          ...detail,
+          latestExecutionId: 'exec-0001',
+          browserLeftFor: 'next-run',
+          outcomes: [
+            outcome(c, 'discovery', 'camoufox', 'skipped', {
+              executionId: 'exec-0001',
+              reason: 'scheduled_only',
+              skipDetail: 'outside-browser-window',
+              fetchedAt: null,
+            }),
+            outcome(c, 'discovery', 'camoufox', 'skipped', {
+              executionId: 'exec-0000',
+              reason: 'scheduled_only',
+              skipDetail: 'catch-up-no-browser',
+              fetchedAt: null,
+            }),
+          ],
+        }),
+      ),
+    );
+    const { findByRole } = renderPanel(definition(), slice({}));
+    const table = await findByRole('table');
+    const rows = within(table)
+      .getAllByRole('row')
+      .slice(1)
+      .map((r) => r.textContent ?? '');
+    expect(
+      rows.filter((t) =>
+        t.includes("left for your next run of this search: outside this run's browser window"),
+      ),
+    ).toHaveLength(1);
+    expect(
+      rows.filter((t) => t.includes('left by that run: a catch-up loads no browser pages')),
+    ).toHaveLength(1);
+    expect(rows.some((t) => t.includes('left for your next run of this search: a catch-up'))).toBe(false);
   });
 
   it('a cell price lacking provenance fails to render: the contract parse refuses the response, no amount appears', async () => {

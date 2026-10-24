@@ -80,9 +80,23 @@ describe('WP10 contract additions (plan decision 38)', () => {
     const route = { origin: 'LHR', destination: 'JFK', calendarSeries: series, routeSeries: [] };
     expect(routeHistoryResponseSchema.safeParse(route).success).toBe(false);
     const withFlags = [
-      { ...series[0], points: [{ ...point, stale: true, truncated: true, cell, executionId: 'e1' }] },
+      {
+        ...series[0],
+        points: [{ ...point, stale: true, truncated: true, cell, executionId: 'e1', catchUp: null }],
+      },
     ];
     expect(routeHistoryResponseSchema.safeParse({ ...route, calendarSeries: withFlags }).success).toBe(true);
+    // review R19: each point names its run's catch-up (when it ran, the firing it ran for) or null; never left out
+    const catchUp = { ranAt: '2027-03-01T08:00:00.000Z', for: '2027-03-01T06:00:00.000Z' };
+    const labelled = [{ ...withFlags[0], points: [{ ...withFlags[0]?.points[0], catchUp }] }];
+    expect(routeHistoryResponseSchema.safeParse({ ...route, calendarSeries: labelled }).success).toBe(true);
+    const { catchUp: _gone, ...unlabelled } = withFlags[0]?.points[0] ?? {};
+    expect(
+      routeHistoryResponseSchema.safeParse({
+        ...route,
+        calendarSeries: [{ ...withFlags[0], points: [unlabelled] }],
+      }).success,
+    ).toBe(false);
     // why: @gmt/db's repositories return the stored shape; WP8 adds the flags when it answers.
     expect(historyPointSchema.safeParse(point).success).toBe(true);
   });
@@ -100,12 +114,14 @@ describe('WP10 contract additions (plan decision 38)', () => {
       ...over,
       series: [{ ...base.series[0], points }],
     });
-    const full = { ...p, priceConfirmed: false, executionId: 'e1' };
+    const full = { ...p, priceConfirmed: false, executionId: 'e1', catchUp: null };
     expect(itineraryHistoryResponseSchema.safeParse(one([full])).success).toBe(true);
-    expect(itineraryHistoryResponseSchema.safeParse(one([{ ...p, executionId: 'e1' }])).success).toBe(false);
-    expect(itineraryHistoryResponseSchema.safeParse(one([{ ...p, priceConfirmed: true }])).success).toBe(
-      false,
-    );
+    expect(
+      itineraryHistoryResponseSchema.safeParse(one([{ ...p, executionId: 'e1', catchUp: null }])).success,
+    ).toBe(false);
+    expect(
+      itineraryHistoryResponseSchema.safeParse(one([{ ...p, priceConfirmed: true, catchUp: null }])).success,
+    ).toBe(false);
     // why: decision 52: the destination comes from the api, never from a cached Results row.
     const { cell: _cell, ...noCell } = base;
     expect(itineraryHistoryResponseSchema.safeParse({ ...noCell, series: one([full]).series }).success).toBe(
@@ -114,8 +130,24 @@ describe('WP10 contract additions (plan decision 38)', () => {
   });
 
   it('the cell detail carries what a per-cell verify would spend, or null without a verification provider', () => {
-    const detail = { cell, outcomes: [], calendarPrices: [], observations: [] };
+    const detail = {
+      cell,
+      outcomes: [],
+      browserLeftFor: 'next-scheduled-run',
+      latestExecutionId: 'e1',
+      calendarPrices: [],
+      observations: [],
+    };
     expect(cellDetailResponseSchema.safeParse(detail).success).toBe(false);
+    // S6, S9: who fetches a left browser cell and the latest run are part of every answer
+    const { browserLeftFor: _who, ...noWho } = detail;
+    expect(cellDetailResponseSchema.safeParse({ ...noWho, verify: null }).success).toBe(false);
+    expect(
+      cellDetailResponseSchema.safeParse({ ...detail, browserLeftFor: 'later', verify: null }).success,
+    ).toBe(false);
+    expect(
+      cellDetailResponseSchema.safeParse({ ...detail, latestExecutionId: null, verify: null }).success,
+    ).toBe(true);
     expect(cellDetailResponseSchema.safeParse({ ...detail, verify: null }).success).toBe(true);
     const verify = { maxCalls: 6, headroomCalls: 1840, needCalls: 6 };
     expect(cellDetailResponseSchema.safeParse({ ...detail, verify }).success).toBe(true);
@@ -187,7 +219,14 @@ describe('WP10 contract additions (plan decision 38)', () => {
         executions: [],
       }).success,
     ).toBe(false);
-    const detail = { cell, outcomes: [], observations: [], verify: null };
+    const detail = {
+      cell,
+      outcomes: [],
+      browserLeftFor: 'next-run',
+      latestExecutionId: 'e1',
+      observations: [],
+      verify: null,
+    };
     const calendarPrice = { ...price, executionId: 'e1', calendarPriceId: 7 };
     expect(cellDetailResponseSchema.safeParse({ ...detail, calendarPrices: [calendarPrice] }).success).toBe(
       false,

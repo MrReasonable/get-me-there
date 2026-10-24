@@ -14,6 +14,8 @@ export {
   gridTileEstimate,
   planGridTiles,
   planSingleCells,
+  readWorkerStatus, // WP16a: the preflight and WP18's status check read the worker through it (decision 76)
+  type WorkerStatusRead,
 } from './camoufox/index.js'; // WP14: apps/api httpLimitsFor and providersFor; the smoke rows; classifyWorkerAnswer: engine tests
 export { fixtureHttpLimits, fixtureProvider } from './fixture/provider.js'; // fixtureHttpLimits: WP4b httpLimitsFor
 export { CREDENTIAL_HEADERS, canonicalCacheKey } from './http/cacheKey.js'; // CREDENTIAL_HEADERS: WP4b createLogger

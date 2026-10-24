@@ -5,7 +5,8 @@ owner: opus
 depends_on: [0]
 spec_sections: ["§4", "§5.2 Errors", "§5.3", "§5.4 (chained steps)", "§5.5", "§9 item 2", "§14"]
 reviewers: [code-architect, test-strategy-reviewer, cost-and-budget-reviewer, security-reviewer, provenance-auditor, provider-integration-expert]
-status: reviewed
+mutate: {}
+status: merged
 ---
 
 # WP4 — providers: http-kit, recorder, scrubbing, egress, fixture provider

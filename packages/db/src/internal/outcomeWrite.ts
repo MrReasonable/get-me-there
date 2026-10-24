@@ -20,7 +20,8 @@ export type Incoming = TileWrite['outcomes'][number];
 export const SELECT_OUTCOME_SQL = `SELECT * FROM cell_outcomes WHERE ${CELL_WHERE} AND stage = @stage AND provider_id = @providerId`;
 export const UPDATE_OUTCOME_SQL = `
 UPDATE cell_outcomes SET status = @status, reason = @reason, last_error = @lastError, fetched_at = @fetchedAt, min_pence = @minPence,
-  cabin = @cabin, point_of_sale = @pointOfSale, source_kind = @sourceKind, attempts = @attempts, reused_from_execution_id = @reusedFromExecutionId
+  cabin = @cabin, point_of_sale = @pointOfSale, source_kind = @sourceKind, attempts = @attempts, reused_from_execution_id = @reusedFromExecutionId,
+  skip_detail = @skipDetail
 WHERE ${CELL_WHERE} AND stage = @stage AND provider_id = @providerId`;
 export const DELETE_FRESH_PRICE_SQL = `DELETE FROM calendar_prices WHERE ${CELL_WHERE} AND provider_id = @providerId AND reused_from_execution_id IS NULL`;
 export const DELETE_REUSED_PRICE_SQL = `DELETE FROM calendar_prices WHERE ${CELL_WHERE} AND provider_id = @providerId AND reused_from_execution_id IS NOT NULL`;
@@ -63,6 +64,8 @@ export function storeOutcome(db: Db, o: CellOutcome): void {
     sourceKind: o.sourceKind,
     attempts: o.attempts,
     reusedFromExecutionId: o.reusedFromExecutionId,
+    // why: spec §3 rev 36 — a detail belongs to skipped:scheduled_only alone, so any other outcome written here clears it
+    skipDetail: o.status === 'skipped' && o.reason === 'scheduled_only' ? o.skipDetail : null,
   });
 }
 

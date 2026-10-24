@@ -3,6 +3,7 @@ import { waitFor, within } from '@testing-library/react';
 import { delay, HttpResponse, http } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { COPY } from '../../src/copy.js';
+import { formatInstantLondon } from '../../src/format.js';
 import { HISTORY_PARAMS, historyHref } from '../../src/state/links.js';
 import { HistoryChart } from '../../src/views/History/HistoryChart.js';
 import { HistoryView } from '../../src/views/History/HistoryView.js';
@@ -342,6 +343,51 @@ describe('History view (spec §11 History, §10 history routes; plan decision 38
     expect(routeChart.querySelector('.recharts-line-curve')?.getAttribute('d')?.match(/M/g)).toHaveLength(1);
   });
 
+  it('a point from a catch-up says "ran <time>, catch-up for <missed time>" and keeps its own fetch time; other runs show nothing extra (spec §8.2 rev 36)', async () => {
+    const runs = runsAt(2, 170, 300, 500);
+    serveRuns(runs);
+    const run170 = runs.find((r) => r.id === 'exec-170');
+    // why: review R19 — the api labels the point from the run that fetched it, whatever its definition; this
+    // definition's own runs list says nothing about it
+    const labelled = routeHistory({
+      calendarSeries: [
+        {
+          providerId: 'travelpayouts',
+          cabin: 'economy',
+          points: [
+            fetchPoint(500, 45000),
+            fetchPoint(2, 39900, cellAt('2027-03-21', 14)),
+            fetchPoint(170, 42000, cellAt('2027-03-14', 14), {
+              catchUp: {
+                ranAt: run170?.startedAt ?? asIsoDateTime('2026-10-07T12:00:00.000Z'),
+                for: asIsoDateTime('2026-10-07T04:00:00.000Z'),
+              },
+            }),
+          ],
+        },
+      ],
+    });
+    server.use(http.get(routeRoute, () => HttpResponse.json(labelled)));
+    const { findAllByRole } = renderWithProviders(<HistoryView definition={definition()} />);
+    const [table] = await findAllByRole('table');
+    if (table === undefined) throw new Error('no table');
+    const rows = within(table).getAllByRole('row').slice(1);
+    const texts = rows.map((r) => r.textContent ?? '');
+    const startedAt = run170?.startedAt ?? '';
+    const label = COPY.historyView.catchUpRun(
+      formatInstantLondon(Date.parse(startedAt)),
+      formatInstantLondon(Date.parse('2026-10-07T04:00:00.000Z')),
+    );
+    expect(label).toMatch(/^ran \d{1,2} [A-Z][a-z]{2} 2026 \d{2}:\d{2}, catch-up for 7 Oct 2026 05:00$/);
+    expect(texts.filter((t) => t.includes(label))).toHaveLength(1);
+    expect(texts.filter((t) => t.includes('catch-up for'))).toHaveLength(1);
+    // the catch-up's price shows its own fetch time in the When column
+    const row = rows.find((r) => (r.textContent ?? '').includes(label));
+    expect(row?.querySelector('td')?.textContent).toBe(
+      formatInstantLondon(Date.parse(fetchPoint(170, 42000).at)),
+    );
+  });
+
   it('a stale route-level point is labelled stale beside its indicative amount (decision 54)', async () => {
     const r = routeHistory();
     const [series] = r.routeSeries;
@@ -440,6 +486,7 @@ describe('History view (spec §11 History, §10 history routes; plan decision 38
       cell: null,
       cellChanged: false,
       priceConfirmed: true,
+      catchUp: null,
     });
     const line: PlotLine = {
       key: 'travelpayouts|calendar',

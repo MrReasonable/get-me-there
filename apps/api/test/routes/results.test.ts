@@ -2,6 +2,7 @@
 // excluded rows (review focus 4), truncation (decisions 36, 47).
 import {
   apiContract,
+  asIsoDateTime,
   type Constraints,
   SEARCH_LINK_LABEL,
   SEARCH_LINK_ROW_LABEL,
@@ -183,6 +184,37 @@ describe('GET /definitions/:id/results, verified basis', () => {
       apiContract.resultsResponseSchema,
     );
     expect(r.executions.map((e) => e.expandTop)).toEqual([2]);
+  });
+  it('every execution summary names the firing a scheduled row stands for, the catch-up flag and a skip code (R17)', async () => {
+    const x = await createHarness();
+    h = x;
+    const def = x.ports.repos.definitions.create(exampleDefinitionInput());
+    const s = seeder(x.ports);
+    s.execution('E1', { def, status: 'completed', startedAt: at(-2), finishedAt: at(-1) });
+    const firing = asIsoDateTime('2026-10-12T04:00:00.000Z');
+    const run = x.ports.repos.executions.get(s.id('E1'));
+    if (run === null) throw new Error('no run');
+    x.ports.repos.executions.createForFiring({
+      definitionId: def.id,
+      isChild: false,
+      cell: null,
+      snapshot: run.snapshot,
+      estimate: null,
+      trigger: 'schedule',
+      status: 'skipped_missed',
+      scheduledFor: firing,
+      skipCode: 'half-cadence',
+    });
+    const r = await expectContract(
+      await x.request(`/api/definitions/${def.id}/results`),
+      'GET',
+      '/api/definitions/:id/results',
+      apiContract.resultsResponseSchema,
+    );
+    expect(r.executions.map((e) => [e.status, e.scheduledFor, e.isCatchUp, e.skipCode])).toEqual([
+      ['skipped_missed', firing, false, 'half-cadence'],
+      ['completed', null, false, null],
+    ]);
   });
   it('scopes to one execution with executionId; 404 for a foreign one', async () => {
     const { x, def, s } = await world();

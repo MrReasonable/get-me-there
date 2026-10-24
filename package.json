@@ -16,7 +16,7 @@
     "casts": "node scripts/check-casts.mjs",
     "test": "vitest run",
     "test:coverage": "pnpm -r --workspace-concurrency=1 test",
-    "mutate": "pnpm --filter @gmt/core mutate && pnpm --filter @gmt/camoufox-worker mutate",
+    "mutate": "pnpm --filter @gmt/core mutate && pnpm --filter @gmt/engine mutate && pnpm --filter @gmt/camoufox-worker mutate",
     "dev": "pnpm --parallel --filter @gmt/api --filter @gmt/web dev",
     "smoke:live": "pnpm -C apps/api run tool smoke",
     "record:fixtures": "pnpm -C apps/api run tool record",
@@ -26,6 +26,7 @@
     "@biomejs/biome": "2.5.15",
     "@types/node": "26.6.5",
     "@vitest/coverage-v8": "5.0.4",
+    "minimatch": "10.2.6",
     "typescript": "5.9.3",
     "vitest": "5.0.4"
   }

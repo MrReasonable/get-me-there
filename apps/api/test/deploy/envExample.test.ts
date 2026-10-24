@@ -23,6 +23,14 @@ describe('.env.example (spec §12)', () => {
     );
   });
 
+  it('offers CAMOUFOX_BROWSER_WINDOW with its two values and its default (decision 83)', () => {
+    const line = read('.env.example')
+      .split('\n')
+      .find((l) => l.startsWith('CAMOUFOX_BROWSER_WINDOW='));
+    expect(line).toMatch(/^CAMOUFOX_BROWSER_WINDOW=scheduled +# exactly scheduled \(default when unset/);
+    expect(line).toContain(' or any (');
+  });
+
   it('carries no value for any credential', () => {
     for (const name of ['APP_BASIC_AUTH_PASS', 'TRAVELPAYOUTS_TOKEN', 'SEARCHAPI_KEY', 'SMTP_PASS'])
       expect(read('.env.example')).toMatch(new RegExp(`^${name}=( |$)`, 'm'));

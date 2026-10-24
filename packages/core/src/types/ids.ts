@@ -51,7 +51,9 @@ export const isoMonthSchema = z
 export const isoDateTimeSchema = z
   .string()
   .refine(
-    (s) => DATETIME_RE.test(s) && new Date(s).toISOString() === s,
+    // why: an impossible date in the right shape (a month 13) makes toISOString throw, which must be a refusal here,
+    // never an exception out of a parse (found by WP16a review R26's marker test)
+    (s) => DATETIME_RE.test(s) && !Number.isNaN(Date.parse(s)) && new Date(s).toISOString() === s,
     'timestamp must be Date#toISOString() form',
   )
   .transform((s) => s as IsoDateTime);

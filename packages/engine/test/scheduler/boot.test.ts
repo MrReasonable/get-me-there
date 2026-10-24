@@ -1,12 +1,12 @@
 import { asIsoDate, asIsoDateTime, parseConfig, type SearchDefinition } from '@gmt/core';
 import { takeStrays } from '@gmt/providers/testing';
 import { describe, expect, it, vi } from 'vitest';
-import { buildContext } from '../src/context.js';
-import { createEngine } from '../src/index.js';
-import { NEVER_STARTED, SUPERSEDED } from '../src/resume.js';
-import { buildSnapshot } from '../src/snapshot.js';
-import type { Engine } from '../src/types.js';
-import { frankfurterBody, stubFrankfurter } from './support/fx.js';
+import { buildContext } from '../../src/context.js';
+import { createEngine } from '../../src/index.js';
+import { NEVER_STARTED, SUPERSEDED } from '../../src/resume.js';
+import { buildSnapshot } from '../../src/snapshot.js';
+import type { Engine } from '../../src/types.js';
+import { frankfurterBody, stubFrankfurter } from '../support/fx.js';
 import {
   createHarness,
   EWR,
@@ -19,7 +19,7 @@ import {
   T0,
   tileRule,
   withVerification,
-} from './support/harness.js';
+} from '../support/harness.js';
 
 // why: every test here runs croner, http-kit and the engine on faked timers set to T0, so the process clock and the
 // engine clock agree and no job fires on the real clock (test-strategy-reviewer-004)
@@ -247,6 +247,7 @@ describe('boot (spec §8.1 "Boot order")', () => {
       expect(e.scheduler.jobs().filter((j) => j.kind === 'resume')).toEqual([]);
       expect(h.repos.executions.get(old.id)).toMatchObject({ status: 'cancelled', errorText: SUPERSEDED });
       expect(executions(h, def.id)).toHaveLength(1); // the fresh run is the next firing's, or the operator's
+      h.clock.set(asIsoDateTime('2026-10-26T05:00:00.000Z')); // the next Monday 05:00 (GMT), a punctual tick
       await e.scheduler.tick(def.id);
       expect(executions(h, def.id)).toHaveLength(scheduleCron === null ? 1 : 2);
     },
@@ -312,19 +313,82 @@ describe('boot (spec §8.1 "Boot order")', () => {
     expect(executions(h, def.id)).toHaveLength(1);
   });
 
-  it('records skipped_missed once, in local time, when the last scheduled firing was missed (spec §8.2)', async () => {
+  it('catches up the last scheduled firing missed while the app was down, once, and writes no skipped_missed for it (spec §8.2 rev 36)', async () => {
     const h = createHarness(fake);
     const def = h.createDefinition({ scheduleCron: '0 5 * * 1' }); // created Wednesday 14 Oct
     h.clock.set(asIsoDateTime('2026-10-20T09:00:00.000Z')); // Tuesday: Monday 05:00 BST passed with the app down
     await engine(h).boot();
-    const missed = executions(h, def.id).filter((x) => x.status === 'skipped_missed');
-    expect(missed).toHaveLength(1);
-    expect(kinds(h)).toEqual(['skipped_missed']);
-    expect(h.notifications[0]?.body).toContain(
-      'The run scheduled for Mon, 19 Oct 2026, 05:00 (Europe/London) did not happen',
-    );
+    const [run, ...rest] = executions(h, def.id);
+    expect(rest).toEqual([]);
+    expect(run).toMatchObject({
+      trigger: 'schedule',
+      scheduledFor: '2026-10-19T04:00:00.000Z',
+      isCatchUp: true,
+    });
+    if (run === undefined) throw new Error('no catch-up');
+    expect((await h.waitForSettled(run.id)).status).toBe('completed');
     await engine(h).boot();
-    expect(executions(h, def.id).filter((x) => x.status === 'skipped_missed')).toHaveLength(1);
+    expect(executions(h, def.id)).toHaveLength(1);
+    expect(kinds(h)).not.toContain('skipped_missed');
+  });
+
+  it('a definition whose catch-up throws is logged and the boot carries on: every definition’s job registered, the other caught up (R3)', async () => {
+    const h = createHarness(fake);
+    const broken = h.createDefinition({ name: 'broken', scheduleCron: '0 5 * * 1' });
+    const fine = h.createDefinition({ name: 'fine', scheduleCron: '0 5 * * 1' });
+    h.clock.set(asIsoDateTime('2026-10-20T09:00:00.000Z'));
+    // why: the broken definition's coverage read throws, as a corrupt row would; the boot must not die with it
+    const covers = h.repos.executions.coversFiring.bind(h.repos.executions);
+    vi.spyOn(h.repos.executions, 'coversFiring').mockImplementation((id, firing, except) => {
+      if (id === broken.id) throw new Error('row decode failed');
+      return covers(id, firing, except);
+    });
+    const e = engine(h);
+    await e.boot();
+    expect(
+      e.scheduler
+        .jobs()
+        .filter((j) => j.kind === 'definition')
+        .map((j) => j.definitionId)
+        .sort(),
+    ).toEqual([broken.id, fine.id].sort());
+    expect(executions(h, fine.id).map((x) => x.isCatchUp)).toEqual([true]);
+    expect(
+      h.logs.filter((l) => l.msg === 'catch-up: definition failed').map((l) => l.fields.definitionId),
+    ).toEqual([broken.id]);
+  });
+
+  it('a firing missed 6 of 7 days ago is recorded once across two boots: one skipped_missed row with scheduled_for and half-cadence, one notice (R42)', async () => {
+    const h = createHarness(fake);
+    const def = h.createDefinition({ scheduleCron: '0 5 * * 1' }); // created Wednesday 14 Oct
+    h.clock.set(asIsoDateTime('2026-10-25T09:00:00.000Z')); // Sunday: Monday 19 Oct 05:00 BST six days back
+    await engine(h).boot();
+    await engine(h).boot();
+    expect(executions(h, def.id).map((e) => [e.status, e.scheduledFor, e.skipCode])).toEqual([
+      ['skipped_missed', '2026-10-19T04:00:00.000Z', 'half-cadence'],
+    ]);
+    expect(kinds(h).filter((k) => k === 'skipped_missed')).toHaveLength(1);
+  });
+
+  it('an old skipped_missed row (before migration 0007, no scheduled_for) still reads, and still covers its firing', async () => {
+    const h = createHarness(fake);
+    const def = h.createDefinition({ scheduleCron: '0 5 * * 1' });
+    h.clock.set(asIsoDateTime('2026-10-20T08:00:00.000Z'));
+    const b = buildSnapshot(buildContext(h.deps, h.options), def, 'schedule');
+    const old = h.repos.executions.create({
+      definitionId: def.id,
+      isChild: false,
+      cell: null,
+      snapshot: b.snapshot,
+      estimate: null,
+      trigger: 'schedule',
+      status: 'skipped_missed',
+    });
+    h.clock.set(asIsoDateTime('2026-10-20T09:00:00.000Z'));
+    await engine(h).boot();
+    expect(executions(h, def.id).map((e) => [e.id, e.status, e.scheduledFor, e.skipCode])).toEqual([
+      [old.id, 'skipped_missed', null, null],
+    ]);
   });
 
   it('does not call a firing missed when no configured provider can run the definition: the tick ran and refused (ssr-005)', async () => {

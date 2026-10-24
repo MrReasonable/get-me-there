@@ -4,7 +4,8 @@ import { errorText } from '../errors.js';
 import type { SchedulerJob } from '../types.js';
 import { parseCron } from './parseCron.js';
 
-export type SystemJob = 'fx-refresh' | 'maintenance';
+/** The system jobs: the daily FX refresh and maintenance, and the minute catch-up job (decision 79). */
+export type SystemJob = 'fx-refresh' | 'maintenance' | 'catch-up';
 export interface SchedulerHooks {
   onTick(definitionId: string): Promise<void>;
   onResumeDue(executionId: string): Promise<void>;
@@ -23,6 +24,11 @@ export interface Scheduler {
   jobs(): SchedulerJob[];
   definitionJobCount(): number;
   stopAll(): void;
+  /**
+   * Waits for the job callbacks already running (a tick, a one-shot resume, the minute catch-up) to finish, at most
+   * `boundMs`; true when they all finished. The engine's shutdown calls it after stopAll and before it stops the runs.
+   */
+  drain(boundMs: number): Promise<boolean>;
 }
 
 const instant = (d: Date | null): IsoDateTime | null =>
@@ -41,8 +47,14 @@ export function createScheduler(hooks: SchedulerHooks, log: Logger): Scheduler {
   >();
   const systems = new Map<SystemJob, Cron>();
   const soon = new Set<ReturnType<typeof setTimeout>>();
+  // why: croner's stop() ends future firings but not a callback already running, so each one is kept until it settles
+  // and the shutdown can wait for it before the database closes
+  const inFlight = new Set<Promise<void>>();
   const fire = (job: string, fn: () => Promise<void>): void => {
-    fn().catch((err: unknown) => log.error({ job, err: errorText(err) }, 'scheduler: job failed'));
+    const p = fn()
+      .catch((err: unknown) => log.error({ job, err: errorText(err) }, 'scheduler: job failed'))
+      .finally(() => inFlight.delete(p));
+    inFlight.add(p);
   };
   const onCronError = (job: string) => (err: unknown) =>
     log.error({ job, err: errorText(err) }, 'scheduler: job failed');
@@ -150,6 +162,19 @@ export function createScheduler(hooks: SchedulerHooks, log: Logger): Scheduler {
       systems.clear();
       for (const t of soon) clearTimeout(t);
       soon.clear();
+    },
+    async drain(boundMs) {
+      if (inFlight.size === 0) return true;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const bound = new Promise<false>((resolve) => {
+        timer = setTimeout(() => resolve(false), boundMs);
+        timer.unref();
+      });
+      const done = Promise.allSettled([...inFlight]).then(() => true);
+      const finished = await Promise.race([done, bound]);
+      clearTimeout(timer);
+      if (!finished) log.warn({ jobs: inFlight.size, boundMs }, 'scheduler: jobs still running at shutdown');
+      return finished;
     },
   };
 }

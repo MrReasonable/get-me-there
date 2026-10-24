@@ -60,6 +60,10 @@ describe('docker-compose.yml app service (spec §13, §5.5)', () => {
     expect(Object.keys(env).sort()).toEqual(expected);
   });
 
+  it('passes CAMOUFOX_BROWSER_WINDOW, which the app reads (decision 83: compose passes only listed names)', () => {
+    expect(env.CAMOUFOX_BROWSER_WINDOW).toBe(`\${CAMOUFOX_BROWSER_WINDOW:-}`);
+  });
+
   it('never passes NODE_ENV, IN_CONTAINER, ALLOW_FIXTURE_PROVIDER or FIXTURE_COST_MICRO_GBP, and has no env_file', () => {
     for (const name of NEVER) expect(env).not.toHaveProperty(name);
     expect(app.env_file).toBeUndefined();

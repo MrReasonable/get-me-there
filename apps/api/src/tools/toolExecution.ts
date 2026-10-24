@@ -6,6 +6,7 @@
  */
 import {
   addDays,
+  type apiContract,
   type Cabin,
   type DefinitionInput,
   type DefinitionSnapshot,
@@ -18,6 +19,7 @@ import {
   type Stage,
 } from '@gmt/core';
 import type { FixtureRecorder } from '@gmt/providers';
+import type { z } from 'zod';
 import type { Ports } from '../wiring.js';
 import {
   CALENDAR_OUT_DAYS,
@@ -29,6 +31,7 @@ import {
   type RecordArgs,
 } from './recordPlan.js';
 import { RECORD_TRAVEL_CLASS } from './recordRequests.js';
+import type { SmokeWorstCase } from './smokeArgs.js';
 
 /** why: a Record over the union fails to compile when core adds a status, so the list below is always complete (arch-r2-002). */
 const STATUS_FLAGS: Record<ExecutionStatus, true> = {
@@ -72,6 +75,26 @@ export function priorToolCredits(ports: Ports): number {
     .filter((e) => e.trigger === 'tool' && (start === null || e.createdAt >= start))
     .reduce((n, e) => n + ports.budget.usage({ kind: 'execution-calls', executionId: e.id }).calls, 0);
 }
+
+/**
+ * Spec §10 `GET /api/tools/smoke/plan`: the smoke's worst case from `smokeWorstCase`, per provider, with the trial's
+ * remaining lifetime credits (the guard's lifetime cap, which already subtracts SEARCHAPI_TRIAL_USED, less what the
+ * ledger holds), or null off the trial. Reads only: no ledger row, no provider call.
+ */
+export function smokePlan(ports: Ports, worst: SmokeWorstCase): SmokePlanResponse {
+  const sa = ports.config.providers.searchapi;
+  const trialLeft = (): number | null => {
+    if (sa === null || sa.limits.window !== 'lifetime') return null;
+    const w = searchApiWindow(ports);
+    return w.cap === null ? null : Math.max(0, w.cap - w.calls);
+  };
+  return {
+    searchApi: worst.searchApi === null ? null : { ...worst.searchApi, trialLeft: trialLeft() },
+    travelpayouts: ports.config.providers.travelpayouts === null ? null : { freeCalls: worst.freeCalls },
+    camoufox: worst.camoufox,
+  };
+}
+export type SmokePlanResponse = z.infer<typeof apiContract.smokePlanResponseSchema>;
 
 /** A tool run's stated worst case: SearchApi credits and free Travelpayouts calls. */
 export interface WorstCase {

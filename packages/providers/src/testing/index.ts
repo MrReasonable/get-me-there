@@ -1,4 +1,7 @@
 // `@gmt/providers/testing`: the only module tree that imports msw (plan decision 7). Production code never imports it.
+// why: review R30 — the production limiter, for the engine's interleaved-pages test only; on this subpath, which
+// production code may not import, so no second limiter for a provider can be built outside http-kit
+export { createLimiter, type ProviderLimiter } from '../http/limiter.js';
 export { withContentHash } from '../http/recorder.js';
 export { loadParamsHistory } from '../params/allowlist.js'; // replay's dated allowlist history (spec §5.2)
 export { fixtureHandlers, type RequestHandler } from './handlers.js';

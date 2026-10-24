@@ -1,14 +1,17 @@
 import { cellKeyString } from '../types/definition.js';
 import type { CellOutcome, CellOutcomeStatus, NoDataReason, RollUp, SkipReason } from '../types/execution.js';
 
-/** Spec §6.6 row 6: skip-reason priority, lower rank wins. */
-const SKIP_RANK: Record<SkipReason, number> = {
+/**
+ * Spec §6.6 row 6: skip-reason priority, lower rank wins: budget > provider_disabled > provider_unavailable >
+ * scheduled_only > departed > not_selected (rev 36).
+ */
+export const SKIP_RANK: Readonly<Record<SkipReason, number>> = {
   budget: 0,
   provider_disabled: 1,
-  // why: spec §6.6 row 6 does not rank it; an unreachable worker sits beside a disabled provider, before departed.
   provider_unavailable: 2,
-  departed: 3,
-  not_selected: 4,
+  scheduled_only: 3,
+  departed: 4,
+  not_selected: 5,
 };
 const CABIN_NOT_OFFERED: NoDataReason = 'cabin-not-offered';
 /**
@@ -78,7 +81,7 @@ function isSkipReason(r: string | null): r is SkipReason {
  * | 3 | any `error`                                          | `error`   |
  * | 4 | any `empty`, every other ∈ {empty, no_data, skipped} | `empty`   |
  * | 5 | any `no_data`                                        | `no_data` |
- * | 6 | all `skipped`                                        | `skipped`, reason budget > provider_disabled > departed > not_selected |
+ * | 6 | all `skipped`                                        | `skipped`, reason by SKIP_RANK |
  *
  * Before the table: `no_data` outcomes with reason `cabin-not-offered` (written at seeding, no
  * call made) are ignored whenever any other outcome exists for the cell; when every outcome is

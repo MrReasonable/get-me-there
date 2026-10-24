@@ -1,7 +1,8 @@
 # Work briefs
 
 > **Historical records.** Each brief records what its work package was asked to build when it was dispatched. The
-> code, the spec and the plan are current; a brief is not updated after its package merges, so where they differ, the
+> code, the spec and the plan are current; a brief's body is not updated after its package merges (its front matter's
+> `status` and mutation scope are kept current for the check below), so where they differ, the
 > code, spec and plan win.
 
 One brief per work package (WP) of `docs/superpowers/plans/2026-10-14-flight-price-optimiser-plan.md`. A brief is the only document an implementer needs besides the spec and the plan: it carries that package's bite-sized tasks in the `superpowers:writing-plans` format, with real test code and real implementation code in every step.
@@ -20,9 +21,18 @@ owner: opus            # opus | sonnet | fable
 depends_on: [4, 4b]
 spec_sections: ["§2", "§5.2", "§5.4", "§9 item 2"]
 reviewers: [code-architect, test-strategy-reviewer, provider-integration-expert, provenance-auditor, cost-and-budget-reviewer]
+mutate: {"@gmt/core": ["src/camoufox/builds.ts"]}   # required: package → package-relative globs it puts under mutation; {} for none
+pending: {"@gmt/cli": ["src/plan/**"]}              # optional: the same, for a package or file not yet in the checkout
 status: draft          # draft | reviewed | dispatched | merged
 ---
 ```
+
+`mutate` and `pending` are the brief's mutation scope, one line each, as JSON (a YAML flow mapping), and the only place
+it is stated: `scripts/check-mutation-globs.mjs` (decision 77) fails when a brief has no `mutate` line (`mutate: {}`
+says it mutates nothing), when a `mutate` glob matches no file of its package, or when a file it matches is not in that
+package's `stryker.config.json` `mutate` list (minimatch, Stryker's own matcher). `pending` is reported while the brief
+is not merged and fails once its `status` is `merged`: the package that writes the file moves its entry to `mutate`
+before it merges. Front matter with CRLF line endings reads the same.
 
 ## Sections, in order
 

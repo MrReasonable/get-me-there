@@ -70,7 +70,7 @@ describe('apps/api wiring: Travelpayouts (plan "Wiring and bootstraps")', () => 
 
   it('providersFor constructs the adapter only with a token, with the configured TTL and the header-only token', async () => {
     const { http, seen } = spyKit();
-    const deps = { http, log: silentLog, clock: fixedClock(NOW) };
+    const deps = { http, log: silentLog, clock: fixedClock(NOW), appInstance: 'test-instance' };
     expect(providersFor(config(base), deps).map((p) => p.id)).not.toContain('travelpayouts');
     const p = providersFor(
       config({ ...base, TRAVELPAYOUTS_TOKEN: TOKEN, TRAVELPAYOUTS_CACHE_TTL_HOURS: '3' }),

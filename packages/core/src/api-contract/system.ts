@@ -102,5 +102,22 @@ export const toolRunResponseSchema = z.object({
   lines: z.array(z.string()),
   fixturesWritten: z.array(z.string()),
 });
+/**
+ * Spec §10 `GET /api/tools/smoke/plan` (ledgers nothing; `gmt smoke` prints it before it asks): the smoke's worst case
+ * per configured provider, from the tool's own `smokeWorstCase`. SearchApi credits are split into the calendar tile and
+ * the itinerary chain, with the trial's remaining lifetime credits (null off the trial); Travelpayouts' free calls; the
+ * browser pages and, in grid mode, the scroll allowance (0 in list mode). A provider not configured is null.
+ */
+export const smokePlanResponseSchema = z.strictObject({
+  searchApi: z
+    .strictObject({
+      calendar: z.number().int().min(0),
+      itinerary: z.number().int().min(0),
+      trialLeft: z.number().int().min(0).nullable(),
+    })
+    .nullable(),
+  travelpayouts: z.strictObject({ freeCalls: z.number().int().min(0) }).nullable(),
+  camoufox: z.strictObject({ pages: z.number().int().min(0), scrolls: z.number().int().min(0) }).nullable(),
+});
 
 export type SchedulerJob = z.infer<typeof schedulerJobSchema>;

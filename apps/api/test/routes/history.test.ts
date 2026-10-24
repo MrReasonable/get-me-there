@@ -142,6 +142,39 @@ describe('history routes (spec §10, §7)', () => {
     ]);
   });
 
+  it('a point a catch-up fetched carries when it ran and the firing it ran for, looked up by its run whatever its definition (R19)', async () => {
+    const { x, s } = await world();
+    const other = x.ports.repos.definitions.create(
+      exampleDefinitionInput({ name: 'London to New York, second' }),
+    );
+    const firing = '2026-10-14T04:00:00.000Z';
+    // why: E2 becomes another definition's catch-up, as a route's points can come from any definition flying it
+    x.ports.db.raw
+      .prepare(
+        "UPDATE search_executions SET definition_id = ?, trigger = 'schedule', scheduled_for = ?, is_catch_up = 1 WHERE id = ?",
+      )
+      .run(other.id, firing, s.id('E2'));
+    const route = await expectContract(
+      await x.request('/api/routes/LHR/JFK/history'),
+      'GET',
+      '/api/routes/:origin/:destination/history',
+      ROUTE,
+    );
+    expect(
+      route.calendarSeries
+        .find((c) => c.providerId === 'fixture')
+        ?.points.map((p) => [p.executionId, p.catchUp]),
+    ).toEqual([
+      [s.id('E1'), null],
+      [s.id('E2'), { ranAt: at(-2), for: firing }],
+    ]);
+    const itinerary = ITINERARY.parse(await (await x.request('/api/itineraries/hV/history')).json());
+    expect(itinerary.series.flatMap((r) => r.points.map((p) => [p.executionId, p.catchUp]))).toEqual([
+      [s.id('E1'), null],
+      [s.id('E2'), { ranAt: at(-2), for: firing }],
+    ]);
+  });
+
   it('judges a route point by the newest live definition flying the pair with that discovery provider (review arch Minor)', async () => {
     const x = await createHarness();
     h = x;

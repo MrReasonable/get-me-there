@@ -5,7 +5,8 @@ owner: sonnet
 depends_on: [8, 9, 11]
 spec_sections: ["§1", "§4 auth", "§5.5", "§7 Migrations, app_lock", "§8.2", "§8.3", "§11 banned words", "§12", "§13", "§14", "§9 item 8"]
 reviewers: [code-architect, test-strategy-reviewer, devops-reviewer, security-reviewer, cost-and-budget-reviewer, persona-flexible-traveller]
-status: reviewed
+mutate: {}
+status: merged
 ---
 
 <!-- Revised 2026-10-17 after review round 1 (3 High, 15 Medium, 16 Low; rulings in plan decision 63), against spec revision 26, plan decisions 1–63 and the code on main at be59ca1 (WP0–WP7, WP4b merged), with the WP8, WP9 and WP11 briefs for what is not on main yet. -->

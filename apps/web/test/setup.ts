@@ -1,10 +1,13 @@
 import '@testing-library/jest-dom/vitest';
-import { cleanup } from '@testing-library/react';
+import { cleanup, configure } from '@testing-library/react';
 import { afterAll, afterEach, beforeAll, beforeEach, vi } from 'vitest';
 import { consoleErrors, drainGuards } from './guards.js';
 import { server } from './msw/server.js';
 import { setViewportWidth } from './viewport.js';
 
+// why: review S12 — findBy*/waitFor wait up to 5 s (testing-library's 1 s default flaked under mutation-run load); a
+// passing wait still returns as soon as it matches, so this only bounds a failure
+configure({ asyncUtilTimeout: 5_000 });
 // why: msw 3 names the unmatched-request policy onUnhandledFrame; the catch-all in server.ts records the rest.
 beforeAll(() => server.listen({ onUnhandledFrame: 'error' }));
 beforeEach(() => {

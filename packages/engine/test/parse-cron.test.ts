@@ -1,6 +1,12 @@
 import { isValidTimeZone } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
-import { firingsBetween, parseCron, previousFiring, runsPerMonth } from '../src/scheduler/parseCron.js';
+import {
+  countFirings,
+  firingsBetween,
+  parseCron,
+  previousFiring,
+  runsPerMonth,
+} from '../src/scheduler/parseCron.js';
 
 const next = (expr: string, tz: string, from: string) => {
   const p = parseCron(expr, tz);
@@ -86,5 +92,68 @@ describe('previousFiring and runsPerMonth', () => {
     expect(runsPerMonth('0 6 * * *', 'Europe/London', from)).toBe(365 / 12);
     expect(runsPerMonth(null, 'Europe/London', from)).toBe(0);
     expect(runsPerMonth('*/5 * * * *', 'Europe/London', from)).toBe(0);
+  });
+});
+
+describe('countFirings (review S11): firingsBetween’s count without stepping croner’s zone conversion through every firing', () => {
+  const DAY = 86_400_000;
+  const YEAR = 365 * DAY;
+  // why: stepping an hourly year through croner's zone conversion (the comparison side) takes over a second, so the
+  // hourly cases compare 40 days around a clock change; the others compare a whole year
+  const CASES: Array<[string, string, string, number?]> = [
+    ['0 * * * *', 'Europe/London', '2026-10-10T09:00:00.000Z', 40 * DAY],
+    ['0 * * * *', 'America/New_York', '2027-02-20T00:00:00.000Z', 40 * DAY],
+    ['30 1 * * *', 'Europe/London', '2027-01-01T00:00:00.000Z'],
+    ['0 1 * * *', 'Europe/London', '2026-10-14T09:00:00.000Z'],
+    ['15 2 * * 0', 'America/New_York', '2026-10-14T09:00:00.000Z'],
+    ['0 9-17 * * 1-5', 'Europe/London', '2026-10-14T09:00:00.000Z'],
+    ['0 6 1 * *', 'Europe/London', '2026-10-14T09:00:00.000Z'],
+    ['0 6 1,15 * 1', 'Europe/London', '2026-10-14T09:00:00.000Z'],
+    ['0 * * 1 *', 'Europe/London', '2026-10-14T09:00:00.000Z'],
+    ['45 * * * *', 'Australia/Lord_Howe', '2027-03-20T09:00:00.000Z', 40 * DAY],
+    ['0 */3 * * *', 'Asia/Kathmandu', '2026-10-14T09:00:00.000Z'],
+    ['0 0 29 2 *', 'UTC', '2026-10-14T09:00:00.000Z'],
+    ['0 5 * * 1', 'Europe/London', '2026-10-14T09:00:00.000Z'],
+  ];
+  it.each(CASES)('%s in %s from %s: the same count as stepping every firing', (expr, tz, from, span) => {
+    const f = new Date(Date.parse(from) + 1);
+    const t = new Date(Date.parse(from) + (span ?? YEAR));
+    expect(countFirings(expr, tz, f, t)).toBe(firingsBetween(expr, tz, f, t).length);
+  });
+
+  it('counts both ends inclusively, a part day and an empty or reversed range, as firingsBetween does', () => {
+    const at = (s: string) => new Date(s);
+    for (const [f, t] of [
+      ['2026-10-14T09:00:00.000Z', '2026-10-14T09:00:00.000Z'],
+      ['2026-10-14T09:00:00.001Z', '2026-10-14T11:00:00.000Z'],
+      ['2026-10-25T00:00:00.000Z', '2026-10-25T03:00:00.000Z'],
+      ['2026-10-14T12:00:00.000Z', '2026-10-14T09:00:00.000Z'],
+    ] as const)
+      expect(countFirings('0 * * * *', 'Europe/London', at(f), at(t))).toBe(
+        firingsBetween('0 * * * *', 'Europe/London', at(f), at(t)).length,
+      );
+    expect(
+      countFirings(
+        '*/5 * * * *',
+        'Europe/London',
+        at('2026-10-14T09:00:00.000Z'),
+        at('2027-10-14T09:00:00.000Z'),
+      ),
+    ).toBe(0);
+  });
+
+  it('an hourly definition sizes in under 50 ms (stepping each firing took over a second)', () => {
+    runsPerMonth('0 6 * * *', 'Europe/London', new Date('2026-10-14T09:00:00.000Z')); // the module warm, not this schedule
+    // why: CPU time, the least of five runs, so other processes and a coverage run's first pass do not count against it
+    let fastest = Number.POSITIVE_INFINITY;
+    let runs = 0;
+    for (let i = 0; i < 5; i++) {
+      const before = process.cpuUsage();
+      runs = runsPerMonth('0 * * * *', 'Europe/London', new Date('2026-10-14T09:00:00.000Z'));
+      const used = process.cpuUsage(before);
+      fastest = Math.min(fastest, (used.user + used.system) / 1000);
+    }
+    expect(fastest).toBeLessThan(50);
+    expect(runs).toBe(8759 / 12); // a year of hours, less the fall-back hour croner fires once (pinned above)
   });
 });

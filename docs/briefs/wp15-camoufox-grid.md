@@ -5,7 +5,8 @@ owner: opus
 depends_on: [14]
 spec_sections: ["§2", "§5.1", "§5.2", "§5.3", "§7", "§8.1", "§11", "§12", "§13", "§16", "§17 revision 34"]
 reviewers: [provenance-auditor, provider-integration-expert, search-strategy-reviewer, cost-and-budget-reviewer, data-model-reviewer, test-strategy-reviewer, code-architect, security-reviewer]
-status: draft
+mutate: {"@gmt/camoufox-worker": ["src/gridNames.ts", "src/gridView.ts"]}
+status: merged
 ---
 
 # WP15: Camoufox grid mode (the Dates tab's 7 × 7 date grid)

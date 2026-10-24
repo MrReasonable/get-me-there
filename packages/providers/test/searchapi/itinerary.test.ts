@@ -26,7 +26,15 @@ import {
 
 afterEach(() => assertEverySentAllowed());
 
-const deps = (k = saKit()): ItineraryDeps & { k: ReturnType<typeof saKit> } => ({
+/**
+ * why: review R43 — a chain of up to seven requests went through bottleneck's real 100 ms start-to-start spacing
+ * (ratePerMinute 600), so the file took about 12 s of wall time and a loaded runner could pass the 5 s default on a
+ * long case. These cases test the chain's rules, not the spacing (http-kit's own tests cover it), so their kit spaces
+ * starts by a millisecond; the describes also carry a 20 s budget for a slow runner.
+ */
+const NO_SPACING = { ratePerMinute: 60_000, ratePerHour: 3_600_000 } as const;
+const kitOf = (o: { budget?: FakeBudget } = {}) => saKit({ ...o, limits: NO_SPACING });
+const deps = (k = kitOf()): ItineraryDeps & { k: ReturnType<typeof saKit> } => ({
   http: k.kit,
   log: k.log,
   key: KEY,
@@ -64,7 +72,7 @@ const sellers = (r: ItinerarySearchResult) =>
   r.offers.map((o) => [o.seller, o.amountMinor, o.booking.kind, o.verified]);
 const step2Only = (r: ItinerarySearchResult) => r.offers.length > 0 && r.offers.every((o) => !o.verified);
 
-describe('itinerary outcome rules (spec §5.4), synthetic shapes', () => {
+describe('itinerary outcome rules (spec §5.4), synthetic shapes', { timeout: 20_000 }, () => {
   it('step 1 zero options → coverage empty, one call (synthetic)', async () => {
     chain(flightsBody([]), {});
     const d = deps();
@@ -313,7 +321,7 @@ describe('itinerary outcome rules (spec §5.4), synthetic shapes', () => {
   });
 });
 
-describe('errors that propagate (spec §5.4 rev 12, plan decision 17), synthetic', () => {
+describe('errors that propagate (spec §5.4 rev 12, plan decision 17), synthetic', { timeout: 20_000 }, () => {
   it.each([
     ['a header-less 429', { status: 429, body: null }, 'rate-limit'],
     ['a 401', { status: 401, body: { error: 'Invalid API key.' } }, 'auth'],
@@ -385,14 +393,16 @@ describe('errors that propagate (spec §5.4 rev 12, plan decision 17), synthetic
         budget.reserveCalls === refuseAt
           ? new BudgetExceeded({ scope: 'execution-calls', cap: 1, current: 1, requested: 1 })
           : null;
-      const d = deps(saKit({ budget }));
+      const d = deps(kitOf({ budget }));
       await expect(searchItinerary(d, q1, ctx())).rejects.toBeInstanceOf(BudgetExceeded);
       expect(sentUrls(d.k.events)).toHaveLength(refuseAt - 1);
     }
   });
 });
 
-describe('a chain stopped by budget or cancel keeps what it paid for (plan decision 24, CBR-05), synthetic', () => {
+describe('a chain stopped by budget or cancel keeps what it paid for (plan decision 24, CBR-05), synthetic', {
+  timeout: 20_000,
+}, () => {
   const step2 = {
     dA: ok(
       flightsBody([option(IN_1, 600, { booking_token: 'b1' }), option(IN_2, 650, { booking_token: 'b2' })]),
@@ -412,7 +422,7 @@ describe('a chain stopped by budget or cancel keeps what it paid for (plan decis
             providerId: p.providerId,
           })
         : null;
-    const d = deps(saKit({ budget }));
+    const d = deps(kitOf({ budget }));
     const res = await searchItinerary(d, q1, ctx());
     expect(res).toMatchObject({ coverage: 'priced', partial: true, failedExpansions: 0 });
     expect(sellers(res)).toEqual([
@@ -434,7 +444,7 @@ describe('a chain stopped by budget or cancel keeps what it paid for (plan decis
       budget.reserveCalls === 4
         ? new BudgetExceeded({ scope: 'provider-month', cap: 3, current: 3, requested: 1 })
         : null;
-    const res = await searchItinerary(deps(saKit({ budget })), CELL_QUERY, ctx());
+    const res = await searchItinerary(deps(kitOf({ budget })), CELL_QUERY, ctx());
     expect(res.partial).toBe(true);
     expect(
       res.offers.map((o) => [o.amountMinor, o.verified]).sort(([a], [b]) => Number(a) - Number(b)),
@@ -457,7 +467,7 @@ describe('a chain stopped by budget or cancel keeps what it paid for (plan decis
         return super.reserve(p);
       }
     })([]);
-    const d = deps(saKit({ budget }));
+    const d = deps(kitOf({ budget }));
     const res = await searchItinerary(d, q1, ctx(ac.signal));
     expect(res.partial).toBe(true);
     expect(res.notes).toContain('chain-stopped-abort:1');
@@ -473,7 +483,7 @@ describe('a chain stopped by budget or cancel keeps what it paid for (plan decis
   });
 });
 
-describe('step 3 and the price-source rule (spec §5.4), synthetic shapes', () => {
+describe('step 3 and the price-source rule (spec §5.4), synthetic shapes', { timeout: 20_000 }, () => {
   it('every priced step-2 return option is its own offer; step 3 runs only for the cheapest (synthetic)', async () => {
     chain(
       flightsBody([A]),
@@ -719,7 +729,9 @@ describe('step 3 and the price-source rule (spec §5.4), synthetic shapes', () =
   });
 });
 
-describe('currency, money and route history (spec §2, §6.3, plan decisions 24–25), synthetic', () => {
+describe('currency, money and route history (spec §2, §6.3, plan decisions 24–25), synthetic', {
+  timeout: 20_000,
+}, () => {
   it('a step-1 response that states no currency → parse (synthetic)', async () => {
     chain({ best_flights: [A] }, {});
     await expect(searchItinerary(deps(), CELL_QUERY, ctx())).rejects.toMatchObject({
@@ -895,7 +907,7 @@ describe('currency, money and route history (spec §2, §6.3, plan decisions 24�
   });
 });
 
-describe('estimateItinerary (spec §5.4, §12; ruling po-006)', () => {
+describe('estimateItinerary (spec §5.4, §12; ruling po-006)', { timeout: 20_000 }, () => {
   it('calls = 1 + expandTop × 2, priced at the configured per-call cost, 29 s per call', () => {
     expect(estimateItinerary(CELL_QUERY, 1234)).toMatchObject({
       calls: 5,

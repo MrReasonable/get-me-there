@@ -5,7 +5,8 @@ owner: sonnet
 depends_on: [9]
 spec_sections: ["§11 View B", "§11 View C", "§11 History", "§11 Accessibility", "§8.1 Staleness per price", "§3", "§10", "§9 item 6", "§5.5"]
 reviewers: [code-architect, test-strategy-reviewer, ui-reviewer, persona-flexible-traveller, provenance-auditor, product-owner]
-status: draft
+mutate: {}
+status: merged
 ---
 
 # WP10 — web: Calendar (View B), Duration (View C), History, Playwright smoke

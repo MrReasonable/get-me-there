@@ -29,7 +29,13 @@ export {
 export { buildNotifiers } from './notifiers/index.js';
 export { LogNotifier } from './notifiers/log.js';
 export { renderOperatorMessage } from './notifiers/operatorTemplates.js';
+export {
+  type BrowserWindowSetting,
+  loadsBrowserPages,
+  resumeLeavesBrowserCells,
+} from './scheduler/browserWindow.js';
 export { parseCron } from './scheduler/parseCron.js';
+export { windowSetting } from './stages/browserGate.js';
 export {
   type Confirmation,
   type ConfirmationContext,

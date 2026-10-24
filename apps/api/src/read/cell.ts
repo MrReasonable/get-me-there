@@ -28,6 +28,8 @@ export function assembleCellDetail(
   return {
     cell: withNights(target),
     outcomes: loaded.all.flatMap((e) => ports.repos.cells.outcomes(e.id, { cells: [target] })),
+    browserLeftFor: engine.browserLeftFor(def),
+    latestExecutionId: loaded.latestParent?.id ?? null,
     calendarPrices: loaded.calendar.filter(onCell).flatMap((r) =>
       r.calendarPriceId === null
         ? []

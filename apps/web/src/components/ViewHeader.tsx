@@ -1,3 +1,4 @@
+import { SKIP_CODE_TEXT } from '@gmt/core';
 import type { ExecutionSummary } from '../api/types.js';
 import { COPY } from '../copy.js';
 import { formatRunInstant } from '../format.js';
@@ -15,11 +16,22 @@ export interface ViewHeaderProps {
 }
 
 /** The fields of an ExecutionSummary the header names. */
-export type HeaderRun = Pick<ExecutionSummary, 'id' | 'status' | 'isChild' | 'startedAt' | 'ageHours'>;
+export type HeaderRun = Pick<
+  ExecutionSummary,
+  'id' | 'status' | 'isChild' | 'startedAt' | 'ageHours' | 'scheduledFor' | 'skipCode'
+>;
 
-/** A run with no start has no age to give: it says "not started yet" (review prov-r2-011). */
+/**
+ * A run with no start has no age to give: it says "not started yet" (review prov-r2-011), or, for a scheduled row that
+ * never started (a skip), the firing it stands for and, for a missed firing, the reason recorded with it (review R17).
+ */
 function itemText(e: HeaderRun): string {
-  const status = COPY.statusName[e.status];
+  const status =
+    e.skipCode === null
+      ? COPY.statusName[e.status]
+      : COPY.skippedWhy(COPY.statusName[e.status], SKIP_CODE_TEXT[e.skipCode]);
+  if (e.startedAt === null && !e.isChild && e.scheduledFor !== null)
+    return COPY.firingNotStarted(formatRunInstant(e.scheduledFor), status);
   if (e.startedAt === null)
     return e.isChild ? COPY.childExecutionNotStarted(status) : COPY.executionNotStarted(status);
   const make = e.isChild ? COPY.childExecutionItem : COPY.executionItem;

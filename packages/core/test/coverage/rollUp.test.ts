@@ -5,6 +5,7 @@ import {
   isPriceUnconfirmed,
   mergeWithinProvider,
   rollUp,
+  SKIP_RANK,
 } from '../../src/coverage/rollUp.js';
 import type { CellOutcome, CellOutcomeStatus, RollUp, SkipReason } from '../../src/types/execution.js';
 import { asIsoDateTime } from '../../src/types/ids.js';
@@ -56,9 +57,11 @@ function oracle(all: readonly O[]): RollUp {
       ? 'provider_disabled'
       : rs.includes('provider_unavailable')
         ? 'provider_unavailable'
-        : rs.includes('departed')
-          ? 'departed'
-          : 'not_selected';
+        : rs.includes('scheduled_only')
+          ? 'scheduled_only'
+          : rs.includes('departed')
+            ? 'departed'
+            : 'not_selected';
   return { status: 'skipped', reason, minPence: null };
 }
 
@@ -75,9 +78,28 @@ const VARIANTS: O[] = [
   skipped('budget'),
   skipped('provider_disabled'),
   skipped('provider_unavailable'),
+  skipped('scheduled_only'),
   skipped('departed'),
   skipped('not_selected'),
 ];
+
+describe('SKIP_RANK (spec §6.6 row 6)', () => {
+  it('ranks every skip reason once, in the spec order budget > provider_disabled > provider_unavailable > scheduled_only > departed > not_selected', () => {
+    // why: Record<SkipReason, number> makes the compiler name every reason; this pins the order and that no rank repeats
+    const order = Object.entries(SKIP_RANK)
+      .sort((a, b) => a[1] - b[1])
+      .map(([r]) => r);
+    expect(order).toEqual([
+      'budget',
+      'provider_disabled',
+      'provider_unavailable',
+      'scheduled_only',
+      'departed',
+      'not_selected',
+    ]);
+    expect(new Set(Object.values(SKIP_RANK)).size).toBe(order.length);
+  });
+});
 
 describe('rollUp precedence (spec §6.6)', () => {
   it.each([
@@ -131,6 +153,16 @@ describe('rollUp precedence (spec §6.6)', () => {
       'row 6: provider_unavailable over departed',
       [skipped('departed'), skipped('provider_unavailable')],
       { status: 'skipped', reason: 'provider_unavailable', minPence: null },
+    ],
+    [
+      'row 6: provider_unavailable over scheduled_only (spec §6.6 row 6, rev 36)',
+      [skipped('scheduled_only'), skipped('provider_unavailable')],
+      { status: 'skipped', reason: 'provider_unavailable', minPence: null },
+    ],
+    [
+      'row 6: scheduled_only over departed (spec §6.6 row 6, rev 36)',
+      [skipped('departed'), skipped('scheduled_only'), skipped('not_selected')],
+      { status: 'skipped', reason: 'scheduled_only', minPence: null },
     ],
     [
       'row 6: departed over not_selected',
@@ -227,7 +259,7 @@ describe('rollUp precedence (spec §6.6)', () => {
     });
   });
 
-  it('matches the independent oracle on every sequence of up to three outcomes (2,955 cases)', () => {
+  it('matches the independent oracle on every sequence of up to three outcomes (3,616 cases)', () => {
     let cases = 0;
     const walk = (prefix: O[]) => {
       expect(rollUp(prefix), JSON.stringify(prefix.map((x) => [x.status, x.reason]))).toEqual(oracle(prefix));
@@ -235,7 +267,7 @@ describe('rollUp precedence (spec §6.6)', () => {
       if (prefix.length < 3) for (const v of VARIANTS) walk([...prefix, v]);
     };
     walk([]);
-    expect(cases).toBe(1 + 14 + 196 + 2744);
+    expect(cases).toBe(1 + 15 + 225 + 3375);
   });
 
   const arbOutcome: fc.Arbitrary<O> = fc.oneof(
@@ -253,6 +285,7 @@ describe('rollUp precedence (spec §6.6)', () => {
         'budget',
         'provider_disabled',
         'provider_unavailable',
+        'scheduled_only',
         'departed',
         'not_selected',
       )

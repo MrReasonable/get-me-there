@@ -225,6 +225,84 @@ describe('View D (spec §11, §6.6)', () => {
     expect(screen.getByText('No errors.')).toBeInTheDocument();
   });
 
+  it('says why the browser provider left cells for the next scheduled run, in each detail’s own text (spec §3 rev 36)', async () => {
+    server.use(
+      http.get(`${API}/definitions/:id/coverage`, () =>
+        HttpResponse.json(
+          coverageResponse({
+            scheduledOnly: [
+              { stage: 'discovery', providerId: 'camoufox', detail: 'catch-up-no-browser', cells: 1 },
+              { stage: 'discovery', providerId: 'camoufox', detail: 'outside-browser-window', cells: 12 },
+            ],
+          }),
+        ),
+      ),
+    );
+    render();
+    const list = await screen.findByRole('list', { name: 'Left for the next scheduled run' });
+    expect(
+      within(list)
+        .getAllByRole('listitem')
+        .map((li) => li.textContent),
+    ).toEqual([
+      `${COPY.provider.camoufox} (${COPY.stageName.discovery}): 1 cell left: a catch-up loads no browser pages`,
+      `${COPY.provider.camoufox} (${COPY.stageName.discovery}): 12 cells left: outside this run's browser window`,
+    ]);
+  });
+
+  it.each([
+    ['next-run', 'Left for your next run of this search'],
+    ['no-longer-used', 'Not fetched: this search no longer uses the browser provider'],
+  ] as const)(
+    'the list is headed by who fetches the cells as the api reads it now (%s; R12, S6)',
+    async (leftFor, heading) => {
+      server.use(
+        http.get(`${API}/definitions/:id/coverage`, () =>
+          HttpResponse.json(
+            coverageResponse({
+              scheduledOnly: [
+                { stage: 'discovery', providerId: 'camoufox', detail: 'outside-browser-window', cells: 3 },
+              ],
+              browserLeftFor: leftFor,
+            }),
+          ),
+        ),
+      );
+      render();
+      expect(await screen.findByRole('list', { name: heading })).toBeInTheDocument();
+      expect(screen.queryByRole('list', { name: 'Left for the next scheduled run' })).toBeNull();
+    },
+  );
+
+  it('S8: a skipped firing as the latest run: the header names its firing and why it was not caught up, as History does', async () => {
+    server.use(
+      http.get(`${API}/executions/:id`, () =>
+        HttpResponse.json(
+          execution({
+            status: 'skipped_missed',
+            startedAt: null,
+            finishedAt: '2027-03-07T05:30:00.000Z',
+            trigger: 'schedule',
+            scheduledFor: '2027-03-01T06:00:00.000Z',
+            skipCode: 'half-cadence',
+          }),
+        ),
+      ),
+    );
+    render();
+    expect(
+      await screen.findByText(
+        'showing run scheduled for 1 Mar 2027 06:00 Europe/London (skipped: missed and not caught up: the next scheduled run was less than half the gap away)',
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it('shows no scheduled-run list when no cell was left for it', async () => {
+    render();
+    await screen.findByRole('table', { name: 'Coverage' });
+    expect(screen.queryByRole('list', { name: 'Left for the next scheduled run' })).toBeNull();
+  });
+
   it('maps both selected-but-not-reached reasons to words', async () => {
     const base = coverageResponse();
     const first = base.selectedNotReached[0];

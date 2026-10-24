@@ -50,11 +50,11 @@ APP_BASIC_AUTH_PASS=CHANGE-ME
 That is the whole `.env` for £0. Then:
 
 ```bash
-docker compose up -d --build --wait --wait-timeout 120
+docker compose up -d --build --wait --wait-timeout 240
 docker compose ps                     # "healthy"
 ```
 
-If it has not reported healthy after 2 minutes, run docker compose logs app: a configuration
+If it has not reported healthy after 4 minutes, run docker compose logs app: a configuration
 refusal (exit 78) names what to fix and restarts until you do. If the log shows the app still
 starting (a lock wait or the first airport seeding), `docker compose ps` turns `healthy` within
 the 4-minute start period.
@@ -335,7 +335,7 @@ rsync -a /var/backups/get-me-there/ backup-host:get-me-there/
      done && mv restore.db get-me-there.db'
    ```
 
-4. Start and check: `docker compose up -d --wait --wait-timeout 120`, then `curl -fsS http://127.0.0.1:3000/api/health`.
+4. Start and check: `docker compose up -d --wait --wait-timeout 240`, then `curl -fsS http://127.0.0.1:3000/api/health`.
    Delete the `*.pre-restore` files once you are satisfied.
 5. Restoring resets month-to-date spend: ledger rows written after the backup are gone. Lower
    the caps and reconcile with the vendor dashboard before the next run, as described in
@@ -409,10 +409,10 @@ for any change to a provider adapter or the engine: run it before merging such a
   clone started with plain `docker compose up` replaces the running container and migrates your real data. To
   try another checkout without touching it, give it its own project name, and so its own volume. Both
   projects publish `127.0.0.1:3000`, so stop your app first (`docker compose stop` in your own checkout),
-  then in the other checkout run `docker compose -p gmt-trial up -d --build --wait --wait-timeout 120`.
+  then in the other checkout run `docker compose -p gmt-trial up -d --build --wait --wait-timeout 240`.
   Afterwards remove it with `docker compose -p gmt-trial down -v`, which removes only the `gmt-trial`
   volume, and start your app again from your own checkout with
-  `docker compose up -d --build --wait --wait-timeout 120`. Keep `--build`: both checkouts tag their image
+  `docker compose up -d --build --wait --wait-timeout 240`. Keep `--build`: both checkouts tag their image
   `get-me-there:local`, so without it your app would start on the trial checkout's code.
 - **One user.** Run every command against the database as the app's user, which
   `docker compose exec app …` and `docker compose run app …` do by default (`node`). Never add
@@ -465,13 +465,13 @@ migrations and the first airport seeding.
 - **Logs.** The app writes one JSON object a line; compose keeps 5 files of 10 MB. To follow
   one run: `docker compose logs --no-log-prefix app | jq -R 'fromjson? | select(.executionId == "<id>")'`.
 - **Upgrade.** Back up first (section 6), then from your checkout: `git pull`,
-  `docker compose up -d --build --wait --wait-timeout 120`. When the new version brings schema migrations, the app
+  `docker compose up -d --build --wait --wait-timeout 240`. When the new version brings schema migrations, the app
   backs the database up again before applying them and logs `backup before N migration(s):
   <file>`. That file is the one a rollback needs and it sits on the volume, where newer backups
   prune it: once the log shows that line, run the cron command of section 6 once by hand (or
   `docker compose cp` that file out) so a copy exists off the volume.
 - **Roll back a failed upgrade.** Check out the previous version, restore the backup the log
-  named (section 6, Restore), and run `docker compose up -d --build --wait --wait-timeout 120`. An older version
+  named (section 6, Restore), and run `docker compose up -d --build --wait --wait-timeout 240`. An older version
   cannot use a database a newer one has migrated, so the restore is required.
 - **Base image updates.** The `Dockerfile` pins `node:22-slim` by digest, so security fixes to
   Node and Debian arrive only when the pin moves. Once a month, run

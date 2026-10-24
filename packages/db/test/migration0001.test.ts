@@ -47,6 +47,7 @@ describe('migration 0001: search_definitions.confirmed_calls (decision 37)', () 
       '0004_route_history_point_of_sale',
       '0005_camoufox_provider',
       '0006_grid_return_source',
+      '0007_catch_up',
     ]);
     expect(applyMigrations(db, MIGRATIONS_DIR)).toEqual({
       applied: [
@@ -56,6 +57,7 @@ describe('migration 0001: search_definitions.confirmed_calls (decision 37)', () 
         '0004_route_history_point_of_sale',
         '0005_camoufox_provider',
         '0006_grid_return_source',
+        '0007_catch_up',
       ],
     });
     expect(new DefinitionsRepo(db, fixedClock(T0)).get(created.id)).toEqual({

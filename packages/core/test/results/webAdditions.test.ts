@@ -59,11 +59,36 @@ describe('the execution summary carries the run own expandTop (decision 42)', ()
       finishedAt: null,
       ageHours: 2,
       expandTop: 2,
+      scheduledFor: null,
+      isCatchUp: false,
+      skipCode: null,
     };
     expect(executionSummarySchema.parse(s).expandTop).toBe(2);
     const { expandTop: _drop, ...bare } = s;
     expect(executionSummarySchema.safeParse(bare).success).toBe(false);
     expect(executionSummarySchema.safeParse({ ...s, expandTop: 0 }).success).toBe(false);
+  });
+  it('names the firing a scheduled row stands for, whether it was a catch-up, and a skip code (spec §8.2 rev 36, review R17)', () => {
+    const s = {
+      id: 'e',
+      status: 'skipped_missed',
+      isChild: false,
+      startedAt: null,
+      finishedAt: null,
+      ageHours: 2,
+      expandTop: 2,
+      scheduledFor: '2027-03-01T06:00:00.000Z',
+      isCatchUp: false,
+      skipCode: 'half-cadence',
+    };
+    expect(executionSummarySchema.parse(s)).toMatchObject({
+      scheduledFor: '2027-03-01T06:00:00.000Z',
+      skipCode: 'half-cadence',
+    });
+    const { skipCode: _code, ...bare } = s;
+    expect(executionSummarySchema.safeParse(bare).success).toBe(false);
+    expect(executionSummarySchema.safeParse({ ...s, scheduledFor: '2027-03-01' }).success).toBe(false);
+    expect(executionSummarySchema.safeParse({ ...s, skipCode: 'asleep' }).success).toBe(false);
   });
 });
 

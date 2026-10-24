@@ -38,7 +38,7 @@ export const cell = (o: string, d: string, dep: string, ret: string): CellKey =>
 });
 const withNights = (c: CellKey) => ({ ...c, nights: daysBetween(c.departureDate, c.returnDate) });
 
-function snapshotOf(def: SearchDefinition, resolvedAt: IsoDateTime): DefinitionSnapshot {
+export function snapshotOf(def: SearchDefinition, resolvedAt: IsoDateTime): DefinitionSnapshot {
   const w = resolveWindow(def.window, londonDateOf(resolvedAt));
   return {
     ...def,

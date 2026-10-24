@@ -249,6 +249,9 @@ export const COPY = {
   childExecutionItem: (started: string, status: string, age: string) =>
     `itinerary search for one cell, started ${started} (${status}, ${age})`,
   executionNotStarted: (status: string) => `run not started yet (${status})`,
+  // why: spec §8.2 rev 36 (review R17) — a scheduled row that never started names its firing and why
+  firingNotStarted: (firing: string, status: string) => `run scheduled for ${firing} (${status})`,
+  skippedWhy: (status: string, why: string) => `${status}: ${why}`,
   childExecutionNotStarted: (status: string) => `itinerary search for one cell, not started yet (${status})`,
   // why: UI-010: "run" means a parent run everywhere; on-demand searches are counted apart.
   spanExecutions: (runs: number, onDemand: number) =>
@@ -266,7 +269,7 @@ export const COPY = {
     skipped_budget: 'skipped: over budget',
     skipped_confirm: 'skipped: cost not confirmed',
     skipped_window: 'skipped: window has no dates',
-    skipped_missed: 'skipped: missed while the app was stopped',
+    skipped_missed: 'skipped: missed and not caught up',
   } satisfies Record<ExecutionStatus, string>,
   stageName: { discovery: 'discovery', verification: 'itinerary search' } satisfies Record<Stage, string>,
 
@@ -404,6 +407,11 @@ export const COPY = {
   reasonNotRun: 'not searched',
   reasonBudget: 'skipped: budget',
   noneSelectedNotReached: 'Every selected cell was reached.',
+  // why: spec §3, §8.2 rev 36 — the browser provider's cells a run left, with core's text: who fetches them (the api's
+  // browserLeftFor, review R12, S6) and why they were left
+  scheduledOnlyHeading: (leftFor: string) => `${leftFor.charAt(0).toUpperCase()}${leftFor.slice(1)}`,
+  scheduledOnlyRow: (provider: string, stage: string, n: number, why: string) =>
+    `${provider} (${stage}): ${n} ${n === 1 ? 'cell' : 'cells'} left: ${why}`,
   overrunFlag: 'Overrun: ledger calls exceed the plan by more than 10%.',
   // why: cost-008: discovery is planned in tiles and a paged tile is one tile (decision 43), so its flag says tiles.
   overrunFlagTiles: 'Overrun: tiles requested exceed the plan by more than 10%.',
@@ -718,6 +726,9 @@ export const COPY = {
         budget: 'stopped: a budget cap was reached',
         provider_disabled: 'provider disabled',
         provider_unavailable: 'browser worker not reachable',
+        // why: spec §3 rev 36 — the panel shows core's scheduledOnlyText for the stored detail; this is the word for a
+        // row that has none, which names no run because it cannot know which one fetches it
+        scheduled_only: 'left for a later run',
         departed: 'departure date has passed',
         'cabin-not-offered': "the provider does not offer this definition's cabin",
         auth: 'the provider refused the credentials',
@@ -800,6 +811,8 @@ export const COPY = {
     coloursRepeat: (lines: number, colours: number) =>
       `${lines} series share ${colours} ${noun(colours, 'colour', 'colours')}: tell them apart by the legend name and line style`,
     xAxisFetched: 'fetched (Europe/London)',
+    // why: spec §8.2 rev 36 — a catch-up's prices keep their own fetch time; the run says which firing it stood for
+    catchUpRun: (ran: string, missed: string) => `ran ${ran}, catch-up for ${missed}`,
     yAxis: 'price (GBP)',
     // why: ruling 6: SearchApi's price_insights series is the vendor's history for the one searched trip, not the route.
     routeChartTitle: 'Vendor price history for a searched trip (indicative): price by date',

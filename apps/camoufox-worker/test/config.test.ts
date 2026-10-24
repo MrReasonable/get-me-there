@@ -1,3 +1,4 @@
+import { effectiveSharedSettings } from '@gmt/core';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { loadWorkerConfig, WorkerConfigError } from '../src/config.js';
 
@@ -101,7 +102,59 @@ describe('worker config (brief Task 14.5; spec §12 worker side)', () => {
     ]);
     expect(fields({ ...ENV, CAMOUFOX_GRID_SCROLL_CAP: '61' })).toEqual(['CAMOUFOX_GRID_SCROLL_CAP']);
   });
+  it('reads the monthly page and scroll caps and the billing day with the app’s defaults (1500, 6000, 1; decision 82)', () => {
+    expect(loadWorkerConfig(ENV)).toMatchObject({
+      monthlyPageCap: 1500,
+      monthlyScrollCap: 6000,
+      billingDay: 1,
+    });
+    expect(
+      loadWorkerConfig({
+        ...ENV,
+        CAMOUFOX_MONTHLY_PAGE_CAP: '900',
+        CAMOUFOX_MONTHLY_SCROLL_CAP: '0',
+        CAMOUFOX_BILLING_DAY: '28',
+      }),
+    ).toMatchObject({ monthlyPageCap: 900, monthlyScrollCap: 0, billingDay: 28 });
+    for (const [name, value] of [
+      ['CAMOUFOX_MONTHLY_PAGE_CAP', '-1'],
+      ['CAMOUFOX_MONTHLY_SCROLL_CAP', 'many'],
+      ['CAMOUFOX_BILLING_DAY', '29'],
+      ['CAMOUFOX_BILLING_DAY', '0'],
+    ] as const)
+      expect(fields({ ...ENV, [name]: value }), `${name}=${value}`).toEqual([name]);
+  });
+  it('states its effective shared settings through core’s effectiveSharedSettings (spec §12): defaults applied, integers decimal', () => {
+    expect(loadWorkerConfig(ENV).sharedSettings).toEqual(effectiveSharedSettings({}));
+    expect(
+      loadWorkerConfig({ ...ENV, CAMOUFOX_COOLDOWN_HOURS: '072', CAMOUFOX_MODE: 'grid', POINT_OF_SALE: 'US' })
+        .sharedSettings,
+    ).toEqual(
+      effectiveSharedSettings({ CAMOUFOX_COOLDOWN_HOURS: '72', CAMOUFOX_MODE: 'grid', POINT_OF_SALE: 'US' }),
+    );
+  });
   it('a missing key refuses', () => {
     expect(fields({ HOME: '/h' })).toEqual(['CAMOUFOX_WORKER_KEY']);
+  });
+  it('R27: every typed shared field comes from the one record, so the worker refuses and defaults exactly as the app does', () => {
+    const c = loadWorkerConfig({
+      ...ENV,
+      CAMOUFOX_COOLDOWN_HOURS: '0072',
+      CAMOUFOX_MODE: 'grid',
+      CAMOUFOX_GRID_SCROLL_CAP: '012',
+      CAMOUFOX_BILLING_DAY: '15',
+    });
+    expect([c.cooldownHours, c.mode, c.gridScrollCap, c.billingDay, c.pointOfSale]).toEqual([
+      72,
+      'grid',
+      12,
+      15,
+      'GB',
+    ]);
+    for (const [name, value] of [
+      ['CAMOUFOX_PAGE_TIMEOUT_SECONDS', '3e1'],
+      ['CAMOUFOX_COOLDOWN_HOURS', '100001'],
+    ] as const)
+      expect(fields({ ...ENV, [name]: value }), `${name}=${value}`).toEqual([name]);
   });
 });

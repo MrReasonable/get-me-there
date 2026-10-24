@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { SHARED_WORKER_DEFAULTS } from '../../src/camoufox/settings.js';
 import { CAMOUFOX_WORKER_HOSTS, camoufoxWorkerUrlOk, parseConfig } from '../../src/config/schema.js';
 
 const realpath = (p: string) => p;
@@ -25,6 +26,52 @@ function errors(env: Record<string, string | undefined>) {
   if (r.ok) throw new Error('expected failure');
   return r.errors.map((e) => e.field);
 }
+
+describe('the app’s effective shared settings (spec §12, WP16a)', () => {
+  it('defaults when no line is set, and the decimal form of what is set', () => {
+    expect(ok(ON).providers.camoufox?.sharedSettings).toEqual(SHARED_WORKER_DEFAULTS);
+    expect(
+      ok({ ...ON, CAMOUFOX_COOLDOWN_HOURS: '030', CAMOUFOX_MODE: 'grid', POINT_OF_SALE: 'US' }).providers
+        .camoufox?.sharedSettings,
+    ).toEqual({
+      ...SHARED_WORKER_DEFAULTS,
+      CAMOUFOX_COOLDOWN_HOURS: '30',
+      CAMOUFOX_MODE: 'grid',
+      POINT_OF_SALE: 'US',
+    });
+  });
+  it('a value the shared rule refuses fails boot naming the field, once, even where the field’s own reader took it', () => {
+    expect(errors({ ...ON, CAMOUFOX_COOLDOWN_HOURS: '+30' })).toEqual(['CAMOUFOX_COOLDOWN_HOURS']);
+    expect(errors({ ...ON, POINT_OF_SALE: 'gb' })).toEqual(['POINT_OF_SALE']);
+  });
+  it('R27: the typed fields come from the one record (no second reader, no second default), and one bound holds everywhere', () => {
+    const c = ok({
+      ...ON,
+      CAMOUFOX_COOLDOWN_HOURS: '0072',
+      CAMOUFOX_MONTHLY_PAGE_CAP: '900',
+      CAMOUFOX_BILLING_DAY: '15',
+      CAMOUFOX_MODE: 'grid',
+      POINT_OF_SALE: 'US',
+    });
+    expect([
+      c.providers.camoufox?.cooldownHours,
+      c.providers.camoufox?.limits.monthlyCallCap,
+      c.providers.camoufox?.limits.billingDay,
+      c.providers.camoufox?.mode,
+      c.pointOfSale,
+    ]).toEqual([72, 900, 15, 'grid', 'US']);
+    // the worker's bound, now the app's too; and still checked with camoufox off
+    expect(errors({ ...ON, CAMOUFOX_COOLDOWN_HOURS: '100001' })).toEqual(['CAMOUFOX_COOLDOWN_HOURS']);
+    expect(errors({ ...minimal, CAMOUFOX_COOLDOWN_HOURS: '100001' })).toEqual(['CAMOUFOX_COOLDOWN_HOURS']);
+    const r = parseConfig({ ...minimal, CAMOUFOX_PAGE_TIMEOUT_SECONDS: '3e1' }, { realpath });
+    expect(r.ok ? [] : r.errors).toEqual([
+      {
+        field: 'CAMOUFOX_PAGE_TIMEOUT_SECONDS',
+        message: 'CAMOUFOX_PAGE_TIMEOUT_SECONDS must be a whole number from 30 to 240',
+      },
+    ]);
+  });
+});
 
 describe('CAMOUFOX_* (spec §12 rev 32)', () => {
   it('off by default: no camoufox provider', () => {
