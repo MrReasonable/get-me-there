@@ -436,7 +436,7 @@ allowlist), `packages/core/src/api-contract/executions.ts`, `packages/providers/
   name, in list and grid mode; a worker status without `sharedSettings` falls back to today's grid-only comparison. A
   `worker.env` with no monthly-cap and no billing-day lines (the operator's current file's shape) beside an app
   config with none passes the preflight in list and in grid mode. The adapter sends `APP_INSTANCE_HEADER`: the database's
-  `app_meta.app_instance_id`, a random id kept with the database's absolute path (`MetaRepo.appInstanceId`, migration
+  `app_meta.app_instance_id`, a random id kept with the database's canonical path (realpathed by `MetaRepo` itself) (`MetaRepo.appInstanceId`, migration
   0007), so a container recreate or a host rename is still one app and a database opened at another path is a second.
 - [ ] **Implement; commit.**
 

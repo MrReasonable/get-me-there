@@ -1658,7 +1658,10 @@ are `toISOString()` text; booleans are integers 0/1.
 - `app_meta` (key PRIMARY KEY, value; migration 0007): facts about the
   database itself, one row per known key. `app_instance_id` is a random id
   the app writes the first time it needs it, kept with `app_instance_path`,
-  the database file's absolute path when the id was made, and sends the
+  the database file's canonical path when the id was made (worked out by
+  the repository itself, symlinks followed and the letter case the volume
+  holds, so every opener agrees; read and written in one immediate
+  transaction), and sends the
   `camoufox` worker as `x-gmt-app-instance` (decision 82). Opened at that
   path again (a restart, a container recreate, whose path is always
   `/data/…`, a host rename) it is the same app; opened at another path (a
@@ -1886,7 +1889,8 @@ any paused catch-up (the scheduled firing replaces it and starts with
 it** (through the compare-and-set); else if any execution is active, record
 nothing and show "schedule blocked since <date>" in the status bar (cleared
 when a run of the definition starts, by a tick, a catch-up or by hand, or
-once the blocking run is no longer active); else
+once the blocking run is no longer active; the date is the blocking run's
+own, so another run blocking later starts a new one); else
 run the pre-start checks and start. A `paused_error` with no `resume_after`
 (every provider disabled) blocks the schedule until a manual resume or the
 supersede above. The definition's own `croner` job is the live tick.
@@ -1929,7 +1933,9 @@ since its `paused_at` to this decision, past the grace at once and inside it
 once the grace has passed (the resume is re-registered just after), and
 resumes only if the catch-up is still paused afterwards; so the outcome is
 decided from stored facts, whichever timer fires first after a wake, and
-only a manual resume can carry a paused catch-up across a firing. Otherwise it is
+only a manual resume can carry a paused catch-up across a firing. A throw
+while deciding is logged with the run and the resume goes ahead, so one
+run can never stop the boot; once the engine is closing nothing resumes. Otherwise it is
 judged against the catch-up's own provider set, which never loads browser
 pages: when `camoufox` is the only discovery provider that could run the
 definition on a schedule (a provider that does not sell its cabin cannot), the firing is recorded as `skipped_missed` with
@@ -1963,7 +1969,10 @@ such as a minute job sending its notice, at most the SMTP connection and
 greeting timeouts plus 2 s (22 s, under the app's 25 s shutdown deadline);
 then hands the database back. A callback still running past the wait
 writes nothing more: a notice it sends late is logged once and its row is
-not written, and a system job's network call is aborted. A catch-up keeps the `camoufox` provider in
+not written, a skip disables no schedule, and a system job's network call
+is aborted. The app marks the engine closed before it closes the database
+in every case, so a shutdown cut off by the app's 25 s deadline is no
+exception. A catch-up keeps the `camoufox` provider in
 its snapshot for the reuse step only: reuse copies camoufox's own outcomes
 that are still inside the refresh window with no page load, and its other
 cells are seeded `skipped` with the reason `scheduled_only` and the detail
