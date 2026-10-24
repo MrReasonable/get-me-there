@@ -1,10 +1,191 @@
 # Setup
 
-This gets one container running on a machine you control, reachable only by you, with a
-daily backup. Everything below uses the worked example London → New York; put your own
-airports in the Definitions form, never in a file of this repository.
+There are two ways to run get-me-there, and each section below says which it applies to:
+
+- **Native (the default on your own Mac or Linux machine):** `pnpm gmt setup` installs the app
+  as a user service. Section 0 is the whole path.
+- **The container (a VPS, or Docker Desktop on a Mac):** one container with a named volume.
+  Sections 1 to 13 describe it; [`local-quickstart.md`](local-quickstart.md) and the root
+  `Start.command` are the Docker Desktop shortcut on a Mac.
+
+Everything below uses the worked example London → New York; put your own airports in the
+Definitions form, never in a file of this repository.
+
+## 0. Quick start (macOS and Linux)
+
+*Applies to: the native path.* On a VPS, use the container path below (sections 1 to 13); for
+Docker Desktop on a Mac, see [`local-quickstart.md`](local-quickstart.md) and `Start.command`.
+
+You need Node 22.18 or later, git, and on Linux a systemd user session. In a terminal on the
+machine itself:
+
+```bash
+git clone https://github.com/MrReasonable/get-me-there.git
+cd get-me-there
+corepack enable
+pnpm install
+pnpm gmt setup
+```
+
+Where Node's own directory is not writable (a system package), run
+`corepack enable --install-directory ~/.local/bin` instead and add `~/.local/bin` to `PATH`.
+Setup checks everything it needs before it writes anything, and names the fix for anything
+missing.
+
+### The questions
+
+Pressing Enter at every question gives a running app with no price source.
+
+| # | Question | Default (Enter) | What it means |
+|---|---|---|---|
+| 1 | Port | 3000, or the next free one | The app listens on this machine only (127.0.0.1). |
+| 2 | Time zone for schedules | the machine’s | Scheduled searches fire in this zone. |
+| 3 | Market (POINT_OF_SALE) | GB | Prices stay in pounds in this build. |
+| 4 | Travelpayouts token | skip | Free, cached prices from Aviasales users’ searches; constraints are not checked. Needs a free Travelpayouts account: if you have none, register at https://www.travelpayouts.com/, then open the API token page (https://support.travelpayouts.com/hc/en-us/articles/203956083). |
+| 5 | SearchApi | off | `trial`: a one-off allowance for a smoke test and spikes, never run on a schedule. `40usd`: about £32 a month, prices scraped from Google Flights by SearchApi. |
+| 6 | Email alerts | skip | Send alerts and notices by email. |
+| 7 | Keep running when nobody is logged in (Linux) | no | Lets the app keep running after you log out (loginctl enable-linger). |
+| 9 | Browser provider after an interruption | no | If a run is interrupted (for example the laptop sleeps), should the browser part finish when it resumes, even outside the scheduled hours? [no] |
+
+Secrets (tokens, keys, the SMTP password) are typed hidden. For SearchApi `trial`, setup also
+asks how many trial credits are already used (100 minus the dashboard's remaining free
+searches). For email it asks the SMTP host, port, TLS, user, password, and the to and from
+addresses. Row 7 runs `loginctl enable-linger <you>` without `sudo`; if that is refused it
+prints the `sudo` line for you to run, and setup never runs `sudo` itself. Row 9 is asked by
+`pnpm gmt setup --reconfigure browser` (row 8, the browser provider itself, comes with the
+browser work package).
+
+When no price source was chosen and the terminal is interactive, setup asks once, before it
+changes anything: "Paste a token now? (Enter to finish without one)". A pasted token is the
+Travelpayouts token, as if row 4 had been answered.
+
+### Where things are kept
+
+| What | Where |
+|---|---|
+| Settings | `~/.config/get-me-there/app.env` (the directory 0700, the file 0600) |
+| Database and backups | `~/.local/share/get-me-there/` (`get-me-there.db`, `backups/`) |
+| The browser worker's state | `~/.local/state/get-me-there/camoufox/` |
+| Logs | macOS: `~/Library/Logs/get-me-there/`; Linux: the user journal |
+| Services | macOS: `~/Library/LaunchAgents/local.get-me-there.app.plist` and `local.get-me-there.backup.plist`; Linux: `~/.config/systemd/user/get-me-there-app.service`, `get-me-there-backup.service` and `.timer` |
+
+On Linux, `XDG_CONFIG_HOME`, `XDG_DATA_HOME` and `XDG_STATE_HOME` move the first two when they
+are absolute paths; the browser worker's directory never moves. The services run the Node
+binary setup ran under, with only `PATH` and `HOME` in their environment, so nothing else in
+your shell changes a setting; a Node inside a temporary or version-manager shim directory is
+refused (setup names a stable one).
+
+### When setup finishes
+
+With no price source, the closing screen says so first:
+
+> No price source is set up yet, so searches will find nothing. The no-cost source is Travelpayouts, which needs a free account: register at https://www.travelpayouts.com/, then open the API token page (https://support.travelpayouts.com/hc/en-us/articles/203956083) and run `pnpm gmt setup --reconfigure travelpayouts`.
+
+Then it gives the address (`http://127.0.0.1:3000`), the user name (`operator`), and where the
+password is: in `~/.config/get-me-there/app.env`. Show it with `pnpm gmt password`, which
+prints it to the terminal only. If scrollback or a shared screen may have kept it,
+`pnpm gmt setup --reconfigure password` replaces it. Setup offers to open the browser.
+
+Scheduled searches run while the machine is awake; a missed one is caught up once, without the
+browser provider. The native service speaks plain HTTP on `127.0.0.1`: from another device use
+an `ssh` tunnel (`ssh -L 3000:127.0.0.1:3000 <host>`), or section 3 for Tailscale and TLS.
+
+### The commands
+
+```bash
+pnpm gmt setup                          # install, or re-check an install
+pnpm gmt setup --dry-run                # print the plan with the real launchctl or systemctl commands
+pnpm gmt setup --reconfigure email      # ask one group again: port, timezone, email, travelpayouts, searchapi, browser, password
+pnpm gmt status                         # the services, the settings files, the newest backup, anything to fix
+pnpm gmt start
+pnpm gmt stop
+pnpm gmt restart
+pnpm gmt logs
+pnpm gmt backup                         # the daily backup job, run once now
+pnpm gmt restore <file>                 # see "Restore (native)" below
+pnpm gmt password
+pnpm gmt smoke --from LHR --to JFK      # section 13; it spends real calls
+pnpm gmt update                         # fast-forward to origin/main, with a backup first
+pnpm gmt uninstall                      # removes the services; keeps settings, data and state
+pnpm gmt uninstall --purge              # also deletes those three directories, after you type purge
+```
+
+Re-running `pnpm gmt setup` changes nothing that is already right: a settings file that differs
+from what setup would write is reported, never overwritten, and `--reconfigure <group>` is the
+way to change one group's lines. Lines you add to `app.env` under other names are kept. Setup
+calls no vendor.
+
+`pnpm gmt smoke` spends: before it sends anything it prints the route's worst case per
+provider from the app (with today's settings, up to 4 SearchApi credits and one browser page),
+refuses when the SearchApi trial has fewer credits left, and asks you to type `yes` (`--yes` in
+scripts).
+
+`pnpm gmt update` refuses a checkout with local changes or not on `main`, fetches before it
+stops anything, and refuses while a search is running (naming it and its estimated finish)
+unless `--wait` or `--force`. It then stops the app, backs up into `backups/update`, merges,
+installs, builds, restarts, waits for health and shows the status. If a step fails it prints
+the commit it started from, the backup, and both ways back.
+
+### Moving from Docker or from a checkout
+
+Only one app may keep the usage ledger, or caps would count twice. If this machine has the
+Docker install (a compose project `get-me-there` or its volume), setup refuses until you choose:
+
+```bash
+pnpm gmt setup --import-docker          # move the Docker database here
+pnpm gmt setup --ignore-docker          # start fresh; the Docker database is marked moved
+pnpm gmt setup --import-db data/dev.db  # move a checkout's database (its app must be stopped)
+```
+
+`--import-docker` refuses while the container is running a search (`--wait` waits for it),
+stops the container, backs up from the stopped volume, copies the backup out, restores and
+checks it here, and only then writes `MOVED-TO-NATIVE` beside the old database. It offers
+`docker compose down` (the volume is kept) and to carry your `.env` settings across, one group
+at a time. Never start the compose stack on that volume again: with the marker it exits and
+restarts in a loop. To use the container again, remove the marker first:
+`docker compose run --rm --no-deps --entrypoint rm app /data/MOVED-TO-NATIVE`. Over an existing
+native database every import refuses unless `--replace-database`, which backs the native one up
+first.
+
+### Backups
+
+A daily job at 03:30 writes a backup into `~/.local/share/get-me-there/backups/daily` and keeps
+14; setup takes the first one before it finishes, and `pnpm gmt backup` takes one by hand.
+These backups sit on the same disk as the database: they protect against a bad update or a
+deletion, not against losing the disk, so copy the folder elsewhere (Time Machine includes it).
+
+### Logs
+
+On macOS the logs go to `~/Library/Logs/get-me-there/`, and `pnpm gmt status` warns past
+100 MB. To rotate them, add a `newsyslog` rule (the user and path are yours):
+
+```bash
+echo '/Users/<you>/Library/Logs/get-me-there/*.log <you>:staff 640 5 10240 * GJN' | sudo tee /etc/newsyslog.d/get-me-there.conf
+```
+
+On Linux the logs are in the user journal (`pnpm gmt logs`). Setup notes when the journal is not
+persistent (`/var/log/journal` absent), which loses them at a reboot.
+
+### Restore (native)
+
+```bash
+pnpm gmt stop
+git checkout <commit>
+pnpm install --frozen-lockfile
+pnpm build
+pnpm gmt restore <backup>
+pnpm gmt start
+```
+
+`pnpm gmt restore` refuses a file that fails `PRAGMA integrity_check`, removes the database's
+`-wal` and `-shm`, keeps the current file as `get-me-there.db.before-restore`, and copies the
+backup into place, 0600. A restored ledger lacks any call made after its backup, so check each
+vendor's dashboard. The checkout is then on a detached commit: run `git switch main` before the
+next `pnpm gmt update` (`pnpm gmt status` reports it).
 
 ## 1. Authentication first
+
+*Applies to: the container path. A native install generates its basic auth (section 0).*
 
 The container listens on all interfaces inside Docker, compose publishes it on
 `127.0.0.1:3000` only, and the app refuses to start without basic auth. Create `.env` next to
@@ -38,6 +219,8 @@ Anyone who can run `docker` on this host can read the container's environment, k
 yourself.
 
 ## 2. The £0 configuration: three lines
+
+*Applies to: the container path. Natively, this is row 4 of section 0, or `pnpm gmt setup --reconfigure travelpayouts`.*
 
 Get a free Travelpayouts token (Travelpayouts account → API token) and add it:
 
@@ -108,6 +291,8 @@ Each must list only `params-*.json` and `.gitkeep` files. Never force-add a reco
 
 ## 3. Reaching it from other devices: ALLOWED_HOSTS and TLS
 
+*Applies to both paths. Natively, the lines go in `~/.config/get-me-there/app.env`, then `pnpm gmt restart`.*
+
 The app rejects any request whose `Host` header is not in `ALLOWED_HOSTS`, and the error names
 the header value and the variable. The default is `localhost:3000,127.0.0.1:3000`. Setting the
 variable replaces the default, so list every hostname you will type in a browser, including
@@ -175,6 +360,8 @@ the moment the host is reachable any other way.
 
 ## 4. Alert email
 
+*Applies to the container path; natively, `pnpm gmt setup --reconfigure email` asks the same settings.*
+
 Without email settings, alerts and operator messages go to the log only, and the Alerts view
 records each such alert as suppressed ("email not configured"). To send email, set all of
 these (all or nothing; boot names any that is missing):
@@ -202,6 +389,8 @@ Set `APP_BASE_URL` to the `https://` address you type (for example
 link straight to the results row; left empty, emails carry relative links.
 
 ## 5. Import the example definition
+
+*Applies to both paths.*
 
 On the Definitions page choose **Import example**, or paste this JSON into the import box:
 
@@ -256,6 +445,8 @@ The form shows the estimate before you create the definition; creating it is you
 confirmation of that cost.
 
 ## 6. The data directory and backups
+
+*Applies to the container path; the native backups and restore are in section 0.*
 
 The database is one file on the named volume `get-me-there_gmt-data`, `/data/get-me-there.db`
 inside the container, and its backups go to `/data/backups` (the `backups` folder beside
@@ -349,6 +540,8 @@ the directory if it cannot write there, or if its file system cannot hold SQLite
 
 ## 7. Expected database growth
 
+*Applies to both paths.*
+
 These are estimates from the row counts of one run of the worked example (8,736 cells); the
 daily maintenance job logs the measured database size (`dbBytes`), which is the number to
 trust.
@@ -364,6 +557,8 @@ kept, so a year of the $40 example is roughly 600 MB. Deleting a definition or a
 only marks it deleted: its runs, prices and alert events stay in the database and in History.
 
 ## 8. Fixture recording
+
+*Applies to a development checkout, not to either install.*
 
 Fixture recording is a development task, not an operations one, and never runs in the
 container (the app refuses it there). Recorded vendor responses are local-only and never
@@ -390,6 +585,8 @@ for any change to a provider adapter or the engine: run it before merging such a
 (plan decision 67, ruling 12).
 
 ## 9. One app per database, one user for every process
+
+*Applies to both paths; moving between them is in section 0.*
 
 - **One app.** The app holds a lock in the database and renews it every 30 seconds. A second
   app started on the same database (a second compose project on the same volume, or
@@ -425,6 +622,8 @@ for any change to a provider adapter or the engine: run it before merging such a
 
 ## 10. Exit codes
 
+*Applies to both paths.*
+
 Every command-line entry point (the app itself, `pnpm record:fixtures`, `pnpm smoke:live`,
 `node scripts/backup.mjs`, `node scripts/check-backup.mjs`) and the `exitCode` of the
 `/api/tools/*` routes use this one table. Codes `2` and `3` come only from the smoke test
@@ -450,6 +649,8 @@ way until you fix the cause; `docker compose logs app` shows the message. The he
 migrations and the first airport seeding.
 
 ## 11. Operating it
+
+*Applies to the container path; the native commands are in section 0.*
 
 - **Start at boot.** `restart: unless-stopped` brings the app back after a reboot only if the
   Docker daemon itself starts at boot: `sudo systemctl enable docker` on Linux.
@@ -480,6 +681,8 @@ migrations and the first airport seeding.
 
 ## 12. Local development
 
+*Applies to a development checkout, not to either install.*
+
 ```bash
 pnpm install
 mkdir -p data
@@ -502,6 +705,8 @@ Messages appear at <http://127.0.0.1:8025>. `SMTP_TLS=none` is accepted only for
 host; the container never uses Mailpit.
 
 ## 13. The smoke test
+
+*Applies to both paths; on a native install, run it with `pnpm gmt smoke --from LHR --to JFK` (section 0).*
 
 The smoke test asks each configured provider for one small search and checks what comes back:
 Travelpayouts one month of cached prices (a free call), SearchApi one date grid and one

@@ -1,5 +1,6 @@
 // Spec §1, §11, §13 and plan decisions 26, 36, 61: the operator docs carry the importable London → New York example
 // and no other route, the plan's single exit-code table as the code defines it, and no banned word.
+import { execFileSync } from 'node:child_process';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { AUTH_MISSING, apiContract, BANNED_WORD_ALLOWLIST, findBannedWords, parseConfig } from '@gmt/core';
@@ -291,14 +292,21 @@ describe('operator docs (spec §11 banned words; spec §1 worked example only)',
     expect(all).toEqual([...OPERATOR_DOCS, ...RESEARCH_NOTES].sort());
   });
 
-  it('the root README points a fresh clone at setup section 1 and the other operator docs (devops-final-006)', () => {
+  it('the root README points a fresh clone at setup section 0, section 1 and the other operator docs (devops-final-006)', () => {
     const readme = read('README.md');
+    expect(readme).toContain('section 0');
+    expect(readme).toContain('pnpm gmt setup');
     expect(readme).toContain('docs/setup.md');
     expect(readme).toContain('section 1');
     expect(readme).toContain('docs/local-quickstart.md');
     expect(readme).toContain('Start.command');
     for (const doc of ['docs/api-limits.md', 'docs/scheduling.md', 'docs/providers.md'])
       expect(readme).toContain(doc);
+  });
+
+  it('Start.command is tracked as an executable (WP16b Task 16b.12)', () => {
+    const entry = execFileSync('git', ['ls-files', '-s', 'Start.command'], { cwd: REPO, encoding: 'utf8' });
+    expect(entry.split(' ')[0]).toBe('100755');
   });
 
   it('Start.command is the Docker Desktop launcher: quiet config check, wait, no credential echo', () => {
@@ -321,7 +329,10 @@ describe('operator docs (spec §11 banned words; spec §1 worked example only)',
     expect(q).toContain('docker compose cp app:/data/backups/.');
     expect(q).toContain('docker compose exec -T app node scripts/backup.mjs');
     expect(q).not.toMatch(/Copy `data\/backups\/`/);
-    expect(q).toContain('Until `pnpm gmt setup` ships');
+    // why: WP16b: the CLI has shipped, so the guide points at section 0 for the native path
+    expect(q).toContain('`pnpm gmt setup`');
+    expect(q).toContain('section 0');
+    expect(q).not.toContain('Until `pnpm gmt setup` ships');
   });
 
   // why: CodeRabbit batch 3 — a reader cannot reach the operator's notes, so a doc states what was found and points
@@ -329,7 +340,9 @@ describe('operator docs (spec §11 banned words; spec §1 worked example only)',
   it.each([...OPERATOR_DOCS, ...RESEARCH_NOTES].map((f) => `docs/${f}`))(
     '%s points at no private notes',
     (path) => {
-      expect(read(path)).not.toMatch(/private notes|\.local\/share/i);
+      // why: WP16b: the native install's own data directory (~/.local/share/get-me-there) is documented; only the
+      // operator's private folder inside it is not
+      expect(read(path)).not.toMatch(/private notes|\.local\/share\/get-me-there\/private/i);
     },
   );
 
