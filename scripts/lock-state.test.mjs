@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -54,5 +54,15 @@ describe('scripts/lock-state.mjs', { timeout: 60_000 }, () => {
   });
   it('a missing argument is usage (64)', () => {
     expect(run([]).status).toBe(64);
+  });
+  it('a lock it cannot read is a plain failure (1), its stdout empty: never a lock state (ca-b1-022)', () => {
+    const d = mkdtempSync(join(tmpdir(), 'gmt-lock-'));
+    dirs.push(d);
+    const bad = join(d, 'bad.db');
+    writeFileSync(bad, 'not a database '.repeat(200));
+    const r = run([bad]);
+    expect(r.status).toBe(1);
+    expect(r.stdout).toBe('');
+    expect(r.stderr).toContain('lock-state failed');
   });
 });

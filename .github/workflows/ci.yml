@@ -48,7 +48,12 @@ jobs:
       # reporter; test failures do not end this step, the next step's exit code is the leg's, and no step may ignore a failure
       - name: every suite (Windows)
         if: runner.os == 'Windows'
-        run: pnpm exec vitest run --reporter=default --reporter=json --outputFile=vitest-results.json || true
+        # why: ts-b1-009: a stale results file from an earlier run on the runner can never be read as this run's
+        run: |
+          rm -f vitest-results.json vitest-list.json
+          # why: ts-b1-012: the suites that run built scripts never build inside the run
+          node scripts/ensure-build.mjs
+          pnpm exec vitest run --reporter=default --reporter=json --outputFile=vitest-results.json || true
       - name: within the known Windows failures (decision 78)
         if: runner.os == 'Windows'
         run: |
@@ -146,8 +151,14 @@ jobs:
       - name: setup
         run: |
           cd "$RUNNER_TEMP/gmt"
+          # why: ts-b1-011: a lint-only runner (none today) proves the plan only; the steps below need its services
+          if [ "$E2E_MODE" = lint-only ]; then
+            pnpm gmt setup --dry-run --non-interactive --answers "$RUNNER_TEMP/answers.json"
+            exit 0
+          fi
           pnpm gmt setup --non-interactive --answers "$RUNNER_TEMP/answers.json"
       - name: installed, running and healthy
+        if: env.E2E_MODE == 'real'
         run: |
           if [ "$RUNNER_OS" = macOS ]; then
             test -f "$HOME/Library/LaunchAgents/local.get-me-there.app.plist"
@@ -158,11 +169,44 @@ jobs:
           fi
           curl -fsS http://127.0.0.1:3917/api/health
       - name: status
+        if: env.E2E_MODE == 'real'
         run: |
           cd "$RUNNER_TEMP/gmt"
           pnpm -s gmt status | tee "$RUNNER_TEMP/status.txt"
           grep -E '^backups +ok' "$RUNNER_TEMP/status.txt"
+      - name: the app comes back after a hard kill (its service restarts it)
+        if: env.E2E_MODE == 'real'
+        run: |
+          if [ "$RUNNER_OS" = macOS ]; then
+            pid="$(launchctl print "gui/$(id -u)/local.get-me-there.app" | awk '$1 == "pid" { print $3; exit }')"
+          else
+            pid="$(systemctl --user show -p MainPID --value get-me-there-app.service)"
+          fi
+          test -n "$pid" && test "$pid" != 0
+          kill -9 "$pid"
+          for _ in $(seq 1 90); do curl -fsS --max-time 2 http://127.0.0.1:3917/api/health > /dev/null 2>&1 && break; sleep 1; done
+          curl -fsS http://127.0.0.1:3917/api/health
+      - name: restart
+        if: env.E2E_MODE == 'real'
+        run: |
+          cd "$RUNNER_TEMP/gmt"
+          pnpm gmt restart
+          for _ in $(seq 1 90); do curl -fsS --max-time 2 http://127.0.0.1:3917/api/health > /dev/null 2>&1 && break; sleep 1; done
+          curl -fsS http://127.0.0.1:3917/api/health
+      - name: a backup taken by hand restores
+        if: env.E2E_MODE == 'real'
+        run: |
+          cd "$RUNNER_TEMP/gmt"
+          pnpm -s gmt backup | tee "$RUNNER_TEMP/backup.txt"
+          file="$(sed -n 's/^backup written: //p' "$RUNNER_TEMP/backup.txt")"
+          test -f "$file"
+          pnpm gmt stop
+          pnpm gmt restore "$file"
+          pnpm gmt start
+          for _ in $(seq 1 90); do curl -fsS --max-time 2 http://127.0.0.1:3917/api/health > /dev/null 2>&1 && break; sleep 1; done
+          curl -fsS http://127.0.0.1:3917/api/health
       - name: update serves the new commit
+        if: env.E2E_MODE == 'real'
         run: |
           marker="gmt-e2e-update-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
           git clone "$RUNNER_TEMP/origin.git" "$RUNNER_TEMP/pusher"
@@ -176,10 +220,19 @@ jobs:
           pass="$(node -e "const { parseEnv } = require('node:util'); const fs = require('fs'); const os = require('os'); process.stdout.write(parseEnv(fs.readFileSync(os.homedir() + '/.config/get-me-there/app.env', 'utf8')).APP_BASIC_AUTH_PASS)")"
           printf 'user = "operator:%s"\n' "$pass" | curl -fsS -K - http://127.0.0.1:3917/ | grep -F "$marker"
       - name: uninstall removes the services and keeps the data
+        if: env.E2E_MODE == 'real'
         run: |
           cd "$RUNNER_TEMP/gmt"
           pnpm -s gmt uninstall --non-interactive | tee "$RUNNER_TEMP/uninstall.txt"
           test "$(grep -c '^kept: ' "$RUNNER_TEMP/uninstall.txt")" = 3
+          # the app's and the backup job's unit files (and on macOS the log directory): three removed lines at least
+          test "$(grep -c '^removed: ' "$RUNNER_TEMP/uninstall.txt")" -ge 3
+          if [ "$RUNNER_OS" = macOS ]; then
+            if launchctl print "gui/$(id -u)/local.get-me-there.app" > /dev/null 2>&1; then echo "the app agent is still loaded"; exit 1; fi
+          else
+            if systemctl --user is-active --quiet get-me-there-app.service; then echo "the app service is still active"; exit 1; fi
+          fi
+          if curl -fsS --max-time 5 http://127.0.0.1:3917/api/health; then echo "the app still answers"; exit 1; fi
           grep '^removed: ' "$RUNNER_TEMP/uninstall.txt" | cut -d' ' -f2- | while read -r p; do test ! -e "$p" || { echo "still there: $p"; exit 1; }; done
           grep '^kept: ' "$RUNNER_TEMP/uninstall.txt" | cut -d' ' -f2- | while read -r p; do test -e "$p" || { echo "gone: $p"; exit 1; }; done
       - name: collect the service logs

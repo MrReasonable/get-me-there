@@ -28,11 +28,10 @@ describe('gmt smoke --help states the default worst case', { timeout: 60_000 }, 
     const help = spawnSync(
       process.execPath,
       ['--conditions=@gmt/source', '--import', 'tsx', 'apps/cli/src/main.ts', 'smoke', '--help'],
-      {
-        cwd: REPO,
-        encoding: 'utf8',
-      },
+      // why: CodeRabbit …k7R: a hung child would block the worker; vitest's own timeout cannot interrupt spawnSync
+      { cwd: REPO, encoding: 'utf8', timeout: 50_000 },
     );
+    expect(help.error).toBeUndefined();
     expect(help.status).toBe(0);
     const pages = worst.camoufox?.pages ?? 0;
     expect(help.stdout).toContain(

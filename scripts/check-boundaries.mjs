@@ -5,7 +5,7 @@
 // an airport code or a metro city name in a string literal of apps/web/src or apps/api/src outside the two
 // worked-example files, and on a lint or type-check suppression comment anywhere in a package (root configs and e2e folders included).
 import { readdirSync, readFileSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import ts from 'typescript';
 import { GENERATED_AT_PACKAGE_ROOT } from './generated-dirs.mjs';
 import { ENV_RULE, isEnvReader, toPosix } from './posix-path.mjs';
@@ -157,6 +157,16 @@ for (const [name, dir] of Object.entries(dirs)) {
       if (pkg !== undefined && !ALLOWED[name].includes(pkg)) {
         console.error(`${f} imports ${pkg}`);
         bad++;
+      }
+      // why: ca-b1-015: a relative path is an edge too; one that leaves the package's own directory bypasses the graph
+      if (spec.startsWith('.')) {
+        const target = toPosix(join(dirname(f), spec));
+        // why: the worked example's JSON (docs/examples/) is data the web reads at build time, not a code edge
+        const data = target.startsWith('docs/examples/') && target.endsWith('.json');
+        if (!data && target !== dir && !target.startsWith(`${dir}/`)) {
+          console.error(`${f} imports ${spec}, which leaves ${dir}`);
+          bad++;
+        }
       }
     }
     if (/process\.env/.test(src) && !isEnvReader(f)) {

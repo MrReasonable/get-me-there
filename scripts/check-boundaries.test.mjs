@@ -404,6 +404,28 @@ describe('scripts/check-boundaries.mjs and @gmt/cli (decision 72)', { timeout: 6
     expect(r.stderr).not.toContain('apps/cli/src/ok.ts');
   });
 
+  it('a relative import that leaves its package fails, in any package; one inside it passes (ca-b1-015)', () => {
+    const r = run(
+      tree({
+        'apps/cli/src/a.ts': "import { x } from '../../api/src/x.js';\n",
+        'apps/cli/src/commands/b.ts': "import { parseArgs } from '../../../../scripts/backup.mjs';\n",
+        'apps/web/src/c.ts': "export { y } from '../../../packages/db/src/index.js';\n",
+        'apps/cli/src/commands/ok.ts': "import { z } from '../setup/z.js';\n",
+        'apps/web/src/okExample.ts': "import ex from '../../../docs/examples/london-new-york.json';\n",
+      }),
+    );
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('apps/cli/src/a.ts imports ../../api/src/x.js, which leaves apps/cli');
+    expect(r.stderr).toContain(
+      'apps/cli/src/commands/b.ts imports ../../../../scripts/backup.mjs, which leaves apps/cli',
+    );
+    expect(r.stderr).toContain(
+      'apps/web/src/c.ts imports ../../../packages/db/src/index.js, which leaves apps/web',
+    );
+    expect(r.stderr).not.toContain('ok.ts');
+    expect(r.stderr).not.toContain('okExample');
+  });
+
   it('@gmt/cli listing @gmt/db in its dependencies fails', () => {
     const r = run(
       tree({ 'apps/cli/package.json': manifest('apps/cli', { dependencies: { '@gmt/db': 'workspace:*' } }) }),

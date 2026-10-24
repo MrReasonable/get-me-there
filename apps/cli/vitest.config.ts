@@ -15,34 +15,17 @@ function repoRoot(): string {
 }
 const ROOT = repoRoot();
 // why: review R29 — the one alias table, loaded by absolute path: a static relative import of vitest.aliases.ts would
-// not resolve from Stryker's sandbox copy. The cli's own tests import its source relatively, so inside the sandbox
-// they run the mutated copy.
-// why: review S16 — a computed import is untyped, so the module and the table it returns are checked at run time
-// rather than given a type unchecked
-const ALIASES = aliasesFrom(await import(pathToFileURL(join(ROOT, 'vitest.aliases.ts')).href), ROOT);
-
-function isAlias(x: unknown): x is { find: RegExp; replacement: string } {
-  return (
-    typeof x === 'object' &&
-    x !== null &&
-    'find' in x &&
-    x.find instanceof RegExp &&
-    'replacement' in x &&
-    typeof x.replacement === 'string'
-  );
-}
-function aliasesFrom(mod: unknown, root: string): Array<{ find: RegExp; replacement: string }> {
-  if (
-    typeof mod !== 'object' ||
-    mod === null ||
-    !('gmtAliases' in mod) ||
-    typeof mod.gmtAliases !== 'function'
-  )
-    throw new Error('vitest.aliases.ts exports no gmtAliases function');
-  const table: unknown = mod.gmtAliases(root);
-  if (!Array.isArray(table) || !table.every(isAlias)) throw new Error('gmtAliases returned no alias table');
-  return table;
-}
+// not resolve from Stryker's sandbox copy. Review S16, ca-b1-023: the module checks its own table at run time
+// (gmtAliasesChecked, shared with the other config); a computed import is untyped, so this checks only the export.
+const ALIASES_MODULE: unknown = await import(pathToFileURL(join(ROOT, 'vitest.aliases.ts')).href);
+if (
+  typeof ALIASES_MODULE !== 'object' ||
+  ALIASES_MODULE === null ||
+  !('gmtAliasesChecked' in ALIASES_MODULE) ||
+  typeof ALIASES_MODULE.gmtAliasesChecked !== 'function'
+)
+  throw new Error('vitest.aliases.ts exports no gmtAliasesChecked function');
+const ALIASES = ALIASES_MODULE.gmtAliasesChecked(ROOT);
 
 // Brief WP16b §11: the package at 85% lines and 70% branches. Coverage counts src/ only; main.ts (the one environment
 // reader and real-world wiring) is covered by the child-process tests, which v8 coverage does not see.

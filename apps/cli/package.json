@@ -5,8 +5,8 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit",
-    "test": "vitest run --coverage",
-    "mutate": "stryker run && node ../../scripts/mutation-gate.mjs reports/mutation/mutation.json"
+    "test": "node ../../scripts/ensure-build.mjs && vitest run --coverage",
+    "mutate": "node ../../scripts/ensure-build.mjs && stryker run && node ../../scripts/mutation-gate.mjs reports/mutation/mutation.json"
   },
   "dependencies": {
     "@gmt/core": "workspace:*",

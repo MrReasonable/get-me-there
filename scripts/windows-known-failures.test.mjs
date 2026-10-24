@@ -23,6 +23,8 @@ function files({ list = '', results = null, listed = null }) {
 const run = (d, ...args) =>
   spawnSync(process.execPath, [SCRIPT, ...args, '--root', d, '--list', join(d, 'known.txt')], {
     encoding: 'utf8',
+    // why: CodeRabbit …k79: a hung checker would block the worker, which vitest's own timeout cannot interrupt
+    timeout: 30_000,
   });
 /** vitest's JSON reporter's shape: absolute file names, the full title as ancestors and title joined by a space. */
 const results = (d, tests) => ({
@@ -99,6 +101,28 @@ describe('scripts/windows-known-failures.mjs check', { timeout: 60_000 }, () => 
     expect(r.status).toBe(1);
     expect(r.stdout + r.stderr).toContain('file failed to load: a/y.test.ts');
   });
+  it('a failed file whose assertions all passed (a failing hook) is a failure outside any list (CodeRabbit …k75)', () => {
+    const d = files({});
+    const r0 = results(d, [T('a/h.test.ts', ['h'], 'works', 'passed')]);
+    r0.testResults[0].status = 'failed';
+    r0.testResults[0].message = 'Error in afterAll';
+    writeFileSync(join(d, 'results.json'), JSON.stringify(r0));
+    const r = run(d, 'check', join(d, 'results.json'));
+    expect(r.status).toBe(1);
+    expect(r.stdout).toContain('file failed outside its tests: a/h.test.ts');
+  });
+  it('two tests sharing a listed title in one file are refused, never matched to either (ts-b1-018)', () => {
+    const d = files({ list: 'a/d.test.ts > d same\n' });
+    writeFileSync(
+      join(d, 'results.json'),
+      JSON.stringify(
+        results(d, [T('a/d.test.ts', ['d'], 'same', 'failed'), T('a/d.test.ts', ['d'], 'same', 'passed')]),
+      ),
+    );
+    const r = run(d, 'check', join(d, 'results.json'));
+    expect(r.status).toBe(1);
+    expect(r.stdout).toContain('two tests share the listed title (rename one): a/d.test.ts > d same');
+  });
   it('a missing results file exits 1', () => {
     const d = files({});
     expect(run(d, 'check', join(d, 'none.json')).status).toBe(1);
@@ -174,9 +198,26 @@ describe('scripts/windows-known-failures.mjs guard', { timeout: 60_000 }, () => 
         '--list',
         join(d, 'known.txt'),
       ],
-      { encoding: 'utf8' },
+      { encoding: 'utf8', timeout: 30_000 },
     );
     expect([r.status, r.stdout]).toEqual([0, 'guard: ok\n']);
+  });
+  it('with --results a line is matched against the run’s exact names first: a broad pattern cannot vouch for a typo (ts-b1-018)', () => {
+    const d = files({
+      list: 'a/p.test.ts > p the cookie SID before the page\na/p.test.ts > p the cookie SID befor the page\n',
+    });
+    writeFileSync(
+      join(d, 'list.json'),
+      JSON.stringify([{ name: 'p > the cookie %s', file: join(d, 'a/p.test.ts') }]),
+    );
+    writeFileSync(
+      join(d, 'results.json'),
+      JSON.stringify(results(d, [T('a/p.test.ts', ['p'], 'the cookie SID before the page', 'failed')])),
+    );
+    const r = run(d, 'guard', join(d, 'list.json'), '--results', join(d, 'results.json'));
+    expect(r.status).toBe(1);
+    expect(r.stdout).toContain('names no test that ran: a/p.test.ts > p the cookie SID befor the page');
+    expect(r.stdout).not.toContain('a/p.test.ts > p the cookie SID before the page\n');
   });
   it('an unknown command is usage (64)', () => {
     const d = files({});

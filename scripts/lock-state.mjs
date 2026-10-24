@@ -3,7 +3,8 @@
 // checkout's app or tool is not running): opens the file read-only through @gmt/db's readOnlyLockState and prints one
 // JSON line, { "state": "absent" } or { "state": "fresh" | "stale", "holder": …, "heartbeatAt": … }.
 //   node scripts/lock-state.mjs <database>
-// Exit codes from the plan's single table (apps/api EXIT): 0 ok, 64 usage; 1 when the built packages cannot be loaded.
+// Exit codes from the plan's single table (core's EXIT): 0 ok (a state printed), 64 usage, 1 failed: the built packages
+// cannot be loaded or the lock cannot be read (no state is printed then, and the CLI reads that as not free).
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 
@@ -39,7 +40,7 @@ async function main() {
     return EXIT.ok;
   } catch (err) {
     process.stderr.write(`lock-state failed: ${message(err)}\n`);
-    return EXIT.backupFailed;
+    return EXIT.failed;
   }
 }
 

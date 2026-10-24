@@ -7,7 +7,7 @@
 // `node`), never as root (plan decision 26).
 import { existsSync, realpathSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { pathToFileURL } from 'node:url';
 
 const USAGE = 'usage: node scripts/backup.mjs [--db <path>] [--dir <path>] [--keep <n ≥ 1>]';
 
@@ -97,11 +97,6 @@ async function main() {
 }
 
 // why: WP16b: the gmt CLI's tests import parseArgs to prove the daily job's argv parses here, so the backup runs only
-// when this file is the program (the image and the services run it as `node scripts/backup.mjs`)
-const invoked = process.argv[1];
-if (
-  invoked !== undefined &&
-  existsSync(invoked) &&
-  realpathSync(invoked) === realpathSync(fileURLToPath(import.meta.url))
-)
-  process.exitCode = await main();
+// when this file is the program (the image and the services run it as `node scripts/backup.mjs`); `import.meta.main`
+// is in every Node the engines field allows (22.18 and later), the one guard shape for scripts (ca-b1-021)
+if (import.meta.main) process.exitCode = await main();

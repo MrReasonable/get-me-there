@@ -14,33 +14,17 @@ function repoRoot(): string {
 }
 const ROOT = repoRoot();
 // why: review R29 — the one alias table, loaded by absolute path: a static relative import of vitest.aliases.ts would
-// not resolve from Stryker's sandbox copy.
-// why: review S16 — a computed import is untyped, so the module and the table it returns are checked at run time
-// rather than given a type unchecked
-const ALIASES = aliasesFrom(await import(pathToFileURL(join(ROOT, 'vitest.aliases.ts')).href), ROOT);
-
-function isAlias(x: unknown): x is { find: RegExp; replacement: string } {
-  return (
-    typeof x === 'object' &&
-    x !== null &&
-    'find' in x &&
-    x.find instanceof RegExp &&
-    'replacement' in x &&
-    typeof x.replacement === 'string'
-  );
-}
-function aliasesFrom(mod: unknown, root: string): Array<{ find: RegExp; replacement: string }> {
-  if (
-    typeof mod !== 'object' ||
-    mod === null ||
-    !('gmtAliases' in mod) ||
-    typeof mod.gmtAliases !== 'function'
-  )
-    throw new Error('vitest.aliases.ts exports no gmtAliases function');
-  const table: unknown = mod.gmtAliases(root);
-  if (!Array.isArray(table) || !table.every(isAlias)) throw new Error('gmtAliases returned no alias table');
-  return table;
-}
+// not resolve from Stryker's sandbox copy. Review S16, ca-b1-023: the module checks its own table at run time
+// (gmtAliasesChecked, shared with the other config); a computed import is untyped, so this checks only the export.
+const ALIASES_MODULE: unknown = await import(pathToFileURL(join(ROOT, 'vitest.aliases.ts')).href);
+if (
+  typeof ALIASES_MODULE !== 'object' ||
+  ALIASES_MODULE === null ||
+  !('gmtAliasesChecked' in ALIASES_MODULE) ||
+  typeof ALIASES_MODULE.gmtAliasesChecked !== 'function'
+)
+  throw new Error('vitest.aliases.ts exports no gmtAliasesChecked function');
+const ALIASES = ALIASES_MODULE.gmtAliasesChecked(ROOT);
 
 // The worker's floors (brief WP14 Task 14.1, decision 69): 90/80/90/90 for the package and 100 lines and branches for
 // the eight safety modules (the classifier, the cool-down, the pacer, the consent read-back, the result grammar, the

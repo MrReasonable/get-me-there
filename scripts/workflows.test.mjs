@@ -53,7 +53,6 @@ describe('GitHub workflows (least privilege)', () => {
   // why: Node 20 actions are deprecated on GitHub-hosted runners; each pin must be a full SHA whose comment names a
   // release that runs on Node 24, and runners are pinned rather than floating on ubuntu-latest.
   // why: WP16b (decision 77): the test job and install-e2e run on a matrix of pinned images, named in the matrix
-  const RUNNERS = ['ubuntu-24.04', 'ubuntu-24.04-arm', 'macos-15', 'windows-2025'];
   it.each(files)('%s pins actions by SHA at Node 24 releases and runners to pinned images', (f) => {
     const t = text(f);
     expect(pinProblems(t)).toEqual([]);
@@ -321,6 +320,17 @@ describe('WP16b: the image carries the CLI manifest only, filtered out of both i
 // machine of its own; install-e2e names each runner's mode as a literal, at least one real. The guard parses the YAML.
 const INSTALL_JOBS = ['install-e2e', 'camoufox-install'];
 const BASE_HOSTS = ['registry.npmjs.org', '127.0.0.1', 'localhost'];
+// why: WP16b (decision 77): the test job and install-e2e run on a matrix of pinned images, named in the matrix
+const RUNNERS = ['ubuntu-24.04', 'ubuntu-24.04-arm', 'macos-15', 'windows-2025'];
+// why: CodeRabbit …k7_: the one runner expression allowed; its matrix values are checked against RUNNERS
+const MATRIX_RUNNER = ['$', '{{ matrix.runner }}'].join('');
+/** Why a permissions block grants more than read, or null (sec-b1-004, CodeRabbit …k8D). */
+function writeGrant(perms) {
+  if (perms === undefined || perms === null) return null;
+  if (typeof perms === 'string') return perms === 'read-all' || perms === '{}' ? null : perms;
+  const w = Object.entries(perms).filter(([, v]) => v !== 'read' && v !== 'none');
+  return w.length === 0 ? null : w.map(([k, v]) => `${k}: ${v}`).join(', ');
+}
 const RELEASE_HOSTS = ['github.com', 'objects.githubusercontent.com', 'release-assets.githubusercontent.com'];
 const REPO = join(import.meta.dirname, '..');
 /** The runners WP16b's research record (Task 16b.0) names as lint-only. */
@@ -348,6 +358,8 @@ function guardProblems(
   const triggers = typeof on === 'string' ? [on] : Array.isArray(on) ? on : Object.keys(on);
   for (const bad of ['pull_request_target', 'workflow_run']) if (triggers.includes(bad)) out.push(bad);
   if (doc.permissions?.contents !== 'read') out.push('no top-level permissions: contents: read');
+  const topWrite = writeGrant(doc.permissions);
+  if (topWrite !== null) out.push(`top-level permissions grant ${topWrite}`);
   const { jobs = {}, ...rest } = doc;
   for (const h of hostsIn(YAML.stringify(rest)))
     if (!BASE_HOSTS.includes(h)) out.push(`host ${h} outside the jobs`);
@@ -358,6 +370,19 @@ function guardProblems(
       .flat()
       .map(String);
     if (runners.some((r) => r.includes('self-hosted'))) out.push(`${name}: a self-hosted runner`);
+    const runsOn = job['runs-on'];
+    if (runsOn !== undefined) {
+      const ro = String(runsOn);
+      if (ro.includes('${{') ? ro !== MATRIX_RUNNER : !RUNNERS.includes(ro))
+        out.push(`${name}: runs-on ${ro} is not a pinned runner or ${MATRIX_RUNNER}`);
+      if (ro === MATRIX_RUNNER)
+        for (const r of runners.slice(1))
+          if (!RUNNERS.includes(r)) out.push(`${name}: matrix runner ${r} is not a pinned runner`);
+    }
+    const jobWrite = writeGrant(job.permissions);
+    if (jobWrite !== null) out.push(`${name}: job permissions grant ${jobWrite}`);
+    if (typeof job.uses === 'string' && !job.uses.startsWith('./') && !/@[0-9a-f]{40}$/.test(job.uses))
+      out.push(`${name}: ${job.uses} is not pinned by a full SHA`);
     const install = INSTALL_JOBS.includes(name);
     if (install && /github\.token|GITHUB_TOKEN/.test(jt)) out.push(`${name}: the GitHub token`);
     for (const step of job.steps ?? [])
@@ -451,6 +476,48 @@ describe('WP16b: the workflow guard (decision 77)', () => {
       guardProblems(ok(step('      - run: echo\n')).replace('permissions:\n  contents: read\n', ''), ctx),
     ).toContain('no top-level permissions: contents: read');
   });
+  it('fails on write permissions at the top or in a job; read and none pass (sec-b1-004, CodeRabbit …k8D)', () => {
+    const job = (perms) => `  build:\n    runs-on: ubuntu-24.04\n${perms}    steps:\n      - run: echo\n`;
+    expect(guardProblems(ok(job('    permissions:\n      contents: write\n')), ctx)).toContain(
+      'build: job permissions grant contents: write',
+    );
+    expect(guardProblems(ok(job('    permissions:\n      id-token: write\n')), ctx)).toContain(
+      'build: job permissions grant id-token: write',
+    );
+    expect(guardProblems(ok(job('    permissions: write-all\n')), ctx)).toContain(
+      'build: job permissions grant write-all',
+    );
+    expect(
+      guardProblems(ok(job('    permissions:\n      contents: read\n      actions: none\n')), ctx),
+    ).toEqual([]);
+    expect(
+      guardProblems(
+        ok(job('')).replace(
+          'permissions:\n  contents: read\n',
+          'permissions:\n  contents: read\n  packages: write\n',
+        ),
+        ctx,
+      ),
+    ).toContain('top-level permissions grant packages: write');
+  });
+  it('fails on a reusable workflow not pinned by a full SHA; a local one passes (sec-b1-004)', () => {
+    expect(guardProblems(ok('  call:\n    uses: o/r/.github/workflows/x.yml@main\n'), ctx)).toContain(
+      'call: o/r/.github/workflows/x.yml@main is not pinned by a full SHA',
+    );
+    expect(guardProblems(ok(`  call:\n    uses: o/r/.github/workflows/x.yml@${SHA}\n`), ctx)).toEqual([]);
+    expect(guardProblems(ok('  call:\n    uses: ./.github/workflows/x.yml\n'), ctx)).toEqual([]);
+  });
+  it('fails on a runner expression other than the matrix runner, and on an unpinned matrix value (CodeRabbit …k7_)', () => {
+    expect(
+      guardProblems(ok(step('      - run: echo\n').replace('ubuntu-24.04', `${X} vars.RUNNER }}`)), ctx),
+    ).toContain(`build: runs-on ${X} vars.RUNNER }} is not a pinned runner or ${X} matrix.runner }}`);
+    expect(
+      guardProblems(ok(step('      - run: echo\n').replace('ubuntu-24.04', 'ubuntu-latest')), ctx),
+    ).toContain(`build: runs-on ubuntu-latest is not a pinned runner or ${X} matrix.runner }}`);
+    expect(
+      guardProblems(ok(e2e('          - runner: ubuntu-latest\n            E2E-MODE: real')), ctx),
+    ).toContain('install-e2e: matrix runner ubuntu-latest is not a pinned runner');
+  });
   it('fails on an action not pinned by a 40-character SHA', () => {
     expect(guardProblems(ok(step('      - uses: actions/checkout@v7\n')), ctx)).toContain(
       'build: actions/checkout@v7 is not pinned by a full SHA',
@@ -519,6 +586,11 @@ describe('WP16b: the CI matrix, install-e2e and the Windows leg (decisions 77, 7
     );
     expect(win.join('\n')).toContain('node scripts/windows-known-failures.mjs check vitest-results.json');
     expect(win.join('\n')).toContain('pnpm gmt setup --dry-run --answers ci/answers.e2e.template.json');
+    // why: ts-b1-009: a crash after partial output must not leave the check reading an older file
+    const run = ci().jobs.test.steps.find((s) =>
+      String(s.run ?? '').includes('--outputFile=vitest-results.json'),
+    );
+    expect(String(run?.run).trim().split('\n')[0]).toBe('rm -f vitest-results.json vitest-list.json');
   });
   it('install-e2e: the three runners real, a timeout, read-only permissions, setup, status, update, uninstall, logs on failure', () => {
     const job = ci().jobs['install-e2e'];
@@ -541,6 +613,25 @@ describe('WP16b: the CI matrix, install-e2e and the Windows leg (decisions 77, 7
     ])
       expect(runs).toContain(s);
     expect(runs).not.toMatch(/gmt smoke/);
+    // why: dev-b1-012: recovery after a hard kill, a restart, and a backup restored, on every real runner
+    for (const s of [
+      'kill -9 "$pid"',
+      'pnpm gmt restart',
+      'pnpm -s gmt backup',
+      'pnpm gmt restore "$file"',
+      // why: ts-b1-010: the removed lines are counted, the services are gone and the port is closed
+      'test "$(grep -c \'^removed: \' "$RUNNER_TEMP/uninstall.txt")" -ge 3',
+      'if curl -fsS --max-time 5 http://127.0.0.1:3917/api/health; then echo "the app still answers"; exit 1; fi',
+    ])
+      expect(runs).toContain(s);
+    // why: ts-b1-011: lint-only means something: setup only plans, and every later step that needs services is skipped
+    const at = job.steps.findIndex((s) => s.name === 'setup');
+    expect(job.steps[at].run).toContain('if [ "$E2E_MODE" = lint-only ]; then');
+    expect(job.steps[at].run).toContain(
+      'pnpm gmt setup --dry-run --non-interactive --answers "$RUNNER_TEMP/answers.json"',
+    );
+    for (const s of job.steps.slice(at + 1))
+      expect(s.if, s.name ?? s.uses).toBe(s.if === 'failure()' ? 'failure()' : "env.E2E_MODE == 'real'");
     expect(
       job.steps.some(
         (s) => s.if === 'failure()' && String(s.uses ?? '').startsWith('actions/upload-artifact@'),
