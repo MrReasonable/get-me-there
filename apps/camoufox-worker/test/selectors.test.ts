@@ -1,4 +1,7 @@
+import { readdirSync, readFileSync } from 'node:fs';
+import { CAMOUFOX_BUILDS, FLAG_NAMES as CORE_FLAG_NAMES, flagsFor } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
+import { DEFAULT_BINARY_BUILD } from '../src/install.js';
 import { FLAG_NAMES, flagsOf, PROOFS, SELECTORS, SELECTORS_VERSION } from '../src/selectors.js';
 
 describe('the dated selectors module (spec §2; brief §9)', () => {
@@ -23,5 +26,20 @@ describe('the dated selectors module (spec §2; brief §9)', () => {
       if (!flagsOf()[f]) continue;
       expect(PROOFS[f], f).toMatch(/^\d{4}-\d{2}-\d{2} /);
     }
+  });
+  it('reads its flags through core’s flagsFor for the operator’s Mac and the pinned build (decision 81), values unchanged', () => {
+    expect(FLAG_NAMES).toBe(CORE_FLAG_NAMES);
+    expect(flagsOf()).toEqual(flagsFor('darwin-arm64', CAMOUFOX_BUILDS['darwin-arm64'].build));
+    expect(DEFAULT_BINARY_BUILD).toBe(CAMOUFOX_BUILDS['darwin-arm64'].build);
+  });
+  it('no worker module states a verification flag’s value itself: every flag is read through core (grep)', () => {
+    const dir = new URL('../src/', import.meta.url);
+    const flag = new RegExp(`\\b(${FLAG_NAMES.join('|')})\\s*:\\s*(true|false)\\b`);
+    // why: the recorder alone switches the no-flights hypothesis on while it records the line that would prove it
+    // (record.ts `reading`); that is a recording mode, never a verified value the worker runs with
+    const offenders = readdirSync(dir)
+      .filter((f) => f.endsWith('.ts') && f !== 'record.ts')
+      .filter((f) => flag.test(readFileSync(new URL(f, dir), 'utf8')));
+    expect(offenders).toEqual([]);
   });
 });

@@ -12,7 +12,18 @@
  * Task 14.2's recordings; until then the server refuses to start (FORM_VERIFIED) and nothing is clicked. SOCS stability
  * is verified by the 2026-10-18 socs-stability recording (operator ruling).
  */
+import { CAMOUFOX_BUILDS, FLAG_NAMES, type FlagName, flagsFor } from '@gmt/core';
+
+export { FLAG_NAMES, type FlagName };
+
 export const SELECTORS_VERSION = '2026-10-18-results';
+
+/**
+ * The verification flags this worker runs with, read through core (decision 81: flags per `<os>-<arch>`, bound to
+ * their build). why: the worker runs on the operator's Mac (darwin-arm64) with the pinned build until WP17 picks the
+ * entry from the platform and the installed build; the values are the 2026-10-18 recordings', and PROOFS names each.
+ */
+const VERIFIED = flagsFor('darwin-arm64', CAMOUFOX_BUILDS['darwin-arm64'].build);
 
 /** The roles the driver queries (a subset of Playwright's AriaRole). */
 export type Role =
@@ -37,17 +48,6 @@ export type Role =
   | 'grid'
   | 'gridcell'
   | 'img';
-
-export const FLAG_NAMES = [
-  'RESULTS_VERIFIED',
-  'FORM_VERIFIED',
-  'CHEAPEST_FLOW_VERIFIED',
-  'VIEW_MORE_ADDS_CHEAPER',
-  'NO_FLIGHTS_VERIFIED',
-  'SOCS_STABLE',
-  'GRID_VERIFIED',
-] as const;
-export type FlagName = (typeof FLAG_NAMES)[number];
 
 export interface Selectors {
   version: string;
@@ -172,18 +172,10 @@ export const SELECTORS: Selectors = {
     return: 'Return',
   },
   maxNameLength: 4000,
-  // why: the flags below were set 2026-10-18 from that day's recordings (operator instruction); PROOFS names each file
-  RESULTS_VERIFIED: true,
-  FORM_VERIFIED: true,
-  CHEAPEST_FLOW_VERIFIED: true,
-  // why: stays false: the view-more recording's minimum (81 links) was no lower than the results page's
-  VIEW_MORE_ADDS_CHEAPER: false,
-  NO_FLIGHTS_VERIFIED: true,
-  // why: set 2026-10-18 by operator ruling: the socs-stability recording's passes 1–3 all read the cookie back `same`
-  SOCS_STABLE: true,
-  // why: decision 70: set 2026-10-18 from the --grid recordings (the dialog view, the cell grammar, the lines, the
-  // one-day step on both axes); grid pages still need CAMOUFOX_MODE=grid in worker.env
-  GRID_VERIFIED: true,
+  // why: the flags come from core's FLAGS (VERIFIED above): set 2026-10-18 from that day's recordings (operator
+  // instruction); View more stays off (its minimum was no lower than the results page's); GRID_VERIFIED still needs
+  // CAMOUFOX_MODE=grid in worker.env for grid pages
+  ...VERIFIED,
 };
 
 /** The recording that proved each true flag (TS-13): its date and what it was. */

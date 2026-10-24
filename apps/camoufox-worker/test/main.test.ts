@@ -1,5 +1,6 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { effectiveSharedSettings, workerStatusSchema } from '@gmt/core';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { buildLaunchOptions } from '../src/launch.js';
 import { acquireLock } from '../src/lock.js';
@@ -180,6 +181,35 @@ describe('the worker’s start checks and shutdown (brief Task 14.5)', () => {
     t.shutdown();
     expect(await w.done).toBe(0);
     expect(() => acquireLock(t.dataDir).release()).not.toThrow();
+  });
+  it('the status reports the worker’s effective shared settings (spec §12), worker.env lines and defaults alike', async () => {
+    const t = setup({ env: { CAMOUFOX_MONTHLY_PAGE_CAP: '900', CAMOUFOX_BILLING_DAY: '15' } });
+    const w = await running(t);
+    const s = await fetch(`http://127.0.0.1:${w.port}/v1/status`, { headers: { 'x-gmt-worker-key': KEY } });
+    const body: unknown = await s.json();
+    expect(body).toMatchObject({
+      sharedSettings: effectiveSharedSettings({
+        CAMOUFOX_MONTHLY_PAGE_CAP: '900',
+        CAMOUFOX_BILLING_DAY: '15',
+      }),
+    });
+    expect(workerStatusSchema.safeParse(body).success).toBe(true);
+    t.shutdown();
+    await w.done;
+  });
+  it('the status read stays clear of the pacer: the persisted last-page time is unchanged (decision 76)', async () => {
+    const t = setup();
+    const at = '2026-10-18T04:59:00.000Z';
+    writeFileSync(join(t.dataDir, 'pacer.json'), JSON.stringify({ lastPageAt: at }), { mode: 0o600 });
+    const before = readFileSync(join(t.dataDir, 'pacer.json'), 'utf8');
+    const w = await running(t);
+    for (let i = 0; i < 3; i++) {
+      const s = await fetch(`http://127.0.0.1:${w.port}/v1/status`, { headers: { 'x-gmt-worker-key': KEY } });
+      expect(await s.json()).toMatchObject({ lastPageAt: at });
+    }
+    expect(readFileSync(join(t.dataDir, 'pacer.json'), 'utf8')).toBe(before);
+    t.shutdown();
+    await w.done;
   });
   it('in grid mode the status reports the worker’s scroll cap and spacing, for the app’s preflight (CA 9)', async () => {
     const status = async (env: Record<string, string>) => {
