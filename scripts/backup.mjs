@@ -7,7 +7,7 @@
 // `node`), never as root (plan decision 26).
 import { existsSync, realpathSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const USAGE = 'usage: node scripts/backup.mjs [--db <path>] [--dir <path>] [--keep <n ≥ 1>]';
 
@@ -45,7 +45,7 @@ async function load() {
  * @param {{ backupsDirFor: (db: string) => string; BACKUPS_KEPT: number }} rules
  * @returns {{ ok: true; db: string; dir: string; keep: number } | { ok: false; reason: string }}
  */
-function parseArgs(argv, envDb, rules) {
+export function parseArgs(argv, envDb, rules) {
   /** @type {Map<string, string>} */
   const flags = new Map();
   for (let i = 0; i < argv.length; i += 2) {
@@ -96,4 +96,12 @@ async function main() {
   }
 }
 
-process.exitCode = await main();
+// why: WP16b: the gmt CLI's tests import parseArgs to prove the daily job's argv parses here, so the backup runs only
+// when this file is the program (the image and the services run it as `node scripts/backup.mjs`)
+const invoked = process.argv[1];
+if (
+  invoked !== undefined &&
+  existsSync(invoked) &&
+  realpathSync(invoked) === realpathSync(fileURLToPath(import.meta.url))
+)
+  process.exitCode = await main();

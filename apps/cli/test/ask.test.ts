@@ -4,10 +4,11 @@ import { noAsk, terminalAsk } from '../src/ask.js';
 
 /** A fake terminal: what the CLI wrote, and a way to type into it. */
 function terminal(tty: boolean) {
+  const rawCalls: boolean[] = [];
   const input = Object.assign(new PassThrough(), {
     isTTY: tty,
     isRaw: false,
-    rawCalls: new Array<boolean>(),
+    rawCalls,
     setRawMode(mode: boolean) {
       input.rawCalls.push(mode);
       input.isRaw = mode;

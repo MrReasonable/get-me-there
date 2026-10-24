@@ -34,6 +34,6 @@ export function linuxPlatform(arch: Arch, uid: number, home: string, env: Env): 
     paths,
     hasDisplay: display,
     writeSecretFile: secretFile,
-    serviceManager: systemdManager(uid, paths),
+    serviceManager: systemdManager(),
   };
 }
