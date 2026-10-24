@@ -5,8 +5,8 @@ owner: opus
 depends_on: [16a]
 spec_sections: ["§1", "§4", "§9 item 9", "§9 CI matrix", "§12 Where settings live", "§13 Native local mode", "§13 One app per ledger", "§13 The gmt command", "§15", "§16", "§17 revision 36"]
 reviewers: [product-owner, code-architect, test-strategy-reviewer, security-reviewer, devops-reviewer, cost-and-budget-reviewer, persona-flexible-traveller]
-mutate: {"@gmt/cli": ["src/plan/**", "src/services/**", "src/setup/answers.ts", "src/setup/secrets.ts"]}
-pending: {"@gmt/cli": ["src/exec/system.ts", "src/setup/appEnv.ts", "src/camoufox/**"]}
+mutate: {"@gmt/cli": ["src/plan/**", "src/services/**", "src/setup/appEnv.ts", "src/setup/answers.ts", "src/setup/secrets.ts"]}
+pending: {"@gmt/cli": ["src/exec/system.ts", "src/camoufox/**"]}
 status: draft
 ---
 
@@ -144,7 +144,7 @@ export type Action =
   | { kind: 'rename'; from: string; to: string }
   | { kind: 'copy'; from: string; to: string; mode: 0o600 }
   | { kind: 'remove'; path: string; recursive: boolean }
-  | { kind: 'run'; argv: readonly string[]; cwd: string; describe: string; secretStdin: boolean }
+  | { kind: 'run'; argv: readonly string[]; cwd: string; describe: string; secretStdin: boolean; stdin?: string }
   | { kind: 'waitHealthy'; url: string; timeoutSeconds: number };
 export interface Plan { command: string; actions: readonly Action[]; notes: readonly string[] }
 export interface Executor { run(a: Action): Promise<void> }
@@ -172,7 +172,9 @@ export function bootOutRefused(platform: Platform, facts: ReadonlyMap<string, Se
 ```
 
 A `run` action's `describe` is what `describePlan` and every error show; its argv never holds a secret (secrets reach a
-child only on stdin, `secretStdin: true`), and a test enforces it.
+child only on stdin, `secretStdin: true`), and a test enforces it. `stdin` (added in WP16b, optional so code written
+to the first statement still compiles) is the child's standard input: a secret with `secretStdin: true`, or a plain
+input such as the moved marker's text with `secretStdin: false`; `describePlan` and errors never show it either way.
 
 ## 6. The wizard's prompts (pinned by a docs test against section 0 of `docs/setup.md`)
 

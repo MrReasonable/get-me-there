@@ -1,4 +1,5 @@
 import { type CommandName, type Flags, parseCommandLine } from './args.js';
+import { passwordCommand } from './commands/password.js';
 import { setupCommand } from './commands/setup.js';
 import { type Deps, EXIT } from './deps.js';
 
@@ -19,7 +20,7 @@ const COMMANDS: Record<CommandName, Command> = {
   logs: notBuilt,
   backup: notBuilt,
   restore: notBuilt,
-  password: notBuilt,
+  password: passwordCommand,
   smoke: notBuilt,
   update: notBuilt,
   uninstall: notBuilt,

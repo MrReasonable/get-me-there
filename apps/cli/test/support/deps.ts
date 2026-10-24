@@ -115,6 +115,7 @@ export function testWorld(
     username: 'op',
     env,
     machineTimeZone: 'Europe/London',
+    tmpDir: '/private/var/folders/x/T',
     portFree: async () => true,
     randomBytes: (n) => Buffer.alloc(n, 7),
     attach: async () => 0,

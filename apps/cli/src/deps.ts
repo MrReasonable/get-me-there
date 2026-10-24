@@ -48,6 +48,8 @@ export interface Deps {
   username: string;
   /** The process environment, read once by main.ts: only `fromEnv` answers and the platform input use it. */
   env: Readonly<Record<string, string | undefined>>;
+  /** `os.tmpdir()`: a Node binary under it is refused for services. */
+  tmpDir: string;
   /** `Intl.DateTimeFormat().resolvedOptions().timeZone`. */
   machineTimeZone: string;
   /** Whether 127.0.0.1:<port> can be listened on now. */

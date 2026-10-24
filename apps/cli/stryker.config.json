@@ -4,7 +4,13 @@
   "commandRunner": {
     "command": "pnpm exec vitest run --coverage.enabled=false test/plan test/services test/setup"
   },
-  "mutate": ["src/plan/**/*.ts", "src/services/**/*.ts", "src/setup/answers.ts", "src/setup/secrets.ts"],
+  "mutate": [
+    "src/plan/**/*.ts",
+    "src/services/**/*.ts",
+    "src/setup/appEnv.ts",
+    "src/setup/answers.ts",
+    "src/setup/secrets.ts"
+  ],
   "thresholds": {
     "high": 90,
     "low": 80,
