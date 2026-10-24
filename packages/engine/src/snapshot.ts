@@ -36,6 +36,18 @@ export function sellsCabin(ctx: EngineContext, providerId: ProviderId, cabin: Ca
 }
 
 /**
+ * The snapshot a pass plans, prices and cap-checks with `out` left out of discovery: a catch-up's browser provider
+ * (decision 79), or one a closed browser window leaves for the next scheduled run (decision 83). The stored snapshot keeps
+ * them, for reuse and for the record.
+ */
+export function withoutDiscovery(s: DefinitionSnapshot, out: readonly ProviderId[]): DefinitionSnapshot {
+  return {
+    ...s,
+    providers: { ...s.providers, discovery: s.providers.discovery.filter((id) => !out.includes(id)) },
+  };
+}
+
+/**
  * The execution's budget: the definition's, plus each discovery provider's own per-execution cap from config
  * (`providerMaxCalls`, camoufox's page cap; decision 69, arch-007). Frozen at creation, and refreshed only where a
  * manual resume refreshes the rest of the budget; the guard reads it from the snapshot, never from config.

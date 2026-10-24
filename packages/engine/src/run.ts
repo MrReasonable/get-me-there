@@ -10,6 +10,7 @@ import {
   type Logger,
   type OperatorMessageKind,
   type ProviderId,
+  type SkipDetail,
   type SkipReason,
   type Stage,
 } from '@gmt/core';
@@ -44,6 +45,11 @@ export interface Lane {
   readonly inFlight: Set<string>;
   /** Set once a provider-month, provider-lifetime or global-month breach took the provider out of the stage. */
   budgetOut: boolean;
+  /**
+   * Decision 79/83: the detail the provider's remaining cells were left with once the lane stopped loading browser pages
+   * (`outside-browser-window` after a window check, `catch-up-no-browser` for a catch-up); null while it may load them.
+   */
+  windowOut: SkipDetail | null;
 }
 
 /** In-memory state of one pass over one execution. Nothing here survives a restart; the DB does. */
@@ -51,6 +57,8 @@ export interface RunState {
   readonly executionId: string;
   readonly definitionId: string;
   readonly isChild: boolean;
+  /** Decision 79: a catch-up never loads a browser page, whatever its cells' state. */
+  readonly isCatchUp: boolean;
   readonly cell: CellKey | null;
   /** Read once from the execution row; a later PUT to the definition never reaches a running pass (Review Focus 4). */
   readonly snapshot: DefinitionSnapshot;
@@ -76,7 +84,16 @@ export interface RunState {
   /** Discovery tiles planned in this pass, per provider (parity, spec §8.1). */
   readonly plannedTiles: Map<ProviderId, number>;
   /** `key` makes a notice once-only across runs (camoufox's once-per-cool-down notice, cost-015). */
-  readonly notices: Array<{ kind: OperatorMessageKind; detail: string; key?: string }>;
+  readonly notices: Array<{
+    kind: OperatorMessageKind;
+    detail: string;
+    key?: string;
+  }>;
+  /**
+   * Decision 83: the browser window is checked before the next browser page: set for a fresh pass's first page (check
+   * a) and by a detected suspension (check c); a resume checks it before its claim instead (check b).
+   */
+  windowCheckDue: boolean;
   readonly log: Logger;
 }
 
@@ -123,6 +140,7 @@ export function newRun(
     executionId: exec.id,
     definitionId: exec.definitionId,
     isChild: exec.isChild,
+    isCatchUp: exec.isCatchUp,
     cell: exec.cell,
     snapshot: exec.snapshot,
     manual: opts.manual,
@@ -139,6 +157,7 @@ export function newRun(
     lanes: new Map(),
     plannedTiles: new Map(),
     notices: [],
+    windowCheckDue: opts.fresh,
     log: ctx.log.child({ executionId: exec.id, definitionId: exec.definitionId }),
   };
 }
@@ -161,14 +180,16 @@ export function laneFor(run: RunState, stage: Stage, providerId: ProviderId): La
     intakeSignal: AbortSignal.any([run.intake.signal, intake.signal]),
     inFlight: new Set(),
     budgetOut: false,
+    windowOut: null,
   };
   run.lanes.set(key, lane);
   return lane;
 }
 
 /**
- * Marks every `not_run` outcome of (stage, provider), except `exclude`, as skipped with `reason`.
- * Without exclusions this is one repository statement; with them, one transaction of per-cell updates.
+ * Marks every `not_run` outcome of (stage, provider), except `exclude`, as skipped with `reason` (and, for
+ * `scheduled_only`, its `skipDetail`, spec §3 rev 36). Without exclusions this is one repository statement; with them,
+ * one transaction of per-cell updates.
  */
 export function markRemaining(
   ctx: EngineContext,
@@ -177,19 +198,17 @@ export function markRemaining(
   providerId: ProviderId,
   reason: SkipReason,
   exclude: ReadonlySet<string> = new Set(),
+  skipDetail?: SkipDetail,
 ): number {
+  const to = { status: 'skipped' as const, reason, ...(skipDetail === undefined ? {} : { skipDetail }) };
   if (exclude.size === 0)
-    return ctx.repos.cells.setOutcomesForProvider(run.executionId, stage, providerId, ['not_run'], {
-      status: 'skipped',
-      reason,
-    });
+    return ctx.repos.cells.setOutcomesForProvider(run.executionId, stage, providerId, ['not_run'], to);
   const rows = ctx.repos.cells
     .outcomes(run.executionId, { stage, providerId })
     .filter((o) => o.status === 'not_run' && !exclude.has(cellKeyString(o)));
   if (rows.length === 0) return 0;
   ctx.db.transaction(() => {
-    for (const o of rows)
-      ctx.repos.cells.setOutcome(run.executionId, o, stage, providerId, { status: 'skipped', reason });
+    for (const o of rows) ctx.repos.cells.setOutcome(run.executionId, o, stage, providerId, to);
   });
   return rows.length;
 }
@@ -410,7 +429,12 @@ export function disableProvider(
 
 /** After a lane's pool drains: budget and disable marking of whatever is still not_run (spec §8.1 "remaining cells …"). */
 export function settleLane(ctx: EngineContext, run: RunState, stage: Stage, providerId: ProviderId): void {
-  if (laneFor(run, stage, providerId).budgetOut) markRemaining(ctx, run, stage, providerId, 'budget');
+  const lane = laneFor(run, stage, providerId);
+  if (lane.budgetOut) markRemaining(ctx, run, stage, providerId, 'budget');
+  // why: decision 83 — a page that was in flight when the window closed and came back not_run (aborted) is left for the
+  // next scheduled run too, never fetched by a later resume
+  if (lane.windowOut !== null)
+    markRemaining(ctx, run, stage, providerId, 'scheduled_only', new Set(), lane.windowOut);
   if (run.disabled.has(providerId))
     markRemaining(ctx, run, stage, providerId, run.disabledReason.get(providerId) ?? 'provider_disabled');
 }

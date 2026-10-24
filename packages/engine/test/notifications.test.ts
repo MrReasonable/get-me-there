@@ -214,6 +214,20 @@ describe('renderOperatorMessage', () => {
     expect(m.subject).toBe('[get-me-there] d: scheduled run skipped: no configured provider can run it');
     expect(m.body).not.toContain('raise the cap');
   });
+  it('a run past its browser window is its own kind, and never says a manual resume retries the provider (decision 83)', () => {
+    const m = renderOperatorMessage('browser_window', {
+      definitionName: 'd',
+      executionId: 'e1',
+      detail: 'browser pages left: this run is past its browser window.',
+    });
+    expect(m.subject).toBe('[get-me-there] d: browser pages left: this run is past its browser window');
+    expect(m.body).toContain(
+      "The line above says which run fetches the browser provider's cells and whether the other providers carried on.",
+    );
+    expect(m.body).not.toContain('The other providers carried on;');
+    expect(m.body).not.toContain('a manual resume retries this one');
+    expect(OPERATOR_KINDS).toContain('browser_window');
+  });
 });
 
 describe('LogNotifier (spec §8.3)', () => {

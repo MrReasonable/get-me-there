@@ -7,13 +7,23 @@ import { buildContext, type EngineContext } from './context.js';
 import { coverageCheckFor } from './coverageCheck.js';
 import { estimateRemainingFor, estimateStart, withBlocked } from './estimate.js';
 import { runSystemJob } from './maintenance.js';
+import { SMTP_TIMEOUTS } from './notifiers/email.js';
 import { createOrchestrator, type Orchestrator } from './orchestrator.js';
 import { isStalePaused, supersede } from './resume.js';
+import { autoResumeYields, catchUpAll } from './scheduler/catchUp.js';
 import { parseCron } from './scheduler/parseCron.js';
 import { createScheduler, type Scheduler } from './scheduler/scheduler.js';
 import { buildSnapshot } from './snapshot.js';
+import { browserLeftFor } from './stages/browserGate.js';
 import type { Engine, EngineDeps, EngineOptions } from './types.js';
 import { HOUR_MS } from './units.js';
+
+/**
+ * The longest the shutdown waits for scheduler callbacks already running (review S2): an operator notice being sent
+ * needs at most the SMTP connection and greeting timeouts before its message is written, plus a margin; it stays under
+ * the app's 25 s shutdown deadline. A callback still running past it writes nothing more (EngineContext.lifecycle).
+ */
+export const SHUTDOWN_DRAIN_MS = SMTP_TIMEOUTS.connectionTimeout + SMTP_TIMEOUTS.greetingTimeout + 2_000;
 
 /** Spec §10 `/health` degraded: job count ≠ enabled scheduled definitions, or an execution running past STUCK_AFTER_HOURS. */
 export function statusOf(
@@ -96,10 +106,13 @@ export function createEngine(deps: EngineDeps, options: EngineOptions = {}): Eng
           await supersede(ctx, orch, e);
           return;
         }
+        // why: decision 79 — a paused catch-up's one-shot yields to a firing since it paused (review S1)
+        if (e !== null && (await autoResumeYields(ctx, orch, e)) !== 'resume') return;
         const r = await orch.resume(id, { manual: false });
         ctx.log.info({ executionId: id, result: r.ok ? 'resumed' : r.code }, 'one-shot resume');
       },
-      onSystem: (name) => runSystemJob(ctx, name),
+      // why: decision 79 — the minute job catches up missed firings through the orchestrator; the daily jobs need none
+      onSystem: (name) => (name === 'catch-up' ? catchUpAll(ctx, orch) : runSystemJob(ctx, name)),
     },
     ctx.log,
   );
@@ -110,9 +123,19 @@ export function createEngine(deps: EngineDeps, options: EngineOptions = {}): Eng
     boot: () => bootEngine(ctx, orch, sched),
     shutdown: async () => {
       // why: spec §8.1 "SIGTERM: stop scheduler, abort in-flight (cells → not_run), status interrupted without
-      // incrementing the counter"; the WAL checkpoint and the lock release follow in WP8's shutdown (arch-020)
+      // incrementing the counter"; the WAL checkpoint and the lock release follow in WP8's shutdown (arch-020). Review
+      // S2's order: (1) nothing new starts, starts, resumes and verifications refused and no timer fires again;
+      // (2) every run stops taking new provider work at once (orch.shutdown stops each as SIGTERM, its calls in flight
+      // ending as they do), so none starts a call during the wait; (3) the scheduler's callbacks already running (a
+      // minute catch-up sending its notice) get a bounded wait while the runs settle; (4) the database is handed back,
+      // and a callback still running writes nothing more
+      ctx.lifecycle.closing = true;
       sched.stopAll();
-      await orch.shutdown();
+      ctx.heartbeat.stop();
+      const settled = orch.shutdown();
+      await Promise.all([sched.drain(SHUTDOWN_DRAIN_MS), settled]);
+      ctx.lifecycle.closed = true;
+      ctx.lifecycle.abort.abort();
       ctx.log.info({}, 'engine: shut down');
     },
     start: (id, opts) => orch.start(id, opts),
@@ -120,6 +143,7 @@ export function createEngine(deps: EngineDeps, options: EngineOptions = {}): Eng
     cancel: (id) => orch.cancel(id),
     verifyCell: (id, cell, opts) => orch.verifyCell(id, cell, opts),
     childCapPreview: (id, cell) => childCapPreview(ctx, id, cell),
+    browserLeftFor: (def) => browserLeftFor(ctx, def),
     estimate: (input, today) => {
       // why: ruling 9 — the save-time estimate is the worst case without reuse; confirmationOf(it), every line
       // included, is what setConfirmed records (cost M-2)

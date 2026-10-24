@@ -2,10 +2,12 @@ import {
   type DefinitionSnapshot,
   type Execution,
   formatPence,
+  type IsoDateTime,
   microGbpToPence,
   PENCE_TO_MICRO,
   type ProviderId,
   type SearchDefinition,
+  type SkipCode,
 } from '@gmt/core';
 import { RowRejected } from '@gmt/db';
 import { breachMessage, checkBudget, spendOf } from './budgetCheck.js';
@@ -16,6 +18,16 @@ import { type LineKey, lineKey } from './lines.js';
 import { notifyOperator } from './notify.js';
 import type { RunRegistry } from './registry.js';
 import { newRun } from './run.js';
+import { browserWindowEndFrom, loadsBrowserPages, windowAnchor } from './scheduler/browserWindow.js';
+import {
+  CatchUpResumed,
+  FiringTaken,
+  pausedCatchUp,
+  plannedSnapshot,
+  replacePausedCatchUp,
+  seedCatchUpBrowser,
+  supersededCatchUp,
+} from './scheduler/catchUpStart.js';
 import { buildSnapshot, sellsCabin } from './snapshot.js';
 import { skipBlockedDiscovery } from './stages/reuse.js';
 import type { Estimate, StartOptions, StartResult } from './types.js';
@@ -49,7 +61,28 @@ export interface Confirmation {
   calls: number | null;
 }
 
-/** Records a scheduled run that did not start (spec §7 statuses skipped_*), then notifies (spec §8.1). */
+/** The refusal of a start or skip whose firing another row already holds (spec §7 rev 36 firing unique index). */
+export const FIRING_TAKEN = 'this scheduled firing already has its run or its skip recorded';
+
+/** The firing a scheduled row stands for and, on a `skipped_missed` row, why it was not caught up (spec §7 rev 36). */
+export interface FiringRow {
+  scheduledFor: IsoDateTime;
+  skipCode?: SkipCode;
+}
+
+/** What recordSkipped did: the row it wrote, or why it wrote nothing (the firing was taken; the catch-up resumed). */
+export type SkipRecord =
+  | { recorded: true; executionId: string }
+  | { recorded: false; why: 'firing-taken' | 'active' };
+
+/**
+ * Records a scheduled run that did not start (spec §7 statuses skipped_*), then notifies (spec §8.1). With a firing the
+ * row inserts through the firing unique index: when another row already holds that firing nothing is written or sent
+ * (`firing-taken`, spec §7 rev 36 "the loser of a race no-ops"). A paused catch-up of the definition is superseded in
+ * the same immediate transaction as the skip's insert (decision 79: the firing's row replaces it, whatever that row
+ * is); a lost insert rolls the supersede back with it, and a catch-up a resume claimed meanwhile rolls the skip back
+ * (`active`: it is running again, and the firing is judged again on the next pass).
+ */
 export async function recordSkipped(
   ctx: EngineContext,
   def: SearchDefinition,
@@ -57,16 +90,50 @@ export async function recordSkipped(
   estimate: Estimate | null,
   status: 'skipped_budget' | 'skipped_confirm' | 'skipped_window' | 'skipped_missed',
   detail: string,
-): Promise<string> {
-  const exec = ctx.repos.executions.create({
+  firing: FiringRow | null = null,
+): Promise<SkipRecord> {
+  const input = {
     definitionId: def.id,
     isChild: false,
     cell: null,
     snapshot,
     estimate,
-    trigger: 'schedule',
+    trigger: 'schedule' as const,
     status,
-  });
+  };
+  const supersedes = firing === null ? null : pausedCatchUp(ctx.repos.executions.activeParent(def.id));
+  let exec: Execution | null;
+  try {
+    exec = ctx.db.immediateTransaction(() => {
+      if (firing === null) return ctx.repos.executions.create(input);
+      replacePausedCatchUp(ctx, supersedes);
+      const e = ctx.repos.executions.createForFiring({
+        ...input,
+        scheduledFor: firing.scheduledFor,
+        ...(firing.skipCode === undefined ? {} : { skipCode: firing.skipCode }),
+      });
+      if (e === null) throw new FiringTaken();
+      return e;
+    });
+  } catch (err) {
+    if (err instanceof CatchUpResumed) {
+      ctx.log.info(
+        { definitionId: def.id, status, scheduledFor: firing?.scheduledFor ?? null },
+        'execution: the paused catch-up resumed first; nothing recorded',
+      );
+      return { recorded: false, why: 'active' };
+    }
+    if (!(err instanceof FiringTaken)) throw err;
+    exec = null;
+  }
+  if (exec === null) {
+    ctx.log.info(
+      { definitionId: def.id, status, scheduledFor: firing?.scheduledFor ?? null },
+      'execution: firing already recorded',
+    );
+    return { recorded: false, why: 'firing-taken' };
+  }
+  if (supersedes !== null) supersededCatchUp(ctx, supersedes, exec);
   await notifyOperator(ctx, status, {
     executionId: exec.id,
     definitionId: def.id,
@@ -74,10 +141,10 @@ export async function recordSkipped(
     detail,
   });
   ctx.log.info(
-    { executionId: exec.id, definitionId: def.id, status },
+    { executionId: exec.id, definitionId: def.id, status, scheduledFor: exec.scheduledFor },
     'execution: scheduled run not started',
   );
-  return exec.id;
+  return { recorded: true, executionId: exec.id };
 }
 
 /**
@@ -181,23 +248,40 @@ export async function startExecution(
     return refused('not_found', `definition ${definitionId} not found`, { definitionId });
   // why: a disabled definition is neither scheduled nor started by hand until it is enabled again
   if (!def.enabled) return refused('disabled', 'this definition is disabled', { definitionId });
-  if (ctx.repos.executions.activeParent(def.id) !== null)
-    return refused('active', 'another execution of this definition is active', { definitionId });
+  const clash = () => refused('active', 'another execution of this definition is active', { definitionId });
+  const active = ctx.repos.executions.activeParent(def.id);
+  // why: spec §8.2 rev 36 — a paused catch-up never blocks a later firing; that firing's start supersedes it inside
+  // its own immediate transaction below (a refusal's skipped_* row does the same in recordSkipped), so the two rows can
+  // never both be active
+  const supersedes = opts.scheduledFor === undefined ? null : pausedCatchUp(active);
+  if (active !== null && supersedes === null) return clash();
   const scheduled = opts.trigger === 'schedule';
+  const catchUp = opts.isCatchUp === true;
   const built = buildSnapshot(ctx, def, opts.trigger);
   const { snapshot, cells } = built;
+  const firing: FiringRow | null =
+    opts.scheduledFor === undefined ? null : { scheduledFor: opts.scheduledFor };
+  const taken = () =>
+    refused('firing-taken', FIRING_TAKEN, { definitionId, scheduledFor: opts.scheduledFor });
+  /**
+   * A scheduled refusal's skipped_* row, through the firing index: null when it was written, else the refusal standing
+   * for what happened instead (the firing taken, or the paused catch-up resumed meanwhile).
+   */
+  const skip = async (
+    status: Parameters<typeof recordSkipped>[4],
+    estimate: Estimate | null,
+    detail: string,
+  ): Promise<StartResult | null> => {
+    const r = await recordSkipped(ctx, def, snapshot, estimate, status, detail, firing);
+    if (r.recorded) return null;
+    return r.why === 'firing-taken' ? taken() : clash();
+  };
 
   if (cells.length === 0) {
     const message = `the window resolves to no departure dates (${snapshot.resolved.departureFrom} to ${snapshot.resolved.departureTo})`;
     if (scheduled) {
-      await recordSkipped(
-        ctx,
-        def,
-        snapshot,
-        null,
-        'skipped_window',
-        `The ${message}; the schedule is disabled.`,
-      );
+      const lost = await skip('skipped_window', null, `The ${message}; the schedule is disabled.`);
+      if (lost !== null) return lost;
       ctx.repos.definitions.update(def.id, { enabled: false }); // why: spec §6.1 "record skipped_window … and disable the schedule"
       ctx.hooks.unregisterSchedule(def.id);
     }
@@ -223,13 +307,16 @@ export async function startExecution(
     return refused('disabled', message, { definitionId, notes: built.notes });
   }
 
-  const planned = estimateStart(ctx, snapshot, cells, def.id);
+  // why: decision 79 — a catch-up keeps the browser provider in its snapshot for reuse only, so its pages are never
+  // planned, priced or cap-checked
+  const planned = estimateStart(ctx, plannedSnapshot(snapshot, catchUp), cells, def.id);
   const check = checkBudget(ctx, spendOf(planned), snapshot.budget, null, def.id);
   const estimate = withBlocked(planned, check.blockedBy);
   if (nothingToSearch(snapshot, planned, check.blocked, (id) => sellsCabin(ctx, id, snapshot.cabin))) {
     const starved = planned.perProvider.some((p) => !check.blocked.has(lineKey(p.stage, p.providerId)));
     const message = `budget cap: ${breachMessage(check.breaches)}${starved ? '; every discovery provider is blocked, so nothing would be searched' : ''}`;
-    if (scheduled) await recordSkipped(ctx, def, snapshot, estimate, 'skipped_budget', `The ${message}.`);
+    const lost = scheduled ? await skip('skipped_budget', estimate, `The ${message}.`) : null;
+    if (lost !== null) return lost;
     return refused('cap', message, { breaches: check.breaches });
   }
 
@@ -239,8 +326,8 @@ export async function startExecution(
   const confirm = confirmationNeeded(ctx, estimate, check.blocked, confirmed);
   if (confirm !== null) {
     const message = `${confirm.reason} and has not been confirmed`;
-    if (scheduled)
-      await recordSkipped(ctx, def, snapshot, estimate, 'skipped_confirm', `This run ${message}.`);
+    const lost = scheduled ? await skip('skipped_confirm', estimate, `This run ${message}.`) : null;
+    if (lost !== null) return lost;
     return refused('confirm', message, {
       estimateMicroGbp: confirm.estimateMicroGbp,
       estimatePence: confirm.estimatePence,
@@ -256,30 +343,55 @@ export async function startExecution(
     // seeded in one BEGIN IMMEDIATE, so a crash can never leave an execution without its cells (ssr-07); blocked
     // providers are seeded skipped:budget in it
     exec = ctx.db.immediateTransaction(() => {
-      const e = ctx.repos.executions.create({
+      const input = {
         definitionId: def.id,
         isChild: false,
         cell: null,
         snapshot,
         estimate,
         trigger: opts.trigger,
-        status: 'running',
+        status: 'running' as const,
+      };
+      // why: a catch-up that a resume claimed since the read above is running again: its guarded cancel changes nothing,
+      // CatchUpResumed rolls this transaction back, and the firing waits like any other blocked one
+      replacePausedCatchUp(ctx, supersedes);
+      // why: spec §7 rev 36 — a scheduled start inserts through the firing unique index inside this immediate
+      // transaction; a loser seeds no cells, launches nothing, sends no notice and (thrown, so rolled back) supersedes
+      // nothing
+      const e =
+        opts.scheduledFor === undefined
+          ? ctx.repos.executions.create(input)
+          : ctx.repos.executions.createForFiring({
+              ...input,
+              scheduledFor: opts.scheduledFor,
+              isCatchUp: catchUp,
+            });
+      if (e === null) throw new FiringTaken();
+      // why: decision 83 — the run's browser window: its anchor (the firing, or a manual run's own start) plus 1.5 ×
+      // the start estimate's seconds, written once here and moved only by a live-tick resume
+      ctx.repos.executions.patch(e.id, {
+        browserWindowEnd: browserWindowEndFrom(
+          windowAnchor(e.scheduledFor, e.startedAt ?? e.createdAt),
+          estimate.seconds,
+        ),
       });
       ctx.repos.cells.seed(e.id, cells, discovery);
+      const scope = { executionId: e.id, definitionId: def.id, snapshot, manual: false };
       for (const id of discovery) {
         // why: spec rev 10 — a provider that does not sell the snapshot's cabin is never called; its cells are no_data
         if (!sellsCabin(ctx, id, snapshot.cabin))
           ctx.repos.cells.markNoData(e.id, 'discovery', id, 'cabin-not-offered');
-        else if (check.blocked.has(lineKey('discovery', id)))
-          skipBlockedDiscovery(ctx, { executionId: e.id, definitionId: def.id, snapshot, manual: false }, id);
+        else if (catchUp && loadsBrowserPages(id)) seedCatchUpBrowser(ctx, scope, id);
+        else if (check.blocked.has(lineKey('discovery', id))) skipBlockedDiscovery(ctx, scope, id);
       }
       return e;
     });
   } catch (err) {
-    if (isActiveClash(err))
-      return refused('active', 'another execution of this definition is active', { definitionId });
+    if (err instanceof FiringTaken) return taken();
+    if (err instanceof CatchUpResumed || isActiveClash(err)) return clash();
     throw err;
   }
+  if (supersedes !== null) supersededCatchUp(ctx, supersedes, exec);
   const run = newRun(ctx, exec, { manual: false, fresh: true, blocked: check.blocked });
   run.log.info(
     { trigger: opts.trigger, cells: cells.length, notes: built.notes, blocked: [...check.blocked] },

@@ -185,11 +185,14 @@ export function parityNotice(ctx: EngineContext, run: RunState): Notice | null {
   const counts = ctx.repos.ledger.countsFor(run.executionId).perProvider;
   const breaks: string[] = [];
   for (const [providerId, planned] of run.plannedTiles) {
-    // why: a disabled or budget-capped provider stops requesting its planned tiles by design, which is not a parity break
+    // why: a disabled, budget-capped or window-stopped provider (decision 83: its pages left for the next scheduled run)
+    // stops requesting its planned tiles by design, which is not a parity break
+    const lane = run.lanes.get(`discovery|${providerId}`);
     if (
       planned === 0 ||
       run.disabled.has(providerId) ||
-      run.lanes.get(`discovery|${providerId}`)?.budgetOut === true
+      lane?.budgetOut === true ||
+      (lane !== undefined && lane.windowOut !== null)
     )
       continue;
     const row = counts.find((c) => c.providerId === providerId && c.stage === 'discovery');

@@ -7,6 +7,7 @@
 import {
   asIsoDate,
   type BlockedPage,
+  type Cabin,
   type CellOutcome,
   type DiscoveryQuery,
   type DiscoveryTileResult,
@@ -16,6 +17,7 @@ import {
   GRID_HORIZON_DAYS,
   GRID_STEP_DAYS,
   GRID_TIMES,
+  type IsoDateTime,
   type OperatorMessage,
   type PreflightResult,
   ProviderError,
@@ -23,6 +25,7 @@ import {
   parseConfig,
   type SearchDefinition,
   Secret,
+  systemClock,
   type TilePlan,
 } from '@gmt/core';
 import {
@@ -43,9 +46,11 @@ import {
   planGridTiles,
   planSingleCells,
 } from '@gmt/providers';
+import type { ProviderLimiter } from '@gmt/providers/testing';
 import { vi } from 'vitest';
 import { buildContext, type EngineContext } from '../../src/context.js';
-import { createOrchestrator } from '../../src/orchestrator.js';
+import { createOrchestrator, type Orchestrator } from '../../src/orchestrator.js';
+import type { EngineDeps } from '../../src/types.js';
 import {
   baseDefinition,
   capturingLogger,
@@ -107,8 +112,23 @@ function stub(
   sourceKind: 'scraped-self' | 'authorised-cached',
   o: {
     cells: number;
+    /** WP16a review R11: the cabins the stub sells (default economy only). */
+    cabins?: Cabin[];
     failTile?: number;
     error?: ProviderError;
+    /** WP16a: the first `failCalls` pages fail with `error` (whatever their index), the later ones answer. */
+    failCalls?: number;
+    /** WP16a: awaited before the page of this call number (1-based) answers, so a test can hold a page in flight. */
+    holdCall?: { call: number; until: Promise<void> };
+    /**
+     * WP16a: every page goes through this limiter (the production createLimiter, shared by every run of the engine) and
+     * takes `pageMs` of (fake) time once admitted; `pageStarts` records each admission.
+     */
+    limiter?: {
+      run: ProviderLimiter['run'];
+      pageMs: number;
+      pageStarts: Array<{ executionId: string | null; at: number }>;
+    };
     preflight?: PreflightResult;
     /** One preflight answer per run, in order (fix round 1, arch M3); the last repeats. */
     preflights?: PreflightResult[];
@@ -124,11 +144,31 @@ function stub(
   const fetchTile = async (
     plan: TilePlan,
     q: DiscoveryQuery,
-    pctx: { executionId: string | null },
+    pctx: { executionId: string | null; beforeSend?: () => void },
   ): Promise<DiscoveryTileResult> => {
+    // why: as http-kit does, the engine's last check (ProviderContext.beforeSend) runs once the limiter admits the page
+    // and before it is sent; an AbortedError from it means the worker is never asked
+    if (o.limiter !== undefined) {
+      const l = o.limiter;
+      await l.run(
+        async () => {
+          pctx.beforeSend?.();
+          l.pageStarts.push({ executionId: pctx.executionId, at: Date.now() });
+          await new Promise((r) => setTimeout(r, l.pageMs));
+        },
+        {
+          signal: new AbortController().signal,
+          maxWaitMs: 86_400_000,
+          providerId: id,
+          endpointPath: '/v1/page',
+        },
+      );
+    } else pctx.beforeSend?.();
     calls.push(plan);
     queries.push(q);
-    const failing = o.failTile === plan.index && o.error !== undefined;
+    if (o.holdCall !== undefined && calls.length === o.holdCall.call) await o.holdCall.until;
+    const failing =
+      (o.failTile === plan.index || calls.length <= (o.failCalls ?? 0)) && o.error !== undefined;
     // why: http-kit reserves before every attempt; a refused connection is a no-page row, a page answer a page row
     const r = ctxOf().budget.reserve({
       providerId: id,
@@ -181,7 +221,7 @@ function stub(
     id,
     displayName: id,
     suppliedFields: ['price'],
-    cabins: ['economy'],
+    cabins: o.cabins ?? ['economy'],
     calls,
     queries,
     cells: o.cells,
@@ -223,7 +263,32 @@ function stub(
   };
 }
 export const stubCamoufox = (o: Parameters<typeof stub>[2]): Stub => stub('camoufox', 'scraped-self', o);
-export const stubTravelpayouts = (o: { cells: number }): Stub =>
+
+/**
+ * WP16a: a SearchApi with only a verification capability, which fails the test if it is ever asked (the catch-up tests
+ * never reach verification). Its config needs SEARCHAPI_KEY and the 40usd plan (the trial is excluded from schedules).
+ */
+export function stubSearchApiVerification(): Stub {
+  return {
+    id: 'searchapi',
+    displayName: 'searchapi',
+    suppliedFields: ['price'],
+    cabins: ['economy'],
+    calls: [],
+    queries: [],
+    cells: 0,
+    bind: () => undefined,
+    verification: {
+      info: { sourceKind: 'scraped-search', maxAgeHours: 0, provenanceNote: 'searchapi stub' },
+      estimate: () => ({ calls: 5, costMicroGbp: 0, seconds: 10, notes: [] }),
+      search: async () => {
+        throw new Error('the SearchApi stub was asked to search');
+      },
+    },
+    healthcheck: async () => ({ ok: true, detail: 'stub' }),
+  };
+}
+export const stubTravelpayouts = (o: Parameters<typeof stub>[2]): Stub =>
   stub('travelpayouts', 'authorised-cached', o);
 
 /**
@@ -327,6 +392,11 @@ export function realCamoufox(
 
 export interface CamoufoxEngine {
   ctx: EngineContext;
+  /** The deps the context was built from, for a full `createEngine` (boot, the minute job, croner). */
+  deps: EngineDeps;
+  /** The engine's clock: fixed at T0 unless `systemClock`, which moves the faked system time. */
+  clock: ReturnType<typeof fixedClock>;
+  orch: Orchestrator;
   definition: SearchDefinition;
   notifications: OperatorMessage[];
   logs: LogLine[];
@@ -356,6 +426,16 @@ export function engineWith(
     maxFreeCalls?: number;
     /** More of the app's environment (WP15 fix round 1: STUCK_AFTER_HOURS, the scroll caps). */
     env?: Record<string, string>;
+    /** WP16a: the engine reads the faked system time (vi.useFakeTimers must be on), so croner and the engine agree. */
+    systemClock?: boolean;
+    /** WP16a: the definition's window (default: absolute from 2026-11-02, one departure day per cell). */
+    window?: SearchDefinition['window'];
+    /** WP16a: the definition's verification providers (default none). */
+    verification?: ProviderId[];
+    /** WP16a: when the definition is created (default: the clock's start). */
+    createdAt?: IsoDateTime;
+    /** WP16a: the clock's start (default T0). */
+    now?: IsoDateTime;
   } = {},
 ): CamoufoxEngine {
   const parsed = parseConfig(
@@ -375,7 +455,17 @@ export function engineWith(
   );
   if (!parsed.ok) throw new Error(JSON.stringify(parsed.errors));
   const config = parsed.config;
-  const clock = fixedClock(T0);
+  const fixed = fixedClock(o.createdAt ?? o.now ?? T0);
+  const clock: ReturnType<typeof fixedClock> =
+    o.systemClock === true
+      ? {
+          now: () => systemClock.now(),
+          todayLondon: () => systemClock.todayLondon(),
+          advance: (ms) => vi.setSystemTime(new Date(Date.now() + ms)),
+          set: (at) => vi.setSystemTime(new Date(at)),
+        }
+      : fixed;
+  if (o.systemClock === true) clock.set(o.createdAt ?? o.now ?? T0);
   const db = openDatabase(':memory:');
   applyMigrations(db, MIGRATIONS_DIR);
   const repos = createRepos(db, clock, { allowSynthetic: false });
@@ -399,7 +489,7 @@ export function engineWith(
   const log = capturingLogger(logs);
   const http = createHttpKit({ budget, cache, clock, log, secrets: [], syntheticAllowed: false, limits: {} });
   const notifications: OperatorMessage[] = [];
-  const ctx = buildContext({
+  const deps: EngineDeps = {
     config,
     db,
     repos,
@@ -414,7 +504,8 @@ export function engineWith(
     ],
     clock,
     log,
-  });
+  };
+  const ctx = buildContext(deps);
   for (const s of stubs) s.bind(() => ctx);
   const orch = createOrchestrator(ctx);
   const cells = Math.max(...stubs.map((s) => s.cells));
@@ -428,27 +519,32 @@ export function engineWith(
     ...(o.maxFreeCalls === undefined
       ? {}
       : { budget: { ...baseDefinition().budget, maxFreeCalls: o.maxFreeCalls } }),
-    window: { kind: 'absolute', from: first, to: last },
+    window: o.window ?? { kind: 'absolute', from: first, to: last },
     minNights: 10,
     maxNights: 10,
     providers: {
-      discovery: ids,
-      verification: [],
+      discovery: ids.filter((i) => stubs.find((s) => s.id === i)?.discovery !== undefined),
+      verification: o.verification ?? [],
       discoveryRefreshHours: Object.fromEntries(ids.map((i) => [i, 168])),
     },
     scheduleCron: o.scheduleCron ?? null,
   });
+  if (o.createdAt !== undefined && o.now !== undefined) clock.set(o.now);
   const settle = async (id: string): Promise<Execution> => {
     for (let i = 0; i < 2000; i++) {
       const e = repos.executions.get(id);
       if (e === null) throw new Error(`no execution ${id}`);
       if (e.status !== 'pending' && e.status !== 'running') return e;
-      await new Promise((r) => setTimeout(r, 2));
+      // why: under fake timers (WP16a's croner tests) a real wait would never let the pass's timers run
+      await (vi.isFakeTimers() ? vi.advanceTimersByTimeAsync(2) : new Promise((r) => setTimeout(r, 2)));
     }
     throw new Error('execution did not settle');
   };
   return {
     ctx,
+    deps,
+    clock,
+    orch,
     definition,
     notifications,
     logs,

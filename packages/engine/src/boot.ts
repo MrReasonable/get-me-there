@@ -1,14 +1,11 @@
-import { type IsoDateTime, isoDateTimeOfEpochMs, type SearchDefinition } from '@gmt/core';
+import { isoDateTimeOfEpochMs } from '@gmt/core';
 import type { EngineContext } from './context.js';
 import { FX_REFRESH_CRON, MAINTENANCE_CRON } from './maintenance.js';
 import { notifyOperator } from './notify.js';
 import type { Orchestrator } from './orchestrator.js';
 import { isStalePaused, olderThanRefresh, supersede } from './resume.js';
-import { previousFiring } from './scheduler/parseCron.js';
+import { autoResumeYields, CATCH_UP_CRON, catchUpIsolated } from './scheduler/catchUp.js';
 import type { Scheduler } from './scheduler/scheduler.js';
-import { buildSnapshot } from './snapshot.js';
-import { recordSkipped } from './start.js';
-import { formatInstant } from './text.js';
 
 /** Spec §5.3 "boot sweep marks pending older than 10 minutes unknown (still counted)". */
 export const PENDING_LEDGER_MAX_AGE_MS = 10 * 60_000;
@@ -16,56 +13,16 @@ export const PENDING_LEDGER_MAX_AGE_MS = 10 * 60_000;
 export const FX_AFTER_BOOT_MS = 60_000;
 
 /**
- * Spec §8.2: "a boot that finds the last scheduled firing was missed records skipped_missed and notifies", once per
- * firing. A firing is not missed when the definition was last changed at or after it (the schedule may not have
- * existed then, ssr2-11), when a scheduled execution was created at or after it, when an execution of the definition
- * was active at that instant (the tick ran and was blocked, which records nothing by design, ssr-16), or when no
- * configured provider can run the definition on a schedule (the tick ran and refused, ssr-005).
- */
-async function detectMissed(ctx: EngineContext, def: SearchDefinition, bootAt: IsoDateTime): Promise<void> {
-  if (def.scheduleCron === null) return;
-  const prev = previousFiring(def.scheduleCron, def.scheduleTz, new Date(bootAt));
-  if (prev === null) return;
-  const prevAt = isoDateTimeOfEpochMs(prev.getTime());
-  // why: ssr2-11 — the schedule as it is now may not have existed at that firing; updated_at bounds when it took effect
-  if (prevAt <= def.updatedAt) return;
-  const lastFiring = ctx.repos.executions.lastScheduledFiring(def.id);
-  if (lastFiring !== null && lastFiring >= prevAt) return;
-  const activeThen = ctx.repos.executions
-    .listForDefinition(def.id, { limit: 50, includeChildren: false })
-    .some((e) => (e.startedAt ?? e.createdAt) <= prevAt && (e.finishedAt === null || e.finishedAt >= prevAt));
-  if (activeThen) return;
-  const built = buildSnapshot(ctx, def, 'schedule');
-  // why: ssr-005: a definition no configured provider can run on a schedule is refused 'disabled' at every tick, which
-  // writes no execution (start.ts; po-003 keeps it out of skipped_budget). That firing ran and refused, so "did not
-  // happen because the app was not running" would be false; the refusal's own notice already told the operator.
-  if (built.snapshot.providers.discovery.length + built.snapshot.providers.verification.length === 0) {
-    ctx.log.info(
-      { definitionId: def.id, firing: prevAt },
-      'boot: last firing refused for no runnable provider, not missed',
-    );
-    return;
-  }
-  await recordSkipped(
-    ctx,
-    def,
-    built.snapshot,
-    null,
-    'skipped_missed',
-    `The run scheduled for ${formatInstant(prevAt, def.scheduleTz)} did not happen because the app was not running.`,
-  );
-}
-
-/**
  * Spec §8.1 "Boot order": (1) sweep — pending ledger rows older than 10 minutes → unknown; pending executions older than
  * the boot and running executions → interrupted with auto_resume_count + 1; (2) if AUTO_RESUME, every interrupted
  * execution with count ≤ MAX_AUTO_RESUMES resumes (graceful SIGTERM rows were not incremented); above the cap, the
- * operator is told, and a run older than its discovery refresh allows is superseded instead of resumed from its old
- * snapshot (ssr2-09); (3) every stale paused run is superseded, with or without a resume_after or a schedule (ssr-11,
+ * operator is told, a run older than its discovery refresh allows is superseded instead of resumed from its old
+ * snapshot (ssr2-09), and a catch-up yields to a firing since it stopped running (`autoResumeYields`); (3) every stale paused run is superseded, with or without a resume_after or a schedule (ssr-11,
  * ssr2-06, ssr M3), and one-shot jobs are re-registered for the others' resume_after; an interrupted run left alone
- * here (AUTO_RESUME off, or capped) is superseded by the tick at the next firing once stale; (4) then cron
- * (after recording any missed firing) and the daily system jobs, plus an FX refresh a minute after boot when no rate
- * is a day fresh (po-011).
+ * here (AUTO_RESUME off, or capped) is superseded by the tick at the next firing once stale; (4) then cron, after
+ * catching up each definition's missed firing once (`catchUpIsolated`, decision 79: a catch-up, a skipped_missed
+ * row with its code, or nothing; a definition that throws is logged and the boot carries on), the daily system jobs and the minute catch-up job, plus an FX refresh a minute after
+ * boot when no rate is a day fresh (po-011).
  * Boot makes no network call.
  */
 export async function bootEngine(ctx: EngineContext, orch: Orchestrator, sched: Scheduler): Promise<void> {
@@ -117,6 +74,8 @@ export async function bootEngine(ctx: EngineContext, orch: Orchestrator, sched: 
       if (await supersede(ctx, orch, exec)) superseded += 1;
       continue;
     }
+    // why: decision 79 (review S1) — an interrupted catch-up yields to a firing since it stopped running
+    if ((await autoResumeYields(ctx, orch, exec)) !== 'resume') continue;
     const r = await orch.resume(exec.id, { manual: false });
     if (r.ok) resumed += 1;
     log.info(
@@ -144,11 +103,18 @@ export async function bootEngine(ctx: EngineContext, orch: Orchestrator, sched: 
 
   for (const def of ctx.repos.definitions.list()) {
     if (!def.enabled || def.deletedAt !== null || def.scheduleCron === null) continue;
-    await detectMissed(ctx, def, bootAt);
+    // why: one definition whose catch-up throws is logged and the boot carries on, so its own job is still registered
+    // and the app still starts (the operator can then reach the UI to fix it)
+    await catchUpIsolated(ctx, orch, def, bootAt);
     sched.register(def);
   }
   sched.registerSystem('fx-refresh', FX_REFRESH_CRON, ctx.config.schedulerTimezone);
   sched.registerSystem('maintenance', MAINTENANCE_CRON, ctx.config.schedulerTimezone);
+  // why: decision 79 — a native install keeps running through sleep, so waking is the common case: every minute the
+  // app is up, a firing missed while asleep is caught up (or recorded skipped) once
+  sched.registerSystem('catch-up', CATCH_UP_CRON, ctx.config.schedulerTimezone);
+  // why: decision 83 — beside the minute job, the heartbeat that detects a suspension (the machine slept)
+  ctx.heartbeat.start();
   // why: spec §5.6 the refresh "runs after boot"; boot itself stays network-free, so it is a one-shot a minute later
   const fxStale = ctx.repos.fx.latest('EUR', 1, ctx.clock.todayLondon()) === null;
   if (fxStale) sched.runSystemSoon('fx-refresh', FX_AFTER_BOOT_MS);

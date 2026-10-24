@@ -13,7 +13,9 @@ import { lineKey } from './lines.js';
 import type { Orchestrator } from './orchestrator.js';
 import type { RunRegistry } from './registry.js';
 import { disabledFor, markRemaining, newRun, resumableCells } from './run.js';
-import { sellsCabin, snapshotBudget } from './snapshot.js';
+import { browserWindowEndFrom, windowAnchor } from './scheduler/browserWindow.js';
+import { sellsCabin, snapshotBudget, withoutDiscovery } from './snapshot.js';
+import { browserLeftAtResume, browserWindowNotice, leaveAtResume } from './stages/browserGate.js';
 import {
   REUSE_TOLERANCE,
   refreshHoursOf,
@@ -24,6 +26,17 @@ import {
 import { confirmationNeeded, nothingToSearch, refused } from './start.js';
 import type { StartResult } from './types.js';
 import { HOUR_MS } from './units.js';
+
+export interface ResumeOptions {
+  manual: boolean;
+  /**
+   * Decision 83: the resume is the definition's own punctual live tick at this firing. It re-anchors the run before the
+   * window check: `scheduled_for` becomes the firing (unless another row holds it) and the window's end is worked out
+   * again from the estimate of the cells still resumable, so the firing the operator chose loads browser pages; both are
+   * written inside the claim, so a refused resume moves neither.
+   */
+  liveTickFiring?: IsoDateTime;
+}
 
 /**
  * Spec §8.1 "Resume": allowed on interrupted | paused_* | cancelled, and on completed when retryable errors remain
@@ -40,13 +53,17 @@ import { HOUR_MS } from './units.js';
  * cost-r1-001, ruling 2) and
  * the pass's runnable plan added to the stored estimate (cost-r1-009, cost-r1-014) all go into the same transaction as
  * the compare-and-set. An automatic resume of a paused_error with nothing resumable leaves it as it is, unclaimed
- * (ruling 10); a manual resume re-admits the providers disabled in the previous pass.
+ * (ruling 10); a manual resume re-admits the providers disabled in the previous pass. Decision 83: before anything is
+ * priced, a live-tick resume re-anchors the run to its firing (worked out in memory, written by one guarded statement
+ * inside the claim), and a browser provider outside the run's window (or any browser provider of a catch-up) is left out
+ * of the estimate and the cap check; its cells the pass would fetch become skipped:scheduled_only inside the claim
+ * (outside-browser-window, with one notice per run; catch-up-no-browser for a catch-up).
  */
 export async function resumeExecution(
   ctx: EngineContext,
   reg: RunRegistry,
   executionId: string,
-  opts: { manual: boolean },
+  opts: ResumeOptions,
 ): Promise<StartResult> {
   const exec = ctx.repos.executions.get(executionId);
   if (exec === null) return refused('not_found', `execution ${executionId} not found`, { executionId });
@@ -78,7 +95,7 @@ export async function resumeExecution(
     return refused('not_found', `this execution ${NEVER_STARTED}; start a new run`, { executionId });
   }
   const refresh = opts.manual && exec.status === 'paused_budget' && !exec.isChild;
-  const current = refresh
+  const refreshed = refresh
     ? {
         ...exec,
         snapshot: {
@@ -87,10 +104,21 @@ export async function resumeExecution(
         },
       }
     : exec;
+  const anchored = reanchor(ctx, refreshed, opts);
+  // why: decision 83 check (b) — before anything is priced or cap-checked, a browser provider outside the window is
+  // left out of the pass, its estimate and its cap check, so its monthly cap cannot refuse a resume the others can run
+  const leaving = browserLeftAtResume(ctx, anchored);
+  const outside = leaving.providers;
+  const current =
+    outside.length === 0 ? anchored : { ...anchored, snapshot: withoutDiscovery(anchored.snapshot, outside) };
   const remaining = estimateRemainingFor(ctx, current, opts.manual);
   const needed = remaining.perProvider.filter((p) => p.calls > 0);
-  // why: ssr M2 — cells another run has priced since need no call but are still work: the pass copies them
-  const copyable = needed.length === 0 && hasReusableWork(ctx, current, opts.manual);
+  // why: ssr M2 — cells another run has priced since need no call but are still work: the pass copies them; and
+  // decision 83 — cells a closed window leaves for the next scheduled run are work too, so View D stops offering them
+  const copyable =
+    needed.length === 0 &&
+    (hasReusableWork(ctx, current, opts.manual) ||
+      outside.some((id) => resumableCells(ctx, executionId, 'discovery', id, opts.manual).length > 0));
   if (needed.length === 0 && !copyable && current.status === 'completed')
     return refused('active', 'nothing left to retry on this execution', { executionId });
   if (needed.length === 0 && !copyable && !opts.manual && current.status === 'paused_error')
@@ -142,12 +170,32 @@ export async function resumeExecution(
       );
   }
   let departed = 0;
+  let leftOutside = 0;
+  // why: decision 83 — the re-anchor is written only by a resume that is performed: inside the claim, in one guarded
+  // statement with the window's end; when another row took the firing meanwhile the pass carries on under the old window
+  let launched = anchored;
+  let left = leaving;
   const claimed = ctx.db.immediateTransaction(() => {
     if (!ctx.repos.executions.claimResume(executionId)) return false;
+    if (
+      anchored !== refreshed &&
+      anchored.scheduledFor !== null &&
+      anchored.browserWindowEnd !== null &&
+      !ctx.repos.executions.reanchorFiring(executionId, anchored.scheduledFor, anchored.browserWindowEnd)
+    ) {
+      ctx.log.info(
+        { executionId, firing: anchored.scheduledFor },
+        'resume: firing taken before the claim; old browser window kept',
+      );
+      launched = refreshed;
+      left = browserLeftAtResume(ctx, refreshed);
+    }
     departed = ctx.repos.cells.markDeparted(executionId, ctx.clock.todayLondon());
+    for (const id of left.providers)
+      leftOutside += leaveAtResume(ctx, executionId, id, opts.manual, left.detail);
     ctx.repos.executions.patch(executionId, {
       estimate: addPass(current.estimate, pass),
-      ...(refresh ? { snapshot: current.snapshot } : {}),
+      ...(refresh ? { snapshot: refreshed.snapshot } : {}),
     });
     // why: ruling 2 — a blocked discovery line copies its reusable cells before the rest become skipped:budget
     for (const id of current.snapshot.providers.discovery)
@@ -170,17 +218,53 @@ export async function resumeExecution(
   });
   if (!claimed) return refused('active', 'another resume claimed this execution first', { executionId });
   ctx.hooks.cancelResume(executionId); // why: spec §8.1 "cancelling the one-shot job in the same step"
+  // why: the pass runs over the stored snapshot (the browser provider kept), whose cells left outside the window are
+  // now scheduled_only, so it fetches none of them
   const run = newRun(
     ctx,
-    { ...current, status: 'running' },
+    { ...launched, status: 'running' },
     { manual: opts.manual, fresh: false, blocked: check.blocked },
   );
+  // why: a catch-up leaves its browser cells by design (decision 79); only a closed window is news to the operator
+  if (left.providers.length > 0 && left.detail === 'outside-browser-window')
+    run.notices.push(browserWindowNotice(ctx, run));
   run.log.info(
-    { manual: opts.manual, autoResumeCount: current.autoResumeCount, departed, blocked: [...check.blocked] },
+    {
+      manual: opts.manual,
+      autoResumeCount: current.autoResumeCount,
+      departed,
+      blocked: [...check.blocked],
+      leftOutsideWindow: leftOutside,
+      browserWindowEnd: launched.browserWindowEnd,
+    },
     'execution: resumed',
   );
   reg.launch(run, () => execute(ctx, run));
   return { ok: true, executionId };
+}
+
+/**
+ * Decision 83: a live-tick resume makes its firing the run's anchor before the window check. This works the anchored
+ * row out in memory and writes nothing: `scheduled_for` the firing and the end the anchor (the later of the firing and
+ * now) plus 1.5 × the estimate of the cells still resumable. When another parent row already holds the firing the run
+ * keeps its old window. A child or a catch-up is never re-anchored (a paused catch-up is superseded by the firing
+ * instead). The claim writes the result (ExecutionsRepo.reanchorFiring), so a refused resume moves nothing.
+ */
+function reanchor(ctx: EngineContext, exec: Execution, opts: ResumeOptions): Execution {
+  const firing = opts.liveTickFiring;
+  if (firing === undefined || exec.isChild || exec.isCatchUp) return exec;
+  if (exec.scheduledFor !== firing && ctx.repos.executions.firingTaken(exec.definitionId, firing)) {
+    ctx.log.info(
+      { executionId: exec.id, firing },
+      'resume: firing held by another row; old browser window kept',
+    );
+    return exec;
+  }
+  const end = browserWindowEndFrom(
+    windowAnchor(firing, ctx.clock.now()),
+    estimateRemainingFor(ctx, exec, opts.manual).seconds,
+  );
+  return { ...exec, scheduledFor: firing, browserWindowEnd: end };
 }
 
 /**

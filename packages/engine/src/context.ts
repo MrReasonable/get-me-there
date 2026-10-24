@@ -13,6 +13,7 @@ import {
 import { budgetConfigFromConfig, type Db, type Repos } from '@gmt/db';
 import type { HttpKit } from '@gmt/providers';
 import { noAlerts } from './alertsStep.js';
+import { createHeartbeat, type Heartbeat } from './scheduler/heartbeat.js';
 import type { AlertsStepHook, EngineDeps, EngineOptions } from './types.js';
 
 /** Callbacks the scheduler installs once it exists (createEngine); no-ops until then. Spec §8.1 one-shot jobs. */
@@ -77,6 +78,19 @@ export interface EngineContext {
   /** The point of sale a provider's rows will carry, known before any call (reuse matching); written rows use the result's own pointOfSale. */
   pointOfSaleOf(id: ProviderId): PointOfSale;
   readonly hooks: EngineHooks;
+  /**
+   * Decision 83: the engine's one heartbeat (scheduler module), started by the boot beside the minute job. Discovery asks
+   * it before each browser page; the orchestrator marks its runs when it detects a suspension.
+   */
+  readonly heartbeat: Heartbeat;
+  /**
+   * Shared by every copy of the context (a spread keeps the same object). `closing` is set once shutdown begins, so a
+   * start, resume or verification asked for after it is refused and the minute job takes no further definition;
+   * `closed` once the engine has handed the database back (review S2): a scheduler job still running past the
+   * shutdown's bound then writes nothing more (notifyOperator logs the notice it sent and skips its row), and `abort`
+   * (aborted at the same moment) ends a system job's network call.
+   */
+  readonly lifecycle: { closing: boolean; closed: boolean; readonly abort: AbortController };
 }
 
 /**
@@ -128,14 +142,19 @@ export function buildContext(deps: EngineDeps, options: EngineOptions = {}): Eng
     providers,
     limitsOf,
     alertsStep: options.alerts ?? noAlerts,
-    // why: spec §2/§5.2 — SearchApi echoes gl = POINT_OF_SALE; Travelpayouts and the fixture state none. A deliberate
-    // engine rule known before any call (reuse matching); reuse.test.ts pins it against the fixture's echo, and WP5's
+    // why: spec §2/§5.2 — SearchApi echoes gl = POINT_OF_SALE, and the camoufox worker loads its pages with the same
+    // gl (POINT_OF_SALE is a shared worker setting the preflight compares) and states it on every answer; Travelpayouts
+    // and the fixture state none. A deliberate engine rule known before any call (reuse matching; WP16a: a catch-up
+    // copies camoufox's fresh outcomes, decision 79); reuse.test.ts pins it against the fixture's echo, and WP5's
     // adapter test pins SearchApi's echo (arch-r2-013)
-    pointOfSaleOf: (id) => (id === 'searchapi' ? config.pointOfSale : 'unknown'),
+    pointOfSaleOf: (id) => (id === 'searchapi' || id === 'camoufox' ? config.pointOfSale : 'unknown'),
     hooks: {
       scheduleResume: () => undefined,
       cancelResume: () => undefined,
       unregisterSchedule: () => undefined,
     },
+    // why: the heartbeat reads the Clock port, as the window check it feeds does, so one decision never mixes clocks
+    heartbeat: createHeartbeat(deps.log, () => Date.parse(deps.clock.now())),
+    lifecycle: { closing: false, closed: false, abort: new AbortController() },
   };
 }
