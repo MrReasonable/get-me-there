@@ -248,7 +248,7 @@ describe('the smoke is never run by setup, update, status or CI', () => {
       readdirSync(d).flatMap((n) => (statSync(join(d, n)).isDirectory() ? walk(join(d, n)) : [join(d, n)]));
     const src = join(import.meta.dirname, '..', '..', 'src');
     const naming = walk(src).filter((f) => readFileSync(f, 'utf8').includes('/api/tools/smoke'));
-    expect(naming.map((f) => f.slice(src.length + 1))).toEqual(['commands/smoke.ts']);
+    expect(naming.map((f) => f.slice(src.length + 1).replaceAll('\\', '/'))).toEqual(['commands/smoke.ts']);
     // why: found upwards, so the mutation run's sandbox copy (nested under the package) reads the real workflows
     const { existsSync } = await import('node:fs');
     const { dirname } = await import('node:path');

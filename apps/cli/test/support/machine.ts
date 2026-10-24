@@ -1,4 +1,5 @@
-import { join } from 'node:path';
+// why: the memory machine's paths are POSIX on every host (Windows' join would write backslashes)
+import { join } from 'node:path/posix';
 import type { Deps } from '../../src/deps.js';
 import { MemoryFs, type RunHandler } from '../../src/exec/memory.js';
 import { type scriptedAsk, stubHttp, type TestIo, testIo, testWorld } from './deps.js';

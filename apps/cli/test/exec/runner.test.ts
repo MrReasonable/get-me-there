@@ -43,7 +43,8 @@ describe('systemRunner (the one execFile wrapper)', { timeout: 30_000 }, () => {
   });
 
   // why: macOS adds __CF_USER_TEXT_ENCODING to every process it starts; nothing the caller passed
-  it('gives the child exactly env when env is given', async () => {
+  // why: Windows always adds its own system variables (SYSTEMROOT, …) to a child's environment
+  it.skipIf(process.platform === 'win32')('gives the child exactly env when env is given', async () => {
     const r = await systemRunner(
       [
         node,
