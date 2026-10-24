@@ -106,12 +106,21 @@ function offsetChanges(tz: string, from: number, to: number): number[] {
 }
 
 /** Firings of `job` in [from, to], stepped one by one. */
-function stepCount(job: Cron, from: number, to: number): number {
+/** Counts the croner steps a count takes (review T4: a test bounds the work, never the time). */
+export interface StepMeter {
+  steps: number;
+}
+const nextOf = (job: Cron, after: Date, meter: StepMeter): Date | null => {
+  meter.steps += 1;
+  return job.nextRun(after);
+};
+
+function stepCount(job: Cron, from: number, to: number, meter: StepMeter): number {
   let n = 0;
-  let cursor = job.nextRun(new Date(from - 1));
+  let cursor = nextOf(job, new Date(from - 1), meter);
   while (cursor !== null && cursor.getTime() <= to) {
     n += 1;
-    cursor = job.nextRun(new Date(cursor.getTime() + 1000));
+    cursor = nextOf(job, new Date(cursor.getTime() + 1000), meter);
   }
   return n;
 }
@@ -121,22 +130,22 @@ function stepCount(job: Cron, from: number, to: number): number {
  * five-field schedule fires the same times on every day it matches (its minute and hour fields do not depend on the
  * day), so a whole matching day counts as the first whole day's tally and only a part day is stepped.
  */
-function dayCount(job: Cron, offset: number, from: number, to: number): number {
+function dayCount(job: Cron, offset: number, from: number, to: number, meter: StepMeter): number {
   const local = offset * MINUTE_MS;
   let perDay: number | null = null;
   let n = 0;
-  let cursor = job.nextRun(new Date(from - 1));
+  let cursor = nextOf(job, new Date(from - 1), meter);
   while (cursor !== null && cursor.getTime() <= to) {
     const dayStart = Math.floor((cursor.getTime() + local) / DAY_MS) * DAY_MS - local;
     const dayEnd = dayStart + DAY_MS - 1;
     const whole = dayStart >= from && dayEnd <= to;
     if (whole && perDay !== null) n += perDay;
     else {
-      const c = stepCount(job, Math.max(from, dayStart), Math.min(to, dayEnd));
+      const c = stepCount(job, Math.max(from, dayStart), Math.min(to, dayEnd), meter);
       if (whole) perDay = c;
       n += c;
     }
-    cursor = job.nextRun(new Date(dayEnd));
+    cursor = nextOf(job, new Date(dayEnd), meter);
   }
   return n;
 }
@@ -148,7 +157,13 @@ function dayCount(job: Cron, offset: number, from: number, to: number): number {
  * within TRANSITION_MARGIN_MS of a change it is stepped in the zone itself, so a skipped or repeated local hour counts
  * exactly as croner fires it. 0 for an invalid schedule.
  */
-export function countFirings(expr: string, tz: string, from: Date, to: Date): number {
+export function countFirings(
+  expr: string,
+  tz: string,
+  from: Date,
+  to: Date,
+  meter: StepMeter = { steps: 0 },
+): number {
   const p = parseCron(expr, tz);
   if (!p.ok) return 0;
   const f = from.getTime();
@@ -170,15 +185,15 @@ export function countFirings(expr: string, tz: string, from: Date, to: Date): nu
     const zoneFrom = Math.max(cursor, change - TRANSITION_MARGIN_MS);
     if (zoneFrom > cursor) {
       const offset = offsetMinutes(tz, cursor);
-      n += dayCount(atOffset(offset), offset, cursor, zoneFrom - 1);
+      n += dayCount(atOffset(offset), offset, cursor, zoneFrom - 1, meter);
     }
     const zoneTo = Math.min(t, change + TRANSITION_MARGIN_MS);
-    if (zoneTo >= zoneFrom) n += stepCount(zoned, zoneFrom, zoneTo);
+    if (zoneTo >= zoneFrom) n += stepCount(zoned, zoneFrom, zoneTo, meter);
     cursor = Math.max(cursor, zoneTo + 1);
   }
   if (cursor <= t) {
     const offset = offsetMinutes(tz, cursor);
-    n += dayCount(atOffset(offset), offset, cursor, t);
+    n += dayCount(atOffset(offset), offset, cursor, t, meter);
   }
   return n;
 }
