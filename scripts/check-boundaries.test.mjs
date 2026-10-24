@@ -96,6 +96,16 @@ describe('scripts/check-boundaries.mjs place and suppression checks (decisions 3
     expect([r.status, r.stderr]).toEqual([0, '']);
   });
 
+  it('a mutation run’s sandbox and report directly under a package root are skipped (WP16a: the engine joins Stryker)', () => {
+    const r = run(
+      tree({
+        'packages/engine/.stryker-tmp/sandbox-x/vitest.config.ts': `${['// @ts', '-nocheck'].join('')}\n`,
+        'packages/engine/reports/mutation/x.js': `${['// eslint', '-disable'].join('')}\n`,
+      }),
+    );
+    expect([r.status, r.stderr]).toEqual([0, '']);
+  });
+
   it('installed and generated trees are not scanned', () => {
     const r = run(
       tree({
