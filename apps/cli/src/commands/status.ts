@@ -6,7 +6,7 @@ import { apply } from '../plan/apply.js';
 import type { ServiceFacts } from '../platform/types.js';
 import { type Check, describeChecks, scheduleUnit, settingsChecks, staleChecks } from '../services/checks.js';
 import { factOf, factsOf, type ServiceEntry, serviceSet } from '../services/set.js';
-import { appEnvPath, dailyBackupsDir } from '../services/specs.js';
+import { appEnvPath, dailyBackupsDir, isLoopback } from '../services/specs.js';
 import { readEnvText } from '../setup/appEnv.js';
 import { appRunningIn, compose } from '../setup/docker.js';
 import { bootOutRefused, readStartRefusal, refusalLine, WORKER_LABEL } from '../worker/refusal.js';
@@ -104,8 +104,6 @@ async function checkoutCheck(deps: Deps): Promise<Check> {
       };
 }
 
-const LOOPBACK = new Set(['127.0.0.1', '::1', 'localhost']);
-
 /** pf-b1-001, sec-b1-002: the price source the app will search with, and a bind address beyond loopback. */
 function appEnvChecks(deps: Deps): Check[] {
   let text: string | null;
@@ -131,7 +129,7 @@ function appEnvChecks(deps: Deps): Check[] {
         },
   ];
   const bind = env.BIND_ADDRESS;
-  if (bind !== undefined && bind !== '' && !LOOPBACK.has(bind))
+  if (bind !== undefined && bind !== '' && !isLoopback(bind))
     out.push({
       name: 'bind address',
       level: 'warn',

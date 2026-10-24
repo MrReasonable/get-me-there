@@ -77,14 +77,27 @@ export function stableNodePath(
   pathDirs: readonly string[],
   files: Pick<Files, 'realpath'>,
 ): string {
-  const real = files.realpath(execPath) ?? execPath;
+  // why: CodeRabbit (PR #11): a candidate that cannot be resolved (EACCES, ELOOP) is not the same binary; main.ts
+  // calls this while it builds deps, so one unreadable PATH entry must not stop every command
+  const resolve = (p: string): string | null => {
+    try {
+      return files.realpath(p);
+    } catch {
+      return null;
+    }
+  };
+  const real = resolve(execPath) ?? execPath;
   const cellar = /^(.*)\/Cellar\/([^/]+)\/[^/]+\/bin\/node$/.exec(real);
   const candidates = [
     ...pathDirs.filter((d) => d !== '').map((d) => join(d, 'node')),
     ...(cellar === null ? [] : [join(cellar[1] ?? '', 'opt', cellar[2] ?? '', 'bin', 'node')]),
   ];
-  return candidates.find((c) => c !== real && files.realpath(c) === real) ?? execPath;
+  return candidates.find((c) => c !== real && resolve(c) === real) ?? execPath;
 }
+
+/** The one loopback rule (setup's note and status's warning): any 127/8 address, `::1` and `localhost`. */
+export const isLoopback = (address: string): boolean =>
+  /^(127\.\d{1,3}\.\d{1,3}\.\d{1,3}|::1|localhost)$/.test(address);
 
 // why: \p{Cc} is every C0 and C1 control character, newline and tab included
 const CONTROL = /\p{Cc}/u;

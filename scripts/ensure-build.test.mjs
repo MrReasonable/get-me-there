@@ -344,8 +344,29 @@ describe('scripts/ensure-build-lib.mjs build lock ownership (CodeRabbit batch 3)
     const text = readFileSync(join(REPO, 'scripts', 'ensure-build.mjs'), 'utf8');
     expect(text).toContain('await underLock(LOCK,');
     expect(text).not.toContain('execFileSync');
-    // why: the Windows leg runs it before its suites; pnpm is a .cmd there
-    expect(text).toContain("shell: process.platform === 'win32'");
+    expect(text).toContain('buildStep(REPO)');
+  });
+
+  it('the build step starts pnpm through a shell on Windows only, and underLock hands spawn those options (CodeRabbit, PR #11)', async () => {
+    const { buildStep, underLock } = await import('./ensure-build-lib.mjs');
+    expect(buildStep('/r', 'win32')).toEqual({
+      cmd: 'pnpm',
+      args: ['--filter', '@gmt/api...', 'build'],
+      opts: { cwd: '/r', stdio: 'ignore', shell: true },
+    });
+    expect(buildStep('/r', 'linux').opts.shell).toBe(false);
+    const seen = [];
+    const { EventEmitter } = await import('node:events');
+    const spawnFn = (cmd, args, opts) => {
+      seen.push({ cmd, args, opts });
+      const c = new EventEmitter();
+      c.pid = 1;
+      setImmediate(() => c.emit('exit', 0, null));
+      return c;
+    };
+    const step = buildStep('/r', 'win32');
+    await underLock(lockIn(), (run) => run(step.cmd, step.args, step.opts), { spawnFn });
+    expect(seen).toEqual([{ cmd: 'pnpm', args: step.args, opts: { ...step.opts, detached: true } }]);
   });
 
   it('a build killed outright (SIGKILL) leaves a lock the next run takes at once', async () => {

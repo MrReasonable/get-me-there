@@ -15,6 +15,7 @@ import {
   dailyBackupsDir,
   databasePath,
   execPathProblem,
+  isLoopback,
 } from '../services/specs.js';
 import {
   type Answers,
@@ -153,7 +154,8 @@ async function fromFile(path: string, deps: Deps, defaults: Answers): Promise<An
 
 /** The native app as the active-run guard sees it, from its settings and its service's state. */
 export function nativeTarget(settings: Settings | null, appFacts: ServiceFacts): GuardTarget {
-  const up = appFacts.state === 'running' || appFacts.state === 'failed';
+  // why: CodeRabbit (PR #11): a failed (or restarting) app has no live process, so no search can be running in it
+  const up = appFacts.state === 'running';
   if (settings === null || !settings.ok) return { label: 'the app', up, creds: null, autoResume: true };
   const auth = settings.config.auth;
   return {
@@ -164,7 +166,6 @@ export function nativeTarget(settings: Settings | null, appFacts: ServiceFacts):
   };
 }
 
-const LOOPBACK = /^(127\.\d+\.\d+\.\d+|::1|localhost)$/;
 export const LEDGER_DROPPED =
   'its ledger is left behind, so the calls it counted this month (and the SearchApi trial’s) stop counting toward the caps here. Check each vendor’s dashboard, and set SEARCHAPI_TRIAL_USED (trial) or SEARCHAPI_MONTHLY_CALL_CAP ($40 plan) in app.env to match if needed.';
 
@@ -357,7 +358,7 @@ export async function setupCommand(flags: Flags, _positional: string | null, dep
       );
     }
     // why: U8 (sec-b1-002): an operator may bind wider for a tunnel (docs section 3); said plainly, never refused
-    if (!LOOPBACK.test(settings.config.bindAddress))
+    if (!isLoopback(settings.config.bindAddress))
       notes.push(
         `app.env binds BIND_ADDRESS=${settings.config.bindAddress}, so the app answers beyond this machine, over plain HTTP; setup keeps it. Use a tunnel or TLS (docs/setup.md section 3), or set it back to 127.0.0.1.`,
       );

@@ -218,12 +218,24 @@ export function releaseOnSignal(lock, owned, proc = process, ops = realOps, befo
 }
 
 /**
+ * The build ensure-build.mjs runs: `pnpm --filter @gmt/api... build`. why: on Windows pnpm is pnpm.cmd, which Node
+ * starts only through a shell (spawn pnpm ENOENT otherwise); the arguments are fixed words.
+ */
+export function buildStep(repo, platform = process.platform) {
+  return {
+    cmd: 'pnpm',
+    args: ['--filter', '@gmt/api...', 'build'],
+    opts: { cwd: repo, stdio: 'ignore', shell: platform === 'win32' },
+  };
+}
+
+/**
  * Runs `body` holding the lock. `body` gets `run(cmd, args, opts)`, which spawns a child in its own process group and
  * resolves when it exits 0. why: PR #3 review — a build under execFileSync blocks the event loop, so the signal
  * handlers could not run and a SIGTERM or SIGHUP neither stopped the build nor released the lock; a spawned child
  * leaves the loop free, and a signal stops the child's whole group (pnpm and its tsc runs), releases the lock and exits.
  */
-export async function underLock(lock, body, { proc = process, ops = realOps } = {}) {
+export async function underLock(lock, body, { proc = process, ops = realOps, spawnFn = spawn } = {}) {
   const owned = acquire(lock, ops);
   const children = new Set();
   const stopAll = (sig) => {
@@ -238,7 +250,7 @@ export async function underLock(lock, body, { proc = process, ops = realOps } = 
   const stopWatching = releaseOnSignal(lock, owned, proc, ops, stopAll);
   const run = (cmd, args, opts = {}) =>
     new Promise((resolve, reject) => {
-      const c = spawn(cmd, args, { ...opts, detached: true });
+      const c = spawnFn(cmd, args, { ...opts, detached: true });
       children.add(c);
       c.once('error', (err) => {
         children.delete(c);

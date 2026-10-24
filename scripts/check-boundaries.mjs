@@ -5,7 +5,7 @@
 // an airport code or a metro city name in a string literal of apps/web/src or apps/api/src outside the two
 // worked-example files, and on a lint or type-check suppression comment anywhere in a package (root configs and e2e folders included).
 import { readdirSync, readFileSync, statSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, sep } from 'node:path';
 import ts from 'typescript';
 import { GENERATED_AT_PACKAGE_ROOT } from './generated-dirs.mjs';
 import { ENV_RULE, isEnvReader, toPosix } from './posix-path.mjs';
@@ -113,6 +113,9 @@ const isMsw = (spec) => spec === 'msw' || spec.startsWith('msw/');
 // generated only directly under a package root, so they are skipped there by path and never by bare name
 // (packages/core/src/coverage/ is real source and must stay covered); the list is the scripts' one copy (R37).
 
+/** A path in the rules' forward-slash form: rewritten only on Windows, where a backslash is a separator. */
+const ruleForm = (p) => (sep === '\\' ? toPosix(p) : p);
+
 function* walk(dir, skipGeneratedHere = false) {
   let names = [];
   try {
@@ -122,8 +125,9 @@ function* walk(dir, skipGeneratedHere = false) {
   }
   for (const n of names) {
     if (n === 'node_modules' || (skipGeneratedHere && GENERATED_AT_PACKAGE_ROOT.has(n))) continue;
-    // why: U13: every rule below is written with forward slashes, and Windows joins with backslashes
-    const p = toPosix(join(dir, n));
+    // why: U13: every rule below is written with forward slashes, and Windows joins with backslashes; only there is a
+    // backslash a separator (a POSIX name may hold one), so only there is the path rewritten, losslessly
+    const p = ruleForm(join(dir, n));
     if (statSync(p).isDirectory()) yield* walk(p);
     else if (/\.(ts|tsx|mts|cts|js|mjs|cjs)$/.test(p)) yield p; // why: .mjs test-support files count too (arch-r3-002)
   }
@@ -160,7 +164,7 @@ for (const [name, dir] of Object.entries(dirs)) {
       }
       // why: ca-b1-015: a relative path is an edge too; one that leaves the package's own directory bypasses the graph
       if (spec.startsWith('.')) {
-        const target = toPosix(join(dirname(f), spec));
+        const target = ruleForm(join(dirname(f), spec));
         // why: the worked example's JSON (docs/examples/) is data the web reads at build time, not a code edge
         const data = target.startsWith('docs/examples/') && target.endsWith('.json');
         if (!data && target !== dir && !target.startsWith(`${dir}/`)) {

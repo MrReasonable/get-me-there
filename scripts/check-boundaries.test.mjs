@@ -426,6 +426,16 @@ describe('scripts/check-boundaries.mjs and @gmt/cli (decision 72)', { timeout: 6
     expect(r.stderr).not.toContain('okExample');
   });
 
+  it.skipIf(process.platform === 'win32')(
+    'a POSIX file name holding a backslash is walked as it is, not renamed (CodeRabbit, PR #11)',
+    () => {
+      const r = run(tree({ 'apps/cli/src/odd\\name.ts': 'export const home = process.env.HOME;\n' }));
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain('apps/cli/src/odd\\name.ts reads process.env outside');
+      expect(r.stderr).not.toContain('ENOENT');
+    },
+  );
+
   it('@gmt/cli listing @gmt/db in its dependencies fails', () => {
     const r = run(
       tree({ 'apps/cli/package.json': manifest('apps/cli', { dependencies: { '@gmt/db': 'workspace:*' } }) }),

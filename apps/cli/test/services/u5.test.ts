@@ -109,3 +109,35 @@ describe('a path holding a control character is refused (U8, sec-b1-006)', () =>
     expect(controlProblem({ checkout: '/c', home: '/h' })).toBeNull();
   });
 });
+
+describe('CodeRabbit round 2 (PR #11)', () => {
+  it('stableNodePath treats a candidate it cannot resolve (EACCES, ELOOP) as not the same binary, never throwing', () => {
+    const files = {
+      realpath: (p: string) => {
+        if (p === '/root/bin/node') throw Object.assign(new Error('EACCES'), { code: 'EACCES' });
+        return p === '/usr/local/bin/node' ? '/opt/node/bin/node' : p;
+      },
+    };
+    expect(stableNodePath('/opt/node/bin/node', ['/root/bin', '/usr/local/bin'], files)).toBe(
+      '/usr/local/bin/node',
+    );
+    const broken = {
+      realpath: () => {
+        throw Object.assign(new Error('ELOOP'), { code: 'ELOOP' });
+      },
+    };
+    expect(stableNodePath('/opt/node/bin/node', ['/usr/local/bin'], broken)).toBe('/opt/node/bin/node');
+  });
+  it('one loopback rule: any 127/8 address, ::1 and localhost; nothing else', async () => {
+    const { isLoopback } = await import('../../src/services/specs.js');
+    for (const a of ['127.0.0.1', '127.0.0.2', '127.255.0.9', '::1', 'localhost'])
+      expect(isLoopback(a), a).toBe(true);
+    for (const a of ['0.0.0.0', '192.168.1.2', '::', '128.0.0.1', '127.0.0'])
+      expect(isLoopback(a), a).toBe(false);
+  });
+  it('a failed app is not up for the active-run guard: no process can be running a search', async () => {
+    const { nativeTarget } = await import('../../src/commands/setup.js');
+    expect(nativeTarget(null, { onDisk: 'x', loaded: true, state: 'failed' }).up).toBe(false);
+    expect(nativeTarget(null, { onDisk: 'x', loaded: true, state: 'running' }).up).toBe(true);
+  });
+});
