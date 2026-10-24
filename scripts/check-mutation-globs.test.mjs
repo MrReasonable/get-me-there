@@ -169,7 +169,7 @@ describe('checkMutationGlobs', () => {
     });
   });
 
-  it('passes on this repository, where WP16a’s scope is the core and engine files it put under mutation', () => {
+  it('passes on this repository, where WP16a’s scope is the core and engine files and WP16b’s the CLI’s', () => {
     expect(checkMutationGlobs(ROOT).violations).toEqual([]);
     const wp16a = scopeOf(readFileSync(join(ROOT, 'docs/briefs/wp16a-local-mode-foundations.md'), 'utf8'));
     expect(wp16a.mutate['@gmt/core']).toEqual(
@@ -178,8 +178,12 @@ describe('checkMutationGlobs', () => {
     expect(wp16a.mutate['@gmt/engine']).toEqual(
       expect.arrayContaining(['src/scheduler/catchUp.ts', 'src/tick.ts', 'src/scheduler/catchUpStart.ts']),
     );
-    // the later packages state theirs as pending until they land
-    for (const name of ['wp16b-local-setup-cli.md', 'wp17-camoufox-install-consent.md', 'wp18-status.md'])
+    // why: WP16b landed its scope in mutate (the CLI's planners and system executor); the later packages state theirs
+    // as pending until they land
+    const wp16b = scopeOf(readFileSync(join(ROOT, 'docs/briefs/wp16b-local-setup-cli.md'), 'utf8'));
+    expect(wp16b.pending).toEqual({});
+    expect(wp16b.mutate['@gmt/cli']).toEqual(expect.arrayContaining(['src/plan/**', 'src/exec/system.ts']));
+    for (const name of ['wp17-camoufox-install-consent.md', 'wp18-status.md'])
       expect(
         Object.keys(scopeOf(readFileSync(join(ROOT, 'docs/briefs', name), 'utf8')).pending).length,
         name,
