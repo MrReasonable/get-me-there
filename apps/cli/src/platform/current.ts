@@ -1,4 +1,5 @@
-import { isAbsolute, win32 } from 'node:path';
+import { win32 } from 'node:path';
+import { isAbsolute } from 'node:path/posix';
 import { darwinPlatform } from './darwin.js';
 import { linuxPlatform } from './linux.js';
 import type { Arch, Platform } from './types.js';

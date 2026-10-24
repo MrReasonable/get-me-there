@@ -1,4 +1,4 @@
-import { join } from 'node:path';
+import { join } from 'node:path/posix';
 import type { Runner } from '../exec/runner.js';
 import { type Action, runAction } from '../plan/action.js';
 import type {

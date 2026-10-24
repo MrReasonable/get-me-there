@@ -1,0 +1,248 @@
+# Tests known to fail on windows-2025 (decision 78; spec §9 "CI matrix"): one `<file relative to the repository root> >
+# <full title>` a line, the full title being vitest's fullName. Each fix removes its line; the Windows leg fails on a
+# failure outside this list and on a listed test that passes (scripts/windows-known-failures.mjs).
+# Recorded 2026-10-24 from https://github.com/MrReasonable/get-me-there/actions/runs/40117391189 (WP16b Task 16b.0).
+# That run could not load 150 files of packages/db, packages/providers and apps/api (fixed since: their vitest configs
+# now use fileURLToPath); their Windows results, and those of the tests WP16b added, are not in this list yet.
+apps/camoufox-worker/test/cooldown.test.ts > CooldownStore (spec §2: cool-down by cause, persisted, fail closed) a read error other than ENOENT is thrown, never read as "no cool-down"
+apps/camoufox-worker/test/cooldown.test.ts > CooldownStore (spec §2: cool-down by cause, persisted, fail closed) writes the record 0600
+apps/camoufox-worker/test/gridPage.test.ts > grid pages: fix round 1 (the moves, the lookups and the settle) a dialog with no Dates tab: unrecognised (grid:no-dates-tab), no tab clicked
+apps/camoufox-worker/test/gridPage.test.ts > grid pages: fix round 1 (the moves, the lookups and the settle) a re-render that only reorders the labels after a scroll is a scroll that did not settle, not a wrong move (PIE M2)
+apps/camoufox-worker/test/gridPage.test.ts > grid pages: fix round 1 (the moves, the lookups and the settle) a scroll click that overruns its step is counted: the ledger never undercounts (CodeRabbit)
+apps/camoufox-worker/test/gridPage.test.ts > grid pages: fix round 1 (the moves, the lookups and the settle) a scroll that moves the other axis too is unrecognised (grid:wrong-move): no view kept, no further click (PIE-12)
+apps/camoufox-worker/test/gridPage.test.ts > grid pages: fix round 1 (the moves, the lookups and the settle) a scroll that moves the wrong way is unrecognised (grid:wrong-move): no view kept, no further click (PIE-12)
+apps/camoufox-worker/test/gridPage.test.ts > grid pages: fix round 1 (the moves, the lookups and the settle) a second "Scroll down" in the dialog, outside the panel: unrecognised (grid:no-scroll-button), never clicked
+apps/camoufox-worker/test/gridPage.test.ts > grid pages: fix round 1 (the moves, the lookups and the settle) a shifted first view at the end of the planning horizon is `sale-window-end` (PA M3)
+apps/camoufox-worker/test/gridPage.test.ts > grid pages: fix round 1 (the moves, the lookups and the settle) a shifted first view far from both ends of the sale window is `shifted` (PA M3)
+apps/camoufox-worker/test/gridPage.test.ts > grid pages: fix round 1 (the moves, the lookups and the settle) a view settles only once two polls 2 s apart match, however short the poll interval (ruling 9)
+apps/camoufox-worker/test/gridPage.test.ts > grid pages: fix round 1 (the moves, the lookups and the settle) no Price graph button: unrecognised (grid:no-price-graph-button), nothing clicked
+apps/camoufox-worker/test/gridPage.test.ts > grid pages: fix round 1 (the moves, the lookups and the settle) SOCS changed by a scroll: consent-unhandled, the profile wiped, the scroll counted
+apps/camoufox-worker/test/gridPage.test.ts > grid pages: fix round 1 (the moves, the lookups and the settle) the pacer is released after a grid page, and the next page waits 30 s from this page’s start
+apps/camoufox-worker/test/gridPage.test.ts > grid pages: fix round 1 (the moves, the lookups and the settle) two "Price insights" dialogs: not the dates-grid view (PIE M3)
+apps/camoufox-worker/test/gridPage.test.ts > grid pages: gating GRID_VERIFIED false, or CAMOUFOX_MODE=list, answers mode-unavailable without opening anything
+apps/camoufox-worker/test/gridPage.test.ts > grid pages: gating more moves than the worker’s scroll cap is rejected before any page
+apps/camoufox-worker/test/gridPage.test.ts > grid pages: the flow a challenge after a scroll is that stop with its cool-down and the scrolls made; no view is returned
+apps/camoufox-worker/test/gridPage.test.ts > grid pages: the flow a first view the sale window shifted to start at today is kept as near-today and ends the page
+apps/camoufox-worker/test/gridPage.test.ts > grid pages: the flow a form showing two adults, or a currency other than GBP, is unrecognised and Price graph is never clicked (PA-12)
+apps/camoufox-worker/test/gridPage.test.ts > grid pages: the flow a move on its axis by another step is an off-plan view, kept, ending the page (PIE-12)
+apps/camoufox-worker/test/gridPage.test.ts > grid pages: the flow a view that never changes after a scroll ends the page scroll-not-settled with the views read, no cool-down
+apps/camoufox-worker/test/gridPage.test.ts > grid pages: the flow drift on a view is unrecognised, with no further scrolls
+apps/camoufox-worker/test/gridPage.test.ts > grid pages: the flow Google’s no-flights page (past the sale window) is a grid answer with no views
+apps/camoufox-worker/test/gridPage.test.ts > grid pages: the flow opens the first block, moves seven days down a scroll at a time 5 s apart, reads the planned views and counts the scrolls
+apps/camoufox-worker/test/gridPage.test.ts > grid pages: the flow the allowance stops the scrolls: 2 of 4 moves, ended allowance
+apps/camoufox-worker/test/gridPage.test.ts > grid pages: the live run’s first page a refused view logs the rule and the failing check with counts only
+apps/camoufox-worker/test/gridPage.test.ts > grid pages: the live run’s first page the planner’s first block for 8–21 Mar, 10–12 nights, is read
+apps/camoufox-worker/test/main.test.ts > the worker’s start checks and shutdown (brief Task 14.5) a cool-down store read error answers its page, then exits 70
+apps/camoufox-worker/test/main.test.ts > the worker’s start checks and shutdown (brief Task 14.5) a launch failure exits 78
+apps/camoufox-worker/test/main.test.ts > the worker’s start checks and shutdown (brief Task 14.5) a port already in use fails the start and releases the lock
+apps/camoufox-worker/test/main.test.ts > the worker’s start checks and shutdown (brief Task 14.5) a standing signed-in refusal starts the server answering cooling-down only, without launching
+apps/camoufox-worker/test/main.test.ts > the worker’s start checks and shutdown (brief Task 14.5) a status poll whose relaunch hangs answers 500 within its bound, and the worker keeps serving
+apps/camoufox-worker/test/main.test.ts > the worker’s start checks and shutdown (brief Task 14.5) an account cookie in the profile exits 78 and closes the browser
+apps/camoufox-worker/test/main.test.ts > the worker’s start checks and shutdown (brief Task 14.5) FORM_VERIFIED false exits 78, launching nothing
+apps/camoufox-worker/test/main.test.ts > the worker’s start checks and shutdown (brief Task 14.5) in grid mode the status reports the worker’s scroll cap and spacing, for the app’s preflight (CA 9)
+apps/camoufox-worker/test/main.test.ts > the worker’s start checks and shutdown (brief Task 14.5) serves a page and a live status; SIGTERM stops it with exit 0 and releases the lock
+apps/camoufox-worker/test/main.test.ts > the worker’s start checks and shutdown (brief Task 14.5) SIGTERM mid-page answers that page, then exits 0
+apps/camoufox-worker/test/main.test.ts > the worker’s start checks and shutdown (brief Task 14.5) the status read stays clear of the pacer: the persisted last-page time is unchanged (decision 76)
+apps/camoufox-worker/test/main.test.ts > the worker’s start checks and shutdown (brief Task 14.5) the status reports the worker’s effective shared settings (spec §12), worker.env lines and defaults alike
+apps/camoufox-worker/test/paths.test.ts > paths (brief §8) places every file under the one data directory and camoufox-js’s install directory under Library/Caches
+apps/camoufox-worker/test/record.test.ts > record --graph-explore a captcha after the click is that stop: the classifier decides, 48 h, nothing recorded
+apps/camoufox-worker/test/record.test.ts > record --graph-explore a chart element read that never answers keeps the summary (aria-label, img and button counts)
+apps/camoufox-worker/test/record.test.ts > record --graph-explore a chart text read that never answers is recorded as timed out after its 10 s, and the Dates phase still runs
+apps/camoufox-worker/test/record.test.ts > record --graph-explore a click that never answers ends at the click-graph step within its own timeout, with no cool-down
+apps/camoufox-worker/test/record.test.ts > record --graph-explore a Dates panel that never holds still is recorded as such at the dates-settle step; no scroll, no cool-down
+apps/camoufox-worker/test/record.test.ts > record --graph-explore a Dates panel without a Scroll forwards button is recorded unscrolled, the count kept
+apps/camoufox-worker/test/record.test.ts > record --graph-explore a graph that never holds still ends plainly at the graph-settle step, within the page budget, with no cool-down
+apps/camoufox-worker/test/record.test.ts > record --graph-explore a region that was already there before the click is not the one that appeared
+apps/camoufox-worker/test/record.test.ts > record --graph-explore a results page showing no flights has no graph to explore: refused plainly, nothing clicked
+apps/camoufox-worker/test/record.test.ts > record --graph-explore a Scroll forwards click that never answers is recorded as timed out, and the file is still written
+apps/camoufox-worker/test/record.test.ts > record --graph-explore a signed-in account control after the click sets the refusal
+apps/camoufox-worker/test/record.test.ts > record --graph-explore a snapshot holding an account name is refused: nothing written
+apps/camoufox-worker/test/record.test.ts > record --graph-explore a snapshot holding an e-mail address is refused: nothing written
+apps/camoufox-worker/test/record.test.ts > record --graph-explore a SOCS the click changes is consent-unhandled: the profile is wiped and no exploration is written
+apps/camoufox-worker/test/record.test.ts > record --graph-explore an account name in the chart text is refused: nothing written
+apps/camoufox-worker/test/record.test.ts > record --graph-explore an e-mail address in the Dates panel is refused: nothing written
+apps/camoufox-worker/test/record.test.ts > record --graph-explore an e-mail address in the scrolled panel is refused: nothing written
+apps/camoufox-worker/test/record.test.ts > record --graph-explore clicks the one Price graph button, polls the dialog that appeared until it holds still, and writes one 0600 exploration file
+apps/camoufox-worker/test/record.test.ts > record --graph-explore logs each step at debug as the Cheapest flow does
+apps/camoufox-worker/test/record.test.ts > record --graph-explore no Price graph button ends plainly at the find-graph-button step: no click, no cool-down, nothing written
+apps/camoufox-worker/test/record.test.ts > record --graph-explore the observed dialog: the chart region’s text and elements, the Dates tab settled and read, then one scroll forwards
+apps/camoufox-worker/test/record.test.ts > record --graph-explore the snapshot must hold still across two polls 2 s apart: a dialog still changing is polled again
+apps/camoufox-worker/test/record.test.ts > record --graph-explore two Price graph buttons ends plainly at the find-graph-button step: no click, no cool-down, nothing written
+apps/camoufox-worker/test/record.test.ts > record --graph-explore when no dialog or region appears, the main landmark is recorded
+apps/camoufox-worker/test/record.test.ts > record --graph-explore without a chart region the chart is null, and without a Dates tab the dates are skipped and counted
+apps/camoufox-worker/test/record.test.ts > record --grid a challenge after a scroll is that stop with its cool-down; only the stop record is written
+apps/camoufox-worker/test/record.test.ts > record --grid a panel holding an e-mail address is refused: nothing written
+apps/camoufox-worker/test/record.test.ts > record --grid a panel that is not the dates-grid view is recorded and no scroll is tried
+apps/camoufox-worker/test/record.test.ts > record --grid a view after a scroll counts only once its lines change, then hold for two polls (12 s polls fit the move budget)
+apps/camoufox-worker/test/record.test.ts > record --grid a view that has not changed by the end of its move budget is recorded timed out; the file is still written
+apps/camoufox-worker/test/record.test.ts > record --grid clicks Price graph, Dates and each scroll 5 s apart, and records every view, move delta and timing
+apps/camoufox-worker/test/record.test.ts > record --grid logs each step as "grid step"
+apps/camoufox-worker/test/record.test.ts > record --grid measures a one-day step from rotated lines
+apps/camoufox-worker/test/record.test.ts > the recorder (brief Task 14.2 rules) --cheapest closes the tab’s pop-up, clicks the tab, settles again and records what it clicked
+apps/camoufox-worker/test/record.test.ts > the recorder (brief Task 14.2 rules) --cheapest whose tab cannot be clicked refuses plainly, with no cool-down
+apps/camoufox-worker/test/record.test.ts > the recorder (brief Task 14.2 rules) --cheapest: a Cheapest view that never settles ends at the cap, nothing written, no cool-down
+apps/camoufox-worker/test/record.test.ts > the recorder (brief Task 14.2 rules) --cheapest: a first poll that times out and a second that settles produces a recording
+apps/camoufox-worker/test/record.test.ts > the recorder (brief Task 14.2 rules) --cheapest: polls that keep timing out end plainly at the budget, no cool-down, nothing recorded
+apps/camoufox-worker/test/record.test.ts > the recorder (brief Task 14.2 rules) --cheapest: the Cheapest view settles without the results line, on its own budget from the click
+apps/camoufox-worker/test/record.test.ts > the recorder (brief Task 14.2 rules) a navigation the guard refuses is that kind
+apps/camoufox-worker/test/record.test.ts > the recorder (brief Task 14.2 rules) a page that never settles is refused at the page deadline
+apps/camoufox-worker/test/record.test.ts > the recorder (brief Task 14.2 rules) an account cookie in the profile stops before any page and cools down
+apps/camoufox-worker/test/record.test.ts > the recorder (brief Task 14.2 rules) rule 1: a consent landing is recorded as the failure it is, starts the 48 h cool-down and stops the session
+apps/camoufox-worker/test/record.test.ts > the recorder (brief Task 14.2 rules) rule 1: a SOCS rewritten by the page is a consent-unhandled stop
+apps/camoufox-worker/test/record.test.ts > the recorder (brief Task 14.2 rules) rule 1: an off-allowlist hop records nothing and cools down
+apps/camoufox-worker/test/record.test.ts > the recorder (brief Task 14.2 rules) rule 1: sets SOCS before the page, lands on the allowlist and writes facts and meta (names, never ARIA text)
+apps/camoufox-worker/test/record.test.ts > the recorder (brief Task 14.2 rules) rule 2: --stability loads three pages of the same query 30 s apart and records each read-back
+apps/camoufox-worker/test/record.test.ts > the recorder (brief Task 14.2 rules) rule 2: a read-back other than same says SOCS_STABLE needs an operator ruling
+apps/camoufox-worker/test/record.test.ts > the recorder (brief Task 14.2 rules) rule 3: the consent probe uses a throwaway profile, no SOCS, the probe guard and no click; it starts no cool-down and deletes its profile
+apps/camoufox-worker/test/record.test.ts > the recorder (brief Task 14.2 rules) rule 4: --no-flights with the line records the page
+apps/camoufox-worker/test/record.test.ts > the recorder (brief Task 14.2 rules) rule 4: --no-flights without a recognisable line writes no-flights/unrecorded.meta.json
+apps/camoufox-worker/test/record.test.ts > the recorder (brief Task 14.2 rules) rule 5: --cheapest clicks the Cheapest tab, --view-more clicks View more, a plain run clicks nothing
+apps/camoufox-worker/test/record.test.ts > the recorder (brief Task 14.2 rules) rule 6: the spacing applies across recorder runs (the shared persisted pacer)
+apps/camoufox-worker/test/record.test.ts > the recorder under the server’s stop rules (fix round 1) --cheapest: a captcha after the click is that stop: 48 h, nothing written
+apps/camoufox-worker/test/record.test.ts > the recorder under the server’s stop rules (fix round 1) --cheapest: a SOCS the click changes is read back after the click: consent-unhandled, wiped, nothing recorded as cheapest
+apps/camoufox-worker/test/record.test.ts > the recorder under the server’s stop rules (fix round 1) --no-flights: a page that never settles writes unrecorded.meta.json from what appeared and exits 0
+apps/camoufox-worker/test/record.test.ts > the recorder under the server’s stop rules (fix round 1) --no-flights: an off-allowlist landing is refused like any other (no exemption)
+apps/camoufox-worker/test/record.test.ts > the recorder under the server’s stop rules (fix round 1) a captcha page whose SOCS also changed keeps captcha, and the profile is wiped
+apps/camoufox-worker/test/record.test.ts > the recorder under the server’s stop rules (fix round 1) a captcha stop whose read-back overruns still cools down by its cause
+apps/camoufox-worker/test/record.test.ts > the recorder under the server’s stop rules (fix round 1) a consent landing wipes the shared profile
+apps/camoufox-worker/test/record.test.ts > the recorder under the server’s stop rules (fix round 1) a consent-unhandled stop whose read-back overruns still cools down by its cause
+apps/camoufox-worker/test/record.test.ts > the recorder under the server’s stop rules (fix round 1) a off-allowlist stop whose read-back overruns still cools down by its cause
+apps/camoufox-worker/test/record.test.ts > the recorder under the server’s stop rules (fix round 1) a read-back overrun on a page with no stop closes the context and refuses
+apps/camoufox-worker/test/record.test.ts > the recorder under the server’s stop rules (fix round 1) a read-back that never answers writes nothing and refuses
+apps/camoufox-worker/test/record.test.ts > the recorder under the server’s stop rules (fix round 1) a sign-in stop whose read-back overruns still cools down by its cause
+apps/camoufox-worker/test/record.test.ts > the recorder under the server’s stop rules (fix round 1) a signed-in page sets the persisted signed-in refusal
+apps/camoufox-worker/test/record.test.ts > the recorder under the server’s stop rules (fix round 1) a signed-in stop whose read-back overruns still cools down by its cause
+apps/camoufox-worker/test/record.test.ts > the recorder under the server’s stop rules (fix round 1) a SOCS rewritten by the page wipes the shared profile
+apps/camoufox-worker/test/record.test.ts > the recorder under the server’s stop rules (fix round 1) a stop logs the classifier decision at debug: cause, rule, elapsed ms since the page started
+apps/camoufox-worker/test/record.test.ts > the recorder under the server’s stop rules (fix round 1) a stop record that cannot be written still leaves the cool-down and the refusal, with a warning
+apps/camoufox-worker/test/record.test.ts > the recorder under the server’s stop rules (fix round 1) a stop with no page (an account cookie) still writes its record and decision
+apps/camoufox-worker/test/record.test.ts > the recorder under the server’s stop rules (fix round 1) a stop writes a stopped record without any query string, naming the rule, 0600
+apps/camoufox-worker/test/record.test.ts > the recorder under the server’s stop rules (fix round 1) a unusual-traffic stop whose read-back overruns still cools down by its cause
+apps/camoufox-worker/test/record.test.ts > the recorder under the server’s stop rules (fix round 1) an account cookie sets the persisted signed-in refusal
+apps/camoufox-worker/test/record.test.ts > the recorder under the server’s stop rules (fix round 1) an account-cookie stop whose read-back overruns sets the refusal and cools down
+apps/camoufox-worker/test/record.test.ts > the recorder under the server’s stop rules (fix round 1) an off-allowlist hop that arrives after the last settling poll records nothing and cools down
+apps/camoufox-worker/test/record.test.ts > the recorder under the server’s stop rules (fix round 1) existing recording directories become 0700 and their files 0600 when the recorder starts
+apps/camoufox-worker/test/record.test.ts > the recorder under the server’s stop rules (fix round 1) one deadline covers the load and the clicks: a click past it is the deadline refusal, not a crash
+apps/camoufox-worker/test/record.test.ts > the recorder under the server’s stop rules (fix round 1) recordings are written 0600 in 0700 directories
+apps/camoufox-worker/test/recordings.test.ts > backupRecordings a second backup the same day adds what is new and keeps what was there
+apps/camoufox-worker/test/recordings.test.ts > backupRecordings copies every recording but .gitkeep, directories 0700 and files 0600, and never follows a link
+apps/camoufox-worker/test/recordings.test.ts > recordingsMain backs up into ~/.local/share/get-me-there/private/fixtures/camoufox-<date>/ and restores the latest backup
+apps/camoufox-worker/test/recordings.test.ts > restoreRecordings copies a backup into an empty tree (only .gitkeep files), directories 0700 and files 0600
+apps/camoufox-worker/test/recordings.test.ts > restoreRecordings refuses a tree that already holds a recording, and a backup that does not exist
+apps/camoufox-worker/test/rules.test.ts > worker rules: a full page session sets only SOCS and clicks nothing on a consent page every addCookies call is exactly [socsCookie(capture)]; the consent page is never clicked
+apps/camoufox-worker/test/run.test.ts > run.ts (SEC-R2-006: one env file, its mode checked on the file loaded) a 0644 file refuses with exit 78
+apps/camoufox-worker/test/run.test.ts > run.ts (SEC-R2-006: one env file, its mode checked on the file loaded) a directory owned by another user refuses
+apps/camoufox-worker/test/run.test.ts > run.ts (SEC-R2-006: one env file, its mode checked on the file loaded) a missing directory, a file in its place and a directory named worker.env refuse
+apps/camoufox-worker/test/run.test.ts > run.ts (SEC-R2-006: one env file, its mode checked on the file loaded) a missing worker.env refuses every command but capture-socs
+apps/camoufox-worker/test/run.test.ts > run.ts (SEC-R2-006: one env file, its mode checked on the file loaded) a pre-set CAMOUFOX_WORKER_KEY that differs from the file refuses with 78, naming it and never a value
+apps/camoufox-worker/test/run.test.ts > run.ts (SEC-R2-006: one env file, its mode checked on the file loaded) an inherited CAMOUFOX_* or POINT_OF_SALE the file lacks refuses; one equal to the file passes
+apps/camoufox-worker/test/run.test.ts > run.ts (SEC-R2-006: one env file, its mode checked on the file loaded) DEBUG or PWDEBUG in the environment refuses (playwright-core would log protocol traffic, the SOCS value)
+apps/camoufox-worker/test/run.test.ts > run.ts (SEC-R2-006: one env file, its mode checked on the file loaded) loads the checked path and dispatches
+apps/camoufox-worker/test/run.test.ts > run.ts (SEC-R2-006: one env file, its mode checked on the file loaded) main runs a command against the live process and maps a thrown entry to exit 70
+apps/camoufox-worker/test/run.test.ts > run.ts (SEC-R2-006: one env file, its mode checked on the file loaded) the entry sees the file’s values plus HOME, PATH, TMPDIR and CAMOUFOX_DATA_DIR only
+apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) a Best view settles at a short poll interval, on two matching polls at least 2 s apart (fix round 1, TS 8)
+apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) a CAPTCHA frame, and SOCS changed on the same page → captcha kept, cool-down cause captcha, profile wiped
+apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) a captcha page whose SOCS read-back hangs → captcha, 48 h, context discarded
+apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) a Cheapest click that lands on a challenge page stops with its cool-down, never a fallback
+apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) a Cheapest click that never resolves falls back to the Best view with the tab price, within seconds
+apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) a Cheapest tab that cannot be clicked: the list is still read, with the tab price, never a block
+apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) a consent hop (302) to consent.google.com ending on results → consent-unhandled, nothing clicked
+apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) a form mismatch → unrecognised, 1 h
+apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) a navigation the route aborts is that page’s kind, Google contacted, read-back run
+apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) a never-resolving addCookies → not-ready at the deadline, Google not contacted, pacer released, relaunched next
+apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) a never-resolving launch → not-ready at the deadline, pacer released
+apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) a never-resolving newPage → not-ready at the deadline, Google not contacted, pacer released, relaunched next
+apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) a never-resolving read-back cookies() in the finally → bounded at 5 s, context discarded, browser-error read
+apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) a never-resolving readFacts → not-ready, and nothing goes unhandled after the page closes
+apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) a never-resolving the account-cookie read → not-ready at the deadline, Google not contacted, pacer released, relaunched next
+apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) a never-resolving the guard’s route registration → not-ready at the deadline, Google not contacted, pacer released, relaunched next
+apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) a no-flights page, once verified, is cells no-flights
+apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) a page close that never resolves discards the context and replaces cells with browser-error read
+apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) a page that turns into a block after a verified click is that block
+apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) a request inside the spacing → spacing, nothing opened
+apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) a signed-in control → signed-in, refusal persisted; a new session over the same directory answers cooling-down without opening
+apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) a signed-in stop leaves the profile directory in place
+apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) addCookies throws → browser-error launch, Google not contacted
+apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) an absent form → unrecognised
+apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) an accounts.google.com hop → sign-in
+apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) an active cool-down → cooling-down, nothing opened
+apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) an error before goto discards the context (the next page relaunches)
+apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) an unrecognised page with SOCS changed keeps unrecognised for the longer, 48 h period
+apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) another currency → unrecognised; only another cell’s option → none-for-cell
+apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) at expiry the page is closed by the deadline (before the finally runs)
+apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) busy() names the page in flight
+apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) Cheapest polls that keep timing out fall back to the list with the tab price
+apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) close() throws after a block → the block answer stands, pacer released
+apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) currentContext is memoised on the launch promise: two concurrent callers launch once
+apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) every option for another cell → cells none-for-cell with the counts, no cool-down
+apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) facts never settling → not-ready at the fake deadline, no cool-down, pacer released
+apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) goto throws → browser-error navigate, Google contacted, read-back ran
+apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) mode grid without the worker’s grid settings → mode-unavailable, nothing opened
+apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) newPage throws → browser-error launch
+apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) readFacts throws after navigation → browser-error read, read-back ran
+apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) settled results → cells; SOCS set before goto; the read-back ran; pacer released; page closed
+apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) settles after polling
+apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) SOCS changed after a settled page → consent-unhandled, profile wiped (SOCS_STABLE false)
+apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) SOCS changed after a settled page → consent-unhandled, profile wiped (SOCS_STABLE true)
+apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) SOCS missing after a settled page → consent-unhandled
+apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) the account cookie __Host-1PLSID before the page → signed-in, nothing opened
+apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) the account cookie __Host-3PLSID before the page → signed-in, nothing opened
+apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) the account cookie __Host-GAPS before the page → signed-in, nothing opened
+apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) the account cookie __Secure-1PAPISID before the page → signed-in, nothing opened
+apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) the account cookie __Secure-1PSID before the page → signed-in, nothing opened
+apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) the account cookie __Secure-1PSIDCC before the page → signed-in, nothing opened
+apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) the account cookie __Secure-1PSIDTS before the page → signed-in, nothing opened
+apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) the account cookie __Secure-3PAPISID before the page → signed-in, nothing opened
+apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) the account cookie __Secure-3PSID before the page → signed-in, nothing opened
+apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) the account cookie __Secure-3PSIDCC before the page → signed-in, nothing opened
+apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) the account cookie __Secure-3PSIDTS before the page → signed-in, nothing opened
+apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) the account cookie __Secure-OSID before the page → signed-in, nothing opened
+apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) the account cookie ACCOUNT_CHOOSER before the page → signed-in, nothing opened
+apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) the account cookie APISID before the page → signed-in, nothing opened
+apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) the account cookie HSID before the page → signed-in, nothing opened
+apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) the account cookie LSID before the page → signed-in, nothing opened
+apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) the account cookie OSID before the page → signed-in, nothing opened
+apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) the account cookie SAPISID before the page → signed-in, nothing opened
+apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) the account cookie SID before the page → signed-in, nothing opened
+apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) the account cookie SIDCC before the page → signed-in, nothing opened
+apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) the account cookie SSID before the page → signed-in, nothing opened
+apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) the Cheapest steps and the first Cheapest poll log in order
+apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) the Cheapest view settles without the results line, on its own budget from the click
+apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) the cool-down store throws on read → browser-error read, fatal
+apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) the overall cap holds: a Cheapest view that never settles ends not-ready within twice the page timeout
+apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) two pages in a row, each preceded by addCookies with SOCS
+apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) with CHEAPEST_FLOW_VERIFIED injected true the Cheapest tab is clicked once; false, nothing is clicked
+apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) with the Cheapest flow verified, the tab’s pop-up is closed and the tab clicked
+apps/web/test/copy/sourceGuard.test.ts > source guards (spec §11 copy, spec §9 item 6 prices) every allowlisted file exists, so a mistyped or removed entry cannot silently exempt a future file
+apps/web/test/copy/sourceGuard.test.ts > source guards (spec §11 copy, spec §9 item 6 prices) money is formatted only by PriceCell and the cost and cap views
+scripts/assert-dist-resolution.test.mjs > scripts/assert-dist-resolution.mjs passes on a built checkout
+scripts/check-boundaries.test.mjs > scripts/check-boundaries.mjs import-graph, process.env and msw rules (spec §4, decisions 7, 9, 20) a dynamic import whose specifier is computed fails, since its edge cannot be checked
+scripts/check-boundaries.test.mjs > scripts/check-boundaries.mjs import-graph, process.env and msw rules (spec §4, decisions 7, 9, 20) a dynamic import with a template literal fails; an import in a comment or a string does not
+scripts/check-boundaries.test.mjs > scripts/check-boundaries.mjs import-graph, process.env and msw rules (spec §4, decisions 7, 9, 20) a dynamic or side-effect import across the graph fails too (CodeRabbit batch 3)
+scripts/check-boundaries.test.mjs > scripts/check-boundaries.mjs import-graph, process.env and msw rules (spec §4, decisions 7, 9, 20) a static import across the graph fails: web may import only @gmt/core
+scripts/check-boundaries.test.mjs > scripts/check-boundaries.mjs import-graph, process.env and msw rules (spec §4, decisions 7, 9, 20) msw imported outside packages/providers/src/testing/ fails; inside it passes
+scripts/check-boundaries.test.mjs > scripts/check-boundaries.mjs import-graph, process.env and msw rules (spec §4, decisions 7, 9, 20) msw in the apps/api manifests or tests fails: api tests reach it only through @gmt/providers/testing
+scripts/check-boundaries.test.mjs > scripts/check-boundaries.mjs import-graph, process.env and msw rules (spec §4, decisions 7, 9, 20) process.env is allowed in exactly apps/api/src/bootstrap/ and the scripts/*.mjs entry points (CodeRabbit batch 3)
+scripts/check-boundaries.test.mjs > scripts/check-boundaries.mjs import-graph, process.env and msw rules (spec §4, decisions 7, 9, 20) process.env outside the api bootstrap fails, in any package
+scripts/check-boundaries.test.mjs > scripts/check-boundaries.mjs import-graph, process.env and msw rules (spec §4, decisions 7, 9, 20) WP14: the worker’s browser libraries only in launch.ts and driver.ts; its env only in run.ts
+scripts/check-boundaries.test.mjs > scripts/check-boundaries.mjs place and suppression checks (decisions 36, 46) a clean tree passes, with codes and cities in comments, identifiers and the two allowlisted files
+scripts/check-boundaries.test.mjs > scripts/check-boundaries.mjs place and suppression checks (decisions 36, 46) a suppression comment fails in any package: apps/api/test/v.test.ts
+scripts/check-boundaries.test.mjs > scripts/check-boundaries.mjs place and suppression checks (decisions 36, 46) a suppression comment fails in any package: apps/web/e2e/smoke.spec.ts
+scripts/check-boundaries.test.mjs > scripts/check-boundaries.mjs place and suppression checks (decisions 36, 46) a suppression comment fails in any package: apps/web/src/z.tsx
+scripts/check-boundaries.test.mjs > scripts/check-boundaries.mjs place and suppression checks (decisions 36, 46) a suppression comment fails in any package: apps/web/vite.config.ts
+scripts/check-boundaries.test.mjs > scripts/check-boundaries.mjs place and suppression checks (decisions 36, 46) a suppression comment fails in any package: packages/core/src/w.ts
+scripts/check-boundaries.test.mjs > scripts/check-boundaries.mjs place and suppression checks (decisions 36, 46) a suppression comment fails in any package: packages/db/test/x.test.ts
+scripts/check-boundaries.test.mjs > scripts/check-boundaries.mjs place and suppression checks (decisions 36, 46) a suppression comment fails in any package: packages/engine/src/y.ts
+scripts/check-boundaries.test.mjs > scripts/check-boundaries.mjs place and suppression checks (decisions 36, 46) a suppression inside real source named coverage (packages/core/src/coverage) still fails
+scripts/check-boundaries.test.mjs > scripts/check-boundaries.mjs place and suppression checks (decisions 36, 46) an airport code or a metro city in a string literal fails, in web and api alike
+scripts/check-boundaries.test.mjs > scripts/check-boundaries.mjs place and suppression checks (decisions 36, 46) both codes of a hyphenated route such as LHR-JFK fail (CodeRabbit batch 3)
+scripts/ensure-build.test.mjs > scripts/ensure-build-lib.mjs build lock ownership (CodeRabbit batch 3) a build interrupted by SIGINT, SIGTERM or SIGHUP releases the lock before it exits
+scripts/ensure-build.test.mjs > scripts/ensure-build-lib.mjs build lock ownership (CodeRabbit batch 3) a build killed outright (SIGKILL) leaves a lock the next run takes at once
+scripts/ensure-build.test.mjs > scripts/ensure-build-lib.mjs build lock ownership (CodeRabbit batch 3) a SIGHUP sent to ensure-build alone, mid-build, stops the build and releases the lock
+scripts/ensure-build.test.mjs > scripts/ensure-build-lib.mjs build lock ownership (CodeRabbit batch 3) a SIGINT sent to ensure-build alone, mid-build, stops the build and releases the lock
+scripts/ensure-build.test.mjs > scripts/ensure-build-lib.mjs build lock ownership (CodeRabbit batch 3) a SIGTERM sent to ensure-build alone, mid-build, stops the build and releases the lock
+scripts/ensure-build.test.mjs > scripts/ensure-build-lib.mjs lock path (CodeRabbit batch 3) is keyed by a hash of the whole checkout path, so checkouts that end alike never share a lock
+scripts/ensure-build.test.mjs > scripts/ensure-build.mjs builds when needed and then reports the build up to date, without rebuilding
+scripts/secret-scan.test.mjs > scripts/secret-scan.mjs skips only an absent root an unreadable directory inside the root fails the scan
+scripts/workflows.test.mjs > the docker job keeps credentials out of the image history a clean history passes the step silently
+scripts/workflows.test.mjs > the docker job keeps credentials out of the image history a planted credential fails the step without any part of it reaching the log

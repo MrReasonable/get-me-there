@@ -1,4 +1,4 @@
-import { resolve } from 'node:path';
+import { resolve } from 'node:path/posix';
 import type { Flags } from '../args.js';
 import { type Deps, EXIT } from '../deps.js';
 import type { Action } from '../plan/action.js';

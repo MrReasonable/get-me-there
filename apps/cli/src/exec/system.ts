@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { createReadStream, createWriteStream } from 'node:fs';
 import { chmod, copyFile, mkdir, rename, rm, unlink, writeFile } from 'node:fs/promises';
-import { basename, dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path/posix';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import type { Action, Executor } from '../plan/action.js';

@@ -1,4 +1,4 @@
-import { isAbsolute, join } from 'node:path';
+import { isAbsolute, join } from 'node:path/posix';
 import { workerDataDir } from '@gmt/core';
 import { systemdManager } from '../services/systemd.js';
 import { secretFile } from './secretFile.js';

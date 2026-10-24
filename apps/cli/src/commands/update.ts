@@ -1,4 +1,4 @@
-import { join } from 'node:path';
+import { join } from 'node:path/posix';
 import { activeLine, credsFrom, readActive } from '../appClient.js';
 import type { Flags } from '../args.js';
 import { type Deps, EXIT } from '../deps.js';

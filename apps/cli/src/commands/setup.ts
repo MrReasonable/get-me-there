@@ -1,4 +1,4 @@
-import { basename, join, resolve } from 'node:path';
+import { basename, join, resolve } from 'node:path/posix';
 import { activeLine, credsFrom, readActive } from '../appClient.js';
 import { type Flags, isReconfigureGroup, type ReconfigureGroup } from '../args.js';
 import { noAsk } from '../ask.js';

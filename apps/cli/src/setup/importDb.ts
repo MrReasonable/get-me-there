@@ -1,4 +1,4 @@
-import { basename, dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path/posix';
 import { asIsoDateTime, MOVED_MARKER, movedMarkerText } from '@gmt/core';
 import type { Deps } from '../deps.js';
 import { type Action, runAction } from '../plan/action.js';

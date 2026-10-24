@@ -1,0 +1,9 @@
+{
+  "port": 3917,
+  "timezone": "UTC",
+  "pointOfSale": "GB",
+  "travelpayouts": null,
+  "searchApi": null,
+  "email": null,
+  "linger": "enable"
+}

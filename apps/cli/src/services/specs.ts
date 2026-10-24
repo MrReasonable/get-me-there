@@ -1,4 +1,4 @@
-import { dirname, join, sep } from 'node:path';
+import { dirname, join, sep } from 'node:path/posix';
 import type { Os, Paths, ServiceSpec } from '../platform/types.js';
 
 /** What every service spec is built from: the recorded Node binary, the checkout, the home and the platform's paths. */

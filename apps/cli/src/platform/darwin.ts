@@ -1,4 +1,4 @@
-import { join } from 'node:path';
+import { join } from 'node:path/posix';
 import { workerDataDir } from '@gmt/core';
 import { launchdManager } from '../services/launchd.js';
 import { secretFile } from './secretFile.js';

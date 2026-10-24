@@ -1,4 +1,4 @@
-import { basename } from 'node:path';
+import { basename } from 'node:path/posix';
 import type { Flags } from '../args.js';
 import { noAsk } from '../ask.js';
 import { type Deps, EXIT } from '../deps.js';

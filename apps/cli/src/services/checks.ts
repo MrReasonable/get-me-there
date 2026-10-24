@@ -1,4 +1,4 @@
-import { join } from 'node:path';
+import { join } from 'node:path/posix';
 import type { Deps } from '../deps.js';
 import type { ServiceFacts } from '../platform/types.js';
 import { factOf, type ServiceEntry } from './set.js';

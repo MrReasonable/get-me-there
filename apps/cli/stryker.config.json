@@ -2,7 +2,7 @@
   "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
   "testRunner": "command",
   "commandRunner": {
-    "command": "pnpm exec vitest run --coverage.enabled=false test/plan test/services test/setup test/exec test/commands"
+    "command": "pnpm exec vitest run --coverage.enabled=false test/plan test/services test/setup test/exec"
   },
   "mutate": [
     "src/plan/**/*.ts",

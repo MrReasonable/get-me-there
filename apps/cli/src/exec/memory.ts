@@ -1,4 +1,4 @@
-import { dirname } from 'node:path';
+import { dirname } from 'node:path/posix';
 import type { Action, Executor } from '../plan/action.js';
 import type { Files } from './files.js';
 import type { Runner } from './runner.js';

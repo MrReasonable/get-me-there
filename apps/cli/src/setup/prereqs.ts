@@ -1,4 +1,4 @@
-import { dirname } from 'node:path';
+import { dirname } from 'node:path/posix';
 import type { Deps } from '../deps.js';
 
 /** One unmet prerequisite: what is wrong and the one-line fix for this OS (null when there is no command for it). */

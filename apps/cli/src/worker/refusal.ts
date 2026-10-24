@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join } from 'node:path/posix';
 import { START_REFUSAL_TEXT, type StartRefusal, startRefusalSchema } from '@gmt/core';
 import { type Action, runAction } from '../plan/action.js';
 import type { Paths, Platform, ServiceFacts } from '../platform/types.js';

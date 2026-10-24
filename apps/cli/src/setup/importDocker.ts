@@ -1,4 +1,4 @@
-import { basename, join } from 'node:path';
+import { basename, join } from 'node:path/posix';
 import { MOVED_MARKER } from '@gmt/core';
 import { activeLine, credsFrom, readActive } from '../appClient.js';
 import type { Ask } from '../ask.js';
