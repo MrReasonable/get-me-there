@@ -168,6 +168,20 @@ describe('engine shutdown with the minute job mid-flight (R2)', () => {
     expect(executions(h, weekly.id)).toHaveLength(1);
   });
 
+  it('T12: markClosed closes the engine at once: nothing new starts', async () => {
+    const h = createHarness();
+    const def = h.createDefinition({ window: RELATIVE });
+    const engine = createEngine(h.deps, h.options);
+    engine.markClosed();
+    expect(
+      await engine.start(def.id, { trigger: 'manual', confirmCostPence: 1, confirmCalls: 1 }),
+    ).toMatchObject({
+      ok: false,
+      code: 'shutting-down',
+    });
+    expect(executions(h, def.id)).toEqual([]);
+  });
+
   it('a minute job that finds the engine closing takes no further definition', async () => {
     const h = createHarness();
     const daily = h.createDefinition({ scheduleCron: '0 6 * * *', window: RELATIVE });

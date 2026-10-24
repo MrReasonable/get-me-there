@@ -119,6 +119,12 @@ export type ChildCapPreview =
 export interface Engine {
   boot(): Promise<void>;
   shutdown(): Promise<void>;
+  /**
+   * Review T12: marks the engine closed at once (nothing new starts; a job still running writes nothing more and its
+   * network call is aborted), as `shutdown` does once its wait ends. The app calls it before closing the database
+   * whatever happened, so a shutdown cut off by the app's deadline never leaves a job writing to a closed handle.
+   */
+  markClosed(): void;
   start(definitionId: string, opts: StartOptions): Promise<StartResult>;
   resume(executionId: string, opts: { manual: boolean }): Promise<StartResult>;
   cancel(executionId: string): Promise<boolean>;

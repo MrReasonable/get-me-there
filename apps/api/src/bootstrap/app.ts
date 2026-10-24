@@ -257,6 +257,9 @@ export async function bootApp(deps: BootDeps): Promise<RunningApp> {
           ]);
         } finally {
           clearTimeout(deadline);
+          // why: review T12 — past the deadline the engine's own wait may still be running; marked closed first, a job
+          // that finishes after this writes nothing to the handle closed below
+          engine.markClosed();
           lock.release();
           ports.db.close();
         }

@@ -10,7 +10,7 @@ import { runSystemJob } from './maintenance.js';
 import { SMTP_TIMEOUTS } from './notifiers/email.js';
 import { createOrchestrator, type Orchestrator } from './orchestrator.js';
 import { isStalePaused, supersede } from './resume.js';
-import { autoResumeYields, catchUpAll } from './scheduler/catchUp.js';
+import { autoResume, catchUpAll } from './scheduler/catchUp.js';
 import { parseCron } from './scheduler/parseCron.js';
 import { createScheduler, type Scheduler } from './scheduler/scheduler.js';
 import { buildSnapshot } from './snapshot.js';
@@ -106,9 +106,9 @@ export function createEngine(deps: EngineDeps, options: EngineOptions = {}): Eng
           await supersede(ctx, orch, e);
           return;
         }
-        // why: decision 79 — a paused catch-up's one-shot yields to a firing since it paused (review S1)
-        if (e !== null && (await autoResumeYields(ctx, orch, e)) !== 'resume') return;
-        const r = await orch.resume(id, { manual: false });
+        // why: decision 79 — a paused catch-up's one-shot yields to a firing since it paused (review S1, T1)
+        const r = e === null ? await orch.resume(id, { manual: false }) : await autoResume(ctx, orch, e);
+        if (r === null) return;
         ctx.log.info({ executionId: id, result: r.ok ? 'resumed' : r.code }, 'one-shot resume');
       },
       // why: decision 79 — the minute job catches up missed firings through the orchestrator; the daily jobs need none
@@ -116,6 +116,12 @@ export function createEngine(deps: EngineDeps, options: EngineOptions = {}): Eng
     },
     ctx.log,
   );
+  /** The engine hands the database back: nothing new starts, and a job still running writes nothing more. */
+  const markClosed = (): void => {
+    ctx.lifecycle.closing = true;
+    ctx.lifecycle.closed = true;
+    ctx.lifecycle.abort.abort();
+  };
   ctx.hooks.scheduleResume = (id, definitionId, at) => sched.registerResume(id, definitionId, at);
   ctx.hooks.cancelResume = (id) => sched.cancelResume(id);
   ctx.hooks.unregisterSchedule = (id) => sched.unregister(id);
@@ -134,10 +140,10 @@ export function createEngine(deps: EngineDeps, options: EngineOptions = {}): Eng
       ctx.heartbeat.stop();
       const settled = orch.shutdown();
       await Promise.all([sched.drain(SHUTDOWN_DRAIN_MS), settled]);
-      ctx.lifecycle.closed = true;
-      ctx.lifecycle.abort.abort();
+      markClosed();
       ctx.log.info({}, 'engine: shut down');
     },
+    markClosed,
     start: (id, opts) => orch.start(id, opts),
     resume: (id, opts) => orch.resume(id, opts),
     cancel: (id) => orch.cancel(id),

@@ -14,6 +14,7 @@ import type { Orchestrator } from '../orchestrator.js';
 import { buildSnapshot, sellsCabin, snapshotProviders } from '../snapshot.js';
 import { recordSkipped } from '../start.js';
 import { formatInstant } from '../text.js';
+import type { StartResult } from '../types.js';
 import { loadsBrowserPages } from './browserWindow.js';
 import { parseCron } from './parseCron.js';
 
@@ -185,11 +186,40 @@ export async function autoResumeYields(
     log.info({ firing, at }, 'catch-up: resume waits for the firing after it');
     return 'deferred';
   }
-  await catchUpDefinition(ctx, orch, def, now);
+  // why: review T5 — a throw in the firing's rule is logged and leaves the catch-up as it was, so it resumes
+  await catchUpIsolated(ctx, orch, def, now);
+  // why: review T12 — the rule may have awaited a notice past the shutdown's wait; the database is then not read again
+  if (ctx.lifecycle.closed) return 'yielded';
   const after = ctx.repos.executions.get(exec.id);
   const still = after !== null && PAUSED_STATUSES.includes(after.status);
   log.info({ firing, resumes: still }, 'catch-up: a later firing decided first');
   return still ? 'resume' : 'yielded';
+}
+
+/**
+ * The automatic resume of a paused or interrupted run, as the resume_after one-shot and the boot's auto-resume make it
+ * (spec §8.1, §8.2 rev 36; review T1): a paused catch-up first yields to a firing since it paused (`autoResumeYields`),
+ * then the run resumes through the compare-and-set. A throw while deciding is logged with the run and the resume goes
+ * ahead as it would have (review T5). Once the engine is closing nothing is read or started (review T12). Null when it
+ * did not resume (yielded, deferred, or closing); else the resume's result.
+ */
+export async function autoResume(
+  ctx: EngineContext,
+  orch: Pick<Orchestrator, 'start' | 'resume'>,
+  exec: Execution,
+): Promise<StartResult | null> {
+  if (ctx.lifecycle.closing) return null;
+  let decision: Awaited<ReturnType<typeof autoResumeYields>>;
+  try {
+    decision = await autoResumeYields(ctx, orch, exec);
+  } catch (err) {
+    ctx.log
+      .child({ executionId: exec.id, definitionId: exec.definitionId })
+      .error({ err: errorText(err) }, 'catch-up: resume check failed; resuming');
+    decision = 'resume';
+  }
+  if (decision !== 'resume' || ctx.lifecycle.closing) return null;
+  return orch.resume(exec.id, { manual: false });
 }
 
 /**

@@ -4,7 +4,7 @@ import { FX_REFRESH_CRON, MAINTENANCE_CRON } from './maintenance.js';
 import { notifyOperator } from './notify.js';
 import type { Orchestrator } from './orchestrator.js';
 import { isStalePaused, olderThanRefresh, supersede } from './resume.js';
-import { autoResumeYields, CATCH_UP_CRON, catchUpIsolated } from './scheduler/catchUp.js';
+import { autoResume, CATCH_UP_CRON, catchUpIsolated } from './scheduler/catchUp.js';
 import type { Scheduler } from './scheduler/scheduler.js';
 
 /** Spec §5.3 "boot sweep marks pending older than 10 minutes unknown (still counted)". */
@@ -74,9 +74,10 @@ export async function bootEngine(ctx: EngineContext, orch: Orchestrator, sched: 
       if (await supersede(ctx, orch, exec)) superseded += 1;
       continue;
     }
-    // why: decision 79 (review S1) — an interrupted catch-up yields to a firing since it stopped running
-    if ((await autoResumeYields(ctx, orch, exec)) !== 'resume') continue;
-    const r = await orch.resume(exec.id, { manual: false });
+    // why: decision 79 (review S1, T1, T12) — an interrupted catch-up yields to a firing since it stopped running, and
+    // nothing resumes once the engine is closing (a notice above may have been awaited across the shutdown)
+    const r = await autoResume(ctx, orch, exec);
+    if (r === null) continue;
     if (r.ok) resumed += 1;
     log.info(
       { executionId: exec.id, autoResumeCount: exec.autoResumeCount, result: r.ok ? 'resumed' : r.code },
