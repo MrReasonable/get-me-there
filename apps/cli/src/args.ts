@@ -92,10 +92,13 @@ const SPEC: Record<
   },
   password: { options: {}, positional: null, help: 'print the app’s password to this terminal', flags: [] },
   smoke: {
-    options: { yes: bool },
+    options: { yes: bool, from: str, to: str },
     positional: null,
     help: 'spends real calls: up to 4 SearchApi credits and one browser page with today’s settings',
-    flags: ['--yes                     skip the typed confirmation (for scripts)'],
+    flags: [
+      '--from <IATA> --to <IATA>  the route to try, for example --from LHR --to JFK',
+      '--yes                     skip the typed confirmation (for scripts)',
+    ],
   },
   update: {
     options: { wait: bool, force: bool, 'dry-run': bool },

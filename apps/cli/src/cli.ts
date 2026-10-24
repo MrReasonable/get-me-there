@@ -1,6 +1,14 @@
 import { type CommandName, type Flags, parseCommandLine } from './args.js';
+import { backupCommand } from './commands/backup.js';
+import { logsCommand } from './commands/logs.js';
 import { passwordCommand } from './commands/password.js';
+import { restartCommand } from './commands/restart.js';
+import { restoreCommand } from './commands/restore.js';
 import { setupCommand } from './commands/setup.js';
+import { smokeCommand } from './commands/smoke.js';
+import { startCommand } from './commands/start.js';
+import { statusCommand } from './commands/status.js';
+import { stopCommand } from './commands/stop.js';
 import { type Deps, EXIT } from './deps.js';
 
 /** A command: its flags and positional, the injected facts, and an exit code. */
@@ -13,15 +21,15 @@ const notBuilt: Command = async (_f, _p, deps) => {
 
 const COMMANDS: Record<CommandName, Command> = {
   setup: setupCommand,
-  status: notBuilt,
-  start: notBuilt,
-  stop: notBuilt,
-  restart: notBuilt,
-  logs: notBuilt,
-  backup: notBuilt,
-  restore: notBuilt,
+  status: statusCommand,
+  start: startCommand,
+  stop: stopCommand,
+  restart: restartCommand,
+  logs: logsCommand,
+  backup: backupCommand,
+  restore: restoreCommand,
   password: passwordCommand,
-  smoke: notBuilt,
+  smoke: smokeCommand,
   update: notBuilt,
   uninstall: notBuilt,
 };

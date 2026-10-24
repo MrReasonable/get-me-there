@@ -25,7 +25,9 @@ export function machine(
   const fs = opts.fs ?? new MemoryFs(501);
   const home = os === 'darwin' ? '/Users/op' : '/home/op';
   const daily = join(home, '.local', 'share', 'get-me-there', 'backups', 'daily');
-  fs.file('/repo/package.json', '{}').dir('/opt/node/bin', 0o755);
+  fs.file('/repo/package.json', '{}')
+    .dir('/opt/node/bin', 0o755)
+    .file('/opt/node/bin/node', 'node binary', 0o755);
   const loaded = new Set<string>();
   const running = new Set<string>();
   let backups = 0;
