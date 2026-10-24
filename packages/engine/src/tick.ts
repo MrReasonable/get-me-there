@@ -15,8 +15,8 @@ import { previousFiring } from './scheduler/parseCron.js';
 export const TICK_FIRING_SLACK_MS = 2000;
 
 /**
- * A definition's "schedule blocked since" (ssr-19): the first instant a firing found it blocked and the run blocking it
- * now. The orchestrator clears it when a run of the definition starts, or once the blocking run is no longer active.
+ * A definition's "schedule blocked since" (ssr-19): the run blocking it and the first instant a firing found that run
+ * blocking it (a different blocking run starts a new date). The orchestrator clears it when a run of the definition starts, or once the blocking run is no longer active.
  */
 export interface Blocked {
   since: IsoDateTime;
@@ -60,7 +60,9 @@ export async function tickDefinition(
   const firing = prev === null ? null : isoDateTimeOfEpochMs(prev.getTime());
   const late = prev === null || pastGrace(prev.getTime(), Date.parse(now));
   const block = (executionId: string, status: string, since: IsoDateTime): void => {
-    const first = blocked.get(def.id)?.since ?? since;
+    // why: review T11 — the first date stands only while the same run blocks; another run's block starts its own
+    const prev = blocked.get(def.id);
+    const first = prev !== undefined && prev.executionId === executionId ? prev.since : since;
     blocked.set(def.id, { since: first, executionId });
     log.info({ executionId, status, since: first, late }, 'tick: schedule blocked by an active execution');
   };

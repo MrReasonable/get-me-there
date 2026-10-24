@@ -406,6 +406,22 @@ describe('the tick’s guards, blocked record, resume arguments and log lines', 
     );
   });
 
+  it('T11: a different run blocking later starts its own "blocked since", even when nobody read the first one', async () => {
+    const h = createHarness();
+    const def = hourly(h);
+    const o = h.orch();
+    const first = leftIn(h, def, 'paused_error', null);
+    await o.tick(def.id); // blocked by the first run at 09:00
+    h.repos.executions.setStatus(first.id, 'cancelled', { finishedAt: h.clock.now() });
+    leftIn(h, def, 'interrupted', null);
+    h.clock.advance(HOUR);
+    await o.tick(def.id); // blocked by another run at 10:00, with no read of blockedSince in between
+    expect(o.blockedSince()).toBe(h.clock.now());
+    h.clock.advance(HOUR);
+    await o.tick(def.id); // the same run again: its first date stands
+    expect(o.blockedSince()).toBe(at('2026-10-14T10:00:00.000Z'));
+  });
+
   it('a refused punctual start after the blocker ended leaves no blocked entry: the entry goes with the run that blocked', async () => {
     const h = createHarness();
     const def = hourly(h);
