@@ -80,6 +80,8 @@ export interface SmokeResult {
   /** Paths relative to the fixture root; always empty for a run inside the app process or a dry run. */
   fixturesWritten: string[];
   executionId: string | null;
+  /** The SearchApi credits tool runs already ledgered in this budget window at the spend check; null before it (U7). */
+  searchApiCreditsLedgered: number | null;
 }
 
 /**
@@ -200,6 +202,7 @@ export async function runSmoke(
   const say = (l: string): void => {
     lines.push(safeMessage(l, ports.secrets));
   };
+  let ledgered: number | null = null;
   const finish = (exitCode: number, summary: string): SmokeResult => ({
     exitCode,
     summary,
@@ -208,6 +211,7 @@ export async function runSmoke(
     reports: [],
     fixturesWritten: [],
     executionId: null,
+    searchApiCreditsLedgered: ledgered,
   });
   const refuse = (exitCode: number, message: string): SmokeResult => {
     say(message);
@@ -241,6 +245,7 @@ export async function runSmoke(
     `this run: at most ${worst.credits} SearchApi credit(s), frozen at ${cap} by --budget ${cli.args.budget}; at most ${worst.freeCalls} free Travelpayouts call(s)${camoufox ? '; one camoufox list tile (at most one Google page load) after its worker status' : ''}`,
   );
   const position = spendPosition(ports, worst, cli.args.budget);
+  ledgered = position.prior;
   for (const l of position.lines) say(l);
   if (cli.dryRun) {
     say('dry run: nothing sent, no execution opened');
@@ -437,6 +442,7 @@ export async function runSmoke(
     reports,
     fixturesWritten: root === undefined ? [] : written.map((f) => relative(root, f)).sort(),
     executionId,
+    searchApiCreditsLedgered: ledgered,
   };
 }
 

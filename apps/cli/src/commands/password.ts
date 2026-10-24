@@ -9,13 +9,13 @@ export async function passwordCommand(_f: Flags, _p: string | null, deps: Deps):
     deps.io.err(
       'pnpm gmt password prints only to a terminal, so the password never lands in a pipe or a log\n',
     );
-    return EXIT.refused;
+    return EXIT.badConfig;
   }
   const text = deps.files.read(appEnvPath(deps.platform.paths));
   const pass = text === null ? undefined : readEnvText(text).APP_BASIC_AUTH_PASS;
   if (pass === undefined || pass === '') {
     deps.io.err(`no password in ${appEnvPath(deps.platform.paths)}: run pnpm gmt setup first\n`);
-    return EXIT.refused;
+    return EXIT.badConfig;
   }
   deps.io.out(`${pass}\n`);
   return EXIT.ok;

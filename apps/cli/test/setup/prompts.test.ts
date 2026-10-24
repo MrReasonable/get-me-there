@@ -1,12 +1,20 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { defaultAnswers } from '../../src/setup/answers.js';
-import { askAnswers, askPasteToken, PASTE_TOKEN_QUESTION, PROMPTS } from '../../src/setup/prompts.js';
+import {
+  askAnswers,
+  askPasteToken,
+  BILLING_DAY_QUESTION,
+  CREDITS_USED_QUESTION,
+  LINGER_QUESTION,
+  PASTE_TOKEN_QUESTION,
+  PROMPTS,
+  SEARCHAPI_QUESTION,
+} from '../../src/setup/prompts.js';
 import { scriptedAsk, testIo } from '../support/deps.js';
 
 const ctx = (over: Partial<Parameters<typeof askAnswers>[1]> = {}) => ({
   os: 'darwin' as const,
   defaults: defaultAnswers({ port: 3000, timezone: 'Europe/London' }),
-  importedDb: false,
   rows: null,
   io: testIo(),
   ...over,
@@ -23,19 +31,18 @@ afterEach(() => {
 });
 
 describe('the wizard’s prompts (brief §6)', () => {
-  it('the table is §6’s rows in order, with their one-line help', () => {
+  it('the table is §6’s rows 1 to 7 in order, with their one-line help', () => {
     expect(PROMPTS.map((p) => [p.row, p.question])).toEqual([
       [1, 'Port'],
       [2, 'Time zone for schedules'],
-      [3, 'Market (POINT_OF_SALE)'],
+      [3, 'Fare market'],
       [4, 'Travelpayouts token'],
       [5, 'SearchApi'],
       [6, 'Email alerts'],
-      [7, 'Keep running when nobody is logged in (Linux)'],
-      [9, 'Browser provider after an interruption'],
+      [7, 'Keep running after you log out (Linux)'],
     ]);
-    expect(PROMPTS.find((p) => p.row === 4)?.help).toBe(
-      'Free, cached prices from Aviasales users’ searches; constraints are not checked. Needs a free Travelpayouts account: if you have none, register at https://www.travelpayouts.com/, then open the API token page (https://support.travelpayouts.com/hc/en-us/articles/203956083).',
+    expect(PROMPTS.find((p) => p.row === 4)?.help).toContain(
+      'Needs a free Travelpayouts account: if you have none, register at https://www.travelpayouts.com/, then open the API token page (https://support.travelpayouts.com/hc/en-us/articles/203956083).',
     );
     expect(PROMPTS.find((p) => p.row === 1)?.help).toBe('The app listens on this machine only (127.0.0.1).');
   });
@@ -47,9 +54,9 @@ describe('the wizard’s prompts (brief §6)', () => {
     expect(ask.asked).toEqual([
       'Port',
       'Time zone for schedules',
-      'Market (POINT_OF_SALE)',
+      'Fare market (two letters)',
       'Travelpayouts token (hidden; Enter to skip):',
-      'SearchApi: trial, 40usd, or Enter for off',
+      SEARCHAPI_QUESTION,
       'Email alerts? (send alerts and notices by email)',
     ]);
   });
@@ -57,7 +64,7 @@ describe('the wizard’s prompts (brief §6)', () => {
   it('on Linux row 7 follows; yes is linger: enable', async () => {
     const ask = scriptedAsk(['', '', '', '', '', '', true]);
     expect((await askAnswers(ask, ctx({ os: 'linux' }))).linger).toBe('enable');
-    expect(ask.asked.at(-1)).toBe('Keep running when nobody is logged in (Linux)?');
+    expect(ask.asked.at(-1)).toBe(LINGER_QUESTION);
   });
 
   it('each prompt prints its help line first', async () => {
@@ -66,15 +73,22 @@ describe('the wizard’s prompts (brief §6)', () => {
     for (const p of PROMPTS.filter((x) => x.row <= 6)) expect(io.stdout).toContain(p.help);
   });
 
-  it('SearchApi trial without an imported database asks the credits already used (default 0)', async () => {
+  it('SearchApi trial always asks the searches already used (default the current count, else 0; U2)', async () => {
     const ask = scriptedAsk(['', '', '', '', 'trial', 'sa-key-0123456789', '', '', '']);
     const a = await askAnswers(ask, ctx());
     expect(a.searchApi).toEqual({ plan: 'trial', key: 'sa-key-0123456789', billingDay: 1, trialUsed: 0 });
-    expect(ask.asked).toContain('Credits already used (100 minus the dashboard’s remaining free searches)');
+    expect(ask.asked).toContain(CREDITS_USED_QUESTION);
+    expect(ask.asked).toContain(BILLING_DAY_QUESTION);
+    const again = scriptedAsk(['trial', 'sa-key-0123456789', '', '']);
+    const current = {
+      ...ctx().defaults,
+      searchApi: { plan: 'trial' as const, key: 'old', billingDay: 1, trialUsed: 9 },
+    };
+    expect(
+      (await askAnswers(again, ctx({ defaults: current, rows: new Set([5]) }))).searchApi?.trialUsed,
+    ).toBe(9);
   });
-  it('trial with an imported database, or 40usd, never asks it', async () => {
-    const imported = scriptedAsk(['', '', '', '', 'trial', 'sa-key-0123456789', '', '']);
-    expect((await askAnswers(imported, ctx({ importedDb: true }))).searchApi?.trialUsed).toBeNull();
+  it('40usd never asks it', async () => {
     const paid = scriptedAsk(['', '', '', '', '40usd', 'sa-key-0123456789', '12', '']);
     expect((await askAnswers(paid, ctx())).searchApi).toEqual({
       plan: '40usd',
@@ -82,7 +96,7 @@ describe('the wizard’s prompts (brief §6)', () => {
       billingDay: 12,
       trialUsed: null,
     });
-    for (const a of [imported, paid]) expect(a.asked.join('\n')).not.toContain('Credits already used');
+    expect(paid.asked).not.toContain(CREDITS_USED_QUESTION);
   });
   it('--reconfigure searchapi asks only row 5, the credits included', async () => {
     const ask = scriptedAsk(['trial', 'sa-key-0123456789', '', '7']);

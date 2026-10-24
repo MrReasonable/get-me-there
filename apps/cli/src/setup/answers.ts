@@ -129,7 +129,7 @@ const hasLiteralSecret = (f: AnswersFile): boolean =>
 export async function loadAnswersFile(
   path: string,
   deps: Deps,
-  ctx: { importedDb: boolean; defaults?: Answers },
+  ctx: { defaults?: Answers } = {},
 ): Promise<{ ok: true; answers: Answers } | { ok: false; error: string }> {
   const text = deps.files.read(path);
   if (text === null) return { ok: false, error: `cannot read ${path}` };
@@ -156,7 +156,7 @@ export async function loadAnswersFile(
   if (f.travelpayouts) inputs.push({ field: 'travelpayouts.token', input: f.travelpayouts.token });
   if (f.searchApi) inputs.push({ field: 'searchApi.key', input: f.searchApi.key });
   if (f.email) inputs.push({ field: 'email.pass', input: f.email.pass });
-  const secrets = await resolveSecrets(inputs, deps.env, deps.io.readStdin);
+  const secrets = await resolveSecrets(inputs, deps.secretEnv, deps.io.readStdin);
   if (!secrets.ok) return secrets;
   const secret = (field: string): string => secrets.values.get(field) ?? '';
 
@@ -176,8 +176,10 @@ export async function loadAnswersFile(
             plan: f.searchApi.plan,
             key: secret('searchApi.key'),
             billingDay: f.searchApi.billingDay ?? 1,
-            // why: an imported database already holds the trial's ledger, so a seed would count it twice (§6 row 5)
-            trialUsed: f.searchApi.plan === 'trial' && !ctx.importedDb ? (f.searchApi.trialUsed ?? 0) : null,
+            // why: U2: the trial's searches spent outside any ledger are never in an imported database, so the count
+            // is kept (from the file, else the current settings, else 0) whatever the database's origin
+            trialUsed:
+              f.searchApi.plan === 'trial' ? (f.searchApi.trialUsed ?? base.searchApi?.trialUsed ?? 0) : null,
           },
     email: f.email === undefined ? base.email : f.email && { ...f.email, pass: secret('email.pass') },
     linger: f.linger ?? base.linger,
@@ -187,5 +189,9 @@ export async function loadAnswersFile(
   return problems.length === 0 ? { ok: true, answers } : { ok: false, error: problems.join('; ') };
 }
 
-/** Whether the answers configure a price source (Travelpayouts or SearchApi). */
-export const hasPriceSource = (a: Answers): boolean => a.travelpayouts !== null || a.searchApi !== null;
+/**
+ * Whether the answers give searches a price source (U3): Travelpayouts, or SearchApi on its monthly plan. The SearchApi
+ * trial is not one: scheduled and definition runs never use it (spec §5.3); it serves `pnpm gmt smoke`.
+ */
+export const searchSource = (a: Answers): boolean =>
+  a.travelpayouts !== null || a.searchApi?.plan === '40usd';

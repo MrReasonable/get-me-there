@@ -1,11 +1,12 @@
 import { isValidTimeZone } from '@gmt/core';
 import type { Ask } from '../ask.js';
 import type { Io } from '../deps.js';
-import { type Answers, hasPriceSource, PORT_RANGE } from './answers.js';
+import { type Answers, PORT_RANGE, searchSource } from './answers.js';
 
 /**
- * The wizard's prompt table (brief §6, pinned by a docs test against docs/setup.md section 0). Row 8, the browser
- * provider itself, is WP17's and is not asked until it lands; row 9 is asked only by `--reconfigure browser`.
+ * The wizard's prompt table (brief §6, pinned by a docs test against docs/setup.md section 0), rows 1 to 7 in plain
+ * words. Row 8, the browser provider itself, is WP17's; the browser-window question (row 9) is asked only by
+ * `--reconfigure browser`, and is shown apart from the table.
  */
 export const TP_SIGNUP_URL = 'https://www.travelpayouts.com/';
 export const TP_TOKEN_URL = 'https://support.travelpayouts.com/hc/en-us/articles/203956083';
@@ -22,38 +23,48 @@ export const PROMPTS = [
     default: 'the machine’s',
     help: 'Scheduled searches fire in this zone.',
   },
-  { row: 3, question: 'Market (POINT_OF_SALE)', default: 'GB', help: 'Prices stay in pounds in this build.' },
+  {
+    row: 3,
+    question: 'Fare market',
+    default: 'GB',
+    help: 'The country whose fares the searches ask for, as two letters (GB, US, …). It can change which fares appear; prices are always shown in pounds in this build.',
+  },
   {
     row: 4,
     question: 'Travelpayouts token',
     default: 'skip',
-    help: `Free, cached prices from Aviasales users’ searches; constraints are not checked. Needs a free Travelpayouts account: if you have none, register at ${TP_SIGNUP_URL}, then open the API token page (${TP_TOKEN_URL}).`,
+    help: `Free prices cached from what other travellers recently searched on Aviasales, typically hours to days old; your stay and date limits are not applied, so check a fare on the airline’s site before you rely on it. Needs a free Travelpayouts account: if you have none, register at ${TP_SIGNUP_URL}, then open the API token page (${TP_TOKEN_URL}).`,
   },
   {
     row: 5,
     question: 'SearchApi',
     default: 'off',
-    help: '`trial`: a one-off allowance for a smoke test and spikes, never run on a schedule. `40usd`: about £32 a month, prices scraped from Google Flights by SearchApi.',
+    help: 'Google Flights results through SearchApi. The free trial is a one-off 100 searches for `pnpm gmt smoke` only: scheduled searches never use it. The $40 a month plan lets scheduled searches spend up to its 10,000 searches a month.',
   },
   { row: 6, question: 'Email alerts', default: 'skip', help: 'Send alerts and notices by email.' },
   {
     row: 7,
-    question: 'Keep running when nobody is logged in (Linux)',
+    question: 'Keep running after you log out (Linux)',
     default: 'no',
-    help: 'Lets the app keep running after you log out (loginctl enable-linger).',
-  },
-  {
-    row: 9,
-    question: 'Browser provider after an interruption',
-    default: 'no',
-    help: 'If a run is interrupted (for example the laptop sleeps), should the browser part finish when it resumes, even outside the scheduled hours? [no]',
+    help: 'Without it, the app stops when you log out of every session; setup runs loginctl enable-linger for you.',
   },
 ] as const;
-export type PromptRow = (typeof PROMPTS)[number]['row'];
+/** Row 9 (decision 83), asked only by `pnpm gmt setup --reconfigure browser`. */
+export const BROWSER_WINDOW_PROMPT = {
+  row: 9,
+  question: 'Browser provider after an interruption',
+  default: 'no',
+  help: 'If a run is interrupted (for example the laptop sleeps), should the browser part finish when it resumes, even outside the scheduled hours? [no]',
+} as const;
+export type PromptRow = (typeof PROMPTS)[number]['row'] | typeof BROWSER_WINDOW_PROMPT.row;
 
 export const PASTE_TOKEN_QUESTION = 'Paste a token now? (Enter to finish without one)';
+export const SEARCHAPI_QUESTION =
+  'SearchApi: Enter for off, trial for the free trial (100 searches, smoke tests only), or 40usd for the $40 a month plan';
+export const BILLING_DAY_QUESTION = 'SearchApi billing day: the day of the month your plan renews (1–28)';
 export const CREDITS_USED_QUESTION =
-  'Credits already used (100 minus the dashboard’s remaining free searches)';
+  'Searches already used on the trial (100 minus the searches your SearchApi dashboard says are left)';
+export const LINGER_QUESTION = 'Keep the app running after you log out?';
 export const BROWSER_WINDOW_QUESTION =
   'If a run is interrupted (for example the laptop sleeps), should the browser part finish when it resumes, even outside the scheduled hours?';
 
@@ -82,8 +93,6 @@ export interface PromptContext {
   os: 'darwin' | 'linux';
   /** The current values: the defaults on a first setup, the file's values under `--reconfigure`. */
   defaults: Answers;
-  /** True after an import, so the SearchApi trial's spent credits are already on the imported ledger. */
-  importedDb: boolean;
   /** The rows to ask (`--reconfigure`), or null for a first setup's rows 1–7. */
   rows: ReadonlySet<PromptRow> | null;
   io: Io;
@@ -93,7 +102,8 @@ export interface PromptContext {
 export async function askAnswers(ask: Ask, ctx: PromptContext): Promise<Answers> {
   const a: Answers = { ...ctx.defaults };
   const want = (row: PromptRow) => (ctx.rows === null ? row <= 7 : ctx.rows.has(row));
-  const help = (row: PromptRow) => ctx.io.out(`\n${PROMPTS.find((p) => p.row === row)?.help ?? ''}\n`);
+  const help = (row: PromptRow) =>
+    ctx.io.out(`\n${[...PROMPTS, BROWSER_WINDOW_PROMPT].find((p) => p.row === row)?.help ?? ''}\n`);
 
   if (want(1)) {
     help(1);
@@ -117,8 +127,8 @@ export async function askAnswers(ask: Ask, ctx: PromptContext): Promise<Answers>
     help(3);
     a.pointOfSale = await asked(
       ctx.io,
-      'Market (POINT_OF_SALE)',
-      () => ask.text('Market (POINT_OF_SALE)', a.pointOfSale),
+      'Fare market',
+      () => ask.text('Fare market (two letters)', a.pointOfSale),
       (s) => (/^[A-Z]{2}$/.test(s.toUpperCase()) ? s.toUpperCase() : null),
     );
   }
@@ -132,7 +142,7 @@ export async function askAnswers(ask: Ask, ctx: PromptContext): Promise<Answers>
     const plan = await asked(
       ctx.io,
       'SearchApi',
-      () => ask.text('SearchApi: trial, 40usd, or Enter for off', a.searchApi?.plan ?? 'off'),
+      () => ask.text(SEARCHAPI_QUESTION, a.searchApi?.plan ?? 'off'),
       (s) => (s === 'off' || s === 'trial' || s === '40usd' ? s : null),
     );
     if (plan === 'off') a.searchApi = null;
@@ -141,11 +151,13 @@ export async function askAnswers(ask: Ask, ctx: PromptContext): Promise<Answers>
       const billingDay = await asked(
         ctx.io,
         'SearchApi billing day',
-        () => ask.text('SearchApi billing day (1–28)', String(a.searchApi?.billingDay ?? 1)),
+        () => ask.text(BILLING_DAY_QUESTION, String(a.searchApi?.billingDay ?? 1)),
         intIn(1, 28),
       );
       const trialUsed =
-        plan === 'trial' && !ctx.importedDb
+        // why: U2: the count of trial searches spent outside any ledger is never in an imported database, so it is
+        // always asked for the trial, with the value the settings already hold as its default
+        plan === 'trial'
           ? await asked(
               ctx.io,
               'Credits already used',
@@ -181,9 +193,7 @@ export async function askAnswers(ask: Ask, ctx: PromptContext): Promise<Answers>
   }
   if (want(7) && ctx.os === 'linux') {
     help(7);
-    a.linger = (await ask.confirm('Keep running when nobody is logged in (Linux)?', a.linger === 'enable'))
-      ? 'enable'
-      : 'skip';
+    a.linger = (await ask.confirm(LINGER_QUESTION, a.linger === 'enable')) ? 'enable' : 'skip';
   }
   if (ctx.rows?.has(9) === true) {
     a.browser = {
@@ -198,7 +208,7 @@ export async function askAnswers(ask: Ask, ctx: PromptContext): Promise<Answers>
  * written as `TRAVELPAYOUTS_TOKEN`, exactly as row 4's answer; Enter leaves the answers as they are.
  */
 export async function askPasteToken(a: Answers, ask: Ask, ctx: { interactive: boolean }): Promise<Answers> {
-  if (hasPriceSource(a) || !ctx.interactive) return a;
+  if (searchSource(a) || !ctx.interactive) return a;
   const token = await ask.secret(PASTE_TOKEN_QUESTION);
   return token === '' ? a : { ...a, travelpayouts: { token } };
 }

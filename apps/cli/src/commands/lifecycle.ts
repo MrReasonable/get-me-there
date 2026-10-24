@@ -7,6 +7,10 @@ import type { ServiceFacts } from '../platform/types.js';
 import { WIN32_REFUSAL } from '../platform/win32.js';
 import { scheduleUnit } from '../services/checks.js';
 import { factOf, factsOf, type ServiceEntry, serviceSet } from '../services/set.js';
+import { appEnvPath } from '../services/specs.js';
+import { readSettings } from '../setup/appEnv.js';
+import { guardActiveRun } from './guard.js';
+import { nativeTarget } from './setup.js';
 
 /** The services setup installed, with their facts; a job's schedule unit's facts included. */
 export async function installed(
@@ -60,5 +64,28 @@ export async function runLifecycle(
 export function refuseOnWindows(deps: Deps): number | null {
   if (deps.platform.os !== 'win32') return null;
   deps.io.err(`${WIN32_REFUSAL}\n`);
-  return EXIT.refused;
+  return EXIT.badConfig;
+}
+
+/** U1 (cb-b1-008): stop and restart ask the app about a run first (decision 80's rule); null when they may go ahead. */
+export async function lifecycleGuard(
+  deps: Deps,
+  flags: Flags,
+  entries: readonly ServiceEntry[],
+  facts: ReadonlyMap<string, ServiceFacts>,
+): Promise<number | null> {
+  if (flags['dry-run'] === true) return null;
+  const app = entries.find((e) => e.name === 'app');
+  const text = deps.files.read(appEnvPath(deps.platform.paths));
+  const g = await guardActiveRun(
+    deps,
+    nativeTarget(text === null ? null : readSettings(text), factOf(facts, app?.unit ?? '')),
+    {
+      wait: flags.wait === true,
+      force: flags.force === true,
+    },
+  );
+  if (g.ok) return null;
+  deps.io.err(`${g.message}\n`);
+  return EXIT.lockRefused;
 }

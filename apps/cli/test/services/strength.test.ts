@@ -72,17 +72,14 @@ describe('systemd edges', () => {
     );
     expect(job[1]?.path).toBe('/home/a/.config/systemd/user/get-me-there-backup.timer');
   });
-  it.each(['active', 'activating', 'reloading', 'deactivating', 'refreshing'])(
-    'is-active %s is running',
-    async (word) => {
-      const run = memoryRunner(new MemoryFs(), (a) =>
-        a[0] === 'systemctl' ? { code: 0, stdout: `${word}\n` } : undefined,
-      );
-      expect((await lin.serviceManager.facts(job, run)).get('get-me-there-backup.service')?.state).toBe(
-        'running',
-      );
-    },
-  );
+  it.each(['active', 'reloading', 'deactivating', 'refreshing'])('is-active %s is running', async (word) => {
+    const run = memoryRunner(new MemoryFs(), (a) =>
+      a[0] === 'systemctl' ? { code: 0, stdout: `${word}\n` } : undefined,
+    );
+    expect((await lin.serviceManager.facts(job, run)).get('get-me-there-backup.service')?.state).toBe(
+      'running',
+    );
+  });
   it('facts reads with cwd / and a 15 s timeout; actions run in /; written units are not secret', async () => {
     const run = memoryRunner(new MemoryFs());
     await lin.serviceManager.facts(job, run);
@@ -136,11 +133,13 @@ describe('specs and the plan text', () => {
   });
   it('the failure report, whole', () => {
     const a = runAction(['x'], '/');
-    expect(describeResult('cmd', { done: [a], failed: { action: a, error: 'boom' }, notRun: [a] })).toBe(
+    expect(
+      describeResult('cmd', { done: [a], outputs: [''], failed: { action: a, error: 'boom' }, notRun: [a] }),
+    ).toBe(
       'cmd: stopped at a failed step; nothing was undone\n  done:    run x\n  failed:  run x: boom\n  not run: run x\n  run the same command again to carry on from here\n',
     );
   });
   it('a run with no input has no stdin key at all', () => {
-    expect(Object.keys(runAction(['x'], '/'))).toEqual(['kind', 'argv', 'cwd', 'describe', 'secretStdin']);
+    expect(Object.keys(runAction(['x'], '/'))).toEqual(['kind', 'argv', 'cwd', 'describe']);
   });
 });

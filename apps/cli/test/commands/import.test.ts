@@ -119,9 +119,9 @@ describe('--import-docker (spec §13 "One app per ledger"; brief Task 16b.7)', (
 
   it('refuses while the container runs a search, naming it and its estimated finish; nothing is stopped', async () => {
     const m = dockerMachine({ active: [ACTIVE] });
-    expect(await runCli(['setup', '--import-docker', ...NI], m.deps)).toBe(78);
+    expect(await runCli(['setup', '--import-docker', ...NI], m.deps)).toBe(75);
     expect(m.io.stderr).toContain(
-      'a search is running: London to New York weekly, started 2026-10-24T09:00:00.000Z, estimated to finish 2026-10-24T10:15:00.000Z',
+      'a search is running in the Docker app: London to New York weekly, started 2026-10-24T09:00:00.000Z, estimated to finish 2026-10-24T10:15:00.000Z',
     );
     expect(argvs(m).some((s) => s.includes('stop app'))).toBe(false);
     expect(m.executor.log).toEqual([]);
@@ -152,34 +152,61 @@ describe('--import-docker (spec §13 "One app per ledger"; brief Task 16b.7)', (
     expect(await runCli(['setup', '--import-docker', ...NI], b.deps)).toBe(1);
     expect(argvs(b).some((s) => s.includes(' cp '))).toBe(false);
     expect(b.docker.state.marker).toBeNull();
+    // why: dev-b1-006: each failure says what state it left and the way back
+    expect(m.io.stderr).toContain('The native database is unchanged and the old one is not marked moved.');
+    expect(m.io.stderr).toContain('to go back to it, run docker compose start app');
+    expect(b.io.stderr).toContain(
+      'The database was not moved. The Docker app is stopped; to go back to it, run docker compose start app.',
+    );
+  });
+  it('a failure after the marker names the state and the way forward; a plain setup re-run then finishes (dev-b1-006)', async () => {
+    const m = dockerMachine();
+    const exec = m.deps.executor;
+    let failHealth = true;
+    m.deps.executor = {
+      run: async (a) => {
+        if (a.kind === 'waitHealthy' && failHealth) throw new Error('not healthy within 240 s');
+        return exec.run(a);
+      },
+    };
+    expect(await runCli(['setup', '--import-docker', ...NI], m.deps)).toBe(1);
+    expect(m.docker.state.marker).not.toBeNull();
+    expect(m.io.stderr).toContain('The database is in place here and the old one is marked moved');
+    expect(m.io.stderr).toContain(
+      'docker compose run --rm --no-deps --entrypoint rm app /data/MOVED-TO-NATIVE',
+    );
+    expect(m.io.stderr).toContain('See pnpm gmt logs, then run pnpm gmt setup to finish.');
+    failHealth = false;
+    m.io.stderr = '';
+    expect(await runCli(['setup', ...NI], m.deps)).toBe(0);
+    expect(m.io.stderr).not.toContain('--replace-database');
   });
 
   it('interactive: each .env group is confirmed; ALLOWED_HOSTS is shown, not copied; values never printed', async () => {
     const ask = scriptedAsk([true, false, '', '', '', '', false, true, false]);
     const m = dockerMachine({ ask });
-    m.deps.io = testIo({ tty: true });
+    const io = testIo({ tty: true });
+    m.deps.io = io;
     m.fs.file('/work/a.json', '{}', 0o600);
     expect(await runCli(['setup', '--import-docker'], m.deps)).toBe(0);
     expect(ask.asked.slice(0, 2)).toEqual([
-      'Carry the Travelpayouts token (TRAVELPAYOUTS_TOKEN) from the Docker .env into app.env?',
+      'Carry the Travelpayouts lines (TRAVELPAYOUTS_TOKEN) from the Docker .env into app.env?',
       'Carry the time zone (SCHEDULER_TIMEZONE) from the Docker .env into app.env?',
     ]);
     const env = m.fs.read('/Users/op/.config/get-me-there/app.env') ?? '';
     expect(env).toContain('TRAVELPAYOUTS_TOKEN="compose-tp-0123456789"');
     expect(env).not.toContain('America/New_York');
     expect(env).not.toContain('ALLOWED_HOSTS');
-    const io = m.deps.io;
-    if ('stdout' in io && typeof io.stdout === 'string') {
-      expect(io.stdout).toContain('ALLOWED_HOSTS=nas.local:3000; it is not copied');
-      expect(io.stdout).not.toContain('compose-tp-0123456789');
-      expect(io.stdout).not.toContain('compose-pass-0123');
-    }
+    // why: CodeRabbit PRRT_kwDOVNmjjs6v7k7l: asserted unconditionally on the io the command wrote to
+    expect(io.stdout).toContain('ALLOWED_HOSTS=nas.local:3000; it is not copied');
+    expect(io.stdout).not.toContain('compose-tp-0123456789');
+    expect(io.stdout).not.toContain('compose-pass-0123');
     expect(ask.asked).toContain(
       'Stop and remove the Docker app’s container now (docker compose down, the volume kept)?',
     );
   });
 
-  it('a native database already present refuses unless --replace-database, which stops the app and backs it up first', async () => {
+  it('a native database already present refuses unless --replace-database, which backs it up before anything is copied in', async () => {
     const m = dockerMachine();
     m.fs.file(DB, 'native', 0o600);
     expect(await runCli(['setup', '--import-docker', ...NI], m.deps)).toBe(78);
@@ -189,17 +216,19 @@ describe('--import-docker (spec §13 "One app per ledger"; brief Task 16b.7)', (
     const a = argvs(m);
     const nativeBackup = idx(a, (s) => s.includes(`backup.mjs --db ${DB} --dir ${DATA}/backups`));
     expect(nativeBackup).toBeGreaterThanOrEqual(0);
-    expect(nativeBackup).toBeLessThan(idx(a, (s) => s.endsWith('stop app')));
+    expect(nativeBackup).toBeLessThan(idx(a, (s) => s.includes('scripts/backup.mjs --dir /data/backups')));
     expect(m.fs.read(DB)).toBe('sqlite copy from the volume');
   });
 });
 
 describe('--import-db <path> and --ignore-docker', () => {
   const SRC = '/work/checkout/data/dev.db';
-  function dbMachine(lock: string) {
+  function dbMachine(lock: string, summary?: { resumable: number; scheduled: number }) {
     const m = machine({
       extra: (argv) => {
         const s = String(argv[1]);
+        if (summary !== undefined && s.endsWith('check-backup.mjs'))
+          return { code: 0, stdout: `${JSON.stringify({ ok: true, file: argv[2], ...summary })}\n` };
         if (s.endsWith('lock-state.mjs')) return { code: 0, stdout: `${JSON.stringify({ state: lock })}\n` };
         if (s.endsWith('backup.mjs') && argv.includes('--db') && argv.includes(SRC)) {
           m.fs.file(`${DATA}/backups/get-me-there-x.db`, 'checkout backup', 0o600);
@@ -229,9 +258,20 @@ describe('--import-db <path> and --ignore-docker', () => {
     );
     expect(log.findIndex((a) => a.kind === 'run' && a.describe.startsWith('check'))).toBeLessThan(markerAt);
   });
+  it('says what the first start resumes and catches up from the imported database (cb-b1-010)', async () => {
+    const m = dbMachine('absent', { resumable: 2, scheduled: 1 });
+    expect(await runCli(['setup', '--import-db', SRC, ...NI], m.deps)).toBe(0);
+    expect(m.io.stdout).toContain(
+      'The app now starts on this database and resumes 2 unfinished runs it holds',
+    );
+    expect(m.io.stdout).toContain('1 scheduled search may catch up its latest missed firing once');
+    expect(m.io.stdout.indexOf('resumes 2 unfinished runs')).toBeLessThan(
+      m.io.stdout.indexOf('User name: operator'),
+    );
+  });
   it('refuses while the checkout’s app holds its lock', async () => {
     const m = dbMachine('fresh');
-    expect(await runCli(['setup', '--import-db', SRC, ...NI], m.deps)).toBe(78);
+    expect(await runCli(['setup', '--import-db', SRC, ...NI], m.deps)).toBe(75);
     expect(m.io.stderr).toContain('its lock is held');
     expect(m.fs.read(DB)).toBeNull();
   });

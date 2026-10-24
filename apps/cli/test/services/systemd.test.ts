@@ -132,7 +132,7 @@ describe('systemd facts and planning', () => {
   });
 
   it.each([
-    ['activating', 0, true, 'old', 'running'],
+    ['activating', 0, true, 'old', 'failed'],
     ['failed', 3, true, 'old', 'failed'],
     ['inactive', 3, false, 'old', 'stopped'],
     ['inactive', 3, false, null, 'not-installed'],

@@ -29,8 +29,7 @@ describe('describePlan never shows a secret (brief WP16b §5, §10)', () => {
     fc.assert(
       fc.property(secretArb, fc.boolean(), (secret, isSecret) => {
         const a = runAction(['docker', 'compose', 'run', 'app'], '/repo', {
-          stdin: secret,
-          secretStdin: isSecret,
+          stdin: { text: secret, secret: isSecret },
         });
         const text = describePlan({ command: 'x', actions: [a], notes: [] });
         expect(text).not.toContain(secret);

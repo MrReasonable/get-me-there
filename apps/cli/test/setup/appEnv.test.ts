@@ -4,7 +4,6 @@ import { describe, expect, it } from 'vitest';
 import { currentPlatform } from '../../src/platform/current.js';
 import { type Answers, defaultAnswers } from '../../src/setup/answers.js';
 import {
-  answersFromRecord,
   checkAppEnv,
   entriesFor,
   GROUP_NAMES,
@@ -160,9 +159,13 @@ describe('app.env (spec §12 "Where settings live")', () => {
     expect(GROUP_NAMES.email).toContain('ALERT_EMAIL_FROM');
   });
 
-  it('answersFromRecord reads back what entriesFor wrote', () => {
-    expect(answersFromRecord(record(), { linger: 'skip' })).toEqual(full);
-    expect(answersFromRecord(record(base), { linger: 'enable' })).toEqual({ ...base, linger: 'enable' });
-    expect(answersFromRecord({ ...record(base), PORT: 'x' }, { linger: 'skip' }).port).toBe(3000);
+  it('replaceGroups recognises an exported or indented owned line and leaves exactly one line per owned name (ts-b1-006)', () => {
+    const owned = entriesFor({ ...base, port: 3917 }, { paths: p.paths, password: PASS });
+    for (const line of ['export PORT=4000', '  PORT=4000', '\tPORT = 4000'])
+      for (const text of [`${line}\nLOG_LEVEL=debug\n`, `PORT=4000\n${line}\nLOG_LEVEL=debug\n`]) {
+        const after = replaceGroups(text, owned, ['port']);
+        expect(after.split('\n').filter((l) => /^\s*(export\s+)?PORT\s*=/.test(l))).toEqual(['PORT="3917"']);
+        expect(parseEnv(after)).toMatchObject({ PORT: '3917', LOG_LEVEL: 'debug' });
+      }
   });
 });

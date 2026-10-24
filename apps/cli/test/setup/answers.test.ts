@@ -14,7 +14,7 @@ describe('--answers <file> (spec §13; brief Task 16b.5)', () => {
       travelpayouts: { token: { fromEnv: 'TP' } },
       searchApi: { plan: 'trial', key: 'sa-key-0123456789', trialUsed: 9 },
     });
-    const r = await loadAnswersFile('/work/answers.json', w.deps, { importedDb: false });
+    const r = await loadAnswersFile('/work/answers.json', w.deps);
     expect(r).toEqual({
       ok: true,
       answers: {
@@ -49,7 +49,7 @@ describe('--answers <file> (spec §13; brief Task 16b.5)', () => {
   ])('the strict schema refuses %s', async (_n, body) => {
     const w = testWorld();
     write(w, body);
-    const r = await loadAnswersFile('/work/answers.json', w.deps, { importedDb: false });
+    const r = await loadAnswersFile('/work/answers.json', w.deps);
     expect(r.ok).toBe(false);
     expect(answersFileSchema.safeParse(body).success).toBe(false);
   });
@@ -58,7 +58,7 @@ describe('--answers <file> (spec §13; brief Task 16b.5)', () => {
     for (const mode of [0o640, 0o604, 0o644]) {
       const w = testWorld();
       write(w, { travelpayouts: { token: 'tp-literal-0123456789' } }, mode);
-      const r = await loadAnswersFile('/work/answers.json', w.deps, { importedDb: false });
+      const r = await loadAnswersFile('/work/answers.json', w.deps);
       expect(r).toEqual({
         ok: false,
         error: '/work/answers.json holds a secret and is readable by others: chmod 600 /work/answers.json',
@@ -87,7 +87,7 @@ describe('--answers <file> (spec §13; brief Task 16b.5)', () => {
       },
       0o644,
     );
-    const r = await loadAnswersFile('/work/answers.json', w.deps, { importedDb: false });
+    const r = await loadAnswersFile('/work/answers.json', w.deps);
     expect(r.ok && r.answers.travelpayouts).toEqual({ token: 'tp-token-on-stdin' });
     expect(r.ok && r.answers.email?.pass).toBe('smtp-pass-from-env');
   });
@@ -95,7 +95,7 @@ describe('--answers <file> (spec §13; brief Task 16b.5)', () => {
   it('fromEnv naming an unset variable, two fromStdin fields, a missing or unreadable file are refused', async () => {
     const w = testWorld();
     write(w, { travelpayouts: { token: { fromEnv: 'NOPE' } } }, 0o644);
-    expect(await loadAnswersFile('/work/answers.json', w.deps, { importedDb: false })).toEqual({
+    expect(await loadAnswersFile('/work/answers.json', w.deps)).toEqual({
       ok: false,
       error: 'travelpayouts.token: the environment variable NOPE is not set',
     });
@@ -107,28 +107,35 @@ describe('--answers <file> (spec §13; brief Task 16b.5)', () => {
       },
       0o644,
     );
-    expect((await loadAnswersFile('/work/answers.json', w.deps, { importedDb: false })).ok).toBe(false);
-    expect(await loadAnswersFile('/work/none.json', w.deps, { importedDb: false })).toEqual({
+    expect((await loadAnswersFile('/work/answers.json', w.deps)).ok).toBe(false);
+    expect(await loadAnswersFile('/work/none.json', w.deps)).toEqual({
       ok: false,
       error: 'cannot read /work/none.json',
     });
     write(w, '{ not json');
-    expect(await loadAnswersFile('/work/answers.json', w.deps, { importedDb: false })).toEqual({
+    expect(await loadAnswersFile('/work/answers.json', w.deps)).toEqual({
       ok: false,
       error: '/work/answers.json is not JSON',
     });
   });
 
-  it('trialUsed is SearchApi trial’s alone: refused with 40usd, dropped with an imported database', async () => {
+  it('trialUsed is SearchApi trial’s alone: refused with 40usd; kept with the trial whatever the database’s origin (U2)', async () => {
     const w = testWorld();
     write(w, { searchApi: { plan: '40usd', key: 'sa-key-0123456789', trialUsed: 3 } });
-    expect(await loadAnswersFile('/work/answers.json', w.deps, { importedDb: false })).toEqual({
+    expect(await loadAnswersFile('/work/answers.json', w.deps)).toEqual({
       ok: false,
       error: 'searchApi.trialUsed applies to the trial plan only',
     });
     write(w, { searchApi: { plan: 'trial', key: 'sa-key-0123456789', trialUsed: 3 } });
-    const r = await loadAnswersFile('/work/answers.json', w.deps, { importedDb: true });
-    expect(r.ok && r.answers.searchApi?.trialUsed).toBeNull();
+    const r = await loadAnswersFile('/work/answers.json', w.deps);
+    expect(r.ok && r.answers.searchApi?.trialUsed).toBe(3);
+    write(w, { searchApi: { plan: 'trial', key: 'sa-key-0123456789' } });
+    const current = {
+      ...defaultAnswers({ port: 3000, timezone: 'UTC' }),
+      searchApi: { plan: 'trial' as const, key: 'old-key-0123456', billingDay: 1, trialUsed: 9 },
+    };
+    const kept = await loadAnswersFile('/work/answers.json', w.deps, { defaults: current });
+    expect(kept.ok && kept.answers.searchApi?.trialUsed).toBe(9);
   });
 
   // why: spec §13: an invalid secret's value never appears in an error; each secret field holds a sentinel made invalid
@@ -154,7 +161,7 @@ describe('--answers <file> (spec §13; brief Task 16b.5)', () => {
     for (const bad of [`${sentinel}"x`, `${sentinel}\nx`, `${sentinel}\\x`, `${sentinel}\rx`, '']) {
       const w = testWorld();
       write(w, body(bad));
-      const r = await loadAnswersFile('/work/answers.json', w.deps, { importedDb: false });
+      const r = await loadAnswersFile('/work/answers.json', w.deps);
       expect(r.ok).toBe(false);
       const text = JSON.stringify(r);
       expect(text).toContain(field);
@@ -184,8 +191,39 @@ describe('--answers <file> (spec §13; brief Task 16b.5)', () => {
   ])('a bad plain value is refused naming it: %j', async (body, field) => {
     const w = testWorld();
     write(w, body);
-    const r = await loadAnswersFile('/work/answers.json', w.deps, { importedDb: false });
+    const r = await loadAnswersFile('/work/answers.json', w.deps);
     expect(r.ok).toBe(false);
     expect(JSON.stringify(r)).toContain(field);
+  });
+
+  it('an answers file whose top level is not an object is refused at the top level (ts-b1-016)', async () => {
+    const w = testWorld();
+    write(w, '[]');
+    const r = await loadAnswersFile('/work/answers.json', w.deps);
+    expect(r.ok).toBe(false);
+    expect(r.ok === false && r.error).toContain('(top level)');
+  });
+  it.each([
+    ['host', '', '/work/answers.json: email.host: too_small'],
+    ['to', 'not-an-address', 'email.to: not an email address'],
+    ['from', 'not-an-address', 'email.from: not an email address'],
+  ])('a bad email %s is refused with its exact message (ts-b1-016)', async (field, value, message) => {
+    const w = testWorld();
+    const email = {
+      host: 'smtp.example.com',
+      port: 465,
+      tls: 'implicit',
+      user: 'u',
+      pass: 'p-0123456789',
+      to: 'a@example.com',
+      from: 'b@example.com',
+    };
+    write(w, { email: { ...email, [field]: value } });
+    const r = await loadAnswersFile('/work/answers.json', w.deps);
+    expect(r.ok).toBe(false);
+    if (r.ok === false) {
+      expect(r.error).toBe(message);
+      expect(r.error).not.toContain('p-0123456789');
+    }
   });
 });

@@ -1,5 +1,5 @@
 import { parseEnv } from 'node:util';
-import { parseConfig } from '@gmt/core';
+import { type Config, parseConfig } from '@gmt/core';
 import type { ReconfigureGroup } from '../args.js';
 import type { Paths } from '../platform/types.js';
 import { databasePath } from '../services/specs.js';
@@ -29,6 +29,8 @@ export const GROUP_NAMES = {
     'ALERT_EMAIL_FROM',
   ],
   browser: ['CAMOUFOX_BROWSER_WINDOW'],
+  // why: linger is the setup record's, not a line of app.env
+  linger: [],
 } as const satisfies Record<ReconfigureGroup | 'base', readonly string[]>;
 export const OWNED_NAMES: readonly string[] = Object.values(GROUP_NAMES).flat();
 export const OPERATOR_USER = 'operator';
@@ -133,9 +135,7 @@ export function checkAppEnv(
       ok: false,
       error: `a value holds a character app.env cannot carry (", \\, CR or LF): ${unsafe.join(', ')}`,
     };
-  const parsed = parseEnv(text);
-  const record: Record<string, string> = {};
-  for (const [k, v] of Object.entries(parsed)) if (v !== undefined) record[k] = v;
+  const record = readEnvText(text);
   const mismatched = OWNED_NAMES.filter((k) => record[k] !== intended[k]);
   if (mismatched.length > 0)
     return { ok: false, error: `app.env would not read back as written: ${mismatched.join(', ')}` };
@@ -156,45 +156,57 @@ export function ownedDiff(
   return OWNED_NAMES.filter((k) => file[k] !== plan[k]);
 }
 
-const int = (s: string | undefined, def: number): number =>
-  s !== undefined && /^\d+$/.test(s) ? Number(s) : def;
+/** A settings file read back the way the app reads it: parseEnv, then core's parseConfig (U9, ca-b1-012). */
+export type Settings =
+  | { ok: true; config: Config; record: Record<string, string> }
+  | { ok: false; fields: string[]; record: Record<string, string> };
+export function readSettings(text: string): Settings {
+  const record = readEnvText(text);
+  const r = parseConfig(record, { realpath: (p) => p });
+  return r.ok
+    ? { ok: true, config: r.config, record }
+    : { ok: false, fields: [...new Set(r.errors.map((e) => e.field))].sort(), record };
+}
 
-/** The answers an existing file's owned lines amount to (a re-run keeps them; `--reconfigure` starts from them). */
-export function answersFromRecord(
-  r: Readonly<Record<string, string | undefined>>,
+/**
+ * The answers a valid settings file amounts to (a re-run keeps them; `--reconfigure` starts from them), every value and
+ * default taken from the app's own parse of it. `SEARCHAPI_TRIAL_USED` is an answer only when the file states it.
+ */
+export function answersFromConfig(
+  c: Config,
+  r: Readonly<Record<string, string>>,
   rec: { linger: 'skip' | 'enable' },
 ): Answers {
-  const tls = r.SMTP_TLS;
-  const plan = r.SEARCHAPI_PLAN;
-  const window = r.CAMOUFOX_BROWSER_WINDOW;
+  const tp = c.providers.travelpayouts;
+  const sa = c.providers.searchapi;
   return {
-    port: int(r.PORT, 3000),
-    timezone: r.SCHEDULER_TIMEZONE ?? 'Europe/London',
-    pointOfSale: r.POINT_OF_SALE ?? 'GB',
-    travelpayouts: r.TRAVELPAYOUTS_TOKEN === undefined ? null : { token: r.TRAVELPAYOUTS_TOKEN },
+    port: c.port,
+    timezone: c.schedulerTimezone,
+    pointOfSale: c.pointOfSale,
+    travelpayouts: tp === null ? null : { token: tp.token.reveal() },
     searchApi:
-      r.SEARCHAPI_KEY === undefined
+      sa === null
         ? null
         : {
-            plan: plan === '40usd' ? '40usd' : 'trial',
-            key: r.SEARCHAPI_KEY,
-            billingDay: int(r.SEARCHAPI_BILLING_DAY, 1),
-            trialUsed: r.SEARCHAPI_TRIAL_USED === undefined ? null : int(r.SEARCHAPI_TRIAL_USED, 0),
+            plan: sa.plan,
+            key: sa.key.reveal(),
+            billingDay: sa.limits.billingDay,
+            trialUsed: sa.plan === 'trial' && r.SEARCHAPI_TRIAL_USED !== undefined ? sa.trialUsed : null,
           },
     email:
-      r.SMTP_HOST === undefined
+      c.smtp === null
         ? null
         : {
-            host: r.SMTP_HOST,
-            port: int(r.SMTP_PORT, 465),
-            tls: tls === 'starttls' || tls === 'none' ? tls : 'implicit',
-            user: r.SMTP_USER ?? '',
-            pass: r.SMTP_PASS ?? '',
-            to: r.ALERT_EMAIL_TO ?? '',
-            from: r.ALERT_EMAIL_FROM ?? '',
+            host: c.smtp.host,
+            port: c.smtp.port,
+            tls: c.smtp.tls,
+            user: c.smtp.user,
+            pass: c.smtp.pass.reveal(),
+            to: c.smtp.to,
+            from: c.smtp.from,
           },
     linger: rec.linger,
-    browser: window === 'scheduled' || window === 'any' ? { window } : null,
+    browser: r.CAMOUFOX_BROWSER_WINDOW === undefined ? null : { window: c.camoufoxBrowserWindow },
   };
 }
 

@@ -59,4 +59,11 @@ describe('parseCommandLine (decision 72: node:util parseArgs, no new dependency)
     expect(p.kind).toBe('usage');
     if (p.kind === 'usage') expect(p.message).toContain(message);
   });
+
+  it('the help names the first step, says setup generates the password, and update fast-forwards only (pf-b1-012)', () => {
+    const top = helpText();
+    expect(top).toContain('First time: pnpm gmt setup');
+    expect(helpText('setup')).toContain('setup generates its password');
+    expect(helpText('update')).toContain('fast-forward only');
+  });
 });

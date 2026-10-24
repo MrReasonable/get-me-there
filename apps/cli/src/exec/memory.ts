@@ -14,6 +14,7 @@ type Entry =
  */
 export class MemoryFs implements Files {
   private readonly entries = new Map<string, Entry>();
+  private readonly locked = new Set<string>();
   constructor(readonly uid = 501) {}
 
   file(path: string, contents: string, mode = 0o644): this {
@@ -29,6 +30,11 @@ export class MemoryFs implements Files {
   symlink(path: string, target: string): this {
     this.mkdirp(dirname(path));
     this.entries.set(path, { kind: 'symlink', target });
+    return this;
+  }
+  /** Makes reading the file fail as an unreadable one does (EACCES). */
+  unreadable(path: string): this {
+    this.locked.add(path);
     return this;
   }
   chown(path: string, owner: number): this {
@@ -54,6 +60,8 @@ export class MemoryFs implements Files {
   }
 
   read(path: string): string | null {
+    if (this.locked.has(path))
+      throw Object.assign(new Error(`EACCES: permission denied, open '${path}'`), { code: 'EACCES' });
     const e = this.resolved(path);
     return e?.kind === 'file' ? e.contents : null;
   }
@@ -71,6 +79,16 @@ export class MemoryFs implements Files {
   }
   isDir(path: string): boolean {
     return this.resolved(path)?.kind === 'dir';
+  }
+  realpath(path: string): string | null {
+    let p = path;
+    for (let i = 0; i < 8; i++) {
+      const e = this.entries.get(p);
+      if (e === undefined) return null;
+      if (e.kind !== 'symlink') return p;
+      p = e.target;
+    }
+    return null;
   }
   isSymlink(path: string): boolean {
     return this.entries.get(path)?.kind === 'symlink';
@@ -125,6 +143,7 @@ export class MemoryFs implements Files {
         return;
       case 'run':
       case 'waitHealthy':
+      case 'waitGone':
         return;
     }
   }
@@ -192,21 +211,28 @@ export function memoryExecutor(
   const runner = opts.runner ?? memoryRunner(fs);
   return {
     log,
-    async run(a: Action): Promise<void> {
+    async run(a: Action): Promise<{ stdout: string }> {
       log.push(a);
       if (opts.fail?.(a, log.length - 1) === true) throw new Error(`injected failure at step ${log.length}`);
       if (a.kind === 'run') {
         const r = await runner(a.argv, {
           cwd: a.cwd,
           timeoutMs: 1000,
-          ...(a.stdin === undefined ? {} : { stdin: a.stdin }),
+          ...(a.stdin === undefined ? {} : { stdin: a.stdin.text }),
+          ...(a.env === undefined ? {} : { env: a.env }),
         });
         if (r.code !== 0) throw new Error(`${a.describe} exited with ${r.code}`);
-        return;
+        return { stdout: r.stdout };
+      }
+      if (a.kind === 'waitGone') {
+        for (let i = 0; i < 10; i++)
+          if ((await runner(a.argv, { cwd: '/', timeoutMs: 1000 })).code !== 0) return { stdout: '' };
+        throw new Error(`${a.describe} still answers after ${a.timeoutSeconds} s`);
       }
       if (a.kind === 'waitHealthy' && opts.healthy !== undefined && !opts.healthy(a.url))
         throw new Error(`${a.url} did not answer healthy within ${a.timeoutSeconds} s`);
       fs.applyEffect(a);
+      return { stdout: '' };
     },
   };
 }

@@ -9,9 +9,10 @@ import {
   plainProblems,
 } from '../../src/setup/answers.js';
 import {
-  answersFromRecord,
+  answersFromConfig,
   checkAppEnv,
   entriesFor,
+  readSettings,
   renderAppEnv,
   replaceGroups,
 } from '../../src/setup/appEnv.js';
@@ -49,7 +50,7 @@ describe('secrets', () => {
         { field: 'b', input: { fromStdin: true } },
         { field: 'c', input: { fromStdin: true } },
       ],
-      { A: 'x' },
+      (n) => (n === 'A' ? 'x' : undefined),
       async () => '',
     );
     expect(r).toEqual({
@@ -62,7 +63,7 @@ describe('secrets', () => {
         { field: 'lit', input: 'literal' },
         { field: 's', input: { fromStdin: true } },
       ],
-      {},
+      () => undefined,
       async () => {
         reads++;
         return 'line one\nline two\r\n';
@@ -125,16 +126,10 @@ describe('the answers file schema and checks', () => {
     expect(plainProblems(base)).toEqual([]);
   });
 
-  const load = async (
-    body: unknown,
-    opts: { mode?: number; defaults?: Answers; importedDb?: boolean } = {},
-  ) => {
+  const load = async (body: unknown, opts: { mode?: number; defaults?: Answers } = {}) => {
     const w = testWorld();
     w.fs.file('/w/a.json', JSON.stringify(body), opts.mode ?? 0o600);
-    return loadAnswersFile('/w/a.json', w.deps, {
-      importedDb: opts.importedDb ?? false,
-      ...(opts.defaults ? { defaults: opts.defaults } : {}),
-    });
+    return loadAnswersFile('/w/a.json', w.deps, opts.defaults ? { defaults: opts.defaults } : {});
   };
   it('a literal SearchApi key or SMTP password alone also needs a 0600 file', async () => {
     expect((await load({ searchApi: { plan: '40usd', key: 'k-0123456789ab' } }, { mode: 0o644 })).ok).toBe(
@@ -268,51 +263,34 @@ describe('app.env edges', () => {
     });
     expect(parseEnv(renderAppEnv(entries)).SMTP_TLS).toBe('none');
   });
-  it('answersFromRecord: its defaults, each mapping and each fallback', () => {
-    expect(answersFromRecord({}, { linger: 'skip' })).toEqual(base);
-    expect(answersFromRecord({ PORT: '3917abc' }, { linger: 'skip' }).port).toBe(3000);
-    expect(answersFromRecord({ PORT: 'abc3917' }, { linger: 'skip' }).port).toBe(3000);
-    expect(
-      answersFromRecord({ SCHEDULER_TIMEZONE: 'UTC', POINT_OF_SALE: 'US' }, { linger: 'skip' }),
-    ).toMatchObject({
-      timezone: 'UTC',
-      pointOfSale: 'US',
-    });
-    expect(
-      answersFromRecord({ SEARCHAPI_KEY: 'k', SEARCHAPI_PLAN: '40usd' }, { linger: 'skip' }).searchApi,
-    ).toEqual({
+  it('answersFromConfig: each mapping, and the trial’s count only when the file states it', () => {
+    const read = (text: string) => {
+      const r = readSettings(`DATABASE_PATH="/d.db"\nBIND_ADDRESS="127.0.0.1"\n${text}`);
+      if (!r.ok) throw new Error(r.fields.join(','));
+      return answersFromConfig(r.config, r.record, { linger: 'skip' });
+    };
+    expect(read('SEARCHAPI_KEY="k"\nSEARCHAPI_PLAN="40usd"\n').searchApi).toEqual({
       plan: '40usd',
       key: 'k',
       billingDay: 1,
       trialUsed: null,
     });
-    expect(
-      answersFromRecord(
-        { SEARCHAPI_KEY: 'k', SEARCHAPI_PLAN: 'x', SEARCHAPI_TRIAL_USED: '7' },
-        { linger: 'skip' },
-      ).searchApi,
-    ).toMatchObject({
+    expect(read('SEARCHAPI_KEY="k"\n').searchApi).toEqual({
       plan: 'trial',
-      trialUsed: 7,
+      key: 'k',
+      billingDay: 1,
+      trialUsed: null,
     });
-    expect(answersFromRecord({ SMTP_HOST: 'h' }, { linger: 'skip' }).email).toEqual({
-      host: 'h',
-      port: 465,
-      tls: 'implicit',
-      user: '',
-      pass: '',
-      to: '',
-      from: '',
+    expect(read('SEARCHAPI_KEY="k"\nSEARCHAPI_TRIAL_USED="7"\n').searchApi?.trialUsed).toBe(7);
+    const smtp =
+      'SMTP_HOST="127.0.0.1"\nSMTP_PORT="25"\nSMTP_USER="u"\nSMTP_PASS="p-0123456789"\nALERT_EMAIL_TO="a@example.com"\nALERT_EMAIL_FROM="b@example.com"\n';
+    for (const t of ['none', 'starttls', 'implicit'] as const)
+      expect(read(`${smtp}SMTP_TLS="${t}"\n`).email?.tls).toBe(t);
+    expect(read('CAMOUFOX_BROWSER_WINDOW="scheduled"\n').browser).toEqual({ window: 'scheduled' });
+    expect(read('').browser).toBeNull();
+    expect(read('SCHEDULER_TIMEZONE="UTC"\nPOINT_OF_SALE="US"\n')).toMatchObject({
+      timezone: 'UTC',
+      pointOfSale: 'US',
     });
-    for (const [t, want] of [
-      ['none', 'none'],
-      ['starttls', 'starttls'],
-      ['ssl', 'implicit'],
-    ])
-      expect(answersFromRecord({ SMTP_HOST: 'h', SMTP_TLS: t }, { linger: 'skip' }).email?.tls).toBe(want);
-    expect(answersFromRecord({ CAMOUFOX_BROWSER_WINDOW: 'scheduled' }, { linger: 'skip' }).browser).toEqual({
-      window: 'scheduled',
-    });
-    expect(answersFromRecord({ CAMOUFOX_BROWSER_WINDOW: 'later' }, { linger: 'skip' }).browser).toBeNull();
   });
 });

@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import type { Deps } from '../../src/deps.js';
 import { MemoryFs, type RunHandler } from '../../src/exec/memory.js';
-import { type scriptedAsk, type stubHttp, type TestIo, testIo, testWorld } from './deps.js';
+import { type scriptedAsk, stubHttp, type TestIo, testIo, testWorld } from './deps.js';
 
 /**
  * A stand-in machine for whole-command tests: launchd's or systemd's state follows the commands run (bootstrap and
@@ -42,6 +42,15 @@ export function machine(
     if (opts.fail?.(argv) === true) return { code: 1, stderr: 'refused by the test' };
     const [cmd, a1, a2, a3] = argv;
     if (cmd === 'docker') return { code: 127 };
+    // the daily job's own command run directly (gmt backup with the job booted out)
+    if (argv.some((x) => x.endsWith('backup.mjs')) && argv.includes(daily)) {
+      writeBackup();
+      if (opts.backupWrites === false) return { code: 74, stderr: 'backup failed' };
+      return {
+        code: 0,
+        stdout: `${JSON.stringify({ ok: true, file: join(daily, `get-me-there-2026-10-24T09-30-0${backups}-000Z.db`) })}\n`,
+      };
+    }
     if (cmd === 'pnpm' && a1 === 'build') {
       fs.file('/repo/apps/api/dist/bootstrap/start.js', '// built');
       return { code: 0 };
@@ -104,7 +113,13 @@ export function machine(
     run: handler,
     ...(opts.ask ? { ask: opts.ask } : {}),
     io: opts.io ?? testIo(),
-    ...(opts.http ? { http: opts.http } : {}),
+    // why: U1: commands that restart the app ask it first; by default no run is active and it answers healthy
+    http:
+      opts.http ??
+      stubHttp({
+        'GET /api/executions/active': () => ({ status: 200, body: { execution: null } }),
+        'GET /api/health': () => ({ status: 200, body: { ok: true, degraded: false } }),
+      }),
     ...(opts.deps ? { deps: opts.deps } : {}),
   });
   if (os === 'linux') fs.dir('/run/systemd/system').dir('/var/log/journal');

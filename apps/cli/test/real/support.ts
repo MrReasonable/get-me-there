@@ -1,7 +1,7 @@
 import { copyFileSync, existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import type { Deps } from '../../src/deps.js';
 import { systemFiles } from '../../src/exec/files.js';
 import { type Runner, systemRunner } from '../../src/exec/runner.js';
@@ -10,7 +10,28 @@ import type { Action, Executor } from '../../src/plan/action.js';
 import { currentPlatform } from '../../src/platform/current.js';
 import { scriptedAsk, stubHttp, type TestIo, testIo } from '../support/deps.js';
 
-export const REPO = join(import.meta.dirname, '..', '..', '..', '..');
+/**
+ * The repository root, found upwards: why: the mutation run (U10) runs these tests from a Stryker sandbox copy nested
+ * under the package, where a fixed `../../../..` is not the root.
+ */
+function repoRoot(): string {
+  for (let d = import.meta.dirname; d !== dirname(d); d = dirname(d))
+    if (existsSync(join(d, 'pnpm-workspace.yaml'))) return d;
+  throw new Error('no pnpm-workspace.yaml above the cli tests');
+}
+export const REPO = repoRoot();
+
+/**
+ * ts-b1-012: the suite runs the built scripts (backup.mjs, check-backup.mjs, lock-state.mjs) but never builds: the
+ * package's test script and CI build first (scripts/ensure-build.mjs). Missing output is a clear refusal.
+ */
+export function requireBuilt(): void {
+  for (const f of ['apps/api/dist/tools/types.js', 'packages/db/dist/index.js'])
+    if (!existsSync(join(REPO, f)))
+      throw new Error(
+        `${f} is missing: build first (node scripts/ensure-build.mjs, or pnpm --filter @gmt/cli test)`,
+      );
+}
 const req = createRequire(join(REPO, 'packages', 'db', 'package.json'));
 /** The few better-sqlite3 calls these tests make (its types are @gmt/db's, not this package's). */
 interface SqliteDb {
@@ -123,7 +144,7 @@ export function interrupting(
   const state = { hit: false };
   return Object.assign(state, {
     async run(a: Action) {
-      if (a.kind === 'waitHealthy') return;
+      if (a.kind === 'waitHealthy') return { stdout: '' };
       const data = ['copy', 'rename', 'remove', 'run', 'writeFile'].includes(a.kind);
       if (data) n++;
       if (data && n === at && when === 'before') {
@@ -135,11 +156,12 @@ export function interrupting(
         writeFileSync(`${a.to}`, 'partial');
         throw new Error('interrupted mid-copy');
       }
-      await inner.run(a);
+      const out = await inner.run(a);
       if (data && n === at && when === 'after') {
         state.hit = true;
         throw new Error('interrupted after');
       }
+      return out;
     },
   });
 }
@@ -175,7 +197,7 @@ export function realDeps(
       files: systemFiles,
       run,
       executor: (opts.executor ?? ((e) => e))({
-        run: (a) => (a.kind === 'waitHealthy' ? Promise.resolve() : base.run(a)),
+        run: (a) => (a.kind === 'waitHealthy' ? Promise.resolve({ stdout: '' }) : base.run(a)),
       }),
       ask: scriptedAsk([]),
       io,
@@ -186,7 +208,10 @@ export function realDeps(
       execPath: process.execPath,
       nodeVersion: process.versions.node,
       username: 'op',
-      env,
+      home,
+      invocationCwd: home,
+      secretEnv: () => undefined,
+      childEnv: { PATH: '/usr/bin:/bin', HOME: home },
       machineTimeZone: 'Europe/London',
       tmpDir: '/nonexistent-tmp',
       portFree: async () => true,

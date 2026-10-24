@@ -16,8 +16,11 @@ Definitions form, never in a file of this repository.
 *Applies to: the native path.* On a VPS, use the container path below (sections 1 to 13); for
 Docker Desktop on a Mac, see [`local-quickstart.md`](local-quickstart.md) and `Start.command`.
 
-You need Node 22.18 or later, git, and on Linux a systemd user session. In a terminal on the
-machine itself:
+You need Node 22.18 or later, git, and on Linux a systemd user session. On a clean machine, get
+Node from the installer at nodejs.org or a package manager: on macOS `brew install node@22`
+(Homebrew), on Linux your distribution's `nodejs` package or NodeSource's. Node 25 and later no
+longer include corepack, so there run `npm install --global corepack` first. Then, in a terminal
+on the machine itself:
 
 ```bash
 git clone https://github.com/MrReasonable/get-me-there.git
@@ -28,9 +31,10 @@ pnpm gmt setup
 ```
 
 Where Node's own directory is not writable (a system package), run
-`corepack enable --install-directory ~/.local/bin` instead and add `~/.local/bin` to `PATH`.
-Setup checks everything it needs before it writes anything, and names the fix for anything
-missing.
+`corepack enable --install-directory ~/.local/bin` instead and add `~/.local/bin` to `PATH`. On a
+Mac, keep the clone out of Desktop, Documents, Downloads and iCloud Drive: macOS does not let a
+background service read those folders, so setup refuses there. Setup checks everything it needs
+before it writes anything, names the fix for anything missing, and builds the app itself.
 
 ### The questions
 
@@ -40,40 +44,52 @@ Pressing Enter at every question gives a running app with no price source.
 |---|---|---|---|
 | 1 | Port | 3000, or the next free one | The app listens on this machine only (127.0.0.1). |
 | 2 | Time zone for schedules | the machine’s | Scheduled searches fire in this zone. |
-| 3 | Market (POINT_OF_SALE) | GB | Prices stay in pounds in this build. |
-| 4 | Travelpayouts token | skip | Free, cached prices from Aviasales users’ searches; constraints are not checked. Needs a free Travelpayouts account: if you have none, register at https://www.travelpayouts.com/, then open the API token page (https://support.travelpayouts.com/hc/en-us/articles/203956083). |
-| 5 | SearchApi | off | `trial`: a one-off allowance for a smoke test and spikes, never run on a schedule. `40usd`: about £32 a month, prices scraped from Google Flights by SearchApi. |
+| 3 | Fare market | GB | The country whose fares the searches ask for, as two letters (GB, US, …). It can change which fares appear; prices are always shown in pounds in this build. |
+| 4 | Travelpayouts token | skip | Free prices cached from what other travellers recently searched on Aviasales, typically hours to days old; your stay and date limits are not applied, so check a fare on the airline’s site before you rely on it. Needs a free Travelpayouts account: if you have none, register at https://www.travelpayouts.com/, then open the API token page (https://support.travelpayouts.com/hc/en-us/articles/203956083). |
+| 5 | SearchApi | off | Google Flights results through SearchApi. The free trial is a one-off 100 searches for `pnpm gmt smoke` only: scheduled searches never use it. The $40 a month plan lets scheduled searches spend up to its 10,000 searches a month. |
 | 6 | Email alerts | skip | Send alerts and notices by email. |
-| 7 | Keep running when nobody is logged in (Linux) | no | Lets the app keep running after you log out (loginctl enable-linger). |
-| 9 | Browser provider after an interruption | no | If a run is interrupted (for example the laptop sleeps), should the browser part finish when it resumes, even outside the scheduled hours? [no] |
+| 7 | Keep running after you log out (Linux) | no | Without it, the app stops when you log out of every session; setup runs loginctl enable-linger for you. |
 
-Secrets (tokens, keys, the SMTP password) are typed hidden. For SearchApi `trial`, setup also
-asks how many trial credits are already used (100 minus the dashboard's remaining free
-searches). For email it asks the SMTP host, port, TLS, user, password, and the to and from
-addresses. Row 7 runs `loginctl enable-linger <you>` without `sudo`; if that is refused it
-prints the `sudo` line for you to run, and setup never runs `sudo` itself. Row 9 is asked by
-`pnpm gmt setup --reconfigure browser` (row 8, the browser provider itself, comes with the
-browser work package).
+Secrets (tokens, keys, the SMTP password) are typed hidden; setup generates the app's password
+itself. For the SearchApi free trial, setup also asks how many of the trial's 100 searches are
+already used (100 minus what your SearchApi dashboard says is left). For email it asks the SMTP
+host, port, TLS, user, password, and the to and from addresses. Row 7 runs
+`loginctl enable-linger <you>` without `sudo`; if that is refused it prints the `sudo` line for
+you to run, and setup never runs `sudo` itself. `pnpm gmt setup --reconfigure linger` changes it
+later.
+
+With the browser provider (a later release; row 8 sets it up), one more question is asked by
+`pnpm gmt setup --reconfigure browser` only: "Browser provider after an interruption". If a run is interrupted (for example the laptop sleeps), should the browser part finish when it resumes, even outside the scheduled hours? [no]
 
 When no price source was chosen and the terminal is interactive, setup asks once, before it
 changes anything: "Paste a token now? (Enter to finish without one)". A pasted token is the
-Travelpayouts token, as if row 4 had been answered.
+Travelpayouts token, as if row 4 had been answered. The SearchApi free trial is not a price
+source for searches: it serves `pnpm gmt smoke` only.
 
 ### Where things are kept
 
 | What | Where |
 |---|---|
 | Settings | `~/.config/get-me-there/app.env` (the directory 0700, the file 0600) |
-| Database and backups | `~/.local/share/get-me-there/` (`get-me-there.db`, `backups/`) |
+| Database and backups | `~/.local/share/get-me-there/` (0700: `get-me-there.db`, `backups/`) |
 | The browser worker's state | `~/.local/state/get-me-there/camoufox/` |
 | Logs | macOS: `~/Library/Logs/get-me-there/`; Linux: the user journal |
 | Services | macOS: `~/Library/LaunchAgents/local.get-me-there.app.plist` and `local.get-me-there.backup.plist`; Linux: `~/.config/systemd/user/get-me-there-app.service`, `get-me-there-backup.service` and `.timer` |
 
 On Linux, `XDG_CONFIG_HOME`, `XDG_DATA_HOME` and `XDG_STATE_HOME` move the first two when they
 are absolute paths; the browser worker's directory never moves. The services run the Node
-binary setup ran under, with only `PATH` and `HOME` in their environment, so nothing else in
-your shell changes a setting; a Node inside a temporary or version-manager shim directory is
-refused (setup names a stable one).
+binary setup ran under (the stable path on your `PATH`, such as Homebrew's, rather than a
+versioned one), with only `PATH` and `HOME` in their environment, so nothing else in your shell
+changes a setting; a Node inside a temporary or version-manager shim directory is refused
+(setup names a stable one).
+
+### What keeps it running
+
+On macOS the app runs while you are logged in and starts again when you log in; a Mac that must
+run unattended needs automatic login. `pnpm gmt stop` lasts until the next login or restart. On
+Linux it runs while you are logged in, and after you log out only with linger (row 7). After
+upgrading Node by any route other than the package manager's own link, run `pnpm gmt setup` again
+so the services point at the new binary; `pnpm gmt status` flags a missing one.
 
 ### When setup finishes
 
@@ -84,47 +100,62 @@ With no price source, the closing screen says so first:
 Then it gives the address (`http://127.0.0.1:3000`), the user name (`operator`), and where the
 password is: in `~/.config/get-me-there/app.env`. Show it with `pnpm gmt password`, which
 prints it to the terminal only. If scrollback or a shared screen may have kept it,
-`pnpm gmt setup --reconfigure password` replaces it. Setup offers to open the browser.
+`pnpm gmt setup --reconfigure password` replaces it. It names the next step: open the app,
+choose Definitions and add a search with your airports and dates (its Coverage check shows what
+the price sources hold before you save it). Nothing runs on a schedule until you give a search
+one. Setup offers to open the browser.
 
 Scheduled searches run while the machine is awake; a missed one is caught up once, without the
-browser provider. The native service speaks plain HTTP on `127.0.0.1`: from another device use
-an `ssh` tunnel (`ssh -L 3000:127.0.0.1:3000 <host>`), or section 3 for Tailscale and TLS.
+browser provider. The native service speaks plain HTTP on `127.0.0.1`: only if you want to reach
+it from another device, use an `ssh` tunnel (`ssh -L 3000:127.0.0.1:3000 <this machine>`), or
+section 3 for Tailscale and TLS.
 
 ### The commands
 
 ```bash
 pnpm gmt setup                          # install, or re-check an install
 pnpm gmt setup --dry-run                # print the plan with the real launchctl or systemctl commands
-pnpm gmt setup --reconfigure email      # ask one group again: port, timezone, email, travelpayouts, searchapi, browser, password
+pnpm gmt setup --reconfigure email      # one group again: port, timezone, email, travelpayouts, searchapi, browser, password, linger
 pnpm gmt status                         # the services, the settings files, the newest backup, anything to fix
 pnpm gmt start
-pnpm gmt stop
+pnpm gmt stop                           # refuses while a search runs, unless --wait or --force
 pnpm gmt restart
 pnpm gmt logs
-pnpm gmt backup                         # the daily backup job, run once now
+pnpm gmt backup                         # a backup now (the daily job's, run once)
 pnpm gmt restore <file>                 # see "Restore (native)" below
 pnpm gmt password
 pnpm gmt smoke --from LHR --to JFK      # section 13; it spends real calls
-pnpm gmt update                         # fast-forward to origin/main, with a backup first
+pnpm gmt update                         # fast-forward only to origin/main, with a backup first
+pnpm gmt update --dry-run               # print the update's plan and change nothing
 pnpm gmt uninstall                      # removes the services; keeps settings, data and state
 pnpm gmt uninstall --purge              # also deletes those three directories, after you type purge
 ```
 
+On Linux, uninstall (with or without `--purge`) offers to turn off the linger setup turned on, or
+prints the `loginctl disable-linger` line when it cannot ask. `--purge` names anything it leaves,
+such as the browser worker's directory when `XDG_STATE_HOME` moved the state elsewhere.
+
 Re-running `pnpm gmt setup` changes nothing that is already right: a settings file that differs
 from what setup would write is reported, never overwritten, and `--reconfigure <group>` is the
 way to change one group's lines. Lines you add to `app.env` under other names are kept. Setup
-calls no vendor.
+calls no vendor. Every command that stops or restarts the app (`stop`, `restart`, `update`,
+`--reconfigure`, the imports) first asks the app whether a search is running, refuses while one
+is (or when the app cannot say) unless `--wait` or `--force`, and with `--force` first says what
+the interruption does.
 
 `pnpm gmt smoke` spends: before it sends anything it prints the route's worst case per
-provider from the app (with today's settings, up to 4 SearchApi credits and one browser page),
-refuses when the SearchApi trial has fewer credits left, and asks you to type `yes` (`--yes` in
-scripts).
+provider from the app (with today's settings, up to 4 SearchApi credits and one browser page)
+and the SearchApi credits tool runs have already used in this window, refuses when the SearchApi
+trial has fewer credits left, and asks you to type `yes` for the running total. In scripts `--yes`
+skips the question, and once earlier tool runs have used credits in the window it also needs
+`--accept-total`. Lowercase airport codes are accepted.
 
 `pnpm gmt update` refuses a checkout with local changes or not on `main`, fetches before it
 stops anything, and refuses while a search is running (naming it and its estimated finish)
-unless `--wait` or `--force`. It then stops the app, backs up into `backups/update`, merges,
-installs, builds, restarts, waits for health and shows the status. If a step fails it prints
-the commit it started from, the backup, and both ways back.
+unless `--wait` or `--force`. It then stops the app, backs up into `backups/update` (with a
+`.commit` file naming the commit it was taken at), merges, installs, builds, restarts, waits for
+health and shows the status. If a step fails it prints the commit it started from, the backup,
+and both ways back; running `pnpm gmt update` again carries on from the failed step.
 
 ### Moving from Docker or from a checkout
 
@@ -132,27 +163,35 @@ Only one app may keep the usage ledger, or caps would count twice. If this machi
 Docker install (a compose project `get-me-there` or its volume), setup refuses until you choose:
 
 ```bash
-pnpm gmt setup --import-docker          # move the Docker database here
-pnpm gmt setup --ignore-docker          # start fresh; the Docker database is marked moved
-pnpm gmt setup --import-db data/dev.db  # move a checkout's database (its app must be stopped)
+pnpm gmt setup --import-docker                   # move the Docker database here
+pnpm gmt setup --ignore-docker                   # start fresh here; stops the Docker app and marks its volume moved
+pnpm gmt setup --import-db data/get-me-there.db  # move a checkout's database (its app must be stopped)
 ```
 
-`--import-docker` refuses while the container is running a search (`--wait` waits for it),
-stops the container, backs up from the stopped volume, copies the backup out, restores and
-checks it here, and only then writes `MOVED-TO-NATIVE` beside the old database. It offers
-`docker compose down` (the volume is kept) and to carry your `.env` settings across, one group
-at a time. Never start the compose stack on that volume again: with the marker it exits and
-restarts in a loop. To use the container again, remove the marker first:
-`docker compose run --rm --no-deps --entrypoint rm app /data/MOVED-TO-NATIVE`. Over an existing
-native database every import refuses unless `--replace-database`, which backs the native one up
-first.
+`--import-docker` refuses while the container is running a search (`--wait` waits for it, and
+it asks again just before it stops the container), stops the container, backs up from the
+stopped volume, copies the backup out, restores and checks it here, and only then writes
+`MOVED-TO-NATIVE` beside the old database. It carries your Docker `.env` settings across, one
+group at a time when you are asked: the price sources with their caps, email, the time zone,
+the market, and the spending caps and run settings; `SEARCHAPI_TRIAL_USED` goes with the
+SearchApi key. It offers `docker compose down` (the volume is kept).
+
+`--ignore-docker` does not import: it stops the Docker app and writes the same marker, so the
+Docker app refuses to start on that volume, and its ledger's month stops counting toward the
+caps here (check the vendors' dashboards). Never start the compose stack on a marked volume:
+with the marker it exits and restarts in a loop. To use the container again, remove the marker
+first: `docker compose run --rm --no-deps --entrypoint rm app /data/MOVED-TO-NATIVE`. Over an
+existing native database every import refuses unless `--replace-database`, which backs the
+native one up first; the replaced ledger's calls then stop counting toward the caps.
 
 ### Backups
 
 A daily job at 03:30 writes a backup into `~/.local/share/get-me-there/backups/daily` and keeps
 14; setup takes the first one before it finishes, and `pnpm gmt backup` takes one by hand.
-These backups sit on the same disk as the database: they protect against a bad update or a
-deletion, not against losing the disk, so copy the folder elsewhere (Time Machine includes it).
+`pnpm gmt update` keeps 5 in `backups/update`. List them with
+`ls -l ~/.local/share/get-me-there/backups/*/`. These backups sit on the same disk as the
+database: they protect against a bad update or a deletion, not against losing the disk, so copy
+the folder elsewhere (Time Machine includes it).
 
 ### Logs
 
@@ -168,6 +207,10 @@ persistent (`/var/log/journal` absent), which loses them at a reboot.
 
 ### Restore (native)
 
+A backup goes with the code that wrote it: an update's backup names its commit in the
+`.commit` file beside it; a daily backup was taken on whatever code was running that day. When
+the code has not changed since the backup, the first four steps below are not needed.
+
 ```bash
 pnpm gmt stop
 git checkout <commit>
@@ -177,11 +220,15 @@ pnpm gmt restore <backup>
 pnpm gmt start
 ```
 
-`pnpm gmt restore` refuses a file that fails `PRAGMA integrity_check`, removes the database's
-`-wal` and `-shm`, keeps the current file as `get-me-there.db.before-restore`, and copies the
-backup into place, 0600. A restored ledger lacks any call made after its backup, so check each
-vendor's dashboard. The checkout is then on a detached commit: run `git switch main` before the
-next `pnpm gmt update` (`pnpm gmt status` reports it).
+`pnpm gmt restore` refuses a file that fails `PRAGMA integrity_check`, keeps the current
+database, with its `-wal` and `-shm`, as `get-me-there.db.before-restore-<time>` (never over an
+earlier one), and copies the backup into place, 0600. A restored ledger lacks any call made
+after its backup, so check each vendor's dashboard and set `SEARCHAPI_TRIAL_USED` (trial) or
+`SEARCHAPI_MONTHLY_CALL_CAP` ($40 plan) to match. Starting the app then resumes any run the
+backup held as running and catches up a missed firing once per scheduled search (set
+`AUTO_RESUME=false` in `app.env` first if you do not want that). The checkout is then on a
+detached commit: run `git switch main` before the next `pnpm gmt update` (`pnpm gmt status`
+reports it).
 
 ## 1. Authentication first
 

@@ -8,6 +8,7 @@ import type {
   ServiceSpec,
   ServiceState,
 } from '../platform/types.js';
+import { assertPrintable } from './specs.js';
 
 /**
  * Linux user units (spec §13; systemd.service(5), systemd.timer(5), systemd.exec(5); brief §7): one `.service` per
@@ -26,6 +27,7 @@ export function quoteWord(w: string): string {
 const pathValue = (p: string): string => p.replaceAll('%', '%%');
 
 export function renderService(spec: ServiceSpec): string {
+  assertPrintable(spec);
   const job = spec.calendar !== null;
   const lines = [
     '[Unit]',
@@ -66,8 +68,9 @@ export function renderTimer(spec: ServiceSpec & { calendar: { hour: number; minu
 
 /** `systemctl --user is-active` words: active or changing is running, failed is failed, anything else inactive. */
 function stateOf(word: string, onDisk: string | null): ServiceState {
-  if (['active', 'activating', 'reloading', 'deactivating', 'refreshing'].includes(word)) return 'running';
-  if (word === 'failed') return 'failed';
+  if (['active', 'reloading', 'deactivating', 'refreshing'].includes(word)) return 'running';
+  // why: U5 (dev-b1-003): a crash-looping unit spends its restart wait as `activating`, which is not a running app
+  if (word === 'failed' || word === 'activating') return 'failed';
   return onDisk === null ? 'not-installed' : 'stopped';
 }
 

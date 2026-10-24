@@ -32,9 +32,11 @@ export function describeAction(a: Action): string {
     case 'remove':
       return a.recursive ? `remove ${a.path} and everything in it` : `remove ${a.path}`;
     case 'run':
-      return `run ${a.describe}${a.stdin === undefined ? '' : a.secretStdin ? ' (secret input on stdin)' : ' (input on stdin)'}`;
+      return `run ${a.describe}${a.stdin === undefined ? '' : a.stdin.secret ? ' (secret input on stdin)' : ' (input on stdin)'}`;
     case 'waitHealthy':
       return `wait up to ${a.timeoutSeconds} s for ${a.url}`;
+    case 'waitGone':
+      return `wait up to ${a.timeoutSeconds} s until ${a.describe} fails`;
   }
 }
 

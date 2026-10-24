@@ -99,6 +99,39 @@ describe('unitTargets and staleChecks (spec §13: a unit whose Node or checkout 
   });
 });
 
+describe('unitTargets edge cases (ts-b1-014)', () => {
+  it('a unit naming neither key yields no targets and no check', () => {
+    expect(unitTargets('[Unit]\nDescription=x\n[Service]\nType=simple\n')).toEqual({ node: null, dir: null });
+    const w = testWorld({ os: 'linux' });
+    const set = serviceSet(w.deps);
+    const facts = new Map(
+      set.map((e) => [
+        e.unit,
+        { onDisk: '[Service]\nType=simple\n', loaded: true, state: 'running' as const },
+      ]),
+    );
+    expect(staleChecks(w.deps, set, facts)).toEqual([]);
+  });
+  it('a commented WorkingDirectory or a stray line before ExecStart is not read as the real one', () => {
+    const unit =
+      '[Service]\n# WorkingDirectory=/old\n; ExecStart="/old/node" x\nWorkingDirectory=/repo\nExecStart="/opt/node/bin/node" "/repo/x.js"\n';
+    expect(unitTargets(unit)).toEqual({ node: '/opt/node/bin/node', dir: '/repo' });
+  });
+});
+
+describe('the services carry HOME (ts-b1-003)', () => {
+  it('every rendered service holds the HOME the CLI resolved, never an empty one', () => {
+    for (const os of ['darwin', 'linux'] as const) {
+      const w = testWorld({ os });
+      for (const e of serviceSet(w.deps)) {
+        expect(e.spec.environment.HOME).toBe(w.deps.home);
+        expect(e.spec.environment.HOME).not.toBe('');
+        expect(e.rendered.map((r) => r.contents).join('\n')).toContain(w.deps.home);
+      }
+    }
+  });
+});
+
 describe('the service set and its facts', () => {
   it('the app then the backup job, each with its unit; the job is scheduled by its timer on Linux', async () => {
     const d = testWorld().deps;

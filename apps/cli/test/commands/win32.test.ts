@@ -17,7 +17,26 @@ describe('setup on win32 (decision 78)', () => {
     expect(w.io.stdout).toBe(`${WIN32_REFUSAL}\n`);
     expect(w.executor.log).toEqual([]);
   });
-  it('runCli prints help with 0 and a usage error with 64', async () => {
+  it.each([
+    ['update'],
+    ['restore', '/b/x.db'],
+    ['uninstall'],
+    ['backup'],
+    ['start'],
+    ['stop'],
+    ['restart'],
+    ['status'],
+    ['logs'],
+  ])('%s refuses on win32 with 78 and touches nothing (CodeRabbit …k73)', async (...argv) => {
+    const w = testWorld({ os: 'win32' });
+    expect(await runCli(argv, w.deps)).toBe(78);
+    expect(w.executor.log).toEqual([]);
+    expect(w.runner.calls).toEqual([]);
+  });
+});
+
+describe('runCli', () => {
+  it('prints help with 0 and a usage error with 64', async () => {
     const w = testWorld();
     expect(await runCli(['--help'], w.deps)).toBe(0);
     expect(w.io.stdout).toContain('usage: pnpm gmt');

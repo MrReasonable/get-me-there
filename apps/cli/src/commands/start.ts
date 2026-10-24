@@ -10,14 +10,14 @@ export async function startCommand(flags: Flags, _p: string | null, deps: Deps):
   const { entries, facts } = await installed(deps);
   if (entries.length === 0) {
     deps.io.err('nothing is installed: run pnpm gmt setup\n');
-    return EXIT.refused;
+    return EXIT.badConfig;
   }
   const fails = [...settingsChecks(deps), ...staleChecks(deps, entries, facts)].filter(
     (c) => c.level === 'fail',
   );
   if (fails.length > 0) {
     deps.io.err(`start refused:\n${describeChecks(fails)}`);
-    return EXIT.refused;
+    return EXIT.badConfig;
   }
   return runLifecycle('start', lifecycleActions(deps, 'start', entries, facts), flags, deps);
 }

@@ -28,6 +28,7 @@ export const RECONFIGURE_GROUPS = [
   'searchapi',
   'browser',
   'password',
+  'linger',
 ] as const;
 export type ReconfigureGroup = (typeof RECONFIGURE_GROUPS)[number];
 
@@ -54,7 +55,7 @@ const SPEC: Record<
       force: bool,
     },
     positional: null,
-    help: 'install or re-check the app as a user service on this machine (127.0.0.1, basic auth)',
+    help: 'install or re-check the app as a user service on this machine (127.0.0.1, basic auth; setup generates its password)',
     flags: [
       '--dry-run                 print the plan and change nothing',
       '--non-interactive         ask nothing (with --answers <file>)',
@@ -62,7 +63,7 @@ const SPEC: Record<
       `--reconfigure <group>     ask one group again and replace only its lines: ${RECONFIGURE_GROUPS.join(', ')}`,
       '--import-docker           move the Docker install’s database here, then mark the old one moved',
       '--import-db <path>        move a checkout’s database here, then mark the old one moved',
-      '--ignore-docker           start fresh and mark the Docker database moved',
+      '--ignore-docker           start fresh here: stops the Docker app and marks its volume moved, so it refuses to start',
       '--replace-database        let an import replace a native database (backed up first)',
       '--wait                    wait for a running search to finish instead of refusing',
       '--force                   go ahead although a search is running (it is interrupted)',
@@ -75,8 +76,24 @@ const SPEC: Record<
     flags: [],
   },
   start: { options: { 'dry-run': bool }, positional: null, help: 'start the services', flags: [] },
-  stop: { options: { 'dry-run': bool }, positional: null, help: 'stop the services', flags: [] },
-  restart: { options: { 'dry-run': bool }, positional: null, help: 'restart the services', flags: [] },
+  stop: {
+    options: { 'dry-run': bool, wait: bool, force: bool },
+    positional: null,
+    help: 'stop the services (refuses while a search runs, unless --wait or --force)',
+    flags: [
+      '--wait                    wait for a running search to finish instead of refusing',
+      '--force                   go ahead although a search is running (it is interrupted)',
+    ],
+  },
+  restart: {
+    options: { 'dry-run': bool, wait: bool, force: bool },
+    positional: null,
+    help: 'restart the services (refuses while a search runs, unless --wait or --force)',
+    flags: [
+      '--wait                    wait for a running search to finish instead of refusing',
+      '--force                   go ahead although a search is running (it is interrupted)',
+    ],
+  },
   logs: { options: {}, positional: null, help: 'follow the app’s log', flags: [] },
   backup: {
     options: { 'dry-run': bool },
@@ -92,18 +109,19 @@ const SPEC: Record<
   },
   password: { options: {}, positional: null, help: 'print the app’s password to this terminal', flags: [] },
   smoke: {
-    options: { yes: bool, from: str, to: str },
+    options: { yes: bool, 'accept-total': bool, from: str, to: str },
     positional: null,
     help: 'spends real calls: up to 4 SearchApi credits and one browser page with today’s settings',
     flags: [
       '--from <IATA> --to <IATA>  the route to try, for example --from LHR --to JFK',
       '--yes                     skip the typed confirmation (for scripts)',
+      '--accept-total            with --yes: accept the running total once earlier tool runs used credits in this window',
     ],
   },
   update: {
     options: { wait: bool, force: bool, 'dry-run': bool },
     positional: null,
-    help: 'fast-forward this checkout to origin/main, rebuild and restart, with a backup first',
+    help: 'update this checkout to origin/main (fast-forward only: it refuses a branch that has diverged), rebuild and restart, with a backup first',
     flags: [
       '--wait                    wait for a running search to finish instead of refusing',
       '--force                   go ahead although a search is running (it is interrupted)',
@@ -142,6 +160,8 @@ export function helpText(command?: CommandName): string {
   const width = Math.max(...COMMANDS.map((c) => c.length));
   return `${[
     'usage: pnpm gmt <command> [options]',
+    '',
+    'First time: pnpm gmt setup',
     '',
     ...COMMANDS.map((c) => `  ${c.padEnd(width)}  ${SPEC[c].help}`),
     '',

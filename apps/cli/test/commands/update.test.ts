@@ -28,6 +28,7 @@ async function world(
 ) {
   const answers = [...(opts.active ?? [{ execution: null }])];
   const http = stubHttp({
+    'GET /api/health': () => ({ status: 200, body: { ok: true, degraded: false } }),
     'GET /api/executions/active': () => {
       const a = answers.length > 1 ? answers.shift() : answers[0];
       return typeof a === 'object' && a !== null && 'status' in a && typeof a.status === 'number'
@@ -52,7 +53,7 @@ async function world(
         return { code: 0 };
       }
       if (
-        String(argv[2]).endsWith('backup.mjs') &&
+        String(argv[1]).endsWith('backup.mjs') &&
         argv.includes('/Users/op/.local/share/get-me-there/backups/update')
       )
         return { code: 0, stdout: `${JSON.stringify({ ok: true, file: BACKUP })}\n` };
@@ -115,9 +116,9 @@ describe('gmt update (decision 80; brief Task 16b.9)', () => {
     ['no estimate', null, 'estimated to finish unknown'],
   ])('a run active with %s refuses, naming the definition, start and finish', async (_n, finish, text) => {
     const m = await world({ active: [ACTIVE(finish)] });
-    expect(await runCli(['update'], m.deps)).toBe(78);
+    expect(await runCli(['update'], m.deps)).toBe(75);
     expect(m.io.stderr).toContain(
-      'a search is running: London to New York weekly, started 2026-10-24T09:00:00.000Z',
+      'a search is running in the app: London to New York weekly, started 2026-10-24T09:00:00.000Z',
     );
     expect(m.io.stderr).toContain(text);
     expect(m.executor.log).toEqual([]);
@@ -131,16 +132,18 @@ describe('gmt update (decision 80; brief Task 16b.9)', () => {
       answer === 'error'
         ? stubHttp({})
         : stubHttp({ 'GET /api/executions/active': () => ({ status: 401, body: {} }) });
-    expect(await runCli(['update'], m.deps)).toBe(78);
+    expect(await runCli(['update'], m.deps)).toBe(75);
     expect(m.io.stderr).toMatch(/cannot tell whether a search is running/);
     expect(m.executor.log).toEqual([]);
   });
   it('with the app service inactive it proceeds without asking the app', async () => {
     const m = await world();
     m.running.clear();
-    m.deps.http = stubHttp({});
+    const http = stubHttp({});
+    m.deps.http = http;
     expect(await runCli(['update'], m.deps)).toBe(0);
-    expect(m.deps.http).toBeDefined();
+    // why: CodeRabbit PRRT_kwDOVNmjjs6v7k7u, ts-b1-008: the app was not asked about a run
+    expect(http.requests.filter((r) => r.url.endsWith('/api/executions/active'))).toEqual([]);
   });
   it('--wait polls every 60 s until no run is active', async () => {
     const m = await world({ active: [ACTIVE(null), ACTIVE(null), { execution: null }] });
@@ -187,7 +190,9 @@ describe('gmt update (decision 80; brief Task 16b.9)', () => {
       record: at(c, (s) => s === 'git rev-parse HEAD'),
       stop: at(c, (s) => s === 'launchctl bootout gui/501/local.get-me-there.app'),
       backup: at(c, (s) =>
-        s.includes('backup.mjs --dir /Users/op/.local/share/get-me-there/backups/update --keep 5'),
+        s.includes(
+          'backup.mjs --db /Users/op/.local/share/get-me-there/get-me-there.db --dir /Users/op/.local/share/get-me-there/backups/update --keep 5',
+        ),
       ),
       merge: at(c, (s) => s === 'git merge --ff-only origin/main'),
       install: at(c, (s) => s === 'pnpm install --frozen-lockfile'),
@@ -203,6 +208,8 @@ describe('gmt update (decision 80; brief Task 16b.9)', () => {
     expect(i.build).toBeLessThan(i.start);
     expect(m.executor.log.some((a) => a.kind === 'waitHealthy' && a.timeoutSeconds === 240)).toBe(true);
     expect(m.io.stdout).toContain(`backup before the update: ${BACKUP}`);
+    // why: U6 (pf-b1-009): the commit a backup goes with sits beside it
+    expect(m.fs.read(`${BACKUP}.commit`)).toBe('aaaa1111\n');
     expect(m.io.stdout).toMatch(/service app +ok/);
   });
 
@@ -226,9 +233,44 @@ describe('gmt update (decision 80; brief Task 16b.9)', () => {
       ])
         expect(e).toContain(s);
       expect(m.executor.log.some((a) => a.kind === 'waitHealthy')).toBe(false);
-      if (step === 'merge') expect(calls(m)).not.toContain('pnpm build');
+      // why: ts-b1-007: nothing after the failing step is called
+      const later: Record<string, string[]> = {
+        merge: ['pnpm install --frozen-lockfile', 'pnpm build'],
+        install: ['pnpm build'],
+        build: [],
+        start: [],
+      };
+      const c = calls(m);
+      for (const l of later[step] ?? []) expect(c).not.toContain(l);
+      const failedAt = c.findIndex((x) => fail(x.split(' ')));
+      expect(c.slice(failedAt + 1).filter((x) => x.startsWith('launchctl bootstrap'))).toEqual([]);
     },
   );
+  it('a failed backup before the update changes no code: no merge, install, build or start (ts-b1-007)', async () => {
+    const m = await world({
+      git: (a) => (String(a[1]).endsWith('backup.mjs') ? { code: 74, stderr: 'disk full' } : undefined),
+    });
+    expect(await runCli(['update'], m.deps)).toBe(1);
+    expect(m.io.stderr).toContain(
+      'the backup before the update failed; the code is unchanged and the app is stopped',
+    );
+    const c = calls(m);
+    expect(
+      c.some(
+        (x) => x.startsWith('git merge ') || x.startsWith('pnpm') || x.startsWith('launchctl bootstrap'),
+      ),
+    ).toBe(false);
+  });
+  it('a changed unit is re-rendered and applied before the start (ts-b1-007)', async () => {
+    const m = await world();
+    m.deps.execPath = '/opt/newer/bin/node';
+    m.fs.file('/opt/newer/bin/node', 'n', 0o755);
+    expect(await runCli(['update'], m.deps)).toBe(0);
+    const w = m.executor.log.find(
+      (a) => a.kind === 'writeFile' && a.path.endsWith('local.get-me-there.app.plist'),
+    );
+    expect(w?.kind === 'writeFile' && w.contents).toContain('/opt/newer/bin/node');
+  });
   it('a failed health wait prints the same report', async () => {
     const m = await world();
     const exec = m.deps.executor;

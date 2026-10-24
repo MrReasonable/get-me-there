@@ -39,7 +39,7 @@ describe('MemoryFs, memoryRunner and memoryExecutor', () => {
       argv[0] === 'false' ? { code: 2, stderr: 'boom' } : undefined,
     );
     const ex = memoryExecutor(fs, { runner });
-    await ex.run(runAction(['sh', '-c', 'cat'], '/r', { stdin: 'marker' }));
+    await ex.run(runAction(['sh', '-c', 'cat'], '/r', { stdin: { text: 'marker', secret: false } }));
     expect(runner.calls[0]).toEqual({
       argv: ['sh', '-c', 'cat'],
       cwd: '/r',

@@ -60,6 +60,7 @@ describe('setup on a clean machine (brief Task 16b.6)', () => {
       'writeFile /Users/op/Library/LaunchAgents/local.get-me-there.backup.plist',
       'run launchctl bootstrap gui/501 /Users/op/Library/LaunchAgents/local.get-me-there.backup.plist',
       'wait http://127.0.0.1:3000/api/health',
+      'writeFile /Users/op/.local/state/get-me-there/setup.json',
       'run launchctl kickstart gui/501/local.get-me-there.backup',
     ]);
     for (const a of m.executor.log)
@@ -167,7 +168,7 @@ describe('setup on a clean machine (brief Task 16b.6)', () => {
     expect(await runCli(['setup'], m.deps)).toBe(0);
     expect(parseEnv(m.fs.read(ENV) ?? '').TRAVELPAYOUTS_TOKEN).toBe('tp-token-0123456789');
     expect(m.io.stdout).not.toContain('No price source is set up yet');
-    expect(m.io.stdout).toContain('Next: Definitions → Coverage check.');
+    expect(m.io.stdout).toContain('Next: open http://127.0.0.1:3000, choose Definitions and add a search');
   });
 });
 
@@ -184,14 +185,15 @@ describe('the closing screen (brief §6)', () => {
       'http://127.0.0.1:3000',
       'User name: operator',
       `The password is in ${ENV}; show it with \`pnpm gmt password\` (if scrollback or a shared screen may have kept it, \`pnpm gmt setup --reconfigure password\` replaces it).`,
-      'ssh -L 3000:127.0.0.1:3000 <host>',
+      'Only if you want to reach it from another device: an SSH tunnel (ssh -L 3000:127.0.0.1:3000 <this machine>)',
       'docs/setup.md section 3',
       'plain HTTP',
       'Scheduled searches run while this machine is awake; a missed one is caught up once when it wakes, without the browser provider.',
+      'Next: open http://127.0.0.1:3000, choose Definitions and add a search with your airports and dates',
+      'Nothing runs on a schedule until you give a search one',
     ])
       expect(closing).toContain(s);
     expect(m.io.stdout).not.toContain(PASS);
-    expect(m.io.stdout).not.toContain('Next: Definitions');
   });
 });
 
@@ -256,7 +258,9 @@ describe('--reconfigure <group>', () => {
     expect(before.filter((l) => !after.includes(l))).toEqual(['PORT="3000"']);
     expect(show(m.executor.log)).toEqual([
       `writeFile ${ENV}`,
-      'run launchctl kickstart -k gui/501/local.get-me-there.app',
+      'run launchctl bootout gui/501/local.get-me-there.app',
+      'waitGone ',
+      'run launchctl bootstrap gui/501 /Users/op/Library/LaunchAgents/local.get-me-there.app.plist',
       'wait http://127.0.0.1:3917/api/health',
     ]);
   });
@@ -289,7 +293,9 @@ describe('--reconfigure <group>', () => {
       .sort();
     expect(changed).toEqual([...names].sort());
     expect(after.LOG_LEVEL).toBe('debug');
-    expect(show(m.executor.log)).toContain('run launchctl kickstart -k gui/501/local.get-me-there.app');
+    expect(show(m.executor.log)).toContain(
+      'run launchctl bootstrap gui/501 /Users/op/Library/LaunchAgents/local.get-me-there.app.plist',
+    );
     expect(m.io.stdout).not.toContain(after.APP_BASIC_AUTH_PASS ?? 'none');
   });
 
@@ -313,8 +319,8 @@ describe('--reconfigure <group>', () => {
     const m = await setUp();
     m.deps.http = stubHttp({ 'GET /api/executions/active': () => ({ status: 200, body: ACTIVE }) });
     m.deps.ask = scriptedAsk([]);
-    expect(await runCli(['setup', '--reconfigure', 'browser'], m.deps)).toBe(78);
-    expect(m.io.stderr).toContain('a search is running: London to New York weekly');
+    expect(await runCli(['setup', '--reconfigure', 'browser'], m.deps)).toBe(75);
+    expect(m.io.stderr).toContain('a search is running in the app: London to New York weekly');
     expect(m.io.stderr).toContain('estimated to finish 2026-10-24T10:15:00.000Z');
     expect(m.executor.log).toEqual([]);
   });
@@ -327,13 +333,15 @@ describe('--reconfigure <group>', () => {
     m.deps.io = io;
     const before = parseEnv(m.fs.read(ENV) ?? '');
     expect(await runCli(['setup', '--reconfigure', 'browser', '--force'], m.deps)).toBe(0);
-    expect(io.stdout).toContain('Restarting the app interrupts London to New York weekly');
-    expect(io.stdout).toContain('the new value applies when it resumes');
-    expect(io.stdout.indexOf('Restarting the app')).toBeLessThan(io.stdout.indexOf('done'));
+    expect(io.stdout).toContain('a search is running in the app: London to New York weekly');
+    expect(io.stdout).toContain('Going ahead anyway (--force): the app stops within 30 s');
+    expect(io.stdout).toContain('The new value applies when the run resumes.');
+    expect(io.stdout.indexOf('Going ahead anyway')).toBeLessThan(io.stdout.indexOf('written'));
     const after = parseEnv(m.fs.read(ENV) ?? '');
     expect(after).toEqual({ ...before, CAMOUFOX_BROWSER_WINDOW: 'any' });
     expect(show(m.executor.log).filter((s) => s.startsWith('run '))).toEqual([
-      'run launchctl kickstart -k gui/501/local.get-me-there.app',
+      'run launchctl bootout gui/501/local.get-me-there.app',
+      'run launchctl bootstrap gui/501 /Users/op/Library/LaunchAgents/local.get-me-there.app.plist',
     ]);
     expect(http.requests[0]?.headers.Authorization).toBe(
       `Basic ${Buffer.from(`operator:${PASS}`).toString('base64')}`,
@@ -352,23 +360,17 @@ describe('--reconfigure <group>', () => {
 });
 
 describe('password', () => {
-  it('prints the password to a terminal only', async () => {
+  it('prints the password to a terminal only, read with parseEnv; refuses a pipe and a missing app.env (CodeRabbit …k7n)', async () => {
     const m = await setUp();
-    m.deps.io = testIo({ tty: true });
+    const tty = testIo({ tty: true });
+    m.deps.io = tty;
     expect(await runCli(['password'], m.deps)).toBe(0);
-    expect(m.deps.io.stdoutIsTTY).toBe(true);
-    const io = testIo({ tty: false });
-    m.deps.io = io;
+    expect(tty.stdout).toBe(`${PASS}\n`);
+    const pipe = testIo({ tty: false });
+    m.deps.io = pipe;
     expect(await runCli(['password'], m.deps)).toBe(78);
-    expect(io.stdout).toBe('');
-    expect(io.stderr).toContain('prints only to a terminal');
-  });
-  it('reads app.env with parseEnv', async () => {
-    const m = await setUp();
-    const io = testIo({ tty: true });
-    m.deps.io = io;
-    await runCli(['password'], m.deps);
-    expect(io.stdout).toBe(`${PASS}\n`);
+    expect(pipe.stdout).toBe('');
+    expect(pipe.stderr).toContain('prints only to a terminal');
     const none = machine({ io: testIo({ tty: true }) });
     expect(await runCli(['password'], none.deps)).toBe(78);
   });
@@ -381,7 +383,7 @@ describe('no secret reaches any output (spec §9 item 9, sentinel secrets)', () 
       sa: 'SENTINEL-sa-Pq73Ns2k',
       smtp: 'SENTINEL-smtp-Rt55Jm',
     };
-    const m = machine({ deps: { env: { HOME: '/Users/op', SMTP_P: secrets.smtp } } });
+    const m = machine({ deps: { secretEnv: (n) => (n === 'SMTP_P' ? secrets.smtp : undefined) } });
     answersFile(m, {
       travelpayouts: { token: secrets.tp },
       searchApi: { plan: '40usd', key: secrets.sa },

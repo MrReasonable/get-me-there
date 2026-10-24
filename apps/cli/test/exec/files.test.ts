@@ -51,3 +51,23 @@ describe.skipIf(process.platform === 'win32')('systemFiles and MemoryFs agree (P
     }
   });
 });
+
+// why: U8 (ca-b1-009): only "no such file" reads as absent; a file this user cannot read is an error, so setup never
+// mistakes an unreadable app.env for a missing one and writes a new one over it
+describe.skipIf(process.platform === 'win32' || process.getuid?.() === 0)('unreadable is not absent', () => {
+  it('systemFiles.read throws for a file it may not read, and returns null only when there is none', () => {
+    const d = mkdtempSync(join(tmpdir(), 'gmt-files-'));
+    dirs.push(d);
+    writeFileSync(join(d, 'locked.env'), 'A=1\n');
+    chmodSync(join(d, 'locked.env'), 0o000);
+    expect(() => systemFiles.read(join(d, 'locked.env'))).toThrow(/EACCES|permission/i);
+    expect(systemFiles.read(join(d, 'none'))).toBeNull();
+    expect(systemFiles.read(join(d, 'none', 'deeper'))).toBeNull();
+    expect(systemFiles.mode(join(d, 'locked.env'))).toBe(0);
+  });
+  it('MemoryFs can stand in for an unreadable file', () => {
+    const fs = new MemoryFs().file('/a', 'x').unreadable('/a');
+    expect(() => fs.read('/a')).toThrow('EACCES');
+    expect(fs.mode('/a')).toBe(0o644);
+  });
+});

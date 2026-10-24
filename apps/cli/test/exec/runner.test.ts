@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { systemRunner } from '../../src/exec/runner.js';
+import { makeRunner, systemRunner } from '../../src/exec/runner.js';
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -66,4 +66,30 @@ describe('systemRunner (the one execFile wrapper)', { timeout: 30_000 }, () => {
     expect(t.code).toBe(124);
     expect(t.stderr).toContain('timed out after 300 ms');
   });
+
+  it('output past the buffer is its own failure, not a timeout (ca-b1-019)', async () => {
+    const r = await makeRunner({ maxBufferBytes: 1024 })(
+      [node, '-e', 'process.stdout.write("x".repeat(4096))'],
+      {
+        cwd: tmp(),
+        timeoutMs: 10_000,
+      },
+    );
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain('printed more than 1024 bytes; stopped');
+    expect(r.stderr).not.toContain('timed out');
+  });
+
+  it.skipIf(process.platform === 'win32')(
+    'a child stopped by a signal is 128 + its number, naming the signal, never "cannot be started" (ca-b1-019)',
+    async () => {
+      const r = await systemRunner([node, '-e', 'process.kill(process.pid, "SIGKILL")'], {
+        cwd: tmp(),
+        timeoutMs: 10_000,
+      });
+      expect(r.code).toBe(137);
+      expect(r.stderr).toContain('was stopped by SIGKILL');
+      expect(r.stderr).not.toContain('cannot be started');
+    },
+  );
 });

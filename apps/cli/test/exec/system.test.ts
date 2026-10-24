@@ -12,14 +12,15 @@ import {
 import { createServer, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { Runner } from '../../src/exec/runner.js';
 import { systemRunner } from '../../src/exec/runner.js';
-import { systemExecutor } from '../../src/exec/system.js';
+import { entryProblem, systemExecutor } from '../../src/exec/system.js';
 import { runAction } from '../../src/plan/action.js';
 
 const dirs: string[] = [];
 afterEach(() => {
+  vi.useRealTimers();
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
 });
 const tmp = () => {
@@ -30,32 +31,55 @@ const tmp = () => {
 const mode = (p: string) => statSync(p).mode & 0o777;
 const sha = (b: Buffer | string) => createHash('sha256').update(b).digest('hex');
 
+// why: the health wait is tried against a real loopback server: one that answers, and one that accepts and never answers
 let server: Server;
+let silent: Server;
 let base = '';
+let silentBase = '';
 let health: Array<{ status: number; body: string }> = [];
-const BLOB = Buffer.from('a'.repeat(200_000));
+const port = (s: Server) => {
+  const addr = s.address();
+  if (addr === null || typeof addr === 'string') throw new Error('no port');
+  return addr.port;
+};
 beforeAll(async () => {
   server = createServer((req, res) => {
-    if (req.url === '/blob') {
-      res.writeHead(200, { 'content-length': String(BLOB.length) });
-      res.end(BLOB);
-    } else if (req.url === '/api/health') {
-      const h = health.length > 1 ? health.shift() : health[0];
-      res.writeHead(h?.status ?? 503, { 'content-type': 'application/json' });
-      res.end(h?.body ?? '{}');
-    } else {
-      res.writeHead(404);
-      res.end();
-    }
+    const h = health.length > 1 ? health.shift() : health[0];
+    res.writeHead(req.url === '/api/health' ? (h?.status ?? 503) : 404, {
+      'content-type': 'application/json',
+    });
+    res.end(h?.body ?? '{}');
   });
+  silent = createServer(() => {});
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()));
-  const addr = server.address();
-  if (addr === null || typeof addr === 'string') throw new Error('no port');
-  base = `http://127.0.0.1:${addr.port}`;
+  await new Promise<void>((r) => silent.listen(0, '127.0.0.1', () => r()));
+  base = `http://127.0.0.1:${port(server)}`;
+  silentBase = `http://127.0.0.1:${port(silent)}`;
 });
 afterAll(() => {
   server.close();
+  silent.closeAllConnections();
+  silent.close();
 });
+
+/** A fetch over a table of URLs: a body, a status, or a redirect; every requested URL is recorded. */
+function fakeFetch(table: Record<string, { status: number; body?: Buffer; location?: string }>) {
+  const seen: Array<{ url: string; redirect: unknown }> = [];
+  const f: typeof fetch = async (input, init) => {
+    const url = String(input);
+    seen.push({ url, redirect: init?.redirect });
+    const e = table[url];
+    if (e === undefined) return new Response(null, { status: 404 });
+    return new Response(e.body === undefined ? null : new Uint8Array(e.body), {
+      status: e.status,
+      headers: e.location === undefined ? {} : { location: e.location },
+    });
+  };
+  return Object.assign(f, { seen });
+}
+const BLOB = Buffer.from('a'.repeat(200_000));
+const REL = 'https://github.com/daijro/camoufox/releases/download/v1/a.zip';
+const ASSET = 'https://release-assets.githubusercontent.com/x/a.zip';
 
 describe.skipIf(process.platform === 'win32')(
   'systemExecutor (temporary directory; POSIX modes)',
@@ -88,13 +112,30 @@ describe.skipIf(process.platform === 'win32')(
       expect(mode(join(d, 'app.env'))).toBe(0o600);
       expect(mode(join(d, 'unit.plist'))).toBe(0o644);
       expect(readdirSync(d).sort()).toEqual(['app.env', 'unit.plist']);
-      // replacing an existing 0644 file still leaves 0600
       writeFileSync(join(d, 'old.env'), 'x', { mode: 0o644 });
       await ex.run({ kind: 'writeFile', path: join(d, 'old.env'), contents: 'y', mode: 0o600, secret: true });
       expect([readFileSync(join(d, 'old.env'), 'utf8'), mode(join(d, 'old.env'))]).toEqual(['y', 0o600]);
     });
 
-    it('a write that fails leaves no temporary file and the old file intact', async () => {
+    it('the temporary file is never wider than its target: created exclusively at the mode before any data', async () => {
+      const d = tmp();
+      const seen: number[] = [];
+      const watch = setInterval(() => {
+        for (const n of readdirSync(d)) if (n.includes('.tmp-')) seen.push(mode(join(d, n)));
+      }, 0);
+      const big = 'x'.repeat(5_000_000);
+      try {
+        await ex.run({ kind: 'writeFile', path: join(d, 's.env'), contents: big, mode: 0o600, secret: true });
+        writeFileSync(join(d, 'src.db'), big, { mode: 0o644 });
+        await ex.run({ kind: 'copy', from: join(d, 'src.db'), to: join(d, 'dst.db'), mode: 0o600 });
+      } finally {
+        clearInterval(watch);
+      }
+      expect(seen.every((m) => (m & 0o077) === 0)).toBe(true);
+      expect(mode(join(d, 'dst.db'))).toBe(0o600);
+    });
+
+    it('a write whose temporary file was never made reports the write’s own error and leaves the old file', async () => {
       const d = tmp();
       writeFileSync(join(d, 'f'), 'old');
       await expect(
@@ -105,15 +146,19 @@ describe.skipIf(process.platform === 'win32')(
           mode: 0o600,
           secret: true,
         }),
-      ).rejects.toThrow();
+      ).rejects.toMatchObject({
+        syscall: 'open',
+        code: 'ENOENT',
+      });
       expect(readdirSync(d)).toEqual(['f']);
     });
 
-    it('mkdir applies its mode whatever the umask, and is idempotent', async () => {
+    it('mkdir applies its mode whatever the umask, and tightens an existing directory', async () => {
       const d = tmp();
       const old = process.umask(0o077);
       try {
         await ex.run({ kind: 'mkdir', path: join(d, 'a', 'b'), mode: 0o755 });
+        expect(mode(join(d, 'a', 'b'))).toBe(0o755);
         await ex.run({ kind: 'mkdir', path: join(d, 'a', 'b'), mode: 0o700 });
       } finally {
         process.umask(old);
@@ -121,7 +166,7 @@ describe.skipIf(process.platform === 'win32')(
       expect(mode(join(d, 'a', 'b'))).toBe(0o700);
     });
 
-    it('copy writes through a temporary file and renames, with its mode', async () => {
+    it('copy writes through a temporary file and renames, with its mode; a missing source leaves nothing', async () => {
       const d = tmp();
       writeFileSync(join(d, 'src.db'), 'database bytes', { mode: 0o644 });
       await ex.run({ kind: 'copy', from: join(d, 'src.db'), to: join(d, 'dst.db'), mode: 0o600 });
@@ -129,7 +174,6 @@ describe.skipIf(process.platform === 'win32')(
         'database bytes',
         0o600,
       ]);
-      expect(readdirSync(d).sort()).toEqual(['dst.db', 'src.db']);
       await expect(
         ex.run({ kind: 'copy', from: join(d, 'none'), to: join(d, 'x'), mode: 0o600 }),
       ).rejects.toThrow();
@@ -150,7 +194,7 @@ describe.skipIf(process.platform === 'win32')(
       expect(readdirSync(d)).toEqual([]);
     });
 
-    it('run uses execFile with the argv, never a shell, and passes the input on stdin only', async () => {
+    it('run uses execFile with the argv, never a shell, passes the input on stdin only, and resolves stdout', async () => {
       const d = tmp();
       const calls: Array<{ argv: readonly string[]; stdin: string | undefined }> = [];
       const spy: Runner = (argv, opts) => {
@@ -158,7 +202,7 @@ describe.skipIf(process.platform === 'win32')(
         return systemRunner(argv, opts);
       };
       const e = systemExecutor(spy, { sleep: async () => {} });
-      await e.run(
+      const out = await e.run(
         runAction(
           [
             process.execPath,
@@ -167,132 +211,33 @@ describe.skipIf(process.platform === 'win32')(
             '$HOME;x',
           ],
           d,
-          {
-            stdin: 'SECRET-on-stdin',
-            secretStdin: true,
-          },
+          { stdin: { text: 'SECRET-on-stdin', secret: true } },
         ),
       );
+      expect(out).toEqual({ stdout: '$HOME;x\n' });
       expect(readFileSync(join(d, 'out'), 'utf8')).toBe('SECRET-on-stdin');
       expect(calls[0]?.argv.join(' ')).not.toContain('SECRET');
       expect(calls[0]?.stdin).toBe('SECRET-on-stdin');
       expect(existsSync(join(d, 'x'))).toBe(false);
     });
 
-    it('a failing run throws naming its describe and exit; a secret-input run never shows its stderr', async () => {
-      const d = tmp();
-      await expect(
-        ex.run(
-          runAction([process.execPath, '-e', 'console.error("boom line"); process.exit(3)'], d, {
-            describe: 'the step',
-          }),
-        ),
-      ).rejects.toThrow('the step exited with 3: boom line');
-      const err = await ex
-        .run(
-          runAction(
-            [
-              process.execPath,
-              '-e',
-              'process.stdin.pipe(process.stderr); process.stdin.on("end", () => process.exit(4))',
-            ],
-            d,
-            {
-              describe: 'secret step',
-              stdin: 'SENTINEL-in-err',
-              secretStdin: true,
-            },
-          ),
-        )
-        .catch((e: unknown) => e);
-      expect(err).toBeInstanceOf(Error);
-      expect(String(err)).toContain('secret step exited with 4');
-      expect(String(err)).not.toContain('SENTINEL');
-    });
-
-    it('download streams while hashing, then moves the file into place', async () => {
-      const d = tmp();
-      await ex.run({
-        kind: 'download',
-        url: `${base}/blob`,
-        to: join(d, 'blob'),
-        sha256: sha(BLOB),
-        bytes: BLOB.length,
-      });
-      expect(readFileSync(join(d, 'blob')).equals(BLOB)).toBe(true);
-      expect(readdirSync(d)).toEqual(['blob']);
-    });
-    it('a hash or size mismatch deletes the partial file and refuses', async () => {
-      const d = tmp();
-      await expect(
-        ex.run({
-          kind: 'download',
-          url: `${base}/blob`,
-          to: join(d, 'blob'),
-          sha256: sha('other'),
-          bytes: BLOB.length,
-        }),
-      ).rejects.toThrow('sha256');
-      await expect(
-        ex.run({ kind: 'download', url: `${base}/blob`, to: join(d, 'blob'), sha256: sha(BLOB), bytes: 1 }),
-      ).rejects.toThrow('bytes');
-      await expect(
-        ex.run({ kind: 'download', url: `${base}/none`, to: join(d, 'blob'), sha256: sha(BLOB), bytes: 1 }),
-      ).rejects.toThrow('404');
-      expect(readdirSync(d)).toEqual([]);
-    });
-
-    it('unpack refuses an archive whose sha256 differs, unpacking nothing', async () => {
-      const d = tmp();
-      writeFileSync(join(d, 'a.zip'), 'not really');
-      await expect(
-        ex.run({ kind: 'unpack', archive: join(d, 'a.zip'), sha256: sha('x'), to: join(d, 'out') }),
-      ).rejects.toThrow('sha256');
-      expect(existsSync(join(d, 'out'))).toBe(false);
-    });
-
-    it('waitHealthy polls until /api/health answers ok, and fails at its deadline', async () => {
-      health = [
-        { status: 503, body: '{}' },
-        { status: 200, body: '{"ok":false,"degraded":false}' },
-        { status: 200, body: '{"ok":true,"degraded":false}' },
-      ];
-      let slept = 0;
-      const e = systemExecutor(systemRunner, {
-        sleep: async () => {
-          slept++;
-        },
-      });
-      await e.run({ kind: 'waitHealthy', url: `${base}/api/health`, timeoutSeconds: 30 });
-      expect(slept).toBe(2);
-      health = [{ status: 503, body: '{}' }];
-      let clock = 0;
-      const late = systemExecutor(systemRunner, {
-        sleep: async (ms) => {
-          clock += ms;
-        },
-        now: () => clock,
-      });
-      await expect(
-        late.run({ kind: 'waitHealthy', url: `${base}/api/health`, timeoutSeconds: 10 }),
-      ).rejects.toThrow('did not answer healthy within 10 s');
-    });
-
-    it('run passes stdin only when the action has one, and the default or given timeout', async () => {
+    it('run passes stdin and env only when the action has them, with the default or given timeout', async () => {
       const seen: Array<Record<string, unknown>> = [];
       const spy: Runner = async (_argv, opts) => {
         seen.push({ ...opts });
         return { code: 0, stdout: '', stderr: '' };
       };
       await systemExecutor(spy).run(runAction(['x'], '/'));
-      await systemExecutor(spy, { runTimeoutMs: 5 }).run(runAction(['x'], '/', { stdin: '' }));
+      await systemExecutor(spy, { runTimeoutMs: 5 }).run(
+        runAction(['x'], '/', { stdin: { text: '', secret: false }, env: { PATH: '/bin', HOME: '/h' } }),
+      );
       expect(seen).toEqual([
         { cwd: '/', timeoutMs: 30 * 60_000 },
-        { cwd: '/', timeoutMs: 5, stdin: '' },
+        { cwd: '/', timeoutMs: 5, stdin: '', env: { PATH: '/bin', HOME: '/h' } },
       ]);
     });
 
-    it('a failure shows only the last line of stderr, and nothing after the code when stderr is empty', async () => {
+    it('a failure shows only the last line of stderr, nothing after the code when stderr is empty, and never a secret run’s stderr', async () => {
       const fail =
         (stderr: string): Runner =>
         async () => ({ code: 2, stdout: '', stderr });
@@ -303,41 +248,87 @@ describe.skipIf(process.platform === 'win32')(
         /^step exited with 2$/,
       );
       await expect(
-        systemExecutor(fail('the secret\n')).run(
-          runAction(['x'], '/', { describe: 'step', stdin: 's', secretStdin: true }),
+        systemExecutor(fail('SENTINEL the secret\n')).run(
+          runAction(['x'], '/', { describe: 'step', stdin: { text: 'SENTINEL', secret: true } }),
         ),
       ).rejects.toThrow(/^step exited with 2$/);
     });
 
-    it('a write whose temporary file was never made reports the write’s own error', async () => {
+    it('download: https on a release host, redirects followed by hand to release hosts only, hashed, 0600, moved into place', async () => {
       const d = tmp();
-      await expect(
-        ex.run({
-          kind: 'writeFile',
-          path: join(d, 'missing', 'f'),
-          contents: 'x',
-          mode: 0o600,
-          secret: true,
-        }),
-      ).rejects.toMatchObject({ syscall: 'open', code: 'ENOENT' });
-    });
-
-    it('a downloaded file is 0600, and a non-2xx answer is refused by its status', async () => {
-      const d = tmp();
-      await ex.run({
+      const f = fakeFetch({ [REL]: { status: 302, location: ASSET }, [ASSET]: { status: 200, body: BLOB } });
+      await systemExecutor(systemRunner, { fetch: f }).run({
         kind: 'download',
-        url: `${base}/blob`,
-        to: join(d, 'blob'),
+        url: REL,
+        to: join(d, 'a.zip'),
         sha256: sha(BLOB),
         bytes: BLOB.length,
       });
-      expect(mode(join(d, 'blob'))).toBe(0o600);
+      expect(readFileSync(join(d, 'a.zip')).equals(BLOB)).toBe(true);
+      expect(mode(join(d, 'a.zip'))).toBe(0o600);
+      expect(f.seen).toEqual([
+        { url: REL, redirect: 'manual' },
+        { url: ASSET, redirect: 'manual' },
+      ]);
+      expect(readdirSync(d)).toEqual(['a.zip']);
+    });
+    it.each([
+      ['plain http', 'http://github.com/x.zip', {}],
+      ['another host', 'https://example.com/x.zip', {}],
+      [
+        'a redirect to http',
+        REL,
+        { [REL]: { status: 302, location: 'http://objects.githubusercontent.com/x' } },
+      ],
+      [
+        'a redirect off the release hosts',
+        REL,
+        { [REL]: { status: 302, location: 'https://cdn.example.com/x' } },
+      ],
+    ])('download refuses %s, writing nothing', async (_n, url, table) => {
+      const d = tmp();
+      const f = fakeFetch(table);
       await expect(
-        ex.run({ kind: 'download', url: `${base}/none`, to: join(d, 'x'), sha256: sha(BLOB), bytes: 0 }),
-      ).rejects.toThrow(/answered 404$/);
+        systemExecutor(systemRunner, { fetch: f }).run({
+          kind: 'download',
+          url,
+          to: join(d, 'x'),
+          sha256: sha(BLOB),
+          bytes: 1,
+        }),
+      ).rejects.toThrow('refused');
+      expect(readdirSync(d)).toEqual([]);
+    });
+    it('download refuses a size or hash mismatch, a non-2xx answer and endless redirects, removing the partial file; a stale part is replaced', async () => {
+      const d = tmp();
+      const ok = fakeFetch({ [REL]: { status: 200, body: BLOB } });
+      const run = (f: typeof fetch, s: string, bytes: number) =>
+        systemExecutor(systemRunner, { fetch: f }).run({
+          kind: 'download',
+          url: REL,
+          to: join(d, 'a'),
+          sha256: s,
+          bytes,
+        });
+      writeFileSync(join(d, 'a.part'), 'stale');
+      await expect(run(ok, sha('other'), BLOB.length)).rejects.toThrow('sha256');
+      await expect(run(ok, sha(BLOB), 10)).rejects.toThrow('more than 10 bytes');
+      await expect(run(ok, sha(BLOB), BLOB.length + 1)).rejects.toThrow(/bytes, expected/);
+      await expect(run(fakeFetch({ [REL]: { status: 404 } }), sha(BLOB), 1)).rejects.toThrow(/answered 404$/);
+      await expect(run(fakeFetch({ [REL]: { status: 302, location: REL } }), sha(BLOB), 1)).rejects.toThrow(
+        'more than 5 redirects',
+      );
+      expect(readdirSync(d)).toEqual([]);
     });
 
-    it('unpack checks the hash, unpacks a tar or a zip with the right argv into a fresh directory and moves it into place', async () => {
+    it('entryProblem refuses absolute, .. and escaping entries', () => {
+      for (const e of ['inner/f.txt', 'a/b/', 'Camoufox.app/Contents/x', ''])
+        expect(entryProblem(e)).toBeNull();
+      for (const e of ['/etc/passwd', '../x', 'a/../../x', 'a/..', 'C:/x'])
+        expect(entryProblem(e)).not.toBeNull();
+    });
+
+    it('unpack checks the hash and the entries, unpacks a tar or a zip into a fresh 0700 directory and moves it into place, making the parent', async () => {
       const d = tmp();
       mkdirSync(join(d, 'src', 'inner'), { recursive: true });
       writeFileSync(join(d, 'src', 'inner', 'f.txt'), 'packed');
@@ -349,13 +340,19 @@ describe.skipIf(process.platform === 'win32')(
       const e = systemExecutor(spy);
       const tar = join(d, 'a.tar');
       await systemRunner(['tar', '-cf', tar, '-C', join(d, 'src'), 'inner'], { cwd: d, timeoutMs: 30_000 });
-      mkdirSync(join(d, 'out.unpacking'));
-      writeFileSync(join(d, 'out.unpacking', 'stale'), 'old');
-      await e.run({ kind: 'unpack', archive: tar, sha256: sha(readFileSync(tar)), to: join(d, 'out') });
-      expect(readFileSync(join(d, 'out', 'inner', 'f.txt'), 'utf8')).toBe('packed');
-      expect(existsSync(join(d, 'out', 'stale'))).toBe(false);
-      expect(existsSync(join(d, 'out.unpacking'))).toBe(false);
-      expect(calls.at(-1)).toEqual({ argv: ['tar', '-xf', tar, '-C', join(d, 'out.unpacking')], cwd: d });
+      await e.run({
+        kind: 'unpack',
+        archive: tar,
+        sha256: sha(readFileSync(tar)),
+        to: join(d, 'nested', 'deep', 'out'),
+      });
+      expect(readFileSync(join(d, 'nested', 'deep', 'out', 'inner', 'f.txt'), 'utf8')).toBe('packed');
+      expect(mode(join(d, 'nested', 'deep', 'out'))).toBe(0o700);
+      expect(readdirSync(join(d, 'nested', 'deep'))).toEqual(['out']);
+      expect(calls.map((c) => c.argv.slice(0, 2))).toEqual([
+        ['tar', '-tf'],
+        ['tar', '-xf'],
+      ]);
       const zip = join(d, 'b.zip');
       if (
         (await systemRunner(['zip', '-qr', zip, 'inner'], { cwd: join(d, 'src'), timeoutMs: 30_000 }))
@@ -363,32 +360,125 @@ describe.skipIf(process.platform === 'win32')(
       ) {
         await e.run({ kind: 'unpack', archive: zip, sha256: sha(readFileSync(zip)), to: join(d, 'zout') });
         expect(readFileSync(join(d, 'zout', 'inner', 'f.txt'), 'utf8')).toBe('packed');
-        expect(calls.at(-1)?.argv).toEqual(['unzip', '-q', zip, '-d', join(d, 'zout.unpacking')]);
+        expect(calls.slice(-2).map((c) => c.argv.slice(0, 2))).toEqual([
+          ['unzip', '-Z1'],
+          ['unzip', '-q'],
+        ]);
       }
-      const bad = join(d, 'c.tar');
-      writeFileSync(bad, 'not a tar at all');
+    });
+    it('unpack refuses a hash mismatch and an escaping entry before unpacking anything', async () => {
+      const d = tmp();
+      writeFileSync(join(d, 'a.zip'), 'not really');
       await expect(
-        e.run({ kind: 'unpack', archive: bad, sha256: sha('not a tar at all'), to: join(d, 'cout') }),
-      ).rejects.toThrow(`unpacking ${bad} exited with`);
-      expect(existsSync(join(d, 'cout.unpacking'))).toBe(false);
-      expect(existsSync(join(d, 'cout'))).toBe(false);
+        systemExecutor(systemRunner).run({
+          kind: 'unpack',
+          archive: join(d, 'a.zip'),
+          sha256: sha('x'),
+          to: join(d, 'out'),
+        }),
+      ).rejects.toThrow('sha256');
+      const listing: Runner = async (argv) =>
+        argv[1] === '-tf'
+          ? { code: 0, stdout: 'ok/a\n../evil\n', stderr: '' }
+          : { code: 0, stdout: '', stderr: '' };
+      writeFileSync(join(d, 'b.tar'), 'x');
+      await expect(
+        systemExecutor(listing).run({
+          kind: 'unpack',
+          archive: join(d, 'b.tar'),
+          sha256: sha('x'),
+          to: join(d, 'out'),
+        }),
+      ).rejects.toThrow('../evil leaves the archive');
+      expect(readdirSync(d).sort()).toEqual(['a.zip', 'b.tar']);
+    });
+    it('a failed extraction that left files is reported by its own error and leaves no temporary directory', async () => {
+      const d = tmp();
+      writeFileSync(join(d, 'c.tar'), 'x');
+      const partial: Runner = async (argv) => {
+        if (argv[1] === '-tf') return { code: 0, stdout: 'inner/f\n', stderr: '' };
+        const into = String(argv.at(-1));
+        mkdirSync(join(into, 'inner'), { recursive: true });
+        writeFileSync(join(into, 'inner', 'f'), 'half');
+        return { code: 2, stdout: '', stderr: 'truncated' };
+      };
+      await expect(
+        systemExecutor(partial).run({
+          kind: 'unpack',
+          archive: join(d, 'c.tar'),
+          sha256: sha('x'),
+          to: join(d, 'cout'),
+        }),
+      ).rejects.toThrow(`unpacking ${join(d, 'c.tar')} exited with 2`);
+      expect(readdirSync(d)).toEqual(['c.tar']);
     });
 
-    it('waitHealthy sleeps 2 s between tries until its deadline, inclusive; by default with a real clock and pause', async () => {
+    it('waitHealthy tries until /api/health answers ok, sleeping 2 s between tries, and fails at its deadline inclusive', async () => {
+      health = [
+        { status: 503, body: '{}' },
+        { status: 200, body: '{"ok":false,"degraded":false}' },
+        { status: 200, body: 'not json' },
+        { status: 200, body: '{"ok":true,"degraded":false}' },
+      ];
+      const sleeps: number[] = [];
+      await systemExecutor(systemRunner, { sleep: async (ms) => void sleeps.push(ms) }).run({
+        kind: 'waitHealthy',
+        url: `${base}/api/health`,
+        timeoutSeconds: 30,
+      });
+      expect(sleeps).toEqual([2000, 2000, 2000]);
       health = [{ status: 503, body: '{}' }];
       let clock = 0;
-      const sleeps: number[] = [];
+      const late: number[] = [];
       const e = systemExecutor(systemRunner, {
         sleep: async (ms) => {
-          sleeps.push(ms);
+          late.push(ms);
           clock += ms;
         },
         now: () => clock,
       });
       await expect(
         e.run({ kind: 'waitHealthy', url: `${base}/api/health`, timeoutSeconds: 10 }),
-      ).rejects.toThrow();
-      expect(sleeps).toEqual([2000, 2000, 2000, 2000, 2000]);
+      ).rejects.toThrow('did not answer healthy within 10 s');
+      expect(late).toEqual([2000, 2000, 2000, 2000, 2000]);
+    });
+    it('a server that accepts and never answers is one failed try, bounded by the try timeout', async () => {
+      let clock = 0;
+      const started = Date.now();
+      const e = systemExecutor(systemRunner, {
+        healthTryMs: 200,
+        sleep: async (ms) => {
+          clock += ms;
+        },
+        now: () => clock,
+      });
+      await expect(
+        e.run({ kind: 'waitHealthy', url: `${silentBase}/api/health`, timeoutSeconds: 2 }),
+      ).rejects.toThrow('within 2 s');
+      expect(Date.now() - started).toBeLessThan(5000);
+    });
+    it('the default pause between tries is a 2 s timer and the default clock the real one', async () => {
+      vi.useFakeTimers({ toFake: ['setTimeout'] });
+      health = [
+        { status: 503, body: '{}' },
+        { status: 200, body: '{"ok":true}' },
+      ];
+      const done = systemExecutor(systemRunner).run({
+        kind: 'waitHealthy',
+        url: `${base}/api/health`,
+        timeoutSeconds: 30,
+      });
+      let settled = false;
+      void done.then(() => {
+        settled = true;
+      });
+      await vi.waitFor(() => expect(vi.getTimerCount()).toBeGreaterThan(0));
+      await vi.advanceTimersByTimeAsync(1999);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      await done;
+      vi.useRealTimers();
+      health = [{ status: 503, body: '{}' }];
       await expect(
         systemExecutor(systemRunner).run({
           kind: 'waitHealthy',
@@ -396,17 +486,6 @@ describe.skipIf(process.platform === 'win32')(
           timeoutSeconds: 0,
         }),
       ).rejects.toThrow('within 0 s');
-      health = [
-        { status: 503, body: '{}' },
-        { status: 200, body: '{"ok":true}' },
-      ];
-      const started = Date.now();
-      await systemExecutor(systemRunner).run({
-        kind: 'waitHealthy',
-        url: `${base}/api/health`,
-        timeoutSeconds: 30,
-      });
-      expect(Date.now() - started).toBeGreaterThanOrEqual(1900);
     });
   },
 );

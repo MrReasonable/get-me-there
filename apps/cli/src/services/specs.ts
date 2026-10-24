@@ -1,4 +1,5 @@
 import { dirname, join, sep } from 'node:path/posix';
+import type { Files } from '../exec/files.js';
 import type { Paths, ServiceSpec } from '../platform/types.js';
 
 /** What every service spec is built from: the recorded Node binary, the checkout, the home and the platform's paths. */
@@ -64,6 +65,42 @@ export function backupServiceSpec(i: SpecInput): ServiceSpec {
     throttleSeconds: 60,
     calendar: { hour: 3, minute: 30 },
   };
+}
+
+/**
+ * The Node path to record in the services (U5, dev-b1-002, po-b1-004): `process.execPath` is resolved through every
+ * symlink, which on Homebrew is a versioned Cellar path a `brew upgrade` deletes. So the first `node` on PATH that is
+ * the same binary is recorded unresolved, else Homebrew's `opt/<formula>` link for that keg, else the path itself.
+ */
+export function stableNodePath(
+  execPath: string,
+  pathDirs: readonly string[],
+  files: Pick<Files, 'realpath'>,
+): string {
+  const real = files.realpath(execPath) ?? execPath;
+  const cellar = /^(.*)\/Cellar\/([^/]+)\/[^/]+\/bin\/node$/.exec(real);
+  const candidates = [
+    ...pathDirs.filter((d) => d !== '').map((d) => join(d, 'node')),
+    ...(cellar === null ? [] : [join(cellar[1] ?? '', 'opt', cellar[2] ?? '', 'bin', 'node')]),
+  ];
+  return candidates.find((c) => c !== real && files.realpath(c) === real) ?? execPath;
+}
+
+// why: \p{Cc} is every C0 and C1 control character, newline and tab included
+const CONTROL = /\p{Cc}/u;
+
+/** U8 (sec-b1-006): the first of these values (named by key) holding a control character, as a sentence; or null. */
+export function controlProblem(values: Readonly<Record<string, string>>): string | null {
+  for (const [name, v] of Object.entries(values))
+    if (CONTROL.test(v)) return `the ${name} path holds a control character (a newline or similar)`;
+  return null;
+}
+
+/** Throws when a spec holds a control character, so no renderer writes a line its reader would split. */
+export function assertPrintable(spec: ServiceSpec): void {
+  const values = [...spec.argv, spec.workingDirectory, spec.environment.PATH, spec.environment.HOME];
+  if (values.some((v) => CONTROL.test(v)))
+    throw new Error(`the ${spec.name} service would hold a control character in a path; refused`);
 }
 
 /** Version managers' shim directories, whose `node` is a launcher that can change or vanish under a service. */

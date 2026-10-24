@@ -1,19 +1,20 @@
 import { basename, join } from 'node:path/posix';
 import { MOVED_MARKER } from '@gmt/core';
-import { activeLine, credsFrom, readActive } from '../appClient.js';
+import { credsFrom } from '../appClient.js';
 import type { Ask } from '../ask.js';
+import type { GuardTarget } from '../commands/guard.js';
 import type { Deps } from '../deps.js';
 import { type Action, runAction } from '../plan/action.js';
-import { type Answers, defaultAnswers } from './answers.js';
-import { answersFromRecord, readEnvText } from './appEnv.js';
-import { compose } from './docker.js';
+import type { Answers } from './answers.js';
+import { answersFromConfig, OWNED_NAMES, readEnvText, readSettings } from './appEnv.js';
+import { appRunningIn, compose } from './docker.js';
 import { markerNow } from './importDb.js';
 import type { PromptRow } from './prompts.js';
 
 /**
  * Moving a Docker install's database to the native install (spec §13 "One app per ledger"): the container's run is
- * waited for or refused, the container stopped, the backup taken from the stopped volume, copied out, restored and
- * checked, and only then the volume marked `MOVED-TO-NATIVE`.
+ * waited for or refused (the shared guard, re-checked just before the stop), the container stopped, the backup taken
+ * from the stopped volume, copied out, restored and checked, and only then the volume marked `MOVED-TO-NATIVE`.
  */
 export interface ComposeFacts {
   /** The compose `.env` beside docker-compose.yml, read with parseEnv; null when there is none. */
@@ -29,24 +30,7 @@ export async function composeFacts(deps: Deps): Promise<ComposeFacts> {
     cwd: deps.checkout,
     timeoutMs: 20_000,
   });
-  const appRunning = ps.stdout
-    .split('\n')
-    .filter((l) => l.trim() !== '')
-    .some((l) => {
-      try {
-        const v: unknown = JSON.parse(l);
-        return (
-          typeof v === 'object' &&
-          v !== null &&
-          'Service' in v &&
-          v.Service === 'app' &&
-          'State' in v &&
-          v.State === 'running'
-        );
-      } catch {
-        return false;
-      }
-    });
+  const appRunning = ps.code === 0 && appRunningIn(ps.stdout);
   let port: number | null = null;
   if (appRunning) {
     const p = await deps.run(compose('port', 'app', '3000'), { cwd: deps.checkout, timeoutMs: 20_000 });
@@ -56,48 +40,44 @@ export async function composeFacts(deps: Deps): Promise<ComposeFacts> {
   return { record: text === null ? null : readEnvText(text), appRunning, port };
 }
 
-/**
- * The container's active run (decision 80's rule, as `update` reads it): none lets the import go on; an active run
- * refuses, naming it and its estimated finish, unless `--wait`, which polls every 60 s; a running container that
- * cannot be read refuses too.
- */
-export async function waitForNoRun(deps: Deps, f: ComposeFacts, wait: boolean): Promise<string | null> {
-  if (!f.appRunning) return null;
+/** The Docker app as the active-run guard sees it: up while its container runs, reached on its published port. */
+export function dockerGuardTarget(f: ComposeFacts): GuardTarget {
   const creds = f.record === null ? null : credsFrom(f.record);
-  if (creds === null || f.port === null)
-    return 'the Docker app is running, and its runs cannot be read (no auth lines in .env, or no published port): stop it when no search runs (docker compose stop app), then run setup again';
-  const c = { ...creds, port: f.port };
-  for (;;) {
-    const r = await readActive(deps, c);
-    if (r.kind === 'none') return null;
-    if (r.kind === 'failed')
-      return `the Docker app’s runs cannot be read (${r.reason}): stop it when no search runs (docker compose stop app), then run setup again`;
-    if (!wait) return `${activeLine(r.execution)}; run setup again when it ends, or with --wait`;
-    deps.io.out(`${activeLine(r.execution)}; waiting (checking every 60 s)\n`);
-    await deps.sleep(60_000);
-  }
+  return {
+    label: 'the Docker app',
+    up: f.appRunning,
+    creds: creds === null || f.port === null ? null : { ...creds, port: f.port },
+    autoResume: (f.record?.AUTO_RESUME ?? 'true') !== 'false',
+  };
 }
 
 export const DOCKER_BACKUP_DIR = '/data/backups';
-export const dockerBackupArgv = (): string[] =>
-  compose(
-    'run',
-    '--rm',
-    '--no-deps',
-    '-T',
-    '--entrypoint',
-    'node',
-    'app',
-    'scripts/backup.mjs',
-    '--dir',
-    DOCKER_BACKUP_DIR,
-  );
-export const dockerStopAction = (deps: Deps): Action => runAction(compose('stop', 'app'), deps.checkout);
-export const dockerCopyAction = (deps: Deps, file: string): Action =>
+/** The backup inside the stopped volume, as an action; its printed file is read with printedBackup. */
+export const dockerBackupAction = (deps: Deps): Action =>
   runAction(
-    compose('cp', `app:${file}`, join(deps.platform.paths.data, 'backups', basename(file))),
+    compose(
+      'run',
+      '--rm',
+      '--no-deps',
+      '-T',
+      '--entrypoint',
+      'node',
+      'app',
+      'scripts/backup.mjs',
+      '--dir',
+      DOCKER_BACKUP_DIR,
+    ),
     deps.checkout,
+    { env: deps.childEnv },
   );
+export const dockerStopAction = (deps: Deps): Action =>
+  runAction(compose('stop', 'app'), deps.checkout, { env: deps.childEnv });
+export const dockerCopiedPath = (deps: Deps, file: string): string =>
+  join(deps.platform.paths.data, 'backups', basename(file));
+export const dockerCopyAction = (deps: Deps, file: string): Action =>
+  runAction(compose('cp', `app:${file}`, dockerCopiedPath(deps, file)), deps.checkout, {
+    env: deps.childEnv,
+  });
 /** The marker, written inside the volume by `cat` from stdin: the shell formats nothing (no `date`, no `touch`). */
 export const dockerMarkerAction = (deps: Deps): Action =>
   runAction(
@@ -113,27 +93,48 @@ export const dockerMarkerAction = (deps: Deps): Action =>
       `cat > /data/${MOVED_MARKER}`,
     ),
     deps.checkout,
-    {
-      stdin: markerNow(deps),
-      secretStdin: false,
-    },
+    { stdin: { text: markerNow(deps), secret: false }, env: deps.childEnv },
   );
+export const dockerDownAction = (deps: Deps): Action =>
+  runAction(compose('down'), deps.checkout, { env: deps.childEnv });
+/** The one line that undoes the marker (spec §13), printed wherever the Docker app is left unable to start. */
+export const MARKER_REMOVAL = `docker compose run --rm --no-deps --entrypoint rm app /data/${MOVED_MARKER}`;
 
 export const DOWN_REASON =
   'a second app on the old database would keep its own ledger, so caps would count twice; with the marker it would exit and restart in a loop until then';
 
-/** The compose `.env` groups an import offers to carry into app.env, each confirmed (spec §13). */
+/**
+ * The compose `.env` groups an import offers to carry into app.env, each confirmed (spec §13; U2). A group carries every
+ * line it names: the wizard's own names become answers, and the rest (caps, rates, cache windows) go across verbatim as
+ * the operator's lines, which setup then keeps. `SEARCHAPI_TRIAL_USED` counts credits spent outside any ledger
+ * (decision 14), so it is never in an imported database and always carries with the key.
+ */
 const CARRY: Array<{ label: string; names: RegExp; rows: PromptRow[] }> = [
-  { label: 'the Travelpayouts token (TRAVELPAYOUTS_TOKEN)', names: /^TRAVELPAYOUTS_TOKEN$/, rows: [4] },
-  { label: 'the SearchApi settings (SEARCHAPI_*)', names: /^SEARCHAPI_/, rows: [5] },
-  { label: 'the email settings (SMTP_*, ALERT_EMAIL_*)', names: /^(SMTP_|ALERT_EMAIL_)/, rows: [6] },
-  { label: 'the time zone (SCHEDULER_TIMEZONE)', names: /^SCHEDULER_TIMEZONE$/, rows: [2] },
-  { label: 'the market (POINT_OF_SALE)', names: /^POINT_OF_SALE$/, rows: [3] },
+  { label: 'the Travelpayouts lines', names: /^TRAVELPAYOUTS_/, rows: [4] },
+  { label: 'the SearchApi lines', names: /^SEARCHAPI_/, rows: [5] },
+  { label: 'the email settings', names: /^(SMTP_|ALERT_EMAIL_)/, rows: [6] },
+  { label: 'the time zone', names: /^SCHEDULER_TIMEZONE$/, rows: [2] },
+  { label: 'the market', names: /^POINT_OF_SALE$/, rows: [3] },
+  {
+    label: 'the spending caps and run settings',
+    names:
+      /^(MONTHLY_SPEND_CAP_PENCE|GLOBAL_BILLING_DAY|SOFT_CONFIRM_PENCE|EXECUTION_MAX_[A-Z_]+|CHILD_MAX_CALLS|AUTO_RESUME|MAX_AUTO_RESUMES|STALE_AFTER_HOURS|CALENDAR_STALE_AFTER_HOURS|STUCK_AFTER_HOURS|MAX_CELLS_PER_DEFINITION|MAX_WAIT_SECONDS|REQUEST_TIMEOUT_SECONDS|ESTIMATE_RETRY_FACTOR|FX_MAX_RATE_AGE_DAYS)$/,
+    rows: [],
+  },
 ];
+/** Lines the native install sets itself, so they are neither carried nor mentioned. */
+const NATIVE_OWN = /^(APP_BASIC_AUTH_USER|APP_BASIC_AUTH_PASS|PORT|BIND_ADDRESS|DATABASE_PATH|NODE_ENV)$/;
+/** Lines shown with their value and not copied: the native app answers on 127.0.0.1 only. */
+const SHOWN = ['ALLOWED_HOSTS', 'APP_BASE_URL'];
+
+export type Carried =
+  | { ok: true; answers: Answers; rows: Set<PromptRow>; extra: Array<readonly [string, string]> }
+  | { ok: false; error: string };
 
 /**
- * Offers each group of the compose `.env` that has values; returns the answers they amount to and the prompt rows
- * they answer. `ALLOWED_HOSTS` and `APP_BASE_URL` are shown and never copied. Values are never printed.
+ * Reads the Docker .env as the container app would (core's parseConfig, with the lines compose fixes) and offers each
+ * group it has values for, confirmed when interactive. Returns the answers, the prompt rows they answer, and the
+ * verbatim lines to keep. Secret values are never printed.
  */
 export async function carryOver(
   deps: Deps,
@@ -141,38 +142,57 @@ export async function carryOver(
   record: Readonly<Record<string, string>>,
   base: Answers,
   interactive: boolean,
-): Promise<{ answers: Answers; rows: Set<PromptRow> }> {
-  const carried: Record<string, string> = {};
+): Promise<Carried> {
+  const settings = readSettings(
+    Object.entries({
+      ...record,
+      DATABASE_PATH: '/data/get-me-there.db',
+      PORT: '3000',
+      BIND_ADDRESS: '127.0.0.1',
+    })
+      .map(([k, v]) => `${k}="${v}"`)
+      .join('\n'),
+  );
+  if (!settings.ok)
+    return {
+      ok: false,
+      error: `the Docker .env would not pass the app’s settings check: ${settings.fields.filter((f) => !NATIVE_OWN.test(f)).join(', ')}`,
+    };
+  const fromDocker = answersFromConfig(settings.config, record, { linger: base.linger });
+  const answers: Answers = { ...base };
   const rows = new Set<PromptRow>();
+  const extra: Array<readonly [string, string]> = [];
+  const owned = new Set(OWNED_NAMES);
   for (const g of CARRY) {
     const names = Object.keys(record).filter((n) => g.names.test(n) && (record[n] ?? '') !== '');
     if (names.length === 0) continue;
-    // why: an imported database holds the trial's ledger, so its seed is never carried
-    const take = names.filter((n) => n !== 'SEARCHAPI_TRIAL_USED');
-    if (!interactive || (await ask.confirm(`Carry ${g.label} from the Docker .env into app.env?`, true))) {
-      for (const n of take) carried[n] = record[n] ?? '';
-      for (const r of g.rows) rows.add(r);
-    }
+    if (
+      interactive &&
+      !(await ask.confirm(`Carry ${g.label} (${names.join(', ')}) from the Docker .env into app.env?`, true))
+    )
+      continue;
+    for (const r of g.rows) rows.add(r);
+    if (g.rows.includes(2)) answers.timezone = fromDocker.timezone;
+    if (g.rows.includes(3)) answers.pointOfSale = fromDocker.pointOfSale;
+    if (g.rows.includes(4)) answers.travelpayouts = fromDocker.travelpayouts;
+    if (g.rows.includes(5)) answers.searchApi = fromDocker.searchApi;
+    if (g.rows.includes(6)) answers.email = fromDocker.email;
+    for (const n of names) if (!owned.has(n)) extra.push([n, record[n] ?? '']);
   }
-  for (const n of ['ALLOWED_HOSTS', 'APP_BASE_URL'])
+  for (const n of SHOWN)
     if ((record[n] ?? '') !== '')
       deps.io.out(
         `The Docker .env also sets ${n}=${record[n]}; it is not copied (the native app listens on 127.0.0.1 only).\n`,
       );
-  const fromRecord = answersFromRecord(carried, { linger: base.linger });
-  const none = defaultAnswers({ port: base.port, timezone: base.timezone });
-  return {
-    answers: {
-      ...base,
-      timezone: rows.has(2) ? fromRecord.timezone : base.timezone,
-      pointOfSale: rows.has(3) ? fromRecord.pointOfSale : base.pointOfSale,
-      travelpayouts: rows.has(4) ? fromRecord.travelpayouts : none.travelpayouts,
-      searchApi:
-        rows.has(5) && fromRecord.searchApi !== null
-          ? { ...fromRecord.searchApi, trialUsed: null }
-          : base.searchApi,
-      email: rows.has(6) ? fromRecord.email : base.email,
-    },
-    rows,
-  };
+  for (const n of Object.keys(record))
+    if (
+      (record[n] ?? '') !== '' &&
+      !NATIVE_OWN.test(n) &&
+      !SHOWN.includes(n) &&
+      !CARRY.some((g) => g.names.test(n))
+    )
+      deps.io.out(
+        `The Docker .env’s ${n} is not copied${n.startsWith('CAMOUFOX_') ? ' (set the browser provider up natively instead)' : ''}.\n`,
+      );
+  return { ok: true, answers, rows, extra };
 }

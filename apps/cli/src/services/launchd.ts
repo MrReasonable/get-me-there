@@ -9,6 +9,7 @@ import type {
   ServiceSpec,
   ServiceState,
 } from '../platform/types.js';
+import { assertPrintable } from './specs.js';
 
 /**
  * macOS user agents (spec §13; `man launchd.plist`, `man launchctl`, brief §7): one plist per service in
@@ -28,6 +29,7 @@ const str = (s: string): string => `<string>${xml(s)}</string>`;
 
 /** The plist for one spec, keys in a fixed order so an unchanged spec renders byte for byte the same. */
 export function renderPlist(spec: ServiceSpec, paths: Paths): string {
+  assertPrintable(spec);
   const label = launchdLabel(spec.name);
   const lines = [
     '<?xml version="1.0" encoding="UTF-8"?>',
@@ -100,7 +102,18 @@ export function launchdManager(uid: number, paths: Paths): ServiceManager {
   const plistPath = (label: string): string => join(paths.serviceDir, `${label}.plist`);
   const lc = (...args: string[]): Action => runAction(['launchctl', ...args], '/');
   const bootstrap = (label: string) => lc('bootstrap', domain, plistPath(label));
-  const bootout = (label: string) => lc('bootout', `${domain}/${label}`);
+  // why: U5 (dev-b1-001, -009): bootout sends SIGTERM (SIGKILL only after ExitTimeOut 30), so the app checkpoints and
+  // releases its lock; it can return before launchd has let the label go, so every bootout is followed by a bounded wait
+  // until `launchctl print` no longer finds it, before anything bootstraps it again
+  const bootout = (label: string): Action[] => [
+    lc('bootout', `${domain}/${label}`),
+    {
+      kind: 'waitGone',
+      argv: ['launchctl', 'print', `${domain}/${label}`],
+      describe: `launchctl print ${domain}/${label}`,
+      timeoutSeconds: 45,
+    },
+  ];
   return {
     render: (spec, p) => [
       {
@@ -140,7 +153,7 @@ export function launchdManager(uid: number, paths: Paths): ServiceManager {
           mode: 0o644,
           secret: false,
         };
-        return [...(f.loaded ? [bootout(r.unitName)] : []), write, bootstrap(r.unitName)];
+        return [...(f.loaded ? bootout(r.unitName) : []), write, bootstrap(r.unitName)];
       });
     },
 
@@ -149,9 +162,9 @@ export function launchdManager(uid: number, paths: Paths): ServiceManager {
       return f.onDisk === null ? [] : [bootstrap(unitName)];
     },
     // why: a booted-out agent stays stopped; killing the process would only let KeepAlive start it again
-    stop: (unitName, f) => (f.loaded ? [bootout(unitName)] : []),
+    stop: (unitName, f) => (f.loaded ? bootout(unitName) : []),
     restart(unitName, f) {
-      if (f.loaded) return [lc('kickstart', '-k', `${domain}/${unitName}`)];
+      if (f.loaded) return [...bootout(unitName), bootstrap(unitName)];
       return f.onDisk === null ? [] : [bootstrap(unitName)];
     },
 
@@ -159,7 +172,7 @@ export function launchdManager(uid: number, paths: Paths): ServiceManager {
       return rendered.flatMap((r) => {
         const f = facts.get(r.unitName) ?? missing;
         return [
-          ...(f.loaded ? [bootout(r.unitName)] : []),
+          ...(f.loaded ? bootout(r.unitName) : []),
           ...(f.onDisk !== null ? [{ kind: 'remove' as const, path: r.path, recursive: false }] : []),
         ];
       });

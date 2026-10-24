@@ -7,15 +7,16 @@ import type { Action, ApplyResult, Executor, Plan } from './action.js';
  */
 export async function apply(plan: Plan, ex: Executor): Promise<ApplyResult> {
   const done: Action[] = [];
+  const outputs: string[] = [];
   for (const [i, action] of plan.actions.entries()) {
     try {
-      await ex.run(action);
+      outputs.push((await ex.run(action)).stdout);
     } catch (e) {
-      return { done, failed: { action, error: errorText(e) }, notRun: plan.actions.slice(i + 1) };
+      return { done, outputs, failed: { action, error: errorText(e) }, notRun: plan.actions.slice(i + 1) };
     }
     done.push(action);
   }
-  return { done, failed: null, notRun: [] };
+  return { done, outputs, failed: null, notRun: [] };
 }
 
 /** An error's message, never its stack or a cause chain (which could hold a child's input). */

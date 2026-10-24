@@ -5,9 +5,10 @@ import { type Deps, EXIT } from '../deps.js';
 import { apply } from '../plan/apply.js';
 import type { ServiceFacts } from '../platform/types.js';
 import { type Check, describeChecks, scheduleUnit, settingsChecks, staleChecks } from '../services/checks.js';
-import { factOf, type ServiceEntry, serviceSet } from '../services/set.js';
-import { dailyBackupsDir } from '../services/specs.js';
-import { compose } from '../setup/docker.js';
+import { factOf, factsOf, type ServiceEntry, serviceSet } from '../services/set.js';
+import { appEnvPath, dailyBackupsDir } from '../services/specs.js';
+import { readEnvText } from '../setup/appEnv.js';
+import { appRunningIn, compose } from '../setup/docker.js';
 import { bootOutRefused, readStartRefusal, refusalLine, WORKER_LABEL } from '../worker/refusal.js';
 import { refuseOnWindows } from './lifecycle.js';
 
@@ -76,9 +77,8 @@ async function dockerCheck(deps: Deps): Promise<Check | null> {
   const run = (argv: string[]) => deps.run(argv, { cwd: deps.checkout, timeoutMs: 20_000 });
   if ((await run(['docker', '--version'])).code !== 0) return null;
   const ps = await run(compose('ps', '--format', 'json'));
-  const running =
-    ps.code === 0 &&
-    ps.stdout.split('\n').some((l) => /"Service":"app"/.test(l) && /"State":"running"/.test(l));
+  // why: ca-b1-011: one parser for compose's NDJSON or array output
+  const running = ps.code === 0 && appRunningIn(ps.stdout);
   return running
     ? {
         name: 'docker',
@@ -104,49 +104,106 @@ async function checkoutCheck(deps: Deps): Promise<Check> {
       };
 }
 
+const LOOPBACK = new Set(['127.0.0.1', '::1', 'localhost']);
+
+/** pf-b1-001, sec-b1-002: the price source the app will search with, and a bind address beyond loopback. */
+function appEnvChecks(deps: Deps): Check[] {
+  let text: string | null;
+  try {
+    text = deps.files.read(appEnvPath(deps.platform.paths));
+  } catch {
+    return [];
+  }
+  if (text === null) return [];
+  const env = readEnvText(text);
+  const sources = [
+    ...((env.TRAVELPAYOUTS_TOKEN ?? '') === '' ? [] : ['Travelpayouts']),
+    ...(env.SEARCHAPI_PLAN === '40usd' && (env.SEARCHAPI_KEY ?? '') !== '' ? ['SearchApi ($40 plan)'] : []),
+  ];
+  const out: Check[] = [
+    sources.length > 0
+      ? { name: 'price source', level: 'ok', detail: sources.join(' and '), fix: null }
+      : {
+          name: 'price source',
+          level: 'warn',
+          detail: 'none, so searches find nothing (the SearchApi free trial serves pnpm gmt smoke only)',
+          fix: 'pnpm gmt setup --reconfigure travelpayouts',
+        },
+  ];
+  const bind = env.BIND_ADDRESS;
+  if (bind !== undefined && bind !== '' && !LOOPBACK.has(bind))
+    out.push({
+      name: 'bind address',
+      level: 'warn',
+      detail: `${bind}: the app answers beyond this machine over plain HTTP (fine behind a tunnel or TLS, docs/setup.md section 3)`,
+      fix: 'BIND_ADDRESS=127.0.0.1 in app.env, then pnpm gmt restart',
+    });
+  return out;
+}
+
+const workerUnit = (deps: Deps) => ({
+  path: join(deps.platform.paths.serviceDir, `${WORKER_LABEL}.plist`),
+  contents: '',
+  unitName: WORKER_LABEL,
+});
+
 /**
- * `gmt status`, the local facts (brief Task 16b.8; WP18 adds the app's report beside them): each service's state, the
- * settings files' presence and modes, stale units, the macOS log size, a Docker app beside the native one, a detached
- * checkout, the newest daily backup, and the worker's refusal (with its agent booted out on macOS). Exits 1 on a fail.
+ * The local facts of `gmt status` (brief Task 16b.8 and §5; WP18 prints its app report beside them): each service's
+ * state, the settings files' presence and modes, the price source, a bind address beyond loopback, stale units, the
+ * macOS log size, a Docker app beside the native one, a detached checkout, the newest daily backup, and the worker's
+ * refusal. Reads only: it runs no action.
  */
-export async function statusCommand(_f: Flags, _p: string | null, deps: Deps): Promise<number> {
-  const win = refuseOnWindows(deps);
-  if (win !== null) return win;
+export async function localChecks(deps: Deps): Promise<Check[]> {
   const entries = serviceSet(deps);
-  const sm = deps.platform.serviceManager;
-  const facts = new Map<string, ServiceFacts>();
-  for (const e of entries) for (const [k, v] of await sm.facts(e.rendered, deps.run)) facts.set(k, v);
+  const facts = await factsOf(deps, entries);
   const checks: Check[] = [
     ...entries.map((e) => serviceCheck(deps, e, facts)),
     ...staleChecks(deps, entries, facts),
     ...settingsChecks(deps),
+    ...appEnvChecks(deps),
     backupsCheck(deps),
   ];
   for (const c of [logsCheck(deps), await dockerCheck(deps), await checkoutCheck(deps)])
     if (c !== null) checks.push(c);
-
-  const refusal = await readStartRefusal(deps.platform.paths);
+  const refusal = readStartRefusal(deps.platform.paths, deps.files);
   if (refusal === 'unreadable')
     checks.push({ name: 'worker', level: 'fail', detail: 'refusal file unreadable', fix: null });
-  else if (refusal !== 'none') {
+  else if (refusal !== 'none')
     checks.push({
       name: 'worker',
       level: 'fail',
       detail: refusalLine(refusal),
       fix: START_REFUSAL_TEXT[refusal.reason].fixCommand,
     });
-    if (deps.platform.os === 'darwin') {
-      const worker = {
-        path: join(deps.platform.paths.serviceDir, `${WORKER_LABEL}.plist`),
-        contents: '',
-        unitName: WORKER_LABEL,
-      };
-      const wf = await sm.facts([worker], deps.run);
-      const out = bootOutRefused(deps.platform, wf, refusal);
-      if (out.length > 0) {
-        await apply({ command: 'boot out the refused worker', actions: out, notes: [] }, deps.executor);
+  return checks;
+}
+
+/**
+ * `gmt status`: the local facts, then on macOS a refused worker's loaded agent booted out (spec §13: launchd's
+ * KeepAlive cannot exclude exit 78), said only when the bootout worked (ca-b1-007). Exits 1 on a fail.
+ */
+export async function statusCommand(_f: Flags, _p: string | null, deps: Deps): Promise<number> {
+  const win = refuseOnWindows(deps);
+  if (win !== null) return win;
+  const checks = await localChecks(deps);
+  const refusal = readStartRefusal(deps.platform.paths, deps.files);
+  if (deps.platform.os === 'darwin' && refusal !== 'none' && refusal !== 'unreadable') {
+    const wf = await deps.platform.serviceManager.facts([workerUnit(deps)], deps.run);
+    const out = bootOutRefused(deps.platform, wf, refusal);
+    if (out.length > 0) {
+      const r = await apply(
+        { command: 'boot out the refused worker', actions: out, notes: [] },
+        deps.executor,
+      );
+      if (r.failed === null)
         deps.io.out('the refused worker agent was booted out so launchd does not restart it\n');
-      }
+      else
+        checks.push({
+          name: 'worker agent',
+          level: 'fail',
+          detail: `still loaded, so launchd keeps restarting it (${r.failed.error})`,
+          fix: `launchctl bootout gui/${deps.platform.uid}/${WORKER_LABEL}`,
+        });
     }
   }
   deps.io.out(describeChecks(checks));

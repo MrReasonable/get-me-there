@@ -5,7 +5,7 @@ import { testWorld } from '../support/deps.js';
 const none: DockerFacts = { command: false, daemon: false, project: false, volume: false };
 const flags = { importDocker: false, ignoreDocker: false, nativeInstalled: false };
 const EARLIER =
-  'an earlier Docker install exists: use --import-docker to move its data, or --ignore-docker to start fresh (the Docker database is then marked moved)';
+  'an earlier Docker install exists. Only one app may keep the usage ledger, so choose: --import-docker moves its database here; --ignore-docker starts fresh here, and stops the Docker app and marks its volume moved, so the Docker app refuses to start on it until you remove the marker (docker compose run --rm --no-deps --entrypoint rm app /data/MOVED-TO-NATIVE)';
 const DAEMON = 'start Docker so setup can check for an existing compose app, or pass --ignore-docker';
 
 describe('the Docker checks (spec §13 "One app per ledger")', () => {
@@ -60,7 +60,7 @@ describe('the Docker checks (spec §13 "One app per ledger")', () => {
     const w = testWorld({
       run: (a) =>
         a[1] === 'compose'
-          ? { code: 0, stdout: '{"Name":"get-me-there-app-1","State":"exited"}\n' }
+          ? { code: 0, stdout: '{"Name":"get-me-there-app-1","Service":"app","State":"exited"}\n' }
           : a[1] === 'volume'
             ? { code: 1 }
             : undefined,
@@ -79,5 +79,24 @@ describe('the Docker checks (spec §13 "One app per ledger")', () => {
     expect(noDocker.runner.calls).toHaveLength(1);
     const down = testWorld({ run: (a) => (a[1] === 'info' ? { code: 1 } : undefined) });
     expect(await gatherDocker(down.deps)).toEqual({ ...none, command: true });
+  });
+});
+
+describe('composeServices: the one reader of docker compose ps --format json (ca-b1-011)', () => {
+  it('reads one object a line (compose 2.21 and later) and one array (earlier), with any spacing', async () => {
+    const { composeServices } = await import('../../src/setup/docker.js');
+    const lines =
+      '{"Service":"app","State":"running","Name":"x"}\n{"Service": "mailpit", "State": "exited"}\n';
+    const array = '[{"Service":"app","State":"exited"},{"Service":"mailpit","State":"running"}]\n';
+    expect(composeServices(lines)).toEqual([
+      { Service: 'app', State: 'running' },
+      { Service: 'mailpit', State: 'exited' },
+    ]);
+    expect(composeServices(array)).toEqual([
+      { Service: 'app', State: 'exited' },
+      { Service: 'mailpit', State: 'running' },
+    ]);
+    expect(composeServices('')).toEqual([]);
+    expect(composeServices('not json\n{"Service":"app"}\n')).toEqual([]);
   });
 });

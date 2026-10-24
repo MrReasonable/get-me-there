@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import type { Deps } from '../deps.js';
 import type { Problem } from './prereqs.js';
 
@@ -5,6 +6,32 @@ import type { Problem } from './prereqs.js';
 export const COMPOSE_PROJECT = 'get-me-there';
 export const COMPOSE_VOLUME = 'get-me-there_gmt-data';
 export const compose = (...args: string[]): string[] => ['docker', 'compose', '-p', COMPOSE_PROJECT, ...args];
+
+const serviceSchema = z.object({ Service: z.string(), State: z.string() });
+export type ComposeService = { Service: string; State: string };
+
+/**
+ * The one reader of `docker compose ps --format json` (ca-b1-011): compose 2.21 and later print one object a line,
+ * earlier versions one array. A line that is no such object makes the whole output unreadable (an empty list).
+ */
+export function composeServices(stdout: string): ComposeService[] {
+  const text = stdout.trim();
+  if (text === '') return [];
+  try {
+    const parsed: unknown = text.startsWith('[')
+      ? JSON.parse(text)
+      : text.split('\n').map((l) => JSON.parse(l));
+    const r = z.array(serviceSchema).safeParse(parsed);
+    return r.success ? r.data.map((x) => ({ Service: x.Service, State: x.State })) : [];
+  } catch {
+    // why: output that is not compose's JSON says nothing about the services; the callers read "none known"
+    return [];
+  }
+}
+
+/** Whether compose's output shows the `app` service running. */
+export const appRunningIn = (stdout: string): boolean =>
+  composeServices(stdout).some((s) => s.Service === 'app' && s.State === 'running');
 
 /** What `docker` says about an earlier install (spec §13 "One app per ledger"). */
 export interface DockerFacts {
@@ -27,7 +54,7 @@ export async function gatherDocker(deps: Deps): Promise<DockerFacts> {
   return {
     command: true,
     daemon: true,
-    project: ps.code === 0 && ps.stdout.trim() !== '',
+    project: ps.code === 0 && composeServices(ps.stdout).length > 0,
     volume: volume.code === 0,
   };
 }
@@ -63,7 +90,7 @@ export function judgeDocker(
     return p('start Docker so setup can check for an existing compose app, or pass --ignore-docker');
   return exists
     ? p(
-        'an earlier Docker install exists: use --import-docker to move its data, or --ignore-docker to start fresh (the Docker database is then marked moved)',
+        'an earlier Docker install exists. Only one app may keep the usage ledger, so choose: --import-docker moves its database here; --ignore-docker starts fresh here, and stops the Docker app and marks its volume moved, so the Docker app refuses to start on it until you remove the marker (docker compose run --rm --no-deps --entrypoint rm app /data/MOVED-TO-NATIVE)',
       )
     : [];
 }

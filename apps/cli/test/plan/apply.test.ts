@@ -68,14 +68,16 @@ describe('apply (decision 72: plan and apply, no journal)', () => {
     expect(text).toMatch(/done: {4}make directory \/h\/a/);
     expect(text).toMatch(/failed: {2}write \/h\/a\/two \(0600, 1 lines, values hidden\): injected failure/);
     expect(text).toMatch(/not run: make directory \/h\/b/);
-    expect(describeResult('toy', { done: [], failed: null, notRun: [] })).toBe('toy: done (0 steps)\n');
+    expect(describeResult('toy', { done: [], outputs: [], failed: null, notRun: [] })).toBe(
+      'toy: done (0 steps)\n',
+    );
   });
 
   it('a thrown non-Error is reported as text', async () => {
     const r = await apply(
       { command: 'x', actions: [{ kind: 'remove', path: '/x', recursive: false }], notes: [] },
       {
-        run: () => {
+        run: async () => {
           throw 'plain';
         },
       },

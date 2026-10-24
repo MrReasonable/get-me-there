@@ -31,6 +31,7 @@ function refused(name: 'record' | 'smoke', exitCode: number, line: string): Tool
     summary: API_TEXT.toolSummary(name, exitCode, 0),
     lines: [line],
     fixturesWritten: [],
+    searchApiCreditsLedgered: null,
   };
 }
 
@@ -76,6 +77,7 @@ export function inProcessTools(ports: Ports, opts: InProcessOptions = {}): HttpT
         summary: API_TEXT.toolSummary('record', exitCode, fixturesWritten.length),
         lines,
         fixturesWritten,
+        searchApiCreditsLedgered: null,
       };
     },
     // why: the app's ports and ledger; no fixtures (the route says so), no --confirm-rerun over HTTP, the synthetic
@@ -92,7 +94,13 @@ export function inProcessTools(ports: Ports, opts: InProcessOptions = {}): HttpT
         },
         { signal, fixtures: null },
       );
-      return { exitCode: r.exitCode, summary: r.summary, lines: r.lines, fixturesWritten: [] };
+      return {
+        exitCode: r.exitCode,
+        summary: r.summary,
+        lines: r.lines,
+        fixturesWritten: [],
+        searchApiCreditsLedgered: r.searchApiCreditsLedgered,
+      };
     },
   };
 }

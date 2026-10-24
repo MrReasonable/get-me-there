@@ -6,23 +6,21 @@ import type { Files } from '../exec/files.js';
 import { type Action, runAction } from '../plan/action.js';
 import { apply } from '../plan/apply.js';
 import { describePlan, describeResult } from '../plan/describe.js';
-import type { Platform } from '../platform/types.js';
 import { factsOf, serviceSet } from '../services/set.js';
-import { appServiceSpec, backupServiceSpec } from '../services/specs.js';
+import { readSetupRecord } from '../setup/record.js';
 import { refuseOnWindows } from './lifecycle.js';
-import { readSetupRecord } from './setup.js';
 
-/** What uninstall removes and keeps (spec §13), exported for the e2e job's assertions. */
-export function uninstallPaths(platform: Platform): { removed: string[]; kept: string[] } {
-  const input = { execPath: '/node', checkout: '/', home: '/', paths: platform.paths };
-  const units = [appServiceSpec(input), backupServiceSpec(input)].flatMap((s) =>
-    platform.serviceManager.render(s, platform.paths).map((r) => r.path),
-  );
+/** What uninstall removes and keeps (spec §13): every unit file of the one service list (ca-b1-016), and the logs. */
+export function uninstallPaths(deps: Deps): { removed: string[]; kept: string[] } {
+  const p = deps.platform.paths;
+  const units = serviceSet(deps).flatMap((e) => e.rendered.map((r) => r.path));
   return {
-    removed: [...units, ...(platform.paths.logs === null ? [] : [platform.paths.logs])],
-    kept: [platform.paths.config, platform.paths.data, platform.paths.state],
+    removed: [...units, ...(p.logs === null ? [] : [p.logs])],
+    kept: [p.config, p.data, p.state],
   };
 }
+
+const inside = (path: string, dir: string): boolean => path === dir || path.startsWith(`${dir}/`);
 
 /** Why `--purge` must not delete a directory, or null: a symlink, the home, the root, or a name not get-me-there. */
 export function purgeRefusal(path: string, home: string, files: Files): string | null {
@@ -48,24 +46,24 @@ export async function uninstallCommand(flags: Flags, _p: string | null, deps: De
   const p = deps.platform.paths;
   const purge = flags.purge === true;
   const purgeDirs = [p.config, p.data, p.state];
+  // why: po-b1-015: read before --purge deletes the only record that setup turned linger on
+  const lingerOn = deps.platform.os === 'linux' && readSetupRecord(deps).linger === 'enable';
   if (purge) {
     if (!interactive) {
       deps.io.err('--purge never runs non-interactively: run pnpm gmt uninstall --purge in a terminal\n');
-      return EXIT.refused;
+      return EXIT.badConfig;
     }
-    const problems = purgeDirs
-      .map((d) => purgeRefusal(d, deps.env.HOME ?? '', deps.files))
-      .filter((x) => x !== null);
+    const problems = purgeDirs.map((d) => purgeRefusal(d, deps.home, deps.files)).filter((x) => x !== null);
     if (problems.length > 0) {
       deps.io.err(`--purge refused, nothing was deleted: ${problems.join('; ')}\n`);
-      return EXIT.refused;
+      return EXIT.badConfig;
     }
     deps.io.out(
       `--purge deletes these directories and everything in them:\n${purgeDirs.map((d) => `  ${d}`).join('\n')}\n`,
     );
     if (!(await ask.typed('Delete them?', 'purge'))) {
       deps.io.err('not purged; nothing was removed\n');
-      return EXIT.refused;
+      return EXIT.badConfig;
     }
   }
   const entries = serviceSet(deps);
@@ -92,8 +90,10 @@ export async function uninstallCommand(flags: Flags, _p: string | null, deps: De
     deps.io.err(describeResult('uninstall', r));
     return EXIT.failed;
   }
-  if (deps.platform.os === 'linux' && readSetupRecord(deps).linger === 'enable' && interactive && !purge) {
-    if (await ask.confirm(`Setup turned on linger for ${deps.username}; turn it off?`, false)) {
+  if (lingerOn) {
+    const line = `loginctl disable-linger ${deps.username}`;
+    if (!interactive) deps.io.out(`Setup turned on linger for ${deps.username}; to turn it off: ${line}\n`);
+    else if (await ask.confirm(`Setup turned on linger for ${deps.username}; turn it off?`, false)) {
       const off = await apply(
         {
           command: 'linger',
@@ -102,13 +102,19 @@ export async function uninstallCommand(flags: Flags, _p: string | null, deps: De
         },
         deps.executor,
       );
-      if (off.failed !== null)
-        deps.io.out(`loginctl refused; run it yourself: sudo loginctl disable-linger ${deps.username}\n`);
-    }
+      if (off.failed !== null) deps.io.out(`loginctl refused; run it yourself: sudo ${line}\n`);
+    } else deps.io.out(`Linger stays on; to turn it off later: ${line}\n`);
   }
-  const paths = uninstallPaths(deps.platform);
+  const paths = uninstallPaths(deps);
+  // why: dev-b1-013: the worker's directory never moves with XDG_STATE_HOME, so a purge can leave it
+  const left =
+    purge && !purgeDirs.some((d) => inside(p.workerData, d)) && deps.files.isDir(p.workerData)
+      ? [
+          `left in place: ${p.workerData} (the browser worker’s directory, outside the purged ones; delete it yourself if you want it gone)`,
+        ]
+      : [];
   deps.io.out(
-    `${[...paths.removed.map((x) => `removed: ${x}`), ...(purge ? purgeDirs.map((x) => `removed: ${x}`) : paths.kept.map((x) => `kept: ${x}`))].join('\n')}\n`,
+    `${[...paths.removed.map((x) => `removed: ${x}`), ...(purge ? purgeDirs.map((x) => `removed: ${x}`) : paths.kept.map((x) => `kept: ${x}`)), ...left].join('\n')}\n`,
   );
   return EXIT.ok;
 }

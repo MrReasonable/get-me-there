@@ -57,6 +57,7 @@ describe('@gmt/db public surface (plan "Database" contract)', () => {
       'runMaintenance',
       'loadAirportsDataset',
       'backupDatabase',
+      'backupSummary',
       'checkBackup',
       'RowRejected',
       'RowCorrupt',
@@ -101,6 +102,7 @@ describe('@gmt/db public surface (plan "Database" contract)', () => {
         'WalUnavailableError', // dm-003: the boot maps it to exit 73
         'applyMigrations',
         'backupDatabase',
+        'backupSummary',
         'budgetConfigFromConfig',
         'checkBackup',
         'createRepos',

@@ -46,8 +46,17 @@ export interface Deps {
   nodeVersion: string;
   /** The login name (`os.userInfo().username`), for `loginctl enable-linger <user>`. */
   username: string;
-  /** The process environment, read once by main.ts: only `fromEnv` answers and the platform input use it. */
-  env: Readonly<Record<string, string | undefined>>;
+  /** The home directory the platform's paths were built from (validated by currentPlatform). */
+  home: string;
+  /** The directory the operator ran `pnpm gmt` from (pnpm's INIT_CWD), against which relative paths are read. */
+  invocationCwd: string;
+  /** One environment variable by name, for an answers file's `{ "fromEnv": "NAME" }` secrets only. */
+  secretEnv(name: string): string | undefined;
+  /**
+   * The environment children such as git and pnpm run with: PATH, HOME and the locale, pnpm, corepack and temporary
+   * directory variables, never the rest of the shell's (U8: no vendor key reaches a dependency's install script).
+   */
+  childEnv: Readonly<Record<string, string>>;
   /** `os.tmpdir()`: a Node binary under it is refused for services. */
   tmpDir: string;
   /** `Intl.DateTimeFormat().resolvedOptions().timeZone`. */
@@ -59,5 +68,5 @@ export interface Deps {
   attach(argv: readonly string[], cwd: string): Promise<number>;
 }
 
-/** Exit codes (sysexits, as the app's EXIT table uses): ok, a failed step, usage, a refusal or unmet prerequisite. */
-export const EXIT = { ok: 0, failed: 1, usage: 64, refused: 78 } as const;
+/** The one exit-code table (core's, shared with apps/api; U9): 78 a refusal or unmet prerequisite, 75 busy, 65 spend. */
+export { EXIT } from '@gmt/core';

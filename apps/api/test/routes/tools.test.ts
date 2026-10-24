@@ -30,6 +30,7 @@ const ok: ToolRunResponse = {
   summary: 'done',
   lines: ['1 call'],
   fixturesWritten: ['fixtures/recorded/x.json'],
+  searchApiCreditsLedgered: null,
 };
 const body = { budget: 5, origins: ['LHR', 'LGW'], destinations: ['JFK', 'EWR'], month: '2027-03' };
 

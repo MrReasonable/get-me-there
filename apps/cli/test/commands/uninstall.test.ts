@@ -22,12 +22,14 @@ describe('gmt uninstall (spec §13)', () => {
     expect(await runCli(['uninstall', '--non-interactive'], m.deps)).toBe(0);
     expect(show(m)).toEqual([
       'launchctl bootout gui/501/local.get-me-there.app',
+      'waitGone ',
       'remove /Users/op/Library/LaunchAgents/local.get-me-there.app.plist',
       'launchctl bootout gui/501/local.get-me-there.backup',
+      'waitGone ',
       'remove /Users/op/Library/LaunchAgents/local.get-me-there.backup.plist',
       'remove /Users/op/Library/Logs/get-me-there',
     ]);
-    const p = uninstallPaths(m.deps.platform);
+    const p = uninstallPaths(m.deps);
     for (const r of p.removed) expect(m.io.stdout).toContain(`removed: ${r}`);
     for (const k of p.kept) {
       expect(m.io.stdout).toContain(`kept: ${k}`);
@@ -51,15 +53,54 @@ describe('gmt uninstall (spec §13)', () => {
       expect(s).toContain(c);
     expect(s).toContain('remove /home/op/.config/systemd/user/get-me-there-backup.timer');
   });
-  it('linger setup did not enable is never offered; --non-interactive never offers it', async () => {
+  it('linger setup did not enable is never offered; --non-interactive on a terminal never asks, and prints the line instead (CodeRabbit …k7q)', async () => {
     const m = await setUp('linux', 'skip');
     m.deps.ask = scriptedAsk([]);
     m.deps.io = testIo({ tty: true });
     expect(await runCli(['uninstall'], m.deps)).toBe(0);
     const n = await setUp('linux', 'enable');
-    n.deps.ask = scriptedAsk([]);
+    const ask = scriptedAsk([]);
+    n.deps.ask = ask;
+    const io = testIo({ tty: true });
+    n.deps.io = io;
     expect(await runCli(['uninstall', '--non-interactive'], n.deps)).toBe(0);
+    expect(ask.asked).toEqual([]);
     expect(show(n)).not.toContain('loginctl disable-linger op');
+    expect(io.stdout).toContain('Setup turned on linger for op; to turn it off: loginctl disable-linger op');
+  });
+  it('--purge still offers to turn off the linger setup turned on, reading the record before deleting it (po-b1-015, dev-b1-013)', async () => {
+    const m = await setUp('linux', 'enable');
+    const ask = scriptedAsk(['purge', true]);
+    m.deps.ask = ask;
+    m.deps.io = testIo({ tty: true });
+    expect(await runCli(['uninstall', '--purge'], m.deps)).toBe(0);
+    expect(ask.asked).toEqual(['Delete them?', 'Setup turned on linger for op; turn it off?']);
+    expect(show(m)).toContain('loginctl disable-linger op');
+    expect(m.fs.isDir('/home/op/.local/state/get-me-there')).toBe(false);
+  });
+  it('--purge names what it left: the browser worker’s directory when XDG_STATE_HOME moved the state (dev-b1-013)', async () => {
+    const { currentPlatform } = await import('../../src/platform/current.js');
+    const m = await setUp('linux');
+    m.deps.platform = currentPlatform({
+      platform: 'linux',
+      arch: 'x64',
+      uid: 501,
+      env: { HOME: '/home/op', XDG_STATE_HOME: '/home/op/st' },
+    });
+    m.fs.dir('/home/op/st/get-me-there').dir('/home/op/.local/state/get-me-there/camoufox');
+    m.deps.ask = scriptedAsk(['purge']);
+    const io = testIo({ tty: true });
+    m.deps.io = io;
+    expect(await runCli(['uninstall', '--purge'], m.deps)).toBe(0);
+    expect(io.stdout).toContain(
+      'left in place: /home/op/.local/state/get-me-there/camoufox (the browser worker’s directory, outside the purged ones; delete it yourself if you want it gone)',
+    );
+  });
+  it('uninstallPaths lists every unit file serviceSet renders, and the log directory (ca-b1-016)', async () => {
+    const { serviceSet } = await import('../../src/services/set.js');
+    const m = await setUp('linux');
+    const units = serviceSet(m.deps).flatMap((e) => e.rendered.map((r) => r.path));
+    expect(uninstallPaths(m.deps).removed).toEqual(units);
   });
 
   it('--purge lists the three directories, needs the typed word purge, and deletes them', async () => {

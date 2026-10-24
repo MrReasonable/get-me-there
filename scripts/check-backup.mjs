@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Checks a backup before a restore (spec §13 Restore; docs/setup.md section 6): opens the file read-only and runs
-// SQLite's `PRAGMA integrity_check`, the check backupDatabase runs on every copy it writes.
+// SQLite's `PRAGMA integrity_check`, the check backupDatabase runs on every copy it writes. On success it prints one JSON
+// line: `{ ok, file, resumable, scheduled }`, what starting the app on that file will resume or catch up (cb-b1-010).
 //   node scripts/check-backup.mjs <file>
 // Exit codes from the plan's single table (apps/api EXIT): 0 ok, 64 usage, 74 the backup is unusable; 1 when the
 // built packages cannot be loaded.
@@ -17,11 +18,12 @@ function message(err) {
 async function main() {
   let EXIT;
   let checkBackup;
+  let backupSummary;
   try {
     // why: no rule of its own, like backup.mjs: the exit codes and the integrity check are apps/api's and @gmt/db's.
     const requireFromApi = createRequire(new URL('../apps/api/package.json', import.meta.url));
     ({ EXIT } = await import(new URL('../apps/api/dist/tools/types.js', import.meta.url).href));
-    ({ checkBackup } = await import(pathToFileURL(requireFromApi.resolve('@gmt/db')).href));
+    ({ checkBackup, backupSummary } = await import(pathToFileURL(requireFromApi.resolve('@gmt/db')).href));
   } catch (err) {
     process.stderr.write(`check-backup: cannot load the built packages (run pnpm build): ${message(err)}\n`);
     return 1;
@@ -34,7 +36,14 @@ async function main() {
   }
   try {
     checkBackup(file);
-    process.stdout.write(`${JSON.stringify({ ok: true, file })}\n`);
+    // why: the summary is advice; a file it cannot read is still a good backup, printed without it
+    let summary = {};
+    try {
+      summary = backupSummary(file);
+    } catch {
+      summary = {};
+    }
+    process.stdout.write(`${JSON.stringify({ ok: true, file, ...summary })}\n`);
     return EXIT.ok;
   } catch (err) {
     process.stderr.write(`backup check failed: ${message(err)}\n`);

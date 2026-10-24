@@ -1,4 +1,4 @@
-import { accessSync, constants, lstatSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { accessSync, constants, lstatSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
 
 /**
  * The synchronous file reads a planner makes before planning (existing settings files and their modes, what is already
@@ -6,7 +6,7 @@ import { accessSync, constants, lstatSync, readdirSync, readFileSync, statSync }
  * two implementations, so a planner is a pure function of what they report.
  */
 export interface Files {
-  /** A regular file's text (symlinks followed), or null when there is none. */
+  /** A regular file's text (symlinks followed), or null when there is none; throws when it exists but cannot be read. */
   read(path: string): string | null;
   /** The permission bits of a file or directory (symlinks followed), or null when absent. */
   mode(path: string): number | null;
@@ -19,15 +19,19 @@ export interface Files {
   isSymlink(path: string): boolean;
   /** A directory's entry names, sorted, or null when it is no directory. */
   list(dir: string): string[] | null;
+  /** The path with every symlink resolved, or null when it does not exist. */
+  realpath(path: string): string | null;
   /** Whether this user may write to the path (create entries in a directory). */
   writable(path: string): boolean;
 }
 
+/** Only "no such file" (or a path through a non-directory) is absence; any other error is thrown (U8, ca-b1-009). */
 const safe = <T>(f: () => T, fallback: T): T => {
   try {
     return f();
-  } catch {
-    return fallback;
+  } catch (e) {
+    if (e instanceof Error && 'code' in e && (e.code === 'ENOENT' || e.code === 'ENOTDIR')) return fallback;
+    throw e;
   }
 };
 
@@ -38,10 +42,15 @@ export const systemFiles: Files = {
   size: (p) => safe(() => (statSync(p).isFile() ? statSync(p).size : null), null),
   isDir: (p) => safe(() => statSync(p).isDirectory(), false),
   isSymlink: (p) => safe(() => lstatSync(p).isSymbolicLink(), false),
+  realpath: (p) => safe(() => realpathSync(p), null),
   list: (d) => safe(() => (statSync(d).isDirectory() ? readdirSync(d).sort() : null), null),
-  writable: (p) =>
-    safe(() => {
+  writable: (p) => {
+    try {
       accessSync(p, constants.W_OK);
       return true;
-    }, false),
+    } catch {
+      // why: "may this user write here" is a yes or no; every reason it cannot is a no
+      return false;
+    }
+  },
 };

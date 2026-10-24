@@ -14,17 +14,20 @@ export type Action =
   | { kind: 'rename'; from: string; to: string }
   | { kind: 'copy'; from: string; to: string; mode: 0o600 }
   | { kind: 'remove'; path: string; recursive: boolean }
-  // why: `stdin` is the child's standard input. A secret reaches a child only this way, with `secretStdin: true`, so
-  // describePlan and every error leave it out; a non-secret input (the moved marker's text) has `secretStdin: false`.
+  // why: `stdin` is the child's standard input with its secrecy: a secret reaches a child only this way, so describePlan
+  // and every error leave the text out (and a secret run's stderr too). `env`, when given, is the child's whole
+  // environment (U8: app-side children get PATH and HOME, not the CLI's environment).
   | {
       kind: 'run';
       argv: readonly string[];
       cwd: string;
       describe: string;
-      secretStdin: boolean;
-      stdin?: string;
+      stdin?: { text: string; secret: boolean };
+      env?: Readonly<Record<string, string>>;
     }
-  | { kind: 'waitHealthy'; url: string; timeoutSeconds: number };
+  | { kind: 'waitHealthy'; url: string; timeoutSeconds: number }
+  // why: U5: a probe run until it fails, within a bound; launchd's bootout returns before the label is gone
+  | { kind: 'waitGone'; argv: readonly string[]; describe: string; timeoutSeconds: number };
 
 export interface Plan {
   command: string;
@@ -32,12 +35,15 @@ export interface Plan {
   notes: readonly string[];
 }
 
+/** Runs one action; a `run` resolves the child's stdout (so a later step can use it), every other action ''. */
 export interface Executor {
-  run(a: Action): Promise<void>;
+  run(a: Action): Promise<{ stdout: string }>;
 }
 
 export interface ApplyResult {
   done: readonly Action[];
+  /** Each done action's stdout, in the order of `done`. */
+  outputs: readonly string[];
   failed: { action: Action; error: string } | null;
   notRun: readonly Action[];
 }
@@ -46,16 +52,20 @@ export interface ApplyResult {
 export function runAction(
   argv: readonly string[],
   cwd: string,
-  opts: { describe?: string; stdin?: string; secretStdin?: boolean } = {},
+  opts: {
+    describe?: string;
+    stdin?: { text: string; secret: boolean };
+    env?: Readonly<Record<string, string>>;
+  } = {},
 ): Extract<Action, { kind: 'run' }> {
-  const base = {
+  return {
     kind: 'run' as const,
     argv,
     cwd,
     describe: opts.describe ?? commandLine(argv),
-    secretStdin: opts.secretStdin ?? false,
+    ...(opts.stdin === undefined ? {} : { stdin: opts.stdin }),
+    ...(opts.env === undefined ? {} : { env: opts.env }),
   };
-  return opts.stdin === undefined ? base : { ...base, stdin: opts.stdin };
 }
 
 /** An argv as a POSIX shell would read it back: each word bare when it is plain, else single-quoted. */

@@ -32,7 +32,7 @@ export type SecretInput = string | { fromEnv: string } | { fromStdin: true };
  */
 export async function resolveSecrets(
   inputs: ReadonlyArray<{ field: string; input: SecretInput }>,
-  env: Readonly<Record<string, string | undefined>>,
+  env: (name: string) => string | undefined,
   readStdin: () => Promise<string>,
 ): Promise<{ ok: true; values: Map<string, string> } | { ok: false; error: string }> {
   const fromStdin = inputs.filter((i) => typeof i.input === 'object' && 'fromStdin' in i.input);
@@ -45,7 +45,7 @@ export async function resolveSecrets(
   for (const { field, input } of inputs) {
     if (typeof input === 'string') values.set(field, input);
     else if ('fromEnv' in input) {
-      const v = env[input.fromEnv];
+      const v = env(input.fromEnv);
       if (v === undefined)
         return { ok: false, error: `${field}: the environment variable ${input.fromEnv} is not set` };
       values.set(field, v);

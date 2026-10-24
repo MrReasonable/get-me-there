@@ -172,6 +172,7 @@ describe('launchd facts and planning (pure over the facts)', () => {
     const a = sm.install(app, new Map([[key, facts({ onDisk: 'old', loaded: true, state: 'running' })]]));
     expect(a.map((x) => (x.kind === 'run' ? x.argv.join(' ') : x.kind))).toEqual([
       'launchctl bootout gui/501/local.get-me-there.app',
+      'waitGone',
       'writeFile',
       `launchctl bootstrap gui/501 ${PLIST}`,
     ]);
@@ -194,9 +195,16 @@ describe('launchd facts and planning (pure over the facts)', () => {
     expect(argv(sm.start(key, running))).toEqual([]);
     expect(argv(sm.start(key, unloaded))).toEqual([`launchctl bootstrap gui/501 ${PLIST}`]);
     expect(argv(sm.start(key, facts({})))).toEqual([]);
-    expect(argv(sm.stop(key, running))).toEqual(['launchctl bootout gui/501/local.get-me-there.app']);
+    expect(argv(sm.stop(key, running))).toEqual([
+      'launchctl bootout gui/501/local.get-me-there.app',
+      'waitGone',
+    ]);
     expect(argv(sm.stop(key, unloaded))).toEqual([]);
-    expect(argv(sm.restart(key, running))).toEqual(['launchctl kickstart -k gui/501/local.get-me-there.app']);
+    expect(argv(sm.restart(key, running))).toEqual([
+      'launchctl bootout gui/501/local.get-me-there.app',
+      'waitGone',
+      `launchctl bootstrap gui/501 ${PLIST}`,
+    ]);
     expect(argv(sm.restart(key, unloaded))).toEqual([`launchctl bootstrap gui/501 ${PLIST}`]);
     expect(argv(sm.restart(key, facts({})))).toEqual([]);
   });
@@ -205,7 +213,7 @@ describe('launchd facts and planning (pure over the facts)', () => {
     const a = sm.remove(app, new Map([[key, facts({ onDisk: contents, loaded: true, state: 'running' })]]));
     expect(
       a.map((x) => (x.kind === 'run' ? x.argv.join(' ') : `${x.kind} ${'path' in x ? x.path : ''}`)),
-    ).toEqual(['launchctl bootout gui/501/local.get-me-there.app', `remove ${PLIST}`]);
+    ).toEqual(['launchctl bootout gui/501/local.get-me-there.app', 'waitGone ', `remove ${PLIST}`]);
     expect(sm.remove(app, new Map([[key, facts({})]]))).toEqual([]);
   });
 });

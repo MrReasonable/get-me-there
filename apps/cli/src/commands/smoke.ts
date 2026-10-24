@@ -5,6 +5,7 @@ import type { Flags } from '../args.js';
 import { type Deps, EXIT } from '../deps.js';
 import { appEnvPath } from '../services/specs.js';
 import { readEnvText } from '../setup/appEnv.js';
+import { NO_SOURCE_TEXT } from '../setup/closing.js';
 
 type SmokePlan = z.infer<typeof apiContract.smokePlanResponseSchema>;
 
@@ -28,7 +29,6 @@ export function spendLines(p: SmokePlan): string[] {
 }
 
 const MUTATING = { 'Content-Type': 'application/json', 'X-Requested-With': 'get-me-there' } as const;
-const LEDGERED = /SearchApi credits already ledgered to tool runs in this budget window: (\d+)/;
 
 async function postSmoke(
   deps: Deps,
@@ -53,21 +53,19 @@ async function postSmoke(
 
 /**
  * `gmt smoke --from <IATA> --to <IATA>` (spec §13): states the route's worst case from `GET /api/tools/smoke/plan`
- * before anything is posted, refuses when the SearchApi trial has fewer credits left, asks for a typed `yes` (`--yes`
- * in scripts), learns the credits tool runs already ledgered from a dry run, then posts the smoke with that plus the
- * worst case as its budget. Basic auth from app.env travels in the request header only.
+ * before anything is posted; refuses with no provider configured, and when the SearchApi trial has fewer credits left;
+ * posts a dry run (it ledgers nothing) and shows its lines, stopping on its refusal; states the credits tool runs
+ * already used in this window (the dry run's `searchApiCreditsLedgered`, U7) and asks for a typed `yes` for that
+ * running total (`--yes` in scripts, with `--accept-total` once earlier tool runs used credits: decision 20); then
+ * posts the smoke with that total as its budget. Basic auth from app.env travels in the request header only.
  */
 export async function smokeCommand(flags: Flags, _p: string | null, deps: Deps): Promise<number> {
-  const from = flags.from;
-  const to = flags.to;
-  if (
-    typeof from !== 'string' ||
-    typeof to !== 'string' ||
-    !/^[A-Z]{3}$/.test(from) ||
-    !/^[A-Z]{3}$/.test(to)
-  ) {
+  // why: po-b1-013: the Definitions form's rule; lowercase is upper-cased, anything but three letters refused
+  const from = typeof flags.from === 'string' ? flags.from.toUpperCase() : null;
+  const to = typeof flags.to === 'string' ? flags.to.toUpperCase() : null;
+  if (from === null || to === null || !/^[A-Z]{3}$/.test(from) || !/^[A-Z]{3}$/.test(to)) {
     deps.io.err(
-      'smoke needs a route: --from <IATA> --to <IATA>, three capital letters each (for example --from LHR --to JFK)\n',
+      'smoke needs a route: --from <IATA> --to <IATA>, three letters each (for example --from LHR --to JFK)\n',
     );
     return EXIT.usage;
   }
@@ -75,7 +73,7 @@ export async function smokeCommand(flags: Flags, _p: string | null, deps: Deps):
   const creds = text === null ? null : credsFrom(readEnvText(text));
   if (creds === null) {
     deps.io.err('no app settings to call the app with: run pnpm gmt setup first\n');
-    return EXIT.refused;
+    return EXIT.badConfig;
   }
   const r = await deps.http({
     method: 'GET',
@@ -96,11 +94,16 @@ export async function smokeCommand(flags: Flags, _p: string | null, deps: Deps):
     deps.io.err(
       `cannot read the smoke's plan from the app on port ${creds.port}; is it running? (pnpm gmt status)\n`,
     );
-    return EXIT.refused;
+    return EXIT.badConfig;
+  }
+  if (plan.searchApi === null && plan.travelpayouts === null && plan.camoufox === null) {
+    // why: po-b1-012, U3: nothing could answer; say why before any question
+    deps.io.err(`${NO_SOURCE_TEXT}\nNothing was sent.\n`);
+    return EXIT.badConfig;
   }
   const lines = spendLines(plan);
   deps.io.out(
-    `The smoke test of ${from} to ${to} spends real calls, at most:\n${lines.map((l) => `  ${l}`).join('\n') || '  nothing: no provider is configured'}\n`,
+    `The smoke test of ${from} to ${to} spends real calls, at most:\n${lines.map((l) => `  ${l}`).join('\n')}\n`,
   );
   const credits = plan.searchApi === null ? 0 : plan.searchApi.calendar + plan.searchApi.itinerary;
   const left = plan.searchApi?.trialLeft ?? null;
@@ -108,17 +111,7 @@ export async function smokeCommand(flags: Flags, _p: string | null, deps: Deps):
     deps.io.err(
       `the smoke needs up to ${credits} SearchApi credits and the trial has ${left} left; nothing was sent\n`,
     );
-    return EXIT.refused;
-  }
-  if (flags.yes !== true) {
-    if (!deps.io.stdinIsTTY) {
-      deps.io.err('the smoke needs a typed yes on a terminal, or --yes; nothing was sent\n');
-      return EXIT.refused;
-    }
-    if (!(await deps.ask.typed('Send the smoke test now? It spends the calls above.', 'yes'))) {
-      deps.io.err('not sent\n');
-      return EXIT.refused;
-    }
+    return EXIT.spendRefused;
   }
   const dry = await postSmoke(deps, creds, {
     origin: from,
@@ -130,16 +123,51 @@ export async function smokeCommand(flags: Flags, _p: string | null, deps: Deps):
     deps.io.err(`the smoke's dry run failed: ${dry}; nothing was sent\n`);
     return EXIT.failed;
   }
-  const ledgered = Number(dry.lines.map((l) => LEDGERED.exec(l)?.[1]).find((v) => v !== undefined) ?? '0');
-  const run = await postSmoke(deps, creds, {
-    origin: from,
-    destination: to,
-    budget: Math.max(1, ledgered + credits),
-  });
+  if (dry.exitCode !== 0) {
+    // why: CodeRabbit …k7a: the app refused the route or the spend; nothing real is posted
+    deps.io.err(`${[dry.summary, ...dry.lines].join('\n')}\nNothing was sent.\n`);
+    return dry.exitCode;
+  }
+  deps.io.out(`${dry.lines.map((l) => `  ${l}`).join('\n')}\n`);
+  const ledgered = dry.searchApiCreditsLedgered ?? 0;
+  const total = ledgered + credits;
+  if (ledgered > 0)
+    deps.io.out(
+      `Tool runs have already used ${ledgered} SearchApi credits in this budget window; this smoke takes that to at most ${total}.\n`,
+    );
+  if (flags.yes === true) {
+    if (ledgered > 0 && flags['accept-total'] !== true) {
+      deps.io.err(
+        `earlier tool runs used ${ledgered} SearchApi credits in this window: confirm the total of ${total} on a terminal, or add --accept-total to --yes; nothing was sent\n`,
+      );
+      return EXIT.spendRefused;
+    }
+  } else {
+    if (!deps.io.stdinIsTTY) {
+      deps.io.err('the smoke needs a typed yes on a terminal, or --yes; nothing was sent\n');
+      return EXIT.badConfig;
+    }
+    const question =
+      ledgered > 0
+        ? `Send the smoke test now, taking tool runs to at most ${total} SearchApi credits?`
+        : 'Send the smoke test now? It spends the calls above.';
+    if (!(await deps.ask.typed(question, 'yes'))) {
+      deps.io.err('not sent\n');
+      return EXIT.badConfig;
+    }
+  }
+  const run = await postSmoke(deps, creds, { origin: from, destination: to, budget: Math.max(1, total) });
   if (typeof run === 'string') {
     deps.io.err(`the smoke failed: ${run}\n`);
     return EXIT.failed;
   }
+  if (run.exitCode === EXIT.spendRefused) {
+    // why: cb-b1-012: the app's advice names a --budget flag this command does not have
+    deps.io.err(
+      'another tool run spent SearchApi credits since the check; run pnpm gmt smoke again to see the new total. Nothing was sent.\n',
+    );
+    return EXIT.spendRefused;
+  }
   deps.io.out(`${[run.summary, ...run.lines].join('\n')}\n`);
-  return run.exitCode === 0 ? EXIT.ok : EXIT.failed;
+  return run.exitCode;
 }

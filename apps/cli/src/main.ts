@@ -13,8 +13,14 @@ import { systemFiles } from './exec/files.js';
 import { systemRunner } from './exec/runner.js';
 import { systemExecutor } from './exec/system.js';
 import { currentPlatform } from './platform/current.js';
+import { stableNodePath } from './services/specs.js';
 
 const env: Readonly<Record<string, string | undefined>> = { ...process.env };
+// why: U8, U9: children (git, pnpm) get these names only; services get PATH and HOME only (services/specs.ts)
+const CHILD_ENV =
+  /^(PATH|HOME|USER|LOGNAME|SHELL|TERM|LANG|LC_[A-Z]+|TMPDIR|TMP|TEMP|PNPM_HOME|COREPACK_HOME|COREPACK_ENABLE_[A-Z_]+|XDG_[A-Z_]+|SSH_AUTH_SOCK|GIT_SSH_COMMAND|NODE_EXTRA_CA_CERTS)$/;
+const childEnv: Record<string, string> = {};
+for (const [k, v] of Object.entries(env)) if (v !== undefined && CHILD_ENV.test(k)) childEnv[k] = v;
 // why: apps/cli/src/main.ts is three directories below the checkout's root, wherever pnpm was run from
 const checkout = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
@@ -85,10 +91,14 @@ async function main(): Promise<number> {
     now: () => new Date(),
     sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
     checkout,
-    execPath: process.execPath,
+    // why: U5: the services record a Node path that survives a package manager's upgrade (services/specs.ts)
+    execPath: stableNodePath(process.execPath, (env.PATH ?? '').split(':'), systemFiles),
     nodeVersion: process.versions.node,
     username: userInfo().username,
-    env,
+    home: env.HOME ?? '',
+    invocationCwd: env.INIT_CWD ?? process.cwd(),
+    secretEnv: (name) => env[name],
+    childEnv,
     machineTimeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     tmpDir: tmpdir(),
     portFree,

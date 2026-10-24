@@ -15,7 +15,7 @@ export function serviceSet(deps: Deps): ServiceEntry[] {
   const input = {
     execPath: deps.execPath,
     checkout: deps.checkout,
-    home: deps.env.HOME ?? '',
+    home: deps.home,
     paths: deps.platform.paths,
   };
   return [appServiceSpec(input), backupServiceSpec(input)].map((spec) => {

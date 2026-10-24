@@ -98,7 +98,7 @@ export function testWorld(
   const runner = memoryRunner(fs, opts.run);
   const executor = memoryExecutor(fs, { runner });
   const io = opts.io ?? testIo();
-  const env = { HOME: home, PATH: '/usr/bin:/bin', ...opts.env };
+  const env: Record<string, string> = { HOME: home, PATH: '/usr/bin:/bin', ...opts.env };
   const deps: Deps = {
     platform: currentPlatform({ platform: os, arch: 'arm64', uid: 501, env }),
     files: fs,
@@ -113,7 +113,10 @@ export function testWorld(
     execPath: '/opt/node/bin/node',
     nodeVersion: '22.18.0',
     username: 'op',
-    env,
+    home: env.HOME ?? '',
+    invocationCwd: '/work',
+    secretEnv: (name) => env[name],
+    childEnv: { PATH: env.PATH ?? '', HOME: env.HOME ?? '' },
     machineTimeZone: 'Europe/London',
     tmpDir: '/private/var/folders/x/T',
     portFree: async () => true,

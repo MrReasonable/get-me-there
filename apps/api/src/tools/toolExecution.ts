@@ -113,7 +113,7 @@ export function spendPosition(
   ports: Ports,
   worst: WorstCase,
   budget: number,
-): { lines: string[]; rerunNeedsConfirm: boolean; windowRefusals: string[] } {
+): { lines: string[]; rerunNeedsConfirm: boolean; windowRefusals: string[]; prior: number } {
   const prior = priorToolCredits(ports);
   const rerunNeedsConfirm = prior + worst.credits > budget;
   const windowRefusals: string[] = [];
@@ -150,7 +150,7 @@ export function spendPosition(
     );
   }
   lines.push(...windowRefusals.map((r) => `a run that calls the vendors would be refused: ${r}`));
-  return { lines, rerunNeedsConfirm, windowRefusals };
+  return { lines, rerunNeedsConfirm, windowRefusals, prior };
 }
 
 /** One line of a tool run's stored estimate: what one provider may call in one stage. */
@@ -298,7 +298,7 @@ export function budgetPosition(
   ports: Ports,
   a: RecordArgs,
   plan: readonly PlannedCall[],
-): { lines: string[]; rerunNeedsConfirm: boolean; windowRefusals: string[] } {
+): { lines: string[]; rerunNeedsConfirm: boolean; windowRefusals: string[]; prior: number } {
   const t = planTotals(plan);
   return spendPosition(ports, { credits: t.worstCaseCredits, freeCalls: t.worstCaseFreeCalls }, a.budget);
 }
