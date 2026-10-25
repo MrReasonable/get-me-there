@@ -2,7 +2,7 @@
   "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
   "testRunner": "command",
   "commandRunner": {
-    "command": "pnpm exec vitest run --coverage.enabled=false"
+    "command": "pnpm exec vitest run --coverage.enabled=false --bail=1"
   },
   "incremental": true,
   "incrementalFile": "reports/stryker-incremental.json",

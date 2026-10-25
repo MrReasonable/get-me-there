@@ -3,7 +3,7 @@
   "testRunner": "command",
   "commandRunner": {
     "$comment": "Left out of the per-mutant command: the two files that start real child processes, installSeam.test.ts (a fresh Node child per case, since camoufox-js reads its install directory once, at import), which ci.yml runs on every push, and install.smoke.test.ts (skipped unless CAMOUFOX_INSTALL_SMOKE=1), which the camoufox-install job runs; a bailed worker killed while it starts a child can leave the child stuck in the kernel (PR #11)",
-    "command": "pnpm exec vitest run --coverage.enabled=false --exclude test/installSeam.test.ts --exclude test/install.smoke.test.ts"
+    "command": "pnpm exec vitest run --coverage.enabled=false --bail=1 --exclude test/installSeam.test.ts --exclude test/install.smoke.test.ts"
   },
   "incremental": true,
   "incrementalFile": "reports/stryker-incremental.json",

@@ -380,7 +380,7 @@ describe('WP16a: the mutation workflow runs every package’s Stryker gate and t
     expect(prefix).toContain("format('{0}/test/**', matrix.dir)");
     expect(prefix).not.toContain('/src/**');
   });
-  it('every package’s Stryker config is incremental into reports/, at concurrency 2', () => {
+  it('every package’s Stryker config is incremental into reports/, at concurrency 2, and bails at the first failure', () => {
     for (const dir of [...MUTATED, 'apps/cli']) {
       const cfg = JSON.parse(readFileSync(join(REPO, dir, 'stryker.config.json'), 'utf8'));
       expect(cfg, dir).toMatchObject({
@@ -389,6 +389,9 @@ describe('WP16a: the mutation workflow runs every package’s Stryker gate and t
         concurrency: 2,
         thresholds: { high: 90, low: 80, break: 80 },
       });
+      // why: a mutant is killed by its first failing test, so the run stops there (measured cold: shards ran past an
+      // hour without it)
+      expect(cfg.commandRunner.command, dir).toMatch(/\s--bail=1(\s|$)/);
     }
   });
   // why: PR #11: a bailed worker killed while it starts a child can leave the child stuck in the kernel; no per-mutant
