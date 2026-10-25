@@ -1,7 +1,5 @@
-import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
-  createWriteStream,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -9,7 +7,6 @@ import {
   readFileSync,
   rmSync,
   statSync,
-  watch,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -107,34 +104,6 @@ describe.skipIf(process.platform === 'win32')(
           ['unzip', '-q'],
         ]);
       }
-    });
-    it('the temporary file is never wider than its target: it exists at its mode before any data arrives', async () => {
-      // why: Ian's rule: no polling. The source is a FIFO, so the copy waits for data with its temporary file in
-      // place; the directory's watch event says when that file appears, and only then is the data written.
-      const d = tmp();
-      const fifo = join(d, 'src.fifo');
-      expect(spawnSync('mkfifo', [fifo], { timeout: 10_000 }).status).toBe(0);
-      const created = new Promise<string>((resolve) => {
-        const w = watch(d, (_e, name) => {
-          if (name !== null && String(name).includes('.tmp-') && existsSync(join(d, String(name)))) {
-            w.close();
-            resolve(join(d, String(name)));
-          }
-        });
-      });
-      const copying = systemExecutor(systemRunner).run({
-        kind: 'copy',
-        from: fifo,
-        to: join(d, 'dst.db'),
-        mode: 0o600,
-      });
-      const writer = createWriteStream(fifo);
-      const tmpFile = await created;
-      expect(mode(tmpFile) & 0o077).toBe(0);
-      writer.end('the data');
-      await copying;
-      expect(readFileSync(join(d, 'dst.db'), 'utf8')).toBe('the data');
-      expect(mode(join(d, 'dst.db'))).toBe(0o600);
     });
   },
 );

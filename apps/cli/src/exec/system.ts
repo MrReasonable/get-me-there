@@ -25,19 +25,30 @@ export interface SystemExecutorOptions {
   fetch?: typeof fetch;
   /** How long one health request may take before it counts as no answer. */
   healthTryMs?: number;
+  /**
+   * Called with each temporary file once it exists and before any data is written to it (a test's event to check its
+   * mode at that moment, since no poll can catch it reliably); production passes none.
+   */
+  onTemporary?: (tmp: string) => Promise<void>;
 }
 
 const tempBeside = (path: string): string =>
   join(dirname(path), `.${basename(path)}.tmp-${process.pid}-${randomBytes(4).toString('hex')}`);
 
 /** Creates `tmp` exclusively at `mode`, lets `fill` write it, then sets the exact mode and renames it over `path`. */
-async function landed(path: string, mode: number, fill: (tmp: string) => Promise<void>): Promise<void> {
+async function landed(
+  path: string,
+  mode: number,
+  fill: (tmp: string) => Promise<void>,
+  onTemporary: (tmp: string) => Promise<void>,
+): Promise<void> {
   const tmp = tempBeside(path);
   let created = false;
   try {
     // why: U8 (sec-b1-003, ts-b1-015): the file exists at its final mode (or narrower, under the umask) from its first byte
     await (await open(tmp, 'wx', mode)).close();
     created = true;
+    await onTemporary(tmp);
     await fill(tmp);
     await chmod(tmp, mode);
     await rename(tmp, path);
@@ -91,6 +102,7 @@ export function systemExecutor(runner: Runner, opts: SystemExecutorOptions = {})
   const runTimeoutMs = opts.runTimeoutMs ?? 30 * 60_000;
   const fetchFn = opts.fetch ?? fetch;
   const healthTryMs = opts.healthTryMs ?? 5000;
+  const onTemporary = opts.onTemporary ?? (async () => {});
   const none = { stdout: '' };
   return {
     async run(a: Action): Promise<{ stdout: string }> {
@@ -101,23 +113,33 @@ export function systemExecutor(runner: Runner, opts: SystemExecutorOptions = {})
           await chmod(a.path, a.mode);
           return none;
         case 'writeFile':
-          await landed(a.path, a.mode, async (tmp) => {
-            const h = await open(tmp, 'w');
-            try {
-              await h.writeFile(a.contents);
-            } finally {
-              await h.close();
-            }
-          });
+          await landed(
+            a.path,
+            a.mode,
+            async (tmp) => {
+              const h = await open(tmp, 'w');
+              try {
+                await h.writeFile(a.contents);
+              } finally {
+                await h.close();
+              }
+            },
+            onTemporary,
+          );
           return none;
         case 'copy': {
           // why: a missing source fails here, before any temporary file exists; the destination is written through a
           // handle already open, so no stream is still opening when a failure's clean-up removes the temporary file
           await (await open(a.from, 'r')).close();
-          await landed(a.to, a.mode, async (tmp) => {
-            const dst = await open(tmp, 'w');
-            await pipeline(createReadStream(a.from), dst.createWriteStream());
-          });
+          await landed(
+            a.to,
+            a.mode,
+            async (tmp) => {
+              const dst = await open(tmp, 'w');
+              await pipeline(createReadStream(a.from), dst.createWriteStream());
+            },
+            onTemporary,
+          );
           return none;
         }
         case 'rename':

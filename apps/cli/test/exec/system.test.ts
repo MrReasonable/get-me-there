@@ -115,6 +115,31 @@ describe.skipIf(process.platform === 'win32')(
       expect([readFileSync(join(d, 'old.env'), 'utf8'), mode(join(d, 'old.env'))]).toEqual(['y', 0o600]);
     });
 
+    it('the temporary file is never wider than its target: it exists at its mode, empty, before any data (onTemporary)', async () => {
+      // why: Ian's rule: no polling. The executor calls onTemporary once the file exists and before it writes, so the
+      // mode is read at exactly that moment.
+      const d = tmp();
+      const seen: Array<[number, number]> = [];
+      const e = systemExecutor(noChild, {
+        onTemporary: async (t) => {
+          seen.push([mode(t), statSync(t).size]);
+        },
+      });
+      await e.run({
+        kind: 'writeFile',
+        path: join(d, 's.env'),
+        contents: 'secret',
+        mode: 0o600,
+        secret: true,
+      });
+      writeFileSync(join(d, 'src.db'), 'data', { mode: 0o644 });
+      await e.run({ kind: 'copy', from: join(d, 'src.db'), to: join(d, 'dst.db'), mode: 0o600 });
+      expect(seen).toEqual([
+        [0o600, 0],
+        [0o600, 0],
+      ]);
+      expect(mode(join(d, 'dst.db'))).toBe(0o600);
+    });
     it('a write whose temporary file was never made reports the write’s own error and leaves the old file', async () => {
       const d = tmp();
       writeFileSync(join(d, 'f'), 'old');
