@@ -17,11 +17,14 @@ import type { Runner } from '../../src/exec/runner.js';
 import { systemRunner } from '../../src/exec/runner.js';
 import { entryProblem, systemExecutor } from '../../src/exec/system.js';
 import { runAction } from '../../src/plan/action.js';
+import { guarded, killTracked } from '../support/children.js';
 
 const dirs: string[] = [];
 afterEach(() => {
   vi.useRealTimers();
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+  // why: PR #11: no real child outlives its test
+  expect(killTracked()).toEqual([]);
 });
 const tmp = () => {
   const d = mkdtempSync(join(tmpdir(), 'gmt-sysexec-'));
@@ -207,7 +210,9 @@ describe.skipIf(process.platform === 'win32')(
           [
             process.execPath,
             '-e',
-            'require("fs").writeFileSync("out", require("fs").readFileSync(0)); console.log(process.argv[1])',
+            guarded(
+              'require("fs").writeFileSync("out", require("fs").readFileSync(0)); console.log(process.argv[1])',
+            ),
             '$HOME;x',
           ],
           d,

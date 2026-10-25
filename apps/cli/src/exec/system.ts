@@ -110,11 +110,16 @@ export function systemExecutor(runner: Runner, opts: SystemExecutorOptions = {})
             }
           });
           return none;
-        case 'copy':
-          await landed(a.to, a.mode, (tmp) =>
-            pipeline(createReadStream(a.from), createWriteStream(tmp, { flags: 'w' })),
-          );
+        case 'copy': {
+          // why: a missing source fails here, before any temporary file exists; the destination is written through a
+          // handle already open, so no stream is still opening when a failure's clean-up removes the temporary file
+          await (await open(a.from, 'r')).close();
+          await landed(a.to, a.mode, async (tmp) => {
+            const dst = await open(tmp, 'w');
+            await pipeline(createReadStream(a.from), dst.createWriteStream());
+          });
           return none;
+        }
         case 'rename':
           await rename(a.from, a.to);
           return none;

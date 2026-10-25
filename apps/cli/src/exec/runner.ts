@@ -36,6 +36,8 @@ export function makeRunner(o: { maxBufferBytes?: number } = {}): Runner {
         {
           cwd: opts.cwd,
           timeout: opts.timeoutMs,
+          // why: PR #11: a child that ignores SIGTERM outlived its timeout (and its parent); SIGKILL cannot be ignored
+          killSignal: 'SIGKILL',
           maxBuffer,
           encoding: 'utf8',
           windowsHide: true,

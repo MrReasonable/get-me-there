@@ -14,6 +14,7 @@ import { parseMovedMarker } from '@gmt/core';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { runCli } from '../../src/cli.js';
 import { databasePath } from '../../src/services/specs.js';
+import { guarded, killTracked } from '../support/children.js';
 import { inspect, interrupting, realDeps, requireBuilt, sampleDb } from './support.js';
 
 // why: spec §9 item 9: the data-loss paths run for real in a temporary directory: a SQLite database with rows,
@@ -22,6 +23,8 @@ import { inspect, interrupting, realDeps, requireBuilt, sampleDb } from './suppo
 const homes: string[] = [];
 afterEach(() => {
   for (const h of homes.splice(0)) rmSync(h, { recursive: true, force: true });
+  // why: PR #11: no real child outlives its test
+  expect(killTracked()).toEqual([]);
 });
 beforeAll(() => {
   requireBuilt();
@@ -268,7 +271,7 @@ describe.skipIf(process.platform === 'win32')(
             [
               process.execPath,
               '-e',
-              'process.stdin.pipe(process.stderr); process.stdin.on("end", () => process.exit(3))',
+              guarded('process.stdin.pipe(process.stderr); process.stdin.on("end", () => process.exit(3))'),
             ],
             temp('gmt-cwd-'),
             { stdin: { text: sentinel, secret: true } },
