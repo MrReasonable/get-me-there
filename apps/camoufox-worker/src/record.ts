@@ -15,6 +15,9 @@ import { checkAccountCookies } from './accountCookies.js';
 import { type PageBudget, pageBudget } from './budget.js';
 import { classifyPageWithRule } from './classify.js';
 import { loadWorkerConfig, type WorkerConfig } from './config.js';
+import { type ConsentDriver, createConsentDriver, NoDisplay } from './consentDriver.js';
+import { type ObservedRequest, observe, type ResearchSession, researchRecord } from './consentResearch.js';
+import { watchConsentWindow } from './consentWatch.js';
 import { CooldownStore } from './cooldown.js';
 import {
   CheapestStepFailed,
@@ -27,12 +30,19 @@ import {
   type ProbePage,
   pollUntilSettled,
   probePage,
+  type RequestLike,
   runStep,
   type Settled,
   type StepOptions,
 } from './driver.js';
 import { type GuardState, installGuard, installProbeGuard, onAllowlist } from './guard.js';
-import { type LaunchOptions, launchContext, launchOptionsForMeta, prepareLaunch } from './launch.js';
+import {
+  type LaunchOptions,
+  launchContext,
+  launchHeadedContext,
+  launchOptionsForMeta,
+  prepareLaunch,
+} from './launch.js';
 import { acquireLock, LockHeld, sweepProbeProfiles } from './lock.js';
 import { debugLogging, stderrLog } from './log.js';
 import { MonthlyCounter } from './monthly.js';
@@ -63,7 +73,7 @@ import { type Entry, type EntryContext, EX_CONFIG, EX_SOFTWARE, EX_UNAVAILABLE }
 import { SELECTORS, SELECTORS_VERSION, type Selectors } from './selectors.js';
 import { loadSocs, type ReadBack, readBack, type SocsCapture, socsCookie } from './socs.js';
 import { bounded, type Deadline, DeadlineExceeded, realTimers, type Timers } from './timers.js';
-import { pageUrl, probeUrl } from './url.js';
+import { landingUrl, pageUrl, probeUrl } from './url.js';
 
 export { stderrLog } from './log.js';
 /**
@@ -96,6 +106,10 @@ export const DEFAULT_ROOT = fileURLToPath(new URL('../fixtures/recorded/', impor
 const FINALLY_MS = 5000;
 
 export interface RecordDeps {
+  /** process.platform: on Linux the research's headed window needs a display (run.ts passes none to the recorder). */
+  platform: string;
+  /** The research's headed window in a throwaway profile, its requests shown to `onRequest` (consentDriver.ts). */
+  consentDriver(profile: string, onRequest: (r: RequestLike) => void): ConsentDriver;
   clock: Clock;
   timers: Timers;
   log: Logger;
@@ -162,6 +176,8 @@ export async function record(ctx: EntryContext, cfg: WorkerConfig, deps: RecordD
     const day = deps.clock.now().slice(0, 10);
     if (args.kind === 'consent-probe')
       return await consentProbe(ctx, cfg, deps, { pacer, monthly, cooldown, day });
+    if (args.kind === 'consent-research')
+      return await consentResearch(ctx, cfg, deps, { pacer, monthly, cooldown, day });
     let capture: SocsCapture;
     try {
       capture = loadSocs(ctx.dataDir, deps.clock);
@@ -744,16 +760,120 @@ async function consentProbe(
   }
 }
 
+/** What the person is asked in each research session (pinned by a test). */
+export const RESEARCH_PROMPT = {
+  reject:
+    'Session 1 of 2: click **Reject all** in the window. Nothing else is needed; close the window when you’re done',
+  accept:
+    'Session 2 of 2: click **Accept all** in the window. Nothing else is needed; close the window when you’re done',
+} as const;
+
+/**
+ * Research 17.0c (WP17 Task 17.4): two headed sessions, each in a throwaway profile `<data>/probe-research-…` (deleted
+ * in a `finally`; the start-up sweep removes any a killed run left), under the consent capture's guard, the lock, the
+ * pacer, the monthly counter and the cool-downs, with one load of the landing page each. The person clicks "Reject
+ * all" in the first and "Accept all" in the second; the tool only observes. A blocking page cools down as on the server
+ * path; an account cookie, a window left for 10 minutes or a session without SOCS records nothing. Then one recording:
+ * the requests' methods, hosts, paths and field names, the one differing value, both SOCS cookies' fields, and the
+ * views seen (consentResearch.ts).
+ */
+async function consentResearch(
+  ctx: EntryContext,
+  cfg: WorkerConfig,
+  deps: RecordDeps,
+  s: { pacer: Pacer; monthly: MonthlyCounter; cooldown: CooldownStore; day: string },
+): Promise<number> {
+  const sessions: ResearchSession[] = [];
+  const views: Record<string, unknown> = {};
+  for (const choice of ['reject', 'accept'] as const) {
+    const profile = join(ctx.dataDir, `probe-research-${choice}-${Date.parse(deps.clock.now())}-${deps.pid}`);
+    mkdirSync(profile, { recursive: true, mode: 0o700 });
+    const requests: ObservedRequest[] = [];
+    try {
+      await claim(s.pacer, s.monthly, 0, deps, ctx);
+      const driver = deps.consentDriver(profile, (r) => {
+        const o = observe(r);
+        if (o !== null) requests.push(o);
+      });
+      try {
+        await driver.launchHeaded({ x11: null, wayland: null });
+        ctx.out(RESEARCH_PROMPT[choice]);
+        await driver.load(landingUrl(cfg.pointOfSale));
+        const w = await watchConsentWindow(driver, { timers: deps.timers, selectors: deps.selectors });
+        if (w.ended === 'blocked' && w.blocked !== null) {
+          const until = s.cooldown.start(w.blocked).until;
+          ctx.err(`session ${choice} stopped on ${w.blocked}; cooling down until ${until}; nothing recorded`);
+          return EX_UNAVAILABLE;
+        }
+        if (w.ended === 'account-cookie') {
+          ctx.err(`session ${choice}: an account cookie appeared in the throwaway profile; nothing recorded`);
+          return EX_UNAVAILABLE;
+        }
+        if (w.socs === null || !w.socsAfterConsent) {
+          ctx.err(
+            `session ${choice} ended (${w.ended}) with no SOCS set after the consent page; nothing recorded`,
+          );
+          return EX_UNAVAILABLE;
+        }
+        sessions.push({
+          choice,
+          requests: [...requests],
+          socs: { ...w.socs },
+          hosts: w.hosts,
+          ended: w.ended,
+        });
+        views[choice] = { first: w.firstView, firstFacts: w.firstFacts, afterConsent: w.afterFacts };
+      } finally {
+        await driver.close();
+        s.pacer.release();
+      }
+    } catch (e) {
+      if (e instanceof NoDisplay) {
+        ctx.err(e.message);
+        return EX_CONFIG;
+      }
+      throw e;
+    } finally {
+      rmSync(profile, { recursive: true, force: true });
+    }
+  }
+  const [reject, accept] = sessions;
+  if (reject === undefined || accept === undefined) throw new RecordingRefused('two sessions are needed');
+  const facts = { ...researchRecord(reject, accept), views };
+  const path = writeRecording(
+    deps.root,
+    'consent-research',
+    s.day,
+    { facts, meta: meta(deps, 'consent-research', 'missing', {}, { profile: 'throwaway', sessions: 2 }) },
+    [cfg.key.reveal()],
+  );
+  ctx.out(`recorded ${path}`);
+  return 0;
+}
+
 /** The real dependencies: the system clock, real timers, and the browser launched with the prepared options. */
 export function realRecordDeps(
   prepared: ReturnType<typeof prepareLaunch>,
   err: (line: string) => void,
   debug = false,
 ): RecordDeps {
+  const log = stderrLog(err, debug);
   return {
+    platform: process.platform,
+    consentDriver: (profile, onRequest) =>
+      createConsentDriver({
+        platform: process.platform,
+        options: prepared.options,
+        profileDir: profile,
+        launch: (options, p, display) => launchHeadedContext(options, p, display),
+        log,
+        clock: systemClock,
+        timers: realTimers,
+        onRequest,
+      }),
     clock: systemClock,
     timers: realTimers,
-    log: stderrLog(err, debug),
+    log,
     launch: (profile) => launchContext(prepared.options, profile),
     launchOptions: launchOptionsForMeta(prepared.options),
     binary: prepared.install.build,

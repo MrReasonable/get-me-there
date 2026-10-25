@@ -159,6 +159,7 @@ export async function run(argv: readonly string[], deps: RunDeps): Promise<numbe
     env = {
       ...entryEnv(deps.env, file, envFile),
       ...(installDir === null ? {} : { CAMOUFOX_INSTALL_DIR: installDir }),
+      ...(command === 'consent' ? displayOf(deps.env) : {}),
     };
   } catch (e) {
     deps.err(e instanceof Error ? e.message : String(e));
@@ -166,6 +167,26 @@ export async function run(argv: readonly string[], deps: RunDeps): Promise<numbe
   }
   const entry = await load();
   return entry({ env, dataDir, args, out: deps.out, err: deps.err });
+}
+
+/**
+ * Decision 74: the `consent` entry alone receives the display variables, in their two groups: DISPLAY with XAUTHORITY
+ * when DISPLAY is set, WAYLAND_DISPLAY with XDG_RUNTIME_DIR when WAYLAND_DISPLAY is set; never DBUS_SESSION_BUS_ADDRESS.
+ */
+export const DISPLAY_GROUPS = [
+  ['DISPLAY', 'XAUTHORITY'],
+  ['WAYLAND_DISPLAY', 'XDG_RUNTIME_DIR'],
+] as const;
+function displayOf(env: Env): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [main, extra] of DISPLAY_GROUPS) {
+    const m = env[main];
+    if (m === undefined || m === '') continue;
+    out[main] = m;
+    const x = env[extra];
+    if (x !== undefined && x !== '') out[extra] = x;
+  }
+  return out;
 }
 
 /** An inherited CAMOUFOX_INSTALL_DIR is refused: the worker sets camoufox-js's install directory itself. */

@@ -46,6 +46,7 @@ describe('createDriver.readFacts (ruling 5: locators, never printed ARIA)', () =
           signInHeading: false,
           challenge: false,
           noFlights: false,
+          landingHeading: false,
         },
         accountControl: false,
         cheapestTabs: [{ name: 'Cheapest from 451 British pounds', inTablist: true, selected: false }],
@@ -71,6 +72,7 @@ describe('createDriver.readFacts (ruling 5: locators, never printed ARIA)', () =
         n('heading', 'Sign in'),
         n('link', 'Google Account: Example Person'),
         text('No results returned for this search'),
+        n('heading', 'Flights'),
       ]),
     ]);
     const { page } = await driver.readFacts(d);
@@ -80,6 +82,7 @@ describe('createDriver.readFacts (ruling 5: locators, never printed ARIA)', () =
       signInHeading: true,
       challenge: true,
       noFlights: true,
+      landingHeading: true,
     });
     expect(page.accountControl).toBe(true);
     expect(page.cheapestTabs).toEqual([]);

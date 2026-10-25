@@ -19,7 +19,7 @@ export interface GuardState {
   refused: BlockedPage | null;
 }
 
-function urlOf(s: string): URL | null {
+export function urlOf(s: string): URL | null {
   try {
     return new URL(s);
   } catch {
@@ -28,7 +28,7 @@ function urlOf(s: string): URL | null {
 }
 
 /** True when `u` is https on `host` with the default port and no user or password (fix round 1, sec M2). */
-function plainHttps(u: URL, host: string): boolean {
+export function plainHttps(u: URL, host: string): boolean {
   return (
     u.protocol === 'https:' && u.hostname === host && u.port === '' && u.username === '' && u.password === ''
   );
@@ -121,7 +121,8 @@ interface Installed {
 // registered once per context and the state is reset for each page, so handlers never pile up.
 const installed = new WeakMap<ContextLike, Installed>();
 
-function install(
+/** Wires a route decision onto a context and its page (each guard below, and consentGuard.ts's, go through this). */
+export function installWith(
   context: ContextLike,
   page: PageLike,
   log: Logger,
@@ -171,7 +172,7 @@ function install(
 
 /** Wires the server path's guard onto a context and its page; resolves once the route is registered. */
 export function installGuard(context: ContextLike, page: PageLike, log: Logger, S: Selectors = SELECTORS) {
-  return install(context, page, log, (u, n, _m, main) => decideRoute(u, n, main, S));
+  return installWith(context, page, log, (u, n, _m, main) => decideRoute(u, n, main, S));
 }
 
 /** The consent probe's guard (record.ts only). */
@@ -181,5 +182,5 @@ export function installProbeGuard(
   log: Logger,
   S: Selectors = SELECTORS,
 ) {
-  return install(context, page, log, (u, n, m, main) => decideProbeRoute(u, n, m, main, S));
+  return installWith(context, page, log, (u, n, m, main) => decideProbeRoute(u, n, m, main, S));
 }

@@ -281,4 +281,50 @@ describe('run.ts (SEC-R2-006: one env file, its mode checked on the file loaded)
       else process.env.CAMOUFOX_INSTALL_DIR = before.set;
     }
   });
+  // why: decision 74: the consent entry alone receives the display variables, by group, never DBUS_SESSION_BUS_ADDRESS
+  it('the display variables reach the consent entry only, in their groups; main and every other entry never see them', async () => {
+    const dir = dataDir();
+    const inherited = {
+      CAMOUFOX_DATA_DIR: dir,
+      DISPLAY: ':0',
+      XAUTHORITY: '/home/op/.Xauthority',
+      WAYLAND_DISPLAY: 'wayland-0',
+      XDG_RUNTIME_DIR: '/run/user/1000',
+      DBUS_SESSION_BUS_ADDRESS: 'unix:path=/run/user/1000/bus',
+    };
+    const envs: Array<Record<string, string | undefined>> = [];
+    const entry: Entry = async (ctx) => {
+      envs.push({ ...ctx.env });
+      return 0;
+    };
+    const t = deps(inherited, {
+      entries: { consent: async () => entry, main: async () => entry, status: async () => entry },
+    });
+    for (const c of ['consent', 'main', 'status']) expect(await run([c], t.d)).toBe(0);
+    const shown = (e: Record<string, string | undefined> | undefined) =>
+      Object.keys(e ?? {})
+        .filter((k) => /DISPLAY|XAUTH|XDG_RUNTIME|DBUS/.test(k))
+        .sort();
+    expect(envs.map(shown)).toEqual([
+      ['DISPLAY', 'WAYLAND_DISPLAY', 'XAUTHORITY', 'XDG_RUNTIME_DIR'],
+      [],
+      [],
+    ]);
+    const x11 = deps(
+      { CAMOUFOX_DATA_DIR: dir, XAUTHORITY: '/a', XDG_RUNTIME_DIR: '/r', DISPLAY: ':1' },
+      {
+        entries: { consent: async () => entry },
+      },
+    );
+    await run(['consent'], x11.d);
+    expect(shown(envs.at(-1))).toEqual(['DISPLAY', 'XAUTHORITY']);
+    const wayland = deps(
+      { CAMOUFOX_DATA_DIR: dir, WAYLAND_DISPLAY: 'w', XDG_RUNTIME_DIR: '/r', XAUTHORITY: '/a' },
+      {
+        entries: { consent: async () => entry },
+      },
+    );
+    await run(['consent'], wayland.d);
+    expect(shown(envs.at(-1))).toEqual(['WAYLAND_DISPLAY', 'XDG_RUNTIME_DIR']);
+  });
 });

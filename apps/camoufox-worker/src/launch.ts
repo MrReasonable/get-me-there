@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 // why: fix round 1 (arch M11): the pin's one copy is core's, which the app's smoke reads too
 import { CAMOUFOX_BUILDS, CAMOUFOX_JS_VERSION } from '@gmt/core';
-import type { ContextLike } from './driver.js';
+import type { ContextLike, HeadedContextLike } from './driver.js';
 import { writeFontsConf } from './fonts.js';
 import { ensureInstallLayout, type InstallFacts, InstallRefused } from './install.js';
 import { installDirFor } from './paths.js';
@@ -100,6 +100,30 @@ export async function launchContext(
     window: [...options.window],
     firefox_user_prefs: { ...options.firefox_user_prefs },
     env: { ...options.env },
+    user_data_dir: userDataDir,
+  });
+}
+
+/**
+ * The consent command's and the consent research's visible window (spec §2 "Consent"; decision 74): the same options
+ * but headed, with the display variables `headedEnv` chose added to the browser's environment. Nothing else changes;
+ * the server path never calls this.
+ */
+export async function launchHeadedContext(
+  options: LaunchOptions,
+  userDataDir: string,
+  display: Readonly<Record<string, string>>,
+  readCamoufoxJs: () => string = installedCamoufoxJsVersion,
+): Promise<HeadedContextLike> {
+  assertPinned(readCamoufoxJs());
+  const { Camoufox } = await import('camoufox-js');
+  return Camoufox({
+    ...options,
+    headless: false,
+    exclude_addons: [...options.exclude_addons],
+    window: [...options.window],
+    firefox_user_prefs: { ...options.firefox_user_prefs },
+    env: { ...options.env, ...display },
     user_data_dir: userDataDir,
   });
 }

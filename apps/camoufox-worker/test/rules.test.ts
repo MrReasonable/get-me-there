@@ -245,6 +245,12 @@ describe('worker rules: source facts through the compiler API', () => {
       ).toBe(true);
     }
   });
+  // why: decision 74 (Task 17.4): the consent capture's guard and driver are reached only from the consent paths
+  it('the consent capture’s guard only from consentDriver.ts, and the consent driver only from record.ts', () => {
+    expect(importersOf(['installConsentCaptureGuard'])).toEqual(['consentDriver.ts']);
+    expect(importersOf(['createConsentDriver'])).toEqual(['record.ts']);
+    expect(importersOf(['launchHeadedContext'])).toEqual(['record.ts']);
+  });
   it('installProbeGuard and the probe page type are imported only by record.ts (never session.ts or server.ts)', () => {
     expect(importersOf(['installProbeGuard', 'ProbePage', 'probePage'])).toEqual(['record.ts']);
   });

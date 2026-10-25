@@ -12,6 +12,7 @@ import { join } from 'node:path';
 import type { BlockedPage } from '@gmt/core';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { loadWorkerConfig } from '../src/config.js';
+import { NoDisplay } from '../src/consentDriver.js';
 import { CooldownStore } from '../src/cooldown.js';
 import { createDriver, probePage } from '../src/driver.js';
 import { buildLaunchOptions, launchOptionsForMeta, prepareLaunch } from '../src/launch.js';
@@ -21,6 +22,7 @@ import { profileDir } from '../src/paths.js';
 import {
   assertClean,
   parseRecordArgs,
+  RESEARCH_PROMPT,
   type RecordDeps,
   realRecordDeps,
   record,
@@ -29,6 +31,14 @@ import {
 import { Refusal } from '../src/refusal.js';
 import { type EntryContext, EX_CONFIG, EX_UNAVAILABLE } from '../src/run.js';
 import { SELECTORS } from '../src/selectors.js';
+import {
+  consentView,
+  type FakeConsentDriver,
+  fakeConsentDriver,
+  request,
+  type Script,
+  SOCS,
+} from './support/fakeConsent.js';
 import { FakeContext } from './support/fakeContext.js';
 import {
   descendants,
@@ -63,7 +73,15 @@ const URL0 =
 const LANDED = 'https://www.google.com/travel/flights/search?tfs=x';
 const cfg = loadWorkerConfig({ CAMOUFOX_WORKER_KEY: KEY, HOME: '/Users/op' });
 
-function setup(o: { socs?: boolean; navigations?: FakeContext['navigations']; launchThrows?: boolean } = {}) {
+function setup(
+  o: {
+    socs?: boolean;
+    navigations?: FakeContext['navigations'];
+    launchThrows?: boolean;
+    consentDriver?: RecordDeps['consentDriver'];
+    platform?: string;
+  } = {},
+) {
   const dataDir = tmpDir();
   if (o.socs !== false) writeFileSync(join(dataDir, 'socs.json'), JSON.stringify(CAPTURE), { mode: 0o600 });
   const root = tmpDir();
@@ -73,6 +91,12 @@ function setup(o: { socs?: boolean; navigations?: FakeContext['navigations']; la
   const out: string[] = [];
   const err: string[] = [];
   const deps: RecordDeps = {
+    platform: o.platform ?? 'darwin',
+    consentDriver:
+      o.consentDriver ??
+      (() => {
+        throw new Error('this test opens no consent window');
+      }),
     clock: timers.clock,
     timers,
     log: memoryLog(),
@@ -181,6 +205,88 @@ describe('the recorder (brief Task 14.2 rules)', () => {
     writeFileSync(join(garbled.dataDir, 'monthly.json'), 'x', { mode: 0o600 });
     expect(await record(garbled.ctx(Q), cfg, garbled.deps)).toBe(EX_CONFIG);
     expect(readFileSync(join(garbled.dataDir, 'monthly.json'), 'utf8')).toBe('x');
+  });
+  // why: WP17 Task 17.4: research 17.0c's two headed sessions, observed only, one recording of names and the mark
+  describe('--consent-research', () => {
+    const body = (choice: string) =>
+      `gl=GB&hl=en-GB&x=SECRET-${choice}&set_eom=${choice === 'reject' ? 'true' : 'false'}`;
+    const research = (scripts: Script[]) => {
+      const drivers: FakeConsentDriver[] = [];
+      const t = setup({
+        consentDriver: (profile, onRequest) => {
+          t.profiles.push(profile);
+          const d = fakeConsentDriver(scripts[drivers.length] ?? {}, onRequest);
+          drivers.push(d);
+          return d;
+        },
+      });
+      return { t, drivers };
+    };
+    const session = (choice: string): Script => ({
+      socsAt: 1,
+      closeAt: 3,
+      socs: { ...SOCS, value: `socs-${choice}` },
+      requests: [
+        request({ url: 'https://consent.google.com/ml?continue=x' }),
+        request({ url: 'https://consent.google.com/save', method: 'POST', body: body(choice) }),
+      ],
+    });
+    it('records both sessions: names, both SOCS cookies, the one differing value; profiles gone, two pages counted', async () => {
+      const { t, drivers } = research([session('reject'), session('accept')]);
+      expect(await record(t.ctx(['--consent-research']), cfg, t.deps)).toBe(0);
+      expect(written(t.root)).toEqual([
+        'consent-research/2026-10-18/1.facts.json',
+        'consent-research/2026-10-18/1.meta.json',
+      ]);
+      const facts = readFileSync(join(t.root, 'consent-research/2026-10-18/1.facts.json'), 'utf8');
+      expect(facts).not.toContain('SECRET');
+      const rec = JSON.parse(facts);
+      expect(rec.differing).toEqual({ names: ['set_eom', 'x'] });
+      expect(rec.sessions.map((x: { socs: { value: string } }) => x.socs.value)).toEqual([
+        'socs-reject',
+        'socs-accept',
+      ]);
+      expect(t.out.filter((l) => l.startsWith('Session'))).toEqual([
+        RESEARCH_PROMPT.reject,
+        RESEARCH_PROMPT.accept,
+      ]);
+      expect(drivers.map((d) => d.loads)).toEqual([
+        ['https://www.google.com/travel/flights?hl=en-GB&gl=GB'],
+        ['https://www.google.com/travel/flights?hl=en-GB&gl=GB'],
+      ]);
+      expect(drivers.flatMap((d) => d.displays)).toEqual([
+        { x11: null, wayland: null },
+        { x11: null, wayland: null },
+      ]);
+      expect(drivers.map((d) => d.calls.at(-1))).toEqual(['close', 'close']);
+      expect(
+        t.profiles.every((p) => p.startsWith(join(t.dataDir, 'probe-research-')) && !existsSync(p)),
+      ).toBe(true);
+      expect(JSON.parse(readFileSync(join(t.dataDir, 'monthly.json'), 'utf8'))).toMatchObject({ pages: 2 });
+    });
+    it('a session that ends with no SOCS after the consent page records nothing, and its profile is gone', async () => {
+      const { t } = research([session('reject'), { closeAt: 2 }]);
+      expect(await record(t.ctx(['--consent-research']), cfg, t.deps)).toBe(EX_UNAVAILABLE);
+      expect(t.err.join()).toContain('session accept ended (closed) with no SOCS set after the consent page');
+      expect(written(t.root)).toEqual([]);
+      expect(t.profiles.some((p) => existsSync(p))).toBe(false);
+    });
+    it('a challenge as the first view cools down; an account cookie records nothing; no display refuses with 78', async () => {
+      const challenge = research([{ first: consentView(), accountAt: 0 }]);
+      expect(await record(challenge.t.ctx(['--consent-research']), cfg, challenge.t.deps)).toBe(
+        EX_UNAVAILABLE,
+      );
+      expect(challenge.t.err.join()).toContain('an account cookie appeared');
+      const blocked = research([
+        { first: { ...consentView(), text: { ...consentView().text, challenge: true } } },
+      ]);
+      expect(await record(blocked.t.ctx(['--consent-research']), cfg, blocked.t.deps)).toBe(EX_UNAVAILABLE);
+      expect(blocked.t.err.join()).toMatch(/stopped on captcha; cooling down until/);
+      const none = research([{ launchThrows: new NoDisplay() }]);
+      expect(await record(none.t.ctx(['--consent-research']), cfg, none.t.deps)).toBe(EX_CONFIG);
+      expect(none.t.err.join()).toContain('pnpm gmt consent export');
+      for (const r of [challenge, blocked, none]) expect(written(r.t.root)).toEqual([]);
+    });
   });
   it('rule 1: every Google-facing run requires a valid SOCS capture; without one nothing launches', async () => {
     const t = setup({ socs: false });

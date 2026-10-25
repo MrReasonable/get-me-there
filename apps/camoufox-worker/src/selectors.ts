@@ -68,6 +68,11 @@ export interface Selectors {
     accountControl: RegExp;
   };
   consent: { heading: RegExp };
+  /**
+   * The landing page the consent command opens (`/travel/flights?hl=…&gl=…`, no query; WP17 Task 17.4): a hypothesis
+   * until research 17.0c's recordings date it and set LANDING_VERIFIED; until then nothing reads as `landing`.
+   */
+  landing: { heading: RegExp };
   results: {
     /** The Cheapest tab, whose name carries the tab price once settled. */
     cheapestTab: RegExp;
@@ -134,6 +139,8 @@ export const SELECTORS: Selectors = {
     accountControl: /^Google Account: /,
   },
   consent: { heading: /^Before you continue/ },
+  // why: unverified (no landing recording yet): research 17.0c records the landing view, then dates this
+  landing: { heading: /^Flights$/ },
   results: {
     cheapestTab: /^Cheapest\b/,
     dateGridButton: 'Date grid',
