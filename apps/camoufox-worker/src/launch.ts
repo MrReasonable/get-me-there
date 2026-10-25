@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 // why: fix round 1 (arch M11): the pin's one copy is core's, which the app's smoke reads too
-import { CAMOUFOX_BUILDS, CAMOUFOX_JS_VERSION } from '@gmt/core';
+import { CAMOUFOX_BUILDS, CAMOUFOX_JS_VERSION, type OsArch } from '@gmt/core';
 import type { ContextLike, HeadedContextLike } from './driver.js';
 import { writeFontsConf } from './fonts.js';
 import { ensureInstallLayout, type InstallFacts, InstallRefused } from './install.js';
@@ -145,7 +145,7 @@ export function prepareLaunch(o: {
   tmp: string;
   /** Test seam (fix round 1, prov-int M2): reads the installed camoufox-js version. */
   readCamoufoxJs?: () => string;
-}): { options: LaunchOptions; install: InstallFacts; camoufoxJs: string } {
+}): { options: LaunchOptions; install: InstallFacts; camoufoxJs: string; osArch: OsArch } {
   assertSupportedPlatform(o.platform);
   const osArch = osArchOf(o.platform, o.arch);
   if (osArch === null) throw new Error(`no Camoufox build is pinned for ${o.platform}-${o.arch}`);
@@ -169,5 +169,6 @@ export function prepareLaunch(o: {
     }),
     install,
     camoufoxJs,
+    osArch,
   };
 }

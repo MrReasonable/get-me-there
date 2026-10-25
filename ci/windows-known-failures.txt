@@ -31,6 +31,8 @@ apps/api/test/tools/smoke.test.ts > runSmoke (spec §9 item 7) exits 0 with prov
 apps/api/test/tools/smokeArgs.test.ts > smokeFixtureTarget (plan decision 61) writes beside the database under the smoke signature
 apps/camoufox-worker/test/cooldown.test.ts > CooldownStore (spec §2: cool-down by cause, persisted, fail closed) a read error other than ENOENT is thrown, never read as "no cool-down"
 apps/camoufox-worker/test/cooldown.test.ts > CooldownStore (spec §2: cool-down by cause, persisted, fail closed) writes the record 0600
+apps/camoufox-worker/test/counts.test.ts > run.ts counts (W3) --json writes this window’s figures from stdin, 0600, under the lock, and prints them
+apps/camoufox-worker/test/counts.test.ts > writePrivateFile (ca-b1-015) replaces the file at 0600 through a temporary file of its own, leaving none behind
 apps/camoufox-worker/test/fonts.test.ts > Linux fonts (spec §2 "Method"; WP17 §0) every working-directory <dir> names the bundle’s fonts/macos by absolute path; nothing else changes
 apps/camoufox-worker/test/fonts.test.ts > Linux fonts (spec §2 "Method"; WP17 §0) writes <workerData>/fonts.conf 0600 from the bundle’s fontconfig/macos/fonts.conf, outside the bundle
 apps/camoufox-worker/test/gridPage.test.ts > grid pages: fix round 1 (the moves, the lookups and the settle) SOCS changed by a scroll: consent-unhandled, the profile wiped, the scroll counted
@@ -58,6 +60,7 @@ apps/camoufox-worker/test/gridPage.test.ts > grid pages: the flow a view that ne
 apps/camoufox-worker/test/gridPage.test.ts > grid pages: the flow drift on a view is unrecognised, with no further scrolls
 apps/camoufox-worker/test/gridPage.test.ts > grid pages: the flow opens the first block, moves seven days down a scroll at a time 5 s apart, reads the planned views and counts the scrolls
 apps/camoufox-worker/test/gridPage.test.ts > grid pages: the flow the allowance stops the scrolls: 2 of 4 moves, ended allowance
+apps/camoufox-worker/test/gridPage.test.ts > grid pages: the flow the whole reservation is on disk while the page reads; a failure part way settles to the scrolls counted
 apps/camoufox-worker/test/gridPage.test.ts > grid pages: the flow with S monthly scrolls left and a request of 4, the allowance is S: ended allowance, views kept, counts settled
 apps/camoufox-worker/test/gridPage.test.ts > grid pages: the flow with a scroll spacing of 0 the scrolls do not wait; with 5 s they do
 apps/camoufox-worker/test/gridPage.test.ts > grid pages: the flow with page room but no monthly scroll left, the page loads, reads its first block and makes no scroll
@@ -67,17 +70,26 @@ apps/camoufox-worker/test/install.test.ts > ensureInstallLayout on macOS (decisi
 apps/camoufox-worker/test/install.test.ts > ensureInstallLayout on macOS (decision 73; Task 17.2): verifies only a link that is a real directory, points nowhere, or out of browsers/official refuses
 apps/camoufox-worker/test/install.test.ts > ensureInstallLayout on macOS (decision 73; Task 17.2): verifies only a top-level version.json that disagrees with its bundle, or one camoufox-js would not accept, is a layout refusal
 apps/camoufox-worker/test/launch.test.ts > prepareLaunch (brief WP17 Task 17.2: the checks before camoufox-js is imported) Linux: writes <workerData>/fonts.conf naming the bundle’s fonts/macos absolutely and passes it as FONTCONFIG_FILE, os macos kept
+apps/camoufox-worker/test/launch.test.ts > prepareLaunch (brief WP17 Task 17.2: the checks before camoufox-js is imported) macOS: the install directory run.ts set, the layout and the camoufox-js pin, then the options; the launch env unchanged
+apps/camoufox-worker/test/launch.test.ts > prepareLaunch (brief WP17 Task 17.2: the checks before camoufox-js is imported) refuses an install directory other than this machine’s, before reading the layout
+apps/camoufox-worker/test/launch.test.ts > prepareLaunch (brief WP17 Task 17.2: the checks before camoufox-js is imported) refuses another camoufox-js version (0.11.6) naming the pin
 apps/camoufox-worker/test/main.test.ts > the worker’s start checks and shutdown (brief Task 14.5) SIGTERM mid-page answers that page, then exits 0
 apps/camoufox-worker/test/main.test.ts > the worker’s start checks and shutdown (brief Task 14.5) Windows exits 78 as flags-unset, writing the refusal file, launching nothing
+apps/camoufox-worker/test/main.test.ts > the worker’s start checks and shutdown (brief Task 14.5) a build-mismatch refusal exits 78 with its file, the layout’s own words and core’s fix, launching nothing
 apps/camoufox-worker/test/main.test.ts > the worker’s start checks and shutdown (brief Task 14.5) a cool-down store read error answers its page, then exits 70
+apps/camoufox-worker/test/main.test.ts > the worker’s start checks and shutdown (brief Task 14.5) a data directory with a pacer file and no counts refuses as counts-missing; unreadable counts as counts-unreadable
 apps/camoufox-worker/test/main.test.ts > the worker’s start checks and shutdown (brief Task 14.5) a held lock exits 78 as locked, its own lock left in place
 apps/camoufox-worker/test/main.test.ts > the worker’s start checks and shutdown (brief Task 14.5) a launch failure exits 78
+apps/camoufox-worker/test/main.test.ts > the worker’s start checks and shutdown (brief Task 14.5) a layout refusal exits 78 with its file, the layout’s own words and core’s fix, launching nothing
+apps/camoufox-worker/test/main.test.ts > the worker’s start checks and shutdown (brief Task 14.5) a not-shown record is refused as consent-not-shown: this worker serves pages with a captured rejection only
 apps/camoufox-worker/test/main.test.ts > the worker’s start checks and shutdown (brief Task 14.5) a port already in use fails the start and releases the lock
 apps/camoufox-worker/test/main.test.ts > the worker’s start checks and shutdown (brief Task 14.5) a standing signed-in refusal starts the server answering cooling-down only, without launching
 apps/camoufox-worker/test/main.test.ts > the worker’s start checks and shutdown (brief Task 14.5) a status poll whose relaunch hangs answers 500 within its bound, and the worker keeps serving
 apps/camoufox-worker/test/main.test.ts > the worker’s start checks and shutdown (brief Task 14.5) a successful start removes a refusal file left by an earlier one, and the file never holds text or secrets
 apps/camoufox-worker/test/main.test.ts > the worker’s start checks and shutdown (brief Task 14.5) an account cookie in the profile exits 78 as signed-in and closes the browser
 apps/camoufox-worker/test/main.test.ts > the worker’s start checks and shutdown (brief Task 14.5) an entry whose flags are unset for its build (linux-x64) exits 78 as flags-unset before any launch
+apps/camoufox-worker/test/main.test.ts > the worker’s start checks and shutdown (brief Task 14.5) another error from the preparation (the camoufox-js pin) exits 78 naming the check, leaving a config refusal
+apps/camoufox-worker/test/main.test.ts > the worker’s start checks and shutdown (brief Task 14.5) bad settings exit 78, leaving a config refusal
 apps/camoufox-worker/test/main.test.ts > the worker’s start checks and shutdown (brief Task 14.5) in grid mode the status reports the worker’s scroll cap and spacing, for the app’s preflight (CA 9)
 apps/camoufox-worker/test/main.test.ts > the worker’s start checks and shutdown (brief Task 14.5) no consent record, an unreadable one, or a voided one exits 78 with its reason; an expired one too
 apps/camoufox-worker/test/main.test.ts > the worker’s start checks and shutdown (brief Task 14.5) serves a page and a live status; SIGTERM stops it with exit 0 and releases the lock
@@ -88,9 +100,13 @@ apps/camoufox-worker/test/main.test.ts > the worker’s start checks and shutdow
 apps/camoufox-worker/test/monthly.test.ts > the counts and instances files’ shapes (fail closed) a 0400 file is read (no wider than 0600), and a new install’s first window is this one
 apps/camoufox-worker/test/monthly.test.ts > the counts and instances files’ shapes (fail closed) an instances file of another shape starts the window’s list afresh; the file is 0600
 apps/camoufox-worker/test/monthly.test.ts > the counts file (fail closed) a new install (neither file) starts the window at zero, and the first page writes it 0600
+apps/camoufox-worker/test/monthly.test.ts > the counts file (fail closed) a refused page leaves the counts unchanged
 apps/camoufox-worker/test/monthly.test.ts > the counts file (fail closed) a restart reads the same counts back
+apps/camoufox-worker/test/monthly.test.ts > the counts file (fail closed) a rewrite replaces the file with this window’s figures, 0600, whatever it held
+apps/camoufox-worker/test/monthly.test.ts > the counts file (fail closed) a stale temporary file at 0644 beside the counts never widens them
 apps/camoufox-worker/test/monthly.test.ts > the counts file (fail closed) counts of an earlier window report zero for this one, and the next page starts it afresh
 apps/camoufox-worker/test/monthly.test.ts > the counts file (fail closed) settles to the scrolls made, only over its own window
+apps/camoufox-worker/test/monthly.test.ts > the counts file (fail closed) the status reports carried counts with their window, and a new install’s zero counts as readable
 apps/camoufox-worker/test/monthly.test.ts > the counts file (fail closed) two callers at once with one page left: exactly one admitted
 apps/camoufox-worker/test/paths.test.ts > paths (brief §8; decision 73) camoufox-js’s install directory: the root on macOS, the pinned bundle on Linux
 apps/camoufox-worker/test/paths.test.ts > paths (brief §8; decision 73) places every file under the one data directory
@@ -127,12 +143,19 @@ apps/camoufox-worker/test/record.test.ts > record --grid a view that has not cha
 apps/camoufox-worker/test/record.test.ts > record --grid clicks Price graph, Dates and each scroll 5 s apart, and records every view, move delta and timing
 apps/camoufox-worker/test/record.test.ts > record --grid logs each step as "grid step"
 apps/camoufox-worker/test/record.test.ts > record --grid measures a one-day step from rotated lines
+apps/camoufox-worker/test/record.test.ts > stderrLog debug lines the real recorder dependencies take the switch
 apps/camoufox-worker/test/record.test.ts > the recorder (brief Task 14.2 rules) --cheapest closes the tab’s pop-up, clicks the tab, settles again and records what it clicked
 apps/camoufox-worker/test/record.test.ts > the recorder (brief Task 14.2 rules) --cheapest whose tab cannot be clicked refuses plainly, with no cool-down
 apps/camoufox-worker/test/record.test.ts > the recorder (brief Task 14.2 rules) --cheapest: a Cheapest view that never settles ends at the cap, nothing written, no cool-down
 apps/camoufox-worker/test/record.test.ts > the recorder (brief Task 14.2 rules) --cheapest: a first poll that times out and a second that settles produces a recording
 apps/camoufox-worker/test/record.test.ts > the recorder (brief Task 14.2 rules) --cheapest: polls that keep timing out end plainly at the budget, no cool-down, nothing recorded
 apps/camoufox-worker/test/record.test.ts > the recorder (brief Task 14.2 rules) --cheapest: the Cheapest view settles without the results line, on its own budget from the click
+apps/camoufox-worker/test/record.test.ts > the recorder (brief Task 14.2 rules) --consent-research Linux: the display run.ts passed reaches the window
+apps/camoufox-worker/test/record.test.ts > the recorder (brief Task 14.2 rules) --consent-research a timed-out window records nothing, and its profile is gone
+apps/camoufox-worker/test/record.test.ts > the recorder (brief Task 14.2 rules) --consent-research no SOCS after the choice records nothing, and its profile is gone
+apps/camoufox-worker/test/record.test.ts > the recorder (brief Task 14.2 rules) --consent-research no choice submitted records nothing, and its profile is gone
+apps/camoufox-worker/test/record.test.ts > the recorder (brief Task 14.2 rules) --consent-research records both sessions: names, both SOCS cookies, the differing names, the machine; profiles gone, two pages counted
+apps/camoufox-worker/test/record.test.ts > the recorder (brief Task 14.2 rules) --consent-research two submissions records nothing, and its profile is gone
 apps/camoufox-worker/test/record.test.ts > the recorder (brief Task 14.2 rules) a navigation the guard refuses is that kind
 apps/camoufox-worker/test/record.test.ts > the recorder (brief Task 14.2 rules) a page that never settles is refused at the page deadline
 apps/camoufox-worker/test/record.test.ts > the recorder (brief Task 14.2 rules) an account cookie in the profile stops before any page and cools down
@@ -148,6 +171,7 @@ apps/camoufox-worker/test/record.test.ts > the recorder (brief Task 14.2 rules) 
 apps/camoufox-worker/test/record.test.ts > the recorder (brief Task 14.2 rules) rule 4: --no-flights without a recognisable line writes no-flights/unrecorded.meta.json
 apps/camoufox-worker/test/record.test.ts > the recorder (brief Task 14.2 rules) rule 5: --cheapest clicks the Cheapest tab, --view-more clicks View more, a plain run clicks nothing
 apps/camoufox-worker/test/record.test.ts > the recorder (brief Task 14.2 rules) rule 6: the spacing applies across recorder runs (the shared persisted pacer)
+apps/camoufox-worker/test/record.test.ts > the recorder (brief Task 14.2 rules) the caps are checked again after the spacing wait: a page loaded in the next window counts there
 apps/camoufox-worker/test/record.test.ts > the recorder under the server’s stop rules (fix round 1) --cheapest: a SOCS the click changes is read back after the click: consent-unhandled, wiped, nothing recorded as cheapest
 apps/camoufox-worker/test/record.test.ts > the recorder under the server’s stop rules (fix round 1) --cheapest: a captcha after the click is that stop: 48 h, nothing written
 apps/camoufox-worker/test/record.test.ts > the recorder under the server’s stop rules (fix round 1) --no-flights: a page that never settles writes unrecorded.meta.json from what appeared and exits 0
@@ -180,6 +204,7 @@ apps/camoufox-worker/test/recordings.test.ts > recordingsMain backs up into ~/.l
 apps/camoufox-worker/test/recordings.test.ts > restoreRecordings copies a backup into an empty tree (only .gitkeep files), directories 0700 and files 0600
 apps/camoufox-worker/test/recordings.test.ts > restoreRecordings refuses a tree that already holds a recording, and a backup that does not exist
 apps/camoufox-worker/test/rules.test.ts > worker rules: a full page session sets only SOCS and clicks nothing on a consent page every addCookies call is exactly [socsCookie(capture)]; the consent page is never clicked
+apps/camoufox-worker/test/run.test.ts > a refusal before any entry runs explains itself (W1, dev-b1-003) main leaves a config refusal in its data directory; check prints one; other commands write nothing
 apps/camoufox-worker/test/run.test.ts > run.ts (SEC-R2-006: one env file, its mode checked on the file loaded) DEBUG or PWDEBUG in the environment refuses (playwright-core would log protocol traffic, the SOCS value)
 apps/camoufox-worker/test/run.test.ts > run.ts (SEC-R2-006: one env file, its mode checked on the file loaded) a 0644 file refuses with exit 78
 apps/camoufox-worker/test/run.test.ts > run.ts (SEC-R2-006: one env file, its mode checked on the file loaded) a directory owned by another user refuses
@@ -226,6 +251,7 @@ apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14
 apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) an accounts.google.com hop → sign-in
 apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) an active cool-down → cooling-down, nothing opened
 apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) an error before goto discards the context (the next page relaunches)
+apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) an unreadable or missing counts file refuses every page as counts-unreadable, nothing loads and the file is untouched
 apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) an unrecognised page with SOCS changed keeps unrecognised for the longer, 48 h period
 apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) another currency → unrecognised; only another cell’s option → none-for-cell
 apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) at expiry the page is closed by the deadline (before the finally runs)
@@ -290,6 +316,8 @@ apps/camoufox-worker/test/socs.test.ts > the consent record (socs.json) reads a 
 apps/camoufox-worker/test/socs.test.ts > the consent record (socs.json) the status names the kind, the expiry and what bounds it (null for voided)
 apps/camoufox-worker/test/socs.test.ts > writeCapture (capture-socs) accepts an existing 0700 directory
 apps/camoufox-worker/test/socs.test.ts > writeCapture (capture-socs) writes a 0600 file in a 0700 directory with the time from the clock and the domain and path fixed
+apps/camoufox-worker/test/startRefusal.test.ts > run.ts check --json (decision 75): the start’s result, nothing started names the lock, the flags, the layout and the build in core’s order
+apps/camoufox-worker/test/startRefusal.test.ts > run.ts check --json (decision 75): the start’s result, nothing started prints the refusal in startRefusalSchema’s terms, exits 78, and writes no file
 apps/camoufox-worker/test/startRefusal.test.ts > run.ts check --json (decision 75): the start’s result, nothing started prints { "ok": true } when every check passes, writing nothing
 apps/camoufox-worker/test/startRefusal.test.ts > the refusal file (decision 75) is { reason, at } only, 0600, for every reason; cleared by a start
 apps/web/test/copy/sourceGuard.test.ts > source guards (spec §11 copy, spec §9 item 6 prices) every allowlisted file exists, so a mistyped or removed entry cannot silently exempt a future file

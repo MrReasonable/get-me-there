@@ -79,6 +79,7 @@ function setup(
       options: buildLaunchOptions({ ffMajor: 152, home: '/h', path: '/p', tmp: '/t' }),
       install: { installDir: '/i', bundleDir: '/b', build: '152.0.4-beta.28', ffMajor: 152 },
       camoufoxJs: '0.11.5',
+      osArch: 'darwin-arm64',
     }),
     launch: async () => {
       const c = new FakeContext();

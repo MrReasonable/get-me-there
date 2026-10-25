@@ -1857,7 +1857,7 @@ describe('parseRecordArgs', () => {
 });
 
 describe('the real recorder dependencies (no launch)', () => {
-  it('use the system clock, two-second polls, the module selectors and stderr JSON lines', () => {
+  it('use the system clock, two-second polls, the prepared entry’s selectors and stderr JSON lines', () => {
     const f = fakeInstall('darwin-arm64');
     const prepared = prepareLaunch({
       platform: 'darwin',
@@ -1875,6 +1875,8 @@ describe('the real recorder dependencies (no launch)', () => {
       selectors: SELECTORS,
       binary: '152.0.4-beta.28',
       pid: process.pid,
+      osArch: 'darwin-arm64',
+      bundleSha256: '8b7680a61818245cf4eb0150edab811d4ed937b6723514569e74c3e7df9685bd',
     });
     expect('env' in d.launchOptions).toBe(false);
     d.log.debug({ a: 1 });
