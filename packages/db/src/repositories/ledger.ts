@@ -88,7 +88,8 @@ export class LedgerRepo {
    * Spec §10 `GET /status` (brief WP18 §6): the provider's newest completed upstream call. `errorKind` is the adapters'
    * own class (migration 0008), and a call is a success only when it ended `ok` with no class recorded: a 2xx whose
    * body http-kit or an adapter rejected carries `parse` and is not one (V4). Cache hits, pending rows and swept
-   * `unknown` rows are not completed calls. Null when the provider has made none. The ledger's text is never read.
+   * `unknown` rows are not completed calls. Null when the provider has made none. The ledger's text is never read. Ordered
+   * by start (the existing provider index's order), so the lookup stops at the first match instead of sorting a history.
    */
   lastCompleted(providerId: ProviderId): {
     at: IsoDateTime;
@@ -101,7 +102,7 @@ export class LedgerRepo {
         [string],
         { at: string; outcome: string; httpStatus: number | null; errorKind: string | null }
       >(
-        `SELECT COALESCE(finished_at, started_at) AS at, outcome, http_status AS httpStatus, error_kind AS errorKind FROM provider_requests WHERE provider_id = ? AND outcome IN ('ok', 'error') ORDER BY COALESCE(finished_at, started_at) DESC, id DESC LIMIT 1`,
+        `SELECT COALESCE(finished_at, started_at) AS at, outcome, http_status AS httpStatus, error_kind AS errorKind FROM provider_requests WHERE provider_id = ? AND outcome IN ('ok', 'error') ORDER BY started_at DESC, id DESC LIMIT 1`,
       )
       .get(providerId);
     if (r === undefined) return null;

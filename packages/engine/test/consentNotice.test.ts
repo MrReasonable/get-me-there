@@ -103,6 +103,18 @@ describe('the subject comes from the cause, not the state (V2)', () => {
   });
 });
 
+describe('every notifier gets the notice (CodeRabbit)', () => {
+  it('two notifiers that both accept each receive the same notice, and the day is claimed once', async () => {
+    const a: Sent[] = [];
+    const b: Sent[] = [];
+    const { h, ctx } = setup({ check: check('warn'), notifiers: [stubNotifier(a), stubNotifier(b)] });
+    expect(await runConsentNotice(ctx, { force: true })).toBe(true);
+    expect(a).toHaveLength(1);
+    expect(b).toEqual(a);
+    expect(count(h, 'operator_notice_keys')).toBe(1);
+  });
+});
+
 describe('once a London day, without losing it (V2)', () => {
   it('a second pass the same day sends nothing and the next day sends again', async () => {
     const { h, sent, ctx } = setup({ check: check('warn') });

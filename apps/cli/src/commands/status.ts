@@ -198,7 +198,9 @@ export async function statusCommand(flags: Flags, _p: string | null, deps: Deps)
         deps.executor,
       );
       if (r.failed === null)
-        deps.io.out('the refused worker agent was booted out so launchd does not restart it\n');
+        (rf.json ? deps.io.err : deps.io.out)(
+          'the refused worker agent was booted out so launchd does not restart it\n',
+        );
       else
         checks.push({
           name: 'worker agent',

@@ -119,7 +119,7 @@ describe('gmt status: the app report beside the local facts (brief Task 18.5)', 
     expect(m.io.stdout).toContain('Status: nothing to check');
   });
 
-  it('--only filters the report to one area and leaves the local facts out; a fail elsewhere does not count', async () => {
+  it('--only filters what is printed to one area and leaves the local facts out; a fail anywhere still fails the command', async () => {
     const { m } = await installed([
       check({
         id: 'schedule',
@@ -129,13 +129,33 @@ describe('gmt status: the app report beside the local facts (brief Task 18.5)', 
       }),
       check({ id: 'email', area: 'email', state: 'ok', summary: 'configured' }),
     ]);
-    expect(await runCli(['status', '--only', 'email'], m.deps)).toBe(0);
+    // the exit code never depends on what the filter printed: the schedule fails, so --only email exits 1 as well
+    expect(await runCli(['status', '--only', 'email'], m.deps)).toBe(1);
     expect(m.io.stdout).toMatch(/email +ok +configured/);
     expect(m.io.stdout).not.toContain('schedule blocked');
     expect(m.io.stdout).not.toMatch(/service app/);
     expect(await runCli(['status', '--only', 'schedule'], m.deps)).toBe(1);
     expect(await runCli(['status', '--only', 'nowhere'], m.deps)).toBe(64);
     expect(m.io.stderr).toContain('unknown area for --only: nowhere');
+  });
+
+  it('a failing local check fails --json and --only too, though the report passes (CodeRabbit)', async () => {
+    const { m } = await installed([check()]);
+    m.running.clear();
+    expect(await runCli(['status', '--json'], m.deps)).toBe(1);
+    expect(await runCli(['status', '--only', 'worker'], m.deps)).toBe(1);
+  });
+
+  it('an app.env that cannot be read is said so, not "run setup" (CodeRabbit)', async () => {
+    const { m } = await installed([check()]);
+    const original = m.deps.files.read.bind(m.deps.files);
+    m.deps.files.read = (path) => {
+      if (path.endsWith('app.env')) throw new Error('EACCES');
+      return original(path);
+    };
+    expect(await runCli(['status', '--only', 'worker'], m.deps)).toBe(1);
+    expect(m.io.stderr).toContain('app.env could not be read');
+    expect(m.io.stderr).not.toContain('run pnpm gmt setup');
   });
 
   it('--json prints the response as JSON and nothing else on stdout', async () => {
@@ -211,6 +231,39 @@ describe('gmt status: the app report beside the local facts (brief Task 18.5)', 
     const { m, http } = await installed([check()]);
     expect(await runCli(['status', '--only', 'nowhere'], m.deps)).toBe(64);
     expect(http.requests).toEqual([]);
+  });
+
+  it('a worker agent booted out during status is told on stderr under --json, so stdout stays JSON (CodeRabbit)', async () => {
+    let loaded = true;
+    const http = stubHttp({
+      ...okRoutes,
+      'GET /api/status': () => ({ status: 200, body: report([check()]) }),
+    });
+    const m = machine({
+      http,
+      extra: (a) => {
+        if (a[0] !== 'launchctl' || !String(a[2]).endsWith('camoufox-worker')) return undefined;
+        if (a[1] === 'print') return loaded ? { code: 0, stdout: '\tstate = not running\n' } : { code: 113 };
+        if (a[1] === 'bootout') {
+          loaded = false;
+          return { code: 0 };
+        }
+        return undefined;
+      },
+    });
+    m.fs.file('/work/a.json', '{}', 0o600);
+    expect(await runCli(['setup', '--non-interactive', '--answers', '/work/a.json'], m.deps)).toBe(0);
+    m.fs.file(
+      '/Users/op/.local/state/get-me-there/camoufox/start-refusal.json',
+      JSON.stringify({ reason: 'consent-expired', at: '2026-10-24T08:00:00.000Z' }),
+    );
+    m.fs.file('/Users/op/Library/LaunchAgents/local.get-me-there.camoufox-worker.plist', 'worker plist');
+    m.io.stdout = '';
+    m.io.stderr = '';
+    await runCli(['status', '--json'], m.deps);
+    const parsed: unknown = JSON.parse(m.io.stdout);
+    expect(parsed).toMatchObject({ mode: 'native' });
+    expect(m.io.stderr).toContain('the refused worker agent was booted out');
   });
 
   it('with no app.env there is nothing to ask', async () => {

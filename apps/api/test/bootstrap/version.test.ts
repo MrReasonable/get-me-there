@@ -31,7 +31,8 @@ describe('readVersion', () => {
   });
 });
 
-describe('scripts/write-version.mjs (V0, ts-b1-011)', () => {
+// why: each case starts a Node process, and one a git process; a spawn is bounded at 30 s, so the case is given 60 s
+describe('scripts/write-version.mjs (V0, ts-b1-011)', { timeout: 60_000 }, () => {
   /** Runs the script in `cwd` (a directory that is not a checkout unless the test makes it one), with only `env`. */
   function run(env: Record<string, string>, cwd: string, out: string) {
     return spawnSync(process.execPath, [SCRIPT, out], { encoding: 'utf8', timeout: 30_000, cwd, env });
@@ -72,7 +73,7 @@ describe('scripts/write-version.mjs (V0, ts-b1-011)', () => {
   });
 
   it.skipIf(spawnSync('git', ['--version']).status !== 0)(
-    'reads the checkout’s short SHA from a repository the test makes itself',
+    'reads the checkout’s short SHA from a repository the test makes itself (needs the git program, not a checkout)',
     () => {
       const repo = tempDir('gmt-repo-');
       const git = (...args: string[]) =>

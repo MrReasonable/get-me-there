@@ -69,7 +69,7 @@ function FixCommand({ command }: { command: string }) {
           value={command}
           size={Math.max(20, command.length)}
           aria-label={COPY.statusView.selectedInstead(command)}
-          className="min-h-11 rounded border border-slate-500 px-2 font-mono"
+          className="min-h-11 max-w-full rounded border border-slate-500 px-2 font-mono"
         />
       ) : null}
     </span>

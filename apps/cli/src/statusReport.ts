@@ -20,14 +20,14 @@ export type ReportRead = { kind: 'ok'; report: StatusReport } | { kind: 'down'; 
 export const STATUS_AREAS: readonly string[] = apiContract.statusAreaSchema.options;
 
 /** The port and, when app.env has them, the credentials; null when there is no app.env to read. */
-function access(deps: Deps): { port: number; creds: AppCreds | null } | null {
+function access(deps: Deps): { port: number; creds: AppCreds | null } | 'missing' | 'unreadable' {
   let text: string | null;
   try {
     text = deps.files.read(appEnvPath(deps.platform.paths));
   } catch {
-    return null;
+    return 'unreadable';
   }
-  if (text === null) return null;
+  if (text === null) return 'missing';
   const record = readEnvText(text);
   const creds = credsFrom(record);
   const port =
@@ -38,7 +38,12 @@ function access(deps: Deps): { port: number; creds: AppCreds | null } | null {
 /** `GET /api/status`: the report, or why there is none (no settings file, no answer, an answer that is not the report). */
 export async function readReport(deps: Deps): Promise<ReportRead> {
   const a = access(deps);
-  if (a === null) return { kind: 'down', reason: 'there is no app.env yet: run pnpm gmt setup' };
+  if (a === 'missing') return { kind: 'down', reason: 'there is no app.env yet: run pnpm gmt setup' };
+  if (a === 'unreadable')
+    return {
+      kind: 'down',
+      reason: 'app.env could not be read: check that it is yours and readable (chmod 600)',
+    };
   const r = await deps.http({
     method: 'GET',
     url: appUrl(a.port, '/api/status'),
@@ -107,7 +112,8 @@ export async function finishStatus(
   const read = await readReport(deps);
   const reportOnly = rf.only !== null || rf.json;
   if (read.kind === 'down') {
-    const step = nextStep(local, access(deps)?.port ?? null);
+    const found = access(deps);
+    const step = nextStep(local, typeof found === 'string' ? null : found.port);
     if (rf.json)
       deps.io.out(
         `${JSON.stringify({ appAnswering: false, reason: read.reason, nextStep: step, checks: local })}\n`,
@@ -127,7 +133,8 @@ export async function finishStatus(
       `${apiContract.barSummary(checks).text} (app ${read.report.version}, ${read.report.mode} mode)\n`,
     );
   }
-  const failing =
-    checks.some((c) => c.state === 'fail') || (!reportOnly && local.some((c) => c.level === 'fail'));
+  // why: CodeRabbit on PR #14 — the exit code never depends on what was printed: a failing check anywhere, local or in
+  // any area of the report, fails the command, whatever `--only` or `--json` filtered out of the output
+  const failing = read.report.checks.some((c) => c.state === 'fail') || local.some((c) => c.level === 'fail');
   return failing ? EXIT.failed : EXIT.ok;
 }

@@ -734,8 +734,9 @@ failing check.
 - **Browser worker and consent.** Whether the worker answers, its monthly pages and scrolls against the caps, any
   cool-down, a setting that differs between the app and the worker (named, never its value), and the app's browser
   window: "browser pages: only inside a run's window" or "also when a run resumes". The consent card gives the
-  record's expiry and warns for its last 30 days. While it is not ok and the browser provider is on, the app emails
-  you once a day (a plain notice from the app, with no separate reminder service).
+  record's expiry and warns for its last 30 days. While it warns or fails (not while it is off or ok) and the browser
+  provider is on, the app emails you at most once a London day (a plain notice from the app, with no separate reminder
+  service). A check that cannot be made, because the worker is down, sends nothing: the worker card says that.
 - **Email.** Configured or not, and the newest send of any kind since the app started (an alert, a notice or a test);
   the card fails when that send failed. **Send test** (or the offer at the end of a full `pnpm gmt setup` and of
   `pnpm gmt setup --reconfigure email`) sends one fixed message; tests have their own limit of one a minute and never
