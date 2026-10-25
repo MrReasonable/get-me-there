@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, w
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { acquire, breakStale, lockPathFor, readLock, realOps, release } from './ensure-build-lib.mjs';
+import { acquire, breakStale, lockPathFor, readLock, realOps, release, stopChildren } from './ensure-build-lib.mjs';
 
 // why: review code-architect M5 — two test files each ran `pnpm --filter @gmt/api... build`, and under the root
 // `pnpm test` they run in parallel, so one tsc could rewrite a dist file the other's script was importing. One script
@@ -407,5 +407,44 @@ describe('scripts/ensure-build-lib.mjs lock path (CodeRabbit batch 3)', () => {
   it('is what ensure-build.mjs uses', () => {
     const text = readFileSync(join(REPO, 'scripts', 'ensure-build.mjs'), 'utf8');
     expect(text).toContain('const LOCK = lockPathFor(REPO);');
+  });
+});
+
+describe('stopChildren: a stop ends each build child’s whole tree (CodeRabbit, PR #11)', () => {
+  const child = (pid) => ({ pid, killed: [], kill(sig) { this.killed.push(sig); } });
+  it('on Windows it runs taskkill /T /F for each child, ignoring one that already exited', () => {
+    const ran = [];
+    const a = child(11);
+    const b = child(22);
+    stopChildren([a, b], 'SIGTERM', {
+      platform: 'win32',
+      run: (cmd, args) => {
+        ran.push([cmd, ...args].join(' '));
+        if (args[1] === '22') throw new Error('ERROR: The process "22" not found.');
+      },
+      killGroup: () => {
+        throw new Error('no process groups on Windows');
+      },
+    });
+    expect(ran).toEqual(['taskkill /pid 11 /T /F', 'taskkill /pid 22 /T /F']);
+    expect(a.killed).toEqual([]);
+  });
+  it('elsewhere it signals the process group, and the child alone when the group is gone', () => {
+    const groups = [];
+    const a = child(11);
+    const b = child(22);
+    stopChildren([a, b], 'SIGHUP', {
+      platform: 'linux',
+      run: () => {
+        throw new Error('taskkill is Windows only');
+      },
+      killGroup: (pid, sig) => {
+        groups.push(`${pid} ${sig}`);
+        if (pid === 22) throw new Error('ESRCH');
+      },
+    });
+    expect(groups).toEqual(['11 SIGHUP', '22 SIGHUP']);
+    expect(a.killed).toEqual([]);
+    expect(b.killed).toEqual(['SIGHUP']);
   });
 });

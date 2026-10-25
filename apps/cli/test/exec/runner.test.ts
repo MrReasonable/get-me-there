@@ -158,5 +158,7 @@ describe('systemRunner (the one execFile wrapper)', { timeout: 30_000 }, () => {
       for (let i = 0; i < 50 && running(pid); i++) await new Promise((r) => setTimeout(r, 100));
       expect(running(pid)).toBe(false);
     },
+    // why: CodeRabbit (PR #11): above the 5 s the loop may poll, plus the parent's own start
+    20_000,
   );
 });
