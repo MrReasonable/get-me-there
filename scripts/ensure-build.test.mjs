@@ -3,7 +3,15 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, w
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { acquire, breakStale, lockPathFor, readLock, realOps, release, stopChildren } from './ensure-build-lib.mjs';
+import {
+  acquire,
+  breakStale,
+  lockPathFor,
+  readLock,
+  realOps,
+  release,
+  stopChildren,
+} from './ensure-build-lib.mjs';
 
 // why: review code-architect M5 — two test files each ran `pnpm --filter @gmt/api... build`, and under the root
 // `pnpm test` they run in parallel, so one tsc could rewrite a dist file the other's script was importing. One script
@@ -411,7 +419,13 @@ describe('scripts/ensure-build-lib.mjs lock path (CodeRabbit batch 3)', () => {
 });
 
 describe('stopChildren: a stop ends each build child’s whole tree (CodeRabbit, PR #11)', () => {
-  const child = (pid) => ({ pid, killed: [], kill(sig) { this.killed.push(sig); } });
+  const child = (pid) => ({
+    pid,
+    killed: [],
+    kill(sig) {
+      this.killed.push(sig);
+    },
+  });
   it('on Windows it runs taskkill /T /F for each child, ignoring one that already exited', () => {
     const ran = [];
     const a = child(11);
