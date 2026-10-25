@@ -2,6 +2,7 @@ import { join } from 'node:path/posix';
 import { z } from 'zod';
 import { appUrl } from '../appClient.js';
 import type { Flags } from '../args.js';
+import { camoufoxUpdateStep } from '../camoufox/updateStep.js';
 import { type Deps, EXIT } from '../deps.js';
 import { type Action, commandLine, type Plan, runAction } from '../plan/action.js';
 import { apply } from '../plan/apply.js';
@@ -201,6 +202,10 @@ export async function updateCommand(flags: Flags, _p: string | null, deps: Deps)
     for (const p of [stopPlan, backupPlan]) if (p.actions.length > 0) deps.io.out(describePlan(p));
     for (const [step, actions] of codePlan('<the backup’s file>'))
       if (actions.length > 0) deps.io.out(describePlan({ command: `update: ${step}`, actions, notes: [] }));
+    if ((deps.files.list(join(deps.platform.paths.camoufoxRoot, 'browsers', 'official')) ?? []).length > 0)
+      deps.io.out(
+        'update: the browser install\n  then: read the new code’s Camoufox pin, and install it only when its recordings set its flags\n',
+      );
     deps.io.out(
       describePlan({
         command: 'update: start and wait',
@@ -260,9 +265,18 @@ export async function updateCommand(flags: Flags, _p: string | null, deps: Deps)
       return EXIT.failed;
     }
   }
+  // why: spec §13: after the build and before the restart; the previous bundle goes only once the app is healthy
+  const browser = await camoufoxUpdateStep(deps);
+  if (!browser.ok) {
+    deps.io.err(`${browser.message}\n${failureReport('the browser install', from, backup)}`);
+    return EXIT.failed;
+  }
   for (const [step, actions] of [
     ['the start', await startPlan()],
-    ['the health wait', healthPlan],
+    [
+      'the health wait',
+      [healthPlan[0], ...browser.after, ...healthPlan.slice(1)].filter((a) => a !== undefined),
+    ],
   ] as const) {
     const r = await apply({ command: `update: ${step}`, actions, notes: [] }, deps.executor);
     if (r.failed !== null) {
