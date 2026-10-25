@@ -42,7 +42,8 @@ async function installed(
 ) {
   const http = stubHttp({
     ...okRoutes,
-    ...(checks === 'down' ? {} : { 'GET /api/status': () => ({ status: 200, body: report(checks) }) }),
+    'GET /api/status': () =>
+      checks === 'down' ? { error: 'connection refused' } : { status: 200, body: report(checks) },
     ...extra,
   });
   const m = machine({ http });
@@ -221,7 +222,6 @@ describe('gmt setup offers the test email at its end (brief Task 18.3)', () => {
   ) {
     const http = stubHttp({
       ...okRoutes,
-      'GET /api/status': () => ({ status: 200, body: report([]) }),
       ...(testEmail === null ? {} : { 'POST /api/alerts/test-email': testEmail }),
     });
     const m = machine({ http });

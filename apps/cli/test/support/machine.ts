@@ -120,11 +120,6 @@ export function machine(
       stubHttp({
         'GET /api/executions/active': () => ({ status: 200, body: { execution: null } }),
         'GET /api/health': () => ({ status: 200, body: { ok: true, degraded: false } }),
-        // why: WP18: `gmt status` also reads the app's own report; by default it has nothing to report
-        'GET /api/status': () => ({
-          status: 200,
-          body: { generatedAt: '2026-10-24T09:30:00.000Z', mode: 'native', version: 'abc1234', checks: [] },
-        }),
       }),
     ...(opts.deps ? { deps: opts.deps } : {}),
   });
