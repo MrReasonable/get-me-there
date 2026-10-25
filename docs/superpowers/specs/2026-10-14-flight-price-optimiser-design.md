@@ -2562,7 +2562,7 @@ SEARCHAPI_TRIAL_USED=0                   # trial only: seed for the lifetime win
 CAMOUFOX_ENABLED=false                   # true only with the host-side worker running; false = the provider does not exist
 CAMOUFOX_WORKER_URL=                     # http://127.0.0.1:8090 (pnpm dev) or http://host.docker.internal:8090 (app in Docker; the compose default); loopback or host.docker.internal only, explicit port, no path
 CAMOUFOX_WORKER_KEY=                     # ≥ 32 chars, shared by app and worker; required when CAMOUFOX_ENABLED=true
-CAMOUFOX_MIN_SPACING_SECONDS=30          # start to start; 0–600 (0 means no pause: pages go back to back, still one at a time, from your own address); never randomised
+CAMOUFOX_MIN_SPACING_SECONDS=30          # start to start; 0–600 (0 means no pause: pages go back to back, still one at a time, from your own address); never randomised; a shared setting, kept equal in worker.env (a difference skips the provider)
 CAMOUFOX_EXECUTION_PAGE_CAP=100          # page loads per execution (BudgetExceeded provider-execution), frozen into the execution's budget snapshot; 1–400
 CAMOUFOX_MONTHLY_PAGE_CAP=1500           # page loads per billing month (provider-month; no-page rows not counted); the app's ledger enforces it; the worker reports it (and enforces it from WP17)
 CAMOUFOX_BILLING_DAY=1                   # 1–28: the month starts 00:00 UTC that day, for both monthly caps (the ledger's, and the worker's from WP17)
@@ -2614,7 +2614,8 @@ for the worker's two directories, so the CLI and the worker always agree);
 `gmt setup` generates one `CAMOUFOX_WORKER_KEY` and writes it to both files,
 and keeps the settings the two sides must share equal:
 `SHARED_WORKER_SETTINGS` in `core/camoufox/settings.ts`
-(`CAMOUFOX_COOLDOWN_HOURS`, `CAMOUFOX_PAGE_TIMEOUT_SECONDS`, `CAMOUFOX_MODE`,
+(`CAMOUFOX_COOLDOWN_HOURS`, `CAMOUFOX_PAGE_TIMEOUT_SECONDS`,
+`CAMOUFOX_MIN_SPACING_SECONDS`, `CAMOUFOX_MODE`,
 `CAMOUFOX_GRID_SCROLL_CAP`, `CAMOUFOX_GRID_SCROLL_SPACING_SECONDS`,
 `CAMOUFOX_MONTHLY_PAGE_CAP`, `CAMOUFOX_MONTHLY_SCROLL_CAP`,
 `CAMOUFOX_BILLING_DAY`, `POINT_OF_SALE`), beside `workerDataDir(home)`, the
@@ -3070,7 +3071,7 @@ as specified in §5.3; no secrets, no full URLs.
 
 The operator ruled that the browser provider's two pauses may be set to 0, meaning no pause at all.
 `CAMOUFOX_MIN_SPACING_SECONDS` takes 0 to 600 (default still 30) and `CAMOUFOX_GRID_SCROLL_SPACING_SECONDS`
-takes 0 to 30 (default still 5). §2's limits paragraph, the grid paragraph and §12's block state the new ranges;
+takes 0 to 30 (default still 5); the page spacing joins the shared settings (§12), so a worker left at 30 beside an app at 0 skips the provider. §2's limits paragraph, the grid paragraph and §12's block state the new ranges;
 at page spacing 0 the app's limiter has no rate limit (the page caps alone bound a run), the worker's pacer lets a
 claim pass at once (still one page at a time, still recording the last page time), and the estimate's 40 s a page
 is unchanged. The per-run page cap, the monthly page and scroll caps, the cool-downs and every stop the classifier

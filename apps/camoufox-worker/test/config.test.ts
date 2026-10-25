@@ -65,6 +65,7 @@ describe('worker config (brief Task 14.5; spec §12 worker side)', () => {
     ['CAMOUFOX_WORKER_PORT', '8o90'],
     ['CAMOUFOX_MIN_SPACING_SECONDS', '-1'],
     ['CAMOUFOX_MIN_SPACING_SECONDS', '601'],
+    ['CAMOUFOX_MIN_SPACING_SECONDS', '  '],
     ['CAMOUFOX_COOLDOWN_HOURS', '23'],
     ['CAMOUFOX_PAGE_TIMEOUT_SECONDS', '29'],
     ['CAMOUFOX_PAGE_TIMEOUT_SECONDS', '241'],
