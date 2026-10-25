@@ -5,8 +5,8 @@ owner: sonnet
 depends_on: [16a, 16b]
 spec_sections: ["§8.3 Consent expiry", "§9 item 9", "§10 GET /status", "§10 POST /alerts/test-email", "§11 Status", "§11 status bar", "§16", "§17 revision 36"]
 reviewers: [product-owner, ui-reviewer, security-reviewer, test-strategy-reviewer, code-architect, provenance-auditor, persona-flexible-traveller]
-mutate: {}
-pending: {"@gmt/core": ["src/api-contract/system.ts"]}
+mutate: {"@gmt/core": ["src/api-contract/system.ts", "src/status/rules.ts"]}
+pending: {}
 status: draft
 ---
 

@@ -76,6 +76,7 @@ export * from './selection/select.js';
 export * from './space/generate.js';
 export * from './space/validate.js';
 export * from './space/window.js';
+export * from './status/rules.js';
 export * from './text/bannedWords.js';
 export { hasControlChars, stripControlChars } from './text/control.js';
 export { formatPence, groupThousands } from './text/money.js';

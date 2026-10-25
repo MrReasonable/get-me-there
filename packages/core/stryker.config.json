@@ -24,7 +24,9 @@
     "src/budget/window.ts",
     "src/local/movedMarker.ts",
     "src/local/paths.ts",
-    "src/labels/skip.ts"
+    "src/labels/skip.ts",
+    "src/api-contract/system.ts",
+    "src/status/rules.ts"
   ],
   "thresholds": {
     "high": 90,

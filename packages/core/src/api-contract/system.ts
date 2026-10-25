@@ -126,4 +126,92 @@ export const smokePlanResponseSchema = z.strictObject({
   camoufox: z.strictObject({ pages: z.number().int().min(0), scrolls: z.number().int().min(0) }).nullable(),
 });
 
+/**
+ * Spec §10 `GET /api/status` (brief WP18 §5): one report of what works, how much of each search the last finished run
+ * covered, and what to do about what does not. Every summary comes from a fixed template; no field carries a key, a
+ * password, a database path or a `SOCS` value.
+ */
+export const statusStateSchema = z.enum(['ok', 'warn', 'fail', 'off']);
+export const statusAreaSchema = z.enum([
+  'app',
+  'database',
+  'backups',
+  'schedule',
+  'data',
+  'provider',
+  'worker',
+  'consent',
+  'email',
+]);
+export const statusCheckSchema = z
+  .strictObject({
+    id: z.string().regex(/^[a-z0-9-]+$/),
+    area: statusAreaSchema,
+    providerId: providerIdSchema.nullable(),
+    state: statusStateSchema,
+    summary: z.string().max(240),
+    /** An aside on any check, such as "first daily backup due 03:30"; it never counts toward the status bar. */
+    note: z.string().max(200).nullable(),
+    /** Only when `state` is `off`: why nothing is checked. */
+    offReason: z.enum(['not-set-up', 'not-visible', 'awaiting-verification']).nullable(),
+    fix: z
+      .strictObject({
+        text: z.string().max(200),
+        command: z.string().startsWith('pnpm gmt ').nullable(),
+      })
+      .nullable(),
+  })
+  .refine((c) => (c.state === 'off') === (c.offReason !== null), {
+    message: 'offReason is set exactly when the state is off',
+    path: ['offReason'],
+  });
+export const statusResponseSchema = z.strictObject({
+  generatedAt: isoDateTimeSchema,
+  mode: z.enum(['native', 'container', 'dev']),
+  version: z.string(),
+  checks: z.array(statusCheckSchema),
+});
+/** Spec §10 `POST /api/alerts/test-email`: the class of the send (a refusal at the hourly ceiling is a 429, not this). */
+export const testEmailResponseSchema = z.strictObject({
+  result: z.enum(['sent', 'failed']),
+  at: isoDateTimeSchema,
+});
+
+export type StatusState = z.infer<typeof statusStateSchema>;
+export type StatusArea = z.infer<typeof statusAreaSchema>;
+export type StatusCheck = z.infer<typeof statusCheckSchema>;
+export type StatusResponse = z.infer<typeof statusResponseSchema>;
+
+/** Worst first. */
+export const STATE_ORDER = { fail: 0, warn: 1, ok: 2, off: 3 } as const;
+const AREA_ORDER = statusAreaSchema.options;
+
+/** Worst first: state, then area (the schema's order), then id. Does not change its argument. */
+export function sortChecks(checks: readonly StatusCheck[]): StatusCheck[] {
+  return [...checks].sort(
+    (a, b) =>
+      STATE_ORDER[a.state] - STATE_ORDER[b.state] ||
+      AREA_ORDER.indexOf(a.area) - AREA_ORDER.indexOf(b.area) ||
+      (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+  );
+}
+
+/**
+ * The one line the status bar and `gmt status` share: any `fail` is "Status: n failing", else any `warn` the quieter
+ * "Status: n to check", each naming the area when exactly one check is concerned. `off` checks and notes never count.
+ */
+export function barSummary(checks: readonly StatusCheck[]): {
+  kind: 'clean' | 'warn' | 'fail';
+  text: string;
+} {
+  const failing = checks.filter((c) => c.state === 'fail');
+  const toCheck = checks.filter((c) => c.state === 'warn');
+  const concerned = failing.length > 0 ? failing : toCheck;
+  const kind = failing.length > 0 ? 'fail' : toCheck.length > 0 ? 'warn' : 'clean';
+  if (kind === 'clean') return { kind, text: 'Status: nothing to check' };
+  // why: one concerned check is named by its area, several by their count
+  const what = concerned.length === 1 ? concerned.map((c) => c.area).join('') : String(concerned.length);
+  return { kind, text: `Status: ${what} ${kind === 'fail' ? 'failing' : 'to check'}` };
+}
+
 export type SchedulerJob = z.infer<typeof schedulerJobSchema>;

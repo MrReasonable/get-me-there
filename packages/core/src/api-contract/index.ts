@@ -43,6 +43,8 @@ import {
   providersResponseSchema,
   schedulerJobsResponseSchema,
   smokePlanResponseSchema,
+  statusResponseSchema,
+  testEmailResponseSchema,
   toolRecordRequestSchema,
   toolRunResponseSchema,
   toolSmokeRequestSchema,
@@ -126,4 +128,6 @@ export const ROUTES: readonly RouteDef[] = [
   route('GET', '/alerts/events', alertEventSchema.array(), { query: alertEventsQuerySchema }),
   route('GET', '/scheduler/jobs', schedulerJobsResponseSchema),
   route('GET', '/budget', budgetResponseSchema),
+  route('GET', '/status', statusResponseSchema),
+  route('POST', '/alerts/test-email', testEmailResponseSchema),
 ];
