@@ -16,6 +16,7 @@ import { DurationView } from './views/Duration/DurationView.js';
 import { HistoryView } from './views/History/HistoryView.js';
 import { ProvidersView } from './views/Providers/ProvidersView.js';
 import { ResultsView } from './views/Results/ResultsView.js';
+import { StatusView } from './views/Status.js';
 
 /**
  * Spec §11 layout: synthetic banner, header with nav and definition selector, status bar on every
@@ -106,6 +107,7 @@ export function App() {
             ) : null}
             {view === 'definitions' ? <DefinitionsView /> : null}
             {view === 'providers' ? <ProvidersView /> : null}
+            {view === 'status' ? <StatusView /> : null}
           </AppBoundary>
         </main>
       </div>

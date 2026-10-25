@@ -619,3 +619,34 @@ export function coverageCheck(
     ...over,
   });
 }
+
+/** WP18 (spec §10 `GET /status`): a status check, ok by default, parsed by the contract. */
+export function statusCheck(
+  over: Partial<In<typeof apiContract.statusCheckSchema>> = {},
+): z.output<typeof apiContract.statusCheckSchema> {
+  return apiContract.statusCheckSchema.parse({
+    id: 'app',
+    area: 'app',
+    providerId: null,
+    state: 'ok',
+    summary: 'version abc1234, up 3d, native mode, loopback only, sign-in on',
+    note: null,
+    offReason: null,
+    fix: null,
+    ...over,
+  });
+}
+
+/** A report generated at the tests' fixed "now" (render.tsx NOW) unless `generatedAt` says otherwise. */
+export function statusReport(
+  checks: Array<Partial<In<typeof apiContract.statusCheckSchema>>> = [{}],
+  over: Partial<Omit<In<typeof apiContract.statusResponseSchema>, 'checks'>> = {},
+): z.output<typeof apiContract.statusResponseSchema> {
+  return apiContract.statusResponseSchema.parse({
+    generatedAt: '2026-10-14T15:00:00.000Z',
+    mode: 'native',
+    version: 'abc1234',
+    checks: checks.map((c) => statusCheck(c)),
+    ...over,
+  });
+}

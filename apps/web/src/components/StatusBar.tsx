@@ -2,12 +2,14 @@ import { ACTIVE_STATUSES, apiContract, budgetScopeLabel, RESUMABLE_STATUSES } fr
 import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import { useCoverage, useExecution, useExecutionActions, useResults } from '../api/queries.js';
+import { useStatus } from '../api/statusQuery.js';
 import type { DefinitionResponse, ExecutionResponse, UsageRow } from '../api/types.js';
 import { COPY } from '../copy.js';
 import { formatIsoDate, formatMicroGbp, formatRunInstant } from '../format.js';
+import { useCheckedWords } from '../hooks/useCheckedWords.js';
 import { NARROW_QUERY, useMediaQuery } from '../hooks/useMediaQuery.js';
 import { BASIS_PARAM, parseBasis } from '../state/resultsState.js';
-import { useSearchParams } from '../state/urlState.js';
+import { hrefWith, navigateTo, useSearchParams } from '../state/urlState.js';
 import { LoadError } from './LoadState.js';
 
 const ACTIVE: ReadonlySet<string> = new Set(ACTIVE_STATUSES);
@@ -95,14 +97,67 @@ function ProviderWindows({ e }: { e: ExecutionResponse }) {
   });
 }
 
+/**
+ * The status bar's link to the Status view (spec §11), from the same query as the view and core's one `barSummary`:
+ * any fail "Status: n failing", any warn the quieter "Status: n to check", the area named when there is one. Nothing
+ * for ok checks (notes included) and while the first answer is awaited. After a failed refresh it says the report is
+ * stale and how old; with no report, that the app is not answering: never a clean state from old data.
+ */
+export function StatusLink() {
+  const q = useStatus();
+  const checked = useCheckedWords(q.data?.generatedAt ?? null);
+  let text: string | null = null;
+  let tone = 'text-slate-900';
+  if (q.data === undefined) {
+    if (q.error) {
+      text = COPY.statusLink.notAnswering;
+      tone = 'font-medium text-red-900';
+    }
+  } else if (q.isRefetchError && checked !== null) {
+    text = COPY.statusLink.stale(checked);
+    tone = 'font-medium text-amber-900';
+  } else {
+    const bar = apiContract.barSummary(q.data.checks);
+    if (bar.kind !== 'clean') {
+      text = bar.text;
+      tone = bar.kind === 'fail' ? 'font-semibold text-red-900' : 'text-amber-900';
+    }
+  }
+  if (text === null) return null;
+  return (
+    <div className="border-b border-slate-300 bg-slate-50 px-4 text-sm">
+      <a
+        href={hrefWith({ view: 'status' })}
+        onClick={navigateTo({ view: 'status' })}
+        className={`inline-flex min-h-11 items-center underline ${tone}`}
+      >
+        {text}
+      </a>
+    </div>
+  );
+}
+
 export interface StatusBarProps {
   definition: DefinitionResponse | null;
   /** "Run now" appears only on Results and Definitions (review UI-10). */
   showRunNow: boolean;
 }
 
-/** Spec §11 status bar, on every view: stage, progress, spend, paused reason + Resume, blocked schedule, Cancel. */
-export function StatusBar({ definition, showRunNow }: StatusBarProps) {
+/**
+ * Spec §11 status bar, on every view: the link to the Status view, then the run's stage, progress, spend, paused reason
+ * + Resume, blocked schedule and Cancel. The link needs no definition; the run's part does.
+ */
+export function StatusBar(props: StatusBarProps) {
+  return (
+    <>
+      <StatusLink />
+      <RunStatus {...props} />
+    </>
+  );
+}
+
+/** The run's part of the bar: stage, progress, spend, paused reason + Resume, blocked schedule, Cancel. */
+function RunStatus({ definition, showRunNow }: StatusBarProps) {
   const params = useSearchParams();
   const results = useResults(definition?.id ?? null, parseBasis(params.get(BASIS_PARAM)));
   const executions = results.data?.executions ?? [];

@@ -4,6 +4,16 @@ import { COPY } from '../../src/copy.js';
 
 /** Sample arguments for every function entry, keyed by dotted path. A missing key fails the test. */
 const SAMPLES: Record<string, unknown[]> = {
+  'statusView.checkedAgo': [90],
+  'statusView.stale': ['checked 3 min ago'],
+  'statusView.offLine.not-set-up': ['SearchApi, email'],
+  'statusView.offLine.awaiting-verification': ['browser provider'],
+  'statusView.offLine.not-visible': ['backups'],
+  'statusView.cardLabel': ['Provider', 'SearchApi'],
+  'statusView.copyCommand': ['pnpm gmt start'],
+  'statusView.selectedInstead': ['pnpm gmt start'],
+  'statusView.testFailedCall': ['HTTP 500'],
+  'statusLink.stale': ['checked 3 min ago'],
   scrollsRow: [3],
   'camoufox.coolingDown': ['2026-10-20T05:00:00.000Z'],
   'alertsView.notSaved': ['database is locked'],
