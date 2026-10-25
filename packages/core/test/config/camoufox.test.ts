@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { SHARED_WORKER_DEFAULTS } from '../../src/camoufox/settings.js';
-import { CAMOUFOX_WORKER_HOSTS, camoufoxWorkerUrlOk, parseConfig } from '../../src/config/schema.js';
+import {
+  CAMOUFOX_WORKER_HOSTS,
+  camoufoxWorkerUrlOk,
+  NO_RATE_LIMIT,
+  parseConfig,
+} from '../../src/config/schema.js';
 
 const realpath = (p: string) => p;
 const minimal = {
@@ -125,8 +130,10 @@ describe('CAMOUFOX_* (spec §12 rev 32)', () => {
     expect(c?.limits).toMatchObject({ monthlyCallCap: 900, billingDay: 15, executionCallCap: 400 });
   });
   it.each([
-    ['CAMOUFOX_MIN_SPACING_SECONDS', '29'],
+    ['CAMOUFOX_MIN_SPACING_SECONDS', '-1'],
     ['CAMOUFOX_MIN_SPACING_SECONDS', '601'],
+    ['CAMOUFOX_GRID_SCROLL_SPACING_SECONDS', '-1'],
+    ['CAMOUFOX_GRID_SCROLL_SPACING_SECONDS', '31'],
     ['CAMOUFOX_EXECUTION_PAGE_CAP', '401'],
     ['CAMOUFOX_EXECUTION_PAGE_CAP', '0'],
     ['CAMOUFOX_COOLDOWN_HOURS', '23'],
@@ -153,6 +160,50 @@ describe('CAMOUFOX_* (spec §12 rev 32)', () => {
     expect(
       ok({ ...ON, CAMOUFOX_MIN_SPACING_SECONDS: '600' }).providers.camoufox?.limits.minSpacingSeconds,
     ).toBe(600);
+  });
+  // why: operator ruling 2026-10-25: both pauses may be 0 (no pause); the defaults stay 30 s and 5 s
+  describe('spacing 0 (operator, 2026-10-25)', () => {
+    it('unset gives 30 and 5; 0 is accepted for both', () => {
+      const dflt = ok(ON).providers.camoufox;
+      expect(dflt).toMatchObject({ minSpacingSeconds: 30, gridScrollSpacingSeconds: 5 });
+      const zero = ok({
+        ...ON,
+        CAMOUFOX_MIN_SPACING_SECONDS: '0',
+        CAMOUFOX_GRID_SCROLL_SPACING_SECONDS: '0',
+      }).providers.camoufox;
+      expect(zero).toMatchObject({ minSpacingSeconds: 0, gridScrollSpacingSeconds: 0 });
+      expect(zero?.sharedSettings.CAMOUFOX_GRID_SCROLL_SPACING_SECONDS).toBe('0');
+    });
+    it('the refusals name the setting and the new range', () => {
+      const msg = (env: Record<string, string>) => {
+        const r = parseConfig({ ...ON, ...env }, { realpath });
+        if (r.ok) throw new Error('expected failure');
+        return r.errors.map((e) => e.message);
+      };
+      for (const v of ['-1', '601'])
+        expect(msg({ CAMOUFOX_MIN_SPACING_SECONDS: v })).toEqual([
+          'CAMOUFOX_MIN_SPACING_SECONDS must be a whole number from 0 to 600',
+        ]);
+      for (const v of ['-1', '31'])
+        expect(msg({ CAMOUFOX_GRID_SCROLL_SPACING_SECONDS: v })).toEqual([
+          'CAMOUFOX_GRID_SCROLL_SPACING_SECONDS must be a whole number from 0 to 30',
+        ]);
+    });
+    it('page spacing 0 divides nothing and sets no rate limit; 30 keeps 2 a minute and 120 an hour', () => {
+      const zero = ok({ ...ON, CAMOUFOX_MIN_SPACING_SECONDS: '0' }).providers.camoufox?.limits;
+      expect(zero).toMatchObject({
+        minSpacingSeconds: 0,
+        ratePerMinute: NO_RATE_LIMIT,
+        ratePerHour: NO_RATE_LIMIT,
+        concurrency: 1,
+        executionCallCap: 100,
+      });
+      expect(ok(ON).providers.camoufox?.limits).toMatchObject({ ratePerMinute: 2, ratePerHour: 120 });
+      expect(ok({ ...ON, CAMOUFOX_MIN_SPACING_SECONDS: '1' }).providers.camoufox?.limits).toMatchObject({
+        ratePerMinute: 60,
+        ratePerHour: 3600,
+      });
+    });
   });
   it('enabled without a key or URL fails boot naming each', () => {
     expect(errors({ ...minimal, CAMOUFOX_ENABLED: 'true' })).toEqual(

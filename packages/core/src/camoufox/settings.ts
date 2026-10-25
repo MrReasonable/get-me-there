@@ -55,7 +55,7 @@ const SHARED_RULES: Readonly<Record<SharedWorkerSetting, Rule>> = {
   CAMOUFOX_PAGE_TIMEOUT_SECONDS: { min: 30, max: 240 },
   CAMOUFOX_MODE: { pattern: /^(list|grid)$/, message: 'must be list or grid' },
   CAMOUFOX_GRID_SCROLL_CAP: { min: 0, max: 60 },
-  CAMOUFOX_GRID_SCROLL_SPACING_SECONDS: { min: 5, max: 30 },
+  CAMOUFOX_GRID_SCROLL_SPACING_SECONDS: { min: 0, max: 30 },
   CAMOUFOX_MONTHLY_PAGE_CAP: { min: 0, max: Number.MAX_SAFE_INTEGER },
   CAMOUFOX_MONTHLY_SCROLL_CAP: { min: 0, max: Number.MAX_SAFE_INTEGER },
   CAMOUFOX_BILLING_DAY: { min: 1, max: 28 },

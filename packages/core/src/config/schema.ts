@@ -148,19 +148,23 @@ class Reader {
     const v = this.env[name];
     return v === undefined || v === '' ? undefined : v;
   }
-  private check<T>(name: string, schema: { safeParse(v: unknown): z.ZodSafeParseResult<T> }): T | undefined {
+  private check<T>(
+    name: string,
+    schema: { safeParse(v: unknown): z.ZodSafeParseResult<T> },
+    message?: string,
+  ): T | undefined {
     const v = this.raw(name);
     if (v === undefined) return undefined;
     const r = schema.safeParse(v);
     if (r.success) return r.data;
-    this.errors.push({ field: name, message: r.error.issues.map((i) => i.message).join('; ') });
+    this.errors.push({ field: name, message: message ?? r.error.issues.map((i) => i.message).join('; ') });
     return undefined;
   }
   str(name: string): string | undefined {
     return this.raw(name);
   }
-  int(name: string, min: number, max = Number.MAX_SAFE_INTEGER): number | undefined {
-    return this.check(name, z.coerce.number().int().min(min).max(max));
+  int(name: string, min: number, max = Number.MAX_SAFE_INTEGER, message?: string): number | undefined {
+    return this.check(name, z.coerce.number().int().min(min).max(max), message);
   }
   num(name: string, min: number, max: number): number | undefined {
     return this.check(name, z.coerce.number().min(min).max(max));
@@ -264,6 +268,9 @@ function sharedSettingsOf(r: Reader): SharedSettings {
   return shared.settings;
 }
 
+/** The rate a limiter reads as "no rate limit" (camoufox page spacing 0): too large for any run's page caps to reach. */
+export const NO_RATE_LIMIT = Number.MAX_SAFE_INTEGER;
+
 /** Spec §12 rev 32: the camoufox block; validated whether or not it is enabled, built only when it is. */
 function camoufoxConfig(r: Reader, shared: SharedSettings): Config['providers']['camoufox'] {
   const enabled = r.bool('CAMOUFOX_ENABLED') ?? false;
@@ -274,7 +281,13 @@ function camoufoxConfig(r: Reader, shared: SharedSettings): Config['providers'][
   const gridScrollCap = sharedInt(shared, 'CAMOUFOX_GRID_SCROLL_CAP');
   const executionScrollCap = r.int('CAMOUFOX_EXECUTION_SCROLL_CAP', 0, 6000) ?? 600;
   const monthlyScrollCap = sharedInt(shared, 'CAMOUFOX_MONTHLY_SCROLL_CAP');
-  const minSpacingSeconds = r.int('CAMOUFOX_MIN_SPACING_SECONDS', 30, 600) ?? 30;
+  const minSpacingSeconds =
+    r.int(
+      'CAMOUFOX_MIN_SPACING_SECONDS',
+      0,
+      600,
+      'CAMOUFOX_MIN_SPACING_SECONDS must be a whole number from 0 to 600',
+    ) ?? 30;
   const executionPageCap = r.int('CAMOUFOX_EXECUTION_PAGE_CAP', 1, 400) ?? 100;
   const monthlyCallCap = sharedInt(shared, 'CAMOUFOX_MONTHLY_PAGE_CAP');
   const billingDay = sharedInt(shared, 'CAMOUFOX_BILLING_DAY');
@@ -307,8 +320,11 @@ function camoufoxConfig(r: Reader, shared: SharedSettings): Config['providers'][
       window: 'month',
       billingDay,
       // why: display and reservoirs only; the app's limiter spaces starts by minIntervalMs = spacing × 1000 (ruling 7).
-      ratePerMinute: Math.max(1, Math.floor(60 / minSpacingSeconds)),
-      ratePerHour: Math.floor(3600 / minSpacingSeconds),
+      // Spacing 0 (operator, 2026-10-25) means no rate limit: the page caps alone bound a run, so there is no division
+      // by zero and the reservoirs never bind.
+      ratePerMinute:
+        minSpacingSeconds === 0 ? NO_RATE_LIMIT : Math.max(1, Math.floor(60 / minSpacingSeconds)),
+      ratePerHour: minSpacingSeconds === 0 ? NO_RATE_LIMIT : Math.floor(3600 / minSpacingSeconds),
       concurrency: 1,
       cacheTtlHours: 0,
       costPerCallMicroGbp: 0,

@@ -107,7 +107,7 @@ describe('SHARED_WORKER_SETTINGS and their effective values (spec §12)', () => 
     ['CAMOUFOX_PAGE_TIMEOUT_SECONDS', '241'],
     ['CAMOUFOX_MODE', 'Grid'],
     ['CAMOUFOX_GRID_SCROLL_CAP', '61'],
-    ['CAMOUFOX_GRID_SCROLL_SPACING_SECONDS', '4'],
+    ['CAMOUFOX_GRID_SCROLL_SPACING_SECONDS', '-1'],
     ['CAMOUFOX_GRID_SCROLL_SPACING_SECONDS', '31'],
     ['CAMOUFOX_MONTHLY_PAGE_CAP', '-1'],
     ['CAMOUFOX_MONTHLY_SCROLL_CAP', 'lots'],
@@ -158,6 +158,18 @@ describe('sharedSettingDiffs (names only; grid-only names in grid mode)', () => 
     const diffs = sharedSettingDiffs(app, worker, 'grid');
     expect(diffs).toEqual([...SHARED_WORKER_SETTINGS]);
     expect(JSON.stringify(diffs)).not.toMatch(/1234567|7654321|ZZ/);
+  });
+  it('agrees when both sides say 0 for the scroll spacing, and differs from a side that says 5', () => {
+    const zero = effectiveSharedSettings({ CAMOUFOX_GRID_SCROLL_SPACING_SECONDS: '0' });
+    expect(zero.CAMOUFOX_GRID_SCROLL_SPACING_SECONDS).toBe('0');
+    expect(
+      sharedSettingDiffs(
+        zero,
+        effectiveSharedSettings({ CAMOUFOX_GRID_SCROLL_SPACING_SECONDS: '00' }),
+        'grid',
+      ),
+    ).toEqual([]);
+    expect(sharedSettingDiffs(zero, app, 'grid')).toEqual(['CAMOUFOX_GRID_SCROLL_SPACING_SECONDS']);
   });
   it('compares the two grid-only settings only in grid mode', () => {
     const worker = { ...app, CAMOUFOX_GRID_SCROLL_CAP: '12', CAMOUFOX_GRID_SCROLL_SPACING_SECONDS: '9' };
@@ -326,7 +338,7 @@ describe('one rule set for both sides (R27)', () => {
       'CAMOUFOX_PAGE_TIMEOUT_SECONDS must be a whole number from 30 to 240',
       'CAMOUFOX_MODE must be list or grid',
       'CAMOUFOX_GRID_SCROLL_CAP must be a whole number from 0 to 60',
-      'CAMOUFOX_GRID_SCROLL_SPACING_SECONDS must be a whole number from 5 to 30',
+      'CAMOUFOX_GRID_SCROLL_SPACING_SECONDS must be a whole number from 0 to 30',
       'CAMOUFOX_MONTHLY_PAGE_CAP must be a whole number of at least 0',
       'CAMOUFOX_MONTHLY_SCROLL_CAP must be a whole number of at least 0',
       'CAMOUFOX_BILLING_DAY must be a whole number from 1 to 28',
