@@ -709,7 +709,10 @@ each with a plain summary and what to do about it; in a native install the fix i
 copy button. Reading it never spends a call, never waits on a vendor and never loads a page. The status bar on every
 view links to it: "Status: 2 failing" when any check fails, the quieter "Status: consent to check" when something is
 worth a look, nothing when nothing needs a look, and "Status: stale, checked 3 min ago" or "Status: app not answering" when the
-report cannot be refreshed. `pnpm gmt status` exits 1 when any check fails or the app does not answer.
+report cannot be refreshed. `pnpm gmt status` exits 1 when any check fails or the app does not answer; with the app
+down it still prints the local facts (with `--json`, a JSON object whose `appAnswering` is false) and says what to try.
+`pnpm gmt update` prints the report at its end but exits on its own steps and the app's health, not on an unrelated
+failing check.
 
 - **App, database, backups.** The version, how long it has run and whether it is bound to this machine only with a
   password on; the database answering and its size; the newest daily backup (`warn` after 36 hours, `fail` when there
@@ -733,10 +736,17 @@ report cannot be refreshed. `pnpm gmt status` exits 1 when any check fails or th
   window: "browser pages: only inside a run's window" or "also when a run resumes". The consent card gives the
   record's expiry and warns for its last 30 days. While it is not ok and the browser provider is on, the app emails
   you once a day (a plain notice from the app, with no separate reminder service).
-- **Email.** Configured or not, and the last test send since the app started; **Send test** (or the offer at the end of
-  `pnpm gmt setup`) sends one fixed message within the hourly limit.
-- **Off.** A check that is not set up, or is waiting for a verified browser build, folds into one line that says why
-  ("not set up: SearchApi"; "awaiting verification for this build: browser provider").
+- **Email.** Configured or not, and the newest send of any kind since the app started (an alert, a notice or a test);
+  the card fails when that send failed. **Send test** (or the offer at the end of a full `pnpm gmt setup` and of
+  `pnpm gmt setup --reconfigure email`) sends one fixed message; tests have their own limit of one a minute and never
+  use up the hourly alert limit.
+- **Off.** A check that is not set up, is waiting for a verified browser build, or belongs to a disabled search folds
+  into one line that says why ("not set up: SearchApi"; "awaiting verification for this build: browser provider";
+  "disabled: <search name>").
+- **Version.** The app check shows the build. A checkout shows its git short commit id; a container image has no git, so
+  compose passes `APP_VERSION` as a build argument (`Start.command` sets it to `git rev-parse --short HEAD`; for your
+  own `docker compose` runs: `APP_VERSION=$(git rev-parse --short HEAD) docker compose up -d --build`); without it the
+  card says `unknown`.
 
 `curl -u operator http://127.0.0.1:3000/api/health` stays for scripts and Docker.
 

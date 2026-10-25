@@ -5,14 +5,14 @@ owner: sonnet
 depends_on: [16a, 16b]
 spec_sections: ["§8.3 Consent expiry", "§9 item 9", "§10 GET /status", "§10 POST /alerts/test-email", "§11 Status", "§11 status bar", "§16", "§17 revision 36"]
 reviewers: [product-owner, ui-reviewer, security-reviewer, test-strategy-reviewer, code-architect, provenance-auditor, persona-flexible-traveller]
-mutate: {"@gmt/core": ["src/api-contract/system.ts", "src/status/rules.ts"]}
+mutate: {"@gmt/core": ["src/status/report.ts", "src/status/rules.ts", "src/status/time.ts"], "@gmt/api": ["src/read/status.ts", "src/read/statusPure.ts"], "@gmt/engine": ["src/consentNotice.ts"]}
 pending: {}
 status: merged
 ---
 
 # WP18: Status (the report, `gmt status`, the Status view and the consent email)
 
-Written 2026-10-19 against spec revision 36 and plan decisions 1–83, after WP16a and WP16b, and revised after review
+Revised 2026-10-25 for the branch review's rulings V0 to V11 (spec revision 38: the consent notice by cause and sent by the minute job too, the one consent fix, the worker judged by the preflight's rule, the adapters' class on the ledger (migration 0008), the email card on any send, the test email's own limit, `label` and `disabled`, nothing truncated, the container version as a build argument). Written 2026-10-19 against spec revision 36 and plan decisions 1–83, after WP16a and WP16b, and revised after review
 rounds 1–3 (every finding answered in the review directories' `resolutions.md`). It builds the operator's chosen
 item 4: one report of what is working, how much of each search the last finished run covered, and what to do about
 what is not, served by the app, printed by `gmt status` and shown in a Status view; and the consent-expiry email
@@ -120,7 +120,7 @@ Times use `formatInstant` in the scheduler's zone. "30 days" is elapsed time, 30
 | `provider-<id>` | provider | the most recent completed call succeeded: "last successful call <time>"; or "configured; not used yet"; usage under 80% of its cap | usage ≥ 80% of its cap; trial ≤ 10 credits left | the most recent completed call failed with `auth` or `quota` | not configured (`not-set-up`) |
 | `provider-fixture` | provider | — | `syntheticAllowed(config)` true: "synthetic test data, not fares" | — | otherwise absent |
 | `worker` | worker | reachable, no cool-down, flags set for its build, `sharedSettingDiffs` empty on effective values, keys equal; this month's pages and scrolls "n of cap" when `monthly` is present; the app's `CAMOUFOX_BROWSER_WINDOW` ("browser pages: only inside a run's window" for `scheduled` and unset, "browser pages: also when a run resumes" for `any`), shown on every state of the card while the provider is enabled | cooling down until a time; two app instances called it this month (`appInstances`); monthly pages or scrolls ≥ 80% of the cap | unreachable with no refusal file (fix `pnpm gmt start`); a refusal with reason `consent-*`, `layout`, `signed-in` or `locked` ("refused, not retrying: <START_REFUSAL_TEXT summary>", fix per reason); a shared setting differs (named, no value); "keys differ" (fix `pnpm gmt setup --reconfigure browser`); container mode: "not reachable from the container" | browser provider not enabled (`not-set-up`); flags unset for this build, or a refusal with reason `flags-unset` or `build-mismatch` (`awaiting-verification`, never `fail`) |
-| `consent` | consent | capture (`socs`) or **not-shown** record valid more than 30 days; the summary says which: "consent rejected, expires <date> (cookie)" / "consent rejected, expires <date> (capture)" / "no consent screen in this region, recorded <date>" — never labels not-shown as a rejection (PA3-005) | ≤ 30 days left; or the worker is down with no refusal file ("cannot check") | expired or missing; kind `voided` ("consent screen now shown: capture again"); a refusal with reason `consent-missing`, `consent-expired` or `consent-voided`; fix `pnpm gmt consent` | browser provider not enabled |
+| `consent` | consent | capture (`socs`) or **not-shown** record valid more than 30 days (an older worker that reports only the capture time: stated as "expires by <date> at the latest"); the summary says which: "consent rejected, expires <date> (cookie)" / "consent rejected, expires <date> (capture)" / "no consent screen in this region, recorded <date>" — never labels not-shown as a rejection (PA3-005) | ≤ 30 days left; or the worker is down with no refusal file ("cannot check") | expired or missing; kind `voided` ("consent screen now shown: capture again"); a refusal with reason `consent-missing`, `consent-expired` or `consent-voided`; fix the capture script (core's `CONSENT_FIX`, `pnpm --filter @gmt/camoufox-worker capture-socs`, text with no `command`) | browser provider not enabled |
 | `email` | email | configured; the last test send since the app started succeeded, or none yet ("since the app started") | — | the last send since the app started failed (class only) | not configured (`not-set-up`; fix `pnpm gmt setup --reconfigure email`) |
 
 ### Data check (`data-<definition>`)
