@@ -175,6 +175,25 @@ describe('gmt consent export and import', () => {
     expect(await runCli(['consent', 'export'], stopped.deps)).toBe(0);
     expect(stopped.loaded.has(LABEL)).toBe(false);
   });
+  // why: CodeRabbit (PR #18): what gmt consent says after an export goes to standard error, beside the worker's own
+  it('export’s standard output holds nothing of gmt’s own: the worker’s restart is said on standard error', async () => {
+    const m = world();
+    expect(await runCli(['consent', 'export'], m.deps)).toBe(0);
+    expect(m.io.stdout).toBe('');
+    expect(m.io.stderr).toContain('consent: the worker');
+    const c = world();
+    expect(await runCli(['consent'], c.deps)).toBe(0);
+    expect(c.io.stdout).toContain('consent: the worker');
+  });
+  it('import from a terminal is refused before the worker is stopped: the line comes from a pipe or a file', async () => {
+    const m = world();
+    m.deps.io = { ...m.deps.io, stdinIsTTY: true };
+    expect(await runCli(['consent', 'import'], m.deps)).toBe(78);
+    expect(m.io.stderr).toContain('consent import reads the line from a pipe or a file, not the terminal');
+    expect(m.attached).toEqual([]);
+    expect(m.runs()).toEqual([]);
+    expect(m.loaded.has(LABEL)).toBe(true);
+  });
   it('import, its line on the inherited standard input, is a capture: the worker is stopped first and started after', async () => {
     const m = world();
     expect(await runCli(['consent', 'import'], m.deps)).toBe(0);

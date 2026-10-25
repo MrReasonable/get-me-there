@@ -43,6 +43,14 @@ export async function consentCommand(flags: Flags, positional: string | null, de
   const run = workerRunArgv(deps, 'consent', ...(positional === null ? [] : [positional]));
   const env = { ...serviceEnvironment(deps.execPath, deps.home), ...deps.platform.displayEnv };
   if (positional === 'check') return deps.attach(run.argv, run.cwd, env);
+  // why: CodeRabbit (PR #18): import reads its line from a pipe or a file; from a terminal it would wait for the end of
+  // input with no prompt while the worker stays stopped, so it is refused before anything stops
+  if (positional === 'import' && deps.io.stdinIsTTY) {
+    deps.io.err(
+      'consent import reads the line from a pipe or a file, not the terminal: pnpm gmt consent import < consent.line\n',
+    );
+    return EXIT.badConfig;
+  }
 
   const worker = workerEntry(deps);
   const before = factOf(await factsOf(deps, [worker]), worker.unit);
@@ -70,7 +78,9 @@ export async function consentCommand(flags: Flags, positional: string | null, de
     code = await deps.attach(run.argv, run.cwd, env);
   } finally {
     const stored = code === 0 && positional !== 'export';
-    const after = await restoreWorker(deps, { stored, wasRunning, isInstalled });
+    // why: CodeRabbit (PR #18): export's standard output is its one line, so what follows it goes to standard error
+    const say = positional === 'export' ? deps.io.err : deps.io.out;
+    const after = await restoreWorker(deps, { stored, wasRunning, isInstalled, say });
     if (after !== EXIT.ok && code === 0) code = after;
   }
   return code;
@@ -79,7 +89,7 @@ export async function consentCommand(flags: Flags, positional: string | null, de
 /** After the worker's command: the consent refusal cleared and the worker started, or the worker put back as it was. */
 async function restoreWorker(
   deps: Deps,
-  o: { stored: boolean; wasRunning: boolean; isInstalled: boolean },
+  o: { stored: boolean; wasRunning: boolean; isInstalled: boolean; say: (text: string) => void },
 ): Promise<number> {
   const paths = deps.platform.paths;
   const actions: Action[] = [];
@@ -92,10 +102,10 @@ async function restoreWorker(
   if (o.isInstalled && (o.stored || o.wasRunning)) {
     const worker = workerEntry(deps);
     const start = await workerStart(deps, worker, await factsOf(deps, [worker]));
-    if (start.notStarted !== null) deps.io.out(`worker: not started: ${start.notStarted}\n`);
+    if (start.notStarted !== null) o.say(`worker: not started: ${start.notStarted}\n`);
     actions.push(...start.actions);
   } else if (o.stored)
-    deps.io.out(
+    o.say(
       'The worker service is not installed yet: pnpm gmt setup --reconfigure browser turns the browser provider on.\n',
     );
   if (actions.length === 0) return EXIT.ok;
@@ -104,6 +114,6 @@ async function restoreWorker(
     deps.io.err(describeResult('consent: the worker', r));
     return EXIT.failed;
   }
-  deps.io.out(describeResult('consent: the worker', r));
+  o.say(describeResult('consent: the worker', r));
   return EXIT.ok;
 }

@@ -383,6 +383,20 @@ describe('consent export: the line for a machine with no display', () => {
     expect(t.out).toHaveLength(1);
     expect(t.err[0]).toBe('waiting 18 s for the spacing');
   });
+  // why: CodeRabbit (PR #18): a cookie that outlives its capture plus 13 months exports the bounded expiry
+  it('a cookie expiring after its capture plus 13 months exports a line import accepts, its expiry bounded', async () => {
+    const far = Date.parse('2028-01-01T00:00:00.000Z') / 1000;
+    const t = setup({ script: { saveAt: 0, socsAt: 1, closeAt: 3, socs: { ...REJECT, expires: far } } });
+    expect(await exported(t)).toBe(0);
+    const line = decodeConsentLine(t.out[0] ?? '');
+    expect(line).toMatchObject({
+      socs: { expires: Date.parse('2027-11-18T05:00:04.000Z') / 1000 },
+      mark: 'reject',
+    });
+    const i = setup({ stdin: t.out[0] ?? '' });
+    // why: the importing machine reads the line after it was captured
+    expect(await consentImport(i.ctx(['import']), { ...i.deps, clock: t.timers.clock })).toBe(0);
+  });
   it('an acceptance exports nothing', async () => {
     const t = setup({ script: { saveAt: 0, socsAt: 1, closeAt: 3, socs: ACCEPT } });
     expect(await exported(t)).toBe(EX_UNAVAILABLE);

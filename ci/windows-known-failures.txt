@@ -5,7 +5,8 @@
 # this branch that loaded and built every suite on Windows (WP16b review r1, U10): its known and unlisted failures,
 # less the seven apps/cli tests fixed after it (their test helpers now use POSIX paths on every host). WP17 adds the
 # worker's own tests that fail there for the same reasons (POSIX modes, the worker refusing to start on Windows), from
-# https://github.com/MrReasonable/get-me-there/actions/runs/40201358467 and the runs after it.
+# https://github.com/MrReasonable/get-me-there/actions/runs/40201358467 and the runs after it; WP17 part 2's consent command tests, from
+# https://github.com/MrReasonable/get-me-there/actions/runs/40238170768.
 apps/api/test/bootstrap/app.backup.test.ts > backup preflight (spec §7 Migrations, §13 Backup) backs up into <db dir>/backups before applying pending migrations; the backup has the old schema
 apps/api/test/bootstrap/app.matrix.test.ts > injected-config boot matrix (spec §5.5) an unwritable data directory fails boot with exit code 73
 apps/api/test/bootstrap/app.spawn.test.ts > production boot lacks fixture (spec §5.5, §9 item 5) the real bootstrap under NODE_ENV=production never offers or accepts synthetic data
@@ -29,6 +30,23 @@ apps/api/test/deploy/docs.test.ts > operator docs (spec §11 banned words; spec 
 apps/api/test/tools/allowlist.test.ts > parameter allowlist files (spec §5.2, plan ParamsAllowlist) refuses a second allowlist for the same provider and date, and a symlink at the target (sec2-006)
 apps/api/test/tools/smoke.test.ts > runSmoke (spec §9 item 7) exits 0 with provenance: one tile per provider, one chain, the confirmed price as headline, every check passed, dated fixtures outside the recorded tree
 apps/api/test/tools/smokeArgs.test.ts > smokeFixtureTarget (plan decision 61) writes beside the database under the smoke signature
+apps/camoufox-worker/test/consentCommand.test.ts > consent check: the stored record’s mark and expiry, no page loaded a not-shown record: exit 78, saying so
+apps/camoufox-worker/test/consentCommand.test.ts > consent check: the stored record’s mark and expiry, no page loaded a voided record: exit 78, saying so
+apps/camoufox-worker/test/consentCommand.test.ts > consent check: the stored record’s mark and expiry, no page loaded an accepted value (entered by hand): exit 78, saying so
+apps/camoufox-worker/test/consentCommand.test.ts > consent check: the stored record’s mark and expiry, no page loaded an expired rejection: exit 78, saying so
+apps/camoufox-worker/test/consentCommand.test.ts > consent check: the stored record’s mark and expiry, no page loaded an in-date rejection: its capture time, mark and expiry, exit 0; never the value
+apps/camoufox-worker/test/consentCommand.test.ts > consent check: the stored record’s mark and expiry, no page loaded bounded by the capture when the cookie outlives 13 months
+apps/camoufox-worker/test/consentCommand.test.ts > consent export: the line for a machine with no display a cookie expiring after its capture plus 13 months exports a line import accepts, its expiry bounded
+apps/camoufox-worker/test/consentCommand.test.ts > consent export: the line for a machine with no display a spacing wait is said on standard error, keeping standard output to the line
+apps/camoufox-worker/test/consentCommand.test.ts > consent import: standard input only, the mark recomputed a valid rejection line writes socs.json keeping its capture time
+apps/camoufox-worker/test/consentCommand.test.ts > consent import: standard input only, the mark recomputed refuses a capture dated in the future, writing nothing
+apps/camoufox-worker/test/consentCommand.test.ts > consent import: standard input only, the mark recomputed refuses an expired cookie, writing nothing
+apps/camoufox-worker/test/consentCommand.test.ts > consent: the capture (the person clicks; the tool observes) Linux: the display groups run.ts passed reach the window; with neither it refuses before any page or window
+apps/camoufox-worker/test/consentCommand.test.ts > consent: the capture (the person clicks; the tool observes) a rejection: the cookie written 0600 with its capture time, the profile gone, one page counted
+apps/camoufox-worker/test/consentCommand.test.ts > consent: the capture (the person clicks; the tool observes) refuses while the worker’s lock is held, during a cool-down (naming its end), and at the monthly page cap
+apps/camoufox-worker/test/consentCommand.test.ts > consent: the capture (the person clicks; the tool observes) sweeps a profile a killed capture left, before it starts
+apps/camoufox-worker/test/consentCommand.test.ts > consent: the capture (the person clicks; the tool observes) waits out the spacing from the persisted last page time before its load
+apps/camoufox-worker/test/consentCommand.test.ts > the throwaway profile is deleted on every path a deletion that throws once is retried; twice, it is reported (the next start sweeps it)
 apps/camoufox-worker/test/cooldown.test.ts > CooldownStore (spec §2: cool-down by cause, persisted, fail closed) a read error other than ENOENT is thrown, never read as "no cool-down"
 apps/camoufox-worker/test/cooldown.test.ts > CooldownStore (spec §2: cool-down by cause, persisted, fail closed) writes the record 0600
 apps/camoufox-worker/test/counts.test.ts > run.ts counts (W3) --json writes this window’s figures from stdin, 0600, under the lock, and prints them
@@ -301,7 +319,7 @@ apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14
 apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) with the Cheapest flow verified, the tab’s pop-up is closed and the tab clicked
 apps/camoufox-worker/test/socs.test.ts > loadSocs (spec §2: a captured, dated rejection value) accepts exactly 13 months old
 apps/camoufox-worker/test/socs.test.ts > loadSocs (spec §2: a captured, dated rejection value) loads a capture
-apps/camoufox-worker/test/socs.test.ts > loadSocs (spec §2: a captured, dated rejection value) refuses a capture whose cookie expiry has passed, naming capture-socs
+apps/camoufox-worker/test/socs.test.ts > loadSocs (spec §2: a captured, dated rejection value) refuses a capture whose cookie expiry has passed, naming pnpm gmt consent
 apps/camoufox-worker/test/socs.test.ts > loadSocs (spec §2: a captured, dated rejection value) the cookie set is SOCS with the captured attributes, nothing else
 apps/camoufox-worker/test/socs.test.ts > readBack (ruling 9: compared by value everywhere) a SOCS on another domain
 apps/camoufox-worker/test/socs.test.ts > readBack (ruling 9: compared by value everywhere) a SOCS with another value on a domain never sent to www.google.com
@@ -316,6 +334,7 @@ apps/camoufox-worker/test/socs.test.ts > the consent record (socs.json) an expir
 apps/camoufox-worker/test/socs.test.ts > the consent record (socs.json) reads a capture, a not-shown and a voided record, and none
 apps/camoufox-worker/test/socs.test.ts > the consent record (socs.json) the status names the kind, the expiry and what bounds it (null for voided)
 apps/camoufox-worker/test/socs.test.ts > writeCapture (capture-socs) accepts an existing 0700 directory
+apps/camoufox-worker/test/socs.test.ts > writeCapture (capture-socs) keeps a given capture time, and refuses one in the future or older than 13 months
 apps/camoufox-worker/test/socs.test.ts > writeCapture (capture-socs) writes a 0600 file in a 0700 directory with the time from the clock and the domain and path fixed
 apps/camoufox-worker/test/startRefusal.test.ts > run.ts check --json (decision 75): the start’s result, nothing started names the lock, the flags, the layout and the build in core’s order
 apps/camoufox-worker/test/startRefusal.test.ts > run.ts check --json (decision 75): the start’s result, nothing started prints the refusal in startRefusalSchema’s terms, exits 78, and writes no file

@@ -267,6 +267,9 @@ export async function consentCapture(
     }
     const c = judged.capture;
     if (o.export) {
+      // why: CodeRabbit (PR #18): the line carries the expiry the worker would use, the earlier of the cookie's own and
+      // its capture plus 13 months, so a cookie that outlives the 13 months still exports a line import accepts
+      const expires = Math.min(c.expires, Math.floor(Date.parse(captureExpiry(c).expiresAt) / 1000));
       ctx.out(
         encodeConsentLine({
           socs: {
@@ -274,7 +277,7 @@ export async function consentCapture(
             value: c.value,
             domain: c.domain,
             path: c.path,
-            expires: c.expires,
+            expires,
             secure: c.secure,
             sameSite: c.sameSite,
           },

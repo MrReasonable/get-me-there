@@ -71,9 +71,14 @@ export const consentLineSchema: z.ZodType<ConsentLine> = z
     capturedAt: isoDateTimeSchema,
     mark: z.enum(['reject', 'accept', 'unknown']),
   })
-  .refine((c) => c.socs.expires * 1000 <= Date.parse(addMonthsClamped(c.capturedAt, SOCS_MAX_AGE_MONTHS)), {
-    message: EXPIRY_TOO_LATE,
-  });
+  .refine(
+    // why: CodeRabbit (PR #18): zod runs this refinement even when capturedAt failed its own check, and the month
+    // arithmetic throws on a date that does not parse; that line is already refused at capturedAt
+    (c) =>
+      Number.isNaN(Date.parse(c.capturedAt)) ||
+      c.socs.expires * 1000 <= Date.parse(addMonthsClamped(c.capturedAt, SOCS_MAX_AGE_MONTHS)),
+    { message: EXPIRY_TOO_LATE },
+  );
 
 /** One schema issue in words: the field it is on, never the value it holds. */
 function refusedWords(issue: z.ZodError['issues'][number]): string {

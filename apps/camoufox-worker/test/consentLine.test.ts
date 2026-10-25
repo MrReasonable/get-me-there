@@ -193,6 +193,10 @@ describe('the consent line (gmt-socs-v1.<base64url of { socs, capturedAt, mark }
   ])('refuses %s, naming the field and never a value', (_what, raw, words) => {
     expect(errorOf(lineOf(raw))).toBe(words);
   });
+  // why: CodeRabbit (PR #18): a capture time that does not parse is refused as itself, never thrown on
+  it('a capture time that does not parse is refused at capturedAt, not thrown on by the expiry check', () => {
+    expect(errorOf(lineOf({ ...LINE, capturedAt: 'not-a-date' }))).toBe('the line’s capturedAt is refused');
+  });
   it('names every field refused, in order', () => {
     expect(errorOf(lineOf({ ...LINE, mark: 'x', capturedAt: 'y' }))).toBe(
       'the line’s capturedAt is refused; the line’s mark is refused',
