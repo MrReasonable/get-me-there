@@ -3,11 +3,14 @@ import {
   CAMOUFOX_BUILDS,
   type CamoufoxBuild,
   camoufoxBuildSchema,
+  EXIT,
   FLAG_NAMES,
   FLAGS,
   type FlagName,
   flagsIn,
+  OS_ARCHES,
   type OsArch,
+  pinSchema,
   type VerifiedSet,
 } from '@gmt/core';
 import { z } from 'zod';
@@ -63,4 +66,40 @@ export function parseManifest(stdout: string): Manifest | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * printManifest.ts's work, with the loader of a pin file injected (tsx's in production): `<os>-<arch>` prints this
+ * code's manifest; `<os>-<arch> --pin <file>` that file's `CAMOUFOX_PIN`, refused (78) unless this code's pinSchema
+ * reads it; anything else is a usage error (64).
+ */
+export async function printManifest(
+  args: readonly string[],
+  load: (file: string) => Promise<unknown>,
+): Promise<{ code: number; out: string; err: string }> {
+  const [arg, flag, file, ...rest] = args;
+  const osArch = OS_ARCHES.find((k) => k === arg);
+  if (
+    osArch === undefined ||
+    rest.length > 0 ||
+    (flag !== undefined && (flag !== '--pin' || file === undefined))
+  )
+    return {
+      code: EXIT.usage,
+      out: '',
+      err: `usage: printManifest.ts <${OS_ARCHES.join('|')}> [--pin <pin.ts>]\n`,
+    };
+  if (file === undefined) return { code: EXIT.ok, out: `${JSON.stringify(manifestFor(osArch))}\n`, err: '' };
+  let mod: unknown;
+  try {
+    mod = await load(file);
+  } catch {
+    mod = null;
+  }
+  const pin = pinSchema.safeParse(
+    typeof mod === 'object' && mod !== null && 'CAMOUFOX_PIN' in mod ? mod.CAMOUFOX_PIN : null,
+  );
+  return pin.success
+    ? { code: EXIT.ok, out: `${JSON.stringify(manifestFor(osArch, pin.data))}\n`, err: '' }
+    : { code: EXIT.badConfig, out: '', err: `${file} is not a pin this code can read\n` };
 }

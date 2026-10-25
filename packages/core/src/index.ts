@@ -23,6 +23,7 @@ export * from './camoufox/builds.js';
 export * from './camoufox/consentFix.js';
 export * from './camoufox/grid.js';
 export * from './camoufox/monthly.js';
+export { CAMOUFOX_PIN } from './camoufox/pin.js';
 export * from './camoufox/protocol.js';
 export * from './camoufox/settings.js';
 export * from './camoufox/start.js';

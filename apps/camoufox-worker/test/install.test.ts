@@ -62,12 +62,12 @@ describe('ensureInstallLayout on macOS (decision 73; Task 17.2): verifies only',
     }
   });
 
-  it('a missing or empty install directory refuses, naming pnpm gmt setup', () => {
+  it('a missing or empty install directory refuses, naming pnpm gmt browser install', () => {
     const f = fakeInstall('darwin-arm64');
     rmSync(f.root, { recursive: true });
     expect(refusal(() => mac(f.installDir))).toEqual({
       reason: 'layout',
-      message: `no Camoufox install at ${f.root}: run pnpm gmt setup`,
+      message: `no Camoufox install at ${f.root}: run pnpm gmt browser install`,
       build: null,
     });
   });
@@ -81,7 +81,7 @@ describe('ensureInstallLayout on macOS (decision 73; Task 17.2): verifies only',
     const dangling = fakeInstall('darwin-arm64', { link: false });
     symlinkSync(join(dangling.root, 'gone'), join(dangling.root, 'Camoufox.app'));
     expect(refusal(() => mac(dangling.installDir)).message).toBe(
-      `${dangling.root}/Camoufox.app points at nothing: run pnpm gmt setup`,
+      `${dangling.root}/Camoufox.app points at nothing: run pnpm gmt browser install`,
     );
     const outside = fakeInstall('darwin-arm64', { link: false });
     const elsewhere = fakeInstall('darwin-arm64');
@@ -129,15 +129,27 @@ describe('ensureInstallLayout on macOS (decision 73; Task 17.2): verifies only',
       ['{}', 'has no version string'],
       ['{"version":"x.1","release":"beta.28"}', 'its version is not numeric'],
       ['{"version":"152.0.4"}', 'names no release'],
+      // why: pie-b1-007: camoufox-js reads only `release` in this file, so `build` alone is refused here
+      ['{"version":"152.0.4","build":"beta.28"}', 'names no release'],
     ] as const) {
       const f = fakeInstall('darwin-arm64');
       writeFileSync(join(f.root, 'version.json'), top);
       expect(refusal(() => mac(f.installDir)).message).toContain(words);
     }
   });
+  it('the bundle’s own version.json, which camoufox-js never reads on macOS, may name its release as build', () => {
+    const f = fakeInstall('darwin-arm64');
+    writeFileSync(join(f.bundleDir, 'version.json'), '{"version":"152.0.4","build":"beta.28"}');
+    expect(mac(f.installDir).build).toBe('152.0.4-beta.28');
+  });
 });
 
 describe('ensureInstallLayout on Linux (decision 73; Task 17.2): the bundle is the install directory', () => {
+  it('the bundle’s version.json is the one camoufox-js reads there: build alone is refused', () => {
+    const f = fakeInstall('linux-arm64');
+    writeFileSync(join(f.bundleDir, 'version.json'), '{"version":"152.0.4","build":"beta.28"}');
+    expect(refusal(() => lin(f.installDir)).message).toContain('names no release');
+  });
   it('passes with version.json, camoufox-bin, properties.json and fontconfig/macos/fonts.conf, writing nothing', () => {
     const f = fakeInstall('linux-arm64');
     const before = snapshot(f.bundleDir);
@@ -162,7 +174,9 @@ describe('ensureInstallLayout on Linux (decision 73; Task 17.2): the bundle is t
   it('a release camoufox-js would not accept, or another build, refuses', () => {
     const bad = fakeInstall('linux-arm64', { bundleVersion: { version: '152.0.4', release: 'alpha.1' } });
     expect(refusal(() => lin(bad.installDir)).reason).toBe('layout');
-    const other = fakeInstall('linux-arm64', { bundleVersion: { version: '152.0.4', build: 'beta.29' } });
+    const other = fakeInstall('linux-arm64', {
+      bundleVersion: { version: '152.0.4', build: 'beta.29', release: 'beta.29' },
+    });
     expect(refusal(() => lin(other.installDir))).toMatchObject({
       reason: 'build-mismatch',
       build: '152.0.4-beta.29',
@@ -173,7 +187,7 @@ describe('ensureInstallLayout on Linux (decision 73; Task 17.2): the bundle is t
     const f = fakeInstall('linux-arm64');
     rmSync(f.bundleDir, { recursive: true });
     expect(refusal(() => lin(f.installDir)).message).toBe(
-      `no Camoufox install at ${f.bundleDir}: run pnpm gmt setup`,
+      `no Camoufox install at ${f.bundleDir}: run pnpm gmt browser install`,
     );
   });
 });

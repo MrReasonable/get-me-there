@@ -235,6 +235,20 @@ describe('browserSetup’s outcomes and words', () => {
     expect(await run(m)).toBe('unavailable');
     expect(m.io.stdout.split('not available').length).toBe(2);
   });
+  // why: ts-b1-002: Enter on the question turns nothing on; a differing key's question defaults to a new key
+  it('the question’s offered defaults: Enter leaves it off; with keys that differ the key question defaults to yes', async () => {
+    const m = await world();
+    const ask = scriptedAsk(['']);
+    expect(await browserSetup(m.deps, { interactive: true, ask, choice: null, reconfigure: false })).toBe(
+      'off',
+    );
+    expect(ask.defaults).toEqual([{ q: ENABLE_QUESTION, def: false }]);
+    await run(m);
+    m.fs.file(WORKER_ENV, `CAMOUFOX_WORKER_KEY="${'e'.repeat(48)}"\n`, 0o600);
+    const key = scriptedAsk(['', '']);
+    await browserSetup(m.deps, { interactive: true, ask: key, choice: null, reconfigure: true });
+    expect(key.defaults[0]).toEqual({ q: 'Generate a new worker key?', def: true });
+  });
   it('a no on a terminal is off, saying so; with no display a no to the typed word is off too', async () => {
     const m = await world();
     expect(await run(m, { interactive: true, answers: [false] })).toBe('off');

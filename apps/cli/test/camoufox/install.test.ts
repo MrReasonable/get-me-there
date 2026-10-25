@@ -1,4 +1,4 @@
-import { CAMOUFOX_BUILDS, type CamoufoxBuild, FLAGS, OS_ARCHES } from '@gmt/core';
+import { CAMOUFOX_BUILDS, CAMOUFOX_PIN, type CamoufoxBuild, FLAGS, OS_ARCHES } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
 import {
   bundlePath,
@@ -22,7 +22,7 @@ import {
   UBUNTU_LIBRARIES,
   unzipProblem,
 } from '../../src/camoufox/libs.js';
-import { manifestArgv, manifestFor, parseManifest } from '../../src/camoufox/manifest.js';
+import { manifestArgv, manifestFor, parseManifest, printManifest } from '../../src/camoufox/manifest.js';
 import { MemoryFs, memoryRunner } from '../../src/exec/memory.js';
 
 const ROOT = '/Users/op/.local/share/get-me-there/camoufox';
@@ -421,6 +421,59 @@ describe('the manifest update reads from the new code (Task 17.1)', () => {
         flags: { ...FLAGS, 'linux-x64': FLAGS['darwin-arm64'] },
       }).flags.FORM_VERIFIED,
     ).toBe(true);
+  });
+});
+
+describe('the manifest printer (W6: the next pin, read before the stop)', () => {
+  const next = {
+    ...CAMOUFOX_PIN,
+    builds: {
+      ...CAMOUFOX_PIN.builds,
+      'darwin-arm64': { ...CAMOUFOX_PIN.builds['darwin-arm64'], build: '153.0.1-beta.30' },
+    },
+    flags: {
+      ...CAMOUFOX_PIN.flags,
+      'darwin-arm64': { ...CAMOUFOX_PIN.flags['darwin-arm64'], build: '153.0.1-beta.30' },
+    },
+  };
+  const load = (mod: unknown) => async () => mod;
+  it('prints this code’s manifest, or a given pin’s through this code’s schema', async () => {
+    expect(await printManifest(['linux-arm64'], load(null))).toEqual({
+      code: 0,
+      out: `${JSON.stringify(manifestFor('linux-arm64'))}\n`,
+      err: '',
+    });
+    const r = await printManifest(['darwin-arm64', '--pin', '/s/next.ts'], load({ CAMOUFOX_PIN: next }));
+    expect(r.code).toBe(0);
+    expect(parseManifest(r.out)?.entry.build).toBe('153.0.1-beta.30');
+    expect(parseManifest(r.out)?.flags.FORM_VERIFIED).toBe(true);
+  });
+  it('refuses a pin it cannot read (78) and a wrong command line (64), printing nothing on stdout', async () => {
+    for (const mod of [null, {}, { CAMOUFOX_PIN: { builds: {} } }, 'x'])
+      expect(await printManifest(['darwin-arm64', '--pin', '/s/p.ts'], load(mod))).toEqual({
+        code: 78,
+        out: '',
+        err: '/s/p.ts is not a pin this code can read\n',
+      });
+    expect(
+      await printManifest(['darwin-arm64', '--pin', '/s/p.ts'], async () => {
+        throw new Error('syntax error');
+      }),
+    ).toMatchObject({ code: 78 });
+    const usage =
+      'usage: printManifest.ts <darwin-arm64|darwin-x64|linux-arm64|linux-x64> [--pin <pin.ts>]\n';
+    for (const args of [
+      [],
+      ['win32-x64'],
+      ['darwin-arm64', '--pin'],
+      ['darwin-arm64', '--pins', 'f'],
+      ['darwin-arm64', '--pin', 'f', 'x'],
+    ])
+      expect(await printManifest(args, load(null)), args.join(' ')).toEqual({
+        code: 64,
+        out: '',
+        err: usage,
+      });
   });
 });
 

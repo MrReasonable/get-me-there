@@ -65,7 +65,12 @@ interface ReadVersion {
   build: string | undefined;
 }
 
-function readVersion(file: string): ReadVersion {
+/**
+ * A version.json's parts. `readByCamoufoxJs`: the file camoufox-js itself reads (the root's on macOS, the bundle's on
+ * Linux), which must name `release` (camoufox-js 0.11.5 reads no other field; pie-b1-007); the macOS bundle's own file
+ * may name it `build`.
+ */
+function readVersion(file: string, readByCamoufoxJs: boolean): ReadVersion {
   let raw: unknown;
   try {
     raw = JSON.parse(readFileSync(file, 'utf8'));
@@ -77,7 +82,7 @@ function readVersion(file: string): ReadVersion {
   if (!/^\d+\./.test(raw.version)) throw new InstallRefused('layout', `${file}: its version is not numeric`);
   const release = 'release' in raw && typeof raw.release === 'string' ? raw.release : undefined;
   const build = 'build' in raw && typeof raw.build === 'string' ? raw.build : undefined;
-  const r = release ?? build;
+  const r = readByCamoufoxJs ? release : (release ?? build);
   if (r === undefined) throw new InstallRefused('layout', `${file} names no release`);
   if (!releaseAccepted(r))
     throw new InstallRefused('layout', `${file}: camoufox-js does not accept the release ${r}`);
@@ -95,9 +100,9 @@ function notEmpty(dir: string): void {
   try {
     names = readdirSync(dir);
   } catch {
-    throw new InstallRefused('layout', `no Camoufox install at ${dir}: run pnpm gmt setup`);
+    throw new InstallRefused('layout', `no Camoufox install at ${dir}: run pnpm gmt browser install`);
   }
-  if (names.length === 0) throw new InstallRefused('layout', `${dir} is empty: run pnpm gmt setup`);
+  if (names.length === 0) throw new InstallRefused('layout', `${dir} is empty: run pnpm gmt browser install`);
 }
 
 /** The installed build against the pin: refused as `build-mismatch`, naming both. */
@@ -121,7 +126,7 @@ export function ensureInstallLayout(o: {
   notEmpty(o.installDir);
   if (o.os === 'linux') {
     need(o.installDir, ['version.json', 'camoufox-bin', 'properties.json', 'fontconfig/macos/fonts.conf']);
-    const v = readVersion(join(o.installDir, 'version.json'));
+    const v = readVersion(join(o.installDir, 'version.json'), true);
     const build = pinned(v, o.entry);
     return {
       installDir: o.installDir,
@@ -130,27 +135,27 @@ export function ensureInstallLayout(o: {
       ffMajor: Number(v.version.split('.')[0]),
     };
   }
-  const top = readVersion(join(o.installDir, 'version.json'));
+  const top = readVersion(join(o.installDir, 'version.json'), true);
   const link = join(o.installDir, 'Camoufox.app');
   let isLink = false;
   try {
     isLink = lstatSync(link).isSymbolicLink();
   } catch {
-    throw new InstallRefused('layout', `the Camoufox install has no ${link}: run pnpm gmt setup`);
+    throw new InstallRefused('layout', `the Camoufox install has no ${link}: run pnpm gmt browser install`);
   }
   if (!isLink) throw new InstallRefused('layout', `${link} is not a symlink to a Camoufox bundle`);
   let app: string;
   try {
     app = realpathSync(link);
   } catch {
-    throw new InstallRefused('layout', `${link} points at nothing: run pnpm gmt setup`);
+    throw new InstallRefused('layout', `${link} points at nothing: run pnpm gmt browser install`);
   }
   const bundleDir = dirname(app);
   const official = join(realpathSync(o.installDir), 'browsers', 'official');
   if (basename(app) !== 'Camoufox.app' || dirname(bundleDir) !== official)
     throw new InstallRefused('layout', `${link} does not point into ${official}`);
   need(app, ['Contents/MacOS/camoufox', 'Contents/Resources/properties.json']);
-  const bundle = readVersion(join(bundleDir, 'version.json'));
+  const bundle = readVersion(join(bundleDir, 'version.json'), false);
   const build = pinned(bundle, o.entry);
   // why: camoufox-js reads the top-level file; one that disagrees with its bundle is a changed layout, never rewritten
   if (top.version !== bundle.version || top.release !== bundle.release)
