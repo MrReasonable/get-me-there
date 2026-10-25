@@ -1,16 +1,15 @@
-import { CAMOUFOX_BUILDS, type CamoufoxBuild, OS_ARCHES } from '@gmt/core';
+import { CAMOUFOX_BUILDS, type CamoufoxBuild, FLAGS, OS_ARCHES } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
 import {
   bundlePath,
   bundleVersionText,
   freeBytesAt,
   installedDigest,
-  installingNote,
   megabytes,
   osArchOf,
   otherBundles,
-  planCamoufoxUpdate,
   planInstall,
+  staleEntries,
   staysOffNote,
 } from '../../src/camoufox/install.js';
 import { planLayout, topVersionText } from '../../src/camoufox/layout.js';
@@ -118,7 +117,7 @@ describe('the install planner (Task 17.1; spec §2 "Method"; decision 73)', () =
       const p = plan(fs);
       expect(p.kind).toBe('refused');
       expect(p.kind === 'refused' ? p.message : '').toBe(
-        `${BUNDLE} is there but is not the pinned Camoufox 152.0.4-beta.28 (its version.json does not name the digest ${MAC.sha256}); it is never overwritten: move it aside, then run setup again`,
+        `${BUNDLE} is there but is not the pinned Camoufox 152.0.4-beta.28 (its version.json does not name the digest ${MAC.sha256}); it is never overwritten: move it aside, then run pnpm gmt browser install`,
       );
     }
   });
@@ -243,7 +242,7 @@ describe('the layout the CLI owns (Task 17.1)', () => {
     ])
       expect(layout(fs)).toEqual({
         kind: 'refused',
-        message: `${ROOT}/Camoufox.app is not a symlink to a Camoufox bundle; it is never replaced: move it aside, then run setup again`,
+        message: `${ROOT}/Camoufox.app is not a symlink to a Camoufox bundle; it is never replaced: move it aside, then run pnpm gmt browser install`,
       });
   });
 
@@ -263,6 +262,7 @@ describe('the layout the CLI owns (Task 17.1)', () => {
 });
 
 describe('the host checks (Task 17.1; WP17 §0)', () => {
+  const ENV = { PATH: '/usr/bin:/bin', HOME: '/home/op' };
   const LIN = '/home/op/.local/share/get-me-there/camoufox/browsers/official/152.0.4-beta.28-924f3109';
   const linuxBundle = () =>
     new MemoryFs(501)
@@ -285,8 +285,31 @@ describe('the host checks (Task 17.1; WP17 §0)', () => {
       `${LIN}/libxul.so`,
     ]);
     const runner = memoryRunner(fs, () => ({ code: 0, stdout: '\tlibc.so.6 => /lib/libc.so.6 (0x1)\n' }));
-    expect(await libraryProblem(runner, fs, LIN)).toBeNull();
+    expect(await libraryProblem(runner, fs, LIN, ENV)).toBeNull();
     expect(runner.calls.map((c) => c.argv)).toEqual(linkedFiles(fs, LIN).map((f) => ['ldd', f]));
+  });
+
+  it('ldd runs with LD_LIBRARY_PATH naming the bundle and its library directories, so the bundle’s own libraries resolve (W4)', async () => {
+    const fs = linuxBundle();
+    // why: as ldd does: libxul.so finds libmozgtk.so only when LD_LIBRARY_PATH names the bundle
+    const runner = memoryRunner(fs, (argv, call) => {
+      if (argv[1]?.endsWith('/libxul.so') !== true) return { code: 0, stdout: '' };
+      const dirs = (call.env?.LD_LIBRARY_PATH ?? '').split(':');
+      return {
+        code: 0,
+        stdout: `\tlibmozgtk.so => ${dirs.includes(LIN) ? `${LIN}/libmozgtk.so` : 'not found'}\n\tlibgtk-3.so.0 => /lib/libgtk-3.so.0\n`,
+      };
+    });
+    expect(await libraryProblem(runner, fs, LIN, ENV)).toBeNull();
+    for (const c of runner.calls)
+      expect(c.env).toEqual({ ...ENV, LD_LIBRARY_PATH: `${LIN}:${LIN}/gmp-clearkey/0.1` });
+    // and a host library the bundle does not ship still refuses
+    const host = memoryRunner(fs, (argv) =>
+      argv[1]?.endsWith('/libxul.so') === true
+        ? { code: 0, stdout: '\tlibgtk-3.so.0 => not found\n' }
+        : { code: 0, stdout: '' },
+    );
+    expect(await libraryProblem(host, fs, LIN, ENV)).toMatch(/missing on this machine \(libgtk-3\.so\.0\)/);
   });
 
   it('only libxul.so reporting libgtk-3.so.0 => not found refuses, naming the missing sonames and the apt line', async () => {
@@ -300,8 +323,8 @@ describe('the host checks (Task 17.1; WP17 §0)', () => {
           }
         : { code: 0, stdout: '\tlibc.so.6 => /lib/libc.so.6\n' },
     );
-    expect(await libraryProblem(runner, fs, LIN)).toBe(
-      `Firefox’s libraries are missing on this machine (libasound.so.2, libgtk-3.so.0). On Ubuntu 24.04 install them with: ${APT_LINE} (Debian 12 also needs libdbus-glib-1-2 libharfbuzz0b libxtst6), then run setup again`,
+    expect(await libraryProblem(runner, fs, LIN, ENV)).toBe(
+      `Firefox’s libraries are missing on this machine (libasound.so.2, libgtk-3.so.0). On Ubuntu 24.04 install them with: ${APT_LINE} (Debian 12 also needs libdbus-glib-1-2 libharfbuzz0b libxtst6), then run pnpm gmt browser install`,
     );
     expect(APT_LINE).toBe(`sudo apt-get install ${UBUNTU_LIBRARIES.join(' ')}`);
     expect(UBUNTU_LIBRARIES).toHaveLength(25);
@@ -310,8 +333,8 @@ describe('the host checks (Task 17.1; WP17 §0)', () => {
 
   it('a bundle without camoufox-bin, or a machine without ldd, refuses with its own words', async () => {
     const fs = new MemoryFs(501).file(`${LIN}/libxul.so`, 'ELF');
-    expect(await libraryProblem(memoryRunner(fs), fs, LIN)).toBe(
-      `${LIN} has no camoufox-bin to check; run setup again to reinstall Camoufox`,
+    expect(await libraryProblem(memoryRunner(fs), fs, LIN, ENV)).toBe(
+      `${LIN} has no camoufox-bin to check; move it aside, then run pnpm gmt browser install`,
     );
     const full = linuxBundle();
     expect(
@@ -319,6 +342,7 @@ describe('the host checks (Task 17.1; WP17 §0)', () => {
         memoryRunner(full, () => ({ code: 127 })),
         full,
         LIN,
+        ENV,
       ),
     ).toBe('ldd is not installed, so Firefox’s libraries cannot be checked: sudo apt-get install libc-bin');
   });
@@ -382,94 +406,93 @@ describe('the manifest update reads from the new code (Task 17.1)', () => {
       '--conditions=@gmt/source',
       '--import',
       'tsx',
-      '/repo/apps/cli/src/printManifest.ts',
+      '/repo/apps/cli/src/camoufox/printManifest.ts',
       'linux-arm64',
     ]);
+    expect(manifestArgv('/n', '/repo', 'linux-arm64', '/s/update-pin-ab.ts').slice(-3)).toEqual([
+      'linux-arm64',
+      '--pin',
+      '/s/update-pin-ab.ts',
+    ]);
+    // why: W6: any validated pin's manifest, its flags read on its own build
+    expect(
+      manifestFor('linux-x64', {
+        builds: CAMOUFOX_BUILDS,
+        flags: { ...FLAGS, 'linux-x64': FLAGS['darwin-arm64'] },
+      }).flags.FORM_VERIFIED,
+    ).toBe(true);
   });
 });
 
-describe('update’s Camoufox step, planned (Task 17.1)', () => {
-  const NEW = { ...MAC, build: '153.0.1-beta.30', sha256: 'c'.repeat(64) };
-  const NEW_BUNDLE = `${ROOT}/browsers/official/153.0.1-beta.30-cccccccc`;
-  const step = (fs: MemoryFs, entry: CamoufoxBuild, formVerified: boolean) =>
-    planCamoufoxUpdate({
-      os: 'darwin',
-      osArch: 'darwin-arm64',
+describe('what an earlier attempt left, and a kept archive (W6)', () => {
+  // why: dev-b1-005, sec-b1-001: an interrupted install leaves gigabytes under hidden names; any later run sweeps them
+  it('every install first removes the unpack’s and the layout’s temporary names, a partial download and other pins’ archives', () => {
+    const name = '152.0.4-beta.28-8b7680a6';
+    const fs = new MemoryFs(501)
+      .dir(`${ROOT}/.tmp-0badf00d/inner`)
+      .dir(`${ROOT}/..tmp-0badf00d.tmp-1-ab`)
+      .file(`${ROOT}/.Camoufox.app.tmp-beef`, '')
+      .file(`${ROOT}/.version.json.tmp-9-cd`, '')
+      .file(`${ROOT}/.download-${name}.zip.part`, 'half')
+      .file(`${ROOT}/.download-152.0.4-beta.27-aaaaaaaa.zip`, 'old')
+      .file(`${ROOT}/version.json`, '{}')
+      .dir(`${ROOT}/browsers`);
+    expect(staleEntries(fs, ROOT, MAC).sort()).toEqual(
+      [
+        `${ROOT}/..tmp-0badf00d.tmp-1-ab`,
+        `${ROOT}/.Camoufox.app.tmp-beef`,
+        `${ROOT}/.download-152.0.4-beta.27-aaaaaaaa.zip`,
+        `${ROOT}/.download-${name}.zip.part`,
+        `${ROOT}/.tmp-0badf00d`,
+        `${ROOT}/.version.json.tmp-9-cd`,
+      ].sort(),
+    );
+    const p = plan(fs);
+    if (p.kind !== 'install') throw new Error(p.kind);
+    expect(p.actions.filter((a) => a.kind === 'remove' && a.recursive).length).toBe(6);
+    expect(p.actions.findIndex((a) => a.kind === 'download')).toBeGreaterThan(5);
+  });
+  it('the pinned archive already whole is not fetched again (the unpack re-hashes it); one of another size is', () => {
+    const archive = `${ROOT}/.download-152.0.4-beta.28-8b7680a6.zip`;
+    const whole = new MemoryFs(501).file(archive, 'x'.repeat(MAC.bytes > 1000 ? 10 : 10));
+    const sized = { ...MAC, bytes: 10 };
+    const p = planInstall({ root: ROOT, entry: sized, files: whole, freeBytes: PLENTY, random: 'abcd1234' });
+    if (p.kind !== 'install') throw new Error(p.kind);
+    expect(p.actions.map((a) => a.kind)).not.toContain('download');
+    expect(p.actions.find((a) => a.kind === 'unpack')).toMatchObject({ archive });
+    expect(staleEntries(whole, ROOT, sized)).toEqual([]);
+    const partial = new MemoryFs(501).file(archive, 'x'.repeat(9));
+    const q = planInstall({
       root: ROOT,
-      entry,
-      formVerified,
-      files: fs,
+      entry: sized,
+      files: partial,
       freeBytes: PLENTY,
       random: 'abcd1234',
-      layout: (bundle) => planLayout({ os: 'darwin', root: ROOT, bundle, entry, files: fs, random: 'beef' }),
     });
-  const installed = () =>
-    new MemoryFs(501)
-      .file(`${BUNDLE}/version.json`, bundleVersionText(MAC))
-      .dir(`${BUNDLE}/Camoufox.app`)
-      .symlink(`${ROOT}/Camoufox.app`, `${BUNDLE}/Camoufox.app`)
-      .file(`${ROOT}/version.json`, topVersionText(MAC));
-
-  it('with no Camoufox installed, nothing at all', () => {
-    expect(step(new MemoryFs(501), NEW, true)).toEqual({ kind: 'none' });
+    expect(q.kind === 'install' && q.actions.map((a) => a.kind)).toContain('download');
   });
-
-  it('the pin already installed: only its layout’s repairs', () => {
-    expect(step(installed(), MAC, true)).toEqual({ kind: 'current', actions: [] });
-    const fs = installed();
-    fs.delete(`${ROOT}/version.json`);
-    expect(step(fs, MAC, false)).toMatchObject({ kind: 'current', actions: [{ kind: 'writeFile' }] });
-  });
-
-  it('a changed pin with its flags set installs it (no keep option), switches the layout, and removes the old bundle after', () => {
-    const r = step(installed(), NEW, true);
-    if (r.kind !== 'install') throw new Error(r.kind);
-    expect(r.bundle).toBe(NEW_BUNDLE);
-    expect(r.note).toBe(
-      'installing Camoufox 153.0.1-beta.30 for darwin-arm64; the previous bundle is removed once the app is healthy',
-    );
-    // why: the memory tree's parents are 0755, so the planner tightens them first
-    expect(r.actions.map((a) => a.kind)).toEqual([
-      'mkdir',
-      'mkdir',
-      'mkdir',
-      'download',
-      'unpack',
-      'writeFile',
-      'rename',
-      'remove',
-      'run',
-      'rename',
-      'writeFile',
-    ]);
-    expect(r.after).toEqual([{ kind: 'remove', path: BUNDLE, recursive: true }]);
-  });
-
-  it('a changed pin without flags installs nothing and keeps the old bundle, saying so', () => {
-    expect(step(installed(), NEW, false)).toEqual({
-      kind: 'stays-off',
-      note: 'the browser provider stays off on darwin-arm64 until recordings for 153.0.1-beta.30 land; the installed Camoufox is kept',
+  it('--keep-archive keeps the verified download; otherwise it is removed once unpacked', () => {
+    const kept = planInstall({
+      root: ROOT,
+      entry: MAC,
+      files: new MemoryFs(501),
+      freeBytes: PLENTY,
+      random: 'abcd1234',
+      keepArchive: true,
     });
+    if (kept.kind !== 'install') throw new Error(kept.kind);
+    expect(kept.actions.at(-1)?.kind).toBe('rename');
+    const plain = plan(new MemoryFs(501));
+    expect(plain.kind === 'install' && plain.actions.at(-1)).toMatchObject({
+      kind: 'remove',
+      recursive: false,
+    });
+  });
+  it('the update’s words when the new pin has no recordings for this machine', () => {
     expect(staysOffNote('linux-x64', '152.0.4-beta.28')).toBe(
       'the browser provider stays off on linux-x64 until recordings for 152.0.4-beta.28 land; the installed Camoufox is kept',
     );
-    expect(installingNote('linux-x64', 'b')).toBe(
-      'installing Camoufox b for linux-x64; the previous bundle is removed once the app is healthy',
-    );
   });
-
-  it('a refused install or layout is the step’s refusal', () => {
-    const notOurs = installed().file(`${NEW_BUNDLE}/version.json`, '{}');
-    expect(step(notOurs, NEW, true).kind).toBe('refused');
-    const dirLink = new MemoryFs(501)
-      .file(`${BUNDLE}/version.json`, bundleVersionText(MAC))
-      .dir(`${ROOT}/Camoufox.app`);
-    expect(step(dirLink, MAC, true)).toEqual({
-      kind: 'refused',
-      message: `${ROOT}/Camoufox.app is not a symlink to a Camoufox bundle; it is never replaced: move it aside, then run setup again`,
-    });
-  });
-
   it('bundlePath names the build and the digest’s first 8 hex characters', () => {
     expect(bundlePath(ROOT, MAC)).toBe(BUNDLE);
   });

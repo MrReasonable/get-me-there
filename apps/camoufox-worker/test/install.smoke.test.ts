@@ -31,7 +31,15 @@ const title = `install smoke: the pinned Camoufox launched through the worker ag
 }`;
 const children: ChildProcess[] = [];
 afterEach(() => {
-  for (const c of children.splice(0)) if (c.exitCode === null && c.signalCode === null) c.kill('SIGKILL');
+  // why: ts-b1-005: the child runs in its own process group, so a browser it started goes with it
+  for (const c of children.splice(0))
+    if (c.exitCode === null && c.signalCode === null && c.pid !== undefined) {
+      try {
+        process.kill(-c.pid, 'SIGKILL');
+      } catch {
+        c.kill('SIGKILL');
+      }
+    }
 });
 
 // why: in the camoufox-install job a missing install is a failure, never a quiet skip
@@ -53,6 +61,7 @@ describe.skipIf(!enabled)(title, () => {
         cwd: WORKER,
         env: { HOME: homedir(), PATH: process.env.PATH ?? '/usr/bin:/bin', CAMOUFOX_DATA_DIR: data },
         stdio: ['ignore', 'pipe', 'pipe'],
+        detached: true,
       });
       children.push(c);
       let out = '';

@@ -113,6 +113,7 @@ function setup(
   o: { scrollsLeft?: (executionId: string | null) => number | null; now?: string } = {},
 ) {
   const { kit, budget, log, clock } = makeKit({ limits: testLimits() });
+  const at = clock;
   if (o.now !== undefined) clock.set(asIsoDateTime(o.now));
   const p = camoufoxProvider({
     http: kit,
@@ -126,7 +127,7 @@ function setup(
   });
   const d = p.discovery;
   if (d === undefined) throw new Error('discovery');
-  return { p, d, budget };
+  return { p, d, budget, clock: at };
 }
 const body = async (req: Request): Promise<unknown> => JSON.parse(await req.text());
 
@@ -293,6 +294,43 @@ describe('camoufox grid mode', () => {
     // why: another run asks the worker again (its month may have turned)
     expect((await d.fetchTile(tile, wide, { ...ctx, executionId: 'exec-2' })).kind).toBe('tile');
     expect(hits).toBe(2);
+  });
+
+  // why: W3 (cb-b1-001, pa-b1-001): the stop lasts until the worker's window ends, then the worker is asked again
+  it('a run paused on the worker’s scroll cap reaches the worker again once its window ends; a call with no run is never held', async () => {
+    const { d, clock } = setup(
+      { executionPageCap: 1, executionScrollCap: 600, scrollCap: 30 },
+      { scrollsLeft: () => 10 },
+    );
+    const wide = { ...Q, departureTo: asIsoDate('2027-03-24') };
+    const [tile] = d.plan(wide);
+    if (tile === undefined) throw new Error('tile');
+    let hits = 0;
+    server.use(
+      http.post(URL_, () => {
+        hits++;
+        // why: the page is read at the clock's own time, which the test moves past the window's end
+        return HttpResponse.json(
+          { ...answer({ views: [view()], ended: 'allowance', scrolls: 4 }), fetchedAt: clock.now() },
+          contacted,
+        );
+      }),
+    );
+    expect((await d.fetchTile(tile, wide, ctx)).kind).toBe('tile');
+    const held = d.fetchTile(tile, wide, ctx);
+    // why: the default billing day is the 1st: the kit's clock (2026-10-14) is in the window ending 2026-11-01
+    await expect(held).rejects.toMatchObject({
+      unit: 'scrolls',
+      counter: 'worker',
+      windowEnd: '2026-11-01T00:00:00.000Z',
+    });
+    clock.set(asIsoDateTime('2026-11-01T00:00:00.000Z'));
+    expect((await d.fetchTile(tile, wide, ctx)).kind).toBe('tile');
+    expect(hits).toBe(2);
+    // why: a null execution id is never remembered, so no later call without a run is held by another's
+    expect((await d.fetchTile(tile, wide, { ...ctx, executionId: null })).kind).toBe('tile');
+    expect((await d.fetchTile(tile, wide, { ...ctx, executionId: null })).kind).toBe('tile');
+    expect(hits).toBe(4);
   });
   it('with no scrolls left, a page still opens and reads its first block, reserving none (CA 1)', async () => {
     const { d, budget } = setup(

@@ -1,12 +1,9 @@
-import { chmodSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import {
   CAMOUFOX_BUILDS,
   type Clock,
-  type IsoDateTime,
   type OsArch,
   START_REFUSAL_TEXT,
   type StartFacts,
-  type StartRefusal,
   type StartRefusalReason,
   startChecks,
   startRefusalSchema,
@@ -15,7 +12,8 @@ import {
 import { loadWorkerConfig } from './config.js';
 import { ensureInstallLayout, type InstallFacts, InstallRefused } from './install.js';
 import { lockHeld } from './lock.js';
-import { installDirFor, startRefusalFile } from './paths.js';
+import { countsFact } from './monthly.js';
+import { installDirFor } from './paths.js';
 import { osArchOf } from './platform.js';
 import { type Entry, type EntryContext, EX_CONFIG } from './run.js';
 import { type ConsentRecord, readConsentRecord, startConsentOf } from './socs.js';
@@ -27,23 +25,7 @@ import { type ConsentRecord, readConsentRecord, startConsentOf } from './socs.js
  * only: no message, no path, no secret), and a successful start removes it; `run.ts check --json` prints the same
  * result without starting anything.
  */
-export function writeStartRefusal(
-  dataDir: string,
-  reason: StartRefusalReason,
-  at: IsoDateTime,
-): StartRefusal {
-  const r = startRefusalSchema.parse({ reason, at });
-  const file = startRefusalFile(dataDir);
-  const tmp = `${file}.tmp`;
-  writeFileSync(tmp, JSON.stringify(r), { mode: 0o600 });
-  chmodSync(tmp, 0o600);
-  renameSync(tmp, file);
-  return r;
-}
-
-export function clearStartRefusal(dataDir: string): void {
-  rmSync(startRefusalFile(dataDir), { force: true });
-}
+export { clearStartRefusal, writeStartRefusal } from './refusalFile.js';
 
 export interface GatheredStart {
   facts: StartFacts;
@@ -97,6 +79,7 @@ export function gatherStart(o: {
       signedIn: false,
       locked: o.locked,
       now: o.clock.now(),
+      counts: countsFact(o.dataDir),
     },
   };
 }
@@ -111,7 +94,10 @@ export function refusalWords(reason: StartRefusalReason, g: GatheredStart): stri
   return `${t.summary}${detail}${t.fixCommand === null ? '' : `; fix: ${t.fixCommand}`}`;
 }
 
-/** `run.ts check --json`: the start's result as one JSON line, `{ reason, at }` or `{ "ok": true }`; nothing starts. */
+/**
+ * `run.ts check --json`: the start's result as one JSON line, `{ reason, at }` or `{ "ok": true }`; nothing starts and
+ * nothing is written. A refusal of the worker's settings is `config`, its own words on stderr (W1).
+ */
 export async function check(
   ctx: EntryContext,
   d: { platform: string; arch: string; clock: Clock; locked: (dataDir: string) => boolean },
@@ -120,13 +106,15 @@ export async function check(
     ctx.err('usage: run.ts check --json');
     return EX_CONFIG;
   }
+  let home: string;
   try {
-    loadWorkerConfig(ctx.env);
+    // why: CodeRabbit (PR #15): the install directory comes from the settings' own HOME, as the start's does
+    home = loadWorkerConfig(ctx.env).home;
   } catch (e) {
+    ctx.out(JSON.stringify(startRefusalSchema.parse({ reason: 'config', at: d.clock.now() })));
     ctx.err(e instanceof Error ? e.message : String(e));
     return EX_CONFIG;
   }
-  const home = ctx.env.HOME ?? '';
   const g = gatherStart({
     platform: d.platform,
     arch: d.arch,

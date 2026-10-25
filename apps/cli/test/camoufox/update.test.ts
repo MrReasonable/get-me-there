@@ -4,6 +4,7 @@ import { bundleVersionText } from '../../src/camoufox/install.js';
 import { topVersionText } from '../../src/camoufox/layout.js';
 import type { Manifest } from '../../src/camoufox/manifest.js';
 import { manifestFor } from '../../src/camoufox/manifest.js';
+import { DRY_RUN_LINE } from '../../src/camoufox/updateStep.js';
 import { runCli } from '../../src/cli.js';
 import { systemExecutor } from '../../src/exec/system.js';
 import type { Action } from '../../src/plan/action.js';
@@ -19,7 +20,16 @@ const NEW_BUNDLE = `${ROOT}/browsers/official/153.0.1-beta.30-cccccccc`;
 const flagsOn = manifestFor('darwin-arm64').flags;
 const flagsOff = manifestFor('linux-x64').flags;
 
-async function world(o: { manifest: Manifest | string; healthy?: boolean; camoufox?: boolean }) {
+async function world(o: {
+  manifest: Manifest | string;
+  /** What the next commit's pin.ts reads as before the stop (its own printer, `--pin`); null: git show fails. */
+  next?: Manifest | string | null;
+  healthy?: boolean;
+  camoufox?: boolean;
+  enabled?: boolean;
+  /** Downloads fail (a network problem) while true. */
+  downloadsFail?: () => boolean;
+}) {
   let started = false;
   let head = 'aaaa1111';
   let healthy = true;
@@ -39,7 +49,17 @@ async function world(o: { manifest: Manifest | string; healthy?: boolean; camouf
         if (argv[1] === 'rev-parse')
           return { code: 0, stdout: `${argv[2] === 'HEAD' ? head : 'bbbb2222'}\n` };
         if (argv[1] === 'merge') head = 'bbbb2222';
+        if (argv[1] === 'show') {
+          const next = o.next === undefined ? o.manifest : o.next;
+          return next === null
+            ? { code: 128, stderr: 'fatal: path not in origin/main' }
+            : { code: 0, stdout: 'export const CAMOUFOX_PIN = {};\n' };
+        }
         return { code: 0 };
+      }
+      if (argv.some((a) => a.endsWith('printManifest.ts')) && argv.includes('--pin')) {
+        const next = o.next === undefined ? o.manifest : o.next;
+        return { code: 0, stdout: typeof next === 'string' ? next : JSON.stringify(next) };
       }
       if (argv.some((a) => a.endsWith('backup.mjs')))
         return {
@@ -59,6 +79,14 @@ async function world(o: { manifest: Manifest | string; healthy?: boolean; camouf
   });
   m.fs.file('/work/a.json', '{}', 0o600);
   expect(await runCli(['setup', '--non-interactive', '--answers', '/work/a.json'], m.deps)).toBe(0);
+  if (o.enabled === true) {
+    const env = '/Users/op/.config/get-me-there/app.env';
+    m.fs.file(
+      env,
+      `${m.fs.read(env) ?? ''}CAMOUFOX_ENABLED="true"\nCAMOUFOX_WORKER_URL="http://127.0.0.1:8090"\nCAMOUFOX_WORKER_KEY="${'k'.repeat(48)}"\n`,
+      0o600,
+    );
+  }
   if (o.camoufox !== false)
     m.fs
       .file(`${OLD}/version.json`, bundleVersionText(MAC))
@@ -77,6 +105,7 @@ async function world(o: { manifest: Manifest | string; healthy?: boolean; camouf
     run: async (a: Action) => {
       if (a.kind === 'download') {
         await download.run(a).catch(() => undefined);
+        if (o.downloadsFail?.() === true) throw new Error(`download of ${a.url} answered 503`);
         m.fs.file(a.to, 'zip', 0o600);
       }
       if (a.kind === 'waitHealthy' && !healthy) throw new Error(`${a.url} did not answer healthy`);
@@ -96,36 +125,80 @@ async function world(o: { manifest: Manifest | string; healthy?: boolean; camouf
 }
 const kinds = (log: readonly Action[]) => log.map((a) => (a.kind === 'remove' ? `remove ${a.path}` : a.kind));
 
-describe('update’s Camoufox step (Task 17.1)', () => {
-  it('a changed entry whose flags are set is installed after the build, and the previous bundle removed only after the health wait', async () => {
+const stopAt = (log: readonly Action[]) =>
+  log.findIndex((a) => a.kind === 'run' && a.argv[0] === 'launchctl' && a.argv[1] === 'bootout');
+
+describe('update’s Camoufox step (Task 17.1; W6)', () => {
+  // why: W6 (dev-b1-006): the network work is done while the app runs; only the switch happens while it is stopped
+  it('a changed entry whose flags are set is downloaded before the app stops, switched after the build, the previous bundle removed after the health wait', async () => {
     const m = await world({ manifest: { entry: NEW, flags: flagsOn } });
     expect(await runCli(['update'], m.deps)).toBe(0);
     expect(m.io.stdout).toContain(
-      'installing Camoufox 153.0.1-beta.30 for darwin-arm64; the previous bundle is removed once the app is healthy\n',
+      'Downloading Camoufox 153.0.1-beta.30 for darwin-arm64 (313 MB) from github.com',
     );
     const log = kinds(m.executor.log);
     const build = m.executor.log.findIndex((a) => a.kind === 'run' && a.argv.join(' ') === 'pnpm build');
     const download = log.indexOf('download');
+    const stop = stopAt(m.executor.log);
+    const link = m.executor.log.findIndex((a) => a.kind === 'run' && a.argv[0] === 'ln');
     const health = log.indexOf('waitHealthy');
     const removal = log.indexOf(`remove ${OLD}`);
-    expect(build).toBeGreaterThan(-1);
-    expect(download).toBeGreaterThan(build);
-    expect(health).toBeGreaterThan(download);
+    expect(download).toBeGreaterThan(-1);
+    expect(stop).toBeGreaterThan(download);
+    expect(build).toBeGreaterThan(stop);
+    expect(link).toBeGreaterThan(build);
+    expect(health).toBeGreaterThan(link);
     expect(removal).toBeGreaterThan(health);
+    expect(log.filter((k) => k === 'download')).toHaveLength(1);
     expect(m.fs.read(`${NEW_BUNDLE}/version.json`)).toBe(bundleVersionText(NEW));
     expect(m.fs.realpath(`${ROOT}/Camoufox.app`)).toBe(`${NEW_BUNDLE}/Camoufox.app`);
     expect(m.fs.read(`${ROOT}/version.json`)).toBe('{"version":"153.0.1","release":"beta.30"}');
     expect(m.fs.isDir(OLD)).toBe(false);
-    const read = m.runner.calls.find((c) => c.argv.some((a) => a.endsWith('printManifest.ts')));
-    expect(read?.argv).toEqual([
-      '/opt/node/bin/node',
-      '--conditions=@gmt/source',
-      '--import',
-      'tsx',
-      '/repo/apps/cli/src/printManifest.ts',
-      'darwin-arm64',
+    const reads = m.runner.calls.filter((c) => c.argv.some((a) => a.endsWith('printManifest.ts')));
+    expect(reads.map((c) => c.argv.slice(4))).toEqual([
+      [
+        '/repo/apps/cli/src/camoufox/printManifest.ts',
+        'darwin-arm64',
+        '--pin',
+        expect.stringMatching(/update-pin-[0-9a-f]+\.ts$/),
+      ],
+      ['/repo/apps/cli/src/camoufox/printManifest.ts', 'darwin-arm64'],
     ]);
-    expect(read?.cwd).toBe('/repo/apps/cli');
+    expect(reads.every((c) => c.cwd === '/repo/apps/cli')).toBe(true);
+    const show = m.runner.calls.find((c) => c.argv[0] === 'git' && c.argv[1] === 'show');
+    expect(show?.argv).toEqual(['git', 'show', 'origin/main:packages/core/src/camoufox/pin.ts']);
+    // why: the next pin's copy is read from a file of its own, removed once read
+    const pinFile = String(reads[0]?.argv.at(-1));
+    expect(m.fs.read(pinFile)).toBeNull();
+  });
+
+  it('a download that fails before the stop is said and tried again after the build; the app is never down for it twice', async () => {
+    let fail = true;
+    const m = await world({ manifest: { entry: NEW, flags: flagsOn }, downloadsFail: () => fail });
+    const inner = m.deps.executor;
+    m.deps.executor = {
+      run: async (a: Action) => {
+        if (a.kind === 'run' && a.argv.join(' ') === 'pnpm build') fail = false;
+        return inner.run(a);
+      },
+    };
+    expect(await runCli(['update'], m.deps)).toBe(0);
+    expect(m.io.stdout).toContain('the browser install runs after the build instead');
+    expect(m.io.stdout.match(/Downloading Camoufox 153\.0\.1-beta\.30/g)).toHaveLength(2);
+    expect(kinds(m.executor.log).indexOf('download')).toBeGreaterThan(stopAt(m.executor.log));
+    expect(m.fs.realpath(`${ROOT}/Camoufox.app`)).toBe(`${NEW_BUNDLE}/Camoufox.app`);
+  });
+
+  it('a next pin that cannot be read before the stop is said, and the install runs after the build', async () => {
+    for (const next of [null, 'garbled']) {
+      const m = await world({ manifest: { entry: NEW, flags: flagsOn }, next });
+      expect(await runCli(['update'], m.deps)).toBe(0);
+      expect(m.io.stdout).toMatch(
+        /the next commit’s Camoufox pin (could not be read|is not one this code reads); the browser install runs after the build instead/,
+      );
+      const log = kinds(m.executor.log);
+      expect(log.indexOf('download')).toBeGreaterThan(stopAt(m.executor.log));
+    }
   });
 
   it('when the health wait fails, the previous bundle is kept', async () => {
@@ -147,7 +220,7 @@ describe('update’s Camoufox step (Task 17.1)', () => {
     expect(m.fs.realpath(`${ROOT}/Camoufox.app`)).toBe(`${OLD}/Camoufox.app`);
   });
 
-  it('with no Camoufox installed, update installs nothing, and says when the new code offers the provider here', async () => {
+  it('with no Camoufox installed and the provider off, update installs nothing, and says when the new code offers the provider here', async () => {
     const on = await world({ manifest: { entry: NEW, flags: flagsOn }, camoufox: false });
     expect(await runCli(['update'], on.deps)).toBe(0);
     expect(kinds(on.executor.log)).not.toContain('download');
@@ -161,28 +234,45 @@ describe('update’s Camoufox step (Task 17.1)', () => {
     expect(await runCli(['update'], unreadable.deps)).toBe(0);
   });
 
-  it('a pin the new code cannot print stops the update with the recovery report', async () => {
-    const m = await world({ manifest: 'not json' });
-    expect(await runCli(['update'], m.deps)).toBe(1);
-    expect(m.io.stderr).toContain(
-      'the new code’s Camoufox pin could not be read\nupdate stopped at the browser install',
-    );
-    expect(kinds(m.executor.log)).not.toContain('waitHealthy');
+  // why: po-b1-002: with the provider on but no bundle (removed, or never installed), update installs it
+  it('with the provider on and no bundle, update installs the pin and never says it is newly available', async () => {
+    const m = await world({ manifest: { entry: MAC, flags: flagsOn }, camoufox: false, enabled: true });
+    // why: the closing status reads the worker, which this stand-in machine does not run; the update itself succeeded
+    await runCli(['update'], m.deps);
+    expect(m.io.stderr).toBe('');
+    expect(m.io.stdout).toContain('updated aaaa1111 to bbbb2222');
+    expect(m.io.stdout).not.toContain('now available');
+    expect(m.fs.read(`${OLD}/version.json`)).toBe(bundleVersionText(MAC));
   });
 
-  it('the pin unchanged changes nothing in the browser install', async () => {
+  // why: CodeRabbit (PR #15), dev-b1-006: the browser is optional; its failure never keeps the app down
+  it('a pin the new code cannot print: the app starts again without the worker, and the update reports the failure', async () => {
+    const m = await world({ manifest: 'not json', next: { entry: MAC, flags: flagsOn } });
+    expect(await runCli(['update'], m.deps)).toBe(1);
+    expect(m.io.stderr).toContain(
+      'the new code’s Camoufox pin could not be read\nThe app starts again without the browser worker; pnpm gmt browser install retries the install.\n',
+    );
+    expect(m.io.stderr).toContain('but not the browser install: run pnpm gmt browser install');
+    expect(kinds(m.executor.log)).toContain('waitHealthy');
+  });
+
+  // why: W6 (dev-b1-004): any later successful run removes what an earlier pin left
+  it('the pin unchanged downloads nothing, and removes a bundle an earlier pin left once the app is healthy', async () => {
     const m = await world({ manifest: { entry: MAC, flags: flagsOn } });
+    const stale = `${ROOT}/browsers/official/152.0.4-beta.27-aaaaaaaa`;
+    m.fs.file(`${stale}/version.json`, '{}');
     expect(await runCli(['update'], m.deps)).toBe(0);
-    expect(kinds(m.executor.log)).not.toContain('download');
+    const log = kinds(m.executor.log);
+    expect(log).not.toContain('download');
     expect(m.fs.isDir(OLD)).toBe(true);
+    expect(log.indexOf(`remove ${stale}`)).toBeGreaterThan(log.indexOf('waitHealthy'));
+    expect(m.fs.isDir(stale)).toBe(false);
   });
 
   it('--dry-run names the step without reading the pin', async () => {
     const m = await world({ manifest: { entry: NEW, flags: flagsOn } });
     expect(await runCli(['update', '--dry-run'], m.deps)).toBe(0);
-    expect(m.io.stdout).toContain(
-      'update: the browser install\n  then: read the new code’s Camoufox pin, and install it only when its recordings set its flags\n',
-    );
+    expect(m.io.stdout).toContain(DRY_RUN_LINE);
     expect(m.runner.calls.some((c) => c.argv.some((a) => a.endsWith('printManifest.ts')))).toBe(false);
   });
 });

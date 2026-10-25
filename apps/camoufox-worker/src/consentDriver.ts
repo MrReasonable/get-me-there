@@ -1,4 +1,4 @@
-import type { Clock, Logger } from '@gmt/core';
+import { type BlockedPage, type Clock, CONSENT_FIX, type Logger } from '@gmt/core';
 import { checkAccountCookies } from './accountCookies.js';
 import type { PageFacts } from './classify.js';
 import { installConsentCaptureGuard } from './consentGuard.js';
@@ -22,16 +22,20 @@ import type { Timers } from './timers.js';
  * and no script evaluation, and this module is the only holder of the page and context handles; the consent command
  * and the research recorder see this interface only.
  */
+/** The consent host's path the person's choice is POSTed to. */
+export const CONSENT_SAVE_PATH = '/save';
+
 export type PageView = PageFacts & {
   /** The page's heading names, so a recording can date the landing view's selectors (never parsed here). */
   headings: string[];
 };
 
-/** The display variables a headed window may receive, in their two groups (never DBUS_SESSION_BUS_ADDRESS). */
-export interface DisplayEnv {
-  x11: { DISPLAY: string; XAUTHORITY?: string } | null;
-  wayland: { WAYLAND_DISPLAY: string; XDG_RUNTIME_DIR: string } | null;
-}
+/**
+ * The display variables a headed window may receive: exactly what run.ts's `displayOf` passes the entries that open one
+ * (decision 74's two groups: DISPLAY with XAUTHORITY, WAYLAND_DISPLAY with XDG_RUNTIME_DIR; never
+ * DBUS_SESSION_BUS_ADDRESS). One rule builds it (ca-b1-013, sec-b1-006), so this module reads no environment.
+ */
+export type DisplayEnv = Readonly<Record<string, string>>;
 
 /** SOCS as the capture reads it: the fields `parseCapture` checks, nothing else. */
 export interface SocsFields {
@@ -48,6 +52,10 @@ export interface ConsentDriver {
   load(url: string): Promise<void>;
   /** Every host the main frame navigated to, in order. */
   mainFrameHosts(): readonly string[];
+  /** The POSTs to the consent host's `/save` seen so far: the person's choice being submitted (method and URL only). */
+  consentSaves(): number;
+  /** The page kind the guard refused a main-frame navigation as (CodeRabbit, PR #15), or null. */
+  refused(): BlockedPage | null;
   /** The classifier's input, read-only. */
   snapshotView(): Promise<PageView>;
   /** SOCS by name and domain; other cookies dropped as read. */
@@ -57,9 +65,11 @@ export interface ConsentDriver {
   close(): Promise<void>;
 }
 
-/** A machine with no display: the capture runs on a desktop instead (`gmt consent export`, then `import` here). */
-export const NO_DISPLAY =
-  'there is no display for the consent window (neither DISPLAY nor WAYLAND_DISPLAY is set): run pnpm gmt consent export on a desktop where pnpm gmt setup has run, and pipe its line into pnpm gmt consent import here';
+/**
+ * A machine with no display. why: W2: until the guided capture (`gmt consent`, brief WP17 Task 17.5) lands, the consent
+ * fix is core's CONSENT_FIX: an ordinary private window on any desktop, its SOCS fields typed into capture-socs here.
+ */
+export const NO_DISPLAY = `there is no display for a browser window here (neither DISPLAY nor WAYLAND_DISPLAY is set); capture the consent choice from an ordinary private window on a desktop and enter it with ${CONSENT_FIX.command} (${CONSENT_FIX.doc})`;
 export class NoDisplay extends Error {
   constructor() {
     super(NO_DISPLAY);
@@ -68,28 +78,13 @@ export class NoDisplay extends Error {
 }
 
 /**
- * The display groups from an environment (run.ts reads them for the `consent` entry only): DISPLAY with XAUTHORITY when
- * DISPLAY is set, WAYLAND_DISPLAY with XDG_RUNTIME_DIR when WAYLAND_DISPLAY is set. Pure.
- */
-export function displayEnvOf(env: Readonly<Record<string, string | undefined>>): DisplayEnv {
-  const set = (v: string | undefined): v is string => v !== undefined && v !== '';
-  const x = env.DISPLAY;
-  const w = env.WAYLAND_DISPLAY;
-  const xauth = env.XAUTHORITY;
-  return {
-    x11: set(x) ? { DISPLAY: x, ...(set(xauth) ? { XAUTHORITY: xauth } : {}) } : null,
-    wayland: set(w) ? { WAYLAND_DISPLAY: w, XDG_RUNTIME_DIR: env.XDG_RUNTIME_DIR ?? '' } : null,
-  };
-}
-
-/**
- * The variables the headed window adds to the browser's minimal environment: each group present only when its main
- * variable is set, nothing else (never DBUS_SESSION_BUS_ADDRESS). On Linux with neither group it refuses (NoDisplay);
- * macOS needs none.
+ * The variables the headed window adds to the browser's minimal environment: the display groups run.ts passed, nothing
+ * else. On Linux with neither DISPLAY nor WAYLAND_DISPLAY it refuses (NoDisplay); macOS needs none.
  */
 export function headedEnv(display: DisplayEnv, platform: string): Record<string, string> {
-  if (platform === 'linux' && display.x11 === null && display.wayland === null) throw new NoDisplay();
-  return { ...(display.x11 ?? {}), ...(display.wayland ?? {}) };
+  if (platform === 'linux' && display.DISPLAY === undefined && display.WAYLAND_DISPLAY === undefined)
+    throw new NoDisplay();
+  return { ...display };
 }
 
 export class ConsentDriverMisuse extends Error {
@@ -122,6 +117,7 @@ export function createConsentDriver(o: {
   let loaded = false;
   let isClosed = false;
   const hosts: string[] = [];
+  let saves = 0;
   const live = (): { c: HeadedContextLike; p: PageLike } => {
     if (context === null || page === null) throw new ConsentDriverMisuse('the consent window is not open');
     return { c: context, p: page };
@@ -133,6 +129,16 @@ export function createConsentDriver(o: {
       context = c;
       c.on('close', () => {
         isClosed = true;
+      });
+      c.on('request', (r) => {
+        // why: the choice's submission is seen by its method and URL only; the research reads bodies through onRequest
+        if (r.method() !== 'POST') return;
+        try {
+          const u = new URL(r.url());
+          if (u.hostname === S.hosts.consent && u.pathname === CONSENT_SAVE_PATH) saves++;
+        } catch {
+          // why: an unparsable URL is no consent submission
+        }
       });
       if (o.onRequest !== undefined) c.on('request', o.onRequest);
       const p = await c.newPage();
@@ -154,6 +160,8 @@ export function createConsentDriver(o: {
       await p.goto(url, { waitUntil: 'domcontentloaded' });
     },
     mainFrameHosts: () => [...hosts],
+    consentSaves: () => saves,
+    refused: () => guard?.refused ?? null,
     async snapshotView() {
       const { p } = live();
       const g = guard;

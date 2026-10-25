@@ -25,6 +25,9 @@ export const UNREACHABLE = 'browser worker not reachable';
 export const KEY_REFUSED = 'the worker refused CAMOUFOX_WORKER_KEY (the app and worker.env differ)';
 export const UNREADABLE = "the worker's status could not be read by this build (versions differ?)";
 export const SIGNED_IN_REFUSED = 'signed-in profile refused';
+/** W3: the worker refuses every page while its counts file cannot be read; waiting does not repair it. */
+export const COUNTS_UNREADABLE =
+  "the browser worker's monthly counts file cannot be read, so it refuses every page (pnpm gmt browser counts rewrites it)";
 export const GRID_NOT_VERIFIED =
   'grid mode not verified on the worker (CAMOUFOX_MODE=grid in worker.env, and the same measured grid step)';
 
@@ -137,6 +140,8 @@ export async function camoufoxPreflight(
     };
   if (st.signedInRefusal || st.accountCookie.found)
     return { ok: false, skip: 'provider_disabled', detail: SIGNED_IN_REFUSED };
+  if (st.monthly !== undefined && !st.monthly.readable)
+    return { ok: false, skip: 'provider_disabled', detail: COUNTS_UNREADABLE };
   // why: spec §12 — both sides compare effective values, by name; a worker too old to report its record is compared
   // on what it does report (the grid-only comparison below), as before
   const shared = st.sharedSettings;

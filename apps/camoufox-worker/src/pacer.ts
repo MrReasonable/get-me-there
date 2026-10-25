@@ -1,6 +1,7 @@
-import { chmodSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { type Clock, type IsoDateTime, isoDateTimeSchema } from '@gmt/core';
+import { writePrivateFile } from './privateFile.js';
 
 /**
  * The start-to-start pacer (spec §2 "at least CAMOUFOX_MIN_SPACING_SECONDS from the start of one page load to the start
@@ -61,10 +62,7 @@ export class Pacer {
       const wait = Date.parse(last) + this.spacingMs - TOLERANCE_MS - now;
       if (wait > 0) return { ok: false, retryAfterSeconds: Math.max(1, Math.ceil(wait / 1000)) };
     }
-    const tmp = `${this.path}.tmp`;
-    writeFileSync(tmp, JSON.stringify({ lastPageAt: this.clock.now() }), { mode: 0o600 });
-    chmodSync(tmp, 0o600);
-    renameSync(tmp, this.path);
+    writePrivateFile(this.path, JSON.stringify({ lastPageAt: this.clock.now() }));
     // why: busy only once the record is written, so a failed write never wedges the pacer (CodeRabbit, fix round 1)
     this.busy = true;
     return { ok: true };

@@ -527,12 +527,14 @@ describe('PageSession (spec §2; brief Task 14.4)', () => {
       },
     });
     expect((await t.session.page(REQ)).answer.kind).toBe('cells');
-    expect(seen).toEqual([{ windowStart: '2026-10-01T00:00:00.000Z', pages: 1, scrolls: 0 }]);
-    expect(JSON.parse(readFileSync(join(t.dataDir, 'monthly.json'), 'utf8'))).toEqual({
+    const october = {
       windowStart: '2026-10-01T00:00:00.000Z',
+      windowEnd: '2026-11-01T00:00:00.000Z',
       pages: 1,
       scrolls: 0,
-    });
+    };
+    expect(seen).toEqual([october]);
+    expect(JSON.parse(readFileSync(join(t.dataDir, 'monthly.json'), 'utf8'))).toEqual(october);
   });
   it('a browser that fails after admission leaves the reservation on disk (a crash over-counts)', async () => {
     const t = setup({
@@ -546,20 +548,28 @@ describe('PageSession (spec §2; brief Task 14.4)', () => {
   it('the page cap refuses before any load, answering monthly-cap, the counts unchanged', async () => {
     const t = setup({ monthly: { pages: 0, scrolls: 6000, billingDay: 1 } });
     expect(await t.session.page(REQ)).toEqual({
-      answer: { kind: 'monthly-cap', cap: 0, windowEnd: '2026-11-01T00:00:00.000Z' },
+      answer: { kind: 'monthly-cap', cap: 0, used: 0, windowEnd: '2026-11-01T00:00:00.000Z' },
       googleContacted: false,
     });
     expect(t.contexts).toEqual([]);
     expect(existsSync(join(t.dataDir, 'monthly.json'))).toBe(false);
     expect(released(t)).toBe(true);
   });
-  it('an unreadable counts file refuses every page with monthly-cap, nothing loads and the file is untouched', async () => {
+  // why: W3: a counts file the worker cannot read is its own answer, never a cap reached, and waiting does not end it
+  it('an unreadable or missing counts file refuses every page as counts-unreadable, nothing loads and the file is untouched', async () => {
     const t = setup();
     writeFileSync(join(t.dataDir, 'pacer.json'), '{"lastPageAt":"2026-10-18T03:00:00.000Z"}', {
       mode: 0o600,
     });
+    expect(await t.session.page(REQ)).toEqual({
+      answer: { kind: 'counts-unreadable', problem: 'missing' },
+      googleContacted: false,
+    });
     writeFileSync(join(t.dataDir, 'monthly.json'), 'garbled', { mode: 0o600 });
-    expect((await t.session.page(REQ)).answer.kind).toBe('monthly-cap');
+    expect(await t.session.page(REQ)).toEqual({
+      answer: { kind: 'counts-unreadable', problem: 'unreadable' },
+      googleContacted: false,
+    });
     expect(t.contexts).toEqual([]);
     expect(readFileSync(join(t.dataDir, 'monthly.json'), 'utf8')).toBe('garbled');
   });

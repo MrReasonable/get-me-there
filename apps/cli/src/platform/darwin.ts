@@ -1,5 +1,5 @@
 import { join } from 'node:path/posix';
-import { workerDataDir } from '@gmt/core';
+import { camoufoxRootDir, workerDataDir } from '@gmt/core';
 import { launchdManager } from '../services/launchd.js';
 import { secretFile } from './secretFile.js';
 import type { Arch, Paths, Platform } from './types.js';
@@ -11,7 +11,7 @@ export function darwinPlatform(arch: Arch, uid: number, home: string): Platform 
     data: join(home, '.local', 'share', 'get-me-there'),
     state: join(home, '.local', 'state', 'get-me-there'),
     workerData: workerDataDir(home),
-    camoufoxRoot: join(home, '.local', 'share', 'get-me-there', 'camoufox'),
+    camoufoxRoot: camoufoxRootDir(home),
     logs: join(home, 'Library', 'Logs', 'get-me-there'),
     serviceDir: join(home, 'Library', 'LaunchAgents'),
   };

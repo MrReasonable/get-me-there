@@ -1,4 +1,4 @@
-import { join } from 'node:path/posix';
+import { dirname, join } from 'node:path/posix';
 import type { Files } from '../exec/files.js';
 import type { Runner } from '../exec/runner.js';
 
@@ -71,21 +71,34 @@ export function linkedFiles(files: Files, bundle: string): string[] {
   return out.sort();
 }
 
-/** Linux: null when every library `ldd` reads is found, else the refusal naming the missing ones and the install line. */
-export async function libraryProblem(run: Runner, files: Files, bundle: string): Promise<string | null> {
+/**
+ * Linux: null when every library `ldd` reads is found, else the refusal naming the missing ones and the install line.
+ * `env` is the environment children run with (PATH above all); LD_LIBRARY_PATH is added to it, never taken from it.
+ */
+export async function libraryProblem(
+  run: Runner,
+  files: Files,
+  bundle: string,
+  env: Readonly<Record<string, string>>,
+): Promise<string | null> {
   const targets = linkedFiles(files, bundle);
   if (!targets.includes(join(bundle, 'camoufox-bin')))
-    return `${bundle} has no camoufox-bin to check; run setup again to reinstall Camoufox`;
+    return `${bundle} has no camoufox-bin to check; move it aside, then run pnpm gmt browser install`;
+  // why: W4 (pie-b1-001): libxul.so links libmozgtk.so and its siblings, which only the bundle holds
+  const libDirs = [
+    ...new Set(targets.filter((t) => t !== join(bundle, 'camoufox-bin')).map((t) => dirname(t))),
+  ];
+  const lddEnv = { ...env, LD_LIBRARY_PATH: [bundle, ...libDirs.filter((d) => d !== bundle)].join(':') };
   const outputs: string[] = [];
   for (const t of targets) {
-    const r = await run(['ldd', t], { cwd: bundle, timeoutMs: 30_000 });
+    const r = await run(['ldd', t], { cwd: bundle, timeoutMs: 30_000, env: lddEnv });
     if (r.code === 127)
       return 'ldd is not installed, so Firefox’s libraries cannot be checked: sudo apt-get install libc-bin';
     outputs.push(r.stdout);
   }
   const missing = missingSonames(outputs);
   if (missing.length === 0) return null;
-  return `Firefox’s libraries are missing on this machine (${missing.join(', ')}). On Ubuntu 24.04 install them with: ${APT_LINE} (Debian 12 also needs ${DEBIAN_EXTRA.join(' ')}), then run setup again`;
+  return `Firefox’s libraries are missing on this machine (${missing.join(', ')}). On Ubuntu 24.04 install them with: ${APT_LINE} (Debian 12 also needs ${DEBIAN_EXTRA.join(' ')}), then run pnpm gmt browser install`;
 }
 
 /** Null when `unzip` runs, else its install line for this system. */

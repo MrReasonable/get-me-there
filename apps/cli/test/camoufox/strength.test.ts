@@ -1,12 +1,7 @@
 import { parseEnv } from 'node:util';
 import { asIsoDateTime, CAMOUFOX_BUILDS } from '@gmt/core';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import {
-  type BrowserChoice,
-  browserSetup,
-  refusalWords,
-  workerCheck,
-} from '../../src/camoufox/browserSetup.js';
+import { type BrowserChoice, browserSetup } from '../../src/camoufox/browserSetup.js';
 import { freeBytesAt, installedDigest } from '../../src/camoufox/install.js';
 import { linkedFiles, missingSonames, unzipProblem } from '../../src/camoufox/libs.js';
 import {
@@ -19,10 +14,12 @@ import {
   SERVER_TEXT,
 } from '../../src/camoufox/offer.js';
 import { availableNote, camoufoxUpdateStep } from '../../src/camoufox/updateStep.js';
-import { renderWorkerEnv, withBrowserLines } from '../../src/camoufox/workerEnv.js';
+import { appEnvWithBrowser, renderWorkerEnv } from '../../src/camoufox/workerEnv.js';
+import { checkWords, workerCheck } from '../../src/camoufox/workerService.js';
 import { runCli } from '../../src/cli.js';
 import { MemoryFs, memoryRunner, type RunHandler } from '../../src/exec/memory.js';
 import type { Action } from '../../src/plan/action.js';
+import { refusalWithFix } from '../../src/worker/refusal.js';
 import { scriptedAsk, stubHttp } from '../support/deps.js';
 import { machine } from '../support/machine.js';
 
@@ -38,12 +35,17 @@ beforeEach(() => {
   });
 });
 
-async function world(o: { check?: string; df?: number; code?: number } = {}) {
+async function world(o: { check?: string; df?: number; code?: number; stderr?: string } = {}) {
   let started = false;
   const handler: RunHandler = (argv) => {
     if (!started) return undefined;
     if (argv.includes('check') && argv.includes('--json'))
-      return { code: o.code ?? 0, stdout: `noise\n${o.check ?? '{"ok":true}'}\n` };
+      return {
+        code: o.code ?? 0,
+        stdout: `noise\n${o.check ?? '{"ok":true}'}\n`,
+        ...(o.stderr === undefined ? {} : { stderr: o.stderr }),
+      };
+    if (argv.includes('counts') && argv.includes('--check')) return { code: 0, stdout: '{"counts":"ok"}\n' };
     if (argv[0] === 'df') return { code: 0, stdout: `h\n/dev/disk 1 1 ${o.df ?? 99_999_999} 1% /\n` };
     if (argv[0] === 'ln') {
       m.fs.symlink(argv[3] ?? '', argv[2] ?? '');
@@ -56,6 +58,15 @@ async function world(o: { check?: string; df?: number; code?: number } = {}) {
   expect(await runCli(['setup', '--non-interactive', '--answers', '/work/a.json'], m.deps)).toBe(0);
   let n = 0;
   m.deps.randomBytes = (k) => Buffer.alloc(k, ++n);
+  // why: the memory tree's unpack makes an empty directory; the macOS asset holds Camoufox.app
+  const unpacking = m.deps.executor;
+  m.deps.executor = {
+    run: async (a: Action) => {
+      const out = await unpacking.run(a);
+      if (a.kind === 'unpack') m.fs.dir(`${a.to}/Camoufox.app`);
+      return out;
+    },
+  };
   m.executor.log.length = 0;
   m.runner.calls.length = 0;
   m.io.stdout = '';
@@ -86,7 +97,7 @@ const show = (log: readonly Action[]) =>
       : `${a.kind} ${'path' in a ? a.path : 'to' in a ? a.to : 'url' in a ? a.url : ''}`,
   );
 
-describe('workerCheck and refusalWords', () => {
+describe('workerCheck and its words', () => {
   it('runs run.ts check --json as the service would, and reads the last line', async () => {
     const m = await world();
     expect(await workerCheck(m.deps)).toEqual({ kind: 'ok' });
@@ -118,16 +129,36 @@ describe('workerCheck and refusalWords', () => {
       });
     expect(await workerCheck((await world({ check: '{', code: 70 })).deps)).toEqual({
       kind: 'failed',
-      error: 'the worker’s start check printed no result (exit 70)',
+      error: 'the worker’s start check exited 70 and said nothing',
+    });
+    // why: dev-b1-003: a config error's own words (its last stderr line) reach the operator
+    expect(
+      await workerCheck(
+        (
+          await world({
+            check: '{',
+            code: 78,
+            stderr: 'warming up\nremove CAMOUFOX_BINARY_BUILD from worker.env\n',
+          })
+        ).deps,
+      ),
+    ).toEqual({
+      kind: 'failed',
+      error: 'the worker’s start check exited 78: remove CAMOUFOX_BINARY_BUILD from worker.env',
     });
   });
-  it('words a refusal with its fix, or without one', () => {
-    expect(refusalWords({ reason: 'locked', at: asIsoDateTime('2026-10-24T09:30:00.000Z') })).toBe(
-      'another worker holds the lock (fix: pnpm gmt restart)',
+  it('words a refusal with its fix, or without one, through the one formatter', () => {
+    const at = asIsoDateTime('2026-10-24T09:30:00.000Z');
+    expect(refusalWithFix({ reason: 'locked', at })).toBe(
+      'refused, not retrying: another worker holds the lock; fix: pnpm gmt restart',
     );
-    expect(refusalWords({ reason: 'flags-unset', at: asIsoDateTime('2026-10-24T09:30:00.000Z') })).toBe(
-      'this machine has no verified browser build yet',
+    expect(refusalWithFix({ reason: 'flags-unset', at })).toBe(
+      'refused, not retrying: this machine has no verified browser build yet',
     );
+    expect(checkWords({ kind: 'refused', refusal: { reason: 'locked', at } })).toBe(
+      refusalWithFix({ reason: 'locked', at }),
+    );
+    expect(checkWords({ kind: 'failed', error: 'e' })).toBe('e');
   });
 });
 
@@ -321,99 +352,24 @@ describe('browserSetup’s outcomes and words', () => {
   });
 });
 
-describe('the counts rewrite’s guards', () => {
-  const base = {
-    ok: true,
-    coolingDownUntil: null,
-    cooldownCause: null,
-    signedInRefusal: false,
-    lastPageAt: null,
-    busySince: null,
-    versions: { selectors: 's', grammar: 'g', camoufoxJs: '0.11.5', binary: 'b' },
-    flags: {},
-    accountCookie: { found: false, names: [], checkedAt: '2026-10-24T09:30:00.000Z' },
-    socsCapturedAt: null,
-    socsStable: true,
-    cooldownHours: 48,
-    pageTimeoutSeconds: 90,
-  };
-  const monthly = (readable: boolean) => ({
-    ...base,
-    monthly: {
-      windowStart: '2026-10-01T00:00:00.000Z',
-      windowEnd: '2026-11-01T00:00:00.000Z',
-      pages: 0,
-      scrolls: 0,
-      readable,
-    },
-  });
-  async function on(routes: Parameters<typeof stubHttp>[0]) {
+describe('the counts rewrite under --reconfigure browser: its guards', () => {
+  it('a readable counts file is said once and nothing is written; a worker whose counts cannot be read fails with its words', async () => {
     const m = await world();
     await run(m);
-    m.deps.http = stubHttp(routes);
     m.executor.log.length = 0;
-    return m;
-  }
-  it('asks the worker on its own port with its key; a status with no counts, a 500 or a body it cannot read offers nothing', async () => {
-    for (const status of [
-      () => ({ status: 200, body: base }),
-      () => ({ status: 500, body: {} }),
-      () => ({ status: 200, body: 'not json' }),
-      () => ({ status: 200, body: { ...base, ok: 'yes' } }),
-    ]) {
-      const m = await on({ 'GET /v1/status': status });
-      m.fs.file(WORKER_ENV, `${m.fs.read(WORKER_ENV) ?? ''}CAMOUFOX_WORKER_PORT="8091"\n`, 0o600);
-      expect(await run(m, { reconfigure: true, choice: {} })).toBe('on');
-      expect(m.io.stdout).not.toContain('counts file');
-    }
-    const m = await on({ 'GET /v1/status': () => ({ status: 200, body: base }) });
-    m.fs.file(WORKER_ENV, `${m.fs.read(WORKER_ENV) ?? ''}CAMOUFOX_WORKER_PORT="8091"\n`, 0o600);
-    const http = stubHttp({ 'GET /v1/status': () => ({ status: 200, body: base }) });
-    m.deps.http = http;
-    await run(m, { reconfigure: true, choice: {} });
-    expect(http.requests[0]?.url).toBe('http://127.0.0.1:8091/v1/status');
-    expect(http.requests[0]?.timeoutMs).toBe(10_000);
-  });
-  it('without a worker key, app credentials or a camoufox figure, nothing is offered or written', async () => {
-    const noKey = await on({ 'GET /v1/status': () => ({ status: 200, body: monthly(false) }) });
-    noKey.fs.file(WORKER_ENV, 'CAMOUFOX_MODE="list"\n', 0o600);
-    noKey.fs.file(
-      ENV,
-      withBrowserLines(noKey.fs.read(ENV) ?? '', [['CAMOUFOX_WORKER_KEY', 'b'.repeat(48)]]),
-      0o600,
-    );
-    expect(await run(noKey, { reconfigure: true, choice: { rotateKey: false } })).toBe('on');
-    const noFigure = await on({
-      'GET /v1/status': () => ({ status: 200, body: monthly(false) }),
-      'GET /api/providers': () => ({ status: 200, body: { providers: [] } }),
-    });
-    expect(await run(noFigure, { reconfigure: true, choice: {} })).toBe('failed');
-    const declined = await on({
-      'GET /v1/status': () => ({ status: 200, body: monthly(false) }),
-      'GET /api/providers': () => ({
-        status: 200,
-        body: {
-          providers: [{ providerId: 'camoufox', usage: [{ scope: 'provider-month:camoufox', calls: 3 }] }],
-        },
-      }),
-    });
-    expect(await run(declined, { reconfigure: true, choice: {} })).toBe('on');
-    expect(declined.fs.read('/Users/op/.local/state/get-me-there/camoufox/monthly.json')).toBeNull();
-    const failing = await on({
-      'GET /v1/status': () => ({ status: 200, body: monthly(false) }),
-      'GET /api/providers': () => ({
-        status: 200,
-        body: {
-          providers: [{ providerId: 'camoufox', usage: [{ scope: 'provider-month:camoufox', calls: 3 }] }],
-        },
-      }),
-    });
-    const inner = failing.deps.executor;
-    failing.deps.executor = {
-      run: async (a) => (a.kind === 'writeFile' ? Promise.reject(new Error('read-only')) : inner.run(a)),
-    };
-    expect(await run(failing, { reconfigure: true, interactive: true, answers: [false, true] })).toBe(
-      'failed',
+    m.io.stdout = '';
+    expect(await run(m, { reconfigure: true, choice: {} })).toBe('on');
+    expect(m.io.stdout).toBe('The worker’s monthly counts file is readable; nothing to rewrite.\n');
+    const broken = await world();
+    await run(broken);
+    const inner = broken.deps.run;
+    broken.deps.run = async (argv, opts) =>
+      argv.includes('counts')
+        ? { code: 78, stdout: '', stderr: 'x\nworker.env must be mode 0600\n' }
+        : inner(argv, opts);
+    expect(await run(broken, { reconfigure: true, choice: {} })).toBe('failed');
+    expect(broken.io.stderr).toContain(
+      'the worker could not read its counts (exit 78: worker.env must be mode 0600)',
     );
   });
 });
@@ -428,7 +384,7 @@ describe('the offer’s fixed words', () => {
         '- Brittleness: Google changes the page without notice; a changed page reads as unrecognised and pauses the provider for an hour, never a silent zero.',
         '- Speed: a page takes about 20 to 60 s to load, settle and read, plus the spacing set between pages.',
         '- Availability: it runs only while this machine is on and the worker is running; otherwise its cells read skipped and every other provider runs.',
-        '- Disk: Camoufox is a 1 MB download and about 2 MB unpacked, under ~/.local/share/get-me-there/camoufox.',
+        '- Disk: Camoufox is a 1 MB download and about 2 MB unpacked, under ~/.local/share/get-me-there/camoufox (pnpm gmt browser install reinstalls it; deleting that directory removes it).',
         '- The worker key: anything that can reach the worker’s address on this machine is stopped only by its key.',
         '- Money: none.',
       ].join('\n'),
@@ -439,7 +395,7 @@ describe('the offer’s fixed words', () => {
     expect(ENABLE_QUESTION).toBe('Turn on the browser provider?');
     expect(SERVER_QUESTION).toBe('Type yes to accept page loads from this server’s address');
     expect(consentMethodText(false)).toBe(
-      'Consent: this machine has no display, so the choice is captured on a desktop: open https://www.google.com/travel/flights in an ordinary private browser window there, click Reject all, and copy the SOCS cookie’s fields into pnpm --filter @gmt/camoufox-worker capture-socs on this machine (a few minutes; docs/setup.md section 14).',
+      'Consent: this machine has no display, so the choice is captured on a desktop: open https://www.google.com/travel/flights in an ordinary private browser window there, click Reject all, and copy the SOCS cookie’s fields into pnpm --filter @gmt/camoufox-worker capture-socs on this machine (a few minutes; docs/setup.md#capture-your-consent-choice).',
     );
     expect(consentMethodText(true)).toContain('click Reject all, then copy the SOCS cookie’s fields');
     expect(RESUME_LINE).toBe(
@@ -524,7 +480,7 @@ describe('the install helpers’ edges', () => {
     expect(r.calls[0]).toMatchObject({ argv: ['unzip', '-v'], cwd: '/', timeoutMs: 15_000 });
   });
   it('worker.env keeps the operator’s own lines, exported ones included, and nothing setup owns twice', () => {
-    const text = renderWorkerEnv(
+    const r = renderWorkerEnv(
       'k',
       {
         CAMOUFOX_COOLDOWN_HOURS: '48',
@@ -540,6 +496,8 @@ describe('the install helpers’ edges', () => {
       },
       'export CAMOUFOX_WORKER_PORT="8091"\n  CAMOUFOX_MODE="grid"\nCAMOUFOX_WORKER_KEY="old"\n# note\n',
     );
+    if (!r.ok) throw new Error(r.error);
+    const text = r.text;
     expect(text.split('\n').slice(0, 2)).toEqual([
       '# get-me-there browser worker settings, written by `pnpm gmt setup` (docs/setup.md section 14).',
       '# Keep this file 0600. The shared settings must equal app.env’s; setup keeps them equal.',
@@ -547,9 +505,12 @@ describe('the install helpers’ edges', () => {
     expect(text).toContain('export CAMOUFOX_WORKER_PORT="8091"\n');
     expect(text).not.toContain('"old"');
     expect(text.match(/CAMOUFOX_MODE/g)).toHaveLength(1);
-    expect(withBrowserLines('export CAMOUFOX_ENABLED="false"\n# c\n', [['CAMOUFOX_ENABLED', 'true']])).toBe(
-      'CAMOUFOX_ENABLED="true"\n# c\n',
-    );
+    expect(
+      appEnvWithBrowser('export CAMOUFOX_ENABLED="false"\n# c\n', [['CAMOUFOX_ENABLED', 'true']]),
+    ).toEqual({
+      ok: true,
+      text: 'CAMOUFOX_ENABLED="true"\n# c\n',
+    });
   });
 });
 
@@ -586,7 +547,12 @@ describe('update’s Camoufox step, each outcome (direct)', () => {
     const r = await camoufoxUpdateStep(m.deps);
     expect(r).toEqual({ ok: true, after: [{ kind: 'remove', path: OLD, recursive: true }] });
     expect(m.io.stdout).toBe(
-      'installing Camoufox 153.0.1-beta.30 for linux-arm64; the previous bundle is removed once the app is healthy\n',
+      [
+        'Downloading Camoufox 153.0.1-beta.30 for linux-arm64 (313 MB) from github.com; this can take several minutes',
+        'Checking and unpacking it (about 670 MB on disk)',
+        `Camoufox 153.0.1-beta.30 is installed in ${NEW_BUNDLE}`,
+        '',
+      ].join('\n'),
     );
     expect(m.io.stderr).toContain('Firefox’s libraries are missing on this machine (libgtk-3.so.0)');
     expect(m.fs.read(`${NEW_BUNDLE}/version.json`)).not.toBeNull();
@@ -615,7 +581,7 @@ describe('update’s Camoufox step, each outcome (direct)', () => {
     const f = await camoufoxUpdateStep(failing.deps);
     expect(f.ok ? '' : f.message).toContain('update: the browser install: stopped at a failed step');
   });
-  it('the pin already installed is current: nothing printed, nothing removed after', async () => {
+  it('the pin already installed is current: nothing printed, every other bundle removed after the wait', async () => {
     const m = await updating();
     m.fs
       .file(`${NEW_BUNDLE}/version.json`, JSON.stringify({ sha256: NEW.sha256 }))
@@ -624,7 +590,10 @@ describe('update’s Camoufox step, each outcome (direct)', () => {
       .symlink(`${ROOT}/Camoufox.app`, `${NEW_BUNDLE}/Camoufox.app`)
       .file(`${ROOT}/version.json`, '{"version":"153.0.1","release":"beta.30"}');
     m.executor.log.length = 0;
-    expect(await camoufoxUpdateStep(m.deps)).toEqual({ ok: true, after: [] });
+    expect(await camoufoxUpdateStep(m.deps)).toEqual({
+      ok: true,
+      after: [{ kind: 'remove', path: OLD, recursive: true }],
+    });
     expect(m.io.stdout).toBe('');
     expect(m.executor.log).toEqual([]);
   });

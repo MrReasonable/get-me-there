@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { effectiveSharedSettings, flagsFor, workerStatusSchema } from '@gmt/core';
+import { CONSENT_FIX, effectiveSharedSettings, flagsFor, workerStatusSchema } from '@gmt/core';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { InstallRefused } from '../src/install.js';
 import { buildLaunchOptions } from '../src/launch.js';
@@ -15,6 +15,13 @@ import { memoryLog } from './support/log.js';
 import { fakeTimers } from './support/timers.js';
 import { tmpDir } from './support/tmp.js';
 
+/** This test clock's billing window's counts file (billing day 1: October 2026). */
+const OCTOBER = (pages: number, scrolls: number) => ({
+  windowStart: '2026-10-01T00:00:00.000Z',
+  windowEnd: '2026-11-01T00:00:00.000Z',
+  pages,
+  scrolls,
+});
 const KEY = 'synthetic-worker-key-0123456789abcdef';
 const CAPTURE = {
   value: 'synthetic-socs',
@@ -155,7 +162,9 @@ describe('the worker’s start checks and shutdown (brief Task 14.5)', () => {
       expect(t.contexts).toEqual([]);
     },
   );
-  it('another error from the preparation (the camoufox-js pin) exits 78 naming the check, with no refusal file', async () => {
+  // why: W1 (dev-b1-003): every exit 78 leaves a refusal file, so status and start explain it and a refused agent is
+  // booted out; one of the worker's own settings or files is `config`, its words on stderr
+  it('another error from the preparation (the camoufox-js pin) exits 78 naming the check, leaving a config refusal', async () => {
     const t = setup({
       deps: {
         prepare: () => {
@@ -165,12 +174,13 @@ describe('the worker’s start checks and shutdown (brief Task 14.5)', () => {
     });
     expect(await startWorker(t.ctx, t.deps)).toBe(EX_CONFIG);
     expect(t.err.join()).toMatch(/install layout and pins: camoufox-js is 0\.11\.6/);
-    expect(refusalFile(t)).toBeNull();
+    expect(refusalFile(t)).toEqual({ reason: 'config', at: AT });
   });
-  it('bad settings exit 78', async () => {
+  it('bad settings exit 78, leaving a config refusal', async () => {
     const t = setup();
     expect(await startWorker({ ...t.ctx, env: { HOME: '/h' } }, t.deps)).toBe(EX_CONFIG);
     expect(t.err.join()).toMatch(/settings: .*CAMOUFOX_WORKER_KEY/);
+    expect(refusalFile(t)).toEqual({ reason: 'config', at: AT });
   });
   it('a held lock exits 78 as locked, its own lock left in place', async () => {
     const t = setup();
@@ -185,7 +195,7 @@ describe('the worker’s start checks and shutdown (brief Task 14.5)', () => {
     expect(await startWorker(missing.ctx, missing.deps)).toBe(EX_CONFIG);
     expect(refusalFile(missing)).toEqual({ reason: 'consent-missing', at: AT });
     expect(missing.err.join()).toContain(
-      'consent-missing: no consent record: capture one; fix: pnpm gmt consent',
+      `consent-missing: no consent record: capture one; fix: ${CONSENT_FIX.command}`,
     );
     const garbled = setup({ socs: false });
     writeFileSync(join(garbled.dataDir, 'socs.json'), '{', { mode: 0o600 });
@@ -209,13 +219,27 @@ describe('the worker’s start checks and shutdown (brief Task 14.5)', () => {
     expect(refusalFile(expired)).toEqual({ reason: 'consent-expired', at: AT });
     for (const t of [missing, garbled, voided, expired]) expect(t.contexts).toEqual([]);
   });
-  it('a not-shown record is refused as consent-missing: this worker serves pages with a captured rejection only', async () => {
+  // why: CodeRabbit (PR #15), pa-b1-006: the start and `check` share core's rule; the record is refused as itself
+  it('a not-shown record is refused as consent-not-shown: this worker serves pages with a captured rejection only', async () => {
     const t = setup({ socs: false });
     writeFileSync(join(t.dataDir, 'socs.json'), JSON.stringify({ consent: 'not-shown', checkedAt: AT }), {
       mode: 0o600,
     });
     expect(await startWorker(t.ctx, t.deps)).toBe(EX_CONFIG);
-    expect(refusalFile(t)).toEqual({ reason: 'consent-missing', at: AT });
+    expect(refusalFile(t)).toEqual({ reason: 'consent-not-shown', at: AT });
+    expect(t.err.join()).toContain(`fix: ${CONSENT_FIX.command}`);
+    expect(t.contexts).toEqual([]);
+  });
+  // why: W3: an earlier worker's data (its pacer file, no counts) refuses to start as counts-missing, with its fix
+  it('a data directory with a pacer file and no counts refuses as counts-missing; unreadable counts as counts-unreadable', async () => {
+    const t = setup();
+    writeFileSync(join(t.dataDir, 'pacer.json'), JSON.stringify({ lastPageAt: AT }), { mode: 0o600 });
+    expect(await startWorker(t.ctx, t.deps)).toBe(EX_CONFIG);
+    expect(refusalFile(t)).toEqual({ reason: 'counts-missing', at: AT });
+    expect(t.err.join()).toContain('fix: pnpm gmt browser counts');
+    writeFileSync(join(t.dataDir, 'monthly.json'), '{', { mode: 0o600 });
+    expect(await startWorker(t.ctx, t.deps)).toBe(EX_CONFIG);
+    expect(refusalFile(t)).toEqual({ reason: 'counts-unreadable', at: AT });
     expect(t.contexts).toEqual([]);
   });
   it('an account cookie in the profile exits 78 as signed-in and closes the browser', async () => {
@@ -298,6 +322,7 @@ describe('the worker’s start checks and shutdown (brief Task 14.5)', () => {
     const t = setup();
     const at = '2026-10-18T04:59:00.000Z';
     writeFileSync(join(t.dataDir, 'pacer.json'), JSON.stringify({ lastPageAt: at }), { mode: 0o600 });
+    writeFileSync(join(t.dataDir, 'monthly.json'), JSON.stringify(OCTOBER(1, 0)), { mode: 0o600 });
     const before = readFileSync(join(t.dataDir, 'pacer.json'), 'utf8');
     const w = await running(t);
     for (let i = 0; i < 3; i++) {
@@ -314,11 +339,7 @@ describe('the worker’s start checks and shutdown (brief Task 14.5)', () => {
     writeFileSync(join(t.dataDir, 'pacer.json'), JSON.stringify({ lastPageAt: '2026-10-18T04:00:00.000Z' }), {
       mode: 0o600,
     });
-    writeFileSync(
-      join(t.dataDir, 'monthly.json'),
-      JSON.stringify({ windowStart: '2026-10-01T00:00:00.000Z', pages: 12, scrolls: 340 }),
-      { mode: 0o600 },
-    );
+    writeFileSync(join(t.dataDir, 'monthly.json'), JSON.stringify(OCTOBER(12, 340)), { mode: 0o600 });
     const before = readFileSync(join(t.dataDir, 'monthly.json'), 'utf8');
     const w = await running(t);
     const read = async (instance: string) =>
@@ -345,6 +366,10 @@ describe('the worker’s start checks and shutdown (brief Task 14.5)', () => {
     const after = readFileSync(join(t.dataDir, 'monthly.json'), 'utf8');
     await read('a'.repeat(64));
     expect(readFileSync(join(t.dataDir, 'monthly.json'), 'utf8')).toBe(after);
+    // why: W3 (pa-b1-002): while the counts cannot be read the worker refuses every page, so its status is not ok
+    expect(await read('a'.repeat(64))).toMatchObject({ ok: true });
+    writeFileSync(join(t.dataDir, 'monthly.json'), '{', { mode: 0o600 });
+    expect(await read('a'.repeat(64))).toMatchObject({ ok: false, monthly: { readable: false } });
     t.shutdown();
     await w.done;
   });
@@ -356,7 +381,12 @@ describe('the worker’s start checks and shutdown (brief Task 14.5)', () => {
     ).json();
     // why: the repository root found upwards, so the read works from Stryker's sandbox copy of this package too
     let root = dirname(fileURLToPath(import.meta.url));
-    while (!existsSync(join(root, 'pnpm-workspace.yaml'))) root = dirname(root);
+    // why: CodeRabbit (PR #15): the search stops at the file system's root with a message, never loops there
+    while (!existsSync(join(root, 'pnpm-workspace.yaml'))) {
+      if (dirname(root) === root)
+        throw new Error('no pnpm-workspace.yaml above this test: run it inside the checkout');
+      root = dirname(root);
+    }
     const full: unknown = JSON.parse(
       readFileSync(join(root, 'packages', 'core', 'test', 'camoufox', 'worker-status-full.json'), 'utf8'),
     );

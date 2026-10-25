@@ -1,6 +1,7 @@
 // A scripted ConsentDriver for the consent window's tests: no browser, no page. Each watcher tick reads the hosts once,
 // so the script is indexed by tick: the hosts the main frame has seen by then, when SOCS and an account cookie appear,
 // and when the person closes the window. `load` sends the scripted requests to the listener, as a session would.
+import type { BlockedPage } from '@gmt/core';
 import type { ConsentDriver, DisplayEnv, PageView, SocsFields } from '../../src/consentDriver.js';
 import type { RequestLike } from '../../src/driver.js';
 
@@ -48,6 +49,14 @@ export const SOCS: SocsFields = {
 export interface Script {
   first?: PageView;
   after?: PageView;
+  /** Snapshots in order, before `first`/`after` take over (a view that settles late). */
+  views?: PageView[];
+  /** The tick after which the person's choice has been submitted, and how many times. */
+  saveAt?: number;
+  saves?: number;
+  /** The tick after which the guard has refused a main-frame navigation, and as what. */
+  refusedAt?: number;
+  refused?: BlockedPage;
   /** The hosts by tick (the last repeats). */
   hosts?: string[][];
   socs?: SocsFields;
@@ -97,9 +106,13 @@ export function fakeConsentDriver(
       tick++;
       return h;
     },
+    consentSaves: () => (s.saveAt !== undefined && tick > s.saveAt ? (s.saves ?? 1) : 0),
+    refused: () => (s.refusedAt !== undefined && tick > s.refusedAt ? (s.refused ?? 'off-allowlist') : null),
     async snapshotView() {
       calls.push('snapshotView');
       snapshots++;
+      const scripted = s.views?.[snapshots - 1];
+      if (scripted !== undefined) return scripted;
       return snapshots === 1 ? (s.first ?? consentView()) : (s.after ?? view());
     },
     async socsCookie() {
@@ -118,8 +131,14 @@ export function fakeConsentDriver(
   };
 }
 
-/** A request as the listener sees it: a navigation or a POST with a URL-encoded body. */
-export function request(o: { url: string; method?: string; nav?: boolean; body?: string }): RequestLike {
+/** A request as the listener sees it: a navigation, or a POST with a body (URL-encoded unless `type` says otherwise). */
+export function request(o: {
+  url: string;
+  method?: string;
+  nav?: boolean;
+  body?: string;
+  type?: string;
+}): RequestLike {
   return {
     url: () => o.url,
     method: () => o.method ?? 'GET',
@@ -127,5 +146,6 @@ export function request(o: { url: string; method?: string; nav?: boolean; body?:
     redirectedFrom: () => null,
     frame: () => ({ url: () => o.url, parentFrame: () => null }),
     postData: () => o.body ?? null,
+    headers: () => ({ 'content-type': o.type ?? 'application/x-www-form-urlencoded;charset=utf-8' }),
   };
 }

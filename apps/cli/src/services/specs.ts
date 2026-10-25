@@ -1,4 +1,5 @@
 import { dirname, join, sep } from 'node:path/posix';
+import { PAGE_TIMEOUT_MAX_SECONDS } from '@gmt/core';
 import type { Files } from '../exec/files.js';
 import type { Paths, ServiceSpec } from '../platform/types.js';
 
@@ -41,6 +42,7 @@ export function appServiceSpec(i: SpecInput): ServiceSpec {
     restart: 'on-failure',
     preventRestartExitStatus: null,
     throttleSeconds: 60,
+    stopSeconds: 30,
     calendar: null,
   };
 }
@@ -63,7 +65,27 @@ export function backupServiceSpec(i: SpecInput): ServiceSpec {
     restart: 'never',
     preventRestartExitStatus: null,
     throttleSeconds: 60,
+    stopSeconds: 30,
     calendar: { hour: 3, minute: 30 },
+  };
+}
+
+/** How long a stop waits for the worker: the longest page plus 30 s to close the browser (W7). */
+export const WORKER_STOP_SECONDS = PAGE_TIMEOUT_MAX_SECONDS + 30;
+
+/**
+ * The one argv that runs the worker's `run.ts <entry>` under tsx, and its directory (ca-b1-011): the service runs
+ * `main`, `gmt start` and setup run `check --json`, `gmt browser counts` runs `counts`, so the pre-check judges the
+ * worker exactly as the service starts it.
+ */
+export function workerRunArgv(
+  i: Pick<SpecInput, 'execPath' | 'checkout'>,
+  ...args: string[]
+): { argv: string[]; cwd: string } {
+  const pkg = join(i.checkout, 'apps', 'camoufox-worker');
+  return {
+    argv: [i.execPath, '--conditions=@gmt/source', '--import', 'tsx', join(pkg, 'src', 'run.ts'), ...args],
+    cwd: pkg,
   };
 }
 
@@ -74,15 +96,17 @@ export function backupServiceSpec(i: SpecInput): ServiceSpec {
  * KeepAlive cannot exclude one code, a 600 s ThrottleInterval while start, status and update boot a refused agent out.
  */
 export function workerServiceSpec(i: SpecInput): ServiceSpec {
-  const pkg = join(i.checkout, 'apps', 'camoufox-worker');
+  const run = workerRunArgv(i, 'main');
   return {
     name: 'camoufox-worker',
-    argv: [i.execPath, '--conditions=@gmt/source', '--import', 'tsx', join(pkg, 'src', 'run.ts'), 'main'],
-    workingDirectory: pkg,
+    argv: run.argv,
+    workingDirectory: run.cwd,
     environment: serviceEnvironment(i.execPath, i.home),
     restart: 'on-failure',
     preventRestartExitStatus: 78,
     throttleSeconds: 600,
+    // why: W7 (dev-b1-007): a page in flight finishes before the worker exits, so its stop waits out the longest page
+    stopSeconds: WORKER_STOP_SECONDS,
     calendar: null,
   };
 }

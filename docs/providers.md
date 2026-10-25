@@ -21,7 +21,7 @@ Labels: VERIFIED = read on an official page; REPORTED = third-party; UNKNOWN = n
 | Trip.com, Travelfusion, Mystifly, Travelport, Sabre, airline NDC | Enterprise/IATA only | — | — | — | — | — | — | — | CLOSED |
 | Google official API | None (QPX Express shut 2018-04-10) | — | — | — | — | — | — | — | NONE |
 | fast-flights / google-flights-ts | Reverse-engineered `tfs` protobuf, direct to Google | free | — | — | — | — | — | **Unauthorised, fragile** | REJECT |
-| `camoufox`: Google Flights read by Camoufox (the operator's installed binary) that a host-side worker launches itself through `camoufox-js` | Self-scraped by this app from the operator's own IP, in the worker's own signed-out profile; no vendor account | £0 in money; the operator's IP and selector upkeep; the operator is responsible for how it is used | `list` mode: the page as Google showed it when it was read (`maxAgeHours` 0); `grid` mode: Google's date grid, age not stated (assumed ≤24h) | `list` mode, one day pair a page; `grid` mode (opt-in, `CAMOUFOX_MODE=grid`), up to 49 day pairs a view | Yes | Yes (`curr=GBP`) | Google search link | Read the provider's terms before enabling it; the operator is responsible for how it is used | Discovery only, opt-in, off by default (continuity fallback); `list` built in WP14, `grid` in WP15 |
+| `camoufox`: Google Flights read by Camoufox (the pinned build `gmt setup` or `gmt browser install` installs) that a host-side worker launches itself through `camoufox-js` | Self-scraped by this app from the address of the machine running the browser worker, in the worker's own signed-out profile; no vendor account | £0 in money; the operator's IP and selector upkeep; the operator is responsible for how it is used | `list` mode: the page as Google showed it when it was read (`maxAgeHours` 0); `grid` mode: Google's date grid, age not stated (assumed ≤24h) | `list` mode, one day pair a page; `grid` mode (opt-in, `CAMOUFOX_MODE=grid`), up to 49 day pairs a view | Yes | Yes (`curr=GBP`) | Google search link | Read the provider's terms before enabling it; the operator is responsible for how it is used | Discovery only, opt-in, off by default (continuity fallback); `list` built in WP14, `grid` in WP15 |
 
 ## Key facts with sources
 
@@ -66,9 +66,9 @@ Labels: VERIFIED = read on an official page; REPORTED = third-party; UNKNOWN = n
 
 ### Camoufox provider (self-scraped, opt-in)
 
-**Method.** A host-side worker (`apps/camoufox-worker`, a Node process on the operator's machine; macOS or Linux, each
+**Method.** A host-side worker (`apps/camoufox-worker`, a Node process on the machine running the worker; macOS or Linux, each
 `<os>-<arch>` offered once recordings under its pinned build set its flags, `darwin-arm64` today; Windows is a later
-release) launches the Camoufox build `pnpm gmt setup` installed from the pinned release through `camoufox-js` 0.11.5 and `playwright-core` 1.59.1, in a persistent signed-out
+release) launches the Camoufox build `pnpm gmt setup` or `pnpm gmt browser install` installed from the pinned release through `camoufox-js` 0.11.5 and `playwright-core` 1.59.1, in a persistent signed-out
 profile of its own, with service workers blocked. The app's adapter calls the worker over HTTP at `CAMOUFOX_WORKER_URL`
 with `CAMOUFOX_WORKER_KEY`; one worker call makes at most one Google page load at
 `https://www.google.com/travel/flights?q=Flights from <origin> to <destination> on <depart> returning <return>&curr=GBP&hl=en-GB&gl=<POINT_OF_SALE>`.
@@ -92,10 +92,14 @@ silently. It never calls the camofox-browser REST server.
 
 **`camoufox-js` facts, read in source on 2026-10-18 (0.11.5).** `Camoufox({ user_data_dir })` returns a
 `BrowserContext` from `firefox.launchPersistentContext`. Without `executable_path` it resolves the binary and
-`properties.json` under its install directory (`~/Library/Caches/camoufox/Camoufox.app/Contents/…`) and reads the
-top-level `version.json` (`{version, release}`), starting an unawaited download when that directory is missing, empty
-or unsupported; the worker verifies or creates both entries at start (a symlink to the pinned bundle, the top-level file
-from the bundle's own `version.json`, whose build field is named `build`) and never modifies the bundle. It passes
+`properties.json` under its install directory, which it reads once from `CAMOUFOX_INSTALL_DIR`, and reads that
+directory's `version.json` (`{version, release}`), starting an unawaited download when the directory is missing, empty
+or unsupported. The worker's launcher (`run.ts`) sets `CAMOUFOX_INSTALL_DIR` itself, before anything imports
+`camoufox-js`: on macOS the install root `~/.local/share/get-me-there/camoufox` (its `Camoufox.app` link to the pinned
+bundle and its top-level `version.json`), on Linux the pinned bundle's own directory. `pnpm gmt setup` and
+`pnpm gmt browser install` write that layout; the worker only verifies it (`release` required in the `version.json`
+`camoufox-js` reads) and refuses (exit 78, `layout` or `build-mismatch`) on any difference, so the download branch is
+never reached, and it never modifies the bundle. It passes
 `ff_version` from the bundle with `i_know_what_im_doing: true`, `exclude_addons: ['UBO']` (no add-on download),
 `geoip: false` (no IP lookup or GeoIP download), no proxy, no humanised input, headless, `serviceWorkers: 'block'`, its
 own signal handling, six preferences that switch off telemetry, crash reports, Normandy and the captive-portal check,
@@ -112,13 +116,14 @@ verification page, a sign-in page, a signed-in control, a consent page or an off
 at least 24); an unrecognised page for 1 hour.
 
 **Costs.** **Terms:** Read the provider's terms before enabling it; the operator is responsible for how it is used. **The operator's IP and account:** every page
-comes from the operator's own address, so a block lands on that address; the profile is never signed in. **Brittleness:**
+comes from the address of the machine running the worker, so a block lands on that address; the profile is never signed in. **Brittleness:**
 a changed page reads as unrecognised and stops the provider for an hour; the selectors and grammar must be re-dated
 against a new recording, and an upgrade of `camoufox-js`, `playwright-core` or the binary is a re-verification.
 **Speed:** about 50–90 s a page at the default 30 s page spacing (`CAMOUFOX_MIN_SPACING_SECONDS`), so 100 cells a run
 take about 1½–2½ hours. **Availability:** only while the machine running the worker is on and the worker runs; otherwise
-its cells read skipped ("browser worker not reachable"). **Image size:** none in the app image; Camoufox (313 MB to
-download and about 670 MB unpacked on macOS, 654 MB and about 1.25 GB on Linux) stays on the operator's machine. **The worker key:** any process or container that can reach the worker (on Docker Desktop, every container on the
+its cells read skipped ("browser worker not reachable"). **Image size:** none in the app image; Camoufox stays on the
+machine running the worker: a 313 MB download on `darwin-arm64` and 320 MB on `darwin-x64` (about 670 MB unpacked), 654 MB
+on `linux-arm64` and 663 MB on `linux-x64` (about 1.25 GB unpacked). **The worker key:** any process or container that can reach the worker (on Docker Desktop, every container on the
 Mac) is stopped only by `CAMOUFOX_WORKER_KEY`. **Money:** none.
 
 **Coverage.** In `list` mode a page prices one day pair, so a run prices at most `CAMOUFOX_EXECUTION_PAGE_CAP` day pairs

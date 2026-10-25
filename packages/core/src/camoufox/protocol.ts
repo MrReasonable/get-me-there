@@ -218,8 +218,11 @@ export const workerAnswerSchema = z.discriminatedUnion('kind', [
     scrolls: count.exactOptional(),
   }),
   // why: decision 82: the worker's own monthly page cap, for every caller together over the ledger's billing month;
-  // nothing was loaded, and the adapter maps it to BudgetExceeded at provider-month
-  z.strictObject({ kind: z.literal('monthly-cap'), cap: count, windowEnd: isoDateTimeSchema }),
+  // nothing was loaded, and the adapter maps it to BudgetExceeded at provider-month with the worker's own figures
+  z.strictObject({ kind: z.literal('monthly-cap'), cap: count, used: count, windowEnd: isoDateTimeSchema }),
+  // why: W3: the counts file is missing or unreadable, so no page is admitted; it is not a cap reached, and waiting
+  // does not repair it (`pnpm gmt browser counts` does)
+  z.strictObject({ kind: z.literal('counts-unreadable'), problem: z.enum(['missing', 'unreadable']) }),
 ]);
 export type WorkerAnswer = z.infer<typeof workerAnswerSchema>;
 
@@ -234,6 +237,7 @@ export const ANSWER_STATUS: Readonly<Record<WorkerAnswer['kind'], number>> = {
   'not-ready': 504,
   'browser-error': 502,
   'monthly-cap': 429,
+  'counts-unreadable': 503,
 };
 
 /**

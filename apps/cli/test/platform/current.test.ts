@@ -118,6 +118,7 @@ describe('currentPlatform (brief WP16b §5, Task 16b.2)', () => {
       restart: 'on-failure',
       preventRestartExitStatus: null,
       throttleSeconds: 60,
+      stopSeconds: 30,
       calendar: null,
     } as const;
     expect(() => p.serviceManager.render(spec, p.paths)).toThrow(WIN32_REFUSAL);

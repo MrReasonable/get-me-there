@@ -1,54 +1,74 @@
 import { createHash } from 'node:crypto';
-import { chmodSync, existsSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { billingMonthWindow, type Clock, type IsoDateTime, isoDateTimeSchema } from '@gmt/core';
+import {
+  billingMonthWindow,
+  type Clock,
+  type IsoDateTime,
+  MONTHLY_FILE,
+  type MonthlyCounts,
+  monthlyCountsSchema,
+} from '@gmt/core';
+import { writePrivateFile } from './privateFile.js';
 
+export type { MonthlyCounts };
 /**
  * The worker's own monthly caps, for every caller together (spec §2 "Caps across callers"; decision 82; brief WP17
  * Task 17.3). The counts of the ledger's billing month (`billingMonthWindow`, 00:00 UTC on CAMOUFOX_BILLING_DAY, core's
- * one rule the ledger's window query is tested to agree with) live in `<data>/monthly.json` (0600, beside the pacer's
- * file). Under the worker's lock and before anything loads, a page is admitted only while the page cap has room, and
- * its scroll allowance is clamped to what the scroll cap leaves (0 still reads the first block); the page and its
- * allowance are written before the load and settle to the scrolls made afterwards, so a crash over-counts and never
- * under-counts. The file fails closed: missing beside an existing pacer file, unreadable, invalid, or wider than 0600,
- * every page is refused (`monthly-cap`) and the file is left exactly as it is, never rewritten with zeros. Only a new
- * install (neither file there) starts the window at zero.
+ * one rule the ledger's window query is tested to agree with) live in `<data>/monthly.json` (0600, core's
+ * `monthlyCountsSchema`, beside the pacer's file). Under the worker's lock and before anything loads, a page is
+ * admitted only while the page cap has room, and its scroll allowance is clamped to what the scroll cap leaves (0
+ * still reads the first block); the page and its allowance are written before the load and settle to the scrolls made
+ * afterwards, so a crash over-counts and never under-counts. Counts start at zero only once the window they belong to
+ * has ended (W3): a changed billing day or a clock step back carries them, never resets them. The file fails closed:
+ * missing beside an existing pacer file (an earlier worker's data), unreadable, invalid, or wider than 0600, every page
+ * is refused (`counts-unreadable`, never a cap reached) and the file is left exactly as it is; `gmt browser counts`
+ * rewrites it from the ledger. Only a new install (neither file there) starts the window at zero.
  */
-export const MONTHLY_FILE = 'monthly.json';
+export { MONTHLY_FILE };
+
 const PACER_FILE = 'pacer.json';
 
-export interface MonthlyCounts {
-  windowStart: IsoDateTime;
-  pages: number;
-  scrolls: number;
-}
 export interface MonthlyCaps {
   pages: number;
   scrolls: number;
   billingDay: number;
 }
+/** Why the counts file refused: missing beside an earlier worker's pacer file, or there but unreadable. */
+export type CountsProblem = 'missing' | 'unreadable';
 export type Admission =
   | { kind: 'ok'; scrollAllowance: number; reserved: MonthlyCounts }
-  | { kind: 'monthly-cap' };
+  | { kind: 'monthly-cap'; cap: number; used: number; windowEnd: IsoDateTime }
+  | { kind: 'counts-unreadable'; problem: CountsProblem };
 
 /**
- * Pure: counts from another window are a new window at zero. A page is refused only on the page cap; its scroll
- * allowance is what the scroll cap leaves, at most `scrollRequest`.
+ * Pure: the counts now's window starts from. Stored counts whose window ended at or before now's window started are a
+ * new window at zero; any other stored window (a billing day changed part way, or a clock stepped back) carries its
+ * counts into now's window, which ends no earlier than the stored one: over-counting is the safe direction.
  */
+export function current(c: MonthlyCounts, now: IsoDateTime, billingDay: number): MonthlyCounts {
+  const w = billingMonthWindow(now, billingDay);
+  if (c.windowStart === w.windowStart && c.windowEnd === w.windowEnd) return c;
+  if (Date.parse(c.windowEnd) <= Date.parse(w.windowStart)) return { ...w, pages: 0, scrolls: 0 };
+  const end = Date.parse(c.windowEnd) > Date.parse(w.windowEnd) ? c.windowEnd : w.windowEnd;
+  return { windowStart: w.windowStart, windowEnd: end, pages: c.pages, scrolls: c.scrolls };
+}
+
+/** Pure: a page is refused only on the page cap; its scroll allowance is what the scroll cap leaves, at most the request. */
 export function admit(
   c: MonthlyCounts,
   caps: MonthlyCaps,
   now: IsoDateTime,
   scrollRequest: number,
 ): Admission {
-  const { windowStart } = billingMonthWindow(now, caps.billingDay);
-  const cur = c.windowStart === windowStart ? c : { windowStart, pages: 0, scrolls: 0 };
-  if (cur.pages >= caps.pages) return { kind: 'monthly-cap' };
+  const cur = current(c, now, caps.billingDay);
+  if (cur.pages >= caps.pages)
+    return { kind: 'monthly-cap', cap: caps.pages, used: cur.pages, windowEnd: cur.windowEnd };
   const scrollAllowance = Math.max(0, Math.min(scrollRequest, caps.scrolls - cur.scrolls));
   return {
     kind: 'ok',
     scrollAllowance,
-    reserved: { windowStart, pages: cur.pages + 1, scrolls: cur.scrolls + scrollAllowance },
+    reserved: { ...cur, pages: cur.pages + 1, scrolls: cur.scrolls + scrollAllowance },
   };
 }
 
@@ -58,36 +78,37 @@ export function settle(reserved: MonthlyCounts, allowance: number, scrollsMade: 
   return { ...reserved, scrolls: reserved.scrolls - (allowance - made) };
 }
 
-const isCount = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v) && v >= 0;
-
-/** The counts file's text, or what refuses it; never throws. */
-function readSync(dir: string): MonthlyCounts | 'absent' | 'refused' {
+/** The counts file's contents, or what refuses it; never throws. */
+function readSync(dir: string): MonthlyCounts | 'absent' | { refused: CountsProblem } {
   const file = join(dir, MONTHLY_FILE);
-  if (!existsSync(file)) return existsSync(join(dir, PACER_FILE)) ? 'refused' : 'absent';
+  if (!existsSync(file)) return existsSync(join(dir, PACER_FILE)) ? { refused: 'missing' } : 'absent';
   let raw: unknown;
   try {
     // why: anything beyond the owner's read and write is a widened mode, and the file is refused as it stands
-    if ((statSync(file).mode & 0o777 & ~0o600) !== 0) return 'refused';
+    if ((statSync(file).mode & 0o777 & ~0o600) !== 0) return { refused: 'unreadable' };
     raw = JSON.parse(readFileSync(file, 'utf8'));
   } catch {
-    return 'refused';
+    return { refused: 'unreadable' };
   }
-  if (typeof raw !== 'object' || raw === null) return 'refused';
-  const keys = Object.keys(raw).sort().join(',');
-  const start = isoDateTimeSchema.safeParse('windowStart' in raw ? raw.windowStart : undefined);
-  const pages = 'pages' in raw ? raw.pages : undefined;
-  const scrolls = 'scrolls' in raw ? raw.scrolls : undefined;
-  if (keys !== 'pages,scrolls,windowStart' || !start.success || !isCount(pages) || !isCount(scrolls))
-    return 'refused';
-  return { windowStart: start.data, pages, scrolls };
+  const r = monthlyCountsSchema.safeParse(raw);
+  return r.success ? r.data : { refused: 'unreadable' };
 }
 
 /**
- * Reads the file: 'absent' only when no pacer file exists either; a missing file beside a pacer file, invalid JSON, a
- * schema failure, a mode wider than 0600 or a read error is 'refused', and the file is left as it is.
+ * Reads the file: 'absent' only when no pacer file exists either; a missing file beside a pacer file is refused as
+ * missing, and invalid JSON, a schema failure, a mode wider than 0600 or a read error as unreadable; the file is left
+ * as it is.
  */
-export async function readCounts(dir: string): Promise<MonthlyCounts | 'absent' | 'refused'> {
+export async function readCounts(
+  dir: string,
+): Promise<MonthlyCounts | 'absent' | { refused: CountsProblem }> {
   return readSync(dir);
+}
+
+/** The counts problem the start checks read: none, or why the file refused. */
+export function countsFact(dir: string): 'ok' | CountsProblem {
+  const read = readSync(dir);
+  return typeof read === 'object' && 'refused' in read ? read.refused : 'ok';
 }
 
 /** The window's counts as `/v1/status` reports them; `readable` false when the file refused. */
@@ -105,28 +126,35 @@ export interface MonthlyStatus {
  */
 export class MonthlyCounter {
   private readonly file: string;
+  /**
+   * Whether this counter found a new install (neither file): the pacer's file this process then writes before the
+   * first reservation does not make the counts "missing" (a check after the pacer's claim reads them as new).
+   */
+  private fresh = false;
   constructor(private readonly o: { dir: string; caps: MonthlyCaps; clock: Clock }) {
     this.file = join(o.dir, MONTHLY_FILE);
   }
 
-  /** Admits a page asking for `scrollRequest` scrolls, or says it is refused (the counts file left unchanged). */
+  private read(): MonthlyCounts | 'absent' | { refused: CountsProblem } {
+    const r = readSync(this.o.dir);
+    if (r === 'absent') this.fresh = true;
+    return this.fresh && typeof r === 'object' && 'refused' in r && r.refused === 'missing' ? 'absent' : r;
+  }
+
+  /** Admits a page asking for `scrollRequest` scrolls, or says why not (the counts file left unchanged). */
   check(scrollRequest: number): Admission {
-    const read = readSync(this.o.dir);
-    if (read === 'refused') return { kind: 'monthly-cap' };
+    const read = this.read();
+    if (typeof read === 'object' && 'refused' in read)
+      return { kind: 'counts-unreadable', problem: read.refused };
     const now = this.o.clock.now();
     const counts =
-      read === 'absent'
-        ? { windowStart: billingMonthWindow(now, this.o.caps.billingDay).windowStart, pages: 0, scrolls: 0 }
-        : read;
+      read === 'absent' ? { ...billingMonthWindow(now, this.o.caps.billingDay), pages: 0, scrolls: 0 } : read;
     return admit(counts, this.o.caps, now, scrollRequest);
   }
 
-  /** Writes counts (a temporary file, 0600, then a rename). */
+  /** Writes counts through the worker's one private-file write. */
   write(c: MonthlyCounts): void {
-    const tmp = `${this.file}.tmp`;
-    writeFileSync(tmp, JSON.stringify(c), { mode: 0o600 });
-    chmodSync(tmp, 0o600);
-    renameSync(tmp, this.file);
+    writePrivateFile(this.file, JSON.stringify(monthlyCountsSchema.parse(c)));
   }
 
   /** `check` then, when admitted, the reservation written before anything loads. */
@@ -138,28 +166,32 @@ export class MonthlyCounter {
 
   /** After the page: the counts settle to the scrolls it made (only while the reservation is still the file's window). */
   settle(reserved: MonthlyCounts, allowance: number, scrollsMade: number): void {
-    const read = readSync(this.o.dir);
-    if (read === 'refused' || read === 'absent' || read.windowStart !== reserved.windowStart) return;
+    const read = this.read();
+    if (read === 'absent' || 'refused' in read || read.windowStart !== reserved.windowStart) return;
     this.write(settle(read, allowance, scrollsMade));
+  }
+
+  /** `gmt browser counts`: this window's figures from the ledger replace the file (the caller holds the lock). */
+  rewrite(pages: number, scrolls: number): MonthlyCounts {
+    const c = { ...billingMonthWindow(this.o.clock.now(), this.o.caps.billingDay), pages, scrolls };
+    this.write(c);
+    return c;
   }
 
   status(): MonthlyStatus {
     const now = this.o.clock.now();
-    const w = billingMonthWindow(now, this.o.caps.billingDay);
-    const read = readSync(this.o.dir);
-    const current = typeof read === 'object' && read.windowStart === w.windowStart ? read : null;
+    const read = this.read();
+    const cur =
+      read === 'absent' || 'refused' in read
+        ? { ...billingMonthWindow(now, this.o.caps.billingDay), pages: 0, scrolls: 0 }
+        : current(read, now, this.o.caps.billingDay);
     return {
-      windowStart: w.windowStart,
-      windowEnd: w.windowEnd,
-      pages: current?.pages ?? 0,
-      scrolls: current?.scrolls ?? 0,
-      readable: read !== 'refused',
+      windowStart: cur.windowStart,
+      windowEnd: cur.windowEnd,
+      pages: cur.pages,
+      scrolls: cur.scrolls,
+      readable: read === 'absent' || !('refused' in read),
     };
-  }
-
-  /** The current window's end, for a refused page's answer. */
-  windowEnd(): IsoDateTime {
-    return billingMonthWindow(this.o.clock.now(), this.o.caps.billingDay).windowEnd;
   }
 
   get caps(): MonthlyCaps {
@@ -207,12 +239,7 @@ export class AppInstances {
     const digest = createHash('sha256').update(id).digest('hex');
     const c = this.current();
     if (c.ids.includes(digest)) return;
-    const tmp = `${this.file}.tmp`;
-    writeFileSync(tmp, JSON.stringify({ windowStart: c.windowStart, ids: [...c.ids, digest] }), {
-      mode: 0o600,
-    });
-    chmodSync(tmp, 0o600);
-    renameSync(tmp, this.file);
+    writePrivateFile(this.file, JSON.stringify({ windowStart: c.windowStart, ids: [...c.ids, digest] }));
   }
 
   status(): { windowStart: IsoDateTime; count: number } {

@@ -186,17 +186,20 @@ export class PageSession {
         googleContacted: false,
       };
     // why: decision 82: the month's page cap for every caller, before anything opens; a refusal leaves the counts as
-    // they are, and an unreadable counts file refuses every page
+    // they are, and a counts file that cannot be read refuses every page as itself (W3), never as a cap reached
     const admission = this.d.monthly.check(req.mode === 'grid' ? req.scrollAllowance : 0);
     if (admission.kind === 'monthly-cap')
       return {
         answer: {
           kind: 'monthly-cap',
-          cap: this.d.monthly.caps.pages,
-          windowEnd: this.d.monthly.windowEnd(),
+          cap: admission.cap,
+          used: admission.used,
+          windowEnd: admission.windowEnd,
         },
         googleContacted: false,
       };
+    if (admission.kind === 'counts-unreadable')
+      return { answer: { kind: 'counts-unreadable', problem: admission.problem }, googleContacted: false };
     const claim = this.d.pacer.claim();
     if (!claim.ok)
       return {

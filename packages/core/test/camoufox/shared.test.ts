@@ -3,6 +3,8 @@
 // its texts, the worker's data directory, the app-instance header, and every status field WP17's worker will emit.
 import { readFileSync } from 'node:fs';
 import { beforeEach, describe, expect, it } from 'vitest';
+import { CONSENT_FIX } from '../../src/camoufox/consentFix.js';
+import { countsRewriteSchema, MONTHLY_FILE, monthlyCountsSchema } from '../../src/camoufox/monthly.js';
 import { APP_INSTANCE_HEADER, workerStatusSchema } from '../../src/camoufox/protocol.js';
 import {
   effectiveSharedSettings,
@@ -18,8 +20,15 @@ import {
   sharedSettingDiffs,
   sharedSettingMessage,
 } from '../../src/camoufox/settings.js';
-import { START_REFUSAL_REASONS, START_REFUSAL_TEXT, startRefusalSchema } from '../../src/camoufox/start.js';
+import {
+  START_REFUSAL_FILE,
+  START_REFUSAL_REASONS,
+  START_REFUSAL_TEXT,
+  startRefusalSchema,
+} from '../../src/camoufox/start.js';
+import { WORKER_PORT, workerPortOf, workerUrlFor } from '../../src/camoufox/workerPort.js';
 import * as core from '../../src/index.js';
+import { camoufoxRootDir } from '../../src/local/paths.js';
 import { BANNED_WORD_ALLOWLIST, findBannedWords } from '../../src/text/bannedWords.js';
 
 beforeEach(() => {
@@ -221,23 +230,34 @@ describe('the start refusal file and its texts (decision 76)', () => {
       'consent-missing',
       'consent-expired',
       'consent-voided',
+      'consent-not-shown',
       'build-mismatch',
       'layout',
       'signed-in',
       'locked',
+      'counts-missing',
+      'counts-unreadable',
+      'config',
     ]);
     expect(Object.keys(START_REFUSAL_TEXT)).toEqual([...START_REFUSAL_REASONS]);
+    // why: W1, W2: every fix names a command that exists today; the consent ones are CONSENT_FIX's until Task 17.5
+    const capture = 'pnpm --filter @gmt/camoufox-worker capture-socs';
+    expect(CONSENT_FIX).toEqual({ command: capture, doc: 'docs/setup.md#capture-your-consent-choice' });
     expect(
       Object.fromEntries(START_REFUSAL_REASONS.map((r) => [r, START_REFUSAL_TEXT[r].fixCommand])),
     ).toEqual({
       'flags-unset': null,
-      'consent-missing': 'pnpm gmt consent',
-      'consent-expired': 'pnpm gmt consent',
-      'consent-voided': 'pnpm gmt consent',
-      'build-mismatch': null,
-      layout: 'pnpm gmt setup --reconfigure browser',
-      'signed-in': 'pnpm gmt consent',
+      'consent-missing': capture,
+      'consent-expired': capture,
+      'consent-voided': capture,
+      'consent-not-shown': capture,
+      'build-mismatch': 'pnpm gmt browser install',
+      layout: 'pnpm gmt browser install',
+      'signed-in': 'pnpm --filter @gmt/camoufox-worker clear-signed-in',
       locked: 'pnpm gmt restart',
+      'counts-missing': 'pnpm gmt browser counts',
+      'counts-unreadable': 'pnpm gmt browser counts',
+      config: 'pnpm gmt start',
     });
     expect(START_REFUSAL_TEXT['consent-voided'].summary).toBe('consent screen now shown: capture again');
     for (const r of START_REFUSAL_REASONS) {
@@ -370,5 +390,58 @@ describe('one rule set for both sides (R27)', () => {
       sharedInt(s, 'CAMOUFOX_COOLDOWN_HOURS'),
     ]).toEqual(['grid', 12, 48]);
     expect(sharedMode(SHARED_WORKER_DEFAULTS)).toBe('list');
+  });
+});
+
+// why: ca-b1-008: one port rule for the worker's listen and the app's CAMOUFOX_WORKER_URL
+describe('the worker’s port', () => {
+  it('is 8090 unset or empty, any whole number 1024–65535 otherwise, and null for anything else', () => {
+    expect(workerPortOf(undefined)).toBe(8090);
+    expect(workerPortOf('')).toBe(8090);
+    expect(workerPortOf('1024')).toBe(1024);
+    expect(workerPortOf('65535')).toBe(65535);
+    for (const bad of ['1023', '65536', '80a', ' 8091', '8091.0', '-1'])
+      expect(workerPortOf(bad), bad).toBeNull();
+    expect(workerUrlFor(8091)).toBe('http://127.0.0.1:8091');
+    expect(WORKER_PORT).toEqual({ default: 8090, min: 1024, max: 65535 });
+  });
+});
+
+// why: W3 (ca-b1-005): the counts file's one shape, read and written by the worker, rewritten through its entry
+describe('the monthly counts file', () => {
+  const ok = {
+    windowStart: '2027-10-01T00:00:00.000Z',
+    windowEnd: '2027-11-01T00:00:00.000Z',
+    pages: 40,
+    scrolls: 200,
+  };
+  it('is the window and its whole counts, nothing else', () => {
+    expect(MONTHLY_FILE).toBe('monthly.json');
+    expect(monthlyCountsSchema.parse(ok)).toEqual(ok);
+    for (const bad of [
+      { ...ok, pages: -1 },
+      { ...ok, scrolls: 1.5 },
+      { ...ok, extra: 1 },
+      { ...ok, windowEnd: 'x' },
+    ])
+      expect(monthlyCountsSchema.safeParse(bad).success).toBe(false);
+    const { windowEnd: _, ...old } = ok;
+    expect(monthlyCountsSchema.safeParse(old).success).toBe(false);
+  });
+  it('a rewrite carries pages and scrolls only, bounded', () => {
+    expect(countsRewriteSchema.parse({ pages: 0, scrolls: 9_999_999 })).toEqual({
+      pages: 0,
+      scrolls: 9_999_999,
+    });
+    for (const bad of [
+      { pages: 1 },
+      { pages: 1, scrolls: 10_000_000 },
+      { pages: 1, scrolls: 1, windowStart: ok.windowStart },
+    ])
+      expect(countsRewriteSchema.safeParse(bad).success).toBe(false);
+  });
+  it('the install root is under the home directory’s local share', () => {
+    expect(camoufoxRootDir('/home/op')).toBe('/home/op/.local/share/get-me-there/camoufox');
+    expect(START_REFUSAL_FILE).toBe('start-refusal.json');
   });
 });

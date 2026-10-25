@@ -349,6 +349,96 @@ describe.skipIf(process.platform === 'win32')(
       expect(readdirSync(d)).toEqual([]);
     });
 
+    // why: sec-b1-002: a stalled connection, a slow whole download and a hung answer each end within their bounds
+    it('download fails when no data comes for the idle bound, or the whole takes longer than its bound, keeping nothing', async () => {
+      const d = tmp();
+      const stalled: typeof fetch = async (_u, init) =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(c) {
+              c.enqueue(new Uint8Array(10));
+              init?.signal?.addEventListener('abort', () => c.error(init.signal?.reason));
+            },
+          }),
+          { status: 200 },
+        );
+      const action = { kind: 'download' as const, url: REL, to: join(d, 'a'), sha256: sha(BLOB), bytes: 100 };
+      await expect(
+        systemExecutor(noChild, { fetch: stalled, downloadIdleMs: 20, downloadTotalMs: 60_000 }).run(action),
+      ).rejects.toThrow(`download of ${REL}: no data for 0.02 s`);
+      await expect(
+        systemExecutor(noChild, { fetch: stalled, downloadIdleMs: 60_000, downloadTotalMs: 30 }).run(action),
+      ).rejects.toThrow(`download of ${REL}: not done within`);
+      const hung: typeof fetch = (_u, init) =>
+        new Promise((_r, reject) =>
+          init?.signal?.addEventListener('abort', () => reject(new Error('aborted'))),
+        );
+      await expect(
+        systemExecutor(noChild, { fetch: hung, downloadIdleMs: 20, downloadTotalMs: 60_000 }).run(action),
+      ).rejects.toThrow('no data for 0.02 s');
+      expect(readdirSync(d)).toEqual([]);
+    });
+    it('a redirect’s own body is cancelled before the next hop, and every hop carries the bound', async () => {
+      const d = tmp();
+      let cancelled = 0;
+      const signals: unknown[] = [];
+      const f: typeof fetch = async (input, init) => {
+        signals.push(init?.signal);
+        if (String(input) === REL)
+          return new Response(
+            new ReadableStream({
+              cancel() {
+                cancelled++;
+              },
+            }),
+            { status: 302, headers: { location: ASSET } },
+          );
+        return new Response(new Uint8Array(BLOB), { status: 200 });
+      };
+      await systemExecutor(noChild, { fetch: f }).run({
+        kind: 'download',
+        url: REL,
+        to: join(d, 'a.zip'),
+        sha256: sha(BLOB),
+        bytes: BLOB.length,
+      });
+      expect(cancelled).toBe(1);
+      expect(signals.every((x) => x instanceof AbortSignal)).toBe(true);
+    });
+    // why: sec-b1-003: a link in the archive that leads out of the bundle is refused, and nothing is kept
+    it('an unpacked tree with a link leading out of it is refused, its temporary directory removed; links inside it pass', async () => {
+      const d = tmp();
+      const extract =
+        (link: string): Runner =>
+        async (argv) => {
+          if (argv[1] === '-Z1') return { code: 0, stdout: 'inner/f\n', stderr: '' };
+          const into = String(argv[4]);
+          const { symlinkSync } = await import('node:fs');
+          mkdirSync(join(into, 'inner'), { recursive: true });
+          writeFileSync(join(into, 'inner', 'f'), 'x');
+          symlinkSync(link, join(into, 'inner', 'l'));
+          return { code: 0, stdout: '', stderr: '' };
+        };
+      writeFileSync(join(d, 'a.zip'), 'zip');
+      for (const bad of ['/etc', '../../outside', '../..'])
+        await expect(
+          systemExecutor(extract(bad)).run({
+            kind: 'unpack',
+            archive: join(d, 'a.zip'),
+            sha256: sha('zip'),
+            to: join(d, 'out'),
+          }),
+        ).rejects.toThrow(`a link leads out of the bundle (inner/l -> ${bad})`);
+      expect(readdirSync(d)).toEqual(['a.zip']);
+      await systemExecutor(extract('f')).run({
+        kind: 'unpack',
+        archive: join(d, 'a.zip'),
+        sha256: sha('zip'),
+        to: join(d, 'ok'),
+      });
+      expect(readFileSync(join(d, 'ok', 'inner', 'l'), 'utf8')).toBe('x');
+    });
+
     it('entryProblem refuses absolute, .. and escaping entries', () => {
       for (const e of ['inner/f.txt', 'a/b/', 'Camoufox.app/Contents/x', ''])
         expect(entryProblem(e)).toBeNull();
@@ -380,7 +470,8 @@ describe.skipIf(process.platform === 'win32')(
           to: join(d, 'out'),
         }),
       ).rejects.toThrow('../evil leaves the archive');
-      expect(readdirSync(d).sort()).toEqual(['a.zip', 'b.tar']);
+      // why: W6: an archive that no longer hashes is removed, so neither a retry nor a cache reuses it
+      expect(readdirSync(d).sort()).toEqual(['b.tar']);
     });
     it('a failed extraction that left files is reported by its own error and leaves no temporary directory', async () => {
       const d = tmp();

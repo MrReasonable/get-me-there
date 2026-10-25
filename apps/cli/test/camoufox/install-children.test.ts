@@ -8,6 +8,7 @@ import {
   realpathSync,
   rmSync,
   statSync,
+  writeFileSync,
 } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
@@ -21,16 +22,15 @@ import { systemFiles } from '../../src/exec/files.js';
 import { systemRunner } from '../../src/exec/runner.js';
 import { systemExecutor } from '../../src/exec/system.js';
 import { apply } from '../../src/plan/apply.js';
-import { killTracked } from '../support/children.js';
 import { LINUX_ENTRIES, MAC_ENTRIES, makeZip } from '../support/zip.js';
 
 // why: these tests start real children (unzip, ln) and serve the archive from a loopback HTTP server, so Stryker's
 // per-mutant command leaves this file out (PR #11); install.test.ts covers the planner with stand-ins. No release host
-// is ever contacted: the fetch the executor uses sends every request to the loopback server.
+// is ever contacted: the fetch the executor uses sends every request to the loopback server. Each child is the
+// executor's own, run to its end (or its bound) before the action resolves, so none outlives its test.
 const dirs: string[] = [];
 afterEach(() => {
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
-  expect(killTracked()).toEqual([]);
 });
 const tmp = () => {
   const d = mkdtempSync(join(tmpdir(), 'gmt-install-'));
@@ -214,6 +214,37 @@ describe.skipIf(process.platform === 'win32')(
       const bad = await systemRunner([...argv.slice(0, -1), 'win32-x64'], { cwd, timeoutMs: 30_000 });
       expect(bad.code).toBe(64);
       expect(bad.stdout).toBe('');
+    });
+
+    // why: W6: update reads the next commit's pin.ts alone, before the stop, through this code's printer and schema
+    it('with --pin it prints the manifest of that copy of pin.ts, and refuses one this code cannot read', async () => {
+      const checkout = join(import.meta.dirname, '..', '..', '..', '..');
+      const cwd = join(checkout, 'apps', 'cli');
+      const d = tmp();
+      const pin = readFileSync(join(checkout, 'packages', 'core', 'src', 'camoufox', 'pin.ts'), 'utf8');
+      writeFileSync(join(d, 'next.ts'), pin.replaceAll('152.0.4-beta.28', '153.0.1-beta.30'));
+      const r = await systemRunner(
+        manifestArgv(process.execPath, checkout, 'darwin-arm64', join(d, 'next.ts')),
+        {
+          cwd,
+          timeoutMs: 30_000,
+        },
+      );
+      expect(r.code, r.stderr).toBe(0);
+      const m = parseManifest(r.stdout);
+      expect(m?.entry.build).toBe('153.0.1-beta.30');
+      expect(m?.flags.FORM_VERIFIED).toBe(true);
+      writeFileSync(join(d, 'odd.ts'), 'export const CAMOUFOX_PIN = { builds: {} };\n');
+      const odd = await systemRunner(
+        manifestArgv(process.execPath, checkout, 'darwin-arm64', join(d, 'odd.ts')),
+        {
+          cwd,
+          timeoutMs: 30_000,
+        },
+      );
+      expect(odd.code).toBe(78);
+      expect(odd.stdout).toBe('');
+      expect(odd.stderr).toContain('is not a pin this code can read');
     });
   },
 );

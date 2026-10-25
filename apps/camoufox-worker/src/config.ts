@@ -1,4 +1,12 @@
-import { readSharedSettings, Secret, type SharedSettings, sharedInt, sharedMode } from '@gmt/core';
+import {
+  readSharedSettings,
+  Secret,
+  type SharedSettings,
+  sharedInt,
+  sharedMode,
+  WORKER_PORT,
+  workerPortOf,
+} from '@gmt/core';
 import type { Env } from './run.js';
 
 /**
@@ -35,7 +43,8 @@ export interface WorkerConfig {
 }
 
 /** Decision 73: the build comes from CAMOUFOX_BUILDS; a worker.env still naming the old setting is refused. */
-export const BINARY_BUILD_REMOVED = 'remove CAMOUFOX_BINARY_BUILD: the build now comes from CAMOUFOX_BUILDS';
+export const BINARY_BUILD_REMOVED =
+  'remove CAMOUFOX_BINARY_BUILD from worker.env (pnpm gmt browser install removes it): the build now comes from CAMOUFOX_BUILDS';
 
 export class WorkerConfigError extends Error {
   constructor(
@@ -47,23 +56,13 @@ export class WorkerConfigError extends Error {
   }
 }
 
-function intIn(env: Env, name: string, min: number, max: number, dflt: number, bad: string[]): number {
-  const raw = env[name];
-  if (raw === undefined || raw === '') return dflt;
-  const v = Number(raw);
-  if (!/^\d+$/.test(raw) || v < min || v > max) {
-    bad.push(name);
-    return dflt;
-  }
-  return v;
-}
-
 /** Parses the worker's environment; throws WorkerConfigError naming every bad variable at once. */
 export function loadWorkerConfig(env: Env): WorkerConfig {
   const bad: string[] = [];
   const key = env.CAMOUFOX_WORKER_KEY ?? '';
   if (key.length < 32) bad.push('CAMOUFOX_WORKER_KEY');
-  const port = intIn(env, 'CAMOUFOX_WORKER_PORT', 1024, 65535, 8090, bad);
+  const port = workerPortOf(env.CAMOUFOX_WORKER_PORT) ?? WORKER_PORT.default;
+  if (workerPortOf(env.CAMOUFOX_WORKER_PORT) === null) bad.push('CAMOUFOX_WORKER_PORT');
   // why: spec §12, review R27 — the ten shared settings through core's one rule set, with its bounds and defaults; every
   // typed field below comes from that one effective record
   const shared = readSharedSettings(env);

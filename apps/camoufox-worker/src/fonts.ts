@@ -1,6 +1,7 @@
-import { chmodSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fontsConfFile } from './paths.js';
+import { writePrivateFile } from './privateFile.js';
 
 /**
  * Linux fonts (spec §2 "Method"; brief WP17 §0). The worker keeps `os: 'macos'` on Linux as on macOS, but each bundled
@@ -23,9 +24,6 @@ export function absoluteFontsConf(text: string, bundleDir: string): string {
 export function writeFontsConf(dataDir: string, bundleDir: string): string {
   const src = readFileSync(join(bundleDir, 'fontconfig', 'macos', 'fonts.conf'), 'utf8');
   const file = fontsConfFile(dataDir);
-  const tmp = `${file}.tmp`;
-  writeFileSync(tmp, absoluteFontsConf(src, bundleDir), { mode: 0o600 });
-  chmodSync(tmp, 0o600);
-  renameSync(tmp, file);
+  writePrivateFile(file, absoluteFontsConf(src, bundleDir));
   return file;
 }

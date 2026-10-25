@@ -42,7 +42,7 @@ export function planLayout(i: {
   } else if (i.files.isDir(link) || i.files.size(link) !== null)
     return {
       kind: 'refused',
-      message: `${link} is not a symlink to a Camoufox bundle; it is never replaced: move it aside, then run setup again`,
+      message: `${link} is not a symlink to a Camoufox bundle; it is never replaced: move it aside, then run pnpm gmt browser install`,
     };
   else actions.push(runAction(['ln', '-s', target, link], i.root, { describe: `link ${link} to ${target}` }));
   const top = join(i.root, 'version.json');

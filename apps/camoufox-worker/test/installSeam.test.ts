@@ -17,6 +17,8 @@ afterEach(() => {
   for (const c of children.splice(0)) if (c.exitCode === null && c.signalCode === null) c.kill('SIGKILL');
 });
 const osArch: OsArch | null = osArchOf(process.platform, process.arch);
+/** What camoufox-js 0.11.5 throws on the fixture's empty properties.json (read after its install was resolved). */
+const LAUNCH_STOP = ['UnknownProperty', 'Unknown property screen.availTop in config'];
 
 function runChild(
   mode: string,
@@ -83,21 +85,34 @@ describe.skipIf(osArch === null)(
       const env = envFor(h);
       const r = await runChild('launch', env);
       expect(r.code, r.err).toBe(0);
-      const got: { fetches: number; error: string | null; fontconfig: string | null } = JSON.parse(r.out);
+      const got: {
+        fetches: number;
+        error: string | null;
+        message: string | null;
+        fontconfig: string | null;
+      } = JSON.parse(r.out);
       expect(got.fetches).toBe(0);
-      // why: the fixture's properties.json is empty, so camoufox-js stops inside launchOptions, after it resolved the
-      // install (where its download branch would have run) and before any browser starts
-      expect(got.error).not.toBeNull();
-      expect(got.error).not.toBe('InstallRefused');
+      // why: ts-b1-004: the fixture's properties.json is empty, so camoufox-js stops inside launchOptions on that file,
+      // after it resolved the install (where its download branch would have run) and before any browser starts
+      expect([got.error, got.message], r.out).toEqual(LAUNCH_STOP);
       expect(got.fontconfig === null).toBe(osArch.startsWith('darwin'));
       expect(existsSync(join(f.bundleDir, 'version.json'))).toBe(true);
+    });
+
+    // why: ts-b1-004: the spy's positive control: with nothing installed, camoufox-js itself reaches its download branch
+    it('the fetch spy sees camoufox-js reach its download branch when nothing is installed (the control)', async () => {
+      const r = await runChild('control', envFor(home()));
+      expect(r.code, r.err).toBe(0);
+      const got: { fetches: number; entry: string | null } = JSON.parse(r.out);
+      expect(got.fetches).toBeGreaterThan(0);
+      expect(got.entry).not.toBeNull();
     });
 
     it('on the refusal paths, a missing and a mismatched bundle, the launch is refused before camoufox-js and fetch is never called', async () => {
       if (osArch === null) return;
       const missing = home();
       const m = await runChild('launch', envFor(missing));
-      expect(JSON.parse(m.out)).toEqual({ fetches: 0, error: 'InstallRefused', fontconfig: null });
+      expect(JSON.parse(m.out)).toMatchObject({ fetches: 0, error: 'InstallRefused', fontconfig: null });
       const mismatched = home();
       const f = fakeInstall(osArch, {
         home: mismatched.home,
@@ -105,7 +120,7 @@ describe.skipIf(osArch === null)(
         top: { version: '153.0.1', release: 'beta.30' },
       });
       const x = await runChild('launch', envFor(mismatched));
-      expect(JSON.parse(x.out)).toEqual({ fetches: 0, error: 'InstallRefused', fontconfig: null });
+      expect(JSON.parse(x.out)).toMatchObject({ fetches: 0, error: 'InstallRefused', fontconfig: null });
       expect(existsSync(f.bundleDir)).toBe(true);
       rmSync(mismatched.home, { recursive: true, force: true });
     });

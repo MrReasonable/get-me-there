@@ -4,8 +4,12 @@ import { MemoryFs, memoryExecutor, memoryRunner, type RunHandler } from '../../s
 import { currentPlatform } from '../../src/platform/current.js';
 
 /** A scripted Ask: answers are taken in order; every question asked is recorded. Running out of answers fails. */
-export function scriptedAsk(answers: Array<string | boolean>): Ask & { asked: string[] } {
+export function scriptedAsk(
+  answers: Array<string | boolean>,
+): Ask & { asked: string[]; defaults: Array<{ q: string; def: boolean }> } {
   const asked: string[] = [];
+  // why: ts-b1-002: each confirm's offered default, so a test can pin it
+  const defaults: Array<{ q: string; def: boolean }> = [];
   const next = (q: string): string | boolean => {
     asked.push(q);
     if (answers.length === 0) throw new Error(`no scripted answer for: ${q}`);
@@ -15,6 +19,7 @@ export function scriptedAsk(answers: Array<string | boolean>): Ask & { asked: st
   };
   return {
     asked,
+    defaults,
     text: async (q, def) => {
       const a = next(q);
       if (typeof a !== 'string') throw new Error(`expected text for: ${q}`);
@@ -26,6 +31,7 @@ export function scriptedAsk(answers: Array<string | boolean>): Ask & { asked: st
       return a;
     },
     confirm: async (q, def) => {
+      defaults.push({ q, def });
       const a = next(q);
       return a === '' ? def : a === true || a === 'y';
     },

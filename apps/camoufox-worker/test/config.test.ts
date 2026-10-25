@@ -81,7 +81,10 @@ describe('worker config (brief Task 14.5; spec §12 worker side)', () => {
   it('a worker.env still naming CAMOUFOX_BINARY_BUILD is refused with the words that say why', () => {
     for (const value of ['152.0.4-beta.28', '', 'latest'])
       expect(() => loadWorkerConfig({ ...ENV, CAMOUFOX_BINARY_BUILD: value })).toThrow(
-        new WorkerConfigError([], 'remove CAMOUFOX_BINARY_BUILD: the build now comes from CAMOUFOX_BUILDS'),
+        new WorkerConfigError(
+          [],
+          'remove CAMOUFOX_BINARY_BUILD from worker.env (pnpm gmt browser install removes it): the build now comes from CAMOUFOX_BUILDS',
+        ),
       );
     // why: run.ts carries its own CAMOUFOX_INSTALL_DIR into the entry's environment; the settings read nothing from it
     expect(loadWorkerConfig({ ...ENV, CAMOUFOX_INSTALL_DIR: '/x' }).port).toBe(8090);

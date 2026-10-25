@@ -59,6 +59,9 @@ describe('loadSocs (spec §2: a captured, dated rejection value)', () => {
     ['a missing field', JSON.stringify({ ...OK, sameSite: undefined }), 0o600],
     ['an unknown sameSite', JSON.stringify({ ...OK, sameSite: 'Sometimes' }), 0o600],
     ['no expiry', JSON.stringify({ ...OK, expires: 'soon' }), 0o600],
+    // why: CodeRabbit (PR #15): an expiry past a date's range is refused here, never thrown later as it is printed
+    ['an expiry past a date’s range', JSON.stringify({ ...OK, expires: -1e306 }), 0o600],
+    ['an expiry far in the future', JSON.stringify({ ...OK, expires: 8.64e12 + 1 }), 0o600],
     ['not secure', JSON.stringify({ ...OK, secure: false }), 0o600],
     ['no capture time', JSON.stringify({ ...OK, capturedAt: 'yesterday' }), 0o600],
     ['older than 13 months', JSON.stringify({ ...OK, capturedAt: '2025-09-17T05:00:00.000Z' }), 0o600],
@@ -195,6 +198,9 @@ describe('writeCapture (capture-socs)', () => {
 // why: decisions 74 and 75 (Task 17.2): the consent record the start checks and the status read
 describe('the consent record (socs.json)', () => {
   const NOW = '2026-10-18T05:00:00.000Z';
+  it('a capture whose expiry is past a date’s range reads as invalid, never throws', () => {
+    expect(readConsentRecord(dirWith(JSON.stringify({ ...OK, expires: -1e306 })), clock)).toBe('invalid');
+  });
   it('monthsAfter keeps the time and clamps the day', () => {
     expect(monthsAfter(asIsoDateTime('2026-10-18T04:00:00.000Z'), 13)).toBe('2027-11-18T04:00:00.000Z');
     expect(monthsAfter(asIsoDateTime('2027-01-31T23:59:59.999Z'), 1)).toBe('2027-02-28T23:59:59.999Z');

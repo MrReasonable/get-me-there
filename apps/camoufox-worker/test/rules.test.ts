@@ -1,6 +1,6 @@
 // The worker's limits as behaviour and as source facts (brief Task 14.11; TS-02, TS-03, arch-016, TS2-10): not string
 // scans, but a full page session over the fake browser and the TypeScript compiler API over src/.
-import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { asIata, asIsoDate } from '@gmt/core';
@@ -309,29 +309,9 @@ describe('worker rules: source facts through the compiler API', () => {
   });
 });
 
-// why: fix round 1 (sec I1): the agent starts the worker with an emptied environment, never a login shell's exports
-describe('the launchd agent example', () => {
-  const plist = readFileSync(
-    fileURLToPath(new URL('../launchd/local.get-me-there.camoufox-worker.plist.example', import.meta.url)),
-    'utf8',
-  );
-  const args = [
-    ...(plist
-      .split('<key>ProgramArguments</key>')[1]
-      ?.split('</array>')[0]
-      ?.matchAll(/<string>([^<]*)<\/string>/g) ?? []),
-  ].map((m) => m[1]);
-  it('runs /usr/bin/env -i with only HOME, PATH and TMPDIR, then pnpm start', () => {
-    expect(args.slice(0, 2)).toEqual(['/usr/bin/env', '-i']);
-    expect(args.filter((a) => a?.includes('=')).map((a) => a?.split('=')[0])).toEqual([
-      'HOME',
-      'PATH',
-      'TMPDIR',
-    ]);
-    expect(args.slice(-3)).toEqual(['--filter', '@gmt/camoufox-worker', 'start']);
-  });
-  it('has no login shell and carries no key', () => {
-    expect(plist).not.toMatch(/-lc|-l\b|zsh|bash/);
-    expect(plist).not.toMatch(/CAMOUFOX_WORKER_KEY=|EnvironmentVariables/);
+// why: po-b1-007: the hand-written launchd agent example is gone; gmt renders and installs the worker's service
+describe('the worker’s launchd agent', () => {
+  it('is gmt’s own: no hand-written example is shipped beside the worker', () => {
+    expect(existsSync(fileURLToPath(new URL('../launchd', import.meta.url)))).toBe(false);
   });
 });

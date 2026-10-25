@@ -341,6 +341,12 @@ export class SqliteBudgetGuard implements BudgetGuard {
     return left.length === 0 ? null : Math.max(0, Math.min(...left));
   }
 
+  scrollsThisMonth(providerId: ProviderId): number | null {
+    return this.budgetFor(providerId).monthlyScrollCap === undefined
+      ? null
+      : this.scrollUsage(providerId, null).month;
+  }
+
   /** The provider's scroll clicks in the execution and in its current month window (spec §2 rev 34). */
   scrollUsage(
     providerId: ProviderId,

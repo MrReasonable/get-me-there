@@ -66,6 +66,38 @@ describe('camoufox preflight (spec §2; decision 69; cost-015): unledgered', () 
       status({ ok: false, accountCookie: { found: true, names: ['SID'], checkedAt: AT } }),
       { ok: false, skip: 'provider_disabled', detail: 'signed-in profile refused' },
     ],
+    [
+      'a counts file the worker cannot read (W3)',
+      status({
+        ok: false,
+        monthly: {
+          windowStart: '2026-10-01T00:00:00.000Z',
+          windowEnd: '2026-11-01T00:00:00.000Z',
+          pages: 0,
+          scrolls: 0,
+          readable: false,
+        },
+      }),
+      {
+        ok: false,
+        skip: 'provider_disabled',
+        detail:
+          "the browser worker's monthly counts file cannot be read, so it refuses every page (pnpm gmt browser counts rewrites it)",
+      },
+    ],
+    [
+      'readable counts',
+      status({
+        monthly: {
+          windowStart: '2026-10-01T00:00:00.000Z',
+          windowEnd: '2026-11-01T00:00:00.000Z',
+          pages: 3,
+          scrolls: 0,
+          readable: true,
+        },
+      }),
+      { ok: true },
+    ],
     ['healthy', status(), { ok: true }],
     [
       'an unreadable status',

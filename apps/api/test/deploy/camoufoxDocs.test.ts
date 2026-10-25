@@ -66,7 +66,8 @@ describe('docs/setup.md section 14 (the Camoufox provider)', () => {
       'pnpm gmt setup --reconfigure browser',
       'The browser provider is not available on this machine yet (no recordings for <os>-<arch>); SearchApi and Travelpayouts work',
       "Page loads will come from this server's address, not a home connection.",
-      '313 MB and about 670 MB on macOS, 654 MB and about 1.25 GB on Linux',
+      // why: pie-b1-008: every entry's own download size
+      '313 MB download on Apple silicon or 320 MB on an Intel Mac, about 670 MB unpacked; 654 MB on arm64 Linux or 663 MB on x86_64 Linux, about 1.25 GB unpacked',
       'only once it finds your consent choice does `app.env` gain `CAMOUFOX_ENABLED=true`',
       '### On a machine with no display',
       '### Linux',
@@ -75,8 +76,31 @@ describe('docs/setup.md section 14 (the Camoufox provider)', () => {
       '### Key rotation',
       '### Appendix: the manual steps',
       'never as a command-line argument and never in a ticket',
+      // why: W1: the browser in any app mode, the hand-set worker's way across, and where the bundle lives
+      '### Install or update the browser, whatever runs the app',
+      '### The app in Docker, the worker on this machine',
+      '### If you set the worker up by hand before',
+      '### Capture your consent choice',
+      'pnpm gmt browser install',
+      'pnpm gmt browser counts',
+      'rm -rf ~/.local/share/get-me-there/camoufox',
+      'without linger (section 0) it stops when you log out',
+      'waits up to 270 s',
     ])
       expect(f, w).toContain(w);
+    // why: W2: no text names a consent command not built yet
+    expect(f).not.toContain('gmt consent');
+  });
+  // why: po-b1-006: the install lives under the pinned root; the old cache appears only where the docs say it is not used
+  it('names ~/Library/Caches only to say it is never used', () => {
+    for (const doc of [setup, providers]) {
+      const text = flat(doc);
+      for (let i = text.indexOf('Library/Caches'); i >= 0; i = text.indexOf('Library/Caches', i + 1)) {
+        const around = text.slice(Math.max(0, i - 120), i + 160);
+        expect(around, around).toMatch(/never one in|is not used any more|from an earlier version/);
+      }
+    }
+    expect(flat(providers)).not.toMatch(/verifies or creates/);
   });
   it('states every cost, the operator’s responsibility and the coverage arithmetic', () => {
     for (const c of COSTS) expect(section, c).toContain(c);
@@ -106,6 +130,15 @@ describe('docs/providers.md and docs/api-limits.md', () => {
   });
   // why: WP17 Task 17.7 (decision 75): the worker may run on any machine of the operator's, so the notes name that
   // machine and its address, never "the operator's IP"; both notes equal spec §2 Labels, word for word
+  // why: pa-b1-008, CodeRabbit (PR #15): the camoufox rows and method name the worker's machine, never the operator's
+  it('the camoufox rows name the pinned build and the worker’s machine, never the operator’s installed binary or own IP', () => {
+    const row = providers.split('\n').find((l) => l.startsWith('| `camoufox`')) ?? '';
+    expect(row).toContain('the pinned build');
+    expect(row).not.toMatch(/operator's installed binary|operator's own IP/);
+    for (const doc of [providers, limits])
+      expect(doc).not.toMatch(/on the operator's machine|stays on the operator's machine/);
+    expect(flat(section)).not.toContain("stay on the operator's machine");
+  });
   it('both camoufox notes name the worker’s machine and its address, and equal spec §2 Labels', () => {
     const spec = flat(read('docs/superpowers/specs/2026-10-14-flight-price-optimiser-design.md'));
     for (const note of [CAMOUFOX_DISCOVERY_INFO.provenanceNote, CAMOUFOX_GRID_INFO.provenanceNote]) {

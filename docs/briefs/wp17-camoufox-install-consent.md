@@ -488,3 +488,26 @@ only if 17.0c proves a mark; 17.6–17.10 follow.
 
 None for dispatch. Research 17.0c decides whether Task 17.5 is built; if no mark derivable from the value exists, the
 operator rules on the reduced scope stated there.
+
+## 11. As built, after branch review round 1 (2026-10-25)
+
+The review's rulings W1–W11 are folded into the code, the spec (revision 39) and plan decisions 75 and 77. Where the
+build differs from the tasks above:
+
+- **One install command in any app mode.** `pnpm gmt browser install [--keep-archive] [--wait|--force]` runs the one
+  install sequence (`apps/cli/src/camoufox/installer.ts`) that setup, `--reconfigure browser`, update and the CI job
+  also run; with `worker.env` present it also installs the gmt worker service. `pnpm gmt browser counts` rewrites the
+  monthly counts through the worker's own `run.ts counts --json` entry (core's `monthlyCountsSchema`, the worker's
+  lock). The CI entry `camoufoxInstall.ts` is gone; the manifest printer is `src/camoufox/printManifest.ts`.
+- **The pin is data.** `packages/core/src/camoufox/pin.ts` holds the builds and flags with no import, so update reads
+  the next commit's copy (`printManifest.ts --pin <file>`) and downloads that bundle before it stops the app.
+- **Consent research.** A session is kept only after exactly one form submission to the consent host's `/save` and a
+  SOCS set or changed after it. Its label is `prompted` (the button the session asked for, stated in the record's
+  `note` as the instruction given), not a captured click: the consent driver exposes no script into the page, so the
+  clicked control is not observable read-only; research 17.0c checks `differing` (kept only from the two `/save`
+  submissions, short plain values under a non-token name) against the two SOCS values before a rejection mark is
+  written. The research recorder gets the display groups through run.ts's rule.
+- **Consent fix.** Until Task 17.5 every consent refusal names core's `CONSENT_FIX` (`pnpm --filter
+  @gmt/camoufox-worker capture-socs`, `docs/setup.md#capture-your-consent-choice`), shared with WP18.
+- **Refusal reasons added:** `consent-not-shown`, `counts-missing`, `counts-unreadable`, `config`; the worker answer
+  kind `counts-unreadable` (503) and the `monthly-cap` answer's `used`.

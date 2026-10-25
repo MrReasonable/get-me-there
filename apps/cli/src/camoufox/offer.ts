@@ -1,4 +1,4 @@
-import { CAMOUFOX_BUILDS, type CamoufoxBuild, flagsFor, type OsArch } from '@gmt/core';
+import { CAMOUFOX_BUILDS, type CamoufoxBuild, CONSENT_FIX, flagsFor, type OsArch } from '@gmt/core';
 import type { Platform } from '../platform/types.js';
 import { megabytes, osArchOf } from './install.js';
 
@@ -33,7 +33,7 @@ export function costsSummary(entry: Pick<CamoufoxBuild, 'bytes' | 'unpackedBytes
     '- Brittleness: Google changes the page without notice; a changed page reads as unrecognised and pauses the provider for an hour, never a silent zero.',
     '- Speed: a page takes about 20 to 60 s to load, settle and read, plus the spacing set between pages.',
     '- Availability: it runs only while this machine is on and the worker is running; otherwise its cells read skipped and every other provider runs.',
-    `- Disk: Camoufox is a ${megabytes(entry.bytes)} download and about ${megabytes(entry.unpackedBytes)} unpacked, under ~/.local/share/get-me-there/camoufox.`,
+    `- Disk: Camoufox is a ${megabytes(entry.bytes)} download and about ${megabytes(entry.unpackedBytes)} unpacked, under ~/.local/share/get-me-there/camoufox (pnpm gmt browser install reinstalls it; deleting that directory removes it).`,
     '- The worker key: anything that can reach the worker’s address on this machine is stopped only by its key.',
     '- Money: none.',
   ].join('\n');
@@ -52,8 +52,8 @@ export const SERVER_QUESTION = 'Type yes to accept page loads from this server�
  */
 export function consentMethodText(hasDisplay: boolean): string {
   return hasDisplay
-    ? 'Consent: Google’s consent page is answered once, by you, with "Reject all". Open https://www.google.com/travel/flights in an ordinary private browser window, click Reject all, then copy the SOCS cookie’s fields into pnpm --filter @gmt/camoufox-worker capture-socs (a few minutes; docs/setup.md section 14).'
-    : 'Consent: this machine has no display, so the choice is captured on a desktop: open https://www.google.com/travel/flights in an ordinary private browser window there, click Reject all, and copy the SOCS cookie’s fields into pnpm --filter @gmt/camoufox-worker capture-socs on this machine (a few minutes; docs/setup.md section 14).';
+    ? `Consent: Google’s consent page is answered once, by you, with "Reject all". Open https://www.google.com/travel/flights in an ordinary private browser window, click Reject all, then copy the SOCS cookie’s fields into ${CONSENT_FIX.command} (a few minutes; ${CONSENT_FIX.doc}).`
+    : `Consent: this machine has no display, so the choice is captured on a desktop: open https://www.google.com/travel/flights in an ordinary private browser window there, click Reject all, and copy the SOCS cookie’s fields into ${CONSENT_FIX.command} on this machine (a few minutes; ${CONSENT_FIX.doc}).`;
 }
 
 /** What setup says when the browser part stops before consent, so a re-run resumes it. */

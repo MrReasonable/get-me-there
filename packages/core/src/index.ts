@@ -20,10 +20,13 @@ export type {
 export * as apiContract from './api-contract/index.js';
 export * from './budget/window.js';
 export * from './camoufox/builds.js';
+export * from './camoufox/consentFix.js';
 export * from './camoufox/grid.js';
+export * from './camoufox/monthly.js';
 export * from './camoufox/protocol.js';
 export * from './camoufox/settings.js';
 export * from './camoufox/start.js';
+export * from './camoufox/workerPort.js';
 export * from './config/presets.js';
 export * from './config/schema.js';
 export * from './config/secret.js';
@@ -51,7 +54,7 @@ export {
 export { GRID_SOURCE_LABEL, SOURCE_LABELS, sourceLabel } from './labels/source.js';
 export { isTruncated, TRUNCATED_NOTE } from './labels/truncated.js';
 export { MOVED_MARKER, movedMarkerText, parseMovedMarker } from './local/movedMarker.js';
-export { workerDataDir } from './local/paths.js';
+export { camoufoxRootDir, workerDataDir } from './local/paths.js';
 export { canonicalCarrier, canonicalFlightNumber } from './normalise/carrier.js';
 export { itineraryHash } from './normalise/hashing.js';
 export { type NormaliseDeps, normaliseOffer } from './normalise/itinerary.js';

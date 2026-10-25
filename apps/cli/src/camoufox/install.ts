@@ -1,5 +1,12 @@
 import { join } from 'node:path/posix';
-import { bundleDirName, type CamoufoxBuild, type OsArch, versionOf } from '@gmt/core';
+import {
+  bundleDirName,
+  bundleRelPath,
+  type CamoufoxBuild,
+  osArchOf as coreOsArch,
+  type OsArch,
+  versionOf,
+} from '@gmt/core';
 import type { Files } from '../exec/files.js';
 import type { Runner } from '../exec/runner.js';
 import type { Action } from '../plan/action.js';
@@ -15,19 +22,15 @@ import type { Arch, Os } from '../platform/types.js';
  * there with the pinned digest plans nothing; any other is reported and never overwritten. Pure over `Files`.
  */
 
-const OS_ARCH: Readonly<Record<'darwin' | 'linux', Readonly<Record<Arch, OsArch>>>> = {
-  darwin: { arm64: 'darwin-arm64', x64: 'darwin-x64' },
-  linux: { arm64: 'linux-arm64', x64: 'linux-x64' },
-};
+/** This machine's `CAMOUFOX_BUILDS` key (core's rule), or null where no build is pinned (Windows, decision 78). */
+export const osArchOf = (p: { os: Os; arch: Arch }): OsArch | null => coreOsArch(p.os, p.arch);
 
-/** This machine's `CAMOUFOX_BUILDS` key, or null where no build is pinned (Windows, decision 78). */
-export function osArchOf(p: { os: Os; arch: Arch }): OsArch | null {
-  return p.os === 'win32' ? null : OS_ARCH[p.os][p.arch];
-}
-
-/** Where the bundle for `entry` lives under the install root. */
+/** Where the bundle for `entry` lives under the install root (core's `bundleRelPath`). */
 export const bundlePath = (root: string, entry: Pick<CamoufoxBuild, 'build' | 'sha256'>): string =>
-  join(root, 'browsers', 'official', bundleDirName(entry));
+  join(root, bundleRelPath(entry));
+
+/** The directory every pinned bundle lives in under the install root. */
+export const officialDir = (root: string): string => join(root, 'browsers', 'official');
 
 /** The bundle's own `version.json` (`{ version, build, release, sha256 }`; `build` is the release, as camoufox-js names it). */
 export function bundleVersionText(entry: Pick<CamoufoxBuild, 'build' | 'sha256'>): string {
@@ -71,6 +74,31 @@ export interface InstallInput {
   freeBytes: number | null;
   /** Hex for the temporary directory's name (the plan is pure; the caller draws it). */
   random: string;
+  /** Keep the verified download beside the install (`gmt browser install --keep-archive`, for CI's cache). */
+  keepArchive?: boolean;
+}
+
+/** The archive a pin downloads to, under the install root (removed once unpacked, unless kept). */
+export const archivePath = (root: string, entry: Pick<CamoufoxBuild, 'build' | 'sha256'>): string =>
+  join(root, `.download-${bundleDirName(entry)}.zip`);
+
+/**
+ * What an install, update or setup left behind under the root when it stopped part way (W6; dev-b1-005, sec-b1-001):
+ * the unpack's `.tmp-*` directories and the executor's own temporary names beside them, the layout's temporary link,
+ * a partial download, and archives of other pins. The current pin's whole archive is kept: the unpack re-hashes it, so a
+ * retry (or CI's cache) need not download it again.
+ */
+const STALE = /^\.{1,2}(?:tmp-|Camoufox\.app\.tmp-|version\.json\.tmp-|download-)/;
+export function staleEntries(
+  files: Files,
+  root: string,
+  entry: Pick<CamoufoxBuild, 'build' | 'sha256'>,
+): string[] {
+  const keep = archivePath(root, entry);
+  return (files.list(root) ?? [])
+    .filter((n) => STALE.test(n))
+    .map((n) => join(root, n))
+    .filter((p) => p !== keep);
 }
 
 /** The install's actions for `entry`, nothing when its bundle is in place, or a refusal naming why. */
@@ -81,7 +109,7 @@ export function planInstall(i: InstallInput): InstallPlan {
       return { kind: 'installed', bundle };
     return {
       kind: 'refused',
-      message: `${bundle} is there but is not the pinned Camoufox ${i.entry.build} (its version.json does not name the digest ${i.entry.sha256}); it is never overwritten: move it aside, then run setup again`,
+      message: `${bundle} is there but is not the pinned Camoufox ${i.entry.build} (its version.json does not name the digest ${i.entry.sha256}); it is never overwritten: move it aside, then run pnpm gmt browser install`,
     };
   }
   const need = i.entry.bytes + i.entry.unpackedBytes;
@@ -95,18 +123,34 @@ export function planInstall(i: InstallInput): InstallPlan {
       kind: 'refused',
       message: `Camoufox needs ${megabytes(need)} free under ${i.root} (the ${megabytes(i.entry.bytes)} download and about ${megabytes(i.entry.unpackedBytes)} unpacked); ${megabytes(i.freeBytes)} is free`,
     };
-  const official = join(i.root, 'browsers', 'official');
-  const archive = join(i.root, `.download-${bundleDirName(i.entry)}.zip`);
+  const official = officialDir(i.root);
+  const archive = archivePath(i.root, i.entry);
   const tmp = join(i.root, `.tmp-${i.random}`);
   const dirs: Action[] = [i.root, join(i.root, 'browsers'), official]
     .filter((d) => !i.files.isDir(d) || i.files.mode(d) !== 0o700)
     .map((path) => ({ kind: 'mkdir', path, mode: 0o700 }));
+  // why: W6: an archive of the pinned size from an earlier attempt (or CI's cache) is not fetched again; the unpack
+  // re-hashes it and removes it on a mismatch
+  const downloaded = i.files.size(archive) === i.entry.bytes;
   return {
     kind: 'install',
     bundle,
     actions: [
+      ...staleEntries(i.files, i.root, i.entry).map(
+        (path): Action => ({ kind: 'remove', path, recursive: true }),
+      ),
       ...dirs,
-      { kind: 'download', url: i.entry.url, to: archive, sha256: i.entry.sha256, bytes: i.entry.bytes },
+      ...(downloaded
+        ? []
+        : [
+            {
+              kind: 'download' as const,
+              url: i.entry.url,
+              to: archive,
+              sha256: i.entry.sha256,
+              bytes: i.entry.bytes,
+            },
+          ]),
       { kind: 'unpack', archive, sha256: i.entry.sha256, to: tmp },
       {
         kind: 'writeFile',
@@ -116,14 +160,14 @@ export function planInstall(i: InstallInput): InstallPlan {
         secret: false,
       },
       { kind: 'rename', from: tmp, to: bundle },
-      { kind: 'remove', path: archive, recursive: false },
+      ...(i.keepArchive === true ? [] : [{ kind: 'remove' as const, path: archive, recursive: false }]),
     ],
   };
 }
 
-/** The bundles under the root other than `keep` (an update removes them once the app is healthy). */
+/** The bundles under the root other than `keep` (removed by any later successful install, update or setup; W6). */
 export function otherBundles(files: Files, root: string, keep: string): string[] {
-  const official = join(root, 'browsers', 'official');
+  const official = officialDir(root);
   return (files.list(official) ?? []).map((n) => join(official, n)).filter((p) => p !== keep);
 }
 
@@ -147,52 +191,6 @@ export async function freeBytesAt(run: Runner, files: Files, path: string): Prom
   return available !== undefined && /^\d+$/.test(available) ? Number(available) * 1024 : null;
 }
 
-/** What `gmt update` does about Camoufox after its build (spec §13; decision 73). */
-export type UpdateStep =
-  | { kind: 'none' }
-  | { kind: 'current'; actions: Action[] }
-  | { kind: 'install'; bundle: string; actions: Action[]; after: Action[]; note: string }
-  | { kind: 'stays-off'; note: string }
-  | { kind: 'refused'; message: string };
-
 /** The words update prints when the new pin has no recordings for this machine yet (pinned by a test). */
 export const staysOffNote = (osArch: OsArch, build: string): string =>
   `the browser provider stays off on ${osArch} until recordings for ${build} land; the installed Camoufox is kept`;
-/** The words update prints when it installs a new pin (pinned by a test). */
-export const installingNote = (osArch: OsArch, build: string): string =>
-  `installing Camoufox ${build} for ${osArch}; the previous bundle is removed once the app is healthy`;
-
-/**
- * Pure: nothing when no Camoufox is installed here (the provider was never set up); the layout's repairs when the pin
- * is installed; a new pin installed (with no keep option) only when its flags are set, the previous bundles removed
- * after the health wait (`after`); otherwise nothing installed and the old bundle kept.
- */
-export function planCamoufoxUpdate(i: {
-  os: 'darwin' | 'linux';
-  osArch: OsArch;
-  root: string;
-  entry: CamoufoxBuild;
-  formVerified: boolean;
-  files: Files;
-  freeBytes: number | null;
-  random: string;
-  layout: (bundle: string) => { kind: 'ok'; actions: Action[] } | { kind: 'refused'; message: string };
-}): UpdateStep {
-  const official = join(i.root, 'browsers', 'official');
-  if ((i.files.list(official) ?? []).length === 0) return { kind: 'none' };
-  const bundle = bundlePath(i.root, i.entry);
-  // why: an installed pin is checked whatever its flags; a new one is installed only once its recordings set them
-  const install = i.files.isDir(bundle) || i.formVerified ? planInstall(i) : null;
-  if (install === null) return { kind: 'stays-off', note: staysOffNote(i.osArch, i.entry.build) };
-  if (install.kind === 'refused') return install;
-  const layout = i.layout(bundle);
-  if (layout.kind === 'refused') return layout;
-  if (install.kind === 'installed') return { kind: 'current', actions: layout.actions };
-  return {
-    kind: 'install',
-    bundle,
-    actions: [...install.actions, ...layout.actions],
-    after: otherBundles(i.files, i.root, bundle).map((path) => ({ kind: 'remove', path, recursive: true })),
-    note: installingNote(i.osArch, i.entry.build),
-  };
-}

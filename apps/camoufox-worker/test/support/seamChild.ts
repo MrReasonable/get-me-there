@@ -11,8 +11,10 @@ import { join } from 'node:path';
 import { main } from '../../src/run.js';
 
 let fetches = 0;
+let firstFetch: (() => void) | null = null;
 globalThis.fetch = async () => {
   fetches++;
+  firstFetch?.();
   throw new Error('this test makes no network request');
 };
 const mode = process.argv[2] ?? '';
@@ -24,9 +26,23 @@ process.exitCode = await main([mode], {
     );
     return 0;
   },
+  // why: ts-b1-004: the positive control: camoufox-js asked to launch with nothing installed reaches its download
+  // branch, and the spy counts that fetch (which throws, so nothing leaves the machine)
+  control: async () => async (ctx) => {
+    const { launchOptions } = await import('camoufox-js');
+    // why: the first fetch is the event that proves the branch was reached; camoufox-js's own retries are not waited for
+    const reached = new Promise<void>((r) => {
+      firstFetch = r;
+    });
+    void launchOptions({ headless: true }).catch(() => undefined);
+    await reached;
+    ctx.out(JSON.stringify({ fetches, entry: ctx.env.CAMOUFOX_INSTALL_DIR ?? null }));
+    process.exit(0);
+  },
   launch: async () => async (ctx) => {
     const { launchContext, prepareLaunch } = await import('../../src/launch.js');
     let error: string | null = null;
+    let message: string | null = null;
     let fontconfig: string | null = null;
     try {
       const p = prepareLaunch({
@@ -43,8 +59,9 @@ process.exitCode = await main([mode], {
       await c.close();
     } catch (e) {
       error = e instanceof Error ? e.name : 'error';
+      message = e instanceof Error ? e.message.slice(0, 200) : String(e);
     }
-    ctx.out(JSON.stringify({ fetches, error, fontconfig }));
+    ctx.out(JSON.stringify({ fetches, error, message, fontconfig }));
     return 0;
   },
   smoke: async () => async (ctx) => {
@@ -56,25 +73,31 @@ process.exitCode = await main([mode], {
     await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()));
     const a = server.address();
     const port = a !== null && typeof a !== 'string' ? a.port : 0;
-    const p = prepareLaunch({
-      platform: process.platform,
-      arch: process.arch,
-      installDirSet: ctx.env.CAMOUFOX_INSTALL_DIR,
-      dataDir: ctx.dataDir,
-      home: ctx.env.HOME ?? '',
-      path: '/usr/bin:/bin',
-      tmp: tmpdir(),
-    });
-    const c = await launchContext(p.options, join(ctx.dataDir, 'profile'));
+    // why: CodeRabbit (PR #15), ts-b1-005: the server closes on every path, a failed preparation or launch included,
+    // so a launch failure ends this child with its own words instead of a hung test
+    let p: ReturnType<typeof prepareLaunch>;
     let title = '';
     let cookies = -1;
     try {
-      const page = await c.newPage();
-      await page.goto(`http://127.0.0.1:${port}/`);
-      title = 'title' in page && typeof page.title === 'function' ? String(await page.title()) : '';
-      cookies = (await c.cookies()).length;
+      p = prepareLaunch({
+        platform: process.platform,
+        arch: process.arch,
+        installDirSet: ctx.env.CAMOUFOX_INSTALL_DIR,
+        dataDir: ctx.dataDir,
+        home: ctx.env.HOME ?? '',
+        path: '/usr/bin:/bin',
+        tmp: tmpdir(),
+      });
+      const c = await launchContext(p.options, join(ctx.dataDir, 'profile'));
+      try {
+        const page = await c.newPage();
+        await page.goto(`http://127.0.0.1:${port}/`);
+        title = 'title' in page && typeof page.title === 'function' ? String(await page.title()) : '';
+        cookies = (await c.cookies()).length;
+      } finally {
+        await c.close();
+      }
     } finally {
-      await c.close();
       await new Promise<void>((r) => server.close(() => r()));
     }
     const env = p.options.env;

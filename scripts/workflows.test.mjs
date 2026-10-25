@@ -699,16 +699,26 @@ describe('WP16b: the CI matrix, install-e2e and the Windows leg (decisions 77, 7
 describe('WP17: the camoufox-install job', () => {
   const wf = () => YAML.parse(text('camoufox-install.yml'));
   const PATHS = [
-    'packages/core/src/camoufox/builds.ts',
+    'packages/core/src/camoufox/**',
+    'packages/core/src/local/paths.ts',
     'apps/cli/src/camoufox/**',
-    'apps/cli/src/camoufoxInstall.ts',
+    'apps/cli/src/commands/browser.ts',
+    'apps/cli/src/exec/**',
+    'apps/cli/src/plan/**',
+    'apps/cli/src/platform/**',
     'apps/camoufox-worker/src/install.ts',
     'apps/camoufox-worker/src/launch.ts',
     'apps/camoufox-worker/src/fonts.ts',
     'apps/camoufox-worker/src/run.ts',
+    'apps/camoufox-worker/src/paths.ts',
+    'apps/camoufox-worker/src/platform.ts',
+    'apps/camoufox-worker/package.json',
+    'apps/camoufox-worker/test/install.smoke.test.ts',
+    'apps/camoufox-worker/test/support/seamChild.ts',
+    'pnpm-lock.yaml',
     '.github/workflows/camoufox-install.yml',
   ];
-  it('runs on the pin’s and the install code’s paths, and weekly', () => {
+  it('runs on the pin’s, the install code’s and the smoke’s paths, and weekly', () => {
     const on = wf().on;
     expect(on.push.paths).toEqual(PATHS);
     expect(on.pull_request.paths).toEqual(PATHS);
@@ -725,14 +735,13 @@ describe('WP17: the camoufox-install job', () => {
     expect(job['timeout-minutes']).toBe(45);
     expect(job.permissions).toEqual({ contents: 'read' });
   });
-  it('caches by the entry’s SHA-256, downloads with a step timeout and one retry, checks the digest, then the loopback launch', () => {
+  it('installs with the operator’s command, each attempt under its own timeout, then checks the digest and the loopback launch', () => {
     const steps = wf().jobs['camoufox-install'].steps;
-    const restore = steps.find((s) => String(s.uses ?? '').startsWith('actions/cache/restore@'));
-    expect(restore.with.key).toBe('camoufox-${{ steps.pin.outputs.key }}-${{ steps.pin.outputs.sha256 }}');
-    const install = steps.find((s) => String(s.run ?? '').includes('camoufoxInstall.ts'));
-    expect(install['timeout-minutes']).toBe(20);
-    expect(String(install.run).match(/camoufoxInstall\.ts/g)).toHaveLength(2);
-    expect(String(install.run)).toContain(' || ');
+    const installs = steps.filter((s) => String(s.run ?? '') === 'pnpm gmt browser install --keep-archive');
+    expect(installs).toHaveLength(2);
+    expect(installs.map((s) => s['timeout-minutes'])).toEqual([15, 15]);
+    expect(installs[0]['continue-on-error']).toBe(true);
+    expect(installs[1].if).toBe(`steps.${installs[0].id}.outcome == 'failure'`);
     expect(
       steps.some((s) => String(s.run ?? '').includes('the bundle does not name the pinned digest')),
     ).toBe(true);
@@ -740,7 +749,22 @@ describe('WP17: the camoufox-install job', () => {
     expect(smoke.env).toEqual({ CAMOUFOX_INSTALL_SMOKE: '1' });
     expect(String(smoke.run)).toContain('test/install.smoke.test.ts');
     const names = steps.map((s) => s.name ?? s.uses ?? s.run);
-    expect(names.indexOf(install.name)).toBeLessThan(names.indexOf(smoke.name));
+    expect(names.indexOf(installs[1].name)).toBeLessThan(names.indexOf(smoke.name));
+  });
+  it('caches the downloaded archive only, per runner and digest; the weekly run restores nothing and only it or main saves', () => {
+    const steps = wf().jobs['camoufox-install'].steps;
+    const restore = steps.find((s) => String(s.uses ?? '').startsWith('actions/cache/restore@'));
+    const save = steps.find((s) => String(s.uses ?? '').startsWith('actions/cache/save@'));
+    // why: the YAML's own expressions, spelled without a template placeholder in this source
+    const ex = (s) => ['$', `{{ ${s} }}`].join('');
+    const key = `camoufox-archive-${ex('steps.pin.outputs.key')}-${ex('steps.pin.outputs.sha256')}`;
+    const path = `~/.local/share/get-me-there/camoufox/${ex('steps.pin.outputs.archive')}`;
+    expect([restore.with.key, save.with.key]).toEqual([key, key]);
+    expect([restore.with.path, save.with.path]).toEqual([path, path]);
+    expect(restore.if).toBe("github.event_name != 'schedule'");
+    expect(save.if).toBe(
+      "steps.cache.outputs.cache-hit != 'true' && (github.event_name == 'schedule' || github.ref == 'refs/heads/main')",
+    );
   });
   it('the release hosts are allowed in this job only: the same step under another job name fails', () => {
     const wfText = (job) =>

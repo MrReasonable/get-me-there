@@ -2,8 +2,10 @@ import { readFileSync, statSync } from 'node:fs';
 import { isAbsolute } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parseEnv } from 'node:util';
+import { isoDateTimeOfEpochMs } from '@gmt/core';
 import { defaultDataDir, installDirFor, workerEnvFile } from './paths.js';
 import { osArchOf } from './platform.js';
+import { writeStartRefusal } from './refusalFile.js';
 
 /**
  * The one launcher every worker script goes through (brief Task 14.1; decision 69 round 2, item 11; SEC-R2-006). It
@@ -144,7 +146,7 @@ export async function run(argv: readonly string[], deps: RunDeps): Promise<numbe
     deps.err(`unknown command ${JSON.stringify(command)}; one of: ${Object.keys(deps.entries).join(', ')}`);
     return EX_CONFIG;
   }
-  let dataDir: string;
+  let dataDir: string | null = null;
   let env: Env;
   try {
     refuseInstallDir(deps.env);
@@ -154,15 +156,18 @@ export async function run(argv: readonly string[], deps: RunDeps): Promise<numbe
       throw new EnvFileRefused(`${envFile} is missing (docs/setup.md section 14)`);
     const file = present ? parseEnv((deps.readEnvFile ?? ((p) => readFileSync(p, 'utf8')))(envFile)) : {};
     if (file.CAMOUFOX_INSTALL_DIR !== undefined)
-      throw new EnvFileRefused(`remove CAMOUFOX_INSTALL_DIR from ${envFile}: the worker sets it itself`);
+      throw new EnvFileRefused(
+        `remove CAMOUFOX_INSTALL_DIR from ${envFile} (pnpm gmt browser install removes it): the worker sets it itself`,
+      );
     const installDir = deps.installDir ?? null;
     env = {
       ...entryEnv(deps.env, file, envFile),
       ...(installDir === null ? {} : { CAMOUFOX_INSTALL_DIR: installDir }),
-      ...(command === 'consent' ? displayOf(deps.env) : {}),
+      ...(opensWindow(command, args) ? displayOf(deps.env) : {}),
     };
   } catch (e) {
     deps.err(e instanceof Error ? e.message : String(e));
+    configRefusal(command, dataDir, deps);
     return EX_CONFIG;
   }
   const entry = await load();
@@ -170,13 +175,38 @@ export async function run(argv: readonly string[], deps: RunDeps): Promise<numbe
 }
 
 /**
- * Decision 74: the `consent` entry alone receives the display variables, in their two groups: DISPLAY with XAUTHORITY
- * when DISPLAY is set, WAYLAND_DISPLAY with XDG_RUNTIME_DIR when WAYLAND_DISPLAY is set; never DBUS_SESSION_BUS_ADDRESS.
+ * W1 (dev-b1-003): a refusal of the settings before any entry runs still explains itself: `main` leaves a `config`
+ * refusal file in its data directory (when that is a directory of this user's), so status and start name it and a
+ * refused agent is booted out; `check` prints the same `config` result for the CLI. The words stay on stderr.
+ */
+function configRefusal(command: string, dataDir: string | null, deps: RunDeps): void {
+  const at = isoDateTimeOfEpochMs(Date.now());
+  if (command === 'check') {
+    deps.out(JSON.stringify({ reason: 'config', at }));
+    return;
+  }
+  if (command !== 'main' || dataDir === null) return;
+  try {
+    const dir = (deps.stat ?? statSync)(dataDir);
+    if (!dir.isDirectory() || dir.uid !== deps.uid) return;
+    writeStartRefusal(dataDir, 'config', at);
+  } catch (e) {
+    deps.err(`the refusal file could not be written: ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+
+/**
+ * Decision 74: only the entries that open a window a person uses receive the display variables (`consent`, and
+ * `record --consent-research`: sec-b1-006), in their two groups: DISPLAY with XAUTHORITY when DISPLAY is set,
+ * WAYLAND_DISPLAY with XDG_RUNTIME_DIR when WAYLAND_DISPLAY is set; never DBUS_SESSION_BUS_ADDRESS.
  */
 export const DISPLAY_GROUPS = [
   ['DISPLAY', 'XAUTHORITY'],
   ['WAYLAND_DISPLAY', 'XDG_RUNTIME_DIR'],
 ] as const;
+export const DISPLAY_NAMES: readonly string[] = DISPLAY_GROUPS.flat();
+const opensWindow = (command: string, args: readonly string[]): boolean =>
+  command === 'consent' || (command === 'record' && args.includes('--consent-research'));
 function displayOf(env: Env): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [main, extra] of DISPLAY_GROUPS) {
@@ -215,6 +245,7 @@ export const ENTRIES: Readonly<Record<string, () => Promise<Entry>>> = {
   'clear-signed-in': async () => (await import('./clearSignedIn.js')).entry,
   'capture-socs': async () => (await import('./captureSocs.js')).entry,
   check: async () => (await import('./startRefusal.js')).entry,
+  counts: async () => (await import('./counts.js')).entry,
 };
 
 /** The process entry: the live environment, this user's uid and the real stdout and stderr. */

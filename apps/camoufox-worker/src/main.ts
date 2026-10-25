@@ -75,8 +75,15 @@ export interface RunningWorker {
 class StartRefused extends Error {}
 
 export async function startWorker(ctx: EntryContext, deps: MainDeps): Promise<RunningWorker | number> {
+  // why: W1 (dev-b1-003): every exit 78 leaves the refusal file, so status and start explain it and boot a refused
+  // agent out; a refusal of the worker's own settings or files is `config`, its words on stderr (start prints them)
   const refuse = (check: string, e: unknown): number => {
     ctx.err(`camoufox worker refused to start: ${check}: ${e instanceof Error ? e.message : String(e)}`);
+    try {
+      writeStartRefusal(ctx.dataDir, 'config', deps.clock.now());
+    } catch (w) {
+      ctx.err(`the refusal file could not be written: ${w instanceof Error ? w.message : String(w)}`);
+    }
     return EX_CONFIG;
   };
   let cfg: WorkerConfig;
@@ -136,13 +143,16 @@ export async function startWorker(ctx: EntryContext, deps: MainDeps): Promise<Ru
   const ready = prepared.value;
   const record = gathered.consent;
   const osArch = gathered.osArch;
-  if (held === null || ready === null || osArch === null || record === null || record === 'invalid')
+  // why: startChecks refuses a never-shown record as itself (consent-not-shown), so only a capture reaches here
+  if (
+    held === null ||
+    ready === null ||
+    osArch === null ||
+    record === null ||
+    record === 'invalid' ||
+    record.kind !== 'socs'
+  )
     return refuse('start checks', new Error('the start facts are incomplete'));
-  if (record.kind !== 'socs')
-    return refused(
-      'consent-missing',
-      'this worker serves pages with a captured rejection only; capture one with pnpm gmt consent',
-    );
   const socs = record.capture;
   const selectors = deps.selectors ?? selectorsFor(osArch, ready.install.build);
   const fail = (check: string, e: unknown): number => {
@@ -234,8 +244,10 @@ export async function startWorker(ctx: EntryContext, deps: MainDeps): Promise<Ru
       if (checked.overran) throw new Error('the browser did not answer the account-cookie check in time');
       account = checked.value;
     }
+    const counts = monthly.status();
     return {
-      ok: active === null && refusal.active() === null && !account.found,
+      // why: W3: a counts file that cannot be read refuses every page, so the app's preflight skips the provider
+      ok: active === null && refusal.active() === null && !account.found && counts.readable,
       coolingDownUntil: active?.until ?? null,
       cooldownCause: active?.cause ?? null,
       signedInRefusal: refusal.active() !== null,
@@ -259,7 +271,7 @@ export async function startWorker(ctx: EntryContext, deps: MainDeps): Promise<Ru
       osArch,
       build: ready.install.build,
       consent: consentStatusOf(record),
-      monthly: monthly.status(),
+      monthly: counts,
       appInstances: instances.status(),
     };
   };

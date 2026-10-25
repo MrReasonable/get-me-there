@@ -89,16 +89,28 @@ export function refuseOnWindows(deps: Deps): number | null {
   return EXIT.badConfig;
 }
 
-/** U1 (cb-b1-008): stop and restart ask the app about a run first (decision 80's rule); null when they may go ahead. */
+/**
+ * U1 (cb-b1-008): stop and restart ask the app about a run first (decision 80's rule); null when they may go ahead.
+ * W5 (ca-b1-002): the app is found among every installed entry, not only the targeted ones, so `--only worker` (whose
+ * stop interrupts a browser page) is guarded too; only a target holding neither the app nor the worker (`--only
+ * backup`) skips the question.
+ */
 export async function lifecycleGuard(
   deps: Deps,
   flags: Flags,
-  entries: readonly ServiceEntry[],
+  targeted: readonly ServiceEntry[],
+  all: readonly ServiceEntry[],
   facts: ReadonlyMap<string, ServiceFacts>,
 ): Promise<number | null> {
   if (flags['dry-run'] === true) return null;
-  const app = entries.find((e) => e.name === 'app');
-  const text = deps.files.read(appEnvPath(deps.platform.paths));
+  if (!targeted.some((e) => e.name === 'app' || e.name === 'camoufox-worker')) return null;
+  const app = all.find((e) => e.name === 'app');
+  let text: string | null;
+  try {
+    text = deps.files.read(appEnvPath(deps.platform.paths));
+  } catch {
+    text = null;
+  }
   const g = await guardActiveRun(
     deps,
     nativeTarget(text === null ? null : readSettings(text), factOf(facts, app?.unit ?? '')),

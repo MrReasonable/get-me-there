@@ -9,12 +9,13 @@ import type {
   ServiceSpec,
   ServiceState,
 } from '../platform/types.js';
-import { assertPrintable } from './specs.js';
+import { assertPrintable, WORKER_STOP_SECONDS } from './specs.js';
 
 /**
  * macOS user agents (spec §13; `man launchd.plist`, `man launchctl`, brief §7): one plist per service in
  * ~/Library/LaunchAgents, loaded into the `gui/<uid>` domain. `KeepAlive { SuccessfulExit: false }` restarts on a
- * failed exit no faster than `ThrottleInterval`; `ExitTimeOut` 30 lets the app checkpoint and release its lock.
+ * failed exit no faster than `ThrottleInterval`; `ExitTimeOut` (30 s; the worker's longest page plus 30 s) lets the app
+ * checkpoint and release its lock, and the worker finish a page in flight.
  */
 export const launchdLabel = (name: ServiceSpec['name']): string => `local.get-me-there.${name}`;
 
@@ -74,7 +75,7 @@ export function renderPlist(spec: ServiceSpec, paths: Paths): string {
       `    <integer>${spec.calendar.minute}</integer>`,
       '  </dict>',
     );
-  lines.push('  <key>ExitTimeOut</key>', '  <integer>30</integer>');
+  lines.push('  <key>ExitTimeOut</key>', `  <integer>${spec.stopSeconds}</integer>`);
   if (paths.logs !== null) {
     const log = join(paths.logs, `${spec.name}.log`);
     lines.push(
@@ -102,7 +103,7 @@ export function launchdManager(uid: number, paths: Paths): ServiceManager {
   const plistPath = (label: string): string => join(paths.serviceDir, `${label}.plist`);
   const lc = (...args: string[]): Action => runAction(['launchctl', ...args], '/');
   const bootstrap = (label: string) => lc('bootstrap', domain, plistPath(label));
-  // why: U5 (dev-b1-001, -009): bootout sends SIGTERM (SIGKILL only after ExitTimeOut 30), so the app checkpoints and
+  // why: U5 (dev-b1-001, -009): bootout sends SIGTERM (SIGKILL only after ExitTimeOut), so the app checkpoints and
   // releases its lock; it can return before launchd has let the label go, so every bootout is followed by a bounded wait
   // until `launchctl print` no longer finds it, before anything bootstraps it again
   const bootout = (label: string): Action[] => [
@@ -111,7 +112,8 @@ export function launchdManager(uid: number, paths: Paths): ServiceManager {
       kind: 'waitGone',
       argv: ['launchctl', 'print', `${domain}/${label}`],
       describe: `launchctl print ${domain}/${label}`,
-      timeoutSeconds: 45,
+      // why: W7: the worker's agent may take its whole ExitTimeOut to let a page in flight finish
+      timeoutSeconds: (label === launchdLabel('camoufox-worker') ? WORKER_STOP_SECONDS : 30) + 15,
     },
   ];
   return {

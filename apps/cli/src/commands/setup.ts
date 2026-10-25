@@ -599,7 +599,13 @@ export async function setupCommand(flags: Flags, _positional: string | null, dep
   await runLinger(answers.linger, deps);
   // why: WP17 Task 17.6: row 8, once the app is up, so a stop in the browser part leaves the app running and the
   // provider off, which --reconfigure browser resumes
-  await browserSetup(deps, { interactive, ask, choice: answers.browser, reconfigure: false });
+  // why: CodeRabbit (PR #15): a failed browser step can leave the app stopped, so setup never reports success then
+  const browser = await browserSetup(deps, { interactive, ask, choice: answers.browser, reconfigure: false });
+  if (browser === 'failed')
+    return failed(
+      deps,
+      'the browser provider’s step failed (above); pnpm gmt setup --reconfigure browser repeats it.',
+    );
   deps.io.out(closingScreen({ port, answers, appEnv: envPath, backupOk, os }));
   if (interactive && (await ask.confirm('Open the app in your browser now?', false))) {
     const opener = os === 'darwin' ? 'open' : 'xdg-open';

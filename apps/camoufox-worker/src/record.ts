@@ -3,21 +3,21 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   type BlockedPage,
+  CAMOUFOX_BUILDS,
   CAMOUFOX_JS_VERSION,
   type Clock,
   GRID_MIN_SCROLL_SPACING_SECONDS,
   GRID_MOVE_BUDGET_MS,
   GRID_MOVE_RESERVE_MS,
   type Logger,
+  type OsArch,
   systemClock,
 } from '@gmt/core';
 import { checkAccountCookies } from './accountCookies.js';
 import { type PageBudget, pageBudget } from './budget.js';
 import { classifyPageWithRule } from './classify.js';
 import { loadWorkerConfig, type WorkerConfig } from './config.js';
-import { type ConsentDriver, createConsentDriver, NoDisplay } from './consentDriver.js';
-import { type ObservedRequest, observe, type ResearchSession, researchRecord } from './consentResearch.js';
-import { watchConsentWindow } from './consentWatch.js';
+import { type ConsentDriver, createConsentDriver, type DisplayEnv } from './consentDriver.js';
 import { CooldownStore } from './cooldown.js';
 import {
   CheapestStepFailed,
@@ -47,7 +47,9 @@ import { acquireLock, LockHeld, sweepProbeProfiles } from './lock.js';
 import { debugLogging, stderrLog } from './log.js';
 import { MonthlyCounter } from './monthly.js';
 import { Pacer } from './pacer.js';
+import { claim } from './pageClaim.js';
 import { profileDir } from './paths.js';
+import { osArchOf } from './platform.js';
 import type { View } from './ready.js';
 import {
   type GridDirection,
@@ -69,11 +71,19 @@ import {
   writeUnrecorded,
 } from './recordWrite.js';
 import { Refusal } from './refusal.js';
-import { type Entry, type EntryContext, EX_CONFIG, EX_SOFTWARE, EX_UNAVAILABLE } from './run.js';
-import { SELECTORS, SELECTORS_VERSION, type Selectors } from './selectors.js';
+import { consentResearch } from './researchSession.js';
+import {
+  DISPLAY_NAMES,
+  type Entry,
+  type EntryContext,
+  EX_CONFIG,
+  EX_SOFTWARE,
+  EX_UNAVAILABLE,
+} from './run.js';
+import { SELECTORS_VERSION, type Selectors, selectorsFor } from './selectors.js';
 import { loadSocs, type ReadBack, readBack, type SocsCapture, socsCookie } from './socs.js';
 import { bounded, type Deadline, DeadlineExceeded, realTimers, type Timers } from './timers.js';
-import { landingUrl, pageUrl, probeUrl } from './url.js';
+import { pageUrl, probeUrl } from './url.js';
 
 export { stderrLog } from './log.js';
 /**
@@ -106,8 +116,13 @@ export const DEFAULT_ROOT = fileURLToPath(new URL('../fixtures/recorded/', impor
 const FINALLY_MS = 5000;
 
 export interface RecordDeps {
-  /** process.platform: on Linux the research's headed window needs a display (run.ts passes none to the recorder). */
+  /** process.platform: on Linux the research's headed window needs a display. */
   platform: string;
+  /** The display groups run.ts passed (`record --consent-research` only; decision 74's rule), else none. */
+  display: DisplayEnv;
+  /** This machine's entry and its bundle's digest, for every recording's meta (pie-b1-006). */
+  osArch: OsArch;
+  bundleSha256: string;
   /** The research's headed window in a throwaway profile, its requests shown to `onRequest` (consentDriver.ts). */
   consentDriver(profile: string, onRequest: (r: RequestLike) => void): ConsentDriver;
   clock: Clock;
@@ -177,7 +192,9 @@ export async function record(ctx: EntryContext, cfg: WorkerConfig, deps: RecordD
     if (args.kind === 'consent-probe')
       return await consentProbe(ctx, cfg, deps, { pacer, monthly, cooldown, day });
     if (args.kind === 'consent-research')
-      return await consentResearch(ctx, cfg, deps, { pacer, monthly, cooldown, day });
+      return await consentResearch(ctx, cfg, deps, { pacer, monthly, cooldown, day }, (extra) =>
+        meta(deps, 'consent-research', 'missing', {}, extra),
+      );
     let capture: SocsCapture;
     try {
       capture = loadSocs(ctx.dataDir, deps.clock);
@@ -439,33 +456,6 @@ export async function record(ctx: EntryContext, cfg: WorkerConfig, deps: RecordD
   }
 }
 
-/**
- * The month's caps, then the shared pacer: a page past the monthly page cap (or with fewer scrolls left than its
- * moves, or an unreadable counts file) is refused before anything loads; the spacing is waited out once (fake timers
- * in tests); then the page and its scrolls are reserved in the counts, which are never settled down (an over-count).
- */
-async function claim(
-  pacer: Pacer,
-  monthly: MonthlyCounter,
-  scrolls: number,
-  deps: RecordDeps,
-  ctx: EntryContext,
-): Promise<void> {
-  const admitted = monthly.check(scrolls);
-  if (admitted.kind !== 'ok' || admitted.scrollAllowance < scrolls)
-    throw new RecordingRefused(
-      `the worker's monthly caps leave no room for this page (until ${monthly.windowEnd()}), or monthly.json is unreadable`,
-    );
-  const first = pacer.claim();
-  if (!first.ok) {
-    ctx.out(`waiting ${first.retryAfterSeconds} s for the spacing`);
-    await deps.timers.sleep(first.retryAfterSeconds * 1000);
-    const second = pacer.claim();
-    if (!second.ok) throw new RecordingRefused(`the spacing still refuses (${second.retryAfterSeconds} s)`);
-  }
-  monthly.write(admitted.reserved);
-}
-
 /** The recorder reads with the no-flights hypothesis on, so it can see the line it is recording. */
 const reading = (S: Selectors): Selectors => ({ ...S, NO_FLIGHTS_VERIFIED: true });
 
@@ -662,6 +652,8 @@ function meta(
     recordedAt: deps.clock.now(),
     recordedBy: RECORDED_BY,
     kind,
+    osArch: deps.osArch,
+    bundleSha256: deps.bundleSha256,
     socsReadBack: back,
     launchOptions: deps.launchOptions,
     versions: { selectors: SELECTORS_VERSION, camoufoxJs: CAMOUFOX_JS_VERSION, binary: deps.binary },
@@ -760,106 +752,22 @@ async function consentProbe(
   }
 }
 
-/** What the person is asked in each research session (pinned by a test). */
-export const RESEARCH_PROMPT = {
-  reject:
-    'Session 1 of 2: click **Reject all** in the window. Nothing else is needed; close the window when you’re done',
-  accept:
-    'Session 2 of 2: click **Accept all** in the window. Nothing else is needed; close the window when you’re done',
-} as const;
-
-/**
- * Research 17.0c (WP17 Task 17.4): two headed sessions, each in a throwaway profile `<data>/probe-research-…` (deleted
- * in a `finally`; the start-up sweep removes any a killed run left), under the consent capture's guard, the lock, the
- * pacer, the monthly counter and the cool-downs, with one load of the landing page each. The person clicks "Reject
- * all" in the first and "Accept all" in the second; the tool only observes. A blocking page cools down as on the server
- * path; an account cookie, a window left for 10 minutes or a session without SOCS records nothing. Then one recording:
- * the requests' methods, hosts, paths and field names, the one differing value, both SOCS cookies' fields, and the
- * views seen (consentResearch.ts).
- */
-async function consentResearch(
-  ctx: EntryContext,
-  cfg: WorkerConfig,
-  deps: RecordDeps,
-  s: { pacer: Pacer; monthly: MonthlyCounter; cooldown: CooldownStore; day: string },
-): Promise<number> {
-  const sessions: ResearchSession[] = [];
-  const views: Record<string, unknown> = {};
-  for (const choice of ['reject', 'accept'] as const) {
-    const profile = join(ctx.dataDir, `probe-research-${choice}-${Date.parse(deps.clock.now())}-${deps.pid}`);
-    mkdirSync(profile, { recursive: true, mode: 0o700 });
-    const requests: ObservedRequest[] = [];
-    try {
-      await claim(s.pacer, s.monthly, 0, deps, ctx);
-      const driver = deps.consentDriver(profile, (r) => {
-        const o = observe(r);
-        if (o !== null) requests.push(o);
-      });
-      try {
-        await driver.launchHeaded({ x11: null, wayland: null });
-        ctx.out(RESEARCH_PROMPT[choice]);
-        await driver.load(landingUrl(cfg.pointOfSale));
-        const w = await watchConsentWindow(driver, { timers: deps.timers, selectors: deps.selectors });
-        if (w.ended === 'blocked' && w.blocked !== null) {
-          const until = s.cooldown.start(w.blocked).until;
-          ctx.err(`session ${choice} stopped on ${w.blocked}; cooling down until ${until}; nothing recorded`);
-          return EX_UNAVAILABLE;
-        }
-        if (w.ended === 'account-cookie') {
-          ctx.err(`session ${choice}: an account cookie appeared in the throwaway profile; nothing recorded`);
-          return EX_UNAVAILABLE;
-        }
-        if (w.socs === null || !w.socsAfterConsent) {
-          ctx.err(
-            `session ${choice} ended (${w.ended}) with no SOCS set after the consent page; nothing recorded`,
-          );
-          return EX_UNAVAILABLE;
-        }
-        sessions.push({
-          choice,
-          requests: [...requests],
-          socs: { ...w.socs },
-          hosts: w.hosts,
-          ended: w.ended,
-        });
-        views[choice] = { first: w.firstView, firstFacts: w.firstFacts, afterConsent: w.afterFacts };
-      } finally {
-        await driver.close();
-        s.pacer.release();
-      }
-    } catch (e) {
-      if (e instanceof NoDisplay) {
-        ctx.err(e.message);
-        return EX_CONFIG;
-      }
-      throw e;
-    } finally {
-      rmSync(profile, { recursive: true, force: true });
-    }
-  }
-  const [reject, accept] = sessions;
-  if (reject === undefined || accept === undefined) throw new RecordingRefused('two sessions are needed');
-  const facts = { ...researchRecord(reject, accept), views };
-  const path = writeRecording(
-    deps.root,
-    'consent-research',
-    s.day,
-    { facts, meta: meta(deps, 'consent-research', 'missing', {}, { profile: 'throwaway', sessions: 2 }) },
-    [cfg.key.reveal()],
-  );
-  ctx.out(`recorded ${path}`);
-  return 0;
-}
-
 /** The real dependencies: the system clock, real timers, and the browser launched with the prepared options. */
 export function realRecordDeps(
   prepared: ReturnType<typeof prepareLaunch>,
   err: (line: string) => void,
   debug = false,
+  display: DisplayEnv = {},
 ): RecordDeps {
   const log = stderrLog(err, debug);
+  const osArch = osArchOf(process.platform, process.arch);
+  if (osArch === null)
+    throw new RecordingRefused(`no Camoufox build is pinned for ${process.platform}-${process.arch}`);
   return {
     platform: process.platform,
+    display,
+    osArch,
+    bundleSha256: CAMOUFOX_BUILDS[osArch].sha256,
     consentDriver: (profile, onRequest) =>
       createConsentDriver({
         platform: process.platform,
@@ -879,7 +787,9 @@ export function realRecordDeps(
     binary: prepared.install.build,
     root: DEFAULT_ROOT,
     pollMs: 2000,
-    selectors: SELECTORS,
+    // why: pie-b1-006: the running entry's flags for its build, as the server path's (the recorder's own reading
+    // override is applied per kind)
+    selectors: selectorsFor(osArch, prepared.install.build),
     pid: process.pid,
   };
 }
@@ -896,5 +806,11 @@ export const entry: Entry = async (ctx) => {
     path: cfg.path,
     tmp: cfg.tmp,
   });
-  return record(ctx, cfg, realRecordDeps(prepared, ctx.err, debugLogging(ctx.env)));
+  // why: run.ts passes the display groups to `record --consent-research` only (decision 74's rule, sec-b1-006)
+  const display: Record<string, string> = {};
+  for (const n of DISPLAY_NAMES) {
+    const v = ctx.env[n];
+    if (v !== undefined) display[n] = v;
+  }
+  return record(ctx, cfg, realRecordDeps(prepared, ctx.err, debugLogging(ctx.env), display));
 };

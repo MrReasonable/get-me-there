@@ -21,7 +21,7 @@ export async function stopCommand(flags: Flags, _p: string | null, deps: Deps): 
   }
   const { entries } = only;
   const { facts } = all;
-  const refused = await lifecycleGuard(deps, flags, entries, facts);
+  const refused = await lifecycleGuard(deps, flags, entries, all.entries, facts);
   if (refused !== null) return refused;
   return runLifecycle('stop', lifecycleActions(deps, 'stop', entries, facts), flags, deps);
 }

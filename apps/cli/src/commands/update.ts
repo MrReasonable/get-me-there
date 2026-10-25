@@ -2,8 +2,14 @@ import { join } from 'node:path/posix';
 import { z } from 'zod';
 import { appUrl } from '../appClient.js';
 import type { Flags } from '../args.js';
-import { refusalWords, workerCheck } from '../camoufox/browserSetup.js';
-import { camoufoxUpdateStep } from '../camoufox/updateStep.js';
+import {
+  browserFailureLine,
+  camoufoxPrefetch,
+  camoufoxUpdateStep,
+  DRY_RUN_LINE,
+  PIN_FILE,
+} from '../camoufox/updateStep.js';
+import { workerStart } from '../camoufox/workerService.js';
 import { type Deps, EXIT } from '../deps.js';
 import { type Action, commandLine, type Plan, runAction } from '../plan/action.js';
 import { apply } from '../plan/apply.js';
@@ -12,6 +18,7 @@ import { factOf, factsOf, serviceSet } from '../services/set.js';
 import { appEnvPath, databasePath } from '../services/specs.js';
 import { readSettings } from '../setup/appEnv.js';
 import { backupAction, printedBackup } from '../setup/importDb.js';
+import { bootOutRefused, readStartRefusal, refusalWithFix } from '../worker/refusal.js';
 import { guardActiveRun } from './guard.js';
 import { refuseOnWindows } from './lifecycle.js';
 import { nativeTarget } from './setup.js';
@@ -189,24 +196,38 @@ export async function updateCommand(flags: Flags, _p: string | null, deps: Deps)
       ],
     ];
   };
-  const startPlan = async (checkWorker = true): Promise<Action[]> => {
+  const startPlan = async (o: { dryRun: boolean; withWorker: boolean }): Promise<Action[]> => {
     const now = await factsOf(deps, entries);
-    // why: decision 75: the worker is re-rendered and started only while its own start check passes
-    let workerStarts = true;
-    if (worker !== undefined && checkWorker) {
-      const check = await workerCheck(deps);
-      if (check.kind !== 'ok') {
-        workerStarts = false;
-        deps.io.out(
-          `worker: not started: ${check.kind === 'refused' ? refusalWords(check.refusal) : check.error}\n`,
-        );
+    const out: Action[] = [];
+    for (const e of entries) {
+      if (e.name === 'camoufox-worker') {
+        if (!o.withWorker) continue;
+        if (o.dryRun) {
+          // why: ca-b1-018: the dry run names a standing refusal, since the real start runs the worker's check first
+          const refusal = readStartRefusal(deps.platform.paths, deps.files);
+          if (refusal !== 'none' && refusal !== 'unreadable')
+            deps.io.out(
+              `worker: ${refusalWithFix(refusal)} (the update starts it only once its check passes)\n`,
+            );
+        } else {
+          // why: decision 75: the worker is re-rendered and started only while its own start check passes
+          const start = await workerStart(deps, e, now);
+          if (start.notStarted !== null) {
+            deps.io.out(`worker: not started: ${start.notStarted}\n`);
+            out.push(
+              ...bootOutRefused(deps.platform, now, readStartRefusal(deps.platform.paths, deps.files)),
+            );
+          }
+          out.push(...start.actions);
+          continue;
+        }
       }
-    }
-    return entries.flatMap((e) => {
-      if (e.name === 'camoufox-worker' && !workerStarts) return [];
       const install = sm.install(e.rendered, now);
-      return e.name !== 'backup' && install.length === 0 ? sm.start(e.unit, factOf(now, e.unit)) : install;
-    });
+      out.push(
+        ...(e.name !== 'backup' && install.length === 0 ? sm.start(e.unit, factOf(now, e.unit)) : install),
+      );
+    }
+    return out;
   };
   const healthPlan: Action[] = [
     { kind: 'waitHealthy', url: appUrl(port, '/api/health'), timeoutSeconds: 240 },
@@ -221,19 +242,22 @@ export async function updateCommand(flags: Flags, _p: string | null, deps: Deps)
     for (const [step, actions] of codePlan('<the backup’s file>'))
       if (actions.length > 0) deps.io.out(describePlan({ command: `update: ${step}`, actions, notes: [] }));
     if ((deps.files.list(join(deps.platform.paths.camoufoxRoot, 'browsers', 'official')) ?? []).length > 0)
-      deps.io.out(
-        'update: the browser install\n  then: read the new code’s Camoufox pin, and install it only when its recordings set its flags\n',
-      );
+      deps.io.out(DRY_RUN_LINE);
     deps.io.out(
       describePlan({
         command: 'update: start and wait',
-        actions: [...(await startPlan(false)), ...healthPlan],
+        actions: [...(await startPlan({ dryRun: true, withWorker: true })), ...healthPlan],
         notes: [],
       }),
     );
     return EXIT.ok;
   }
 
+  // why: W6 (dev-b1-006): the next bundle's download is network work too, done while the app still runs
+  if (changeCode) {
+    const pin = await git('show', `origin/main:${PIN_FILE}`);
+    await camoufoxPrefetch(deps, pin.code === 0 ? pin.stdout : null);
+  }
   const g = await guardActiveRun(deps, nativeTarget(settings, appFacts), {
     wait: flags.wait === true,
     force: flags.force === true,
@@ -283,17 +307,18 @@ export async function updateCommand(flags: Flags, _p: string | null, deps: Deps)
       return EXIT.failed;
     }
   }
-  // why: spec §13: after the build and before the restart; the previous bundle goes only once the app is healthy
+  // why: spec §13: after the build and before the restart; the previous bundle goes only once the app is healthy. A
+  // failed browser step never keeps the app down (CodeRabbit, PR #15): the app starts without the worker, and the
+  // update reports the failure once the app is healthy
   const browser = await camoufoxUpdateStep(deps);
-  if (!browser.ok) {
-    deps.io.err(`${browser.message}\n${failureReport('the browser install', from, backup)}`);
-    return EXIT.failed;
-  }
+  if (!browser.ok) deps.io.err(browserFailureLine(browser.message));
   for (const [step, actions] of [
-    ['the start', await startPlan()],
+    ['the start', await startPlan({ dryRun: false, withWorker: browser.ok })],
     [
       'the health wait',
-      [healthPlan[0], ...browser.after, ...healthPlan.slice(1)].filter((a) => a !== undefined),
+      [healthPlan[0], ...(browser.ok ? browser.after : []), ...healthPlan.slice(1)].filter(
+        (a) => a !== undefined,
+      ),
     ],
   ] as const) {
     const r = await apply({ command: `update: ${step}`, actions, notes: [] }, deps.executor);
@@ -301,6 +326,11 @@ export async function updateCommand(flags: Flags, _p: string | null, deps: Deps)
       deps.io.err(`${describeResult(`update: ${step}`, r)}${failureReport(step, from, backup)}`);
       return EXIT.failed;
     }
+  }
+  if (!browser.ok) {
+    deps.io.err(`updated ${from} to ${target}, but not the browser install: run pnpm gmt browser install\n`);
+    await statusCommand({}, null, deps);
+    return EXIT.failed;
   }
   deps.io.out(
     commit === target && !resuming

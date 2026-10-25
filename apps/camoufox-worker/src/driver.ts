@@ -57,6 +57,8 @@ export interface RequestLike {
   method(): string;
   /** A form POST's body (the consent research reads its field names); absent on the fakes that send none. */
   postData?(): string | null;
+  /** The request's headers, lower-cased names (the consent research reads the content type only). */
+  headers?(): Record<string, string>;
   isNavigationRequest(): boolean;
   redirectedFrom(): RequestLike | null;
   frame(): FrameLike;

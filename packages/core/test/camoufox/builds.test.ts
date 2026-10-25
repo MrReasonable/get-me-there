@@ -1,18 +1,24 @@
 // The camoufox build table, the verified flags and the pure start checks (spec §2 rev 36; decisions 73, 76, 81; WP16a
 // Task 16a.5): the pieces WP16b's CLI, WP17's install and worker, and WP18's status report all read from core.
+import { readFileSync } from 'node:fs';
 import { beforeEach, describe, expect, expectTypeOf, it } from 'vitest';
 import {
   bundleDirName,
+  bundleRelPath,
   CAMOUFOX_BUILDS,
   camoufoxBuildSchema,
   FLAG_NAMES,
   FLAGS,
   type FlagName,
   flagsFor,
+  flagsIn,
   OS_ARCHES,
+  osArchOf,
+  pinSchema,
   REDIRECT_HOSTS,
   versionOf,
 } from '../../src/camoufox/builds.js';
+import { CAMOUFOX_PIN } from '../../src/camoufox/pin.js';
 import {
   START_REFUSAL_REASONS,
   type StartConsent,
@@ -181,16 +187,20 @@ describe('startChecks (pure; the worker’s own start and the status report use 
     signedIn: false,
     locked: false,
     now: NOW,
+    counts: 'ok',
   };
 
-  it('null when every check passes (a socs record, or no consent screen in the region)', () => {
+  it('null when every check passes (a captured rejection and readable counts)', () => {
     expect(startChecks(ready)).toBeNull();
+  });
+
+  it('a never-shown record is refused as itself, never as missing (CodeRabbit, PR #15; pa-b1-006)', () => {
     expect(
       startChecks({
         ...ready,
         consent: { kind: 'not-shown', expiresAt: asIsoDateTime('2027-03-02T00:00:00.000Z') },
       }),
-    ).toBeNull();
+    ).toBe('consent-not-shown');
   });
 
   it.each([
@@ -204,6 +214,8 @@ describe('startChecks (pure; the worker’s own start and the status report use 
     ['consent-missing', { consent: null }],
     ['consent-voided', { consent: { kind: 'voided' } }],
     ['consent-expired', { consent: { kind: 'socs', expiresAt: NOW } }],
+    ['counts-missing', { counts: 'missing' }],
+    ['counts-unreadable', { counts: 'unreadable' }],
   ] as const)('%s from %j', (reason, facts) => {
     expect(startChecks({ ...ready, ...facts })).toBe(reason);
   });
@@ -224,7 +236,7 @@ describe('startChecks (pure; the worker’s own start and the status report use 
     ).toBeNull();
   });
 
-  it('returns every START_REFUSAL_REASONS value from some facts', () => {
+  it('returns every START_REFUSAL_REASONS value from some facts, but config (the worker’s own, before any fact)', () => {
     const seen = new Set<string>();
     for (const facts of [
       { locked: true },
@@ -235,9 +247,17 @@ describe('startChecks (pure; the worker’s own start and the status report use 
       { consent: null },
       { consent: { kind: 'voided' as const } },
       { consent: { kind: 'socs' as const, expiresAt: NOW } },
+      { consent: { kind: 'not-shown' as const, expiresAt: asIsoDateTime('2028-01-01T00:00:00.000Z') } },
+      { counts: 'missing' as const },
+      { counts: 'unreadable' as const },
     ])
       seen.add(String(startChecks({ ...ready, ...facts })));
-    expect([...seen].sort()).toEqual([...START_REFUSAL_REASONS].sort());
+    expect([...seen].sort()).toEqual(START_REFUSAL_REASONS.filter((r) => r !== 'config').sort());
+  });
+
+  it('the consent checks come before the counts: a missing record with unreadable counts says consent-missing', () => {
+    expect(startChecks({ ...ready, consent: null, counts: 'unreadable' })).toBe('consent-missing');
+    expect(startChecks({ ...ready, counts: 'missing', signedIn: true })).toBe('signed-in');
   });
 });
 
@@ -258,5 +278,40 @@ describe('the build table at its edges', () => {
   });
   it.each(OS_ARCHES)('%s: its flags were set on its own pinned build', (osArch) => {
     expect(FLAGS[osArch].build).toBe(CAMOUFOX_BUILDS[osArch].build);
+  });
+});
+
+// why: W6: gmt update reads the next commit's pin.ts alone, before it stops the app
+describe('the pin as data (pin.ts)', () => {
+  it('imports nothing, so it runs alone', () => {
+    const text = readFileSync(new URL('../../src/camoufox/pin.ts', import.meta.url), 'utf8');
+    expect(text).not.toMatch(/^\s*import\b/m);
+    expect(text).not.toMatch(/\brequire\(/);
+  });
+  it('parses under pinSchema, and is the table builds.ts serves', () => {
+    expect(pinSchema.parse(CAMOUFOX_PIN)).toEqual(CAMOUFOX_PIN);
+    expect(CAMOUFOX_BUILDS).toBe(CAMOUFOX_PIN.builds);
+    expect(pinSchema.safeParse({ ...CAMOUFOX_PIN, extra: 1 }).success).toBe(false);
+    const { LANDING_VERIFIED: _, ...fewer } = CAMOUFOX_PIN.flags['darwin-arm64'].flags;
+    expect(
+      pinSchema.safeParse({
+        ...CAMOUFOX_PIN,
+        flags: { ...CAMOUFOX_PIN.flags, 'darwin-arm64': { build: '152.0.4-beta.28', flags: fewer } },
+      }).success,
+    ).toBe(false);
+  });
+  it('flagsIn reads any pin: its flags on its own build, none on another', () => {
+    expect(flagsIn(CAMOUFOX_PIN, 'darwin-arm64', '152.0.4-beta.28').FORM_VERIFIED).toBe(true);
+    expect(flagsIn(CAMOUFOX_PIN, 'darwin-arm64', '152.0.4-beta.27').FORM_VERIFIED).toBe(false);
+    expect(Object.values(flagsIn(CAMOUFOX_PIN, 'linux-x64', '152.0.4-beta.28')).every((v) => !v)).toBe(true);
+  });
+  it('osArchOf maps the platform and arch to an entry, and nothing else', () => {
+    expect(osArchOf('darwin', 'arm64')).toBe('darwin-arm64');
+    expect(osArchOf('darwin', 'x64')).toBe('darwin-x64');
+    expect(osArchOf('linux', 'arm64')).toBe('linux-arm64');
+    expect(osArchOf('linux', 'x64')).toBe('linux-x64');
+    expect(osArchOf('win32', 'x64')).toBeNull();
+    expect(osArchOf('linux', 'ia32')).toBeNull();
+    expect(bundleRelPath(CAMOUFOX_BUILDS['darwin-arm64'])).toBe('browsers/official/152.0.4-beta.28-8b7680a6');
   });
 });

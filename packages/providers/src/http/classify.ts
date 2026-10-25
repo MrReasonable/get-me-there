@@ -140,6 +140,8 @@ export function finishError(err: ProviderError, c: FinishContext): ProviderError
     ...(err.retryAfterSeconds === undefined ? {} : { retryAfterSeconds: err.retryAfterSeconds }),
     // why: fix round 1 (arch I1): a block's cool-down end survives the re-scrub as data
     ...(err.cooldownUntil === undefined ? {} : { cooldownUntil: err.cooldownUntil }),
+    // why: W3: the worker's monthly cap figures survive the re-scrub as data, for the adapter's BudgetExceeded
+    ...(err.monthlyCap === undefined ? {} : { monthlyCap: err.monthlyCap }),
   };
   if (!retryable) return new ProviderError({ ...base, message });
   const is429 = c.facts.status === 429;

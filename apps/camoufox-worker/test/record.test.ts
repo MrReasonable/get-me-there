@@ -9,10 +9,9 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
-import type { BlockedPage } from '@gmt/core';
+import { asIsoDateTime, type BlockedPage, CONSENT_FIX } from '@gmt/core';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { loadWorkerConfig } from '../src/config.js';
-import { NoDisplay } from '../src/consentDriver.js';
 import { CooldownStore } from '../src/cooldown.js';
 import { createDriver, probePage } from '../src/driver.js';
 import { buildLaunchOptions, launchOptionsForMeta, prepareLaunch } from '../src/launch.js';
@@ -22,13 +21,13 @@ import { profileDir } from '../src/paths.js';
 import {
   assertClean,
   parseRecordArgs,
-  RESEARCH_PROMPT,
   type RecordDeps,
   realRecordDeps,
   record,
   stderrLog,
 } from '../src/record.js';
 import { Refusal } from '../src/refusal.js';
+import { RESEARCH_PROMPT } from '../src/researchSession.js';
 import { type EntryContext, EX_CONFIG, EX_UNAVAILABLE } from '../src/run.js';
 import { SELECTORS } from '../src/selectors.js';
 import {
@@ -80,6 +79,7 @@ function setup(
     launchThrows?: boolean;
     consentDriver?: RecordDeps['consentDriver'];
     platform?: string;
+    display?: Record<string, string>;
   } = {},
 ) {
   const dataDir = tmpDir();
@@ -92,6 +92,9 @@ function setup(
   const err: string[] = [];
   const deps: RecordDeps = {
     platform: o.platform ?? 'darwin',
+    display: o.display ?? {},
+    osArch: 'darwin-arm64',
+    bundleSha256: '8b7680a61818245cf4eb0150edab811d4ed937b6723514569e74c3e7df9685bd',
     consentDriver:
       o.consentDriver ??
       (() => {
@@ -149,7 +152,9 @@ beforeEach(() => {
 describe('the recorder (brief Task 14.2 rules)', () => {
   it('rule 1: sets SOCS before the page, lands on the allowlist and writes facts and meta (names, never ARIA text)', async () => {
     const t = setup();
-    expect(await record(t.ctx(Q), cfg, t.deps)).toBe(0);
+    const code = await record(t.ctx(Q), cfg, t.deps);
+    expect(t.err).toEqual([]);
+    expect(code).toBe(0);
     expect(written(t.root)).toEqual(['results/2026-10-18/1.facts.json', 'results/2026-10-18/1.meta.json']);
     const c = t.contexts[0];
     if (c === undefined) throw new Error('no context');
@@ -193,26 +198,57 @@ describe('the recorder (brief Task 14.2 rules)', () => {
     expect(await record(t.ctx(Q), cfg, t.deps)).toBe(0);
     expect(JSON.parse(readFileSync(join(t.dataDir, 'monthly.json'), 'utf8'))).toEqual({
       windowStart: '2026-10-01T00:00:00.000Z',
+      windowEnd: '2026-11-01T00:00:00.000Z',
       pages: 1,
       scrolls: 0,
     });
     const full = setup();
     expect(await record(full.ctx(Q), { ...cfg, monthlyPageCap: 0 }, full.deps)).toBe(EX_CONFIG);
-    expect(full.err.join()).toContain("the worker's monthly caps leave no room for this page");
+    expect(full.err.join()).toContain(
+      "the worker's monthly page cap (0) is reached until 2026-11-01T00:00:00.000Z",
+    );
     expect(full.contexts.flatMap((c) => c.pages)).toEqual([]);
     const garbled = setup();
     writeFileSync(join(garbled.dataDir, 'pacer.json'), '{}', { mode: 0o600 });
     writeFileSync(join(garbled.dataDir, 'monthly.json'), 'x', { mode: 0o600 });
     expect(await record(garbled.ctx(Q), cfg, garbled.deps)).toBe(EX_CONFIG);
+    expect(garbled.err.join()).toContain(
+      "the worker's monthly counts file is unreadable; rewrite it with pnpm gmt browser counts",
+    );
     expect(readFileSync(join(garbled.dataDir, 'monthly.json'), 'utf8')).toBe('x');
+  });
+  // why: cb-b1-005: a wait for the spacing that crosses the window's end counts the page in the window it loads in
+  it('the caps are checked again after the spacing wait: a page loaded in the next window counts there', async () => {
+    const t = setup();
+    writeFileSync(
+      join(t.dataDir, 'monthly.json'),
+      JSON.stringify({
+        windowStart: '2026-10-01T00:00:00.000Z',
+        windowEnd: '2026-11-01T00:00:00.000Z',
+        pages: 7,
+        scrolls: 0,
+      }),
+      { mode: 0o600 },
+    );
+    t.timers.clock.set(asIsoDateTime('2026-10-31T23:59:50.000Z'));
+    writeFileSync(join(t.dataDir, 'pacer.json'), JSON.stringify({ lastPageAt: '2026-10-31T23:59:45.000Z' }), {
+      mode: 0o600,
+    });
+    expect(await record(t.ctx(Q), cfg, t.deps)).toBe(0);
+    expect(t.out.join()).toMatch(/waiting \d+ s for the spacing/);
+    expect(JSON.parse(readFileSync(join(t.dataDir, 'monthly.json'), 'utf8'))).toMatchObject({
+      windowStart: '2026-11-01T00:00:00.000Z',
+      pages: 1,
+    });
   });
   // why: WP17 Task 17.4: research 17.0c's two headed sessions, observed only, one recording of names and the mark
   describe('--consent-research', () => {
     const body = (choice: string) =>
       `gl=GB&hl=en-GB&x=SECRET-${choice}&set_eom=${choice === 'reject' ? 'true' : 'false'}`;
-    const research = (scripts: Script[]) => {
+    const research = (scripts: Script[], o: { platform?: string; display?: Record<string, string> } = {}) => {
       const drivers: FakeConsentDriver[] = [];
       const t = setup({
+        ...o,
         consentDriver: (profile, onRequest) => {
           t.profiles.push(profile);
           const d = fakeConsentDriver(scripts[drivers.length] ?? {}, onRequest);
@@ -223,6 +259,7 @@ describe('the recorder (brief Task 14.2 rules)', () => {
       return { t, drivers };
     };
     const session = (choice: string): Script => ({
+      saveAt: 0,
       socsAt: 1,
       closeAt: 3,
       socs: { ...SOCS, value: `socs-${choice}` },
@@ -231,7 +268,7 @@ describe('the recorder (brief Task 14.2 rules)', () => {
         request({ url: 'https://consent.google.com/save', method: 'POST', body: body(choice) }),
       ],
     });
-    it('records both sessions: names, both SOCS cookies, the one differing value; profiles gone, two pages counted', async () => {
+    it('records both sessions: names, both SOCS cookies, the differing names, the machine; profiles gone, two pages counted', async () => {
       const { t, drivers } = research([session('reject'), session('accept')]);
       expect(await record(t.ctx(['--consent-research']), cfg, t.deps)).toBe(0);
       expect(written(t.root)).toEqual([
@@ -242,10 +279,15 @@ describe('the recorder (brief Task 14.2 rules)', () => {
       expect(facts).not.toContain('SECRET');
       const rec = JSON.parse(facts);
       expect(rec.differing).toEqual({ names: ['set_eom', 'x'] });
-      expect(rec.sessions.map((x: { socs: { value: string } }) => x.socs.value)).toEqual([
-        'socs-reject',
-        'socs-accept',
+      expect(
+        rec.sessions.map((x: { prompted: string; socs: { value: string } }) => [x.prompted, x.socs.value]),
+      ).toEqual([
+        ['reject', 'socs-reject'],
+        ['accept', 'socs-accept'],
       ]);
+      // why: pie-b1-006: a recording names the machine and bundle it was made on
+      const meta = JSON.parse(readFileSync(join(t.root, 'consent-research/2026-10-18/1.meta.json'), 'utf8'));
+      expect([meta.osArch, meta.bundleSha256]).toEqual(['darwin-arm64', t.deps.bundleSha256]);
       expect(t.out.filter((l) => l.startsWith('Session'))).toEqual([
         RESEARCH_PROMPT.reject,
         RESEARCH_PROMPT.accept,
@@ -254,24 +296,46 @@ describe('the recorder (brief Task 14.2 rules)', () => {
         ['https://www.google.com/travel/flights?hl=en-GB&gl=GB'],
         ['https://www.google.com/travel/flights?hl=en-GB&gl=GB'],
       ]);
-      expect(drivers.flatMap((d) => d.displays)).toEqual([
-        { x11: null, wayland: null },
-        { x11: null, wayland: null },
-      ]);
+      expect(drivers.flatMap((d) => d.displays)).toEqual([{}, {}]);
       expect(drivers.map((d) => d.calls.at(-1))).toEqual(['close', 'close']);
       expect(
         t.profiles.every((p) => p.startsWith(join(t.dataDir, 'probe-research-')) && !existsSync(p)),
       ).toBe(true);
       expect(JSON.parse(readFileSync(join(t.dataDir, 'monthly.json'), 'utf8'))).toMatchObject({ pages: 2 });
     });
-    it('a session that ends with no SOCS after the consent page records nothing, and its profile is gone', async () => {
-      const { t } = research([session('reject'), { closeAt: 2 }]);
+    it('Linux: the display run.ts passed reaches the window', async () => {
+      const { t, drivers } = research([session('reject'), session('accept')], {
+        platform: 'linux',
+        display: { DISPLAY: ':0', XAUTHORITY: '/x' },
+      });
+      expect(await record(t.ctx(['--consent-research']), cfg, t.deps)).toBe(0);
+      expect(drivers.flatMap((d) => d.displays)).toEqual([
+        { DISPLAY: ':0', XAUTHORITY: '/x' },
+        { DISPLAY: ':0', XAUTHORITY: '/x' },
+      ]);
+    });
+    it.each([
+      ['no SOCS after the choice', { saveAt: 0, closeAt: 2 }, 'no SOCS was set after the consent choice'],
+      [
+        'no choice submitted',
+        { socsAt: 1, closeAt: 3 },
+        'no consent choice was submitted before the window closed',
+      ],
+      [
+        'two submissions',
+        { saveAt: 0, saves: 2, socsAt: 1, closeAt: 3 },
+        'the consent choice was submitted 2 times',
+      ],
+      // why: CodeRabbit (PR #15): a window left for 10 minutes records nothing, whatever it read
+      ['a timed-out window', { saveAt: 0, socsAt: 1 }, 'the window was left for 10 minutes'],
+    ] as const)('%s records nothing, and its profile is gone', async (_w, second, words) => {
+      const { t } = research([session('reject'), second]);
       expect(await record(t.ctx(['--consent-research']), cfg, t.deps)).toBe(EX_UNAVAILABLE);
-      expect(t.err.join()).toContain('session accept ended (closed) with no SOCS set after the consent page');
+      expect(t.err.join()).toContain(`session accept: ${words}; nothing recorded`);
       expect(written(t.root)).toEqual([]);
       expect(t.profiles.some((p) => existsSync(p))).toBe(false);
     });
-    it('a challenge as the first view cools down; an account cookie records nothing; no display refuses with 78', async () => {
+    it('a challenge as the first view cools down; an account cookie records nothing', async () => {
       const challenge = research([{ first: consentView(), accountAt: 0 }]);
       expect(await record(challenge.t.ctx(['--consent-research']), cfg, challenge.t.deps)).toBe(
         EX_UNAVAILABLE,
@@ -282,10 +346,16 @@ describe('the recorder (brief Task 14.2 rules)', () => {
       ]);
       expect(await record(blocked.t.ctx(['--consent-research']), cfg, blocked.t.deps)).toBe(EX_UNAVAILABLE);
       expect(blocked.t.err.join()).toMatch(/stopped on captcha; cooling down until/);
-      const none = research([{ launchThrows: new NoDisplay() }]);
+      for (const r of [challenge, blocked]) expect(written(r.t.root)).toEqual([]);
+    });
+    // why: CodeRabbit (PR #15): no display refuses before anything is reserved or launched
+    it('Linux with no display refuses with 78 before any page is reserved or any window opens', async () => {
+      const none = research([session('reject')], { platform: 'linux' });
       expect(await record(none.t.ctx(['--consent-research']), cfg, none.t.deps)).toBe(EX_CONFIG);
-      expect(none.t.err.join()).toContain('pnpm gmt consent export');
-      for (const r of [challenge, blocked, none]) expect(written(r.t.root)).toEqual([]);
+      expect(none.t.err.join()).toContain(CONSENT_FIX.command);
+      expect(none.drivers).toEqual([]);
+      expect(existsSync(join(none.t.dataDir, 'monthly.json'))).toBe(false);
+      expect(written(none.t.root)).toEqual([]);
     });
   });
   it('rule 1: every Google-facing run requires a valid SOCS capture; without one nothing launches', async () => {

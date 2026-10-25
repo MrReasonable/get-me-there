@@ -63,6 +63,58 @@ beforeEach(() => {
   expect.hasAssertions();
 });
 
+describe('a refusal before any entry runs explains itself (W1, dev-b1-003)', () => {
+  const refusalOf = (dir: string): unknown => {
+    try {
+      return JSON.parse(readFileSync(join(dir, 'start-refusal.json'), 'utf8'));
+    } catch {
+      return null;
+    }
+  };
+  it('main leaves a config refusal in its data directory; check prints one; other commands write nothing', async () => {
+    const dir = dataDir({ fileMode: 0o644 });
+    const out: string[] = [];
+    const t = deps({ CAMOUFOX_DATA_DIR: dir }, { out: (l: string) => out.push(l), entries: {} });
+    expect(await run(['main'], { ...t.d, entries: { main: async () => async () => 0 } })).toBe(EX_CONFIG);
+    expect(refusalOf(dir)).toMatchObject({ reason: 'config' });
+    expect(t.errs.join()).toMatch(/0600/);
+    const other = dataDir({ fileMode: 0o644 });
+    const c = deps({ CAMOUFOX_DATA_DIR: other }, { out: (l: string) => out.push(l) });
+    expect(await run(['check', '--json'], { ...c.d, entries: { check: async () => async () => 0 } })).toBe(
+      EX_CONFIG,
+    );
+    expect(JSON.parse(out.at(-1) ?? '')).toMatchObject({ reason: 'config' });
+    expect(refusalOf(other)).toBeNull();
+    const status = dataDir({ fileMode: 0o644 });
+    expect(await run(['status'], deps({ CAMOUFOX_DATA_DIR: status }).d)).toBe(EX_CONFIG);
+    expect(refusalOf(status)).toBeNull();
+  });
+  it('a data directory that is not there, or not a directory of this user’s, gets no file', async () => {
+    const gone = join(tmpDir(), 'gone');
+    expect(
+      await run(['main'], {
+        ...deps({ CAMOUFOX_DATA_DIR: gone }).d,
+        entries: { main: async () => async () => 0 },
+      }),
+    ).toBe(EX_CONFIG);
+    expect(refusalOf(gone)).toBeNull();
+    const theirs = dataDir({ fileMode: 0o644 });
+    const { statSync } = await import('node:fs');
+    const foreign = (p: string) => {
+      const st = statSync(p);
+      return { mode: st.mode, uid: uid + 1, isDirectory: () => st.isDirectory(), isFile: () => st.isFile() };
+    };
+    expect(
+      await run(['main'], {
+        ...deps({ CAMOUFOX_DATA_DIR: theirs }).d,
+        stat: foreign,
+        entries: { main: async () => async () => 0 },
+      }),
+    ).toBe(EX_CONFIG);
+    expect(refusalOf(theirs)).toBeNull();
+  });
+});
+
 describe('run.ts (SEC-R2-006: one env file, its mode checked on the file loaded)', () => {
   it('loads the checked path and dispatches', async () => {
     const dir = dataDir();
@@ -252,7 +304,7 @@ describe('run.ts (SEC-R2-006: one env file, its mode checked on the file loaded)
     const filed = deps({ CAMOUFOX_DATA_DIR: dir }, { installDir: '/i' });
     expect(await run(['status'], filed.d)).toBe(EX_CONFIG);
     expect(filed.errs.join()).toBe(
-      `remove CAMOUFOX_INSTALL_DIR from ${dir}/worker.env: the worker sets it itself`,
+      `remove CAMOUFOX_INSTALL_DIR from ${dir}/worker.env (pnpm gmt browser install removes it): the worker sets it itself`,
     );
   });
   it('main sets CAMOUFOX_INSTALL_DIR in its own process once, after refusing an inherited one', async () => {
@@ -298,18 +350,28 @@ describe('run.ts (SEC-R2-006: one env file, its mode checked on the file loaded)
       return 0;
     };
     const t = deps(inherited, {
-      entries: { consent: async () => entry, main: async () => entry, status: async () => entry },
+      entries: {
+        consent: async () => entry,
+        main: async () => entry,
+        status: async () => entry,
+        record: async () => entry,
+      },
     });
-    for (const c of ['consent', 'main', 'status']) expect(await run([c], t.d)).toBe(0);
+    for (const c of [
+      ['consent'],
+      ['main'],
+      ['status'],
+      ['record', '--consent-research'],
+      ['record', '--from', 'LHR'],
+    ])
+      expect(await run(c, t.d)).toBe(0);
     const shown = (e: Record<string, string | undefined> | undefined) =>
       Object.keys(e ?? {})
         .filter((k) => /DISPLAY|XAUTH|XDG_RUNTIME|DBUS/.test(k))
         .sort();
-    expect(envs.map(shown)).toEqual([
-      ['DISPLAY', 'WAYLAND_DISPLAY', 'XAUTHORITY', 'XDG_RUNTIME_DIR'],
-      [],
-      [],
-    ]);
+    // why: sec-b1-006: the research recorder opens a window a person uses, so it gets the same groups as consent
+    const all = ['DISPLAY', 'WAYLAND_DISPLAY', 'XAUTHORITY', 'XDG_RUNTIME_DIR'];
+    expect(envs.map(shown)).toEqual([all, [], [], all, []]);
     const x11 = deps(
       { CAMOUFOX_DATA_DIR: dir, XAUTHORITY: '/a', XDG_RUNTIME_DIR: '/r', DISPLAY: ':1' },
       {

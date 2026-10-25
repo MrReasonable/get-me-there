@@ -349,12 +349,35 @@ describe('grid pages: the flow', () => {
     expect(r.answer.kind === 'grid' ? r.answer.views.length : 0).toBe(1);
     expect(clicksOf(t).filter((c) => c.startsWith('button:Scroll'))).toEqual([]);
   });
+  // why: CodeRabbit (PR #15): the page stops before its allowance, so only the settle can bring 4 reserved down to 1
   it('a page that ends early settles the counts to the scrolls it made', async () => {
-    const t = setup();
-    await t.session.page(req(['down', 'down', 'down', 'down'], { allowance: 2 }));
+    let moves = 0;
+    const t = setup({ moveOf: (dir) => (dir === 'down' && moves++ === 0 ? [0, 1] : [0, 0]) });
+    const r = await t.session.page(req(['down', 'down', 'down', 'down'], { allowance: 4 }));
+    expect(r.answer).toMatchObject({ kind: 'grid', ended: 'scroll-not-settled' });
+    const made = r.answer.kind === 'grid' ? r.answer.scrolls : -1;
+    expect(made).toBeLessThan(4);
     expect(JSON.parse(readFileSync(join(t.dataDir, 'monthly.json'), 'utf8'))).toMatchObject({
       pages: 1,
-      scrolls: 2,
+      scrolls: made,
+    });
+  });
+  // why: ts-b1-007: while the page is in flight its whole reservation is on disk, so a process killed there
+  // over-counts; a failure the worker survives settles to the scrolls it counted (the click that failed included)
+  it('the whole reservation is on disk while the page reads; a failure part way settles to the scrolls counted', async () => {
+    const during: unknown[] = [];
+    const t = setup({
+      onScrollContext: () => {
+        during.push(JSON.parse(readFileSync(join(t.dataDir, 'monthly.json'), 'utf8')));
+        throw new Error('the browser died mid-read');
+      },
+    });
+    const r = await t.session.page(req(['down', 'down', 'down', 'down'], { allowance: 4 }));
+    expect(r.answer.kind).not.toBe('grid');
+    expect(during).toEqual([expect.objectContaining({ pages: 1, scrolls: 4 })]);
+    expect(JSON.parse(readFileSync(join(t.dataDir, 'monthly.json'), 'utf8'))).toMatchObject({
+      pages: 1,
+      scrolls: 1,
     });
   });
   it('Google’s no-flights page (past the sale window) is a grid answer with no views', async () => {

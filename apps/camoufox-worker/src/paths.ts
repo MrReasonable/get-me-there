@@ -1,5 +1,12 @@
 import { join } from 'node:path';
-import { bundleDirName, CAMOUFOX_BUILDS, type OsArch, workerDataDir } from '@gmt/core';
+import {
+  bundleRelPath,
+  CAMOUFOX_BUILDS,
+  camoufoxRootDir,
+  type OsArch,
+  START_REFUSAL_FILE,
+  workerDataDir,
+} from '@gmt/core';
 
 /**
  * The worker's files (brief §8; decision 69 round 2, item 11). One data directory, 0700: the env file, the profile,
@@ -13,18 +20,18 @@ export function defaultDataDir(home: string): string {
 export const workerEnvFile = (data: string): string => join(data, 'worker.env');
 export const profileDir = (data: string): string => join(data, 'profile');
 /** Decision 75: the start refusal the CLI and the app's status read, `{ reason, at }` only. */
-export const startRefusalFile = (data: string): string => join(data, 'start-refusal.json');
+export const startRefusalFile = (data: string): string => join(data, START_REFUSAL_FILE);
 /** Linux: the generated fonts.conf naming the bundle's fonts by absolute path (spec §2 "Method"). */
 export const fontsConfFile = (data: string): string => join(data, 'fonts.conf');
 
-/** The install root `gmt setup` writes (spec §2 rev 36; the CLI's `Paths.camoufoxRoot`, XDG ignored). */
+/** The install root `gmt` writes (core's `camoufoxRootDir`, the CLI's `Paths.camoufoxRoot`, XDG ignored). */
 export function camoufoxRoot(home: string): string {
-  return join(home, '.local', 'share', 'get-me-there', 'camoufox');
+  return camoufoxRootDir(home);
 }
 
 /** The pinned bundle's directory for this machine: `<root>/browsers/official/<build>-<first 8 hex>`. */
 export function pinnedBundleDir(home: string, osArch: OsArch): string {
-  return join(camoufoxRoot(home), 'browsers', 'official', bundleDirName(CAMOUFOX_BUILDS[osArch]));
+  return join(camoufoxRoot(home), bundleRelPath(CAMOUFOX_BUILDS[osArch]));
 }
 
 /**

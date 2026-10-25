@@ -87,18 +87,15 @@ export function renderAppEnv(entries: Entries): string {
   return `${[...HEADER, ...entries.map(line)].join('\n')}\n`;
 }
 
-const NAME_OF_LINE = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=/;
+/** The name a settings line sets (`NAME=`, `export NAME=`), or undefined for a comment, a blank or a continuation. */
+export const NAME_OF_LINE = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=/;
 
 /**
- * The file with the groups' lines replaced: each line under one of the groups' names is replaced in place by its new
- * entry (or dropped when the answers no longer have it), new names are appended, and every other line is kept.
+ * The one line editor for app.env and worker.env (ca-b1-007): each line under one of `names` is replaced in place by
+ * its entry (the first one only; later duplicates are dropped), or dropped when `entries` has no value for it; names
+ * not yet in the file are appended; every other line is kept.
  */
-export function replaceGroups(
-  text: string,
-  entries: Entries,
-  groups: ReadonlyArray<keyof typeof GROUP_NAMES>,
-): string {
-  const names = new Set<string>(groups.flatMap((g) => GROUP_NAMES[g]));
+export function setLines(text: string, names: ReadonlySet<string>, entries: Entries): string {
   const wanted = new Map(entries.filter(([n]) => names.has(n)));
   const placed = new Set<string>();
   const kept: string[] = [];
@@ -116,6 +113,30 @@ export function replaceGroups(
   }
   for (const [n, v] of wanted) if (!placed.has(n)) kept.push(line([n, v]));
   return `${kept.join('\n')}\n`;
+}
+
+/**
+ * The file with the groups' lines replaced: each line under one of the groups' names is replaced in place by its new
+ * entry (or dropped when the answers no longer have it), new names are appended, and every other line is kept.
+ */
+export function replaceGroups(
+  text: string,
+  entries: Entries,
+  groups: ReadonlyArray<keyof typeof GROUP_NAMES>,
+): string {
+  return setLines(text, new Set<string>(groups.flatMap((g) => GROUP_NAMES[g])), entries);
+}
+
+/** Whether `text` reads back with exactly these entries' values (names only in the refusal, never a value). */
+export function readsBack(text: string, entries: Entries): { ok: true } | { ok: false; error: string } {
+  const unsafe = entries.filter(([, v]) => UNSAFE_VALUE.test(v)).map(([k]) => k);
+  if (unsafe.length > 0)
+    return { ok: false, error: `a value holds a character the file cannot carry: ${unsafe.join(', ')}` };
+  const record = readEnvText(text);
+  const wrong = entries.filter(([k, v]) => record[k] !== v).map(([k]) => k);
+  return wrong.length === 0
+    ? { ok: true }
+    : { ok: false, error: `would not read back as written: ${wrong.join(', ')}` };
 }
 
 /**

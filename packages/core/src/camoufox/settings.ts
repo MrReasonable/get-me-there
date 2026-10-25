@@ -52,9 +52,12 @@ type Rule = { min: number; max: number } | { pattern: RegExp; message: string };
  * Each setting's one rule (spec §12): a whole-number range, or a closed pattern with its words. why: the cool-down is
  * bounded at 100,000 hours (about eleven years), the worker's own bound, so an absurd value is refused on both sides.
  */
+/** The longest a page may take (CAMOUFOX_PAGE_TIMEOUT_SECONDS' bound): the worker service's stop waits this long (W7). */
+export const PAGE_TIMEOUT_MAX_SECONDS = 240;
+
 const SHARED_RULES: Readonly<Record<SharedWorkerSetting, Rule>> = {
   CAMOUFOX_COOLDOWN_HOURS: { min: 24, max: 100_000 },
-  CAMOUFOX_PAGE_TIMEOUT_SECONDS: { min: 30, max: 240 },
+  CAMOUFOX_PAGE_TIMEOUT_SECONDS: { min: 30, max: PAGE_TIMEOUT_MAX_SECONDS },
   // why: operator ruling 2026-10-25: 0 is no pause; both sides must hold the same value or the worker's pacer refuses
   CAMOUFOX_MIN_SPACING_SECONDS: { min: 0, max: 600 },
   CAMOUFOX_MODE: { pattern: /^(list|grid)$/, message: 'must be list or grid' },

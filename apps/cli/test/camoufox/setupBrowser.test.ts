@@ -1,7 +1,7 @@
 import { parseEnv } from 'node:util';
 import { CAMOUFOX_BUILDS, readSharedSettings, sharedSettingDiffs } from '@gmt/core';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { pagesFromProviders } from '../../src/camoufox/browserSetup.js';
+import { ledgerFigures } from '../../src/camoufox/counts.js';
 import {
   costsSummary,
   ENABLE_QUESTION,
@@ -10,17 +10,19 @@ import {
   unavailableText,
 } from '../../src/camoufox/offer.js';
 import {
+  appEnvWithBrowser,
   keysDiffer,
   newWorkerKey,
   renderWorkerEnv,
-  settingsDiffer,
-  withBrowserLines,
+  retiredWorkerLines,
+  workerUrlOf,
 } from '../../src/camoufox/workerEnv.js';
 import { runCli } from '../../src/cli.js';
 import { localChecks } from '../../src/commands/status.js';
 import type { RunHandler } from '../../src/exec/memory.js';
 import type { Action } from '../../src/plan/action.js';
 import { serviceSet } from '../../src/services/set.js';
+import { setLines } from '../../src/setup/appEnv.js';
 import { scriptedAsk, stubHttp, testIo } from '../support/deps.js';
 import { machine } from '../support/machine.js';
 
@@ -38,15 +40,23 @@ beforeEach(() => {
 });
 
 /** A machine with an Enter-only setup done; `check` answers the worker's start check, `os` and display as given. */
-async function world(o: { check?: string; os?: 'darwin' | 'linux'; display?: boolean; df?: number } = {}) {
+async function world(
+  o: { check?: string; counts?: string; os?: 'darwin' | 'linux'; display?: boolean; df?: number } = {},
+) {
   let started = false;
   const checks: string[][] = [];
+  const countsWrites: Array<{ argv: string[]; stdin: string | undefined }> = [];
   let n = 0;
-  const handler: RunHandler = (argv) => {
+  const handler: RunHandler = (argv, call) => {
     if (!started) return undefined;
     if (argv.includes('check') && argv.includes('--json') && argv.some((a) => a.endsWith('run.ts'))) {
       checks.push([...argv]);
       return { code: 0, stdout: `${o.check ?? '{"ok":true}'}\n` };
+    }
+    if (argv.includes('counts') && argv.some((a) => a.endsWith('run.ts'))) {
+      if (argv.includes('--check')) return { code: 0, stdout: `${o.counts ?? '{"counts":"ok"}'}\n` };
+      countsWrites.push({ argv: [...argv], stdin: call.stdin });
+      return { code: 0, stdout: '{"ok":true}\n' };
     }
     if (argv[0] === 'df') return { code: 0, stdout: `h\n/dev/disk 1 1 ${o.df ?? 99_999_999} 1% /\n` };
     if (argv[0] === 'ln') {
@@ -66,7 +76,7 @@ async function world(o: { check?: string; os?: 'darwin' | 'linux'; display?: boo
   m.io.stdout = '';
   m.io.stderr = '';
   started = true;
-  return { ...m, checks, opts: o };
+  return { ...m, checks, countsWrites, opts: o };
 }
 const answers = (m: Awaited<ReturnType<typeof world>>, browser: Record<string, unknown>) =>
   m.fs.file('/work/b.json', JSON.stringify({ browser: { window: 'scheduled', ...browser } }), 0o600);
@@ -203,13 +213,13 @@ describe('choosing it (Task 17.6): costs, consent method, install, worker.env, t
     answers(locked, { enabled: true });
     await runCli(['setup', '--non-interactive', '--answers', '/work/b.json'], locked.deps);
     expect(locked.io.stderr).toContain(
-      'The worker would refuse to start: another worker holds the lock (fix: pnpm gmt restart)',
+      'The worker would refuse to start: refused, not retrying: another worker holds the lock; fix: pnpm gmt restart',
     );
     expect(env(locked).CAMOUFOX_ENABLED).toBeUndefined();
     const garbled = await world({ check: 'not json' });
     answers(garbled, { enabled: true });
     await runCli(['setup', '--non-interactive', '--answers', '/work/b.json'], garbled.deps);
-    expect(garbled.io.stderr).toContain('the worker’s start check printed no result');
+    expect(garbled.io.stderr).toContain('the worker’s start check exited 0 and said nothing');
   });
 });
 
@@ -261,12 +271,11 @@ describe('the worker service (Task 17.6)', () => {
     m.executor.log.length = 0;
     m.io.stdout = '';
     expect(await runCli(['start'], m.deps), m.io.stderr).toBe(0);
+    // why: ca-b1-012: one line, one formatter (WP16b's refusalLine) with the fix that works today
     expect(m.io.stdout).toContain(
-      'worker: refused, not retrying: the browser install is incomplete or has changed',
+      'worker: not started: refused, not retrying: the browser install is incomplete or has changed; fix: pnpm gmt browser install\n',
     );
-    expect(m.io.stdout).toContain(
-      'worker: not started: the browser install is incomplete or has changed (fix: pnpm gmt setup --reconfigure browser)',
-    );
+    expect(m.io.stdout.match(/the browser install is incomplete/g)).toHaveLength(1);
     expect(m.checks).toHaveLength(1);
     // why: launchd cannot exclude exit 78, so the refused worker's loaded agent is booted out, never started
     const runs = m.executor.log
@@ -300,7 +309,9 @@ describe('key rotation under --reconfigure browser (Task 17.6)', () => {
     const oldKey = env(m).CAMOUFOX_WORKER_KEY ?? '';
     m.fs.file(
       WORKER_ENV,
-      withBrowserLines(m.fs.read(WORKER_ENV) ?? '', [['CAMOUFOX_WORKER_KEY', 'f'.repeat(48)]]),
+      setLines(m.fs.read(WORKER_ENV) ?? '', new Set(['CAMOUFOX_WORKER_KEY']), [
+        ['CAMOUFOX_WORKER_KEY', 'f'.repeat(48)],
+      ]),
       0o600,
     );
     m.deps.ask = scriptedAsk([false, '']);
@@ -313,13 +324,25 @@ describe('key rotation under --reconfigure browser (Task 17.6)', () => {
     expect(m.io.stdout).toContain('The app’s and the worker’s keys differ.');
     const log = kinds(m.executor.log);
     const order = [
-      log.findIndex((k) => k === 'run launchctl bootout'),
+      log.indexOf('run launchctl bootout'),
       log.indexOf(`writeFile ${WORKER_ENV}`),
       log.lastIndexOf(`writeFile ${ENV}`),
     ];
     expect(order.every((x) => x >= 0)).toBe(true);
     expect(order[1]).toBeLessThan(order[2] ?? 0);
-    expect(log.lastIndexOf('run launchctl bootstrap')).toBeGreaterThan(order[2] ?? 0);
+    // why: ts-b1-008: the worker starts before the app, so the app's first status read finds it up
+    const runs = m.executor.log.map((a) => (a.kind === 'run' ? a.argv.join(' ') : ''));
+    const workerUp = runs.findIndex(
+      (r, i) => i > (order[2] ?? 0) && r.startsWith('launchctl bootstrap') && r.includes('camoufox-worker'),
+    );
+    const appUp = runs.findIndex(
+      (r, i) =>
+        i > (order[2] ?? 0) && r.startsWith('launchctl bootstrap') && r.includes('local.get-me-there.app'),
+    );
+    expect(workerUp).toBeGreaterThan(order[2] ?? 0);
+    expect(appUp).toBeGreaterThan(workerUp);
+    // why: the executor's logged actions carry no key either
+    const logged = JSON.stringify(m.executor.log.filter((a) => !(a.kind === 'writeFile' && a.secret)));
     const newKey = env(m).CAMOUFOX_WORKER_KEY ?? '';
     expect(newKey).toMatch(/^[0-9a-f]{48}$/);
     expect(newKey).not.toBe(oldKey);
@@ -329,20 +352,68 @@ describe('key rotation under --reconfigure browser (Task 17.6)', () => {
     for (const k of [oldKey, newKey, 'f'.repeat(48), Buffer.from(newKey).toString('base64url')]) {
       expect(m.io.stdout).not.toContain(k);
       expect(m.io.stderr).not.toContain(k);
+      expect(logged).not.toContain(k);
     }
   });
-  it('interrupted after the worker’s file the keys differ, and a re-run repairs them', async () => {
+  // why: ts-b1-008: an interruption after any one action of the rotation leaves a state a re-run repairs
+  it('interrupted after each of its actions in turn, a re-run repairs the keys every time', async () => {
+    const probe = await on();
+    answers(probe, { enabled: true, rotateKey: true });
+    const http = () =>
+      stubHttp({
+        'GET /api/executions/active': () => ({ status: 200, body: { execution: null } }),
+        'GET /api/health': () => ({ status: 200, body: { ok: true } }),
+      });
+    probe.deps.http = http();
+    probe.executor.log.length = 0;
+    expect(
+      await runCli(
+        ['setup', '--reconfigure', 'browser', '--non-interactive', '--answers', '/work/b.json'],
+        probe.deps,
+      ),
+    ).toBe(0);
+    const count = probe.executor.log.length;
+    expect(count).toBeGreaterThan(4);
+    for (let stopAt = 0; stopAt < count; stopAt++) {
+      const m = await on();
+      const inner = m.deps.executor;
+      let n = 0;
+      m.deps.executor = {
+        run: async (a) => {
+          if (n++ === stopAt) throw new Error('interrupted in the test');
+          return inner.run(a);
+        },
+      };
+      answers(m, { enabled: true, rotateKey: true });
+      m.deps.http = http();
+      expect(
+        await runCli(
+          ['setup', '--reconfigure', 'browser', '--non-interactive', '--answers', '/work/b.json'],
+          m.deps,
+        ),
+        `interrupted at ${stopAt}`,
+      ).toBe(1);
+      m.deps.executor = inner;
+      answers(m, { enabled: true });
+      expect(
+        await runCli(
+          ['setup', '--reconfigure', 'browser', '--non-interactive', '--answers', '/work/b.json'],
+          m.deps,
+        ),
+        `repaired after ${stopAt}`,
+      ).toBe(0);
+      expect(keysDiffer(env(m), env(m, WORKER_ENV)), `after ${stopAt}`).toBe(false);
+    }
+  });
+  it('interrupted after the worker’s file, it says a re-run repairs the keys', async () => {
     const m = await on();
     const inner = m.deps.executor;
     let workerWritten = false;
-    let interrupted = false;
     m.deps.executor = {
       run: async (a) => {
         if (a.kind === 'writeFile' && a.path === WORKER_ENV) workerWritten = true;
-        else if (a.kind === 'writeFile' && a.path === ENV && workerWritten && !interrupted) {
-          interrupted = true;
+        else if (a.kind === 'writeFile' && a.path === ENV && workerWritten)
           throw new Error('interrupted in the test');
-        }
         return inner.run(a);
       },
     };
@@ -359,110 +430,163 @@ describe('key rotation under --reconfigure browser (Task 17.6)', () => {
     ).toBe(1);
     expect(keysDiffer(env(m), env(m, WORKER_ENV))).toBe(true);
     expect(m.io.stderr).toContain('A re-run of pnpm gmt setup --reconfigure browser repairs the keys.');
-    answers(m, { enabled: true });
-    expect(
-      await runCli(
-        ['setup', '--reconfigure', 'browser', '--non-interactive', '--answers', '/work/b.json'],
-        m.deps,
-      ),
-    ).toBe(0);
-    expect(keysDiffer(env(m), env(m, WORKER_ENV))).toBe(false);
   });
 });
 
-describe('an unreadable counts file under --reconfigure browser (Task 17.6)', () => {
-  const status = (readable: boolean) => ({
-    ok: true,
-    coolingDownUntil: null,
-    cooldownCause: null,
-    signedInRefusal: false,
-    lastPageAt: null,
-    busySince: null,
-    versions: { selectors: 's', grammar: 'g', camoufoxJs: '0.11.5', binary: '152.0.4-beta.28' },
-    flags: {},
-    accountCookie: { found: false, names: [], checkedAt: '2026-10-24T09:30:00.000Z' },
-    socsCapturedAt: null,
-    socsStable: true,
-    cooldownHours: 48,
-    pageTimeoutSeconds: 90,
-    monthly: {
-      windowStart: '2026-10-01T00:00:00.000Z',
-      windowEnd: '2026-11-01T00:00:00.000Z',
-      pages: 0,
-      scrolls: 0,
-      readable,
-    },
-  });
-  async function onWith(readable: boolean, answer: boolean) {
-    const m = await world();
+describe('a missing or unreadable counts file: gmt browser counts, and --reconfigure browser (W3)', () => {
+  async function onWith(
+    counts: 'ok' | 'missing' | 'unreadable',
+    ask: Array<string | boolean>,
+    providers?: unknown,
+  ) {
+    const m = await world({ counts: JSON.stringify({ counts }) });
     answers(m, { enabled: true });
     await runCli(['setup', '--non-interactive', '--answers', '/work/b.json'], m.deps);
     const http = stubHttp({
       'GET /api/executions/active': () => ({ status: 200, body: { execution: null } }),
       'GET /api/health': () => ({ status: 200, body: { ok: true } }),
-      'GET /v1/status': () => ({ status: 200, body: status(readable) }),
-      'GET /api/providers': () => ({
-        status: 200,
-        body: {
-          providers: [{ providerId: 'camoufox', usage: [{ scope: 'provider-month:camoufox', calls: 37 }] }],
-        },
-      }),
+      'GET /api/providers': () =>
+        providers === undefined
+          ? { status: 200, body: providersBody(37, 412) }
+          : { status: 200, body: providers },
     });
     m.deps.http = http;
-    m.deps.ask = scriptedAsk([false, false, answer]);
+    const scripted = scriptedAsk(ask);
+    m.deps.ask = scripted;
     m.deps.io = { ...testIo({ tty: true }), out: m.deps.io.out, err: m.deps.io.err };
     m.io.stdout = '';
-    return { m, http };
-  }
-  const MONTHLY = '/Users/op/.local/state/get-me-there/camoufox/monthly.json';
-  it('offers to rewrite it from the app’s ledger, saying what that leaves out, and writes nothing without a yes', async () => {
-    const { m, http } = await onWith(false, false);
-    expect(await runCli(['setup', '--reconfigure', 'browser'], m.deps)).toBe(0);
-    expect(m.io.stdout).toContain(
-      'This app’s ledger counts 37 browser pages this month (pages other apps caused are not in that figure); the app does not count scrolls, so the month’s 6000 scrolls would be counted as spent.',
-    );
-    expect(m.fs.read(MONTHLY)).toBeNull();
-    const worker = http.requests.find((r) => r.url.endsWith('/v1/status'));
-    expect(worker?.url).toBe('http://127.0.0.1:8090/v1/status');
-    expect(worker?.headers['x-gmt-worker-key']).toBe(env(m, WORKER_ENV).CAMOUFOX_WORKER_KEY);
-  });
-  it('on a yes the worker is stopped, the counts written 0600 from the ledger, and the worker started again', async () => {
-    const { m } = await onWith(false, true);
+    m.io.stderr = '';
     m.executor.log.length = 0;
-    expect(await runCli(['setup', '--reconfigure', 'browser'], m.deps)).toBe(0);
-    expect(JSON.parse(m.fs.read(MONTHLY) ?? '{}')).toEqual({
-      windowStart: '2026-10-01T00:00:00.000Z',
-      pages: 37,
-      scrolls: 6000,
-    });
-    expect(m.fs.mode(MONTHLY)).toBe(0o600);
-    const log = kinds(m.executor.log);
-    expect(log.indexOf(`writeFile ${MONTHLY}`)).toBeGreaterThan(log.indexOf('run launchctl bootout'));
-    expect(log.lastIndexOf('run launchctl bootstrap')).toBeGreaterThan(log.indexOf(`writeFile ${MONTHLY}`));
+    return { m, http, ask: scripted };
+  }
+  it('a readable counts file: nothing to rewrite, nothing asked or written', async () => {
+    const { m } = await onWith('ok', []);
+    expect(await runCli(['browser', 'counts'], m.deps)).toBe(0);
+    expect(m.io.stdout).toContain('readable; nothing to rewrite');
+    expect(m.countsWrites).toEqual([]);
   });
-  it('a readable counts file, a worker that does not answer, or no ledger offers nothing', async () => {
-    const { m } = await onWith(true, true);
-    m.deps.ask = scriptedAsk([false, false]);
+  it('from the ledger’s real pages and scrolls, plus pages stated outside it; nothing written without a yes', async () => {
+    const no = await onWith('missing', ['3', '']);
+    expect(await runCli(['browser', 'counts'], no.m.deps)).toBe(0);
+    expect(no.m.io.stdout).toContain(
+      'From this app’s ledger: 37 browser pages and 412 scrolls this month, plus 3 pages outside the ledger. The worker’s counts would be 40 pages and 412 scrolls.',
+    );
+    expect(no.m.io.stdout).toContain('Nothing was written.');
+    expect(no.m.countsWrites).toEqual([]);
+    // why: ts-b1-002: Enter on the rewrite's question is no
+    expect(no.ask.defaults).toEqual([{ q: 'Rewrite the worker’s counts with these figures?', def: false }]);
+    const yes = await onWith('unreadable', ['', true]);
+    expect(await runCli(['browser', 'counts'], yes.m.deps)).toBe(0);
+    expect(yes.m.countsWrites).toHaveLength(1);
+    expect(JSON.parse(yes.m.countsWrites[0]?.stdin ?? '')).toEqual({ pages: 37, scrolls: 412 });
+    expect(yes.m.countsWrites[0]?.argv.slice(-3)).toEqual([
+      '/repo/apps/camoufox-worker/src/run.ts',
+      'counts',
+      '--json',
+    ]);
+    // why: the worker is stopped first, its file written under its lock, and started again once its check passes
+    const runs = yes.m.executor.log.map((a) => (a.kind === 'run' ? a.argv.join(' ') : a.kind));
+    const stop = runs.indexOf('launchctl bootout gui/501/local.get-me-there.camoufox-worker');
+    const write = runs.findIndex((r) => r.endsWith('run.ts counts --json'));
+    const start = runs.findIndex((r, i) => i > write && r.startsWith('launchctl bootstrap'));
+    expect([stop >= 0, write > stop, start > write]).toEqual([true, true, true]);
+  });
+  it('with no app here (Docker), the figures come from the flags, or are asked for', async () => {
+    const { m } = await onWith('missing', []);
+    m.fs.delete(ENV);
+    expect(
+      await runCli(
+        ['browser', 'counts', '--non-interactive', '--pages', '12', '--scrolls', '90', '--other-pages', '2'],
+        m.deps,
+      ),
+    ).toBe(0);
+    expect(JSON.parse(m.countsWrites[0]?.stdin ?? '')).toEqual({ pages: 14, scrolls: 90 });
+    expect(await runCli(['browser', 'counts', '--non-interactive'], m.deps)).toBe(78);
+    expect(m.io.stderr).toContain('--pages and --scrolls');
+    m.deps.ask = scriptedAsk(['5', '50', '0', true]);
+    expect(await runCli(['browser', 'counts'], m.deps)).toBe(0);
+    expect(JSON.parse(m.countsWrites.at(-1)?.stdin ?? '')).toEqual({ pages: 5, scrolls: 50 });
+  });
+  it('--reconfigure browser offers the same rewrite after its key question', async () => {
+    // why: the window question, the key question, the pages outside the ledger, then the rewrite
+    const { m, ask } = await onWith('missing', [false, false, '', true]);
     expect(await runCli(['setup', '--reconfigure', 'browser'], m.deps)).toBe(0);
-    expect(m.fs.read(MONTHLY)).toBeNull();
-    const down = await onWith(false, true);
-    down.m.deps.http = stubHttp({
-      'GET /api/executions/active': () => ({ status: 200, body: { execution: null } }),
-      'GET /v1/status': () => ({ error: 'ECONNREFUSED' }),
+    expect(ask.asked.at(-1)).toBe('Rewrite the worker’s counts with these figures?');
+    expect(JSON.parse(m.countsWrites[0]?.stdin ?? '')).toEqual({ pages: 37, scrolls: 412 });
+  });
+  it('a ledger that cannot be read, or that reports no scrolls, asks for the figures instead', async () => {
+    const old = await onWith('missing', ['1', '2', '0', true], {
+      providers: [
+        {
+          providerId: 'camoufox',
+          displayName: 'x',
+          enabled: true,
+          capabilities: { discovery: null, verification: null },
+          plan: 'free',
+          usage: [
+            {
+              scope: 'provider-month:camoufox',
+              calls: 1,
+              costMicroGbp: 0,
+              costPence: 0,
+              cap: 1500,
+              windowStart: null,
+              windowEnd: null,
+            },
+          ],
+          excludedFromSchedule: false,
+          notices: [],
+          capNote: null,
+        },
+      ],
+      synthetic: false,
+      presets: providersBody(0, 0).presets,
+      pointOfSale: 'GB',
     });
-    down.m.deps.ask = scriptedAsk([false, false]);
-    expect(await runCli(['setup', '--reconfigure', 'browser'], down.m.deps)).toBe(0);
-    const ledger = await onWith(false, true);
-    ledger.m.deps.http = stubHttp({
-      'GET /api/executions/active': () => ({ status: 200, body: { execution: null } }),
-      'GET /v1/status': () => ({ status: 200, body: status(false) }),
-      'GET /api/providers': () => ({ status: 500, body: {} }),
-    });
-    ledger.m.deps.ask = scriptedAsk([false, false]);
-    expect(await runCli(['setup', '--reconfigure', 'browser'], ledger.m.deps)).toBe(1);
-    expect(ledger.m.io.stderr).toContain('the app’s ledger could not be read to rewrite it');
+    expect(await runCli(['browser', 'counts'], old.m.deps)).toBe(0);
+    expect(old.m.io.stderr).toContain('the app does not report its scroll count (update it first)');
+    expect(JSON.parse(old.m.countsWrites[0]?.stdin ?? '')).toEqual({ pages: 1, scrolls: 2 });
   });
 });
+
+/** A `GET /api/providers` answer with the camoufox month's pages and scrolls. */
+function providersBody(calls: number, scrolls: number) {
+  return {
+    providers: [
+      {
+        providerId: 'camoufox',
+        displayName: 'Google Flights (browser)',
+        enabled: true,
+        capabilities: { discovery: null, verification: null },
+        plan: 'free',
+        usage: [
+          {
+            scope: 'provider-month:camoufox',
+            calls,
+            costMicroGbp: 0,
+            costPence: 0,
+            cap: 1500,
+            windowStart: '2026-10-01T00:00:00.000Z',
+            windowEnd: '2026-11-01T00:00:00.000Z',
+            scrolls,
+          },
+        ],
+        excludedFromSchedule: false,
+        notices: [],
+        capNote: null,
+      },
+    ],
+    synthetic: false,
+    presets: {
+      policy: { maxCells: 10, topN: 10, expandTop: 2, bookingLinks: true },
+      providers: { discovery: ['camoufox'], verification: [], discoveryRefreshHours: {} },
+      budget: { maxCalls: 1, maxFreeCalls: 10, maxCostMicroGbp: 0 },
+      discoveryRefreshHours: 168,
+      schedulerTimezone: 'Europe/London',
+    },
+    pointOfSale: 'GB',
+  };
+}
 
 describe('worker.env and its helpers', () => {
   it('a key is 24 random bytes as hex; keys compare by digest; a missing key differs', () => {
@@ -475,47 +599,72 @@ describe('worker.env and its helpers', () => {
   });
   it('worker.env holds the key and the app’s effective shared settings, keeping the operator’s other lines', () => {
     const app = { CAMOUFOX_MODE: 'grid', CAMOUFOX_BILLING_DAY: '15' };
-    const text = renderWorkerEnv(
+    const r = renderWorkerEnv(
       'k'.repeat(48),
       readSharedSettings(app).settings,
       'CAMOUFOX_WORKER_PORT="8091"\nCAMOUFOX_MODE="list"\n# a note\n',
     );
-    const w = parseEnv(text);
+    if (!r.ok) throw new Error(r.error);
+    const w = parseEnv(r.text);
     expect(w).toMatchObject({
       CAMOUFOX_WORKER_KEY: 'k'.repeat(48),
       CAMOUFOX_MODE: 'grid',
       CAMOUFOX_BILLING_DAY: '15',
       CAMOUFOX_WORKER_PORT: '8091',
     });
+    const record = Object.fromEntries(
+      Object.entries(w).filter((e): e is [string, string] => e[1] !== undefined),
+    );
     expect(
-      settingsDiffer(
-        app,
-        Object.fromEntries(Object.entries(w).filter((e): e is [string, string] => e[1] !== undefined)),
-      ),
+      sharedSettingDiffs(readSharedSettings(app).settings, readSharedSettings(record).settings, 'grid'),
     ).toEqual([]);
-    expect(settingsDiffer(app, { CAMOUFOX_MODE: 'list' })).toEqual(['CAMOUFOX_MODE', 'CAMOUFOX_BILLING_DAY']);
   });
-  it('withBrowserLines replaces in place, drops a duplicate, appends what is new and keeps every other line', () => {
+  // why: sec-b1-007: the text is read back before it is written, and a value spread over lines is refused, never cut
+  it('worker.env refuses a kept value spread over several lines', () => {
+    const r = renderWorkerEnv('k'.repeat(48), readSharedSettings({}).settings, 'MY_NOTE="first\nsecond"\n');
+    expect(r).toEqual({
+      ok: false,
+      error: 'worker.env holds MY_NOTE over several lines; put it on one line, then run setup again',
+    });
+  });
+  it('app.env’s browser lines go through the one line editor, replaced in place, a duplicate dropped, read back', () => {
     expect(
-      withBrowserLines('A="1"\nCAMOUFOX_ENABLED="false"\nCAMOUFOX_ENABLED="x"\n', [
+      appEnvWithBrowser('A="1"\nCAMOUFOX_ENABLED="false"\nCAMOUFOX_ENABLED="x"\n', [
         ['CAMOUFOX_ENABLED', 'true'],
-        ['CAMOUFOX_WORKER_URL', 'u'],
+        ['CAMOUFOX_WORKER_URL', 'http://127.0.0.1:8090'],
       ]),
-    ).toBe('A="1"\nCAMOUFOX_ENABLED="true"\nCAMOUFOX_WORKER_URL="u"\n');
+    ).toEqual({
+      ok: true,
+      text: 'A="1"\nCAMOUFOX_ENABLED="true"\nCAMOUFOX_WORKER_URL="http://127.0.0.1:8090"\n',
+    });
+    expect(appEnvWithBrowser('', [['CAMOUFOX_WORKER_KEY', 'a"b']])).toEqual({
+      ok: false,
+      error: 'app.env a value holds a character the file cannot carry: CAMOUFOX_WORKER_KEY',
+    });
   });
-  it('reads the camoufox provider-month pages from GET /api/providers', () => {
-    const body = (usage: unknown) =>
-      JSON.stringify({
-        providers: [
-          { providerId: 'searchapi', usage: [] },
-          { providerId: 'camoufox', usage },
-        ],
-      });
-    expect(pagesFromProviders(body([{ scope: 'provider-month:camoufox', calls: 12 }]))).toBe(12);
-    expect(pagesFromProviders(body([{ scope: 'global-month', calls: 1 }]))).toBeNull();
-    expect(pagesFromProviders(body('x'))).toBeNull();
-    expect(pagesFromProviders('{')).toBeNull();
-    expect(pagesFromProviders('{"providers":1}')).toBeNull();
+  // why: ca-b1-008: the app's address is worker.env's own port, through core's one rule
+  it('the worker’s address is its own port: 8090 unset, the configured one, none for a bad one', () => {
+    expect(workerUrlOf(null)).toBe('http://127.0.0.1:8090');
+    expect(workerUrlOf({ CAMOUFOX_WORKER_PORT: '8091' })).toBe('http://127.0.0.1:8091');
+    expect(workerUrlOf({ CAMOUFOX_WORKER_PORT: '80' })).toBeNull();
+  });
+  it('the retired names are removed from worker.env, every other line kept', () => {
+    expect(
+      retiredWorkerLines('A="1"\nCAMOUFOX_BINARY_BUILD="x"\nexport CAMOUFOX_INSTALL_DIR=/y\nB=2\n'),
+    ).toEqual({ text: 'A="1"\nB=2\n', removed: ['CAMOUFOX_BINARY_BUILD', 'CAMOUFOX_INSTALL_DIR'] });
+    expect(retiredWorkerLines('A=1\n')).toEqual({ text: 'A=1\n', removed: [] });
+  });
+  it('reads the camoufox month’s pages and scrolls from GET /api/providers through its schema', () => {
+    expect(ledgerFigures(JSON.stringify(providersBody(12, 40)))).toEqual({ pages: 12, scrolls: 40 });
+    const none = providersBody(0, 0);
+    expect(ledgerFigures(JSON.stringify({ ...none, providers: [] }))).toEqual({ pages: 0, scrolls: 0 });
+    expect(
+      ledgerFigures(JSON.stringify({ ...none, providers: [{ ...none.providers[0], usage: [] }] })),
+    ).toEqual({ pages: 0, scrolls: 0 });
+    expect(ledgerFigures('{')).toEqual({ problem: 'the app’s providers answer is not JSON' });
+    expect(ledgerFigures('{"providers":1}')).toEqual({
+      problem: 'the app’s providers answer is not one this build can read',
+    });
   });
 });
 

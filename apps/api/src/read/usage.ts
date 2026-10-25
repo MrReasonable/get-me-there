@@ -83,6 +83,8 @@ export function budgetScopes(
 /** The api-contract `Usage`: the guard's usage plus its scope label and pence (core's rounding: spend is never understated). */
 export function usageOf(ports: Ports, scope: BudgetScope): ApiUsage {
   const u = ports.budget.usage(scope);
+  // why: W3 (cb-b1-004): the ledger counts a grid page's scrolls; the providers view and `gmt browser counts` read them
+  const scrolls = scope.kind === 'provider-month' ? ports.budget.scrollsThisMonth(scope.providerId) : null;
   return {
     scope: budgetScopeLabel(scope),
     calls: u.calls,
@@ -91,5 +93,6 @@ export function usageOf(ports: Ports, scope: BudgetScope): ApiUsage {
     cap: u.cap,
     windowStart: u.windowStart,
     windowEnd: u.windowEnd,
+    ...(scrolls === null ? {} : { scrolls }),
   };
 }

@@ -103,7 +103,7 @@ window's start and end with calls and cost so far.
 ### Camoufox (own Google Flights pages): self-scraped, opt-in, free
 
 - Off by default (`CAMOUFOX_ENABLED=false`); a definition must also name it. Discovery only, `list` mode: one page per
-  day pair, through the host-side worker on the operator's machine (macOS or Linux; docs/setup.md section 14).
+  day pair, through the host-side worker on the machine running it (macOS or Linux; docs/setup.md section 14).
 - Caps: `CAMOUFOX_EXECUTION_PAGE_CAP` (default 100, 1 to 400) pages a run and `CAMOUFOX_MONTHLY_PAGE_CAP` (default 1,500)
   pages a calendar month from `CAMOUFOX_BILLING_DAY`. The app's ledger enforces both; the worker reports its own month's
   counts, and enforces the monthly caps across every caller. The run's cap is frozen into the execution's snapshot when it is

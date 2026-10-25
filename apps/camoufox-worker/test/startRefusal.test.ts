@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { START_REFUSAL_REASONS, startRefusalSchema } from '@gmt/core';
+import { CONSENT_FIX, START_REFUSAL_REASONS, startRefusalSchema } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
 import type { EntryContext } from '../src/run.js';
 import { check, clearStartRefusal, writeStartRefusal } from '../src/startRefusal.js';
@@ -68,7 +68,7 @@ describe('run.ts check --json (decision 75): the start’s result, nothing start
     expect(await check(t.ctx, mac)).toBe(78);
     expect(t.out.map((l) => JSON.parse(l))).toEqual([{ reason: 'consent-missing', at: AT }]);
     expect(t.err).toEqual([
-      'the camoufox worker would refuse to start: no consent record: capture one; fix: pnpm gmt consent',
+      `the camoufox worker would refuse to start: no consent record: capture one; fix: ${CONSENT_FIX.command}`,
     ]);
     expect(existsSync(join(t.dataDir, 'start-refusal.json'))).toBe(false);
   });
@@ -92,13 +92,23 @@ describe('run.ts check --json (decision 75): the start’s result, nothing start
     await check(mismatch.ctx, mac);
     expect(JSON.parse(mismatch.out[0] ?? '')).toEqual({ reason: 'build-mismatch', at: AT });
   });
-  it('refuses another argument, and bad settings, printing nothing on stdout', async () => {
+  // why: W1 (dev-b1-003): bad settings are a config refusal the CLI can read, their words on stderr
+  it('refuses another argument printing nothing on stdout; bad settings print a config refusal and say why', async () => {
     const t = ctxFor({ home: '/h', args: [] });
     expect(await check(t.ctx, mac)).toBe(78);
     expect([t.out, t.err]).toEqual([[], ['usage: run.ts check --json']]);
     const bad = ctxFor({ home: '/h', env: { CAMOUFOX_WORKER_KEY: 'short' } });
     expect(await check(bad.ctx, mac)).toBe(78);
-    expect(bad.out).toEqual([]);
+    expect(bad.out.map((l) => JSON.parse(l))).toEqual([{ reason: 'config', at: AT }]);
     expect(bad.err.join()).toContain('CAMOUFOX_WORKER_KEY');
+    expect(existsSync(join(bad.dataDir, 'start-refusal.json'))).toBe(false);
+  });
+  // why: CodeRabbit (PR #15): the install directory comes from the settings' own HOME, as the start's does
+  it('the install directory is the settings’ HOME’s: no HOME is a config refusal, never a layout under an empty one', async () => {
+    const f = fakeInstall('darwin-arm64');
+    const t = ctxFor({ home: f.home, installDir: f.root, env: { HOME: '' } });
+    expect(await check(t.ctx, mac)).toBe(78);
+    expect(JSON.parse(t.out[0] ?? '')).toEqual({ reason: 'config', at: AT });
+    expect(t.err.join()).toContain('HOME');
   });
 });

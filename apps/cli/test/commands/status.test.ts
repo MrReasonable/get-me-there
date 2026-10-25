@@ -90,7 +90,8 @@ describe('gmt status, the local facts (brief Task 16b.8)', () => {
     m.fs.file(WORKER_PLIST, 'worker plist');
     await runCli(['status'], m.deps);
     expect(m.io.stdout).toContain('refused, not retrying: the consent record has expired: capture again');
-    expect(m.io.stdout).toContain('fix: pnpm gmt consent');
+    // why: W2: the consent fix names the command that exists today, core's CONSENT_FIX
+    expect(m.io.stdout).toContain('fix: pnpm --filter @gmt/camoufox-worker capture-socs');
     expect(m.io.stdout).toContain('the refused worker agent was booted out so launchd does not restart it');
     expect(m.executor.log.map((x) => (x.kind === 'run' ? x.describe : x.kind))).toEqual([
       'launchctl bootout gui/501/local.get-me-there.camoufox-worker',

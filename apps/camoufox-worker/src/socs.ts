@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   type Clock,
@@ -8,6 +8,7 @@ import {
   type StartConsent,
 } from '@gmt/core';
 import type { CookieInput, CookieLike } from './driver.js';
+import { writePrivateFile } from './privateFile.js';
 
 /**
  * Consent: rejected, never accepted (spec §2; decision 69 ruling 9; SEC-R2-001, TS2-06). Google's consent-choice
@@ -58,6 +59,9 @@ export function monthsBefore(at: IsoDateTime, months: number): string {
   return target.toISOString().slice(0, 10);
 }
 
+/** The furthest instant a JavaScript date holds, either side of 1970. */
+const MAX_DATE_MS = 8.64e15;
+
 /** A capture's fields, shape only (no date judged); throws ConsentNotCaptured naming what is wrong. */
 export function parseCaptureShape(raw: unknown): SocsCapture {
   if (typeof raw !== 'object' || raw === null) throw new ConsentNotCaptured('not a JSON object');
@@ -68,6 +72,8 @@ export function parseCaptureShape(raw: unknown): SocsCapture {
   if (get('path') !== '/') throw new ConsentNotCaptured('the path is not /');
   const expires = get('expires');
   if (typeof expires !== 'number' || !Number.isFinite(expires)) throw new ConsentNotCaptured('no expiry');
+  // why: CodeRabbit (PR #15): an expiry past what a date can hold would throw when it is printed; it is refused here
+  if (Math.abs(expires * 1000) > MAX_DATE_MS) throw new ConsentNotCaptured('an expiry out of range');
   if (get('secure') !== true) throw new ConsentNotCaptured('not Secure');
   const sameSite = get('sameSite');
   if (!isSameSite(sameSite)) throw new ConsentNotCaptured('no SameSite');
@@ -129,10 +135,7 @@ export function writeCapture(dataDir: string, input: CaptureInput, clock: Clock)
   } else mkdirSync(dataDir, { recursive: true, mode: 0o700 });
   const capture = parseCapture({ ...input, domain: SOCS_DOMAIN, path: '/', capturedAt: clock.now() }, clock);
   const file = join(dataDir, SOCS_FILE);
-  const tmp = `${file}.tmp`;
-  writeFileSync(tmp, JSON.stringify(capture), { mode: 0o600 });
-  chmodSync(tmp, 0o600);
-  renameSync(tmp, file);
+  writePrivateFile(file, JSON.stringify(capture));
   return capture;
 }
 

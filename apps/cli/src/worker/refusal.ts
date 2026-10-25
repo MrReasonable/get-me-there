@@ -1,5 +1,5 @@
 import { join } from 'node:path/posix';
-import { START_REFUSAL_TEXT, type StartRefusal, startRefusalSchema } from '@gmt/core';
+import { START_REFUSAL_FILE, START_REFUSAL_TEXT, type StartRefusal, startRefusalSchema } from '@gmt/core';
 import type { Files } from '../exec/files.js';
 import type { Action } from '../plan/action.js';
 import type { Paths, Platform, ServiceFacts } from '../platform/types.js';
@@ -11,7 +11,8 @@ import { launchdLabel } from '../services/launchd.js';
  * hostile file cannot put a command in front of the operator. WP17's `start` and `update` call these too, with
  * `deps.files`.
  */
-export const REFUSAL_FILE = 'start-refusal.json';
+// why: WP18 V8 — the refusal file's name is core's constant, one for the worker, this CLI and the app
+export const REFUSAL_FILE = START_REFUSAL_FILE;
 export const WORKER_LABEL = launchdLabel('camoufox-worker');
 
 /** The refusal, read through Files (ca-b1-024): none when absent; unreadable when it cannot be read or is any other shape. */
@@ -34,6 +35,12 @@ export function readStartRefusal(paths: Paths, files: Files): StartRefusal | 'no
 /** "refused, not retrying: <START_REFUSAL_TEXT summary>". */
 export const refusalLine = (r: StartRefusal): string =>
   `refused, not retrying: ${START_REFUSAL_TEXT[r.reason].summary}`;
+
+/** refusalLine with its fix, for start, update, setup and `browser install` (W2: one formatter): "…; fix: <command>". */
+export const refusalWithFix = (r: StartRefusal): string => {
+  const fix = START_REFUSAL_TEXT[r.reason].fixCommand;
+  return `${refusalLine(r)}${fix === null ? '' : `; fix: ${fix}`}`;
+};
 
 /**
  * macOS: launchd's KeepAlive cannot exclude exit 78, so a refused worker's loaded agent is booted out while the refusal
