@@ -74,6 +74,16 @@ describe('scripts/until-log-line.mjs', { timeout: 30_000 }, () => {
     expect(r.code).toBe(1);
     expect(r.err).toContain('the log follower ended before the line (2)');
   });
+  it('a line the follower prints just before it ends still counts', async () => {
+    const r = await run([
+      ...WANT,
+      '--',
+      process.execPath,
+      '-e',
+      'console.log(\'{"msg":"execution: pass finished","executionId":"e-2"}\')',
+    ]);
+    expect(r.code).toBe(0);
+  });
   it('a follower that cannot start fails at once, saying so', async () => {
     const r = await run([...WANT, '--', '/nonexistent/follower'], { BACKSTOP_MS: '60000' });
     expect(r.code).toBe(1);

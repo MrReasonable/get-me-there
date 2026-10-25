@@ -34,7 +34,7 @@ const backstop = Number(process.env.BACKSTOP_MS ?? '120000');
 const follow = spawn(command[0], command.slice(1), { stdio: ['ignore', 'pipe', 'inherit'] });
 let finished = false;
 const done = (code, message, stream = process.stderr) => {
-  // why: the first result stands; a later event (the follower's exit after its kill) cannot override it
+  // why: the first result stands; a later event (the follower's close after its kill) cannot override it
   if (finished) return;
   finished = true;
   clearTimeout(timer);
@@ -44,7 +44,8 @@ const done = (code, message, stream = process.stderr) => {
 };
 const timer = setTimeout(() => done(1, `no "${msg}" line${named} within ${backstop} ms`), backstop);
 follow.once('error', (e) => done(1, `could not start the log follower ${command[0]}: ${e.message}`));
-follow.once('exit', (code, signal) => done(1, `the log follower ended before the line (${signal ?? code})`));
+// why: 'close', not 'exit': it comes after the follower's output is read, so a line printed just before it ends counts
+follow.once('close', (code, signal) => done(1, `the log follower ended before the line (${signal ?? code})`));
 let buffered = '';
 follow.stdout.on('data', (chunk) => {
   buffered += chunk;
