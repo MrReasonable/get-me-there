@@ -1,7 +1,7 @@
 // A fake Playwright page shaped like playwright-core 1.59.1's (PageLike): a synthetic accessibility tree of roles,
 // accessible names and text that locators query, scripted navigation (hops, the route guard, framenavigated), and a
 // record of every call's timeout. Synthetic only; nothing here is copied from a recording.
-import type { FrameLike, LocatorLike, PageLike, RequestLike } from '../../src/driver.js';
+import type { FrameLike, HeadedPageLike, LocatorLike, PageLike, RequestLike } from '../../src/driver.js';
 import type { Role } from '../../src/selectors.js';
 import type { FakeContext } from './fakeContext.js';
 
@@ -141,7 +141,7 @@ export class FakeLocator implements LocatorLike {
   }
   private read<T>(o: { timeout?: number } | undefined, f: (x: FakeNode) => T): Promise<T> {
     if (o?.timeout !== undefined) this.page.calls.timeouts.push(o.timeout);
-    if (this.page.isClosed)
+    if (this.page.isClosed())
       return Promise.reject(new Error('Target page, context or browser has been closed'));
     const x = this.node();
     if (x === undefined) return Promise.reject(new Error('locator resolved to no element'));
@@ -149,7 +149,7 @@ export class FakeLocator implements LocatorLike {
     return Promise.resolve(f(x));
   }
   count(): Promise<number> {
-    if (this.page.isClosed)
+    if (this.page.isClosed())
       return Promise.reject(new Error('Target page, context or browser has been closed'));
     if (this.page.hangAll || this.countHangs() || this.find().some((x) => x.countHang === true))
       return this.page.hangUntilClosed<number>();
@@ -282,9 +282,13 @@ export interface Navigation {
 }
 
 /** A scripted page. `trees` are what successive `readFacts` polls see (the last repeats). */
-export class FakePage implements PageLike {
+export class FakePage implements HeadedPageLike {
   readonly calls: Calls = { timeouts: [], clicks: [], gotos: [], closed: 0 };
-  isClosed = false;
+  /** Whether the page was closed; read through `isClosed()` as Playwright's page is. */
+  shut = false;
+  isClosed(): boolean {
+    return this.shut;
+  }
   hangAll = false;
   closeThrows = false;
   closeHangs = false;
@@ -396,7 +400,7 @@ export class FakePage implements PageLike {
   }
   close(): Promise<void> {
     this.calls.closed += 1;
-    this.isClosed = true;
+    this.shut = true;
     for (const c of this.closers.splice(0)) c();
     if (this.closeHangs) return never();
     if (this.closeThrows) return Promise.reject(new Error('close failed'));

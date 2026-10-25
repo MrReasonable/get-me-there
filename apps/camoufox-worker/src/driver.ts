@@ -97,10 +97,15 @@ export interface ContextLike {
   close(): Promise<void>;
 }
 
+/** The consent window's page: Playwright's `Page.isClosed()` says when the person has closed it. */
+export interface HeadedPageLike extends PageLike {
+  isClosed(): boolean;
+}
 /** A headed context (the consent window): a person may close it, which the consent driver observes. */
 export interface HeadedContextLike extends ContextLike {
   on(event: 'request', listener: (request: RequestLike) => void): unknown;
   on(event: 'close', listener: () => void): unknown;
+  newPage(): Promise<HeadedPageLike>;
 }
 
 /** Readiness facts (spec §2 "settled"; brief §9): read beside the page facts on every poll. */
