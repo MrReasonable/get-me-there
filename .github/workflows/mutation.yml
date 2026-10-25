@@ -33,8 +33,8 @@ jobs:
     # incrementally: a mutant whose code did not change keeps its last result. The incremental file is cached under a
     # key of the tests, config and lockfile, then the source; a restore falls back only to a run over the same tests,
     # because the command runner reports one test and cannot tell which test killed a mutant. A cold run (any test
-    # change) is about 2,700 mutants: measured at about 1 s a mutant, two at a time, on a 10-core Mac (933 in 16 min),
-    # so about 50 minutes there and an expected 2 to 3 hours on this runner; 300 minutes leaves room. The per-mutant
+    # change) is about 2,700 mutants: measured cold on this runner at 49 minutes (run 40173525400, 2,709 mutants, score
+    # 96.01); 300 minutes leaves room for the scope to grow, well inside the cap. The per-mutant
     # command leaves out test/real (its real-SQLite sweep takes about 80 s a run) and the two files that start real child
     # processes; ci.yml runs them on every push.
     runs-on: ubuntu-24.04

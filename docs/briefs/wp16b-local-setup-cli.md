@@ -742,8 +742,8 @@ removal command), `pnpm gmt logs`, and that a plain `pnpm gmt setup` finishes. R
   the job restores and always saves `apps/cli/reports/stryker-incremental.json` with `actions/cache`, keyed by the tests,
   config and lockfile, then the source, and falls back only to a run over the same tests (the command runner reports one
   test, so it cannot tell which test killed a mutant). A cold run, after any test change, is about 2,700 mutants at two
-  at a time, about 1 s a mutant on a 10-core Mac (about 50 minutes) and an expected 2 to 3 hours on the 4-core
-  runner, inside the job's 300 minutes. Concurrency is 2.
+  at a time: measured cold on `ubuntu-24.04` at 49 minutes (2,709 mutants, score 96.01), inside the job's 300 minutes.
+  Concurrency is 2.
 - [ ] **Commit `wp16b: workflow guard and CI matrix`.**
 
 ### Task 16b.12: Docs
