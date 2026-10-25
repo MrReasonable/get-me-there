@@ -33,6 +33,8 @@ function world(
     worker?: 'running' | 'stopped' | 'absent';
     env?: boolean;
     active?: boolean;
+    /** The app in Docker (review X4): running with its port published, or a compose that cannot be read. */
+    docker?: 'running' | 'unreadable';
   } = {},
 ) {
   const checks: string[][] = [];
@@ -40,6 +42,14 @@ function world(
     if (argv.includes('check') && argv.includes('--json') && argv.includes(RUN_TS)) {
       checks.push([...argv]);
       return { code: 0, stdout: `${o.check ?? '{"ok":true}'}\n` };
+    }
+    if (o.docker !== undefined && argv[0] === 'docker') {
+      if (argv[1] === '--version') return { code: 0, stdout: 'Docker version 28\n' };
+      if (argv.includes('ps'))
+        return o.docker === 'unreadable'
+          ? { code: 1, stderr: 'cannot connect' }
+          : { code: 0, stdout: '{"Service":"app","State":"running"}\n' };
+      if (argv.includes('port')) return { code: 0, stdout: '127.0.0.1:3000\n' };
     }
     return undefined;
   };
@@ -77,6 +87,8 @@ function world(
     m.loaded.add(LABEL);
     if (worker === 'running') m.running.add(LABEL);
   }
+  if (o.docker !== undefined)
+    m.fs.file('/repo/.env', 'APP_BASIC_AUTH_USER=op\nAPP_BASIC_AUTH_PASS=synthetic-pass\nPORT=3000\n', 0o600);
   const attached: Attached[] = [];
   m.deps.attach = async (argv, cwd, env) => {
     attached.push({ argv, cwd, env, workerLoaded: m.loaded.has(LABEL) });
@@ -132,13 +144,61 @@ describe('gmt consent: the capture, with the worker stopped meanwhile', () => {
     );
     expect(m.loaded.has(LABEL)).toBe(false);
   });
-  it('with no worker service installed yet (setup stopped for consent), says how to finish turning it on', async () => {
-    const m = world({ worker: 'absent' });
-    expect(await runCli(['consent'], m.deps)).toBe(0);
-    expect(m.io.stdout).toContain(
+  it('with no worker service installed yet, says how to finish turning it on: browser install with the app in Docker, setup natively', async () => {
+    const docker = world({ worker: 'absent' });
+    expect(await runCli(['consent'], docker.deps)).toBe(0);
+    expect(docker.io.stdout).toContain(
+      'The worker service is not installed yet: pnpm gmt browser install installs the worker service and starts it.',
+    );
+    expect(docker.runs().some((x) => x.startsWith('launchctl'))).toBe(false);
+    const native = world({ worker: 'absent' });
+    native.fs.file('/Users/op/.config/get-me-there/app.env', 'PORT=3000\n', 0o600);
+    expect(await runCli(['consent'], native.deps)).toBe(0);
+    expect(native.io.stdout).toContain(
       'The worker service is not installed yet: pnpm gmt setup --reconfigure browser turns the browser provider on.',
     );
-    expect(m.runs().some((x) => x.startsWith('launchctl'))).toBe(false);
+  });
+  // why: ts-b1-002, review X3: a stop that fails does not go on, and the worker is put back as it was
+  it('a worker stop that fails spawns nothing and starts the worker again: 1, with the plan’s report', async () => {
+    const m = world();
+    const inner = m.deps.executor;
+    let failed = false;
+    m.deps.executor = {
+      run: async (a) => {
+        if (!failed && a.kind === 'waitGone') {
+          failed = true;
+          return Promise.reject(new Error('the label stayed'));
+        }
+        return inner.run(a);
+      },
+    };
+    expect(await runCli(['consent'], m.deps)).toBe(1);
+    expect(m.io.stderr).toContain('consent: stop the worker: stopped at a failed step');
+    expect(m.attached).toEqual([]);
+    expect(m.loaded.has(LABEL)).toBe(true);
+  });
+  // why: sec-b1-001, review X3: SIGINT or SIGTERM is passed to the child and the worker is put back before the end
+  it('an interruption reaches the child, then the worker is put back as it was and nothing is cleared', async () => {
+    const m = world();
+    m.fs.file(REFUSAL, '{"reason":"consent-missing","at":"2026-10-24T09:00:00.000Z"}', 0o600);
+    const handlers: Array<() => void> = [];
+    let listening = 0;
+    m.deps.onInterrupt = (h) => {
+      handlers.push(h);
+      listening++;
+      return () => {
+        listening--;
+      };
+    };
+    m.deps.attach = (_argv, _cwd, _env, signal) =>
+      new Promise((resolve) => {
+        signal?.addEventListener('abort', () => resolve(130), { once: true });
+        for (const h of handlers) h();
+      });
+    expect(await runCli(['consent'], m.deps)).toBe(130);
+    expect(m.loaded.has(LABEL)).toBe(true);
+    expect(m.fs.read(REFUSAL)).not.toBeNull();
+    expect(listening).toBe(0);
   });
   it('a failure to spawn still puts the worker back, and is not reported as success', async () => {
     const m = world();
@@ -163,6 +223,32 @@ describe('gmt consent: the capture, with the worker stopped meanwhile', () => {
 });
 
 describe('gmt consent export and import', () => {
+  // why: review X4: export needs only the pinned Camoufox, so it runs where no worker is set up
+  it('export runs with no worker.env, making the worker’s data directory 0700 for its lock and spacing', async () => {
+    const m = world({ env: false, worker: 'absent' });
+    expect(await runCli(['consent', 'export'], m.deps), m.io.stderr).toBe(0);
+    expect(m.fs.isDir(DATA)).toBe(true);
+    expect(m.fs.mode(DATA)).toBe(0o700);
+    expect(m.attached[0]?.argv).toEqual([...ARGV, 'export']);
+    expect(m.io.stdout).toBe('');
+  });
+  it('capture or import with no worker.env names the steps for this machine: browser install with the app in Docker', async () => {
+    for (const action of [[], ['import']]) {
+      const m = world({ env: false, worker: 'absent' });
+      expect(await runCli(['consent', ...action], m.deps)).toBe(78);
+      expect(m.io.stderr).toContain(
+        'no worker.env): write worker.env as docs/setup.md#the-app-in-docker-the-worker-on-this-machine says, then pnpm gmt browser install',
+      );
+      expect(m.attached).toEqual([]);
+    }
+  });
+  // why: po-b1-007: with --wait or --force the guard's words go to standard error, never into the exported line
+  it('export --force with a search running says so on standard error only', async () => {
+    const m = world({ docker: 'running', active: true });
+    expect(await runCli(['consent', 'export', '--force'], m.deps)).toBe(0);
+    expect(m.io.stdout).toBe('');
+    expect(m.io.stderr).toContain('a search is running in the Docker app');
+  });
   it('export writes nothing here, so the worker goes back as it was, the refusal untouched', async () => {
     const m = world();
     m.fs.file(REFUSAL, '{"reason":"consent-missing","at":"2026-10-24T09:00:00.000Z"}', 0o600);
@@ -231,6 +317,29 @@ describe('gmt consent check', () => {
 });
 
 describe('gmt consent’s refusals', () => {
+  // why: po-b1-003, review X4: on the operator's machine the app runs in Docker, and the guard asks it too
+  it('the Docker app with a run active refuses with 75 before the worker is stopped; --force goes ahead', async () => {
+    const m = world({ docker: 'running', active: true });
+    expect(await runCli(['consent'], m.deps)).toBe(75);
+    expect(m.io.stderr).toContain('a search is running in the Docker app');
+    expect(m.attached).toEqual([]);
+    expect(m.runs()).toEqual([]);
+    const request = m.deps.http;
+    expect(await runCli(['consent', '--force'], m.deps)).toBe(0);
+    expect(m.attached).toHaveLength(1);
+    expect(request).toBeDefined();
+  });
+  it('a Docker app with no run active lets it go ahead; a Docker state that cannot be read refuses unless --force', async () => {
+    const idle = world({ docker: 'running' });
+    expect(await runCli(['consent'], idle.deps)).toBe(0);
+    const unknown = world({ docker: 'unreadable' });
+    expect(await runCli(['consent'], unknown.deps)).toBe(75);
+    expect(unknown.io.stderr).toContain(
+      'cannot tell whether a search is running in the app (docker compose ps failed, so whether the Docker app runs is not known)',
+    );
+    expect(unknown.attached).toEqual([]);
+    expect(await runCli(['consent', '--force'], unknown.deps)).toBe(0);
+  });
   it('with no worker.env: the browser worker is not set up, nothing spawned', async () => {
     const m = world({ env: false, worker: 'absent' });
     expect(await runCli(['consent'], m.deps)).toBe(78);

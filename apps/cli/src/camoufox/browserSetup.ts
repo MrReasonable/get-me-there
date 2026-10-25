@@ -1,6 +1,7 @@
-import { START_REFUSAL_TEXT } from '@gmt/core';
+import { CONSENT_FIX, START_REFUSAL_TEXT } from '@gmt/core';
 import { appUrl, credsFrom } from '../appClient.js';
 import type { Ask } from '../ask.js';
+import { consentChild } from '../commands/consent.js';
 import type { Deps } from '../deps.js';
 import type { Action } from '../plan/action.js';
 import { apply } from '../plan/apply.js';
@@ -13,6 +14,7 @@ import { rewriteCounts } from './counts.js';
 import { installCamoufox, oldBundleRemovals } from './installer.js';
 import {
   browserAvailability,
+  CONSENT_STEP,
   consentMethodText,
   costsSummary,
   ENABLE_QUESTION,
@@ -36,8 +38,8 @@ import { checkWords, workerCheck, workerStart } from './workerService.js';
 /**
  * The browser provider in `gmt setup` (spec §13 "The gmt command"; decision 75; brief WP17 Task 17.6). The order is
  * fixed: costs, the consent method, the install (the one sequence `gmt browser install` runs: download, layout, Linux
- * libraries), worker.env with a new shared key mirrored into app.env, then the worker's own start check: only once it
- * says consent is in place does app.env gain CAMOUFOX_ENABLED=true and the worker service get installed and started.
+ * libraries), worker.env with a new shared key mirrored into app.env, then (interactive, with a display) the consent
+ * capture as its own step (review X5), then the worker's own start check: only once it says consent is in place does app.env gain CAMOUFOX_ENABLED=true and the worker service get installed and started.
  * Any step that stops leaves the provider off (`not-set-up`), and `pnpm gmt setup --reconfigure browser` resumes it.
  * With the provider on, `--reconfigure browser` installs a missing or changed bundle first, then offers a new key (yes
  * by default when the two files' keys differ) and, when the worker's counts file is missing or unreadable, the rewrite
@@ -145,7 +147,9 @@ async function turnOn(deps: Deps, o: Options): Promise<BrowserOutcome> {
     deps.io.out('The browser provider stays off.\n');
     return 'off';
   }
-  deps.io.out(`${consentMethodText(deps.platform.hasDisplay)}\n`);
+  // why: review X5 (spec §13's one wizard): interactive with a display, the capture is setup's own step after the install
+  const how = !deps.platform.hasDisplay ? 'server' : o.interactive ? 'wizard' : 'command';
+  deps.io.out(`${consentMethodText(how)}\n`);
   const paths = deps.platform.paths;
   const stop = (why: string): BrowserOutcome => {
     deps.io.err(`${why}\n${RESUME_LINE}\n`);
@@ -182,12 +186,22 @@ async function turnOn(deps: Deps, o: Options): Promise<BrowserOutcome> {
     deps.executor,
   );
   if (wrote.failed !== null) return stop(describeResult('setup: the worker’s settings', wrote));
-  const check = await workerCheck(deps);
+  let check = await workerCheck(deps);
+  if (check.kind === 'refused' && check.refusal.reason.startsWith('consent-') && how === 'wizard') {
+    deps.io.out(`${CONSENT_STEP}\n`);
+    const child = consentChild(deps, null);
+    const code = await deps.attach(child.argv, child.cwd, child.env);
+    if (code !== 0)
+      return stop(
+        `The consent capture stored no rejection (it said why above). Run ${CONSENT_FIX.command} when you are ready.`,
+      );
+    check = await workerCheck(deps);
+  }
   if (check.kind === 'refused') {
     const r = check.refusal.reason;
     if (r.startsWith('consent-'))
       return stop(
-        `The worker needs your consent choice before it can start: ${START_REFUSAL_TEXT[r].summary}. ${consentMethodText(deps.platform.hasDisplay)}`,
+        `The worker needs your consent choice before it can start: ${START_REFUSAL_TEXT[r].summary}. ${consentMethodText(how === 'wizard' ? 'command' : how)}`,
       );
   }
   if (check.kind !== 'ok') return stop(`The worker would refuse to start: ${checkWords(check)}`);

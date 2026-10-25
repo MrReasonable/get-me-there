@@ -6,6 +6,7 @@ import { freeBytesAt, installedDigest } from '../../src/camoufox/install.js';
 import { linkedFiles, missingSonames, unzipProblem } from '../../src/camoufox/libs.js';
 import {
   browserAvailability,
+  CONSENT_STEP,
   consentMethodText,
   costsSummary,
   ENABLE_QUESTION,
@@ -162,12 +163,57 @@ describe('workerCheck and its words', () => {
   });
 });
 
+describe('the wizard’s own consent step (review X5)', () => {
+  it('interactive with a display: after the install it runs the capture itself, then turns the provider on', async () => {
+    const m = await world({ check: '{"reason":"consent-missing","at":"2026-10-24T09:30:00.000Z"}' });
+    const spawned: string[][] = [];
+    let checkAnswer = '{"reason":"consent-missing","at":"2026-10-24T09:30:00.000Z"}';
+    m.deps.attach = async (argv, _cwd, env) => {
+      spawned.push([...argv, JSON.stringify(env)]);
+      // why: the capture stored a rejection, so the worker's next check passes
+      checkAnswer = '{"ok":true}';
+      return 0;
+    };
+    const inner = m.deps.run;
+    m.deps.run = async (argv, opts) =>
+      argv.includes('check') && argv.includes('--json')
+        ? { code: 0, stdout: `${checkAnswer}\n`, stderr: '' }
+        : inner(argv, opts);
+    expect(await run(m, { interactive: true, answers: [true] })).toBe('on');
+    expect(m.io.stdout).toContain(`${consentMethodText('wizard')}\n`);
+    expect(m.io.stdout).toContain(`${CONSENT_STEP}\n`);
+    expect(spawned).toHaveLength(1);
+    expect(spawned[0]?.slice(4, 6)).toEqual(['/repo/apps/camoufox-worker/src/run.ts', 'consent']);
+    expect(parseEnv(m.fs.read(ENV) ?? '').CAMOUFOX_ENABLED).toBe('true');
+  });
+  it('a capture that stores nothing stops, provider off, with the command to run when ready', async () => {
+    const m = await world({ check: '{"reason":"consent-missing","at":"2026-10-24T09:30:00.000Z"}' });
+    m.deps.attach = async () => 69;
+    expect(await run(m, { interactive: true, answers: [true] })).toBe('not-set-up');
+    expect(m.io.stderr).toContain(
+      'The consent capture stored no rejection (it said why above). Run pnpm gmt consent when you are ready.',
+    );
+    expect(parseEnv(m.fs.read(ENV) ?? '').CAMOUFOX_ENABLED).toBeUndefined();
+  });
+  it('not interactive, or with no display, it opens no window and names the route instead', async () => {
+    const m = await world({ check: '{"reason":"consent-missing","at":"2026-10-24T09:30:00.000Z"}' });
+    let spawned = 0;
+    m.deps.attach = async () => {
+      spawned++;
+      return 0;
+    };
+    expect(await run(m)).toBe('not-set-up');
+    expect(m.io.stderr).toContain(consentMethodText('command'));
+    expect(spawned).toBe(0);
+  });
+});
+
 describe('browserSetup’s outcomes and words', () => {
   it('turning it on: the exact plan, the outcome on, and its line', async () => {
     const m = await world();
     expect(await run(m)).toBe('on');
     expect(m.io.stdout).toContain(`\n${costsSummary(MAC)}\n`);
-    expect(m.io.stdout).toContain(`${consentMethodText(true)}\n`);
+    expect(m.io.stdout).toContain(`${consentMethodText('command')}\n`);
     expect(
       m.io.stdout.endsWith('The browser provider is on: the worker service is installed and running.\n'),
     ).toBe(true);
@@ -410,11 +456,18 @@ describe('the offer’s fixed words', () => {
     );
     expect(ENABLE_QUESTION).toBe('Turn on the browser provider?');
     expect(SERVER_QUESTION).toBe('Type yes to accept page loads from this server’s address');
-    expect(consentMethodText(false)).toBe(
-      'Consent: this machine has no display, so the choice is captured on a desktop where pnpm gmt setup has set up the browser provider: run pnpm gmt consent export there and pipe its one line into pnpm gmt consent import here (a few minutes; the line holds only the cookie choice, so move it by pipe or clipboard, never as an argument or in a ticket). Or open https://www.google.com/travel/flights in an ordinary private browser window there, click Reject all, and copy the SOCS cookie’s fields into pnpm --filter @gmt/camoufox-worker capture-socs here (a few minutes; docs/setup.md#on-a-machine-with-no-display).',
+    const window =
+      'a browser window opens on Google Flights: click Reject all, wait until Google Flights shows, then close the window. The choice is kept only when the cookie’s own value reads as a rejection';
+    const fallback =
+      'If the window cannot be used, the fallback is to copy the SOCS cookie’s fields from an ordinary private window into pnpm --filter @gmt/camoufox-worker capture-socs, which keeps only a rejection too (a few minutes).';
+    expect(consentMethodText('server')).toBe(
+      `Consent: this machine has no display, so the choice is captured on a machine that shows the consent page and has the pinned Camoufox (pnpm gmt browser install there), and piped here: pnpm gmt consent export | ssh <this machine> 'cd <checkout> && pnpm gmt consent import' (a few minutes; docs/setup.md#on-a-machine-with-no-display). ${fallback}`,
     );
-    expect(consentMethodText(true)).toBe(
-      'Consent: Google’s consent page is answered once, by you, with "Reject all". Run pnpm gmt consent: a browser window opens on Google Flights, you click Reject all and close the window, and the choice is kept only when the cookie itself records a rejection (a minute or two; docs/setup.md#capture-your-consent-choice). Or copy the SOCS cookie’s fields from an ordinary private window into pnpm --filter @gmt/camoufox-worker capture-socs (a few minutes).',
+    expect(consentMethodText('command')).toBe(
+      `Consent: Google’s consent page is answered once, by you, with "Reject all". Run pnpm gmt consent: ${window} (a minute or two; docs/setup.md#capture-your-consent-choice). ${fallback}`,
+    );
+    expect(consentMethodText('wizard')).toBe(
+      `Consent: Google’s consent page is answered once, by you, with "Reject all". After the install, ${window} (a minute or two; docs/setup.md#capture-your-consent-choice). ${fallback}`,
     );
     expect(RESUME_LINE).toBe(
       'The browser provider stays off until then; resume with pnpm gmt setup --reconfigure browser',

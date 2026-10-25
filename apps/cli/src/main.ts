@@ -50,6 +50,7 @@ const attach = (
   argv: readonly string[],
   cwd: string,
   childEnvOf?: Readonly<Record<string, string>>,
+  signal?: AbortSignal,
 ): Promise<number> =>
   new Promise((resolve) => {
     const [file, ...args] = argv;
@@ -59,6 +60,8 @@ const attach = (
       stdio: 'inherit',
       ...(childEnvOf === undefined ? {} : { env: { ...childEnvOf } }),
     });
+    // why: review X3: an interruption reaches the child, which closes its window and deletes its profile
+    signal?.addEventListener('abort', () => child.kill('SIGTERM'), { once: true });
     child.on('error', () => resolve(127));
     child.on('exit', (code) => resolve(code ?? 1));
   });
@@ -112,6 +115,14 @@ async function main(): Promise<number> {
     portFree,
     randomBytes,
     attach,
+    onInterrupt: (handler) => {
+      process.on('SIGINT', handler);
+      process.on('SIGTERM', handler);
+      return () => {
+        process.off('SIGINT', handler);
+        process.off('SIGTERM', handler);
+      };
+    },
   };
   return runCli(process.argv.slice(2), deps);
 }

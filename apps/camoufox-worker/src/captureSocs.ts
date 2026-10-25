@@ -5,7 +5,9 @@ import { type Entry, type EntryContext, EX_CONFIG } from './run.js';
 import { ConsentNotCaptured, writeCapture } from './socs.js';
 
 /**
- * `capture-socs` (spec §2 "Consent"; brief Tasks 14.2 and 14.12; devops-010): the operator opens
+ * `capture-socs` (spec §2 "Consent"; brief Tasks 14.2 and 14.12; devops-010), the fallback to `pnpm gmt consent`
+ * (review X1): it stores a value only when the value's own mark reads as a rejection, as every store does. The operator
+ * opens
  * https://www.google.com/travel/flights in an ordinary private browser window, clicks "Reject all", opens the cookie
  * view for https://www.google.com and pastes the SOCS cookie's value, expiry, Secure and SameSite here. The command
  * stamps the time, fixes the domain (.google.com) and path (/), and writes `<data>/socs.json` 0600. It never prints

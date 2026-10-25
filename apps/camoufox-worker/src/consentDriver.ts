@@ -72,7 +72,7 @@ export interface ConsentDriver {
  * A machine with no display (brief WP17 Task 17.4, decision 74): the refusal points at export and import, the capture
  * made on a desktop and carried here as one line, and at capture-socs, the lighter equal option.
  */
-export const NO_DISPLAY = `there is no display for a browser window here (neither DISPLAY nor WAYLAND_DISPLAY is set): on a desktop that has run pnpm gmt setup, run ${CONSENT_FIX.command} export and pipe its line into ${CONSENT_FIX.command} import here, or enter the cookie from an ordinary private window with pnpm --filter @gmt/camoufox-worker capture-socs (docs/setup.md#on-a-machine-with-no-display)`;
+export const NO_DISPLAY = `there is no display for a browser window here (neither DISPLAY nor WAYLAND_DISPLAY is set): on a machine that shows the consent page and has the pinned Camoufox (pnpm gmt browser install), run ${CONSENT_FIX.command} export and pipe its line into ${CONSENT_FIX.command} import here, or, the fallback, enter the cookie from an ordinary private window with pnpm --filter @gmt/camoufox-worker capture-socs (docs/setup.md#on-a-machine-with-no-display)`;
 export class NoDisplay extends Error {
   constructor() {
     super(NO_DISPLAY);

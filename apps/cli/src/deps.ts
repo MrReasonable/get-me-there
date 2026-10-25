@@ -66,9 +66,19 @@ export interface Deps {
   randomBytes(n: number): Buffer;
   /**
    * Runs an argv with this terminal attached (`logs`, `consent`), resolving its exit code; `env`, when given, is the
-   * child's whole environment.
+   * child's whole environment, and aborting `signal` sends the child SIGTERM.
    */
-  attach(argv: readonly string[], cwd: string, env?: Readonly<Record<string, string>>): Promise<number>;
+  attach(
+    argv: readonly string[],
+    cwd: string,
+    env?: Readonly<Record<string, string>>,
+    signal?: AbortSignal,
+  ): Promise<number>;
+  /**
+   * Handles SIGINT and SIGTERM with `handler` instead of exiting, until the returned function is called (review X3:
+   * `gmt consent` puts the worker back before it ends).
+   */
+  onInterrupt(handler: () => void): () => void;
 }
 
 /** The one exit-code table (core's, shared with apps/api; U9): 78 a refusal or unmet prerequisite, 75 busy, 65 spend. */

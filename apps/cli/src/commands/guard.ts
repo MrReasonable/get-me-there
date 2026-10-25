@@ -1,4 +1,5 @@
 import { type ActiveExecution, type AppCreds, activeLine, readActive } from '../appClient.js';
+import type { AppEndpoint } from '../appEndpoint.js';
 import type { Deps } from '../deps.js';
 
 /** Decision 80's `--force` statement, printed before the first action; the last sentence follows AUTO_RESUME. */
@@ -17,6 +18,21 @@ export interface GuardTarget {
   up: boolean;
   creds: AppCreds | null;
   autoResume: boolean;
+  /** Why an app that may be up cannot be asked (no credentials, or an unknown Docker state); the default names no auth. */
+  cannot?: string;
+}
+
+/** The guard's target for an app found through appEndpoint (review X4): the native app, the Docker app, or neither. */
+export function endpointTarget(e: AppEndpoint): GuardTarget {
+  if (e.kind === 'none') return { label: 'the app', up: false, creds: null, autoResume: true };
+  if (e.kind === 'unknown')
+    return { label: 'the app', up: true, creds: null, autoResume: true, cannot: e.reason };
+  return {
+    label: e.kind === 'docker' ? 'the Docker app' : 'the app',
+    up: true,
+    creds: e.creds,
+    autoResume: e.autoResume,
+  };
 }
 
 const runningIn = (label: string, e: ActiveExecution): string =>
@@ -37,7 +53,7 @@ export async function guardActiveRun(
   for (;;) {
     const r =
       t.creds === null
-        ? { kind: 'failed' as const, reason: 'no basic auth in its settings' }
+        ? { kind: 'failed' as const, reason: t.cannot ?? 'no basic auth in its settings' }
         : await readActive(deps, t.creds);
     if (r.kind === 'none') return { ok: true, forced: false };
     const what =

@@ -46,17 +46,28 @@ export const SERVER_TEXT =
 export const ENABLE_QUESTION = 'Turn on the browser provider?';
 export const SERVER_QUESTION = 'Type yes to accept page loads from this server’s address';
 
-/**
- * How consent is captured on this machine, with the effort of each way (brief WP17 Tasks 17.5 and 17.6): the guided
- * capture, `pnpm gmt consent`, in a window here; with no display, its export on a desktop and its import here; and
- * capture-socs, the lighter equal option, either way.
- */
+/** capture-socs, the fallback (review X1): it too stores a value only when the value reads as a rejection. */
 export const CAPTURE_SOCS = 'pnpm --filter @gmt/camoufox-worker capture-socs';
-export function consentMethodText(hasDisplay: boolean): string {
-  return hasDisplay
-    ? `Consent: Google’s consent page is answered once, by you, with "Reject all". Run ${CONSENT_FIX.command}: a browser window opens on Google Flights, you click Reject all and close the window, and the choice is kept only when the cookie itself records a rejection (a minute or two; ${CONSENT_FIX.doc}). Or copy the SOCS cookie’s fields from an ordinary private window into ${CAPTURE_SOCS} (a few minutes).`
-    : `Consent: this machine has no display, so the choice is captured on a desktop where pnpm gmt setup has set up the browser provider: run ${CONSENT_FIX.command} export there and pipe its one line into ${CONSENT_FIX.command} import here (a few minutes; the line holds only the cookie choice, so move it by pipe or clipboard, never as an argument or in a ticket). Or open https://www.google.com/travel/flights in an ordinary private browser window there, click Reject all, and copy the SOCS cookie’s fields into ${CAPTURE_SOCS} here (a few minutes; docs/setup.md#on-a-machine-with-no-display).`;
+
+/**
+ * How consent is captured (brief WP17 Tasks 17.5 and 17.6; review X5), with the effort of each way: `wizard`, the
+ * capture setup runs itself after the install (interactive, with a display); `command`, the same capture as its own
+ * command (setup with a display but asked nothing); `server`, a machine with no display, whose choice is captured on a
+ * machine that shows the consent page and piped here. capture-socs is the fallback either way.
+ */
+export function consentMethodText(how: 'wizard' | 'command' | 'server'): string {
+  const window =
+    'a browser window opens on Google Flights: click Reject all, wait until Google Flights shows, then close the window. The choice is kept only when the cookie’s own value reads as a rejection';
+  const fallback = `If the window cannot be used, the fallback is to copy the SOCS cookie’s fields from an ordinary private window into ${CAPTURE_SOCS}, which keeps only a rejection too (a few minutes).`;
+  if (how === 'wizard')
+    return `Consent: Google’s consent page is answered once, by you, with "Reject all". After the install, ${window} (a minute or two; ${CONSENT_FIX.doc}). ${fallback}`;
+  if (how === 'command')
+    return `Consent: Google’s consent page is answered once, by you, with "Reject all". Run ${CONSENT_FIX.command}: ${window} (a minute or two; ${CONSENT_FIX.doc}). ${fallback}`;
+  return `Consent: this machine has no display, so the choice is captured on a machine that shows the consent page and has the pinned Camoufox (pnpm gmt browser install there), and piped here: ${CONSENT_FIX.command} export | ssh <this machine> 'cd <checkout> && ${CONSENT_FIX.command} import' (a few minutes; docs/setup.md#on-a-machine-with-no-display). ${fallback}`;
 }
+
+/** Said as setup's consent step starts, before the window opens. */
+export const CONSENT_STEP = 'Capturing your consent choice now: a browser window opens on Google Flights.';
 
 /** What setup says when the browser part stops before consent, so a re-run resumes it. */
 export const RESUME_LINE =
