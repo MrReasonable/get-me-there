@@ -48,7 +48,8 @@ and a daily backup job, and a closing screen that says plainly whether a price s
 - `start`, `stop`, `restart`, `logs`, `backup`, `restore <file>`, `password`, `smoke`, `update` (decision 80) and
   `uninstall`.
 - A local `status`: service state, settings files' presence and modes, units whose Node binary or checkout is gone, a
-  compose `app` container beside the native one, a detached checkout, and the worker's refusal (`<workerData>/
+  compose `app` container beside the native one (or, with no native install, the app in Docker: the worker's facts
+  only, the report read from the Docker app), a detached checkout, and the worker's refusal (`<workerData>/
   start-refusal.json` read through `startRefusalSchema` and printed through `START_REFUSAL_TEXT` as "refused, not
   retrying: <summary>"); the refusal helper `apps/cli/src/worker/refusal.ts`, which also plans the macOS boot-out of a
   refused worker agent and which WP17's `start` and `update` call. This package is the only later editor of
@@ -631,7 +632,10 @@ removal command), `pnpm gmt logs`, and that a plain `pnpm gmt setup` finishes. R
     `BIND_ADDRESS` beyond loopback (`warn`) (a group- or world-readable file is a
     `fail` naming `chmod 600 <path>`), a unit whose `argv[0]` or checkout path is gone (`fail`, fix `pnpm gmt setup`), on
     macOS a log directory over 100 MB (`warn`, with the `newsyslog` line), a running compose `app` container beside the
-    native service (`warn`, fix `docker compose down`), a detached checkout (`warn`, fix `git switch main`), and the
+    native service (`warn`, fix `docker compose down`; with no native install, no `app.env` and no app or backup unit,
+    the compose `app` is the app status reads: `docker` `ok`, "the app runs in Docker", or a stopped container a `fail`
+    with `docker compose start app`, and only the worker's service, stale unit (fix `pnpm gmt browser install`),
+    `worker.env` and refusal are checked, never `app.env`, the app service or the daily backups), a detached checkout (`warn`, fix `git switch main`), and the
     worker's refusal: with `<workerData>/start-refusal.json` present it prints `refusalLine` (each
     `START_REFUSAL_REASONS` value through `START_REFUSAL_TEXT`, with its fix command), an unreadable file prints
     "refusal file unreadable" and nothing from it (a hostile `fix` string and an unknown reason in fixtures), and on

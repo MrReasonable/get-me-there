@@ -1,7 +1,7 @@
 /**
  * `gmt status`'s app report (spec §10 `GET /status`, brief WP18 Task 18.5): the same checks the Status view shows, read
- * from the running app on 127.0.0.1 with the basic auth in app.env (never in an argv), printed beside WP16b's local
- * facts. A fix is the `pnpm gmt` command when the app names one, else its words. The password travels only in the
+ * from the running app on 127.0.0.1 with the basic auth in app.env (never in an argv), or for the app in Docker with no
+ * native install (W1) the basic auth in the checkout's .env, printed beside WP16b's local facts. A fix is the `pnpm gmt` command when the app names one, else its words. The password travels only in the
  * Authorization header of one in-process request.
  */
 import { apiContract } from '@gmt/core';
@@ -19,31 +19,33 @@ export type ReportRead = { kind: 'ok'; report: StatusReport } | { kind: 'down'; 
 /** The areas `--only` accepts. */
 export const STATUS_AREAS: readonly string[] = apiContract.statusAreaSchema.options;
 
-/** The port and, when app.env has them, the credentials; null when there is no app.env to read. */
-function access(deps: Deps): { port: number; creds: AppCreds | null } | 'missing' | 'unreadable' {
+/** Where the app's report is read: its port on 127.0.0.1 and, when known, its basic auth; or why it cannot be read. */
+export type AppAccess =
+  | { kind: 'ready'; port: number; creds: AppCreds | null }
+  | { kind: 'none'; reason: string };
+
+/** The native app's access, from app.env: its port and, when app.env has them, the credentials. */
+export function nativeAccess(deps: Deps): AppAccess {
   let text: string | null;
   try {
     text = deps.files.read(appEnvPath(deps.platform.paths));
   } catch {
-    return 'unreadable';
+    return {
+      kind: 'none',
+      reason: 'app.env could not be read: check that it is yours and readable (chmod 600)',
+    };
   }
-  if (text === null) return 'missing';
+  if (text === null) return { kind: 'none', reason: 'there is no app.env yet: run pnpm gmt setup' };
   const record = readEnvText(text);
   const creds = credsFrom(record);
   const port =
     creds?.port ?? (record.PORT !== undefined && /^\d+$/.test(record.PORT) ? Number(record.PORT) : 3000);
-  return { port, creds };
+  return { kind: 'ready', port, creds };
 }
 
-/** `GET /api/status`: the report, or why there is none (no settings file, no answer, an answer that is not the report). */
-export async function readReport(deps: Deps): Promise<ReportRead> {
-  const a = access(deps);
-  if (a === 'missing') return { kind: 'down', reason: 'there is no app.env yet: run pnpm gmt setup' };
-  if (a === 'unreadable')
-    return {
-      kind: 'down',
-      reason: 'app.env could not be read: check that it is yours and readable (chmod 600)',
-    };
+/** `GET /api/status`: the report, or why there is none (no settings to read, no answer, an answer that is not the report). */
+export async function readReport(deps: Deps, a: AppAccess = nativeAccess(deps)): Promise<ReportRead> {
+  if (a.kind === 'none') return { kind: 'down', reason: a.reason };
   const r = await deps.http({
     method: 'GET',
     url: appUrl(a.port, '/api/status'),
@@ -90,12 +92,24 @@ export function reportFlags(flags: Flags): ReportFlags {
 }
 
 /** What to do when the app does not answer: the service state decides (V9; a running service that is silent is hung). */
-function nextStep(local: readonly Check[], port: number | null): string {
+function nativeNextStep(local: readonly Check[], port: number | null): string {
   const running = local.some((c) => c.name === 'service app' && c.detail === 'running');
   return running
     ? `the service is running but the app does not answer${port === null ? '' : ` on port ${port}`}: pnpm gmt logs shows why; pnpm gmt restart tries again`
     : 'the app is not running: pnpm gmt start';
 }
+
+/** Which app `gmt status` reads, and what it says to do when that app does not answer. */
+export interface StatusTarget {
+  access: AppAccess;
+  nextStep: (local: readonly Check[], port: number | null) => string;
+}
+
+/** The native app: app.env's port and basic auth, and the service manager's next steps. */
+export const nativeTarget = (deps: Deps): StatusTarget => ({
+  access: nativeAccess(deps),
+  nextStep: nativeNextStep,
+});
 
 /**
  * Everything `gmt status` prints after the local facts are read, and its exit code (Task 18.5, review V9): the app's report
@@ -108,12 +122,12 @@ export async function finishStatus(
   deps: Deps,
   rf: Extract<ReportFlags, { ok: true }>,
   local: readonly Check[],
+  target: StatusTarget = nativeTarget(deps),
 ): Promise<number> {
-  const read = await readReport(deps);
+  const read = await readReport(deps, target.access);
   const reportOnly = rf.only !== null || rf.json;
   if (read.kind === 'down') {
-    const found = access(deps);
-    const step = nextStep(local, typeof found === 'string' ? null : found.port);
+    const step = target.nextStep(local, target.access.kind === 'ready' ? target.access.port : null);
     if (rf.json)
       deps.io.out(
         `${JSON.stringify({ appAnswering: false, reason: read.reason, nextStep: step, checks: local })}\n`,
