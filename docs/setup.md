@@ -857,7 +857,7 @@ sets the flag back, and empty routes then read as not searched again.
 
 ### How it behaves
 
-- One page at a time, at least 30 seconds from the start of one page to the start of the next (never randomised).
+- One page at a time, at least `CAMOUFOX_MIN_SPACING_SECONDS` (default 30 seconds, 0 to 600) from the start of one page to the start of the next (never randomised). A value of 0 means no pause: pages go back to back, from your own address, still one at a time. Keep it equal in `worker.env` and the app's settings.
 - Its own signed-out browser profile, never shared and never seeded from any cookie file; service workers are blocked
   and every redirect is checked, so a page that leaves `https://www.google.com/travel/flights` stops at once.
 - Your saved cookie choice (Reject all) is applied before every page and checked by value after it; a consent page, or a
@@ -981,7 +981,7 @@ provider never clicks the graph and nothing reads these files yet.
   `set -a; . ~/.config/get-me-there/dev-camoufox.env; set +a`, so the key is never typed or exported by hand and never
   reaches your shell history. Never put that URL in `.env`, where it would break the container.
 
-Keep `CAMOUFOX_COOLDOWN_HOURS` and `CAMOUFOX_PAGE_TIMEOUT_SECONDS` equal on both sides (`worker.env` and the app's); the
+Keep `CAMOUFOX_COOLDOWN_HOURS`, `CAMOUFOX_PAGE_TIMEOUT_SECONDS` and `CAMOUFOX_MIN_SPACING_SECONDS` equal on both sides (`worker.env` and the app's); the
 smoke test flags a mismatch.
 
 ### Grid mode (optional)
@@ -999,7 +999,7 @@ verified on the worker").
 - **Caps.** Every page still counts one page against `CAMOUFOX_EXECUTION_PAGE_CAP` and `CAMOUFOX_MONTHLY_PAGE_CAP`.
   Scrolls have their own caps: `CAMOUFOX_EXECUTION_SCROLL_CAP` (default 600) and `CAMOUFOX_MONTHLY_SCROLL_CAP`
   (default 6,000), at most `CAMOUFOX_GRID_SCROLL_CAP` (default 30) a page, at least
-  `CAMOUFOX_GRID_SCROLL_SPACING_SECONDS` (default 5, never randomised) between scroll clicks. Keep the grid settings
+  `CAMOUFOX_GRID_SCROLL_SPACING_SECONDS` (default 5, 0 to 30, never randomised; 0 means no pause, scrolls go back to back) between scroll clicks. Keep the grid settings
   equal in `worker.env` and the app's settings: the worker reports its scroll cap, spacing and page timeout, and the app
   skips the provider, naming the setting, while any of them differs. A page asks for no more scrolls than the run's and the month's
   scroll caps leave; with none left it still reads its first block, and the blocks it did not reach stay for the next

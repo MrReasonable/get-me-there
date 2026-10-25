@@ -60,8 +60,9 @@ describe('worker config (brief Task 14.5; spec §12 worker side)', () => {
     ['CAMOUFOX_WORKER_PORT', '80'],
     ['CAMOUFOX_WORKER_PORT', '70000'],
     ['CAMOUFOX_WORKER_PORT', '8o90'],
-    ['CAMOUFOX_MIN_SPACING_SECONDS', '29'],
+    ['CAMOUFOX_MIN_SPACING_SECONDS', '-1'],
     ['CAMOUFOX_MIN_SPACING_SECONDS', '601'],
+    ['CAMOUFOX_MIN_SPACING_SECONDS', '  '],
     ['CAMOUFOX_COOLDOWN_HOURS', '23'],
     ['CAMOUFOX_PAGE_TIMEOUT_SECONDS', '29'],
     ['CAMOUFOX_PAGE_TIMEOUT_SECONDS', '241'],
@@ -86,7 +87,7 @@ describe('worker config (brief Task 14.5; spec §12 worker side)', () => {
     expect(loadWorkerConfig({ ...ENV, CAMOUFOX_INSTALL_DIR: '/x' }).port).toBe(8090);
   });
   // why: spec §2 rev 34: grid pages only with CAMOUFOX_MODE=grid; the scroll spacing at least 5 s, the cap at most 60
-  it('grid settings: list by default, grid when asked, spacing 5–30 and a cap of 0–60', () => {
+  it('grid settings: list by default, grid when asked, spacing 0–30 and a cap of 0–60', () => {
     expect(loadWorkerConfig(ENV)).toMatchObject({
       mode: 'list',
       gridScrollSpacingSeconds: 5,
@@ -101,7 +102,13 @@ describe('worker config (brief Task 14.5; spec §12 worker side)', () => {
       }),
     ).toMatchObject({ mode: 'grid', gridScrollSpacingSeconds: 30, gridScrollCap: 0 });
     expect(fields({ ...ENV, CAMOUFOX_MODE: 'calendar' })).toEqual(['CAMOUFOX_MODE']);
-    expect(fields({ ...ENV, CAMOUFOX_GRID_SCROLL_SPACING_SECONDS: '4' })).toEqual([
+    expect(loadWorkerConfig({ ...ENV, CAMOUFOX_GRID_SCROLL_SPACING_SECONDS: '0' })).toMatchObject({
+      gridScrollSpacingSeconds: 0,
+    });
+    expect(loadWorkerConfig({ ...ENV, CAMOUFOX_MIN_SPACING_SECONDS: '0' })).toMatchObject({
+      minSpacingSeconds: 0,
+    });
+    expect(fields({ ...ENV, CAMOUFOX_GRID_SCROLL_SPACING_SECONDS: '31' })).toEqual([
       'CAMOUFOX_GRID_SCROLL_SPACING_SECONDS',
     ]);
     expect(fields({ ...ENV, CAMOUFOX_GRID_SCROLL_CAP: '61' })).toEqual(['CAMOUFOX_GRID_SCROLL_CAP']);

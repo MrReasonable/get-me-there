@@ -224,7 +224,7 @@ describe('the grid config (spec §12 rev 34)', () => {
     });
   });
   it.each([
-    ['CAMOUFOX_GRID_SCROLL_SPACING_SECONDS', '4'],
+    ['CAMOUFOX_GRID_SCROLL_SPACING_SECONDS', '-1'],
     ['CAMOUFOX_GRID_SCROLL_SPACING_SECONDS', '31'],
     ['CAMOUFOX_GRID_SCROLL_CAP', '61'],
     ['CAMOUFOX_EXECUTION_SCROLL_CAP', '6001'],

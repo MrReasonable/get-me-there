@@ -529,6 +529,7 @@ describe('the install helpers’ edges', () => {
       {
         CAMOUFOX_COOLDOWN_HOURS: '48',
         CAMOUFOX_PAGE_TIMEOUT_SECONDS: '90',
+        CAMOUFOX_MIN_SPACING_SECONDS: '30',
         CAMOUFOX_MODE: 'list',
         CAMOUFOX_GRID_SCROLL_CAP: '30',
         CAMOUFOX_GRID_SCROLL_SPACING_SECONDS: '5',

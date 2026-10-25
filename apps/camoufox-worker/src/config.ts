@@ -64,12 +64,12 @@ export function loadWorkerConfig(env: Env): WorkerConfig {
   const key = env.CAMOUFOX_WORKER_KEY ?? '';
   if (key.length < 32) bad.push('CAMOUFOX_WORKER_KEY');
   const port = intIn(env, 'CAMOUFOX_WORKER_PORT', 1024, 65535, 8090, bad);
-  const minSpacingSeconds = intIn(env, 'CAMOUFOX_MIN_SPACING_SECONDS', 30, 600, 30, bad);
-  // why: spec §12, review R27 — the nine shared settings through core's one rule set, with its bounds and defaults; every
+  // why: spec §12, review R27 — the ten shared settings through core's one rule set, with its bounds and defaults; every
   // typed field below comes from that one effective record
   const shared = readSharedSettings(env);
   bad.push(...shared.invalid);
   const s = shared.settings;
+  const minSpacingSeconds = sharedInt(s, 'CAMOUFOX_MIN_SPACING_SECONDS');
   const cooldownHours = sharedInt(s, 'CAMOUFOX_COOLDOWN_HOURS');
   const pageTimeoutSeconds = sharedInt(s, 'CAMOUFOX_PAGE_TIMEOUT_SECONDS');
   // why: decision 73: the pin is CAMOUFOX_BUILDS[osArch].build; there is no separate build setting any more

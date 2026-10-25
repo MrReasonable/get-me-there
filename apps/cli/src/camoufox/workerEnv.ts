@@ -44,8 +44,8 @@ const HEADER = [
 ];
 
 /**
- * worker.env's text: the key, then the nine shared settings with the app's effective values; any other line already
- * there (the operator's own, CAMOUFOX_WORKER_PORT or the spacing) is kept as it was.
+ * worker.env's text: the key, then the shared settings with the app's effective values; any other line already there
+ * (the operator's own, CAMOUFOX_WORKER_PORT) is kept as it was.
  */
 export function renderWorkerEnv(key: string, shared: SharedSettings, existingText: string | null): string {
   const owned = new Set<string>(['CAMOUFOX_WORKER_KEY', ...SHARED_WORKER_SETTINGS]);

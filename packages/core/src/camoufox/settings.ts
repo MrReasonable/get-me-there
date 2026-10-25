@@ -12,6 +12,7 @@ import { z } from 'zod';
 export const SHARED_WORKER_SETTINGS = [
   'CAMOUFOX_COOLDOWN_HOURS',
   'CAMOUFOX_PAGE_TIMEOUT_SECONDS',
+  'CAMOUFOX_MIN_SPACING_SECONDS',
   'CAMOUFOX_MODE',
   'CAMOUFOX_GRID_SCROLL_CAP',
   'CAMOUFOX_GRID_SCROLL_SPACING_SECONDS',
@@ -35,6 +36,7 @@ export const sharedSettingsSchema = z.record(z.enum(SHARED_WORKER_SETTINGS), z.s
 export const SHARED_WORKER_DEFAULTS: SharedSettings = {
   CAMOUFOX_COOLDOWN_HOURS: '48',
   CAMOUFOX_PAGE_TIMEOUT_SECONDS: '90',
+  CAMOUFOX_MIN_SPACING_SECONDS: '30',
   CAMOUFOX_MODE: 'list',
   CAMOUFOX_GRID_SCROLL_CAP: '30',
   CAMOUFOX_GRID_SCROLL_SPACING_SECONDS: '5',
@@ -53,9 +55,11 @@ type Rule = { min: number; max: number } | { pattern: RegExp; message: string };
 const SHARED_RULES: Readonly<Record<SharedWorkerSetting, Rule>> = {
   CAMOUFOX_COOLDOWN_HOURS: { min: 24, max: 100_000 },
   CAMOUFOX_PAGE_TIMEOUT_SECONDS: { min: 30, max: 240 },
+  // why: operator ruling 2026-10-25: 0 is no pause; both sides must hold the same value or the worker's pacer refuses
+  CAMOUFOX_MIN_SPACING_SECONDS: { min: 0, max: 600 },
   CAMOUFOX_MODE: { pattern: /^(list|grid)$/, message: 'must be list or grid' },
   CAMOUFOX_GRID_SCROLL_CAP: { min: 0, max: 60 },
-  CAMOUFOX_GRID_SCROLL_SPACING_SECONDS: { min: 5, max: 30 },
+  CAMOUFOX_GRID_SCROLL_SPACING_SECONDS: { min: 0, max: 30 },
   CAMOUFOX_MONTHLY_PAGE_CAP: { min: 0, max: Number.MAX_SAFE_INTEGER },
   CAMOUFOX_MONTHLY_SCROLL_CAP: { min: 0, max: Number.MAX_SAFE_INTEGER },
   CAMOUFOX_BILLING_DAY: { min: 1, max: 28 },
