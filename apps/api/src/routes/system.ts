@@ -21,7 +21,7 @@ type HealthDetail = z.infer<typeof apiContract.healthDetailSchema>;
 type ProvidersResponse = z.infer<typeof apiContract.providersResponseSchema>;
 type BudgetResponse = z.infer<typeof apiContract.budgetResponseSchema>;
 
-function dbOk(ports: Ports): boolean {
+export function dbOk(ports: Pick<Ports, 'db'>): boolean {
   try {
     ports.db.raw.prepare('select 1 as one').get();
     return true;
@@ -36,7 +36,7 @@ export function healthPublic(ctx: RouteContext): { ok: boolean; degraded: boolea
 }
 
 /** The file's size; 0 for an in-memory database (the contract has no "unknown"). */
-function dbSizeBytes(path: string): number {
+export function dbSizeBytes(path: string): number {
   if (path === ':memory:') return 0;
   try {
     return statSync(path).size;

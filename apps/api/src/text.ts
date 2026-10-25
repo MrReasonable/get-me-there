@@ -40,6 +40,9 @@ export const API_TEXT = {
     `schedule rejected: the monthly load of every enabled schedule would exceed ${scopes.join(', ')}`,
   coverageCheckUnavailable:
     'the coverage check reads the free Travelpayouts cache; set TRAVELPAYOUTS_TOKEN to enable it',
+  // why: spec §10 /alerts/test-email: the refusals say what to do, never the SMTP server's words
+  emailNotConfigured: 'email is not set up',
+  emailLimit: (max: number) => `the hourly email limit (${max}) is reached; try again later`,
   zeroCapVerification: 'verification will not run: spend cap is 0',
   zeroCapBootWarning: 'billed provider enabled under a zero spend cap: verification will not run',
   // why: cost-006: on a subscription calls cost £0 at the margin, so a cap below the fees stops nothing; say so at boot.

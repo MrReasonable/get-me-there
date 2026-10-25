@@ -18,7 +18,7 @@ import {
   systemClock,
 } from '@gmt/core';
 import { AppLock, HEARTBEAT_INTERVAL_MS, sanityCheckAirports, WalUnavailableError } from '@gmt/db';
-import type { Engine } from '@gmt/engine';
+import { buildNotifiers, EmailNotifier, type Engine } from '@gmt/engine';
 import { type ServerType, serve } from '@hono/node-server';
 import type { Hono } from 'hono';
 import { createApp } from '../app.js';
@@ -36,6 +36,7 @@ import { waitForLockFree } from './lock.js';
 import { type AssetPaths, assetPaths } from './paths.js';
 import { backupBeforeMigrations, dataDirRefusal, movedDatabaseRefusal } from './preflight.js';
 import { seedIfNeeded } from './seed.js';
+import { readVersion } from './version.js';
 
 /**
  * In-process shutdown deadline. why: it sits below compose's 30 s `stop_grace_period`, so a hung shutdown ends here
@@ -61,6 +62,10 @@ export interface BootDeps {
   assets: AssetPaths;
   /** Builds the in-process tool runners once ports exist (`main` passes `inProcessTools`). */
   tools?: (ports: Ports) => HttpToolRunners;
+  /** `HOME`, the one place the environment is read for it: the Status report finds the worker's refusal file under it. */
+  home?: string | null;
+  /** The build's short SHA (`dist/version.json`), shown by the Status report; "unknown" when absent. */
+  version?: string;
   /** Injected by tests to advance a fixed clock instead of waiting for app_lock. */
   sleep?: (ms: number) => Promise<void>;
 }
@@ -213,10 +218,24 @@ export async function bootApp(deps: BootDeps): Promise<RunningApp> {
     const sanity = sanityCheckAirports(ports.db, referenced);
     if (!sanity.ok) throw new BootError(`airport sanity check failed: ${sanity.reason}`, EXIT.failed);
     // why: spec §8.1, §8.3 — WP11's alert runner as the alerts step, the notifiers config asks for (engine.ts).
-    const engine = engineFor(ports, log);
+    const home = deps.home ?? null;
+    const notifiers = buildNotifiers(ports.config, log, ports.clock);
+    const engine = engineFor(ports, log, { notifiers, home });
     await engine.boot();
     logProvidersConfigured(ports, log);
-    const app = createApp(ports, engine, { webRoot: deps.assets.webRoot, tools: deps.tools?.(ports) ?? {} });
+    // why: spec §10 /alerts/test-email goes through the same email notifier (and its hourly ceiling) as every alert
+    const email = notifiers.find((n) => n instanceof EmailNotifier);
+    const app = createApp(ports, engine, {
+      webRoot: deps.assets.webRoot,
+      tools: deps.tools?.(ports) ?? {},
+      status: {
+        home,
+        version: deps.version ?? 'unknown',
+        startedAt: clock.now(),
+        migrationsDir: deps.assets.migrationsDir,
+      },
+      ...(email === undefined ? {} : { sendTestEmail: () => email.sendTest() }),
+    });
     const bound = deps.listen ? await listen(app, config) : null;
     const beat = heartbeat;
     let closed = false;
@@ -319,6 +338,8 @@ export async function main(env: NodeJS.ProcessEnv): Promise<void> {
       log,
       listen: true,
       assets: assetPaths(),
+      home: env.HOME ?? null,
+      version: readVersion(),
       tools: (p) => inProcessTools(p),
     });
   } catch (err) {

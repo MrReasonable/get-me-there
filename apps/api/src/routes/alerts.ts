@@ -24,6 +24,22 @@ function getRule(ctx: RouteContext, id: string): AlertRule {
 }
 
 export const alertHandlers: HandlerTable = {
+  /**
+   * Spec §10: one fixed test message through the configured email notifier, inside ALERT_EMAIL_MAX_PER_HOUR (429 past
+   * it); 409 when email is not configured. The class and time are kept in the process ("since the app started"); the
+   * server's own text is never returned or kept.
+   */
+  'POST /api/alerts/test-email': plain(async (c, _input, ctx) => {
+    if (ctx.ports.config.smtp === null || ctx.sendTestEmail === null)
+      throw new ApiError(409, 'email_not_configured', API_TEXT.emailNotConfigured);
+    const result = await ctx.sendTestEmail();
+    const at = ctx.ports.clock.now();
+    ctx.status.testEmail.last = { at, result };
+    if (result === 'refused')
+      throw new ApiError(429, 'email_limit', API_TEXT.emailLimit(ctx.ports.config.alertEmailMaxPerHour));
+    return c.json({ result, at });
+  }),
+
   'GET /api/alerts': route(
     { request: NO_INPUT, query: apiContract.alertRulesQuerySchema },
     (c, { query }, ctx) => c.json(ctx.ports.repos.alerts.rules(query.definitionId)),
