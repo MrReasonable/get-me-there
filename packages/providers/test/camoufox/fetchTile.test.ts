@@ -53,7 +53,7 @@ const price = (
 });
 // The spec §2 provenance note, copied here so a change to either is a visible diff.
 const SPEC_PROVENANCE_NOTE =
-  "Google Flights prices via Camoufox: the cheapest round-trip price Google Flights listed for this day pair when this app's own Camoufox browser read the page on the operator's machine, from the operator's IP address, in the currency the page states. Return date: the date asked for, which the page's search form showed; the listed options state only the departure. The operator turned this provider on. Constraints are not checked; no return leg, seller or baggage is read.";
+  "Google Flights prices via Camoufox: the cheapest round-trip price Google Flights listed for this day pair when this app's own Camoufox browser read the page on the machine running this app's browser worker, from that machine's address, in the currency the page states. Return date: the date asked for, which the page's search form showed; the listed options state only the departure. The operator turned this provider on. Constraints are not checked; no return leg, seller or baggage is read.";
 
 function setup(port = 8090) {
   const { kit, budget, log, clock, events } = makeKit({

@@ -632,9 +632,9 @@ day pair when this app's own Camoufox browser read the page on the
 machine running this app's browser worker, from that machine's address. The grid shows whole
 pounds; the exact fare may differ by under £1. Google's date grid; age not
 stated (assumed ≤24h). Return date: read from the grid cell, checked against
-the grid's return row. A "cheapest" mark means Google's date grid marked
-this the cheapest of the prices shown in that view; it is Google's, not this
-app's. The operator turned this provider on. Constraints are not checked; no
+the grid's return row. A "cheapest" or "low" mark means Google's date grid
+marked this price so among the prices shown in that view; it is Google's, not
+this app's. The operator turned this provider on. Constraints are not checked; no
 return leg, seller or baggage is read." Vendor links: `google.com` only.
 `pointOfSale` is the ISO country of the page's stated location, through a
 dated table, or `'unknown'` when the page states none; it is stored as

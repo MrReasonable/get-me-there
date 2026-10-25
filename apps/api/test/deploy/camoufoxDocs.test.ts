@@ -2,7 +2,7 @@
 // keeps the worker key off every command line, says nothing about Linux, and carries the costs and the provenance note
 // exactly as the app states them.
 import { GRID_SOURCE_LABEL } from '@gmt/core';
-import { CAMOUFOX_DISCOVERY_INFO } from '@gmt/providers';
+import { CAMOUFOX_DISCOVERY_INFO, CAMOUFOX_GRID_INFO } from '@gmt/providers';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { read } from './files.js';
 
@@ -83,6 +83,17 @@ describe('docs/providers.md and docs/api-limits.md', () => {
       );
     expect(flat(section)).toContain('whenever a page is not a recognised results page');
     expect(flat(section)).toContain('Your saved cookie choice (Reject all) is applied before every page');
+  });
+  // why: WP17 Task 17.7 (decision 75): the worker may run on any machine of the operator's, so the notes name that
+  // machine and its address, never "the operator's IP"; both notes equal spec §2 Labels, word for word
+  it('both camoufox notes name the worker’s machine and its address, and equal spec §2 Labels', () => {
+    const spec = flat(read('docs/superpowers/specs/2026-10-14-flight-price-optimiser-design.md'));
+    for (const note of [CAMOUFOX_DISCOVERY_INFO.provenanceNote, CAMOUFOX_GRID_INFO.provenanceNote]) {
+      expect(note).toContain("on the machine running this app's browser worker, from that machine's address");
+      expect(note).not.toMatch(/operator's IP|operator’s IP|operator's machine/);
+      expect(spec).toContain(flat(note));
+    }
+    expect(flat(providers)).toContain(flat(CAMOUFOX_GRID_INFO.provenanceNote));
   });
   it('providers.md quotes the provenance note exactly and no longer calls the provider unbuilt', () => {
     expect(providers).toContain(`"${CAMOUFOX_DISCOVERY_INFO.provenanceNote}"`);
