@@ -121,12 +121,8 @@ export async function watchConsentWindow(
       if (refused !== null) return { ...w, ended: 'blocked', blocked: refused };
       w.hosts = [...d.mainFrameHosts()];
       w.saves = d.consentSaves();
-      if (w.saves > 0 && w.afterFacts === null && w.hosts.at(-1) === S.hosts.results) {
-        const after = await settled(true);
-        w.afterFacts = after.facts;
-        if (after.decided.kind === 'blocked') return { ...w, ended: 'blocked', blocked: after.decided.page };
-        w.afterView = after.decided.kind === 'landing' ? 'landing' : 'other';
-      }
+      // why: the cookies are read before the view after the choice settles, which can take the whole settle bound while
+      // the landing view is unverified, so a window closed during that settle still keeps the choice's SOCS (2026-10-25)
       if (await d.accountCookieSeen()) return { ...w, ended: 'account-cookie' };
       const socs = await d.socsCookie();
       // why: W8 (pa-b1-005): only a SOCS set or changed after the choice was submitted is the choice's
@@ -136,6 +132,12 @@ export async function watchConsentWindow(
           socsBefore = socs.value;
         }
       } else if (socs !== null && socs.value !== socsBefore) w.socs = socs;
+      if (w.saves > 0 && w.afterFacts === null && w.hosts.at(-1) === S.hosts.results) {
+        const after = await settled(true);
+        w.afterFacts = after.facts;
+        if (after.decided.kind === 'blocked') return { ...w, ended: 'blocked', blocked: after.decided.page };
+        w.afterView = after.decided.kind === 'landing' ? 'landing' : 'other';
+      }
     } catch (e) {
       // why: a window the person closed between ticks reads as closed, whatever the read was doing then; the read can
       // fail on the closed page before the close event arrives (2026-10-25)

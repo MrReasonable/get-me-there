@@ -17,6 +17,7 @@ import {
   LANDING_URL,
   request,
   SOCS,
+  targetClosed,
   view,
 } from './support/fakeConsent.js';
 import { FakeContext } from './support/fakeContext.js';
@@ -333,6 +334,30 @@ describe('watching the window (the tool only observes)', () => {
     expect([w.ended, w.saves, w.socs?.value]).toEqual(['closed', 1, SOCS.value]);
     const first = await watchConsentWindow(fakeConsentDriver({ goneAt: -1 }), { timers: fakeTimers() });
     expect([first.ended, first.saves]).toEqual(['closed', 0]);
+  });
+  // why: with LANDING_VERIFIED false the view after the choice settles for up to 30 s; the SOCS is read before that
+  it('the SOCS set by the choice is read before the view after it settles, so closing the window during the settle keeps it', async () => {
+    // why: the choice, its SOCS and the return to the results host all first show on the same tick
+    const d = fakeConsentDriver({ saveAt: 0, socsAt: 0, hosts: [['consent.google.com', 'www.google.com']] });
+    let snapshots = 0;
+    let gone = false;
+    const closing = {
+      ...d,
+      snapshotView: async () => {
+        snapshots++;
+        if (snapshots >= 3) {
+          gone = true;
+          throw targetClosed();
+        }
+        return d.snapshotView();
+      },
+      socsCookie: async () => {
+        if (gone) throw targetClosed();
+        return d.socsCookie();
+      },
+    };
+    const w = await watchConsentWindow(closing, { timers: fakeTimers() });
+    expect([w.ended, w.saves, w.socs?.value]).toEqual(['closed', 1, SOCS.value]);
   });
   it('any other read failure still throws', async () => {
     const d = fakeConsentDriver({});
