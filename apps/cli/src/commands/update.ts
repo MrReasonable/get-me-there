@@ -2,6 +2,7 @@ import { join } from 'node:path/posix';
 import { z } from 'zod';
 import { appUrl } from '../appClient.js';
 import type { Flags } from '../args.js';
+import { refusalWords, workerCheck } from '../camoufox/browserSetup.js';
 import { camoufoxUpdateStep } from '../camoufox/updateStep.js';
 import { type Deps, EXIT } from '../deps.js';
 import { type Action, commandLine, type Plan, runAction } from '../plan/action.js';
@@ -146,7 +147,12 @@ export async function updateCommand(flags: Flags, _p: string | null, deps: Deps)
   const dir = join(deps.platform.paths.data, 'backups', 'update');
   const from = resuming ? state.from : commit;
   const begin: UpdateState = { from, to: target, backup: null, step: 'stopped' };
-  const stop: Action[] = app === undefined ? [] : sm.stop(app.unit, appFacts);
+  // why: spec §13: the plan stops the app and the browser worker (a refused agent is booted out the same way)
+  const worker = entries.find((e) => e.name === 'camoufox-worker');
+  const stop: Action[] = [
+    ...(app === undefined ? [] : sm.stop(app.unit, appFacts)),
+    ...(worker === undefined ? [] : sm.stop(worker.unit, factOf(facts, worker.unit))),
+  ];
   const changeCode = !resuming && commit !== target;
   // why: decision 80: nothing is backed up before the app has stopped, and nothing changes the code before the backup
   const stopPlan: Plan = {
@@ -183,11 +189,23 @@ export async function updateCommand(flags: Flags, _p: string | null, deps: Deps)
       ],
     ];
   };
-  const startPlan = async (): Promise<Action[]> => {
+  const startPlan = async (checkWorker = true): Promise<Action[]> => {
     const now = await factsOf(deps, entries);
+    // why: decision 75: the worker is re-rendered and started only while its own start check passes
+    let workerStarts = true;
+    if (worker !== undefined && checkWorker) {
+      const check = await workerCheck(deps);
+      if (check.kind !== 'ok') {
+        workerStarts = false;
+        deps.io.out(
+          `worker: not started: ${check.kind === 'refused' ? refusalWords(check.refusal) : check.error}\n`,
+        );
+      }
+    }
     return entries.flatMap((e) => {
+      if (e.name === 'camoufox-worker' && !workerStarts) return [];
       const install = sm.install(e.rendered, now);
-      return e.name === 'app' && install.length === 0 ? sm.start(e.unit, factOf(now, e.unit)) : install;
+      return e.name !== 'backup' && install.length === 0 ? sm.start(e.unit, factOf(now, e.unit)) : install;
     });
   };
   const healthPlan: Action[] = [
@@ -209,7 +227,7 @@ export async function updateCommand(flags: Flags, _p: string | null, deps: Deps)
     deps.io.out(
       describePlan({
         command: 'update: start and wait',
-        actions: [...(await startPlan()), ...healthPlan],
+        actions: [...(await startPlan(false)), ...healthPlan],
         notes: [],
       }),
     );

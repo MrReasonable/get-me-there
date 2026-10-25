@@ -1,6 +1,7 @@
 import type { Deps } from '../deps.js';
 import type { RenderedService, ServiceFacts, ServiceSpec } from '../platform/types.js';
-import { appServiceSpec, backupServiceSpec } from './specs.js';
+import { readEnvText } from '../setup/appEnv.js';
+import { appEnvPath, appServiceSpec, backupServiceSpec, workerServiceSpec } from './specs.js';
 
 /** One installed service: its spec, its rendered files, and the unit `start`/`stop` act on (the job's service for a job). */
 export interface ServiceEntry {
@@ -10,7 +11,38 @@ export interface ServiceEntry {
   unit: string;
 }
 
-/** The services this package installs, in install order: the app, then the daily backup job (WP17 adds the worker). */
+const entryOf = (deps: Deps, spec: ServiceSpec): ServiceEntry => {
+  const rendered = deps.platform.serviceManager.render(spec, deps.platform.paths);
+  return { name: spec.name, spec, rendered, unit: rendered[0]?.unitName ?? spec.name };
+};
+
+/** The browser worker's entry, whether or not it is installed (setup installs it once consent is in place). */
+export function workerEntry(deps: Deps): ServiceEntry {
+  return entryOf(
+    deps,
+    workerServiceSpec({
+      execPath: deps.execPath,
+      checkout: deps.checkout,
+      home: deps.home,
+      paths: deps.platform.paths,
+    }),
+  );
+}
+
+/** Whether app.env turns the browser provider on (an unreadable file reads as off; the settings checks report it). */
+function browserOn(deps: Deps): boolean {
+  try {
+    const text = deps.files.read(appEnvPath(deps.platform.paths));
+    return text !== null && readEnvText(text).CAMOUFOX_ENABLED === 'true';
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The services this package installs, in install order: the app, the daily backup job, and the browser worker when
+ * the provider is on in app.env or its unit is on disk (so stop, status and uninstall see it), never otherwise.
+ */
 export function serviceSet(deps: Deps): ServiceEntry[] {
   const input = {
     execPath: deps.execPath,
@@ -18,10 +50,16 @@ export function serviceSet(deps: Deps): ServiceEntry[] {
     home: deps.home,
     paths: deps.platform.paths,
   };
-  return [appServiceSpec(input), backupServiceSpec(input)].map((spec) => {
-    const rendered = deps.platform.serviceManager.render(spec, deps.platform.paths);
-    return { name: spec.name, spec, rendered, unit: rendered[0]?.unitName ?? spec.name };
+  const base = [appServiceSpec(input), backupServiceSpec(input)].map((spec) => entryOf(deps, spec));
+  const worker = workerEntry(deps);
+  const onDisk = worker.rendered.some((r) => {
+    try {
+      return deps.files.read(r.path) !== null;
+    } catch {
+      return true;
+    }
   });
+  return onDisk || browserOn(deps) ? [...base, worker] : base;
 }
 
 /** Every entry's facts, read once through the runner. */

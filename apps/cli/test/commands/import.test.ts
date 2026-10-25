@@ -183,7 +183,8 @@ describe('--import-docker (spec §13 "One app per ledger"; brief Task 16b.7)', (
   });
 
   it('interactive: each .env group is confirmed; ALLOWED_HOSTS is shown, not copied; values never printed', async () => {
-    const ask = scriptedAsk([true, false, '', '', '', '', false, true, false]);
+    // why: WP17 Task 17.6: the browser provider's question (false) before the offer to open the app
+    const ask = scriptedAsk([true, false, '', '', '', '', false, true, false, false]);
     const m = dockerMachine({ ask });
     const io = testIo({ tty: true });
     m.deps.io = io;

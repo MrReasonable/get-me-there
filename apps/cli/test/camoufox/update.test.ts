@@ -147,11 +147,18 @@ describe('update’s Camoufox step (Task 17.1)', () => {
     expect(m.fs.realpath(`${ROOT}/Camoufox.app`)).toBe(`${OLD}/Camoufox.app`);
   });
 
-  it('with no Camoufox installed, update reads no pin and installs nothing', async () => {
-    const m = await world({ manifest: { entry: NEW, flags: flagsOn }, camoufox: false });
-    expect(await runCli(['update'], m.deps)).toBe(0);
-    expect(m.runner.calls.some((c) => c.argv.some((a) => a.endsWith('printManifest.ts')))).toBe(false);
-    expect(kinds(m.executor.log)).not.toContain('download');
+  it('with no Camoufox installed, update installs nothing, and says when the new code offers the provider here', async () => {
+    const on = await world({ manifest: { entry: NEW, flags: flagsOn }, camoufox: false });
+    expect(await runCli(['update'], on.deps)).toBe(0);
+    expect(kinds(on.executor.log)).not.toContain('download');
+    expect(on.io.stdout).toContain(
+      'The browser provider is now available on darwin-arm64: turn it on with pnpm gmt setup --reconfigure browser\n',
+    );
+    const off = await world({ manifest: { entry: NEW, flags: flagsOff }, camoufox: false });
+    expect(await runCli(['update'], off.deps)).toBe(0);
+    expect(off.io.stdout).not.toContain('now available');
+    const unreadable = await world({ manifest: 'garbled', camoufox: false });
+    expect(await runCli(['update'], unreadable.deps)).toBe(0);
   });
 
   it('a pin the new code cannot print stops the update with the recovery report', async () => {

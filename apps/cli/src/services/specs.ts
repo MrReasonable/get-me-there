@@ -68,6 +68,26 @@ export function backupServiceSpec(i: SpecInput): ServiceSpec {
 }
 
 /**
+ * The browser worker (spec §13; brief WP17 Task 17.6): `<node> --conditions=@gmt/source --import tsx
+ * <checkout>/apps/camoufox-worker/src/run.ts main` from that package's directory, with `PATH` and `HOME` only. A refused
+ * start (exit 78) is never retried every minute: systemd's RestartPreventExitStatus=78, and on macOS, where launchd's
+ * KeepAlive cannot exclude one code, a 600 s ThrottleInterval while start, status and update boot a refused agent out.
+ */
+export function workerServiceSpec(i: SpecInput): ServiceSpec {
+  const pkg = join(i.checkout, 'apps', 'camoufox-worker');
+  return {
+    name: 'camoufox-worker',
+    argv: [i.execPath, '--conditions=@gmt/source', '--import', 'tsx', join(pkg, 'src', 'run.ts'), 'main'],
+    workingDirectory: pkg,
+    environment: serviceEnvironment(i.execPath, i.home),
+    restart: 'on-failure',
+    preventRestartExitStatus: 78,
+    throttleSeconds: 600,
+    calendar: null,
+  };
+}
+
+/**
  * The Node path to record in the services (U5, dev-b1-002, po-b1-004): `process.execPath` is resolved through every
  * symlink, which on Homebrew is a versioned Cellar path a `brew upgrade` deletes. So the first `node` on PATH that is
  * the same binary is recorded unresolved, else Homebrew's `opt/<formula>` link for that keg, else the path itself.

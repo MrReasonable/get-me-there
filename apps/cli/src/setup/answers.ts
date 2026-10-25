@@ -25,8 +25,16 @@ export interface Answers {
     from: string;
   } | null;
   linger: 'skip' | 'enable';
-  /** Row 9 (decision 83); null until the browser provider is set up (WP17) or `--reconfigure browser` asks it. */
-  browser: { window: 'scheduled' | 'any' } | null;
+  /**
+   * Row 9 (decision 83), and the answers file's row 8 (WP17 Task 17.6): turn the browser provider on, accept a server's
+   * own address (a machine with no display), and generate a new worker key under `--reconfigure browser`.
+   */
+  browser: {
+    window: 'scheduled' | 'any';
+    enabled?: boolean;
+    acceptServerAddress?: boolean;
+    rotateKey?: boolean;
+  } | null;
 }
 
 /** Pressing Enter at every prompt: a running app with no price source, no email and no linger. */
@@ -81,7 +89,14 @@ export const answersFileSchema = z.strictObject({
     .nullable()
     .optional(),
   linger: z.enum(['skip', 'enable']).optional(),
-  browser: z.strictObject({ window: z.enum(['scheduled', 'any']) }).optional(),
+  browser: z
+    .strictObject({
+      window: z.enum(['scheduled', 'any']),
+      enabled: z.boolean().exactOptional(),
+      acceptServerAddress: z.boolean().exactOptional(),
+      rotateKey: z.boolean().exactOptional(),
+    })
+    .optional(),
 });
 type AnswersFile = z.infer<typeof answersFileSchema>;
 

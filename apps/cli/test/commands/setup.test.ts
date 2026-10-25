@@ -148,7 +148,8 @@ describe('setup on a clean machine (brief Task 16b.6)', () => {
   });
 
   it('interactive: Enter through the prompts, the paste question before any action, then the browser offer', async () => {
-    const ask = scriptedAsk(['', '', '', '', '', '', '', false]);
+    // why: WP17 Task 17.6: the browser provider's question (false) comes before the offer to open the app
+    const ask = scriptedAsk(['', '', '', '', '', '', '', false, false]);
     const m = machine({ ask, io: testIo({ tty: true }) });
     const asked: number[] = [];
     const orig = ask.secret;
@@ -163,7 +164,7 @@ describe('setup on a clean machine (brief Task 16b.6)', () => {
   });
 
   it('a pasted token is written as TRAVELPAYOUTS_TOKEN and the closing screen has a source', async () => {
-    const ask = scriptedAsk(['', '', '', '', '', '', 'tp-token-0123456789', false]);
+    const ask = scriptedAsk(['', '', '', '', '', '', 'tp-token-0123456789', false, false]);
     const m = machine({ ask, io: testIo({ tty: true }) });
     expect(await runCli(['setup'], m.deps)).toBe(0);
     expect(parseEnv(m.fs.read(ENV) ?? '').TRAVELPAYOUTS_TOKEN).toBe('tp-token-0123456789');
@@ -328,7 +329,8 @@ describe('--reconfigure <group>', () => {
     const m = await setUp();
     const http = stubHttp({ 'GET /api/executions/active': () => ({ status: 200, body: ACTIVE }) });
     m.deps.http = http;
-    m.deps.ask = scriptedAsk([true]);
+    // why: WP17 Task 17.6: row 9, then the browser provider's own question (no)
+    m.deps.ask = scriptedAsk([true, false]);
     const io = testIo({ tty: true });
     m.deps.io = io;
     const before = parseEnv(m.fs.read(ENV) ?? '');
@@ -352,7 +354,7 @@ describe('--reconfigure <group>', () => {
     m.deps.http = stubHttp({
       'GET /api/executions/active': () => ({ status: 200, body: { execution: null } }),
     });
-    m.deps.ask = scriptedAsk([false]);
+    m.deps.ask = scriptedAsk([false, false]);
     m.deps.io = testIo({ tty: true });
     expect(await runCli(['setup', '--reconfigure', 'browser'], m.deps)).toBe(0);
     expect(parseEnv(m.fs.read(ENV) ?? '').CAMOUFOX_BROWSER_WINDOW).toBe('scheduled');
