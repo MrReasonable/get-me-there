@@ -111,7 +111,8 @@ describe('worker rules: launch and dependencies', () => {
       Object.keys(o.firefox_user_prefs).length,
     ]).toEqual([false, ['UBO'], 'block', ['HOME', 'LANG', 'PATH', 'TMPDIR'], 6]);
   });
-  it('the dependencies are exactly @gmt/core, camoufox-js 0.11.5 and playwright-core 1.59.1', () => {
+  // why: WP17 Task 17.5: zod for the consent line's strict schema (consentLine.ts), at core's own version
+  it('the dependencies are exactly @gmt/core, camoufox-js 0.11.5, playwright-core 1.59.1 and zod 4.6.7', () => {
     const pkg: unknown = JSON.parse(readFileSync(PKG, 'utf8'));
     expect(
       typeof pkg === 'object' && pkg !== null && 'dependencies' in pkg ? pkg.dependencies : null,
@@ -119,6 +120,7 @@ describe('worker rules: launch and dependencies', () => {
       '@gmt/core': 'workspace:*',
       'camoufox-js': '0.11.5',
       'playwright-core': '1.59.1',
+      zod: '4.6.7',
     });
   });
 });

@@ -239,6 +239,9 @@ importers:
       playwright-core:
         specifier: 1.59.1
         version: 1.59.1
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
     devDependencies:
       '@gmt/providers':
         specifier: workspace:*
@@ -246,12 +249,12 @@ importers:
       '@stryker-mutator/core':
         specifier: 10.0.0
         version: 10.0.0(@types/node@26.6.5)
+      fast-check:
+        specifier: 4.10.2
+        version: 4.10.2
       tsx:
         specifier: 4.23.15
         version: 4.23.15
-      zod:
-        specifier: 4.6.7
-        version: 4.6.7
 
   apps/cli:
     dependencies:

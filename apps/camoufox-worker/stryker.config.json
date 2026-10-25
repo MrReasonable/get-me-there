@@ -15,7 +15,8 @@
     "src/accountCookies.ts",
     "src/gridNames.ts",
     "src/gridView.ts",
-    "src/monthly.ts"
+    "src/monthly.ts",
+    "src/consentLine.ts"
   ],
   "thresholds": {
     "high": 90,

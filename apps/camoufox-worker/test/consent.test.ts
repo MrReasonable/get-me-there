@@ -612,6 +612,7 @@ describe('the consent modules’ browser access (grep)', () => {
     expect(files.sort()).toEqual([
       'consentDriver.ts',
       'consentGuard.ts',
+      'consentLine.ts',
       'consentResearch.ts',
       'consentWatch.ts',
     ]);
