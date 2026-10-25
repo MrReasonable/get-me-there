@@ -14,8 +14,7 @@ export function sortChecks(checks: readonly StatusCheck[]): StatusCheck[] {
     (a, b) =>
       STATE_ORDER[a.state] - STATE_ORDER[b.state] ||
       AREA_ORDER.indexOf(a.area) - AREA_ORDER.indexOf(b.area) ||
-      // why: V8's sort asks only whether a comes before b, so a tie (never two equal ids in a report) keeps its order
-      (a.id < b.id ? -1 : 1),
+      a.id.localeCompare(b.id, 'en'),
   );
 }
 

@@ -2,7 +2,7 @@
 import { act, screen } from '@testing-library/react';
 import { HttpResponse, http, type JsonBodyType } from 'msw';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { STATUS_KEY, STATUS_REFRESH_MS } from '../../src/api/statusQuery.js';
+import { STATUS_KEY, STATUS_REFRESH_MS, STATUS_RETRY_DELAY_MS } from '../../src/api/statusQuery.js';
 import { StatusBar, StatusLink } from '../../src/components/StatusBar.js';
 import { StatusView } from '../../src/views/Status.js';
 import { API, definition, statusReport } from '../fixtures.js';
@@ -111,7 +111,11 @@ describe('the status bar link (spec §11)', () => {
     expect(link.closest('section')).toHaveAccessibleName('Status report');
   });
 
-  it('fails fast: one retry at most, so a dead app shows at once', async () => {
+  it('fails fast: one retry at most, after a short delay the test steps over with fake timers', async () => {
+    vi.useFakeTimers({
+      toFake: ['setTimeout', 'setInterval', 'clearTimeout', 'clearInterval'],
+      shouldAdvanceTime: true,
+    });
     let hits = 0;
     server.use(
       http.get(`${API}/status`, () => {
@@ -120,7 +124,9 @@ describe('the status bar link (spec §11)', () => {
       }),
     );
     renderWithProviders(<StatusLink />);
-    await screen.findByRole('link', { name: 'Status: app not answering' });
+    await act(() => vi.advanceTimersByTimeAsync(STATUS_RETRY_DELAY_MS));
+    expect(await screen.findByRole('link', { name: 'Status: app not answering' })).toBeInTheDocument();
+    await act(() => vi.advanceTimersByTimeAsync(STATUS_RETRY_DELAY_MS * 10));
     expect(hits).toBe(2);
   });
 

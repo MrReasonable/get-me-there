@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
 import { readVersion } from '../../src/bootstrap/version.js';
 import { tempDir } from '../helpers/tmp.js';
 
-const SCRIPT = fileURLToPath(new URL('../../scripts/write-version.mjs', import.meta.url));
+const SCRIPT = fileURLToPath(new URL('../../../../scripts/write-api-version.mjs', import.meta.url));
 
 describe('readVersion', () => {
   const file = (text: string) => {
@@ -32,7 +32,7 @@ describe('readVersion', () => {
 });
 
 // why: each case starts a Node process, and one a git process; a spawn is bounded at 30 s, so the case is given 60 s
-describe('scripts/write-version.mjs (V0, ts-b1-011)', { timeout: 60_000 }, () => {
+describe('scripts/write-api-version.mjs (V0, ts-b1-011)', { timeout: 60_000 }, () => {
   /** Runs the script in `cwd` (a directory that is not a checkout unless the test makes it one), with only `env`. */
   function run(env: Record<string, string>, cwd: string, out: string) {
     return spawnSync(process.execPath, [SCRIPT, out], { encoding: 'utf8', timeout: 30_000, cwd, env });
@@ -77,10 +77,30 @@ describe('scripts/write-version.mjs (V0, ts-b1-011)', { timeout: 60_000 }, () =>
     () => {
       const repo = tempDir('gmt-repo-');
       const git = (...args: string[]) =>
-        spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.com', ...args], {
-          cwd: repo,
-          encoding: 'utf8',
-        });
+        spawnSync(
+          'git',
+          [
+            '-c',
+            'user.name=t',
+            '-c',
+            'user.email=t@example.com',
+            '-c',
+            'commit.gpgsign=false',
+            '-c',
+            'core.hooksPath=/dev/null',
+            ...args,
+          ],
+          {
+            cwd: repo,
+            encoding: 'utf8',
+            // why: CodeRabbit — the developer's global and system git configuration (signing, hooks) must not reach it
+            env: {
+              PATH: process.env.PATH ?? '',
+              GIT_CONFIG_GLOBAL: '/dev/null',
+              GIT_CONFIG_SYSTEM: '/dev/null',
+            },
+          },
+        );
       expect(git('init', '-q').status).toBe(0);
       expect(git('commit', '--allow-empty', '-q', '-m', 'x').status).toBe(0);
       const want = git('rev-parse', '--short=7', 'HEAD').stdout.trim();

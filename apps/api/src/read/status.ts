@@ -535,8 +535,9 @@ export function consentOutcome(f: Frame, w: WorkerFacts): { check: StatusCheck; 
       }),
       'voided',
     );
-  const bound =
-    c !== null ? c.expiresAt : s.socsCapturedAt === null ? null : consentBoundOf(s.socsCapturedAt);
+  // why: a record that states no expiry still has its capture time; the capture bound stands in, said as an upper bound
+  const stated = c?.expiresAt ?? null;
+  const bound = stated ?? (s.socsCapturedAt === null ? null : consentBoundOf(s.socsCapturedAt));
   if (bound === null)
     return out(
       check({
@@ -549,7 +550,7 @@ export function consentOutcome(f: Frame, w: WorkerFacts): { check: StatusCheck; 
     );
   const state = consentWindowState(bound, f.now);
   const words =
-    c === null && s.socsCapturedAt !== null
+    stated === null && s.socsCapturedAt !== null
       ? `consent rejected, captured ${at(f, s.socsCapturedAt)}; expires by ${at(f, bound)} at the latest (this worker does not report the cookie's expiry)`
       : c?.kind === 'not-shown'
         ? `no consent screen in this region, recorded ${at(f, consentMadeAt(bound))}`

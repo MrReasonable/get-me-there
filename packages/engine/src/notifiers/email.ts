@@ -168,9 +168,10 @@ export class EmailNotifier implements Notifier {
   }
 
   /**
-   * Spec §10 `POST /alerts/test-email`: sends the one fixed test message through the same ceiling and transport as any
-   * other mail. The answer is a class only (`sent`, `refused` at the hourly ceiling, `failed`); the server's text is
-   * logged scrubbed and never returned.
+   * Spec §10 `POST /alerts/test-email`: sends the one fixed test message through the same transport as any other mail, but
+   * apart from the alert ceiling: a test has its own limit (one every TEST_EMAIL_MIN_GAP_MS) and an in-flight guard. The
+   * answer is a class only: `sent`; `refused` for a test sent too soon after the last or one already in flight (the route
+   * answers 429); `failed`. The server's text is logged scrubbed and never returned.
    */
   async sendTest(): Promise<'sent' | 'refused' | 'failed'> {
     // why: V7 (sec-b1-001): a test send has its own small limit and an in-flight guard, and never draws on the alert

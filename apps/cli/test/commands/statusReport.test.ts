@@ -399,8 +399,6 @@ describe('gmt setup offers the test email at its end (brief Task 18.3)', () => {
     );
     expect(await runCli(['setup'], full.m.deps)).toBe(0);
     expect(full.ask.asked).toContain(TEST_EMAIL_QUESTION);
-    expect(offeredFor(null)).toBe(true);
-    expect(offeredFor('email')).toBe(true);
     for (const group of ['travelpayouts', 'password', 'linger', 'port', 'timezone'] as const) {
       const other = await withEmail(
         () => ({ status: 200, body: {} }),
@@ -410,6 +408,23 @@ describe('gmt setup offers the test email at its end (brief Task 18.3)', () => {
       await runCli(['setup', '--reconfigure', group], other.m.deps);
       expect(other.ask.asked, group).not.toContain(TEST_EMAIL_QUESTION);
     }
+  });
+
+  it('--reconfigure email offers it too, whether or not the answers changed anything (CodeRabbit)', async () => {
+    const changed = await withEmail(
+      () => ({ status: 200, body: { result: 'sent', at: '2026-10-24T09:30:00.000Z' } }),
+      [true, '', '', '', '', 'another-smtp-pass-0123456789', '', '', true],
+    );
+    expect(await runCli(['setup', '--reconfigure', 'email'], changed.m.deps)).toBe(0);
+    expect(changed.ask.asked.at(-1)).toBe(TEST_EMAIL_QUESTION);
+    expect(changed.io.stdout).toContain(TEST_EMAIL_WORDS.sent);
+    const same = await withEmail(
+      () => ({ status: 200, body: { result: 'sent', at: '2026-10-24T09:30:00.000Z' } }),
+      [true, '', '', '', '', 'smtp-pass-0123456789', '', '', false],
+    );
+    expect(await runCli(['setup', '--reconfigure', 'email'], same.m.deps)).toBe(0);
+    expect(same.io.stdout).toContain('no change');
+    expect(same.ask.asked.at(-1)).toBe(TEST_EMAIL_QUESTION);
   });
 
   it('is never offered without email, without a terminal, or with --non-interactive', async () => {

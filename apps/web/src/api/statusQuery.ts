@@ -6,6 +6,8 @@ import { api } from './endpoints.js';
 export const STATUS_KEY = ['status'] as const;
 /** The report refreshes every 60 s and on focus (spec §11 Status). */
 export const STATUS_REFRESH_MS = 60_000;
+/** The one retry waits this long, so a dead app shows at once. */
+export const STATUS_RETRY_DELAY_MS = 500;
 
 /** How a failed status read is worded: no answer at all, a refused sign-in, or an answer that was an error (V11). */
 export type StatusFailure = 'not-answering' | 'sign-in-refused' | 'report-failed';
@@ -24,7 +26,7 @@ export function useStatus() {
     staleTime: 10_000,
     // why: V11 (ui-b1-003): the 60 s refetch is the retry; one more try at most, so a dead app shows at once
     retry: 1,
-    retryDelay: 500,
+    retryDelay: STATUS_RETRY_DELAY_MS,
   });
 }
 

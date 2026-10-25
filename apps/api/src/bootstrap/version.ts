@@ -1,5 +1,5 @@
 /**
- * The build's version for the Status report: the git short SHA `scripts/write-version.mjs` writes to
+ * The build's version for the Status report: the git short SHA `scripts/write-api-version.mjs` writes to
  * `dist/version.json` at build time. Missing, unreadable or malformed gives "unknown" (a source run, or an image built
  * without git); the file's text is never shown except as a short SHA.
  */

@@ -1,12 +1,15 @@
-// Writes dist/version.json ({ "version": "<git short SHA>" }) after the TypeScript build, for the Status report. An
+// Writes apps/api/dist/version.json ({ "version": "<git short SHA>" }) after the TypeScript build, for the Status report. An
 // image or checkout without git leaves "unknown" (no file), which the app reads as such.
-// Usage: node scripts/write-version.mjs [output file, default dist/version.json]
+// Usage: node scripts/write-api-version.mjs [output file, default apps/api/dist/version.json]. A root script, because it
+// is an entry point that reads the environment (APP_VERSION), which only scripts/*.mjs may.
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const out = process.argv[2] ?? join(dirname(fileURLToPath(import.meta.url)), '..', 'dist', 'version.json');
+const out =
+  process.argv[2] ??
+  join(dirname(fileURLToPath(import.meta.url)), '..', 'apps', 'api', 'dist', 'version.json');
 let sha = null;
 // why: WP18 (V0): an image build has no git; compose passes the checkout's short SHA as APP_VERSION
 const given = process.env.APP_VERSION ?? '';

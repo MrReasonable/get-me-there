@@ -165,6 +165,23 @@ describe('a worker older than WP17 reports no consent record (pa-b1-010, ca-b1-0
     expect(c.check.summary).toContain('expires by Sun, 28 Feb 2027, 10:00 (Europe/London) at the latest');
     expect(c.check.state).toBe('ok');
   });
+  it('a record that states no expiry uses the capture bound, in the same upper-bound words (CodeRabbit)', () => {
+    const c = consentOutcome(
+      { now: NOW, tz: 'Europe/London', mode: 'native' },
+      healthyWorker({
+        read: {
+          kind: 'ok',
+          status: okWorkerStatus({
+            consent: { kind: 'socs', expiresAt: null, boundedBy: null },
+            socsCapturedAt: asIsoDateTime('2026-10-01T10:00:00.000Z'),
+          }),
+        },
+      }),
+    );
+    expect(c.check.state).toBe('ok');
+    expect(c.check.summary).toContain('at the latest');
+    expect(c.cause).toBe('none');
+  });
   it('warns in the last 30 days of the bound, which is the clamped date', () => {
     const c = older('2026-01-31T10:00:00.000Z', asIsoDateTime('2027-02-02T00:00:00.000Z'));
     expect(c.check.state).toBe('warn');

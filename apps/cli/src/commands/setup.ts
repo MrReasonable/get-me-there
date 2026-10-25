@@ -469,10 +469,20 @@ export async function setupCommand(flags: Flags, _positional: string | null, dep
   for (const n of notes) deps.io.out(`note: ${n}\n`);
   const run = (p: Plan) => apply(p, deps.executor);
 
+  // why: WP18 owns the test-email offer (brief WP16b left it): the route exists once the app is up; the default is no.
+  // It belongs to a full setup and to `--reconfigure email`, and to no other single-group change (review V9)
+  const offerTest = () =>
+    offerTestEmail(deps, ask, {
+      interactive: interactive && offeredFor(group),
+      emailConfigured: answers.email !== null,
+      creds: credsFrom(effective),
+    });
+
   // 5. reconfigure: nothing changed, or the guard, then apply
   if (group !== null) {
     if (group !== 'linger' && envText === null) {
       deps.io.out(`${command}: no change, app.env already has these values; nothing was restarted\n`);
+      if (group === 'email') await offerTest();
       return EXIT.ok;
     }
     const r = await run({
@@ -489,6 +499,7 @@ export async function setupCommand(flags: Flags, _positional: string | null, dep
     );
     if (group === 'travelpayouts' || group === 'searchapi')
       deps.io.out(`${searchSource(answers) ? nextStep(port) : NO_SOURCE_TEXT}\n`);
+    if (group === 'email') await offerTest();
     return EXIT.ok;
   }
 
@@ -589,12 +600,7 @@ export async function setupCommand(flags: Flags, _positional: string | null, dep
   const backupOk = backup === undefined ? true : await firstBackup(deps, backup);
   await runLinger(answers.linger, deps);
   deps.io.out(closingScreen({ port, answers, appEnv: envPath, backupOk, os }));
-  // why: WP18 owns this offer (brief WP16b left it): the route exists once the app is up; the default is no
-  await offerTestEmail(deps, ask, {
-    interactive: interactive && offeredFor(group),
-    emailConfigured: answers.email !== null,
-    creds: credsFrom(effective),
-  });
+  await offerTest();
   if (interactive && (await ask.confirm('Open the app in your browser now?', false))) {
     const opener = os === 'darwin' ? 'open' : 'xdg-open';
     await run({
