@@ -242,6 +242,45 @@ describe('WP14: the image stays browser-free and the app runs without the camouf
     expect(step).toContain('docker compose -p gmt-cfabsent down -v');
     expect(step).not.toMatch(/>>?\s*\.env/);
   });
+  // why: the project's rule (Ian, PR #11): CI waits on events, never a poll or a fixed sleep; the run's own log line
+  // ends the wait, read from an instant taken before the run starts
+  it('the docker job waits on events: the run’s "pass finished" line, never a poll or a sleep', () => {
+    const job = YAML.parse(ci).jobs.docker;
+    const runs = job.steps.map((s) => s.run ?? '').join('\n');
+    expect(runs).not.toMatch(/seq 1|sleep \d|until |while /);
+    const step = job.steps.find(
+      (s) => s.name === 'app runs with the camoufox-worker absent (WP14, devops-012)',
+    ).run;
+    const at = (x) => {
+      const i = step.indexOf(x);
+      expect(i, x).toBeGreaterThan(-1);
+      return i;
+    };
+    expect(at('since="$(date -u +%Y-%m-%dT%H:%M:%S.%NZ)"')).toBeLessThan(
+      at('"$base/definitions/$def/executions"'),
+    );
+    const wait = step.search(
+      /node scripts\/until-log-line\.mjs --msg 'execution: pass finished' --field "executionId=\$exe" -- \\\n\s+docker compose -p gmt-cfabsent logs --follow --no-log-prefix --since "\$since" app\n/,
+    );
+    expect(at('"$base/definitions/$def/executions"')).toBeLessThan(wait);
+    expect(wait).toBeLessThan(at('"$base/executions/$exe"'));
+    // every other wait in the job is compose's own, on the healthcheck
+    for (const m of runs.matchAll(/docker compose (?:-p \S+ )?up -d([^\n]*)/g))
+      expect(m[1]).toMatch(/--wait --wait-timeout \d+/);
+  });
+  it('the run logs "execution: pass finished" with its execution id, after writing its final status', () => {
+    const src = readFileSync(join(repo, 'packages/engine/src/execute.ts'), 'utf8');
+    const finish = src.slice(src.indexOf('export async function finish('));
+    expect(finish.indexOf('ctx.repos.executions.setStatus(run.executionId, status, patch)')).toBeGreaterThan(
+      0,
+    );
+    expect(finish.indexOf("'execution: pass finished'")).toBeGreaterThan(
+      finish.indexOf('ctx.repos.executions.setStatus(run.executionId, status, patch)'),
+    );
+    expect(readFileSync(join(repo, 'packages/engine/src/run.ts'), 'utf8')).toContain(
+      'log: ctx.log.child({ executionId: exec.id, definitionId: exec.definitionId })',
+    );
+  });
 });
 
 // why: WP14 fix round 1 (TS I6, TS M9): the worker's recorded suites skip visibly too, and the size limit is pinned
