@@ -271,13 +271,51 @@ describe('WP14 fix round 1: the worker recorded suites and the image size step',
 
 describe('WP16a: the mutation workflow runs every package’s Stryker gate and the glob check', () => {
   const t = () => text('mutation.yml');
-  it('runs the mutation-glob check, then pnpm mutate', () => {
-    const runs = [...t().matchAll(/^\s*- run: (.+)$/gm)].map((m) => m[1]);
-    expect(runs).toEqual([
+  it('runs the mutation-glob check, then core, engine and the worker in one job and the CLI in its own', () => {
+    const jobs = YAML.parse(t()).jobs;
+    expect(Object.keys(jobs)).toEqual(['mutate', 'mutate-cli']);
+    const runs = (j) => j.steps.map((s) => s.run).filter((r) => r !== undefined);
+    expect(runs(jobs.mutate)).toEqual([
       'pnpm install --frozen-lockfile',
       'node scripts/check-mutation-globs.mjs',
-      'pnpm mutate',
+      'pnpm --filter @gmt/core mutate && pnpm --filter @gmt/engine mutate && pnpm --filter @gmt/camoufox-worker mutate',
     ]);
+    expect(runs(jobs['mutate-cli'])).toEqual([
+      'pnpm install --frozen-lockfile',
+      'pnpm --filter @gmt/cli mutate',
+    ]);
+  });
+  // why: Ian's ruling (PR #11): GitHub stops a job at 6 hours; the CLI's run is incremental, its results cached, and
+  // its cold run must still finish well inside that
+  it('the CLI job restores and always saves its incremental file, keyed on its tests and its source, inside 5 hours', () => {
+    const job = YAML.parse(t()).jobs['mutate-cli'];
+    expect(job['timeout-minutes']).toBeLessThanOrEqual(300);
+    const restore = job.steps.find((s) => String(s.uses ?? '').startsWith('actions/cache/restore@'));
+    const save = job.steps.find((s) => String(s.uses ?? '').startsWith('actions/cache/save@'));
+    for (const c of [restore, save]) expect(c?.with?.path).toBe('apps/cli/reports/stryker-incremental.json');
+    expect(save?.if).toBe('always()');
+    expect(save?.with?.key).toBe(restore?.with?.key);
+    const key = String(restore?.with?.key);
+    expect(key).toContain("hashFiles('apps/cli/test/**'");
+    expect(key).toContain("hashFiles('apps/cli/src/**'");
+    // a restore falls back only to a run over the same tests, never across a test change
+    const prefix = String(restore?.with?.['restore-keys']).trim();
+    expect(key.startsWith(prefix)).toBe(true);
+    expect(prefix).toContain("hashFiles('apps/cli/test/**'");
+    expect(prefix).not.toContain("hashFiles('apps/cli/src/**'");
+    const cfg = JSON.parse(
+      readFileSync(join(import.meta.dirname, '..', 'apps', 'cli', 'stryker.config.json'), 'utf8'),
+    );
+    expect(cfg).toMatchObject({
+      incremental: true,
+      incrementalFile: 'reports/stryker-incremental.json',
+      concurrency: 2,
+    });
+    expect(cfg.commandRunner.command).toContain('test/commands');
+    expect(cfg.commandRunner.command).not.toContain('test/real');
+    // why: no per-mutant run starts a real child process (PR #11: orphans stuck in the kernel)
+    expect(cfg.commandRunner.command).toContain('--exclude test/exec/runner.test.ts');
+    expect(cfg.commandRunner.command).toContain('--exclude test/exec/system-children.test.ts');
   });
   it('pnpm mutate runs @gmt/engine and @gmt/cli mutate beside core and the worker (WP16b, decision 77)', () => {
     const pkg = JSON.parse(readFileSync(join(import.meta.dirname, '..', 'package.json'), 'utf8'));

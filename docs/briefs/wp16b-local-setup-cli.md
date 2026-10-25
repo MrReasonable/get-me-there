@@ -729,11 +729,21 @@ removal command), `pnpm gmt logs`, and that a plain `pnpm gmt setup` finishes. R
   --non-interactive`, assert at least three `removed:` lines, each absent, the kept list present, the app's agent or
   unit gone and port 3917 closed; echo `E2E-MODE`, and on a `lint-only` entry run only `setup --dry-run` (every later
   step is `if: env.E2E_MODE == 'real'`); upload the service logs on failure. Windows: `pnpm gmt setup --dry-run --answers <generated>` exits
-  0. `mutation.yml` and the root `mutate` script gain `@gmt/cli` with `mutation-gate.mjs`; this brief's front-matter
-  scope (`src/plan/**`, `src/services/**`, `src/exec/system.ts`, `src/setup/{appEnv,answers,secrets,importDb,
-  importDocker}.ts`, `src/commands/{update,restore,uninstall}.ts`; Stryker's command runs `test/plan`, `test/services`,
-  `test/setup`, `test/exec`, `test/commands` and `test/real`) is its `mutate` field, and WP16a's `scripts/check-mutation-globs.mjs` then checks it against
-  `apps/cli/stryker.config.json`.
+  0. The root `mutate` script gains `@gmt/cli` with `mutation-gate.mjs`, and `mutation.yml` runs it in a job of its own
+  (`mutate-cli`, 300 minutes, inside GitHub's 6-hour cap): this brief's front-matter scope (`src/plan/**`,
+  `src/services/**`, `src/exec/system.ts`, `src/setup/{appEnv,answers,secrets,importDb,importDocker}.ts`,
+  `src/commands/{update,restore,uninstall}.ts`) is its `mutate` field, and WP16a's `scripts/check-mutation-globs.mjs`
+  checks it against `apps/cli/stryker.config.json`. Stryker's per-mutant command runs `test/plan`, `test/services`,
+  `test/setup`, `test/exec` and `test/commands` with `--bail=1`, about 3 s a run, and starts no real child process;
+  left out, and run on every push in `ci.yml`, are `test/real` (its real-SQLite interruption sweep takes about 80 s a
+  run) and the two files that start children, `test/exec/runner.test.ts` (`runner.ts` is not under mutation) and
+  `test/exec/system-children.test.ts` (`system.test.ts` covers the same rules with stand-in runners), since a bailed
+  worker killed while it starts a child can leave the child stuck. Stryker runs incrementally:
+  the job restores and always saves `apps/cli/reports/stryker-incremental.json` with `actions/cache`, keyed by the tests,
+  config and lockfile, then the source, and falls back only to a run over the same tests (the command runner reports one
+  test, so it cannot tell which test killed a mutant). A cold run, after any test change, is about 2,700 mutants at two
+  at a time, about 1 s a mutant on a 10-core Mac (about 50 minutes) and an expected 2 to 3 hours on the 4-core
+  runner, inside the job's 300 minutes. Concurrency is 2.
 - [ ] **Commit `wp16b: workflow guard and CI matrix`.**
 
 ### Task 16b.12: Docs
