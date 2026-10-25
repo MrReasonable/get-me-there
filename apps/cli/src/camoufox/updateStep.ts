@@ -1,4 +1,5 @@
 import { join } from 'node:path/posix';
+import type { OsArch } from '@gmt/core';
 import type { Deps } from '../deps.js';
 import type { Action } from '../plan/action.js';
 import { apply } from '../plan/apply.js';
@@ -36,9 +37,7 @@ function browserHere(deps: Deps): boolean {
   }
 }
 
-async function readManifest(deps: Deps, osArchKey: string, pinFile?: string): Promise<Manifest | null> {
-  const osArch = osArchOf(deps.platform);
-  if (osArch === null || osArch !== osArchKey) return null;
+async function readManifest(deps: Deps, osArch: OsArch, pinFile?: string): Promise<Manifest | null> {
   const read = await deps.run(manifestArgv(deps.execPath, deps.checkout, osArch, pinFile), {
     cwd: join(deps.checkout, 'apps', 'cli'),
     timeoutMs: 120_000,
@@ -53,8 +52,9 @@ async function readManifest(deps: Deps, osArchKey: string, pinFile?: string): Pr
  * again after the build.
  */
 export async function camoufoxPrefetch(deps: Deps, pinText: string | null): Promise<void> {
+  // why: no build is pinned for Windows, so it has no <os>-<arch> and no step
   const osArch = osArchOf(deps.platform);
-  if (osArch === null || deps.platform.os === 'win32' || !browserHere(deps)) return;
+  if (osArch === null || !browserHere(deps)) return;
   const later = 'the browser install runs after the build instead';
   if (pinText === null) {
     deps.io.out(`the next commit’s Camoufox pin could not be read; ${later}\n`);
@@ -94,9 +94,8 @@ export async function camoufoxPrefetch(deps: Deps, pinText: string | null): Prom
 
 /** After the build, before the start. */
 export async function camoufoxUpdateStep(deps: Deps): Promise<BrowserStep> {
-  const os = deps.platform.os;
   const osArch = osArchOf(deps.platform);
-  if (os === 'win32' || osArch === null) return { ok: true, after: [] };
+  if (osArch === null) return { ok: true, after: [] };
   const manifest = await readManifest(deps, osArch);
   if (!browserHere(deps)) {
     // why: decision 75: once recordings set this machine's flags, update says the provider is now offered here

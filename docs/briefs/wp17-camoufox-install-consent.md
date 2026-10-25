@@ -315,9 +315,12 @@ only if 17.0c proves a mark; 17.6–17.10 follow.
 
 ### Research 17.0c: the rejection mark (after Task 17.4; Task 17.5 is not dispatched without it)
 
-- [ ] The operator runs `record --kind consent-research` twice in throwaway profiles, headed, clicking "Reject all" and
-  then "Accept all"; the files stay local and are backed up. The same sessions record the landing view, which sets
-  `LANDING_VERIFIED`.
+- [ ] The operator runs `pnpm --filter @gmt/camoufox-worker record --consent-research` once, with the worker stopped
+  (`pnpm gmt stop --only worker`) on a machine with a display: it opens two headed sessions in throwaway profiles, the
+  first asking for "Reject all", the second for "Accept all", each closed by the operator once the choice is made. A
+  session is kept only with exactly one consent submission and a SOCS set after it within 10 minutes; the one recording
+  stays local and is backed up (`recordings:backup`), and counts two pages. The same sessions record the landing view,
+  which sets `LANDING_VERIFIED`.
 - [ ] If the two `SOCS` values differ in a stable way that the value alone shows, write `rejectionMark(value)` with tests
   on both recordings, and dispatch Task 17.5. If the mark is not derivable from the value alone, the consent command is
   not built: `capture-socs` stays the capture path, the docs say so, and Task 17.5 shrinks to `import` of a

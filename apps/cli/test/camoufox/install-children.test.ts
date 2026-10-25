@@ -248,3 +248,37 @@ describe.skipIf(process.platform === 'win32')(
     });
   },
 );
+
+// why: printManifest.ts is the entry gmt update and the CI install job run; its one job past manifest.ts is loading a
+// pin.ts copy through tsx, so it runs here as a real child (its own end bounds it; nothing is downloaded)
+describe('printManifest.ts as a child', () => {
+  const entry = join(import.meta.dirname, '../../src/camoufox/printManifest.ts');
+  const node = (args: string[]) =>
+    systemRunner([process.execPath, '--conditions=@gmt/source', '--import', 'tsx', entry, ...args], {
+      cwd: join(import.meta.dirname, '../..'),
+      timeoutMs: 60_000,
+    });
+  it('prints this checkout’s manifest, and a pin.ts copy’s through tsx; a file that is not one is refused', async () => {
+    const own = await node(['darwin-arm64']);
+    expect(own.code).toBe(0);
+    expect(parseManifest(own.stdout)).toMatchObject({
+      entry: { build: CAMOUFOX_BUILDS['darwin-arm64'].build },
+    });
+    const d = tmp();
+    const copy = join(d, 'pin.ts');
+    writeFileSync(
+      copy,
+      readFileSync(
+        join(import.meta.dirname, '../../../../packages/core/src/camoufox/pin.ts'),
+        'utf8',
+      ).replaceAll(CAMOUFOX_BUILDS['darwin-arm64'].build, '153.0.1-beta.1'),
+    );
+    const next = await node(['darwin-arm64', '--pin', copy]);
+    expect(next.code, next.stderr).toBe(0);
+    expect(parseManifest(next.stdout)).toMatchObject({ entry: { build: '153.0.1-beta.1' } });
+    writeFileSync(copy, 'export const CAMOUFOX_PIN = { builds: 1 };\n');
+    const bad = await node(['darwin-arm64', '--pin', copy]);
+    expect(bad.code).toBe(78);
+    expect(bad.stderr).toBe(`${copy} is not a pin this code can read\n`);
+  }, 120_000);
+});

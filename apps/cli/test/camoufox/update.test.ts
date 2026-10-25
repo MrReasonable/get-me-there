@@ -29,6 +29,8 @@ async function world(o: {
   enabled?: boolean;
   /** Downloads fail (a network problem) while true. */
   downloadsFail?: () => boolean;
+  /** The new code's printer's exit (0 by default). */
+  printerCode?: number;
 }) {
   let started = false;
   let head = 'aaaa1111';
@@ -67,7 +69,10 @@ async function world(o: {
           stdout: `${JSON.stringify({ ok: true, file: '/Users/op/.local/share/get-me-there/backups/update/get-me-there-2026-10-24T09-30-00-000Z.db' })}\n`,
         };
       if (argv.some((a) => a.endsWith('printManifest.ts')))
-        return { code: 0, stdout: typeof o.manifest === 'string' ? o.manifest : JSON.stringify(o.manifest) };
+        return {
+          code: o.printerCode ?? 0,
+          stdout: typeof o.manifest === 'string' ? o.manifest : JSON.stringify(o.manifest),
+        };
       if (argv[0] === 'df') return { code: 0, stdout: 'h\n/dev/disk 1 1 99999999 1% /\n' };
       if (argv[0] === 'ln') {
         const link = argv[3] ?? '';
@@ -269,7 +274,82 @@ describe('update’s Camoufox step (Task 17.1; W6)', () => {
     expect(m.fs.isDir(stale)).toBe(false);
   });
 
+  // why: ts-b1-003: the next pin is read from a private file of its own, gone afterwards, by this code's printer
+  it('the next pin goes to a 0600 file under the state directory, read with --pin, then removed', async () => {
+    const m = await world({ manifest: { entry: NEW, flags: flagsOn } });
+    expect(await runCli(['update'], m.deps)).toBe(0);
+    const write = m.executor.log.find((a) => a.kind === 'writeFile' && a.path.includes('update-pin-'));
+    expect(write).toMatchObject({
+      kind: 'writeFile',
+      contents: 'export const CAMOUFOX_PIN = {};\n',
+      mode: 0o600,
+      secret: false,
+    });
+    const path = write?.kind === 'writeFile' ? write.path : '';
+    expect(path).toMatch(/^\/Users\/op\/\.local\/state\/get-me-there\/update-pin-[0-9a-f]{8}\.ts$/);
+    const read = m.runner.calls.find((c) => c.argv.includes('--pin'));
+    expect(read?.argv.slice(-3)).toEqual(['darwin-arm64', '--pin', path]);
+    expect(read?.cwd).toBe('/repo/apps/cli');
+    expect(kinds(m.executor.log)).toContain(`remove ${path}`);
+    expect(m.fs.read(path)).toBeNull();
+    expect(m.io.stdout).not.toContain('instead');
+  });
+
+  it('a pin file that cannot be written is said, nothing is read with it, and the install runs after the build', async () => {
+    const m = await world({ manifest: { entry: NEW, flags: flagsOn } });
+    const inner = m.deps.executor;
+    m.deps.executor = {
+      run: async (a: Action) => {
+        if (a.kind === 'writeFile' && a.path.includes('update-pin-')) throw new Error('EACCES');
+        return inner.run(a);
+      },
+    };
+    expect(await runCli(['update'], m.deps)).toBe(0);
+    expect(m.io.stdout).toContain(
+      'the next commit’s Camoufox pin is not one this code reads; the browser install runs after the build instead',
+    );
+    expect(m.runner.calls.some((c) => c.argv.includes('--pin'))).toBe(false);
+    expect(kinds(m.executor.log).indexOf('download')).toBeGreaterThan(stopAt(m.executor.log));
+  });
+
+  it('a printer that exits non-zero is no manifest, whatever it printed', async () => {
+    const m = await world({ manifest: { entry: MAC, flags: flagsOn }, printerCode: 1 });
+    expect(await runCli(['update'], m.deps)).toBe(1);
+    expect(m.io.stderr).toContain('the new code’s Camoufox pin could not be read');
+  });
+
+  it('a download that fails before the stop names its step', async () => {
+    let fail = true;
+    const m = await world({ manifest: { entry: NEW, flags: flagsOn }, downloadsFail: () => fail });
+    const inner = m.deps.executor;
+    m.deps.executor = {
+      run: async (a: Action) => {
+        if (a.kind === 'run' && a.argv.join(' ') === 'pnpm build') fail = false;
+        return inner.run(a);
+      },
+    };
+    expect(await runCli(['update'], m.deps)).toBe(0);
+    expect(m.io.stdout).toContain('update: download Camoufox: stopped at a failed step');
+  });
+
+  it('nothing to do for the browser leaves nothing for after the health wait', async () => {
+    for (const o of [
+      { manifest: { entry: NEW, flags: flagsOff } },
+      { manifest: { entry: NEW, flags: flagsOn }, camoufox: false },
+    ]) {
+      const m = await world(o);
+      expect(await runCli(['update'], m.deps)).toBe(0);
+      const log = m.executor.log;
+      const wait = log.findIndex((a) => a.kind === 'waitHealthy');
+      // why: update's own record of the run is the one removal after the wait; no bundle removal follows
+      expect(kinds(log.slice(wait + 1))).toEqual(['remove /Users/op/.local/state/get-me-there/update.json']);
+    }
+  });
+
   it('--dry-run names the step without reading the pin', async () => {
+    expect(DRY_RUN_LINE).toBe(
+      'update: the browser install\n  then: download the next pin before the stop when its recordings set its flags, switch to it after the build, and remove older bundles once the app is healthy\n',
+    );
     const m = await world({ manifest: { entry: NEW, flags: flagsOn } });
     expect(await runCli(['update', '--dry-run'], m.deps)).toBe(0);
     expect(m.io.stdout).toContain(DRY_RUN_LINE);

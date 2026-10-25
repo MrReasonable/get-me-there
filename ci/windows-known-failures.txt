@@ -144,6 +144,7 @@ apps/camoufox-worker/test/record.test.ts > record --grid clicks Price graph, Dat
 apps/camoufox-worker/test/record.test.ts > record --grid logs each step as "grid step"
 apps/camoufox-worker/test/record.test.ts > record --grid measures a one-day step from rotated lines
 apps/camoufox-worker/test/record.test.ts > stderrLog debug lines the real recorder dependencies take the switch
+apps/camoufox-worker/test/record.test.ts > the real recorder dependencies (no launch) use the system clock, two-second polls, the prepared entry’s selectors and stderr JSON lines
 apps/camoufox-worker/test/record.test.ts > the recorder (brief Task 14.2 rules) --cheapest closes the tab’s pop-up, clicks the tab, settles again and records what it clicked
 apps/camoufox-worker/test/record.test.ts > the recorder (brief Task 14.2 rules) --cheapest whose tab cannot be clicked refuses plainly, with no cool-down
 apps/camoufox-worker/test/record.test.ts > the recorder (brief Task 14.2 rules) --cheapest: a Cheapest view that never settles ends at the cap, nothing written, no cool-down

@@ -2,6 +2,7 @@ import { parseEnv } from 'node:util';
 import { CAMOUFOX_BUILDS, readSharedSettings, sharedSettingDiffs } from '@gmt/core';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ledgerFigures } from '../../src/camoufox/counts.js';
+import { installCamoufox } from '../../src/camoufox/installer.js';
 import {
   costsSummary,
   ENABLE_QUESTION,
@@ -41,7 +42,17 @@ beforeEach(() => {
 
 /** A machine with an Enter-only setup done; `check` answers the worker's start check, `os` and display as given. */
 async function world(
-  o: { check?: string; counts?: string; os?: 'darwin' | 'linux'; display?: boolean; df?: number } = {},
+  o: {
+    check?: string;
+    counts?: string;
+    /** The worker's whole `counts --check` answer, in place of `counts`. */
+    countsCheck?: { code: number; stdout: string; stderr?: string };
+    countsWriteCode?: number;
+    bootstrapCode?: number;
+    os?: 'darwin' | 'linux';
+    display?: boolean;
+    df?: number;
+  } = {},
 ) {
   let started = false;
   const checks: string[][] = [];
@@ -54,10 +65,17 @@ async function world(
       return { code: 0, stdout: `${o.check ?? '{"ok":true}'}\n` };
     }
     if (argv.includes('counts') && argv.some((a) => a.endsWith('run.ts'))) {
-      if (argv.includes('--check')) return { code: 0, stdout: `${o.counts ?? '{"counts":"ok"}'}\n` };
+      if (argv.includes('--check')) {
+        checks.push([...argv]);
+        return o.countsCheck ?? { code: 0, stdout: `${o.counts ?? '{"counts":"ok"}'}\n` };
+      }
       countsWrites.push({ argv: [...argv], stdin: call.stdin });
-      return { code: 0, stdout: '{"ok":true}\n' };
+      return o.countsWriteCode === undefined
+        ? { code: 0, stdout: '{"ok":true}\n' }
+        : { code: o.countsWriteCode, stderr: 'the lock is held\n' };
     }
+    if (o.bootstrapCode !== undefined && argv[0] === 'launchctl' && argv[1] === 'bootstrap')
+      return { code: o.bootstrapCode, stderr: 'bootstrap failed\n' };
     if (argv[0] === 'df') return { code: 0, stdout: `h\n/dev/disk 1 1 ${o.df ?? 99_999_999} 1% /\n` };
     if (argv[0] === 'ln') {
       m.fs.symlink(argv[3] ?? '', argv[2] ?? '');
@@ -220,6 +238,146 @@ describe('choosing it (Task 17.6): costs, consent method, install, worker.env, t
     answers(garbled, { enabled: true });
     await runCli(['setup', '--non-interactive', '--answers', '/work/b.json'], garbled.deps);
     expect(garbled.io.stderr).toContain('the worker’s start check exited 0 and said nothing');
+  });
+});
+
+// why: ts-b1-003: each stop of the turn-on and the reconfigure says its own reason, and each restart its own steps
+describe('the browser step’s stops and steps (ts-b1-003)', () => {
+  const runs = (log: readonly Action[]) =>
+    log.map((a) =>
+      a.kind === 'run' ? a.argv.slice(0, 3).join(' ') : a.kind === 'waitHealthy' ? `wait ${a.url}` : a.kind,
+    );
+  const tty = (m: Awaited<ReturnType<typeof world>>, script: Array<string | boolean>) => {
+    const ask = scriptedAsk(script);
+    m.deps.ask = ask;
+    m.deps.io = { ...testIo({ tty: true }), out: m.deps.io.out, err: m.deps.io.err };
+    return ask;
+  };
+
+  const BUNDLE = `${ROOT}/browsers/official/152.0.4-beta.28-8b7680a6`;
+  /** The provider on, then one reconfigure so app.env holds every line setup writes; logs and output cleared. */
+  async function settled() {
+    const m = await world();
+    answers(m, { enabled: true });
+    await runCli(['setup', '--non-interactive', '--answers', '/work/b.json'], m.deps);
+    // why: the memory unpack writes no app inside the bundle; a real one does, and the link resolves to it
+    m.fs.dir(`${BUNDLE}/Camoufox.app`, 0o755);
+    await reconfigure(m);
+    return Object.assign(m, {
+      countsChecked: () => m.runner.calls.some((c) => c.argv.includes('--check')),
+    });
+  }
+  async function reconfigure(m: Awaited<ReturnType<typeof world>>) {
+    m.executor.log.length = 0;
+    m.runner.calls.length = 0;
+    m.io.stdout = '';
+    m.io.stderr = '';
+    return runCli(
+      ['setup', '--reconfigure', 'browser', '--non-interactive', '--answers', '/work/b.json'],
+      m.deps,
+    );
+  }
+
+  it('with a display: no server text, and Enter on the question is no', async () => {
+    const m = await world();
+    const ask = tty(m, ['', '']);
+    expect(await runCli(['setup', '--reconfigure', 'browser'], m.deps)).toBe(0);
+    expect(m.io.stdout).not.toContain(SERVER_TEXT);
+    expect(ask.defaults.find((d) => d.q === ENABLE_QUESTION)).toEqual({ q: ENABLE_QUESTION, def: false });
+    expect(m.io.stdout).toContain('The browser provider stays off.');
+  });
+
+  it('the turn-on: no worker to stop, the app stopped, files written, the worker started, then the app and its health on its port', async () => {
+    const m = await world();
+    m.fs.file(ENV, setLines(m.fs.read(ENV) ?? '', new Set(['PORT']), [['PORT', '3101']]), 0o600);
+    answers(m, { enabled: true });
+    expect(await runCli(['setup', '--non-interactive', '--answers', '/work/b.json'], m.deps)).toBe(0);
+    const r = runs(m.executor.log);
+    const after = r.slice(r.lastIndexOf('writeFile') - 1);
+    expect(r.filter((x) => x.includes('camoufox-worker') && x.startsWith('launchctl bootout'))).toEqual([]);
+    expect(r.at(-1)).toBe('wait http://127.0.0.1:3101/api/health');
+    const appStop = r.indexOf('launchctl bootout gui/501/local.get-me-there.app');
+    const workerStart = r.findIndex((x) => x.startsWith('launchctl bootstrap') && after.includes(x));
+    expect(appStop).toBeGreaterThan(-1);
+    expect(workerStart).toBeGreaterThan(appStop);
+    expect(m.io.stdout).toContain('The browser provider is on: the worker service is installed and running.');
+  });
+
+  it('a worker.env whose port is not one stops with that reason', async () => {
+    const m = await world();
+    m.fs
+      .dir('/Users/op/.local/state/get-me-there/camoufox', 0o700)
+      .file(WORKER_ENV, 'CAMOUFOX_WORKER_PORT="80"\n', 0o600);
+    answers(m, { enabled: true });
+    expect(await runCli(['setup', '--non-interactive', '--answers', '/work/b.json'], m.deps)).toBe(0);
+    expect(m.io.stderr).toContain('CAMOUFOX_WORKER_PORT in worker.env is not a port from 1024 to 65535');
+    expect(m.io.stderr).toContain('resume with pnpm gmt setup --reconfigure browser');
+    expect(env(m).CAMOUFOX_ENABLED).toBeUndefined();
+  });
+
+  it('a kept worker.env line spread over lines stops before anything is written', async () => {
+    const m = await world();
+    m.fs.dir('/Users/op/.local/state/get-me-there/camoufox', 0o700).file(WORKER_ENV, 'NOTE="a\nb"\n', 0o600);
+    answers(m, { enabled: true });
+    await runCli(['setup', '--non-interactive', '--answers', '/work/b.json'], m.deps);
+    expect(m.io.stderr).toContain('resume with pnpm gmt setup --reconfigure browser');
+    expect(env(m).CAMOUFOX_WORKER_KEY).toBeUndefined();
+  });
+
+  it('--reconfigure browser: an install it cannot do says why and leaves the provider as it was (exit 0)', async () => {
+    const m = await settled();
+    m.fs.delete(BUNDLE);
+    m.opts.df = 1;
+    expect(await reconfigure(m)).toBe(0);
+    expect(m.io.stderr).toContain('Camoufox needs 983 MB free');
+    expect(m.countsChecked()).toBe(false);
+  });
+
+  it('--reconfigure browser with equal keys and no new bundle restarts nothing; a new bundle restarts the worker alone', async () => {
+    const m = await settled();
+    expect(await reconfigure(m)).toBe(0);
+    expect(runs(m.executor.log).filter((x) => x.startsWith('launchctl'))).toEqual([]);
+    expect(m.io.stdout).not.toContain('keys differ');
+    m.fs.delete(BUNDLE);
+    expect(await reconfigure(m)).toBe(0);
+    const r = runs(m.executor.log).filter((x) => x.startsWith('launchctl'));
+    expect(r).toEqual([
+      'launchctl bootout gui/501/local.get-me-there.camoufox-worker',
+      'launchctl bootstrap gui/501',
+    ]);
+    expect(runs(m.executor.log).some((x) => x.startsWith('wait '))).toBe(false);
+  });
+
+  it('a new bundle whose worker restart fails fails the reconfigure, naming the step', async () => {
+    const m = await settled();
+    m.fs.delete(BUNDLE);
+    m.opts.bootstrapCode = 5;
+    expect(await reconfigure(m)).toBe(1);
+    expect(m.io.stderr).toContain('setup: the browser provider: stopped at a failed step');
+    expect(m.io.stderr).not.toContain('repairs the keys');
+    expect(m.countsChecked()).toBe(false);
+  });
+
+  it('a re-run with the provider on and its unit unchanged plans nothing for the worker', async () => {
+    const m = await world();
+    answers(m, { enabled: true });
+    await runCli(['setup', '--non-interactive', '--answers', '/work/b.json'], m.deps);
+    m.executor.log.length = 0;
+    m.checks.length = 0;
+    expect(await runCli(['setup', '--non-interactive', '--answers', '/work/b.json'], m.deps)).toBe(0);
+    expect(m.checks).toEqual([]);
+    expect(runs(m.executor.log).filter((x) => x.includes('camoufox-worker'))).toEqual([]);
+  });
+
+  it('a re-run whose changed unit fails to start fails setup, naming the worker service', async () => {
+    const m = await world();
+    answers(m, { enabled: true });
+    await runCli(['setup', '--non-interactive', '--answers', '/work/b.json'], m.deps);
+    m.fs.file(PLIST, '<plist>old</plist>', 0o644);
+    m.opts.bootstrapCode = 5;
+    m.io.stderr = '';
+    expect(await runCli(['setup', '--non-interactive', '--answers', '/work/b.json'], m.deps)).toBe(1);
+    expect(m.io.stderr).toContain('setup: the worker service: stopped at a failed step');
   });
 });
 
@@ -438,17 +596,21 @@ describe('a missing or unreadable counts file: gmt browser counts, and --reconfi
     counts: 'ok' | 'missing' | 'unreadable',
     ask: Array<string | boolean>,
     providers?: unknown,
+    w: Parameters<typeof world>[0] = {},
+    active: unknown = { execution: null },
   ) {
-    const m = await world({ counts: JSON.stringify({ counts }) });
+    const m = await world({ counts: JSON.stringify({ counts }), ...w });
     answers(m, { enabled: true });
     await runCli(['setup', '--non-interactive', '--answers', '/work/b.json'], m.deps);
     const http = stubHttp({
-      'GET /api/executions/active': () => ({ status: 200, body: { execution: null } }),
+      'GET /api/executions/active': () => ({ status: 200, body: active }),
       'GET /api/health': () => ({ status: 200, body: { ok: true } }),
       'GET /api/providers': () =>
-        providers === undefined
-          ? { status: 200, body: providersBody(37, 412) }
-          : { status: 200, body: providers },
+        providers === 500
+          ? { status: 500, body: { error: 'x' } }
+          : providers === undefined
+            ? { status: 200, body: providersBody(37, 412) }
+            : { status: 200, body: providers },
     });
     m.deps.http = http;
     const scripted = scriptedAsk(ask);
@@ -549,6 +711,193 @@ describe('a missing or unreadable counts file: gmt browser counts, and --reconfi
   });
 });
 
+// why: ts-b1-003 (W3): each of the rewrite's own refusals and words, so none can change with the suite green
+describe('gmt browser counts: its refusals, its words and its steps', () => {
+  const MISSING =
+    'The worker’s monthly counts file is missing beside an earlier worker’s files, so it refuses every page.';
+  const UNREADABLE = 'The worker’s monthly counts file cannot be read, so it refuses every page.';
+  async function counts(
+    state: 'ok' | 'missing' | 'unreadable',
+    ask: Array<string | boolean>,
+    o: { providers?: unknown; w?: Parameters<typeof world>[0]; active?: unknown } = {},
+  ) {
+    const m = await world({ counts: JSON.stringify({ counts: state }), ...o.w });
+    answers(m, { enabled: true });
+    await runCli(['setup', '--non-interactive', '--answers', '/work/b.json'], m.deps);
+    m.deps.http = stubHttp({
+      'GET /api/executions/active': () => ({ status: 200, body: o.active ?? { execution: null } }),
+      'GET /api/health': () => ({ status: 200, body: { ok: true } }),
+      'GET /api/providers': () =>
+        o.providers === 500
+          ? { status: 500, body: { error: 'x' } }
+          : { status: 200, body: o.providers ?? providersBody(37, 412) },
+    });
+    const scripted = scriptedAsk(ask);
+    m.deps.ask = scripted;
+    m.deps.io = { ...testIo({ tty: true }), out: m.deps.io.out, err: m.deps.io.err };
+    m.io.stdout = '';
+    m.io.stderr = '';
+    m.executor.log.length = 0;
+    m.checks.length = 0;
+    return { m, ask: scripted };
+  }
+
+  it('says which of the two states the file is in', async () => {
+    const a = await counts('missing', ['', false]);
+    expect(await runCli(['browser', 'counts'], a.m.deps)).toBe(0);
+    expect(a.m.io.stdout).toContain(MISSING);
+    expect(a.m.io.stdout).not.toContain(UNREADABLE);
+    const b = await counts('unreadable', ['', false]);
+    expect(await runCli(['browser', 'counts'], b.m.deps)).toBe(0);
+    expect(b.m.io.stdout).toContain(UNREADABLE);
+    expect(b.m.io.stdout).not.toContain(MISSING);
+  });
+
+  it('with no worker.env it refuses, asking nothing and running nothing', async () => {
+    const { m } = await counts('missing', []);
+    m.fs.delete(WORKER_ENV);
+    expect(await runCli(['browser', 'counts'], m.deps)).toBe(78);
+    expect(m.io.stderr).toBe('The browser worker is not set up here (no worker.env): nothing to rewrite.\n');
+    expect(m.checks).toEqual([]);
+  });
+
+  it('reads the state from the worker’s last stdout line, in the service’s environment and the worker’s directory', async () => {
+    const { m } = await counts('ok', [], {
+      w: { countsCheck: { code: 0, stdout: 'a note\n{"counts":"ok"}\n' } },
+    });
+    expect(await runCli(['browser', 'counts'], m.deps)).toBe(0);
+    expect(m.io.stdout).toBe('The worker’s monthly counts file is readable; nothing to rewrite.\n');
+    const call = m.runner.calls.find((c) => c.argv.includes('--check'));
+    expect(call?.argv.slice(-3)).toEqual(['/repo/apps/camoufox-worker/src/run.ts', 'counts', '--check']);
+    expect(call?.cwd).toBe('/repo/apps/camoufox-worker');
+    expect(call?.env?.HOME).toBe('/Users/op');
+  });
+
+  it('an answer it cannot read is the worker’s failure, with its exit and its last stderr line', async () => {
+    for (const [stdout, stderr, said] of [
+      ['not json', 'first\nthe data directory is refused\n', ': the data directory is refused'],
+      ['null', '', ''],
+      ['"ok"', '', ''],
+      ['{"state":"ok"}', '', ''],
+      ['{"counts":"fine"}', '', ''],
+    ] as const) {
+      const { m } = await counts('ok', [], { w: { countsCheck: { code: 78, stdout, stderr } } });
+      expect(await runCli(['browser', 'counts'], m.deps)).toBe(1);
+      expect(m.io.stderr).toBe(`the worker could not read its counts (exit 78${said})\n`);
+      expect(m.countsWrites).toEqual([]);
+    }
+  });
+
+  it('one figure from the flags is not enough: the ledger is read instead', async () => {
+    const { m } = await counts('missing', ['', true]);
+    expect(await runCli(['browser', 'counts', '--pages', '12'], m.deps)).toBe(0);
+    expect(m.io.stdout).toContain('From this app’s ledger: 37 browser pages and 412 scrolls this month.');
+    const both = await counts('missing', ['', true]);
+    expect(await runCli(['browser', 'counts', '--pages', '12', '--scrolls', '3'], both.m.deps)).toBe(0);
+    expect(both.m.io.stdout).toContain(
+      'From the figures given: 12 browser pages and 3 scrolls this month. The worker’s counts would be 12 pages and 3 scrolls.',
+    );
+  });
+
+  it('a ledger that does not answer is said, then the figures are asked for, each 0 on Enter', async () => {
+    const { m, ask } = await counts('missing', [' 4 ', '', '', true], { providers: 500 });
+    expect(await runCli(['browser', 'counts'], m.deps)).toBe(0);
+    expect(m.io.stderr).toContain('The app’s ledger could not be read (is the app running?).');
+    expect(ask.asked.slice(0, 3)).toEqual([
+      'This month’s browser pages (the app’s Providers page shows them)',
+      'This month’s browser scrolls (the same page)',
+      'Pages loaded this month outside this app’s ledger (recordings, another app), if any',
+    ]);
+    expect(m.io.stdout).toContain('From the figures you gave: 4 browser pages and 0 scrolls this month.');
+    expect(JSON.parse(m.countsWrites[0]?.stdin ?? '')).toEqual({ pages: 4, scrolls: 0 });
+  });
+
+  it('a stated figure must be a whole number, each on its own, and nothing is written otherwise', async () => {
+    for (const answers of [
+      ['x4', '9'],
+      ['4x', '9'],
+      ['4', 'x9'],
+      ['4', '9x'],
+      ['4', '9', 'x1'],
+      ['4', '9', '1x'],
+    ]) {
+      const { m } = await counts('missing', [...answers, true], { providers: 500 });
+      expect(await runCli(['browser', 'counts'], m.deps)).toBe(78);
+      expect(m.io.stderr).toContain('A whole number is needed; nothing was written.');
+      expect(m.countsWrites).toEqual([]);
+    }
+  });
+
+  it('--other-pages given is not asked again; 0 outside the ledger adds no words', async () => {
+    const { m, ask } = await counts('missing', [true]);
+    expect(await runCli(['browser', 'counts', '--other-pages', '0'], m.deps)).toBe(0);
+    expect(ask.asked).toEqual(['Rewrite the worker’s counts with these figures?']);
+    expect(m.io.stdout).toContain(
+      'From this app’s ledger: 37 browser pages and 412 scrolls this month. The worker’s counts would be 37 pages and 412 scrolls.',
+    );
+    const ni = await counts('missing', []);
+    expect(await runCli(['browser', 'counts', '--non-interactive'], ni.m.deps)).toBe(0);
+    expect(ni.ask.asked).toEqual([]);
+    expect(JSON.parse(ni.m.countsWrites[0]?.stdin ?? '')).toEqual({ pages: 37, scrolls: 412 });
+  });
+
+  it('a search running in the app refuses the rewrite unless --force; nothing is stopped or written', async () => {
+    const active = {
+      execution: {
+        id: 'e1',
+        definitionId: 'd1',
+        definitionName: 'London to New York weekly',
+        kind: 'run',
+        startedAt: '2026-10-24T09:00:00.000Z',
+        estimatedFinishAt: null,
+      },
+    };
+    const { m } = await counts('missing', [], { active });
+    expect(await runCli(['browser', 'counts', '--non-interactive'], m.deps)).toBe(75);
+    expect(m.io.stderr).toContain('London to New York weekly');
+    expect(m.io.stderr).toContain('or with --wait or --force');
+    expect(m.countsWrites).toEqual([]);
+    expect(m.executor.log).toEqual([]);
+    const forced = await counts('missing', [], { active });
+    expect(await runCli(['browser', 'counts', '--non-interactive', '--force'], forced.m.deps)).toBe(0);
+    expect(forced.m.countsWrites).toHaveLength(1);
+  });
+
+  it('a write the worker refuses stops there, naming the command, and the worker is not started', async () => {
+    const { m } = await counts('missing', [], { w: { countsWriteCode: 75 } });
+    expect(await runCli(['browser', 'counts', '--non-interactive'], m.deps)).toBe(1);
+    expect(m.io.stderr).toContain('browser counts: stopped at a failed step');
+    expect(m.io.stderr).toContain('the worker writes its monthly counts');
+    expect(m.io.stdout).not.toContain('The worker’s counts are now');
+    expect(m.executor.log.some((a) => a.kind === 'run' && a.argv[1] === 'bootstrap')).toBe(false);
+  });
+
+  it('after the write: the new figures said; a worker whose check refuses is left stopped, with why', async () => {
+    const { m } = await counts('missing', []);
+    m.opts.check = '{"reason":"consent-missing","at":"2026-10-24T09:30:00.000Z"}';
+    expect(await runCli(['browser', 'counts', '--non-interactive'], m.deps)).toBe(0);
+    expect(m.io.stdout).toContain('The worker’s counts are now 37 pages and 412 scrolls for this window.');
+    expect(m.io.stdout).toContain('worker: not started: ');
+    expect(m.executor.log.some((a) => a.kind === 'run' && a.argv[1] === 'bootstrap')).toBe(false);
+  });
+
+  it('a start that fails after the write exits 1 naming the step', async () => {
+    const { m } = await counts('missing', [], { w: { bootstrapCode: 5 } });
+    expect(await runCli(['browser', 'counts', '--non-interactive'], m.deps)).toBe(1);
+    expect(m.io.stdout).toContain('The worker’s counts are now 37 pages and 412 scrolls for this window.');
+    expect(m.io.stderr).toContain('browser counts: stopped at a failed step');
+  });
+
+  it('with no worker service installed, the file is written and nothing is started', async () => {
+    const { m } = await counts('missing', []);
+    m.fs.delete(PLIST);
+    expect(await runCli(['browser', 'counts', '--non-interactive'], m.deps)).toBe(0);
+    expect(m.countsWrites).toHaveLength(1);
+    expect(m.io.stdout).not.toContain('worker: not started');
+    expect(m.executor.log.some((a) => a.kind === 'run' && a.argv[1] === 'bootstrap')).toBe(false);
+  });
+});
+
 /** A `GET /api/providers` answer with the camoufox month's pages and scrolls. */
 function providersBody(calls: number, scrolls: number) {
   return {
@@ -619,6 +968,34 @@ describe('worker.env and its helpers', () => {
       sharedSettingDiffs(readSharedSettings(app).settings, readSharedSettings(record).settings, 'grid'),
     ).toEqual([]);
   });
+  it('worker.env is the header, the kept lines, then the owned ones: nothing else, comments not carried', () => {
+    const r = renderWorkerEnv(
+      'k'.repeat(48),
+      readSharedSettings({}).settings,
+      'CAMOUFOX_WORKER_PORT="8091"\n# mine\n\n',
+    );
+    if (!r.ok) throw new Error(r.error);
+    const lines = r.text.split('\n');
+    expect(lines.slice(0, 4)).toEqual([
+      '# get-me-there browser worker settings, written by `pnpm gmt setup` (docs/setup.md section 14).',
+      '# Keep this file 0600. The shared settings must equal app.env’s; setup keeps them equal.',
+      'CAMOUFOX_WORKER_PORT="8091"',
+      `CAMOUFOX_WORKER_KEY="${'k'.repeat(48)}"`,
+    ]);
+    expect(lines.filter((l) => l !== '' && !l.startsWith('#') && !/^[A-Z_]+=/.test(l))).toEqual([]);
+    expect(r.text).not.toContain('# mine');
+  });
+  it('a multi-line value is refused whichever quote opens it, spaces before it or not; an owned one is replaced', () => {
+    const shared = readSharedSettings({}).settings;
+    for (const kept of ["MY_NOTE='first\nsecond'\n", 'MY_NOTE= "first\nsecond"\n'])
+      expect(renderWorkerEnv('k'.repeat(48), shared, kept)).toMatchObject({ ok: false });
+    expect(renderWorkerEnv('k'.repeat(48), shared, 'MY_NOTE=\'one line\'\nB="x=y"\n')).toMatchObject({
+      ok: true,
+    });
+    const owned = renderWorkerEnv('k'.repeat(48), shared, 'CAMOUFOX_MODE="list\n');
+    if (!owned.ok) throw new Error(owned.error);
+    expect(parseEnv(owned.text).CAMOUFOX_MODE).toBe(shared.CAMOUFOX_MODE);
+  });
   // why: sec-b1-007: the text is read back before it is written, and a value spread over lines is refused, never cut
   it('worker.env refuses a kept value spread over several lines', () => {
     const r = renderWorkerEnv('k'.repeat(48), readSharedSettings({}).settings, 'MY_NOTE="first\nsecond"\n');
@@ -671,6 +1048,18 @@ describe('worker.env and its helpers', () => {
 });
 
 // why: the coordinator's ruling for Task 17.8: a recording session stops the browser worker alone, never a native app
+describe('the installer off macOS and Linux', () => {
+  it('refuses with the machine named and does nothing', async () => {
+    const m = await world();
+    m.deps.platform = { ...m.deps.platform, os: 'win32', arch: 'x64' };
+    expect(await installCamoufox(m.deps, { command: 'browser install' })).toEqual({
+      kind: 'refused',
+      message: 'no Camoufox build is pinned for win32-x64; the browser provider runs on macOS and Linux',
+    });
+    expect(m.executor.log).toEqual([]);
+  });
+});
+
 describe('start, stop and restart --only <service>', () => {
   async function on() {
     const m = await world();
