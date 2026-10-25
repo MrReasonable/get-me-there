@@ -5,9 +5,9 @@ owner: opus
 depends_on: [16a, 16b]
 spec_sections: ["§2 Method", "§2 Caps across callers", "§2 Consent", "§2 Recordings first", "§2 Labels", "§2 Costs", "§9 item 9", "§9 CI matrix", "§12 Where settings live", "§13 Native local mode", "§13 The camoufox worker", "§16", "§17 revision 36"]
 reviewers: [provenance-auditor, provider-integration-expert, security-reviewer, devops-reviewer, cost-and-budget-reviewer, test-strategy-reviewer, code-architect, product-owner]
-mutate: {"@gmt/camoufox-worker": ["src/monthly.ts"], "@gmt/cli": ["src/camoufox/**"]}
-pending: {"@gmt/camoufox-worker": ["src/consentLine.ts"]}
-status: open (Tasks 17.1–17.4, 17.6, 17.7, 17.9 and 17.10 built; research 17.0c, Task 17.5 and Task 17.8 open)
+mutate: {"@gmt/camoufox-worker": ["src/monthly.ts", "src/consentLine.ts"], "@gmt/cli": ["src/camoufox/**"]}
+pending: {}
+status: open (Tasks 17.1–17.7, 17.9, 17.10 and research 17.0c built; Task 17.8, the recording sessions, open)
 ---
 
 # WP17: Camoufox install, consent capture, the worker's caps and the Linux worker
@@ -543,3 +543,31 @@ build differs from the tasks above:
   @gmt/camoufox-worker capture-socs`, `docs/setup.md#capture-your-consent-choice`), shared with WP18.
 - **Refusal reasons added:** `consent-not-shown`, `counts-missing`, `counts-unreadable`, `config`; the worker answer
   kind `counts-unreadable` (503) and the `monthly-cap` answer's `used`.
+
+## 12. As built, part 2 (2026-10-25)
+
+Research 17.0c is answered (§0a) and Task 17.5 is built: `rejectionMark` and the line codec in `consentLine.ts`
+(mutation-tested), the worker's `consent` entry in `consent.ts` (`run.ts consent [export|import|check]`, script
+`consent`), and `pnpm gmt consent [export|import|check]` in `apps/cli/src/commands/consent.ts`. `CONSENT_FIX` is
+`pnpm gmt consent`. Where the build differs from the task above:
+
+- **`check` reads the record; it loads no page.** `consent check` prints the stored record's capture time, the mark
+  computed from its value and its expiry, and exits 0 only for a rejection still in date. Since revision 40 the worker
+  refuses a never-shown record (`consent-not-shown`), so the server-side headless check, which could only write such a
+  record, is not built, and neither is the voiding of a never-shown record by the server path.
+- **No not-shown record is written.** A first view that is the landing view with no consent page and no `SOCS` writes
+  nothing and says to capture on a desktop that shows the page and import it, for the same reason; there is no
+  confirmation prompt.
+- **Export runs where the browser provider is set up.** Every `consent` entry needs `worker.env` (the point of sale and
+  the caps), as `record` does, so `export` runs on a desktop where `gmt setup` has set the browser provider up; a
+  missing install is refused naming `pnpm gmt setup`, and nothing is downloaded.
+- **Setup still stops for consent.** `gmt setup` explains `pnpm gmt consent` and stops at the worker's start check as
+  before; `gmt consent` then starts an installed worker, or says to run `pnpm gmt setup --reconfigure browser` when the
+  service is not installed yet. Running the capture inside the wizard is left to a later change.
+- **The worker's state afterwards.** `gmt consent` stops the worker only when it is running, after the one active-run
+  guard; after a capture or import that stored a rejection it clears a `consent-*` refusal and starts an installed
+  worker once its check passes; after anything else (an export included) it starts the worker again only if it was
+  running.
+- **Display variables** come from the CLI's platform (`Platform.displayEnv`, by decision 74's groups), and `attach`
+  takes the child's whole environment.
+

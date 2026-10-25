@@ -1,6 +1,6 @@
 # get-me-there — Flight Price Intelligence & Flexible-Date Optimiser
 
-**Design spec, revision 40.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
+**Design spec, revision 41.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
 four full-roster reviews (145, 140, 126 and 101 findings; zero Critical since
 revision 2) and the provider spike. Revision 9 folds in the three decisions
 taken at approval (the self-scraping fallback in §2, the dashboard readings in
@@ -519,8 +519,10 @@ stable view is the landing view, a page kind the classifier recognises
 positively from its own dated selectors (`LANDING_VERIFIED`, set by the same
 recordings: on 2026-10-25 both views after the choice were the bare
 `/travel/flights` URL with the heading "Flights" and no results structure), no consent host was seen and no `SOCS` is set (a region with no
-consent screen), the command asks the operator to confirm and writes the
-record `{ consent: "not-shown", checkedAt }` at once. On a machine with no
+consent screen), the command writes nothing and says so: the worker serves
+pages only on a captured rejection (a never-shown record is refused as
+`consent-not-shown`), so a machine in such a region imports a rejection
+captured on a desktop that shows the page. On a machine with no
 display there are two paths. `gmt consent export`, on a Mac or Linux desktop
 where `gmt setup` has installed the pinned Camoufox (it never installs one
 itself), runs the same capture and prints one line, `gmt-socs-v1.` followed by
@@ -532,20 +534,14 @@ bounded, domain `.google.com`, path `/`, expiry no later than 13 months after
 `capturedAt`), recomputes the mark from the value and refuses a line whose
 carried mark differs or is not a rejection, and writes the same file, keeping
 `capturedAt`. `capture-socs`, the paste from an ordinary private window, is
-the lighter equal option. A server in a region with no consent screen uses
-`gmt consent check`: one headless load of the same landing page under every
-worker rule (the lock, the pacer and its monthly count, the guard, the
-classifier, the cool-downs), read-only, at most once an hour (the last
-check's time is persisted beside the pacer's last-page time, so a new process
-is refused before then with the time it may run), which writes the not-shown record only under
-the rule above and otherwise says that this server's region shows a consent
-screen and to capture on a desktop. With a not-shown record the worker sets
-no cookie, and a consent page at any step, or a `SOCS` cookie appearing after
-a page, stops it as `consent-unhandled` like any other and rewrites the
-record as `{ consent: "voided", voidedAt }`: `/v1/status` then reports kind
-`voided`, the worker refuses its next start with the reason `consent-voided`,
-and the Status view's consent check fails ("consent screen now shown: capture
-again"). A capture's expiry is the earlier of the cookie's own expiry and
+the lighter equal option. `gmt consent check` reports the stored record and
+loads no page: its capture time, the mark computed from its value and its
+expiry, exiting 0 only for a rejection still in date. A not-shown record
+(`{ consent: "not-shown", checkedAt }`) or a voided one (`{ consent:
+"voided", voidedAt }`) is read and reported by `/v1/status` but never serves a
+page: the worker refuses its start as `consent-not-shown` or
+`consent-voided`, and the Status view's consent check fails ("consent screen
+now shown: capture again" for a voided one). A capture's expiry is the earlier of the cookie's own expiry and
 `capturedAt` plus 13 months (a not-shown record's is `checkedAt` plus 13
 months), and the summary says which bounds it (`boundedBy` `cookie`,
 `capture` or, for a not-shown record, `check`; null once voided); `gmt status` and the Status
@@ -3129,6 +3125,15 @@ as specified in §5.3; no secrets, no full URLs.
 ---
 
 ## 17. Changelog
+
+### Revision 41: the guided consent capture (2026-10-25)
+
+Research 17.0c's two sessions (2026-10-25) showed the consent choice in the `SOCS` value itself: the first protobuf
+field is 1 after "Reject all" and 2 after "Accept all", so §2 states that mark and `gmt consent` is built with
+`export`, `import` and `check`. The landing view is recognised from that recording's views on `darwin-arm64`.
+`gmt consent check` reports the stored record without loading a page, and a region that shows no consent page
+writes no record (the worker already refuses a never-shown one), so the server-side headless check and the voiding of
+a never-shown record are not built. Every consent fix names `pnpm gmt consent`. No other design rule changes.
 
 ### Revision 40: WP17's branch review, round 1 (2026-10-25)
 
