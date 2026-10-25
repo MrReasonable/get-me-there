@@ -50,11 +50,7 @@ describe('scripts/write-api-version.mjs (V0, ts-b1-011)', { timeout: 60_000 }, (
     const out = outFile();
     mkdirSync(dirname(out), { recursive: true });
     writeFileSync(out, '{"version":"deadbee"}\n');
-    const r = run(
-      { PATH: process.env.PATH ?? '', GIT_CEILING_DIRECTORIES: tmpdir() },
-      tempDir('gmt-empty-'),
-      out,
-    );
+    const r = run({ GIT_CEILING_DIRECTORIES: tmpdir() }, tempDir('gmt-empty-'), out);
     expect(r.status).toBe(0);
     expect(existsSync(out)).toBe(false);
     expect(readVersion(out)).toBe('unknown');
@@ -95,7 +91,6 @@ describe('scripts/write-api-version.mjs (V0, ts-b1-011)', { timeout: 60_000 }, (
             encoding: 'utf8',
             // why: CodeRabbit — the developer's global and system git configuration (signing, hooks) must not reach it
             env: {
-              PATH: process.env.PATH ?? '',
               GIT_CONFIG_GLOBAL: '/dev/null',
               GIT_CONFIG_SYSTEM: '/dev/null',
             },
@@ -105,7 +100,7 @@ describe('scripts/write-api-version.mjs (V0, ts-b1-011)', { timeout: 60_000 }, (
       expect(git('commit', '--allow-empty', '-q', '-m', 'x').status).toBe(0);
       const want = git('rev-parse', '--short=7', 'HEAD').stdout.trim();
       const out = outFile();
-      expect(run({ PATH: process.env.PATH ?? '' }, repo, out).status).toBe(0);
+      expect(run({}, repo, out).status).toBe(0);
       expect(JSON.parse(readFileSync(out, 'utf8'))).toEqual({ version: want });
     },
   );

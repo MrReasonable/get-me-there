@@ -112,20 +112,44 @@ describe('the status bar link (spec §11)', () => {
   });
 
   it('fails fast: one retry at most, after a short delay the test steps over with fake timers', async () => {
-    vi.useFakeTimers({
-      toFake: ['setTimeout', 'setInterval', 'clearTimeout', 'clearInterval'],
-      shouldAdvanceTime: true,
-    });
+    // why: every clock is fake and nothing advances by itself: the retry timer is stepped explicitly, and the failure is
+    // awaited as the query cache's own event, never as elapsed time
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'setInterval', 'clearTimeout', 'clearInterval'] });
+    vi.setSystemTime(Date.parse('2026-10-14T15:00:00.000Z'));
     let hits = 0;
+    const waiting: Array<() => void> = [];
+    const nextRequest = () => new Promise<void>((resolve) => waiting.push(resolve));
     server.use(
       http.get(`${API}/status`, () => {
         hits += 1;
+        waiting.shift()?.();
         return HttpResponse.error();
       }),
     );
-    renderWithProviders(<StatusLink />);
-    await act(() => vi.advanceTimersByTimeAsync(STATUS_RETRY_DELAY_MS));
-    expect(await screen.findByRole('link', { name: 'Status: app not answering' })).toBeInTheDocument();
+    const first = nextRequest();
+    const { client } = renderWithProviders(<StatusLink />);
+    const failed = new Promise<void>((resolve) => {
+      const off = client.getQueryCache().subscribe((e) => {
+        if (e.query.state.status === 'error') {
+          off();
+          resolve();
+        }
+      });
+    });
+    await act(async () => {
+      await first;
+    });
+    // the first request has landed and failed; the one retry waits for its timer, which is stepped here
+    const second = nextRequest();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(STATUS_RETRY_DELAY_MS);
+      await second;
+      await failed;
+      // the query client hands its change to React on a timer of its own (also fake): step it
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    await act(() => vi.advanceTimersByTimeAsync(10));
+    expect(screen.getByRole('link', { name: 'Status: app not answering' })).toBeInTheDocument();
     await act(() => vi.advanceTimersByTimeAsync(STATUS_RETRY_DELAY_MS * 10));
     expect(hits).toBe(2);
   });

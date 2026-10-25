@@ -535,6 +535,10 @@ export function consentOutcome(f: Frame, w: WorkerFacts): { check: StatusCheck; 
       }),
       'voided',
     );
+  // why: a not-shown record has no capture: it expires 13 months after its own check, which this worker's status does not
+  // carry, so with no stated expiry nothing can be said (CodeRabbit)
+  if (c?.kind === 'not-shown' && c.expiresAt === null)
+    return cannot('the worker did not state when its no-consent-screen check expires', consentFix);
   // why: a record that states no expiry still has its capture time; the capture bound stands in, said as an upper bound
   const stated = c?.expiresAt ?? null;
   const bound = stated ?? (s.socsCapturedAt === null ? null : consentBoundOf(s.socsCapturedAt));
