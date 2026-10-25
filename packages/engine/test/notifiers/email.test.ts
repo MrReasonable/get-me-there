@@ -1,5 +1,5 @@
 import { Socket } from 'node:net';
-import { asIsoDateTime, fixedClock, type OperatorMessage, Secret } from '@gmt/core';
+import { asIsoDateTime, fixedClock, type OperatorMessage, parseConfig, Secret } from '@gmt/core';
 import nodemailer from 'nodemailer';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
@@ -456,5 +456,78 @@ describe('EmailNotifier system notices and the test send (spec §8.3, §10 /aler
     });
     await failing.n.send({ kind: 'system', subject: 's', body: 'b' });
     expect(failing.n.lastResult()).toMatchObject({ kind: 'system', result: 'failed' });
+  });
+});
+
+// why: Dependabot alerts GHSA-8c8m-p3m8-cjg8, GHSA-m943-m63m-w62w and GHSA-85x2-q946-cp5h (nodemailer's addressparser
+// before 10.1.4 misread nested comments, ";" in quoted text and ">" in a quoted local part). The configured
+// ALERT_EMAIL_TO and ALERT_EMAIL_FROM go through the real nodemailer from config to envelope, and each stays one
+// recipient; the shapes the advisories name never get that far, since config takes one bare mailbox only.
+describe('the configured ALERT_EMAIL_TO and ALERT_EMAIL_FROM reach nodemailer as one address each', () => {
+  const env = (to: string, from: string) => ({
+    NODE_ENV: 'production',
+    DATABASE_PATH: '/data/get-me-there.db',
+    APP_BASIC_AUTH_USER: 'ian',
+    APP_BASIC_AUTH_PASS: 'correct-horse-battery',
+    IN_CONTAINER: '1',
+    SMTP_HOST: 'smtp.example.com',
+    SMTP_PORT: '465',
+    SMTP_USER: 'alerts',
+    SMTP_PASS: PASS,
+    ALERT_EMAIL_TO: to,
+    ALERT_EMAIL_FROM: from,
+  });
+  const configured = (to: string, from: string) => {
+    const r = parseConfig(env(to, from), { realpath: (p) => p });
+    if (!r.ok) throw new Error(`config refused: ${r.errors.map((e) => e.field).join(', ')}`);
+    if (r.config.smtp === null) throw new Error('no SMTP settings');
+    return r.config.smtp;
+  };
+  const mailbox = z.object({ address: z.string(), name: z.string() });
+  const headers = z.object({ from: mailbox, to: z.array(mailbox) });
+
+  it.each([
+    ['operator@example.com', 'get-me-there@example.com'],
+    ['first.last+alerts@mail.example.co.uk', 'no-reply@alerts.example.org'],
+    ["o'neill_ops-1@example.com", 'gmt@example.net'],
+  ])('%s from %s: one recipient in the envelope and in the To header', async (to, from) => {
+    const sent: Array<{ envelope: { from: string | false; to: string[] }; message: string }> = [];
+    const factory: TransportFactory = () => {
+      const json = nodemailer.createTransport({ jsonTransport: true });
+      return {
+        async sendMail(m: MailMessage) {
+          const info = await json.sendMail(m);
+          sent.push({ envelope: info.envelope, message: String(info.message) });
+          return { messageId: info.messageId };
+        },
+      };
+    };
+    const { n } = notifier({ smtp: configured(to, from), createTransport: factory });
+    expect((await n.send(digestMessage())).ok).toBe(true);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.envelope).toEqual({ from, to: [to] });
+    expect(headers.parse(JSON.parse(sent[0]?.message ?? ''))).toEqual({
+      from: { address: from, name: '' },
+      to: [{ address: to, name: '' }],
+    });
+  });
+
+  it.each([
+    ['a nested comment', 'ops@example.com (a (b) evil@example.org)'],
+    ['";" in a quoted string', '"a;evil@example.org"@example.com'],
+    ['">" in a quoted local part', '"ops>"@evil.example'],
+  ])('%s is refused by config and by the notifier, never handed to nodemailer', (_name, value) => {
+    for (const field of ['ALERT_EMAIL_TO', 'ALERT_EMAIL_FROM'] as const) {
+      const r = parseConfig(
+        field === 'ALERT_EMAIL_TO' ? env(value, 'gmt@example.com') : env('operator@example.com', value),
+        { realpath: (p) => p },
+      );
+      expect(r.ok ? [] : r.errors.map((e) => e.field)).toEqual([field]);
+    }
+    const created = vi.fn<TransportFactory>();
+    expect(() => notifier({ smtp: smtp({ to: value }), createTransport: created })).toThrow(
+      /one email address/,
+    );
+    expect(created).not.toHaveBeenCalled();
   });
 });
