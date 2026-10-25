@@ -270,7 +270,7 @@ print` (45 s), so a restart is bootout, wait, bootstrap; systemd's `activating` 
 | 1 | Port | 3000, or the next free one | — | "The app listens on this machine only (127.0.0.1)." |
 | 2 | Time zone for schedules | the machine's (`Intl.DateTimeFormat().resolvedOptions().timeZone`), checked by `core` | — | "Scheduled searches fire in this zone." |
 | 3 | Fare market | `GB` | — | "The country whose fares the searches ask for, as two letters (GB, US, …). It can change which fares appear; prices are always shown in pounds in this build." Written as `POINT_OF_SALE`. |
-| 4 | Travelpayouts token | skip | Enter | "Free prices cached from what other travellers recently searched on Aviasales, typically hours to days old; your stay and date limits are not applied, so check a fare on the airline's site before you rely on it. Needs a free Travelpayouts account: if you have none, register at https://www.travelpayouts.com/, then open the API token page (https://support.travelpayouts.com/hc/en-us/articles/203956083)." |
+| 4 | Travelpayouts token | skip | Enter | "Free prices cached from what other travellers recently searched on Aviasales, typically hours to days old; your stay and date limits are not applied, so check a fare on the airline's site before you rely on it. Needs a free Travelpayouts account: if you have none, register at https://www.travelpayouts.com/, then copy the token from your Profile’s API token section (help: https://support.travelpayouts.com/hc/en-us/articles/203956083)." |
 | 5 | SearchApi | off | Enter | "Google Flights results through SearchApi. The free trial is a one-off 100 searches for `pnpm gmt smoke` only: scheduled searches never use it. The $40 a month plan lets scheduled searches spend up to its 10,000 searches a month." The choice is asked as "Enter for off, trial for the free trial (100 searches, smoke tests only), or 40usd for the $40 a month plan"; the key (hidden) and the billing day ("the day of the month your plan renews") follow only if chosen. For `trial` it always asks "Searches already used on the trial (100 minus the searches your SearchApi dashboard says are left)", default the current `SEARCHAPI_TRIAL_USED` or 0, written as `SEARCHAPI_TRIAL_USED`: that count lives in `app.env`, never in a database, so an import never supplies it (decision 14); never asked for `40usd`. |
 | 6 | Email alerts | skip | Enter | "Send alerts and notices by email." Host, port, TLS, user, password (hidden), to, from follow only if chosen. The test email is WP18's: its brief owns offering it at the end of setup once its route exists. |
 | 7 | Keep running after you log out (Linux) | no | Enter | "Without it, the app stops when you log out of every session; setup runs loginctl enable-linger for you." Runs `loginctl enable-linger` without sudo, else prints the sudo line; `--reconfigure linger` changes it later. |
@@ -290,8 +290,8 @@ source: searches never use it.
 
 Then the closing screen. With no price source configured, it says so first: "No price source is set up yet, so searches
 will find nothing. The no-cost source is Travelpayouts, which needs a free account: register at
-https://www.travelpayouts.com/, then open the API token page
-(https://support.travelpayouts.com/hc/en-us/articles/203956083) and run `pnpm gmt setup --reconfigure
+https://www.travelpayouts.com/, then copy the token from your Profile’s API token section
+(help: https://support.travelpayouts.com/hc/en-us/articles/203956083) and run `pnpm gmt setup --reconfigure
 travelpayouts`.", followed on the trial by "The SearchApi free trial is for `pnpm gmt smoke` only; searches never use
 it." Then: URL, user name (`operator`), "the password is in `~/.config/get-me-there/app.env`; show it with `pnpm gmt
 password` (if scrollback or a shared screen may have kept it, `pnpm gmt setup --reconfigure password` replaces it)",

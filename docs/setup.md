@@ -45,7 +45,7 @@ Pressing Enter at every question gives a running app with no price source.
 | 1 | Port | 3000, or the next free one | The app listens on this machine only (127.0.0.1). |
 | 2 | Time zone for schedules | the machine’s | Scheduled searches fire in this zone. |
 | 3 | Fare market | GB | The country whose fares the searches ask for, as two letters (GB, US, …). It can change which fares appear; prices are always shown in pounds in this build. |
-| 4 | Travelpayouts token | skip | Free prices cached from what other travellers recently searched on Aviasales, typically hours to days old; your stay and date limits are not applied, so check a fare on the airline’s site before you rely on it. Needs a free Travelpayouts account: if you have none, register at https://www.travelpayouts.com/, then open the API token page (https://support.travelpayouts.com/hc/en-us/articles/203956083). |
+| 4 | Travelpayouts token | skip | Free prices cached from what other travellers recently searched on Aviasales, typically hours to days old; your stay and date limits are not applied, so check a fare on the airline’s site before you rely on it. Needs a free Travelpayouts account: if you have none, register at https://www.travelpayouts.com/, then copy the token from your Profile’s API token section (help: https://support.travelpayouts.com/hc/en-us/articles/203956083). |
 | 5 | SearchApi | off | Google Flights results through SearchApi. The free trial is a one-off 100 searches for `pnpm gmt smoke` only: scheduled searches never use it. The $40 a month plan lets scheduled searches spend up to its 10,000 searches a month. |
 | 6 | Email alerts | skip | Send alerts and notices by email. |
 | 7 | Keep running after you log out (Linux) | no | Without it, the app stops when you log out of every session; setup runs loginctl enable-linger for you. |
@@ -95,7 +95,7 @@ so the services point at the new binary; `pnpm gmt status` flags a missing one.
 
 With no price source, the closing screen says so first:
 
-> No price source is set up yet, so searches will find nothing. The no-cost source is Travelpayouts, which needs a free account: register at https://www.travelpayouts.com/, then open the API token page (https://support.travelpayouts.com/hc/en-us/articles/203956083) and run `pnpm gmt setup --reconfigure travelpayouts`.
+> No price source is set up yet, so searches will find nothing. The no-cost source is Travelpayouts, which needs a free account: register at https://www.travelpayouts.com/, then copy the token from your Profile’s API token section (help: https://support.travelpayouts.com/hc/en-us/articles/203956083) and run `pnpm gmt setup --reconfigure travelpayouts`.
 
 Then it gives the address (`http://127.0.0.1:3000`), the user name (`operator`), and where the
 password is: in `~/.config/get-me-there/app.env`. Show it with `pnpm gmt password`, which

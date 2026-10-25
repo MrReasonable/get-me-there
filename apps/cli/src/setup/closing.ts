@@ -2,7 +2,7 @@ import type { Answers } from './answers.js';
 import { searchSource } from './answers.js';
 import { TP_SIGNUP_URL, TP_TOKEN_URL } from './prompts.js';
 
-export const NO_SOURCE_TEXT = `No price source is set up yet, so searches will find nothing. The no-cost source is Travelpayouts, which needs a free account: register at ${TP_SIGNUP_URL}, then open the API token page (${TP_TOKEN_URL}) and run \`pnpm gmt setup --reconfigure travelpayouts\`.`;
+export const NO_SOURCE_TEXT = `No price source is set up yet, so searches will find nothing. The no-cost source is Travelpayouts, which needs a free account: register at ${TP_SIGNUP_URL}, then copy the token from your Profile’s API token section (help: ${TP_TOKEN_URL}) and run \`pnpm gmt setup --reconfigure travelpayouts\`.`;
 export const TRIAL_ONLY_TEXT =
   'The SearchApi free trial is for `pnpm gmt smoke` only; searches never use it.';
 export const BACKUP_FAILED_TEXT = 'The first daily backup did not complete; take one with `pnpm gmt backup`.';

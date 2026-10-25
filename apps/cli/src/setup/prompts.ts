@@ -33,7 +33,7 @@ export const PROMPTS = [
     row: 4,
     question: 'Travelpayouts token',
     default: 'skip',
-    help: `Free prices cached from what other travellers recently searched on Aviasales, typically hours to days old; your stay and date limits are not applied, so check a fare on the airline’s site before you rely on it. Needs a free Travelpayouts account: if you have none, register at ${TP_SIGNUP_URL}, then open the API token page (${TP_TOKEN_URL}).`,
+    help: `Free prices cached from what other travellers recently searched on Aviasales, typically hours to days old; your stay and date limits are not applied, so check a fare on the airline’s site before you rely on it. Needs a free Travelpayouts account: if you have none, register at ${TP_SIGNUP_URL}, then copy the token from your Profile’s API token section (help: ${TP_TOKEN_URL}).`,
   },
   {
     row: 5,

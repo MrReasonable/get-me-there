@@ -179,7 +179,7 @@ describe('the closing screen (brief §6)', () => {
     await runCli(['setup', '--non-interactive', '--answers', '/work/a.json'], m.deps);
     const closing = m.io.stdout.slice(m.io.stdout.indexOf('No price source'));
     expect(closing.split('\n')[0]).toBe(
-      'No price source is set up yet, so searches will find nothing. The no-cost source is Travelpayouts, which needs a free account: register at https://www.travelpayouts.com/, then open the API token page (https://support.travelpayouts.com/hc/en-us/articles/203956083) and run `pnpm gmt setup --reconfigure travelpayouts`.',
+      'No price source is set up yet, so searches will find nothing. The no-cost source is Travelpayouts, which needs a free account: register at https://www.travelpayouts.com/, then copy the token from your Profile’s API token section (help: https://support.travelpayouts.com/hc/en-us/articles/203956083) and run `pnpm gmt setup --reconfigure travelpayouts`.',
     );
     for (const s of [
       'http://127.0.0.1:3000',

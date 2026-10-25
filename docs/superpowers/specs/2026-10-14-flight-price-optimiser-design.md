@@ -2851,7 +2851,7 @@ wizard asks as few questions as it can: pressing Enter through every prompt
 gives a running app with no price source, and the closing screen then says
 so first and names Travelpayouts as the no-cost source, that it needs a free
 Travelpayouts account (register at `https://www.travelpayouts.com/`, then
-open the API token page, `https://support.travelpayouts.com/hc/en-us/articles/203956083`)
+copy the token from the Profile's API token section, with `https://support.travelpayouts.com/hc/en-us/articles/203956083` as help)
 and `pnpm gmt setup --reconfigure travelpayouts`; on an interactive terminal,
 before applying the plan, it asks once "Paste a token now? (Enter to finish
 without one)", so a first run can end with a source. Each provider prompt

@@ -42,7 +42,7 @@ describe('the wizard’s prompts (brief §6)', () => {
       [7, 'Keep running after you log out (Linux)'],
     ]);
     expect(PROMPTS.find((p) => p.row === 4)?.help).toContain(
-      'Needs a free Travelpayouts account: if you have none, register at https://www.travelpayouts.com/, then open the API token page (https://support.travelpayouts.com/hc/en-us/articles/203956083).',
+      'Needs a free Travelpayouts account: if you have none, register at https://www.travelpayouts.com/, then copy the token from your Profile’s API token section (help: https://support.travelpayouts.com/hc/en-us/articles/203956083).',
     );
     expect(PROMPTS.find((p) => p.row === 1)?.help).toBe('The app listens on this machine only (127.0.0.1).');
   });
