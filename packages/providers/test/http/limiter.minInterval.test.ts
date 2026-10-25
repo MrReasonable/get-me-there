@@ -40,4 +40,25 @@ describe('limiter minIntervalMs (decision 69 ruling 7: start to start)', { timeo
       expect((at[i] ?? 0) - (at[i - 1] ?? 0)).toBeLessThan(120_000);
     }
   });
+  // why: operator ruling 2026-10-25: camoufox page spacing 0 sends minIntervalMs 0 and the no-rate-limit rates
+  it('with minIntervalMs 0 and no rate limit, six jobs start together, one at a time', async () => {
+    const { kit, events } = makeKit({
+      overrides: {
+        searchapi: {
+          minIntervalMs: 0,
+          ratePerMinute: Number.MAX_SAFE_INTEGER,
+          ratePerHour: Number.MAX_SAFE_INTEGER,
+          concurrency: 1,
+        },
+      },
+    });
+    server.use(http.get(SEARCH, () => HttpResponse.json({ ok: true })));
+    await drive(Promise.all([1, 2, 3, 4, 5, 6].map((i) => kit.request(nth(i)))), {
+      stepMs: 1000,
+      maxMs: 5000,
+    });
+    const at = starts(events);
+    expect(at).toHaveLength(6);
+    expect(Math.max(...at) - Math.min(...at)).toBeLessThan(1000);
+  });
 });

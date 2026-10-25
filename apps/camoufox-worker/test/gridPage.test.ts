@@ -205,6 +205,22 @@ describe('grid pages: the live run’s first page', () => {
 });
 
 describe('grid pages: the flow', () => {
+  // why: operator ruling 2026-10-25: CAMOUFOX_GRID_SCROLL_SPACING_SECONDS=0 is no pause between scroll clicks
+  it('with a scroll spacing of 0 the scrolls do not wait; with 5 s they do', async () => {
+    const run = async (spacingMs: number) => {
+      const at: number[] = [];
+      const t = setup({ grid: { ...GRID, spacingMs }, onScroll: (x) => at.push(x) });
+      const moves: GridMove[] = Array(4).fill('down');
+      const r = await t.session.page(req(moves, { reads: [true, false, false, false, true] }));
+      expect(r.answer).toMatchObject({ kind: 'grid', scrolls: 4, ended: 'complete' });
+      return { gaps: at.slice(1).map((x, i) => x - (at[i] ?? 0)), sleeps: t.timers.sleeps };
+    };
+    const zero = await run(0);
+    const five = await run(5000);
+    expect(five.gaps.every((g) => g >= 5000)).toBe(true);
+    expect(zero.gaps.every((g) => g < 5000)).toBe(true);
+    expect(zero.sleeps.reduce((x, y) => x + y, 0)).toBeLessThan(five.sleeps.reduce((x, y) => x + y, 0));
+  });
   it('opens the first block, moves seven days down a scroll at a time 5 s apart, reads the planned views and counts the scrolls', async () => {
     const at: number[] = [];
     const t = setup({ onScroll: (x) => at.push(x) });

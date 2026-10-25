@@ -254,7 +254,7 @@ export function camoufoxWorkerUrlOk(raw: string): boolean {
 }
 
 /**
- * Spec §12 "Where settings live" (review R27): the nine shared settings, read once through core's one rule set
+ * Spec §12 "Where settings live" (review R27): the ten shared settings, read once through core's one rule set
  * (readSharedSettings), whether or not camoufox is enabled; every invalid name is reported, and the typed fields below
  * all come from the one effective record.
  */
@@ -263,6 +263,9 @@ function sharedSettingsOf(r: Reader): SharedSettings {
   for (const n of shared.invalid) r.fail(n, sharedSettingMessage(n));
   return shared.settings;
 }
+
+/** The rate a limiter reads as "no rate limit" (camoufox page spacing 0): too large for any run's page caps to reach. */
+export const NO_RATE_LIMIT = Number.MAX_SAFE_INTEGER;
 
 /** Spec §12 rev 32: the camoufox block; validated whether or not it is enabled, built only when it is. */
 function camoufoxConfig(r: Reader, shared: SharedSettings): Config['providers']['camoufox'] {
@@ -274,7 +277,7 @@ function camoufoxConfig(r: Reader, shared: SharedSettings): Config['providers'][
   const gridScrollCap = sharedInt(shared, 'CAMOUFOX_GRID_SCROLL_CAP');
   const executionScrollCap = r.int('CAMOUFOX_EXECUTION_SCROLL_CAP', 0, 6000) ?? 600;
   const monthlyScrollCap = sharedInt(shared, 'CAMOUFOX_MONTHLY_SCROLL_CAP');
-  const minSpacingSeconds = r.int('CAMOUFOX_MIN_SPACING_SECONDS', 30, 600) ?? 30;
+  const minSpacingSeconds = sharedInt(shared, 'CAMOUFOX_MIN_SPACING_SECONDS');
   const executionPageCap = r.int('CAMOUFOX_EXECUTION_PAGE_CAP', 1, 400) ?? 100;
   const monthlyCallCap = sharedInt(shared, 'CAMOUFOX_MONTHLY_PAGE_CAP');
   const billingDay = sharedInt(shared, 'CAMOUFOX_BILLING_DAY');
@@ -307,8 +310,11 @@ function camoufoxConfig(r: Reader, shared: SharedSettings): Config['providers'][
       window: 'month',
       billingDay,
       // why: display and reservoirs only; the app's limiter spaces starts by minIntervalMs = spacing × 1000 (ruling 7).
-      ratePerMinute: Math.max(1, Math.floor(60 / minSpacingSeconds)),
-      ratePerHour: Math.floor(3600 / minSpacingSeconds),
+      // Spacing 0 (operator, 2026-10-25) means no rate limit: the page caps alone bound a run, so there is no division
+      // by zero and the reservoirs never bind.
+      ratePerMinute:
+        minSpacingSeconds === 0 ? NO_RATE_LIMIT : Math.max(1, Math.floor(60 / minSpacingSeconds)),
+      ratePerHour: minSpacingSeconds === 0 ? NO_RATE_LIMIT : Math.floor(3600 / minSpacingSeconds),
       concurrency: 1,
       cacheTtlHours: 0,
       costPerCallMicroGbp: 0,
