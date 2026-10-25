@@ -1,16 +1,15 @@
 /**
  * `gmt status`'s app report (spec §10 `GET /status`, brief WP18 Task 18.5): the same checks the Status view shows, read
- * from the running app on 127.0.0.1 with the basic auth in app.env (never in an argv), or for the app in Docker with no
- * native install (W1) the basic auth in the checkout's .env, printed beside WP16b's local facts. A fix is the `pnpm gmt` command when the app names one, else its words. The password travels only in the
- * Authorization header of one in-process request.
+ * from this machine's app on 127.0.0.1 through `appEndpoint` (the native app with app.env's basic auth, or with no
+ * native install the app in Docker with the checkout's .env's; never in an argv), printed beside WP16b's local facts. A
+ * fix is the `pnpm gmt` command when the app names one, else its words. The password travels only in the Authorization
+ * header of one in-process request.
  */
 import { apiContract } from '@gmt/core';
-import { type AppCreds, appUrl, authHeaders, credsFrom } from './appClient.js';
+import { type AppEndpoint, nativeEndpoint } from './appEndpoint.js';
 import type { Flags } from './args.js';
 import { type Deps, EXIT } from './deps.js';
 import { type Check, describeChecks } from './services/checks.js';
-import { appEnvPath } from './services/specs.js';
-import { readEnvText } from './setup/appEnv.js';
 
 export type StatusReport = apiContract.StatusResponse;
 export type StatusCheck = apiContract.StatusCheck;
@@ -19,37 +18,13 @@ export type ReportRead = { kind: 'ok'; report: StatusReport } | { kind: 'down'; 
 /** The areas `--only` accepts. */
 export const STATUS_AREAS: readonly string[] = apiContract.statusAreaSchema.options;
 
-/** Where the app's report is read: its port on 127.0.0.1 and, when known, its basic auth; or why it cannot be read. */
-export type AppAccess =
-  | { kind: 'ready'; port: number; creds: AppCreds | null }
-  | { kind: 'none'; reason: string };
-
-/** The native app's access, from app.env: its port and, when app.env has them, the credentials. */
-export function nativeAccess(deps: Deps): AppAccess {
-  let text: string | null;
-  try {
-    text = deps.files.read(appEnvPath(deps.platform.paths));
-  } catch {
-    return {
-      kind: 'none',
-      reason: 'app.env could not be read: check that it is yours and readable (chmod 600)',
-    };
-  }
-  if (text === null) return { kind: 'none', reason: 'there is no app.env yet: run pnpm gmt setup' };
-  const record = readEnvText(text);
-  const creds = credsFrom(record);
-  const port =
-    creds?.port ?? (record.PORT !== undefined && /^\d+$/.test(record.PORT) ? Number(record.PORT) : 3000);
-  return { kind: 'ready', port, creds };
-}
-
 /** `GET /api/status`: the report, or why there is none (no settings to read, no answer, an answer that is not the report). */
-export async function readReport(deps: Deps, a: AppAccess = nativeAccess(deps)): Promise<ReportRead> {
+export async function readReport(deps: Deps, a: AppEndpoint = nativeEndpoint(deps)): Promise<ReportRead> {
   if (a.kind === 'none') return { kind: 'down', reason: a.reason };
   const r = await deps.http({
     method: 'GET',
-    url: appUrl(a.port, '/api/status'),
-    headers: a.creds === null ? {} : authHeaders(a.creds),
+    url: `${a.baseUrl}/api/status`,
+    headers: a.headers,
     // why: the app's own worker read is bounded at 2 s; the rest is local reads
     timeoutMs: 15_000,
   });
@@ -101,13 +76,13 @@ function nativeNextStep(local: readonly Check[], port: number | null): string {
 
 /** Which app `gmt status` reads, and what it says to do when that app does not answer. */
 export interface StatusTarget {
-  access: AppAccess;
+  endpoint: AppEndpoint;
   nextStep: (local: readonly Check[], port: number | null) => string;
 }
 
 /** The native app: app.env's port and basic auth, and the service manager's next steps. */
 export const nativeTarget = (deps: Deps): StatusTarget => ({
-  access: nativeAccess(deps),
+  endpoint: nativeEndpoint(deps),
   nextStep: nativeNextStep,
 });
 
@@ -124,10 +99,10 @@ export async function finishStatus(
   local: readonly Check[],
   target: StatusTarget = nativeTarget(deps),
 ): Promise<number> {
-  const read = await readReport(deps, target.access);
+  const read = await readReport(deps, target.endpoint);
   const reportOnly = rf.only !== null || rf.json;
   if (read.kind === 'down') {
-    const step = target.nextStep(local, target.access.kind === 'ready' ? target.access.port : null);
+    const step = target.nextStep(local, target.endpoint.kind === 'none' ? null : target.endpoint.port);
     if (rf.json)
       deps.io.out(
         `${JSON.stringify({ appAnswering: false, reason: read.reason, nextStep: step, checks: local })}\n`,

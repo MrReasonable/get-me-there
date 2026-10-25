@@ -1,6 +1,6 @@
 import { join } from 'node:path/posix';
 import { BACKUP_MAX_AGE_MS, backupTimeOf, START_REFUSAL_TEXT } from '@gmt/core';
-import { credsFrom } from '../appClient.js';
+import { type DockerAppState, dockerAppState, dockerEndpoint } from '../appEndpoint.js';
 import type { Flags } from '../args.js';
 import { type Deps, EXIT } from '../deps.js';
 import { apply } from '../plan/apply.js';
@@ -9,7 +9,7 @@ import { type Check, scheduleUnit, settingsChecks, staleChecks } from '../servic
 import { factOf, factsOf, type ServiceEntry, serviceSet } from '../services/set.js';
 import { appEnvPath, dailyBackupsDir, isLoopback } from '../services/specs.js';
 import { readEnvText } from '../setup/appEnv.js';
-import { COMPOSE_PROJECT, compose, composeServicesRead } from '../setup/docker.js';
+import { COMPOSE_PROJECT } from '../setup/docker.js';
 import { finishStatus, nativeTarget, reportFlags, type StatusTarget } from '../statusReport.js';
 import { bootOutRefused, readStartRefusal, refusalLine, WORKER_LABEL } from '../worker/refusal.js';
 import { refuseOnWindows } from './lifecycle.js';
@@ -74,24 +74,6 @@ function logsCheck(deps: Deps): Check | null {
 }
 
 /**
- * The compose project's `app` (spec §13): running, stopped, absent, `unknown` when docker answered but its compose state
- * could not be read (`docker compose ps` failed, or printed what is not compose's JSON), or null with no docker command.
- */
-type DockerApp = 'running' | 'stopped' | 'absent' | 'unknown' | null;
-
-async function dockerApp(deps: Deps): Promise<DockerApp> {
-  const run = (argv: string[]) => deps.run(argv, { cwd: deps.checkout, timeoutMs: 20_000 });
-  if ((await run(['docker', '--version'])).code !== 0) return null;
-  const ps = await run(compose('ps', '-a', '--format', 'json'));
-  // why: ca-b1-011: one parser for compose's NDJSON or array output
-  const services = ps.code === 0 ? composeServicesRead(ps.stdout) : null;
-  if (services === null) return 'unknown';
-  const app = services.find((s) => s.Service === 'app');
-  if (app === undefined) return 'absent';
-  return app.State === 'running' ? 'running' : 'stopped';
-}
-
-/**
  * The app mode status reports on (W1: the app in Docker with the worker on this machine is supported). `unknown`: no
  * native install, and Docker's compose state could not be read, so whether the app is in Docker is not known.
  */
@@ -109,13 +91,13 @@ function nativeInstalled(
   );
 }
 
-function modeOf(native: boolean, docker: DockerApp): AppMode {
+function modeOf(native: boolean, docker: DockerAppState): AppMode {
   if (native) return docker === 'running' ? 'both' : 'native';
   if (docker === 'running' || docker === 'stopped') return 'docker';
   return docker === 'unknown' ? 'unknown' : 'none';
 }
 
-function dockerCheck(mode: AppMode, docker: DockerApp): Check | null {
+function dockerCheck(mode: AppMode, docker: DockerAppState): Check | null {
   if (docker === null) return null;
   if (docker === 'unknown')
     return {
@@ -149,37 +131,16 @@ function dockerCheck(mode: AppMode, docker: DockerApp): Check | null {
   return { name: 'docker', level: 'ok', detail: 'no Docker app running', fix: null };
 }
 
-/**
- * How status reaches the Docker app (W1): the host port compose publishes for the container's 3000 (docker-compose.yml
- * fixes the container's PORT, so a PORT line in .env is not it), and the basic auth in the checkout's .env, read and
- * never printed. A stopped container has no report to read, and with no published port known the credentials are not
- * read or sent anywhere: a guessed port could be another program's.
- */
-async function dockerTarget(deps: Deps, docker: DockerApp): Promise<StatusTarget> {
-  const nextStep = (_local: readonly Check[], port: number | null): string =>
+/** What to do when the Docker app does not answer: a docker compose command, never a native one. */
+function dockerNextStep(docker: DockerAppState) {
+  return (_local: readonly Check[], port: number | null): string =>
     port !== null
       ? `the Docker app is running but does not answer on port ${port}: docker compose logs app shows why; docker compose restart app tries again`
       : docker === 'running'
         ? 'docker compose port app 3000 shows what compose publishes; docker compose logs app shows the app'
-        : 'the Docker app is stopped: docker compose start app';
-  const none = (reason: string): StatusTarget => ({ access: { kind: 'none', reason }, nextStep });
-  if (docker !== 'running') return none('the Docker app is not running');
-  const published = await deps.run(compose('port', 'app', '3000'), { cwd: deps.checkout, timeoutMs: 20_000 });
-  const m =
-    published.code === 0
-      ? /^(?:127\.0\.0\.1|0\.0\.0\.0|\[::1?\]|::):(\d+)$/.exec(published.stdout.trim())
-      : null;
-  const port = m?.[1] === undefined ? null : Number(m[1]);
-  if (port === null || port < 1 || port > 65535)
-    return none('compose did not say which host port the Docker app publishes');
-  let text: string | null;
-  try {
-    text = deps.files.read(join(deps.checkout, '.env'));
-  } catch {
-    return none('the checkout’s .env could not be read: check that it is yours and readable (chmod 600)');
-  }
-  const creds = text === null ? null : credsFrom(readEnvText(text));
-  return { access: { kind: 'ready', port, creds: creds === null ? null : { ...creds, port } }, nextStep };
+        : docker === 'unknown'
+          ? 'start Docker, then run pnpm gmt status again'
+          : 'the Docker app is stopped: docker compose start app';
 }
 
 async function checkoutCheck(deps: Deps): Promise<Check> {
@@ -250,7 +211,7 @@ const workerUnit = (deps: Deps) => ({
 export async function statusFacts(deps: Deps): Promise<{ checks: Check[]; target: StatusTarget }> {
   const entries = serviceSet(deps);
   const facts = await factsOf(deps, entries);
-  const docker = await dockerApp(deps);
+  const docker = await dockerAppState(deps);
   const mode = modeOf(nativeInstalled(deps, entries, facts), docker);
   // why: with no native install and Docker's state unknown, the native checks would only say to set one up
   const inDocker = mode === 'docker' || mode === 'unknown';
@@ -277,18 +238,9 @@ export async function statusFacts(deps: Deps): Promise<{ checks: Check[]; target
       detail: refusalLine(refusal),
       fix: START_REFUSAL_TEXT[refusal.reason].fixCommand,
     });
-  const target: StatusTarget =
-    mode === 'docker'
-      ? await dockerTarget(deps, docker)
-      : mode === 'unknown'
-        ? {
-            access: {
-              kind: 'none',
-              reason: 'there is no native install, and Docker’s compose state could not be read',
-            },
-            nextStep: () => 'start Docker, then run pnpm gmt status again',
-          }
-        : nativeTarget(deps);
+  const target: StatusTarget = inDocker
+    ? { endpoint: await dockerEndpoint(deps, docker), nextStep: dockerNextStep(docker) }
+    : nativeTarget(deps);
   return { checks, target };
 }
 
