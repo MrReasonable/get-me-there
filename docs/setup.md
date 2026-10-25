@@ -154,8 +154,8 @@ skips the question, and once earlier tool runs have used credits in the window i
 stops anything, and refuses while a search is running (naming it and its estimated finish)
 unless `--wait` or `--force`. It then stops the app, backs up into `backups/update` (with a
 `.commit` file naming the commit it was taken at), merges, installs, builds, restarts, waits for
-health and shows the status. If a step fails it prints the commit it started from, the backup,
-and both ways back; running `pnpm gmt update` again carries on from the failed step.
+health and shows the status. If a step fails it prints the commit it started from, the backup
+(or why there is none), and the ways back; running `pnpm gmt update` again carries on from the failed step.
 
 ### Moving from Docker or from a checkout
 

@@ -17,21 +17,32 @@ import { statusCommand } from './status.js';
 
 export { forceStatement } from './guard.js';
 
-/** What to do when a step after the stop failed (spec §13): nothing is rolled back; both ways back are printed, quoted. */
-export function failureReport(step: string, commit: string, backup: string): string {
+/**
+ * What to do when a step after the stop failed (spec §13): nothing is rolled back; the way back to the old code, and the
+ * restore of the backup when this update took one, both printed and quoted. Without a backup it says why and gives no
+ * restore steps, since there is nothing to restore.
+ */
+export function failureReport(step: string, commit: string, backup: string | { none: string }): string {
+  const file = typeof backup === 'string' ? backup : null;
   return [
     `update stopped at ${step}; nothing was rolled back.`,
-    `The checkout was at ${commit}; the backup taken before the change is ${backup}.`,
+    typeof backup === 'string'
+      ? `The checkout was at ${commit}; the backup taken before the change is ${backup}.`
+      : `The checkout was at ${commit}; there is no backup from this update (${backup.none}).`,
     'To finish the update, fix what failed and run pnpm gmt update again: it carries on from the failed step.',
     'If the database was not migrated (the app never started on the new code), go back to the old code:',
     `  ${commandLine(['git', 'checkout', commit])} && pnpm install --frozen-lockfile && pnpm build && pnpm gmt start`,
-    'Otherwise restore the backup (docs/setup.md section 0, "Restore (native)"):',
-    '  pnpm gmt stop',
-    `  ${commandLine(['git', 'checkout', commit])}`,
-    '  pnpm install --frozen-lockfile',
-    '  pnpm build',
-    `  ${commandLine(['pnpm', 'gmt', 'restore', backup])}`,
-    '  pnpm gmt start',
+    ...(file === null
+      ? []
+      : [
+          'Otherwise restore the backup (docs/setup.md section 0, "Restore (native)"):',
+          '  pnpm gmt stop',
+          `  ${commandLine(['git', 'checkout', commit])}`,
+          '  pnpm install --frozen-lockfile',
+          '  pnpm build',
+          `  ${commandLine(['pnpm', 'gmt', 'restore', file])}`,
+          '  pnpm gmt start',
+        ]),
     'The checkout is then on a detached commit: run git switch main before the next update.',
     '',
   ].join('\n');
@@ -208,7 +219,9 @@ export async function updateCommand(flags: Flags, _p: string | null, deps: Deps)
   if (resuming) deps.io.out(`finishing the update to ${target}, from the step after ${state.step}\n`);
   const stopped = await apply(stopPlan, deps.executor);
   if (stopped.failed !== null) return refuse(deps, describeResult(stopPlan.command, stopped), EXIT.failed);
-  let backup = resuming ? (state.backup ?? '(none recorded)') : '(no change of code, so none)';
+  let backup: string | { none: string } = resuming
+    ? (state.backup ?? { none: 'none was recorded' })
+    : { none: 'no code changed, so none was taken' };
   if (changeCode) {
     const b = await apply(backupPlan, deps.executor);
     const printed = b.failed === null ? printedBackup(b.outputs.at(-1) ?? '', dir) : null;
@@ -218,7 +231,8 @@ export async function updateCommand(flags: Flags, _p: string | null, deps: Deps)
       );
       return EXIT.failed;
     }
-    backup = printed.file;
+    const file = printed.file;
+    backup = file;
     // why: U6 (pf-b1-009): the commit the backup goes with, beside it, so a restore can pick the matching code
     const sidecar = await apply(
       {
@@ -226,7 +240,7 @@ export async function updateCommand(flags: Flags, _p: string | null, deps: Deps)
         actions: [
           {
             kind: 'writeFile',
-            path: `${backup}.commit`,
+            path: `${file}.commit`,
             contents: `${commit}\n`,
             mode: 0o600,
             secret: false,
@@ -237,9 +251,9 @@ export async function updateCommand(flags: Flags, _p: string | null, deps: Deps)
       deps.executor,
     );
     if (sidecar.failed !== null) deps.io.err(describeResult('update: record the backup’s commit', sidecar));
-    deps.io.out(`backup before the update: ${backup} (taken at ${commit}; ${backup}.commit says so)\n`);
+    deps.io.out(`backup before the update: ${file} (taken at ${commit}; ${file}.commit says so)\n`);
   }
-  for (const [step, actions] of codePlan(changeCode ? backup : (state?.backup ?? null))) {
+  for (const [step, actions] of codePlan(typeof backup === 'string' ? backup : null)) {
     const r = await apply({ command: `update: ${step}`, actions, notes: [] }, deps.executor);
     if (r.failed !== null) {
       deps.io.err(`${describeResult(`update: ${step}`, r)}${failureReport(step, from, backup)}`);

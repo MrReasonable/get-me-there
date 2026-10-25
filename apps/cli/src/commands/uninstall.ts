@@ -20,8 +20,6 @@ export function uninstallPaths(deps: Deps): { removed: string[]; kept: string[] 
   };
 }
 
-const inside = (path: string, dir: string): boolean => path === dir || path.startsWith(`${dir}/`);
-
 /** Why `--purge` must not delete a directory, or null: a symlink, the home, the root, or a name not get-me-there. */
 export function purgeRefusal(path: string, home: string, files: Files): string | null {
   if (files.isSymlink(path)) return `${path} is a symbolic link`;
@@ -106,9 +104,10 @@ export async function uninstallCommand(flags: Flags, _p: string | null, deps: De
     } else deps.io.out(`Linger stays on; to turn it off later: ${line}\n`);
   }
   const paths = uninstallPaths(deps);
-  // why: dev-b1-013: the worker's directory never moves with XDG_STATE_HOME, so a purge can leave it
+  // why: dev-b1-013: the worker's directory never moves with XDG_STATE_HOME, so a purge can leave it; read after the
+  // removals, so one inside a purged directory is already gone
   const left =
-    purge && !purgeDirs.some((d) => inside(p.workerData, d)) && deps.files.isDir(p.workerData)
+    purge && deps.files.isDir(p.workerData)
       ? [
           `left in place: ${p.workerData} (the browser worker’s directory, outside the purged ones; delete it yourself if you want it gone)`,
         ]

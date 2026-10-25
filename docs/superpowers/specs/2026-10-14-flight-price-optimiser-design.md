@@ -2931,7 +2931,8 @@ re-render the units, start, wait up to 240 s for health (the compose start
 period: a stale-lock wait, backup, migrations and seeding), remove the
 previous Camoufox bundle once healthy, and run `status`. A failure at any
 step after the stop prints the recorded commit, the backup and the native
-restore steps, plus the shorter path when the database was not migrated
+restore steps (with no backup from this update, as when no code changed, it
+says so and prints no restore steps), plus the shorter path when the database was not migrated
 (`git checkout <commit>`, `pnpm install --frozen-lockfile`, `pnpm build`,
 `pnpm gmt start`), shell-quoted, and rolls nothing back itself; a failed backup
 before the merge changes no code. **Restore (native):** `pnpm
