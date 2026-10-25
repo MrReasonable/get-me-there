@@ -34,6 +34,16 @@ afterEach(() => {
   for (const c of children.splice(0)) if (c.exitCode === null && c.signalCode === null) c.kill('SIGKILL');
 });
 
+// why: in the camoufox-install job a missing install is a failure, never a quiet skip
+describe.skipIf(process.env.CAMOUFOX_INSTALL_SMOKE !== '1')(
+  'install smoke: asked for, so the pinned install must be there',
+  () => {
+    it('finds the bundle gmt setup installed for this machine', () => {
+      expect(installed).not.toBeNull();
+    });
+  },
+);
+
 describe.skipIf(!enabled)(title, () => {
   it('launches headless with no Node-side fetch, the pinned build, no cookies and, on Linux, FONTCONFIG_FILE', async () => {
     const data = tmpDir();

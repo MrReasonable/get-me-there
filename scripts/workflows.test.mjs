@@ -359,7 +359,8 @@ describe('WP16b: the image carries the CLI manifest only, filtered out of both i
 const INSTALL_JOBS = ['install-e2e', 'camoufox-install'];
 const BASE_HOSTS = ['registry.npmjs.org', '127.0.0.1', 'localhost'];
 // why: WP16b (decision 77): the test job and install-e2e run on a matrix of pinned images, named in the matrix
-const RUNNERS = ['ubuntu-24.04', 'ubuntu-24.04-arm', 'macos-15', 'windows-2025'];
+// why: WP17 (decision 77): macos-15-intel too, which WP16b's research found for the darwin-x64 entry
+const RUNNERS = ['ubuntu-24.04', 'ubuntu-24.04-arm', 'macos-15', 'macos-15-intel', 'windows-2025'];
 // why: CodeRabbit …k7_: the one runner expression allowed; its matrix values are checked against RUNNERS
 const MATRIX_RUNNER = ['$', '{{ matrix.runner }}'].join('');
 /** Why a permissions block grants more than read, or null (sec-b1-004, CodeRabbit …k8D). */
@@ -691,5 +692,62 @@ describe('WP16b: the CI matrix, install-e2e and the Windows leg (decisions 77, 7
       port: 3917,
       linger: 'enable',
     });
+  });
+});
+
+// why: WP17 Task 17.9 (decision 77): the camoufox-install job, on the pin's and the install code's changes and weekly
+describe('WP17: the camoufox-install job', () => {
+  const wf = () => YAML.parse(text('camoufox-install.yml'));
+  const PATHS = [
+    'packages/core/src/camoufox/builds.ts',
+    'apps/cli/src/camoufox/**',
+    'apps/cli/src/camoufoxInstall.ts',
+    'apps/camoufox-worker/src/install.ts',
+    'apps/camoufox-worker/src/launch.ts',
+    'apps/camoufox-worker/src/fonts.ts',
+    'apps/camoufox-worker/src/run.ts',
+    '.github/workflows/camoufox-install.yml',
+  ];
+  it('runs on the pin’s and the install code’s paths, and weekly', () => {
+    const on = wf().on;
+    expect(on.push.paths).toEqual(PATHS);
+    expect(on.pull_request.paths).toEqual(PATHS);
+    expect(on.schedule).toEqual([{ cron: '23 5 * * 1' }]);
+  });
+  it('covers each pinned entry’s runner, Intel macOS included, with a timeout and read-only permissions', () => {
+    const job = wf().jobs['camoufox-install'];
+    expect(job.strategy.matrix.runner).toEqual([
+      'ubuntu-24.04',
+      'ubuntu-24.04-arm',
+      'macos-15',
+      'macos-15-intel',
+    ]);
+    expect(job['timeout-minutes']).toBe(45);
+    expect(job.permissions).toEqual({ contents: 'read' });
+  });
+  it('caches by the entry’s SHA-256, downloads with a step timeout and one retry, checks the digest, then the loopback launch', () => {
+    const steps = wf().jobs['camoufox-install'].steps;
+    const restore = steps.find((s) => String(s.uses ?? '').startsWith('actions/cache/restore@'));
+    expect(restore.with.key).toBe('camoufox-${{ steps.pin.outputs.key }}-${{ steps.pin.outputs.sha256 }}');
+    const install = steps.find((s) => String(s.run ?? '').includes('camoufoxInstall.ts'));
+    expect(install['timeout-minutes']).toBe(20);
+    expect(String(install.run).match(/camoufoxInstall\.ts/g)).toHaveLength(2);
+    expect(String(install.run)).toContain(' || ');
+    expect(
+      steps.some((s) => String(s.run ?? '').includes('the bundle does not name the pinned digest')),
+    ).toBe(true);
+    const smoke = steps.at(-1);
+    expect(smoke.env).toEqual({ CAMOUFOX_INSTALL_SMOKE: '1' });
+    expect(String(smoke.run)).toContain('test/install.smoke.test.ts');
+    const names = steps.map((s) => s.name ?? s.uses ?? s.run);
+    expect(names.indexOf(install.name)).toBeLessThan(names.indexOf(smoke.name));
+  });
+  it('the release hosts are allowed in this job only: the same step under another job name fails', () => {
+    const wfText = (job) =>
+      `on: push\npermissions:\n  contents: read\njobs:\n  ${job}:\n    runs-on: ubuntu-24.04\n    steps:\n      - run: curl -fsSL https://release-assets.githubusercontent.com/x -o x.zip\n`;
+    expect(guardProblems(wfText('camoufox-install'))).toEqual([]);
+    expect(guardProblems(wfText('build'))).toContain(
+      'build: host release-assets.githubusercontent.com is off its allowlist',
+    );
   });
 });
