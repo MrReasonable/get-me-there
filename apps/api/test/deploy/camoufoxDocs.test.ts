@@ -29,7 +29,7 @@ beforeEach(() => {
 
 describe('docs/setup.md section 14 (the Camoufox provider)', () => {
   it('has the heading and every step the brief names', () => {
-    expect(setup).toContain('## 14. The Camoufox provider (optional, off by default; macOS only)');
+    expect(setup).toContain('## 14. The Camoufox provider (optional, off by default; macOS and Linux)');
     for (const w of [
       'capture-socs',
       'pnpm --filter @gmt/camoufox-worker status',
@@ -52,11 +52,31 @@ describe('docs/setup.md section 14 (the Camoufox provider)', () => {
       'reads as an unrecognised page and pauses the provider for an hour, so empty routes',
     );
   });
-  it('never puts the key on a command line, and has no Linux, docker0 or systemd setup text', () => {
+  // why: WP17 Task 17.10: Linux is set up natively (headless, its libraries and fonts); the Docker path there stays off
+  it('never puts the key on a command line, and has no docker0 text', () => {
     expect(setup).not.toMatch(/\$\(grep[^)]*CAMOUFOX_WORKER_KEY/);
     expect(setup).not.toMatch(/export CAMOUFOX_WORKER_KEY=/);
     expect(section).not.toMatch(/CAMOUFOX_WORKER_KEY=[0-9a-f]/);
-    for (const bad of ['docker0', 'systemd', 'Linux']) expect(section, bad).not.toContain(bad);
+    expect(section).not.toContain('docker0');
+  });
+  it('WP17 Task 17.10: gmt setup’s browser row, its order, resuming, no display, Linux, the monthly caps, sizes and key rotation', () => {
+    const f = flat(section);
+    for (const w of [
+      '### Set it up',
+      'pnpm gmt setup --reconfigure browser',
+      'The browser provider is not available on this machine yet (no recordings for <os>-<arch>); SearchApi and Travelpayouts work',
+      "Page loads will come from this server's address, not a home connection.",
+      '313 MB and about 670 MB on macOS, 654 MB and about 1.25 GB on Linux',
+      'only once it finds your consent choice does `app.env` gain `CAMOUFOX_ENABLED=true`',
+      '### On a machine with no display',
+      '### Linux',
+      '`RestartPreventExitStatus=78`',
+      '### The monthly caps across every caller',
+      '### Key rotation',
+      '### Appendix: the manual steps',
+      'never as a command-line argument and never in a ticket',
+    ])
+      expect(f, w).toContain(w);
   });
   it('states every cost, the operator’s responsibility and the coverage arithmetic', () => {
     for (const c of COSTS) expect(section, c).toContain(c);

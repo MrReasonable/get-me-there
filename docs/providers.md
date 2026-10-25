@@ -66,8 +66,9 @@ Labels: VERIFIED = read on an official page; REPORTED = third-party; UNKNOWN = n
 
 ### Camoufox provider (self-scraped, opt-in)
 
-**Method.** A host-side worker (`apps/camoufox-worker`, a Node process on the operator's Mac; macOS only) launches the
-operator's installed Camoufox through `camoufox-js` 0.11.5 and `playwright-core` 1.59.1, in a persistent signed-out
+**Method.** A host-side worker (`apps/camoufox-worker`, a Node process on the operator's machine; macOS or Linux, each
+`<os>-<arch>` offered once recordings under its pinned build set its flags, `darwin-arm64` today; Windows is a later
+release) launches the Camoufox build `pnpm gmt setup` installed from the pinned release through `camoufox-js` 0.11.5 and `playwright-core` 1.59.1, in a persistent signed-out
 profile of its own, with service workers blocked. The app's adapter calls the worker over HTTP at `CAMOUFOX_WORKER_URL`
 with `CAMOUFOX_WORKER_KEY`; one worker call makes at most one Google page load at
 `https://www.google.com/travel/flights?q=Flights from <origin> to <destination> on <depart> returning <return>&curr=GBP&hl=en-GB&gl=<POINT_OF_SALE>`.

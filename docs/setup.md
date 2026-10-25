@@ -58,8 +58,9 @@ host, port, TLS, user, password, and the to and from addresses. Row 7 runs
 you to run, and setup never runs `sudo` itself. `pnpm gmt setup --reconfigure linger` changes it
 later.
 
-With the browser provider (a later release; row 8 sets it up), one more question is asked by
-`pnpm gmt setup --reconfigure browser` only: "Browser provider after an interruption". If a run is interrupted (for example the laptop sleeps), should the browser part finish when it resumes, even outside the scheduled hours? [no]
+Row 8 is the browser provider, offered after the app is running and only where this machine has
+verified recordings (section 14: its costs come first, and it stays off unless you say yes). One
+more question is asked by `pnpm gmt setup --reconfigure browser` only: "Browser provider after an interruption". If a run is interrupted (for example the laptop sleeps), should the browser part finish when it resumes, even outside the scheduled hours? [no]
 
 When no price source was chosen and the terminal is interactive, setup asks once, before it
 changes anything: "Paste a token now? (Enter to finish without one)". A pasted token is the
@@ -823,12 +824,12 @@ Each checklist line reads `ok`, `FAIL`, `skip` or `look`:
 Codes `2` and `3` are not faults of the app: `2` means no provider key is set; `3` means a
 provider had no price for those days.
 
-## 14. The Camoufox provider (optional, off by default; macOS only)
+## 14. The Camoufox provider (optional, off by default; macOS and Linux)
 
 ### What it is and what it costs
 
-The `camoufox` provider reads Google Flights itself, in Camoufox (a Firefox-based browser you have installed on your
-Mac), started by a small worker process on the Mac. It is a continuity fallback for when SearchApi is
+The `camoufox` provider reads Google Flights itself, in Camoufox (a Firefox-based browser that `pnpm gmt setup` installs on
+this machine), started by a small worker process on the same machine. It is a continuity fallback for when SearchApi is
 not available. It prices discovery cells only: one day pair a page, the cheapest round-trip price Google Flights lists,
 labelled "Google Flights prices via Camoufox". Read its costs before you turn it on:
 
@@ -867,35 +868,89 @@ sets the flag back, and empty routes then read as not searched again.
   retries it.
 - The camofox-browser server is not used and need not run.
 
-### Set it up (macOS)
+### Set it up
 
-1. Create the worker's data directory, private to you:
-   `mkdir -p -m 700 ~/.local/state/get-me-there/camoufox`
-2. Run `pnpm install` in a checkout of this repository. The worker runs from source; repeat it after every `git pull`.
-   The worker launches the Camoufox bundle already installed under `~/Library/Caches/camoufox/browsers/official/`
-   (`<version>-<build>-<id>/`, the layout the camofox-browser installer leaves; the pinned build is `152.0.4-beta.28`).
-   It creates the `Camoufox.app` link and the top-level `version.json` beside it itself, and refuses anything that
-   disagrees rather than rewriting it. It never downloads a browser: camoufox-js's own `fetch` unpacks into a different,
-   flat layout, which the worker refuses. `pnpm --filter @gmt/camoufox-worker status` names the build it launched. macOS
-   may purge `~/Library/Caches`: if the bundle is gone, reinstall it with the same installer, then run `status`.
-3. Capture your cookie choice. In an ordinary private browser window open `https://www.google.com/travel/flights`, click
-   **Reject all**, then open the cookie view (developer tools, Storage or Application, cookies for
-   `https://www.google.com`). Run `pnpm --filter @gmt/camoufox-worker capture-socs` and paste the `SOCS` cookie's value,
-   expiry, Secure and SameSite when asked. It stamps the time and writes the file 0600; capture again within 13 months.
-4. Create `~/.local/state/get-me-there/camoufox/worker.env` in an editor (never with `echo`) and make it private with
-   `chmod 600 ~/.local/state/get-me-there/camoufox/worker.env`. It holds `CAMOUFOX_WORKER_KEY`, at least 32 random
-   characters: generate them with `openssl rand -hex 24 > ~/.local/state/get-me-there/camoufox/key.tmp`, paste them from
-   that file into `worker.env`, then delete `key.tmp`. Add `CAMOUFOX_BINARY_BUILD` only if your Camoufox build is not the
-   default one. That file is the only place the key lives on the Mac.
-5. Start it: `pnpm --filter @gmt/camoufox-worker start` to try it, from a shell that has not loaded the app's
-   `CAMOUFOX_*` lines (the worker refuses an inherited `CAMOUFOX_*` or `POINT_OF_SALE` that differs from `worker.env`,
-   and any `DEBUG`). To keep it running, install the launchd agent: copy
-   `apps/camoufox-worker/launchd/local.get-me-there.camoufox-worker.plist.example` to
-   `~/Library/LaunchAgents/local.get-me-there.camoufox-worker.plist`, set your checkout path, your home and a `PATH` that finds
-   `node` and `pnpm` in it (it starts the worker with an emptied environment), and run
-   `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/local.get-me-there.camoufox-worker.plist`. A start check
-   that fails exits 78 and the agent does not restart it faster than once a minute; logs go to
-   `~/Library/Logs/get-me-there/`.
+`pnpm gmt setup` sets it up as one row of the wizard (row 8), and `pnpm gmt setup --reconfigure browser` resumes or
+changes it later.
+
+- **When it is offered.** Only where this machine's `<os>-<arch>` (`darwin-arm64`, `darwin-x64`, `linux-arm64`,
+  `linux-x64`) has verified recordings for its pinned Camoufox build. Elsewhere setup says once "The browser provider is
+  not available on this machine yet (no recordings for <os>-<arch>); SearchApi and Travelpayouts work", downloads
+  nothing and leaves `CAMOUFOX_ENABLED` unset; a later `pnpm gmt setup` or `pnpm gmt update` offers it once
+  recordings land. Today `darwin-arm64` has them.
+- **Its costs first.** Setup prints the costs above before it asks, on every machine. On a machine with no display it
+  adds: "Page loads will come from this server's address, not a home connection. A datacentre address is more likely to
+  be refused or shown a verification page, and each one pauses the provider for 48 hours; any restriction applies to
+  that address. If that is not acceptable, leave the provider off, or run the app on a machine at home." and turns it on
+  only after you type `yes` (in an answers file, `"browser": { "window": "scheduled", "enabled": true,
+  "acceptServerAddress": true }`). `--non-interactive` without those fields leaves it off.
+- **The order of its steps.** The consent method is explained; then the install: a free-space check against the
+  download plus its unpacked size (313 MB and about 670 MB on macOS, 654 MB and about 1.25 GB on Linux), `unzip`, the
+  download of the pinned asset from the project's GitHub release over HTTPS (redirects followed only to GitHub's
+  release-asset hosts), its digest checked while it streams and again before unpacking, the archive's entries listed
+  and refused if any is absolute or leaves its directory, the unpack into a private temporary directory beside the
+  target, and one rename into `~/.local/share/get-me-there/camoufox/browsers/official/<build>-<8 hex>/`. Then
+  `worker.env` (0600, in `~/.local/state/get-me-there/camoufox/`, 0700) with a newly generated
+  `CAMOUFOX_WORKER_KEY` (48 hex characters), the same key and `CAMOUFOX_WORKER_URL=http://127.0.0.1:8090` in `app.env`,
+  and the settings the two sides share copied from `app.env`. Then the worker's own start check (`run.ts check --json`):
+  only once it finds your consent choice does `app.env` gain `CAMOUFOX_ENABLED=true` and the worker service get
+  installed and started (a launchd agent `local.get-me-there.camoufox-worker` on macOS, the systemd user unit
+  `get-me-there-camoufox-worker.service` on Linux).
+- **Resuming.** Any step that stops (no space, no `unzip`, a library missing, no consent yet) leaves the provider off,
+  shown as not set up, never as failing; run `pnpm gmt setup --reconfigure browser` to carry on from where it stopped.
+- **Consent.** Google's consent page is answered once, by you, with "Reject all": in an ordinary private browser
+  window open `https://www.google.com/travel/flights`, click **Reject all**, then open the cookie view (developer tools,
+  Storage or Application, cookies for `https://www.google.com`) and run `pnpm --filter @gmt/camoufox-worker capture-socs`,
+  pasting the `SOCS` cookie's value, expiry, Secure and SameSite when asked (a few minutes). It stamps the time and
+  writes the file 0600; capture again within 13 months. The value records only your cookie choice, no account data.
+  The guided capture, `pnpm gmt consent`, is not built yet.
+- **The service.** It runs `<node> --conditions=@gmt/source --import tsx <checkout>/apps/camoufox-worker/src/run.ts main`
+  from that package's directory with `PATH` and `HOME` only. A start the worker refuses exits 78 and writes
+  `start-refusal.json` (`{ reason, at }`) beside `worker.env`; it is never retried every minute (systemd's
+  `RestartPreventExitStatus=78`; on macOS a 600 s throttle, and `pnpm gmt start`, `status` and `update` boot a refused
+  agent out and say "refused, not retrying: …"). `pnpm gmt start` runs the worker's start check first and does not start
+  it while the check reports a reason.
+
+### On a machine with no display
+
+The consent capture needs a browser window, so on a server you capture it on a desktop: open
+`https://www.google.com/travel/flights` in an ordinary private browser window there, click **Reject all**, read the
+`SOCS` cookie's fields from the cookie view, and enter them into `pnpm --filter @gmt/camoufox-worker capture-socs` on the
+server (a few minutes; move the value by clipboard or a pipe, never as a command-line argument and never in a ticket).
+Page loads then come from the server's own address (above).
+
+### Linux
+
+The worker runs headless on Linux as on macOS, with no display. Camoufox's Linux bundle is the install directory itself
+(`version.json`, `camoufox-bin`, `properties.json` and `fontconfig/` directly in it). Firefox needs its shared
+libraries even headless: setup runs `ldd` over `camoufox-bin` and every `.so` in the bundle and names any that is
+missing with its install line; on Ubuntu 24.04:
+`sudo apt-get install libasound2t64 libatk1.0-0t64 libavcodec60 libcairo-gobject2 libcairo2 libdbus-1-3 libfontconfig1 libfreetype6 libgdk-pixbuf-2.0-0 libglib2.0-0t64 libgtk-3-0t64 libpango-1.0-0 libpangocairo-1.0-0 libx11-6 libx11-xcb1 libxcb-shm0 libxcb1 libxcomposite1 libxcursor1 libxdamage1 libxext6 libxfixes3 libxi6 libxrandr2 libxrender1`
+(Debian 12 also needs `libdbus-glib-1-2 libharfbuzz0b libxtst6`). The worker writes its own `fonts.conf` beside
+`worker.env`, naming the bundle's `fonts/macos/` by absolute path, because the bundled one resolves fonts from the
+working directory. Each `<os>-<arch>` earns its flags from recordings made under its own build; until `linux-arm64`
+and `linux-x64` have theirs, the provider is not offered there. In Docker on Linux the app cannot reach the host's
+loopback, so the Docker path on Linux leaves the provider off; the native app reaches it.
+
+### The monthly caps across every caller
+
+The worker enforces `CAMOUFOX_MONTHLY_PAGE_CAP` and `CAMOUFOX_MONTHLY_SCROLL_CAP` itself, for every app and recorder
+that calls it together, over the ledger's billing month (from 00:00 UTC on `CAMOUFOX_BILLING_DAY`). It counts each page
+before it loads (a crash over-counts, never under-counts) in `monthly.json` beside `worker.env`, refuses a page past the
+page cap (the app reads that as the month's cap reached), and gives a grid page no more scrolls than the scroll cap
+leaves. If that file is missing beside the pacer's file, unreadable, invalid or readable by others, the worker refuses
+every page and never rewrites it with zeros; `pnpm gmt setup --reconfigure browser` then offers to rewrite it from the
+app's own ledger (the app counts pages, not scrolls, so the month's scrolls are counted as spent). A second app calling
+the same worker in one month is reported in the status, not refused.
+
+### Key rotation
+
+`pnpm gmt setup --reconfigure browser` asks whether to generate a new worker key (yes by default when the app's and the
+worker's keys differ). It stops both services, writes the new key to `worker.env` and then `app.env` (each through a
+0600 temporary file and a rename), and starts the worker and then the app. A run interrupted midway leaves the keys
+differing, which a re-run repairs. No key is ever printed.
+
+### Recordings
 
 The search-form check is mandatory: the worker refuses to start while `FORM_VERIFIED` is false. The 2026-10-18
 recordings set it, with the results, Cheapest and no-flights flags. A page change that needs new recordings sets them
@@ -980,7 +1035,27 @@ shows it listening on `127.0.0.1` only. To see which navigation a stopped page r
 ### Turn it off or recover
 
 - Set `CAMOUFOX_ENABLED=false` and restart the app.
-- Stop the worker: `launchctl bootout gui/$(id -u)/local.get-me-there.camoufox-worker`. A page in flight finishes
-  before the worker exits.
+- Stop the worker: `pnpm gmt stop` (with the app), or the worker alone with
+  `launchctl bootout gui/$(id -u)/local.get-me-there.camoufox-worker` on macOS or
+  `systemctl --user stop get-me-there-camoufox-worker.service` on Linux. A page in flight finishes before the worker
+  exits.
 - After a signed-in refusal: `pnpm --filter @gmt/camoufox-worker clear-signed-in` (it wipes the profile first).
 - Deleting the cool-down record ends a pause early, which defeats its purpose.
+
+### Appendix: the manual steps
+
+`pnpm gmt setup` does all of this; these are the same steps by hand, for a machine where you would rather not run it.
+The install itself has no manual form: the worker launches only the bundle `gmt setup` installed, never one in
+`~/Library/Caches`, and refuses (exit 78) when the layout differs from the pinned entry.
+
+1. Create the worker's data directory, private to you: `mkdir -p -m 700 ~/.local/state/get-me-there/camoufox`
+2. Capture your cookie choice with `pnpm --filter @gmt/camoufox-worker capture-socs` (above).
+3. Create `~/.local/state/get-me-there/camoufox/worker.env` in an editor (never with `echo`) and make it private with
+   `chmod 600 ~/.local/state/get-me-there/camoufox/worker.env`. It holds `CAMOUFOX_WORKER_KEY`, at least 32 random
+   characters: generate them with `openssl rand -hex 24 > ~/.local/state/get-me-there/camoufox/key.tmp`, paste them from
+   that file into `worker.env`, then delete `key.tmp`. A `worker.env` that still names `CAMOUFOX_BINARY_BUILD` is
+   refused: the build now comes from the pinned entry. Copy the shared settings (the cool-down, page timeout, mode, grid
+   scroll cap and spacing, monthly caps, billing day and fare market) from `app.env`, so both sides match.
+4. Try it with `pnpm --filter @gmt/camoufox-worker start`, from a shell that has not loaded the app's `CAMOUFOX_*` lines
+   (the worker refuses an inherited `CAMOUFOX_*` or `POINT_OF_SALE` that differs from `worker.env`, an inherited
+   `CAMOUFOX_INSTALL_DIR`, and any `DEBUG`).

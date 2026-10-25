@@ -5,9 +5,9 @@ owner: opus
 depends_on: [16a, 16b]
 spec_sections: ["§2 Method", "§2 Caps across callers", "§2 Consent", "§2 Recordings first", "§2 Labels", "§2 Costs", "§9 item 9", "§9 CI matrix", "§12 Where settings live", "§13 Native local mode", "§13 The camoufox worker", "§16", "§17 revision 36"]
 reviewers: [provenance-auditor, provider-integration-expert, security-reviewer, devops-reviewer, cost-and-budget-reviewer, test-strategy-reviewer, code-architect, product-owner]
-mutate: {}
-pending: {"@gmt/camoufox-worker": ["src/consentLine.ts", "src/monthly.ts"], "@gmt/cli": ["src/camoufox/**"]}
-status: draft
+mutate: {"@gmt/camoufox-worker": ["src/monthly.ts"], "@gmt/cli": ["src/camoufox/**"]}
+pending: {"@gmt/camoufox-worker": ["src/consentLine.ts"]}
+status: open (Tasks 17.1–17.4, 17.6, 17.7, 17.9 and 17.10 built; research 17.0c, Task 17.5 and Task 17.8 open)
 ---
 
 # WP17: Camoufox install, consent capture, the worker's caps and the Linux worker
