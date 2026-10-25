@@ -11,7 +11,7 @@ import { expectContract } from '../helpers/contract.js';
 import { SENTINEL_AUTH, SENTINEL_SA, SENTINEL_SMTP, SENTINEL_TP, silentLog } from '../helpers/env.js';
 import { exampleDefinitionInput } from '../helpers/examples.js';
 import { AUTH_USER, basic, createHarness, type Harness, T0 } from '../helpers/harness.js';
-import { at, cell, seeder } from '../helpers/seed.js';
+import { at, cell, seeder, snapshotOf } from '../helpers/seed.js';
 import { tempDir } from '../helpers/tmp.js';
 import { stubWorker, WORKER_ENV, WORKER_KEY, workerBody } from '../helpers/workerStub.js';
 
@@ -120,6 +120,119 @@ describe('GET /api/status (spec §10)', () => {
     const sched = body.checks.find((c) => c.id === 'schedule');
     expect(sched?.state).toBe('ok');
     expect(sched?.summary).toContain('1 job registered');
+  });
+});
+
+describe('the data check over a stored run (brief WP18 §6)', () => {
+  const days = (n: number) =>
+    cell('LHR', 'JFK', `2026-11-${String(n).padStart(2, '0')}`, `2026-11-${String(n + 10).padStart(2, '0')}`);
+  const dataOf = async (x: Harness, id: string) =>
+    (await expectContract(await get(x), 'GET', '/api/status', STATUS)).checks.find(
+      (c) => c.id === `data-${id}`,
+    );
+
+  it('the six buckets sum to the cells of the run, whatever the mix', async () => {
+    const x = await harness();
+    const s = seeder(x.ports);
+    const def = x.ports.repos.definitions.create(exampleDefinitionInput());
+    s.execution('E1', { def, status: 'completed', startedAt: at(-3), finishedAt: at(-2) });
+    const cells = [1, 2, 3, 4, 5, 6, 7, 8].map(days);
+    s.cells('E1', cells);
+    const [c1, c2, c3, c4, c5, c6] = cells;
+    if (
+      c1 === undefined ||
+      c2 === undefined ||
+      c3 === undefined ||
+      c4 === undefined ||
+      c5 === undefined ||
+      c6 === undefined
+    )
+      throw new Error('eight cells');
+    s.tile('E1', c1, { status: 'priced', fetchedAt: at(-3), tileIndex: 0 });
+    s.tile('E1', c2, { status: 'priced', fetchedAt: at(-3), tileIndex: 1 });
+    s.tile('E1', c3, { status: 'empty', fetchedAt: at(-3), tileIndex: 2 });
+    s.tile('E1', c4, { status: 'no_data', fetchedAt: at(-3), tileIndex: 3 });
+    s.tileError('E1', [c5], 'upstream', null);
+    x.ports.repos.cells.setOutcome(s.id('E1'), c6, 'discovery', 'fixture', {
+      status: 'skipped',
+      reason: 'budget',
+    });
+    const c = await dataOf(x, def.id);
+    const m =
+      /priced (\d+), no fares (\d+), no cached data (\d+), error (\d+), skipped (\d+), not searched (\d+) of (\d+) cells/.exec(
+        c?.summary ?? '',
+      );
+    expect(m).not.toBeNull();
+    const [priced, empty, noData, error, skipped, notRun, total] = (m ?? []).slice(1).map(Number);
+    expect([priced, empty, noData, error, skipped, notRun, total]).toEqual([2, 1, 1, 1, 1, 2, 8]);
+    expect((priced ?? 0) + (empty ?? 0) + (noData ?? 0) + (error ?? 0) + (skipped ?? 0) + (notRun ?? 0)).toBe(
+      total,
+    );
+    expect(c?.state).toBe('warn');
+  });
+
+  it('cells a catch-up left for the next scheduled run count under skipped, with their detail words', async () => {
+    const x = await harness();
+    const s = seeder(x.ports);
+    const def = x.ports.repos.definitions.create(exampleDefinitionInput());
+    s.execution('E1', { def, status: 'completed', startedAt: at(-3), finishedAt: at(-2) });
+    s.cells('E1', [days(1), days(2), days(3)]);
+    x.ports.repos.cells.setOutcomesForProvider(s.id('E1'), 'discovery', 'fixture', ['not_run'], {
+      status: 'skipped',
+      reason: 'scheduled_only',
+      skipDetail: 'catch-up-no-browser',
+    });
+    const c = await dataOf(x, def.id);
+    expect(c?.summary).toContain('skipped 3');
+    expect(c?.note).toContain('a catch-up loads no browser pages (3 cells)');
+    // why: this definition does not use the browser provider, so the words are the engine's "no longer used" form
+    expect(c?.note).toMatch(/^not fetched: this search no longer uses the browser provider; /);
+  });
+
+  it('a missed firing that was not caught up states the stored code, and is warn', async () => {
+    const x = await harness();
+    const s = seeder(x.ports);
+    const def = x.ports.repos.definitions.create(exampleDefinitionInput());
+    x.ports.repos.executions.createForFiring({
+      definitionId: def.id,
+      isChild: false,
+      cell: null,
+      snapshot: snapshotOf(def, at(-5)),
+      estimate: null,
+      trigger: 'schedule',
+      status: 'skipped_missed',
+      scheduledFor: at(-5),
+      skipCode: 'half-cadence',
+    });
+    expect(s).toBeDefined();
+    const c = await dataOf(x, def.id);
+    expect(c?.state).toBe('warn');
+    expect(c?.summary).toContain('the next scheduled run was less than half the gap away');
+  });
+
+  it('a recent catch-up shows as a note on the schedule card, which stays ok', async () => {
+    const x = await harness();
+    const def = x.ports.repos.definitions.create(
+      exampleDefinitionInput({ scheduleCron: '0 6 * * 1', scheduleTz: 'Europe/London' }),
+    );
+    x.engine.scheduler.register(def);
+    const e = x.ports.repos.executions.createForFiring({
+      definitionId: def.id,
+      isChild: false,
+      cell: null,
+      snapshot: snapshotOf(def, at(-5)),
+      estimate: null,
+      trigger: 'schedule',
+      status: 'running',
+      scheduledFor: at(-6),
+      isCatchUp: true,
+    });
+    if (e === null) throw new Error('the firing was free');
+    x.ports.repos.executions.setStatus(e.id, 'completed', { startedAt: at(-5), finishedAt: at(-4) });
+    const body = await expectContract(await get(x), 'GET', '/api/status', STATUS);
+    const sched = body.checks.find((c) => c.id === 'schedule');
+    expect(sched?.state).toBe('ok');
+    expect(sched?.note).toMatch(/^caught up the run missed at .+, ran .+$/);
   });
 });
 
