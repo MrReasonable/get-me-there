@@ -605,6 +605,8 @@ describe('WP16b: the CI matrix, install-e2e and the Windows leg (decisions 77, 7
     for (const s of [
       'echo "E2E-MODE: $E2E_MODE"',
       'git init --bare',
+      // why: a local clone's hardlinks race git's background maintenance (seen on ubuntu-24.04-arm)
+      'git clone --no-local "$RUNNER_TEMP/origin.git" "$RUNNER_TEMP/gmt"',
       'pnpm gmt setup --non-interactive --answers "$RUNNER_TEMP/answers.json"',
       'curl -fsS http://127.0.0.1:3917/api/health',
       "grep -E '^backups +ok'",

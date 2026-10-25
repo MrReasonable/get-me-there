@@ -144,7 +144,9 @@ jobs:
         run: |
           git init --bare -b main "$RUNNER_TEMP/origin.git"
           git push "$RUNNER_TEMP/origin.git" HEAD:refs/heads/main
-          git clone "$RUNNER_TEMP/origin.git" "$RUNNER_TEMP/gmt"
+          # why: a local clone hardlinks objects, and git's background maintenance after the push can rewrite one under
+          # it ("hardlink different from source"); --no-local copies through the pack protocol
+          git clone --no-local "$RUNNER_TEMP/origin.git" "$RUNNER_TEMP/gmt"
           cd "$RUNNER_TEMP/gmt"
           pnpm install --frozen-lockfile
           node -e "const fs = require('fs'); fs.writeFileSync(process.argv[2], fs.readFileSync(process.argv[1]), { mode: 0o600 })" ci/answers.e2e.template.json "$RUNNER_TEMP/answers.json"
@@ -209,7 +211,7 @@ jobs:
         if: env.E2E_MODE == 'real'
         run: |
           marker="gmt-e2e-update-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
-          git clone "$RUNNER_TEMP/origin.git" "$RUNNER_TEMP/pusher"
+          git clone --no-local "$RUNNER_TEMP/origin.git" "$RUNNER_TEMP/pusher"
           cd "$RUNNER_TEMP/pusher"
           node -e "const fs = require('fs'); const f = 'apps/web/index.html'; fs.writeFileSync(f, fs.readFileSync(f, 'utf8').replace('</head>', '<meta name=\"gmt-e2e\" content=\"' + process.argv[1] + '\" />\n  </head>'))" "$marker"
           git -c user.name=ci -c user.email=ci@example.invalid commit -qam 'e2e: a change to serve'
