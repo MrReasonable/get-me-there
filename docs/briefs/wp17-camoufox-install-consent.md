@@ -5,9 +5,9 @@ owner: opus
 depends_on: [16a, 16b]
 spec_sections: ["§2 Method", "§2 Caps across callers", "§2 Consent", "§2 Recordings first", "§2 Labels", "§2 Costs", "§9 item 9", "§9 CI matrix", "§12 Where settings live", "§13 Native local mode", "§13 The camoufox worker", "§16", "§17 revision 36"]
 reviewers: [provenance-auditor, provider-integration-expert, security-reviewer, devops-reviewer, cost-and-budget-reviewer, test-strategy-reviewer, code-architect, product-owner]
-mutate: {}
-pending: {"@gmt/camoufox-worker": ["src/consentLine.ts", "src/monthly.ts"], "@gmt/cli": ["src/camoufox/**"]}
-status: draft
+mutate: {"@gmt/camoufox-worker": ["src/monthly.ts"], "@gmt/cli": ["src/camoufox/**"]}
+pending: {"@gmt/camoufox-worker": ["src/consentLine.ts"]}
+status: open (Tasks 17.1–17.4, 17.6, 17.7, 17.9 and 17.10 built; research 17.0c, Task 17.5 and Task 17.8 open)
 ---
 
 # WP17: Camoufox install, consent capture, the worker's caps and the Linux worker
@@ -86,9 +86,12 @@ earn their flags through recording sessions.
   `DEFAULT_BINARY_BUILD` and `CAMOUFOX_BINARY_BUILD`; enforcing the monthly page and scroll caps across every caller
   over the ledger's billing month (decision 82; WP16a's worker already reads and reports the caps and the billing day);
   `/v1/status` filling the fields WP16a put in `workerStatusSchema` (`osArch`, `build`, `consent` with `boundedBy`
-  `cookie`, `capture` or `check` and null once voided, `monthly`, `appInstances`), with `flags` the running entry's. This
-  package does not edit `packages/core/src/camoufox/protocol.ts`; a field it finds missing goes back to a WP16a-style
-  change merged first (decision 76's compatibility rule).
+  `cookie`, `capture` or `check` and null once voided, `monthly`, `appInstances`), with `flags` the running entry's. In
+  `packages/core/src/camoufox/protocol.ts` this package only adds: the worker answer kind `monthly-cap` (HTTP 429, with
+  the cap and the window's end; the adapter maps it to `BudgetExceeded` at `provider-month`), which WP16a's schema
+  lacked and decision 82's refusal needs, landed in its own first commit with the adapter's answer map so the app and
+  the worker read it from the same change (decision 76's rule: the schema before any worker emits it); and, in
+  `builds.ts`, the `LANDING_VERIFIED` flag WP16a §3 listed. No existing field changes.
 - `run.ts session export | seed | merge` for the recording sessions (Task 17.8).
 - The `landing` page kind and `LANDING_VERIFIED`; `consentCaptureGuard` and the `consent-research` recorder kind;
   research 17.0c; then the `consent` command with `export`, `import` and `check`; `gmt consent` with the service stop,
@@ -252,8 +255,8 @@ only if 17.0c proves a mark; 17.6–17.10 follow.
     earlier of the cookie's expiry and `capturedAt` + 13 months, `boundedBy` `cookie` or `capture`; kind `not-shown`:
     `checkedAt` + 13 months, `boundedBy` `check`; kind `voided`: `expiresAt` and `boundedBy` null), `monthly`,
     `appInstances`. The worker's status parses under `core`'s `workerStatusSchema` as WP16a left it (the shared fixture
-    of Task 16a.5 is regenerated from this worker and must still parse), and this package's diff leaves
-    `packages/core/src/camoufox/protocol.ts` unchanged (a CI check over the branch diff).
+    of Task 16a.5 is regenerated from this worker and must still parse); `packages/core/src/camoufox/protocol.ts`
+    changes only by adding answer kinds (`monthly-cap`, §2).
 - [ ] **Implement; commit.**
 
 ### Task 17.3: The worker's monthly caps (decision 82)
@@ -312,9 +315,12 @@ only if 17.0c proves a mark; 17.6–17.10 follow.
 
 ### Research 17.0c: the rejection mark (after Task 17.4; Task 17.5 is not dispatched without it)
 
-- [ ] The operator runs `record --kind consent-research` twice in throwaway profiles, headed, clicking "Reject all" and
-  then "Accept all"; the files stay local and are backed up. The same sessions record the landing view, which sets
-  `LANDING_VERIFIED`.
+- [ ] The operator runs `pnpm --filter @gmt/camoufox-worker record --consent-research` once, with the worker stopped
+  (`pnpm gmt stop --only worker`) on a machine with a display: it opens two headed sessions in throwaway profiles, the
+  first asking for "Reject all", the second for "Accept all", each closed by the operator once the choice is made. A
+  session is kept only with exactly one consent submission and a SOCS set after it within 10 minutes; the one recording
+  stays local and is backed up (`recordings:backup`), and counts two pages. The same sessions record the landing view,
+  which sets `LANDING_VERIFIED`.
 - [ ] If the two `SOCS` values differ in a stable way that the value alone shows, write `rejectionMark(value)` with tests
   on both recordings, and dispatch Task 17.5. If the mark is not derivable from the value alone, the consent command is
   not built: `capture-socs` stays the capture path, the docs say so, and Task 17.5 shrinks to `import` of a
@@ -412,11 +418,13 @@ only if 17.0c proves a mark; 17.6–17.10 follow.
 
 ### Task 17.8: The recording sessions (operator, with the implementer)
 
-- [ ] **Before each session:** `pnpm gmt stop` for the host worker; no camoufox run active (`GET
+- [ ] **Before each session:** `pnpm gmt stop --only worker` for the host worker (the worker alone: a native app keeps
+  running); no camoufox run active (`GET
   /api/executions/active` and the definitions' providers); refuse while the host worker's persisted cool-down is
   active; seed the session's last-page time from the host's (`run.ts session export` on the host piped into `run.ts
   session seed` in the session's container or throwaway `HOME`). **After:** pipe the session's `run.ts session export`
-  into the host's `run.ts session merge` (the later last-page time, the counts added) before `pnpm gmt start`, or wait
+  into the host's `run.ts session merge` (the later last-page time, the counts added) before `pnpm gmt start --only
+  worker`, or wait
   one spacing interval when the windows differ; record the session's page and scroll counts in the session record.
   Tests: seed sets only the last-page time; merge adds counts and keeps the later time; merge refuses while the host
   worker runs or the line fails its schema.
@@ -486,3 +494,26 @@ only if 17.0c proves a mark; 17.6–17.10 follow.
 
 None for dispatch. Research 17.0c decides whether Task 17.5 is built; if no mark derivable from the value exists, the
 operator rules on the reduced scope stated there.
+
+## 11. As built, after branch review round 1 (2026-10-25)
+
+The review's rulings W1–W11 are folded into the code, the spec (revision 40) and plan decisions 75 and 77. Where the
+build differs from the tasks above:
+
+- **One install command in any app mode.** `pnpm gmt browser install [--keep-archive] [--wait|--force]` runs the one
+  install sequence (`apps/cli/src/camoufox/installer.ts`) that setup, `--reconfigure browser`, update and the CI job
+  also run; with `worker.env` present it also installs the gmt worker service. `pnpm gmt browser counts` rewrites the
+  monthly counts through the worker's own `run.ts counts --json` entry (core's `monthlyCountsSchema`, the worker's
+  lock). The CI entry `camoufoxInstall.ts` is gone; the manifest printer is `src/camoufox/printManifest.ts`.
+- **The pin is data.** `packages/core/src/camoufox/pin.ts` holds the builds and flags with no import, so update reads
+  the next commit's copy (`printManifest.ts --pin <file>`) and downloads that bundle before it stops the app.
+- **Consent research.** A session is kept only after exactly one form submission to the consent host's `/save` and a
+  SOCS set or changed after it. Its label is `prompted` (the button the session asked for, stated in the record's
+  `note` as the instruction given), not a captured click: the consent driver exposes no script into the page, so the
+  clicked control is not observable read-only; research 17.0c checks `differing` (kept only from the two `/save`
+  submissions, short plain values under a non-token name) against the two SOCS values before a rejection mark is
+  written. The research recorder gets the display groups through run.ts's rule.
+- **Consent fix.** Until Task 17.5 every consent refusal names core's `CONSENT_FIX` (`pnpm --filter
+  @gmt/camoufox-worker capture-socs`, `docs/setup.md#capture-your-consent-choice`), shared with WP18.
+- **Refusal reasons added:** `consent-not-shown`, `counts-missing`, `counts-unreadable`, `config`; the worker answer
+  kind `counts-unreadable` (503) and the `monthly-cap` answer's `used`.

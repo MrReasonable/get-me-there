@@ -139,7 +139,33 @@ describe('worker protocol (core/src/camoufox/protocol.ts; brief §5, §6)', () =
       'mode-unavailable': 409,
       'not-ready': 504,
       'browser-error': 502,
+      'monthly-cap': 429,
+      'counts-unreadable': 503,
     });
+  });
+
+  // why: decision 82: the worker refuses a page past its own monthly page cap, naming the cap and when the window ends
+  it('a monthly-cap answer carries the cap, the worker’s own count and the window end, nothing else', () => {
+    const ok = { kind: 'monthly-cap', cap: 1500, used: 1500, windowEnd: '2027-04-01T00:00:00.000Z' };
+    expect(workerAnswerSchema.parse(ok)).toEqual(ok);
+    expect(workerAnswerSchema.safeParse({ ...ok, pages: 1500 }).success).toBe(false);
+    expect(workerAnswerSchema.safeParse({ ...ok, cap: -1 }).success).toBe(false);
+    expect(workerAnswerSchema.safeParse({ ...ok, used: -1 }).success).toBe(false);
+    const { used: _, ...noUsed } = ok;
+    expect(workerAnswerSchema.safeParse(noUsed).success).toBe(false);
+  });
+
+  // why: W3: a counts file the worker cannot read is its own answer, never a cap reached
+  it('a counts-unreadable answer names missing or unreadable, nothing else', () => {
+    for (const problem of ['missing', 'unreadable'])
+      expect(workerAnswerSchema.parse({ kind: 'counts-unreadable', problem })).toEqual({
+        kind: 'counts-unreadable',
+        problem,
+      });
+    expect(workerAnswerSchema.safeParse({ kind: 'counts-unreadable', problem: 'gone' }).success).toBe(false);
+    expect(
+      workerAnswerSchema.safeParse({ kind: 'counts-unreadable', problem: 'missing', cap: 1 }).success,
+    ).toBe(false);
   });
 
   // why: fix round 1 (prov I1): a page whose every option is for another cell was read; it is a cell issue, never a block

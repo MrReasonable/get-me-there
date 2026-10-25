@@ -10,6 +10,8 @@ export const KINDS = [
   'view-more',
   'socs-stability',
   'consent-probe',
+  // why: WP17 Task 17.4 (research 17.0c): two headed sessions, the person clicking Reject all, then Accept all
+  'consent-research',
   'no-flights',
   'graph-explore',
   'grid',
@@ -61,6 +63,7 @@ export function parseRecordArgs(args: readonly string[]): RecordArgs {
         '--view-more',
         '--stability',
         '--consent-probe',
+        '--consent-research',
         '--no-flights',
         '--graph-explore',
         '--grid',
@@ -71,7 +74,7 @@ export function parseRecordArgs(args: readonly string[]): RecordArgs {
   }
   if (flags.size > 1)
     throw new RecordingRefused(
-      'pass at most one of --cheapest, --view-more, --stability, --consent-probe, --no-flights, --graph-explore, --grid',
+      'pass at most one of --cheapest, --view-more, --stability, --consent-probe, --consent-research, --no-flights, --graph-explore, --grid',
     );
   const movesRaw = values.get('--moves');
   if (movesRaw !== undefined && !flags.has('--grid')) throw new RecordingRefused('--moves needs --grid');
@@ -87,18 +90,21 @@ export function parseRecordArgs(args: readonly string[]): RecordArgs {
         ? 'socs-stability'
         : flags.has('--consent-probe')
           ? 'consent-probe'
-          : flags.has('--no-flights')
-            ? 'no-flights'
-            : flags.has('--graph-explore')
-              ? 'graph-explore'
-              : flags.has('--grid')
-                ? 'grid'
-                : 'results';
+          : flags.has('--consent-research')
+            ? 'consent-research'
+            : flags.has('--no-flights')
+              ? 'no-flights'
+              : flags.has('--graph-explore')
+                ? 'graph-explore'
+                : flags.has('--grid')
+                  ? 'grid'
+                  : 'results';
   const pagesRaw = values.get('--pages') ?? (kind === 'socs-stability' ? String(STABILITY_PAGES) : '1');
   const pages = Number(pagesRaw);
   if (!/^\d+$/.test(pagesRaw) || pages < 1 || pages > MAX_PAGES)
     throw new RecordingRefused(`--pages must be 1 to ${MAX_PAGES}`);
-  if (kind === 'consent-probe') return { kind, request: null, pages: 1, moves: [] };
+  if (kind === 'consent-probe' || kind === 'consent-research')
+    return { kind, request: null, pages: 1, moves: [] };
   const origin = iataSchema.safeParse(values.get('--origin') ?? '');
   const destination = iataSchema.safeParse(values.get('--destination') ?? '');
   const departureDate = isoDateSchema.safeParse(values.get('--depart') ?? '');

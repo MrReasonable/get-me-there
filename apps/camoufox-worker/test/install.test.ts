@@ -1,160 +1,213 @@
-import {
-  lstatSync,
-  mkdirSync,
-  readFileSync,
-  readlinkSync,
-  realpathSync,
-  rmSync,
-  symlinkSync,
-  writeFileSync,
-} from 'node:fs';
+import { lstatSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { CAMOUFOX_BUILDS } from '@gmt/core';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { ensureInstallLayout } from '../src/install.js';
+import { ensureInstallLayout, InstallRefused, releaseAccepted } from '../src/install.js';
 import { fakeInstall } from './support/tmp.js';
 
-const PIN = '152.0.4-beta.28';
-const BUNDLE = { version: '152.0.4', build: 'beta.28', sha256: '8b7680a6' };
-const run = (installDir: string, o: { pin?: string; override?: string } = {}) =>
-  ensureInstallLayout({ installDir, pinnedBuild: o.pin ?? PIN, installDirOverride: o.override });
-const bytesOf = (dir: string) =>
-  [
-    'version.json',
-    'Camoufox.app/Contents/MacOS/camoufox',
-    'Camoufox.app/Contents/Resources/properties.json',
-  ].map((f) => readFileSync(join(dir, f), 'utf8'));
+const MAC = CAMOUFOX_BUILDS['darwin-arm64'];
+const LIN = CAMOUFOX_BUILDS['linux-arm64'];
+const mac = (installDir: string) => ensureInstallLayout({ os: 'darwin', installDir, entry: MAC });
+const lin = (installDir: string) => ensureInstallLayout({ os: 'linux', installDir, entry: LIN });
+/** Every path under `dir` with its size and modification time: a check that writes nothing leaves this equal. */
+function snapshot(dir: string): string[] {
+  const out: string[] = [];
+  const walk = (d: string): void => {
+    for (const name of readdirSync(d).sort()) {
+      const p = join(d, name);
+      const st = lstatSync(p);
+      out.push(`${p} ${st.size} ${st.mtimeMs}`);
+      if (st.isDirectory()) walk(p);
+    }
+  };
+  walk(dir);
+  return out;
+}
+const refusal = (f: () => unknown): { reason: string; message: string; build: string | null } => {
+  try {
+    f();
+  } catch (e) {
+    if (e instanceof InstallRefused) return { reason: e.reason, message: e.message, build: e.installedBuild };
+    throw e;
+  }
+  throw new Error('no refusal');
+};
 
 beforeEach(() => {
   expect.hasAssertions();
 });
 
-describe('ensureInstallLayout (decision 69 round 2, item 1; PIE-R2-03)', () => {
-  it('with both entries present and correct, nothing is written', () => {
-    const f = fakeInstall(BUNDLE);
-    symlinkSync(f.app, join(f.installDir, 'Camoufox.app'));
-    writeFileSync(
-      join(f.installDir, 'version.json'),
-      JSON.stringify({ version: '152.0.4', release: 'beta.28' }),
-    );
-    expect(run(f.installDir)).toEqual({
-      installDir: f.installDir,
-      bundleDir: f.bundleDir,
-      build: PIN,
+describe('ensureInstallLayout on macOS (decision 73; Task 17.2): verifies only', () => {
+  it('the layout gmt setup makes passes, reporting the bundle, the pin and the Firefox major, and nothing is written', () => {
+    const f = fakeInstall('darwin-arm64');
+    const before = snapshot(f.root);
+    expect(mac(f.installDir)).toEqual({
+      installDir: f.root,
+      // why: the bundle is read through the link, so it is the resolved path (macOS's temporary root is under /private)
+      bundleDir: join(realpathSync(f.root), 'browsers', 'official', '152.0.4-beta.28-8b7680a6'),
+      build: '152.0.4-beta.28',
       ffMajor: 152,
-      created: [],
+    });
+    expect(snapshot(f.root)).toEqual(before);
+  });
+
+  it('a missing Camoufox.app link or top-level version.json is a layout refusal; nothing is created', () => {
+    for (const f of [
+      fakeInstall('darwin-arm64', { link: false }),
+      fakeInstall('darwin-arm64', { top: null }),
+    ]) {
+      const before = snapshot(f.root);
+      expect(refusal(() => mac(f.installDir)).reason).toBe('layout');
+      expect(snapshot(f.root)).toEqual(before);
+    }
+  });
+
+  it('a missing or empty install directory refuses, naming pnpm gmt browser install', () => {
+    const f = fakeInstall('darwin-arm64');
+    rmSync(f.root, { recursive: true });
+    expect(refusal(() => mac(f.installDir))).toEqual({
+      reason: 'layout',
+      message: `no Camoufox install at ${f.root}: run pnpm gmt browser install`,
+      build: null,
     });
   });
-  it('creates the Camoufox.app symlink to the configured bundle and the top-level version.json, leaving the bundle untouched', () => {
-    const f = fakeInstall(BUNDLE);
-    const before = bytesOf(f.bundleDir);
-    expect(run(f.installDir).created).toEqual(['Camoufox.app', 'version.json']);
-    const link = join(f.installDir, 'Camoufox.app');
-    expect(lstatSync(link).isSymbolicLink()).toBe(true);
-    expect(realpathSync(readlinkSync(link))).toBe(realpathSync(f.app));
-    expect(JSON.parse(readFileSync(join(f.installDir, 'version.json'), 'utf8'))).toEqual({
-      version: '152.0.4',
-      release: 'beta.28',
+
+  it('a link that is a real directory, points nowhere, or out of browsers/official refuses', () => {
+    const real = fakeInstall('darwin-arm64', { link: false });
+    writeFileSync(join(real.root, 'Camoufox.app'), 'not a link');
+    expect(refusal(() => mac(real.installDir)).message).toBe(
+      `${real.root}/Camoufox.app is not a symlink to a Camoufox bundle`,
+    );
+    const dangling = fakeInstall('darwin-arm64', { link: false });
+    symlinkSync(join(dangling.root, 'gone'), join(dangling.root, 'Camoufox.app'));
+    expect(refusal(() => mac(dangling.installDir)).message).toBe(
+      `${dangling.root}/Camoufox.app points at nothing: run pnpm gmt browser install`,
+    );
+    const outside = fakeInstall('darwin-arm64', { link: false });
+    const elsewhere = fakeInstall('darwin-arm64');
+    symlinkSync(join(elsewhere.bundleDir, 'Camoufox.app'), join(outside.root, 'Camoufox.app'));
+    expect(refusal(() => mac(outside.installDir)).message).toMatch(
+      /does not point into .*browsers\/official$/,
+    );
+  });
+
+  it('a bundle without its binary or properties.json refuses naming the file', () => {
+    const f = fakeInstall('darwin-arm64');
+    rmSync(join(f.bundleDir, 'Camoufox.app', 'Contents', 'Resources', 'properties.json'));
+    expect(refusal(() => mac(f.installDir)).message).toMatch(
+      /has no .*Contents\/Resources\/properties\.json$/,
+    );
+  });
+
+  it('a bundle of another build is build-mismatch, naming both builds', () => {
+    const f = fakeInstall('darwin-arm64', {
+      bundleVersion: { version: '153.0.1', build: 'beta.30', release: 'beta.30' },
+      top: { version: '153.0.1', release: 'beta.30' },
     });
-    expect(bytesOf(f.bundleDir)).toEqual(before);
+    expect(refusal(() => mac(f.installDir))).toEqual({
+      reason: 'build-mismatch',
+      message:
+        'the installed Camoufox is 153.0.1-beta.30 but this worker is pinned to 152.0.4-beta.28; a new build is a re-verification',
+      build: '153.0.1-beta.30',
+    });
   });
-  it('accepts release where build is absent', () => {
-    const f = fakeInstall({ version: '152.0.4', release: 'beta.28' });
-    expect(run(f.installDir).build).toBe(PIN);
-  });
-  it('picks the pinned bundle among several', () => {
-    const f = fakeInstall(BUNDLE);
-    fakeInstall({ version: '150.0.1', build: 'beta.25' }, { home: f.home, id: '150.0.1-beta.25-aaaa' });
-    expect(run(f.installDir).bundleDir).toBe(f.bundleDir);
-  });
-  // why: fix round 1 (arch M13, prov-int M2): two bundles with the pinned build are ambiguous, never a guess
-  it('two bundles with the pinned build refuse', () => {
-    const f = fakeInstall(BUNDLE);
-    fakeInstall(BUNDLE, { home: f.home, id: '152.0.4-beta.28-ffff0000' });
-    expect(() => run(f.installDir)).toThrow(
-      /CAMOUFOX_BINARY_BUILD is 152\.0\.4-beta\.28 but the installed bundles are/,
+
+  it('a top-level version.json that disagrees with its bundle, or one camoufox-js would not accept, is a layout refusal', () => {
+    const disagree = fakeInstall('darwin-arm64', { top: { version: '152.0.4', release: 'beta.27' } });
+    expect(refusal(() => mac(disagree.installDir)).message).toBe(
+      `${disagree.root}/version.json disagrees with its bundle`,
+    );
+    const unsupported = fakeInstall('darwin-arm64', { top: { version: '152.0.4', release: '2' } });
+    expect(refusal(() => mac(unsupported.installDir)).message).toBe(
+      `${unsupported.root}/version.json: camoufox-js does not accept the release 2`,
     );
   });
-  // why: fix round 1 (prov-int M1): camoufox-js reads only `release` from the top-level file
-  it('a top-level version.json with build but no release refuses', () => {
-    const f = fakeInstall(BUNDLE);
-    symlinkSync(f.app, join(f.installDir, 'Camoufox.app'));
-    writeFileSync(
-      join(f.installDir, 'version.json'),
-      JSON.stringify({ version: '152.0.4', build: 'beta.28' }),
+
+  it('malformed version files are named: not JSON, no version, a non-numeric version, no release', () => {
+    for (const [top, words] of [
+      ['{', 'is missing or not JSON'],
+      ['{}', 'has no version string'],
+      ['{"version":"x.1","release":"beta.28"}', 'its version is not numeric'],
+      ['{"version":"152.0.4"}', 'names no release'],
+      // why: pie-b1-007: camoufox-js reads only `release` in this file, so `build` alone is refused here
+      ['{"version":"152.0.4","build":"beta.28"}', 'names no release'],
+    ] as const) {
+      const f = fakeInstall('darwin-arm64');
+      writeFileSync(join(f.root, 'version.json'), top);
+      expect(refusal(() => mac(f.installDir)).message).toContain(words);
+    }
+  });
+  it('the bundle’s own version.json, which camoufox-js never reads on macOS, may name its release as build', () => {
+    const f = fakeInstall('darwin-arm64');
+    writeFileSync(join(f.bundleDir, 'version.json'), '{"version":"152.0.4","build":"beta.28"}');
+    expect(mac(f.installDir).build).toBe('152.0.4-beta.28');
+  });
+});
+
+describe('ensureInstallLayout on Linux (decision 73; Task 17.2): the bundle is the install directory', () => {
+  it('the bundle’s version.json is the one camoufox-js reads there: build alone is refused', () => {
+    const f = fakeInstall('linux-arm64');
+    writeFileSync(join(f.bundleDir, 'version.json'), '{"version":"152.0.4","build":"beta.28"}');
+    expect(refusal(() => lin(f.installDir)).message).toContain('names no release');
+  });
+  it('passes with version.json, camoufox-bin, properties.json and fontconfig/macos/fonts.conf, writing nothing', () => {
+    const f = fakeInstall('linux-arm64');
+    const before = snapshot(f.bundleDir);
+    expect(lin(f.installDir)).toEqual({
+      installDir: f.bundleDir,
+      bundleDir: f.bundleDir,
+      build: '152.0.4-beta.28',
+      ffMajor: 152,
+    });
+    expect(snapshot(f.bundleDir)).toEqual(before);
+  });
+
+  it.each(['version.json', 'camoufox-bin', 'properties.json', 'fontconfig/macos/fonts.conf'])(
+    'without %s it is a layout refusal',
+    (file) => {
+      const f = fakeInstall('linux-arm64');
+      rmSync(join(f.bundleDir, file));
+      expect(refusal(() => lin(f.installDir)).reason).toBe('layout');
+    },
+  );
+
+  it('a release camoufox-js would not accept, or another build, refuses', () => {
+    const bad = fakeInstall('linux-arm64', { bundleVersion: { version: '152.0.4', release: 'alpha.1' } });
+    expect(refusal(() => lin(bad.installDir)).reason).toBe('layout');
+    const other = fakeInstall('linux-arm64', {
+      bundleVersion: { version: '152.0.4', build: 'beta.29', release: 'beta.29' },
+    });
+    expect(refusal(() => lin(other.installDir))).toMatchObject({
+      reason: 'build-mismatch',
+      build: '152.0.4-beta.29',
+    });
+  });
+
+  it('a missing or empty bundle directory refuses', () => {
+    const f = fakeInstall('linux-arm64');
+    rmSync(f.bundleDir, { recursive: true });
+    expect(refusal(() => lin(f.installDir)).message).toBe(
+      `no Camoufox install at ${f.bundleDir}: run pnpm gmt browser install`,
     );
-    expect(() => run(f.installDir)).toThrow(/version\.json names no release/);
   });
-  it('a top-level version.json whose build and release disagree refuses; agreeing ones pass', () => {
-    const f = fakeInstall(BUNDLE);
-    symlinkSync(f.app, join(f.installDir, 'Camoufox.app'));
-    const top = join(f.installDir, 'version.json');
-    writeFileSync(top, JSON.stringify({ version: '152.0.4', release: 'beta.28', build: 'beta.27' }));
-    expect(() => run(f.installDir)).toThrow(/disagrees with the pinned bundle/);
-    writeFileSync(top, JSON.stringify({ version: '152.0.4', release: 'beta.28', build: 'beta.28' }));
-    expect(run(f.installDir).created).toEqual([]);
-  });
-  it('a top-level version.json that disagrees with the bundle refuses, never rewritten', () => {
-    const f = fakeInstall(BUNDLE);
-    writeFileSync(
-      join(f.installDir, 'version.json'),
-      JSON.stringify({ version: '152.0.4', release: 'beta.27' }),
-    );
-    expect(() => run(f.installDir)).toThrow(/never rewritten silently/);
-    expect(JSON.parse(readFileSync(join(f.installDir, 'version.json'), 'utf8')).release).toBe('beta.27');
-  });
-  it('a top-level version.json on another version refuses', () => {
-    const f = fakeInstall(BUNDLE);
-    writeFileSync(
-      join(f.installDir, 'version.json'),
-      JSON.stringify({ version: '151.0.0', release: 'beta.28' }),
-    );
-    expect(() => run(f.installDir)).toThrow(/disagrees/);
-  });
-  it('a Camoufox.app symlink to another bundle refuses', () => {
-    const f = fakeInstall(BUNDLE);
-    const other = fakeInstall(
-      { version: '150.0.1', build: 'beta.25' },
-      { home: f.home, id: '150.0.1-beta.25-aaaa' },
-    );
-    symlinkSync(other.app, join(f.installDir, 'Camoufox.app'));
-    expect(() => run(f.installDir)).toThrow(/not a symlink to the pinned bundle/);
-  });
-  it('a Camoufox.app that is a real directory refuses', () => {
-    const f = fakeInstall(BUNDLE);
-    mkdirSync(join(f.installDir, 'Camoufox.app'));
-    expect(() => run(f.installDir)).toThrow(/never rewritten silently/);
-  });
-  it('CAMOUFOX_INSTALL_DIR set in the environment refuses', () => {
-    const f = fakeInstall(BUNDLE);
-    expect(() => run(f.installDir, { override: '/elsewhere' })).toThrow(/CAMOUFOX_INSTALL_DIR/);
-  });
-  it.each([
-    ['a non-numeric version', { version: 'x.0', build: 'beta.28' }],
-    ['no build or release', { version: '152.0.4' }],
-    ['no version', { build: 'beta.28' }],
-  ])('the shape check runs before the pin: %s fails naming version.json', (_n, v) => {
-    const f = fakeInstall(v);
-    expect(() => run(f.installDir)).toThrow(/version\.json/);
-  });
-  it('a malformed version.json fails naming it', () => {
-    const f = fakeInstall(BUNDLE);
-    writeFileSync(join(f.bundleDir, 'version.json'), '{not json');
-    expect(() => run(f.installDir)).toThrow(/version\.json/);
-  });
-  it('another build fails naming CAMOUFOX_BINARY_BUILD', () => {
-    const f = fakeInstall({ version: '152.0.4', build: 'beta.29' });
-    expect(() => run(f.installDir)).toThrow(/CAMOUFOX_BINARY_BUILD/);
-  });
-  it('no bundle at all refuses', () => {
-    const f = fakeInstall(BUNDLE);
-    expect(() => run(join(f.home, 'nowhere'))).toThrow(/no Camoufox bundle/);
-    mkdirSync(join(f.home, 'empty', 'browsers', 'official'), { recursive: true });
-    expect(() => run(join(f.home, 'empty'))).toThrow(/no Camoufox bundle/);
-  });
-  it('a bundle without its binary refuses', () => {
-    const f = fakeInstall(BUNDLE);
-    writeFileSync(join(f.bundleDir, 'version.json'), JSON.stringify(BUNDLE));
-    rmSync(join(f.app, 'Contents', 'MacOS', 'camoufox'));
-    expect(() => run(f.installDir)).toThrow(/MacOS\/camoufox/);
+});
+
+describe('releaseAccepted: camoufox-js 0.11.5’s own range, strictly between alpha.1 and 1', () => {
+  it('accepts the pins and refuses the edges', () => {
+    expect(['beta.28', 'beta.1', 'alpha.2', 'rc.1', '0.9'].map(releaseAccepted)).toEqual([
+      true,
+      true,
+      true,
+      true,
+      true,
+    ]);
+    expect(['alpha.1', 'alpha.0', '1', '2', '1.0.1'].map(releaseAccepted)).toEqual([
+      false,
+      false,
+      false,
+      false,
+      false,
+    ]);
+    expect(releaseAccepted(LIN.build.split('-')[1] ?? '')).toBe(true);
   });
 });

@@ -31,6 +31,7 @@ import { checkForm } from './form.js';
 import { readGrid } from './gridSession.js';
 import { installGuard } from './guard.js';
 import { readList } from './list.js';
+import type { MonthlyCounter } from './monthly.js';
 import type { Pacer } from './pacer.js';
 import type { Refusal } from './refusal.js';
 import { SELECTORS, type Selectors } from './selectors.js';
@@ -71,6 +72,8 @@ export interface SessionDeps {
   socs: SocsCapture;
   cooldown: CooldownStore;
   pacer: Pacer;
+  /** Decision 82: the worker's own monthly page and scroll caps, for every caller together. */
+  monthly: MonthlyCounter;
   refusal: Refusal;
   clock: Clock;
   timers: Timers;
@@ -141,7 +144,8 @@ export class PageSession {
     if (wipe) rmSync(this.d.profileDir, { recursive: true, force: true });
   }
 
-  async page(req: PageRequest): Promise<PageResult> {
+  async page(asked: PageRequest): Promise<PageResult> {
+    let req = asked;
     // why: decision 70: grid pages only once the selectors module verifies the grid and worker.env asks for it
     if (req.mode === 'grid' && (!this.S.GRID_VERIFIED || this.d.grid?.mode !== 'grid'))
       return { answer: { kind: 'mode-unavailable', mode: 'grid' }, googleContacted: false };
@@ -181,12 +185,40 @@ export class PageSession {
         answer: { kind: 'cooling-down', cause: active.cause, cooldownUntil: active.until },
         googleContacted: false,
       };
+    // why: decision 82: the month's page cap for every caller, before anything opens; a refusal leaves the counts as
+    // they are, and a counts file that cannot be read refuses every page as itself (W3), never as a cap reached
+    const admission = this.d.monthly.check(req.mode === 'grid' ? req.scrollAllowance : 0);
+    if (admission.kind === 'monthly-cap')
+      return {
+        answer: {
+          kind: 'monthly-cap',
+          cap: admission.cap,
+          used: admission.used,
+          windowEnd: admission.windowEnd,
+        },
+        googleContacted: false,
+      };
+    if (admission.kind === 'counts-unreadable')
+      return { answer: { kind: 'counts-unreadable', problem: admission.problem }, googleContacted: false };
     const claim = this.d.pacer.claim();
     if (!claim.ok)
       return {
         answer: { kind: 'spacing', retryAfterSeconds: claim.retryAfterSeconds },
         googleContacted: false,
       };
+    // why: the page and its clamped scroll allowance are on disk before the load, so a crash over-counts, never under
+    try {
+      this.d.monthly.write(admission.reserved);
+    } catch (e) {
+      this.d.pacer.release();
+      return {
+        answer: { kind: 'browser-error', stage: 'read', detail: `monthly counts unwritable: ${detailOf(e)}` },
+        googleContacted: false,
+        fatal: true,
+      };
+    }
+    // why: a grid page scrolls no further than the month's scroll cap leaves (it still reads its first block)
+    if (req.mode === 'grid') req = { ...req, scrollAllowance: admission.scrollAllowance };
 
     this.busySince = this.d.clock.now();
     const started = this.d.timers.now();
@@ -326,6 +358,12 @@ export class PageSession {
     if (stop === 'consent-unhandled') wipe = true;
     if (wipe || discard) await this.discard(wipe);
     this.busySince = null;
+    try {
+      this.d.monthly.settle(admission.reserved, admission.scrollAllowance, counter.scrolls);
+    } catch (e) {
+      // why: the reservation stays on disk, which over-counts; the page's own answer is unchanged
+      this.d.log.warn({ error: detailOf(e) }, 'monthly counts not settled');
+    }
 
     if (stop !== null) {
       this.d.log.debug(

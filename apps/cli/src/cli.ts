@@ -1,5 +1,6 @@
 import { type CommandName, type Flags, parseCommandLine } from './args.js';
 import { backupCommand } from './commands/backup.js';
+import { browserCommand } from './commands/browser.js';
 import { logsCommand } from './commands/logs.js';
 import { passwordCommand } from './commands/password.js';
 import { restartCommand } from './commands/restart.js';
@@ -29,6 +30,7 @@ const COMMANDS: Record<CommandName, Command> = {
   smoke: smokeCommand,
   update: updateCommand,
   uninstall: uninstallCommand,
+  browser: browserCommand,
 };
 
 /** Parses `gmt`'s arguments and runs the command; resolves the process's exit code. */

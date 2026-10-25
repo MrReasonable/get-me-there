@@ -252,6 +252,26 @@ describe('scripts/check-boundaries.mjs import-graph, process.env and msw rules (
     });
     expect(run(ok).status).toBe(0);
   });
+  // why: decision 73: the worker's one write to process.env is run.ts setting CAMOUFOX_INSTALL_DIR for camoufox-js
+  it('WP17: run.ts may set CAMOUFOX_INSTALL_DIR in process.env, and nothing may write process.env otherwise', () => {
+    const ok = tree({
+      'apps/camoufox-worker/src/run.ts':
+        "process.env.CAMOUFOX_INSTALL_DIR = '/x';\nexport const e = process.env;\n",
+    });
+    expect(run(ok).status).toBe(0);
+    for (const [path, text] of [
+      ['apps/camoufox-worker/src/run.ts', "process.env.CAMOUFOX_DATA_DIR = '/x';"],
+      ['apps/camoufox-worker/src/run.ts', "process.env['CAMOUFOX_INSTALL_DIR'] = '/x';"],
+      ['apps/camoufox-worker/src/run.ts', "Object.assign(process.env, { A: '1' });"],
+      ['apps/camoufox-worker/src/run.ts', 'delete process.env.HOME;'],
+      ['apps/cli/src/main.ts', "process.env.CAMOUFOX_INSTALL_DIR = '/x';"],
+      ['apps/api/src/bootstrap/start.ts', "process.env.TZ = 'UTC';"],
+    ]) {
+      const r = run(tree({ [path]: `${text}\n` }));
+      expect(r.status, text).toBe(1);
+      expect(r.stderr, text).toContain(`${path} writes process.env`);
+    }
+  });
   it('WP14: worker tests import only @gmt/providers/testing, and nothing imports the worker', () => {
     const r = run(
       tree({

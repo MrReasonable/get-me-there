@@ -112,6 +112,33 @@ describe('GET /api/providers (spec §10)', () => {
       schedulerTimezone: 'Europe/London',
     });
   });
+  // why: W3 (cb-b1-004): the ledger counts a grid page's scrolls; the camoufox month reports them, the others never
+  it('the camoufox month carries the ledger’s scroll count; a provider with no scroll cap has none', async () => {
+    const x = await harness({
+      CAMOUFOX_ENABLED: 'true',
+      CAMOUFOX_WORKER_URL: 'http://127.0.0.1:8090',
+      CAMOUFOX_WORKER_KEY: 'test-camoufox-worker-key-0123456789abcdef',
+    });
+    const r = x.ports.budget.reserve({
+      providerId: 'camoufox',
+      executionId: null,
+      tileIndex: null,
+      costMicroGbp: 0,
+      httpAttempt: 1,
+      endpointPath: '/v1/page',
+      scrolls: 7,
+    });
+    r.finalise({ outcome: 'ok', durationMs: 1, pageClass: 'page', scrollCount: 5 });
+    const body = await expectContract(
+      await x.request('/api/providers'),
+      'GET',
+      '/api/providers',
+      apiContract.providersResponseSchema,
+    );
+    const month = body.providers.find((p) => p.providerId === 'camoufox')?.usage[0];
+    expect(month).toMatchObject({ scope: 'provider-month:camoufox', calls: 1, scrolls: 5 });
+    expect(body.providers.find((p) => p.providerId === 'fixture')?.usage[0]).not.toHaveProperty('scrolls');
+  });
   it('a trial plan reports the lifetime window alone, with its cap (ruling 2, F2)', async () => {
     const x = await harness({
       SEARCHAPI_KEY: SENTINEL_SA,

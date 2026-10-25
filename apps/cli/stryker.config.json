@@ -2,8 +2,8 @@
   "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
   "testRunner": "command",
   "commandRunner": {
-    "$comment": "Left out of the per-mutant command, all run by ci.yml on every push: test/real (its real-SQLite interruption sweep takes about 80 s a run), and the two files that start real child processes, runner.test.ts (runner.ts is not under mutation) and system-children.test.ts (system.test.ts covers the same rules with stand-in runners): a bailed worker killed while it starts a child can leave the child stuck in the kernel (PR #11)",
-    "command": "pnpm exec vitest run --coverage.enabled=false --bail=1 --exclude test/exec/runner.test.ts --exclude test/exec/system-children.test.ts test/plan test/services test/setup test/exec test/commands"
+    "$comment": "Left out of the per-mutant command, all run by ci.yml on every push: test/real (its real-SQLite interruption sweep takes about 80 s a run), and the three files that start real child processes, runner.test.ts (runner.ts is not under mutation), system-children.test.ts (system.test.ts covers the same rules with stand-in runners) and camoufox/install-children.test.ts (install.test.ts covers the planner with stand-ins): a bailed worker killed while it starts a child can leave the child stuck in the kernel (PR #11)",
+    "command": "pnpm exec vitest run --coverage.enabled=false --bail=1 --exclude test/exec/runner.test.ts --exclude test/exec/system-children.test.ts --exclude test/camoufox/install-children.test.ts test/plan test/services test/setup test/exec test/commands test/camoufox"
   },
   "incremental": true,
   "incrementalFile": "reports/stryker-incremental.json",
@@ -18,7 +18,8 @@
     "src/setup/importDocker.ts",
     "src/commands/update.ts",
     "src/commands/restore.ts",
-    "src/commands/uninstall.ts"
+    "src/commands/uninstall.ts",
+    "src/camoufox/**/*.ts"
   ],
   "thresholds": {
     "high": 90,

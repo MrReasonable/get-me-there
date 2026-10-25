@@ -121,6 +121,8 @@ export const usageSchema = z.object({
   cap: z.number().int().min(0).nullable(),
   windowStart: isoDateTimeSchema.nullable(),
   windowEnd: isoDateTimeSchema.nullable(),
+  /** W3: a provider-month window's scroll clicks, for a provider with a monthly scroll cap (camoufox) only. */
+  scrolls: count.exactOptional(),
 });
 export const cellKeySchema = z.object({
   origin: iataSchema,

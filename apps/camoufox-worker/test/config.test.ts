@@ -26,7 +26,6 @@ describe('worker config (brief Task 14.5; spec §12 worker side)', () => {
       minSpacingSeconds: 30,
       cooldownHours: 48,
       pageTimeoutSeconds: 90,
-      binaryBuild: '152.0.4-beta.28',
       home: '/Users/op',
       path: '/usr/bin',
       tmp: '/tmp',
@@ -44,7 +43,6 @@ describe('worker config (brief Task 14.5; spec §12 worker side)', () => {
         CAMOUFOX_MIN_SPACING_SECONDS: '45',
         CAMOUFOX_COOLDOWN_HOURS: '72',
         CAMOUFOX_PAGE_TIMEOUT_SECONDS: '120',
-        CAMOUFOX_BINARY_BUILD: '152.0.5-beta.1',
         POINT_OF_SALE: 'US',
       }),
     ).toMatchObject({
@@ -52,7 +50,6 @@ describe('worker config (brief Task 14.5; spec §12 worker side)', () => {
       minSpacingSeconds: 45,
       cooldownHours: 72,
       pageTimeoutSeconds: 120,
-      binaryBuild: '152.0.5-beta.1',
       pointOfSale: 'US',
       path: '/usr/bin:/bin',
       tmp: '/tmp',
@@ -69,8 +66,6 @@ describe('worker config (brief Task 14.5; spec §12 worker side)', () => {
     ['CAMOUFOX_COOLDOWN_HOURS', '23'],
     ['CAMOUFOX_PAGE_TIMEOUT_SECONDS', '29'],
     ['CAMOUFOX_PAGE_TIMEOUT_SECONDS', '241'],
-    ['CAMOUFOX_INSTALL_DIR', '/elsewhere'],
-    ['CAMOUFOX_BINARY_BUILD', 'latest'],
     ['POINT_OF_SALE', 'gb'],
     ['HOME', ''],
   ])('%s=%s refuses, naming the variable and never the value', (name, value) => {
@@ -81,6 +76,18 @@ describe('worker config (brief Task 14.5; spec §12 worker side)', () => {
       expect(String(e)).not.toContain(value === '' ? '\u0000' : `=${value}`);
       expect(String(e)).not.toContain(KEY);
     }
+  });
+  // why: decision 73: the pin is CAMOUFOX_BUILDS[osArch].build; the old setting is refused by name, whatever its value
+  it('a worker.env still naming CAMOUFOX_BINARY_BUILD is refused with the words that say why', () => {
+    for (const value of ['152.0.4-beta.28', '', 'latest'])
+      expect(() => loadWorkerConfig({ ...ENV, CAMOUFOX_BINARY_BUILD: value })).toThrow(
+        new WorkerConfigError(
+          [],
+          'remove CAMOUFOX_BINARY_BUILD from worker.env (pnpm gmt browser install removes it): the build now comes from CAMOUFOX_BUILDS',
+        ),
+      );
+    // why: run.ts carries its own CAMOUFOX_INSTALL_DIR into the entry's environment; the settings read nothing from it
+    expect(loadWorkerConfig({ ...ENV, CAMOUFOX_INSTALL_DIR: '/x' }).port).toBe(8090);
   });
   // why: spec §2 rev 34: grid pages only with CAMOUFOX_MODE=grid; the scroll spacing at least 5 s, the cap at most 60
   it('grid settings: list by default, grid when asked, spacing 0–30 and a cap of 0–60', () => {

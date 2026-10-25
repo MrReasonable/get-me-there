@@ -26,3 +26,10 @@ export function probeUrl(gl: string): string {
   u.search = new URLSearchParams({ curr: 'GBP', hl: 'en-GB', gl }).toString();
   return u.href;
 }
+
+/** The consent command's and the consent research's one page (spec §2 "Consent"): the landing page, no query. */
+export function landingUrl(gl: string): string {
+  const u = new URL(RESULTS_BASE);
+  u.search = new URLSearchParams({ hl: 'en-GB', gl }).toString();
+  return u.href;
+}

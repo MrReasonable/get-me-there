@@ -36,6 +36,12 @@ export function readStartRefusal(paths: Paths, files: Files): StartRefusal | 'no
 export const refusalLine = (r: StartRefusal): string =>
   `refused, not retrying: ${START_REFUSAL_TEXT[r.reason].summary}`;
 
+/** refusalLine with its fix, for start, update, setup and `browser install` (W2: one formatter): "…; fix: <command>". */
+export const refusalWithFix = (r: StartRefusal): string => {
+  const fix = START_REFUSAL_TEXT[r.reason].fixCommand;
+  return `${refusalLine(r)}${fix === null ? '' : `; fix: ${fix}`}`;
+};
+
 /**
  * macOS: launchd's KeepAlive cannot exclude exit 78, so a refused worker's loaded agent is booted out while the refusal
  * stands (spec §13); elsewhere, or with no refusal or no loaded agent, nothing.

@@ -1,6 +1,6 @@
 // The worker's limits as behaviour and as source facts (brief Task 14.11; TS-02, TS-03, arch-016, TS2-10): not string
 // scans, but a full page session over the fake browser and the TypeScript compiler API over src/.
-import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { asIata, asIsoDate } from '@gmt/core';
@@ -8,6 +8,7 @@ import ts from 'typescript';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { CooldownStore } from '../src/cooldown.js';
 import { buildLaunchOptions } from '../src/launch.js';
+import { MonthlyCounter } from '../src/monthly.js';
 import { Pacer } from '../src/pacer.js';
 import { Refusal } from '../src/refusal.js';
 import { PageSession } from '../src/session.js';
@@ -168,6 +169,11 @@ describe('worker rules: a full page session sets only SOCS and clicks nothing on
       socs,
       cooldown: new CooldownStore({ dir, challengeHours: 48, clock: timers.clock }),
       pacer: new Pacer({ dir, minSpacingSeconds: 30, clock: timers.clock }),
+      monthly: new MonthlyCounter({
+        dir,
+        caps: { pages: 1500, scrolls: 6000, billingDay: 1 },
+        clock: timers.clock,
+      }),
       refusal: new Refusal({ dir, clock: timers.clock }),
       clock: timers.clock,
       timers,
@@ -239,6 +245,12 @@ describe('worker rules: source facts through the compiler API', () => {
       ).toBe(true);
     }
   });
+  // why: decision 74 (Task 17.4): the consent capture's guard and driver are reached only from the consent paths
+  it('the consent capture’s guard only from consentDriver.ts, and the consent driver only from record.ts', () => {
+    expect(importersOf(['installConsentCaptureGuard'])).toEqual(['consentDriver.ts']);
+    expect(importersOf(['createConsentDriver'])).toEqual(['record.ts']);
+    expect(importersOf(['launchHeadedContext'])).toEqual(['record.ts']);
+  });
   it('installProbeGuard and the probe page type are imported only by record.ts (never session.ts or server.ts)', () => {
     expect(importersOf(['installProbeGuard', 'ProbePage', 'probePage'])).toEqual(['record.ts']);
   });
@@ -297,29 +309,9 @@ describe('worker rules: source facts through the compiler API', () => {
   });
 });
 
-// why: fix round 1 (sec I1): the agent starts the worker with an emptied environment, never a login shell's exports
-describe('the launchd agent example', () => {
-  const plist = readFileSync(
-    fileURLToPath(new URL('../launchd/local.get-me-there.camoufox-worker.plist.example', import.meta.url)),
-    'utf8',
-  );
-  const args = [
-    ...(plist
-      .split('<key>ProgramArguments</key>')[1]
-      ?.split('</array>')[0]
-      ?.matchAll(/<string>([^<]*)<\/string>/g) ?? []),
-  ].map((m) => m[1]);
-  it('runs /usr/bin/env -i with only HOME, PATH and TMPDIR, then pnpm start', () => {
-    expect(args.slice(0, 2)).toEqual(['/usr/bin/env', '-i']);
-    expect(args.filter((a) => a?.includes('=')).map((a) => a?.split('=')[0])).toEqual([
-      'HOME',
-      'PATH',
-      'TMPDIR',
-    ]);
-    expect(args.slice(-3)).toEqual(['--filter', '@gmt/camoufox-worker', 'start']);
-  });
-  it('has no login shell and carries no key', () => {
-    expect(plist).not.toMatch(/-lc|-l\b|zsh|bash/);
-    expect(plist).not.toMatch(/CAMOUFOX_WORKER_KEY=|EnvironmentVariables/);
+// why: po-b1-007: the hand-written launchd agent example is gone; gmt renders and installs the worker's service
+describe('the worker’s launchd agent', () => {
+  it('is gmt’s own: no hand-written example is shipped beside the worker', () => {
+    expect(existsSync(fileURLToPath(new URL('../launchd', import.meta.url)))).toBe(false);
   });
 });

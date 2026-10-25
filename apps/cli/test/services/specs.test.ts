@@ -28,6 +28,7 @@ describe('the app and backup service specs (spec §13 native mode)', () => {
       restart: 'on-failure',
       preventRestartExitStatus: null,
       throttleSeconds: 60,
+      stopSeconds: 30,
       calendar: null,
     });
     expect(Object.keys(s.environment).sort()).toEqual(['HOME', 'PATH']);

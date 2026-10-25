@@ -349,6 +349,136 @@ describe.skipIf(process.platform === 'win32')(
       expect(readdirSync(d)).toEqual([]);
     });
 
+    // why: sec-b1-002: a stalled connection, a slow whole download and a hung answer each end within their bounds
+    it('download fails when no data comes for the idle bound, or the whole takes longer than its bound, keeping nothing', async () => {
+      const d = tmp();
+      // why: CodeRabbit (PR #15): the bounds' timers are the test's, fired on demand once the download has begun
+      const manual = () => {
+        const live = new Map<number, { fire: () => void; ms: number }>();
+        let n = 0;
+        return {
+          live,
+          set: (fire: () => void, ms: number) => {
+            live.set(++n, { fire, ms });
+            return n;
+          },
+          clear: (h: unknown) => {
+            if (typeof h === 'number') live.delete(h);
+          },
+          fireLatest(ms: number) {
+            const hit = [...live.values()].filter((t) => t.ms === ms).at(-1);
+            if (hit === undefined) throw new Error(`no ${ms} ms timer is set`);
+            hit.fire();
+          },
+        };
+      };
+      const stalled =
+        (begun: () => void): typeof fetch =>
+        async (_u, init) => {
+          begun();
+          return new Response(
+            new ReadableStream<Uint8Array>({
+              start(c) {
+                c.enqueue(new Uint8Array(10));
+                init?.signal?.addEventListener('abort', () => c.error(init.signal?.reason));
+              },
+            }),
+            { status: 200 },
+          );
+        };
+      const hung =
+        (begun: () => void): typeof fetch =>
+        (_u, init) => {
+          begun();
+          return new Promise((_r, reject) =>
+            init?.signal?.addEventListener('abort', () => reject(new Error('aborted'))),
+          );
+        };
+      const action = { kind: 'download' as const, url: REL, to: join(d, 'a'), sha256: sha(BLOB), bytes: 100 };
+      for (const [make, ms, words] of [
+        [stalled, 20, `download of ${REL}: no data for 0.02 s`],
+        [stalled, 120_000, `download of ${REL}: not done within 2 minutes`],
+        [hung, 20, 'no data for 0.02 s'],
+      ] as const) {
+        const t = manual();
+        let begun: () => void = () => undefined;
+        const started = new Promise<void>((r) => {
+          begun = r;
+        });
+        const run = systemExecutor(noChild, {
+          fetch: make(() => begun()),
+          downloadIdleMs: 20,
+          downloadTotalMs: 120_000,
+          timers: t,
+        }).run(action);
+        await started;
+        t.fireLatest(ms);
+        await expect(run).rejects.toThrow(words);
+        expect(t.live.size).toBe(0);
+      }
+      expect(readdirSync(d)).toEqual([]);
+    });
+    it('a redirect’s own body is cancelled before the next hop, and every hop carries the bound', async () => {
+      const d = tmp();
+      let cancelled = 0;
+      const signals: unknown[] = [];
+      const f: typeof fetch = async (input, init) => {
+        signals.push(init?.signal);
+        if (String(input) === REL)
+          return new Response(
+            new ReadableStream({
+              cancel() {
+                cancelled++;
+              },
+            }),
+            { status: 302, headers: { location: ASSET } },
+          );
+        return new Response(new Uint8Array(BLOB), { status: 200 });
+      };
+      await systemExecutor(noChild, { fetch: f }).run({
+        kind: 'download',
+        url: REL,
+        to: join(d, 'a.zip'),
+        sha256: sha(BLOB),
+        bytes: BLOB.length,
+      });
+      expect(cancelled).toBe(1);
+      expect(signals.every((x) => x instanceof AbortSignal)).toBe(true);
+    });
+    // why: sec-b1-003: a link in the archive that leads out of the bundle is refused, and nothing is kept
+    it('an unpacked tree with a link leading out of it is refused, its temporary directory removed; links inside it pass', async () => {
+      const d = tmp();
+      const extract =
+        (link: string): Runner =>
+        async (argv) => {
+          if (argv[1] === '-Z1') return { code: 0, stdout: 'inner/f\n', stderr: '' };
+          const into = String(argv[4]);
+          const { symlinkSync } = await import('node:fs');
+          mkdirSync(join(into, 'inner'), { recursive: true });
+          writeFileSync(join(into, 'inner', 'f'), 'x');
+          symlinkSync(link, join(into, 'inner', 'l'));
+          return { code: 0, stdout: '', stderr: '' };
+        };
+      writeFileSync(join(d, 'a.zip'), 'zip');
+      for (const bad of ['/etc', '../../outside', '../..'])
+        await expect(
+          systemExecutor(extract(bad)).run({
+            kind: 'unpack',
+            archive: join(d, 'a.zip'),
+            sha256: sha('zip'),
+            to: join(d, 'out'),
+          }),
+        ).rejects.toThrow(`a link leads out of the bundle (inner/l -> ${bad})`);
+      expect(readdirSync(d)).toEqual(['a.zip']);
+      await systemExecutor(extract('f')).run({
+        kind: 'unpack',
+        archive: join(d, 'a.zip'),
+        sha256: sha('zip'),
+        to: join(d, 'ok'),
+      });
+      expect(readFileSync(join(d, 'ok', 'inner', 'l'), 'utf8')).toBe('x');
+    });
+
     it('entryProblem refuses absolute, .. and escaping entries', () => {
       for (const e of ['inner/f.txt', 'a/b/', 'Camoufox.app/Contents/x', ''])
         expect(entryProblem(e)).toBeNull();
@@ -380,7 +510,8 @@ describe.skipIf(process.platform === 'win32')(
           to: join(d, 'out'),
         }),
       ).rejects.toThrow('../evil leaves the archive');
-      expect(readdirSync(d).sort()).toEqual(['a.zip', 'b.tar']);
+      // why: W6: an archive that no longer hashes is removed, so neither a retry nor a cache reuses it
+      expect(readdirSync(d).sort()).toEqual(['b.tar']);
     });
     it('a failed extraction that left files is reported by its own error and leaves no temporary directory', async () => {
       const d = tmp();

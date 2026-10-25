@@ -1,4 +1,4 @@
-import { chmodSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   type BlockedPage,
@@ -8,6 +8,7 @@ import {
   isoDateTimeOfEpochMs,
   isoDateTimeSchema,
 } from '@gmt/core';
+import { writePrivateFile } from './privateFile.js';
 
 /**
  * The cool-down store (spec §2 "Navigation and the stops"; decision 69 "Cool-downs by cause"): a stop pauses every
@@ -80,10 +81,7 @@ export class CooldownStore {
   }
 
   private write(rec: CooldownRecord): CooldownRecord {
-    const tmp = `${this.path}.tmp`;
-    writeFileSync(tmp, JSON.stringify(rec), { mode: 0o600 });
-    chmodSync(tmp, 0o600);
-    renameSync(tmp, this.path);
+    writePrivateFile(this.path, JSON.stringify(rec));
     return rec;
   }
 

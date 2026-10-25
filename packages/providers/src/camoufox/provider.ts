@@ -7,6 +7,8 @@
  */
 import {
   APP_INSTANCE_HEADER,
+  BudgetExceeded,
+  billingMonthWindow,
   CAMOUFOX_CLOCK_SKEW_MS,
   type Cabin,
   type CapabilityInfo,
@@ -19,14 +21,17 @@ import {
   GRID_HORIZON_DAYS,
   GRID_STEP_DAYS,
   GRID_TIMES,
+  type IsoDateTime,
   type Logger,
   type PageRequest,
   type ProviderContext,
   ProviderError,
   pageRequestSchema,
   type Secret,
+  SHARED_WORKER_DEFAULTS,
   type SharedSettings,
   type SuppliedField,
+  sharedInt,
   type TilePlan,
   WORKER_KEY_HEADER,
   workerAnswerSchema,
@@ -44,7 +49,7 @@ export const CAMOUFOX_DISCOVERY_INFO: CapabilityInfo = {
   sourceKind: 'scraped-self',
   maxAgeHours: 0,
   provenanceNote:
-    "Google Flights prices via Camoufox: the cheapest round-trip price Google Flights listed for this day pair when this app's own Camoufox browser read the page on the operator's machine, from the operator's IP address, in the currency the page states. Return date: the date asked for, which the page's search form showed; the listed options state only the departure. The operator turned this provider on. Constraints are not checked; no return leg, seller or baggage is read.",
+    "Google Flights prices via Camoufox: the cheapest round-trip price Google Flights listed for this day pair when this app's own Camoufox browser read the page on the machine running this app's browser worker, from that machine's address, in the currency the page states. Return date: the date asked for, which the page's search form showed; the listed options state only the departure. The operator turned this provider on. Constraints are not checked; no return leg, seller or baggage is read.",
 };
 /**
  * Spec §2 rev 34 (grid mode): Google's own pre-aggregated date grid, so the same assumed 24 h age as the SearchApi
@@ -56,7 +61,7 @@ export const CAMOUFOX_GRID_INFO: CapabilityInfo = {
   maxAgeAssumed: true,
   returnDateSource: 'grid-cell',
   provenanceNote:
-    "Google Flights date grid via Camoufox: the round-trip price Google's date grid showed for this day pair when this app's own Camoufox browser read the page on the operator's machine, from the operator's IP address. The grid shows whole pounds; the exact fare may differ by under £1. Google's date grid; age not stated (assumed ≤24h). Return date: read from the grid cell, checked against the grid's return row. A \"cheapest\" or \"low\" mark means Google's date grid marked this price so among the prices shown in that view; it is Google's, not this app's. The operator turned this provider on. Constraints are not checked; no return leg, seller or baggage is read.",
+    "Google Flights date grid via Camoufox: the round-trip price Google's date grid showed for this day pair when this app's own Camoufox browser read the page on the machine running this app's browser worker, from that machine's address. The grid shows whole pounds; the exact fare may differ by under £1. Google's date grid; age not stated (assumed ≤24h). Return date: read from the grid cell, checked against the grid's return row. A \"cheapest\" or \"low\" mark means Google's date grid marked this price so among the prices shown in that view; it is Google's, not this app's. The operator turned this provider on. Constraints are not checked; no return leg, seller or baggage is read.",
 };
 export const CAMOUFOX_SUPPLIED_FIELDS: readonly SuppliedField[] = ['price'];
 export const CAMOUFOX_CABINS: readonly Cabin[] = ['economy'];
@@ -142,6 +147,53 @@ export function camoufoxProvider(o: CamoufoxProviderOptions): FlightProvider {
   if (o.key.reveal().length < 32)
     throw new Error('camoufoxProvider: CAMOUFOX_WORKER_KEY must be at least 32 characters');
   const log = o.log.child({ providerId: 'camoufox' });
+  // why: decision 82, W3: the worker's own monthly page cap, as BudgetExceeded at provider-month (the ledger's scope)
+  // with the worker's own figures and window end, never the app's settings copied in
+  const throwIfMonthly = (e: ProviderError): void => {
+    const m = e.monthlyCap;
+    if (e.reason !== 'monthly-cap' || m === undefined) return;
+    throw new BudgetExceeded({
+      scope: 'provider-month',
+      providerId: 'camoufox',
+      cap: m.cap,
+      current: m.used,
+      requested: 1,
+      counter: 'worker',
+      windowEnd: m.windowEnd,
+    });
+  };
+  /**
+   * W3 (cb-b1-001, pa-b1-001): the executions whose last grid page met the worker's monthly scroll cap, each with the
+   * end of the worker's window then (its billing day, a shared setting): their next grid tile stops at provider-month
+   * until that end, and asks the worker again after it. A call with no execution is never remembered.
+   */
+  const shared = o.sharedSettings ?? SHARED_WORKER_DEFAULTS;
+  const scrollsSpent = new Map<string, IsoDateTime>();
+  const scrollCapReached = (executionId: string | null): void => {
+    if (executionId === null) return;
+    const day = sharedInt(shared, 'CAMOUFOX_BILLING_DAY');
+    scrollsSpent.set(executionId, billingMonthWindow(o.clock.now(), day).windowEnd);
+  };
+  const throwIfScrollsSpent = (executionId: string | null): void => {
+    const until = executionId === null ? undefined : scrollsSpent.get(executionId);
+    if (until === undefined || executionId === null) return;
+    if (Date.parse(o.clock.now()) >= Date.parse(until)) {
+      scrollsSpent.delete(executionId);
+      return;
+    }
+    // why: the page that stopped short used every scroll the worker allowed, so its count stood at the cap then
+    const cap = sharedInt(shared, 'CAMOUFOX_MONTHLY_SCROLL_CAP');
+    throw new BudgetExceeded({
+      scope: 'provider-month',
+      providerId: 'camoufox',
+      cap,
+      current: cap,
+      requested: 1,
+      unit: 'scrolls',
+      counter: 'worker',
+      windowEnd: until,
+    });
+  };
   const instanceHeader = o.appInstance === undefined ? {} : { [APP_INSTANCE_HEADER]: o.appInstance };
 
   async function fetchTile(
@@ -196,7 +248,10 @@ export function camoufoxProvider(o: CamoufoxProviderOptions): FlightProvider {
       });
       body = res.body;
     } catch (e) {
-      if (e instanceof ProviderError) return fail(e);
+      if (e instanceof ProviderError) {
+        throwIfMonthly(e);
+        return fail(e);
+      }
       throw e;
     }
     const a = workerAnswerSchema.safeParse(body);
@@ -250,6 +305,7 @@ export function camoufoxProvider(o: CamoufoxProviderOptions): FlightProvider {
   ): Promise<DiscoveryTileResult> {
     // why: fix round 1 (CA 1): spec §2 rev 34: the page asks for what the caps leave; the worker stops there (`allowance`)
     // and the unreached cells are resumable issues, while a page with no scroll left still reads its first block
+    throwIfScrollsSpent(ctx.executionId);
     const left = o.scrollsLeft?.(ctx.executionId) ?? null;
     // why: CodeRabbit on PR #9 and re-review N2: a page whose first read view lies past what the caps leave (a 0-night
     // lead scroll with none left) drops its lead scrolls and reads the view it opens on, a day later on the returns;
@@ -297,7 +353,10 @@ export function camoufoxProvider(o: CamoufoxProviderOptions): FlightProvider {
       });
       body = res.body;
     } catch (e) {
-      if (e instanceof ProviderError) return fail(e);
+      if (e instanceof ProviderError) {
+        throwIfMonthly(e);
+        return fail(e);
+      }
       throw e;
     }
     const a = workerAnswerSchema.safeParse(body);
@@ -310,6 +369,9 @@ export function camoufoxProvider(o: CamoufoxProviderOptions): FlightProvider {
       return fail(
         parseError('fetched-at-out-of-range', `fetchedAt ${a.data.fetchedAt} is outside this request`, WHERE),
       );
+    // why: decision 82: a page that stopped short of what it asked for at its allowance met the worker's monthly scroll
+    // cap; this page's views stand, and the next grid tile of the run stops at provider-month
+    if (a.data.ended === 'allowance' && a.data.scrolls < allowance) scrollCapReached(ctx.executionId);
     const mapped = gridTile(plan, a.data);
     return leadDropped && mapped.kind === 'tile'
       ? { ...mapped, notes: [...mapped.notes, 'lead-scroll-dropped'] }

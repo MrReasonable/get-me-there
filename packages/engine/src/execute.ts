@@ -6,7 +6,7 @@ import { notifyOperator } from './notify.js';
 import { type RunState, type StopReason, stopRun } from './run.js';
 import { runDiscovery } from './stages/discovery.js';
 import { runVerification } from './stages/verification.js';
-import { breachText } from './text.js';
+import { budgetText } from './text.js';
 
 /**
  * Runs one pass: discovery, verification (spec §8.1 order), the alerts step, then finish. A stage error that escapes
@@ -116,7 +116,7 @@ export function finalStatus(
         patch: { resumeAfter: stop.resumeAfter },
         notice: {
           kind: 'paused_budget',
-          detail: `The cap was reached: ${breachText(e.scope, e.providerId ?? null, e.cap, e.current, e.requested, 'the next call needed', e.unit ?? 'calls')}. ${when}`,
+          detail: `The cap was reached: ${budgetText(e, 'the next call needed')}. ${when}`,
         },
       };
     }

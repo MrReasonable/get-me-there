@@ -1,5 +1,5 @@
 import { win32 } from 'node:path';
-import { workerDataDir } from '@gmt/core';
+import { camoufoxRootDir, workerDataDir } from '@gmt/core';
 import type { Arch, Paths, Platform, ServiceManager } from './types.js';
 
 /** Decision 78: Windows setup is a later work package; until then every command that would install refuses so. */
@@ -26,7 +26,7 @@ export function win32Platform(arch: Arch, home: string): Platform {
     data: j(home, '.local', 'share', 'get-me-there'),
     state: j(home, '.local', 'state', 'get-me-there'),
     workerData: workerDataDir(home),
-    camoufoxRoot: j(home, '.local', 'share', 'get-me-there', 'camoufox'),
+    camoufoxRoot: camoufoxRootDir(home),
     logs: null,
     serviceDir: j(home, '.config', 'get-me-there', 'services'),
   };

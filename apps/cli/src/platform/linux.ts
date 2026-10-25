@@ -1,5 +1,5 @@
 import { isAbsolute, join } from 'node:path/posix';
-import { workerDataDir } from '@gmt/core';
+import { camoufoxRootDir, workerDataDir } from '@gmt/core';
 import { systemdManager } from '../services/systemd.js';
 import { secretFile } from './secretFile.js';
 import type { Arch, Paths, Platform } from './types.js';
@@ -22,7 +22,7 @@ export function linuxPlatform(arch: Arch, uid: number, home: string, env: Env): 
     data: join(xdg(env, 'XDG_DATA_HOME', join(home, '.local', 'share')), 'get-me-there'),
     state: join(xdg(env, 'XDG_STATE_HOME', join(home, '.local', 'state')), 'get-me-there'),
     workerData: workerDataDir(home),
-    camoufoxRoot: join(home, '.local', 'share', 'get-me-there', 'camoufox'),
+    camoufoxRoot: camoufoxRootDir(home),
     logs: null,
     serviceDir: join(home, '.config', 'systemd', 'user'),
   };

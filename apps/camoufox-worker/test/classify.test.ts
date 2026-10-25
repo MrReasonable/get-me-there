@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { classifyPage, classifyPageWithRule, type PageFacts } from '../src/classify.js';
+import { classifyLanding, classifyPage, classifyPageWithRule, type PageFacts } from '../src/classify.js';
 import { SELECTORS } from '../src/selectors.js';
 
 const RESULTS = 'https://www.google.com/travel/flights/search?tfs=x';
@@ -13,6 +13,7 @@ const facts = (o: Partial<PageFacts> = {}): PageFacts => ({
     signInHeading: false,
     challenge: false,
     noFlights: false,
+    landingHeading: false,
   },
   accountControl: false,
   cheapestTabs: [{ name: 'Cheapest from 451 British pounds', inTablist: true }],
@@ -278,6 +279,7 @@ describe('classify by view (ruling of 2026-10-18)', () => {
         signInHeading: false,
         challenge: false,
         noFlights: true,
+        landingHeading: false,
       },
       accountControl: false,
       cheapestTabs: [
@@ -299,5 +301,57 @@ describe('classify by view (ruling of 2026-10-18)', () => {
     ).toEqual({ kind: 'results' });
     // the same facts on the Best view are not a Best page (no Date grid)
     expect(classifyPageWithRule(record, SELECTORS, 'best').rule).toBe('date-grid-buttons');
+  });
+});
+
+// why: WP17 Task 17.4: the consent command's first view is the landing page, recognised positively or not at all
+describe('classifyLanding (the consent command’s first view)', () => {
+  const LANDING = 'https://www.google.com/travel/flights?hl=en-GB&gl=GB';
+  const on = { ...SELECTORS, LANDING_VERIFIED: true };
+  const landing = (o: Partial<PageFacts> = {}): PageFacts =>
+    facts({
+      url: LANDING,
+      hops: [LANDING],
+      text: t({ landingHeading: true }),
+      cheapestTabs: [],
+      dateGridButtons: 0,
+      resultLinks: 0,
+      ...o,
+    });
+  it('until LANDING_VERIFIED nothing reads as landing', () => {
+    expect(classifyLanding(landing())).toEqual({
+      kind: { kind: 'blocked', page: 'unrecognised' },
+      rule: 'not-landing',
+    });
+  });
+  it('with the flag, the bare landing URL, its heading and no results structure is landing', () => {
+    expect(classifyLanding(landing(), on)).toEqual({ kind: { kind: 'landing' }, rule: 'landing' });
+  });
+  it.each([
+    ['a query', { url: `${LANDING}&q=Flights`, hops: [`${LANDING}&q=Flights`] }],
+    ['a tfs search', { url: `${LANDING}&tfs=x`, hops: [`${LANDING}&tfs=x`] }],
+    ['another path', { url: 'https://www.google.com/travel/flights/search', hops: [] }],
+    ['an unparsable URL', { url: 'not a url', hops: [] }],
+    ['no heading', { text: t({ landingHeading: false }) }],
+    ['result links', { resultLinks: 1 }],
+    ['a Cheapest tab', { cheapestTabs: [{ name: 'Cheapest', inTablist: true }] }],
+    ['a Date grid button', { dateGridButtons: 1 }],
+  ])('with %s it is not landing', (_w, o) => {
+    expect(classifyLanding(landing(o), on).rule).not.toBe('landing');
+  });
+  it('the blocked kinds come first: a consent host, a challenge, a signed-in control', () => {
+    expect(
+      classifyLanding(landing({ hops: [LANDING, 'https://consent.google.com/ml?continue=x'] }), on).kind,
+    ).toEqual({ kind: 'blocked', page: 'consent-unhandled' });
+    expect(classifyLanding(landing({ text: t({ landingHeading: true, challenge: true }) }), on).kind).toEqual(
+      {
+        kind: 'blocked',
+        page: 'captcha',
+      },
+    );
+    expect(classifyLanding(landing({ accountControl: true }), on).kind).toEqual({
+      kind: 'blocked',
+      page: 'signed-in',
+    });
   });
 });

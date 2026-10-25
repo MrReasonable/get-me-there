@@ -25,6 +25,9 @@ export const UNREACHABLE = 'browser worker not reachable';
 export const KEY_REFUSED = 'the worker refused CAMOUFOX_WORKER_KEY (the app and worker.env differ)';
 export const UNREADABLE = "the worker's status could not be read by this build (versions differ?)";
 export const SIGNED_IN_REFUSED = 'signed-in profile refused';
+/** W3: the worker refuses every page while its counts file cannot be read; waiting does not repair it. */
+export const COUNTS_UNREADABLE =
+  "the browser worker's monthly counts file cannot be read, so it refuses every page (pnpm gmt browser counts rewrites it)";
 export const GRID_NOT_VERIFIED =
   'grid mode not verified on the worker (CAMOUFOX_MODE=grid in worker.env, and the same measured grid step)';
 
@@ -99,13 +102,15 @@ export type WorkerFinding =
       cause: WorkerStatus['cooldownCause'];
     }
   | { kind: 'signed-in' }
+  /** W3: the worker's monthly counts file cannot be read, so it refuses every page; waiting does not repair it. */
+  | { kind: 'counts-unreadable' }
   | { kind: 'settings'; names: readonly string[] }
   | { kind: 'grid-unverified' }
   | { kind: 'grid-setting'; name: string; worker: number | null | undefined; app: number };
 
 /**
  * The first reason a worker that answered will refuse pages (spec §2, §12), in the order the preflight has always judged
- * them: a cool-down, a signed-in profile, shared settings that differ, then, in grid mode, an unverified grid step or a
+ * them: a cool-down, a signed-in profile, a monthly counts file it cannot read (W3), shared settings that differ, then, in grid mode, an unverified grid step or a
  * grid setting that differs. Null when none applies. Pure: the preflight skips cells on it and the Status report words it.
  */
 export function workerFinding(
@@ -118,6 +123,7 @@ export function workerFinding(
   if (st.coolingDownUntil !== null)
     return { kind: 'cooling', until: st.coolingDownUntil, cause: st.cooldownCause };
   if (st.signedInRefusal || st.accountCookie.found) return { kind: 'signed-in' };
+  if (st.monthly !== undefined && !st.monthly.readable) return { kind: 'counts-unreadable' };
   // why: spec §12 — both sides compare effective values, by name; a worker too old to report its record is compared
   // on what it does report (the grid-only comparison below), as before
   const shared = st.sharedSettings;
@@ -210,6 +216,8 @@ export async function camoufoxPreflight(
       };
     case 'signed-in':
       return { ok: false, skip: 'provider_disabled', detail: SIGNED_IN_REFUSED };
+    case 'counts-unreadable':
+      return { ok: false, skip: 'provider_disabled', detail: COUNTS_UNREADABLE };
     case 'settings':
       return { ok: false, skip: 'provider_disabled', detail: settingsDiffer(found.names) };
     case 'grid-unverified':

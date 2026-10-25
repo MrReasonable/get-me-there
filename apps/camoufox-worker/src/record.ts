@@ -3,18 +3,21 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   type BlockedPage,
+  CAMOUFOX_BUILDS,
   CAMOUFOX_JS_VERSION,
   type Clock,
   GRID_MIN_SCROLL_SPACING_SECONDS,
   GRID_MOVE_BUDGET_MS,
   GRID_MOVE_RESERVE_MS,
   type Logger,
+  type OsArch,
   systemClock,
 } from '@gmt/core';
 import { checkAccountCookies } from './accountCookies.js';
 import { type PageBudget, pageBudget } from './budget.js';
 import { classifyPageWithRule } from './classify.js';
 import { loadWorkerConfig, type WorkerConfig } from './config.js';
+import { type ConsentDriver, createConsentDriver, type DisplayEnv } from './consentDriver.js';
 import { CooldownStore } from './cooldown.js';
 import {
   CheapestStepFailed,
@@ -27,16 +30,25 @@ import {
   type ProbePage,
   pollUntilSettled,
   probePage,
+  type RequestLike,
   runStep,
   type Settled,
   type StepOptions,
 } from './driver.js';
 import { type GuardState, installGuard, installProbeGuard, onAllowlist } from './guard.js';
-import { type LaunchOptions, launchContext, launchOptionsForMeta, prepareLaunch } from './launch.js';
+import {
+  type LaunchOptions,
+  launchContext,
+  launchHeadedContext,
+  launchOptionsForMeta,
+  prepareLaunch,
+} from './launch.js';
 import { acquireLock, LockHeld, sweepProbeProfiles } from './lock.js';
 import { debugLogging, stderrLog } from './log.js';
+import { MonthlyCounter } from './monthly.js';
 import { Pacer } from './pacer.js';
-import { installDir, profileDir } from './paths.js';
+import { claim } from './pageClaim.js';
+import { profileDir } from './paths.js';
 import type { View } from './ready.js';
 import {
   type GridDirection,
@@ -58,8 +70,16 @@ import {
   writeUnrecorded,
 } from './recordWrite.js';
 import { Refusal } from './refusal.js';
-import { type Entry, type EntryContext, EX_CONFIG, EX_SOFTWARE, EX_UNAVAILABLE } from './run.js';
-import { SELECTORS, SELECTORS_VERSION, type Selectors } from './selectors.js';
+import { consentResearch } from './researchSession.js';
+import {
+  DISPLAY_NAMES,
+  type Entry,
+  type EntryContext,
+  EX_CONFIG,
+  EX_SOFTWARE,
+  EX_UNAVAILABLE,
+} from './run.js';
+import { SELECTORS_VERSION, type Selectors, selectorsFor } from './selectors.js';
 import { loadSocs, type ReadBack, readBack, type SocsCapture, socsCookie } from './socs.js';
 import { bounded, type Deadline, DeadlineExceeded, realTimers, type Timers } from './timers.js';
 import { pageUrl, probeUrl } from './url.js';
@@ -95,6 +115,15 @@ export const DEFAULT_ROOT = fileURLToPath(new URL('../fixtures/recorded/', impor
 const FINALLY_MS = 5000;
 
 export interface RecordDeps {
+  /** process.platform: on Linux the research's headed window needs a display. */
+  platform: string;
+  /** The display groups run.ts passed (`record --consent-research` only; decision 74's rule), else none. */
+  display: DisplayEnv;
+  /** This machine's entry and its bundle's digest, for every recording's meta (pie-b1-006). */
+  osArch: OsArch;
+  bundleSha256: string;
+  /** The research's headed window in a throwaway profile, its requests shown to `onRequest` (consentDriver.ts). */
+  consentDriver(profile: string, onRequest: (r: RequestLike) => void): ConsentDriver;
   clock: Clock;
   timers: Timers;
   log: Logger;
@@ -152,8 +181,19 @@ export async function record(ctx: EntryContext, cfg: WorkerConfig, deps: RecordD
       minSpacingSeconds: cfg.minSpacingSeconds,
       clock: deps.clock,
     });
+    // why: decision 82: every page the recorder loads counts in the worker's own month, as the server's do
+    const monthly = new MonthlyCounter({
+      dir: ctx.dataDir,
+      caps: { pages: cfg.monthlyPageCap, scrolls: cfg.monthlyScrollCap, billingDay: cfg.billingDay },
+      clock: deps.clock,
+    });
     const day = deps.clock.now().slice(0, 10);
-    if (args.kind === 'consent-probe') return await consentProbe(ctx, cfg, deps, { pacer, cooldown, day });
+    if (args.kind === 'consent-probe')
+      return await consentProbe(ctx, cfg, deps, { pacer, monthly, cooldown, day });
+    if (args.kind === 'consent-research')
+      return await consentResearch(ctx, cfg, deps, { pacer, monthly, cooldown, day }, (extra) =>
+        meta(deps, 'consent-research', 'missing', {}, extra),
+      );
     let capture: SocsCapture;
     try {
       capture = loadSocs(ctx.dataDir, deps.clock);
@@ -169,7 +209,7 @@ export async function record(ctx: EntryContext, cfg: WorkerConfig, deps: RecordD
       for (let i = 0; i < args.pages; i++) {
         const req = args.request;
         if (req === null) throw new RecordingRefused('no request');
-        await claim(pacer, deps, ctx);
+        await claim(pacer, monthly, args.moves.length, deps, ctx);
         const c: ContextLike = context ?? (await deps.launch(profile));
         context = c;
         // why: ruling of 2026-10-18: the first view has the page timeout; the Cheapest flow the same again from its click,
@@ -415,16 +455,6 @@ export async function record(ctx: EntryContext, cfg: WorkerConfig, deps: RecordD
   }
 }
 
-/** The shared pacer: waits out the spacing once (fake timers in tests), then claims or refuses. */
-async function claim(pacer: Pacer, deps: RecordDeps, ctx: EntryContext): Promise<void> {
-  const first = pacer.claim();
-  if (first.ok) return;
-  ctx.out(`waiting ${first.retryAfterSeconds} s for the spacing`);
-  await deps.timers.sleep(first.retryAfterSeconds * 1000);
-  const second = pacer.claim();
-  if (!second.ok) throw new RecordingRefused(`the spacing still refuses (${second.retryAfterSeconds} s)`);
-}
-
 /** The recorder reads with the no-flights hypothesis on, so it can see the line it is recording. */
 const reading = (S: Selectors): Selectors => ({ ...S, NO_FLIGHTS_VERIFIED: true });
 
@@ -621,6 +651,8 @@ function meta(
     recordedAt: deps.clock.now(),
     recordedBy: RECORDED_BY,
     kind,
+    osArch: deps.osArch,
+    bundleSha256: deps.bundleSha256,
     socsReadBack: back,
     launchOptions: deps.launchOptions,
     versions: { selectors: SELECTORS_VERSION, camoufoxJs: CAMOUFOX_JS_VERSION, binary: deps.binary },
@@ -638,12 +670,12 @@ async function consentProbe(
   ctx: EntryContext,
   cfg: WorkerConfig,
   deps: RecordDeps,
-  s: { pacer: Pacer; cooldown: CooldownStore; day: string },
+  s: { pacer: Pacer; monthly: MonthlyCounter; cooldown: CooldownStore; day: string },
 ): Promise<number> {
   const profile = join(ctx.dataDir, `probe-${Date.parse(deps.clock.now())}-${deps.pid}`);
   mkdirSync(profile, { recursive: true, mode: 0o700 });
   try {
-    await claim(s.pacer, deps, ctx);
+    await claim(s.pacer, s.monthly, 0, deps, ctx);
     const context = await deps.launch(profile);
     const d = deps.timers.deadline(cfg.pageTimeoutSeconds * 1000);
     try {
@@ -724,17 +756,38 @@ export function realRecordDeps(
   prepared: ReturnType<typeof prepareLaunch>,
   err: (line: string) => void,
   debug = false,
+  display: DisplayEnv = {},
 ): RecordDeps {
+  const log = stderrLog(err, debug);
+  // why: the entry the launch was prepared for, so the meta and the flags are that machine's on every host
+  const { osArch } = prepared;
   return {
+    platform: process.platform,
+    display,
+    osArch,
+    bundleSha256: CAMOUFOX_BUILDS[osArch].sha256,
+    consentDriver: (profile, onRequest) =>
+      createConsentDriver({
+        platform: process.platform,
+        options: prepared.options,
+        profileDir: profile,
+        launch: (options, p, display) => launchHeadedContext(options, p, display),
+        log,
+        clock: systemClock,
+        timers: realTimers,
+        onRequest,
+      }),
     clock: systemClock,
     timers: realTimers,
-    log: stderrLog(err, debug),
+    log,
     launch: (profile) => launchContext(prepared.options, profile),
     launchOptions: launchOptionsForMeta(prepared.options),
     binary: prepared.install.build,
     root: DEFAULT_ROOT,
     pollMs: 2000,
-    selectors: SELECTORS,
+    // why: pie-b1-006: the running entry's flags for its build, as the server path's (the recorder's own reading
+    // override is applied per kind)
+    selectors: selectorsFor(osArch, prepared.install.build),
     pid: process.pid,
   };
 }
@@ -744,12 +797,18 @@ export const entry: Entry = async (ctx) => {
   const cfg = loadWorkerConfig(ctx.env);
   const prepared = prepareLaunch({
     platform: process.platform,
-    installDir: installDir(cfg.home),
-    pinnedBuild: cfg.binaryBuild,
-    installDirOverride: ctx.env.CAMOUFOX_INSTALL_DIR,
+    arch: process.arch,
+    installDirSet: ctx.env.CAMOUFOX_INSTALL_DIR,
+    dataDir: ctx.dataDir,
     home: cfg.home,
     path: cfg.path,
     tmp: cfg.tmp,
   });
-  return record(ctx, cfg, realRecordDeps(prepared, ctx.err, debugLogging(ctx.env)));
+  // why: run.ts passes the display groups to `record --consent-research` only (decision 74's rule, sec-b1-006)
+  const display: Record<string, string> = {};
+  for (const n of DISPLAY_NAMES) {
+    const v = ctx.env[n];
+    if (v !== undefined) display[n] = v;
+  }
+  return record(ctx, cfg, realRecordDeps(prepared, ctx.err, debugLogging(ctx.env), display));
 };

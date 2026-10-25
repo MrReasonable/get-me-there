@@ -6,3 +6,6 @@
 
 /** The camoufox worker's data directory (the CLI ignores `XDG_*` for it). */
 export const workerDataDir = (home: string): string => `${home}/.local/state/get-me-there/camoufox`;
+
+/** The Camoufox install root `gmt` writes (spec §2 rev 36; decision 73; XDG ignored). */
+export const camoufoxRootDir = (home: string): string => `${home}/.local/share/get-me-there/camoufox`;

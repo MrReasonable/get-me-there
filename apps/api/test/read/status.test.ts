@@ -737,12 +737,9 @@ describe('consent', () => {
       expect(c.state).toBe('fail');
       expect(c.fix).toEqual({ text: consentFixText(), command: null });
     }
-    for (const reason of ['flags-unset', 'build-mismatch'] as const) {
-      expect(checkOf(withWorker(down({ kind: 'refusal', reason, at: at(HOUR) })), 'consent')).toMatchObject({
-        state: 'off',
-        offReason: 'awaiting-verification',
-      });
-    }
+    expect(
+      checkOf(withWorker(down({ kind: 'refusal', reason: 'flags-unset', at: at(HOUR) })), 'consent'),
+    ).toMatchObject({ state: 'off', offReason: 'awaiting-verification' });
   });
 });
 
@@ -773,16 +770,40 @@ describe('the worker check', () => {
       for (const f of [ok, warn, fail, off]) expect(noteOf(f)).toContain(words);
     }
   });
-  it('maps each refusal reason through the shared words: flags-unset and build-mismatch are off, never fail', () => {
+  it('maps each refusal reason through the shared words: flags-unset is off, never fail; a build mismatch names its fix', () => {
+    const mismatch = checkOf(
+      withWorker(down({ kind: 'refusal', reason: 'build-mismatch', at: at(HOUR) })),
+      'worker',
+    );
+    expect(mismatch).toMatchObject({ state: 'fail', fix: { command: 'pnpm gmt browser install' } });
+    const signedIn = checkOf(
+      withWorker(down({ kind: 'refusal', reason: 'signed-in', at: at(HOUR) })),
+      'worker',
+    );
+    expect(signedIn.fix?.command).toBeNull();
+    expect(signedIn.fix?.text).toContain('run pnpm --filter @gmt/camoufox-worker clear-signed-in');
     for (const reason of START_REFUSAL_REASONS) {
       const c = checkOf(withWorker(down({ kind: 'refusal', reason, at: at(HOUR) })), 'worker');
-      if (reason === 'flags-unset' || reason === 'build-mismatch') {
+      if (reason === 'flags-unset') {
         expect(c).toMatchObject({ state: 'off', offReason: 'awaiting-verification' });
       } else {
         expect(c.state).toBe('fail');
         expect(c.summary).toContain('refused, not retrying: ');
       }
     }
+  });
+  // why: W3: a worker that cannot read its counts refuses every page; the card names the rewrite
+  it('a worker whose counts cannot be read fails, naming gmt browser counts', () => {
+    const c = checkOf(
+      withWorker(
+        healthyWorker({
+          read: { kind: 'ok', status: okWorkerStatus({ finding: { kind: 'counts-unreadable' } }) },
+        }),
+      ),
+      'worker',
+    );
+    expect(c).toMatchObject({ state: 'fail', fix: { command: 'pnpm gmt browser counts' } });
+    expect(c.summary).toContain('monthly counts file cannot be read');
   });
   it('flags unset in the worker status is off (awaiting verification), not fail', () => {
     const c = checkOf(

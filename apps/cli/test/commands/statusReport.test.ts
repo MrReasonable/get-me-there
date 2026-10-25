@@ -322,6 +322,9 @@ describe('gmt setup offers the test email at its end (brief Task 18.3)', () => {
     const io = testIo({ tty: true });
     m.deps.ask = ask;
     m.deps.io = io;
+    // why: WP17's browser row is offered on darwin-arm64; on an entry without recordings it asks nothing, so these
+    // tests see the email question alone
+    m.deps.platform = { ...m.deps.platform, arch: 'x64' };
     http.requests.length = 0;
     return { m, http, ask, io };
   }
@@ -428,7 +431,8 @@ describe('gmt setup offers the test email at its end (brief Task 18.3)', () => {
   });
 
   it('is never offered without email, without a terminal, or with --non-interactive', async () => {
-    const plainAsk = scriptedAsk(['', '', '', '', '', '', '', false]);
+    // why: the Enter-only wizard also meets WP17's browser row on darwin-arm64 (Enter keeps it off)
+    const plainAsk = scriptedAsk(['', '', '', '', '', '', '', '', false]);
     const plain = machine({ ask: plainAsk, io: testIo({ tty: true }) });
     expect(await runCli(['setup'], plain.deps)).toBe(0);
     expect(plainAsk.asked).not.toContain(TEST_EMAIL_QUESTION);

@@ -103,10 +103,10 @@ window's start and end with calls and cost so far.
 ### Camoufox (own Google Flights pages): self-scraped, opt-in, free
 
 - Off by default (`CAMOUFOX_ENABLED=false`); a definition must also name it. Discovery only, `list` mode: one page per
-  day pair, through the host-side worker on the operator's Mac (docs/setup.md section 14).
+  day pair, through the host-side worker on the machine running it (macOS or Linux; docs/setup.md section 14).
 - Caps: `CAMOUFOX_EXECUTION_PAGE_CAP` (default 100, 1 to 400) pages a run and `CAMOUFOX_MONTHLY_PAGE_CAP` (default 1,500)
   pages a calendar month from `CAMOUFOX_BILLING_DAY`. The app's ledger enforces both; the worker reports its own month's
-  counts, and enforces the monthly caps across every caller from WP17. The run's cap is frozen into the execution's snapshot when it is
+  counts, and enforces the monthly caps across every caller. The run's cap is frozen into the execution's snapshot when it is
   created; the guard reads it from there, never from the configuration, and only a manual resume refreshes it with the
   rest of the budget. Reaching it skips the remaining camoufox cells for budget (`provider-execution`) while other
   providers continue, or pauses the run for a manual resume when none remains.
@@ -122,7 +122,7 @@ window's start and end with calls and cost so far.
   airport pair (8,736 for its four pairs), so a full pass of one pair takes 22 runs.
 - Costs (the spec's §2, in full on docs/setup.md section 14): **Terms** (read the provider's terms before enabling
   it; the operator is responsible for how it is used), **The operator's IP and account**, **Brittleness**, **Speed** (50–90 s a
-  page, 1½–2½ hours a run), **Availability**, **Image size** (none in the app image), **The worker key**, **Money** (none).
+  page and 1½–2½ hours a run at the default 30 s page spacing), **Availability**, **Image size** (none in the app image), **The worker key**, **Money** (none).
 
 ## Reconciling with the vendor dashboard
 

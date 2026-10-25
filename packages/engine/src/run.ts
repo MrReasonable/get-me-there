@@ -18,7 +18,7 @@ import {
 import type { EngineContext } from './context.js';
 import { classifyFailure } from './errors.js';
 import { type LineKey, lineKey } from './lines.js';
-import { breachText } from './text.js';
+import { budgetText } from './text.js';
 
 /** Why a pass stopped early. Each maps to one execution status in execute.ts `finalStatus` (spec §8.1 error table). */
 export type StopReason =
@@ -396,12 +396,17 @@ export function applyBudgetBreach(
       return;
     }
     const scope: BudgetScope = global ? { kind: 'global-month' } : { kind: err.scope, providerId };
-    stopRun(run, { kind: 'budget', error: err, resumeAfter: ctx.budget.usage(scope).windowEnd });
+    // why: W3: a counter that states its own window (the browser worker's) resumes the run when that window ends
+    stopRun(run, {
+      kind: 'budget',
+      error: err,
+      resumeAfter: err.windowEnd ?? ctx.budget.usage(scope).windowEnd,
+    });
     return;
   }
   run.notices.push({
     kind: 'provider_capped',
-    detail: `${affected.join(', ')}: ${breachText(err.scope, providerId, err.cap, err.current, err.requested, 'the next call needed', err.unit ?? 'calls')}. Its remaining ${stage} cells are skipped (budget) in this run and the other providers continue.`,
+    detail: `${affected.join(', ')}: ${budgetText(err, 'the next call needed')}. Its remaining ${stage} cells are skipped (budget) in this run and the other providers continue.`,
   });
 }
 

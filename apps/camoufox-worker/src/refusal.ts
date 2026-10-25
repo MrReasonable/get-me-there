@@ -1,6 +1,7 @@
-import { chmodSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { type Clock, type IsoDateTime, isoDateTimeSchema } from '@gmt/core';
+import { writePrivateFile } from './privateFile.js';
 
 /**
  * The persisted signed-in refusal (spec §2 "the worker refuses to serve until the operator clears a persisted flag after
@@ -49,10 +50,7 @@ export class Refusal {
 
   set(reason: string): RefusalRecord {
     const rec = { reason, since: this.o.clock.now() };
-    const tmp = `${this.path}.tmp`;
-    writeFileSync(tmp, JSON.stringify(rec), { mode: 0o600 });
-    chmodSync(tmp, 0o600);
-    renameSync(tmp, this.path);
+    writePrivateFile(this.path, JSON.stringify(rec));
     return rec;
   }
 

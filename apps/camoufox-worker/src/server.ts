@@ -2,6 +2,7 @@ import { timingSafeEqual } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import {
   ANSWER_STATUS,
+  APP_INSTANCE_HEADER,
   GOOGLE_CONTACTED_HEADER,
   type Logger,
   type PageRequest,
@@ -29,6 +30,8 @@ export interface ServerDeps {
   status(): Promise<WorkerStatus>;
   /** Called after an answer whose result was fatal (the cool-down store failed): main exits 70. */
   onFatal(): void;
+  /** Decision 82: each authorised request's APP_INSTANCE_HEADER, for the month's count of calling apps. */
+  seen?(appInstance: string): void;
   now(): number;
 }
 
@@ -86,6 +89,8 @@ export function createWorkerServer(d: ServerDeps): Server {
         send(res, 401, undefined, false);
         return done(401, 'unauthorised');
       }
+      const instance = req.headers[APP_INSTANCE_HEADER];
+      if (typeof instance === 'string') d.seen?.(instance);
       if (route === 'GET /v1/status') {
         send(res, 200, await d.status(), false);
         return done(200, 'status');

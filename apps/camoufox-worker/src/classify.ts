@@ -17,6 +17,8 @@ export interface PageFacts {
     signInHeading: boolean;
     challenge: boolean;
     noFlights: boolean;
+    /** The landing view's heading (WP17 Task 17.4; a hypothesis until LANDING_VERIFIED). */
+    landingHeading: boolean;
   };
   accountControl: boolean;
   /** `selected`: the tab is the selected one (aria-selected), read for the tabs in the tablist. */
@@ -58,7 +60,9 @@ export type ClassifyRule =
   | 'date-grid-buttons'
   | 'cheapest-tab-not-selected'
   | 'cheapest-tab-unpriced'
-  | 'no-result-links';
+  | 'no-result-links'
+  | 'landing'
+  | 'not-landing';
 
 export function classifyPage(f: PageFacts, S: Selectors = SELECTORS, view: View = 'best'): PageKind {
   return classifyPageWithRule(f, S, view).kind;
@@ -73,6 +77,30 @@ export function classifyPageWithRule(
   S: Selectors = SELECTORS,
   view: View = 'best',
 ): { kind: PageKind; rule: ClassifyRule } {
+  const b = blockedRule(f, S);
+  if (b !== null) return b;
+  const blocked = (page: BlockedPage, rule: ClassifyRule) => ({
+    kind: { kind: 'blocked' as const, page },
+    rule,
+  });
+  // why: ruling of 2026-10-18: the line counts only on a page with no result links, so the flag can never misread a
+  // results page (the Cheapest view carries a status line matching it beside 21 links)
+  if (S.NO_FLIGHTS_VERIFIED && f.text.noFlights && f.resultLinks === 0)
+    return { kind: { kind: 'no-flights' }, rule: 'no-flights-line' };
+  const tabs = f.cheapestTabs;
+  if (tabs.length !== 1) return blocked('unrecognised', 'cheapest-tab-count');
+  if (!tabs.every((x) => x.inTablist)) return blocked('unrecognised', 'cheapest-tab-outside-tablist');
+  if (view === 'best' && f.dateGridButtons !== 1) return blocked('unrecognised', 'date-grid-buttons');
+  if (view === 'cheapest' && !tabs.every((x) => x.selected === true))
+    return blocked('unrecognised', 'cheapest-tab-not-selected');
+  if (view === 'cheapest' && !tabs.every((x) => /\d/.test(x.name)))
+    return blocked('unrecognised', 'cheapest-tab-unpriced');
+  if (f.resultLinks <= 0) return blocked('unrecognised', 'no-result-links');
+  return { kind: { kind: 'results' }, rule: 'results' };
+}
+
+/** The blocked kinds, in the table's order, the first match winning; null when none applies (total over any input). */
+function blockedRule(f: PageFacts, S: Selectors): { kind: PageKind; rule: ClassifyRule } | null {
   const blocked = (page: BlockedPage, rule: ClassifyRule) => ({
     kind: { kind: 'blocked' as const, page },
     rule,
@@ -95,18 +123,31 @@ export function classifyPageWithRule(
   if (f.text.signInHeading) return blocked('sign-in', 'sign-in-heading');
   // why: the guard's one allowlist rule (fix round 1: the port and user checks live there once)
   if (![f.url, ...f.hops].every((x) => onAllowlist(x, S))) return blocked('off-allowlist', 'off-allowlist');
-  // why: ruling of 2026-10-18: the line counts only on a page with no result links, so the flag can never misread a
-  // results page (the Cheapest view carries a status line matching it beside 21 links)
-  if (S.NO_FLIGHTS_VERIFIED && f.text.noFlights && f.resultLinks === 0)
-    return { kind: { kind: 'no-flights' }, rule: 'no-flights-line' };
-  const tabs = f.cheapestTabs;
-  if (tabs.length !== 1) return blocked('unrecognised', 'cheapest-tab-count');
-  if (!tabs.every((x) => x.inTablist)) return blocked('unrecognised', 'cheapest-tab-outside-tablist');
-  if (view === 'best' && f.dateGridButtons !== 1) return blocked('unrecognised', 'date-grid-buttons');
-  if (view === 'cheapest' && !tabs.every((x) => x.selected === true))
-    return blocked('unrecognised', 'cheapest-tab-not-selected');
-  if (view === 'cheapest' && !tabs.every((x) => /\d/.test(x.name)))
-    return blocked('unrecognised', 'cheapest-tab-unpriced');
-  if (f.resultLinks <= 0) return blocked('unrecognised', 'no-result-links');
-  return { kind: { kind: 'results' }, rule: 'results' };
+  return null;
+}
+
+/**
+ * The consent command's first view (WP17 Task 17.4; spec §2 "Consent"): the blocked kinds first, as on every page;
+ * then `landing` only when it is positively recognised (LANDING_VERIFIED, the URL the command opened with no query,
+ * the landing heading, and no results page structure); anything else is `unrecognised`. Pure.
+ */
+export function classifyLanding(
+  f: PageFacts,
+  S: Selectors = SELECTORS,
+): { kind: { kind: 'landing' } | PageKind; rule: ClassifyRule } {
+  const b = blockedRule(f, S);
+  if (b !== null) return b;
+  const u = urlOf(f.url);
+  const bare =
+    u !== null && u.pathname === S.resultsPath && !u.searchParams.has('q') && !u.searchParams.has('tfs');
+  const landing =
+    S.LANDING_VERIFIED &&
+    bare &&
+    f.text.landingHeading &&
+    f.resultLinks === 0 &&
+    f.cheapestTabs.length === 0 &&
+    f.dateGridButtons === 0;
+  return landing
+    ? { kind: { kind: 'landing' }, rule: 'landing' }
+    : { kind: { kind: 'blocked', page: 'unrecognised' }, rule: 'not-landing' };
 }

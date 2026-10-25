@@ -6,6 +6,7 @@
  */
 import { z } from 'zod';
 import { isoDateSchema } from '../types/ids.js';
+import { CAMOUFOX_PIN } from './pin.js';
 
 /** The machines a build is pinned for (spec §2 rev 36: macOS or Linux; Windows is a later work package). */
 export const OS_ARCHES = ['darwin-arm64', 'darwin-x64', 'linux-arm64', 'linux-x64'] as const;
@@ -25,51 +26,27 @@ export const camoufoxBuildSchema = z.strictObject({
 });
 export type CamoufoxBuild = z.input<typeof camoufoxBuildSchema>;
 
-const ASSET = `${RELEASE_PREFIX}v152.0.4-beta.28/camoufox-152.0.4-beta.28-`;
-
 /**
- * WP17 §0 (research 17.0a and 17.0b, 2026-10-19): release `v152.0.4-beta.28`, the digests GitHub publishes per asset.
- * why: the unpacked sizes are the research's own round figures (about 670 MB for the macOS app, about 1.25 GB for the
- * flat Linux tree), used only for the planner's free-space check, which adds the download's own size.
+ * WP17 §0 (research 17.0a and 17.0b, 2026-10-19): release `v152.0.4-beta.28`, the digests GitHub publishes per asset
+ * (pin.ts holds them).
  */
-export const CAMOUFOX_BUILDS = {
-  'darwin-arm64': {
-    build: '152.0.4-beta.28',
-    url: `${ASSET}mac.arm64.zip`,
-    sha256: '8b7680a61818245cf4eb0150edab811d4ed937b6723514569e74c3e7df9685bd',
-    bytes: 312_626_286,
-    unpackedBytes: 670_000_000,
-    hashedOn: '2026-10-19',
-  },
-  'darwin-x64': {
-    build: '152.0.4-beta.28',
-    url: `${ASSET}mac.x86_64.zip`,
-    sha256: '6e0efd66f6db46bece072827cb2c5a4851bca822ff4fed95b8a0c2fb6f61a3d4',
-    bytes: 319_866_512,
-    unpackedBytes: 670_000_000,
-    hashedOn: '2026-10-19',
-  },
-  'linux-arm64': {
-    build: '152.0.4-beta.28',
-    url: `${ASSET}lin.arm64.zip`,
-    sha256: '3a105a2fc929e80a79b4b7fce2c93ed62c4fb2c877f3c1ed2a5d66a1c4fe968f',
-    bytes: 653_814_950,
-    unpackedBytes: 1_250_000_000,
-    hashedOn: '2026-10-19',
-  },
-  'linux-x64': {
-    build: '152.0.4-beta.28',
-    url: `${ASSET}lin.x86_64.zip`,
-    sha256: '924f3109ccd6d47cd6a0384d67a345fadf975d48b6319f8dbbd5954c588982bd',
-    bytes: 663_387_175,
-    unpackedBytes: 1_250_000_000,
-    hashedOn: '2026-10-19',
-  },
-} as const satisfies Record<OsArch, CamoufoxBuild>;
+export const CAMOUFOX_BUILDS: Readonly<Record<OsArch, CamoufoxBuild>> = CAMOUFOX_PIN.builds;
 
 /** The install's directory name: the build and the digest's first 8 hex characters (the operator's Mac: `…-8b7680a6`). */
 export const bundleDirName = (b: Pick<CamoufoxBuild, 'build' | 'sha256'>): string =>
   `${b.build}-${b.sha256.slice(0, 8)}`;
+/** Where a pinned bundle lives under the install root (`camoufoxRootDir`): `browsers/official/<bundleDirName>`. */
+export const bundleRelPath = (b: Pick<CamoufoxBuild, 'build' | 'sha256'>): string =>
+  `browsers/official/${bundleDirName(b)}`;
+
+const OS_ARCH: Readonly<Record<string, Readonly<Record<string, OsArch>>>> = {
+  darwin: { arm64: 'darwin-arm64', x64: 'darwin-x64' },
+  linux: { arm64: 'linux-arm64', x64: 'linux-x64' },
+};
+/** The `CAMOUFOX_BUILDS` key of an os (process.platform) and arch (process.arch), or null where none is pinned. */
+export function osArchOf(os: string, arch: string): OsArch | null {
+  return OS_ARCH[os]?.[arch] ?? null;
+}
 
 /** A build's camoufox-js `version.json` parts: the version before the first hyphen, the release after it. */
 export function versionOf(b: Pick<CamoufoxBuild, 'build'>): { version: string; release: string } {
@@ -93,6 +70,8 @@ export const FLAG_NAMES = [
   'NO_FLIGHTS_VERIFIED',
   'SOCS_STABLE',
   'GRID_VERIFIED',
+  // why: WP17 Task 17.4: the consent command's landing view, false until research 17.0c's recordings show it
+  'LANDING_VERIFIED',
 ] as const;
 export type FlagName = (typeof FLAG_NAMES)[number];
 
@@ -110,33 +89,51 @@ const NONE: Readonly<Record<FlagName, boolean>> = {
   NO_FLIGHTS_VERIFIED: false,
   SOCS_STABLE: false,
   GRID_VERIFIED: false,
+  LANDING_VERIFIED: false,
 };
 
 /**
- * The verified flags per `<os>-<arch>` (spec §2 rev 36). darwin-arm64 carries the 2026-10-18 recordings' values on the
- * operator's Mac (the worker's PROOFS name each one); the other three earn theirs in WP17's recording sessions.
+ * The verified flags per `<os>-<arch>` (spec §2 rev 36; pin.ts holds them). darwin-arm64 carries the 2026-10-18
+ * recordings' values on the operator's Mac (the worker's PROOFS name each one); the other three earn theirs in WP17's
+ * recording sessions.
  */
-export const FLAGS: Readonly<Record<OsArch, VerifiedSet>> = {
-  'darwin-arm64': {
-    build: '152.0.4-beta.28',
-    flags: {
-      RESULTS_VERIFIED: true,
-      FORM_VERIFIED: true,
-      CHEAPEST_FLOW_VERIFIED: true,
-      // why: the view-more recording's minimum was no lower than the results page's
-      VIEW_MORE_ADDS_CHEAPER: false,
-      NO_FLIGHTS_VERIFIED: true,
-      SOCS_STABLE: true,
-      GRID_VERIFIED: true,
-    },
-  },
-  'darwin-x64': { build: '152.0.4-beta.28', flags: NONE },
-  'linux-arm64': { build: '152.0.4-beta.28', flags: NONE },
-  'linux-x64': { build: '152.0.4-beta.28', flags: NONE },
-};
+export const FLAGS: Readonly<Record<OsArch, VerifiedSet>> = CAMOUFOX_PIN.flags;
+
+const verifiedSetSchema = z.strictObject({
+  build: z.string(),
+  flags: z.record(z.enum(FLAG_NAMES), z.boolean()),
+});
+/**
+ * A pin as data (pin.ts's shape): what `gmt update` checks the next commit's copy of pin.ts against before it uses it
+ * (W6: the new bundle is downloaded while the app still runs).
+ */
+export const pinSchema = z.strictObject({
+  builds: z.strictObject({
+    'darwin-arm64': camoufoxBuildSchema,
+    'darwin-x64': camoufoxBuildSchema,
+    'linux-arm64': camoufoxBuildSchema,
+    'linux-x64': camoufoxBuildSchema,
+  }),
+  flags: z.strictObject({
+    'darwin-arm64': verifiedSetSchema,
+    'darwin-x64': verifiedSetSchema,
+    'linux-arm64': verifiedSetSchema,
+    'linux-x64': verifiedSetSchema,
+  }),
+});
+export type Pin = z.output<typeof pinSchema>;
+
+/** The flags `pin` gives `osArch` when it runs `runningBuild`; all false on any other build. */
+export function flagsIn(
+  pin: { flags: Readonly<Record<OsArch, VerifiedSet>> },
+  osArch: OsArch,
+  runningBuild: string,
+): Readonly<Record<FlagName, boolean>> {
+  const set = pin.flags[osArch];
+  return set.build === runningBuild ? set.flags : NONE;
+}
 
 /** The flags of `osArch` when it runs the build they were earned on; all false on any other build. */
 export function flagsFor(osArch: OsArch, runningBuild: string): Readonly<Record<FlagName, boolean>> {
-  const set = FLAGS[osArch];
-  return set.build === runningBuild ? set.flags : NONE;
+  return flagsIn({ flags: FLAGS }, osArch, runningBuild);
 }

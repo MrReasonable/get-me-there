@@ -72,6 +72,22 @@ function check(i: CheckInput): StatusCheck {
 
 type Cmd = `pnpm gmt ${string}`;
 /** A fix: a `pnpm gmt` command in native mode; in container and dev mode no command, and the docs section named. */
+/**
+ * A refusal's own fix (core's START_REFUSAL_TEXT, a command that exists): a `pnpm gmt` one is the card's command; any
+ * other (the worker's own scripts, such as clear-signed-in) goes into the text, since a card's command is `gmt`'s.
+ */
+const refusalFix = (
+  fix: ReturnType<typeof fixer>,
+  summary: string,
+  command: `pnpm ${string}` | null,
+): StatusCheck['fix'] =>
+  command === null
+    ? fix(summary)
+    : isGmt(command)
+      ? fix(summary, command)
+      : fix(`${summary}: run ${command}`);
+const isGmt = (c: string): c is Cmd => c.startsWith('pnpm gmt ');
+
 function fixer(f: Pick<StatusFacts, 'mode'>) {
   return (text: string, command: Cmd | null = null): StatusCheck['fix'] =>
     f.mode === 'native' ? { text, command } : { text: `${text}: see ${STATUS_TEXT.docs}`, command: null };
@@ -494,7 +510,9 @@ export function consentOutcome(f: Frame, w: WorkerFacts): { check: StatusCheck; 
   if (r.kind === 'unreachable') {
     const ref = w.refusal;
     if (f.mode === 'native' && ref.kind === 'refusal') {
-      if (ref.reason === 'flags-unset' || ref.reason === 'build-mismatch')
+      // why: W1: a build mismatch means the pinned build (whose flags are set, or flags-unset would come first) is not
+      // installed yet: a refusal whose fix is `pnpm gmt browser install`, never awaiting verification
+      if (ref.reason === 'flags-unset')
         return out(
           check({ ...base, state: 'off', offReason: 'awaiting-verification', summary: NOT_VERIFIED }),
           'none',
@@ -503,7 +521,7 @@ export function consentOutcome(f: Frame, w: WorkerFacts): { check: StatusCheck; 
         const cause =
           ref.reason === 'consent-voided'
             ? 'voided'
-            : ref.reason === 'consent-missing'
+            : ref.reason === 'consent-missing' || ref.reason === 'consent-not-shown'
               ? 'missing'
               : 'expired';
         return out(
@@ -512,7 +530,7 @@ export function consentOutcome(f: Frame, w: WorkerFacts): { check: StatusCheck; 
         );
       }
       const t = START_REFUSAL_TEXT[ref.reason];
-      return cannot(`the worker will not start (${t.summary})`, fix(t.summary, t.fixCommand));
+      return cannot(`the worker will not start (${t.summary})`, refusalFix(fix, t.summary, t.fixCommand));
     }
     return cannot('the worker is not answering', fix('start the worker', 'pnpm gmt start'));
   }
@@ -608,7 +626,9 @@ function workerCheckOf(f: StatusFacts, w: WorkerFacts): StatusCheck {
     const ref = w.refusal;
     if (ref.kind === 'refusal') {
       const t = START_REFUSAL_TEXT[ref.reason];
-      if (ref.reason === 'flags-unset' || ref.reason === 'build-mismatch')
+      // why: W1: a build mismatch means the pinned build (whose flags are set, or flags-unset would come first) is not
+      // installed yet: a refusal whose fix is `pnpm gmt browser install`, never awaiting verification
+      if (ref.reason === 'flags-unset')
         return check({
           ...base,
           state: 'off',
@@ -621,7 +641,9 @@ function workerCheckOf(f: StatusFacts, w: WorkerFacts): StatusCheck {
         state: 'fail',
         summary: `refused, not retrying: ${t.summary}`,
         note,
-        fix: ref.reason.startsWith('consent-') ? fix(consentFixText()) : fix(t.summary, t.fixCommand),
+        fix: ref.reason.startsWith('consent-')
+          ? fix(consentFixText())
+          : refusalFix(fix, t.summary, t.fixCommand),
       });
     }
     return check({
@@ -651,8 +673,16 @@ function workerCheckOf(f: StatusFacts, w: WorkerFacts): StatusCheck {
   const found = s.finding;
   if (found !== null) {
     switch (found.kind) {
-      case 'signed-in':
-        return refuses(SIGNED_IN_REFUSED, fix(START_REFUSAL_TEXT['signed-in'].summary, null));
+      case 'signed-in': {
+        const t = START_REFUSAL_TEXT['signed-in'];
+        return refuses(SIGNED_IN_REFUSED, refusalFix(fix, t.summary, t.fixCommand));
+      }
+      // why: W3: the worker refuses every page while its counts cannot be read; a rewrite from the ledger repairs it
+      case 'counts-unreadable':
+        return refuses(
+          "the worker's monthly counts file cannot be read",
+          fix('rewrite the counts from the ledger', 'pnpm gmt browser counts'),
+        );
       case 'settings':
         return refuses(
           `settings differ between the app and the worker: ${found.names.join(', ')}`,
@@ -692,7 +722,7 @@ function workerCheckOf(f: StatusFacts, w: WorkerFacts): StatusCheck {
       state: 'warn',
       summary: "the worker's monthly counts cannot be read",
       note,
-      fix: fix('restart the worker', 'pnpm gmt restart'),
+      fix: fix('rewrite the counts from the ledger', 'pnpm gmt browser counts'),
     });
   if (
     s.monthly !== null &&

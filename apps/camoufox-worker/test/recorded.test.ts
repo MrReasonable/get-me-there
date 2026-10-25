@@ -42,6 +42,8 @@ const pageFactsSchema = z.object({
     signInHeading: z.boolean(),
     challenge: z.boolean(),
     noFlights: z.boolean(),
+    // why: WP17 Task 17.4 added it; recordings made before then lack it
+    landingHeading: z.boolean().default(false),
   }),
   accountControl: z.boolean(),
   cheapestTabs: z.array(

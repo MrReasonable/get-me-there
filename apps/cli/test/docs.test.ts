@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { COMMANDS, parseCommandLine } from '../src/args.js';
@@ -67,5 +67,32 @@ describe('docs/setup.md section 0 is the CLI’s own text', () => {
     expect(flat).toContain('docker compose run --rm --no-deps --entrypoint rm app /data/MOVED-TO-NATIVE');
     expect(flat).toContain('Time Machine');
     expect(section0).toContain('newsyslog');
+  });
+});
+
+// why: po-b1-003, pa-b1-006: every `pnpm gmt …` an operator is told to run, in any package's source, exists
+describe('every gmt command the code names exists', () => {
+  it('names only commands (and browser actions) the CLI parses', () => {
+    const repo = join(import.meta.dirname, '..', '..', '..');
+    const files = [
+      'apps/cli/src',
+      'apps/camoufox-worker/src',
+      'packages/core/src',
+      'packages/providers/src',
+      'apps/api/src',
+    ]
+      .flatMap((d) => readdirSync(join(repo, d), { recursive: true }).map((f) => join(repo, d, String(f))))
+      .filter((f) => f.endsWith('.ts'));
+    const named = new Set<string>();
+    for (const f of files)
+      for (const m of readFileSync(f, 'utf8').matchAll(/pnpm gmt ([a-z-]+)(?: ([a-z-]+))?/g))
+        named.add(m[1] === 'browser' ? `browser ${m[2] ?? ''}` : (m[1] ?? ''));
+    expect(named.size).toBeGreaterThan(5);
+    for (const c of named) {
+      const [cmd, action] = c.split(' ');
+      expect(COMMANDS, c).toContain(cmd);
+      if (cmd === 'browser') expect(['install', 'counts'], c).toContain(action);
+    }
+    expect(named.has('consent')).toBe(false);
   });
 });

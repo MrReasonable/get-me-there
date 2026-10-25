@@ -2,6 +2,7 @@ import { dirname, join, resolve } from 'node:path/posix';
 import { credsFrom } from '../appClient.js';
 import { type Flags, isReconfigureGroup, type ReconfigureGroup } from '../args.js';
 import { noAsk } from '../ask.js';
+import { browserSetup } from '../camoufox/browserSetup.js';
 import { type Deps, EXIT } from '../deps.js';
 import { type Action, type Plan, runAction } from '../plan/action.js';
 import { apply } from '../plan/apply.js';
@@ -422,7 +423,10 @@ export async function setupCommand(flags: Flags, _positional: string | null, dep
       : [
           ...serviceActions(
             deps,
-            group === null ? entriesSet : entriesSet.filter((e) => e.name === 'app'),
+            // why: the browser worker is installed only by the browser step, once its start check passes
+            group === null
+              ? entriesSet.filter((e) => e.name !== 'camoufox-worker')
+              : entriesSet.filter((e) => e.name === 'app'),
             facts,
             restarts,
           ),
@@ -479,11 +483,17 @@ export async function setupCommand(flags: Flags, _positional: string | null, dep
     });
 
   // 5. reconfigure: nothing changed, or the guard, then apply
+  // why: WP17 Task 17.6: the browser provider's own steps follow the browser group's window question
+  const browserPart = async (code: number): Promise<number> => {
+    if (group !== 'browser' || code !== EXIT.ok) return code;
+    const out = await browserSetup(deps, { interactive, ask, choice: answers.browser, reconfigure: true });
+    return out === 'failed' ? EXIT.failed : code;
+  };
   if (group !== null) {
     if (group !== 'linger' && envText === null) {
       deps.io.out(`${command}: no change, app.env already has these values; nothing was restarted\n`);
       if (group === 'email') await offerTest();
-      return EXIT.ok;
+      return browserPart(EXIT.ok);
     }
     const r = await run({
       command,
@@ -500,7 +510,7 @@ export async function setupCommand(flags: Flags, _positional: string | null, dep
     if (group === 'travelpayouts' || group === 'searchapi')
       deps.io.out(`${searchSource(answers) ? nextStep(port) : NO_SOURCE_TEXT}\n`);
     if (group === 'email') await offerTest();
-    return EXIT.ok;
+    return browserPart(EXIT.ok);
   }
 
   // 6. setup: apply each phase, with a recovery message for the state each failure leaves
@@ -599,6 +609,15 @@ export async function setupCommand(flags: Flags, _positional: string | null, dep
   const backup = entriesSet.find((e) => e.name === 'backup');
   const backupOk = backup === undefined ? true : await firstBackup(deps, backup);
   await runLinger(answers.linger, deps);
+  // why: WP17 Task 17.6: row 8, once the app is up, so a stop in the browser part leaves the app running and the
+  // provider off, which --reconfigure browser resumes
+  // why: CodeRabbit (PR #15): a failed browser step can leave the app stopped, so setup never reports success then
+  const browser = await browserSetup(deps, { interactive, ask, choice: answers.browser, reconfigure: false });
+  if (browser === 'failed')
+    return failed(
+      deps,
+      'the browser provider’s step failed (above); pnpm gmt setup --reconfigure browser repeats it.',
+    );
   deps.io.out(closingScreen({ port, answers, appEnv: envPath, backupOk, os }));
   await offerTest();
   if (interactive && (await ask.confirm('Open the app in your browser now?', false))) {

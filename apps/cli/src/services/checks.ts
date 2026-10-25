@@ -13,9 +13,10 @@ export interface Check {
 }
 
 /** The two settings files: present (app.env must be), the user's own and 0600 (spec §12). */
-export function settingsChecks(deps: Deps): Check[] {
+export function settingsChecks(deps: Deps, appEnvRequired = true): Check[] {
   const files: Array<[string, string, boolean]> = [
-    ['settings app.env', appEnvPath(deps.platform.paths), true],
+    // why: W1: a worker alone (the app in Docker) needs no app.env; an app.env that is there is still checked
+    ['settings app.env', appEnvPath(deps.platform.paths), appEnvRequired],
     ['settings worker.env', join(deps.platform.paths.workerData, 'worker.env'), false],
   ];
   const out: Check[] = [];

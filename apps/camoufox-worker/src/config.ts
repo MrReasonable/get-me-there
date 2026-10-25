@@ -1,5 +1,12 @@
-import { readSharedSettings, Secret, type SharedSettings, sharedInt, sharedMode } from '@gmt/core';
-import { DEFAULT_BINARY_BUILD } from './install.js';
+import {
+  readSharedSettings,
+  Secret,
+  type SharedSettings,
+  sharedInt,
+  sharedMode,
+  WORKER_PORT,
+  workerPortOf,
+} from '@gmt/core';
 import type { Env } from './run.js';
 
 /**
@@ -13,7 +20,6 @@ export interface WorkerConfig {
   minSpacingSeconds: number;
   cooldownHours: number;
   pageTimeoutSeconds: number;
-  binaryBuild: string;
   /** The minimal browser environment's values (never the worker's own variables). */
   home: string;
   path: string;
@@ -36,22 +42,18 @@ export interface WorkerConfig {
   sharedSettings: SharedSettings;
 }
 
+/** Decision 73: the build comes from CAMOUFOX_BUILDS; a worker.env still naming the old setting is refused. */
+export const BINARY_BUILD_REMOVED =
+  'remove CAMOUFOX_BINARY_BUILD from worker.env (pnpm gmt browser install removes it): the build now comes from CAMOUFOX_BUILDS';
+
 export class WorkerConfigError extends Error {
-  constructor(readonly fields: string[]) {
-    super(`the worker's settings in worker.env are not valid: ${fields.join(', ')}`);
+  constructor(
+    readonly fields: string[],
+    message = `the worker's settings in worker.env are not valid: ${fields.join(', ')}`,
+  ) {
+    super(message);
     this.name = 'WorkerConfigError';
   }
-}
-
-function intIn(env: Env, name: string, min: number, max: number, dflt: number, bad: string[]): number {
-  const raw = env[name];
-  if (raw === undefined || raw === '') return dflt;
-  const v = Number(raw);
-  if (!/^\d+$/.test(raw) || v < min || v > max) {
-    bad.push(name);
-    return dflt;
-  }
-  return v;
 }
 
 /** Parses the worker's environment; throws WorkerConfigError naming every bad variable at once. */
@@ -59,7 +61,8 @@ export function loadWorkerConfig(env: Env): WorkerConfig {
   const bad: string[] = [];
   const key = env.CAMOUFOX_WORKER_KEY ?? '';
   if (key.length < 32) bad.push('CAMOUFOX_WORKER_KEY');
-  const port = intIn(env, 'CAMOUFOX_WORKER_PORT', 1024, 65535, 8090, bad);
+  const port = workerPortOf(env.CAMOUFOX_WORKER_PORT) ?? WORKER_PORT.default;
+  if (workerPortOf(env.CAMOUFOX_WORKER_PORT) === null) bad.push('CAMOUFOX_WORKER_PORT');
   // why: spec §12, review R27 — the ten shared settings through core's one rule set, with its bounds and defaults; every
   // typed field below comes from that one effective record
   const shared = readSharedSettings(env);
@@ -68,14 +71,8 @@ export function loadWorkerConfig(env: Env): WorkerConfig {
   const minSpacingSeconds = sharedInt(s, 'CAMOUFOX_MIN_SPACING_SECONDS');
   const cooldownHours = sharedInt(s, 'CAMOUFOX_COOLDOWN_HOURS');
   const pageTimeoutSeconds = sharedInt(s, 'CAMOUFOX_PAGE_TIMEOUT_SECONDS');
-  const installDir = env.CAMOUFOX_INSTALL_DIR;
-  // why: decision 69 round 2: the worker launches only from camoufox-js's default install directory.
-  if (installDir !== undefined && installDir !== '') bad.push('CAMOUFOX_INSTALL_DIR');
-  const binaryBuild =
-    env.CAMOUFOX_BINARY_BUILD === undefined || env.CAMOUFOX_BINARY_BUILD === ''
-      ? DEFAULT_BINARY_BUILD
-      : env.CAMOUFOX_BINARY_BUILD;
-  if (!/^\d+\.\d+(\.\d+)?-[a-z]+\.\d+$/.test(binaryBuild)) bad.push('CAMOUFOX_BINARY_BUILD');
+  // why: decision 73: the pin is CAMOUFOX_BUILDS[osArch].build; there is no separate build setting any more
+  if (env.CAMOUFOX_BINARY_BUILD !== undefined) throw new WorkerConfigError([], BINARY_BUILD_REMOVED);
   const pointOfSale = s.POINT_OF_SALE;
   const mode = sharedMode(s);
   const gridScrollSpacingSeconds = sharedInt(s, 'CAMOUFOX_GRID_SCROLL_SPACING_SECONDS');
@@ -92,7 +89,6 @@ export function loadWorkerConfig(env: Env): WorkerConfig {
     minSpacingSeconds,
     cooldownHours,
     pageTimeoutSeconds,
-    binaryBuild,
     home,
     path: env.PATH ?? '/usr/bin:/bin',
     tmp: env.TMPDIR ?? '/tmp',

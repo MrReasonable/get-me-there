@@ -25,6 +25,7 @@ export interface ServiceSpec {
   restart: 'on-failure' | 'never';
   preventRestartExitStatus: number | null; // 78 for the worker (systemd)
   throttleSeconds: number; // launchd ThrottleInterval: 60, or 600 for the worker
+  stopSeconds: number; // TimeoutStopSec / ExitTimeOut: 30, or a page's longest time plus a margin for the worker (W7)
   calendar: { hour: number; minute: number } | null; // jobs only
 }
 export interface RenderedService {

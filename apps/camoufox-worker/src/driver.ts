@@ -55,6 +55,10 @@ export interface PageLike {
 export interface RequestLike {
   url(): string;
   method(): string;
+  /** A form POST's body (the consent research reads its field names); absent on the fakes that send none. */
+  postData?(): string | null;
+  /** The request's headers, lower-cased names (the consent research reads the content type only). */
+  headers?(): Record<string, string>;
   isNavigationRequest(): boolean;
   redirectedFrom(): RequestLike | null;
   frame(): FrameLike;
@@ -69,6 +73,10 @@ export interface CookieLike {
   value: string;
   domain: string;
   path: string;
+  /** The attributes the consent capture reads (Playwright's cookie carries them; the fakes may not). */
+  expires?: number;
+  secure?: boolean;
+  sameSite?: string;
 }
 export interface CookieInput {
   name: string;
@@ -87,6 +95,12 @@ export interface ContextLike {
   on(event: 'request', listener: (request: RequestLike) => void): unknown;
   newPage(): Promise<PageLike>;
   close(): Promise<void>;
+}
+
+/** A headed context (the consent window): a person may close it, which the consent driver observes. */
+export interface HeadedContextLike extends ContextLike {
+  on(event: 'request', listener: (request: RequestLike) => void): unknown;
+  on(event: 'close', listener: () => void): unknown;
 }
 
 /** Readiness facts (spec §2 "settled"; brief §9): read beside the page facts on every poll. */
@@ -365,6 +379,9 @@ export function createDriver(page: PageLike, guard: GuardState, S: Selectors = S
       // why: ruling of 2026-10-18: visible only, as the loading check (a hidden status line never counts)
       at('no-flights-text');
       const noFlights = (await visibleCount(page.getByText(S.results.noFlights), d)) > 0;
+      // why: WP17 Task 17.4: the consent command's landing view (a hypothesis until LANDING_VERIFIED)
+      at('landing-heading');
+      const landingHeading = await has(page.getByRole('heading', { name: S.landing.heading }), d);
       at('date-grid-buttons');
       const dateGridButtons = await countOf(
         page.getByRole('button', { name: S.results.dateGridButton, exact: true }),
@@ -376,7 +393,7 @@ export function createDriver(page: PageLike, guard: GuardState, S: Selectors = S
         url,
         hops: [...guard.hops],
         frameUrls: [...new Set([...page.frames().map((f) => f.url()), ...guard.frameUrls])],
-        text: { unusualTraffic, consentHeading, signInHeading, challenge, noFlights },
+        text: { unusualTraffic, consentHeading, signInHeading, challenge, noFlights, landingHeading },
         accountControl: accountButtons + accountLinks > 0,
         cheapestTabs,
         dateGridButtons,

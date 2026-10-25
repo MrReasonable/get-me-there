@@ -1,4 +1,4 @@
-import type { Flags } from '../args.js';
+import { type Flags, isOnlyService, type OnlyService } from '../args.js';
 import { type Deps, EXIT } from '../deps.js';
 import type { Action } from '../plan/action.js';
 import { apply } from '../plan/apply.js';
@@ -20,6 +20,28 @@ export async function installed(
   const facts = await factsOf(deps, all);
   const entries = all.filter((e) => e.rendered.some((r) => factOf(facts, r.unitName).onDisk !== null));
   return { entries, facts };
+}
+
+const ONLY_ENTRY: Readonly<Record<OnlyService, ServiceEntry['name']>> = {
+  app: 'app',
+  backup: 'backup',
+  worker: 'camoufox-worker',
+};
+
+/**
+ * `--only <service>` (WP17 Task 17.8: the browser worker alone, so a recording session never stops a native app): the
+ * one installed entry it names, all of them without the flag, or the refusal when that service is not installed.
+ */
+export function onlyEntries(
+  flags: Flags,
+  entries: readonly ServiceEntry[],
+): { ok: true; entries: ServiceEntry[] } | { ok: false; message: string } {
+  const only = flags.only;
+  if (typeof only !== 'string' || !isOnlyService(only)) return { ok: true, entries: [...entries] };
+  const picked = entries.filter((e) => e.name === ONLY_ENTRY[only]);
+  return picked.length > 0
+    ? { ok: true, entries: picked }
+    : { ok: false, message: `the ${only} service is not installed: nothing to do` };
 }
 
 /** A job is started or stopped by its schedule (launchd's calendar agent loaded or not; the systemd timer), never run. */
@@ -67,16 +89,28 @@ export function refuseOnWindows(deps: Deps): number | null {
   return EXIT.badConfig;
 }
 
-/** U1 (cb-b1-008): stop and restart ask the app about a run first (decision 80's rule); null when they may go ahead. */
+/**
+ * U1 (cb-b1-008): stop and restart ask the app about a run first (decision 80's rule); null when they may go ahead.
+ * W5 (ca-b1-002): the app is found among every installed entry, not only the targeted ones, so `--only worker` (whose
+ * stop interrupts a browser page) is guarded too; only a target holding neither the app nor the worker (`--only
+ * backup`) skips the question.
+ */
 export async function lifecycleGuard(
   deps: Deps,
   flags: Flags,
-  entries: readonly ServiceEntry[],
+  targeted: readonly ServiceEntry[],
+  all: readonly ServiceEntry[],
   facts: ReadonlyMap<string, ServiceFacts>,
 ): Promise<number | null> {
   if (flags['dry-run'] === true) return null;
-  const app = entries.find((e) => e.name === 'app');
-  const text = deps.files.read(appEnvPath(deps.platform.paths));
+  if (!targeted.some((e) => e.name === 'app' || e.name === 'camoufox-worker')) return null;
+  const app = all.find((e) => e.name === 'app');
+  let text: string | null;
+  try {
+    text = deps.files.read(appEnvPath(deps.platform.paths));
+  } catch {
+    text = null;
+  }
   const g = await guardActiveRun(
     deps,
     nativeTarget(text === null ? null : readSettings(text), factOf(facts, app?.unit ?? '')),

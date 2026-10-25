@@ -1,10 +1,11 @@
 // WP15 Task 15.4: the worker's grid page through the page session (spec §2 rev 34; decision 70). Fake browser objects
 // and synthetic grids in the --grid recordings' shape (test/support/gridTree.ts); no Google page is loaded.
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { asIata, asIsoDate, asIsoDateTime, type GridMove, type PageRequest } from '@gmt/core';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { CooldownStore } from '../src/cooldown.js';
+import { MonthlyCounter } from '../src/monthly.js';
 import { Pacer } from '../src/pacer.js';
 import { Refusal } from '../src/refusal.js';
 import { SELECTORS, type Selectors } from '../src/selectors.js';
@@ -61,6 +62,8 @@ const dialogPage = (g: FakeNode): FakeNode =>
 
 interface Run {
   tree?: FakeNode;
+  /** The worker's monthly scroll cap (decision 82); 6000 when absent. */
+  monthlyScrolls?: number;
   grid?: GridSettings;
   selectors?: Selectors;
   /** The trees a view at (first departure, first return) shows, by its index. */
@@ -87,6 +90,11 @@ function setup(o: Run = {}) {
   const contexts: FakeContext[] = [];
   const cooldown = new CooldownStore({ dir: dataDir, challengeHours: 48, clock });
   const pacer = new Pacer({ dir: dataDir, minSpacingSeconds: 30, clock });
+  const monthly = new MonthlyCounter({
+    dir: dataDir,
+    caps: { pages: 1500, scrolls: o.monthlyScrolls ?? 6000, billingDay: 1 },
+    clock,
+  });
   let at = { dep: '2027-03-11', ret: '2027-03-21' };
   let index = 0;
   const step = o.step ?? 1;
@@ -129,6 +137,7 @@ function setup(o: Run = {}) {
     socs: loadSocs(dataDir, clock),
     cooldown,
     pacer,
+    monthly,
     refusal: new Refusal({ dir: dataDir, clock }),
     clock,
     timers,
@@ -139,7 +148,7 @@ function setup(o: Run = {}) {
     grid: o.grid ?? GRID,
     ...(o.pollMs === undefined ? {} : { pollMs: o.pollMs }),
   });
-  return { session, timers, cooldown, contexts, pacer, profileDir };
+  return { session, timers, cooldown, contexts, pacer, profileDir, dataDir, monthly };
 }
 const clicksOf = (t: ReturnType<typeof setup>) => t.contexts[0]?.pages[0]?.calls.clicks ?? [];
 const decisions = (log: ReturnType<typeof memoryLog>) =>
@@ -321,6 +330,55 @@ describe('grid pages: the flow', () => {
     const t = setup();
     const r = await t.session.page(req(['down', 'down', 'down', 'down'], { allowance: 2 }));
     expect(r.answer).toMatchObject({ kind: 'grid', scrolls: 2, ended: 'allowance' });
+  });
+  // why: decision 82 (Task 17.3): the month's scroll cap clamps the allowance; the page reads its views and settles
+  it('with S monthly scrolls left and a request of 4, the allowance is S: ended allowance, views kept, counts settled', async () => {
+    const t = setup({ monthlyScrolls: 2 });
+    const r = await t.session.page(req(['down', 'down', 'down', 'down']));
+    expect(r.answer).toMatchObject({ kind: 'grid', scrolls: 2, ended: 'allowance' });
+    expect(r.answer.kind === 'grid' ? r.answer.views.length : 0).toBe(3);
+    expect(JSON.parse(readFileSync(join(t.dataDir, 'monthly.json'), 'utf8'))).toMatchObject({
+      pages: 1,
+      scrolls: 2,
+    });
+  });
+  it('with page room but no monthly scroll left, the page loads, reads its first block and makes no scroll', async () => {
+    const t = setup({ monthlyScrolls: 0 });
+    const r = await t.session.page(req(['down', 'down']));
+    expect(r.answer).toMatchObject({ kind: 'grid', scrolls: 0, ended: 'allowance' });
+    expect(r.answer.kind === 'grid' ? r.answer.views.length : 0).toBe(1);
+    expect(clicksOf(t).filter((c) => c.startsWith('button:Scroll'))).toEqual([]);
+  });
+  // why: CodeRabbit (PR #15): the page stops before its allowance, so only the settle can bring 4 reserved down to 1
+  it('a page that ends early settles the counts to the scrolls it made', async () => {
+    let moves = 0;
+    const t = setup({ moveOf: (dir) => (dir === 'down' && moves++ === 0 ? [0, 1] : [0, 0]) });
+    const r = await t.session.page(req(['down', 'down', 'down', 'down'], { allowance: 4 }));
+    expect(r.answer).toMatchObject({ kind: 'grid', ended: 'scroll-not-settled' });
+    const made = r.answer.kind === 'grid' ? r.answer.scrolls : -1;
+    expect(made).toBeLessThan(4);
+    expect(JSON.parse(readFileSync(join(t.dataDir, 'monthly.json'), 'utf8'))).toMatchObject({
+      pages: 1,
+      scrolls: made,
+    });
+  });
+  // why: ts-b1-007: while the page is in flight its whole reservation is on disk, so a process killed there
+  // over-counts; a failure the worker survives settles to the scrolls it counted (the click that failed included)
+  it('the whole reservation is on disk while the page reads; a failure part way settles to the scrolls counted', async () => {
+    const during: unknown[] = [];
+    const t = setup({
+      onScrollContext: () => {
+        during.push(JSON.parse(readFileSync(join(t.dataDir, 'monthly.json'), 'utf8')));
+        throw new Error('the browser died mid-read');
+      },
+    });
+    const r = await t.session.page(req(['down', 'down', 'down', 'down'], { allowance: 4 }));
+    expect(r.answer.kind).not.toBe('grid');
+    expect(during).toEqual([expect.objectContaining({ pages: 1, scrolls: 4 })]);
+    expect(JSON.parse(readFileSync(join(t.dataDir, 'monthly.json'), 'utf8'))).toMatchObject({
+      pages: 1,
+      scrolls: 1,
+    });
   });
   it('Google’s no-flights page (past the sale window) is a grid answer with no views', async () => {
     const t = setup({

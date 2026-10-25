@@ -1,4 +1,5 @@
 import {
+  type BudgetExceeded,
   type BudgetScopeKind,
   formatPence,
   type IsoDateTime,
@@ -50,6 +51,25 @@ export function scopeAmount(scope: BudgetScopeKind, n: number, unit: CapUnit = '
   if (unit === 'scrolls') return `${n} ${n === 1 ? 'scroll' : 'scrolls'}`;
   if (isCostScope(scope)) return formatPence(microGbpToPence(n));
   return `${n} ${n === 1 ? 'call' : 'calls'}`;
+}
+
+/**
+ * A BudgetExceeded in one sentence: breachText for this app's own caps; for the browser worker's own monthly caps
+ * (decision 82; W3), named as the worker's, counting every app and recording that uses it, with the worker's figures.
+ */
+export function budgetText(e: BudgetExceeded, needsLabel: string): string {
+  if (e.counter !== 'worker')
+    return breachText(
+      e.scope,
+      e.providerId ?? null,
+      e.cap,
+      e.current,
+      e.requested,
+      needsLabel,
+      e.unit ?? 'calls',
+    );
+  const unit = e.unit === 'scrolls' ? 'scrolls' : 'pages';
+  return `the browser worker's monthly ${unit === 'scrolls' ? 'scroll' : 'page'} cap, counting every app and recording that uses it, is ${e.cap.toLocaleString('en-GB')} ${unit}; the worker counts ${e.current.toLocaleString('en-GB')} ${unit} used`;
 }
 
 /** "this run's billed-call cap is 50 calls; 50 calls used; the next call needs 1 call" in one sentence. */

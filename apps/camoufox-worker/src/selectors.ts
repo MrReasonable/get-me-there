@@ -12,16 +12,16 @@
  * Task 14.2's recordings; until then the server refuses to start (FORM_VERIFIED) and nothing is clicked. SOCS stability
  * is verified by the 2026-10-18 socs-stability recording (operator ruling).
  */
-import { CAMOUFOX_BUILDS, FLAG_NAMES, type FlagName, flagsFor } from '@gmt/core';
+import { CAMOUFOX_BUILDS, FLAG_NAMES, type FlagName, flagsFor, type OsArch } from '@gmt/core';
 
 export { FLAG_NAMES, type FlagName };
 
 export const SELECTORS_VERSION = '2026-10-18-results';
 
 /**
- * The verification flags this worker runs with, read through core (decision 81: flags per `<os>-<arch>`, bound to
- * their build). why: the worker runs on the operator's Mac (darwin-arm64) with the pinned build until WP17 picks the
- * entry from the platform and the installed build; the values are the 2026-10-18 recordings', and PROOFS names each.
+ * The module's default flags: the operator's Mac (darwin-arm64) on its pinned build, the 2026-10-18 recordings' values
+ * (PROOFS names each). The running worker never reads these: it runs on `selectorsFor(osArch, build)`, the entry and
+ * build it actually has (decision 75), and every flag it reads goes through that one object.
  */
 const VERIFIED = flagsFor('darwin-arm64', CAMOUFOX_BUILDS['darwin-arm64'].build);
 
@@ -68,6 +68,11 @@ export interface Selectors {
     accountControl: RegExp;
   };
   consent: { heading: RegExp };
+  /**
+   * The landing page the consent command opens (`/travel/flights?hl=…&gl=…`, no query; WP17 Task 17.4): a hypothesis
+   * until research 17.0c's recordings date it and set LANDING_VERIFIED; until then nothing reads as `landing`.
+   */
+  landing: { heading: RegExp };
   results: {
     /** The Cheapest tab, whose name carries the tab price once settled. */
     cheapestTab: RegExp;
@@ -114,6 +119,8 @@ export interface Selectors {
   NO_FLIGHTS_VERIFIED: boolean;
   SOCS_STABLE: boolean;
   GRID_VERIFIED: boolean;
+  /** The consent command's landing view (WP17 Task 17.4); false until research 17.0c's recordings show it. */
+  LANDING_VERIFIED: boolean;
 }
 
 export const SELECTORS: Selectors = {
@@ -132,6 +139,8 @@ export const SELECTORS: Selectors = {
     accountControl: /^Google Account: /,
   },
   consent: { heading: /^Before you continue/ },
+  // why: unverified (no landing recording yet): research 17.0c records the landing view, then dates this
+  landing: { heading: /^Flights$/ },
   results: {
     cheapestTab: /^Cheapest\b/,
     dateGridButton: 'Date grid',
@@ -178,6 +187,18 @@ export const SELECTORS: Selectors = {
   ...VERIFIED,
 };
 
+/**
+ * The selectors with the flags `osArch` earned for the build it runs (decision 75: all false on any other build or
+ * entry). `flags` is core's `flagsFor`; a test passes its own to state a partly verified entry.
+ */
+export function selectorsFor(
+  osArch: OsArch,
+  build: string,
+  flags: (osArch: OsArch, build: string) => Readonly<Record<FlagName, boolean>> = flagsFor,
+): Selectors {
+  return { ...SELECTORS, ...flags(osArch, build) };
+}
+
 /** The recording that proved each true flag (TS-13): its date and what it was. */
 export const PROOFS: Readonly<Partial<Record<FlagName, string>>> = {
   RESULTS_VERIFIED:
@@ -204,5 +225,6 @@ export function flagsOf(S: Selectors = SELECTORS): Record<FlagName, boolean> {
     NO_FLIGHTS_VERIFIED: S.NO_FLIGHTS_VERIFIED,
     SOCS_STABLE: S.SOCS_STABLE,
     GRID_VERIFIED: S.GRID_VERIFIED,
+    LANDING_VERIFIED: S.LANDING_VERIFIED,
   };
 }

@@ -42,7 +42,7 @@ export function renderService(spec: ServiceSpec): string {
   if (spec.restart === 'on-failure') lines.push('Restart=on-failure', 'RestartSec=60');
   if (spec.preventRestartExitStatus !== null)
     lines.push(`RestartPreventExitStatus=${spec.preventRestartExitStatus}`);
-  lines.push('TimeoutStopSec=30', 'KillSignal=SIGTERM');
+  lines.push(`TimeoutStopSec=${spec.stopSeconds}`, 'KillSignal=SIGTERM');
   if (!job) lines.push('', '[Install]', 'WantedBy=default.target');
   lines.push('');
   return lines.join('\n');

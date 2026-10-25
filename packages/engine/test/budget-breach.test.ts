@@ -1,4 +1,4 @@
-import { asIsoDateTime, BudgetExceeded, type Execution, type ProviderId } from '@gmt/core';
+import { asIsoDateTime, BudgetExceeded, type Execution, type IsoDateTime, type ProviderId } from '@gmt/core';
 import { describe, expect, it, vi } from 'vitest';
 import { buildContext } from '../src/context.js';
 import { finalStatus } from '../src/execute.js';
@@ -102,7 +102,11 @@ describe('BudgetExceeded provider-month with another provider in the stage (spec
    * A running execution whose snapshot lists a second discovery provider. Layer A registers only the fixture, so the
    * second provider exists in the snapshot alone: blocked by the pre-start check, or still able to run.
    */
-  async function breachWithSecondProvider(blocked: ProviderId[], unit?: 'scrolls') {
+  async function breachWithSecondProvider(
+    blocked: ProviderId[],
+    unit?: 'scrolls',
+    worker?: { current: number; windowEnd: IsoDateTime },
+  ) {
     const h = createHarness();
     await h.fixtureScenario([{ match: { path: '/calendar' }, respond: FIXTURE_RULES.hold }]);
     const ctx = buildContext(h.deps, h.options);
@@ -126,9 +130,10 @@ describe('BudgetExceeded provider-month with another provider in the stage (spec
       scope: 'provider-month',
       providerId: 'fixture',
       cap: 20,
-      current: 20,
+      current: worker?.current ?? 20,
       requested: 1,
       ...(unit === undefined ? {} : { unit }),
+      ...(worker === undefined ? {} : { counter: 'worker' as const, windowEnd: worker.windowEnd }),
     });
     applyBudgetBreach(ctx, run, 'fixture', 'discovery', err);
     return { h, run };
@@ -155,6 +160,21 @@ describe('BudgetExceeded provider-month with another provider in the stage (spec
     expect(body).toContain('Its remaining discovery cells are skipped (budget) in this run');
     expect(body).toContain(
       'resume the run by hand once the cap window reopens or the cap is raised, or the next scheduled run searches them',
+    );
+  });
+
+  // why: W3 (pa-b1-003): the browser worker's own cap is named as the worker's, with its own figures and window end
+  it('a cap the browser worker counted is named as the worker’s, with its count, and the pause ends with its window', async () => {
+    const windowEnd = asIsoDateTime('2026-10-20T00:00:00.000Z');
+    const blocked = await breachWithSecondProvider(['travelpayouts'], undefined, { current: 23, windowEnd });
+    expect(blocked.run.stop).toMatchObject({ kind: 'budget', resumeAfter: windowEnd });
+    const { run } = await breachWithSecondProvider([], undefined, { current: 23, windowEnd });
+    expect(run.notices[0]?.detail).toContain(
+      "the browser worker's monthly page cap, counting every app and recording that uses it, is 20 pages; the worker counts 23 pages used",
+    );
+    const scrolls = await breachWithSecondProvider([], 'scrolls', { current: 20, windowEnd });
+    expect(scrolls.run.notices[0]?.detail).toContain(
+      "the browser worker's monthly scroll cap, counting every app and recording that uses it, is 20 scrolls; the worker counts 20 scrolls used",
     );
   });
 

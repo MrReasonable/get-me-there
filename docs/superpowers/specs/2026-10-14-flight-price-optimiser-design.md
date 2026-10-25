@@ -1,6 +1,6 @@
 # get-me-there — Flight Price Intelligence & Flexible-Date Optimiser
 
-**Design spec, revision 39.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
+**Design spec, revision 40.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
 four full-roster reviews (145, 140, 126 and 101 findings; zero Critical since
 revision 2) and the provider spike. Revision 9 folds in the three decisions
 taken at approval (the self-scraping fallback in §2, the dashboard readings in
@@ -109,7 +109,7 @@ Google has no public API.
 | Travelpayouts `/aviasales/v3/prices_for_dates` (`month` tiles: `departure_at=YYYY-MM`, `one_way=false`, no `return_at`; origin is always an airport code (a metro query returns one cheapest row per date pair across the whole metro and hides the definition's own fares, recorded 2026-10-15), rows attributed by `origin_airport`; paginated at 1000) | Authorised. Cached from Aviasales user searches, declared last 48h; **no** `found_at` on rows, but each row's `link` carries `search_date=DDMMYYYY` (the recordings show 4–7-day-old rows), which becomes `providerObservedAt`; `market` ignored; economy only; coverage of thin routes can be zero (spike) | Free, 600/min | Discovery baseline | `authorised-cached` | 48 |
 | SearchApi `google_flights_calendar` | Scraping-derived aggregate of Google's date grid; ≤200 combinations per call (HTTP 400 above); per airport only (city codes rejected); entries `{departure, return, price, is_lowest_price}` in the request currency; 126/126 cells priced on every probed route including a thin one (spike); 9–29 s per call | trial 100 once; $40/10k per month | Discovery, opt-in | `scraped-aggregate` | 24 (the app's own conservative assumption, flagged as assumed and shown as "assumed ≤24h (undocumented)": a repeat call answered in 3 s and was not billed, so a vendor cache exists; its window is undocumented) |
 | SearchApi `google_flights` | Scraping-derived itinerary search, three steps; some options carry no `price`; step 3 reveals OTA prices below the airline fare, so step 3 is always run (§5.4) | same plan | Verification, opt-in | `scraped-search` | `'unknown'` (the vendor may serve a cached answer of undocumented age, rev 15) |
-| `camoufox`: Google Flights read by Camoufox (the pinned build `gmt setup` installs on the operator's machine) that a host-side worker launches itself through `camoufox-js` | Self-scraped by this app from the operator's own IP, in the worker's own signed-out profile; `list` mode reads one cell's cheapest round-trip total per page load from every result the page lists (structure seen in the feasibility load of 2026-10-18); `grid` mode (designed from the 2026-10-18 recordings, not built) reads up to 49 day pairs per view from the Dates tab's 7 × 7 grid; no return legs, flight numbers or sellers | £0 in money; the operator's IP and selector upkeep; the operator is responsible for how it is used | Discovery only, opt-in, off by default (continuity fallback) | `scraped-self` | 0 (the page as Google showed it when it was read) |
+| `camoufox`: Google Flights read by Camoufox (the pinned build `gmt setup` or `gmt browser install` installs on the machine running the worker) that a host-side worker launches itself through `camoufox-js` | Self-scraped by this app from the address of the machine running the browser worker, in the worker's own signed-out profile; `list` mode reads one cell's cheapest round-trip total per page load from every result the page lists (structure seen in the feasibility load of 2026-10-18); `grid` mode (designed from the 2026-10-18 recordings, not built) reads up to 49 day pairs per view from the Dates tab's 7 × 7 grid; no return legs, flight numbers or sellers | £0 in money; the operator's IP and selector upkeep; the operator is responsible for how it is used | Discovery only, opt-in, off by default (continuity fallback) | `scraped-self` | 0 (the page as Google showed it when it was read) |
 
 **Decision (Ian, 2026-10-14):** SearchApi is accepted as an opt-in provider,
 on the understanding that its data is obtained in a way Google's terms
@@ -140,10 +140,15 @@ each entry holding its release asset's URL (only under
 `https://github.com/daijro/camoufox/releases/download/`), its SHA-256 (equal
 to GitHub's published digest, read 2026-10-19), its size and its unpacked
 size. The worker's pin is its own entry's build; there is no separate build
-setting. Only `gmt setup` and `gmt update` (§13) write the install root
-`~/.local/share/get-me-there/camoufox/`: after checking free space against
-the archive plus its unpacked size (313 MB and about 670 MB on macOS, 654 MB
-and about 1.25 GB on Linux), they download the archive over HTTPS
+setting. Only `gmt setup`, `gmt update` and `gmt browser install` (§13)
+write the install root `~/.local/share/get-me-there/camoufox/`, through one
+install sequence: after removing what an interrupted attempt left there
+(temporary directories and partial downloads) and checking free space
+against the archive plus its unpacked size (each entry's own: 313 MB on
+`darwin-arm64`, 320 MB on `darwin-x64`, about 670 MB unpacked; 654 MB on
+`linux-arm64`, 663 MB on `linux-x64`, about 1.25 GB unpacked), they download
+the archive over HTTPS (unless the pinned archive is already whole under the
+root, which the unpack re-hashes) within an idle and an overall bound
 (redirects followed only to `https` GitHub release-asset hosts), hash it
 while streaming, refuse a mismatch, re-hash it just before unpacking, list
 the archive and refuse any entry that is absolute, holds `..` or resolves
@@ -432,11 +437,28 @@ no monthly scroll left still reads its first block and a page that reaches
 the clamp ends as `allowance` with the views it read kept and its row's
 `scroll_count` equal to the scrolls made; and it writes the page and its
 clamped allowance into the counts file before the load, settling to the
-scrolls made afterwards, so a crash over-counts and never under-counts. An
+scrolls made afterwards, so a crash over-counts and never under-counts. The
+`monthly-cap` answer carries the worker's cap, its own count and its window's
+end, and the adapter's `BudgetExceeded` carries those figures, named as the
+browser worker's cap counting every app and recording that uses it, and a
+paused run resumes at that window's end; a page that stopped short at the
+worker's scroll clamp stops that run's next grid tile at `provider-month`
+(scrolls) until the worker's window ends, then asks the worker again. The
+counts file records its window's start and end, and counts start at zero
+only once their own window has ended: a changed billing day or a clock
+stepped back carries them into the current window, never resets them. An
 absent counts file starts the window at zero only when the worker has never
-loaded a page (no pacer file either); a counts file that is unreadable,
-invalid, from a widened mode, or missing beside an existing pacer file
-refuses every page with `monthly-cap` and is never overwritten with zeros.
+loaded a page (no pacer file either). A counts file that is missing beside
+an existing pacer file (an earlier worker's data) or cannot be read
+(invalid, or from a widened mode) is never overwritten with zeros: the worker
+refuses to start (`counts-missing`, `counts-unreadable`), a running worker
+refuses every page with its own answer `counts-unreadable` (never
+`monthly-cap`; HTTP 503) and reports `ok: false` with `readable: false`, and
+the app's preflight skips the provider with that reason. `gmt browser counts`
+(§13) rewrites the file, through the worker's own `counts` entry under its
+lock and core's schema, from the app ledger's month of camoufox pages and
+scrolls (`GET /api/providers` reports both) or the figures the operator
+states, plus the pages loaded outside the ledger the operator states.
 `/v1/status` reports the counts and the window. A second app instance
 calling the worker in one window is reported in the Status view, not
 refused.
@@ -634,9 +656,9 @@ day pair when this app's own Camoufox browser read the page on the
 machine running this app's browser worker, from that machine's address. The grid shows whole
 pounds; the exact fare may differ by under £1. Google's date grid; age not
 stated (assumed ≤24h). Return date: read from the grid cell, checked against
-the grid's return row. A "cheapest" mark means Google's date grid marked
-this the cheapest of the prices shown in that view; it is Google's, not this
-app's. The operator turned this provider on. Constraints are not checked; no
+the grid's return row. A "cheapest" or "low" mark means Google's date grid
+marked this price so among the prices shown in that view; it is Google's, not
+this app's. The operator turned this provider on. Constraints are not checked; no
 return leg, seller or baggage is read." Vendor links: `google.com` only.
 `pointOfSale` is the ISO country of the page's stated location, through a
 dated table, or `'unknown'` when the page states none; it is stored as
@@ -686,17 +708,16 @@ provider for an hour (never a silent zero), and the selectors and grammar
 must be re-dated against a new recording; `camoufox-js` is marked
 experimental by its authors, and an upgrade of it, of `playwright-core` or of
 the Camoufox binary is a re-verification. **Speed:** a page takes about 20–60
-s (load, settle, read) plus the 30 s spacing, about 50–90 s in all, so 100
-cells a run take about 1½–2½ hours; in the designed `grid` mode a page opens a
+s (load, settle, read) plus the page spacing (30 s by default), so at the
+default about 50–90 s in all and 100 cells a run take about 1½–2½ hours; in the designed `grid` mode a page opens a
 block in about 30 s and each scroll takes about 9.3 s (measured 2026-10-18),
 so a page with its full 30 scrolls takes about 5 minutes, and about 30
 minutes at the maximums (60 scrolls, 30 s spacing). **Availability:** the provider runs only
 while the operator's machine is on and the worker is running; otherwise its
 cells read skipped ("browser worker not reachable") and every other provider
 runs. **Image size:** none in the app image, which is unchanged; Camoufox
-(313 MB to download and about 670 MB unpacked on macOS, 654 MB and about
-1.25 GB on Linux) and the worker's dependencies live on the
-operator's machine. **The worker key:** any process or container that can reach
+(each entry's download and unpacked size, above) and the worker's
+dependencies live on the machine running the worker. **The worker key:** any process or container that can reach
 the worker's address (Docker Desktop forwards `host.docker.internal` to the
 Mac's loopback for every container) is stopped only by
 `CAMOUFOX_WORKER_KEY`. **Money:** none, against SearchApi's ~£32 a month.
@@ -2574,17 +2595,17 @@ CAMOUFOX_WORKER_URL=                     # http://127.0.0.1:8090 (pnpm dev) or h
 CAMOUFOX_WORKER_KEY=                     # ≥ 32 chars, shared by app and worker; required when CAMOUFOX_ENABLED=true
 CAMOUFOX_MIN_SPACING_SECONDS=30          # start to start; 0–600 (0 means no pause: pages go back to back, still one at a time, from your own address); never randomised; a shared setting, kept equal in worker.env (a difference skips the provider)
 CAMOUFOX_EXECUTION_PAGE_CAP=100          # page loads per execution (BudgetExceeded provider-execution), frozen into the execution's budget snapshot; 1–400
-CAMOUFOX_MONTHLY_PAGE_CAP=1500           # page loads per billing month (provider-month; no-page rows not counted); the app's ledger enforces it; the worker reports it (and enforces it from WP17)
-CAMOUFOX_BILLING_DAY=1                   # 1–28: the month starts 00:00 UTC that day, for both monthly caps (the ledger's, and the worker's from WP17)
+CAMOUFOX_MONTHLY_PAGE_CAP=1500           # page loads per billing month (provider-month; no-page rows not counted); the app's ledger enforces it; the worker enforces it too
+CAMOUFOX_BILLING_DAY=1                   # 1–28: the month starts 00:00 UTC that day, for both monthly caps, in the ledger and the worker
 CAMOUFOX_COOLDOWN_HOURS=48               # pause after a challenge, sign-in or consent page; 24–100000 (an unrecognised page pauses a fixed 1 h)
 CAMOUFOX_PAGE_TIMEOUT_SECONDS=90         # the worker's whole-page deadline (load, settle, read), 30–240; the app's request timeout is this + 15 s
 CAMOUFOX_MODE=list                       # list (one day pair a page) or grid (the Dates tab's date grid, once the worker reports GRID_VERIFIED and its measured step)
 CAMOUFOX_GRID_SCROLL_SPACING_SECONDS=5   # grid: scroll clicks start to start; 0–30 (0 means no pause: scrolls go back to back); never randomised
 CAMOUFOX_GRID_SCROLL_CAP=30              # grid: scrolls a page may make; 0–60
 CAMOUFOX_EXECUTION_SCROLL_CAP=600        # grid: scrolls per execution, checked before every page's scrolls; 0–6000
-CAMOUFOX_MONTHLY_SCROLL_CAP=6000         # grid: scrolls per billing month; the app's ledger enforces it; the worker reports it (and enforces it from WP17)
+CAMOUFOX_MONTHLY_SCROLL_CAP=6000         # grid: scrolls per billing month; the app's ledger enforces it; the worker enforces it too
 CAMOUFOX_BROWSER_WINDOW=scheduled        # exactly scheduled (default when unset: pages only inside a run's window, §8.2) or any (a resumed run keeps loading pages, within every cap, spacing and cool-down); any other value fails boot naming the field; app side only, not shared with the worker; a catch-up loads no browser page either way
-# worker side only (macOS; Linux from WP17; its one 0600 env file <workerData>/worker.env, written by gmt setup; docs/setup.md §14): CAMOUFOX_WORKER_KEY, CAMOUFOX_WORKER_PORT, and the shared settings named under "Where settings live" below
+# worker side only (macOS and Linux; its one 0600 env file <workerData>/worker.env, written by gmt setup; docs/setup.md §14): CAMOUFOX_WORKER_KEY, CAMOUFOX_WORKER_PORT, and the shared settings named under "Where settings live" below
 # fixed, not configurable: concurrency 1, rate per hour = floor(3600 / spacing) (no rate limit at spacing 0; the page caps still bound a run), cost 0, cache never
 # --- email (all or nothing) ---
 SMTP_HOST=
@@ -2766,16 +2787,37 @@ second service runs the worker (`<node> --conditions=@gmt/source --import
 tsx <checkout>/apps/camoufox-worker/src/run.ts main`, in that package's
 directory; `local.get-me-there.camoufox-worker`,
 `get-me-there-camoufox-worker.service`). It is installed and started only
-once its start checks pass (`gmt start` runs `run.ts check --json` first, a
-result in `startRefusalSchema`'s terms), and a refused start never restarts
-every minute: systemd's `RestartPreventExitStatus=78` stops it, and on macOS,
+once its start checks pass (`gmt start`, `restart`, `update`, `setup` and
+`browser install` run `run.ts check --json` first, a result in
+`startRefusalSchema`'s terms; `start --only app` or `--only backup` never
+reads or touches the worker), and a refused start never restarts every
+minute: systemd's `RestartPreventExitStatus=78` stops it, and on macOS,
 where launchd's `KeepAlive` cannot exclude one exit code, the worker's agent
 has `ThrottleInterval` 600 and `gmt start`, `gmt status` and `gmt update` boot
 the agent out while `start-refusal.json` is present, reporting "refused, not
-retrying". The worker writes that file (0600, inside its 0700 data
-directory; `{ reason, at }` in `startRefusalSchema`, no free text) before
-exiting 78 and clears it on a successful start. There is no separate
-reminder service (§8.3).
+retrying" with the reason's fix (each a command that exists). The worker
+writes that file (0600, inside its 0700 data directory; `{ reason, at }` in
+`startRefusalSchema`, no free text) before every exit 78, a refusal of its own
+settings or files included (reason `config`, its words on standard error,
+which `gmt start` prints), and clears it on a successful start. The worker's
+service waits up to 270 s on a stop (launchd `ExitTimeOut`, systemd
+`TimeoutStopSec`: the longest page timeout, 240 s, plus 30 s), so a page in
+flight finishes; `stop --only worker` and `restart --only worker` ask the app
+about an active run first, as `stop` does. `gmt browser install` installs or
+reinstalls the pinned bundle and its layout in any app mode (native, in
+Docker or none), needing no `app.env`: it asks a native app about an active
+run first, and where `worker.env` exists it removes the retired
+`CAMOUFOX_BINARY_BUILD` and `CAMOUFOX_INSTALL_DIR` lines, installs or
+re-renders the worker's service (replacing a hand-written agent of the same
+label) and starts it once its checks pass; the `layout` and `build-mismatch`
+refusals name it as their fix. Before `update` stops the app it reads the
+next commit's `pin.ts` (data only, no imports) through this code's printer
+and schema and downloads and unpacks that bundle beside the running one;
+only the layout switch happens while the app is stopped, after the build. A
+browser step that fails never keeps the app down: the app starts without the
+worker and the update exits 1, naming `gmt browser install`. Any later
+successful install, setup or update removes every bundle but the pinned one.
+There is no separate reminder service (§8.3).
 
 **One app per ledger.** Two apps on two databases would each enforce the
 caps against their own ledger. Docker stays the VPS path, unchanged, and
@@ -2877,7 +2919,7 @@ database holds; `40usd`: the $40 a month plan, Google Flights results through
 SearchApi); the email step asks for the SMTP settings with the password
 hidden (offering the test email at the end of setup is WP18's, once its route
 exists); the browser
-provider is offered only where its flags are set, and when chosen it also asks "If a run is interrupted (for example the laptop sleeps), should the browser part finish when it resumes, even outside the scheduled hours? [no]" (yes writes `CAMOUFOX_BROWSER_WINDOW=any`, §8.2), after the §2 costs
+provider is offered only where its flags are set (the interruption question, "If a run is interrupted (for example the laptop sleeps), should the browser part finish when it resumes, even outside the scheduled hours? [no]", is asked only by `--reconfigure browser`, yes writing `CAMOUFOX_BROWSER_WINDOW=any`, §8.2; unset means `scheduled`), after the §2 costs
 summary, with the server sentence and a typed `yes` on a machine with no
 display, and its steps run in the order costs, consent method, download,
 consent: `CAMOUFOX_ENABLED` is written only after consent succeeds, so an
@@ -2980,8 +3022,8 @@ facts: the service manager's state, the last log lines, the settings files'
 presence and modes, and the worker's `start-refusal.json`.
 
 **The `camoufox` worker** (§2, opt-in) is not part of the image or of
-compose: it runs on the operator's machine (macOS or Linux; Windows in a
-later work package), launching the Camoufox `gmt setup` installed itself (`camoufox-js`,
+compose: it runs on the machine the operator chooses (macOS or Linux; Windows in a
+later work package), launching the Camoufox `gmt setup` or `gmt browser install` installed itself (`camoufox-js`,
 `playwright-core`; no camofox-browser server is needed or called). It is
 started from a checkout with `pnpm --filter @gmt/camoufox-worker start` (from
 source, like the api's `tool` script) or as the user service `gmt setup`
@@ -2992,10 +3034,12 @@ loads its settings from one file, `<workerData>/worker.env`, where `<workerData>
 (0600, the user's own) before loading it; nothing secret is ever typed on a
 command line. It refuses to start, exiting 78, when the platform is neither
 macOS nor Linux, when its `<os>-<arch>` flags are not set for the running build, when the bundle's build or the `camoufox-js` version is not the
-pinned one, when the install-directory entries cannot be verified or
-created, when its profile holds a Google account cookie, when the `SOCS`
-capture (or the "not-shown" record) is missing, stale or future-dated, or when another worker holds the
-data directory's lock. It listens on `127.0.0.1` port 8090 only; Docker
+pinned one, when the install-directory entries cannot be verified, when its
+profile holds a Google account cookie, when the `SOCS` capture is missing,
+stale or future-dated, when the record says no consent page was shown (this
+build serves pages on a captured rejection only), when its monthly counts
+file is missing beside an earlier worker's files or cannot be read, or when
+another worker holds the data directory's lock. It listens on `127.0.0.1` port 8090 only; Docker
 Desktop forwards `host.docker.internal` to it. On Linux it serves the native
 app only: a container there cannot reach the host's loopback, so the Docker
 path on Linux leaves the provider off. The worker persists its
@@ -3076,6 +3120,23 @@ as specified in §5.3; no secrets, no full URLs.
 ---
 
 ## 17. Changelog
+
+### Revision 40: WP17's branch review, round 1 (2026-10-25)
+
+The browser provider's install no longer needs the native app: `gmt browser install` installs or reinstalls the
+pinned Camoufox and the worker's service in any app mode, and is the fix the `layout` and `build-mismatch` refusals
+name; setup, `--reconfigure browser` (which now installs a missing or changed bundle too), update and the CI job run
+its one install sequence, which sweeps what an interrupted attempt left, bounds a download in time and refuses a link
+in the archive that leads out of the bundle. `update` downloads the next commit's bundle before it stops the app
+(reading that commit's `pin.ts`, data only), switches only while it is stopped, and starts the app without the worker
+when the browser step fails. Every exit 78 of the worker leaves its refusal file (reason `config` for its own
+settings), every refusal's fix is a command that exists (the consent ones `capture-socs` until `gmt consent` lands),
+a never-shown consent record is refused as `consent-not-shown`, and the worker's stop waits for a page in flight
+(270 s). The worker's monthly counts are never read as full or empty when they are not: a missing or unreadable counts
+file is its own refusal and answer (`counts-missing`, `counts-unreadable`), `gmt browser counts` rewrites it from the
+ledger's pages and scrolls (`GET /api/providers` now reports a provider's month of scrolls), the counts carry until
+their own window ends, and the app's `BudgetExceeded` takes the worker's own cap, count and window end. The setup
+wizard's interruption question is asked by `--reconfigure browser` only. No other design rule changes.
 
 ### Revision 39: the status report after its branch review (2026-10-25)
 

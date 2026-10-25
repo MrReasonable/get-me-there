@@ -37,6 +37,13 @@ export type ProviderErrorKind =
   | 'blocked'
   | 'provider-unavailable';
 
+/** A cap counter's own figures: its cap, what it has counted, and when its window ends. */
+export interface MonthlyCapFacts {
+  cap: number;
+  used: number;
+  windowEnd: IsoDateTime;
+}
+
 /** Spec §5.1. Thrown by http-kit (classified) and adapters (parse); never retried at adapter level. */
 export class ProviderError extends Error {
   readonly kind: ProviderErrorKind;
@@ -47,6 +54,8 @@ export class ProviderError extends Error {
   readonly providerId: ProviderId | 'fx' | undefined;
   /** A `blocked` error's cool-down end, as the worker stated it (fix round 1, arch I1); keys the once-per-cool-down notice. */
   readonly cooldownUntil: IsoDateTime | undefined;
+  /** The browser worker's own monthly cap as its answer stated it (decision 82; W3): the adapter's BudgetExceeded. */
+  readonly monthlyCap: MonthlyCapFacts | undefined;
   constructor(p: {
     kind: ProviderErrorKind;
     retryable: boolean;
@@ -56,9 +65,11 @@ export class ProviderError extends Error {
     retryAfterSeconds?: number;
     providerId?: ProviderId | 'fx';
     cooldownUntil?: IsoDateTime;
+    monthlyCap?: MonthlyCapFacts;
   }) {
     super(stripUrlsInText(p.message));
     this.name = 'ProviderError';
+    this.monthlyCap = p.monthlyCap;
     this.kind = p.kind;
     this.reason = p.reason;
     this.retryable = p.retryable;
@@ -93,6 +104,13 @@ export class BudgetExceeded extends Error {
   readonly providerId: ProviderId | undefined;
   /** What the cap counts when it is not calls: `scrolls` for the camoufox grid's scroll caps (spec §2 rev 34). */
   readonly unit: 'scrolls' | undefined;
+  /**
+   * Who counted (decision 82; W3): `worker` when the browser worker's own monthly cap refused, counting every app and
+   * recording that uses it; undefined for this app's own ledger.
+   */
+  readonly counter: 'worker' | undefined;
+  /** The counter's own window end, when it stated one (the worker's); a pause resumes then. */
+  readonly windowEnd: IsoDateTime | undefined;
   constructor(p: {
     scope: BudgetScopeKind;
     cap: number;
@@ -100,6 +118,8 @@ export class BudgetExceeded extends Error {
     requested: number;
     providerId?: ProviderId;
     unit?: 'scrolls';
+    counter?: 'worker';
+    windowEnd?: IsoDateTime;
   }) {
     super(
       `budget exceeded: ${p.scope}${p.unit === undefined ? '' : ` ${p.unit}`} cap ${p.cap}, current ${p.current}, requested ${p.requested}${
@@ -107,6 +127,8 @@ export class BudgetExceeded extends Error {
       }`,
     );
     this.unit = p.unit;
+    this.counter = p.counter;
+    this.windowEnd = p.windowEnd;
     this.name = 'BudgetExceeded';
     this.scope = p.scope;
     this.cap = p.cap;

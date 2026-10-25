@@ -1,0 +1,136 @@
+name: camoufox-install
+# Spec §9 "CI matrix", decision 77 (WP17 Task 17.9): each runner installs its own pinned Camoufox with the command an
+# operator runs, `pnpm gmt browser install` (hash, archive listing, links, layout, and on Linux the library check), then
+# launches it headless through the worker's own launch path against a loopback page only, with a fetch spy proving
+# camoufox-js never reached its download branch and, on Linux, the generated FONTCONFIG_FILE in place. It runs when the
+# pin or the install code changes, and weekly. It loads no Google page, calls no vendor and reads no secret.
+# The cache holds the downloaded archive only, per runner and digest; the install re-hashes it before unpacking, so a
+# hit is verified exactly as a download is. The weekly run restores nothing (it proves the real download) and saves
+# the cache; other runs save only on main. A failed weekly run is reported by GitHub's own notice of a failed scheduled
+# workflow (to the repository's owner) and stands as main's failed run: the job holds no token to open an issue.
+# why: a workflow of its own, because a path filter applies to a whole workflow and the test matrix must run on every push
+on:
+  push:
+    branches: [main, 'wp/**']
+    paths:
+      - packages/core/src/camoufox/**
+      - packages/core/src/local/paths.ts
+      - apps/cli/src/camoufox/**
+      - apps/cli/src/commands/browser.ts
+      - apps/cli/src/exec/**
+      - apps/cli/src/plan/**
+      - apps/cli/src/platform/**
+      - apps/camoufox-worker/src/install.ts
+      - apps/camoufox-worker/src/launch.ts
+      - apps/camoufox-worker/src/fonts.ts
+      - apps/camoufox-worker/src/run.ts
+      - apps/camoufox-worker/src/paths.ts
+      - apps/camoufox-worker/src/platform.ts
+      - apps/camoufox-worker/package.json
+      - apps/camoufox-worker/test/install.smoke.test.ts
+      - apps/camoufox-worker/test/support/seamChild.ts
+      - pnpm-lock.yaml
+      - .github/workflows/camoufox-install.yml
+  pull_request:
+    paths:
+      - packages/core/src/camoufox/**
+      - packages/core/src/local/paths.ts
+      - apps/cli/src/camoufox/**
+      - apps/cli/src/commands/browser.ts
+      - apps/cli/src/exec/**
+      - apps/cli/src/plan/**
+      - apps/cli/src/platform/**
+      - apps/camoufox-worker/src/install.ts
+      - apps/camoufox-worker/src/launch.ts
+      - apps/camoufox-worker/src/fonts.ts
+      - apps/camoufox-worker/src/run.ts
+      - apps/camoufox-worker/src/paths.ts
+      - apps/camoufox-worker/src/platform.ts
+      - apps/camoufox-worker/package.json
+      - apps/camoufox-worker/test/install.smoke.test.ts
+      - apps/camoufox-worker/test/support/seamChild.ts
+      - pnpm-lock.yaml
+      - .github/workflows/camoufox-install.yml
+  schedule:
+    - cron: '23 5 * * 1'
+permissions:
+  contents: read
+# Actions are pinned by commit SHA (plan decision 63); the comment names the tag the SHA was read from on 2026-10-17.
+jobs:
+  camoufox-install:
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        # why: WP16b's research (Task 16b.0, 2026-10-24) found macos-15-intel, so darwin-x64 is exercised here too
+        runner: [ubuntu-24.04, ubuntu-24.04-arm, macos-15, macos-15-intel]
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: this runner's pinned entry
+        id: pin
+        run: |
+          case "$(uname -s)-$(uname -m)" in
+            Darwin-arm64) key=darwin-arm64 ;;
+            Darwin-x86_64) key=darwin-x64 ;;
+            Linux-aarch64) key=linux-arm64 ;;
+            Linux-x86_64) key=linux-x64 ;;
+            *) echo "no pinned entry for $(uname -s)-$(uname -m)"; exit 1 ;;
+          esac
+          node --conditions=@gmt/source --import tsx apps/cli/src/camoufox/printManifest.ts "$key" > pin.json
+          echo "key=$key" >> "$GITHUB_OUTPUT"
+          echo "sha256=$(node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync("pin.json","utf8")).entry.sha256)')" >> "$GITHUB_OUTPUT"
+          echo "archive=$(node -e 'const e=JSON.parse(require("fs").readFileSync("pin.json","utf8")).entry; process.stdout.write(".download-"+e.build+"-"+e.sha256.slice(0,8)+".zip")')" >> "$GITHUB_OUTPUT"
+      - name: Firefox's libraries and unzip (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          libs="$(node --conditions=@gmt/source --import tsx -e 'import("./apps/cli/src/camoufox/libs.ts").then((m) => process.stdout.write(m.UBUNTU_LIBRARIES.join(" ")))')"
+          sudo apt-get update
+          sudo apt-get install -y unzip $libs
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: cache
+        if: github.event_name != 'schedule'
+        with:
+          path: ~/.local/share/get-me-there/camoufox/${{ steps.pin.outputs.archive }}
+          key: camoufox-archive-${{ steps.pin.outputs.key }}-${{ steps.pin.outputs.sha256 }}
+      - name: install with pnpm gmt browser install (first attempt)
+        id: first
+        continue-on-error: true
+        timeout-minutes: 15
+        run: pnpm gmt browser install --keep-archive
+      - name: install with pnpm gmt browser install (the one retry)
+        if: steps.first.outcome == 'failure'
+        timeout-minutes: 15
+        run: pnpm gmt browser install --keep-archive
+      - name: the installed bundle names the pinned digest
+        run: |
+          node -e '
+            const fs = require("fs"); const path = require("path"); const os = require("os");
+            const pin = JSON.parse(fs.readFileSync("pin.json", "utf8")).entry;
+            const dir = path.join(os.homedir(), ".local/share/get-me-there/camoufox/browsers/official", pin.build + "-" + pin.sha256.slice(0, 8));
+            const v = JSON.parse(fs.readFileSync(path.join(dir, "version.json"), "utf8"));
+            if (v.sha256 !== pin.sha256) { console.error("the bundle does not name the pinned digest"); process.exit(1); }
+            console.log("installed", dir);'
+      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: steps.cache.outputs.cache-hit != 'true' && (github.event_name == 'schedule' || github.ref == 'refs/heads/main')
+        with:
+          path: ~/.local/share/get-me-there/camoufox/${{ steps.pin.outputs.archive }}
+          key: camoufox-archive-${{ steps.pin.outputs.key }}-${{ steps.pin.outputs.sha256 }}
+      - name: launch through the worker against a loopback page (fetch spy; FONTCONFIG_FILE on Linux)
+        timeout-minutes: 10
+        env:
+          CAMOUFOX_INSTALL_SMOKE: '1'
+        run: pnpm --filter @gmt/camoufox-worker exec vitest run --coverage.enabled=false test/install.smoke.test.ts --reporter=verbose
