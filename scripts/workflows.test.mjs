@@ -669,9 +669,9 @@ describe('WP16b: the CI matrix, install-e2e and the Windows leg (decisions 77, 7
     expect(runs).not.toMatch(/seq 1|sleep \d|until /);
     for (const s of [
       'sudo systemctl start "user@$(id -u).service"',
-      'node ci/after-app-listening.mjs -- kill -9 "$pid"',
-      'node ci/after-app-listening.mjs -- pnpm gmt restart',
-      'node ci/after-app-listening.mjs -- pnpm gmt start',
+      'node scripts/after-app-listening.mjs -- kill -9 "$pid"',
+      'node scripts/after-app-listening.mjs -- pnpm gmt restart',
+      'node scripts/after-app-listening.mjs -- pnpm gmt start',
     ])
       expect(runs).toContain(s);
     // why: ts-b1-011: lint-only means something: setup only plans, and every later step that needs services is skipped

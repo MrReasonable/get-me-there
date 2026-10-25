@@ -187,13 +187,13 @@ jobs:
           fi
           test -n "$pid" && test "$pid" != 0
           # why: an event, not a poll: the helper follows the app's log and returns on its next "listening" line
-          node ci/after-app-listening.mjs -- kill -9 "$pid"
+          node scripts/after-app-listening.mjs -- kill -9 "$pid"
           curl -fsS http://127.0.0.1:3917/api/health
       - name: restart
         if: env.E2E_MODE == 'real'
         run: |
           cd "$RUNNER_TEMP/gmt"
-          node ci/after-app-listening.mjs -- pnpm gmt restart
+          node scripts/after-app-listening.mjs -- pnpm gmt restart
           curl -fsS http://127.0.0.1:3917/api/health
       - name: a backup taken by hand restores
         if: env.E2E_MODE == 'real'
@@ -204,7 +204,7 @@ jobs:
           test -f "$file"
           pnpm gmt stop
           pnpm gmt restore "$file"
-          node ci/after-app-listening.mjs -- pnpm gmt start
+          node scripts/after-app-listening.mjs -- pnpm gmt start
           curl -fsS http://127.0.0.1:3917/api/health
       - name: update serves the new commit
         if: env.E2E_MODE == 'real'
