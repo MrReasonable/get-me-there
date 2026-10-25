@@ -383,7 +383,10 @@ describe('WP16a: the mutation workflow runs every package’s Stryker gate and t
     expect(String(run.run).trim().split('\n')).toEqual([
       'files="$(node ../../scripts/mutation-shard.mjs . "$SHARD" "$SHARDS" --config reports/stryker.shard.json)"',
       'echo "shard $SHARD of $SHARDS: $files"',
-      'pnpm exec stryker run reports/stryker.shard.json',
+      "# why: incremental results never see a change outside the mutated and test files (a dependency's source), so",
+      '# the weekly run tests every mutant afresh and saves that as the next base; a dispatched run reuses them',
+      'if [ "$GITHUB_EVENT_NAME" = schedule ]; then force=--force; else force=; fi',
+      'pnpm exec stryker run reports/stryker.shard.json $force',
     ]);
     const restore = job.steps.find((s) => String(s.uses ?? '').startsWith('actions/cache/restore@'));
     const save = job.steps.find((s) => String(s.uses ?? '').startsWith('actions/cache/save@'));

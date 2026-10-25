@@ -78,7 +78,10 @@ jobs:
         run: |
           files="$(node ../../scripts/mutation-shard.mjs . "$SHARD" "$SHARDS" --config reports/stryker.shard.json)"
           echo "shard $SHARD of $SHARDS: $files"
-          pnpm exec stryker run reports/stryker.shard.json
+          # why: incremental results never see a change outside the mutated and test files (a dependency's source), so
+          # the weekly run tests every mutant afresh and saves that as the next base; a dispatched run reuses them
+          if [ "$GITHUB_EVENT_NAME" = schedule ]; then force=--force; else force=; fi
+          pnpm exec stryker run reports/stryker.shard.json $force
       # why: saved even when the run fails, so the next run carries on from these results
       - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         if: always()
