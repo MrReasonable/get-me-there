@@ -68,6 +68,7 @@ import { describeProblems, gatherPrereqs, judgePrereqs, nextFreePort } from '../
 import { askAnswers, askPasteToken, type PromptRow } from '../setup/prompts.js';
 import { readSetupRecord, recordAction, type SetupRecord } from '../setup/record.js';
 import { generatePassword } from '../setup/secrets.js';
+import { offerTestEmail } from '../setup/testEmail.js';
 import { type GuardTarget, guardActiveRun } from './guard.js';
 
 /** The rows each `--reconfigure` group asks (brief §6); `password` asks none and generates a new one. */
@@ -588,6 +589,12 @@ export async function setupCommand(flags: Flags, _positional: string | null, dep
   const backupOk = backup === undefined ? true : await firstBackup(deps, backup);
   await runLinger(answers.linger, deps);
   deps.io.out(closingScreen({ port, answers, appEnv: envPath, backupOk, os }));
+  // why: WP18 owns this offer (brief WP16b left it): the route exists once the app is up; the default is no
+  await offerTestEmail(deps, ask, {
+    interactive,
+    emailConfigured: answers.email !== null,
+    creds: credsFrom(effective),
+  });
   if (interactive && (await ask.confirm('Open the app in your browser now?', false))) {
     const opener = os === 'darwin' ? 'open' : 'xdg-open';
     await run({

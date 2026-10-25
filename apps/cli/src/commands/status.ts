@@ -9,6 +9,7 @@ import { factOf, factsOf, type ServiceEntry, serviceSet } from '../services/set.
 import { appEnvPath, dailyBackupsDir, isLoopback } from '../services/specs.js';
 import { readEnvText } from '../setup/appEnv.js';
 import { appRunningIn, compose } from '../setup/docker.js';
+import { printAppReport, STATUS_AREAS } from '../statusReport.js';
 import { bootOutRefused, readStartRefusal, refusalLine, WORKER_LABEL } from '../worker/refusal.js';
 import { refuseOnWindows } from './lifecycle.js';
 
@@ -180,9 +181,14 @@ export async function localChecks(deps: Deps): Promise<Check[]> {
  * `gmt status`: the local facts, then on macOS a refused worker's loaded agent booted out (spec §13: launchd's
  * KeepAlive cannot exclude exit 78), said only when the bootout worked (ca-b1-007). Exits 1 on a fail.
  */
-export async function statusCommand(_f: Flags, _p: string | null, deps: Deps): Promise<number> {
+export async function statusCommand(flags: Flags, _p: string | null, deps: Deps): Promise<number> {
   const win = refuseOnWindows(deps);
   if (win !== null) return win;
+  const only = flags.only;
+  if (typeof only === 'string' && !STATUS_AREAS.includes(only)) {
+    deps.io.err(`unknown area for --only: ${only} (one of ${STATUS_AREAS.join(', ')})\n`);
+    return EXIT.usage;
+  }
   const checks = await localChecks(deps);
   const refusal = readStartRefusal(deps.platform.paths, deps.files);
   if (deps.platform.os === 'darwin' && refusal !== 'none' && refusal !== 'unreadable') {
@@ -204,6 +210,11 @@ export async function statusCommand(_f: Flags, _p: string | null, deps: Deps): P
         });
     }
   }
-  deps.io.out(describeChecks(checks));
-  return checks.some((c) => c.level === 'fail') ? EXIT.failed : EXIT.ok;
+  // why: the local facts are the machine's, not an area of the app's report: `--only` and `--json` show the report alone
+  const reportOnly = only !== undefined || flags.json === true;
+  if (!reportOnly) deps.io.out(describeChecks(checks));
+  const report = await printAppReport(deps, flags);
+  return report !== EXIT.ok || (!reportOnly && checks.some((c) => c.level === 'fail'))
+    ? EXIT.failed
+    : EXIT.ok;
 }
