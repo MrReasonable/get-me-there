@@ -1,26 +1,20 @@
-import {
-  existsSync,
-  lstatSync,
-  readdirSync,
-  readFileSync,
-  realpathSync,
-  symlinkSync,
-  writeFileSync,
-} from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
+import type { CamoufoxBuild } from '@gmt/core';
 
 /**
- * The launch through camoufox-js's own install layout (decision 69 round 2, item 1; spec §2 "Method"; brief §7;
- * PIE-R2-03). Without `executable_path`, camoufox-js resolves the binary and `properties.json` under
- * `INSTALL_DIR/Camoufox.app/Contents/…` and checks the top-level `INSTALL_DIR/version.json` (`{version, release}`),
- * and it starts an unawaited download when the directory is missing, empty or unsupported. On the operator's Mac that
- * layout already exists: `Camoufox.app` is a symlink to `browsers/official/<build>-<sha>/Camoufox.app`. This module
- * verifies both entries and creates any that is missing (the symlink to the pinned bundle, the top-level file written
- * from the bundle's own `version.json`), so camoufox-js never reaches its download branch. It never modifies the
- * bundle, never rewrites an entry that disagrees (it refuses instead), and refuses a set CAMOUFOX_INSTALL_DIR.
+ * The worker's check of the install `gmt setup` made (spec §2 "Method"; decision 73; brief WP17 Task 17.2). It only
+ * verifies: it never creates, rewrites or removes anything. camoufox-js 0.11.5 resolves its browser from `INSTALL_DIR`
+ * (read once, when its module is evaluated, from CAMOUFOX_INSTALL_DIR, which run.ts sets) and, when that directory is
+ * missing, empty or holds a `version.json` whose release it does not accept, starts an unawaited download whose first
+ * step is `rmSync(INSTALL_DIR, { recursive: true })`: reaching that branch would delete the operator's install and fetch
+ * a release this app never pinned. So this check runs before any camoufox-js call and refuses (exit 78) whenever the
+ * layout differs from the pinned entry, so the branch is never reached.
+ *
+ * macOS: the install directory is the root, holding the `Camoufox.app` symlink to the pinned bundle's app and the
+ * top-level `{ version, release }` `version.json`. Linux: the install directory is the pinned bundle itself, holding
+ * `version.json`, `camoufox-bin`, `properties.json` and `fontconfig/macos/fonts.conf`.
  */
-export const DEFAULT_BINARY_BUILD = '152.0.4-beta.28';
-
 export interface InstallFacts {
   installDir: string;
   bundleDir: string;
@@ -28,125 +22,138 @@ export interface InstallFacts {
   build: string;
   /** The Firefox major passed as `ff_version` (from the bundle's own version.json). */
   ffMajor: number;
-  /** What was created this start, if anything. */
-  created: Array<'Camoufox.app' | 'version.json'>;
 }
 
+/** Why the start refuses: the layout is missing or changed, or it holds another build than the pin. */
 export class InstallRefused extends Error {
-  constructor(message: string) {
+  constructor(
+    readonly reason: 'layout' | 'build-mismatch',
+    message: string,
+    /** The build the layout holds, when it could be read. */
+    readonly installedBuild: string | null = null,
+  ) {
     super(message);
     this.name = 'InstallRefused';
   }
 }
 
-interface BundleVersion {
-  version: string;
-  build: string;
+/**
+ * Whether camoufox-js 0.11.5 accepts `release` (its `Version.isSupported`: strictly between `alpha.1` and `1`, each part
+ * a number or a word read by its first letter's code less 1024, padded to five parts). Pure.
+ */
+export function releaseAccepted(release: string): boolean {
+  const parts = (r: string): number[] => {
+    const p = r.split('.').map((x) => (Number.isNaN(Number(x)) ? x.charCodeAt(0) - 1024 : Number(x)));
+    while (p.length < 5) p.push(0);
+    return p;
+  };
+  const less = (a: number[], b: number[]): boolean => {
+    for (let i = 0; i < a.length; i++) {
+      const x = a[i] ?? 0;
+      const y = b[i] ?? 0;
+      if (x !== y) return x < y;
+    }
+    return false;
+  };
+  const v = parts(release);
+  return less(parts('alpha.1'), v) && less(v, parts('1'));
 }
 
-/** The shape check that runs before the pin (TS2-09): `version` starts with a number; `build` or `release` is a string. */
-function readBundleVersion(file: string): BundleVersion {
+interface ReadVersion {
+  version: string;
+  release: string;
+  build: string | undefined;
+}
+
+function readVersion(file: string): ReadVersion {
   let raw: unknown;
   try {
     raw = JSON.parse(readFileSync(file, 'utf8'));
   } catch {
-    throw new InstallRefused(`${file}: version.json is missing or not JSON`);
+    throw new InstallRefused('layout', `${file} is missing or not JSON`);
   }
   if (typeof raw !== 'object' || raw === null || !('version' in raw) || typeof raw.version !== 'string')
-    throw new InstallRefused(`${file}: version.json has no version string`);
-  if (!/^\d+\./.test(raw.version)) throw new InstallRefused(`${file}: version.json version is not numeric`);
-  const build = 'build' in raw && typeof raw.build === 'string' ? raw.build : undefined;
+    throw new InstallRefused('layout', `${file} has no version string`);
+  if (!/^\d+\./.test(raw.version)) throw new InstallRefused('layout', `${file}: its version is not numeric`);
   const release = 'release' in raw && typeof raw.release === 'string' ? raw.release : undefined;
-  const b = build ?? release;
-  if (b === undefined) throw new InstallRefused(`${file}: version.json names no build or release`);
-  return { version: raw.version, build: b };
+  const build = 'build' in raw && typeof raw.build === 'string' ? raw.build : undefined;
+  const r = release ?? build;
+  if (r === undefined) throw new InstallRefused('layout', `${file} names no release`);
+  if (!releaseAccepted(r))
+    throw new InstallRefused('layout', `${file}: camoufox-js does not accept the release ${r}`);
+  return { version: raw.version, release: r, build };
 }
 
-/**
- * The top-level `version.json` (fix round 1, prov-int M1): camoufox-js reads only its `release`, so `release` is
- * required; a `build` beside it must agree.
- */
-function readTopVersion(file: string): BundleVersion {
-  const v = readBundleVersion(file);
-  const raw: unknown = JSON.parse(readFileSync(file, 'utf8'));
-  const obj = typeof raw === 'object' && raw !== null ? raw : {};
-  const release = 'release' in obj && typeof obj.release === 'string' ? obj.release : undefined;
-  if (release === undefined) throw new InstallRefused(`${file}: version.json names no release`);
-  const build = 'build' in obj && typeof obj.build === 'string' ? obj.build : undefined;
-  if (build !== undefined && build !== release)
-    throw new InstallRefused(
-      `${file} disagrees with the pinned bundle (build ${build}, release ${release}); it is never rewritten silently`,
-    );
-  return { version: v.version, build: release };
+function need(dir: string, files: readonly string[]): void {
+  for (const f of files)
+    if (!existsSync(join(dir, f)))
+      throw new InstallRefused('layout', `the Camoufox install has no ${join(dir, f)}`);
 }
 
-/**
- * Verifies or creates the install layout for the pinned build. `env` is the worker's environment, read only for the
- * CAMOUFOX_INSTALL_DIR refusal.
- */
-export function ensureInstallLayout(o: {
-  installDir: string;
-  pinnedBuild: string;
-  installDirOverride: string | undefined;
-}): InstallFacts {
-  if (o.installDirOverride !== undefined && o.installDirOverride !== '')
-    throw new InstallRefused(
-      'CAMOUFOX_INSTALL_DIR is set; the worker launches only from camoufox-js’s default install directory',
-    );
-  const official = join(o.installDir, 'browsers', 'official');
-  if (!existsSync(official)) throw new InstallRefused(`no Camoufox bundle under ${official}`);
-  const bundles = readdirSync(official)
-    .map((id) => join(official, id))
-    .filter((dir) => existsSync(join(dir, 'version.json')));
-  if (bundles.length === 0) throw new InstallRefused(`no Camoufox bundle under ${official}`);
-  // why: every bundle's shape is checked before any pin comparison, so a malformed file is named as such (TS2-09).
-  const read = bundles.map((dir) => ({ dir, v: readBundleVersion(join(dir, 'version.json')) }));
-  const matching = read.filter(({ v }) => `${v.version}-${v.build}` === o.pinnedBuild);
-  const only = matching[0];
-  if (matching.length !== 1 || only === undefined) {
-    const seen = read.map(({ v }) => `${v.version}-${v.build}`).join(', ');
-    throw new InstallRefused(
-      `CAMOUFOX_BINARY_BUILD is ${o.pinnedBuild} but the installed bundles are ${seen}; an upgrade is a re-verification`,
-    );
-  }
-  const { dir: bundleDir, v } = only;
-  const bundleApp = join(bundleDir, 'Camoufox.app');
-  for (const f of ['Contents/MacOS/camoufox', 'Contents/Resources/properties.json'])
-    if (!existsSync(join(bundleApp, f))) throw new InstallRefused(`the bundle has no ${f}`);
-
-  const created: InstallFacts['created'] = [];
-  const appLink = join(o.installDir, 'Camoufox.app');
-  let linkStat: ReturnType<typeof lstatSync> | undefined;
+function notEmpty(dir: string): void {
+  let names: string[];
   try {
-    linkStat = lstatSync(appLink);
+    names = readdirSync(dir);
   } catch {
-    linkStat = undefined;
+    throw new InstallRefused('layout', `no Camoufox install at ${dir}: run pnpm gmt setup`);
   }
-  if (linkStat === undefined) {
-    symlinkSync(bundleApp, appLink);
-    created.push('Camoufox.app');
-  } else if (!linkStat.isSymbolicLink() || realpathSync(appLink) !== realpathSync(bundleApp)) {
-    throw new InstallRefused(
-      `${appLink} is not a symlink to the pinned bundle; it is never rewritten silently`,
-    );
-  }
+  if (names.length === 0) throw new InstallRefused('layout', `${dir} is empty: run pnpm gmt setup`);
+}
 
-  const topVersion = join(o.installDir, 'version.json');
-  if (!existsSync(topVersion)) {
-    writeFileSync(topVersion, JSON.stringify({ version: v.version, release: v.build }));
-    created.push('version.json');
-  } else {
-    const top = readTopVersion(topVersion);
-    if (top.version !== v.version || top.build !== v.build)
-      throw new InstallRefused(
-        `${topVersion} disagrees with the pinned bundle; it is never rewritten silently`,
-      );
+/** The installed build against the pin: refused as `build-mismatch`, naming both. */
+function pinned(v: ReadVersion, entry: Pick<CamoufoxBuild, 'build'>): string {
+  const installed = `${v.version}-${v.release}`;
+  if (installed !== entry.build)
+    throw new InstallRefused(
+      'build-mismatch',
+      `the installed Camoufox is ${installed} but this worker is pinned to ${entry.build}; a new build is a re-verification`,
+      installed,
+    );
+  return installed;
+}
+
+/** Verifies the layout for `os` at `installDir` against `entry`; throws InstallRefused, naming what differs. */
+export function ensureInstallLayout(o: {
+  os: 'darwin' | 'linux';
+  installDir: string;
+  entry: Pick<CamoufoxBuild, 'build'>;
+}): InstallFacts {
+  notEmpty(o.installDir);
+  if (o.os === 'linux') {
+    need(o.installDir, ['version.json', 'camoufox-bin', 'properties.json', 'fontconfig/macos/fonts.conf']);
+    const v = readVersion(join(o.installDir, 'version.json'));
+    const build = pinned(v, o.entry);
+    return {
+      installDir: o.installDir,
+      bundleDir: o.installDir,
+      build,
+      ffMajor: Number(v.version.split('.')[0]),
+    };
   }
-  return {
-    installDir: o.installDir,
-    bundleDir,
-    build: o.pinnedBuild,
-    ffMajor: Number(v.version.split('.')[0]),
-    created,
-  };
+  const top = readVersion(join(o.installDir, 'version.json'));
+  const link = join(o.installDir, 'Camoufox.app');
+  let isLink = false;
+  try {
+    isLink = lstatSync(link).isSymbolicLink();
+  } catch {
+    throw new InstallRefused('layout', `the Camoufox install has no ${link}: run pnpm gmt setup`);
+  }
+  if (!isLink) throw new InstallRefused('layout', `${link} is not a symlink to a Camoufox bundle`);
+  let app: string;
+  try {
+    app = realpathSync(link);
+  } catch {
+    throw new InstallRefused('layout', `${link} points at nothing: run pnpm gmt setup`);
+  }
+  const bundleDir = dirname(app);
+  const official = join(realpathSync(o.installDir), 'browsers', 'official');
+  if (basename(app) !== 'Camoufox.app' || dirname(bundleDir) !== official)
+    throw new InstallRefused('layout', `${link} does not point into ${official}`);
+  need(app, ['Contents/MacOS/camoufox', 'Contents/Resources/properties.json']);
+  const bundle = readVersion(join(bundleDir, 'version.json'));
+  const build = pinned(bundle, o.entry);
+  // why: camoufox-js reads the top-level file; one that disagrees with its bundle is a changed layout, never rewritten
+  if (top.version !== bundle.version || top.release !== bundle.release)
+    throw new InstallRefused('layout', `${join(o.installDir, 'version.json')} disagrees with its bundle`);
+  return { installDir: o.installDir, bundleDir, build, ffMajor: Number(bundle.version.split('.')[0]) };
 }

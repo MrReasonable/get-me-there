@@ -1663,13 +1663,13 @@ describe('parseRecordArgs', () => {
 
 describe('the real recorder dependencies (no launch)', () => {
   it('use the system clock, two-second polls, the module selectors and stderr JSON lines', () => {
-    const f = fakeInstall({ version: '152.0.4', build: 'beta.28' });
+    const f = fakeInstall('darwin-arm64');
     const prepared = prepareLaunch({
       platform: 'darwin',
-      installDir: f.installDir,
-      pinnedBuild: '152.0.4-beta.28',
-      installDirOverride: undefined,
-      home: '/h',
+      arch: 'arm64',
+      installDirSet: f.root,
+      dataDir: tmpDir(),
+      home: f.home,
       path: '/p',
       tmp: '/t',
     });
@@ -1711,13 +1711,13 @@ describe('stderrLog debug lines', () => {
     );
   });
   it('the real recorder dependencies take the switch', () => {
-    const f = fakeInstall({ version: '152.0.4', build: 'beta.28' });
+    const f = fakeInstall('darwin-arm64');
     const prepared = prepareLaunch({
       platform: 'darwin',
-      installDir: f.installDir,
-      pinnedBuild: '152.0.4-beta.28',
-      installDirOverride: undefined,
-      home: '/h',
+      arch: 'arm64',
+      installDirSet: f.root,
+      dataDir: tmpDir(),
+      home: f.home,
       path: '/p',
       tmp: '/t',
     });

@@ -1,13 +1,13 @@
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { effectiveSharedSettings, workerStatusSchema } from '@gmt/core';
+import { effectiveSharedSettings, flagsFor, workerStatusSchema } from '@gmt/core';
 import { beforeEach, describe, expect, it } from 'vitest';
+import { InstallRefused } from '../src/install.js';
 import { buildLaunchOptions } from '../src/launch.js';
 import { acquireLock } from '../src/lock.js';
 import { type MainDeps, type RunningWorker, startWorker } from '../src/main.js';
 import { Refusal } from '../src/refusal.js';
 import { type EntryContext, EX_CONFIG, EX_SOFTWARE } from '../src/run.js';
-import { SELECTORS } from '../src/selectors.js';
 import { FakeContext } from './support/fakeContext.js';
 import { resultsTree } from './support/fakePage.js';
 import { memoryLog } from './support/log.js';
@@ -63,13 +63,13 @@ function setup(
   const timers = fakeTimers();
   const deps: MainDeps = {
     platform: 'darwin',
+    arch: 'arm64',
     clock: timers.clock,
     timers,
     log: memoryLog(),
-    selectors: { ...SELECTORS, FORM_VERIFIED: true },
     prepare: () => ({
       options: buildLaunchOptions({ ffMajor: 152, home: '/h', path: '/p', tmp: '/t' }),
-      install: { installDir: '/i', bundleDir: '/b', build: '152.0.4-beta.28', ffMajor: 152, created: [] },
+      install: { installDir: '/i', bundleDir: '/b', build: '152.0.4-beta.28', ffMajor: 152 },
       camoufoxJs: '0.11.5',
     }),
     launch: async () => {
@@ -105,52 +105,142 @@ beforeEach(() => {
 });
 
 describe('the worker’s start checks and shutdown (brief Task 14.5)', () => {
-  it('non-macOS exits 78 with the macOS message', async () => {
-    const t = setup({ deps: { platform: 'linux' } });
+  /** The refusal file the CLI and the app's status read: `{ reason, at }` only, 0600. */
+  const refusalFile = (t: ReturnType<typeof setup>): unknown => {
+    const f = join(t.dataDir, 'start-refusal.json');
+    if (!existsSync(f)) return null;
+    expect(statSync(f).mode & 0o777).toBe(0o600);
+    return JSON.parse(readFileSync(f, 'utf8'));
+  };
+  const AT = '2026-10-18T05:00:00.000Z';
+  it('Windows exits 78 as flags-unset, writing the refusal file, launching nothing', async () => {
+    const t = setup({ deps: { platform: 'win32', arch: 'x64' } });
     expect(await startWorker(t.ctx, t.deps)).toBe(EX_CONFIG);
-    expect(t.err.join()).toMatch(/supports macOS only/);
+    expect(t.err.join()).toContain('flags-unset: this machine has no verified browser build yet');
+    expect(refusalFile(t)).toEqual({ reason: 'flags-unset', at: AT });
+    expect(t.contexts).toEqual([]);
   });
-  it('FORM_VERIFIED false exits 78, launching nothing', async () => {
-    const t = setup({ deps: { selectors: { ...SELECTORS, FORM_VERIFIED: false } } });
+  it('an entry whose flags are unset for its build (linux-x64) exits 78 as flags-unset before any launch', async () => {
+    const t = setup({ deps: { platform: 'linux', arch: 'x64' } });
     expect(await startWorker(t.ctx, t.deps)).toBe(EX_CONFIG);
-    expect(t.err.join()).toMatch(/FORM_VERIFIED/);
+    expect(refusalFile(t)).toEqual({ reason: 'flags-unset', at: AT });
     expect(t.contexts).toEqual([]);
     expect(() => acquireLock(t.dataDir).release()).not.toThrow();
   });
-  it('a start-check failure exits 78 naming the check', async () => {
+  it.each([
+    ['layout', new InstallRefused('layout', 'no Camoufox install at /i: run pnpm gmt setup')],
+    [
+      'build-mismatch',
+      new InstallRefused(
+        'build-mismatch',
+        'the installed Camoufox is 153.0.1-beta.30 but …',
+        '153.0.1-beta.30',
+      ),
+    ],
+  ])(
+    'a %s refusal exits 78 with its file, the layout’s own words and core’s fix, launching nothing',
+    async (reason, e) => {
+      const t = setup({
+        deps: {
+          prepare: () => {
+            throw e;
+          },
+        },
+      });
+      expect(await startWorker(t.ctx, t.deps)).toBe(EX_CONFIG);
+      expect(refusalFile(t)).toEqual({ reason, at: AT });
+      expect(t.err.join()).toContain(`${reason}: `);
+      expect(t.err.join()).toContain(`(${e.message})`);
+      expect(t.contexts).toEqual([]);
+    },
+  );
+  it('another error from the preparation (the camoufox-js pin) exits 78 naming the check, with no refusal file', async () => {
     const t = setup({
       deps: {
         prepare: () => {
-          throw new Error('CAMOUFOX_BINARY_BUILD is 152.0.4-beta.28 but …');
+          throw new Error('camoufox-js is 0.11.6; this worker is verified against 0.11.5 only');
         },
       },
     });
     expect(await startWorker(t.ctx, t.deps)).toBe(EX_CONFIG);
-    expect(t.err.join()).toMatch(/install layout and pins: CAMOUFOX_BINARY_BUILD/);
+    expect(t.err.join()).toMatch(/install layout and pins: camoufox-js is 0\.11\.6/);
+    expect(refusalFile(t)).toBeNull();
   });
   it('bad settings exit 78', async () => {
     const t = setup();
     expect(await startWorker({ ...t.ctx, env: { HOME: '/h' } }, t.deps)).toBe(EX_CONFIG);
     expect(t.err.join()).toMatch(/settings: .*CAMOUFOX_WORKER_KEY/);
   });
-  it('a held lock exits 78 naming the pid', async () => {
+  it('a held lock exits 78 as locked, its own lock left in place', async () => {
     const t = setup();
     acquireLock(t.dataDir, { pid: process.pid });
     expect(await startWorker(t.ctx, t.deps)).toBe(EX_CONFIG);
-    expect(t.err.join()).toMatch(new RegExp(`pid ${process.pid}`));
+    expect(t.err.join()).toContain('locked: another worker holds the lock; fix: pnpm gmt restart');
+    expect(refusalFile(t)).toEqual({ reason: 'locked', at: AT });
+    expect(readFileSync(join(t.dataDir, 'worker.lock'), 'utf8')).toBe(String(process.pid));
   });
-  it('a missing SOCS capture exits 78', async () => {
+  it('no consent record, an unreadable one, or a voided one exits 78 with its reason; an expired one too', async () => {
+    const missing = setup({ socs: false });
+    expect(await startWorker(missing.ctx, missing.deps)).toBe(EX_CONFIG);
+    expect(refusalFile(missing)).toEqual({ reason: 'consent-missing', at: AT });
+    expect(missing.err.join()).toContain(
+      'consent-missing: no consent record: capture one; fix: pnpm gmt consent',
+    );
+    const garbled = setup({ socs: false });
+    writeFileSync(join(garbled.dataDir, 'socs.json'), '{', { mode: 0o600 });
+    expect(await startWorker(garbled.ctx, garbled.deps)).toBe(EX_CONFIG);
+    expect(refusalFile(garbled)).toEqual({ reason: 'consent-missing', at: AT });
+    const voided = setup({ socs: false });
+    writeFileSync(join(voided.dataDir, 'socs.json'), JSON.stringify({ consent: 'voided', voidedAt: AT }), {
+      mode: 0o600,
+    });
+    expect(await startWorker(voided.ctx, voided.deps)).toBe(EX_CONFIG);
+    expect(refusalFile(voided)).toEqual({ reason: 'consent-voided', at: AT });
+    const expired = setup({ socs: false });
+    writeFileSync(
+      join(expired.dataDir, 'socs.json'),
+      JSON.stringify({ ...CAPTURE, expires: 1_760_000_000 }),
+      {
+        mode: 0o600,
+      },
+    );
+    expect(await startWorker(expired.ctx, expired.deps)).toBe(EX_CONFIG);
+    expect(refusalFile(expired)).toEqual({ reason: 'consent-expired', at: AT });
+    for (const t of [missing, garbled, voided, expired]) expect(t.contexts).toEqual([]);
+  });
+  it('a not-shown record is refused as consent-missing: this worker serves pages with a captured rejection only', async () => {
     const t = setup({ socs: false });
+    writeFileSync(join(t.dataDir, 'socs.json'), JSON.stringify({ consent: 'not-shown', checkedAt: AT }), {
+      mode: 0o600,
+    });
     expect(await startWorker(t.ctx, t.deps)).toBe(EX_CONFIG);
-    expect(t.err.join()).toMatch(/SOCS capture/);
+    expect(refusalFile(t)).toEqual({ reason: 'consent-missing', at: AT });
+    expect(t.contexts).toEqual([]);
   });
-  it('an account cookie in the profile exits 78 and closes the browser', async () => {
+  it('an account cookie in the profile exits 78 as signed-in and closes the browser', async () => {
     const t = setup({
       shape: (c) => c.jar.push({ name: 'SID', value: 'x', domain: '.google.com', path: '/' }),
     });
     expect(await startWorker(t.ctx, t.deps)).toBe(EX_CONFIG);
-    expect(t.err.join()).toMatch(/account cookies \(SID\)/);
+    expect(t.err.join()).toMatch(/signed-in: the profile holds Google account cookies \(SID\)/);
+    expect(refusalFile(t)).toEqual({ reason: 'signed-in', at: AT });
     expect(t.contexts[0]?.closed).toBe(1);
+  });
+  it('a successful start removes a refusal file left by an earlier one, and the file never holds text or secrets', async () => {
+    const t = setup();
+    writeFileSync(join(t.dataDir, 'start-refusal.json'), JSON.stringify({ reason: 'layout', at: AT }), {
+      mode: 0o600,
+    });
+    const w = await running(t);
+    expect(refusalFile(t)).toBeNull();
+    t.shutdown();
+    await w.done;
+    const r = setup({ socs: false });
+    await startWorker(r.ctx, r.deps);
+    const text = readFileSync(join(r.dataDir, 'start-refusal.json'), 'utf8');
+    expect(Object.keys(JSON.parse(text))).toEqual(['reason', 'at']);
+    expect(text).not.toContain(KEY);
+    expect(text).not.toContain('capture');
   });
   it('a launch failure exits 78', async () => {
     const t = setup({
@@ -169,15 +259,21 @@ describe('the worker’s start checks and shutdown (brief Task 14.5)', () => {
     const r = await post(w);
     expect(r.status).toBe(200);
     const s = await fetch(`http://127.0.0.1:${w.port}/v1/status`, { headers: { 'x-gmt-worker-key': KEY } });
-    expect(await s.json()).toMatchObject({
+    const body: unknown = await s.json();
+    expect(body).toMatchObject({
       ok: true,
-      flags: { FORM_VERIFIED: true },
       accountCookie: { found: false },
       socsCapturedAt: CAPTURE.capturedAt,
       cooldownHours: 48,
       pageTimeoutSeconds: 90,
       lastPageAt: '2026-10-18T05:00:00.000Z',
+      // why: decision 75: the running entry, its build and its flags; the consent record and what bounds its expiry
+      osArch: 'darwin-arm64',
+      build: '152.0.4-beta.28',
+      flags: flagsFor('darwin-arm64', '152.0.4-beta.28'),
+      consent: { kind: 'socs', expiresAt: '2027-01-15T08:00:00.000Z', boundedBy: 'cookie' },
     });
+    expect(workerStatusSchema.safeParse(body).success).toBe(true);
     t.shutdown();
     expect(await w.done).toBe(0);
     expect(() => acquireLock(t.dataDir).release()).not.toThrow();

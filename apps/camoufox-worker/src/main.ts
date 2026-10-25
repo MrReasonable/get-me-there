@@ -5,6 +5,8 @@ import {
   type Clock,
   GRID_STEP_DAYS,
   type Logger,
+  type StartRefusalReason,
+  startChecks,
   systemClock,
   type Versions,
   type WorkerStatus,
@@ -14,36 +16,46 @@ import { loadWorkerConfig, type WorkerConfig } from './config.js';
 import { CooldownStore } from './cooldown.js';
 import type { ContextLike } from './driver.js';
 import { type LaunchOptions, launchContext, prepareLaunch } from './launch.js';
-import { acquireLock, sweepProbeProfiles } from './lock.js';
+import { acquireLock, LockHeld, sweepProbeProfiles } from './lock.js';
 import { debugLogging, stderrLog } from './log.js';
 import { GRAMMAR_VERSION } from './names.js';
 import { Pacer } from './pacer.js';
-import { installDir, profileDir } from './paths.js';
+import { profileDir } from './paths.js';
 import { Refusal } from './refusal.js';
 import { type Entry, type EntryContext, EX_CONFIG, EX_SOFTWARE } from './run.js';
-import { flagsOf, SELECTORS, type Selectors } from './selectors.js';
+import { flagsOf, type Selectors, selectorsFor } from './selectors.js';
 import { BIND_HOST, createWorkerServer, portOf } from './server.js';
 import { PageSession } from './session.js';
-import { loadSocs } from './socs.js';
+import { consentStatusOf } from './socs.js';
+import {
+  clearStartRefusal,
+  type GatheredStart,
+  gatherStart,
+  refusalWords,
+  writeStartRefusal,
+} from './startRefusal.js';
 import { bounded, realTimers, type Timers } from './timers.js';
 
 /** The status route's bound on a cold relaunch plus its cookie read: under the app's 10 s status timeout. */
 const STATUS_CHECK_MS = 8000;
 
 /**
- * The worker process (spec §2, §13; brief Task 14.5; decision 69). Start checks, in order, each exiting 78 naming the
- * check: macOS, the settings, the install layout and the pins, the data-directory lock (and the probe sweep), the
- * launch, the account-cookie check, the SOCS capture, and FORM_VERIFIED (the search-form check is mandatory, so the
- * server refuses to start until Task 14.2's recording verifies it). A standing signed-in refusal starts the server
+ * The worker process (spec §2, §13; brief Task 14.5; decisions 69 and 75). The settings first, then the start facts
+ * judged by core's `startChecks` in its order (the lock, this machine's flags for its pinned build, the install layout
+ * and its build, the consent record), each refusal exiting 78 after writing `start-refusal.json`; then the launch and
+ * the account-cookie check (a signed-in profile refuses the same way). A successful start removes the refusal file. The
+ * flags are the running entry's (`selectorsFor(osArch, build)`). A standing signed-in refusal starts the server
  * answering `cooling-down` only, without launching. SIGTERM stops accepting, lets the page in flight answer, closes
  * the browser, releases the lock and exits 0; a cool-down store failure answers its page, then exits 70.
  */
 export interface MainDeps {
   platform: string;
+  arch: string;
   clock: Clock;
   timers: Timers;
   log: Logger;
-  selectors: Selectors;
+  /** Tests only: the flags to run with; production runs on `selectorsFor(osArch, installed build)` (decision 75). */
+  selectors?: Selectors;
   prepare: typeof prepareLaunch;
   launch: (options: LaunchOptions, profile: string) => Promise<ContextLike>;
   /** Registers the shutdown signal (process.once('SIGTERM') and SIGINT in production). */
@@ -67,39 +79,73 @@ export async function startWorker(ctx: EntryContext, deps: MainDeps): Promise<Ru
     return EX_CONFIG;
   };
   let cfg: WorkerConfig;
-  let prepared: ReturnType<typeof prepareLaunch>;
-  try {
-    if (deps.platform !== 'darwin') throw new StartRefused('the camoufox worker supports macOS only');
-  } catch (e) {
-    return refuse('platform', e);
-  }
   try {
     cfg = loadWorkerConfig(ctx.env);
   } catch (e) {
     return refuse('settings', e);
   }
-  try {
-    prepared = deps.prepare({
-      platform: deps.platform,
-      installDir: installDir(cfg.home),
-      pinnedBuild: cfg.binaryBuild,
-      installDirOverride: ctx.env.CAMOUFOX_INSTALL_DIR,
-      home: cfg.home,
-      path: cfg.path,
-      tmp: cfg.tmp,
-    });
-  } catch (e) {
-    return refuse('install layout and pins', e);
-  }
-  let lock: { release(): void };
+  let lock: { release(): void } | null = null;
   try {
     lock = acquireLock(ctx.dataDir, { pid: deps.pid });
     sweepProbeProfiles(ctx.dataDir);
   } catch (e) {
-    return refuse('lock', e);
+    if (!(e instanceof LockHeld)) return refuse('lock', e);
   }
+  // why: decision 75: the start's facts, judged by core's startChecks (the CLI and the app's status read the same)
+  // why: filled by the inspection below, which TS cannot follow into the callback
+  const prepared: { value: ReturnType<typeof prepareLaunch> | null } = { value: null };
+  let gathered: GatheredStart;
+  try {
+    gathered = gatherStart({
+      platform: deps.platform,
+      arch: deps.arch,
+      dataDir: ctx.dataDir,
+      locked: lock === null,
+      clock: deps.clock,
+      inspect: () => {
+        prepared.value = deps.prepare({
+          platform: deps.platform,
+          arch: deps.arch,
+          installDirSet: ctx.env.CAMOUFOX_INSTALL_DIR,
+          dataDir: ctx.dataDir,
+          home: cfg.home,
+          path: cfg.path,
+          tmp: cfg.tmp,
+        });
+        return prepared.value.install;
+      },
+    });
+  } catch (e) {
+    lock?.release();
+    return refuse('install layout and pins', e);
+  }
+  const reason = startChecks(gathered.facts);
+  const refused = (r: StartRefusalReason, words: string): number => {
+    lock?.release();
+    try {
+      writeStartRefusal(ctx.dataDir, r, deps.clock.now());
+    } catch (e) {
+      ctx.err(`the refusal file could not be written: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    ctx.err(`camoufox worker refused to start: ${r}: ${words}`);
+    return EX_CONFIG;
+  };
+  if (reason !== null) return refused(reason, refusalWords(reason, gathered));
+  const held = lock;
+  const ready = prepared.value;
+  const record = gathered.consent;
+  const osArch = gathered.osArch;
+  if (held === null || ready === null || osArch === null || record === null || record === 'invalid')
+    return refuse('start checks', new Error('the start facts are incomplete'));
+  if (record.kind !== 'socs')
+    return refused(
+      'consent-missing',
+      'this worker serves pages with a captured rejection only; capture one with pnpm gmt consent',
+    );
+  const socs = record.capture;
+  const selectors = deps.selectors ?? selectorsFor(osArch, ready.install.build);
   const fail = (check: string, e: unknown): number => {
-    lock.release();
+    held.release();
     return refuse(check, e);
   };
   const cooldown = new CooldownStore({
@@ -109,27 +155,16 @@ export async function startWorker(ctx: EntryContext, deps: MainDeps): Promise<Ru
   });
   const refusal = new Refusal({ dir: ctx.dataDir, clock: deps.clock });
   const pacer = new Pacer({ dir: ctx.dataDir, minSpacingSeconds: cfg.minSpacingSeconds, clock: deps.clock });
-  let socs: ReturnType<typeof loadSocs>;
-  try {
-    socs = loadSocs(ctx.dataDir, deps.clock);
-  } catch (e) {
-    return fail('SOCS capture', e);
-  }
-  if (!deps.selectors.FORM_VERIFIED)
-    return fail(
-      'FORM_VERIFIED',
-      new Error('the search-form check is unverified until Task 14.2’s recording (decision 69)'),
-    );
   const profile = profileDir(ctx.dataDir);
   mkdirSync(profile, { recursive: true, mode: 0o700 });
   const versions: Versions = {
-    selectors: deps.selectors.version,
+    selectors: selectors.version,
     grammar: GRAMMAR_VERSION,
     camoufoxJs: CAMOUFOX_JS_VERSION,
-    binary: prepared.install.build,
+    binary: ready.install.build,
   };
   const session = new PageSession({
-    launch: () => deps.launch(prepared.options, profile),
+    launch: () => deps.launch(ready.options, profile),
     profileDir: profile,
     socs,
     cooldown,
@@ -137,7 +172,7 @@ export async function startWorker(ctx: EntryContext, deps: MainDeps): Promise<Ru
     refusal,
     clock: deps.clock,
     timers: deps.timers,
-    selectors: deps.selectors,
+    selectors,
     pageTimeoutMs: cfg.pageTimeoutSeconds * 1000,
     log: deps.log,
     versions,
@@ -162,8 +197,11 @@ export async function startWorker(ctx: EntryContext, deps: MainDeps): Promise<Ru
       }
     }
   } catch (e) {
-    return fail(e instanceof StartRefused ? 'account cookies' : 'launch', e);
+    if (!(e instanceof StartRefused)) return fail('launch', e);
+    return refused('signed-in', e.message);
   }
+  // why: decision 75: a successful start clears the refusal the CLI and the status read
+  clearStartRefusal(ctx.dataDir);
 
   let exitCode = 0;
   let stopping: Promise<number> | null = null;
@@ -195,19 +233,23 @@ export async function startWorker(ctx: EntryContext, deps: MainDeps): Promise<Ru
       lastPageAt: pacer.lastPageAt(),
       busySince: session.busy(),
       versions,
-      flags: flagsOf(deps.selectors),
+      // why: decision 75: the running entry's flags, for the build it runs
+      flags: flagsOf(selectors),
       accountCookie: account,
       socsCapturedAt: socs.capturedAt,
-      socsStable: deps.selectors.SOCS_STABLE,
+      socsStable: selectors.SOCS_STABLE,
       cooldownHours: cfg.cooldownHours,
       pageTimeoutSeconds: cfg.pageTimeoutSeconds,
       // why: spec §2 rev 34: the measured step the planner uses, only while this worker serves grid pages
-      gridStepDays: deps.selectors.GRID_VERIFIED && cfg.mode === 'grid' ? { ...GRID_STEP_DAYS } : null,
+      gridStepDays: selectors.GRID_VERIFIED && cfg.mode === 'grid' ? { ...GRID_STEP_DAYS } : null,
       // why: fix round 1 (CA 9): the app's preflight refuses grid mode when its settings differ from these
       gridScrollCap: cfg.mode === 'grid' ? cfg.gridScrollCap : null,
       gridScrollSpacingSeconds: cfg.mode === 'grid' ? cfg.gridScrollSpacingSeconds : null,
       // why: spec §12 — the effective record the app's preflight compares with its own, by name
       sharedSettings: cfg.sharedSettings,
+      osArch,
+      build: ready.install.build,
+      consent: consentStatusOf(record),
     };
   };
   let server: Server;
@@ -218,7 +260,7 @@ export async function startWorker(ctx: EntryContext, deps: MainDeps): Promise<Ru
       await new Promise<void>((r) => server.close(() => r()));
       await inFlight.catch(() => undefined);
       await session.discard(false);
-      lock.release();
+      held.release();
       resolveDone(exitCode);
       return exitCode;
     })();
@@ -243,7 +285,7 @@ export async function startWorker(ctx: EntryContext, deps: MainDeps): Promise<Ru
     server.listen(deps.port ?? cfg.port, BIND_HOST, () => resolve());
   }).catch(async (e: unknown) => {
     await session.discard(false);
-    lock.release();
+    held.release();
     throw e;
   });
   deps.onShutdown(() => {
@@ -259,10 +301,10 @@ export async function startWorker(ctx: EntryContext, deps: MainDeps): Promise<Ru
 export const entry: Entry = async (ctx) => {
   const w = await startWorker(ctx, {
     platform: process.platform,
+    arch: process.arch,
     clock: systemClock,
     timers: realTimers,
     log: stderrLog(ctx.err, debugLogging(ctx.env)),
-    selectors: SELECTORS,
     prepare: prepareLaunch,
     launch: launchContext,
     onShutdown: (h) => {

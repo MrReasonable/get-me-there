@@ -1,4 +1,7 @@
+import { existsSync, readFileSync, statSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { InstallRefused } from '../src/install.js';
 import {
   BACKGROUND_PREFS,
   buildLaunchOptions,
@@ -7,7 +10,7 @@ import {
   launchOptionsForMeta,
   prepareLaunch,
 } from '../src/launch.js';
-import { fakeInstall } from './support/tmp.js';
+import { fakeInstall, tmpDir } from './support/tmp.js';
 
 const opts = buildLaunchOptions({ ffMajor: 152, home: '/Users/op', path: '/usr/bin', tmp: '/tmp' });
 
@@ -80,37 +83,94 @@ describe('buildLaunchOptions (spec §2 limits; brief §7)', () => {
   });
 });
 
-describe('prepareLaunch (brief Task 14.5 start checks, in order)', () => {
-  const base = {
-    pinnedBuild: '152.0.4-beta.28',
-    installDirOverride: undefined,
-    home: '/Users/op',
-    path: '/usr/bin',
-    tmp: '/tmp',
-  };
-  it('checks macOS, the install layout and the camoufox-js pin, then builds the options from the bundle', () => {
-    const f = fakeInstall({ version: '152.0.4', build: 'beta.28' });
-    const p = prepareLaunch({ ...base, platform: 'darwin', installDir: f.installDir });
+describe('prepareLaunch (brief WP17 Task 17.2: the checks before camoufox-js is imported)', () => {
+  const base = { path: '/usr/bin', tmp: '/tmp' };
+  it('macOS: the install directory run.ts set, the layout and the camoufox-js pin, then the options; the launch env unchanged', () => {
+    const f = fakeInstall('darwin-arm64');
+    const data = tmpDir();
+    const p = prepareLaunch({
+      ...base,
+      platform: 'darwin',
+      arch: 'arm64',
+      installDirSet: f.root,
+      dataDir: data,
+      home: f.home,
+    });
     expect(p.camoufoxJs).toBe('0.11.5');
     expect(p.install.build).toBe('152.0.4-beta.28');
     expect(p.options).toEqual(
-      buildLaunchOptions({ ffMajor: 152, home: '/Users/op', path: '/usr/bin', tmp: '/tmp' }),
+      buildLaunchOptions({ ffMajor: 152, home: f.home, path: '/usr/bin', tmp: '/tmp' }),
     );
+    expect(Object.keys(p.options.env)).toEqual(['HOME', 'PATH', 'TMPDIR', 'LANG']);
+    expect(existsSync(join(data, 'fonts.conf'))).toBe(false);
+  });
+  it('Linux: writes <workerData>/fonts.conf naming the bundle’s fonts/macos absolutely and passes it as FONTCONFIG_FILE, os macos kept', () => {
+    const f = fakeInstall('linux-arm64');
+    const data = tmpDir();
+    const p = prepareLaunch({
+      ...base,
+      platform: 'linux',
+      arch: 'arm64',
+      installDirSet: f.bundleDir,
+      dataDir: data,
+      home: f.home,
+    });
+    const conf = join(data, 'fonts.conf');
+    expect(p.options.env).toEqual({
+      HOME: f.home,
+      PATH: '/usr/bin',
+      TMPDIR: '/tmp',
+      LANG: 'en_GB.UTF-8',
+      FONTCONFIG_FILE: conf,
+    });
+    expect(p.options.os).toBe('macos');
+    expect(readFileSync(conf, 'utf8')).toBe(
+      `<?xml version="1.0"?>\n<fontconfig>\n  <dir>${f.bundleDir}/fonts/macos</dir>\n  <cachedir>~/.cache</cachedir>\n</fontconfig>\n`,
+    );
+    expect(statSync(conf).mode & 0o777).toBe(0o600);
+  });
+  it('refuses an install directory other than this machine’s, before reading the layout', () => {
+    const f = fakeInstall('darwin-arm64');
+    for (const set of [undefined, '/elsewhere'])
+      expect(() =>
+        prepareLaunch({
+          ...base,
+          platform: 'darwin',
+          arch: 'arm64',
+          installDirSet: set,
+          dataDir: tmpDir(),
+          home: f.home,
+        }),
+      ).toThrow(
+        new InstallRefused(
+          'layout',
+          `CAMOUFOX_INSTALL_DIR is not ${f.root}; start the worker through run.ts, which sets it`,
+        ),
+      );
   });
   // why: fix round 1 (prov-int M2): the camoufox-js pin is checked, through a seam, in both places
   it('refuses another camoufox-js version (0.11.6) naming the pin', () => {
-    const f = fakeInstall({ version: '152.0.4', build: 'beta.28' });
+    const f = fakeInstall('darwin-arm64');
     expect(() =>
       prepareLaunch({
         ...base,
         platform: 'darwin',
-        installDir: f.installDir,
+        arch: 'arm64',
+        installDirSet: f.root,
+        dataDir: tmpDir(),
+        home: f.home,
         readCamoufoxJs: () => '0.11.6',
       }),
     ).toThrow('camoufox-js is 0.11.6; this worker is verified against 0.11.5 only');
   });
-  it('refuses off macOS before touching the install directory', () => {
-    expect(() => prepareLaunch({ ...base, platform: 'linux', installDir: '/nowhere' })).toThrow(/macOS only/);
+  it('refuses Windows, and a machine with no pinned build, before touching any install directory', () => {
+    const o = { ...base, installDirSet: '/x', dataDir: '/nowhere', home: '/nowhere' };
+    expect(() => prepareLaunch({ ...o, platform: 'win32', arch: 'x64' })).toThrow(
+      /runs on macOS and Linux only/,
+    );
+    expect(() => prepareLaunch({ ...o, platform: 'linux', arch: 'ia32' })).toThrow(
+      'no Camoufox build is pinned for linux-ia32',
+    );
   });
 });
 

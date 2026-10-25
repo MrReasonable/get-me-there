@@ -36,7 +36,7 @@ import { type LaunchOptions, launchContext, launchOptionsForMeta, prepareLaunch 
 import { acquireLock, LockHeld, sweepProbeProfiles } from './lock.js';
 import { debugLogging, stderrLog } from './log.js';
 import { Pacer } from './pacer.js';
-import { installDir, profileDir } from './paths.js';
+import { profileDir } from './paths.js';
 import type { View } from './ready.js';
 import {
   type GridDirection,
@@ -744,9 +744,9 @@ export const entry: Entry = async (ctx) => {
   const cfg = loadWorkerConfig(ctx.env);
   const prepared = prepareLaunch({
     platform: process.platform,
-    installDir: installDir(cfg.home),
-    pinnedBuild: cfg.binaryBuild,
-    installDirOverride: ctx.env.CAMOUFOX_INSTALL_DIR,
+    arch: process.arch,
+    installDirSet: ctx.env.CAMOUFOX_INSTALL_DIR,
+    dataDir: ctx.dataDir,
     home: cfg.home,
     path: cfg.path,
     tmp: cfg.tmp,

@@ -1,12 +1,12 @@
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { asIata, asIsoDate, type PageRequest } from '@gmt/core';
+import { ANSWER_STATUS, asIata, asIsoDate, flagsFor, type PageRequest } from '@gmt/core';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ACCOUNT_COOKIE_NAMES } from '../src/accountCookies.js';
 import { CooldownStore } from '../src/cooldown.js';
 import { Pacer } from '../src/pacer.js';
 import { Refusal } from '../src/refusal.js';
-import { SELECTORS, type Selectors } from '../src/selectors.js';
+import { SELECTORS, type Selectors, selectorsFor } from '../src/selectors.js';
 import { PageSession } from '../src/session.js';
 import { loadSocs } from '../src/socs.js';
 import { FakeContext } from './support/fakeContext.js';
@@ -507,6 +507,40 @@ describe('PageSession (spec §2; brief Task 14.4)', () => {
       googleContacted: false,
     });
     expect(t.contexts).toEqual([]);
+  });
+  // why: decision 75 (Task 17.2): a partly verified entry runs on exactly its own flags, through selectorsFor
+  it('linux-arm64 with only the form and results verified: no grid page, no no_data from a no-flights page, no Cheapest click', async () => {
+    const partial = selectorsFor('linux-arm64', '152.0.4-beta.28', () => ({
+      ...flagsFor('darwin-arm64', '152.0.4-beta.28'),
+      GRID_VERIFIED: false,
+      NO_FLIGHTS_VERIFIED: false,
+      CHEAPEST_FLOW_VERIFIED: false,
+    }));
+    const grid = setup({ selectors: partial });
+    const g = await grid.session.page({
+      mode: 'grid',
+      origin: asIata('LHR'),
+      destination: asIata('JFK'),
+      gl: 'GB',
+      start: { departureDate: asIsoDate('2026-11-05'), returnDate: asIsoDate('2026-11-15') },
+      moves: [],
+      reads: [true],
+      scrollAllowance: 0,
+    });
+    expect([g.answer, g.googleContacted, ANSWER_STATUS[g.answer.kind]]).toEqual([
+      { kind: 'mode-unavailable', mode: 'grid' },
+      false,
+      409,
+    ]);
+    const none = setup({
+      selectors: partial,
+      tree: n('document', '', [text('No results returned for this search')]),
+    });
+    // why: with the line unverified the page never reads as settled: not-ready, never a `no-flights` cell (no_data)
+    expect((await none.session.page(REQ)).answer).toMatchObject({ kind: 'not-ready' });
+    const results = setup({ selectors: partial });
+    expect((await results.session.page(REQ)).answer.kind).toBe('cells');
+    expect(page0(results).calls.clicks).toEqual([]);
   });
   it('with CHEAPEST_FLOW_VERIFIED injected true the Cheapest tab is clicked once; false, nothing is clicked', async () => {
     const on = setup({ selectors: { ...SELECTORS, CHEAPEST_FLOW_VERIFIED: true } });

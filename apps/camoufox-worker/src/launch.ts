@@ -1,10 +1,12 @@
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 // why: fix round 1 (arch M11): the pin's one copy is core's, which the app's smoke reads too
-import { CAMOUFOX_JS_VERSION } from '@gmt/core';
+import { CAMOUFOX_BUILDS, CAMOUFOX_JS_VERSION } from '@gmt/core';
 import type { ContextLike } from './driver.js';
-import { ensureInstallLayout, type InstallFacts } from './install.js';
-import { assertMacOS } from './platform.js';
+import { writeFontsConf } from './fonts.js';
+import { ensureInstallLayout, type InstallFacts, InstallRefused } from './install.js';
+import { installDirFor } from './paths.js';
+import { assertSupportedPlatform, osArchOf } from './platform.js';
 
 /**
  * The launch options (spec §2 "Limits"; decision 69; brief §7, verified in camoufox-js 0.11.5's source): headless,
@@ -33,6 +35,8 @@ export interface LaunchInput {
   home: string;
   path: string;
   tmp: string;
+  /** Linux: the generated fonts.conf (spec §2 "Method"); absent on macOS, whose launch env is unchanged. */
+  fontconfigFile?: string;
 }
 
 export function buildLaunchOptions(o: LaunchInput) {
@@ -52,7 +56,13 @@ export function buildLaunchOptions(o: LaunchInput) {
     // which the context measures its viewport; an explicit viewport over a generated window can hang a second newPage,
     // daijro/camoufox#666), so the date grid's layout never follows a generated screen size. Layout only.
     window: [1280, 900],
-    env: { HOME: o.home, PATH: o.path, TMPDIR: o.tmp, LANG: 'en_GB.UTF-8' },
+    env: {
+      HOME: o.home,
+      PATH: o.path,
+      TMPDIR: o.tmp,
+      LANG: 'en_GB.UTF-8',
+      ...(o.fontconfigFile === undefined ? {} : { FONTCONFIG_FILE: o.fontconfigFile }),
+    },
     firefox_user_prefs: { ...BACKGROUND_PREFS },
   } as const;
 }
@@ -95,30 +105,44 @@ export async function launchContext(
 }
 
 /**
- * Everything a launch needs, checked in order (brief Task 14.5 "Start"): macOS, the install layout for the pinned
- * build (verified or created), the camoufox-js pin, then the launch options from the bundle's own Firefox major.
+ * Everything a launch needs, checked in order before camoufox-js is imported (brief WP17 Task 17.2): macOS or Linux; the
+ * install directory run.ts set (CAMOUFOX_INSTALL_DIR, which camoufox-js reads once at import) is this machine's; the
+ * layout there holds the pinned build (verified only, so camoufox-js never reaches its download branch); the camoufox-js
+ * pin; on Linux the generated fonts.conf; then the launch options from the bundle's own Firefox major.
  */
 export function prepareLaunch(o: {
   platform: string;
-  installDir: string;
-  pinnedBuild: string;
-  installDirOverride: string | undefined;
+  arch: string;
+  /** The CAMOUFOX_INSTALL_DIR run.ts set (the entry's environment), asserted here. */
+  installDirSet: string | undefined;
+  dataDir: string;
   home: string;
   path: string;
   tmp: string;
   /** Test seam (fix round 1, prov-int M2): reads the installed camoufox-js version. */
   readCamoufoxJs?: () => string;
 }): { options: LaunchOptions; install: InstallFacts; camoufoxJs: string } {
-  assertMacOS(o.platform);
-  const install = ensureInstallLayout({
-    installDir: o.installDir,
-    pinnedBuild: o.pinnedBuild,
-    installDirOverride: o.installDirOverride,
-  });
+  assertSupportedPlatform(o.platform);
+  const osArch = osArchOf(o.platform, o.arch);
+  if (osArch === null) throw new Error(`no Camoufox build is pinned for ${o.platform}-${o.arch}`);
+  const installDir = installDirFor(osArch, o.home);
+  if (o.installDirSet !== installDir)
+    throw new InstallRefused(
+      'layout',
+      `CAMOUFOX_INSTALL_DIR is not ${installDir}; start the worker through run.ts, which sets it`,
+    );
+  const install = ensureInstallLayout({ os: o.platform, installDir, entry: CAMOUFOX_BUILDS[osArch] });
   const camoufoxJs = (o.readCamoufoxJs ?? installedCamoufoxJsVersion)();
   assertPinned(camoufoxJs);
+  const fontconfigFile = o.platform === 'linux' ? writeFontsConf(o.dataDir, install.bundleDir) : undefined;
   return {
-    options: buildLaunchOptions({ ffMajor: install.ffMajor, home: o.home, path: o.path, tmp: o.tmp }),
+    options: buildLaunchOptions({
+      ffMajor: install.ffMajor,
+      home: o.home,
+      path: o.path,
+      tmp: o.tmp,
+      ...(fontconfigFile === undefined ? {} : { fontconfigFile }),
+    }),
     install,
     camoufoxJs,
   };

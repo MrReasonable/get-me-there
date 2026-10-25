@@ -1,8 +1,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { CAMOUFOX_BUILDS, FLAG_NAMES as CORE_FLAG_NAMES, flagsFor } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_BINARY_BUILD } from '../src/install.js';
-import { FLAG_NAMES, flagsOf, PROOFS, SELECTORS, SELECTORS_VERSION } from '../src/selectors.js';
+import { FLAG_NAMES, flagsOf, PROOFS, SELECTORS, SELECTORS_VERSION, selectorsFor } from '../src/selectors.js';
 
 describe('the dated selectors module (spec §2; brief §9)', () => {
   it('is dated', () => {
@@ -31,7 +30,6 @@ describe('the dated selectors module (spec §2; brief §9)', () => {
   it('reads its flags through core’s flagsFor for the operator’s Mac and the pinned build (decision 81), values unchanged', () => {
     expect(FLAG_NAMES).toBe(CORE_FLAG_NAMES);
     expect(flagsOf()).toEqual(flagsFor('darwin-arm64', CAMOUFOX_BUILDS['darwin-arm64'].build));
-    expect(DEFAULT_BINARY_BUILD).toBe(CAMOUFOX_BUILDS['darwin-arm64'].build);
   });
   it('no worker module states a verification flag’s value itself: every flag is read through core (grep)', () => {
     const dir = new URL('../src/', import.meta.url);
@@ -42,5 +40,26 @@ describe('the dated selectors module (spec §2; brief §9)', () => {
       .filter((f) => f.endsWith('.ts') && f !== 'record.ts')
       .filter((f) => flag.test(readFileSync(new URL(f, dir), 'utf8')));
     expect(offenders).toEqual([]);
+  });
+});
+
+// why: decision 75: the running worker's flags are its own entry's, for the build it runs, all false otherwise
+describe('selectorsFor (the running entry’s flags)', () => {
+  it('gives each entry its own flags for its pinned build, and none for another build or entry', () => {
+    const pin = CAMOUFOX_BUILDS['darwin-arm64'].build;
+    expect(flagsOf(selectorsFor('darwin-arm64', pin))).toEqual(flagsFor('darwin-arm64', pin));
+    expect(Object.values(flagsOf(selectorsFor('darwin-arm64', '153.0.1-beta.30'))).some(Boolean)).toBe(false);
+    for (const k of ['darwin-x64', 'linux-arm64', 'linux-x64'] as const)
+      expect(Object.values(flagsOf(selectorsFor(k, CAMOUFOX_BUILDS[k].build))).some(Boolean), k).toBe(false);
+    const s = selectorsFor('linux-arm64', 'b', () => ({
+      ...flagsFor('darwin-arm64', pin),
+      GRID_VERIFIED: false,
+    }));
+    expect([s.FORM_VERIFIED, s.GRID_VERIFIED, s.version, s.hosts]).toEqual([
+      true,
+      false,
+      SELECTORS.version,
+      SELECTORS.hosts,
+    ]);
   });
 });

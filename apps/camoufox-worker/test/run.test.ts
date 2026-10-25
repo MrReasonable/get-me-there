@@ -1,7 +1,17 @@
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { checkEnvFiles, type Entry, EX_CONFIG, EX_SOFTWARE, main, resolveDataDir, run } from '../src/run.js';
+import {
+  checkEnvFiles,
+  type Entry,
+  EX_CONFIG,
+  EX_SOFTWARE,
+  INSTALL_DIR_INHERITED,
+  installDirSetting,
+  main,
+  resolveDataDir,
+  run,
+} from '../src/run.js';
 import { tmpDir } from './support/tmp.js';
 
 const uid = process.getuid?.() ?? 0;
@@ -97,7 +107,7 @@ describe('run.ts (SEC-R2-006: one env file, its mode checked on the file loaded)
   });
   it('an inherited CAMOUFOX_* or POINT_OF_SALE the file lacks refuses; one equal to the file passes', async () => {
     const dir = dataDir();
-    for (const extra of [{ CAMOUFOX_INSTALL_DIR: '/x' }, { POINT_OF_SALE: 'US' }, { CAMOUFOX_DEBUG: '1' }]) {
+    for (const extra of [{ CAMOUFOX_INSTALL_DIR: '' }, { POINT_OF_SALE: 'US' }, { CAMOUFOX_DEBUG: '1' }]) {
       const t = deps({ CAMOUFOX_DATA_DIR: dir, ...extra });
       expect(await run(['status'], t.d), JSON.stringify(extra)).toBe(EX_CONFIG);
     }
@@ -175,6 +185,8 @@ describe('run.ts (SEC-R2-006: one env file, its mode checked on the file loaded)
     };
     try {
       expect(await main(['no-such-command'])).toBe(EX_CONFIG);
+      // why: main's one write (decision 73); this test runs it in the test process, so it takes it back each time
+      delete process.env.CAMOUFOX_INSTALL_DIR;
       const dir = dataDir();
       const before = process.env.CAMOUFOX_DATA_DIR;
       process.env.CAMOUFOX_DATA_DIR = dir;
@@ -190,10 +202,83 @@ describe('run.ts (SEC-R2-006: one env file, its mode checked on the file loaded)
         if (before === undefined) delete process.env.CAMOUFOX_DATA_DIR;
         else process.env.CAMOUFOX_DATA_DIR = before;
         delete process.env.CAMOUFOX_WORKER_KEY;
+        delete process.env.CAMOUFOX_INSTALL_DIR;
       }
     } finally {
       process.stderr.write = write;
     }
     expect(errSpy.join('')).toMatch(/unknown command[\s\S]*entry failed/);
+  });
+
+  // why: decision 73: camoufox-js reads CAMOUFOX_INSTALL_DIR once, at import; the worker sets it and refuses any other
+  it('an inherited CAMOUFOX_INSTALL_DIR is refused with 78, set or empty, before anything is read', async () => {
+    const dir = dataDir();
+    for (const value of ['/x', '']) {
+      const t = deps({ CAMOUFOX_DATA_DIR: dir, CAMOUFOX_INSTALL_DIR: value }, { installDir: '/i' });
+      expect(await run(['status'], t.d)).toBe(EX_CONFIG);
+      expect(t.errs).toEqual([INSTALL_DIR_INHERITED]);
+      expect(t.loaded).toEqual([]);
+    }
+    expect(() =>
+      installDirSetting({ HOME: '/Users/op', CAMOUFOX_INSTALL_DIR: '/x' }, 'darwin', 'arm64'),
+    ).toThrow(INSTALL_DIR_INHERITED);
+  });
+  it('the install directory is the root on macOS and the pinned bundle on Linux; none on Windows or without HOME', () => {
+    expect(installDirSetting({ HOME: '/Users/op' }, 'darwin', 'arm64')).toBe(
+      '/Users/op/.local/share/get-me-there/camoufox',
+    );
+    expect(installDirSetting({ HOME: '/home/op' }, 'linux', 'x64')).toBe(
+      '/home/op/.local/share/get-me-there/camoufox/browsers/official/152.0.4-beta.28-924f3109',
+    );
+    expect(installDirSetting({ HOME: '/h' }, 'win32', 'x64')).toBeNull();
+    expect(installDirSetting({}, 'darwin', 'arm64')).toBeNull();
+    expect(installDirSetting({ HOME: 'relative' }, 'darwin', 'arm64')).toBeNull();
+  });
+  it('the entry’s environment carries the install directory main set; worker.env may not name one', async () => {
+    const dir = dataDir();
+    const t = deps(
+      { CAMOUFOX_DATA_DIR: dir },
+      { installDir: '/Users/op/.local/share/get-me-there/camoufox' },
+    );
+    expect(await run(['status'], t.d)).toBe(0);
+    expect(t.envs[0]?.CAMOUFOX_INSTALL_DIR).toBe('/Users/op/.local/share/get-me-there/camoufox');
+    const none = deps({ CAMOUFOX_DATA_DIR: dir }, { installDir: null });
+    expect(await run(['status'], none.d)).toBe(0);
+    expect(none.envs[0]).not.toHaveProperty('CAMOUFOX_INSTALL_DIR');
+    writeFileSync(
+      join(dir, 'worker.env'),
+      'CAMOUFOX_WORKER_KEY=synthetic-worker-key-0123456789abcdef\nCAMOUFOX_INSTALL_DIR=/x\n',
+    );
+    const filed = deps({ CAMOUFOX_DATA_DIR: dir }, { installDir: '/i' });
+    expect(await run(['status'], filed.d)).toBe(EX_CONFIG);
+    expect(filed.errs.join()).toBe(
+      `remove CAMOUFOX_INSTALL_DIR from ${dir}/worker.env: the worker sets it itself`,
+    );
+  });
+  it('main sets CAMOUFOX_INSTALL_DIR in its own process once, after refusing an inherited one', async () => {
+    const before = { home: process.env.HOME, set: process.env.CAMOUFOX_INSTALL_DIR };
+    const write = process.stderr.write.bind(process.stderr);
+    const errs: string[] = [];
+    process.stderr.write = (chunk: string | Uint8Array) => {
+      errs.push(String(chunk));
+      return true;
+    };
+    try {
+      delete process.env.CAMOUFOX_INSTALL_DIR;
+      process.env.HOME = '/Users/op';
+      expect(await main(['no-such-command'])).toBe(EX_CONFIG);
+      expect(process.env.CAMOUFOX_INSTALL_DIR).toBe(
+        installDirSetting({ HOME: '/Users/op' }, process.platform, process.arch) ?? undefined,
+      );
+      process.env.CAMOUFOX_INSTALL_DIR = '/elsewhere';
+      expect(await main(['no-such-command'])).toBe(EX_CONFIG);
+      expect(errs.at(-1)).toBe(`${INSTALL_DIR_INHERITED}\n`);
+      expect(process.env.CAMOUFOX_INSTALL_DIR).toBe('/elsewhere');
+    } finally {
+      process.stderr.write = write;
+      process.env.HOME = before.home;
+      if (before.set === undefined) delete process.env.CAMOUFOX_INSTALL_DIR;
+      else process.env.CAMOUFOX_INSTALL_DIR = before.set;
+    }
   });
 });

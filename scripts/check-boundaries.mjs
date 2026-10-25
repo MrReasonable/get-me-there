@@ -26,6 +26,19 @@ const ALLOWED = {
 /** The worker's browser libraries, allowed only in its launch and driver modules (arch-009, TS-04). */
 const WORKER_BROWSER_LIBS = ['camoufox-js', 'playwright-core'];
 const WORKER_BROWSER_FILES = /^apps\/camoufox-worker\/src\/(launch|driver)\.ts$/;
+// why: decision 73: camoufox-js reads CAMOUFOX_INSTALL_DIR once, at import, so the worker's run.ts sets it before any
+// entry loads; that one assignment is the only write to process.env anywhere in the tree
+const ENV_WRITE_FILE = 'apps/camoufox-worker/src/run.ts';
+const ALLOWED_ENV_WRITE = /process\.env\.CAMOUFOX_INSTALL_DIR\s*=(?!=)/g;
+/** Whether `src` assigns, deletes or merges into process.env, other than the one allowed write in run.ts. */
+function writesEnv(f, src) {
+  const rest = ruleForm(f) === ENV_WRITE_FILE ? src.replace(ALLOWED_ENV_WRITE, '') : src;
+  return (
+    /process\.env(?:\.[A-Za-z_$][\w$]*|\[[^\]]*\])\s*(?:[-+*/|&?]{0,3})=(?!=)/.test(rest) ||
+    /delete\s+process\.env\b/.test(rest) ||
+    /Object\.assign\(\s*process\.env\b/.test(rest)
+  );
+}
 const CORE_ALLOWED_EXTERNAL = ['zod', '@noble/hashes', '@date-fns/tz'];
 // Three-letter words that appear in string literals and are also dataset airport codes (decision 46): currencies,
 // HTTP, formats, standards and plain English. A later package adds the words it needs here, in its own diff.
@@ -175,6 +188,12 @@ for (const [name, dir] of Object.entries(dirs)) {
     }
     if (/process\.env/.test(src) && !isEnvReader(f)) {
       console.error(`${f} reads process.env outside ${ENV_RULE}`);
+      bad++;
+    }
+    if (writesEnv(f, src)) {
+      console.error(
+        `${f} writes process.env; only ${ENV_WRITE_FILE} may, and only CAMOUFOX_INSTALL_DIR (decision 73)`,
+      );
       bad++;
     }
     for (const spec of specs)
