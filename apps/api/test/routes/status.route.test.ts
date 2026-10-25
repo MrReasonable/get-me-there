@@ -417,17 +417,7 @@ describe('the report never spends, waits on a vendor or loads a page (spec §10)
     stubWorker(() =>
       Response.json(
         workerBody({
-          sharedSettings: {
-            CAMOUFOX_COOLDOWN_HOURS: '72',
-            CAMOUFOX_PAGE_TIMEOUT_SECONDS: '90',
-            CAMOUFOX_MODE: 'list',
-            CAMOUFOX_GRID_SCROLL_CAP: '30',
-            CAMOUFOX_GRID_SCROLL_SPACING_SECONDS: '5',
-            CAMOUFOX_MONTHLY_PAGE_CAP: '1500',
-            CAMOUFOX_MONTHLY_SCROLL_CAP: '6000',
-            CAMOUFOX_BILLING_DAY: '1',
-            POINT_OF_SALE: 'GB',
-          },
+          sharedSettings: { ...SHARED, CAMOUFOX_COOLDOWN_HOURS: '72' },
         }),
       ),
     );

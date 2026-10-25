@@ -1,5 +1,6 @@
 // A stand-in for the camoufox worker's `GET /v1/status` on the Mac's loopback, installed as global fetch (the api's tests
 // never import msw). Anything else the app asks for fails the test: the Status report may read nothing but the worker.
+import { SHARED_WORKER_DEFAULTS } from '@gmt/core';
 import { vi } from 'vitest';
 
 export const WORKER_URL = 'http://127.0.0.1:8090';
@@ -10,17 +11,8 @@ export const WORKER_ENV = {
   CAMOUFOX_WORKER_KEY: WORKER_KEY,
 };
 
-export const SHARED = {
-  CAMOUFOX_COOLDOWN_HOURS: '48',
-  CAMOUFOX_PAGE_TIMEOUT_SECONDS: '90',
-  CAMOUFOX_MODE: 'list',
-  CAMOUFOX_GRID_SCROLL_CAP: '30',
-  CAMOUFOX_GRID_SCROLL_SPACING_SECONDS: '5',
-  CAMOUFOX_MONTHLY_PAGE_CAP: '1500',
-  CAMOUFOX_MONTHLY_SCROLL_CAP: '6000',
-  CAMOUFOX_BILLING_DAY: '1',
-  POINT_OF_SALE: 'GB',
-};
+// why: core's own defaults, so a setting the shared list gains later never leaves this stand-in behind
+export const SHARED: Record<string, string> = { ...SHARED_WORKER_DEFAULTS };
 
 /** A status body the app's schema accepts; `over` replaces or adds fields. */
 export function workerBody(over: Record<string, unknown> = {}): Record<string, unknown> {
