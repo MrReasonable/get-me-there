@@ -67,10 +67,10 @@ export interface ConsentDriver {
 }
 
 /**
- * A machine with no display. why: W2: until the guided capture (`gmt consent`, brief WP17 Task 17.5) lands, the consent
- * fix is core's CONSENT_FIX: an ordinary private window on any desktop, its SOCS fields typed into capture-socs here.
+ * A machine with no display (brief WP17 Task 17.4, decision 74): the refusal points at export and import, the capture
+ * made on a desktop and carried here as one line, and at capture-socs, the lighter equal option.
  */
-export const NO_DISPLAY = `there is no display for a browser window here (neither DISPLAY nor WAYLAND_DISPLAY is set); capture the consent choice from an ordinary private window on a desktop and enter it with ${CONSENT_FIX.command} (${CONSENT_FIX.doc})`;
+export const NO_DISPLAY = `there is no display for a browser window here (neither DISPLAY nor WAYLAND_DISPLAY is set): on a desktop that has run pnpm gmt setup, run ${CONSENT_FIX.command} export and pipe its line into ${CONSENT_FIX.command} import here, or enter the cookie from an ordinary private window with pnpm --filter @gmt/camoufox-worker capture-socs (docs/setup.md#on-a-machine-with-no-display)`;
 export class NoDisplay extends Error {
   constructor() {
     super(NO_DISPLAY);

@@ -362,7 +362,7 @@ describe('the recorder (brief Task 14.2 rules)', () => {
     const t = setup({ socs: false });
     expect(await record(t.ctx(Q), cfg, t.deps)).toBe(EX_CONFIG);
     expect(t.profiles).toEqual([]);
-    expect(t.err.join()).toMatch(/capture-socs/);
+    expect(t.err.join()).toMatch(/pnpm gmt consent/);
   });
   it('rule 1: an off-allowlist hop records nothing and cools down', async () => {
     const t = setup({ navigations: [{ hops: [URL0, 'https://www.example.test/x'], tree: resultsTree() }] });

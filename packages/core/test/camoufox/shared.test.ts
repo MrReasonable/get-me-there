@@ -240,8 +240,9 @@ describe('the start refusal file and its texts (decision 76)', () => {
       'config',
     ]);
     expect(Object.keys(START_REFUSAL_TEXT)).toEqual([...START_REFUSAL_REASONS]);
-    // why: W1, W2: every fix names a command that exists today; the consent ones are CONSENT_FIX's until Task 17.5
-    const capture = 'pnpm --filter @gmt/camoufox-worker capture-socs';
+    // why: W1, W2: every fix names a command that exists today; the consent ones are CONSENT_FIX's, the guided capture
+    // since Task 17.5
+    const capture = 'pnpm gmt consent';
     expect(CONSENT_FIX).toEqual({ command: capture, doc: 'docs/setup.md#capture-your-consent-choice' });
     expect(
       Object.fromEntries(START_REFUSAL_REASONS.map((r) => [r, START_REFUSAL_TEXT[r].fixCommand])),

@@ -247,6 +247,7 @@ export const ENTRIES: Readonly<Record<string, () => Promise<Entry>>> = {
   'capture-socs': async () => (await import('./captureSocs.js')).entry,
   check: async () => (await import('./startRefusal.js')).entry,
   counts: async () => (await import('./counts.js')).entry,
+  consent: async () => (await import('./consent.js')).entry,
 };
 
 /** The process entry: the live environment, this user's uid and the real stdout and stderr. */

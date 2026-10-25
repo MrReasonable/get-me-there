@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import {
   addMonthsClamped,
   type Clock,
+  CONSENT_FIX,
   type IsoDateTime,
   isoDateTimeOfEpochMs,
   isoDateTimeSchema,
@@ -15,7 +16,8 @@ import { writePrivateFile } from './privateFile.js';
  * Consent: rejected, never accepted (spec §2; decision 69 ruling 9; SEC-R2-001, TS2-06). Google's consent-choice
  * cookie is `SOCS` (Google's cookie policy, read 2026-10-18: "Google uses the 'SOCS' cookie, which lasts for 13
  * months, to store a user's state regarding their cookies choices"). Its value is undocumented and never invented: the
- * operator captures it once from a real "Reject all" in an ordinary private browser window (`capture-socs`), and the
+ * operator captures it once from a real "Reject all", in the window `pnpm gmt consent` opens (its mark checked from the
+ * value, consentLine.ts) or from an ordinary private browser window (`capture-socs`), and the
  * worker sets it before every page and compares it by value after every page, on every path. `SOCS_STABLE` records only
  * that the stability recording passed; it never weakens the comparison.
  */
@@ -37,9 +39,7 @@ export interface SocsCapture {
 
 export class ConsentNotCaptured extends Error {
   constructor(why: string) {
-    super(
-      `SOCS capture refused (${why}); capture "Reject all" again with: pnpm --filter @gmt/camoufox-worker capture-socs`,
-    );
+    super(`SOCS capture refused (${why}); capture "Reject all" again with: ${CONSENT_FIX.command}`);
     this.name = 'ConsentNotCaptured';
   }
 }
@@ -86,8 +86,7 @@ export function parseCapture(raw: unknown, clock: Clock): SocsCapture {
   if (c.capturedAt.slice(0, 10) < monthsBefore(now, SOCS_MAX_AGE_MONTHS))
     throw new ConsentNotCaptured('older than 13 months, the cookie’s stated lifetime');
   // why: fix round 1 (prov-int M11): addCookies would drop an expired cookie and every page would stop as consent
-  if (c.expires * 1000 <= Date.parse(now))
-    throw new ConsentNotCaptured('the cookie has expired; run capture-socs again');
+  if (c.expires * 1000 <= Date.parse(now)) throw new ConsentNotCaptured('the cookie has expired');
   return c;
 }
 
@@ -121,15 +120,21 @@ export interface CaptureInput {
 }
 
 /**
- * Writes the capture, stamped from the clock, with the domain and path fixed: the directory is created 0700 (an
- * existing one with a looser mode is refused, naming `chmod 700`) and the file written 0600, atomically.
+ * Writes the capture, stamped from the clock (or, for `consent import`, with the capture time the line carries), with
+ * the domain and path fixed: the directory is created 0700 (an existing one with a looser mode is refused, naming
+ * `chmod 700`) and the file written 0600, atomically. The dates are judged as `loadSocs` judges them.
  */
-export function writeCapture(dataDir: string, input: CaptureInput, clock: Clock): SocsCapture {
+export function writeCapture(
+  dataDir: string,
+  input: CaptureInput,
+  clock: Clock,
+  capturedAt: IsoDateTime = clock.now(),
+): SocsCapture {
   if (existsSync(dataDir)) {
     if ((statSync(dataDir).mode & 0o777) !== 0o700)
       throw new ConsentNotCaptured(`${dataDir} is not 0700; chmod 700 it`);
   } else mkdirSync(dataDir, { recursive: true, mode: 0o700 });
-  const capture = parseCapture({ ...input, domain: SOCS_DOMAIN, path: '/', capturedAt: clock.now() }, clock);
+  const capture = parseCapture({ ...input, domain: SOCS_DOMAIN, path: '/', capturedAt }, clock);
   const file = join(dataDir, SOCS_FILE);
   writePrivateFile(file, JSON.stringify(capture));
   return capture;

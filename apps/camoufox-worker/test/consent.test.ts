@@ -84,7 +84,7 @@ describe('the consent capture’s guard', () => {
 });
 
 describe('the display variables (decision 74)', () => {
-  it('the headed window gets exactly the groups run.ts passed; with neither on Linux it refuses, naming the capture that works today', () => {
+  it('the headed window gets exactly the groups run.ts passed; with neither on Linux it refuses, pointing at export and import', () => {
     expect(headedEnv({ DISPLAY: ':0', XAUTHORITY: '/a' }, 'linux')).toEqual({
       DISPLAY: ':0',
       XAUTHORITY: '/a',
@@ -95,10 +95,11 @@ describe('the display variables (decision 74)', () => {
     });
     expect(() => headedEnv({}, 'linux')).toThrow(new NoDisplay());
     expect(() => headedEnv({ XAUTHORITY: '/a', XDG_RUNTIME_DIR: '/r' }, 'linux')).toThrow(NoDisplay);
-    // why: W2: until Task 17.5, the fix is core's CONSENT_FIX; no text names a consent command not built yet
-    expect(NO_DISPLAY).toContain(CONSENT_FIX.command);
-    expect(NO_DISPLAY).toContain(CONSENT_FIX.doc);
-    expect(NO_DISPLAY).not.toContain('gmt consent');
+    // why: decision 74: with no display the refusal points at export and import (Task 17.5), and capture-socs
+    expect(NO_DISPLAY).toContain(`${CONSENT_FIX.command} export`);
+    expect(NO_DISPLAY).toContain(`${CONSENT_FIX.command} import`);
+    expect(NO_DISPLAY).toContain('capture-socs');
+    expect(NO_DISPLAY).toContain('docs/setup.md#on-a-machine-with-no-display');
     expect(headedEnv({}, 'darwin')).toEqual({});
   });
   it('the headless worker’s browser environment is unchanged: no display variable in it', () => {
@@ -640,6 +641,7 @@ describe('the consent modules’ browser access (grep)', () => {
     const dir = new URL('../src/', import.meta.url);
     const files = readdirSync(dir).filter((f) => f.startsWith('consent') && f.endsWith('.ts'));
     expect(files.sort()).toEqual([
+      'consent.ts',
       'consentDriver.ts',
       'consentGuard.ts',
       'consentLine.ts',

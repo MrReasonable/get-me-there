@@ -69,13 +69,13 @@ describe('loadSocs (spec §2: a captured, dated rejection value)', () => {
   ])('%s refuses, saying how to capture it', (_n, content, mode) => {
     const d = dirWith(content, mode);
     expect(() => loadSocs(d, clock)).toThrow(ConsentNotCaptured);
-    expect(() => loadSocs(d, clock)).toThrow(/capture-socs/);
+    expect(() => loadSocs(d, clock)).toThrow(/pnpm gmt consent/);
   });
   // why: fix round 1 (prov-int M11): a capture whose cookie has expired would be dropped by addCookies
-  it('refuses a capture whose cookie expiry has passed, naming capture-socs', () => {
+  it('refuses a capture whose cookie expiry has passed, naming pnpm gmt consent', () => {
     const now = Date.parse(clock.now()) / 1000;
     expect(() => loadSocs(dirWith(JSON.stringify({ ...OK, expires: now })), clock)).toThrow(
-      /expired.*capture-socs/,
+      /expired.*pnpm gmt consent/,
     );
     expect(loadSocs(dirWith(JSON.stringify({ ...OK, expires: now + 1 })), clock).expires).toBe(now + 1);
   });
@@ -171,6 +171,21 @@ describe('writeCapture (capture-socs)', () => {
     expect(statSync(join(dir, 'socs.json')).mode & 0o777).toBe(0o600);
     expect(statSync(dir).mode & 0o777).toBe(0o700);
     expect(loadSocs(dir, clock)).toEqual(c);
+  });
+  // why: WP17 Task 17.5: consent import keeps the capture time the line carries, judged by the same date rules
+  it('keeps a given capture time, and refuses one in the future or older than 13 months', () => {
+    const input = { value: 'v', expires: 1_800_000_000, secure: true, sameSite: 'Lax' };
+    const dir = tmpDir();
+    expect(writeCapture(dir, input, clock, asIsoDateTime('2026-10-01T09:00:00.000Z')).capturedAt).toBe(
+      '2026-10-01T09:00:00.000Z',
+    );
+    expect(loadSocs(dir, clock).capturedAt).toBe('2026-10-01T09:00:00.000Z');
+    expect(() => writeCapture(tmpDir(), input, clock, asIsoDateTime('2026-10-18T05:00:00.001Z'))).toThrow(
+      /dated in the future/,
+    );
+    expect(() => writeCapture(tmpDir(), input, clock, asIsoDateTime('2025-09-17T05:00:00.000Z'))).toThrow(
+      /older than 13 months/,
+    );
   });
   it('accepts an existing 0700 directory', () => {
     const dir = tmpDir();
