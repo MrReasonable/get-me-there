@@ -49,7 +49,6 @@ import { MonthlyCounter } from './monthly.js';
 import { Pacer } from './pacer.js';
 import { claim } from './pageClaim.js';
 import { profileDir } from './paths.js';
-import { osArchOf } from './platform.js';
 import type { View } from './ready.js';
 import {
   type GridDirection,
@@ -760,9 +759,8 @@ export function realRecordDeps(
   display: DisplayEnv = {},
 ): RecordDeps {
   const log = stderrLog(err, debug);
-  const osArch = osArchOf(process.platform, process.arch);
-  if (osArch === null)
-    throw new RecordingRefused(`no Camoufox build is pinned for ${process.platform}-${process.arch}`);
+  // why: the entry the launch was prepared for, so the meta and the flags are that machine's on every host
+  const { osArch } = prepared;
   return {
     platform: process.platform,
     display,

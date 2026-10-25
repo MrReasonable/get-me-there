@@ -17,8 +17,11 @@ afterEach(() => {
   for (const c of children.splice(0)) if (c.exitCode === null && c.signalCode === null) c.kill('SIGKILL');
 });
 const osArch: OsArch | null = osArchOf(process.platform, process.arch);
-/** What camoufox-js 0.11.5 throws on the fixture's empty properties.json (read after its install was resolved). */
-const LAUNCH_STOP = ['UnknownProperty', 'Unknown property screen.availTop in config'];
+/**
+ * What camoufox-js 0.11.5 throws on the fixture's empty properties.json (read after its install was resolved): its
+ * first generated property, whichever that is on the host, is unknown.
+ */
+const LAUNCH_STOP = ['UnknownProperty', expect.stringMatching(/^Unknown property [A-Za-z.]+ in config$/)];
 
 function runChild(
   mode: string,
