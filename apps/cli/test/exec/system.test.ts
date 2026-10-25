@@ -632,7 +632,8 @@ describe('systemExecutor: waits, redirects and answers (survivors, PR #11)', () 
     ).rejects.toThrow();
     expect(readdirSync(d)).toEqual(['src-dir']);
   });
-  it('a tar is extracted with -C into the fresh directory', async () => {
+  // why: the executor joins POSIX paths (the CLI refuses Windows before it runs), so this compares POSIX paths only
+  it.skipIf(process.platform === 'win32')('a tar is extracted with -C into the fresh directory', async () => {
     const d = tmp();
     const calls: Array<readonly string[]> = [];
     const r: Runner = async (argv) => {
