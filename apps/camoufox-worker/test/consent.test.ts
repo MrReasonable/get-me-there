@@ -325,6 +325,29 @@ describe('watching the window (the tool only observes)', () => {
     });
     expect([w.ended, w.blocked]).toEqual(['blocked', 'sign-in']);
   });
+  // why: the window closed mid-read: Playwright's read throws before the context's close event arrives (seen 2026-10-25)
+  it('a read that throws because the person closed the window ends the watch as closed, keeping what it saw', async () => {
+    const w = await watchConsentWindow(fakeConsentDriver({ saveAt: 1, socsAt: 2, goneAt: 4 }), {
+      timers: fakeTimers(),
+    });
+    expect([w.ended, w.saves, w.socs?.value]).toEqual(['closed', 1, SOCS.value]);
+    const first = await watchConsentWindow(fakeConsentDriver({ goneAt: -1 }), { timers: fakeTimers() });
+    expect([first.ended, first.saves]).toEqual(['closed', 0]);
+  });
+  it('any other read failure still throws', async () => {
+    const d = fakeConsentDriver({});
+    await expect(
+      watchConsentWindow(
+        {
+          ...d,
+          socsCookie: async () => {
+            throw new Error('cookies: protocol error');
+          },
+        },
+        { timers: fakeTimers() },
+      ),
+    ).rejects.toThrow('protocol error');
+  });
   // why: W8 (pa-b1-005): a SOCS there before any choice is not the choice's; only one set or changed after it counts
   it('a SOCS present before the choice is never kept; one changed after it is', async () => {
     const before = await watchConsentWindow(fakeConsentDriver({ socsAt: 0, closeAt: 3 }), {

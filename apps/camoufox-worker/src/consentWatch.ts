@@ -40,6 +40,14 @@ export interface Watched {
   hosts: string[];
 }
 
+/**
+ * Whether a read failed because the window is gone: Playwright throws its TargetClosedError from a read on a page the
+ * person has just closed, before the context's close event has arrived, so `closed()` can still say false.
+ */
+export function windowGone(e: unknown): boolean {
+  return e instanceof Error && (e.name === 'TargetClosedError' || /has been closed/.test(e.message));
+}
+
 type Decided = { kind: 'landing' | 'consent' | 'other' } | { kind: 'blocked'; page: BlockedPage };
 
 const hostOf = (u: string): string | null => {
@@ -98,7 +106,7 @@ export async function watchConsentWindow(
     first = await settled(false);
   } catch (e) {
     // why: CodeRabbit (PR #15): a window closed while its first view settles reads as closed, as below
-    if (d.closed()) return { ...w, ended: 'closed' };
+    if (d.closed() || windowGone(e)) return { ...w, ended: 'closed' };
     throw e;
   }
   w.firstFacts = first.facts;
@@ -129,8 +137,9 @@ export async function watchConsentWindow(
         }
       } else if (socs !== null && socs.value !== socsBefore) w.socs = socs;
     } catch (e) {
-      // why: a window the person closed between ticks reads as closed, whatever the read was doing then
-      if (d.closed()) return { ...w, ended: 'closed' };
+      // why: a window the person closed between ticks reads as closed, whatever the read was doing then; the read can
+      // fail on the closed page before the close event arrives (2026-10-25)
+      if (d.closed() || windowGone(e)) return { ...w, ended: 'closed' };
       throw e;
     }
     if (o.timers.now() - started >= limit) return { ...w, ended: 'timed-out' };

@@ -63,6 +63,8 @@ export interface Script {
   socsAt?: number;
   accountAt?: number;
   closeAt?: number;
+  /** From this tick the window is gone but its close event has not arrived: reads throw as Playwright's do. */
+  goneAt?: number;
   requests?: RequestLike[];
   launchThrows?: Error;
 }
@@ -73,6 +75,13 @@ export type FakeConsentDriver = ConsentDriver & {
   loads: string[];
   ticks(): number;
 };
+
+/** The error Playwright throws from a read on a page the person has closed (its class is TargetClosedError). */
+export function targetClosed(): Error {
+  const e = new Error('locator.count: Target page, context or browser has been closed');
+  e.name = 'TargetClosedError';
+  return e;
+}
 
 export function fakeConsentDriver(
   s: Script,
@@ -110,6 +119,7 @@ export function fakeConsentDriver(
     refused: () => (s.refusedAt !== undefined && tick > s.refusedAt ? (s.refused ?? 'off-allowlist') : null),
     async snapshotView() {
       calls.push('snapshotView');
+      if (s.goneAt !== undefined && tick > s.goneAt) throw targetClosed();
       snapshots++;
       const scripted = s.views?.[snapshots - 1];
       if (scripted !== undefined) return scripted;
@@ -117,6 +127,7 @@ export function fakeConsentDriver(
     },
     async socsCookie() {
       calls.push('socsCookie');
+      if (s.goneAt !== undefined && tick > s.goneAt) throw targetClosed();
       return s.socsAt !== undefined && tick > s.socsAt ? (s.socs ?? SOCS) : null;
     },
     async accountCookieSeen() {
