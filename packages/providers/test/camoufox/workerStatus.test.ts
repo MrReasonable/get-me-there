@@ -211,6 +211,27 @@ describe('the preflight compares the shared settings through sharedSettingDiffs 
     },
   );
 
+  it.each(['list', 'grid'] as const)(
+    '%s mode: an app with page spacing 0 and a worker left at 30 is skipped, naming the setting',
+    async (mode) => {
+      useFakeTime();
+      const { p, budget } = provider(mode, effectiveSharedSettings({ CAMOUFOX_MIN_SPACING_SECONDS: '0' }));
+      server.use(http.get(STATUS_URL, () => HttpResponse.json(status({ ...grid, sharedSettings: app }))));
+      expect(await preflightOf(p)).toEqual({
+        ok: false,
+        skip: 'provider_disabled',
+        detail: 'settings differ: CAMOUFOX_MIN_SPACING_SECONDS',
+      });
+      expect(budget.rows).toEqual([]);
+    },
+  );
+  it.each(['list', 'grid'] as const)('%s mode: both sides at page spacing 0 pass', async (mode) => {
+    useFakeTime();
+    const zero = effectiveSharedSettings({ CAMOUFOX_MIN_SPACING_SECONDS: '0' });
+    server.use(http.get(STATUS_URL, () => HttpResponse.json(status({ ...grid, sharedSettings: zero }))));
+    expect(await preflightOf(provider(mode, zero).p)).toEqual({ ok: true });
+  });
+
   it('the grid-only two differ only in grid mode', async () => {
     useFakeTime();
     const worker = effectiveSharedSettings({ CAMOUFOX_GRID_SCROLL_CAP: '12' });

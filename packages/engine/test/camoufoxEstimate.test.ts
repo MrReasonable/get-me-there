@@ -37,6 +37,20 @@ describe('the camoufox estimate (cost-004, cost-009, cost-011, prov-013)', () =>
       'camoufox list mode prices 100 of 2184 cells this run; a full pass takes 22 runs; the month cap allows about 1500 cells',
     );
   });
+  it('with page spacing 0 a page is estimated at 40 s, so 100 pages take 4000 s (operator, 2026-10-25)', () => {
+    const e = engineWith([stubCamoufox({ cells: 1 })], { env: { CAMOUFOX_MIN_SPACING_SECONDS: '0' } });
+    const def = e.ctx.repos.definitions.update(e.definition.id, {
+      window: { kind: 'absolute', from: asIsoDate('2026-11-02'), to: asIsoDate('2027-05-02') },
+      minNights: 10,
+      maxNights: 21,
+      scheduleCron: '0 5 * * 1',
+    });
+    const built = buildSnapshot(e.ctx, def);
+    const est = estimateStart(e.ctx, built.snapshot, built.cells, null);
+    const line = est.perProvider.find((p) => p.providerId === 'camoufox');
+    expect(line).toMatchObject({ planCalls: 100, calls: 100, costMicroGbp: 0 });
+    expect(line?.seconds).toBe(4000);
+  });
   it('is not blocked at start by provider-month or by the shared free-calls cap', () => {
     const { e, def } = workedExample();
     const built = buildSnapshot(e.ctx, def);

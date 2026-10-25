@@ -101,7 +101,7 @@ own signal handling, six preferences that switch off telemetry, crash reports, N
 and a minimal browser environment (`HOME`, `PATH`, `TMPDIR`, `LANG`), since without `env` the library passes the whole
 process environment to the browser. Any other `camoufox-js` version or Camoufox build is refused at start.
 
-**Limits.** One page at a time; at least `CAMOUFOX_MIN_SPACING_SECONDS` (default 30, never lower, never randomised)
+**Limits.** One page at a time; at least `CAMOUFOX_MIN_SPACING_SECONDS` (default 30, 0 to 600, never randomised; a value of 0 means no pause: pages go back to back, from your own address; scrolls do so only when `CAMOUFOX_GRID_SCROLL_SPACING_SECONDS` is 0)
 from the start of one page to the next, persisted across restarts; `CAMOUFOX_EXECUTION_PAGE_CAP` (default 100, at most
 400) pages a run, frozen into the execution's snapshot; `CAMOUFOX_MONTHLY_PAGE_CAP` (default 1,500) a month. No
 proxies; no challenge is ever solved, clicked through or waited out; consent is rejected, never accepted (the

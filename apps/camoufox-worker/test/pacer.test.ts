@@ -99,7 +99,7 @@ describe('Pacer (spec §2: start to start, 2 s tolerance, persisted, never rando
       /EISDIR/,
     );
   });
-  it.each([29, 601, 30.5])('refuses a spacing of %s', (s) => {
+  it.each([-1, 601, 30.5])('refuses a spacing of %s', (s) => {
     expect(() => new Pacer({ dir: tmpDir(), minSpacingSeconds: s, clock: fixedClock(T0) })).toThrow(
       /CAMOUFOX_MIN_SPACING_SECONDS/,
     );
@@ -108,17 +108,17 @@ describe('Pacer (spec §2: start to start, 2 s tolerance, persisted, never rando
 
 // why: fix round 1 (TS M5): both bounds are inclusive
 describe('Pacer bounds', () => {
-  it('accepts 30 and 600 seconds and refuses 29 and 601', () => {
-    for (const ok of [30, 600])
+  it('accepts 0 and 600 seconds and refuses -1 and 601', () => {
+    for (const ok of [0, 600])
       expect(
         () => new Pacer({ dir: tmpDir(), minSpacingSeconds: ok, clock: fixedClock(T0) }),
         String(ok),
       ).not.toThrow();
-    for (const bad of [29, 601])
+    for (const bad of [-1, 601])
       expect(
         () => new Pacer({ dir: tmpDir(), minSpacingSeconds: bad, clock: fixedClock(T0) }),
         String(bad),
-      ).toThrow(/from 30 to 600/);
+      ).toThrow(/from 0 to 600/);
   });
 });
 
@@ -131,5 +131,47 @@ describe('Pacer write failure', () => {
     expect(p.isBusy()).toBe(false);
     mkdirSync(dir);
     expect(p.claim()).toEqual({ ok: true });
+  });
+});
+
+// why: operator ruling 2026-10-25: spacing 0 is no pause at all, with the one-page-at-a-time rule kept
+describe('Pacer with spacing 0', () => {
+  it('passes consecutive claims at the same instant without waiting and records each start', () => {
+    const clock = fixedClock(T0);
+    const dir = tmpDir();
+    const p = new Pacer({ dir, minSpacingSeconds: 0, clock });
+    for (let i = 0; i < 3; i++) {
+      expect(p.claim()).toEqual({ ok: true });
+      expect(p.lastPageAt()).toBe(clock.now());
+      p.release();
+    }
+    clock.advance(1_000);
+    expect(p.claim()).toEqual({ ok: true });
+    expect(p.lastPageAt()).toBe(clock.now());
+  });
+  it('still serves one page at a time, and the refusal asks for at least a second', () => {
+    const p = new Pacer({ dir: tmpDir(), minSpacingSeconds: 0, clock: fixedClock(T0) });
+    expect(p.claim()).toEqual({ ok: true });
+    expect(p.isBusy()).toBe(true);
+    expect(p.claim()).toEqual({ ok: false, retryAfterSeconds: 1 });
+    p.release();
+    expect(p.claim()).toEqual({ ok: true });
+  });
+  it('passes even when the last start is recorded ahead of the clock (no wait is computed at all)', () => {
+    const dir = tmpDir();
+    writeFileSync(join(dir, 'pacer.json'), JSON.stringify({ lastPageAt: '2026-10-18T05:00:10.000Z' }));
+    expect(new Pacer({ dir, minSpacingSeconds: 0, clock: fixedClock(T0) }).claim()).toEqual({ ok: true });
+    // the same record under a real spacing still waits
+    writeFileSync(join(dir, 'pacer.json'), JSON.stringify({ lastPageAt: '2026-10-18T05:00:10.000Z' }));
+    expect(new Pacer({ dir, minSpacingSeconds: 30, clock: fixedClock(T0) }).claim()).toEqual({
+      ok: false,
+      retryAfterSeconds: 38,
+    });
+  });
+  it('passes after a restart and when the record is unreadable', () => {
+    const dir = tmpDir();
+    writeFileSync(join(dir, 'pacer.json'), '{not json');
+    const clock = fixedClock(T0);
+    expect(new Pacer({ dir, minSpacingSeconds: 0, clock }).claim()).toEqual({ ok: true });
   });
 });

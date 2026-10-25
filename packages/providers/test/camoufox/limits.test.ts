@@ -32,6 +32,24 @@ describe('camoufoxHttpLimits (spec §5.3 rev 32; decision 69)', () => {
       2 * 90 + 30 * (5 + move) + 15,
     );
   });
+  it('page spacing 0 gives minIntervalMs 0 and a limiter with no rate limit (operator, 2026-10-25)', () => {
+    const l = camoufoxHttpLimits(camoufox({ CAMOUFOX_MIN_SPACING_SECONDS: '0' }), { maxWaitSeconds: 3900 });
+    expect(l).toMatchObject({
+      minIntervalMs: 0,
+      ratePerMinute: Number.MAX_SAFE_INTEGER,
+      ratePerHour: Number.MAX_SAFE_INTEGER,
+      concurrency: 1,
+    });
+    const grid = camoufoxHttpLimits(
+      camoufox({
+        CAMOUFOX_MODE: 'grid',
+        CAMOUFOX_GRID_SCROLL_CAP: '30',
+        CAMOUFOX_GRID_SCROLL_SPACING_SECONDS: '0',
+      }),
+      { maxWaitSeconds: 3900 },
+    );
+    expect(grid.requestTimeoutSeconds).toBe(2 * 90 + 30 * 60 + 15);
+  });
   it('the worker’s origin, never billable, concurrency 1, spacing as minIntervalMs, page timeout + 15 s, no transport retries', () => {
     const l = camoufoxHttpLimits(camoufox(), { maxWaitSeconds: 3900 });
     expect(l).toMatchObject({

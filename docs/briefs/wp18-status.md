@@ -12,7 +12,7 @@ status: merged
 
 # WP18: Status (the report, `gmt status`, the Status view and the consent email)
 
-Revised 2026-10-25 for the branch review's rulings V0 to V11 (spec revision 38: the consent notice by cause and sent by the minute job too, the one consent fix, the worker judged by the preflight's rule, the adapters' class on the ledger (migration 0008), the email card on any send, the test email's own limit, `label` and `disabled`, nothing truncated, the container version as a build argument). Written 2026-10-19 against spec revision 36 and plan decisions 1–83, after WP16a and WP16b, and revised after review
+Revised 2026-10-25 for the branch review's rulings V0 to V11 (spec revision 39: the consent notice by cause and sent by the minute job too, the one consent fix, the worker judged by the preflight's rule, the adapters' class on the ledger (migration 0008), the email card on any send, the test email's own limit, `label` and `disabled`, nothing truncated, the container version as a build argument). Written 2026-10-19 against spec revision 36 and plan decisions 1–83, after WP16a and WP16b, and revised after review
 rounds 1–3 (every finding answered in the review directories' `resolutions.md`). It builds the operator's chosen
 item 4: one report of what is working, how much of each search the last finished run covered, and what to do about
 what is not, served by the app, printed by `gmt status` and shown in a Status view; and the consent-expiry email

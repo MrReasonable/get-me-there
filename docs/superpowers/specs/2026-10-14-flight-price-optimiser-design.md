@@ -1,6 +1,6 @@
 # get-me-there — Flight Price Intelligence & Flexible-Date Optimiser
 
-**Design spec, revision 38.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
+**Design spec, revision 39.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
 four full-roster reviews (145, 140, 126 and 101 findings; zero Critical since
 revision 2) and the provider spike. Revision 9 folds in the three decisions
 taken at approval (the self-scraping fallback in §2, the dashboard readings in
@@ -309,7 +309,8 @@ never silently dropped.
   least departure and least return. Pages hold at most
   `CAMOUFOX_GRID_SCROLL_CAP` scrolls (default 30, at most 60). Scroll clicks
   are at least `CAMOUFOX_GRID_SCROLL_SPACING_SECONDS` apart start to start
-  (default 5, at least 5, fixed, never randomised). A run makes at most
+  (default 5, 0 to 30, fixed, never randomised; 0 means no pause, the scrolls go
+  back to back). A run makes at most
   `CAMOUFOX_EXECUTION_SCROLL_CAP` scrolls (default 600) and a month at most
   `CAMOUFOX_MONTHLY_SCROLL_CAP` (default 6,000); the adapter asks the budget
   guard what the two caps leave, passes the page no more than that as its
@@ -400,12 +401,13 @@ until the operator clears a persisted flag after wiping the profile. **No
 proxies** of any kind: every page comes from the operator's own IP address.
 **No challenge is ever solved or bypassed**: no CAPTCHA solver, no clicking a
 challenge, no waiting a challenge out. One page at a time (concurrency 1), at
-least `CAMOUFOX_MIN_SPACING_SECONDS` (default 30, never lower, never
+least `CAMOUFOX_MIN_SPACING_SECONDS` (default 30, 0 to 600, never
 randomised) from the **start** of one page load to the start of the next. The
 app's limiter takes that spacing directly as its minimum interval between
 starts; the worker enforces the same spacing with a fixed 2 s tolerance for
 arrival jitter. The last page time is persisted, so a restart keeps the
-spacing. At most
+spacing. A value of 0 means no pause: pages go back to back, from your own
+address, still one at a time, with no rate limit beyond the page caps. At most
 `CAMOUFOX_EXECUTION_PAGE_CAP` page loads per execution (default 100, at most
 400; frozen into the execution's budget snapshot at creation) and
 `CAMOUFOX_MONTHLY_PAGE_CAP` per month (default 1,500).
@@ -2570,20 +2572,20 @@ SEARCHAPI_TRIAL_USED=0                   # trial only: seed for the lifetime win
 CAMOUFOX_ENABLED=false                   # true only with the host-side worker running; false = the provider does not exist
 CAMOUFOX_WORKER_URL=                     # http://127.0.0.1:8090 (pnpm dev) or http://host.docker.internal:8090 (app in Docker; the compose default); loopback or host.docker.internal only, explicit port, no path
 CAMOUFOX_WORKER_KEY=                     # ≥ 32 chars, shared by app and worker; required when CAMOUFOX_ENABLED=true
-CAMOUFOX_MIN_SPACING_SECONDS=30          # start to start; minimum 30, maximum 600; never randomised
+CAMOUFOX_MIN_SPACING_SECONDS=30          # start to start; 0–600 (0 means no pause: pages go back to back, still one at a time, from your own address); never randomised; a shared setting, kept equal in worker.env (a difference skips the provider)
 CAMOUFOX_EXECUTION_PAGE_CAP=100          # page loads per execution (BudgetExceeded provider-execution), frozen into the execution's budget snapshot; 1–400
 CAMOUFOX_MONTHLY_PAGE_CAP=1500           # page loads per billing month (provider-month; no-page rows not counted); the app's ledger enforces it; the worker reports it (and enforces it from WP17)
 CAMOUFOX_BILLING_DAY=1                   # 1–28: the month starts 00:00 UTC that day, for both monthly caps (the ledger's, and the worker's from WP17)
 CAMOUFOX_COOLDOWN_HOURS=48               # pause after a challenge, sign-in or consent page; 24–100000 (an unrecognised page pauses a fixed 1 h)
 CAMOUFOX_PAGE_TIMEOUT_SECONDS=90         # the worker's whole-page deadline (load, settle, read), 30–240; the app's request timeout is this + 15 s
 CAMOUFOX_MODE=list                       # list (one day pair a page) or grid (the Dates tab's date grid, once the worker reports GRID_VERIFIED and its measured step)
-CAMOUFOX_GRID_SCROLL_SPACING_SECONDS=5   # grid: scroll clicks start to start; minimum 5, maximum 30; never randomised
+CAMOUFOX_GRID_SCROLL_SPACING_SECONDS=5   # grid: scroll clicks start to start; 0–30 (0 means no pause: scrolls go back to back); never randomised
 CAMOUFOX_GRID_SCROLL_CAP=30              # grid: scrolls a page may make; 0–60
 CAMOUFOX_EXECUTION_SCROLL_CAP=600        # grid: scrolls per execution, checked before every page's scrolls; 0–6000
 CAMOUFOX_MONTHLY_SCROLL_CAP=6000         # grid: scrolls per billing month; the app's ledger enforces it; the worker reports it (and enforces it from WP17)
 CAMOUFOX_BROWSER_WINDOW=scheduled        # exactly scheduled (default when unset: pages only inside a run's window, §8.2) or any (a resumed run keeps loading pages, within every cap, spacing and cool-down); any other value fails boot naming the field; app side only, not shared with the worker; a catch-up loads no browser page either way
 # worker side only (macOS; Linux from WP17; its one 0600 env file <workerData>/worker.env, written by gmt setup; docs/setup.md §14): CAMOUFOX_WORKER_KEY, CAMOUFOX_WORKER_PORT, and the shared settings named under "Where settings live" below
-# fixed, not configurable: concurrency 1, rate per hour = floor(3600 / spacing), cost 0, cache never
+# fixed, not configurable: concurrency 1, rate per hour = floor(3600 / spacing) (no rate limit at spacing 0; the page caps still bound a run), cost 0, cache never
 # --- email (all or nothing) ---
 SMTP_HOST=
 SMTP_PORT=
@@ -2622,7 +2624,8 @@ for the worker's two directories, so the CLI and the worker always agree);
 `gmt setup` generates one `CAMOUFOX_WORKER_KEY` and writes it to both files,
 and keeps the settings the two sides must share equal:
 `SHARED_WORKER_SETTINGS` in `core/camoufox/settings.ts`
-(`CAMOUFOX_COOLDOWN_HOURS`, `CAMOUFOX_PAGE_TIMEOUT_SECONDS`, `CAMOUFOX_MODE`,
+(`CAMOUFOX_COOLDOWN_HOURS`, `CAMOUFOX_PAGE_TIMEOUT_SECONDS`,
+`CAMOUFOX_MIN_SPACING_SECONDS`, `CAMOUFOX_MODE`,
 `CAMOUFOX_GRID_SCROLL_CAP`, `CAMOUFOX_GRID_SCROLL_SPACING_SECONDS`,
 `CAMOUFOX_MONTHLY_PAGE_CAP`, `CAMOUFOX_MONTHLY_SCROLL_CAP`,
 `CAMOUFOX_BILLING_DAY`, `POINT_OF_SALE`), beside `workerDataDir(home)`, the
@@ -3074,7 +3077,7 @@ as specified in §5.3; no secrets, no full URLs.
 
 ## 17. Changelog
 
-### Revision 38: the status report after its branch review (2026-10-25)
+### Revision 39: the status report after its branch review (2026-10-25)
 
 From WP18's branch review (58 findings, every one addressed), §8.3 and §10 state the status report as built: the
 consent notice's subject comes from the check's cause (a check that cannot be made sends nothing), it is claimed
@@ -3083,6 +3086,16 @@ that will refuse pages is `fail` by the preflight's own rule; the provider card'
 adapters' (ledger `error_kind`, migration 0008) and a rejected 2xx is not a success; the email card reflects the
 newest send of any kind and the test email has its own limit; cards carry a `label`, disabled searches are
 `off`/`disabled`, and nothing a state rests on is truncated; the container's version is a build argument.
+
+### Revision 38: the browser provider's pauses may be 0 (operator ruling, 2026-10-25)
+
+The operator ruled that the browser provider's two pauses may be set to 0, meaning no pause at all.
+`CAMOUFOX_MIN_SPACING_SECONDS` takes 0 to 600 (default still 30) and `CAMOUFOX_GRID_SCROLL_SPACING_SECONDS`
+takes 0 to 30 (default still 5); the page spacing joins the shared settings (§12), so a worker left at 30 beside an app at 0 skips the provider. §2's limits paragraph, the grid paragraph and §12's block state the new ranges;
+at page spacing 0 the app's limiter has no rate limit (the page caps alone bound a run), the worker's pacer lets a
+claim pass at once (still one page at a time, still recording the last page time), and the estimate's 40 s a page
+is unchanged. The per-run page cap, the monthly page and scroll caps, the cool-downs and every stop the classifier
+triggers are unchanged. No other design rule changes.
 
 ### Revision 37: the local setup as built, after its branch review (2026-10-24)
 
