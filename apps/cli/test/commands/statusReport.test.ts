@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 import type { z } from 'zod';
 import { runCli } from '../../src/cli.js';
 import type { HttpRequest } from '../../src/deps.js';
-import { TEST_EMAIL_QUESTION, TEST_EMAIL_WORDS } from '../../src/setup/testEmail.js';
+import { offeredFor, TEST_EMAIL_QUESTION, TEST_EMAIL_WORDS } from '../../src/setup/testEmail.js';
 import { scriptedAsk, stubHttp, testIo } from '../support/deps.js';
 import { machine } from '../support/machine.js';
 
@@ -18,6 +18,7 @@ const check = (over: Partial<Check> = {}): Check => ({
   id: 'worker',
   area: 'worker',
   providerId: null,
+  label: null,
   state: 'ok',
   summary: 'reachable',
   note: null,
@@ -175,6 +176,43 @@ describe('gmt status: the app report beside the local facts (brief Task 18.5)', 
     expect(m.io.stderr).toContain(`the app is not answering: ${reason}`);
   });
 
+  it('with the app down the local facts and the worker refusal still print under --json and --only (V9)', async () => {
+    const { m } = await installed('down');
+    m.fs.file(
+      '/Users/op/.local/state/get-me-there/camoufox/start-refusal.json',
+      JSON.stringify({ reason: 'consent-expired', at: '2026-10-24T08:00:00.000Z' }),
+    );
+    expect(await runCli(['status', '--only', 'worker'], m.deps)).toBe(1);
+    expect(m.io.stdout).toMatch(/service app +ok +running/);
+    expect(m.io.stdout).toContain('the consent record has expired: capture again');
+    m.io.stdout = '';
+    expect(await runCli(['status', '--json'], m.deps)).toBe(1);
+    const parsed: unknown = JSON.parse(m.io.stdout);
+    expect(parsed).toMatchObject({
+      appAnswering: false,
+      reason: 'no answer from the app on port 3000',
+      checks: expect.arrayContaining([expect.objectContaining({ name: 'worker' })]),
+    });
+  });
+
+  it('a service that is running but silent says so and points at the log; one that is stopped says to start it (V9)', async () => {
+    const { m } = await installed('down');
+    expect(await runCli(['status'], m.deps)).toBe(1);
+    expect(m.io.stderr).toContain(
+      'the service is running but the app does not answer on port 3000: pnpm gmt logs shows why; pnpm gmt restart tries again',
+    );
+    m.running.clear();
+    m.io.stderr = '';
+    expect(await runCli(['status'], m.deps)).toBe(1);
+    expect(m.io.stderr).toContain('the app is not running: pnpm gmt start');
+  });
+
+  it('a bad --only is a usage error before anything is read', async () => {
+    const { m, http } = await installed([check()]);
+    expect(await runCli(['status', '--only', 'nowhere'], m.deps)).toBe(64);
+    expect(http.requests).toEqual([]);
+  });
+
   it('with no app.env there is nothing to ask', async () => {
     const m = machine();
     expect(await runCli(['status'], m.deps)).toBe(1);
@@ -299,6 +337,26 @@ describe('gmt setup offers the test email at its end (brief Task 18.3)', () => {
     const { m, io } = await withEmail(null, [true, false]);
     expect(await runCli(['setup'], m.deps)).toBe(0);
     expect(io.stdout).toContain(TEST_EMAIL_WORDS.silent);
+  });
+
+  it('is offered on a full setup and on --reconfigure email, and on no other reconfigure (V9)', async () => {
+    const full = await withEmail(
+      () => ({ status: 200, body: { result: 'sent', at: '2026-10-24T09:30:00.000Z' } }),
+      [false, false],
+    );
+    expect(await runCli(['setup'], full.m.deps)).toBe(0);
+    expect(full.ask.asked).toContain(TEST_EMAIL_QUESTION);
+    expect(offeredFor(null)).toBe(true);
+    expect(offeredFor('email')).toBe(true);
+    for (const group of ['travelpayouts', 'password', 'linger', 'port', 'timezone'] as const) {
+      const other = await withEmail(
+        () => ({ status: 200, body: {} }),
+        Array.from({ length: 14 }, () => ''),
+      );
+      expect(offeredFor(group)).toBe(false);
+      await runCli(['setup', '--reconfigure', group], other.m.deps);
+      expect(other.ask.asked, group).not.toContain(TEST_EMAIL_QUESTION);
+    }
   });
 
   it('is never offered without email, without a terminal, or with --non-interactive', async () => {

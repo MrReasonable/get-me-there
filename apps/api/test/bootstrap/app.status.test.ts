@@ -82,3 +82,24 @@ describe('the app bootstrap and the Status report', { timeout: BOOT_TIMEOUT_MS }
     expect(text).not.toContain('ECONNREFUSED');
   });
 });
+
+describe('the test email at the boot level (ts-b1-010)', { timeout: BOOT_TIMEOUT_MS }, () => {
+  it('goes through the booted notifier: the second test within a minute is 429, and the first fails by class when SMTP is down', async () => {
+    const running = await boot({
+      SMTP_HOST: '127.0.0.1',
+      SMTP_PORT: '1',
+      SMTP_TLS: 'none',
+      SMTP_USER: 'alerts',
+      SMTP_PASS: SENTINEL_SMTP,
+      ALERT_EMAIL_TO: 'operator@example.com',
+      ALERT_EMAIL_FROM: 'get-me-there@example.com',
+    });
+    const first = await call(running, '/api/alerts/test-email', 'POST');
+    const second = await call(running, '/api/alerts/test-email', 'POST');
+    const report = apiContract.statusResponseSchema.parse(await (await call(running, '/api/status')).json());
+    await running.close();
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(429);
+    expect(report.checks.find((c) => c.id === 'email')).toMatchObject({ state: 'fail' });
+  });
+});

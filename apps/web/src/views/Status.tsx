@@ -1,5 +1,5 @@
 import { apiContract } from '@gmt/core';
-import { useStatus } from '../api/statusQuery.js';
+import { failureOf, useStatus } from '../api/statusQuery.js';
 import { Loading } from '../components/LoadState.js';
 import { StatusCard } from '../components/StatusCard.js';
 import { COPY } from '../copy.js';
@@ -17,9 +17,11 @@ export function offLines(checks: readonly Check[]): string[] {
     const names = folded
       .filter((c) => c.offReason === reason && !(workerOff && c.area === 'consent'))
       .map((c) =>
-        c.area === 'provider' && c.providerId !== null
-          ? COPY.provider[c.providerId]
-          : COPY.statusView.offName[c.area],
+        c.area === 'data' && c.label !== null
+          ? c.label
+          : c.area === 'provider' && c.providerId !== null
+            ? COPY.provider[c.providerId]
+            : COPY.statusView.offName[c.area],
       );
     const unique = [...new Set(names)];
     if (reason !== 'not-visible' && unique.length > 0)
@@ -53,7 +55,15 @@ export function StatusView() {
         <div className="space-y-2 text-sm">
           <h2 className="text-xl font-semibold">{COPY.statusView.heading}</h2>
           <div role="alert" className="flex flex-wrap items-center gap-2 rounded border border-red-700 p-2">
-            <span>{COPY.statusView.notAnswering}</span>
+            <span>
+              {
+                {
+                  'not-answering': COPY.statusView.notAnswering,
+                  'sign-in-refused': COPY.statusView.signInRefused,
+                  'report-failed': COPY.statusView.reportFailed,
+                }[failureOf(q.error)]
+              }
+            </span>
             <button
               type="button"
               className="min-h-11 rounded border border-slate-500 px-3"
@@ -71,7 +81,9 @@ export function StatusView() {
   return (
     <div className="space-y-3 text-sm">
       <h2 className="text-xl font-semibold">{COPY.statusView.heading}</h2>
-      <p role="status">{q.isRefetchError && checked !== null ? COPY.statusView.stale(checked) : checked}</p>
+      {/* why: V11 (ui-b1-001): the ticking age is plain text; only a change of state (stale or not) is announced */}
+      <p>{q.isRefetchError ? null : checked}</p>
+      <p role="status">{q.isRefetchError && checked !== null ? COPY.statusView.stale(checked) : null}</p>
       {groups.map((g) => (
         <div key={g.area} className="space-y-2">
           <h3 className="font-semibold">{COPY.statusView.areaName[g.area]}</h3>

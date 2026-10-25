@@ -8,6 +8,7 @@ import { apiContract } from '@gmt/core';
 import { type AppCreds, appUrl, authHeaders, credsFrom } from './appClient.js';
 import type { Flags } from './args.js';
 import { type Deps, EXIT } from './deps.js';
+import { type Check, describeChecks } from './services/checks.js';
 import { appEnvPath } from './services/specs.js';
 import { readEnvText } from './setup/appEnv.js';
 
@@ -74,25 +75,59 @@ export function describeReport(checks: readonly StatusCheck[]): string {
     .join('\n')}\n`;
 }
 
-/**
- * Prints the app's report (or why there is none) and answers whether it makes `gmt status` fail: any `fail` check, or no
- * report at all. `--only <area>` shows one area's rows, `--json` the response as the app sent it.
- */
-export async function printAppReport(deps: Deps, flags: Flags): Promise<number> {
+/** `gmt status`'s flags: one area for `--only` (checked against the report's areas) and `--json`; or a usage error. */
+export type ReportFlags = { ok: true; only: string | null; json: boolean } | { ok: false; message: string };
+export function reportFlags(flags: Flags): ReportFlags {
   const only = typeof flags.only === 'string' ? flags.only : null;
+  if (only !== null && !STATUS_AREAS.includes(only))
+    return { ok: false, message: `unknown area for --only: ${only} (one of ${STATUS_AREAS.join(', ')})\n` };
+  return { ok: true, only, json: flags.json === true };
+}
+
+/** What to do when the app does not answer: the service state decides (V9; a running service that is silent is hung). */
+function nextStep(local: readonly Check[], port: number | null): string {
+  const running = local.some((c) => c.name === 'service app' && c.detail === 'running');
+  return running
+    ? `the service is running but the app does not answer${port === null ? '' : ` on port ${port}`}: pnpm gmt logs shows why; pnpm gmt restart tries again`
+    : 'the app is not running: pnpm gmt start';
+}
+
+/**
+ * Everything `gmt status` prints after the local facts are read, and its exit code (Task 18.5, review V9): the app's report
+ * beside them, or, when the app does not answer, the local facts and the worker's refusal line (whatever the flags), the
+ * reason and the next step. `--only <area>` and `--json` show the report alone while it is there; with it down, `--json`
+ * prints `{ "appAnswering": false, … }` with the local facts on stdout, so a script never reads an empty pipe. Exit 1 on a
+ * failing check, here or locally, or an app that does not answer.
+ */
+export async function finishStatus(
+  deps: Deps,
+  rf: Extract<ReportFlags, { ok: true }>,
+  local: readonly Check[],
+): Promise<number> {
   const read = await readReport(deps);
+  const reportOnly = rf.only !== null || rf.json;
   if (read.kind === 'down') {
-    // why: the local facts and the worker's refusal reason are printed by the caller; this says the app is silent
-    deps.io.err(`the app is not answering: ${read.reason}\n`);
+    const step = nextStep(local, access(deps)?.port ?? null);
+    if (rf.json)
+      deps.io.out(
+        `${JSON.stringify({ appAnswering: false, reason: read.reason, nextStep: step, checks: local })}\n`,
+      );
+    else {
+      deps.io.out(describeChecks(local));
+      deps.io.err(`the app is not answering: ${read.reason}\n${step}\n`);
+    }
     return EXIT.failed;
   }
-  const checks = only === null ? read.report.checks : read.report.checks.filter((c) => c.area === only);
-  if (flags.json === true) deps.io.out(`${JSON.stringify({ ...read.report, checks })}\n`);
+  if (!reportOnly) deps.io.out(describeChecks(local));
+  const checks = rf.only === null ? read.report.checks : read.report.checks.filter((c) => c.area === rf.only);
+  if (rf.json) deps.io.out(`${JSON.stringify({ ...read.report, checks })}\n`);
   else {
     deps.io.out(`\n${describeReport(checks)}`);
     deps.io.out(
       `${apiContract.barSummary(checks).text} (app ${read.report.version}, ${read.report.mode} mode)\n`,
     );
   }
-  return checks.some((c) => c.state === 'fail') ? EXIT.failed : EXIT.ok;
+  const failing =
+    checks.some((c) => c.state === 'fail') || (!reportOnly && local.some((c) => c.level === 'fail'));
+  return failing ? EXIT.failed : EXIT.ok;
 }

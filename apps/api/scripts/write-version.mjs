@@ -8,14 +8,19 @@ import { fileURLToPath } from 'node:url';
 
 const out = process.argv[2] ?? join(dirname(fileURLToPath(import.meta.url)), '..', 'dist', 'version.json');
 let sha = null;
-try {
-  const text = execFileSync('git', ['rev-parse', '--short=7', 'HEAD'], {
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'ignore'],
-  }).trim();
-  if (/^[0-9a-f]{4,40}$/.test(text)) sha = text;
-} catch {
-  // no git, or not a checkout: the version stays unknown
+// why: WP18 (V0): an image build has no git; compose passes the checkout's short SHA as APP_VERSION
+const given = process.env.APP_VERSION ?? '';
+if (/^[0-9a-f]{4,40}$/.test(given)) sha = given;
+else {
+  try {
+    const text = execFileSync('git', ['rev-parse', '--short=7', 'HEAD'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+    if (/^[0-9a-f]{4,40}$/.test(text)) sha = text;
+  } catch {
+    // no git, or not a checkout: the version stays unknown
+  }
 }
 if (sha === null) {
   rmSync(out, { force: true });

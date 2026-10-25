@@ -86,10 +86,42 @@ describe('the status bar link (spec §11)', () => {
     expect(await screen.findByRole('link', { name: 'Status: stale, checked 3 min ago' })).toBeInTheDocument();
   });
 
-  it('with no report it says the app is not answering', async () => {
-    serve({ error: { code: 'internal', message: 'boom' } }, 500);
+  it('with no answer at all it says the app is not answering', async () => {
+    server.use(http.get(`${API}/status`, () => HttpResponse.error()));
     renderWithProviders(<StatusLink />);
     expect(await screen.findByRole('link', { name: 'Status: app not answering' })).toBeInTheDocument();
+  });
+
+  it('tells a refused sign-in and an error answer apart from silence (V11)', async () => {
+    serve({ error: { code: 'unauthenticated', message: 'authentication required' } }, 401);
+    const first = renderWithProviders(<StatusLink />);
+    expect(await screen.findByRole('link', { name: 'Status: sign-in refused' })).toBeInTheDocument();
+    first.unmount();
+    serve({ error: { code: 'internal', message: 'internal error; see the server log' } }, 500);
+    renderWithProviders(<StatusLink />);
+    expect(
+      await screen.findByRole('link', { name: 'Status: report failed, see the app log' }),
+    ).toBeInTheDocument();
+  });
+
+  it('labels its landmark with the key and keeps the line as the link’s own name', async () => {
+    serve(statusReport([failing('schedule')]));
+    renderWithProviders(<StatusLink />);
+    const link = await screen.findByRole('link', { name: 'Status: schedule failing' });
+    expect(link.closest('section')).toHaveAccessibleName('Status report');
+  });
+
+  it('fails fast: one retry at most, so a dead app shows at once', async () => {
+    let hits = 0;
+    server.use(
+      http.get(`${API}/status`, () => {
+        hits += 1;
+        return HttpResponse.error();
+      }),
+    );
+    renderWithProviders(<StatusLink />);
+    await screen.findByRole('link', { name: 'Status: app not answering' });
+    expect(hits).toBe(2);
   });
 
   it('says nothing while the first answer is awaited', async () => {

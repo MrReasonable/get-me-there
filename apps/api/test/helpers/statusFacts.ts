@@ -24,7 +24,9 @@ export function healthyData(over: Partial<DataFacts> = {}): DataFacts {
   return {
     definitionId: 'def-1',
     name: 'London to New York',
+    enabled: true,
     latest: { status: 'completed', at: ago(2 * HOUR), isCatchUp: false, skipCode: null },
+    lastRun: { status: 'completed', at: ago(2 * HOUR), isCatchUp: false, skipCode: null },
     coverage: {
       buckets: { priced: 90, empty: 5, no_data: 3, error: 0, skipped: 0, not_run: 2, reused: 0 },
       total: 100,
@@ -40,10 +42,8 @@ export function healthyData(over: Partial<DataFacts> = {}): DataFacts {
 
 export function okWorkerStatus(over: Partial<WorkerStatusFacts> = {}): WorkerStatusFacts {
   return {
-    coolingDownUntil: null,
-    cooldownCause: null,
+    finding: null,
     formVerified: true,
-    diffs: [],
     appInstances: 1,
     monthly: { pages: 10, scrolls: 20, readable: true },
     consent: { kind: 'socs', expiresAt: inFuture(200 * DAY), boundedBy: 'capture' },
@@ -64,7 +64,6 @@ export function healthyWorker(over: Partial<WorkerFacts> = {}): WorkerFacts {
 
 export const travelpayouts = (over: Partial<ProviderFacts> = {}): ProviderFacts => ({
   id: 'travelpayouts',
-  displayName: 'Travelpayouts',
   configured: true,
   lastCall: { at: ago(2 * HOUR), result: 'ok' },
   usage: { used: 120, cap: 50_000, window: 'month' },
@@ -73,7 +72,6 @@ export const travelpayouts = (over: Partial<ProviderFacts> = {}): ProviderFacts 
 });
 export const searchApi = (over: Partial<ProviderFacts> = {}): ProviderFacts => ({
   id: 'searchapi',
-  displayName: 'SearchApi',
   configured: false,
   lastCall: null,
   usage: null,
@@ -102,7 +100,7 @@ export function healthyFacts(over: Partial<StatusFacts> = {}): StatusFacts {
       clashes: [],
     },
     data: [healthyData()],
-    priceSources: { usable: ['Travelpayouts'] },
+    priceSources: { usable: ['travelpayouts'] },
     providers: [travelpayouts(), searchApi()],
     synthetic: false,
     worker: healthyWorker(),

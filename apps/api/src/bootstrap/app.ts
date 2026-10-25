@@ -12,6 +12,7 @@ import {
   AUTH_MISSING,
   type Clock,
   type Config,
+  isLoopbackHost,
   type Logger,
   microGbpToPence,
   type Secret,
@@ -78,8 +79,6 @@ export interface RunningApp {
   close(): Promise<void>;
 }
 
-const LOOPBACK = /^(127\.\d+\.\d+\.\d+|::1|localhost)$/;
-
 /**
  * Spec §4, review SEC-3: the invariants `loadConfigFromEnv` enforces, re-asserted on the injected config, so no caller
  * of `bootApp` can serve without auth on a public bind or with no allowed host. 78, as a config error.
@@ -89,7 +88,7 @@ export function assertAuthInvariants(config: Config, log: Logger): void {
     throw new BootError('ALLOWED_HOSTS is empty; refusing to serve', EXIT.badConfig);
   if (config.auth !== null && config.auth.pass.reveal().length < 12)
     throw new BootError('APP_BASIC_AUTH_PASS must be at least 12 characters', EXIT.badConfig);
-  if (config.auth === null && !LOOPBACK.test(config.bindAddress)) {
+  if (config.auth === null && !isLoopbackHost(config.bindAddress)) {
     if (!config.allowUnauthenticated)
       // why: devops-final-001: the same words as config's refusal, so the fix named is the two auth lines.
       throw new BootError(
@@ -234,7 +233,7 @@ export async function bootApp(deps: BootDeps): Promise<RunningApp> {
         startedAt: clock.now(),
         migrationsDir: deps.assets.migrationsDir,
       },
-      ...(email === undefined ? {} : { sendTestEmail: () => email.sendTest() }),
+      ...(email === undefined ? {} : { email }),
     });
     const bound = deps.listen ? await listen(app, config) : null;
     const beat = heartbeat;

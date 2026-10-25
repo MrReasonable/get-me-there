@@ -3,17 +3,19 @@
 // in-process last result. The worked example only.
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { apiContract, fixedClock, Secret } from '@gmt/core';
+import { apiContract, FIXTURE_OPT_IN_PHRASE, fixedClock, Secret } from '@gmt/core';
 import { EmailNotifier } from '@gmt/engine';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { modeOf as modeOfConfig } from '../../src/read/statusSources.js';
 import { API_TEXT } from '../../src/text.js';
+import { loadConfigFromEnv } from '../../src/wiring.js';
 import { expectContract } from '../helpers/contract.js';
 import { SENTINEL_AUTH, SENTINEL_SA, SENTINEL_SMTP, SENTINEL_TP, silentLog } from '../helpers/env.js';
 import { exampleDefinitionInput } from '../helpers/examples.js';
-import { AUTH_USER, basic, createHarness, type Harness, T0 } from '../helpers/harness.js';
+import { AUTH_USER, basic, createHarness, type Harness, harnessEnv, T0 } from '../helpers/harness.js';
 import { at, cell, seeder, snapshotOf } from '../helpers/seed.js';
 import { tempDir } from '../helpers/tmp.js';
-import { stubWorker, WORKER_ENV, WORKER_KEY, workerBody } from '../helpers/workerStub.js';
+import { SHARED, stubWorker, WORKER_ENV, WORKER_KEY, workerBody } from '../helpers/workerStub.js';
 
 beforeEach(() => {
   expect.hasAssertions();
@@ -291,7 +293,7 @@ describe('what the report never holds (brief WP18 Task 18.1, spec §16)', () => 
         ALERT_EMAIL_TO: 'operator@example.com',
         ALERT_EMAIL_FROM: 'get-me-there@example.com',
       },
-      app: { status: { home }, sendTestEmail: () => failing.sendTest() },
+      app: { status: { home }, email: failing },
     });
     const x = h;
     // a ledger error row and a cell error holding a sentinel key and URL
@@ -303,7 +305,7 @@ describe('what the report never holds (brief WP18 Task 18.1, spec §16)', () => 
     s.tileError('E1', [c1], 'upstream', `${SENTINEL_SA} ${URL_SENTINEL}`);
     x.ports.db.raw
       .prepare(
-        `INSERT INTO provider_requests (provider_id, endpoint_path, started_at, finished_at, http_status, outcome, cost_micro_gbp, http_attempt) VALUES ('searchapi', '/search', @t, @t, 401, 'error', 0, 1)`,
+        `INSERT INTO provider_requests (provider_id, endpoint_path, started_at, finished_at, http_status, outcome, error_kind, cost_micro_gbp, http_attempt) VALUES ('searchapi', '/search', @t, @t, 401, 'error', 'auth', 0, 1)`,
       )
       .run({ t: T0 });
     // an SMTP failure whose text holds a sentinel
@@ -444,27 +446,97 @@ describe('the report never spends, waits on a vendor or loads a page (spec §10)
     expect(body.checks.find((c) => c.id === 'worker')?.note).toBe('browser pages: also when a run resumes');
   });
 
-  it('a provider card reads the newest completed call from the ledger by its HTTP class', async () => {
-    const x = await harness({
-      TRAVELPAYOUTS_TOKEN: SENTINEL_TP,
-      SEARCHAPI_KEY: SENTINEL_SA,
-      SEARCHAPI_PLAN: '40usd',
-    });
-    const insert = (provider: string, status: number, outcome: string, t: string) =>
+  describe('a provider card reads the adapters’ class of the newest completed call, never an HTTP status (V3, V4)', () => {
+    const insert = (
+      x: Harness,
+      o: { provider: string; status: number | null; outcome: string; kind: string | null; t: string },
+    ) =>
       x.ports.db.raw
         .prepare(
-          `INSERT INTO provider_requests (provider_id, endpoint_path, started_at, finished_at, http_status, outcome, cost_micro_gbp, http_attempt) VALUES (@p, '/s', @t, @t, @status, @outcome, 0, 1)`,
+          `INSERT INTO provider_requests (provider_id, endpoint_path, started_at, finished_at, http_status, outcome, error_kind, cost_micro_gbp, http_attempt) VALUES (@provider, '/s', @t, @t, @status, @outcome, @kind, 0, 1)`,
         )
-        .run({ p: provider, t, status, outcome });
-    insert('searchapi', 401, 'error', '2026-10-14T07:00:00.000Z');
-    insert('searchapi', 200, 'ok', '2026-10-14T08:00:00.000Z');
-    insert('travelpayouts', 402, 'error', '2026-10-14T08:30:00.000Z');
-    const body = await expectContract(await get(x), 'GET', '/api/status', STATUS);
-    const byId = new Map(body.checks.map((c) => [c.id, c]));
-    expect(byId.get('provider-searchapi')?.state).toBe('ok');
-    expect(byId.get('provider-searchapi')?.summary).toContain('last successful call');
-    expect(byId.get('provider-travelpayouts')?.state).toBe('fail');
-    expect(byId.get('price-sources')?.state).toBe('ok');
+        .run(o);
+    const KEYS = { TRAVELPAYOUTS_TOKEN: SENTINEL_TP, SEARCHAPI_KEY: SENTINEL_SA, SEARCHAPI_PLAN: '40usd' };
+    const cardOf = async (x: Harness, id: string) =>
+      (await expectContract(await get(x), 'GET', '/api/status', STATUS)).checks.find((c) => c.id === id);
+
+    it.each([
+      ['401, key refused', 401, 'auth', 'fail', 'pnpm gmt setup --reconfigure searchapi'],
+      ['403 whose words name the credits: quota, not a bad key', 403, 'quota', 'fail', null],
+      ['403 that is the key', 403, 'auth', 'fail', 'pnpm gmt setup --reconfigure searchapi'],
+      ['429 whose words name the credits: quota, fail not warn', 429, 'quota', 'fail', null],
+      ['5xx', 503, 'upstream', 'warn', null],
+      ['a socket failure with no status', null, 'network', 'warn', null],
+    ] as const)('%s', async (_n, status, kind, state, command) => {
+      const x = await harness(KEYS);
+      insert(x, { provider: 'searchapi', status, outcome: 'error', kind, t: '2026-10-14T08:00:00.000Z' });
+      const c = await cardOf(x, 'provider-searchapi');
+      expect(c?.state).toBe(state);
+      expect(c?.fix?.command ?? null).toBe(command);
+    });
+
+    it('a success after a failure is ok with its time; a failure after a success fails', async () => {
+      const x = await harness(KEYS);
+      insert(x, {
+        provider: 'searchapi',
+        status: 403,
+        outcome: 'error',
+        kind: 'quota',
+        t: '2026-10-14T07:00:00.000Z',
+      });
+      insert(x, {
+        provider: 'searchapi',
+        status: 200,
+        outcome: 'ok',
+        kind: null,
+        t: '2026-10-14T08:00:00.000Z',
+      });
+      const ok = await cardOf(x, 'provider-searchapi');
+      expect(ok?.state).toBe('ok');
+      expect(ok?.summary).toContain('last successful call');
+      insert(x, {
+        provider: 'travelpayouts',
+        status: 200,
+        outcome: 'ok',
+        kind: null,
+        t: '2026-10-14T07:00:00.000Z',
+      });
+      insert(x, {
+        provider: 'travelpayouts',
+        status: 402,
+        outcome: 'error',
+        kind: 'quota',
+        t: '2026-10-14T08:30:00.000Z',
+      });
+      expect((await cardOf(x, 'provider-travelpayouts'))?.state).toBe('fail');
+      expect((await cardOf(x, 'price-sources'))?.state).toBe('ok');
+    });
+
+    it('a 200 whose body was rejected is not a success (V4)', async () => {
+      const x = await harness(KEYS);
+      insert(x, {
+        provider: 'travelpayouts',
+        status: 200,
+        outcome: 'ok',
+        kind: 'parse',
+        t: '2026-10-14T08:00:00.000Z',
+      });
+      const c = await cardOf(x, 'provider-travelpayouts');
+      expect(c?.state).toBe('warn');
+      expect(c?.summary).not.toContain('last successful call');
+    });
+
+    it('a row written before the class was kept (error, no class) is an unclassified failure, not a bad key', async () => {
+      const x = await harness(KEYS);
+      insert(x, {
+        provider: 'searchapi',
+        status: 401,
+        outcome: 'error',
+        kind: null,
+        t: '2026-10-14T08:00:00.000Z',
+      });
+      expect((await cardOf(x, 'provider-searchapi'))?.state).toBe('warn');
+    });
   });
 });
 
@@ -481,26 +553,56 @@ describe('POST /api/alerts/test-email (spec §10)', () => {
     ALERT_EMAIL_FROM: 'get-me-there@example.com',
   };
 
+  /** The real notifier over a stub transport (no SMTP, no network); `sent` holds every message it was asked to send. */
+  function realNotifier(o: { fail?: boolean; gate?: Promise<void>; maxPerHour?: number } = {}) {
+    const clock = fixedClock(T0);
+    const sent: Array<{ subject: string; text: string }> = [];
+    const notifier = new EmailNotifier({
+      smtp: {
+        host: 'smtp.example.com',
+        port: 465,
+        tls: 'implicit',
+        user: 'alerts',
+        pass: new Secret(SENTINEL_SMTP),
+        to: 'operator@example.com',
+        from: 'get-me-there@example.com',
+      },
+      nodeEnv: 'production',
+      log: silentLog,
+      clock,
+      maxPerHour: o.maxPerHour ?? 20,
+      createTransport: () => ({
+        sendMail: async (m) => {
+          await o.gate;
+          if (o.fail === true) throw new Error(`550 refused ${SENTINEL_SMTP}`);
+          sent.push({ subject: m.subject, text: m.text });
+          return { messageId: 'stub' };
+        },
+      }),
+    });
+    return { notifier, clock, sent };
+  }
+
   it('needs auth and the mutating-route headers', async () => {
-    h = await createHarness({ env: withEmail, app: { sendTestEmail: async () => 'sent' } });
+    h = await createHarness({ env: withEmail, app: { email: realNotifier().notifier } });
     expect((await post(h, { auth: false })).status).toBe(401);
     expect((await post(h, { csrf: false })).status).toBe(415);
   });
 
   it('is 409 when email is not configured, and sends nothing', async () => {
-    const send = vi.fn(async () => 'sent' as const);
-    h = await createHarness({ app: { sendTestEmail: send } });
+    const { notifier, sent } = realNotifier();
+    h = await createHarness({ app: { email: notifier } });
     const res = await post(h);
     expect(res.status).toBe(409);
     expect(await res.json()).toMatchObject({
       error: { code: 'email_not_configured', message: API_TEXT.emailNotConfigured },
     });
-    expect(send).not.toHaveBeenCalled();
+    expect(sent).toEqual([]);
   });
 
-  it('sends one fixed message and keeps the class and time in the process', async () => {
-    const send = vi.fn(async () => 'sent' as const);
-    h = await createHarness({ env: withEmail, app: { sendTestEmail: send } });
+  it('sends one fixed message through the real notifier and the email card reports it', async () => {
+    const { notifier, sent } = realNotifier();
+    h = await createHarness({ env: withEmail, app: { email: notifier } });
     const body = await expectContract(
       await post(h),
       'POST',
@@ -508,32 +610,69 @@ describe('POST /api/alerts/test-email (spec §10)', () => {
       apiContract.testEmailResponseSchema,
     );
     expect(body).toEqual({ result: 'sent', at: T0 });
-    expect(send).toHaveBeenCalledTimes(1);
+    expect(sent).toEqual([
+      { subject: '[get-me-there] test email', text: expect.stringContaining('test message') },
+    ]);
     const status = await expectContract(await get(h), 'GET', '/api/status', STATUS);
-    expect(status.checks.find((c) => c.id === 'email')?.summary).toContain('the last test send was sent at');
+    expect(status.checks.find((c) => c.id === 'email')?.summary).toContain('the last test email was sent at');
   });
 
-  it('is 429 past the hourly ceiling and records a refusal that is not a failure', async () => {
-    h = await createHarness({
-      env: { ...withEmail, ALERT_EMAIL_MAX_PER_HOUR: '3' },
-      app: { sendTestEmail: async () => 'refused' },
+  it('a second test within a minute is 429 and sends nothing; a minute later it goes; neither touches the alert ceiling or the ledger', async () => {
+    const { notifier, clock, sent } = realNotifier({ maxPerHour: 1 });
+    h = await createHarness({ env: withEmail, app: { email: notifier } });
+    const ledger = () =>
+      h?.ports.db.raw.prepare<[], { n: number }>('SELECT count(*) AS n FROM provider_requests').get()?.n;
+    const before = ledger();
+    expect((await post(h)).status).toBe(200);
+    const refused = await post(h);
+    expect(refused.status).toBe(429);
+    expect(await refused.json()).toMatchObject({
+      error: { code: 'email_limit', message: API_TEXT.emailLimit },
     });
-    const res = await post(h);
-    expect(res.status).toBe(429);
-    expect(await res.json()).toMatchObject({
-      error: { code: 'email_limit', message: API_TEXT.emailLimit(3) },
-    });
+    expect(sent).toHaveLength(1);
+    clock.advance(60_000);
+    expect((await post(h)).status).toBe(200);
+    // the alert ceiling of 1 an hour is still free for a real message
+    expect(await notifier.send({ kind: 'system', subject: 'real', body: 'alert' })).toEqual({ ok: true });
+    expect(sent).toHaveLength(3);
+    expect(ledger()).toBe(before);
     const status = await expectContract(await get(h), 'GET', '/api/status', STATUS);
     expect(status.checks.find((c) => c.id === 'email')?.state).toBe('ok');
   });
 
+  it('two at once: the second is refused while the first is in flight', async () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const { notifier, sent } = realNotifier({ gate });
+    h = await createHarness({ env: withEmail, app: { email: notifier } });
+    const first = post(h);
+    const second = await post(h);
+    expect(second.status).toBe(429);
+    release();
+    expect((await first).status).toBe(200);
+    expect(sent).toHaveLength(1);
+  });
+
   it('a failed send answers "failed" with no server text and turns the email card to fail', async () => {
-    h = await createHarness({ env: withEmail, app: { sendTestEmail: async () => 'failed' } });
+    h = await createHarness({ env: withEmail, app: { email: realNotifier({ fail: true }).notifier } });
     const res = await post(h);
     const text = await res.text();
     expect(JSON.parse(text)).toEqual({ result: 'failed', at: T0 });
+    expect(text).not.toContain(SENTINEL_SMTP);
     const status = await expectContract(await get(h), 'GET', '/api/status', STATUS);
     expect(status.checks.find((c) => c.id === 'email')?.state).toBe('fail');
+  });
+
+  it('a failed real alert shows on the email card too, though no test was sent (V7)', async () => {
+    const { notifier } = realNotifier({ fail: true });
+    h = await createHarness({ env: withEmail, app: { email: notifier } });
+    await notifier.send({ kind: 'system', subject: 'consent', body: 'b' });
+    const status = await expectContract(await get(h), 'GET', '/api/status', STATUS);
+    const card = status.checks.find((c) => c.id === 'email');
+    expect(card?.state).toBe('fail');
+    expect(card?.summary).toContain('the last notice email failed');
   });
 
   it('the harness basic-auth user and password are not part of the report', async () => {
@@ -543,5 +682,165 @@ describe('POST /api/alerts/test-email (spec §10)', () => {
       await x.request('/api/status', { headers: { authorization: basic(AUTH_USER, SENTINEL_AUTH) } })
     ).text();
     expect(text).not.toContain(SENTINEL_AUTH);
+  });
+});
+
+describe('real prices through the real age code (ts-b1-001)', () => {
+  const ENV = { TRAVELPAYOUTS_TOKEN: SENTINEL_TP, CALENDAR_STALE_AFTER_HOURS: '72' };
+  async function withPrices(prices: Array<{ hoursAgo: number; maxAgeHours: number | null }>) {
+    const x = await harness(ENV);
+    const s = seeder(x.ports);
+    const def = x.ports.repos.definitions.create(exampleDefinitionInput());
+    s.execution('E1', { def, status: 'completed', startedAt: at(-200), finishedAt: at(-199) });
+    const cells = prices.map((_, i) =>
+      cell(
+        'LHR',
+        'JFK',
+        `2026-11-${String(i + 1).padStart(2, '0')}`,
+        `2026-11-${String(i + 11).padStart(2, '0')}`,
+      ),
+    );
+    s.cells('E1', cells, { discovery: ['travelpayouts'] });
+    prices.forEach((p, i) => {
+      const c = cells[i];
+      if (c === undefined) throw new Error('a cell per price');
+      s.tile('E1', c, {
+        status: 'priced',
+        fetchedAt: at(-p.hoursAgo),
+        tileIndex: i,
+        real: { providerId: 'travelpayouts', maxAgeHours: p.maxAgeHours },
+      });
+    });
+    const body = await expectContract(await get(x), 'GET', '/api/status', STATUS);
+    return body.checks.find((c) => c.id === `data-${def.id}`);
+  }
+
+  it('one price at 1 h beside one at 6 d names both ends and warns on the oldest', async () => {
+    const c = await withPrices([
+      { hoursAgo: 1, maxAgeHours: 0 },
+      { hoursAgo: 144, maxAgeHours: 0 },
+    ]);
+    expect(c?.summary).toContain('newest price 1h old, oldest 6d old');
+    expect(c?.state).toBe('warn');
+    expect(c?.fix?.text).toBe('start a run for newer prices');
+  });
+
+  it('at the stale threshold the card is ok, one hour past it warns', async () => {
+    expect((await withPrices([{ hoursAgo: 72, maxAgeHours: 0 }]))?.state).toBe('ok');
+  });
+  it('one hour past the threshold warns', async () => {
+    expect((await withPrices([{ hoursAgo: 73, maxAgeHours: 0 }]))?.state).toBe('warn');
+  });
+
+  it('an unknown vendor age prints "age unknown" at the old end and does not warn on that account', async () => {
+    const c = await withPrices([
+      { hoursAgo: 1, maxAgeHours: 0 },
+      { hoursAgo: 2, maxAgeHours: null },
+    ]);
+    expect(c?.summary).toContain('newest price 1h old, oldest age unknown');
+    expect(c?.state).toBe('ok');
+  });
+});
+
+describe('the modes, through the real facts (ts-b1-004)', () => {
+  const modeOf = async (env: Record<string, string>) => {
+    const x = await harness(env);
+    return expectContract(await get(x), 'GET', '/api/status', STATUS);
+  };
+  it('IN_CONTAINER is container: no command anywhere and the backups are not visible', async () => {
+    const body = await modeOf({ IN_CONTAINER: '1' });
+    expect(body.mode).toBe('container');
+    expect(body.checks.every((c) => c.fix === null || c.fix.command === null)).toBe(true);
+    expect(body.checks.find((c) => c.id === 'backups')).toMatchObject({
+      state: 'off',
+      offReason: 'not-visible',
+    });
+  });
+  it('NODE_ENV=development is dev, with no command anywhere', async () => {
+    const body = await modeOf({
+      NODE_ENV: 'development',
+      DATABASE_PATH: join(tempDir('gmt-dev-'), 'dev.fixture.db'),
+      ALLOW_FIXTURE_PROVIDER: FIXTURE_OPT_IN_PHRASE,
+    });
+    expect(body.mode).toBe('dev');
+    expect(body.checks.every((c) => c.fix === null || c.fix.command === null)).toBe(true);
+  });
+  it('modeOf prefers IN_CONTAINER over development, and development over native', () => {
+    const config = (env: Record<string, string>) =>
+      loadConfigFromEnv(
+        harnessEnv({
+          DATABASE_PATH: join(tempDir('gmt-mode-'), 'm.fixture.db'),
+          ALLOW_FIXTURE_PROVIDER: FIXTURE_OPT_IN_PHRASE,
+          ...env,
+        }),
+      );
+    expect(modeOfConfig({ config: config({ NODE_ENV: 'development', IN_CONTAINER: '1' }) })).toBe(
+      'container',
+    );
+    expect(modeOfConfig({ config: config({ NODE_ENV: 'development' }) })).toBe('dev');
+    expect(modeOfConfig({ config: config({ NODE_ENV: 'production' }) })).toBe('native');
+    expect(modeOfConfig({ config: config({ NODE_ENV: 'production', IN_CONTAINER: '1' }) })).toBe('container');
+  });
+});
+
+describe('the worker read, through the real facts (V5)', () => {
+  const body = async (x: Harness) => expectContract(await get(x), 'GET', '/api/status', STATUS);
+  const byId = (b: Awaited<ReturnType<typeof body>>, id: string) => b.checks.find((c) => c.id === id);
+
+  it('a worker that is up but refusing pages (a signed-in profile) is fail, and not a usable price source', async () => {
+    stubWorker(() => Response.json(workerBody({ signedInRefusal: true, ok: false })));
+    const x = await harness(WORKER_ENV);
+    const b = await body(x);
+    expect(byId(b, 'worker')).toMatchObject({
+      state: 'fail',
+      summary: expect.stringContaining('refusing pages: signed-in profile refused'),
+    });
+    expect(byId(b, 'price-sources')?.state).toBe('warn');
+  });
+
+  it('a signed-in cookie counts too', async () => {
+    stubWorker(() =>
+      Response.json(
+        workerBody({ accountCookie: { found: true, names: ['SID'], checkedAt: '2026-10-14T08:59:00.000Z' } }),
+      ),
+    );
+    const x = await harness(WORKER_ENV);
+    expect(byId(await body(x), 'worker')?.state).toBe('fail');
+  });
+
+  it('in grid mode a worker with no measured grid step is refusing pages', async () => {
+    stubWorker(() =>
+      Response.json(
+        workerBody({
+          sharedSettings: {
+            ...SHARED,
+            CAMOUFOX_MODE: 'grid',
+          },
+        }),
+      ),
+    );
+    const x = await harness({ ...WORKER_ENV, CAMOUFOX_MODE: 'grid' });
+    const w = byId(await body(x), 'worker');
+    expect(w?.state).toBe('fail');
+    expect(w?.summary).toContain('grid mode not verified on the worker');
+  });
+
+  it('a healthy worker keeps the browser provider a usable price source', async () => {
+    stubWorker();
+    const x = await harness(WORKER_ENV);
+    const b = await body(x);
+    expect(byId(b, 'price-sources')?.summary).toBe('price sources: Camoufox');
+  });
+
+  it('concurrent reports share one worker read, and its result is reused for 10 s (sec-b1-002)', async () => {
+    const log = stubWorker();
+    const x = await harness(WORKER_ENV);
+    await Promise.all([get(x), get(x), get(x)]);
+    expect(log.urls).toHaveLength(1);
+    await get(x);
+    expect(log.urls).toHaveLength(1);
+    x.clock.advance(10_000);
+    await get(x);
+    expect(log.urls).toHaveLength(2);
   });
 });

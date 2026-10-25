@@ -628,6 +628,7 @@ export function statusCheck(
     id: 'app',
     area: 'app',
     providerId: null,
+    label: null,
     state: 'ok',
     summary: 'version abc1234, up 3d, native mode, loopback only, sign-in on',
     note: null,

@@ -1,6 +1,13 @@
 // The Status report's check builders (spec §10 `GET /status`, brief WP18 §6 and Task 18.2): table-driven, one case per
 // row and state of the table, over injected facts. The worked example only.
-import { apiContract, asIsoDateTime, findBannedWords, START_REFUSAL_REASONS } from '@gmt/core';
+import {
+  apiContract,
+  asIsoDateTime,
+  CONSENT_FIX,
+  type ExecutionStatus,
+  findBannedWords,
+  START_REFUSAL_REASONS,
+} from '@gmt/core';
 import { describe, expect, it } from 'vitest';
 import { buildChecks, buildStatus, STATUS_TEXT } from '../../src/read/status.js';
 import type { ProviderFacts, StatusFacts, WorkerFacts } from '../../src/read/statusFacts.js';
@@ -113,7 +120,9 @@ const CASES: Case[] = [
         clashes: [{ a: 'North', b: 'South', at: asIsoDateTime('2026-10-15T02:30:00.000Z') }],
       },
     }),
-    has: ["North and South both fire at 03:30; stagger them so neither waits for the other's browser pages"],
+    has: [
+      "North and South both fire at Thu, 15 Oct 2026, 03:30 (Europe/London); stagger them so neither waits for the other's browser pages",
+    ],
   },
   {
     row: 'schedule',
@@ -126,7 +135,7 @@ const CASES: Case[] = [
     state: 'fail',
     id: 'schedule',
     facts: healthyFacts({ schedule: { ...healthyFacts().schedule, blockedSince: at(2 * DAY) } }),
-    has: ['schedule blocked since 2026-10-12'],
+    has: ['schedule blocked since Mon, 12 Oct 2026, 10:00 (Europe/London)'],
   },
   {
     row: 'schedule',
@@ -195,7 +204,9 @@ const CASES: Case[] = [
       healthyWorker({
         read: {
           kind: 'ok',
-          status: okWorkerStatus({ coolingDownUntil: inFuture(30 * HOUR), cooldownCause: 'captcha' }),
+          status: okWorkerStatus({
+            finding: { kind: 'cooling', until: inFuture(30 * HOUR), cause: 'captcha' },
+          }),
         },
       }),
     ),
@@ -236,7 +247,7 @@ const CASES: Case[] = [
         },
       }),
     ),
-    has: ['(cookie)', 'under 30 days left'],
+    has: ['(cookie)', '30 days or less left'],
   },
   {
     row: 'consent',
@@ -263,7 +274,9 @@ const CASES: Case[] = [
     row: 'email',
     state: 'fail',
     id: 'email',
-    facts: healthyFacts({ email: { configured: true, last: { at: at(HOUR), result: 'failed' } } }),
+    facts: healthyFacts({
+      email: { configured: true, last: { at: at(HOUR), kind: 'test', result: 'failed' } },
+    }),
   },
   {
     row: 'email',
@@ -284,10 +297,20 @@ describe('the checks table (brief WP18 §6)', () => {
     const covered = new Set(CASES.map((c) => `${c.row}:${c.state}`));
     const wanted = Object.entries(TABLE).flatMap(([row, states]) => states.map((s) => `${row}:${s}`));
     expect(wanted.filter((w) => !covered.has(w))).toEqual([]);
-    expect(CASES.length).toBeGreaterThanOrEqual(wanted.length);
   });
 
+  /** The table row a check id belongs to, so a case can never claim a row it does not check (ts-b1-009). */
+  const rowOf = (id: string) =>
+    id === 'provider-fixture'
+      ? id
+      : id === 'data' || id.startsWith('data-')
+        ? 'data'
+        : id.startsWith('provider-')
+          ? 'provider'
+          : id;
+
   it.each(CASES.map((c, i) => [`${c.row} ${c.state} #${i}`, c] as const))('%s', (_n, c) => {
+    expect(rowOf(c.id), 'the case checks its own row').toBe(c.row);
     const check = checkOf(c.facts, c.id);
     expect(check.state).toBe(c.state);
     for (const text of c.has ?? []) expect(`${check.summary} | ${check.note ?? ''}`).toContain(text);
@@ -328,13 +351,13 @@ describe('agreement of the card and the bar', () => {
       app: { ...healthyFacts().app, startedAt: at(HOUR) },
       schedule: {
         ...healthyFacts().schedule,
-        catchUp: { scheduledFor: at(8 * HOUR), ranAt: at(2 * HOUR) },
+        catchUp: { scheduledFor: at(8 * HOUR), ranAt: at(2 * HOUR), status: 'completed' },
       },
     });
     expect(checkOf(f, 'backups')).toMatchObject({ state: 'ok', note: null });
     const s = checkOf(f, 'schedule');
     expect(s.state).toBe('ok');
-    expect(s.note).toMatch(/^caught up the run missed at 2026-10-14 \d\d:\d\d, ran 2026-10-14 \d\d:\d\d$/);
+    expect(s.note).toMatch(/^caught up the run missed at .+ \(Europe\/London\), ran .+ \(Europe\/London\)$/);
     expect(barSummary(buildChecks(f)).kind).toBe('clean');
   });
 });
@@ -375,8 +398,8 @@ describe('boundaries', () => {
       '2027-10-30T12:00:00.000Z',
       '2027-11-01T12:00:00.000Z',
     ]) {
-      expect(consentAt(now, 30 * 86_400_000 - 1)).toBe('warn');
-      expect(consentAt(now, 30 * 86_400_000)).toBe('ok');
+      expect(consentAt(now, 30 * 86_400_000 + 1)).toBe('ok');
+      expect(consentAt(now, 30 * 86_400_000)).toBe('warn');
       expect(consentAt(now, 0)).toBe('fail');
     }
   });
@@ -389,7 +412,7 @@ describe('the data check', () => {
   it('words the six buckets as core does and the parts sum to the cells', () => {
     const c = dataOf({});
     expect(c.summary).toBe(
-      'London to New York: last run 2026-10-14: priced 90, no fares 5, no cached data 3, error 0, skipped 0, not searched 2 of 100 cells; newest price 1h old, oldest 30h old',
+      'last run Wed, 14 Oct 2026, 08:00 (Europe/London): priced 90, no fares 5, no cached data 3, error 0, skipped 0, not searched 2 of 100 cells; newest price 1h old, oldest 30h old',
     );
   });
   it('R + S + U of 412 in 1,000 cells warns; 200 in 1,000 does not', () => {
@@ -434,7 +457,7 @@ describe('the data check', () => {
       });
       expect(c.state).toBe('warn');
       expect(c.summary).toContain('last firing skipped (');
-      expect(c.summary).toContain('on 2026-10-13');
+      expect(c.summary).toContain('on Tue, 13 Oct 2026, 10:00 (Europe/London)');
       expect(c.summary).not.toContain('0 of 0');
     }
   });
@@ -448,12 +471,12 @@ describe('the data check', () => {
   });
   it('an active run shows "running since" beside the previous finished counts', () => {
     const c = dataOf({ runningSince: at(HOUR) });
-    expect(c.summary).toContain('running since 2026-10-14 09:00');
+    expect(c.summary).toContain('running since Wed, 14 Oct 2026, 09:00 (Europe/London)');
     expect(c.summary).toContain('priced 90');
-    const first = dataOf({ latest: null, coverage: null, ages: null, runningSince: at(HOUR) });
-    expect(first.state).toBe('ok');
-    expect(first.summary).toContain('no finished run yet');
-    expect(dataOf({ latest: null, coverage: null, ages: null }).state).toBe('warn');
+    const first = dataOf({ latest: null, lastRun: null, coverage: null, ages: null, runningSince: at(HOUR) });
+    expect(first.state).toBe('warn');
+    expect(first.summary).toContain('first run in progress: no prices yet');
+    expect(dataOf({ latest: null, lastRun: null, coverage: null, ages: null }).state).toBe('warn');
   });
   it('counts a catch-up and window left cells under skipped, with their detail words, and the reused suffix', () => {
     const c = dataOf({
@@ -477,6 +500,7 @@ describe('the data check', () => {
     const catchUp = dataOf({
       browserOnlyScheduled: true,
       latest: { status: 'completed', at: at(HOUR), isCatchUp: true, skipCode: null },
+      lastRun: { status: 'completed', at: at(HOUR), isCatchUp: true, skipCode: null },
     });
     expect(catchUp.state).toBe('warn');
     expect(catchUp.fix?.text).toBe(STATUS_TEXT.browserOnlyFix);
@@ -509,8 +533,11 @@ describe('the data check', () => {
   });
   it('a cancelled or paused run says so', () => {
     expect(
-      dataOf({ latest: { status: 'paused_budget', at: at(HOUR), isCatchUp: false, skipCode: null } }).summary,
-    ).toContain('last run 2026-10-14 (paused at a budget cap)');
+      dataOf({
+        latest: { status: 'paused_budget', at: at(HOUR), isCatchUp: false, skipCode: null },
+        lastRun: { status: 'paused_budget', at: at(HOUR), isCatchUp: false, skipCode: null },
+      }).summary,
+    ).toContain('(paused at a budget cap)');
   });
   it('one check per definition and an off check with none', () => {
     const f = healthyFacts({
@@ -524,6 +551,132 @@ describe('the data check', () => {
   });
 });
 
+describe('the data check: honest and complete (review V6)', () => {
+  const dataOf = (d: Partial<ReturnType<typeof healthyData>>) =>
+    checkOf(healthyFacts({ data: [healthyData(d)] }), 'data-def-1');
+  const row = (status: ExecutionStatus, over = {}) => ({
+    status,
+    at: ago(HOUR),
+    isCatchUp: false,
+    skipCode: null,
+    ...over,
+  });
+
+  it('each skipped status has its own next step, from the engine (po-b1-001)', () => {
+    const fixOf = (status: ExecutionStatus, code: 'half-cadence' | 'browser-only-definition' | null = null) =>
+      dataOf({ latest: row(status, { skipCode: code }) }).fix?.text;
+    expect(fixOf('skipped_window')).toBe(
+      'the schedule is now off: edit the window, then enable the definition again',
+    );
+    expect(fixOf('skipped_confirm')).toContain('confirm the new estimate');
+    expect(fixOf('skipped_budget')).toContain('the Providers view shows when its window reopens');
+    expect(fixOf('skipped_missed', 'half-cadence')).toContain('the next scheduled run goes ahead as normal');
+    expect(fixOf('skipped_missed', 'browser-only-definition')).toBe(STATUS_TEXT.browserOnlyFix);
+  });
+
+  it('a skipped latest row still shows the last real run’s coverage and ages (po-b1-004)', () => {
+    const c = dataOf({ latest: row('skipped_budget') });
+    expect(c.state).toBe('warn');
+    expect(c.summary).toContain('last firing skipped (it would exceed a budget cap)');
+    expect(c.summary).toContain('priced 90');
+    expect(c.summary).toContain('newest price 1h old, oldest 30h old');
+  });
+
+  it('never cuts the oldest age or the reused note, however long the line is (po-b1-002)', () => {
+    const c = dataOf({
+      name: 'x'.repeat(120),
+      runningSince: ago(HOUR),
+      lastRun: row('paused_error'),
+      coverage: {
+        buckets: {
+          priced: 999_999,
+          empty: 999_999,
+          no_data: 999_999,
+          error: 999_999,
+          skipped: 999_999,
+          not_run: 999_999,
+          reused: 999_999,
+        },
+        total: 5_999_994,
+      },
+      ages: { newest: observed(1), oldest: observed(6 * 24), stale: true },
+    });
+    expect(c.summary).toContain('(999999 reused from earlier runs)');
+    expect(c.summary).toContain('newest price 1h old, oldest 6d old');
+    expect(c.summary).not.toContain('x'.repeat(10));
+    expect(c.label).toBe('x'.repeat(120));
+    expect(apiContract.statusCheckSchema.safeParse(c).success).toBe(true);
+  });
+
+  it('a disabled definition is off, so a parked search never nags the bar', () => {
+    const c = dataOf({
+      enabled: false,
+      ages: { newest: observed(1), oldest: observed(30 * 24), stale: true },
+    });
+    expect(c).toMatchObject({ state: 'off', offReason: 'disabled', label: 'London to New York' });
+    expect(c.summary).toContain('disabled; its last run was');
+    expect(dataOf({ enabled: false, lastRun: null, latest: null }).summary).toBe(
+      'disabled; it never finished a run',
+    );
+    expect(
+      apiContract.barSummary(
+        buildChecks(healthyFacts({ data: [healthyData({ enabled: false, ages: null })] })),
+      ).kind,
+    ).toBe('clean');
+  });
+
+  it.each(['paused_error', 'interrupted', 'cancelled'] as const)(
+    'a last run that is %s warns, naming it',
+    (status) => {
+      const c = dataOf({ lastRun: row(status), latest: row(status) });
+      expect(c.state).toBe('warn');
+      expect(c.summary).toContain(
+        `(${{ paused_error: 'paused after errors', interrupted: 'interrupted', cancelled: 'cancelled' }[status]})`,
+      );
+      expect(c.fix?.text).toBe('start a run to finish the cells it left');
+    },
+  );
+
+  it('a run paused at a budget cap stays ok: it is deliberate', () => {
+    expect(dataOf({ lastRun: row('paused_budget'), latest: row('paused_budget') }).state).toBe('ok');
+  });
+
+  it('behind schedule names the actual cause, not the schedule card', () => {
+    const c = dataOf({ behindSchedule: true });
+    expect(c.fix?.text).toContain('no run has finished since the schedule last fired');
+    expect(c.fix?.text).not.toContain('check the schedule card');
+  });
+
+  it('the first run in flight is "first run in progress", not ok', () => {
+    const c = dataOf({ latest: null, lastRun: null, coverage: null, ages: null, runningSince: ago(HOUR) });
+    expect(c.state).toBe('warn');
+    expect(c.fix?.text).toBe('wait for the first run to finish');
+  });
+});
+
+describe('the schedule note (pa-b1-008)', () => {
+  const noteWith = (catchUp: NonNullable<StatusFacts['schedule']['catchUp']>) =>
+    checkOf(healthyFacts({ schedule: { ...healthyFacts().schedule, catchUp } }), 'schedule').note;
+  it('says "caught up" only for a catch-up that completed', () => {
+    expect(noteWith({ scheduledFor: ago(8 * HOUR), ranAt: ago(2 * HOUR), status: 'completed' })).toMatch(
+      /^caught up the run missed at/,
+    );
+    for (const [status, word] of [
+      ['paused_budget', 'paused at a budget cap'],
+      ['interrupted', 'interrupted'],
+      ['cancelled', 'cancelled'],
+    ] as const)
+      expect(noteWith({ scheduledFor: ago(8 * HOUR), ranAt: ago(2 * HOUR), status })).toMatch(
+        new RegExp(`^a catch-up of the run missed at .* started .* and is ${word}$`),
+      );
+  });
+  it('leaves out the missed time when the row names none', () => {
+    expect(noteWith({ scheduledFor: null, ranAt: ago(2 * HOUR), status: 'completed' })).toMatch(
+      /^caught up a missed run, ran /,
+    );
+  });
+});
+
 describe('price sources', () => {
   it('a fixture-only or awaiting-verification browser setup leaves usable empty and warns with the Travelpayouts fix', () => {
     const c = checkOf(healthyFacts({ priceSources: { usable: [] } }), 'price-sources');
@@ -532,7 +685,7 @@ describe('price sources', () => {
       command: 'pnpm gmt setup --reconfigure travelpayouts',
     });
     expect(
-      checkOf(healthyFacts({ priceSources: { usable: ['Travelpayouts', 'SearchApi'] } }), 'price-sources')
+      checkOf(healthyFacts({ priceSources: { usable: ['travelpayouts', 'searchapi'] } }), 'price-sources')
         .summary,
     ).toBe('price sources: Travelpayouts and SearchApi');
   });
@@ -550,13 +703,13 @@ describe('consent', () => {
   it('a not-shown record is never labelled a rejection', () => {
     const c = consentWith({ kind: 'not-shown', expiresAt: inFuture(100 * DAY), boundedBy: 'check' });
     expect(c.state).toBe('ok');
-    expect(c.summary).toMatch(/^no consent screen in this region, recorded \d{4}-\d\d-\d\d$/);
+    expect(c.summary).toMatch(/^no consent screen in this region, recorded .+ \(Europe\/London\)$/);
     expect(c.summary).not.toContain('rejected');
   });
   it('a captured record names the cookie or the capture as its bound', () => {
     expect(
       consentWith({ kind: 'socs', expiresAt: inFuture(100 * DAY), boundedBy: 'cookie' }).summary,
-    ).toMatch(/^consent rejected, expires \d{4}-\d\d-\d\d \(cookie\)$/);
+    ).toMatch(/^consent rejected, expires .+ \(Europe\/London\) \(cookie\)$/);
     expect(
       consentWith({ kind: 'socs', expiresAt: inFuture(100 * DAY), boundedBy: 'capture' }).summary,
     ).toContain('(capture)');
@@ -564,12 +717,13 @@ describe('consent', () => {
   it('an expired record fails with the capture fix', () => {
     const c = consentWith({ kind: 'socs', expiresAt: at(DAY), boundedBy: 'cookie' });
     expect(c.state).toBe('fail');
-    expect(c.fix).toEqual({ text: 'capture consent again', command: 'pnpm gmt consent' });
+    expect(c.fix).toEqual({ text: CONSENT_FIX.text, command: null });
   });
   it('a worker that reports no consent record falls back to the capture time plus 13 months, or fails when it has none', () => {
     const fallback = consentWith(null, { socsCapturedAt: ago(10 * DAY) });
     expect(fallback.state).toBe('ok');
-    expect(fallback.summary).toContain('(capture)');
+    expect(fallback.summary).toContain('at the latest');
+    expect(fallback.summary).toContain("this worker does not report the cookie's expiry");
     expect(consentWith(null, { socsCapturedAt: ago(500 * DAY) }).state).toBe('fail');
     expect(consentWith(null, { socsCapturedAt: null })).toMatchObject({
       state: 'fail',
@@ -581,7 +735,7 @@ describe('consent', () => {
     for (const reason of ['consent-missing', 'consent-expired', 'consent-voided'] as const) {
       const c = checkOf(withWorker(down({ kind: 'refusal', reason, at: at(HOUR) })), 'consent');
       expect(c.state).toBe('fail');
-      expect(c.fix?.command).toBe('pnpm gmt consent');
+      expect(c.fix).toEqual({ text: CONSENT_FIX.text, command: null });
     }
     for (const reason of ['flags-unset', 'build-mismatch'] as const) {
       expect(checkOf(withWorker(down({ kind: 'refusal', reason, at: at(HOUR) })), 'consent')).toMatchObject({
@@ -605,7 +759,7 @@ describe('the worker check', () => {
           browserWindow: setting,
           read: {
             kind: 'ok',
-            status: okWorkerStatus({ coolingDownUntil: inFuture(HOUR), cooldownCause: 'captcha' }),
+            status: okWorkerStatus({ finding: { kind: 'cooling', until: inFuture(HOUR), cause: 'captcha' } }),
           },
         }),
       );
@@ -641,7 +795,12 @@ describe('the worker check', () => {
     const c = checkOf(
       withWorker(
         healthyWorker({
-          read: { kind: 'ok', status: okWorkerStatus({ diffs: ['CAMOUFOX_MODE', 'POINT_OF_SALE'] }) },
+          read: {
+            kind: 'ok',
+            status: okWorkerStatus({
+              finding: { kind: 'settings', names: ['CAMOUFOX_MODE', 'POINT_OF_SALE'] },
+            }),
+          },
         }),
       ),
       'worker',
@@ -735,7 +894,7 @@ describe('providers', () => {
     expect(tpCheck({ lastCall: { at: ago(HOUR), result: 'quota' } }).state).toBe('fail');
     const ok = tpCheck({ lastCall: { at: ago(HOUR), result: 'ok' } });
     expect(ok.state).toBe('ok');
-    expect(ok.summary).toContain('last successful call 2026-10-14 09:00');
+    expect(ok.summary).toContain('last successful call Wed, 14 Oct 2026, 09:00 (Europe/London)');
   });
   it('never called is "configured; not used yet"; another failure warns', () => {
     expect(tpCheck({ lastCall: null }).summary).toContain('configured; not used yet');
@@ -766,14 +925,18 @@ describe('providers', () => {
 
 describe('email', () => {
   it('words the last test send by class only', () => {
-    expect(checkOf(healthyFacts(), 'email').summary).toBe('configured; no test send since the app started');
-    expect(
-      checkOf(healthyFacts({ email: { configured: true, last: { at: ago(HOUR), result: 'sent' } } }), 'email')
-        .summary,
-    ).toContain('the last test send was sent at');
+    expect(checkOf(healthyFacts(), 'email').summary).toBe('configured; no email sent since the app started');
     expect(
       checkOf(
-        healthyFacts({ email: { configured: true, last: { at: ago(HOUR), result: 'refused' } } }),
+        healthyFacts({ email: { configured: true, last: { at: ago(HOUR), kind: 'test', result: 'sent' } } }),
+        'email',
+      ).summary,
+    ).toContain('the last test email was sent at');
+    expect(
+      checkOf(
+        healthyFacts({
+          email: { configured: true, last: { at: ago(HOUR), kind: 'test', result: 'refused' } },
+        }),
         'email',
       ),
     ).toMatchObject({ state: 'ok' });

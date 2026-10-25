@@ -12,6 +12,7 @@ import {
   type NoDataReason,
   type PARTIAL_EXPANSION,
   type PRICE_UNCONFIRMED,
+  PROVIDER_NAMES,
   type ProviderId,
   type SkipReason,
   type Stage,
@@ -97,12 +98,7 @@ export const COPY = {
   // why: a fixture-provider row that is not tagged synthetic cannot be trusted for any of its fields (ruling 3).
   rowWithheld: "details withheld: this row's provenance is invalid",
   withheldCell: 'withheld',
-  provider: {
-    travelpayouts: 'Travelpayouts',
-    searchapi: 'SearchApi',
-    camoufox: 'Camoufox',
-    fixture: 'Fixture',
-  } satisfies Record<ProviderId, string>,
+  provider: PROVIDER_NAMES satisfies Record<ProviderId, string>,
   fxApprox: '≈',
   /** WP10 (decision 52): PriceCell's `face` marks on a phone day cell; the words stay in its title and spoken text. */
   priceMarkGlyph: {
@@ -929,6 +925,9 @@ export const COPY = {
       seconds < 60 ? `checked ${seconds} s ago` : `checked ${Math.floor(seconds / 60)} min ago`,
     stale: (checked: string) => `stale, ${checked}`,
     notAnswering: 'The app is not answering.',
+    // why: V11 (po-b1-011, ui-b1-003): an answer that is an error is not "not answering"; each is said in plain words
+    signInRefused: 'The app refused the sign-in, so the report cannot be read. Sign in again.',
+    reportFailed: 'The app answered with an error instead of a report; its log has the cause.',
     state: { ok: 'ok', warn: 'to check', fail: 'failing', off: 'off' } satisfies Record<
       apiContract.StatusState,
       string
@@ -960,6 +959,7 @@ export const COPY = {
       'not-set-up': (names: string) => `not set up: ${names}`,
       'awaiting-verification': (names: string) => `awaiting verification for this build: ${names}`,
       'not-visible': (names: string) => `not visible from here: ${names}`,
+      disabled: (names: string) => `disabled: ${names}`,
     },
     cardLabel: (area: string, name: string | null) => (name === null ? area : `${area}, ${name}`),
     fixLabel: 'Fix:',
@@ -969,11 +969,12 @@ export const COPY = {
     copied: 'Copied',
     selectedInstead: (command: string) => `Command, selected: ${command}`,
     providersLink: 'Providers view',
+    coverageLink: 'Coverage view',
     sendTest: 'Send test',
     sending: 'Sending…',
     testSent: 'Test email sent. Check the inbox, and the spam folder.',
     testNotConfigured: 'Email is not set up.',
-    testLimit: 'Hourly email limit reached. Try again later.',
+    testLimit: 'A test email was sent a moment ago. Try again in a minute.',
     testFailed: 'The test email failed to send.',
     testFailedCall: (message: string) => `The test email request failed: ${message}`,
   },
@@ -982,5 +983,7 @@ export const COPY = {
     label: 'Status report',
     stale: (checked: string) => `Status: stale, ${checked}`,
     notAnswering: 'Status: app not answering',
+    signInRefused: 'Status: sign-in refused',
+    reportFailed: 'Status: report failed, see the app log',
   },
 } as const;

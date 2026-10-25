@@ -54,7 +54,12 @@ describe('engineFor: the consent check (spec §8.3 consent expiry)', () => {
     engineFor(ports(), silentLog, { home: null });
     const check = spy.mock.calls[0]?.[1]?.consentCheck;
     expect(check).toBeDefined();
-    expect(await check?.()).toEqual({ state: 'off', summary: 'browser provider not enabled', fix: null });
+    expect(await check?.()).toEqual({
+      state: 'off',
+      cause: 'none',
+      summary: 'browser provider not enabled',
+      fix: null,
+    });
   });
   it('uses the notifiers it is given', () => {
     const spy = vi.spyOn(engine, 'createEngine');

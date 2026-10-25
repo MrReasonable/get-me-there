@@ -30,14 +30,12 @@ export const alertHandlers: HandlerTable = {
    * server's own text is never returned or kept.
    */
   'POST /api/alerts/test-email': plain(async (c, _input, ctx) => {
-    if (ctx.ports.config.smtp === null || ctx.sendTestEmail === null)
+    if (ctx.ports.config.smtp === null || ctx.email === null)
       throw new ApiError(409, 'email_not_configured', API_TEXT.emailNotConfigured);
-    const result = await ctx.sendTestEmail();
-    const at = ctx.ports.clock.now();
-    ctx.status.testEmail.last = { at, result };
-    if (result === 'refused')
-      throw new ApiError(429, 'email_limit', API_TEXT.emailLimit(ctx.ports.config.alertEmailMaxPerHour));
-    return c.json({ result, at });
+    const result = await ctx.email.sendTest();
+    // why: V7 — a test send has its own one-a-minute limit apart from the alert ceiling; the notifier keeps the result
+    if (result === 'refused') throw new ApiError(429, 'email_limit', API_TEXT.emailLimit);
+    return c.json({ result, at: ctx.ports.clock.now() });
   }),
 
   'GET /api/alerts': route(

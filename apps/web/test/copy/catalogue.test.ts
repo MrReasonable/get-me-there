@@ -9,6 +9,7 @@ const SAMPLES: Record<string, unknown[]> = {
   'statusView.offLine.not-set-up': ['SearchApi, email'],
   'statusView.offLine.awaiting-verification': ['browser provider'],
   'statusView.offLine.not-visible': ['backups'],
+  'statusView.offLine.disabled': ['London to New York'],
   'statusView.cardLabel': ['Provider', 'SearchApi'],
   'statusView.copyCommand': ['pnpm gmt start'],
   'statusView.selectedInstead': ['pnpm gmt start'],

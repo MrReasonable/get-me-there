@@ -12,6 +12,9 @@ import type { Deps } from '../deps.js';
 export const TEST_EMAIL_QUESTION = 'Send a test email now?';
 const NEXT = 'pnpm gmt setup --reconfigure email';
 
+/** V9: the offer belongs to a full setup and to `--reconfigure email`, not to the other single-group changes. */
+export const offeredFor = (group: string | null): boolean => group === null || group === 'email';
+
 /** What the operator is told for each answer of the route. */
 export const TEST_EMAIL_WORDS = {
   sent: 'The test email was sent. Check the inbox (and the spam folder) of the address you gave.',

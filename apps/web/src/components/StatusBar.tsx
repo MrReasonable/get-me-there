@@ -1,8 +1,8 @@
-import { ACTIVE_STATUSES, apiContract, budgetScopeLabel, RESUMABLE_STATUSES } from '@gmt/core';
+import { ACTIVE_STATUSES, apiContract, budgetScopeLabel, capWarn, RESUMABLE_STATUSES } from '@gmt/core';
 import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import { useCoverage, useExecution, useExecutionActions, useResults } from '../api/queries.js';
-import { useStatus } from '../api/statusQuery.js';
+import { failureOf, useStatus } from '../api/statusQuery.js';
 import type { DefinitionResponse, ExecutionResponse, UsageRow } from '../api/types.js';
 import { COPY } from '../copy.js';
 import { formatIsoDate, formatMicroGbp, formatRunInstant } from '../format.js';
@@ -17,8 +17,6 @@ const ACTIVE: ReadonlySet<string> = new Set(ACTIVE_STATUSES);
 const RESUMABLE_ACTIVE: ReadonlySet<string> = new Set(
   ACTIVE_STATUSES.filter((s) => RESUMABLE_STATUSES.includes(s)),
 );
-/** Spend at or above this share of a cap is marked "near cap" (review UI-10). */
-const NEAR_CAP = 0.8;
 
 /**
  * Spec §11 progress, one line per stage × provider (never summed across providers). Ruling 4 (decision 67): the line
@@ -53,9 +51,8 @@ function usageOf(e: ExecutionResponse, label: string): UsageRow | null {
 
 const capText = (cap: number | null, fmt: (n: number) => string): string =>
   cap === null ? COPY.noCap : fmt(cap);
-/** At or above 80% of the cap; any use of a zero cap counts (it is already over); no cap is never near. */
-export const near = (used: number, cap: number | null): boolean =>
-  cap !== null && used > 0 && used >= cap * NEAR_CAP;
+/** At or above 80% of the cap, by core's one rule (a cap of 0 or no cap is never near; review V8). */
+export const near = (used: number, cap: number | null): boolean => capWarn(used, cap);
 
 function Spend({ text, used, cap }: { text: string; used: number; cap: number | null }) {
   // why: data-cost marks a cost or cap figure, never a fare; the rendered sweep allows "£" only in a PriceCell or here.
@@ -110,7 +107,11 @@ export function StatusLink() {
   let tone = 'text-slate-900';
   if (q.data === undefined) {
     if (q.error) {
-      text = COPY.statusLink.notAnswering;
+      text = {
+        'not-answering': COPY.statusLink.notAnswering,
+        'sign-in-refused': COPY.statusLink.signInRefused,
+        'report-failed': COPY.statusLink.reportFailed,
+      }[failureOf(q.error)];
       tone = 'font-medium text-red-900';
     }
   } else if (q.isRefetchError && checked !== null) {
@@ -125,7 +126,11 @@ export function StatusLink() {
   }
   if (text === null) return null;
   return (
-    <div className="border-b border-slate-300 bg-slate-50 px-4 text-sm">
+    // why: V11 (ui-b1-004): the key labels the landmark; the link keeps its own text as its name, so the count is read
+    <section
+      aria-label={COPY.statusLink.label}
+      className="border-b border-slate-300 bg-slate-50 px-4 text-sm"
+    >
       <a
         href={hrefWith({ view: 'status' })}
         onClick={navigateTo({ view: 'status' })}
@@ -133,7 +138,7 @@ export function StatusLink() {
       >
         {text}
       </a>
-    </div>
+    </section>
   );
 }
 

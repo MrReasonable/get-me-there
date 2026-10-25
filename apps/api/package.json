@@ -16,7 +16,8 @@
     "test": "vitest run --coverage",
     "dev": "node --conditions=@gmt/source --import tsx --watch src/bootstrap/start.ts",
     "tool": "node --conditions=@gmt/source --env-file-if-exists=../../.env --import tsx src/bootstrap/tool.ts",
-    "start": "node dist/bootstrap/start.js"
+    "start": "node dist/bootstrap/start.js",
+    "mutate": "stryker run && node ../../scripts/mutation-gate.mjs reports/mutation/mutation.json"
   },
   "dependencies": {
     "@gmt/core": "workspace:*",
@@ -29,6 +30,7 @@
     "zod": "4.6.7"
   },
   "devDependencies": {
+    "@stryker-mutator/core": "10.0.0",
     "tsx": "4.23.15",
     "yaml": "2.9.1"
   }

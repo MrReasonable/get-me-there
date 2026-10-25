@@ -7,9 +7,17 @@ import { hrefWith, navigateTo } from '../state/urlState.js';
 
 export type StatusCheck = apiContract.StatusCheck;
 
-/** The words a card is labelled by besides its area: a provider card's own name (the browser worker card is its area's). */
+/** The words a card is labelled by besides its area: a provider's own name, or a search's name (V11); else none. */
 export function cardName(c: StatusCheck): string | null {
-  return c.area === 'provider' && c.providerId !== null ? COPY.provider[c.providerId] : null;
+  if (c.area === 'provider' && c.providerId !== null) return COPY.provider[c.providerId];
+  return c.label;
+}
+
+/** The Coverage view of a data card's search, by the definition id its check id carries (`data-<id>`). */
+function coverageHref(c: StatusCheck): string | null {
+  return c.area === 'data' && c.id.startsWith('data-')
+    ? hrefWith({ view: 'coverage', def: c.id.slice(5) })
+    : null;
 }
 
 /**
@@ -28,13 +36,19 @@ function FixCommand({ command }: { command: string }) {
   }, [state]);
   const copy = async () => {
     const clipboard = typeof navigator === 'undefined' ? undefined : navigator.clipboard;
-    if (clipboard === undefined) return setState('selected');
+    if (clipboard === undefined) return reselect();
     try {
       await clipboard.writeText(command);
       setState('copied');
     } catch {
-      setState('selected');
+      reselect();
     }
+  };
+  // why: pressing Copy again in the selected state selects the field again, even though the state does not change
+  const reselect = () => {
+    setState('selected');
+    field.current?.focus();
+    field.current?.select();
   };
   return (
     <span className="flex flex-wrap items-center gap-2">
@@ -120,8 +134,22 @@ export function StatusCard({ check }: { check: StatusCheck }) {
           <p>
             <span className="font-medium">{COPY.statusView.fixLabel}</span> {check.fix.text}
           </p>
-          {check.fix.command === null ? null : <FixCommand command={check.fix.command} />}
+          {/* why: V11 (ui-b1-005): keyed by the command, so "Copied" never outlives the command it was for */}
+          {check.fix.command === null ? null : (
+            <FixCommand key={check.fix.command} command={check.fix.command} />
+          )}
         </div>
+      ) : null}
+      {coverageHref(check) !== null ? (
+        <p>
+          <a
+            href={coverageHref(check) ?? undefined}
+            onClick={navigateTo({ view: 'coverage', def: check.id.slice(5) })}
+            className="inline-flex min-h-11 items-center underline"
+          >
+            {COPY.statusView.coverageLink}
+          </a>
+        </p>
       ) : null}
       {check.area === 'provider' && check.providerId !== null ? (
         <p>

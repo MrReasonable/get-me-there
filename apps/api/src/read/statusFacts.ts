@@ -10,10 +10,10 @@ import type {
   ExecutionStatus,
   IsoDateTime,
   ProviderId,
-  SharedWorkerSetting,
   SkipCode,
   StartRefusalReason,
 } from '@gmt/core';
+import type { WorkerFinding } from '@gmt/providers';
 
 export type StatusMode = 'native' | 'container' | 'dev';
 
@@ -30,6 +30,13 @@ export interface DatabaseFacts {
   pendingMigrations: number;
 }
 
+/** A catch-up in the last 7 days: the firing it stood for (null when the row names none), when it ran, how it stands. */
+export interface CatchUpFacts {
+  scheduledFor: IsoDateTime | null;
+  ranAt: IsoDateTime;
+  status: ExecutionStatus;
+}
+
 export interface ScheduleFacts {
   /** Enabled, undeleted definitions with a schedule. */
   scheduledDefinitions: number;
@@ -38,8 +45,7 @@ export interface ScheduleFacts {
   blockedSince: IsoDateTime | null;
   lastExecutionAt: IsoDateTime | null;
   nextRun: IsoDateTime | null;
-  /** A catch-up in the last 7 days: the firing it stood for and when it ran. */
-  catchUp: { scheduledFor: IsoDateTime; ranAt: IsoDateTime } | null;
+  catchUp: CatchUpFacts | null;
   /** The newest `skipped_missed` row in the last 7 days whose stored code is the camoufox-only one. */
   skippedMissed: { scheduledFor: IsoDateTime; code: SkipCode } | null;
   /** Two definitions using the browser provider that share a firing time. */
@@ -54,24 +60,30 @@ export interface AgeFacts {
   stale: boolean;
 }
 
+export interface RunFacts {
+  status: ExecutionStatus;
+  at: IsoDateTime;
+  isCatchUp: boolean;
+  skipCode: SkipCode | null;
+}
+
 export interface DataFacts {
   definitionId: string;
+  /** The definition's name: the card's label, never part of its summary. */
   name: string;
-  /** The latest parent run of any status once finished (not pending or running), or null. */
-  latest: {
-    status: ExecutionStatus;
-    at: IsoDateTime;
-    isCatchUp: boolean;
-    skipCode: SkipCode | null;
-  } | null;
-  /** The latest row's discovery coverage per cell after the roll-up; null for a row without cells. */
+  /** A disabled definition is shown as off, so a parked search never nags the bar. */
+  enabled: boolean;
+  /** The newest parent row that is not pending or running, whatever its status (a skipped firing included), or null. */
+  latest: RunFacts | null;
+  /** The newest such row that actually ran (not a skipped firing): the coverage and ages below are its. */
+  lastRun: RunFacts | null;
   coverage: { buckets: Buckets; total: number } | null;
   ages: AgeFacts | null;
   /** Skipped cells that a browser window or a catch-up left, with the words of their detail. */
   leftNotes: { text: string; cells: number }[];
   /** A run that is pending or running now. */
   runningSince: IsoDateTime | null;
-  /** Scheduled, and the latest row of any kind is older than the schedule's previous firing. */
+  /** Scheduled, and the newest row of any kind is older than the schedule's previous firing. */
   behindSchedule: boolean;
   /** The browser provider is the only discovery provider that can run this definition on a schedule. */
   browserOnlyScheduled: boolean;
@@ -79,9 +91,8 @@ export interface DataFacts {
 
 export interface ProviderFacts {
   id: ProviderId;
-  displayName: string;
   configured: boolean;
-  /** The newest completed call: when, and its class (`other` is any failure that is neither auth nor quota). */
+  /** The newest completed call: when, and the adapters' own class of how it ended (`other` is any other failure). */
   lastCall: { at: IsoDateTime; result: 'ok' | 'auth' | 'quota' | 'other' } | null;
   usage: { used: number; cap: number | null; window: 'month' | 'lifetime' } | null;
   /** The trial's remaining lifetime credits, or null off the trial. */
@@ -95,10 +106,9 @@ export type RefusalRead =
 
 /** The worker's status named field by named field (nothing else of its answer is kept). */
 export interface WorkerStatusFacts {
-  coolingDownUntil: IsoDateTime | null;
-  cooldownCause: string | null;
+  /** What the worker will do with the next page request, judged by the one rule the preflight uses (V5). */
+  finding: WorkerFinding | null;
   formVerified: boolean;
-  diffs: readonly SharedWorkerSetting[];
   appInstances: number | null;
   monthly: { pages: number; scrolls: number; readable: boolean } | null;
   consent: {
@@ -126,12 +136,13 @@ export interface WorkerFacts {
 
 export interface EmailFacts {
   configured: boolean;
-  last: { at: IsoDateTime; result: 'sent' | 'refused' | 'failed' } | null;
+  /** The newest send of any kind since the app started (V7). */
+  last: { at: IsoDateTime; kind: string; result: 'sent' | 'refused' | 'failed' } | null;
 }
 
 export interface PriceSourceFacts {
-  /** The usable non-synthetic discovery providers that can price a scheduled search, by display name. */
-  usable: string[];
+  /** The usable non-synthetic discovery providers that can price a scheduled search. */
+  usable: ProviderId[];
 }
 
 export interface StatusFacts {

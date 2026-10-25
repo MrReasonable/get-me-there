@@ -40,13 +40,31 @@ describe('the Status view: states (spec §11)', () => {
   });
 
   it('with no report the view says the app is not answering, and Try again loads it', async () => {
-    serve({ error: { code: 'internal', message: 'boom' } }, 500);
+    server.use(http.get(`${API}/status`, () => HttpResponse.error()));
     const { user } = renderWithProviders(<StatusView />);
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent(COPY.statusView.notAnswering);
     serve(statusReport([{ id: 'app', area: 'app', summary: 'back again' }]));
     await user.click(within(alert).getByRole('button', { name: COPY.retryLoad }));
     expect(await screen.findByText(/back again/)).toBeInTheDocument();
+  });
+
+  it('tells a refused sign-in and an error answer apart from silence (V11)', async () => {
+    serve({ error: { code: 'unauthenticated', message: 'authentication required' } }, 401);
+    const first = renderWithProviders(<StatusView />);
+    expect(await screen.findByRole('alert')).toHaveTextContent(COPY.statusView.signInRefused);
+    first.unmount();
+    serve({ error: { code: 'internal', message: 'internal error; see the server log' } }, 500);
+    renderWithProviders(<StatusView />);
+    expect(await screen.findByRole('alert')).toHaveTextContent(COPY.statusView.reportFailed);
+  });
+
+  it('the ticking "checked N s ago" is plain text; only the stale mark is announced (V11)', async () => {
+    serve(statusReport([{}], { generatedAt: ago(40) }));
+    renderWithProviders(<StatusView />);
+    const checked = await screen.findByText('checked 40 s ago');
+    expect(checked.closest('[role="status"]')).toBeNull();
+    expect(checked).not.toHaveAttribute('aria-live');
   });
 
   it('"checked N s ago" and "N min ago" come from the report generatedAt', async () => {
@@ -239,6 +257,94 @@ describe('the Status view: cards (spec §11)', () => {
     expect(card('Backups')).toHaveTextContent("not visible from the container: check your host's backup job");
     expect(screen.queryByRole('region', { name: 'Email' })).toBeNull();
     expect(screen.queryByText(/SearchApi is not set up/)).toBeNull();
+  });
+});
+
+describe('cards for several searches (V6, V11)', () => {
+  const searches = () =>
+    statusReport([
+      {
+        id: 'data-a1',
+        area: 'data',
+        label: 'London to New York',
+        state: 'warn',
+        summary: 'no prices yet',
+        fix: { text: 'start a run', command: null },
+      },
+      { id: 'data-b2', area: 'data', label: 'Weekend trips', state: 'ok', summary: 'last run fine' },
+      {
+        id: 'data-c3',
+        area: 'data',
+        label: 'Old search',
+        state: 'off',
+        offReason: 'disabled',
+        summary: 'disabled',
+      },
+    ]);
+  it('each search has its own accessible name, and the Data heading is not repeated per card', async () => {
+    serve(searches());
+    renderWithProviders(<StatusView />);
+    await screen.findByRole('region', { name: 'Data, London to New York' });
+    expect(screen.getByRole('region', { name: 'Data, Weekend trips' })).toBeInTheDocument();
+  });
+  it('a data card links to that search’s Coverage view', async () => {
+    serve(searches());
+    const { user } = renderWithProviders(<StatusView />);
+    const link = await within(
+      await screen.findByRole('region', { name: 'Data, London to New York' }),
+    ).findByRole('link', {
+      name: COPY.statusView.coverageLink,
+    });
+    expect(link).toHaveAttribute('href', expect.stringContaining('view=coverage'));
+    expect(link).toHaveAttribute('href', expect.stringContaining('def=a1'));
+    await user.click(link);
+    expect(window.location.search).toContain('view=coverage');
+    expect(window.location.search).toContain('def=a1');
+  });
+  it('a disabled search folds into the off line by name, with no card', async () => {
+    serve(searches());
+    renderWithProviders(<StatusView />);
+    expect(await screen.findByText('disabled: Old search')).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Data, Old search' })).toBeNull();
+  });
+});
+
+describe('the fix command box (V11)', () => {
+  const report = (command: string) =>
+    statusReport([
+      { id: 'schedule', area: 'schedule', state: 'fail', summary: 'down', fix: { text: 'restart', command } },
+    ]);
+  const copyButton = (command: string) =>
+    screen.findByRole('button', { name: COPY.statusView.copyCommand(command) });
+
+  it('"Copied" does not outlive the command it was for', async () => {
+    serve(report('pnpm gmt restart'));
+    const { user, client } = renderWithProviders(<StatusView />);
+    vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue(undefined);
+    await user.click(await copyButton('pnpm gmt restart'));
+    expect(await screen.findByText(COPY.statusView.copied)).toBeInTheDocument();
+    serve(report('pnpm gmt start'));
+    await act(async () => {
+      await client.refetchQueries({ queryKey: STATUS_KEY });
+    });
+    await copyButton('pnpm gmt start');
+    expect(screen.queryByText(COPY.statusView.copied)).toBeNull();
+  });
+
+  it('with the clipboard unavailable, Copy selects the field again every time it is pressed', async () => {
+    serve(report('pnpm gmt restart'));
+    const { user } = renderWithProviders(<StatusView />);
+    const button = await copyButton('pnpm gmt restart');
+    Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true });
+    await user.click(button);
+    const field = await screen.findByRole<HTMLInputElement>('textbox');
+    expect(field).toHaveFocus();
+    await user.click(document.body);
+    field.setSelectionRange(2, 2);
+    await user.click(button);
+    expect(field).toHaveProperty('selectionStart', 0);
+    expect(field).toHaveProperty('selectionEnd', 'pnpm gmt restart'.length);
+    expect(field).toHaveFocus();
   });
 });
 

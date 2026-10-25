@@ -157,7 +157,7 @@ function apiTexts(): string[] {
     API_TEXT.noExecution,
     API_TEXT.alertNotFound,
     API_TEXT.emailNotConfigured,
-    API_TEXT.emailLimit(20),
+    API_TEXT.emailLimit,
     API_TEXT.alreadyRunning,
     API_TEXT.unknownProvider('fixture'),
     API_TEXT.unknownDestination,

@@ -14,6 +14,7 @@ import { HANDLERS } from './routes/index.js';
 import {
   API_PREFIX,
   type AppEnv,
+  type EmailPort,
   type HttpToolRunners,
   type RawInput,
   type RouteContext,
@@ -39,9 +40,9 @@ export interface AppOptions {
    * Spec §10 `/status`: what only the bootstrap knows. `home` is HOME (the refusal file's directory), `version` the
    * build's short SHA, `startedAt` when the app started. Defaults: no home, "unknown", now, db's migrations directory.
    */
-  status?: Partial<Omit<StatusEnv, 'testEmail'>>;
-  /** The email notifier's test send (spec §10 `/alerts/test-email`); absent means email is not configured. */
-  sendTestEmail?: () => Promise<'sent' | 'refused' | 'failed'>;
+  status?: Partial<Omit<StatusEnv, 'emailLast'>>;
+  /** The email notifier (spec §10 `/alerts/test-email`, the email check); absent means email is not configured. */
+  email?: EmailPort;
 }
 
 export function publicRouteKeys(routes: readonly apiContract.RouteDef[]): Set<string> {
@@ -78,9 +79,9 @@ export function createApp(ports: Ports, engine: Engine, options: AppOptions = {}
       startedAt: ports.clock.now(),
       migrationsDir: MIGRATIONS_DIR,
       ...options.status,
-      testEmail: { last: null },
+      emailLast: () => options.email?.lastResult() ?? null,
     },
-    sendTestEmail: options.sendTestEmail ?? null,
+    email: options.email ?? null,
   };
   const app = new Hono<AppEnv>();
   app.onError(onError(ports.log, ports.secrets));
