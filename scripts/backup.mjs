@@ -45,7 +45,7 @@ async function load() {
  * @param {{ backupsDirFor: (db: string) => string; BACKUPS_KEPT: number }} rules
  * @returns {{ ok: true; db: string; dir: string; keep: number } | { ok: false; reason: string }}
  */
-function parseArgs(argv, envDb, rules) {
+export function parseArgs(argv, envDb, rules) {
   /** @type {Map<string, string>} */
   const flags = new Map();
   for (let i = 0; i < argv.length; i += 2) {
@@ -96,4 +96,7 @@ async function main() {
   }
 }
 
-process.exitCode = await main();
+// why: WP16b: the gmt CLI's tests import parseArgs to prove the daily job's argv parses here, so the backup runs only
+// when this file is the program (the image and the services run it as `node scripts/backup.mjs`); `import.meta.main`
+// is in every Node the engines field allows (22.18 and later), the one guard shape for scripts (ca-b1-021)
+if (import.meta.main) process.exitCode = await main();

@@ -4,15 +4,16 @@ A self-hosted flight price optimiser for one operator: it searches a window of d
 and a range of stays for the cheapest round trip, within a stated budget of vendor calls. The
 worked example throughout is London → New York.
 
-**Docker Desktop on a Mac (working path today):** double-click `Start.command`, then open
-<http://127.0.0.1:3000>. See [the short Docker guide](docs/local-quickstart.md).
+**On your own Mac or Linux machine:** with Node 22.18 or later and git,
+`corepack enable && pnpm install && pnpm gmt setup` installs the app as a user service (on Node 25
+and later, which no longer include corepack, run `npm install --global corepack` first);
+[`docs/setup.md`](docs/setup.md) section 0 is the quick start, including how to get Node.
 
-**First-time configuration:** start with [`docs/setup.md`](docs/setup.md) section 1 — the
-app refuses to start without basic auth, and that section says which two lines to put in
-`.env`.
-
-**Native local install (`pnpm gmt setup`):** lands with WP16b; section 0 of
-[`docs/setup.md`](docs/setup.md) is written in that work package. Until then, use Docker.
+**In a container (a VPS, or Docker Desktop on a Mac):** start with
+[`docs/setup.md`](docs/setup.md) section 1 — the app refuses to start without basic auth, and
+that section says which two lines to put in `.env`. On a Mac with Docker Desktop, double-click
+`Start.command`, then open <http://127.0.0.1:3000>; see
+[the short Docker guide](docs/local-quickstart.md).
 
 - [`docs/setup.md`](docs/setup.md): install, configure, back up, operate, the smoke test.
 - [`docs/local-quickstart.md`](docs/local-quickstart.md): Docker Desktop on a Mac via `Start.command`.

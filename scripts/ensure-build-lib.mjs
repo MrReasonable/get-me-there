@@ -1,5 +1,5 @@
 // The logic of scripts/ensure-build.mjs, with its file-system, process and clock operations injectable for tests.
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import {
   closeSync,
@@ -218,27 +218,63 @@ export function releaseOnSignal(lock, owned, proc = process, ops = realOps, befo
 }
 
 /**
+ * Ends each child's whole tree before the lock is released, so a second build cannot overlap the first. why: CodeRabbit
+ * (PR #11): on Windows there are no process groups and the child is a shell, so killing it alone leaves pnpm and its
+ * tsc runs going; `taskkill /T /F` ends the tree (a child that already exited makes it fail, which is ignored).
+ * Elsewhere the child leads its own group (it was spawned detached), so the group is signalled.
+ */
+export function stopChildren(
+  children,
+  sig,
+  {
+    platform = process.platform,
+    run = (cmd, args) => execFileSync(cmd, args, { stdio: 'ignore' }),
+    killGroup = (pid, s) => process.kill(-pid, s),
+  } = {},
+) {
+  for (const c of children) {
+    if (platform === 'win32') {
+      try {
+        run('taskkill', ['/pid', String(c.pid), '/T', '/F']);
+      } catch {
+        // why: the child already exited
+      }
+      continue;
+    }
+    try {
+      killGroup(c.pid, sig);
+    } catch {
+      c.kill(sig);
+    }
+  }
+}
+
+/**
+ * The build ensure-build.mjs runs: `pnpm --filter @gmt/api... build`. why: on Windows pnpm is pnpm.cmd, which Node
+ * starts only through a shell (spawn pnpm ENOENT otherwise); the arguments are fixed words.
+ */
+export function buildStep(repo, platform = process.platform) {
+  return {
+    cmd: 'pnpm',
+    args: ['--filter', '@gmt/api...', 'build'],
+    opts: { cwd: repo, stdio: 'ignore', shell: platform === 'win32' },
+  };
+}
+
+/**
  * Runs `body` holding the lock. `body` gets `run(cmd, args, opts)`, which spawns a child in its own process group and
  * resolves when it exits 0. why: PR #3 review — a build under execFileSync blocks the event loop, so the signal
  * handlers could not run and a SIGTERM or SIGHUP neither stopped the build nor released the lock; a spawned child
  * leaves the loop free, and a signal stops the child's whole group (pnpm and its tsc runs), releases the lock and exits.
  */
-export async function underLock(lock, body, { proc = process, ops = realOps } = {}) {
+export async function underLock(lock, body, { proc = process, ops = realOps, spawnFn = spawn } = {}) {
   const owned = acquire(lock, ops);
   const children = new Set();
-  const stopAll = (sig) => {
-    for (const c of children) {
-      try {
-        process.kill(-c.pid, sig);
-      } catch {
-        c.kill(sig);
-      }
-    }
-  };
+  const stopAll = (sig) => stopChildren(children, sig);
   const stopWatching = releaseOnSignal(lock, owned, proc, ops, stopAll);
   const run = (cmd, args, opts = {}) =>
     new Promise((resolve, reject) => {
-      const c = spawn(cmd, args, { ...opts, detached: true });
+      const c = spawnFn(cmd, args, { ...opts, detached: true });
       children.add(c);
       c.once('error', (err) => {
         children.delete(c);

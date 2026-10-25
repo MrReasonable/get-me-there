@@ -31,7 +31,9 @@ nagging about routine states; and the app emails the operator once a day while t
 ## 2. Scope
 
 **In**: `statusResponseSchema` in `core/api-contract/system.ts`; the check builders in `apps/api/src/read/status.ts`;
-the route, with `HOME` passed from the api bootstrap; `POST /api/alerts/test-email` with its in-process last result; the
+the route, with `HOME` passed from the api bootstrap; `POST /api/alerts/test-email` with its in-process last result,
+and offering it at the end of `gmt setup` (WP16b's wizard leaves that offer to this package, since the route is this
+package's); the
 consent-expiry system notice on the maintenance tick (decision 74 / §8.3); the API-backed `gmt status` on top of
 WP16b's local facts; the web Status view, the nav entry and the status bar; redaction and route tests; docs
 (`setup.md` §11 "Operating it"); Stryker `mutate` entries for the pure status helpers this package adds in `core`.
@@ -158,8 +160,9 @@ Modify: `packages/core/src/api-contract/system.ts` (and its Stryker `mutate` glo
 `apps/api/src/bootstrap/app.ts` (`HOME` into the status sources), `apps/api/src/routes/{system,alerts}.ts`, the email
 notifier's last-result hook, `packages/engine/src/{maintenance,notifiers/operatorTemplates}.ts` (`sendSystemNotice`
 path only), `apps/web/src/components/{Nav,StatusBar}.tsx`, `apps/web/src/api/{endpoints,queries}.ts`,
-`apps/cli/src/commands/status.ts` **only** to call the HTTP report beside WP16b's local facts (no new refusal
-rendering here), the `apps/api` build script (`version.json`), `docs/setup.md`.
+`apps/cli/src/commands/status.ts` **only** to print the HTTP report beside WP16b's `localChecks(deps)` (no new refusal
+rendering here), `apps/cli/src/commands/setup.ts` **only** for the test-email offer after the closing screen,
+the `apps/api` build script (`version.json`), `docs/setup.md`.
 
 ## 8. Tasks
 
@@ -227,6 +230,10 @@ rendering here), the `apps/api` build script (`version.json`), `docs/setup.md`.
   - `POST /api/alerts/test-email` requires the mutating-route headers; 409 when email is not configured; sends one fixed
     message; 429 past `ALERT_EMAIL_MAX_PER_HOUR`; records time and class (`sent`, `refused`, `failed`) in the process,
     never the server's text.
+  - `gmt setup` with email configured, on an interactive terminal, offers once after the closing screen "Send a test
+    email now?" (default no); yes posts `POST /api/alerts/test-email` with `app.env`'s basic auth and the mutating-route
+    headers and prints `sent`, `refused` or `failed` with the next step; `--non-interactive`, no email, or no terminal
+    never offers it; the reply's server text is never printed.
 - [ ] **Implement; commit.**
 
 ### Task 18.4: The consent email on the maintenance tick

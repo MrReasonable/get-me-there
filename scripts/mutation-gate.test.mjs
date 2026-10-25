@@ -82,7 +82,8 @@ describe('mutation gate: timed-out mutants (ruling 10)', { timeout: 60_000 }, ()
     expect(wf).toMatch(/schedule:\s*\n\s+- cron: /);
     expect(wf).not.toMatch(/^\s*push:/m);
     expect(wf).not.toMatch(/^\s*pull_request:/m);
-    expect(wf).toMatch(/run: pnpm mutate\s*$/m);
+    expect(wf).toMatch(/run: pnpm --filter @gmt\/core mutate/);
+    expect(wf).toMatch(/run: pnpm --filter @gmt\/cli mutate\s*$/m);
     const ci = readFileSync(resolve(import.meta.dirname, '../.github/workflows/ci.yml'), 'utf8');
     expect(ci).not.toMatch(/pnpm mutate/);
   });

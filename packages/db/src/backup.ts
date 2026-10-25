@@ -2,6 +2,7 @@ import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readdirSync, rmS
 import { join } from 'node:path';
 import type { Clock } from '@gmt/core';
 import Database from 'better-sqlite3';
+import { ACTIVE_STATUS_SQL } from './schema/checks.js';
 
 const BACKUP_FILE = /^get-me-there-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z\.db$/;
 
@@ -22,6 +23,46 @@ export function integrityCheck(file: string): string {
 export function checkBackup(file: string, verify: (file: string) => string = integrityCheck): void {
   const verdict = verify(file);
   if (verdict !== 'ok') throw new Error(`integrity_check returned ${verdict}`);
+}
+
+/**
+ * What starting the app on this database will do (cb-b1-010), read without writing: `resumable` counts the top-level
+ * runs left active (the boot sweep marks a `running` one interrupted, then AUTO_RESUME resumes it), `scheduled` the
+ * enabled, undeleted searches with a schedule (each may catch up its latest missed firing once). A database with no
+ * such tables (never migrated) counts none.
+ */
+export function backupSummary(file: string): { resumable: number; scheduled: number } {
+  const db = new Database(file, { readonly: true, fileMustExist: true });
+  try {
+    const columns = (t: string): Set<string> => {
+      const rows: unknown = db.prepare(`PRAGMA table_info(${t})`).all();
+      const out = new Set<string>();
+      if (Array.isArray(rows))
+        for (const r of rows) if (typeof r === 'object' && r !== null && 'name' in r) out.add(String(r.name));
+      return out;
+    };
+    const n = (sql: string): number => {
+      const row: unknown = db.prepare(sql).get();
+      return typeof row === 'object' && row !== null && 'n' in row && typeof row.n === 'number' ? row.n : 0;
+    };
+    // why: an imported or restored file may predate later migrations, so each filter is used only where its column is
+    const ex = columns('search_executions');
+    const def = columns('search_definitions');
+    return {
+      resumable: ex.has('status')
+        ? n(
+            `SELECT COUNT(*) AS n FROM search_executions WHERE status IN (${ACTIVE_STATUS_SQL})${ex.has('is_child') ? ' AND is_child = 0' : ''}`,
+          )
+        : 0,
+      scheduled: def.has('schedule_cron')
+        ? n(
+            `SELECT COUNT(*) AS n FROM search_definitions WHERE schedule_cron IS NOT NULL${def.has('enabled') ? ' AND enabled = 1' : ''}${def.has('deleted_at') ? ' AND deleted_at IS NULL' : ''}`,
+          )
+        : 0,
+    };
+  } finally {
+    db.close();
+  }
 }
 
 /**

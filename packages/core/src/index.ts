@@ -35,6 +35,7 @@ export * from './coverage/buckets.js';
 export * from './coverage/rollUp.js';
 export * from './dates/epochDay.js';
 export * from './errors.js';
+export { EXIT } from './exit.js';
 export * from './labels/age.js';
 export { pointOfSaleLabel } from './labels/pointOfSale.js';
 export {

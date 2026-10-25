@@ -99,7 +99,9 @@ describe('loadSocs (spec §2: a captured, dated rejection value)', () => {
 });
 
 describe('readBack (ruling 9: compared by value everywhere)', () => {
-  const capture = loadSocs(dirWith(JSON.stringify(OK)), clock);
+  // why: WP16b (U10): loaded inside each test, so on a host without POSIX modes (Windows) the mode refusal fails these
+  // tests by title instead of failing the whole file at collection
+  const capture = () => loadSocs(dirWith(JSON.stringify(OK)), clock);
   const cases = [
     ['same', [{ name: 'SOCS', value: OK.value, domain: '.google.com' }], 'same'],
     ['changed', [{ name: 'SOCS', value: 'an-accept-value', domain: '.google.com' }], 'changed'],
@@ -137,7 +139,7 @@ describe('readBack (ruling 9: compared by value everywhere)', () => {
   // why: fix round 1 (TS M10): readBack never reads SOCS_STABLE; that the flag changes nothing is proved by the session
   // test "SOCS changed after a settled page → consent-unhandled (SOCS_STABLE …)"
   it.each(cases)('%s', (_n, cookies, expected) => {
-    expect(readBack(cookies, capture)).toBe(expected);
+    expect(readBack(cookies, capture())).toBe(expected);
   });
 });
 

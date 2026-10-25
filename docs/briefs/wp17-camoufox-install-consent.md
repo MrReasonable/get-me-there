@@ -181,7 +181,9 @@ Modify: `packages/providers/src/camoufox/provider.ts` (the notes' wording; `mont
 install,launch,selectors,run,server,classify,session,guard,record,recordArgs,pacer,gridPage,status}.ts`, its
 `package.json` (`consent` script) and `stryker.config.json` (`src/consentLine.ts`, `src/monthly.ts`);
 `scripts/check-boundaries.mjs` (the `run.ts` write exception); `apps/cli/src/commands/{setup,update,start,stop,
-uninstall}.ts` (not `status.ts`);
+uninstall}.ts` (not `status.ts`); `apps/cli/src/args.ts` and `apps/cli/src/cli.ts` (registering `consent`);
+`apps/cli/src/services/{set,specs}.ts` (the worker service in the one service list); `apps/cli/src/exec/system.ts`
+(the download and unpack steps, if they need more than WP16b's);
 `.github/workflows/ci.yml` (`camoufox-install`); `scripts/workflows.test.mjs`; `docs/setup.md` §14;
 `docs/providers.md`; the spec's and docs' provenance note copies with their docs test.
 

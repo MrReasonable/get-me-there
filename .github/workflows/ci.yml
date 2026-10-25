@@ -8,9 +8,21 @@ permissions:
 # Actions are pinned by commit SHA (plan decision 63); the comment names the tag the SHA was read from on 2026-10-17.
 jobs:
   test:
-    # why: ubuntu-latest moves to a new image without notice; a pinned image changes only when this line does.
-    runs-on: ubuntu-24.04
+    # why: decision 77 (WP16b): Linux on both architectures, macOS and Windows; each image is pinned, so a runner changes
+    # only when this list does. Windows runs every suite and passes within ci/windows-known-failures.txt (decision 78).
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm, macos-15, windows-2025]
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        shell: bash
     steps:
+      # why: Biome checks line endings, so Windows must check out the repository's LF as is
+      - name: keep LF line endings (Windows)
+        if: runner.os == 'Windows'
+        run: git config --global core.autocrlf false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -26,13 +38,33 @@ jobs:
       - run: pnpm -r typecheck
       # why: the root vitest config ignores each package's coverage thresholds (coverage is a root-only option), so every
       # package runs its own `test` script (its config, its thresholds, then its TZ runs); the root scripts project follows.
-      - run: pnpm -r --workspace-concurrency=1 test
-      - run: pnpm exec vitest run --project scripts
-      # why: recorded vendor responses are local-only (plan decisions 61, 64), so this fresh checkout has none. Every suite
-      # that replays them must report its skip by title, never pass vacuously; `shell: bash` adds -o pipefail, so a
-      # failing suite fails the step even through tee.
+      - name: unit suites with coverage
+        if: runner.os != 'Windows'
+        run: pnpm -r --workspace-concurrency=1 test
+      - name: root scripts
+        if: runner.os != 'Windows'
+        run: pnpm exec vitest run --project scripts
+      # why: decision 78: the Windows leg runs every project once, writing vitest's JSON results beside the default
+      # reporter; test failures do not end this step, the next step's exit code is the leg's, and no step may ignore a failure
+      - name: every suite (Windows)
+        if: runner.os == 'Windows'
+        # why: ts-b1-009: a stale results file from an earlier run on the runner can never be read as this run's
+        run: |
+          rm -f vitest-results.json vitest-list.json
+          # why: ts-b1-012: the suites that run built scripts never build inside the run
+          node scripts/ensure-build.mjs
+          pnpm exec vitest run --reporter=default --reporter=json --outputFile=vitest-results.json || true
+      - name: within the known Windows failures (decision 78)
+        if: runner.os == 'Windows'
+        run: |
+          pnpm exec vitest list --json=vitest-list.json > /dev/null
+          node scripts/windows-known-failures.mjs guard vitest-list.json --results vitest-results.json
+          node scripts/windows-known-failures.mjs check vitest-results.json
+      - name: gmt setup on Windows states the refusal and exits 0 (decision 78)
+        if: runner.os == 'Windows'
+        run: pnpm gmt setup --dry-run --answers ci/answers.e2e.template.json
       - name: recording-dependent suites skip visibly (decision 61)
-        shell: bash
+        if: runner.os != 'Windows'
         run: |
           pnpm exec vitest run --project api --project providers --project engine test/recorded/ test/searchapi/recorded.test.ts test/travelpayouts/replay.test.ts test/layerB/ --reporter=verbose | tee recorded-skip.log
           # why: WP14: the camoufox worker's recorded pages are local-only too (decision 61)
@@ -56,12 +88,166 @@ jobs:
             grep -qF "$title $suffix" recorded-skip.log || { echo "not skipped visibly: $title"; exit 1; }
           done
       - run: pnpm secret-scan
+        if: runner.os != 'Windows'
       - name: secret scan catches a planted fixture
+        if: runner.os != 'Windows'
         run: |
           mkdir -p packages/providers/fixtures/recorded/planted
-          echo '{"url":"https://x/?api_key=ABCDEFGH12345678"}' > packages/providers/fixtures/recorded/planted/p.json
+          echo '{"url":"http://127.0.0.1/?api_key=ABCDEFGH12345678"}' > packages/providers/fixtures/recorded/planted/p.json
           if pnpm secret-scan; then echo "scan missed the plant"; exit 1; fi
           rm -r packages/providers/fixtures/recorded/planted
+  install-e2e:
+    # Spec §9 "CI matrix", decision 77 (WP16b): a clone on a local main whose origin is a bare repository, set up with the
+    # gmt CLI as a real user service (no vendor key, port 3917), checked, updated to a new commit, and uninstalled. Each
+    # entry's mode is a literal from WP16b's research record (Task 16b.0); the only outbound call the app makes is its
+    # free FX-rate fetch, never ledgered.
+    needs: test
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            E2E-MODE: real
+          - runner: ubuntu-24.04-arm
+            E2E-MODE: real
+          - runner: macos-15
+            E2E-MODE: real
+    runs-on: ${{ matrix.runner }}
+    env:
+      E2E_MODE: ${{ matrix['E2E-MODE'] }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # why: the fixture pushes this commit into a bare repository, which a shallow history cannot do
+          fetch-depth: 0
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - name: mode
+        run: |
+          echo "E2E-MODE: $E2E_MODE"
+      - name: the user service manager (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo loginctl enable-linger "$(id -un)"
+          echo "XDG_RUNTIME_DIR=/run/user/$(id -u)" >> "$GITHUB_ENV"
+          # why: an event, not a poll: starting the user manager returns once it is up, its bus socket with it
+          sudo systemctl start "user@$(id -u).service"
+      - name: a clone on a local main whose origin is a bare repository
+        run: |
+          git init --bare -b main "$RUNNER_TEMP/origin.git"
+          git push "$RUNNER_TEMP/origin.git" HEAD:refs/heads/main
+          # why: a local clone hardlinks objects, and git's background maintenance after the push can rewrite one under
+          # it ("hardlink different from source"); --no-local copies through the pack protocol
+          git clone --no-local "$RUNNER_TEMP/origin.git" "$RUNNER_TEMP/gmt"
+          cd "$RUNNER_TEMP/gmt"
+          pnpm install --frozen-lockfile
+          node -e "const fs = require('fs'); fs.writeFileSync(process.argv[2], fs.readFileSync(process.argv[1]), { mode: 0o600 })" ci/answers.e2e.template.json "$RUNNER_TEMP/answers.json"
+      - name: setup
+        run: |
+          cd "$RUNNER_TEMP/gmt"
+          # why: ts-b1-011: a lint-only runner (none today) proves the plan only; the steps below need its services
+          if [ "$E2E_MODE" = lint-only ]; then
+            pnpm gmt setup --dry-run --non-interactive --answers "$RUNNER_TEMP/answers.json"
+            exit 0
+          fi
+          pnpm gmt setup --non-interactive --answers "$RUNNER_TEMP/answers.json"
+      - name: installed, running and healthy
+        if: env.E2E_MODE == 'real'
+        run: |
+          if [ "$RUNNER_OS" = macOS ]; then
+            test -f "$HOME/Library/LaunchAgents/local.get-me-there.app.plist"
+            launchctl print "gui/$(id -u)/local.get-me-there.app" > /dev/null
+          else
+            test -f "$HOME/.config/systemd/user/get-me-there-app.service"
+            systemctl --user is-active get-me-there-app.service
+          fi
+          curl -fsS http://127.0.0.1:3917/api/health
+      - name: status
+        if: env.E2E_MODE == 'real'
+        run: |
+          cd "$RUNNER_TEMP/gmt"
+          pnpm -s gmt status | tee "$RUNNER_TEMP/status.txt"
+          grep -E '^backups +ok' "$RUNNER_TEMP/status.txt"
+      - name: the app comes back after a hard kill (its service restarts it)
+        if: env.E2E_MODE == 'real'
+        run: |
+          if [ "$RUNNER_OS" = macOS ]; then
+            pid="$(launchctl print "gui/$(id -u)/local.get-me-there.app" | awk '$1 == "pid" { print $3; exit }')"
+          else
+            pid="$(systemctl --user show -p MainPID --value get-me-there-app.service)"
+          fi
+          test -n "$pid" && test "$pid" != 0
+          # why: an event, not a poll: the helper follows the app's log and returns on its next "listening" line
+          node scripts/after-app-listening.mjs -- kill -9 "$pid"
+          curl -fsS http://127.0.0.1:3917/api/health
+      - name: restart
+        if: env.E2E_MODE == 'real'
+        run: |
+          cd "$RUNNER_TEMP/gmt"
+          node scripts/after-app-listening.mjs -- pnpm gmt restart
+          curl -fsS http://127.0.0.1:3917/api/health
+      - name: a backup taken by hand restores
+        if: env.E2E_MODE == 'real'
+        run: |
+          cd "$RUNNER_TEMP/gmt"
+          pnpm -s gmt backup | tee "$RUNNER_TEMP/backup.txt"
+          file="$(sed -n 's/^backup written: //p' "$RUNNER_TEMP/backup.txt")"
+          test -f "$file"
+          pnpm gmt stop
+          pnpm gmt restore "$file"
+          node scripts/after-app-listening.mjs -- pnpm gmt start
+          curl -fsS http://127.0.0.1:3917/api/health
+      - name: update serves the new commit
+        if: env.E2E_MODE == 'real'
+        run: |
+          marker="gmt-e2e-update-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          git clone --no-local "$RUNNER_TEMP/origin.git" "$RUNNER_TEMP/pusher"
+          cd "$RUNNER_TEMP/pusher"
+          node -e "const fs = require('fs'); const f = 'apps/web/index.html'; fs.writeFileSync(f, fs.readFileSync(f, 'utf8').replace('</head>', '<meta name=\"gmt-e2e\" content=\"' + process.argv[1] + '\" />\n  </head>'))" "$marker"
+          git -c user.name=ci -c user.email=ci@example.invalid commit -qam 'e2e: a change to serve'
+          git push -q origin main
+          cd "$RUNNER_TEMP/gmt"
+          pnpm gmt update
+          # why: the page needs basic auth; curl reads the throwaway CI password from stdin, never from its argv
+          pass="$(node -e "const { parseEnv } = require('node:util'); const fs = require('fs'); const os = require('os'); process.stdout.write(parseEnv(fs.readFileSync(os.homedir() + '/.config/get-me-there/app.env', 'utf8')).APP_BASIC_AUTH_PASS)")"
+          printf 'user = "operator:%s"\n' "$pass" | curl -fsS -K - http://127.0.0.1:3917/ | grep -F "$marker"
+      - name: uninstall removes the services and keeps the data
+        if: env.E2E_MODE == 'real'
+        run: |
+          cd "$RUNNER_TEMP/gmt"
+          pnpm -s gmt uninstall --non-interactive | tee "$RUNNER_TEMP/uninstall.txt"
+          test "$(grep -c '^kept: ' "$RUNNER_TEMP/uninstall.txt")" = 3
+          # the app's and the backup job's unit files (and on macOS the log directory): three removed lines at least
+          test "$(grep -c '^removed: ' "$RUNNER_TEMP/uninstall.txt")" -ge 3
+          if [ "$RUNNER_OS" = macOS ]; then
+            if launchctl print "gui/$(id -u)/local.get-me-there.app" > /dev/null 2>&1; then echo "the app agent is still loaded"; exit 1; fi
+          else
+            if systemctl --user is-active --quiet get-me-there-app.service; then echo "the app service is still active"; exit 1; fi
+          fi
+          if curl -fsS --max-time 5 http://127.0.0.1:3917/api/health; then echo "the app still answers"; exit 1; fi
+          grep '^removed: ' "$RUNNER_TEMP/uninstall.txt" | cut -d' ' -f2- | while read -r p; do test ! -e "$p" || { echo "still there: $p"; exit 1; }; done
+          grep '^kept: ' "$RUNNER_TEMP/uninstall.txt" | cut -d' ' -f2- | while read -r p; do test -e "$p" || { echo "gone: $p"; exit 1; }; done
+      - name: collect the service logs
+        if: failure()
+        run: |
+          mkdir -p "$RUNNER_TEMP/logs"
+          if [ "$RUNNER_OS" = macOS ]; then cp "$HOME"/Library/Logs/get-me-there/*.log "$RUNNER_TEMP/logs/" || true
+          else journalctl --user -u get-me-there-app -u get-me-there-backup -n 500 --no-pager > "$RUNNER_TEMP/logs/journal.txt" || true
+          fi
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: failure()
+        with:
+          name: service-logs-${{ matrix.runner }}
+          path: ${{ runner.temp }}/logs
   docker:
     # Spec §13 through the shipped docker-compose.yml: the image builds from the lockfile, runs as node with the
     # production flags, no curl and no secret or recording inside; compose boots it healthy on a fresh volume; it backs

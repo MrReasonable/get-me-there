@@ -3,7 +3,15 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, w
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { acquire, breakStale, lockPathFor, readLock, realOps, release } from './ensure-build-lib.mjs';
+import {
+  acquire,
+  breakStale,
+  lockPathFor,
+  readLock,
+  realOps,
+  release,
+  stopChildren,
+} from './ensure-build-lib.mjs';
 
 // why: review code-architect M5 — two test files each ran `pnpm --filter @gmt/api... build`, and under the root
 // `pnpm test` they run in parallel, so one tsc could rewrite a dist file the other's script was importing. One script
@@ -325,9 +333,12 @@ describe('scripts/ensure-build-lib.mjs build lock ownership (CodeRabbit batch 3)
       expect(await exited).toMatchObject({ code: 128 + { SIGINT: 2, SIGTERM: 15, SIGHUP: 1 }[sig] });
       expect(Date.now() - started).toBeLessThan(10_000);
       expect(existsSync(lock)).toBe(false);
-      // the build itself was stopped too, never left running unlocked
-      await new Promise((ok) => setTimeout(ok, 200));
-      expect(realOps.alive(buildPid)).toBe(false);
+      // the build itself was stopped too, never left running unlocked: it writes into the same stdout pipe as
+      // ensure-build, so the pipe closes only once it has exited too (an event, no fixed wait)
+      // (an exited process may wait a moment to be reaped, so the close, not a pid probe, is the proof)
+      if (!child.stdout.closed) await new Promise((ok) => child.stdout.once('close', ok));
+      expect(child.stdout.closed).toBe(true);
+      expect(buildPid).toBeGreaterThan(0);
     },
   );
 
@@ -344,6 +355,29 @@ describe('scripts/ensure-build-lib.mjs build lock ownership (CodeRabbit batch 3)
     const text = readFileSync(join(REPO, 'scripts', 'ensure-build.mjs'), 'utf8');
     expect(text).toContain('await underLock(LOCK,');
     expect(text).not.toContain('execFileSync');
+    expect(text).toContain('buildStep(REPO)');
+  });
+
+  it('the build step starts pnpm through a shell on Windows only, and underLock hands spawn those options (CodeRabbit, PR #11)', async () => {
+    const { buildStep, underLock } = await import('./ensure-build-lib.mjs');
+    expect(buildStep('/r', 'win32')).toEqual({
+      cmd: 'pnpm',
+      args: ['--filter', '@gmt/api...', 'build'],
+      opts: { cwd: '/r', stdio: 'ignore', shell: true },
+    });
+    expect(buildStep('/r', 'linux').opts.shell).toBe(false);
+    const seen = [];
+    const { EventEmitter } = await import('node:events');
+    const spawnFn = (cmd, args, opts) => {
+      seen.push({ cmd, args, opts });
+      const c = new EventEmitter();
+      c.pid = 1;
+      setImmediate(() => c.emit('exit', 0, null));
+      return c;
+    };
+    const step = buildStep('/r', 'win32');
+    await underLock(lockIn(), (run) => run(step.cmd, step.args, step.opts), { spawnFn });
+    expect(seen).toEqual([{ cmd: 'pnpm', args: step.args, opts: { ...step.opts, detached: true } }]);
   });
 
   it('a build killed outright (SIGKILL) leaves a lock the next run takes at once', async () => {
@@ -384,5 +418,50 @@ describe('scripts/ensure-build-lib.mjs lock path (CodeRabbit batch 3)', () => {
   it('is what ensure-build.mjs uses', () => {
     const text = readFileSync(join(REPO, 'scripts', 'ensure-build.mjs'), 'utf8');
     expect(text).toContain('const LOCK = lockPathFor(REPO);');
+  });
+});
+
+describe('stopChildren: a stop ends each build child’s whole tree (CodeRabbit, PR #11)', () => {
+  const child = (pid) => ({
+    pid,
+    killed: [],
+    kill(sig) {
+      this.killed.push(sig);
+    },
+  });
+  it('on Windows it runs taskkill /T /F for each child, ignoring one that already exited', () => {
+    const ran = [];
+    const a = child(11);
+    const b = child(22);
+    stopChildren([a, b], 'SIGTERM', {
+      platform: 'win32',
+      run: (cmd, args) => {
+        ran.push([cmd, ...args].join(' '));
+        if (args[1] === '22') throw new Error('ERROR: The process "22" not found.');
+      },
+      killGroup: () => {
+        throw new Error('no process groups on Windows');
+      },
+    });
+    expect(ran).toEqual(['taskkill /pid 11 /T /F', 'taskkill /pid 22 /T /F']);
+    expect(a.killed).toEqual([]);
+  });
+  it('elsewhere it signals the process group, and the child alone when the group is gone', () => {
+    const groups = [];
+    const a = child(11);
+    const b = child(22);
+    stopChildren([a, b], 'SIGHUP', {
+      platform: 'linux',
+      run: () => {
+        throw new Error('taskkill is Windows only');
+      },
+      killGroup: (pid, sig) => {
+        groups.push(`${pid} ${sig}`);
+        if (pid === 22) throw new Error('ESRCH');
+      },
+    });
+    expect(groups).toEqual(['11 SIGHUP', '22 SIGHUP']);
+    expect(a.killed).toEqual([]);
+    expect(b.killed).toEqual(['SIGHUP']);
   });
 });

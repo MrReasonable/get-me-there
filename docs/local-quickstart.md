@@ -1,8 +1,7 @@
 # Docker Desktop on this Mac
 
-Until `pnpm gmt setup` ships (WP16b), Docker is the working local path. The native
-wizard and `docs/setup.md` section 0 land with that CLI. Prefer Docker for now, or when
-you want the container:
+For the native path (no Docker), run `pnpm gmt setup` as [`setup.md`](setup.md) section 0
+describes. This page is the container path on a Mac with Docker Desktop:
 
 1. Open Docker Desktop and wait until it is running.
 2. Create `.env` next to `docker-compose.yml` if you do not have one yet
@@ -36,4 +35,4 @@ folder. To keep a copy off this machine, follow [`setup.md`](setup.md) section 6
 `docker compose exec -T app node scripts/backup.mjs`, then
 `docker compose cp app:/data/backups/. /Volumes/<other disk>/get-me-there-backups` (a private folder on another disk). The longer
 setup guide also covers optional email, scheduled backups, moving to the native path
-(`pnpm gmt setup --import-docker` once the CLI lands), and remote access.
+(`pnpm gmt setup --import-docker`, [`setup.md`](setup.md) section 0), and remote access.

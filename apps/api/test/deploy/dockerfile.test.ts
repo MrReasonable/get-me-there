@@ -120,8 +120,10 @@ describe('Dockerfile (spec §13, §5.5, §9 item 8)', () => {
 
   it('installs with the frozen lockfile and pnpm from packageManager, and asserts the sqlite prebuilt in every stage', () => {
     const text = all.join('\n');
-    // why: WP14: the build stage installs everything but the camoufox worker
-    expect(text).toMatch(/pnpm install --frozen-lockfile (--filter '!@gmt\/camoufox-worker' )?--store-dir/);
+    // why: WP14, WP16b: the build stage installs everything but the camoufox worker and the gmt CLI
+    expect(text).toMatch(
+      /pnpm install --frozen-lockfile (--filter '!@gmt\/camoufox-worker' --filter '!@gmt\/cli' )?--store-dir/,
+    );
     expect(text).toMatch(/pnpm install --frozen-lockfile --prod --filter "@gmt\/api\.\.\."/);
     expect(text).toContain('corepack enable pnpm');
     expect(text).toContain('packageManager');

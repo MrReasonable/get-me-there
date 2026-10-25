@@ -12,7 +12,7 @@ import { join } from 'node:path';
 import { fixedClock } from '@gmt/core';
 import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
-import { backupDatabase, checkBackup, integrityCheck } from '../src/backup.js';
+import { backupDatabase, backupSummary, checkBackup, integrityCheck } from '../src/backup.js';
 import { at, count, freshDb, openTracked, T0, tmpDir } from './helpers/db.js';
 
 const NAME = 'get-me-there-2026-10-14T12-00-00-000Z.db';
@@ -176,5 +176,45 @@ describe('checkBackup (spec §13 "Restore"; the one rule scripts/check-backup.mj
     expect(() => checkBackup(path, () => '*** in database main ***')).toThrow(
       'integrity_check returned *** in database main ***',
     );
+  });
+});
+
+describe('backupSummary (cb-b1-010: what starting the app on a restored or imported database will do)', () => {
+  const DEFINITION = `INSERT INTO search_definitions (id, name, origins_json, destinations_json, window_json, min_nights, max_nights, cabin, constraints_json,
+    verification_policy_json, budget_json, providers_json, schedule_cron, schedule_tz, enabled, deleted_at, created_at, updated_at)
+   VALUES (@id, 'London to New York', '["LHR"]', '["JFK"]', '{"kind":"relative","startOffsetDays":7,"lengthDays":182}', 10, 10, 'economy', '{}',
+    '{"maxCells":10,"topN":10,"alwaysInclude":[],"expandTop":2,"bookingLinks":true}', '{"maxCalls":0,"maxFreeCalls":10,"maxCostMicroGbp":0}',
+    '{"discovery":["travelpayouts"],"verification":[],"discoveryRefreshHours":{}}', @cron, 'Europe/London', @enabled, @deleted, @at, @at)`;
+  const EXECUTION = `INSERT INTO search_executions (id, definition_id, definition_snapshot_json, trigger, status, created_at)
+   VALUES (@id, @definitionId, '{"budget":{"maxCalls":0,"maxFreeCalls":10,"maxCostMicroGbp":0}}', 'manual', @status, @at)`;
+
+  it('counts the top-level runs a start would resume and the enabled scheduled searches it may catch up', () => {
+    const { path, db } = live();
+    const def = db.raw.prepare(DEFINITION);
+    def.run({ id: 'd1', cron: '0 6 * * 1', enabled: 1, deleted: null, at: T0 });
+    def.run({ id: 'd2', cron: '0 6 * * 2', enabled: 0, deleted: null, at: T0 });
+    def.run({ id: 'd3', cron: null, enabled: 1, deleted: null, at: T0 });
+    def.run({ id: 'd4', cron: '0 6 * * 3', enabled: 1, deleted: T0, at: T0 });
+    const ex = db.raw.prepare(EXECUTION);
+    ex.run({ id: 'e1', definitionId: 'd1', status: 'running', at: T0 });
+    ex.run({ id: 'e2', definitionId: 'd3', status: 'interrupted', at: T0 });
+    ex.run({ id: 'e3', definitionId: 'd1', status: 'completed', at: T0 });
+    expect(backupSummary(path)).toEqual({ resumable: 2, scheduled: 1 });
+  });
+
+  it('an older schema counts what its columns allow: no is_child means every active row; a definitions table without a schedule counts none', () => {
+    const file = join(tmpDir(), 'old.db');
+    const db = new Database(file);
+    db.exec('CREATE TABLE search_executions (id TEXT PRIMARY KEY, status TEXT NOT NULL)');
+    db.exec("INSERT INTO search_executions VALUES ('a', 'running'), ('b', 'completed')");
+    db.exec('CREATE TABLE search_definitions (id TEXT PRIMARY KEY, name TEXT)');
+    db.close();
+    expect(backupSummary(file)).toEqual({ resumable: 1, scheduled: 0 });
+  });
+
+  it('a database without those tables (before any migration) counts none', () => {
+    const file = join(tmpDir(), 'empty.db');
+    new Database(file).close();
+    expect(backupSummary(file)).toEqual({ resumable: 0, scheduled: 0 });
   });
 });

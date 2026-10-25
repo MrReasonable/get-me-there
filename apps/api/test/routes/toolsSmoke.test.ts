@@ -25,7 +25,13 @@ async function harness(opts: Parameters<typeof createHarness>[0] = {}): Promise<
 
 const TOOL = apiContract.toolRunResponseSchema;
 const body = { origin: 'LHR', destination: 'JFK', budget: 4 };
-const ok: ToolRunResponse = { exitCode: 0, summary: 'cheapest found £1', lines: ['x'], fixturesWritten: [] };
+const ok: ToolRunResponse = {
+  exitCode: 0,
+  summary: 'cheapest found £1',
+  lines: ['x'],
+  fixturesWritten: [],
+  searchApiCreditsLedgered: 0,
+};
 
 // why: ruling 11: cases run the smoke in process over a seeded database; 30 s survives a loaded runner.
 describe('POST /api/tools/smoke (spec §10, §13)', { timeout: 30_000 }, () => {

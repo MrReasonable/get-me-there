@@ -5,7 +5,7 @@
 // code-architect M5). Development and CI only; the image does not carry this script. Logic: ensure-build-lib.mjs.
 import { utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { lockPathFor, needsBuild, underLock } from './ensure-build-lib.mjs';
+import { buildStep, lockPathFor, needsBuild, underLock } from './ensure-build-lib.mjs';
 
 const REPO = join(import.meta.dirname, '..');
 const STAMP = join(REPO, 'node_modules', '.gmt-build-stamp');
@@ -16,7 +16,8 @@ const LOCK = lockPathFor(REPO);
 // leaves a lock whose dead pid the next run takes over at once (ensure-build-lib.mjs).
 await underLock(LOCK, async (run) => {
   if (needsBuild(REPO, STAMP)) {
-    await run('pnpm', ['--filter', '@gmt/api...', 'build'], { cwd: REPO, stdio: 'ignore' });
+    const step = buildStep(REPO);
+    await run(step.cmd, step.args, step.opts);
     writeFileSync(STAMP, '');
     utimesSync(STAMP, new Date(), new Date());
     console.log('built');

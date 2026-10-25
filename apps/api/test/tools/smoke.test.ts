@@ -208,6 +208,17 @@ describe('runSmoke (spec §9 item 7)', { timeout: 30_000 }, () => {
     expect((await smoke(ports, cli(4, true))).r.exitCode).toBe(EXIT.ok);
   });
 
+  it('a dry run returns the credits tool runs already ledgered as a field, not only in prose (U7, ca-b1-018)', async () => {
+    const ports = smokePorts();
+    expect((await smoke(ports, cli(4, false, LHR, JFK, true))).r.searchApiCreditsLedgered).toBe(0);
+    expect((await smoke(ports, cli(4))).r.exitCode).toBe(EXIT.ok);
+    const dry = await smoke(ports, cli(4, false, LHR, JFK, true));
+    expect(dry.r.searchApiCreditsLedgered).toBe(4);
+    expect(dry.urls).toEqual([]);
+    // a refusal before the spend check has no figure
+    expect((await smoke(ports, cli(4, false, LHR, LHR, true))).r.searchApiCreditsLedgered).toBeNull();
+  });
+
   it("the cap is frozen at min(--budget, worst case): --budget 3 --confirm-rerun lets the guard refuse the chain's last step before the fetch (decision 66, cost-wp4b-011)", async () => {
     const ports = smokePorts();
     const { r, urls } = await smoke(ports, cli(3, true));

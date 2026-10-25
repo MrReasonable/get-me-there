@@ -1,0 +1,37 @@
+{
+  "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
+  "testRunner": "command",
+  "commandRunner": {
+    "$comment": "Left out of the per-mutant command, all run by ci.yml on every push: test/real (its real-SQLite interruption sweep takes about 80 s a run), and the two files that start real child processes, runner.test.ts (runner.ts is not under mutation) and system-children.test.ts (system.test.ts covers the same rules with stand-in runners): a bailed worker killed while it starts a child can leave the child stuck in the kernel (PR #11)",
+    "command": "pnpm exec vitest run --coverage.enabled=false --bail=1 --exclude test/exec/runner.test.ts --exclude test/exec/system-children.test.ts test/plan test/services test/setup test/exec test/commands"
+  },
+  "incremental": true,
+  "incrementalFile": "reports/stryker-incremental.json",
+  "mutate": [
+    "src/plan/**/*.ts",
+    "src/services/**/*.ts",
+    "src/exec/system.ts",
+    "src/setup/appEnv.ts",
+    "src/setup/answers.ts",
+    "src/setup/secrets.ts",
+    "src/setup/importDb.ts",
+    "src/setup/importDocker.ts",
+    "src/commands/update.ts",
+    "src/commands/restore.ts",
+    "src/commands/uninstall.ts"
+  ],
+  "thresholds": {
+    "high": 90,
+    "low": 80,
+    "break": 80
+  },
+  "reporters": ["html", "json", "progress"],
+  "jsonReporter": {
+    "fileName": "reports/mutation/mutation.json"
+  },
+  "timeoutMS": 15000,
+  "timeoutFactor": 3,
+  "concurrency": 2,
+  "ignorePatterns": ["dist", "/coverage", "reports"],
+  "inPlace": false
+}

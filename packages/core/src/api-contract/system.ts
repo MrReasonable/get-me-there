@@ -101,6 +101,12 @@ export const toolRunResponseSchema = z.object({
   summary: z.string(),
   lines: z.array(z.string()),
   fixturesWritten: z.array(z.string()),
+  /**
+   * The smoke's: the SearchApi credits tool runs already ledgered in this budget window when it checked its spend
+   * (decision 20's running total, which `gmt smoke` prints and confirms; U7). Null for a refusal before that check and
+   * for `record`.
+   */
+  searchApiCreditsLedgered: z.number().int().min(0).nullable(),
 });
 /**
  * Spec §10 `GET /api/tools/smoke/plan` (ledgers nothing; `gmt smoke` prints it before it asks): the smoke's worst case
