@@ -686,8 +686,8 @@ provider for an hour (never a silent zero), and the selectors and grammar
 must be re-dated against a new recording; `camoufox-js` is marked
 experimental by its authors, and an upgrade of it, of `playwright-core` or of
 the Camoufox binary is a re-verification. **Speed:** a page takes about 20–60
-s (load, settle, read) plus the 30 s spacing, about 50–90 s in all, so 100
-cells a run take about 1½–2½ hours; in the designed `grid` mode a page opens a
+s (load, settle, read) plus the page spacing (30 s by default), so at the
+default about 50–90 s in all and 100 cells a run take about 1½–2½ hours; in the designed `grid` mode a page opens a
 block in about 30 s and each scroll takes about 9.3 s (measured 2026-10-18),
 so a page with its full 30 scrolls takes about 5 minutes, and about 30
 minutes at the maximums (60 scrolls, 30 s spacing). **Availability:** the provider runs only

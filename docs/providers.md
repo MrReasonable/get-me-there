@@ -115,9 +115,10 @@ at least 24); an unrecognised page for 1 hour.
 comes from the operator's own address, so a block lands on that address; the profile is never signed in. **Brittleness:**
 a changed page reads as unrecognised and stops the provider for an hour; the selectors and grammar must be re-dated
 against a new recording, and an upgrade of `camoufox-js`, `playwright-core` or the binary is a re-verification.
-**Speed:** about 50–90 s a page, so 100 cells a run take about 1½–2½ hours. **Availability:** only while the Mac is on
-and the worker runs; otherwise its cells read skipped ("browser worker not reachable"). **Image size:** none in the app
-image. **The worker key:** any process or container that can reach the worker (on Docker Desktop, every container on the
+**Speed:** about 50–90 s a page at the default 30 s page spacing (`CAMOUFOX_MIN_SPACING_SECONDS`), so 100 cells a run
+take about 1½–2½ hours. **Availability:** only while the machine running the worker is on and the worker runs; otherwise
+its cells read skipped ("browser worker not reachable"). **Image size:** none in the app image; Camoufox (313 MB to
+download and about 670 MB unpacked on macOS, 654 MB and about 1.25 GB on Linux) stays on the operator's machine. **The worker key:** any process or container that can reach the worker (on Docker Desktop, every container on the
 Mac) is stopped only by `CAMOUFOX_WORKER_KEY`. **Money:** none.
 
 **Coverage.** In `list` mode a page prices one day pair, so a run prices at most `CAMOUFOX_EXECUTION_PAGE_CAP` day pairs

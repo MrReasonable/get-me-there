@@ -32,6 +32,12 @@ export const RECONFIGURE_GROUPS = [
 ] as const;
 export type ReconfigureGroup = (typeof RECONFIGURE_GROUPS)[number];
 
+/** `start`, `stop` and `restart --only <service>`: one service of the set (WP17: the browser worker alone, for recordings). */
+export const ONLY_SERVICES = ['app', 'backup', 'worker'] as const;
+export type OnlyService = (typeof ONLY_SERVICES)[number];
+export const isOnlyService = (s: string): s is OnlyService => ONLY_SERVICES.some((x) => x === s);
+const ONLY_HELP = `--only <service>          act on one service only: ${ONLY_SERVICES.join(', ')}`;
+
 type OptionSpec = { type: 'boolean' } | { type: 'string' };
 const bool: OptionSpec = { type: 'boolean' };
 const str: OptionSpec = { type: 'string' };
@@ -75,23 +81,30 @@ const SPEC: Record<
     help: 'show the services, the settings files and anything that needs attention',
     flags: [],
   },
-  start: { options: { 'dry-run': bool }, positional: null, help: 'start the services', flags: [] },
+  start: {
+    options: { 'dry-run': bool, only: str },
+    positional: null,
+    help: 'start the services',
+    flags: [ONLY_HELP],
+  },
   stop: {
-    options: { 'dry-run': bool, wait: bool, force: bool },
+    options: { 'dry-run': bool, wait: bool, force: bool, only: str },
     positional: null,
     help: 'stop the services (refuses while a search runs, unless --wait or --force)',
     flags: [
       '--wait                    wait for a running search to finish instead of refusing',
       '--force                   go ahead although a search is running (it is interrupted)',
+      ONLY_HELP,
     ],
   },
   restart: {
-    options: { 'dry-run': bool, wait: bool, force: bool },
+    options: { 'dry-run': bool, wait: bool, force: bool, only: str },
     positional: null,
     help: 'restart the services (refuses while a search runs, unless --wait or --force)',
     flags: [
       '--wait                    wait for a running search to finish instead of refusing',
       '--force                   go ahead although a search is running (it is interrupted)',
+      ONLY_HELP,
     ],
   },
   logs: { options: {}, positional: null, help: 'follow the app’s log', flags: [] },
@@ -201,6 +214,12 @@ export function parseCommandLine(argv: readonly string[]): Parsed {
     return {
       kind: 'usage',
       message: `unknown group for --reconfigure: ${reconfigure} (one of ${RECONFIGURE_GROUPS.join(', ')})`,
+    };
+  const only = flags.only;
+  if (typeof only === 'string' && !isOnlyService(only))
+    return {
+      kind: 'usage',
+      message: `unknown service for --only: ${only} (one of ${ONLY_SERVICES.join(', ')})`,
     };
   return { kind: 'command', command: first, flags, positional: parsed.positionals[0] ?? null };
 }

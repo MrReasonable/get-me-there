@@ -86,9 +86,12 @@ earn their flags through recording sessions.
   `DEFAULT_BINARY_BUILD` and `CAMOUFOX_BINARY_BUILD`; enforcing the monthly page and scroll caps across every caller
   over the ledger's billing month (decision 82; WP16a's worker already reads and reports the caps and the billing day);
   `/v1/status` filling the fields WP16a put in `workerStatusSchema` (`osArch`, `build`, `consent` with `boundedBy`
-  `cookie`, `capture` or `check` and null once voided, `monthly`, `appInstances`), with `flags` the running entry's. This
-  package does not edit `packages/core/src/camoufox/protocol.ts`; a field it finds missing goes back to a WP16a-style
-  change merged first (decision 76's compatibility rule).
+  `cookie`, `capture` or `check` and null once voided, `monthly`, `appInstances`), with `flags` the running entry's. In
+  `packages/core/src/camoufox/protocol.ts` this package only adds: the worker answer kind `monthly-cap` (HTTP 429, with
+  the cap and the window's end; the adapter maps it to `BudgetExceeded` at `provider-month`), which WP16a's schema
+  lacked and decision 82's refusal needs, landed in its own first commit with the adapter's answer map so the app and
+  the worker read it from the same change (decision 76's rule: the schema before any worker emits it); and, in
+  `builds.ts`, the `LANDING_VERIFIED` flag WP16a §3 listed. No existing field changes.
 - `run.ts session export | seed | merge` for the recording sessions (Task 17.8).
 - The `landing` page kind and `LANDING_VERIFIED`; `consentCaptureGuard` and the `consent-research` recorder kind;
   research 17.0c; then the `consent` command with `export`, `import` and `check`; `gmt consent` with the service stop,
@@ -249,8 +252,8 @@ only if 17.0c proves a mark; 17.6–17.10 follow.
     earlier of the cookie's expiry and `capturedAt` + 13 months, `boundedBy` `cookie` or `capture`; kind `not-shown`:
     `checkedAt` + 13 months, `boundedBy` `check`; kind `voided`: `expiresAt` and `boundedBy` null), `monthly`,
     `appInstances`. The worker's status parses under `core`'s `workerStatusSchema` as WP16a left it (the shared fixture
-    of Task 16a.5 is regenerated from this worker and must still parse), and this package's diff leaves
-    `packages/core/src/camoufox/protocol.ts` unchanged (a CI check over the branch diff).
+    of Task 16a.5 is regenerated from this worker and must still parse); `packages/core/src/camoufox/protocol.ts`
+    changes only by adding answer kinds (`monthly-cap`, §2).
 - [ ] **Implement; commit.**
 
 ### Task 17.3: The worker's monthly caps (decision 82)
@@ -409,11 +412,13 @@ only if 17.0c proves a mark; 17.6–17.10 follow.
 
 ### Task 17.8: The recording sessions (operator, with the implementer)
 
-- [ ] **Before each session:** `pnpm gmt stop` for the host worker; no camoufox run active (`GET
+- [ ] **Before each session:** `pnpm gmt stop --only worker` for the host worker (the worker alone: a native app keeps
+  running); no camoufox run active (`GET
   /api/executions/active` and the definitions' providers); refuse while the host worker's persisted cool-down is
   active; seed the session's last-page time from the host's (`run.ts session export` on the host piped into `run.ts
   session seed` in the session's container or throwaway `HOME`). **After:** pipe the session's `run.ts session export`
-  into the host's `run.ts session merge` (the later last-page time, the counts added) before `pnpm gmt start`, or wait
+  into the host's `run.ts session merge` (the later last-page time, the counts added) before `pnpm gmt start --only
+  worker`, or wait
   one spacing interval when the windows differ; record the session's page and scroll counts in the session record.
   Tests: seed sets only the last-page time; merge adds counts and keeps the later time; merge refuses while the host
   worker runs or the line fails its schema.

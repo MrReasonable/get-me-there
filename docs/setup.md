@@ -839,13 +839,15 @@ other Google use from the same network; the worker's profile is never signed in,
 used. **Brittleness:** Google changes the page without notice; a changed page reads as unrecognised and stops the
 provider for an hour (never a silent zero), and the selectors and grammar must be re-dated against a new recording;
 `camoufox-js` is marked experimental by its authors, and an upgrade of it, of `playwright-core` or of the Camoufox
-binary is a re-verification. **Speed:** a page takes about 20–60 s (load, settle, read) plus the 30 s spacing, about
-50–90 s in all, so 100 cells a run take about 1½–2½ hours. **Availability:** the provider runs only while the
-operator's machine is on and the worker is running; otherwise its cells read skipped ("browser worker not reachable")
-and every other provider runs. **Image size:** none in the app image, which is unchanged; Camoufox (several hundred
-megabytes) and the worker's dependencies stay on the operator's Mac. **The worker key:** any process or container that
-can reach the worker's address (Docker Desktop forwards `host.docker.internal` to the Mac's loopback for every
-container) is stopped only by `CAMOUFOX_WORKER_KEY`. **Money:** none, against SearchApi's ~£32 a month.
+binary is a re-verification. **Speed:** a page takes about 20–60 s (load, settle, read) plus the page spacing
+(`CAMOUFOX_MIN_SPACING_SECONDS`, 30 s by default), so at the default about 50–90 s in all and 100 cells a run take
+about 1½–2½ hours; a smaller spacing shortens the run, never the page. **Availability:** the provider runs only while
+the machine running the worker is on and the worker is running; otherwise its cells read skipped ("browser worker not
+reachable") and every other provider runs. **Image size:** none in the app image, which is unchanged; Camoufox (313 MB
+to download and about 670 MB unpacked on macOS, 654 MB and about 1.25 GB on Linux) and the worker's dependencies stay on
+the operator's machine. **The worker key:** any process or container that can reach the worker's address (on macOS,
+Docker Desktop forwards `host.docker.internal` to the Mac's loopback for every container) is stopped only by
+`CAMOUFOX_WORKER_KEY`. **Money:** none, against SearchApi's ~£32 a month.
 
 Coverage, stated plainly: in `list` mode a page prices one day pair, so a run prices at most
 `CAMOUFOX_EXECUTION_PAGE_CAP` day pairs and a month at most `CAMOUFOX_MONTHLY_PAGE_CAP`: with the defaults, 100 a run and
@@ -1035,7 +1037,8 @@ shows it listening on `127.0.0.1` only. To see which navigation a stopped page r
 ### Turn it off or recover
 
 - Set `CAMOUFOX_ENABLED=false` and restart the app.
-- Stop the worker: `pnpm gmt stop` (with the app), or the worker alone with
+- Stop the worker alone with `pnpm gmt stop --only worker` (the app keeps running; `pnpm gmt start --only worker`
+  starts it again after its start check), or by hand with
   `launchctl bootout gui/$(id -u)/local.get-me-there.camoufox-worker` on macOS or
   `systemctl --user stop get-me-there-camoufox-worker.service` on Linux. A page in flight finishes before the worker
   exits.

@@ -3,17 +3,24 @@ import { refusalWords, workerCheck } from '../camoufox/browserSetup.js';
 import { type Deps, EXIT } from '../deps.js';
 import { describeChecks, settingsChecks, staleChecks } from '../services/checks.js';
 import { bootOutRefused, readStartRefusal, refusalLine } from '../worker/refusal.js';
-import { installed, lifecycleActions, refuseOnWindows, runLifecycle } from './lifecycle.js';
+import { installed, lifecycleActions, onlyEntries, refuseOnWindows, runLifecycle } from './lifecycle.js';
 
 /** `gmt start` (spec §12, §13): refuses over a settings file others can read or a unit whose Node or checkout is gone. */
 export async function startCommand(flags: Flags, _p: string | null, deps: Deps): Promise<number> {
   const win = refuseOnWindows(deps);
   if (win !== null) return win;
-  const { entries, facts } = await installed(deps);
-  if (entries.length === 0) {
+  const all = await installed(deps);
+  if (all.entries.length === 0) {
     deps.io.err('nothing is installed: run pnpm gmt setup\n');
     return EXIT.badConfig;
   }
+  const only = onlyEntries(flags, all.entries);
+  if (!only.ok) {
+    deps.io.err(`${only.message}\n`);
+    return EXIT.badConfig;
+  }
+  const { entries } = only;
+  const { facts } = all;
   const fails = [...settingsChecks(deps), ...staleChecks(deps, entries, facts)].filter(
     (c) => c.level === 'fail',
   );

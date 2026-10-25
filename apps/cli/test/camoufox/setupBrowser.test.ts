@@ -518,3 +518,61 @@ describe('worker.env and its helpers', () => {
     expect(pagesFromProviders('{"providers":1}')).toBeNull();
   });
 });
+
+// why: the coordinator's ruling for Task 17.8: a recording session stops the browser worker alone, never a native app
+describe('start, stop and restart --only <service>', () => {
+  async function on() {
+    const m = await world();
+    answers(m, { enabled: true });
+    await runCli(['setup', '--non-interactive', '--answers', '/work/b.json'], m.deps);
+    m.deps.http = stubHttp({
+      'GET /api/executions/active': () => ({ status: 200, body: { execution: null } }),
+      'GET /api/health': () => ({ status: 200, body: { ok: true } }),
+    });
+    m.executor.log.length = 0;
+    m.checks.length = 0;
+    return m;
+  }
+  const runs = (log: readonly Action[]) =>
+    log.filter((a) => a.kind === 'run').map((a) => (a.kind === 'run' ? a.argv.join(' ') : ''));
+  it('stop --only worker stops the worker alone; the app keeps running', async () => {
+    const m = await on();
+    expect(await runCli(['stop', '--only', 'worker'], m.deps)).toBe(0);
+    expect(runs(m.executor.log)).toEqual(['launchctl bootout gui/501/local.get-me-there.camoufox-worker']);
+    expect(m.loaded.has('local.get-me-there.app')).toBe(true);
+    expect(m.loaded.has('local.get-me-there.camoufox-worker')).toBe(false);
+  });
+  it('start --only worker checks the worker and starts it alone', async () => {
+    const m = await on();
+    await runCli(['stop', '--only', 'worker'], m.deps);
+    m.executor.log.length = 0;
+    expect(await runCli(['start', '--only', 'worker'], m.deps)).toBe(0);
+    expect(m.checks).toHaveLength(1);
+    expect(runs(m.executor.log)).toEqual([
+      'launchctl bootstrap gui/501 /Users/op/Library/LaunchAgents/local.get-me-there.camoufox-worker.plist',
+    ]);
+  });
+  it('stop --only app leaves the worker; restart --only worker restarts it alone', async () => {
+    const m = await on();
+    expect(await runCli(['stop', '--only', 'app'], m.deps)).toBe(0);
+    expect(runs(m.executor.log)).toEqual(['launchctl bootout gui/501/local.get-me-there.app']);
+    m.executor.log.length = 0;
+    expect(await runCli(['restart', '--only', 'worker'], m.deps)).toBe(0);
+    expect(runs(m.executor.log).every((r) => r.includes('camoufox-worker'))).toBe(true);
+    expect(runs(m.executor.log).length).toBeGreaterThan(0);
+  });
+  it('a service that is not installed is refused with 78, nothing done; an unknown one is a usage error', async () => {
+    const m = await world();
+    for (const verb of ['start', 'stop', 'restart']) {
+      m.io.stderr = '';
+      expect(await runCli([verb, '--only', 'worker'], m.deps), verb).toBe(78);
+      expect(m.io.stderr).toBe('the worker service is not installed: nothing to do\n');
+    }
+    expect(m.executor.log).toEqual([]);
+    expect(await runCli(['stop', '--only', 'browser'], m.deps)).toBe(64);
+    expect(m.io.stderr).toContain('unknown service for --only: browser (one of app, backup, worker)');
+    m.io.stdout = '';
+    expect(await runCli(['stop', '--help'], m.deps)).toBe(0);
+    expect(m.io.stdout).toContain('--only <service>          act on one service only: app, backup, worker');
+  });
+});
