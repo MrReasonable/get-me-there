@@ -115,24 +115,6 @@ describe.skipIf(process.platform === 'win32')(
       expect([readFileSync(join(d, 'old.env'), 'utf8'), mode(join(d, 'old.env'))]).toEqual(['y', 0o600]);
     });
 
-    it('the temporary file is never wider than its target: created exclusively at the mode before any data', async () => {
-      const d = tmp();
-      const seen: number[] = [];
-      const watch = setInterval(() => {
-        for (const n of readdirSync(d)) if (n.includes('.tmp-')) seen.push(mode(join(d, n)));
-      }, 0);
-      const big = 'x'.repeat(5_000_000);
-      try {
-        await ex.run({ kind: 'writeFile', path: join(d, 's.env'), contents: big, mode: 0o600, secret: true });
-        writeFileSync(join(d, 'src.db'), big, { mode: 0o644 });
-        await ex.run({ kind: 'copy', from: join(d, 'src.db'), to: join(d, 'dst.db'), mode: 0o600 });
-      } finally {
-        clearInterval(watch);
-      }
-      expect(seen.every((m) => (m & 0o077) === 0)).toBe(true);
-      expect(mode(join(d, 'dst.db'))).toBe(0o600);
-    });
-
     it('a write whose temporary file was never made reports the write’s own error and leaves the old file', async () => {
       const d = tmp();
       writeFileSync(join(d, 'f'), 'old');

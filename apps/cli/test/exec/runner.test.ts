@@ -1,3 +1,5 @@
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -137,8 +139,8 @@ describe('systemRunner (the one execFile wrapper)', { timeout: 30_000 }, () => {
         { cwd: d, timeoutMs: 1000 },
       );
       expect(t.code).toBe(124);
+      // the runner answers once execFile has seen the child exit and its pipes close, so it is gone already
       const pid = Number(readFileSync(pidFile, 'utf8'));
-      await new Promise((r) => setTimeout(r, 200));
       expect(running(pid)).toBe(false);
     },
   );
@@ -146,19 +148,24 @@ describe('systemRunner (the one execFile wrapper)', { timeout: 30_000 }, () => {
   it.skipIf(process.platform === 'win32')(
     'a guarded child whose parent is killed exits by itself (the teardown cannot run in a killed worker)',
     async () => {
-      const d = tmp();
-      const pidFile = join(d, 'pid');
+      // why: Ian's rule: no fixed waits. The grandchild holds the write end of the test's fd 3 and writes its pid there;
+      // it says "ready" to the parent, which then kills itself. fd 3 closes only once every holder has exited, so its
+      // 'close' is the grandchild's exit; the test timeout is the backstop.
       const child = guarded(
-        `require('fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); process.stdin.resume(); setInterval(() => {}, 1000)`,
+        "process.stdout.write('ready'); require('fs').writeSync(3, String(process.pid)); process.stdin.resume(); setInterval(() => {}, 1000)",
       );
-      // the parent starts the child with its stdin open, waits for its pid, then dies at once
-      const parent = `const c = require('child_process').spawn(process.execPath, ['-e', ${JSON.stringify(child)}], { stdio: ['pipe', 'ignore', 'ignore'] }); const t = setInterval(() => { if (require('fs').existsSync(${JSON.stringify(pidFile)})) process.kill(process.pid, 'SIGKILL'); }, 20);`;
-      await systemRunner([node, '-e', parent], { cwd: d, timeoutMs: 10_000 });
-      const pid = Number(readFileSync(pidFile, 'utf8'));
-      for (let i = 0; i < 50 && running(pid); i++) await new Promise((r) => setTimeout(r, 100));
-      expect(running(pid)).toBe(false);
+      const parent = `const c = require('child_process').spawn(process.execPath, ['-e', ${JSON.stringify(child)}], { stdio: ['pipe', 'pipe', 'ignore', 3] }); c.stdout.once('data', () => process.kill(process.pid, 'SIGKILL'));`;
+      const p = spawn(node, ['-e', parent], { stdio: ['ignore', 'ignore', 'ignore', 'pipe'] });
+      const fd3 = p.stdio[3];
+      if (fd3 === null || fd3 === undefined || !('on' in fd3)) throw new Error('no fd 3 pipe');
+      let pid = '';
+      fd3.on('data', (b: Buffer) => {
+        pid += b.toString();
+      });
+      await once(fd3, 'close');
+      // the close is the proof: an orphan may wait a moment to be reaped, so no pid probe follows
+      expect(Number(pid)).toBeGreaterThan(0);
     },
-    // why: CodeRabbit (PR #11): above the 5 s the loop may poll, plus the parent's own start
     20_000,
   );
 });

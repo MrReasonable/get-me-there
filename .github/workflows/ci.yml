@@ -139,7 +139,8 @@ jobs:
         run: |
           sudo loginctl enable-linger "$(id -un)"
           echo "XDG_RUNTIME_DIR=/run/user/$(id -u)" >> "$GITHUB_ENV"
-          for _ in $(seq 1 30); do test -S "/run/user/$(id -u)/bus" && break; sleep 1; done
+          # why: an event, not a poll: starting the user manager returns once it is up, its bus socket with it
+          sudo systemctl start "user@$(id -u).service"
       - name: a clone on a local main whose origin is a bare repository
         run: |
           git init --bare -b main "$RUNNER_TEMP/origin.git"
@@ -185,15 +186,14 @@ jobs:
             pid="$(systemctl --user show -p MainPID --value get-me-there-app.service)"
           fi
           test -n "$pid" && test "$pid" != 0
-          kill -9 "$pid"
-          for _ in $(seq 1 90); do curl -fsS --max-time 2 http://127.0.0.1:3917/api/health > /dev/null 2>&1 && break; sleep 1; done
+          # why: an event, not a poll: the helper follows the app's log and returns on its next "listening" line
+          node ci/after-app-listening.mjs -- kill -9 "$pid"
           curl -fsS http://127.0.0.1:3917/api/health
       - name: restart
         if: env.E2E_MODE == 'real'
         run: |
           cd "$RUNNER_TEMP/gmt"
-          pnpm gmt restart
-          for _ in $(seq 1 90); do curl -fsS --max-time 2 http://127.0.0.1:3917/api/health > /dev/null 2>&1 && break; sleep 1; done
+          node ci/after-app-listening.mjs -- pnpm gmt restart
           curl -fsS http://127.0.0.1:3917/api/health
       - name: a backup taken by hand restores
         if: env.E2E_MODE == 'real'
@@ -204,8 +204,7 @@ jobs:
           test -f "$file"
           pnpm gmt stop
           pnpm gmt restore "$file"
-          pnpm gmt start
-          for _ in $(seq 1 90); do curl -fsS --max-time 2 http://127.0.0.1:3917/api/health > /dev/null 2>&1 && break; sleep 1; done
+          node ci/after-app-listening.mjs -- pnpm gmt start
           curl -fsS http://127.0.0.1:3917/api/health
       - name: update serves the new commit
         if: env.E2E_MODE == 'real'

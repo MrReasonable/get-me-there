@@ -333,9 +333,12 @@ describe('scripts/ensure-build-lib.mjs build lock ownership (CodeRabbit batch 3)
       expect(await exited).toMatchObject({ code: 128 + { SIGINT: 2, SIGTERM: 15, SIGHUP: 1 }[sig] });
       expect(Date.now() - started).toBeLessThan(10_000);
       expect(existsSync(lock)).toBe(false);
-      // the build itself was stopped too, never left running unlocked
-      await new Promise((ok) => setTimeout(ok, 200));
-      expect(realOps.alive(buildPid)).toBe(false);
+      // the build itself was stopped too, never left running unlocked: it writes into the same stdout pipe as
+      // ensure-build, so the pipe closes only once it has exited too (an event, no fixed wait)
+      // (an exited process may wait a moment to be reaped, so the close, not a pid probe, is the proof)
+      if (!child.stdout.closed) await new Promise((ok) => child.stdout.once('close', ok));
+      expect(child.stdout.closed).toBe(true);
+      expect(buildPid).toBeGreaterThan(0);
     },
   );
 

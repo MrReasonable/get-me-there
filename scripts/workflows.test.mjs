@@ -664,6 +664,16 @@ describe('WP16b: the CI matrix, install-e2e and the Windows leg (decisions 77, 7
       'if curl -fsS --max-time 5 http://127.0.0.1:3917/api/health; then echo "the app still answers"; exit 1; fi',
     ])
       expect(runs).toContain(s);
+    // why: Ian's rule (PR #11): the job waits on events, never a poll or a fixed sleep: the user manager's start job,
+    // and the app's own "listening" log line after the step that (re)starts it
+    expect(runs).not.toMatch(/seq 1|sleep \d|until /);
+    for (const s of [
+      'sudo systemctl start "user@$(id -u).service"',
+      'node ci/after-app-listening.mjs -- kill -9 "$pid"',
+      'node ci/after-app-listening.mjs -- pnpm gmt restart',
+      'node ci/after-app-listening.mjs -- pnpm gmt start',
+    ])
+      expect(runs).toContain(s);
     // why: ts-b1-011: lint-only means something: setup only plans, and every later step that needs services is skipped
     const at = job.steps.findIndex((s) => s.name === 'setup');
     expect(job.steps[at].run).toContain('if [ "$E2E_MODE" = lint-only ]; then');
