@@ -66,6 +66,31 @@ proxies, no challenge ever solved or clicked, the page spacing and the caps.
   and D-Bus libraries are `libxul.so`'s dependencies: `ldd camoufox-bin` alone reports nothing missing. playwright-core's
   own host check runs `ldd` over every executable and `.so` in the browser directory; WP17 does the same.
 
+## 0a. What research 17.0c settled (2026-10-25)
+
+The operator's two headed sessions of 2026-10-25 (`record --consent-research` on `darwin-arm64`, build
+`152.0.4-beta.28`; one recording, local and backed up, never in git) settled the rejection mark and the landing view.
+
+- **The mark is in the value.** `SOCS` is the base64url of a protobuf message. Both sessions' values were 68 bytes and
+  differed in exactly one byte, byte 1: the varint of field 1 (tag `0x08`), `0x01` after "Reject all" (the value
+  starts `CAES`) and `0x02` after "Accept all" (`CAIS`). `rejectionMark(value)` (`consentLine.ts`) base64url-decodes
+  the value and reads that first field: `reject` for 1, `accept` for 2, and `unknown` for anything else (a value that
+  is not canonical base64url, another first tag, a multi-byte varint, a value too short or empty). Its tests use
+  synthetic values of the same shape; the recorded suite checks both recorded values locally.
+- **The choice's submission.** Each session made exactly one POST to `consent.google.com/save`; the Reject all form
+  carries `escs` and `set_eom`, the Accept all form adds `set_sc` and `set_aps` (names only; no value was kept).
+- **Before the choice.** In both sessions a `SOCS` was already set by the consent page before the choice; only the
+  value set or changed after the submission is the choice's (W8).
+- **The views.** Both sessions' first view was the consent page ("Before you continue to Google"). The views after the
+  choice were `/travel/flights?hl=en-GB&gl=GB` with no query, the heading "Flights" first among the page's headings, and
+  no Cheapest tab, Date grid button or result link; they read `other` only because `LANDING_VERIFIED` was false, and
+  under the landing rule with the flag set they read `landing`. `LANDING_VERIFIED` is therefore set for `darwin-arm64`
+  on its pinned build, dated 2026-10-25 in `PROOFS`; the other three entries earn it in Task 17.8's sessions.
+- **The labels.** The sessions are labelled `prompted` (the button each asked for), not observed; the operator confirms
+  he clicked Reject all in session 1 and Accept all in session 2, and the values' marks agree.
+
+So Task 17.5 is built as the full `consent` command.
+
 ## 1. Goal
 
 On macOS or Linux, where the machine's `<os>-<arch>` has verification flags for the pinned build, `gmt setup` (with
@@ -315,13 +340,14 @@ only if 17.0c proves a mark; 17.6–17.10 follow.
 
 ### Research 17.0c: the rejection mark (after Task 17.4; Task 17.5 is not dispatched without it)
 
-- [ ] The operator runs `pnpm --filter @gmt/camoufox-worker record --consent-research` once, with the worker stopped
+- [x] The operator runs `pnpm --filter @gmt/camoufox-worker record --consent-research` once, with the worker stopped
   (`pnpm gmt stop --only worker`) on a machine with a display: it opens two headed sessions in throwaway profiles, the
   first asking for "Reject all", the second for "Accept all", each closed by the operator once the choice is made. A
   session is kept only with exactly one consent submission and a SOCS set after it within 10 minutes; the one recording
   stays local and is backed up (`recordings:backup`), and counts two pages. The same sessions record the landing view,
   which sets `LANDING_VERIFIED`.
-- [ ] If the two `SOCS` values differ in a stable way that the value alone shows, write `rejectionMark(value)` with tests
+- [x] Done 2026-10-25 (§0a).
+- [x] If the two `SOCS` values differ in a stable way that the value alone shows, write `rejectionMark(value)` with tests
   on both recordings, and dispatch Task 17.5. If the mark is not derivable from the value alone, the consent command is
   not built: `capture-socs` stays the capture path, the docs say so, and Task 17.5 shrinks to `import` of a
   `capture-socs` file with the operator's typed confirmation, which the operator rules on.

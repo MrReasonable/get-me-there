@@ -499,17 +499,26 @@ seen, it reads the value, domain, path, expiry, `secure` and `sameSite`,
 checks them with the parser `capture-socs` uses, computes the rejection mark
 from the value with the function work package 17's two throwaway recordings
 (one "Reject all", one "Accept all") establish, and writes the file 0600
-with the capture time only when that mark says rejection. An acceptance,
+with the capture time only when that mark says rejection. Those recordings
+(2026-10-25, `darwin-arm64`) showed the mark in the value itself: `SOCS` is the
+base64url of a protobuf message, and the two 68-byte values differed only in
+byte 1, the varint of its first field (tag `0x08`), 1 after "Reject all" (the
+value starts `CAES`) and 2 after "Accept all" (`CAIS`); the mark is `reject`
+for 1, `accept` for 2 and `unknown` for anything else, and only `reject` is
+ever stored. The reject form posted `escs` and `set_eom` to `/save`, the accept
+form added `set_sc` and `set_aps`, and the consent page had set a `SOCS` of its
+own before either choice, so only a value set or changed after the submission
+is the choice's. An acceptance,
 `SOCS` with no consent host seen, a consent page left unclicked for 10
 minutes, a challenge page, a page that never loads, a first view the
 classifier does not positively recognise, or a closed window writes nothing
-and says which. The command is built only once those recordings prove a
-mark computed from the value alone; until then `capture-socs` stays the way
-to record the choice. The throwaway profile is deleted in a `finally` (the
+and says which. The recordings proved that mark, so the command is built (work package 17
+part 2); `capture-socs` stays as the lighter equal option. The throwaway profile is deleted in a `finally` (the
 recorder's start-up sweep removes any left by a killed run). Where the first
 stable view is the landing view, a page kind the classifier recognises
 positively from its own dated selectors (`LANDING_VERIFIED`, set by the same
-recordings), no consent host was seen and no `SOCS` is set (a region with no
+recordings: on 2026-10-25 both views after the choice were the bare
+`/travel/flights` URL with the heading "Flights" and no results structure), no consent host was seen and no `SOCS` is set (a region with no
 consent screen), the command asks the operator to confirm and writes the
 record `{ consent: "not-shown", checkedAt }` at once. On a machine with no
 display there are two paths. `gmt consent export`, on a Mac or Linux desktop

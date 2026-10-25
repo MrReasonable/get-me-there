@@ -246,6 +246,8 @@ describe('the real consent driver over a fake headed context', () => {
 
 describe('watching the window (the tool only observes)', () => {
   const on = { ...SELECTORS, LANDING_VERIFIED: true };
+  // why: an entry whose landing view is not recorded yet (every entry but darwin-arm64 since 2026-10-25)
+  const off = { ...SELECTORS, LANDING_VERIFIED: false };
   it('a consent page, the choice submitted, SOCS set after it, then the window closed: closed, with that SOCS and the settled view after', async () => {
     const d = fakeConsentDriver({ saveAt: 0, socsAt: 1, closeAt: 3 });
     const w = await watchConsentWindow(d, { timers: fakeTimers(), selectors: on });
@@ -287,7 +289,7 @@ describe('watching the window (the tool only observes)', () => {
     });
     const other = await watchConsentWindow(
       fakeConsentDriver({ first: view(), after: view(), closeAt: 0, hosts: [['www.google.com']] }),
-      { timers: fakeTimers() },
+      { timers: fakeTimers(), selectors: off },
     );
     expect([other.ended, other.firstView, other.saves]).toEqual(['closed', 'other', 0]);
     const landing = await watchConsentWindow(
@@ -301,7 +303,10 @@ describe('watching the window (the tool only observes)', () => {
   it('a challenge that appears on the second snapshot of the first view stops the watch; the settle waits on the injected timers', async () => {
     const challenge = view({ text: { ...view().text, challenge: true } });
     const timers = fakeTimers();
-    const w = await watchConsentWindow(fakeConsentDriver({ views: [view(), challenge] }), { timers });
+    const w = await watchConsentWindow(fakeConsentDriver({ views: [view(), challenge] }), {
+      timers,
+      selectors: off,
+    });
     expect(w).toMatchObject({ ended: 'blocked', blocked: 'captcha', firstFacts: challenge });
     expect(timers.now() - Date.parse('2026-10-18T05:00:00.000Z')).toBe(1000);
   });
@@ -309,7 +314,7 @@ describe('watching the window (the tool only observes)', () => {
     const timers = fakeTimers();
     const w = await watchConsentWindow(
       fakeConsentDriver({ first: view(), after: view(), hosts: [['www.google.com']], closeAt: 0 }),
-      { timers, settleMs: 5000 },
+      { timers, settleMs: 5000, selectors: off },
     );
     expect([w.ended, w.firstView]).toEqual(['closed', 'other']);
     // why: snapshots a tick apart until the 5 s bound, then one watch tick before the closed window is read
@@ -364,7 +369,7 @@ describe('watching the window (the tool only observes)', () => {
         return d.socsCookie();
       },
     };
-    const w = await watchConsentWindow(closing, { timers: fakeTimers() });
+    const w = await watchConsentWindow(closing, { timers: fakeTimers(), selectors: off });
     expect([w.ended, w.saves, w.socs?.value]).toEqual(['closed', 1, SOCS.value]);
   });
   // why: CodeRabbit (PR #16): a challenge after the choice stops (and cools down) even when an account cookie shows with it

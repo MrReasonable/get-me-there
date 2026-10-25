@@ -10,13 +10,15 @@ import { GRID_STEP_DAYS } from '@gmt/core';
 import { recordingsPresentForKind, skipTitle } from '@gmt/providers/testing';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { classifyPage } from '../src/classify.js';
+import { classifyLanding, classifyPage } from '../src/classify.js';
+import { rejectionMark } from '../src/consentLine.js';
+import { CONSENT_HOST } from '../src/consentWatch.js';
 import { parseCellName, parseSelectedPrice } from '../src/gridNames.js';
 import { interpretView } from '../src/gridView.js';
 import { onAllowlist } from '../src/guard.js';
 import { parseOptionName } from '../src/names.js';
 import { KINDS, RECORDED_BY, type RecordingKind } from '../src/record.js';
-import { FLAG_NAMES, flagsOf, PROOFS, SELECTORS } from '../src/selectors.js';
+import { FLAG_NAMES, flagsOf, PROOFS, SELECTORS, selectorsFor } from '../src/selectors.js';
 import { recordedAnchor } from './support/recordedGrid.js';
 
 const ROOT = fileURLToPath(new URL('../fixtures/recorded/', import.meta.url));
@@ -166,6 +168,69 @@ for (const kind of ['results', 'cheapest', 'view-more'] as const) {
       expect(recs.length + (unrecorded ? 1 : 0)).toBeGreaterThan(0);
       if (recs.length === 0) expect(SELECTORS.NO_FLIGHTS_VERIFIED).toBe(false);
       for (const r of recs) expect(r.facts.page?.text.noFlights, r.file).toBe(true);
+    });
+  });
+}
+
+// WP17 research 17.0c (decision 61: local-only, skipped visibly when absent): the two headed sessions of 2026-10-25, one
+// asked for "Reject all" and one for "Accept all". Each session's SOCS reads as the choice it was asked for, by the value
+// alone; the first views are the consent page; and the views after the choice are the landing view under the selectors
+// the recording's own entry and build earned, which is what sets LANDING_VERIFIED there.
+{
+  const present = recordingsPresentForKind(ROOT, 'consent-research');
+  describe.skipIf(!present)(skipTitle('recorded consent research (research 17.0c)', present), () => {
+    const researchSchema = z.object({
+      sessions: z.array(
+        z
+          .object({ prompted: z.enum(['reject', 'accept']), socs: z.object({ value: z.string() }).loose() })
+          .loose(),
+      ),
+      views: z.record(
+        z.enum(['reject', 'accept']),
+        z.object({ firstFacts: pageFactsSchema, afterFacts: pageFactsSchema }),
+      ),
+    });
+    const metaOf = z.object({
+      osArch: z.enum(['darwin-arm64', 'darwin-x64', 'linux-arm64', 'linux-x64']),
+      versions: z.object({ binary: z.string() }),
+    });
+    const recs = () => {
+      const dir = join(ROOT, 'consent-research');
+      return readdirSync(dir, { withFileTypes: true })
+        .filter((d) => d.isDirectory())
+        .flatMap((d) =>
+          readdirSync(join(dir, d.name))
+            .filter((f) => f.endsWith('.facts.json'))
+            .map((f) => join(dir, d.name, f)),
+        )
+        .map((file) => ({
+          file,
+          facts: researchSchema.parse(JSON.parse(readFileSync(file, 'utf8'))),
+          meta: metaOf.parse(JSON.parse(readFileSync(file.replace(/\.facts\.json$/, '.meta.json'), 'utf8'))),
+        }));
+    };
+    it('each session’s SOCS value carries the mark of the button it asked for', () => {
+      for (const r of recs())
+        for (const s of r.facts.sessions) expect(rejectionMark(s.socs.value), r.file).toBe(s.prompted);
+    });
+    it('the first views are the consent page; the views after the choice are landing exactly where LANDING_VERIFIED is set', () => {
+      for (const r of recs()) {
+        const S = selectorsFor(r.meta.osArch, r.meta.versions.binary);
+        for (const v of Object.values(r.facts.views)) {
+          expect(classifyLanding(v.firstFacts, S).kind, r.file).toEqual({
+            kind: 'blocked',
+            page: 'consent-unhandled',
+          });
+          const after = {
+            ...v.afterFacts,
+            hops: v.afterFacts.hops.filter((h) => new URL(h).hostname !== CONSENT_HOST),
+          };
+          expect(classifyLanding(after, { ...S, LANDING_VERIFIED: true }).kind, r.file).toEqual({
+            kind: 'landing',
+          });
+          expect(classifyLanding(after, S).kind.kind === 'landing', r.file).toBe(S.LANDING_VERIFIED);
+        }
+      }
     });
   });
 }

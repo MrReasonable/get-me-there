@@ -122,7 +122,7 @@ describe('CAMOUFOX_BUILDS (WP17 §0: release v152.0.4-beta.28)', () => {
   });
 });
 
-/** The worker's flags as its selectors module states them today (2026-10-18 recordings), one by one. */
+/** The worker's flags as its selectors module states them today (the 2026-10-18 and 2026-10-25 recordings), one by one. */
 const WORKER_FLAGS: Readonly<Record<FlagName, boolean>> = {
   RESULTS_VERIFIED: true,
   FORM_VERIFIED: true,
@@ -131,8 +131,8 @@ const WORKER_FLAGS: Readonly<Record<FlagName, boolean>> = {
   NO_FLIGHTS_VERIFIED: true,
   SOCS_STABLE: true,
   GRID_VERIFIED: true,
-  // why: WP17 Task 17.4: false until research 17.0c's recordings show the landing view
-  LANDING_VERIFIED: false,
+  // why: WP17 research 17.0c: the 2026-10-25 recording's views after the choice read as the landing view
+  LANDING_VERIFIED: true,
 };
 
 describe('FLAGS and flagsFor (spec §2 rev 36: flags per <os>-<arch>, bound to their build)', () => {
