@@ -525,9 +525,8 @@ describe('the configured ALERT_EMAIL_TO and ALERT_EMAIL_FROM reach nodemailer as
       expect(r.ok ? [] : r.errors.map((e) => e.field)).toEqual([field]);
     }
     const created = vi.fn<TransportFactory>();
-    expect(() => notifier({ smtp: smtp({ to: value }), createTransport: created })).toThrow(
-      /one email address/,
-    );
+    for (const over of [{ to: value }, { from: value }])
+      expect(() => notifier({ smtp: smtp(over), createTransport: created })).toThrow(/one email address/);
     expect(created).not.toHaveBeenCalled();
   });
 });

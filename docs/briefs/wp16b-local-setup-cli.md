@@ -635,7 +635,8 @@ removal command), `pnpm gmt logs`, and that a plain `pnpm gmt setup` finishes. R
     native service (`warn`, fix `docker compose down`; with no native install, no `app.env` and no app or backup unit,
     the compose `app` is the app status reads: `docker` `ok`, "the app runs in Docker", or a stopped container a `fail`
     with `docker compose start app`, and only the worker's service, stale unit (fix `pnpm gmt browser install`),
-    `worker.env` and refusal are checked, never `app.env`, the app service or the daily backups), a detached checkout (`warn`, fix `git switch main`), and the
+    `worker.env` and refusal are checked, never `app.env`, the app service or the daily backups; a compose state Docker
+    cannot report is a `fail` with no native install, a `warn` beside one), a detached checkout (`warn`, fix `git switch main`), and the
     worker's refusal: with `<workerData>/start-refusal.json` present it prints `refusalLine` (each
     `START_REFUSAL_REASONS` value through `START_REFUSAL_TEXT`, with its fix command), an unreadable file prints
     "refusal file unreadable" and nothing from it (a hostile `fix` string and an unknown reason in fixtures), and on

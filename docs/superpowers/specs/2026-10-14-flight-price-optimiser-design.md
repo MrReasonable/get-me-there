@@ -2879,7 +2879,10 @@ never printed); it prints the Docker app's report beside the worker's
 service, `worker.env` and refusal, does not check `app.env`, the app service
 or the daily backup job, and offers neither `pnpm gmt setup` nor `docker
 compose down`; a stopped container is a `fail` with `docker compose start
-app`. The worker enforces its
+app`, and with no published port known the credentials are sent nowhere.
+With no native install and a compose state Docker cannot report (`docker
+compose ps` failing or printing what is not its JSON), the app's state is
+unknown: a `fail` saying so, the worker's facts, and no native fix. The worker enforces its
 own monthly page and scroll caps across every caller (§2) and reports a
 second app instance in a month: each app sends its database's own random
 `app_instance_id` (§7 `app_meta`, kept with the database's path), so a

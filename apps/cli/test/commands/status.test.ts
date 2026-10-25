@@ -197,18 +197,24 @@ describe('gmt status by app mode: Docker only, native only, both (W1)', () => {
   };
   /** Docker with the compose project's app in this state, publishing its port 3000 on this host address. */
   const docker =
-    (state: 'running' | 'exited' | null, published = '127.0.0.1:3000'): RunHandler =>
+    (
+      state: 'running' | 'exited' | null,
+      published: string | null = '127.0.0.1:3000',
+      ps?: { code: number; stdout: string },
+    ): RunHandler =>
     (a) => {
       if (a[0] !== 'docker') return undefined;
       if (a[1] === '--version') return { code: 0, stdout: 'Docker version 29.0.0\n' };
       if (a[1] !== 'compose') return undefined;
       if (a.includes('ps'))
-        return {
-          code: 0,
-          stdout: state === null ? '' : `${JSON.stringify({ Service: 'app', State: state })}\n`,
-        };
+        return (
+          ps ?? {
+            code: 0,
+            stdout: state === null ? '' : `${JSON.stringify({ Service: 'app', State: state })}\n`,
+          }
+        );
       if (a.includes('port') && a.includes('app') && a.includes('3000'))
-        return state === 'running'
+        return state === 'running' && published !== null
           ? { code: 0, stdout: `${published}\n` }
           : { code: 1, stderr: 'no container' };
       return undefined;
@@ -220,10 +226,11 @@ describe('gmt status by app mode: Docker only, native only, both (W1)', () => {
       status: 200,
       body: report,
     }),
-    published?: string,
+    published?: string | null,
+    ps?: { code: number; stdout: string },
   ) {
     const http = stubHttp({ 'GET /api/status': status });
-    const m = machine({ http, extra: docker(state, published) });
+    const m = machine({ http, extra: docker(state, published, ps) });
     // why: compose fixes the container's PORT and publishes it; a PORT line in .env is not the host port
     m.fs.file(DOT_ENV, `APP_BASIC_AUTH_USER=op\nAPP_BASIC_AUTH_PASS=${DOCKER_PASS}\nPORT=9999\n`, 0o600);
     m.fs.file(WORKER_PLIST, 'worker plist');
@@ -291,6 +298,49 @@ describe('gmt status by app mode: Docker only, native only, both (W1)', () => {
     const j: unknown = JSON.parse(m.io.stdout);
     expect(j).toMatchObject({ appAnswering: false, reason: 'no answer from the app on port 3000' });
     nativeOnlyLines(m.io.stdout);
+  });
+  it('Docker only, compose naming no published port: no report is read and the .env basic auth is sent nowhere', async () => {
+    const { m, http } = dockerOnly('running', undefined, null);
+    expect(await runCli(['status'], m.deps)).toBe(1);
+    expect(http.requests.filter((r) => r.url.endsWith('/api/status'))).toEqual([]);
+    expect(m.io.stderr).toContain(
+      'the app is not answering: compose did not say which host port the Docker app publishes',
+    );
+    expect(m.io.stderr).toContain('docker compose port app 3000');
+    nativeOnlyLines(m.io.stdout + m.io.stderr);
+  });
+  it('Docker only, an unreadable checkout .env: says so, and reads no report', async () => {
+    const { m, http } = dockerOnly('running');
+    m.fs.unreadable(DOT_ENV);
+    expect(await runCli(['status'], m.deps)).toBe(1);
+    expect(http.requests.filter((r) => r.url.endsWith('/api/status'))).toEqual([]);
+    expect(m.io.stderr).toContain(
+      'the app is not answering: the checkout’s .env could not be read: check that it is yours and readable (chmod 600)',
+    );
+    nativeOnlyLines(m.io.stdout + m.io.stderr);
+  });
+  it.each([
+    ['docker compose ps fails', { code: 1, stdout: '' }],
+    [
+      'docker compose ps prints what is not its JSON',
+      { code: 0, stdout: 'Cannot connect to the Docker daemon\n' },
+    ],
+  ])('no native install and %s: the app’s state is unknown, never a native fix', async (_name, ps) => {
+    const { m, http } = dockerOnly('running', undefined, undefined, ps);
+    expect(await runCli(['status'], m.deps)).toBe(1);
+    expect(m.io.stdout).toMatch(
+      /docker +fail +docker compose ps failed or printed what is not compose’s JSON/,
+    );
+    expect(m.io.stdout).toContain('fix: start Docker, then run pnpm gmt status again');
+    expect(m.io.stdout).toMatch(/service camoufox-worker +ok +running/);
+    expect(http.requests.filter((r) => r.url.endsWith('/api/status'))).toEqual([]);
+    nativeOnlyLines(m.io.stdout + m.io.stderr);
+  });
+  it('native, docker compose ps unreadable: a warning, and the native app is read as before', async () => {
+    const m = await afterSetup(docker(null, undefined, { code: 1, stdout: '' }));
+    expect(await runCli(['status'], m.deps)).toBe(0);
+    expect(m.io.stdout).toMatch(/docker +warn +docker compose ps failed/);
+    expect(m.io.stdout).toMatch(/service app +ok +running/);
   });
   it('native only: the native checks, the report from app.env, and Docker without a compose app is ok', async () => {
     const m = await afterSetup(docker(null));

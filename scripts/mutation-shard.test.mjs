@@ -27,7 +27,8 @@ function pkg(mutate, files) {
 
 describe('mutatedFiles: the files a Stryker mutate list names', () => {
   it('expands globs and negations, skips generated dirs and node_modules, and sorts by path', () => {
-    const dir = pkg(['src/a/*.ts', 'src/b.ts', '!src/a/skip.ts'], {
+    // why: the globs match the generated and node_modules copies too, so only the walk's skipping keeps them out
+    const dir = pkg(['**/a/*.ts', 'src/b.ts', '!**/a/skip.ts'], {
       'src/a/one.ts': 3,
       'src/a/two.ts': 5,
       'src/a/skip.ts': 7,

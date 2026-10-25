@@ -8,14 +8,27 @@ import { afterEach, describe, expect, it } from 'vitest';
 // reading the container's log as it is written; a timeout is only a backstop.
 const SCRIPT = join(import.meta.dirname, 'until-log-line.mjs');
 const started = [];
+// why: on POSIX each helper leads a process group of its own, its follower in it, so teardown stops both even when the
+// helper is killed before it can stop its follower; Windows has no process groups to signal
+const GROUPS = process.platform !== 'win32';
 afterEach(() => {
   // why: a test that fails or times out must not leave the script (or its follower) running
-  for (const c of started.splice(0)) if (c.exitCode === null && c.signalCode === null) c.kill('SIGKILL');
+  for (const c of started.splice(0)) {
+    if (GROUPS && c.pid !== undefined)
+      try {
+        process.kill(-c.pid, 'SIGKILL');
+      } catch {
+        // why: the group is gone already (ESRCH), the expected case
+      }
+    else if (c.exitCode === null && c.signalCode === null) c.kill('SIGKILL');
+  }
 });
-const run = async (args, env = {}) => {
-  const c = spawn(process.execPath, [SCRIPT, ...args], {
+/** Runs the helper with these arguments (and Node options before the script, such as an --import preload). */
+const run = async (args, env = {}, nodeOptions = []) => {
+  const c = spawn(process.execPath, [...nodeOptions, SCRIPT, ...args], {
     env: { ...process.env, ...env },
     stdio: ['ignore', 'pipe', 'pipe'],
+    detached: GROUPS,
   });
   started.push(c);
   let out = '';
@@ -90,7 +103,12 @@ describe('scripts/until-log-line.mjs', { timeout: 30_000 }, () => {
     expect(r.err).toContain('could not start the log follower');
   });
   it('fails when no such line comes within the backstop', async () => {
-    const r = await run([...WANT, '--', ...follower(['{"msg":"listening"}'])], { BACKSTOP_MS: '300' });
+    // why: the backstop's timer is due at once, so the test waits on no wall clock: a preload makes setTimeout queue
+    // its callback for the next turn of the helper's event loop
+    const r = await run([...WANT, '--', ...follower(['{"msg":"listening"}'])], { BACKSTOP_MS: '300' }, [
+      '--import',
+      `data:text/javascript,${encodeURIComponent('globalThis.setTimeout = (f) => setImmediate(f);')}`,
+    ]);
     expect(r.code).toBe(1);
     expect(r.err).toContain('no "execution: pass finished" line (executionId=e-2) within 300 ms');
   });
