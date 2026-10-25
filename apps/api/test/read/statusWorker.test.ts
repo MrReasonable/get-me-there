@@ -1,6 +1,6 @@
 // The worker, consent and price-source cards on the review's findings (V5, V2, V8): what the worker will actually do, the
 // real cause of "cannot check", the older worker's upper bound, and the cap rule.
-import { asIsoDateTime, BLOCKED_PAGES, CONSENT_FIX, START_REFUSAL_REASONS } from '@gmt/core';
+import { asIsoDateTime, BLOCKED_PAGES, consentFixText, START_REFUSAL_REASONS } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
 import { buildChecks, consentOutcome } from '../../src/read/status.js';
 import type { StatusFacts, WorkerFacts } from '../../src/read/statusFacts.js';
@@ -144,7 +144,7 @@ describe('the cause behind the consent card (V2)', () => {
         read: { kind: 'ok', status: okWorkerStatus({ consent: null, socsCapturedAt: null }) },
       }),
     ).check;
-    expect(c.fix).toEqual({ text: CONSENT_FIX.text, command: null });
+    expect(c.fix).toEqual({ text: consentFixText(), command: null });
     expect(JSON.stringify(buildChecks(healthyFacts()))).not.toContain('pnpm gmt consent');
   });
 });

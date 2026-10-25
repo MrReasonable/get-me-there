@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { appendFileSync, existsSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -6,7 +7,8 @@ import { join } from 'node:path';
  * Real `node -e` children the tests start (PR #11: a mutant or a killed test worker once left ~100 of them running).
  * `guarded(script)` prefixes a child script so that it records its pid here, exits as soon as its parent goes away
  * (POSIX re-parents an orphan, so its ppid changes), and exits after 30 s whatever it is waiting on (stdin included);
- * `killTracked()`, in each such file's afterEach, kills every recorded child still running.
+ * `killTracked()`, in each such file's afterEach, kills every recorded child still running and returns those still attached to
+ * this process (an orphan that is already exiting by itself is killed but not returned).
  */
 const TRACK = join(tmpdir(), `gmt-test-children-${process.pid}`);
 
@@ -34,6 +36,20 @@ function zombie(pid: number): boolean {
   }
 }
 
+/**
+ * Whether a running pid is an orphan: its parent is no longer this process, so the guard (which exits a child whose parent
+ * went away, within 200 ms) is already ending it. Such a child is not a leak the test left behind; one still attached to
+ * this process is. Unknown (no `ps`, Windows) reads as attached, the strict answer.
+ */
+function orphaned(pid: number): boolean {
+  try {
+    const out = execFileSync('ps', ['-o', 'ppid=', '-p', String(pid)], { encoding: 'utf8' }).trim();
+    return /^\d+$/.test(out) && Number(out) !== process.pid;
+  } catch {
+    return false;
+  }
+}
+
 /** The recorded children that are still running (zombies aside), after killing each with SIGKILL. */
 export function killTracked(): number[] {
   if (!existsSync(TRACK)) return [];
@@ -43,9 +59,11 @@ export function killTracked(): number[] {
     if (!Number.isInteger(pid) || pid <= 0) continue;
     // why: read before the kill, which itself makes a running child a zombie
     if (zombie(pid)) continue;
+    // why: an orphan is on its way out by itself (the parent-killed test exercises exactly that); it is killed, not counted
+    const orphan = orphaned(pid);
     try {
       process.kill(pid, 'SIGKILL');
-      alive.push(pid);
+      if (!orphan) alive.push(pid);
     } catch {
       // why: already gone (ESRCH), the expected case
     }

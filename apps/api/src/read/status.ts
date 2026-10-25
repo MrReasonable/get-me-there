@@ -10,10 +10,10 @@ import {
   BACKUP_MAX_AGE_MS,
   backupState,
   CAP_WARN_SHARE,
-  CONSENT_FIX,
   capPercent,
   capWarn,
   consentBoundOf,
+  consentFixText,
   consentMadeAt,
   consentWindowState,
   coverageGapWarn,
@@ -471,7 +471,7 @@ const NOT_VERIFIED = 'awaiting verification for this build: consent is not check
 export function consentOutcome(f: Frame, w: WorkerFacts): { check: StatusCheck; cause: ConsentCause } {
   const fix = fixer(f);
   const base = { id: 'consent', area: 'consent' } as const;
-  const consentFix = fix(CONSENT_FIX.text);
+  const consentFix = fix(consentFixText());
   const out = (c: StatusCheck, cause: ConsentCause) => ({ check: c, cause });
   const cannot = (why: string, fixFor: StatusCheck['fix']) =>
     out(check({ ...base, state: 'warn', summary: `cannot check: ${why}`, fix: fixFor }), 'cannot-check');
@@ -616,7 +616,7 @@ function workerCheckOf(f: StatusFacts, w: WorkerFacts): StatusCheck {
         state: 'fail',
         summary: `refused, not retrying: ${t.summary}`,
         note,
-        fix: ref.reason.startsWith('consent-') ? fix(CONSENT_FIX.text) : fix(t.summary, t.fixCommand),
+        fix: ref.reason.startsWith('consent-') ? fix(consentFixText()) : fix(t.summary, t.fixCommand),
       });
     }
     return check({

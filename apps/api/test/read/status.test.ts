@@ -3,7 +3,7 @@
 import {
   apiContract,
   asIsoDateTime,
-  CONSENT_FIX,
+  consentFixText,
   type ExecutionStatus,
   findBannedWords,
   START_REFUSAL_REASONS,
@@ -717,7 +717,7 @@ describe('consent', () => {
   it('an expired record fails with the capture fix', () => {
     const c = consentWith({ kind: 'socs', expiresAt: at(DAY), boundedBy: 'cookie' });
     expect(c.state).toBe('fail');
-    expect(c.fix).toEqual({ text: CONSENT_FIX.text, command: null });
+    expect(c.fix).toEqual({ text: consentFixText(), command: null });
   });
   it('a worker that reports no consent record falls back to the capture time plus 13 months, or fails when it has none', () => {
     const fallback = consentWith(null, { socsCapturedAt: ago(10 * DAY) });
@@ -735,7 +735,7 @@ describe('consent', () => {
     for (const reason of ['consent-missing', 'consent-expired', 'consent-voided'] as const) {
       const c = checkOf(withWorker(down({ kind: 'refusal', reason, at: at(HOUR) })), 'consent');
       expect(c.state).toBe('fail');
-      expect(c.fix).toEqual({ text: CONSENT_FIX.text, command: null });
+      expect(c.fix).toEqual({ text: consentFixText(), command: null });
     }
     for (const reason of ['flags-unset', 'build-mismatch'] as const) {
       expect(checkOf(withWorker(down({ kind: 'refusal', reason, at: at(HOUR) })), 'consent')).toMatchObject({

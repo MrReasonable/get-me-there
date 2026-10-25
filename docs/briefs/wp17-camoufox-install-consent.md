@@ -123,10 +123,10 @@ WP16b §5 exactly (`Platform`, `Paths.workerData`, `Paths.camoufoxRoot`, `Servic
 `workerStatusSchema`, `billingMonthWindow`). WP16b's `apps/cli/src/worker/refusal.ts` (`readStartRefusal`,
 `refusalLine`, `bootOutRefused`). The worker's `socs.ts` (`parseCapture`, `writeCapture`),
 `lock.ts`, `pacer.ts`, `cooldown.ts`, `install.ts`, `launch.ts`, `selectors.ts`, `guard.ts`, `classify.ts`, `record.ts`,
-`run.ts`. WP18's `CONSENT_FIX` (`packages/core/src/status/rules.ts`: text with no command, naming the capture script and
-docs/setup.md section 14): the one constant the Status view's consent card, the worker card's `consent-*` refusals and
-the consent email all use; when Task 17.5 lands a `pnpm gmt consent`, WP17 changes that one constant (and its `command`)
-and nothing else in the report (WP18 branch review, V1).
+`run.ts`. `CONSENT_FIX` (`packages/core/src/camoufox/consentFix.ts`: `{ command: 'pnpm --filter @gmt/camoufox-worker capture-socs',
+doc: 'docs/setup.md#set-it-up-macos' }`, one constant shared with WP18's PR): the Status view's consent card, the worker card's
+`consent-*` refusals and the consent email use it through `consentFixText()`; when Task 17.5 lands a `pnpm gmt consent`,
+WP17 changes that one constant and nothing else in the report (WP18 branch review, V1).
 
 ## 5. Interfaces produced
 

@@ -20,6 +20,7 @@ export type {
 export * as apiContract from './api-contract/index.js';
 export * from './budget/window.js';
 export * from './camoufox/builds.js';
+export * from './camoufox/consentFix.js';
 export * from './camoufox/grid.js';
 export * from './camoufox/protocol.js';
 export * from './camoufox/settings.js';

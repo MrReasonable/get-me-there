@@ -8,7 +8,6 @@ import {
   BUCKET_WORDS,
   backupState,
   backupTimeOf,
-  CONSENT_FIX,
   CONSENT_MAX_AGE_MONTHS,
   CONSENT_WARN_MS,
   capPercent,
@@ -161,13 +160,6 @@ describe('coverageBuckets', () => {
         expect(sum).toBe(total);
       }),
     );
-  });
-});
-
-describe('the consent fix', () => {
-  it('names a command that exists today, and carries no pnpm gmt command', () => {
-    expect(CONSENT_FIX.text).toContain('capture-socs');
-    expect(CONSENT_FIX.command).toBeNull();
   });
 });
 

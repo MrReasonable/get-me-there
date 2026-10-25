@@ -117,9 +117,3 @@ export function coverageBuckets(
   for (const status of discovery) buckets[status ?? 'not_run'] += 1;
   return { buckets, total: discovery.length };
 }
-
-/** Where a consent record is captured today (one place; WP17 changes it if it ships a command). */
-export const CONSENT_FIX = {
-  text: 'capture consent again with pnpm --filter @gmt/camoufox-worker capture-socs (docs/setup.md section 14)',
-  command: null,
-} as const;
