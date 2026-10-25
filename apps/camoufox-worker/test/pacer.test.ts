@@ -157,6 +157,17 @@ describe('Pacer with spacing 0', () => {
     p.release();
     expect(p.claim()).toEqual({ ok: true });
   });
+  it('passes even when the last start is recorded ahead of the clock (no wait is computed at all)', () => {
+    const dir = tmpDir();
+    writeFileSync(join(dir, 'pacer.json'), JSON.stringify({ lastPageAt: '2026-10-18T05:00:10.000Z' }));
+    expect(new Pacer({ dir, minSpacingSeconds: 0, clock: fixedClock(T0) }).claim()).toEqual({ ok: true });
+    // the same record under a real spacing still waits
+    writeFileSync(join(dir, 'pacer.json'), JSON.stringify({ lastPageAt: '2026-10-18T05:00:10.000Z' }));
+    expect(new Pacer({ dir, minSpacingSeconds: 30, clock: fixedClock(T0) }).claim()).toEqual({
+      ok: false,
+      retryAfterSeconds: 38,
+    });
+  });
   it('passes after a restart and when the record is unreadable', () => {
     const dir = tmpDir();
     writeFileSync(join(dir, 'pacer.json'), '{not json');
