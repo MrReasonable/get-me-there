@@ -4,6 +4,8 @@
   "commandRunner": {
     "command": "pnpm exec vitest run --coverage.enabled=false test/scheduler test/parse-cron.test.ts test/consentNotice.test.ts"
   },
+  "incremental": true,
+  "incrementalFile": "reports/stryker-incremental.json",
   "mutate": [
     "src/scheduler/catchUp.ts",
     "src/scheduler/parseCron.ts",
@@ -20,7 +22,9 @@
     "break": 80
   },
   "reporters": ["html", "json", "progress"],
-  "jsonReporter": { "fileName": "reports/mutation/mutation.json" },
+  "jsonReporter": {
+    "fileName": "reports/mutation/mutation.json"
+  },
   "timeoutMS": 60000,
   "timeoutFactor": 3,
   "concurrency": 2,

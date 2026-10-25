@@ -58,7 +58,7 @@ export function scopeOf(text) {
 }
 
 /** Every file under `dir`, package-relative with `/`, skipping node_modules anywhere and generated dirs at the root. */
-function filesOf(dir) {
+export function filesOf(dir) {
   const out = [];
   const walk = (d, atRoot) => {
     for (const name of readdirSync(d)) {

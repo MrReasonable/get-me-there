@@ -12,10 +12,10 @@ permissions:
   contents: read
 # Actions are pinned by commit SHA (plan decision 63), the same SHAs ci.yml reads.
 jobs:
-  mutate:
+  mutation-globs:
     # why: ubuntu-latest moves to a new image without notice; a pinned image changes only when this line does.
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -27,7 +27,68 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: node scripts/check-mutation-globs.mjs
-      - run: pnpm --filter @gmt/core mutate && pnpm --filter @gmt/engine mutate && pnpm --filter @gmt/api mutate && pnpm --filter @gmt/camoufox-worker mutate
+  mutate:
+    # why: one job held core, engine, api and the worker in a row and ran past its 120 minutes (run 40173525400; main's
+    # weekly run on 2026-10-19), core alone needing about 3.2 hours. Each package now runs in jobs of its own, as the
+    # CLI's does: a package whose cold run would not fit one job splits its mutate files across shards
+    # (scripts/mutation-shard.mjs deals them out by size, so the shards always hold every file once), and each shard's
+    # gate (break 80, timeouts within 5%) holds for its own files. Stryker runs incrementally, its file cached per shard
+    # under a key of the package's tests, its config, the lockfile and the shard split, then every source; a restore
+    # falls back only to a run of the same shard over the same tests (the command runner reports one test and cannot
+    # tell which test killed a mutant). Cold runs measured on this runner: MEASURED.
+    name: mutate ${{ matrix.package }} (${{ matrix.shard }} of ${{ matrix.shards }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { package: core, dir: packages/core, shard: 1, shards: 4 }
+          - { package: core, dir: packages/core, shard: 2, shards: 4 }
+          - { package: core, dir: packages/core, shard: 3, shards: 4 }
+          - { package: core, dir: packages/core, shard: 4, shards: 4 }
+          - { package: engine, dir: packages/engine, shard: 1, shards: 3 }
+          - { package: engine, dir: packages/engine, shard: 2, shards: 3 }
+          - { package: engine, dir: packages/engine, shard: 3, shards: 3 }
+          - { package: api, dir: apps/api, shard: 1, shards: 1 }
+          - { package: camoufox-worker, dir: apps/camoufox-worker, shard: 1, shards: 6 }
+          - { package: camoufox-worker, dir: apps/camoufox-worker, shard: 2, shards: 6 }
+          - { package: camoufox-worker, dir: apps/camoufox-worker, shard: 3, shards: 6 }
+          - { package: camoufox-worker, dir: apps/camoufox-worker, shard: 4, shards: 6 }
+          - { package: camoufox-worker, dir: apps/camoufox-worker, shard: 5, shards: 6 }
+          - { package: camoufox-worker, dir: apps/camoufox-worker, shard: 6, shards: 6 }
+    env:
+      SHARD: ${{ matrix.shard }}
+      SHARDS: ${{ matrix.shards }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ matrix.dir }}/reports/stryker-incremental.json
+          key: stryker-${{ matrix.package }}-${{ matrix.shard }}of${{ matrix.shards }}-${{ hashFiles(format('{0}/test/**', matrix.dir), format('{0}/stryker.config.json', matrix.dir), format('{0}/vitest.config.ts', matrix.dir), 'pnpm-lock.yaml', 'scripts/mutation-shard.mjs') }}-${{ hashFiles('packages/*/src/**', 'apps/*/src/**') }}
+          restore-keys: |
+            stryker-${{ matrix.package }}-${{ matrix.shard }}of${{ matrix.shards }}-${{ hashFiles(format('{0}/test/**', matrix.dir), format('{0}/stryker.config.json', matrix.dir), format('{0}/vitest.config.ts', matrix.dir), 'pnpm-lock.yaml', 'scripts/mutation-shard.mjs') }}-
+      - name: Stryker over this shard's files, then the timeout gate
+        working-directory: ${{ matrix.dir }}
+        run: |
+          files="$(node ../../scripts/mutation-shard.mjs . "$SHARD" "$SHARDS")"
+          echo "shard $SHARD of $SHARDS: $files"
+          pnpm exec stryker run --mutate "$files"
+          node ../../scripts/mutation-gate.mjs reports/mutation/mutation.json
+      # why: saved even when the gate fails, so the next run carries on from these results
+      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: always()
+        with:
+          path: ${{ matrix.dir }}/reports/stryker-incremental.json
+          key: stryker-${{ matrix.package }}-${{ matrix.shard }}of${{ matrix.shards }}-${{ hashFiles(format('{0}/test/**', matrix.dir), format('{0}/stryker.config.json', matrix.dir), format('{0}/vitest.config.ts', matrix.dir), 'pnpm-lock.yaml', 'scripts/mutation-shard.mjs') }}-${{ hashFiles('packages/*/src/**', 'apps/*/src/**') }}
   mutate-cli:
     # why: Ian's ruling on PR #11: the CLI's run has a job of its own, since GitHub stops a job at 6 hours. Stryker runs
     # incrementally: a mutant whose code did not change keeps its last result. The incremental file is cached under a

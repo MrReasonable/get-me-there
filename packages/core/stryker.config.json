@@ -4,6 +4,8 @@
   "commandRunner": {
     "command": "pnpm exec vitest run --coverage.enabled=false"
   },
+  "incremental": true,
+  "incrementalFile": "reports/stryker-incremental.json",
   "mutate": [
     "src/config/synthetic.ts",
     "src/labels/age.ts",
@@ -35,7 +37,9 @@
     "break": 80
   },
   "reporters": ["html", "json", "progress"],
-  "jsonReporter": { "fileName": "reports/mutation/mutation.json" },
+  "jsonReporter": {
+    "fileName": "reports/mutation/mutation.json"
+  },
   "timeoutMS": 60000,
   "timeoutFactor": 3,
   "concurrency": 2,

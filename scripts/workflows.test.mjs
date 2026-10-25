@@ -63,7 +63,10 @@ describe('GitHub workflows (least privilege)', () => {
     for (const r of runners) if (!r.startsWith('${{')) expect(RUNNERS).toContain(r);
     for (const job of Object.values(YAML.parse(t).jobs)) {
       const m = job.strategy?.matrix;
-      const named = [...(m?.runner ?? []), ...(m?.include ?? []).map((e) => e.runner)];
+      // an include entry that names no runner (the mutation shards) runs on the job's own runs-on
+      const named = [...(m?.runner ?? []), ...(m?.include ?? []).map((e) => e.runner)].filter(
+        (r) => r !== undefined,
+      );
       if (String(job['runs-on']).includes('matrix.runner')) expect(named.length).toBeGreaterThan(0);
       for (const r of named) expect(RUNNERS).toContain(r);
     }
@@ -271,20 +274,120 @@ describe('WP14 fix round 1: the worker recorded suites and the image size step',
 
 describe('WP16a: the mutation workflow runs every package’s Stryker gate and the glob check', () => {
   const t = () => text('mutation.yml');
-  it('runs the mutation-glob check, then core, engine and the worker in one job and the CLI in its own', () => {
+  const runs = (j) => j.steps.map((s) => s.run).filter((r) => r !== undefined);
+  // why: the follow-ups PR: one job held core, engine, api and the worker in a row and ran past its 120 minutes (run
+  // 40173525400; main's weekly run on 2026-10-19); core alone needed about 3.2 hours. Each package now has a job of its
+  // own (a shard of one, or several where a cold run would not fit), incremental like the CLI's.
+  const MUTATED = ['packages/core', 'packages/engine', 'apps/api', 'apps/camoufox-worker'];
+  it('runs the mutation-glob check in a job of its own, each package in its own shards and the CLI in its own job', () => {
     const jobs = YAML.parse(t()).jobs;
-    expect(Object.keys(jobs)).toEqual(['mutate', 'mutate-cli']);
-    const runs = (j) => j.steps.map((s) => s.run).filter((r) => r !== undefined);
-    expect(runs(jobs.mutate)).toEqual([
+    expect(Object.keys(jobs)).toEqual(['mutation-globs', 'mutate', 'mutate-cli']);
+    expect(runs(jobs['mutation-globs'])).toEqual([
       'pnpm install --frozen-lockfile',
       'node scripts/check-mutation-globs.mjs',
-      'pnpm --filter @gmt/core mutate && pnpm --filter @gmt/engine mutate && pnpm --filter @gmt/api mutate && pnpm --filter @gmt/camoufox-worker mutate',
     ]);
     expect(runs(jobs['mutate-cli'])).toEqual([
       'pnpm install --frozen-lockfile',
       'pnpm --filter @gmt/cli mutate',
     ]);
+    const include = jobs.mutate.strategy.matrix.include;
+    expect([...new Set(include.map((e) => e.dir))]).toEqual(MUTATED);
+    for (const dir of MUTATED) {
+      const mine = include.filter((e) => e.dir === dir);
+      const n = mine[0].shards;
+      // every shard of the package once, all of one count, so the shards hold every mutated file exactly once
+      expect(
+        mine.map((e) => e.shards),
+        dir,
+      ).toEqual(mine.map(() => n));
+      expect(
+        mine.map((e) => e.shard),
+        dir,
+      ).toEqual(Array.from({ length: n }, (_, i) => i + 1));
+      for (const e of mine) expect(e.package, dir).toBe(dir.split('/')[1]);
+    }
+    expect(jobs.mutate.strategy['fail-fast']).toBe(false);
   });
+  it('each shard mutates its own files, gates on timeouts and caches its incremental file, inside 120 minutes', () => {
+    const job = YAML.parse(t()).jobs.mutate;
+    expect(job['timeout-minutes']).toBeLessThanOrEqual(120);
+    const X = ['$', '{{'].join('');
+    expect(job.env).toEqual({ SHARD: `${X} matrix.shard }}`, SHARDS: `${X} matrix.shards }}` });
+    const run = job.steps.find((s) => String(s.run ?? '').includes('stryker run'));
+    expect(run['working-directory']).toBe(`${X} matrix.dir }}`);
+    expect(String(run.run).trim().split('\n')).toEqual([
+      'files="$(node ../../scripts/mutation-shard.mjs . "$SHARD" "$SHARDS")"',
+      'echo "shard $SHARD of $SHARDS: $files"',
+      'pnpm exec stryker run --mutate "$files"',
+      'node ../../scripts/mutation-gate.mjs reports/mutation/mutation.json',
+    ]);
+    const restore = job.steps.find((s) => String(s.uses ?? '').startsWith('actions/cache/restore@'));
+    const save = job.steps.find((s) => String(s.uses ?? '').startsWith('actions/cache/save@'));
+    expect(job.steps.indexOf(restore)).toBeLessThan(job.steps.indexOf(run));
+    expect(job.steps.indexOf(save)).toBeGreaterThan(job.steps.indexOf(run));
+    for (const c of [restore, save])
+      expect(c?.with?.path).toBe(`${X} matrix.dir }}/reports/stryker-incremental.json`);
+    expect(save?.if).toBe('always()');
+    expect(save?.with?.key).toBe(restore?.with?.key);
+    const key = String(restore?.with?.key);
+    expect(key).toContain(`stryker-${X} matrix.package }}-${X} matrix.shard }}of${X} matrix.shards }}-`);
+    expect(key).toContain("format('{0}/test/**', matrix.dir)");
+    expect(key).toContain("format('{0}/stryker.config.json', matrix.dir)");
+    expect(key).toContain("'scripts/mutation-shard.mjs'");
+    expect(key).toContain("hashFiles('packages/*/src/**', 'apps/*/src/**')");
+    // a restore falls back only to a run of the same shard over the same tests, never across a test change
+    const prefix = String(restore?.with?.['restore-keys']).trim();
+    expect(key.startsWith(prefix)).toBe(true);
+    expect(prefix).toContain("format('{0}/test/**', matrix.dir)");
+    expect(prefix).not.toContain('/src/**');
+  });
+  it('every package’s Stryker config is incremental into reports/, at concurrency 2', () => {
+    for (const dir of [...MUTATED, 'apps/cli']) {
+      const cfg = JSON.parse(readFileSync(join(REPO, dir, 'stryker.config.json'), 'utf8'));
+      expect(cfg, dir).toMatchObject({
+        incremental: true,
+        incrementalFile: 'reports/stryker-incremental.json',
+        concurrency: 2,
+        thresholds: { high: 90, low: 80, break: 80 },
+      });
+    }
+  });
+  // why: PR #11: a bailed worker killed while it starts a child can leave the child stuck in the kernel; no per-mutant
+  // run starts one, and ci.yml runs every file left out on every push
+  it.each([...MUTATED, 'apps/cli'])(
+    'no per-mutant command in %s runs a test that starts a real process',
+    (dir) => {
+      const cfg = JSON.parse(readFileSync(join(REPO, dir, 'stryker.config.json'), 'utf8'));
+      const words = cfg.commandRunner.command.split(/\s+/);
+      const at = words.indexOf('run');
+      expect(words.slice(0, at + 1)).toEqual(['pnpm', 'exec', 'vitest', 'run']);
+      const excluded = [];
+      const filters = [];
+      for (let i = at + 1; i < words.length; i++) {
+        if (words[i] === '--exclude') excluded.push(words[++i]);
+        else if (!words[i].startsWith('-')) filters.push(words[i]);
+      }
+      const testFiles = (d) =>
+        readdirSync(join(REPO, dir, d), { recursive: true, withFileTypes: true })
+          .filter((e) => e.isFile() && /\.test\.ts$/.test(e.name))
+          .map((e) =>
+            join(e.parentPath, e.name)
+              .slice(join(REPO, dir).length + 1)
+              .split('\\')
+              .join('/'),
+          );
+      const run = testFiles('test').filter(
+        (f) => (filters.length === 0 || filters.some((x) => f.includes(x))) && !excluded.includes(f),
+      );
+      expect(run.length).toBeGreaterThan(0);
+      const starting = run.filter((f) =>
+        /from 'node:child_process'/.test(readFileSync(join(REPO, dir, f), 'utf8')),
+      );
+      expect(starting).toEqual([]);
+      for (const f of excluded)
+        expect(cfg.commandRunner.$comment, `${dir} ${f}`).toContain(f.split('/').pop());
+    },
+  );
   // why: Ian's ruling (PR #11): GitHub stops a job at 6 hours; the CLI's run is incremental, its results cached, and
   // its cold run must still finish well inside that
   it('the CLI job restores and always saves its incremental file, keyed on its tests and its source, inside 5 hours', () => {
