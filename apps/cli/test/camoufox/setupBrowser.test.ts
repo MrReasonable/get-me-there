@@ -358,6 +358,54 @@ describe('the browser step’s stops and steps (ts-b1-003)', () => {
     expect(m.countsChecked()).toBe(false);
   });
 
+  it('a new bundle whose worker check refuses leaves the worker stopped, saying why; the reconfigure still succeeds', async () => {
+    const m = await settled();
+    m.fs.delete(BUNDLE);
+    m.opts.check = '{"reason":"consent-missing","at":"2026-10-24T09:30:00.000Z"}';
+    expect(await reconfigure(m)).toBe(0);
+    expect(m.io.stdout).toContain('worker: not started: ');
+    expect(runs(m.executor.log).filter((x) => x.startsWith('launchctl bootstrap'))).toEqual([]);
+  });
+
+  it('a download that fails in the reconfigure fails setup with its step', async () => {
+    const m = await settled();
+    m.fs.delete(BUNDLE);
+    const inner = m.deps.executor;
+    m.deps.executor = {
+      run: async (a: Action) => {
+        if (a.kind === 'download') throw new Error('answered 503');
+        return inner.run(a);
+      },
+    };
+    expect(await reconfigure(m)).toBe(1);
+    expect(m.io.stderr).toContain('setup: install Camoufox: stopped at a failed step');
+  });
+
+  it('a new key that cannot be written into worker.env fails the reconfigure with worker.env’s reason, writing nothing', async () => {
+    const m = await settled();
+    m.fs.file(WORKER_ENV, `${m.fs.read(WORKER_ENV) ?? ''}MY_NOTE="first\nsecond"\n`, 0o600);
+    const before = m.fs.read(ENV);
+    m.fs.file('/work/b.json', JSON.stringify({ browser: { window: 'scheduled', rotateKey: true } }), 0o600);
+    expect(await reconfigure(m)).toBe(1);
+    expect(m.io.stderr).toBe(
+      'worker.env holds MY_NOTE over several lines; put it on one line, then run setup again\n',
+    );
+    expect(m.fs.read(ENV)).toBe(before);
+  });
+
+  it('a re-run whose worker unit changed and whose check passes rewrites and starts it', async () => {
+    const m = await world();
+    answers(m, { enabled: true });
+    await runCli(['setup', '--non-interactive', '--answers', '/work/b.json'], m.deps);
+    m.fs.file(PLIST, '<plist>old</plist>', 0o644);
+    m.io.stderr = '';
+    expect(
+      await runCli(['setup', '--non-interactive', '--answers', '/work/b.json'], m.deps),
+      m.io.stderr,
+    ).toBe(0);
+    expect(m.fs.read(PLIST)).toContain('<string>/repo/apps/camoufox-worker/src/run.ts</string>');
+  });
+
   it('a re-run with the provider on and its unit unchanged plans nothing for the worker', async () => {
     const m = await world();
     answers(m, { enabled: true });
