@@ -258,6 +258,14 @@ describe('LogNotifier (spec §8.3)', () => {
     expect(containsSynthetic({ a: [{ b: { sourceKind: 'authorised-cached' } }] })).toBe(false);
     expect(containsSynthetic({ a: [{ b: { sourceKind: 'synthetic' } }] })).toBe(true);
   });
+  it('logs a system notice with its subject and plain body (spec §8.3 consent expiry)', async () => {
+    const lines: LogLine[] = [];
+    const n = new LogNotifier(capturingLogger(lines));
+    expect(await n.send({ kind: 'system', subject: 'consent\u0007', body: 'one\ntwo' })).toEqual({
+      ok: true,
+    });
+    expect(lines[0]).toMatchObject({ fields: { kind: 'system', subject: 'consent' }, msg: 'one\ntwo' });
+  });
   it('logs a digest without synthetic rows', async () => {
     const lines: LogLine[] = [];
     const n = new LogNotifier(capturingLogger(lines));

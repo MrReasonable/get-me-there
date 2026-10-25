@@ -65,7 +65,12 @@ export function seedEveryRebuiltTableAt0004(): {
   const db = openTracked(tmpDbPath());
   applyMigrations(
     db,
-    migrationsWithout(['0005_camoufox_provider', '0006_grid_return_source', '0007_catch_up']),
+    migrationsWithout([
+      '0005_camoufox_provider',
+      '0006_grid_return_source',
+      '0007_catch_up',
+      '0008_wp18_error_kind',
+    ]),
   );
   const run = (sql: string, p: Record<string, unknown> = {}): void => {
     db.raw.prepare(sql).run({ at: T0, ...p });

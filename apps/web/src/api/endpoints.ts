@@ -16,6 +16,9 @@ import type {
  */
 export const api = {
   providers: () => call(c.providersResponseSchema, 'GET', '/api/providers'),
+  // WP18 (spec §10): the one report of what works, shown by the Status view and the bar's link
+  status: () => call(c.statusResponseSchema, 'GET', '/api/status'),
+  testEmail: () => call(c.testEmailResponseSchema, 'POST', '/api/alerts/test-email'),
   definitions: () => call(c.definitionResponseSchema.array(), 'GET', '/api/definitions'),
   estimateDraft: (body: DefinitionBody) =>
     call(c.estimateResponseSchema, 'POST', '/api/definitions/estimate', { body }),

@@ -37,6 +37,8 @@ export class LogNotifier implements Notifier {
         },
         cleanText(m.body),
       );
+    } else if (msg.kind === 'system') {
+      this.#log.info({ kind: 'system', subject: cleanLine(msg.subject) }, cleanText(msg.body));
     } else {
       const d = msg.digest;
       this.#log.info(

@@ -1,6 +1,6 @@
 # get-me-there — Flight Price Intelligence & Flexible-Date Optimiser
 
-**Design spec, revision 39.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
+**Design spec, revision 40.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
 four full-roster reviews (145, 140, 126 and 101 findings; zero Critical since
 revision 2) and the provider spike. Revision 9 folds in the three decisions
 taken at approval (the self-scraping fallback in §2, the dashboard readings in
@@ -2115,18 +2115,28 @@ Synthetic refused. The banned-word test (§11) runs over rendered notifier
 output and API reason strings with word-boundary matching.
 
 
-**Consent expiry.** The app's maintenance tick evaluates the Status view's
-consent check (§10) and, while it is `warn` or `fail` and the browser
-provider is enabled, sends a consent-expiry notice to every notifier at most
-once a London day: it first claims the key `consent-expiring:<London date>`
-in `operator_notice_keys`, the store the camoufox cool-down notice uses, and
-only on a successful claim sends the notice as the notifier message variant
-`{ kind: 'system', subject, body }` through one engine helper,
-`sendSystemNotice`. It is not an `OperatorMessageKind` (that union feeds
-`OPERATOR_MESSAGE_KINDS`, the `operator_notifications` kind check, and needs
-a definition id), so `operator_notifications`, its CHECK and the drizzle
-snapshot are untouched and no migration is needed; there is no separate
-reminder service.
+**Consent expiry.** The app evaluates the Status view's consent check (§10) on the
+03:30 maintenance job and, so that a machine asleep at 03:30 still sends, on the
+minute job (which re-reads the check at most hourly while the day's notice is
+unsent). While the check is `warn` or `fail` for a cause it can name and the
+browser provider is enabled, it sends one consent-expiry notice a London day to
+every notifier, as the notifier message variant `{ kind: 'system', subject,
+body }` through one engine helper, `sendSystemNotice`. The subject comes from
+the cause, never the state: "expires soon" (30 days or less left), "has
+expired", "has no consent record", "consent screen is now shown" (a voided
+not-shown record); a check that cannot be made (the worker is down, refused the
+key or answered something unreadable) sends nothing, because the worker card
+says that. The body gives the check's summary, one sentence of consequence
+("Browser prices stop when consent lapses; the other price sources are
+unaffected.") and the fix in its own sentence. The day's key
+`consent-expiring:<London date>` in `operator_notice_keys`, the store the
+camoufox cool-down notice uses, is claimed only after a notice was sent, so a
+failed send is tried again on the next pass; an in-flight flag stops two passes
+sending twice. It is not an `OperatorMessageKind` (that union feeds
+`OPERATOR_MESSAGE_KINDS`, the `operator_notifications` kind check, and needs a
+definition id), so `operator_notifications`, its CHECK and the drizzle snapshot
+are untouched; there is no separate reminder service.
+
 ---
 
 ## 9. Testing
@@ -2335,9 +2345,9 @@ shape carries `provenance` and `stale`.
 | Route | Purpose |
 |---|---|
 | `GET /health` | unauthenticated and exempt from the Host allowlist: `{ ok, degraded }` where `degraded` = job count ≠ enabled scheduled definitions, or an execution running past `STUCK_AFTER_HOURS`, with no detail; authenticated detail `{ db, providers, scheduler: { jobCount, nextRun, lastExecutionAt, degraded } }` |
-| `GET /status` | authenticated; never spends, never waits on a vendor, never loads a page: `{ generatedAt, mode: 'native' \| 'container' \| 'dev', version, checks }`, each check `{ id, area, providerId, state: 'ok' \| 'warn' \| 'fail' \| 'off', summary, note, offReason, fix: { text, command } \| null }` (`note` an aside on an `ok` check, such as "caught up the run missed at 01:30, ran 07:02", which never counts toward the status bar; `offReason` ∈ `not-set-up`, `not-visible`, `awaiting-verification`, only when `off`), worst first; `command` is a `pnpm gmt …` line in native mode and always null in container and dev mode, where the text names the compose action or the docs section; areas `app`, `database`, `backups`, `schedule`, `data` (per definition, its latest finished parent run's discovery coverage per cell in the six buckets with their spec labels, both ends of its priced observations' effective ages, never "fresh", "complete" or "all"), `provider` (one per provider plus `price-sources`, which warns "no usable price source" unless a non-synthetic provider can price a scheduled search), `worker` (whose card also states the app's `CAMOUFOX_BROWSER_WINDOW`), `consent`, `email`; summaries come from fixed templates and error classes, never from vendor, worker or SMTP text; the worker check reads the worker's `/v1/status` through http-kit with a 2 s timeout and picks named fields (`workerStatusSchema` gains a field one work package before any worker emits it, so an app parses the status of a worker one package newer); no field carries a key, password, database path or `SOCS` value |
+| `GET /status` | authenticated; never spends, never waits on a vendor, never loads a page: `{ generatedAt, mode: 'native' \| 'container' \| 'dev', version, checks }`, each check `{ id, area, providerId, label, state: 'ok' \| 'warn' \| 'fail' \| 'off', summary, note, offReason, fix: { text, command } \| null }` (`label` names a card among several of its area, a search's name; `note` an aside on any check, such as "caught up the run missed at 01:30, ran 07:02", which never counts toward the status bar; `offReason` ∈ `not-set-up`, `not-visible`, `awaiting-verification`, `disabled` (a disabled search, so a parked one never nags the bar), only when `off`; nothing a state rests on is ever truncated), worst first; `command` is a `pnpm gmt …` line in native mode and always null in container and dev mode, where the text names the compose action or the docs section; areas `app`, `database`, `backups`, `schedule`, `data` (per definition, its latest finished parent run's discovery coverage per cell in the six buckets with their spec labels, both ends of its priced observations' effective ages, never "fresh", "complete" or "all"), `provider` (one per provider plus `price-sources`, which warns "no usable price source" unless a non-synthetic provider can price a scheduled search), `worker` (whose card also states the app's `CAMOUFOX_BROWSER_WINDOW`; a worker that answers but will refuse pages is `fail`, judged by the same rule as the engine's preflight: a signed-in profile, shared settings that differ, an unverified or differing grid setup), `consent` (a capture's date is stated as an upper bound, "expires by … at the latest", when the worker does not report the cookie's own expiry), `email` (the newest send of any kind since the app started: alert digest, notice or test; `fail` when it failed); a provider card's auth or quota class is the adapters' own, recorded on the ledger row where the call is classified (migration 0008, `error_kind`), and a 2xx whose body was rejected is not a success; summaries come from fixed templates and error classes, never from vendor, worker or SMTP text; the worker check reads the worker's `/v1/status` through http-kit with a 2 s timeout and picks named fields (`workerStatusSchema` gains a field one work package before any worker emits it, so an app parses the status of a worker one package newer); no field carries a key, password, database path or `SOCS` value |
 | `GET /executions/active` | authenticated: `{ execution: { id, definitionId, definitionName, kind: 'run' \| 'cell-verification', startedAt, estimatedFinishAt } \| null }`, the oldest execution with a pass in flight (pending or running), a parent run or a single-cell verification (which spends credits too), read as one row; its estimated finish is now plus the seconds its remaining cells are estimated to take (so a resumed run never reads as finished in the past), or null without an estimate; `gmt update` reads it |
-| `POST /alerts/test-email` | sends one fixed test message through the configured email notifier, inside `ALERT_EMAIL_MAX_PER_HOUR` (429 past it); 409 when email is not configured; the result's time and class (sent, refused, failed; never the server's text) is kept in the process and shown as "since the app started" |
+| `POST /alerts/test-email` | sends one fixed test message through the configured email notifier, apart from `ALERT_EMAIL_MAX_PER_HOUR` (a test has its own limit of one a minute and an in-flight guard, so pressing it never crowds out an alert; 429 past it); 409 when email is not configured; the class of the send (sent, failed; never the server's text) is kept in the notifier and shown as "since the app started" |
 | `GET /airports?q=` | airport-table autocomplete: up to 20 rows `{ iata, name, city, country, tz, metro }` |
 | `GET /providers` | capabilities, plan, usage vs caps with window bounds for the one window each plan uses (the month on a monthly plan, the lifetime on the trial; the unused window is not sent, so a null cap means no cap); "verification will not run: spend cap is 0" when a provider whose calls cost money is enabled under a zero spend cap; on a billed plan whose calls cost £0, a `capNote` naming the call cap that is the hard stop |
 | `GET/POST/PUT/DELETE /definitions[/:id]` | CRUD; `POST` with no body creates the **default definition for the configured plan**; response includes `budgetFit`; `PUT` re-registers the schedule; a zero-cell window returns 422 |
@@ -3111,7 +3121,7 @@ as specified in §5.3; no secrets, no full URLs.
 
 ## 17. Changelog
 
-### Revision 39: WP17's branch review, round 1 (2026-10-25)
+### Revision 40: WP17's branch review, round 1 (2026-10-25)
 
 The browser provider's install no longer needs the native app: `gmt browser install` installs or reinstalls the
 pinned Camoufox and the worker's service in any app mode, and is the fix the `layout` and `build-mismatch` refusals
@@ -3127,6 +3137,16 @@ file is its own refusal and answer (`counts-missing`, `counts-unreadable`), `gmt
 ledger's pages and scrolls (`GET /api/providers` now reports a provider's month of scrolls), the counts carry until
 their own window ends, and the app's `BudgetExceeded` takes the worker's own cap, count and window end. The setup
 wizard's interruption question is asked by `--reconfigure browser` only. No other design rule changes.
+
+### Revision 39: the status report after its branch review (2026-10-25)
+
+From WP18's branch review (58 findings, every one addressed), §8.3 and §10 state the status report as built: the
+consent notice's subject comes from the check's cause (a check that cannot be made sends nothing), it is claimed
+only after a send and is also sent by the minute job; the fix is the capture script that exists today; a worker
+that will refuse pages is `fail` by the preflight's own rule; the provider card's auth or quota class is the
+adapters' (ledger `error_kind`, migration 0008) and a rejected 2xx is not a success; the email card reflects the
+newest send of any kind and the test email has its own limit; cards carry a `label`, disabled searches are
+`off`/`disabled`, and nothing a state rests on is truncated; the container's version is a build argument.
 
 ### Revision 38: the browser provider's pauses may be 0 (operator ruling, 2026-10-25)
 

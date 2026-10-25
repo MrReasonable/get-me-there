@@ -97,10 +97,13 @@ const SPEC: Record<
     ],
   },
   status: {
-    options: {},
+    options: { only: str, json: bool },
     positional: null,
-    help: 'show the services, the settings files and anything that needs attention',
-    flags: [],
+    help: 'show the services, the settings files and the app’s own report of anything that needs attention',
+    flags: [
+      '--only <area>             show only the app’s report for one area: app, database, backups, schedule, data, provider, worker, consent or email',
+      '--json                    print the app’s report as JSON',
+    ],
   },
   start: {
     options: { 'dry-run': bool, only: str },

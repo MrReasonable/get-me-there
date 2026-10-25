@@ -14,7 +14,7 @@ import { budgetConfigFromConfig, type Db, type Repos } from '@gmt/db';
 import type { HttpKit } from '@gmt/providers';
 import { noAlerts } from './alertsStep.js';
 import { createHeartbeat, type Heartbeat } from './scheduler/heartbeat.js';
-import type { AlertsStepHook, EngineDeps, EngineOptions } from './types.js';
+import type { AlertsStepHook, ConsentCheck, EngineDeps, EngineOptions } from './types.js';
 
 /** Callbacks the scheduler installs once it exists (createEngine); no-ops until then. Spec §8.1 one-shot jobs. */
 export interface EngineHooks {
@@ -74,6 +74,8 @@ export interface EngineContext {
   readonly notifiers: readonly Notifier[];
   readonly providers: ReadonlyMap<ProviderId, FlightProvider>;
   readonly alertsStep: AlertsStepHook;
+  /** Spec §8.3 consent expiry: the app's consent check, or undefined when the app passes none. */
+  readonly consentCheck: ConsentCheck | undefined;
   limitsOf(id: ProviderId): ProviderRunLimits;
   /** The point of sale a provider's rows will carry, known before any call (reuse matching); written rows use the result's own pointOfSale. */
   pointOfSaleOf(id: ProviderId): PointOfSale;
@@ -142,6 +144,7 @@ export function buildContext(deps: EngineDeps, options: EngineOptions = {}): Eng
     providers,
     limitsOf,
     alertsStep: options.alerts ?? noAlerts,
+    consentCheck: options.consentCheck,
     // why: spec §2/§5.2 — SearchApi echoes gl = POINT_OF_SALE, and the camoufox worker loads its pages with the same
     // gl (POINT_OF_SALE is a shared worker setting the preflight compares) and states it on every answer; Travelpayouts
     // and the fixture state none. A deliberate engine rule known before any call (reuse matching; WP16a: a catch-up

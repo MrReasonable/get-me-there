@@ -87,21 +87,6 @@ export function breachText(
   return `${scopeName(scope, providerId, unit)} is ${scopeAmount(scope, cap, unit)}; ${scopeAmount(scope, used, unit)} used; ${label} ${scopeAmount(scope, needs, unit)}`;
 }
 
-/** An instant as a readable local date and time in `tz`, e.g. "Mon, 19 Oct 2026, 05:00 (Europe/London)" (po-015). */
-export function formatInstant(at: IsoDateTime, tz: string): string {
-  const f = new Intl.DateTimeFormat('en-GB', {
-    timeZone: tz,
-    weekday: 'short',
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    hourCycle: 'h23',
-  });
-  return `${f.format(new Date(at))} (${tz})`;
-}
-
 /**
  * Unicode format characters that reorder or hide text in a plain-text mail client (sec-007): the soft hyphen, the
  * Arabic letter mark, the Mongolian vowel separator, the zero-width space, joiners and directional marks

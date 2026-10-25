@@ -276,7 +276,7 @@ describe('--reconfigure <group>', () => {
     ],
     [
       'email',
-      [true, 'smtp.example.com', '', '', 'me', 'smtp-pass-0123', 'me@example.com', 'gmt@example.com'],
+      [true, 'smtp.example.com', '', '', 'me', 'smtp-pass-0123', 'me@example.com', 'gmt@example.com', false],
       ['SMTP_HOST', 'SMTP_PORT', 'SMTP_TLS', 'SMTP_USER', 'SMTP_PASS', 'ALERT_EMAIL_TO', 'ALERT_EMAIL_FROM'],
     ],
     ['password', [], ['APP_BASIC_AUTH_PASS']],

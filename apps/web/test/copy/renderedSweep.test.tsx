@@ -33,6 +33,7 @@ const CONTENT: Record<(typeof VIEWS)[number], () => Promise<HTMLElement>> = {
   definitions: () => screen.findByRole('button', { name: COPY.showEstimate }),
   alerts: () => screen.findByRole('heading', { name: COPY.alertsView.heading }),
   providers: () => screen.findByRole('heading', { name: COPY.providersHeading }),
+  status: () => screen.findByRole('heading', { name: COPY.statusView.heading }),
 };
 
 describe('rendered views contain no banned word, and no "£" outside a price or a cost (spec §11, §9 item 6)', () => {

@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import {
+  addMonthsClamped,
   type Clock,
   type IsoDateTime,
   isoDateTimeOfEpochMs,
@@ -50,13 +51,8 @@ function isSameSite(s: unknown): s is SocsCapture['sameSite'] {
 
 /** The UTC calendar date `months` before `at`, clamped to the month's last day (2026-03-31 − 1 → 2026-02-28). */
 export function monthsBefore(at: IsoDateTime, months: number): string {
-  const d = new Date(at);
-  const y = d.getUTCFullYear();
-  const m = d.getUTCMonth() - months;
-  const target = new Date(Date.UTC(y, m, 1));
-  const last = new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0)).getUTCDate();
-  target.setUTCDate(Math.min(d.getUTCDate(), last));
-  return target.toISOString().slice(0, 10);
+  // why: WP18 V8: the one month rule, in core, which the Status report's consent card reads too
+  return addMonthsClamped(at, -months).slice(0, 10);
 }
 
 /** The furthest instant a JavaScript date holds, either side of 1970. */
@@ -180,12 +176,8 @@ export function readBack(
 
 /** The UTC instant `months` calendar months after `at`, the day clamped to the month's last (2026-01-31 + 1 → 02-28). */
 export function monthsAfter(at: IsoDateTime, months: number): IsoDateTime {
-  const d = new Date(at);
-  const target = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + months, 1));
-  const last = new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0)).getUTCDate();
-  target.setUTCDate(Math.min(d.getUTCDate(), last));
-  target.setUTCHours(d.getUTCHours(), d.getUTCMinutes(), d.getUTCSeconds(), d.getUTCMilliseconds());
-  return isoDateTimeOfEpochMs(target.getTime());
+  // why: WP18 V8: the one month rule, in core
+  return addMonthsClamped(at, months);
 }
 
 /**

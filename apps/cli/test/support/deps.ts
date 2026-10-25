@@ -60,14 +60,26 @@ export function testIo(opts: { tty?: boolean; stdin?: string } = {}): TestIo {
   return io;
 }
 
+type Route = (r: HttpRequest) => { status: number; body: unknown } | { error: string };
+
+/**
+ * WP18: `gmt status` also reads the app's own report, and `gmt update` ends with it, so a stand-in app answers it with an
+ * empty report unless a test routes `GET /api/status` itself (an `{ error }` route is an app that does not answer).
+ */
+const DEFAULT_ROUTES: Record<string, Route> = {
+  'GET /api/status': () => ({
+    status: 200,
+    body: { generatedAt: '2026-10-24T09:30:00.000Z', mode: 'native', version: 'abc1234', checks: [] },
+  }),
+};
+
 /** An Http stand-in answering from a route table keyed "METHOD path"; every request is recorded. */
-export function stubHttp(
-  routes: Record<string, (r: HttpRequest) => { status: number; body: unknown } | { error: string }>,
-): Http & { requests: HttpRequest[] } {
+export function stubHttp(routes: Record<string, Route>): Http & { requests: HttpRequest[] } {
   const requests: HttpRequest[] = [];
+  const table = { ...DEFAULT_ROUTES, ...routes };
   const http: Http = async (r) => {
     requests.push(r);
-    const route = routes[`${r.method} ${new URL(r.url).pathname}`];
+    const route = table[`${r.method} ${new URL(r.url).pathname}`];
     if (route === undefined) return { error: `no stub for ${r.method} ${r.url}` };
     const a = route(r);
     return 'error' in a

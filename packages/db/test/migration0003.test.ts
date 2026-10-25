@@ -17,10 +17,13 @@ const LAST = '0007_catch_up';
 function upTo0002(): string {
   const dir = join(tmpDir(), 'drizzle');
   cpSync(MIGRATIONS_DIR, dir, { recursive: true });
-  for (const tag of [TAG, LATER, LATEST, NEWEST, LAST]) rmSync(join(dir, `${tag}.sql`));
+  for (const tag of [TAG, LATER, LATEST, NEWEST, LAST, '0008_wp18_error_kind'])
+    rmSync(join(dir, `${tag}.sql`));
   const journalPath = join(dir, 'meta', '_journal.json');
   const journal: { entries: Array<{ tag: string }> } = JSON.parse(readFileSync(journalPath, 'utf8'));
-  journal.entries = journal.entries.filter((e) => ![TAG, LATER, LATEST, NEWEST, LAST].includes(e.tag));
+  journal.entries = journal.entries.filter(
+    (e) => ![TAG, LATER, LATEST, NEWEST, LAST, '0008_wp18_error_kind'].includes(e.tag),
+  );
   writeFileSync(journalPath, JSON.stringify(journal));
   return dir;
 }
@@ -34,7 +37,14 @@ describe('migration 0003: route price history keyed by trip (ruling 6, spec §7 
     );
     insertOld.run('2026-09-01', 48_000, T0);
     insertOld.run('2026-09-02', 47_500, T0);
-    expect(pendingMigrations(db, MIGRATIONS_DIR)).toEqual([TAG, LATER, LATEST, NEWEST, LAST]);
+    expect(pendingMigrations(db, MIGRATIONS_DIR)).toEqual([
+      TAG,
+      LATER,
+      LATEST,
+      NEWEST,
+      LAST,
+      '0008_wp18_error_kind',
+    ]);
     applyMigrations(db, MIGRATIONS_DIR);
     const rows = db.raw
       .prepare(

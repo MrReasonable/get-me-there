@@ -1,10 +1,8 @@
 import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import type { Clock } from '@gmt/core';
+import { BACKUP_FILE_PATTERN, type Clock } from '@gmt/core';
 import Database from 'better-sqlite3';
 import { ACTIVE_STATUS_SQL } from './schema/checks.js';
-
-const BACKUP_FILE = /^get-me-there-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z\.db$/;
 
 /** The default check: SQLite's own integrity verdict on the copy. Internal; exported for its test only. */
 export function integrityCheck(file: string): string {
@@ -108,7 +106,7 @@ export function backupDatabase(
     throw new Error(`backup failed for ${dbPath}: ${err instanceof Error ? err.message : String(err)}`);
   }
   const backups = readdirSync(backupsDir)
-    .filter((f) => BACKUP_FILE.test(f))
+    .filter((f) => BACKUP_FILE_PATTERN.test(f))
     .sort()
     .reverse();
   for (const old of backups.slice(opts.keep)) rmSync(join(backupsDir, old));

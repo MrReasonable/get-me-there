@@ -1,5 +1,6 @@
 /** The single HTTP surface of spec §10, mounted from `@gmt/core` api-contract ROUTES. */
 import { apiContract } from '@gmt/core';
+import { MIGRATIONS_DIR } from '@gmt/db';
 import type { Engine } from '@gmt/engine';
 import { type Context, Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
@@ -7,11 +8,13 @@ import { envelope, notFound, onError } from './errors.js';
 import { basicAuthGate, clientIpFrom, FailedAuthLimiter } from './middleware/auth.js';
 import { hostAllowlist, mutatingRequestCheck, noStore, originCheck } from './middleware/hardening.js';
 import { securityHeaders } from './middleware/headers.js';
+import type { StatusEnv } from './read/statusSources.js';
 import { NO_INPUT } from './routes/define.js';
 import { HANDLERS } from './routes/index.js';
 import {
   API_PREFIX,
   type AppEnv,
+  type EmailPort,
   type HttpToolRunners,
   type RawInput,
   type RouteContext,
@@ -33,6 +36,13 @@ export interface AppOptions {
   clientIp?: (c: Context<AppEnv>) => string | null;
   /** The route table to mount; defaults to `apiContract.ROUTES`. Tests pass a modified table. */
   routes?: readonly apiContract.RouteDef[];
+  /**
+   * Spec §10 `/status`: what only the bootstrap knows. `home` is HOME (the refusal file's directory), `version` the
+   * build's short SHA, `startedAt` when the app started. Defaults: no home, "unknown", now, db's migrations directory.
+   */
+  status?: Partial<Omit<StatusEnv, 'emailLast'>>;
+  /** The email notifier (spec §10 `/alerts/test-email`, the email check); absent means email is not configured. */
+  email?: EmailPort;
 }
 
 export function publicRouteKeys(routes: readonly apiContract.RouteDef[]): Set<string> {
@@ -63,6 +73,15 @@ export function createApp(ports: Ports, engine: Engine, options: AppOptions = {}
     engine,
     tools: options.tools ?? {},
     busy: new Set(),
+    status: {
+      home: null,
+      version: 'unknown',
+      startedAt: ports.clock.now(),
+      migrationsDir: MIGRATIONS_DIR,
+      ...options.status,
+      emailLast: () => options.email?.lastResult() ?? null,
+    },
+    email: options.email ?? null,
   };
   const app = new Hono<AppEnv>();
   app.onError(onError(ports.log, ports.secrets));

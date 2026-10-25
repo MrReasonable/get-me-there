@@ -1,8 +1,9 @@
 /** Shared types of the route table (spec §10). */
-import type { apiContract } from '@gmt/core';
+import type { apiContract, IsoDateTime } from '@gmt/core';
 import type { Engine } from '@gmt/engine';
 import type { Context } from 'hono';
 import type { z } from 'zod';
+import type { StatusEnv } from '../read/statusSources.js';
 import type { Ports } from '../wiring.js';
 
 /** Every ROUTES path starts with this (spec §10); static files and the SPA fallback own everything else. */
@@ -33,12 +34,21 @@ export interface RawInput {
   query: Record<string, string> | undefined;
   params: Record<string, string>;
 }
+/** The part of the email notifier the routes use: the test send, and the newest send of any kind (V7). */
+export interface EmailPort {
+  sendTest(): Promise<'sent' | 'refused' | 'failed'>;
+  lastResult(): { at: IsoDateTime; kind: string; result: 'sent' | 'refused' | 'failed' } | null;
+}
 export interface RouteContext {
   ports: Ports;
   engine: Engine;
   tools: HttpToolRunners;
   /** Plan decisions 54, 58: the keys with a request in flight (`oneAtATime`): definitions, the coverage check, the tool. */
   busy: Set<string>;
+  /** Spec §10 `/status` and `/alerts/test-email`: the build, the start, HOME and the in-process last test send. */
+  status: StatusEnv;
+  /** The configured email notifier (its test send), or null when email is not set up. */
+  email: EmailPort | null;
 }
 /**
  * One route's handler with the schemas it validates against: the ROUTES entry's own `request` and `query` objects

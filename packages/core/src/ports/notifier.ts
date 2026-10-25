@@ -66,12 +66,22 @@ export interface OperatorMessage {
   subject: string;
   body: string;
 }
+/**
+ * Spec §8.3 "Consent expiry": a notice from the app itself, with no execution, no definition and no
+ * `OperatorMessageKind` (so no `operator_notifications` row and no migration).
+ */
+export interface SystemNotice {
+  kind: 'system';
+  subject: string;
+  body: string;
+}
 /** Spec §8.3: email and log notifiers; synthetic rows are refused by the engine before send. */
 export interface Notifier {
   id: string;
   send(
     msg:
       | { kind: 'digest'; digest: AlertDigest; subject: string; body: string }
-      | { kind: 'operator'; message: OperatorMessage },
+      | { kind: 'operator'; message: OperatorMessage }
+      | SystemNotice,
   ): Promise<{ ok: boolean; detail?: string }>;
 }

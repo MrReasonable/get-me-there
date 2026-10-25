@@ -107,8 +107,15 @@ describe('Dockerfile (spec §13, §5.5, §9 item 8)', () => {
     expect(prod).not.toContain('COPY . .');
   });
 
-  it('takes no build argument or build secret, so no credential can enter a layer', () => {
-    expect(all.some((i) => /^ARG\b/.test(i) || i.includes('--mount=type=secret'))).toBe(false);
+  it('takes no build secret, and one build argument only: the version the Status report shows (WP18 V0)', () => {
+    expect(all.some((i) => i.includes('--mount=type=secret'))).toBe(false);
+    expect(all.filter((i) => /^ARG\b/.test(i))).toEqual(['ARG APP_VERSION=unknown']);
+    expect(all.filter((i) => /^ENV APP_VERSION\b/.test(i))).toEqual(['ENV APP_VERSION=$APP_VERSION']);
+    // the argument precedes the build that writes dist/version.json, and sits in the build stage only
+    const build = stages.find((s) => s.from.endsWith(' AS build'))?.instructions ?? [];
+    expect(build.indexOf('ARG APP_VERSION=unknown')).toBeGreaterThan(-1);
+    expect(build.indexOf('ARG APP_VERSION=unknown')).toBeLessThan(build.indexOf('RUN pnpm build'));
+    expect(runtime.some((i) => i.includes('APP_VERSION'))).toBe(false);
   });
 
   it('builds every package and never opts the runtime into the @gmt/source condition', () => {

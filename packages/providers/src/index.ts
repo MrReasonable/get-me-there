@@ -11,11 +11,15 @@ export {
   camoufoxStatusHttpLimits,
   classifyWorkerAnswer,
   coolingDownWords,
+  GRID_NOT_VERIFIED,
   gridTileEstimate,
   planGridTiles,
   planSingleCells,
   readWorkerStatus, // WP16a: the preflight and WP18's status check read the worker through it (decision 76)
+  SIGNED_IN_REFUSED,
+  type WorkerFinding,
   type WorkerStatusRead,
+  workerFinding, // WP18: the one judgement the preflight and the Status report share
 } from './camoufox/index.js'; // WP14: apps/api httpLimitsFor and providersFor; the smoke rows; classifyWorkerAnswer: engine tests
 export { fixtureHttpLimits, fixtureProvider } from './fixture/provider.js'; // fixtureHttpLimits: WP4b httpLimitsFor
 export { CREDENTIAL_HEADERS, canonicalCacheKey } from './http/cacheKey.js'; // CREDENTIAL_HEADERS: WP4b createLogger

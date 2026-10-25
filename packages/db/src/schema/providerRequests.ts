@@ -31,6 +31,12 @@ export const providerRequests = sqliteTable(
      * list included) and on a grid call that ended with no answer. The scroll caps sum it.
      */
     scrollCount: integer('scroll_count'),
+    /**
+     * Migration 0008 (WP18, V3/V4): the adapters' own class of a failed call (http-kit's ProviderError kind, or `parse`
+     * for a 2xx body an adapter rejected), written where the call is classified; NULL for a call that succeeded and for
+     * rows written before 0008. The Status report reads it; it never re-derives a class from the HTTP status.
+     */
+    errorKind: text('error_kind'),
   },
   (t) => [
     check('provider_requests_provider_ck', isOneOf('provider_id', PROVIDER_IDS)),

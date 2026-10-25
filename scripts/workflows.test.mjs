@@ -278,7 +278,7 @@ describe('WP16a: the mutation workflow runs every package’s Stryker gate and t
     expect(runs(jobs.mutate)).toEqual([
       'pnpm install --frozen-lockfile',
       'node scripts/check-mutation-globs.mjs',
-      'pnpm --filter @gmt/core mutate && pnpm --filter @gmt/engine mutate && pnpm --filter @gmt/camoufox-worker mutate',
+      'pnpm --filter @gmt/core mutate && pnpm --filter @gmt/engine mutate && pnpm --filter @gmt/api mutate && pnpm --filter @gmt/camoufox-worker mutate',
     ]);
     expect(runs(jobs['mutate-cli'])).toEqual([
       'pnpm install --frozen-lockfile',
@@ -317,10 +317,10 @@ describe('WP16a: the mutation workflow runs every package’s Stryker gate and t
     expect(cfg.commandRunner.command).toContain('--exclude test/exec/runner.test.ts');
     expect(cfg.commandRunner.command).toContain('--exclude test/exec/system-children.test.ts');
   });
-  it('pnpm mutate runs @gmt/engine and @gmt/cli mutate beside core and the worker (WP16b, decision 77)', () => {
+  it('pnpm mutate runs @gmt/engine, @gmt/api and @gmt/cli mutate beside core and the worker (WP16b, decision 77; WP18)', () => {
     const pkg = JSON.parse(readFileSync(join(import.meta.dirname, '..', 'package.json'), 'utf8'));
     expect(pkg.scripts.mutate).toBe(
-      'pnpm --filter @gmt/core mutate && pnpm --filter @gmt/engine mutate && pnpm --filter @gmt/camoufox-worker mutate && pnpm --filter @gmt/cli mutate',
+      'pnpm --filter @gmt/core mutate && pnpm --filter @gmt/engine mutate && pnpm --filter @gmt/api mutate && pnpm --filter @gmt/camoufox-worker mutate && pnpm --filter @gmt/cli mutate',
     );
   });
 });

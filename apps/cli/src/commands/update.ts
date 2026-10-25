@@ -337,5 +337,9 @@ export async function updateCommand(flags: Flags, _p: string | null, deps: Deps)
       ? `the app is running again at ${target}\n`
       : `updated ${from} to ${target}\n`,
   );
-  return statusCommand({}, null, deps);
+  // why: V0 — the update's exit code is the update's own steps and the app's health wait (both passed by here); the report
+  // is printed for the operator to read, and an unrelated failing check (the email, an expired consent) does not make a
+  // successful update fail
+  await statusCommand({}, null, deps);
+  return EXIT.ok;
 }

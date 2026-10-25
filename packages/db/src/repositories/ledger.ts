@@ -1,7 +1,7 @@
 import type { IsoDateTime, ProviderId, Stage } from '@gmt/core';
 import type { Db } from '../client.js';
 import { PROVIDER_IDS, STAGES } from '../internal/enums.js';
-import { oneOf } from '../internal/read.js';
+import { oneOf, readTime } from '../internal/read.js';
 import { assertIsoDateTime } from '../internal/validate.js';
 
 /** Distinct tiles fetched upstream on a first attempt (ruling 7); cache hits are counted separately so parity = tiles + cacheHits. */
@@ -82,6 +82,51 @@ export class LedgerRepo {
       )
       .all(executionId)
       .map((r) => ({ ...r, providerId: oneOf('provider_id', PROVIDER_IDS, r.providerId) }));
+  }
+
+  /**
+   * Spec §10 `GET /status` (brief WP18 §6): the provider's newest completed upstream call. `errorKind` is the adapters'
+   * own class (migration 0008), and a call is a success only when it ended `ok` with no class recorded: a 2xx whose
+   * body http-kit or an adapter rejected carries `parse` and is not one (V4). Cache hits, pending rows and swept
+   * `unknown` rows are not completed calls. Null when the provider has made none. The ledger's text is never read. Ordered
+   * by start (the existing provider index's order), so the lookup stops at the first match instead of sorting a history.
+   */
+  lastCompleted(providerId: ProviderId): {
+    at: IsoDateTime;
+    outcome: 'ok' | 'error';
+    httpStatus: number | null;
+    errorKind: string | null;
+  } | null {
+    const r = this.db.raw
+      .prepare<
+        [string],
+        { at: string; outcome: string; httpStatus: number | null; errorKind: string | null }
+      >(
+        `SELECT COALESCE(finished_at, started_at) AS at, outcome, http_status AS httpStatus, error_kind AS errorKind FROM provider_requests WHERE provider_id = ? AND outcome IN ('ok', 'error') ORDER BY started_at DESC, id DESC LIMIT 1`,
+      )
+      .get(providerId);
+    if (r === undefined) return null;
+    return {
+      at: readTime('provider_requests.finished_at', r.at),
+      outcome: oneOf('outcome', ['ok', 'error'] as const, r.outcome),
+      httpStatus: r.httpStatus,
+      errorKind: r.errorKind,
+    };
+  }
+
+  /**
+   * V4: an adapter rejected the body of a call http-kit had finalised `ok` (a 2xx whose JSON the adapter could not use).
+   * Marks the newest such row of this provider in this execution `kind`, if it has none yet, so it is no longer read as a
+   * success. Returns whether a row was marked.
+   */
+  markRejected(providerId: ProviderId, executionId: string | null, kind: string): boolean {
+    return (
+      this.db.raw
+        .prepare<[string, string, string | null]>(
+          `UPDATE provider_requests SET error_kind = ? WHERE id = (SELECT id FROM provider_requests WHERE provider_id = ? AND execution_id IS ? AND outcome = 'ok' AND error_kind IS NULL ORDER BY id DESC LIMIT 1)`,
+        )
+        .run(kind, providerId, executionId).changes === 1
+    );
   }
 
   /** Spec §8.1 parity numerator for one provider (add its cache hits for the full count). */

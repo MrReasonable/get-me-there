@@ -53,6 +53,14 @@ const DEFAULTED: Readonly<Record<string, string>> = {
 };
 
 describe('docker-compose.yml app service (spec §13, §5.5)', () => {
+  it('passes the build its version as the one build argument, defaulting to unknown (WP18 V0)', () => {
+    expect(app.build).toEqual({ context: '.', args: { APP_VERSION: '${APP_VERSION:-unknown}' } });
+    expect(read('Start.command')).toContain(
+      'APP_VERSION="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"',
+    );
+    expect(read('Start.command')).toContain('export APP_VERSION');
+  });
+
   it('passes an explicit allowlist: every .env.example variable except the never-passed and override-only ones', () => {
     const expected = envExampleVariables(read('.env.example')).filter(
       (n) => !NEVER.includes(n) && !OVERRIDE_ONLY.includes(n),

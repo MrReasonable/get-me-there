@@ -18,6 +18,9 @@ if [ ! -f .env ]; then
 fi
 chmod 600 .env
 # Validate without printing the resolved configuration, which contains credentials.
+# The Status view shows which build is running; the image has no git, so the checkout's short SHA goes in as a build argument.
+APP_VERSION="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+export APP_VERSION
 docker compose config --quiet
 docker compose up -d --build --wait --wait-timeout 240 app
 printf '\nFlight scanner ready: http://127.0.0.1:3000\nLogin: use APP_BASIC_AUTH_USER and APP_BASIC_AUTH_PASS from your local .env file.\n'

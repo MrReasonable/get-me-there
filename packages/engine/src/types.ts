@@ -58,11 +58,27 @@ export type AlertsStepHook = (
   pass: AlertsPass,
 ) => Promise<{ digests: number; events: number }>;
 /**
+ * What the consent notice needs of the Status view's consent check: its state, why (the cause decides the subject; a
+ * check that cannot be made sends nothing), its fixed summary and its fix words.
+ */
+export type ConsentCause = 'expiring' | 'expired' | 'missing' | 'voided' | 'cannot-check' | 'none';
+export type ConsentCheck = () => Promise<{
+  state: 'ok' | 'warn' | 'fail' | 'off';
+  cause: ConsentCause;
+  summary: string;
+  fix: string | null;
+}>;
+/**
  * Engine options. Every cost and limit comes from `config` (ruling 3); `providerConcurrency` overrides the pool size per
  * provider and is passed only by tests.
  */
 export interface EngineOptions {
   alerts?: AlertsStepHook;
+  /**
+   * Spec §8.3 "Consent expiry": the Status view's consent check, evaluated on the daily maintenance tick. The engine
+   * knows nothing of the worker; the app passes this in. Absent means no consent notice is ever sent.
+   */
+  consentCheck?: ConsentCheck;
   providerConcurrency?: Partial<Record<ProviderId, number>>;
 }
 

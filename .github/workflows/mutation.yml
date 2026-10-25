@@ -27,7 +27,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: node scripts/check-mutation-globs.mjs
-      - run: pnpm --filter @gmt/core mutate && pnpm --filter @gmt/engine mutate && pnpm --filter @gmt/camoufox-worker mutate
+      - run: pnpm --filter @gmt/core mutate && pnpm --filter @gmt/engine mutate && pnpm --filter @gmt/api mutate && pnpm --filter @gmt/camoufox-worker mutate
   mutate-cli:
     # why: Ian's ruling on PR #11: the CLI's run has a job of its own, since GitHub stops a job at 6 hours. Stryker runs
     # incrementally: a mutant whose code did not change keeps its last result. The incremental file is cached under a

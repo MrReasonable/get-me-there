@@ -196,7 +196,12 @@ describe('the command line (W5)', () => {
         kind: 'command',
         flags: { only: 'worker' },
       });
-    expect(parseCommandLine(['status', '--only', 'database']).kind).toBe('usage');
+    // why: W5: status's --only is WP18's area list, checked by the status report, never as a service
+    expect(parseCommandLine(['status', '--only', 'database'])).toMatchObject({
+      kind: 'command',
+      command: 'status',
+      flags: { only: 'database' },
+    });
   });
   it('browser takes one action of two, each with its own options', () => {
     expect(parseCommandLine(['browser']).kind).toBe('usage');

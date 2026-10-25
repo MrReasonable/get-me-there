@@ -10,6 +10,7 @@ import {
   execution,
   providersResponse,
   resultsResponse,
+  statusReport,
 } from '../fixtures.js';
 import { wp10Handlers } from './wp10Handlers.js';
 
@@ -45,6 +46,8 @@ export const handlers = [
   http.get(url('/api/alerts'), () => HttpResponse.json([])),
   http.get(url('/api/alerts/events'), () => HttpResponse.json([])),
   http.get(url('/api/providers'), () => HttpResponse.json(providersResponse())),
+  // WP18: a clean report, so the status bar's link shows nothing unless a test says otherwise
+  http.get(url('/api/status'), () => HttpResponse.json(statusReport())),
   http.get(url('/api/definitions'), () => HttpResponse.json([definition()])),
   http.get(url('/api/definitions/:id/results'), () => HttpResponse.json(resultsResponse())),
   http.get(url('/api/executions/:id'), () =>

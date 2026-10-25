@@ -1,13 +1,15 @@
-import { ACTIVE_STATUSES, apiContract, budgetScopeLabel, RESUMABLE_STATUSES } from '@gmt/core';
+import { ACTIVE_STATUSES, apiContract, budgetScopeLabel, capWarn, RESUMABLE_STATUSES } from '@gmt/core';
 import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import { useCoverage, useExecution, useExecutionActions, useResults } from '../api/queries.js';
+import { failureOf, useStatus } from '../api/statusQuery.js';
 import type { DefinitionResponse, ExecutionResponse, UsageRow } from '../api/types.js';
 import { COPY } from '../copy.js';
 import { formatIsoDate, formatMicroGbp, formatRunInstant } from '../format.js';
+import { useCheckedWords } from '../hooks/useCheckedWords.js';
 import { NARROW_QUERY, useMediaQuery } from '../hooks/useMediaQuery.js';
 import { BASIS_PARAM, parseBasis } from '../state/resultsState.js';
-import { useSearchParams } from '../state/urlState.js';
+import { hrefWith, navigateTo, useSearchParams } from '../state/urlState.js';
 import { LoadError } from './LoadState.js';
 
 const ACTIVE: ReadonlySet<string> = new Set(ACTIVE_STATUSES);
@@ -15,8 +17,6 @@ const ACTIVE: ReadonlySet<string> = new Set(ACTIVE_STATUSES);
 const RESUMABLE_ACTIVE: ReadonlySet<string> = new Set(
   ACTIVE_STATUSES.filter((s) => RESUMABLE_STATUSES.includes(s)),
 );
-/** Spend at or above this share of a cap is marked "near cap" (review UI-10). */
-const NEAR_CAP = 0.8;
 
 /**
  * Spec §11 progress, one line per stage × provider (never summed across providers). Ruling 4 (decision 67): the line
@@ -51,9 +51,8 @@ function usageOf(e: ExecutionResponse, label: string): UsageRow | null {
 
 const capText = (cap: number | null, fmt: (n: number) => string): string =>
   cap === null ? COPY.noCap : fmt(cap);
-/** At or above 80% of the cap; any use of a zero cap counts (it is already over); no cap is never near. */
-export const near = (used: number, cap: number | null): boolean =>
-  cap !== null && used > 0 && used >= cap * NEAR_CAP;
+/** At or above 80% of the cap, by core's one rule (a cap of 0 or no cap is never near; review V8). */
+export const near = (used: number, cap: number | null): boolean => capWarn(used, cap);
 
 function Spend({ text, used, cap }: { text: string; used: number; cap: number | null }) {
   // why: data-cost marks a cost or cap figure, never a fare; the rendered sweep allows "£" only in a PriceCell or here.
@@ -95,14 +94,75 @@ function ProviderWindows({ e }: { e: ExecutionResponse }) {
   });
 }
 
+/**
+ * The status bar's link to the Status view (spec §11), from the same query as the view and core's one `barSummary`:
+ * any fail "Status: n failing", any warn the quieter "Status: n to check", the area named when there is one. Nothing
+ * for ok checks (notes included) and while the first answer is awaited. After a failed refresh it says the report is
+ * stale and how old; with no report, that the app is not answering: never a clean state from old data.
+ */
+export function StatusLink() {
+  const q = useStatus();
+  const checked = useCheckedWords(q.data?.generatedAt ?? null);
+  let text: string | null = null;
+  let tone = 'text-slate-900';
+  if (q.data === undefined) {
+    if (q.error) {
+      text = {
+        'not-answering': COPY.statusLink.notAnswering,
+        'sign-in-refused': COPY.statusLink.signInRefused,
+        'report-failed': COPY.statusLink.reportFailed,
+      }[failureOf(q.error)];
+      tone = 'font-medium text-red-900';
+    }
+  } else if (q.isRefetchError && checked !== null) {
+    text = COPY.statusLink.stale(checked);
+    tone = 'font-medium text-amber-900';
+  } else {
+    const bar = apiContract.barSummary(q.data.checks);
+    if (bar.kind !== 'clean') {
+      text = bar.text;
+      tone = bar.kind === 'fail' ? 'font-semibold text-red-900' : 'text-amber-900';
+    }
+  }
+  if (text === null) return null;
+  return (
+    // why: V11 (ui-b1-004): the key labels the landmark; the link keeps its own text as its name, so the count is read
+    <section
+      aria-label={COPY.statusLink.label}
+      className="border-b border-slate-300 bg-slate-50 px-4 text-sm"
+    >
+      <a
+        href={hrefWith({ view: 'status' })}
+        onClick={navigateTo({ view: 'status' })}
+        className={`inline-flex min-h-11 items-center underline ${tone}`}
+      >
+        {text}
+      </a>
+    </section>
+  );
+}
+
 export interface StatusBarProps {
   definition: DefinitionResponse | null;
   /** "Run now" appears only on Results and Definitions (review UI-10). */
   showRunNow: boolean;
 }
 
-/** Spec §11 status bar, on every view: stage, progress, spend, paused reason + Resume, blocked schedule, Cancel. */
-export function StatusBar({ definition, showRunNow }: StatusBarProps) {
+/**
+ * Spec §11 status bar, on every view: the link to the Status view, then the run's stage, progress, spend, paused reason
+ * + Resume, blocked schedule and Cancel. The link needs no definition; the run's part does.
+ */
+export function StatusBar(props: StatusBarProps) {
+  return (
+    <>
+      <StatusLink />
+      <RunStatus {...props} />
+    </>
+  );
+}
+
+/** The run's part of the bar: stage, progress, spend, paused reason + Resume, blocked schedule, Cancel. */
+function RunStatus({ definition, showRunNow }: StatusBarProps) {
   const params = useSearchParams();
   const results = useResults(definition?.id ?? null, parseBasis(params.get(BASIS_PARAM)));
   const executions = results.data?.executions ?? [];

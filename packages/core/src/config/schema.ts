@@ -119,6 +119,8 @@ export type ConfigResult = { ok: true; config: Config } | { ok: false; errors: C
 
 type Env = Record<string, string | undefined>;
 const LOOPBACK = /^(127\.\d+\.\d+\.\d+|::1|localhost)$/;
+/** Whether a bind address or host is this machine's loopback: the one rule config, the boot guard and Status share. */
+export const isLoopbackHost = (host: string): boolean => LOOPBACK.test(host);
 
 /**
  * Spec §8.3: SMTP_TLS=none is allowed only for a loopback host, or the `mailpit` host under NODE_ENV=development. The

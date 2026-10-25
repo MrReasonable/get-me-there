@@ -18,7 +18,11 @@ name: get-me-there
 
 services:
   app:
-    build: .
+    # why: WP18 (V0): the Status report shows the build; the image has no git, so the version is a build argument
+    build:
+      context: .
+      args:
+        APP_VERSION: ${APP_VERSION:-unknown}
     image: get-me-there:local
     # why: tini as PID 1 forwards SIGTERM so the app checkpoints WAL and releases app_lock (spec §7).
     init: true
