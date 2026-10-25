@@ -1,16 +1,18 @@
 /**
  * The pure state rules and words of the Status report (spec §10 `GET /status`, brief WP18 §6): the thresholds, the
- * coverage line, the age line and the instant format, so the api's builders only gather facts and the rules are
+ * coverage line, the age line and the backup and consent rules, so the api's builders only gather facts and the rules are
  * mutation-tested here. Nothing in this file reads a clock, a file or the network.
  */
-import type { Buckets } from '../types/execution.js';
-import type { IsoDateTime } from '../types/ids.js';
+
+import type { Buckets, CellOutcomeStatus } from '../types/execution.js';
+import { type IsoDateTime, isoDateTimeOfEpochMs } from '../types/ids.js';
+import { addMonthsClamped } from './time.js';
 
 const HOUR_MS = 3_600_000;
 const DAY_MS = 24 * HOUR_MS;
 /** A daily backup older than this is a warning, and its absence in an app older than this a failure. */
 export const BACKUP_MAX_AGE_MS = 36 * HOUR_MS;
-/** A consent record with less than this left is a warning ("30 days" is elapsed time, 30 × 86,400,000 ms). */
+/** A consent record with this long or less left is a warning ("30 days" is elapsed time, 30 × 86,400,000 ms). */
 export const CONSENT_WARN_MS = 30 * DAY_MS;
 /** A run whose not-searched, skipped and error cells exceed this share of its cells is a warning. */
 export const COVERAGE_GAP_SHARE = 0.2;
@@ -37,13 +39,13 @@ export function backupState(a: {
 }
 
 /**
- * A consent record's own `expiresAt` against now: expired (at or before now) is a failure, under 30 days left a warning,
- * exactly 30 days or more is fine (the brief's pinned boundary: one millisecond short of 30 days warns, 30 days does not).
+ * A consent record's own `expiresAt` against now: expired (at or before now) is a failure, 30 days or less left a warning
+ * (spec §8.3 and the brief's table: exactly 30 days left warns; one millisecond more does not).
  */
 export function consentWindowState(expiresAt: IsoDateTime, now: IsoDateTime): RuleState {
   const left = Date.parse(expiresAt) - Date.parse(now);
   if (left <= 0) return 'fail';
-  return left < CONSENT_WARN_MS ? 'warn' : 'ok';
+  return left <= CONSENT_WARN_MS ? 'warn' : 'ok';
 }
 
 /** True when the cells that were not priced for lack of a result (error, skipped, not searched) exceed 20% of the cells. */
@@ -76,31 +78,6 @@ export function ageEndsLine(newest: string, oldest: string): string {
   return `newest price ${newest}, oldest ${oldest}`;
 }
 
-/** A short instant in a time zone, "2026-10-14 03:30" (24 h, the zone's own clock), for summaries. */
-export function formatInstantIn(iso: IsoDateTime, tz: string): string {
-  const parts = new Intl.DateTimeFormat('en-GB', {
-    timeZone: tz,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hourCycle: 'h23',
-  }).formatToParts(new Date(iso));
-  const part: Record<string, string> = Object.fromEntries(parts.map((p) => [p.type, p.value]));
-  return `${part.year}-${part.month}-${part.day} ${part.hour}:${part.minute}`;
-}
-
-/** The date part of `formatInstantIn`. */
-export function formatDateIn(iso: IsoDateTime, tz: string): string {
-  return formatInstantIn(iso, tz).slice(0, 10);
-}
-
-/** The time part of `formatInstantIn`. */
-export function formatTimeIn(iso: IsoDateTime, tz: string): string {
-  return formatInstantIn(iso, tz).slice(11);
-}
-
 /** The share of a cap used, as a whole percent (down), or null when there is no cap. */
 export function capPercent(used: number, cap: number | null): number | null {
   return cap === null || cap <= 0 ? null : Math.floor((used * 100) / cap);
@@ -110,3 +87,39 @@ export function capPercent(used: number, cap: number | null): number | null {
 export function capWarn(used: number, cap: number | null): boolean {
   return cap !== null && cap > 0 && used >= cap * CAP_WARN_SHARE;
 }
+
+/** The cookie lifetime the consent record is judged by: a capture expires 13 months after it was made (spec §2). */
+export const CONSENT_MAX_AGE_MONTHS = 13;
+/** The latest a capture made at `capturedAt` can expire (an upper bound: the cookie's own expiry may be earlier). */
+export const consentBoundOf = (capturedAt: IsoDateTime): IsoDateTime =>
+  addMonthsClamped(capturedAt, CONSENT_MAX_AGE_MONTHS);
+/** When a record that expires at `expiresAt` (a not-shown record's check plus 13 months) was made. */
+export const consentMadeAt = (expiresAt: IsoDateTime): IsoDateTime =>
+  addMonthsClamped(expiresAt, -CONSENT_MAX_AGE_MONTHS);
+
+/** The daily backup file name the backup job writes (and db's retention reads): one pattern for every reader. */
+export const BACKUP_FILE_PATTERN = /^get-me-there-(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z\.db$/;
+/** The instant in a backup's name, or null for a file that is not one. */
+export function backupTimeOf(name: string): IsoDateTime | null {
+  const m = BACKUP_FILE_PATTERN.exec(name);
+  return m === null ? null : isoDateTimeOfEpochMs(Date.parse(`${m[1]}T${m[2]}:${m[3]}:${m[4]}.${m[5]}Z`));
+}
+
+/**
+ * The six buckets of a run's cells after the §6.6 roll-up (a cell with no discovery roll-up counts as not searched), and
+ * how many cells there are: the parts always sum to the total.
+ */
+export function coverageBuckets(
+  discovery: readonly (CellOutcomeStatus | null)[],
+  reused: number,
+): { buckets: Buckets; total: number } {
+  const buckets: Buckets = { priced: 0, empty: 0, no_data: 0, error: 0, skipped: 0, not_run: 0, reused };
+  for (const status of discovery) buckets[status ?? 'not_run'] += 1;
+  return { buckets, total: discovery.length };
+}
+
+/** Where a consent record is captured today (one place; WP17 changes it if it ships a command). */
+export const CONSENT_FIX = {
+  text: 'capture consent again with pnpm --filter @gmt/camoufox-worker capture-socs (docs/setup.md section 14)',
+  command: null,
+} as const;

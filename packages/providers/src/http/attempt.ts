@@ -1,4 +1,4 @@
-import { AbortedError, type IsoDateTime, type Reservation } from '@gmt/core';
+import { AbortedError, type IsoDateTime, ProviderError, type Reservation } from '@gmt/core';
 import {
   bodyReadFailed,
   bodyTooLarge,
@@ -137,6 +137,12 @@ export async function runAttempt(
       ...(scrollCount === undefined ? {} : { scrollCount }),
     });
   };
+  // why: WP18 V3: the class http-kit gives a failed call is kept on its ledger row, the one classification the Status
+  // report reads; AbortedError is not a ProviderError and records nothing
+  const classified = <E extends Error>(e: E): E => {
+    if (e instanceof ProviderError) reservation?.classify(e.kind);
+    return e;
+  };
   // why: setTimeout + AbortController rather than AbortSignal.timeout, whose Node-internal timer vitest cannot fake.
   const timeout = new AbortController();
   const timer = setTimeout(() => timeout.abort(), limits.requestTimeoutSeconds * 1000);
@@ -176,7 +182,7 @@ export async function runAttempt(
     }
     if (timeout.signal.aborted) {
       finalise('unknown');
-      throw requestTimeout(w, limits.billable, limits.retryTransport !== false);
+      throw classified(requestTimeout(w, limits.billable, limits.retryTransport !== false));
     }
     const thrown = classifyThrown(err, w, {
       ...(limits.retryTransport === undefined ? {} : { retryTransport: limits.retryTransport }),
@@ -185,7 +191,7 @@ export async function runAttempt(
     // why: a refused connection sent nothing, so it loaded nothing (decision 69: `no-page`).
     if (connectionRefused(err)) classOverride = 'no-page';
     finalise('error');
-    throw thrown;
+    throw classified(thrown);
   }
 
   const status = res.status;
@@ -204,10 +210,10 @@ export async function runAttempt(
     }
     if (timeout.signal.aborted) {
       finalise('unknown', status);
-      throw requestTimeout(w, limits.billable, limits.retryTransport !== false);
+      throw classified(requestTimeout(w, limits.billable, limits.retryTransport !== false));
     }
     finalise(billed200 ? 'unknown' : 'error', status);
-    throw bodyReadFailed(w, status, billed200, limits.retryTransport !== false);
+    throw classified(bodyReadFailed(w, status, billed200, limits.retryTransport !== false));
   } finally {
     clearTimeout(timer);
   }
@@ -225,8 +231,8 @@ export async function runAttempt(
     },
     'http attempt',
   );
-  if (status >= 300 && status < 400) throw redirectRefused(w, status);
-  if (text === null) throw bodyTooLarge(w, status);
+  if (status >= 300 && status < 400) throw classified(redirectRefused(w, status));
+  if (text === null) throw classified(bodyTooLarge(w, status));
 
   let body: unknown;
   let malformed = false;
@@ -258,14 +264,16 @@ export async function runAttempt(
       ...w,
     };
     const raw = limits.classifyError?.(facts) ?? classifyResponse(facts);
-    throw finishError(raw, {
-      facts,
-      limits,
-      now: deps.clock.now(),
-      secrets: deps.secrets,
-      secondsToHourRefresh: ctx.secondsToHourRefresh,
-    });
+    throw classified(
+      finishError(raw, {
+        facts,
+        limits,
+        now: deps.clock.now(),
+        secrets: deps.secrets,
+        secondsToHourRefresh: ctx.secondsToHourRefresh,
+      }),
+    );
   }
-  if (malformed) throw malformedBody(w, status);
+  if (malformed) throw classified(malformedBody(w, status));
   return { status, body: scrubbed, fetchedAt };
 }

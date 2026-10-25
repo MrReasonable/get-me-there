@@ -1,4 +1,4 @@
-import { type CellKey, cellKeyString, generateCells } from '@gmt/core';
+import { type CellKey, cellKeyString, generateCells, ProviderError } from '@gmt/core';
 import type { FixtureRule } from '@gmt/providers/fixture';
 import { describe, expect, it, vi } from 'vitest';
 import { buildContext } from '../src/context.js';
@@ -213,6 +213,25 @@ describe('error table, discovery stage: non-retryable kinds', () => {
     const errors = h.outcomes(e.id, { status: 'error' });
     expect(keys(errors)).toEqual(keys(lhrTile(h, FIRST)));
     expect(errors.every((o) => o.reason === 'parse')).toBe(true);
+  });
+});
+
+describe('a 2xx the adapter rejects is no longer a success on the ledger (WP18 V4)', () => {
+  it('the row http-kit finalised ok is marked parse when the adapter then throws parse', async () => {
+    const { h } = await run([], {
+      transformFixture: (p) =>
+        mapTiles(p, () => {
+          throw new ProviderError({ kind: 'parse', retryable: false, message: 'the tile was not usable' });
+        }),
+    });
+    const rows = h.db.raw
+      .prepare<[], { outcome: string; kind: string | null }>(
+        `SELECT outcome, error_kind AS kind FROM provider_requests WHERE provider_id = 'fixture' AND outcome = 'ok'`,
+      )
+      .all();
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows.some((r) => r.kind === 'parse')).toBe(true);
+    expect(h.repos.ledger.lastCompleted('fixture')).toMatchObject({ outcome: 'ok', errorKind: 'parse' });
   });
 });
 

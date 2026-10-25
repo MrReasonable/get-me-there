@@ -105,6 +105,9 @@ export const TEST_EMAIL_SUBJECT = '[get-me-there] test email';
 export const TEST_EMAIL_BODY =
   'This is a test message from get-me-there. If you can read it, email alerts and notices are set up.';
 
+/** A test send is allowed once a minute, apart from the alert ceiling (V7). */
+export const TEST_EMAIL_MIN_GAP_MS = 60_000;
+
 export interface EmailNotifierOptions {
   smtp: SmtpConfig;
   nodeEnv: Config['nodeEnv'];
@@ -128,6 +131,9 @@ export class EmailNotifier implements Notifier {
    * A send takes its slot before it starts, so concurrent sends stop at the ceiling, and gives it back when it fails.
    */
   #recent: IsoDateTime[] = [];
+  #last: { at: IsoDateTime; kind: string; result: 'sent' | 'refused' | 'failed' } | null = null;
+  #testing = false;
+  #lastTestAt = Number.NEGATIVE_INFINITY;
 
   constructor(opts: EmailNotifierOptions) {
     // why: defence in depth for sec-001 — core's config already refuses anything but one mailbox per address
@@ -149,8 +155,16 @@ export class EmailNotifier implements Notifier {
       msg.kind === 'digest' ? msg.subject : msg.kind === 'operator' ? msg.message.subject : msg.subject,
     );
     const body = msg.kind === 'digest' ? msg.body : msg.kind === 'operator' ? msg.message.body : msg.body;
-    const r = await this.#deliver(msg.kind, subject, body);
+    const r = await this.#deliver(msg.kind, subject, body, true);
     return r.result === 'sent' ? { ok: true } : { ok: false, detail: r.detail };
+  }
+
+  /**
+   * V7 (spec §10, brief §6 email): the newest send of any kind since the app started (an alert digest, an operator or
+   * system notice, or a test), its class only: `sent`, `refused` at the hourly ceiling, or `failed`. Null before any.
+   */
+  lastResult(): { at: IsoDateTime; kind: string; result: 'sent' | 'refused' | 'failed' } | null {
+    return this.#last;
   }
 
   /**
@@ -159,17 +173,39 @@ export class EmailNotifier implements Notifier {
    * logged scrubbed and never returned.
    */
   async sendTest(): Promise<'sent' | 'refused' | 'failed'> {
-    return (await this.#deliver('test', TEST_EMAIL_SUBJECT, TEST_EMAIL_BODY)).result;
+    // why: V7 (sec-b1-001): a test send has its own small limit and an in-flight guard, and never draws on the alert
+    // ceiling, so pressing the button cannot crowd out a price alert or a consent notice
+    const now = Date.parse(this.#clock.now());
+    if (this.#testing || now - this.#lastTestAt < TEST_EMAIL_MIN_GAP_MS) return 'refused';
+    this.#testing = true;
+    this.#lastTestAt = now;
+    try {
+      return (await this.#deliver('test', TEST_EMAIL_SUBJECT, TEST_EMAIL_BODY, false)).result;
+    } finally {
+      this.#testing = false;
+    }
   }
 
   async #deliver(
     kind: string,
     subject: string,
     body: string,
+    countsTowardCeiling: boolean,
+  ): Promise<{ result: 'sent'; detail?: undefined } | { result: 'refused' | 'failed'; detail: string }> {
+    const r = await this.#attempt(kind, subject, body, countsTowardCeiling);
+    this.#last = { at: this.#clock.now(), kind, result: r.result };
+    return r;
+  }
+
+  async #attempt(
+    kind: string,
+    subject: string,
+    body: string,
+    countsTowardCeiling: boolean,
   ): Promise<{ result: 'sent'; detail?: undefined } | { result: 'refused' | 'failed'; detail: string }> {
     const now = this.#clock.now();
     this.#recent = this.#recent.filter((t) => Date.parse(now) - Date.parse(t) < HOUR_MS);
-    if (this.#recent.length >= this.#maxPerHour) {
+    if (countsTowardCeiling && this.#recent.length >= this.#maxPerHour) {
       // why: decision 56 — beyond the ceiling a message is logged and dropped; a digest's events stay queued for the next pass
       this.#log.warn(
         { kind, subject, maxPerHour: this.#maxPerHour },
@@ -180,7 +216,7 @@ export class EmailNotifier implements Notifier {
         detail: `outgoing email ceiling reached (${this.#maxPerHour} per hour); message dropped`,
       };
     }
-    this.#recent.push(now);
+    if (countsTowardCeiling) this.#recent.push(now);
     const mail: MailMessage = { from: this.#smtp.from, to: this.#smtp.to, subject, text: plainText(body) };
     try {
       const info = await this.#transport.sendMail(mail);
@@ -190,7 +226,7 @@ export class EmailNotifier implements Notifier {
       // why: spec §12 — the ceiling counts delivered mail. A failed send returns its slot, so a run of SMTP failures
       // never turns later sends into "ceiling reached" and hides the real cause; retries stay bounded by the alert
       // passes, which follow executions (CodeRabbit batch 3).
-      const slot = this.#recent.indexOf(now);
+      const slot = countsTowardCeiling ? this.#recent.indexOf(now) : -1;
       if (slot !== -1) this.#recent.splice(slot, 1);
       this.#log.warn(failureCodes(err), 'email not sent');
       return { result: 'failed', detail: this.#detail(err) };

@@ -24,14 +24,11 @@ export {
   type SmtpConfig,
   type SmtpTransportOptions,
   smtpTransportOptions,
-  TEST_EMAIL_BODY,
-  TEST_EMAIL_SUBJECT,
   type TransportFactory,
 } from './notifiers/email.js';
 export { buildNotifiers } from './notifiers/index.js';
 export { LogNotifier } from './notifiers/log.js';
 export { renderOperatorMessage } from './notifiers/operatorTemplates.js';
-export { sendSystemNotice } from './notify.js';
 export {
   type BrowserWindowSetting,
   loadsBrowserPages,
@@ -50,7 +47,6 @@ export type {
   AlertsStepHook,
   BudgetFit,
   ChildCapPreview,
-  ConsentCheck,
   CoverageCheckRequest,
   CoverageCheckResponse,
   Engine,

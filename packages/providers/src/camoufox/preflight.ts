@@ -91,6 +91,77 @@ export async function readWorkerStatus(o: {
 /** The preflight's refusal when the worker's effective shared settings differ from the app's (spec §12), names only. */
 export const settingsDiffer = (names: readonly string[]): string => `settings differ: ${names.join(', ')}`;
 
+/** What a worker's own status says it will do with the next page request (the one list preflight and Status read). */
+export type WorkerFinding =
+  | {
+      kind: 'cooling';
+      until: WorkerStatus['coolingDownUntil'] & string;
+      cause: WorkerStatus['cooldownCause'];
+    }
+  | { kind: 'signed-in' }
+  | { kind: 'settings'; names: readonly string[] }
+  | { kind: 'grid-unverified' }
+  | { kind: 'grid-setting'; name: string; worker: number | null | undefined; app: number };
+
+/**
+ * The first reason a worker that answered will refuse pages (spec §2, §12), in the order the preflight has always judged
+ * them: a cool-down, a signed-in profile, shared settings that differ, then, in grid mode, an unverified grid step or a
+ * grid setting that differs. Null when none applies. Pure: the preflight skips cells on it and the Status report words it.
+ */
+export function workerFinding(
+  st: WorkerStatus,
+  o: {
+    sharedSettings?: SharedSettings | undefined;
+    grid?: { scrollCap: number; spacingSeconds: number; pageTimeoutSeconds: number } | undefined;
+  },
+): WorkerFinding | null {
+  if (st.coolingDownUntil !== null)
+    return { kind: 'cooling', until: st.coolingDownUntil, cause: st.cooldownCause };
+  if (st.signedInRefusal || st.accountCookie.found) return { kind: 'signed-in' };
+  // why: spec §12 — both sides compare effective values, by name; a worker too old to report its record is compared
+  // on what it does report (the grid-only comparison below), as before
+  const shared = st.sharedSettings;
+  if (shared !== undefined && o.sharedSettings !== undefined) {
+    const differ = sharedSettingDiffs(o.sharedSettings, shared, o.grid === undefined ? 'list' : 'grid');
+    if (differ.length > 0) return { kind: 'settings', names: differ };
+  }
+  if (o.grid === undefined) return null;
+  // why: spec §2 rev 34: grid pages are planned from the measured step, so the worker must report the same one
+  const step = st.gridStepDays;
+  if (
+    step === undefined ||
+    step === null ||
+    step.departures !== GRID_STEP_DAYS.departures ||
+    step.returns !== GRID_STEP_DAYS.returns
+  )
+    return { kind: 'grid-unverified' };
+  // why: fix round 1 (CA 9): a lower worker cap refuses every page (400); a longer worker spacing outlasts the app's
+  // request timeout; either is a configuration fault, named. CodeRabbit on PR #9: a longer worker page timeout
+  // outlasts the app's request timeout, even with no scroll
+  if (st.gridScrollCap !== o.grid.scrollCap)
+    return {
+      kind: 'grid-setting',
+      name: 'CAMOUFOX_GRID_SCROLL_CAP',
+      worker: st.gridScrollCap,
+      app: o.grid.scrollCap,
+    };
+  if (st.pageTimeoutSeconds !== o.grid.pageTimeoutSeconds)
+    return {
+      kind: 'grid-setting',
+      name: 'CAMOUFOX_PAGE_TIMEOUT_SECONDS',
+      worker: st.pageTimeoutSeconds,
+      app: o.grid.pageTimeoutSeconds,
+    };
+  if (st.gridScrollSpacingSeconds !== o.grid.spacingSeconds)
+    return {
+      kind: 'grid-setting',
+      name: 'CAMOUFOX_GRID_SCROLL_SPACING_SECONDS',
+      worker: st.gridScrollSpacingSeconds,
+      app: o.grid.spacingSeconds,
+    };
+  return null;
+}
+
 export async function camoufoxPreflight(
   o: {
     http: HttpKit;
@@ -127,61 +198,27 @@ export async function camoufoxPreflight(
     };
   if (read.kind === 'unreachable') return { ok: false, skip: 'provider_unavailable', detail: UNREACHABLE };
   if (read.kind === 'unreadable') return { ok: false, skip: 'provider_unavailable', detail: UNREADABLE };
-  const st = read.status;
-  if (st.coolingDownUntil !== null)
-    return {
-      ok: false,
-      skip: 'provider_disabled',
-      detail: `cooling down until ${st.coolingDownUntil} (${st.cooldownCause ?? 'unknown'})`,
-      until: st.coolingDownUntil,
-    };
-  if (st.signedInRefusal || st.accountCookie.found)
-    return { ok: false, skip: 'provider_disabled', detail: SIGNED_IN_REFUSED };
-  // why: spec §12 — both sides compare effective values, by name; a worker too old to report its record is compared
-  // on what it does report (the grid-only comparison below), as before
-  const shared = st.sharedSettings;
-  if (shared !== undefined && o.sharedSettings !== undefined) {
-    const differ = sharedSettingDiffs(o.sharedSettings, shared, o.grid === undefined ? 'list' : 'grid');
-    if (differ.length > 0) return { ok: false, skip: 'provider_disabled', detail: settingsDiffer(differ) };
+  const found = workerFinding(read.status, o);
+  if (found === null) return { ok: true };
+  switch (found.kind) {
+    case 'cooling':
+      return {
+        ok: false,
+        skip: 'provider_disabled',
+        detail: `cooling down until ${found.until} (${found.cause ?? 'unknown'})`,
+        until: found.until,
+      };
+    case 'signed-in':
+      return { ok: false, skip: 'provider_disabled', detail: SIGNED_IN_REFUSED };
+    case 'settings':
+      return { ok: false, skip: 'provider_disabled', detail: settingsDiffer(found.names) };
+    case 'grid-unverified':
+      return { ok: false, skip: 'provider_disabled', detail: GRID_NOT_VERIFIED };
+    case 'grid-setting':
+      return {
+        ok: false,
+        skip: 'provider_disabled',
+        detail: gridSettingDiffers(found.name, found.worker, found.app),
+      };
   }
-  // why: spec §2 rev 34: grid pages are planned from the measured step, so the worker must report the same one
-  const step = st.gridStepDays;
-  if (o.grid === undefined) return { ok: true };
-  if (
-    step === undefined ||
-    step === null ||
-    step.departures !== GRID_STEP_DAYS.departures ||
-    step.returns !== GRID_STEP_DAYS.returns
-  )
-    return { ok: false, skip: 'provider_disabled', detail: GRID_NOT_VERIFIED };
-  // why: fix round 1 (CA 9): a lower worker cap refuses every page (400); a longer worker spacing outlasts the app's
-  // request timeout; either is a configuration fault, named
-  if (st.gridScrollCap !== o.grid.scrollCap)
-    return {
-      ok: false,
-      skip: 'provider_disabled',
-      detail: gridSettingDiffers('CAMOUFOX_GRID_SCROLL_CAP', st.gridScrollCap, o.grid.scrollCap),
-    };
-  // why: CodeRabbit on PR #9: a longer worker page timeout outlasts the app's request timeout, even with no scroll
-  if (st.pageTimeoutSeconds !== o.grid.pageTimeoutSeconds)
-    return {
-      ok: false,
-      skip: 'provider_disabled',
-      detail: gridSettingDiffers(
-        'CAMOUFOX_PAGE_TIMEOUT_SECONDS',
-        st.pageTimeoutSeconds,
-        o.grid.pageTimeoutSeconds,
-      ),
-    };
-  if (st.gridScrollSpacingSeconds !== o.grid.spacingSeconds)
-    return {
-      ok: false,
-      skip: 'provider_disabled',
-      detail: gridSettingDiffers(
-        'CAMOUFOX_GRID_SCROLL_SPACING_SECONDS',
-        st.gridScrollSpacingSeconds,
-        o.grid.spacingSeconds,
-      ),
-    };
-  return { ok: true };
 }

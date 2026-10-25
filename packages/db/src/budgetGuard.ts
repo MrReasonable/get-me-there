@@ -58,6 +58,7 @@ UPDATE provider_requests SET outcome = @outcome, http_status = @httpStatus, dura
   scroll_count = CASE WHEN @scrollCount IS NULL AND @outcome = 'unknown' THEN scroll_count ELSE @scrollCount END,
   cost_micro_gbp = CASE WHEN @zeroCost = 1 THEN 0 ELSE cost_micro_gbp END
 WHERE id = @id AND outcome = 'pending'`;
+const CLASSIFY_SQL = `UPDATE provider_requests SET error_kind = @kind WHERE id = @id`;
 const INSERT_CACHE_HIT_SQL = `
 INSERT INTO provider_requests (provider_id, execution_id, endpoint_path, tile_index, started_at, finished_at, duration_ms, http_status, outcome, billable, cost_micro_gbp, http_attempt)
 VALUES (@providerId, @executionId, @endpointPath, @tileIndex, @at, @at, 0, NULL, 'cache_hit', 0, 0, 0)`;
@@ -103,6 +104,7 @@ FROM search_executions WHERE id = ?`;
 interface GuardStatements {
   insertPending: Database.Statement<Record<string, unknown>>;
   finalise: Database.Statement<Record<string, unknown>>;
+  classify: Database.Statement<Record<string, unknown>>;
   insertCacheHit: Database.Statement<Record<string, unknown>>;
   recentCalls: Database.Statement<[string, string], { n: number }>;
   providerUsage: Database.Statement<Record<string, unknown>, CallsAndCost>;
@@ -121,6 +123,7 @@ function prepareStatements(db: Db): GuardStatements {
   return {
     insertPending: db.raw.prepare<Record<string, unknown>>(INSERT_PENDING_SQL),
     finalise: db.raw.prepare<Record<string, unknown>>(FINALISE_SQL),
+    classify: db.raw.prepare<Record<string, unknown>>(CLASSIFY_SQL),
     insertCacheHit: db.raw.prepare<Record<string, unknown>>(INSERT_CACHE_HIT_SQL),
     recentCalls: db.raw.prepare<[string, string], { n: number }>(RECENT_CALLS_SQL),
     providerUsage: db.raw.prepare<Record<string, unknown>, CallsAndCost>(PROVIDER_USAGE_SQL),
@@ -495,6 +498,10 @@ export class SqliteBudgetGuard implements BudgetGuard {
         }).changes;
         if (changes !== 1) throw new Error(`reservation ${id} is no longer pending`);
         done = true;
+      },
+      // why: WP18 V3: http-kit classifies after it finalises, so the class is written to the finalised row
+      classify: (kind) => {
+        this.sql.classify.run({ id, kind });
       },
     };
   }

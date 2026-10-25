@@ -1,4 +1,5 @@
 // Spec §10 `GET /status`: the report's schema, its worst-first order and the bar line (brief WP18 §5, Task 18.1).
+import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import {
   barSummary,
@@ -15,6 +16,7 @@ const check = (over: Partial<StatusCheck> = {}): StatusCheck => ({
   id: 'app',
   area: 'app',
   providerId: null,
+  label: null,
   state: 'ok',
   summary: 'running',
   note: null,
@@ -42,9 +44,9 @@ describe('statusCheckSchema', () => {
   });
   it('bounds the id, the summary and the note', () => {
     expect(statusCheckSchema.safeParse(check({ id: 'Bad Id' })).success).toBe(false);
-    expect(statusCheckSchema.safeParse(check({ summary: 'x'.repeat(241) })).success).toBe(false);
-    expect(statusCheckSchema.safeParse(check({ summary: 'x'.repeat(240) })).success).toBe(true);
-    expect(statusCheckSchema.safeParse(check({ note: 'x'.repeat(201) })).success).toBe(false);
+    expect(statusCheckSchema.safeParse(check({ summary: 'x'.repeat(601) })).success).toBe(false);
+    expect(statusCheckSchema.safeParse(check({ summary: 'x'.repeat(600) })).success).toBe(true);
+    expect(statusCheckSchema.safeParse(check({ note: 'x'.repeat(601) })).success).toBe(false);
   });
 });
 
@@ -85,6 +87,21 @@ describe('sortChecks', () => {
     const hi = check({ id: 'b' });
     expect(sortChecks([lo, hi]).map((c) => c.id)).toEqual(['a', 'b']);
     expect(sortChecks([hi, lo]).map((c) => c.id)).toEqual(['a', 'b']);
+  });
+  it('orders many checks that share a state and an area by id, in every permutation tried', () => {
+    const ids = ['m', 'c', 'x', 'a', 'q', 'f'];
+    const sorted = [...ids].sort();
+    fc.assert(
+      fc.property(fc.shuffledSubarray(ids, { minLength: ids.length, maxLength: ids.length }), (order) => {
+        expect(sortChecks(order.map((id) => check({ id }))).map((c) => c.id)).toEqual(sorted);
+      }),
+    );
+  });
+  it('allows the disabled reason and a label', () => {
+    expect(
+      statusCheckSchema.safeParse(check({ state: 'off', offReason: 'disabled', label: 'London to New York' }))
+        .success,
+    ).toBe(true);
   });
   it('keeps checks that tie on state, area and id in their given order', () => {
     const a = check({ summary: 'first' });

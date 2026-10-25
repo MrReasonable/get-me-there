@@ -149,11 +149,14 @@ export const statusCheckSchema = z
     area: statusAreaSchema,
     providerId: providerIdSchema.nullable(),
     state: statusStateSchema,
-    summary: z.string().max(240),
+    /** What distinguishes the card when its area has several (a search definition's name); null otherwise. */
+    label: z.string().max(200).nullable(),
+    // why: never cut a fact a state rests on (review V6): the longest summary is well under this
+    summary: z.string().max(600),
     /** An aside on any check, such as "first daily backup due 03:30"; it never counts toward the status bar. */
-    note: z.string().max(200).nullable(),
+    note: z.string().max(600).nullable(),
     /** Only when `state` is `off`: why nothing is checked. */
-    offReason: z.enum(['not-set-up', 'not-visible', 'awaiting-verification']).nullable(),
+    offReason: z.enum(['not-set-up', 'not-visible', 'awaiting-verification', 'disabled']).nullable(),
     fix: z
       .strictObject({
         text: z.string().max(200),
@@ -181,37 +184,5 @@ export type StatusState = z.infer<typeof statusStateSchema>;
 export type StatusArea = z.infer<typeof statusAreaSchema>;
 export type StatusCheck = z.infer<typeof statusCheckSchema>;
 export type StatusResponse = z.infer<typeof statusResponseSchema>;
-
-/** Worst first. */
-export const STATE_ORDER = { fail: 0, warn: 1, ok: 2, off: 3 } as const;
-const AREA_ORDER = statusAreaSchema.options;
-
-/** Worst first: state, then area (the schema's order), then id. Does not change its argument. */
-export function sortChecks(checks: readonly StatusCheck[]): StatusCheck[] {
-  return [...checks].sort(
-    (a, b) =>
-      STATE_ORDER[a.state] - STATE_ORDER[b.state] ||
-      AREA_ORDER.indexOf(a.area) - AREA_ORDER.indexOf(b.area) ||
-      (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
-  );
-}
-
-/**
- * The one line the status bar and `gmt status` share: any `fail` is "Status: n failing", else any `warn` the quieter
- * "Status: n to check", each naming the area when exactly one check is concerned. `off` checks and notes never count.
- */
-export function barSummary(checks: readonly StatusCheck[]): {
-  kind: 'clean' | 'warn' | 'fail';
-  text: string;
-} {
-  const failing = checks.filter((c) => c.state === 'fail');
-  const toCheck = checks.filter((c) => c.state === 'warn');
-  const concerned = failing.length > 0 ? failing : toCheck;
-  const kind = failing.length > 0 ? 'fail' : toCheck.length > 0 ? 'warn' : 'clean';
-  if (kind === 'clean') return { kind, text: 'Status: nothing to check' };
-  // why: one concerned check is named by its area, several by their count
-  const what = concerned.length === 1 ? concerned.map((c) => c.area).join('') : String(concerned.length);
-  return { kind, text: `Status: ${what} ${kind === 'fail' ? 'failing' : 'to check'}` };
-}
 
 export type SchedulerJob = z.infer<typeof schedulerJobSchema>;

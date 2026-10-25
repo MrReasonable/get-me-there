@@ -1,19 +1,24 @@
 // The Status report's pure rules (brief WP18 §6): the boundaries are pinned to the millisecond.
+import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import {
   ageEndsLine,
+  BACKUP_FILE_PATTERN,
   BACKUP_MAX_AGE_MS,
   BUCKET_WORDS,
   backupState,
+  backupTimeOf,
+  CONSENT_FIX,
+  CONSENT_MAX_AGE_MONTHS,
   CONSENT_WARN_MS,
   capPercent,
   capWarn,
+  consentBoundOf,
+  consentMadeAt,
   consentWindowState,
+  coverageBuckets,
   coverageGapWarn,
   coverageLine,
-  formatDateIn,
-  formatInstantIn,
-  formatTimeIn,
 } from '../../src/status/rules.js';
 import { asIsoDateTime, isoDateTimeOfEpochMs } from '../../src/types/ids.js';
 
@@ -46,8 +51,9 @@ describe('backupState', () => {
 });
 
 describe('consentWindowState', () => {
-  it('30 days is ok, a millisecond short of it warns, now or earlier fails', () => {
-    expect(consentWindowState(at(T + CONSENT_WARN_MS), now)).toBe('ok');
+  it('exactly 30 days left warns (spec §8.3), a millisecond more is ok, now or earlier fails', () => {
+    expect(consentWindowState(at(T + CONSENT_WARN_MS + 1), now)).toBe('ok');
+    expect(consentWindowState(at(T + CONSENT_WARN_MS), now)).toBe('warn');
     expect(consentWindowState(at(T + CONSENT_WARN_MS - 1), now)).toBe('warn');
     expect(consentWindowState(at(T + 1), now)).toBe('warn');
     expect(consentWindowState(at(T), now)).toBe('fail');
@@ -58,8 +64,8 @@ describe('consentWindowState', () => {
       const start = Date.parse(day);
       for (const offset of [-3, 3]) {
         const n = at(start + offset * 86_400_000);
-        expect(consentWindowState(at(Date.parse(n) + CONSENT_WARN_MS - 1), n)).toBe('warn');
-        expect(consentWindowState(at(Date.parse(n) + CONSENT_WARN_MS), n)).toBe('ok');
+        expect(consentWindowState(at(Date.parse(n) + CONSENT_WARN_MS), n)).toBe('warn');
+        expect(consentWindowState(at(Date.parse(n) + CONSENT_WARN_MS + 1), n)).toBe('ok');
       }
     }
   });
@@ -103,17 +109,54 @@ describe('ageEndsLine', () => {
   });
 });
 
-describe('instant formats', () => {
-  it('reads the zone own clock, across the changes', () => {
-    expect(formatInstantIn(asIsoDateTime('2026-10-14T09:05:00.000Z'), 'Europe/London')).toBe(
-      '2026-10-14 10:05',
+describe('the 13-month consent rule', () => {
+  it('clamps to the end of the month, as the worker does', () => {
+    expect(CONSENT_MAX_AGE_MONTHS).toBe(13);
+    expect(consentBoundOf(asIsoDateTime('2026-01-31T10:00:00.000Z'))).toBe('2027-02-28T10:00:00.000Z');
+    expect(consentBoundOf(asIsoDateTime('2026-10-14T09:00:00.000Z'))).toBe('2027-11-14T09:00:00.000Z');
+    expect(consentMadeAt(asIsoDateTime('2027-03-31T10:00:00.000Z'))).toBe('2026-02-28T10:00:00.000Z');
+  });
+});
+
+describe('backup names', () => {
+  it('reads the instant in a daily backup name and nothing else', () => {
+    expect(backupTimeOf('get-me-there-2026-10-24T03-30-01-123Z.db')).toBe('2026-10-24T03:30:01.123Z');
+    expect(backupTimeOf('get-me-there-2026-10-24T03-30-01-123Z.db.tmp')).toBeNull();
+    expect(backupTimeOf('notes.txt')).toBeNull();
+    expect(BACKUP_FILE_PATTERN.test('get-me-there-2026-10-24T03-30-01-123Z.db')).toBe(true);
+  });
+});
+
+describe('coverageBuckets', () => {
+  const STATUSES = ['priced', 'empty', 'no_data', 'error', 'skipped', 'not_run', null] as const;
+  it('counts a cell with no roll-up as not searched', () => {
+    expect(coverageBuckets(['priced', null, 'error'], 1)).toEqual({
+      buckets: { priced: 1, empty: 0, no_data: 0, error: 1, skipped: 0, not_run: 1, reused: 1 },
+      total: 3,
+    });
+  });
+  it('the six parts always sum to the number of cells (property)', () => {
+    fc.assert(
+      fc.property(fc.array(fc.constantFrom(...STATUSES), { maxLength: 200 }), (cells) => {
+        const { buckets, total } = coverageBuckets(cells, 0);
+        const sum =
+          buckets.priced +
+          buckets.empty +
+          buckets.no_data +
+          buckets.error +
+          buckets.skipped +
+          buckets.not_run;
+        expect(total).toBe(cells.length);
+        expect(sum).toBe(total);
+      }),
     );
-    expect(formatInstantIn(asIsoDateTime('2026-12-14T09:05:00.000Z'), 'Europe/London')).toBe(
-      '2026-12-14 09:05',
-    );
-    expect(formatInstantIn(asIsoDateTime('2026-12-14T00:05:00.000Z'), 'UTC')).toBe('2026-12-14 00:05');
-    expect(formatDateIn(asIsoDateTime('2026-10-14T23:30:00.000Z'), 'Europe/London')).toBe('2026-10-15');
-    expect(formatTimeIn(asIsoDateTime('2026-10-14T23:30:00.000Z'), 'Europe/London')).toBe('00:30');
+  });
+});
+
+describe('the consent fix', () => {
+  it('names a command that exists today, and carries no pnpm gmt command', () => {
+    expect(CONSENT_FIX.text).toContain('capture-socs');
+    expect(CONSENT_FIX.command).toBeNull();
   });
 });
 
@@ -128,6 +171,7 @@ describe('cap use', () => {
     expect(capWarn(80, null)).toBe(false);
     expect(capWarn(1, 0)).toBe(false);
     expect(capWarn(0, 0)).toBe(false);
+    expect(capWarn(5, 0)).toBe(false);
     expect(capPercent(0, 0)).toBeNull();
     expect(capPercent(0, -5)).toBeNull();
     expect(capPercent(100, 100)).toBe(100);

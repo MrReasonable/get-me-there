@@ -38,6 +38,7 @@ export * from './errors.js';
 export { EXIT } from './exit.js';
 export * from './labels/age.js';
 export { pointOfSaleLabel } from './labels/pointOfSale.js';
+export { PROVIDER_NAMES } from './labels/providers.js';
 export {
   LEFT_FOR,
   LEFT_FOR_TEXT,
@@ -77,6 +78,7 @@ export * from './space/generate.js';
 export * from './space/validate.js';
 export * from './space/window.js';
 export * from './status/rules.js';
+export * from './status/time.js';
 export * from './text/bannedWords.js';
 export { hasControlChars, stripControlChars } from './text/control.js';
 export { formatPence, groupThousands } from './text/money.js';

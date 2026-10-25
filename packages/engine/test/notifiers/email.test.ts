@@ -13,6 +13,7 @@ import {
   type SmtpTransportOptions,
   smtpTransportOptions,
   TEST_EMAIL_BODY,
+  TEST_EMAIL_MIN_GAP_MS,
   TEST_EMAIL_SUBJECT,
   type TransportFactory,
 } from '../../src/notifiers/email.js';
@@ -395,11 +396,37 @@ describe('EmailNotifier system notices and the test send (spec §8.3, §10 /aler
     expect(t.messages[0]?.parsed.subject).toBe(TEST_EMAIL_SUBJECT);
     expect(t.messages[0]?.parsed.text).toBe(TEST_EMAIL_BODY);
   });
-  it('sendTest is refused at the hourly ceiling and fails on a transport error, never returning its text', async () => {
-    const one = notifier({ maxPerHour: 1 });
-    expect(await one.n.sendTest()).toBe('sent');
-    expect(await one.n.sendTest()).toBe('refused');
-    expect(one.t.messages).toHaveLength(1);
+  it('a test send has its own one-a-minute limit and never draws on the alert ceiling', async () => {
+    const { n, t, clock } = notifier({ maxPerHour: 1 });
+    expect(await n.sendTest()).toBe('sent');
+    expect(await n.sendTest()).toBe('refused');
+    clock.advance(TEST_EMAIL_MIN_GAP_MS);
+    expect(await n.sendTest()).toBe('sent');
+    // the alert ceiling of 1 is still free for a real message
+    expect(await n.send({ kind: 'system', subject: 'real', body: 'alert' })).toEqual({ ok: true });
+    expect(t.messages).toHaveLength(3);
+  });
+
+  it('a second test send while one is in flight is refused', async () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const { n } = notifier({
+      createTransport: () => ({
+        sendMail: async () => {
+          await gate;
+          return { messageId: 'm' };
+        },
+      }),
+    });
+    const first = n.sendTest();
+    expect(await n.sendTest()).toBe('refused');
+    release();
+    expect(await first).toBe('sent');
+  });
+
+  it('a transport error fails by class and never returns its text', async () => {
     const failing = notifier({
       createTransport: () => ({
         sendMail: async () => {
@@ -408,5 +435,26 @@ describe('EmailNotifier system notices and the test send (spec §8.3, §10 /aler
       }),
     });
     expect(await failing.n.sendTest()).toBe('failed');
+  });
+
+  it('lastResult is the newest send of any kind, by class (V7)', async () => {
+    const { n, clock } = notifier({ maxPerHour: 1 });
+    expect(n.lastResult()).toBeNull();
+    await n.send({ kind: 'system', subject: 's', body: 'b' });
+    expect(n.lastResult()).toEqual({ at: clock.now(), kind: 'system', result: 'sent' });
+    await n.send({ kind: 'system', subject: 's', body: 'b' });
+    expect(n.lastResult()).toMatchObject({ kind: 'system', result: 'refused' });
+    clock.advance(TEST_EMAIL_MIN_GAP_MS);
+    await n.sendTest();
+    expect(n.lastResult()).toMatchObject({ kind: 'test', result: 'sent' });
+    const failing = notifier({
+      createTransport: () => ({
+        sendMail: async () => {
+          throw new Error('boom');
+        },
+      }),
+    });
+    await failing.n.send({ kind: 'system', subject: 's', body: 'b' });
+    expect(failing.n.lastResult()).toMatchObject({ kind: 'system', result: 'failed' });
   });
 });
