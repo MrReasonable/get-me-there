@@ -209,12 +209,20 @@ for (const kind of ['results', 'cheapest', 'view-more'] as const) {
           meta: metaOf.parse(JSON.parse(readFileSync(file.replace(/\.facts\.json$/, '.meta.json'), 'utf8'))),
         }));
     };
+    // why: ts-b1-005: a directory that holds no facts file (a partial copy) fails, never passes with nothing checked
+    const present = () => {
+      const all = recs();
+      expect(all.length).toBeGreaterThan(0);
+      for (const r of all)
+        expect(r.facts.sessions.map((s) => s.prompted).sort(), r.file).toEqual(['accept', 'reject']);
+      return all;
+    };
     it('each session’s SOCS value carries the mark of the button it asked for', () => {
-      for (const r of recs())
+      for (const r of present())
         for (const s of r.facts.sessions) expect(rejectionMark(s.socs.value), r.file).toBe(s.prompted);
     });
     it('the first views are the consent page; the views after the choice are landing exactly where LANDING_VERIFIED is set', () => {
-      for (const r of recs()) {
+      for (const r of present()) {
         const S = selectorsFor(r.meta.osArch, r.meta.versions.binary);
         for (const v of Object.values(r.facts.views)) {
           expect(classifyLanding(v.firstFacts, S).kind, r.file).toEqual({

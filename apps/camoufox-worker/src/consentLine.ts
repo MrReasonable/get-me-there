@@ -1,32 +1,14 @@
 import { addMonthsClamped, type IsoDateTime, isoDateTimeSchema } from '@gmt/core';
 import { z } from 'zod';
 import { SOCS_DOMAIN, SOCS_MAX_AGE_MONTHS, SOCS_NAME } from './socs.js';
+import { type RejectionMark, rejectionMark } from './socsMark.js';
 
 /**
  * The consent choice carried between machines and checked by its own value (spec §2 "Consent"; decision 74; brief WP17
- * §5 and Task 17.5). Beside socs.ts; the CLI never imports it.
- *
- * Research 17.0c (the operator's two sessions of 2026-10-25, one "Reject all" and one "Accept all", recorded on
- * darwin-arm64): the SOCS value is the base64url of a protobuf message. The two values were 68 bytes each and differed
- * in exactly one byte, byte 1, the varint of field 1 (tag 0x08): 0x01 after "Reject all" (the value starts `CAES`) and
- * 0x02 after "Accept all" (`CAIS`). So the choice is read from the value alone: field 1 = 1 is a rejection, 2 an
- * acceptance, and anything else is unknown, which no command ever stores.
+ * §5 and Task 17.5). Beside socs.ts; the CLI never imports it. The mark is socsMark.ts's `rejectionMark`, read from the
+ * value alone in the shape research 17.0c observed (2026-10-25).
  */
-export type RejectionMark = 'reject' | 'accept' | 'unknown';
-
-/**
- * The choice a SOCS value records, from its first protobuf field. Pure. A value that is not canonical base64url (a
- * character outside the alphabet, padding, a length no byte string has, or trailing bits an encoder never sets), a
- * first tag other than field 1 as a varint, a varint of more than one byte, or a value too short to hold the field is
- * `unknown`.
- */
-export function rejectionMark(value: string): RejectionMark {
-  const bytes = Buffer.from(value, 'base64url');
-  // why: Node's decoder skips what it cannot read, so only a value that encodes back to itself was read whole
-  if (bytes.toString('base64url') !== value || bytes[0] !== 0x08) return 'unknown';
-  // why: a multi-byte varint has the high bit set in this byte, so it is never exactly 1 or 2
-  return bytes[1] === 0x01 ? 'reject' : bytes[1] === 0x02 ? 'accept' : 'unknown';
-}
+export { type RejectionMark, rejectionMark } from './socsMark.js';
 
 /** The line's version prefix; a later format takes another. */
 export const CONSENT_LINE_PREFIX = 'gmt-socs-v1.';

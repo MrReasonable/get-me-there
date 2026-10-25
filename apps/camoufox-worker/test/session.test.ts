@@ -13,10 +13,11 @@ import { loadSocs } from '../src/socs.js';
 import { FakeContext } from './support/fakeContext.js';
 import { descendants, type FakeNode, formNodes, n, option, resultsTree, text } from './support/fakePage.js';
 import { memoryLog } from './support/log.js';
+import { SYNTHETIC_ACCEPT, SYNTHETIC_REJECT } from './support/socsValues.js';
 import { fakeTimers, flush } from './support/timers.js';
 import { tmpDir } from './support/tmp.js';
 
-const SOCS_VALUE = 'synthetic-socs-rejection-value';
+const SOCS_VALUE = SYNTHETIC_REJECT;
 const CAPTURE = {
   value: SOCS_VALUE,
   domain: '.google.com',
@@ -57,6 +58,8 @@ function setup(
     pollMs?: number;
     /** The worker's monthly caps (decision 82); the defaults' when absent. */
     monthly?: MonthlyCaps;
+    /** The capture's value, in place of the stored one (review X1: a value that is not a rejection). */
+    socsValue?: string;
   } = {},
 ) {
   const dataDir = tmpDir();
@@ -98,7 +101,7 @@ function setup(
         return c;
       },
       profileDir,
-      socs: loadSocs(dataDir, clock),
+      socs: { ...loadSocs(dataDir, clock), ...(o.socsValue === undefined ? {} : { value: o.socsValue }) },
       cooldown,
       pacer,
       monthly,
@@ -210,6 +213,19 @@ describe('PageSession (spec §2; brief Task 14.4)', () => {
     expect(
       Number(get(polls.at(-1), 'elapsedMs')) - Number(get(polls.at(-5), 'elapsedMs')),
     ).toBeGreaterThanOrEqual(2000);
+  });
+  // why: review X1: every page's consent check reads the value's own mark, so an Accept all cookie is never applied
+  it('a capture whose value is not a rejection sets no cookie and loads no page: a browser error before Google', async () => {
+    for (const socsValue of [SYNTHETIC_ACCEPT, 'not-a-socs-value']) {
+      const t = setup({ socsValue });
+      const r = await t.session.page(REQ);
+      expect(r.googleContacted).toBe(false);
+      expect(r.answer).toMatchObject({ kind: 'browser-error', stage: 'launch' });
+      const c = ctx0(t);
+      expect(c.added).toEqual([]);
+      expect(c.pages.flatMap((p) => p.calls.gotos)).toEqual([]);
+      expect(released(t)).toBe(true);
+    }
   });
   it('two pages in a row, each preceded by addCookies with SOCS', async () => {
     const t = setup();

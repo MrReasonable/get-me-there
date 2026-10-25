@@ -93,9 +93,6 @@ export const CONSENT_MAX_AGE_MONTHS = 13;
 /** The latest a capture made at `capturedAt` can expire (an upper bound: the cookie's own expiry may be earlier). */
 export const consentBoundOf = (capturedAt: IsoDateTime): IsoDateTime =>
   addMonthsClamped(capturedAt, CONSENT_MAX_AGE_MONTHS);
-/** When a record that expires at `expiresAt` (a not-shown record's check plus 13 months) was made. */
-export const consentMadeAt = (expiresAt: IsoDateTime): IsoDateTime =>
-  addMonthsClamped(expiresAt, -CONSENT_MAX_AGE_MONTHS);
 
 /** The daily backup file name the backup job writes (and db's retention reads): one pattern for every reader. */
 export const BACKUP_FILE_PATTERN = /^get-me-there-(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z\.db$/;

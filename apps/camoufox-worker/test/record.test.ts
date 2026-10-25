@@ -52,11 +52,12 @@ import {
 } from './support/fakePage.js';
 import { gridTree, plusDays } from './support/gridTree.js';
 import { memoryLog } from './support/log.js';
+import { SYNTHETIC_REJECT } from './support/socsValues.js';
 import { fakeTimers, flush } from './support/timers.js';
 import { fakeInstall, tmpDir } from './support/tmp.js';
 
 const KEY = 'synthetic-worker-key-0123456789abcdef';
-const SOCS_VALUE = 'synthetic-socs-rejection-value';
+const SOCS_VALUE = SYNTHETIC_REJECT;
 const CAPTURE = {
   value: SOCS_VALUE,
   domain: '.google.com',

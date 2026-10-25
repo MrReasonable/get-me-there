@@ -4,13 +4,14 @@ import { CONSENT_FIX, START_REFUSAL_REASONS, startRefusalSchema } from '@gmt/cor
 import { describe, expect, it } from 'vitest';
 import type { EntryContext } from '../src/run.js';
 import { check, clearStartRefusal, writeStartRefusal } from '../src/startRefusal.js';
+import { SYNTHETIC_REJECT } from './support/socsValues.js';
 import { fakeTimers } from './support/timers.js';
 import { fakeInstall, tmpDir } from './support/tmp.js';
 
 const clock = fakeTimers().clock;
 const AT = clock.now();
 const CAPTURE = {
-  value: 'synthetic-socs',
+  value: SYNTHETIC_REJECT,
   domain: '.google.com',
   path: '/',
   expires: 1_800_000_000,

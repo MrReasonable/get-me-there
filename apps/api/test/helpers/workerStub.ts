@@ -31,7 +31,7 @@ export function workerBody(over: Record<string, unknown> = {}): Record<string, u
     cooldownHours: 48,
     pageTimeoutSeconds: 90,
     sharedSettings: SHARED,
-    consent: { kind: 'socs', expiresAt: '2027-10-01T10:00:00.000Z', boundedBy: 'capture' },
+    consent: { kind: 'socs', expiresAt: '2027-10-01T10:00:00.000Z', boundedBy: 'capture', mark: 'reject' },
     monthly: {
       windowStart: '2026-10-01T00:00:00.000Z',
       windowEnd: '2026-11-01T00:00:00.000Z',

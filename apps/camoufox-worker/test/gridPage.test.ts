@@ -15,6 +15,7 @@ import { FakeContext } from './support/fakeContext.js';
 import { type FakeNode, type FakePage, formNodes, n, resultsTree, text } from './support/fakePage.js';
 import { gridTree, plusDays } from './support/gridTree.js';
 import { memoryLog } from './support/log.js';
+import { SYNTHETIC_REJECT } from './support/socsValues.js';
 import { fakeTimers } from './support/timers.js';
 import { tmpDir } from './support/tmp.js';
 
@@ -23,7 +24,7 @@ beforeEach(() => {
 });
 
 const CAPTURE = {
-  value: 'synthetic-socs-rejection-value',
+  value: SYNTHETIC_REJECT,
   domain: '.google.com',
   path: '/',
   expires: 1_800_000_000,

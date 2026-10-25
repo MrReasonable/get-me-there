@@ -55,6 +55,8 @@ export interface ConsentDriver {
   mainFrameHosts(): readonly string[];
   /** The POSTs to the consent host's `/save` seen so far: the person's choice being submitted (method and URL only). */
   consentSaves(): number;
+  /** The form field names those submissions carried, sorted (names only: no value is ever kept). */
+  consentSaveFields(): readonly string[];
   /** The page kind the guard refused a main-frame navigation as (CodeRabbit, PR #15), or null. */
   refused(): BlockedPage | null;
   /** The classifier's input, read-only. */
@@ -119,6 +121,7 @@ export function createConsentDriver(o: {
   let isClosed = false;
   const hosts: string[] = [];
   let saves = 0;
+  const saveFields = new Set<string>();
   const live = (): { c: HeadedContextLike; p: PageLike } => {
     if (context === null || page === null) throw new ConsentDriverMisuse('the consent window is not open');
     return { c: context, p: page };
@@ -132,11 +135,14 @@ export function createConsentDriver(o: {
         isClosed = true;
       });
       c.on('request', (r) => {
-        // why: the choice's submission is seen by its method and URL only; the research reads bodies through onRequest
+        // why: the choice's submission is seen by its method, its URL and its form's field names (review X2: the names
+        // tell the forms apart as research 17.0c saw them); a value is never kept
         if (r.method() !== 'POST') return;
         try {
           const u = new URL(r.url());
-          if (u.hostname === S.hosts.consent && u.pathname === CONSENT_SAVE_PATH) saves++;
+          if (u.hostname !== S.hosts.consent || u.pathname !== CONSENT_SAVE_PATH) return;
+          saves++;
+          for (const name of new URLSearchParams(r.postData?.() ?? '').keys()) saveFields.add(name);
         } catch {
           // why: an unparsable URL is no consent submission
         }
@@ -162,6 +168,7 @@ export function createConsentDriver(o: {
     },
     mainFrameHosts: () => [...hosts],
     consentSaves: () => saves,
+    consentSaveFields: () => [...saveFields].sort(),
     refused: () => guard?.refused ?? null,
     async snapshotView() {
       const { p } = live();

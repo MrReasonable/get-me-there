@@ -350,8 +350,13 @@ describe('watching the window (the tool only observes)', () => {
   });
   // why: with LANDING_VERIFIED false the view after the choice settles for up to 30 s; the SOCS is read before that
   it('the SOCS set by the choice is read before the view after it settles, so closing the window during the settle keeps it', async () => {
-    // why: the choice, its SOCS and the return to the results host all first show on the same tick
-    const d = fakeConsentDriver({ saveAt: 0, socsAt: 0, hosts: [['consent.google.com', 'www.google.com']] });
+    // why: the choice, its SOCS and the return to the results host all first show on the same tick, after a first
+    // tick that read the cookies before the choice (the baseline)
+    const d = fakeConsentDriver({
+      saveAt: 1,
+      socsAt: 1,
+      hosts: [['consent.google.com'], ['consent.google.com', 'www.google.com']],
+    });
     let snapshots = 0;
     let gone = false;
     const closing = {
@@ -405,6 +410,27 @@ describe('watching the window (the tool only observes)', () => {
     ).rejects.toThrow('has been closed');
   });
   // why: W8 (pa-b1-005): a SOCS there before any choice is not the choice's; only one set or changed after it counts
+  // why: pa-b1-006, review X2: with no cookie read before the choice, the first read after it is only the baseline
+  it('with no read before the choice, a SOCS already there at the first read is never the choice’s; a later change is', async () => {
+    const same = await watchConsentWindow(
+      fakeConsentDriver({ saveAt: -1, socsAt: -1, closeAt: 4, socs: SOCS }),
+      { timers: fakeTimers() },
+    );
+    expect([same.saves, same.socs, same.socsBeforeChoice]).toEqual([1, null, false]);
+    let reads = 0;
+    const d = fakeConsentDriver({ saveAt: -1, closeAt: 4 });
+    const changing = await watchConsentWindow(
+      {
+        ...d,
+        socsCookie: async () => {
+          reads++;
+          return { ...SOCS, value: reads === 1 ? 'before' : 'after' };
+        },
+      },
+      { timers: fakeTimers() },
+    );
+    expect(changing.socs?.value).toBe('after');
+  });
   it('a SOCS present before the choice is never kept; one changed after it is', async () => {
     const before = await watchConsentWindow(fakeConsentDriver({ socsAt: 0, closeAt: 3 }), {
       timers: fakeTimers(),

@@ -242,7 +242,7 @@ const CASES: Case[] = [
         read: {
           kind: 'ok',
           status: okWorkerStatus({
-            consent: { kind: 'socs', expiresAt: inFuture(10 * DAY), boundedBy: 'cookie' },
+            consent: { kind: 'socs', expiresAt: inFuture(10 * DAY), boundedBy: 'cookie', mark: 'reject' },
           }),
         },
       }),
@@ -257,11 +257,13 @@ const CASES: Case[] = [
       healthyWorker({
         read: {
           kind: 'ok',
-          status: okWorkerStatus({ consent: { kind: 'voided', expiresAt: null, boundedBy: null } }),
+          status: okWorkerStatus({
+            consent: { kind: 'socs', expiresAt: inFuture(200 * DAY), boundedBy: 'cookie', mark: 'accept' },
+          }),
         },
       }),
     ),
-    has: ['consent screen now shown: capture again'],
+    has: ['the stored consent choice is not a rejection: capture a rejection'],
   },
   {
     row: 'consent',
@@ -385,7 +387,7 @@ describe('boundaries', () => {
           read: {
             kind: 'ok',
             status: okWorkerStatus({
-              consent: { kind: 'socs', expiresAt: iso, boundedBy: 'capture' },
+              consent: { kind: 'socs', expiresAt: iso, boundedBy: 'capture', mark: 'reject' },
             }),
           },
         }),
@@ -700,31 +702,47 @@ describe('consent', () => {
       withWorker(healthyWorker({ read: { kind: 'ok', status: okWorkerStatus({ consent, ...over }) } })),
       'consent',
     );
-  it('a not-shown record is never labelled a rejection', () => {
-    const c = consentWith({ kind: 'not-shown', expiresAt: inFuture(100 * DAY), boundedBy: 'check' });
-    expect(c.state).toBe('ok');
-    expect(c.summary).toMatch(/^no consent screen in this region, recorded .+ \(Europe\/London\)$/);
+  // why: review X1: "consent rejected" only for a value the worker reads as a rejection; any other mark fails
+  it('a stored choice that is not a rejection fails with the capture fix, never labelled rejected', () => {
+    for (const mark of ['accept', 'unknown'] as const) {
+      const c = consentWith({ kind: 'socs', expiresAt: inFuture(100 * DAY), boundedBy: 'cookie', mark });
+      expect(c).toMatchObject({
+        state: 'fail',
+        summary: 'the stored consent choice is not a rejection: capture a rejection',
+        fix: { text: consentFixText(), command: null },
+      });
+    }
+  });
+  it('a worker that does not report the mark cannot be checked, and never reads as rejected', () => {
+    const c = consentWith({ kind: 'socs', expiresAt: inFuture(100 * DAY), boundedBy: 'cookie', mark: null });
+    expect(c.state).toBe('warn');
+    expect(c.summary).toMatch(
+      /^cannot check: this worker does not report whether its stored consent choice is a rejection \(it expires by .+ at the latest\)$/,
+    );
     expect(c.summary).not.toContain('rejected');
   });
   it('a captured record names the cookie or the capture as its bound', () => {
     expect(
-      consentWith({ kind: 'socs', expiresAt: inFuture(100 * DAY), boundedBy: 'cookie' }).summary,
+      consentWith({ kind: 'socs', expiresAt: inFuture(100 * DAY), boundedBy: 'cookie', mark: 'reject' })
+        .summary,
     ).toMatch(/^consent rejected, expires .+ \(Europe\/London\) \(cookie\)$/);
     expect(
-      consentWith({ kind: 'socs', expiresAt: inFuture(100 * DAY), boundedBy: 'capture' }).summary,
+      consentWith({ kind: 'socs', expiresAt: inFuture(100 * DAY), boundedBy: 'capture', mark: 'reject' })
+        .summary,
     ).toContain('(capture)');
   });
   it('an expired record fails with the capture fix', () => {
-    const c = consentWith({ kind: 'socs', expiresAt: at(DAY), boundedBy: 'cookie' });
+    const c = consentWith({ kind: 'socs', expiresAt: at(DAY), boundedBy: 'cookie', mark: 'reject' });
     expect(c.state).toBe('fail');
     expect(c.fix).toEqual({ text: consentFixText(), command: null });
   });
-  it('a worker that reports no consent record falls back to the capture time plus 13 months, or fails when it has none', () => {
+  it('a worker that reports no consent record cannot be checked, stating the capture bound; with no capture it fails', () => {
     const fallback = consentWith(null, { socsCapturedAt: ago(10 * DAY) });
-    expect(fallback.state).toBe('ok');
+    expect(fallback.state).toBe('warn');
     expect(fallback.summary).toContain('at the latest');
-    expect(fallback.summary).toContain("this worker does not report the cookie's expiry");
-    expect(consentWith(null, { socsCapturedAt: ago(500 * DAY) }).state).toBe('fail');
+    expect(fallback.summary).toContain(
+      'this worker does not report whether its stored consent choice is a rejection',
+    );
     expect(consentWith(null, { socsCapturedAt: null })).toMatchObject({
       state: 'fail',
       summary: 'no consent record: capture one',
@@ -732,7 +750,12 @@ describe('consent', () => {
   });
   it('a worker that is down with no refusal file cannot be checked (warn); a consent refusal fails; awaiting verification is off', () => {
     expect(checkOf(withWorker(down()), 'consent')).toMatchObject({ state: 'warn' });
-    for (const reason of ['consent-missing', 'consent-expired', 'consent-voided'] as const) {
+    for (const reason of [
+      'consent-missing',
+      'consent-expired',
+      'consent-voided',
+      'consent-not-rejection',
+    ] as const) {
       const c = checkOf(withWorker(down({ kind: 'refusal', reason, at: at(HOUR) })), 'consent');
       expect(c.state).toBe('fail');
       expect(c.fix).toEqual({ text: consentFixText(), command: null });

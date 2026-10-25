@@ -131,7 +131,7 @@ export interface RunDeps {
   /** Reads worker.env's text (readFileSync by default). */
   readEnvFile?: (path: string) => string;
   entries: Readonly<Record<string, () => Promise<Entry>>>;
-  /** Commands that may run before worker.env exists (capture-socs). */
+  /** Commands that may run before worker.env exists, as the command or the command and its first argument. */
   withoutEnvFile: ReadonlySet<string>;
   out: (line: string) => void;
   err: (line: string) => void;
@@ -153,7 +153,11 @@ export async function run(argv: readonly string[], deps: RunDeps): Promise<numbe
     dataDir = resolveDataDir(deps.env);
     refuseInstallDir(deps.env);
     const { envFile, present } = checkEnvFiles(dataDir, deps.uid, deps.stat);
-    if (!present && !deps.withoutEnvFile.has(command))
+    if (
+      !present &&
+      !deps.withoutEnvFile.has(command) &&
+      !deps.withoutEnvFile.has(`${command} ${args[0] ?? ''}`)
+    )
       throw new EnvFileRefused(`${envFile} is missing (docs/setup.md section 14)`);
     const file = present ? parseEnv((deps.readEnvFile ?? ((p) => readFileSync(p, 'utf8')))(envFile)) : {};
     if (file.CAMOUFOX_INSTALL_DIR !== undefined)
@@ -271,7 +275,8 @@ export async function main(argv: readonly string[], entries = ENTRIES): Promise<
       installDir,
       uid: process.getuid?.() ?? -1,
       entries,
-      withoutEnvFile: new Set(['capture-socs']),
+      // why: review X4: `consent export` needs only the pinned Camoufox, so a desktop with no worker set up can export
+      withoutEnvFile: new Set(['capture-socs', 'consent export']),
       out: (l) => process.stdout.write(`${l}\n`),
       err: (l) => process.stderr.write(`${l}\n`),
     });

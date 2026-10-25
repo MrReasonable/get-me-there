@@ -114,23 +114,30 @@ describe('"cannot check" names its real reason (pa-b1-009)', () => {
 describe('the cause behind the consent card (V2)', () => {
   const frame = { now: NOW, tz: 'Europe/London', mode: 'native' } as const;
   const cause = (w: Partial<WorkerFacts>) => consentOutcome(frame, healthyWorker(w)).cause;
-  it('names expiring, expired, missing, voided and cannot-check', () => {
+  it('names expiring, expired, missing, not-rejection and cannot-check', () => {
     const soon = okWorkerStatus({
-      consent: { kind: 'socs', expiresAt: inFuture(10 * DAY), boundedBy: 'cookie' },
+      consent: { kind: 'socs', expiresAt: inFuture(10 * DAY), boundedBy: 'cookie', mark: 'reject' },
     });
-    const gone = okWorkerStatus({ consent: { kind: 'socs', expiresAt: ago(DAY), boundedBy: 'cookie' } });
-    const voided = okWorkerStatus({ consent: { kind: 'voided', expiresAt: null, boundedBy: null } });
+    const gone = okWorkerStatus({
+      consent: { kind: 'socs', expiresAt: ago(DAY), boundedBy: 'cookie', mark: 'reject' },
+    });
+    const accepted = okWorkerStatus({
+      consent: { kind: 'socs', expiresAt: inFuture(100 * DAY), boundedBy: 'cookie', mark: 'accept' },
+    });
     const none = okWorkerStatus({ consent: null, socsCapturedAt: null });
     expect(cause({ read: { kind: 'ok', status: soon } })).toBe('expiring');
     expect(cause({ read: { kind: 'ok', status: gone } })).toBe('expired');
-    expect(cause({ read: { kind: 'ok', status: voided } })).toBe('voided');
+    expect(cause({ read: { kind: 'ok', status: accepted } })).toBe('not-rejection');
     expect(cause({ read: { kind: 'ok', status: none } })).toBe('missing');
     expect(cause({ read: { kind: 'ok', status: okWorkerStatus() } })).toBe('none');
     expect(cause({ read: { kind: 'unreachable' } })).toBe('cannot-check');
+    // why: review X5: an older voided or never-shown record is one this version does not use, so it reads as missing
     for (const [reason, want] of [
       ['consent-missing', 'missing'],
       ['consent-expired', 'expired'],
-      ['consent-voided', 'voided'],
+      ['consent-voided', 'missing'],
+      ['consent-not-shown', 'missing'],
+      ['consent-not-rejection', 'not-rejection'],
     ] as const)
       expect(
         cause({ read: { kind: 'unreachable' }, refusal: { kind: 'refusal', reason, at: ago(HOUR) } }),
@@ -149,7 +156,9 @@ describe('the cause behind the consent card (V2)', () => {
   });
 });
 
-describe('a worker older than WP17 reports no consent record (pa-b1-010, ca-b1-004)', () => {
+// why: review X1: a worker that does not report its record's mark (one before this version) is never labelled rejected;
+// its capture bound is stated as the latest expiry, and once that has passed the record has expired whatever its mark
+describe('a worker that does not report the mark (pa-b1-010, ca-b1-004, review X1)', () => {
   const older = (capturedAt: string, now = NOW) =>
     consentOutcome(
       { now, tz: 'Europe/London', mode: 'native' },
@@ -160,68 +169,43 @@ describe('a worker older than WP17 reports no consent record (pa-b1-010, ca-b1-0
         },
       }),
     );
-  it('states the date as an upper bound, with the worker’s month-end clamp', () => {
+  it('states the capture bound as the latest expiry, with the worker’s month-end clamp, and cannot be checked', () => {
     const c = older('2026-01-31T10:00:00.000Z', asIsoDateTime('2026-10-01T00:00:00.000Z'));
-    expect(c.check.summary).toContain('expires by Sun, 28 Feb 2027, 10:00 (Europe/London) at the latest');
-    expect(c.check.state).toBe('ok');
-  });
-  it('a record that states no expiry uses the capture bound, in the same upper-bound words (CodeRabbit)', () => {
-    const c = consentOutcome(
-      { now: NOW, tz: 'Europe/London', mode: 'native' },
-      healthyWorker({
-        read: {
-          kind: 'ok',
-          status: okWorkerStatus({
-            consent: { kind: 'socs', expiresAt: null, boundedBy: null },
-            socsCapturedAt: asIsoDateTime('2026-10-01T10:00:00.000Z'),
-          }),
-        },
-      }),
+    expect(c.check.summary).toBe(
+      'cannot check: this worker does not report whether its stored consent choice is a rejection (it expires by Sun, 28 Feb 2027, 10:00 (Europe/London) at the latest)',
     );
-    expect(c.check.state).toBe('ok');
-    expect(c.check.summary).toContain('at the latest');
-    expect(c.cause).toBe('none');
-  });
-  it('a not-shown record with no stated expiry is not given a capture bound (CodeRabbit)', () => {
-    const c = consentOutcome(
-      { now: NOW, tz: 'Europe/London', mode: 'native' },
-      healthyWorker({
-        read: {
-          kind: 'ok',
-          status: okWorkerStatus({
-            consent: { kind: 'not-shown', expiresAt: null, boundedBy: null },
-            socsCapturedAt: asIsoDateTime('2026-10-01T10:00:00.000Z'),
-          }),
-        },
-      }),
-    );
+    expect(c.check.state).toBe('warn');
     expect(c.cause).toBe('cannot-check');
-    expect(c.check.state).toBe('warn');
-    expect(c.check.summary).toContain('did not state when');
-    expect(c.check.summary).not.toContain('at the latest');
+    expect(c.check.summary).not.toContain('rejected');
   });
-  it('warns in the last 30 days of the bound, which is the clamped date', () => {
-    const c = older('2026-01-31T10:00:00.000Z', asIsoDateTime('2027-02-02T00:00:00.000Z'));
-    expect(c.check.state).toBe('warn');
-    expect(c.cause).toBe('expiring');
-  });
-  it('a not-shown record was made 13 months before it expires, clamped', () => {
+  it('a record with a stated expiry but no mark states that expiry', () => {
     const c = consentOutcome(
-      { now: NOW, tz: 'UTC', mode: 'native' },
+      { now: NOW, tz: 'Europe/London', mode: 'native' },
       healthyWorker({
         read: {
           kind: 'ok',
           status: okWorkerStatus({
             consent: {
-              kind: 'not-shown',
+              kind: 'socs',
               expiresAt: asIsoDateTime('2027-03-31T10:00:00.000Z'),
-              boundedBy: 'check',
+              boundedBy: 'cookie',
+              mark: null,
             },
           }),
         },
       }),
     );
-    expect(c.check.summary).toBe('no consent screen in this region, recorded Sat, 28 Feb 2026, 10:00 (UTC)');
+    expect(c.check.summary).toContain('expires by Wed, 31 Mar 2027, 11:00 (Europe/London) at the latest');
+    expect(c.check.fix).toEqual({
+      text: 'update the app and the worker together',
+      command: 'pnpm gmt update',
+    });
+  });
+  it('past the bound it has expired, whatever its mark', () => {
+    const c = older('2025-01-31T10:00:00.000Z', asIsoDateTime('2027-02-02T00:00:00.000Z'));
+    expect(c.check.state).toBe('fail');
+    expect(c.cause).toBe('expired');
+    expect(c.check.summary).toBe('consent expired on Sat, 28 Feb 2026, 10:00 (Europe/London)');
   });
 });
 

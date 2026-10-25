@@ -231,6 +231,7 @@ describe('the start refusal file and its texts (decision 76)', () => {
       'consent-expired',
       'consent-voided',
       'consent-not-shown',
+      'consent-not-rejection',
       'build-mismatch',
       'layout',
       'signed-in',
@@ -252,6 +253,7 @@ describe('the start refusal file and its texts (decision 76)', () => {
       'consent-expired': capture,
       'consent-voided': capture,
       'consent-not-shown': capture,
+      'consent-not-rejection': capture,
       'build-mismatch': 'pnpm gmt browser install',
       layout: 'pnpm gmt browser install',
       'signed-in': 'pnpm --filter @gmt/camoufox-worker clear-signed-in',
@@ -260,7 +262,13 @@ describe('the start refusal file and its texts (decision 76)', () => {
       'counts-unreadable': 'pnpm gmt browser counts',
       config: 'pnpm gmt start',
     });
-    expect(START_REFUSAL_TEXT['consent-voided'].summary).toBe('consent screen now shown: capture again');
+    // why: review X5: an older record is refused by name, saying why it is not used
+    expect(START_REFUSAL_TEXT['consent-voided'].summary).toBe(
+      'the consent record is an older voided one, which this version does not use: capture a rejection',
+    );
+    expect(START_REFUSAL_TEXT['consent-not-rejection'].summary).toBe(
+      'the stored consent choice is not a rejection: capture a rejection',
+    );
     for (const r of START_REFUSAL_REASONS) {
       expect(START_REFUSAL_TEXT[r].summary.length, r).toBeGreaterThan(0);
       expect(findBannedWords(START_REFUSAL_TEXT[r].summary, BANNED_WORD_ALLOWLIST), r).toEqual([]);
@@ -284,16 +292,26 @@ describe('workerStatusSchema: every field WP17’s worker will emit, optional, s
       delete today[k];
     expect(workerStatusSchema.safeParse(today).success).toBe(true);
   });
-  it('each consent kind with its bound; a voided record has no expiry or bound; monthly unreadable', () => {
+  // why: review X1, X5: a capture with its bound and (from this version) its mark; the older kinds are never served
+  it('a captured record with each bound and each mark, or no mark (an earlier worker); monthly unreadable', () => {
     const at = '2028-03-01T06:00:00.000Z';
     for (const consent of [
       { kind: 'socs', expiresAt: at, boundedBy: 'cookie' },
-      { kind: 'socs', expiresAt: at, boundedBy: 'capture' },
-      { kind: 'not-shown', expiresAt: at, boundedBy: 'check' },
-      { kind: 'voided', expiresAt: null, boundedBy: null },
+      { kind: 'socs', expiresAt: at, boundedBy: 'capture', mark: 'reject' },
+      { kind: 'socs', expiresAt: at, boundedBy: 'cookie', mark: 'accept' },
+      { kind: 'socs', expiresAt: at, boundedBy: 'cookie', mark: 'unknown' },
     ])
       expect(workerStatusSchema.safeParse({ ...full(), consent }).success, JSON.stringify(consent)).toBe(
         true,
+      );
+    for (const consent of [
+      { kind: 'not-shown', expiresAt: at, boundedBy: 'check' },
+      { kind: 'voided', expiresAt: null, boundedBy: null },
+      { kind: 'socs', expiresAt: null, boundedBy: 'cookie' },
+      { kind: 'socs', expiresAt: at, boundedBy: 'cookie', mark: 'maybe' },
+    ])
+      expect(workerStatusSchema.safeParse({ ...full(), consent }).success, JSON.stringify(consent)).toBe(
+        false,
       );
     expect(full().monthly).toEqual(MONTHLY);
     const unreadable = { ...MONTHLY, readable: false };

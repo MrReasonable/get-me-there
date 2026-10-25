@@ -19,49 +19,7 @@ const socsOf = (prefix: readonly number[], rest: readonly number[] = FILLER): st
   b64([...prefix, ...rest]);
 const REJECT = socsOf([0x08, 0x01]);
 const ACCEPT = socsOf([0x08, 0x02]);
-
-describe('rejectionMark (research 17.0c: the first protobuf field of the SOCS value)', () => {
-  it('reads field 1 = 1 as a rejection and 2 as an acceptance', () => {
-    expect(rejectionMark(REJECT)).toBe('reject');
-    expect(rejectionMark(ACCEPT)).toBe('accept');
-    // why: the two prefixes the recordings showed: CAES after Reject all, CAIS after Accept all
-    expect(REJECT.startsWith('CAES')).toBe(true);
-    expect(ACCEPT.startsWith('CAIS')).toBe(true);
-  });
-  it('needs nothing after the field: two bytes are enough, whatever follows', () => {
-    expect(rejectionMark(b64([0x08, 0x01]))).toBe('reject');
-    expect(rejectionMark(b64([0x08, 0x02]))).toBe('accept');
-    expect(rejectionMark(socsOf([0x08, 0x01], [0xff, 0x00, 0x7f]))).toBe('reject');
-  });
-  it.each([
-    ['another varint value: 0', [0x08, 0x00]],
-    ['another varint value: 3', [0x08, 0x03]],
-    ['another varint value: 127', [0x08, 0x7f]],
-    ['a multi-byte varint whose low bits read 1', [0x08, 0x81, 0x00]],
-    ['a multi-byte varint whose low bits read 2', [0x08, 0x82, 0x00]],
-    ['field 1 as a length-delimited field', [0x0a, 0x01]],
-    ['field 2 first', [0x10, 0x01]],
-    ['no tag: the value byte first', [0x01, 0x08]],
-    ['a zero byte first', [0x00, 0x01]],
-  ] as const)('%s is unknown', (_what, prefix) => {
-    expect(rejectionMark(socsOf(prefix))).toBe('unknown');
-  });
-  it('a truncated or empty value is unknown', () => {
-    expect(rejectionMark(b64([0x08]))).toBe('unknown');
-    expect(rejectionMark('')).toBe('unknown');
-  });
-  it.each([
-    ['a character outside base64url at the end', `${REJECT}!`],
-    ['a character outside base64url at the start', `!${REJECT}`],
-    ['a space inside', `${REJECT.slice(0, 4)} ${REJECT.slice(4)}`],
-    ['standard base64’s +', `${REJECT.slice(0, 4)}+${REJECT.slice(5)}`],
-    ['padding', `${b64([0x08, 0x01])}=`],
-    ['a length no byte string has (4n + 1)', `${b64([0x08, 0x01, 0x12])}A`],
-    ['trailing bits a canonical encoding never sets', 'CAF'],
-  ])('%s is unknown, never read past', (_what, value) => {
-    expect(rejectionMark(value)).toBe('unknown');
-  });
-});
+// why: rejectionMark's own cases are in socsMark.test.ts; these values have its observed shape (field 1, then field 2)
 
 const LINE: ConsentLine = {
   socs: {

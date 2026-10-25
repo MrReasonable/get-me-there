@@ -293,7 +293,9 @@ describe('browserSetup’s outcomes and words', () => {
     expect(expired.io.stderr).toContain('the consent record has expired: capture again.');
     const voided = await world({ check: '{"reason":"consent-voided","at":"2026-10-24T09:30:00.000Z"}' });
     expect(await run(voided)).toBe('not-set-up');
-    expect(voided.io.stderr).toContain('consent screen now shown: capture again.');
+    expect(voided.io.stderr).toContain(
+      'the consent record is an older voided one, which this version does not use: capture a rejection.',
+    );
     for (const w of [unzip, linkDir, broken, files, expired, voided])
       expect(parseEnv(w.fs.read(ENV) ?? '').CAMOUFOX_ENABLED).toBeUndefined();
   });

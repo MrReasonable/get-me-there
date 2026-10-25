@@ -14,7 +14,6 @@ import {
   capWarn,
   consentBoundOf,
   consentFixText,
-  consentMadeAt,
   consentWindowState,
   coverageGapWarn,
   coverageLine,
@@ -479,7 +478,7 @@ function syntheticCheck(f: StatusFacts): StatusCheck {
 }
 
 /** Why the consent card reads as it does: the cause the daily notice's subject comes from (V2). */
-export type ConsentCause = 'expiring' | 'expired' | 'missing' | 'voided' | 'cannot-check' | 'none';
+export type ConsentCause = 'expiring' | 'expired' | 'missing' | 'not-rejection' | 'cannot-check' | 'none';
 
 const NOT_VERIFIED = 'awaiting verification for this build: consent is not checked yet';
 
@@ -518,12 +517,13 @@ export function consentOutcome(f: Frame, w: WorkerFacts): { check: StatusCheck; 
           'none',
         );
       if (ref.reason.startsWith('consent-')) {
-        const cause =
-          ref.reason === 'consent-voided'
-            ? 'voided'
-            : ref.reason === 'consent-missing' || ref.reason === 'consent-not-shown'
-              ? 'missing'
-              : 'expired';
+        // why: review X5: a voided or never-shown record is one this version no longer uses, so it reads as missing
+        const cause: ConsentCause =
+          ref.reason === 'consent-expired'
+            ? 'expired'
+            : ref.reason === 'consent-not-rejection'
+              ? 'not-rejection'
+              : 'missing';
         return out(
           check({ ...base, state: 'fail', summary: START_REFUSAL_TEXT[ref.reason].summary, fix: consentFix }),
           cause,
@@ -540,27 +540,11 @@ export function consentOutcome(f: Frame, w: WorkerFacts): { check: StatusCheck; 
       check({ ...base, state: 'off', offReason: 'awaiting-verification', summary: NOT_VERIFIED }),
       'none',
     );
-  // spec §2: a capture expires at the earlier of the cookie's own expiry and 13 months after it was made. A worker that
-  // reports no consent record gives only the capture time, so the date it can state is an upper bound, said as one
+  // spec §2: a capture expires at the earlier of the cookie's own expiry and 13 months after it was made. Review X1:
+  // "consent rejected" is said only for a record whose value the worker reads as a rejection; a worker that does not
+  // report the mark (an earlier version) cannot be checked, and says so, with the capture's upper bound
   const c = s.consent;
-  if (c?.kind === 'voided')
-    return out(
-      check({
-        ...base,
-        state: 'fail',
-        summary: START_REFUSAL_TEXT['consent-voided'].summary,
-        fix: consentFix,
-      }),
-      'voided',
-    );
-  // why: a not-shown record has no capture: it expires 13 months after its own check, which this worker's status does not
-  // carry, so with no stated expiry nothing can be said (CodeRabbit)
-  if (c?.kind === 'not-shown' && c.expiresAt === null)
-    return cannot('the worker did not state when its no-consent-screen check expires', consentFix);
-  // why: a record that states no expiry still has its capture time; the capture bound stands in, said as an upper bound
-  const stated = c?.expiresAt ?? null;
-  const bound = stated ?? (s.socsCapturedAt === null ? null : consentBoundOf(s.socsCapturedAt));
-  if (bound === null)
+  if (c === null && s.socsCapturedAt === null)
     return out(
       check({
         ...base,
@@ -570,13 +554,32 @@ export function consentOutcome(f: Frame, w: WorkerFacts): { check: StatusCheck; 
       }),
       'missing',
     );
+  if (c === null || c.mark === null) {
+    const upper = c?.expiresAt ?? (s.socsCapturedAt === null ? null : consentBoundOf(s.socsCapturedAt));
+    // why: whatever the choice, a record past its latest expiry has expired
+    if (upper !== null && consentWindowState(upper, f.now) === 'fail')
+      return out(
+        check({ ...base, state: 'fail', summary: `consent expired on ${at(f, upper)}`, fix: consentFix }),
+        'expired',
+      );
+    return cannot(
+      `this worker does not report whether its stored consent choice is a rejection${upper === null ? '' : ` (it expires by ${at(f, upper)} at the latest)`}`,
+      fix('update the app and the worker together', 'pnpm gmt update'),
+    );
+  }
+  if (c.mark !== 'reject')
+    return out(
+      check({
+        ...base,
+        state: 'fail',
+        summary: START_REFUSAL_TEXT['consent-not-rejection'].summary,
+        fix: consentFix,
+      }),
+      'not-rejection',
+    );
+  const bound = c.expiresAt;
   const state = consentWindowState(bound, f.now);
-  const words =
-    stated === null && s.socsCapturedAt !== null
-      ? `consent rejected, captured ${at(f, s.socsCapturedAt)}; expires by ${at(f, bound)} at the latest (this worker does not report the cookie's expiry)`
-      : c?.kind === 'not-shown'
-        ? `no consent screen in this region, recorded ${at(f, consentMadeAt(bound))}`
-        : `consent rejected, expires ${at(f, bound)} (${c?.boundedBy === 'cookie' ? 'cookie' : 'capture'})`;
+  const words = `consent rejected, expires ${at(f, bound)} (${c.boundedBy === 'cookie' ? 'cookie' : 'capture'})`;
   if (state === 'ok') return out(check({ ...base, state: 'ok', summary: words }), 'none');
   return out(
     check({

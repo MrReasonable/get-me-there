@@ -56,6 +56,45 @@ export class WorkerConfigError extends Error {
   }
 }
 
+/** What a consent capture needs: the page rules every page keeps, the market, and the browser's minimal environment. */
+export type CaptureConfig = Pick<
+  WorkerConfig,
+  | 'minSpacingSeconds'
+  | 'cooldownHours'
+  | 'monthlyPageCap'
+  | 'monthlyScrollCap'
+  | 'billingDay'
+  | 'pointOfSale'
+  | 'home'
+  | 'path'
+  | 'tmp'
+>;
+
+/**
+ * The consent capture's settings (review X4): the shared settings through core's one rule set, as loadWorkerConfig
+ * reads them, but no key or port, so `consent export` runs on a desktop with only the pinned Camoufox installed (no
+ * worker.env: every setting at its default). Throws WorkerConfigError naming every bad variable at once.
+ */
+export function loadCaptureConfig(env: Env): CaptureConfig {
+  const shared = readSharedSettings(env);
+  const bad: string[] = [...shared.invalid];
+  const home = env.HOME ?? '';
+  if (home === '') bad.push('HOME');
+  if (bad.length > 0) throw new WorkerConfigError(bad);
+  const s = shared.settings;
+  return {
+    minSpacingSeconds: sharedInt(s, 'CAMOUFOX_MIN_SPACING_SECONDS'),
+    cooldownHours: sharedInt(s, 'CAMOUFOX_COOLDOWN_HOURS'),
+    monthlyPageCap: sharedInt(s, 'CAMOUFOX_MONTHLY_PAGE_CAP'),
+    monthlyScrollCap: sharedInt(s, 'CAMOUFOX_MONTHLY_SCROLL_CAP'),
+    billingDay: sharedInt(s, 'CAMOUFOX_BILLING_DAY'),
+    pointOfSale: s.POINT_OF_SALE,
+    home,
+    path: env.PATH ?? '/usr/bin:/bin',
+    tmp: env.TMPDIR ?? '/tmp',
+  };
+}
+
 /** Parses the worker's environment; throws WorkerConfigError naming every bad variable at once. */
 export function loadWorkerConfig(env: Env): WorkerConfig {
   const bad: string[] = [];

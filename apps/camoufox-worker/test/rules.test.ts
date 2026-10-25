@@ -16,6 +16,7 @@ import { loadSocs, socsCookie } from '../src/socs.js';
 import { FakeContext } from './support/fakeContext.js';
 import { n, resultsTree } from './support/fakePage.js';
 import { memoryLog } from './support/log.js';
+import { SYNTHETIC_REJECT } from './support/socsValues.js';
 import { fakeTimers } from './support/timers.js';
 import { tmpDir } from './support/tmp.js';
 
@@ -131,7 +132,7 @@ describe('worker rules: a full page session sets only SOCS and clicks nothing on
     writeFileSync(
       join(dir, 'socs.json'),
       JSON.stringify({
-        value: 'synthetic-socs',
+        value: SYNTHETIC_REJECT,
         domain: '.google.com',
         path: '/',
         expires: 1_800_000_000,
