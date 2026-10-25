@@ -2,7 +2,7 @@
 // example only.
 import { findBannedWords } from '@gmt/core';
 import { act, screen, within } from '@testing-library/react';
-import { HttpResponse, http } from 'msw';
+import { HttpResponse, http, type JsonBodyType } from 'msw';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { STATUS_KEY, STATUS_REFRESH_MS } from '../../src/api/statusQuery.js';
 import { COPY } from '../../src/copy.js';
@@ -17,7 +17,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-const serve = (body: unknown, status = 200) =>
+const serve = (body: JsonBodyType, status = 200) =>
   server.use(http.get(`${API}/status`, () => HttpResponse.json(body, { status })));
 const ago = (seconds: number) =>
   new Date(Date.parse('2026-10-14T15:00:00.000Z') - seconds * 1000).toISOString();
@@ -248,7 +248,7 @@ describe('the email card: Send test (spec §11)', () => {
       { id: 'email', area: 'email', state: 'ok', summary: 'configured; no test send since the app started' },
       { id: 'app', area: 'app', summary: 'up' },
     ]);
-  const post = (status: number, body: unknown) =>
+  const post = (status: number, body: JsonBodyType) =>
     server.use(http.post(`${API}/alerts/test-email`, () => HttpResponse.json(body, { status })));
 
   it('is only on the email card', async () => {

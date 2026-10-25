@@ -1,6 +1,6 @@
 // Spec §11 status bar: the link to the Status view, from the same query as the view (brief WP18 Task 18.6).
 import { act, screen } from '@testing-library/react';
-import { HttpResponse, http } from 'msw';
+import { HttpResponse, http, type JsonBodyType } from 'msw';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { STATUS_KEY, STATUS_REFRESH_MS } from '../../src/api/statusQuery.js';
 import { StatusBar, StatusLink } from '../../src/components/StatusBar.js';
@@ -11,7 +11,7 @@ import { renderWithProviders, settled } from '../render.js';
 
 afterEach(() => vi.useRealTimers());
 
-const serve = (body: unknown, status = 200) =>
+const serve = (body: JsonBodyType, status = 200) =>
   server.use(http.get(`${API}/status`, () => HttpResponse.json(body, { status })));
 const ago = (seconds: number) =>
   new Date(Date.parse('2026-10-14T15:00:00.000Z') - seconds * 1000).toISOString();

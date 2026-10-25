@@ -228,15 +228,16 @@ describe('gmt setup offers the test email at its end (brief Task 18.3)', () => {
     m.fs.file('/work/a.json', JSON.stringify(EMAIL), 0o600);
     expect(await runCli(['setup', '--non-interactive', '--answers', '/work/a.json'], m.deps)).toBe(0);
     const ask = scriptedAsk(asks);
+    const io = testIo({ tty: true });
     m.deps.ask = ask;
-    m.deps.io = testIo({ tty: true });
+    m.deps.io = io;
     http.requests.length = 0;
-    return { m, http, ask };
+    return { m, http, ask, io };
   }
   const posts = (http: { requests: HttpRequest[] }) => http.requests.filter((r) => r.method === 'POST');
 
   it('yes posts the test email with the app.env basic auth and the mutating-route headers, and prints sent', async () => {
-    const { m, http, ask } = await withEmail(
+    const { m, http, ask, io } = await withEmail(
       () => ({ status: 200, body: { result: 'sent', at: '2026-10-24T09:30:00.000Z' } }),
       [true, false],
     );
@@ -249,7 +250,7 @@ describe('gmt setup offers the test email at its end (brief Task 18.3)', () => {
       'Content-Type': 'application/json',
       'X-Requested-With': 'get-me-there',
     });
-    const text = (m.deps.io as ReturnType<typeof testIo>).stdout;
+    const text = io.stdout;
     expect(text).toContain(TEST_EMAIL_WORDS.sent);
     expect(text.indexOf('get-me-there is running at')).toBeLessThan(text.indexOf(TEST_EMAIL_WORDS.sent));
     expect(text).not.toContain(password(m));
@@ -287,26 +288,24 @@ describe('gmt setup offers the test email at its end (brief Task 18.3)', () => {
     ['not JSON', () => ({ status: 200, body: 'plain' }), TEST_EMAIL_WORDS.silent],
     ['an unexpected status', () => ({ status: 500, body: 'boom secret-detail' }), TEST_EMAIL_WORDS.silent],
   ])('prints the next step for %s and never the server text', async (_n, route, words) => {
-    const { m } = await withEmail(route, [true, false]);
+    const { m, io } = await withEmail(route, [true, false]);
     expect(await runCli(['setup'], m.deps)).toBe(0);
-    const text = (m.deps.io as ReturnType<typeof testIo>).stdout;
+    const text = io.stdout;
     expect(text).toContain(words);
     expect(text).not.toContain('secret-detail');
   });
 
   it('an app that does not answer is said plainly', async () => {
-    const { m } = await withEmail(null, [true, false]);
+    const { m, io } = await withEmail(null, [true, false]);
     expect(await runCli(['setup'], m.deps)).toBe(0);
-    expect((m.deps.io as ReturnType<typeof testIo>).stdout).toContain(TEST_EMAIL_WORDS.silent);
+    expect(io.stdout).toContain(TEST_EMAIL_WORDS.silent);
   });
 
   it('is never offered without email, without a terminal, or with --non-interactive', async () => {
-    const plain = machine({
-      ask: scriptedAsk(['', '', '', '', '', '', '', false]),
-      io: testIo({ tty: true }),
-    });
+    const plainAsk = scriptedAsk(['', '', '', '', '', '', '', false]);
+    const plain = machine({ ask: plainAsk, io: testIo({ tty: true }) });
     expect(await runCli(['setup'], plain.deps)).toBe(0);
-    expect((plain.deps.ask as ReturnType<typeof scriptedAsk>).asked).not.toContain(TEST_EMAIL_QUESTION);
+    expect(plainAsk.asked).not.toContain(TEST_EMAIL_QUESTION);
     const { m, http, ask } = await withEmail(() => ({ status: 200, body: {} }), []);
     m.deps.io = testIo({ tty: false });
     expect(await runCli(['setup'], m.deps)).toBe(0);

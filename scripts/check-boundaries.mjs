@@ -64,6 +64,7 @@ const NOT_AIRPORT_WORDS = [
   'SQL',
   'SRC',
   'SVG',
+  'TLS',
   'TOP',
   'WAL',
 ];
