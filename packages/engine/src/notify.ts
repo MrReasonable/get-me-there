@@ -81,3 +81,30 @@ export async function notifyOperator(
   ctx.repos.notifications.record(kind, p.executionId, p.definitionId, ok ? 'sent' : 'failed');
   return ok;
 }
+
+/**
+ * Spec §8.3 "Consent expiry": sends a notice from the app itself, `{ kind: 'system', subject, body }`, to every notifier.
+ * It is not an `OperatorMessageKind`: no `operator_notifications` row is written and no definition id is needed, so the
+ * once-a-day rule is the caller's (a claimed `operator_notice_keys` key). Returns true only when every notifier accepted
+ * it; never throws, because a notice must not stop the tick that sends it.
+ */
+export async function sendSystemNotice(
+  ctx: Pick<EngineContext, 'notifiers' | 'log'>,
+  subject: string,
+  body: string,
+): Promise<boolean> {
+  let ok = ctx.notifiers.length > 0;
+  for (const n of ctx.notifiers) {
+    try {
+      const r = await n.send({ kind: 'system', subject, body });
+      if (!r.ok) {
+        ok = false;
+        ctx.log.warn({ notifier: n.id, kind: 'system', detail: r.detail ?? null }, 'system notice refused');
+      }
+    } catch (err) {
+      ok = false;
+      ctx.log.warn({ notifier: n.id, kind: 'system', err: errorText(err) }, 'system notice failed');
+    }
+  }
+  return ok;
+}

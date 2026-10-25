@@ -12,6 +12,8 @@ import {
   type SmtpConfig,
   type SmtpTransportOptions,
   smtpTransportOptions,
+  TEST_EMAIL_BODY,
+  TEST_EMAIL_SUBJECT,
   type TransportFactory,
 } from '../../src/notifiers/email.js';
 import { buildNotifiers } from '../../src/notifiers/index.js';
@@ -373,5 +375,38 @@ describe('buildNotifiers', () => {
       ).map((n) => n.id),
     ).toEqual(['log', 'email']);
     expect(connect).not.toHaveBeenCalled();
+  });
+});
+
+describe('EmailNotifier system notices and the test send (spec §8.3, §10 /alerts/test-email)', () => {
+  it('sends a system notice as plain text with the subject and body it carries', async () => {
+    const { n, t } = notifier();
+    expect(
+      await n.send({ kind: 'system', subject: 'consent\u0007 expires', body: 'line one\r\nline two' }),
+    ).toEqual({
+      ok: true,
+    });
+    expect(t.messages[0]?.parsed.subject).toBe('consent expires');
+    expect(t.messages[0]?.parsed.text).toBe('line one\nline two');
+  });
+  it('sendTest sends the one fixed message and answers a class', async () => {
+    const { n, t } = notifier();
+    expect(await n.sendTest()).toBe('sent');
+    expect(t.messages[0]?.parsed.subject).toBe(TEST_EMAIL_SUBJECT);
+    expect(t.messages[0]?.parsed.text).toBe(TEST_EMAIL_BODY);
+  });
+  it('sendTest is refused at the hourly ceiling and fails on a transport error, never returning its text', async () => {
+    const one = notifier({ maxPerHour: 1 });
+    expect(await one.n.sendTest()).toBe('sent');
+    expect(await one.n.sendTest()).toBe('refused');
+    expect(one.t.messages).toHaveLength(1);
+    const failing = notifier({
+      createTransport: () => ({
+        sendMail: async () => {
+          throw new Error(`550 mailbox ${PASS} unavailable`);
+        },
+      }),
+    });
+    expect(await failing.n.sendTest()).toBe('failed');
   });
 });

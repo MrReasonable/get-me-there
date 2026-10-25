@@ -1,7 +1,7 @@
 import type { IsoDateTime, ProviderId, Stage } from '@gmt/core';
 import type { Db } from '../client.js';
 import { PROVIDER_IDS, STAGES } from '../internal/enums.js';
-import { oneOf } from '../internal/read.js';
+import { oneOf, readTime } from '../internal/read.js';
 import { assertIsoDateTime } from '../internal/validate.js';
 
 /** Distinct tiles fetched upstream on a first attempt (ruling 7); cache hits are counted separately so parity = tiles + cacheHits. */
@@ -82,6 +82,27 @@ export class LedgerRepo {
       )
       .all(executionId)
       .map((r) => ({ ...r, providerId: oneOf('provider_id', PROVIDER_IDS, r.providerId) }));
+  }
+
+  /**
+   * Spec §10 `GET /status` (brief WP18 §6): the provider's newest completed upstream call, success or failure: when it
+   * ended and how (`outcome`, the HTTP status when it had one). Cache hits, pending rows and swept `unknown` rows are
+   * not completed calls. Null when the provider has made none. Reads only; the ledger text is never read.
+   */
+  lastCompleted(
+    providerId: ProviderId,
+  ): { at: IsoDateTime; outcome: 'ok' | 'error'; httpStatus: number | null } | null {
+    const r = this.db.raw
+      .prepare<[string], { at: string; outcome: string; httpStatus: number | null }>(
+        `SELECT COALESCE(finished_at, started_at) AS at, outcome, http_status AS httpStatus FROM provider_requests WHERE provider_id = ? AND outcome IN ('ok', 'error') ORDER BY COALESCE(finished_at, started_at) DESC, id DESC LIMIT 1`,
+      )
+      .get(providerId);
+    if (r === undefined) return null;
+    return {
+      at: readTime('provider_requests.finished_at', r.at),
+      outcome: oneOf('outcome', ['ok', 'error'] as const, r.outcome),
+      httpStatus: r.httpStatus,
+    };
   }
 
   /** Spec §8.1 parity numerator for one provider (add its cache hits for the full count). */

@@ -170,3 +170,57 @@ describe('LedgerRepo (spec §5.3, §7, §8.1 parity)', () => {
     expect(new LedgerRepo(db).pruneCacheHits(T0, [])).toBe(0);
   });
 });
+
+describe('LedgerRepo.lastCompleted (spec §10 /status)', () => {
+  it('is the newest completed call of the provider, success or failure; cache hits and pending rows are not calls', () => {
+    const db = freshDb();
+    const clock = fixedClock(T0);
+    const guard = new SqliteBudgetGuard(db, cfg, clock);
+    const ledger = new LedgerRepo(db);
+    const reserve = (providerId: 'travelpayouts' | 'searchapi') =>
+      guard.reserve({
+        providerId,
+        executionId: null,
+        tileIndex: null,
+        costMicroGbp: providerId === 'searchapi' ? 3200 : 0,
+        httpAttempt: 1,
+        endpointPath: '/p',
+      });
+    expect(ledger.lastCompleted('searchapi')).toBeNull();
+    reserve('searchapi').finalise({ outcome: 'error', httpStatus: 401, durationMs: 1 });
+    clock.advance(60_000);
+    reserve('searchapi').finalise(ok);
+    clock.advance(60_000);
+    reserve('searchapi').finalise({ outcome: 'error', httpStatus: 402, durationMs: 1 });
+    clock.advance(60_000);
+    reserve('searchapi'); // pending: not a completed call
+    guard.recordCacheHit({ providerId: 'searchapi', executionId: null, tileIndex: null, endpointPath: '/p' });
+    reserve('travelpayouts').finalise(ok);
+    expect(ledger.lastCompleted('searchapi')).toEqual({
+      at: at('2026-10-14T12:02:00.000Z'),
+      outcome: 'error',
+      httpStatus: 402,
+    });
+    expect(ledger.lastCompleted('travelpayouts')).toMatchObject({ outcome: 'ok', httpStatus: 200 });
+    expect(ledger.lastCompleted('camoufox')).toBeNull();
+  });
+
+  it('an error with no HTTP status (a socket error) has a null status', () => {
+    const db = freshDb();
+    const guard = new SqliteBudgetGuard(db, cfg, fixedClock(T0));
+    guard
+      .reserve({
+        providerId: 'searchapi',
+        executionId: null,
+        tileIndex: null,
+        costMicroGbp: 3200,
+        httpAttempt: 1,
+        endpointPath: '/p',
+      })
+      .finalise({ outcome: 'error', durationMs: 1 });
+    expect(new LedgerRepo(db).lastCompleted('searchapi')).toMatchObject({
+      outcome: 'error',
+      httpStatus: null,
+    });
+  });
+});
