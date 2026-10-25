@@ -3,14 +3,18 @@
 // job's limit splits its `mutate` files across several jobs. This prints one shard's files, the list `stryker run
 // --mutate` takes:
 //
-//   node scripts/mutation-shard.mjs <package dir> <shard> <shards>    (shard counts from 1)
+//   node scripts/mutation-shard.mjs <package dir> <shard> <shards> [--config <out>]    (shard counts from 1)
+//
+// With --config it also writes the shard's Stryker config to <out> (made if needed): the package's stryker.config.json
+// with `mutate` set to the shard's files and no break threshold of its own, since scripts/mutation-gate.mjs judges the
+// package's break once over all its shards' reports, as an unsharded run is judged.
 //
 // The files are those the package's stryker.config.json `mutate` list names (Stryker's matcher, as the mutation-glob
 // check reads it), so the shards together always hold every mutated file exactly once and a file added to the list
 // joins a shard by itself. Files are dealt largest first to the shard with the fewest bytes so far (the lower shard on
 // a tie, equal sizes by path): size stands in for the mutant count, which only Stryker's instrumenter knows.
-import { readFileSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { filesOf, mutatedBy } from './check-mutation-globs.mjs';
 
@@ -42,11 +46,25 @@ export function shardOf(files, shard, shards) {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  const [dir, shard, shards] = process.argv.slice(2);
+  const args = process.argv.slice(2);
+  const at = args.indexOf('--config');
+  const out = at === -1 ? null : args.splice(at, 2)[1];
+  const [dir, shard, shards] = args;
   try {
-    if (dir === undefined)
-      throw new Error('usage: node scripts/mutation-shard.mjs <package dir> <shard> <shards>');
-    console.log(shardOf(mutatedFiles(dir), Number(shard), Number(shards)).join(','));
+    if (dir === undefined || out === undefined)
+      throw new Error(
+        'usage: node scripts/mutation-shard.mjs <package dir> <shard> <shards> [--config <out>]',
+      );
+    const files = shardOf(mutatedFiles(dir), Number(shard), Number(shards));
+    if (out !== null) {
+      const cfg = JSON.parse(readFileSync(join(dir, 'stryker.config.json'), 'utf8'));
+      mkdirSync(dirname(out), { recursive: true });
+      writeFileSync(
+        out,
+        `${JSON.stringify({ ...cfg, mutate: files, thresholds: { ...cfg.thresholds, break: null } }, null, 2)}\n`,
+      );
+    }
+    console.log(files.join(','));
   } catch (e) {
     console.error(`mutation shard: ${e instanceof Error ? e.message : e}`);
     process.exit(1);

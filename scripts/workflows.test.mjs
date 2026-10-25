@@ -320,7 +320,7 @@ describe('WP16a: the mutation workflow runs every package’s Stryker gate and t
   const MUTATED = ['packages/core', 'packages/engine', 'apps/api', 'apps/camoufox-worker'];
   it('runs the mutation-glob check in a job of its own, each package in its own shards and the CLI in its own job', () => {
     const jobs = YAML.parse(t()).jobs;
-    expect(Object.keys(jobs)).toEqual(['mutation-globs', 'mutate', 'mutate-cli']);
+    expect(Object.keys(jobs)).toEqual(['mutation-globs', 'mutate', 'mutation-gate', 'mutate-cli']);
     expect(runs(jobs['mutation-globs'])).toEqual([
       'pnpm install --frozen-lockfile',
       'node scripts/check-mutation-globs.mjs',
@@ -346,8 +346,34 @@ describe('WP16a: the mutation workflow runs every package’s Stryker gate and t
       for (const e of mine) expect(e.package, dir).toBe(dir.split('/')[1]);
     }
     expect(jobs.mutate.strategy['fail-fast']).toBe(false);
+    // the gate runs once per package, expecting every one of its shards
+    const gates = jobs['mutation-gate'].strategy.matrix.include;
+    expect(gates.map((g) => g.dir)).toEqual(MUTATED);
+    for (const g of gates) expect(g.shards, g.dir).toBe(include.find((e) => e.dir === g.dir).shards);
   });
-  it('each shard mutates its own files, gates on timeouts and caches its incremental file, inside 120 minutes', () => {
+  // why: ruling 10 (decision 67): the package's break threshold and timeout share are judged as an unsharded run's, once
+  // over all its shards; a shard alone has no break of its own
+  it('the gate job merges every shard’s report, after every shard, whatever they did', () => {
+    const job = YAML.parse(t()).jobs['mutation-gate'];
+    expect(job.needs).toBe('mutate');
+    expect(job.if).toBe('always()');
+    const X = ['$', '{{'].join('');
+    const dl = job.steps.find((s) => String(s.uses ?? '').startsWith('actions/download-artifact@'));
+    expect(dl.with.pattern).toBe(`mutation-${X} matrix.package }}-*`);
+    const run = job.steps.find((s) => String(s.run ?? '').includes('mutation-gate.mjs'));
+    expect(String(run.run)).toContain(
+      'node scripts/mutation-gate.mjs --config "$DIR/stryker.config.json" --expect "$SHARDS" "$REPORTS"/*/mutation.json',
+    );
+    const up = YAML.parse(t()).jobs.mutate.steps.find((s) =>
+      String(s.uses ?? '').startsWith('actions/upload-artifact@'),
+    );
+    expect(up.with).toMatchObject({
+      name: `mutation-${X} matrix.package }}-${X} matrix.shard }}of${X} matrix.shards }}`,
+      path: `${X} matrix.dir }}/reports/mutation/mutation.json`,
+      'if-no-files-found': 'error',
+    });
+  });
+  it('each shard mutates its own files and caches its incremental file, inside 120 minutes', () => {
     const job = YAML.parse(t()).jobs.mutate;
     expect(job['timeout-minutes']).toBeLessThanOrEqual(120);
     const X = ['$', '{{'].join('');
@@ -355,10 +381,9 @@ describe('WP16a: the mutation workflow runs every package’s Stryker gate and t
     const run = job.steps.find((s) => String(s.run ?? '').includes('stryker run'));
     expect(run['working-directory']).toBe(`${X} matrix.dir }}`);
     expect(String(run.run).trim().split('\n')).toEqual([
-      'files="$(node ../../scripts/mutation-shard.mjs . "$SHARD" "$SHARDS")"',
+      'files="$(node ../../scripts/mutation-shard.mjs . "$SHARD" "$SHARDS" --config reports/stryker.shard.json)"',
       'echo "shard $SHARD of $SHARDS: $files"',
-      'pnpm exec stryker run --mutate "$files"',
-      'node ../../scripts/mutation-gate.mjs reports/mutation/mutation.json',
+      'pnpm exec stryker run reports/stryker.shard.json',
     ]);
     const restore = job.steps.find((s) => String(s.uses ?? '').startsWith('actions/cache/restore@'));
     const save = job.steps.find((s) => String(s.uses ?? '').startsWith('actions/cache/save@'));

@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -99,6 +99,21 @@ describe('the command line', { timeout: 20_000 }, () => {
     const r = spawnSync(process.execPath, [SCRIPT, dir, '2', '2'], { encoding: 'utf8' });
     expect(r.status).toBe(0);
     expect(r.stdout).toBe('src/b.ts,src/c.ts\n');
+  });
+  it('with --config writes the shard’s Stryker config: the package’s, its mutate the shard, no break of its own', () => {
+    const dir = pkg(['src/*.ts'], { 'src/a.ts': 5, 'src/b.ts': 4, 'src/c.ts': 3 });
+    const cfg = { mutate: ['src/*.ts'], incremental: true, thresholds: { high: 90, low: 80, break: 80 } };
+    writeFileSync(join(dir, 'stryker.config.json'), JSON.stringify(cfg));
+    const out = join(dir, 'reports', 'stryker.shard.json');
+    const r = spawnSync(process.execPath, [SCRIPT, dir, '1', '2', '--config', out], { encoding: 'utf8' });
+    expect(r.status).toBe(0);
+    expect(r.stdout).toBe('src/a.ts\n');
+    // why: the break is judged once over every shard by scripts/mutation-gate.mjs, as an unsharded run is
+    expect(JSON.parse(readFileSync(out, 'utf8'))).toEqual({
+      mutate: ['src/a.ts'],
+      incremental: true,
+      thresholds: { high: 90, low: 80, break: null },
+    });
   });
   it('exits 1 with the reason on a bad shard', () => {
     const dir = pkg(['src/*.ts'], { 'src/a.ts': 5 });
