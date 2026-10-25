@@ -3,7 +3,7 @@
 // claimed only after a successful send, with no operator_notifications row.
 import { asIsoDateTime, findBannedWords, type Notifier } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
-import { CONSENT_RECHECK_MS, runConsentNotice } from '../src/consentNotice.js';
+import { CONSENT_RECHECK_MS, runConsentNotice, runConsentNoticeSafely } from '../src/consentNotice.js';
 import { buildContext } from '../src/context.js';
 import { runSystemJob } from '../src/maintenance.js';
 import { sendSystemNotice } from '../src/notify.js';
@@ -213,6 +213,25 @@ describe('when nothing is sent', () => {
     });
     await runSystemJob(ctx, 'maintenance');
     expect(h.logs.some((l) => l.msg === 'system job failed')).toBe(true);
+  });
+});
+
+describe('the minute job’s pass', () => {
+  it('a check that throws is logged with its cause and never stops the catch-up that called it', async () => {
+    const { h, ctx } = setup({
+      check: async () => {
+        throw new Error('worker unreachable');
+      },
+    });
+    await expect(runConsentNoticeSafely(ctx)).resolves.toBeUndefined();
+    const line = h.logs.find((l) => l.msg === 'consent notice failed');
+    expect(line?.fields).toMatchObject({ err: expect.stringContaining('worker unreachable') });
+  });
+  it('a pass that sends is not logged as a failure', async () => {
+    const { h, sent, ctx } = setup({ check: check('warn') });
+    await runConsentNoticeSafely(ctx);
+    expect(sent).toHaveLength(1);
+    expect(h.logs.some((l) => l.msg === 'consent notice failed')).toBe(false);
   });
 });
 

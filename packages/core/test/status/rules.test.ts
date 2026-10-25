@@ -123,6 +123,17 @@ describe('backup names', () => {
     expect(backupTimeOf('get-me-there-2026-10-24T03-30-01-123Z.db')).toBe('2026-10-24T03:30:01.123Z');
     expect(backupTimeOf('get-me-there-2026-10-24T03-30-01-123Z.db.tmp')).toBeNull();
     expect(backupTimeOf('notes.txt')).toBeNull();
+    for (const bad of [
+      'x-get-me-there-2026-10-24T03-30-01-123Z.db',
+      'get-me-there-2026-10-24T03-30-01-12Z.db',
+      'get-me-there-2026-10-24T03-30-01-1234Z.db',
+      'get-me-there-26-10-24T03-30-01-123Z.db',
+      'get-me-there-2026-10-24T03:30:01.123Z.db',
+      'get-me-there-2026-1a-24T03-30-01-123Z.db',
+      'get-me-there-2026-10-24T03-30-01-123Z.sqlite',
+      'get-me-there-2026-10-24T03-30-01-123.db',
+    ])
+      expect(backupTimeOf(bad), bad).toBeNull();
     expect(BACKUP_FILE_PATTERN.test('get-me-there-2026-10-24T03-30-01-123Z.db')).toBe(true);
   });
 });

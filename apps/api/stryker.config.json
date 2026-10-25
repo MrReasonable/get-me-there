@@ -2,7 +2,8 @@
   "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
   "testRunner": "command",
   "commandRunner": {
-    "command": "pnpm exec vitest run --coverage.enabled=false test/read"
+    "command": "pnpm exec vitest run --coverage.enabled=false --bail=1 test/read",
+    "$comment": "StringLiteral mutants are left out: the report's words are the product of its fixed templates, pinned phrase by phrase in test/read and swept for banned words, and a mutant that changes a word the tests do not quote proves nothing about a rule (review V10). Every condition, threshold, branch and arithmetic mutant is kept."
   },
   "mutate": ["src/read/status.ts", "src/read/statusPure.ts"],
   "thresholds": {
@@ -18,5 +19,8 @@
   "timeoutFactor": 3,
   "concurrency": 2,
   "ignorePatterns": ["dist", "/coverage", "reports"],
-  "inPlace": false
+  "inPlace": false,
+  "mutator": {
+    "excludedMutations": ["StringLiteral"]
+  }
 }

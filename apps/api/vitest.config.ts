@@ -1,11 +1,33 @@
-import { fileURLToPath } from 'node:url';
+import { existsSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { defineConfig } from 'vitest/config';
-import { gmtAliases } from '../../vitest.aliases.js';
+
+/**
+ * The repository root, found upwards from this file. why: WP18's mutation run (Stryker, `inPlace: false`) runs this
+ * config from a sandbox copy nested under the package (`.stryker-tmp/sandbox-…`), where a fixed `../..` is not the root.
+ */
+function repoRoot(): string {
+  for (let d = dirname(fileURLToPath(import.meta.url)); d !== dirname(d); d = dirname(d))
+    if (existsSync(join(d, 'pnpm-workspace.yaml'))) return d;
+  throw new Error('no pnpm-workspace.yaml above the api');
+}
+const ROOT = repoRoot();
+// why: the one alias table, loaded by absolute path (a static relative import would not resolve from the sandbox)
+const ALIASES_MODULE: unknown = await import(pathToFileURL(join(ROOT, 'vitest.aliases.ts')).href);
+if (
+  typeof ALIASES_MODULE !== 'object' ||
+  ALIASES_MODULE === null ||
+  !('gmtAliases' in ALIASES_MODULE) ||
+  typeof ALIASES_MODULE.gmtAliases !== 'function'
+)
+  throw new Error('vitest.aliases.ts exports no gmtAliases function');
+const ALIASES = ALIASES_MODULE.gmtAliases(ROOT);
 
 // Package thresholds from the design spec §9. Coverage counts src/ only; barrels are excluded.
 export default defineConfig({
   // why: WP16b (decision 78): fileURLToPath, not URL.pathname, which reads /D:/… on Windows and resolves nothing
-  resolve: { alias: gmtAliases(fileURLToPath(new URL('../..', import.meta.url))) },
+  resolve: { alias: ALIASES },
   test: {
     name: 'api',
     include: ['test/**/*.test.ts'],
