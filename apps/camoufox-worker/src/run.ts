@@ -149,8 +149,9 @@ export async function run(argv: readonly string[], deps: RunDeps): Promise<numbe
   let dataDir: string | null = null;
   let env: Env;
   try {
-    refuseInstallDir(deps.env);
+    // why: CodeRabbit (PR #15): the data directory first, so this refusal too leaves its refusal file
     dataDir = resolveDataDir(deps.env);
+    refuseInstallDir(deps.env);
     const { envFile, present } = checkEnvFiles(dataDir, deps.uid, deps.stat);
     if (!present && !deps.withoutEnvFile.has(command))
       throw new EnvFileRefused(`${envFile} is missing (docs/setup.md section 14)`);
@@ -256,9 +257,9 @@ export async function main(argv: readonly string[], entries = ENTRIES): Promise<
     let installDir: string | null;
     try {
       installDir = installDirSetting(inherited, process.platform, process.arch);
-    } catch (e) {
-      process.stderr.write(`${e instanceof Error ? e.message : String(e)}\n`);
-      return EX_CONFIG;
+    } catch {
+      // why: CodeRabbit (PR #15): run() refuses the inherited setting itself, writing the refusal file and check's line
+      installDir = null;
     }
     // why: decision 73: the worker's one write to process.env (scripts/check-boundaries.mjs allows exactly this one):
     // camoufox-js reads CAMOUFOX_INSTALL_DIR once, when its module is evaluated, so it is set before any entry can

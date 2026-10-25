@@ -348,6 +348,25 @@ describe('watching the window (the tool only observes)', () => {
     const after = await watchConsentWindow(changing, { timers: fakeTimers() });
     expect([after.socs?.value, after.socsBeforeChoice]).toEqual(['after', true]);
   });
+  it('a window closed while its first view settles reads as closed, never as an error', async () => {
+    const d = fakeConsentDriver({});
+    let closed = false;
+    const closing = {
+      ...d,
+      closed: () => closed,
+      snapshotView: async () => {
+        closed = true;
+        throw new Error('Target closed');
+      },
+    };
+    expect((await watchConsentWindow(closing, { timers: fakeTimers() })).ended).toBe('closed');
+    await expect(
+      watchConsentWindow(
+        { ...d, snapshotView: async () => Promise.reject(new Error('boom')) },
+        { timers: fakeTimers() },
+      ),
+    ).rejects.toThrow('boom');
+  });
   it('a read that fails because the person closed the window reads as closed; any other failure is thrown', async () => {
     const d = fakeConsentDriver({});
     let closed = false;
@@ -479,6 +498,15 @@ describe('research 17.0c’s record: names only, and the one value that tells th
       reject: 'reject_all',
       accept: 'accept_all',
     });
+  });
+  // why: CodeRabbit (PR #15): a field only one submission carries is a difference, never "the same values"
+  it('a field only one session submitted counts as a difference, by name', () => {
+    const only = (body: string) => [
+      request({ url: 'https://consent.google.com/save', method: 'POST', body }),
+    ];
+    expect(
+      researchRecord(session('reject', only('a=1&set_eom=true')), session('accept', only('a=1'))).differing,
+    ).toEqual({ names: ['set_eom'] });
   });
   it('a value is kept only when each session submitted exactly once', () => {
     const twice = [...reqs('reject'), save('reject')];

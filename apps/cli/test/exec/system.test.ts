@@ -352,30 +352,70 @@ describe.skipIf(process.platform === 'win32')(
     // why: sec-b1-002: a stalled connection, a slow whole download and a hung answer each end within their bounds
     it('download fails when no data comes for the idle bound, or the whole takes longer than its bound, keeping nothing', async () => {
       const d = tmp();
-      const stalled: typeof fetch = async (_u, init) =>
-        new Response(
-          new ReadableStream<Uint8Array>({
-            start(c) {
-              c.enqueue(new Uint8Array(10));
-              init?.signal?.addEventListener('abort', () => c.error(init.signal?.reason));
-            },
-          }),
-          { status: 200 },
-        );
+      // why: CodeRabbit (PR #15): the bounds' timers are the test's, fired on demand once the download has begun
+      const manual = () => {
+        const live = new Map<number, { fire: () => void; ms: number }>();
+        let n = 0;
+        return {
+          live,
+          set: (fire: () => void, ms: number) => {
+            live.set(++n, { fire, ms });
+            return n;
+          },
+          clear: (h: unknown) => {
+            if (typeof h === 'number') live.delete(h);
+          },
+          fireLatest(ms: number) {
+            const hit = [...live.values()].filter((t) => t.ms === ms).at(-1);
+            if (hit === undefined) throw new Error(`no ${ms} ms timer is set`);
+            hit.fire();
+          },
+        };
+      };
+      const stalled =
+        (begun: () => void): typeof fetch =>
+        async (_u, init) => {
+          begun();
+          return new Response(
+            new ReadableStream<Uint8Array>({
+              start(c) {
+                c.enqueue(new Uint8Array(10));
+                init?.signal?.addEventListener('abort', () => c.error(init.signal?.reason));
+              },
+            }),
+            { status: 200 },
+          );
+        };
+      const hung =
+        (begun: () => void): typeof fetch =>
+        (_u, init) => {
+          begun();
+          return new Promise((_r, reject) =>
+            init?.signal?.addEventListener('abort', () => reject(new Error('aborted'))),
+          );
+        };
       const action = { kind: 'download' as const, url: REL, to: join(d, 'a'), sha256: sha(BLOB), bytes: 100 };
-      await expect(
-        systemExecutor(noChild, { fetch: stalled, downloadIdleMs: 20, downloadTotalMs: 60_000 }).run(action),
-      ).rejects.toThrow(`download of ${REL}: no data for 0.02 s`);
-      await expect(
-        systemExecutor(noChild, { fetch: stalled, downloadIdleMs: 60_000, downloadTotalMs: 30 }).run(action),
-      ).rejects.toThrow(`download of ${REL}: not done within`);
-      const hung: typeof fetch = (_u, init) =>
-        new Promise((_r, reject) =>
-          init?.signal?.addEventListener('abort', () => reject(new Error('aborted'))),
-        );
-      await expect(
-        systemExecutor(noChild, { fetch: hung, downloadIdleMs: 20, downloadTotalMs: 60_000 }).run(action),
-      ).rejects.toThrow('no data for 0.02 s');
+      for (const [make, ms, words] of [
+        [stalled, 20, `download of ${REL}: no data for 0.02 s`],
+        [stalled, 120_000, `download of ${REL}: not done within 2 minutes`],
+        [hung, 20, 'no data for 0.02 s'],
+      ] as const) {
+        const t = manual();
+        let begun: () => void = () => undefined;
+        const started = new Promise<void>((r) => {
+          begun = r;
+        });
+        const run = systemExecutor(noChild, {
+          fetch: make(() => begun()),
+          downloadIdleMs: 20,
+          downloadTotalMs: 120_000,
+          timers: t,
+        }).run(action);
+        await started;
+        t.fireLatest(ms);
+        await expect(run).rejects.toThrow(words);
+        expect(t.live.size).toBe(0);
+      }
       expect(readdirSync(d)).toEqual([]);
     });
     it('a redirect’s own body is cancelled before the next hop, and every hop carries the bound', async () => {

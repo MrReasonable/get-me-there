@@ -34,10 +34,36 @@ export interface SystemExecutorOptions {
   downloadIdleMs?: number;
   /** How long a whole download may take; 60 minutes by default. */
   downloadTotalMs?: number;
+  /** The download bounds' timers (tests pass their own to fire a bound on demand); the real ones by default. */
+  timers?: { set(fire: () => void, ms: number): unknown; clear(handle: unknown): void };
 }
 
 const tempBeside = (path: string): string =>
   join(dirname(path), `.${basename(path)}.tmp-${process.pid}-${randomBytes(4).toString('hex')}`);
+
+/** The real timers behind the download bounds: each handle a number of its own, so a test's timers can be any value. */
+function realDownloadTimers(): NonNullable<SystemExecutorOptions['timers']> {
+  let next = 0;
+  const live = new Map<number, ReturnType<typeof setTimeout>>();
+  return {
+    set(fire, ms) {
+      const id = ++next;
+      live.set(
+        id,
+        setTimeout(() => {
+          live.delete(id);
+          fire();
+        }, ms),
+      );
+      return id;
+    },
+    clear(h) {
+      if (typeof h !== 'number') return;
+      clearTimeout(live.get(h));
+      live.delete(h);
+    },
+  };
+}
 
 /** Creates `tmp` exclusively at `mode`, lets `fill` write it, then sets the exact mode and renames it over `path`. */
 async function landed(
@@ -140,6 +166,7 @@ export function systemExecutor(runner: Runner, opts: SystemExecutorOptions = {})
   const onTemporary = opts.onTemporary ?? (async () => {});
   const idleMs = opts.downloadIdleMs ?? 60_000;
   const totalMs = opts.downloadTotalMs ?? 60 * 60_000;
+  const timers = opts.timers ?? realDownloadTimers();
   const none = { stdout: '' };
   return {
     async run(a: Action): Promise<{ stdout: string }> {
@@ -200,8 +227,8 @@ export function systemExecutor(runner: Runner, opts: SystemExecutorOptions = {})
           // why: sec-b1-002: a stalled connection fails within the idle bound, and the whole download within its own
           const stop = new AbortController();
           const stall = () => stop.abort(new Error(`download of ${a.url}: no data for ${idleMs / 1000} s`));
-          let idle = setTimeout(stall, idleMs);
-          const total = setTimeout(
+          let idle = timers.set(stall, idleMs);
+          const total = timers.set(
             () => stop.abort(new Error(`download of ${a.url}: not done within ${totalMs / 60_000} minutes`)),
             totalMs,
           );
@@ -213,8 +240,8 @@ export function systemExecutor(runner: Runner, opts: SystemExecutorOptions = {})
             let bytes = 0;
             const capped = new Transform({
               transform(chunk: Buffer, _enc, done) {
-                clearTimeout(idle);
-                idle = setTimeout(stall, idleMs);
+                timers.clear(idle);
+                idle = timers.set(stall, idleMs);
                 bytes += chunk.length;
                 if (bytes > a.bytes)
                   return done(new Error(`download of ${a.url}: more than ${a.bytes} bytes; removed`));
@@ -239,8 +266,8 @@ export function systemExecutor(runner: Runner, opts: SystemExecutorOptions = {})
             await rm(part, { force: true });
             throw stop.signal.aborted && stop.signal.reason instanceof Error ? stop.signal.reason : e;
           } finally {
-            clearTimeout(idle);
-            clearTimeout(total);
+            timers.clear(idle);
+            timers.clear(total);
           }
           return none;
         }

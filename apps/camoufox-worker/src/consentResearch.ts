@@ -129,8 +129,9 @@ export function researchRecord(reject: ResearchSession, accept: ResearchSession)
       none: `each session needs exactly one consent submission (found ${a.length} and ${b.length})`,
     };
   else {
-    const names = [...ra.fields.keys()]
-      .filter((n) => rb.fields.has(n) && rb.fields.get(n) !== ra.fields.get(n))
+    // why: CodeRabbit (PR #15): a field only one submission carries is a difference too, by name
+    const names = [...new Set([...ra.fields.keys(), ...rb.fields.keys()])]
+      .filter((n) => ra.fields.get(n) !== rb.fields.get(n))
       .sort();
     const only = names.length === 1 ? names[0] : undefined;
     const va = only === undefined ? undefined : ra.fields.get(only);

@@ -89,6 +89,22 @@ describe('a refusal before any entry runs explains itself (W1, dev-b1-003)', () 
     expect(await run(['status'], deps({ CAMOUFOX_DATA_DIR: status }).d)).toBe(EX_CONFIG);
     expect(refusalOf(status)).toBeNull();
   });
+  // why: CodeRabbit (PR #15): an inherited CAMOUFOX_INSTALL_DIR is refused by run() too, so it leaves its file
+  it('an inherited CAMOUFOX_INSTALL_DIR under main leaves a config refusal; under check prints one', async () => {
+    const dir = dataDir();
+    const out: string[] = [];
+    const t = deps(
+      { CAMOUFOX_DATA_DIR: dir, CAMOUFOX_INSTALL_DIR: '/elsewhere' },
+      { out: (l: string) => out.push(l) },
+    );
+    expect(await run(['main'], { ...t.d, entries: { main: async () => async () => 0 } })).toBe(EX_CONFIG);
+    expect(refusalOf(dir)).toMatchObject({ reason: 'config' });
+    expect(t.errs.join()).toContain(INSTALL_DIR_INHERITED);
+    expect(await run(['check', '--json'], { ...t.d, entries: { check: async () => async () => 0 } })).toBe(
+      EX_CONFIG,
+    );
+    expect(JSON.parse(out.at(-1) ?? '')).toMatchObject({ reason: 'config' });
+  });
   it('a data directory that is not there, or not a directory of this user’s, gets no file', async () => {
     const gone = join(tmpDir(), 'gone');
     expect(
@@ -323,7 +339,8 @@ describe('run.ts (SEC-R2-006: one env file, its mode checked on the file loaded)
         installDirSetting({ HOME: '/Users/op' }, process.platform, process.arch) ?? undefined,
       );
       process.env.CAMOUFOX_INSTALL_DIR = '/elsewhere';
-      expect(await main(['no-such-command'])).toBe(EX_CONFIG);
+      // why: run() refuses the inherited value itself (after naming an unknown command first)
+      expect(await main(['status'])).toBe(EX_CONFIG);
       expect(errs.at(-1)).toBe(`${INSTALL_DIR_INHERITED}\n`);
       expect(process.env.CAMOUFOX_INSTALL_DIR).toBe('/elsewhere');
     } finally {

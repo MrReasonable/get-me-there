@@ -657,7 +657,9 @@ describe('worker.env and its helpers', () => {
   it('reads the camoufox month’s pages and scrolls from GET /api/providers through its schema', () => {
     expect(ledgerFigures(JSON.stringify(providersBody(12, 40)))).toEqual({ pages: 12, scrolls: 40 });
     const none = providersBody(0, 0);
-    expect(ledgerFigures(JSON.stringify({ ...none, providers: [] }))).toEqual({ pages: 0, scrolls: 0 });
+    expect(ledgerFigures(JSON.stringify({ ...none, providers: [] }))).toEqual({
+      problem: 'the app does not list the browser provider (is it turned on?)',
+    });
     expect(
       ledgerFigures(JSON.stringify({ ...none, providers: [{ ...none.providers[0], usage: [] }] })),
     ).toEqual({ pages: 0, scrolls: 0 });

@@ -93,7 +93,14 @@ export async function watchConsentWindow(
       await o.timers.sleep(tick);
     }
   };
-  const first = await settled(false);
+  let first: Awaited<ReturnType<typeof settled>>;
+  try {
+    first = await settled(false);
+  } catch (e) {
+    // why: CodeRabbit (PR #15): a window closed while its first view settles reads as closed, as below
+    if (d.closed()) return { ...w, ended: 'closed' };
+    throw e;
+  }
   w.firstFacts = first.facts;
   if (first.decided.kind === 'blocked') return { ...w, ended: 'blocked', blocked: first.decided.page };
   w.firstView =

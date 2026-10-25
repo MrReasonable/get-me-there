@@ -139,6 +139,14 @@ describe('gmt browser install (W1)', () => {
     expect(m.loaded.has('local.get-me-there.camoufox-worker')).toBe(true);
   });
 
+  it('a worker set up by hand with no agent at all gets gmt’s service, started once its check passes', async () => {
+    const m = world();
+    m.fs.dir(DATA, 0o700).file(WORKER_ENV, `CAMOUFOX_WORKER_KEY="${KEY}"\n`, 0o600);
+    expect(await runCli(['browser', 'install'], m.deps), m.io.stderr).toBe(0);
+    expect(m.fs.read(PLIST)).toContain('<string>/repo/apps/camoufox-worker/src/run.ts</string>');
+    expect(m.loaded.has('local.get-me-there.camoufox-worker')).toBe(true);
+  });
+
   it('a worker whose check refuses is installed but not started, its refusal and fix said', async () => {
     const m = world({ check: '{"reason":"consent-missing","at":"2026-10-24T09:30:00.000Z"}' });
     m.fs.dir(DATA, 0o700).file(WORKER_ENV, `CAMOUFOX_WORKER_KEY="${KEY}"\n`, 0o600).file(PLIST, 'old', 0o644);

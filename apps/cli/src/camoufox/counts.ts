@@ -40,7 +40,10 @@ export function ledgerFigures(body: string): Figures | { problem: string } {
   const r = apiContract.providersResponseSchema.safeParse(raw);
   if (!r.success) return { problem: 'the app’s providers answer is not one this build can read' };
   const camoufox = r.data.providers.find((p) => p.providerId === 'camoufox');
-  if (camoufox === undefined) return { pages: 0, scrolls: 0 };
+  // why: CodeRabbit (PR #15): an app with the provider off lists no camoufox entry, yet its ledger may hold this
+  // month's pages; no entry is no figure, never zero (a listed provider with no month row has used none)
+  if (camoufox === undefined)
+    return { problem: 'the app does not list the browser provider (is it turned on?)' };
   const month = camoufox.usage.find((u) => u.scope === 'provider-month:camoufox');
   if (month === undefined) return { pages: 0, scrolls: 0 };
   if (month.scrolls === undefined)

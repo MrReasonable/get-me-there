@@ -32,14 +32,16 @@ const title = `install smoke: the pinned Camoufox launched through the worker ag
 const children: ChildProcess[] = [];
 afterEach(() => {
   // why: ts-b1-005: the child runs in its own process group, so a browser it started goes with it
-  for (const c of children.splice(0))
-    if (c.exitCode === null && c.signalCode === null && c.pid !== undefined) {
-      try {
-        process.kill(-c.pid, 'SIGKILL');
-      } catch {
-        c.kill('SIGKILL');
-      }
+  // why: CodeRabbit (PR #15): the group is signalled even when its leader has exited, since a browser it started
+  // may outlive it; a group already gone is a normal end
+  for (const c of children.splice(0)) {
+    if (c.pid === undefined) continue;
+    try {
+      process.kill(-c.pid, 'SIGKILL');
+    } catch {
+      if (c.exitCode === null && c.signalCode === null) c.kill('SIGKILL');
     }
+  }
 });
 
 // why: in the camoufox-install job a missing install is a failure, never a quiet skip
