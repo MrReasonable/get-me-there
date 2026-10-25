@@ -20,13 +20,29 @@ export function guarded(script: string): string {
   return `${prefix} ${script}`;
 }
 
-/** The recorded children that are still running, after killing each with SIGKILL. */
+/**
+ * Whether the pid is a zombie: exited, waiting for its new parent to reap it (on Linux an orphan goes to a subreaper,
+ * which may take a moment). A signal to a zombie succeeds, so it would otherwise read as still running.
+ */
+function zombie(pid: number): boolean {
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+    return stat.slice(stat.lastIndexOf(')') + 2).startsWith('Z');
+  } catch {
+    // why: no /proc (macOS, where launchd reaps at once), or the process is gone
+    return false;
+  }
+}
+
+/** The recorded children that are still running (zombies aside), after killing each with SIGKILL. */
 export function killTracked(): number[] {
   if (!existsSync(TRACK)) return [];
   const alive: number[] = [];
   for (const line of readFileSync(TRACK, 'utf8').split('\n')) {
     const pid = Number(line);
     if (!Number.isInteger(pid) || pid <= 0) continue;
+    // why: read before the kill, which itself makes a running child a zombie
+    if (zombie(pid)) continue;
     try {
       process.kill(pid, 'SIGKILL');
       alive.push(pid);
