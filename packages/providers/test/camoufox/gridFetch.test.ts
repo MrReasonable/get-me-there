@@ -7,6 +7,7 @@ import {
   asIata,
   asIsoDate,
   asIsoDateTime,
+  BudgetExceeded,
   cellKeyString,
   type GridView,
   type IsoDate,
@@ -262,6 +263,36 @@ describe('camoufox grid mode', () => {
     expect(budget.rowsOf('camoufox').map((x) => [x.scrolls, x.scrollCount])).toEqual([[10, 10]]);
     if (r.kind !== 'tile') throw new Error('tile');
     expect(r.cellIssues?.map((i) => i.detail.split(' ')[0])).toEqual(Array(7).fill('scroll-allowance'));
+  });
+  // why: decision 82 (Task 17.3): a page the worker stopped short at its allowance met the worker's monthly scroll cap
+  it('a grid answer that spent the month’s scrolls keeps its views and raises BudgetExceeded at provider-month for the next tile', async () => {
+    const { d } = setup(
+      { executionPageCap: 1, executionScrollCap: 600, scrollCap: 30 },
+      { scrollsLeft: () => 10 },
+    );
+    const wide = { ...Q, departureTo: asIsoDate('2027-03-24') };
+    const [tile] = d.plan(wide);
+    if (tile === undefined) throw new Error('tile');
+    let hits = 0;
+    server.use(
+      http.post(URL_, () => {
+        hits++;
+        return HttpResponse.json(answer({ views: [view()], ended: 'allowance', scrolls: 4 }), contacted);
+      }),
+    );
+    const first = await d.fetchTile(tile, wide, ctx);
+    expect(first.kind === 'tile' && first.prices).toHaveLength(7);
+    const next = d.fetchTile(tile, wide, ctx);
+    await expect(next).rejects.toBeInstanceOf(BudgetExceeded);
+    await expect(next).rejects.toMatchObject({
+      scope: 'provider-month',
+      providerId: 'camoufox',
+      unit: 'scrolls',
+    });
+    expect(hits).toBe(1);
+    // why: another run asks the worker again (its month may have turned)
+    expect((await d.fetchTile(tile, wide, { ...ctx, executionId: 'exec-2' })).kind).toBe('tile');
+    expect(hits).toBe(2);
   });
   it('with no scrolls left, a page still opens and reads its first block, reserving none (CA 1)', async () => {
     const { d, budget } = setup(

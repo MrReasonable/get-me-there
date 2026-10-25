@@ -163,6 +163,25 @@ describe('the recorder (brief Task 14.2 rules)', () => {
     expect(factsText).not.toContain(SOCS_VALUE);
     expect(factsText).not.toMatch(/- (link|tab|button) "/);
   });
+  // why: decision 82 (Task 17.3): every page the recorder loads counts in the worker's own month
+  it('each recorded page counts in monthly.json; a page past the cap, or unreadable counts, loads nothing', async () => {
+    const t = setup();
+    expect(await record(t.ctx(Q), cfg, t.deps)).toBe(0);
+    expect(JSON.parse(readFileSync(join(t.dataDir, 'monthly.json'), 'utf8'))).toEqual({
+      windowStart: '2026-10-01T00:00:00.000Z',
+      pages: 1,
+      scrolls: 0,
+    });
+    const full = setup();
+    expect(await record(full.ctx(Q), { ...cfg, monthlyPageCap: 0 }, full.deps)).toBe(EX_CONFIG);
+    expect(full.err.join()).toContain("the worker's monthly caps leave no room for this page");
+    expect(full.contexts.flatMap((c) => c.pages)).toEqual([]);
+    const garbled = setup();
+    writeFileSync(join(garbled.dataDir, 'pacer.json'), '{}', { mode: 0o600 });
+    writeFileSync(join(garbled.dataDir, 'monthly.json'), 'x', { mode: 0o600 });
+    expect(await record(garbled.ctx(Q), cfg, garbled.deps)).toBe(EX_CONFIG);
+    expect(readFileSync(join(garbled.dataDir, 'monthly.json'), 'utf8')).toBe('x');
+  });
   it('rule 1: every Google-facing run requires a valid SOCS capture; without one nothing launches', async () => {
     const t = setup({ socs: false });
     expect(await record(t.ctx(Q), cfg, t.deps)).toBe(EX_CONFIG);

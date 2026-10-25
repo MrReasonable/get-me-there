@@ -12,6 +12,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { CooldownStore } from '../src/cooldown.js';
 import { parseCellName, resolveDay } from '../src/gridNames.js';
+import { MonthlyCounter } from '../src/monthly.js';
 import { Pacer } from '../src/pacer.js';
 import { Refusal } from '../src/refusal.js';
 import { SELECTORS } from '../src/selectors.js';
@@ -160,6 +161,11 @@ async function serve(rec: z.infer<typeof fileSchema>) {
     socs: loadSocs(dataDir, timers.clock),
     cooldown: new CooldownStore({ dir: dataDir, challengeHours: 48, clock: timers.clock }),
     pacer: new Pacer({ dir: dataDir, minSpacingSeconds: 30, clock: timers.clock }),
+    monthly: new MonthlyCounter({
+      dir: dataDir,
+      caps: { pages: 1500, scrolls: 6000, billingDay: 1 },
+      clock: timers.clock,
+    }),
     refusal: new Refusal({ dir: dataDir, clock: timers.clock }),
     clock: timers.clock,
     timers,

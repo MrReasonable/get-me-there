@@ -18,6 +18,7 @@ import type { ContextLike } from './driver.js';
 import { type LaunchOptions, launchContext, prepareLaunch } from './launch.js';
 import { acquireLock, LockHeld, sweepProbeProfiles } from './lock.js';
 import { debugLogging, stderrLog } from './log.js';
+import { AppInstances, MonthlyCounter } from './monthly.js';
 import { GRAMMAR_VERSION } from './names.js';
 import { Pacer } from './pacer.js';
 import { profileDir } from './paths.js';
@@ -155,6 +156,13 @@ export async function startWorker(ctx: EntryContext, deps: MainDeps): Promise<Ru
   });
   const refusal = new Refusal({ dir: ctx.dataDir, clock: deps.clock });
   const pacer = new Pacer({ dir: ctx.dataDir, minSpacingSeconds: cfg.minSpacingSeconds, clock: deps.clock });
+  // why: decision 82: the month's caps for every caller, over the ledger's billing window
+  const monthly = new MonthlyCounter({
+    dir: ctx.dataDir,
+    caps: { pages: cfg.monthlyPageCap, scrolls: cfg.monthlyScrollCap, billingDay: cfg.billingDay },
+    clock: deps.clock,
+  });
+  const instances = new AppInstances({ dir: ctx.dataDir, billingDay: cfg.billingDay, clock: deps.clock });
   const profile = profileDir(ctx.dataDir);
   mkdirSync(profile, { recursive: true, mode: 0o700 });
   const versions: Versions = {
@@ -169,6 +177,7 @@ export async function startWorker(ctx: EntryContext, deps: MainDeps): Promise<Ru
     socs,
     cooldown,
     pacer,
+    monthly,
     refusal,
     clock: deps.clock,
     timers: deps.timers,
@@ -250,6 +259,8 @@ export async function startWorker(ctx: EntryContext, deps: MainDeps): Promise<Ru
       osArch,
       build: ready.install.build,
       consent: consentStatusOf(record),
+      monthly: monthly.status(),
+      appInstances: instances.status(),
     };
   };
   let server: Server;
@@ -276,6 +287,13 @@ export async function startWorker(ctx: EntryContext, deps: MainDeps): Promise<Ru
       return p;
     },
     status,
+    seen: (id) => {
+      try {
+        instances.seen(id);
+      } catch (e) {
+        deps.log.warn({ error: e instanceof Error ? e.name : 'unknown' }, 'app instance not recorded');
+      }
+    },
     onFatal: () => {
       void stop(EX_SOFTWARE);
     },

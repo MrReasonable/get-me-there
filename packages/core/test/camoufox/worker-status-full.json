@@ -11,7 +11,16 @@
     "camoufoxJs": "0.11.5",
     "binary": "152.0.4-beta.28"
   },
-  "flags": { "RESULTS_VERIFIED": true, "FORM_VERIFIED": true },
+  "flags": {
+    "RESULTS_VERIFIED": true,
+    "FORM_VERIFIED": true,
+    "CHEAPEST_FLOW_VERIFIED": true,
+    "VIEW_MORE_ADDS_CHEAPER": false,
+    "NO_FLIGHTS_VERIFIED": true,
+    "SOCS_STABLE": true,
+    "GRID_VERIFIED": true,
+    "LANDING_VERIFIED": false
+  },
   "accountCookie": { "found": false, "names": [], "checkedAt": "2027-03-01T06:00:00.000Z" },
   "socsCapturedAt": "2027-02-01T06:00:00.000Z",
   "socsStable": true,

@@ -1,6 +1,6 @@
 import dns from 'node:dns';
 import { createServer, type Server } from 'node:http';
-import { asIata, asIsoDate, BudgetExceeded, Secret } from '@gmt/core';
+import { asIata, asIsoDate, BudgetExceeded, effectiveSharedSettings, Secret } from '@gmt/core';
 import { passthrough } from 'msw';
 import { HttpResponse, http } from 'msw/http';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -224,13 +224,6 @@ describe('camoufox fetchTile (spec §2, §5.2)', () => {
     [409, { kind: 'mode-unavailable', mode: 'grid' }, false, 'parse', 'no-page'],
     [504, { kind: 'not-ready', elapsedMs: 90_000 }, true, 'parse', 'page'],
     [502, { kind: 'browser-error', stage: 'launch', detail: 'x' }, false, 'upstream', 'no-page'],
-    [
-      429,
-      { kind: 'monthly-cap', cap: 1500, windowEnd: '2026-11-01T00:00:00.000Z' },
-      false,
-      'quota',
-      'no-page',
-    ],
     [401, {}, false, 'auth', 'no-page'],
     [400, { kind: 'bad-request' }, false, 'parse', 'no-page'],
     [500, { what: 'unreadable' }, true, 'parse', 'page'],
@@ -253,6 +246,35 @@ describe('camoufox fetchTile (spec §2, §5.2)', () => {
       expect(classes(budget)).toEqual([cls]);
     },
   );
+  // why: decision 82 (Task 17.3): the worker's own monthly page cap is the ledger's scope, never a cell error
+  it('a monthly-cap answer raises BudgetExceeded at provider-month (the app’s page cap), called once, a no-page row', async () => {
+    const { tile } = setup();
+    let hits = 0;
+    server.use(
+      http.post(URL_, () => {
+        hits++;
+        return HttpResponse.json(
+          { kind: 'monthly-cap', cap: 1500, windowEnd: '2026-11-01T00:00:00.000Z' },
+          { status: 429, ...contacted(false) },
+        );
+      }),
+    );
+    const k = makeKit({ limits: testLimits() });
+    const p = camoufoxProvider({
+      http: k.kit,
+      log: k.log,
+      clock: k.clock,
+      key: SENTINELS.camoufox,
+      workerUrl: 'http://127.0.0.1:8090',
+      pointOfSale: 'GB',
+      sharedSettings: effectiveSharedSettings({ CAMOUFOX_MONTHLY_PAGE_CAP: '1500' }),
+    });
+    const r = p.discovery?.fetchTile(tile, Q, ctx);
+    await expect(r).rejects.toBeInstanceOf(BudgetExceeded);
+    await expect(r).rejects.toMatchObject({ scope: 'provider-month', providerId: 'camoufox', cap: 1500 });
+    expect(hits).toBe(1);
+    expect(k.budget.rowsOf('camoufox').map((x) => x.pageClass)).toEqual(['no-page']);
+  });
   it('a blocked answer words the page kind and the cool-down end for last_error', async () => {
     const { p, tile } = setup();
     server.use(

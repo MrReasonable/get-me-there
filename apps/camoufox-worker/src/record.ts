@@ -35,6 +35,7 @@ import { type GuardState, installGuard, installProbeGuard, onAllowlist } from '.
 import { type LaunchOptions, launchContext, launchOptionsForMeta, prepareLaunch } from './launch.js';
 import { acquireLock, LockHeld, sweepProbeProfiles } from './lock.js';
 import { debugLogging, stderrLog } from './log.js';
+import { MonthlyCounter } from './monthly.js';
 import { Pacer } from './pacer.js';
 import { profileDir } from './paths.js';
 import type { View } from './ready.js';
@@ -152,8 +153,15 @@ export async function record(ctx: EntryContext, cfg: WorkerConfig, deps: RecordD
       minSpacingSeconds: cfg.minSpacingSeconds,
       clock: deps.clock,
     });
+    // why: decision 82: every page the recorder loads counts in the worker's own month, as the server's do
+    const monthly = new MonthlyCounter({
+      dir: ctx.dataDir,
+      caps: { pages: cfg.monthlyPageCap, scrolls: cfg.monthlyScrollCap, billingDay: cfg.billingDay },
+      clock: deps.clock,
+    });
     const day = deps.clock.now().slice(0, 10);
-    if (args.kind === 'consent-probe') return await consentProbe(ctx, cfg, deps, { pacer, cooldown, day });
+    if (args.kind === 'consent-probe')
+      return await consentProbe(ctx, cfg, deps, { pacer, monthly, cooldown, day });
     let capture: SocsCapture;
     try {
       capture = loadSocs(ctx.dataDir, deps.clock);
@@ -169,7 +177,7 @@ export async function record(ctx: EntryContext, cfg: WorkerConfig, deps: RecordD
       for (let i = 0; i < args.pages; i++) {
         const req = args.request;
         if (req === null) throw new RecordingRefused('no request');
-        await claim(pacer, deps, ctx);
+        await claim(pacer, monthly, args.moves.length, deps, ctx);
         const c: ContextLike = context ?? (await deps.launch(profile));
         context = c;
         // why: ruling of 2026-10-18: the first view has the page timeout; the Cheapest flow the same again from its click,
@@ -415,14 +423,31 @@ export async function record(ctx: EntryContext, cfg: WorkerConfig, deps: RecordD
   }
 }
 
-/** The shared pacer: waits out the spacing once (fake timers in tests), then claims or refuses. */
-async function claim(pacer: Pacer, deps: RecordDeps, ctx: EntryContext): Promise<void> {
+/**
+ * The month's caps, then the shared pacer: a page past the monthly page cap (or with fewer scrolls left than its
+ * moves, or an unreadable counts file) is refused before anything loads; the spacing is waited out once (fake timers
+ * in tests); then the page and its scrolls are reserved in the counts, which are never settled down (an over-count).
+ */
+async function claim(
+  pacer: Pacer,
+  monthly: MonthlyCounter,
+  scrolls: number,
+  deps: RecordDeps,
+  ctx: EntryContext,
+): Promise<void> {
+  const admitted = monthly.check(scrolls);
+  if (admitted.kind !== 'ok' || admitted.scrollAllowance < scrolls)
+    throw new RecordingRefused(
+      `the worker's monthly caps leave no room for this page (until ${monthly.windowEnd()}), or monthly.json is unreadable`,
+    );
   const first = pacer.claim();
-  if (first.ok) return;
-  ctx.out(`waiting ${first.retryAfterSeconds} s for the spacing`);
-  await deps.timers.sleep(first.retryAfterSeconds * 1000);
-  const second = pacer.claim();
-  if (!second.ok) throw new RecordingRefused(`the spacing still refuses (${second.retryAfterSeconds} s)`);
+  if (!first.ok) {
+    ctx.out(`waiting ${first.retryAfterSeconds} s for the spacing`);
+    await deps.timers.sleep(first.retryAfterSeconds * 1000);
+    const second = pacer.claim();
+    if (!second.ok) throw new RecordingRefused(`the spacing still refuses (${second.retryAfterSeconds} s)`);
+  }
+  monthly.write(admitted.reserved);
 }
 
 /** The recorder reads with the no-flights hypothesis on, so it can see the line it is recording. */
@@ -638,12 +663,12 @@ async function consentProbe(
   ctx: EntryContext,
   cfg: WorkerConfig,
   deps: RecordDeps,
-  s: { pacer: Pacer; cooldown: CooldownStore; day: string },
+  s: { pacer: Pacer; monthly: MonthlyCounter; cooldown: CooldownStore; day: string },
 ): Promise<number> {
   const profile = join(ctx.dataDir, `probe-${Date.parse(deps.clock.now())}-${deps.pid}`);
   mkdirSync(profile, { recursive: true, mode: 0o700 });
   try {
-    await claim(s.pacer, deps, ctx);
+    await claim(s.pacer, s.monthly, 0, deps, ctx);
     const context = await deps.launch(profile);
     const d = deps.timers.deadline(cfg.pageTimeoutSeconds * 1000);
     try {

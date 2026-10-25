@@ -106,7 +106,7 @@ window's start and end with calls and cost so far.
   day pair, through the host-side worker on the operator's Mac (docs/setup.md section 14).
 - Caps: `CAMOUFOX_EXECUTION_PAGE_CAP` (default 100, 1 to 400) pages a run and `CAMOUFOX_MONTHLY_PAGE_CAP` (default 1,500)
   pages a calendar month from `CAMOUFOX_BILLING_DAY`. The app's ledger enforces both; the worker reports its own month's
-  counts, and enforces the monthly caps across every caller from WP17. The run's cap is frozen into the execution's snapshot when it is
+  counts, and enforces the monthly caps across every caller. The run's cap is frozen into the execution's snapshot when it is
   created; the guard reads it from there, never from the configuration, and only a manual resume refreshes it with the
   rest of the budget. Reaching it skips the remaining camoufox cells for budget (`provider-execution`) while other
   providers continue, or pauses the run for a manual resume when none remains.

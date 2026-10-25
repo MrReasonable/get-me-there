@@ -307,6 +307,65 @@ describe('the worker’s start checks and shutdown (brief Task 14.5)', () => {
     t.shutdown();
     await w.done;
   });
+  // why: decision 82 (Task 17.3): the month's counts and its calling apps, reported and never changed by a status read
+  it('the status reports the month’s counts and app instances; a read leaves the counts file unchanged', async () => {
+    const t = setup();
+    writeFileSync(join(t.dataDir, 'pacer.json'), JSON.stringify({ lastPageAt: '2026-10-18T04:00:00.000Z' }), {
+      mode: 0o600,
+    });
+    writeFileSync(
+      join(t.dataDir, 'monthly.json'),
+      JSON.stringify({ windowStart: '2026-10-01T00:00:00.000Z', pages: 12, scrolls: 340 }),
+      { mode: 0o600 },
+    );
+    const before = readFileSync(join(t.dataDir, 'monthly.json'), 'utf8');
+    const w = await running(t);
+    const read = async (instance: string) =>
+      (
+        await fetch(`http://127.0.0.1:${w.port}/v1/status`, {
+          headers: { 'x-gmt-worker-key': KEY, 'x-gmt-app-instance': instance },
+        })
+      ).json();
+    const first: unknown = await read('a'.repeat(64));
+    expect(first).toMatchObject({
+      monthly: {
+        windowStart: '2026-10-01T00:00:00.000Z',
+        windowEnd: '2026-11-01T00:00:00.000Z',
+        pages: 12,
+        scrolls: 340,
+        readable: true,
+      },
+      appInstances: { windowStart: '2026-10-01T00:00:00.000Z', count: 1 },
+    });
+    // why: a second app instance in one window is reported, not refused
+    expect(await read('b'.repeat(64))).toMatchObject({ appInstances: { count: 2 } });
+    expect((await post(w)).status).toBe(200);
+    expect(readFileSync(join(t.dataDir, 'monthly.json'), 'utf8')).not.toBe(before);
+    const after = readFileSync(join(t.dataDir, 'monthly.json'), 'utf8');
+    await read('a'.repeat(64));
+    expect(readFileSync(join(t.dataDir, 'monthly.json'), 'utf8')).toBe(after);
+    t.shutdown();
+    await w.done;
+  });
+  it('the status carries every field core’s shared full fixture has (Task 16a.5), and parses under workerStatusSchema', async () => {
+    const t = setup({ env: { CAMOUFOX_MODE: 'grid' } });
+    const w = await running(t);
+    const body: unknown = await (
+      await fetch(`http://127.0.0.1:${w.port}/v1/status`, { headers: { 'x-gmt-worker-key': KEY } })
+    ).json();
+    const full: unknown = JSON.parse(
+      readFileSync(
+        new URL('../../../packages/core/test/camoufox/worker-status-full.json', import.meta.url),
+        'utf8',
+      ),
+    );
+    const keys = (o: unknown): string[] => (typeof o === 'object' && o !== null ? Object.keys(o).sort() : []);
+    expect(keys(body)).toEqual(keys(full));
+    expect(workerStatusSchema.safeParse(body).success).toBe(true);
+    expect(workerStatusSchema.safeParse(full).success).toBe(true);
+    t.shutdown();
+    await w.done;
+  });
   it('in grid mode the status reports the worker’s scroll cap and spacing, for the app’s preflight (CA 9)', async () => {
     const status = async (env: Record<string, string>) => {
       const t = setup({ env });
