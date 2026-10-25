@@ -127,5 +127,9 @@ describe('cap use', () => {
     expect(capWarn(80, 100)).toBe(true);
     expect(capWarn(80, null)).toBe(false);
     expect(capWarn(1, 0)).toBe(false);
+    expect(capWarn(0, 0)).toBe(false);
+    expect(capPercent(0, 0)).toBeNull();
+    expect(capPercent(0, -5)).toBeNull();
+    expect(capPercent(100, 100)).toBe(100);
   });
 });

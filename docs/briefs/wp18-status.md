@@ -7,7 +7,7 @@ spec_sections: ["§8.3 Consent expiry", "§9 item 9", "§10 GET /status", "§10 
 reviewers: [product-owner, ui-reviewer, security-reviewer, test-strategy-reviewer, code-architect, provenance-auditor, persona-flexible-traveller]
 mutate: {"@gmt/core": ["src/api-contract/system.ts", "src/status/rules.ts"]}
 pending: {}
-status: draft
+status: merged
 ---
 
 # WP18: Status (the report, `gmt status`, the Status view and the consent email)

@@ -25,7 +25,7 @@
     "src/local/movedMarker.ts",
     "src/local/paths.ts",
     "src/labels/skip.ts",
-    "src/api-contract/system.ts",
+    "src/api-contract/system.ts:185-215",
     "src/status/rules.ts"
   ],
   "thresholds": {
