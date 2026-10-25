@@ -224,6 +224,13 @@ describe('camoufox fetchTile (spec §2, §5.2)', () => {
     [409, { kind: 'mode-unavailable', mode: 'grid' }, false, 'parse', 'no-page'],
     [504, { kind: 'not-ready', elapsedMs: 90_000 }, true, 'parse', 'page'],
     [502, { kind: 'browser-error', stage: 'launch', detail: 'x' }, false, 'upstream', 'no-page'],
+    [
+      429,
+      { kind: 'monthly-cap', cap: 1500, windowEnd: '2026-11-01T00:00:00.000Z' },
+      false,
+      'quota',
+      'no-page',
+    ],
     [401, {}, false, 'auth', 'no-page'],
     [400, { kind: 'bad-request' }, false, 'parse', 'no-page'],
     [500, { what: 'unreadable' }, true, 'parse', 'page'],

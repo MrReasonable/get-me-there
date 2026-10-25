@@ -114,6 +114,8 @@ export interface Selectors {
   NO_FLIGHTS_VERIFIED: boolean;
   SOCS_STABLE: boolean;
   GRID_VERIFIED: boolean;
+  /** The consent command's landing view (WP17 Task 17.4); false until research 17.0c's recordings show it. */
+  LANDING_VERIFIED: boolean;
 }
 
 export const SELECTORS: Selectors = {
@@ -204,5 +206,6 @@ export function flagsOf(S: Selectors = SELECTORS): Record<FlagName, boolean> {
     NO_FLIGHTS_VERIFIED: S.NO_FLIGHTS_VERIFIED,
     SOCS_STABLE: S.SOCS_STABLE,
     GRID_VERIFIED: S.GRID_VERIFIED,
+    LANDING_VERIFIED: S.LANDING_VERIFIED,
   };
 }

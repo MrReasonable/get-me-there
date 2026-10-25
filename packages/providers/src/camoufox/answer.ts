@@ -96,6 +96,14 @@ export function classifyWorkerAnswer(f: ResponseFacts): ProviderError {
         `the worker's browser failed at ${answer.stage}`,
         `browser-error:${answer.stage}`,
       );
+    case 'monthly-cap':
+      // why: decision 82: the worker's own monthly cap, across every caller; the adapter turns it into BudgetExceeded
+      return error(
+        f,
+        'quota',
+        `the worker's monthly page cap (${answer.cap}) is reached until ${answer.windowEnd}; Google was not contacted`,
+        'monthly-cap',
+      );
     case 'cells':
     case 'grid':
       return error(f, 'parse', `HTTP ${f.status} with a ${answer.kind} answer`, 'unexpected-status');

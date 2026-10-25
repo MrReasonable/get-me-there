@@ -125,6 +125,8 @@ const WORKER_FLAGS: Readonly<Record<FlagName, boolean>> = {
   NO_FLIGHTS_VERIFIED: true,
   SOCS_STABLE: true,
   GRID_VERIFIED: true,
+  // why: WP17 Task 17.4: false until research 17.0c's recordings show the landing view
+  LANDING_VERIFIED: false,
 };
 
 describe('FLAGS and flagsFor (spec §2 rev 36: flags per <os>-<arch>, bound to their build)', () => {
@@ -137,6 +139,7 @@ describe('FLAGS and flagsFor (spec §2 rev 36: flags per <os>-<arch>, bound to t
       'NO_FLIGHTS_VERIFIED',
       'SOCS_STABLE',
       'GRID_VERIFIED',
+      'LANDING_VERIFIED',
     ]);
   });
 

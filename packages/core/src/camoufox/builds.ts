@@ -93,6 +93,8 @@ export const FLAG_NAMES = [
   'NO_FLIGHTS_VERIFIED',
   'SOCS_STABLE',
   'GRID_VERIFIED',
+  // why: WP17 Task 17.4: the consent command's landing view, false until research 17.0c's recordings show it
+  'LANDING_VERIFIED',
 ] as const;
 export type FlagName = (typeof FLAG_NAMES)[number];
 
@@ -110,6 +112,7 @@ const NONE: Readonly<Record<FlagName, boolean>> = {
   NO_FLIGHTS_VERIFIED: false,
   SOCS_STABLE: false,
   GRID_VERIFIED: false,
+  LANDING_VERIFIED: false,
 };
 
 /**
@@ -128,6 +131,8 @@ export const FLAGS: Readonly<Record<OsArch, VerifiedSet>> = {
       NO_FLIGHTS_VERIFIED: true,
       SOCS_STABLE: true,
       GRID_VERIFIED: true,
+      // why: no landing-view recording yet (research 17.0c)
+      LANDING_VERIFIED: false,
     },
   },
   'darwin-x64': { build: '152.0.4-beta.28', flags: NONE },

@@ -18,6 +18,7 @@ describe('the dated selectors module (spec §2; brief §9)', () => {
       NO_FLIGHTS_VERIFIED: true,
       SOCS_STABLE: true,
       GRID_VERIFIED: true,
+      LANDING_VERIFIED: false,
     });
     expect(Object.keys(flagsOf())).toEqual([...FLAG_NAMES]);
   });

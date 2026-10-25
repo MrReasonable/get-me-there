@@ -139,7 +139,16 @@ describe('worker protocol (core/src/camoufox/protocol.ts; brief §5, §6)', () =
       'mode-unavailable': 409,
       'not-ready': 504,
       'browser-error': 502,
+      'monthly-cap': 429,
     });
+  });
+
+  // why: decision 82: the worker refuses a page past its own monthly page cap, naming the cap and when the window ends
+  it('a monthly-cap answer carries the cap and the window end, nothing else', () => {
+    const ok = { kind: 'monthly-cap', cap: 1500, windowEnd: '2027-04-01T00:00:00.000Z' };
+    expect(workerAnswerSchema.parse(ok)).toEqual(ok);
+    expect(workerAnswerSchema.safeParse({ ...ok, pages: 1500 }).success).toBe(false);
+    expect(workerAnswerSchema.safeParse({ ...ok, cap: -1 }).success).toBe(false);
   });
 
   // why: fix round 1 (prov I1): a page whose every option is for another cell was read; it is a cell issue, never a block
