@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { effectiveSharedSettings, flagsFor, workerStatusSchema } from '@gmt/core';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { InstallRefused } from '../src/install.js';
@@ -353,11 +354,11 @@ describe('the worker’s start checks and shutdown (brief Task 14.5)', () => {
     const body: unknown = await (
       await fetch(`http://127.0.0.1:${w.port}/v1/status`, { headers: { 'x-gmt-worker-key': KEY } })
     ).json();
+    // why: the repository root found upwards, so the read works from Stryker's sandbox copy of this package too
+    let root = dirname(fileURLToPath(import.meta.url));
+    while (!existsSync(join(root, 'pnpm-workspace.yaml'))) root = dirname(root);
     const full: unknown = JSON.parse(
-      readFileSync(
-        new URL('../../../packages/core/test/camoufox/worker-status-full.json', import.meta.url),
-        'utf8',
-      ),
+      readFileSync(join(root, 'packages', 'core', 'test', 'camoufox', 'worker-status-full.json'), 'utf8'),
     );
     const keys = (o: unknown): string[] => (typeof o === 'object' && o !== null ? Object.keys(o).sort() : []);
     expect(keys(body)).toEqual(keys(full));

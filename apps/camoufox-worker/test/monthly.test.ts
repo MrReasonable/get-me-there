@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { asIsoDate, asIsoDateTime, billingMonthWindow, fixedClock, type IsoDateTime } from '@gmt/core';
 import { beforeEach, describe, expect, it } from 'vitest';
@@ -214,5 +214,57 @@ describe('app instances (decision 82: a second one is reported, never refused)',
     expect(i.status()).toEqual({ windowStart: '2027-04-01T00:00:00.000Z', count: 0 });
     writeFileSync(join(d, 'app-instances.json'), '{');
     expect(i.status().count).toBe(0);
+  });
+});
+
+describe('the counts and instances files’ shapes (fail closed)', () => {
+  const clock = fixedClock(at('2027-03-10T12:00:00.000Z'));
+  it.each([
+    ['a fractional count', '{"windowStart":"2027-03-01T00:00:00.000Z","pages":1.5,"scrolls":0}'],
+    ['a count as text', '{"windowStart":"2027-03-01T00:00:00.000Z","pages":"1","scrolls":0}'],
+    ['scrolls missing', '{"windowStart":"2027-03-01T00:00:00.000Z","pages":1,"x":0}'],
+    ['null', 'null'],
+    ['a number', '7'],
+  ])('%s is refused', async (_w, text) => {
+    const d = tmpDir();
+    writeFileSync(join(d, MONTHLY_FILE), text, { mode: 0o600 });
+    expect(await readCounts(d)).toBe('refused');
+    expect(new MonthlyCounter({ dir: d, caps: CAPS, clock }).status().readable).toBe(false);
+  });
+  it('a 0400 file is read (no wider than 0600), and a new install’s first window is this one', async () => {
+    const d = tmpDir();
+    writeFileSync(join(d, MONTHLY_FILE), '{"windowStart":"2027-03-01T00:00:00.000Z","pages":2,"scrolls":3}', {
+      mode: 0o400,
+    });
+    expect(await readCounts(d)).toEqual(counts('2027-03-01T00:00:00.000Z', 2, 3));
+    const fresh = new MonthlyCounter({ dir: tmpDir(), caps: CAPS, clock });
+    expect(fresh.check(4)).toEqual({
+      kind: 'ok',
+      scrollAllowance: 4,
+      reserved: counts('2027-03-01T00:00:00.000Z', 1, 4),
+    });
+  });
+  it('an instances file of another shape starts the window’s list afresh; the file is 0600', () => {
+    const d = tmpDir();
+    const i = new AppInstances({ dir: d, billingDay: 1, clock });
+    for (const text of [
+      'null',
+      '{"windowStart":"2027-03-01T00:00:00.000Z"}',
+      '{"windowStart":"2027-03-01T00:00:00.000Z","ids":"x"}',
+      `{"windowStart":"2027-03-01T00:00:00.000Z","ids":["${'a'.repeat(63)}"]}`,
+      `{"windowStart":"2027-03-01T00:00:00.000Z","ids":["x${'a'.repeat(64)}"]}`,
+      `{"windowStart":"2027-03-01T00:00:00.000Z","ids":[7]}`,
+    ]) {
+      writeFileSync(join(d, 'app-instances.json'), text);
+      expect(i.status().count, text).toBe(0);
+    }
+    writeFileSync(
+      join(d, 'app-instances.json'),
+      `{"windowStart":"2027-03-01T00:00:00.000Z","ids":["${'b'.repeat(64)}"]}`,
+    );
+    expect(i.status().count).toBe(1);
+    i.seen('next-app');
+    expect(statSync(join(d, 'app-instances.json')).mode & 0o777).toBe(0o600);
+    expect(i.status().count).toBe(2);
   });
 });
