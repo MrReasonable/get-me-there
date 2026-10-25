@@ -178,6 +178,13 @@ describe('the real consent driver over a fake headed context', () => {
     expect(d.mainFrameHosts()).toEqual(['www.google.com']);
     expect((await d.snapshotView()).url).toBe('https://www.google.com/travel/flights?hl=en-GB&gl=GB');
     expect(d.closed()).toBe(false);
+    // why: the page closes before the context's close event arrives (2026-10-25); the driver already reads it closed
+    const page = c.pages[0];
+    if (page === undefined) throw new Error('no page');
+    page.shut = true;
+    expect(d.closed()).toBe(true);
+    page.shut = false;
+    expect(d.closed()).toBe(false);
     for (const l of c.closeListeners) l();
     expect(d.closed()).toBe(true);
     await d.close();
@@ -343,6 +350,7 @@ describe('watching the window (the tool only observes)', () => {
     let gone = false;
     const closing = {
       ...d,
+      closed: () => gone || d.closed(),
       snapshotView: async () => {
         snapshots++;
         if (snapshots >= 3) {
@@ -359,19 +367,36 @@ describe('watching the window (the tool only observes)', () => {
     const w = await watchConsentWindow(closing, { timers: fakeTimers() });
     expect([w.ended, w.saves, w.socs?.value]).toEqual(['closed', 1, SOCS.value]);
   });
-  it('any other read failure still throws', async () => {
+  // why: CodeRabbit (PR #16): a challenge after the choice stops (and cools down) even when an account cookie shows with it
+  it('a challenge after the choice is reported as blocked before an account cookie seen on the same tick', async () => {
+    const challengeAfter = view({
+      hops: [LANDING_URL, CONSENT_URL, LANDING_URL],
+      text: { ...view().text, unusualTraffic: true },
+    });
+    const w = await watchConsentWindow(
+      fakeConsentDriver({
+        saveAt: 0,
+        accountAt: 0,
+        hosts: [['consent.google.com', 'www.google.com']],
+        views: [consentView(), challengeAfter],
+      }),
+      { timers: fakeTimers(), selectors: on },
+    );
+    expect([w.ended, w.blocked]).toEqual(['blocked', 'unusual-traffic']);
+  });
+  it('a read failure while the window is still open throws, whatever its message says', async () => {
     const d = fakeConsentDriver({});
     await expect(
       watchConsentWindow(
         {
           ...d,
           socsCookie: async () => {
-            throw new Error('cookies: protocol error');
+            throw targetClosed();
           },
         },
         { timers: fakeTimers() },
       ),
-    ).rejects.toThrow('protocol error');
+    ).rejects.toThrow('has been closed');
   });
   // why: W8 (pa-b1-005): a SOCS there before any choice is not the choice's; only one set or changed after it counts
   it('a SOCS present before the choice is never kept; one changed after it is', async () => {
