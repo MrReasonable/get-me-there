@@ -22,7 +22,10 @@ import type { Timers } from './timers.js';
  * and no script evaluation, and this module is the only holder of the page and context handles; the consent command
  * and the research recorder see this interface only.
  */
-export type PageView = PageFacts;
+export type PageView = PageFacts & {
+  /** The page's heading names, so a recording can date the landing view's selectors (never parsed here). */
+  headings: string[];
+};
 
 /** The display variables a headed window may receive, in their two groups (never DBUS_SESSION_BUS_ADDRESS). */
 export interface DisplayEnv {
@@ -157,7 +160,9 @@ export function createConsentDriver(o: {
       if (g === null) throw new ConsentDriverMisuse('the consent window has no guard');
       const d = o.timers.deadline(LOOKUP_TIMEOUT_MS * 6);
       try {
-        return (await createDriver(p, g, S).readFacts(d)).page;
+        const driver = createDriver(p, g, S);
+        const facts = (await driver.readFacts(d)).page;
+        return { ...facts, headings: await driver.headingNames(d) };
       } finally {
         d.clear();
       }

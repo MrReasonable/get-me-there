@@ -370,6 +370,100 @@ describe('key rotation under --reconfigure browser (Task 17.6)', () => {
   });
 });
 
+describe('an unreadable counts file under --reconfigure browser (Task 17.6)', () => {
+  const status = (readable: boolean) => ({
+    ok: true,
+    coolingDownUntil: null,
+    cooldownCause: null,
+    signedInRefusal: false,
+    lastPageAt: null,
+    busySince: null,
+    versions: { selectors: 's', grammar: 'g', camoufoxJs: '0.11.5', binary: '152.0.4-beta.28' },
+    flags: {},
+    accountCookie: { found: false, names: [], checkedAt: '2026-10-24T09:30:00.000Z' },
+    socsCapturedAt: null,
+    socsStable: true,
+    cooldownHours: 48,
+    pageTimeoutSeconds: 90,
+    monthly: {
+      windowStart: '2026-10-01T00:00:00.000Z',
+      windowEnd: '2026-11-01T00:00:00.000Z',
+      pages: 0,
+      scrolls: 0,
+      readable,
+    },
+  });
+  async function onWith(readable: boolean, answer: boolean) {
+    const m = await world();
+    answers(m, { enabled: true });
+    await runCli(['setup', '--non-interactive', '--answers', '/work/b.json'], m.deps);
+    const http = stubHttp({
+      'GET /api/executions/active': () => ({ status: 200, body: { execution: null } }),
+      'GET /api/health': () => ({ status: 200, body: { ok: true } }),
+      'GET /v1/status': () => ({ status: 200, body: status(readable) }),
+      'GET /api/providers': () => ({
+        status: 200,
+        body: {
+          providers: [{ providerId: 'camoufox', usage: [{ scope: 'provider-month:camoufox', calls: 37 }] }],
+        },
+      }),
+    });
+    m.deps.http = http;
+    m.deps.ask = scriptedAsk([false, false, answer]);
+    m.deps.io = { ...testIo({ tty: true }), out: m.deps.io.out, err: m.deps.io.err };
+    m.io.stdout = '';
+    return { m, http };
+  }
+  const MONTHLY = '/Users/op/.local/state/get-me-there/camoufox/monthly.json';
+  it('offers to rewrite it from the app’s ledger, saying what that leaves out, and writes nothing without a yes', async () => {
+    const { m, http } = await onWith(false, false);
+    expect(await runCli(['setup', '--reconfigure', 'browser'], m.deps)).toBe(0);
+    expect(m.io.stdout).toContain(
+      'This app’s ledger counts 37 browser pages this month (pages other apps caused are not in that figure); the app does not count scrolls, so the month’s 6000 scrolls would be counted as spent.',
+    );
+    expect(m.fs.read(MONTHLY)).toBeNull();
+    const worker = http.requests.find((r) => r.url.endsWith('/v1/status'));
+    expect(worker?.url).toBe('http://127.0.0.1:8090/v1/status');
+    expect(worker?.headers['x-gmt-worker-key']).toBe(env(m, WORKER_ENV).CAMOUFOX_WORKER_KEY);
+  });
+  it('on a yes the worker is stopped, the counts written 0600 from the ledger, and the worker started again', async () => {
+    const { m } = await onWith(false, true);
+    m.executor.log.length = 0;
+    expect(await runCli(['setup', '--reconfigure', 'browser'], m.deps)).toBe(0);
+    expect(JSON.parse(m.fs.read(MONTHLY) ?? '{}')).toEqual({
+      windowStart: '2026-10-01T00:00:00.000Z',
+      pages: 37,
+      scrolls: 6000,
+    });
+    expect(m.fs.mode(MONTHLY)).toBe(0o600);
+    const log = kinds(m.executor.log);
+    expect(log.indexOf(`writeFile ${MONTHLY}`)).toBeGreaterThan(log.indexOf('run launchctl bootout'));
+    expect(log.lastIndexOf('run launchctl bootstrap')).toBeGreaterThan(log.indexOf(`writeFile ${MONTHLY}`));
+  });
+  it('a readable counts file, a worker that does not answer, or no ledger offers nothing', async () => {
+    const { m } = await onWith(true, true);
+    m.deps.ask = scriptedAsk([false, false]);
+    expect(await runCli(['setup', '--reconfigure', 'browser'], m.deps)).toBe(0);
+    expect(m.fs.read(MONTHLY)).toBeNull();
+    const down = await onWith(false, true);
+    down.m.deps.http = stubHttp({
+      'GET /api/executions/active': () => ({ status: 200, body: { execution: null } }),
+      'GET /v1/status': () => ({ error: 'ECONNREFUSED' }),
+    });
+    down.m.deps.ask = scriptedAsk([false, false]);
+    expect(await runCli(['setup', '--reconfigure', 'browser'], down.m.deps)).toBe(0);
+    const ledger = await onWith(false, true);
+    ledger.m.deps.http = stubHttp({
+      'GET /api/executions/active': () => ({ status: 200, body: { execution: null } }),
+      'GET /v1/status': () => ({ status: 200, body: status(false) }),
+      'GET /api/providers': () => ({ status: 500, body: {} }),
+    });
+    ledger.m.deps.ask = scriptedAsk([false, false]);
+    expect(await runCli(['setup', '--reconfigure', 'browser'], ledger.m.deps)).toBe(1);
+    expect(ledger.m.io.stderr).toContain('the app’s ledger could not be read to rewrite it');
+  });
+});
+
 describe('worker.env and its helpers', () => {
   it('a key is 24 random bytes as hex; keys compare by digest; a missing key differs', () => {
     expect(newWorkerKey((n) => Buffer.alloc(n, 255))).toBe('ff'.repeat(24));

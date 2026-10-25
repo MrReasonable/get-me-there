@@ -1,14 +1,13 @@
 // A scripted ConsentDriver for the consent window's tests: no browser, no page. Each watcher tick reads the hosts once,
 // so the script is indexed by tick: the hosts the main frame has seen by then, when SOCS and an account cookie appear,
 // and when the person closes the window. `load` sends the scripted requests to the listener, as a session would.
-import type { PageFacts } from '../../src/classify.js';
-import type { ConsentDriver, DisplayEnv, SocsFields } from '../../src/consentDriver.js';
+import type { ConsentDriver, DisplayEnv, PageView, SocsFields } from '../../src/consentDriver.js';
 import type { RequestLike } from '../../src/driver.js';
 
 export const LANDING_URL = 'https://www.google.com/travel/flights?hl=en-GB&gl=GB';
 export const CONSENT_URL = 'https://consent.google.com/ml?continue=https://www.google.com/travel/flights';
 
-export function view(o: Partial<PageFacts> = {}): PageFacts {
+export function view(o: Partial<PageView> = {}): PageView {
   return {
     url: LANDING_URL,
     hops: [LANDING_URL],
@@ -25,14 +24,16 @@ export function view(o: Partial<PageFacts> = {}): PageFacts {
     cheapestTabs: [],
     dateGridButtons: 0,
     resultLinks: 0,
+    headings: ['Flights'],
     ...o,
   };
 }
-export const consentView = (): PageFacts =>
+export const consentView = (): PageView =>
   view({
     url: CONSENT_URL,
     hops: [LANDING_URL, CONSENT_URL],
     text: { ...view().text, consentHeading: true, landingHeading: false },
+    headings: ['Before you continue to Google'],
   });
 
 export const SOCS: SocsFields = {
@@ -45,8 +46,8 @@ export const SOCS: SocsFields = {
 };
 
 export interface Script {
-  first?: PageFacts;
-  after?: PageFacts;
+  first?: PageView;
+  after?: PageView;
   /** The hosts by tick (the last repeats). */
   hosts?: string[][];
   socs?: SocsFields;
