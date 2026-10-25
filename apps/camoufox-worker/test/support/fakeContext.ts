@@ -84,7 +84,7 @@ export class FakeContext implements ContextLike {
     }
     return outcome;
   }
-  newPage(): Promise<PageLike> {
+  newPage(): Promise<FakePage> {
     if (this.newPageHangs) return new Promise(() => undefined);
     if (this.newPageThrows) return Promise.reject(new Error('newPage failed'));
     const nav = this.navigations[Math.min(this.pages.length, this.navigations.length - 1)] ?? null;

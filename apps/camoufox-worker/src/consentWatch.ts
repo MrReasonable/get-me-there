@@ -113,13 +113,8 @@ export async function watchConsentWindow(
       if (refused !== null) return { ...w, ended: 'blocked', blocked: refused };
       w.hosts = [...d.mainFrameHosts()];
       w.saves = d.consentSaves();
-      if (w.saves > 0 && w.afterFacts === null && w.hosts.at(-1) === S.hosts.results) {
-        const after = await settled(true);
-        w.afterFacts = after.facts;
-        if (after.decided.kind === 'blocked') return { ...w, ended: 'blocked', blocked: after.decided.page };
-        w.afterView = after.decided.kind === 'landing' ? 'landing' : 'other';
-      }
-      if (await d.accountCookieSeen()) return { ...w, ended: 'account-cookie' };
+      // why: the SOCS is read before the view after the choice settles, which can take the whole settle bound while
+      // the landing view is unverified, so a window closed during that settle still keeps the choice's SOCS (2026-10-25)
       const socs = await d.socsCookie();
       // why: W8 (pa-b1-005): only a SOCS set or changed after the choice was submitted is the choice's
       if (w.saves === 0) {
@@ -128,6 +123,14 @@ export async function watchConsentWindow(
           socsBefore = socs.value;
         }
       } else if (socs !== null && socs.value !== socsBefore) w.socs = socs;
+      if (w.saves > 0 && w.afterFacts === null && w.hosts.at(-1) === S.hosts.results) {
+        const after = await settled(true);
+        w.afterFacts = after.facts;
+        if (after.decided.kind === 'blocked') return { ...w, ended: 'blocked', blocked: after.decided.page };
+        w.afterView = after.decided.kind === 'landing' ? 'landing' : 'other';
+      }
+      // why: CodeRabbit (PR #16): a challenge after the choice is classified, and cools down, before an account cookie ends it
+      if (await d.accountCookieSeen()) return { ...w, ended: 'account-cookie' };
     } catch (e) {
       // why: a window the person closed between ticks reads as closed, whatever the read was doing then
       if (d.closed()) return { ...w, ended: 'closed' };

@@ -17,6 +17,7 @@ import {
   LANDING_URL,
   request,
   SOCS,
+  targetClosed,
   view,
 } from './support/fakeConsent.js';
 import { FakeContext } from './support/fakeContext.js';
@@ -177,6 +178,13 @@ describe('the real consent driver over a fake headed context', () => {
     expect(d.mainFrameHosts()).toEqual(['www.google.com']);
     expect((await d.snapshotView()).url).toBe('https://www.google.com/travel/flights?hl=en-GB&gl=GB');
     expect(d.closed()).toBe(false);
+    // why: the page closes before the context's close event arrives (2026-10-25); the driver already reads it closed
+    const page = c.pages[0];
+    if (page === undefined) throw new Error('no page');
+    page.shut = true;
+    expect(d.closed()).toBe(true);
+    page.shut = false;
+    expect(d.closed()).toBe(false);
     for (const l of c.closeListeners) l();
     expect(d.closed()).toBe(true);
     await d.close();
@@ -324,6 +332,71 @@ describe('watching the window (the tool only observes)', () => {
       timers: fakeTimers(),
     });
     expect([w.ended, w.blocked]).toEqual(['blocked', 'sign-in']);
+  });
+  // why: the window closed mid-read: Playwright's read throws before the context's close event arrives (seen 2026-10-25)
+  it('a read that throws because the person closed the window ends the watch as closed, keeping what it saw', async () => {
+    const w = await watchConsentWindow(fakeConsentDriver({ saveAt: 1, socsAt: 2, goneAt: 4 }), {
+      timers: fakeTimers(),
+    });
+    expect([w.ended, w.saves, w.socs?.value]).toEqual(['closed', 1, SOCS.value]);
+    const first = await watchConsentWindow(fakeConsentDriver({ goneAt: -1 }), { timers: fakeTimers() });
+    expect([first.ended, first.saves]).toEqual(['closed', 0]);
+  });
+  // why: with LANDING_VERIFIED false the view after the choice settles for up to 30 s; the SOCS is read before that
+  it('the SOCS set by the choice is read before the view after it settles, so closing the window during the settle keeps it', async () => {
+    // why: the choice, its SOCS and the return to the results host all first show on the same tick
+    const d = fakeConsentDriver({ saveAt: 0, socsAt: 0, hosts: [['consent.google.com', 'www.google.com']] });
+    let snapshots = 0;
+    let gone = false;
+    const closing = {
+      ...d,
+      closed: () => gone || d.closed(),
+      snapshotView: async () => {
+        snapshots++;
+        if (snapshots >= 3) {
+          gone = true;
+          throw targetClosed();
+        }
+        return d.snapshotView();
+      },
+      socsCookie: async () => {
+        if (gone) throw targetClosed();
+        return d.socsCookie();
+      },
+    };
+    const w = await watchConsentWindow(closing, { timers: fakeTimers() });
+    expect([w.ended, w.saves, w.socs?.value]).toEqual(['closed', 1, SOCS.value]);
+  });
+  // why: CodeRabbit (PR #16): a challenge after the choice stops (and cools down) even when an account cookie shows with it
+  it('a challenge after the choice is reported as blocked before an account cookie seen on the same tick', async () => {
+    const challengeAfter = view({
+      hops: [LANDING_URL, CONSENT_URL, LANDING_URL],
+      text: { ...view().text, unusualTraffic: true },
+    });
+    const w = await watchConsentWindow(
+      fakeConsentDriver({
+        saveAt: 0,
+        accountAt: 0,
+        hosts: [['consent.google.com', 'www.google.com']],
+        views: [consentView(), challengeAfter],
+      }),
+      { timers: fakeTimers(), selectors: on },
+    );
+    expect([w.ended, w.blocked]).toEqual(['blocked', 'unusual-traffic']);
+  });
+  it('a read failure while the window is still open throws, whatever its message says', async () => {
+    const d = fakeConsentDriver({});
+    await expect(
+      watchConsentWindow(
+        {
+          ...d,
+          socsCookie: async () => {
+            throw targetClosed();
+          },
+        },
+        { timers: fakeTimers() },
+      ),
+    ).rejects.toThrow('has been closed');
   });
   // why: W8 (pa-b1-005): a SOCS there before any choice is not the choice's; only one set or changed after it counts
   it('a SOCS present before the choice is never kept; one changed after it is', async () => {

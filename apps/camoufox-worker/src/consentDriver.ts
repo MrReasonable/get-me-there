@@ -5,6 +5,7 @@ import { installConsentCaptureGuard } from './consentGuard.js';
 import {
   createDriver,
   type HeadedContextLike,
+  type HeadedPageLike,
   LOOKUP_TIMEOUT_MS,
   type PageLike,
   type RequestLike,
@@ -112,7 +113,7 @@ export function createConsentDriver(o: {
 }): ConsentDriver {
   const S = o.selectors ?? SELECTORS;
   let context: HeadedContextLike | null = null;
-  let page: PageLike | null = null;
+  let page: HeadedPageLike | null = null;
   let guard: Awaited<ReturnType<typeof installConsentCaptureGuard>> | null = null;
   let loaded = false;
   let isClosed = false;
@@ -193,7 +194,9 @@ export function createConsentDriver(o: {
     async accountCookieSeen() {
       return (await checkAccountCookies(live().c, o.clock)).found;
     },
-    closed: () => isClosed,
+    // why: a read on a page the person has just closed can fail before the context's close event arrives; the page
+    // itself already says it is closed then (2026-10-25)
+    closed: () => isClosed || (page?.isClosed() ?? false),
     async close() {
       const c = context;
       context = null;
