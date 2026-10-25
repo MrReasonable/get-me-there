@@ -4,12 +4,14 @@ import { definitionHandlers } from './definitions.js';
 import { executionHandlers } from './executions.js';
 import { historyHandlers } from './history.js';
 import { resultHandlers } from './results.js';
+import { statusHandlers } from './status.js';
 import { systemHandlers } from './system.js';
 import { toolHandlers } from './tools.js';
 import type { HandlerTable } from './types.js';
 
 export const HANDLERS: HandlerTable = {
   ...systemHandlers,
+  ...statusHandlers,
   ...definitionHandlers,
   ...executionHandlers,
   ...resultHandlers,

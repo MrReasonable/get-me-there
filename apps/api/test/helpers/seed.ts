@@ -185,19 +185,23 @@ export function seeder(ports: Ports) {
         lastError?: string | null;
         maxAgeHours?: number | null;
         tileIndex?: number;
+        /** WP18: a non-synthetic provider's tile (the Status data check counts only those); default the fixture. */
+        real?: { providerId: 'travelpayouts'; maxAgeHours?: number | null };
       },
     ): void {
+      const provider: ProviderId = s.real?.providerId ?? PROVIDER;
+      const sourceKind = s.real === undefined ? 'synthetic' : 'authorised-cached';
       const priced = s.status === 'priced';
       const pricePence = s.pricePence ?? 45_000;
-      repos.cells.writeTile(id(name), PROVIDER, {
+      repos.cells.writeTile(id(name), provider, {
         tileIndex: s.tileIndex ?? 0,
         cells: [c],
         discards: 0,
         prices: priced
           ? [
               {
-                providerId: PROVIDER,
-                sourceKind: 'synthetic',
+                providerId: provider,
+                sourceKind,
                 cabin: CABIN,
                 cell: c,
                 pricePence,
@@ -207,7 +211,12 @@ export function seeder(ports: Ports) {
                 pointOfSale: POS,
                 fetchedAt: s.fetchedAt,
                 providerObservedAt: null,
-                maxAgeHours: s.maxAgeHours === undefined ? 24 : s.maxAgeHours,
+                maxAgeHours:
+                  s.real?.maxAgeHours !== undefined
+                    ? s.real.maxAgeHours
+                    : s.maxAgeHours === undefined
+                      ? 24
+                      : s.maxAgeHours,
                 vendorLink: null,
                 reusedFromExecutionId: null,
                 returnDateSource: 'vendor',
@@ -225,7 +234,7 @@ export function seeder(ports: Ports) {
             minPence: priced ? pricePence : null,
             cabin: CABIN,
             pointOfSale: POS,
-            sourceKind: 'synthetic',
+            sourceKind,
           },
         ],
       });

@@ -21,7 +21,15 @@ describe('parseCommandLine (decision 72: node:util parseArgs, no new dependency)
     expect(p.text).toContain(RECONFIGURE_GROUPS.join(', '));
     expect(helpText('restore')).toContain('usage: pnpm gmt restore <file> [options]');
     expect(helpText('status')).toBe(
-      'usage: pnpm gmt status\n\n  show the services, the settings files and anything that needs attention\n',
+      [
+        'usage: pnpm gmt status [options]',
+        '',
+        '  show the services, the settings files and the app’s own report of anything that needs attention',
+        '',
+        '  --only <area>             show only the app’s report for one area: app, database, backups, schedule, data, provider, worker, consent or email',
+        '  --json                    print the app’s report as JSON',
+        '',
+      ].join('\n'),
     );
   });
 

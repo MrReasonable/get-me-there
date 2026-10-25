@@ -12,6 +12,7 @@ import {
   type NoDataReason,
   type PARTIAL_EXPANSION,
   type PRICE_UNCONFIRMED,
+  PROVIDER_NAMES,
   type ProviderId,
   type SkipReason,
   type Stage,
@@ -75,6 +76,7 @@ export const COPY = {
     definitions: 'Definitions',
     alerts: 'Alerts',
     providers: 'Providers',
+    status: 'Status',
   },
   definitionSelectorLabel: 'Search definition',
   noDefinitions: 'No search definitions yet. Create one under Definitions.',
@@ -96,12 +98,7 @@ export const COPY = {
   // why: a fixture-provider row that is not tagged synthetic cannot be trusted for any of its fields (ruling 3).
   rowWithheld: "details withheld: this row's provenance is invalid",
   withheldCell: 'withheld',
-  provider: {
-    travelpayouts: 'Travelpayouts',
-    searchapi: 'SearchApi',
-    camoufox: 'Camoufox',
-    fixture: 'Fixture',
-  } satisfies Record<ProviderId, string>,
+  provider: PROVIDER_NAMES satisfies Record<ProviderId, string>,
   fxApprox: '≈',
   /** WP10 (decision 52): PriceCell's `face` marks on a phone day cell; the words stay in its title and spoken text. */
   priceMarkGlyph: {
@@ -918,5 +915,75 @@ export const COPY = {
     noReason: 'no reason recorded',
     payloadInvalid: 'invalid record: it does not match the alert format',
     reasonWithheld: 'reason withheld: its record is invalid',
+  },
+
+  // Status (spec §10 `GET /status`, §11 Status and the status bar; brief WP18 Task 18.6)
+  statusView: {
+    heading: 'Status',
+    /** "checked 40 s ago", "checked 3 min ago": from the report's own generatedAt. */
+    checkedAgo: (seconds: number) =>
+      seconds < 60 ? `checked ${seconds} s ago` : `checked ${Math.floor(seconds / 60)} min ago`,
+    stale: (checked: string) => `stale, ${checked}`,
+    notAnswering: 'The app is not answering.',
+    // why: V11 (po-b1-011, ui-b1-003): an answer that is an error is not "not answering"; each is said in plain words
+    signInRefused: 'The app refused the sign-in, so the report cannot be read. Sign in again.',
+    reportFailed: 'The app answered with an error instead of a report; its log has the cause.',
+    state: { ok: 'ok', warn: 'to check', fail: 'failing', off: 'off' } satisfies Record<
+      apiContract.StatusState,
+      string
+    >,
+    areaName: {
+      app: 'App',
+      database: 'Database',
+      backups: 'Backups',
+      schedule: 'Schedule',
+      data: 'Data',
+      provider: 'Provider',
+      worker: 'Browser worker',
+      consent: 'Consent',
+      email: 'Email',
+    } satisfies Record<apiContract.StatusArea, string>,
+    /** What an off check is called in the folded line. */
+    offName: {
+      app: 'app',
+      database: 'database',
+      backups: 'backups',
+      schedule: 'schedule',
+      data: 'searches',
+      provider: 'provider',
+      worker: 'browser provider',
+      consent: 'consent',
+      email: 'email',
+    } satisfies Record<apiContract.StatusArea, string>,
+    offLine: {
+      'not-set-up': (names: string) => `not set up: ${names}`,
+      'awaiting-verification': (names: string) => `awaiting verification for this build: ${names}`,
+      'not-visible': (names: string) => `not visible from here: ${names}`,
+      disabled: (names: string) => `disabled: ${names}`,
+    },
+    cardLabel: (area: string, name: string | null) => (name === null ? area : `${area}, ${name}`),
+    fixLabel: 'Fix:',
+    noteLabel: 'Note:',
+    copyCommand: (command: string) => `Copy command: ${command}`,
+    copy: 'Copy',
+    copied: 'Copied',
+    selectedInstead: (command: string) => `Command, selected: ${command}`,
+    providersLink: 'Providers view',
+    coverageLink: 'Coverage view',
+    sendTest: 'Send test',
+    sending: 'Sending…',
+    testSent: 'Test email sent. Check the inbox, and the spam folder.',
+    testNotConfigured: 'Email is not set up.',
+    testLimit: 'A test email was sent a moment ago. Try again in a minute.',
+    testFailed: 'The test email failed to send.',
+    testFailedCall: (message: string) => `The test email request failed: ${message}`,
+  },
+  /** The link in the status bar (the line itself, "Status: 2 failing", comes from core's barSummary). */
+  statusLink: {
+    label: 'Status report',
+    stale: (checked: string) => `Status: stale, ${checked}`,
+    notAnswering: 'Status: app not answering',
+    signInRefused: 'Status: sign-in refused',
+    reportFailed: 'Status: report failed, see the app log',
   },
 } as const;

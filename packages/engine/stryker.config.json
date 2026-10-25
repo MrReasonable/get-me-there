@@ -2,7 +2,7 @@
   "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
   "testRunner": "command",
   "commandRunner": {
-    "command": "pnpm exec vitest run --coverage.enabled=false test/scheduler test/parse-cron.test.ts"
+    "command": "pnpm exec vitest run --coverage.enabled=false test/scheduler test/parse-cron.test.ts test/consentNotice.test.ts"
   },
   "mutate": [
     "src/scheduler/catchUp.ts",
@@ -11,7 +11,8 @@
     "src/scheduler/browserWindow.ts",
     "src/scheduler/heartbeat.ts",
     "src/tick.ts",
-    "src/stages/browserGate.ts"
+    "src/stages/browserGate.ts",
+    "src/consentNotice.ts"
   ],
   "thresholds": {
     "high": 90,

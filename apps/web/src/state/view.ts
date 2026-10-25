@@ -9,7 +9,8 @@ export type ViewId =
   | 'coverage'
   | 'definitions'
   | 'alerts'
-  | 'providers';
+  | 'providers'
+  | 'status';
 export const VIEWS: readonly ViewId[] = [
   'results',
   'calendar',
@@ -19,6 +20,7 @@ export const VIEWS: readonly ViewId[] = [
   'definitions',
   'alerts',
   'providers',
+  'status',
 ];
 
 const isView = oneOf(VIEWS);

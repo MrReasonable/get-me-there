@@ -183,11 +183,21 @@ describe('checkMutationGlobs', () => {
     const wp16b = scopeOf(readFileSync(join(ROOT, 'docs/briefs/wp16b-local-setup-cli.md'), 'utf8'));
     expect(wp16b.pending).toEqual({});
     expect(wp16b.mutate['@gmt/cli']).toEqual(expect.arrayContaining(['src/plan/**', 'src/exec/system.ts']));
-    for (const name of ['wp17-camoufox-install-consent.md', 'wp18-status.md'])
+    for (const name of ['wp17-camoufox-install-consent.md'])
       expect(
         Object.keys(scopeOf(readFileSync(join(ROOT, 'docs/briefs', name), 'utf8')).pending).length,
         name,
       ).toBeGreaterThan(0);
+    // WP18 landed its scope in mutate (the report's order and rules in core, its api builders, the consent notice)
+    const wp18 = scopeOf(readFileSync(join(ROOT, 'docs/briefs/wp18-status.md'), 'utf8'));
+    expect(wp18.pending).toEqual({});
+    expect(wp18.mutate['@gmt/core']).toEqual([
+      'src/status/report.ts',
+      'src/status/rules.ts',
+      'src/status/time.ts',
+    ]);
+    expect(wp18.mutate['@gmt/api']).toEqual(['src/read/status.ts', 'src/read/statusPure.ts']);
+    expect(wp18.mutate['@gmt/engine']).toEqual(['src/consentNotice.ts']);
     // the merged packages state the scopes their definitions of done claim (S13)
     const scopeOfBrief = (name) => scopeOf(readFileSync(join(ROOT, 'docs/briefs', name), 'utf8'));
     expect(scopeOfBrief('wp01-core-space-coverage-selection.md').mutate['@gmt/core']).toEqual([

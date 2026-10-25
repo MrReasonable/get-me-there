@@ -1,4 +1,4 @@
-import type { ExecutionStatus, IsoDateTime, OperatorMessageKind } from '@gmt/core';
+import { type ExecutionStatus, formatInstant, type IsoDateTime, type OperatorMessageKind } from '@gmt/core';
 import type { ExecutionPatch } from '@gmt/db';
 import type { EngineContext } from './context.js';
 import { errorText } from './errors.js';
@@ -6,7 +6,7 @@ import { notifyOperator } from './notify.js';
 import { type RunState, type StopReason, stopRun } from './run.js';
 import { runDiscovery } from './stages/discovery.js';
 import { runVerification } from './stages/verification.js';
-import { breachText, formatInstant } from './text.js';
+import { breachText } from './text.js';
 
 /**
  * Runs one pass: discovery, verification (spec §8.1 order), the alerts step, then finish. A stage error that escapes

@@ -43,11 +43,14 @@ import {
   providersResponseSchema,
   schedulerJobsResponseSchema,
   smokePlanResponseSchema,
+  statusResponseSchema,
+  testEmailResponseSchema,
   toolRecordRequestSchema,
   toolRunResponseSchema,
   toolSmokeRequestSchema,
 } from './system.js';
 
+export { barSummary, STATE_ORDER, sortChecks } from '../status/report.js';
 export * from './airports.js';
 export * from './alerts.js';
 export * from './common.js';
@@ -126,4 +129,6 @@ export const ROUTES: readonly RouteDef[] = [
   route('GET', '/alerts/events', alertEventSchema.array(), { query: alertEventsQuerySchema }),
   route('GET', '/scheduler/jobs', schedulerJobsResponseSchema),
   route('GET', '/budget', budgetResponseSchema),
+  route('GET', '/status', statusResponseSchema),
+  route('POST', '/alerts/test-email', testEmailResponseSchema),
 ];

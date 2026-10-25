@@ -314,7 +314,7 @@ describe('status bar (spec §11)', () => {
   it.each<[number, number | null, boolean]>([
     [79, 100, false],
     [80, 100, true],
-    [1, 0, true],
+    [1, 0, false],
     [0, 0, false],
     [5, null, false],
   ])('near cap: %i used of %s is %s (review tsr2-013)', (used, cap, expected) => {

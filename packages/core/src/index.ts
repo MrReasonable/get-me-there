@@ -20,6 +20,7 @@ export type {
 export * as apiContract from './api-contract/index.js';
 export * from './budget/window.js';
 export * from './camoufox/builds.js';
+export * from './camoufox/consentFix.js';
 export * from './camoufox/grid.js';
 export * from './camoufox/protocol.js';
 export * from './camoufox/settings.js';
@@ -38,6 +39,7 @@ export * from './errors.js';
 export { EXIT } from './exit.js';
 export * from './labels/age.js';
 export { pointOfSaleLabel } from './labels/pointOfSale.js';
+export { PROVIDER_NAMES } from './labels/providers.js';
 export {
   LEFT_FOR,
   LEFT_FOR_TEXT,
@@ -76,6 +78,8 @@ export * from './selection/select.js';
 export * from './space/generate.js';
 export * from './space/validate.js';
 export * from './space/window.js';
+export * from './status/rules.js';
+export * from './status/time.js';
 export * from './text/bannedWords.js';
 export { hasControlChars, stripControlChars } from './text/control.js';
 export { formatPence, groupThousands } from './text/money.js';

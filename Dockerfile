@@ -36,6 +36,10 @@ RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
     pnpm install --frozen-lockfile --filter '!@gmt/camoufox-worker' --filter '!@gmt/cli' --store-dir /pnpm/store
 COPY . .
 RUN node scripts/assert-sqlite-prebuilt.mjs
+# why: WP18 (V0): the Status report shows the build; an image has no git, so the version comes in as a build argument
+# (compose passes APP_VERSION; Start.command sets it to the checkout's short SHA) and is written to apps/api/dist/version.json
+ARG APP_VERSION=unknown
+ENV APP_VERSION=$APP_VERSION
 RUN pnpm build
 
 # ---- prod-deps: production dependencies of @gmt/api and its workspace dependencies only ----

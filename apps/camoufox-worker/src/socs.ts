@@ -1,6 +1,6 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { type Clock, type IsoDateTime, isoDateTimeSchema } from '@gmt/core';
+import { addMonthsClamped, type Clock, type IsoDateTime, isoDateTimeSchema } from '@gmt/core';
 import type { CookieInput, CookieLike } from './driver.js';
 
 /**
@@ -43,13 +43,8 @@ function isSameSite(s: unknown): s is SocsCapture['sameSite'] {
 
 /** The UTC calendar date `months` before `at`, clamped to the month's last day (2026-03-31 − 1 → 2026-02-28). */
 export function monthsBefore(at: IsoDateTime, months: number): string {
-  const d = new Date(at);
-  const y = d.getUTCFullYear();
-  const m = d.getUTCMonth() - months;
-  const target = new Date(Date.UTC(y, m, 1));
-  const last = new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0)).getUTCDate();
-  target.setUTCDate(Math.min(d.getUTCDate(), last));
-  return target.toISOString().slice(0, 10);
+  // why: WP18 V8: the one month rule, in core, which the Status report's consent card reads too
+  return addMonthsClamped(at, -months).slice(0, 10);
 }
 
 /** Validates a parsed capture; throws ConsentNotCaptured naming what is wrong. */

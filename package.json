@@ -16,7 +16,7 @@
     "casts": "node scripts/check-casts.mjs",
     "test": "node scripts/ensure-build.mjs && vitest run",
     "test:coverage": "pnpm -r --workspace-concurrency=1 test",
-    "mutate": "pnpm --filter @gmt/core mutate && pnpm --filter @gmt/engine mutate && pnpm --filter @gmt/camoufox-worker mutate && pnpm --filter @gmt/cli mutate",
+    "mutate": "pnpm --filter @gmt/core mutate && pnpm --filter @gmt/engine mutate && pnpm --filter @gmt/api mutate && pnpm --filter @gmt/camoufox-worker mutate && pnpm --filter @gmt/cli mutate",
     "dev": "pnpm --parallel --filter @gmt/api --filter @gmt/web dev",
     "gmt": "node --conditions=@gmt/source --import tsx apps/cli/src/main.ts",
     "smoke:live": "pnpm -C apps/api run tool smoke",

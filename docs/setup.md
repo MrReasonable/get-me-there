@@ -116,7 +116,8 @@ section 3 for Tailscale and TLS.
 pnpm gmt setup                          # install, or re-check an install
 pnpm gmt setup --dry-run                # print the plan with the real launchctl or systemctl commands
 pnpm gmt setup --reconfigure email      # one group again: port, timezone, email, travelpayouts, searchapi, browser, password, linger
-pnpm gmt status                         # the services, the settings files, the newest backup, anything to fix
+pnpm gmt status                         # the services, the settings files, the newest backup, the app's own report, anything to fix
+pnpm gmt status --only worker           # the app's report for one area; --json prints it as JSON
 pnpm gmt start
 pnpm gmt stop                           # refuses while a search runs, unless --wait or --force
 pnpm gmt restart
@@ -697,7 +698,58 @@ migrations and the first airport seeding.
 
 ## 11. Operating it
 
-*Applies to the container path; the native commands are in section 0.*
+*Applies to the container path, except the first part below, which applies to both; the native commands are in
+section 0.*
+
+### Status first
+
+The app reports on itself. Open the **Status** view (the nav's last link), or run `pnpm gmt status` (add
+`--only <area>` for one area, `--json` for the report as the app sent it). Both show the same checks, worst first,
+each with a plain summary and what to do about it; in a native install the fix is a `pnpm gmt` command with a
+copy button. Reading it never spends a call, never waits on a vendor and never loads a page. The status bar on every
+view links to it: "Status: 2 failing" when any check fails, the quieter "Status: consent to check" when something is
+worth a look, nothing when nothing needs a look, and "Status: stale, checked 3 min ago" or "Status: app not answering" when the
+report cannot be refreshed. `pnpm gmt status` exits 1 when any check fails or the app does not answer; with the app
+down it still prints the local facts (with `--json`, a JSON object whose `appAnswering` is false) and says what to try.
+`pnpm gmt update` prints the report at its end but exits on its own steps and the app's health, not on an unrelated
+failing check.
+
+- **App, database, backups.** The version, how long it has run and whether it is bound to this machine only with a
+  password on; the database answering and its size; the newest daily backup (`warn` after 36 hours, `fail` when there
+  is none and the app is older than that; a new install shows "first daily backup due 03:30" until the first one
+  exists). In the container path the backups card says they are not visible from there: check your host's backup job
+  (section 6).
+- **Schedule.** The jobs registered, the last and next run, a run caught up after a sleep or a restart (a note, not a
+  problem), and a warning when two searches that use the browser provider fire at the same time: stagger them so
+  neither waits for the other's browser pages.
+- **Data.** One card per search: its last finished run's cells in the six buckets (priced, no fares, no cached data,
+  error, skipped, not searched, out of the run's cells), "(n reused from earlier runs)" when a run reused earlier
+  outcomes, and both ends of the prices' ages ("newest price 1h old, oldest 6d old"; "age unknown" where a vendor gives
+  no bound). It warns when errors, skipped and not searched cells are over a fifth of the cells, when the oldest price
+  is past its stale threshold, when there is no price yet, or when the last firing was skipped (with the stored reason).
+  A catch-up loads no browser pages, so a search that only the browser provider can run warns: keep the machine awake
+  at the scheduled time, or move the schedule.
+- **Providers.** One card per price source with its last successful call and its use against its cap (the Providers
+  view's wording, linked), and **price sources**, which warns when no usable source is set up.
+- **Browser worker and consent.** Whether the worker answers, its monthly pages and scrolls against the caps, any
+  cool-down, a setting that differs between the app and the worker (named, never its value), and the app's browser
+  window: "browser pages: only inside a run's window" or "also when a run resumes". The consent card gives the
+  record's expiry and warns for its last 30 days. While it warns or fails (not while it is off or ok) and the browser
+  provider is on, the app emails you at most once a London day (a plain notice from the app, with no separate reminder
+  service). A check that cannot be made, because the worker is down, sends nothing: the worker card says that.
+- **Email.** Configured or not, and the newest send of any kind since the app started (an alert, a notice or a test);
+  the card fails when that send failed. **Send test** (or the offer at the end of a full `pnpm gmt setup` and of
+  `pnpm gmt setup --reconfigure email`) sends one fixed message; tests have their own limit of one a minute and never
+  use up the hourly alert limit.
+- **Off.** A check that is not set up, is waiting for a verified browser build, or belongs to a disabled search folds
+  into one line that says why ("not set up: SearchApi"; "awaiting verification for this build: browser provider";
+  "disabled: <search name>").
+- **Version.** The app check shows the build. A checkout shows its git short commit id; a container image has no git, so
+  compose passes `APP_VERSION` as a build argument (`Start.command` sets it to `git rev-parse --short HEAD`; for your
+  own `docker compose` runs: `APP_VERSION=$(git rev-parse --short HEAD) docker compose up -d --build`); without it the
+  card says `unknown`.
+
+`curl -u operator http://127.0.0.1:3000/api/health` stays for scripts and Docker.
 
 - **Start at boot.** `restart: unless-stopped` brings the app back after a reboot only if the
   Docker daemon itself starts at boot: `sudo systemctl enable docker` on Linux.

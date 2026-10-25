@@ -6,6 +6,7 @@ import {
   fixedClock,
   type IsoDateTime,
   type Logger,
+  type ProviderErrorKind,
   type ProviderId,
   type Reservation,
   type ResponseCache,
@@ -51,6 +52,8 @@ interface Row {
   /** camoufox grid (spec §7 rev 34): the planned scrolls at reserve, then the scrolls the answer stated (or none). */
   scrolls: number | undefined;
   scrollCount: number | undefined;
+  /** The adapters' class of a failed call (WP18 V3), as http-kit recorded it after finalising. */
+  errorKind: ProviderErrorKind | undefined;
 }
 
 /** Every FakeBudget built by makeKit; test/support/setup.ts asserts none holds an open reservation after a test. */
@@ -90,6 +93,7 @@ export class FakeBudget implements BudgetGuard {
       pageClass: undefined,
       scrolls: p.scrolls,
       scrollCount: undefined,
+      errorKind: undefined,
     };
     this.rows.push(row);
     this.events.push({ type: 'reserve', at: Date.now(), ...p });
@@ -102,6 +106,9 @@ export class FakeBudget implements BudgetGuard {
         row.pageClass = r.pageClass;
         row.scrollCount = r.scrollCount;
         this.events.push({ type: 'finalise', at: Date.now(), ...r });
+      },
+      classify: (kind) => {
+        row.errorKind = kind;
       },
     };
   }

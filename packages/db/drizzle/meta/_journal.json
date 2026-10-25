@@ -57,6 +57,13 @@
       "when": 1792827405608,
       "tag": "0007_catch_up",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1792926154303,
+      "tag": "0008_wp18_error_kind",
+      "breakpoints": true
     }
   ]
 }

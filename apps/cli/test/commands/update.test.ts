@@ -182,6 +182,58 @@ describe('gmt update (decision 80; brief Task 16b.9)', () => {
     },
   );
 
+  it('the exit code is the update’s own steps and the health wait: an unrelated failing check, or a silent report, does not fail it (V0)', async () => {
+    const failingEmail = {
+      generatedAt: '2026-10-24T09:30:00.000Z',
+      mode: 'native',
+      version: 'abc1234',
+      checks: [
+        {
+          id: 'email',
+          area: 'email',
+          providerId: null,
+          label: null,
+          state: 'fail',
+          summary: 'the last test email failed',
+          note: null,
+          offReason: null,
+          fix: { text: 'check the SMTP settings', command: 'pnpm gmt setup --reconfigure email' },
+        },
+        {
+          id: 'app',
+          area: 'app',
+          providerId: null,
+          label: null,
+          state: 'fail',
+          summary: 'sign-in is off',
+          note: null,
+          offReason: null,
+          fix: null,
+        },
+      ],
+    };
+    const failing = await world();
+    failing.deps.http = stubHttp({
+      'GET /api/health': () => ({ status: 200, body: { ok: true, degraded: false } }),
+      'GET /api/executions/active': () => ({ status: 200, body: { execution: null } }),
+      'GET /api/status': () => ({ status: 200, body: failingEmail }),
+    });
+    expect(await runCli(['update'], failing.deps)).toBe(0);
+    expect(failing.io.stdout).toContain('the last test email failed');
+    const silent = await world();
+    silent.deps.http = stubHttp({
+      'GET /api/health': () => ({ status: 200, body: { ok: true, degraded: false } }),
+      'GET /api/executions/active': () => ({ status: 200, body: { execution: null } }),
+      'GET /api/status': () => ({ error: 'connection refused' }),
+    });
+    expect(await runCli(['update'], silent.deps)).toBe(0);
+    expect(silent.io.stderr).toContain('the app is not answering');
+  });
+  it('a step of the update itself that fails still fails it', async () => {
+    const m = await world({ fail: (a) => a[0] === 'pnpm' && a[1] === 'build' });
+    expect(await runCli(['update'], m.deps)).toBe(1);
+  });
+
   it('the plan, in order: record, stop, back up, merge, install, build, re-render, start, health, status', async () => {
     const m = await world();
     expect(await runCli(['update'], m.deps)).toBe(0);

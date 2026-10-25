@@ -170,3 +170,107 @@ describe('LedgerRepo (spec §5.3, §7, §8.1 parity)', () => {
     expect(new LedgerRepo(db).pruneCacheHits(T0, [])).toBe(0);
   });
 });
+
+describe('LedgerRepo.lastCompleted (spec §10 /status)', () => {
+  it('is the newest completed call of the provider, success or failure; cache hits and pending rows are not calls', () => {
+    const db = freshDb();
+    const clock = fixedClock(T0);
+    const guard = new SqliteBudgetGuard(db, cfg, clock);
+    const ledger = new LedgerRepo(db);
+    const reserve = (providerId: 'travelpayouts' | 'searchapi') =>
+      guard.reserve({
+        providerId,
+        executionId: null,
+        tileIndex: null,
+        costMicroGbp: providerId === 'searchapi' ? 3200 : 0,
+        httpAttempt: 1,
+        endpointPath: '/p',
+      });
+    expect(ledger.lastCompleted('searchapi')).toBeNull();
+    reserve('searchapi').finalise({ outcome: 'error', httpStatus: 401, durationMs: 1 });
+    clock.advance(60_000);
+    reserve('searchapi').finalise(ok);
+    clock.advance(60_000);
+    reserve('searchapi').finalise({ outcome: 'error', httpStatus: 402, durationMs: 1 });
+    clock.advance(60_000);
+    reserve('searchapi'); // pending: not a completed call
+    guard.recordCacheHit({ providerId: 'searchapi', executionId: null, tileIndex: null, endpointPath: '/p' });
+    reserve('travelpayouts').finalise(ok);
+    expect(ledger.lastCompleted('searchapi')).toEqual({
+      at: at('2026-10-14T12:02:00.000Z'),
+      outcome: 'error',
+      httpStatus: 402,
+      errorKind: null,
+    });
+    expect(ledger.lastCompleted('travelpayouts')).toMatchObject({ outcome: 'ok', httpStatus: 200 });
+    expect(ledger.lastCompleted('camoufox')).toBeNull();
+  });
+
+  it('an error with no HTTP status (a socket error) has a null status', () => {
+    const db = freshDb();
+    const guard = new SqliteBudgetGuard(db, cfg, fixedClock(T0));
+    guard
+      .reserve({
+        providerId: 'searchapi',
+        executionId: null,
+        tileIndex: null,
+        costMicroGbp: 3200,
+        httpAttempt: 1,
+        endpointPath: '/p',
+      })
+      .finalise({ outcome: 'error', durationMs: 1 });
+    expect(new LedgerRepo(db).lastCompleted('searchapi')).toMatchObject({
+      outcome: 'error',
+      httpStatus: null,
+    });
+  });
+});
+
+describe('the adapters’ class on the ledger (migration 0008; WP18 V3, V4)', () => {
+  const reserve = (guard: SqliteBudgetGuard) =>
+    guard.reserve({
+      providerId: 'searchapi',
+      executionId: null,
+      tileIndex: null,
+      costMicroGbp: 3200,
+      httpAttempt: 1,
+      endpointPath: '/p',
+    });
+
+  it('classify writes the class on the finalised row, and lastCompleted returns it', () => {
+    const db = freshDb();
+    const guard = new SqliteBudgetGuard(db, cfg, fixedClock(T0));
+    const r = reserve(guard);
+    r.finalise({ outcome: 'error', httpStatus: 403, durationMs: 1 });
+    r.classify('quota');
+    expect(new LedgerRepo(db).lastCompleted('searchapi')).toMatchObject({
+      outcome: 'error',
+      httpStatus: 403,
+      errorKind: 'quota',
+    });
+  });
+
+  it('a 2xx the adapter rejected is marked parse, once, and is no longer a success', () => {
+    const db = freshDb();
+    const guard = new SqliteBudgetGuard(db, cfg, fixedClock(T0));
+    const ledger = new LedgerRepo(db);
+    reserve(guard).finalise(ok);
+    expect(ledger.lastCompleted('searchapi')).toMatchObject({ outcome: 'ok', errorKind: null });
+    expect(ledger.markRejected('searchapi', null, 'parse')).toBe(true);
+    expect(ledger.lastCompleted('searchapi')).toMatchObject({ outcome: 'ok', errorKind: 'parse' });
+    expect(ledger.markRejected('searchapi', null, 'parse')).toBe(false);
+    expect(ledger.markRejected('travelpayouts', null, 'parse')).toBe(false);
+  });
+
+  it('only the newest unmarked ok row of the provider and execution is marked', () => {
+    const db = freshDb();
+    const guard = new SqliteBudgetGuard(db, cfg, fixedClock(T0));
+    reserve(guard).finalise(ok);
+    reserve(guard).finalise(ok);
+    new LedgerRepo(db).markRejected('searchapi', null, 'parse');
+    expect(db.raw.prepare('SELECT error_kind AS k FROM provider_requests ORDER BY id').all()).toEqual([
+      { k: null },
+      { k: 'parse' },
+    ]);
+  });
+});

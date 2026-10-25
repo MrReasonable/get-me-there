@@ -1,5 +1,5 @@
 import { join } from 'node:path/posix';
-import { START_REFUSAL_TEXT } from '@gmt/core';
+import { BACKUP_MAX_AGE_MS, backupTimeOf, START_REFUSAL_TEXT } from '@gmt/core';
 import type { Flags } from '../args.js';
 import { type Deps, EXIT } from '../deps.js';
 import { apply } from '../plan/apply.js';
@@ -9,12 +9,11 @@ import { factOf, factsOf, type ServiceEntry, serviceSet } from '../services/set.
 import { appEnvPath, dailyBackupsDir, isLoopback } from '../services/specs.js';
 import { readEnvText } from '../setup/appEnv.js';
 import { appRunningIn, compose } from '../setup/docker.js';
+import { finishStatus, reportFlags } from '../statusReport.js';
 import { bootOutRefused, readStartRefusal, refusalLine, WORKER_LABEL } from '../worker/refusal.js';
 import { refuseOnWindows } from './lifecycle.js';
 
 const LOGS_WARN_BYTES = 100 * 1024 * 1024;
-const BACKUP_MAX_AGE_MS = 36 * 3600 * 1000;
-const BACKUP_NAME = /^get-me-there-(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z\.db$/;
 
 /** The rotation rule for the macOS log directory (docs/setup.md section 0), one newsyslog line. */
 export const newsyslogLine = (logs: string, user: string): string =>
@@ -40,11 +39,11 @@ function serviceCheck(deps: Deps, e: ServiceEntry, facts: ReadonlyMap<string, Se
 function backupsCheck(deps: Deps): Check {
   const now = deps.now().getTime();
   const newest = (deps.files.list(dailyBackupsDir(deps.platform.paths)) ?? [])
-    .map((n) => BACKUP_NAME.exec(n))
-    .filter((m) => m !== null)
-    .map((m) => Date.parse(`${m[1]}T${m[2]}:${m[3]}:${m[4]}.${m[5]}Z`))
+    .map(backupTimeOf)
+    .filter((t) => t !== null)
+    .map((t) => Date.parse(t))
     .sort((a, b) => b - a)[0];
-  if (newest !== undefined && now - newest <= BACKUP_MAX_AGE_MS)
+  if (newest !== undefined && now - newest < BACKUP_MAX_AGE_MS)
     return {
       name: 'backups',
       level: 'ok',
@@ -180,9 +179,14 @@ export async function localChecks(deps: Deps): Promise<Check[]> {
  * `gmt status`: the local facts, then on macOS a refused worker's loaded agent booted out (spec §13: launchd's
  * KeepAlive cannot exclude exit 78), said only when the bootout worked (ca-b1-007). Exits 1 on a fail.
  */
-export async function statusCommand(_f: Flags, _p: string | null, deps: Deps): Promise<number> {
+export async function statusCommand(flags: Flags, _p: string | null, deps: Deps): Promise<number> {
   const win = refuseOnWindows(deps);
   if (win !== null) return win;
+  const rf = reportFlags(flags);
+  if (!rf.ok) {
+    deps.io.err(rf.message);
+    return EXIT.usage;
+  }
   const checks = await localChecks(deps);
   const refusal = readStartRefusal(deps.platform.paths, deps.files);
   if (deps.platform.os === 'darwin' && refusal !== 'none' && refusal !== 'unreadable') {
@@ -194,7 +198,9 @@ export async function statusCommand(_f: Flags, _p: string | null, deps: Deps): P
         deps.executor,
       );
       if (r.failed === null)
-        deps.io.out('the refused worker agent was booted out so launchd does not restart it\n');
+        (rf.json ? deps.io.err : deps.io.out)(
+          'the refused worker agent was booted out so launchd does not restart it\n',
+        );
       else
         checks.push({
           name: 'worker agent',
@@ -204,6 +210,5 @@ export async function statusCommand(_f: Flags, _p: string | null, deps: Deps): P
         });
     }
   }
-  deps.io.out(describeChecks(checks));
-  return checks.some((c) => c.level === 'fail') ? EXIT.failed : EXIT.ok;
+  return finishStatus(deps, rf, checks);
 }

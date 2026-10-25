@@ -1,5 +1,6 @@
 import {
   type Execution,
+  formatInstant,
   type IsoDateTime,
   isoDateTimeOfEpochMs,
   PAUSED_STATUSES,
@@ -13,7 +14,6 @@ import { errorText } from '../errors.js';
 import type { Orchestrator } from '../orchestrator.js';
 import { buildSnapshot, sellsCabin, snapshotProviders } from '../snapshot.js';
 import { recordSkipped } from '../start.js';
-import { formatInstant } from '../text.js';
 import type { StartResult } from '../types.js';
 import { loadsBrowserPages } from './browserWindow.js';
 import { parseCron } from './parseCron.js';

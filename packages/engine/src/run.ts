@@ -9,6 +9,7 @@ import {
   type IsoDateTime,
   type Logger,
   type OperatorMessageKind,
+  ProviderError,
   type ProviderId,
   type SkipDetail,
   type SkipReason,
@@ -257,6 +258,10 @@ export function onFailure(
   err: unknown,
 ): void {
   const d = classifyFailure(err, run.controller.signal.aborted, ctx.clock.now());
+  // why: WP18 V4 — http-kit finalised the call `ok` before the adapter read the body; an adapter that rejects it throws
+  // `parse`, and the ledger row then stops reading as a success (a malformed body http-kit already marked is left as is)
+  if (err instanceof ProviderError && err.kind === 'parse')
+    ctx.repos.ledger.markRejected(providerId, run.executionId, 'parse');
   const log = run.log.child({ providerId });
   switch (d.kind) {
     case 'abort':

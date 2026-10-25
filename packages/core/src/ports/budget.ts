@@ -1,3 +1,4 @@
+import type { ProviderErrorKind } from '../errors.js';
 import type { IsoDateTime } from '../types/ids.js';
 import type { ProviderId } from '../types/provenance.js';
 
@@ -46,6 +47,11 @@ export interface Reservation {
     /** Spec §7 rev 34: the scroll clicks a camoufox grid page made, from its answer; absent when no answer came. */
     scrollCount?: number;
   }): void;
+  /**
+   * Records the adapters' own class of a failed call (http-kit's `ProviderError.kind`) on the finalised row (WP18, V3):
+   * the one classification, kept where the call is ledgered, so the Status report never re-derives it from a status code.
+   */
+  classify(kind: ProviderErrorKind): void;
 }
 
 /**

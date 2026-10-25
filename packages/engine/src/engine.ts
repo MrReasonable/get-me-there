@@ -3,6 +3,7 @@ import { bootEngine } from './boot.js';
 import { checkBudget, spendOf } from './budgetCheck.js';
 import { budgetFitFor } from './budgetFit.js';
 import { childCapPreview } from './child.js';
+import { runConsentNoticeSafely } from './consentNotice.js';
 import { buildContext, type EngineContext } from './context.js';
 import { coverageCheckFor } from './coverageCheck.js';
 import { estimateRemainingFor, estimateStart, withBlocked } from './estimate.js';
@@ -112,7 +113,12 @@ export function createEngine(deps: EngineDeps, options: EngineOptions = {}): Eng
         ctx.log.info({ executionId: id, result: r.ok ? 'resumed' : r.code }, 'one-shot resume');
       },
       // why: decision 79 — the minute job catches up missed firings through the orchestrator; the daily jobs need none
-      onSystem: (name) => (name === 'catch-up' ? catchUpAll(ctx, orch) : runSystemJob(ctx, name)),
+      onSystem: async (name) => {
+        if (name !== 'catch-up') return runSystemJob(ctx, name);
+        await catchUpAll(ctx, orch);
+        // why: V2 — a Mac asleep at 03:30 still sends today's consent notice once it is awake (the minute job re-reads at most hourly)
+        await runConsentNoticeSafely(ctx);
+      },
     },
     ctx.log,
   );
