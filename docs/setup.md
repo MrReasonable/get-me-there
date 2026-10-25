@@ -959,15 +959,17 @@ changes it later.
   `worker.env` (0600, in `~/.local/state/get-me-there/camoufox/`, 0700) with a newly generated
   `CAMOUFOX_WORKER_KEY` (48 hex characters), the same key and `CAMOUFOX_WORKER_URL` in `app.env` (the worker's own
   port, `CAMOUFOX_WORKER_PORT` in `worker.env`, 8090 when unset), and the settings the two sides share copied from
-  `app.env`; both files are read back before they are written. Then the worker's own start check (`run.ts check --json`):
-  only once it finds your consent choice does `app.env` gain `CAMOUFOX_ENABLED=true` and the worker service get
+  `app.env`; both files are read back before they are written. Then, when setup asks you questions on a machine with a
+  display, the consent capture as its own step (below): a window opens and you click Reject all. Then the worker's own
+  start check (`run.ts check --json`): only once it finds your consent choice does `app.env` gain `CAMOUFOX_ENABLED=true` and the worker service get
   installed and started (a launchd agent `local.get-me-there.camoufox-worker` on macOS, the systemd user unit
   `get-me-there-camoufox-worker.service` on Linux).
 - **Resuming.** Any step that stops (no space, no `unzip`, a library missing, no consent yet) leaves the provider off,
   shown as not set up, never as failing; run `pnpm gmt setup --reconfigure browser` to carry on from where it stopped.
-- **Consent.** Captured once, by you, with `pnpm gmt consent` (below). The first time, setup stops at the start check
-  with "The worker needs your consent choice before it can start"; run `pnpm gmt consent`, then
-  `pnpm gmt setup --reconfigure browser` to finish.
+- **Consent.** Captured once, by you (below). Interactive setup on a machine with a display runs the capture itself,
+  after the install. Asked nothing (`--non-interactive`), or on a machine with no display, it stops at the start check
+  with "The worker needs your consent choice before it can start" and names the way for that machine: run
+  `pnpm gmt consent` (or the export and import below), then `pnpm gmt setup --reconfigure browser` to finish.
 - **The service.** It runs `<node> --conditions=@gmt/source --import tsx <checkout>/apps/camoufox-worker/src/run.ts main`
   from that package's directory with `PATH` and `HOME` only. Every start the worker refuses exits 78 and writes
   `start-refusal.json` (`{ reason, at }`) beside `worker.env`, a refusal of its own settings or files included (reason
@@ -981,40 +983,53 @@ changes it later.
 ### Capture your consent choice
 
 Google's consent page is answered once, by you, with "Reject all", and the worker then sets that choice before every
-page. Capture it with:
+page. Interactive setup runs this capture itself; to run it again (or with the app in Docker):
 
 ```bash
 pnpm gmt consent
 ```
 
-1. It asks the app whether a search is running (as `stop` does: `--wait` or `--force` when one is), then stops the
-   worker service alone; the app keeps running.
+1. With the worker service running, it first asks this machine's app whether a search is running: the native app, or
+   the Docker app on the port compose publishes, with the basic auth in the checkout's `.env` (read, never printed).
+   `--wait` waits for the search to end and `--force` goes ahead, as `stop` does; when Docker answers but its app's
+   state cannot be read, it refuses unless `--force`. Then it stops the worker service alone; the app keeps running.
 2. A Camoufox window opens on `https://www.google.com/travel/flights` in a new, throwaway profile, and the command says
-   "Click **Reject all** in the window. Nothing else is needed; close the window when you’re done". That one page
-   load counts like any other (the page spacing, the monthly page count; it refuses during a cool-down and names its
-   end).
-3. Click **Reject all**, wait for Google Flights to show, and close the window. The tool clicks, types and navigates
-   nothing itself; it only watches.
-4. It keeps the `SOCS` cookie set after your choice only when the cookie's own value records a rejection (the first
-   field of the cookie, read from the value alone: research of 2026-10-25), writes it 0600 with the time, deletes the
-   throwaway profile, clears a consent refusal and starts the worker once its start check passes. Anything else writes
-   nothing and says which: an Accept all, a window closed before the choice, a page left for 10 minutes, a challenge
-   page (which pauses the provider as on any page), a page that does not load, a first view it does not recognise or
-   an account cookie. A region that shows no consent page at all writes nothing either: the worker needs a captured
-   rejection, so capture it on a desktop that shows the page and import it (below). After anything but a capture the
-   worker is put back as it was.
+   "Click **Reject all** in the window, wait until Google Flights shows, then close the window. Nothing else is
+   needed". That one page load counts like any other (the page spacing, the monthly page count; it refuses during a
+   cool-down and names its end).
+3. Click **Reject all** on the first page, wait for Google Flights to show, and close the window. The tool clicks,
+   types and navigates nothing itself; it only watches.
+4. It keeps the `SOCS` cookie set or changed after your choice only when the cookie's own value reads as a rejection
+   and your choice's submission carried none of the fields that only the "Accept all" form sent. That reading is the
+   one observed on 2026-10-25 (darwin-arm64, the GB market, one "Reject all" and one "Accept all" session): the value's
+   first field is 1 after "Reject all" and 2 after "Accept all". A choice made under "More options" has not been
+   observed, so it is refused rather than guessed. The command writes the cookie 0600 with the time, deletes the
+   throwaway profile, clears a consent refusal and starts the worker once its start check passes.
 
-`pnpm gmt consent check` shows the stored choice without loading a page: when it was captured, its mark
-(`reject`), and when it expires (the earlier of the cookie's own expiry and 13 months after the capture), exiting 0
-only for a rejection still in date. Capture again within 13 months; `pnpm gmt status` warns from 30 days before. The
-value records only your cookie choice, no account data, and is never printed. Every refusal that needs a new capture
-(no record, an expired or voided one, or a record saying no consent page was shown) names `pnpm gmt consent`.
+Anything else writes nothing, keeps a record already there exactly as it was, and says which: an Accept all, a value
+this version does not read as a rejection, a window closed before the choice or before its cookie was set, a page
+left for 10 minutes, a challenge page (which pauses the provider as on any page), a page that does not load, a first
+view it does not recognise, or an account cookie. A region that shows no consent page at all writes nothing either:
+the browser provider cannot start without a captured rejection, so capture one on a machine that is shown the page and
+import it (below); if no machine you use is shown it, leave the provider off. Ctrl-C (or SIGTERM) closes the window,
+deletes the throwaway profile and puts the worker back as it was. After anything but a stored rejection the worker is
+put back as it was.
 
-The lighter equal option is `pnpm --filter @gmt/camoufox-worker capture-socs`: in an ordinary private browser window
-open `https://www.google.com/travel/flights`, click **Reject all**, then open the cookie view (developer tools, Storage
-or Application, cookies for `https://www.google.com`) and paste the `SOCS` cookie's value, expiry, Secure and SameSite
-when asked (a few minutes). It stamps the time and writes the same file 0600; stop the worker first
-(`pnpm gmt stop --only worker`) and start it after (`pnpm gmt start --only worker`).
+`pnpm gmt consent check` shows the stored choice without loading a page: when it was captured, its mark (`reject`),
+and when it expires (the earlier of the cookie's own expiry and 13 months after the capture), exiting 0 only for a
+rejection still in date. Run it once on a record you stored before this check existed. Capture again within 13
+months; `pnpm gmt status` warns from 30 days before. The value comes from a signed-out throwaway profile and holds no
+account cookie; only its first field is understood, so treat it as private and never print it (no command does). The
+worker refuses to start, and never sets the cookie, when the stored value is not a rejection (`consent-not-rejection`),
+and the Status view says "consent rejected" only then. Every refusal that needs a new capture names
+`pnpm gmt consent`. A record left by an earlier version saying no consent page was shown, or voided, is not used: the
+worker refuses it by name until you capture a rejection.
+
+The fallback is `pnpm --filter @gmt/camoufox-worker capture-socs`: in an ordinary private browser window open
+`https://www.google.com/travel/flights`, click **Reject all**, then open the cookie view (developer tools, Storage or
+Application, cookies for `https://www.google.com`) and paste the `SOCS` cookie's value, expiry, Secure and SameSite
+when asked (a few minutes). It stores the value only when it reads as a rejection, stamps the time and writes the same
+file 0600; stop the worker first (`pnpm gmt stop --only worker`) and start it after (`pnpm gmt start --only worker`).
 
 ### Install or update the browser, whatever runs the app
 
@@ -1041,9 +1056,10 @@ removes every older bundle. The `layout` and `build-mismatch` refusals name it a
 
 The Docker app reaches a worker on the Mac at `host.docker.internal:8090` (Docker Desktop forwards it to the Mac's
 loopback; on Linux, Docker cannot reach the host's loopback, so the browser provider needs the native app there). The
-worker is set up by hand (the appendix below: its data directory, consent capture and `worker.env`); then
-`pnpm gmt browser install` installs the pinned Camoufox and the gmt worker service, and starts the worker once its check
-passes. After a `git pull` that changes the pin, run `pnpm gmt browser install` again (the worker refuses with
+worker is set up by hand, in this order (the appendix below): its data directory and `worker.env`; then
+`pnpm gmt browser install`, which installs the pinned Camoufox and the gmt worker service (the worker then refuses to
+start with `consent-missing`, which is expected); then `pnpm gmt consent`, which captures your choice and starts the
+worker once its check passes. After a `git pull` that changes the pin, run `pnpm gmt browser install` again (the worker refuses with
 `build-mismatch` until you do). `pnpm gmt start --only worker`, `stop --only worker` and `restart --only worker` work
 without `app.env`; stopping the worker does not ask the Docker app about a running search, so do it between runs. Point
 the app at the worker as below.
@@ -1064,24 +1080,32 @@ reinstalled where the install now puts it; nothing is copied from the old locati
 ### On a machine with no display
 
 The consent capture needs a browser window (with no `DISPLAY` or `WAYLAND_DISPLAY` set, `pnpm gmt consent` refuses
-and says so), so on a server you capture it on a desktop where `pnpm gmt setup` has set up the browser provider (it
-installs the pinned Camoufox; the consent command never downloads one) and carry it across as one line:
+and says so), so on a server you capture it on a machine that is shown the consent page and has the pinned Camoufox
+(`pnpm gmt browser install` there; no worker needs to be set up on it, and the consent command never downloads), and
+pipe the one line it prints to the server:
 
 ```bash
-pnpm gmt consent export > consent.line     # on the desktop: the same capture, printed as one line
-pnpm gmt consent import < consent.line     # on the server: reads standard input only, at most 4 KB
+pnpm gmt consent export | ssh <server> 'cd <checkout> && pnpm gmt consent import'
 ```
 
 `export` prints `gmt-socs-v1.` followed by the cookie's fields, its capture time and its mark as its only standard
 output (everything else it says goes to standard error) and writes nothing on the desktop. `import` refuses a line
-given as an argument, checks it strictly (the name `SOCS`, the value's length and characters, the domain
-`.google.com`, the path `/`, an expiry no later than 13 months after the capture, not expired), recomputes the mark
-from the value and refuses anything but a rejection, then writes the file keeping the capture time and starts the
-worker. The line holds only the cookie choice, no account data: move it by pipe, a file you delete afterwards or the
-clipboard, never as a command-line argument and never in a ticket. Or, the lighter equal option: read the `SOCS`
-cookie's fields from an ordinary private window on the desktop and enter them into
-`pnpm --filter @gmt/camoufox-worker capture-socs` on the server (a few minutes). Page loads then come from the server's
-own address (above).
+given as an argument or typed at the terminal, checks it strictly (the name `SOCS`, the value's length and characters,
+the domain `.google.com`, the path `/`, an expiry no later than 13 months after the capture, not expired), recomputes
+the mark from the value and refuses anything but a rejection, then writes the file keeping the capture time and starts
+the worker; its expiry is the line's, which export bounds by the capture plus 13 months. The line holds the cookie
+from a signed-out throwaway profile (only its first field is understood), its capture time and its expiry: move it by pipe,
+never as a command-line argument and never in a ticket. If you cannot pipe, use a private file and delete it on both machines:
+
+```bash
+(umask 077; pnpm gmt consent export > consent.line)   # on the desktop; copy consent.line to the server
+pnpm gmt consent import < consent.line                # on the server
+rm consent.line                                       # on both machines
+```
+
+The fallback is to read the `SOCS` cookie's fields from an ordinary private window on the desktop and enter them into
+`pnpm --filter @gmt/camoufox-worker capture-socs` on the server (a few minutes; it too keeps only a rejection). Page
+loads then come from the server's own address (above).
 
 ### Linux
 
@@ -1225,16 +1249,16 @@ shows it listening on `127.0.0.1` only. To see which navigation a stopped page r
 layout differs from the pinned entry.
 
 1. Create the worker's data directory, private to you: `mkdir -p -m 700 ~/.local/state/get-me-there/camoufox`
-2. Capture your cookie choice with `pnpm gmt consent`, or `pnpm --filter @gmt/camoufox-worker capture-socs` (above).
-3. Create `~/.local/state/get-me-there/camoufox/worker.env` in an editor (never with `echo`) and make it private with
+2. Create `~/.local/state/get-me-there/camoufox/worker.env` in an editor (never with `echo`) and make it private with
    `chmod 600 ~/.local/state/get-me-there/camoufox/worker.env`. It holds `CAMOUFOX_WORKER_KEY`, at least 32 random
    characters: generate them with `openssl rand -hex 24 > ~/.local/state/get-me-there/camoufox/key.tmp`, paste them from
    that file into `worker.env`, then delete `key.tmp`. A `worker.env` that still names `CAMOUFOX_BINARY_BUILD` or
    `CAMOUFOX_INSTALL_DIR` is refused (`pnpm gmt browser install` removes them): the build and its directory now come
    from the pinned entry. Copy the shared settings (the cool-down, page timeout, mode, grid
    scroll cap and spacing, monthly caps, billing day and fare market) from `app.env`, so both sides match.
-4. Install the browser and the worker service with `pnpm gmt browser install`; it starts the worker once its check
-   passes. To try the worker in a terminal instead, stop the service (`pnpm gmt stop --only worker`) and run
+3. Install the browser and the worker service with `pnpm gmt browser install`. The worker refuses to start with
+   `consent-missing` until the next step, which is expected.
+4. Capture your cookie choice with `pnpm gmt consent` (above); it starts the worker once its check passes. To try the worker in a terminal instead, stop the service (`pnpm gmt stop --only worker`) and run
    `pnpm --filter @gmt/camoufox-worker start` from a shell that has not loaded the app's `CAMOUFOX_*` lines (the worker
    refuses an inherited `CAMOUFOX_*` or `POINT_OF_SALE` that differs from `worker.env`, an inherited
    `CAMOUFOX_INSTALL_DIR`, and any `DEBUG`).

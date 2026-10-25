@@ -428,7 +428,7 @@ worker count the same month against the same numbers. Under the default
 browser window (§8.2). The worker keeps the
 window's page and scroll counts in their own 0600 file beside its pacer's
 last-page time and counts every page it loads (the adapter's, the `consent`
-command's, `consent check`'s and the `consent-research` recorder's). Under
+command's and the `consent-research` recorder's). Under
 its lock, before loading anything, it admits a page only while the page cap
 has room (a page past it is refused with the reason `monthly-cap`, which the
 adapter maps to `BudgetExceeded` at `provider-month`); it clamps a grid
@@ -471,85 +471,109 @@ consent-choice cookie `SOCS` (named in Google's cookie policy as the cookie
 that "store[s] a user's state regarding their cookies choices", read
 2026-10-18) to the operator's captured **rejection** value with
 `context.addCookies`. Google does not document the value, so the operator
-captures it from a real "Reject all" with `gmt consent` (§13), which stops
-the worker service, runs the worker's `consent` command, and afterwards
-starts the worker when the capture succeeded (clearing any `consent-*` start
-refusal) or restores its previous state otherwise. The command holds the
-worker's lock and runs under its pacer and cool-downs: it refuses during a
-cool-down, naming its end, waits out the page spacing from the persisted
-last-page time and writes that time after its one load, which the monthly
-page count includes. It opens a visible Camoufox window in a new throwaway
-profile on the landing page `https://www.google.com/travel/flights?hl=en-GB&gl=<POINT_OF_SALE>`;
+captures it from a real "Reject all" with `gmt consent` (§13; interactive
+`gmt setup` runs the same capture as its own step after the install), which,
+when the worker service runs, first asks this machine's app whether a search
+is running (the native app, or the Docker app on the port compose publishes
+with the checkout's `.env` basic auth, through one `appEndpoint` reader;
+`--wait`, `--force`), stops the worker service, runs the worker's `consent`
+command, and afterwards starts the worker when a rejection was stored
+(clearing any `consent-*` start refusal) or puts it back as it was otherwise:
+a failed stop, a refusal, a failure, SIGINT or SIGTERM (which reach the child,
+whose window closes and whose throwaway profile is deleted) all leave the
+worker as it was and the stored record byte for byte as it was. The command
+holds the worker's lock and runs under its pacer and cool-downs: it refuses
+during a cool-down, naming its end, waits out the page spacing from the
+persisted last-page time and writes that time after its one load, which the
+monthly page count includes. It opens a visible Camoufox window in a new
+throwaway profile on the landing page `https://www.google.com/travel/flights?hl=en-GB&gl=<POINT_OF_SALE>`;
 on Linux it alone receives the display variables `gmt consent` passes
 through, as two groups, `DISPLAY` with `XAUTHORITY` when `DISPLAY` is set and
 `WAYLAND_DISPLAY` with `XDG_RUNTIME_DIR` when `WAYLAND_DISPLAY` is set (never
 `DBUS_SESSION_BUS_ADDRESS`), and it refuses, pointing at export and import,
-when neither is set. It prints "Click **Reject all** in the window. Nothing
-else is needed; close the window when you're done", and never clicks, types,
-navigates after that one load or evaluates script. Its guard is the
-recorder's consent-probe guard widened by exactly document navigations and
-form POSTs to `consent.google.com` (its `/save` included) and the redirect to
-`www.google.com/travel/flights`; every other host is refused as on the server
-path, and the server path never admits `/save`. It observes read-only: the
-main frame's URL host on every navigation, the classifier's view on a
-snapshot, and `SOCS` by name and domain from `context.cookies()`, every other
+when neither is set. It prints "Click **Reject all** in the window, wait until
+Google Flights shows, then close the window. Nothing else is needed", and
+never clicks, types, navigates after that one load or evaluates script. Its
+guard is the recorder's consent-probe guard widened by exactly document
+navigations and form POSTs to `consent.google.com` (its `/save` included) and
+the redirect to `www.google.com/travel/flights`; every other host is refused
+as on the server path, and the server path never admits `/save`. It observes
+read-only: the main frame's URL host on every navigation, the classifier's
+view on a snapshot, the `/save` submissions' form field names (never a
+value), and `SOCS` by name and domain from `context.cookies()`, every other
 cookie dropped as it is read; a Google account cookie appearing (the worker's
-own set) fails the capture. When `SOCS` appears after the consent host was
-seen, it reads the value, domain, path, expiry, `secure` and `sameSite`,
-checks them with the parser `capture-socs` uses, computes the rejection mark
-from the value with the function work package 17's two throwaway recordings
-(one "Reject all", one "Accept all") establish, and writes the file 0600
-with the capture time only when that mark says rejection. Those recordings
-(2026-10-25, `darwin-arm64`) showed the mark in the value itself: `SOCS` is the
-base64url of a protobuf message, and the two 68-byte values differed only in
-byte 1, the varint of its first field (tag `0x08`), 1 after "Reject all" (the
-value starts `CAES`) and 2 after "Accept all" (`CAIS`); the mark is `reject`
-for 1, `accept` for 2 and `unknown` for anything else, and only `reject` is
-ever stored. The reject form posted `escs` and `set_eom` to `/save`, the accept
-form added `set_sc` and `set_aps`, and the consent page had set a `SOCS` of its
-own before either choice, so only a value set or changed after the submission
-is the choice's. An acceptance,
-`SOCS` with no consent host seen, a consent page left unclicked for 10
-minutes, a challenge page, a page that never loads, a first view the
-classifier does not positively recognise, or a closed window writes nothing
-and says which. The recordings proved that mark, so the command is built (work package 17
-part 2); `capture-socs` stays as the lighter equal option. The throwaway profile is deleted in a `finally` (the
+own set) fails the capture. A `SOCS` read before the choice is the baseline,
+and only a value set or changed after the submission is the choice's (with no
+read before it, the first read after it is the baseline). For that value it
+reads the domain, path, expiry, `secure` and `sameSite`, checks them with the
+parser every store uses, computes the rejection mark from the value, and
+writes the file 0600 with the capture time only when the mark is `reject` and
+the submission carried none of the fields only the "Accept all" form sent.
+
+The mark is the rule observed on 2026-10-25 by work package 17's two throwaway
+recordings (`darwin-arm64`, the GB market, one "Reject all" and one "Accept
+all" session), not a documented format: `SOCS` is the base64url of a protobuf
+message whose top-level fields were field 1, a one-byte varint (tag `0x08`;
+1 after "Reject all", the value starting `CAES`, and 2 after "Accept all",
+`CAIS`), then field 2 (length-delimited, 56 bytes), then field 3; the two
+68-byte values differed only in byte 1. `rejectionMark` reads `reject` or
+`accept` only from a value of that shape (canonical base64url, field 1 first
+as a one-byte varint 1 or 2, field 2 length-delimited next, every later field
+well formed and inside the value, field 1 never repeated) and `unknown` from
+anything else. The reject form posted `escs` and `set_eom` to `/save`; the
+accept form added `set_sc` and `set_aps`. A choice made under "More options"
+was not recorded, so a reject mark sent with either accept-only field is
+refused. The consent page sets a `SOCS` of its own before any choice, which is
+never stored. **Only `reject` is ever stored or applied:** every store
+(`gmt consent`, `consent import`, `capture-socs`) refuses another mark in plain
+words, the worker's start refuses a stored one as `consent-not-rejection`, the
+cookie is never set from one, `/v1/status` reports the mark, and the Status
+view says "consent rejected" only for `reject` (another mark fails with the
+fix; a worker that does not report the mark cannot be checked). An Accept all
+(the refusal names the command that was run), a value this version does not
+read as a rejection (the refusal says to update the checkout), `SOCS` with no
+consent host seen, a consent page left unclicked for 10 minutes, a challenge
+page, a page that never loads, a first view the classifier does not
+positively recognise, or a window closed before the choice's cookie writes
+nothing and says which. `capture-socs`, the paste from an ordinary private
+window, is the fallback. The throwaway profile is deleted in a `finally` (the
 recorder's start-up sweep removes any left by a killed run). Where the first
 stable view is the landing view, a page kind the classifier recognises
 positively from its own dated selectors (`LANDING_VERIFIED`, set by the same
 recordings: on 2026-10-25 both views after the choice were the bare
-`/travel/flights` URL with the heading "Flights" and no results structure), no consent host was seen and no `SOCS` is set (a region with no
-consent screen), the command writes nothing and says so: the worker serves
-pages only on a captured rejection (a never-shown record is refused as
-`consent-not-shown`), so a machine in such a region imports a rejection
-captured on a desktop that shows the page. On a machine with no
-display there are two paths. `gmt consent export`, on a Mac or Linux desktop
-where `gmt setup` has installed the pinned Camoufox (it never installs one
-itself), runs the same capture and prints one line, `gmt-socs-v1.` followed by
-the base64url of the `SOCS` fields, `capturedAt` and the mark, as its only
-standard output; `gmt consent import` on the server reads that line from
-standard input only (at most 4 KB; an argument is refused), checks it with a
-strict schema (name exactly `SOCS`, the value's length and characters
-bounded, domain `.google.com`, path `/`, expiry no later than 13 months after
-`capturedAt`), recomputes the mark from the value and refuses a line whose
-carried mark differs or is not a rejection, and writes the same file, keeping
-`capturedAt`. `capture-socs`, the paste from an ordinary private window, is
-the lighter equal option. `gmt consent check` reports the stored record and
-loads no page: its capture time, the mark computed from its value and its
-expiry, exiting 0 only for a rejection still in date. A not-shown record
-(`{ consent: "not-shown", checkedAt }`) or a voided one (`{ consent:
-"voided", voidedAt }`) is read and reported by `/v1/status` but never serves a
-page: the worker refuses its start as `consent-not-shown` or
-`consent-voided`, and the Status view's consent check fails ("consent screen
-now shown: capture again" for a voided one). A capture's expiry is the earlier of the cookie's own expiry and
-`capturedAt` plus 13 months (a not-shown record's is `checkedAt` plus 13
-months), and the summary says which bounds it (`boundedBy` `cookie`,
-`capture` or, for a not-shown record, `check`; null once voided); `gmt status` and the Status
-view (§11) warn from 30 days (as elapsed time) before it and fail after it,
-and the app sends one operator email a day while that check is not `ok`
-(§8.3); the worker refuses to start
-without a capture, or with one older than 13 months (the cookie's stated
-lifetime) or dated in the future. After every page, on every path, success
+`/travel/flights` URL with the heading "Flights" and no results structure),
+no consent host was seen and no `SOCS` is set, the region shows no consent
+page: the command writes nothing and says that the browser provider cannot
+start without a captured rejection, which a machine that is shown the page can
+export, and that otherwise the provider stays off. On a machine with no
+display, `gmt consent export`, on any machine that is shown the consent page
+and has the pinned Camoufox (`gmt browser install`; no worker.env is needed,
+and it never installs one itself), runs the same capture and prints one line,
+`gmt-socs-v1.` followed by the base64url of the `SOCS` fields (the expiry
+bounded by `capturedAt` plus 13 months), `capturedAt` and the mark, as its
+only standard output, and is piped to the server's `gmt consent import`
+(`pnpm gmt consent export | ssh <server> 'cd <checkout> && pnpm gmt consent
+import'`; a file is the fallback, made under `umask 077` and deleted on both
+machines), which reads that line from standard input only (at most 4 KB; an
+argument or a terminal is refused), checks it with a strict schema (name
+exactly `SOCS`, the value's length and characters bounded, domain
+`.google.com`, path `/`, expiry no later than 13 months after `capturedAt`),
+recomputes the mark from the value and refuses a line whose carried mark
+differs or is not a rejection, and writes the same file, keeping
+`capturedAt`. The line holds a cookie from a signed-out throwaway profile of
+which only the first field is understood, so it is treated as private.
+`gmt consent check` reports the stored record and loads no page: its capture
+time, the mark computed from its value and its expiry, exiting 0 only for a
+rejection still in date. A record in the older never-shown or voided shape is
+written by no command; the worker reads one only to refuse its start by name
+(`consent-not-shown`, `consent-voided`), since pages need a captured
+rejection. A capture's expiry is the earlier of the cookie's own expiry and
+`capturedAt` plus 13 months (a tie is the capture's bound), and the summary
+says which bounds it (`boundedBy` `cookie` or `capture`); `gmt status` and the
+Status view (§11) warn from 30 days (as elapsed time) before it and fail after
+it, and the app sends one operator email a day while that check is not `ok`
+(§8.3); the worker refuses to start without a capture, or with one older than
+13 months (the cookie's stated lifetime) or dated in the future. After every page, on every path, success
 and failure alike, the worker reads `SOCS` back with `context.cookies()` and
 **compares the value**: a consent page at any step, or a `SOCS` value changed
 or missing after a page, is **`blocked`, page `consent-unhandled`**: the
@@ -2128,8 +2152,8 @@ browser provider is enabled, it sends one consent-expiry notice a London day to
 every notifier, as the notifier message variant `{ kind: 'system', subject,
 body }` through one engine helper, `sendSystemNotice`. The subject comes from
 the cause, never the state: "expires soon" (30 days or less left), "has
-expired", "has no consent record", "consent screen is now shown" (a voided
-not-shown record); a check that cannot be made (the worker is down, refused the
+expired", "has no consent record" (none, or one in an older shape), "is not a
+rejection" (a stored value whose mark is not `reject`); a check that cannot be made (the worker is down, refused the
 key or answered something unreadable) sends nothing, because the worker card
 says that. The body gives the check's summary, one sentence of consequence
 ("Browser prices stop when consent lapses; the other price sources are
@@ -2350,7 +2374,7 @@ shape carries `provenance` and `stale`.
 | Route | Purpose |
 |---|---|
 | `GET /health` | unauthenticated and exempt from the Host allowlist: `{ ok, degraded }` where `degraded` = job count ≠ enabled scheduled definitions, or an execution running past `STUCK_AFTER_HOURS`, with no detail; authenticated detail `{ db, providers, scheduler: { jobCount, nextRun, lastExecutionAt, degraded } }` |
-| `GET /status` | authenticated; never spends, never waits on a vendor, never loads a page: `{ generatedAt, mode: 'native' \| 'container' \| 'dev', version, checks }`, each check `{ id, area, providerId, label, state: 'ok' \| 'warn' \| 'fail' \| 'off', summary, note, offReason, fix: { text, command } \| null }` (`label` names a card among several of its area, a search's name; `note` an aside on any check, such as "caught up the run missed at 01:30, ran 07:02", which never counts toward the status bar; `offReason` ∈ `not-set-up`, `not-visible`, `awaiting-verification`, `disabled` (a disabled search, so a parked one never nags the bar), only when `off`; nothing a state rests on is ever truncated), worst first; `command` is a `pnpm gmt …` line in native mode and always null in container and dev mode, where the text names the compose action or the docs section; areas `app`, `database`, `backups`, `schedule`, `data` (per definition, its latest finished parent run's discovery coverage per cell in the six buckets with their spec labels, both ends of its priced observations' effective ages, never "fresh", "complete" or "all"), `provider` (one per provider plus `price-sources`, which warns "no usable price source" unless a non-synthetic provider can price a scheduled search), `worker` (whose card also states the app's `CAMOUFOX_BROWSER_WINDOW`; a worker that answers but will refuse pages is `fail`, judged by the same rule as the engine's preflight: a signed-in profile, shared settings that differ, an unverified or differing grid setup), `consent` (a capture's date is stated as an upper bound, "expires by … at the latest", when the worker does not report the cookie's own expiry), `email` (the newest send of any kind since the app started: alert digest, notice or test; `fail` when it failed); a provider card's auth or quota class is the adapters' own, recorded on the ledger row where the call is classified (migration 0008, `error_kind`), and a 2xx whose body was rejected is not a success; summaries come from fixed templates and error classes, never from vendor, worker or SMTP text; the worker check reads the worker's `/v1/status` through http-kit with a 2 s timeout and picks named fields (`workerStatusSchema` gains a field one work package before any worker emits it, so an app parses the status of a worker one package newer); no field carries a key, password, database path or `SOCS` value |
+| `GET /status` | authenticated; never spends, never waits on a vendor, never loads a page: `{ generatedAt, mode: 'native' \| 'container' \| 'dev', version, checks }`, each check `{ id, area, providerId, label, state: 'ok' \| 'warn' \| 'fail' \| 'off', summary, note, offReason, fix: { text, command } \| null }` (`label` names a card among several of its area, a search's name; `note` an aside on any check, such as "caught up the run missed at 01:30, ran 07:02", which never counts toward the status bar; `offReason` ∈ `not-set-up`, `not-visible`, `awaiting-verification`, `disabled` (a disabled search, so a parked one never nags the bar), only when `off`; nothing a state rests on is ever truncated), worst first; `command` is a `pnpm gmt …` line in native mode and always null in container and dev mode, where the text names the compose action or the docs section; areas `app`, `database`, `backups`, `schedule`, `data` (per definition, its latest finished parent run's discovery coverage per cell in the six buckets with their spec labels, both ends of its priced observations' effective ages, never "fresh", "complete" or "all"), `provider` (one per provider plus `price-sources`, which warns "no usable price source" unless a non-synthetic provider can price a scheduled search), `worker` (whose card also states the app's `CAMOUFOX_BROWSER_WINDOW`; a worker that answers but will refuse pages is `fail`, judged by the same rule as the engine's preflight: a signed-in profile, shared settings that differ, an unverified or differing grid setup), `consent` ("consent rejected" only for a stored value whose mark is `reject`, any other mark a `fail` with the fix; a worker that does not report the mark cannot be checked, its capture's latest expiry stated as an upper bound, "expires by … at the latest"), `email` (the newest send of any kind since the app started: alert digest, notice or test; `fail` when it failed); a provider card's auth or quota class is the adapters' own, recorded on the ledger row where the call is classified (migration 0008, `error_kind`), and a 2xx whose body was rejected is not a success; summaries come from fixed templates and error classes, never from vendor, worker or SMTP text; the worker check reads the worker's `/v1/status` through http-kit with a 2 s timeout and picks named fields (`workerStatusSchema` gains a field one work package before any worker emits it, so an app parses the status of a worker one package newer); no field carries a key, password, database path or `SOCS` value |
 | `GET /executions/active` | authenticated: `{ execution: { id, definitionId, definitionName, kind: 'run' \| 'cell-verification', startedAt, estimatedFinishAt } \| null }`, the oldest execution with a pass in flight (pending or running), a parent run or a single-cell verification (which spends credits too), read as one row; its estimated finish is now plus the seconds its remaining cells are estimated to take (so a resumed run never reads as finished in the past), or null without an estimate; `gmt update` reads it |
 | `POST /alerts/test-email` | sends one fixed test message through the configured email notifier, apart from `ALERT_EMAIL_MAX_PER_HOUR` (a test has its own limit of one a minute and an in-flight guard, so pressing it never crowds out an alert; 429 past it); 409 when email is not configured; the class of the send (sent, failed; never the server's text) is kept in the notifier and shown as "since the app started" |
 | `GET /airports?q=` | airport-table autocomplete: up to 20 rows `{ iata, name, city, country, tz, metro }` |
@@ -2927,7 +2951,10 @@ exists); the browser
 provider is offered only where its flags are set (the interruption question, "If a run is interrupted (for example the laptop sleeps), should the browser part finish when it resumes, even outside the scheduled hours? [no]", is asked only by `--reconfigure browser`, yes writing `CAMOUFOX_BROWSER_WINDOW=any`, §8.2; unset means `scheduled`), after the §2 costs
 summary, with the server sentence and a typed `yes` on a machine with no
 display, and its steps run in the order costs, consent method, download,
-consent: `CAMOUFOX_ENABLED` is written only after consent succeeds, so an
+`worker.env`, consent (interactive with a display, setup runs the capture
+itself; otherwise it stops at the worker's start check, naming `gmt consent`
+or the export and import, and `--reconfigure browser` finishes),
+the worker's start check: `CAMOUFOX_ENABLED` is written only after consent succeeds, so an
 interrupted step leaves the provider off (`not-set-up`) with `pnpm gmt setup
 --reconfigure browser` to resume. Re-running is idempotent: existing values
 are kept unless the operator asks to change them, and a file that differs
@@ -3128,12 +3155,18 @@ as specified in §5.3; no secrets, no full URLs.
 
 ### Revision 41: the guided consent capture (2026-10-25)
 
-Research 17.0c's two sessions (2026-10-25) showed the consent choice in the `SOCS` value itself: the first protobuf
-field is 1 after "Reject all" and 2 after "Accept all", so §2 states that mark and `gmt consent` is built with
-`export`, `import` and `check`. The landing view is recognised from that recording's views on `darwin-arm64`.
-`gmt consent check` reports the stored record without loading a page, and a region that shows no consent page
-writes no record (the worker already refuses a never-shown one), so the server-side headless check and the voiding of
-a never-shown record are not built. Every consent fix names `pnpm gmt consent`. No other design rule changes.
+Research 17.0c's two sessions (2026-10-25: darwin-arm64, the GB market) showed the consent choice in the `SOCS`
+value: a well-formed message whose first field is 1 after "Reject all" and 2 after "Accept all". §2 states it as
+that observation, and `gmt consent` is built with `export`, `import` and `check`; the landing view is recognised from
+that recording's views on `darwin-arm64`. From its branch review (rulings X1–X6): only a rejection is stored or
+applied, by every store and every page, and the start, `/v1/status` and the Status view read the mark; a choice whose
+submission carried an accept-only field is refused, and a choice under "More options" is not observed; nothing that
+fails or is interrupted changes a stored record or leaves the worker stopped; the active-run guard asks a Docker app
+too (`appEndpoint`); `export` needs only the pinned Camoufox and is piped over ssh; interactive `gmt setup` runs the
+capture as its own step; `gmt consent check` reports the stored record without loading a page; a region that shows no
+consent page writes no record and is told the provider cannot start; and the never-shown and voided record kinds are
+dropped (one left behind is read only to be refused). Every consent fix names `pnpm gmt consent`. No other design rule
+changes.
 
 ### Revision 40: WP17's branch review, round 1 (2026-10-25)
 

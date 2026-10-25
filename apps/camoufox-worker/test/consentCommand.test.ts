@@ -343,7 +343,7 @@ describe('consent: the capture (the person clicks; the tool observes)', () => {
     expect(held.drivers).toEqual([]);
     held.kept();
   });
-  it('refuses during a cool-down (naming its end) and at the monthly page cap, keeping the stored record', async () => {
+  it('refuses during a cool-down, naming its end, keeping the stored record', async () => {
     const cooling = setup();
     new CooldownStore({ dir: cooling.dataDir, challengeHours: 48, clock: cooling.timers.clock }).start(
       'captcha',
@@ -352,14 +352,17 @@ describe('consent: the capture (the person clicks; the tool observes)', () => {
     expect(cooling.err).toEqual([
       'cooling down until 2026-10-20T05:00:00.000Z (captcha); no page is loaded before then',
     ]);
+    expect(cooling.drivers).toEqual([]);
+    cooling.kept();
+  });
+  // why: ts-b1-006: its own test, as it reads the counts file through its 0600 mode check (POSIX)
+  it('refuses at the monthly page cap, keeping the stored record', async () => {
     const full = setup();
     lastPage(full.dataDir, '2026-10-17T00:00:00.000Z', cfg.monthlyPageCap);
     expect(await capture(full)).toBe(EX_UNAVAILABLE);
     expect(full.err.join()).toContain('monthly page cap');
-    for (const t of [cooling, full]) {
-      expect(t.drivers).toEqual([]);
-      t.kept();
-    }
+    expect(full.drivers).toEqual([]);
+    full.kept();
   });
   it('sweeps a profile a killed capture left, before it starts', async () => {
     const t = setup();

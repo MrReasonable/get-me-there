@@ -94,7 +94,9 @@ describe('docs/setup.md section 14 (the Camoufox provider)', () => {
       'pnpm gmt consent export',
       'pnpm gmt consent import',
       'pnpm gmt consent check',
-      'Click **Reject all** in the window. Nothing else is needed; close the window when you’re done',
+      'Click **Reject all** in the window, wait until Google Flights shows, then close the window. Nothing else is needed',
+      '(umask 077; pnpm gmt consent export > consent.line)',
+      "pnpm gmt consent export | ssh <server> 'cd <checkout> && pnpm gmt consent import'",
     ])
       expect(f, w).toContain(w);
   });

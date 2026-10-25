@@ -16,7 +16,8 @@
     "src/gridNames.ts",
     "src/gridView.ts",
     "src/monthly.ts",
-    "src/consentLine.ts"
+    "src/consentLine.ts",
+    "src/socsMark.ts"
   ],
   "thresholds": {
     "high": 90,
