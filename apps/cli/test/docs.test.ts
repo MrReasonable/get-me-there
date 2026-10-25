@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { COMMANDS, parseCommandLine } from '../src/args.js';
+import { COMMANDS, isConsentAction, parseCommandLine } from '../src/args.js';
 import { NO_SOURCE_TEXT } from '../src/setup/closing.js';
 import { PASTE_TOKEN_QUESTION, PROMPTS, TP_SIGNUP_URL, TP_TOKEN_URL } from '../src/setup/prompts.js';
 
@@ -86,13 +86,18 @@ describe('every gmt command the code names exists', () => {
     const named = new Set<string>();
     for (const f of files)
       for (const m of readFileSync(f, 'utf8').matchAll(/pnpm gmt ([a-z-]+)(?: ([a-z-]+))?/g))
-        named.add(m[1] === 'browser' ? `browser ${m[2] ?? ''}` : (m[1] ?? ''));
+        named.add(
+          m[1] === 'browser' || (m[1] === 'consent' && m[2] !== undefined && isConsentAction(m[2]))
+            ? `${m[1]} ${m[2] ?? ''}`
+            : (m[1] ?? ''),
+        );
     expect(named.size).toBeGreaterThan(5);
     for (const c of named) {
       const [cmd, action] = c.split(' ');
       expect(COMMANDS, c).toContain(cmd);
       if (cmd === 'browser') expect(['install', 'counts'], c).toContain(action);
     }
-    expect(named.has('consent')).toBe(false);
+    // why: WP17 Task 17.5: the consent fix names the guided capture, and its export and import are named too
+    for (const c of ['consent', 'consent export', 'consent import']) expect(named.has(c), c).toBe(true);
   });
 });

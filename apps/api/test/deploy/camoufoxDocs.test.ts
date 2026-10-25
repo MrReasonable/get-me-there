@@ -88,8 +88,15 @@ describe('docs/setup.md section 14 (the Camoufox provider)', () => {
       'waits up to 270 s',
     ])
       expect(f, w).toContain(w);
-    // why: W2: no text names a consent command not built yet
-    expect(f).not.toContain('gmt consent');
+    // why: WP17 Task 17.5: the guided capture and its subcommands, each as the CLI names it
+    for (const w of [
+      'pnpm gmt consent',
+      'pnpm gmt consent export',
+      'pnpm gmt consent import',
+      'pnpm gmt consent check',
+      'Click **Reject all** in the window. Nothing else is needed; close the window when you’re done',
+    ])
+      expect(f, w).toContain(w);
   });
   // why: po-b1-006: the install lives under the pinned root; the old cache appears only where the docs say it is not used
   it('names ~/Library/Caches only to say it is never used', () => {

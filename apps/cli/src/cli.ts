@@ -1,6 +1,7 @@
 import { type CommandName, type Flags, parseCommandLine } from './args.js';
 import { backupCommand } from './commands/backup.js';
 import { browserCommand } from './commands/browser.js';
+import { consentCommand } from './commands/consent.js';
 import { logsCommand } from './commands/logs.js';
 import { passwordCommand } from './commands/password.js';
 import { restartCommand } from './commands/restart.js';
@@ -31,6 +32,7 @@ const COMMANDS: Record<CommandName, Command> = {
   update: updateCommand,
   uninstall: uninstallCommand,
   browser: browserCommand,
+  consent: consentCommand,
 };
 
 /** Parses `gmt`'s arguments and runs the command; resolves the process's exit code. */

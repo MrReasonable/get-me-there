@@ -47,13 +47,15 @@ export const ENABLE_QUESTION = 'Turn on the browser provider?';
 export const SERVER_QUESTION = 'Type yes to accept page loads from this server’s address';
 
 /**
- * How consent is captured on this machine, with the effort of each way. why: until the guided capture (`pnpm gmt
- * consent`, brief WP17 Task 17.5) lands, the cookie is captured from an ordinary private window with capture-socs.
+ * How consent is captured on this machine, with the effort of each way (brief WP17 Tasks 17.5 and 17.6): the guided
+ * capture, `pnpm gmt consent`, in a window here; with no display, its export on a desktop and its import here; and
+ * capture-socs, the lighter equal option, either way.
  */
+export const CAPTURE_SOCS = 'pnpm --filter @gmt/camoufox-worker capture-socs';
 export function consentMethodText(hasDisplay: boolean): string {
   return hasDisplay
-    ? `Consent: Google’s consent page is answered once, by you, with "Reject all". Open https://www.google.com/travel/flights in an ordinary private browser window, click Reject all, then copy the SOCS cookie’s fields into ${CONSENT_FIX.command} (a few minutes; ${CONSENT_FIX.doc}).`
-    : `Consent: this machine has no display, so the choice is captured on a desktop: open https://www.google.com/travel/flights in an ordinary private browser window there, click Reject all, and copy the SOCS cookie’s fields into ${CONSENT_FIX.command} on this machine (a few minutes; ${CONSENT_FIX.doc}).`;
+    ? `Consent: Google’s consent page is answered once, by you, with "Reject all". Run ${CONSENT_FIX.command}: a browser window opens on Google Flights, you click Reject all and close the window, and the choice is kept only when the cookie itself records a rejection (a minute or two; ${CONSENT_FIX.doc}). Or copy the SOCS cookie’s fields from an ordinary private window into ${CAPTURE_SOCS} (a few minutes).`
+    : `Consent: this machine has no display, so the choice is captured on a desktop where pnpm gmt setup has set up the browser provider: run ${CONSENT_FIX.command} export there and pipe its one line into ${CONSENT_FIX.command} import here (a few minutes; the line holds only the cookie choice, so move it by pipe or clipboard, never as an argument or in a ticket). Or open https://www.google.com/travel/flights in an ordinary private browser window there, click Reject all, and copy the SOCS cookie’s fields into ${CAPTURE_SOCS} here (a few minutes; docs/setup.md#on-a-machine-with-no-display).`;
 }
 
 /** What setup says when the browser part stops before consent, so a re-run resumes it. */

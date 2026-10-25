@@ -189,7 +189,7 @@ export function camoufoxChecks(
     consentStop
       ? 'a consent page appeared (the saved Reject all choice did not hold)'
       : !fresh
-        ? 'no SOCS capture younger than 13 months: run capture-socs'
+        ? 'no SOCS capture younger than 13 months: run pnpm gmt consent'
         : `SOCS captured ${captured ?? ''}${s?.socsStable === true ? '' : '; its stability is not yet proved by a recording (SOCS_STABLE false)'}`,
   );
   const same =

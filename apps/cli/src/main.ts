@@ -46,11 +46,19 @@ const portFree = (port: number): Promise<boolean> =>
     s.listen(port, '127.0.0.1', () => s.close(() => resolve(true)));
   });
 
-const attach = (argv: readonly string[], cwd: string): Promise<number> =>
+const attach = (
+  argv: readonly string[],
+  cwd: string,
+  childEnvOf?: Readonly<Record<string, string>>,
+): Promise<number> =>
   new Promise((resolve) => {
     const [file, ...args] = argv;
     if (file === undefined) return resolve(127);
-    const child = spawn(file, args, { cwd, stdio: 'inherit' });
+    const child = spawn(file, args, {
+      cwd,
+      stdio: 'inherit',
+      ...(childEnvOf === undefined ? {} : { env: { ...childEnvOf } }),
+    });
     child.on('error', () => resolve(127));
     child.on('exit', (code) => resolve(code ?? 1));
   });

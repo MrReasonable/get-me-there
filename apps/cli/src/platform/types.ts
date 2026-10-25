@@ -54,6 +54,12 @@ export interface Platform {
   uid: number; // for launchctl's gui/<uid> domain
   paths: Paths;
   hasDisplay: boolean;
+  /**
+   * The display variables a visible browser window takes (`gmt consent`; decision 74), in their two groups: DISPLAY
+   * with XAUTHORITY when DISPLAY is set, WAYLAND_DISPLAY with XDG_RUNTIME_DIR when WAYLAND_DISPLAY is set; never
+   * DBUS_SESSION_BUS_ADDRESS. Empty on macOS, which needs none.
+   */
+  displayEnv: Readonly<Record<string, string>>;
   writeSecretFile(path: string, contents: string): Action;
   serviceManager: ServiceManager;
 }

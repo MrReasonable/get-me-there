@@ -21,6 +21,7 @@ export function darwinPlatform(arch: Arch, uid: number, home: string): Platform 
     uid,
     paths,
     hasDisplay: true,
+    displayEnv: {},
     writeSecretFile: secretFile,
     serviceManager: launchdManager(uid, paths),
   };

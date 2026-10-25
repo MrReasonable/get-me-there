@@ -409,9 +409,11 @@ describe('the offer’s fixed words', () => {
     expect(ENABLE_QUESTION).toBe('Turn on the browser provider?');
     expect(SERVER_QUESTION).toBe('Type yes to accept page loads from this server’s address');
     expect(consentMethodText(false)).toBe(
-      'Consent: this machine has no display, so the choice is captured on a desktop: open https://www.google.com/travel/flights in an ordinary private browser window there, click Reject all, and copy the SOCS cookie’s fields into pnpm --filter @gmt/camoufox-worker capture-socs on this machine (a few minutes; docs/setup.md#capture-your-consent-choice).',
+      'Consent: this machine has no display, so the choice is captured on a desktop where pnpm gmt setup has set up the browser provider: run pnpm gmt consent export there and pipe its one line into pnpm gmt consent import here (a few minutes; the line holds only the cookie choice, so move it by pipe or clipboard, never as an argument or in a ticket). Or open https://www.google.com/travel/flights in an ordinary private browser window there, click Reject all, and copy the SOCS cookie’s fields into pnpm --filter @gmt/camoufox-worker capture-socs here (a few minutes; docs/setup.md#on-a-machine-with-no-display).',
     );
-    expect(consentMethodText(true)).toContain('click Reject all, then copy the SOCS cookie’s fields');
+    expect(consentMethodText(true)).toBe(
+      'Consent: Google’s consent page is answered once, by you, with "Reject all". Run pnpm gmt consent: a browser window opens on Google Flights, you click Reject all and close the window, and the choice is kept only when the cookie itself records a rejection (a minute or two; docs/setup.md#capture-your-consent-choice). Or copy the SOCS cookie’s fields from an ordinary private window into pnpm --filter @gmt/camoufox-worker capture-socs (a few minutes).',
+    );
     expect(RESUME_LINE).toBe(
       'The browser provider stays off until then; resume with pnpm gmt setup --reconfigure browser',
     );

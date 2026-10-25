@@ -36,6 +36,7 @@ export function win32Platform(arch: Arch, home: string): Platform {
     uid: -1,
     paths,
     hasDisplay: true,
+    displayEnv: {},
     writeSecretFile: refuse,
     serviceManager: refusing,
   };

@@ -152,7 +152,7 @@ describe('gmt browser install (W1)', () => {
     m.fs.dir(DATA, 0o700).file(WORKER_ENV, `CAMOUFOX_WORKER_KEY="${KEY}"\n`, 0o600).file(PLIST, 'old', 0o644);
     expect(await runCli(['browser', 'install'], m.deps)).toBe(0);
     expect(m.io.stdout).toContain(
-      'worker: not started: refused, not retrying: no consent record: capture one; fix: pnpm --filter @gmt/camoufox-worker capture-socs',
+      'worker: not started: refused, not retrying: no consent record: capture one; fix: pnpm gmt consent',
     );
     expect(runs(m.executor.log).some((x) => x.startsWith('launchctl bootstrap'))).toBe(false);
   });
