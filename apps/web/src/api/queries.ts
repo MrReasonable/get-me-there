@@ -45,6 +45,16 @@ export function useProviders() {
   return useQuery({ queryKey: qk.providers, queryFn: () => api.providers() });
 }
 
+/**
+ * The shell's /providers read as an observer only (WP19 Task 19.7), for a view that asks whether the shell already
+ * shows the synthetic banner. why: the views render only once /providers has answered or failed; a second active
+ * observer mounting on a failed query (it has no data) refetches it and reads as pending again, which unmounted the view
+ * and looped. A disabled observer never fetches and still follows every update of the shell's query.
+ */
+export function useProvidersWatch() {
+  return useQuery({ queryKey: qk.providers, queryFn: () => api.providers(), enabled: false });
+}
+
 export function useDefinitions() {
   return useQuery({ queryKey: qk.definitions, queryFn: () => api.definitions() });
 }

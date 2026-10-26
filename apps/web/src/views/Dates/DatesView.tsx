@@ -1,7 +1,7 @@
 import type { DecodedDatePairs, IsoDateTime } from '@gmt/core';
 import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { ApiError } from '../../api/client.js';
-import { DATES_DRAWN_MARK, useDatePairs, useExecutionWatch } from '../../api/queries.js';
+import { DATES_DRAWN_MARK, useDatePairs, useExecutionWatch, useProvidersWatch } from '../../api/queries.js';
 import type { DefinitionResponse, ExecutionResponse } from '../../api/types.js';
 import { LoadError } from '../../components/LoadState.js';
 import { SyntheticBanner } from '../../components/SyntheticBanner.js';
@@ -88,6 +88,7 @@ function DatesOf({
   const scope = scopeQuery(state);
   const scopeKey = JSON.stringify(scope);
   const query = useDatePairs(definition.id, scope);
+  const providers = useProvidersWatch();
   const now = useNow();
   const [visible, setVisible] = useState(PAGE_SIZE);
   const [lit, setLit] = useState<number | null>(null);
@@ -169,7 +170,10 @@ function DatesOf({
   );
   return (
     <div className="space-y-4">
-      {data !== null && isSyntheticRead(data, run) ? <SyntheticBanner /> : null}
+      {/* why: the shell already shows the banner when /providers says synthetic (spec §5.5: one banner, WP19 Task 19.7) */}
+      {data !== null && providers.data?.synthetic !== true && isSyntheticRead(data, run) ? (
+        <SyntheticBanner />
+      ) : null}
       <DatesHeader definition={definition} data={data} model={model} state={state} run={run} now={now} />
       <Filters definition={definition} state={state} />
       <p role="status" className="sr-only">

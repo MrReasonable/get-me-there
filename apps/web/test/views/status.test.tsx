@@ -287,7 +287,7 @@ describe('cards for several searches (V6, V11)', () => {
     await screen.findByRole('region', { name: 'Data, London to New York' });
     expect(screen.getByRole('region', { name: 'Data, Weekend trips' })).toBeInTheDocument();
   });
-  it('a data card links to that search’s Coverage view', async () => {
+  it('a data card links to that search’s Dates view with its coverage section open (WP19 Task 19.7)', async () => {
     serve(searches());
     const { user } = renderWithProviders(<StatusView />);
     const link = await within(
@@ -295,11 +295,9 @@ describe('cards for several searches (V6, V11)', () => {
     ).findByRole('link', {
       name: COPY.statusView.coverageLink,
     });
-    expect(link).toHaveAttribute('href', expect.stringContaining('view=coverage'));
-    expect(link).toHaveAttribute('href', expect.stringContaining('def=a1'));
+    expect(link).toHaveAttribute('href', '/?view=dates&def=a1&d.coverage=open');
     await user.click(link);
-    expect(window.location.search).toContain('view=coverage');
-    expect(window.location.search).toContain('def=a1');
+    expect(window.location.search).toBe('?view=dates&def=a1&d.coverage=open');
   });
   it('a disabled search folds into the off line by name, with no card', async () => {
     serve(searches());

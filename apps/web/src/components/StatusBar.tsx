@@ -8,7 +8,7 @@ import { COPY } from '../copy.js';
 import { formatIsoDate, formatMicroGbp, formatRunInstant } from '../format.js';
 import { useCheckedWords } from '../hooks/useCheckedWords.js';
 import { NARROW_QUERY, useMediaQuery } from '../hooks/useMediaQuery.js';
-import { BASIS_PARAM, parseBasis } from '../state/resultsState.js';
+import { BASIS_PARAM, DATES_COVERAGE, parseBasis } from '../state/resultsState.js';
 import { hrefWith, navigateTo, useSearchParams } from '../state/urlState.js';
 import { LoadError } from './LoadState.js';
 
@@ -184,7 +184,7 @@ export function RunNowButton({
 
 export interface StatusBarProps {
   definition: DefinitionResponse | null;
-  /** "Run now" appears only on Results and Definitions (review UI-10). */
+  /** "Run now" appears only on Dates and Definitions (review UI-10; WP19 Task 19.7: Dates replaced Results). */
   showRunNow: boolean;
 }
 
@@ -354,6 +354,14 @@ function RunStatus({ definition, showRunNow }: StatusBarProps) {
                 {l.text}
               </span>
             ))}
+            {/* why: spec §11: the progress breakdown links to the Dates view's coverage section (WP19 Task 19.7) */}
+            <a
+              href={hrefWith(DATES_COVERAGE)}
+              onClick={navigateTo(DATES_COVERAGE)}
+              className="inline-flex min-h-11 items-center underline"
+            >
+              {COPY.progressCoverageLink}
+            </a>
             {runCalls ? (
               <Spend
                 text={COPY.spendRunCalls(runCalls.calls, capText(runCalls.cap, String))}

@@ -67,12 +67,13 @@ export const COPY = {
   appTitle: 'get-me-there',
   skipToContent: 'Skip to the main content',
   navLabel: 'Views',
+  // WP19 Task 19.7 (spec §11 layout): the nav's two tiers
+  navTier: { decide: 'Decide', setup: 'Set up' },
   nav: {
+    dates: 'Dates',
+    // why: the date pair detail is not in the nav (spec §11); the word names the view in the Record every ViewId keys
     results: 'Results',
-    calendar: 'Calendar',
-    duration: 'Duration',
     history: 'History',
-    coverage: 'Coverage',
     definitions: 'Definitions',
     alerts: 'Alerts',
     providers: 'Providers',
@@ -303,6 +304,8 @@ export const COPY = {
   runNowUnestimated: 'Run now',
   working: 'Working…',
   runDetails: 'Progress and spend',
+  // WP19 Task 19.7 (spec §11): the status bar's progress breakdown links to the Dates view's coverage section
+  progressCoverageLink: 'Coverage in the Dates view',
   runNowBlocked: 'The estimate is above what you confirmed; confirm it under Definitions before running.',
 
   // filters (spec §6.5)
@@ -938,6 +941,11 @@ export const COPY = {
     verifyConflict: 'An itinerary search for this cell is already running.',
   },
   // --- WP19 Task 19.6: the date pair detail, what was Results (spec §11 Date pair detail) ---
+  // WP19 Task 19.7 (spec §11 URLs): an old alert link whose row the whole-space read no longer holds lands on Dates
+  landing: {
+    rowGone: "That result is no longer in this search's results.",
+    rowNotRead: (n: number) => `That result is not among the first ${n} results read for this search.`,
+  },
   detailView: {
     title: (departure: string, back: string, nights: number) =>
       `${departure} to ${back} · ${nights} ${noun(nights, 'night', 'nights')}`,
@@ -1149,7 +1157,7 @@ export const COPY = {
     copied: 'Copied',
     selectedInstead: (command: string) => `Command, selected: ${command}`,
     providersLink: 'Providers view',
-    coverageLink: 'Coverage view',
+    coverageLink: 'Coverage in the Dates view',
     sendTest: 'Send test',
     sending: 'Sending…',
     testSent: 'Test email sent. Check the inbox, and the spam folder.',

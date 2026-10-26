@@ -25,16 +25,14 @@ import { drawn, renderWithProviders } from '../render.js';
  * showed nothing but an error or a skeleton (neither carries a banned word or a "£").
  */
 const CONTENT: Record<(typeof VIEWS)[number], () => Promise<HTMLElement>> = {
+  dates: () => screen.findByRole('table', { name: /^Best dates/ }),
   results: () => screen.findByRole('table', { name: 'Round trips found' }),
-  calendar: () => screen.findByRole('table', { name: 'Mar 2027' }),
-  duration: () => screen.findByRole('table', { name: COPY.durationView.tableCaption }),
   // why: the chart draws its axes after the figure renders; the sweep reads them, so it waits for the drawn surface
   history: async () => {
     const figure = await screen.findByRole('figure', { name: COPY.historyView.fetchChartTitle });
     await drawn(figure);
     return figure;
   },
-  coverage: () => screen.findByRole('heading', { name: COPY.coverageHeading }),
   definitions: () => screen.findByRole('button', { name: COPY.showEstimate }),
   alerts: () => screen.findByRole('heading', { name: COPY.alertsView.heading }),
   providers: () => screen.findByRole('heading', { name: COPY.providersHeading }),

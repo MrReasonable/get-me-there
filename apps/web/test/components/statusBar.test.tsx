@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { POLL_MS } from '../../src/api/queries.js';
 import { near, StatusBar } from '../../src/components/StatusBar.js';
 import { ViewHeader } from '../../src/components/ViewHeader.js';
+import { COPY } from '../../src/copy.js';
 import {
   API,
   coverageResponse,
@@ -40,6 +41,17 @@ describe('status bar (spec §11)', () => {
       ['116', '126'],
       ['0', '10'],
     ]);
+  });
+
+  it("the progress breakdown links to the Dates view's coverage section, keeping the other parameters (WP19 Task 19.7)", async () => {
+    server.use(http.get(`${API}/executions/:id`, () => HttpResponse.json(execution())));
+    const { user } = renderWithProviders(bar(), {
+      search: '?view=results&def=def-0001&d.to=JFK&depart=2027-03-14&return=2027-03-28&row=x',
+    });
+    const link = await screen.findByRole('link', { name: COPY.progressCoverageLink });
+    expect(link).toHaveAttribute('href', '/?view=dates&def=def-0001&d.to=JFK&d.coverage=open');
+    await user.click(link);
+    expect(window.location.search).toBe('?view=dates&def=def-0001&d.to=JFK&d.coverage=open');
   });
 
   it('shows spend used / cap for the run, the month and each provider-month call cap, marking a cap that is near', async () => {

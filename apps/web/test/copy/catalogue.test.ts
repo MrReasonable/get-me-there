@@ -229,6 +229,7 @@ const SAMPLES: Record<string, unknown[]> = {
   'panel.run': ['14 Oct 2026'],
   'panel.heading': ['LHR', 'JFK'],
   'detailView.title': ['14 Mar 2027', '28 Mar 2027', 14],
+  'landing.rowNotRead': [1000],
   'detailView.boardPriceRest': ['LHR → JFK', 'itinerary-search basis'],
   'panel.offersDropped': [3],
   'panel.reasonRaw': ['something-new'],

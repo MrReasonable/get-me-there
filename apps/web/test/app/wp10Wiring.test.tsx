@@ -14,27 +14,8 @@ const swept = () => ({
 
 // The default msw handlers (test/msw/wp10Handlers.ts) serve every WP10 route, so these views render real content.
 describe('WP10 views in the shell: real content, no banned word (spec §11, §9 item 6)', () => {
-  it('?view=calendar renders the calendar grid, legend and a priced day', async () => {
-    const { findByRole, getByTestId } = renderWithProviders(<App />, {
-      search: '?view=calendar&def=def-0001',
-    });
-    expect(await findByRole('table', { name: 'Mar 2027' })).toBeInTheDocument();
-    expect(getByTestId('calendar-legend')).toBeInTheDocument();
-    expect(getByTestId('day-price-block')).toHaveTextContent('£412');
-    expect(swept()).toEqual({ banned: [], pounds: [] });
-  });
-
-  it('?view=duration renders the chart figure and the table', async () => {
-    const { findByRole, getByRole } = renderWithProviders(<App />, {
-      search: '?view=duration&def=def-0001',
-    });
-    expect(await findByRole('figure', { name: 'Cheapest found by stay length' })).toBeInTheDocument();
-    expect(
-      getByRole('table', { name: 'Cheapest found per stay length, with provenance' }),
-    ).toBeInTheDocument();
-    expect(swept()).toEqual({ banned: [], pounds: [] });
-  });
-
+  // why: WP19 Task 19.7: ?view=calendar and ?view=duration land on Dates (test/state/landing.test.ts and the shell
+  // test hold that rule); the Calendar and Duration views are reached by no URL until Task 19.8 deletes them.
   it('?view=history renders both charts and their tables', async () => {
     const { findByRole, getByRole } = renderWithProviders(<App />, {
       search: '?view=history&def=def-0001',

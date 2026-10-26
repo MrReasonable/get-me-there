@@ -16,7 +16,8 @@
     "src/views/Dates/refresh.ts",
     "src/views/Dates/shade.ts",
     "src/views/Dates/overview.ts",
-    "src/views/Dates/keys.ts"
+    "src/views/Dates/keys.ts",
+    "src/state/landing.ts"
   ],
   "thresholds": {
     "high": 90,

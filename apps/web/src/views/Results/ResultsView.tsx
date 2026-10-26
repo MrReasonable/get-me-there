@@ -1,6 +1,7 @@
 import { bandCheapest, cellKeyString, filterRows, type Provenance, type SortKey, sortRows } from '@gmt/core';
-import { useCallback, useMemo } from 'react';
-import { useCalendarGap, useProviders, useResults } from '../../api/queries.js';
+import { useCallback, useEffect, useMemo } from 'react';
+import { ApiError } from '../../api/client.js';
+import { useCalendarGap, useProvidersWatch, useResults } from '../../api/queries.js';
 import type {
   CalendarGapResponse,
   DefinitionResponse,
@@ -16,6 +17,7 @@ import { parseDatesState } from '../../state/datesState.js';
 import { oneOf } from '../../state/oneOf.js';
 import {
   activeFilterCount,
+  BACK_TO_DATES,
   BASIS_PARAM,
   CLASSES,
   DATES_COVERAGE,
@@ -123,7 +125,7 @@ export function ResultsView({ definition, datePair }: ResultsViewProps) {
   const ui = useMemo(() => detailState(parseResultsState(params)), [params]);
   const dates = useMemo(() => parseDatesState(params, definition), [params, definition]);
   const results = useResults(definition.id, basis, detailScope(dates, datePair));
-  const providers = useProviders();
+  const providers = useProvidersWatch();
   // why: the gap read runs only when a verification provider is configured (spec §6.9: never on the £0 configuration)
   const gap = useCalendarGap(definition.id, results.data?.verificationProviderConfigured === true);
   const cells = useMemo(
@@ -136,6 +138,12 @@ export function ResultsView({ definition, datePair }: ResultsViewProps) {
     [dates.from, dates.to, definition.origins, definition.destinations, datePair],
   );
   const marks = useMemo(() => gapMarks(gap.data, new Set(cells.map(cellKeyString))), [gap.data, cells]);
+  // why: spec §11 URLs (WP19 Task 19.7): the landing rules judge the date pair's format only; one outside the current
+  // resolved space is the server's answer, and the detail then replaces the URL with Dates, keeping def= and d.*
+  const outside = results.error instanceof ApiError && results.error.code === 'date_pair_outside_space';
+  useEffect(() => {
+    if (outside) updateSearchParams(BACK_TO_DATES, 'replace');
+  }, [outside]);
   const narrow = useMediaQuery(NARROW_QUERY);
   const { filtered, rows, banded, staleHidden } = useMemo(() => {
     if (results.data === undefined)
@@ -170,6 +178,7 @@ export function ResultsView({ definition, datePair }: ResultsViewProps) {
     [setSort],
   );
 
+  if (outside) return <Loading />;
   if (results.error) return <LoadError error={results.error} retry={() => void results.refetch()} />;
   if (results.data === undefined) return <Loading />;
   const data = results.data;

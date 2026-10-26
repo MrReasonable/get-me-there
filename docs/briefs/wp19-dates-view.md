@@ -5,8 +5,8 @@ owner: opus
 depends_on: [18]
 spec_sections: ["§1", "§6.5", "§6.6", "§8.3", "§9 items 1, 4, 5, 6", "§10 GET /definitions/:id/date-pairs", "§10 /results scope parameters", "§10 Routes the Dates view retires", "§11 layout and nav", "§11 URLs", "§11 Dates", "§11 Date pair detail", "§16", "§17 revisions 48 and 50"]
 reviewers: [code-architect, test-strategy-reviewer, ui-reviewer, provenance-auditor, data-model-reviewer, search-strategy-reviewer]
-mutate: {"@gmt/core": ["src/datePairs/space.ts", "src/datePairs/figure.ts", "src/datePairs/rank.ts", "src/datePairs/bands.ts", "src/datePairs/encode.ts", "src/datePairs/decode.ts", "src/datePairs/detailLink.ts", "src/api-contract/datePairs.ts"], "@gmt/web": ["src/state/parse.ts", "src/state/datesState.ts", "src/views/Dates/board.ts", "src/views/Dates/howFar.ts", "src/views/Dates/stayScope.ts", "src/views/Dates/refresh.ts", "src/views/Dates/shade.ts", "src/views/Dates/overview.ts", "src/views/Dates/keys.ts"]}
-pending: {"@gmt/web": ["src/state/landing.ts"]}
+mutate: {"@gmt/core": ["src/datePairs/space.ts", "src/datePairs/figure.ts", "src/datePairs/rank.ts", "src/datePairs/bands.ts", "src/datePairs/encode.ts", "src/datePairs/decode.ts", "src/datePairs/detailLink.ts", "src/api-contract/datePairs.ts"], "@gmt/web": ["src/state/parse.ts", "src/state/datesState.ts", "src/views/Dates/board.ts", "src/views/Dates/howFar.ts", "src/views/Dates/stayScope.ts", "src/views/Dates/refresh.ts", "src/views/Dates/shade.ts", "src/views/Dates/overview.ts", "src/views/Dates/keys.ts", "src/state/landing.ts"]}
+pending: {}
 status: reviewed
 ---
 
@@ -1373,7 +1373,17 @@ DetailHeader}.tsx`, `views/Results/panel.ts` (moved from `views/Calendar`), `sta
     Status `data` card links to that search's Dates view with its coverage section open.
 - [ ] **Run to verify they fail**: `pnpm --filter @gmt/web exec vitest run test/state/landing.test.ts
   test/app/shell.test.tsx test/views/status.test.tsx` → `parseView` still defaults to Results; the nav has one list.
-- [ ] **Implement**; add `landing.ts` to the web Stryker list and this brief's `mutate`.
+- [ ] **Implement**; add `landing.ts` to the web Stryker list and this brief's `mutate`. As built: `ViewId` is the
+  seven views here (Calendar, Duration and Coverage stay as modules no URL reaches until Task 19.8), `NAV_TIERS` and
+  `navPatch` live in `state/view.ts`, and every nav link drops the detail's `depart`, `return` and `row` while keeping
+  every filter; the App draws a view only once the landing's patch is in the URL (it waits for the definitions, so a
+  `cal.dest` is judged against the selected one), shows Dates' own "No search yet" when there is no definition, and
+  carries the row lookup's line on the Dates view until the URL next changes; a row found opens on the basis of the
+  read that held it; the truncated line counts the rows that read returned (1000 at the cap). The Dates view and the
+  detail read `/providers` through a non-fetching observer (`useProvidersWatch`): a second active observer mounting on
+  a failed `/providers` refetched it, read as pending, unmounted the view and looped; the Dates view also leaves the red
+  banner to the shell when `/providers` already says synthetic, so it shows once. `test/app/wp10Wiring.test.tsx` lost its
+  `?view=calendar` and `?view=duration` cases (the landing tests hold that rule).
 - [ ] **Run to verify they pass**; **Commit**: `wp19: two-tier nav and view landing rules`.
 
 ### Task 19.8: Remove the retired views and routes; the TZ suite
@@ -1391,7 +1401,7 @@ time-zone cases were written first, beside the view, in Tasks 19.4 and 19.5.
   - `test/tz/datesView.tz.test.tsx` gains the detail header's case: a 2027-03-14 → 2027-03-28 detail reads 14 Mar and
     28 Mar under both zones.
 - [ ] **Run to verify they fail**: `pnpm --filter @gmt/core exec vitest run test/api-contract` → the old routes are
-  still listed; the shell test still sees nine views.
+  still listed (the web's view list is already the seven views since Task 19.7).
 - [ ] **Implement**: delete (the calendar gap already lives in `read/calendarGap.ts`, Task 19.2); remove the query keys
   and invalidations for `calendar` and `duration` and add `date-pairs` to `useExecutionActions`' refresh list; keep
   `recharts` (History uses it). `grep -rn "duration-analysis\|/calendar'\|calendarState\|DurationView\|CalendarView\|
