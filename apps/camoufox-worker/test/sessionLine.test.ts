@@ -4,6 +4,7 @@ import { asIsoDateTime, fixedClock } from '@gmt/core';
 import fc from 'fast-check';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { acquireLock } from '../src/lock.js';
+import { countsFact } from '../src/monthly.js';
 import { type EntryContext, EX_CONFIG, EX_UNAVAILABLE } from '../src/run.js';
 import {
   EX_TEMPFAIL,
@@ -126,18 +127,46 @@ describe('run.ts session export (Task 17.8)', () => {
 
 describe('run.ts session seed (Task 17.8)', () => {
   it('sets only the last-page time, 0600, under the lock; counts and cool-down are not touched', async () => {
-    const d = dir();
+    const d = dir({ 'monthly.json': { ...OCT, pages: 3, scrolls: 2 } });
     const t = ctx(d, ['seed']);
     expect(await sessionEntry(t.c, deps(line({ cooldown: null })))).toBe(0);
     expect(read(d, 'pacer.json')).toEqual({ lastPageAt: '2027-10-03T11:58:00.000Z' });
     expect(statSync(join(d, 'pacer.json')).mode & 0o777).toBe(0o600);
-    expect(existsSync(join(d, 'monthly.json'))).toBe(false);
+    expect(read(d, 'monthly.json')).toEqual({ ...OCT, pages: 3, scrolls: 2 });
     expect(existsSync(join(d, 'cooldown.json'))).toBe(false);
     expect(existsSync(join(d, 'worker.lock'))).toBe(false);
     expect(JSON.parse(t.out[0] ?? '')).toEqual({ ok: true, lastPageAt: '2027-10-03T11:58:00.000Z' });
   });
+  // why: a pacer file with no counts file beside it is an earlier worker's data, which the counts refuse (fail
+  // closed); the 2026-10-26 linux-arm64 session's first page was refused so, before it loaded
+  it('in a new directory it also starts this window’s counts at zero, so the pages that follow are counted', async () => {
+    const d = dir();
+    expect(await sessionEntry(ctx(d, ['seed'], { CAMOUFOX_BILLING_DAY: '15' }).c, deps(line()))).toBe(0);
+    expect(read(d, 'monthly.json')).toEqual({
+      windowStart: '2027-09-15T00:00:00.000Z',
+      windowEnd: '2027-10-15T00:00:00.000Z',
+      pages: 0,
+      scrolls: 0,
+    });
+    expect(statSync(join(d, 'monthly.json')).mode & 0o777).toBe(0o600);
+    expect(countsFact(d)).toBe('ok');
+    const e = dir();
+    expect(await sessionEntry(ctx(e, ['seed']).c, deps(line({ lastPageAt: null })))).toBe(0);
+    expect(read(e, 'monthly.json')).toEqual({ ...OCT, pages: 0, scrolls: 0 });
+  });
+  it('refuses where the counts are missing or unreadable beside a pacer file, writing nothing', async () => {
+    const d = dir({ 'pacer.json': { lastPageAt: '2027-10-03T11:00:00.000Z' } });
+    const t = ctx(d, ['seed']);
+    expect(await sessionEntry(t.c, deps(line()))).toBe(EX_CONFIG);
+    expect(t.err.join()).toMatch(/monthly counts are missing/);
+    expect(read(d, 'pacer.json')).toEqual({ lastPageAt: '2027-10-03T11:00:00.000Z' });
+    expect(existsSync(join(d, 'monthly.json'))).toBe(false);
+  });
   it('never moves this directory’s last page earlier; a line with none leaves the record as it is', async () => {
-    const d = dir({ 'pacer.json': { lastPageAt: '2027-10-03T11:59:00.000Z' } });
+    const d = dir({
+      'pacer.json': { lastPageAt: '2027-10-03T11:59:00.000Z' },
+      'monthly.json': { ...OCT, pages: 0, scrolls: 0 },
+    });
     expect(await sessionEntry(ctx(d, ['seed']).c, deps(line()))).toBe(0);
     expect(read(d, 'pacer.json')).toEqual({ lastPageAt: '2027-10-03T11:59:00.000Z' });
     const e = dir();

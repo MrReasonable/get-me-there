@@ -24,8 +24,9 @@ import { readBounded } from './stdin.js';
  * - `export` prints this directory's state as one JSON line: the last page start, this billing window's start and its
  *   page and scroll counts, and the cool-down in force (null when none). It writes nothing.
  * - `seed` (in the session, before any page) reads the host's line on stdin and sets only this directory's last-page
- *   time, never earlier than the one it has, so the session's first page waits the spacing from the host's last; it
- *   refuses while the host's cool-down is active, naming its end.
+ *   time, never earlier than the one it has, so the session's first page waits the spacing from the host's last (in a
+ *   new directory it also starts this window's counts at zero, which the counts' fail-closed rule needs beside a
+ *   pacer file); it refuses while the host's cool-down is active, naming its end.
  * - `merge` (on the host, after the session, before its worker starts again) reads the session's line on stdin and
  *   keeps the later last-page time, adds the session's pages and scrolls to this window's counts when the two windows
  *   start at the same instant (otherwise it adds none and says so), and carries an active cool-down whose end is later
@@ -133,19 +134,40 @@ async function exportLine(ctx: EntryContext, cfg: WorkerConfig, d: SessionDeps):
   ctx.out(JSON.stringify(line));
 }
 
-async function seed(ctx: EntryContext, d: SessionDeps): Promise<void> {
+async function seed(ctx: EntryContext, cfg: WorkerConfig, d: SessionDeps): Promise<void> {
   const line = await lineFrom(d);
-  if (line.cooldown !== null && Date.parse(line.cooldown.until) > Date.parse(d.clock.now()))
+  const now = d.clock.now();
+  if (line.cooldown !== null && Date.parse(line.cooldown.until) > Date.parse(now))
     throw new SessionRefused(
       `the host is cooling down until ${line.cooldown.until} (${line.cooldown.cause}); no session page is loaded before then`,
       EX_UNAVAILABLE,
     );
-  const lastPageAt = await withLock(ctx.dataDir, () => {
+  const lastPageAt = await withLock(ctx.dataDir, async () => {
+    const read = await readCounts(ctx.dataDir);
+    if (typeof read === 'object' && 'refused' in read)
+      throw new SessionRefused(
+        `this directory's monthly counts are ${read.refused}: nothing is carried (pnpm gmt browser counts rewrites them)`,
+      );
+    // why: a pacer file with no counts file beside it reads as an earlier worker's data and refuses every page (the
+    // counts' fail-closed rule), so a new directory's counts start at zero in this window before the time is carried
+    if (read === 'absent')
+      counter(ctx.dataDir, cfg, d.clock).write({
+        ...billingMonthWindow(now, cfg.billingDay),
+        pages: 0,
+        scrolls: 0,
+      });
     const at = line.lastPageAt;
     return at === null ? null : carryLastPageAt(ctx.dataDir, at, d.clock);
   });
   ctx.out(JSON.stringify({ ok: true, lastPageAt }));
 }
+
+const counter = (dir: string, cfg: WorkerConfig, clock: Clock): MonthlyCounter =>
+  new MonthlyCounter({
+    dir,
+    caps: { pages: cfg.monthlyPageCap, scrolls: cfg.monthlyScrollCap, billingDay: cfg.billingDay },
+    clock,
+  });
 
 async function merge(ctx: EntryContext, cfg: WorkerConfig, d: SessionDeps): Promise<void> {
   const line = await lineFrom(d);
@@ -160,12 +182,7 @@ async function merge(ctx: EntryContext, cfg: WorkerConfig, d: SessionDeps): Prom
       ctx.err(
         `the windows differ (this directory ${host.windowStart}, the session ${line.windowStart}): the session's ${line.pages} pages and ${line.scrolls} scrolls are not added`,
       );
-    else
-      new MonthlyCounter({
-        dir: ctx.dataDir,
-        caps: { pages: cfg.monthlyPageCap, scrolls: cfg.monthlyScrollCap, billingDay: cfg.billingDay },
-        clock: d.clock,
-      }).write(counts);
+    else counter(ctx.dataDir, cfg, d.clock).write(counts);
     const pacer = new Pacer({ dir: ctx.dataDir, minSpacingSeconds: cfg.minSpacingSeconds, clock: d.clock });
     const lastPageAt =
       line.lastPageAt === null ? pacer.lastPageAt() : carryLastPageAt(ctx.dataDir, line.lastPageAt, d.clock);
@@ -191,7 +208,7 @@ export async function sessionEntry(ctx: EntryContext, d: SessionDeps): Promise<n
   }
   try {
     if (sub === 'export') await exportLine(ctx, cfg, d);
-    else if (sub === 'seed') await seed(ctx, d);
+    else if (sub === 'seed') await seed(ctx, cfg, d);
     else await merge(ctx, cfg, d);
     return 0;
   } catch (e) {
