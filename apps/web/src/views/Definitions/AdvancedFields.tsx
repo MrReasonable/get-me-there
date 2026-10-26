@@ -1,13 +1,22 @@
 import { microGbpToPence, PENCE_TO_MICRO, type ProviderId } from '@gmt/core';
+import { SETUP_COPY } from '../../copy/setup.js';
 import { COPY } from '../../copy.js';
-import { formatMinutes } from '../../format.js';
 import { type OptionalKeys, withKey } from '../../state/withKey.js';
 import type { Draft } from './draft.js';
-import { AirlinesField, Check, NumberField, PoundsField, TimeWindowField } from './fields.js';
+import {
+  AirlinesField,
+  Check,
+  HoursMinutesField,
+  NumberField,
+  PoundsField,
+  TimeWindowField,
+} from './fields.js';
+import { ScheduleField } from './ScheduleField.js';
 
 type DraftConstraints = Draft['constraints'];
 type DraftPolicy = Draft['verification'];
 const input = 'min-h-11 rounded border border-slate-400 px-1';
+const D = SETUP_COPY.definitions;
 
 export interface ProviderCapabilities {
   id: ProviderId;
@@ -56,14 +65,11 @@ export function AdvancedFields({
           value={c.maxStops}
           onChange={(n) => setC('maxStops', n)}
         />
-        <NumberField
+        <HoursMinutesField
           id="c-maxJourney"
           label={COPY.constraint.maxJourneyMinutes}
           value={c.maxJourneyMinutes}
           onChange={(n) => setC('maxJourneyMinutes', n)}
-          {...(c.maxJourneyMinutes === undefined
-            ? {}
-            : { hint: COPY.minutesAsHours(formatMinutes(c.maxJourneyMinutes)) })}
         />
         <NumberField
           id="c-minLayover"
@@ -149,7 +155,7 @@ export function AdvancedFields({
       <fieldset className="flex flex-wrap gap-3">
         <legend className="font-semibold">{COPY.providersSection}</legend>
         <span className="flex flex-col">
-          <span>{COPY.discoveryProviders}</span>
+          <span>{D.discoveryProviders}</span>
           {capabilities
             .filter((p) => p.discovery)
             .map((p) => (
@@ -163,7 +169,7 @@ export function AdvancedFields({
             ))}
         </span>
         <span className="flex flex-col">
-          <span>{COPY.verificationProviders}</span>
+          <span>{D.verificationProviders}</span>
           {capabilities
             .filter((p) => p.verification)
             .map((p) => (
@@ -195,29 +201,43 @@ export function AdvancedFields({
         ))}
       </fieldset>
       <fieldset className="flex flex-wrap gap-3">
-        <legend className="font-semibold">{COPY.policyHeading}</legend>
+        <legend className="font-semibold">{D.policyHeading}</legend>
+        <div className="w-full">
+          <p className="max-w-prose text-slate-700">{D.policyIntro}</p>
+        </div>
         <NumberField
           id="v-maxCells"
-          label={COPY.maxCells}
+          label={D.maxCells}
+          description={D.maxCellsHint}
           value={v.maxCells}
           onChange={(n) => setV('maxCells', n ?? 0)}
         />
-        <NumberField id="v-topN" label={COPY.topN} value={v.topN} onChange={(n) => setV('topN', n ?? 0)} />
+        <NumberField
+          id="v-topN"
+          label={D.topN}
+          description={D.topNHint}
+          value={v.topN}
+          onChange={(n) => setV('topN', n ?? 0)}
+        />
         <PoundsField
           id="v-ceiling"
           label={COPY.priceCeiling}
+          description={D.priceCeilingHint}
           pence={v.priceCeilingPence}
           onChange={(p) => setVOptional('priceCeilingPence', p)}
         />
         <NumberField
           id="v-perDate"
-          label={COPY.perDepartureDateBest}
+          label={D.perDepartureDateBest}
+          description={D.perDepartureDateBestHint}
           value={v.perDepartureDateBest}
           onChange={(n) => setVOptional('perDepartureDateBest', n)}
         />
         <NumberField
           id="v-expandTop"
-          label={COPY.expandTop}
+          label={D.expandTop}
+          // why: spec §5.4, a SearchApi itinerary search costs 1 + expandTop × 2 calls per cell.
+          description={D.expandTopHint(1 + v.expandTop * 2)}
           value={v.expandTop}
           onChange={(n) => setV('expandTop', n ?? 0)}
         />
@@ -237,6 +257,8 @@ export function AdvancedFields({
         <NumberField
           id="b-calls"
           label={COPY.maxCalls}
+          // why: a 0 call cap stops SearchApi entirely; say so where the 0 is, with the way to raise it (critique).
+          description={draft.budget.maxCalls === 0 ? D.maxCallsZero : D.maxCallsHint}
           value={draft.budget.maxCalls}
           onChange={(n) => setDraft({ ...draft, budget: { ...draft.budget, maxCalls: n ?? 0 } })}
         />
@@ -257,17 +279,13 @@ export function AdvancedFields({
       </fieldset>
       <fieldset className="flex flex-wrap gap-3">
         <legend className="font-semibold">{COPY.scheduleHeading}</legend>
-        <span className="flex flex-col">
-          <label htmlFor="s-cron">{COPY.scheduleCron}</label>
-          <input
-            id="s-cron"
-            value={draft.scheduleCron ?? ''}
-            onChange={(e) =>
-              setDraft({ ...draft, scheduleCron: e.target.value.trim() === '' ? null : e.target.value })
-            }
-            className={input}
-          />
-        </span>
+        <ScheduleField
+          cron={draft.scheduleCron}
+          tz={draft.scheduleTz}
+          enabled={draft.enabled}
+          onChange={(scheduleCron) => setDraft({ ...draft, scheduleCron })}
+          {...(onIncomplete ? { onIncomplete } : {})}
+        />
         <span className="flex flex-col">
           <label htmlFor="s-tz">{COPY.scheduleTz}</label>
           <input

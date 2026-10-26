@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
+import { SETUP_COPY } from '../../copy/setup.js';
 import { COPY } from '../../copy.js';
-import { parsePoundsToPence, penceToPoundsInput, poundsText } from '../../format.js';
+import { formatMinutes, parsePoundsToPence, penceToPoundsInput, poundsText } from '../../format.js';
 import { useSynced } from '../../hooks/useSynced.js';
 import { carriersText, parseCarriers } from '../../state/carriers.js';
+import { joinHoursMinutes, splitMinutes } from './hoursMinutes.js';
 
 // The Definitions form's field primitives (review arch-r2-008): the form and its advanced fold both use them.
 
@@ -20,9 +22,26 @@ export function FieldErrors({ id, messages }: { id: string; messages: readonly s
   );
 }
 
+/** The ids an input is described by: its hint, then its errors; undefined when it has neither. */
+function describedBy(...ids: Array<string | null>): string | undefined {
+  const list = ids.filter((x) => x !== null);
+  return list.length > 0 ? list.join(' ') : undefined;
+}
+
+/** A short hint under a field, tied to its input by id so a screen reader hears it with the label. */
+function Hint({ id, text }: { id: string; text: string | undefined }) {
+  if (text === undefined) return null;
+  return (
+    <span id={id} className="text-xs text-slate-700">
+      {text}
+    </span>
+  );
+}
+
 /**
- * A labelled non-negative integer input; blank means "not set". `hint` is shown beside it (minutes as
- * hours); `errors` are the API's messages for this field, announced and linked with aria-describedby.
+ * A labelled non-negative integer input; blank means "not set". `hint` is shown beside the box (a unit or a
+ * conversion); `description` is a plain sentence under it, read with the label; `errors` are the API's messages for
+ * this field, announced and linked with aria-describedby.
  */
 export function NumberField({
   id,
@@ -30,6 +49,7 @@ export function NumberField({
   value,
   onChange,
   hint,
+  description,
   errors = [],
 }: {
   id: string;
@@ -37,11 +57,13 @@ export function NumberField({
   value: number | undefined;
   onChange: (n: number | undefined) => void;
   hint?: string;
+  description?: string;
   errors?: readonly string[];
 }) {
   const errorId = `${id}-errors`;
+  const hintId = `${id}-hint`;
   return (
-    <span className="flex flex-col">
+    <span className="flex max-w-xs flex-col gap-0.5">
       <label htmlFor={id}>{label}</label>
       <span className="flex items-center gap-1">
         <input
@@ -49,7 +71,10 @@ export function NumberField({
           inputMode="numeric"
           value={value === undefined ? '' : String(value)}
           aria-invalid={errors.length > 0}
-          aria-describedby={errors.length > 0 ? errorId : undefined}
+          aria-describedby={describedBy(
+            description !== undefined ? hintId : null,
+            errors.length > 0 ? errorId : null,
+          )}
           onChange={(e) => {
             const t = e.target.value.trim();
             if (t === '') onChange(undefined);
@@ -59,8 +84,73 @@ export function NumberField({
         />
         {hint !== undefined ? <span className="text-xs">{hint}</span> : null}
       </span>
+      <Hint id={hintId} text={description} />
       <FieldErrors id={errorId} messages={errors} />
     </span>
+  );
+}
+
+/**
+ * A duration stored in whole minutes, entered as hours and minutes (journey time). Blank in both boxes is "not set";
+ * only digits are taken. Minutes above 59 still count as minutes, and the total is then shown beside the boxes.
+ */
+export function HoursMinutesField({
+  id,
+  label,
+  value,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  value: number | undefined;
+  onChange: (minutes: number | undefined) => void;
+}) {
+  const [text, setText] = useState(() => splitMinutes(value));
+  // why: the boxes follow the value when it changes elsewhere (Import example), and keep what was typed while it
+  // already means the value ("20" and "75" for 1275).
+  useEffect(() => {
+    setText((t) => {
+      const j = joinHoursMinutes(t.hours, t.minutes);
+      return (j.kind === 'value' ? j.minutes : undefined) === value ? t : splitMinutes(value);
+    });
+  }, [value]);
+  const update = (next: { hours: string; minutes: string }) => {
+    const j = joinHoursMinutes(next.hours, next.minutes);
+    if (j.kind === 'invalid') return;
+    setText(next);
+    onChange(j.kind === 'value' ? j.minutes : undefined);
+  };
+  const D = SETUP_COPY.definitions;
+  const total = joinHoursMinutes(text.hours, text.minutes);
+  // why: "20 hours 75 minutes" is accepted as minutes; the total says what that comes to.
+  const shownTotal = total.kind === 'value' && Number(text.minutes) > 59 ? total.minutes : null;
+  return (
+    <fieldset className="flex flex-col gap-0.5">
+      <legend>{label}</legend>
+      <span className="flex flex-wrap items-center gap-1">
+        <input
+          id={`${id}-h`}
+          inputMode="numeric"
+          aria-label={D.journeyPart(label, D.journeyHours)}
+          value={text.hours}
+          onChange={(e) => update({ ...text, hours: e.target.value })}
+          className={`w-16 ${input}`}
+        />
+        <span aria-hidden="true">{D.journeyHours}</span>
+        <input
+          id={`${id}-m`}
+          inputMode="numeric"
+          aria-label={D.journeyPart(label, D.journeyMinutes)}
+          value={text.minutes}
+          onChange={(e) => update({ ...text, minutes: e.target.value })}
+          className={`ml-2 w-16 ${input}`}
+        />
+        <span aria-hidden="true">{D.journeyMinutes}</span>
+        {shownTotal === null ? null : (
+          <span className="text-xs">{COPY.minutesAsHours(formatMinutes(shownTotal))}</span>
+        )}
+      </span>
+    </fieldset>
   );
 }
 
@@ -73,24 +163,27 @@ export function PoundsField({
   label,
   pence,
   onChange,
+  description,
 }: {
   id: string;
   label: string;
   pence: number | undefined;
   onChange: (p: number | undefined) => void;
+  description?: string;
 }) {
   const [text, setText] = useSynced(penceToPoundsInput(pence), poundsText);
   // why: text that does not parse is shown as an error rather than silently leaving the old value in force (UI-8).
   const invalid = text.trim() !== '' && parsePoundsToPence(text) === undefined;
   const errorId = `${id}-errors`;
+  const hintId = `${id}-hint`;
   return (
-    <span className="flex flex-col">
+    <span className="flex max-w-xs flex-col gap-0.5">
       <label htmlFor={id}>{label}</label>
       <input
         id={id}
         inputMode="decimal"
         aria-invalid={invalid}
-        aria-describedby={invalid ? errorId : undefined}
+        aria-describedby={describedBy(description !== undefined ? hintId : null, invalid ? errorId : null)}
         value={text}
         onChange={(e) => {
           setText(e.target.value);
@@ -99,6 +192,7 @@ export function PoundsField({
         }}
         className={`w-28 ${input}`}
       />
+      <Hint id={hintId} text={description} />
       <FieldErrors id={errorId} messages={invalid ? [COPY.invalidPounds] : []} />
     </span>
   );

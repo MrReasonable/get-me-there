@@ -2,6 +2,7 @@ import { CONSTRAINT_LABELS } from '@gmt/core';
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { delay, HttpResponse, http } from 'msw';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { SETUP_COPY } from '../../../src/copy/setup.js';
 import { COPY } from '../../../src/copy.js';
 import { EXAMPLE_LABEL } from '../../../src/example.js';
 import { AIRPORT_DEBOUNCE_MS } from '../../../src/views/Definitions/AirportListInput.js';
@@ -62,13 +63,16 @@ describe('Definitions form defaults (spec §11)', () => {
     expect(fieldValue('Max nights')).toBe('21');
     expect(fieldValue('Cabin')).toBe('economy');
     await user.click(screen.getByText('Advanced: constraints and policy'));
-    expect(fieldValue(CONSTRAINT_LABELS.maxJourneyMinutes)).toBe('1500');
-    expect(screen.getByText('= 25h 00m')).toBeInTheDocument();
+    // 1500 minutes, entered and shown as 25 hours 0 minutes
+    const D = SETUP_COPY.definitions;
+    const journey = CONSTRAINT_LABELS.maxJourneyMinutes;
+    expect(fieldValue(D.journeyPart(journey, D.journeyHours))).toBe('25');
+    expect(fieldValue(D.journeyPart(journey, D.journeyMinutes))).toBe('0');
     expect(fieldValue(`${CONSTRAINT_LABELS.arrivalWindowLocal} from`)).toBe('06:00');
     expect(fieldValue(`${CONSTRAINT_LABELS.arrivalWindowLocal} to`)).toBe('23:00');
-    expect(fieldValue('Max cells per run')).toBe('10');
-    expect(fieldValue('Top N by discovery price')).toBe('10');
-    expect(fieldValue('Outbounds expanded per cell')).toBe('2');
+    expect(fieldValue(D.maxCells)).toBe('10');
+    expect(fieldValue(D.topN)).toBe('10');
+    expect(fieldValue(D.expandTop)).toBe('2');
     expect(screen.getByRole('checkbox', { name: 'Fetch booking options' })).toBeChecked();
     expect(screen.getByRole('checkbox', { name: 'Fetch booking options' })).toBeDisabled();
     expect(
@@ -77,7 +81,9 @@ describe('Definitions form defaults (spec §11)', () => {
     expect(fieldValue('Max billed calls per run')).toBe('2000');
     expect(fieldValue('Max cost per run in £')).toBe('0');
     expect(fieldValue('Travelpayouts refresh interval (hours)')).toBe('168');
-    expect(fieldValue('Cron (blank: manual runs only)')).toBe('0 5 * * 1');
+    // the default cron 0 5 * * 1, read by the schedule picker
+    expect(fieldValue(SETUP_COPY.schedule.repeat)).toBe('weekly');
+    expect(screen.getByText('Mondays at 05:00 (Europe/London)')).toBeInTheDocument();
     expect(fieldValue('Time zone')).toBe('Europe/London');
     expect(screen.getByRole('checkbox', { name: 'Enabled: scheduled runs happen' })).not.toBeChecked();
   });

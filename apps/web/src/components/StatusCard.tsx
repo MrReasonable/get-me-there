@@ -121,6 +121,10 @@ export function StatusCard({ check }: { check: StatusCheck }) {
         : 'border-slate-300';
   return (
     <section aria-label={label} className={`space-y-1 rounded border p-2 text-sm ${border}`}>
+      {/* why: a search's card is named by its search; the name is shown, not only in the region's label (critique) */}
+      {check.area === 'data' && check.label !== null ? (
+        <h4 className="font-semibold">{check.label}</h4>
+      ) : null}
       <p>
         <span className="font-semibold">{COPY.statusView.state[check.state]}</span> {check.summary}
       </p>

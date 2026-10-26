@@ -3,6 +3,7 @@ import { useId } from 'react';
 import { useItineraryHistory, useResults, useRouteHistories } from '../../api/queries.js';
 import type { DefinitionResponse } from '../../api/types.js';
 import { ViewHeader } from '../../components/ViewHeader.js';
+import { SETUP_COPY } from '../../copy/setup.js';
 import { COPY } from '../../copy.js';
 import { formatInstantDateLondon } from '../../format.js';
 import { instantMs } from '../../lib/time.js';
@@ -83,6 +84,7 @@ export function HistoryView({ definition }: { definition: DefinitionResponse }) 
     fetchLines = lines.fetch;
     routeLines = lines.route;
   }
+  const parentRuns = executions.filter((e) => !e.isChild).length;
   const span = historySpan(fetchLines, new Set(executions.filter((e) => e.isChild).map((e) => e.id)));
   const notes = definition.destinationNotes;
 
@@ -91,12 +93,26 @@ export function HistoryView({ definition }: { definition: DefinitionResponse }) 
       <ViewHeader title={H.title} variant="span" executions={executions} stale={newestAllStale(fetchLines)} />
       {span !== null ? (
         <p className="text-sm">
-          {H.spanLine(
-            span.runs,
-            span.onDemand,
-            formatInstantDateLondon(instantMs(span.firstAt)),
-            formatInstantDateLondon(instantMs(span.lastAt)),
-          )}
+          <span>
+            {H.spanLine(
+              span.runs,
+              span.onDemand,
+              formatInstantDateLondon(instantMs(span.firstAt)),
+              formatInstantDateLondon(instantMs(span.lastAt)),
+            )}
+          </span>
+          {/* why: the header counts every run of the search; this line counts the runs with a price here, so it says
+              how many of those runs have none, and the two counts agree (critique: "across 2 runs" vs "1 run shown") */}
+          {parentRuns > span.runs ? (
+            <span>
+              {'. '}
+              {SETUP_COPY.history.runsWithoutPrice(
+                parentRuns - span.runs,
+                parentRuns,
+                hash === null ? 'route' : 'itinerary',
+              )}
+            </span>
+          ) : null}
         </p>
       ) : null}
       {hash !== null ? (
@@ -113,12 +129,12 @@ export function HistoryView({ definition }: { definition: DefinitionResponse }) 
         </div>
       ) : (
         <div>
-          <label className="flex flex-col text-sm">
+          <label className="flex max-w-xs flex-col text-sm">
             {H.routePicker}
             <select
               value={overlay ? ALL : chosen === undefined ? '' : pairKey(chosen)}
               onChange={(e) => updateSearchParams({ [HISTORY_PARAMS.pair]: e.target.value }, 'replace')}
-              className="rounded border px-2 py-1"
+              className="min-h-11 max-w-full rounded border border-slate-400 px-1"
             >
               {pairs.map((p) => (
                 <option key={pairKey(p)} value={pairKey(p)}>

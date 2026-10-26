@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { ApiError, type FieldError } from '../../api/client.js';
 import { api } from '../../api/endpoints.js';
 import type { DefinitionResponse, EstimateResponse, ProvidersResponse } from '../../api/types.js';
+import { SETUP_COPY } from '../../copy/setup.js';
 import { COPY } from '../../copy.js';
 import { EXAMPLE_DEFINITION, EXAMPLE_LABEL } from '../../example.js';
 import { updateSearchParams } from '../../state/urlState.js';
@@ -24,6 +25,7 @@ import {
 } from './draft.js';
 import { BudgetFitPanel, EstimatePanel } from './EstimatePanel.js';
 import { FieldErrors, PoundsField } from './fields.js';
+import { SCHEDULE_FIELD_ID } from './ScheduleField.js';
 import { SearchSpaceFields } from './SearchSpaceFields.js';
 
 /** Field errors whose path is `field` or starts with `field.` (422 `details.fields`). */
@@ -189,7 +191,7 @@ export function DefinitionForm({
       >
         {COPY.importExample(EXAMPLE_LABEL)}
       </button>
-      <span className="flex flex-col">
+      <span className="flex max-w-md flex-col">
         <label htmlFor="d-name">{COPY.name}</label>
         <input
           id="d-name"
@@ -283,7 +285,8 @@ export function DefinitionForm({
       {blocked ? (
         <p id="d-blocked" className="text-red-800">
           {[
-            ...(incomplete.length > 0 ? [COPY.blockedByTimeWindow] : []),
+            ...(incomplete.some((id) => id !== SCHEDULE_FIELD_ID) ? [COPY.blockedByTimeWindow] : []),
+            ...(incomplete.includes(SCHEDULE_FIELD_ID) ? [SETUP_COPY.schedule.blocked] : []),
             ...(blank.length > 0 ? [COPY.blockedByRequired] : []),
           ].join(' ')}
         </p>
