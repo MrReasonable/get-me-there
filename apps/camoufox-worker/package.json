@@ -10,6 +10,7 @@
     "consent": "node --conditions=@gmt/source --import tsx src/run.ts consent",
     "clear-signed-in": "node --conditions=@gmt/source --import tsx src/run.ts clear-signed-in",
     "status": "node --conditions=@gmt/source --import tsx src/run.ts status",
+    "session": "node --conditions=@gmt/source --import tsx src/run.ts session",
     "recordings:backup": "node --conditions=@gmt/source --import tsx src/recordings.ts backup",
     "recordings:restore": "node --conditions=@gmt/source --import tsx src/recordings.ts restore",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit",

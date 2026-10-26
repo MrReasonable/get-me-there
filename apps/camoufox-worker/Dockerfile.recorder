@@ -1,0 +1,92 @@
+# syntax=docker/dockerfile:1
+# The recording sessions' Linux image (spec §2 "Recordings first"; brief WP17 Task 17.8). It holds only what a Linux
+# entry's session needs: Node 22 and pnpm, Firefox's Linux libraries (brief WP17 §0, Debian 12's names) and unzip, and
+# the workspace's dependencies built for this image's platform. The source is never copied in: it is mounted read-only
+# from the checkout, with fixtures/recorded/ read-write for the recordings, and the session's own worker data (the
+# pinned Camoufox, worker.env, socs.json, the counts) lives in a named volume. Nothing is published.
+#
+# Base image pin: the same multi-platform index digest of node:22-slim as the app's Dockerfile (recorded 2026-10-14,
+# NODE_VERSION 22.23.3, Debian bookworm-slim); refresh both together.
+#
+# Build, from the repository root, once per platform (the second under emulation):
+#   docker build -f apps/camoufox-worker/Dockerfile.recorder --platform linux/arm64 -t gmt-recorder:linux-arm64 .
+#   docker build -f apps/camoufox-worker/Dockerfile.recorder --platform linux/amd64 -t gmt-recorder:linux-x64 .
+#
+# Run, from the repository root (linux-arm64 shown; for linux-x64 use --platform linux/amd64 and that tag and volume).
+# The mounts are exactly these: apps/, packages/ and the three workspace files read-only, fixtures/recorded/ read-write,
+# and the named volume for the worker data. No port is published; the session's app and worker use the container's
+# own loopback.
+#   docker run -d --name gmt-recorder-linux-arm64 --platform linux/arm64 \
+#     --mount type=bind,src="$PWD/apps",dst=/src/apps,readonly \
+#     --mount type=bind,src="$PWD/packages",dst=/src/packages,readonly \
+#     --mount type=bind,src="$PWD/package.json",dst=/src/package.json,readonly \
+#     --mount type=bind,src="$PWD/pnpm-lock.yaml",dst=/src/pnpm-lock.yaml,readonly \
+#     --mount type=bind,src="$PWD/pnpm-workspace.yaml",dst=/src/pnpm-workspace.yaml,readonly \
+#     --mount type=bind,src="$PWD/apps/camoufox-worker/fixtures/recorded",dst=/src/apps/camoufox-worker/fixtures/recorded \
+#     --mount type=volume,src=gmt-recorder-linux-arm64,dst=/home/node/.local \
+#     gmt-recorder:linux-arm64
+# then `docker exec -it gmt-recorder-linux-arm64 …` for each step (apps/camoufox-worker/recorder/session.sh), and
+# `docker rm -f gmt-recorder-linux-arm64` afterwards (the volume keeps the bundle until `docker volume rm`).
+#
+# why the dependencies are built into the image: the source mounts are read-only, so no install can write the
+# per-package node_modules there. pnpm links each package's node_modules to the root's virtual store by relative
+# paths (`../../../node_modules/.pnpm/<name>@<version>/…`), and the store's directory names come from the lockfile
+# alone, so the checkout's own per-package links resolve to this image's /src/node_modules, built here for Linux from
+# the same lockfile. Only the root node_modules is the image's.
+FROM node:22-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392
+ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
+# why: WP17 §0: playwright-core 1.59.1's Firefox libraries under Debian 12's names (the Ubuntu 24.04 list's t64
+# packages are libasound2, libatk1.0-0, libglib2.0-0 and libgtk-3-0 here, and libavcodec is 59), plus Debian 12's three
+# additions, and unzip for the install
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      libasound2 libatk1.0-0 libavcodec59 libcairo-gobject2 libcairo2 libdbus-1-3 libfontconfig1 libfreetype6 \
+      libgdk-pixbuf-2.0-0 libglib2.0-0 libgtk-3-0 libpango-1.0-0 libpangocairo-1.0-0 libx11-6 libx11-xcb1 \
+      libxcb-shm0 libxcb1 libxcomposite1 libxcursor1 libxdamage1 libxext6 libxfixes3 libxi6 libxrandr2 libxrender1 \
+      libdbus-glib-1-2 libharfbuzz0b libxtst6 \
+      unzip \
+ && rm -rf /var/lib/apt/lists/*
+WORKDIR /src
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
+COPY packages/core/package.json ./packages/core/
+COPY packages/db/package.json ./packages/db/
+COPY packages/providers/package.json ./packages/providers/
+COPY packages/engine/package.json ./packages/engine/
+COPY apps/api/package.json ./apps/api/
+COPY apps/web/package.json ./apps/web/
+COPY apps/camoufox-worker/package.json ./apps/camoufox-worker/
+COPY apps/cli/package.json ./apps/cli/
+RUN corepack enable pnpm \
+ && test "$(pnpm --version)" = "$(node -p "require('./package.json').packageManager.replace(/^pnpm@/, '').replace(/\\+.*$/, '')")"
+RUN --mount=type=cache,id=pnpm-store-recorder,target=/pnpm/store \
+    pnpm install --frozen-lockfile --store-dir /pnpm/store \
+ && chown -R node:node /src
+# why: a fresh named volume copies the ownership of the directory it is mounted on, so the worker data's parent belongs
+# to node before anything runs
+RUN mkdir -p /home/node/.local && chown node:node /home/node/.local
+# The start-up check: the session never sees the operator's settings or secrets. It refuses (78) when any `.env`
+# (`.env.example` aside), `app.env` or `worker.env`, or a `data/` directory, is visible in the mounted source, or when
+# the source is writable; the session's own worker.env and app.env are written later, inside its volume.
+COPY --chmod=0755 <<'EOF' /usr/local/bin/gmt-recorder-check
+#!/bin/sh
+set -eu
+found=$(find /src -name node_modules -prune -o \( -name .env -o \( -name '.env.*' ! -name .env.example \) -o -name app.env -o -name worker.env \) -print | head -n 5)
+if [ -n "$found" ]; then
+  echo "refused: a settings file is visible in the mounted source (mount only apps/, packages/ and the workspace files): $found" >&2
+  exit 78
+fi
+if [ -e /src/data ] || [ -e /src/.env ]; then
+  echo "refused: /src/data or /src/.env is visible; mount only apps/, packages/ and the workspace files" >&2
+  exit 78
+fi
+if touch /src/apps/.gmt-recorder-probe 2>/dev/null; then
+  rm -f /src/apps/.gmt-recorder-probe
+  echo "refused: /src/apps is writable; mount the source read-only" >&2
+  exit 78
+fi
+exec "$@"
+EOF
+USER node
+ENV HOME=/home/node
+ENTRYPOINT ["/usr/local/bin/gmt-recorder-check"]
+CMD ["sleep", "infinity"]
