@@ -111,7 +111,7 @@ export function HistoryView({ definition }: { definition: DefinitionResponse }) 
           </span>
           {/* why: the header counts every run of the search; this line counts the runs with a price here, so it says
               how many of those runs have none, and the two counts agree (critique: "across 2 runs" vs "1 run shown") */}
-          {withoutPrice > 0 ? (
+          {loaded && withoutPrice > 0 ? (
             <span>
               {'. '}
               {SETUP_COPY.history.runsWithoutPrice(withoutPrice, parentIds.length, subject)}
