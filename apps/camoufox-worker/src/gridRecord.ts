@@ -3,13 +3,19 @@
  * it reads the results page's Cheapest tab and list minimum (to learn how the grid rounds against the list), clicks the
  * one "Price graph" button and, in the dialog "Price insights", the one "Dates" tab, then makes the named moves with the
  * four scroll buttons. Every view is settled (the first by two stable polls; each after a scroll only once its
- * departures or returns line has changed, then holds still) and classified on every poll; each scroll starts at least
- * the core's least scroll spacing after the last; each move has its own budget. It records what it reads, through locators, for
+ * departures or returns line has changed, then holds still; each only once it names every cell its lines call for, to
+ * its bound, after which it is recorded as it is and marked not drawn: spec §2 rev 46) and classified on every poll;
+ * each scroll starts at least the core's least scroll spacing after the last; each move has its own budget. It records what it reads, through locators, for
  * the grammar and the planner to be written from: the lines and labels with their element counts, the cell candidates in
  * order, the dates-grid check, and per move its timings and how many days each line moved. Nothing parses the printed
  * snapshot; it is stored for people to read. Only `record --grid` calls this module (rules.test.ts pins that).
  */
-import { GRID_MIN_SCROLL_SPACING_SECONDS, GRID_MOVE_BUDGET_MS, GRID_MOVE_RESERVE_MS } from '@gmt/core';
+import {
+  GRID_MIN_SCROLL_SPACING_SECONDS,
+  GRID_MOVE_BUDGET_MS,
+  GRID_MOVE_RESERVE_MS,
+  type IsoDate,
+} from '@gmt/core';
 import { type ClassifyRule, classifyPageWithRule } from './classify.js';
 import { type Blocked, type Facts, panelOf, type Skipped, settle, snapshotOf, soft } from './dialogSettle.js';
 import {
@@ -27,6 +33,7 @@ import {
   type StepOptions,
   timeoutOf,
 } from './driver.js';
+import { stillDrawing } from './gridView.js';
 import { parseOptionName } from './names.js';
 import type { GridDirection } from './recordArgs.js';
 import type { Selectors } from './selectors.js';
@@ -74,6 +81,11 @@ export interface ViewRead {
   datesGrid: { dialog: number; datesSelected: number; grid: number; scrollButtons: number };
   selectedLines: string[];
   polls: number;
+  /**
+   * Whether every cell its lines call for had drawn when it was taken (spec §2 rev 46): false only for a view still
+   * drawing when its settle's bound came, recorded as it was.
+   */
+  drawn: boolean;
 }
 export type MoveRead =
   | {
@@ -114,6 +126,8 @@ export interface GridOptions {
   /** What was clicked, appended in order (kept by the caller for a stop record). */
   clicked: string[];
   moves: readonly GridDirection[];
+  /** The query's departure: the year of each line date, from which a view's called-for cells are counted. */
+  anchor: IsoDate;
   /** The page budget's next deadline (the Cheapest flow's), started at the Price graph click. */
   next: () => Deadline;
   /** A move's own deadline, never past the page's overall cap. */
@@ -240,11 +254,17 @@ export async function exploreGrid(
         const p = await panelOf(dialog, st);
         const lines = await texts(p.locator.getByText(LINE), st);
         const labels = await texts(p.locator.getByText(LABEL), st);
+        // why: spec §2 rev 46: the cells are counted on every poll (the panel's buttons less the scroll buttons there),
+        // so a view still drawing is waited on as the provider waits; their names are read once it has settled
+        let cells = await countOf(p.locator.getByRole('button'), st);
+        for (const nm of scrollNames)
+          cells -= await countOf(p.locator.getByRole('button', { name: nm, exact: true }), st);
         return {
           value: p.locator,
           id: `panel:${p.index ?? 'dialog'}`,
           snapshot: await snapshotOf(p.locator, st),
           changeKey: changeKeyOf({ lines, labels }),
+          drawing: stillDrawing(lines.texts, cells, o.anchor),
         };
       },
       differsFrom,
@@ -280,6 +300,7 @@ export async function exploreGrid(
         },
         selectedLines: (await texts(panel.getByText(SELECTED_LINE), st)).texts,
         polls: s.polls,
+        drawn: !s.drawing,
       };
     });
     return { read, settleMs, readMs: timers.now() - r0, facts: s.facts, rule: s.rule };

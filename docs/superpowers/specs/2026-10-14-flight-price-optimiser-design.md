@@ -1,6 +1,6 @@
 # get-me-there — Flight Price Intelligence & Flexible-Date Optimiser
 
-**Design spec, revision 45.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
+**Design spec, revision 46.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
 four full-roster reviews (145, 140, 126 and 101 findings; zero Critical since
 revision 2) and the provider spike. Revision 9 folds in the three decisions
 taken at approval (the self-scraping fallback in §2, the dashboard readings in
@@ -191,10 +191,9 @@ each set bound to the build it was recorded under: a flag counts as true only wh
 build equals that set's build. `darwin-arm64`'s come from the 2026-10-18
 recordings (its landing view from 2026-10-25's), and `darwin-x64`'s,
 `linux-arm64`'s and `linux-x64`'s from their own recording sessions of
-2026-10-26, each under its own build; `darwin-x64` has every flag but the
-date grid's, since each of its grid recordings held a view taken before its
-cells had rendered, which the reading refused (so grid mode stays
-unavailable there). An entry whose flags are not set for its pinned build (a
+2026-10-26, each under its own build (`darwin-x64`'s date grid from its
+re-recorded pages of that day, under the settle that waits for every cell,
+§2 "Settles and deadlines"). An entry whose flags are not set for its pinned build (a
 new pin before its recordings) stays off: the worker refuses to start there
 (exit 78) naming the missing recording, `gmt setup` does not offer the
 provider on that machine, and the app runs without it. The profile is a persistent directory
@@ -335,7 +334,20 @@ never silently dropped.
   **Settles and deadlines.** The first view, after the Dates click, settles by
   the two-stable-polls rule. A view after a scroll counts only when its
   departures or returns line differs from the view before the move, and then
-  holds stable across two polls at least 2 s apart. Every poll is classified.
+  holds stable across two polls at least 2 s apart. Either view is taken only
+  once it names every cell its lines call for (49 less the pairs whose return
+  precedes the departure): a view whose lines read but which names fewer cells
+  is still drawing, and a stable poll of it does not settle. The settle polls
+  on within its own bound (the first view's page budget, a move's budget), and
+  a view still drawing when that bound comes is taken as it is, so the reading
+  refuses it as it refuses any view short of cells (a later view structurally
+  unparsed, a first view with no selected cell `unrecognised`), never priced in
+  part. The `darwin-x64` recordings of 2026-10-26 showed why: under Rosetta a
+  view held still across two polls with 42 of its 49 cells drawn, or none,
+  each undrawn cell printing "0000" in its place. A view whose lines do not
+  read, or that names more cells than they call for, is not waited on. The
+  `--grid` recorder waits the same way and marks a view still drawing at its
+  bound as not drawn. Every poll is classified.
   Each move has its own bounded budget (45 s for the click, settle and read,
   plus a 15 s reserve) inside the page's overall cap (the first view's page
   budget plus one move budget and spacing per planned move). A stop discards
@@ -3206,6 +3218,17 @@ as specified in §5.3; no secrets, no full URLs.
 ---
 
 ## 17. Changelog
+
+### Revision 46: a grid view is taken only once its cells have drawn (2026-10-26)
+
+Both of `darwin-x64`'s first grid recordings (2026-10-26, under Rosetta) held a view that stayed still across two
+polls before all its cells had drawn: 42 of 49 after the first scroll, and none in the second page's first view, each
+undrawn cell printing "0000" in its place. The settle took them, and the reading refused them, so no page there read
+whole. §2 "Settles and deadlines" now takes a grid view only once it names every cell its lines call for: a stable
+view still drawing does not settle, the settle polls on within its own bound, and a view still drawing when the bound
+comes is taken as it is and refused as any view short of cells is, never priced in part; the `--grid` recorder waits
+the same way and marks such a view. Two grid pages re-recorded on `darwin-x64` under that settle read every view
+whole, so §2 Method gives `darwin-x64` the date grid's flag too. No other design rule changes.
 
 ### Revision 45: the smoke waits for its page's own bound (2026-10-26)
 

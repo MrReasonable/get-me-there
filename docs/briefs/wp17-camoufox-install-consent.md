@@ -499,11 +499,29 @@ headless, from the operator's own address, with the build `152.0.4-beta.28` of e
 - [x] `recordings:backup` after each session (`camoufox-2026-10-26`).
 - [x] One commit per entry sets its `FLAGS` set, with `PROOFS` (now kept per entry) naming each recording by kind, date
   and number. Every entry has every flag but `VIEW_MORE_ADDS_CHEAPER` (each View more page's minimum equalled its
-  results page's); `darwin-x64` also leaves `GRID_VERIFIED` off: each of its two grid pages held a view taken before
-  its cells had rendered (42 of 49 after the first scroll; none in the second page's first view), which the reading
-  refused, so no recording shows a whole page of views there. The recorded suites read each recording under its own
-  entry's flags, hold only entries with `GRID_VERIFIED` to the grid's strict checks, and keep it false wherever a view
-  was refused.
+  results page's). `darwin-x64` first left `GRID_VERIFIED` off: each of its two grid pages (grid 3 and 4) held a view
+  taken before its cells had drawn (42 of 49 after the first scroll; none in the second page's first view), which the
+  reading refused, so no recording showed a whole page of views there. The recorded suites read each recording under
+  its own entry's flags, hold only entries with `GRID_VERIFIED` to the grid's strict checks, and keep it false
+  wherever a view was refused.
+- [x] **The grid settle, then `darwin-x64`'s grid again (2026-10-26, spec rev 46; the operator approved up to 6
+  pages).** Cause: the settle took a view once its printed snapshot held still across two polls 2 s apart, and under
+  Rosetta the page paused longer than that with cells still undrawn (each printing "0000" in its place). Rule: a grid
+  view is taken only once it names every cell its lines call for (`cellsCalledFor` and `stillDrawing` in
+  `gridView.ts`; `Found.drawing` in `dialogSettle.ts`, read on every poll by `gridPage.ts` and by the recorder, which
+  counts the panel's buttons less the scroll buttons); a stable poll still drawing does not settle, and one still
+  drawing at the settle's bound is taken as it is, so the reading refuses it as before. The recorder marks each view
+  `drawn`. Tests replay grid 3 and 4: served as recorded, each early view is waited on to its bound and refused; with
+  the same dates' whole view from the entry's other recording shown after it, each page reads whole. The session ran
+  as above (a throwaway clone of the branch, the official Node 22.23.3 x86_64 build checked against its
+  `SHASUMS256.txt` under `arch -x86_64` with `process.arch === 'x64'` asserted, a throwaway `HOME`, `pnpm gmt browser
+  install`, a hand-written `worker.env` with `CAMOUFOX_MONTHLY_PAGE_CAP=6`, the consent line through a 0600 file deleted
+  after import, `session seed` and `merge` around the host worker's stop and start). Two grid pages (grid 5 and 6, the
+  LHR → JFK query of 14 to 24 Mar 2027 with right, down, left and up) read all five views whole, 49 cells each, each in
+  two polls, so `darwin-x64` has `GRID_VERIFIED` with `PROOFS` naming grid 5 and 6. A recording made before the new
+  settle that holds a view still drawing, on an entry since recorded under it, is held to the wait-or-refuse tests
+  instead of the strict ones (`superseded` in `test/support/recordedGrid.ts`); a view marked not drawn keeps the flag
+  false.
 - [x] One live grid page per Linux entry through an app running inside the same container (app and worker on its
   loopback, `CAMOUFOX_MODE=grid`, `CAMOUFOX_EXECUTION_PAGE_CAP=1`): a run of a nine-cell definition that one grid view
   covers priced 9 of 9 cells on each entry. (On `linux-arm64` a first try through `pnpm gmt smoke` loaded its grid page
@@ -516,8 +534,9 @@ The session record:
 | `linux-arm64` | 11 (9 recorder, the lost smoke page, the app's page) | 32 | results 1, cheapest 1, view-more 1, socs-stability 1–3, no-flights 1, landing 1, grid 1 |
 | `linux-x64` | 11 (10 recorder, one a View more page that did not settle, the app's page) | 4 | results 2, cheapest 2, view-more 2, socs-stability 4–6, no-flights 2, landing 2, grid 2 |
 | `darwin-x64` | 10 (all recorder) | 8 | results 3, cheapest 3, view-more 3, socs-stability 7–9, no-flights 3, landing 3, grid 3 and 4 |
+| `darwin-x64`, again | 2 (both recorder) | 8 | grid 5 and 6 |
 
-The host worker's month after the three merges: 57 pages and 144 scrolls.
+The host worker's month after the three merges: 57 pages and 144 scrolls; after the fourth, 59 and 152.
 
 ### Task 17.9: The `camoufox-install` CI job
 

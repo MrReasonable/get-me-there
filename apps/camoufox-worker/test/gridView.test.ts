@@ -3,7 +3,15 @@
 // and set mismatches structural, drift a stop, weekdays and years checked, and the first view's selected pair.
 import { asIsoDate } from '@gmt/core';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { changeKeyOf, interpretView, type RawView, readRawView, viewCounts } from '../src/gridView.js';
+import {
+  cellsCalledFor,
+  changeKeyOf,
+  interpretView,
+  type RawView,
+  readRawView,
+  stillDrawing,
+  viewCounts,
+} from '../src/gridView.js';
 import { SELECTORS } from '../src/selectors.js';
 import { FakeLocator, FakePage, n } from './support/fakePage.js';
 import { cellName, dayLabel, gridTree, plusDays, selectedRange } from './support/gridTree.js';
@@ -282,6 +290,46 @@ describe('interpretView', () => {
   ])('the first view: %s is unrecognised (PA-11)', (label, r) => {
     const check = label.includes('price') ? 'price' : label.includes('selected') ? 'selected-cell' : 'range';
     expect(interpretView(r, Q.dep, Q)).toEqual({ kind: 'unrecognised', why: 'first-view', check });
+  });
+});
+
+// why: the darwin-x64 recordings of 2026-10-26 (grid 3 and 4): a view held still for two polls with 42 of its 49 cells,
+// or none, drawn; each undrawn cell printed "0000" in its place. A view is taken only once every cell its lines call
+// for has drawn (spec §2 rev 46)
+describe('cellsCalledFor and stillDrawing', () => {
+  const whole = raw({ depart: '2027-03-11', ret: '2027-03-21' });
+  it('the lines call for 49 cells, 39 near today, and the pairs across the year', () => {
+    expect(cellsCalledFor(whole.lines, Q.dep)).toBe(49);
+    expect(
+      cellsCalledFor(raw({ depart: '2026-10-18', ret: '2026-10-20' }).lines, asIsoDate('2026-10-20')),
+    ).toBe(39);
+    expect(cellsCalledFor(raw({ depart: '2027-03-11', ret: '2027-03-11' }).lines, Q.dep)).toBe(28);
+    expect(
+      cellsCalledFor(raw({ depart: '2026-12-28', ret: '2027-01-01' }).lines, asIsoDate('2026-12-30')),
+    ).toBe(46);
+  });
+  it.each([
+    ['one line', whole.lines.slice(0, 1)],
+    ['three lines', [...whole.lines, whole.lines[1] ?? '']],
+    ['six days on a line', [whole.lines[0]?.replace('Wed 17 Mar', '') ?? '', whole.lines[1] ?? '']],
+    ['a wrong weekday', [whole.lines[0]?.replace('Thu 11 Mar', 'Fri 11 Mar') ?? '', whole.lines[1] ?? '']],
+    ['six days on the returns line', [whole.lines[0] ?? '', whole.lines[1]?.replace('Sat 27 Mar', '') ?? '']],
+    ['no lines', []],
+  ])('lines that do not read (%s) call for no count', (_l, lines) => {
+    expect(cellsCalledFor(lines, Q.dep)).toBeNull();
+  });
+  it('a view naming fewer cells than its lines call for is still drawing; a whole one is not', () => {
+    expect(stillDrawing(whole.lines, 49, Q.dep)).toBe(false);
+    expect(stillDrawing(whole.lines, 48, Q.dep)).toBe(true);
+    expect(stillDrawing(whole.lines, 42, Q.dep)).toBe(true);
+    expect(stillDrawing(whole.lines, 0, Q.dep)).toBe(true);
+    const near = raw({ depart: '2026-10-18', ret: '2026-10-20' });
+    expect(stillDrawing(near.lines, 39, asIsoDate('2026-10-20'))).toBe(false);
+    expect(stillDrawing(near.lines, 38, asIsoDate('2026-10-20'))).toBe(true);
+  });
+  it('more cells than called for, or lines that do not read, are not waited on: the reading refuses them as it is', () => {
+    expect(stillDrawing(whole.lines, 50, Q.dep)).toBe(false);
+    expect(stillDrawing(whole.lines.slice(0, 1), 0, Q.dep)).toBe(false);
   });
 });
 

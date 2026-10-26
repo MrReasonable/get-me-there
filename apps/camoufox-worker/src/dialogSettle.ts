@@ -98,6 +98,11 @@ export interface Found<T> {
   snapshot: string;
   /** What must differ from `differsFrom` before the view counts (a grid view's departures and returns lines). */
   changeKey?: string;
+  /**
+   * The view is still drawing (a grid view naming fewer cells than its lines call for, spec §2 rev 46): a stable poll
+   * of it does not settle, and the settle waits for it to draw, to its bound at most.
+   */
+  drawing?: boolean;
 }
 
 export interface Settled<T> {
@@ -105,6 +110,8 @@ export interface Settled<T> {
   value: T;
   snapshot: string;
   changeKey: string | undefined;
+  /** True when the bound came while the view, stable, was still drawing: it is taken as it is, for the reading to refuse. */
+  drawing: boolean;
   polls: number;
   facts: Facts;
   rule: ClassifyRule;
@@ -114,8 +121,10 @@ export interface Settled<T> {
 /**
  * Polls `find` (classified on every poll: a blocked kind other than unrecognised is that stop at once) until the printed
  * snapshot it names holds still across two polls at least STABLE_MS apart. With `differsFrom`, a poll whose change key
- * equals it (the view before a scroll) never counts (WP15 ruling 9). `name` names the steps (`<name>-poll`) and the
- * overrun (`<name>-settle`, thrown when less than the reserve is left).
+ * equals it (the view before a scroll) never counts (WP15 ruling 9). A stable poll that is still drawing does not settle
+ * either (spec §2 rev 46): the settle polls on, and when less than the reserve is left it returns the last such poll,
+ * marked `drawing`, provided nothing has changed since, so the caller refuses it as it is. `name` names the steps
+ * (`<name>-poll`) and the overrun (`<name>-settle`, thrown when less than the reserve is left and no stable poll is held).
  */
 export async function settle<T>(
   name: string,
@@ -127,8 +136,13 @@ export async function settle<T>(
   differsFrom?: string,
 ): Promise<Settled<T> | Blocked> {
   let previous: { key: string; at: number } | null = null;
+  /** The last poll, when it was stable but still drawing: what the bound takes, as it is. */
+  let held: Settled<T> | null = null;
   for (let polls = 1; ; polls++) {
-    if (d.remaining() < o.reserveMs) throw new CheapestStepFailed(`${name}-settle`, 'timed-out');
+    if (d.remaining() < o.reserveMs) {
+      if (held !== null) return held;
+      throw new CheapestStepFailed(`${name}-settle`, 'timed-out');
+    }
     // why: the page is classified before the container is looked for, so a challenge that replaced the dialog is that
     // stop, never a failed lookup
     const step = await runStep(`${name}-poll`, POLL_TIMEOUT_MS, d, steps, async (st) => {
@@ -162,20 +176,24 @@ export async function settle<T>(
         snapshotLength: poll.snapshot.length,
         moved,
         stable,
+        drawing: poll.drawing === true,
       },
       'dialog poll',
     );
-    if (stable)
-      return {
-        kind: 'settled',
-        value: poll.value,
-        snapshot: poll.snapshot,
-        changeKey: poll.changeKey,
-        polls,
-        facts,
-        rule,
-        pageKind: kind.kind,
-      };
+    const settled: Settled<T> = {
+      kind: 'settled',
+      value: poll.value,
+      snapshot: poll.snapshot,
+      changeKey: poll.changeKey,
+      drawing: poll.drawing === true,
+      polls,
+      facts,
+      rule,
+      pageKind: kind.kind,
+    };
+    // why: spec §2 rev 46: settled means stable and drawn; a stable view still drawing is only held for the bound
+    if (stable && !settled.drawing) return settled;
+    held = stable ? settled : null;
     // why: fix round 1 (TS 8): the first poll of a run of matching ones is kept, so a short poll interval still needs
     // two matching polls STABLE_MS apart, and never settles on two polls closer than that
     previous = !moved ? null : previous !== null && previous.key === key ? previous : { key, at };

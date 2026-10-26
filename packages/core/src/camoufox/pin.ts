@@ -82,10 +82,11 @@ const FLAGS = {
       VIEW_MORE_ADDS_CHEAPER: false,
       NO_FLIGHTS_VERIFIED: true,
       SOCS_STABLE: true,
-      // why: both grid recordings (grid/2026-10-26/3 and 4) hold a view taken before its cells had all rendered (42 of
-      // 49 after the first scroll; none in the second page's first view), which the reading refused; every scroll did
-      // move one day, but no recording shows every view of a page read whole on this entry
-      GRID_VERIFIED: false,
+      // why: grid/2026-10-26/5 and 6, recorded on 2026-10-26 under the settle that takes a view only once every cell
+      // its lines call for has drawn (spec §2 rev 46): every view of both pages read whole, 49 cells each, and each
+      // scroll moved one day. The earlier grid/2026-10-26/3 and 4 hold views the old settle took before their cells had
+      // drawn, which the reading refused
+      GRID_VERIFIED: true,
       LANDING_VERIFIED: true,
     },
   },

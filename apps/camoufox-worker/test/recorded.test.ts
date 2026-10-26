@@ -19,7 +19,7 @@ import { onAllowlist } from '../src/guard.js';
 import { parseOptionName } from '../src/names.js';
 import { KINDS, RECORDED_BY, type RecordingKind } from '../src/record.js';
 import { FLAG_NAMES, flagsOf, PROOFS, SELECTORS, selectorsFor } from '../src/selectors.js';
-import { rangeOf, recordedAnchor } from './support/recordedGrid.js';
+import { rangeOf, recordedAnchor, superseded, underDrawnSettle } from './support/recordedGrid.js';
 
 const ROOT = fileURLToPath(new URL('../fixtures/recorded/', import.meta.url));
 
@@ -315,6 +315,8 @@ describe('verification flags (TS-13; runs on every checkout)', () => {
           }),
           selectedLines: z.array(z.string()),
           snapshot: z.string(),
+          // why: spec §2 rev 46: a recording made under the settle that waits for every cell marks each view
+          drawn: z.boolean().optional(),
         })
         .loose();
       const fileSchema = z
@@ -353,12 +355,32 @@ describe('verification flags (TS-13; runs on every checkout)', () => {
         recordedAnchor(rec.views[0]?.snapshot ?? '', rec.recordedAt);
       const verifiedOn = (rec: z.infer<typeof fileSchema>): boolean =>
         selectorsFor(rec.osArch, rec.versions.binary).GRID_VERIFIED;
-      /** The recordings of entries whose GRID_VERIFIED is set: the strict checks below hold on every one of them. */
-      const verified = () =>
+      const all = () =>
         files()
           .filter((f) => !f.file.endsWith('0-explore.json'))
-          .map((f) => ({ file: f.file, rec: fileSchema.parse(f.raw) }))
-          .filter((f) => verifiedOn(f.rec));
+          .map((f) => ({ file: f.file, rec: fileSchema.parse(f.raw) }));
+      /**
+       * A year anchor for a recording any of whose views names its range: grid/2026-10-26/4's first view had drawn no
+       * price line, and a scroll never moves the selection.
+       */
+      const anyAnchorOf = (rec: z.infer<typeof fileSchema>) => {
+        const v = rec.views.find((x) => parseSelectedRange(rangeOf(x.snapshot)) !== null);
+        return recordedAnchor(v?.snapshot ?? '', rec.recordedAt);
+      };
+      const isSuperseded = (rec: z.infer<typeof fileSchema>, recs: ReturnType<typeof all>): boolean =>
+        superseded(
+          rec,
+          recs.map((r) => r.rec),
+          anyAnchorOf(rec),
+        );
+      /**
+       * The recordings of entries whose GRID_VERIFIED is set: the strict checks below hold on every one of them but a
+       * recording the settle of spec §2 rev 46 supersedes (gridRecorded.test.ts holds those to wait or refuse).
+       */
+      const verified = () => {
+        const recs = all();
+        return recs.filter((f) => verifiedOn(f.rec) && !isSuperseded(f.rec, recs));
+      };
       const readOf = (rec: z.infer<typeof fileSchema>) =>
         rec.views.map((v) =>
           interpretView(
@@ -375,18 +397,20 @@ describe('verification flags (TS-13; runs on every checkout)', () => {
       // why: WP17 Task 17.8: an entry whose grid recordings hold a view the reading refuses (on darwin-x64 under
       // Rosetta, a view taken before all its cells had rendered) keeps GRID_VERIFIED false, as SOCS_STABLE follows its
       // read-backs
+      // and a view marked not drawn is refused; a view taken while still drawing in a recording the settle of rev 46
+      // supersedes is the one excuse
       it('an entry with a refused view in any of its grid recordings keeps GRID_VERIFIED false', () => {
-        const recs = files()
-          .filter((f) => !f.file.endsWith('0-explore.json'))
-          .map((f) => ({ file: f.file, rec: fileSchema.parse(f.raw) }));
+        const recs = all();
         expect(recs.length).toBeGreaterThan(0);
         for (const { file, rec } of recs) {
           // why: a first view with no range line (nothing rendered yet) gives the reading no anchor: refused too
           const anchored = parseSelectedRange(rangeOf(rec.views[0]?.snapshot ?? '')) !== null;
           const refused =
             !anchored ||
+            rec.views.some((v) => v.drawn === false) ||
             readOf(rec).some((r) => r.kind !== 'view' || r.unparsed > 0 || r.structural !== 'ok');
-          if (refused) expect(verifiedOn(rec), `${file} (${rec.osArch})`).toBe(false);
+          if (refused && !isSuperseded(rec, recs))
+            expect(verifiedOn(rec), `${file} (${rec.osArch})`).toBe(false);
         }
       });
       it('every view is the dates-grid view; every candidate parses; the cells name exactly the lines’ dates', () => {
@@ -405,6 +429,7 @@ describe('verification flags (TS-13; runs on every checkout)', () => {
               anchorOf(rec),
             );
             expect(r.kind === 'view' && [r.unparsed, r.structural], `${file} view ${i}`).toEqual([0, 'ok']);
+            if (underDrawnSettle(rec)) expect(v.drawn, `${file} view ${i}`).toBe(true);
             const sel = v.candidates.find((c) => c?.endsWith(', selected'));
             if (sel !== undefined && sel !== null)
               expect(parseSelectedPrice(v.selectedLines[0] ?? ''), file).toBe(parseCellName(sel)?.pounds);

@@ -3,7 +3,9 @@
  * view has settled and passed the search-form and currency checks. It clicks the one "Price graph" button and, in the
  * dialog, the one "Dates" tab; settles the first view by two stable polls; then makes the request's moves, each at
  * least the scroll spacing after the last, each under its own budget inside the page's overall cap, each counted only
- * once its lines change and then hold still, never more than the request's allowance. Every poll is classified first:
+ * once its lines change and then hold still, never more than the request's allowance. A view is taken only once it
+ * names every cell its lines call for (spec §2 rev 46); one still drawing when its settle's bound comes is taken as it
+ * is, and the reading refuses it as it would any view short of cells. Every poll is classified first:
  * any blocked kind but unrecognised is that stop at once, and the session discards the page. A view that cannot be read
  * as the dates-grid view, or whose cells drift from the grammar, is `unrecognised`. A view whose dates are off the plan
  * but consistent is kept, flagged with its cause, and ends the page; a scroll that does not settle ends it too.
@@ -39,6 +41,7 @@ import {
   interpretView,
   type RawView,
   readRawView,
+  stillDrawing,
   viewCounts,
 } from './gridView.js';
 import type { Selectors } from './selectors.js';
@@ -151,7 +154,7 @@ export async function gridPage(
   await click('click-dates-tab', tab.nth(0), d);
 
   const anchor = req.start.departureDate;
-  /** One view after a click: settled (after a scroll, only once its lines changed), read and checked. */
+  /** One view after a click: settled (after a scroll, only once its lines changed; drawn, to the bound), read, checked. */
   const view = async (name: string, st0: Deadline, differsFrom: string | undefined, first: boolean) => {
     const s = await settle(
       name,
@@ -167,6 +170,7 @@ export async function gridPage(
           id: `panel:${p.index ?? 'dialog'}`,
           snapshot: await snapshotOf(p.locator, st),
           changeKey: changeKeyOf(raw),
+          drawing: stillDrawing(raw.lines, raw.candidates.length, anchor),
         };
       },
       differsFrom,

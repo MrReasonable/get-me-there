@@ -5,7 +5,7 @@
  * blocked kind is that stop, with its cool-down; otherwise the recording ends plainly, naming the step. Only record.ts
  * imports this module (rules.test.ts pins that).
  */
-import type { BlockedPage, Logger } from '@gmt/core';
+import type { BlockedPage, IsoDate, Logger } from '@gmt/core';
 import type { PageBudget } from './budget.js';
 import { CheapestStepFailed, type Driver, type PageLike, type StepOptions } from './driver.js';
 import { exploreGraph, stripSnapshotQueries } from './graph.js';
@@ -62,12 +62,16 @@ export interface DialogPage {
 export async function recordGrid(
   c: DialogPage,
   settled: 'results' | 'no-flights',
-  moves: readonly GridDirection[],
+  grid: { moves: readonly GridDirection[]; anchor: IsoDate | null },
 ): Promise<Outcome> {
   let d = c.d;
 
   if (settled !== 'results')
     throw new RecordingRefused('the results page shows no flights; there is no date grid to record');
+  const { moves, anchor } = grid;
+  // why: spec §2 rev 46: whether a view still draws is read from its lines' dates, whose years need the query's
+  // departure; `parseRecordArgs` gives every --grid page one
+  if (anchor === null) throw new RecordingRefused('--grid needs --depart and --return');
   const steps: StepOptions = { timers: c.deps.timers, log: c.deps.log, startedAt: c.pageStart, flow: 'grid' };
   try {
     const g = await exploreGrid(c.driver, c.page, d, {
@@ -77,6 +81,7 @@ export async function recordGrid(
       steps,
       clicked: c.clicked,
       moves,
+      anchor,
       next: () => {
         d = c.budget.next();
         return d;
