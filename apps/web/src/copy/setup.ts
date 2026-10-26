@@ -88,7 +88,7 @@ export const SETUP_COPY = {
   // --- Providers ---
   providers: {
     intro:
-      'Discovery prices date pairs across the whole window; itinerary search checks the cheapest of them for full itineraries with booking options.',
+      'Discovery prices date pairs across the whole window. Itinerary search, which runs only when a source below offers it, checks the cheapest of them for full itineraries with booking options.',
     markLine: (mark: string) => `Its prices carry the mark ${mark} where space is short.`,
     ageUnknownHint:
       "Vendor's cache age unknown: the vendor does not say how old its answer may be, so each price shows when this app fetched it.",

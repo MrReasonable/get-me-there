@@ -84,9 +84,17 @@ export function HistoryView({ definition }: { definition: DefinitionResponse }) 
     fetchLines = lines.fetch;
     routeLines = lines.route;
   }
-  const parentRuns = executions.filter((e) => !e.isChild).length;
   const span = historySpan(fetchLines, new Set(executions.filter((e) => e.isChild).map((e) => e.id)));
   const notes = definition.destinationNotes;
+  // why: route history is shared by every search with this airport pair, so the runs counted here are this search's
+  // own parent runs (the header's), each with or without a price point in this chart.
+  const pricedIds = new Set(
+    fetchLines.flatMap((l) => l.points.flatMap((p) => (p.kind === 'price' ? [p.executionId] : []))),
+  );
+  const parentIds = executions.filter((e) => !e.isChild).map((e) => e.id);
+  const withoutPrice = parentIds.filter((id) => !pricedIds.has(id)).length;
+  const subject = hash === null ? 'route' : 'itinerary';
+  const loaded = !pending && error === null;
 
   return (
     <section aria-label={H.title} className="flex flex-col gap-4">
@@ -103,16 +111,16 @@ export function HistoryView({ definition }: { definition: DefinitionResponse }) 
           </span>
           {/* why: the header counts every run of the search; this line counts the runs with a price here, so it says
               how many of those runs have none, and the two counts agree (critique: "across 2 runs" vs "1 run shown") */}
-          {parentRuns > span.runs ? (
+          {withoutPrice > 0 ? (
             <span>
               {'. '}
-              {SETUP_COPY.history.runsWithoutPrice(
-                parentRuns - span.runs,
-                parentRuns,
-                hash === null ? 'route' : 'itinerary',
-              )}
+              {SETUP_COPY.history.runsWithoutPrice(withoutPrice, parentIds.length, subject)}
             </span>
           ) : null}
+        </p>
+      ) : loaded && parentIds.length > 0 ? (
+        <p className="text-sm">
+          {SETUP_COPY.history.runsWithoutPrice(withoutPrice, parentIds.length, subject)}
         </p>
       ) : null}
       {hash !== null ? (

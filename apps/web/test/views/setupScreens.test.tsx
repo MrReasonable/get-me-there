@@ -125,6 +125,51 @@ describe('History', () => {
     );
   });
 
+  it("counts only this search's runs: a point from another search's run on the same pair is not one of them", async () => {
+    server.use(
+      http.get(`${API}/definitions/:id/results`, () =>
+        HttpResponse.json(resultsResponse({ executions: runsAt(2, 170, 300, 500) })),
+      ),
+      http.get(`${API}/routes/:origin/:destination/history`, () =>
+        HttpResponse.json(
+          routeHistory({
+            calendarSeries: [
+              {
+                providerId: 'travelpayouts',
+                cabin: 'economy',
+                // exec-400 belongs to another search; exec-300 of this one has no point
+                points: [
+                  fetchPoint(500, 45000),
+                  fetchPoint(400, 44000),
+                  fetchPoint(2, 39900),
+                  fetchPoint(170, 42000),
+                ],
+              },
+            ],
+          }),
+        ),
+      ),
+    );
+    renderWithProviders(<HistoryView definition={definition()} />);
+    await drawn(await screen.findByRole('figure', { name: COPY.historyView.fetchChartTitle }));
+    expect(
+      screen.getByText(SETUP_COPY.history.runsWithoutPrice(1, 4, 'route'), { exact: false }),
+    ).toBeInTheDocument();
+  });
+
+  it('with runs but no price at all, it still says how many runs have none', async () => {
+    server.use(
+      http.get(`${API}/definitions/:id/results`, () =>
+        HttpResponse.json(resultsResponse({ executions: runsAt(2, 170) })),
+      ),
+      http.get(`${API}/routes/:origin/:destination/history`, () =>
+        HttpResponse.json(routeHistory({ calendarSeries: [] })),
+      ),
+    );
+    renderWithProviders(<HistoryView definition={definition()} />);
+    expect(await screen.findByText(SETUP_COPY.history.runsWithoutPrice(2, 2, 'route'))).toBeInTheDocument();
+  });
+
   it('the route select does not stretch the full width', async () => {
     renderWithProviders(<HistoryView definition={definition()} />);
     expect(await screen.findByLabelText(COPY.historyView.routePicker)).toHaveClass('max-w-full');
