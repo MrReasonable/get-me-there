@@ -45,6 +45,7 @@ describe('api-contract (spec §10)', () => {
       'POST /executions/:id/resume',
       'POST /cells/verify',
       'GET /definitions/:id/results',
+      'GET /definitions/:id/date-pairs',
       'GET /definitions/:id/calendar',
       'GET /definitions/:id/duration-analysis',
       'GET /definitions/:id/coverage',
