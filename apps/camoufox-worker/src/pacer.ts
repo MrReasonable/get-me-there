@@ -77,3 +77,16 @@ export class Pacer {
     return this.busy;
   }
 }
+
+/**
+ * WP17 Task 17.8 (`run.ts session seed` and `merge`): carries a last page start from another data directory into this
+ * one's record, keeping the later of the two, so a carried time never shortens the spacing. An unreadable record reads
+ * as now, as the pacer reads it (fail closed). Returns the time now recorded.
+ */
+export function carryLastPageAt(dir: string, at: IsoDateTime, clock: Clock): IsoDateTime {
+  // why: the pacer's own reading of its file (spacing 0: only the reader is used, and every spacing reads alike)
+  const current = new Pacer({ dir, minSpacingSeconds: 0, clock }).lastPageAt();
+  if (current !== null && Date.parse(current) >= Date.parse(at)) return current;
+  writePrivateFile(join(dir, FILE), JSON.stringify({ lastPageAt: at }));
+  return at;
+}

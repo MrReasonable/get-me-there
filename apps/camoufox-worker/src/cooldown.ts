@@ -103,4 +103,16 @@ export class CooldownStore {
     if (current !== null && Date.parse(current.until) >= Date.parse(end)) return current;
     return this.write({ until: end, cause });
   }
+
+  /**
+   * WP17 Task 17.8 (`run.ts session merge`): a cool-down carried from a recording session's data directory, which
+   * loaded its pages from this machine's address. It is written only when it is still active and ends later than the
+   * one in force; otherwise the record in force stands (null when none). Returns the cool-down now in force.
+   */
+  carry(rec: CooldownRecord): CooldownRecord | null {
+    const current = this.active();
+    if (Date.parse(rec.until) <= Date.parse(this.clock.now())) return current;
+    if (current !== null && Date.parse(current.until) >= Date.parse(rec.until)) return current;
+    return this.write(rec);
+  }
 }
