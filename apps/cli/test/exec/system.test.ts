@@ -769,6 +769,132 @@ describe('systemExecutor: waits, redirects and answers (survivors, PR #11)', () 
       e.run({ kind: 'waitUnlocked', path: d, holder: 'the worker', timeoutSeconds: 1 }),
     ).rejects.toThrow(/EISDIR/);
   });
+  // why: spec §13: a start is done only once the worker answers; its service manager reports it started before that
+  describe('waitWorkerAnswers', () => {
+    const wait = (refusalFile: string, timeoutSeconds = 60) => ({
+      kind: 'waitWorkerAnswers' as const,
+      port: 8191,
+      log: '/l/camoufox-worker.log',
+      refusalFile,
+      timeoutSeconds,
+    });
+    const worker = (status: number) =>
+      new Response(null, { status, headers: { 'x-gmt-google-contacted': '0' } });
+    it('asks the worker’s port on loopback, without the key, a second apart, until an answer carries the worker’s header', async () => {
+      const answers: Array<() => Promise<Response>> = [
+        () => Promise.reject(new TypeError('fetch failed')),
+        // why: something else answering on the port is not the worker
+        async () => new Response('{}', { status: 200 }),
+        async () => worker(401),
+      ];
+      const asked: Array<{ url: string; init: RequestInit | undefined }> = [];
+      const fetchFn: typeof fetch = (url, init) => {
+        asked.push({ url: String(url), init });
+        return (answers.shift() ?? (async () => worker(401)))();
+      };
+      const sleeps: number[] = [];
+      const e = systemExecutor(noChild, {
+        fetch: fetchFn,
+        sleep: async (ms) => void sleeps.push(ms),
+        now: () => 0,
+      });
+      await expect(e.run(wait(join(tmp(), 'start-refusal.json')))).resolves.toEqual({ stdout: '' });
+      expect(asked.map((a) => a.url)).toEqual(Array(3).fill('http://127.0.0.1:8191/v1/status'));
+      expect(asked.map((a) => a.init?.headers)).toEqual([undefined, undefined, undefined]);
+      expect(asked.every((a) => a.init?.signal instanceof AbortSignal && a.init.redirect === 'manual')).toBe(
+        true,
+      );
+      expect(sleeps).toEqual([1000, 1000]);
+    });
+    it('fails at its deadline, inclusive, naming the port and the log, and the refusal file when one is there', async () => {
+      const d = tmp();
+      let clock = 0;
+      let tries = 0;
+      const e = systemExecutor(noChild, {
+        fetch: () => {
+          tries++;
+          return Promise.reject(new TypeError('fetch failed'));
+        },
+        sleep: async (ms) => {
+          clock += ms;
+        },
+        now: () => clock,
+      });
+      const file = join(d, 'start-refusal.json');
+      await expect(e.run(wait(file, 2))).rejects.toThrow(
+        new Error('the worker did not answer on 127.0.0.1:8191 within 2 s; its log: /l/camoufox-worker.log'),
+      );
+      // tries at 0, 1 and 2 s: the one at the deadline still counts
+      expect(tries).toBe(3);
+      writeFileSync(file, '{"reason":"signed-in","at":"2026-10-24T09:30:00.000Z"}');
+      clock = 0;
+      await expect(e.run(wait(file, 2))).rejects.toThrow(
+        `its log: /l/camoufox-worker.log; its start refusal file ${file} (written 2026-10-24T09:30:00.000Z) says: refused, not retrying: the browser profile is signed in to an account: clear it; fix: pnpm --filter @gmt/camoufox-worker clear-signed-in`,
+      );
+      writeFileSync(file, 'not a refusal');
+      clock = 0;
+      await expect(e.run(wait(file, 2))).rejects.toThrow(
+        `; its start refusal file ${file} is there but cannot be read`,
+      );
+      // why: a directory where the file should be cannot be read either; nothing from it is shown
+      clock = 0;
+      await expect(e.run(wait(d, 2))).rejects.toThrow(
+        `; its start refusal file ${d} is there but cannot be read`,
+      );
+    });
+    it('a try with no answer is ended by its own bound, on the executor’s timers, and each bound is cleared', async () => {
+      const fires: Array<() => void> = [];
+      const bounds: number[] = [];
+      const cleared: unknown[] = [];
+      let handle = 0;
+      const timers = {
+        set(fire: () => void, ms: number) {
+          fires.push(fire);
+          bounds.push(ms);
+          return ++handle;
+        },
+        clear(h: unknown) {
+          cleared.push(h);
+        },
+      };
+      let tries = 0;
+      const fetchFn: typeof fetch = (_url, init) => {
+        tries++;
+        if (tries > 1) return Promise.resolve(worker(401));
+        // why: an accepted connection that never answers: only the try's own bound ends it
+        return new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(init.signal?.reason));
+          fires.shift()?.();
+        });
+      };
+      const e = systemExecutor(noChild, {
+        fetch: fetchFn,
+        timers,
+        healthTryMs: 750,
+        sleep: async () => {},
+        now: () => 0,
+      });
+      await expect(e.run(wait(join(tmp(), 'start-refusal.json')))).resolves.toEqual({ stdout: '' });
+      expect(tries).toBe(2);
+      expect(bounds).toEqual([750, 750]);
+      expect(cleared).toEqual([1, 2]);
+    });
+    it('an answer whose body cannot be discarded still counts', async () => {
+      const body = new ReadableStream({
+        cancel() {
+          throw new Error('cannot cancel');
+        },
+      });
+      const e = systemExecutor(noChild, {
+        fetch: async () => new Response(body, { status: 401, headers: { 'x-gmt-google-contacted': '0' } }),
+        sleep: async () => {
+          throw new Error('asked only once');
+        },
+        now: () => 0,
+      });
+      await expect(e.run(wait(join(tmp(), 'start-refusal.json')))).resolves.toEqual({ stdout: '' });
+    });
+  });
   it('pidAlive: this process is alive; a pid no process has is not', () => {
     expect(pidAlive(process.pid)).toBe(true);
     expect(pidAlive(2_147_483_646)).toBe(false);

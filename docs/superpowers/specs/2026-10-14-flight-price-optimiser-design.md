@@ -1,6 +1,6 @@
 # get-me-there — Flight Price Intelligence & Flexible-Date Optimiser
 
-**Design spec, revision 46.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
+**Design spec, revision 47.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
 four full-roster reviews (145, 140, 126 and 101 findings; zero Critical since
 revision 2) and the provider spike. Revision 9 folds in the three decisions
 taken at approval (the self-scraping fallback in §2, the dashboard readings in
@@ -2874,7 +2874,22 @@ process holding `<workerData>/worker.lock`, each wait bounded by the stop
 timeout plus 15 s and saying at its bound what is still running; the worker's
 start check runs only then. A check that refuses leaves the worker stopped
 (its launchd agent booted out), prints the refusal with its fix and that the
-worker is stopped, and exits 78 rather than reporting the restart done. `gmt browser install` installs or
+worker is stopped, and exits 78 rather than reporting the restart done.
+Every start of the worker's service (`gmt start`, `restart`, `update`,
+setup's browser step, and `browser install`, `browser counts` and `gmt
+consent` when they start it again) is done only once the worker answers:
+its service manager reports it started before it listens, since it launches
+its browser first (about 3 s on the operator's Mac). The command asks `GET
+/v1/status` on `127.0.0.1` at worker.env's `CAMOUFOX_WORKER_PORT`, without
+the key, a second apart, until an answer carries `x-gmt-google-contacted`
+(the worker's 401, answered before any route runs: no page, no cookie read,
+no redirect followed, nothing beyond loopback), for at most 60 s. A worker
+that never answers fails the command (exit 1, never "done"), naming the
+port, the worker's log (`~/Library/Logs/get-me-there/camoufox-worker.log`,
+or `journalctl --user -u get-me-there-camoufox-worker.service`) and, when
+the worker left one, `start-refusal.json` with its reason and fix; setup's
+browser step still starts the app again after it. A start the check refuses
+is neither started nor waited on. `gmt browser install` installs or
 reinstalls the pinned bundle and its layout in any app mode (native, in
 Docker or none), needing no `app.env`: it asks a native app about an active
 run first, and where `worker.env` exists it removes the retired
@@ -3218,6 +3233,15 @@ as specified in §5.3; no secrets, no full URLs.
 ---
 
 ## 17. Changelog
+
+### Revision 47: a start of the worker is done once the worker answers (2026-10-26)
+
+On the operator's Mac, `gmt restart --only worker` printed "restart: done" as soon as launchd had started the worker,
+which listens only about 3 s later, after its browser has launched; a `gmt status` run straight after reported the
+worker unreachable and its consent unchecked. §13 now says every start of the worker's service waits until the worker
+answers a keyless request to its status route on loopback (any answer carrying its own header), a second apart, for
+at most 60 s, and that a worker that never answers fails the command, naming its port, its log and any start refusal
+file, never printing "done" (setup's browser step still starts the app again). A start its check refuses is unchanged. No other design rule changes.
 
 ### Revision 46: a grid view is taken only once its cells have drawn (2026-10-26)
 

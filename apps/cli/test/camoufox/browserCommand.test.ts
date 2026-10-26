@@ -135,6 +135,10 @@ describe('gmt browser install (W1)', () => {
     const link = r.findIndex((x) => x.startsWith('ln -s'));
     const start = r.findIndex((x) => x.startsWith('launchctl bootstrap'));
     expect([stop >= 0, link > stop, start > link]).toEqual([true, true, true]);
+    // why: spec §13: the started worker is waited on until it answers, before the older bundle goes
+    const kinds = m.executor.log.map((a) => a.kind);
+    expect(kinds.indexOf('waitWorkerAnswers')).toBeGreaterThan(kinds.lastIndexOf('writeFile'));
+    expect(m.executor.log.filter((a) => a.kind === 'waitWorkerAnswers')).toHaveLength(1);
     expect(m.fs.isDir(OLD)).toBe(false);
     expect(m.loaded.has('local.get-me-there.camoufox-worker')).toBe(true);
   });

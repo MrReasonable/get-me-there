@@ -12,6 +12,7 @@
     "src/services/**/*.ts",
     "src/exec/system.ts",
     "src/exec/http.ts",
+    "src/worker/answer.ts",
     "src/setup/appEnv.ts",
     "src/setup/answers.ts",
     "src/setup/secrets.ts",

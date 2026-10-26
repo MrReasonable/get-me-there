@@ -6,7 +6,9 @@ import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { REDIRECT_HOSTS } from '@gmt/core';
 import type { Action, Executor } from '../plan/action.js';
+import { answeredAsWorker, notAnswering, workerAnswerUrl } from '../worker/answer.js';
 import { liveHolder, stillHeld } from '../worker/lock.js';
+import { refusalOfText } from '../worker/refusal.js';
 import type { Runner } from './runner.js';
 
 /**
@@ -24,7 +26,7 @@ export interface SystemExecutorOptions {
   runTimeoutMs?: number;
   /** The fetch a download and the health wait use (tests pass their own). */
   fetch?: typeof fetch;
-  /** How long one health request may take before it counts as no answer. */
+  /** How long one health request, or one request to the worker, may take before it counts as no answer. */
   healthTryMs?: number;
   /**
    * Called with each temporary file once it exists and before any data is written to it (a test's event to check its
@@ -35,7 +37,10 @@ export interface SystemExecutorOptions {
   downloadIdleMs?: number;
   /** How long a whole download may take; 60 minutes by default. */
   downloadTotalMs?: number;
-  /** The download bounds' timers (tests pass their own to fire a bound on demand); the real ones by default. */
+  /**
+   * The download bounds' timers and each worker request's own bound (tests pass their own to fire a bound on demand);
+   * the real ones by default.
+   */
   timers?: { set(fire: () => void, ms: number): unknown; clear(handle: unknown): void };
   /** Whether a pid is a live process, for `waitUnlocked` (tests pass their own); `pidAlive` by default. */
   isAlive?: (pid: number) => boolean;
@@ -368,6 +373,24 @@ export function systemExecutor(runner: Runner, opts: SystemExecutorOptions = {})
             await sleep(1000);
           }
         }
+        // why: spec §13: the worker's service manager returns before the worker listens; it is asked a second apart on
+        // this executor's clock, each try ended by its own bound on this executor's timers
+        case 'waitWorkerAnswers': {
+          const deadline = now() + a.timeoutSeconds * 1000;
+          for (;;) {
+            if (await workerAnswers(fetchFn, a.port, healthTryMs, timers)) return none;
+            if (now() >= deadline) {
+              let refusal: ReturnType<typeof refusalOfText>;
+              try {
+                refusal = refusalOfText(await textOrNull(a.refusalFile));
+              } catch {
+                refusal = 'unreadable';
+              }
+              throw new Error(notAnswering(a, refusal));
+            }
+            await sleep(1000);
+          }
+        }
         case 'waitHealthy': {
           const deadline = now() + a.timeoutSeconds * 1000;
           for (;;) {
@@ -380,6 +403,30 @@ export function systemExecutor(runner: Runner, opts: SystemExecutorOptions = {})
       }
     },
   };
+}
+
+/** One request to the worker on loopback (worker/answer.ts): an answer with its header within `tryMs`, never a redirect. */
+async function workerAnswers(
+  fetchFn: typeof fetch,
+  port: number,
+  tryMs: number,
+  timers: NonNullable<SystemExecutorOptions['timers']>,
+): Promise<boolean> {
+  const stop = new AbortController();
+  const bound = timers.set(() => stop.abort(), tryMs);
+  try {
+    // why: a refused connection, or a try its bound ended, is no answer
+    const res = await fetchFn(workerAnswerUrl(port), { redirect: 'manual', signal: stop.signal }).catch(
+      () => null,
+    );
+    if (res === null) return false;
+    const answered = answeredAsWorker(res.headers);
+    // why: the body is not read; a failure to discard it does not undo an answer already had
+    await res.body?.cancel().catch(() => undefined);
+    return answered;
+  } finally {
+    timers.clear(bound);
+  }
 }
 
 /** One health try: a 2xx JSON answer with `ok: true` within `tryMs`. */
