@@ -274,6 +274,24 @@ describe('gmt status by app mode: Docker only, native only, both (W1)', () => {
     expect(m.runner.calls.map((c) => c.argv.join(' ')).join('\n')).not.toContain(DOCKER_PASS);
     expect(m.executor.log).toEqual([]);
   });
+  it('Docker only, published on loopback: no bind-address warning', async () => {
+    for (const published of ['127.0.0.1:3917', '[::1]:3917']) {
+      const { m } = dockerOnly('running', undefined, published);
+      expect(await runCli(['status'], m.deps)).toBe(0);
+      expect(m.io.stdout).not.toContain('bind address');
+      expect(m.io.stdout).not.toContain('beyond this machine');
+    }
+  });
+  it('Docker only, published beyond loopback: warns with the same words and a compose fix; no fail', async () => {
+    for (const published of ['0.0.0.0:3917', '[::]:3917']) {
+      const { m } = dockerOnly('running', undefined, published);
+      expect(await runCli(['status'], m.deps)).toBe(0);
+      expect(m.io.stdout).toMatch(
+        /bind address +warn .*published beyond loopback: plain HTTP beyond this machine needs TLS or Tailscale: docs\/setup\.md section 3/,
+      );
+      expect(m.io.stdout).toContain('fix: publish 127.0.0.1:3000:3000 in docker-compose.yml');
+    }
+  });
   it('Docker only, the app not answering: the reason, a Docker next step, exit 1, and still no native fix', async () => {
     const { m } = dockerOnly('running', () => ({ error: 'connection refused' }));
     expect(await runCli(['status'], m.deps)).toBe(1);

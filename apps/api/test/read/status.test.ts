@@ -73,6 +73,14 @@ const CASES: Case[] = [
     has: ['plain HTTP beyond this machine needs TLS or Tailscale: docs/setup.md section 3'],
   },
   {
+    // why: inside the container the app binds 0.0.0.0 and compose decides the host address, which the app cannot see
+    row: 'app',
+    state: 'ok',
+    id: 'app',
+    facts: healthyFacts({ mode: 'container', app: { ...healthyFacts().app, loopback: false } }),
+    has: ['container mode', 'sign-in on'],
+  },
+  {
     row: 'app',
     state: 'fail',
     id: 'app',

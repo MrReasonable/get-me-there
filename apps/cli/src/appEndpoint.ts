@@ -74,6 +74,18 @@ export async function dockerAppState(deps: Deps): Promise<DockerAppState> {
   return app.State === 'running' ? 'running' : 'stopped';
 }
 
+/**
+ * The host address and port compose publishes for the container's 3000 (`docker compose port app 3000`), or null when
+ * compose does not say. The address has no brackets (`::1`, not `[::1]`). Inside the container the app binds 0.0.0.0;
+ * this published address is what decides who can reach it.
+ */
+export async function dockerPublished(deps: Deps): Promise<{ address: string; port: number } | null> {
+  const r = await deps.run(compose('port', 'app', '3000'), { cwd: deps.checkout, timeoutMs: 20_000 });
+  const m = r.code === 0 ? /^(127\.0\.0\.1|0\.0\.0\.0|\[::1?\]|::):(\d+)$/.exec(r.stdout.trim()) : null;
+  if (m?.[1] === undefined || m[2] === undefined) return null;
+  return { address: m[1].replace(/^\[|\]$/g, ''), port: Number(m[2]) };
+}
+
 /** The Docker app, given its compose state (read it with dockerAppState). */
 export async function dockerEndpoint(deps: Deps, state: DockerAppState): Promise<AppEndpoint> {
   if (state === 'unknown')
@@ -82,12 +94,8 @@ export async function dockerEndpoint(deps: Deps, state: DockerAppState): Promise
       reason: 'there is no native install, and Docker’s compose state could not be read',
     };
   if (state !== 'running') return { kind: 'none', reason: 'the Docker app is not running' };
-  const published = await deps.run(compose('port', 'app', '3000'), { cwd: deps.checkout, timeoutMs: 20_000 });
-  const m =
-    published.code === 0
-      ? /^(?:127\.0\.0\.1|0\.0\.0\.0|\[::1?\]|::):(\d+)$/.exec(published.stdout.trim())
-      : null;
-  const port = m?.[1] === undefined ? null : Number(m[1]);
+  const published = await dockerPublished(deps);
+  const port = published?.port ?? null;
   if (port === null || port < 1 || port > 65535)
     return { kind: 'none', reason: 'compose did not say which host port the Docker app publishes' };
   let text: string | null;

@@ -110,6 +110,15 @@ function appCheck(f: StatusFacts): StatusCheck {
       fix: fix('replace the password so sign-in is on', 'pnpm gmt setup --reconfigure password'),
     });
   const base = `version ${f.version}, up ${uptime}, ${f.mode} mode`;
+  // why: in a container the app binds 0.0.0.0 and compose decides the host address, which the app cannot see; `gmt status`
+  // judges that address, so the app's own bind is not a finding there
+  if (f.mode === 'container')
+    return check({
+      id: 'app',
+      area: 'app',
+      state: 'ok',
+      summary: `${base}, ${f.app.authOn ? 'sign-in on' : 'sign-in off for development'}`,
+    });
   if (!f.app.loopback)
     return check({
       id: 'app',

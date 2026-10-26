@@ -2879,7 +2879,7 @@ never printed); it prints the Docker app's report beside the worker's
 service, `worker.env` and refusal, does not check `app.env`, the app service
 or the daily backup job, and offers neither `pnpm gmt setup` nor `docker
 compose down`; a stopped container is a `fail` with `docker compose start
-app`, and with no published port known the credentials are sent nowhere.
+app`, and with no published port known the credentials are sent nowhere. That report's `app` check never warns on a container's own bind (the container binds `0.0.0.0`); `gmt status` itself warns, with the same words and the fix of publishing `127.0.0.1:3000:3000`, when the address compose publishes is not loopback, and says nothing when it is. A native app keeps its `BIND_ADDRESS` check.
 With no native install and a compose state Docker cannot report (`docker
 compose ps` failing or printing what is not its JSON), the app's state is
 unknown: a `fail` saying so, the worker's facts, and no native fix. The worker enforces its
