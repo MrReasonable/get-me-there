@@ -1124,8 +1124,10 @@ missing with its install line; on Ubuntu 24.04:
 `sudo apt-get install libasound2t64 libatk1.0-0t64 libavcodec60 libcairo-gobject2 libcairo2 libdbus-1-3 libfontconfig1 libfreetype6 libgdk-pixbuf-2.0-0 libglib2.0-0t64 libgtk-3-0t64 libpango-1.0-0 libpangocairo-1.0-0 libx11-6 libx11-xcb1 libxcb-shm0 libxcb1 libxcomposite1 libxcursor1 libxdamage1 libxext6 libxfixes3 libxi6 libxrandr2 libxrender1`
 (Debian 12 also needs `libdbus-glib-1-2 libharfbuzz0b libxtst6`). The worker writes its own `fonts.conf` beside
 `worker.env`, naming the bundle's `fonts/macos/` by absolute path, because the bundled one resolves fonts from the
-working directory. Each `<os>-<arch>` earns its flags from recordings made under its own build; until `linux-arm64`
-and `linux-x64` have theirs, the provider is not offered there. In Docker on Linux the app cannot reach the host's
+working directory. Each `<os>-<arch>` earns its flags from recordings made under its own build; `linux-arm64` and
+`linux-x64` have theirs, recorded on 2026-10-26 in Linux containers (`apps/camoufox-worker/Dockerfile.recorder`, whose
+header has the `docker run` line, and `apps/camoufox-worker/recorder/session.sh`, which stops this machine's worker for
+a session and carries its last page, counts and any pause in and out). In Docker on Linux the app cannot reach the host's
 loopback, so the Docker path on Linux leaves the provider off; the native app reaches it.
 
 ### The monthly caps across every caller

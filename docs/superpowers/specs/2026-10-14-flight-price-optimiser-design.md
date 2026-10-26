@@ -1,6 +1,6 @@
 # get-me-there — Flight Price Intelligence & Flexible-Date Optimiser
 
-**Design spec, revision 42.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
+**Design spec, revision 43.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
 four full-roster reviews (145, 140, 126 and 101 findings; zero Critical since
 revision 2) and the provider spike. Revision 9 folds in the three decisions
 taken at approval (the self-scraping fallback in §2, the dashboard readings in
@@ -189,8 +189,13 @@ flags live beside `CAMOUFOX_BUILDS` in `core/camoufox/builds.ts` (`FLAGS`,
 read by the worker's selectors module and by the CLI), per `<os>-<arch>`,
 each set bound to the build it was recorded under: a flag counts as true only while the running
 build equals that set's build. `darwin-arm64`'s come from the 2026-10-18
-recordings; the others stay false until a recording session under that
-entry's build sets them, and until then the worker refuses to start there
+recordings (its landing view from 2026-10-25's), and `darwin-x64`'s,
+`linux-arm64`'s and `linux-x64`'s from their own recording sessions of
+2026-10-26, each under its own build; `darwin-x64` has every flag but the
+date grid's, since each of its grid recordings held a view taken before its
+cells had rendered, which the reading refused (so grid mode stays
+unavailable there). An entry whose flags are not set for its pinned build (a
+new pin before its recordings) stays off: the worker refuses to start there
 (exit 78) naming the missing recording, `gmt setup` does not offer the
 provider on that machine, and the app runs without it. The profile is a persistent directory
 of the worker's own under its data directory, never shared and never seeded
@@ -635,14 +640,22 @@ in a `finally` (a start-up sweep removes any left by a killed run); (4) a "no
 flights" page, from a valid query the operator picks at recording time for a
 pair or date with no service, or a record that none appeared, in which case
 the no-flights line stays unverified. For each further `<os>-<arch>`
-entry the operator repeats (2) and (4), and the `--grid` pages, under that
+entry the operator repeats (2) and (4), the landing view (`record
+--landing`: the worker's own profile with `SOCS` set, the landing page read
+under the landing rule, nothing clicked) and the `--grid` pages, under that
 entry's build, and the session sets that entry's flags only (work package
 17): `darwin-x64` on the operator's Mac under Rosetta, `linux-arm64` in a
 Linux arm64 container on the same Mac and `linux-x64` in a Linux x64
 container under emulation, all headless with the generated `fonts.conf`, so
-every load comes from the operator's own address like every other recording.
-The containers mount only the source paths the recorder needs, never `.env`,
-`data/` or any settings file. Work package 17 also records, in throwaway
+every load comes from the operator's own address like every other recording;
+each Linux session also prices one grid page through an app running in the
+same container. Because the address is the operator's, the host's worker is
+stopped for the session, the session's spacing starts from the host's last
+page, and the session's pages, scrolls and any cool-down are merged back into
+the host's data directory before its worker starts again (the later last-page
+time, the counts added when the billing windows match, the longer cool-down
+kept). The containers mount only the source paths the recorder needs, never
+`.env`, `data/` or any settings file. Work package 17 also records, in throwaway
 profiles, headed, with the person clicking and under the `consent`
 command's guard above, one "Reject all" and one "Accept all" capture,
 storing the two `SOCS` cookies' fields and the consent form submission's
@@ -3171,6 +3184,16 @@ as specified in §5.3; no secrets, no full URLs.
 ---
 
 ## 17. Changelog
+
+### Revision 43: the recording sessions (2026-10-26)
+
+WP17 Task 17.8's sessions recorded `darwin-x64` (the operator's Mac under Rosetta), `linux-arm64` (a Linux arm64
+container) and `linux-x64` (a Linux x64 container under emulation) on build `152.0.4-beta.28`, headless, and each
+Linux session priced one grid page through an app in its own container. §2 Method now says every entry has its own
+flags, `darwin-x64` all but the date grid's (each of its grid recordings held a view taken before its cells had
+rendered, which the reading refused); §2 Recordings first adds the headless landing view (`record --landing`) and the
+session's handover with the host's worker (stopped for the session; the last page carried in, the pages, scrolls and
+any cool-down merged back). No other design rule changes.
 
 ### Revision 42: the worker's restart waits for the old worker (2026-10-26)
 
