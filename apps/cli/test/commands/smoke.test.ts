@@ -65,15 +65,19 @@ describe('gmt smoke (spec §13: it states its spend before posting)', () => {
       ['Travelpayouts: up to 2 free calls'],
     ],
     [
-      { searchApi: null, travelpayouts: null, camoufox: { pages: 1, scrolls: 30 } },
+      { searchApi: null, travelpayouts: null, camoufox: { pages: 1, scrolls: 30, pageBoundSeconds: 2145 } },
       ['browser provider: 1 page, up to 30 scrolls'],
     ],
     [
-      { searchApi: null, travelpayouts: null, camoufox: { pages: 1, scrolls: 0 } },
+      { searchApi: null, travelpayouts: null, camoufox: { pages: 1, scrolls: 0, pageBoundSeconds: 105 } },
       ['browser provider: 1 page'],
     ],
     [
-      { searchApi: SA, travelpayouts: { freeCalls: 2 }, camoufox: { pages: 1, scrolls: 0 } },
+      {
+        searchApi: SA,
+        travelpayouts: { freeCalls: 2 },
+        camoufox: { pages: 1, scrolls: 0, pageBoundSeconds: 105 },
+      },
       [
         'SearchApi: up to 4 calls (calendar 1, itinerary 3)',
         'Travelpayouts: up to 2 free calls',
@@ -196,6 +200,41 @@ describe('gmt smoke (spec §13: it states its spend before posting)', () => {
       'another tool run spent SearchApi credits since the check; run pnpm gmt smoke again to see the new total',
     );
     expect(raced.io.stderr).not.toContain('--budget');
+  });
+
+  it.each([
+    ['no browser provider', ONLY_SA, 600_000],
+    [
+      'a list page',
+      { searchApi: SA, travelpayouts: null, camoufox: { pages: 1, scrolls: 0, pageBoundSeconds: 105 } },
+      705_000,
+    ],
+    [
+      'a grid page at the default settings',
+      { searchApi: null, travelpayouts: null, camoufox: { pages: 1, scrolls: 30, pageBoundSeconds: 2145 } },
+      2_745_000,
+    ],
+  ])(
+    '%s: the smoke waits 600 s for the rest of the run plus the bound the app states for its page; the dry run 600 s',
+    async (_label, plan, timeoutMs) => {
+      const w = world(plan);
+      expect(await runCli(ARGS, w.deps)).toBe(0);
+      const posts = w.http.requests.filter((r) => r.method === 'POST');
+      expect(posts.map((r) => [JSON.parse(r.body ?? '{}').dryRun === true, r.timeoutMs])).toEqual([
+        [true, 600_000],
+        [false, timeoutMs],
+      ]);
+    },
+  );
+
+  it('a plan whose browser entry states no bound for its page is not read: nothing is posted', async () => {
+    const w = world(
+      { searchApi: null, travelpayouts: null, camoufox: { pages: 1, scrolls: 30 } },
+      { answers: [] },
+    );
+    expect(await runCli(ARGS, w.deps)).toBe(78);
+    expect(w.io.stderr).toContain("cannot read the smoke's plan");
+    expect(w.posts).toEqual([]);
   });
 
   it('a route is required; no settings refuses', async () => {

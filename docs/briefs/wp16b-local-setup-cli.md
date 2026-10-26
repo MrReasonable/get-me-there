@@ -360,7 +360,7 @@ Verify each on the day of dispatch and record the source and date here.
 - **undici 7.30.1** (`/nodejs/undici`: "Timeouts", `docs/docs/api/Client.md`; checked 2026-10-26): `deps.http`
   (`src/exec/http.ts`) calls undici's own `fetch` with one `Agent({ headersTimeout: 0, bodyTimeout: 0 })`, so each
   request's `timeoutMs` (its `AbortSignal.timeout`) is the one bound that ends it; Node's global fetch would apply
-  undici's 300 s defaults, below the smoke's 600 s (spec §13 rev 44). Its timers fire at about one second's
+  undici's 300 s defaults, below the smoke's wait (spec §13 rev 45). Its timers fire at about one second's
   resolution, so the test's stand-in timeout is 1 s.
 - **GitHub-hosted runners**: research task 16b.0 below.
 
@@ -650,7 +650,10 @@ removal command), `pnpm gmt logs`, and that a plain `pnpm gmt setup` finishes. R
     asserts the printed figures equal the plan route's (and so `smokeWorstCase`); its `--help` line says "spends real
     calls: up to 4 SearchApi credits and one browser page with today's settings", and a test pins those figures to
     `smokeWorstCase` at the default settings; then it posts `POST /api/tools/smoke` with basic auth from `app.env`
-    (never argv) and the mutating-route headers. A test asserts setup, update, status and the e2e fixture never call
+    (never argv) and the mutating-route headers. The dry run waits 600 s; the real post waits 600 s plus the plan's
+    `pageBoundSeconds` when the browser provider is configured (the app's bound for its page, which the CLI cannot
+    compute in a container), and a test per plan asserts both waits; a plan whose browser entry lacks the bound is not
+    read, and nothing is posted. A test asserts setup, update, status and the e2e fixture never call
     it.
   - Local `status` is `localChecks(deps)` (§5, reads only) printed with `describeChecks`: each service's state, each
     settings file's presence and mode, the price source as a line of its own ("none" a `warn` with the fix), a

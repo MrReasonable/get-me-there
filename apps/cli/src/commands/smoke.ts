@@ -30,17 +30,33 @@ export function spendLines(p: SmokePlan): string[] {
 
 const MUTATING = { 'Content-Type': 'application/json', 'X-Requested-With': 'get-me-there' } as const;
 
+/**
+ * What a smoke post waits for besides the browser page, and the dry run's whole wait: the vendors' stages, the worker's
+ * status read and a margin.
+ */
+export const SMOKE_REST_MS = 600_000;
+
+/**
+ * How long the real smoke post waits for the app's answer (spec §13): `SMOKE_REST_MS`, plus the bound the plan route
+ * states for the browser page when that provider is configured. why: the app's bound for a grid page (2 × page timeout
+ * + scroll cap × (spacing + 60 s) + 15 s: 2,145 s at the default settings) passes any fixed wait, and only the app holds
+ * the settings it computes it from (in a container they come from compose's environment and the app's own defaults).
+ */
+export const smokeWaitMs = (p: SmokePlan): number =>
+  SMOKE_REST_MS + (p.camoufox === null ? 0 : p.camoufox.pageBoundSeconds * 1000);
+
 async function postSmoke(
   deps: Deps,
   c: AppCreds,
   body: Record<string, unknown>,
+  timeoutMs: number,
 ): Promise<z.infer<typeof apiContract.toolRunResponseSchema> | string> {
   const r = await deps.http({
     method: 'POST',
     url: credsUrl(c, '/api/tools/smoke'),
     headers: { ...authHeaders(c), ...MUTATING },
     body: JSON.stringify(body),
-    timeoutMs: 600_000,
+    timeoutMs,
   });
   if ('error' in r) return `no answer from the app on port ${c.port}`;
   try {
@@ -57,7 +73,8 @@ async function postSmoke(
  * posts a dry run (it ledgers nothing) and shows its lines, stopping on its refusal; states the credits tool runs
  * already used in this window (the dry run's `searchApiCreditsLedgered`, U7) and asks for a typed `yes` for that
  * running total (`--yes` in scripts, with `--accept-total` once earlier tool runs used credits: decision 20); then
- * posts the smoke with that total as its budget. Basic auth from app.env travels in the request header only.
+ * posts the smoke with that total as its budget, waiting `smokeWaitMs` of the plan for it. Basic auth from app.env
+ * travels in the request header only.
  */
 export async function smokeCommand(flags: Flags, _p: string | null, deps: Deps): Promise<number> {
   // why: po-b1-013: the Definitions form's rule; lowercase is upper-cased, anything but three letters refused
@@ -113,12 +130,13 @@ export async function smokeCommand(flags: Flags, _p: string | null, deps: Deps):
     );
     return EXIT.spendRefused;
   }
-  const dry = await postSmoke(deps, creds, {
-    origin: from,
-    destination: to,
-    budget: Math.max(1, credits),
-    dryRun: true,
-  });
+  // why: the dry run loads no page, so it waits for the rest only
+  const dry = await postSmoke(
+    deps,
+    creds,
+    { origin: from, destination: to, budget: Math.max(1, credits), dryRun: true },
+    SMOKE_REST_MS,
+  );
   if (typeof dry === 'string') {
     deps.io.err(`the smoke's dry run failed: ${dry}; nothing was sent\n`);
     return EXIT.failed;
@@ -156,7 +174,12 @@ export async function smokeCommand(flags: Flags, _p: string | null, deps: Deps):
       return EXIT.badConfig;
     }
   }
-  const run = await postSmoke(deps, creds, { origin: from, destination: to, budget: Math.max(1, total) });
+  const run = await postSmoke(
+    deps,
+    creds,
+    { origin: from, destination: to, budget: Math.max(1, total) },
+    smokeWaitMs(plan),
+  );
   if (typeof run === 'string') {
     deps.io.err(`the smoke failed: ${run}\n`);
     return EXIT.failed;

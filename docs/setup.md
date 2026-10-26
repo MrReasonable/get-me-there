@@ -156,7 +156,9 @@ provider from the app (with today's settings, up to 4 SearchApi credits and one 
 and the SearchApi credits tool runs have already used in this window, refuses when the SearchApi
 trial has fewer credits left, and asks you to type `yes` for the running total. In scripts `--yes`
 skips the question, and once earlier tool runs have used credits in the window it also needs
-`--accept-total`. Lowercase airport codes are accepted.
+`--accept-total`. Lowercase airport codes are accepted. It waits 10 minutes for the app's answer,
+plus, with the browser provider set up, the longest the app allows its one page (about 36
+minutes for a grid page at the default settings), so a slow page is never cut short.
 
 `pnpm gmt update` refuses a checkout with local changes or not on `main`, fetches before it
 stops anything, and refuses while a search is running (naming it and its estimated finish)

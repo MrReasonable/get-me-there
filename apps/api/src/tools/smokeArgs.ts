@@ -14,7 +14,7 @@ import {
   iataSchema,
   monthOf,
 } from '@gmt/core';
-import { defaultRecordedRoot } from '@gmt/providers';
+import { camoufoxHttpLimits, defaultRecordedRoot } from '@gmt/providers';
 import { positiveInt, readFlags } from './args.js';
 import { isInside } from './paths.js';
 import {
@@ -109,14 +109,18 @@ export function smokeQuery(today: IsoDate, origin: Iata, destination: Iata): Dis
 export interface SmokeWorstCase extends WorstCase {
   /** SearchApi credits: one calendar tile, then the itinerary chain's `1 + 2 × expandTop`. */
   searchApi: { calendar: number; itinerary: number } | null;
-  /** The browser pages (one list or grid tile) and, in grid mode, the scrolls that page may make. */
-  camoufox: { pages: number; scrolls: number } | null;
+  /**
+   * The browser pages (one list or grid tile), in grid mode the scrolls that page may make, and the page's bound: the
+   * seconds http-kit lets its request run (spec §5.3), which `gmt smoke` waits for on top of the rest (spec §13).
+   */
+  camoufox: { pages: number; scrolls: number; pageBoundSeconds: number } | null;
 }
 
 /**
  * The run's stated worst case: SearchApi one calendar tile plus the chain's `1 + 2 × expandTop` (the adapter's own
  * estimate rule, spec §5.4); Travelpayouts one month tile at the page cap; camoufox one page, with up to
- * CAMOUFOX_GRID_SCROLL_CAP scrolls in grid mode. `credits` and `freeCalls` are the totals the spend position checks.
+ * CAMOUFOX_GRID_SCROLL_CAP scrolls in grid mode, bounded by the request timeout the run's http-kit gives that page.
+ * `credits` and `freeCalls` are the totals the spend position checks.
  */
 export function smokeWorstCase(config: Config): SmokeWorstCase {
   const sa = config.providers.searchapi;
@@ -126,7 +130,15 @@ export function smokeWorstCase(config: Config): SmokeWorstCase {
     credits: searchApi === null ? 0 : searchApi.calendar + searchApi.itinerary,
     freeCalls: config.providers.travelpayouts === null ? 0 : TP_MAX_PAGES_PER_TILE,
     searchApi,
-    camoufox: cf === null ? null : { pages: 1, scrolls: cf.mode === 'grid' ? cf.gridScrollCap : 0 },
+    camoufox:
+      cf === null
+        ? null
+        : {
+            pages: 1,
+            scrolls: cf.mode === 'grid' ? cf.gridScrollCap : 0,
+            // why: the same limits the run's http-kit ends the page at, so the bound the CLI waits for cannot drift
+            pageBoundSeconds: camoufoxHttpLimits(cf, config).requestTimeoutSeconds,
+          },
   };
 }
 

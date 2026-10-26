@@ -1,6 +1,6 @@
 # get-me-there — Flight Price Intelligence & Flexible-Date Optimiser
 
-**Design spec, revision 44.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
+**Design spec, revision 45.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
 four full-roster reviews (145, 140, 126 and 101 findings; zero Critical since
 revision 2) and the provider spike. Revision 9 folds in the three decisions
 taken at approval (the self-scraping fallback in §2, the dashboard readings in
@@ -2314,7 +2314,9 @@ or the engine. First-failing-test per WP in §16.
    one, never partial. The CLI's HTTP client is tested against a local
    server whose answer, headers or body, comes after fetch's own timeout
    (stood in by a small one) and still arrives, while one later than the
-   request's own bound does not. The launchd plist and the systemd units have snapshot
+   request's own bound does not; `gmt smoke`'s post waits 600 s plus the
+   plan route's `pageBoundSeconds`, and the route's test pins that figure
+   to the request timeout http-kit gives the smoke's browser page. The launchd plist and the systemd units have snapshot
    tests plus property tests (the parsed `ProgramArguments` equals the argv;
    `ExecStart` round-trips paths with spaces, quotes, `%` and `$`), and are
    checked by `plutil -lint` and `systemd-analyze --user verify` in the
@@ -2414,7 +2416,7 @@ shape carries `provenance` and `stale`.
 | `GET /definitions/:id/calendar-gap` | cells whose calendar price is below the cheapest class-`verified` observation (incl. children); empty when the definition has no verification provider |
 | `GET /definitions/:id/cells/:origin/:destination/:departureDate/:returnDate` | that cell's outcomes per stage and provider and its prices, each with full provenance (the View B side panel source) |
 | `POST /tools/smoke`, `POST /tools/record` | the live smoke and recording scripts run inside the app process (authenticated), for use while the app holds `app_lock`; the response's `searchApiCreditsLedgered` is the smoke's running total (the SearchApi credits tool runs had already ledgered in the window at its spend check, null before that check and for `record`), which `gmt smoke` prints and confirms |
-| `GET /tools/smoke/plan` | authenticated, ledgers nothing: the smoke's worst case from `smokeWorstCase` (SearchApi credits split into calendar and itinerary, Travelpayouts free calls, browser pages and, in grid mode, the scroll allowance) and the SearchApi trial credits left, which `gmt smoke` prints before it asks |
+| `GET /tools/smoke/plan` | authenticated, ledgers nothing: the smoke's worst case from `smokeWorstCase` (SearchApi credits split into calendar and itinerary, Travelpayouts free calls, browser pages and, in grid mode, the scroll allowance), the SearchApi trial credits left, which `gmt smoke` prints before it asks, and the browser page's bound (`pageBoundSeconds`: the per-request timeout the smoke's http-kit gives that page, from the same limits, §5.3), which `gmt smoke` waits for (§13) |
 | `GET /itineraries/:hash/history`, `GET /routes/:o/:d/history?cabin=` | series per provider and kind; the route's calendar series has one point per execution fetch (the pair's minimum across its cells, carrying the cheapest cell); reused rows excluded; the vendor's price-history series comes grouped by searched trip (`trip` = its departure and return dates, null for rows stored before the trip was recorded), each point vendor-stated GBP |
 | `GET/POST/PUT/DELETE /alerts[/:id]`, `GET /alerts/events` | |
 | `GET /scheduler/jobs`, `GET /budget` | |
@@ -2648,7 +2650,7 @@ CAMOUFOX_EXECUTION_PAGE_CAP=100          # page loads per execution (BudgetExcee
 CAMOUFOX_MONTHLY_PAGE_CAP=1500           # page loads per billing month (provider-month; no-page rows not counted); the app's ledger enforces it; the worker enforces it too
 CAMOUFOX_BILLING_DAY=1                   # 1–28: the month starts 00:00 UTC that day, for both monthly caps, in the ledger and the worker
 CAMOUFOX_COOLDOWN_HOURS=48               # pause after a challenge, sign-in or consent page; 24–100000 (an unrecognised page pauses a fixed 1 h)
-CAMOUFOX_PAGE_TIMEOUT_SECONDS=90         # the worker's whole-page deadline (load, settle, read), 30–240; the app's request timeout is this + 15 s
+CAMOUFOX_PAGE_TIMEOUT_SECONDS=90         # the worker's whole-page deadline (load, settle, read), 30–240; the app's request timeout is this + 15 s (grid: 2 × this + scroll cap × (scroll spacing + 60 s) + 15 s)
 CAMOUFOX_MODE=list                       # list (one day pair a page) or grid (the Dates tab's date grid, once the worker reports GRID_VERIFIED and its measured step)
 CAMOUFOX_GRID_SCROLL_SPACING_SECONDS=5   # grid: scroll clicks start to start; 0–30 (0 means no pause: scrolls go back to back); never randomised
 CAMOUFOX_GRID_SCROLL_CAP=30              # grid: scrolls a page may make; 0–60
@@ -3034,8 +3036,17 @@ states the credits tool runs have already used in the window (the response's
 for that total (`--yes` in scripts, which once earlier tool runs used credits
 also needs `--accept-total`: decision 20); setup, update, status and the CI
 jobs never run it. Each request the CLI makes to the app or the worker
-carries its own bound (the smoke's posts 600 s), and its HTTP client has no
-header or body timeout of its own, so that bound is the one that ends it. `update`
+carries its own bound, and its HTTP client has no header or body timeout of
+its own, so that bound is the one that ends it. The smoke's dry run waits
+600 s; the smoke itself waits 600 s for everything but the browser page (the
+vendors' stages, the worker's status, a margin) plus, when the browser
+provider is configured, the page's bound the plan route states
+(`pageBoundSeconds`), so the CLI never gives up on a page the app is still
+allowed to finish: a list page's is the page timeout plus 15 s, a grid page's
+twice the page timeout, plus the scroll cap times (the scroll spacing plus a
+move's 60 s), plus 15 s (2,145 s at the default settings). The app states it
+because only the app holds the settings it computes it from (in a container,
+compose's environment and the app's own defaults). `update`
 refuses a checkout with local changes or not on `main`; runs `git fetch` and
 checks that `git merge --ff-only` is possible while the app still runs;
 refuses while a run is active, naming it and its estimated finish (`GET
@@ -3194,6 +3205,16 @@ as specified in §5.3; no secrets, no full URLs.
 ---
 
 ## 17. Changelog
+
+### Revision 45: the smoke waits for its page's own bound (2026-10-26)
+
+`gmt smoke` waited 600 s for the app's answer, while the app's bound for one grid page is 2,145 s at the default
+settings (twice the page timeout, plus the scroll cap times the scroll spacing plus a move's 60 s, plus 15 s), so a
+slow grid page still lost its client while the app carried on and the page counted. §10's `GET /tools/smoke/plan`
+now also states the browser page's bound (`pageBoundSeconds`), from the same limits the smoke's http-kit ends that
+page at; §13 says the smoke waits 600 s for the rest of the run plus that bound (its dry run 600 s), because only the
+app holds the settings the bound comes from; §12 states the grid page's request timeout beside the page timeout; §9
+item 9 adds the tests. No other design rule changes.
 
 ### Revision 44: a request's own bound is its only one (2026-10-26)
 
