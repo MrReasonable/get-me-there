@@ -133,7 +133,7 @@ async function choose(deps: Deps, o: Options): Promise<boolean> {
  * worker's check, then CAMOUFOX_ENABLED and the worker service.
  */
 async function turnOn(deps: Deps, o: Options): Promise<BrowserOutcome> {
-  const avail = browserAvailability(deps.platform);
+  const avail = browserAvailability(deps.platform, deps.flags);
   if (avail === null) {
     deps.io.out(`${unavailableText(`${deps.platform.os}-${deps.platform.arch}`)}\n`);
     return 'unavailable';
@@ -316,7 +316,7 @@ export async function browserSetup(
   // why: a run with no terminal and no browser answer asks nothing and turns nothing on, but still says once where
   // the provider is not offered on this machine
   if (!o.reconfigure && !o.interactive && o.choice?.enabled === undefined) {
-    if (browserAvailability(deps.platform) !== null) return 'off';
+    if (browserAvailability(deps.platform, deps.flags) !== null) return 'off';
     deps.io.out(`${unavailableText(`${deps.platform.os}-${deps.platform.arch}`)}\n`);
     return 'unavailable';
   }

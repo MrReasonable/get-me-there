@@ -1,4 +1,11 @@
-import { CAMOUFOX_BUILDS, type CamoufoxBuild, CONSENT_FIX, flagsFor, type OsArch } from '@gmt/core';
+import {
+  CAMOUFOX_BUILDS,
+  type CamoufoxBuild,
+  CONSENT_FIX,
+  type FlagName,
+  flagsFor,
+  type OsArch,
+} from '@gmt/core';
 import type { Platform } from '../platform/types.js';
 import { megabytes, osArchOf } from './install.js';
 
@@ -12,12 +19,15 @@ export interface Availability {
   entry: CamoufoxBuild;
 }
 
-/** This machine's entry when its flags are set for its pinned build, else null. */
-export function browserAvailability(p: Pick<Platform, 'os' | 'arch'>): Availability | null {
+/** This machine's entry when its flags (core's `flagsFor` unless a test states them) are set for its pinned build, else null. */
+export function browserAvailability(
+  p: Pick<Platform, 'os' | 'arch'>,
+  flags: (osArch: OsArch, build: string) => Readonly<Record<FlagName, boolean>> = flagsFor,
+): Availability | null {
   const osArch = osArchOf(p);
   if (osArch === null) return null;
   const entry = CAMOUFOX_BUILDS[osArch];
-  return flagsFor(osArch, entry.build).FORM_VERIFIED ? { osArch, entry } : null;
+  return flags(osArch, entry.build).FORM_VERIFIED ? { osArch, entry } : null;
 }
 
 /** Said once where the provider is not offered (pinned by a test). */

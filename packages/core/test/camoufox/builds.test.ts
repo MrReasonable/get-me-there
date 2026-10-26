@@ -155,11 +155,14 @@ describe('FLAGS and flagsFor (spec §2 rev 36: flags per <os>-<arch>, bound to t
     expect(Object.keys(FLAGS['darwin-arm64'].flags)).toEqual([...FLAG_NAMES]);
   });
 
-  it('every other entry is all false until its own recording session', () => {
-    for (const k of ['darwin-x64', 'linux-arm64', 'linux-x64'] as const) {
-      expect(Object.values(FLAGS[k].flags).some(Boolean), k).toBe(false);
-      expect(Object.keys(FLAGS[k].flags)).toEqual([...FLAG_NAMES]);
+  it('every entry names every flag, and each earned its search form in its own recording session', () => {
+    // why: WP17 Task 17.8: the darwin-x64, linux-arm64 and linux-x64 sessions of 2026-10-26 set their own flags
+    for (const k of OS_ARCHES) {
+      expect(Object.keys(FLAGS[k].flags), k).toEqual([...FLAG_NAMES]);
+      expect(FLAGS[k].flags.FORM_VERIFIED, k).toBe(true);
     }
+    // why: darwin-x64's grid recordings each held a view the reading refused, so its grid mode stays off
+    expect(FLAGS['darwin-x64'].flags.GRID_VERIFIED).toBe(false);
   });
 
   it('a flag set is bound to its build: an entry with any flag true names the build CAMOUFOX_BUILDS pins', () => {
@@ -173,7 +176,7 @@ describe('FLAGS and flagsFor (spec §2 rev 36: flags per <os>-<arch>, bound to t
     const off = Object.fromEntries(FLAG_NAMES.map((f) => [f, false]));
     expect(flagsFor('darwin-arm64', '152.0.4-beta.27')).toEqual(off);
     expect(flagsFor('darwin-arm64', '')).toEqual(off);
-    expect(flagsFor('linux-x64', PINNED)).toEqual(off);
+    expect(flagsFor('linux-x64', '152.0.4-beta.27')).toEqual(off);
   });
 });
 
@@ -218,7 +221,6 @@ describe('startChecks (pure; the worker’s own start and the status report use 
   it.each([
     ['locked', { locked: true }],
     ['flags-unset', { osArch: null }],
-    ['flags-unset', { osArch: 'linux-x64' }],
     ['layout', { layoutOk: false }],
     ['build-mismatch', { installedBuild: '152.0.4-beta.27' }],
     ['build-mismatch', { installedBuild: null }],
@@ -318,7 +320,7 @@ describe('the pin as data (pin.ts)', () => {
   it('flagsIn reads any pin: its flags on its own build, none on another', () => {
     expect(flagsIn(CAMOUFOX_PIN, 'darwin-arm64', '152.0.4-beta.28').FORM_VERIFIED).toBe(true);
     expect(flagsIn(CAMOUFOX_PIN, 'darwin-arm64', '152.0.4-beta.27').FORM_VERIFIED).toBe(false);
-    expect(Object.values(flagsIn(CAMOUFOX_PIN, 'linux-x64', '152.0.4-beta.28')).every((v) => !v)).toBe(true);
+    expect(Object.values(flagsIn(CAMOUFOX_PIN, 'linux-x64', '152.0.4-beta.27')).every((v) => !v)).toBe(true);
   });
   it('osArchOf maps the platform and arch to an entry, and nothing else', () => {
     expect(osArchOf('darwin', 'arm64')).toBe('darwin-arm64');

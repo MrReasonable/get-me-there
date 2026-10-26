@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { asIsoDateTime, fixedClock } from '@gmt/core';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { Pacer } from '../src/pacer.js';
+import { carryLastPageAt, Pacer } from '../src/pacer.js';
 import { tmpDir } from './support/tmp.js';
 
 const T0 = asIsoDateTime('2026-10-18T05:00:00.000Z');
@@ -173,5 +173,51 @@ describe('Pacer with spacing 0', () => {
     writeFileSync(join(dir, 'pacer.json'), '{not json');
     const clock = fixedClock(T0);
     expect(new Pacer({ dir, minSpacingSeconds: 0, clock }).claim()).toEqual({ ok: true });
+  });
+});
+
+// why: WP17 Task 17.8: a recording session's last page is carried between data directories (run.ts session seed and
+// merge), and a carried time never moves the last page earlier
+describe('carryLastPageAt (Task 17.8)', () => {
+  it('writes the time when none is recorded, 0600, and the pacer then waits from it', async () => {
+    const dir = tmpDir();
+    const clock = fixedClock(T0);
+    expect(carryLastPageAt(dir, asIsoDateTime('2026-10-18T04:59:50.000Z'), clock)).toBe(
+      '2026-10-18T04:59:50.000Z',
+    );
+    const { statSync } = await import('node:fs');
+    expect(statSync(join(dir, 'pacer.json')).mode & 0o777).toBe(0o600);
+    expect(new Pacer({ dir, minSpacingSeconds: 30, clock }).claim()).toEqual({
+      ok: false,
+      retryAfterSeconds: 18,
+    });
+  });
+  it('keeps the later of the recorded time and the carried one', () => {
+    const dir = tmpDir();
+    const clock = fixedClock(T0);
+    carryLastPageAt(dir, asIsoDateTime('2026-10-18T04:00:00.000Z'), clock);
+    expect(carryLastPageAt(dir, asIsoDateTime('2026-10-18T03:00:00.000Z'), clock)).toBe(
+      '2026-10-18T04:00:00.000Z',
+    );
+    expect(new Pacer({ dir, minSpacingSeconds: 30, clock }).lastPageAt()).toBe('2026-10-18T04:00:00.000Z');
+    expect(carryLastPageAt(dir, asIsoDateTime('2026-10-18T04:30:00.000Z'), clock)).toBe(
+      '2026-10-18T04:30:00.000Z',
+    );
+    expect(new Pacer({ dir, minSpacingSeconds: 30, clock }).lastPageAt()).toBe('2026-10-18T04:30:00.000Z');
+  });
+  it('an equal time is kept as it is', () => {
+    const dir = tmpDir();
+    const clock = fixedClock(T0);
+    carryLastPageAt(dir, asIsoDateTime('2026-10-18T04:00:00.000Z'), clock);
+    expect(carryLastPageAt(dir, asIsoDateTime('2026-10-18T04:00:00.000Z'), clock)).toBe(
+      '2026-10-18T04:00:00.000Z',
+    );
+  });
+  it('an unreadable record reads as now (fail closed), so a carried earlier time leaves now', () => {
+    const dir = tmpDir();
+    writeFileSync(join(dir, 'pacer.json'), '{not json');
+    const clock = fixedClock(T0);
+    expect(carryLastPageAt(dir, asIsoDateTime('2026-10-18T04:00:00.000Z'), clock)).toBe(T0);
+    expect(new Pacer({ dir, minSpacingSeconds: 30, clock }).lastPageAt()).toBe(T0);
   });
 });

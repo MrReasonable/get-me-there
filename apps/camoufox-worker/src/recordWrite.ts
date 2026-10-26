@@ -61,14 +61,15 @@ export function writeRecording(
 
 export function writeUnrecorded(
   root: string,
+  kind: 'no-flights' | 'landing',
   day: string,
   facts: { data: Record<string, unknown> },
   secrets: readonly string[],
 ): void {
   const text = `${JSON.stringify({ recordedAt: day, recordedBy: RECORDED_BY, appeared: facts.data }, null, 2)}\n`;
   assertClean(text, secrets);
-  mkdirSync(join(root, 'no-flights'), { recursive: true, mode: DIR_MODE });
-  const file = join(root, 'no-flights', 'unrecorded.meta.json');
+  mkdirSync(join(root, kind), { recursive: true, mode: DIR_MODE });
+  const file = join(root, kind, 'unrecorded.meta.json');
   writeFileSync(file, text, { mode: FILE_MODE });
   // why: a second run overwrites the file, whose mode writeFileSync leaves as it was
   chmodSync(file, FILE_MODE);

@@ -1687,6 +1687,9 @@ describe('record --grid', () => {
     const rec = recOf(t);
     expect(rec).toMatchObject({
       kind: 'grid',
+      // why: WP17 Task 17.8: an exploration names the entry and bundle it was recorded under, as a recording's meta does
+      osArch: 'darwin-arm64',
+      bundleSha256: '8b7680a61818245cf4eb0150edab811d4ed937b6723514569e74c3e7df9685bd',
       socsReadBack: 'same',
       window: [1280, 900],
       clicked: [
@@ -1922,5 +1925,114 @@ describe('stderrLog debug lines', () => {
     const lines: string[] = [];
     realRecordDeps(prepared, (l) => lines.push(l), true).log.debug({ a: 1 }, 'x');
     expect(lines).toHaveLength(1);
+  });
+});
+
+// why: WP17 Task 17.8: the landing view earns LANDING_VERIFIED on the entries recorded headless, where no person
+// clicks a consent page: the worker's own profile, SOCS set, the landing page (no query) read with the hypothesis on
+describe('record --landing (Task 17.8)', () => {
+  const LANDING = 'https://www.google.com/travel/flights?hl=en-GB&gl=GB';
+  const landingTree = () =>
+    n('document', 'Google Flights', [
+      n('heading', 'Flights'),
+      n('heading', 'Find cheap flights'),
+      ...formNodes(),
+    ]);
+  const unverified = { ...SELECTORS, LANDING_VERIFIED: false };
+  const cooldownOf = (t: ReturnType<typeof setup>) =>
+    new CooldownStore({ dir: t.dataDir, challengeHours: 48, clock: t.timers.clock }).active();
+  it('parses with no query, one page', () => {
+    expect(parseRecordArgs(['--landing'])).toEqual({ kind: 'landing', request: null, pages: 1, moves: [] });
+    expect(() => parseRecordArgs(['--landing', '--grid'])).toThrow(/at most one of .*--landing/);
+  });
+  it('loads the landing page with SOCS set, clicks nothing and records the view, the flag still off', async () => {
+    const t = setup({ navigations: [{ hops: [LANDING], tree: landingTree() }] });
+    const code = await record(t.ctx(['--landing']), cfg, { ...t.deps, selectors: unverified });
+    expect(t.err).toEqual([]);
+    expect(code).toBe(0);
+    expect(written(t.root)).toEqual(['landing/2026-10-18/1.facts.json', 'landing/2026-10-18/1.meta.json']);
+    const c = t.contexts[0];
+    expect(c?.added[0]?.[0]?.name).toBe('SOCS');
+    expect(c?.pages[0]?.calls.gotos.map((g) => g.url)).toEqual([LANDING]);
+    expect(c?.pages[0]?.calls.clicks).toEqual([]);
+    const facts = JSON.parse(readFileSync(join(t.root, 'landing/2026-10-18/1.facts.json'), 'utf8'));
+    expect(facts).toMatchObject({
+      kind: 'landing',
+      landing: LANDING,
+      hops: [LANDING],
+      clicked: [],
+      headings: ['Flights', 'Find cheap flights'],
+      socsReadBack: 'same',
+      page: { text: { landingHeading: true }, resultLinks: 0, dateGridButtons: 0, cheapestTabs: [] },
+    });
+    const meta = JSON.parse(readFileSync(join(t.root, 'landing/2026-10-18/1.meta.json'), 'utf8'));
+    expect(meta).toMatchObject({ kind: 'landing', osArch: 'darwin-arm64', socsReadBack: 'same' });
+    expect(t.out.join()).toContain('recorded ');
+    expect(cooldownOf(t)).toBeNull();
+    expect(JSON.parse(readFileSync(join(t.dataDir, 'monthly.json'), 'utf8')).pages).toBe(1);
+  });
+  it('a view the landing rule never recognises is what appeared: unrecorded, no pause, the flag stays off', async () => {
+    const t = setup({ navigations: [{ hops: [LANDING], tree: resultsTree() }] });
+    expect(await record(t.ctx(['--landing']), cfg, { ...t.deps, selectors: unverified })).toBe(0);
+    expect(written(t.root)).toEqual(['landing/unrecorded.meta.json']);
+    const u = JSON.parse(readFileSync(join(t.root, 'landing/unrecorded.meta.json'), 'utf8'));
+    expect(u.appeared).toMatchObject({ kind: 'landing', landing: LANDING, hops: [LANDING] });
+    expect(u.appeared.headings).toEqual(['Top departing flights', 'Other departing flights']);
+    expect(u.appeared.page.resultLinks).toBe(2);
+    expect(t.out.join()).toMatch(/LANDING_VERIFIED stays false/);
+    expect(cooldownOf(t)).toBeNull();
+  });
+  it('a consent page is the stop it always is: the pause, the profile wiped, nothing recorded as the landing', async () => {
+    const t = setup({
+      navigations: [
+        {
+          hops: [LANDING, 'https://consent.google.com/ml?continue=x'],
+          tree: n('document', '', [n('heading', 'Before you continue to Google')]),
+        },
+      ],
+    });
+    expect(await record(t.ctx(['--landing']), cfg, t.deps)).toBe(EX_UNAVAILABLE);
+    // why: as on every kind, a consent stop is recorded as the failure it is, never as a view
+    expect(written(t.root)).toEqual(['landing/2026-10-18/1.facts.json', 'landing/2026-10-18/1.meta.json']);
+    expect(JSON.parse(readFileSync(join(t.root, 'landing/2026-10-18/1.facts.json'), 'utf8'))).toMatchObject({
+      failure: 'consent-unhandled',
+    });
+    expect(cooldownOf(t)?.cause).toBe('consent-unhandled');
+    expect(existsSync(t.profiles[0] ?? '')).toBe(false);
+  });
+  it('a challenge on the landing page stops and pauses', async () => {
+    const t = setup({
+      navigations: [{ hops: [LANDING], tree: n('document', '', [text("I'm not a robot")]) }],
+    });
+    expect(await record(t.ctx(['--landing']), cfg, t.deps)).toBe(EX_UNAVAILABLE);
+    expect(cooldownOf(t)?.cause).toBe('captcha');
+    expect(written(t.root)).toEqual([]);
+    // why: the stop record keeps what the classifier saw on that view
+    const stop = JSON.parse(readFileSync(join(t.root, 'stopped/2026-10-18/1.facts.json'), 'utf8'));
+    expect(stop).toMatchObject({ cause: 'captcha', rule: 'challenge-text', resultLinks: 0 });
+  });
+  it('a read that fails other than by the deadline ends the recording with that error, writing nothing', async () => {
+    const t = setup({ navigations: [{ hops: [LANDING], tree: landingTree() }] });
+    const deps: RecordDeps = {
+      ...t.deps,
+      launch: async (p) => {
+        const c = await t.deps.launch(p);
+        if (c instanceof FakeContext)
+          c.onNewPage = (pg) => {
+            const role = pg.getByRole.bind(pg);
+            let calls = 0;
+            pg.getByRole = (...a: Parameters<FakePage['getByRole']>) => {
+              calls++;
+              if (calls === 1) throw new Error('the page went away');
+              return role(...a);
+            };
+          };
+        return c;
+      },
+    };
+    expect(await record(t.ctx(['--landing']), cfg, deps)).not.toBe(0);
+    expect(t.err.join()).toContain('the page went away');
+    expect(written(t.root)).toEqual([]);
+    expect(cooldownOf(t)).toBeNull();
   });
 });

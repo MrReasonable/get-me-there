@@ -5,9 +5,9 @@ owner: opus
 depends_on: [16a, 16b]
 spec_sections: ["§2 Method", "§2 Caps across callers", "§2 Consent", "§2 Recordings first", "§2 Labels", "§2 Costs", "§9 item 9", "§9 CI matrix", "§12 Where settings live", "§13 Native local mode", "§13 The camoufox worker", "§16", "§17 revision 36"]
 reviewers: [provenance-auditor, provider-integration-expert, security-reviewer, devops-reviewer, cost-and-budget-reviewer, test-strategy-reviewer, code-architect, product-owner]
-mutate: {"@gmt/camoufox-worker": ["src/monthly.ts", "src/consentLine.ts", "src/socsMark.ts"], "@gmt/cli": ["src/camoufox/**"]}
+mutate: {"@gmt/camoufox-worker": ["src/monthly.ts", "src/consentLine.ts", "src/socsMark.ts", "src/sessionLine.ts"], "@gmt/cli": ["src/camoufox/**"]}
 pending: {}
-status: open (Tasks 17.1–17.7, 17.9, 17.10 and research 17.0c built; Task 17.8, the recording sessions, open)
+status: open (every task built; Task 17.8's recording sessions recorded on 2026-10-26, in review)
 ---
 
 # WP17: Camoufox install, consent capture, the worker's caps and the Linux worker
@@ -206,8 +206,8 @@ export function readCounts(dir: string): Promise<MonthlyCounts | 'absent' | 'ref
 
 ## 6. Files
 
-Create: `apps/camoufox-worker/src/{consent,consentLine,consentDriver,consentGuard,fonts,startRefusal,monthly}.ts`
-(+ tests); `apps/camoufox-worker/Dockerfile.recorder`; `apps/cli/src/camoufox/{install,layout,workerEnv,offer,libs}.ts`
+Create: `apps/camoufox-worker/src/{consent,consentLine,consentDriver,consentGuard,fonts,startRefusal,monthly,sessionLine,stdin}.ts`
+(+ tests); `apps/camoufox-worker/Dockerfile.recorder` and `apps/camoufox-worker/recorder/session.sh`; `apps/cli/src/camoufox/{install,layout,workerEnv,offer,libs}.ts`
 (+ tests); `apps/cli/src/commands/consent.ts`.
 
 Modify: `packages/providers/src/camoufox/provider.ts` (the notes' wording; `monthly-cap` → `BudgetExceeded` at
@@ -451,32 +451,73 @@ Built (2026-10-25); the bullets marked *not built* were dropped with revision 40
 
 ### Task 17.8: The recording sessions (operator, with the implementer)
 
-- [ ] **Before each session:** `pnpm gmt stop --only worker` for the host worker (the worker alone: a native app keeps
-  running); no camoufox run active (`GET
-  /api/executions/active` and the definitions' providers); refuse while the host worker's persisted cool-down is
-  active; seed the session's last-page time from the host's (`run.ts session export` on the host piped into `run.ts
-  session seed` in the session's container or throwaway `HOME`). **After:** pipe the session's `run.ts session export`
-  into the host's `run.ts session merge` (the later last-page time, the counts added) before `pnpm gmt start --only
-  worker`, or wait
-  one spacing interval when the windows differ; record the session's page and scroll counts in the session record.
-  Tests: seed sets only the last-page time; merge adds counts and keeps the later time; merge refuses while the host
-  worker runs or the line fails its schema.
-- [ ] `apps/camoufox-worker/Dockerfile.recorder`: `FROM node:22-slim` pinned by digest, §0's Linux libraries and
-  `unzip`, Node and pnpm; mounts (documented `docker run` line) only `apps/`, `packages/`, `pnpm-lock.yaml`,
-  `package.json`, `pnpm-workspace.yaml` read-only and `fixtures/recorded/` read-write, plus a named volume for the worker
-  data; no published ports. A start-up check refuses when any `.env`, `app.env` or `worker.env` is visible.
-- [ ] `linux-arm64` (native arm64 container) and `linux-x64` (`--platform linux/amd64`): `gmt setup` inside the
-  container (the provider chosen, the install from `CAMOUFOX_BUILDS`), `SOCS` by `gmt consent import`, then the recorder
-  kinds of spec §2 (2), (4), the landing view and `--grid`, headless with the generated `fonts.conf`.
-- [ ] `darwin-x64`: under a throwaway `HOME` (so `camoufoxRoot`, `workerData` and `socs.json` are separate from the
-  operator's), with an x86_64 Node build run under `arch -x86_64`, asserting `process.arch === 'x64'` at the start;
-  `gmt setup` there installs the `darwin-x64` entry; `SOCS` by `gmt consent import`; the same kinds; then
-  `recordings:backup` and the throwaway tree removed.
-- [ ] `recordings:backup` after each session.
-- [ ] One commit per entry sets its `FLAGS` set (build and flags) to what its recordings prove, naming the files by
-  date.
-- [ ] One live grid page per Linux entry through an app running inside the same container (app and worker on its
-  loopback) prices its cells.
+Done on 2026-10-26 (the operator approved the live loads); every page loaded under the recorder's or the worker's own
+rules (the lock, the spacing from the host's last page, the monthly count, the guard, the classifier, the cool-downs),
+headless, from the operator's own address, with the build `152.0.4-beta.28` of each entry, and no page stopped.
+
+- [x] **Before each session:** `recorder/session.sh before` on the host asks the app whether a search runs (`GET
+  /api/executions/active` with the checkout's basic auth, read and never printed) and refuses while one does, stops the
+  host worker alone (`pnpm gmt stop --only worker` from the checkout its service runs from) and prints the host's `run.ts
+  session export` line, which `run.ts session seed` reads in the session's container or throwaway `HOME`. The line is
+  `{ lastPageAt, windowStart, pages, scrolls, cooldown }`: `seed` sets only the session's last-page time (never earlier
+  than its own), refuses while the host's cool-down is active, naming its end, and in a new directory also starts this
+  window's counts at zero (a pacer file with no counts file beside it reads as an earlier worker's data, which every
+  page refuses). **After:** the session's app and worker are stopped, then its export line is piped into
+  `recorder/session.sh after`, whose `run.ts session merge` keeps the later last-page time, adds the counts when the
+  windows start at the same instant (otherwise it adds none and says so) and carries the session's cool-down when it ends
+  later than the host's, before `pnpm gmt start --only worker`. Seed and merge take the worker's lock (merge refuses
+  while the host worker runs) and refuse a line that fails its strict schema, writing nothing. Tests: seed sets only the
+  last-page time; merge adds counts, keeps the later time and the longer cool-down; both refuse a held lock and a bad
+  line; `src/sessionLine.ts` is mutation-tested.
+- [x] `apps/camoufox-worker/Dockerfile.recorder`: `FROM node:22-slim` pinned by the app image's digest, §0's libraries
+  under Debian 12's names and `unzip`, Node and pnpm, and the workspace's dependencies installed into the image's root
+  `node_modules` from the lockfile (the source mounts are read-only, so no install can write the per-package
+  `node_modules`; the checkout's own per-package links are relative and name the lockfile's store directories, so they
+  resolve to the image's). The documented `docker run` line mounts only `apps/`, `packages/`, `pnpm-lock.yaml`,
+  `package.json`, `pnpm-workspace.yaml` read-only and `fixtures/recorded/` read-write, plus a named volume for the
+  worker data, and publishes no port. The start-up check refuses when any `.env` (but `.env.example`), `app.env` or
+  `worker.env`, or a `data/` directory, is visible in the mounted source, or when the source is writable.
+- [x] `linux-arm64` (a native arm64 container) and `linux-x64` (`--platform linux/amd64`, under emulation): `gmt setup`
+  does not run in a container (no service manager) and does not offer the provider before the entry's flags exist, so
+  the session installs with `pnpm gmt browser install` (the same install sequence: the entry from `CAMOUFOX_BUILDS`,
+  its hash and library checks) and writes the container's own `worker.env` and, for the grid page, `app.env` with the
+  keys setup writes (a fresh worker key, `CAMOUFOX_MONTHLY_PAGE_CAP=15` as the session's page budget). `SOCS` comes by
+  `consent import` of a line encoded with the worker's own codec from the host's stored rejection, through a private
+  file deleted after (`consent export` captures anew with a person's click, which a session has none of). Then the
+  recorder kinds of spec §2 (2), (4), the landing view and `--grid`, headless with the generated `fonts.conf`. The
+  landing view is recorded by `record --landing` (added here): the worker's own profile with `SOCS` set, the landing
+  page read under the landing rule with the hypothesis on (as `--no-flights` reads its line), nothing clicked; a view
+  the rule does not recognise is written as `landing/unrecorded.meta.json` with the flag left off, and a blocked kind is
+  the stop it always is. `linux-x64` ran with `CAMOUFOX_PAGE_TIMEOUT_SECONDS=180`, after a first View more page did not
+  settle within 90 s under emulation (no stop; the page counted).
+- [x] `darwin-x64`: under a throwaway `HOME`, with the official Node 22.23.3 x86_64 build (checked against its
+  `SHASUMS256.txt`) run under `arch -x86_64`, `process.arch === 'x64'` asserted before every step; a throwaway checkout
+  of the branch with its dependencies installed by that Node (the operator's checkout holds only arm64 native
+  packages); `pnpm gmt browser install` installed the `darwin-x64` entry; `SOCS` by `consent import` as above; the same
+  kinds, and a second grid page from a second data directory under the same `HOME` (its own seed and merge); then the
+  throwaway checkout, `HOME` and Node removed.
+- [x] `recordings:backup` after each session (`camoufox-2026-10-26`).
+- [x] One commit per entry sets its `FLAGS` set, with `PROOFS` (now kept per entry) naming each recording by kind, date
+  and number. Every entry has every flag but `VIEW_MORE_ADDS_CHEAPER` (each View more page's minimum equalled its
+  results page's); `darwin-x64` also leaves `GRID_VERIFIED` off: each of its two grid pages held a view taken before
+  its cells had rendered (42 of 49 after the first scroll; none in the second page's first view), which the reading
+  refused, so no recording shows a whole page of views there. The recorded suites read each recording under its own
+  entry's flags, hold only entries with `GRID_VERIFIED` to the grid's strict checks, and keep it false wherever a view
+  was refused.
+- [x] One live grid page per Linux entry through an app running inside the same container (app and worker on its
+  loopback, `CAMOUFOX_MODE=grid`, `CAMOUFOX_EXECUTION_PAGE_CAP=1`): a run of a nine-cell definition that one grid view
+  covers priced 9 of 9 cells on each entry. (On `linux-arm64` a first try through `pnpm gmt smoke` loaded its grid page
+  with 28 scrolls, but the smoke's request outlasted the CLI's wait and its answer was lost; that page counted.)
+
+The session record:
+
+| entry | pages | scrolls | recordings (2026-10-26) |
+|---|---|---|---|
+| `linux-arm64` | 11 (9 recorder, the lost smoke page, the app's page) | 32 | results 1, cheapest 1, view-more 1, socs-stability 1–3, no-flights 1, landing 1, grid 1 |
+| `linux-x64` | 11 (10 recorder, one a View more page that did not settle, the app's page) | 4 | results 2, cheapest 2, view-more 2, socs-stability 4–6, no-flights 2, landing 2, grid 2 |
+| `darwin-x64` | 10 (all recorder) | 8 | results 3, cheapest 3, view-more 3, socs-stability 7–9, no-flights 3, landing 3, grid 3 and 4 |
+
+The host worker's month after the three merges: 57 pages and 144 scrolls.
 
 ### Task 17.9: The `camoufox-install` CI job
 

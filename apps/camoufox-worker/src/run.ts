@@ -251,6 +251,7 @@ export const ENTRIES: Readonly<Record<string, () => Promise<Entry>>> = {
   'capture-socs': async () => (await import('./captureSocs.js')).entry,
   check: async () => (await import('./startRefusal.js')).entry,
   counts: async () => (await import('./counts.js')).entry,
+  session: async () => (await import('./sessionLine.js')).entry,
   consent: async () => (await import('./consent.js')).entry,
 };
 

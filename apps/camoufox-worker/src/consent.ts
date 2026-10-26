@@ -36,6 +36,7 @@ import {
   type SocsCapture,
   writeCapture,
 } from './socs.js';
+import { readBounded } from './stdin.js';
 import { realTimers, type Timers } from './timers.js';
 import { landingUrl } from './url.js';
 
@@ -477,18 +478,8 @@ export function consentCheck(ctx: EntryContext, clock: Clock): number {
   return 0;
 }
 
-/** Standard input, up to `max` bytes; `too-long` as soon as more arrives (the rest is never read). */
-export async function readBounded(input: AsyncIterable<unknown>, max: number): Promise<string | 'too-long'> {
-  const chunks: Buffer[] = [];
-  let total = 0;
-  for await (const c of input) {
-    const b = Buffer.isBuffer(c) ? c : Buffer.from(String(c));
-    total += b.length;
-    if (total > max) return 'too-long';
-    chunks.push(b);
-  }
-  return Buffer.concat(chunks).toString('utf8');
-}
+// why: the bounded reader moved to stdin.ts (WP17 Task 17.8 shares it); re-exported for its existing callers
+export { readBounded };
 
 export const CONSENT_USAGE =
   'usage: consent [export | import | check]: consent captures here, export prints the line for another machine, import reads that line from standard input, check reports the stored record';

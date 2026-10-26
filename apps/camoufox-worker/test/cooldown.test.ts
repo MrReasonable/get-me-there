@@ -129,3 +129,33 @@ describe('CooldownStore bounds', () => {
     );
   });
 });
+
+// why: WP17 Task 17.8: a recording session's cool-down is carried back to the host's data directory (run.ts session
+// merge): the address is the same, so the later end stands and nothing is ever shortened
+describe('CooldownStore.carry (Task 17.8)', () => {
+  it('writes an active carried record where there is none', () => {
+    const s = new CooldownStore({ dir: tmpDir(), challengeHours: 48, clock: fixedClock(T0) });
+    const rec = { until: asIsoDateTime('2026-10-19T05:00:00.000Z'), cause: 'captcha' as const };
+    expect(s.carry(rec)).toEqual(rec);
+    expect(s.active()).toEqual(rec);
+  });
+  it('an ended carried record changes nothing', () => {
+    const s = new CooldownStore({ dir: tmpDir(), challengeHours: 48, clock: fixedClock(T0) });
+    expect(s.carry({ until: T0, cause: 'captcha' })).toBeNull();
+    expect(s.active()).toBeNull();
+    s.start('unrecognised');
+    expect(s.carry({ until: asIsoDateTime('2026-10-18T04:00:00.000Z'), cause: 'sign-in' })).toEqual({
+      until: '2026-10-18T06:00:00.000Z',
+      cause: 'unrecognised',
+    });
+  });
+  it('a later carried end replaces a shorter one; an earlier or equal one keeps the current record', () => {
+    const s = new CooldownStore({ dir: tmpDir(), challengeHours: 48, clock: fixedClock(T0) });
+    s.start('unrecognised');
+    const later = { until: asIsoDateTime('2026-10-20T05:00:00.000Z'), cause: 'captcha' as const };
+    expect(s.carry(later)).toEqual(later);
+    expect(s.carry({ until: asIsoDateTime('2026-10-19T05:00:00.000Z'), cause: 'sign-in' })).toEqual(later);
+    expect(s.carry({ until: later.until, cause: 'sign-in' })).toEqual(later);
+    expect(s.active()).toEqual(later);
+  });
+});

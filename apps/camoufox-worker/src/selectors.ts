@@ -202,22 +202,74 @@ export function selectorsFor(
   return { ...SELECTORS, ...flags(osArch, build) };
 }
 
-/** The recording that proved each true flag (TS-13): its date and what it was. */
-export const PROOFS: Readonly<Partial<Record<FlagName, string>>> = {
-  RESULTS_VERIFIED:
-    '2026-10-18 results/2026-10-18/1 (23 links, every name parses; first seen in the feasibility load)',
-  FORM_VERIFIED:
-    '2026-10-18 results/2026-10-18/1 (round trip, 1 passenger, 14 Mar to 24 Mar as asked) and no-flights/2026-10-18/1 (1 Dec to 10 Dec as asked)',
-  CHEAPEST_FLOW_VERIFIED:
-    '2026-10-18 cheapest/2026-10-18/1 (21 links after the tab click; their minimum equals the tab price, SOCS same)',
-  NO_FLIGHTS_VERIFIED:
-    '2026-10-18 no-flights/2026-10-18/1 (a date beyond the sale window: the line visible with 0 links, form as asked)',
-  SOCS_STABLE:
-    '2026-10-18 socs-stability recording, passes 1–3 all read back same (operator ruling of 2026-10-18)',
-  LANDING_VERIFIED:
-    '2026-10-25 consent-research/2026-10-25/1 (both sessions’ views after the choice: /travel/flights?hl=en-GB&gl=GB with no query, the heading "Flights", no tab, Date grid button or result link)',
-  GRID_VERIFIED:
-    '2026-10-18 grid/2026-10-18/1–4 (every cell name parses, each view’s cells name its lines’ dates, one scroll moves one day on its axis, SOCS same) and the renamed 0-explore',
+/**
+ * The recording that proved each true flag (TS-13), per `<os>-<arch>` entry (decision 75: a flag counts only on the
+ * entry and build it was recorded under): its date and what it was. The recordings are local-only (decision 61), named
+ * here by kind, date and number.
+ */
+export const PROOFS: Readonly<Record<OsArch, Partial<Record<FlagName, string>>>> = {
+  'darwin-arm64': {
+    RESULTS_VERIFIED:
+      '2026-10-18 results/2026-10-18/1 (23 links, every name parses; first seen in the feasibility load)',
+    FORM_VERIFIED:
+      '2026-10-18 results/2026-10-18/1 (round trip, 1 passenger, 14 Mar to 24 Mar as asked) and no-flights/2026-10-18/1 (1 Dec to 10 Dec as asked)',
+    CHEAPEST_FLOW_VERIFIED:
+      '2026-10-18 cheapest/2026-10-18/1 (21 links after the tab click; their minimum equals the tab price, SOCS same)',
+    NO_FLIGHTS_VERIFIED:
+      '2026-10-18 no-flights/2026-10-18/1 (a date beyond the sale window: the line visible with 0 links, form as asked)',
+    SOCS_STABLE:
+      '2026-10-18 socs-stability recording, passes 1–3 all read back same (operator ruling of 2026-10-18)',
+    LANDING_VERIFIED:
+      '2026-10-25 consent-research/2026-10-25/1 (both sessions’ views after the choice: /travel/flights?hl=en-GB&gl=GB with no query, the heading "Flights", no tab, Date grid button or result link)',
+    GRID_VERIFIED:
+      '2026-10-18 grid/2026-10-18/1–4 (every cell name parses, each view’s cells name its lines’ dates, one scroll moves one day on its axis, SOCS same) and the renamed 0-explore',
+  },
+  // why: WP17 Task 17.8's recording sessions fill these, one commit per entry
+  // why: WP17 Task 17.8, the operator's Mac under Rosetta (an official x86_64 Node 22, a throwaway HOME,
+  // CAMOUFOX_PAGE_TIMEOUT_SECONDS 180); GRID_VERIFIED stays false (pin.ts says why)
+  'darwin-x64': {
+    RESULTS_VERIFIED: '2026-10-26 results/2026-10-26/3 (23 links, every name parses, SOCS same)',
+    FORM_VERIFIED:
+      '2026-10-26 results/2026-10-26/3 (round trip, 1 passenger, 14 Mar to 24 Mar as asked) and no-flights/2026-10-26/3 (1 Dec to 10 Dec as asked)',
+    CHEAPEST_FLOW_VERIFIED:
+      '2026-10-26 cheapest/2026-10-26/3 (23 links after the tab click; their minimum equals the tab price, SOCS same)',
+    NO_FLIGHTS_VERIFIED:
+      '2026-10-26 no-flights/2026-10-26/3 (a date beyond the sale window: the line visible with 0 links, form as asked)',
+    SOCS_STABLE: '2026-10-26 socs-stability/2026-10-26/7–9 (three spaced pages, every read-back same)',
+    LANDING_VERIFIED:
+      '2026-10-26 landing/2026-10-26/3 (/travel/flights?hl=en-GB&gl=GB with no query, the heading "Flights", no tab, Date grid button or result link, SOCS same)',
+  },
+  // why: WP17 Task 17.8, a Linux arm64 container on the operator's Mac (headless, the generated fonts.conf)
+  'linux-arm64': {
+    RESULTS_VERIFIED: '2026-10-26 results/2026-10-26/1 (23 links, every name parses, SOCS same)',
+    FORM_VERIFIED:
+      '2026-10-26 results/2026-10-26/1 (round trip, 1 passenger, 14 Mar to 24 Mar as asked) and no-flights/2026-10-26/1 (1 Dec to 10 Dec as asked)',
+    CHEAPEST_FLOW_VERIFIED:
+      '2026-10-26 cheapest/2026-10-26/1 (22 links after the tab click; their minimum equals the tab price, SOCS same)',
+    NO_FLIGHTS_VERIFIED:
+      '2026-10-26 no-flights/2026-10-26/1 (a date beyond the sale window: the line visible with 0 links, form as asked)',
+    SOCS_STABLE: '2026-10-26 socs-stability/2026-10-26/1–3 (three spaced pages, every read-back same)',
+    LANDING_VERIFIED:
+      '2026-10-26 landing/2026-10-26/1 (/travel/flights?hl=en-GB&gl=GB with no query, the heading "Flights", no tab, Date grid button or result link, SOCS same)',
+    GRID_VERIFIED:
+      '2026-10-26 grid/2026-10-26/1 (five views of 49 cells, every cell name parses, each view’s cells name its lines’ dates, each of the four scrolls moves one day on its axis, SOCS same)',
+  },
+  // why: WP17 Task 17.8, a Linux x86_64 container under emulation on the operator's Mac (headless, the generated
+  // fonts.conf, CAMOUFOX_PAGE_TIMEOUT_SECONDS 180 after a first View more page did not settle within 90 s)
+  'linux-x64': {
+    RESULTS_VERIFIED: '2026-10-26 results/2026-10-26/2 (23 links, every name parses, SOCS same)',
+    FORM_VERIFIED:
+      '2026-10-26 results/2026-10-26/2 (round trip, 1 passenger, 14 Mar to 24 Mar as asked) and no-flights/2026-10-26/2 (1 Dec to 10 Dec as asked)',
+    CHEAPEST_FLOW_VERIFIED:
+      '2026-10-26 cheapest/2026-10-26/2 (22 links after the tab click; their minimum equals the tab price, SOCS same)',
+    NO_FLIGHTS_VERIFIED:
+      '2026-10-26 no-flights/2026-10-26/2 (a date beyond the sale window: the line visible with 0 links, form as asked)',
+    SOCS_STABLE: '2026-10-26 socs-stability/2026-10-26/4–6 (three spaced pages, every read-back same)',
+    LANDING_VERIFIED:
+      '2026-10-26 landing/2026-10-26/2 (/travel/flights?hl=en-GB&gl=GB with no query, the heading "Flights", no tab, Date grid button or result link, SOCS same)',
+    GRID_VERIFIED:
+      '2026-10-26 grid/2026-10-26/2 (five views of 49 cells, every cell name parses, each view’s cells name its lines’ dates, each of the four scrolls moves one day on its axis, SOCS same)',
+  },
 };
 
 /** The flags as `/v1/status` reports them. */

@@ -15,6 +15,8 @@ export const KINDS = [
   'no-flights',
   'graph-explore',
   'grid',
+  // why: WP17 Task 17.8: the landing view, headless, in the worker's own profile with SOCS set (no person clicks)
+  'landing',
 ] as const;
 export type RecordingKind = (typeof KINDS)[number];
 export const RECORDED_BY = 'camoufox-worker record';
@@ -67,6 +69,7 @@ export function parseRecordArgs(args: readonly string[]): RecordArgs {
         '--no-flights',
         '--graph-explore',
         '--grid',
+        '--landing',
       ].includes(a)
     )
       flags.add(a);
@@ -74,7 +77,7 @@ export function parseRecordArgs(args: readonly string[]): RecordArgs {
   }
   if (flags.size > 1)
     throw new RecordingRefused(
-      'pass at most one of --cheapest, --view-more, --stability, --consent-probe, --consent-research, --no-flights, --graph-explore, --grid',
+      'pass at most one of --cheapest, --view-more, --stability, --consent-probe, --consent-research, --no-flights, --graph-explore, --grid, --landing',
     );
   const movesRaw = values.get('--moves');
   if (movesRaw !== undefined && !flags.has('--grid')) throw new RecordingRefused('--moves needs --grid');
@@ -98,12 +101,14 @@ export function parseRecordArgs(args: readonly string[]): RecordArgs {
                 ? 'graph-explore'
                 : flags.has('--grid')
                   ? 'grid'
-                  : 'results';
+                  : flags.has('--landing')
+                    ? 'landing'
+                    : 'results';
   const pagesRaw = values.get('--pages') ?? (kind === 'socs-stability' ? String(STABILITY_PAGES) : '1');
   const pages = Number(pagesRaw);
   if (!/^\d+$/.test(pagesRaw) || pages < 1 || pages > MAX_PAGES)
     throw new RecordingRefused(`--pages must be 1 to ${MAX_PAGES}`);
-  if (kind === 'consent-probe' || kind === 'consent-research')
+  if (kind === 'consent-probe' || kind === 'consent-research' || kind === 'landing')
     return { kind, request: null, pages: 1, moves: [] };
   const origin = iataSchema.safeParse(values.get('--origin') ?? '');
   const destination = iataSchema.safeParse(values.get('--destination') ?? '');

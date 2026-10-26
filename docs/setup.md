@@ -942,7 +942,8 @@ changes it later.
   `linux-x64`) has verified recordings for its pinned Camoufox build. Elsewhere setup says once "The browser provider is
   not available on this machine yet (no recordings for <os>-<arch>); SearchApi and Travelpayouts work", downloads
   nothing and leaves `CAMOUFOX_ENABLED` unset; a later `pnpm gmt setup` or `pnpm gmt update` offers it once
-  recordings land. Today `darwin-arm64` has them.
+  recordings land. Today all four have them; `darwin-x64` has no date grid recording that reads whole, so keep
+  `CAMOUFOX_MODE=list` there (its worker answers a grid page as unavailable).
 - **Its costs first.** Setup prints the costs above before it asks, on every machine. On a machine with no display it
   adds: "Page loads will come from this server's address, not a home connection. A datacentre address is more likely to
   be refused or shown a verification page, and each one pauses the provider for 48 hours; any restriction applies to
@@ -1123,8 +1124,10 @@ missing with its install line; on Ubuntu 24.04:
 `sudo apt-get install libasound2t64 libatk1.0-0t64 libavcodec60 libcairo-gobject2 libcairo2 libdbus-1-3 libfontconfig1 libfreetype6 libgdk-pixbuf-2.0-0 libglib2.0-0t64 libgtk-3-0t64 libpango-1.0-0 libpangocairo-1.0-0 libx11-6 libx11-xcb1 libxcb-shm0 libxcb1 libxcomposite1 libxcursor1 libxdamage1 libxext6 libxfixes3 libxi6 libxrandr2 libxrender1`
 (Debian 12 also needs `libdbus-glib-1-2 libharfbuzz0b libxtst6`). The worker writes its own `fonts.conf` beside
 `worker.env`, naming the bundle's `fonts/macos/` by absolute path, because the bundled one resolves fonts from the
-working directory. Each `<os>-<arch>` earns its flags from recordings made under its own build; until `linux-arm64`
-and `linux-x64` have theirs, the provider is not offered there. In Docker on Linux the app cannot reach the host's
+working directory. Each `<os>-<arch>` earns its flags from recordings made under its own build; `linux-arm64` and
+`linux-x64` have theirs, recorded on 2026-10-26 in Linux containers (`apps/camoufox-worker/Dockerfile.recorder`, whose
+header has the `docker run` line, and `apps/camoufox-worker/recorder/session.sh`, which stops this machine's worker for
+a session and carries its last page, counts and any pause in and out). In Docker on Linux the app cannot reach the host's
 loopback, so the Docker path on Linux leaves the provider off; the native app reaches it.
 
 ### The monthly caps across every caller
