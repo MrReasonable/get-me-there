@@ -36,7 +36,7 @@ apps/api/test/tools/smoke.test.ts > runSmoke (spec §9 item 7) exits 0 with prov
 apps/api/test/tools/smokeArgs.test.ts > smokeFixtureTarget (plan decision 61) writes beside the database under the smoke signature
 apps/camoufox-worker/test/captureSocs.test.ts > capture-socs (devops-010) refuses a value of no known shape in plain words, writing nothing and keeping a record already there
 apps/camoufox-worker/test/captureSocs.test.ts > capture-socs (devops-010) refuses an Accept all value in plain words, writing nothing and keeping a record already there
-apps/camoufox-worker/test/consentCommand.test.ts > an interruption (SIGINT or SIGTERM: review X3) during the spacing wait: no window opens
+apps/camoufox-worker/test/consentCommand.test.ts > an interruption (SIGINT or SIGTERM: review X3) during the spacing wait: the wait ends, nothing is claimed and no window opens
 apps/camoufox-worker/test/consentCommand.test.ts > consent check: the stored record’s mark and expiry, no page loaded an accepted value (entered by hand): exit 78, saying so, the file untouched
 apps/camoufox-worker/test/consentCommand.test.ts > consent check: the stored record’s mark and expiry, no page loaded an expired rejection: exit 78, saying so, the file untouched
 apps/camoufox-worker/test/consentCommand.test.ts > consent check: the stored record’s mark and expiry, no page loaded an in-date rejection: its capture time, mark and expiry, exit 0; never the value; the file untouched
