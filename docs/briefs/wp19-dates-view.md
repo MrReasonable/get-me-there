@@ -1402,12 +1402,12 @@ time-zone cases were written first, beside the view, in Tasks 19.4 and 19.5.
     200 ms is recorded. Each limit is multiplied by `GMT_TIMING_FACTOR` (default 1, revision 50). Each wait is
     `waitForFunction` on that step's mark, with the timeout only as a backstop. The performance test runs with the e2e
     suite, locally and in CI's `e2e` job, and is not part of `pnpm test`.
-  - **CI** (revision 50, settled by the orchestrator): a new workflow, `.github/workflows/e2e.yml` (a workflow of its own, because GitHub applies a path filter to a
-    whole workflow and ci.yml's test matrix runs on every push), holds an `e2e` job on ubuntu-24.04
-    that installs Chromium with `pnpm --filter @gmt/web e2e:install` and runs `pnpm --filter @gmt/web e2e` (the smoke
-    on both projects and the `@perf` test) with `GMT_TIMING_FACTOR: 3`, path-filtered to `apps/web/**`, `apps/api/**`,
-    `packages/core/**`, `packages/db/**`, `packages/engine/**` and the workflow itself; `scripts/workflows.test.mjs`
-    pins the job, its runner, its install and run steps, its factor and its path filter.
+  - **CI** (revision 50, settled by the orchestrator): a new workflow, `.github/workflows/e2e.yml` (a workflow of its
+    own, because GitHub applies a path filter to a whole workflow and ci.yml's test matrix runs on every push), holds an
+    `e2e` job on ubuntu-24.04 that installs Chromium with `pnpm --filter @gmt/web e2e:install` and runs `pnpm --filter
+    @gmt/web e2e` (the smoke on both projects and the `@perf` test) with `GMT_TIMING_FACTOR: 3`, path-filtered to
+    `apps/web/**`, `apps/api/**`, `packages/core/**`, `packages/db/**`, `packages/engine/**` and the workflow itself;
+    `scripts/workflows.test.mjs` pins the job, its runner, its install and run steps, its factor and its path filter.
 - [ ] **Run to verify they fail**: `pnpm --filter @gmt/web e2e` → the smoke looks for the board caption on the old
   Results view and fails; the perf spec finds no `gmt:dates-drawn` mark.
 - [ ] **Implement**; `playwright.config.ts` keeps `@phone` in the phone project and runs `@perf` in the desktop project
