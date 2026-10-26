@@ -339,6 +339,7 @@ apps/camoufox-worker/test/socs.test.ts > readBack (ruling 9: compared by value e
 apps/camoufox-worker/test/socs.test.ts > readBack (ruling 9: compared by value everywhere) missing
 apps/camoufox-worker/test/socs.test.ts > readBack (ruling 9: compared by value everywhere) one same and one changed
 apps/camoufox-worker/test/socs.test.ts > readBack (ruling 9: compared by value everywhere) same
+apps/camoufox-worker/test/socs.test.ts > the consent record (socs.json) a capture dated exactly now is read; a millisecond later is the future
 apps/camoufox-worker/test/socs.test.ts > the consent record (socs.json) an expired or stale capture is returned with its past expiry, never as missing
 apps/camoufox-worker/test/socs.test.ts > the consent record (socs.json) reads a capture with its mark, an older record by name only, and none
 apps/camoufox-worker/test/socs.test.ts > the consent record (socs.json) the start checks see a capture’s expiry and mark, an older record by name, and nothing on none or an invalid one

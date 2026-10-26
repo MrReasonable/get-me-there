@@ -15,11 +15,11 @@ export type RejectionMark = 'reject' | 'accept' | 'unknown';
 /** A protobuf varint at `at`: its value and the index after it, or null when it is cut off or longer than 10 bytes. */
 function varint(b: Uint8Array, at: number): { value: number; next: number } | null {
   let value = 0;
-  for (let k = 0; k < 10; k++) {
-    const c = b[at + k];
-    if (c === undefined) return null;
-    value += (c & 0x7f) * 2 ** (7 * k);
-    if (c < 0x80) return { value, next: at + k + 1 };
+  const end = Math.min(at + 10, b.length);
+  for (let i = at; i < end; i++) {
+    const c = b[i] ?? 0;
+    value += (c & 0x7f) * 2 ** (7 * (i - at));
+    if (c < 0x80) return { value, next: i + 1 };
   }
   return null;
 }

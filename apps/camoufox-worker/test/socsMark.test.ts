@@ -32,6 +32,8 @@ describe('rejectionMark: field 1 of a well-formed SOCS message', () => {
     expect(mark([0x08, 0x01, ...FIELD2, 0x18, ...Array.from({ length: 9 }, () => 0x80), 0x01])).toBe(
       'reject',
     );
+    // why: field 2 again later, as a varint (tag 16, the first allowed after field 1)
+    expect(mark([0x08, 0x01, ...FIELD2, 0x10, 0x01])).toBe('reject');
     // why: a field number above 15 takes a two-byte tag
     expect(mark([0x08, 0x01, ...FIELD2, 0x80, 0x01, 0x05])).toBe('reject');
   });
@@ -61,10 +63,11 @@ describe('rejectionMark: field 1 of a well-formed SOCS message', () => {
     ['a tag cut off', [0x08, 0x01, ...FIELD2, 0x80]],
     ['a 64-bit field cut short', [0x08, 0x01, ...FIELD2, 0x21, 1, 2, 3, 4, 5, 6, 7]],
     ['a 32-bit field cut short', [0x08, 0x01, ...FIELD2, 0x2d, 1, 2, 3]],
-    ['a group start (wire type 3)', [0x08, 0x01, ...FIELD2, 0x1b]],
-    ['a group end (wire type 4)', [0x08, 0x01, ...FIELD2, 0x1c]],
-    ['wire type 6', [0x08, 0x01, ...FIELD2, 0x1e, 0x00]],
-    ['wire type 7', [0x08, 0x01, ...FIELD2, 0x1f, 0x00]],
+    // why: each followed by exactly the bytes a fixed-width field would take, so only the wire type refuses it
+    ['a group start (wire type 3)', [0x08, 0x01, ...FIELD2, 0x1b, 0x41, 0x41, 0x41, 0x41]],
+    ['a group end (wire type 4)', [0x08, 0x01, ...FIELD2, 0x1c, 0x41, 0x41, 0x41, 0x41]],
+    ['wire type 6', [0x08, 0x01, ...FIELD2, 0x1e, 0x41, 0x41, 0x41, 0x41]],
+    ['wire type 7', [0x08, 0x01, ...FIELD2, 0x1f, ...Array.from({ length: 8 }, () => 0x41)]],
     ['a later length past the end', [0x08, 0x01, ...FIELD2, 0x1a, 0x05, 0x41]],
   ] as const)('%s is unknown', (_what, bytes) => {
     expect(mark(bytes)).toBe('unknown');

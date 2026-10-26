@@ -713,6 +713,14 @@ describe('consent', () => {
       });
     }
   });
+  it('a record the worker states is judged by its own expiry, whatever the capture time it reports', () => {
+    const c = consentWith(
+      { kind: 'socs', expiresAt: inFuture(100 * DAY), boundedBy: 'cookie', mark: 'reject' },
+      { socsCapturedAt: null },
+    );
+    expect(c.state).toBe('ok');
+    expect(c.summary).toMatch(/^consent rejected, expires /);
+  });
   it('a worker that does not report the mark cannot be checked, and never reads as rejected', () => {
     const c = consentWith({ kind: 'socs', expiresAt: inFuture(100 * DAY), boundedBy: 'cookie', mark: null });
     expect(c.state).toBe('warn');

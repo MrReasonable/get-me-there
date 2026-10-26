@@ -544,7 +544,9 @@ export function consentOutcome(f: Frame, w: WorkerFacts): { check: StatusCheck; 
   // "consent rejected" is said only for a record whose value the worker reads as a rejection; a worker that does not
   // report the mark (an earlier version) cannot be checked, and says so, with the capture's upper bound
   const c = s.consent;
-  if (c === null && s.socsCapturedAt === null)
+  // why: the latest the record can expire: its own stated expiry, or (a worker that reports no record) its capture's bound
+  const upper = c?.expiresAt ?? (s.socsCapturedAt === null ? null : consentBoundOf(s.socsCapturedAt));
+  if (upper === null)
     return out(
       check({
         ...base,
@@ -555,15 +557,14 @@ export function consentOutcome(f: Frame, w: WorkerFacts): { check: StatusCheck; 
       'missing',
     );
   if (c === null || c.mark === null) {
-    const upper = c?.expiresAt ?? (s.socsCapturedAt === null ? null : consentBoundOf(s.socsCapturedAt));
     // why: whatever the choice, a record past its latest expiry has expired
-    if (upper !== null && consentWindowState(upper, f.now) === 'fail')
+    if (consentWindowState(upper, f.now) === 'fail')
       return out(
         check({ ...base, state: 'fail', summary: `consent expired on ${at(f, upper)}`, fix: consentFix }),
         'expired',
       );
     return cannot(
-      `this worker does not report whether its stored consent choice is a rejection${upper === null ? '' : ` (it expires by ${at(f, upper)} at the latest)`}`,
+      `this worker does not report whether its stored consent choice is a rejection (it expires by ${at(f, upper)} at the latest)`,
       fix('update the app and the worker together', 'pnpm gmt update'),
     );
   }
@@ -577,7 +578,7 @@ export function consentOutcome(f: Frame, w: WorkerFacts): { check: StatusCheck; 
       }),
       'not-rejection',
     );
-  const bound = c.expiresAt;
+  const bound = upper;
   const state = consentWindowState(bound, f.now);
   const words = `consent rejected, expires ${at(f, bound)} (${c.boundedBy === 'cookie' ? 'cookie' : 'capture'})`;
   if (state === 'ok') return out(check({ ...base, state: 'ok', summary: words }), 'none');

@@ -50,19 +50,18 @@ export const SERVER_QUESTION = 'Type yes to accept page loads from this server�
 export const CAPTURE_SOCS = 'pnpm --filter @gmt/camoufox-worker capture-socs';
 
 /**
- * How consent is captured (brief WP17 Tasks 17.5 and 17.6; review X5), with the effort of each way: `wizard`, the
- * capture setup runs itself after the install (interactive, with a display); `command`, the same capture as its own
- * command (setup with a display but asked nothing); `server`, a machine with no display, whose choice is captured on a
- * machine that shows the consent page and piped here. capture-socs is the fallback either way.
+ * How consent is captured (brief WP17 Tasks 17.5 and 17.6; review X5), with the effort of each way: with no display, on
+ * a machine that shows the consent page and piped here; with one, the capture setup runs itself after the install
+ * (`wizard`), or the same capture as its own command. capture-socs is the fallback either way.
  */
-export function consentMethodText(how: 'wizard' | 'command' | 'server'): string {
+export function consentMethodText(display: boolean, wizard: boolean): string {
   const window =
     'a browser window opens on Google Flights: click Reject all, wait until Google Flights shows, then close the window. The choice is kept only when the cookie’s own value reads as a rejection';
   const fallback = `If the window cannot be used, the fallback is to copy the SOCS cookie’s fields from an ordinary private window into ${CAPTURE_SOCS}, which keeps only a rejection too (a few minutes).`;
-  if (how === 'wizard')
-    return `Consent: Google’s consent page is answered once, by you, with "Reject all". After the install, ${window} (a minute or two; ${CONSENT_FIX.doc}). ${fallback}`;
-  if (how === 'command')
-    return `Consent: Google’s consent page is answered once, by you, with "Reject all". Run ${CONSENT_FIX.command}: ${window} (a minute or two; ${CONSENT_FIX.doc}). ${fallback}`;
+  if (display)
+    return wizard
+      ? `Consent: Google’s consent page is answered once, by you, with "Reject all". After the install, ${window} (a minute or two; ${CONSENT_FIX.doc}). ${fallback}`
+      : `Consent: Google’s consent page is answered once, by you, with "Reject all". Run ${CONSENT_FIX.command}: ${window} (a minute or two; ${CONSENT_FIX.doc}). ${fallback}`;
   return `Consent: this machine has no display, so the choice is captured on a machine that shows the consent page and has the pinned Camoufox (pnpm gmt browser install there), and piped here: ${CONSENT_FIX.command} export | ssh <this machine> 'cd <checkout> && ${CONSENT_FIX.command} import' (a few minutes; docs/setup.md#on-a-machine-with-no-display). ${fallback}`;
 }
 

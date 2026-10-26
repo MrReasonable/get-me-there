@@ -180,7 +180,7 @@ describe('the wizard’s own consent step (review X5)', () => {
         ? { code: 0, stdout: `${checkAnswer}\n`, stderr: '' }
         : inner(argv, opts);
     expect(await run(m, { interactive: true, answers: [true] })).toBe('on');
-    expect(m.io.stdout).toContain(`${consentMethodText('wizard')}\n`);
+    expect(m.io.stdout).toContain(`${consentMethodText(true, true)}\n`);
     expect(m.io.stdout).toContain(`${CONSENT_STEP}\n`);
     expect(spawned).toHaveLength(1);
     expect(spawned[0]?.slice(4, 6)).toEqual(['/repo/apps/camoufox-worker/src/run.ts', 'consent']);
@@ -195,6 +195,38 @@ describe('the wizard’s own consent step (review X5)', () => {
     );
     expect(parseEnv(m.fs.read(ENV) ?? '').CAMOUFOX_ENABLED).toBeUndefined();
   });
+  it('a refusal that is not about consent opens no window: the worker’s own words stop it', async () => {
+    const m = await world({ check: '{"reason":"layout","at":"2026-10-24T09:30:00.000Z"}' });
+    let spawned = 0;
+    m.deps.attach = async () => {
+      spawned++;
+      return 0;
+    };
+    expect(await run(m, { interactive: true, answers: [true] })).toBe('not-set-up');
+    expect(spawned).toBe(0);
+    expect(m.io.stderr).toContain(
+      'The worker would refuse to start: refused, not retrying: the browser install is incomplete',
+    );
+  });
+  it('a capture that says it stored a rejection while the check still refuses stops with the command to run', async () => {
+    const m = await world({ check: '{"reason":"consent-missing","at":"2026-10-24T09:30:00.000Z"}' });
+    m.deps.attach = async () => 0;
+    expect(await run(m, { interactive: true, answers: [true] })).toBe('not-set-up');
+    expect(m.io.stderr).toContain(consentMethodText(true, false));
+  });
+  it('interactive with no display opens no window and names the export and import route', async () => {
+    const m = await world({ check: '{"reason":"consent-missing","at":"2026-10-24T09:30:00.000Z"}' });
+    m.deps.platform = { ...m.deps.platform, hasDisplay: false };
+    let spawned = 0;
+    m.deps.attach = async () => {
+      spawned++;
+      return 0;
+    };
+    expect(await run(m, { interactive: true, answers: [true, 'yes'] })).toBe('not-set-up');
+    expect(spawned).toBe(0);
+    expect(m.io.stdout).toContain(consentMethodText(false, false));
+    expect(m.io.stderr).toContain(consentMethodText(false, false));
+  });
   it('not interactive, or with no display, it opens no window and names the route instead', async () => {
     const m = await world({ check: '{"reason":"consent-missing","at":"2026-10-24T09:30:00.000Z"}' });
     let spawned = 0;
@@ -203,7 +235,7 @@ describe('the wizard’s own consent step (review X5)', () => {
       return 0;
     };
     expect(await run(m)).toBe('not-set-up');
-    expect(m.io.stderr).toContain(consentMethodText('command'));
+    expect(m.io.stderr).toContain(consentMethodText(true, false));
     expect(spawned).toBe(0);
   });
 });
@@ -213,7 +245,7 @@ describe('browserSetup’s outcomes and words', () => {
     const m = await world();
     expect(await run(m)).toBe('on');
     expect(m.io.stdout).toContain(`\n${costsSummary(MAC)}\n`);
-    expect(m.io.stdout).toContain(`${consentMethodText('command')}\n`);
+    expect(m.io.stdout).toContain(`${consentMethodText(true, false)}\n`);
     expect(
       m.io.stdout.endsWith('The browser provider is on: the worker service is installed and running.\n'),
     ).toBe(true);
@@ -460,13 +492,16 @@ describe('the offer’s fixed words', () => {
       'a browser window opens on Google Flights: click Reject all, wait until Google Flights shows, then close the window. The choice is kept only when the cookie’s own value reads as a rejection';
     const fallback =
       'If the window cannot be used, the fallback is to copy the SOCS cookie’s fields from an ordinary private window into pnpm --filter @gmt/camoufox-worker capture-socs, which keeps only a rejection too (a few minutes).';
-    expect(consentMethodText('server')).toBe(
+    // why: with no display the route is the same, asked or not
+    expect(consentMethodText(false, true)).toBe(consentMethodText(false, false));
+    expect(CONSENT_STEP).toBe('Capturing your consent choice now: a browser window opens on Google Flights.');
+    expect(consentMethodText(false, false)).toBe(
       `Consent: this machine has no display, so the choice is captured on a machine that shows the consent page and has the pinned Camoufox (pnpm gmt browser install there), and piped here: pnpm gmt consent export | ssh <this machine> 'cd <checkout> && pnpm gmt consent import' (a few minutes; docs/setup.md#on-a-machine-with-no-display). ${fallback}`,
     );
-    expect(consentMethodText('command')).toBe(
+    expect(consentMethodText(true, false)).toBe(
       `Consent: Google’s consent page is answered once, by you, with "Reject all". Run pnpm gmt consent: ${window} (a minute or two; docs/setup.md#capture-your-consent-choice). ${fallback}`,
     );
-    expect(consentMethodText('wizard')).toBe(
+    expect(consentMethodText(true, true)).toBe(
       `Consent: Google’s consent page is answered once, by you, with "Reject all". After the install, ${window} (a minute or two; docs/setup.md#capture-your-consent-choice). ${fallback}`,
     );
     expect(RESUME_LINE).toBe(

@@ -148,8 +148,9 @@ async function turnOn(deps: Deps, o: Options): Promise<BrowserOutcome> {
     return 'off';
   }
   // why: review X5 (spec §13's one wizard): interactive with a display, the capture is setup's own step after the install
-  const how = !deps.platform.hasDisplay ? 'server' : o.interactive ? 'wizard' : 'command';
-  deps.io.out(`${consentMethodText(how)}\n`);
+  const display = deps.platform.hasDisplay;
+  const wizard = display && o.interactive;
+  deps.io.out(`${consentMethodText(display, wizard)}\n`);
   const paths = deps.platform.paths;
   const stop = (why: string): BrowserOutcome => {
     deps.io.err(`${why}\n${RESUME_LINE}\n`);
@@ -187,7 +188,7 @@ async function turnOn(deps: Deps, o: Options): Promise<BrowserOutcome> {
   );
   if (wrote.failed !== null) return stop(describeResult('setup: the worker’s settings', wrote));
   let check = await workerCheck(deps);
-  if (check.kind === 'refused' && check.refusal.reason.startsWith('consent-') && how === 'wizard') {
+  if (check.kind === 'refused' && check.refusal.reason.startsWith('consent-') && wizard) {
     deps.io.out(`${CONSENT_STEP}\n`);
     const child = consentChild(deps, null);
     const code = await deps.attach(child.argv, child.cwd, child.env);
@@ -201,7 +202,7 @@ async function turnOn(deps: Deps, o: Options): Promise<BrowserOutcome> {
     const r = check.refusal.reason;
     if (r.startsWith('consent-'))
       return stop(
-        `The worker needs your consent choice before it can start: ${START_REFUSAL_TEXT[r].summary}. ${consentMethodText(how === 'wizard' ? 'command' : how)}`,
+        `The worker needs your consent choice before it can start: ${START_REFUSAL_TEXT[r].summary}. ${consentMethodText(display, false)}`,
       );
   }
   if (check.kind !== 'ok') return stop(`The worker would refuse to start: ${checkWords(check)}`);
