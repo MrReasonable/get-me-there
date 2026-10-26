@@ -3214,7 +3214,7 @@ settings (twice the page timeout, plus the scroll cap times the scroll spacing p
 slow grid page still lost its client while the app carried on and the page counted. §10's `GET /tools/smoke/plan`
 now also states the browser page's bound (`pageBoundSeconds`), from the same limits the smoke's http-kit ends that
 page at; §13 says `gmt smoke` prints it in whole minutes with the browser page's line and waits 600 s for the rest of
-the run plus that bound (its dry run 600 s), because only the app holds the settings the bound comes from; §12 states
+the run plus that bound (its dry run 600 s) because only the app holds the settings the bound comes from; §12 states
 the grid page's request timeout beside the page timeout; §9 item 9 adds the tests. No other design rule changes.
 
 ### Revision 44: a request's own bound is its only one (2026-10-26)
