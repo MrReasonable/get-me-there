@@ -1,5 +1,5 @@
 import { apiContract } from '@gmt/core';
-import { appUrl, authHeaders, credsFrom } from '../appClient.js';
+import { authHeaders, credsFrom, credsUrl } from '../appClient.js';
 import type { Flags } from '../args.js';
 import type { Ask } from '../ask.js';
 import { guardActiveRun } from '../commands/guard.js';
@@ -98,7 +98,7 @@ async function figuresOf(
   if (creds !== null) {
     const p = await deps.http({
       method: 'GET',
-      url: appUrl(creds.port, '/api/providers'),
+      url: credsUrl(creds, '/api/providers'),
       headers: authHeaders(creds),
       timeoutMs: 10_000,
     });

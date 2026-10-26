@@ -1,6 +1,6 @@
 import { apiContract } from '@gmt/core';
 import type { z } from 'zod';
-import { type AppCreds, appUrl, authHeaders, credsFrom } from '../appClient.js';
+import { type AppCreds, authHeaders, credsFrom, credsUrl } from '../appClient.js';
 import type { Flags } from '../args.js';
 import { type Deps, EXIT } from '../deps.js';
 import { appEnvPath } from '../services/specs.js';
@@ -37,7 +37,7 @@ async function postSmoke(
 ): Promise<z.infer<typeof apiContract.toolRunResponseSchema> | string> {
   const r = await deps.http({
     method: 'POST',
-    url: appUrl(c.port, '/api/tools/smoke'),
+    url: credsUrl(c, '/api/tools/smoke'),
     headers: { ...authHeaders(c), ...MUTATING },
     body: JSON.stringify(body),
     timeoutMs: 600_000,
@@ -77,7 +77,7 @@ export async function smokeCommand(flags: Flags, _p: string | null, deps: Deps):
   }
   const r = await deps.http({
     method: 'GET',
-    url: appUrl(creds.port, '/api/tools/smoke/plan'),
+    url: credsUrl(creds, '/api/tools/smoke/plan'),
     headers: authHeaders(creds),
     timeoutMs: 30_000,
   });

@@ -8,6 +8,8 @@ import type { Deps } from './deps.js';
  */
 export interface AppCreds {
   port: number;
+  /** The loopback host the app answers on, as a URL host: `127.0.0.1` (the default) or `[::1]`. */
+  host?: string;
   user: string;
   pass: string;
 }
@@ -34,13 +36,17 @@ export function credsFrom(
 export const authHeaders = (c: AppCreds): Record<string, string> => ({
   Authorization: `Basic ${Buffer.from(`${c.user}:${c.pass}`).toString('base64')}`,
 });
-export const appUrl = (port: number, path: string): string => `http://127.0.0.1:${port}${path}`;
+export const appUrl = (port: number, path: string, host = '127.0.0.1'): string =>
+  `http://${host}:${port}${path}`;
+
+/** A path on the app these credentials belong to: on its port and the loopback family it answers on. */
+export const credsUrl = (c: AppCreds, path: string): string => appUrl(c.port, path, c.host);
 
 /** `GET /api/executions/active` (WP16a): none, the active execution, or why it could not be read. */
 export async function readActive(deps: Deps, c: AppCreds): Promise<ActiveRead> {
   const r = await deps.http({
     method: 'GET',
-    url: appUrl(c.port, '/api/executions/active'),
+    url: credsUrl(c, '/api/executions/active'),
     headers: authHeaders(c),
     timeoutMs: 10_000,
   });

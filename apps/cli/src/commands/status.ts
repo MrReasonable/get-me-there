@@ -1,6 +1,6 @@
 import { join } from 'node:path/posix';
 import { BACKUP_MAX_AGE_MS, backupTimeOf, START_REFUSAL_TEXT } from '@gmt/core';
-import { type DockerAppState, dockerAppState, dockerEndpoint, dockerPublished } from '../appEndpoint.js';
+import { type DockerAppState, dockerAppState, dockerEndpoint, dockerPublications } from '../appEndpoint.js';
 import type { Flags } from '../args.js';
 import { type Deps, EXIT } from '../deps.js';
 import { apply } from '../plan/apply.js';
@@ -199,7 +199,7 @@ function appEnvChecks(deps: Deps): Check[] {
  */
 async function dockerBindChecks(deps: Deps, docker: DockerAppState): Promise<Check[]> {
   if (docker !== 'running') return [];
-  const published = await dockerPublished(deps);
+  const published = await dockerPublications(deps);
   // why: an unread address is not a loopback one: error must not look empty
   if (published === null)
     return [
@@ -210,15 +210,14 @@ async function dockerBindChecks(deps: Deps, docker: DockerAppState): Promise<Che
         fix: 'docker compose port app 3000',
       },
     ];
-  if (isLoopback(published.address)) return [];
-  return [
-    {
+  return published
+    .filter((p) => !isLoopback(p.address))
+    .map((p) => ({
       name: 'bind address',
-      level: 'warn',
-      detail: `${published.address}: published beyond loopback: plain HTTP beyond this machine needs TLS or Tailscale: docs/setup.md section 3`,
+      level: 'warn' as const,
+      detail: `${p.address}: published beyond loopback: plain HTTP beyond this machine needs TLS or Tailscale: docs/setup.md section 3`,
       fix: 'publish 127.0.0.1:3000:3000 in docker-compose.yml, then docker compose up -d, or put TLS or Tailscale in front of it',
-    },
-  ];
+    }));
 }
 
 const workerUnit = (deps: Deps) => ({

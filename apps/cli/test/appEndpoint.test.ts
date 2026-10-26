@@ -46,7 +46,7 @@ describe('appEndpoint', () => {
       kind: 'docker',
       baseUrl: 'http://127.0.0.1:3001',
       port: 3001,
-      creds: { port: 3001, user: 'op', pass: 'docker-pass-0123' },
+      creds: { port: 3001, host: '127.0.0.1', user: 'op', pass: 'docker-pass-0123' },
       headers: { Authorization: basic('op', 'docker-pass-0123') },
     });
   });

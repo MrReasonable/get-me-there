@@ -30,9 +30,14 @@ export type AppEndpoint =
     }
   | { kind: 'none'; reason: string };
 
-const ready = (kind: 'native' | 'docker', port: number, creds: AppCreds | null): AppEndpoint => ({
+const ready = (
+  kind: 'native' | 'docker',
+  port: number,
+  creds: AppCreds | null,
+  host = '127.0.0.1',
+): AppEndpoint => ({
   kind,
-  baseUrl: appUrl(port, ''),
+  baseUrl: appUrl(port, '', host),
   port,
   creds,
   headers: creds === null ? {} : authHeaders(creds),
@@ -75,21 +80,26 @@ export async function dockerAppState(deps: Deps): Promise<DockerAppState> {
   return app.State === 'running' ? 'running' : 'stopped';
 }
 
-const LOCAL_PUBLISH: ReadonlySet<string> = new Set(['127.0.0.1', '0.0.0.0', '::1', '::']);
+const V4_LOCAL: ReadonlySet<string> = new Set(['127.0.0.1', '0.0.0.0']);
+const V6_LOCAL: ReadonlySet<string> = new Set(['::1', '::']);
 
 /**
- * The host address and port compose publishes for the container's 3000 (`docker compose port app 3000`), or null when
- * compose does not say. The address has no brackets (`::1`, not `[::1]`). Inside the container the app binds 0.0.0.0;
- * this published address is what decides who can reach it.
+ * The host addresses and ports compose publishes for the container's 3000 (`docker compose port app 3000` prints one
+ * `address:port` line per family), or null when compose does not say. Addresses have no brackets (`::1`, not `[::1]`).
+ * Inside the container the app binds 0.0.0.0; these published addresses decide who can reach it.
  */
-export async function dockerPublished(deps: Deps): Promise<{ address: string; port: number } | null> {
+export async function dockerPublications(deps: Deps): Promise<{ address: string; port: number }[] | null> {
   const r = await deps.run(compose('port', 'app', '3000'), { cwd: deps.checkout, timeoutMs: 20_000 });
   if (r.code !== 0) return null;
-  // why: any valid IP, so status can judge a LAN address; dockerEndpoint alone limits where credentials may go
-  const m = /^(.+):(\d+)$/.exec(r.stdout.trim());
-  const address = m?.[1]?.replace(/^\[|\]$/g, '');
-  if (address === undefined || m?.[2] === undefined || isIP(address) === 0) return null;
-  return { address, port: Number(m[2]) };
+  const out: { address: string; port: number }[] = [];
+  for (const line of r.stdout.split('\n')) {
+    // why: any valid IP, so status can judge a LAN address; dockerEndpoint alone limits where credentials may go
+    const m = /^(.+):(\d+)$/.exec(line.trim());
+    const address = m?.[1]?.replace(/^\[|\]$/g, '');
+    if (address !== undefined && m?.[2] !== undefined && isIP(address) !== 0)
+      out.push({ address, port: Number(m[2]) });
+  }
+  return out.length === 0 ? null : out;
 }
 
 /** The Docker app, given its compose state (read it with dockerAppState). */
@@ -100,17 +110,24 @@ export async function dockerEndpoint(deps: Deps, state: DockerAppState): Promise
       reason: 'there is no native install, and Docker’s compose state could not be read',
     };
   if (state !== 'running') return { kind: 'none', reason: 'the Docker app is not running' };
-  const published = await dockerPublished(deps);
-  const port = published?.port ?? null;
-  if (published === null || port === null || port < 1 || port > 65535)
-    return { kind: 'none', reason: 'compose did not say which host port the Docker app publishes' };
-  // why: the basic auth is read and sent to 127.0.0.1:<port> only when that port is this machine's own (loopback or
-  // wildcard); a port compose publishes on another address could be reached by another program there
-  if (!LOCAL_PUBLISH.has(published.address))
+  const published = (await dockerPublications(deps)) ?? [];
+  // why: the basic auth is sent only to this machine's loopback, in the family compose published (IPv4 first when both):
+  // a port published on another address, or on a family that was not, could belong to another program on 127.0.0.1
+  const v4 = published.find((p) => V4_LOCAL.has(p.address));
+  const v6 = published.find((p) => V6_LOCAL.has(p.address));
+  const chosen = v4 ?? v6;
+  if (chosen === undefined)
     return {
       kind: 'none',
-      reason: `compose publishes the Docker app on ${published.address}, not on this machine’s loopback`,
+      reason:
+        published[0] === undefined
+          ? 'compose did not say which host port the Docker app publishes'
+          : `compose publishes the Docker app on ${published[0].address}, not on this machine’s loopback`,
     };
+  const { port } = chosen;
+  if (port < 1 || port > 65535)
+    return { kind: 'none', reason: 'compose did not say which host port the Docker app publishes' };
+  const host = v4 === undefined ? '[::1]' : '127.0.0.1';
   let text: string | null;
   try {
     text = deps.files.read(join(deps.checkout, '.env'));
@@ -121,7 +138,7 @@ export async function dockerEndpoint(deps: Deps, state: DockerAppState): Promise
     };
   }
   const creds = text === null ? null : credsFrom(readEnvText(text));
-  return ready('docker', port, creds === null ? null : { ...creds, port });
+  return ready('docker', port, creds === null ? null : { ...creds, port, host }, host);
 }
 
 /**
