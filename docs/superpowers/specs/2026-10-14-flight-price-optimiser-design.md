@@ -2865,9 +2865,11 @@ merged into price.
     known and above the limit is left out of the figure, one whose time is
     not known stays and reads "journey time not known" (so a date pair whose
     journey time is unknown stays on the board, and only date pairs known to
-    exceed the limit drop out), and a date pair
-    whose every price was left out reads "none within <limit>" with its
-    marks, never "no fares". This filter is part of this revision, which
+    exceed the limit drop out), and a date pair that had at least one price
+    and saw every one left out for a known journey time above the limit reads
+    "none within <limit>" with its marks, never "no fares"; a date pair that
+    had no price keeps its own marks (not searched, no cached data, error and
+    so on), never "none within <limit>". This filter is part of this revision, which
     supersedes plan decision 36's Phase 4 placement of it. "Clear filters" resets them.
   - **Coverage section** (folded; the header line's coverage link and
     `?view=coverage` open it, `d.coverage=open`), over the latest parent
