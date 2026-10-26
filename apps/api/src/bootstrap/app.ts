@@ -293,17 +293,45 @@ export async function bootApp(deps: BootDeps): Promise<RunningApp> {
     // why: a boot that failed after the engine booted (a listen refused) stops its scheduler too, so no cron job or the
     // FX refresh a minute after boot fires against the database closed below; its own failure is logged, never thrown
     // over the boot's
-    if (booted !== null)
-      await booted.shutdown().catch((e: unknown) => {
-        log.error(
-          { err: { message: safeMessage(e, secrets) } },
-          'engine shutdown after a failed boot failed',
-        );
-      });
+    if (booted !== null) await shutdownAfterFailedBoot(booted, log, secrets);
     // why: WP3's release deletes only the row this AppLock acquired, so a refused acquire leaves the holder's lock alone.
     lock.release();
     ports.db.close();
     throw err;
+  }
+}
+
+/**
+ * A failed boot's engine shutdown, bounded as close() bounds its own (review devops M4; CodeRabbit, PR #20): the boot
+ * may have resumed a run whose wait does not end, and the lock and the database must still be handed back. A failure
+ * or the deadline is logged, never thrown over the boot's own error, and the engine is marked closed either way (T12).
+ */
+async function shutdownAfterFailedBoot(
+  engine: Engine,
+  log: Logger,
+  secrets: readonly Secret[],
+): Promise<void> {
+  let deadline: NodeJS.Timeout | undefined;
+  const timedOut = new Promise<void>((resolve) => {
+    deadline = setTimeout(() => {
+      log.error({ deadlineMs: SHUTDOWN_DEADLINE_MS }, 'engine shutdown after a failed boot timed out');
+      resolve();
+    }, SHUTDOWN_DEADLINE_MS);
+    deadline.unref();
+  });
+  try {
+    await Promise.race([
+      engine.shutdown().catch((e: unknown) => {
+        log.error(
+          { err: { message: safeMessage(e, secrets) } },
+          'engine shutdown after a failed boot failed',
+        );
+      }),
+      timedOut,
+    ]);
+  } finally {
+    clearTimeout(deadline);
+    engine.markClosed();
   }
 }
 
