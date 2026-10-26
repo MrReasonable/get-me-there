@@ -13,7 +13,12 @@ import { z } from 'zod';
 import { classifyLanding, classifyPage } from '../src/classify.js';
 import { rejectionMark } from '../src/consentLine.js';
 import { CONSENT_HOST } from '../src/consentWatch.js';
-import { parseCellName, parseSelectedPrice, parseSelectedRange } from '../src/gridNames.js';
+import {
+  parseCellName,
+  parseSelectedPrice,
+  parseSelectedRange,
+  parseUnpricedCellName,
+} from '../src/gridNames.js';
 import { interpretView } from '../src/gridView.js';
 import { onAllowlist } from '../src/guard.js';
 import { parseOptionName } from '../src/names.js';
@@ -355,6 +360,10 @@ describe('verification flags (TS-13; runs on every checkout)', () => {
         recordedAnchor(rec.views[0]?.snapshot ?? '', rec.recordedAt);
       const verifiedOn = (rec: z.infer<typeof fileSchema>): boolean =>
         selectorsFor(rec.osArch, rec.versions.binary).GRID_VERIFIED;
+      /** Each recording is read under its own entry's flags: the unpriced cells only where that entry earned them. */
+      const unpricedOn = (rec: z.infer<typeof fileSchema>) => ({
+        unpriced: selectorsFor(rec.osArch, rec.versions.binary).GRID_UNPRICED_VERIFIED,
+      });
       const all = () =>
         files()
           .filter((f) => !f.file.endsWith('0-explore.json'))
@@ -392,6 +401,8 @@ describe('verification flags (TS-13; runs on every checkout)', () => {
               datesGrid: v.datesGrid,
             },
             anchorOf(rec),
+            undefined,
+            unpricedOn(rec),
           ),
         );
       // why: WP17 Task 17.8: an entry whose grid recordings hold a view the reading refuses (on darwin-x64 under
@@ -413,7 +424,7 @@ describe('verification flags (TS-13; runs on every checkout)', () => {
             expect(verifiedOn(rec), `${file} (${rec.osArch})`).toBe(false);
         }
       });
-      it('every view is the dates-grid view; every candidate parses; the cells name exactly the lines’ dates', () => {
+      it('every view is the dates-grid view; every candidate parses (an unpriced one where its entry reads them); the cells name exactly the lines’ dates', () => {
         const recs = verified();
         expect(recs.length).toBeGreaterThan(0);
         for (const { file, rec } of recs) {
@@ -427,6 +438,8 @@ describe('verification flags (TS-13; runs on every checkout)', () => {
                 datesGrid: v.datesGrid,
               },
               anchorOf(rec),
+              undefined,
+              unpricedOn(rec),
             );
             expect(r.kind === 'view' && [r.unparsed, r.structural], `${file} view ${i}`).toEqual([0, 'ok']);
             if (underDrawnSettle(rec)) expect(v.drawn, `${file} view ${i}`).toBe(true);
@@ -435,6 +448,32 @@ describe('verification flags (TS-13; runs on every checkout)', () => {
               expect(parseSelectedPrice(v.selectedLines[0] ?? ''), file).toBe(parseCellName(sel)?.pounds);
           }
         }
+      });
+      // why: spec §2 "Cells by name": GRID_UNPRICED_VERIFIED is set only on an entry whose own grid recordings show an
+      // unpriced cell (darwin-arm64: grid/2026-10-26/7 and 8), and every name there that is not a price is one of the
+      // two unpriced forms; an entry whose recordings show none keeps it false
+      it('GRID_UNPRICED_VERIFIED stands on the entry’s own recordings of unpriced cells, each of which parses', () => {
+        const recs = all();
+        let shown = 0;
+        for (const { file, rec } of recs) {
+          const names = rec.views
+            .flatMap((v) => v.candidates)
+            .filter((c) => c !== null && !c.startsWith('£'));
+          if (names.length > 0 && unpricedOn(rec).unpriced) {
+            shown++;
+            for (const nm of names) expect(parseUnpricedCellName(nm ?? ''), `${file}: ${nm}`).not.toBeNull();
+          }
+        }
+        for (const k of OS_ARCHES) {
+          const own = recs.filter(({ rec }) => rec.osArch === k);
+          const unpriced = own.some(({ rec }) =>
+            rec.views.some((v) => v.candidates.some((c) => c !== null && parseUnpricedCellName(c) !== null)),
+          );
+          if (own.length > 0 && !unpriced)
+            expect(selectorsFor(k, own[0]?.rec.versions.binary ?? '').GRID_UNPRICED_VERIFIED, k).toBe(false);
+          if (own.some(({ rec }) => unpricedOn(rec).unpriced)) expect(unpriced, k).toBe(true);
+        }
+        expect(shown).toBeGreaterThan(0);
       });
       it('one scroll moves one day on its own axis and none on the other (GRID_STEP_DAYS)', () => {
         let measured = 0;

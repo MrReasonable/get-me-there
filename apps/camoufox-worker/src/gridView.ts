@@ -12,6 +12,10 @@
  *   it names is still drawing, and its settle waits, to its bound at most. A cell that fails the grammar or names a
  *   date outside the lines is unparsed (counted). A pair named twice, a count that is not the expected one, or cells
  *   whose dates are not the lines' sets make the view structurally unparsed: none of its cells is kept.
+ * - A pair the grid shows without a price (spec §2 "Cells by name"; grid/2026-10-26/7 and 8) is a button like any cell,
+ *   named "no flights, <d> <Mon> to <d> <Mon>" or "price unknown, <d> <Mon> to <d> <Mon>". Where GRID_UNPRICED_VERIFIED
+ *   is set it is read as an unpriced cell: it counts for the view's cells and its lines' sets, but carries no price and
+ *   is never selected. Elsewhere it is unparsed, as any name the grammar does not read.
  * - More than half of the priced-looking cells (names starting "£") failing is drift: `unrecognised`.
  * - Each date takes the year nearest the query's departure. On the first view the selected cell must be the query's
  *   pair, the range line must name it (and its year, when printed), and the price line must be its price.
@@ -23,6 +27,7 @@ import {
   parseCellName,
   parseSelectedPrice,
   parseSelectedRange,
+  parseUnpricedCellName,
   resolveDay,
   weekdayMatches,
 } from './gridNames.js';
@@ -201,12 +206,13 @@ export function stillDrawing(lines: readonly string[], cells: number, anchor: Is
 
 /**
  * Checks one view (see the module comment). `anchor` is the query's departure (each date's year); `first` is the
- * query's pair on the page's first view.
+ * query's pair on the page's first view; `o.unpriced` reads the unpriced cells (GRID_UNPRICED_VERIFIED).
  */
 export function interpretView(
   r: RawView,
   anchor: IsoDate,
   first?: { dep: IsoDate; ret: IsoDate },
+  o: { unpriced: boolean } = { unpriced: false },
 ): Interpreted {
   const g = r.datesGrid;
   if (g.dialog !== 1 || g.datesSelected !== 1 || g.grid !== 1 || g.scrollButtons !== 4)
@@ -229,7 +235,9 @@ export function interpretView(
     const name = raw === null ? null : spaced(raw);
     const looksPriced = name?.startsWith('£') === true;
     if (looksPriced) pricedLooking++;
-    const c = name === null ? null : parseCellName(name);
+    const priced = name === null ? null : parseCellName(name);
+    // why: spec §2 "Cells by name": the unpriced forms are read only where a recording proved them
+    const c = priced ?? (o.unpriced && name !== null ? parseUnpricedCellName(name) : null);
     const dep = c === null ? null : resolveDay(c.dep, anchor);
     const ret = c === null ? null : resolveDay(c.ret, anchor);
     if (c === null || dep === null || ret === null || !depSet.has(dep) || !retSet.has(ret) || ret < dep) {
@@ -240,6 +248,11 @@ export function interpretView(
     const key = `${dep}/${ret}`;
     if (seen.has(key)) duplicate = true;
     seen.add(key);
+    if ('status' in c) {
+      // why: an unpriced cell explains its pair (it is shown, and says why it has no price) but is never priced
+      cells.push({ status: c.status, departureDate: dep, returnDate: ret });
+      continue;
+    }
     if (c.selected) selected = { key, pounds: c.pounds };
     cells.push({
       status: 'price',

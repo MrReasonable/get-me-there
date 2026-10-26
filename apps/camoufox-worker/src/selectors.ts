@@ -123,6 +123,8 @@ export interface Selectors {
   GRID_VERIFIED: boolean;
   /** The consent command's landing view (WP17 Task 17.4); set by research 17.0c's recording of 2026-10-25. */
   LANDING_VERIFIED: boolean;
+  /** The date grid's unpriced cells, "no flights, …" and "price unknown, …" (spec §2 "Cells by name"). */
+  GRID_UNPRICED_VERIFIED: boolean;
 }
 
 export const SELECTORS: Selectors = {
@@ -223,6 +225,8 @@ export const PROOFS: Readonly<Record<OsArch, Partial<Record<FlagName, string>>>>
       '2026-10-25 consent-research/2026-10-25/1 (both sessions’ views after the choice: /travel/flights?hl=en-GB&gl=GB with no query, the heading "Flights", no tab, Date grid button or result link)',
     GRID_VERIFIED:
       '2026-10-18 grid/2026-10-18/1–4 (every cell name parses, each view’s cells name its lines’ dates, one scroll moves one day on its axis, SOCS same) and the renamed 0-explore',
+    GRID_UNPRICED_VERIFIED:
+      '2026-10-26 grid/2026-10-26/7 and 8 (a sparse route, ten views of 49 cells, every view drawn: each pair shown without a price a button named "no flights, <d> <Mon> to <d> <Mon>" or "price unknown, <d> <Mon> to <d> <Mon>", 14 to 19 of them a view, every other name priced and parsed, each view’s cells name its lines’ dates, SOCS same)',
   },
   // why: WP17 Task 17.8's recording sessions fill these, one commit per entry
   // why: WP17 Task 17.8, the operator's Mac under Rosetta (an official x86_64 Node 22, a throwaway HOME,
@@ -285,5 +289,6 @@ export function flagsOf(S: Selectors = SELECTORS): Record<FlagName, boolean> {
     SOCS_STABLE: S.SOCS_STABLE,
     GRID_VERIFIED: S.GRID_VERIFIED,
     LANDING_VERIFIED: S.LANDING_VERIFIED,
+    GRID_UNPRICED_VERIFIED: S.GRID_UNPRICED_VERIFIED,
   };
 }

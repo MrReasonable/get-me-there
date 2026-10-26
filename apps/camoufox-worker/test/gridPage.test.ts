@@ -20,7 +20,7 @@ import { type GridSettings, PageSession } from '../src/session.js';
 import { loadSocs } from '../src/socs.js';
 import { FakeContext } from './support/fakeContext.js';
 import { type FakeNode, type FakePage, formNodes, n, resultsTree, text } from './support/fakePage.js';
-import { gridTree, plusDays } from './support/gridTree.js';
+import { cellName, gridTree, plusDays } from './support/gridTree.js';
 import { memoryLog } from './support/log.js';
 import { SYNTHETIC_REJECT } from './support/socsValues.js';
 import { fakeTimers } from './support/timers.js';
@@ -250,7 +250,7 @@ describe('grid pages: the flow', () => {
     expect(clicksOf(t).filter((c) => c === 'button:Scroll down')).toHaveLength(7);
     for (let i = 1; i < at.length; i++) expect((at[i] ?? 0) - (at[i - 1] ?? 0)).toBeGreaterThanOrEqual(5000);
     expect(r.answer).toMatchObject({ scrolls: 7, ended: 'complete', currency: 'GBP', pointOfSale: 'GB' });
-    expect(r.answer.versions.gridGrammar).toBe('2026-10-18');
+    expect(r.answer.versions.gridGrammar).toBe('2026-10-26');
     expect(
       r.answer.views.map((v) => [v.index, v.departures[0], v.returns[0], v.cells.length, v.offPlan]),
     ).toEqual([
@@ -398,6 +398,81 @@ describe('grid pages: the flow', () => {
     });
     const r = await t.session.page(req(['down'], { dep: '2027-09-10', ret: '2027-09-20' }));
     expect(r.answer).toMatchObject({ kind: 'grid', views: [], scrolls: 0, ended: 'no-flights' });
+  });
+});
+
+// why: spec §2 "Cells by name" (grid/2026-10-26/7 and 8, a sparse route): a pair the grid shows without a price is a
+// button named "no flights, <d> <Mon> to <d> <Mon>" or "price unknown, <d> <Mon> to <d> <Mon>". Synthetic London → New
+// York views: no flights on any Tuesday 16 March departure, and no known price for 11 → 23 March
+describe('grid pages: pairs shown without a price', () => {
+  const sparseNames = (d: string, r: string): string | undefined => {
+    const pair = cellName(d, r, 1, { selected: false }).slice('£1, '.length);
+    if (d === '2027-03-16') return `no flights, ${pair}`;
+    if (d === '2027-03-11' && r === '2027-03-23') return `price unknown, ${pair}`;
+    return undefined;
+  };
+  const sparse = (d: string, r: string, i: number, undrawn?: (dd: string, rr: string) => boolean) =>
+    dialogPage(
+      gridTree({
+        depart: d,
+        ret: r,
+        rotate: i,
+        names: (dd, rr) => sparseNames(dd, rr),
+        ...(undrawn === undefined ? {} : { undrawn }),
+      }),
+    );
+  const statuses = (v: { cells: Array<{ status: string }> }) =>
+    ['price', 'no-flights', 'price-unknown'].map((x) => v.cells.filter((c) => c.status === x).length);
+  it('each view is read whole on its two stable polls: priced, no-flights and price-unknown cells as named', async () => {
+    const log = memoryLog();
+    const t = setup({ log, view: (d, r, i) => [sparse(d, r, i)] });
+    const r = await t.session.page(req(['right', 'down']));
+    if (r.answer.kind !== 'grid') throw new Error(JSON.stringify(r.answer));
+    expect(r.answer.ended).toBe('complete');
+    expect(r.answer.views.map((v) => [v.structural, v.unparsed, ...statuses(v)])).toEqual([
+      ['ok', 0, 41, 7, 1],
+      ['ok', 0, 42, 7, 0],
+      ['ok', 0, 42, 7, 0],
+    ]);
+    expect(r.answer.views[0]?.cells).toContainEqual({
+      status: 'no-flights',
+      departureDate: '2027-03-16',
+      returnDate: '2027-03-21',
+    });
+    // why: the unpriced cells are buttons, so no poll finds the view still drawing and none waits for them
+    const polls = log.lines.filter((l) => l.msg === 'dialog poll' && Reflect.get(l.o, 'view') === 'dates');
+    expect(polls.map((l) => Reflect.get(l.o, 'drawing'))).toEqual([false, false]);
+  });
+  it('a view whose unpriced cells are drawn but whose new column still prints "0000" is waited on, then read whole', async () => {
+    const log = memoryLog();
+    const t = setup({
+      log,
+      view: (d, r, i) =>
+        i === 1
+          ? [...Array(4).fill(sparse(d, r, i, (dd) => dd === plusDays(d, 6))), sparse(d, r, i)]
+          : [sparse(d, r, i)],
+    });
+    const r = await t.session.page(req(['right']));
+    if (r.answer.kind !== 'grid') throw new Error(JSON.stringify(r.answer));
+    expect(r.answer.views.map((v) => [v.structural, v.cells.length])).toEqual([
+      ['ok', 49],
+      ['ok', 49],
+    ]);
+    const polls = log.lines.filter((l) => l.msg === 'dialog poll' && Reflect.get(l.o, 'view') === 'move-1');
+    expect(polls.map((l) => Reflect.get(l.o, 'drawing'))).toEqual([true, true, true, true, false, false]);
+  });
+  it('without GRID_UNPRICED_VERIFIED the same views are refused whole (structural), and the page goes on', async () => {
+    const t = setup({
+      selectors: { ...SELECTORS, CHEAPEST_FLOW_VERIFIED: false, GRID_UNPRICED_VERIFIED: false },
+      view: (d, r, i) => [sparse(d, r, i)],
+    });
+    const r = await t.session.page(req(['right']));
+    if (r.answer.kind !== 'grid') throw new Error(JSON.stringify(r.answer));
+    expect(r.answer.ended).toBe('complete');
+    expect(r.answer.views.map((v) => [v.structural, v.cells.length, v.unparsed])).toEqual([
+      ['unparsed', 0, 8],
+      ['unparsed', 0, 7],
+    ]);
   });
 });
 

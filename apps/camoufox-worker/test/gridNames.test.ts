@@ -8,6 +8,7 @@ import {
   parseCellName,
   parseSelectedPrice,
   parseSelectedRange,
+  parseUnpricedCellName,
   resolveDay,
   weekdayMatches,
   weekdayOf,
@@ -71,6 +72,47 @@ describe('parseCellName', () => {
     '',
   ])('%j is unparsed, never guessed', (name) => {
     expect(parseCellName(name)).toBeNull();
+  });
+});
+
+// why: spec §2 "Cells by name": the unpriced forms grid/2026-10-26/7 and 8 recorded, each a button naming its pair
+describe('parseUnpricedCellName', () => {
+  it.each([
+    ['no flights, 14 Nov to 20 Nov', { status: 'no-flights', dep: [14, 11], ret: [20, 11] }],
+    ['no flights, 13 Feb to 5 Mar', { status: 'no-flights', dep: [13, 2], ret: [5, 3] }],
+    ['price unknown, 10 Nov to 24 Nov', { status: 'price-unknown', dep: [10, 11], ret: [24, 11] }],
+    ['no flights, 30 Dec to 2 Jan', { status: 'no-flights', dep: [30, 12], ret: [2, 1] }],
+    ['price unknown, 20 Oct to 20 Oct', { status: 'price-unknown', dep: [20, 10], ret: [20, 10] }],
+  ])('%s parses', (name, want) => {
+    const c = parseUnpricedCellName(name);
+    expect(c && { status: c.status, dep: [c.dep.day, c.dep.month], ret: [c.ret.day, c.ret.month] }).toEqual(
+      want,
+    );
+  });
+  it.each([
+    // why: no recording showed an unpriced cell selected or marked; such a name is unparsed until one does
+    'no flights, 14 Nov to 20 Nov, selected',
+    'price unknown, low price, 10 Nov to 24 Nov',
+    'No flights, 14 Nov to 20 Nov',
+    'Price unknown, 10 Nov to 24 Nov',
+    'no flights 14 Nov to 20 Nov',
+    'no flights, 14 Nov - 20 Nov',
+    'no flights, 14 Nov to 20 Nov ',
+    ' no flights, 14 Nov to 20 Nov',
+    'no flights, 31 Nov to 20 Dec',
+    'no flights, 14 Nov to 0 Dec',
+    'no flights, 14 Nvo to 20 Nov',
+    'no prices, 14 Nov to 20 Nov',
+    'no flights',
+    '£457, 11 Mar to 21 Mar',
+    '',
+  ])('%j is unparsed, never guessed', (name) => {
+    expect(parseUnpricedCellName(name)).toBeNull();
+  });
+  it('a priced name is never read as unpriced, nor an unpriced one as priced', () => {
+    expect(parseCellName('no flights, 14 Nov to 20 Nov')).toBeNull();
+    expect(parseCellName('price unknown, 10 Nov to 24 Nov')).toBeNull();
+    expect(parseUnpricedCellName('£607, low price, 13 Nov to 23 Nov, selected')).toBeNull();
   });
 });
 

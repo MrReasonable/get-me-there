@@ -69,13 +69,13 @@ const answer = {
   versions,
 };
 
-describe('the grid constants (recordings of 2026-10-18)', () => {
+describe('the grid constants (recordings of 2026-10-18; grammar of 2026-10-26)', () => {
   it('are the measured and dated values', () => {
     expect([GRID_SIDE, GRID_STEP_DAYS, GRID_HORIZON_DAYS, GRID_GRAMMAR_VERSION]).toEqual([
       7,
       { departures: 1, returns: 1 },
       320,
-      '2026-10-18',
+      '2026-10-26',
     ]);
     expect(GRID_TIMES).toEqual({ pageSeconds: 30, scrollSeconds: 9.3 });
   });
@@ -116,13 +116,29 @@ describe('the grid answer', () => {
     ['a mark outside the three', { ...cell, mark: 'great' }],
     ['a price of 0', { ...cell, amountMinor: 0 }],
     [
-      'an unpriced cell (not recorded yet, PA-13)',
-      { status: 'no-flights', departureDate: '2027-03-11', returnDate: '2027-03-21' },
+      'an unpriced cell carrying a price',
+      { status: 'no-flights', departureDate: '2027-03-11', returnDate: '2027-03-21', amountMinor: 100 },
+    ],
+    [
+      'an unpriced cell carrying a mark',
+      { status: 'price-unknown', departureDate: '2027-03-11', returnDate: '2027-03-21', mark: 'none' },
     ],
   ])('refuses %s', (_l, bad) => {
     expect(workerAnswerSchema.safeParse({ ...answer, views: [{ ...view, cells: [bad] }] }).success).toBe(
       false,
     );
+  });
+  // why: spec §2 "Cells by name" (grid/2026-10-26/7 and 8): a view's cells may mix priced and unpriced pairs
+  it('carries the unpriced cells beside the priced ones', () => {
+    const cells = [
+      cell,
+      { status: 'no-flights', departureDate: '2027-03-12', returnDate: '2027-03-21' },
+      { status: 'price-unknown', departureDate: '2027-03-13', returnDate: '2027-03-21' },
+    ];
+    expect(workerAnswerSchema.parse({ ...answer, views: [{ ...view, cells }] })).toEqual({
+      ...answer,
+      views: [{ ...view, cells }],
+    });
   });
   it('a same-day cell is a cell (the grid shows one); a view holds at most 49', () => {
     expect(

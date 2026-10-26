@@ -4,6 +4,8 @@
  *
  * - A cell: `£<price>[, cheapest price | , low price], <d> <Mon> to <d> <Mon>[, selected]`, the price in whole pounds
  *   with thousands separators ("£1,308").
+ * - An unpriced cell (observed 2026-10-26, grid/2026-10-26/7 and 8): `no flights, <d> <Mon> to <d> <Mon>` or
+ *   `price unknown, <d> <Mon> to <d> <Mon>`, each a button like a priced cell, printing "no flights" or "price unknown".
  * - A day label: `<Ddd> <d> <Mon>` ("Thu 11 Mar"); a line prints its seven labels with no space between them
  *   ("0000Thu 11 MarFri 12 Mar…"), so labels are matched without word boundaries.
  * - The selected-pair line: "14 – 24 Mar 2027", "28 Mar – 7 Apr 2027", "27 Dec 2026 – 6 Jan 2027", or "20 – 23 Oct" (the
@@ -37,6 +39,7 @@ const POUNDS = '([1-9]\\d{0,2}(?:,\\d{3})*)';
 const CELL = new RegExp(
   `^£${POUNDS}(, cheapest price|, low price)?, (\\d{1,2}) (${MON}) to (\\d{1,2}) (${MON})(, selected)?$`,
 );
+const UNPRICED = new RegExp(`^(no flights|price unknown), (\\d{1,2}) (${MON}) to (\\d{1,2}) (${MON})$`);
 const LABEL = new RegExp(`(Mon|Tue|Wed|Thu|Fri|Sat|Sun) (\\d{1,2}) (${MON})`, 'g');
 const RANGE = new RegExp(`^(\\d{1,2})(?: (${MON}))?(?: (\\d{4}))? – (\\d{1,2}) (${MON})(?: (\\d{4}))?$`);
 const PRICE_LINE = new RegExp(`^£${POUNDS} · Round trip$`);
@@ -71,6 +74,28 @@ const dayMonth = (d: string, token: string): DayMonth | null => {
   const month = monthOf(token);
   return month !== null && day >= 1 && day <= daysIn(month) ? { day, month } : null;
 };
+
+/** A cell the grid shows without a price: its words and both dates (spec §2 "Cells by name"). */
+export interface UnpricedCellName {
+  /** `no-flights`: the cell says there are no flights for the pair; `price-unknown`: it says no price is known. */
+  status: 'no-flights' | 'price-unknown';
+  dep: DayMonth;
+  ret: DayMonth;
+}
+
+/**
+ * "no flights, 14 Nov to 20 Nov" and "price unknown, 10 Nov to 24 Nov", exactly as grid/2026-10-26/7 and 8 recorded
+ * them (no mark and no ", selected" was ever seen on one, so a name carrying either is unparsed). Read only where
+ * GRID_UNPRICED_VERIFIED is set; the caller decides.
+ */
+export function parseUnpricedCellName(name: string): UnpricedCellName | null {
+  const m = UNPRICED.exec(name);
+  if (m === null) return null;
+  const dep = dayMonth(at(m, 2), at(m, 3));
+  const ret = dayMonth(at(m, 4), at(m, 5));
+  if (dep === null || ret === null) return null;
+  return { status: at(m, 1) === 'no flights' ? 'no-flights' : 'price-unknown', dep, ret };
+}
 
 export function parseCellName(name: string): CellName | null {
   const m = CELL.exec(name);

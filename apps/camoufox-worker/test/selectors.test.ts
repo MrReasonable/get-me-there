@@ -8,7 +8,7 @@ describe('the dated selectors module (spec §2; brief §9)', () => {
     expect(SELECTORS_VERSION).toMatch(/^\d{4}-\d{2}-\d{2}-/);
     expect(SELECTORS.version).toBe(SELECTORS_VERSION);
   });
-  it('reports every flag as the 2026-10-18 and 2026-10-25 recordings set them; View more stays off', () => {
+  it('reports every flag as the 2026-10-18, 2026-10-25 and 2026-10-26 recordings set them; View more stays off', () => {
     expect(flagsOf()).toEqual({
       RESULTS_VERIFIED: true,
       FORM_VERIFIED: true,
@@ -18,6 +18,8 @@ describe('the dated selectors module (spec §2; brief §9)', () => {
       SOCS_STABLE: true,
       GRID_VERIFIED: true,
       LANDING_VERIFIED: true,
+      // why: grid/2026-10-26/7 and 8 showed the date grid's unpriced cells on the operator's Mac
+      GRID_UNPRICED_VERIFIED: true,
     });
     expect(Object.keys(flagsOf())).toEqual([...FLAG_NAMES]);
   });

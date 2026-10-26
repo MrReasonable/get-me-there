@@ -68,6 +68,9 @@ const FLAGS = {
       // why: research 17.0c's recording of 2026-10-25 (consent-research/2026-10-25/1): both sessions' views after the
       // choice read as the landing view
       LANDING_VERIFIED: true,
+      // why: grid/2026-10-26/7 and 8 (the operator's Mac): every unpriced cell of ten views read as "no flights, <d>
+      // <Mon> to <d> <Mon>" or "price unknown, <d> <Mon> to <d> <Mon>", each a button naming its pair
+      GRID_UNPRICED_VERIFIED: true,
     },
   },
   // why: WP17 Task 17.8's darwin-x64 session of 2026-10-26 (the operator's Mac under Rosetta, an x86_64 Node, a
@@ -88,6 +91,8 @@ const FLAGS = {
       // drawn, which the reading refused
       GRID_VERIFIED: true,
       LANDING_VERIFIED: true,
+      // why: no grid recording of this entry shows an unpriced cell (its pages were all priced)
+      GRID_UNPRICED_VERIFIED: false,
     },
   },
   // why: WP17 Task 17.8's linux-arm64 session of 2026-10-26 (a Linux arm64 container on the operator's Mac, headless,
@@ -104,6 +109,8 @@ const FLAGS = {
       SOCS_STABLE: true,
       GRID_VERIFIED: true,
       LANDING_VERIFIED: true,
+      // why: no grid recording of this entry shows an unpriced cell (its pages were all priced)
+      GRID_UNPRICED_VERIFIED: false,
     },
   },
   // why: WP17 Task 17.8's linux-x64 session of 2026-10-26 (a Linux x86_64 container under emulation on the operator's
@@ -120,6 +127,8 @@ const FLAGS = {
       SOCS_STABLE: true,
       GRID_VERIFIED: true,
       LANDING_VERIFIED: true,
+      // why: no grid recording of this entry shows an unpriced cell (its pages were all priced)
+      GRID_UNPRICED_VERIFIED: false,
     },
   },
 } as const;

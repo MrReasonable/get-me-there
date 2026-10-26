@@ -11,12 +11,12 @@ import { recordingsPresentForKind, skipTitle } from '@gmt/providers/testing';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { CooldownStore } from '../src/cooldown.js';
-import { parseCellName, resolveDay } from '../src/gridNames.js';
+import { parseCellName, parseUnpricedCellName, resolveDay } from '../src/gridNames.js';
 import { changeKeyOf, stillDrawing } from '../src/gridView.js';
 import { MonthlyCounter } from '../src/monthly.js';
 import { Pacer } from '../src/pacer.js';
 import { Refusal } from '../src/refusal.js';
-import { SELECTORS, selectorsFor } from '../src/selectors.js';
+import { type Selectors, selectorsFor } from '../src/selectors.js';
 import { PageSession } from '../src/session.js';
 import { loadSocs } from '../src/socs.js';
 import { FakeContext } from './support/fakeContext.js';
@@ -101,6 +101,8 @@ function allRecordings(): Array<{ file: string; rec: z.infer<typeof fileSchema> 
           });
   return out;
 }
+const entrySelectors = (rec: z.infer<typeof fileSchema>): Selectors =>
+  selectorsFor(rec.osArch, rec.versions?.binary ?? CAMOUFOX_BUILDS[rec.osArch].build);
 /**
  * WP17 Task 17.8: the server path is held to these recordings only on entries whose GRID_VERIFIED is set; the recorded
  * suite keeps that flag false where a recording shows a refused view.
@@ -111,7 +113,7 @@ const recordings = () => {
   // that a view still drawing is waited on or refused, not to these
   return all.filter(
     ({ rec }) =>
-      selectorsFor(rec.osArch, rec.versions?.binary ?? CAMOUFOX_BUILDS[rec.osArch].build).GRID_VERIFIED &&
+      entrySelectors(rec).GRID_VERIFIED &&
       !superseded(
         rec,
         all.map((o) => o.rec),
@@ -141,6 +143,7 @@ async function serve(
   rec: z.infer<typeof fileSchema>,
   drawnLater = new Map<number, View>(),
   log = memoryLog(),
+  flags: Partial<Selectors> = {},
 ) {
   const first = queryView(rec);
   const anchor = anchorOf(rec);
@@ -218,7 +221,8 @@ async function serve(
     refusal: new Refusal({ dir: dataDir, clock: timers.clock }),
     clock: timers.clock,
     timers,
-    selectors: { ...SELECTORS, CHEAPEST_FLOW_VERIFIED: false },
+    // why: each recording is served under its own entry's flags (the unpriced cells only where that entry earned them)
+    selectors: { ...entrySelectors(rec), CHEAPEST_FLOW_VERIFIED: false, ...flags },
     pageTimeoutMs: 90_000,
     log,
     versions: { selectors: 's', grammar: 'g', camoufoxJs: '0.11.5', binary: 'b' },
@@ -279,7 +283,7 @@ describe.skipIf(!present)(
         const r = await serve(rec);
         if (r.answer.kind === 'grid') views.push(...r.answer.views);
       }
-      const cells = views.flatMap((v) => v.cells);
+      const cells = views.flatMap((v) => v.cells).flatMap((c) => (c.status === 'price' ? [c] : []));
       expect(cells.some((c) => c.mark === 'low')).toBe(true);
       expect(cells.some((c) => c.mark === 'cheapest')).toBe(true);
       expect(
@@ -403,6 +407,72 @@ describe.skipIf(!present)(
         }
       }
       expect(paired).toBeGreaterThan(0);
+    });
+  },
+);
+
+// why: spec §2 "Cells by name": grid/2026-10-26/7 and 8, a sparse route on the operator's Mac (darwin-arm64), whose
+// views hold pairs Google shows without a price, each a button named "no flights, <d> <Mon> to <d> <Mon>" or
+// "price unknown, <d> <Mon> to <d> <Mon>". The operator's first run of 2026-10-26 refused every such view (its cells
+// were unparsed and a whole departure day named no price, failing the set check), so nothing was priced
+describe.skipIf(!present)(
+  skipTitle('recorded grid views holding unpriced cells (spec §2 "Cells by name")', present),
+  () => {
+    const sparse = () =>
+      allRecordings().filter(({ rec }) =>
+        rec.views.some((v) => v.candidates.some((c) => c !== null && parseUnpricedCellName(c) !== null)),
+      );
+    it('each view is read whole: every pair priced, no flights or price unknown, as its cell names it', async () => {
+      const recs = sparse();
+      expect(recs.length).toBeGreaterThan(0);
+      const seen = new Set<string>();
+      for (const { file, rec } of recs) {
+        expect(entrySelectors(rec).GRID_UNPRICED_VERIFIED, file).toBe(true);
+        const log = memoryLog();
+        const r = await serve(rec, new Map(), log);
+        if (r.answer.kind !== 'grid') throw new Error(`${file}: ${JSON.stringify(r.answer)}`);
+        expect(r.answer.ended, file).toBe('complete');
+        expect(r.answer.views, file).toHaveLength(rec.views.length);
+        for (const [i, v] of r.answer.views.entries()) {
+          const called = v.departures.flatMap((d) => v.returns.filter((x) => x >= d)).length;
+          expect([v.structural, v.unparsed, v.cells.length], `${file} view ${i}`).toEqual(['ok', 0, called]);
+          const names = rec.views[i]?.candidates ?? [];
+          // why: every cell's status is its own name's words, never inferred from a neighbour or a weekday
+          const dm = (iso: string): string =>
+            `${Number(iso.slice(8, 10))} ${MONS[Number(iso.slice(5, 7)) - 1] ?? ''}`;
+          for (const c of v.cells) {
+            const pair = `${dm(c.departureDate)} to ${dm(c.returnDate)}`;
+            const own = names.filter(
+              (nm) => nm !== null && (nm.endsWith(pair) || nm.endsWith(`${pair}, selected`)),
+            );
+            const want =
+              c.status === 'price'
+                ? own.length === 1 && (own[0] ?? '').startsWith('£')
+                : own.length === 1 &&
+                  own[0] === `${c.status === 'no-flights' ? 'no flights' : 'price unknown'}, ${pair}`;
+            expect(want, `${file} view ${i} ${pair}`).toBe(true);
+            seen.add(c.status);
+          }
+          expect(v.cells.filter((c) => c.status !== 'price')).toHaveLength(
+            names.filter((nm) => nm !== null && !nm.startsWith('£')).length,
+          );
+        }
+        // why: the unpriced cells are buttons, so the view names every cell: no poll of it waits as still drawing
+        const drawing = log.lines
+          .filter((l) => l.msg === 'dialog poll' && Reflect.get(l.o, 'stable') === true)
+          .map((l) => Reflect.get(l.o, 'drawing'));
+        expect(drawing.length, file).toBeGreaterThan(0);
+        expect(new Set(drawing), file).toEqual(new Set([false]));
+      }
+      expect([...seen].sort()).toEqual(['no-flights', 'price', 'price-unknown']);
+    });
+    it('without GRID_UNPRICED_VERIFIED the same views are refused whole, as the first run refused them', async () => {
+      for (const { file, rec } of sparse()) {
+        const r = await serve(rec, new Map(), memoryLog(), { GRID_UNPRICED_VERIFIED: false });
+        if (r.answer.kind !== 'grid') throw new Error(`${file}: ${JSON.stringify(r.answer)}`);
+        for (const v of r.answer.views)
+          expect([v.structural, v.cells.length], `${file} view ${v.index}`).toEqual(['unparsed', 0]);
+      }
     });
   },
 );

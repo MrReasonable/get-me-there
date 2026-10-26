@@ -19,6 +19,11 @@ export type FailureDecision =
       reason: ErrorReason;
       lastError: string;
       parse: boolean;
+      /**
+       * A camoufox page that did not settle within its page timeout (`parse`, reason `page-not-ready`): Ian's ruling of
+       * 2026-10-26 (spec §8.1 rev 49) lets three in a row, not two, disable the provider.
+       */
+      notReady: boolean;
       disableProvider: boolean;
       /** camoufox's worker refused the connection (spec §8.1 rev 32): disabled for the run as provider_unavailable. */
       unavailable: boolean;
@@ -59,6 +64,7 @@ export function classifyFailure(err: unknown, aborted: boolean, now: IsoDateTime
       reason: kept ?? err.kind,
       lastError: stripUrlsInText(err.message),
       parse: err.kind === 'parse',
+      notReady: err.kind === 'parse' && err.providerId === 'camoufox' && err.reason === 'page-not-ready',
       // why: spec §8.1 rev 32: a camoufox block disables the provider like auth and quota do
       disableProvider: err.kind === 'auth' || err.kind === 'quota' || err.kind === 'blocked',
       unavailable: err.kind === 'provider-unavailable',

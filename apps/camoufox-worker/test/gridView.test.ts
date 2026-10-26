@@ -113,7 +113,10 @@ describe('interpretView', () => {
     names[0] = '£397, cheapest price, 11 Mar to 21 Mar';
     names[1] = '£485, low price, 12 Mar to 21 Mar';
     const v = interpretView({ ...r, candidates: names }, Q.dep);
-    expect(v.kind === 'view' && v.cells.slice(0, 2).map((c) => [c.amountMinor, c.mark])).toEqual([
+    expect(
+      v.kind === 'view' &&
+        v.cells.slice(0, 2).map((c) => (c.status === 'price' ? [c.amountMinor, c.mark] : c.status)),
+    ).toEqual([
       [39_700, 'cheapest'],
       [48_500, 'low'],
     ]);
@@ -290,6 +293,119 @@ describe('interpretView', () => {
   ])('the first view: %s is unrecognised (PA-11)', (label, r) => {
     const check = label.includes('price') ? 'price' : label.includes('selected') ? 'selected-cell' : 'range';
     expect(interpretView(r, Q.dep, Q)).toEqual({ kind: 'unrecognised', why: 'first-view', check });
+  });
+});
+
+// why: spec §2 "Cells by name" (grid/2026-10-26/7 and 8, a sparse route): a pair the grid shows without a price is a
+// button named "no flights, <d> <Mon> to <d> <Mon>" or "price unknown, <d> <Mon> to <d> <Mon>". Synthetic London → New
+// York views: Tuesday 16 March has no flights on any return, and one pair has no known price
+describe('interpretView with the unpriced cells (GRID_UNPRICED_VERIFIED)', () => {
+  const ON = { unpriced: true };
+  /** The whole view with the 16 March departures named "no flights" and 11 → 23 March "price unknown". */
+  function sparse(): RawView {
+    const r = raw({ depart: '2027-03-11', ret: '2027-03-21' });
+    return {
+      ...r,
+      candidates: r.candidates.map((x) => {
+        const m = /, (\d+ Mar) to (\d+ Mar)$/.exec(x ?? '');
+        if (m?.[1] === '16 Mar') return `no flights, ${m[1]} to ${m[2] ?? ''}`;
+        if (m?.[1] === '11 Mar' && m[2] === '23 Mar') return `price unknown, ${m[1]} to ${m[2]}`;
+        return x;
+      }),
+    };
+  }
+  it('reads each unpriced pair as its own cell beside the priced ones: the view is whole', () => {
+    const v = interpretView(sparse(), Q.dep, Q, ON);
+    if (v.kind !== 'view') throw new Error(v.why);
+    expect([v.cells.length, v.unparsed, v.structural, v.structuralCheck]).toEqual([49, 0, 'ok', null]);
+    const of = (status: string) => v.cells.filter((c) => c.status === status);
+    expect(of('price')).toHaveLength(41);
+    expect(of('no-flights').map((c) => [c.departureDate, c.returnDate])).toEqual(
+      days('2027-03-21').map((r) => ['2027-03-16', r]),
+    );
+    expect(of('price-unknown')).toEqual([
+      { status: 'price-unknown', departureDate: '2027-03-11', returnDate: '2027-03-23' },
+    ]);
+    // why: an unpriced cell carries no price and no mark, so it can never be counted as priced
+    for (const c of [...of('no-flights'), ...of('price-unknown')])
+      expect(Object.keys(c).sort()).toEqual(['departureDate', 'returnDate', 'status']);
+  });
+  it('without the flag the same names are unparsed, as any name the grammar does not read: the view is refused', () => {
+    expect(interpretView(sparse(), Q.dep, Q)).toMatchObject({
+      kind: 'view',
+      structural: 'unparsed',
+      structuralCheck: 'sets',
+      cells: [],
+      unparsed: 8,
+    });
+    expect(interpretView(sparse(), Q.dep, Q, { unpriced: false })).toMatchObject({
+      structural: 'unparsed',
+      unparsed: 8,
+    });
+  });
+  it('unpriced names are not priced-looking: a view of them alone is no drift', () => {
+    const r = raw({ depart: '2027-03-11', ret: '2027-03-21' });
+    const none = r.candidates.map((x) => (x ?? '').replace(/^£\d+/, 'no flights').replace(/, selected$/, ''));
+    expect(interpretView({ ...r, candidates: none }, Q.dep, undefined, ON)).toMatchObject({
+      kind: 'view',
+      structural: 'ok',
+      unparsed: 0,
+    });
+    expect(interpretView({ ...r, candidates: none }, Q.dep)).toMatchObject({
+      kind: 'view',
+      structural: 'unparsed',
+      unparsed: 49,
+    });
+  });
+  it('the first view’s selected cell must still be priced: an unpriced name never carries the selection', () => {
+    const r = sparse();
+    const names = r.candidates.map((x) =>
+      x === '£462, 14 Mar to 24 Mar, selected' ? 'no flights, 14 Mar to 24 Mar, selected' : x,
+    );
+    expect(interpretView({ ...r, candidates: names }, Q.dep, Q, ON)).toEqual({
+      kind: 'unrecognised',
+      why: 'first-view',
+      check: 'selected-cell',
+    });
+  });
+  it.each([
+    ['a missing cell (the count)', (xs: Array<string | null>) => xs.slice(1), 'count'],
+    [
+      'an unpriced pair named twice',
+      (xs: Array<string | null>) => xs.map((x, i) => (i === 0 ? 'no flights, 16 Mar to 21 Mar' : x)),
+      'duplicate',
+    ],
+    [
+      'a priced and an unpriced name for one pair',
+      (xs: Array<string | null>) =>
+        xs.map((x) => (x === 'no flights, 16 Mar to 22 Mar' ? '£450, 16 Mar to 21 Mar' : x)),
+      'duplicate',
+    ],
+  ])('anything still unexplained is refused whole: %s', (_l, edit, check) => {
+    const r = sparse();
+    expect(interpretView({ ...r, candidates: edit(r.candidates) }, Q.dep, Q, ON)).toMatchObject({
+      kind: 'view',
+      structural: 'unparsed',
+      structuralCheck: check,
+      cells: [],
+    });
+  });
+  it('an unpriced name for a date off the lines, or returning before it departs, is unparsed and never a cell', () => {
+    const r = sparse();
+    const names = r.candidates.map((x) =>
+      x === 'no flights, 16 Mar to 21 Mar'
+        ? 'no flights, 18 Mar to 21 Mar'
+        : x === 'no flights, 16 Mar to 22 Mar'
+          ? 'no flights, 16 Mar to 15 Mar'
+          : x,
+    );
+    const v = interpretView({ ...r, candidates: names }, Q.dep, Q, ON);
+    if (v.kind !== 'view') throw new Error(v.why);
+    expect([v.unparsed, v.structural, v.cells.length]).toEqual([2, 'ok', 47]);
+  });
+  it('a view whose unpriced cells are buttons names every cell: it is not still drawing', () => {
+    const r = sparse();
+    expect(stillDrawing(r.lines, r.candidates.length, Q.dep)).toBe(false);
   });
 });
 

@@ -103,6 +103,118 @@ describe('camoufox grid mode through the engine (Task 15.8)', () => {
   });
 });
 
+// why: Ian's ruling of 2026-10-26 (spec §8.1 rev 49): camoufox pages that do not settle within the page timeout
+// (`parse`, `page-not-ready`) disable the provider only after three in a row; each stays an error for its cells, and a
+// page that settled (read or refused) breaks the streak. Every other parse streak, and a block, is unchanged
+describe('camoufox pages that did not settle (Ian, 2026-10-26)', () => {
+  const NOT_READY = { status: 504, body: { kind: 'not-ready', elapsedMs: 90_000, scrolls: 0 } };
+  /** Block k of a one-stay window of 10 nights from 2 Nov: departures from 2 Nov + 7k. */
+  const dep = (k: number) => addDays(asIsoDate('2026-11-02'), 7 * k);
+  const read = (k: number) => grid([view(0, dep(k), addDays(dep(k), 10))], 'complete', 0);
+  const refused = (k: number) =>
+    grid([{ ...view(0, dep(k), addDays(dep(k), 10)), cells: [], structural: 'unparsed' }], 'complete', 0);
+  const run = async (answers: Array<{ status: number; body: unknown }>) => {
+    const cf = realCamoufox(answers, 42, { executionPageCap: 100, executionScrollCap: 600 });
+    const e = engineWith([cf]);
+    const ex = await e.runToEnd();
+    const o = outcomes(e, ex.id, 'camoufox');
+    const count = (status: string, reason?: string) =>
+      o.filter((x) => x.status === status && (reason === undefined || x.reason === reason)).length;
+    return { cf, ex, count, e };
+  };
+  it('two in a row keep going: each is an error for its cells, and the next pages load', async () => {
+    const r = await run([NOT_READY, NOT_READY, read(2), read(3), read(4), read(5)]);
+    expect(r.cf.calls).toHaveLength(6);
+    expect([r.count('error', 'parse'), r.count('priced'), r.count('skipped')]).toEqual([14, 28, 0]);
+    for (const x of outcomes(r.e, r.ex.id, 'camoufox').filter((o) => o.status === 'error'))
+      expect(x.lastError ?? '').toMatch(/page-not-ready/);
+  });
+  it('three in a row disable the provider for the run: the rest skipped provider_disabled, no page loaded again', async () => {
+    const r = await run([NOT_READY, NOT_READY, NOT_READY, read(3), read(4), read(5)]);
+    expect(r.cf.calls).toHaveLength(3);
+    expect([r.count('error', 'parse'), r.count('skipped', 'provider_disabled')]).toEqual([21, 21]);
+    expect(r.e.ledgerRows('camoufox')).toHaveLength(3);
+    expect(JSON.stringify(r.e.notifications)).toContain(
+      'camoufox was disabled for this run after three consecutive pages that did not settle',
+    );
+  });
+  // why: the sixth page shows the streak was counted from the settled page: a stale count would disable at the fifth
+  it('a page that settled breaks the streak, read or refused: two runs of two, then a page read, none disabled', async () => {
+    for (const middle of [read(2), refused(2)]) {
+      const r = await run([NOT_READY, NOT_READY, middle, NOT_READY, NOT_READY, read(5)]);
+      expect(r.cf.calls).toHaveLength(6);
+      expect(r.count('skipped')).toBe(0);
+      expect(r.count('error', 'parse')).toBe(42 - r.count('priced'));
+    }
+  });
+  it('any other parse error keeps the rule of two, whichever comes first', async () => {
+    const BAD = { status: 400, body: {} };
+    for (const answers of [
+      [NOT_READY, BAD, read(2)],
+      [BAD, NOT_READY, read(2)],
+    ]) {
+      const r = await run(answers);
+      expect(r.cf.calls).toHaveLength(2);
+      expect(r.count('skipped', 'provider_disabled')).toBe(28);
+      expect(JSON.stringify(r.e.notifications)).toContain(
+        'camoufox was disabled for this run after two consecutive parse errors',
+      );
+    }
+  });
+  it('a block after a page that did not settle still stops the provider at once', async () => {
+    const r = await run([
+      NOT_READY,
+      { status: 423, body: { kind: 'blocked', page: 'captcha', cooldownUntil: B, scrolls: 0 } },
+      read(2),
+    ]);
+    expect(r.cf.calls).toHaveLength(2);
+    expect([r.count('error', 'blocked'), r.count('skipped', 'provider_disabled')]).toEqual([7, 28]);
+  });
+});
+
+// why: spec §2 "Cells by name" (grid/2026-10-26/7 and 8, a sparse route): a view's cell named "no flights" is no
+// fares for that pair (`empty`); one named "price unknown" is `no_data` (no price shown, not evidence of no flights);
+// neither is priced, neither is an error, and the view's priced cells are kept beside them
+describe('camoufox grid pages holding unpriced cells, through the engine', () => {
+  it('no flights is no fares, price unknown is no data, and the rest are priced; none is an error', async () => {
+    const v = view(0, '2026-11-02', '2026-11-12');
+    const cells = v.cells.map((c) =>
+      c.departureDate === '2026-11-05'
+        ? { status: 'no-flights' as const, departureDate: c.departureDate, returnDate: c.returnDate }
+        : c.departureDate === '2026-11-02' && c.returnDate === '2026-11-12'
+          ? { status: 'price-unknown' as const, departureDate: c.departureDate, returnDate: c.returnDate }
+          : c,
+    );
+    const cf = realCamoufox([grid([{ ...v, cells }], 'complete', 0)], 7, {
+      executionPageCap: 100,
+      executionScrollCap: 600,
+    });
+    const e = engineWith([cf]);
+    const ex = await e.runToEnd();
+    const o = outcomes(e, ex.id, 'camoufox');
+    const of = (status: string) => o.filter((x) => x.status === status).map((x) => x.departureDate);
+    expect(of('priced')).toEqual(['2026-11-03', '2026-11-04', '2026-11-06', '2026-11-07', '2026-11-08']);
+    expect(of('empty')).toEqual(['2026-11-05']);
+    expect(of('no_data')).toEqual(['2026-11-02']);
+    expect(of('error')).toEqual([]);
+    expect(e.ctx.repos.cells.buckets(ex.id, 'discovery', 'camoufox')).toMatchObject({
+      priced: 5,
+      empty: 1,
+      no_data: 1,
+      error: 0,
+      not_run: 0,
+    });
+    const rolled = e.ctx.repos.cells.rollUps(ex.id);
+    const rollOf = (dep: string) =>
+      [...rolled.entries()].find(([k]) => k.includes(dep))?.[1].discovery.status ?? null;
+    expect([rollOf('2026-11-05'), rollOf('2026-11-02'), rollOf('2026-11-03')]).toEqual([
+      'empty',
+      'no_data',
+      'priced',
+    ]);
+  });
+});
+
 // why: fix round 2 (ruling 1): a capped camoufox grid run spreads its pages across the pairs, never finishing pair 1
 describe('camoufox grid pages across the pairs (fix round 2)', () => {
   function fourPairs(pageCap: number, grid = true) {

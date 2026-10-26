@@ -1,7 +1,11 @@
 /**
  * The camoufox grid answer as a discovery tile (spec §2, §5.2, §7 rev 34; plan decision 70; WP15 Task 15.7). Every
- * covered cell ends one of three ways, and never as `empty`:
+ * covered cell ends one of these ways:
  * - priced: a parsed cell of a read view, with `returnDateSource: 'grid-cell'` and Google's mark kept as the vendor's;
+ * - no fares (`noFares`, which the engine writes `empty`): a cell of a read view whose own name says "no flights" for
+ *   that pair (spec §2 "Cells by name"; grid/2026-10-26/7 and 8), counted per view (`no-flights:<n>@<view>`);
+ * - neither (the engine writes `no_data`, not evidence that no flights exist): a cell of a read view whose name says
+ *   "price unknown", counted per view (`price-unknown:<n>@<view>`);
  * - no data: Google's no-flights page. Its line is generic, so it says nothing of cells the page never showed (ruling on
  *   N1): on the probe page past the planning horizon it is the sale window's end, and every covered cell is no data;
  *   on any other page only the query cell is, and every other covered cell stays unsearched (`no-flights-unseen`,
@@ -75,7 +79,9 @@ export function gridTile(plan: TilePlan, answer: GridAnswer): DiscoveryTileResul
   }
   const covered = new Map<string, CellKey>(plan.coveredCells.map((c) => [cellKeyString(c), c]));
   const prices: RawCalendarPrice[] = [];
-  const priced = new Set<string>();
+  const noFares: CellKey[] = [];
+  /** Every covered pair a read view named, priced or not: each is read in exactly one view. */
+  const read = new Set<string>();
   const notes = [...answer.notes];
   let outside = 0;
   /** For each covered cell a read view showed: whether the view was structurally unparsed. */
@@ -83,6 +89,10 @@ export function gridTile(plan: TilePlan, answer: GridAnswer): DiscoveryTileResul
   const [first] = plan.coveredCells;
   for (const v of answer.views) {
     if (v.unparsed > 0) notes.push(`unparsed:${v.unparsed}@${v.index}`);
+    for (const status of ['no-flights', 'price-unknown'] as const) {
+      const n = v.cells.filter((c) => c.status === status).length;
+      if (n > 0) notes.push(`${status}:${n}@${v.index}`);
+    }
     if (v.offPlan !== null) notes.push(`off-plan:${v.offPlan}@${v.index}`);
     const deps = new Set<string>(v.departures);
     const rets = new Set<string>(v.returns);
@@ -104,7 +114,7 @@ export function gridTile(plan: TilePlan, answer: GridAnswer): DiscoveryTileResul
       }
       // why: each cell is read in exactly one view (the plan's `reads`); a second reading is an answer this build does
       // not trust (a worker fault, or a page laid out otherwise), so the tile fails and nothing from it is stored
-      if (priced.has(key))
+      if (read.has(key))
         return {
           kind: 'tile-error',
           index: plan.index,
@@ -117,24 +127,28 @@ export function gridTile(plan: TilePlan, answer: GridAnswer): DiscoveryTileResul
             message: 'camoufox /v1/page: a day pair was read in two views of one page [grid-cell-read-twice]',
           }),
         };
-      priced.add(key);
-      prices.push({
-        ...cell,
-        amountMinor: g.amountMinor,
-        currency: answer.currency,
-        returnDateSource: 'grid-cell',
-        vendorPriceMark: g.mark,
-      });
+      read.add(key);
+      // why: "no flights" is the page's own word for this pair, so it is no fares; "price unknown" is not (flights may
+      // exist), so it is left out of both lists and the engine writes it `no_data`, never `empty`
+      if (g.status === 'no-flights') noFares.push(cell);
+      else if (g.status === 'price')
+        prices.push({
+          ...cell,
+          amountMinor: g.amountMinor,
+          currency: answer.currency,
+          returnDateSource: 'grid-cell',
+          vendorPriceMark: g.mark,
+        });
     }
   }
   if (outside > 0) notes.push(`dropped-outside-tile:${outside}`);
   const issues: CellIssue[] = [];
   for (const [key, c] of covered) {
-    if (priced.has(key)) continue;
+    if (read.has(key)) continue;
     const state = shown.get(key);
     const code =
       state === 'unparsed' ? 'view-unparsed' : state === 'ok' ? 'cell-unparsed' : UNREACHED[answer.ended];
     issues.push(issueOf(c, code));
   }
-  return { ...base, prices, noFares: [], notes, ...(issues.length === 0 ? {} : { cellIssues: issues }) };
+  return { ...base, prices, noFares, notes, ...(issues.length === 0 ? {} : { cellIssues: issues }) };
 }
