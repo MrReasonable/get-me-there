@@ -1021,7 +1021,7 @@ rejection still in date. Run it once on a record you stored before this check ex
 months; `pnpm gmt status` warns from 30 days before. The value comes from a signed-out throwaway profile and holds no
 account cookie; only its first field is understood, so treat it as private and never print it (no command does). The
 worker refuses to start, and never sets the cookie, when the stored value is not a rejection (`consent-not-rejection`),
-and the Status view says "consent rejected" only then. Every refusal that needs a new capture names
+and the Status view says "consent rejected" only when the stored mark is `reject`. Every refusal that needs a new capture names
 `pnpm gmt consent`. A record left by an earlier version saying no consent page was shown, or voided, is not used: the
 worker refuses it by name until you capture a rejection.
 

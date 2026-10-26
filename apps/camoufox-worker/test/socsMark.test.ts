@@ -57,6 +57,10 @@ describe('rejectionMark: field 1 of a well-formed SOCS message', () => {
     ['a field 0 tag of another wire type', [0x08, 0x01, ...FIELD2, 0x02, 0x00]],
     ['a varint cut off', [0x08, 0x01, ...FIELD2, 0x18, 0x96]],
     [
+      'a ten-byte varint past 64 bits',
+      [0x08, 0x01, ...FIELD2, 0x18, ...Array.from({ length: 9 }, () => 0x80), 0x02],
+    ],
+    [
       'a varint of eleven bytes',
       [0x08, 0x01, ...FIELD2, 0x18, ...Array.from({ length: 10 }, () => 0x80), 0x01],
     ],

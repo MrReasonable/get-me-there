@@ -394,14 +394,26 @@ describe('an interruption (SIGINT or SIGTERM: review X3)', () => {
     expect(existsSync(join(t.dataDir, 'worker.lock'))).toBe(false);
     t.kept();
   });
-  it('during the spacing wait: no window opens', async () => {
+  it('during the spacing wait: the wait ends, nothing is claimed and no window opens', async () => {
     const stop = new AbortController();
     const t = setup({ interrupted: stop.signal });
     lastPage(t.dataDir, '2026-10-18T04:59:50.000Z');
-    t.deps.timers = { ...t.timers, sleep: () => (stop.abort(), new Promise(() => undefined)) };
+    const pacerBefore = readFileSync(join(t.dataDir, 'pacer.json'));
+    const countsBefore = readFileSync(join(t.dataDir, 'monthly.json'));
+    const sleep = t.timers.sleep.bind(t.timers);
+    t.deps.timers = {
+      ...t.timers,
+      sleep: (ms, signal) => {
+        stop.abort();
+        return sleep(ms, signal);
+      },
+    };
     expect(await capture(t)).toBe(EX_INTERRUPTED);
     expect(t.err).toEqual([`interrupted before the page loaded; ${NOTHING}`]);
     expect(t.drivers).toEqual([]);
+    // why: CodeRabbit (PR #18): the wait itself ends, so the page is never claimed after the command returns
+    expect(readFileSync(join(t.dataDir, 'pacer.json'))).toEqual(pacerBefore);
+    expect(readFileSync(join(t.dataDir, 'monthly.json'))).toEqual(countsBefore);
     expect(existsSync(join(t.dataDir, 'worker.lock'))).toBe(false);
     t.kept();
   });

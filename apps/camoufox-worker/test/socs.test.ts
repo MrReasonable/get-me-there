@@ -313,6 +313,8 @@ describe('the consent record (socs.json)', () => {
     expect(readConsentRecord(dirWith(JSON.stringify({ ...OK, capturedAt: NOW })), clock)).toMatchObject({
       kind: 'socs',
     });
+    const later = new Date(Date.parse(NOW) + 1).toISOString();
+    expect(readConsentRecord(dirWith(JSON.stringify({ ...OK, capturedAt: later })), clock)).toBe('invalid');
   });
   it('an expired or stale capture is returned with its past expiry, never as missing', () => {
     const stale = readConsentRecord(

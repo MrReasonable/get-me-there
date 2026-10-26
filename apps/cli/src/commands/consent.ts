@@ -90,32 +90,38 @@ export async function consentCommand(flags: Flags, positional: string | null, de
     }
     first.push(...deps.platform.serviceManager.stop(worker.unit, before));
   }
-  if (first.length > 0) {
-    const stop = await apply(
-      { command: 'consent: stop the worker', actions: first, notes: [] },
-      deps.executor,
-    );
-    if (stop.failed !== null) {
-      deps.io.err(describeResult('consent: stop the worker', stop));
-      // why: ts-b1-002, review X3: a stop that failed part way leaves the worker as it was, started again if need be
-      await restoreWorker(said, { stored: false, wasRunning, isInstalled, turnOn });
-      return EXIT.failed;
-    }
-  }
   const interrupt = new AbortController();
-  // why: sec-b1-001, review X3: SIGINT or SIGTERM reaches the child, which closes its window and deletes its profile;
-  // this process waits for it and puts the worker back before it ends
+  // why: sec-b1-001, review X3, CodeRabbit (PR #18): from before the worker stops, SIGINT or SIGTERM is handled here
+  // instead of ending this process: it reaches the child, which closes its window and deletes its profile, and the
+  // worker is put back before the command ends
   const off = deps.onInterrupt(() => interrupt.abort());
-  let code: number = EXIT.failed;
+  // why: null until the child ran (an interruption before it leaves it null)
+  let code: number | null = null;
   try {
-    code = await deps.attach(run.argv, run.cwd, env, interrupt.signal);
+    if (first.length > 0) {
+      const stop = await apply(
+        { command: 'consent: stop the worker', actions: first, notes: [] },
+        deps.executor,
+      );
+      if (stop.failed !== null) {
+        deps.io.err(describeResult('consent: stop the worker', stop));
+        // why: ts-b1-002, review X3: a stop that failed part way leaves the worker as it was, started again if need be
+        await restoreWorker(said, { stored: false, wasRunning, isInstalled, turnOn });
+        return EXIT.failed;
+      }
+    }
+    try {
+      if (!interrupt.signal.aborted) code = await deps.attach(run.argv, run.cwd, env, interrupt.signal);
+    } finally {
+      const stored = code === 0 && !exporting && !interrupt.signal.aborted;
+      const after = await restoreWorker(said, { stored, wasRunning, isInstalled, turnOn });
+      if (after !== EXIT.ok && code === 0) code = after;
+    }
   } finally {
-    const stored = code === 0 && !exporting && !interrupt.signal.aborted;
-    const after = await restoreWorker(said, { stored, wasRunning, isInstalled, turnOn });
     off();
-    if (after !== EXIT.ok && code === 0) code = after;
   }
-  return interrupt.signal.aborted && code === 0 ? INTERRUPTED : code;
+  if (interrupt.signal.aborted) return code === null || code === 0 ? INTERRUPTED : code;
+  return code ?? EXIT.failed;
 }
 
 /**

@@ -178,6 +178,31 @@ describe('gmt consent: the capture, with the worker stopped meanwhile', () => {
     expect(m.loaded.has(LABEL)).toBe(true);
   });
   // why: sec-b1-001, review X3: SIGINT or SIGTERM is passed to the child and the worker is put back before the end
+  // why: CodeRabbit (PR #18): the handler is in place from before the stop, so an interruption during it still ends
+  // with the worker put back and no child started
+  it('an interruption during the worker’s stop starts no child and puts the worker back', async () => {
+    const m = world();
+    const handlers: Array<() => void> = [];
+    let listening = 0;
+    m.deps.onInterrupt = (h) => {
+      handlers.push(h);
+      listening++;
+      return () => {
+        listening--;
+      };
+    };
+    const inner = m.deps.executor;
+    m.deps.executor = {
+      run: async (a) => {
+        if (a.kind === 'waitGone') for (const h of handlers) h();
+        return inner.run(a);
+      },
+    };
+    expect(await runCli(['consent'], m.deps)).toBe(130);
+    expect(m.attached).toEqual([]);
+    expect(m.loaded.has(LABEL)).toBe(true);
+    expect(listening).toBe(0);
+  });
   it('an interruption reaches the child, then the worker is put back as it was and nothing is cleared', async () => {
     const m = world();
     m.fs.file(REFUSAL, '{"reason":"consent-missing","at":"2026-10-24T09:00:00.000Z"}', 0o600);
@@ -324,10 +349,12 @@ describe('gmt consent’s refusals', () => {
     expect(m.io.stderr).toContain('a search is running in the Docker app');
     expect(m.attached).toEqual([]);
     expect(m.runs()).toEqual([]);
-    const request = m.deps.http;
     expect(await runCli(['consent', '--force'], m.deps)).toBe(0);
     expect(m.attached).toHaveLength(1);
-    expect(request).toBeDefined();
+    // why: CodeRabbit (PR #18): --force says what going ahead does to the run in the Docker app
+    expect(m.io.stdout).toContain(
+      'Going ahead anyway (--force): the Docker app stops within 30 s on SIGTERM',
+    );
   });
   it('a Docker app with no run active lets it go ahead; a Docker state that cannot be read refuses unless --force', async () => {
     const idle = world({ docker: 'running' });

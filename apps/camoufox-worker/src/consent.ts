@@ -288,9 +288,11 @@ export async function consentCapture(
       clock: deps.clock,
     });
     try {
-      await untilInterrupted(claim(pacer, monthly, 0, deps, { ...ctx, out: say }), deps.interrupted);
+      if (deps.interrupted?.aborted === true) throw new Interrupted();
+      // why: CodeRabbit (PR #18): the interruption ends the spacing wait itself, so no claim runs after the command ends
+      await claim(pacer, monthly, 0, deps, { ...ctx, out: say });
     } catch (e) {
-      if (e instanceof Interrupted) {
+      if (deps.interrupted?.aborted === true) {
         ctx.err(`interrupted before the page loaded; ${NOTHING}`);
         return EX_INTERRUPTED;
       }

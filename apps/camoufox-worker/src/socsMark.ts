@@ -12,16 +12,18 @@
  */
 export type RejectionMark = 'reject' | 'accept' | 'unknown';
 
-/** A protobuf varint at `at`: its value and the index after it, or null when it is cut off or longer than 10 bytes. */
+/** A protobuf varint at `at`: its value and the index after it, or null when it is cut off or past 64 bits. */
 function varint(b: Uint8Array, at: number): { value: number; next: number } | null {
   let value = 0;
-  const end = Math.min(at + 10, b.length);
-  for (let i = at; i < end; i++) {
-    const c = b[i] ?? 0;
+  for (let i = at; ; i++) {
+    const c = b[i];
+    // why: a varint cut off by the end of the value
+    if (c === undefined) return null;
+    // why: CodeRabbit (PR #18): a tenth byte above 1 overflows the 64 bits a varint holds, and none takes an eleventh
+    if (i - at === 9 && c > 0x01) return null;
     value += (c & 0x7f) * 2 ** (7 * (i - at));
     if (c < 0x80) return { value, next: i + 1 };
   }
-  return null;
 }
 
 /** The top-level fields from `at` to the end: each well formed and inside the value, none of them field 0 or 1. */

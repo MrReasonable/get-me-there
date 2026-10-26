@@ -201,6 +201,23 @@ describe('a worker that does not report the mark (pa-b1-010, ca-b1-004, review X
       command: 'pnpm gmt update',
     });
   });
+  // why: CodeRabbit (PR #18): a stated expiry already passed fails as expired, the mark unreported
+  it('a stated expiry already passed, with no mark, has expired on that date', () => {
+    const c = consentOutcome(
+      { now: NOW, tz: 'Europe/London', mode: 'native' },
+      healthyWorker({
+        read: {
+          kind: 'ok',
+          status: okWorkerStatus({
+            consent: { kind: 'socs', expiresAt: ago(DAY), boundedBy: 'cookie', mark: null },
+          }),
+        },
+      }),
+    );
+    expect(c.cause).toBe('expired');
+    expect(c.check.state).toBe('fail');
+    expect(c.check.summary).toMatch(/^consent expired on .+ \(Europe\/London\)$/);
+  });
   it('past the bound it has expired, whatever its mark', () => {
     const c = older('2025-01-31T10:00:00.000Z', asIsoDateTime('2027-02-02T00:00:00.000Z'));
     expect(c.check.state).toBe('fail');
