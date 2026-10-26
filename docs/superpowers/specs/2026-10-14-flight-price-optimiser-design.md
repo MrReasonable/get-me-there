@@ -2221,7 +2221,7 @@ or the engine. First-failing-test per WP in §16.
    error mapping incl. `Retry-After`, 403, quota discrimination,
    per-request timeout, limiter-timeout; an answer whose headers, or whose
    body, come after fetch's own timeout (stood in by a small one) still
-   arrives; backoff with fake timers; pipeline
+   arrives, and one held past the request's own bound ends at it; backoff with fake timers; pipeline
    order (cache hit → zero upstream, non-billable row, original `fetchedAt`;
    dedup → one call; reserve before fetch each attempt; `BudgetExceeded`
    before mock hit); `auth`/`quota`/`parse` never retried; abort mid-fetch

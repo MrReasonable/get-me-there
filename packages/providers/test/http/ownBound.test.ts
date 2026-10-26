@@ -26,6 +26,7 @@ let port = 0;
 let previous: Dispatcher;
 let standIn: Agent;
 let restoreLookup: () => void;
+let lastBudget: ReturnType<typeof makeKit>['budget'] | null = null;
 
 beforeEach(async () => {
   expect.hasAssertions();
@@ -56,11 +57,12 @@ function nextHeld(): Promise<{ req: IncomingMessage; res: ServerResponse }> {
   return new Promise((resolve) => worker.once('request', (req, res) => resolve({ req, res })));
 }
 
-/** One grid page asked of the worker through http-kit, with a bound far above the stand-in's timeout. */
-function page() {
-  const { kit } = makeKit({
-    limits: testLimits({ camoufox: { workerPort: port, requestTimeoutSeconds: 600 } }),
+/** One grid page asked of the worker through http-kit, by default with a bound far above the stand-in's timeout. */
+function page(requestTimeoutSeconds = 600) {
+  const { kit, budget } = makeKit({
+    limits: testLimits({ camoufox: { workerPort: port, requestTimeoutSeconds } }),
   });
+  lastBudget = budget;
   return kit.request(
     req({
       providerId: 'camoufox',
@@ -107,5 +109,17 @@ describe('http-kit: the request’s own bound is the one that applies (spec §5.
     await expect(lateAnswer.text()).rejects.toMatchObject({ cause: { code: 'UND_ERR_BODY_TIMEOUT' } });
     res.end('"cells"}');
     await expect(answer).resolves.toMatchObject({ status: 200, body: { kind: 'cells' } });
+  });
+
+  it('a page held past its own bound ends at that bound, a timeout, not retried', async () => {
+    const arrived = nextHeld();
+    const answer = page(1);
+    await arrived;
+    await expect(answer).rejects.toMatchObject({
+      kind: 'network',
+      retryable: false,
+      message: expect.stringContaining('[timeout]'),
+    });
+    expect(lastBudget?.sequence()).toEqual(['reserve', 'fetch', 'finalise:unknown']);
   });
 });
