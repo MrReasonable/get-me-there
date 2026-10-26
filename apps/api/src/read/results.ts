@@ -263,5 +263,7 @@ export function assembleResults(def: SearchDefinition, q: ResultsQuery, ports: P
     // why: decision 45 (review prov I2): the headline is the first ranked row: the best class available and, within it,
     // a confirmed price before an unconfirmed one (`compareRows`); an unconfirmed headline keeps its verdict badge.
     cheapest: ranked[0] ?? null,
+    // why: WP19 Task 19.2 sets it on a date-pair-scoped read; until the scope parameters are read, no read is scoped
+    datePairFigure: null,
   };
 }

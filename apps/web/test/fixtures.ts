@@ -288,6 +288,7 @@ export function resultsResponse(
     excludedByCurrentSpace: 0,
     verificationProviderConfigured: true,
     cheapest: rows[0] ?? null,
+    datePairFigure: null,
     ...over,
   });
 }

@@ -25,6 +25,7 @@ import {
   verdictClassSchema,
   verdictsSchema,
 } from './common.js';
+import { datePairFigureSchema } from './datePairs.js';
 
 const count = z.number().int().min(0);
 /** A vendor search link (spec §5.2): re-validated on the wire like a booking link (plan decision 54). */
@@ -100,6 +101,17 @@ export const resultsQuerySchema = z.object({
   basis: resultBasisSchema.optional(),
   executionId: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(1000).optional(),
+  /**
+   * Spec §10 scope parameters (WP19), the wire form as the date-pairs query's: strings the api parses and answers 422
+   * for itself (`date_pair_incomplete`, `invalid_date_pair`, `date_pair_outside_space`, `unknown_airport`,
+   * `invalid_journey_limit`), so only length bounds live here. The dates are `YYYY-MM-DD`; the bound leaves room for a
+   * malformed one to reach the api's 422 rather than the route wrapper's 400.
+   */
+  departureDate: z.string().max(40).optional(),
+  returnDate: z.string().max(40).optional(),
+  origins: z.string().max(200).optional(),
+  destinations: z.string().max(200).optional(),
+  maxJourneyMinutes: z.string().max(10).optional(),
 });
 export const resultsResponseSchema = z.object({
   rows: z.array(resultRowSchema),
@@ -112,6 +124,12 @@ export const resultsResponseSchema = z.object({
   excludedByCurrentSpace: count,
   verificationProviderConfigured: z.boolean(),
   cheapest: resultRowSchema.nullable(),
+  /**
+   * Spec §10 (WP19): on a date-pair-scoped read only (else null), the figure the Dates board shows for that date pair,
+   * from the same function as the board's (`pickFigure` over the scoped rows, the journey limit applied), so the
+   * detail can show it beside its own cheapest row and say why they differ (revision 50).
+   */
+  datePairFigure: datePairFigureSchema.nullable(),
 });
 const pricedCell = priceCellSchema.extend({ cell: cellSchema });
 /**
