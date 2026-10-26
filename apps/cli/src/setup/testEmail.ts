@@ -5,7 +5,7 @@
  * the class it answers and the next step for it.
  */
 import { apiContract } from '@gmt/core';
-import { type AppCreds, appUrl, authHeaders } from '../appClient.js';
+import { type AppCreds, authHeaders, credsUrl } from '../appClient.js';
 import type { Ask } from '../ask.js';
 import type { Deps } from '../deps.js';
 
@@ -28,7 +28,7 @@ export const TEST_EMAIL_WORDS = {
 export async function sendTestEmail(deps: Deps, creds: AppCreds): Promise<string> {
   const r = await deps.http({
     method: 'POST',
-    url: appUrl(creds.port, '/api/alerts/test-email'),
+    url: credsUrl(creds, '/api/alerts/test-email'),
     // why: the app's mutating-route rules (spec §4): a JSON content type and the requested-with header
     headers: {
       ...authHeaders(creds),

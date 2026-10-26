@@ -274,6 +274,53 @@ describe('gmt status by app mode: Docker only, native only, both (W1)', () => {
     expect(m.runner.calls.map((c) => c.argv.join(' ')).join('\n')).not.toContain(DOCKER_PASS);
     expect(m.executor.log).toEqual([]);
   });
+  it('Docker only, published on loopback: no bind-address warning', async () => {
+    for (const published of ['127.0.0.1:3917', '[::1]:3917', '[0:0:0:0:0:0:0:1]:3917']) {
+      const { m } = dockerOnly('running', undefined, published);
+      expect(await runCli(['status'], m.deps)).toBe(0);
+      expect(m.io.stdout).not.toContain('bind address');
+      expect(m.io.stdout).not.toContain('beyond this machine');
+    }
+  });
+  it('Docker only, published beyond loopback: warns with the same words and a compose fix; no fail', async () => {
+    for (const published of ['0.0.0.0:3917', '[::]:3917']) {
+      const { m } = dockerOnly('running', undefined, published);
+      expect(await runCli(['status'], m.deps)).toBe(0);
+      expect(m.io.stdout).toMatch(
+        /bind address +warn .*published beyond loopback: plain HTTP beyond this machine needs TLS or Tailscale: docs\/setup\.md section 3/,
+      );
+      expect(m.io.stdout).toContain('fix: publish 127.0.0.1:3000:3000 in docker-compose.yml');
+    }
+  });
+  it.each([
+    ['IPv4 loopback only', '127.0.0.1:3917', 'http://127.0.0.1:3917'],
+    ['IPv4 wildcard only', '0.0.0.0:3917', 'http://127.0.0.1:3917'],
+    ['IPv6 loopback only', '[::1]:3917', 'http://[::1]:3917'],
+    ['IPv6 wildcard only', '[::]:3917', 'http://[::1]:3917'],
+    ['IPv6 loopback written out in full', '[0:0:0:0:0:0:0:1]:3917', 'http://[::1]:3917'],
+    ['both families', '[::]:3918\n0.0.0.0:3917', 'http://127.0.0.1:3917'],
+    ['both families, IPv6 listed first', '[::1]:3918\n127.0.0.1:3917', 'http://127.0.0.1:3917'],
+    ['a LAN address beside an IPv6 loopback', '192.0.2.10:3918\n[::1]:3917', 'http://[::1]:3917'],
+  ])(
+    'Docker only, published on %s: the basic auth goes to the family published',
+    async (_n, published, base) => {
+      const { m, http } = dockerOnly('running', undefined, published);
+      await runCli(['status'], m.deps);
+      const sent = http.requests.filter((r) => r.headers?.Authorization !== undefined).map((r) => r.url);
+      expect(sent).toEqual([`${base}/api/status`]);
+    },
+  );
+  it('Docker only, published on a LAN address: warns, and sends the .env basic auth nowhere', async () => {
+    const { m, http } = dockerOnly('running', undefined, '192.0.2.10:3917');
+    expect(await runCli(['status'], m.deps)).toBe(1);
+    expect(m.io.stdout).toMatch(/bind address +warn +192\.0\.2\.10: published beyond loopback/);
+    expect(http.requests.filter((r) => r.url.endsWith('/api/status'))).toEqual([]);
+  });
+  it('Docker only, the published address unreadable: a warning that it is not checked, never silence', async () => {
+    const { m } = dockerOnly('running', undefined, null);
+    await runCli(['status'], m.deps);
+    expect(m.io.stdout).toMatch(/bind address +warn +compose did not say which address/);
+  });
   it('Docker only, the app not answering: the reason, a Docker next step, exit 1, and still no native fix', async () => {
     const { m } = dockerOnly('running', () => ({ error: 'connection refused' }));
     expect(await runCli(['status'], m.deps)).toBe(1);

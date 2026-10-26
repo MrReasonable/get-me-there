@@ -1,6 +1,6 @@
 import { join } from 'node:path/posix';
 import { BACKUP_MAX_AGE_MS, backupTimeOf, START_REFUSAL_TEXT } from '@gmt/core';
-import { type DockerAppState, dockerAppState, dockerEndpoint } from '../appEndpoint.js';
+import { type DockerAppState, dockerAppState, dockerEndpoint, dockerPublications } from '../appEndpoint.js';
 import type { Flags } from '../args.js';
 import { type Deps, EXIT } from '../deps.js';
 import { apply } from '../plan/apply.js';
@@ -193,6 +193,33 @@ function appEnvChecks(deps: Deps): Check[] {
   return out;
 }
 
+/**
+ * The Docker app's bind check: the app binds 0.0.0.0 inside its container, so what matters is the host address compose
+ * publishes. Beyond loopback is the same warning as a native BIND_ADDRESS beyond loopback; loopback says nothing.
+ */
+async function dockerBindChecks(deps: Deps, docker: DockerAppState): Promise<Check[]> {
+  if (docker !== 'running') return [];
+  const published = await dockerPublications(deps);
+  // why: an unread address is not a loopback one: error must not look empty
+  if (published === null)
+    return [
+      {
+        name: 'bind address',
+        level: 'warn',
+        detail: 'compose did not say which address the Docker app is published on, so it is not checked',
+        fix: 'docker compose port app 3000',
+      },
+    ];
+  return published
+    .filter((p) => !isLoopback(p.address))
+    .map((p) => ({
+      name: 'bind address',
+      level: 'warn' as const,
+      detail: `${p.address}: published beyond loopback: plain HTTP beyond this machine needs TLS or Tailscale: docs/setup.md section 3`,
+      fix: 'publish 127.0.0.1:3000:3000 in docker-compose.yml, then docker compose up -d, or put TLS or Tailscale in front of it',
+    }));
+}
+
 const workerUnit = (deps: Deps) => ({
   path: join(deps.platform.paths.serviceDir, `${WORKER_LABEL}.plist`),
   contents: '',
@@ -224,6 +251,7 @@ export async function statusFacts(deps: Deps): Promise<{ checks: Check[]; target
     ...staleChecks(deps, shown, facts).map(workerFix),
     ...settingsChecks(deps, !inDocker),
     ...appEnvChecks(deps),
+    ...(inDocker ? await dockerBindChecks(deps, docker) : []),
     ...(inDocker ? [] : [backupsCheck(deps)]),
   ];
   for (const c of [logsCheck(deps), dockerCheck(mode, docker), await checkoutCheck(deps)])
