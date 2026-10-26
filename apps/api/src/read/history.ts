@@ -5,6 +5,7 @@ import {
   DEFAULT_DISCOVERY_REFRESH_HOURS,
   type Iata,
   isStale,
+  isTruncated,
   type ProviderId,
   type SearchDefinition,
   withAssumedBound,
@@ -13,7 +14,6 @@ import type { z } from 'zod';
 import { ApiError } from '../errors.js';
 import { API_TEXT } from '../text.js';
 import type { Ports } from '../wiring.js';
-import { truncationOf } from './results.js';
 import { calendarThreshold, refreshHoursFor, staleness, withNights } from './rows.js';
 
 export type ItineraryHistoryResponse = z.infer<typeof apiContract.itineraryHistoryResponseSchema>;
@@ -108,7 +108,6 @@ export function routeHistory(
   ports: Ports,
 ): RouteHistoryResponse {
   const now = ports.clock.now();
-  const truncated = truncationOf(ports);
   const defs = ports.repos.definitions.list();
   const catchUp = catchUpOf(ports);
   return {
@@ -126,16 +125,12 @@ export function routeHistory(
       return {
         providerId: s.providerId,
         cabin,
-        points: s.points.map((p) => ({
+        points: s.points.map(({ sourceLastError, ...p }) => ({
           ...p,
           provenance: withAssumedBound(p.provenance, info),
           stale: staleness(p.provenance, threshold, now).stale,
-          truncated: truncated({
-            executionId: p.executionId,
-            reusedFromExecutionId: null,
-            providerId: s.providerId,
-            cell: p.cell,
-          }),
+          // why: decisions 36, 47: the fetching outcome's last_error, read with the point (WP19: no outcome read per run)
+          truncated: isTruncated(sourceLastError),
           catchUp: catchUp(p.executionId),
         })),
       };

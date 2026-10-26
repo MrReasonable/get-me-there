@@ -98,7 +98,12 @@ afterEach(async () => {
 });
 
 export async function createHarness(
-  opts: { env?: Record<string, string>; app?: AppOptions } = {},
+  opts: {
+    env?: Record<string, string>;
+    app?: AppOptions;
+    /** WP19: a harness a file builds once in `beforeAll` and closes in `afterAll` itself (not after each test). */
+    persistent?: boolean;
+  } = {},
 ): Promise<Harness> {
   const config = loadConfigFromEnv(harnessEnv(opts.env));
   const logLines: string[] = [];
@@ -106,6 +111,12 @@ export async function createHarness(
   const clock = fixedClock(T0);
   const ports = buildPorts(config, { log, clock, migrationsDir: MIGRATIONS_DIR });
   seedAirports(ports.db, routeTestAirports());
+  // why: a harness that lives past a minute would reach the engine's after-boot FX refresh, a request no stand-in
+  // answers; a rate for today means boot schedules none
+  if (opts.persistent === true)
+    ports.repos.fx.upsert([
+      { date: clock.todayLondon(), currency: 'EUR', rateNano: 850_000_000, source: 'test' },
+    ]);
   const engine = createEngine({ ...ports, notifiers: [new LogNotifier(log)] });
   await engine.boot();
   const app = createApp(ports, engine, { webRoot: null, ...opts.app });
@@ -139,6 +150,6 @@ export async function createHarness(
       ports.db.close();
     },
   };
-  open.push(harness);
+  if (opts.persistent !== true) open.push(harness);
   return harness;
 }

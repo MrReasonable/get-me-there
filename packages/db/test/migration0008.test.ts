@@ -12,7 +12,7 @@ beforeEach(() => {
 describe('migration 0008', () => {
   it('adds a nullable error_kind and leaves a row written at 0007 with none', () => {
     const db = openTracked(tmpDbPath());
-    applyMigrations(db, migrationsWithout(['0008_wp18_error_kind']));
+    applyMigrations(db, migrationsWithout(['0008_wp18_error_kind', '0009_wp19_latest_price_idx']));
     db.raw
       .prepare(
         `INSERT INTO provider_requests (provider_id, endpoint_path, started_at, outcome, cost_micro_gbp, http_attempt) VALUES ('searchapi', '/s', '2026-10-01T00:00:00.000Z', 'ok', 0, 1)`,
@@ -25,7 +25,7 @@ describe('migration 0008', () => {
         .map((c) => String(Object.getOwnPropertyDescriptor(c, 'name')?.value)),
     ).not.toContain('error_kind');
     const second = applyMigrations(db, MIGRATIONS_DIR);
-    expect(second.applied).toEqual(['0008_wp18_error_kind']);
+    expect(second.applied).toEqual(['0008_wp18_error_kind', '0009_wp19_latest_price_idx']);
     expect(db.raw.prepare('SELECT error_kind AS k FROM provider_requests').all()).toEqual([{ k: null }]);
     db.raw.prepare(`UPDATE provider_requests SET error_kind = 'quota'`).run();
     expect(db.raw.prepare('SELECT error_kind AS k FROM provider_requests').get()).toEqual({ k: 'quota' });

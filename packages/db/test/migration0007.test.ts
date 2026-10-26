@@ -37,7 +37,10 @@ const HASH = 'a'.repeat(64);
  */
 function populatedAt0006(): Db {
   const db = openTracked(tmpDbPath());
-  applyMigrations(db, migrationsWithout(['0007_catch_up', '0008_wp18_error_kind']));
+  applyMigrations(
+    db,
+    migrationsWithout(['0007_catch_up', '0008_wp18_error_kind', '0009_wp19_latest_price_idx']),
+  );
   const run = (sql: string, p: Record<string, unknown> = {}) => db.raw.prepare(sql).run(p);
   const def = `INSERT INTO search_definitions (id, name, origins_json, destinations_json, window_json, min_nights, max_nights, cabin,
       constraints_json, verification_policy_json, budget_json, providers_json, schedule_cron, schedule_tz, enabled, created_at, updated_at)
@@ -329,9 +332,9 @@ describe('migration 0007 (spec §7 rev 36)', () => {
     expect(before.cell_outcomes).toHaveLength(8);
     expect(before.provider_requests).toHaveLength(3);
     expect(before.operator_notifications).toHaveLength(2);
-    expect(applyMigrations(db, migrationsWithout(['0008_wp18_error_kind'])).applied).toEqual([
-      '0007_catch_up',
-    ]);
+    expect(
+      applyMigrations(db, migrationsWithout(['0008_wp18_error_kind', '0009_wp19_latest_price_idx'])).applied,
+    ).toEqual(['0007_catch_up']);
     const after = everyRow(db);
     expect(after).toEqual({
       ...before,
@@ -359,7 +362,9 @@ describe('migration 0007 (spec §7 rev 36)', () => {
     expect(db.raw.pragma('foreign_key_check')).toEqual([]);
     expect(db.raw.pragma('integrity_check', { simple: true })).toBe('ok');
     // a second apply is a no-op (for the migrations this test installed; 0008 is the next one)
-    expect(applyMigrations(db, migrationsWithout(['0008_wp18_error_kind'])).applied).toEqual([]);
+    expect(
+      applyMigrations(db, migrationsWithout(['0008_wp18_error_kind', '0009_wp19_latest_price_idx'])).applied,
+    ).toEqual([]);
   });
 
   it('the rebuilt tables come back with the same indexes, plus only the firing unique index and the in-flight index', () => {

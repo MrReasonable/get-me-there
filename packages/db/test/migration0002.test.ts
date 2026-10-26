@@ -21,6 +21,7 @@ function upTo0001(): string {
     '0006_grid_return_source',
     '0007_catch_up',
     '0008_wp18_error_kind',
+    '0009_wp19_latest_price_idx',
   ];
   for (const tag of later) rmSync(join(dir, `${tag}.sql`));
   const journalPath = join(dir, 'meta', '_journal.json');
@@ -57,6 +58,7 @@ describe('migration 0002: alert event lifecycle (decision 56)', () => {
       '0006_grid_return_source',
       '0007_catch_up',
       '0008_wp18_error_kind',
+      '0009_wp19_latest_price_idx',
     ]);
     applyMigrations(db, MIGRATIONS_DIR);
     const events = new AlertsRepo(db, fixedClock(T0)).events({ ruleId: 'r1', limit: 10 });

@@ -129,6 +129,13 @@ export interface CalendarPriceRow extends CalendarPriceInsert {
   executionId: string;
   provenance: Provenance;
 }
+/**
+ * WP19 §5: the marks a calendar price is read with. `sourceLastError` is the `last_error` of the discovery outcome that
+ * fetched it (through `reused_from_execution_id` for a reused copy), for truncation (decisions 36, 47);
+ * `searchedEmptyLater` is true when the newest searched, non-reused discovery outcome of a parent execution for that
+ * (provider, cell) is newer than the price's execution and found the cell empty or no_data (decision 54).
+ */
+export type CalendarMarks = { sourceLastError: string | null; searchedEmptyLater: boolean };
 /** One verified cell's write (spec §7 atomic unit). best_observation_id becomes the cheapest observation written (ruling 13). */
 export interface VerifiedCellWrite {
   cell: CellKey;

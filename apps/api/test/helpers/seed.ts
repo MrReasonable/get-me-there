@@ -69,10 +69,19 @@ export interface SeedOffer {
   maxAgeHours?: number | 'unknown';
   /** The stored booking, as an adapter wrote it; the api re-validates it on the way out (decision 54). */
   booking?: Booking;
+  /** WP19: each direction's stated travel time (default 480 minutes each); null: the source did not state it. */
+  minutes?: { outbound: number | null; inbound: number | null };
+  /** WP19: the inbound leg's local times (default `<return>T10:00` → `<return>T18:00`), e.g. an overnight return. */
+  inboundTimes?: { departLocal: string; arriveLocal: string };
 }
 
 /** A synthetic itinerary for the cell: `stopsOut` clearly synthetic connection points (AAA, BBB), one inbound leg. */
-function itineraryOf(c: CellKey, hash: string, stopsOut: number): NormalisedItinerary {
+function itineraryOf(
+  c: CellKey,
+  hash: string,
+  stopsOut: number,
+  o: Partial<SeedOffer> = {},
+): NormalisedItinerary {
   const path = [c.origin, ...['AAA', 'BBB', 'CCC'].slice(0, stopsOut).map(asIata), c.destination];
   const outbound: Segment[] = path.slice(0, -1).map((from, i) => ({
     marketingCarrier: 'BA',
@@ -89,11 +98,13 @@ function itineraryOf(c: CellKey, hash: string, stopsOut: number): NormalisedItin
       flightNumber: 200,
       from: c.destination,
       to: c.origin,
-      departLocal: `${c.returnDate}T10:00`,
-      arriveLocal: `${c.returnDate}T18:00`,
+      departLocal: o.inboundTimes?.departLocal ?? `${c.returnDate}T10:00`,
+      arriveLocal: o.inboundTimes?.arriveLocal ?? `${c.returnDate}T18:00`,
       durationMinutes: 480,
     },
   ];
+  const outboundMinutes = o.minutes === undefined ? 480 : o.minutes.outbound;
+  const inboundMinutes = o.minutes === undefined ? 480 : o.minutes.inbound;
   return {
     hash,
     origin: c.origin,
@@ -103,8 +114,8 @@ function itineraryOf(c: CellKey, hash: string, stopsOut: number): NormalisedItin
     nights: daysBetween(c.departureDate, c.returnDate),
     outbound,
     inbound,
-    outboundMinutes: 480,
-    inboundMinutes: 480,
+    ...(outboundMinutes === null ? {} : { outboundMinutes }),
+    ...(inboundMinutes === null ? {} : { inboundMinutes }),
     stopsOut,
     stopsIn: 0,
     layovers: [],
@@ -262,7 +273,7 @@ export function seeder(ports: Ports) {
     /** One verified cell: its itineraries, offers and observations and its priced outcome (spec §7 atomic unit). */
     verified(name: string, c: CellKey, offers: SeedOffer[]): void {
       const itineraries: VerifiedCellWrite['itineraries'] = offers.map((o) => {
-        const itinerary = itineraryOf(c, o.hash, o.stopsOut ?? 0);
+        const itinerary = itineraryOf(c, o.hash, o.stopsOut ?? 0, o);
         const baggage = o.baggage === undefined ? { checkedBags: 1 } : o.baggage;
         const suppliedFields: SuppliedField[] = [
           'segments',

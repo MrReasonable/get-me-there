@@ -12,15 +12,16 @@ const LATER = '0005_camoufox_provider';
 const NEWEST = '0006_grid_return_source';
 const LAST = '0007_catch_up';
 const FINAL = '0008_wp18_error_kind';
+const WP19 = '0009_wp19_latest_price_idx';
 
 /** A copy of the migrations folder that stops before 0004, as an install made before this migration has it. */
 function before0004(): string {
   const dir = join(tmpDir(), 'drizzle');
   cpSync(MIGRATIONS_DIR, dir, { recursive: true });
-  for (const tag of [TAG, LATER, NEWEST, LAST, FINAL]) rmSync(join(dir, `${tag}.sql`));
+  for (const tag of [TAG, LATER, NEWEST, LAST, FINAL, WP19]) rmSync(join(dir, `${tag}.sql`));
   const journalPath = join(dir, 'meta', '_journal.json');
   const journal: { entries: Array<{ tag: string }> } = JSON.parse(readFileSync(journalPath, 'utf8'));
-  journal.entries = journal.entries.filter((e) => ![TAG, LATER, NEWEST, LAST, FINAL].includes(e.tag));
+  journal.entries = journal.entries.filter((e) => ![TAG, LATER, NEWEST, LAST, FINAL, WP19].includes(e.tag));
   writeFileSync(journalPath, JSON.stringify(journal));
   return dir;
 }
@@ -50,7 +51,7 @@ describe('migration 0004: route price-history points carry their point of sale (
         `INSERT INTO route_price_history (origin, destination, departure_date, return_date, cabin, provider_id, date, lowest_price_pence, fetched_at) VALUES ('LHR', 'JFK', '2026-11-05', '2026-11-15', 'economy', 'searchapi', '2026-09-01', 48000, ?)`,
       )
       .run(T0);
-    expect(pendingMigrations(db, MIGRATIONS_DIR)).toEqual([TAG, LATER, NEWEST, LAST, FINAL]);
+    expect(pendingMigrations(db, MIGRATIONS_DIR)).toEqual([TAG, LATER, NEWEST, LAST, FINAL, WP19]);
     applyMigrations(db, MIGRATIONS_DIR);
     const repo = new RoutePriceHistoryRepo(db, { allowSynthetic: false });
     const [old] = repo.series(asIata('LHR'), asIata('JFK'), 'searchapi', 'economy');

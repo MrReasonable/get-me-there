@@ -29,6 +29,15 @@ export const API_TEXT = {
   alreadyRunning: 'a request for this definition is already running; retry when it finishes',
   unknownProvider: (id: string) => `provider ${id} is not configured`,
   unknownDestination: 'that destination is not one of this definition',
+  // why: spec §10 (WP19): the scope parameters of the date-pairs route and /results, each 422 named by its code
+  unknownScopeAirport: (code: string) => `airport ${code} is not one of this definition's airports`,
+  invalidJourneyLimit: (min: number, max: number) =>
+    `the journey limit is a whole number of minutes from ${min} to ${max}`,
+  tooManyCells: (cells: number, bound: number) =>
+    `these airports cover ${cells} cells, more than the ${bound} this view reads at once; choose fewer airports`,
+  datePairIncomplete: 'give both the departure date and the return date, or neither',
+  invalidDatePair: 'a date of the date pair is not a calendar date (YYYY-MM-DD)',
+  datePairOutsideSpace: 'that date pair is outside the current window or nights range of this definition',
   draftNotice: 'Set at least one origin and one destination before running or scheduling this search.',
   draftCannotEnable: 'a definition without origins and destinations cannot be enabled',
   draftNoEstimate: 'set origins and destinations before asking for an estimate',

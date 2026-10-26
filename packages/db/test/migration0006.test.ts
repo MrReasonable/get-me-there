@@ -31,7 +31,12 @@ describe('migration 0006 (spec §7 rev 34)', () => {
     const db = openTracked(tmpDbPath());
     applyMigrations(
       db,
-      migrationsWithout(['0006_grid_return_source', '0007_catch_up', '0008_wp18_error_kind']),
+      migrationsWithout([
+        '0006_grid_return_source',
+        '0007_catch_up',
+        '0008_wp18_error_kind',
+        '0009_wp19_latest_price_idx',
+      ]),
     );
     for (const s of SEED) db.raw.prepare(s).run({ at: T0 });
     db.raw.prepare(price('travelpayouts', 'authorised-cached', '2027-03-24')).run({ at: T0 });

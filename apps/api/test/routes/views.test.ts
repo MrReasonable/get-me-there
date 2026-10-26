@@ -497,9 +497,11 @@ describe('GET /api/definitions/:id/coverage (spec §10, View D)', () => {
       apiContract.coverageResponseSchema,
     );
     expect(cov.executionId).toBe(s.id('E1'));
+    // why: revision 50: the summary is the per-cell classification over the current space (182 days × 12 nights of
+    // one airport pair), so the 2,180 cells the run has no discovery result for count as not searched
     expect(cov.summary).toEqual({
-      buckets: { priced: 1, empty: 1, no_data: 1, error: 1, skipped: 0, not_run: 0, reused: 0 },
-      total: 4,
+      buckets: { priced: 1, empty: 1, no_data: 1, error: 1, skipped: 0, not_run: 2_180, reused: 0 },
+      total: 2_184,
       selected: 4,
       itinerarySearched: 3,
       onDemand: 0,

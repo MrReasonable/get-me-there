@@ -1,9 +1,11 @@
-/** Spec §10 read routes over a definition's executions: results and the four views, and the cell detail. */
+/** Spec §10 read routes over a definition's executions: results, the date pairs, the views, and the cell detail. */
 import { apiContract, type CellKey, iataSchema, isoDateSchema } from '@gmt/core';
 import { ApiError } from '../errors.js';
-import { assembleCalendar, assembleCalendarGap } from '../read/calendar.js';
+import { assembleCalendar } from '../read/calendar.js';
+import { assembleCalendarGap } from '../read/calendarGap.js';
 import { assembleCellDetail } from '../read/cell.js';
 import { assembleCoverage } from '../read/coverageView.js';
+import { assembleDatePairs } from '../read/datePairs.js';
 import { assembleDuration } from '../read/duration.js';
 import { assembleResults } from '../read/results.js';
 import { API_TEXT } from '../text.js';
@@ -27,6 +29,12 @@ export const resultHandlers: HandlerTable = {
     { request: NO_INPUT, query: apiContract.resultsQuerySchema },
     (c, input, ctx) =>
       c.json(assembleResults(getLiveDefinition(ctx, param(input, 'id')), input.query, ctx.ports)),
+  ),
+  // why: spec §10 (WP19): the Dates view's source; the query arrives as strings and parseScope answers its 422s
+  'GET /api/definitions/:id/date-pairs': route(
+    { request: NO_INPUT, query: apiContract.datePairsQuerySchema },
+    (c, input, ctx) =>
+      c.json(assembleDatePairs(getLiveDefinition(ctx, param(input, 'id')), input.query, ctx.ports)),
   ),
   // why: plan decision 53: both bases come back per day; `destination` narrows the day to one destination's cells.
   'GET /api/definitions/:id/calendar': route(

@@ -38,11 +38,7 @@ export function assembleDuration(def: SearchDefinition, ports: Ports): DurationR
   const parent = all.find((e) => !e.isChild);
   const children = all.filter((e) => e.isChild && e.status === 'completed');
   const set = [...(parent === undefined ? [] : [parent]), ...children];
-  const loaded = loadRows(
-    def,
-    ports,
-    set.map((e) => e.id),
-  );
+  const loaded = loadRows(def, ports, { executionIds: set.map((e) => e.id) });
   // why: plan decision 58: picked over every confirmed offer before any per-itinerary dedup (see assembleCalendar).
   const verified = loaded.verified.filter(confirmedIn(loaded)).filter((r) => r.verdictClass === 'verified');
   const inSpace = (c: CellKey) => cellInSpace(loaded.space, c);

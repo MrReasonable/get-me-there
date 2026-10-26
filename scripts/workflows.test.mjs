@@ -104,6 +104,15 @@ describe('GitHub workflows (least privilege)', () => {
 // (an `ENV NAME value` layer, a JSON "token": value) passed; and the compose step's throwaway credentials are said to
 // be CI-only and never a real value. The check's own grep patterns are run over sample history lines here.
 // why: ruling 11: each case spawns grep; 60 s survives a loaded runner.
+describe('WP19: the test job multiplies time limits only (spec revision 50)', () => {
+  it('sets GMT_TIMING_FACTOR: 3 on the job that runs the package suites', () => {
+    const ci = text('ci.yml');
+    const job = ci.split('\n  test:\n')[1]?.split('\n  docker:\n')[0] ?? '';
+    expect(job).toContain('pnpm -r --workspace-concurrency=1 test');
+    expect(job).toMatch(/\n {4}env:\n {6}GMT_TIMING_FACTOR: 3\n/);
+  });
+});
+
 describe('the docker job keeps credentials out of the image history', { timeout: 60_000 }, () => {
   const ci = text('ci.yml');
   const line = ci.split('\n').find((l) => l.includes('docker history --no-trunc get-me-there:local')) ?? '';

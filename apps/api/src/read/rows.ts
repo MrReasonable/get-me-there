@@ -257,26 +257,29 @@ export function latestPerOffer(rows: readonly ObservationRow[]): ObservationRow[
 }
 
 /**
- * Spec §8.1: a row is "not seen in latest search" when its cell's newest `priced | empty`
- * verification outcome comes from another execution in which this offer has no observation.
+ * Spec §8.1: a row is "not seen in latest search" when its cell's newest `priced | empty` verification outcome comes
+ * from another execution in which this offer has no observation. `latestOutcomes` is the definition's newest such
+ * outcome per cell (`ItinerariesRepo.latestVerificationOutcomes`, one grouped read, keyed by `cellKeyString`).
  */
 export function notSeenResolver(
   rows: readonly ObservationRow[],
-  latestOutcome: (cell: CellKey) => CellOutcome | null,
+  latestOutcomes: ReadonlyMap<string, CellOutcome>,
   now: IsoDateTime,
 ) {
   const seen = new Set(rows.map((r) => `${r.executionId}|${r.offer.id}`));
-  const cache = new Map<string, CellOutcome | null>();
   return (r: ObservationRow): { ageHours: number | 'unknown' } | null => {
-    const key = cellKeyString(r.cell);
-    let latest = cache.get(key);
-    if (latest === undefined) {
-      latest = latestOutcome(r.cell);
-      cache.set(key, latest);
-    }
+    const latest = latestOutcomes.get(cellKeyString(r.cell)) ?? null;
     if (latest === null || (latest.status !== 'priced' && latest.status !== 'empty')) return null;
     if (latest.executionId === r.executionId || seen.has(`${latest.executionId}|${r.offer.id}`)) return null;
     // why: a priced or empty outcome always has fetchedAt; if one ever lacks it the age is not known, never "now".
     return { ageHours: latest.fetchedAt === null ? 'unknown' : hoursSince(latest.fetchedAt, now) };
   };
+}
+
+/**
+ * A verified-basis row whose price the final step confirmed (decisions 45, 48); `unconfirmed` holds the observation
+ * ids without a `price` supplied field (`Loaded.unconfirmed`).
+ */
+export function confirmedIn(loaded: { unconfirmed: ReadonlySet<number> }): (r: ResultRow) => boolean {
+  return (r) => r.observationId === null || !loaded.unconfirmed.has(r.observationId);
 }

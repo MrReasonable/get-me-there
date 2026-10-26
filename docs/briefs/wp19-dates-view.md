@@ -391,7 +391,10 @@ type CalendarMarks = { sourceLastError: string | null; searchedEmptyLater: boole
   // sourceLastError: the last_error of the discovery outcome that fetched the price (through reused_from_execution_id
   // for a reused copy), for truncation; searchedEmptyLater: the newest searched, non-reused discovery outcome of a parent
   // execution for that (provider, cell) is newer than the price's execution and found empty or no_data (supersession).
-  // Both by ROW_NUMBER windows and joins in SQL.
+  // Both in the same statement: the latest row per (provider, cell) grouped in the order of migration 0009's covering
+  // index `calendar_prices_latest_idx` (max fetched_at, then max id; a ROW_NUMBER window sorted every row of a 20-run
+  // history, several seconds), the truncation by a primary-key join to the fetching outcome, and the supersession by a
+  // correlated probe of only the executions newer than the price's.
 CalendarPricesRepo.latestPerCell(definitionId: string, cabin: Cabin, space: ResolvedSpace | null):
   Array<CalendarPriceRow & CalendarMarks>;   // reworked: the same rows, one statement, with the marks joined
 CalendarPricesRepo.latestHeldBy(executionIds: readonly string[], cabin: Cabin, space: ResolvedSpace | null):
@@ -404,7 +407,11 @@ ItinerariesRepo.observationsForDefinition(definitionId, { executionIds, space, c
 ItinerariesRepo.latestVerificationOutcomes(definitionId: string, cabin: Cabin, space: ResolvedSpace | null): Map<string, CellOutcome>;
 CellsRepo.childVerificationRollUps(definitionId: string): Array<{ executionId: string; createdAt: IsoDateTime; cell: CellKey;
   status: CellOutcomeStatus | null }>;
+CellsRepo.reusedCells(executionId: string): Set<string>;   // new: ParentFacts.reusedCells in one statement (cell keys)
+CalendarPricesRepo.history(...)   // each point gains `sourceLastError` (same join), so read/history.ts keeps its
+                                  // truncation mark without truncationOf
 // truncationOf and supersessionOf (apps/api/src/read/results.ts) and their per-execution outcome reads are deleted.
+// Migration 0009 (`0009_wp19_latest_price_idx`, with test/migration0009.test.ts) adds the covering index above.
 
 // packages/engine/src/alerts/templates.ts
 export function appRowLink(appBaseUrl: string | null, definitionId: string, basis: ResultBasis, rowKey: string,
@@ -428,18 +435,25 @@ export interface ParentFacts {   // read once per request, each one statement
 }
 export function classifyCells(space: ResolvedSpace /* scoped */, parent: ParentFacts | null,
   children: ReturnType<CellsRepo['childVerificationRollUps']>,
-  offers: { partiallyVerified: ReadonlySet<string>; unconfirmed: ReadonlySet<string> }): CellClass[];
+  offers: { partiallyVerified: ReadonlySet<string> }): CellClass[];
   // one per cell of `space` in generation order; bucket = the parent's discovery roll-up status when present and not
-  // null, else not_run (and every cell not_run when parent is null); no read inside
+  // null, else not_run (and every cell not_run when parent is null); no read inside. `unconfirmed` comes from the
+  // parent's roll-up (itinerary-searched, priced, no confirmed price: decisions 45, 48, 51), the rule the calendar's
+  // `unconfirmedCells` had ("follows the latest run"), so `offers` carries the partially-verified cells only
+export function parentFacts(ports: Ports, parent: Execution | null): ParentFacts | null;   // the three reads above
 export function summariseCells(classes: readonly CellClass[]): CoverageSummary;
   // the only way the api builds a CoverageSummary: buckets, total (= classes.length), reused, selected,
   // itinerarySearched and onDemand as counts of distinct cells
 
 // apps/api/src/read/datePairs.ts
-export function datePairFigures(loaded: Loaded, scope: ParsedScope, rc: RowContext): Map<number, DatePairFigure>;
+export function datePairFigures(loaded: Loaded, scope: ParsedScope, rc: RowContext):
+  { figures: Map<number, DatePairFigure>; journeyLeftOut: Map<number, number> };
   // the one path from rows to a figure: confirmedIn, figuresByDatePair (journey rule included), the cheaper-cached
-  // staleness by thresholdFor, fromEarlierSearch from the executions' order; assembleDatePairs uses the whole map,
-  // assembleResults takes .get(datePairIndex(...)) and drops airportPair for datePairFigureSchema
+  // staleness by thresholdFor, fromEarlierSearch from the executions' order; assembleDatePairs uses the whole map and
+  // figuresByDatePair's journeyLeftOut, assembleResults takes .figures.get(datePairIndex(...)) and drops airportPair
+  // for datePairFigureSchema
+// apps/api/src/read/load.ts: loadRows, Loaded and LoadOptions (re-exported from results.ts), so results.ts and
+// datePairs.ts both read them without importing each other; confirmedIn lives in rows.ts for the same reason
 
 // apps/web/src/state/view.ts
 export type ViewId = 'dates' | 'results' | 'history' | 'definitions' | 'providers' | 'alerts' | 'status';
@@ -509,7 +523,9 @@ Versions from the lockfile (plan Task 0.1 list and later pins). Verified 2026-10
   `packages/core/src/api-contract/datePairs.ts`, `packages/core/src/space/limits.ts`; tests `packages/core/test/datePairs/{space,figure,rank,bands,codec,
   detailLink}.test.ts`, `packages/core/test/api-contract/datePairs.test.ts`, `packages/core/test/helpers/datePairs.ts`
   (builds a `DecodedDatePairs` and encodes it through `encodeDatePairs`).
-- `apps/api/src/read/{datePairs,scope,calendarGap}.ts`; `apps/api/test/routes/{datePairs,datePairsBound,
+- `apps/api/src/read/{datePairs,scope,calendarGap,load}.ts`, `apps/api/test/helpers/dates.ts` (the date-pairs world and
+  the shared 422 table), `packages/db/test/helpers/history.ts` (the several-runs seed), `packages/db/drizzle/0009_wp19_latest_price_idx.sql`
+  with `packages/db/test/migration0009.test.ts`; `apps/api/test/routes/{datePairs,datePairsBound,
   datePairsClassify,resultsScope}.test.ts`.
 - `apps/web/src/views/Dates/{DatesView,DatesHeader,Board,BoardCard,UpdateBoard,Overview,OverviewMonth,Legend,Readout,
   Filters,CoverageSection,States}.tsx`, `apps/web/src/views/Dates/{board,howFar,stayScope,refresh,shade,overview,keys,
@@ -969,18 +985,23 @@ summary.
     the same axes on `/results` (whole space, one date pair, and `?executionId=` of the oldest of 20 runs, so its
     truncation and supersession marks are read without a scan of each past run). A statement per cell, per past run,
     per child or per itinerary fails it.
-  - **Time and size**: a definition of 50,000 cells in scope (400 days × 25 nights × 5 airport pairs), with history 20
-    parent runs deep over those cells (their discovery outcomes and calendar prices), every cell priced, a few hundred
-    verified observations and about one distinct provenance per 49 cells: `it(…, { timeout: 3_000 * timingFactor })`
-    answers 200 (`timingFactor` is `Number(process.env.GMT_TIMING_FACTOR ?? 1)`, a positive number else the test
-    throws),
+  - **Time and size**: a definition of 49,600 cells in scope (400 days × 31 nights × the worked example's 4 airport
+    pairs, the largest space of those four within 50,000; five would need an airport outside the example), with history
+    20 parent runs deep over those cells (their discovery outcomes and calendar prices), every cell priced, a few hundred
+    verified observations and about one distinct provenance per 49 cells: the request, timed on its own, answers 200
+    within `3_000 * timingFactor` ms (`timingFactor` is `Number(process.env.GMT_TIMING_FACTOR ?? 1)`, a positive number
+    else the test throws; the `it`'s own timeout is a backstop only),
     the uncompressed body is at most 4 MiB (4 × 1024 × 1024 bytes) and the gzip body at most 512 KiB. A second case at
     36,400 date pairs (400 × 91, one airport pair, every one with a figure) holds the same bounds. A third: a
-    100,000-cell definition (the operator's raised setting) read with `origins` bringing the scope to 50,000 answers
-    200 within the same bounds, reading only the scope's cells (the SQL carries the scope).
+    99,200-cell definition (the operator's raised setting; 400 × 62 × 4) read with `origins=LHR` bringing the scope to
+    49,600 answers 200 within the same bounds, reading only the scope's cells (the SQL carries the scope). Axis (d)
+    compares 1,000 cells with the 49,600-cell seed. The seeds' bulk rows are written with raw statements in one
+    transaction per run (the repositories' per-tile writes would take minutes), the verified cells through the
+    repositories; their harnesses are built with `createHarness({ persistent: true })`, which the file closes in
+    `afterAll` and which stores a rate for today so the engine's after-boot FX refresh never fires mid-file.
   - The count and size assertions are exact gates everywhere. The 3 s limit is §10's starting default; it is exact on
     the operator's machine (factor 1) and multiplied by 3 on CI, where `ci.yml` sets `GMT_TIMING_FACTOR: 3` on the job
-    that runs `pnpm test` (revision 50: shared runners are slower and noisier, and a limit that fails on noise proves
+    that runs the package suites (`test`, whose step runs `pnpm -r --workspace-concurrency=1 test`) (revision 50: shared runners are slower and noisier, and a limit that fails on noise proves
     nothing; the factor never applies to counts or sizes, and no test is ever retried). `scripts/workflows.test.mjs`
     pins that env line.
 
@@ -992,8 +1013,10 @@ summary.
   and the scope tests fail on unscoped counts.
 - [ ] **Implement.**
   - `db`: §5's methods, each a fixed number of statements with `ROW_NUMBER()` windows and `json_each` as §6 says; the
-    scope's space (airports, dates, nights) in the `WHERE`; the reworked methods keep their signatures and callers. If the history-deep seed needs an index to meet 3 s, add it in a
-    new migration numbered after main's latest at build time, with its migration test.
+    scope's space (airports, dates, nights) in the `WHERE`; the reworked methods keep their signatures and callers. The
+    history-deep seed needed an index: migration 0009 (`calendar_prices_latest_idx`, a covering index in (provider,
+    cell, fetched_at, id) order), after main's 0008, with its migration test, and `latestPerCell` groups in that index's
+    order (`INDEXED BY`) instead of a window over every row; the stay filter applies to the winners only.
   - `read/scope.ts`: `parseScope` splits each comma list, keeps only the definition's codes (else 422
     `unknown_airport`), sorts and deduplicates them, treats empty or absent as all; parses the journey limit
     (`/^\d+$/`, 60..6000, else 422 `invalid_journey_limit`) and the date pair (both or neither, ISO dates, inside the
@@ -1023,7 +1046,8 @@ summary.
   - `read/pick.ts`: `pickVerified` and `pickCalendar` delegate to `core`'s `pickVerifiedFigure` and
     `pickCalendarFigure` (one rule; the calendar-gap reference keeps using them). `read/coverage.ts`'s
     `onDemandSearched` reads `childVerificationRollUps` once instead of one roll-up read per child.
-  - `ci.yml`: `GMT_TIMING_FACTOR: 3` on the job that runs `pnpm test`, with a `# why:` naming revision 50's reason.
+  - `ci.yml`: `GMT_TIMING_FACTOR: 3` as the `env` of the `test` job (it runs the package suites), with a `# why:` naming
+    revision 50's reason.
   - `read/calendarGap.ts`: `assembleCalendarGap` moved out of `calendar.ts` unchanged.
   - `routes/results.ts` and `core`'s ROUTES: `route('GET', '/definitions/:id/date-pairs', datePairsResponseSchema,
     { query: datePairsQuerySchema })` beside `/results`; `app.ts`: `compress` on that path.

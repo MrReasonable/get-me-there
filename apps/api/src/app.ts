@@ -4,6 +4,7 @@ import { MIGRATIONS_DIR } from '@gmt/db';
 import type { Engine } from '@gmt/engine';
 import { type Context, Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
+import { compress } from 'hono/compress';
 import { envelope, notFound, onError } from './errors.js';
 import { basicAuthGate, clientIpFrom, FailedAuthLimiter } from './middleware/auth.js';
 import { hostAllowlist, mutatingRequestCheck, noStore, originCheck } from './middleware/hardening.js';
@@ -113,6 +114,10 @@ export function createApp(ports: Ports, engine: Engine, options: AppOptions = {}
     }),
   );
   app.use(`${API_PREFIX}/*`, mutatingRequestCheck());
+  // why: spec §10 bounds: the date-pairs body is columns of every date pair, not paged, so it is gzip-compressed when
+  // the request accepts it, on this route alone; mounted after the hardening and auth so a refused request is never
+  // compressed work.
+  app.use(`${API_PREFIX}/definitions/:id/date-pairs`, compress({ encoding: 'gzip' }));
   const routeKeys = new Set(routes.map((r) => `${r.method} ${r.path}`));
   for (const key of Object.keys(HANDLERS)) {
     // why: a handler for a route the contract no longer has is dead code the web client cannot reach.

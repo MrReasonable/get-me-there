@@ -6,6 +6,7 @@ import { CalendarPricesRepo } from '../src/repositories/calendarPrices.js';
 import { CellsRepo } from '../src/repositories/cells.js';
 import { DefinitionsRepo } from '../src/repositories/definitions.js';
 import { ExecutionsRepo } from '../src/repositories/executions.js';
+import type { CalendarPriceRow } from '../src/types.js';
 import { at, count, freshDb, sqliteCode, T0 } from './helpers/db.js';
 import {
   calendarPrice,
@@ -18,6 +19,7 @@ import {
   newExecution,
   withNights,
 } from './helpers/factories.js';
+import { historySeed, statementsOf } from './helpers/history.js';
 
 function setup(allowSynthetic = false, onlyLhrJfk = false) {
   const db = freshDb();
@@ -366,5 +368,162 @@ describe('CalendarPricesRepo.insert is a prices-only tile write (spec §3, §7 a
     expect(() => repo.insert('no-such-execution', [calendarPrice(cell())])).toThrow(
       expect.objectContaining({ rule: 'missing' }),
     );
+  });
+});
+
+// WP19 Task 19.2: the grouped reads, each one statement, equal to the per-execution algorithms they replace (the api's
+// old truncationOf, supersessionOf and heldBy loop, written out here as the reference).
+describe('grouped calendar reads with their marks (WP19 Task 19.2, spec §10 bounds)', () => {
+  /** The statement latestPerCell ran before WP19, kept verbatim as the reference for its rows. */
+  const OLD_LATEST_PER_CELL_SQL = `
+WITH ranked AS (
+  SELECT p.*, ROW_NUMBER() OVER (PARTITION BY p.provider_id, p.origin, p.destination, p.departure_date, p.return_date ORDER BY p.fetched_at DESC, p.id DESC) AS rn
+  FROM calendar_prices p JOIN search_executions e ON e.id = p.execution_id
+  WHERE e.definition_id = @definitionId AND p.cabin = @cabin AND p.reused_from_execution_id IS NULL
+)
+SELECT id FROM ranked WHERE rn = 1`;
+
+  function reference(seed: ReturnType<typeof historySeed>) {
+    const all = seed.executions.listForDefinition(seed.definition.id, {
+      limit: 'all',
+      includeChildren: true,
+    });
+    const truncation = (r: CalendarPriceRow): string | null =>
+      seed.cells
+        .outcomes(r.reusedFromExecutionId ?? r.executionId, { stage: 'discovery' })
+        .find((o) => o.providerId === r.providerId && cellKeyString(o) === cellKeyString(r.cell))
+        ?.lastError ?? null;
+    // the old supersessionOf: the newest parent's searched, non-reused outcome per (provider, cell), by position
+    const position = new Map(all.map((e, i) => [e.id, i]));
+    const lastSearch = new Map<string, { at: number; found: boolean }>();
+    all.forEach((e, at) => {
+      if (e.isChild) return;
+      for (const o of seed.cells.outcomes(e.id, { stage: 'discovery' })) {
+        const key = `${o.providerId}|${cellKeyString(o)}`;
+        if (!['priced', 'empty', 'no_data'].includes(o.status) || o.reusedFromExecutionId !== null) continue;
+        if (lastSearch.has(key)) continue;
+        lastSearch.set(key, { at, found: o.status === 'priced' });
+      }
+    });
+    const superseded = (r: CalendarPriceRow): boolean => {
+      const fetchedBy = position.get(r.executionId);
+      const last = lastSearch.get(`${r.providerId}|${cellKeyString(r.cell)}`);
+      return fetchedBy !== undefined && last !== undefined && last.at < fetchedBy && !last.found;
+    };
+    const marked = (r: CalendarPriceRow) => ({
+      ...r,
+      sourceLastError: truncation(r),
+      searchedEmptyLater: superseded(r),
+    });
+    return { marked };
+  }
+
+  const key = (r: CalendarPriceRow) => `${r.providerId}|${cellKeyString(r.cell)}`;
+  const sorted = <T extends CalendarPriceRow>(rows: readonly T[]) =>
+    [...rows].sort((a, b) => (key(a) < key(b) ? -1 : key(a) > key(b) ? 1 : 0));
+
+  it('latestPerCell: the old rows, with the reference truncation and supersession over five parent runs, in one statement', () => {
+    const seed = historySeed();
+    const { marked } = reference(seed);
+    const { result, statements } = statementsOf(seed.db, () =>
+      seed.prices.latestPerCell(seed.definition.id, 'economy', null),
+    );
+    expect(statements).toBe(1);
+    const oldIds = seed.db.raw
+      .prepare<Record<string, unknown>, { id: number }>(OLD_LATEST_PER_CELL_SQL)
+      .all({ definitionId: seed.definition.id, cabin: 'economy' })
+      .map((r) => r.id)
+      .sort((a, b) => a - b);
+    expect(result.map((r) => r.id).sort((a, b) => a - b)).toEqual(oldIds);
+    expect(sorted(result)).toEqual(sorted(result.map((r) => marked(r))));
+    // why: the seed must exercise every arm, or the equality above proves nothing
+    expect(result.some((r) => r.searchedEmptyLater)).toBe(true);
+    expect(result.some((r) => !r.searchedEmptyLater)).toBe(true);
+    expect(result.some((r) => r.sourceLastError?.startsWith('truncated') === true)).toBe(true);
+  });
+
+  it('latestPerCell: a newer run that skipped, errored on or reused the cell is not a search', () => {
+    const seed = historySeed();
+    const all = seed.executions.listForDefinition(seed.definition.id, {
+      limit: 'all',
+      includeChildren: true,
+    });
+    const rows = seed.prices.latestPerCell(seed.definition.id, 'economy', null);
+    // every row marked superseded has a newer searched empty/no_data outcome; none is marked by a skip, error or copy
+    for (const r of rows.filter((x) => x.searchedEmptyLater)) {
+      const newer = all
+        .slice(
+          0,
+          all.findIndex((e) => e.id === r.executionId),
+        )
+        .filter((e) => !e.isChild)
+        .flatMap((e) => seed.cells.outcomes(e.id, { stage: 'discovery', cells: [r.cell] }))
+        .filter((o) => o.providerId === r.providerId && o.reusedFromExecutionId === null);
+      expect(newer.find((o) => ['priced', 'empty', 'no_data'].includes(o.status))?.status).toMatch(
+        /^(empty|no_data)$/,
+      );
+    }
+  });
+
+  it('latestPerCell: restricted to the scope when given (airports, dates and nights in the SQL)', () => {
+    const seed = historySeed();
+    const all = seed.prices.latestPerCell(seed.definition.id, 'economy', null);
+    const space = {
+      origins: [LHR],
+      destinations: [JFK],
+      departureFrom: asIsoDate('2027-03-15'),
+      departureTo: asIsoDate('2027-03-15'),
+      minNights: 14,
+      maxNights: 14,
+    };
+    const scoped = seed.prices.latestPerCell(seed.definition.id, 'economy', space);
+    expect(scoped.length).toBeGreaterThan(0);
+    expect(sorted(scoped)).toEqual(
+      sorted(
+        all.filter(
+          (r) => r.cell.origin === LHR && r.cell.destination === JFK && r.cell.departureDate === '2027-03-15',
+        ),
+      ),
+    );
+    expect(
+      seed.prices.latestPerCell(seed.definition.id, 'economy', { ...space, minNights: 15, maxNights: 15 }),
+    ).toEqual([]);
+  });
+
+  it('latestHeldBy: for one and for several executions, the latest held row per (provider, cell), reused copies included, each with its marks', () => {
+    const seed = historySeed();
+    const { marked } = reference(seed);
+    const heldLoop = (ids: readonly string[]) => {
+      const best = new Map<string, CalendarPriceRow>();
+      for (const r of ids.flatMap((id) => seed.prices.heldBy(id)).filter((x) => x.cabin === 'economy')) {
+        const cur = best.get(key(r));
+        if (
+          cur === undefined ||
+          r.fetchedAt > cur.fetchedAt ||
+          (r.fetchedAt === cur.fetchedAt && r.id > cur.id)
+        )
+          best.set(key(r), r);
+      }
+      return [...best.values()];
+    };
+    for (const ids of [
+      [seed.runs[0] ?? ''],
+      [seed.runs[3] ?? ''],
+      seed.runs,
+      [seed.runs[1] ?? '', seed.runs[4] ?? ''],
+    ]) {
+      const { result, statements } = statementsOf(seed.db, () =>
+        seed.prices.latestHeldBy(ids, 'economy', null),
+      );
+      expect(statements).toBe(1);
+      expect(sorted(result)).toEqual(sorted(heldLoop(ids).map(marked)));
+    }
+    // why: a reused copy's truncation is its source run's (decision 58), so the seed must hold one
+    const held = seed.prices.latestHeldBy(seed.runs, 'economy', null);
+    expect(seed.runs.some((id) => seed.prices.heldBy(id).some((r) => r.reusedFromExecutionId !== null))).toBe(
+      true,
+    );
+    expect(held.length).toBeGreaterThan(0);
+    expect(seed.prices.latestHeldBy(seed.runs, 'business', null)).toEqual([]);
   });
 });
