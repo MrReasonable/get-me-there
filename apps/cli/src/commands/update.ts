@@ -9,7 +9,7 @@ import {
   DRY_RUN_LINE,
   PIN_FILE,
 } from '../camoufox/updateStep.js';
-import { workerStart, workerStop } from '../camoufox/workerService.js';
+import { workerStart, workerStarted, workerStop } from '../camoufox/workerService.js';
 import { type Deps, EXIT } from '../deps.js';
 import { type Action, commandLine, type Plan, runAction } from '../plan/action.js';
 import { apply } from '../plan/apply.js';
@@ -223,9 +223,10 @@ export async function updateCommand(flags: Flags, _p: string | null, deps: Deps)
         }
       }
       const install = sm.install(e.rendered, now);
-      out.push(
-        ...(e.name !== 'backup' && install.length === 0 ? sm.start(e.unit, factOf(now, e.unit)) : install),
-      );
+      const start =
+        e.name !== 'backup' && install.length === 0 ? sm.start(e.unit, factOf(now, e.unit)) : install;
+      // why: spec §13: the dry run shows the worker's start as the real one plans it, its answer wait included
+      out.push(...(e.name === 'camoufox-worker' ? workerStarted(deps, e.unit, start) : start));
     }
     return out;
   };

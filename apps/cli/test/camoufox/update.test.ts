@@ -32,6 +32,8 @@ async function world(o: {
   downloadsFail?: () => boolean;
   /** The new code's printer's exit (0 by default). */
   printerCode?: number;
+  /** The worker's start check passes (it fails to print anything by default). */
+  workerOk?: boolean;
 }) {
   let started = false;
   let head = 'aaaa1111';
@@ -74,6 +76,8 @@ async function world(o: {
           code: o.printerCode ?? 0,
           stdout: typeof o.manifest === 'string' ? o.manifest : JSON.stringify(o.manifest),
         };
+      if (o.workerOk === true && argv.includes('check') && argv.some((a) => a.endsWith('run.ts')))
+        return { code: 0, stdout: '{"ok":true}\n' };
       if (argv[0] === 'df') return { code: 0, stdout: 'h\n/dev/disk 1 1 99999999 1% /\n' };
       if (argv[0] === 'ln') {
         const link = argv[3] ?? '';
@@ -345,6 +349,28 @@ describe('update’s Camoufox step (Task 17.1; W6)', () => {
       // why: update's own record of the run is the one removal after the wait; no bundle removal follows
       expect(kinds(log.slice(wait + 1))).toEqual(['remove /Users/op/.local/state/get-me-there/update.json']);
     }
+  });
+
+  // why: spec §13: a start of the worker is done only once it answers, and the dry run shows that wait too
+  it('with the provider on, the worker’s start is followed by its answer wait, before the app’s health wait', async () => {
+    const m = await world({ manifest: { entry: MAC, flags: flagsOn }, enabled: true, workerOk: true });
+    expect(await runCli(['update'], m.deps), m.io.stderr).toBe(0);
+    const log = kinds(m.executor.log);
+    const start = m.executor.log.findIndex(
+      (a) =>
+        a.kind === 'run' && a.argv[1] === 'bootstrap' && a.argv.at(-1)?.includes('camoufox-worker') === true,
+    );
+    expect(start).toBeGreaterThan(-1);
+    expect(log[start + 1]).toBe('waitWorkerAnswers');
+    expect(log.indexOf('waitHealthy')).toBeGreaterThan(start + 1);
+    // only the worker's start is waited on this way, never the app's
+    expect(log.filter((k) => k === 'waitWorkerAnswers')).toHaveLength(1);
+    const dry = await world({ manifest: { entry: MAC, flags: flagsOn }, enabled: true });
+    expect(await runCli(['update', '--dry-run'], dry.deps)).toBe(0);
+    expect(dry.io.stdout.match(/until the worker answers/g)).toHaveLength(1);
+    expect(dry.io.stdout).toMatch(
+      /\. run launchctl bootstrap gui\/501 \/Users\/op\/Library\/LaunchAgents\/local\.get-me-there\.camoufox-worker\.plist\n {2}\d+\. wait up to 60 s until the worker answers on 127\.0\.0\.1:8090\n/,
+    );
   });
 
   it('--dry-run names the step without reading the pin', async () => {
