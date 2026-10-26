@@ -18,14 +18,17 @@ import { tempDir } from '../helpers/tmp.js';
 const BOOT_TIMEOUT_MS = 30_000;
 /** Every boot runs on a fixed clock (CodeRabbit, PR #20): what a test steps is its own fake timers, never the wall. */
 const T0 = asIsoDateTime('2026-10-14T12:00:00.000Z');
+/** Why a boot with `listen: true` fails in this process: the network guards refuse its address lookup. */
+const LISTEN_REFUSED = 'tests make no DNS lookups (127.0.0.1)';
 
 /**
- * Each engine a boot creates, through the real `engineFor`; with `hangShutdown` set, the next one's shutdown never
- * settles (its real shutdown is kept for the teardown), so a test can stand in a boot whose shutdown hangs.
+ * Each engine a boot creates, through the real `engineFor`. With `stub` set, the next one's shutdown never settles
+ * ('hang') or throws before it returns a promise ('throw'); its real shutdown is kept for the teardown.
  */
 const engines = vi.hoisted(() => {
   const real: Array<() => Promise<void>> = [];
-  return { hangShutdown: false, real };
+  const state: { stub: 'hang' | 'throw' | null; real: typeof real } = { stub: null, real };
+  return state;
 });
 vi.mock('../../src/bootstrap/engine.js', async (importOriginal) => {
   const orig = await importOriginal<typeof import('../../src/bootstrap/engine.js')>();
@@ -33,10 +36,16 @@ vi.mock('../../src/bootstrap/engine.js', async (importOriginal) => {
     ...orig,
     engineFor: (...args: Parameters<typeof orig.engineFor>) => {
       const engine = orig.engineFor(...args);
-      if (engines.hangShutdown) {
-        engines.hangShutdown = false;
+      const stub = engines.stub;
+      engines.stub = null;
+      if (stub !== null) {
         engines.real.push(engine.shutdown);
-        engine.shutdown = () => new Promise<void>(() => undefined);
+        engine.shutdown =
+          stub === 'hang'
+            ? () => new Promise<void>(() => undefined)
+            : () => {
+                throw new Error('shutdown threw before returning');
+              };
       }
       return engine;
     },
@@ -127,7 +136,7 @@ afterEach(async () => {
   vi.restoreAllMocks();
   for (const running of booted.splice(0)) await running.engine.shutdown();
   for (const shutdown of engines.real.splice(0)) await shutdown();
-  engines.hangShutdown = false;
+  engines.stub = null;
 });
 
 describe('graceful shutdown (spec §7, §13)', { timeout: BOOT_TIMEOUT_MS }, () => {
@@ -201,7 +210,7 @@ describe('graceful shutdown (spec §7, §13)', { timeout: BOOT_TIMEOUT_MS }, () 
     // lookup, so it fails here deterministically.
     await expect(
       bootApp({ config: devConfig(dbPath), clock: fixedClock(T0), log, listen: true, assets: assetPaths() }),
-    ).rejects.toThrow();
+    ).rejects.toThrow(LISTEN_REFUSED);
     expect(lockRow(dbPath)).toBeNull();
     expect(timers.clear).toHaveBeenCalledWith(timers.heartbeat());
     // two minutes on, past the FX refresh and the minute catch-up: no request was made and nothing logged an error
@@ -220,7 +229,7 @@ describe('a failed boot whose engine shutdown hangs (CodeRabbit, PR #20)', {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'setTimeout', 'clearTimeout'] });
     const log = createLogger({ logLevel: 'error' });
     const errors = vi.spyOn(log, 'error');
-    engines.hangShutdown = true;
+    engines.stub = 'hang';
     const boot = bootApp({
       config: devConfig(dbPath),
       clock: fixedClock(T0),
@@ -228,18 +237,33 @@ describe('a failed boot whose engine shutdown hangs (CodeRabbit, PR #20)', {
       listen: true,
       assets: assetPaths(),
     });
+    // why: the boot's own error is what it rejects with, never the shutdown's (CodeRabbit, PR #20)
     const settled = boot.then(
       () => 'booted',
-      () => 'refused',
+      (e: unknown) => (e instanceof Error ? e.message : String(e)),
     );
     await vi.advanceTimersByTimeAsync(SHUTDOWN_DEADLINE_MS - 1);
     expect(lockRow(dbPath)).not.toBeNull();
     await vi.advanceTimersByTimeAsync(1);
-    expect(await settled).toBe('refused');
+    expect(await settled).toBe(LISTEN_REFUSED);
     expect(lockRow(dbPath)).toBeNull();
     expect(
       errors.mock.calls.filter((c) => String(c[1]) === 'engine shutdown after a failed boot timed out'),
     ).toHaveLength(1);
+  });
+
+  it('a shutdown that throws before returning is logged; the boot still rejects with its own error and hands back the lock', async () => {
+    const dbPath = seededDb();
+    const log = createLogger({ logLevel: 'error' });
+    const errors = vi.spyOn(log, 'error');
+    engines.stub = 'throw';
+    await expect(
+      bootApp({ config: devConfig(dbPath), clock: fixedClock(T0), log, listen: true, assets: assetPaths() }),
+    ).rejects.toThrow(LISTEN_REFUSED);
+    expect(lockRow(dbPath)).toBeNull();
+    expect(errors.mock.calls.map((c) => String(c[1]))).toContain(
+      'engine shutdown after a failed boot failed',
+    );
   });
 });
 

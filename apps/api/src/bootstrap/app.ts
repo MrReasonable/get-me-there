@@ -321,12 +321,15 @@ async function shutdownAfterFailedBoot(
   });
   try {
     await Promise.race([
-      engine.shutdown().catch((e: unknown) => {
-        log.error(
-          { err: { message: safeMessage(e, secrets) } },
-          'engine shutdown after a failed boot failed',
-        );
-      }),
+      // why: a shutdown that throws before it returns a promise is a rejection here too, never an escape
+      Promise.resolve()
+        .then(() => engine.shutdown())
+        .catch((e: unknown) => {
+          log.error(
+            { err: { message: safeMessage(e, secrets) } },
+            'engine shutdown after a failed boot failed',
+          );
+        }),
       timedOut,
     ]);
   } finally {
