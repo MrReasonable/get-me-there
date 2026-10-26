@@ -1,6 +1,6 @@
 # get-me-there — Flight Price Intelligence & Flexible-Date Optimiser
 
-**Design spec, revision 43.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
+**Design spec, revision 44.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
 four full-roster reviews (145, 140, 126 and 101 findings; zero Critical since
 revision 2) and the provider spike. Revision 9 folds in the three decisions
 taken at approval (the self-scraping fallback in §2, the dashboard readings in
@@ -1138,7 +1138,10 @@ export class AbortedError extends Error {}
 ### 5.3 http-kit (`packages/providers/src/http/`)
 
 `createHttpKit({ budget, cache, limits, clock, log, secrets, syntheticAllowed, recorder?, inProcessHosts? })`
-over `globalThis.fetch`. The one transport seam is `inProcessHosts`: a
+over `globalThis.fetch`, whose own header and body timeouts (undici's, 300 s
+each by default) the kit turns off for its process, so each attempt's
+per-request timeout is the one bound that ends it: a grid page's passes 300 s
+(§2). The one transport seam is `inProcessHosts`: a
 hostname-keyed in-process handler that only wiring under `syntheticAllowed`
 may supply (http-kit refuses it otherwise), used for `http://fixture.local`;
 tests intercept with `msw` on global fetch. A request that joins an identical
@@ -1154,7 +1157,7 @@ in-flight dedup
 p-retry (max 3 attempts; Retry-After honoured up to MAX_WAIT_SECONDS, beyond → limiter-timeout) {
    limiter (chained per-minute + per-hour reservoirs, maxConcurrent; queue age ≤ MAX_WAIT_SECONDS and !signal.aborted checked before reserve)
    budget.reserve  (one BEGIN IMMEDIATE transaction: cap predicates, insert provider_requests outcome='pending')
-   fetch (per-provider hostname allowlist; redirect: 'error'; REQUEST_TIMEOUT_SECONDS; credentials in header when supported)
+   fetch (per-provider hostname allowlist; redirect: 'error'; the provider's per-request timeout, the only one; credentials in header when supported)
    reservation.finalise
 }
 cache.set when cacheable  →  return { body, fetchedAt: now }
@@ -2216,7 +2219,9 @@ or the engine. First-failing-test per WP in §16.
    conversion and the FX flag; `suppliedFields` populated from **recorded**
    fixtures only; parameter names and values match the dated allowlist;
    error mapping incl. `Retry-After`, 403, quota discrimination,
-   per-request timeout, limiter-timeout; backoff with fake timers; pipeline
+   per-request timeout, limiter-timeout; an answer whose headers, or whose
+   body, come after fetch's own timeout (stood in by a small one) still
+   arrives, and one held past the request's own bound ends at it; backoff with fake timers; pipeline
    order (cache hit → zero upstream, non-billable row, original `fetchedAt`;
    dedup → one call; reserve before fetch each attempt; `BudgetExceeded`
    before mock hit); `auth`/`quota`/`parse` never retried; abort mid-fetch
@@ -2306,7 +2311,10 @@ or the engine. First-failing-test per WP in §16.
    temporary directory: a SQLite database with rows backed up by
    `scripts/backup.mjs`, imported or restored, reopened and counted, and
    interrupted at each step to show the database is the old one or the new
-   one, never partial. The launchd plist and the systemd units have snapshot
+   one, never partial. The CLI's HTTP client is tested against a local
+   server whose answer, headers or body, comes after fetch's own timeout
+   (stood in by a small one) and still arrives, while one later than the
+   request's own bound does not. The launchd plist and the systemd units have snapshot
    tests plus property tests (the parsed `ProgramArguments` equals the argv;
    `ExecStart` round-trips paths with spaces, quotes, `%` and `$`), and are
    checked by `plutil -lint` and `systemd-analyze --user verify` in the
@@ -3025,7 +3033,9 @@ states the credits tool runs have already used in the window (the response's
 `searchApiCreditsLedgered`) with the running total, and asks for a typed `yes`
 for that total (`--yes` in scripts, which once earlier tool runs used credits
 also needs `--accept-total`: decision 20); setup, update, status and the CI
-jobs never run it. `update`
+jobs never run it. Each request the CLI makes to the app or the worker
+carries its own bound (the smoke's posts 600 s), and its HTTP client has no
+header or body timeout of its own, so that bound is the one that ends it. `update`
 refuses a checkout with local changes or not on `main`; runs `git fetch` and
 checks that `git merge --ff-only` is possible while the app still runs;
 refuses while a run is active, naming it and its estimated finish (`GET
@@ -3184,6 +3194,15 @@ as specified in §5.3; no secrets, no full URLs.
 ---
 
 ## 17. Changelog
+
+### Revision 44: a request's own bound is its only one (2026-10-26)
+
+`gmt smoke` of a grid page with many scrolls (about 340 s at a scroll cap of 30) reported no answer from the app at
+300 s, though its bound is 600 s: Node's global fetch applies undici's own header and body timeouts, 300 s each by
+default. The app then ended the tool run with its client gone, and the page still counted. §5.3 now says http-kit
+turns those timeouts off for its process, so each attempt's per-request timeout is its one bound (a grid page's passes
+300 s); §13 says the same of every request the CLI makes; §9 items 2 and 9 add the tests, which stand in a small
+timeout for fetch's own. No other design rule changes.
 
 ### Revision 43: the recording sessions (2026-10-26)
 

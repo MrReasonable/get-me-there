@@ -2,6 +2,7 @@ import { AbortedError, BudgetExceeded, isoDateTimeOfEpochMs, ProviderError } fro
 import pRetry from 'p-retry';
 import { type AttemptResult, raceAbort, runAttempt } from './attempt.js';
 import { canonicalCacheKey } from './cacheKey.js';
+import { useOwnBoundsOnly } from './dispatcher.js';
 import { assertEgress, assertKitConfig } from './egress.js';
 import { createLimiter, HOUR_MS, NotSent, type ProviderLimiter } from './limiter.js';
 import { sleep } from './sleep.js';
@@ -46,7 +47,8 @@ interface Flight {
 
 /**
  * Spec §5.3 (rev 11) http-kit over globalThis.fetch; the only other transport is the gated `inProcessHosts` seam
- * for fixture.local. 'fx' is never ledgered.
+ * for fixture.local. 'fx' is never ledgered. Creating a kit turns off global fetch's own header and body timeouts
+ * (dispatcher.ts), so each attempt's `requestTimeoutSeconds` is the one bound that ends it.
  *
  *   egress → cache lookup ─hit─▶ recordCacheHit → { body, fetchedAt: storedAt }
  *     │miss
@@ -58,6 +60,7 @@ interface Flight {
  */
 export function createHttpKit(deps: HttpKitDeps): HttpKit {
   assertKitConfig(deps);
+  useOwnBoundsOnly();
   const limiters = new Map<HttpProviderId, ProviderLimiter>();
   const since = isoDateTimeOfEpochMs(Date.parse(deps.clock.now()) - HOUR_MS);
   for (const id of HTTP_PROVIDER_IDS) {

@@ -1,4 +1,3 @@
-import dns from 'node:dns';
 import { createServer, type Server } from 'node:http';
 import { asIata, asIsoDate, BudgetExceeded, effectiveSharedSettings, ProviderError, Secret } from '@gmt/core';
 import { passthrough } from 'msw';
@@ -6,6 +5,7 @@ import { HttpResponse, http } from 'msw/http';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { camoufoxProvider, planSingleCells } from '../../src/camoufox/index.js';
 import { makeKit, SENTINELS, testLimits } from '../fakes.js';
+import { allowLoopbackLookup } from '../support/loopback.js';
 import { respondAfter, server } from '../support/msw.js';
 import { drive, useFakeTime } from '../support/time.js';
 
@@ -75,28 +75,6 @@ const classes = (b: ReturnType<typeof setup>['budget']) => b.rowsOf('camoufox').
 
 let real: Server | null = null;
 let restoreLookup: (() => void) | null = null;
-/**
- * The loopback literal only, for the passthrough tests. why: the network guards refuse every DNS lookup and msw's
- * passthrough socket looks up even an IP literal; real names stay refused.
- */
-function allowLoopbackLookup(): void {
-  const refused = dns.lookup;
-  const lookup = (hostname: string, ...rest: unknown[]): void => {
-    const cb = rest.find((x) => typeof x === 'function');
-    const opts = rest[0];
-    const all = typeof opts === 'object' && opts !== null && 'all' in opts && opts.all === true;
-    if (hostname !== '127.0.0.1' || typeof cb !== 'function') {
-      Reflect.apply(refused, dns, [hostname, ...rest]);
-      return;
-    }
-    process.nextTick(() =>
-      all ? cb(null, [{ address: '127.0.0.1', family: 4 }]) : cb(null, '127.0.0.1', 4),
-    );
-  };
-  Object.defineProperty(dns, 'lookup', { value: lookup, writable: true, configurable: true });
-  restoreLookup = () =>
-    Object.defineProperty(dns, 'lookup', { value: refused, writable: true, configurable: true });
-}
 afterEach(async () => {
   restoreLookup?.();
   restoreLookup = null;
@@ -112,7 +90,7 @@ beforeEach(() => {
 
 /** A real socket behind msw's passthrough(): `destroy` accepts then drops the connection; `closed` is a port bound then freed. */
 async function setupWithRealSocket(mode: 'destroy' | 'closed') {
-  allowLoopbackLookup();
+  restoreLookup = allowLoopbackLookup();
   const s = createServer((req) => {
     req.socket.destroy();
   });
