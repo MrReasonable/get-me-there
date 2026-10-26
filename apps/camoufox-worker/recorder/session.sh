@@ -74,7 +74,10 @@ case "${1:-}" in
     ;;
   after)
     (cd "$pkg" && node --conditions=@gmt/source --import tsx src/run.ts session merge) >&2
-    (cd "$(host_checkout)" && pnpm gmt start --only worker && pnpm gmt status --only worker) >&2
+    (cd "$(host_checkout)" && pnpm gmt start --only worker) >&2
+    # why: a worker started a moment ago may not answer yet; its status is shown, never a reason to fail the merge
+    (cd "$(host_checkout)" && pnpm gmt status --only worker) >&2 ||
+      echo 'the worker may still be starting: run pnpm gmt status --only worker again' >&2
     ;;
   *)
     echo 'usage: session.sh before > line | session.sh run <run.ts args…> | session.sh after < line' >&2
