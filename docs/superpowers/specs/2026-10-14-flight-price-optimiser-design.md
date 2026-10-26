@@ -2769,7 +2769,7 @@ merged into price.
     readout all say "cheapest of the rows read". The date pair's own cheapest
     fare can then only be lower, so ranking by it never puts the date pair
     above where its fares belong. It is never presented as that date pair's
-    lowest fare, and its how far checked says the read was cut short.
+    lowest fare, and its "how far checked" entry says the read was cut short.
   - **Board**: a `table` captioned "Best dates", one row per date pair with
     a figure. Columns: rank, depart, return, nights, price (`PriceCell` row
     form: provider badge, source, age, "≈", destination, the dashed outline
