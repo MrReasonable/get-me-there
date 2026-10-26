@@ -46,5 +46,15 @@ export interface DatePairsScope {
   maxJourneyMinutes: string | undefined;
 }
 
+/**
+ * `/results`' scope (spec §10, WP19 Task 19.6): the date pair detail's read, scoped to one date pair and to the Dates
+ * airport filter and journey limit. Its wire form, every value a string or absent; built by resultsState's
+ * `detailScope` from the URL, so one scope is one query key.
+ */
+export interface ResultsScope extends DatePairsScope {
+  departureDate: string;
+  returnDate: string;
+}
+
 /** An alert rule as the form sends it: the schema's input shape (cooldownHours may be left to its default of 336). */
 export type AlertRuleBody = z.input<typeof apiContract.alertRuleInputSchema>;

@@ -47,9 +47,9 @@ describe('camoufox copy (prov-008, prov-015, ruling 11)', () => {
     );
   });
   it('the outcome reasons word blocked and provider_unavailable', () => {
-    expect(COPY.calendarView.panel.reasons.blocked).toBe(
+    expect(COPY.panel.reasons.blocked).toBe(
       'stopped: Google showed a page this app does not read, or a check (the detail says which)',
     );
-    expect(COPY.calendarView.panel.reasons.provider_unavailable).toBe('browser worker not reachable');
+    expect(COPY.panel.reasons.provider_unavailable).toBe('browser worker not reachable');
   });
 });

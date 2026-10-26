@@ -1,6 +1,4 @@
 import {
-  asIata,
-  asIsoDate,
   bandCheapest,
   effectiveAge,
   filterRows,
@@ -12,7 +10,7 @@ import {
   type SortKey,
   sortRows,
 } from '@gmt/core';
-import { fireEvent, screen, within } from '@testing-library/react';
+import { screen, within } from '@testing-library/react';
 import { HttpResponse, http } from 'msw';
 import { describe, expect, it, vi } from 'vitest';
 import type { ResultRow } from '../../../src/api/types.js';
@@ -23,6 +21,8 @@ import {
   API,
   calendarRow,
   cell,
+  DETAIL_PAIR,
+  DETAIL_SEARCH,
   definition,
   failedRow,
   fxConverted,
@@ -51,8 +51,9 @@ function countResults(body = resultsResponse()) {
   return hits;
 }
 
-const view = (search = '?view=results&def=def-0001', def = definition()) =>
-  renderWithProviders(<ResultsView definition={def} />, { search });
+// why: WP19 Task 19.6: Results is the date pair detail; the server scopes the read, so these rows stand for its answer
+const view = (search = DETAIL_SEARCH, def = definition()) =>
+  renderWithProviders(<ResultsView definition={def} datePair={DETAIL_PAIR} />, { search });
 const table = () => screen.findByRole('table', { name: 'Round trips found' });
 const headers = () =>
   screen.getAllByRole('columnheader').map((h) => h.textContent?.replace(/[↑↓]/g, '').trim());
@@ -209,7 +210,7 @@ describe('View A columns (spec §11)', () => {
 });
 
 describe('View A header (spec §11 two lines)', () => {
-  it('line 1: the headline price through PriceCell with provider, source and the full age; line 2 links to Coverage', async () => {
+  it('line 1: the headline price through PriceCell with provider, source and the full age; line 2 links to the Dates coverage section', async () => {
     countResults();
     view();
     await table();
@@ -226,7 +227,7 @@ describe('View A header (spec §11 two lines)', () => {
     const line2 = screen.getByRole('link', {
       name: 'discovery: 60 priced · 10 no fares · 40 no cached data · 6 error · 0 skipped · 10 not searched of 126 (0 reused) · itinerary-searched 8 of 10 selected (2 outbounds each) +1 on demand',
     });
-    expect(line2).toHaveAttribute('href', '/?view=coverage&def=def-0001');
+    expect(line2).toHaveAttribute('href', '/?view=dates&def=def-0001&d.coverage=open');
   });
 
   it('a converted, stale, truncated calendar headline carries "≈", "stale" and "cheapest of the rows read" (the Critical)', async () => {
@@ -248,13 +249,13 @@ describe('View A header (spec §11 two lines)', () => {
 
   it('the headline follows the filters; when they leave nothing it is labelled "overall, filters not applied" (decision 36)', async () => {
     countResults();
-    const { unmount } = view('?view=results&f.class=partially-verified');
+    const { unmount } = view(`${DETAIL_SEARCH}&f.class=partially-verified`);
     await table();
     const headline = () => screen.getByText('cheapest found').parentElement;
     expect(headline()).toHaveTextContent('£388');
     expect(screen.queryByText('overall, filters not applied')).toBeNull();
     unmount();
-    view('?view=results&f.maxPrice=100');
+    view(`${DETAIL_SEARCH}&f.maxPrice=100`);
     await screen.findByText('No rows match these filters.');
     expect(headline()).toHaveTextContent('£412');
     expect(screen.getByText('overall, filters not applied')).toBeInTheDocument();
@@ -262,7 +263,7 @@ describe('View A header (spec §11 two lines)', () => {
 
   it('"(E outbounds each)" is the shown run own policy, even after the definition changed (decision 42)', async () => {
     countResults(resultsResponse({ executions: [summary({ expandTop: 3 })] }));
-    view('?view=results', definition({ updatedAt: '2026-10-14T12:30:00.000Z' }));
+    view(DETAIL_SEARCH, definition({ updatedAt: '2026-10-14T12:30:00.000Z' }));
     await table();
     expect(
       screen.getByRole('link', {
@@ -282,7 +283,7 @@ describe('View A header (spec §11 two lines)', () => {
 
   it('a non-price sort over a truncated page says it sorts within the cheapest rows (review PFT-04)', async () => {
     countResults(resultsResponse({ truncated: true, total: 4210 }));
-    view('?view=results&sort=totalTime.asc');
+    view(`${DETAIL_SEARCH}&sort=totalTime.asc`);
     expect(
       await screen.findByText('sorted by Travel time within the cheapest 2 of 4210'),
     ).toBeInTheDocument();
@@ -297,7 +298,7 @@ describe('client-side sort and filter (spec §6.5)', () => {
     ),
   )('sort=%s.%s matches core sortRows over filterRows, without a refetch', async (key, dir) => {
     const hits = countResults(resultsResponse({ rows: five }));
-    const { client } = view(`?view=results&sort=${key}.${dir}`);
+    const { client } = view(`${DETAIL_SEARCH}&sort=${key}.${dir}`);
     await table();
     expect(rowNames()).toEqual(sortRows(filterRows(five, {}), key, dir).map(nameOf));
     await settled(client);
@@ -323,7 +324,7 @@ describe('client-side sort and filter (spec §6.5)', () => {
       cell: cell('LGW', 'JFK', '2027-05-01', '2027-05-15', 14),
     });
     countResults(resultsResponse({ rows: [current, superseded], basis: 'calendar' }));
-    view('?view=results&def=def-0001&basis=calendar');
+    view(`${DETAIL_SEARCH}&basis=calendar`);
     await table();
     const rows = dataRows();
     expect(rows).toHaveLength(2);
@@ -384,12 +385,6 @@ describe('client-side sort and filter (spec §6.5)', () => {
       { providerId: ['travelpayouts'] },
     ],
     [
-      'destination',
-      'f.dest',
-      (u) => u.click(screen.getByRole('checkbox', { name: 'EWR' })),
-      { destination: [asIata('EWR')] },
-    ],
-    [
       'max stops',
       'f.stops',
       (u) => u.selectOptions(screen.getByLabelText('Max stops'), '0'),
@@ -400,12 +395,6 @@ describe('client-side sort and filter (spec §6.5)', () => {
       'f.maxPrice',
       (u) => u.type(screen.getByLabelText('Max price (£)'), '400{Enter}'),
       { maxPricePence: 40000 },
-    ],
-    [
-      'nights (a blank end takes the data range)',
-      'f.nights',
-      (u) => u.type(screen.getByLabelText('Min nights'), '14{Enter}'),
-      { nights: { min: 14, max: 16 } },
     ],
     [
       'hide stale',
@@ -434,80 +423,35 @@ describe('client-side sort and filter (spec §6.5)', () => {
     },
   );
 
-  it('the departure-date range filter keeps departures inside it (decision 36)', async () => {
-    countResults(resultsResponse({ rows: five }));
-    view();
-    await table();
-    // why: a date input commits a whole date; setting one end fills the other from the data's own range.
-    fireEvent.change(screen.getByLabelText('Departs on or after'), { target: { value: '2027-03-14' } });
-    expect(url().get('f.depart')).toBe('2027-03-14..2027-04-02');
-    fireEvent.change(screen.getByLabelText('Departs on or before'), { target: { value: '2027-03-20' } });
-    expect(url().get('f.depart')).toBe('2027-03-14..2027-03-20');
-    expect(rowNames()).toEqual(
-      filterRows(five, { departure: { from: asIsoDate('2027-03-14'), to: asIsoDate('2027-03-20') } }).map(
-        nameOf,
-      ),
-    );
-    expect(rowNames()).toHaveLength(3);
-  });
-
-  it('clearing one departure date keeps the other end, open-ended on the cleared side (UI-9)', async () => {
-    countResults(resultsResponse({ rows: five }));
-    view();
-    await table();
-    fireEvent.change(screen.getByLabelText('Departs on or after'), { target: { value: '2027-03-14' } });
-    fireEvent.change(screen.getByLabelText('Departs on or before'), { target: { value: '2027-03-20' } });
-    fireEvent.change(screen.getByLabelText('Departs on or after'), { target: { value: '' } });
-    expect(url().get('f.depart')).toBe('2027-03-10..2027-03-20');
-    fireEvent.change(screen.getByLabelText('Departs on or before'), { target: { value: '' } });
-    expect(url().get('f.depart')).toBe('2027-03-10..2027-04-02');
-  });
-
-  it('a max price or nights box that does not parse is flagged instead of silently ignored (UI-8)', async () => {
+  it('a max price box that does not parse is flagged instead of silently ignored (UI-8)', async () => {
     countResults(resultsResponse({ rows: five }));
     const { user } = view();
     await table();
     await user.type(screen.getByLabelText('Max price (£)'), 'abc');
     expect(screen.getByLabelText('Max price (£)')).toBeInvalid();
     expect(screen.getByText('not an amount in pounds (for example 450 or 450.50)')).toBeInTheDocument();
-    await user.type(screen.getByLabelText('Min nights'), '1x');
-    expect(screen.getByLabelText('Min nights')).toBeInvalid();
-    expect(screen.getByText('not a whole number')).toBeInTheDocument();
   });
 
   it('an invalid typed box leaves the active filters as they were: leaving the box or Enter applies nothing (UI-8)', async () => {
     countResults(resultsResponse({ rows: five }));
-    const { user } = view('?view=results&f.maxPrice=48000&f.nights=10-14');
+    const { user } = view(`${DETAIL_SEARCH}&f.maxPrice=48000&f.carriers=ZZ`);
     await table();
     await user.clear(screen.getByLabelText('Max price (£)'));
     await user.type(screen.getByLabelText('Max price (£)'), 'abc');
     await user.tab();
     // why: before the fix the cap vanished from the URL, so rows above it came back while the alert still showed
     expect(url().get('f.maxPrice')).toBe('48000');
-    expect(url().get('f.nights')).toBe('10-14');
-    await user.type(screen.getByLabelText('Min nights'), 'x{Enter}');
+    expect(url().get('f.carriers')).toBe('ZZ');
+    await user.type(screen.getByLabelText('Max price (£)'), '{Enter}');
     expect(url().get('f.maxPrice')).toBe('48000');
-    expect(url().get('f.nights')).toBe('10-14');
+    expect(url().get('f.carriers')).toBe('ZZ');
     expect(screen.getByLabelText('Max price (£)')).toBeInvalid();
-  });
-
-  it('an invalid nights box alone, with a valid price, leaves the active filters unchanged', async () => {
-    countResults(resultsResponse({ rows: five }));
-    const { user, client } = view('?view=results&f.maxPrice=48000&f.nights=10-14');
-    await table();
-    await user.clear(screen.getByLabelText('Min nights'));
-    await user.type(screen.getByLabelText('Min nights'), 'x{Enter}');
-    await settled(client);
-    expect(screen.getByLabelText('Max price (£)')).toBeValid();
-    expect(url().get('f.maxPrice')).toBe('48000');
-    expect(url().get('f.nights')).toBe('10-14');
   });
 
   it('a filter value from the URL stays in its option list when no shown row has it', async () => {
     countResults(resultsResponse({ rows: [verifiedRow()] }));
-    view('?view=results&f.provider=travelpayouts&f.dest=EWR&f.unverified=cabin');
+    view(`${DETAIL_SEARCH}&f.provider=travelpayouts&f.unverified=cabin`);
     expect(await screen.findByRole('checkbox', { name: 'Travelpayouts' })).toBeChecked();
-    expect(screen.getByRole('checkbox', { name: 'EWR' })).toBeChecked();
     expect(screen.getByLabelText('Has this constraint unverified')).toHaveValue('cabin');
   });
 
@@ -523,7 +467,7 @@ describe('client-side sort and filter (spec §6.5)', () => {
 
   it('hide stale states how many rows it hid; Clear filters resets every box', async () => {
     countResults(resultsResponse({ rows: five }));
-    const { user } = view('?view=results&f.stale=hide&f.maxPrice=48000');
+    const { user } = view(`${DETAIL_SEARCH}&f.stale=hide&f.maxPrice=48000`);
     await table();
     expect(screen.getByText('1 stale row hidden')).toBeInTheDocument();
     expect(screen.getByLabelText('Max price (£)')).toHaveValue('480');
@@ -536,14 +480,14 @@ describe('client-side sort and filter (spec §6.5)', () => {
     // h4 is stale at £450; a second stale row at £900 is above the max price, so the price filter hides it anyway
     const dear = verifiedRow({ itineraryHash: 'h6', pricePence: 90000, stale: true });
     countResults(resultsResponse({ rows: [...five, dear] }));
-    view('?view=results&f.stale=hide&f.maxPrice=48000');
+    view(`${DETAIL_SEARCH}&f.stale=hide&f.maxPrice=48000`);
     await table();
     expect(screen.getByText('1 stale row hidden')).toBeInTheDocument();
   });
 
   it('filters survive a remount because they are in the URL', async () => {
     countResults();
-    const first = view('?view=results&f.class=partially-verified');
+    const first = view(`${DETAIL_SEARCH}&f.class=partially-verified`);
     await table();
     expect(dataRows()).toHaveLength(1);
     const search = window.location.search;
@@ -564,17 +508,17 @@ describe('client-side sort and filter (spec §6.5)', () => {
 });
 
 describe('empty, loading and error states (reviews UI-5, tsr-011, tsr-002)', () => {
-  it('no rows from the run points to Coverage; rows filtered to nothing say so and offer Clear', async () => {
+  it('no rows points to the Dates coverage section; rows filtered to nothing say so and offer Clear', async () => {
     countResults(resultsResponse({ rows: [], cheapest: null }));
     const { unmount } = view();
-    expect(await screen.findByRole('link', { name: /This run has no rows on this basis/ })).toHaveAttribute(
+    expect(await screen.findByRole('link', { name: 'Open the coverage section' })).toHaveAttribute(
       'href',
-      '/?view=coverage&def=def-0001',
+      '/?view=dates&def=def-0001&d.coverage=open',
     );
     expect(screen.queryByText('No rows match these filters.')).toBeNull();
     unmount();
     countResults();
-    const { user } = view('?view=results&f.maxPrice=100');
+    const { user } = view(`${DETAIL_SEARCH}&f.maxPrice=100`);
     expect(await screen.findByText('No rows match these filters.')).toBeInTheDocument();
     await user.click(screen.getAllByRole('button', { name: 'Clear filters' }).at(-1) ?? document.body);
     expect(await table()).toBeInTheDocument();
@@ -734,7 +678,7 @@ describe('row= selects, expands and scrolls to a row (plan "Web")', () => {
     vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(function (this: Element) {
       scrolled.push(this);
     });
-    view('?view=results&row=hash-partial-1');
+    view(`${DETAIL_SEARCH}&row=hash-partial-1`);
     await table();
     const selected = dataRows().find((r) => r.getAttribute('aria-current') === 'true');
     if (selected === undefined) throw new Error('no selected row');

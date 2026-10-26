@@ -1,14 +1,12 @@
 import { type CellKey, cellKeyString, daysBetween, type IsoDate } from '@gmt/core';
 import { type ReactNode, useEffect, useId, useMemo, useRef, useState } from 'react';
-import { ApiError } from '../../api/client.js';
-import { useCellDetail, useExecutionActions } from '../../api/queries.js';
+import { useCellDetail } from '../../api/queries.js';
 import type { DefinitionResponse, ExecutionSummary } from '../../api/types.js';
-import { verifyCellName } from '../../components/VerifyCellButton.js';
 import { COPY } from '../../copy.js';
 import { formatDayShort, formatIsoDateLong } from '../../format.js';
 import { DayMarker } from './DayMarker.js';
-import { CellDetailBody, DayPrices, VerifyCost } from './PanelSections.js';
-import { canPressVerify, cellsForDay, toKey } from './panel.js';
+import { CellDetailBody, DayPrices, VerifySection } from './PanelSections.js';
+import { cellsForDay, toKey } from './panel.js';
 import type { DaySlice } from './types.js';
 
 const P = COPY.calendarView.panel;
@@ -44,11 +42,8 @@ export function CellPanel(props: CellPanelProps) {
   const headingRef = useRef<HTMLHeadingElement>(null);
   useEffect(() => headingRef.current?.focus(), []);
   const detail = useCellDetail(definition.id, selected);
-  const verify = useExecutionActions().verify;
   const canVerify = definition.providers.verification.length > 0;
   const key = selected === null ? '' : cellKeyString(selected);
-  // why: the cell the last verify was sent for; the mutation's own status says nothing about which cell that was.
-  const [submittedKey, setSubmittedKey] = useState<string | null>(null);
   const selectedIndex = cells.findIndex((c) => cellKeyString(c) === key);
   const notes = definition.destinationNotes;
 
@@ -96,39 +91,8 @@ export function CellPanel(props: CellPanelProps) {
         />
       ) : null}
       {canVerify && selected !== null ? (
-        <div className="mt-4 flex flex-col gap-1">
-          {detail.data === undefined ? (
-            <p data-testid="verify-cost" className="text-xs">
-              {P.verifyCostLoading}
-            </p>
-          ) : (
-            <VerifyCost verify={detail.data.verify} runCapZero={definition.budget.maxCalls === 0} />
-          )}
-          <button
-            type="button"
-            disabled={!canPressVerify(detail.data, verify.isPending)}
-            onClick={() => {
-              setSubmittedKey(key);
-              verify.mutate({
-                definitionId: definition.id,
-                cell: selected,
-                // why: cost-004: the click confirms the hard stop shown above (and £0, so a priced estimate still asks),
-                // so a cap-share soft confirm on a small trial window never dead-ends the button.
-                ...(detail.data?.verify
-                  ? { confirmCalls: detail.data.verify.maxCalls, confirmCostPence: 0 }
-                  : {}),
-              });
-            }}
-            className="self-start rounded bg-slate-900 px-3 py-1 text-white disabled:bg-slate-400"
-          >
-            {COPY.verifyCellFor(verifyCellName(selected))}
-          </button>
-          {/* why: the status belongs to the cell that was submitted; another picked cell shows none */}
-          {verify.isSuccess && submittedKey === key ? (
-            <p role="status">{COPY.verifyStartedFor(verifyCellName(selected))}</p>
-          ) : null}
-          {verify.isError && submittedKey === key ? <p role="alert">{verifyError(verify.error)}</p> : null}
-        </div>
+        // why: moved to the date pair detail's panel (WP19 Task 19.6); the status follows the submitted cell there too
+        <VerifySection definition={definition} cell={selected} detail={detail.data} />
       ) : null}
     </>
   );
@@ -162,17 +126,4 @@ export function CellPanel(props: CellPanelProps) {
       {body}
     </aside>
   );
-}
-
-/**
- * A refusal in words: a named budget cap (409 `cap`) or a confirmation the click did not cover (409 `confirm`, with the
- * engine's estimate, cost-004), each with WP8's message; a running child (409 `active`); or else.
- */
-function verifyError(error: Error): string {
-  if (error instanceof ApiError && error.status === 409) {
-    if (error.code === 'cap') return P.verifyCapRefused(error.message);
-    if (error.code === 'confirm') return P.verifyConfirmRefused(error.message);
-    return P.verifyConflict;
-  }
-  return COPY.actionFailed(error.message);
 }

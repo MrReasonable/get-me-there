@@ -7,6 +7,7 @@ import type {
   DatePairsScope,
   DefinitionBody,
   DefinitionUpdateBody,
+  ResultsScope,
   StartExecutionBody,
   VerifyCellBody,
 } from './types.js';
@@ -39,10 +40,12 @@ export const api = {
     call(c.executionResponseSchema, 'POST', '/api/executions/:id/resume', { params: { id } }),
   verifyCell: (body: VerifyCellBody) =>
     call(c.startExecutionResponseSchema, 'POST', '/api/cells/verify', { body }),
-  results: (id: string, basis: Basis | null) =>
+  // WP19 (spec §10): with a scope, the date pair detail's read (one date pair, the Dates airport filter and journey
+  // limit); without one, the whole space (the status bar's run, the row lookup of an old alert link).
+  results: (id: string, basis: Basis | null, scope?: ResultsScope) =>
     call(c.resultsResponseSchema, 'GET', '/api/definitions/:id/results', {
       params: { id },
-      query: { basis: basis ?? undefined },
+      query: { basis: basis ?? undefined, ...scope },
     }),
   // WP19 (spec §10): every date pair of the current space with its figure over the airport pairs in scope; the body is
   // read only through core's decodeDatePairs (useDatePairs), never column by column.

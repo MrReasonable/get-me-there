@@ -1,4 +1,4 @@
-import { apiContract, microGbpToPence } from '@gmt/core';
+import { apiContract, asIsoDate, microGbpToPence } from '@gmt/core';
 import type { z } from 'zod';
 import type {
   AirportsResponse,
@@ -649,6 +649,41 @@ export function statusReport(
     mode: 'native',
     version: 'abc1234',
     checks: checks.map((c) => statusCheck(c)),
+    ...over,
+  });
+}
+
+// --- WP19 Task 19.6: the date pair detail (spec §11 Date pair detail) ---
+
+/** The worked example's date pair the detail tests open: 14 Mar 2027 to 28 Mar 2027, 14 nights (verifiedRow's cell). */
+export const DETAIL_PAIR = {
+  departureDate: asIsoDate('2027-03-14'),
+  returnDate: asIsoDate('2027-03-28'),
+} as const;
+/** The detail's URL for DETAIL_PAIR on the worked example's definition, as a board row's link writes it. */
+export const DETAIL_SEARCH = '?view=results&def=def-0001&depart=2027-03-14&return=2027-03-28';
+
+/**
+ * `/results`' `datePairFigure` (spec §10, revision 50): the board's figure for the scoped date pair, by default the
+ * verified LHR→JFK £412 the verifiedRow fixture carries, so it agrees with the detail's cheapest row.
+ */
+export function datePairFigure(
+  over: Partial<In<typeof apiContract.datePairFigureSchema>> = {},
+): NonNullable<ResultsResponse['datePairFigure']> {
+  return apiContract.datePairFigureSchema.parse({
+    price: { pricePence: 41200, provenance: provSearch, stale: false, ageHours: 'unknown', truncated: false },
+    basis: 'verified',
+    origin: 'LHR',
+    destination: 'JFK',
+    superseded: false,
+    notSeenInLatest: null,
+    journeyMinutes: 1005,
+    departOut: '2027-03-14T10:25',
+    arriveOut: '2027-03-14T15:10',
+    departBack: '2027-03-28T19:00',
+    arriveBack: '2027-03-29T07:00',
+    fromEarlierSearch: false,
+    cheaperCached: null,
     ...over,
   });
 }

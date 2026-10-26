@@ -64,7 +64,11 @@ describe('rendered views contain no banned word, and no "£" outside a price or 
       );
       // why: core's filterRows hides failed rows by default (spec §6.9); every class is in the URL so every row's copy is swept.
       const classes = 'f.class=verified,partially-verified,failed,unchecked';
-      const { user } = renderWithProviders(<App />, { search: `?view=${view}&def=def-0001&${classes}` });
+      // why: Results is the date pair detail (WP19 Task 19.6): its URL names the date pair
+      const pair = view === 'results' ? '&depart=2027-03-14&return=2027-03-28' : '';
+      const { user } = renderWithProviders(<App />, {
+        search: `?view=${view}&def=def-0001&${classes}${pair}`,
+      });
       await screen.findByRole('navigation', { name: 'Views' });
       await waitFor(() => expect(screen.queryByText('Loading…')).toBeNull());
       // why: a failed or empty load would pass the sweep untouched, so the view must have rendered its own content

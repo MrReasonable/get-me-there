@@ -5,7 +5,7 @@ import { formatIsoDate, formatIsoDateLong, WEEK_HEADERS } from '../../src/format
 import { CalendarGrid } from '../../src/views/Calendar/CalendarGrid.js';
 import { buildCalendarModel } from '../../src/views/Calendar/model.js';
 import { ResultsView } from '../../src/views/Results/ResultsView.js';
-import { API, calendarRow, definition, resultsResponse } from '../fixtures.js';
+import { API, calendarRow, DETAIL_PAIR, DETAIL_SEARCH, definition, resultsResponse } from '../fixtures.js';
 import { cellAt, gridDay, priceAt, provItinerary } from '../fixtures.wp10.js';
 import { server } from '../msw/server.js';
 import { NOW, renderWithProviders } from '../render.js';
@@ -102,7 +102,10 @@ describe.each(ZONES)('dates never shift under TZ=%s (review focus 3)', (zone) =>
         HttpResponse.json(resultsResponse({ rows: [row], total: 1 })),
       ),
     );
-    const { findAllByText, queryAllByText } = renderWithProviders(<ResultsView definition={definition()} />);
+    const { findAllByText, queryAllByText } = renderWithProviders(
+      <ResultsView definition={definition()} datePair={DETAIL_PAIR} />,
+      { search: DETAIL_SEARCH },
+    );
     expect((await findAllByText(/14 Mar 2027/)).length).toBeGreaterThan(0);
     expect((await findAllByText(/28 Mar 2027/)).length).toBeGreaterThan(0);
     expect(queryAllByText(/\b(13|15) Mar 2027\b|\b(27|29) Mar 2027\b/)).toHaveLength(0);

@@ -10,6 +10,8 @@ import {
   calendarGap,
   calendarRow,
   cell,
+  DETAIL_PAIR,
+  DETAIL_SEARCH,
   definition,
   provCalendar,
   resultsResponse,
@@ -39,16 +41,18 @@ describe('basis (spec §6.9)', () => {
     const urls: string[] = [];
     server.use(
       http.get(`${API}/definitions/:id/results`, ({ request }) => {
-        urls.push(new URL(request.url).search);
+        urls.push(new URL(request.url).searchParams.get('basis') ?? 'default');
         return HttpResponse.json(calendarResults());
       }),
     );
-    const { user } = renderWithProviders(<ResultsView definition={calendarOnly} />);
+    const { user } = renderWithProviders(<ResultsView definition={calendarOnly} datePair={DETAIL_PAIR} />, {
+      search: DETAIL_SEARCH,
+    });
     expect(await screen.findByText('no verification provider configured')).toBeInTheDocument();
     expect(screen.getByRole('radio', { name: 'calendar basis' })).toBeChecked();
     await user.click(screen.getByRole('radio', { name: 'itinerary-search basis' }));
     expect(new URLSearchParams(window.location.search).get('basis')).toBe('verified');
-    await expect.poll(() => urls).toEqual(['', '?basis=verified']);
+    await expect.poll(() => urls).toEqual(['default', 'verified']);
   });
 
   it("the shown run's own itinerary-search counts stay when the provider has since been unconfigured", async () => {
@@ -58,7 +62,9 @@ describe('basis (spec §6.9)', () => {
         HttpResponse.json({ ...base, verificationProviderConfigured: false }),
       ),
     );
-    renderWithProviders(<ResultsView definition={calendarOnly} />);
+    renderWithProviders(<ResultsView definition={calendarOnly} datePair={DETAIL_PAIR} />, {
+      search: DETAIL_SEARCH,
+    });
     await screen.findByRole('table', { name: 'Round trips found' });
     // why: the run itinerary-searched 8 of 10 cells; removing the key afterwards does not un-search them
     expect(screen.getByRole('link', { name: /itinerary-searched 8 of 10 selected/ })).toBeInTheDocument();
@@ -67,7 +73,9 @@ describe('basis (spec §6.9)', () => {
 
   it('calendar headline and coverage line when no verification provider is configured', async () => {
     server.use(http.get(`${API}/definitions/:id/results`, () => HttpResponse.json(calendarResults())));
-    renderWithProviders(<ResultsView definition={calendarOnly} />);
+    renderWithProviders(<ResultsView definition={calendarOnly} datePair={DETAIL_PAIR} />, {
+      search: DETAIL_SEARCH,
+    });
     await screen.findByRole('table', { name: 'Round trips found' });
     const headline = screen.getByText('cheapest found').parentElement;
     if (headline === null) throw new Error('no headline');
@@ -87,157 +95,92 @@ describe('basis (spec §6.9)', () => {
   });
 });
 
-describe('calendar-gap banner (spec §11, §6.9)', () => {
-  it('pluralised lead naming unchecked constraints, prices through PriceCell, per-cell verify', async () => {
-    const verifies: unknown[] = [];
-    server.use(
-      http.get(`${API}/definitions/:id/calendar-gap`, () => HttpResponse.json(calendarGap())),
-      http.post(`${API}/cells/verify`, async ({ request }) => {
-        verifies.push(await request.json());
-        return HttpResponse.json({ executionId: 'exec-child-1' });
-      }),
-    );
-    const { user } = renderWithProviders(<ResultsView definition={definition()} />);
-    const banner = await screen.findByRole('region', { name: 'Cells to search' });
-    expect(
-      within(banner).getByText(
-        '1 cell has a calendar price (constraints not checked) below your reference verified price (latest seen, then fresh, then cheapest)',
-      ),
-    ).toBeInTheDocument();
-    const prices = within(banner).getAllByTestId('price-cell');
-    expect(prices.map((p) => p.firstElementChild?.firstChild?.textContent)).toEqual(['£412', '£399']);
-    expect(within(banner).getByText("vendor's cache age unknown")).toBeInTheDocument();
-    expect(within(banner).getByText('Google Flights via SearchApi')).toBeInTheDocument();
-    expect(within(banner).getByText('Aviasales cache')).toBeInTheDocument();
-    await user.click(
-      within(banner).getByRole('button', {
-        name: 'Search LHR → EWR 2 Apr 2027–16 Apr 2027 (14n) for itineraries (uses billed calls)',
-      }),
-    );
-    await expect
-      .poll(() => verifies)
-      .toEqual([
+describe('calendar-gap marks in the detail (spec §11, §6.9; the banner moved to the Dates header)', () => {
+  const onThisPair = cell('LHR', 'EWR', '2027-03-14', '2027-03-28', 14);
+  const gapHere = () =>
+    calendarGap({
+      cells: [
         {
-          definitionId: 'def-0001',
-          cell: { origin: 'LHR', destination: 'EWR', departureDate: '2027-04-02', returnDate: '2027-04-16' },
+          cell: onThisPair,
+          calendar: {
+            pricePence: 39900,
+            provenance: provCalendar,
+            stale: false,
+            ageHours: 50,
+            truncated: false,
+          },
+          verifyAvailable: true,
         },
-      ]);
-  });
+      ],
+    });
 
-  it('every gap price carries the operator note for its destination (spec §11)', async () => {
-    server.use(http.get(`${API}/definitions/:id/calendar-gap`, () => HttpResponse.json(calendarGap())));
-    renderWithProviders(
-      <ResultsView
-        definition={definition({
-          destinationNotes: { JFK: 'onward leg not included', EWR: 'train to city extra' },
-        })}
-      />,
-    );
-    const banner = await screen.findByRole('region', { name: 'Cells to search' });
-    expect(within(banner).getByText('onward leg not included')).toBeInTheDocument();
-    expect(within(banner).getByText('train to city extra')).toBeInTheDocument();
-  });
-
-  it('each verify button names its cell, is disabled while it works, and its status names that cell (UI-5)', async () => {
-    const more = {
-      cell: cell('LGW', 'JFK', '2027-04-05', '2027-04-19', 14),
-      calendar: { pricePence: 39000, provenance: provCalendar, stale: false, ageHours: 50, truncated: false },
-      verifyAvailable: true,
-    };
+  it('a gap cell of this date pair is marked in its panel, whose verify searches that cell, disabled while it works (UI-5)', async () => {
     let release: () => void = () => undefined;
     const gate = new Promise<void>((resolve) => {
       release = resolve;
     });
     const posts: unknown[] = [];
     server.use(
-      http.get(`${API}/definitions/:id/calendar-gap`, () =>
-        HttpResponse.json({ ...calendarGap(), cells: [...calendarGap().cells, more] }),
-      ),
+      http.get(`${API}/definitions/:id/calendar-gap`, () => HttpResponse.json(gapHere())),
       http.post(`${API}/cells/verify`, async ({ request }) => {
         posts.push(await request.json());
         await gate;
         return HttpResponse.json({ executionId: 'exec-child-1' });
       }),
     );
-    const { user } = renderWithProviders(<ResultsView definition={definition()} />);
-    const banner = await screen.findByRole('region', { name: 'Cells to search' });
-    const buttons = within(banner).getAllByRole('button', { name: /for itineraries/ });
-    expect(buttons.map((b) => b.textContent)).toEqual([
-      'Search LHR → EWR 2 Apr 2027–16 Apr 2027 (14n) for itineraries (uses billed calls)',
-      'Search LGW → JFK 5 Apr 2027–19 Apr 2027 (14n) for itineraries (uses billed calls)',
-    ]);
-    await user.click(buttons[0] ?? document.body);
-    const working = await within(banner).findByRole('button', { name: 'Working…' });
-    expect(working).toBeDisabled();
-    await user.click(working);
+    const { user } = renderWithProviders(<ResultsView definition={definition()} datePair={DETAIL_PAIR} />, {
+      search: DETAIL_SEARCH,
+    });
+    const [mark] = await screen.findAllByTestId('gap-mark');
+    const panel = mark?.closest<HTMLElement>('[data-testid="airport-pair-panel"]');
+    if (panel === null || panel === undefined) throw new Error('the mark sits in a panel');
+    expect(panel.querySelector('h3')).toHaveTextContent('LHR → EWR');
+    const name = 'Search LHR → EWR 14 Mar 2027–28 Mar 2027 (14n) for itineraries (uses billed calls)';
+    await within(panel).findByText('hard stop 6 calls · 1840 calls of budget headroom left');
+    await user.click(within(panel).getByRole('button', { name }));
+    expect(within(panel).getByRole('button', { name })).toBeDisabled();
     release();
-    expect(await within(banner).findByRole('status')).toHaveTextContent(
-      'Itinerary search started for LHR → EWR 2 Apr 2027–16 Apr 2027 (14n)',
+    expect(await within(panel).findByRole('status')).toHaveTextContent(
+      'Itinerary search started for LHR → EWR 14 Mar 2027–28 Mar 2027 (14n)',
     );
-    expect(posts).toHaveLength(1);
+    expect(posts).toEqual([
+      {
+        definitionId: 'def-0001',
+        cell: { origin: 'LHR', destination: 'EWR', departureDate: '2027-03-14', returnDate: '2027-03-28' },
+        confirmCalls: 6,
+        confirmCostPence: 0,
+      },
+    ]);
   });
 
-  it('a cheapest-verified figure the latest search no longer returned says so (decision 54)', async () => {
-    const base = calendarGap();
-    const cv = base.cheapestVerified;
-    server.use(
-      http.get(`${API}/definitions/:id/calendar-gap`, () =>
-        HttpResponse.json({ ...base, cheapestVerified: cv && { ...cv, notSeenInLatest: { ageHours: 72 } } }),
-      ),
-    );
-    renderWithProviders(<ResultsView definition={definition()} />);
-    const banner = await screen.findByRole('region', { name: 'Cells to search' });
-    expect(within(banner).getByText(/not seen in latest search/)).toBeInTheDocument();
-  });
-
-  it('a truncated calendar cell says "cheapest of the rows read"; two cells pluralise', async () => {
-    const more = {
-      cell: cell('LGW', 'JFK', '2027-04-05', '2027-04-19', 14),
-      calendar: { pricePence: 39000, provenance: provCalendar, stale: false, ageHours: 50, truncated: true },
-      verifyAvailable: false,
-    };
-    server.use(
-      http.get(`${API}/definitions/:id/calendar-gap`, () =>
-        HttpResponse.json({ ...calendarGap(), cells: [...calendarGap().cells, more] }),
-      ),
-    );
-    renderWithProviders(<ResultsView definition={definition()} />);
-    const banner = await screen.findByRole('region', { name: 'Cells to search' });
-    expect(
-      within(banner).getByText(
-        '2 cells have calendar prices (constraints not checked) below your reference verified price (latest seen, then fresh, then cheapest)',
-      ),
-    ).toBeInTheDocument();
-    expect(within(banner).getByText('cheapest of the rows read')).toBeInTheDocument();
-    expect(
-      within(banner).getAllByRole('button', { name: /for itineraries \(uses billed calls\)/ }),
-    ).toHaveLength(1);
-  });
-
-  it('a failed gap request says so in the banner place, never looks like "no gap" (review prov-019)', async () => {
+  it('a failed gap request says so above the panels, never looks like "no gap" (review prov-019)', async () => {
     server.use(
       http.get(`${API}/definitions/:id/calendar-gap`, () =>
         HttpResponse.json({ error: { code: 'internal', message: 'boom' } }, { status: 500 }),
       ),
     );
-    renderWithProviders(<ResultsView definition={definition()} />);
+    renderWithProviders(<ResultsView definition={definition()} datePair={DETAIL_PAIR} />, {
+      search: DETAIL_SEARCH,
+    });
     expect(await screen.findByText('Could not load: boom')).toBeInTheDocument();
   });
 
-  it('is hidden, and never requested, without a verification provider', async () => {
+  it('is never requested without a verification provider', async () => {
     let gapHits = 0;
     server.use(
       http.get(`${API}/definitions/:id/results`, () => HttpResponse.json(calendarResults())),
       http.get(`${API}/definitions/:id/calendar-gap`, () => {
         gapHits += 1;
-        return HttpResponse.json(calendarGap());
+        return HttpResponse.json(gapHere());
       }),
     );
-    const { client } = renderWithProviders(<ResultsView definition={calendarOnly} />);
+    const { client } = renderWithProviders(<ResultsView definition={calendarOnly} datePair={DETAIL_PAIR} />, {
+      search: DETAIL_SEARCH,
+    });
     await screen.findByRole('table', { name: 'Round trips found' });
-    expect(screen.queryByRole('region', { name: 'Cells to search' })).toBeNull();
     // why: settle first, so a request the render fired late would be counted (review tsr2-002).
     await settled(client);
+    expect(screen.queryByTestId('gap-mark')).toBeNull();
     expect(gapHits).toBe(0);
     expect(
       client.getQueryCache().find({ queryKey: qk.calendarGap(calendarOnly.id) })?.state.dataUpdateCount ?? 0,
@@ -259,12 +202,16 @@ describe('thin coverage names the next move (ruling 16, pft-006)', () => {
     });
   it('more than half the cells with no cached data shows one line with the three moves', async () => {
     server.use(http.get(`${API}/definitions/:id/results`, () => HttpResponse.json(withCoverage(99, 9))));
-    renderWithProviders(<ResultsView definition={definition()} />);
+    renderWithProviders(<ResultsView definition={definition()} datePair={DETAIL_PAIR} />, {
+      search: DETAIL_SEARCH,
+    });
     expect(await screen.findByText(COPY.thinCoverage)).toBeInTheDocument();
   });
   it('half or fewer does not', async () => {
     server.use(http.get(`${API}/definitions/:id/results`, () => HttpResponse.json(withCoverage(54, 54))));
-    renderWithProviders(<ResultsView definition={definition()} />);
+    renderWithProviders(<ResultsView definition={definition()} datePair={DETAIL_PAIR} />, {
+      search: DETAIL_SEARCH,
+    });
     await screen.findByText(/discovery: 54 priced/);
     expect(screen.queryByText(COPY.thinCoverage)).toBeNull();
   });

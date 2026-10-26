@@ -1326,7 +1326,18 @@ DetailHeader}.tsx`, `views/Results/panel.ts` (moved from `views/Calendar`), `sta
     shows.
 - [ ] **Run to verify they fail**: `pnpm --filter @gmt/web exec vitest run test/views/results` → the scoped request
   is missing its parameters and the header lacks the date pair.
-- [ ] **Implement**; the panel is the Calendar's `CellPanel`/`PanelSections`/`panel.ts` moved, not rewritten.
+- [ ] **Implement**; the panel is the Calendar's `CellPanel`/`PanelSections`/`panel.ts` moved, not rewritten. As built:
+  `panel.ts` and `PanelSections.tsx` moved to `views/Results/` (with the panel's words, from `COPY.calendarView.panel` to
+  `COPY.panel`); `CellPanel.tsx` stays in `views/Calendar/` until Task 19.8 (the Calendar still renders it), so
+  `AirportPairPanel.tsx` is its shell for one cell and both use the verify block it held, now `VerifySection` in
+  `PanelSections.tsx`; `views/Calendar/{panel.ts,PanelSections.tsx}` keep only the day's picker and prices and re-export
+  the rest. The Calendar-only cases of the old panel test (the day's section, the picker, focus and Escape, the inline
+  section) stay in `test/views/calendar/cellPanel.test.tsx` until Task 19.8. The detail's coverage line and empty state
+  link to the Dates coverage section; the calendar-gap banner left Results (`CalendarGapBanner.tsx` and
+  `test/views/results/gapNotSeen.test.tsx` deleted, their rules held by the panel's gap-mark tests and
+  `basisAndGap.test.tsx`); Results' `Filters` lost the stay, departure-range and destination controls, and the
+  table tests that drove them (the departure range, the nights box, the destination checkbox) went with them.
+  `test:tz` also runs `test/views/results/panel.test.tsx`, which formats London instants.
 - [ ] **Run to verify they pass**; **Commit**: `wp19: results as the date pair detail`.
 
 ### Task 19.7: The two-tier nav and the `?view=` landing rules
@@ -1368,7 +1379,7 @@ DetailHeader}.tsx`, `views/Results/panel.ts` (moved from `views/Calendar`), `sta
 ### Task 19.8: Remove the retired views and routes; the TZ suite
 
 **Files**: §7's Delete list; `packages/core/src/api-contract/{results,index}.ts`, `apps/api/src/routes/results.ts`,
-`apps/web/src/api/*`, `apps/web/package.json` (`test:tz` → `test/tz test/views/dates`), `apps/web/test/tz/dates.tz.test.tsx`
+`apps/web/src/api/*`, `apps/web/package.json` (`test:tz` → `test/tz test/views/dates test/views/results/panel.test.tsx`), `apps/web/test/tz/dates.tz.test.tsx`
 (its Calendar cases removed; its Results and formatting cases stay), the tests that named them. The Dates view's own
 time-zone cases were written first, beside the view, in Tasks 19.4 and 19.5.
 

@@ -1,5 +1,6 @@
-import { apiContract, type ResultFilters, type SortKey } from '@gmt/core';
-import type { Basis } from '../api/types.js';
+import { apiContract, DETAIL_LINK_PARAMS, type IsoDate, type ResultFilters, type SortKey } from '@gmt/core';
+import type { Basis, ResultsScope } from '../api/types.js';
+import { type DatesUiState, datesPatch, scopeQuery } from './datesState.js';
 import { oneOf } from './oneOf.js';
 import { int, list, nightsRange, type SortDir, sortToken, uniqueIataList } from './parse.js';
 import { withKey } from './withKey.js';
@@ -121,3 +122,61 @@ export function resultsStatePatch(s: ResultsUiState): Record<string, string | nu
     'f.unverified': joined(f.unverified),
   };
 }
+
+// --- WP19 Task 19.6: the date pair detail (spec §11 Date pair detail, URLs) ---
+
+/** The date pair a detail URL names. */
+export interface DetailPair {
+  departureDate: IsoDate;
+  returnDate: IsoDate;
+}
+
+/**
+ * `depart=` and `return=` as two well-formed `YYYY-MM-DD` dates with the return on or after the departure, else null.
+ * Format only (spec §11 URLs; WP19 Task 19.7): whether the date pair is inside the current resolved space is the
+ * server's answer (`/results`' 422 `date_pair_outside_space`), never the browser's, which has no clock to judge it by.
+ */
+export function parseDetailPair(p: URLSearchParams): DetailPair | null {
+  const dateOf = apiContract.cellKeySchema.shape.departureDate;
+  const dep = dateOf.safeParse(p.get(DETAIL_LINK_PARAMS.depart));
+  const ret = dateOf.safeParse(p.get(DETAIL_LINK_PARAMS.return));
+  return dep.success && ret.success && dep.data <= ret.data
+    ? { departureDate: dep.data, returnDate: ret.data }
+    : null;
+}
+
+/**
+ * Results' filters inside the detail (spec §11): the stay, departure and destination filters are fixed by the date pair
+ * and the Dates airport filter, so a stale `f.nights`, `f.depart` or `f.dest` in the URL is ignored rather than
+ * emptying a detail opened from the board; class, provider, stops, carriers, maximum price, unverified constraint and
+ * stale stay.
+ */
+export function detailState(s: ResultsUiState): ResultsUiState {
+  let f = withKey(s.filters, 'nights', undefined);
+  f = withKey(f, 'departure', undefined);
+  f = withKey(f, 'destination', undefined);
+  return { sort: s.sort, filters: f };
+}
+
+/** `/results`' scope for the detail (spec §10): the date pair, and the Dates airport filter and journey limit. */
+export function detailScope(dates: DatesUiState, pair: DetailPair): ResultsScope {
+  return { ...scopeQuery(dates), departureDate: pair.departureDate, returnDate: pair.returnDate };
+}
+
+/**
+ * "Back to dates" (spec §11): the Dates view with every `d.*` parameter kept (hrefWith keeps every parameter the patch
+ * does not name) and the detail's own parameters removed, names from core's one constant.
+ */
+export const BACK_TO_DATES: Readonly<Record<string, string | null>> = {
+  [DETAIL_LINK_PARAMS.view]: 'dates',
+  [DETAIL_LINK_PARAMS.depart]: null,
+  [DETAIL_LINK_PARAMS.return]: null,
+  [DETAIL_LINK_PARAMS.basis]: null,
+  [DETAIL_LINK_PARAMS.row]: null,
+};
+
+/** The Dates view's coverage section, opened (spec §11: the detail's coverage line and empty state link to it). */
+export const DATES_COVERAGE: Readonly<Record<string, string | null>> = {
+  ...BACK_TO_DATES,
+  ...datesPatch({ coverageOpen: true }),
+};

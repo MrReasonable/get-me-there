@@ -16,7 +16,7 @@
     "test": "vitest run --coverage && pnpm run test:tz",
     "dev": "vite",
     "e2e": "pnpm --workspace-root run build && playwright test",
-    "test:tz": "GMT_TEST_TZ=America/Los_Angeles vitest run test/tz test/views/calendar && GMT_TEST_TZ=Asia/Tokyo vitest run test/tz test/views/calendar",
+    "test:tz": "GMT_TEST_TZ=America/Los_Angeles vitest run test/tz test/views/calendar test/views/results/panel.test.tsx && GMT_TEST_TZ=Asia/Tokyo vitest run test/tz test/views/calendar test/views/results/panel.test.tsx",
     "e2e:install": "playwright install chromium",
     "mutate": "stryker run && node ../../scripts/mutation-gate.mjs reports/mutation/mutation.json"
   },

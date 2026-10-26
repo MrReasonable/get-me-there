@@ -1,37 +1,47 @@
-import { asIsoDate, generateCells, resultRowKey } from '@gmt/core';
-import { waitFor, within } from '@testing-library/react';
+import { asIata, asIsoDate, type CellKey, generateCells, resultRowKey } from '@gmt/core';
+import { within } from '@testing-library/react';
 import { delay, HttpResponse, http } from 'msw';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
+import type { CalendarGapResponse, DefinitionResponse } from '../../../src/api/types.js';
 import { verifyCellName } from '../../../src/components/VerifyCellButton.js';
 import { COPY } from '../../../src/copy.js';
-import { CellPanel } from '../../../src/views/Calendar/CellPanel.js';
+import { AirportPairPanel, type GapMark } from '../../../src/views/Results/AirportPairPanel.js';
 import {
   canPressVerify,
-  cellsForDay,
+  cellsForDatePair,
   noHeadroom,
   orderCalendarPrices,
   orderOutcomes,
   reasonText,
-} from '../../../src/views/Calendar/panel.js';
-import { API, calendarRow, definition, summary, verifiedRow } from '../../fixtures.js';
+} from '../../../src/views/Results/panel.js';
+import {
+  API,
+  calendarGap,
+  calendarRow,
+  DETAIL_SEARCH,
+  definition,
+  summary,
+  verifiedRow,
+} from '../../fixtures.js';
 import {
   bare,
   cellAt,
   cellDetail,
-  disc,
   hoursBefore,
   keyOf,
   outcome,
   priceAt,
   provCalendarAt,
-  provItinerary,
-  slice,
 } from '../../fixtures.wp10.js';
 import { server } from '../../msw/server.js';
 import { renderWithProviders } from '../../render.js';
 
+// The date pair detail's per-airport-pair panel (spec §11, WP19 Task 19.6): the Calendar's side panel moved, its tests
+// ported from test/views/calendar/panel.test.tsx. The Calendar-only parts (the day's section, the cell picker, the
+// dialog's focus and Escape) stay with the Calendar's own test until Task 19.8 removes that view.
+
 const c = cellAt('2027-03-14', 14);
-const date = asIsoDate('2027-03-14');
+const key: CellKey = keyOf(c);
 const earlier = summary({
   id: 'exec-0000',
   ageHours: 170,
@@ -60,26 +70,37 @@ const detail = cellDetail(c, {
   observations: [observation],
 });
 const cellRoute = `${API}/definitions/:id/cells/:origin/:destination/:departureDate/:returnDate`;
-const daySlice = slice({
-  discovery: [disc('travelpayouts', { priced: 40, no_data: 8 })],
-  verification: { selected: 10, itinerarySearched: 1, onDemand: 0, unconfirmedCells: 0 },
-  cheapestCalendar: priceAt(41200, provCalendarAt(2), false, c),
-});
 
-function renderPanel(def = definition(), s = daySlice, inline = false) {
-  const onClose = vi.fn();
-  const r = renderWithProviders(
-    <CellPanel
-      definition={def}
-      date={date}
-      slice={s}
-      executions={executions}
-      initialCell={c}
-      inline={inline}
-      onClose={onClose}
-    />,
+function renderPanel(
+  def: DefinitionResponse = definition(),
+  gap: GapMark | null = null,
+  cells: readonly CellKey[] = [key],
+) {
+  return renderWithProviders(
+    <div>
+      {cells.map((k) => (
+        <AirportPairPanel
+          key={`${k.origin}${k.destination}`}
+          definition={def}
+          cell={k}
+          executions={executions}
+          gap={gap}
+        />
+      ))}
+    </div>,
+    { search: DETAIL_SEARCH },
   );
-  return { onClose, ...r };
+}
+
+/** A calendar-gap mark for this panel's cell, from the gap route's fixture (spec §6.9, decision 58). */
+function gapMark(over: Partial<CalendarGapResponse['cells'][number]['calendar']> = {}): GapMark {
+  const g = calendarGap();
+  const [first] = g.cells;
+  if (first === undefined || g.cheapestVerified === null) throw new Error('the gap fixture has a cell');
+  return {
+    calendar: { ...first.calendar, ...over },
+    reference: g.cheapestVerified,
+  };
 }
 
 describe('outcome order and reason words (prov-011, ui-r1-012)', () => {
@@ -156,42 +177,41 @@ describe('outcome order and reason words (prov-011, ui-r1-012)', () => {
       2, 4, 1, 3,
     ]);
   });
-  it("the cell picker follows core's generation order: origins and destinations sorted (arch2-004)", () => {
+  it("the panels follow core's generation order: origins and destinations sorted (arch2-004)", () => {
     const def = definition();
-    const cells = cellsForDay(def, date);
+    const dates = { departureDate: asIsoDate('2027-03-14'), returnDate: asIsoDate('2027-03-28') };
+    const cells = cellsForDatePair(def.origins, def.destinations, dates);
     expect(def.origins).toEqual(['LHR', 'LGW']);
-    expect(cells[0]).toEqual({
-      origin: 'LGW',
-      destination: 'EWR',
-      departureDate: '2027-03-14',
-      returnDate: '2027-03-24',
-    });
     const core = generateCells({
       origins: def.origins,
       destinations: def.destinations,
-      departureFrom: date,
-      departureTo: date,
-      minNights: def.minNights,
-      maxNights: def.maxNights,
+      departureFrom: dates.departureDate,
+      departureTo: dates.departureDate,
+      minNights: 14,
+      maxNights: 14,
     });
-    expect(cells.map((k) => `${k.origin}${k.destination}${k.returnDate}`)).toEqual(
-      core.map((k) => `${k.origin}${k.destination}${k.returnDate}`),
-    );
+    expect(cells).toEqual(core.map(keyOf));
+    expect(cells.map((k) => `${k.origin}${k.destination}`)).toEqual(['LGWEWR', 'LGWJFK', 'LHREWR', 'LHRJFK']);
+    // the Dates airport filter narrows them, in the same order
+    expect(
+      cellsForDatePair([asIata('LHR')], [asIata('JFK'), asIata('EWR')], dates).map((k) => k.destination),
+    ).toEqual(['EWR', 'JFK']);
   });
 });
 
-describe('View B side panel (spec §11, §10 cells route; plan decision 38)', () => {
-  it('shows the day’s six-bucket marker and its prices with full provenance', async () => {
-    server.use(http.get(cellRoute, () => HttpResponse.json(detail)));
-    const { findByRole } = renderPanel();
-    const day = await findByRole('region', { name: 'This day' });
-    expect(within(day).getByTestId('day-marker')).toHaveTextContent(
-      '40 priced · 0 no fares · 8 no cached data',
+describe('the per-airport-pair panel (spec §11 Date pair detail, §10 cells route; plan decision 38)', () => {
+  it('is headed by its airport pair and reads its own cell', async () => {
+    const paths: string[] = [];
+    server.use(
+      http.get(cellRoute, ({ request }) => {
+        paths.push(new URL(request.url).pathname);
+        return HttpResponse.json(detail);
+      }),
     );
-    expect(day).toHaveTextContent('cheapest calendar price');
-    expect(day).toHaveTextContent('14 nights · back Sun 28 Mar');
-    expect(within(day).getByTestId('provenance')).toHaveTextContent('Aviasales cache');
-    expect(within(day).getByTestId('provenance')).toHaveTextContent('constraints not checked');
+    const { findByRole, getByTestId } = renderPanel();
+    await findByRole('table');
+    expect(getByTestId('airport-pair-panel').querySelector('h3')).toHaveTextContent('LHR → JFK');
+    expect(paths).toEqual(['/api/definitions/def-0001/cells/LHR/JFK/2027-03-14/2027-03-28']);
   });
 
   it('lists the cell outcomes newest run first, marks the latest run, words the reason and labels reuse by date', async () => {
@@ -211,43 +231,40 @@ describe('View B side panel (spec §11, §10 cells route; plan decision 38)', ()
     expect(rows[2]).toHaveTextContent(/run 7 Oct 2026.*discovery/);
   });
 
-  it('a priced verification with no confirmed price says "price not confirmed" in the outcome and the day (decision 48)', async () => {
+  it('a priced verification with no confirmed price says "price not confirmed" in the outcome (decision 48)', async () => {
     const unconfirmed = cellDetail(c, {
       outcomes: [
         outcome(c, 'verification', 'searchapi', 'priced', { reason: 'partial-expansion;price-unconfirmed' }),
       ],
     });
     server.use(http.get(cellRoute, () => HttpResponse.json(unconfirmed)));
-    const day = slice({
-      discovery: [disc('travelpayouts', { priced: 48 })],
-      verification: { selected: 1, itinerarySearched: 1, onDemand: 0, unconfirmedCells: 1 },
-      unconfirmedCells: 1,
-    });
-    const { findByRole, getByRole } = renderPanel(definition(), day);
+    const { findByRole } = renderPanel();
     const row = within(await findByRole('table')).getAllByRole('row')[1];
     expect(row).toHaveTextContent(/priced.*price not confirmed/);
     expect(row).toHaveTextContent(
       'some outbound flights could not be expanded; price not confirmed by the final step',
     );
-    expect(within(getByRole('region', { name: 'This day' })).getByTestId('day-marker')).toHaveTextContent(
-      'price not confirmed: 1 itinerary-searched cell priced nothing the final step confirmed',
-    );
   });
 
-  it('shows every cell price with provenance and the rows-read note; an offer links to its Results row', async () => {
+  it('shows every cell price with provenance and the rows-read note; an offer links to its row in this detail', async () => {
     server.use(http.get(cellRoute, () => HttpResponse.json(detail)));
-    const { findByText, getByRole } = renderPanel(definition(), slice({}));
+    const { findByText, getByTestId } = renderPanel();
     await findByText('£412');
-    const dialog = getByRole('dialog');
-    const provs = within(dialog).getAllByTestId('provenance');
+    const panel = getByTestId('airport-pair-panel');
+    const provs = within(panel).getAllByTestId('provenance');
     expect(provs).toHaveLength(2);
     expect(provs[0]).toHaveClass('border-dashed');
-    expect(dialog).toHaveTextContent('calendar price · run 7 Oct 2026');
-    expect(dialog).toHaveTextContent('cheapest of the rows read');
-    expect(dialog).toHaveTextContent('itinerary offer · Example Air · verified');
-    const link = within(dialog).getByRole('link', { name: 'show in results' }).getAttribute('href') ?? '';
-    expect(new URLSearchParams(link.split('?')[1]).get('row')).toBe(resultRowKey(observation));
-    expect(new URLSearchParams(link.split('?')[1]).get('view')).toBe('results');
+    expect(panel).toHaveTextContent('calendar price · run 7 Oct 2026');
+    expect(panel).toHaveTextContent('cheapest of the rows read');
+    expect(panel).toHaveTextContent('itinerary offer · Example Air · verified');
+    const link = within(panel).getByRole('link', { name: 'show in results' }).getAttribute('href') ?? '';
+    const q = new URLSearchParams(link.split('?')[1]);
+    expect([q.get('view'), q.get('row'), q.get('depart'), q.get('return')]).toEqual([
+      'results',
+      resultRowKey(observation),
+      '2027-03-14',
+      '2027-03-28',
+    ]);
   });
 
   it('an offer whose price the final step did not confirm says so inside its price; a page-capped row says rows read (prov-r2-001)', async () => {
@@ -263,7 +280,7 @@ describe('View B side panel (spec §11, §10 cells route; plan decision 38)', ()
         HttpResponse.json({ ...detail, calendarPrices: [], observations: [unconfirmed, capped] }),
       ),
     );
-    const { findAllByTestId } = renderPanel(definition(), slice({}));
+    const { findAllByTestId } = renderPanel();
     const [first, second] = await findAllByTestId('panel-observation');
     if (first === undefined || second === undefined) throw new Error('two observations');
     expect(within(first).getByTestId('price-cell')).toHaveTextContent(
@@ -281,7 +298,7 @@ describe('View B side panel (spec §11, §10 cells route; plan decision 38)', ()
         HttpResponse.json({ ...detail, calendarPrices: [], observations: [unseen, old] }),
       ),
     );
-    const { findAllByTestId } = renderPanel(definition(), slice({}));
+    const { findAllByTestId } = renderPanel();
     const [first, second] = await findAllByTestId('panel-observation');
     if (first === undefined || second === undefined) throw new Error('two observations');
     expect(within(first).getByTestId('price-cell')).toHaveTextContent('not seen in latest search (30h ago)');
@@ -297,10 +314,10 @@ describe('View B side panel (spec §11, §10 cells route; plan decision 38)', ()
         HttpResponse.json({ ...detail, calendarPrices: [old, first], observations: [] }),
       ),
     );
-    const { findByText, getByRole } = renderPanel(definition(), slice({}));
+    const { findByText, getByTestId } = renderPanel();
     await findByText('£300');
-    const prices = within(getByRole('dialog')).getAllByTestId('price-cell');
-    expect(prices.map((c) => c.textContent?.includes('superseded by a later search'))).toEqual([false, true]);
+    const prices = within(getByTestId('airport-pair-panel')).getAllByTestId('price-cell');
+    expect(prices.map((p) => p.textContent?.includes('superseded by a later search'))).toEqual([false, true]);
     expect(prices[0]).toHaveTextContent('£412');
   });
 
@@ -324,7 +341,7 @@ describe('View B side panel (spec §11, §10 cells route; plan decision 38)', ()
         }),
       ),
     );
-    const { findByRole } = renderPanel(definition(), slice({}));
+    const { findByRole } = renderPanel();
     const table = await findByRole('table');
     const rows = within(table)
       .getAllByRole('row')
@@ -366,7 +383,7 @@ describe('View B side panel (spec §11, §10 cells route; plan decision 38)', ()
         }),
       ),
     );
-    const { findByRole } = renderPanel(definition(), slice({}));
+    const { findByRole } = renderPanel();
     const table = await findByRole('table');
     const rows = within(table)
       .getAllByRole('row')
@@ -390,9 +407,9 @@ describe('View B side panel (spec §11, §10 cells route; plan decision 38)', ()
     server.use(
       http.get(cellRoute, () => HttpResponse.json({ ...detail, calendarPrices: [rest], observations: [] })),
     );
-    const { findByRole, getByRole } = renderPanel(definition(), slice({}));
+    const { findByRole, getByTestId } = renderPanel();
     expect(await findByRole('alert')).toHaveTextContent(/^Could not load:/);
-    expect(getByRole('dialog')).not.toHaveTextContent('£');
+    expect(getByTestId('airport-pair-panel')).not.toHaveTextContent('£');
   });
 
   it('hides the verify action when the definition has no verification provider', async () => {
@@ -406,7 +423,7 @@ describe('View B side panel (spec §11, §10 cells route; plan decision 38)', ()
     });
     const { findByRole, queryByRole } = renderPanel(def);
     await findByRole('table');
-    expect(queryByRole('button', { name: COPY.verifyCellFor(verifyCellName(c)) })).toBeNull();
+    expect(queryByRole('button', { name: COPY.verifyCellFor(verifyCellName(key)) })).toBeNull();
   });
 
   it('verify shows what it may spend, posts through WP9’s action, and names a running search or a budget cap', async () => {
@@ -423,12 +440,12 @@ describe('View B side panel (spec §11, §10 cells route; plan decision 38)', ()
       'data-testid',
       'verify-cost',
     );
-    await user.click(getByRole('button', { name: COPY.verifyCellFor(verifyCellName(c)) }));
-    expect(await findByText(COPY.verifyStartedFor(verifyCellName(c)))).toBeInTheDocument();
+    await user.click(getByRole('button', { name: COPY.verifyCellFor(verifyCellName(key)) }));
+    expect(await findByText(COPY.verifyStartedFor(verifyCellName(key)))).toBeInTheDocument();
     // why: cost-004: the click confirms the hard stop the panel showed, so a cap-share soft confirm never dead-ends it.
     expect(posted).toEqual({
       definitionId: 'def-0001',
-      cell: keyOf(c),
+      cell: key,
       confirmCalls: 6,
       confirmCostPence: 0,
     });
@@ -438,7 +455,7 @@ describe('View B side panel (spec §11, §10 cells route; plan decision 38)', ()
         HttpResponse.json({ error: { code: 'active', message: 'child active' } }, { status: 409 }),
       ),
     );
-    await user.click(getByRole('button', { name: COPY.verifyCellFor(verifyCellName(c)) }));
+    await user.click(getByRole('button', { name: COPY.verifyCellFor(verifyCellName(key)) }));
     expect(await findByText('An itinerary search for this cell is already running.')).toBeInTheDocument();
 
     const capMessage = 'budget cap: provider-month:searchapi 10000 of 10000 calls';
@@ -447,7 +464,7 @@ describe('View B side panel (spec §11, §10 cells route; plan decision 38)', ()
         HttpResponse.json({ error: { code: 'cap', message: capMessage } }, { status: 409 }),
       ),
     );
-    await user.click(getByRole('button', { name: COPY.verifyCellFor(verifyCellName(c)) }));
+    await user.click(getByRole('button', { name: COPY.verifyCellFor(verifyCellName(key)) }));
     expect(await findByText(`Refused by a budget cap: ${capMessage}`)).toBeInTheDocument();
 
     // why: cost-004: a 409 'confirm' is a confirmation the click did not cover, never "already running".
@@ -458,30 +475,25 @@ describe('View B side panel (spec §11, §10 cells route; plan decision 38)', ()
         HttpResponse.json({ error: { code: 'confirm', message: confirmMessage } }, { status: 409 }),
       ),
     );
-    await user.click(getByRole('button', { name: COPY.verifyCellFor(verifyCellName(c)) }));
-    expect(
-      await findByText(COPY.calendarView.panel.verifyConfirmRefused(confirmMessage)),
-    ).toBeInTheDocument();
+    await user.click(getByRole('button', { name: COPY.verifyCellFor(verifyCellName(key)) }));
+    expect(await findByText(COPY.panel.verifyConfirmRefused(confirmMessage))).toBeInTheDocument();
   });
 
-  it('the verify status names the cell that was submitted, and goes away when another cell is picked', async () => {
+  it('the verify status names the cell that was submitted, in its own panel only', async () => {
     server.use(
       http.get(cellRoute, () => HttpResponse.json(detail)),
       http.post(`${API}/cells/verify`, () => HttpResponse.json({ executionId: 'child-1' })),
     );
-    const { findByText, getByRole, queryByText, user } = renderPanel();
-    await findByText('hard stop 6 calls · 1840 calls of budget headroom left');
-    await user.click(getByRole('button', { name: COPY.verifyCellFor(verifyCellName(c)) }));
-    expect(await findByText(COPY.verifyStartedFor(verifyCellName(c)))).toBeInTheDocument();
-    const options = cellsForDay(definition(), date);
-    const otherIndex = options.findIndex((o) => verifyCellName(o) !== verifyCellName(c));
-    expect(otherIndex).toBeGreaterThanOrEqual(0);
-    const other = options[otherIndex];
-    if (other === undefined) throw new Error('another cell');
-    await user.selectOptions(getByRole('combobox'), String(otherIndex));
-    // why: no search was submitted for the picked cell, so no status may say one started for it
-    expect(queryByText(COPY.verifyStartedFor(verifyCellName(other)))).toBeNull();
-    expect(queryByText(COPY.verifyStartedFor(verifyCellName(c)))).toBeNull();
+    const other: CellKey = { ...key, origin: asIata('LGW') };
+    const { findAllByText, getByRole, getAllByTestId, user } = renderPanel(definition(), null, [key, other]);
+    await findAllByText('hard stop 6 calls · 1840 calls of budget headroom left');
+    await user.click(getByRole('button', { name: COPY.verifyCellFor(verifyCellName(key)) }));
+    const [mine, theirs] = getAllByTestId('airport-pair-panel');
+    if (mine === undefined || theirs === undefined) throw new Error('two panels');
+    expect(await within(mine).findByText(COPY.verifyStartedFor(verifyCellName(key)))).toBeInTheDocument();
+    // why: no search was submitted for the other airport pair, so no status may say one started for it
+    expect(within(theirs).queryByText(COPY.verifyStartedFor(verifyCellName(other)))).toBeNull();
+    expect(within(theirs).queryByText(COPY.verifyStartedFor(verifyCellName(key)))).toBeNull();
   });
 
   it('while the cell detail loads, verify is disabled and says its cost is loading (ui-r2-007)', async () => {
@@ -493,16 +505,7 @@ describe('View B side panel (spec §11, §10 cells route; plan decision 38)', ()
     );
     const { getByRole, getByTestId } = renderPanel();
     expect(getByTestId('verify-cost')).toHaveTextContent('Loading what this search may spend…');
-    expect(getByRole('button', { name: COPY.verifyCellFor(verifyCellName(c)) })).toBeDisabled();
-  });
-
-  it('at phone width the panel is a section of the page, not an overlay dialog (ui-r2-010)', async () => {
-    server.use(http.get(cellRoute, () => HttpResponse.json(detail)));
-    const { findByRole, queryByRole, getByTestId } = renderPanel(definition(), daySlice, true);
-    await findByRole('table');
-    expect(queryByRole('dialog')).toBeNull();
-    expect(getByTestId('cell-panel').tagName).toBe('SECTION');
-    expect(getByTestId('cell-panel')).not.toHaveClass('fixed');
+    expect(getByRole('button', { name: COPY.verifyCellFor(verifyCellName(key)) })).toBeDisabled();
   });
 
   it('a definition allowing 0 billed calls says so and names the call cap that fixes it, in plain words (N2)', async () => {
@@ -518,12 +521,12 @@ describe('View B side panel (spec §11, §10 cells route; plan decision 38)', ()
         "This definition allows 0 billed calls, so this search cannot start. Raise the definition's call cap to at least 6 in Definitions → Run budget (Max billed calls per run).",
       ),
     ).toBeInTheDocument();
-    expect(COPY.calendarView.panel.verifyZeroRunCap(6)).toBe(
+    expect(COPY.panel.verifyZeroRunCap(6)).toBe(
       "This definition allows 0 billed calls, so this search cannot start. Raise the definition's call cap to at least 6 in Definitions → Run budget (Max billed calls per run).",
     );
     // why: the jargon line is for real headroom exhaustion by a running parent or child, not for a 0-call definition.
     expect(queryByText('No budget headroom left for this search.')).toBeNull();
-    expect(getByRole('button', { name: COPY.verifyCellFor(verifyCellName(c)) })).toBeDisabled();
+    expect(getByRole('button', { name: COPY.verifyCellFor(verifyCellName(key)) })).toBeDisabled();
   });
 
   it('with no headroom left the button is disabled and says why', async () => {
@@ -537,47 +540,56 @@ describe('View B side panel (spec §11, §10 cells route; plan decision 38)', ()
     );
     const { findByText, getByRole } = renderPanel();
     expect(await findByText('No budget headroom left for this search.')).toBeInTheDocument();
-    expect(getByRole('button', { name: COPY.verifyCellFor(verifyCellName(c)) })).toBeDisabled();
-  });
-
-  it('the cell picker lists origins × destinations × nights for the day and fetches the chosen cell', async () => {
-    const paths: string[] = [];
-    server.use(
-      http.get(cellRoute, ({ request }) => {
-        paths.push(new URL(request.url).pathname);
-        return HttpResponse.json(detail);
-      }),
-    );
-    expect(cellsForDay(definition(), date)).toHaveLength(2 * 2 * 12);
-    const { findByLabelText, getByRole, user } = renderPanel();
-    const picker = await findByLabelText('Cell');
-    const target = cellsForDay(definition(), date).findIndex(
-      (k) => k.origin === 'LGW' && k.destination === 'EWR' && k.returnDate === '2027-04-04',
-    );
-    await user.selectOptions(picker, String(target));
-    await waitFor(() =>
-      expect(paths.at(-1)).toMatch(/\/api\/definitions\/def-0001\/cells\/LGW\/EWR\/2027-03-14\/2027-04-04$/),
-    );
-    expect(getByRole('option', { name: 'LGW→EWR · 21 nights · back Sun 4 Apr' })).toBeInTheDocument();
-  });
-
-  it('focuses its heading on open and closes on Escape', async () => {
-    const { getByRole, onClose, user } = renderPanel(
-      definition(),
-      slice({ cheapestVerified: priceAt(52000, provItinerary(5), false, c) }),
-    );
-    expect(getByRole('heading', { name: 'Departing Sun 14 Mar 2027' })).toHaveFocus();
-    await user.keyboard('{Escape}');
-    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(getByRole('button', { name: COPY.verifyCellFor(verifyCellName(key)) })).toBeDisabled();
   });
 });
 
-describe('View B side panel point of sale (spec §11)', () => {
+describe('the calendar-gap mark in its panel (spec §11, §6.9, decision 58)', () => {
+  it('names the gap and shows its calendar price and the reference across the whole search, each through PriceCell', async () => {
+    server.use(http.get(cellRoute, () => HttpResponse.json(detail)));
+    const { getByTestId } = renderPanel(
+      definition({ destinationNotes: { JFK: 'onward leg not included' } }),
+      gapMark(),
+    );
+    const mark = getByTestId('gap-mark');
+    expect(mark).toHaveTextContent(COPY.calendarGapLead(1));
+    const [cached, reference] = within(mark).getAllByTestId('price-cell');
+    expect(cached).toHaveTextContent('£399');
+    expect(within(cached ?? mark).getByTestId('provenance')).toHaveTextContent('constraints not checked');
+    expect(mark).toHaveTextContent(COPY.datesView.gapReference);
+    expect(reference).toHaveTextContent('£412');
+    // a current reference carries no not-seen mark (decision 54)
+    expect(reference).not.toHaveTextContent('not seen in latest search');
+    // every price for a destination carries its note (spec §11)
+    expect(mark).toHaveTextContent('onward leg not included');
+  });
+
+  it('a truncated gap price says "cheapest of the rows read"; a reference the latest search no longer returned says so (decision 54)', async () => {
+    server.use(http.get(cellRoute, () => HttpResponse.json(detail)));
+    const mark = gapMark({ truncated: true });
+    const { getByTestId } = renderPanel(definition(), {
+      ...mark,
+      reference: { ...mark.reference, notSeenInLatest: { ageHours: 30 } },
+    });
+    const [cached, reference] = within(getByTestId('gap-mark')).getAllByTestId('price-cell');
+    expect(cached).toHaveTextContent('cheapest of the rows read');
+    expect(reference).toHaveTextContent('not seen in latest search (30h ago)');
+  });
+
+  it('without a gap cell there is no mark', async () => {
+    server.use(http.get(cellRoute, () => HttpResponse.json(detail)));
+    const { findByRole, queryByTestId } = renderPanel();
+    await findByRole('table');
+    expect(queryByTestId('gap-mark')).toBeNull();
+  });
+});
+
+describe('panel point of sale (spec §11)', () => {
   it('each price in the panel names its market', async () => {
     server.use(http.get(cellRoute, () => HttpResponse.json(detail)));
-    const { findByText, getByRole } = renderPanel(definition(), slice({}));
+    const { findByText, getByTestId } = renderPanel();
     await findByText('£412');
-    const pos = within(getByRole('dialog')).getAllByTestId('point-of-sale');
+    const pos = within(getByTestId('airport-pair-panel')).getAllByTestId('point-of-sale');
     expect(pos.map((e) => e.textContent)).toEqual(['market not stated', 'UK market']);
   });
 });

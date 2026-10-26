@@ -6,6 +6,7 @@ import { Nav } from './components/Nav.js';
 import { StatusBar } from './components/StatusBar.js';
 import { SyntheticBanner } from './components/SyntheticBanner.js';
 import { COPY } from './copy.js';
+import { parseDetailPair } from './state/resultsState.js';
 import { useSearchParams } from './state/urlState.js';
 import { parseView } from './state/view.js';
 import { AlertsView } from './views/Alerts/index.js';
@@ -26,6 +27,8 @@ import { StatusView } from './views/Status.js';
 export function App() {
   const params = useSearchParams();
   const view = parseView(params.get('view'));
+  // why: Results is the date pair detail (spec §11, WP19 Task 19.6): it renders only for a well-formed date pair
+  const datePair = parseDetailPair(params);
   const providers = useProviders();
   const definitions = useDefinitions();
   const list = (definitions.data ?? []).filter((d) => d.deletedAt === null);
@@ -86,8 +89,12 @@ export function App() {
               <p>{requested !== null ? COPY.definitionNotFound : COPY.noDefinitions}</p>
             ) : null}
             {needsDefinition && selected !== null && !providerStatusKnown ? <Loading /> : null}
-            {view === 'results' && selected !== null && providerStatusKnown ? (
-              <ResultsView definition={selected} />
+            {view === 'results' && selected !== null && providerStatusKnown && datePair !== null ? (
+              <ResultsView
+                key={`${selected.id}|${datePair.departureDate}|${datePair.returnDate}`}
+                definition={selected}
+                datePair={datePair}
+              />
             ) : null}
             {view === 'coverage' && selected !== null && providerStatusKnown ? (
               <CoverageView definition={selected} />
