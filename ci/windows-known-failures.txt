@@ -336,6 +336,7 @@ apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14
 apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) with the Cheapest flow verified, the tab’s pop-up is closed and the tab clicked
 apps/camoufox-worker/test/sessionLine.test.ts > run.ts session export (Task 17.8) counts of an ended window export as this window’s zero; an ended cool-down exports as none
 apps/camoufox-worker/test/sessionLine.test.ts > run.ts session export (Task 17.8) prints one JSON line: the last page, this window’s counts and the cool-down in force; writes nothing
+apps/camoufox-worker/test/sessionLine.test.ts > run.ts session merge (Task 17.8) a new host directory whose window differs gets this window’s zero counts beside the carried time
 apps/camoufox-worker/test/sessionLine.test.ts > run.ts session merge (Task 17.8) adds the counts when the windows match and keeps the later last-page time, under the lock
 apps/camoufox-worker/test/sessionLine.test.ts > run.ts session merge (Task 17.8) an error taking the lock other than a held lock is thrown as it is, never reported as a refusal
 apps/camoufox-worker/test/sessionLine.test.ts > run.ts session merge (Task 17.8) carries the session’s active cool-down; the longer one stands

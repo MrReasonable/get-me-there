@@ -258,6 +258,22 @@ describe('run.ts session merge (Task 17.8)', () => {
     );
     expect(JSON.parse(t.out[0] ?? '')).toMatchObject({ ok: true, countsAdded: false, pages: 40 });
   });
+  // why: CodeRabbit (PR #21): a new host directory whose window differs from the session's still gets its counts
+  // file beside the carried last-page time, or every page would refuse as counts-missing
+  it('a new host directory whose window differs gets this window’s zero counts beside the carried time', async () => {
+    const d = dir();
+    const t = ctx(d, ['merge'], { CAMOUFOX_BILLING_DAY: '15' });
+    expect(await sessionEntry(t.c, deps(line()))).toBe(0);
+    expect(read(d, 'pacer.json')).toEqual({ lastPageAt: '2027-10-03T11:58:00.000Z' });
+    expect(read(d, 'monthly.json')).toEqual({
+      windowStart: '2027-09-15T00:00:00.000Z',
+      windowEnd: '2027-10-15T00:00:00.000Z',
+      pages: 0,
+      scrolls: 0,
+    });
+    expect(countsFact(d)).toBe('ok');
+    expect(t.err.join()).toContain('the windows differ');
+  });
   it('carries the session’s active cool-down; the longer one stands', async () => {
     const d = dir({
       'monthly.json': { ...OCT, pages: 1, scrolls: 0 },

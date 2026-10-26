@@ -29,8 +29,9 @@ import { readBounded } from './stdin.js';
  *   pacer file); it refuses while the host's cool-down is active, naming its end.
  * - `merge` (on the host, after the session, before its worker starts again) reads the session's line on stdin and
  *   keeps the later last-page time, adds the session's pages and scrolls to this window's counts when the two windows
- *   start at the same instant (otherwise it adds none and says so), and carries an active cool-down whose end is later
- *   than the one in force, so a stop in the session pauses the host's worker too.
+ *   start at the same instant (otherwise it adds none and says so, and still writes this window's counts), and carries
+ *   an active cool-down whose end is later than the one in force, so a stop in the session pauses the host's worker
+ *   too.
  *
  * Seed and merge take the worker's lock, so they refuse while that directory's worker or recorder runs, and refuse a
  * line that fails its strict schema; nothing is written then. Unreadable counts are refused as they stand (the counts
@@ -182,7 +183,9 @@ async function merge(ctx: EntryContext, cfg: WorkerConfig, d: SessionDeps): Prom
       ctx.err(
         `the windows differ (this directory ${host.windowStart}, the session ${line.windowStart}): the session's ${line.pages} pages and ${line.scrolls} scrolls are not added`,
       );
-    else counter(ctx.dataDir, cfg, d.clock).write(counts);
+    // why: CodeRabbit (PR #21): written either way, before the last-page time, so a new directory never holds a pacer
+    // file with no counts file beside it (which every page refuses as counts-missing)
+    counter(ctx.dataDir, cfg, d.clock).write(counts);
     const pacer = new Pacer({ dir: ctx.dataDir, minSpacingSeconds: cfg.minSpacingSeconds, clock: d.clock });
     const lastPageAt =
       line.lastPageAt === null ? pacer.lastPageAt() : carryLastPageAt(ctx.dataDir, line.lastPageAt, d.clock);
