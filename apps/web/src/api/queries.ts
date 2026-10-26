@@ -1,7 +1,7 @@
-import { type Cabin, type CellKey, cellKeyString, type Iata } from '@gmt/core';
+import { type Cabin, type CellKey, cellKeyString, decodeDatePairs, type Iata } from '@gmt/core';
 import { skipToken, useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from './endpoints.js';
-import type { Basis, VerifyCellBody } from './types.js';
+import type { Basis, DatePairsScope, VerifyCellBody } from './types.js';
 
 /** Query keys; prefixes are what mutations invalidate. */
 export const qk = {
@@ -10,6 +10,9 @@ export const qk = {
   results: (id: string, basis: Basis | null) => ['results', id, basis ?? 'default'] as const,
   execution: (id: string) => ['execution', id] as const,
   coverage: (id: string) => ['coverage', id] as const,
+  // WP19 §6: the key holds every route parameter, so a filtered read is never answered from an unfiltered one
+  datePairs: (id: string, s: DatePairsScope) =>
+    ['date-pairs', id, s.origins ?? '', s.destinations ?? '', s.maxJourneyMinutes ?? ''] as const,
   calendarGap: (id: string) => ['calendar-gap', id] as const,
   airports: (q: string) => ['airports', q] as const,
   // WP10
@@ -52,6 +55,37 @@ export function useExecution(id: string | null) {
   });
 }
 
+/**
+ * The Dates view's read (spec §10, §11), decoded once by core's `decodeDatePairs`, with the User Timing mark the
+ * performance test measures from (WP19 §6). why: no `placeholderData: keepPreviousData` (WP19 §6): it would show the
+ * previous key's unfiltered figures while a filtered read loads, and §9 forbids that.
+ */
+export function useDatePairs(definitionId: string, scope: DatePairsScope) {
+  return useQuery({
+    queryKey: qk.datePairs(definitionId, scope),
+    queryFn: async () => {
+      const decoded = decodeDatePairs(await api.datePairs(definitionId, scope));
+      performance.mark(DATES_RESPONSE_MARK);
+      return decoded;
+    },
+  });
+}
+
+/** The User Timing marks of WP19 §6: the body parsed and decoded, and the board and overview committed. */
+export const DATES_RESPONSE_MARK = 'gmt:dates-response';
+export const DATES_DRAWN_MARK = 'gmt:dates-drawn';
+
+/**
+ * The status bar's execution query as an observer only (WP19 Task 19.4: "same key, no second poll"): the Dates view
+ * reads the run's status and progress from it to time its re-reads, and leaves the polling to the status bar.
+ */
+export function useExecutionWatch(id: string | null) {
+  return useQuery({
+    queryKey: qk.execution(id ?? ''),
+    queryFn: id === null ? skipToken : () => api.execution(id),
+  });
+}
+
 /** View D and the status bar's "schedule blocked since" (coverage.scheduleBlockedSince). */
 export function useCoverage(definitionId: string | null) {
   return useQuery({
@@ -88,6 +122,7 @@ export function useExecutionActions() {
         ['results'],
         ['execution'],
         ['coverage'],
+        ['date-pairs'],
         ['calendar-gap'],
         ['calendar'],
         ['duration'],

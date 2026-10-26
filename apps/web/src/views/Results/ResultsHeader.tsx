@@ -4,6 +4,7 @@ import { PriceBoundary } from '../../components/PriceBoundary.js';
 import { PriceCell } from '../../components/PriceCell.js';
 import { COPY } from '../../copy.js';
 import { formatIsoDate } from '../../format.js';
+import { coverageLineText } from '../../lib/coverageLine.js';
 import { isThinCoverage } from '../../lib/thinCoverage.js';
 import { hrefWith, navigateTo } from '../../state/urlState.js';
 
@@ -63,27 +64,11 @@ export function ResultsHeader({ data, filteredFirst }: ResultsHeaderProps) {
   const overall = filteredFirst === null && data.cheapest !== null;
   const c = data.coverage;
   const b = c.buckets;
-  const latestParent = data.executions.find((e) => !e.isChild);
-  // why: "(E outbounds each)" is the shown run's own policy from its summary (decision 42), never the
-  // current definition's, which the operator may have edited since.
-  const itinerary = { searched: c.itinerarySearched, selected: c.selected, onDemand: c.onDemand };
-  const line2 =
-    COPY.coverageLine({
-      priced: b.priced,
-      empty: b.empty,
-      noData: b.no_data,
-      error: b.error,
-      skipped: b.skipped,
-      notRun: b.not_run,
-      total: c.total,
-      reused: c.reused,
-    }) +
-    // why: the line describes the shown run, so the current configuration only speaks when the run itinerary-searched nothing.
-    (!data.verificationProviderConfigured && c.itinerarySearched === 0 && c.onDemand === 0
-      ? COPY.noItinerarySearch
-      : latestParent !== undefined
-        ? COPY.itineraryLineExpand({ ...itinerary, expandTop: latestParent.expandTop })
-        : COPY.itineraryLine(itinerary));
+  const line2 = coverageLineText(
+    c,
+    data.verificationProviderConfigured,
+    data.executions.find((e) => !e.isChild),
+  );
   return (
     <div className="space-y-1">
       {headline !== null ? (

@@ -5,8 +5,8 @@ owner: opus
 depends_on: [18]
 spec_sections: ["§1", "§6.5", "§6.6", "§8.3", "§9 items 1, 4, 5, 6", "§10 GET /definitions/:id/date-pairs", "§10 /results scope parameters", "§10 Routes the Dates view retires", "§11 layout and nav", "§11 URLs", "§11 Dates", "§11 Date pair detail", "§16", "§17 revisions 48 and 50"]
 reviewers: [code-architect, test-strategy-reviewer, ui-reviewer, provenance-auditor, data-model-reviewer, search-strategy-reviewer]
-mutate: {"@gmt/core": ["src/datePairs/space.ts", "src/datePairs/figure.ts", "src/datePairs/rank.ts", "src/datePairs/bands.ts", "src/datePairs/encode.ts", "src/datePairs/decode.ts", "src/datePairs/detailLink.ts", "src/api-contract/datePairs.ts"]}
-pending: {"@gmt/web": ["src/state/parse.ts", "src/state/datesState.ts", "src/state/landing.ts", "src/views/Dates/board.ts", "src/views/Dates/howFar.ts", "src/views/Dates/stayScope.ts", "src/views/Dates/refresh.ts", "src/views/Dates/shade.ts", "src/views/Dates/overview.ts", "src/views/Dates/keys.ts"]}
+mutate: {"@gmt/core": ["src/datePairs/space.ts", "src/datePairs/figure.ts", "src/datePairs/rank.ts", "src/datePairs/bands.ts", "src/datePairs/encode.ts", "src/datePairs/decode.ts", "src/datePairs/detailLink.ts", "src/api-contract/datePairs.ts"], "@gmt/web": ["src/state/parse.ts", "src/state/datesState.ts", "src/views/Dates/board.ts", "src/views/Dates/howFar.ts", "src/views/Dates/stayScope.ts", "src/views/Dates/refresh.ts"]}
+pending: {"@gmt/web": ["src/state/landing.ts", "src/views/Dates/shade.ts", "src/views/Dates/overview.ts", "src/views/Dates/keys.ts"]}
 status: reviewed
 ---
 
@@ -70,8 +70,9 @@ The plan's file map and its WP9 and WP10 sections yield to spec revisions 48 and
   site); commit messages stay neutral and name no vendor's site and no data-collection method. Before every push, run
   the wording test and grep the diff, including `git diff main...HEAD | grep -nP '\b[Bb][Oo][t](s?\b|[A-Z_-])'`.
 - **The only example route** is London → New York (`LHR`, `LGW` → `JFK`, `EWR`; synthetic codes `AAA`, `BBB`).
-  Every web and e2e fixture provenance is `providerId: 'fixture'`, `sourceKind: 'synthetic'`; no fixture reads
-  `fixtures/recorded`.
+  Every web and e2e fixture provenance is `providerId: 'fixture'`, `sourceKind: 'synthetic'` by default; a test that
+  needs a price that is not synthetic (the synthetic banner's absent case, Task 19.4) overrides it with a real
+  provider's shape (`provCached`, `provSearched` in `test/fixtures.dates.ts`); no fixture reads `fixtures/recorded`.
 - **Commits**: plain fix commits are fine (the PR lands by squash-merge; no fixups or history rewrites needed). Every
   commit ends with the trailer `MrReasonable <4990954+MrReasonable@users.noreply.github.com>`. Never a bare
   `git stash`.
@@ -527,8 +528,11 @@ Versions from the lockfile (plan Task 0.1 list and later pins). Verified 2026-10
   the shared 422 table), `packages/db/test/helpers/history.ts` (the several-runs seed), `packages/db/drizzle/0009_wp19_latest_price_idx.sql`
   with `packages/db/test/migration0009.test.ts`; `apps/api/test/routes/{datePairs,datePairsBound,
   datePairsClassify,resultsScope}.test.ts`.
-- `apps/web/src/views/Dates/{DatesView,DatesHeader,Board,BoardCard,UpdateBoard,Overview,OverviewMonth,Legend,Readout,
-  Filters,CoverageSection,States}.tsx`, `apps/web/src/views/Dates/{board,howFar,stayScope,refresh,shade,overview,keys,
+- `apps/web/src/views/Dates/{DatesView,DatesHeader,BoardTable,BoardCard,UpdateBoard,Overview,OverviewMonth,Legend,
+  Readout,Filters,CoverageSection,States}.tsx` (the board's component is `BoardTable.tsx`: beside `board.ts`, a
+  `Board.tsx` would differ only in case, which a case-insensitive file system cannot tell apart in an import),
+  `apps/web/src/lib/coverageLine.ts` (§11's coverage line, one builder for the Results header, the Dates header and the
+  detail), `apps/web/src/views/Dates/{board,howFar,stayScope,refresh,shade,overview,keys,
   flip}.ts`, `apps/web/src/state/{parse,datesState,landing}.ts`, `apps/web/src/views/Results/{AirportPairPanel,
   PanelSections,DetailHeader,RowLanding}.tsx`, `apps/web/src/views/Results/panel.ts`; tests:
   `apps/web/test/views/dates/logic/*.test.ts` (the pure-logic tests Stryker runs),
@@ -1074,12 +1078,16 @@ summary.
 
 ### Task 19.4: The Dates view: data, header line, filters, board and run updates
 
-**Files**: `apps/web/src/api/{endpoints,queries,types}.ts`, `src/state/{parse,datesState,resultsState}.ts`,
-`src/views/Dates/{DatesView,DatesHeader,Filters,Board,BoardCard,UpdateBoard,States}.tsx`,
+**Files**: `apps/web/src/api/{client,endpoints,queries,types}.ts` (`ApiError` keeps the envelope's `details`, so the
+422 `too_many_cells` state reads its `cells` and `bound`), `src/state/{parse,datesState,resultsState}.ts`,
+`src/views/Dates/{DatesView,DatesHeader,Filters,BoardTable,BoardCard,UpdateBoard,States}.tsx`, `src/lib/coverageLine.ts`,
+`src/components/StatusBar.tsx` (its Run now button exported as `RunNowButton` for the never-run state),
 `src/views/Dates/{board,howFar,stayScope,refresh,flip}.ts`, `copy.ts`; tests under `test/views/dates/` and
 `test/views/dates/logic/`, `test/state/{parse,datesState}.test.ts`, `test/fixtures.dates.ts`,
 `test/msw/datesHandlers.ts`; `apps/web/stryker.config.json`, `apps/web/package.json`, root `package.json`,
-`.github/workflows/mutation.yml`, `scripts/workflows.test.mjs`.
+`.github/workflows/mutation.yml`, `scripts/workflows.test.mjs`, `apps/web/vitest.config.ts` (the alias table and the
+worked example's JSON are loaded from the repository root wherever the config runs, as `apps/api`'s config does, so the
+config also runs from Stryker's sandbox).
 **Consumes**: Task 19.1's codec, ranking and `bestPerWeek`; Task 19.2's route.
 
 - [ ] **Write the failing tests** (Testing Library over msw, fake timers, `test/fixtures.dates.ts` building responses
@@ -1184,7 +1192,8 @@ summary.
   missing; `pnpm exec vitest run scripts/workflows.test.mjs` → no `web` shard.
 - [ ] **Implement.** `DatesView` decodes with `decodeDatePairs`, applies the stay range in `stayScope.ts`, ranks with
   `rankDatePairs`, applies `bestPerWeek` when switched on, and renders the board from `board.ts` (sort, page size,
-  arrival time). `refresh.ts` is a pure state machine over an injected clock (throttle, trailing read, terminal read,
+  arrival time; `isSyntheticRead`, the banner's judgement over the decoded read, lives there too, so Stryker covers
+  it). `refresh.ts` is a pure state machine over an injected clock (throttle, trailing read, terminal read,
   held pending read and its change count). `flip.ts` measures row tops in `useLayoutEffect` and calls the injected
   `animate(el, [{ transform: 'translateY(Δpx)' }, { transform: 'none' }], { duration: 200 })`, skipped under reduced
   motion. The re-read hook watches the status bar's execution query (same key, no second poll). `performance.mark` as

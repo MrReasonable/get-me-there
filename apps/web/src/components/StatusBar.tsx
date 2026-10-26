@@ -142,6 +142,46 @@ export function StatusLink() {
   );
 }
 
+/**
+ * "Run now" with the estimate it will spend (spec §11: the status bar on Results and Definitions, and the Dates view's
+ * never-run state), confirmed by the definition's stored calls and pence (decision 43); blocked, with the reason, while
+ * the estimate is above what was confirmed. The caller owns the mutation, so its error shows where it was pressed.
+ */
+export function RunNowButton({
+  definition,
+  start,
+}: {
+  definition: DefinitionResponse;
+  start: ReturnType<typeof useExecutionActions>['start'];
+}) {
+  const est = definition.estimate;
+  return (
+    <>
+      <button
+        type="button"
+        data-cost=""
+        className="min-h-11 rounded border border-slate-500 px-3 disabled:opacity-60"
+        disabled={definition.needsConfirmation !== null || start.isPending}
+        aria-busy={start.isPending ? true : undefined}
+        onClick={() =>
+          start.mutate({
+            id: definition.id,
+            confirmCostPence: definition.confirmedCostPence,
+            confirmCalls: definition.confirmedCalls,
+          })
+        }
+      >
+        {start.isPending
+          ? COPY.working
+          : est === null
+            ? COPY.runNowUnestimated
+            : COPY.runNow(est.totalCalls, definition.budget.maxCalls, formatMicroGbp(est.totalCostMicroGbp))}
+      </button>
+      {definition.needsConfirmation !== null ? <span>{COPY.runNowBlocked}</span> : null}
+    </>
+  );
+}
+
 export interface StatusBarProps {
   definition: DefinitionResponse | null;
   /** "Run now" appears only on Results and Definitions (review UI-10). */
@@ -206,7 +246,6 @@ function RunStatus({ definition, showRunNow }: StatusBarProps) {
   const runCost = e ? usageOf(e, budgetScopeLabel({ kind: 'execution-cost', executionId: e.id })) : null;
   const month = e ? usageOf(e, budgetScopeLabel({ kind: 'global-month' })) : null;
   const active = e !== undefined && ACTIVE.has(e.status);
-  const est = definition.estimate;
 
   const loadError = results.error ?? execution.error;
   const retryLoad = () => {
@@ -293,33 +332,7 @@ function RunStatus({ definition, showRunNow }: StatusBarProps) {
           </>
         ) : null}
         {showRunNow && !active && results.data !== undefined ? (
-          <>
-            <button
-              type="button"
-              data-cost=""
-              className="min-h-11 rounded border border-slate-500 px-3 disabled:opacity-60"
-              disabled={definition.needsConfirmation !== null || actions.start.isPending}
-              aria-busy={busy(actions.start)}
-              onClick={() =>
-                actions.start.mutate({
-                  id: definition.id,
-                  confirmCostPence: definition.confirmedCostPence,
-                  confirmCalls: definition.confirmedCalls,
-                })
-              }
-            >
-              {actions.start.isPending
-                ? COPY.working
-                : est === null
-                  ? COPY.runNowUnestimated
-                  : COPY.runNow(
-                      est.totalCalls,
-                      definition.budget.maxCalls,
-                      formatMicroGbp(est.totalCostMicroGbp),
-                    )}
-            </button>
-            {definition.needsConfirmation !== null ? <span>{COPY.runNowBlocked}</span> : null}
-          </>
+          <RunNowButton definition={definition} start={actions.start} />
         ) : null}
       </div>
       {e !== undefined ? (

@@ -592,6 +592,101 @@ export const COPY = {
   confirmNew: (calls: number, cap: number, amount: string) =>
     `Confirm about ${calls} ${noun(calls, 'call', 'calls')} (hard stop ${cap}), ${amount} per run`,
   none: 'none',
+  // --- WP19: the Dates view (spec §11 Dates; revision 50) ---
+  datesView: {
+    title: 'Dates',
+    // header line
+    runFinished: (ago: string) => `run finished ${ago}`,
+    runInProgress: (ago: string) => `run in progress, started ${ago}`,
+    runPaused: (ago: string, reason: string) => `run paused ${ago}: ${reason}`,
+    runEnded: (status: string, ago: string) => `run ${status} ${ago}`,
+    runNotStarted: (status: string) => `run not started yet (${status})`,
+    minutesAgo: (minutes: number) => `${minutes} min ago`,
+    noRunYet: 'no run yet',
+    staleAll: 'Every price shown is older than one refresh cycle.',
+    scopeAirports: (inScope: number, total: number) =>
+      `${inScope} of ${total} airport ${noun(total, 'pair', 'pairs')}`,
+    scopeNights: (min: number, max: number) =>
+      min === max ? `${min} ${noun(min, 'night', 'nights')}` : `${min}–${max} nights`,
+    coverageCheckLink: 'Open the coverage check for this search',
+    gapReference: 'reference across the whole search:',
+    // filters
+    filtersLabel: 'Filters',
+    stayMin: 'Stay from (nights)',
+    stayMax: 'Stay to (nights)',
+    stayInvalid: 'a stay range is two whole numbers, the first no larger than the second',
+    origins: 'Origins',
+    destinations: 'Destinations',
+    journeyLimit: 'Max journey time (minutes)',
+    journeyBounds: (min: number, max: number) => `between ${min} and ${max} minutes`,
+    weekSwitch: 'Best per departure week',
+    loadingFiltered: 'Loading dates for these filters',
+    // board
+    boardCaption: 'Best dates',
+    boardOrderNote: 'Prices a later search no longer found rank after current ones.',
+    partial: 'partial: run in progress',
+    columns: {
+      rank: 'Rank',
+      depart: 'Depart',
+      return: 'Return',
+      nights: 'Nights',
+      price: 'Price',
+      howFar: 'How far checked',
+      journey: 'Journey time',
+      airports: 'Airports',
+    },
+    priceSortNote: 'current prices first, then by price',
+    showMore: (n: number) => `Show ${n} more`,
+    showing: (shown: number, total: number) =>
+      `showing ${shown} of ${total} date ${noun(total, 'pair', 'pairs')} with a price`,
+    bestPerWeek: (weeks: number) => `best per departure week: ${weeks} ${noun(weeks, 'week', 'weeks')}`,
+    openDates: (dep: string, ret: string) => `Open ${dep} to ${ret}`,
+    journeyNotKnown: 'not known',
+    journeyNotKnownFiltered: 'journey time not known',
+    directionOut: 'out',
+    directionBack: 'back',
+    arrives: (time: string, dayOffset: number) =>
+      dayOffset > 0 ? `arrives ${time} +${dayOffset}` : `arrives ${time}`,
+    arrivesOn: (date: string) => `(arrives on ${date})`,
+    airports: (origin: string, destination: string) => `${origin} → ${destination}`,
+    cachedFrom: 'cached from',
+    cachedFromPair: (origin: string, destination: string) => `(${origin} → ${destination})`,
+    howFar: {
+      verified: 'verified',
+      calendar: 'calendar price, constraints not checked',
+      itinerarySearched: (k: number, of: number) =>
+        `itinerary-searched ${k} of ${of} airport ${noun(of, 'pair', 'pairs')}`,
+      notReached: (n: number) => `${n} selected but not reached`,
+      selectedOther: (n: number) => `${n} selected, itinerary search error or skipped`,
+      notSelected: 'not selected for itinerary search',
+      onDemand: (n: number) => `+${n} on demand`,
+      partiallyVerified: (n: number) => `${n} partially verified`,
+      unconfirmed: (n: number) => `${n} ${noun(n, 'price', 'prices')} not confirmed`,
+      bucket: (n: number, words: string) => `${n} ${words}`,
+      notSearched: (n: number, of: number) =>
+        `${n} of ${of} airport ${noun(of, 'pair', 'pairs')} not searched`,
+      earlierSearch: 'price from an earlier search',
+      cutShort: 'read was cut short',
+      noneWithin: (limit: string) => `none within ${limit}`,
+    },
+    // run updates (revision 50, Ian ruled)
+    updateBoard: (n: number) => `${n} ${noun(n, 'change', 'changes')} · Update board`,
+    updated: 'Best dates updated',
+    pendingChanges: (n: number) =>
+      `${n} ${noun(n, 'change', 'changes')} to Best dates; Update board to see them`,
+    // states
+    noSearch: 'No search yet.',
+    noSearchLink: 'Create one under Definitions',
+    neverRun: 'Not run yet: nothing has been searched.',
+    onDemandOnly: (n: number) =>
+      `Not run yet: ${n} on-demand itinerary ${noun(n, 'search', 'searches')} so far, and the prices ${noun(n, 'it', 'they')} found are below.`,
+    pausedNote: 'The board shows prices found before the pause.',
+    notSearchedCount: (n: number) => `${n} ${noun(n, 'cell', 'cells')} not searched`,
+    noPricesInRun: 'No prices in this run.',
+    tooManyCells: (cells: number, bound: number) =>
+      `This search has ${cells} cells in scope, more than the ${bound} the Dates view reads at once. Narrow the origins or destinations in the filters above to bring it under ${bound}.`,
+    noPriceInFilters: 'No date pair in these filters has a price found so far.',
+  },
   // --- WP10 (spec §11 View B, View C, History; plan decisions 38, 44, 46, 48) ---
   calendarView: {
     title: 'Calendar',

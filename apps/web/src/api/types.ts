@@ -36,5 +36,15 @@ export type CellDetailResponse = z.output<typeof apiContract.cellDetailResponseS
 export type ItineraryHistoryResponse = z.output<typeof apiContract.itineraryHistoryResponseSchema>;
 export type RouteHistoryResponse = z.output<typeof apiContract.routeHistoryResponseSchema>;
 
+/**
+ * The date-pairs route's scope (spec §10, WP19): its wire form, every value a string or absent. Built by datesState's
+ * `scopeQuery`, sorted so one scope is one query key.
+ */
+export interface DatePairsScope {
+  origins: string | undefined;
+  destinations: string | undefined;
+  maxJourneyMinutes: string | undefined;
+}
+
 /** An alert rule as the form sends it: the schema's input shape (cooldownHours may be left to its default of 336). */
 export type AlertRuleBody = z.input<typeof apiContract.alertRuleInputSchema>;

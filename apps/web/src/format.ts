@@ -59,6 +59,31 @@ export function formatWeekday(d: IsoDate): string {
   return WEEKDAYS[(((toEpochDay(d) + 4) % 7) + 7) % 7] ?? '';
 }
 
+const MONTH_WORDS = [
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
+] as const;
+const WEEKDAY_WORDS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'] as const;
+
+/**
+ * The date in words for assistive technology (WP19, revision 50: an arrival's day offset is spoken as its date),
+ * "2027-03-15" → "Monday 15 March 2027", from the string and core's epoch day, never a Date.
+ */
+export function formatIsoDateWords(d: IsoDate): string {
+  const [y, m, day] = d.split('-');
+  return `${WEEKDAY_WORDS[(((toEpochDay(d) + 4) % 7) + 7) % 7] ?? ''} ${Number(day)} ${MONTH_WORDS[Number(m) - 1] ?? ''} ${y ?? ''}`;
+}
+
 /** Long form with the weekday, "2027-03-14" → "Sun 14 Mar 2027". */
 export function formatIsoDateLong(d: IsoDate): string {
   return `${formatWeekday(d)} ${formatIsoDate(d)}`;

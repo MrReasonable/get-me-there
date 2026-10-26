@@ -1,0 +1,58 @@
+import { screen, within } from '@testing-library/react';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { at, priced, pricedPair } from '../fixtures.dates.js';
+import { setViewportWidth } from '../viewport.js';
+import { boardRows, findBoard, renderDates } from '../views/dates/render.js';
+
+// Review focus 3 for the Dates view (WP19 Tasks 19.4, 19.5): run by `test:tz` under America/Los_Angeles and
+// Asia/Tokyo. Every date the view shows is formatted from its `YYYY-MM-DD` string, so a browser west or east of
+// Greenwich never moves a date pair to the day before or after.
+
+const ZONES = ['America/Los_Angeles', 'Asia/Tokyo'] as const;
+// why: the 2027-01-01 offsets prove the zone is in effect, so these tests cannot pass vacuously in UTC
+const JAN_OFFSET_MINUTES = { 'America/Los_Angeles': 480, 'Asia/Tokyo': -540 } as const;
+
+const body = {
+  pairs: {
+    [at('2027-03-14', 10)]: pricedPair(priced(30_000)),
+    [at('2027-04-01', 12)]: pricedPair(priced(31_000)),
+  },
+};
+
+describe.each(ZONES)('the Dates view’s dates never shift under TZ=%s', (zone) => {
+  let previous: string | undefined;
+  beforeAll(() => {
+    previous = process.env.TZ;
+    process.env.TZ = zone;
+  });
+  afterAll(() => {
+    if (previous === undefined) delete process.env.TZ;
+    else process.env.TZ = previous;
+  });
+
+  it('the zone is in effect', () => {
+    expect(Intl.DateTimeFormat().resolvedOptions().timeZone).toBe(zone);
+    expect(new Date(2027, 0, 1).getTimezoneOffset()).toBe(JAN_OFFSET_MINUTES[zone]);
+  });
+
+  it('a 2027-03-14 date pair reads 14 Mar on the board, and a 2027-04-01 one reads 1 Apr (April, not March)', async () => {
+    renderDates({ body });
+    const rows = boardRows(await findBoard());
+    expect(rows[0]?.querySelectorAll('td')[1]).toHaveTextContent('14 Mar 2027');
+    expect(rows[0]?.querySelectorAll('td')[2]).toHaveTextContent('24 Mar 2027');
+    expect(rows[1]?.querySelectorAll('td')[1]).toHaveTextContent('1 Apr 2027');
+    expect(rows[1]?.querySelectorAll('td')[2]).toHaveTextContent('13 Apr 2027');
+  });
+
+  it('the phone card reads the same dates', async () => {
+    setViewportWidth(375);
+    renderDates({ body });
+    const cards = await screen.findAllByTestId('board-card');
+    expect(within(cards[0] ?? document.body).getByRole('link')).toHaveTextContent(
+      '14 Mar 2027–24 Mar 2027 (10n)',
+    );
+    expect(within(cards[1] ?? document.body).getByRole('link')).toHaveTextContent(
+      '1 Apr 2027–13 Apr 2027 (12n)',
+    );
+  });
+});

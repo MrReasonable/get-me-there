@@ -20,13 +20,28 @@ export class ApiError extends Error {
   readonly status: number;
   readonly code: string;
   private readonly fields: readonly FieldError[];
+  /** The envelope's `details` as sent (WP19: a 422 `too_many_cells` carries `{ cells, bound }`); null when absent. */
+  readonly details: Readonly<Record<string, unknown>> | null;
 
-  constructor(status: number, code: string, message: string, fields: readonly FieldError[] = []) {
+  constructor(
+    status: number,
+    code: string,
+    message: string,
+    fields: readonly FieldError[] = [],
+    details: Readonly<Record<string, unknown>> | null = null,
+  ) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
     this.code = code;
     this.fields = fields;
+    this.details = details;
+  }
+
+  /** A whole number the envelope's `details` carries under `key`, else null (the contract keeps unknown details). */
+  detailNumber(key: string): number | null {
+    const v = this.details?.[key];
+    return typeof v === 'number' && Number.isSafeInteger(v) ? v : null;
   }
 
   /** A 422's `details.fields` (spec §10), e.g. the metro-code message of review focus 1; already contract-parsed. */
@@ -119,7 +134,7 @@ export async function call<S extends z.ZodType>(
     const envelope = apiContract.errorEnvelopeSchema.safeParse(body.ok ? body.value : null);
     if (envelope.success) {
       const e = envelope.data.error;
-      throw new ApiError(res.status, e.code, e.message, e.details?.fields ?? []);
+      throw new ApiError(res.status, e.code, e.message, e.details?.fields ?? [], e.details ?? null);
     }
     throw new ApiError(res.status, 'http', `${method} ${path} failed with HTTP ${res.status}`);
   }

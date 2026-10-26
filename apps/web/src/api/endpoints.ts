@@ -4,6 +4,7 @@ import type {
   AlertRuleBody,
   Basis,
   CoverageCheckBody,
+  DatePairsScope,
   DefinitionBody,
   DefinitionUpdateBody,
   StartExecutionBody,
@@ -42,6 +43,17 @@ export const api = {
     call(c.resultsResponseSchema, 'GET', '/api/definitions/:id/results', {
       params: { id },
       query: { basis: basis ?? undefined },
+    }),
+  // WP19 (spec §10): every date pair of the current space with its figure over the airport pairs in scope; the body is
+  // read only through core's decodeDatePairs (useDatePairs), never column by column.
+  datePairs: (id: string, scope: DatePairsScope) =>
+    call(c.datePairsResponseSchema, 'GET', '/api/definitions/:id/date-pairs', {
+      params: { id },
+      query: {
+        origins: scope.origins,
+        destinations: scope.destinations,
+        maxJourneyMinutes: scope.maxJourneyMinutes,
+      },
     }),
   coverage: (id: string) =>
     call(c.coverageResponseSchema, 'GET', '/api/definitions/:id/coverage', { params: { id } }),
