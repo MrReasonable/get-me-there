@@ -419,7 +419,9 @@ describe('camoufox grid mode', () => {
       returnDateSource: 'grid-cell',
       vendorPriceMark: 'low',
     });
-    expect(r.notes).toContain('dropped-outside-tile:42');
+    // why: a whole priced view on plan notes only the cells outside the tile: no unparsed, unpriced or off-plan count
+    expect(r.notes).toEqual(['dropped-outside-tile:42']);
+    expect(r.noFares).toEqual([]);
     expect(r.cellIssues ?? []).toEqual([]);
     expect(budget.rowsOf('camoufox').map((x) => [x.scrolls, x.scrollCount])).toEqual([[0, 0]]);
   });

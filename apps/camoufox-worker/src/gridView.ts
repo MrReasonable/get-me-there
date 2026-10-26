@@ -237,8 +237,7 @@ export function interpretView(
     if (looksPriced) pricedLooking++;
     const priced = name === null ? null : parseCellName(name);
     // why: spec §2 "Cells by name": the unpriced forms are read only where a recording proved them
-    const unpriced = name === null || priced !== null || !o.unpriced ? null : parseUnpricedCellName(name);
-    const c = priced ?? unpriced;
+    const c = priced ?? (o.unpriced && name !== null ? parseUnpricedCellName(name) : null);
     const dep = c === null ? null : resolveDay(c.dep, anchor);
     const ret = c === null ? null : resolveDay(c.ret, anchor);
     if (c === null || dep === null || ret === null || !depSet.has(dep) || !retSet.has(ret) || ret < dep) {
