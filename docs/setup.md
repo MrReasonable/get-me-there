@@ -942,7 +942,7 @@ changes it later.
   `linux-x64`) has verified recordings for its pinned Camoufox build. Elsewhere setup says once "The browser provider is
   not available on this machine yet (no recordings for <os>-<arch>); SearchApi and Travelpayouts work", downloads
   nothing and leaves `CAMOUFOX_ENABLED` unset; a later `pnpm gmt setup` or `pnpm gmt update` offers it once
-  recordings land. Today `darwin-arm64` has them.
+  recordings land. Today `darwin-arm64` and `linux-arm64` have them.
 - **Its costs first.** Setup prints the costs above before it asks, on every machine. On a machine with no display it
   adds: "Page loads will come from this server's address, not a home connection. A datacentre address is more likely to
   be refused or shown a verification page, and each one pauses the provider for 48 hours; any restriction applies to

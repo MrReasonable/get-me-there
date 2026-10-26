@@ -1,3 +1,4 @@
+import type { FlagName } from '@gmt/core';
 import type { Ask } from '../../src/ask.js';
 import type { Deps, Http, HttpRequest, Io } from '../../src/deps.js';
 import { MemoryFs, memoryExecutor, memoryRunner, type RunHandler } from '../../src/exec/memory.js';
@@ -145,3 +146,18 @@ export function testWorld(
   };
   return { deps, fs, io, runner, executor };
 }
+
+/**
+ * Every verification flag false: an entry awaiting its recordings (WP17 Task 17.8 recorded every entry on the pinned
+ * build, so a test states an unverified one through `Deps.flags`).
+ */
+export const unsetFlags = (): Readonly<Record<FlagName, boolean>> => ({
+  RESULTS_VERIFIED: false,
+  FORM_VERIFIED: false,
+  CHEAPEST_FLOW_VERIFIED: false,
+  VIEW_MORE_ADDS_CHEAPER: false,
+  NO_FLIGHTS_VERIFIED: false,
+  SOCS_STABLE: false,
+  GRID_VERIFIED: false,
+  LANDING_VERIFIED: false,
+});

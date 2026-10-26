@@ -21,7 +21,7 @@ import { runCli } from '../../src/cli.js';
 import { MemoryFs, memoryRunner, type RunHandler } from '../../src/exec/memory.js';
 import type { Action } from '../../src/plan/action.js';
 import { refusalWithFix } from '../../src/worker/refusal.js';
-import { scriptedAsk, stubHttp } from '../support/deps.js';
+import { scriptedAsk, stubHttp, unsetFlags } from '../support/deps.js';
 import { machine } from '../support/machine.js';
 
 // why: WP17 (Tasks 17.1 and 17.6): the browser step's and the install helpers' exact outcomes, words and plans, so
@@ -305,6 +305,8 @@ describe('browserSetup’s outcomes and words', () => {
   it('unavailable here: the line, once, and the outcome unavailable', async () => {
     const m = await world();
     m.deps.platform = { ...m.deps.platform, os: 'linux', arch: 'x64' };
+    // why: WP17 Task 17.8 recorded every entry on the pinned build; one awaiting recordings is stated here
+    m.deps.flags = unsetFlags;
     expect(await run(m, { choice: null })).toBe('unavailable');
     expect(m.io.stdout).toBe(
       'The browser provider is not available on this machine yet (no recordings for linux-x64); SearchApi and Travelpayouts work\n',
@@ -511,7 +513,8 @@ describe('the offer’s fixed words', () => {
     );
     expect(browserAvailability({ os: 'win32', arch: 'x64' })).toBeNull();
     expect(browserAvailability({ os: 'darwin', arch: 'arm64' })?.osArch).toBe('darwin-arm64');
-    expect(browserAvailability({ os: 'linux', arch: 'arm64' })).toBeNull();
+    expect(browserAvailability({ os: 'linux', arch: 'arm64' })?.osArch).toBe('linux-arm64');
+    expect(browserAvailability({ os: 'darwin', arch: 'arm64' }, unsetFlags)).toBeNull();
   });
 });
 

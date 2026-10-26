@@ -81,7 +81,22 @@ const FLAGS = {
     },
   },
   'darwin-x64': { build: '152.0.4-beta.28', flags: NONE },
-  'linux-arm64': { build: '152.0.4-beta.28', flags: NONE },
+  // why: WP17 Task 17.8's linux-arm64 session of 2026-10-26 (a Linux arm64 container on the operator's Mac, headless,
+  // the generated fonts.conf); the worker's PROOFS name each recording
+  'linux-arm64': {
+    build: '152.0.4-beta.28',
+    flags: {
+      RESULTS_VERIFIED: true,
+      FORM_VERIFIED: true,
+      CHEAPEST_FLOW_VERIFIED: true,
+      // why: the view-more recording's minimum (78 links) equalled the results page's
+      VIEW_MORE_ADDS_CHEAPER: false,
+      NO_FLIGHTS_VERIFIED: true,
+      SOCS_STABLE: true,
+      GRID_VERIFIED: true,
+      LANDING_VERIFIED: true,
+    },
+  },
   'linux-x64': { build: '152.0.4-beta.28', flags: NONE },
 } as const;
 

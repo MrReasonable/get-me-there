@@ -226,7 +226,21 @@ export const PROOFS: Readonly<Record<OsArch, Partial<Record<FlagName, string>>>>
   },
   // why: WP17 Task 17.8's recording sessions fill these, one commit per entry
   'darwin-x64': {},
-  'linux-arm64': {},
+  // why: WP17 Task 17.8, a Linux arm64 container on the operator's Mac (headless, the generated fonts.conf)
+  'linux-arm64': {
+    RESULTS_VERIFIED: '2026-10-26 results/2026-10-26/1 (23 links, every name parses, SOCS same)',
+    FORM_VERIFIED:
+      '2026-10-26 results/2026-10-26/1 (round trip, 1 passenger, 14 Mar to 24 Mar as asked) and no-flights/2026-10-26/1 (1 Dec to 10 Dec as asked)',
+    CHEAPEST_FLOW_VERIFIED:
+      '2026-10-26 cheapest/2026-10-26/1 (22 links after the tab click; their minimum equals the tab price, SOCS same)',
+    NO_FLIGHTS_VERIFIED:
+      '2026-10-26 no-flights/2026-10-26/1 (a date beyond the sale window: the line visible with 0 links, form as asked)',
+    SOCS_STABLE: '2026-10-26 socs-stability/2026-10-26/1–3 (three spaced pages, every read-back same)',
+    LANDING_VERIFIED:
+      '2026-10-26 landing/2026-10-26/1 (/travel/flights?hl=en-GB&gl=GB with no query, the heading "Flights", no tab, Date grid button or result link, SOCS same)',
+    GRID_VERIFIED:
+      '2026-10-26 grid/2026-10-26/1 (five views of 49 cells, every cell name parses, each view’s cells name its lines’ dates, each of the four scrolls moves one day on its axis, SOCS same)',
+  },
   'linux-x64': {},
 };
 

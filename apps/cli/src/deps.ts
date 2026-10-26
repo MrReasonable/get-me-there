@@ -1,3 +1,4 @@
+import type { FlagName, OsArch } from '@gmt/core';
 import type { Ask } from './ask.js';
 import type { Files } from './exec/files.js';
 import type { Runner } from './exec/runner.js';
@@ -79,6 +80,12 @@ export interface Deps {
    * `gmt consent` puts the worker back before it ends).
    */
   onInterrupt(handler: () => void): () => void;
+  /**
+   * The verification flags an entry earned for a build: core's `flagsFor` when absent (the real CLI). A test states an
+   * entry's flags with it (WP17 Task 17.8: once every entry has recordings, an unverified one is a test's own), as the
+   * worker's `selectorsFor` takes its flags.
+   */
+  flags?: (osArch: OsArch, build: string) => Readonly<Record<FlagName, boolean>>;
 }
 
 /** The one exit-code table (core's, shared with apps/api; U9): 78 a refusal or unmet prerequisite, 75 busy, 65 spend. */

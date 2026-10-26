@@ -24,7 +24,7 @@ import type { RunHandler } from '../../src/exec/memory.js';
 import type { Action } from '../../src/plan/action.js';
 import { serviceSet } from '../../src/services/set.js';
 import { setLines } from '../../src/setup/appEnv.js';
-import { scriptedAsk, stubHttp, testIo } from '../support/deps.js';
+import { scriptedAsk, stubHttp, testIo, unsetFlags } from '../support/deps.js';
 import { machine } from '../support/machine.js';
 
 // why: WP17 Task 17.6: the browser provider in gmt setup, the worker service and key rotation (spec §13; decision 75)
@@ -109,6 +109,8 @@ const kinds = (log: readonly Action[]) =>
 describe('the browser provider’s offer (Task 17.6)', () => {
   it('where the flags are unset (linux-arm64) setup says so once, installs nothing and leaves CAMOUFOX_ENABLED unset', async () => {
     const m = await world({ os: 'linux' });
+    // why: WP17 Task 17.8 recorded every entry; an entry awaiting recordings (a new build) is stated here
+    m.deps.flags = unsetFlags;
     m.fs.file('/work/b.json', JSON.stringify({ browser: { window: 'scheduled', enabled: true } }), 0o600);
     expect(await runCli(['setup', '--non-interactive', '--answers', '/work/b.json'], m.deps)).toBe(0);
     const text = unavailableText('linux-arm64');

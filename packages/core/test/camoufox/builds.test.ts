@@ -155,8 +155,9 @@ describe('FLAGS and flagsFor (spec §2 rev 36: flags per <os>-<arch>, bound to t
     expect(Object.keys(FLAGS['darwin-arm64'].flags)).toEqual([...FLAG_NAMES]);
   });
 
-  it('every other entry is all false until its own recording session', () => {
-    for (const k of ['darwin-x64', 'linux-arm64', 'linux-x64'] as const) {
+  it('every entry not yet recorded is all false until its own recording session', () => {
+    // why: WP17 Task 17.8: linux-arm64's session of 2026-10-26 set its flags; the others follow
+    for (const k of ['darwin-x64', 'linux-x64'] as const) {
       expect(Object.values(FLAGS[k].flags).some(Boolean), k).toBe(false);
       expect(Object.keys(FLAGS[k].flags)).toEqual([...FLAG_NAMES]);
     }
