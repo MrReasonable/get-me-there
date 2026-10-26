@@ -1,5 +1,4 @@
 import { join } from 'node:path/posix';
-import { appEndpoint } from '../appEndpoint.js';
 import type { Flags } from '../args.js';
 import { workerEnvPath } from '../camoufox/workerEnv.js';
 import { workerStart } from '../camoufox/workerService.js';
@@ -11,7 +10,7 @@ import type { ServiceFacts } from '../platform/types.js';
 import { factOf, factsOf, workerEntry } from '../services/set.js';
 import { appEnvPath, serviceEnvironment, workerRunArgv } from '../services/specs.js';
 import { REFUSAL_FILE, readStartRefusal } from '../worker/refusal.js';
-import { endpointTarget, guardActiveRun } from './guard.js';
+import { appGuardTarget, guardActiveRun } from './guard.js';
 import { refuseOnWindows } from './lifecycle.js';
 
 /**
@@ -80,7 +79,7 @@ export async function consentCommand(flags: Flags, positional: string | null, de
   const wasRunning = before.state === 'running';
   const isInstalled = before.onDisk !== null;
   if (wasRunning) {
-    const g = await guardActiveRun(said, endpointTarget(await appEndpoint(deps)), {
+    const g = await guardActiveRun(said, await appGuardTarget(deps), {
       wait: flags.wait === true,
       force: flags.force === true,
     });

@@ -63,7 +63,10 @@ describe('GitHub workflows (least privilege)', () => {
     for (const r of runners) if (!r.startsWith('${{')) expect(RUNNERS).toContain(r);
     for (const job of Object.values(YAML.parse(t).jobs)) {
       const m = job.strategy?.matrix;
-      const named = [...(m?.runner ?? []), ...(m?.include ?? []).map((e) => e.runner)];
+      // an include entry that names no runner (the mutation shards) runs on the job's own runs-on
+      const named = [...(m?.runner ?? []), ...(m?.include ?? []).map((e) => e.runner)].filter(
+        (r) => r !== undefined,
+      );
       if (String(job['runs-on']).includes('matrix.runner')) expect(named.length).toBeGreaterThan(0);
       for (const r of named) expect(RUNNERS).toContain(r);
     }
@@ -239,6 +242,45 @@ describe('WP14: the image stays browser-free and the app runs without the camouf
     expect(step).toContain('docker compose -p gmt-cfabsent down -v');
     expect(step).not.toMatch(/>>?\s*\.env/);
   });
+  // why: the project's rule (Ian, PR #11): CI waits on events, never a poll or a fixed sleep; the run's own log line
+  // ends the wait, read from an instant taken before the run starts
+  it('the docker job waits on events: the run’s "pass finished" line, never a poll or a sleep', () => {
+    const job = YAML.parse(ci).jobs.docker;
+    const runs = job.steps.map((s) => s.run ?? '').join('\n');
+    expect(runs).not.toMatch(/seq 1|sleep \d|until |while /);
+    const step = job.steps.find(
+      (s) => s.name === 'app runs with the camoufox-worker absent (WP14, devops-012)',
+    ).run;
+    const at = (x) => {
+      const i = step.indexOf(x);
+      expect(i, x).toBeGreaterThan(-1);
+      return i;
+    };
+    expect(at('since="$(date -u +%Y-%m-%dT%H:%M:%S.%NZ)"')).toBeLessThan(
+      at('"$base/definitions/$def/executions"'),
+    );
+    const wait = step.search(
+      /node scripts\/until-log-line\.mjs --msg 'execution: pass finished' --field "executionId=\$exe" -- \\\n\s+docker compose -p gmt-cfabsent logs --follow --no-log-prefix --since "\$since" app\n/,
+    );
+    expect(at('"$base/definitions/$def/executions"')).toBeLessThan(wait);
+    expect(wait).toBeLessThan(at('"$base/executions/$exe"'));
+    // every other wait in the job is compose's own, on the healthcheck
+    for (const m of runs.matchAll(/docker compose (?:-p \S+ )?up -d([^\n]*)/g))
+      expect(m[1]).toMatch(/--wait --wait-timeout \d+/);
+  });
+  it('the run logs "execution: pass finished" with its execution id, after writing its final status', () => {
+    const src = readFileSync(join(repo, 'packages/engine/src/execute.ts'), 'utf8');
+    const finish = src.slice(src.indexOf('export async function finish('));
+    expect(finish.indexOf('ctx.repos.executions.setStatus(run.executionId, status, patch)')).toBeGreaterThan(
+      0,
+    );
+    expect(finish.indexOf("'execution: pass finished'")).toBeGreaterThan(
+      finish.indexOf('ctx.repos.executions.setStatus(run.executionId, status, patch)'),
+    );
+    expect(readFileSync(join(repo, 'packages/engine/src/run.ts'), 'utf8')).toContain(
+      'log: ctx.log.child({ executionId: exec.id, definitionId: exec.definitionId })',
+    );
+  });
 });
 
 // why: WP14 fix round 1 (TS I6, TS M9): the worker's recorded suites skip visibly too, and the size limit is pinned
@@ -269,22 +311,170 @@ describe('WP14 fix round 1: the worker recorded suites and the image size step',
   });
 });
 
+/**
+ * A mutation job's cache: the weekly run restores nothing (every mutant afresh, the next base); each run saves under a key
+ * of its own, since a cache entry cannot be replaced; a restore takes the newest of the same tests, the same sources
+ * first, and never falls back across a test change (the command runner cannot tell which test killed a mutant).
+ */
+function weeklyFreshAndRunKeyed(restore, save, testHash, srcHash) {
+  const X = ['$', '{{'].join('');
+  expect(restore?.if).toBe("github.event_name != 'schedule'");
+  expect(save?.with?.key).toBe(restore?.with?.key);
+  const key = String(restore?.with?.key);
+  expect(key.endsWith(`-${X} github.run_id }}-${X} github.run_attempt }}`)).toBe(true);
+  const prefixes = String(restore?.with?.['restore-keys']).trim().split('\n');
+  expect(prefixes).toHaveLength(2);
+  for (const p of prefixes) {
+    expect(key.startsWith(p), p).toBe(true);
+    expect(p).toContain(testHash);
+  }
+  expect(prefixes[0]).toContain(srcHash);
+  expect(prefixes[1]).not.toContain(srcHash);
+}
+
 describe('WP16a: the mutation workflow runs every package’s Stryker gate and the glob check', () => {
   const t = () => text('mutation.yml');
-  it('runs the mutation-glob check, then core, engine and the worker in one job and the CLI in its own', () => {
+  const runs = (j) => j.steps.map((s) => s.run).filter((r) => r !== undefined);
+  // why: the follow-ups PR: one job held core, engine, api and the worker in a row and ran past its 120 minutes (run
+  // 40173525400; main's weekly run on 2026-10-19); core alone needed about 3.2 hours. Each package now has a job of its
+  // own (a shard of one, or several where a cold run would not fit), incremental like the CLI's.
+  const MUTATED = ['packages/core', 'packages/engine', 'apps/api', 'apps/camoufox-worker'];
+  it('runs the mutation-glob check in a job of its own, each package in its own shards and the CLI in its own job', () => {
     const jobs = YAML.parse(t()).jobs;
-    expect(Object.keys(jobs)).toEqual(['mutate', 'mutate-cli']);
-    const runs = (j) => j.steps.map((s) => s.run).filter((r) => r !== undefined);
-    expect(runs(jobs.mutate)).toEqual([
+    expect(Object.keys(jobs)).toEqual(['mutation-globs', 'mutate', 'mutation-gate', 'mutate-cli']);
+    expect(runs(jobs['mutation-globs'])).toEqual([
       'pnpm install --frozen-lockfile',
       'node scripts/check-mutation-globs.mjs',
-      'pnpm --filter @gmt/core mutate && pnpm --filter @gmt/engine mutate && pnpm --filter @gmt/api mutate && pnpm --filter @gmt/camoufox-worker mutate',
     ]);
     expect(runs(jobs['mutate-cli'])).toEqual([
       'pnpm install --frozen-lockfile',
       'pnpm --filter @gmt/cli mutate',
     ]);
+    const include = jobs.mutate.strategy.matrix.include;
+    expect([...new Set(include.map((e) => e.dir))]).toEqual(MUTATED);
+    for (const dir of MUTATED) {
+      const mine = include.filter((e) => e.dir === dir);
+      const n = mine[0].shards;
+      // every shard of the package once, all of one count, so the shards hold every mutated file exactly once
+      expect(
+        mine.map((e) => e.shards),
+        dir,
+      ).toEqual(mine.map(() => n));
+      expect(
+        mine.map((e) => e.shard),
+        dir,
+      ).toEqual(Array.from({ length: n }, (_, i) => i + 1));
+      for (const e of mine) expect(e.package, dir).toBe(dir.split('/')[1]);
+    }
+    expect(jobs.mutate.strategy['fail-fast']).toBe(false);
+    // the gate runs once per package, expecting every one of its shards
+    const gates = jobs['mutation-gate'].strategy.matrix.include;
+    expect(gates.map((g) => g.dir)).toEqual(MUTATED);
+    for (const g of gates) expect(g.shards, g.dir).toBe(include.find((e) => e.dir === g.dir).shards);
   });
+  // why: ruling 10 (decision 67): the package's break threshold and timeout share are judged as an unsharded run's, once
+  // over all its shards; a shard alone has no break of its own
+  it('the gate job merges every shard’s report, after every shard, whatever they did', () => {
+    const job = YAML.parse(t()).jobs['mutation-gate'];
+    expect(job.needs).toBe('mutate');
+    expect(job.if).toBe('always()');
+    const X = ['$', '{{'].join('');
+    const dl = job.steps.find((s) => String(s.uses ?? '').startsWith('actions/download-artifact@'));
+    expect(dl.with.pattern).toBe(`mutation-${X} matrix.package }}-*`);
+    const run = job.steps.find((s) => String(s.run ?? '').includes('mutation-gate.mjs'));
+    // one artifact lands at the top of the path, several in a directory each: the reports are found either way
+    expect(String(run.run)).toContain('mapfile -t reports < <(find "$REPORTS" -name mutation.json | sort)');
+    expect(String(run.run)).toContain(
+      // why: assembled, so the shell array is not read as a template placeholder
+      `node scripts/mutation-gate.mjs --config "$DIR/stryker.config.json" --expect "$SHARDS" "${['$', '{reports[@]}'].join('')}"`,
+    );
+    const up = YAML.parse(t()).jobs.mutate.steps.find((s) =>
+      String(s.uses ?? '').startsWith('actions/upload-artifact@'),
+    );
+    expect(up.with).toMatchObject({
+      name: `mutation-${X} matrix.package }}-${X} matrix.shard }}of${X} matrix.shards }}`,
+      path: `${X} matrix.dir }}/reports/mutation/mutation.json`,
+      'if-no-files-found': 'error',
+    });
+  });
+  it('each shard mutates its own files and caches its incremental file, inside 120 minutes', () => {
+    const job = YAML.parse(t()).jobs.mutate;
+    expect(job['timeout-minutes']).toBeLessThanOrEqual(120);
+    const X = ['$', '{{'].join('');
+    expect(job.env).toEqual({ SHARD: `${X} matrix.shard }}`, SHARDS: `${X} matrix.shards }}` });
+    const run = job.steps.find((s) => String(s.run ?? '').includes('stryker run'));
+    expect(run['working-directory']).toBe(`${X} matrix.dir }}`);
+    expect(String(run.run).trim().split('\n')).toEqual([
+      'files="$(node ../../scripts/mutation-shard.mjs . "$SHARD" "$SHARDS" --config reports/stryker.shard.json)"',
+      'echo "shard $SHARD of $SHARDS: $files"',
+      'pnpm exec stryker run reports/stryker.shard.json',
+    ]);
+    const restore = job.steps.find((s) => String(s.uses ?? '').startsWith('actions/cache/restore@'));
+    const save = job.steps.find((s) => String(s.uses ?? '').startsWith('actions/cache/save@'));
+    expect(job.steps.indexOf(restore)).toBeLessThan(job.steps.indexOf(run));
+    expect(job.steps.indexOf(save)).toBeGreaterThan(job.steps.indexOf(run));
+    for (const c of [restore, save])
+      expect(c?.with?.path).toBe(`${X} matrix.dir }}/reports/stryker-incremental.json`);
+    expect(save?.if).toBe('always()');
+    expect(save?.with?.key).toBe(restore?.with?.key);
+    const key = String(restore?.with?.key);
+    expect(key).toContain(`stryker-${X} matrix.package }}-${X} matrix.shard }}of${X} matrix.shards }}-`);
+    expect(key).toContain("format('{0}/test/**', matrix.dir)");
+    expect(key).toContain("format('{0}/stryker.config.json', matrix.dir)");
+    expect(key).toContain("'scripts/mutation-shard.mjs'");
+    expect(key).toContain("hashFiles('packages/*/src/**', 'apps/*/src/**')");
+    weeklyFreshAndRunKeyed(restore, save, "format('{0}/test/**', matrix.dir)", '/src/**');
+  });
+  it('every package’s Stryker config is incremental into reports/, at concurrency 2, and bails at the first failure', () => {
+    for (const dir of [...MUTATED, 'apps/cli']) {
+      const cfg = JSON.parse(readFileSync(join(REPO, dir, 'stryker.config.json'), 'utf8'));
+      expect(cfg, dir).toMatchObject({
+        incremental: true,
+        incrementalFile: 'reports/stryker-incremental.json',
+        concurrency: 2,
+        thresholds: { high: 90, low: 80, break: 80 },
+      });
+      // why: a mutant is killed by its first failing test, so the run stops there (measured cold: shards ran past an
+      // hour without it)
+      expect(cfg.commandRunner.command, dir).toMatch(/\s--bail=1(\s|$)/);
+    }
+  });
+  // why: PR #11: a bailed worker killed while it starts a child can leave the child stuck in the kernel; no per-mutant
+  // run starts one, and ci.yml runs every file left out on every push
+  it.each([...MUTATED, 'apps/cli'])(
+    'no per-mutant command in %s runs a test that starts a real process',
+    (dir) => {
+      const cfg = JSON.parse(readFileSync(join(REPO, dir, 'stryker.config.json'), 'utf8'));
+      const words = cfg.commandRunner.command.split(/\s+/);
+      const at = words.indexOf('run');
+      expect(words.slice(0, at + 1)).toEqual(['pnpm', 'exec', 'vitest', 'run']);
+      const excluded = [];
+      const filters = [];
+      for (let i = at + 1; i < words.length; i++) {
+        if (words[i] === '--exclude') excluded.push(words[++i]);
+        else if (!words[i].startsWith('-')) filters.push(words[i]);
+      }
+      const testFiles = (d) =>
+        readdirSync(join(REPO, dir, d), { recursive: true, withFileTypes: true })
+          .filter((e) => e.isFile() && /\.test\.ts$/.test(e.name))
+          .map((e) =>
+            join(e.parentPath, e.name)
+              .slice(join(REPO, dir).length + 1)
+              .split('\\')
+              .join('/'),
+          );
+      const run = testFiles('test').filter(
+        (f) => (filters.length === 0 || filters.some((x) => f.includes(x))) && !excluded.includes(f),
+      );
+      expect(run.length).toBeGreaterThan(0);
+      const starting = run.filter((f) =>
+        /from 'node:child_process'/.test(readFileSync(join(REPO, dir, f), 'utf8')),
+      );
+      expect(starting).toEqual([]);
+      for (const f of excluded)
+        expect(cfg.commandRunner.$comment, `${dir} ${f}`).toContain(f.split('/').pop());
+    },
+  );
   // why: Ian's ruling (PR #11): GitHub stops a job at 6 hours; the CLI's run is incremental, its results cached, and
   // its cold run must still finish well inside that
   it('the CLI job restores and always saves its incremental file, keyed on its tests and its source, inside 5 hours', () => {
@@ -298,11 +488,7 @@ describe('WP16a: the mutation workflow runs every package’s Stryker gate and t
     const key = String(restore?.with?.key);
     expect(key).toContain("hashFiles('apps/cli/test/**'");
     expect(key).toContain("hashFiles('apps/cli/src/**'");
-    // a restore falls back only to a run over the same tests, never across a test change
-    const prefix = String(restore?.with?.['restore-keys']).trim();
-    expect(key.startsWith(prefix)).toBe(true);
-    expect(prefix).toContain("hashFiles('apps/cli/test/**'");
-    expect(prefix).not.toContain("hashFiles('apps/cli/src/**'");
+    weeklyFreshAndRunKeyed(restore, save, "hashFiles('apps/cli/test/**'", "hashFiles('apps/cli/src/**'");
     const cfg = JSON.parse(
       readFileSync(join(import.meta.dirname, '..', 'apps', 'cli', 'stryker.config.json'), 'utf8'),
     );

@@ -577,9 +577,11 @@ Where the build differs from the task above:
   (tests start from a stored rejection). A failed worker stop goes no further and puts the worker back. SIGINT or
   SIGTERM: the CLI passes it to the child (`attach` with an abort signal; `onInterrupt` instead of exiting), the child
   closes its window and deletes its profile (`consentEntry`'s signal handlers), and the CLI puts the worker back.
-- **The Docker-app machine (X4).** The active-run guard reads this machine's app through `appEndpoint`
-  (`apps/cli/src/appEndpoint.ts`: the native app from app.env, or the Docker app's published port and the checkout's
-  `.env` basic auth, or none, or unknown), shared with the follow-up PR's `gmt status`. `export` needs only the pinned
+- **The Docker-app machine (X4).** The active-run guard (`appGuardTarget` in `apps/cli/src/commands/guard.ts`) reads
+  this machine's app through the readers of `apps/cli/src/appEndpoint.ts`, which PR #17 added for `gmt status`
+  (`nativeEndpoint`; with no native install, `dockerAppState` and `dockerEndpoint`: the port compose publishes and the
+  checkout's `.env` basic auth, read and never printed). A Docker app whose state, port or credentials cannot be read
+  is treated as possibly running a search, so the guard refuses unless `--force`. `export` needs only the pinned
   Camoufox (no worker.env; `loadCaptureConfig` reads the shared settings at their defaults), and the CLI makes the data
   directory 0700 for it. Refusals on a machine with no native app name `pnpm gmt browser install` and the guide's
   Docker section; the guide's Docker section and appendix run install, then consent, then the worker start.

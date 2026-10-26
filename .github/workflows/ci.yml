@@ -368,12 +368,13 @@ jobs:
           # a one-cell definition naming camoufox only, from the worked example 40 days out
           body="$(node -e 'const e=require("./docs/examples/london-new-york.json");const d=new Date(Date.now()+40*864e5).toISOString().slice(0,10);Object.assign(e,{name:"camoufox absent",origins:["LHR"],destinations:["JFK"],window:{kind:"absolute",from:d,to:d},minNights:10,maxNights:10,scheduleCron:null,providers:{discovery:["camoufox"],verification:[],discoveryRefreshHours:{camoufox:168}}});delete e.confirmedCostPence;delete e.confirmedCalls;process.stdout.write(JSON.stringify(e))')"
           def="$(curl -fsS "${auth[@]}" -X POST --data "$body" "$base/definitions" | node -p 'JSON.parse(require("fs").readFileSync(0,"utf8")).id')"
+          # why: an event, not a poll: the run logs "execution: pass finished" after writing its final status; the log is
+          # read from before the start, so a run that ends at once is still seen (the backstop is only a backstop)
+          since="$(date -u +%Y-%m-%dT%H:%M:%S.%NZ)"
           exe="$(curl -fsS "${auth[@]}" -X POST --data '{}' "$base/definitions/$def/executions" | node -p 'JSON.parse(require("fs").readFileSync(0,"utf8")).executionId')"
-          status=pending
-          for _ in $(seq 1 60); do
-            status="$(curl -fsS "${auth[@]}" "$base/executions/$exe" | node -p 'JSON.parse(require("fs").readFileSync(0,"utf8")).status')"
-            case "$status" in pending|running) sleep 2 ;; *) break ;; esac
-          done
+          node scripts/until-log-line.mjs --msg 'execution: pass finished' --field "executionId=$exe" -- \
+            docker compose -p gmt-cfabsent logs --follow --no-log-prefix --since "$since" app
+          status="$(curl -fsS "${auth[@]}" "$base/executions/$exe" | node -p 'JSON.parse(require("fs").readFileSync(0,"utf8")).status')"
           echo "execution $exe ended $status"
           # the camoufox cells were skipped by the preflight, and no camoufox ledger row exists
           check='const D=require(require.resolve("better-sqlite3",{paths:["/app/packages/db"]}));const d=new D("/data/get-me-there.db",{readonly:true});const o=d.prepare("SELECT status, reason FROM cell_outcomes WHERE provider_id = ?").all("camoufox");const r=d.prepare("SELECT COUNT(*) AS n FROM provider_requests WHERE provider_id = ?").get("camoufox").n;console.log(JSON.stringify({o,r}));process.exit(o.length>0&&o.every((x)=>x.status==="skipped"&&x.reason==="provider_unavailable")&&r===0?0:1)'

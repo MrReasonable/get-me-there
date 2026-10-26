@@ -249,7 +249,8 @@ the `apps/api` build script (`version.json`), `docs/setup.md`.
 ### Task 18.5: `gmt status`
 
 - [ ] **Failing tests:** with a stub app it calls `GET /api/status` with basic auth read from `app.env` by `parseEnv`
-  (never argv), prints one row per check (state as text, area, summary, note, fix command) and WP16b's local facts
+  (never argv; with no native install and the compose `app` present, the Docker app on the port compose publishes, with
+  the basic auth in the checkout's `.env`, its next step a `docker compose` command, never `pnpm gmt setup`), prints one row per check (state as text, area, summary, note, fix command) and WP16b's local facts
   (compose container, detached checkout, the worker's refusal through `refusalLine` / `START_REFUSAL_TEXT`), and the
   `barSummary` line; exits 1 on any `fail`, 0 otherwise; `--only <area>` filters; `--json` prints the response; with
   the app unreachable it prints "the app is not answering", the local facts and the worker's refusal reason through its

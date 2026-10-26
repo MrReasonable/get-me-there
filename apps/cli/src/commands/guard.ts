@@ -1,6 +1,10 @@
+import { join } from 'node:path/posix';
 import { type ActiveExecution, type AppCreds, activeLine, readActive } from '../appClient.js';
-import type { AppEndpoint } from '../appEndpoint.js';
+import { dockerAppState, dockerEndpoint, nativeEndpoint } from '../appEndpoint.js';
 import type { Deps } from '../deps.js';
+import { factOf, factsOf, serviceSet } from '../services/set.js';
+import { appEnvPath } from '../services/specs.js';
+import { readEnvText } from '../setup/appEnv.js';
 
 /** Decision 80's `--force` statement, printed before the first action; the last sentence follows AUTO_RESUME. */
 export function forceStatement(label: string, autoResume: boolean): string {
@@ -22,17 +26,41 @@ export interface GuardTarget {
   cannot?: string;
 }
 
-/** The guard's target for an app found through appEndpoint (review X4): the native app, the Docker app, or neither. */
-export function endpointTarget(e: AppEndpoint): GuardTarget {
-  if (e.kind === 'none') return { label: 'the app', up: false, creds: null, autoResume: true };
-  if (e.kind === 'unknown')
-    return { label: 'the app', up: true, creds: null, autoResume: true, cannot: e.reason };
-  return {
-    label: e.kind === 'docker' ? 'the Docker app' : 'the app',
-    up: true,
-    creds: e.creds,
-    autoResume: e.autoResume,
-  };
+/**
+ * The guard's target for this machine's app (review X4), through appEndpoint.ts's readers: the native app (up while its
+ * service runs) with app.env's credentials, or, with no native install, the Docker app on the port compose publishes
+ * with the checkout's .env credentials (read, never printed). A Docker app whose state, port or credentials cannot be
+ * read may be running a search, so it is up with the reason it cannot be asked: the guard refuses unless --force.
+ */
+export async function appGuardTarget(deps: Deps): Promise<GuardTarget> {
+  const paths = deps.platform.paths;
+  if (deps.files.mode(appEnvPath(paths)) !== null) {
+    const app = serviceSet(deps).find((e) => e.name === 'app');
+    const up = app !== undefined && factOf(await factsOf(deps, [app]), app.unit).state === 'running';
+    const e = nativeEndpoint(deps);
+    let autoResume = true;
+    try {
+      autoResume = readEnvText(deps.files.read(appEnvPath(paths)) ?? '').AUTO_RESUME !== 'false';
+    } catch {
+      // why: an unreadable app.env is the endpoint's own reason below
+    }
+    return e.kind === 'none'
+      ? { label: 'the app', up, creds: null, autoResume, cannot: e.reason }
+      : { label: 'the app', up, creds: e.creds, autoResume };
+  }
+  const state = await dockerAppState(deps);
+  if (state === null || state === 'absent' || state === 'stopped')
+    return { label: 'the Docker app', up: false, creds: null, autoResume: true };
+  const e = await dockerEndpoint(deps, state);
+  if (e.kind === 'none')
+    return { label: 'the Docker app', up: true, creds: null, autoResume: true, cannot: e.reason };
+  let autoResume = true;
+  try {
+    autoResume = readEnvText(deps.files.read(join(deps.checkout, '.env')) ?? '').AUTO_RESUME !== 'false';
+  } catch {
+    // why: the endpoint has read .env already; a failure here leaves the default
+  }
+  return { label: 'the Docker app', up: true, creds: e.creds, autoResume };
 }
 
 const runningIn = (label: string, e: ActiveExecution): string =>

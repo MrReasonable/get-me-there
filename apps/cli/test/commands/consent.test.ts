@@ -362,7 +362,7 @@ describe('gmt consent’s refusals', () => {
     const unknown = world({ docker: 'unreadable' });
     expect(await runCli(['consent'], unknown.deps)).toBe(75);
     expect(unknown.io.stderr).toContain(
-      'cannot tell whether a search is running in the app (docker compose ps failed, so whether the Docker app runs is not known)',
+      'cannot tell whether a search is running in the Docker app (there is no native install, and Docker’s compose state could not be read)',
     );
     expect(unknown.attached).toEqual([]);
     expect(await runCli(['consent', '--force'], unknown.deps)).toBe(0);

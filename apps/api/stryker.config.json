@@ -5,6 +5,8 @@
     "command": "pnpm exec vitest run --coverage.enabled=false --bail=1 test/read",
     "$comment": "StringLiteral mutants are left out: the report's words are the product of its fixed templates, pinned phrase by phrase in test/read and swept for banned words, and a mutant that changes a word the tests do not quote proves nothing about a rule (review V10). Every condition, threshold, branch and arithmetic mutant is kept."
   },
+  "incremental": true,
+  "incrementalFile": "reports/stryker-incremental.json",
   "mutate": ["src/read/status.ts", "src/read/statusPure.ts"],
   "thresholds": {
     "high": 90,

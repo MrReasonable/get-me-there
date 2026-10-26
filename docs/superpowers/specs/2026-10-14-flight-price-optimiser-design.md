@@ -2899,7 +2899,19 @@ modification time's, in Europe/London; a marker that exists but cannot be
 read still refuses, its date unknown), which also
 names the line that removes the marker (`docker compose run --rm --no-deps
 --entrypoint rm app /data/MOVED-TO-NATIVE`). `gmt status` reports a compose
-`app` container running beside the native service. The worker enforces its
+`app` container running beside the native service (two ledgers, a `warn`
+with `docker compose down`). With no native install (no `app.env`, no app
+or backup unit) and the compose `app` present, the app in Docker with the
+worker on this machine, `gmt status` reads that app instead: the host port
+compose publishes for it and the basic auth in the checkout's `.env` (read,
+never printed); it prints the Docker app's report beside the worker's
+service, `worker.env` and refusal, does not check `app.env`, the app service
+or the daily backup job, and offers neither `pnpm gmt setup` nor `docker
+compose down`; a stopped container is a `fail` with `docker compose start
+app`, and with no published port known the credentials are sent nowhere.
+With no native install and a compose state Docker cannot report (`docker
+compose ps` failing or printing what is not its JSON), the app's state is
+unknown: a `fail` saying so, the worker's facts, and no native fix. The worker enforces its
 own monthly page and scroll caps across every caller (§2) and reports a
 second app instance in a month: each app sends its database's own random
 `app_instance_id` (§7 `app_meta`, kept with the database's path), so a
