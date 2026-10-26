@@ -1687,6 +1687,9 @@ describe('record --grid', () => {
     const rec = recOf(t);
     expect(rec).toMatchObject({
       kind: 'grid',
+      // why: WP17 Task 17.8: an exploration names the entry and bundle it was recorded under, as a recording's meta does
+      osArch: 'darwin-arm64',
+      bundleSha256: '8b7680a61818245cf4eb0150edab811d4ed937b6723514569e74c3e7df9685bd',
       socsReadBack: 'same',
       window: [1280, 900],
       clicked: [

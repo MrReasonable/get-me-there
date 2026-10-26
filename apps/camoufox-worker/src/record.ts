@@ -399,6 +399,9 @@ export async function record(ctx: EntryContext, cfg: WorkerConfig, deps: RecordD
             {
               recordedAt: deps.clock.now(),
               recordedBy: RECORDED_BY,
+              // why: WP17 Task 17.8: the entry and bundle, as every recording's meta names them (pie-b1-006)
+              osArch: deps.osArch,
+              bundleSha256: deps.bundleSha256,
               ...outcome.data,
               // why: ruling 7: the fixed window the grid's layout was read at
               window: deps.launchOptions.window,
