@@ -1930,7 +1930,11 @@ describe('stderrLog debug lines', () => {
 describe('record --landing (Task 17.8)', () => {
   const LANDING = 'https://www.google.com/travel/flights?hl=en-GB&gl=GB';
   const landingTree = () =>
-    n('document', 'Google Flights', [n('heading', 'Flights'), n('heading', 'Find cheap flights'), ...formNodes()]);
+    n('document', 'Google Flights', [
+      n('heading', 'Flights'),
+      n('heading', 'Find cheap flights'),
+      ...formNodes(),
+    ]);
   const unverified = { ...SELECTORS, LANDING_VERIFIED: false };
   const cooldownOf = (t: ReturnType<typeof setup>) =>
     new CooldownStore({ dir: t.dataDir, challengeHours: 48, clock: t.timers.clock }).active();

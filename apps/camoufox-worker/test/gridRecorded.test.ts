@@ -22,6 +22,7 @@ import { FakeContext } from './support/fakeContext.js';
 import { type FakeNode, formNodes, n, resultsTree, text } from './support/fakePage.js';
 import { memoryLog } from './support/log.js';
 import { rangeOf, recordedAnchor } from './support/recordedGrid.js';
+import { SYNTHETIC_REJECT } from './support/socsValues.js';
 import { fakeTimers } from './support/timers.js';
 import { tmpDir } from './support/tmp.js';
 
@@ -114,7 +115,8 @@ async function serve(rec: z.infer<typeof fileSchema>) {
   writeFileSync(
     join(dataDir, 'socs.json'),
     JSON.stringify({
-      value: 'v',
+      // why: since review X1 only a value that reads as a rejection is loaded (this suite runs only where recordings are)
+      value: SYNTHETIC_REJECT,
       domain: '.google.com',
       path: '/',
       expires: 1_800_000_000,

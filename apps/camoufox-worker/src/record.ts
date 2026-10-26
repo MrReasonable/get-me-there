@@ -259,20 +259,11 @@ export async function record(ctx: EntryContext, cfg: WorkerConfig, deps: RecordD
             const p = await d.race(c.newPage());
             page = p;
             // why: --no-flights and --landing read what appeared once the deadline passes, so their page stays open
-            if (args.kind !== 'no-flights' && args.kind !== 'landing') budget.onExpire(() => void p.close().catch(() => undefined));
+            if (args.kind !== 'no-flights' && args.kind !== 'landing')
+              budget.onExpire(() => void p.close().catch(() => undefined));
             guard = await d.race(installGuard(c, p, deps.log, deps.selectors));
             const driver = createDriver(p, guard, deps.selectors);
-            outcome = await interact(
-              driver,
-              p,
-              guard,
-              budget,
-              pageStart,
-              deps,
-              args.kind,
-              url,
-              args.moves,
-            );
+            outcome = await interact(driver, p, guard, budget, pageStart, deps, args.kind, url, args.moves);
           }
         } catch (e) {
           failure = e;
