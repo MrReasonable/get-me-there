@@ -7,7 +7,7 @@ spec_sections: ["§1", "§6.5", "§6.6", "§8.3", "§9 items 1, 4, 5, 6", "§10 
 reviewers: [code-architect, test-strategy-reviewer, ui-reviewer, provenance-auditor, data-model-reviewer, search-strategy-reviewer]
 mutate: {}
 pending: {"@gmt/core": ["src/datePairs/space.ts", "src/datePairs/figure.ts", "src/datePairs/rank.ts", "src/datePairs/bands.ts", "src/datePairs/encode.ts", "src/datePairs/decode.ts", "src/datePairs/detailLink.ts", "src/api-contract/datePairs.ts"], "@gmt/web": ["src/state/parse.ts", "src/state/datesState.ts", "src/state/landing.ts", "src/views/Dates/board.ts", "src/views/Dates/howFar.ts", "src/views/Dates/stayScope.ts", "src/views/Dates/refresh.ts", "src/views/Dates/shade.ts", "src/views/Dates/overview.ts", "src/views/Dates/keys.ts"]}
-status: draft
+status: reviewed
 ---
 
 # WP19: The Dates view (the date-pair board and overview, the date pair detail, the two-tier nav)
@@ -17,7 +17,8 @@ after that day's critique of the web UI) and his rulings on revision 48's draft 
 Revised the same day after the core roster's review (89 findings: 19 High, 51 Medium, 19 Low; every one answered in
 the text below), Ian's two further rulings and the orchestrator's settlements, all of which Task 19.0 records as spec
 revision 50 (revision 49 is PR #28's grid-cells change, which merges first; the build rebases onto main before it
-starts). WP18 is merged.
+starts). Revised again after the quick re-review of `d43004b1` (20 findings: 9 Medium, 11 Low; each answered in
+the text) and Ian's confirmation of four review settlements. WP18 is merged.
 
 This package makes the first screen answer which dates to fly: a ranked board of date pairs, each priced by the
 figure chosen across the airport pairs in scope, with an overview of months beneath it; Results becomes that date
@@ -98,11 +99,15 @@ panels); the nav has two tiers; and the old view URLs land on Dates.
   `encodeDatePairs` and `decodeDatePairs`, the figure precedence (`pickFigure`, `figuresByDatePair`),
   `rankDatePairs`, `bestPerWeek`, `foldNights`, the detail link's query (`detailLinkQuery`); the barrel exports;
   Stryker entries for each.
-- `db`: the grouped reads the route needs (§5), each one statement, so neither route issues a statement per cell, per
-  past execution, per child or per itinerary; `latestVerificationOutcomeForCell` gains the provider tie-break.
+- `db`: the grouped reads the routes need (§5), each one statement, reworked in place where a method already exists,
+  so no read route issues a statement per cell, per past execution, per child or per itinerary;
+  `latestVerificationOutcomeForCell` gains the provider tie-break.
 - `api`: the date-pairs route with Hono's `compress` on that route alone, its 422s, the 50,000-cell bound; `/results`'
   scope parameters (date pair, airports, journey limit) and its `datePairFigure`; one shared scope parser and one
-  per-cell classification used by both routes; `pick.ts` delegating to `core`; removal of the calendar and
+  per-cell classification (`classifyCells`, summed by `summariseCells`) behind every coverage summary the api sends:
+  the date-pairs route, `/results` (scoped, unscoped and `?executionId=`) and the coverage route's summary (revision
+  50, settled by the orchestrator; the coverage route's per-stage × provider breakdown stays run-scoped as it is);
+  `pick.ts` delegating to `core`; removal of the calendar and
   duration-analysis routes, schemas, read modules and tests, with their rules ported first.
 - `engine`: the alert email's POST-booking link through `core`'s `detailLinkQuery` (§8.3).
 - `web`: the Dates view (header line, calendar-gap banner, filters, board with its week switch and update button,
@@ -129,7 +134,8 @@ panels); the nav has two tiers; and the old view URLs land on Dates.
 - `PriceCell`, `Provenance` and `ClassBadge` beyond using them (WP9 owns them; this package adds no second price
   renderer, and adds a prop only where a face it needs is missing).
 - The estimate and budget surfaces, and the status bar beyond its progress link and its Run now on Dates (WP9, WP18).
-- The coverage route's content and the cell route (WP8; read here as they are).
+- The coverage route's per-stage × provider breakdown, its error list and its on-demand list, and the cell route
+  (WP8; read here as they are). Only the coverage route's summary changes (In, above).
 - History beyond its nav place and one test's retired-route assertion (WP10 Task 10.11).
 - Alerts rules, digests and their wording beyond the link (WP11).
 - Any change to discovery, selection, verification or the engine's runs (WP7); the providers (WP5, WP6, WP14, WP15).
@@ -187,6 +193,7 @@ export function loadRows(def: SearchDefinition, ports: Ports, executionIds?: rea
 export function confirmedIn(loaded: Loaded): (r: ResultRow) => boolean;
 export function chooseBasis(loaded: Loaded, requested: Basis | undefined): { basis: Basis; reason: string };
 export function onDemandSearched(executions: readonly Execution[], ports: Ports, space: ResolvedSpace): Execution[];  // reworked, Task 19.2
+export function coverageSummaryFor(latestParent, executions, ports, space): CoverageSummary;  // replaced by summariseCells, Task 19.2
 export const SEARCHED: ReadonlySet<CellOutcomeStatus>;
 export function currentSpace(def, today: IsoDate): ResolvedSpace;
 export function cellInSpace(space: ResolvedSpace, cell: CellKey): boolean;
@@ -237,8 +244,8 @@ export const datePairsQuerySchema = z.strictObject({
   destinations: z.string().max(200).optional(),     // comma list
   maxJourneyMinutes: z.string().max(10).optional(), // integer 60..6000
 });
-export const DEFAULT_MAX_CELLS = 50_000;   // §10's fixed bound; core's config default for MAX_CELLS_PER_DEFINITION reads it
-export const MAX_DATE_PAIRS = 36_400;      // 400 × 91: §6.1's longest window and widest stay range (0–90 nights)
+// re-exported from packages/core/src/space/limits.ts, the one home of the space's limits (below)
+export { DEFAULT_MAX_CELLS, MAX_DATE_PAIRS } from '../space/limits.js';
 export const datePairsResponseSchema;      // §10's shape with revision 50's columns (below), a z.strictObject with one
                                            // superRefine (one linear pass, no per-pair allocation)
 export type DatePairsResponse = z.output<typeof datePairsResponseSchema>;
@@ -257,7 +264,11 @@ The response shape is §10's, with these element schemas and revision 50's addit
   `scope.destinations`), `cheaperCachedTruncated` and `cheaperCachedStale` (the server's staleness rule, the same one the
   figure's `stale` uses), each null exactly when `cheaperCachedPence` is; and `arriveOut` and `arriveBack` (the
   figure's last outbound and last inbound segment's `arriveLocal`, as the source states it; null on a calendar figure or
-  a row without segments).
+  a row without segments), with `departOut` and `departBack` (the first segment's `departLocal` of each direction) so
+  the web can show the arrival's day offset; and `fromEarlierSearch: boolean[]` (true when the figure's row was
+  fetched by an execution created before the latest parent run, an earlier parent or an earlier on-demand search;
+  false when the latest parent run or a later on-demand search fetched it, and false before any parent run; revision
+  50, settled by the orchestrator).
 - Every per-date-pair count (`selected`, `itinerarySearched`, `onDemand`, `unconfirmed`, `partiallyVerified`,
   `notReached`, `journeyLeftOut`, `reused`) counts **distinct in-scope cells**, never executions, offers or itineraries.
 
@@ -271,7 +282,7 @@ is null; a cheaper-cached price on a calendar figure; `cheaperCachedPence` not b
 verified figure; the four cheaper-cached columns not null together with `cheaperCachedPence`; money not integer pence.
 
 ```ts
-// packages/core/src/api-contract/results.ts: resultsQuerySchema gains four strings, parsed by the api (all 422):
+// packages/core/src/api-contract/results.ts: resultsQuerySchema gains five strings, parsed by the api (all 422):
 //   departureDate?: string; returnDate?: string; origins?: string; destinations?: string; maxJourneyMinutes?: string
 // resultsResponseSchema gains:
 //   datePairFigure: z.output<typeof datePairFigureSchema> | null   // only on a date-pair-scoped read: pickFigure over
@@ -280,20 +291,28 @@ verified figure; the four cheaper-cached columns not null together with `cheaper
 // `airportPair`, each provenance inline (provenanceSchema), money as moneyPenceSchema; the codec test compares it with
 // the board's decoded figure.
 
-// packages/core/src/datePairs/space.ts
+// packages/core/src/space/limits.ts (new; validate.ts's private MAX_WINDOW_DAYS and MAX_NIGHTS move here, and
+// api-contract/datePairs.ts and config/schema.ts both import from it, so config never depends on api-contract)
+export const MAX_WINDOW_DAYS = 400;
+export const MAX_NIGHTS = 90;
+export const DEFAULT_MAX_CELLS = 50_000;                         // §10's fixed bound; MAX_CELLS_PER_DEFINITION's default
+export const MAX_DATE_PAIRS = MAX_WINDOW_DAYS * (MAX_NIGHTS + 1); // 36,400
+
+// packages/core/src/space/generate.ts (the one home of the order and the clamp; generateCells and countCells use both)
+export function windowDays(s: Pick<ResolvedSpace, 'departureFrom' | 'departureTo'>): number;  // max(0, daysBetween + 1)
+export function sortedAirportPairs(origins: readonly Iata[], destinations: readonly Iata[]): Array<{ origin: Iata; destination: Iata }>;
+
+// packages/core/src/datePairs/space.ts (imports windowDays and sortedAirportPairs; adds only the date-pair arithmetic)
 export type DatePairSpace = Omit<ResolvedSpace, 'origins' | 'destinations'>;
 export function stayCount(s: DatePairSpace): number;                  // max(0, maxNights − minNights + 1)
-export function dayCount(s: DatePairSpace): number;                   // max(0, daysBetween(from, to) + 1), as countCells
-export function datePairCount(s: DatePairSpace): number;              // dayCount × stayCount
+export function datePairCount(s: DatePairSpace): number;              // windowDays × stayCount
 export function datePairAt(s: DatePairSpace, i: number): { departureDate: IsoDate; returnDate: IsoDate; nights: number; dayIndex: number };
 export function datePairIndex(s: DatePairSpace, departureDate: IsoDate, returnDate: IsoDate): number | null; // null outside
-export function sortedAirportPairs(origins: readonly Iata[], destinations: readonly Iata[]): Array<{ origin: Iata; destination: Iata }>;
-// generateCells is refactored to use sortedAirportPairs, so the order is written once.
 
 // packages/core/src/datePairs/figure.ts
 export type FigureCandidate = Pick<ResultRow,
   'cell' | 'verdictClass' | 'pricePence' | 'provenance' | 'stale' | 'ageHours' | 'truncated' | 'notSeenInLatest'
-  | 'superseded' | 'totalMinutes' | 'outbound' | 'inbound' | 'itineraryHash' | 'calendarPriceId'>;
+  | 'superseded' | 'totalMinutes' | 'outbound' | 'inbound' | 'itineraryHash' | 'calendarPriceId' | 'executionId'>;
 export type Figure<T extends FigureCandidate> =
   | { basis: 'verified'; chosen: T; cheaperCached: T | null }
   | { basis: 'calendar'; chosen: T; cheaperCached: null };
@@ -312,7 +331,8 @@ export interface DatePairFigure {
   superseded: boolean;
   notSeenInLatest: { ageHours: number | 'unknown' } | null;
   journeyMinutes: number | null;
-  arriveOut: string | null; arriveBack: string | null;
+  departOut: string | null; arriveOut: string | null; departBack: string | null; arriveBack: string | null;
+  fromEarlierSearch: boolean;
   cheaperCached: { pricePence: number; provenance: Provenance; stale: boolean; truncated: boolean;
                    origin: Iata; destination: Iata } | null;
 }
@@ -348,16 +368,26 @@ export const DETAIL_LINK_PARAMS = { view: 'view', def: 'def', depart: 'depart', 
 export function detailLinkQuery(p: { definitionId: string; departureDate: IsoDate; returnDate: IsoDate;
   basis: ResultBasis; row?: string }): string;   // "view=results&def=…&depart=…&return=…&basis=…[&row=…]", §8.3's order
 
-// packages/db: grouped reads, each exactly one statement (better-sqlite3, synchronous)
-CalendarPricesRepo.latestInScope(definitionId: string, cabin: Cabin, space: ResolvedSpace | null):
-  Array<CalendarPriceRow & { sourceLastError: string | null; searchedEmptyLater: boolean }>;
-  // latest per (provider, cell); the source outcome's last_error joined (truncation); and whether the newest searched,
-  // non-reused discovery outcome of a parent execution for that (provider, cell) is newer and found empty or no_data
-  // (supersession), by ROW_NUMBER windows in SQL
-ItinerariesRepo.observationsInScope(definitionId: string, cabin: Cabin, space: ResolvedSpace | null,
-  executionIds: readonly string[] | 'all'): ObservationRow[];   // itineraries and segments hydrated by hash list (json_each), no get(hash) per itinerary
+// packages/db: grouped reads, each a fixed number of statements (better-sqlite3, synchronous). Existing methods are
+// reworked in place, keeping their signatures; no method is left without a caller.
+type CalendarMarks = { sourceLastError: string | null; searchedEmptyLater: boolean };
+  // sourceLastError: the last_error of the discovery outcome that fetched the price (through reused_from_execution_id
+  // for a reused copy), for truncation; searchedEmptyLater: the newest searched, non-reused discovery outcome of a parent
+  // execution for that (provider, cell) is newer than the price's execution and found empty or no_data (supersession).
+  // Both by ROW_NUMBER windows and joins in SQL.
+CalendarPricesRepo.latestPerCell(definitionId: string, cabin: Cabin, space: ResolvedSpace | null):
+  Array<CalendarPriceRow & CalendarMarks>;   // reworked: the same rows, one statement, with the marks joined
+CalendarPricesRepo.latestHeldBy(executionIds: readonly string[], cabin: Cabin, space: ResolvedSpace | null):
+  Array<CalendarPriceRow & CalendarMarks>;   // new: `/results?executionId=`'s rows (latest held per (provider, cell)
+                                             // among those executions, reused copies included), one statement;
+                                             // heldBy(id) stays for its other caller, read/statusSources.ts
+ItinerariesRepo.observationsForDefinition(definitionId, { executionIds, space, cabin, includeChildren }): ObservationRow[];
+  // reworked: its private rows() hydrates itineraries and segments by hash list (json_each) in two statements instead of
+  // get(hash) per itinerary, so writtenBy (the engine's alerts) gains the same fix
 ItinerariesRepo.latestVerificationOutcomes(definitionId: string, cabin: Cabin, space: ResolvedSpace | null): Map<string, CellOutcome>;
-CellsRepo.childVerificationRollUps(definitionId: string): Array<{ executionId: string; cell: CellKey; status: CellOutcomeStatus | null }>;
+CellsRepo.childVerificationRollUps(definitionId: string): Array<{ executionId: string; createdAt: IsoDateTime; cell: CellKey;
+  status: CellOutcomeStatus | null }>;
+// truncationOf and supersessionOf (apps/api/src/read/results.ts) and their per-execution outcome reads are deleted.
 
 // packages/engine/src/alerts/templates.ts
 export function appRowLink(appBaseUrl: string | null, definitionId: string, basis: ResultBasis, rowKey: string,
@@ -368,8 +398,31 @@ export function parseScope(def: SearchDefinition, q: { origins?: string; destina
   departureDate?: string; returnDate?: string }, space: ResolvedSpace):
   { space: ResolvedSpace /* airports narrowed, sorted, unique */; maxJourneyMinutes: number | null;
     datePair: { departureDate: IsoDate; returnDate: IsoDate } | null };   // throws ApiError 422
-export function classifyCells(…): CellClass[];   // one per in-scope cell: its bucket, reused, selected, itinerary-searched,
-                                                 // not reached, on demand; the one rule pairs, summary and /results' coverage use
+export interface CellClass {
+  cell: Cell;
+  bucket: 'priced' | 'empty' | 'no_data' | 'error' | 'skipped' | 'not_run';
+  reused: boolean; selected: boolean; itinerarySearched: boolean; notReached: boolean;
+  onDemand: boolean; unconfirmed: boolean; partiallyVerified: boolean;
+}
+export interface ParentFacts {   // read once per request, each one statement
+  rollUps: Map<string, { discovery: RollUp; verification: RollUp }>;   // cells.rollUps(parent.id)
+  reusedCells: ReadonlySet<string>;                                    // the parent's reused discovery outcomes
+  selected: ReadonlySet<string>;                                       // cells.selected(parent.id)
+}
+export function classifyCells(space: ResolvedSpace /* scoped */, parent: ParentFacts | null,
+  children: ReturnType<CellsRepo['childVerificationRollUps']>,
+  offers: { partiallyVerified: ReadonlySet<string>; unconfirmed: ReadonlySet<string> }): CellClass[];
+  // one per cell of `space` in generation order; bucket = the parent's discovery roll-up status when present and not
+  // null, else not_run (and every cell not_run when parent is null); no read inside
+export function summariseCells(classes: readonly CellClass[]): CoverageSummary;
+  // the only way the api builds a CoverageSummary: buckets, total (= classes.length), reused, selected,
+  // itinerarySearched and onDemand as counts of distinct cells
+
+// apps/api/src/read/datePairs.ts
+export function datePairFigures(loaded: Loaded, scope: ParsedScope, rc: RowContext): Map<number, DatePairFigure>;
+  // the one path from rows to a figure: confirmedIn, figuresByDatePair (journey rule included), the cheaper-cached
+  // staleness by thresholdFor, fromEarlierSearch from the executions' order; assembleDatePairs uses the whole map,
+  // assembleResults takes .get(datePairIndex(...)) and drops airportPair for datePairFigureSchema
 
 // apps/web/src/state/view.ts
 export type ViewId = 'dates' | 'results' | 'history' | 'definitions' | 'providers' | 'alerts' | 'status';
@@ -386,7 +439,10 @@ export interface DatesUiState { nights: { min: number; max: number } | null; fro
   sort: { key: 'price' | 'departure' | 'nights' | 'journey'; dir: 'asc' | 'desc' }; bestPerWeek: boolean; coverageOpen: boolean }
 export function parseDatesState(p: URLSearchParams, def: { origins: readonly Iata[]; destinations: readonly Iata[] }): DatesUiState;
 export function datesPatch(s: Partial<DatesUiState>): Record<string, string | null>;
-export function detailHref(pair: DatePair): string;   // detailLinkQuery with the figure's basis; every d.* kept
+export function detailHref(pair: DatePair): string;
+  // hrefWith({ [DETAIL_LINK_PARAMS.view]: 'results', [DETAIL_LINK_PARAMS.depart]: …, [DETAIL_LINK_PARAMS.return]: …,
+  //   [DETAIL_LINK_PARAMS.basis]: <figure's basis>, [DETAIL_LINK_PARAMS.row]: null }): def and every d.* kept, the
+  //   parameter names from core's one constant
 ```
 
 The "Show 10 more" count is component state, not a URL parameter: §11 puts the filters, the sort, the week switch and
@@ -433,7 +489,7 @@ Versions from the lockfile (plan Task 0.1 list and later pins). Verified 2026-10
 **Create**
 
 - `packages/core/src/datePairs/{space,figure,rank,bands,encode,decode,detailLink,index}.ts`,
-  `packages/core/src/api-contract/datePairs.ts`; tests `packages/core/test/datePairs/{space,figure,rank,bands,codec,
+  `packages/core/src/api-contract/datePairs.ts`, `packages/core/src/space/limits.ts`; tests `packages/core/test/datePairs/{space,figure,rank,bands,codec,
   detailLink}.test.ts`, `packages/core/test/api-contract/datePairs.test.ts`, `packages/core/test/helpers/datePairs.ts`
   (builds a `DecodedDatePairs` and encodes it through `encodeDatePairs`).
 - `apps/api/src/read/{datePairs,scope,calendarGap}.ts`; `apps/api/test/routes/{datePairs,datePairsBound,
@@ -445,7 +501,7 @@ Versions from the lockfile (plan Task 0.1 list and later pins). Verified 2026-10
   `apps/web/test/views/dates/logic/*.test.ts` (the pure-logic tests Stryker runs),
   `apps/web/test/views/dates/*.test.tsx` (components), `apps/web/test/state/{datesState,landing,parse}.test.ts`,
   `apps/web/test/views/results/{detail,panel}.test.tsx`, `apps/web/test/fixtures.dates.ts` (through `@gmt/core`'s
-  `encodeDatePairs`), `apps/web/test/msw/datesHandlers.ts`.
+  `encodeDatePairs`), `apps/web/test/msw/datesHandlers.ts`, `apps/web/test/tz/datesView.tz.test.tsx`.
 - `apps/web/stryker.config.json`; `apps/web/e2e/perf.spec.ts`, `apps/web/e2e/perfFixtures.ts` (through
   `@gmt/core`'s `encodeDatePairs`).
 
@@ -455,12 +511,14 @@ No web or e2e file imports from `packages/core/test`; fixtures build through `@g
 
 - `docs/superpowers/specs/2026-10-14-flight-price-optimiser-design.md` (revision 50, Task 19.0).
 - `packages/core/src/api-contract/{results,index}.ts`, `packages/core/src/index.ts`, `packages/core/src/space/generate.ts`
-  (`sortedAirportPairs`), `packages/core/src/config/schema.ts` (`DEFAULT_MAX_CELLS`), `packages/core/stryker.config.json`,
+  (`windowDays`, `sortedAirportPairs`), `packages/core/src/space/validate.ts` (its limits from `limits.ts`),
+  `packages/core/src/config/schema.ts` (`DEFAULT_MAX_CELLS` from `limits.ts`), `packages/core/stryker.config.json`,
   `packages/core/test/api-contract/{contract,wp10}.test.ts`, the core barrel tests.
 - `packages/db/src/repositories/{itineraries,calendarPrices,cells}.ts` (+ `packages/db/test/{itineraries,
   calendarPrices,cells.rollup}.test.ts`).
 - `apps/api/src/app.ts` (compress on the one path), `apps/api/src/routes/results.ts`, `apps/api/src/read/{results,pick,
-  rows,coverage}.ts`, `apps/api/test/routes/{views,contract-sweep,results}.test.ts`, `apps/api/test/helpers/seed.ts`,
+  rows,coverage,coverageView,calendar}.ts` (`calendar.ts` loses `assembleCalendarGap` in Task 19.2 and is deleted in
+  Task 19.8), `apps/api/test/routes/{views,contract-sweep,results}.test.ts`, `apps/api/test/helpers/seed.ts`,
   `apps/api/test/wiring/buildPorts.test.ts` (only where it names a retired route).
 - `packages/engine/src/alerts/templates.ts`, `packages/engine/test/alerts/templates.test.ts`.
 - `apps/web/src/{App.tsx,copy.ts}`, `apps/web/src/state/{view,resultsState}.ts`, `apps/web/src/components/{Nav,
@@ -469,10 +527,10 @@ No web or e2e file imports from `packages/core/test`; fixtures build through `@g
   view list (`test/app/shell.test.tsx`, `test/app/shellBoundary.test.tsx`, `test/app/wp10Wiring.test.tsx`,
   `test/state/resultsState.test.ts`, `test/copy/{catalogue,renderedSweep}.test.ts(x)`, `test/views/status.test.tsx`,
   `test/views/history.test.tsx`, `test/views/definitions/create.test.tsx`, `test/e2e/selectors.test.tsx`),
-  `apps/web/test/tz/dates.tz.test.tsx` (rewritten, Task 19.8), `apps/web/e2e/{smoke.spec.ts,selectors.ts}`,
+  `apps/web/test/tz/dates.tz.test.tsx` (its Calendar cases removed, Task 19.8), `apps/web/e2e/{smoke.spec.ts,selectors.ts}`,
   `apps/web/playwright.config.ts` (the `@perf` tag).
 - Root `package.json` (`mutate` runs `@gmt/web`'s), `.github/workflows/mutation.yml` (a `web` shard and gate),
-  `scripts/workflows.test.mjs`.
+  `.github/workflows/ci.yml` (`GMT_TIMING_FACTOR: 3` on the job that runs `pnpm test`), `scripts/workflows.test.mjs`.
 - `docs/setup.md`, `apps/web/PRODUCT.md`.
 
 **Delete** (Task 19.8, after the moves of §4)
@@ -489,7 +547,7 @@ No web or e2e file imports from `packages/core/test`; fixtures build through `@g
 
 **Files**: the spec. No code. First commit of the build, after rebasing onto main (revision 49, PR #28, is merged).
 
-- [ ] Write `### Revision 50: the Dates view's review (2026-10-26)` at the top of §17, in three labelled parts, and fold
+- [ ] Write `### Revision 50: the Dates view's review (2026-10-26)` at the top of §17, in four labelled parts, and fold
   each change into the section it changes (no amendment blocks):
   - **Ian ruled 2026-10-26**: (1) the board has a "best per departure week" switch, off by default, in the URL
     (`d.week=best`), applied in the browser: when on, the board shows the first-ranked date pair of each departure week
@@ -497,6 +555,13 @@ No web or e2e file imports from `packages/core/test`; fixtures build through `@g
     enters), ranked by the same rule (§11 Board). (2) While a run is in progress and the pointer is over the board or
     focus is inside it, a new read does not re-rank rows: an "N changes · Update board" button appears, reachable by
     keyboard and announced politely, and applies them; otherwise rows re-rank in place as before (§11 Run landing).
+  - **Ian confirmed 2026-10-26** (settlements of the brief's review he was shown): (1) the detail applies the journey
+    limit, keeps "cheapest found" as its headline, and shows the board's price with a one-line reason when it differs
+    (§10 `/results`' `maxJourneyMinutes` and `datePairFigure`, §11 Date pair detail); (2) superseded and not-seen figures
+    are not on the overview's colour scale: drawn with their mark and counted in the legend, so every printed band range
+    holds every price shaded in it (§11 Overview); (3) on touch, a tap on an overview cell shows its readout and a second
+    tap (or the readout's link) opens the detail (§11 Overview); (4) a search with no discovery source shows every date
+    pair as not searched, by the classification below (§6.6, §11).
   - **Settled by the orchestrator** (po-010's split): `journeyLeftOut` (its definition in §5 above; 0 without a journey
     limit); every cell of the current space in scope that the latest parent run has no discovery result for (a day the
     relative window rolled in, widened nights, an added airport, a roll-up with no discovery status) counts as not
@@ -508,20 +573,28 @@ No web or e2e file imports from `packages/core/test`; fixtures build through `@g
     shade,overview,keys}.ts`), run over their pure unit tests only, never the jsdom component tests, at ≥ 80% (§9's
     mutation list); arrival times shown on the board row and in the detail only where the figure's own data carries
     them, with no arrival filter; the route reads what the latest parent run, its on-demand children and the scope
-    need through a fixed number of grouped statements, never one per cell, past run, child or itinerary (§10, §16).
+    need through a fixed number of grouped statements, never one per cell, past run, child or itinerary, and
+    `/results?executionId=` reads the same way with its truncation and supersession marks (§10, §16); every coverage
+    summary the api sends (the date-pairs route, `/results` scoped, unscoped and by execution, and the coverage route's
+    summary) is the sum of one per-cell classification, so the totals always agree, and the coverage route's
+    not-searched count now includes days a relative window rolled in, widened nights and added airports (§10 coverage
+    route, §6.6); each figure carries `fromEarlierSearch`, and how far checked says the price comes from an earlier
+    search exactly when it is true (§10, §11); an arrival on a later date than its leg's departure shows its day offset
+    ("arrives 06:40 +1", the full date in words for assistive technology) (§11 Board, Date pair detail).
   - **Settled with the brief's review** (the brief's author, from the roster's findings; Ian may overturn any): the
     §10 query is a wire form of strings and the api answers 422 itself; the shape additions of §5 above
-    (`notReached`, the cheaper-cached origin, destination, truncated and stale columns, `arriveOut`, `arriveBack`) and
+    (`notReached`, the cheaper-cached origin, destination, truncated and stale columns, `departOut`, `arriveOut`,
+    `departBack`, `arriveBack`) and
     the refinement rules listed there; "cached from £X" only from a current (not superseded) calendar price, named with
     its own airport pair; the date pair's counts are distinct cells; the scope's airports are sorted and unique;
     §11's last rank tie (the airport pair's order) is removed, because each date pair has one figure and one index, so
-    departure and nights already make the order total; superseded and not-seen figures are not on the overview's scale
-    (drawn with their mark and counted in the legend), so every printed band range holds every price shaded in it;
-    the stay filter applies before ranking and shading, and bands fold the filtered stay range; a tap on an overview
-    cell shows its readout, a second tap opens the detail; `/results` takes `maxJourneyMinutes` and returns
-    `datePairFigure` on a date-pair read, and the detail header shows the board's price beside "cheapest found" when
-    they differ; the calendar-gap banner lists only cells in scope and names its reference price as across all of the
-    search's airport pairs; the Dates synthetic-banner rule (Task 19.4); `DEFAULT_MAX_CELLS` written once.
+    departure and nights already make the order total; the stay filter applies before ranking and shading, and bands
+    fold the filtered stay range; the calendar-gap banner lists only cells inside the airport scope and the stay filter
+    and names its reference price as "across the whole search"; the Dates and detail synthetic-banner rule (Tasks 19.4,
+    19.6); the space's limits written once in `core/space/limits.ts`; §9's time limits (the route's 3 s, the browser's
+    1.5 s and 200 ms) are multiplied by `GMT_TIMING_FACTOR` (default 1; the CI job that runs `pnpm test` sets 3,
+    because shared runners are slower and noisier than the operator's machine, and a limit that fails on noise teaches
+    nothing), while the statement counts and byte sizes stay exact.
 - [ ] §16's row 19 names the grouped db reads and `encodeDatePairs`; §9 item 5's bound test names its axes (Task 19.2)
   and item 6 the web mutation list.
 - [ ] **Run**: `pnpm exec vitest run scripts/wording.test.mjs` and `pnpm --filter @gmt/api exec vitest run
@@ -531,8 +604,8 @@ No web or e2e file imports from `packages/core/test`; fixtures build through `@g
 ### Task 19.1: `core`: space, contract, codec, figure precedence, ranking, week, bands, detail link (first failing test)
 
 **Files**: create `packages/core/src/datePairs/*`, `packages/core/src/api-contract/datePairs.ts`, their tests and
-`packages/core/test/helpers/datePairs.ts`; modify `space/generate.ts`, `config/schema.ts`, the barrels and
-`packages/core/stryker.config.json`.
+`packages/core/test/helpers/datePairs.ts`, and `space/limits.ts`; modify `space/generate.ts`, `space/validate.ts`,
+`config/schema.ts`, the barrels and `packages/core/stryker.config.json`.
 **Consumes**: §4's core helpers. **Produces**: §5's core interfaces.
 
 - [ ] **Write the failing tests.**
@@ -579,7 +652,10 @@ No web or e2e file imports from `packages/core/test`; fixtures build through `@g
   takes the first by generation order and then `resultRowKey`, whatever the input order (property: the pick is the same
   for every permutation); `pickCalendarFigure` prefers a current over a superseded price even when the superseded one is
   cheaper, and returns the cheapest superseded one when nothing is current, ties by generation order then
-  `resultRowKey`. `figuresByDatePair`: candidates outside the space or the scope's airports are dropped;
+  `resultRowKey`. One case per tie level, for each of the two picks, so every arm of `cellOrder` and `tieOrder` runs:
+  equal keys on cells that differ only in origin, only in destination, only in departure date, only in return date;
+  the same cell with two different row keys (an itinerary hash against `calendar:<id>`, and two hashes); and two
+  candidates with the same cell and the same row key (the first in input order stays). `figuresByDatePair`: candidates outside the space or the scope's airports are dropped;
   `maxJourneyMinutes` 600 drops a candidate with `totalMinutes` 601, keeps 600 and keeps `null`; a date pair whose
   every figure-eligible candidate was dropped for a known journey time has no figure and `journeyLeftOut` equal to
   those airport pairs; a date pair whose only over-limit prices are `failed` or `partially-verified` has no figure and
@@ -590,11 +666,13 @@ No web or e2e file imports from `packages/core/test`; fixtures build through `@g
   (2027-01-30 to 2027-02-02), the leap day (2028-02-28 to 2028-03-01, 29 Feb present) and the 2027→2028 boundary, and
   over `minNights` 0 (index offset 0 returns on the departure date); `datePairIndex` is null for a departure outside the
   window, a nights value outside the range and a return before the departure; an expired window (`departureFrom` after
-  `departureTo`, as `resolveWindow` gives an absolute window that has passed) has `dayCount` 0, `datePairCount` 0 and
-  every `datePairIndex` null; `datePairCount` is 182 × 12 = 2,184 for the worked example's default space and
+  `departureTo`, as `resolveWindow` gives an absolute window that has passed) has `datePairCount` 0 and
+  every `datePairIndex` null, and `windowDays` 0; `datePairCount` is 182 × 12 = 2,184 for the worked example's default space and
   400 × 91 = 36,400 at the largest (0–90 nights), and equals `countCells` over the same space with one airport pair
   (property); `sortedAirportPairs(['LHR','LGW'], ['JFK','EWR'])` is LGW→EWR, LGW→JFK, LHR→EWR, LHR→JFK, and
-  `generateCells` still passes its own tests after it is refactored onto it.
+  `generateCells` and `countCells` still pass their own tests after they are refactored onto `windowDays` and
+  `sortedAirportPairs`; `MAX_DATE_PAIRS` equals `MAX_WINDOW_DAYS × (MAX_NIGHTS + 1)` and `validateSearchSpace` still
+  refuses 401 days and 91 nights through the moved constants.
 
   `test/datePairs/rank.test.ts`, table-driven (one row per tie rule, each built so only that rule decides):
 
@@ -743,14 +821,14 @@ No web or e2e file imports from `packages/core/test`; fixtures build through `@g
   }
   ```
 
-  `space.ts`: `dayCount` clamps at 0 as `countCells` does; `datePairAt` is `dayIndex = Math.floor(i / stays)`,
+  `space.ts`: the day count is `generate.ts`'s `windowDays` (the one clamp, shared with `countCells`); `datePairAt` is `dayIndex = Math.floor(i / stays)`,
   `nights = minNights + (i % stays)`, dates by `addDays`; `datePairIndex` uses `daysBetween` and returns null outside.
   `figuresByDatePair` drops candidates outside the scope's space, counts per date pair the airport pairs whose every
   figure-eligible candidate has `totalMinutes !== null && totalMinutes > maxJourneyMinutes` (and drops those
   candidates), groups the rest by `datePairIndex`, and calls `pickFigure` per group. `encodeDatePairs` writes every
   column in one pass with the provenance table keyed by `provenanceKey`; `decodeDatePairs` walks `pairs` once and
   `figures` once. The contract's `superRefine` is one pass, reporting the first offending index per rule.
-  `config/schema.ts`'s `MAX_CELLS_PER_DEFINITION` default reads `DEFAULT_MAX_CELLS`.
+  `config/schema.ts`'s `MAX_CELLS_PER_DEFINITION` default reads `DEFAULT_MAX_CELLS` from `space/limits.ts`.
   Add the eight files to `packages/core/stryker.config.json`'s `mutate` and move them in this brief's front matter
   from `pending` to `mutate` in the same commit.
 - [ ] **Run to verify they pass**: the same command, green; `pnpm --filter @gmt/core test` green at 100% (no
@@ -762,24 +840,32 @@ No web or e2e file imports from `packages/core/test`; fixtures build through `@g
 ### Task 19.2: The db reads, the date-pairs route and `/results`' scope
 
 **Files**: `packages/db/src/repositories/{itineraries,calendarPrices,cells}.ts` and their tests;
-`apps/api/src/read/{datePairs,scope,calendarGap,results,pick,rows,coverage}.ts`, `routes/results.ts`, `app.ts`;
+`apps/api/src/read/{datePairs,scope,calendarGap,calendar,results,pick,rows,coverage,coverageView}.ts`,
+`routes/results.ts`, `app.ts`; `.github/workflows/ci.yml` and `scripts/workflows.test.mjs` (`GMT_TIMING_FACTOR`);
 `packages/core/src/api-contract/{index,results}.ts` (the ROUTES entry, the scope fields, `datePairFigure`); the api
 tests named in §7.
 **Consumes**: Task 19.1; §4's api helpers. **Produces**: §5's db methods, `parseScope`, `classifyCells`,
-`GET /api/definitions/:id/date-pairs`, `/results` scoped.
+`summariseCells`, `datePairFigures`, `GET /api/definitions/:id/date-pairs`, `/results` scoped, the coverage route's
+summary.
 
 - [ ] **Write the failing tests.**
 
-  **db** (each method: one statement, by a `prepare` spy; equal to today's per-execution or per-cell result over a seed
-  with several runs; with the scope's space pushed into the SQL):
+  **db** (each method: a fixed number of statements, by a `prepare` spy; with the scope's space pushed into the SQL;
+  equal, over a seed with several runs, to a reference the test computes the old way: the per-execution and per-cell
+  algorithm of today's `truncationOf`, `supersessionOf`, `get(hash)` and `latestVerificationOutcomeForCell`, written out
+  in the test file, since the reworked methods replace those paths):
   - `latestVerificationOutcomes`: for every cell, the outcome `latestVerificationOutcomeForCell` returns, including a
     tie between two verification providers' outcomes with one `fetched_at` in one execution (both queries end their
     `ORDER BY` with `o.provider_id`, so they agree whatever the plan); a cell with only an error outcome is absent.
-  - `CalendarPricesRepo.latestInScope`: the rows `latestPerCell` gives, restricted to the scope; `sourceLastError`
-    equal to what `truncationOf` reads; `searchedEmptyLater` equal to `supersessionOf`'s answer over a history of five
-    parent runs (a newer run that skipped, errored or reused the cell does not count as a search).
-  - `ItinerariesRepo.observationsInScope`: the rows `observationsForDefinition` gives, with itineraries and segments
-    hydrated in a fixed number of statements however many distinct itineraries there are.
+  - `CalendarPricesRepo.latestPerCell` (reworked): the same rows as before, restricted to the scope when given;
+    `sourceLastError` equal to the reference truncation read; `searchedEmptyLater` equal to the reference supersession
+    answer over a history of five parent runs (a newer run that skipped, errored or reused the cell does not count as a
+    search).
+  - `CalendarPricesRepo.latestHeldBy`: for one and for several executions, the latest held row per (provider, cell)
+    the old `heldBy` loop gives, reused copies included, each with `sourceLastError` taken from the run that fetched it
+    (through `reused_from_execution_id`) and `searchedEmptyLater` as above.
+  - `ItinerariesRepo.observationsForDefinition` (reworked): the same rows as before, with itineraries and segments
+    hydrated in two statements whether there are 1 or 500 distinct itineraries; `writtenBy` likewise.
   - `CellsRepo.childVerificationRollUps`: every completed child's verification roll-up for its cell, in one statement.
 
   **The classification** (`test/routes/datePairsClassify.test.ts`, a route property test over seeded states): for each
@@ -789,7 +875,10 @@ tests named in §7.
   parent run in progress, (h) a cell whose roll-up has verification outcomes only (discovery status null): the body
   passes `datePairsResponseSchema`, every date pair's six buckets sum to `scope.airportPairs`, `summary.buckets` equal
   the column sums and `summary.total === scope.cells`; `/results` scoped to any of those date pairs reports the same
-  six counts in its `coverage`. Before any parent run: every cell is not searched, `executionId` null.
+  six counts in its `coverage`; the coverage route's `summary` equals the unfiltered date-pairs summary (after the
+  one-day roll-forward too) while its per-stage × provider breakdown keeps the run's own cells; unscoped `/results` and
+  `/results?executionId=` build their `coverage` through `summariseCells` as well. Before any parent run: every cell
+  is not searched, `executionId` null. A search with no discovery source: every cell not searched.
 
   **The route** (`test/routes/datePairs.test.ts`, a migrated in-memory database seeded through `test/helpers/seed.ts`
   with the worked example's four airport pairs):
@@ -806,8 +895,11 @@ tests named in §7.
     `cheaperCached` on a fresh verified LHR→JFK figure that hides a cheaper LGW→EWR calendar price, with LGW and EWR in
     its columns; a date pair whose only cheaper calendar price is superseded has none; a truncated cheaper price carries
     `cheaperCachedTruncated`; `cheaperCachedStale` for a provider no longer among the definition's discovery providers
-    follows the figure's own staleness rule; a truncated tile's calendar figure carries `truncated`; `arriveOut` and
-    `arriveBack` from a verified figure's segments and null on a calendar figure.
+    follows the figure's own staleness rule; a truncated tile's calendar figure carries `truncated`; `departOut`,
+    `arriveOut`, `departBack` and `arriveBack` from a verified figure's segments (an overnight return among them) and
+    null on a calendar figure; `fromEarlierSearch` false on a figure the latest parent run fetched while another airport
+    pair of the same date pair is not searched, true on a figure an earlier run fetched, false on one an on-demand search
+    after the latest run fetched, false before any parent run.
   - **Distinct cells**: two completed children on one cell give `onDemand` 1; two partially-verified itineraries in one
     cell give `partiallyVerified` 1; a partially-verified-only date pair has no figure; an unconfirmed offer is never a
     figure and counts once in `unconfirmed`; a selected cell whose verification is `not_run`, one `skipped:budget` and
@@ -816,8 +908,9 @@ tests named in §7.
     stored row's provenance as the row carries it (after the assumed-bound mark); two figures whose provenances differ
     in one field each get distinct table entries.
   - **Board and detail agree** (prov-014): for each date pair with a figure, `/results` scoped to that date pair, the
-    same airports and the figure's basis returns `datePairFigure` deep-equal to the board's figure and contains a row
-    (or other offer) with the figure's price, provenance and cell.
+    same airports, the same journey limit and the figure's basis returns `datePairFigure` deep-equal to the board's
+    figure with `airportPair` removed, and contains a row (or other offer) with the figure's price, provenance and cell.
+    Both come from `datePairFigures`, the one path from rows to a figure.
   - `maxJourneyMinutes=600`: a verified price of 601 minutes is left out of its figure, one of 600 and a calendar price
     with no journey time stay; a date pair whose every figure-eligible price was left out has no figure, keeps its
     buckets and has `journeyLeftOut` equal to those airport pairs; without the parameter every `journeyLeftOut` is 0.
@@ -851,51 +944,65 @@ tests named in §7.
   hook's timeout set explicitly to 120 s):
   - **Query count**: a `prepare` spy counts statements per request, and the count is equal between the smaller and the
     larger seed on each axis that grows: (a) 10 against 500 verified cells with distinct itineraries, (b) 1 against 20
-    parent executions over the same cells, (c) 0 against 20 completed children, (d) 1,000 against 50,000 cells. A
-    statement per cell, per past run, per child or per itinerary fails it.
+    parent executions over the same cells, (c) 0 against 20 completed children, (d) 1,000 against 50,000 cells; and
+    the same axes on `/results` (whole space, one date pair, and `?executionId=` of the oldest of 20 runs, so its
+    truncation and supersession marks are read without a scan of each past run). A statement per cell, per past run,
+    per child or per itinerary fails it.
   - **Time and size**: a definition of 50,000 cells in scope (400 days × 25 nights × 5 airport pairs), with history 20
     parent runs deep over those cells (their discovery outcomes and calendar prices), every cell priced, a few hundred
-    verified observations and about one distinct provenance per 49 cells: `it(…, { timeout: 3_000 })` answers 200,
+    verified observations and about one distinct provenance per 49 cells: `it(…, { timeout: 3_000 * timingFactor })`
+    answers 200 (`timingFactor` is `Number(process.env.GMT_TIMING_FACTOR ?? 1)`, a positive number else the test
+    throws),
     the uncompressed body is at most 4 MiB (4 × 1024 × 1024 bytes) and the gzip body at most 512 KiB. A second case at
     36,400 date pairs (400 × 91, one airport pair, every one with a figure) holds the same bounds. A third: a
     100,000-cell definition (the operator's raised setting) read with `origins` bringing the scope to 50,000 answers
     200 within the same bounds, reading only the scope's cells (the SQL carries the scope).
-  - The count and size assertions are the deterministic guards. The 3 s limit is §10's starting default (revision 48:
-    tunable); if it proves unstable on CI hardware the spec's number is revisited, never retried in the test.
+  - The count and size assertions are exact gates everywhere. The 3 s limit is §10's starting default; it is exact on
+    the operator's machine (factor 1) and multiplied by 3 on CI, where `ci.yml` sets `GMT_TIMING_FACTOR: 3` on the job
+    that runs `pnpm test` (revision 50: shared runners are slower and noisier, and a limit that fails on noise proves
+    nothing; the factor never applies to counts or sizes, and no test is ever retried). `scripts/workflows.test.mjs`
+    pins that env line.
 
 - [ ] **Run to verify they fail**: `pnpm --filter @gmt/db exec vitest run test/itineraries.test.ts
-  test/calendarPrices.test.ts test/cells.rollup.test.ts` → the new methods are not functions;
+  test/calendarPrices.test.ts test/cells.rollup.test.ts` → the new methods are not functions and the reworked ones
+  still issue a statement per itinerary;
   `pnpm --filter @gmt/api exec vitest run test/routes/datePairs.test.ts test/routes/datePairsBound.test.ts
   test/routes/datePairsClassify.test.ts test/routes/resultsScope.test.ts` → 404 on `/api/definitions/:id/date-pairs`
   and the scope tests fail on unscoped counts.
 - [ ] **Implement.**
-  - `db`: the four methods of §5, each one statement with `ROW_NUMBER()` windows and `json_each` as §6 says; the scope's
-    space (airports, dates, nights) in the `WHERE`. If the history-deep seed needs an index to meet 3 s, add it in a
+  - `db`: §5's methods, each a fixed number of statements with `ROW_NUMBER()` windows and `json_each` as §6 says; the
+    scope's space (airports, dates, nights) in the `WHERE`; the reworked methods keep their signatures and callers. If the history-deep seed needs an index to meet 3 s, add it in a
     new migration numbered after main's latest at build time, with its migration test.
   - `read/scope.ts`: `parseScope` splits each comma list, keeps only the definition's codes (else 422
     `unknown_airport`), sorts and deduplicates them, treats empty or absent as all; parses the journey limit
     (`/^\d+$/`, 60..6000, else 422 `invalid_journey_limit`) and the date pair (both or neither, ISO dates, inside the
-    space); `classifyCells` walks the in-scope cells of the current space once: a cell's bucket is the latest parent
-    run's discovery roll-up status when it exists and is not null, else `not_run` (revision 50; before any parent run
-    every cell is `not_run`); `reused` from the parent's reused discovery outcomes; selected, itinerary-searched and
-    not-reached from its selections and verification roll-ups; on demand from `childVerificationRollUps` (one read,
-    shared). Both routes and both summaries use it, so the columns, the summary and `/results`' scoped coverage cannot
-    disagree.
+    space); `classifyCells` (§5's signature; its inputs are read once per request by the caller and it reads nothing
+    itself) walks the in-scope cells of the current space once: a cell's bucket is the parent run's discovery roll-up
+    status when it exists and is not null, else `not_run` (revision 50; before any parent run every cell is `not_run`);
+    `reused` from the parent's reused discovery outcomes; selected, itinerary-searched and not-reached from its
+    selections and verification roll-ups; on demand from `childVerificationRollUps`. `summariseCells` sums it into the
+    one `CoverageSummary` every caller sends: the date-pairs route, `/results` (scoped and unscoped: the latest parent
+    over the scope or the current space; `?executionId=`: that run as the parent over the current space) and
+    `read/coverageView.ts`'s `summary` (the latest parent over the current space; its per-stage × provider breakdown,
+    errors and on-demand list stay as they are). `coverageSummaryFor` is deleted.
   - `read/results.ts`: `loadRows(def, ports, { executionIds?, scope? })` reads through the grouped methods (scope
     pushed into SQL; the whole space when absent, so `excluded` counts stay); `notSeenResolver` takes the
-    `latestVerificationOutcomes` map; `supersessionOf` and `truncationOf` read the columns `latestInScope` returns;
-    `assembleResults` applies `parseScope` before `chooseBasis` and ranking and adds `datePairFigure` through `core`'s
-    `pickFigure` over the scoped rows.
+    `latestVerificationOutcomes` map; calendar rows come from `latestPerCell` (whole history) or `latestHeldBy`
+    (`?executionId=`), each with its truncation and supersession columns, and `truncationOf` and `supersessionOf` are
+    deleted; `assembleResults` applies `parseScope` before `chooseBasis` and ranking and, on a date-pair read, sets
+    `datePairFigure` from `datePairFigures(…).get(datePairIndex(…))` with `airportPair` dropped.
   - `read/datePairs.ts` `assembleDatePairs(def, query, ports)`: `parseScope`; cells = `countCells(scoped space)`, over
-    `DEFAULT_MAX_CELLS` (fixed, whatever `MAX_CELLS_PER_DEFINITION` says, §10) → 422 `too_many_cells`; one `loadRows` with the scope; `classifyCells`;
-    figures through `figuresByDatePair` over `loaded.verified.filter(confirmedIn(loaded))` and `loaded.calendar`;
-    cheaper-cached staleness from the same `thresholdFor` as the figure; a `DecodedDatePairs` built in one pass and
-    written by `encodeDatePairs`. It stays synchronous from its first read to its last
+    `DEFAULT_MAX_CELLS` (fixed, whatever `MAX_CELLS_PER_DEFINITION` says, §10) → 422 `too_many_cells`; one `loadRows`
+    with the scope; `classifyCells` and `summariseCells`; figures from `datePairFigures` (which applies `confirmedIn`,
+    calls `figuresByDatePair`, takes the cheaper-cached staleness from the same `thresholdFor` as the figure, and sets
+    `fromEarlierSearch` by comparing the row's execution's creation with the latest parent's); a `DecodedDatePairs`
+    built in one pass and written by `encodeDatePairs`. It stays synchronous from its first read to its last
     (`// why: the api process is the only writer and better-sqlite3 is synchronous, so no engine write lands between
     these reads; an await here would break that snapshot`), and so does the scoped `assembleResults`.
   - `read/pick.ts`: `pickVerified` and `pickCalendar` delegate to `core`'s `pickVerifiedFigure` and
     `pickCalendarFigure` (one rule; the calendar-gap reference keeps using them). `read/coverage.ts`'s
     `onDemandSearched` reads `childVerificationRollUps` once instead of one roll-up read per child.
+  - `ci.yml`: `GMT_TIMING_FACTOR: 3` on the job that runs `pnpm test`, with a `# why:` naming revision 50's reason.
   - `read/calendarGap.ts`: `assembleCalendarGap` moved out of `calendar.ts` unchanged.
   - `routes/results.ts` and `core`'s ROUTES: `route('GET', '/definitions/:id/date-pairs', datePairsResponseSchema,
     { query: datePairsQuerySchema })` beside `/results`; `app.ts`: `compress` on that path.
@@ -968,13 +1075,17 @@ tests named in §7.
   - **Header line**: the search's name; the run with status and age ("run finished 2h ago", "run in progress, started
     40 min ago", "run paused 3h ago: <reason>"); the coverage line in §11's form over the cells in view, linking to the
     coverage section; with filters set, "2 of 4 airport pairs · 10–14 nights"; the calendar-gap banner, when a
-    verification provider is configured, lists only the gap cells inside the airport scope, names its reference price
-    "across all of this search's airport pairs", and links each cell to its date pair's detail (`detailHref`), where
-    the verify action runs (Task 19.6).
+    verification provider is configured, lists only the gap cells inside the airport scope and the stay filter (each
+    gap cell carries its cell, nights included, so this is done in the browser), names its reference price "across the
+    whole search" (it is not narrowed by any filter), and links each cell to its date pair's detail (`detailHref`),
+    where the verify action runs (Task 19.6); under `d.nights=10-14` a 20-night gap cell is not listed and the
+    reference label is unchanged.
   - **Board**: a `table` captioned "Best dates", with one caption line saying prices a later search no longer found rank
     after current ones; columns rank, depart, return, nights, price, how far checked, journey time (with "arrives
-    HH:MM" for each direction when `arriveOut`/`arriveBack` carry a well-formed local time, nothing otherwise),
-    airports; rows in `rankDatePairs` order; the rank stays the price rank whatever the sort; sort buttons for price
+    HH:MM" for each direction when `arriveOut`/`arriveBack` carry a well-formed `YYYY-MM-DDTHH:MM` local time, nothing
+    otherwise; when the arrival's date is later than that direction's `departOut`/`departBack` date, the day offset
+    follows, "arrives 06:40 +1", with the arrival's full date in words in visually hidden text; an overnight return
+    pins it), airports; rows in `rankDatePairs` order; the rank stays the price rank whatever the sort; sort buttons for price
     (default; the rank order, "current prices first" in its accessible description), departure, nights and journey
     time with `aria-sort`, a second press reverses, unknown journey time last both ways, the sort written to `d.sort`;
     10 rows, then "Show 10 more" adding 10, with "showing 10 of P date pairs with a price"; the week switch shows one
@@ -988,8 +1099,9 @@ tests named in §7.
   - **How far checked** (`logic/howFar.test.ts`): class verified or a calendar price; itinerary-searched, selected but
     not reached (`notReached`), or not selected, and a selected cell in error worded as an error, never "not reached";
     partially-verified and unconfirmed counts; the date pair's airport pairs without a price by bucket ("3 no cached
-    data"); a figure on a date pair some of whose airport pairs are not searched says its price comes from an earlier
-    search; a truncated figure says the read was cut short; never "searched", never a banned word, "verified" only
+    data"); the line "price from an earlier search" exactly when the figure's `fromEarlierSearch` is true (revision 50),
+    and never on a figure the latest run fetched while another airport pair of its date pair is not searched (that pair
+    reads "1 of 2 airport pairs not searched"); a truncated figure says the read was cut short; never "searched", never a banned word, "verified" only
     beside a class-verified figure.
   - **Run updates** (`logic/refresh.test.ts` and the component): while the latest parent run is pending or running, a
     progress change from the status bar's execution poll re-reads the route at most once per 30 s, with a trailing
@@ -1009,8 +1121,16 @@ tests named in §7.
     face: provider mark, destination, short age, "not checked" on a calendar price, "≈" on a converted price), then how
     far checked (with "cheapest of the rows read" and "read was cut short" on a truncated figure), then journey time,
     arrival and airports; point of sale is not on the card. Sizes and sideways scroll are Playwright's (Task 19.9).
-  - **Provenance**: every amount on the board and the cards renders inside `[data-testid="price-cell"]`; a figure whose
-    provenance is removed from the table fails to render (the boundary's message, no amount in the DOM).
+  - **Provenance**: every amount on the board and the cards renders inside `[data-testid="price-cell"]`. Two seams:
+    (1) `Board` given a decoded `DatePair` whose figure's provenance lacks a required field renders the price boundary's
+    message and no amount in the DOM; (2) a response body whose provenance index is out of range fails the contract,
+    and the view shows its load error with no amount in the DOM.
+  - **Time zones** (`test/tz/datesView.tz.test.tsx`, run by `test:tz` under `America/Los_Angeles` and `Asia/Tokyo`):
+    a 2027-03-14 date pair reads 14 Mar on the board and in the card, and a 2027-04-01 date pair stays in April's
+    group; the existing `JAN_OFFSET` control case is copied in so the file cannot pass in UTC alone. Its first failure
+    is a time-zone failure: before the board's date formatting is written, the test is run against a formatter built
+    on `new Date(iso)` and fails under `America/Los_Angeles` (1 Apr reads 31 Mar); the real formatter, from the string,
+    then passes.
   - **Mutation workflow**: `scripts/workflows.test.mjs` expects a `web` entry in `mutate` (one shard) and in
     `mutation-gate`.
 - [ ] **Run to verify they fail**: `pnpm --filter @gmt/web exec vitest run test/views/dates test/state` → modules
@@ -1046,12 +1166,13 @@ among them).
   - **Not searched, defined** (revision 50): a date pair with no figure whose `notRun` equals its airport pairs is "not
     searched" and is never shaded; a date pair with a figure is shaded (when current) and, if any of its airport pairs is
     not searched, also carries the striped "partly not searched" mark; a figure from an earlier run on a date pair the
-    in-progress run has not reached is shaded, striped, and its readout says the price comes from an earlier search.
+    in-progress run has not reached (its `fromEarlierSearch` true) is shaded, striped, and its readout says the price
+    comes from an earlier search.
   - **Distinct marks**: the six marks (not searched, no fares, no cached data, error, skipped, partly not searched) and
     the "not checked", "superseded" and "not seen" marks render pairwise-distinct non-colour glyphs or patterns (by
-    class or SVG pattern id) in the cells and the same ones in the legend with the word beside each; under
-    `forced-colors: active` the glyphs and stripes remain (no `background-color`-only mark); each mark meets the
-    contrast test (`test/contrast.ts`) on every band shade.
+    class or SVG pattern id) in the cells and the same ones in the legend with the word beside each, and no mark is
+    drawn by `background-color` alone (a class-level guard; jsdom cannot apply `forced-colors`, so the browser check is
+    the smoke's, Task 19.9); each mark meets the contrast test (`test/contrast.ts`) on every band shade.
   - **Shading** (`logic/shade.test.ts`, with the ported scale tests): one scale for current verified and calendar figures
     together, by `quintileBand` over their prices in view (ties share a band); fewer than ten figures, or a spread under
     10% of the cheapest, gives the flat shade and the legend says so; superseded and not-seen figures are not on the
@@ -1081,6 +1202,9 @@ among them).
     row lights its cell and a ringed cell lights its row; neither calls `scrollIntoView` (spy).
   - **Phone**: one month at a time with Previous and Next month buttons and a swipe (pointer events), each day a row
     with its strip across the width, the legend and readout present (sizes in Task 19.9).
+  - **Time zones** (added to `test/tz/datesView.tz.test.tsx`): under both zones a 2027-03-31 date pair sits in March's
+    month of the overview and a 2027-04-01 one in April's, and the readout names 14 Mar for a 2027-03-14 date pair;
+    first run against a `new Date(iso)` month helper and seen to fail under `America/Los_Angeles`, as in Task 19.4.
   - **Coverage section** (what the Coverage view held, moved, with `coverage.test.tsx`'s cases ported): folded by
     default; the header line's coverage link, `d.coverage=open` and `?view=coverage` (Task 19.7) open it; counts per
     stage × provider with the six-bucket breakdown and "searched" as the umbrella beside it (the one place it appears)
@@ -1118,7 +1242,9 @@ DetailHeader}.tsx`, `views/Results/panel.ts` (moved from `views/Calendar`), `sta
     price: £X · <airport pair> · <basis>") and says why they differ ("the board prefers a price the latest search
     returned, then a fresh one"; revision 50). Opened under `d.journey=600`, no row over 600 minutes leads; opened with a
     not-seen verified row cheaper than the board's figure, both lines show and say so.
-  - Arrival: the primary row shows "arrives HH:MM" for each direction where the row has segments.
+  - Arrival: the primary row shows "arrives HH:MM" for each direction where the row has segments, with "+1" (or
+    "+2") and the arrival's full date in visually hidden text when the last segment's `arriveLocal` date is later than
+    the first segment's `departLocal` date; an overnight return pins it.
   - The basis switch opens on `basis=` from the link (a calendar figure's row opens on the calendar basis) and else on
     §6.9's default, and the header says why; switching keeps the date pair.
   - "Back to dates" links to `?view=dates` with every `d.*` parameter kept and `depart`, `return`, `basis`, `row`
@@ -1134,7 +1260,11 @@ DetailHeader}.tsx`, `views/Results/panel.ts` (moved from `views/Calendar`), `sta
   - `row=` opens and scrolls to that row, or says the row is no longer among this date pair's results.
   - A date pair without a row says so with its coverage line and a link to the coverage section, never "no flights".
   - 375 px: price, provenance, the class badge, dates and stops stay on the primary row.
-  - The synthetic banner follows Task 19.4's rule over the scoped read.
+  - The synthetic banner (revision 50): shown when any provenance in the scoped `/results` response is synthetic or the
+    fixture provider's: every row's, every row's `otherOffers`, `cheapest`, `datePairFigure.price.provenance`,
+    `datePairFigure.cheaperCached.provenance`, and the calendar-gap prices the detail marks; whatever `/providers` says.
+    Test: opened on the verified basis with real verified rows and a synthetic calendar `datePairFigure`, the banner
+    shows.
 - [ ] **Run to verify they fail**: `pnpm --filter @gmt/web exec vitest run test/views/results` → the scoped request
   is missing its parameters and the header lacks the date pair.
 - [ ] **Implement**; the panel is the Calendar's `CellPanel`/`PanelSections`/`panel.ts` moved, not rewritten.
@@ -1179,26 +1309,37 @@ DetailHeader}.tsx`, `views/Results/panel.ts` (moved from `views/Calendar`), `sta
 ### Task 19.8: Remove the retired views and routes; the TZ suite
 
 **Files**: §7's Delete list; `packages/core/src/api-contract/{results,index}.ts`, `apps/api/src/routes/results.ts`,
-`apps/web/src/api/*`, `apps/web/package.json` (`test:tz` → `test/tz test/views/dates`),
-`apps/web/test/tz/dates.tz.test.tsx`, the tests that named them.
+`apps/web/src/api/*`, `apps/web/package.json` (`test:tz` → `test/tz test/views/dates`), `apps/web/test/tz/dates.tz.test.tsx`
+(its Calendar cases removed; its Results and formatting cases stay), the tests that named them. The Dates view's own
+time-zone cases were written first, beside the view, in Tasks 19.4 and 19.5.
 
 - [ ] **Write the failing tests first:**
   - `packages/core/test/api-contract/contract.test.ts`'s ROUTES list no longer has `GET /definitions/:id/calendar` or
     `/duration-analysis` and has `/date-pairs`; `apiContract` exports no `calendarDaySchema`, `calendarQuerySchema`,
     `calendarResponseSchema` or `durationAnalysisResponseSchema`; History's "never the calendar" test asserts no request
     to `/date-pairs` either; the shell test's view list is the seven views.
-  - `test/tz/dates.tz.test.tsx`, rewritten for the Dates view (it imported `views/Calendar` and `fixtures.wp10`): under
-    `GMT_TEST_TZ=America/Los_Angeles` and `Asia/Tokyo`, a 2027-03-14 date pair stays 14 Mar on the board, in the
-    readout, in the overview's month grouping (a 31 Mar date pair stays in March) and in the detail header, with the
-    existing `JAN_OFFSET` control so the suite cannot pass in UTC alone.
+  - `test/tz/datesView.tz.test.tsx` gains the detail header's case: a 2027-03-14 → 2027-03-28 detail reads 14 Mar and
+    28 Mar under both zones.
 - [ ] **Run to verify they fail**: `pnpm --filter @gmt/core exec vitest run test/api-contract` → the old routes are
-  still listed; `pnpm --filter @gmt/web run test:tz` → the rewritten file fails on the missing Dates hooks.
+  still listed; the shell test still sees nine views.
 - [ ] **Implement**: delete (the calendar gap already lives in `read/calendarGap.ts`, Task 19.2); remove the query keys
   and invalidations for `calendar` and `duration` and add `date-pairs` to `useExecutionActions`' refresh list; keep
   `recharts` (History uses it). `grep -rn "duration-analysis\|/calendar'\|calendarState\|DurationView\|CalendarView\|
-  CoverageView" apps packages --include='*.ts' --include='*.tsx'` finds nothing. The PR's ported-tests table (§0) lists
-  every deleted `it(…)` title.
-- [ ] **Run to verify they pass**: `pnpm -r typecheck`, `pnpm test`.
+  CoverageView" apps packages --include='*.ts' --include='*.tsx'` finds nothing. `test:tz` runs `test/tz
+  test/views/dates`, and `dates.tz.test.tsx` no longer imports `views/Calendar` or `fixtures.wp10`'s calendar builders.
+- [ ] **Ported titles**: list every `it(…)` title of the deleted test files and print those no surviving test holds:
+
+  ```bash
+  git diff --name-only --diff-filter=D main...HEAD | grep -E '\.test\.tsx?$' | while read -r f; do
+    git show "main:$f" | grep -oP "\bit\(\s*['\"\`]\K[^'\"\`]+"
+  done | sort -u | while IFS= read -r t; do
+    grep -rqF -- "$t" apps packages --include='*.test.ts' --include='*.test.tsx' || printf '%s\n' "$t"
+  done
+  ```
+
+  Every printed title is in the PR's ported-tests table (§0) with the test that now holds its rule under another title,
+  or the line of spec revision 48 that dropped the rule. The output and the table go into the PR description.
+- [ ] **Run to verify they pass**: `pnpm -r typecheck`, `pnpm test`, `pnpm --filter @gmt/web run test:tz`.
 - [ ] **Commit**: `wp19: remove the calendar, duration and coverage views and routes`.
 
 ### Task 19.9: The Playwright smoke and the performance test
@@ -1221,17 +1362,24 @@ DetailHeader}.tsx`, `views/Results/panel.ts` (moved from `views/Calendar`), `sta
     overview shows one month with Previous and Next, every overview cell's box is at least 24 × 24 px, nothing spills
     out of a cell, a tap on a cell shows the readout, the filters fit without sideways scroll, and on Dates, the detail,
     History, Definitions, Alerts, Providers and Status every nav link is at least 44 px tall, the two tiers keep every
-    link in view in at most two rows, and `document.documentElement.scrollWidth <= 375`.
+    link in view in at most two rows, and `document.documentElement.scrollWidth <= 375`; (7) desktop, after
+    `page.emulateMedia({ forcedColors: 'active' })`: on Dates each mark of the legend and of an overview cell that
+    carries one still has its glyph or pattern (the glyph element is visible, or the computed `background-image` /
+    SVG `fill` names the pattern), and the current nav entry keeps its non-colour cue.
   - **Performance** (`perf.spec.ts`, tagged `@perf`, desktop project): an init script installs a `longtask`
     `PerformanceObserver`; `page.route('**/api/**')` serves a synthetic definition, providers (the fixture provider,
     synthetic), status and executions, and the date-pairs body built by `@gmt/core`'s `encodeDatePairs` in
     `perfFixtures.ts` (every provenance `fixture`/`synthetic`, airports `AAA`, `BBB`) for (a) 36,400 date pairs every one
     with a figure (400 × 91, one airport pair) and (b) 50,000 cells (400 days × 25 nights × 5 airport pairs); the red
     banner shows; with marks cleared before each step, the board and overview are drawn within 1.5 s of the response
-    (`gmt:dates-drawn` minus `gmt:dates-response`); a stay filter change and a re-rank (a second response served on the
-    next request) each redraw within 200 ms; no long task over 200 ms is recorded. Each wait is `waitForFunction` on
-    that step's mark, with the timeout only as a backstop. These limits are revision 48's starting defaults; the
-    performance test is not part of `pnpm test`.
+    (`gmt:dates-drawn` minus `gmt:dates-response`); a stay filter change redraws within 200 ms; a re-rank redraws
+    within 200 ms, triggered without waiting: the page is loaded under `page.clock.install()`, the served status and
+    execution show a running parent run, the pointer is moved off the board and focus put on the page body (so the
+    board is not held), the next execution poll is served with changed progress, `page.clock.fastForward('00:31')`
+    passes the 30 s throttle, and the date-pairs route serves a second body whose order differs; no long task over
+    200 ms is recorded. Each limit is multiplied by `GMT_TIMING_FACTOR` (default 1, revision 50). Each wait is
+    `waitForFunction` on that step's mark, with the timeout only as a backstop. The performance test runs locally with
+    the e2e suite (which CI does not run) and is not part of `pnpm test`.
 - [ ] **Run to verify they fail**: `pnpm --filter @gmt/web e2e` → the smoke looks for the board caption on the old
   Results view and fails; the perf spec finds no `gmt:dates-drawn` mark.
 - [ ] **Implement**; `playwright.config.ts` keeps `@phone` in the phone project and runs `@perf` in the desktop project
@@ -1277,15 +1425,18 @@ DetailHeader}.tsx`, `views/Results/panel.ts` (moved from `views/Calendar`), `sta
 - Spec revision 50 written (Task 19.0) and every "revision 50" rule of this brief in it.
 - `pnpm --filter @gmt/core test` (100% lines, branches, functions), `pnpm --filter @gmt/db test`,
   `pnpm --filter @gmt/engine test`, `pnpm --filter @gmt/api test` (85% / 70%), `pnpm --filter @gmt/web test` (70% /
-  60%, both time zones of `test:tz`), each green.
+  60%; the script ends by running `test:tz`), and `pnpm --filter @gmt/web run test:tz` on its own (both zones), each
+  green.
 - `pnpm lint`, `pnpm -r typecheck`, `node scripts/check-boundaries.mjs`, `node scripts/check-casts.mjs`, `pnpm test`.
 - Mutation, each at ≥ 80% with timed-out mutants under 5% of those tested: `pnpm --filter @gmt/core mutate` (the eight
   `core` files of this brief among its list) and `pnpm --filter @gmt/web mutate` (the ten `web` files, over the pure
   tests). Every file in this brief's `pending` has moved to `mutate` and to its package's `stryker.config.json`, and
   `status` reads `merged` only after that: `node scripts/check-mutation-globs.mjs` exits 0 with nothing pending for
   WP19.
-- `pnpm --filter @gmt/web e2e`: the smoke green on the desktop project and the `@phone` project at 375 px, the `@perf`
-  test green on the desktop project.
+- `pnpm --filter @gmt/web e2e`, run locally with `GMT_TIMING_FACTOR` unset (factor 1): the smoke green on the desktop
+  project and the `@phone` project at 375 px, the `@perf` test green on the desktop project. CI gates the route's
+  statement counts, sizes and 3 s × 3 through `pnpm test`; the browser's 1.5 s and 200 ms limits are gated only by this
+  local run.
 - `pnpm exec vitest run scripts/wording.test.mjs scripts/workflows.test.mjs` green.
 - No orphaned vitest, Stryker, Playwright or browser process after the runs.
 - The PR's description carries the ported-tests table and the changed-file count with the CodeRabbit route it took
@@ -1293,8 +1444,8 @@ DetailHeader}.tsx`, `views/Results/panel.ts` (moved from `views/Calendar`), `sta
 
 ## 11. Open questions
 
-None. Revision 48's three questions were settled by the orchestrator on 2026-10-26 and Task 19.0 records them in
-revision 50: `journeyLeftOut` is added (§5); cells without a discovery result in the latest parent run count as not
+None. Revision 48's three questions were settled by the orchestrator on 2026-10-26, and Ian confirmed the review's
+four operator-facing settlements the same day; Task 19.0 records all of them in revision 50: `journeyLeftOut` is added (§5); cells without a discovery result in the latest parent run count as not
 searched (Task 19.2's classification); the truncated-read landing line is "That result is not among the first 1000
 results read for this search." (Task 19.7). Ian's two rulings of the same day (the week switch, the update button) and
 the review's own settlements are in Task 19.0's list.
