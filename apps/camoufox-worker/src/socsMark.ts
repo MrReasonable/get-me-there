@@ -31,7 +31,9 @@ function restWellFormed(b: Uint8Array, at: number): boolean {
   let i = at;
   while (i < b.length) {
     const tag = varint(b, i);
-    if (tag === null || tag.value < 16) return false;
+    // why: a tag holds a field number below 2^29 and its wire type, so it is below 2^32 (CodeRabbit, PR #18: a larger
+    // one would lose its low bits in a number)
+    if (tag === null || tag.value < 16 || tag.value >= 2 ** 32) return false;
     const wire = tag.value % 8;
     if (wire === 0) {
       const v = varint(b, tag.next);

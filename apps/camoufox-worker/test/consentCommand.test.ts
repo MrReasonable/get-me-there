@@ -425,6 +425,26 @@ describe('an interruption (SIGINT or SIGTERM: review X3)', () => {
     expect(t.drivers).toEqual([]);
     t.kept();
   });
+  // why: CodeRabbit (PR #18): an interruption that arrives while the window closes still writes nothing
+  it('after a rejection was seen, while the window closes: nothing is written', async () => {
+    const stop = new AbortController();
+    const t = setup({
+      interrupted: stop.signal,
+      driver: (d) => ({
+        ...d,
+        close: async () => {
+          stop.abort();
+          await d.close();
+        },
+      }),
+    });
+    expect(await capture(t)).toBe(EX_INTERRUPTED);
+    expect(t.err).toEqual([
+      `interrupted: the window is closed and its throwaway profile deleted; ${NOTHING}`,
+    ]);
+    t.kept();
+    expect(t.profiles.some((p) => existsSync(p))).toBe(false);
+  });
   it('during an import’s read: nothing is written', async () => {
     const stop = new AbortController();
     const t = setup({ stdin: new Promise(() => undefined), interrupted: stop.signal });

@@ -3177,7 +3177,8 @@ fails or is interrupted changes a stored record or leaves the worker stopped; th
 too (`appEndpoint`); `export` needs only the pinned Camoufox and is piped over ssh; interactive `gmt setup` runs the
 capture as its own step; `gmt consent check` reports the stored record without loading a page; a region that shows no
 consent page writes no record and is told the provider cannot start; and the never-shown and voided record kinds are
-dropped (one left behind is read only to be refused). Every consent fix names `pnpm gmt consent`. No other design rule
+dropped (one left behind is read only to be refused). Every consent-related refusal, card and notice names
+`pnpm gmt consent` as its fix. No other design rule
 changes.
 
 ### Revision 40: WP17's branch review, round 1 (2026-10-25)

@@ -1019,7 +1019,8 @@ put back as it was.
 and when it expires (the earlier of the cookie's own expiry and 13 months after the capture), exiting 0 only for a
 rejection still in date. Run it once on a record you stored before this check existed. Capture again within 13
 months; `pnpm gmt status` warns from 30 days before. The value comes from a signed-out throwaway profile and holds no
-account cookie; only its first field is understood, so treat it as private and never print it (no command does). The
+account cookie; only its first field is understood, so treat it as private: no command prints it except inside
+`pnpm gmt consent export`'s one line (below), which exists to carry it. The
 worker refuses to start, and never sets the cookie, when the stored value is not a rejection (`consent-not-rejection`),
 and the Status view says "consent rejected" only when the stored mark is `reject`. Every refusal that needs a new capture names
 `pnpm gmt consent`. A record left by an earlier version saying no consent page was shown, or voided, is not used: the
@@ -1083,8 +1084,9 @@ reinstalled where the install now puts it; nothing is copied from the old locati
 
 The consent capture needs a browser window (with no `DISPLAY` or `WAYLAND_DISPLAY` set, `pnpm gmt consent` refuses
 and says so), so on a server you capture it on a machine that is shown the consent page and has the pinned Camoufox
-(`pnpm gmt browser install` there; no worker needs to be set up on it, and the consent command never downloads), and
-pipe the one line it prints to the server:
+(`pnpm gmt browser install` there, which lays out only the install root; no `worker.env` or worker service is needed,
+`pnpm gmt consent export` makes the worker's data directory, 0700, if it is missing, and the consent command never
+downloads), and pipe the one line it prints to the server:
 
 ```bash
 pnpm gmt consent export | ssh <server> 'cd <checkout> && pnpm gmt consent import'

@@ -196,6 +196,8 @@ describe('a worker that does not report the mark (pa-b1-010, ca-b1-004, review X
       }),
     );
     expect(c.check.summary).toContain('expires by Wed, 31 Mar 2027, 11:00 (Europe/London) at the latest');
+    // why: CodeRabbit (PR #18): in date but its mark unreported, the card cannot be checked
+    expect([c.cause, c.check.state]).toEqual(['cannot-check', 'warn']);
     expect(c.check.fix).toEqual({
       text: 'update the app and the worker together',
       command: 'pnpm gmt update',

@@ -245,6 +245,8 @@ export async function consentCapture(
 ): Promise<number> {
   // why: export's standard output is its one line; everything else it says goes to standard error
   const say = o.export ? ctx.err : ctx.out;
+  /** Whether SIGINT or SIGTERM has arrived (read afresh each time: it can arrive at any await). */
+  const interrupted = (): boolean => deps.interrupted?.aborted === true;
   const command: ConsentCommand = o.export ? 'pnpm gmt consent export' : 'pnpm gmt consent';
   try {
     headedEnv(deps.display, deps.platform);
@@ -288,11 +290,11 @@ export async function consentCapture(
       clock: deps.clock,
     });
     try {
-      if (deps.interrupted?.aborted === true) throw new Interrupted();
+      if (interrupted()) throw new Interrupted();
       // why: CodeRabbit (PR #18): the interruption ends the spacing wait itself, so no claim runs after the command ends
       await claim(pacer, monthly, 0, deps, { ...ctx, out: say });
     } catch (e) {
-      if (deps.interrupted?.aborted === true) {
+      if (interrupted()) {
         ctx.err(`interrupted before the page loaded; ${NOTHING}`);
         return EX_INTERRUPTED;
       }
@@ -322,6 +324,11 @@ export async function consentCapture(
       return EX_INTERRUPTED;
     } finally {
       deleteProfile(profile, deps.removeProfile ?? removeTree, ctx.err);
+    }
+    // why: CodeRabbit (PR #18): an interruption that arrives while the window closes still writes nothing
+    if (interrupted()) {
+      ctx.err(`interrupted: the window is closed and its throwaway profile deleted; ${NOTHING}`);
+      return EX_INTERRUPTED;
     }
     if (judged.kind === 'refused') {
       const until = judged.cooldown === null ? null : cooldown.start(judged.cooldown).until;

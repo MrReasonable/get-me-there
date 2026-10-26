@@ -11,6 +11,17 @@ const FIELD3 = [0x1a, 0x02, 0x41, 0x42];
 const REJECT = b64([0x08, 0x01, ...FIELD2, ...FIELD3]);
 const ACCEPT = b64([0x08, 0x02, ...FIELD2, ...FIELD3]);
 const mark = (bytes: readonly number[]) => rejectionMark(b64(bytes));
+/** A varint's bytes, for tags past what a byte holds (BigInt, so 2^60 keeps its low bits). */
+function varintOf(n: bigint): number[] {
+  const out: number[] = [];
+  let v = n;
+  do {
+    const low = Number(v & 0x7fn);
+    v >>= 7n;
+    out.push(v === 0n ? low : low | 0x80);
+  } while (v !== 0n);
+  return out;
+}
 
 describe('rejectionMark: field 1 of a well-formed SOCS message', () => {
   it('reads field 1 = 1 as a rejection and 2 as an acceptance, in the observed shape', () => {
@@ -75,6 +86,12 @@ describe('rejectionMark: field 1 of a well-formed SOCS message', () => {
     ['a later length past the end', [0x08, 0x01, ...FIELD2, 0x1a, 0x05, 0x41]],
   ] as const)('%s is unknown', (_what, bytes) => {
     expect(mark(bytes)).toBe('unknown');
+  });
+  // why: CodeRabbit (PR #18): a tag holds a field number below 2^29 and a wire type, so it is below 2^32
+  it('a tag of 2^32 or more is unknown; the largest field number’s tag still reads', () => {
+    expect(mark([0x08, 0x01, ...FIELD2, ...varintOf(2n ** 60n + 3n), 0x01])).toBe('unknown');
+    expect(mark([0x08, 0x01, ...FIELD2, ...varintOf(2n ** 32n), 0x01])).toBe('unknown');
+    expect(mark([0x08, 0x01, ...FIELD2, ...varintOf(2n ** 32n - 8n), 0x01])).toBe('reject');
   });
   it('an accept of any other shape is unknown too', () => {
     expect(mark([0x08, 0x02])).toBe('unknown');
