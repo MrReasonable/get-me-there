@@ -10,6 +10,7 @@
  *   checkout's .env. With no published port known nothing is read or sent: a guessed port could be another program's.
  * - Otherwise none, with the reason.
  */
+import { isIP } from 'node:net';
 import { join } from 'node:path/posix';
 import { type AppCreds, appUrl, authHeaders, credsFrom } from './appClient.js';
 import type { Deps } from './deps.js';
@@ -74,6 +75,8 @@ export async function dockerAppState(deps: Deps): Promise<DockerAppState> {
   return app.State === 'running' ? 'running' : 'stopped';
 }
 
+const LOCAL_PUBLISH: ReadonlySet<string> = new Set(['127.0.0.1', '0.0.0.0', '::1', '::']);
+
 /**
  * The host address and port compose publishes for the container's 3000 (`docker compose port app 3000`), or null when
  * compose does not say. The address has no brackets (`::1`, not `[::1]`). Inside the container the app binds 0.0.0.0;
@@ -81,9 +84,12 @@ export async function dockerAppState(deps: Deps): Promise<DockerAppState> {
  */
 export async function dockerPublished(deps: Deps): Promise<{ address: string; port: number } | null> {
   const r = await deps.run(compose('port', 'app', '3000'), { cwd: deps.checkout, timeoutMs: 20_000 });
-  const m = r.code === 0 ? /^(127\.0\.0\.1|0\.0\.0\.0|\[::1?\]|::):(\d+)$/.exec(r.stdout.trim()) : null;
-  if (m?.[1] === undefined || m[2] === undefined) return null;
-  return { address: m[1].replace(/^\[|\]$/g, ''), port: Number(m[2]) };
+  if (r.code !== 0) return null;
+  // why: any valid IP, so status can judge a LAN address; dockerEndpoint alone limits where credentials may go
+  const m = /^(.+):(\d+)$/.exec(r.stdout.trim());
+  const address = m?.[1]?.replace(/^\[|\]$/g, '');
+  if (address === undefined || m?.[2] === undefined || isIP(address) === 0) return null;
+  return { address, port: Number(m[2]) };
 }
 
 /** The Docker app, given its compose state (read it with dockerAppState). */
@@ -96,8 +102,15 @@ export async function dockerEndpoint(deps: Deps, state: DockerAppState): Promise
   if (state !== 'running') return { kind: 'none', reason: 'the Docker app is not running' };
   const published = await dockerPublished(deps);
   const port = published?.port ?? null;
-  if (port === null || port < 1 || port > 65535)
+  if (published === null || port === null || port < 1 || port > 65535)
     return { kind: 'none', reason: 'compose did not say which host port the Docker app publishes' };
+  // why: the basic auth is read and sent to 127.0.0.1:<port> only when that port is this machine's own (loopback or
+  // wildcard); a port compose publishes on another address could be reached by another program there
+  if (!LOCAL_PUBLISH.has(published.address))
+    return {
+      kind: 'none',
+      reason: `compose publishes the Docker app on ${published.address}, not on this machine’s loopback`,
+    };
   let text: string | null;
   try {
     text = deps.files.read(join(deps.checkout, '.env'));

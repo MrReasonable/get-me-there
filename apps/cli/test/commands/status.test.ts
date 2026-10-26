@@ -292,6 +292,17 @@ describe('gmt status by app mode: Docker only, native only, both (W1)', () => {
       expect(m.io.stdout).toContain('fix: publish 127.0.0.1:3000:3000 in docker-compose.yml');
     }
   });
+  it('Docker only, published on a LAN address: warns, and sends the .env basic auth nowhere', async () => {
+    const { m, http } = dockerOnly('running', undefined, '192.0.2.10:3917');
+    expect(await runCli(['status'], m.deps)).toBe(1);
+    expect(m.io.stdout).toMatch(/bind address +warn +192\.0\.2\.10: published beyond loopback/);
+    expect(http.requests.filter((r) => r.url.endsWith('/api/status'))).toEqual([]);
+  });
+  it('Docker only, the published address unreadable: a warning that it is not checked, never silence', async () => {
+    const { m } = dockerOnly('running', undefined, null);
+    await runCli(['status'], m.deps);
+    expect(m.io.stdout).toMatch(/bind address +warn +compose did not say which address/);
+  });
   it('Docker only, the app not answering: the reason, a Docker next step, exit 1, and still no native fix', async () => {
     const { m } = dockerOnly('running', () => ({ error: 'connection refused' }));
     expect(await runCli(['status'], m.deps)).toBe(1);

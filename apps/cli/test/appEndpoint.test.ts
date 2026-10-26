@@ -72,7 +72,11 @@ describe('appEndpoint', () => {
       docker(running, null),
       'compose did not say which host port the Docker app publishes',
     ],
-    ['a published port that is not loopback', docker(running, '192.0.2.7:3000'), 'compose did not say'],
+    [
+      'a published port that is not loopback',
+      docker(running, '192.0.2.7:3000'),
+      'compose publishes the Docker app on 192.0.2.7',
+    ],
   ])('none, with the reason, for %s', async (_name, handler, reason) => {
     const m = machine({ extra: handler });
     m.fs.file(DOT_ENV, 'APP_BASIC_AUTH_USER=op\nAPP_BASIC_AUTH_PASS=docker-pass-0123\n', 0o600);

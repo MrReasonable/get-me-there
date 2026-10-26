@@ -200,7 +200,17 @@ function appEnvChecks(deps: Deps): Check[] {
 async function dockerBindChecks(deps: Deps, docker: DockerAppState): Promise<Check[]> {
   if (docker !== 'running') return [];
   const published = await dockerPublished(deps);
-  if (published === null || isLoopback(published.address)) return [];
+  // why: an unread address is not a loopback one: error must not look empty
+  if (published === null)
+    return [
+      {
+        name: 'bind address',
+        level: 'warn',
+        detail: 'compose did not say which address the Docker app is published on, so it is not checked',
+        fix: 'docker compose port app 3000',
+      },
+    ];
+  if (isLoopback(published.address)) return [];
   return [
     {
       name: 'bind address',
