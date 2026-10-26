@@ -8,6 +8,7 @@ import {
 } from '../types/definition.js';
 import type { Iata, IsoDate } from '../types/ids.js';
 import { countCells } from './generate.js';
+import { MAX_NIGHTS, MAX_WINDOW_DAYS } from './limits.js';
 import { resolveSpace } from './window.js';
 
 /**
@@ -26,9 +27,6 @@ export type ValidationResult =
   | { ok: true; resolved: ResolvedSpace; clamped: boolean; notes: string[] }
   | { ok: false; errors: Array<{ field: string; message: string }> };
 
-/** Spec §6.1 limits. */
-const MAX_WINDOW_DAYS = 400;
-const MAX_NIGHTS = 90;
 const IATA_RE = /^[A-Z]{3}$/;
 
 /**

@@ -5,8 +5,8 @@ owner: opus
 depends_on: [18]
 spec_sections: ["§1", "§6.5", "§6.6", "§8.3", "§9 items 1, 4, 5, 6", "§10 GET /definitions/:id/date-pairs", "§10 /results scope parameters", "§10 Routes the Dates view retires", "§11 layout and nav", "§11 URLs", "§11 Dates", "§11 Date pair detail", "§16", "§17 revisions 48 and 50"]
 reviewers: [code-architect, test-strategy-reviewer, ui-reviewer, provenance-auditor, data-model-reviewer, search-strategy-reviewer]
-mutate: {}
-pending: {"@gmt/core": ["src/datePairs/space.ts", "src/datePairs/figure.ts", "src/datePairs/rank.ts", "src/datePairs/bands.ts", "src/datePairs/encode.ts", "src/datePairs/decode.ts", "src/datePairs/detailLink.ts", "src/api-contract/datePairs.ts"], "@gmt/web": ["src/state/parse.ts", "src/state/datesState.ts", "src/state/landing.ts", "src/views/Dates/board.ts", "src/views/Dates/howFar.ts", "src/views/Dates/stayScope.ts", "src/views/Dates/refresh.ts", "src/views/Dates/shade.ts", "src/views/Dates/overview.ts", "src/views/Dates/keys.ts"]}
+mutate: {"@gmt/core": ["src/datePairs/space.ts", "src/datePairs/figure.ts", "src/datePairs/rank.ts", "src/datePairs/bands.ts", "src/datePairs/encode.ts", "src/datePairs/decode.ts", "src/datePairs/detailLink.ts", "src/api-contract/datePairs.ts"]}
+pending: {"@gmt/web": ["src/state/parse.ts", "src/state/datesState.ts", "src/state/landing.ts", "src/views/Dates/board.ts", "src/views/Dates/howFar.ts", "src/views/Dates/stayScope.ts", "src/views/Dates/refresh.ts", "src/views/Dates/shade.ts", "src/views/Dates/overview.ts", "src/views/Dates/keys.ts"]}
 status: reviewed
 ---
 
@@ -244,6 +244,8 @@ export const datePairsQuerySchema = z.strictObject({
   destinations: z.string().max(200).optional(),     // comma list
   maxJourneyMinutes: z.string().max(10).optional(), // integer 60..6000
 });
+export const MIN_JOURNEY_LIMIT_MINUTES = 60;       // the journey limit's bounds, for parseScope's 422 and the web's
+export const MAX_JOURNEY_LIMIT_MINUTES = 6000;     // "between 60 and 6000 minutes"; scope.maxJourneyMinutes is held to them
 // re-exported from packages/core/src/space/limits.ts, the one home of the space's limits (below)
 export { DEFAULT_MAX_CELLS, MAX_DATE_PAIRS } from '../space/limits.js';
 export const datePairsResponseSchema;      // §10's shape with revision 50's columns (below), a z.strictObject with one
@@ -288,8 +290,9 @@ verified figure; the four cheaper-cached columns not null together with `cheaper
 //   datePairFigure: z.output<typeof datePairFigureSchema> | null   // only on a date-pair-scoped read: pickFigure over
 //                                                                   // the scoped rows, the same figure the board shows
 // datePairFigureSchema (in api-contract/datePairs.ts): a strict object with DatePairFigure's fields below, less
-// `airportPair`, each provenance inline (provenanceSchema), money as moneyPenceSchema; the codec test compares it with
-// the board's decoded figure.
+// `airportPair`, each provenance inline (provenanceSchema), money as moneyPenceSchema, refined by the board's per-figure
+// rules (superseded and truncated only on a calendar figure, a not-seen age and a cheaper-cached price only on a verified
+// one, the cheaper-cached price below the figure's); the codec test compares it with the board's decoded figure.
 
 // packages/core/src/space/limits.ts (new; validate.ts's private MAX_WINDOW_DAYS and MAX_NIGHTS move here, and
 // api-contract/datePairs.ts and config/schema.ts both import from it, so config never depends on api-contract)
@@ -306,8 +309,11 @@ export function sortedAirportPairs(origins: readonly Iata[], destinations: reado
 export type DatePairSpace = Omit<ResolvedSpace, 'origins' | 'destinations'>;
 export function stayCount(s: DatePairSpace): number;                  // max(0, maxNights − minNights + 1)
 export function datePairCount(s: DatePairSpace): number;              // windowDays × stayCount
-export function datePairAt(s: DatePairSpace, i: number): { departureDate: IsoDate; returnDate: IsoDate; nights: number; dayIndex: number };
+export function datePairAt(s: DatePairSpace, i: number): { departureDate: IsoDate; returnDate: IsoDate; nights: number; dayIndex: number };  // RangeError outside
 export function datePairIndex(s: DatePairSpace, departureDate: IsoDate, returnDate: IsoDate): number | null; // null outside
+export function datePairIndexer(s: DatePairSpace): (departureDate: IsoDate, returnDate: IsoDate) => number | null;
+  // datePairIndex for many rows or cells over one space, each distinct date parsed once (figuresByDatePair and the api's
+  // per-cell grouping use it)
 
 // packages/core/src/datePairs/figure.ts
 export type FigureCandidate = Pick<ResultRow,
@@ -322,6 +328,8 @@ export function pickFigure<T extends FigureCandidate>(candidates: readonly T[], 
 export interface FigureScope { space: ResolvedSpace /* airports already narrowed to the scope */; maxJourneyMinutes: number | null }
 export function figuresByDatePair<T extends FigureCandidate>(candidates: readonly T[], scope: FigureScope, now: IsoDateTime):
   { figures: Map<number, Figure<T>>; journeyLeftOut: Map<number, number> };
+  // keyed by date-pair index; journeyLeftOut holds only non-zero counts (read it with `.get(i) ?? 0`) and is empty
+  // without a limit
 
 // packages/core/src/datePairs/encode.ts and decode.ts (inverse pair; decode(encode(x)) deep-equals x)
 export interface DatePairFigure {
@@ -353,6 +361,10 @@ export interface DecodedDatePairs {
 export function encodeDatePairs(d: DecodedDatePairs): DatePairsResponse;   // one pass; provenance table keyed canonically
 export function decodeDatePairs(r: DatePairsResponse): DecodedDatePairs;   // pure; no clock
 export function provenanceKey(p: Provenance): string;   // canonical: every field, nested fx included, keys sorted
+// DatePairFigure, DatePair and DecodedDatePairs are declared in encode.ts. encodeDatePairs throws RangeError for a
+// figure or cheaper-cached price on an airport outside the scope; decodeDatePairs throws RangeError on a body the
+// contract refuses (a short column, a cheaper-cached column null beside its price) rather than invent a value.
+// CoverageSummary and ExecutionSummary are z.output types of their schemas in api-contract/common.ts.
 
 // packages/core/src/datePairs/rank.ts
 export function rankDatePairs(pairs: readonly DatePair[], now: IsoDateTime): DatePair[]; // those with a figure, best first
@@ -816,7 +828,7 @@ No web or e2e file imports from `packages/core/test`; fixtures build through `@g
     if (!Number.isInteger(minNights) || !Number.isInteger(maxNights) || minNights < 0 || maxNights < minNights)
       throw new RangeError(`foldNights: ${minNights}–${maxNights} is not a stay range`);
     const n = maxNights - minNights + 1;
-    const width = n > MAX_NIGHT_BANDS ? Math.ceil(n / MAX_NIGHT_BANDS) : 1;
+    const width = Math.ceil(n / MAX_NIGHT_BANDS);   // 1 up to twelve lengths: one band per night
     const bands: NightsBand[] = [];
     for (let from = minNights; from <= maxNights; from += width)
       bands.push({ from, to: Math.min(from + width - 1, maxNights) });

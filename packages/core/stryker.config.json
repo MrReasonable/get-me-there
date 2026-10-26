@@ -29,7 +29,15 @@
     "src/labels/skip.ts",
     "src/status/report.ts",
     "src/status/rules.ts",
-    "src/status/time.ts"
+    "src/status/time.ts",
+    "src/datePairs/space.ts",
+    "src/datePairs/figure.ts",
+    "src/datePairs/rank.ts",
+    "src/datePairs/bands.ts",
+    "src/datePairs/encode.ts",
+    "src/datePairs/decode.ts",
+    "src/datePairs/detailLink.ts",
+    "src/api-contract/datePairs.ts"
   ],
   "thresholds": {
     "high": 90,

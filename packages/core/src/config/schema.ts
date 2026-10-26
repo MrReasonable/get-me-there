@@ -7,6 +7,7 @@ import {
   sharedMode,
   sharedSettingMessage,
 } from '../camoufox/settings.js';
+import { DEFAULT_MAX_CELLS } from '../space/limits.js';
 import {
   PENCE_TO_MICRO,
   PLAN_PRESETS,
@@ -508,7 +509,7 @@ export function parseConfig(env: Env, opts: ParseConfigOptions): ConfigResult {
   const alertEmailMaxPerHour = r.int('ALERT_EMAIL_MAX_PER_HOUR', 1) ?? 20;
   const calendarStaleAfterHours = r.int('CALENDAR_STALE_AFTER_HOURS', 1) ?? null;
   const stuckAfterHours = r.int('STUCK_AFTER_HOURS', 1) ?? 12;
-  const maxCellsPerDefinition = r.int('MAX_CELLS_PER_DEFINITION', 1) ?? 50_000;
+  const maxCellsPerDefinition = r.int('MAX_CELLS_PER_DEFINITION', 1) ?? DEFAULT_MAX_CELLS;
   const autoResume = r.bool('AUTO_RESUME') ?? true;
   const maxAutoResumes = r.int('MAX_AUTO_RESUMES', 0) ?? 3;
   const maxWaitSeconds = r.int('MAX_WAIT_SECONDS', 1) ?? 3900;

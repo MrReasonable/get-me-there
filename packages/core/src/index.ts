@@ -11,6 +11,7 @@ export type {
   CalendarDay,
   CoverageCheckRequest,
   CoverageCheckResponse,
+  DatePairsResponse,
   DefinitionResponse,
   HistoryPoint,
   ResultRow,
@@ -37,6 +38,7 @@ export { CONSTRAINT_LABELS, CONSTRAINT_NAMES } from './constraints/labels.js';
 export { unverifiedNames, verdictClass } from './constraints/verdictClass.js';
 export * from './coverage/buckets.js';
 export * from './coverage/rollUp.js';
+export * from './datePairs/index.js';
 export * from './dates/epochDay.js';
 export * from './errors.js';
 export { EXIT } from './exit.js';
@@ -79,6 +81,7 @@ export { SEARCH_LINK_LABEL, SEARCH_LINK_ROW_LABEL, searchLinkFor } from './resul
 export type { ResultFilters, SortKey } from './results/types.js';
 export * from './selection/select.js';
 export * from './space/generate.js';
+export * from './space/limits.js';
 export * from './space/validate.js';
 export * from './space/window.js';
 export * from './status/rules.js';
