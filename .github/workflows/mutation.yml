@@ -69,27 +69,30 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # why: the weekly run restores nothing, so every mutant is tested afresh (incremental results never see a change
+      # outside the mutated and test files, such as a dependency's source) and that becomes the next base. Each run saves
+      # under a key of its own (a cache entry cannot be replaced), and a restore takes the newest of the same shard over
+      # the same tests, the same sources first.
       - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: github.event_name != 'schedule'
         with:
           path: ${{ matrix.dir }}/reports/stryker-incremental.json
-          key: stryker-${{ matrix.package }}-${{ matrix.shard }}of${{ matrix.shards }}-${{ hashFiles(format('{0}/test/**', matrix.dir), format('{0}/stryker.config.json', matrix.dir), format('{0}/vitest.config.ts', matrix.dir), 'pnpm-lock.yaml', 'scripts/mutation-shard.mjs') }}-${{ hashFiles('packages/*/src/**', 'apps/*/src/**') }}
+          key: stryker-${{ matrix.package }}-${{ matrix.shard }}of${{ matrix.shards }}-${{ hashFiles(format('{0}/test/**', matrix.dir), format('{0}/stryker.config.json', matrix.dir), format('{0}/vitest.config.ts', matrix.dir), 'pnpm-lock.yaml', 'scripts/mutation-shard.mjs') }}-${{ hashFiles('packages/*/src/**', 'apps/*/src/**') }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
+            stryker-${{ matrix.package }}-${{ matrix.shard }}of${{ matrix.shards }}-${{ hashFiles(format('{0}/test/**', matrix.dir), format('{0}/stryker.config.json', matrix.dir), format('{0}/vitest.config.ts', matrix.dir), 'pnpm-lock.yaml', 'scripts/mutation-shard.mjs') }}-${{ hashFiles('packages/*/src/**', 'apps/*/src/**') }}-
             stryker-${{ matrix.package }}-${{ matrix.shard }}of${{ matrix.shards }}-${{ hashFiles(format('{0}/test/**', matrix.dir), format('{0}/stryker.config.json', matrix.dir), format('{0}/vitest.config.ts', matrix.dir), 'pnpm-lock.yaml', 'scripts/mutation-shard.mjs') }}-
       - name: Stryker over this shard's files
         working-directory: ${{ matrix.dir }}
         run: |
           files="$(node ../../scripts/mutation-shard.mjs . "$SHARD" "$SHARDS" --config reports/stryker.shard.json)"
           echo "shard $SHARD of $SHARDS: $files"
-          # why: incremental results never see a change outside the mutated and test files (a dependency's source), so
-          # the weekly run tests every mutant afresh and saves that as the next base; a dispatched run reuses them
-          if [ "$GITHUB_EVENT_NAME" = schedule ]; then force=--force; else force=; fi
-          pnpm exec stryker run reports/stryker.shard.json $force
+          pnpm exec stryker run reports/stryker.shard.json
       # why: saved even when the run fails, so the next run carries on from these results
       - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         if: always()
         with:
           path: ${{ matrix.dir }}/reports/stryker-incremental.json
-          key: stryker-${{ matrix.package }}-${{ matrix.shard }}of${{ matrix.shards }}-${{ hashFiles(format('{0}/test/**', matrix.dir), format('{0}/stryker.config.json', matrix.dir), format('{0}/vitest.config.ts', matrix.dir), 'pnpm-lock.yaml', 'scripts/mutation-shard.mjs') }}-${{ hashFiles('packages/*/src/**', 'apps/*/src/**') }}
+          key: stryker-${{ matrix.package }}-${{ matrix.shard }}of${{ matrix.shards }}-${{ hashFiles(format('{0}/test/**', matrix.dir), format('{0}/stryker.config.json', matrix.dir), format('{0}/vitest.config.ts', matrix.dir), 'pnpm-lock.yaml', 'scripts/mutation-shard.mjs') }}-${{ hashFiles('packages/*/src/**', 'apps/*/src/**') }}-${{ github.run_id }}-${{ github.run_attempt }}
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: mutation-${{ matrix.package }}-${{ matrix.shard }}of${{ matrix.shards }}
@@ -151,11 +154,14 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # why: as the package shards: the weekly run restores nothing, and each run saves under a key of its own
       - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: github.event_name != 'schedule'
         with:
           path: apps/cli/reports/stryker-incremental.json
-          key: stryker-cli-${{ hashFiles('apps/cli/test/**', 'apps/cli/stryker.config.json', 'apps/cli/vitest.config.ts', 'pnpm-lock.yaml') }}-${{ hashFiles('apps/cli/src/**', 'packages/core/src/**') }}
+          key: stryker-cli-${{ hashFiles('apps/cli/test/**', 'apps/cli/stryker.config.json', 'apps/cli/vitest.config.ts', 'pnpm-lock.yaml') }}-${{ hashFiles('apps/cli/src/**', 'packages/core/src/**') }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
+            stryker-cli-${{ hashFiles('apps/cli/test/**', 'apps/cli/stryker.config.json', 'apps/cli/vitest.config.ts', 'pnpm-lock.yaml') }}-${{ hashFiles('apps/cli/src/**', 'packages/core/src/**') }}-
             stryker-cli-${{ hashFiles('apps/cli/test/**', 'apps/cli/stryker.config.json', 'apps/cli/vitest.config.ts', 'pnpm-lock.yaml') }}-
       - run: pnpm --filter @gmt/cli mutate
       # why: saved even when the gate fails, so the next run carries on from these results
@@ -163,4 +169,4 @@ jobs:
         if: always()
         with:
           path: apps/cli/reports/stryker-incremental.json
-          key: stryker-cli-${{ hashFiles('apps/cli/test/**', 'apps/cli/stryker.config.json', 'apps/cli/vitest.config.ts', 'pnpm-lock.yaml') }}-${{ hashFiles('apps/cli/src/**', 'packages/core/src/**') }}
+          key: stryker-cli-${{ hashFiles('apps/cli/test/**', 'apps/cli/stryker.config.json', 'apps/cli/vitest.config.ts', 'pnpm-lock.yaml') }}-${{ hashFiles('apps/cli/src/**', 'packages/core/src/**') }}-${{ github.run_id }}-${{ github.run_attempt }}

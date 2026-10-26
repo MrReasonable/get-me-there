@@ -311,6 +311,27 @@ describe('WP14 fix round 1: the worker recorded suites and the image size step',
   });
 });
 
+/**
+ * A mutation job's cache: the weekly run restores nothing (every mutant afresh, the next base); each run saves under a key
+ * of its own, since a cache entry cannot be replaced; a restore takes the newest of the same tests, the same sources
+ * first, and never falls back across a test change (the command runner cannot tell which test killed a mutant).
+ */
+function weeklyFreshAndRunKeyed(restore, save, testHash, srcHash) {
+  const X = ['$', '{{'].join('');
+  expect(restore?.if).toBe("github.event_name != 'schedule'");
+  expect(save?.with?.key).toBe(restore?.with?.key);
+  const key = String(restore?.with?.key);
+  expect(key.endsWith(`-${X} github.run_id }}-${X} github.run_attempt }}`)).toBe(true);
+  const prefixes = String(restore?.with?.['restore-keys']).trim().split('\n');
+  expect(prefixes).toHaveLength(2);
+  for (const p of prefixes) {
+    expect(key.startsWith(p), p).toBe(true);
+    expect(p).toContain(testHash);
+  }
+  expect(prefixes[0]).toContain(srcHash);
+  expect(prefixes[1]).not.toContain(srcHash);
+}
+
 describe('WP16a: the mutation workflow runs every package’s Stryker gate and the glob check', () => {
   const t = () => text('mutation.yml');
   const runs = (j) => j.steps.map((s) => s.run).filter((r) => r !== undefined);
@@ -386,10 +407,7 @@ describe('WP16a: the mutation workflow runs every package’s Stryker gate and t
     expect(String(run.run).trim().split('\n')).toEqual([
       'files="$(node ../../scripts/mutation-shard.mjs . "$SHARD" "$SHARDS" --config reports/stryker.shard.json)"',
       'echo "shard $SHARD of $SHARDS: $files"',
-      "# why: incremental results never see a change outside the mutated and test files (a dependency's source), so",
-      '# the weekly run tests every mutant afresh and saves that as the next base; a dispatched run reuses them',
-      'if [ "$GITHUB_EVENT_NAME" = schedule ]; then force=--force; else force=; fi',
-      'pnpm exec stryker run reports/stryker.shard.json $force',
+      'pnpm exec stryker run reports/stryker.shard.json',
     ]);
     const restore = job.steps.find((s) => String(s.uses ?? '').startsWith('actions/cache/restore@'));
     const save = job.steps.find((s) => String(s.uses ?? '').startsWith('actions/cache/save@'));
@@ -405,11 +423,7 @@ describe('WP16a: the mutation workflow runs every package’s Stryker gate and t
     expect(key).toContain("format('{0}/stryker.config.json', matrix.dir)");
     expect(key).toContain("'scripts/mutation-shard.mjs'");
     expect(key).toContain("hashFiles('packages/*/src/**', 'apps/*/src/**')");
-    // a restore falls back only to a run of the same shard over the same tests, never across a test change
-    const prefix = String(restore?.with?.['restore-keys']).trim();
-    expect(key.startsWith(prefix)).toBe(true);
-    expect(prefix).toContain("format('{0}/test/**', matrix.dir)");
-    expect(prefix).not.toContain('/src/**');
+    weeklyFreshAndRunKeyed(restore, save, "format('{0}/test/**', matrix.dir)", '/src/**');
   });
   it('every package’s Stryker config is incremental into reports/, at concurrency 2, and bails at the first failure', () => {
     for (const dir of [...MUTATED, 'apps/cli']) {
@@ -474,11 +488,7 @@ describe('WP16a: the mutation workflow runs every package’s Stryker gate and t
     const key = String(restore?.with?.key);
     expect(key).toContain("hashFiles('apps/cli/test/**'");
     expect(key).toContain("hashFiles('apps/cli/src/**'");
-    // a restore falls back only to a run over the same tests, never across a test change
-    const prefix = String(restore?.with?.['restore-keys']).trim();
-    expect(key.startsWith(prefix)).toBe(true);
-    expect(prefix).toContain("hashFiles('apps/cli/test/**'");
-    expect(prefix).not.toContain("hashFiles('apps/cli/src/**'");
+    weeklyFreshAndRunKeyed(restore, save, "hashFiles('apps/cli/test/**'", "hashFiles('apps/cli/src/**'");
     const cfg = JSON.parse(
       readFileSync(join(import.meta.dirname, '..', 'apps', 'cli', 'stryker.config.json'), 'utf8'),
     );
