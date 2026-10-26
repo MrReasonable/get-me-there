@@ -1959,6 +1959,7 @@ describe('record --landing (Task 17.8)', () => {
     expect(facts).toMatchObject({
       kind: 'landing',
       landing: LANDING,
+      hops: [LANDING],
       clicked: [],
       headings: ['Flights', 'Find cheap flights'],
       socsReadBack: 'same',
@@ -1975,6 +1976,7 @@ describe('record --landing (Task 17.8)', () => {
     expect(await record(t.ctx(['--landing']), cfg, { ...t.deps, selectors: unverified })).toBe(0);
     expect(written(t.root)).toEqual(['landing/unrecorded.meta.json']);
     const u = JSON.parse(readFileSync(join(t.root, 'landing/unrecorded.meta.json'), 'utf8'));
+    expect(u.appeared).toMatchObject({ kind: 'landing', landing: LANDING, hops: [LANDING] });
     expect(u.appeared.headings).toEqual(['Top departing flights', 'Other departing flights']);
     expect(u.appeared.page.resultLinks).toBe(2);
     expect(t.out.join()).toMatch(/LANDING_VERIFIED stays false/);
@@ -2005,5 +2007,32 @@ describe('record --landing (Task 17.8)', () => {
     expect(await record(t.ctx(['--landing']), cfg, t.deps)).toBe(EX_UNAVAILABLE);
     expect(cooldownOf(t)?.cause).toBe('captcha');
     expect(written(t.root)).toEqual([]);
+    // why: the stop record keeps what the classifier saw on that view
+    const stop = JSON.parse(readFileSync(join(t.root, 'stopped/2026-10-18/1.facts.json'), 'utf8'));
+    expect(stop).toMatchObject({ cause: 'captcha', rule: 'challenge-text', resultLinks: 0 });
+  });
+  it('a read that fails other than by the deadline ends the recording with that error, writing nothing', async () => {
+    const t = setup({ navigations: [{ hops: [LANDING], tree: landingTree() }] });
+    const deps: RecordDeps = {
+      ...t.deps,
+      launch: async (p) => {
+        const c = await t.deps.launch(p);
+        if (c instanceof FakeContext)
+          c.onNewPage = (pg) => {
+            const role = pg.getByRole.bind(pg);
+            let calls = 0;
+            pg.getByRole = (...a: Parameters<FakePage['getByRole']>) => {
+              calls++;
+              if (calls === 1) throw new Error('the page went away');
+              return role(...a);
+            };
+          };
+        return c;
+      },
+    };
+    expect(await record(t.ctx(['--landing']), cfg, deps)).not.toBe(0);
+    expect(t.err.join()).toContain('the page went away');
+    expect(written(t.root)).toEqual([]);
+    expect(cooldownOf(t)).toBeNull();
   });
 });

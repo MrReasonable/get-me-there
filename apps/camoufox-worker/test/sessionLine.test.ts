@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { asIsoDateTime, fixedClock } from '@gmt/core';
 import fc from 'fast-check';
@@ -281,6 +281,20 @@ describe('run.ts session merge (Task 17.8)', () => {
     expect(read(d, 'monthly.json')).toEqual({ ...OCT, pages: 1, scrolls: 0 });
     expect(existsSync(join(d, 'pacer.json'))).toBe(false);
   });
+  // why: as root the directory's mode does not stop the lock's write, so there is no error to see
+  it.skipIf(process.getuid?.() === 0)(
+    'an error taking the lock other than a held lock is thrown as it is, never reported as a refusal',
+    async () => {
+      const d = dir({ 'monthly.json': { ...OCT, pages: 1, scrolls: 0 } });
+      chmodSync(d, 0o500);
+      try {
+        await expect(sessionEntry(ctx(d, ['merge']).c, deps(line()))).rejects.toThrow(/EACCES|permission/i);
+      } finally {
+        chmodSync(d, 0o700);
+      }
+      expect(read(d, 'monthly.json')).toEqual({ ...OCT, pages: 1, scrolls: 0 });
+    },
+  );
   it('refuses unreadable host counts as they stand', async () => {
     const d = dir({ 'pacer.json': { lastPageAt: '2027-10-03T10:00:00.000Z' }, 'monthly.json': '{' });
     const t = ctx(d, ['merge']);
@@ -349,6 +363,8 @@ describe('the session line on stdin (Task 17.8)', () => {
     expect(t.err.join()).toContain('usage: run.ts session export | seed | merge');
     const none = ctx(dir(), []);
     expect(await sessionEntry(none.c, deps())).toBe(EX_CONFIG);
+    // why: the subcommand is the arguments as written, never run together
+    expect(await sessionEntry(ctx(dir(), ['se', 'ed']).c, deps(line()))).toBe(EX_CONFIG);
     const bad = ctx(dir(), ['export'], { CAMOUFOX_WORKER_KEY: 'short' });
     expect(await sessionEntry(bad.c, deps())).toBe(EX_CONFIG);
     expect(bad.err.join()).toContain('CAMOUFOX_WORKER_KEY');
