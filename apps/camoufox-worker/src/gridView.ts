@@ -181,9 +181,10 @@ const pairsOf = (departures: readonly IsoDate[], returns: readonly IsoDate[]): n
  * days with the right weekdays.
  */
 export function cellsCalledFor(lines: readonly string[], anchor: IsoDate): number | null {
-  if (lines.length !== 2) return null;
-  const departures = lineDates(spaced(lines[0] ?? ''), anchor);
-  const returns = lineDates(spaced(lines[1] ?? ''), anchor);
+  const [depLine, retLine, ...more] = lines;
+  if (depLine === undefined || retLine === undefined || more.length > 0) return null;
+  const departures = lineDates(spaced(depLine), anchor);
+  const returns = lineDates(spaced(retLine), anchor);
   return departures === null || returns === null ? null : pairsOf(departures, returns);
 }
 
