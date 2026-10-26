@@ -2328,8 +2328,9 @@ or the engine. First-failing-test per WP in §16.
 6. **`web`**: the Dates view, a component test per state of §11 (no
    search, never run, run in progress with a partial board, paused,
    budget-stopped, stale, no prices but coverage, thin coverage with its
-   next move, synthetic banner, too many cells, no date pair within the
-   filters, loading, load error); **the coverage marks never read as no
+   next move, synthetic banner, too many cells, no price within the
+   filters (its coverage line shown, with a filtered scope that is partly
+   not searched or in error), loading, load error); **the coverage marks never read as no
    flights**: for each unpriced bucket alone and mixed with others, the
    overview cell's mark, its readout, its accessible name and the board's
    how far checked use that bucket's words, no text says "no flights", only
@@ -2903,8 +2904,12 @@ merged into price.
     the coverage line and the marks, never "no flights"); *thin coverage*
     (the next-move line above); *synthetic* (the red banner, §5.5); *too
     many cells* (the route's 422: the scope's cell count, the bound, and the
-    airport filter as the way under it); *no date pair within the filters*
-    (with "Clear filters"); loading; and a load error with Retry.
+    airport filter as the way under it); *no price within the filters* (no date
+    pair in the filtered scope has a figure: the board says "No date pair in
+    these filters has a price found so far" beside the coverage line over the
+    filtered scope, so its not searched, skipped and error counts stay in
+    view, and it never says no date pair exists or no flights exist; the
+    overview keeps its marks; "Clear filters" resets them); loading; and a load error with Retry.
 - **Date pair detail** (`?view=results&depart=…&return=…`; what was View A,
   Results): one date pair's itineraries and calendar prices, opened from a
   board row, an overview cell or an alert email, never from the nav. A
