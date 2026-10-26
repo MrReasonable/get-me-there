@@ -103,6 +103,49 @@ describe('camoufox grid mode through the engine (Task 15.8)', () => {
   });
 });
 
+// why: spec §2 "Cells by name" (grid/2026-10-26/7 and 8, a sparse route): a view's cell named "no flights" is no
+// fares for that pair (`empty`); one named "price unknown" is `no_data` (no price shown, not evidence of no flights);
+// neither is priced, neither is an error, and the view's priced cells are kept beside them
+describe('camoufox grid pages holding unpriced cells, through the engine', () => {
+  it('no flights is no fares, price unknown is no data, and the rest are priced; none is an error', async () => {
+    const v = view(0, '2026-11-02', '2026-11-12');
+    const cells = v.cells.map((c) =>
+      c.departureDate === '2026-11-05'
+        ? { status: 'no-flights' as const, departureDate: c.departureDate, returnDate: c.returnDate }
+        : c.departureDate === '2026-11-02' && c.returnDate === '2026-11-12'
+          ? { status: 'price-unknown' as const, departureDate: c.departureDate, returnDate: c.returnDate }
+          : c,
+    );
+    const cf = realCamoufox([grid([{ ...v, cells }], 'complete', 0)], 7, {
+      executionPageCap: 100,
+      executionScrollCap: 600,
+    });
+    const e = engineWith([cf]);
+    const ex = await e.runToEnd();
+    const o = outcomes(e, ex.id, 'camoufox');
+    const of = (status: string) => o.filter((x) => x.status === status).map((x) => x.departureDate);
+    expect(of('priced')).toEqual(['2026-11-03', '2026-11-04', '2026-11-06', '2026-11-07', '2026-11-08']);
+    expect(of('empty')).toEqual(['2026-11-05']);
+    expect(of('no_data')).toEqual(['2026-11-02']);
+    expect(of('error')).toEqual([]);
+    expect(e.ctx.repos.cells.buckets(ex.id, 'discovery', 'camoufox')).toMatchObject({
+      priced: 5,
+      empty: 1,
+      no_data: 1,
+      error: 0,
+      not_run: 0,
+    });
+    const rolled = e.ctx.repos.cells.rollUps(ex.id);
+    const rollOf = (dep: string) =>
+      [...rolled.entries()].find(([k]) => k.includes(dep))?.[1].discovery.status ?? null;
+    expect([rollOf('2026-11-05'), rollOf('2026-11-02'), rollOf('2026-11-03')]).toEqual([
+      'empty',
+      'no_data',
+      'priced',
+    ]);
+  });
+});
+
 // why: fix round 2 (ruling 1): a capped camoufox grid run spreads its pages across the pairs, never finishing pair 1
 describe('camoufox grid pages across the pairs (fix round 2)', () => {
   function fourPairs(pageCap: number, grid = true) {

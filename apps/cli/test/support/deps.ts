@@ -160,4 +160,5 @@ export const unsetFlags = (): Readonly<Record<FlagName, boolean>> => ({
   SOCS_STABLE: false,
   GRID_VERIFIED: false,
   LANDING_VERIFIED: false,
+  GRID_UNPRICED_VERIFIED: false,
 });

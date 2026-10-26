@@ -180,6 +180,7 @@ export async function gridPage(
       s.value,
       anchor,
       first ? { dep: req.start.departureDate, ret: req.start.returnDate } : undefined,
+      { unpriced: S.GRID_UNPRICED_VERIFIED },
     );
     return { kind: 'read' as const, read, key: changeKeyOf(s.value), raw: s.value };
   };

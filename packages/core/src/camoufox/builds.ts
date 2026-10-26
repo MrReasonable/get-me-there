@@ -72,6 +72,9 @@ export const FLAG_NAMES = [
   'GRID_VERIFIED',
   // why: WP17 Task 17.4: the consent command's landing view, false until research 17.0c's recordings show it
   'LANDING_VERIFIED',
+  // why: spec §2 "Cells by name": the date grid's unpriced cells ("no flights, …", "price unknown, …"), read only where
+  // a grid recording showed them (grid/2026-10-26/7 and 8 on darwin-arm64); elsewhere they stay unparsed
+  'GRID_UNPRICED_VERIFIED',
 ] as const;
 export type FlagName = (typeof FLAG_NAMES)[number];
 
@@ -90,6 +93,7 @@ const NONE: Readonly<Record<FlagName, boolean>> = {
   SOCS_STABLE: false,
   GRID_VERIFIED: false,
   LANDING_VERIFIED: false,
+  GRID_UNPRICED_VERIFIED: false,
 };
 
 /**

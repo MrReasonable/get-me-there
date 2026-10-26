@@ -142,23 +142,38 @@ export const pageCellSchema = z.discriminatedUnion('status', [
 ]);
 export type PageCell = z.infer<typeof pageCellSchema>;
 
+const returnsOnOrAfter = {
+  message: 'a cell returns on or after it departs',
+  path: ['returnDate'],
+};
+const onOrAfter = (c: { departureDate: string; returnDate: string }): boolean =>
+  c.returnDate >= c.departureDate;
 /**
- * One priced grid cell (spec §2 rev 34): both dates from the cell's own name (a same-day pair is shown), the price in
- * pence (the grid states whole pounds), and Google's mark relative to that view. An unpriced cell has no shape until a
- * recording pins Google's form (PA-13): the worker counts it unparsed.
+ * One read grid cell (spec §2, "Cells by name"), both dates from the cell's own name (a same-day pair is shown):
+ * - `price`: the price in pence (the grid states whole pounds) and Google's mark relative to that view;
+ * - `no-flights`: the cell's own words say there are no flights for this pair ("no flights, 14 Nov to 20 Nov");
+ * - `price-unknown`: the cell shows no price and says nothing of flights ("price unknown, 10 Nov to 24 Nov").
+ * The two unpriced forms are read only where a recording proved them (GRID_UNPRICED_VERIFIED, the grid recordings of
+ * 2026-10-26); elsewhere the worker counts them unparsed, as any name it does not read.
  */
-export const gridCellSchema = z
-  .strictObject({
-    status: z.literal('price'),
-    departureDate: isoDateSchema,
-    returnDate: isoDateSchema,
-    amountMinor: z.number().int().min(1),
-    mark: vendorPriceMarkSchema,
-  })
-  .refine((c) => c.returnDate >= c.departureDate, {
-    message: 'a cell returns on or after it departs',
-    path: ['returnDate'],
-  });
+export const gridCellSchema = z.discriminatedUnion('status', [
+  z
+    .strictObject({
+      status: z.literal('price'),
+      departureDate: isoDateSchema,
+      returnDate: isoDateSchema,
+      amountMinor: z.number().int().min(1),
+      mark: vendorPriceMarkSchema,
+    })
+    .refine(onOrAfter, returnsOnOrAfter),
+  z
+    .strictObject({
+      status: z.enum(['no-flights', 'price-unknown']),
+      departureDate: isoDateSchema,
+      returnDate: isoDateSchema,
+    })
+    .refine(onOrAfter, returnsOnOrAfter),
+]);
 export type GridCell = z.infer<typeof gridCellSchema>;
 /** One settled, read view of the grid. `structural: 'unparsed'`: nothing from it is stored (duplicates, a set mismatch). */
 export const gridViewSchema = z.strictObject({

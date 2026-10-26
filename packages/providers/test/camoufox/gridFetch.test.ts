@@ -388,7 +388,7 @@ describe('camoufox grid mode', () => {
     let sent: unknown;
     const marked = view();
     const c0 = marked.cells[24];
-    if (c0 !== undefined) marked.cells[24] = { ...c0, mark: 'low', amountMinor: 39_700 };
+    if (c0?.status === 'price') marked.cells[24] = { ...c0, mark: 'low', amountMinor: 39_700 };
     server.use(
       http.post(URL_, async ({ request }) => {
         sent = await body(request);
@@ -525,6 +525,58 @@ describe('camoufox grid mode', () => {
     if (r.kind !== 'tile') throw new Error('tile');
     expect([r.prices, r.noFares, r.cellIssues ?? []]).toEqual([[], [], []]);
     expect(r.notes).toContain(`no-flights-inferred:${probe.coveredCells.length}`);
+  });
+  // why: spec §2 "Cells by name" (grid/2026-10-26/7 and 8): a pair the grid names "no flights" is positive no fares
+  // (`empty`); one it names "price unknown" says nothing of flights, so it is neither priced nor no fares: the engine
+  // writes it `no_data` (not evidence that no flights exist), never an issue and never `empty`
+  it('a no-flights cell is no fares; a price-unknown cell is neither priced nor no fares; each is counted', async () => {
+    const { d } = setup();
+    const [tile] = d.plan(Q);
+    if (tile === undefined) throw new Error('tile');
+    const v = view();
+    v.cells = v.cells.map((c) =>
+      c.departureDate === '2027-03-16'
+        ? { status: 'no-flights' as const, departureDate: c.departureDate, returnDate: c.returnDate }
+        : c.departureDate === '2027-03-11' && c.returnDate === '2027-03-21'
+          ? { status: 'price-unknown' as const, departureDate: c.departureDate, returnDate: c.returnDate }
+          : c,
+    );
+    server.use(http.post(URL_, () => HttpResponse.json(answer({ views: [v] }), contacted)));
+    const r = await d.fetchTile(tile, Q, ctx);
+    if (r.kind !== 'tile') throw new Error(JSON.stringify(r));
+    expect(r.prices.map((p) => p.departureDate)).toEqual([
+      '2027-03-12',
+      '2027-03-13',
+      '2027-03-14',
+      '2027-03-15',
+      '2027-03-17',
+    ]);
+    expect(r.noFares).toEqual([
+      { origin: 'LHR', destination: 'JFK', departureDate: '2027-03-16', returnDate: '2027-03-26' },
+    ]);
+    expect(r.cellIssues ?? []).toEqual([]);
+    // why: the notes count the view's own cells, as `unparsed:` does (16 Mar has no flights on all seven returns); the
+    // 42 cells outside the tile are dropped whatever they say
+    expect(r.notes).toEqual(['no-flights:7@0', 'price-unknown:1@0', 'dropped-outside-tile:42']);
+  });
+  it('an unpriced pair read in two views, or priced in one and unpriced in another, fails the tile', async () => {
+    const { d } = setup();
+    const [tile] = d.plan(Q);
+    if (tile === undefined) throw new Error('tile');
+    const unpriced = (status: 'no-flights' | 'price-unknown') => {
+      const v = view({ index: 1 });
+      v.cells = v.cells.map((c) => ({ status, departureDate: c.departureDate, returnDate: c.returnDate }));
+      return v;
+    };
+    for (const views of [
+      [view(), unpriced('no-flights')],
+      [unpriced('price-unknown'), { ...unpriced('price-unknown'), index: 2 }],
+    ]) {
+      server.use(http.post(URL_, () => HttpResponse.json(answer({ views, scrolls: 1 }), contacted)));
+      const r = await d.fetchTile(tile, Q, ctx);
+      if (r.kind !== 'tile-error') throw new Error(JSON.stringify(r));
+      expect(r.error).toMatchObject({ kind: 'parse', reason: 'grid-cell-read-twice' });
+    }
   });
   it('two views that both price one covered pair fail the tile: nothing from the page is stored (PA M1, CodeRabbit)', async () => {
     const { d } = setup();

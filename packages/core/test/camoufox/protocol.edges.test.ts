@@ -167,6 +167,26 @@ describe('each refinement names its field and says why', () => {
       message: 'a cell returns on or after it departs',
     });
   });
+  // why: spec §2 "Cells by name" (grid/2026-10-26/7 and 8): the grid's two unpriced forms ("no flights", "price unknown") carry both dates and nothing else
+  it.each(['no-flights', 'price-unknown'])(
+    'an unpriced %s cell carries its dates only, the return on or after',
+    (status) => {
+      const cell = { status, departureDate: '2027-03-11', returnDate: '2027-03-21' };
+      expect(gridCellSchema.safeParse(cell).success).toBe(true);
+      expect(gridCellSchema.safeParse({ ...cell, amountMinor: 100 }).success).toBe(false);
+      expect(gridCellSchema.safeParse({ ...cell, mark: 'none' }).success).toBe(false);
+      expect(issue(gridCellSchema.safeParse({ ...cell, returnDate: '2027-03-10' }))).toEqual({
+        path: ['returnDate'],
+        message: 'a cell returns on or after it departs',
+      });
+    },
+  );
+  it('a cell of any other status is refused', () => {
+    expect(
+      gridCellSchema.safeParse({ status: 'none', departureDate: '2027-03-11', returnDate: '2027-03-21' })
+        .success,
+    ).toBe(false);
+  });
 });
 
 describe('every value of each closed list is accepted, and nothing else', () => {

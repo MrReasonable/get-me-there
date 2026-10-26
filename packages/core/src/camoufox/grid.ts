@@ -23,7 +23,7 @@ export const GRID_TIMES: Readonly<{ pageSeconds: number; scrollSeconds: number }
   scrollSeconds: 9.3,
 };
 /** The cell grammar's date (the worker's gridNames.ts), stated in every grid answer's versions. */
-export const GRID_GRAMMAR_VERSION = '2026-10-18';
+export const GRID_GRAMMAR_VERSION = '2026-10-26';
 /** The least spacing between scroll clicks, start to start (ruling 12). */
 export const GRID_MIN_SCROLL_SPACING_SECONDS = 5;
 /** The most scrolls a page may make (CAMOUFOX_GRID_SCROLL_CAP's maximum). */

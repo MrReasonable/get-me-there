@@ -1,6 +1,6 @@
 # get-me-there — Flight Price Intelligence & Flexible-Date Optimiser
 
-**Design spec, revision 48.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
+**Design spec, revision 49.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
 four full-roster reviews (145, 140, 126 and 101 findings; zero Critical since
 revision 2) and the provider spike. Revision 9 folds in the three decisions
 taken at approval (the self-scraping fallback in §2, the dashboard readings in
@@ -197,7 +197,10 @@ recordings (its landing view from 2026-10-25's), and `darwin-x64`'s,
 `linux-arm64`'s and `linux-x64`'s from their own recording sessions of
 2026-10-26, each under its own build (`darwin-x64`'s date grid from its
 re-recorded pages of that day, under the settle that waits for every cell,
-§2 "Settles and deadlines"). An entry whose flags are not set for its pinned build (a
+§2 "Settles and deadlines"); `darwin-arm64`'s date grid's unpriced cells
+(`GRID_UNPRICED_VERIFIED`) come from its grid pages of 2026-10-26 on a sparse
+route, and no other entry has that flag until its own grid recordings show
+an unpriced cell. An entry whose flags are not set for its pinned build (a
 new pin before its recordings) stays off: the worker refuses to start there
 (exit 78) naming the missing recording, `gmt setup` does not offer the
 provider on that machine, and the app runs without it. The profile is a persistent directory
@@ -276,11 +279,24 @@ never silently dropped.
   selected]`, the price with thousands separators ("£1,308"), read through
   locators from each button's accessible name, never from printed
   accessibility text. A priced cell that parses and names
-  its position's pair is kept; an unpriced cell is counted as `no_data` once a
-  recording proves Google's unpriced form, and until then as unparsed, never
-  guessed. Duplicate pairs, or names that fail the departures × returns
-  cross-product, make the whole view structurally unparsed: nothing from it
-  is stored, and its covered cells are issues. **Grammar drift:** when more
+  its position's pair is kept. **Unpriced cells** (dated, observed
+  2026-10-26 on a sparse route, `grid/2026-10-26/7` and `8`): a pair Google
+  shows without a price is a button like any cell, named `no flights, <d>
+  <Mon> to <d> <Mon>` (printing "no flights") or `price unknown, <d> <Mon> to
+  <d> <Mon>` (printing "price unknown"); neither was seen marked or selected.
+  On an entry whose own `--grid` recordings show them (`GRID_UNPRICED_VERIFIED`,
+  set for `darwin-arm64` only) each is read as an unpriced cell of its pair:
+  it counts toward the view's cells and the lines' sets, carries no price and
+  is never the selected cell. A "no flights" cell is the page's own statement
+  that this pair has no flights, so it is `empty` (no fares); a "price
+  unknown" cell says nothing of flights, so it is `no_data` (not evidence that
+  no flights exist), never `empty` and never priced. Each view's counts of
+  both are notes on the tile (`no-flights:<n>@<view>`,
+  `price-unknown:<n>@<view>`). On any other entry both forms are unparsed,
+  never guessed. Duplicate pairs (a priced and an unpriced name for one pair
+  included), or names that fail the departures × returns cross-product, make
+  the whole view structurally unparsed: nothing from it is stored, and its
+  covered cells are issues; a view is never priced in part. **Grammar drift:** when more
   than half of a view's priced-looking cells (names starting "£") fail the
   grammar, the page stops as `unrecognised` and no further scrolls run.
   **Years.** Each `<d> <Mon>` takes the year in {Y − 1, Y, Y + 1} (Y the
@@ -348,7 +364,9 @@ never silently dropped.
   unparsed, a first view with no selected cell `unrecognised`), never priced in
   part. The `darwin-x64` recordings of 2026-10-26 showed why: under Rosetta a
   view held still across two polls with 42 of its 49 cells drawn, or none,
-  each undrawn cell printing "0000" in its place. A view whose lines do not
+  each undrawn cell printing "0000" in its place. An unpriced cell is a named
+  button, so it counts as drawn and is never waited on; only an undrawn
+  cell's "0000", which is no button, is. A view whose lines do not
   read, or that names more cells than they call for, is not waited on. The
   `--grid` recorder waits the same way and marks a view still drawing at its
   bound as not drawn. Every poll is classified.
@@ -3624,6 +3642,22 @@ as specified in §5.3; no secrets, no full URLs.
 ---
 
 ## 17. Changelog
+
+### Revision 49: the date grid's unpriced cells (2026-10-26)
+
+The operator's first grid run on a sparse route (182 departure days, stays of 10–21 nights, 2,184 day pairs,
+`darwin-arm64`) priced no cell: 1,324 were refused with their views (`view-unparsed`), 48 were left when three pages
+answered that they had not settled (`page-not-ready`), and after two of those in a row the provider was disabled for
+the run's other 812. Two grid pages recorded on that route (`grid/2026-10-26/7` and `8`) showed the cause of the
+refusals: a pair Google shows without a price is a button named "no flights, 14 Nov to 20 Nov" or "price unknown,
+10 Nov to 24 Nov", which the grammar did not read, so each was unparsed, and a departure or return day with no priced
+cell failed the view's set check. §2 "Cells by name" now reads both forms on an entry whose own recordings show them
+(the new flag `GRID_UNPRICED_VERIFIED`, `darwin-arm64` only): "no flights" is `empty`, "price unknown" is `no_data`, and
+a view whose missing prices they explain is whole; anything still unexplained is refused whole as before. Both forms
+are buttons, so the settle of revision 46 never waited on them (§2 "Settles and deadlines" now says so). The three
+pages that did not settle answered at 90 s, the first view's page timeout, which ends before the Price graph is
+clicked; one of their queries settled in 18 s when recorded again, so they are not this cause, and the rule that two
+consecutive parse errors disable a provider for the run (§8.1) is unchanged. No other design rule changes.
 
 ### Revision 48: the Dates view (2026-10-26)
 

@@ -133,6 +133,8 @@ const WORKER_FLAGS: Readonly<Record<FlagName, boolean>> = {
   GRID_VERIFIED: true,
   // why: WP17 research 17.0c: the 2026-10-25 recording's views after the choice read as the landing view
   LANDING_VERIFIED: true,
+  // why: grid/2026-10-26/7 and 8: the date grid's unpriced cells ("no flights", "price unknown") on the operator's Mac
+  GRID_UNPRICED_VERIFIED: true,
 };
 
 describe('FLAGS and flagsFor (spec §2 rev 36: flags per <os>-<arch>, bound to their build)', () => {
@@ -146,6 +148,7 @@ describe('FLAGS and flagsFor (spec §2 rev 36: flags per <os>-<arch>, bound to t
       'SOCS_STABLE',
       'GRID_VERIFIED',
       'LANDING_VERIFIED',
+      'GRID_UNPRICED_VERIFIED',
     ]);
   });
 
@@ -162,10 +165,15 @@ describe('FLAGS and flagsFor (spec §2 rev 36: flags per <os>-<arch>, bound to t
       expect(FLAGS[k].flags.FORM_VERIFIED, k).toBe(true);
     }
     // why: darwin-x64's grid mode came on with its re-recorded pages (grid/2026-10-26/5 and 6, spec §2 rev 46); every
-    // entry now has every flag but VIEW_MORE_ADDS_CHEAPER
+    // entry has every flag but VIEW_MORE_ADDS_CHEAPER, and GRID_UNPRICED_VERIFIED only where a grid recording showed an
+    // unpriced cell (darwin-arm64's grid/2026-10-26/7 and 8)
     for (const k of OS_ARCHES) {
       const off = FLAG_NAMES.filter((f) => !FLAGS[k].flags[f]);
-      expect(off, k).toEqual(['VIEW_MORE_ADDS_CHEAPER']);
+      expect(off, k).toEqual(
+        k === 'darwin-arm64'
+          ? ['VIEW_MORE_ADDS_CHEAPER']
+          : ['VIEW_MORE_ADDS_CHEAPER', 'GRID_UNPRICED_VERIFIED'],
+      );
     }
   });
 

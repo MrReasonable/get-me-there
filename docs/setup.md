@@ -1212,6 +1212,12 @@ verified on the worker").
 - **Prices.** Google's own date grid, labelled "Google Flights date grid via Camoufox": whole pounds, an assumed age
   of up to 24 hours (Google does not state it), the return date read from the grid cell. Google's "cheapest price" and
   "low price" marks are shown as Google's, for the prices in that view only, never as this app's own minimum.
+- **Day pairs without a price.** Where the grid shows a day pair with no price, its cell says "no flights" or "price
+  unknown". On a Mac with Apple silicon (the one entry whose recordings show these cells) a "no flights" cell counts as
+  no fares and a "price unknown" cell as no cached data, which is not evidence that no flights exist; the rest of the
+  view is priced as usual. On other machines such a cell is not read until that machine's own recordings show one:
+  it ends as an error you can resume, and a view in which a whole departure or return day has no price is not read
+  at all.
 - **Caps.** Every page still counts one page against `CAMOUFOX_EXECUTION_PAGE_CAP` and `CAMOUFOX_MONTHLY_PAGE_CAP`.
   Scrolls have their own caps: `CAMOUFOX_EXECUTION_SCROLL_CAP` (default 600) and `CAMOUFOX_MONTHLY_SCROLL_CAP`
   (default 6,000), at most `CAMOUFOX_GRID_SCROLL_CAP` (default 30) a page, at least
