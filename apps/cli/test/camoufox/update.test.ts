@@ -8,7 +8,7 @@ import { DRY_RUN_LINE } from '../../src/camoufox/updateStep.js';
 import { runCli } from '../../src/cli.js';
 import { systemExecutor } from '../../src/exec/system.js';
 import type { Action } from '../../src/plan/action.js';
-import { stubHttp } from '../support/deps.js';
+import { stubHttp, unsetFlags } from '../support/deps.js';
 import { machine } from '../support/machine.js';
 
 // why: Task 17.1: update's Camoufox step, placed after the build and before the restart (spec §13; decision 73)
@@ -18,7 +18,8 @@ const OLD = `${ROOT}/browsers/official/152.0.4-beta.28-8b7680a6`;
 const NEW = { ...MAC, build: '153.0.1-beta.30', sha256: 'c'.repeat(64) };
 const NEW_BUNDLE = `${ROOT}/browsers/official/153.0.1-beta.30-cccccccc`;
 const flagsOn = manifestFor('darwin-arm64').flags;
-const flagsOff = manifestFor('linux-x64').flags;
+// why: WP17 Task 17.8 recorded every entry on the pinned build; a new build's entry has no flags yet
+const flagsOff = unsetFlags();
 
 async function world(o: {
   manifest: Manifest | string;

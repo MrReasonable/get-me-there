@@ -394,7 +394,14 @@ describe('the manifest update reads from the new code (Task 17.1)', () => {
     const m = manifestFor('darwin-arm64');
     expect(m.entry).toEqual(MAC);
     expect(m.flags.FORM_VERIFIED).toBe(true);
-    expect(manifestFor('linux-x64').flags.FORM_VERIFIED).toBe(false);
+    expect(manifestFor('linux-x64').flags.FORM_VERIFIED).toBe(true);
+    // why: flags earned on another build count for none (decision 75)
+    expect(
+      manifestFor('linux-x64', {
+        builds: CAMOUFOX_BUILDS,
+        flags: { ...FLAGS, 'linux-x64': { build: '153.0.1-beta.30', flags: FLAGS['darwin-arm64'].flags } },
+      }).flags.FORM_VERIFIED,
+    ).toBe(false);
     expect(parseManifest(JSON.stringify(m))).toEqual(m);
     expect(parseManifest(JSON.stringify({ ...m, extra: 1 }))).toBeNull();
     expect(

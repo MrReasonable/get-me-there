@@ -241,7 +241,22 @@ export const PROOFS: Readonly<Record<OsArch, Partial<Record<FlagName, string>>>>
     GRID_VERIFIED:
       '2026-10-26 grid/2026-10-26/1 (five views of 49 cells, every cell name parses, each view’s cells name its lines’ dates, each of the four scrolls moves one day on its axis, SOCS same)',
   },
-  'linux-x64': {},
+  // why: WP17 Task 17.8, a Linux x86_64 container under emulation on the operator's Mac (headless, the generated
+  // fonts.conf, CAMOUFOX_PAGE_TIMEOUT_SECONDS 180 after a first View more page did not settle within 90 s)
+  'linux-x64': {
+    RESULTS_VERIFIED: '2026-10-26 results/2026-10-26/2 (23 links, every name parses, SOCS same)',
+    FORM_VERIFIED:
+      '2026-10-26 results/2026-10-26/2 (round trip, 1 passenger, 14 Mar to 24 Mar as asked) and no-flights/2026-10-26/2 (1 Dec to 10 Dec as asked)',
+    CHEAPEST_FLOW_VERIFIED:
+      '2026-10-26 cheapest/2026-10-26/2 (22 links after the tab click; their minimum equals the tab price, SOCS same)',
+    NO_FLIGHTS_VERIFIED:
+      '2026-10-26 no-flights/2026-10-26/2 (a date beyond the sale window: the line visible with 0 links, form as asked)',
+    SOCS_STABLE: '2026-10-26 socs-stability/2026-10-26/4–6 (three spaced pages, every read-back same)',
+    LANDING_VERIFIED:
+      '2026-10-26 landing/2026-10-26/2 (/travel/flights?hl=en-GB&gl=GB with no query, the heading "Flights", no tab, Date grid button or result link, SOCS same)',
+    GRID_VERIFIED:
+      '2026-10-26 grid/2026-10-26/2 (five views of 49 cells, every cell name parses, each view’s cells name its lines’ dates, each of the four scrolls moves one day on its axis, SOCS same)',
+  },
 };
 
 /** The flags as `/v1/status` reports them. */

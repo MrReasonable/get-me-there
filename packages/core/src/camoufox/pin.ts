@@ -97,7 +97,22 @@ const FLAGS = {
       LANDING_VERIFIED: true,
     },
   },
-  'linux-x64': { build: '152.0.4-beta.28', flags: NONE },
+  // why: WP17 Task 17.8's linux-x64 session of 2026-10-26 (a Linux x86_64 container under emulation on the operator's
+  // Mac, headless, the generated fonts.conf); the worker's PROOFS name each recording
+  'linux-x64': {
+    build: '152.0.4-beta.28',
+    flags: {
+      RESULTS_VERIFIED: true,
+      FORM_VERIFIED: true,
+      CHEAPEST_FLOW_VERIFIED: true,
+      // why: the view-more recording's minimum (71 links) equalled the results page's
+      VIEW_MORE_ADDS_CHEAPER: false,
+      NO_FLIGHTS_VERIFIED: true,
+      SOCS_STABLE: true,
+      GRID_VERIFIED: true,
+      LANDING_VERIFIED: true,
+    },
+  },
 } as const;
 
 /** The pin as data: the builds and the flags, validated by builds.ts's `pinSchema`. */
