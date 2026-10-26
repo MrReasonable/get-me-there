@@ -1366,7 +1366,7 @@ time-zone cases were written first, beside the view, in Tasks 19.4 and 19.5.
 ### Task 19.9: The Playwright smoke and the performance test
 
 **Files**: `apps/web/e2e/{smoke.spec.ts,selectors.ts,perf.spec.ts,perfFixtures.ts}`, `apps/web/playwright.config.ts`,
-`.github/workflows/ci.yml` and `scripts/workflows.test.mjs` (the `e2e` job),
+`.github/workflows/e2e.yml` and `scripts/workflows.test.mjs` (the `e2e` job),
 `apps/web/test/e2e/selectors.test.tsx`.
 
 - [ ] **Write the failing tests:**
@@ -1402,7 +1402,8 @@ time-zone cases were written first, beside the view, in Tasks 19.4 and 19.5.
     200 ms is recorded. Each limit is multiplied by `GMT_TIMING_FACTOR` (default 1, revision 50). Each wait is
     `waitForFunction` on that step's mark, with the timeout only as a backstop. The performance test runs with the e2e
     suite, locally and in CI's `e2e` job, and is not part of `pnpm test`.
-  - **CI** (revision 50, settled by the orchestrator): `.github/workflows/ci.yml` gains an `e2e` job on ubuntu-24.04
+  - **CI** (revision 50, settled by the orchestrator): a new workflow, `.github/workflows/e2e.yml` (a workflow of its own, because GitHub applies a path filter to a
+    whole workflow and ci.yml's test matrix runs on every push), holds an `e2e` job on ubuntu-24.04
     that installs Chromium with `pnpm --filter @gmt/web e2e:install` and runs `pnpm --filter @gmt/web e2e` (the smoke
     on both projects and the `@perf` test) with `GMT_TIMING_FACTOR: 3`, path-filtered to `apps/web/**`, `apps/api/**`,
     `packages/core/**`, `packages/db/**`, `packages/engine/**` and the workflow itself; `scripts/workflows.test.mjs`
@@ -1463,7 +1464,7 @@ time-zone cases were written first, beside the view, in Tasks 19.4 and 19.5.
 - `pnpm --filter @gmt/web e2e`, run locally with `GMT_TIMING_FACTOR` unset (factor 1): the smoke green on the desktop
   project and the `@phone` project at 375 px, the `@perf` test green on the desktop project. CI gates the route's
   statement counts, sizes and 3 s × 3 through `pnpm test`, and the smoke and the browser's 1.5 s and 200 ms limits
-  (× 3) through its `e2e` job (revision 50, settled by the orchestrator), green on the PR.
+  (× 3) through `e2e.yml`'s `e2e` job (revision 50, settled by the orchestrator), green on the PR.
 - `pnpm exec vitest run scripts/wording.test.mjs scripts/workflows.test.mjs` green.
 - No orphaned vitest, Stryker, Playwright or browser process after the runs.
 - The PR's description carries the ported-tests table and the changed-file count with the CodeRabbit route it took
