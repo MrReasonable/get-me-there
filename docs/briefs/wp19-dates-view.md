@@ -140,7 +140,7 @@ panels); the nav has two tiers; and the old view URLs land on Dates.
 - Alerts rules, digests and their wording beyond the link (WP11).
 - Any change to discovery, selection, verification or the engine's runs (WP7); the providers (WP5, WP6, WP14, WP15).
 - The status report (WP18) beyond the `data` card's link.
-- Windows, CI matrix changes other than the mutation workflow's web shard (WP16b, WP17).
+- Windows, CI matrix changes other than the mutation workflow's web shard and the `e2e` job (WP16b, WP17).
 
 ## 3. Spec sections
 
@@ -580,7 +580,10 @@ No web or e2e file imports from `packages/core/test`; fixtures build through `@g
     not-searched count now includes days a relative window rolled in, widened nights and added airports (§10 coverage
     route, §6.6); each figure carries `fromEarlierSearch`, and how far checked says the price comes from an earlier
     search exactly when it is true (§10, §11); an arrival on a later date than its leg's departure shows its day offset
-    ("arrives 06:40 +1", the full date in words for assistive technology) (§11 Board, Date pair detail).
+    ("arrives 06:40 +1", the full date in words for assistive technology) (§11 Board, Date pair detail); CI runs
+    the Playwright suite (the smoke on the desktop and 375 px projects, and the performance test) in a job of its own
+    on ubuntu-24.04 with `GMT_TIMING_FACTOR=3`, path-filtered to `apps/web/**`, `apps/api/**`, `packages/core/**`,
+    `packages/db/**`, `packages/engine/**` and the workflow itself (§9).
   - **Settled with the brief's review** (the brief's author, from the roster's findings; Ian may overturn any): the
     §10 query is a wire form of strings and the api answers 422 itself; the shape additions of §5 above
     (`notReached`, the cheaper-cached origin, destination, truncated and stale columns, `departOut`, `arriveOut`,
@@ -1345,6 +1348,7 @@ time-zone cases were written first, beside the view, in Tasks 19.4 and 19.5.
 ### Task 19.9: The Playwright smoke and the performance test
 
 **Files**: `apps/web/e2e/{smoke.spec.ts,selectors.ts,perf.spec.ts,perfFixtures.ts}`, `apps/web/playwright.config.ts`,
+`.github/workflows/ci.yml` and `scripts/workflows.test.mjs` (the `e2e` job),
 `apps/web/test/e2e/selectors.test.tsx`.
 
 - [ ] **Write the failing tests:**
@@ -1378,8 +1382,13 @@ time-zone cases were written first, beside the view, in Tasks 19.4 and 19.5.
     board is not held), the next execution poll is served with changed progress, `page.clock.fastForward('00:31')`
     passes the 30 s throttle, and the date-pairs route serves a second body whose order differs; no long task over
     200 ms is recorded. Each limit is multiplied by `GMT_TIMING_FACTOR` (default 1, revision 50). Each wait is
-    `waitForFunction` on that step's mark, with the timeout only as a backstop. The performance test runs locally with
-    the e2e suite (which CI does not run) and is not part of `pnpm test`.
+    `waitForFunction` on that step's mark, with the timeout only as a backstop. The performance test runs with the e2e
+    suite, locally and in CI's `e2e` job, and is not part of `pnpm test`.
+  - **CI** (revision 50, settled by the orchestrator): `.github/workflows/ci.yml` gains an `e2e` job on ubuntu-24.04
+    that installs Chromium with `pnpm --filter @gmt/web e2e:install` and runs `pnpm --filter @gmt/web e2e` (the smoke
+    on both projects and the `@perf` test) with `GMT_TIMING_FACTOR: 3`, path-filtered to `apps/web/**`, `apps/api/**`,
+    `packages/core/**`, `packages/db/**`, `packages/engine/**` and the workflow itself; `scripts/workflows.test.mjs`
+    pins the job, its runner, its install and run steps, its factor and its path filter.
 - [ ] **Run to verify they fail**: `pnpm --filter @gmt/web e2e` → the smoke looks for the board caption on the old
   Results view and fails; the perf spec finds no `gmt:dates-drawn` mark.
 - [ ] **Implement**; `playwright.config.ts` keeps `@phone` in the phone project and runs `@perf` in the desktop project
@@ -1435,8 +1444,8 @@ time-zone cases were written first, beside the view, in Tasks 19.4 and 19.5.
   WP19.
 - `pnpm --filter @gmt/web e2e`, run locally with `GMT_TIMING_FACTOR` unset (factor 1): the smoke green on the desktop
   project and the `@phone` project at 375 px, the `@perf` test green on the desktop project. CI gates the route's
-  statement counts, sizes and 3 s × 3 through `pnpm test`; the browser's 1.5 s and 200 ms limits are gated only by this
-  local run.
+  statement counts, sizes and 3 s × 3 through `pnpm test`, and the smoke and the browser's 1.5 s and 200 ms limits
+  (× 3) through its `e2e` job (revision 50, settled by the orchestrator), green on the PR.
 - `pnpm exec vitest run scripts/wording.test.mjs scripts/workflows.test.mjs` green.
 - No orphaned vitest, Stryker, Playwright or browser process after the runs.
 - The PR's description carries the ported-tests table and the changed-file count with the CodeRabbit route it took
