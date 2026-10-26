@@ -1,6 +1,6 @@
 # get-me-there — Flight Price Intelligence & Flexible-Date Optimiser
 
-**Design spec, revision 47.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
+**Design spec, revision 48.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
 four full-roster reviews (145, 140, 126 and 101 findings; zero Critical since
 revision 2) and the provider spike. Revision 9 folds in the three decisions
 taken at approval (the self-scraping fallback in §2, the dashboard readings in
@@ -40,12 +40,14 @@ anyone technical who clones the public repository, not only for the
 original operator; multi-user use stays a non-goal.
 
 **Success looks like:** with provider credentials configured, scheduled
-searches keep a ranked table, a calendar heatmap and a price-vs-stay chart
-current for the configured space, within a configurable spend ceiling, and
+searches keep the Dates view current for the configured space (a ranked
+board of the cheapest date pairs found, and an overview of every date pair
+by stay length), within a configurable spend ceiling, and
 email Ian when an itinerary that satisfies his constraints drops under a
 threshold. Every price on screen says where it came from, how old it is,
-and whether its constraints were checked. The coverage view makes it
-impossible to mistake "not searched" for "no flights".
+and whether its constraints were checked. The Dates view's coverage marks
+and its coverage section make it impossible to mistake "not searched" for
+"no flights".
 
 The headline number is the **cheapest round trip found** and always carries
 its basis, verdict class, provider and age. Never "cheapest bookable". The
@@ -67,7 +69,7 @@ subscribing to (decision 2026-10-14).
 **What £0 gives, honestly:** cached calendar prices only, no constraints
 checked, and coverage that depends entirely on what Aviasales users have
 searched for the chosen pairs. The coverage check shows this before a
-definition is saved, the Results header shows the coverage line on every
+definition is saved, the Dates view's header shows the coverage line on every
 run, and per-cell verify is hidden. The spike (2026-10-14) found that a
 thin long-haul destination can have **no** cached rows at all across eight
 months while the busy gateways of the same country have four to six a
@@ -724,7 +726,7 @@ most `CAMOUFOX_MONTHLY_PAGE_CAP`: with the defaults, 100 a run and 1,500 a
 month, against 2,184 day pairs for one worked-example airport pair (8,736 for
 its four pairs). The estimate says how many cells a run will price and how
 many runs a full pass takes; the rest of the cells read skipped or not
-searched in View D. The `grid` mode changes the arithmetic: 7 × 7
+searched in the Dates view's coverage section. The `grid` mode changes the arithmetic: 7 × 7
 blocks laid over a 12-night band need `⌈182 / 7⌉ × ⌈18 / 7⌉ = 26 × 3 = 78`
 blocks a pair (3,822 grid cells, of which the 2,184 in the band are stored,
 57%), 312 for the four pairs. At the measured one-day step a block-to-block
@@ -893,12 +895,12 @@ verification as a free history source (§7 `route_price_history`).
     `currency-unsupported`, `unknown-airport-tz`, `no-return-legs`,
     `no-priced-options`, `unmappable-carrier`; the vendor's message,
     URL-stripped, is in `last_error`, never in `reason`.
-  - `skipped`: `reason ∈ not_selected | budget | provider_disabled | provider_unavailable | scheduled_only | departed` (`provider_unavailable`: the `camoufox` worker could not be reached, §2; `scheduled_only`: a `camoufox` cell left for a later run, with a detail code in `cell_outcomes.skip_detail` (migration 0007): `catch-up-no-browser`, a catch-up's cell that reuse did not fill, shown "…: a catch-up loads no browser pages", or `outside-browser-window`, a cell a run reached past its browser window, shown "…: outside this run's browser window" (§8.2); the words before the colon name who fetches it, read when it is shown: "left for the next scheduled run" only when the definition is scheduled and enabled and its scheduled runs still use the browser provider (configured and enabled), "left for your next run of this search" when only a run started by hand would, else "not fetched: this search no longer uses the browser provider" (`core`'s `leftForOf` and `scheduledOnlyText`, one text for View D, the cell panel, the notice and the Status view; the engine's `browserLeftFor` answers it and the api returns it as `browserLeftFor`); the promise is made only for the latest parent run's cells, and an earlier run's left cell reads in the past tense, "left by that run: <why>").
+  - `skipped`: `reason ∈ not_selected | budget | provider_disabled | provider_unavailable | scheduled_only | departed` (`provider_unavailable`: the `camoufox` worker could not be reached, §2; `scheduled_only`: a `camoufox` cell left for a later run, with a detail code in `cell_outcomes.skip_detail` (migration 0007): `catch-up-no-browser`, a catch-up's cell that reuse did not fill, shown "…: a catch-up loads no browser pages", or `outside-browser-window`, a cell a run reached past its browser window, shown "…: outside this run's browser window" (§8.2); the words before the colon name who fetches it, read when it is shown: "left for the next scheduled run" only when the definition is scheduled and enabled and its scheduled runs still use the browser provider (configured and enabled), "left for your next run of this search" when only a run started by hand would, else "not fetched: this search no longer uses the browser provider" (`core`'s `leftForOf` and `scheduledOnlyText`, one text for the Dates view's coverage section, the date pair detail's per-airport-pair panel, the notice and the Status view; the engine's `browserLeftFor` answers it and the api returns it as `browserLeftFor`); the promise is made only for the latest parent run's cells, and an earlier run's left cell reads in the past tense, "left by that run: <why>").
   - Coverage is always shown as **six buckets**: priced, no fares (`empty`),
     no cached data (`no_data`), error, skipped (reasons in the drill-down),
     not searched (`not_run`); they sum to the cell count. "Searched" as an
-    umbrella (`priced + empty + no_data`) appears only in View D beside the
-    breakdown. Reused outcomes count in their bucket and the header adds
+    umbrella (`priced + empty + no_data`) appears only in the Dates view's
+    coverage section (§11) beside the breakdown. Reused outcomes count in their bucket and the header adds
     "(R reused from earlier runs)".
   - A cell interrupted mid-flight returns to `not_run`.
 - **Cell roll-up** — §6.6 precedence, stored, recomputed with every write.
@@ -913,7 +915,7 @@ verification as a free history source (§7 `route_price_history`).
   price is stale only when its known age exceeds the threshold). Two label formats are defined once in `core`: the full form
   "fetched 2h ago · provider age unknown (≤7d before that)" for tooltips,
   headers and email, and the compact row form "2h ago · ≤7d" for table
-  cells; where even that does not fit (a calendar day, the phone face) the
+  cells; where even that does not fit (a phone board card, §11) the
   short face form "5d old", "≤2d old" or "age unknown", also from `core`.
 
 ---
@@ -1439,7 +1441,8 @@ freshness; the other offers for that itinerary appear in the expanded row
 with their own class and unverified constraints. Stale rows are labelled,
 never demoted (hiding them is the opt-in filter). `/results` returns up to 1000 such rows ranked by verdict
 class (verified, partially-verified, failed) then price, for the chosen
-basis and execution set; **all sorting and filtering happen client-side**
+basis, execution set and scope (the whole space, or one date pair's cells
+across the airport pairs in scope, §10); **all sorting and filtering happen client-side**
 on that set with these functions, composing without refetch; when
 `truncated`, the header says "within the cheapest 1000 of N". Sort keys:
 price, total travel time, departure, return, nights, stops, adjusted.
@@ -1474,8 +1477,8 @@ fetched again in the same execution; the §7 supersede rule is a safety net
 in the tile write, not a path the planner takes. Coverage
 fractions in the UI always show the **six buckets** of §3 (priced, no
 fares, no cached data, error, skipped, not searched), which sum to the cell
-count; "searched" as an umbrella appears only in View D beside the
-breakdown. "Selected but not reached" = `selected ∧ (not_run ∨
+count; "searched" as an umbrella appears only in the Dates view's coverage
+section beside the breakdown. "Selected but not reached" = `selected ∧ (not_run ∨
 skipped:budget)`. Property test from an independent enumeration of the
 table.
 
@@ -1884,12 +1887,13 @@ completed
   come from the ledger by `execution_id` at any time and are labelled
   "ledger cost, from configured rates". **Parity** = distinct tile requests
   (first-attempt ledger rows + cache hits) for one uninterrupted pass =
-  `plan` length; a parity break raises an operator notification and a View
-  D flag. View D otherwise flags **overruns** only: usage above the
+  `plan` length; a parity break raises an operator notification and a flag
+  in the Dates view's coverage section (§11), which otherwise flags
+  **overruns** only: usage above the
   **pre-factor plan** by more than 10% (the stored estimate already carries
   the 1.2 factor, so it is not the comparison baseline), judged on distinct
   tiles for discovery (its plan counts tiles, and a paged tile is one tile)
-  and on calls for itinerary search; View D words each line by its unit.
+  and on calls for itinerary search; the section words each line by its unit.
 - **Resume**: on `interrupted | paused_* | cancelled`, and on `completed`
   when `error` outcomes with headroom remain (retry-errors), continue per
   §7. Resume is a **compare-and-set**: `UPDATE … SET status = 'running'
@@ -1901,8 +1905,8 @@ completed
   `skipped` outcomes in either stage for cells with `departureDate ≤
   todayLondon` become `skipped:departed`, their attempts and `last_error`
   kept as evidence (an error on a flight that has left is not retryable;
-  priced/empty/no_data rows are untouched). View D offers Retry only for an
-  error on a cell that has not departed.
+  priced/empty/no_data rows are untouched). The Dates view's coverage section
+  offers Retry only for an error on a cell that has not departed.
   Resume uses `estimateRemaining` (resumable tiles + remaining selected
   cells × estimate × factor) for its per-scope cap check, on both the
   tick and `/resume`. **Any** paused run older than `discoveryRefreshHours`
@@ -1945,12 +1949,12 @@ completed
   definition's other active children may still spend; a definition whose run
   cap is 0 billed calls therefore starts no child, the request refused with
   code `cap`; the other budget fields are inherited from the definition; the
-  cell panel's verify confirms the hard stop it shows; a child never pauses: a
+  detail's verify (§11) confirms the hard stop it shows; a child never pauses: a
   cap breach ends it `cancelled` with the cell left unverified), shares the
   provider/global caps; at most one active child per cell; the action is hidden when the
   definition has no verification provider. Child observations are
-  **included** in results, calendar-gap, View B counts and duration
-  analysis (filtered to the current resolved space), counted separately as
+  **included** in results, calendar-gap and the date-pair figures and
+  counts (filtered to the current resolved space), counted separately as
   "+C on demand" beside "itinerary-searched K of N selected", where C counts
   completed children whose cell is inside the current resolved space and
   whose verification roll-up for it is priced, empty or no_data (the
@@ -2115,8 +2119,8 @@ cells as §3's texts do. SearchApi and Travelpayouts resume and continue as
 usual, and the next scheduled run (on a definition with no schedule, the
 operator's next run of it) fetches the browser provider's cells. A pass the
 window cut left its planned tiles unrequested on purpose, so it is no parity
-break, and View D offers no Retry on a browser error a resume would only
-leave (the resume's own rule). So browser pages load near the times the operator chose, and never
+break, and the Dates view's coverage section offers no Retry on a browser
+error a resume would only leave (the resume's own rule). So browser pages load near the times the operator chose, and never
 late; the Status view warns when two definitions that use the browser
 provider share a firing time and suggests staggering them. Under `any`, a
 run resumed by the operator, by its `resume_after` job or by the boot's
@@ -2166,7 +2170,8 @@ or, calendar basis, `… · Aviasales cache · fetched 2h ago · provider age un
 Body: segments (or "calendar price, no itinerary"), verdicts naming every
 unverified constraint, provenance line with effective age, link (validated
 `https`, host shown, expiry state; for POST bookings a link to the app's
-results row instead), coverage caveat "itinerary-searched K of N cells, E
+detail of that row's date pair with the row open instead,
+`/?view=results&def=…&depart=…&return=…&basis=…&row=…`, §11), coverage caveat "itinerary-searched K of N cells, E
 outbounds each", the rule. Provider strings CRLF/control-stripped.
 Synthetic refused. The banned-word test (§11) runs over rendered notifier
 output and API reason strings with word-boundary matching.
@@ -2201,7 +2206,8 @@ Thresholds in each package's `vitest.config.ts`, enforced in CI from WP0:
 `core` 100% lines/branches/functions; `db`, `providers`, `engine`, `api`
 85% lines and 70% branches; `web` 70% lines, 60% branches. Mutation
 testing (Stryker) on `core` `hashing`, `constraints`, `selection`,
-`rollUp`, `syntheticAllowed`, `toGbp`, `vendorUrl` and `alertDedup` with a
+`rollUp`, `syntheticAllowed`, `toGbp`, `vendorUrl`, `alertDedup`,
+`rankDatePairs` and the date-pair figure precedence with a
 break threshold of 80%, run in Stryker's sandbox (never in place) with
 explicit timeouts and concurrency 2; the gate fails when timed-out mutants
 exceed 5% of those tested (a timeout counts as detected, so load must never
@@ -2222,7 +2228,18 @@ or the engine. First-failing-test per WP in §16.
    both bases, dedup, cooldown, calendar identity, digests, sparse-cache
    drop rule, 1,000 calls × 3200 micro-GBP = 320p trips a 300p cap;
    `syntheticAllowed` truth table incl. traversal and symlink cases; vendor
-   URL validation; the label formatter.
+   URL validation; the label formatter. The Dates view's pure functions: the
+   figure precedence (every branch of §11's rule, ties to verified, unknown
+   age losing to known, partially-verified and failed never chosen);
+   `rankDatePairs` ties, table-driven (equal prices: verified before
+   calendar, then fresher, unknown age last, then earlier departure, then
+   fewer nights, then airport-pair order; superseded and not-seen after every
+   current figure), with property tests that the order is total and
+   unchanged by permuting the input; the band folding (12 stay lengths stay
+   unfolded, 13 fold, at most 12 bands, contiguous and covering the range);
+   `decodeDatePairs` (index → dates across a month end, a leap day and the
+   2027→2028 boundary; every figure decoded with its full provenance; each
+   refinement of §10 rejecting its own malformed response).
 2. **`providers`** (`msw` on global fetch): tiles partition cells and
    `plan().length` equals msw hits exactly; response-date keying drops
    out-of-band entries; empty-is-per-capability (Travelpayouts empty
@@ -2275,7 +2292,8 @@ or the engine. First-failing-test per WP in §16.
    rules and inclusion in results; scheduler re-registration on
    edit/disable/delete; one-shot resume jobs; paused_budget resumed at
    window start; `fx-unavailable`, `currency-unsupported`,
-   `unknown-airport-tz`, `offers-dropped`.
+   `unknown-airport-tz`, `offers-dropped`; the alert email's POST-booking
+   link opens the row's date pair detail (§8.3), its dates in the URL.
 5. **`api`**: every route against `core/api-contract` with provenance
    required on every price-bearing response; verdicts recomputed at read
    time after a constraint edit; stale rows returned with `stale: true`;
@@ -2286,17 +2304,83 @@ or the engine. First-failing-test per WP in §16.
    production environment asserting that `/providers` omits `fixture`, that
    constructing the fixture provider throws, and that a synthetic repository
    write throws; cron validation; `/cells/verify` membership; `truncated` +
-   `total`; `/tools/*` routes require auth.
-6. **`web`**: View B states incl. partial-day five-way marker and
-   per-basis colour scale with hatched fallback days; View D sums; a price
+   `total`; `/tools/*` routes require auth. The date-pair route: columns in
+   generation order and of equal length; the figure precedence, children
+   included and decision 54's marks, over a migrated database; **airport
+   filtering honesty** (decision 53): every count, figure and the summary
+   under `origins`/`destinations` equal those of a definition holding only
+   those airport pairs, and a date pair priced only on a filtered-out airport
+   pair has no figure and counts only its in-scope buckets; `maxJourneyMinutes`
+   leaves out a price whose known journey time is above it, keeps one whose
+   time is unknown, and leaves a date pair with every price left out without
+   a figure but with its buckets; 422 for an airport outside the definition,
+   a bad journey limit, and a scope above 50,000 cells; the **50,000-cell
+   bound**: a database seeded with 50,000 cells in scope, every one priced,
+   answers within the test's explicit 3 s timeout through one grouped query
+   per stage (query count asserted), with a body of at most 4 MiB and at most
+   512 KiB gzip-compressed; `/results` scope parameters (a date pair's cells
+   only, both dates or neither, airports as above, 422 outside the space).
+6. **`web`**: the Dates view, a component test per state of §11 (no
+   search, never run, run in progress with a partial board, paused,
+   budget-stopped, stale, no prices but coverage, thin coverage with its
+   next move, synthetic banner, too many cells, no date pair within the
+   filters, loading, load error); **the coverage marks never read as no
+   flights**: for each unpriced bucket alone and mixed with others, the
+   overview cell's mark, its readout, its accessible name and the board's
+   how far checked use that bucket's words, no text says "no flights", only
+   `empty` says "no fares", a not searched date pair is never shaded, and a
+   date pair with some airport pairs not searched carries the striped mark;
+   airport filters re-read the route and the shown figures come from it, never
+   from a cached unfiltered read; **keyboard paths**: Tab reaches the
+   filters, the board's sort buttons, each row's link, "Show 10 more", the
+   overview's one tab stop and the coverage section's toggle in that order;
+   in the overview the arrows, PageUp/PageDown and Home/End move as §11
+   says, across a month end and into a band, Enter on a band opens it and
+   Escape closes it, Enter on a cell or a row opens the detail with the date
+   pair in the URL, and focus stays on its date pair across a re-rank; the
+   re-rank's one transition, and none under `prefers-reduced-motion:
+   reduce`; the status region announces once per read; rings and lighting
+   both ways; every amount on the board, the readout and the phone cards
+   renders through `PriceCell`, no overview cell prints an amount, and a
+   figure lacking provenance fails to render; the old `?view=calendar`,
+   `?view=duration` and `?view=coverage` URLs and `?view=results` without a
+   date pair (with and without `row=`) land as §11 says; the nav's two
+   tiers, labelled, with `aria-current`; the date pair detail: rows and
+   header of the date pair only, the basis switch opening on the row's
+   basis, the per-airport-pair panels and the verify wording, hard stop and
+   headroom; **the phone layout at 375 px**: board cards lead with dates and
+   price and keep source, age and how far checked, one month of overview with
+   its buttons, cells at least 24 px, no sideways scroll; a price
    lacking provenance fails to render; synthetic banner present and absent;
    distinct text and ARIA for pass/fail/unverified; keyboard operation;
    375px assertion that price, provenance **and the class badge** stay
    visible; banned-word test with word boundaries and an allowlist over
    web, engine templates and API strings; booking links render with
    `rel="noopener noreferrer"`, host shown, POST bookings as forms, no
-   auto-navigation; chart empty and loading states. One Playwright smoke in
-   fixture mode.
+   auto-navigation; History's chart empty and loading states. **Playwright,
+   fixture mode**, through the real api and the built SPA: (1) import the
+   example, switch both stages to the fixture provider, enable, estimate,
+   create and run now; (2) Dates: the header line names the run and its
+   age, the red banner shows, the board's first row carries the synthetic
+   source and its age, the overview's legend is visible, its one tab stop
+   moves by arrow with a solid focus outline, and pointing at the first row
+   lights its ringed cell; (3) the first row opens the date pair detail,
+   whose headline names the synthetic source and whose URL carries the date
+   pair; "Back to dates" returns with the filters kept; (4) `?view=calendar`
+   lands on Dates and `?view=coverage` on Dates with the coverage section
+   open; (5) History's charts draw and its table names the synthetic
+   source; (6) at 375 px the board is stacked cards, the overview shows one
+   month with Previous and Next, nothing spills out of a cell, and on every
+   loaded view (Dates, the detail, History, Definitions, Alerts, Providers,
+   Status) the nav's two tiers keep every link in view in at most two rows
+   and the page does not scroll sideways. **The performance bound**, a
+   second Playwright test, serves the decoded worst cases through the
+   browser's route interception: 36,400 date pairs every one with a figure
+   (400 days × 91 nights, one airport pair) and 50,000 cells (400 days × 25
+   nights × 5 airport pairs); the board and the overview are drawn within
+   1.5 s of the response, a filter change and a re-rank each within 200 ms,
+   and no main-thread task runs longer than 200 ms (a `longtask` observer),
+   each waited on its event with the timeout only as a backstop.
 7. **Live scripts** (excluded from `pnpm test`, run via the tool bootstrap):
    `pnpm smoke:live` issues exactly one tile per configured provider (a
    query sized so `plan` yields one tile), asserts via the ledger, prints
@@ -2421,17 +2505,114 @@ shape carries `provenance` and `stale`.
 | `GET /executions/:id` | status, stage, reason, `resumeAfter`, progress per stage × provider, budget usage for every scope (each provider in the one window its plan uses), estimate vs ledger (updates during run) |
 | `POST /executions/:id/cancel`, `/resume` | `/resume` 409 if another is active or the compare-and-set loses; manual resume re-enables disabled providers and, on a `completed` execution, retries `error` outcomes with headroom |
 | `POST /cells/verify` | validated cell → child execution; 409 if a child is active for that cell |
-| `GET /definitions/:id/results?basis=&executionId=&limit=` | `{ rows, total, truncated, basis, basisReason, executions: [{ id, status, age }], coverage }`; default basis per §6.9; one row per itinerary (§6.5 dedup) from this definition's executions **including children**, filtered to the current resolved space and cabin, verdicts recomputed, **all verdict classes returned**, ranked by class then price so `failed` rows never consume the cap ahead of better ones, stale labelled, rows carry `notSeenInLatest`; calendar basis per §6.9; cap 1000 with `truncated`. **No sort or filter parameters**: sorting and filtering are client-side (§6.5) |
-| `GET /definitions/:id/calendar?destination=` | per day: discovery counts per provider in the six buckets `{ priced, empty, no_data, error, skipped, not_run, reused }`, verification `{ selected, itinerarySearched, onDemand }`, `cheapestVerified` (class verified only, incl. children), `cheapestPartiallyVerified` with count, `cheapestCalendar`; all in the definition's cabin. With `destination`, every count and minimum is that destination's alone (plan decisions 53, 58: there is no basis parameter and no per-destination breakdown) |
-| `GET /definitions/:id/duration-analysis` | per nights: `minVerified` (class verified, with n, incl. children), `minCalendar` per provider with n |
-| `GET /definitions/:id/coverage` | summary, per-provider request counts (tiles and calls), overrun and parity flags, "selected but not reached", errors with retry (only on cells that have not departed), and the on-demand children with their own buckets and calls |
-| `GET /definitions/:id/calendar-gap` | cells whose calendar price is below the cheapest class-`verified` observation (incl. children); empty when the definition has no verification provider |
-| `GET /definitions/:id/cells/:origin/:destination/:departureDate/:returnDate` | that cell's outcomes per stage and provider and its prices, each with full provenance (the View B side panel source) |
+| `GET /definitions/:id/results?basis=&executionId=&limit=&departureDate=&returnDate=&origins=&destinations=` | the date pair detail's source (§11): `{ rows, total, truncated, basis, basisReason, executions: [{ id, status, age }], coverage }`; default basis per §6.9; **scope parameters**: `departureDate` and `returnDate` (both or neither, else 422; a date pair outside the current resolved space is 422) narrow the rows and `coverage` to that date pair's cells, and `origins` and `destinations` (comma lists, each a subset of the definition's airports, else 422) to those airport pairs, by the date-pair route's rule (plan decision 53: no row or count from a cell outside the scope); without them the read is the whole space, as an alert email sent before revision 48 needs; one row per itinerary (§6.5 dedup) from this definition's executions **including children**, filtered to the current resolved space and cabin, verdicts recomputed, **all verdict classes returned**, ranked by class then price so `failed` rows never consume the cap ahead of better ones, stale labelled, rows carry `notSeenInLatest`; calendar basis per §6.9; cap 1000 with `truncated`. **No sort or filter parameters**: sorting and filtering are client-side (§6.5); the scope parameters only choose which cells are read |
+| `GET /definitions/:id/date-pairs?origins=&destinations=&maxJourneyMinutes=` | the Dates view's source (§11), shape below: for the definition's latest parent run, one entry per date pair of the current resolved space with its six discovery buckets over the airport pairs in scope, its verification counts, and its **figure**, the cheapest price found across those airport pairs by §11's precedence, with the airport pair it came from, its basis and class, provenance, `stale`, age, and the decision 54 marks; the same execution set and price rules as `/results` (children included, current space and cabin, plan decisions 53, 54, 58); `origins` and `destinations` scope every count, figure and the summary to those airport pairs alone (decision 53); `maxJourneyMinutes` leaves out of a figure any price whose journey time is known and above it, never one whose time is unknown; columns, not paged, gzip, at most 50,000 cells read |
+| `GET /definitions/:id/coverage` | the latest parent run's coverage, read by the status bar (its blocked-schedule line) and the Dates view's coverage section: summary, per-provider request counts (tiles and calls), overrun and parity flags, "selected but not reached", errors with retry (only on cells that have not departed), and the on-demand children with their own buckets and calls |
+| `GET /definitions/:id/calendar-gap` | the Dates view's calendar-gap banner and the date pair detail: cells whose calendar price is below the cheapest class-`verified` observation (incl. children); empty when the definition has no verification provider |
+| `GET /definitions/:id/cells/:origin/:destination/:departureDate/:returnDate` | that cell's outcomes per stage and provider and its prices, each with full provenance (the source of the date pair detail's per-airport-pair panel, §11) |
 | `POST /tools/smoke`, `POST /tools/record` | the live smoke and recording scripts run inside the app process (authenticated), for use while the app holds `app_lock`; the response's `searchApiCreditsLedgered` is the smoke's running total (the SearchApi credits tool runs had already ledgered in the window at its spend check, null before that check and for `record`), which `gmt smoke` prints and confirms |
 | `GET /tools/smoke/plan` | authenticated, ledgers nothing: the smoke's worst case from `smokeWorstCase` (SearchApi credits split into calendar and itinerary, Travelpayouts free calls, browser pages and, in grid mode, the scroll allowance), the SearchApi trial credits left, and the browser page's bound (`pageBoundSeconds`: the per-request timeout the smoke's http-kit gives that page, from the same limits, §5.3); `gmt smoke` prints all of it before it asks, and waits for the page's bound (§13) |
 | `GET /itineraries/:hash/history`, `GET /routes/:o/:d/history?cabin=` | series per provider and kind; the route's calendar series has one point per execution fetch (the pair's minimum across its cells, carrying the cheapest cell); reused rows excluded; the vendor's price-history series comes grouped by searched trip (`trip` = its departure and return dates, null for rows stored before the trip was recorded), each point vendor-stated GBP |
 | `GET/POST/PUT/DELETE /alerts[/:id]`, `GET /alerts/events` | |
 | `GET /scheduler/jobs`, `GET /budget` | |
+
+**The date-pair route's shape** (`datePairsQuerySchema` and
+`datePairsResponseSchema` in `core/api-contract`, beside the results
+schemas). A **date pair** is a departure date and a stay length (its return
+date is the departure date plus the nights); a **figure** is the one price
+the Dates view shows for a date pair (§11 states the precedence that picks
+it).
+
+```ts
+datePairsQuerySchema = {
+  origins?: Iata[];             // comma list, each one of the definition's origins, else 422
+  destinations?: Iata[];        // comma list, each one of the definition's destinations, else 422
+  maxJourneyMinutes?: number;   // integer 60..6000, else 422
+}
+datePairsResponseSchema = {
+  executionId: string | null;   // the latest parent run; null before the first
+  executions: ExecutionSummary[];   // the runs read, newest first, children included (as /results)
+  discoveryProviders: ProviderId[]; // the definition's; [] means no discovery stage
+  verificationProviderConfigured: boolean;
+  staleAfterHours: number;
+  calendarStaleAfterHours: Partial<Record<ProviderId, number>>;
+  space: { departureFrom: IsoDate; departureTo: IsoDate; minNights: number; maxNights: number }; // current resolved space
+  scope: {                      // what the server applied
+    origins: Iata[]; destinations: Iata[];
+    airportPairs: number;       // origins × destinations in scope
+    cells: number;              // date pairs × airportPairs, ≤ 50,000
+    maxJourneyMinutes: number | null;
+  };
+  summary: CoverageSummary;     // as /results' coverage, over the cells in scope
+  provenances: Provenance[];    // each distinct provenance once; figures index it
+  pairs: {                      // one entry per date pair, in generation order:
+                                // index i = dayIndex × (maxNights − minNights + 1) + (nights − minNights)
+    priced: number[]; empty: number[]; noData: number[]; error: number[];
+    skipped: number[]; notRun: number[];   // the six buckets over the airport pairs in scope
+    reused: number[];
+    selected: number[]; itinerarySearched: number[]; onDemand: number[];
+    unconfirmed: number[];      // itinerary-searched cells that priced nothing the final step confirmed
+    partiallyVerified: number[];    // cells in scope with a partially-verified price (never a figure)
+  };
+  figures: {                    // one entry per date pair that has a figure, pair ascending
+    pair: number[];             // index into pairs
+    pricePence: number[];
+    provenance: number[];       // index into provenances
+    stale: boolean[];
+    ageHours: (number | 'unknown')[];
+    truncated: boolean[];       // "cheapest of the rows read" (decisions 30, 36)
+    basis: ('verified' | 'calendar')[];   // class verified, or a calendar price (class unchecked)
+    origin: number[]; destination: number[];   // indices into scope.origins and scope.destinations
+    superseded: boolean[];      // decision 54, calendar figures only (false on verified)
+    notSeenInLatestAgeHours: (number | 'unknown' | null)[];  // decision 54, verified figures only (null on calendar)
+    journeyMinutes: (number | null)[];   // total travel time when the figure's source states it
+    cheaperCachedPence: (number | null)[];      // a cheaper calendar price a verified figure hides (decision 38)
+    cheaperCachedProvenance: (number | null)[]; // its provenance index; null exactly when cheaperCachedPence is
+  };
+}
+```
+
+The contract's refinement rejects any response whose `pairs` columns are not
+all `days × stays` long, whose `figures` columns differ in length, whose
+`pair` indices are not strictly ascending and in range, whose provenance,
+origin or destination index is out of range, whose six bucket counts for a
+date pair sum to anything but `scope.airportPairs` or 0 (0: no run has a
+discovery outcome for it, or there is no discovery stage, §6.6 row 0), or
+whose decision 54 marks sit on the wrong basis. The provenance table is an
+encoding only: `core`'s `decodeDatePairs` turns the response into one
+record per date pair (departure and return dates, nights, buckets,
+verification counts, and the figure as a full price cell with its complete
+provenance and its airport pair), and the web reads only the decoder's
+output, so no amount reaches `PriceCell` without its provenance (§11).
+
+**Bounds.** The route reads at most **50,000 cells** in scope (fixed, the
+`MAX_CELLS_PER_DEFINITION` default): a scope above it, possible only where
+the operator raised that setting, is refused with 422 `too-many-cells`
+naming the scope's cells and the bound, and the Dates view asks for an
+airport filter that brings it under. Whatever the airports, it returns at
+most 400 × 91 = 36,400 date pairs (§6.1's longest window and widest stay
+range). It reads through one grouped query per stage over the execution
+set, never one per cell. It is **not paged and never truncated**: the
+board's ranking and the overview's shading need every date pair, and a page
+boundary would make an unread date pair look absent. It is delivered as
+**columns** (above) and **gzip-compressed** when the request accepts it
+(Hono's `compress` middleware on this route alone, verified against Hono's
+documentation in the work brief). Measured on synthetic responses
+(2026-10-26): about 240 KiB (22 KiB compressed) for the worked example (182
+days × 12 nights × 4 airport pairs, 60% priced) and about 3.7 MiB (210 KiB
+compressed) for 36,400 date pairs every one with a figure; the bound the
+route's test holds is **4 MiB uncompressed and 512 KiB compressed**.
+
+**Routes the Dates view retires.** `GET /definitions/:id/calendar` and
+`GET /definitions/:id/duration-analysis` had one caller each, the Calendar
+and Duration views (History reads its run list from the executions list,
+plan decision 52, and neither the status bar, the Status view, the alert
+email nor `gmt` reads them), so they are **removed** with their contract
+schemas, read modules and tests in the Dates view's work package.
+`GET /definitions/:id/coverage` is **kept**: the status bar reads its
+blocked-schedule line and the Dates view's coverage section reads the rest.
+`calendar-gap` and the cell route are kept for the Dates view and the date
+pair detail.
 
 ---
 
@@ -2446,8 +2627,14 @@ mark `CF`), "Aviasales cache", "estimate vs ledger". The word "verified"
 appears only beside class-`verified` values; the `verified` basis is
 labelled "itinerary-search basis"; stage counts say "itinerary-searched".
 
-Layout: nav owned by WP9 for all views, its links wrapping into rows on a
-phone so every view stays in sight; definition selector; **status bar**
+Layout: one nav for all views, in two labelled tiers: **Decide** (Dates,
+History) and **Set up** (Definitions, Providers, Alerts, Status). Each tier
+is a list of real links headed by its name in text; the current view carries
+`aria-current="page"` and a non-colour cue; every link is at least 44 px
+tall. On a phone each tier is one row at 375 px, its name first, so every
+view stays in sight and nothing scrolls sideways. The date pair detail
+(Results) is not in the nav: it opens from a Dates board row or overview
+cell, and from an alert email's link. Definition selector; **status bar**
 on every view (it reads `GET /status` through the same query as the Status
 view, every 60 s: any `fail` shows a "Status: n failing" link, any `warn` a
 quieter "Status: n to check" link, each naming the area when there is one
@@ -2460,26 +2647,44 @@ for the execution and the month, and each provider's call usage against
 its binding window, worded as the Providers view words it ("this month:
 Travelpayouts 2 of 50000 calls", "SearchApi 7 of 24 calls over the plan's
 lifetime"), paused state with reason and Resume, "schedule blocked since
-<date>", Cancel. On a phone the numbers fold for a finished run and stay
+<date>", Cancel; its progress breakdown links to the Dates view's coverage
+section. On a phone the numbers fold for a finished run and stay
 open while a run is active or paused. Every view header: execution(s) shown, status, age, stale label,
-banner when not completed. The Results header is two lines: **"cheapest
-found £X · <destination> <dates> · <basis> · <verdict class> · <provider> ·
-<age>"** and **"discovery: P priced · E no fares · X no cached data · R
+banner when not completed. The **coverage line** is
+**"discovery: P priced · E no fares · X no cached data · R
 error · S skipped · U not searched of M (R′ reused) · itinerary-searched K
-of N selected (E outbounds each) +C on demand"**, linking to Coverage
-("outbound" agrees with E; a run that selected nothing beside on-demand
-searches reads "itinerary-searched C cells on demand; none selected by the
-run"). When more than half the counted cells are "no cached data", Results
-and Calendar add one line naming the next move: add SearchApi discovery,
-widen the airports, or run the coverage check. Empty state for no
+of N selected (E outbounds each) +C on demand"** ("outbound" agrees with E;
+a run that selected nothing beside on-demand searches reads
+"itinerary-searched C cells on demand; none selected by the run"); the
+Dates view's header line and the date pair detail's header each carry it
+over their own cells, linking to the Dates view's coverage section. When
+more than half the counted cells are "no cached data", the Dates view and
+the date pair detail add one line naming the next move: add SearchApi
+discovery, widen the airports, or run the coverage check (a link to the
+Definitions form's coverage check for this search); the line says "no
+cached data" is not evidence that no flights exist. Empty state for no
 providers. Red synthetic banner (§5.5).
+
+**URLs.** `?view=` names the view: `dates` (also for an absent or unknown
+value), `results` (the date pair detail, with `depart=` and `return=` as
+`YYYY-MM-DD`), `history`, `definitions`, `providers`, `alerts`, `status`;
+`def=` names the search. The retired values land on Dates, keeping `def=`:
+`?view=calendar` and `?view=duration` open it as it stands (a Calendar
+`cal.dest=<IATA>` becomes the Dates destination filter; other `cal.*`
+parameters are ignored), and `?view=coverage` opens it with its coverage
+section open. A `?view=results` URL without a valid date pair in the current
+resolved space opens Dates, except that one carrying `row=` (an alert email
+sent before revision 48) opens the detail of that row's date pair when the
+row is among the definition's results (the whole-space `/results` read),
+else Dates with the line "That result is no longer in this search's
+results." A parameter that no longer applies is ignored, never an error.
 
 **Provenance on every price, visible without hover**: provider badge,
 source in words, effective age in the `core` compact row format ("2h ago ·
 ≤7d", or "age unknown") with the full form on hover and in headers, "≈" when
 FX-converted, dashed outline + "constraints not checked" for calendar
 prices, destination airport. Where a cell is too small for the row form
-(the desktop calendar day, the phone day face, the 375px Results row) the
+(the phone board card, the date pair detail's 375px row) the
 face still shows the provider's short mark, the destination, a short age
 line from `core` ("5d old", "≤2d old", "age unknown", or the "vendor's
 cache age unknown" badge) and, on a calendar price, "not checked"; the
@@ -2491,10 +2696,12 @@ observed time, point of sale, FX status) before it prints an amount, and a
 face keeps "≈" on a converted price. Point of sale is validated on every
 price and shown, in words from `core` ("UK market" for GB, "market not stated"
 for `'unknown'`, otherwise the code and "market"), on the full price displays:
-the Results rows and header, the cell detail panel, Duration, History and the
+the Dates board's rows and the overview's readout, the date pair detail's rows,
+header and per-airport-pair panel, History and the
 alert events table, and on the alert email's provenance line, because the same
-flight can be priced differently by market. It is not a face item: the compact
-calendar face and the phone face leave it out, so the 375px widths do not change.
+flight can be priced differently by market. It is not a face item: the phone
+board card leaves it out, so the 375px widths do not change.
+An overview cell is no price display at all: it prints no amount (Dates, below).
 It is one install-wide setting (§12 `POINT_OF_SALE`), or `'unknown'` where the
 vendor ignores it. Each row also carries the operator's per-destination note from
 the definition (free text such as "onward leg not included") on every row
@@ -2519,7 +2726,167 @@ merged into price.
   Advanced fold for constraints and policy. An "import example" action
   loads the JSON from `docs/setup.md`. The £0 path needs a three-line
   `.env` (`TRAVELPAYOUTS_TOKEN`, auth user, auth pass).
-- **View A Results**: columns in order: price (+ provenance), total travel
+- **Dates** (`?view=dates`, the default view): answers which dates to fly.
+  Within seconds the operator can name the cheapest acceptable date pair and
+  how far its price was checked. It reads `GET /definitions/:id/date-pairs`
+  (§10) through `core`'s decoder. Top to bottom:
+  - **Header line**: the search's name; the run it shows (the latest parent
+    run) with its status and age ("run finished 2h ago", "run in progress,
+    started 40 min ago", "run paused 3h ago: <reason>") and the stale label
+    when every figure is stale; then the coverage line (above) over the
+    cells in scope, linking to the coverage section. With a filter set, the
+    line covers the date pairs and airport pairs in scope and says so ("2 of
+    4 airport pairs · 10–14 nights"). Below it, when a verification provider
+    is configured, the calendar-gap banner: "N cells have calendar prices
+    below your reference verified price (latest seen, then fresh, then
+    cheapest) (£X)" with per-cell verify (the detail's verify, below).
+  - **The figure** of a date pair, chosen across the airport pairs in scope
+    by the precedence the calendar day had: the cheapest class-verified price
+    that is not stale (`STALE_AFTER_HOURS`), else the fresher of the
+    cheapest stale verified price and the cheapest calendar price (unknown
+    age loses to known; ties go to verified), else none. A
+    partially-verified price is never the figure (its count shows under how
+    far checked) and a `failed` one never is (§6.9). A verified figure that
+    hides a cheaper calendar price says "cached from £X" through `PriceCell`
+    (plan decision 38). A calendar figure whose cell a newer parent execution
+    found empty or no_data is "superseded by a later search", and a verified
+    figure the latest search no longer returned is "not seen in latest
+    search (<age>)" (decision 54). Stale figures are labelled, never hidden.
+  - **Board**: a `table` captioned "Best dates", one row per date pair with
+    a figure. Columns: rank, depart, return, nights, price (`PriceCell` row
+    form: provider badge, source, age, "≈", destination, the dashed outline
+    and "constraints not checked" on a calendar price), how far checked,
+    journey time (the figure's total travel time when its source states it,
+    else "not known"), airports (the figure's origin → destination). The
+    **rank** is by price whatever the sort: price ascending; equal prices
+    rank a verified figure before a calendar one, then the fresher (unknown
+    age last), then the earlier departure, then fewer nights, then
+    generation order of the airport pair; superseded and not-seen figures
+    rank after every current figure. One pure function in `core`,
+    `rankDatePairs`, ranks the board and shades the overview. **Sort**:
+    price (default), departure, nights and journey time are header buttons
+    with `aria-sort`, a second press reverses, and an unknown journey time
+    sorts last either way; the sort is in the URL (`d.sort=journey.asc`).
+    **Size**: the first 10 rows by default (the later "clarify" step may
+    change the number), then "Show 10 more", with "showing 10 of P date pairs
+    with a price"; nothing else caps the board. **How far checked** comes
+    from the date pair's own counts: whether the figure is class verified or
+    a calendar price, whether its cells were itinerary-searched, selected but
+    not reached, or not selected, how many partially-verified or
+    unconfirmed prices it has, and how many of its airport pairs in scope
+    have no price and why, by bucket ("3 no cached data"); never the
+    "searched" umbrella and never a word claiming completeness. Its final
+    wording, "verified · cabin only" included, is the clarify step's, within
+    the banned-word list and the "verified" rule. Each row opens the date
+    pair detail: its dates are a real link to the detail URL, carrying the
+    figure's basis, and a click anywhere on the row follows it.
+  - **Run landing and re-ranking**: while the latest parent run is pending or
+    running, the view re-reads the route when the run's progress changes (the
+    status bar's execution poll), at most once every 30 s, and the board's
+    caption says "partial: run in progress"; prices from earlier runs keep
+    their own ages. When a read changes the order, rows move to their new
+    places in one transition of at most 200 ms, and with no transition under
+    `prefers-reduced-motion: reduce`; focus stays on the same date pair's row
+    (or on the board's caption when that row leaves the shown rows), the
+    scroll position is kept, and one polite status region (`role="status"`)
+    says "Best dates updated" once per read, never per row.
+  - **Overview**: below the board, the window's months in order, each day
+    with a strip of stay-length cells, one per nights value, shortest first.
+    A cell prints no amount. A cell with a figure is shaded by the figure's
+    rank among the date pairs in view (quintiles of rank; with fewer than ten
+    figures or a price spread under 10% the shading is flat and the legend
+    says so, decision 38), and a calendar-price figure also carries a "not
+    checked" mark. A cell without a figure carries one distinct non-colour
+    mark for its bucket: not searched, no fares, no cached data, error or
+    skipped (with several airport pairs, the bucket §6.6's precedence gives
+    over their roll-ups), and a striped "partly not searched" mark when some
+    of its airport pairs in scope were not searched, priced or not; a not
+    searched date pair is never shaded. The legend is numeric and always
+    open: each mark in words with its count in view, the shading's price
+    bands as scale values, and what "not checked" means. The shading's
+    colours are the later "colorize" step's, within the existing palette.
+    **Readout**: the cell under the pointer or the focus shows its date pair
+    in one line beside the legend: dates, nights, the figure through
+    `PriceCell` row form with how far checked and airports, or its marks with
+    their counts by bucket. The cell's accessible name gives its dates,
+    nights and rank or mark in words, and its description is the readout, so
+    an amount is read out only from `PriceCell`'s output. **Rings**: the
+    board's shown rows are ringed on the overview (an outline, not colour
+    alone); pointing at or focusing a board row lights its cell, and
+    pointing at or focusing a ringed cell lights its row; neither scrolls the
+    page. **Folded bands**: a stay range of more than 12 nights values folds
+    into at most 12 bands of consecutive nights of equal width (the last may
+    be narrower), each named by its range ("10–13 nights"); a band cell
+    shows its cheapest figure's shade, and the striped mark when any date
+    pair in it has a cell not searched; a click or Enter opens that band into
+    its stay lengths for that month, and Escape or the band's header closes
+    it; a ring on a date pair inside a closed band rings the band.
+    **Keyboard**: the overview is one tab stop (roving tabindex, as the
+    calendar grid had); Left and Right move to the previous and next cell in
+    reading order (stay lengths, then the next day), Up and Down to the same
+    stay length a week earlier or later, PageUp and PageDown a month, Home
+    and End to the first and last cell of the day; Enter opens the date pair
+    detail (on a closed band, opens the band); focus is always visible.
+  - **Filters**, above the board, in the URL, applying to the header line,
+    the board and the overview together, and kept across views: stay range
+    (`d.nights=10-14`, applied in the browser to the decoded date pairs,
+    whose own counts the header line then sums);
+    airports (`d.from=LHR,LGW`, `d.to=JFK`, subsets of the definition's),
+    sent to the route, because a figure is the cheapest across the airport
+    pairs in scope (decision 53: a price on a filtered-out airport pair never
+    becomes a figure and its buckets are not counted); max journey time
+    (`d.journey=<minutes>`), sent to the route: a price whose journey time is
+    known and above the limit is left out of the figure, one whose time is
+    not known stays and reads "journey time not known", and a date pair
+    whose every price was left out reads "none within <limit>" with its
+    marks, never "no fares". "Clear filters" resets them.
+  - **Coverage section** (folded; the header line's coverage link and
+    `?view=coverage` open it, `d.coverage=open`), over the latest parent
+    run: counts per stage × provider with the six-bucket breakdown and
+    "searched" as the umbrella beside it (the one place that shows it), with
+    the "with a price" share; selected but not reached with reason; the
+    browser provider's left cells with §3's texts; overrun and parity flags,
+    each line worded by its unit (§8.1); the error list with Retry (only on
+    a cell that has not departed, and none on a browser error a resume
+    would only leave); "schedule blocked since <date>"; below the run, the
+    on-demand itinerary searches, each with its own buckets and ledger
+    calls. It reads `GET /definitions/:id/coverage` and is not narrowed by
+    the filters, which it says.
+  - **Phone** (narrower than 900 px): the board becomes stacked cards, each a
+    link to the detail: the dates and the price lead (`PriceCell` phone
+    face: provider mark, destination, short age, "not checked" on a calendar
+    price), then how far checked, then journey time and airports. The
+    overview follows, one month at a time, with Previous and Next month
+    buttons and a swipe; each day is a row with its strip across the width
+    and every cell at least 24 px square; nothing scrolls sideways at 375 px.
+  - **States**, each in words, never colour alone: *no search* (no
+    definition: "No search yet" with a link to Definitions); *never run*
+    ("Not run yet: nothing has been searched", the estimate, and Run now; the
+    overview shows every date pair not searched);
+    *run in progress* (the board fills as prices land, captioned partial;
+    date pairs not yet reached read not searched); *paused or budget-stopped*
+    (the reason and Resume as the status bar gives them, "the board shows
+    prices found before the pause", and the not searched count); *stale*
+    (the header's stale label when every figure is stale, and each stale
+    figure labelled); *no prices but coverage* ("No prices in this run" with
+    the coverage line and the marks, never "no flights"); *thin coverage*
+    (the next-move line above); *synthetic* (the red banner, §5.5); *too
+    many cells* (the route's 422: the scope's cell count, the bound, and the
+    airport filter as the way under it); *no date pair within the filters*
+    (with "Clear filters"); loading; and a load error with Retry.
+- **Date pair detail** (`?view=results&depart=…&return=…`; what was View A,
+  Results): one date pair's itineraries and calendar prices, opened from a
+  board row, an overview cell or an alert email, never from the nav. A
+  "Back to dates" link returns with the Dates filters and sort kept. It
+  reads `/results` scoped to the date pair and to the Dates airport filter
+  (§10), so every rule below holds over that date pair's cells. Header: the
+  dates and nights, the airport pairs in scope ("2 of 4 airport pairs"), then
+  two lines: **"cheapest found £X · <destination> <dates> · <basis> ·
+  <verdict class> · <provider> · <age>"** and the coverage line over the
+  date pair's cells. **Basis switch**: kept, scoped to the date pair; the
+  detail opens on the basis of the figure the board showed (its link
+  carries `basis=`), else on §6.9's default, and the header says why. Table
+  columns in order: price (+ provenance), total travel
   time, departure, return, nights, destination, carriers, stops, verdict
   class badge, fetched-ago, provider, adjusted (if configured). At 375px the
   primary row keeps price, provenance, **the class badge**, dates and stops;
@@ -2530,43 +2897,29 @@ merged into price.
   composing without refetch; when `truncated` the header says "within the
   cheapest 1000 of N". Filter and sort state persists across views.
   `bandCheapest` marks the cheapest row per 6h travel-time band. Calendar
-  rows show the "not applied: …" note. Banner (only when a verification
-  provider is configured): "N cells have calendar prices below your
-  reference verified price (latest seen, then fresh, then cheapest) (£X)"
-  with per-cell verify.
-- **View B Calendar**: day shows, by precedence, the cheapest class-verified
-  price under `STALE_AFTER_HOURS`, else the fresher of a stale verified and
-  the cheapest calendar price (labelled; unknown age loses to known), else
-  glyphs. Colour by **one basis at a time** on a quintile scale over the
-  visible days of that basis; fallback days are hatched, excluded from the
-  scale, and the legend says which basis each day uses. Marker: "P priced ·
-  E no fares · X no cached data · R error · S skipped · U not searched of M"
-  for discovery, and "itinerary-searched 1 of 10 selected +C on demand"
-  separately. The day face names the buckets that apply ("12 no cached
-  data", "3 priced, 9 no cached data"), with a striped mark when part of the
-  day was not searched; it never shows a "searched" fraction or a "fully
-  searched" mark, which would make a day of cache misses read as covered.
-  Distinct glyphs for `empty`, `no_data`, `error`, `not_run`, each with its
-  count on the phone face too; numeric legend, the dashed-outline key
-  always open. Per-destination filter. Side panel with cells, outcomes,
-  verify.
-- **View C Duration**: bars per nights with axis titles (nights, £); series
-  "min among verified (class verified, n=…)" and calendar per provider; `n`
-  in label and tooltip; explicit empty and loading states; gaps for
-  unsearched nights; no interpolation.
-- **View D Coverage**: counts per stage × provider with the six-bucket
-  breakdown and "searched" as the umbrella beside it (the one view that
-  shows it); selected but not reached with reason; overrun and parity
-  flags; error list with retry; below the latest parent run, the on-demand
-  itinerary searches, each with its own buckets and ledger calls.
+  rows show the "not applied: …" note. `row=` opens and scrolls to that
+  row, or says the row is no longer among this date pair's results. **Per airport pair** (what the calendar's side panel was), one
+  panel per airport pair in scope for this date pair, from the cell route:
+  its outcomes per stage and provider with reasons (§3's texts for left
+  browser cells), its prices each with full provenance (superseded ones
+  marked), and, when a verification provider is configured, the verify
+  action "Search <cell> for itineraries (uses billed calls)", which states
+  the child's hard stop and the budget headroom left before it starts
+  ("hard stop 6 calls · 40 calls of budget headroom left"), names the call
+  cap to raise when the definition allows 0 billed calls, says when no
+  headroom is left, shows a refusal with the cap it names, and hands the
+  started search to the status bar (§8.1). The calendar-gap cells of this
+  date pair are marked in their panels. A date pair without a row says so
+  with its coverage line and a link to the coverage section, never "no
+  flights".
 - **History**: one series per provider and kind; x = `fetchedAt` for
   provider series and the point's own `date` for the vendor's price-history
   series from `route_price_history`, one per searched trip and named by it
   ("Google's price history for 5–15 Nov", or "trip unknown"; points share
   one fetch time and are vendor-stated GBP, never marked "≈"); gaps;
   reused rows excluded; axis titles; empty state. The route view says
-  itinerary offers are shown per itinerary, from a Results row; "run"
-  counts parent runs, with on-demand searches counted apart.
+  itinerary offers are shown per itinerary, from a row of the date pair
+  detail; "run" counts parent runs, with on-demand searches counted apart.
 - **Status**: one card per `GET /status` check, grouped by area, worst first,
   each a labelled region whose state is written as text before its summary
   (never colour alone); "checked N s ago" from `generatedAt`; on a failed
@@ -2579,15 +2932,16 @@ merged into price.
   this build: browser provider"); container-mode backups keep a card of their
   own ("not visible from the container: check your host's backup job,
   docs/setup.md section 6"). Provider cards use the Providers view's wording
-  and link to it. Refreshes on focus and every 60 s; read only, except the
+  and link to it; a search's `data` card links to that search's Dates view
+  with its coverage section open. Refreshes on focus and every 60 s; read only, except the
   email card's "Send test" (`POST /alerts/test-email`), disabled while
   sending, with distinct messages for sent, not configured (409), hourly
   limit (429) and failed. Settings are not edited here.
 - **Definitions / Alerts / Providers**: forms with estimate, `budgetFit`,
   standing confirmation, onward-cost entries, plan presets shown.
-- **Accessibility**: 375px layout as above; keyboard-operable table and
-  calendar; visible focus; labelled controls; no colour-only meaning;
-  numeric legend on the heatmap.
+- **Accessibility**: 375px layout as above; keyboard-operable board,
+  overview and detail table; visible focus; labelled controls; no
+  colour-only meaning; numeric legend on the overview.
 
 Charts follow the `dataviz` skill.
 
@@ -3189,7 +3543,7 @@ as specified in §5.3; no secrets, no full URLs.
 | Multi-airport queries | Per pair | Exact attribution |
 | Daily scheduled search | Weekly default, sized to the plan | Cost; `budgetFit` enforces |
 | Absolute date range | Relative windows supported and default | A scheduled absolute window expires |
-| Filter without rerunning searches | Client-side filtering over the ranked page; `/results` has no filter parameters | One path, no refetch |
+| Filter without rerunning searches | Client-side filtering over the ranked page; `/results` has no sort or filter parameters (its scope parameters choose a date pair's cells and the airport pairs); the Dates view's airport and journey-time filters re-read the date-pair route, which never searches | One path, no refetch of vendor data; a figure is the cheapest across the airport pairs in scope, so changing the pairs changes the figure (plan decision 53) |
 | Postgres/SQLite, Prisma/Drizzle | SQLite + Drizzle | One operator |
 | Saved searches entity | Definition with schedule | One concept fewer |
 | Airlines/routes as search dimensions | Filters and constraints | No provider exposes them |
@@ -3229,10 +3583,107 @@ as specified in §5.3; no secrets, no full URLs.
 | 16b | Local setup: `apps/cli` (`gmt`) and its `Platform` layer (launchd, systemd `--user`), the native app service and backup job, `--import-docker`, `--import-db` and `--ignore-docker`, `start`/`stop`/`logs`/`backup`/`restore`/`password`/`smoke`/`update`/`uninstall`, the image's `apps/cli` manifest, the CI matrix, `install-e2e` and the workflow guard, `setup.md`'s quick start | Opus | 16a | a second `setup` over an `app.env` that differs from the plan reports the difference and writes nothing |
 | 17 | Camoufox install and consent: the verified install from `CAMOUFOX_BUILDS` with the CLI-owned layout, the worker's install directory and Linux fonts, flags per `<os>-<arch>` bound to their build, the `consent` command with export, import and check, the worker's own monthly caps, key rotation under `--reconfigure browser`, the worker service and its refusal file, the provenance notes' wording, the recording sessions for the other three entries, the `camoufox-install` CI job | Opus | 16a, 16b | a download whose SHA-256 differs from the manifest is refused and nothing is moved into place |
 | 18 | Status: `statusResponseSchema`, `GET /api/status` with every check (the worker's through http-kit), `POST /alerts/test-email`, the consent email on the maintenance tick, `gmt status`, the Status view and the status bar link, redaction tests | Sonnet | 16a, 16b | a status response holding the basic-auth password, the worker key or a `SOCS` value fails the redaction test |
+| 19 | The Dates view: `core`'s date-pair decoder, figure precedence, `rankDatePairs` and band folding; `GET /definitions/:id/date-pairs` and `/results`' scope parameters; the Dates view, Results as the date pair detail with the per-airport-pair panels, the two-tier nav, the `?view=` landing rules; the alert email's date-pair link; removal of the Calendar, Duration and Coverage views and of the calendar and duration-analysis routes; the Playwright smoke and the performance test | Opus | 18 | a date pair priced only on a filtered-out airport pair has no figure |
 
 ---
 
 ## 17. Changelog
+
+### Revision 48: the Dates view (2026-10-26)
+
+Ian's decisions of 2026-10-26, from the Dates view design brief (shaped
+after that day's critique of the web UI), each chosen by him:
+
+1. The first screen answers which dates to fly: a ranked **board** of date
+   pairs ("Best dates"), with an **overview** of months beneath it in which
+   each day is a strip of stay-length cells (chosen over a month calendar of
+   stay strips alone).
+2. A date pair's price is the cheapest found **across the airport pairs** in
+   scope.
+3. The Dates view **replaces Calendar, Duration and Coverage**; Results
+   becomes the **date pair detail**, opened from a board row, not from the
+   nav.
+4. The nav has **two tiers**: Decide (Dates, History) and Set up
+   (Definitions, Providers, Alerts, Status).
+5. On a phone, the best dates come first as stacked cards, then the
+   overview one month at a time.
+6. Filters (stay range, airports, max journey time) are kept in the URL; the
+   board sorts by price (default), departure, nights and journey time; the
+   overview keeps the calendar's roving-tabindex arrows, and Enter opens the
+   detail; more than about 12 stay lengths fold into bands that open on
+   click.
+7. Left to the later design steps, not ruled here: the overview's shading
+   colours ("colorize"), the wording of "how far checked", "verified · cabin
+   only" included ("clarify"), and the board's default row count (10 until
+   then). Untouched: the price and provenance components, the binding
+   terminology, the estimate and budget surfaces, the status bar beyond one
+   link, and the visual system.
+
+What changed. §1: success is stated through the Dates view. §3, §6.6, §8.1,
+§8.2: what was View D is the Dates view's coverage section; the "searched"
+umbrella appears only there. §6.5, §10: `/results` gains scope parameters (a
+date pair, airports) that choose which cells it reads; it still has no sort
+or filter parameters. §10: the new `GET /definitions/:id/date-pairs`, every
+date pair of the current resolved space with its six buckets over the
+airport pairs in scope, its verification counts and its figure, with
+decision 53's honesty rule for the airport filter; its shape, delivered as
+columns with a provenance table that `core`'s decoder expands, gzip, never
+paged or truncated, at most 50,000 cells read and 36,400 date pairs
+returned, bounded at 4 MiB (512 KiB compressed); the calendar and
+duration-analysis routes are removed (their one caller each was a retired
+view; History reads its runs from the executions list, decision 52) and the
+coverage route is kept (the status bar's blocked-schedule line and the
+coverage section). §8.3: the alert email's POST-booking link opens the row's
+date pair detail. §9: the date-pair tests in `core`, `api` and `web`
+(ranking ties, airport filtering honesty, marks that never read as no
+flights, keyboard paths, the 375 px phone layout), the rewritten Playwright
+smoke and the performance test at 36,400 date pairs and 50,000 cells;
+`rankDatePairs` and the figure precedence join the mutation list. §11: the
+two-tier nav, the `?view=` rules (`dates` is the default; the retired
+values and a `results` URL without a date pair land on Dates; an email's
+`row=` still finds its row), the Dates view and its states, and the date
+pair detail. §15: one row reworded. §16: work package 19.
+
+Moved from the retired views, so no rule that still matters is lost: from
+the Calendar, the precedence that picks a day's price (now a date pair's
+figure, across airport pairs), "cached from £X", decision 54's superseded
+and not-seen marks, the bucket words and distinct marks for each unpriced
+bucket, the striped mark for a partly searched cell, never a "searched"
+fraction, the always-open numeric legend, decision 38's flat scale, the
+destination filter (now the airport filter, origins too, still read by the
+route, decision 53), the roving-tabindex keyboard, the phone's one month at
+a time, and its side panel (outcomes, prices with provenance, and the
+per-cell verify with its billed-call wording, hard stop and headroom), now
+the detail's per-airport-pair panels; from Results, the thin-coverage next
+move (now on the Dates view and the detail) and the calendar-gap banner (now
+on the Dates view, its cells marked in the detail); from Coverage,
+everything, as the Dates view's coverage section, which the coverage line,
+the status bar and the Status view's `data` cards link to.
+
+Dropped, and why: the Calendar's per-departure-day price and its colour
+scale by one basis at a time with hatched fallback days (the date pair is
+now the unit, the board ranks the one figure each date pair shows, and the
+overview shades by that rank with a "not checked" mark on calendar prices;
+a second scale would make the overview disagree with the board); the
+Duration chart of minima per nights with its per-provider series and its
+rows linking to Results by nights (decision 38), because a minimum per stay
+length across the whole window hides which dates give it, and the
+overview's strips and the stay filter show the same trade-off per date
+pair; Results as the default view and a nav entry; the calendar and
+duration-analysis routes, with no caller left.
+
+Briefs and other documents. The work briefs are historical records
+(`docs/briefs/README.md`), so none is edited: the work package 19 brief
+will supersede the parts of WP8 (the calendar and duration-analysis
+routes), WP9 (Results as a view, Coverage, the nav), WP10 (Calendar,
+Duration, the Playwright smoke), WP11 (the results-row link) and WP18 (the
+Status `data` card's link) that describe the retired views as current, and
+the plan's file map and WP9 and WP10 sections, where they differ, yield to
+this revision. `docs/setup.md` (its "Verify in the calendar" and "in View D"
+lines) and `apps/web/PRODUCT.md` (the product record, PR #26: its list of views) are brought in line by
+that work package with the code, as are the web tests that pin the old view
+list (`state/view.ts`'s `VIEWS`, the shell tests and the Playwright smoke).
+No other design rule changes.
 
 ### Revision 47: a start of the worker is done once the worker answers (2026-10-26)
 
