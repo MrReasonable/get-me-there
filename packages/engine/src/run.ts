@@ -81,6 +81,8 @@ export interface RunState {
    */
   readonly disabledReason: Map<ProviderId, SkipReason>;
   readonly parseStreak: Map<ProviderId, number>;
+  /** How many of the parse streak's latest errors in a row are camoufox pages that did not settle (rev 49). */
+  readonly notReadyStreak: Map<ProviderId, number>;
   readonly lanes: Map<string, Lane>;
   /** Discovery tiles planned in this pass, per provider (parity, spec §8.1). */
   readonly plannedTiles: Map<ProviderId, number>;
@@ -155,6 +157,7 @@ export function newRun(
     disabled: disabledFor(ctx, exec.id, opts.manual),
     disabledReason: new Map(),
     parseStreak: new Map(),
+    notReadyStreak: new Map(),
     lanes: new Map(),
     plannedTiles: new Map(),
     notices: [],
@@ -246,6 +249,15 @@ export function runnableCells(
 }
 
 /**
+ * A call for `providerId` settled with an answer (spec §8.1: any other outcome breaks a parse streak): both streaks end.
+ * A camoufox page that settled breaks a run of pages that did not, whether its views were read or refused.
+ */
+export function streakBroken(run: RunState, providerId: ProviderId): void {
+  run.parseStreak.set(providerId, 0);
+  run.notReadyStreak.set(providerId, 0);
+}
+
+/**
  * Applies the spec §8.1 error table to one failed tile (discovery) or cell (verification) call. The cells of the call
  * are `cells`; nothing has been written for them yet.
  */
@@ -284,6 +296,11 @@ export function onFailure(
       // calls settle in finalisation order, and any other outcome breaks the streak
       const streak = d.parse ? (run.parseStreak.get(providerId) ?? 0) + 1 : 0;
       run.parseStreak.set(providerId, streak);
+      // why: Ian's ruling of 2026-10-26 (spec §8.1 rev 49): a streak made only of camoufox pages that did not settle
+      // disables at three; one holding any other parse error keeps the rule of two
+      const notReady = d.notReady ? (run.notReadyStreak.get(providerId) ?? 0) + 1 : 0;
+      run.notReadyStreak.set(providerId, notReady);
+      const limit = notReady === streak ? 3 : 2;
       log.warn({ stage, reason: d.reason, cells: cells.length, parseStreak: streak }, 'cells marked error');
       if (d.unavailable)
         disableProvider(
@@ -307,7 +324,12 @@ export function onFailure(
                 key: cooldownNoticeKey(providerId, until),
               },
         );
-      } else if (streak >= 2) disableProvider(run, providerId, 'two consecutive parse errors');
+      } else if (streak >= limit)
+        disableProvider(
+          run,
+          providerId,
+          limit === 3 ? 'three consecutive pages that did not settle' : 'two consecutive parse errors',
+        );
       return;
     }
     case 'limiter-timeout':

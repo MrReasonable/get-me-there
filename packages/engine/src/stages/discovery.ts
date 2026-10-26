@@ -19,7 +19,15 @@ import type { TileWrite } from '@gmt/db';
 import type { EngineContext } from '../context.js';
 import { normaliseCalendarPrice, type RepoDeps, reduceTile } from '../normalise.js';
 import { runPool } from '../pool.js';
-import { laneFor, onFailure, type RunState, runnableCells, settleLane, stopRun } from '../run.js';
+import {
+  laneFor,
+  onFailure,
+  type RunState,
+  runnableCells,
+  settleLane,
+  stopRun,
+  streakBroken,
+} from '../run.js';
 import { loadsBrowserPages } from '../scheduler/browserWindow.js';
 import { mayLoadPage, pageGate } from './browserGate.js';
 import { applyReuse } from './reuse.js';
@@ -375,7 +383,7 @@ export function commitTile(
     for (const g of failed.values())
       ctx.repos.cells.writeTileError(run.executionId, providerId, g.cells, g.reason, g.lastError);
   });
-  run.parseStreak.set(providerId, 0);
+  streakBroken(run, providerId);
   if (reduced.discarded > 0 || result.notes.length > 0 || failed.size > 0) {
     run.log.child({ providerId }).debug(
       {

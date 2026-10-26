@@ -522,6 +522,23 @@ headless, from the operator's own address, with the build `152.0.4-beta.28` of e
   settle that holds a view still drawing, on an entry since recorded under it, is held to the wait-or-refuse tests
   instead of the strict ones (`superseded` in `test/support/recordedGrid.ts`); a view marked not drawn keeps the flag
   false.
+- [x] **The grid's unpriced cells, and three pages that did not settle (2026-10-26, spec rev 49; the operator approved
+  up to 3 pages, 2 used).** The operator's first grid run on a sparse route priced no cell. Two `record --grid` pages
+  on that route on the operator's Mac (grid 7 and 8, `darwin-arm64`, every view drawn) showed why: a pair the grid
+  shows without a price is a button named `no flights, <d> <Mon> to <d> <Mon>` or `price unknown, <d> <Mon> to <d>
+  <Mon>`, which the grammar left unparsed, so a day with no priced cell failed the view's set check. Rule:
+  `parseUnpricedCellName` (`gridNames.ts`) reads both forms and `interpretView` counts them toward the view's cells
+  and sets where the entry's new flag `GRID_UNPRICED_VERIFIED` is set (`darwin-arm64` only, `PROOFS` naming grid 7
+  and 8; every other entry keeps it false until its own grid recordings show one); on the wire a cell is `price`,
+  `no-flights` or `price-unknown` (`gridCellSchema`); the adapter's `gridTile.ts` puts `no-flights` in `noFares`
+  (`empty`) and leaves `price-unknown` to the engine's `no_data`; both are buttons, so `stillDrawing` never waited on
+  them. Tests: the recorded suites read each recording under its own entry's flags (grid 7 and 8 whole with the flag,
+  refused whole without it), and synthetic London → New York views through the reader, the page, the adapter and the
+  engine. The run's three `page-not-ready` answers came at the first view's 90 s page timeout, before the Price graph
+  click, so they are not this cause; Ian ruled 2026-10-26 that camoufox pages that do not settle disable the provider
+  only after three in a row (`notReady` in the engine's `classifyFailure`, `notReadyStreak` and `streakBroken` in
+  `run.ts`): each is still an `error`, never retried, any page that settled (read or refused) breaks the run, and every
+  other parse streak and every block keeps its rule.
 - [x] One live grid page per Linux entry through an app running inside the same container (app and worker on its
   loopback, `CAMOUFOX_MODE=grid`, `CAMOUFOX_EXECUTION_PAGE_CAP=1`): a run of a nine-cell definition that one grid view
   covers priced 9 of 9 cells on each entry. (On `linux-arm64` a first try through `pnpm gmt smoke` loaded its grid page

@@ -26,6 +26,7 @@ import {
   runnableCells,
   settleLane,
   stopRun,
+  streakBroken,
 } from '../run.js';
 import { sellsCabin } from '../snapshot.js';
 import { normaliseDeps } from './discovery.js';
@@ -289,7 +290,7 @@ export function commitVerifiedCell(
     });
     if (history.rows.length > 0) ctx.repos.routeHistory.upsert(history.rows);
   });
-  run.parseStreak.set(provider.id, 0);
+  streakBroken(run, provider.id);
   const log = run.log.child({ providerId: provider.id });
   if (dropped > 0)
     log.warn(

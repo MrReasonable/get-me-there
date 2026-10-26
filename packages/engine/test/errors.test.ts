@@ -87,6 +87,19 @@ describe('classifyFailure (spec §8.1 error table, both stages)', () => {
   ] as const)('%s', (_name, err, aborted, expected) => {
     expect(classifyFailure(err, aborted, now)).toMatchObject(expected);
   });
+  // why: Ian's ruling of 2026-10-26 (spec §8.1 rev 49): only camoufox's own page-not-ready counts toward the rule of three
+  it.each([
+    ['camoufox, parse, page-not-ready', 'camoufox', 'parse', 'page-not-ready', true],
+    ['camoufox, parse, another reason', 'camoufox', 'parse', 'unexpected-status', false],
+    ['camoufox, upstream, page-not-ready', 'camoufox', 'upstream', 'page-not-ready', false],
+    ['another provider, parse, page-not-ready', 'searchapi', 'parse', 'page-not-ready', false],
+  ] as const)(
+    'notReady for %s: only camoufox’s own page-not-ready',
+    (_n, providerId, kind, reason, notReady) => {
+      const err = new ProviderError({ kind, retryable: false, providerId, reason, message: 'm' });
+      expect(classifyFailure(err, false, now)).toMatchObject({ kind: 'cell-error', notReady });
+    },
+  );
   it('addSeconds mints an IsoDateTime through core', () => {
     expect(addSeconds(now, 90)).toBe('2026-10-14T09:01:30.000Z');
   });

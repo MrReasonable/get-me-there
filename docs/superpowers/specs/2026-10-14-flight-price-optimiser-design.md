@@ -650,8 +650,12 @@ retried; the page kind, worded distinctly, goes to `last_error`), the
 provider is disabled for the rest of that execution (including a manual
 resume of it), and the cool-down survives a worker restart. A page that does
 not settle within the page timeout is an `error` (`parse`, detail
-`page-not-ready`) with no cool-down; two in a row disable the provider for
-the run, as any parse streak does. Before planning camoufox tiles, the engine
+`page-not-ready`) for its cells, with no cool-down, and is never retried, so
+no page is loaded twice; three such pages in a row disable the provider for
+the rest of the execution (Ian's ruling of 2026-10-26, §8.1). Any page that
+settled breaks that run, whether its views were read or refused (a refused
+view is an issue on its cells, never a failed call); a parse error of any
+other kind keeps the rule of two consecutive. Before planning camoufox tiles, the engine
 reads the worker's `/v1/status` (an unledgered call): during a cool-down, or
 with the worker unreachable, the provider's cells are skipped with no ledger
 rows (`skipped:provider_disabled` "cooling down until <time>", or
@@ -1881,7 +1885,7 @@ completed
 | Event | Cell outcome | Execution |
 |---|---|---|
 | `ProviderError` rate-limit/upstream/network after retries | `error`, attempts+1 | continue |
-| `ProviderError` parse | `error`, attempts+1; 2 consecutive for one provider (counted in ledger finalisation order) → provider disabled for the run, remaining cells `skipped:provider_disabled` | continue other providers; if none remain, `paused_error` + notify |
+| `ProviderError` parse | `error`, attempts+1; 2 consecutive for one provider (counted in ledger finalisation order) → provider disabled for the run, remaining cells `skipped:provider_disabled`; for camoufox, a streak made only of pages that did not settle within the page timeout (reason `page-not-ready`) disables at 3 consecutive instead (Ian's ruling of 2026-10-26); any call that answers (a camoufox page that settled, its views read or refused) breaks a streak | continue other providers; if none remain, `paused_error` + notify |
 | `ProviderError` auth or quota on **any** call | provider disabled for the run; remaining cells `skipped:provider_disabled` | continue other providers; if none remain, `paused_error` + notify |
 | `ProviderError` upstream with reason `no-return-legs` or `no-priced-options` | `error`, non-retryable on resume | continue |
 | `ProviderError` blocked (`camoufox` only, §2) | `error` reason `blocked`, non-retryable on resume; provider disabled for the run, remaining cells `skipped:provider_disabled`, and kept disabled by a manual resume of that run | continue other providers; if none remain, `paused_error` + one notification per cool-down (keyed by its end), never one per run |
@@ -3643,7 +3647,7 @@ as specified in §5.3; no secrets, no full URLs.
 
 ## 17. Changelog
 
-### Revision 49: the date grid's unpriced cells (2026-10-26)
+### Revision 49: the date grid's unpriced cells; three pages that did not settle (2026-10-26)
 
 The operator's first grid run on a sparse route (182 departure days, stays of 10–21 nights, 2,184 day pairs,
 `darwin-arm64`) priced no cell: 1,324 were refused with their views (`view-unparsed`), 48 were left when three pages
@@ -3656,8 +3660,12 @@ cell failed the view's set check. §2 "Cells by name" now reads both forms on an
 a view whose missing prices they explain is whole; anything still unexplained is refused whole as before. Both forms
 are buttons, so the settle of revision 46 never waited on them (§2 "Settles and deadlines" now says so). The three
 pages that did not settle answered at 90 s, the first view's page timeout, which ends before the Price graph is
-clicked; one of their queries settled in 18 s when recorded again, so they are not this cause, and the rule that two
-consecutive parse errors disable a provider for the run (§8.1) is unchanged. No other design rule changes.
+clicked; one of their queries settled in 18 s when recorded again, so they are not this cause. Ian ruled 2026-10-26:
+camoufox pages that do not settle within the page timeout (`parse`, `page-not-ready`) disable the provider for the rest
+of the execution only after three in a row, not two; each stays an `error` for its cells with no cool-down and is never
+retried, so no page is loaded twice; any page that settled breaks the run, its views read or refused; every other
+parse streak keeps the rule of two, and a block still stops the provider at once with its cool-down (§2 "Navigation and the
+stops", §8.1). No other design rule changes.
 
 ### Revision 48: the Dates view (2026-10-26)
 

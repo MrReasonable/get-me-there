@@ -358,28 +358,8 @@ step (`GRID_MOVES`, `GRID_STEP_DAYS`), and, if one was seen, the unpriced form, 
 
 `<MON>` is the month-token table, which holds only the tokens recordings have shown ("Mar" on 2026-10-18; Task 15.1
 adds the others its moves cross). A token not in the table makes the cell unparsed. The price is whole pounds:
-`amountMinor = pounds × 100`, and the note says the grid shows whole pounds (ruling 5; PA-10).
-
-**Unpriced cells** (spec §2 rev 49, "Cells by name"; ruling 2 answered by `grid/2026-10-26/7` and `8`, a sparse route
-on darwin-arm64; `GRID_GRAMMAR_VERSION = '2026-10-26'`): a pair Google shows without a price is a button like any cell,
-named by one of
-
-```
-^(?<words>no flights|price unknown), (?<dd>\d{1,2}) (?<dm><MON>) to (?<rd>\d{1,2}) (?<rm><MON>)$
-```
-
-(no mark and no ", selected" was ever seen on one, so a name carrying either is unparsed). `gridNames.ts`
-`parseUnpricedCellName` reads it, and `interpretView` only where the entry's `GRID_UNPRICED_VERIFIED` is set
-(darwin-arm64; every other entry keeps it false until its own `--grid` recordings show one, and there the names stay
-unparsed). An unpriced cell counts toward the view's count and the lines' sets, carries no price and is never the
-selected cell, so a view whose missing prices it explains is whole, and a view with anything else unexplained is
-refused as before. On the wire it is `{ status: 'no-flights' | 'price-unknown', departureDate, returnDate }`
-(`gridCellSchema`). The adapter (`gridTile.ts`) puts a `no-flights` cell in `noFares` (the engine writes `empty`: the
-page's own words say this pair has no flights) and leaves a `price-unknown` cell out of both lists (the engine writes
-`no_data`: no price was shown, which is not evidence that no flights exist); neither is ever priced or an issue, and
-each view's counts are notes (`no-flights:<n>@<view>`, `price-unknown:<n>@<view>`). A pair read twice in one page,
-priced or not, fails the tile as before. Both forms are buttons, so `stillDrawing` counts them as drawn: the settle
-waits only on an undrawn cell's "0000", which is no button (spec §2 rev 46).
+`amountMinor = pounds × 100`, and the note says the grid shows whole pounds (ruling 5; PA-10). An unpriced cell is
+unparsed until a recording proves Google's unpriced form, and then `no_data` (ruling 2).
 
 - **Years** (PA-05): the selected-pair line (observed `^(\d{1,2}) – (\d{1,2}) (<MON>) (\d{4})£(\d…)`; the two-month and
   two-year forms are hypotheses Task 15.1 records) gives the query pair's year Y, which must equal the query's. Each
@@ -674,8 +654,7 @@ Decision 70 records the rulings. Items for Fable:
    paragraph are restated before Task 15.3.
 3. **"Date grid" on the results page** may open the same panel in one click; if Task 15.1's recording shows it, a later
    change may use it in place of Price graph then Dates, with its own proof.
-4. **An unpriced cell** (answered 2026-10-26, spec §2 rev 49): "no flights, …" maps to `empty`, "price unknown, …"
-   to `no_data`, where the entry's `GRID_UNPRICED_VERIFIED` is set; see the cell grammar above.
+4. **An unpriced cell** is unparsed until a recording shows Google's form; then it maps to `no_data` (spec §2).
 5. **Re-dating** the grid's names after a Google change is part of WP14's standing maintenance task.
 
 ## 14. Open questions
