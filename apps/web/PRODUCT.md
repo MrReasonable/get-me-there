@@ -119,6 +119,7 @@ the operator's own machine, which must be awake for it. Setup and operation happ
 
 ## Accessibility & Inclusion
 
-Every view stays reachable and usable on a phone; navigation wraps rather than hiding views.
-Beyond the spec's basic accessibility (keyboard use, accessible names), no formal standard has
-been chosen yet.
+At 375 px every view stays reachable and usable: navigation wraps rather than hiding views, and
+compact layouts keep each price's source, age and verdict class. Keyboard operation has a
+visible focus and labelled controls, and no meaning is carried by colour alone. Beyond these and
+the spec's other requirements, no formal accessibility standard has been chosen yet.
