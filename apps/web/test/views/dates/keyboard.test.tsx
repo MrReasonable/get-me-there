@@ -3,6 +3,7 @@ import { screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { CELL_FOCUS } from '../../../src/views/Dates/OverviewMonth.js';
 import { at, DATES_SPACE, type DatesOptions, priced, pricedPair, workedDates } from '../../fixtures.dates.js';
+import { setViewportWidth } from '../../viewport.js';
 import { findBoard, renderDates } from './render.js';
 
 // Spec §11 Overview "Keyboard" and Accessibility: the overview is one tab stop with a roving tabindex, the arrow,
@@ -69,6 +70,26 @@ describe('the overview’s keyboard (spec §11)', () => {
     expect(focused()).toBe('2027-04-30|11'); // 30 May is after the window
     await user.keyboard('{PageUp}');
     expect(focused()).toBe('2027-03-30|11');
+  });
+
+  // ported from the Calendar's grid test (review ui M7, WP19 Task 19.8): on a phone one month is drawn, so a key that
+  // leaves it turns the overview to the month it lands in, and focus follows
+  it('at phone width a key that leaves the drawn month shows the month it lands in', async () => {
+    setViewportWidth(375);
+    const { user } = renderDates({ body: workedDates() });
+    await screen.findAllByTestId('board-card');
+    const months = () => [
+      ...new Set(
+        [...document.querySelectorAll<HTMLElement>('[data-cell]')].map((c) => c.dataset.date?.slice(0, 7)),
+      ),
+    ];
+    expect(months()).toEqual(['2027-03']);
+    const last = document.querySelector<HTMLElement>('[data-cell="2027-03-31|12"]');
+    if (last === null) throw new Error('no cell');
+    last.focus();
+    await user.keyboard('{ArrowRight}');
+    expect(months()).toEqual(['2027-04']);
+    expect(focused()).toBe('2027-04-01|10');
   });
 
   it('Enter on a cell opens the detail with the date pair in the URL', async () => {

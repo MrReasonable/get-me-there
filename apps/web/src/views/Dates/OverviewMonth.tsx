@@ -1,7 +1,7 @@
 import type { IsoDate, IsoMonth } from '@gmt/core';
 import { memo } from 'react';
 import { COPY } from '../../copy.js';
-import { formatDayOfMonth, formatDayShort, formatIsoMonth, WEEK_HEADERS } from '../../format.js';
+import { formatDayOfMonth, formatIsoMonth, formatWeekday, WEEK_HEADERS } from '../../format.js';
 import { type CellModel, type Column, type Mark, weeksOf } from './overview.js';
 import { BAND_CLASSES, FLAT_CLASS } from './shade.js';
 import './dates.css';
@@ -121,9 +121,13 @@ export const OverviewMonth = memo(function OverviewMonth({
         <h4 className="font-semibold">{formatIsoMonth(month)}</h4>
         <ol className="space-y-1">
           {[...days.keys()].map((date) => (
-            <li key={date} className="flex items-center gap-1">
-              <span className="w-16 shrink-0 text-xs">{formatDayShort(date)}</span>
-              <span className="flex flex-1 gap-0.5">{strip(date)}</span>
+            // why: WP19 Task 19.9 (the 375 px smoke): twelve 24 px cells and their 1 px gaps take 299 px of the 343 px
+            // inside the page's gutters, so the day's label is its weekday and number (the month is the heading above)
+            <li key={date} className="flex items-center gap-0.5">
+              <span className="w-10 shrink-0 text-[10px] leading-tight">
+                {`${formatWeekday(date)} ${formatDayOfMonth(date)}`}
+              </span>
+              <span className="flex flex-1 gap-px">{strip(date)}</span>
             </li>
           ))}
         </ol>
@@ -131,35 +135,39 @@ export const OverviewMonth = memo(function OverviewMonth({
     );
   }
   return (
-    <table className="w-full table-fixed border-separate border-spacing-1">
-      <caption className="text-left font-semibold">{formatIsoMonth(month)}</caption>
-      <thead>
-        <tr>
-          {WEEK_HEADERS.map((w) => (
-            <th key={w} scope="col" className="text-xs font-medium">
-              {w}
-            </th>
-          ))}
-        </tr>
-      </thead>
-      <tbody>
-        {weeksOf(month).map((week) => (
-          <tr key={week.find((d) => d !== null) ?? month}>
-            {week.map((date, i) =>
-              date === null ? (
-                <td key={`pad-${month}-${i}`} />
-              ) : (
-                <td key={date} className="align-top">
-                  <span className="block text-[10px] text-slate-700" aria-hidden="true">
-                    {formatDayOfMonth(date)}
-                  </span>
-                  {days.has(date) ? <span className="flex gap-px">{strip(date)}</span> : null}
-                </td>
-              ),
-            )}
+    // why: WP19 Task 19.9: a month off screen skips style, layout and paint (dates.css), so a read or a filter change
+    // over 400 days lays out the months in view, not every cell of the window
+    <div className="dates-month">
+      <table className="w-full table-fixed border-separate border-spacing-1">
+        <caption className="text-left font-semibold">{formatIsoMonth(month)}</caption>
+        <thead>
+          <tr>
+            {WEEK_HEADERS.map((w) => (
+              <th key={w} scope="col" className="text-xs font-medium">
+                {w}
+              </th>
+            ))}
           </tr>
-        ))}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {weeksOf(month).map((week) => (
+            <tr key={week.find((d) => d !== null) ?? month}>
+              {week.map((date, i) =>
+                date === null ? (
+                  <td key={`pad-${month}-${i}`} />
+                ) : (
+                  <td key={date} className="align-top">
+                    <span className="block text-[10px] text-slate-700" aria-hidden="true">
+                      {formatDayOfMonth(date)}
+                    </span>
+                    {days.has(date) ? <span className="flex gap-px">{strip(date)}</span> : null}
+                  </td>
+                ),
+              )}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 });

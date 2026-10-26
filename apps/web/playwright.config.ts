@@ -1,7 +1,8 @@
 import { fileURLToPath } from 'node:url';
 import { defineConfig, devices } from '@playwright/test';
 
-// Spec §9 item 6: one smoke in fixture mode, run on a desktop browser and at the 375px phone width (ui-r1-014).
+// Spec §9 item 6: one smoke in fixture mode, run on a desktop browser and at the 375px phone width (ui-r1-014), and the
+// performance test (e2e/perf.spec.ts, @perf), which serves its own bodies through route interception.
 // Excluded from `pnpm test`; run with `pnpm --filter @gmt/web e2e`.
 const API_PORT = 3100;
 const WEB_PORT = 4173;
@@ -21,6 +22,8 @@ export default defineConfig({
   reporter: [['list']],
   use: { baseURL: WEB_ORIGIN, trace: 'retain-on-failure' },
   projects: [
+    // why: WP19 Task 19.9: the desktop project runs the smoke and the @perf test (Chromium reports long tasks); the
+    // phone project runs only @phone, so the performance bound is measured once, at desktop width
     { name: 'desktop', use: { ...devices['Desktop Chrome'] }, grepInvert: /@phone/ },
     // why: the phone project only checks layout on the run the desktop project made (it depends on it). It has touch,
     // so the smoke's tap on an overview cell is a touch (revision 50: a first tap shows the readout).

@@ -84,6 +84,9 @@ describe('the date-pairs shape over the worked world (spec §10, §11 "The figur
     const { x, def, s } = await world();
     const d = await datesOf(x, def.id);
     expect(d.executionId).toBe(s.id('E2'));
+    // ported from the calendar route's "per day" test (WP19 Task 19.8): the stale thresholds the view labels by, the
+    // definition's verified one and each discovery provider's own
+    expect([d.staleAfterHours, d.calendarStaleAfterHours]).toEqual([192, { fixture: 168 }]);
     expect(d.pairs.map((p) => p.index)).toEqual(d.pairs.map((_, i) => i));
     expect(d.pairs).toHaveLength(4 * 12);
     expect([d.pairs[0]?.departureDate, d.pairs[0]?.nights, d.pairs[12]?.departureDate]).toEqual([

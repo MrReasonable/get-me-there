@@ -87,6 +87,9 @@ export function useExecution(id: string | null) {
 export function useDatePairs(definitionId: string, scope: DatePairsScope) {
   return useQuery({
     queryKey: qk.datePairs(definitionId, scope),
+    // why: WP19 Task 19.9: each read is decoded afresh, so sharing structure with the last one only costs a deep walk
+    // of up to 36,400 date pairs (about 70 ms) on every re-read; the view compares reads by identity
+    structuralSharing: false,
     queryFn: async () => {
       const decoded = decodeDatePairs(await api.datePairs(definitionId, scope));
       performance.mark(DATES_RESPONSE_MARK);

@@ -1460,8 +1460,10 @@ task's commit (Task 19.9 adds the performance test).
   - **Performance** (`perf.spec.ts`, tagged `@perf`, desktop project): an init script installs a `longtask`
     `PerformanceObserver`; `page.route('**/api/**')` serves a synthetic definition, providers (the fixture provider,
     synthetic), status and executions, and the date-pairs body built by `@gmt/core`'s `encodeDatePairs` in
-    `perfFixtures.ts` (every provenance `fixture`/`synthetic`, airports `AAA`, `BBB`) for (a) 36,400 date pairs every one
-    with a figure (400 × 91, one airport pair) and (b) 50,000 cells (400 days × 25 nights × 5 airport pairs); the red
+    `perfFixtures.ts` (every provenance `fixture`/`synthetic`) for (a) 36,400 date pairs every one with a figure (400 ×
+    91, one airport pair, `AAA` → `BBB`) and (b) 50,000 cells (250 days × 50 nights × the example's 4 airport pairs, as
+    the api's bound test seeds it: 400 × 25 × 5 needs a fifth airport pair, which needs a code outside the example's
+    six; every seventh date pair unpriced, its buckets cycling through the unpriced ones); the red
     banner shows; with marks cleared before each step, the board and overview are drawn within 1.5 s of the response
     (`gmt:dates-drawn` minus `gmt:dates-response`); a stay filter change redraws within 200 ms; a re-rank redraws
     within 200 ms, triggered without waiting: the page is loaded under `page.clock.install()`, the served status and
@@ -1470,7 +1472,22 @@ task's commit (Task 19.9 adds the performance test).
     passes the 30 s throttle, and the date-pairs route serves a second body whose order differs; no long task over
     200 ms is recorded. Each limit is multiplied by `GMT_TIMING_FACTOR` (default 1, revision 50). Each wait is
     `waitForFunction` on that step's mark, with the timeout only as a backstop. The performance test runs with the e2e
-    suite, locally and in CI's `e2e` job, and is not part of `pnpm test`.
+    suite, locally and in CI's `e2e` job, and is not part of `pnpm test`. As built: Playwright's clock replaces
+    `performance` with an object whose `mark` records nothing and whose `getEntriesByName` returns `[]` (it fakes only
+    `now`), so one init script, added before `page.clock.install()`, keeps the browser's own `mark`, `clearMarks` and
+    `getEntriesByName`, installs the `longtask` observer and marks every `input` event at dispatch (`perf:input`), and a
+    second, added after it, routes the app's marks back to the browser's; the stay filter step is measured from that
+    input mark (a stay change reads nothing, so there is no response mark), filling the longest stay first (a lone
+    maximum is not a range) and then the shortest; the served execution's progress moves with every tick (a fully
+    priced case would otherwise show no progress change). Each run prints its measured times. The first local run
+    failed the 36,400 case (draw 257 ms; stay change 204 ms; re-rank 252 ms; longest task 242 ms); the fixes, in the web
+    code: `useFlip` measures the rows only on the commit that applies a new read (it measured after every commit,
+    forcing a layout of every overview cell on each stay change and hover), the date-pairs query has no structural
+    sharing (a deep walk of 36,400 pairs on each re-read), the held-read change count builds its two boards only while
+    the board is held, `pairsAt` looks a day up once rather than once per stay, and each desktop month of the overview
+    is `content-visibility: auto` (`dates.css`), so a redraw lays out the months in view. The 375 px smoke also found
+    the phone overview 19 px too wide (twelve 24 px cells beside a 64 px day label): the day label is now the weekday
+    and day number in 40 px and the strip's gaps 1 px.
   - **CI** (revision 50, settled by the orchestrator): a new workflow, `.github/workflows/e2e.yml` (a workflow of its
     own, because GitHub applies a path filter to a whole workflow and ci.yml's test matrix runs on every push), holds an
     `e2e` job on ubuntu-24.04 that installs Chromium with `pnpm --filter @gmt/web e2e:install` and runs `pnpm --filter

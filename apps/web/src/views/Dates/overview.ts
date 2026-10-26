@@ -197,9 +197,12 @@ export function pairsAt(
   column: Column,
 ): DatePair[] {
   const out: DatePair[] = [];
-  for (let n = column.from; n <= column.to; n += 1) {
-    const i = datePairIndex(space, date, addDays(date, n));
-    const p = i === null ? undefined : pairs[i];
+  // why: WP19 Task 19.9: the day's first stay is looked up once and its other stays follow it in index order (a day's
+  // stays are consecutive indices, core's order), so a folded band of 8 stays costs one date lookup, not 8
+  const first = datePairIndex(space, date, addDays(date, space.minNights));
+  if (first === null) return out;
+  for (let n = Math.max(column.from, space.minNights); n <= Math.min(column.to, space.maxNights); n += 1) {
+    const p = pairs[first + n - space.minNights];
     if (p !== undefined) out.push(p);
   }
   return out;

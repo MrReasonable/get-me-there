@@ -2431,11 +2431,13 @@ First-failing-test per WP in §16.
    and the page does not scroll sideways. **The performance bound**, a
    second Playwright test, serves the decoded worst cases through the
    browser's route interception: 36,400 date pairs every one with a figure
-   (400 days × 91 nights, one airport pair) and 50,000 cells (400 days × 25
-   nights × 5 airport pairs); the board and the overview are drawn within
-   1.5 s of the response, a filter change and a re-rank each within 200 ms,
-   and no main-thread task runs longer than 200 ms (a `longtask` observer),
-   each waited on its event with the timeout only as a backstop. CI runs the
+   (400 days × 91 nights, one airport pair) and 50,000 cells (250 days × 50
+   nights × 4 airport pairs, as the route's bound test seeds it: a fifth
+   airport pair would need a code outside the example's six); the board and
+   the overview are drawn within 1.5 s of the response, a filter change and
+   a re-rank each within 200 ms, and no main-thread task runs longer than
+   200 ms (a `longtask` observer), each waited on its event with the timeout
+   only as a backstop. CI runs the
    Playwright suite (the smoke on the desktop and 375 px projects, and the
    performance test) in a job of its own on ubuntu-24.04 with
    `GMT_TIMING_FACTOR=3`, path-filtered to `apps/web`, `apps/api`,
@@ -2690,9 +2692,9 @@ the worked example (182 days × 12 nights × 4 airport pairs, 60% priced),
 about 3.5 MiB (180 KiB compressed) for 36,400 date pairs every one with a
 calendar figure, about 3.6 MiB (192 KiB compressed) for the same with about
 300 verified figures carrying times and a cheaper cached price, and about
-1.2 MiB (68 KiB compressed) for 50,000 cells (400 days × 25 nights × 5
-airport pairs, every cell priced); the bound the route's test holds is **4
-MiB uncompressed and 512 KiB compressed**.
+1.4 MiB (80 KiB compressed) for 50,000 cells (250 days × 50 nights × 4
+airport pairs, every cell priced, 20 runs deep); the bound the route's test
+holds is **4 MiB uncompressed and 512 KiB compressed**.
 
 **Routes the Dates view retires.** `GET /definitions/:id/calendar` and
 `GET /definitions/:id/duration-analysis` had one caller each, the Calendar

@@ -125,11 +125,16 @@ function DatesOf({
       if (track.shown === null || track.shown.scope !== scopeKey) {
         next = { ...next, shown: read, pending: null, changes: 0 };
       } else {
-        const changes = changeCount(
-          boardModel(track.shown.data.pairs, options, track.shown.now),
-          boardModel(data.pairs, options, now),
-          visible,
-        );
+        // why: the change count only decides a held read (refresh.ts readDecision applies every other one), so the two
+        // boards are built only while the board is held (WP19 Task 19.9: each is a rank of up to 36,400 date pairs)
+        const changes =
+          runActive && held.current
+            ? changeCount(
+                boardModel(track.shown.data.pairs, options, track.shown.now),
+                boardModel(data.pairs, options, now),
+                visible,
+              )
+            : 0;
         next =
           readDecision({ runActive, held: held.current, sameScope: true, changes }) === 'hold'
             ? { ...next, pending: read, changes, message: D.pendingChanges(changes) }

@@ -2,6 +2,7 @@ import { asIata } from '@gmt/core';
 import { screen, within } from '@testing-library/react';
 import { HttpResponse, http } from 'msw';
 import { describe, expect, it } from 'vitest';
+import { COPY } from '../../../src/copy.js';
 import {
   at,
   calendarFig,
@@ -164,6 +165,30 @@ describe('the calendar-gap banner on Dates (spec §11, revision 50)', () => {
       search: '?view=dates&def=def-0001&d.nights=10-14',
     });
     await findBoard();
+    expect(screen.queryByRole('region', { name: 'Cells to search' })).toBeNull();
+  });
+
+  // ported from Results' calendar-gap banner (basisAndGap.test.tsx, WP19 Task 19.8): the lead pluralises
+  it('two gap cells in scope pluralise the lead', async () => {
+    server.use(http.get(`${API}/definitions/:id/calendar-gap`, () => HttpResponse.json(gap())));
+    renderDates({ body: workedDates({ space: WIDE }), search: '?view=dates&def=def-0001&d.nights=10-14' });
+    const section = await screen.findByRole('region', { name: 'Cells to search' });
+    expect(within(section).getAllByRole('link')).toHaveLength(2);
+    expect(section).toHaveTextContent('2 cells have calendar prices');
+  });
+
+  // ported from Results' calendar-gap banner (review prov-019): a failed gap request says so with Retry, and never
+  // reads as "no gap"
+  it('a failed gap request shows its load error with Retry in the banner’s place, never an empty banner', async () => {
+    server.use(
+      http.get(`${API}/definitions/:id/calendar-gap`, () =>
+        HttpResponse.json({ error: { code: 'internal', message: 'gap read failed' } }, { status: 500 }),
+      ),
+    );
+    renderDates({ body: workedDates({ space: WIDE }) });
+    await findBoard();
+    expect(await screen.findByText(/gap read failed/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: COPY.retryLoad })).toBeInTheDocument();
     expect(screen.queryByRole('region', { name: 'Cells to search' })).toBeNull();
   });
 

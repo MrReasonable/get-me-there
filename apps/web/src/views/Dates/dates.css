@@ -6,3 +6,11 @@
 .dates-partly {
   background-image: repeating-linear-gradient(45deg, currentColor 0 1px, transparent 1px 5px);
 }
+
+/* A month of the overview off screen skips style, layout and paint until it nears the viewport (WP19 Task 19.9: the
+   performance bound over 400 days). `auto` keeps the size it last rendered at, so the page does not jump; its cells
+   stay in the accessibility tree and reachable by keyboard, and find-in-page still finds them. */
+.dates-month {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 18rem;
+}
