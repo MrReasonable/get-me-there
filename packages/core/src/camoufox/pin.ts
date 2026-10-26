@@ -48,20 +48,10 @@ const BUILDS = {
   },
 } as const;
 
-const NONE = {
-  RESULTS_VERIFIED: false,
-  FORM_VERIFIED: false,
-  CHEAPEST_FLOW_VERIFIED: false,
-  VIEW_MORE_ADDS_CHEAPER: false,
-  NO_FLIGHTS_VERIFIED: false,
-  SOCS_STABLE: false,
-  GRID_VERIFIED: false,
-  LANDING_VERIFIED: false,
-} as const;
-
 /**
  * The verified flags per `<os>-<arch>` (spec §2 rev 36). darwin-arm64 carries the 2026-10-18 recordings' values (and
- * the landing view from 2026-10-25's) on the operator's Mac (the worker's PROOFS name each one); the other three earn theirs in WP17's recording sessions.
+ * the landing view from 2026-10-25's) on the operator's Mac; the other three carry their own from WP17 Task 17.8's
+ * recording sessions of 2026-10-26. The worker's PROOFS name each one.
  */
 const FLAGS = {
   'darwin-arm64': {
@@ -80,7 +70,25 @@ const FLAGS = {
       LANDING_VERIFIED: true,
     },
   },
-  'darwin-x64': { build: '152.0.4-beta.28', flags: NONE },
+  // why: WP17 Task 17.8's darwin-x64 session of 2026-10-26 (the operator's Mac under Rosetta, an x86_64 Node, a
+  // throwaway HOME); the worker's PROOFS name each recording
+  'darwin-x64': {
+    build: '152.0.4-beta.28',
+    flags: {
+      RESULTS_VERIFIED: true,
+      FORM_VERIFIED: true,
+      CHEAPEST_FLOW_VERIFIED: true,
+      // why: the view-more recording's minimum (71 links) equalled the results page's
+      VIEW_MORE_ADDS_CHEAPER: false,
+      NO_FLIGHTS_VERIFIED: true,
+      SOCS_STABLE: true,
+      // why: both grid recordings (grid/2026-10-26/3 and 4) hold a view taken before its cells had all rendered (42 of
+      // 49 after the first scroll; none in the second page's first view), which the reading refused; every scroll did
+      // move one day, but no recording shows every view of a page read whole on this entry
+      GRID_VERIFIED: false,
+      LANDING_VERIFIED: true,
+    },
+  },
   // why: WP17 Task 17.8's linux-arm64 session of 2026-10-26 (a Linux arm64 container on the operator's Mac, headless,
   // the generated fonts.conf); the worker's PROOFS name each recording
   'linux-arm64': {

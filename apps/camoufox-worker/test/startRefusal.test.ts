@@ -79,7 +79,7 @@ describe('run.ts check --json (decision 75): the start’s result, nothing start
     expect(await check(locked.ctx, { ...mac, locked: () => true })).toBe(78);
     expect(JSON.parse(locked.out[0] ?? '')).toEqual({ reason: 'locked', at: AT });
     const linux = ctxFor({ home: f.home, installDir: f.root });
-    await check(linux.ctx, { ...mac, platform: 'darwin', arch: 'x64' });
+    await check(linux.ctx, { ...mac, platform: 'linux', arch: 'ia32' });
     expect(JSON.parse(linux.out[0] ?? '')).toEqual({ reason: 'flags-unset', at: AT });
     const elsewhere = ctxFor({ home: f.home, installDir: '/elsewhere' });
     await check(elsewhere.ctx, mac);

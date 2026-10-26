@@ -13,13 +13,13 @@ import { z } from 'zod';
 import { classifyLanding, classifyPage } from '../src/classify.js';
 import { rejectionMark } from '../src/consentLine.js';
 import { CONSENT_HOST } from '../src/consentWatch.js';
-import { parseCellName, parseSelectedPrice } from '../src/gridNames.js';
+import { parseCellName, parseSelectedPrice, parseSelectedRange } from '../src/gridNames.js';
 import { interpretView } from '../src/gridView.js';
 import { onAllowlist } from '../src/guard.js';
 import { parseOptionName } from '../src/names.js';
 import { KINDS, RECORDED_BY, type RecordingKind } from '../src/record.js';
 import { FLAG_NAMES, flagsOf, PROOFS, SELECTORS, selectorsFor } from '../src/selectors.js';
-import { recordedAnchor } from './support/recordedGrid.js';
+import { rangeOf, recordedAnchor } from './support/recordedGrid.js';
 
 const ROOT = fileURLToPath(new URL('../fixtures/recorded/', import.meta.url));
 
@@ -131,9 +131,18 @@ for (const kind of ['results', 'cheapest', 'view-more'] as const) {
       }
     });
     it('every readable name parses with the dated grammar (Task 14.3)', () => {
-      for (const r of common(kind))
+      for (const r of common(kind)) {
+        // why: WP17 Task 17.8: the provider reads a View more page only where VIEW_MORE_ADDS_CHEAPER is set for the
+        // entry; elsewhere its names are a recording's observation (linux-x64's of 2026-10-26 holds a mixed-cabin
+        // option the grammar leaves unparsed, counted and never misread)
+        if (
+          kind === 'view-more' &&
+          !selectorsFor(r.meta.osArch, r.meta.versions.binary).VIEW_MORE_ADDS_CHEAPER
+        )
+          continue;
         for (const name of r.facts.names)
           if (name !== null && name !== '') expect(parseOptionName(name), name).not.toBeNull();
+      }
     });
   });
 }
@@ -312,6 +321,10 @@ describe('verification flags (TS-13; runs on every checkout)', () => {
         .object({
           kind: z.literal('grid'),
           recordedAt: z.string(),
+          // why: WP17 Task 17.8 names the entry in every grid recording; the earlier ones were made on entries whose
+          // GRID_VERIFIED is set (darwin-arm64 on 2026-10-18, the two Linux entries on 2026-10-26)
+          osArch: z.enum(OS_ARCHES).default('darwin-arm64'),
+          versions: z.object({ binary: z.string() }).loose(),
           socsReadBack: z.literal('same'),
           views: z.array(viewSchema),
           moves: z.array(z.object({ dir: z.enum(['left', 'right', 'up', 'down']) }).loose()),
@@ -338,11 +351,48 @@ describe('verification flags (TS-13; runs on every checkout)', () => {
       // line (test/support/recordedGrid.ts), never on an offset from the recording time
       const anchorOf = (rec: z.infer<typeof fileSchema>) =>
         recordedAnchor(rec.views[0]?.snapshot ?? '', rec.recordedAt);
-      it('every view is the dates-grid view; every candidate parses; the cells name exactly the lines’ dates', () => {
-        const recs = files().filter((f) => !f.file.endsWith('0-explore.json'));
+      const verifiedOn = (rec: z.infer<typeof fileSchema>): boolean =>
+        selectorsFor(rec.osArch, rec.versions.binary).GRID_VERIFIED;
+      /** The recordings of entries whose GRID_VERIFIED is set: the strict checks below hold on every one of them. */
+      const verified = () =>
+        files()
+          .filter((f) => !f.file.endsWith('0-explore.json'))
+          .map((f) => ({ file: f.file, rec: fileSchema.parse(f.raw) }))
+          .filter((f) => verifiedOn(f.rec));
+      const readOf = (rec: z.infer<typeof fileSchema>) =>
+        rec.views.map((v) =>
+          interpretView(
+            {
+              lines: v.lines.texts,
+              candidates: v.candidates,
+              ranges: [],
+              prices: v.selectedLines,
+              datesGrid: v.datesGrid,
+            },
+            anchorOf(rec),
+          ),
+        );
+      // why: WP17 Task 17.8: an entry whose grid recordings hold a view the reading refuses (on darwin-x64 under
+      // Rosetta, a view taken before all its cells had rendered) keeps GRID_VERIFIED false, as SOCS_STABLE follows its
+      // read-backs
+      it('an entry with a refused view in any of its grid recordings keeps GRID_VERIFIED false', () => {
+        const recs = files()
+          .filter((f) => !f.file.endsWith('0-explore.json'))
+          .map((f) => ({ file: f.file, rec: fileSchema.parse(f.raw) }));
         expect(recs.length).toBeGreaterThan(0);
-        for (const { file, raw } of recs) {
-          const rec = fileSchema.parse(raw);
+        for (const { file, rec } of recs) {
+          // why: a first view with no range line (nothing rendered yet) gives the reading no anchor: refused too
+          const anchored = parseSelectedRange(rangeOf(rec.views[0]?.snapshot ?? '')) !== null;
+          const refused =
+            !anchored ||
+            readOf(rec).some((r) => r.kind !== 'view' || r.unparsed > 0 || r.structural !== 'ok');
+          if (refused) expect(verifiedOn(rec), `${file} (${rec.osArch})`).toBe(false);
+        }
+      });
+      it('every view is the dates-grid view; every candidate parses; the cells name exactly the lines’ dates', () => {
+        const recs = verified();
+        expect(recs.length).toBeGreaterThan(0);
+        for (const { file, rec } of recs) {
           for (const [i, v] of rec.views.entries()) {
             const r = interpretView(
               {
@@ -363,20 +413,8 @@ describe('verification flags (TS-13; runs on every checkout)', () => {
       });
       it('one scroll moves one day on its own axis and none on the other (GRID_STEP_DAYS)', () => {
         let measured = 0;
-        for (const { file, raw } of files().filter((f) => !f.file.endsWith('0-explore.json'))) {
-          const rec = fileSchema.parse(raw);
-          const read = rec.views.map((v) =>
-            interpretView(
-              {
-                lines: v.lines.texts,
-                candidates: v.candidates,
-                ranges: [],
-                prices: v.selectedLines,
-                datesGrid: v.datesGrid,
-              },
-              anchorOf(rec),
-            ),
-          );
+        for (const { file, rec } of verified()) {
+          const read = readOf(rec);
           for (const [i, m] of rec.moves.entries()) {
             const a = read[i];
             const b = read[i + 1];

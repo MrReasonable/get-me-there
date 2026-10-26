@@ -130,8 +130,8 @@ describe('the worker’s start checks and shutdown (brief Task 14.5)', () => {
     expect(refusalFile(t)).toEqual({ reason: 'flags-unset', at: AT });
     expect(t.contexts).toEqual([]);
   });
-  it('an entry whose flags are unset for its build (darwin-x64) exits 78 as flags-unset before any launch', async () => {
-    const t = setup({ deps: { platform: 'darwin', arch: 'x64' } });
+  it('a machine with no pinned entry (Linux on ia32) exits 78 as flags-unset before any launch', async () => {
+    const t = setup({ deps: { platform: 'linux', arch: 'ia32' } });
     expect(await startWorker(t.ctx, t.deps)).toBe(EX_CONFIG);
     expect(refusalFile(t)).toEqual({ reason: 'flags-unset', at: AT });
     expect(t.contexts).toEqual([]);

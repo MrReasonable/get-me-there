@@ -6,7 +6,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { asIata, GRID_STEP_DAYS, type GridMove, type IsoDate } from '@gmt/core';
+import { asIata, CAMOUFOX_BUILDS, GRID_STEP_DAYS, type GridMove, type IsoDate, OS_ARCHES } from '@gmt/core';
 import { recordingsPresentForKind, skipTitle } from '@gmt/providers/testing';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
@@ -15,7 +15,7 @@ import { parseCellName, resolveDay } from '../src/gridNames.js';
 import { MonthlyCounter } from '../src/monthly.js';
 import { Pacer } from '../src/pacer.js';
 import { Refusal } from '../src/refusal.js';
-import { SELECTORS } from '../src/selectors.js';
+import { SELECTORS, selectorsFor } from '../src/selectors.js';
 import { PageSession } from '../src/session.js';
 import { loadSocs } from '../src/socs.js';
 import { FakeContext } from './support/fakeContext.js';
@@ -44,6 +44,10 @@ const viewSchema = z
 const fileSchema = z
   .object({
     recordedAt: z.string(),
+    // why: WP17 Task 17.8 names the entry in every grid recording; the earlier ones were made on entries whose
+    // GRID_VERIFIED is set (darwin-arm64 on 2026-10-18, the two Linux entries on 2026-10-26)
+    osArch: z.enum(OS_ARCHES).default('darwin-arm64'),
+    versions: z.object({ binary: z.string() }).loose().optional(),
     views: z.array(viewSchema),
     moves: z.array(
       z.object({ dir: z.enum(['left', 'right', 'up', 'down']), delta: z.unknown().optional() }).loose(),
@@ -94,7 +98,12 @@ function recordings(): Array<{ file: string; rec: z.infer<typeof fileSchema> }> 
             file: `${day.name}/${f}`,
             rec: fileSchema.parse(JSON.parse(readFileSync(join(dir, day.name, f), 'utf8'))),
           });
-  return out;
+  // why: WP17 Task 17.8: the server path is held to these recordings only on entries whose GRID_VERIFIED is set; the
+  // recorded suite keeps that flag false where a recording shows a refused view
+  return out.filter(
+    ({ rec }) =>
+      selectorsFor(rec.osArch, rec.versions?.binary ?? CAMOUFOX_BUILDS[rec.osArch].build).GRID_VERIFIED,
+  );
 }
 
 async function serve(rec: z.infer<typeof fileSchema>) {

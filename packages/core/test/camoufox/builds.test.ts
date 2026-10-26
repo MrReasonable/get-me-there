@@ -155,12 +155,14 @@ describe('FLAGS and flagsFor (spec §2 rev 36: flags per <os>-<arch>, bound to t
     expect(Object.keys(FLAGS['darwin-arm64'].flags)).toEqual([...FLAG_NAMES]);
   });
 
-  it('every entry not yet recorded is all false until its own recording session', () => {
-    // why: WP17 Task 17.8: the linux-arm64 and linux-x64 sessions of 2026-10-26 set their flags; darwin-x64 follows
-    for (const k of ['darwin-x64'] as const) {
-      expect(Object.values(FLAGS[k].flags).some(Boolean), k).toBe(false);
-      expect(Object.keys(FLAGS[k].flags)).toEqual([...FLAG_NAMES]);
+  it('every entry names every flag, and each earned its search form in its own recording session', () => {
+    // why: WP17 Task 17.8: the darwin-x64, linux-arm64 and linux-x64 sessions of 2026-10-26 set their own flags
+    for (const k of OS_ARCHES) {
+      expect(Object.keys(FLAGS[k].flags), k).toEqual([...FLAG_NAMES]);
+      expect(FLAGS[k].flags.FORM_VERIFIED, k).toBe(true);
     }
+    // why: darwin-x64's grid recordings each held a view the reading refused, so its grid mode stays off
+    expect(FLAGS['darwin-x64'].flags.GRID_VERIFIED).toBe(false);
   });
 
   it('a flag set is bound to its build: an entry with any flag true names the build CAMOUFOX_BUILDS pins', () => {
@@ -219,7 +221,6 @@ describe('startChecks (pure; the worker’s own start and the status report use 
   it.each([
     ['locked', { locked: true }],
     ['flags-unset', { osArch: null }],
-    ['flags-unset', { osArch: 'darwin-x64' }],
     ['layout', { layoutOk: false }],
     ['build-mismatch', { installedBuild: '152.0.4-beta.27' }],
     ['build-mismatch', { installedBuild: null }],

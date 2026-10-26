@@ -225,7 +225,20 @@ export const PROOFS: Readonly<Record<OsArch, Partial<Record<FlagName, string>>>>
       '2026-10-18 grid/2026-10-18/1–4 (every cell name parses, each view’s cells name its lines’ dates, one scroll moves one day on its axis, SOCS same) and the renamed 0-explore',
   },
   // why: WP17 Task 17.8's recording sessions fill these, one commit per entry
-  'darwin-x64': {},
+  // why: WP17 Task 17.8, the operator's Mac under Rosetta (an official x86_64 Node 22, a throwaway HOME,
+  // CAMOUFOX_PAGE_TIMEOUT_SECONDS 180); GRID_VERIFIED stays false (pin.ts says why)
+  'darwin-x64': {
+    RESULTS_VERIFIED: '2026-10-26 results/2026-10-26/3 (23 links, every name parses, SOCS same)',
+    FORM_VERIFIED:
+      '2026-10-26 results/2026-10-26/3 (round trip, 1 passenger, 14 Mar to 24 Mar as asked) and no-flights/2026-10-26/3 (1 Dec to 10 Dec as asked)',
+    CHEAPEST_FLOW_VERIFIED:
+      '2026-10-26 cheapest/2026-10-26/3 (23 links after the tab click; their minimum equals the tab price, SOCS same)',
+    NO_FLIGHTS_VERIFIED:
+      '2026-10-26 no-flights/2026-10-26/3 (a date beyond the sale window: the line visible with 0 links, form as asked)',
+    SOCS_STABLE: '2026-10-26 socs-stability/2026-10-26/7–9 (three spaced pages, every read-back same)',
+    LANDING_VERIFIED:
+      '2026-10-26 landing/2026-10-26/3 (/travel/flights?hl=en-GB&gl=GB with no query, the heading "Flights", no tab, Date grid button or result link, SOCS same)',
+  },
   // why: WP17 Task 17.8, a Linux arm64 container on the operator's Mac (headless, the generated fonts.conf)
   'linux-arm64': {
     RESULTS_VERIFIED: '2026-10-26 results/2026-10-26/1 (23 links, every name parses, SOCS same)',

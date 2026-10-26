@@ -7,7 +7,7 @@ import type { z } from 'zod';
 import { runCli } from '../../src/cli.js';
 import type { HttpRequest } from '../../src/deps.js';
 import { offeredFor, TEST_EMAIL_QUESTION, TEST_EMAIL_WORDS } from '../../src/setup/testEmail.js';
-import { scriptedAsk, stubHttp, testIo } from '../support/deps.js';
+import { scriptedAsk, stubHttp, testIo, unsetFlags } from '../support/deps.js';
 import { machine } from '../support/machine.js';
 
 type Report = z.input<typeof apiContract.statusResponseSchema>;
@@ -322,9 +322,9 @@ describe('gmt setup offers the test email at its end (brief Task 18.3)', () => {
     const io = testIo({ tty: true });
     m.deps.ask = ask;
     m.deps.io = io;
-    // why: WP17's browser row is offered on darwin-arm64; on an entry without recordings it asks nothing, so these
-    // tests see the email question alone
-    m.deps.platform = { ...m.deps.platform, arch: 'x64' };
+    // why: WP17's browser row is offered wherever an entry has recordings (every entry since Task 17.8); on one
+    // without them it asks nothing, so these tests state that entry and see the email question alone
+    m.deps.flags = unsetFlags;
     http.requests.length = 0;
     return { m, http, ask, io };
   }

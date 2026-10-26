@@ -52,10 +52,8 @@ describe('selectorsFor (the running entry’s flags)', () => {
     const pin = CAMOUFOX_BUILDS['darwin-arm64'].build;
     expect(flagsOf(selectorsFor('darwin-arm64', pin))).toEqual(flagsFor('darwin-arm64', pin));
     expect(Object.values(flagsOf(selectorsFor('darwin-arm64', '153.0.1-beta.30'))).some(Boolean)).toBe(false);
-    for (const k of ['darwin-x64'] as const)
-      expect(Object.values(flagsOf(selectorsFor(k, CAMOUFOX_BUILDS[k].build))).some(Boolean), k).toBe(false);
-    // why: WP17 Task 17.8: each Linux entry's own session set its flags for its build, and none for another build
-    for (const k of ['linux-arm64', 'linux-x64'] as const) {
+    // why: WP17 Task 17.8: each entry's own session set its flags for its build, and none for another build
+    for (const k of ['darwin-x64', 'linux-arm64', 'linux-x64'] as const) {
       const linux = CAMOUFOX_BUILDS[k].build;
       expect(flagsOf(selectorsFor(k, linux))).toEqual(flagsFor(k, linux));
       expect(selectorsFor(k, linux).FORM_VERIFIED, k).toBe(true);
