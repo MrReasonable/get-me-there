@@ -11,7 +11,9 @@ records the rules settled by the first reviews of those briefs. Review
 summaries and the spike record live outside the repository (the operator's
 private notes), not in `docs/`; the changelog in §17 maps every finding ID.
 The implementation plan under `docs/superpowers/plans/` and the work briefs
-under `docs/briefs/` derive from this revision.
+under `docs/briefs/` derive from this revision. That approval is historical
+for the later revisions: revision 48 (the Dates view, §17) is a draft
+awaiting Ian's approval, and nothing in it is built before he approves it.
 
 This document is the single source of truth for what gets built. The
 implementation plan and every per-package work brief derive from it. Where
@@ -2236,7 +2238,9 @@ or the engine. First-failing-test per WP in §16.
    fewer nights, then airport-pair order; superseded and not-seen after every
    current figure), with property tests that the order is total and
    unchanged by permuting the input; the band folding (12 stay lengths stay
-   unfolded, 13 fold, at most 12 bands, contiguous and covering the range);
+   unfolded; 13 stay lengths fold into 7 bands of ⌈13 / 12⌉ = 2 nights, the
+   last of 1; 91 into 12 bands of 8, the last of 3; bands always contiguous,
+   in order and covering the range);
    `decodeDatePairs` (index → dates across a month end, a leap day and the
    2027→2028 boundary; every figure decoded with its full provenance; each
    refinement of §10 rejecting its own malformed response).
@@ -2575,9 +2579,13 @@ datePairsResponseSchema = {
 The contract's refinement rejects any response whose `pairs` columns are not
 all `days × stays` long, whose `figures` columns differ in length, whose
 `pair` indices are not strictly ascending and in range, whose provenance,
-origin or destination index is out of range, whose six bucket counts for a
-date pair sum to anything but `scope.airportPairs` or 0 (0: no run has a
-discovery outcome for it, or there is no discovery stage, §6.6 row 0), or
+origin or destination index is out of range, any of whose six bucket
+counts or `reused`, `selected`, `itinerarySearched`, `onDemand`,
+`unconfirmed` or `partiallyVerified` values for a date pair is not an
+integer from 0 to `scope.airportPairs`, whose six bucket counts for a date
+pair sum to anything but `scope.airportPairs` or 0 (0, with all six 0: no
+run has a discovery outcome for it, or there is no discovery stage, §6.6
+row 0), or
 whose decision 54 marks sit on the wrong basis. The provenance table is an
 encoding only: `core`'s `decodeDatePairs` turns the response into one
 record per date pair (departure and return dates, nights, buckets,
@@ -2689,7 +2697,9 @@ face still shows the provider's short mark, the destination, a short age
 line from `core` ("5d old", "≤2d old", "age unknown", or the "vendor's
 cache age unknown" badge) and, on a calendar price, "not checked"; the
 title attribute may carry the long form, never the only form, and these
-faces keep their tested contrast and their fit at 375px. Every such face is
+faces keep their tested contrast and their fit at 375px. Every amount the
+Dates view (board, overview readout, phone cards) and the date pair detail
+show renders through `PriceCell` with its complete provenance, and every such face is
 a variant of `PriceCell`, never a second price renderer: `PriceCell`
 validates the complete provenance (provider, source kind, fetched and
 observed time, point of sale, FX status) before it prints an amount, and a
@@ -2814,9 +2824,9 @@ merged into price.
     board's shown rows are ringed on the overview (an outline, not colour
     alone); pointing at or focusing a board row lights its cell, and
     pointing at or focusing a ringed cell lights its row; neither scrolls the
-    page. **Folded bands**: a stay range of more than 12 nights values folds
-    into at most 12 bands of consecutive nights of equal width (the last may
-    be narrower), each named by its range ("10–13 nights"); a band cell
+    page. **Folded bands**: a stay range of n > 12 nights values folds
+    into bands of ⌈n / 12⌉ consecutive nights, shortest first (the last may
+    be narrower), so at most 12, each named by its range ("10–13 nights"); a band cell
     shows its cheapest figure's shade, and the striped mark when any date
     pair in it has a cell not searched; a click or Enter opens that band into
     its stay lengths for that month, and Escape or the band's header closes
