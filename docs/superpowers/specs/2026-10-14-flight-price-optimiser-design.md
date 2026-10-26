@@ -2416,7 +2416,7 @@ shape carries `provenance` and `stale`.
 | `GET /definitions/:id/calendar-gap` | cells whose calendar price is below the cheapest class-`verified` observation (incl. children); empty when the definition has no verification provider |
 | `GET /definitions/:id/cells/:origin/:destination/:departureDate/:returnDate` | that cell's outcomes per stage and provider and its prices, each with full provenance (the View B side panel source) |
 | `POST /tools/smoke`, `POST /tools/record` | the live smoke and recording scripts run inside the app process (authenticated), for use while the app holds `app_lock`; the response's `searchApiCreditsLedgered` is the smoke's running total (the SearchApi credits tool runs had already ledgered in the window at its spend check, null before that check and for `record`), which `gmt smoke` prints and confirms |
-| `GET /tools/smoke/plan` | authenticated, ledgers nothing: the smoke's worst case from `smokeWorstCase` (SearchApi credits split into calendar and itinerary, Travelpayouts free calls, browser pages and, in grid mode, the scroll allowance), the SearchApi trial credits left, which `gmt smoke` prints before it asks, and the browser page's bound (`pageBoundSeconds`: the per-request timeout the smoke's http-kit gives that page, from the same limits, §5.3), which `gmt smoke` waits for (§13) |
+| `GET /tools/smoke/plan` | authenticated, ledgers nothing: the smoke's worst case from `smokeWorstCase` (SearchApi credits split into calendar and itinerary, Travelpayouts free calls, browser pages and, in grid mode, the scroll allowance), the SearchApi trial credits left, and the browser page's bound (`pageBoundSeconds`: the per-request timeout the smoke's http-kit gives that page, from the same limits, §5.3); `gmt smoke` prints all of it before it asks, and waits for the page's bound (§13) |
 | `GET /itineraries/:hash/history`, `GET /routes/:o/:d/history?cabin=` | series per provider and kind; the route's calendar series has one point per execution fetch (the pair's minimum across its cells, carrying the cheapest cell); reused rows excluded; the vendor's price-history series comes grouped by searched trip (`trip` = its departure and return dates, null for rows stored before the trip was recorded), each point vendor-stated GBP |
 | `GET/POST/PUT/DELETE /alerts[/:id]`, `GET /alerts/events` | |
 | `GET /scheduler/jobs`, `GET /budget` | |
@@ -3029,7 +3029,8 @@ configured, and before posting to `POST /api/tools/smoke` with the
 credentials in `app.env` it prints what it will use per provider from `GET
 /api/tools/smoke/plan`, the route's own worst case ("SearchApi: up to 4 calls
 (calendar 1, itinerary 3; trial: N left)", "browser provider: 1 page, up to S
-scrolls"), refuses before posting when the trial credits left are fewer than
+scrolls; the page may take up to M min", M the page's bound in whole minutes,
+rounded up), refuses before posting when the trial credits left are fewer than
 that worst case, posts a dry run (ledgering nothing) and stops on its refusal,
 states the credits tool runs have already used in the window (the response's
 `searchApiCreditsLedgered`) with the running total, and asks for a typed `yes`
@@ -3212,9 +3213,9 @@ as specified in §5.3; no secrets, no full URLs.
 settings (twice the page timeout, plus the scroll cap times the scroll spacing plus a move's 60 s, plus 15 s), so a
 slow grid page still lost its client while the app carried on and the page counted. §10's `GET /tools/smoke/plan`
 now also states the browser page's bound (`pageBoundSeconds`), from the same limits the smoke's http-kit ends that
-page at; §13 says the smoke waits 600 s for the rest of the run plus that bound (its dry run 600 s), because only the
-app holds the settings the bound comes from; §12 states the grid page's request timeout beside the page timeout; §9
-item 9 adds the tests. No other design rule changes.
+page at; §13 says `gmt smoke` prints it in whole minutes with the browser page's line and waits 600 s for the rest of
+the run plus that bound (its dry run 600 s), because only the app holds the settings the bound comes from; §12 states
+the grid page's request timeout beside the page timeout; §9 item 9 adds the tests. No other design rule changes.
 
 ### Revision 44: a request's own bound is its only one (2026-10-26)
 

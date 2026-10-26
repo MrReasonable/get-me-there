@@ -66,11 +66,15 @@ describe('gmt smoke (spec §13: it states its spend before posting)', () => {
     ],
     [
       { searchApi: null, travelpayouts: null, camoufox: { pages: 1, scrolls: 30, pageBoundSeconds: 2145 } },
-      ['browser provider: 1 page, up to 30 scrolls'],
+      ['browser provider: 1 page, up to 30 scrolls; the page may take up to 36 min'],
     ],
     [
       { searchApi: null, travelpayouts: null, camoufox: { pages: 1, scrolls: 0, pageBoundSeconds: 105 } },
-      ['browser provider: 1 page'],
+      ['browser provider: 1 page; the page may take up to 2 min'],
+    ],
+    [
+      { searchApi: null, travelpayouts: null, camoufox: { pages: 1, scrolls: 0, pageBoundSeconds: 61 } },
+      ['browser provider: 1 page; the page may take up to 2 min'],
     ],
     [
       {
@@ -81,7 +85,7 @@ describe('gmt smoke (spec §13: it states its spend before posting)', () => {
       [
         'SearchApi: up to 4 calls (calendar 1, itinerary 3)',
         'Travelpayouts: up to 2 free calls',
-        'browser provider: 1 page',
+        'browser provider: 1 page; the page may take up to 2 min',
       ],
     ],
   ])('prints the plan route’s figures for %j before anything is posted', async (plan, lines) => {

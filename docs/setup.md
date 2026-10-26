@@ -152,7 +152,8 @@ is (or when the app cannot say) unless `--wait` or `--force`, and with `--force`
 the interruption does.
 
 `pnpm gmt smoke` spends: before it sends anything it prints the route's worst case per
-provider from the app (with today's settings, up to 4 SearchApi credits and one browser page)
+provider from the app (with today's settings, up to 4 SearchApi credits and one browser page,
+with the longest that page may take)
 and the SearchApi credits tool runs have already used in this window, refuses when the SearchApi
 trial has fewer credits left, and asks you to type `yes` for the running total. In scripts `--yes`
 skips the question, and once earlier tool runs have used credits in the window it also needs

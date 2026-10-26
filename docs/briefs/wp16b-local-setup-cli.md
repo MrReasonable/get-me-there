@@ -641,7 +641,8 @@ removal command), `pnpm gmt logs`, and that a plain `pnpm gmt setup` finishes. R
     as flags keeps airports out of code; lowercase is upper-cased) reads `GET /api/tools/smoke/plan`, refuses with the
     no-price-source text when no provider is configured, and prints, before anything is posted, the route's own worst
     case per provider ("SearchApi: up to 4 calls (calendar 1, itinerary 3; trial: N left)", "Travelpayouts: up to F free calls",
-    "browser provider: 1 page, up to S scrolls" in grid mode, "1 page" in list mode); with the trial credits left fewer
+    "browser provider: 1 page, up to S scrolls" in grid mode, "1 page" in list mode, each followed by "; the page may
+    take up to M min", the plan's `pageBoundSeconds` in whole minutes rounded up); with the trial credits left fewer
     than the SearchApi worst case it refuses (65) before posting, naming both numbers. It then posts a dry run (it
     ledgers nothing), stops on its refusal with its exit code, prints its lines, states the credits tool runs already
     used in the window (`searchApiCreditsLedgered`, never parsed from prose) and the running total, and asks for a typed

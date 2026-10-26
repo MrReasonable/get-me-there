@@ -21,8 +21,10 @@ export function spendLines(p: SmokePlan): string[] {
   if (p.travelpayouts !== null) out.push(`Travelpayouts: up to ${p.travelpayouts.freeCalls} free calls`);
   if (p.camoufox !== null) {
     const pages = `${p.camoufox.pages} page${p.camoufox.pages === 1 ? '' : 's'}`;
+    // why: the page's bound sets how long the smoke waits (smokeWaitMs), so the operator sees it before the question
+    const minutes = Math.ceil(p.camoufox.pageBoundSeconds / 60);
     out.push(
-      `browser provider: ${pages}${p.camoufox.scrolls > 0 ? `, up to ${p.camoufox.scrolls} scrolls` : ''}`,
+      `browser provider: ${pages}${p.camoufox.scrolls > 0 ? `, up to ${p.camoufox.scrolls} scrolls` : ''}; the page may take up to ${minutes} min`,
     );
   }
   return out;
