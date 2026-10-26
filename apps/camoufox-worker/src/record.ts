@@ -15,7 +15,7 @@ import {
 } from '@gmt/core';
 import { checkAccountCookies } from './accountCookies.js';
 import { type PageBudget, pageBudget } from './budget.js';
-import { classifyPageWithRule } from './classify.js';
+import { classifyLanding, classifyPageWithRule } from './classify.js';
 import { loadWorkerConfig, type WorkerConfig } from './config.js';
 import { type ConsentDriver, createConsentDriver, type DisplayEnv } from './consentDriver.js';
 import { CooldownStore } from './cooldown.js';
@@ -82,7 +82,7 @@ import {
 import { SELECTORS_VERSION, type Selectors, selectorsFor } from './selectors.js';
 import { loadSocs, type ReadBack, readBack, type SocsCapture, socsCookie } from './socs.js';
 import { bounded, type Deadline, DeadlineExceeded, realTimers, type Timers } from './timers.js';
-import { pageUrl, probeUrl } from './url.js';
+import { landingUrl, pageUrl, probeUrl } from './url.js';
 
 export { stderrLog } from './log.js';
 /**
@@ -208,7 +208,14 @@ export async function record(ctx: EntryContext, cfg: WorkerConfig, deps: RecordD
     try {
       for (let i = 0; i < args.pages; i++) {
         const req = args.request;
-        if (req === null) throw new RecordingRefused('no request');
+        // why: WP17 Task 17.8: the landing kind opens the landing page, which names no airport
+        const url =
+          args.kind === 'landing'
+            ? landingUrl(cfg.pointOfSale)
+            : req === null
+              ? null
+              : pageUrl({ ...req, gl: cfg.pointOfSale });
+        if (url === null) throw new RecordingRefused('no request');
         await claim(pacer, monthly, args.moves.length, deps, ctx);
         const c: ContextLike = context ?? (await deps.launch(profile));
         context = c;
@@ -251,8 +258,8 @@ export async function record(ctx: EntryContext, cfg: WorkerConfig, deps: RecordD
           } else {
             const p = await d.race(c.newPage());
             page = p;
-            // why: --no-flights reads what appeared once the deadline passes, so its page stays open until then
-            if (args.kind !== 'no-flights') budget.onExpire(() => void p.close().catch(() => undefined));
+            // why: --no-flights and --landing read what appeared once the deadline passes, so their page stays open
+            if (args.kind !== 'no-flights' && args.kind !== 'landing') budget.onExpire(() => void p.close().catch(() => undefined));
             guard = await d.race(installGuard(c, p, deps.log, deps.selectors));
             const driver = createDriver(p, guard, deps.selectors);
             outcome = await interact(
@@ -263,7 +270,7 @@ export async function record(ctx: EntryContext, cfg: WorkerConfig, deps: RecordD
               pageStart,
               deps,
               args.kind,
-              pageUrl({ ...req, gl: cfg.pointOfSale }),
+              url,
               args.moves,
             );
           }
@@ -417,8 +424,15 @@ export async function record(ctx: EntryContext, cfg: WorkerConfig, deps: RecordD
           ctx.out(`recorded ${path}`);
           continue;
         }
+        if (args.kind === 'landing' && outcome.kind === 'appeared') {
+          writeUnrecorded(deps.root, 'landing', day, { data: outcome.data }, secrets);
+          ctx.out(
+            'the landing rule did not recognise the view; wrote landing/unrecorded.meta.json, LANDING_VERIFIED stays false',
+          );
+          continue;
+        }
         if (outcome.kind === 'appeared' || (args.kind === 'no-flights' && !outcome.noFlights)) {
-          writeUnrecorded(deps.root, day, { data: outcome.data }, secrets);
+          writeUnrecorded(deps.root, 'no-flights', day, { data: outcome.data }, secrets);
           ctx.out(
             'no recognisable "no flights" line appeared; wrote no-flights/unrecorded.meta.json, NO_FLIGHTS_VERIFIED stays false',
           );
@@ -510,6 +524,7 @@ async function interact(
     return await stop(guard.refused, `guard-refused:${guard.refused}`);
   }
   stepMs.goto = deps.timers.now() - t0;
+  if (kind === 'landing') return await readLanding(driver, page, guard, d, deps, stepMs, t0, stop);
   let settled: Settled;
   try {
     settled = await poll(reading(deps.selectors), 'best');
@@ -638,6 +653,77 @@ async function interact(
     clicked,
     headings: data.headings,
   };
+}
+
+/**
+ * `record --landing` (WP17 Task 17.8): the landing page's view, polled until the landing rule decides, read with the
+ * hypothesis on (as --no-flights reads with its line on), so the recording can show it before LANDING_VERIFIED is set
+ * for this entry. A blocked kind is the stop it always is; the landing view is recorded with its facts and headings;
+ * a view the rule does not recognise by the page deadline is what appeared (written unrecorded, the flag left off).
+ * It clicks and types nothing.
+ */
+async function readLanding(
+  driver: Driver,
+  page: PageLike,
+  guard: GuardState,
+  d: Deadline,
+  deps: RecordDeps,
+  stepMs: Record<string, number>,
+  t0: number,
+  stop: (p: BlockedPage, rule: string, facts?: StopFacts | null) => Promise<Outcome>,
+): Promise<Outcome> {
+  const S: Selectors = { ...deps.selectors, LANDING_VERIFIED: true };
+  let last: Awaited<ReturnType<Driver['readFacts']>> | null = null;
+  try {
+    for (;;) {
+      const read = await driver.readFacts(d);
+      last = read;
+      const k = classifyLanding(read.page, S);
+      if (k.kind.kind === 'landing') {
+        stepMs.settle = deps.timers.now() - t0;
+        const headings = await driver.headingNames(d);
+        stepMs.read = deps.timers.now() - t0;
+        return {
+          kind: 'read',
+          data: {
+            kind: 'landing',
+            landing: page.url(),
+            hops: [...guard.hops],
+            page: read.page,
+            settle: read.settle,
+            clicked: [],
+            headings,
+          },
+          noFlights: false,
+          stepMs,
+          facts: read,
+          clicked: [],
+          headings,
+        };
+      }
+      if (k.kind.kind === 'blocked' && k.kind.page !== 'unrecognised')
+        return await stop(k.kind.page, k.rule, { page: read.page, settle: read.settle });
+      await deps.timers.sleep(deps.pollMs, d.signal);
+    }
+  } catch (e) {
+    if (!(e instanceof DeadlineExceeded)) throw e;
+  }
+  const after = deps.timers.deadline(FINALLY_MS * 2);
+  try {
+    return {
+      kind: 'appeared',
+      data: {
+        kind: 'landing',
+        landing: page.url(),
+        hops: [...guard.hops],
+        page: last?.page ?? null,
+        headings: await driver.headingNames(after),
+      },
+      stepMs: { ...stepMs, settle: deps.timers.now() - t0 },
+    };
+  } finally {
+    after.clear();
+  }
 }
 
 function meta(

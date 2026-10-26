@@ -1,5 +1,5 @@
 import { readdirSync, readFileSync } from 'node:fs';
-import { CAMOUFOX_BUILDS, FLAG_NAMES as CORE_FLAG_NAMES, flagsFor } from '@gmt/core';
+import { CAMOUFOX_BUILDS, FLAG_NAMES as CORE_FLAG_NAMES, flagsFor, OS_ARCHES } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
 import { FLAG_NAMES, flagsOf, PROOFS, SELECTORS, SELECTORS_VERSION, selectorsFor } from '../src/selectors.js';
 
@@ -21,10 +21,13 @@ describe('the dated selectors module (spec §2; brief §9)', () => {
     });
     expect(Object.keys(flagsOf())).toEqual([...FLAG_NAMES]);
   });
-  it('each true flag names its proving recording’s date (TS-13)', () => {
-    for (const f of FLAG_NAMES) {
-      if (!flagsOf()[f]) continue;
-      expect(PROOFS[f], f).toMatch(/^\d{4}-\d{2}-\d{2} /);
+  it('each true flag of every entry names its proving recording’s date, and no false flag names one (TS-13)', () => {
+    for (const k of OS_ARCHES) {
+      const flags = flagsFor(k, CAMOUFOX_BUILDS[k].build);
+      for (const f of FLAG_NAMES) {
+        if (flags[f]) expect(PROOFS[k][f], `${k} ${f}`).toMatch(/^\d{4}-\d{2}-\d{2} /);
+        else if (f !== 'VIEW_MORE_ADDS_CHEAPER') expect(PROOFS[k][f], `${k} ${f}`).toBeUndefined();
+      }
     }
   });
   it('reads its flags through core’s flagsFor for the operator’s Mac and the pinned build (decision 81), values unchanged', () => {

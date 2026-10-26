@@ -6,7 +6,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { GRID_STEP_DAYS } from '@gmt/core';
+import { GRID_STEP_DAYS, OS_ARCHES } from '@gmt/core';
 import { recordingsPresentForKind, skipTitle } from '@gmt/providers/testing';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
@@ -33,6 +33,8 @@ const metaSchema = z.object({
   stepMs: z.record(z.string(), z.number()),
   contentSha256: z.string().regex(/^[0-9a-f]{64}$/),
   failure: z.string().optional(),
+  // why: pie-b1-006 added the entry; the recordings made before it are the operator's Mac (darwin-arm64)
+  osArch: z.enum(OS_ARCHES).default('darwin-arm64'),
 });
 const pageFactsSchema = z.object({
   url: z.string(),
@@ -59,7 +61,9 @@ const factsSchema = z.object({
   landing: z.string(),
   hops: z.array(z.string()),
   page: pageFactsSchema.nullable(),
-  names: z.array(z.string().nullable()),
+  // why: the landing view (Task 17.8) reads no result names
+  names: z.array(z.string().nullable()).default([]),
+  headings: z.array(z.string()).default([]),
   socsReadBack: z.enum(['same', 'changed', 'missing']).optional(),
   clicked: z.array(z.string()),
 });
@@ -137,9 +141,17 @@ for (const kind of ['results', 'cheapest', 'view-more'] as const) {
 {
   const present = recordingsPresentForKind(ROOT, 'socs-stability');
   describe.skipIf(!present)(skipTitle('recorded SOCS stability (ruling 9)', present), () => {
-    it('read-backs are all same iff SOCS_STABLE', () => {
+    it('read-backs are all same iff SOCS_STABLE, per entry and build', () => {
       const recs = common('socs-stability');
-      expect(recs.every((r) => r.meta.socsReadBack === 'same')).toBe(SELECTORS.SOCS_STABLE);
+      for (const k of OS_ARCHES) {
+        const own = recs.filter((r) => r.meta.osArch === k);
+        if (own.length === 0) continue;
+        const S = selectorsFor(k, own[0]?.meta.versions.binary ?? '');
+        expect(
+          own.every((r) => r.meta.socsReadBack === 'same'),
+          k,
+        ).toBe(S.SOCS_STABLE);
+      }
     });
   });
 }
@@ -168,6 +180,30 @@ for (const kind of ['results', 'cheapest', 'view-more'] as const) {
       expect(recs.length + (unrecorded ? 1 : 0)).toBeGreaterThan(0);
       if (recs.length === 0) expect(SELECTORS.NO_FLIGHTS_VERIFIED).toBe(false);
       for (const r of recs) expect(r.facts.page?.text.noFlights, r.file).toBe(true);
+    });
+  });
+}
+
+// WP17 Task 17.8 (decision 61: local-only, skipped visibly when absent): the landing view recorded headless in the
+// worker's own profile with SOCS set. Each reads as the landing view under the hypothesis, nothing was clicked, SOCS
+// came back the same, and under the selectors its own entry and build earned it reads as landing exactly where
+// LANDING_VERIFIED is set.
+{
+  const present = recordingsPresentForKind(ROOT, 'landing');
+  describe.skipIf(!present)(skipTitle('recorded landing view (Task 17.8)', present), () => {
+    it('reads as the landing view, clicked nothing, SOCS same; landing under its own selectors iff LANDING_VERIFIED', () => {
+      for (const r of common('landing')) {
+        const S = selectorsFor(r.meta.osArch, r.meta.versions.binary);
+        const page = r.facts.page;
+        if (page === null) throw new Error(`${r.file} holds no page facts`);
+        expect(classifyLanding(page, { ...S, LANDING_VERIFIED: true }).kind, r.file).toEqual({
+          kind: 'landing',
+        });
+        expect(classifyLanding(page, S).kind.kind === 'landing', r.file).toBe(S.LANDING_VERIFIED);
+        expect(r.facts.clicked, r.file).toEqual([]);
+        expect(r.meta.socsReadBack, r.file).toBe('same');
+        expect(onAllowlist(r.facts.landing), r.file).toBe(true);
+      }
     });
   });
 }
@@ -245,7 +281,8 @@ for (const kind of ['results', 'cheapest', 'view-more'] as const) {
 
 describe('verification flags (TS-13; runs on every checkout)', () => {
   it('each true flag names its proving recording’s date', () => {
-    for (const f of FLAG_NAMES) if (flagsOf()[f]) expect(PROOFS[f], f).toMatch(/^\d{4}-\d{2}-\d{2} /);
+    for (const f of FLAG_NAMES)
+      if (flagsOf()[f]) expect(PROOFS['darwin-arm64'][f], f).toMatch(/^\d{4}-\d{2}-\d{2} /);
   });
 });
 
