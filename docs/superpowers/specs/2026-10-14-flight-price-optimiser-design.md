@@ -2740,7 +2740,10 @@ merged into price.
 - **Dates** (`?view=dates`, the default view): answers which dates to fly.
   Within seconds the operator can name the cheapest acceptable date pair and
   how far its price was checked. It reads `GET /definitions/:id/date-pairs`
-  (§10) through `core`'s decoder. Top to bottom:
+  (§10) through `core`'s decoder. Its sizes and timings (the 900 px phone
+  breakpoint, 24 px phone cells, at most 12 bands, the 200 ms transition,
+  the 30 s re-read during a run, and §9's 1.5 s and 200 ms performance
+  limits) are starting defaults the build may tune. Top to bottom:
   - **Header line**: the search's name; the run it shows (the latest parent
     run) with its status and age ("run finished 2h ago", "run in progress,
     started 40 min ago", "run paused 3h ago: <reason>") and the stale label
@@ -2776,6 +2779,10 @@ merged into price.
     and "constraints not checked" on a calendar price), how far checked,
     journey time (the figure's total travel time when its source states it,
     else "not known"), airports (the figure's origin → destination). The
+    board is **cheapest first, purely by price**: a verified figure is not
+    put ahead of a cheaper calendar one, and each row's how far checked says
+    which it is (the figure precedence above still lets a fresh verified
+    price beat a cheaper cached one within a date pair). The
     **rank** is by price whatever the sort: price ascending; equal prices
     rank a verified figure before a calendar one, then the fresher (unknown
     age last), then the earlier departure, then fewer nights, then
@@ -2810,7 +2817,8 @@ merged into price.
     says "Best dates updated" once per read, never per row.
   - **Overview**: below the board, the window's months in order, each day
     with a strip of stay-length cells, one per nights value, shortest first.
-    A cell prints no amount. A cell with a figure is shaded by the figure's
+    A cell prints no amount. A cell with a figure is shaded on **one scale
+    for verified and calendar figures together**, by the figure's
     rank among the date pairs in view (quintiles of rank; with fewer than ten
     figures or a price spread under 10% the shading is flat and the legend
     says so, decision 38), and a calendar-price figure also carries a "not
@@ -2855,9 +2863,12 @@ merged into price.
     becomes a figure and its buckets are not counted); max journey time
     (`d.journey=<minutes>`), sent to the route: a price whose journey time is
     known and above the limit is left out of the figure, one whose time is
-    not known stays and reads "journey time not known", and a date pair
+    not known stays and reads "journey time not known" (so a date pair whose
+    journey time is unknown stays on the board, and only date pairs known to
+    exceed the limit drop out), and a date pair
     whose every price was left out reads "none within <limit>" with its
-    marks, never "no fares". "Clear filters" resets them.
+    marks, never "no fares". This filter is part of this revision, which
+    supersedes plan decision 36's Phase 4 placement of it. "Clear filters" resets them.
   - **Coverage section** (folded; the header line's coverage link and
     `?view=coverage` open it, `d.coverage=open`), over the latest parent
     run: counts per stage × provider with the six-bucket breakdown and
@@ -3601,7 +3612,7 @@ as specified in §5.3; no secrets, no full URLs.
 | 16b | Local setup: `apps/cli` (`gmt`) and its `Platform` layer (launchd, systemd `--user`), the native app service and backup job, `--import-docker`, `--import-db` and `--ignore-docker`, `start`/`stop`/`logs`/`backup`/`restore`/`password`/`smoke`/`update`/`uninstall`, the image's `apps/cli` manifest, the CI matrix, `install-e2e` and the workflow guard, `setup.md`'s quick start | Opus | 16a | a second `setup` over an `app.env` that differs from the plan reports the difference and writes nothing |
 | 17 | Camoufox install and consent: the verified install from `CAMOUFOX_BUILDS` with the CLI-owned layout, the worker's install directory and Linux fonts, flags per `<os>-<arch>` bound to their build, the `consent` command with export, import and check, the worker's own monthly caps, key rotation under `--reconfigure browser`, the worker service and its refusal file, the provenance notes' wording, the recording sessions for the other three entries, the `camoufox-install` CI job | Opus | 16a, 16b | a download whose SHA-256 differs from the manifest is refused and nothing is moved into place |
 | 18 | Status: `statusResponseSchema`, `GET /api/status` with every check (the worker's through http-kit), `POST /alerts/test-email`, the consent email on the maintenance tick, `gmt status`, the Status view and the status bar link, redaction tests | Sonnet | 16a, 16b | a status response holding the basic-auth password, the worker key or a `SOCS` value fails the redaction test |
-| 19 | The Dates view: `core`'s date-pair decoder, figure precedence, `rankDatePairs` and band folding; `GET /definitions/:id/date-pairs` and `/results`' scope parameters; the Dates view, Results as the date pair detail with the per-airport-pair panels, the two-tier nav, the `?view=` landing rules; the alert email's date-pair link; removal of the Calendar, Duration and Coverage views and of the calendar and duration-analysis routes; the Playwright smoke and the performance test | Opus | 18 | a date pair priced only on a filtered-out airport pair has no figure |
+| 19 | The Dates view: `core`'s date-pair decoder, figure precedence, `rankDatePairs` and band folding; `GET /definitions/:id/date-pairs` and `/results`' scope parameters; the Dates view, Results as the date pair detail with the per-airport-pair panels, the two-tier nav, the `?view=` landing rules; the alert email's date-pair link; removal of the Calendar, Duration and Coverage views and of the calendar and duration-analysis routes; the Playwright smoke and the performance test; `apps/web/PRODUCT.md` brought in line with the Dates view in its build PR | Opus | 18 | a date pair priced only on a filtered-out airport pair has no figure |
 
 ---
 
@@ -3636,6 +3647,29 @@ after that day's critique of the web UI), each chosen by him:
    then). Untouched: the price and provenance components, the binding
    terminology, the estimate and budget surfaces, the status bar beyond one
    link, and the visual system.
+
+Ian ruled 2026-10-26 on the draft's open questions, each as drafted:
+
+- **Ranking**: the board is cheapest first, purely by price, each row
+  saying how far it was checked. Within one date pair, a fresh verified
+  price still beats a cheaper cached one (the calendar's existing rule,
+  kept), shown with "cached from £X".
+- **Max journey time filter**: a date pair whose journey time is unknown
+  stays on the board, marked "journey time not known". Only date pairs known
+  to exceed the limit drop out. The filter is in this revision, superseding
+  plan decision 36's Phase 4 placement of it.
+- **Detail**: it opens from board rows, overview cells and alert emails.
+  Results' basis switch is kept and starts on the basis of the price the
+  board showed.
+- **Overview shading**: one scale for verified and calendar prices
+  together, calendar prices marked "not checked".
+
+Settled with the ruling, by the coordinator rather than by Ian: the sizes
+and timings in §11 and §9 (the 900 px breakpoint, 24 px phone cells, at most
+12 bands, the 200 ms transition, the 30 s re-read, the 1.5 s and 200 ms
+performance limits) are starting defaults the build may tune; work package
+19 is Opus's and depends on WP18 (merged); and `apps/web/PRODUCT.md` (merged
+on main) is updated in WP19's build PR, not in this revision.
 
 What changed. §1: success is stated through the Dates view. §3, §6.6, §8.1,
 §8.2: what was View D is the Dates view's coverage section; the "searched"
@@ -3698,7 +3732,7 @@ Duration, the Playwright smoke), WP11 (the results-row link) and WP18 (the
 Status `data` card's link) that describe the retired views as current, and
 the plan's file map and WP9 and WP10 sections, where they differ, yield to
 this revision. `docs/setup.md` (its "Verify in the calendar" and "in View D"
-lines) and `apps/web/PRODUCT.md` (the product record, PR #26: its list of views) are brought in line by
+lines) and `apps/web/PRODUCT.md` (the product record: its list of views and its desk-use line) are brought in line by
 that work package with the code, as are the web tests that pin the old view
 list (`state/view.ts`'s `VIEWS`, the shell tests and the Playwright smoke).
 No other design rule changes.
