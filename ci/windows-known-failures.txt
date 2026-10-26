@@ -85,6 +85,9 @@ apps/camoufox-worker/test/gridPage.test.ts > grid pages: fix round 1 (the moves,
 apps/camoufox-worker/test/gridPage.test.ts > grid pages: fix round 1 (the moves, the lookups and the settle) two "Price insights" dialogs: not the dates-grid view (PIE M3)
 apps/camoufox-worker/test/gridPage.test.ts > grid pages: gating GRID_VERIFIED false, or CAMOUFOX_MODE=list, answers mode-unavailable without opening anything
 apps/camoufox-worker/test/gridPage.test.ts > grid pages: gating more moves than the worker’s scroll cap is rejected before any page
+apps/camoufox-worker/test/gridPage.test.ts > grid pages: pairs shown without a price a view whose unpriced cells are drawn but whose new column still prints "0000" is waited on, then read whole
+apps/camoufox-worker/test/gridPage.test.ts > grid pages: pairs shown without a price each view is read whole on its two stable polls: priced, no-flights and price-unknown cells as named
+apps/camoufox-worker/test/gridPage.test.ts > grid pages: pairs shown without a price without GRID_UNPRICED_VERIFIED the same views are refused whole (structural), and the page goes on
 apps/camoufox-worker/test/gridPage.test.ts > grid pages: the flow Google’s no-flights page (past the sale window) is a grid answer with no views
 apps/camoufox-worker/test/gridPage.test.ts > grid pages: the flow a challenge after a scroll is that stop with its cool-down and the scrolls made; no view is returned
 apps/camoufox-worker/test/gridPage.test.ts > grid pages: the flow a first view the sale window shifted to start at today is kept as near-today and ends the page
