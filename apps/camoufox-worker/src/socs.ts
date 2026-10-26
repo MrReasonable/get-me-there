@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import {
   addMonthsClamped,
   type Clock,
+  CONSENT_FIX,
   type IsoDateTime,
   isoDateTimeOfEpochMs,
   isoDateTimeSchema,
@@ -10,12 +11,14 @@ import {
 } from '@gmt/core';
 import type { CookieInput, CookieLike } from './driver.js';
 import { writePrivateFile } from './privateFile.js';
+import { type RejectionMark, rejectionMark } from './socsMark.js';
 
 /**
  * Consent: rejected, never accepted (spec §2; decision 69 ruling 9; SEC-R2-001, TS2-06). Google's consent-choice
  * cookie is `SOCS` (Google's cookie policy, read 2026-10-18: "Google uses the 'SOCS' cookie, which lasts for 13
  * months, to store a user's state regarding their cookies choices"). Its value is undocumented and never invented: the
- * operator captures it once from a real "Reject all" in an ordinary private browser window (`capture-socs`), and the
+ * operator captures it once from a real "Reject all", in the window `pnpm gmt consent` opens (its mark checked from the
+ * value, consentLine.ts) or from an ordinary private browser window (`capture-socs`), and the
  * worker sets it before every page and compares it by value after every page, on every path. `SOCS_STABLE` records only
  * that the stability recording passed; it never weakens the comparison.
  */
@@ -37,9 +40,7 @@ export interface SocsCapture {
 
 export class ConsentNotCaptured extends Error {
   constructor(why: string) {
-    super(
-      `SOCS capture refused (${why}); capture "Reject all" again with: pnpm --filter @gmt/camoufox-worker capture-socs`,
-    );
+    super(`SOCS capture refused (${why}); capture "Reject all" again with: ${CONSENT_FIX.command}`);
     this.name = 'ConsentNotCaptured';
   }
 }
@@ -78,16 +79,33 @@ export function parseCaptureShape(raw: unknown): SocsCapture {
   return { value, domain: SOCS_DOMAIN, path: '/', expires, secure: true, sameSite, capturedAt: at.data };
 }
 
-/** Validates a parsed capture, its dates included; throws ConsentNotCaptured naming what is wrong. */
+/** Why a value whose mark is not `reject` is never stored or applied (review X1), in the operator's words. */
+export function notRejectionWhy(mark: Exclude<RejectionMark, 'reject'>): string {
+  return mark === 'accept'
+    ? 'the value records Accept all, and only a rejection is ever stored or applied'
+    : 'the value does not show a rejection this version reads (if you clicked Reject all, the cookie’s format may have changed: the browser provider stays off until this checkout is updated to read it)';
+}
+
+/** Throws ConsentNotCaptured unless the value's own mark is `reject` (socsMark.ts). */
+export function assertRejection(value: string): void {
+  const mark = rejectionMark(value);
+  if (mark !== 'reject') throw new ConsentNotCaptured(notRejectionWhy(mark));
+}
+
+/**
+ * Validates a parsed capture, its mark and its dates included; throws ConsentNotCaptured naming what is wrong. Every
+ * store (capture-socs, consent, consent import) and every page's cookie goes through it, so a value that is not a
+ * rejection is never stored or applied (review X1).
+ */
 export function parseCapture(raw: unknown, clock: Clock): SocsCapture {
   const c = parseCaptureShape(raw);
+  assertRejection(c.value);
   const now = clock.now();
   if (Date.parse(c.capturedAt) > Date.parse(now)) throw new ConsentNotCaptured('dated in the future');
   if (c.capturedAt.slice(0, 10) < monthsBefore(now, SOCS_MAX_AGE_MONTHS))
     throw new ConsentNotCaptured('older than 13 months, the cookie’s stated lifetime');
   // why: fix round 1 (prov-int M11): addCookies would drop an expired cookie and every page would stop as consent
-  if (c.expires * 1000 <= Date.parse(now))
-    throw new ConsentNotCaptured('the cookie has expired; run capture-socs again');
+  if (c.expires * 1000 <= Date.parse(now)) throw new ConsentNotCaptured('the cookie has expired');
   return c;
 }
 
@@ -121,22 +139,33 @@ export interface CaptureInput {
 }
 
 /**
- * Writes the capture, stamped from the clock, with the domain and path fixed: the directory is created 0700 (an
- * existing one with a looser mode is refused, naming `chmod 700`) and the file written 0600, atomically.
+ * Writes the capture, stamped from the clock (or, for `consent import`, with the capture time the line carries), with
+ * the domain and path fixed: the directory is created 0700 (an existing one with a looser mode is refused, naming
+ * `chmod 700`) and the file written 0600, atomically. The dates are judged as `loadSocs` judges them.
  */
-export function writeCapture(dataDir: string, input: CaptureInput, clock: Clock): SocsCapture {
+export function writeCapture(
+  dataDir: string,
+  input: CaptureInput,
+  clock: Clock,
+  capturedAt: IsoDateTime = clock.now(),
+): SocsCapture {
   if (existsSync(dataDir)) {
     if ((statSync(dataDir).mode & 0o777) !== 0o700)
       throw new ConsentNotCaptured(`${dataDir} is not 0700; chmod 700 it`);
   } else mkdirSync(dataDir, { recursive: true, mode: 0o700 });
-  const capture = parseCapture({ ...input, domain: SOCS_DOMAIN, path: '/', capturedAt: clock.now() }, clock);
+  const capture = parseCapture({ ...input, domain: SOCS_DOMAIN, path: '/', capturedAt }, clock);
   const file = join(dataDir, SOCS_FILE);
   writePrivateFile(file, JSON.stringify(capture));
   return capture;
 }
 
-/** The one cookie the worker ever sets (decision 69): SOCS with the captured attributes, nothing else. */
+/**
+ * The one cookie the worker ever sets (decision 69): SOCS with the captured attributes, nothing else. Every page's
+ * consent check: it throws ConsentNotCaptured, before any cookie is set or page loaded, unless the value's own mark is
+ * `reject` (review X1).
+ */
 export function socsCookie(c: SocsCapture): CookieInput {
+  assertRejection(c.value);
   return {
     name: SOCS_NAME,
     value: c.value,
@@ -182,33 +211,43 @@ export function monthsAfter(at: IsoDateTime, months: number): IsoDateTime {
 
 /**
  * The consent record in `<data>/socs.json` (spec §2 "Consent"; decision 74): a captured rejection (`socs`), whose
- * expiry is the earlier of the cookie's own and `capturedAt` + 13 months; a region with no consent screen
- * (`{ consent: "not-shown", checkedAt }`, expiring `checkedAt` + 13 months); or one voided because a consent screen
- * appeared later (`{ consent: "voided", voidedAt }`, no expiry).
+ * expiry is the earlier of the cookie's own and `capturedAt` + 13 months, and the mark its value carries. A file in
+ * either older shape (`{ consent: "not-shown", checkedAt }` or `{ consent: "voided", voidedAt }`) is read as `legacy`
+ * only so the start can refuse it by name: no command of this version writes one, and pages need a captured
+ * rejection (review X5).
  */
 export type ConsentRecord =
-  | { kind: 'socs'; capture: SocsCapture; expiresAt: IsoDateTime; boundedBy: 'cookie' | 'capture' }
-  | { kind: 'not-shown'; checkedAt: IsoDateTime; expiresAt: IsoDateTime }
-  | { kind: 'voided'; voidedAt: IsoDateTime };
+  | {
+      kind: 'socs';
+      capture: SocsCapture;
+      expiresAt: IsoDateTime;
+      boundedBy: 'cookie' | 'capture';
+      mark: RejectionMark;
+    }
+  | { kind: 'legacy'; was: 'not-shown' | 'voided' };
 
-/** A capture's expiry and what bounds it (the cookie's own expiry wins a tie). Pure. */
+/**
+ * A capture's expiry and what bounds it. Pure. A tie is the capture's bound: an exported line carries an expiry capped
+ * at the capture plus 13 months, so an imported record at that cap names the capture, never the cookie (review X2).
+ */
 export function captureExpiry(c: Pick<SocsCapture, 'expires' | 'capturedAt'>): {
   expiresAt: IsoDateTime;
   boundedBy: 'cookie' | 'capture';
 } {
   const cookie = c.expires * 1000;
   const capture = Date.parse(monthsAfter(c.capturedAt, SOCS_MAX_AGE_MONTHS));
-  return cookie <= capture
+  return cookie < capture
     ? { expiresAt: isoDateTimeOfEpochMs(cookie), boundedBy: 'cookie' }
     : { expiresAt: isoDateTimeOfEpochMs(capture), boundedBy: 'capture' };
 }
 
-const RECORD_KINDS = ['not-shown', 'voided'] as const;
+const LEGACY_KINDS = ['not-shown', 'voided'] as const;
 
 /**
  * Reads the consent record for the start checks and the status: null when there is none, 'invalid' when the file is
  * readable by others, unreadable, not JSON, of no known shape, or dated in the future. An expired record is returned
- * with its expiry, so the start says `consent-expired`, never `consent-missing`.
+ * with its expiry, so the start says `consent-expired`, never `consent-missing`; a capture of another mark is returned
+ * with that mark, so the start says `consent-not-rejection`.
  */
 export function readConsentRecord(dataDir: string, clock: Clock): ConsentRecord | null | 'invalid' {
   const file = join(dataDir, SOCS_FILE);
@@ -228,29 +267,10 @@ export function readConsentRecord(dataDir: string, clock: Clock): ConsentRecord 
     return 'invalid';
   }
   if (typeof raw !== 'object' || raw === null) return 'invalid';
-  const now = Date.parse(clock.now());
-  const at = (k: string) =>
-    isoDateTimeSchema.safeParse(k in raw ? Object.getOwnPropertyDescriptor(raw, k)?.value : undefined);
-  const consent = 'consent' in raw ? raw.consent : undefined;
-  if (consent !== undefined) {
-    const kind = RECORD_KINDS.find((k) => k === consent);
-    const keys = Object.keys(raw).sort().join(',');
-    if (kind === 'not-shown') {
-      const checked = at('checkedAt');
-      if (keys !== 'checkedAt,consent' || !checked.success || Date.parse(checked.data) > now)
-        return 'invalid';
-      return {
-        kind,
-        checkedAt: checked.data,
-        expiresAt: monthsAfter(checked.data, SOCS_MAX_AGE_MONTHS),
-      };
-    }
-    if (kind === 'voided') {
-      const voided = at('voidedAt');
-      if (keys !== 'consent,voidedAt' || !voided.success) return 'invalid';
-      return { kind, voidedAt: voided.data };
-    }
-    return 'invalid';
+  if ('consent' in raw) {
+    const consent = raw.consent;
+    const was = LEGACY_KINDS.find((k) => k === consent);
+    return was === undefined ? 'invalid' : { kind: 'legacy', was };
   }
   let capture: SocsCapture;
   try {
@@ -259,23 +279,22 @@ export function readConsentRecord(dataDir: string, clock: Clock): ConsentRecord 
   } catch {
     return 'invalid';
   }
-  if (Date.parse(capture.capturedAt) > now) return 'invalid';
-  return { kind: 'socs', capture, ...captureExpiry(capture) };
+  if (Date.parse(capture.capturedAt) > Date.parse(clock.now())) return 'invalid';
+  return { kind: 'socs', capture, ...captureExpiry(capture), mark: rejectionMark(capture.value) };
 }
 
-/** The start checks' view of a record (core's StartConsent): a voided record has no expiry. */
+/** The start checks' view of a record (core's StartConsent). */
 export function startConsentOf(r: ConsentRecord | null | 'invalid'): StartConsent | null {
   if (r === null || r === 'invalid') return null;
-  return r.kind === 'voided' ? { kind: 'voided' } : { kind: r.kind, expiresAt: r.expiresAt };
+  return r.kind === 'legacy' ? r : { kind: 'socs', expiresAt: r.expiresAt, mark: r.mark };
 }
 
-/** `/v1/status`'s consent field: the kind, its expiry and what bounds it (null for a voided record). */
-export function consentStatusOf(r: ConsentRecord): {
-  kind: ConsentRecord['kind'];
-  expiresAt: IsoDateTime | null;
-  boundedBy: 'cookie' | 'capture' | 'check' | null;
+/** `/v1/status`'s consent field for a captured record: its expiry, what bounds it, and its mark. */
+export function consentStatusOf(r: Extract<ConsentRecord, { kind: 'socs' }>): {
+  kind: 'socs';
+  expiresAt: IsoDateTime;
+  boundedBy: 'cookie' | 'capture';
+  mark: RejectionMark;
 } {
-  if (r.kind === 'voided') return { kind: 'voided', expiresAt: null, boundedBy: null };
-  if (r.kind === 'not-shown') return { kind: 'not-shown', expiresAt: r.expiresAt, boundedBy: 'check' };
-  return { kind: 'socs', expiresAt: r.expiresAt, boundedBy: r.boundedBy };
+  return { kind: 'socs', expiresAt: r.expiresAt, boundedBy: r.boundedBy, mark: r.mark };
 }

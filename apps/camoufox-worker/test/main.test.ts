@@ -12,6 +12,7 @@ import { type EntryContext, EX_CONFIG, EX_SOFTWARE } from '../src/run.js';
 import { FakeContext } from './support/fakeContext.js';
 import { resultsTree } from './support/fakePage.js';
 import { memoryLog } from './support/log.js';
+import { SYNTHETIC_REJECT } from './support/socsValues.js';
 import { fakeTimers } from './support/timers.js';
 import { tmpDir } from './support/tmp.js';
 
@@ -24,7 +25,7 @@ const OCTOBER = (pages: number, scrolls: number) => ({
 });
 const KEY = 'synthetic-worker-key-0123456789abcdef';
 const CAPTURE = {
-  value: 'synthetic-socs',
+  value: SYNTHETIC_REJECT,
   domain: '.google.com',
   path: '/',
   expires: 1_800_000_000,

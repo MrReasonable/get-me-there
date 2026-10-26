@@ -111,10 +111,12 @@ export interface WorkerStatusFacts {
   formVerified: boolean;
   appInstances: number | null;
   monthly: { pages: number; scrolls: number; readable: boolean } | null;
+  /** The captured record; `mark` null from a worker that does not report it (one before review X1). */
   consent: {
-    kind: 'socs' | 'not-shown' | 'voided';
-    expiresAt: IsoDateTime | null;
-    boundedBy: 'cookie' | 'capture' | 'check' | null;
+    kind: 'socs';
+    expiresAt: IsoDateTime;
+    boundedBy: 'cookie' | 'capture';
+    mark: 'reject' | 'accept' | 'unknown' | null;
   } | null;
   socsCapturedAt: IsoDateTime | null;
 }

@@ -64,8 +64,21 @@ export interface Deps {
   /** Whether 127.0.0.1:<port> can be listened on now. */
   portFree(port: number): Promise<boolean>;
   randomBytes(n: number): Buffer;
-  /** Runs an argv with this terminal attached (for `logs`), resolving its exit code. */
-  attach(argv: readonly string[], cwd: string): Promise<number>;
+  /**
+   * Runs an argv with this terminal attached (`logs`, `consent`), resolving its exit code; `env`, when given, is the
+   * child's whole environment, and aborting `signal` sends the child SIGTERM.
+   */
+  attach(
+    argv: readonly string[],
+    cwd: string,
+    env?: Readonly<Record<string, string>>,
+    signal?: AbortSignal,
+  ): Promise<number>;
+  /**
+   * Handles SIGINT and SIGTERM with `handler` instead of exiting, until the returned function is called (review X3:
+   * `gmt consent` puts the worker back before it ends).
+   */
+  onInterrupt(handler: () => void): () => void;
 }
 
 /** The one exit-code table (core's, shared with apps/api; U9): 78 a refusal or unmet prerequisite, 75 busy, 65 spend. */

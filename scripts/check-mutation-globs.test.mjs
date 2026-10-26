@@ -183,11 +183,14 @@ describe('checkMutationGlobs', () => {
     const wp16b = scopeOf(readFileSync(join(ROOT, 'docs/briefs/wp16b-local-setup-cli.md'), 'utf8'));
     expect(wp16b.pending).toEqual({});
     expect(wp16b.mutate['@gmt/cli']).toEqual(expect.arrayContaining(['src/plan/**', 'src/exec/system.ts']));
-    for (const name of ['wp17-camoufox-install-consent.md'])
-      expect(
-        Object.keys(scopeOf(readFileSync(join(ROOT, 'docs/briefs', name), 'utf8')).pending).length,
-        name,
-      ).toBeGreaterThan(0);
+    // WP17 part 2 landed its last pending file (the consent line's codec) in mutate
+    const wp17 = scopeOf(readFileSync(join(ROOT, 'docs/briefs/wp17-camoufox-install-consent.md'), 'utf8'));
+    expect(wp17.pending).toEqual({});
+    expect(wp17.mutate['@gmt/camoufox-worker']).toEqual([
+      'src/monthly.ts',
+      'src/consentLine.ts',
+      'src/socsMark.ts',
+    ]);
     // WP18 landed its scope in mutate (the report's order and rules in core, its api builders, the consent notice)
     const wp18 = scopeOf(readFileSync(join(ROOT, 'docs/briefs/wp18-status.md'), 'utf8'));
     expect(wp18.pending).toEqual({});

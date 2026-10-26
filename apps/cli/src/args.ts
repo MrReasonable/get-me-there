@@ -18,6 +18,7 @@ export const COMMANDS = [
   'update',
   'uninstall',
   'browser',
+  'consent',
 ] as const;
 export type CommandName = (typeof COMMANDS)[number];
 
@@ -44,6 +45,11 @@ export const BROWSER_ACTIONS = ['install', 'counts'] as const;
 export type BrowserAction = (typeof BROWSER_ACTIONS)[number];
 export const isBrowserAction = (s: string): s is BrowserAction => BROWSER_ACTIONS.some((x) => x === s);
 
+/** `gmt consent [<action>]`: capture here (no action), export the line, import it, or check the stored record. */
+export const CONSENT_ACTIONS = ['export', 'import', 'check'] as const;
+export type ConsentAction = (typeof CONSENT_ACTIONS)[number];
+export const isConsentAction = (s: string): s is ConsentAction => CONSENT_ACTIONS.some((x) => x === s);
+
 type OptionSpec = { type: 'boolean' } | { type: 'string' };
 const bool: OptionSpec = { type: 'boolean' };
 const str: OptionSpec = { type: 'string' };
@@ -63,6 +69,8 @@ const SPEC: Record<
   {
     options: Record<string, OptionSpec>;
     positional: string | null;
+    /** The positional may be left out (consent's action). */
+    optional?: true;
     help: string;
     flags: string[];
     check?: (flags: Flags, positional: string | null) => string | null;
@@ -216,6 +224,24 @@ const SPEC: Record<
       return null;
     },
   },
+  consent: {
+    options: { wait: bool, force: bool },
+    positional: 'action',
+    optional: true,
+    help: 'capture your consent choice: a browser window opens on Google Flights and you click Reject all (the worker is stopped meanwhile and started again after)',
+    flags: [
+      '(no action)               capture here, in a window on this machine, and start the worker',
+      'export                    capture here and print it as one line for a machine with no display',
+      'import                    read that line from standard input (a pipe), never as an argument',
+      'check                     show the stored choice’s mark and expiry; loads no page',
+      '--wait                    wait for a running search to finish instead of refusing',
+      '--force                   go ahead although a search is running (it is interrupted)',
+    ],
+    check: (_flags, positional) =>
+      positional !== null && !isConsentAction(positional)
+        ? `consent takes no action or one of: ${CONSENT_ACTIONS.join(', ')} (import reads the line from standard input)`
+        : null,
+  },
 };
 
 export type Flags = Readonly<Record<string, string | boolean | undefined>>;
@@ -232,7 +258,9 @@ export const isReconfigureGroup = (s: string): s is ReconfigureGroup =>
 export function helpText(command?: CommandName): string {
   if (command !== undefined) {
     const s = SPEC[command];
-    const usage = `usage: pnpm gmt ${command}${s.positional === null ? '' : ` <${s.positional}>`}${Object.keys(s.options).length > 0 ? ' [options]' : ''}`;
+    const arg =
+      s.positional === null ? '' : s.optional === true ? ` [<${s.positional}>]` : ` <${s.positional}>`;
+    const usage = `usage: pnpm gmt ${command}${arg}${Object.keys(s.options).length > 0 ? ' [options]' : ''}`;
     return `${[usage, '', `  ${s.help}`, ...(s.flags.length > 0 ? ['', ...s.flags.map((f) => `  ${f}`)] : [])].join('\n')}\n`;
   }
   const width = Math.max(...COMMANDS.map((c) => c.length));
@@ -267,10 +295,11 @@ export function parseCommandLine(argv: readonly string[]): Parsed {
   }
   if (parsed.values.help === true) return { kind: 'help', text: helpText(first) };
   const want = spec.positional === null ? 0 : 1;
-  if (parsed.positionals.length !== want)
+  const given = parsed.positionals.length;
+  if (spec.optional === true ? given > want : given !== want)
     return {
       kind: 'usage',
-      message: `${want === 0 ? `${first} takes no argument` : `${first} needs <${spec.positional}>`}\n${helpText(first)}`,
+      message: `${want === 0 ? `${first} takes no argument` : spec.optional === true ? `${first} takes at most one <${spec.positional}>` : `${first} needs <${spec.positional}>`}\n${helpText(first)}`,
     };
   const flags: Record<string, string | boolean | undefined> = {};
   for (const [k, v] of Object.entries(parsed.values)) if (k !== 'help' && !Array.isArray(v)) flags[k] = v;

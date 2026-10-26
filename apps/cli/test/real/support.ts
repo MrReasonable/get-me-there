@@ -217,6 +217,7 @@ export function realDeps(
       portFree: async () => true,
       randomBytes: (n) => Buffer.alloc(n, 5),
       attach: async () => 0,
+      onInterrupt: () => () => undefined,
     },
   };
 }

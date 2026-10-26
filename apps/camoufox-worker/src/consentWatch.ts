@@ -33,6 +33,8 @@ export interface Watched {
   afterFacts: PageView | null;
   /** The consent host's `/save` submissions seen: the person's choice. */
   saves: number;
+  /** The form field names those submissions carried (names only). */
+  saveFields: string[];
   /** Whether a SOCS was already there before the first submission (its value is never kept). */
   socsBeforeChoice: boolean;
   /** The SOCS first set, or changed, after the first submission; null when none was. */
@@ -78,6 +80,7 @@ export async function watchConsentWindow(
     afterView: null,
     afterFacts: null,
     saves: 0,
+    saveFields: [],
     socsBeforeChoice: false,
     socs: null,
     hosts: [],
@@ -106,6 +109,9 @@ export async function watchConsentWindow(
   w.firstView =
     first.decided.kind === 'landing' ? 'landing' : first.decided.kind === 'consent' ? 'consent' : 'other';
   let socsBefore: string | null = null;
+  // why: pa-b1-006: whether a cookie read was made before the choice; without one, the first read after it is the
+  // baseline, so only a later change counts as the choice's
+  let baseline = false;
   for (;;) {
     if (d.closed()) return { ...w, ended: 'closed' };
     try {
@@ -113,13 +119,15 @@ export async function watchConsentWindow(
       if (refused !== null) return { ...w, ended: 'blocked', blocked: refused };
       w.hosts = [...d.mainFrameHosts()];
       w.saves = d.consentSaves();
+      w.saveFields = [...d.consentSaveFields()];
       // why: the SOCS is read before the view after the choice settles, which can take the whole settle bound while
       // the landing view is unverified, so a window closed during that settle still keeps the choice's SOCS (2026-10-25)
       const socs = await d.socsCookie();
       // why: W8 (pa-b1-005): only a SOCS set or changed after the choice was submitted is the choice's
-      if (w.saves === 0) {
+      if (w.saves === 0 || !baseline) {
+        baseline = true;
         if (socs !== null) {
-          w.socsBeforeChoice = true;
+          if (w.saves === 0) w.socsBeforeChoice = true;
           socsBefore = socs.value;
         }
       } else if (socs !== null && socs.value !== socsBefore) w.socs = socs;

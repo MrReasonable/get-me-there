@@ -16,6 +16,7 @@ import { loadSocs, socsCookie } from '../src/socs.js';
 import { FakeContext } from './support/fakeContext.js';
 import { n, resultsTree } from './support/fakePage.js';
 import { memoryLog } from './support/log.js';
+import { SYNTHETIC_REJECT } from './support/socsValues.js';
 import { fakeTimers } from './support/timers.js';
 import { tmpDir } from './support/tmp.js';
 
@@ -111,7 +112,8 @@ describe('worker rules: launch and dependencies', () => {
       Object.keys(o.firefox_user_prefs).length,
     ]).toEqual([false, ['UBO'], 'block', ['HOME', 'LANG', 'PATH', 'TMPDIR'], 6]);
   });
-  it('the dependencies are exactly @gmt/core, camoufox-js 0.11.5 and playwright-core 1.59.1', () => {
+  // why: WP17 Task 17.5: zod for the consent line's strict schema (consentLine.ts), at core's own version
+  it('the dependencies are exactly @gmt/core, camoufox-js 0.11.5, playwright-core 1.59.1 and zod 4.6.7', () => {
     const pkg: unknown = JSON.parse(readFileSync(PKG, 'utf8'));
     expect(
       typeof pkg === 'object' && pkg !== null && 'dependencies' in pkg ? pkg.dependencies : null,
@@ -119,6 +121,7 @@ describe('worker rules: launch and dependencies', () => {
       '@gmt/core': 'workspace:*',
       'camoufox-js': '0.11.5',
       'playwright-core': '1.59.1',
+      zod: '4.6.7',
     });
   });
 });
@@ -129,7 +132,7 @@ describe('worker rules: a full page session sets only SOCS and clicks nothing on
     writeFileSync(
       join(dir, 'socs.json'),
       JSON.stringify({
-        value: 'synthetic-socs',
+        value: SYNTHETIC_REJECT,
         domain: '.google.com',
         path: '/',
         expires: 1_800_000_000,
@@ -246,10 +249,11 @@ describe('worker rules: source facts through the compiler API', () => {
     }
   });
   // why: decision 74 (Task 17.4): the consent capture's guard and driver are reached only from the consent paths
-  it('the consent capture’s guard only from consentDriver.ts, and the consent driver only from record.ts', () => {
+  // why: WP17 Task 17.5: the consent command is the driver's second user, beside the research recorder
+  it('the consent capture’s guard only from consentDriver.ts, and the consent driver only from consent.ts and record.ts', () => {
     expect(importersOf(['installConsentCaptureGuard'])).toEqual(['consentDriver.ts']);
-    expect(importersOf(['createConsentDriver'])).toEqual(['record.ts']);
-    expect(importersOf(['launchHeadedContext'])).toEqual(['record.ts']);
+    expect(importersOf(['createConsentDriver'])).toEqual(['consent.ts', 'record.ts']);
+    expect(importersOf(['launchHeadedContext'])).toEqual(['consent.ts', 'record.ts']);
   });
   it('installProbeGuard and the probe page type are imported only by record.ts (never session.ts or server.ts)', () => {
     expect(importersOf(['installProbeGuard', 'ProbePage', 'probePage'])).toEqual(['record.ts']);

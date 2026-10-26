@@ -122,7 +122,7 @@ describe('CAMOUFOX_BUILDS (WP17 §0: release v152.0.4-beta.28)', () => {
   });
 });
 
-/** The worker's flags as its selectors module states them today (2026-10-18 recordings), one by one. */
+/** The worker's flags as its selectors module states them today (the 2026-10-18 and 2026-10-25 recordings), one by one. */
 const WORKER_FLAGS: Readonly<Record<FlagName, boolean>> = {
   RESULTS_VERIFIED: true,
   FORM_VERIFIED: true,
@@ -131,8 +131,8 @@ const WORKER_FLAGS: Readonly<Record<FlagName, boolean>> = {
   NO_FLIGHTS_VERIFIED: true,
   SOCS_STABLE: true,
   GRID_VERIFIED: true,
-  // why: WP17 Task 17.4: false until research 17.0c's recordings show the landing view
-  LANDING_VERIFIED: false,
+  // why: WP17 research 17.0c: the 2026-10-25 recording's views after the choice read as the landing view
+  LANDING_VERIFIED: true,
 };
 
 describe('FLAGS and flagsFor (spec §2 rev 36: flags per <os>-<arch>, bound to their build)', () => {
@@ -179,11 +179,12 @@ describe('FLAGS and flagsFor (spec §2 rev 36: flags per <os>-<arch>, bound to t
 
 describe('startChecks (pure; the worker’s own start and the status report use it)', () => {
   const NOW = asIsoDateTime('2027-03-01T06:00:00.000Z');
+  const LATER = asIsoDateTime('2028-03-01T00:00:00.000Z');
   const ready: StartFacts = {
     osArch: 'darwin-arm64',
     installedBuild: PINNED,
     layoutOk: true,
-    consent: { kind: 'socs', expiresAt: asIsoDateTime('2028-03-01T00:00:00.000Z') },
+    consent: { kind: 'socs', expiresAt: LATER, mark: 'reject' },
     signedIn: false,
     locked: false,
     now: NOW,
@@ -194,13 +195,24 @@ describe('startChecks (pure; the worker’s own start and the status report use 
     expect(startChecks(ready)).toBeNull();
   });
 
-  it('a never-shown record is refused as itself, never as missing (CodeRabbit, PR #15; pa-b1-006)', () => {
-    expect(
-      startChecks({
-        ...ready,
-        consent: { kind: 'not-shown', expiresAt: asIsoDateTime('2027-03-02T00:00:00.000Z') },
-      }),
-    ).toBe('consent-not-shown');
+  // why: CodeRabbit (PR #15), pa-b1-006, review X5: a record in an older shape is refused as itself, never as missing
+  it('a record in an older shape is refused by name: never-shown and voided', () => {
+    expect(startChecks({ ...ready, consent: { kind: 'legacy', was: 'not-shown' } })).toBe(
+      'consent-not-shown',
+    );
+    expect(startChecks({ ...ready, consent: { kind: 'legacy', was: 'voided' } })).toBe('consent-voided');
+  });
+
+  // why: review X1: the worker never applies a cookie whose value is not a rejection, however long it has left
+  it('a capture whose value is not a rejection is refused, before its expiry is judged', () => {
+    for (const mark of ['accept', 'unknown'] as const) {
+      expect(startChecks({ ...ready, consent: { kind: 'socs', expiresAt: LATER, mark } })).toBe(
+        'consent-not-rejection',
+      );
+      expect(startChecks({ ...ready, consent: { kind: 'socs', expiresAt: NOW, mark } })).toBe(
+        'consent-not-rejection',
+      );
+    }
   });
 
   it.each([
@@ -212,26 +224,28 @@ describe('startChecks (pure; the worker’s own start and the status report use 
     ['build-mismatch', { installedBuild: null }],
     ['signed-in', { signedIn: true }],
     ['consent-missing', { consent: null }],
-    ['consent-voided', { consent: { kind: 'voided' } }],
-    ['consent-expired', { consent: { kind: 'socs', expiresAt: NOW } }],
+    ['consent-voided', { consent: { kind: 'legacy', was: 'voided' } }],
+    ['consent-expired', { consent: { kind: 'socs', expiresAt: NOW, mark: 'reject' } }],
     ['counts-missing', { counts: 'missing' }],
     ['counts-unreadable', { counts: 'unreadable' }],
   ] as const)('%s from %j', (reason, facts) => {
     expect(startChecks({ ...ready, ...facts })).toBe(reason);
   });
 
-  it('a voided record has no expiry to read (R31): the type refuses one', () => {
-    const voided: StartConsent = { kind: 'voided' };
-    expect(startChecks({ ...ready, consent: voided })).toBe('consent-voided');
-    expectTypeOf<Extract<StartConsent, { kind: 'voided' }>>().toEqualTypeOf<{ kind: 'voided' }>();
-    expectTypeOf<Exclude<StartConsent, { kind: 'voided' }>['expiresAt']>().toEqualTypeOf<IsoDateTime>();
+  it('an older record has no expiry or mark to read: the type gives it none', () => {
+    expect(startChecks({ ...ready, consent: { kind: 'legacy', was: 'voided' } })).not.toBeNull();
+    expectTypeOf<Extract<StartConsent, { kind: 'legacy' }>>().toEqualTypeOf<{
+      kind: 'legacy';
+      was: 'not-shown' | 'voided';
+    }>();
+    expectTypeOf<Extract<StartConsent, { kind: 'socs' }>['expiresAt']>().toEqualTypeOf<IsoDateTime>();
   });
 
   it('consent expiry is the record’s expiresAt: one millisecond after now still starts', () => {
     expect(
       startChecks({
         ...ready,
-        consent: { kind: 'socs', expiresAt: asIsoDateTime('2027-03-01T06:00:00.001Z') },
+        consent: { kind: 'socs', expiresAt: asIsoDateTime('2027-03-01T06:00:00.001Z'), mark: 'reject' },
       }),
     ).toBeNull();
   });
@@ -245,9 +259,10 @@ describe('startChecks (pure; the worker’s own start and the status report use 
       { installedBuild: null },
       { signedIn: true },
       { consent: null },
-      { consent: { kind: 'voided' as const } },
-      { consent: { kind: 'socs' as const, expiresAt: NOW } },
-      { consent: { kind: 'not-shown' as const, expiresAt: asIsoDateTime('2028-01-01T00:00:00.000Z') } },
+      { consent: { kind: 'legacy' as const, was: 'voided' as const } },
+      { consent: { kind: 'legacy' as const, was: 'not-shown' as const } },
+      { consent: { kind: 'socs' as const, expiresAt: NOW, mark: 'reject' as const } },
+      { consent: { kind: 'socs' as const, expiresAt: LATER, mark: 'accept' as const } },
       { counts: 'missing' as const },
       { counts: 'unreadable' as const },
     ])

@@ -7,6 +7,7 @@
     "start": "node --conditions=@gmt/source --import tsx src/run.ts main",
     "record": "node --conditions=@gmt/source --import tsx src/run.ts record",
     "capture-socs": "node --conditions=@gmt/source --import tsx src/run.ts capture-socs",
+    "consent": "node --conditions=@gmt/source --import tsx src/run.ts consent",
     "clear-signed-in": "node --conditions=@gmt/source --import tsx src/run.ts clear-signed-in",
     "status": "node --conditions=@gmt/source --import tsx src/run.ts status",
     "recordings:backup": "node --conditions=@gmt/source --import tsx src/recordings.ts backup",
@@ -18,12 +19,13 @@
   "dependencies": {
     "@gmt/core": "workspace:*",
     "camoufox-js": "0.11.5",
-    "playwright-core": "1.59.1"
+    "playwright-core": "1.59.1",
+    "zod": "4.6.7"
   },
   "devDependencies": {
     "@gmt/providers": "workspace:*",
     "@stryker-mutator/core": "10.0.0",
-    "tsx": "4.23.15",
-    "zod": "4.6.7"
+    "fast-check": "4.10.2",
+    "tsx": "4.23.15"
   }
 }

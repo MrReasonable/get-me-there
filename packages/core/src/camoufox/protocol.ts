@@ -282,12 +282,16 @@ export const workerStatusSchema = z.strictObject({
   sharedSettings: sharedSettingsSchema.exactOptional(),
   osArch: z.enum(OS_ARCHES).exactOptional(),
   build: z.string().exactOptional(),
-  /** The consent record (null expiry and bound for a voided one): what bounds its expiry. */
+  /**
+   * The captured consent record: its expiry, what bounds it, and (review X1) the mark its value carries, which a worker
+   * of an earlier version does not report. A record in an older shape is never served (the start refuses it).
+   */
   consent: z
     .strictObject({
-      kind: z.enum(['socs', 'not-shown', 'voided']),
-      expiresAt: isoDateTimeSchema.nullable(),
-      boundedBy: z.enum(['cookie', 'capture', 'check']).nullable(),
+      kind: z.literal('socs'),
+      expiresAt: isoDateTimeSchema,
+      boundedBy: z.enum(['cookie', 'capture']),
+      mark: z.enum(['reject', 'accept', 'unknown']).exactOptional(),
     })
     .exactOptional(),
   /** Decision 82: the worker's own count over the billing month; `readable` false when its counts file refused. */

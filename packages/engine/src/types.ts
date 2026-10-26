@@ -61,7 +61,7 @@ export type AlertsStepHook = (
  * What the consent notice needs of the Status view's consent check: its state, why (the cause decides the subject; a
  * check that cannot be made sends nothing), its fixed summary and its fix words.
  */
-export type ConsentCause = 'expiring' | 'expired' | 'missing' | 'voided' | 'cannot-check' | 'none';
+export type ConsentCause = 'expiring' | 'expired' | 'missing' | 'not-rejection' | 'cannot-check' | 'none';
 export type ConsentCheck = () => Promise<{
   state: 'ok' | 'warn' | 'fail' | 'off';
   cause: ConsentCause;

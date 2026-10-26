@@ -60,8 +60,8 @@ const NONE = {
 } as const;
 
 /**
- * The verified flags per `<os>-<arch>` (spec §2 rev 36). darwin-arm64 carries the 2026-10-18 recordings' values on the
- * operator's Mac (the worker's PROOFS name each one); the other three earn theirs in WP17's recording sessions.
+ * The verified flags per `<os>-<arch>` (spec §2 rev 36). darwin-arm64 carries the 2026-10-18 recordings' values (and
+ * the landing view from 2026-10-25's) on the operator's Mac (the worker's PROOFS name each one); the other three earn theirs in WP17's recording sessions.
  */
 const FLAGS = {
   'darwin-arm64': {
@@ -75,8 +75,9 @@ const FLAGS = {
       NO_FLIGHTS_VERIFIED: true,
       SOCS_STABLE: true,
       GRID_VERIFIED: true,
-      // why: no landing-view recording yet (research 17.0c)
-      LANDING_VERIFIED: false,
+      // why: research 17.0c's recording of 2026-10-25 (consent-research/2026-10-25/1): both sessions' views after the
+      // choice read as the landing view
+      LANDING_VERIFIED: true,
     },
   },
   'darwin-x64': { build: '152.0.4-beta.28', flags: NONE },

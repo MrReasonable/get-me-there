@@ -84,7 +84,7 @@ describe('the consent capture’s guard', () => {
 });
 
 describe('the display variables (decision 74)', () => {
-  it('the headed window gets exactly the groups run.ts passed; with neither on Linux it refuses, naming the capture that works today', () => {
+  it('the headed window gets exactly the groups run.ts passed; with neither on Linux it refuses, pointing at export and import', () => {
     expect(headedEnv({ DISPLAY: ':0', XAUTHORITY: '/a' }, 'linux')).toEqual({
       DISPLAY: ':0',
       XAUTHORITY: '/a',
@@ -95,10 +95,11 @@ describe('the display variables (decision 74)', () => {
     });
     expect(() => headedEnv({}, 'linux')).toThrow(new NoDisplay());
     expect(() => headedEnv({ XAUTHORITY: '/a', XDG_RUNTIME_DIR: '/r' }, 'linux')).toThrow(NoDisplay);
-    // why: W2: until Task 17.5, the fix is core's CONSENT_FIX; no text names a consent command not built yet
-    expect(NO_DISPLAY).toContain(CONSENT_FIX.command);
-    expect(NO_DISPLAY).toContain(CONSENT_FIX.doc);
-    expect(NO_DISPLAY).not.toContain('gmt consent');
+    // why: decision 74: with no display the refusal points at export and import (Task 17.5), and capture-socs
+    expect(NO_DISPLAY).toContain(`${CONSENT_FIX.command} export`);
+    expect(NO_DISPLAY).toContain(`${CONSENT_FIX.command} import`);
+    expect(NO_DISPLAY).toContain('capture-socs');
+    expect(NO_DISPLAY).toContain('docs/setup.md#on-a-machine-with-no-display');
     expect(headedEnv({}, 'darwin')).toEqual({});
   });
   it('the headless worker’s browser environment is unchanged: no display variable in it', () => {
@@ -246,6 +247,8 @@ describe('the real consent driver over a fake headed context', () => {
 
 describe('watching the window (the tool only observes)', () => {
   const on = { ...SELECTORS, LANDING_VERIFIED: true };
+  // why: an entry whose landing view is not recorded yet (every entry but darwin-arm64 since 2026-10-25)
+  const off = { ...SELECTORS, LANDING_VERIFIED: false };
   it('a consent page, the choice submitted, SOCS set after it, then the window closed: closed, with that SOCS and the settled view after', async () => {
     const d = fakeConsentDriver({ saveAt: 0, socsAt: 1, closeAt: 3 });
     const w = await watchConsentWindow(d, { timers: fakeTimers(), selectors: on });
@@ -287,7 +290,7 @@ describe('watching the window (the tool only observes)', () => {
     });
     const other = await watchConsentWindow(
       fakeConsentDriver({ first: view(), after: view(), closeAt: 0, hosts: [['www.google.com']] }),
-      { timers: fakeTimers() },
+      { timers: fakeTimers(), selectors: off },
     );
     expect([other.ended, other.firstView, other.saves]).toEqual(['closed', 'other', 0]);
     const landing = await watchConsentWindow(
@@ -301,7 +304,10 @@ describe('watching the window (the tool only observes)', () => {
   it('a challenge that appears on the second snapshot of the first view stops the watch; the settle waits on the injected timers', async () => {
     const challenge = view({ text: { ...view().text, challenge: true } });
     const timers = fakeTimers();
-    const w = await watchConsentWindow(fakeConsentDriver({ views: [view(), challenge] }), { timers });
+    const w = await watchConsentWindow(fakeConsentDriver({ views: [view(), challenge] }), {
+      timers,
+      selectors: off,
+    });
     expect(w).toMatchObject({ ended: 'blocked', blocked: 'captcha', firstFacts: challenge });
     expect(timers.now() - Date.parse('2026-10-18T05:00:00.000Z')).toBe(1000);
   });
@@ -309,7 +315,7 @@ describe('watching the window (the tool only observes)', () => {
     const timers = fakeTimers();
     const w = await watchConsentWindow(
       fakeConsentDriver({ first: view(), after: view(), hosts: [['www.google.com']], closeAt: 0 }),
-      { timers, settleMs: 5000 },
+      { timers, settleMs: 5000, selectors: off },
     );
     expect([w.ended, w.firstView]).toEqual(['closed', 'other']);
     // why: snapshots a tick apart until the 5 s bound, then one watch tick before the closed window is read
@@ -344,8 +350,13 @@ describe('watching the window (the tool only observes)', () => {
   });
   // why: with LANDING_VERIFIED false the view after the choice settles for up to 30 s; the SOCS is read before that
   it('the SOCS set by the choice is read before the view after it settles, so closing the window during the settle keeps it', async () => {
-    // why: the choice, its SOCS and the return to the results host all first show on the same tick
-    const d = fakeConsentDriver({ saveAt: 0, socsAt: 0, hosts: [['consent.google.com', 'www.google.com']] });
+    // why: the choice, its SOCS and the return to the results host all first show on the same tick, after a first
+    // tick that read the cookies before the choice (the baseline)
+    const d = fakeConsentDriver({
+      saveAt: 1,
+      socsAt: 1,
+      hosts: [['consent.google.com'], ['consent.google.com', 'www.google.com']],
+    });
     let snapshots = 0;
     let gone = false;
     const closing = {
@@ -364,7 +375,7 @@ describe('watching the window (the tool only observes)', () => {
         return d.socsCookie();
       },
     };
-    const w = await watchConsentWindow(closing, { timers: fakeTimers() });
+    const w = await watchConsentWindow(closing, { timers: fakeTimers(), selectors: off });
     expect([w.ended, w.saves, w.socs?.value]).toEqual(['closed', 1, SOCS.value]);
   });
   // why: CodeRabbit (PR #16): a challenge after the choice stops (and cools down) even when an account cookie shows with it
@@ -399,6 +410,27 @@ describe('watching the window (the tool only observes)', () => {
     ).rejects.toThrow('has been closed');
   });
   // why: W8 (pa-b1-005): a SOCS there before any choice is not the choice's; only one set or changed after it counts
+  // why: pa-b1-006, review X2: with no cookie read before the choice, the first read after it is only the baseline
+  it('with no read before the choice, a SOCS already there at the first read is never the choice’s; a later change is', async () => {
+    const same = await watchConsentWindow(
+      fakeConsentDriver({ saveAt: -1, socsAt: -1, closeAt: 4, socs: SOCS }),
+      { timers: fakeTimers() },
+    );
+    expect([same.saves, same.socs, same.socsBeforeChoice]).toEqual([1, null, false]);
+    let reads = 0;
+    const d = fakeConsentDriver({ saveAt: -1, closeAt: 4 });
+    const changing = await watchConsentWindow(
+      {
+        ...d,
+        socsCookie: async () => {
+          reads++;
+          return { ...SOCS, value: reads === 1 ? 'before' : 'after' };
+        },
+      },
+      { timers: fakeTimers() },
+    );
+    expect(changing.socs?.value).toBe('after');
+  });
   it('a SOCS present before the choice is never kept; one changed after it is', async () => {
     const before = await watchConsentWindow(fakeConsentDriver({ socsAt: 0, closeAt: 3 }), {
       timers: fakeTimers(),
@@ -635,8 +667,10 @@ describe('the consent modules’ browser access (grep)', () => {
     const dir = new URL('../src/', import.meta.url);
     const files = readdirSync(dir).filter((f) => f.startsWith('consent') && f.endsWith('.ts'));
     expect(files.sort()).toEqual([
+      'consent.ts',
       'consentDriver.ts',
       'consentGuard.ts',
+      'consentLine.ts',
       'consentResearch.ts',
       'consentWatch.ts',
     ]);

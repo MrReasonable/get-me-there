@@ -43,7 +43,12 @@
   },
   "osArch": "darwin-arm64",
   "build": "152.0.4-beta.28",
-  "consent": { "kind": "socs", "expiresAt": "2028-03-01T06:00:00.000Z", "boundedBy": "cookie" },
+  "consent": {
+    "kind": "socs",
+    "expiresAt": "2028-03-01T06:00:00.000Z",
+    "boundedBy": "cookie",
+    "mark": "reject"
+  },
   "monthly": {
     "windowStart": "2027-03-01T00:00:00.000Z",
     "windowEnd": "2027-04-01T00:00:00.000Z",

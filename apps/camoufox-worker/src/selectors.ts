@@ -7,7 +7,9 @@
  * What is verified (2026-10-18): the results page's structure, from the feasibility load (a `tablist` with "Best" and
  * "Cheapest from £…", "N results returned.", unnamed lists, each after a heading "Top departing flights" or
  * "Other departing flights", of `listitem`s each holding one `link` named with the whole option, the "Date grid" button, "Currency GBP" and
- * "Location·United Kingdom"), and the consent page's heading from the signed-out test. Everything else (the search
+ * "Location·United Kingdom"), and the consent page's heading from the signed-out test. The landing view (2026-10-25):
+ * research 17.0c's two sessions, whose views after the choice were `/travel/flights?hl=en-GB&gl=GB` with no query, the
+ * heading "Flights" first among the page's headings, and no Cheapest tab, Date grid button or result link. Everything else (the search
  * form's controls, the Cheapest flow, "View more", the no-flights line, the grid) is unverified until
  * Task 14.2's recordings; until then the server refuses to start (FORM_VERIFIED) and nothing is clicked. SOCS stability
  * is verified by the 2026-10-18 socs-stability recording (operator ruling).
@@ -16,7 +18,7 @@ import { CAMOUFOX_BUILDS, FLAG_NAMES, type FlagName, flagsFor, type OsArch } fro
 
 export { FLAG_NAMES, type FlagName };
 
-export const SELECTORS_VERSION = '2026-10-18-results';
+export const SELECTORS_VERSION = '2026-10-25-landing';
 
 /**
  * The module's default flags: the operator's Mac (darwin-arm64) on its pinned build, the 2026-10-18 recordings' values
@@ -69,8 +71,8 @@ export interface Selectors {
   };
   consent: { heading: RegExp };
   /**
-   * The landing page the consent command opens (`/travel/flights?hl=…&gl=…`, no query; WP17 Task 17.4): a hypothesis
-   * until research 17.0c's recordings date it and set LANDING_VERIFIED; until then nothing reads as `landing`.
+   * The landing page the consent command opens (`/travel/flights?hl=…&gl=…`, no query; WP17 Task 17.4), dated by
+   * research 17.0c's recording of 2026-10-25, which set LANDING_VERIFIED for darwin-arm64.
    */
   landing: { heading: RegExp };
   results: {
@@ -119,7 +121,7 @@ export interface Selectors {
   NO_FLIGHTS_VERIFIED: boolean;
   SOCS_STABLE: boolean;
   GRID_VERIFIED: boolean;
-  /** The consent command's landing view (WP17 Task 17.4); false until research 17.0c's recordings show it. */
+  /** The consent command's landing view (WP17 Task 17.4); set by research 17.0c's recording of 2026-10-25. */
   LANDING_VERIFIED: boolean;
 }
 
@@ -139,7 +141,8 @@ export const SELECTORS: Selectors = {
     accountControl: /^Google Account: /,
   },
   consent: { heading: /^Before you continue/ },
-  // why: unverified (no landing recording yet): research 17.0c records the landing view, then dates this
+  // why: observed 2026-10-25 (consent-research/2026-10-25/1): the landing view's first heading, in both sessions'
+  // views after the choice; classifyLanding also needs the bare URL and no results structure
   landing: { heading: /^Flights$/ },
   results: {
     cheapestTab: /^Cheapest\b/,
@@ -211,6 +214,8 @@ export const PROOFS: Readonly<Partial<Record<FlagName, string>>> = {
     '2026-10-18 no-flights/2026-10-18/1 (a date beyond the sale window: the line visible with 0 links, form as asked)',
   SOCS_STABLE:
     '2026-10-18 socs-stability recording, passes 1–3 all read back same (operator ruling of 2026-10-18)',
+  LANDING_VERIFIED:
+    '2026-10-25 consent-research/2026-10-25/1 (both sessions’ views after the choice: /travel/flights?hl=en-GB&gl=GB with no query, the heading "Flights", no tab, Date grid button or result link)',
   GRID_VERIFIED:
     '2026-10-18 grid/2026-10-18/1–4 (every cell name parses, each view’s cells name its lines’ dates, one scroll moves one day on its axis, SOCS same) and the renamed 0-explore',
 };

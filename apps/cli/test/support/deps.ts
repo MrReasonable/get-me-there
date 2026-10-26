@@ -140,6 +140,7 @@ export function testWorld(
     portFree: async () => true,
     randomBytes: (n) => Buffer.alloc(n, 7),
     attach: async () => 0,
+    onInterrupt: () => () => undefined,
     ...opts.deps,
   };
   return { deps, fs, io, runner, executor };

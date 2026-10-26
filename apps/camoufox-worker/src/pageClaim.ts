@@ -14,7 +14,8 @@ export async function claim(
   pacer: Pacer,
   monthly: MonthlyCounter,
   scrolls: number,
-  deps: { timers: Timers },
+  /** `interrupted` (the consent command's SIGINT or SIGTERM) ends the spacing wait at once, so nothing is claimed. */
+  deps: { timers: Timers; interrupted?: AbortSignal },
   ctx: EntryContext,
 ): Promise<void> {
   const admissible = (): Extract<Admission, { kind: 'ok' }> => {
@@ -35,7 +36,7 @@ export async function claim(
   const first = pacer.claim();
   if (!first.ok) {
     ctx.out(`waiting ${first.retryAfterSeconds} s for the spacing`);
-    await deps.timers.sleep(first.retryAfterSeconds * 1000);
+    await deps.timers.sleep(first.retryAfterSeconds * 1000, deps.interrupted);
     const second = pacer.claim();
     if (!second.ok) throw new RecordingRefused(`the spacing still refuses (${second.retryAfterSeconds} s)`);
   }

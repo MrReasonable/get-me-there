@@ -54,6 +54,8 @@ export interface Script {
   /** The tick after which the person's choice has been submitted, and how many times. */
   saveAt?: number;
   saves?: number;
+  /** The field names the submission carried (by default the Reject all form's, as research 17.0c saw it). */
+  saveFields?: string[];
   /** The tick after which the guard has refused a main-frame navigation, and as what. */
   refusedAt?: number;
   refused?: BlockedPage;
@@ -114,6 +116,8 @@ export function fakeConsentDriver(
       return h;
     },
     consentSaves: () => (s.saveAt !== undefined && tick > s.saveAt ? (s.saves ?? 1) : 0),
+    consentSaveFields: () =>
+      s.saveAt !== undefined && tick > s.saveAt ? [...(s.saveFields ?? ['escs', 'set_eom'])].sort() : [],
     refused: () => (s.refusedAt !== undefined && tick > s.refusedAt ? (s.refused ?? 'off-allowlist') : null),
     async snapshotView() {
       calls.push('snapshotView');

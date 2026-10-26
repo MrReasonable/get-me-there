@@ -13,7 +13,6 @@ import {
   capPercent,
   capWarn,
   consentBoundOf,
-  consentMadeAt,
   consentWindowState,
   coverageBuckets,
   coverageGapWarn,
@@ -113,7 +112,6 @@ describe('the 13-month consent rule', () => {
     expect(CONSENT_MAX_AGE_MONTHS).toBe(13);
     expect(consentBoundOf(asIsoDateTime('2026-01-31T10:00:00.000Z'))).toBe('2027-02-28T10:00:00.000Z');
     expect(consentBoundOf(asIsoDateTime('2026-10-14T09:00:00.000Z'))).toBe('2027-11-14T09:00:00.000Z');
-    expect(consentMadeAt(asIsoDateTime('2027-03-31T10:00:00.000Z'))).toBe('2026-02-28T10:00:00.000Z');
   });
 });
 

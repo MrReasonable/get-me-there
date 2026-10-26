@@ -18,6 +18,7 @@ export const START_REFUSAL_REASONS = [
   'consent-expired',
   'consent-voided',
   'consent-not-shown',
+  'consent-not-rejection',
   'build-mismatch',
   'layout',
   'signed-in',
@@ -48,10 +49,20 @@ export const START_REFUSAL_TEXT: Readonly<
     summary: 'the consent record has expired: capture again',
     fixCommand: CONSENT_FIX.command,
   },
-  'consent-voided': { summary: 'consent screen now shown: capture again', fixCommand: CONSENT_FIX.command },
+  // why: review X5: no command of this version writes a voided or never-shown record; one left by an earlier version
+  // is read only to be refused by name, since pages need a captured rejection
+  'consent-voided': {
+    summary:
+      'the consent record is an older voided one, which this version does not use: capture a rejection',
+    fixCommand: CONSENT_FIX.command,
+  },
   'consent-not-shown': {
     summary:
-      'the consent record says no consent page was shown; this worker needs a captured rejection: capture one',
+      'the consent record says no consent page was shown, which this version does not use (pages need a captured rejection): capture one',
+    fixCommand: CONSENT_FIX.command,
+  },
+  'consent-not-rejection': {
+    summary: 'the stored consent choice is not a rejection: capture a rejection',
     fixCommand: CONSENT_FIX.command,
   },
   'build-mismatch': {
@@ -83,10 +94,13 @@ export const START_REFUSAL_TEXT: Readonly<
 };
 
 /**
- * The worker's consent record as the start reads it (review R31): a voided record has no expiry, so the type gives it
- * none; a captured (`socs`) or never-shown (`not-shown`) record has its own `expiresAt`.
+ * The worker's consent record as the start reads it: a capture (`socs`) with its own `expiresAt` and the mark its value
+ * carries (review X1), or a file in an older shape this version no longer writes (`legacy`: never-shown or voided),
+ * read only to be refused by name (review X5).
  */
-export type StartConsent = { kind: 'voided' } | { kind: 'socs' | 'not-shown'; expiresAt: IsoDateTime };
+export type StartConsent =
+  | { kind: 'socs'; expiresAt: IsoDateTime; mark: 'reject' | 'accept' | 'unknown' }
+  | { kind: 'legacy'; was: 'not-shown' | 'voided' };
 
 /** What the worker's start knows about its machine, its install, its consent record, its profile and its lock. */
 export interface StartFacts {
@@ -105,10 +119,10 @@ export interface StartFacts {
 /**
  * Whether the worker may start, as the first refusal in this order, or null: another worker holds the lock; the
  * machine's pinned build has no verified search form (FORM_VERIFIED, the one check every page needs); the install's
- * layout is broken; the installed build is not the pinned one; the profile is signed in; no consent record; a voided
- * one (the consent screen is shown again); an expired one (its own `expiresAt`, at or before now); a never-shown one;
- * the monthly counts file missing or unreadable. `config` is the worker's own (its settings refused before any fact).
- * Pure.
+ * layout is broken; the installed build is not the pinned one; the profile is signed in; no consent record; one in an
+ * older shape (voided, then never-shown); a capture whose value is not a rejection; an expired one (its own
+ * `expiresAt`, at or before now); the monthly counts file missing or unreadable. `config` is the worker's own (its
+ * settings refused before any fact). Pure.
  */
 export function startChecks(f: StartFacts): StartRefusalReason | null {
   if (f.locked) return 'locked';
@@ -118,11 +132,12 @@ export function startChecks(f: StartFacts): StartRefusalReason | null {
   if (f.installedBuild !== CAMOUFOX_BUILDS[f.osArch].build) return 'build-mismatch';
   if (f.signedIn) return 'signed-in';
   if (f.consent === null) return 'consent-missing';
-  if (f.consent.kind === 'voided') return 'consent-voided';
+  // why: CodeRabbit (PR #15), pa-b1-006, review X5: pages are served only on a captured rejection, so an older record is
+  // refused as itself, never as a missing one
+  if (f.consent.kind === 'legacy') return f.consent.was === 'voided' ? 'consent-voided' : 'consent-not-shown';
+  // why: review X1: the worker never applies a cookie whose value is not a rejection
+  if (f.consent.mark !== 'reject') return 'consent-not-rejection';
   if (Date.parse(f.consent.expiresAt) <= Date.parse(f.now)) return 'consent-expired';
-  // why: CodeRabbit (PR #15), pa-b1-006: one rule for the check and the start: pages are served only on a captured
-  // rejection, so a never-shown record is refused as itself, never as a missing one
-  if (f.consent.kind === 'not-shown') return 'consent-not-shown';
   if (f.counts === 'missing') return 'counts-missing';
   if (f.counts === 'unreadable') return 'counts-unreadable';
   return null;

@@ -5,9 +5,9 @@ owner: opus
 depends_on: [16a, 16b]
 spec_sections: ["§2 Method", "§2 Caps across callers", "§2 Consent", "§2 Recordings first", "§2 Labels", "§2 Costs", "§9 item 9", "§9 CI matrix", "§12 Where settings live", "§13 Native local mode", "§13 The camoufox worker", "§16", "§17 revision 36"]
 reviewers: [provenance-auditor, provider-integration-expert, security-reviewer, devops-reviewer, cost-and-budget-reviewer, test-strategy-reviewer, code-architect, product-owner]
-mutate: {"@gmt/camoufox-worker": ["src/monthly.ts"], "@gmt/cli": ["src/camoufox/**"]}
-pending: {"@gmt/camoufox-worker": ["src/consentLine.ts"]}
-status: open (Tasks 17.1–17.4, 17.6, 17.7, 17.9 and 17.10 built; research 17.0c, Task 17.5 and Task 17.8 open)
+mutate: {"@gmt/camoufox-worker": ["src/monthly.ts", "src/consentLine.ts", "src/socsMark.ts"], "@gmt/cli": ["src/camoufox/**"]}
+pending: {}
+status: open (Tasks 17.1–17.7, 17.9, 17.10 and research 17.0c built; Task 17.8, the recording sessions, open)
 ---
 
 # WP17: Camoufox install, consent capture, the worker's caps and the Linux worker
@@ -65,6 +65,34 @@ proxies, no challenge ever solved or clicked, the page spacing and the caps.
 - **Library check.** Firefox's Linux executable is a stub that loads `libxul.so` at run time, so the GTK, X11, ALSA
   and D-Bus libraries are `libxul.so`'s dependencies: `ldd camoufox-bin` alone reports nothing missing. playwright-core's
   own host check runs `ldd` over every executable and `.so` in the browser directory; WP17 does the same.
+
+## 0a. What research 17.0c settled (2026-10-25)
+
+The operator's two headed sessions of 2026-10-25 (`record --consent-research` on `darwin-arm64`, build
+`152.0.4-beta.28`; one recording, local and backed up, never in git) settled the rejection mark and the landing view.
+
+- **The mark, as observed.** On these two sessions (one machine, the GB market, one "Reject all" and one "Accept all";
+  an observation, not a documented format), `SOCS` was the base64url of a protobuf message of three top-level fields:
+  field 1, a one-byte varint (tag `0x08`), then field 2 (length-delimited, 56 bytes), then field 3 (6 bytes). The two
+  68-byte values differed in exactly one byte, byte 1, field 1's value: `0x01` after "Reject all" (the value starts
+  `CAES`) and `0x02` after "Accept all" (`CAIS`). `rejectionMark(value)` (`socsMark.ts`, re-exported by
+  `consentLine.ts`) reads `reject` for 1 and `accept` for 2 only from a value of that shape (canonical base64url; field
+  1 first, a one-byte varint; field 2 length-delimited next; every later field well formed and inside the value; field
+  1 never repeated), and `unknown` from anything else (review X1). A choice made under "More options" was not
+  recorded. Its tests use synthetic values of the same shape; the recorded suite checks both recorded values locally.
+- **The choice's submission.** Each session made exactly one POST to `consent.google.com/save`; the Reject all form
+  carries `escs` and `set_eom`, the Accept all form adds `set_sc` and `set_aps` (names only; no value was kept).
+- **Before the choice.** In both sessions a `SOCS` was already set by the consent page before the choice; only the
+  value set or changed after the submission is the choice's (W8).
+- **The views.** Both sessions' first view was the consent page ("Before you continue to Google"). The views after the
+  choice were `/travel/flights?hl=en-GB&gl=GB` with no query, the heading "Flights" first among the page's headings, and
+  no Cheapest tab, Date grid button or result link; they read `other` only because `LANDING_VERIFIED` was false, and
+  under the landing rule with the flag set they read `landing`. `LANDING_VERIFIED` is therefore set for `darwin-arm64`
+  on its pinned build, dated 2026-10-25 in `PROOFS`; the other three entries earn it in Task 17.8's sessions.
+- **The labels.** The sessions are labelled `prompted` (the button each asked for), not observed; the operator confirms
+  he clicked Reject all in session 1 and Accept all in session 2, and the values' marks agree.
+
+So Task 17.5 is built as the `consent` command (§12 states where it differs from the task).
 
 ## 1. Goal
 
@@ -315,20 +343,24 @@ only if 17.0c proves a mark; 17.6–17.10 follow.
 
 ### Research 17.0c: the rejection mark (after Task 17.4; Task 17.5 is not dispatched without it)
 
-- [ ] The operator runs `pnpm --filter @gmt/camoufox-worker record --consent-research` once, with the worker stopped
+- [x] The operator runs `pnpm --filter @gmt/camoufox-worker record --consent-research` once, with the worker stopped
   (`pnpm gmt stop --only worker`) on a machine with a display: it opens two headed sessions in throwaway profiles, the
   first asking for "Reject all", the second for "Accept all", each closed by the operator once the choice is made. A
   session is kept only with exactly one consent submission and a SOCS set after it within 10 minutes; the one recording
   stays local and is backed up (`recordings:backup`), and counts two pages. The same sessions record the landing view,
   which sets `LANDING_VERIFIED`.
-- [ ] If the two `SOCS` values differ in a stable way that the value alone shows, write `rejectionMark(value)` with tests
+- [x] Done 2026-10-25 (§0a).
+- [x] If the two `SOCS` values differ in a stable way that the value alone shows, write `rejectionMark(value)` with tests
   on both recordings, and dispatch Task 17.5. If the mark is not derivable from the value alone, the consent command is
   not built: `capture-socs` stays the capture path, the docs say so, and Task 17.5 shrinks to `import` of a
   `capture-socs` file with the operator's typed confirmation, which the operator rules on.
 
 ### Task 17.5: The `consent` command, `export`, `import` and `check` (after 17.0c)
 
-- [ ] **Failing tests** (fake `ConsentDriver`, fake clock, loopback fixture pages):
+Built (2026-10-25); the bullets marked *not built* were dropped with revision 40's refusal of never-shown records, and
+§12 states the command as built.
+
+- [x] **Failing tests** (fake `ConsentDriver`, fake clock, loopback fixture pages):
   - It takes the worker's lock and refuses while held; during an active cool-down it refuses, naming its end; it waits
     out the page spacing from the persisted last-page time and writes that time after its load; the load counts in the
     monthly counter. Capture then worker: the worker's next page waits the spacing.
@@ -342,27 +374,28 @@ only if 17.0c proves a mark; 17.6–17.10 follow.
     challenge page; a page that never loads (offline); a first view not positively recognised; the window closed with no
     `SOCS`; an account cookie appearing: nothing written, each with its own message; the account-cookie case also
     deletes the profile at once.
-  - First stable view `landing`, no consent host, no `SOCS`: the operator is asked to confirm, and on yes the `{
-    consent: "not-shown", checkedAt }` record is written at once; an unrecognised first view with no consent host and no
-    `SOCS` writes nothing.
+  - *Not built (§12):* first stable view `landing`, no consent host, no `SOCS`: the operator is asked to confirm, and
+    on yes the `{ consent: "not-shown", checkedAt }` record is written at once. As built it writes nothing and says the
+    provider needs a rejection captured where the page is shown; an unrecognised first view writes nothing.
   - The profile is deleted on every path, including a throw during deletion (retried once, then reported), and the
     start-up sweep removes a leftover.
-  - `export` requires `gmt setup`'s install (it refuses, naming `pnpm gmt setup`, when the layout is missing; the worker
-    never downloads) and prints exactly one line, `gmt-socs-v1.` + base64url of `{ socs, capturedAt, mark }`, and nothing
+  - `export` requires only the pinned Camoufox (it refuses, naming `pnpm gmt browser install`, when the layout is
+    missing; no worker.env is needed; the worker never downloads) and prints exactly one line, `gmt-socs-v1.` + base64url of `{ socs, capturedAt, mark }`, and nothing
     else on stdout.
   - `import` reads stdin only (an argument is refused), at most 4 KB; `consentLineSchema` refuses a wrong prefix, an
     extra field, a name other than `SOCS`, a value over its length bound or outside its character set, a domain other
     than `.google.com`, a path other than `/`, an expiry later than `capturedAt` + 13 months, and an expired cookie; it
     recomputes `rejectionMark(socs.value)` and refuses a line whose carried mark differs or is not `reject` (an
     Accept-all value carrying a forged reject mark is refused); a valid line writes `socs.json` keeping `capturedAt`.
-  - `check` (server): one headless load of the landing page under the worker's lock, pacer, monthly counter, guard,
+  - *Not built (§12; as built `check` reports the stored record and loads no page):* `check` (server): one headless
+    load of the landing page under the worker's lock, pacer, monthly counter, guard,
     classifier and cool-downs, at most once an hour: the last check's time is persisted beside the pacer's last-page
     time, so a second process within the hour is refused naming the time it may run (a test with two processes);
     writes the not-shown record
     only when the first stable view is `landing` with no consent host and no `SOCS`; a consent page says "this server's
     region shows a consent screen; capture on a desktop and use gmt consent import"; a challenge page starts its
     cool-down as on the server path.
-  - Voiding: with a not-shown record, a consent page or a `SOCS` cookie after a page stops the worker as
+  - *Not built (§12):* voiding: with a not-shown record, a consent page or a `SOCS` cookie after a page stops the worker as
     `consent-unhandled` and rewrites the record as `{ consent: "voided", voidedAt }`; `/v1/status` reports `voided`; the
     next start refuses `consent-voided`.
   - Secrets: the `SOCS` value, raw, base64url and as the line, appears in no output other than `export`'s one line (no
@@ -372,7 +405,7 @@ only if 17.0c proves a mark; 17.6–17.10 follow.
   - `gmt consent [export|import|check]` spawns `[<execPath>, --conditions=@gmt/source, --import, tsx,
     <checkout>/apps/camoufox-worker/src/run.ts, consent, …]` with standard streams inherited, an environment of `PATH`,
     `HOME` and the display variables present (by group), and imports no worker code (a CLI test of the spawn env).
-- [ ] **Implement; commit.**
+- [x] **Implement; commit.**
 
 ### Task 17.6: The browser provider in `gmt setup`, the worker service and key rotation
 
@@ -517,3 +550,48 @@ build differs from the tasks above:
   @gmt/camoufox-worker capture-socs`, `docs/setup.md#capture-your-consent-choice`), shared with WP18.
 - **Refusal reasons added:** `consent-not-shown`, `counts-missing`, `counts-unreadable`, `config`; the worker answer
   kind `counts-unreadable` (503) and the `monthly-cap` answer's `used`.
+
+## 12. As built, part 2 (2026-10-25, after branch review round 1)
+
+Research 17.0c is answered (§0a) and Task 17.5 is built: `rejectionMark` (`socsMark.ts`) and the line codec
+(`consentLine.ts`), both mutation-tested; the worker's `consent` entry in `consent.ts` (`run.ts consent
+[export|import|check]`, script `consent`); and `pnpm gmt consent [export|import|check]` in
+`apps/cli/src/commands/consent.ts`. `CONSENT_FIX` is `pnpm gmt consent`. The review's rulings X1–X6 are folded in.
+Where the build differs from the task above:
+
+- **Only a rejection is stored or applied (X1).** Every store (`consent`, `consent import`, `capture-socs`) goes
+  through `parseCapture`, which refuses a value whose mark is not `reject`; `socsCookie` refuses one too, so no page
+  sets it; the start refuses a stored one as `consent-not-rejection` (core, with `CONSENT_FIX`); `/v1/status` reports
+  the mark (`consent.mark`, optional for an earlier worker); the Status card says "consent rejected" only for `reject`,
+  fails another mark with the fix, and cannot check a worker that does not report it. `capture-socs` is the fallback.
+- **A second gate and the baseline (X2).** The driver keeps the `/save` submissions' field names; a reject mark sent
+  with `set_sc` or `set_aps` (seen only in the Accept all form) is refused, and "More options" is stated as not
+  observed. A `SOCS` read before the choice is the baseline; with none, the first read after it is.
+- **`check` reads the record; it loads no page.** It prints the capture time, the mark and the expiry, and exits 0 only
+  for a rejection still in date. The never-shown and voided kinds are dropped (X5): no command writes one, and a file in
+  either older shape is read only so the start can refuse it by name (`consent-not-shown`, `consent-voided`, whose
+  words now say why).
+- **A region with no consent page** writes nothing and says the provider cannot start without a rejection captured
+  where the page is shown (then exported and imported), or stays off.
+- **Nothing is lost (X3).** A refused or failed capture, import or check leaves `socs.json` byte for byte as it was
+  (tests start from a stored rejection). A failed worker stop goes no further and puts the worker back. SIGINT or
+  SIGTERM: the CLI passes it to the child (`attach` with an abort signal; `onInterrupt` instead of exiting), the child
+  closes its window and deletes its profile (`consentEntry`'s signal handlers), and the CLI puts the worker back.
+- **The Docker-app machine (X4).** The active-run guard (`appGuardTarget` in `apps/cli/src/commands/guard.ts`) reads
+  this machine's app through the readers of `apps/cli/src/appEndpoint.ts`, which PR #17 added for `gmt status`
+  (`nativeEndpoint`; with no native install, `dockerAppState` and `dockerEndpoint`: the port compose publishes and the
+  checkout's `.env` basic auth, read and never printed). A Docker app whose state, port or credentials cannot be read
+  is treated as possibly running a search, so the guard refuses unless `--force`. `export` needs only the pinned
+  Camoufox (no worker.env; `loadCaptureConfig` reads the shared settings at their defaults), and the CLI makes the data
+  directory 0700 for it. Refusals on a machine with no native app name `pnpm gmt browser install` and the guide's
+  Docker section; the guide's Docker section and appendix run install, then consent, then the worker start.
+- **The wizard (X5).** Interactive `gmt setup` with a display runs the capture as its own step after the install, then
+  the start check; asked nothing, or with no display, it stops at the check and names `pnpm gmt consent` or the export
+  and import route. With `--wait` or `--force` the guard's words go to standard error during an export; an Accept all
+  names the command that was run; an unknown mark says to update the checkout. The prompt says to wait until Google
+  Flights shows. The docs give the ssh pipe first and a `umask 077` file, deleted on both machines, as the fallback.
+- **The worker's state afterwards.** `gmt consent` stops the worker only when it is running; after a capture or import
+  that stored a rejection it clears a `consent-*` refusal and starts an installed worker once its check passes; after
+  anything else it starts the worker again only if it was running.
+- **Display variables** come from the CLI's platform (`Platform.displayEnv`, by decision 74's groups), and `attach`
+  takes the child's whole environment.

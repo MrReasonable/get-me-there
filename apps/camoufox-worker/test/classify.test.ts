@@ -318,8 +318,8 @@ describe('classifyLanding (the consent command’s first view)', () => {
       resultLinks: 0,
       ...o,
     });
-  it('until LANDING_VERIFIED nothing reads as landing', () => {
-    expect(classifyLanding(landing())).toEqual({
+  it('without LANDING_VERIFIED nothing reads as landing (every entry but darwin-arm64 until its recordings)', () => {
+    expect(classifyLanding(landing(), { ...SELECTORS, LANDING_VERIFIED: false })).toEqual({
       kind: { kind: 'blocked', page: 'unrecognised' },
       rule: 'not-landing',
     });

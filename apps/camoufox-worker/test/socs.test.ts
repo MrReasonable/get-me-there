@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { asIsoDateTime, fixedClock } from '@gmt/core';
 import { beforeEach, describe, expect, it } from 'vitest';
@@ -17,12 +17,13 @@ import {
   startConsentOf,
   writeCapture,
 } from '../src/socs.js';
+import { SYNTHETIC_ACCEPT, SYNTHETIC_REJECT } from './support/socsValues.js';
 import { tmpDir } from './support/tmp.js';
 
 const clock = fixedClock(asIsoDateTime('2026-10-18T05:00:00.000Z'));
 // A synthetic value: the real one is captured by the operator and never enters git.
 const OK = {
-  value: 'synthetic-socs-rejection-value',
+  value: SYNTHETIC_REJECT,
   domain: '.google.com',
   path: '/',
   expires: 1_800_000_000,
@@ -69,13 +70,13 @@ describe('loadSocs (spec §2: a captured, dated rejection value)', () => {
   ])('%s refuses, saying how to capture it', (_n, content, mode) => {
     const d = dirWith(content, mode);
     expect(() => loadSocs(d, clock)).toThrow(ConsentNotCaptured);
-    expect(() => loadSocs(d, clock)).toThrow(/capture-socs/);
+    expect(() => loadSocs(d, clock)).toThrow(/pnpm gmt consent/);
   });
   // why: fix round 1 (prov-int M11): a capture whose cookie has expired would be dropped by addCookies
-  it('refuses a capture whose cookie expiry has passed, naming capture-socs', () => {
+  it('refuses a capture whose cookie expiry has passed, naming pnpm gmt consent', () => {
     const now = Date.parse(clock.now()) / 1000;
     expect(() => loadSocs(dirWith(JSON.stringify({ ...OK, expires: now })), clock)).toThrow(
-      /expired.*capture-socs/,
+      /expired.*pnpm gmt consent/,
     );
     expect(loadSocs(dirWith(JSON.stringify({ ...OK, expires: now + 1 })), clock).expires).toBe(now + 1);
   });
@@ -156,11 +157,11 @@ describe('writeCapture (capture-socs)', () => {
     const dir = join(tmpDir(), 'camoufox');
     const c = writeCapture(
       dir,
-      { value: 'v-synthetic', expires: 1_800_000_000, secure: true, sameSite: 'Strict' },
+      { value: SYNTHETIC_REJECT, expires: 1_800_000_000, secure: true, sameSite: 'Strict' },
       clock,
     );
     expect(c).toEqual({
-      value: 'v-synthetic',
+      value: SYNTHETIC_REJECT,
       domain: '.google.com',
       path: '/',
       expires: 1_800_000_000,
@@ -172,11 +173,56 @@ describe('writeCapture (capture-socs)', () => {
     expect(statSync(dir).mode & 0o777).toBe(0o700);
     expect(loadSocs(dir, clock)).toEqual(c);
   });
+  // why: WP17 Task 17.5: consent import keeps the capture time the line carries, judged by the same date rules
+  it('keeps a given capture time, and refuses one in the future or older than 13 months', () => {
+    const input = { value: SYNTHETIC_REJECT, expires: 1_800_000_000, secure: true, sameSite: 'Lax' };
+    const dir = tmpDir();
+    expect(writeCapture(dir, input, clock, asIsoDateTime('2026-10-01T09:00:00.000Z')).capturedAt).toBe(
+      '2026-10-01T09:00:00.000Z',
+    );
+    expect(loadSocs(dir, clock).capturedAt).toBe('2026-10-01T09:00:00.000Z');
+    expect(() => writeCapture(tmpDir(), input, clock, asIsoDateTime('2026-10-18T05:00:00.001Z'))).toThrow(
+      /dated in the future/,
+    );
+    expect(() => writeCapture(tmpDir(), input, clock, asIsoDateTime('2025-09-17T05:00:00.000Z'))).toThrow(
+      /older than 13 months/,
+    );
+  });
+  // why: review X1: capture-socs, consent and consent import all store through here, so only a rejection is stored
+  it('refuses a value whose mark is not reject, writing nothing and keeping a record already there', () => {
+    const dir = tmpDir();
+    const kept = writeCapture(
+      dir,
+      { value: SYNTHETIC_REJECT, expires: 1_800_000_000, secure: true, sameSite: 'Lax' },
+      clock,
+    );
+    const before = readFileSync(join(dir, 'socs.json'));
+    for (const [value, words] of [
+      [SYNTHETIC_ACCEPT, /the value records Accept all, and only a rejection is ever stored or applied/],
+      ['not-a-socs-value', /does not show a rejection this version reads/],
+    ] as const)
+      expect(() =>
+        writeCapture(dir, { value, expires: 1_800_000_000, secure: true, sameSite: 'Lax' }, clock),
+      ).toThrow(words);
+    expect(readFileSync(join(dir, 'socs.json'))).toEqual(before);
+    expect(loadSocs(dir, clock)).toEqual(kept);
+  });
+  it('loadSocs refuses a stored value that is not a rejection, and the cookie is never built from one', () => {
+    const d = dirWith(JSON.stringify({ ...OK, value: SYNTHETIC_ACCEPT }));
+    expect(() => loadSocs(d, clock)).toThrow(/Accept all/);
+    const stored = parseCapture(OK, clock);
+    expect(() => socsCookie({ ...stored, value: SYNTHETIC_ACCEPT })).toThrow(/Accept all/);
+    expect(() => socsCookie({ ...stored, value: 'x' })).toThrow(/does not show a rejection/);
+    expect(socsCookie(stored).value).toBe(SYNTHETIC_REJECT);
+  });
   it('accepts an existing 0700 directory', () => {
     const dir = tmpDir();
     expect(
-      writeCapture(dir, { value: 'v', expires: 1_800_000_000, secure: true, sameSite: 'None' }, clock)
-        .sameSite,
+      writeCapture(
+        dir,
+        { value: SYNTHETIC_REJECT, expires: 1_800_000_000, secure: true, sameSite: 'None' },
+        clock,
+      ).sameSite,
     ).toBe('None');
   });
   it('refuses an empty value, secure false, and a looser existing directory (naming chmod 700)', () => {
@@ -219,27 +265,56 @@ describe('the consent record (socs.json)', () => {
       expiresAt: '2027-11-18T04:00:00.000Z',
       boundedBy: 'capture',
     });
+    // why: review X2: a tie is the capture's bound, so an imported line's capped expiry never names the cookie
     const tie = Date.parse('2027-11-18T04:00:00.000Z') / 1000;
     expect(
       captureExpiry({ expires: tie, capturedAt: asIsoDateTime('2026-10-18T04:00:00.000Z') }).boundedBy,
+    ).toBe('capture');
+    expect(
+      captureExpiry({ expires: tie - 1, capturedAt: asIsoDateTime('2026-10-18T04:00:00.000Z') }).boundedBy,
     ).toBe('cookie');
   });
-  it('reads a capture, a not-shown and a voided record, and none', () => {
+  it('reads a capture with its mark, an older record by name only, and none', () => {
     const cap = readConsentRecord(dirWith(JSON.stringify(OK)), clock);
-    expect(cap).toMatchObject({ kind: 'socs', expiresAt: '2027-01-15T08:00:00.000Z', boundedBy: 'cookie' });
+    expect(cap).toMatchObject({
+      kind: 'socs',
+      expiresAt: '2027-01-15T08:00:00.000Z',
+      boundedBy: 'cookie',
+      mark: 'reject',
+    });
     expect(cap !== null && cap !== 'invalid' && cap.kind === 'socs' ? cap.capture.value : '').toBe(OK.value);
+    // why: review X1: a capture of another mark is read with that mark, so the start refuses it by name
+    expect(
+      readConsentRecord(dirWith(JSON.stringify({ ...OK, value: SYNTHETIC_ACCEPT })), clock),
+    ).toMatchObject({
+      kind: 'socs',
+      mark: 'accept',
+    });
+    expect(
+      readConsentRecord(dirWith(JSON.stringify({ ...OK, value: 'not-a-socs-value' })), clock),
+    ).toMatchObject({
+      kind: 'socs',
+      mark: 'unknown',
+    });
+    // why: review X5: no command writes the older shapes; one left behind is read only so the start can refuse it
     expect(
       readConsentRecord(dirWith(JSON.stringify({ consent: 'not-shown', checkedAt: NOW })), clock),
     ).toEqual({
-      kind: 'not-shown',
-      checkedAt: NOW,
-      expiresAt: '2027-11-18T05:00:00.000Z',
+      kind: 'legacy',
+      was: 'not-shown',
     });
     expect(readConsentRecord(dirWith(JSON.stringify({ consent: 'voided', voidedAt: NOW })), clock)).toEqual({
-      kind: 'voided',
-      voidedAt: NOW,
+      kind: 'legacy',
+      was: 'voided',
     });
     expect(readConsentRecord(dirWith(null), clock)).toBeNull();
+  });
+  it('a capture dated exactly now is read; a millisecond later is the future', () => {
+    expect(readConsentRecord(dirWith(JSON.stringify({ ...OK, capturedAt: NOW })), clock)).toMatchObject({
+      kind: 'socs',
+    });
+    const later = new Date(Date.parse(NOW) + 1).toISOString();
+    expect(readConsentRecord(dirWith(JSON.stringify({ ...OK, capturedAt: later })), clock)).toBe('invalid');
   });
   it('an expired or stale capture is returned with its past expiry, never as missing', () => {
     const stale = readConsentRecord(
@@ -256,27 +331,11 @@ describe('the consent record (socs.json)', () => {
     ['readable by others', JSON.stringify(OK), 0o644],
     ['not JSON', '{', 0o600],
     ['not an object', '7', 0o600],
+    ['null', 'null', 0o600],
     ['a capture missing its value', JSON.stringify({ ...OK, value: '' }), 0o600],
     [
       'a capture dated in the future',
       JSON.stringify({ ...OK, capturedAt: '2026-10-19T00:00:00.000Z' }),
-      0o600,
-    ],
-    [
-      'a not-shown record dated in the future',
-      JSON.stringify({ consent: 'not-shown', checkedAt: '2026-10-19T00:00:00.000Z' }),
-      0o600,
-    ],
-    [
-      'a not-shown record with an extra field',
-      JSON.stringify({ consent: 'not-shown', checkedAt: NOW, x: 1 }),
-      0o600,
-    ],
-    ['a not-shown record with no time', JSON.stringify({ consent: 'not-shown' }), 0o600],
-    ['a voided record with no time', JSON.stringify({ consent: 'voided', voidedAt: 'soon' }), 0o600],
-    [
-      'a voided record with an extra field',
-      JSON.stringify({ consent: 'voided', voidedAt: NOW, checkedAt: NOW }),
       0o600,
     ],
     ['another consent kind', JSON.stringify({ consent: 'accepted', checkedAt: NOW }), 0o600],
@@ -289,33 +348,25 @@ describe('the consent record (socs.json)', () => {
     chmodSync(join(d, 'socs.json'), 0o700);
     expect(readConsentRecord(d, clock)).toBe('invalid');
   });
-  it('the start checks see no expiry on a voided record, and nothing on none or an invalid one', () => {
+  it('the start checks see a capture’s expiry and mark, an older record by name, and nothing on none or an invalid one', () => {
     expect(startConsentOf(null)).toBeNull();
     expect(startConsentOf('invalid')).toBeNull();
-    expect(startConsentOf({ kind: 'voided', voidedAt: asIsoDateTime(NOW) })).toEqual({ kind: 'voided' });
-    expect(
-      startConsentOf({ kind: 'not-shown', checkedAt: asIsoDateTime(NOW), expiresAt: asIsoDateTime(NOW) }),
-    ).toEqual({ kind: 'not-shown', expiresAt: NOW });
-  });
-  it('the status names the kind, the expiry and what bounds it (null for voided)', () => {
+    expect(startConsentOf({ kind: 'legacy', was: 'voided' })).toEqual({ kind: 'legacy', was: 'voided' });
     const cap = readConsentRecord(dirWith(JSON.stringify(OK)), clock);
-    if (cap === null || cap === 'invalid') throw new Error('capture');
+    expect(startConsentOf(cap)).toEqual({
+      kind: 'socs',
+      expiresAt: '2027-01-15T08:00:00.000Z',
+      mark: 'reject',
+    });
+  });
+  it('the status names the kind, the expiry, what bounds it and the mark', () => {
+    const cap = readConsentRecord(dirWith(JSON.stringify(OK)), clock);
+    if (cap === null || cap === 'invalid' || cap.kind !== 'socs') throw new Error('capture');
     expect(consentStatusOf(cap)).toEqual({
       kind: 'socs',
       expiresAt: '2027-01-15T08:00:00.000Z',
       boundedBy: 'cookie',
-    });
-    expect(
-      consentStatusOf({ kind: 'not-shown', checkedAt: asIsoDateTime(NOW), expiresAt: asIsoDateTime(NOW) }),
-    ).toEqual({
-      kind: 'not-shown',
-      expiresAt: NOW,
-      boundedBy: 'check',
-    });
-    expect(consentStatusOf({ kind: 'voided', voidedAt: asIsoDateTime(NOW) })).toEqual({
-      kind: 'voided',
-      expiresAt: null,
-      boundedBy: null,
+      mark: 'reject',
     });
   });
 });

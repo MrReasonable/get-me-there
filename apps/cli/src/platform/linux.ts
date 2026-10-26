@@ -6,6 +6,12 @@ import type { Arch, Paths, Platform } from './types.js';
 
 type Env = Readonly<Record<string, string | undefined>>;
 
+/** Decision 74's two display groups, each a main variable and the one that goes with it. */
+const DISPLAY_GROUPS = [
+  ['DISPLAY', 'XAUTHORITY'],
+  ['WAYLAND_DISPLAY', 'XDG_RUNTIME_DIR'],
+] as const;
+
 /** An XDG base directory when it is set to an absolute path (the spec ignores a relative one), else the default. */
 const xdg = (env: Env, name: string, fallback: string): string => {
   const v = env[name];
@@ -27,12 +33,21 @@ export function linuxPlatform(arch: Arch, uid: number, home: string, env: Env): 
     serviceDir: join(home, '.config', 'systemd', 'user'),
   };
   const display = (env.DISPLAY ?? '') !== '' || (env.WAYLAND_DISPLAY ?? '') !== '';
+  const displayEnv: Record<string, string> = {};
+  for (const [main, extra] of DISPLAY_GROUPS) {
+    const m = env[main] ?? '';
+    if (m === '') continue;
+    displayEnv[main] = m;
+    const x = env[extra] ?? '';
+    if (x !== '') displayEnv[extra] = x;
+  }
   return {
     os: 'linux',
     arch,
     uid,
     paths,
     hasDisplay: display,
+    displayEnv,
     writeSecretFile: secretFile,
     serviceManager: systemdManager(),
   };

@@ -64,7 +64,7 @@ describe('the subject comes from the cause, not the state (V2)', () => {
     ['warn', 'expiring', 'browser provider consent expires soon'],
     ['fail', 'expired', 'browser provider consent has expired'],
     ['fail', 'missing', 'browser provider has no consent record'],
-    ['fail', 'voided', 'browser provider consent screen is now shown'],
+    ['fail', 'not-rejection', 'browser provider consent is not a rejection'],
   ] as const)(
     '%s / %s sends "%s" with the consequence and the fix in their own sentences',
     async (s, cause, subject) => {

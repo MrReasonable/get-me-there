@@ -332,7 +332,12 @@ async function readWorkerOnce(ports: Ports): Promise<WorkerRead> {
         consent:
           st.consent === undefined
             ? null
-            : { kind: st.consent.kind, expiresAt: st.consent.expiresAt, boundedBy: st.consent.boundedBy },
+            : {
+                kind: st.consent.kind,
+                expiresAt: st.consent.expiresAt,
+                boundedBy: st.consent.boundedBy,
+                mark: st.consent.mark ?? null,
+              },
         socsCapturedAt: st.socsCapturedAt,
       },
     };

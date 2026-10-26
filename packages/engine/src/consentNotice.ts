@@ -12,7 +12,8 @@ const CONSENT_SUBJECT: Readonly<Record<Exclude<ConsentCause, 'cannot-check' | 'n
   expiring: 'browser provider consent expires soon',
   expired: 'browser provider consent has expired',
   missing: 'browser provider has no consent record',
-  voided: 'browser provider consent screen is now shown',
+  // why: review X1: a stored choice whose value is not a rejection is never applied
+  'not-rejection': 'browser provider consent is not a rejection',
 };
 const CONSENT_CONSEQUENCE =
   'Browser prices stop when consent lapses; the other price sources are unaffected.';
@@ -23,7 +24,7 @@ const consentState = new WeakMap<object, { checkedAt: number; sending: boolean }
 /**
  * Spec §8.3 "Consent expiry": while the Status view's consent check is `warn` or `fail` for a cause it can name and the
  * browser provider is enabled, one notice a London day to every notifier. The subject comes from the cause (expiring,
- * expired, missing, voided); a check that cannot be made (the worker is down or unreadable) sends nothing, because the
+ * expired, missing, not a rejection); a check that cannot be made (the worker is down or unreadable) sends nothing, because the
  * worker card says that. The day's key `consent-expiring:<London date>` (`operator_notice_keys`) is claimed only after
  * a notice was sent, so a failed send is tried again on the next pass; an in-flight flag stops two passes (the daily
  * job and the minute job) sending twice. No `operator_notifications` row, no `OperatorMessageKind`, no migration.
