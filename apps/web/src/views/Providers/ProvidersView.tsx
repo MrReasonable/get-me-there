@@ -8,6 +8,7 @@ import {
 import { useProviders } from '../../api/queries.js';
 import type { UsageRow } from '../../api/types.js';
 import { LoadError, Loading } from '../../components/LoadState.js';
+import { SETUP_COPY } from '../../copy/setup.js';
 import { COPY } from '../../copy.js';
 import { formatIsoDate } from '../../format.js';
 
@@ -19,12 +20,48 @@ function maxAgeText(info: CapabilityInfo): string {
   return info.maxAgeAssumed === true ? COPY.maxAgeAssumed(formatDuration(h)) : COPY.maxAge(formatDuration(h));
 }
 
+const P = SETUP_COPY.providers;
+
 function Capability({ title, info }: { title: string; info: CapabilityInfo }) {
   return (
     <div>
       <p>{COPY.capability(title, sourceLabel(info), maxAgeText(info))}</p>
       <p className="text-slate-700">{info.provenanceNote}</p>
+      {/* why: the critique: "vendor's cache age unknown" is said where it appears, in plain words */}
+      {info.maxAgeHours === 'unknown' ? <p className="text-xs text-slate-700">{P.ageUnknownHint}</p> : null}
     </div>
+  );
+}
+
+/** No provider configured: what each source is, what it costs, and where to set it up (critique, onboard pass). */
+function NoProviders() {
+  return (
+    <section
+      aria-labelledby="providers-empty"
+      className="max-w-prose space-y-2 rounded border border-amber-600 p-3"
+    >
+      <h3 id="providers-empty" className="font-semibold">
+        {P.emptyHeading}
+      </h3>
+      <p>{P.emptyLead}</p>
+      <ul className="space-y-3">
+        {P.sources.map((s) => (
+          <li key={s.id}>
+            <p className="font-medium">{s.name}</p>
+            <p>
+              <span className="font-medium">{P.whatLabel}</span> {s.what}
+            </p>
+            <p>
+              <span className="font-medium">{P.costLabel}</span> {s.cost}
+            </p>
+            <p>
+              <span className="font-medium">{P.setupLabel}</span>{' '}
+              <code className="break-all rounded bg-slate-100 px-1">{s.command}</code> {s.doc}
+            </p>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 
@@ -61,6 +98,8 @@ export function ProvidersView() {
   return (
     <div className="space-y-3 text-sm">
       <h2 className="text-xl font-semibold">{COPY.providersHeading}</h2>
+      <p className="max-w-prose text-slate-700">{P.intro}</p>
+      {q.data.providers.length === 0 ? <NoProviders /> : null}
       {q.data.providers.map((p) => (
         // why: UI-003: the card is headed by the provider's name, the word the status bar, filters and marks use; the
         // source labels (the API's displayName among them) stay on the capability lines.
@@ -79,6 +118,7 @@ export function ProvidersView() {
             </p>
           ))}
           <p>{COPY.plan(COPY.planName[p.plan])}</p>
+          <p className="text-slate-700">{P.markLine(COPY.providerShort[p.providerId])}</p>
           {/* why: ruling 5: which call cap stops a £0-per-call plan; information, not a warning, so no alert role */}
           {p.capNote !== null ? <p data-cost="">{p.capNote}</p> : null}
           {p.excludedFromSchedule ? <p>{COPY.excludedFromSchedule}</p> : null}

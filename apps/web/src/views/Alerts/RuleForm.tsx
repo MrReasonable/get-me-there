@@ -6,6 +6,8 @@ import { COPY } from '../../copy.js';
 import { parsePoundsToPence } from '../../format.js';
 
 const C = COPY.alertsView;
+/** The same box as every other form field (Definitions), so each field shows where to type. */
+const field = 'min-h-11 w-full min-w-0 rounded border border-slate-400 px-1';
 const RULE_TYPES = ['absolute', 'dropPct', 'dropAbs'] as const;
 const BASES = ['verified', 'calendar'] as const;
 type RuleType = (typeof RULE_TYPES)[number];
@@ -75,12 +77,17 @@ export function RuleForm(props: {
   return (
     <form
       onSubmit={submit}
-      className="grid max-w-xl grid-cols-[minmax(0,1fr)] gap-3 [&_input:not([type=checkbox])]:w-full [&_label]:min-w-0 [&_select]:w-full [&_select]:min-w-0"
+      className="grid max-w-md grid-cols-[minmax(0,1fr)] gap-3 [&_label]:min-w-0"
       aria-label={C.formLabel}
     >
       <label className="grid gap-1">
         <span>{C.ruleType}</span>
-        <select aria-label={C.ruleType} value={type} onChange={(e) => setType(ruleTypeOf(e.target.value))}>
+        <select
+          aria-label={C.ruleType}
+          className={field}
+          value={type}
+          onChange={(e) => setType(ruleTypeOf(e.target.value))}
+        >
           <option value="absolute">{C.typeAbsolute}</option>
           <option value="dropPct">{C.typeDropPct}</option>
           <option value="dropAbs">{C.typeDropAbs}</option>
@@ -91,6 +98,7 @@ export function RuleForm(props: {
           <span>{C.dropPct}</span>
           <input
             aria-label={C.dropPct}
+            className={field}
             inputMode="numeric"
             value={pct}
             onChange={(e) => setPct(e.target.value)}
@@ -101,6 +109,7 @@ export function RuleForm(props: {
           <span>{C.threshold}</span>
           <input
             aria-label={C.threshold}
+            className={field}
             inputMode="decimal"
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
@@ -109,12 +118,17 @@ export function RuleForm(props: {
       )}
       <label className="grid gap-1">
         <span>{C.basis}</span>
-        <select aria-label={C.basis} value={basis} onChange={(e) => setBasis(basisOf(e.target.value))}>
+        <select
+          aria-label={C.basis}
+          className={field}
+          value={basis}
+          onChange={(e) => setBasis(basisOf(e.target.value))}
+        >
           <option value="verified">{C.basisVerified}</option>
           <option value="calendar">{C.basisCalendar}</option>
         </select>
       </label>
-      <label className="flex items-center gap-2">
+      <label className="flex min-h-11 items-center gap-2">
         <input
           type="checkbox"
           aria-label={C.requireAll}
@@ -124,17 +138,18 @@ export function RuleForm(props: {
         />
         <span>{C.requireAll}</span>
       </label>
-      {basis === 'calendar' ? <p className="text-sm">{C.requireAllCalendarNote}</p> : null}
+      {basis === 'calendar' ? <p className="text-slate-700">{C.requireAllCalendarNote}</p> : null}
       <label className="grid gap-1">
         <span>{C.cooldown}</span>
         <input
           aria-label={C.cooldown}
+          className={field}
           type="number"
           min={1}
           value={cooldown}
           onChange={(e) => setCooldown(e.target.value)}
         />
-        <span className="text-sm">{C.cooldownHint}</span>
+        <span className="text-xs text-slate-700">{C.cooldownHint}</span>
       </label>
       {errors.length > 0 ? (
         <div role="alert" className="text-sm text-red-800">
@@ -143,7 +158,11 @@ export function RuleForm(props: {
           ))}
         </div>
       ) : null}
-      <button type="submit" className="min-h-11 rounded border border-slate-500 px-3" disabled={props.busy}>
+      <button
+        type="submit"
+        className="min-h-11 justify-self-start rounded border border-slate-700 px-3"
+        disabled={props.busy}
+      >
         {C.addRule}
       </button>
     </form>

@@ -37,9 +37,13 @@ export function AlertsView(props: { definitionId: string }) {
   const ruleText = new Map(list.map((r) => [r.id, describeRule(r)] as const));
 
   return (
-    <section aria-labelledby="alerts-heading" className="grid grid-cols-[minmax(0,1fr)] gap-6">
-      <h2 id="alerts-heading">{C.heading}</h2>
-      <p>{C.intro}</p>
+    <section aria-labelledby="alerts-heading" className="grid grid-cols-[minmax(0,1fr)] gap-6 text-sm">
+      <div className="space-y-1">
+        <h2 id="alerts-heading" className="text-xl font-semibold">
+          {C.heading}
+        </h2>
+        <p className="max-w-prose">{C.intro}</p>
+      </div>
       <RuleForm
         definitionId={props.definitionId}
         onSubmit={(b) => create.mutate(b)}
@@ -48,7 +52,7 @@ export function AlertsView(props: { definitionId: string }) {
       {create.isError ? <p role="alert">{C.notSaved(create.error.message)}</p> : null}
       {remove.isError ? <p role="alert">{COPY.actionFailed(remove.error.message)}</p> : null}
       <div>
-        <h3>{C.rulesHeading}</h3>
+        <h3 className="font-semibold">{C.rulesHeading}</h3>
         <p className="text-sm">{C.deleteKeepsHistory}</p>
         {rules.error ? (
           <LoadError error={rules.error} retry={() => void rules.refetch()} />
@@ -59,7 +63,7 @@ export function AlertsView(props: { definitionId: string }) {
         ) : (
           <ul>
             {list.map((r) => (
-              <li key={r.id} className="flex gap-2">
+              <li key={r.id} className="flex flex-wrap items-center gap-2">
                 {/* why: decision 55 — a rule's threshold is a price quoted in text, which WP9's sweep allows inside [data-quote] */}
                 <span data-quote>{ruleText.get(r.id)}</span>
                 <button
@@ -75,7 +79,7 @@ export function AlertsView(props: { definitionId: string }) {
         )}
       </div>
       <div>
-        <h3>{C.eventsHeading}</h3>
+        <h3 className="font-semibold">{C.eventsHeading}</h3>
         {/* why: the Rule column shows each rule in words, so the table waits for both queries */}
         {events.error ? (
           <LoadError error={events.error} retry={() => void events.refetch()} />
