@@ -2628,23 +2628,29 @@ datePairsResponseSchema = {
     superseded: boolean[];      // decision 54, calendar figures only (false on verified)
     notSeenInLatestAgeHours: (number | 'unknown' | null)[];  // decision 54, verified figures only (null on calendar)
     journeyMinutes: (number | null)[];   // total travel time when the figure's source states it
-    cheaperCachedPence: (number | null)[];      // a cheaper current calendar price a verified figure hides (decision 38)
-    cheaperCachedProvenance: (number | null)[]; // its provenance index; null exactly when cheaperCachedPence is
-    cheaperCachedOrigin: (number | null)[];     // its own airport pair, indices into scope.origins
-    cheaperCachedDestination: (number | null)[]; //  and scope.destinations
-    cheaperCachedTruncated: (boolean | null)[];
-    cheaperCachedStale: (boolean | null)[];     // the figure's own staleness rule
+    fromEarlierSearch: boolean[];   // fetched by an execution created before the latest parent run
+  };
+  cheaperCached: {              // sparse: one entry per verified figure hiding a cheaper current calendar price
+    figure: number[];           // index into the figures columns, strictly ascending
+    pricePence: number[];       // the cheaper price (decision 38)
+    provenance: number[];       // index into provenances
+    origin: number[]; destination: number[];   // its own airport pair, indices into scope.origins and destinations
+    truncated: boolean[];
+    stale: boolean[];           // the figure's own staleness rule
+  };
+  times: {                      // sparse: one entry per verified figure with at least one local time
+    figure: number[];           // index into the figures columns, strictly ascending
     departOut: (string | null)[]; arriveOut: (string | null)[];    // first segment's departLocal and last
     departBack: (string | null)[]; arriveBack: (string | null)[];  // segment's arriveLocal of each direction,
-                                                // as the source states them; null on a calendar figure
-    fromEarlierSearch: boolean[];   // fetched by an execution created before the latest parent run
+                                                // as the source states them
   };
 }
 ```
 
 The contract's refinement rejects any response whose `pairs` columns are not
-all `days × stays` long, whose `figures` columns differ in length, whose
-`pair` indices are not strictly ascending and in range, whose provenance,
+all `days × stays` long, whose `figures` columns differ in length or whose
+`cheaperCached` or `times` columns do, whose `pair` indices or either sparse
+group's `figure` indices are not strictly ascending and in range, whose provenance,
 origin or destination index is out of range, any of whose six bucket
 counts or `reused`, `selected`, `itinerarySearched`, `onDemand`,
 `unconfirmed` or `partiallyVerified` values for a date pair is not an
@@ -2655,11 +2661,11 @@ basis, whose `summary` differs from the column sums or whose `summary.total`
 differs from `scope.cells`, whose scope airports are not sorted and unique or
 whose `airportPairs` and `cells` are not their products, with more than
 36,400 date pairs or 50,000 cells, with `notReached` above `selected`, with
-`journeyLeftOut` set while no limit is, with a cheaper-cached price on a
-calendar figure or not below the figure's price, with `truncated` on a
-verified figure, with the cheaper-cached columns not null together, or with
-money that is not integer pence. The provenance table is an
-encoding only: `core`'s `decodeDatePairs` turns the response into one
+`journeyLeftOut` set while no limit is, with a cheaper-cached price or times
+on a calendar figure, with a cheaper-cached price not below the figure's
+price, with a times entry holding no time, with `truncated` on a verified
+figure, or with money that is not integer pence. The provenance table and
+the sparse groups are an encoding only: `core`'s `decodeDatePairs` turns the response into one
 record per date pair (departure and return dates, nights, buckets,
 verification counts, and the figure as a full price cell with its complete
 provenance and its airport pair), and the web reads only the decoder's
@@ -2679,10 +2685,14 @@ boundary would make an unread date pair look absent. It is delivered as
 **columns** (above) and **gzip-compressed** when the request accepts it
 (Hono's `compress` middleware on this route alone, verified against Hono's
 documentation in the work brief). Measured on synthetic responses
-(2026-10-26): about 240 KiB (22 KiB compressed) for the worked example (182
-days × 12 nights × 4 airport pairs, 60% priced) and about 3.7 MiB (210 KiB
-compressed) for 36,400 date pairs every one with a figure; the bound the
-route's test holds is **4 MiB uncompressed and 512 KiB compressed**.
+(2026-10-26, with the sparse groups): about 240 KiB (16 KiB compressed) for
+the worked example (182 days × 12 nights × 4 airport pairs, 60% priced),
+about 3.5 MiB (180 KiB compressed) for 36,400 date pairs every one with a
+calendar figure, about 3.6 MiB (192 KiB compressed) for the same with about
+300 verified figures carrying times and a cheaper cached price, and about
+1.2 MiB (68 KiB compressed) for 50,000 cells (400 days × 25 nights × 5
+airport pairs, every cell priced); the bound the route's test holds is **4
+MiB uncompressed and 512 KiB compressed**.
 
 **Routes the Dates view retires.** `GET /definitions/:id/calendar` and
 `GET /definitions/:id/duration-analysis` had one caller each, the Calendar
@@ -3788,7 +3798,8 @@ on every change that can move them and not only by a local run (§9).
 **Settled with the brief's review** (the brief's author, from the roster's findings; Ian may overturn any). The §10
 query is a wire form of strings and the api answers 422 itself. The shape gains `notReached`, `journeyLeftOut`, the
 cheaper-cached price's origin, destination, truncated and stale columns, and `departOut`, `arriveOut`, `departBack`
-and `arriveBack`, and the refinement rejects every rule §10 lists. "Cached from £X" is quoted only from a current (not
+and `arriveBack`, and the refinement rejects every rule §10 lists. The cheaper-cached and arrival columns are sparse
+groups keyed by figure, because as dense columns they put 36,400 date pairs at about 5 MiB, above the 4 MiB bound. "Cached from £X" is quoted only from a current (not
 superseded) calendar price, named with its own airport pair. A date pair's counts are of distinct cells. The scope's
 airports are sorted and unique. §11's last rank tie (the airport pair's order) is removed, because each date pair has
 one figure and one index, so departure and nights already make the order total. The stay filter applies before

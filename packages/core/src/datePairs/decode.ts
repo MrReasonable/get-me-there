@@ -14,20 +14,13 @@ export function columnAt<T>(column: readonly T[], i: number): T {
   return x;
 }
 
-/** A value the contract makes non-null beside a non-null cheaper-cached price. */
-function present<T>(x: T | null, what: string): T {
-  if (x === null) throw new RangeError(`decodeDatePairs: ${what} is null beside a cheaper cached price`);
-  return x;
-}
-
-/** The figure in column position `j`, with its full provenance and its airport pair. */
+/** The figure in column position `j`, with its full provenance and its airport pair; no cheaper price or times yet. */
 function figureAt(r: DatePairsResponse, j: number): DatePairFigure {
   const f = r.figures;
   const { origins, destinations } = r.scope;
   const o = columnAt(f.origin, j);
   const d = columnAt(f.destination, j);
   const notSeen = columnAt(f.notSeenInLatestAgeHours, j);
-  const cheaper = columnAt(f.cheaperCachedPence, j);
   return {
     price: {
       pricePence: columnAt(f.pricePence, j),
@@ -44,34 +37,18 @@ function figureAt(r: DatePairsResponse, j: number): DatePairFigure {
     superseded: columnAt(f.superseded, j),
     notSeenInLatest: notSeen === null ? null : { ageHours: notSeen },
     journeyMinutes: columnAt(f.journeyMinutes, j),
-    departOut: columnAt(f.departOut, j),
-    arriveOut: columnAt(f.arriveOut, j),
-    departBack: columnAt(f.departBack, j),
-    arriveBack: columnAt(f.arriveBack, j),
+    departOut: null,
+    arriveOut: null,
+    departBack: null,
+    arriveBack: null,
     fromEarlierSearch: columnAt(f.fromEarlierSearch, j),
-    cheaperCached:
-      cheaper === null
-        ? null
-        : {
-            pricePence: cheaper,
-            provenance: columnAt(
-              r.provenances,
-              present(columnAt(f.cheaperCachedProvenance, j), 'its provenance'),
-            ),
-            stale: present(columnAt(f.cheaperCachedStale, j), 'its staleness'),
-            truncated: present(columnAt(f.cheaperCachedTruncated, j), 'its truncation'),
-            origin: columnAt(origins, present(columnAt(f.cheaperCachedOrigin, j), 'its origin')),
-            destination: columnAt(
-              destinations,
-              present(columnAt(f.cheaperCachedDestination, j), 'its destination'),
-            ),
-          },
+    cheaperCached: null,
   };
 }
 
 /**
- * One record per date pair from the route's columns (spec §10): `pairs` walked once, `figures` once, every figure and
- * cheaper-cached price given its full provenance from the table. Pure; no clock. Dates come from the index, each
+ * One record per date pair from the route's columns (spec §10): `pairs` walked once, `figures` once and each sparse
+ * group once, every figure and cheaper-cached price given its full provenance from the table. Pure; no clock. Dates come from the index, each
  * distinct date computed once.
  */
 export function decodeDatePairs(r: DatePairsResponse): DecodedDatePairs {
@@ -108,8 +85,31 @@ export function decodeDatePairs(r: DatePairsResponse): DecodedDatePairs {
       figure: null,
     });
   }
-  for (let j = 0; j < r.figures.pair.length; j += 1)
-    columnAt(pairs, columnAt(r.figures.pair, j)).figure = figureAt(r, j);
+  const figures: DatePairFigure[] = [];
+  for (let j = 0; j < r.figures.pair.length; j += 1) {
+    const figure = figureAt(r, j);
+    figures.push(figure);
+    columnAt(pairs, columnAt(r.figures.pair, j)).figure = figure;
+  }
+  // why: the sparse groups name a figure by its position in the figures columns (revision 50)
+  const cheaper = r.cheaperCached;
+  for (let k = 0; k < cheaper.figure.length; k += 1)
+    columnAt(figures, columnAt(cheaper.figure, k)).cheaperCached = {
+      pricePence: columnAt(cheaper.pricePence, k),
+      provenance: columnAt(r.provenances, columnAt(cheaper.provenance, k)),
+      stale: columnAt(cheaper.stale, k),
+      truncated: columnAt(cheaper.truncated, k),
+      origin: columnAt(r.scope.origins, columnAt(cheaper.origin, k)),
+      destination: columnAt(r.scope.destinations, columnAt(cheaper.destination, k)),
+    };
+  const t = r.times;
+  for (let k = 0; k < t.figure.length; k += 1) {
+    const figure = columnAt(figures, columnAt(t.figure, k));
+    figure.departOut = columnAt(t.departOut, k);
+    figure.arriveOut = columnAt(t.arriveOut, k);
+    figure.departBack = columnAt(t.departBack, k);
+    figure.arriveBack = columnAt(t.arriveBack, k);
+  }
   return {
     executionId: r.executionId,
     executions: r.executions,

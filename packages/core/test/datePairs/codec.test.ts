@@ -305,7 +305,7 @@ describe('encodeDatePairs and decodeDatePairs (spec §10: the provenance table i
       }),
     );
     expect(wire.provenances).toEqual([shared]);
-    expect([wire.figures.provenance, wire.figures.cheaperCachedProvenance]).toEqual([[0], [0]]);
+    expect([wire.figures.provenance, wire.cheaperCached.provenance]).toEqual([[0], [0]]);
   });
 
   it('buckets.reused is the reused column', () => {
@@ -361,19 +361,36 @@ describe('encodeDatePairs and decodeDatePairs (spec §10: the provenance table i
     const past = encodeDatePairs(workedExample());
     past.figures.pair[0] = past.pairs.priced.length;
     expect(() => decodeDatePairs(past)).toThrow(new RangeError('no entry 12 in a column of 12'));
-    for (const [c, what] of [
-      ['cheaperCachedProvenance', 'its provenance'],
-      ['cheaperCachedOrigin', 'its origin'],
-      ['cheaperCachedDestination', 'its destination'],
-      ['cheaperCachedTruncated', 'its truncation'],
-      ['cheaperCachedStale', 'its staleness'],
-    ] as const) {
+    for (const group of ['cheaperCached', 'times'] as const) {
       const r = encodeDatePairs(workedExample());
-      const j = r.figures.cheaperCachedPence.findIndex((p) => p !== null);
-      r.figures[c][j] = null;
-      expect(() => decodeDatePairs(r), c).toThrow(
-        new RangeError(`decodeDatePairs: ${what} is null beside a cheaper cached price`),
+      r[group].figure[0] = r.figures.pair.length;
+      expect(() => decodeDatePairs(r), group).toThrow(new RangeError('no entry 8 in a column of 8'));
+    }
+  });
+
+  it("keys a figure's cheaper-cached price and its times by the figure's position, only where it has them", () => {
+    const at = (figure: DatePairFigure) =>
+      encodeDatePairs(
+        decoded({ pair: (i) => (i === 1 ? { figure } : i === 3 ? { figure: calendarFigure() } : {}) }),
       );
+    // a calendar figure and a verified one without times or a cheaper price have no group entries
+    const none = at(verifiedFigure({ departOut: null, arriveOut: null, departBack: null, arriveBack: null }));
+    expect([none.cheaperCached.figure, none.times.figure]).toEqual([[], []]);
+    // any one time is an entry, the others null in it
+    const times = ['departOut', 'arriveOut', 'departBack', 'arriveBack'] as const;
+    for (const kept of times) {
+      const nulls = { departOut: null, arriveOut: null, departBack: null, arriveBack: null };
+      const figure = verifiedFigure({ ...nulls, [kept]: '2027-03-15T06:40' });
+      const one = at(figure);
+      expect(one.times, kept).toEqual({
+        figure: [0],
+        departOut: [null],
+        arriveOut: [null],
+        departBack: [null],
+        arriveBack: [null],
+        [kept]: ['2027-03-15T06:40'],
+      });
+      expect(decodeDatePairs(one).pairs[1]?.figure, kept).toEqual(figure);
     }
   });
 });

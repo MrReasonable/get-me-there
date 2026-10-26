@@ -49,8 +49,8 @@ function resum(r: DatePairsResponse): DatePairsResponse {
 }
 const verifiedAt = (r: DatePairsResponse) => firstWhere(r.figures.basis, (b) => b === 'verified');
 const calendarAt = (r: DatePairsResponse) => firstWhere(r.figures.basis, (b) => b === 'calendar');
-const cheaperAt = (r: DatePairsResponse) => firstWhere(r.figures.cheaperCachedPence, (p) => p !== null);
 
+const TIMES = ['departOut', 'arriveOut', 'departBack', 'arriveBack'] as const;
 const PAIR_COUNTS = [
   'priced',
   'empty',
@@ -66,13 +66,6 @@ const PAIR_COUNTS = [
   'partiallyVerified',
   'notReached',
   'journeyLeftOut',
-] as const;
-const CHEAPER_COMPANIONS = [
-  'cheaperCachedProvenance',
-  'cheaperCachedOrigin',
-  'cheaperCachedDestination',
-  'cheaperCachedTruncated',
-  'cheaperCachedStale',
 ] as const;
 
 describe("datePairsResponseSchema (spec §10 the date-pair route's shape; brief §5)", () => {
@@ -90,11 +83,15 @@ describe("datePairsResponseSchema (spec §10 the date-pair route's shape; brief 
   });
   it('rejects figures columns of different lengths, longer or shorter', () => {
     const r = body();
-    r.figures.arriveBack.push(null);
-    expect(issuePaths(r)).toEqual(['figures.arriveBack']);
+    r.figures.journeyMinutes.push(null);
+    expect(issuePaths(r)).toEqual(['figures.journeyMinutes']);
     const s = body();
     s.figures.origin.pop();
     expect(issuePaths(s)).toEqual(['figures.origin']);
+    // and nothing is read across them: the sparse groups name figures 0 to 4
+    const t = body();
+    t.figures.basis.splice(4);
+    expect(issuePaths(t)).toEqual(['figures.basis']);
   });
   it('rejects a pair index that is not strictly ascending', () => {
     const r = body();
@@ -122,14 +119,13 @@ describe("datePairsResponseSchema (spec §10 the date-pair route's shape; brief 
     expect(issuePaths(r)).toEqual([`figures.${column}.2`]);
   });
   it.each([
-    ['cheaperCachedProvenance', (r: DatePairsResponse) => r.provenances.length],
-    ['cheaperCachedOrigin', (r: DatePairsResponse) => r.scope.origins.length],
-    ['cheaperCachedDestination', (r: DatePairsResponse) => r.scope.destinations.length],
-  ] as const)('rejects a %s index out of range', (column, outside) => {
+    ['provenance', (r: DatePairsResponse) => r.provenances.length],
+    ['origin', (r: DatePairsResponse) => r.scope.origins.length],
+    ['destination', (r: DatePairsResponse) => r.scope.destinations.length],
+  ] as const)('rejects a cheaper-cached %s index out of range', (column, outside) => {
     const r = body();
-    const j = cheaperAt(r);
-    r.figures[column][j] = outside(r);
-    expect(issuePaths(r)).toEqual([`figures.${column}.${j}`]);
+    r.cheaperCached[column][1] = outside(r);
+    expect(issuePaths(r)).toEqual([`cheaperCached.${column}.1`]);
   });
   it.each(PAIR_COUNTS)('rejects a %s count above scope.airportPairs', (column) => {
     const r = body();
@@ -270,25 +266,62 @@ describe("datePairsResponseSchema (spec §10 the date-pair route's shape; brief 
     r.scope.maxJourneyMinutes = 600;
     expect(issuePaths(r)).toEqual([]);
   });
+  // the sparse groups (revision 50): the worked example's cheaper-cached prices are on figures 0 and 4, its times on
+  // figures 0, 2 and 4; figures 1, 3, 5, 6 and 7 are calendar figures
+  it('the worked example has the sparse groups this file assumes', () => {
+    const r = body();
+    expect([r.cheaperCached.figure, r.times.figure]).toEqual([
+      [0, 4],
+      [0, 2, 4],
+    ]);
+    expect(r.figures.basis.map((b) => b[0])).toEqual(['v', 'c', 'v', 'c', 'v', 'c', 'c', 'c']);
+  });
+  it('rejects sparse-group columns of different lengths', () => {
+    const r = body();
+    r.cheaperCached.provenance.pop();
+    expect(issuePaths(r)).toEqual(['cheaperCached.provenance']);
+    const s = body();
+    s.times.departOut.pop();
+    expect(issuePaths(s)).toEqual(['times.departOut']);
+  });
+  it.each(['cheaperCached', 'times'] as const)(
+    'rejects a %s figure index not strictly ascending',
+    (group) => {
+      const r = body();
+      r[group].figure[1] = r[group].figure[0] ?? 0;
+      expect(issuePaths(r)).toEqual([`${group}.figure.1`]);
+    },
+  );
+  it.each(['cheaperCached', 'times'] as const)('rejects a %s figure index that names no figure', (group) => {
+    const r = body();
+    const last = r[group].figure.length - 1;
+    r[group].figure[last] = r.figures.pair.length;
+    expect(issuePaths(r)).toEqual([`${group}.figure.${last}`]);
+  });
   it('rejects a cheaper-cached price on a calendar figure', () => {
     const r = body();
-    const j = calendarAt(r);
-    const k = cheaperAt(r);
-    for (const c of ['cheaperCachedPence', ...CHEAPER_COMPANIONS] as const) {
-      const v = r.figures[c][k];
-      // why: copy every cheaper-cached column of figure k onto calendar figure j, so only the basis rule is broken
-      if (c === 'cheaperCachedTruncated' || c === 'cheaperCachedStale')
-        r.figures[c][j] = typeof v === 'boolean' ? v : null;
-      else r.figures[c][j] = typeof v === 'number' ? v : null;
-    }
-    r.figures.cheaperCachedPence[j] = 1;
-    expect(issuePaths(r)).toEqual([`figures.cheaperCachedPence.${j}`]);
+    r.cheaperCached.figure[0] = 1;
+    expect(issuePaths(r)).toEqual(['cheaperCached.figure.0']);
+  });
+  it('rejects times on a calendar figure', () => {
+    const r = body();
+    r.times.figure[1] = 1;
+    expect(issuePaths(r)).toEqual(['times.figure.1']);
   });
   it("rejects a cheaper-cached price not below the figure's price", () => {
     const r = body();
-    const j = cheaperAt(r);
-    r.figures.cheaperCachedPence[j] = r.figures.pricePence[j] ?? 0;
-    expect(issuePaths(r)).toEqual([`figures.cheaperCachedPence.${j}`]);
+    r.cheaperCached.pricePence[1] = r.figures.pricePence[4] ?? 0;
+    expect(issuePaths(r)).toEqual(['cheaperCached.pricePence.1']);
+  });
+  it('rejects a times entry holding no time', () => {
+    const r = body();
+    for (const c of TIMES) r.times[c][2] = null;
+    expect(issuePaths(r)).toEqual(['times.departOut.2']);
+  });
+  it.each(TIMES)('accepts a times entry holding %s alone', (kept) => {
+    const r = body();
+    for (const c of TIMES) if (c !== kept) r.times[c][2] = null;
+    expect(issuePaths(r)).toEqual([]);
   });
   it('rejects truncated on a verified figure', () => {
     const r = body();
@@ -296,30 +329,19 @@ describe("datePairsResponseSchema (spec §10 the date-pair route's shape; brief 
     r.figures.truncated[j] = true;
     expect(issuePaths(r)).toEqual([`figures.truncated.${j}`]);
   });
-  it.each(CHEAPER_COMPANIONS)('rejects %s not null together with the cheaper-cached price', (column) => {
-    const r = body();
-    const j = cheaperAt(r);
-    r.figures[column][j] = null;
-    expect(issuePaths(r)).toEqual([`figures.${column}.${j}`]);
-    const s = body();
-    const k = firstWhere(s.figures.cheaperCachedPence, (p) => p === null);
-    if (column === 'cheaperCachedTruncated' || column === 'cheaperCachedStale') s.figures[column][k] = false;
-    else s.figures[column][k] = 0;
-    expect(issuePaths(s)).toEqual([`figures.${column}.${k}`]);
-  });
   it.each([31_200.5, -1])('rejects money that is not integer pence (%d)', (pence) => {
     const r = body();
     r.figures.pricePence[0] = pence;
     // why: zod runs the refinement after a continuable issue (a minimum), which may then add its own
     expect(issuePaths(r)).toContain('figures.pricePence.0');
     const s = body();
-    const j = cheaperAt(s);
-    s.figures.cheaperCachedPence[j] = pence;
-    expect(issuePaths(s)).toContain(`figures.cheaperCachedPence.${j}`);
+    s.cheaperCached.pricePence[0] = pence;
+    expect(issuePaths(s)).toContain('cheaperCached.pricePence.0');
   });
   it('rejects an unknown key (strict)', () => {
     expect(issuePaths({ ...body(), extra: 1 })).toEqual(['']);
     expect(issuePaths({ ...body(), figures: { ...body().figures, extra: [] } })).toEqual(['figures']);
+    expect(issuePaths({ ...body(), times: { ...body().times, extra: [] } })).toEqual(['times']);
   });
   it('reports one custom issue per rule, at the first offending index', () => {
     const r = body();

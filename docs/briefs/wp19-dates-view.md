@@ -255,19 +255,23 @@ export type DatePairsResponse = z.output<typeof datePairsResponseSchema>;
 
 The response shape is §10's, with these element schemas and revision 50's additions:
 
-- Every money column (`figures.pricePence`, `figures.cheaperCachedPence`) is `moneyPenceSchema` (nullable where §10
-  says so); `figures.ageHours` and `notSeenInLatestAgeHours` use `ageHoursSchema`; `journeyMinutes` and every count and
+- Every money column (`figures.pricePence`, `cheaperCached.pricePence`) is `moneyPenceSchema`; `figures.ageHours` and `notSeenInLatestAgeHours` use `ageHoursSchema`; `journeyMinutes` and every count and
   index column are non-negative integers.
 - `pairs` gains `journeyLeftOut: number[]` (the airport pairs in scope with at least one figure-eligible price, every
   one of them left out for a known journey time above `maxJourneyMinutes`; figure-eligible means class `verified` and
   confirmed, or a calendar price; 0 everywhere when `scope.maxJourneyMinutes` is null) and `notReached: number[]` (the
   in-scope cells that are `selected ∧ (verification not_run ∨ skipped:budget)`, §6.6's "selected but not reached").
-- `figures` gains `cheaperCachedOrigin` and `cheaperCachedDestination` (indices into `scope.origins` and
-  `scope.destinations`), `cheaperCachedTruncated` and `cheaperCachedStale` (the server's staleness rule, the same one the
-  figure's `stale` uses), each null exactly when `cheaperCachedPence` is; and `arriveOut` and `arriveBack` (the
-  figure's last outbound and last inbound segment's `arriveLocal`, as the source states it; null on a calendar figure or
-  a row without segments), with `departOut` and `departBack` (the first segment's `departLocal` of each direction) so
-  the web can show the arrival's day offset; and `fromEarlierSearch: boolean[]` (true when the figure's row was
+- The cheaper-cached price leaves `figures` for a sparse group `cheaperCached: { figure, pricePence, provenance, origin,
+  destination, truncated, stale }`, one entry per verified figure that hides a cheaper current calendar price, `figure`
+  an index into the figures columns (strictly ascending), `origin` and `destination` indices into `scope.origins` and
+  `scope.destinations`, `stale` by the server's staleness rule (the same one the figure's `stale` uses). The local
+  times are a sparse group `times: { figure, departOut, arriveOut, departBack, arriveBack }`, one entry per verified
+  figure with at least one time: `arriveOut` and `arriveBack` the last outbound and last inbound segment's
+  `arriveLocal`, `departOut` and `departBack` the first segment's `departLocal` of each direction (so the web can show
+  the arrival's day offset), each as the source states it and null where it does not. Revision 50: as dense columns
+  these ten put 36,400 date pairs at about 5 MiB, above §10's 4 MiB bound; sparse, the case measures about 3.5 MiB. The
+  decoder's output is unchanged: every `DatePairFigure` carries `cheaperCached` and the four times, null where the
+  groups have no entry. `figures` gains `fromEarlierSearch: boolean[]` (true when the figure's row was
   fetched by an execution created before the latest parent run, an earlier parent or an earlier on-demand search;
   false when the latest parent run or a later on-demand search fetched it, and false before any parent run; revision
   50, settled by the orchestrator).
@@ -280,8 +284,9 @@ never 0, see the classification in Task 19.2); `summary.buckets`, `summary.reuse
 `scope.cells`; `scope.origins` or `scope.destinations` not sorted and unique; `scope.airportPairs` ≠ origins ×
 destinations; `scope.cells` ≠ days × stays × airportPairs; days × stays > `MAX_DATE_PAIRS`; `scope.cells` above
 `DEFAULT_MAX_CELLS`; `notReached` above `selected` for a pair; `journeyLeftOut` non-zero while `scope.maxJourneyMinutes`
-is null; a cheaper-cached price on a calendar figure; `cheaperCachedPence` not below `pricePence`; `truncated` true on a
-verified figure; the four cheaper-cached columns not null together with `cheaperCachedPence`; money not integer pence.
+is null; a sparse group's columns of different lengths, or its `figure` indices not strictly ascending or not naming a
+figure; a cheaper-cached price or times on a calendar figure; a cheaper-cached price not below its figure's price; a
+times entry holding no time; `truncated` true on a verified figure; money not integer pence.
 
 ```ts
 // packages/core/src/api-contract/results.ts: resultsQuerySchema gains five strings, parsed by the api (all 422):
@@ -363,7 +368,7 @@ export function decodeDatePairs(r: DatePairsResponse): DecodedDatePairs;   // pu
 export function provenanceKey(p: Provenance): string;   // canonical: every field, nested fx included, keys sorted
 // DatePairFigure, DatePair and DecodedDatePairs are declared in encode.ts. encodeDatePairs throws RangeError for a
 // figure or cheaper-cached price on an airport outside the scope; decodeDatePairs throws RangeError on a body the
-// contract refuses (a short column, a cheaper-cached column null beside its price) rather than invent a value.
+// contract refuses (a short column, a sparse group's figure index naming no figure) rather than invent a value.
 // CoverageSummary and ExecutionSummary are z.output types of their schemas in api-contract/common.ts.
 
 // packages/core/src/datePairs/rank.ts
@@ -598,9 +603,9 @@ No web or e2e file imports from `packages/core/test`; fixtures build through `@g
     `packages/db/**`, `packages/engine/**` and the workflow itself (§9).
   - **Settled with the brief's review** (the brief's author, from the roster's findings; Ian may overturn any): the
     §10 query is a wire form of strings and the api answers 422 itself; the shape additions of §5 above
-    (`notReached`, the cheaper-cached origin, destination, truncated and stale columns, `departOut`, `arriveOut`,
-    `departBack`, `arriveBack`) and
-    the refinement rules listed there; "cached from £X" only from a current (not superseded) calendar price, named with
+    (`notReached`, the cheaper-cached price's origin, destination, truncated and stale, `departOut`, `arriveOut`,
+    `departBack`, `arriveBack`), the sparse `cheaperCached` and `times` groups that carry the last ten (as dense columns
+    they put 36,400 date pairs at about 5 MiB, above the 4 MiB bound) and the refinement rules listed there; "cached from £X" only from a current (not superseded) calendar price, named with
     its own airport pair; the date pair's counts are distinct cells; the scope's airports are sorted and unique;
     §11's last rank tie (the airport pair's order) is removed, because each date pair has one figure and one index, so
     departure and nights already make the order total; the stay filter applies before ranking and shading, and bands
@@ -732,9 +737,10 @@ No web or e2e file imports from `packages/core/test`; fixtures build through `@g
   figure; a not-seen age on a calendar figure; `scope.cells` above 50,000) and each rule of §5 above (buckets summing to
   anything but `airportPairs`, 0 included; summary differing from the column sums; `summary.total` ≠ `scope.cells`;
   unsorted or repeated scope airports; `airportPairs` ≠ the product; `cells` ≠ days × stays × airportPairs; more than
-  36,400 date pairs; `notReached` above `selected`; `journeyLeftOut` non-zero with no limit; a cheaper-cached price on
-  a calendar figure; one not below the figure's price; truncated on a verified figure; any cheaper-cached column not
-  null together with the price; `pricePence` 31200.5 and −1, and the same in `cheaperCachedPence`); an unknown key
+  36,400 date pairs; `notReached` above `selected`; `journeyLeftOut` non-zero with no limit; a sparse group's columns
+  of different lengths, its `figure` index not strictly ascending or naming no figure; a cheaper-cached price or times
+  on a calendar figure; a cheaper-cached price not below the figure's price; a times entry with no time; truncated on a
+  verified figure; `pricePence` 31200.5 and −1, and the same in `cheaperCached.pricePence`); an unknown key
   (strict). The query schema accepts the three strings and rejects an unknown key.
 
   `test/datePairs/codec.test.ts`: `decodeDatePairs(encodeDatePairs(x))` deep-equals `x` (fast-check over generated
@@ -908,8 +914,8 @@ summary.
     price becomes a figure and counts in `onDemand`; decision 54's marks (a calendar figure whose cell a newer parent
     found empty is `superseded`; a verified figure the latest search did not return carries `notSeenInLatestAgeHours`);
     `cheaperCached` on a fresh verified LHR→JFK figure that hides a cheaper LGW→EWR calendar price, with LGW and EWR in
-    its columns; a date pair whose only cheaper calendar price is superseded has none; a truncated cheaper price carries
-    `cheaperCachedTruncated`; `cheaperCachedStale` for a provider no longer among the definition's discovery providers
+    its decoded `cheaperCached`; a date pair whose only cheaper calendar price is superseded has none; a truncated cheaper
+    price carries `cheaperCached.truncated`; `cheaperCached.stale` for a provider no longer among the definition's discovery providers
     follows the figure's own staleness rule; a truncated tile's calendar figure carries `truncated`; `departOut`,
     `arriveOut`, `departBack` and `arriveBack` from a verified figure's segments (an overnight return among them) and
     null on a calendar figure; `fromEarlierSearch` false on a figure the latest parent run fetched while another airport

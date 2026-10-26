@@ -99,7 +99,8 @@ function indexOf(at: ReadonlyMap<string, number>, code: Iata): number {
 
 /**
  * The route's body from the decoded form, in one pass over the date pairs: every column written as it goes, each
- * distinct provenance entered once in the table (keyed by `provenanceKey`). `decodeDatePairs` is its inverse.
+ * distinct provenance entered once in the table (keyed by `provenanceKey`), and a figure's cheaper-cached price and
+ * local times in their sparse groups, keyed by the figure's position. `decodeDatePairs` is its inverse.
  */
 export function encodeDatePairs(d: DecodedDatePairs): DatePairsResponse {
   const originAt = new Map(d.scope.origins.map((c, i) => [c, i]));
@@ -142,17 +143,23 @@ export function encodeDatePairs(d: DecodedDatePairs): DatePairsResponse {
     superseded: [],
     notSeenInLatestAgeHours: [],
     journeyMinutes: [],
-    cheaperCachedPence: [],
-    cheaperCachedProvenance: [],
-    cheaperCachedOrigin: [],
-    cheaperCachedDestination: [],
-    cheaperCachedTruncated: [],
-    cheaperCachedStale: [],
+    fromEarlierSearch: [],
+  };
+  const cheaper: DatePairsResponse['cheaperCached'] = {
+    figure: [],
+    pricePence: [],
+    provenance: [],
+    origin: [],
+    destination: [],
+    truncated: [],
+    stale: [],
+  };
+  const times: DatePairsResponse['times'] = {
+    figure: [],
     departOut: [],
     arriveOut: [],
     departBack: [],
     arriveBack: [],
-    fromEarlierSearch: [],
   };
   for (const p of d.pairs) {
     const b = p.buckets;
@@ -172,7 +179,8 @@ export function encodeDatePairs(d: DecodedDatePairs): DatePairsResponse {
     pairs.journeyLeftOut.push(p.journeyLeftOut);
     const x = p.figure;
     if (x === null) continue;
-    f.pair.push(p.index);
+    // why: the sparse groups name a figure by its position in the figures columns (revision 50)
+    const figure = f.pair.push(p.index) - 1;
     f.pricePence.push(x.price.pricePence);
     f.provenance.push(entry(x.price.provenance));
     f.stale.push(x.price.stale);
@@ -184,26 +192,23 @@ export function encodeDatePairs(d: DecodedDatePairs): DatePairsResponse {
     f.superseded.push(x.superseded);
     f.notSeenInLatestAgeHours.push(x.notSeenInLatest === null ? null : x.notSeenInLatest.ageHours);
     f.journeyMinutes.push(x.journeyMinutes);
-    f.departOut.push(x.departOut);
-    f.arriveOut.push(x.arriveOut);
-    f.departBack.push(x.departBack);
-    f.arriveBack.push(x.arriveBack);
     f.fromEarlierSearch.push(x.fromEarlierSearch);
     const c = x.cheaperCached;
-    if (c === null) {
-      f.cheaperCachedPence.push(null);
-      f.cheaperCachedProvenance.push(null);
-      f.cheaperCachedOrigin.push(null);
-      f.cheaperCachedDestination.push(null);
-      f.cheaperCachedTruncated.push(null);
-      f.cheaperCachedStale.push(null);
-    } else {
-      f.cheaperCachedPence.push(c.pricePence);
-      f.cheaperCachedProvenance.push(entry(c.provenance));
-      f.cheaperCachedOrigin.push(indexOf(originAt, c.origin));
-      f.cheaperCachedDestination.push(indexOf(destinationAt, c.destination));
-      f.cheaperCachedTruncated.push(c.truncated);
-      f.cheaperCachedStale.push(c.stale);
+    if (c !== null) {
+      cheaper.figure.push(figure);
+      cheaper.pricePence.push(c.pricePence);
+      cheaper.provenance.push(entry(c.provenance));
+      cheaper.origin.push(indexOf(originAt, c.origin));
+      cheaper.destination.push(indexOf(destinationAt, c.destination));
+      cheaper.truncated.push(c.truncated);
+      cheaper.stale.push(c.stale);
+    }
+    if (x.departOut !== null || x.arriveOut !== null || x.departBack !== null || x.arriveBack !== null) {
+      times.figure.push(figure);
+      times.departOut.push(x.departOut);
+      times.arriveOut.push(x.arriveOut);
+      times.departBack.push(x.departBack);
+      times.arriveBack.push(x.arriveBack);
     }
   }
   const { space, scope } = d;
@@ -232,5 +237,7 @@ export function encodeDatePairs(d: DecodedDatePairs): DatePairsResponse {
     provenances,
     pairs,
     figures: f,
+    cheaperCached: cheaper,
+    times,
   };
 }

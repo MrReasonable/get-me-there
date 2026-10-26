@@ -92,18 +92,6 @@ const figuresSchema = z.strictObject({
   /** decision 54, verified figures only */
   notSeenInLatestAgeHours: z.array(ageHoursSchema.nullable()),
   journeyMinutes: z.array(count.nullable()),
-  /** a cheaper current calendar price a verified figure hides (decision 38), with its own airport pair */
-  cheaperCachedPence: z.array(moneyPenceSchema.nullable()),
-  cheaperCachedProvenance: z.array(count.nullable()),
-  cheaperCachedOrigin: z.array(count.nullable()),
-  cheaperCachedDestination: z.array(count.nullable()),
-  cheaperCachedTruncated: z.array(z.boolean().nullable()),
-  cheaperCachedStale: z.array(z.boolean().nullable()),
-  /** the first segment's departLocal and the last segment's arriveLocal of each direction, as the source states them */
-  departOut: z.array(z.string().nullable()),
-  arriveOut: z.array(z.string().nullable()),
-  departBack: z.array(z.string().nullable()),
-  arriveBack: z.array(z.string().nullable()),
   /** fetched by an execution created before the latest parent run (revision 50) */
   fromEarlierSearch: z.array(z.boolean()),
 });
@@ -120,25 +108,55 @@ const FIGURE_COLUMNS = [
   'superseded',
   'notSeenInLatestAgeHours',
   'journeyMinutes',
-  'cheaperCachedPence',
-  'cheaperCachedProvenance',
-  'cheaperCachedOrigin',
-  'cheaperCachedDestination',
-  'cheaperCachedTruncated',
-  'cheaperCachedStale',
+  'fromEarlierSearch',
+] as const satisfies ReadonlyArray<keyof typeof figuresSchema.shape>;
+
+/**
+ * One entry per verified figure that hides a cheaper current calendar price (decision 38), `figure` (an index into
+ * the figures columns) strictly ascending; the price is named with its own airport pair.
+ *
+ * why: revision 50: a sparse group keyed by figure, not six columns beside every figure; as dense columns they put
+ * 36,400 date pairs at about 5 MiB, above §10's 4 MiB bound.
+ */
+const cheaperCachedSchema = z.strictObject({
+  figure: counts,
+  pricePence: z.array(moneyPenceSchema),
+  provenance: counts,
+  origin: counts,
+  destination: counts,
+  truncated: z.array(z.boolean()),
+  /** the figure's own staleness rule */
+  stale: z.array(z.boolean()),
+});
+const CHEAPER_COLUMNS = [
+  'figure',
+  'pricePence',
+  'provenance',
+  'origin',
+  'destination',
+  'truncated',
+  'stale',
+] as const satisfies ReadonlyArray<keyof typeof cheaperCachedSchema.shape>;
+
+/**
+ * One entry per verified figure with at least one local time: the first segment's departLocal and the last segment's
+ * arriveLocal of each direction, as the source states them (null where it does not); `figure` strictly ascending.
+ * Sparse for the reason above: a calendar figure has no segments.
+ */
+const timesSchema = z.strictObject({
+  figure: counts,
+  departOut: z.array(z.string().nullable()),
+  arriveOut: z.array(z.string().nullable()),
+  departBack: z.array(z.string().nullable()),
+  arriveBack: z.array(z.string().nullable()),
+});
+const TIME_COLUMNS = [
+  'figure',
   'departOut',
   'arriveOut',
   'departBack',
   'arriveBack',
-  'fromEarlierSearch',
-] as const satisfies ReadonlyArray<keyof typeof figuresSchema.shape>;
-const CHEAPER_COMPANIONS = [
-  'cheaperCachedProvenance',
-  'cheaperCachedOrigin',
-  'cheaperCachedDestination',
-  'cheaperCachedTruncated',
-  'cheaperCachedStale',
-] as const;
+] as const satisfies ReadonlyArray<keyof typeof timesSchema.shape>;
 
 const datePairsBodySchema = z.strictObject({
   /** the latest parent run; null before the first */
@@ -176,6 +194,8 @@ const datePairsBodySchema = z.strictObject({
   provenances: z.array(provenanceSchema),
   pairs: pairsSchema,
   figures: figuresSchema,
+  cheaperCached: cheaperCachedSchema,
+  times: timesSchema,
 });
 type DatePairsBody = z.output<typeof datePairsBodySchema>;
 
@@ -219,7 +239,7 @@ function refineDatePairs(v: DatePairsBody, ctx: z.RefinementCtx): void {
   if (summary.total !== scope.cells)
     fail('total', ['summary', 'total'], 'summary.total must equal scope.cells');
   refinePairs(v, datePairs, fail);
-  refineFigures(v, datePairs, fail);
+  if (refineFigures(v, datePairs, fail)) refineGroups(v, fail);
 }
 
 type Fail = (rule: string, path: Array<string | number>, message: string) => void;
@@ -282,67 +302,116 @@ function refinePairs(v: DatePairsBody, datePairs: number, fail: Fail): void {
       );
 }
 
-function refineFigures(v: DatePairsBody, datePairs: number, fail: Fail): void {
-  const f = v.figures;
-  const n = f.pair.length;
-  let lengthsOk = true;
-  for (const c of FIGURE_COLUMNS) {
-    if (f[c].length === n) continue;
-    lengthsOk = false;
-    fail(`length.${c}`, ['figures', c], `figures.${c} has ${f[c].length} entries; figures.pair has ${n}`);
+/** Whether every column of a group is as long as its first; reports each one that is not. */
+function sameLengths<C extends string>(
+  group: Record<C, readonly unknown[]>,
+  columns: readonly [C, ...C[]],
+  name: string,
+  fail: Fail,
+): boolean {
+  const n = group[columns[0]].length;
+  let ok = true;
+  for (const c of columns) {
+    if (group[c].length === n) continue;
+    ok = false;
+    fail(
+      `length.${name}.${c}`,
+      [name, c],
+      `${name}.${c} has ${group[c].length} entries; ${name}.${columns[0]} has ${n}`,
+    );
   }
-  if (!lengthsOk) return;
+  return ok;
+}
+
+/** The figures' rules; false when their columns differ in length, so nothing can be read across them. */
+function refineFigures(v: DatePairsBody, datePairs: number, fail: Fail): boolean {
+  const f = v.figures;
+  if (!sameLengths(f, FIGURE_COLUMNS, 'figures', fail)) return false;
   const provenances = v.provenances.length;
   const origins = v.scope.origins.length;
   const destinations = v.scope.destinations.length;
-  const within = (x: number | null, size: number) => x === null || x < size;
-  for (let j = 0; j < n; j += 1) {
+  for (let j = 0; j < f.pair.length; j += 1) {
     const pair = columnAt(f.pair, j);
     if (j > 0 && pair <= columnAt(f.pair, j - 1))
       fail('pairOrder', ['figures', 'pair', j], 'pair must be strictly ascending');
     else if (pair >= datePairs) fail('pairRange', ['figures', 'pair', j], `pair must be below ${datePairs}`);
-    if (!within(columnAt(f.provenance, j), provenances))
+    if (columnAt(f.provenance, j) >= provenances)
       fail('provenance', ['figures', 'provenance', j], 'no such provenance');
-    if (!within(columnAt(f.origin, j), origins))
-      fail('origin', ['figures', 'origin', j], 'no such origin in scope');
-    if (!within(columnAt(f.destination, j), destinations))
+    if (columnAt(f.origin, j) >= origins) fail('origin', ['figures', 'origin', j], 'no such origin in scope');
+    if (columnAt(f.destination, j) >= destinations)
       fail('destination', ['figures', 'destination', j], 'no such destination in scope');
-    const cheaper = columnAt(f.cheaperCachedPence, j);
     if (columnAt(f.basis, j) === 'verified') {
       if (columnAt(f.superseded, j))
         fail('superseded', ['figures', 'superseded', j], 'superseded is for calendar figures');
       if (columnAt(f.truncated, j))
         fail('truncated', ['figures', 'truncated', j], 'truncated is for calendar figures');
-    } else {
-      if (columnAt(f.notSeenInLatestAgeHours, j) !== null)
-        fail(
-          'notSeen',
-          ['figures', 'notSeenInLatestAgeHours', j],
-          'not seen in latest is for verified figures',
-        );
-      if (cheaper !== null)
-        fail(
-          'cheaperBasis',
-          ['figures', 'cheaperCachedPence', j],
-          'a cheaper cached price is for verified figures',
-        );
-    }
-    if (cheaper !== null && cheaper >= columnAt(f.pricePence, j))
+    } else if (columnAt(f.notSeenInLatestAgeHours, j) !== null)
       fail(
-        'cheaperBelow',
-        ['figures', 'cheaperCachedPence', j],
-        "a cheaper cached price must be below the figure's",
+        'notSeen',
+        ['figures', 'notSeenInLatestAgeHours', j],
+        'not seen in latest is for verified figures',
       );
-    for (const c of CHEAPER_COMPANIONS)
-      if ((columnAt<unknown>(f[c], j) === null) !== (cheaper === null))
-        fail(`together.${c}`, ['figures', c, j], `${c} must be null exactly when cheaperCachedPence is`);
-    if (!within(columnAt(f.cheaperCachedProvenance, j), provenances))
-      fail('cheaperProvenance', ['figures', 'cheaperCachedProvenance', j], 'no such provenance');
-    if (!within(columnAt(f.cheaperCachedOrigin, j), origins))
-      fail('cheaperOrigin', ['figures', 'cheaperCachedOrigin', j], 'no such origin in scope');
-    if (!within(columnAt(f.cheaperCachedDestination, j), destinations))
-      fail('cheaperDestination', ['figures', 'cheaperCachedDestination', j], 'no such destination in scope');
   }
+  return true;
+}
+
+/**
+ * The figure a sparse group's entry `k` names: reports an index that is not strictly ascending or not a figure, and
+ * returns it only when it names a verified figure (both groups belong to verified figures alone), else null.
+ */
+function verifiedFigureOf(
+  v: DatePairsBody,
+  name: 'cheaperCached' | 'times',
+  k: number,
+  fail: Fail,
+): number | null {
+  const figure = v[name].figure;
+  const at = columnAt(figure, k);
+  if (k > 0 && at <= columnAt(figure, k - 1)) {
+    fail(`${name}.order`, [name, 'figure', k], `${name}.figure must be strictly ascending`);
+    return null;
+  }
+  if (at >= v.figures.pair.length) {
+    fail(`${name}.range`, [name, 'figure', k], `${name}.figure must name one of the figures`);
+    return null;
+  }
+  if (columnAt(v.figures.basis, at) === 'verified') return at;
+  fail(`${name}.basis`, [name, 'figure', k], `${name} entries are for verified figures only`);
+  return null;
+}
+
+/** The sparse groups' rules: lengths, figure order and basis, the cheaper price below its figure's, indices. */
+function refineGroups(v: DatePairsBody, fail: Fail): void {
+  const c = v.cheaperCached;
+  if (sameLengths(c, CHEAPER_COLUMNS, 'cheaperCached', fail))
+    for (let k = 0; k < c.figure.length; k += 1) {
+      const at = verifiedFigureOf(v, 'cheaperCached', k, fail);
+      if (at !== null && columnAt(c.pricePence, k) >= columnAt(v.figures.pricePence, at))
+        fail(
+          'cheaperBelow',
+          ['cheaperCached', 'pricePence', k],
+          "a cheaper cached price must be below the figure's",
+        );
+      if (columnAt(c.provenance, k) >= v.provenances.length)
+        fail('cheaperProvenance', ['cheaperCached', 'provenance', k], 'no such provenance');
+      if (columnAt(c.origin, k) >= v.scope.origins.length)
+        fail('cheaperOrigin', ['cheaperCached', 'origin', k], 'no such origin in scope');
+      if (columnAt(c.destination, k) >= v.scope.destinations.length)
+        fail('cheaperDestination', ['cheaperCached', 'destination', k], 'no such destination in scope');
+    }
+  const t = v.times;
+  if (sameLengths(t, TIME_COLUMNS, 'times', fail))
+    for (let k = 0; k < t.figure.length; k += 1) {
+      verifiedFigureOf(v, 'times', k, fail);
+      // why: an entry exists only for a figure with a time, so each figure has one encoding
+      if (
+        columnAt(t.departOut, k) === null &&
+        columnAt(t.arriveOut, k) === null &&
+        columnAt(t.departBack, k) === null &&
+        columnAt(t.arriveBack, k) === null
+      )
+        fail('timesEmpty', ['times', 'departOut', k], 'a times entry must hold at least one time');
+    }
 }
 
 /**
@@ -353,7 +422,7 @@ export const datePairsResponseSchema = datePairsBodySchema.superRefine(refineDat
 export type DatePairsResponse = z.output<typeof datePairsResponseSchema>;
 
 /** A cheaper current calendar price a verified figure hides (decision 38), named with its own airport pair. */
-const cheaperCachedSchema = z.strictObject({
+const cheaperCachedPriceSchema = z.strictObject({
   pricePence: moneyPenceSchema,
   provenance: provenanceSchema,
   stale: z.boolean(),
@@ -380,7 +449,7 @@ export const datePairFigureSchema = z
     departBack: z.string().nullable(),
     arriveBack: z.string().nullable(),
     fromEarlierSearch: z.boolean(),
-    cheaperCached: cheaperCachedSchema.nullable(),
+    cheaperCached: cheaperCachedPriceSchema.nullable(),
   })
   .superRefine((f, ctx) => {
     const fail = (path: Array<string | number>, message: string) =>
