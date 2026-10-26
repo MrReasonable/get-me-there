@@ -191,6 +191,7 @@ export async function bootApp(deps: BootDeps): Promise<RunningApp> {
   }
   const lock = new AppLock(ports.db, 'app', clock, log);
   let heartbeat: NodeJS.Timeout | null = null;
+  let booted: Engine | null = null;
   try {
     // why: plan decision 58: the lock is taken right after the migrations, as the tool bootstrap takes it, so airports are
     // seeded under it. The read-only wait found it free; a process that took it since is caught here, without a wait.
@@ -220,6 +221,7 @@ export async function bootApp(deps: BootDeps): Promise<RunningApp> {
     const home = deps.home ?? null;
     const notifiers = buildNotifiers(ports.config, log, ports.clock);
     const engine = engineFor(ports, log, { notifiers, home });
+    booted = engine;
     await engine.boot();
     logProvidersConfigured(ports, log);
     // why: spec §10 /alerts/test-email goes through the same email notifier (and its hourly ceiling) as every alert
@@ -288,6 +290,16 @@ export async function bootApp(deps: BootDeps): Promise<RunningApp> {
     // why: review arch-008: a boot that failed after the lock was taken must not leave it fresh for 90 s or a heartbeat
     // firing against a closed database.
     if (heartbeat !== null) clearInterval(heartbeat);
+    // why: a boot that failed after the engine booted (a listen refused) stops its scheduler too, so no cron job or the
+    // FX refresh a minute after boot fires against the database closed below; its own failure is logged, never thrown
+    // over the boot's
+    if (booted !== null)
+      await booted.shutdown().catch((e: unknown) => {
+        log.error(
+          { err: { message: safeMessage(e, secrets) } },
+          'engine shutdown after a failed boot failed',
+        );
+      });
     // why: WP3's release deletes only the row this AppLock acquired, so a refused acquire leaves the holder's lock alone.
     lock.release();
     ports.db.close();
