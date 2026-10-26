@@ -961,3 +961,39 @@ describe('WP17: the camoufox-install job', () => {
     );
   });
 });
+
+// why: WP19 Task 19.9 (spec §9 item 6, §17 revision 50, settled by the orchestrator): CI runs the Playwright suite, the
+// smoke on both projects and the @perf test, at GMT_TIMING_FACTOR 3, whenever a package it drives changes
+describe('WP19: the e2e job', () => {
+  const wf = () => YAML.parse(text('e2e.yml'));
+  const PATHS = [
+    'apps/web/**',
+    'apps/api/**',
+    'packages/core/**',
+    'packages/db/**',
+    'packages/engine/**',
+    '.github/workflows/e2e.yml',
+  ];
+  it('runs on the web, api, core, db and engine packages’ paths and its own, on push and pull request', () => {
+    const on = wf().on;
+    expect(on.push.paths).toEqual(PATHS);
+    expect(on.pull_request.paths).toEqual(PATHS);
+  });
+  it('runs on ubuntu-24.04 with a timeout and the timing factor 3, never retried or allowed to fail', () => {
+    const job = wf().jobs.e2e;
+    expect(job['runs-on']).toBe('ubuntu-24.04');
+    expect(job['timeout-minutes']).toBe(30);
+    expect(job.env).toEqual({ GMT_TIMING_FACTOR: 3 });
+    expect(job['continue-on-error']).toBeUndefined();
+    expect(job.steps.every((s) => s['continue-on-error'] === undefined)).toBe(true);
+  });
+  it('installs Chromium with the web package’s script, then runs its e2e script (both projects, @perf included)', () => {
+    const runs = wf().jobs.e2e.steps.map((s) => String(s.run ?? ''));
+    const install = runs.indexOf('pnpm --filter @gmt/web e2e:install');
+    const e2e = runs.indexOf('pnpm --filter @gmt/web e2e');
+    expect(install).toBeGreaterThan(runs.indexOf('pnpm install --frozen-lockfile'));
+    expect(e2e).toBeGreaterThan(install);
+    // why: no --project, --grep or --grep-invert narrows the run; the projects in playwright.config.ts decide
+    expect(runs.join('\n')).not.toMatch(/--project|--grep/);
+  });
+});
