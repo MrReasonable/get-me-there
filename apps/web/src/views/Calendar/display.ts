@@ -1,4 +1,5 @@
 import { compareAges, effectiveAge, type IsoDateTime } from '@gmt/core';
+import { GLYPH_ORDER as DATES_GLYPH_ORDER } from '../Dates/overview.js';
 import { bestCovered, countsConsistent } from './marker.js';
 import type { DayBasis, DayPrice, DaySlice, GlyphStatus, GridDay } from './types.js';
 
@@ -37,8 +38,8 @@ export type DayDisplay =
     }
   | { kind: 'glyphs'; glyphs: Glyph[]; reason: GlyphReason };
 
-/** The order priceless-day glyphs are drawn and the legend lists them. */
-export const GLYPH_ORDER: readonly GlyphStatus[] = ['empty', 'no_data', 'error', 'skipped', 'not_run'];
+/** The order priceless-day glyphs are drawn and the legend lists them (moved to the Dates overview, WP19 §4). */
+export const GLYPH_ORDER: readonly GlyphStatus[] = DATES_GLYPH_ORDER;
 
 function priceless(slice: DaySlice): DayDisplay {
   if (slice.discoveryProviders.length === 0) return { kind: 'glyphs', glyphs: [], reason: 'no-provider' };

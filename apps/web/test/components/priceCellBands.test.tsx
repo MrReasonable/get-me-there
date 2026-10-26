@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { PriceCell } from '../../src/components/PriceCell.js';
-import { BAND_CLASSES, BAND_COLOURS, type Band } from '../../src/views/Calendar/scale.js';
+import { BAND_CLASSES, BAND_COLOURS, type Band } from '../../src/views/Dates/shade.js';
 import { contrast } from '../contrast.js';
 import { provCalendar, provSearch } from '../fixtures.js';
 import { renderWithProviders } from '../render.js';

@@ -686,6 +686,77 @@ export const COPY = {
     tooManyCells: (cells: number, bound: number) =>
       `This search has ${cells} cells in scope, more than the ${bound} the Dates view reads at once. Narrow the origins or destinations in the filters above to bring it under ${bound}.`,
     noPriceInFilters: 'No date pair in these filters has a price found so far.',
+    // the overview (Task 19.5; spec §11 Overview)
+    overview: {
+      heading: 'Overview',
+      monthsLabel: 'Months of the window',
+      previousMonth: 'Previous month',
+      nextMonth: 'Next month',
+      stay: (from: number, to: number) =>
+        from === to ? `${from} ${noun(from, 'night', 'nights')}` : `${from}–${to} nights`,
+      closeBand: (stay: string, month: string) => `Close ${stay} in ${month}`,
+      cellName: (dates: string, stay: string, what: string) => `${dates}, ${stay}: ${what}`,
+      rank: (n: number) => `rank ${n}`,
+      bandDates: (date: string) => `departing ${date}`,
+      openBand: 'opens its stay lengths',
+      noMark: 'no airport pair in scope',
+      readoutLabel: 'Date pair readout',
+      readoutEmpty: 'Point at or focus a cell to read its date pair here.',
+      openThese: 'Open these dates',
+      buckets: (breakdown: string) => `by airport pair: ${breakdown}`,
+    },
+    marks: {
+      words: {
+        empty: 'no fares',
+        no_data: 'no cached data',
+        error: 'error',
+        skipped: 'skipped',
+        not_run: 'not searched',
+        partly: 'partly not searched',
+        notChecked: 'not checked',
+        superseded: 'superseded by a later search',
+        notSeen: 'not seen in latest search',
+        noneWithin: 'none within the journey limit',
+        unshown: 'priced, but no price can be shown here',
+      },
+      glyph: {
+        empty: '∅',
+        no_data: '◇',
+        error: '✕',
+        skipped: '–',
+        not_run: '○',
+        partly: '▨',
+        notChecked: '◫',
+        superseded: '↺',
+        notSeen: '◌',
+        noneWithin: '⧗',
+        unshown: '◑',
+      },
+    },
+    legend: {
+      title: 'Legend',
+      scaleQuintile: (n: number) =>
+        `Shade: ${n} current ${noun(n, 'price', 'prices')} in view, in five bands by rank, darkest cheapest`,
+      scaleFlatFew: (n: number, min: number) =>
+        `One shade for ${n} current ${noun(n, 'price', 'prices')}: fewer than ${min} are too few for price bands`,
+      scaleFlatNarrow: (n: number, min: string, max: string) =>
+        `One shade for ${n} current prices: they span ${min}–${max}, less than 10%, too narrow for price bands`,
+      scaleEmpty: 'No current price in view to shade',
+      band: (band: number, min: string, max: string, n: number) =>
+        `band ${band + 1}: ${min}–${max} (${n} date ${noun(n, 'pair', 'pairs')})`,
+      flat: (n: number) => `one shade: ${n} date ${noun(n, 'pair', 'pairs')}`,
+      offScale:
+        'Prices a later search no longer found (superseded, not seen) are on a plain fill with their mark, never on the scale.',
+      markCount: (words: string, n: number) => `${words}: ${n}`,
+      notChecked:
+        'not checked: a calendar price; its constraints (stops, journey time, arrival times) were not checked.',
+      noAmount: 'Cells print no amount: point at or focus one to read its price beside the legend.',
+      ring: 'outlined: on the board above',
+    },
+    // the coverage section (Task 19.5; what the Coverage view held)
+    coverageToggle: 'Coverage of the latest run',
+    coverageNotFiltered:
+      'The filters above do not narrow this section: it covers the latest run over the whole search.',
   },
   // --- WP10 (spec §11 View B, View C, History; plan decisions 38, 44, 46, 48) ---
   calendarView: {

@@ -1,4 +1,4 @@
-import { screen, within } from '@testing-library/react';
+import { fireEvent, screen, within } from '@testing-library/react';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { at, priced, pricedPair } from '../fixtures.dates.js';
 import { setViewportWidth } from '../viewport.js';
@@ -15,9 +15,12 @@ const JAN_OFFSET_MINUTES = { 'America/Los_Angeles': 480, 'Asia/Tokyo': -540 } as
 const body = {
   pairs: {
     [at('2027-03-14', 10)]: pricedPair(priced(30_000)),
+    [at('2027-03-31', 11)]: pricedPair(priced(30_500)),
     [at('2027-04-01', 12)]: pricedPair(priced(31_000)),
   },
 };
+const cellAt = (date: string, from: number) =>
+  document.querySelector<HTMLElement>(`[data-testid="dates-overview"] [data-cell="${date}|${from}"]`);
 
 describe.each(ZONES)('the Dates view’s dates never shift under TZ=%s', (zone) => {
   let previous: string | undefined;
@@ -40,8 +43,8 @@ describe.each(ZONES)('the Dates view’s dates never shift under TZ=%s', (zone) 
     const rows = boardRows(await findBoard());
     expect(rows[0]?.querySelectorAll('td')[1]).toHaveTextContent('14 Mar 2027');
     expect(rows[0]?.querySelectorAll('td')[2]).toHaveTextContent('24 Mar 2027');
-    expect(rows[1]?.querySelectorAll('td')[1]).toHaveTextContent('1 Apr 2027');
-    expect(rows[1]?.querySelectorAll('td')[2]).toHaveTextContent('13 Apr 2027');
+    expect(rows[2]?.querySelectorAll('td')[1]).toHaveTextContent('1 Apr 2027');
+    expect(rows[2]?.querySelectorAll('td')[2]).toHaveTextContent('13 Apr 2027');
   });
 
   it('the phone card reads the same dates', async () => {
@@ -51,8 +54,26 @@ describe.each(ZONES)('the Dates view’s dates never shift under TZ=%s', (zone) 
     expect(within(cards[0] ?? document.body).getByRole('link')).toHaveTextContent(
       '14 Mar 2027–24 Mar 2027 (10n)',
     );
-    expect(within(cards[1] ?? document.body).getByRole('link')).toHaveTextContent(
+    expect(within(cards[2] ?? document.body).getByRole('link')).toHaveTextContent(
       '1 Apr 2027–13 Apr 2027 (12n)',
     );
+  });
+
+  it('the overview puts a 2027-03-31 date pair in March’s month and a 2027-04-01 one in April’s, and the readout names 14 Mar', async () => {
+    renderDates({ body });
+    await findBoard();
+    expect(cellAt('2027-03-31', 11)?.closest('table')?.querySelector('caption')).toHaveTextContent(
+      'Mar 2027',
+    );
+    expect(cellAt('2027-04-01', 12)?.closest('table')?.querySelector('caption')).toHaveTextContent(
+      'Apr 2027',
+    );
+    // the day number in its own column: 31 Mar 2027 is a Wednesday, 1 Apr a Thursday (Monday first)
+    expect(cellAt('2027-03-31', 11)?.closest('td')?.cellIndex).toBe(2);
+    expect(cellAt('2027-04-01', 12)?.closest('td')?.cellIndex).toBe(3);
+    const c = cellAt('2027-03-14', 10);
+    if (c === null) throw new Error('no cell');
+    fireEvent.pointerOver(c);
+    expect(screen.getByTestId('dates-readout')).toHaveTextContent('14 Mar 2027–24 Mar 2027 (10n)');
   });
 });

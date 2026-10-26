@@ -5,8 +5,8 @@ owner: opus
 depends_on: [18]
 spec_sections: ["§1", "§6.5", "§6.6", "§8.3", "§9 items 1, 4, 5, 6", "§10 GET /definitions/:id/date-pairs", "§10 /results scope parameters", "§10 Routes the Dates view retires", "§11 layout and nav", "§11 URLs", "§11 Dates", "§11 Date pair detail", "§16", "§17 revisions 48 and 50"]
 reviewers: [code-architect, test-strategy-reviewer, ui-reviewer, provenance-auditor, data-model-reviewer, search-strategy-reviewer]
-mutate: {"@gmt/core": ["src/datePairs/space.ts", "src/datePairs/figure.ts", "src/datePairs/rank.ts", "src/datePairs/bands.ts", "src/datePairs/encode.ts", "src/datePairs/decode.ts", "src/datePairs/detailLink.ts", "src/api-contract/datePairs.ts"], "@gmt/web": ["src/state/parse.ts", "src/state/datesState.ts", "src/views/Dates/board.ts", "src/views/Dates/howFar.ts", "src/views/Dates/stayScope.ts", "src/views/Dates/refresh.ts"]}
-pending: {"@gmt/web": ["src/state/landing.ts", "src/views/Dates/shade.ts", "src/views/Dates/overview.ts", "src/views/Dates/keys.ts"]}
+mutate: {"@gmt/core": ["src/datePairs/space.ts", "src/datePairs/figure.ts", "src/datePairs/rank.ts", "src/datePairs/bands.ts", "src/datePairs/encode.ts", "src/datePairs/decode.ts", "src/datePairs/detailLink.ts", "src/api-contract/datePairs.ts"], "@gmt/web": ["src/state/parse.ts", "src/state/datesState.ts", "src/views/Dates/board.ts", "src/views/Dates/howFar.ts", "src/views/Dates/stayScope.ts", "src/views/Dates/refresh.ts", "src/views/Dates/shade.ts", "src/views/Dates/overview.ts", "src/views/Dates/keys.ts"]}
+pending: {"@gmt/web": ["src/state/landing.ts"]}
 status: reviewed
 ---
 
@@ -229,8 +229,10 @@ Moved, not rewritten (each with its existing tests ported beside it; the new tes
 - `views/Calendar/{CellPanel,PanelSections}.tsx` and `panel.ts` → `views/Results/{AirportPairPanel,PanelSections}.tsx`
   and `views/Results/panel.ts` (Task 19.6), with `test/views/calendar/panel.test.tsx` →
   `test/views/results/panel.test.tsx`.
-- `views/Coverage/CoverageView.tsx`'s body → `views/Dates/CoverageSection.tsx`, with `test/views/coverage.test.tsx` →
-  `test/views/dates/coverageSection.test.tsx`.
+- `views/Coverage/CoverageView.tsx`'s body → `views/Dates/CoverageSection.tsx` (as `CoverageBody`, which the folded
+  `CoverageSection` renders when open), with `test/views/coverage.test.tsx` → `test/views/dates/coverageSection.test.tsx`.
+  Until Task 19.8 deletes it, `CoverageView` renders `CoverageBody` whole; the Calendar view imports `shade.ts`,
+  `keys.ts` (`targetOf`) and `overview.ts` (`weeksOf`, `GLYPH_ORDER`) from their new homes rather than keeping copies.
 - `state/resultsState.ts`'s private `list`, `safeInt`, nights-range and sort-token parsers and its IATA list filter →
   `state/parse.ts`, used by `resultsState.ts` and `datesState.ts` (resultsState's tests stay the pin).
 
@@ -528,9 +530,10 @@ Versions from the lockfile (plan Task 0.1 list and later pins). Verified 2026-10
   the shared 422 table), `packages/db/test/helpers/history.ts` (the several-runs seed), `packages/db/drizzle/0009_wp19_latest_price_idx.sql`
   with `packages/db/test/migration0009.test.ts`; `apps/api/test/routes/{datePairs,datePairsBound,
   datePairsClassify,resultsScope}.test.ts`.
-- `apps/web/src/views/Dates/{DatesView,DatesHeader,BoardTable,BoardCard,UpdateBoard,Overview,OverviewMonth,Legend,
-  Readout,Filters,CoverageSection,States}.tsx` (the board's component is `BoardTable.tsx`: beside `board.ts`, a
-  `Board.tsx` would differ only in case, which a case-insensitive file system cannot tell apart in an import),
+- `apps/web/src/views/Dates/{DatesView,DatesHeader,BoardTable,BoardCard,UpdateBoard,OverviewGrid,OverviewMonth,Legend,
+  Readout,Filters,CoverageSection,States}.tsx` and `dates.css` (the board's and the overview's components are
+  `BoardTable.tsx` and `OverviewGrid.tsx`: beside `board.ts` and `overview.ts`, a `Board.tsx` or `Overview.tsx` would
+  differ only in case, which a case-insensitive file system cannot tell apart in an import),
   `apps/web/src/lib/coverageLine.ts` (§11's coverage line, one builder for the Results header, the Dates header and the
   detail), `apps/web/src/views/Dates/{board,howFar,stayScope,refresh,shade,overview,keys,
   flip}.ts`, `apps/web/src/state/{parse,datesState,landing}.ts`, `apps/web/src/views/Results/{AirportPairPanel,
@@ -1208,7 +1211,7 @@ config also runs from Stryker's sandbox).
 
 ### Task 19.5: The overview and the coverage section
 
-**Files**: `apps/web/src/views/Dates/{Overview,OverviewMonth,Legend,Readout,CoverageSection}.tsx`,
+**Files**: `apps/web/src/views/Dates/{OverviewGrid,OverviewMonth,Legend,Readout,CoverageSection}.tsx`, `dates.css`,
 `{overview,keys,shade}.ts` (with §4's moved functions); tests `test/views/dates/{overview,keyboard,marks,
 coverageSection}.test.tsx`, `test/views/dates/logic/{shade,overview,keys}.test.ts` (the ported scale and grid tests
 among them).

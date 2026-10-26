@@ -13,7 +13,10 @@
     "src/views/Dates/board.ts",
     "src/views/Dates/howFar.ts",
     "src/views/Dates/stayScope.ts",
-    "src/views/Dates/refresh.ts"
+    "src/views/Dates/refresh.ts",
+    "src/views/Dates/shade.ts",
+    "src/views/Dates/overview.ts",
+    "src/views/Dates/keys.ts"
   ],
   "thresholds": {
     "high": 90,

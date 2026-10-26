@@ -1,6 +1,6 @@
 import type { IsoDate, IsoDateTime } from '@gmt/core';
+import { type Band, buildScale, type QuintileScale } from '../Dates/shade.js';
 import { type DayDisplay, resolveDayDisplay } from './display.js';
-import { type Band, buildScale, type QuintileScale } from './scale.js';
 import type { DayBasis, GridDay } from './types.js';
 
 /** Per-day displays, the one-basis colour scale and the counts the header and legend need (spec §11 View B). */

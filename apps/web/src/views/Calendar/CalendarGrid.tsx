@@ -3,10 +3,11 @@ import { monthOf } from '@gmt/core';
 import { type KeyboardEvent, useEffect, useRef, useState } from 'react';
 import { COPY } from '../../copy.js';
 import { formatDayOfMonth, formatIsoDateLong, formatIsoMonth, WEEK_HEADERS } from '../../format.js';
+import { targetOf } from '../Dates/keys.js';
+import { weeksOf } from '../Dates/overview.js';
+import { BAND_CLASSES, FLAT_CLASS, PRICELESS_CLASS } from '../Dates/shade.js';
 import { DayBody, PhoneDayBody } from './DayBodies.js';
-import { targetOf, weeksOf } from './grid.js';
 import type { CalendarModel } from './model.js';
-import { BAND_CLASSES, FLAT_CLASS, PRICELESS_CLASS } from './scale.js';
 import type { GridDay } from './types.js';
 import './calendar.css';
 

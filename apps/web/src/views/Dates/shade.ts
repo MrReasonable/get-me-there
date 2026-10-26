@@ -1,3 +1,6 @@
+import type { DatePair, DatePairFigure } from '@gmt/core';
+
+// The overview's shading (WP19 §4: the Calendar view's scale.ts, moved, with the superseded and not-seen rule added).
 /** A quintile band; 0 is the cheapest fifth (spec §11 View B). */
 export type Band = 0 | 1 | 2 | 3 | 4;
 const BANDS = [0, 1, 2, 3, 4] as const satisfies readonly Band[];
@@ -108,4 +111,26 @@ export function buildScale(values: readonly number[]): QuintileScale {
     band: (v) => (mode === 'quintile' ? quintileBand(sorted, v) : null),
     legend,
   };
+}
+
+// --- The Dates overview's scale (spec §11 Overview; revision 50, Ian confirmed) ---
+
+/**
+ * A figure on the scale: one a later search did not overturn. Superseded and not-seen figures are drawn with their
+ * mark on a neutral fill and counted in the legend, never shaded, so every printed band range holds every price
+ * shaded in it.
+ */
+export function isCurrent(f: Pick<DatePairFigure, 'superseded' | 'notSeenInLatest'>): boolean {
+  return !f.superseded && f.notSeenInLatest === null;
+}
+
+/**
+ * The overview's one scale: the current verified and calendar figures of the date pairs in view together, by rank
+ * quintile (ties in one band), flat under ten figures or a spread under 10% of the cheapest (decision 38). The stay
+ * filter applies first (the caller passes the date pairs in view).
+ */
+export function shadeScale(pairs: readonly DatePair[]): QuintileScale {
+  const values: number[] = [];
+  for (const p of pairs) if (p.figure !== null && isCurrent(p.figure)) values.push(p.figure.price.pricePence);
+  return buildScale(values);
 }

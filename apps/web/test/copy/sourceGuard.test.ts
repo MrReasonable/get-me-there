@@ -36,7 +36,10 @@ const MONEY_FILES = new Set([
   'src/format.ts',
   'src/components/PriceCell.tsx',
   'src/components/StatusBar.tsx',
-  'src/views/Coverage/CoverageView.tsx',
+  // WP19: the coverage section's ledger costs (moved from the Coverage view), and the overview legend's band ranges,
+  // scale values in [data-scale], never fares
+  'src/views/Dates/CoverageSection.tsx',
+  'src/views/Dates/Legend.tsx',
   'src/views/Definitions/Confirmation.tsx',
   'src/views/Definitions/EstimatePanel.tsx',
   // WP10 (plan decision 52): the heatmap legend's band ranges, scale values in [data-scale], never fares; the

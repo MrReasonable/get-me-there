@@ -1,0 +1,8 @@
+/* The Dates overview's patterns (spec §11 Overview). Stylesheet rules, not inline styles: spec §4's CSP blocks inline
+   styles. A pattern, not a colour, so the meaning survives greyscale, colour-blindness and forced colours (where the
+   glyph beside it carries it too). */
+
+/* Partly not searched: stripes in the cell's own text colour, so they keep that colour's contrast on every shade. */
+.dates-partly {
+  background-image: repeating-linear-gradient(45deg, currentColor 0 1px, transparent 1px 5px);
+}

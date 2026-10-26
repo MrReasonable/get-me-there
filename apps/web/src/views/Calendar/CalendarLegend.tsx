@@ -1,8 +1,8 @@
 import { COPY } from '../../copy.js';
 import { formatPence } from '../../format.js';
+import { BAND_CLASSES, FLAT_CLASS, MIN_BANDED_DAYS, PRICELESS_CLASS } from '../Dates/shade.js';
 import { GLYPH_ORDER } from './display.js';
 import type { CalendarModel } from './model.js';
-import { BAND_CLASSES, FLAT_CLASS, MIN_BANDED_DAYS, PRICELESS_CLASS } from './scale.js';
 import type { DayBasis } from './types.js';
 
 /**

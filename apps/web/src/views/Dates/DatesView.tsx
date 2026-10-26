@@ -12,9 +12,11 @@ import { type DatesUiState, filtersActive, parseDatesState, scopeQuery } from '.
 import { useSearchParams } from '../../state/urlState.js';
 import { BoardTable } from './BoardTable.js';
 import { type BoardModel, boardModel, isSyntheticRead, PAGE_SIZE } from './board.js';
+import { CoverageSection } from './CoverageSection.js';
 import { DatesHeader } from './DatesHeader.js';
 import { Filters } from './Filters.js';
 import { type Animate, browserAnimate } from './flip.js';
+import { Overview } from './OverviewGrid.js';
 import { changeCount, IDLE, onProgress, onTerminal, onTimer, type Reread, readDecision } from './refresh.js';
 import { NeverRun, NoPriceInFilters, NoSearch, Paused, TooManyCells } from './States.js';
 import { countsOf } from './stayScope.js';
@@ -160,6 +162,11 @@ function DatesOf({
   }, [model]);
 
   const data = shown?.data ?? null;
+  // why: spec §11 Rings: the board's shown rows are ringed on the overview
+  const ringed = useMemo(
+    () => new Set((model?.rows ?? []).slice(0, visible).map((p) => p.index)),
+    [model, visible],
+  );
   return (
     <div className="space-y-4">
       {data !== null && isSyntheticRead(data, run) ? <SyntheticBanner /> : null}
@@ -199,6 +206,18 @@ function DatesOf({
           />
         )}
       />
+      {data !== null && model !== null ? (
+        <Overview
+          definition={definition}
+          data={data}
+          model={model}
+          state={state}
+          ringed={ringed}
+          lit={lit}
+          onLight={setLit}
+        />
+      ) : null}
+      <CoverageSection definition={definition} open={state.coverageOpen} />
     </div>
   );
 }
