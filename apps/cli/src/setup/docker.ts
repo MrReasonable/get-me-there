@@ -12,9 +12,10 @@ export type ComposeService = { Service: string; State: string };
 
 /**
  * The one reader of `docker compose ps --format json` (ca-b1-011): compose 2.21 and later print one object a line,
- * earlier versions one array. A line that is no such object makes the whole output unreadable (an empty list).
+ * earlier versions one array. Null when the output is not that (a line that is no such object makes the whole output
+ * unreadable); empty output is no service.
  */
-export function composeServices(stdout: string): ComposeService[] {
+export function composeServicesRead(stdout: string): ComposeService[] | null {
   const text = stdout.trim();
   if (text === '') return [];
   try {
@@ -22,12 +23,15 @@ export function composeServices(stdout: string): ComposeService[] {
       ? JSON.parse(text)
       : text.split('\n').map((l) => JSON.parse(l));
     const r = z.array(serviceSchema).safeParse(parsed);
-    return r.success ? r.data.map((x) => ({ Service: x.Service, State: x.State })) : [];
+    return r.success ? r.data.map((x) => ({ Service: x.Service, State: x.State })) : null;
   } catch {
-    // why: output that is not compose's JSON says nothing about the services; the callers read "none known"
-    return [];
+    // why: output that is not compose's JSON says nothing about the services
+    return null;
   }
 }
+
+/** The services compose's output names; unreadable output reads as none known (an empty list). */
+export const composeServices = (stdout: string): ComposeService[] => composeServicesRead(stdout) ?? [];
 
 /** Whether compose's output shows the `app` service running. */
 export const appRunningIn = (stdout: string): boolean =>

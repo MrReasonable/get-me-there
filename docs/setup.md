@@ -1012,7 +1012,9 @@ worker is set up by hand (the appendix below: its data directory, consent captur
 passes. After a `git pull` that changes the pin, run `pnpm gmt browser install` again (the worker refuses with
 `build-mismatch` until you do). `pnpm gmt start --only worker`, `stop --only worker` and `restart --only worker` work
 without `app.env`; stopping the worker does not ask the Docker app about a running search, so do it between runs. Point
-the app at the worker as below.
+the app at the worker as below. `pnpm gmt status` then reads the Docker app (its port from compose, the basic auth from
+this checkout's `.env`) and prints its report beside the worker's service, `worker.env` and refusal; with no native
+install it does not check `app.env`, the app service or the daily backup job.
 
 ### If you set the worker up by hand before
 

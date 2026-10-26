@@ -2,8 +2,11 @@
   "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
   "testRunner": "command",
   "commandRunner": {
-    "command": "pnpm exec vitest run --coverage.enabled=false"
+    "$comment": "Left out of the per-mutant command: the two files that start real child processes, installSeam.test.ts (a fresh Node child per case, since camoufox-js reads its install directory once, at import), which ci.yml runs on every push, and install.smoke.test.ts (skipped unless CAMOUFOX_INSTALL_SMOKE=1), which the camoufox-install job runs; a bailed worker killed while it starts a child can leave the child stuck in the kernel (PR #11)",
+    "command": "pnpm exec vitest run --coverage.enabled=false --bail=1 --exclude test/installSeam.test.ts --exclude test/install.smoke.test.ts"
   },
+  "incremental": true,
+  "incrementalFile": "reports/stryker-incremental.json",
   "mutate": [
     "src/classify.ts",
     "src/cooldown.ts",
@@ -23,7 +26,9 @@
     "break": 80
   },
   "reporters": ["html", "json", "progress"],
-  "jsonReporter": { "fileName": "reports/mutation/mutation.json" },
+  "jsonReporter": {
+    "fileName": "reports/mutation/mutation.json"
+  },
   "timeoutMS": 60000,
   "timeoutFactor": 3,
   "concurrency": 2,

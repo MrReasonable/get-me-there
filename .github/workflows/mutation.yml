@@ -12,10 +12,10 @@ permissions:
   contents: read
 # Actions are pinned by commit SHA (plan decision 63), the same SHAs ci.yml reads.
 jobs:
-  mutate:
+  mutation-globs:
     # why: ubuntu-latest moves to a new image without notice; a pinned image changes only when this line does.
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -27,7 +27,112 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: node scripts/check-mutation-globs.mjs
-      - run: pnpm --filter @gmt/core mutate && pnpm --filter @gmt/engine mutate && pnpm --filter @gmt/api mutate && pnpm --filter @gmt/camoufox-worker mutate
+  mutate:
+    # why: one job held core, engine, api and the worker in a row and ran past its 120 minutes (run 40173525400; main's
+    # weekly run on 2026-10-19), core alone needing about 3.2 hours. Each package now runs in jobs of its own, as the
+    # CLI's does: a package whose cold run would not fit one job splits its mutate files across shards
+    # (scripts/mutation-shard.mjs deals them out by size, so the shards always hold every file once, and writes each
+    # shard's Stryker config with no break of its own). Stryker runs incrementally, its file cached per shard under a key
+    # of the package's tests, its config, the lockfile and the shard split, then every source; a restore falls back only
+    # to a run of the same shard over the same tests (the command runner reports one test and cannot tell which test
+    # killed a mutant). The gate is the mutation-gate job below, once per package over all its shards. Each per-mutant
+    # command stops at its first failing test (--bail=1). Cold runs measured on this runner (run 40244374665,
+    # 2026-10-25), in minutes: core 20 and 22; engine 17, 32, 12 and 18; api 10; the worker 16, 18 and 11 (scores: core
+    # 99.82, engine 93.16, api 88.55, the worker 91.60). 120 minutes leaves room for the scope to grow.
+    name: mutate ${{ matrix.package }} (${{ matrix.shard }} of ${{ matrix.shards }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { package: core, dir: packages/core, shard: 1, shards: 2 }
+          - { package: core, dir: packages/core, shard: 2, shards: 2 }
+          - { package: engine, dir: packages/engine, shard: 1, shards: 4 }
+          - { package: engine, dir: packages/engine, shard: 2, shards: 4 }
+          - { package: engine, dir: packages/engine, shard: 3, shards: 4 }
+          - { package: engine, dir: packages/engine, shard: 4, shards: 4 }
+          - { package: api, dir: apps/api, shard: 1, shards: 1 }
+          - { package: camoufox-worker, dir: apps/camoufox-worker, shard: 1, shards: 3 }
+          - { package: camoufox-worker, dir: apps/camoufox-worker, shard: 2, shards: 3 }
+          - { package: camoufox-worker, dir: apps/camoufox-worker, shard: 3, shards: 3 }
+    env:
+      SHARD: ${{ matrix.shard }}
+      SHARDS: ${{ matrix.shards }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # why: the weekly run restores nothing, so every mutant is tested afresh (incremental results never see a change
+      # outside the mutated and test files, such as a dependency's source) and that becomes the next base. Each run saves
+      # under a key of its own (a cache entry cannot be replaced), and a restore takes the newest of the same shard over
+      # the same tests, the same sources first.
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: github.event_name != 'schedule'
+        with:
+          path: ${{ matrix.dir }}/reports/stryker-incremental.json
+          key: stryker-${{ matrix.package }}-${{ matrix.shard }}of${{ matrix.shards }}-${{ hashFiles(format('{0}/test/**', matrix.dir), format('{0}/stryker.config.json', matrix.dir), format('{0}/vitest.config.ts', matrix.dir), 'pnpm-lock.yaml', 'scripts/mutation-shard.mjs') }}-${{ hashFiles('packages/*/src/**', 'apps/*/src/**') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            stryker-${{ matrix.package }}-${{ matrix.shard }}of${{ matrix.shards }}-${{ hashFiles(format('{0}/test/**', matrix.dir), format('{0}/stryker.config.json', matrix.dir), format('{0}/vitest.config.ts', matrix.dir), 'pnpm-lock.yaml', 'scripts/mutation-shard.mjs') }}-${{ hashFiles('packages/*/src/**', 'apps/*/src/**') }}-
+            stryker-${{ matrix.package }}-${{ matrix.shard }}of${{ matrix.shards }}-${{ hashFiles(format('{0}/test/**', matrix.dir), format('{0}/stryker.config.json', matrix.dir), format('{0}/vitest.config.ts', matrix.dir), 'pnpm-lock.yaml', 'scripts/mutation-shard.mjs') }}-
+      - name: Stryker over this shard's files
+        working-directory: ${{ matrix.dir }}
+        run: |
+          files="$(node ../../scripts/mutation-shard.mjs . "$SHARD" "$SHARDS" --config reports/stryker.shard.json)"
+          echo "shard $SHARD of $SHARDS: $files"
+          pnpm exec stryker run reports/stryker.shard.json
+      # why: saved even when the run fails, so the next run carries on from these results
+      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: always()
+        with:
+          path: ${{ matrix.dir }}/reports/stryker-incremental.json
+          key: stryker-${{ matrix.package }}-${{ matrix.shard }}of${{ matrix.shards }}-${{ hashFiles(format('{0}/test/**', matrix.dir), format('{0}/stryker.config.json', matrix.dir), format('{0}/vitest.config.ts', matrix.dir), 'pnpm-lock.yaml', 'scripts/mutation-shard.mjs') }}-${{ hashFiles('packages/*/src/**', 'apps/*/src/**') }}-${{ github.run_id }}-${{ github.run_attempt }}
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: mutation-${{ matrix.package }}-${{ matrix.shard }}of${{ matrix.shards }}
+          path: ${{ matrix.dir }}/reports/mutation/mutation.json
+          if-no-files-found: error
+          retention-days: 7
+  mutation-gate:
+    # why: the package's gate is the one an unsharded run had (ruling 10, decision 67): its stryker.config.json break
+    # threshold and timeouts within 5%, judged once over every shard's mutants together, never shard by shard; a shard
+    # that did not report fails it (--expect).
+    name: gate ${{ matrix.package }}
+    needs: mutate
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { package: core, dir: packages/core, shards: 2 }
+          - { package: engine, dir: packages/engine, shards: 4 }
+          - { package: api, dir: apps/api, shards: 1 }
+          - { package: camoufox-worker, dir: apps/camoufox-worker, shards: 3 }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: mutation-${{ matrix.package }}-*
+          path: ${{ runner.temp }}/mutation
+      - name: The package's break threshold and timeout share over all its shards
+        env:
+          DIR: ${{ matrix.dir }}
+          SHARDS: ${{ matrix.shards }}
+          REPORTS: ${{ runner.temp }}/mutation
+        # why: download-artifact puts each of several artifacts in a directory of its own, but a single one at the top
+        run: |
+          mapfile -t reports < <(find "$REPORTS" -name mutation.json | sort)
+          node scripts/mutation-gate.mjs --config "$DIR/stryker.config.json" --expect "$SHARDS" "${reports[@]}"
   mutate-cli:
     # why: Ian's ruling on PR #11: the CLI's run has a job of its own, since GitHub stops a job at 6 hours. Stryker runs
     # incrementally: a mutant whose code did not change keeps its last result. The incremental file is cached under a
@@ -49,11 +154,14 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # why: as the package shards: the weekly run restores nothing, and each run saves under a key of its own
       - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: github.event_name != 'schedule'
         with:
           path: apps/cli/reports/stryker-incremental.json
-          key: stryker-cli-${{ hashFiles('apps/cli/test/**', 'apps/cli/stryker.config.json', 'apps/cli/vitest.config.ts', 'pnpm-lock.yaml') }}-${{ hashFiles('apps/cli/src/**', 'packages/core/src/**') }}
+          key: stryker-cli-${{ hashFiles('apps/cli/test/**', 'apps/cli/stryker.config.json', 'apps/cli/vitest.config.ts', 'pnpm-lock.yaml') }}-${{ hashFiles('apps/cli/src/**', 'packages/core/src/**') }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
+            stryker-cli-${{ hashFiles('apps/cli/test/**', 'apps/cli/stryker.config.json', 'apps/cli/vitest.config.ts', 'pnpm-lock.yaml') }}-${{ hashFiles('apps/cli/src/**', 'packages/core/src/**') }}-
             stryker-cli-${{ hashFiles('apps/cli/test/**', 'apps/cli/stryker.config.json', 'apps/cli/vitest.config.ts', 'pnpm-lock.yaml') }}-
       - run: pnpm --filter @gmt/cli mutate
       # why: saved even when the gate fails, so the next run carries on from these results
@@ -61,4 +169,4 @@ jobs:
         if: always()
         with:
           path: apps/cli/reports/stryker-incremental.json
-          key: stryker-cli-${{ hashFiles('apps/cli/test/**', 'apps/cli/stryker.config.json', 'apps/cli/vitest.config.ts', 'pnpm-lock.yaml') }}-${{ hashFiles('apps/cli/src/**', 'packages/core/src/**') }}
+          key: stryker-cli-${{ hashFiles('apps/cli/test/**', 'apps/cli/stryker.config.json', 'apps/cli/vitest.config.ts', 'pnpm-lock.yaml') }}-${{ hashFiles('apps/cli/src/**', 'packages/core/src/**') }}-${{ github.run_id }}-${{ github.run_attempt }}
