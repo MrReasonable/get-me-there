@@ -5,7 +5,7 @@ owner: opus
 depends_on: [16a]
 spec_sections: ["§1", "§4", "§9 item 9", "§9 CI matrix", "§12 Where settings live", "§13 Native local mode", "§13 One app per ledger", "§13 The gmt command", "§15", "§16", "§17 revision 36"]
 reviewers: [product-owner, code-architect, test-strategy-reviewer, security-reviewer, devops-reviewer, cost-and-budget-reviewer, persona-flexible-traveller]
-mutate: {"@gmt/cli": ["src/plan/**", "src/services/**", "src/exec/system.ts", "src/setup/appEnv.ts", "src/setup/answers.ts", "src/setup/secrets.ts", "src/setup/importDb.ts", "src/setup/importDocker.ts", "src/commands/update.ts", "src/commands/restore.ts", "src/commands/uninstall.ts"]}
+mutate: {"@gmt/cli": ["src/plan/**", "src/services/**", "src/exec/system.ts", "src/exec/http.ts", "src/setup/appEnv.ts", "src/setup/answers.ts", "src/setup/secrets.ts", "src/setup/importDb.ts", "src/setup/importDocker.ts", "src/commands/update.ts", "src/commands/restore.ts", "src/commands/uninstall.ts"]}
 pending: {}
 status: merged
 ---
@@ -357,6 +357,11 @@ Verify each on the day of dispatch and record the source and date here.
 - **vitest's JSON reporter and `vitest list --json`** (vitest.dev/guide/reporters, vitest.dev/guide/cli): the result
   file's per-test `file`, `fullName` and `status`, and the list output across projects, which
   `scripts/windows-known-failures.mjs` reads.
+- **undici 7.30.1** (`/nodejs/undici`: "Timeouts", `docs/docs/api/Client.md`; checked 2026-10-26): `deps.http`
+  (`src/exec/http.ts`) calls undici's own `fetch` with one `Agent({ headersTimeout: 0, bodyTimeout: 0 })`, so each
+  request's `timeoutMs` (its `AbortSignal.timeout`) is the one bound that ends it; Node's global fetch would apply
+  undici's 300 s defaults, below the smoke's 600 s (spec §13 rev 44). Its timers fire at about one second's
+  resolution, so the test's stand-in timeout is 1 s.
 - **GitHub-hosted runners**: research task 16b.0 below.
 
 ## 8. Files
@@ -364,7 +369,7 @@ Verify each on the day of dispatch and record the source and date here.
 Create: `apps/cli/{package.json, tsconfig.json, tsconfig.test.json, vitest.config.ts, stryker.config.json}`,
 `src/main.ts` (the only `process.env` reader), `src/args.ts`, `src/ask.ts`, `src/platform/{types,darwin,linux,win32,
 current}.ts`, `src/services/{launchd,systemd}.ts`, `src/plan/{action,apply,describe}.ts`,
-`src/exec/{memory,system,runner}.ts`, `src/commands/{setup,start,stop,restart,logs,backup,restore,password,smoke,update,
+`src/exec/{memory,system,runner,http}.ts`, `src/commands/{setup,start,stop,restart,logs,backup,restore,password,smoke,update,
 uninstall,status}.ts`, `src/setup/{prereqs,docker,prompts,answers,secrets,appEnv,importDocker,importDb,closing}.ts`,
 `src/worker/refusal.ts`, `src/commands/guard.ts`, `src/setup/record.ts`, `test/**`, `ci/answers.e2e.template.json`,
 `ci/windows-known-failures.txt`, `scripts/windows-known-failures.mjs`, `scripts/lock-state.mjs`,

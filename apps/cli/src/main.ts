@@ -8,8 +8,9 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { terminalAsk } from './ask.js';
 import { runCli } from './cli.js';
-import type { Deps, Http } from './deps.js';
+import type { Deps } from './deps.js';
 import { systemFiles } from './exec/files.js';
+import { systemHttp } from './exec/http.js';
 import { systemRunner } from './exec/runner.js';
 import { systemExecutor } from './exec/system.js';
 import { currentPlatform } from './platform/current.js';
@@ -23,21 +24,6 @@ const childEnv: Record<string, string> = {};
 for (const [k, v] of Object.entries(env)) if (v !== undefined && CHILD_ENV.test(k)) childEnv[k] = v;
 // why: apps/cli/src/main.ts is three directories below the checkout's root, wherever pnpm was run from
 const checkout = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
-
-/** Requests to this machine's app only; the Authorization header is never logged or echoed. */
-const http: Http = async (r) => {
-  try {
-    const res = await fetch(r.url, {
-      method: r.method,
-      headers: r.headers,
-      ...(r.body === undefined ? {} : { body: r.body }),
-      signal: AbortSignal.timeout(r.timeoutMs),
-    });
-    return { status: res.status, body: await res.text() };
-  } catch (e) {
-    return { error: e instanceof Error ? e.name : 'request failed' };
-  }
-};
 
 const portFree = (port: number): Promise<boolean> =>
   new Promise((resolve) => {
@@ -98,7 +84,7 @@ async function main(): Promise<number> {
       stdinIsTTY: process.stdin.isTTY === true,
       readStdin,
     },
-    http,
+    http: systemHttp,
     now: () => new Date(),
     sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
     checkout,
