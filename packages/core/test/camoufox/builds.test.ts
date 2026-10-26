@@ -161,8 +161,12 @@ describe('FLAGS and flagsFor (spec §2 rev 36: flags per <os>-<arch>, bound to t
       expect(Object.keys(FLAGS[k].flags), k).toEqual([...FLAG_NAMES]);
       expect(FLAGS[k].flags.FORM_VERIFIED, k).toBe(true);
     }
-    // why: darwin-x64's grid recordings each held a view the reading refused, so its grid mode stays off
-    expect(FLAGS['darwin-x64'].flags.GRID_VERIFIED).toBe(false);
+    // why: darwin-x64's grid mode came on with its re-recorded pages (grid/2026-10-26/5 and 6, spec §2 rev 46); every
+    // entry now has every flag but VIEW_MORE_ADDS_CHEAPER
+    for (const k of OS_ARCHES) {
+      const off = FLAG_NAMES.filter((f) => !FLAGS[k].flags[f]);
+      expect(off, k).toEqual(['VIEW_MORE_ADDS_CHEAPER']);
+    }
   });
 
   it('a flag set is bound to its build: an entry with any flag true names the build CAMOUFOX_BUILDS pins', () => {

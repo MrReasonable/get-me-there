@@ -7,7 +7,9 @@
  * - Each cell's dates come from its own name; after a scroll the page reuses and rotates its elements, so position says
  *   nothing. The two lines are a set check: each must hold seven consecutive dates with the right weekdays, and the
  *   dates the cells name must be those sets.
- * - A view holds 49 cells less the pairs whose return precedes the departure. A cell that fails the grammar or names a
+ * - A view holds 49 cells less the pairs whose return precedes the departure. It is taken only once it names that
+ *   many (spec §2 rev 46; the darwin-x64 recordings of 2026-10-26): a view whose readable lines call for more cells than
+ *   it names is still drawing, and its settle waits, to its bound at most. A cell that fails the grammar or names a
  *   date outside the lines is unparsed (counted). A pair named twice, a count that is not the expected one, or cells
  *   whose dates are not the lines' sets make the view structurally unparsed: none of its cells is kept.
  * - More than half of the priced-looking cells (names starting "£") failing is drift: `unrecognised`.
@@ -169,6 +171,34 @@ function lineDates(text: string, anchor: IsoDate): IsoDate[] | null {
   return new Set(days).size === 7 && Math.max(...days) - Math.min(...days) === 6 ? [...dates].sort() : null;
 }
 
+/** The pairs of `departures` × `returns` whose return is on or after the departure (a same-day pair is shown). */
+const pairsOf = (departures: readonly IsoDate[], returns: readonly IsoDate[]): number =>
+  departures.flatMap((d) => returns.filter((x) => x >= d)).length;
+
+/**
+ * How many cells a view's lines call for: the pairs of their seven departures and seven returns whose return is on or
+ * after the departure (49, fewer near the diagonal); null when the lines do not read as two lines of seven consecutive
+ * days with the right weekdays.
+ */
+export function cellsCalledFor(lines: readonly string[], anchor: IsoDate): number | null {
+  const [depLine, retLine, ...more] = lines;
+  if (depLine === undefined || retLine === undefined || more.length > 0) return null;
+  const departures = lineDates(spaced(depLine), anchor);
+  const returns = lineDates(spaced(retLine), anchor);
+  return departures === null || returns === null ? null : pairsOf(departures, returns);
+}
+
+/**
+ * Whether a view is still drawing its cells (spec §2 rev 46): its lines read, and it names fewer cells than they call
+ * for. The darwin-x64 recordings of 2026-10-26 held such views still across two polls (each undrawn cell printed "0000"
+ * in its place), so a settle waits while this holds. A view whose lines do not read, or that names more cells than they
+ * call for, is not drawing: there is nothing to wait for, and the reading refuses it as it is.
+ */
+export function stillDrawing(lines: readonly string[], cells: number, anchor: IsoDate): boolean {
+  // why: lines that do not read call for none, so nothing is waited for
+  return cells < (cellsCalledFor(lines, anchor) ?? 0);
+}
+
 /**
  * Checks one view (see the module comment). `anchor` is the query's departure (each date's year); `first` is the
  * query's pair on the page's first view.
@@ -239,7 +269,7 @@ export function interpretView(
       return { kind: 'unrecognised', why: 'first-view', check: 'range' };
     if (price !== selected.pounds) return { kind: 'unrecognised', why: 'first-view', check: 'price' };
   }
-  const possible = departures.flatMap((d) => returns.filter((x) => x >= d)).length;
+  const possible = pairsOf(departures, returns);
   const namedDeps = new Set(cells.map((c) => c.departureDate));
   const namedRets = new Set(cells.map((c) => c.returnDate));
   // why: every kept cell names dates on the lines, so the named sets are the lines' sets when their sizes are

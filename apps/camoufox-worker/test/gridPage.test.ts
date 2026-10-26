@@ -2,7 +2,14 @@
 // and synthetic grids in the --grid recordings' shape (test/support/gridTree.ts); no Google page is loaded.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { asIata, asIsoDate, asIsoDateTime, type GridMove, type PageRequest } from '@gmt/core';
+import {
+  asIata,
+  asIsoDate,
+  asIsoDateTime,
+  GRID_MOVE_BUDGET_MS,
+  type GridMove,
+  type PageRequest,
+} from '@gmt/core';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { CooldownStore } from '../src/cooldown.js';
 import { MonthlyCounter } from '../src/monthly.js';
@@ -391,6 +398,119 @@ describe('grid pages: the flow', () => {
     });
     const r = await t.session.page(req(['down'], { dep: '2027-09-10', ret: '2027-09-20' }));
     expect(r.answer).toMatchObject({ kind: 'grid', views: [], scrolls: 0, ended: 'no-flights' });
+  });
+});
+
+// why: the darwin-x64 recordings of 2026-10-26 (grid 3 and 4): a view held still across two polls while some of its
+// cells still showed the "0000" placeholder (a new column after a scroll, or a whole first view). Spec §2 rev 46: a view
+// is taken only once every cell its lines call for has drawn, bounded by its settle's bound, after which it is refused
+// as it is, never priced partly.
+describe('grid pages: a view still drawing its cells', () => {
+  const pollsOf = (log: ReturnType<typeof memoryLog>, view: string) =>
+    log.lines
+      .filter((l) => l.msg === 'dialog poll' && Reflect.get(l.o, 'view') === view)
+      .map((l) => Reflect.get(l.o, 'drawing'));
+  it('a view after a scroll whose new column draws late is waited on and read whole', async () => {
+    const log = memoryLog();
+    const t = setup({
+      log,
+      view: (d, r, i) => {
+        const whole = dialogPage(gridTree({ depart: d, ret: r, rotate: i }));
+        if (i !== 1) return [whole];
+        const part = dialogPage(
+          gridTree({ depart: d, ret: r, rotate: i, undrawn: (dd) => dd === plusDays(d, 6) }),
+        );
+        return [part, part, part, part, whole];
+      },
+    });
+    const r = await t.session.page(req(['right', 'down']));
+    expect(r.answer).toMatchObject({ kind: 'grid', ended: 'complete', scrolls: 2 });
+    expect(r.answer.kind === 'grid' && r.answer.views.map((v) => [v.cells.length, v.structural])).toEqual([
+      [49, 'ok'],
+      [49, 'ok'],
+      [49, 'ok'],
+    ]);
+    expect(pollsOf(log, 'move-1')).toEqual([true, true, true, true, false, false]);
+  });
+  it('a first view that has drawn no cell yet is waited on and read once it has', async () => {
+    const t = setup({
+      view: (d, r, i) => {
+        const whole = dialogPage(gridTree({ depart: d, ret: r }));
+        const none = dialogPage(gridTree({ depart: d, ret: r, undrawn: () => true }));
+        return i === 0 ? [none, none, none, whole] : [whole];
+      },
+    });
+    const r = await t.session.page(req(['down']));
+    expect(r.answer).toMatchObject({ kind: 'grid', ended: 'complete', scrolls: 1 });
+    expect(r.answer.kind === 'grid' && r.answer.views.map((v) => [v.cells.length, v.structural])).toEqual([
+      [49, 'ok'],
+      [49, 'ok'],
+    ]);
+  });
+  it('a view that never draws whole is waited on to its bound, then refused as it is: no cell kept, the page goes on', async () => {
+    const log = memoryLog();
+    const at: number[] = [];
+    const t = setup({
+      log,
+      onScroll: (x) => at.push(x),
+      view: (d, r, i) => [
+        dialogPage(
+          gridTree({
+            depart: d,
+            ret: r,
+            rotate: i,
+            ...(i === 1 ? { undrawn: (dd: string) => dd === plusDays(d, 6) } : {}),
+          }),
+        ),
+      ],
+    });
+    const r = await t.session.page(req(['right', 'down']));
+    expect(r.answer).toMatchObject({ kind: 'grid', ended: 'complete', scrolls: 2 });
+    expect(r.answer.kind === 'grid' && r.answer.views.map((v) => [v.cells.length, v.structural])).toEqual([
+      [49, 'ok'],
+      [0, 'unparsed'],
+      [49, 'ok'],
+    ]);
+    const polls = pollsOf(log, 'move-1');
+    expect(polls.length).toBeGreaterThan(2);
+    expect(new Set(polls)).toEqual(new Set([true]));
+    // why: the next scroll waits for the move's settle to reach its bound, never the 5 s spacing alone
+    expect((at[1] ?? 0) - (at[0] ?? 0)).toBeGreaterThanOrEqual(GRID_MOVE_BUDGET_MS);
+  });
+  it('a first view that never draws is waited on to its bound, then refused as it is: unrecognised', async () => {
+    const log = memoryLog();
+    const t = setup({
+      log,
+      view: (d, r) => [dialogPage(gridTree({ depart: d, ret: r, undrawn: () => true }))],
+    });
+    const r = await t.session.page(req(['down']));
+    expect(r.answer).toMatchObject({ kind: 'blocked', page: 'unrecognised', scrolls: 0 });
+    expect(decisions(log)[0]).toMatchObject({
+      rule: 'grid:first-view',
+      check: 'selected-cell',
+      candidates: 0,
+    });
+    expect(pollsOf(log, 'dates').length).toBeGreaterThan(2);
+  });
+  it('a view that names more cells than its lines call for is not waited on: refused as it is', async () => {
+    const log = memoryLog();
+    const t = setup({
+      log,
+      view: (d, r, i) => {
+        const g = gridTree({ depart: d, ret: r, rotate: i });
+        if (i === 1) {
+          const panel = (g.children ?? []).find((x) => x.role === 'tabpanel');
+          panel?.children?.push(n('button', '£450, 12 Mar to 21 Mar'));
+        }
+        return [dialogPage(g)];
+      },
+    });
+    const r = await t.session.page(req(['right']));
+    expect(r.answer.kind === 'grid' && r.answer.views.map((v) => [v.cells.length, v.structural])).toEqual([
+      [49, 'ok'],
+      [0, 'unparsed'],
+    ]);
+    expect(pollsOf(log, 'move-1')).toEqual([false, false]);
   });
 });
 

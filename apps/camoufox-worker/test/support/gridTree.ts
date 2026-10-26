@@ -48,6 +48,12 @@ export interface GridTreeOptions {
    * spaces around the dash and the dot.
    */
   selectedForm?: 'shared' | 'separate' | 'spaced';
+  /**
+   * The cells the page has not drawn yet: each shows as the "0000" placeholder text in its place, as the darwin-x64
+   * recordings of 2026-10-26 print one (grid 3's new column after a scroll, grid 4's whole first view). When the
+   * selected cell is one of them, its price line is not drawn either.
+   */
+  undrawn?: (d: string, r: string) => boolean;
 }
 
 function selectedLines(range: string, price: string, form: 'shared' | 'separate' | 'spaced'): FakeNode[] {
@@ -94,6 +100,10 @@ export function gridTree(o: GridTreeOptions): FakeNode {
     for (const [col, d] of deps.entries()) {
       // why: the grid shows no pair whose return precedes its departure (run 4: 39 cells); a same-day pair is shown
       if (r < d) continue;
+      if (o.undrawn?.(d, r) === true) {
+        cells.push(text('0000'));
+        continue;
+      }
       const p = price(d, r);
       const name =
         o.names?.(d, r, row * 7 + col) ??
@@ -129,7 +139,9 @@ export function gridTree(o: GridTreeOptions): FakeNode {
           ...(scroll ? [n('button', 'Scroll up'), n('button', 'Scroll down')] : []),
           ...selectedLines(
             selectedRange(sel[0], sel[1], o.thisYear),
-            `£${price(sel[0], sel[1]).toLocaleString('en-GB')} · Round trip`,
+            o.undrawn?.(sel[0], sel[1]) === true
+              ? ''
+              : `£${price(sel[0], sel[1]).toLocaleString('en-GB')} · Round trip`,
             o.selectedForm ?? 'shared',
           ),
           ...(o.extra ?? []),

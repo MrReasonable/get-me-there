@@ -13,6 +13,8 @@
 # and cool-down assertions, which need no mode, are in tests of their own, which pass there.
 # WP17 Task 17.8 adds the session line's and the landing recorder's tests, which fail there for the same POSIX modes
 # (https://github.com/MrReasonable/get-me-there/actions/runs/40305929385).
+# The grid settle that waits for every cell (spec rev 46) adds its grid page and recorder tests, which share those
+# files' POSIX-mode setup (https://github.com/MrReasonable/get-me-there/actions/runs/40325418273).
 apps/api/test/bootstrap/app.backup.test.ts > backup preflight (spec §7 Migrations, §13 Backup) backs up into <db dir>/backups before applying pending migrations; the backup has the old schema
 apps/api/test/bootstrap/app.matrix.test.ts > injected-config boot matrix (spec §5.5) an unwritable data directory fails boot with exit code 73
 apps/api/test/bootstrap/app.spawn.test.ts > production boot lacks fixture (spec §5.5, §9 item 5) the real bootstrap under NODE_ENV=production never offers or accepts synthetic data
@@ -63,6 +65,11 @@ apps/camoufox-worker/test/counts.test.ts > run.ts counts (W3) --json writes this
 apps/camoufox-worker/test/counts.test.ts > writePrivateFile (ca-b1-015) replaces the file at 0600 through a temporary file of its own, leaving none behind
 apps/camoufox-worker/test/fonts.test.ts > Linux fonts (spec §2 "Method"; WP17 §0) every working-directory <dir> names the bundle’s fonts/macos by absolute path; nothing else changes
 apps/camoufox-worker/test/fonts.test.ts > Linux fonts (spec §2 "Method"; WP17 §0) writes <workerData>/fonts.conf 0600 from the bundle’s fontconfig/macos/fonts.conf, outside the bundle
+apps/camoufox-worker/test/gridPage.test.ts > grid pages: a view still drawing its cells a first view that has drawn no cell yet is waited on and read once it has
+apps/camoufox-worker/test/gridPage.test.ts > grid pages: a view still drawing its cells a first view that never draws is waited on to its bound, then refused as it is: unrecognised
+apps/camoufox-worker/test/gridPage.test.ts > grid pages: a view still drawing its cells a view after a scroll whose new column draws late is waited on and read whole
+apps/camoufox-worker/test/gridPage.test.ts > grid pages: a view still drawing its cells a view that names more cells than its lines call for is not waited on: refused as it is
+apps/camoufox-worker/test/gridPage.test.ts > grid pages: a view still drawing its cells a view that never draws whole is waited on to its bound, then refused as it is: no cell kept, the page goes on
 apps/camoufox-worker/test/gridPage.test.ts > grid pages: fix round 1 (the moves, the lookups and the settle) SOCS changed by a scroll: consent-unhandled, the profile wiped, the scroll counted
 apps/camoufox-worker/test/gridPage.test.ts > grid pages: fix round 1 (the moves, the lookups and the settle) a dialog with no Dates tab: unrecognised (grid:no-dates-tab), no tab clicked
 apps/camoufox-worker/test/gridPage.test.ts > grid pages: fix round 1 (the moves, the lookups and the settle) a re-render that only reorders the labels after a scroll is a scroll that did not settle, not a wrong move (PIE M2)
@@ -168,7 +175,9 @@ apps/camoufox-worker/test/record.test.ts > record --grid a challenge after a scr
 apps/camoufox-worker/test/record.test.ts > record --grid a panel holding an e-mail address is refused: nothing written
 apps/camoufox-worker/test/record.test.ts > record --grid a panel that is not the dates-grid view is recorded and no scroll is tried
 apps/camoufox-worker/test/record.test.ts > record --grid a view after a scroll counts only once its lines change, then hold for two polls (12 s polls fit the move budget)
+apps/camoufox-worker/test/record.test.ts > record --grid a view still drawing at its bound is recorded as it is, marked not drawn; the next move still runs
 apps/camoufox-worker/test/record.test.ts > record --grid a view that has not changed by the end of its move budget is recorded timed out; the file is still written
+apps/camoufox-worker/test/record.test.ts > record --grid a view whose cells draw late is recorded once whole, marked drawn
 apps/camoufox-worker/test/record.test.ts > record --grid clicks Price graph, Dates and each scroll 5 s apart, and records every view, move delta and timing
 apps/camoufox-worker/test/record.test.ts > record --grid logs each step as "grid step"
 apps/camoufox-worker/test/record.test.ts > record --grid measures a one-day step from rotated lines

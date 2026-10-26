@@ -1779,6 +1779,61 @@ describe('record --grid', () => {
     expect(t.contexts[0]?.pages[0]?.calls.clicks).not.toContain('button:Scroll down');
     expect(cooldownOf(t)).toBeNull();
   });
+  // why: the darwin-x64 recordings of 2026-10-26 (grid 3 and 4) held views taken before their cells had drawn (spec §2
+  // rev 46): the recorder waits as the provider does, and records a view still drawing at its bound as it is, marked
+  it('a view whose cells draw late is recorded once whole, marked drawn', async () => {
+    let calls = 0;
+    const { t, deps } = gridRun({
+      step: 1,
+      view: (d, r) => {
+        calls++;
+        const whole = dialogPage(gridTree({ depart: d, ret: r }));
+        if (calls === 1) return [whole];
+        // why: one cell short, fewer than the four scroll buttons, so a count that kept them in would miss it
+        const part = dialogPage(
+          gridTree({
+            depart: d,
+            ret: r,
+            undrawn: (dd, rr) => dd === plusDays(d, 6) && rr === plusDays(r, 6),
+          }),
+        );
+        return [part, part, part, whole];
+      },
+    });
+    expect(await record(t.ctx([...G, '--moves', 'right']), cfg, deps)).toBe(0);
+    const rec = recOf(t);
+    expect(
+      rec.views.map((v: { candidates: unknown[]; drawn: boolean }) => [v.candidates.length, v.drawn]),
+    ).toEqual([
+      [49, true],
+      [49, true],
+    ]);
+    expect(rec.moves[0].polls).toBeGreaterThanOrEqual(5);
+  });
+  it('a view still drawing at its bound is recorded as it is, marked not drawn; the next move still runs', async () => {
+    let calls = 0;
+    const { t, deps } = gridRun({
+      pollMs: 12_000,
+      view: (d, r) => {
+        calls++;
+        return [dialogPage(gridTree({ depart: d, ret: r, ...(calls === 2 ? { undrawn: () => true } : {}) }))];
+      },
+    });
+    expect(await record(t.ctx([...G, '--moves', 'right,down']), cfg, deps)).toBe(0);
+    const rec = recOf(t);
+    expect(
+      rec.views.map((v: { candidates: unknown[]; drawn: boolean }) => [v.candidates.length, v.drawn]),
+    ).toEqual([
+      [49, true],
+      [0, false],
+      [49, true],
+    ]);
+    expect(rec.moves.map((m: { dir: string; delta: unknown }) => [m.dir, m.delta])).toEqual([
+      ['right', { departures: 7, returns: 0 }],
+      ['down', { departures: 0, returns: 7 }],
+    ]);
+    expect(rec.moves[0].polls).toBeGreaterThan(2);
+  });
   it('a challenge after a scroll is that stop with its cool-down; only the stop record is written', async () => {
     let calls = 0;
     const { t, deps } = gridRun({

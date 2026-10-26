@@ -12,6 +12,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { CooldownStore } from '../src/cooldown.js';
 import { parseCellName, resolveDay } from '../src/gridNames.js';
+import { changeKeyOf, stillDrawing } from '../src/gridView.js';
 import { MonthlyCounter } from '../src/monthly.js';
 import { Pacer } from '../src/pacer.js';
 import { Refusal } from '../src/refusal.js';
@@ -21,7 +22,7 @@ import { loadSocs } from '../src/socs.js';
 import { FakeContext } from './support/fakeContext.js';
 import { type FakeNode, formNodes, n, resultsTree, text } from './support/fakePage.js';
 import { memoryLog } from './support/log.js';
-import { rangeOf, recordedAnchor } from './support/recordedGrid.js';
+import { rangeOf, recordedAnchor, superseded } from './support/recordedGrid.js';
 import { SYNTHETIC_REJECT } from './support/socsValues.js';
 import { fakeTimers } from './support/timers.js';
 import { tmpDir } from './support/tmp.js';
@@ -86,7 +87,7 @@ function dialogOf(v: z.infer<typeof viewSchema>): FakeNode {
   ]);
 }
 
-function recordings(): Array<{ file: string; rec: z.infer<typeof fileSchema> }> {
+function allRecordings(): Array<{ file: string; rec: z.infer<typeof fileSchema> }> {
   const out: Array<{ file: string; rec: z.infer<typeof fileSchema> }> = [];
   const dir = join(ROOT, 'grid');
   if (!existsSync(dir)) return out;
@@ -98,18 +99,51 @@ function recordings(): Array<{ file: string; rec: z.infer<typeof fileSchema> }> 
             file: `${day.name}/${f}`,
             rec: fileSchema.parse(JSON.parse(readFileSync(join(dir, day.name, f), 'utf8'))),
           });
-  // why: WP17 Task 17.8: the server path is held to these recordings only on entries whose GRID_VERIFIED is set; the
-  // recorded suite keeps that flag false where a recording shows a refused view
-  return out.filter(
-    ({ rec }) =>
-      selectorsFor(rec.osArch, rec.versions?.binary ?? CAMOUFOX_BUILDS[rec.osArch].build).GRID_VERIFIED,
-  );
+  return out;
 }
+/**
+ * WP17 Task 17.8: the server path is held to these recordings only on entries whose GRID_VERIFIED is set; the recorded
+ * suite keeps that flag false where a recording shows a refused view.
+ */
+const recordings = () => {
+  const all = allRecordings();
+  // why: spec §2 rev 46: a recording that settle supersedes (darwin-x64's grid 3 and 4) is held to the checks below
+  // that a view still drawing is waited on or refused, not to these
+  return all.filter(
+    ({ rec }) =>
+      selectorsFor(rec.osArch, rec.versions?.binary ?? CAMOUFOX_BUILDS[rec.osArch].build).GRID_VERIFIED &&
+      !superseded(
+        rec,
+        all.map((o) => o.rec),
+        anchorOf(rec),
+      ),
+  );
+};
 
-async function serve(rec: z.infer<typeof fileSchema>) {
-  const first = rec.views[0];
-  if (first === undefined) throw new Error('no view');
-  const anchor = recordedAnchor(first.snapshot, rec.recordedAt);
+type View = z.infer<typeof viewSchema>;
+/**
+ * Serves a recording's views through the page session. `drawnLater` gives, by view index, what the page shows once
+ * that view has finished drawing: the recorded view holds still for three polls first (two more than the two-poll
+ * settle needs), then the later one shows.
+ */
+/**
+ * The view that names the query: the first holding a selected cell. Why: the darwin-x64 recordings of 2026-10-26:
+ * grid 4's first view had drawn no cell, and a scroll never moves the selection (every recording keeps it).
+ */
+function queryView(rec: z.infer<typeof fileSchema>): View {
+  const first = rec.views.find((v) => v.candidates.some((c) => c?.endsWith(', selected')));
+  if (first === undefined) throw new Error('no view names a selected cell');
+  return first;
+}
+const anchorOf = (rec: z.infer<typeof fileSchema>): IsoDate =>
+  recordedAnchor(queryView(rec).snapshot, rec.recordedAt);
+async function serve(
+  rec: z.infer<typeof fileSchema>,
+  drawnLater = new Map<number, View>(),
+  log = memoryLog(),
+) {
+  const first = queryView(rec);
+  const anchor = anchorOf(rec);
   const sel = parseCellName(first.candidates.find((c) => c?.endsWith(', selected')) ?? '');
   if (sel === null) throw new Error('no selected cell');
   const dep = resolveDay(sel.dep, anchor);
@@ -153,8 +187,12 @@ async function serve(rec: z.infer<typeof fileSchema>) {
       ];
       c.onNewPage = (pg) => {
         const show = () => {
-          const v = rec.views[Math.min(index, rec.views.length - 1)];
-          if (v !== undefined) pg.setTrees([n('document', '', [dialogOf(v)])]);
+          const at = Math.min(index, rec.views.length - 1);
+          const v = rec.views[at];
+          const later = drawnLater.get(at);
+          const tree = (x: View) => n('document', '', [dialogOf(x)]);
+          if (v !== undefined)
+            pg.setTrees(later === undefined ? [tree(v)] : [tree(v), tree(v), tree(v), tree(later)]);
         };
         pg.onClick = (x) => {
           if (x.role === 'button' && x.name === 'Price graph') show();
@@ -182,7 +220,7 @@ async function serve(rec: z.infer<typeof fileSchema>) {
     timers,
     selectors: { ...SELECTORS, CHEAPEST_FLOW_VERIFIED: false },
     pageTimeoutMs: 90_000,
-    log: memoryLog(),
+    log,
     versions: { selectors: 's', grammar: 'g', camoufoxJs: '0.11.5', binary: 'b' },
     grid: { mode: 'grid', spacingMs: 5000, scrollCap: 30, stepDays: GRID_STEP_DAYS },
   });
@@ -289,6 +327,82 @@ describe.skipIf(!present)(
         }
       }
       expect(diagonal).toBeGreaterThan(0);
+    });
+  },
+);
+
+// why: the darwin-x64 recordings of 2026-10-26 (grid 3 and 4): a view held still across two polls before all its
+// cells had drawn (42 of 49 after grid 3's first scroll, none in grid 4's first view). Spec §2 rev 46: a view is taken
+// only once every cell its lines call for has drawn, bounded by its settle's bound, after which it is refused as it is
+// today, never priced partly.
+describe.skipIf(!present)(
+  skipTitle('recorded grid views taken before their cells had drawn (spec §2 rev 46)', present),
+  () => {
+    /** Each recording holding a view whose lines call for more cells than it names, with those views' indexes. */
+    const drawing = () =>
+      allRecordings().flatMap(({ file, rec }) => {
+        const anchor = anchorOf(rec);
+        const idx = rec.views.flatMap((v, i) =>
+          stillDrawing(v.lines.texts, v.candidates.length, anchor) ? [i] : [],
+        );
+        return idx.length === 0 ? [] : [{ file, rec, idx }];
+      });
+    const settleName = (i: number): string => (i === 0 ? 'dates' : `move-${i}`);
+    it('such a view is waited on to its bound and refused as it is: no view is priced partly', async () => {
+      const recs = drawing();
+      expect(recs.length).toBeGreaterThan(0);
+      for (const { file, rec, idx } of recs) {
+        const log = memoryLog();
+        const r = await serve(rec, new Map(), log);
+        if (r.answer.kind === 'grid')
+          for (const v of r.answer.views) {
+            const called = v.departures.flatMap((d) => v.returns.filter((x) => x >= d)).length;
+            const whole = v.structural === 'ok' && v.cells.length === called;
+            const refused = v.structural === 'unparsed' && v.cells.length === 0;
+            expect(whole || refused, `${file} view ${v.index}`).toBe(true);
+          }
+        else expect(r.answer, file).toMatchObject({ kind: 'blocked', page: 'unrecognised' });
+        // why: the old rule took the view on its second poll; every poll of it now finds it still drawing
+        const polls = log.lines
+          .filter((l) => l.msg === 'dialog poll' && Reflect.get(l.o, 'view') === settleName(idx[0] ?? 0))
+          .map((l) => Reflect.get(l.o, 'drawing'));
+        expect(polls.length, file).toBeGreaterThan(2);
+        expect(new Set(polls), file).toEqual(new Set([true]));
+      }
+    });
+    it('once the same dates have drawn whole (the entry’s own whole view of them), each page is read whole', async () => {
+      let paired = 0;
+      for (const { file, rec, idx } of drawing()) {
+        const later = new Map<number, View>();
+        for (const i of idx) {
+          const key = changeKeyOf({ lines: rec.views[i]?.lines.texts ?? [] });
+          const whole = allRecordings()
+            .filter((o) => o.rec.osArch === rec.osArch)
+            .flatMap((o) =>
+              o.rec.views.filter(
+                (w) =>
+                  changeKeyOf({ lines: w.lines.texts }) === key &&
+                  !stillDrawing(w.lines.texts, w.candidates.length, anchorOf(o.rec)),
+              ),
+            )[0];
+          if (whole !== undefined) later.set(i, whole);
+        }
+        if (later.size !== idx.length) continue;
+        paired++;
+        const r = await serve(rec, later);
+        if (r.answer.kind !== 'grid') throw new Error(`${file}: ${JSON.stringify(r.answer)}`);
+        expect(r.answer.ended, file).toBe('complete');
+        expect(r.answer.views, file).toHaveLength(rec.views.length);
+        for (const v of r.answer.views) {
+          const called = v.departures.flatMap((d) => v.returns.filter((x) => x >= d)).length;
+          expect([v.structural, v.unparsed, v.cells.length], `${file} view ${v.index}`).toEqual([
+            'ok',
+            0,
+            called,
+          ]);
+        }
+      }
+      expect(paired).toBeGreaterThan(0);
     });
   },
 );

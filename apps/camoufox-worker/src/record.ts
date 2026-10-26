@@ -9,6 +9,7 @@ import {
   GRID_MIN_SCROLL_SPACING_SECONDS,
   GRID_MOVE_BUDGET_MS,
   GRID_MOVE_RESERVE_MS,
+  type IsoDate,
   type Logger,
   type OsArch,
   systemClock,
@@ -263,7 +264,10 @@ export async function record(ctx: EntryContext, cfg: WorkerConfig, deps: RecordD
               budget.onExpire(() => void p.close().catch(() => undefined));
             guard = await d.race(installGuard(c, p, deps.log, deps.selectors));
             const driver = createDriver(p, guard, deps.selectors);
-            outcome = await interact(driver, p, guard, budget, pageStart, deps, args.kind, url, args.moves);
+            outcome = await interact(driver, p, guard, budget, pageStart, deps, args.kind, url, {
+              moves: args.moves,
+              anchor: req?.departureDate ?? null,
+            });
           }
         } catch (e) {
           failure = e;
@@ -479,7 +483,8 @@ async function interact(
   deps: RecordDeps,
   kind: RecordingKind,
   url: string,
-  moves: readonly GridDirection[],
+  /** A `--grid` page's moves, and its query's departure (each line date's year; null for a kind with no request). */
+  grid: { moves: readonly GridDirection[]; anchor: IsoDate | null },
 ): Promise<Outcome> {
   let d = budget.d;
   const poll = (S: Selectors, view: View) =>
@@ -585,7 +590,7 @@ async function interact(
       stop,
       classifyAfterFailedStep,
     };
-    return kind === 'grid' ? await recordGrid(c, shown, moves) : await recordGraph(c, shown);
+    return kind === 'grid' ? await recordGrid(c, shown, grid) : await recordGraph(c, shown);
   }
   // why: rule 5: only --cheapest and --view-more click these controls before their flags are set.
   if (kind === 'cheapest' || kind === 'view-more') {
