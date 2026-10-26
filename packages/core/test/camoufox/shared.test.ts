@@ -25,6 +25,7 @@ import {
   START_REFUSAL_REASONS,
   START_REFUSAL_TEXT,
   startRefusalSchema,
+  WORKER_LOCK_FILE,
 } from '../../src/camoufox/start.js';
 import { WORKER_PORT, workerPortOf, workerUrlFor } from '../../src/camoufox/workerPort.js';
 import * as core from '../../src/index.js';
@@ -462,5 +463,7 @@ describe('the monthly counts file', () => {
   it('the install root is under the home directory’s local share', () => {
     expect(camoufoxRootDir('/home/op')).toBe('/home/op/.local/share/get-me-there/camoufox');
     expect(START_REFUSAL_FILE).toBe('start-refusal.json');
+    // why: the worker takes this file and the CLI's restart waits on it, so both read one name
+    expect(WORKER_LOCK_FILE).toBe('worker.lock');
   });
 });

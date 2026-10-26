@@ -1,10 +1,11 @@
+import { join } from 'node:path/posix';
 import type { StartRefusal } from '@gmt/core';
-import { startRefusalSchema } from '@gmt/core';
+import { startRefusalSchema, WORKER_LOCK_FILE } from '@gmt/core';
 import type { Deps } from '../deps.js';
 import type { Action } from '../plan/action.js';
-import type { ServiceFacts } from '../platform/types.js';
+import type { Paths, ServiceFacts } from '../platform/types.js';
 import { factOf, type ServiceEntry } from '../services/set.js';
-import { serviceEnvironment, workerRunArgv } from '../services/specs.js';
+import { serviceEnvironment, stopWaitSeconds, workerRunArgv } from '../services/specs.js';
 import { refusalWithFix } from '../worker/refusal.js';
 
 /**
@@ -65,3 +66,15 @@ export async function workerStart(
     notStarted: null,
   };
 }
+
+/**
+ * After the worker's service is stopped (WP16b ruling U5: nothing starts it again until the old process has exited):
+ * a bounded wait until no live process holds `<workerData>/worker.lock`, so its start check never meets the lock of
+ * the worker it replaces. The bound is the worker's stop timeout plus the margin.
+ */
+export const workerLockWait = (paths: Pick<Paths, 'workerData'>): Action => ({
+  kind: 'waitUnlocked',
+  path: join(paths.workerData, WORKER_LOCK_FILE),
+  holder: 'the worker',
+  timeoutSeconds: stopWaitSeconds('camoufox-worker'),
+});

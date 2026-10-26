@@ -1,5 +1,6 @@
 import { dirname } from 'node:path/posix';
 import type { Action, Executor } from '../plan/action.js';
+import { liveHolder, stillHeld } from '../worker/lock.js';
 import type { Files } from './files.js';
 import type { Runner } from './runner.js';
 
@@ -144,6 +145,8 @@ export class MemoryFs implements Files {
       case 'run':
       case 'waitHealthy':
       case 'waitGone':
+      case 'waitState':
+      case 'waitUnlocked':
         return;
     }
   }
@@ -205,10 +208,13 @@ export function memoryExecutor(
     runner?: Runner;
     fail?: (a: Action, index: number) => boolean;
     healthy?: (url: string) => boolean;
+    /** Whether a pid is a live process, for `waitUnlocked`; none is by default. */
+    alive?: (pid: number) => boolean;
   } = {},
 ): Executor & { log: Action[] } {
   const log: Action[] = [];
   const runner = opts.runner ?? memoryRunner(fs);
+  const alive = opts.alive ?? (() => false);
   return {
     log,
     async run(a: Action): Promise<{ stdout: string }> {
@@ -228,6 +234,22 @@ export function memoryExecutor(
         for (let i = 0; i < 10; i++)
           if ((await runner(a.argv, { cwd: '/', timeoutMs: 1000 })).code !== 0) return { stdout: '' };
         throw new Error(`${a.describe} still answers after ${a.timeoutSeconds} s`);
+      }
+      // why: one check a simulated second, as the system executor's, so a bound of n seconds is n + 1 checks
+      if (a.kind === 'waitState') {
+        for (let i = 0; i <= a.timeoutSeconds; i++) {
+          const r = await runner(a.argv, { cwd: '/', timeoutMs: 1000 });
+          if (r.code === 0 && a.until.includes(r.stdout.trim())) return { stdout: '' };
+        }
+        throw new Error(`${a.describe} still prints something else after ${a.timeoutSeconds} s`);
+      }
+      if (a.kind === 'waitUnlocked') {
+        let pid: number | null = null;
+        for (let i = 0; i <= a.timeoutSeconds; i++) {
+          pid = liveHolder(fs.read(a.path), alive);
+          if (pid === null) return { stdout: '' };
+        }
+        throw new Error(stillHeld(a, pid ?? 0));
       }
       if (a.kind === 'waitHealthy' && opts.healthy !== undefined && !opts.healthy(a.url))
         throw new Error(`${a.url} did not answer healthy within ${a.timeoutSeconds} s`);

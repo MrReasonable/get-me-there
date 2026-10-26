@@ -6,8 +6,7 @@ import type { Deps } from '../deps.js';
 import type { Action } from '../plan/action.js';
 import { apply } from '../plan/apply.js';
 import { describeResult } from '../plan/describe.js';
-import type { ServiceFacts } from '../platform/types.js';
-import { factOf, factsOf, serviceSet, workerEntry } from '../services/set.js';
+import { assumedStopped, factOf, factsOf, serviceSet, workerEntry } from '../services/set.js';
 import { appEnvPath } from '../services/specs.js';
 import { readEnvText, readSettings } from '../setup/appEnv.js';
 import { rewriteCounts } from './counts.js';
@@ -59,8 +58,6 @@ interface Options {
   ask: Ask;
   choice: BrowserChoice | null;
 }
-
-const assumedStopped = (f: ServiceFacts): ServiceFacts => ({ ...f, loaded: false, state: 'stopped' });
 
 /**
  * The worker's stop and the app's (when it restarts), the files written, then the worker's start once its check passes

@@ -285,14 +285,16 @@ describe('the worker’s service under --only (W5) and its start check', () => {
     expect(m.io.stdout).not.toContain('worker');
     expect(runs(m.executor.log).filter((r) => r.includes('camoufox-worker'))).toEqual([]);
   });
-  // why: CodeRabbit (PR #15): a restart starts the worker only once its check passes; a refused one stays stopped
-  it('restart runs the worker’s check: refused, the worker is stopped and stays so, its refusal said', async () => {
+  // why: CodeRabbit (PR #15): a restart starts the worker only once its check passes; a refused one stays stopped,
+  // and (U5, 2026-10-26) the restart is then not done: it says so and exits non-zero
+  it('restart runs the worker’s check after the stop: refused, the worker stays stopped, its refusal said, exit 78', async () => {
     const m = await on({ check: '{"reason":"consent-expired","at":"2026-10-24T09:30:00.000Z"}' });
-    expect(await runCli(['restart', '--only', 'worker'], m.deps)).toBe(0);
+    expect(await runCli(['restart', '--only', 'worker'], m.deps)).toBe(78);
     expect(m.checks).toHaveLength(1);
-    expect(m.io.stdout).toContain(
+    expect(m.io.stderr).toContain(
       'worker: not restarted: refused, not retrying: the consent record has expired',
     );
+    expect(m.io.stdout).not.toContain('restart: done');
     expect(runs(m.executor.log)).toEqual(['launchctl bootout gui/501/local.get-me-there.camoufox-worker']);
   });
   // why: W1: with the app in Docker there is no app.env here; the worker alone still starts and stops

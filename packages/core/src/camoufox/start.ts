@@ -11,6 +11,12 @@ import { CONSENT_FIX } from './consentFix.js';
 /** The refusal file's name inside the worker's data directory: a contract between the worker, the CLI and the app. */
 export const START_REFUSAL_FILE = 'start-refusal.json';
 
+/**
+ * The worker's lock file inside its data directory, holding the holder's pid: a contract between the worker (which takes
+ * it) and the CLI (whose restart waits until no live process holds it before it starts the worker again).
+ */
+export const WORKER_LOCK_FILE = 'worker.lock';
+
 /** Why the worker refused to start, written to `<workerData>/start-refusal.json` with the instant. */
 export const START_REFUSAL_REASONS = [
   'flags-unset',

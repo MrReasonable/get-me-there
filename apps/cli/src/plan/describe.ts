@@ -37,6 +37,10 @@ export function describeAction(a: Action): string {
       return `wait up to ${a.timeoutSeconds} s for ${a.url}`;
     case 'waitGone':
       return `wait up to ${a.timeoutSeconds} s until ${a.describe} fails`;
+    case 'waitState':
+      return `wait up to ${a.timeoutSeconds} s until ${a.describe} prints ${a.until.join(' or ')}`;
+    case 'waitUnlocked':
+      return `wait up to ${a.timeoutSeconds} s until ${a.holder} lets go of ${a.path}`;
   }
 }
 

@@ -44,9 +44,12 @@ describe('start, stop, restart (each service the setup installed)', () => {
   it('linux: stop and start act on the app and the job’s timer, never running the job', async () => {
     const m = await setUp('linux');
     expect(await runCli(['stop'], m.deps)).toBe(0);
+    // why: U5 on Linux: each stop waits until its unit reads inactive
     expect(show(m.executor.log)).toEqual([
       'systemctl --user stop get-me-there-app.service',
+      'waitState ',
       'systemctl --user stop get-me-there-backup.timer',
+      'waitState ',
     ]);
     m.executor.log.length = 0;
     expect(await runCli(['start'], m.deps)).toBe(0);

@@ -71,4 +71,47 @@ describe('MemoryFs, memoryRunner and memoryExecutor', () => {
     ).rejects.toThrow('did not answer healthy within 5 s');
     await memoryExecutor(new MemoryFs()).run({ kind: 'waitHealthy', url: 'u', timeoutSeconds: 1 });
   });
+
+  it('waitState and waitUnlocked check once a simulated second: a bound of n seconds is n + 1 checks', async () => {
+    const fs = new MemoryFs().file('/d/worker.lock', '77');
+    let probes = 0;
+    const runner = memoryRunner(fs, () => ({
+      code: 0,
+      stdout: ++probes < 3 ? 'deactivating\n' : 'inactive\n',
+    }));
+    const state = {
+      kind: 'waitState' as const,
+      argv: ['x'],
+      describe: 'x',
+      until: ['inactive'],
+      timeoutSeconds: 4,
+    };
+    await memoryExecutor(fs, { runner }).run(state);
+    expect(probes).toBe(3);
+    probes = -100;
+    await expect(memoryExecutor(fs, { runner }).run(state)).rejects.toThrow(
+      'x still prints something else after 4 s',
+    );
+    expect(probes).toBe(-95);
+    // a non-zero exit never counts, whatever it prints
+    const failing = memoryRunner(fs, () => ({ code: 1, stdout: 'inactive' }));
+    await expect(memoryExecutor(fs, { runner: failing }).run(state)).rejects.toThrow('after 4 s');
+    const lock = {
+      kind: 'waitUnlocked' as const,
+      path: '/d/worker.lock',
+      holder: 'the worker',
+      timeoutSeconds: 4,
+    };
+    // no live pid by default: free at once
+    await memoryExecutor(fs).run(lock);
+    let asked = 0;
+    await memoryExecutor(fs, { alive: () => ++asked < 3 }).run(lock);
+    expect(asked).toBe(3);
+    asked = 0;
+    await expect(memoryExecutor(fs, { alive: () => ++asked > 0 }).run(lock)).rejects.toThrow(
+      'the worker (pid 77) is still running and holds /d/worker.lock after 4 s',
+    );
+    expect(asked).toBe(5);
+    expect(fs.paths()).toContain('/d/worker.lock');
+  });
 });

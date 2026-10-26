@@ -1,6 +1,6 @@
 # get-me-there — Flight Price Intelligence & Flexible-Date Optimiser
 
-**Design spec, revision 41.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
+**Design spec, revision 42.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
 four full-roster reviews (145, 140, 126 and 101 findings; zero Critical since
 revision 2) and the provider spike. Revision 9 folds in the three decisions
 taken at approval (the self-scraping fallback in §2, the dashboard readings in
@@ -2832,7 +2832,14 @@ which `gmt start` prints), and clears it on a successful start. The worker's
 service waits up to 270 s on a stop (launchd `ExitTimeOut`, systemd
 `TimeoutStopSec`: the longest page timeout, 240 s, plus 30 s), so a page in
 flight finishes; `stop --only worker` and `restart --only worker` ask the app
-about an active run first, as `stop` does. `gmt browser install` installs or
+about an active run first, as `stop` does. A restart starts the worker again
+only after the old process has exited: the launchd label gone (or the systemd
+unit reading inactive, the wait every systemd stop ends with) and then no live
+process holding `<workerData>/worker.lock`, each wait bounded by the stop
+timeout plus 15 s and saying at its bound what is still running; the worker's
+start check runs only then. A check that refuses leaves the worker stopped
+(its launchd agent booted out), prints the refusal with its fix and that the
+worker is stopped, and exits 78 rather than reporting the restart done. `gmt browser install` installs or
 reinstalls the pinned bundle and its layout in any app mode (native, in
 Docker or none), needing no `app.env`: it asks a native app about an active
 run first, and where `worker.env` exists it removes the retired
@@ -3164,6 +3171,15 @@ as specified in §5.3; no secrets, no full URLs.
 ---
 
 ## 17. Changelog
+
+### Revision 42: the worker's restart waits for the old worker (2026-10-26)
+
+On the operator's Mac, `gmt restart --only worker` ran the worker's start check while the old worker still held its
+lock (it gets up to 270 s to finish a page), was refused as `locked`, left the agent booted out and still printed
+"restart: done". §13 now states WP16b ruling U5 for the worker: the restart stops it, waits until the launchd label
+is gone (every systemd stop now waits until its unit reads inactive) and no live process holds `worker.lock`, each
+wait bounded by the stop timeout plus 15 s, and runs the check only then; a refused check leaves the worker stopped,
+says so with the refusal's fix, and exits 78 instead of reporting done. No other design rule changes.
 
 ### Revision 41: the guided consent capture (2026-10-25)
 

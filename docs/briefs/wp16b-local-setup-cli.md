@@ -159,7 +159,11 @@ export type Action =
       stdin?: { text: string; secret: boolean };              // the child's standard input, never shown
       env?: Readonly<Record<string, string>> }                // the child's whole environment when given
   | { kind: 'waitHealthy'; url: string; timeoutSeconds: number }
-  | { kind: 'waitGone'; argv: readonly string[]; describe: string; timeoutSeconds: number }; // a probe run until it fails
+  | { kind: 'waitGone'; argv: readonly string[]; describe: string; timeoutSeconds: number }  // a probe run until it fails
+  | { kind: 'waitState'; argv: readonly string[]; describe: string; until: readonly string[]; timeoutSeconds: number }
+                                                       // a probe run until its trimmed stdout is one of `until`
+  | { kind: 'waitUnlocked'; path: string; holder: string; timeoutSeconds: number }; // a pid file (the worker's lock)
+                                                       // until it is gone or its pid is not a live process
 export interface Plan { command: string; actions: readonly Action[]; notes: readonly string[] }
 export interface Executor { run(a: Action): Promise<{ stdout: string }> } // a run resolves the child's stdout, else ''
 export interface ApplyResult {
@@ -262,7 +266,17 @@ child only as `stdin` with `secret: true`, and a secret run's stderr is never sh
 plain `stdin` (`secret: false`), such as the moved marker's text, is not shown either. A step whose output a later step
 needs (a backup's printed file, the check's summary) is an action like any other, read from `ApplyResult.outputs`, so
 every phase's dry run is `describePlan` of its real plan. On macOS a bootout is followed by a `waitGone` on `launchctl
-print` (45 s), so a restart is bootout, wait, bootstrap; systemd's `activating` (an auto-restart) reads as failed.
+print`, so a restart is bootout, wait, bootstrap; on Linux a `systemctl --user stop` is followed by a `waitState` until
+`systemctl --user show --property=ActiveState --value` prints `inactive` or `failed` (`is-active` exits non-zero while a
+unit is still `deactivating`). Each wait is bounded by the service's stop timeout plus 15 s (45 s; the worker's 285 s).
+The worker's restart (U5, folded in after the operator's report of 2026-10-26, where a restart ran the worker's check
+while the old worker still held its lock, was refused as `locked`, left the agent booted out and still printed "done") is
+the worker's stop, the wait above, then a `waitUnlocked` on `<workerData>/worker.lock` (core's `WORKER_LOCK_FILE`; free
+when the file is gone or its pid is not a live process, the worker's own `lockHeld` rule; read a second apart on the
+executor's clock, since no event marks another process's exit), the app's own restart, and only then the worker's check
+and start; a check that refuses leaves the worker stopped, prints the refusal with its fix and that the worker is
+stopped (its agent booted out on macOS), and exits 78 (1 for a check that fails), never "done". `stop --only worker`
+waits for the lock too when it stopped a running worker. systemd's `activating` (an auto-restart) reads as failed.
 
 ## 6. The wizard's prompts (pinned by a docs test against section 0 of `docs/setup.md`)
 
@@ -327,7 +341,8 @@ Verify each on the day of dispatch and record the source and date here.
   25 s shutdown), stdout and stderr paths, `StartCalendarInterval`.
 - **systemd `--user`** (systemd.service(5), systemd.timer(5), systemd.exec(5), loginctl(1)): units in
   `~/.config/systemd/user/`; `daemon-reload`, `enable --now`, `restart`, `stop`, `disable`, `reset-failed`,
-  `is-active`, `show-environment` (the probe; `is-system-running` exits non-zero for `degraded` too); `Restart=on-failure`,
+  `is-active`, `show --property=ActiveState --value` (the stop's wait), `show-environment` (the probe;
+  `is-system-running` exits non-zero for `degraded` too); `Restart=on-failure`,
   `RestartSec=60`, `RestartPreventExitStatus=`, `TimeoutStopSec=30`, `KillSignal=SIGTERM`, `Environment=` for `PATH`
   and `HOME` only, `ExecStart` quoting (and `%%` for a literal `%`), timers with `OnCalendar=*-*-* 03:30:00` and
   `Persistent=true`, `systemd-analyze --user verify`, `loginctl enable-linger`.
@@ -604,7 +619,11 @@ removal command), `pnpm gmt logs`, and that a plain `pnpm gmt setup` finishes. R
     get-me-there-backup`); on macOS with the agent booted out (after `gmt stop`) it runs the job's own command directly
     and names the file it printed.
   - `stop` and `restart` pass the active-run guard (§5; `--wait`, `--force`); `restart` on macOS is bootout, wait until
-    the label is gone, bootstrap (no `kickstart -k`).
+    the label is gone, bootstrap (no `kickstart -k`); on Linux every stop waits until the unit reads inactive. The
+    worker's restart waits for its lock to be free of a live pid after the stop and runs its check only then: a lock
+    released after n checks starts it after the n + 1st; a lock never released ends the bounded wait with the pid and
+    the path, exit 1, no start; a refused check exits 78 without "done", naming the refusal, its fix and the stopped
+    worker (both on launchd and systemd, with the injected executor and runner and the executors' clock, no sleep).
   - `restore <file>` requires the app stopped and uses importDb's one placement: the backup copied to a 0600 temporary
     file, that copy checked with `PRAGMA integrity_check` before anything moves (a failing copy is removed, nothing
     changed), the current database kept whole with its `-wal` and `-shm` as `<name>.before-restore-<time>` (never over an
@@ -692,7 +711,9 @@ removal command), `pnpm gmt logs`, and that a plain `pnpm gmt setup` finishes. R
   exclusively, and deletes it on any mismatch (a loopback HTTP server); `unpack` re-hashes the archive, refuses an
   absolute, `..` or escaping entry before extracting (`unzip -Z1`, `tar -tf`), and extracts into a fresh 0700 directory
   beside the target, making the parent, removing it on failure; `waitHealthy` bounds each try (a server that never
-  answers is one failed try); `waitGone` probes until the command fails, within its bound. `Files` reads null only for
+  answers is one failed try); `waitGone` probes until the command fails, within its bound; `waitState` until the
+  probe's trimmed output is one it waits for (a non-zero exit never counts); `waitUnlocked` until the pid file is gone or
+  its pid is not alive (`process.kill(pid, 0)`, EPERM counting as alive), naming the pid and the file at its bound. `Files` reads null only for
   an absent path and throws for an unreadable one.
 - [ ] **Implement; commit.**
 
