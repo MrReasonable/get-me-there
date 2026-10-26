@@ -2236,7 +2236,8 @@ or the engine. First-failing-test per WP in §16.
    `rankDatePairs` ties, table-driven (equal prices: verified before
    calendar, then fresher, unknown age last, then earlier departure, then
    fewer nights, then airport-pair order; superseded and not-seen after every
-   current figure), with property tests that the order is total and
+   current figure; a truncated figure ranked by its amount and carrying its
+   flag through the decoder), with property tests that the order is total and
    unchanged by permuting the input; the band folding (12 stay lengths stay
    unfolded; 13 stay lengths fold into 7 bands of ⌈13 / 12⌉ = 2 nights, the
    last of 1; 91 into 12 bands of 8, the last of 3; bands always contiguous,
@@ -2762,6 +2763,13 @@ merged into price.
     found empty or no_data is "superseded by a later search", and a verified
     figure the latest search no longer returned is "not seen in latest
     search (<age>)" (decision 54). Stale figures are labelled, never hidden.
+    A **truncated** figure (from a tile the pagination cap stopped early,
+    plan decisions 30 and 36) is a price that was found, so it is ranked by
+    its amount like any other, and the board row, the phone card and the
+    readout all say "cheapest of the rows read". The date pair's own cheapest
+    fare can then only be lower, so ranking by it never puts the date pair
+    above where its fares belong. It is never presented as that date pair's
+    lowest fare, and its how far checked says the read was cut short.
   - **Board**: a `table` captioned "Best dates", one row per date pair with
     a figure. Columns: rank, depart, return, nights, price (`PriceCell` row
     form: provider badge, source, age, "≈", destination, the dashed outline
