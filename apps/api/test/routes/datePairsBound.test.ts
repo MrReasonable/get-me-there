@@ -4,6 +4,7 @@
 // The statement counts and byte sizes are exact gates; only the time is multiplied, and no test is retried.
 import { gzipSync } from 'node:zlib';
 import {
+  asIata,
   type CellKey,
   type DefinitionInput,
   generateCells,
@@ -12,6 +13,7 @@ import {
 } from '@gmt/core';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { currentSpace } from '../../src/read/space.js';
+import { errorOf } from '../helpers/contract.js';
 import { EWR, exampleDefinitionInput, JFK, LGW, LHR } from '../helpers/examples.js';
 import { createHarness, type Harness, T0 } from '../helpers/harness.js';
 import { at, type Seeder, seeder } from '../helpers/seed.js';
@@ -78,6 +80,53 @@ function bulkRun(
   return exec;
 }
 
+/**
+ * A later parent run over the same cells as `from`, copied in SQL (three INSERT … SELECT statements in one
+ * transaction): every price moved by the run's own offset, every fetch `5 × run` hours later, so each run's prices and
+ * provenances differ. why: the 120 s seed budget; copying in SQL is several times faster than a row loop in the test.
+ */
+function copyRun(x: Harness, s: Seeder, name: string, def: SearchDefinition, from: string, run: number) {
+  const exec = s.execution(name, {
+    def,
+    status: 'completed',
+    startedAt: at(-200 + run * 5),
+    finishedAt: at(-199 + run * 5),
+  });
+  const raw = x.ports.db.raw;
+  const moved = (col: string) => `((${col} - 30000 + @offset) % 40000 + 30000)`;
+  const later = (col: string) => `strftime('%Y-%m-%dT%H:%M:%S.000Z', ${col}, @hours)`;
+  const p = { exec, from, offset: run * 104_729, hours: `+${run * 5} hours` };
+  raw.transaction(() => {
+    raw
+      .prepare(
+        `INSERT INTO search_cells (execution_id, origin, destination, departure_date, return_date, discovery_status, discovery_min_pence)
+         SELECT @exec, origin, destination, departure_date, return_date, 'priced', ${moved('discovery_min_pence')}
+         FROM search_cells WHERE execution_id = @from`,
+      )
+      .run(p);
+    raw
+      .prepare(
+        `INSERT INTO cell_outcomes (execution_id, origin, destination, departure_date, return_date, stage, provider_id, status, attempts,
+           fetched_at, min_pence, cabin, point_of_sale, source_kind)
+         SELECT @exec, origin, destination, departure_date, return_date, stage, provider_id, status, attempts,
+           ${later('fetched_at')}, ${moved('min_pence')}, cabin, point_of_sale, source_kind
+         FROM cell_outcomes WHERE execution_id = @from AND stage = 'discovery'`,
+      )
+      .run(p);
+    raw
+      .prepare(
+        `INSERT INTO calendar_prices (execution_id, provider_id, source_kind, cabin, origin, destination, departure_date, return_date,
+           price_pence, price_native_minor, currency_native, fx_converted, point_of_sale, fetched_at, max_age_hours, return_date_source)
+         SELECT @exec, provider_id, source_kind, cabin, origin, destination, departure_date, return_date,
+           ${moved('price_pence')}, ${moved('price_native_minor')}, currency_native, fx_converted, point_of_sale,
+           ${later('fetched_at')}, max_age_hours, return_date_source
+         FROM calendar_prices WHERE execution_id = @from`,
+      )
+      .run(p);
+  })();
+  return exec;
+}
+
 /** `n` verified cells of the latest run, each with its own itinerary (through the repositories' atomic unit). */
 function verifiedCells(x: Harness, s: Seeder, name: string, cells: readonly CellKey[]): void {
   x.ports.repos.cells.seedVerification(
@@ -135,7 +184,8 @@ async function smallWorld(o: { days?: number; runs?: number; verified?: number; 
   const def = x.ports.repos.definitions.create(small(o.days ?? 50));
   const cells = cellsOf(x, def);
   const runs: string[] = [];
-  for (let r = 0; r < (o.runs ?? 1); r++) runs.push(bulkRun(x, s, `E${r}`, def, cells, r));
+  runs.push(bulkRun(x, s, 'E0', def, cells, 0));
+  for (let r = 1; r < (o.runs ?? 1); r++) runs.push(copyRun(x, s, `E${r}`, def, runs[0] ?? '', r));
   verifiedCells(x, s, `E${(o.runs ?? 1) - 1}`, cells.slice(0, o.verified ?? 0));
   for (let k = 0; k < (o.children ?? 0); k++) {
     const c = cells[k];
@@ -174,8 +224,8 @@ describe('statements are constant on every axis that grows (spec §10 bounds)', 
 });
 
 describe('the 50,000-cell bound: time, size and the scope in the SQL (spec §9, §10)', () => {
-  // why: 400 days × 31 nights × 4 airport pairs = 49,600 cells, the largest space of the worked example's four airport
-  // pairs within 50,000 (five would need an airport outside the example); 20 parent runs deep, every cell priced.
+  // why: 250 days × 50 nights × the worked example's 4 airport pairs = exactly 50,000 cells (a fifth airport pair would
+  // need a code outside the example); 20 parent runs deep, every cell priced.
   let big: { x: Harness; def: SearchDefinition; oldest: string };
   let wide: { x: Harness; def: SearchDefinition };
   let raised: { x: Harness; def: SearchDefinition };
@@ -188,14 +238,15 @@ describe('the 50,000-cell bound: time, size and the scope in the SQL (spec §9, 
         exampleDefinitionInput({
           origins: [LHR, LGW],
           destinations: [JFK, EWR],
-          window: { kind: 'relative', startOffsetDays: 7, lengthDays: 400 },
+          window: { kind: 'relative', startOffsetDays: 7, lengthDays: 250 },
           minNights: 10,
-          maxNights: 40,
+          maxNights: 59,
         }),
       );
       const cells = cellsOf(x, def);
       const runs: string[] = [];
-      for (let r = 0; r < 20; r++) runs.push(bulkRun(x, s, `E${r}`, def, cells, r));
+      runs.push(bulkRun(x, s, 'E0', def, cells, 0));
+      for (let r = 1; r < 20; r++) runs.push(copyRun(x, s, `E${r}`, def, runs[0] ?? '', r));
       // a few hundred verified observations, spread over the space
       verifiedCells(
         x,
@@ -223,11 +274,12 @@ describe('the 50,000-cell bound: time, size and the scope in the SQL (spec §9, 
       const s = seeder(x.ports);
       const def = x.ports.repos.definitions.create(
         exampleDefinitionInput({
-          origins: [LHR, LGW],
+          // why: 250 × 50 × 8 airport pairs = 100,000 cells; AAA and BBB are the example's synthetic codes
+          origins: [asIata('AAA'), asIata('BBB'), LGW, LHR],
           destinations: [JFK, EWR],
-          window: { kind: 'relative', startOffsetDays: 7, lengthDays: 400 },
+          window: { kind: 'relative', startOffsetDays: 7, lengthDays: 250 },
           minNights: 10,
-          maxNights: 71,
+          maxNights: 59,
         }),
       );
       bulkRun(x, s, 'E0', def, cellsOf(x, def), 0);
@@ -255,11 +307,11 @@ describe('the 50,000-cell bound: time, size and the scope in the SQL (spec §9, 
     return { ...sizes, body: JSON.parse(text) };
   }
 
-  it('49,600 cells, 20 runs deep: within 3 s, at most 4 MiB and 512 KiB gzip', {
+  it('50,000 cells, 20 runs deep: within 3 s, at most 4 MiB and 512 KiB gzip', {
     timeout: 60_000,
   }, async () => {
     const m = await measure(big.x, `/api/definitions/${big.def.id}/date-pairs`);
-    expect(m.body.scope.cells).toBe(49_600);
+    expect(m.body.scope.cells).toBe(50_000);
     expect(m.ms).toBeLessThan(3_000 * timingFactor);
     expect(m.bytes).toBeLessThanOrEqual(4 * MiB);
     expect(m.gzip).toBeLessThanOrEqual(512 * KiB);
@@ -276,19 +328,22 @@ describe('the 50,000-cell bound: time, size and the scope in the SQL (spec §9, 
     expect(m.gzip).toBeLessThanOrEqual(512 * KiB);
   });
 
-  it("a 99,200-cell definition (the operator's raised setting) read with origins=LHR answers its 49,600 cells within the bounds", {
+  it("a 100,000-cell definition (the operator's raised setting) read with origins=LGW,LHR answers its 50,000 cells within the bounds", {
     timeout: 60_000,
   }, async () => {
     const unscoped = await raised.x.request(`/api/definitions/${raised.def.id}/date-pairs`);
     expect(unscoped.status).toBe(422);
-    const m = await measure(raised.x, `/api/definitions/${raised.def.id}/date-pairs?origins=LHR`);
-    expect([m.body.scope.cells, m.body.scope.origins]).toEqual([49_600, ['LHR']]);
+    const refusal = await errorOf(unscoped);
+    expect(refusal.code).toBe('too_many_cells');
+    expect(refusal.details).toMatchObject({ cells: 100_000, bound: 50_000 });
+    const m = await measure(raised.x, `/api/definitions/${raised.def.id}/date-pairs?origins=LGW,LHR`);
+    expect([m.body.scope.cells, m.body.scope.origins]).toEqual([50_000, ['LGW', 'LHR']]);
     expect(m.ms).toBeLessThan(3_000 * timingFactor);
     expect(m.bytes).toBeLessThanOrEqual(4 * MiB);
     expect(m.gzip).toBeLessThanOrEqual(512 * KiB);
   });
 
-  it('(d) 1,000 against 49,600 cells: the same statements for every read', { timeout: 60_000 }, async () => {
+  it('(d) 1,000 against 50,000 cells: the same statements for every read', { timeout: 60_000 }, async () => {
     const thousand = await smallWorld({ days: 100, verified: 5 });
     expect(await statementCounts(big.x, big.def, big.oldest)).toEqual(
       await statementCounts(thousand.x, thousand.def, thousand.oldest),

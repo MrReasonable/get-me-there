@@ -985,19 +985,21 @@ summary.
     the same axes on `/results` (whole space, one date pair, and `?executionId=` of the oldest of 20 runs, so its
     truncation and supersession marks are read without a scan of each past run). A statement per cell, per past run,
     per child or per itinerary fails it.
-  - **Time and size**: a definition of 49,600 cells in scope (400 days × 31 nights × the worked example's 4 airport
-    pairs, the largest space of those four within 50,000; five would need an airport outside the example), with history
+  - **Time and size**: a definition of exactly 50,000 cells in scope (250 days × 50 nights × the worked example's 4
+    airport pairs, LHR, LGW → EWR, JFK; a fifth airport pair would need a code outside the example), with history
     20 parent runs deep over those cells (their discovery outcomes and calendar prices), every cell priced, a few hundred
     verified observations and about one distinct provenance per 49 cells: the request, timed on its own, answers 200
     within `3_000 * timingFactor` ms (`timingFactor` is `Number(process.env.GMT_TIMING_FACTOR ?? 1)`, a positive number
     else the test throws; the `it`'s own timeout is a backstop only),
     the uncompressed body is at most 4 MiB (4 × 1024 × 1024 bytes) and the gzip body at most 512 KiB. A second case at
     36,400 date pairs (400 × 91, one airport pair, every one with a figure) holds the same bounds. A third: a
-    99,200-cell definition (the operator's raised setting; 400 × 62 × 4) read with `origins=LHR` bringing the scope to
-    49,600 answers 200 within the same bounds, reading only the scope's cells (the SQL carries the scope). Axis (d)
-    compares 1,000 cells with the 49,600-cell seed. The seeds' bulk rows are written with raw statements in one
-    transaction per run (the repositories' per-tile writes would take minutes), the verified cells through the
-    repositories; their harnesses are built with `createHarness({ persistent: true })`, which the file closes in
+    100,000-cell definition (the operator's raised setting; 250 × 50 × 8 airport pairs, origins AAA, BBB, LGW, LHR →
+    EWR, JFK, AAA and BBB being the example's synthetic codes) read with `origins=LGW,LHR` bringing the scope to 50,000
+    answers 200 within the same bounds, reading only the scope's cells (the SQL carries the scope), and its unscoped
+    read is 422 `too_many_cells` with `cells: 100000`. Axis (d) compares 1,000 cells with the 50,000-cell seed. The
+    first run's bulk rows are written with raw statements in one transaction, each later run copied from it in SQL
+    (INSERT … SELECT, prices and fetch times moved per run) to stay inside the 120 s seed budget (the repositories'
+    per-tile writes would take minutes), the verified cells through the repositories; their harnesses are built with `createHarness({ persistent: true })`, which the file closes in
     `afterAll` and which stores a rate for today so the engine's after-boot FX refresh never fires mid-file.
   - The count and size assertions are exact gates everywhere. The 3 s limit is §10's starting default; it is exact on
     the operator's machine (factor 1) and multiplied by 3 on CI, where `ci.yml` sets `GMT_TIMING_FACTOR: 3` on the job
