@@ -290,7 +290,9 @@ executor's clock, each try bounded on the executor's timers, until an answer of 
 line); the bound is 60 s, against about 3 s measured from launchd's start to listening on the operator's Mac. At its
 bound it fails naming `127.0.0.1:<port>`, the worker's log (`<logs>/camoufox-worker.log` on macOS, `journalctl --user -u
 <unit>` on Linux) and, when present, `<workerData>/start-refusal.json` with its reason and fix (or that it cannot be
-read), so the command exits 1 and never prints "done". A start the check refuses plans no start and no wait.
+read), so the command exits 1 and never prints "done"; setup's browser step, which starts the worker before the app,
+applies the app's start and health wait whatever the worker's start and wait did, and reports each failure. A start the
+check refuses plans no start and no wait.
 systemd's `activating` (an auto-restart) reads as failed.
 
 ## 6. The wizard's prompts (pinned by a docs test against section 0 of `docs/setup.md`)

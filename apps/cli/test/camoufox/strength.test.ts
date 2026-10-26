@@ -297,6 +297,46 @@ describe('browserSetup’s outcomes and words', () => {
       'writeFile /Users/op/Library/LaunchAgents/local.get-me-there.camoufox-worker.plist',
     );
   });
+  it('turning it on with a worker that never answers: the app is started again all the same, and the outcome is failed', async () => {
+    const m = await world();
+    const inner = m.deps.executor;
+    m.deps.executor = {
+      run: async (a: Action) => {
+        if (a.kind === 'waitWorkerAnswers') {
+          m.executor.log.push(a);
+          throw new Error('the worker did not answer on 127.0.0.1:8090 within 60 s');
+        }
+        return inner.run(a);
+      },
+    };
+    expect(await run(m)).toBe('failed');
+    expect(show(m.executor.log).slice(-4)).toEqual([
+      'run launchctl bootstrap gui/501 /Users/op/Library/LaunchAgents/local.get-me-there.camoufox-worker.plist',
+      'waitWorkerAnswers ',
+      'run launchctl bootstrap gui/501 /Users/op/Library/LaunchAgents/local.get-me-there.app.plist',
+      'waitHealthy http://127.0.0.1:3000/api/health',
+    ]);
+    expect(m.io.stderr).toContain(
+      '  failed:  wait up to 60 s until the worker answers on 127.0.0.1:8090: the worker did not answer on 127.0.0.1:8090 within 60 s\n',
+    );
+    expect(m.io.stdout).not.toContain('The browser provider is on');
+  });
+  it('a worker that never answers and an app that is not healthy: both failures are reported, one after the other', async () => {
+    const m = await world();
+    const inner = m.deps.executor;
+    m.deps.executor = {
+      run: async (a: Action) => {
+        if (a.kind === 'waitWorkerAnswers') throw new Error('the worker did not answer');
+        if (a.kind === 'waitHealthy') throw new Error('the app did not answer healthy');
+        return inner.run(a);
+      },
+    };
+    expect(await run(m)).toBe('failed');
+    expect(m.io.stderr).toContain(
+      'the worker did not answer\n  run the same command again to carry on from here\nsetup: the browser provider: stopped at a failed step; nothing was undone\n',
+    );
+    expect(m.io.stderr).toContain('the app did not answer healthy\n');
+  });
   it('a second run with it on re-renders nothing and says on; a failed re-render is failed', async () => {
     const m = await world();
     await run(m);

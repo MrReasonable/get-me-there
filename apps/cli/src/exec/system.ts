@@ -420,8 +420,10 @@ async function workerAnswers(
       () => null,
     );
     if (res === null) return false;
-    await res.body?.cancel();
-    return answeredAsWorker(res.headers);
+    const answered = answeredAsWorker(res.headers);
+    // why: the body is not read; a failure to discard it does not undo an answer already had
+    await res.body?.cancel().catch(() => undefined);
+    return answered;
   } finally {
     timers.clear(bound);
   }

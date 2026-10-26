@@ -61,7 +61,8 @@ interface Options {
 
 /**
  * The worker's stop and the app's (when it restarts), the files written, then the worker's start once its check passes
- * and the app's, and the health wait: worker before app, so the app's first status read finds the worker up.
+ * and its answer wait, then the app's start and health wait: worker before app, so the app's first status read finds
+ * the worker up. The app is started even when the worker's start or wait failed; every failure is returned.
  */
 async function writeAndRestart(
   deps: Deps,
@@ -107,23 +108,25 @@ async function writeAndRestart(
     if (start.notStarted !== null) deps.io.out(`worker: not started: ${start.notStarted}\n`);
     workerActions.push(...start.actions);
   }
-  const started = await apply(
+  const workerApplied = await apply({ command, actions: workerActions, notes: [] }, deps.executor);
+  // why: spec §13: a worker that fails to start or never answers never keeps the app down: the app is started again
+  // whatever the worker's start did, and each failure is reported
+  const appStarted = await apply(
     {
       command,
-      actions: [
-        ...workerActions,
-        ...(o.appRestart && app !== undefined
+      actions:
+        o.appRestart && app !== undefined
           ? [
               ...sm.start(app.unit, assumedStopped(af)),
               { kind: 'waitHealthy' as const, url: appUrl(port, '/api/health'), timeoutSeconds: 240 },
             ]
-          : []),
-      ],
+          : [],
       notes: [],
     },
     deps.executor,
   );
-  return started.failed === null ? null : describeResult(command, started);
+  const failures = [workerApplied, appStarted].filter((r) => r.failed !== null);
+  return failures.length === 0 ? null : failures.map((r) => describeResult(command, r)).join('');
 }
 
 /** Whether to turn the provider on: asked on a terminal, read from the answers file otherwise. */

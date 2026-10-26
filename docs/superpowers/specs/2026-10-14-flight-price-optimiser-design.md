@@ -2887,8 +2887,9 @@ no redirect followed, nothing beyond loopback), for at most 60 s. A worker
 that never answers fails the command (exit 1, never "done"), naming the
 port, the worker's log (`~/Library/Logs/get-me-there/camoufox-worker.log`,
 or `journalctl --user -u get-me-there-camoufox-worker.service`) and, when
-the worker left one, `start-refusal.json` with its reason and fix. A start
-the check refuses is neither started nor waited on. `gmt browser install` installs or
+the worker left one, `start-refusal.json` with its reason and fix; setup's
+browser step still starts the app again after it. A start the check refuses
+is neither started nor waited on. `gmt browser install` installs or
 reinstalls the pinned bundle and its layout in any app mode (native, in
 Docker or none), needing no `app.env`: it asks a native app about an active
 run first, and where `worker.env` exists it removes the retired
@@ -3240,7 +3241,7 @@ which listens only about 3 s later, after its browser has launched; a `gmt statu
 worker unreachable and its consent unchecked. §13 now says every start of the worker's service waits until the worker
 answers a keyless request to its status route on loopback (any answer carrying its own header), a second apart, for
 at most 60 s, and that a worker that never answers fails the command, naming its port, its log and any start refusal
-file, never printing "done". A start its check refuses is unchanged. No other design rule changes.
+file, never printing "done" (setup's browser step still starts the app again). A start its check refuses is unchanged. No other design rule changes.
 
 ### Revision 46: a grid view is taken only once its cells have drawn (2026-10-26)
 

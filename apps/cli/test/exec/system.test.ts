@@ -879,6 +879,21 @@ describe('systemExecutor: waits, redirects and answers (survivors, PR #11)', () 
       expect(bounds).toEqual([750, 750]);
       expect(cleared).toEqual([1, 2]);
     });
+    it('an answer whose body cannot be discarded still counts', async () => {
+      const body = new ReadableStream({
+        cancel() {
+          throw new Error('cannot cancel');
+        },
+      });
+      const e = systemExecutor(noChild, {
+        fetch: async () => new Response(body, { status: 401, headers: { 'x-gmt-google-contacted': '0' } }),
+        sleep: async () => {
+          throw new Error('asked only once');
+        },
+        now: () => 0,
+      });
+      await expect(e.run(wait(join(tmp(), 'start-refusal.json')))).resolves.toEqual({ stdout: '' });
+    });
   });
   it('pidAlive: this process is alive; a pid no process has is not', () => {
     expect(pidAlive(process.pid)).toBe(true);
