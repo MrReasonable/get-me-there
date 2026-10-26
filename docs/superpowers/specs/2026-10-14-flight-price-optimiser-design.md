@@ -1951,7 +1951,7 @@ completed
   definition's other active children may still spend; a definition whose run
   cap is 0 billed calls therefore starts no child, the request refused with
   code `cap`; the other budget fields are inherited from the definition; the
-  detail's verify (§11) confirms the hard stop it shows; a child never pauses: a
+  date pair detail's verify action (§11) confirms the hard stop it shows; a child never pauses: a
   cap breach ends it `cancelled` with the cell left unverified), shares the
   provider/global caps; at most one active child per cell; the action is hidden when the
   definition has no verification provider. Child observations are
@@ -2749,7 +2749,7 @@ merged into price.
     4 airport pairs · 10–14 nights"). Below it, when a verification provider
     is configured, the calendar-gap banner: "N cells have calendar prices
     below your reference verified price (latest seen, then fresh, then
-    cheapest) (£X)" with per-cell verify (the detail's verify, below).
+    cheapest) (£X)" with per-cell verify (the date pair detail's verify action, below).
   - **The figure** of a date pair, chosen across the airport pairs in scope
     by the precedence the calendar day had: the cheapest class-verified price
     that is not stale (`STALE_AFTER_HOURS`), else the fresher of the
