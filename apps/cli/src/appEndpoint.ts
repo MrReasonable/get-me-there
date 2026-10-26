@@ -95,9 +95,12 @@ export async function dockerPublications(deps: Deps): Promise<{ address: string;
   for (const line of r.stdout.split('\n')) {
     // why: any valid IP, so status can judge a LAN address; dockerEndpoint alone limits where credentials may go
     const m = /^(.+):(\d+)$/.exec(line.trim());
-    const address = m?.[1]?.replace(/^\[|\]$/g, '');
-    if (address !== undefined && m?.[2] !== undefined && isIP(address) !== 0)
-      out.push({ address, port: Number(m[2]) });
+    const raw = m?.[1]?.replace(/^\[|\]$/g, '');
+    if (raw === undefined || m?.[2] === undefined) continue;
+    const kind = isIP(raw);
+    // why: compose prints the host text as written, so 0:0:0:0:0:0:0:1 must read as ::1; URL writes the canonical form
+    const address = kind === 6 ? new URL(`http://[${raw}]`).hostname.replace(/^\[|\]$/g, '') : raw;
+    if (kind !== 0) out.push({ address, port: Number(m[2]) });
   }
   return out.length === 0 ? null : out;
 }

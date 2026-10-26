@@ -275,7 +275,7 @@ describe('gmt status by app mode: Docker only, native only, both (W1)', () => {
     expect(m.executor.log).toEqual([]);
   });
   it('Docker only, published on loopback: no bind-address warning', async () => {
-    for (const published of ['127.0.0.1:3917', '[::1]:3917']) {
+    for (const published of ['127.0.0.1:3917', '[::1]:3917', '[0:0:0:0:0:0:0:1]:3917']) {
       const { m } = dockerOnly('running', undefined, published);
       expect(await runCli(['status'], m.deps)).toBe(0);
       expect(m.io.stdout).not.toContain('bind address');
@@ -297,6 +297,7 @@ describe('gmt status by app mode: Docker only, native only, both (W1)', () => {
     ['IPv4 wildcard only', '0.0.0.0:3917', 'http://127.0.0.1:3917'],
     ['IPv6 loopback only', '[::1]:3917', 'http://[::1]:3917'],
     ['IPv6 wildcard only', '[::]:3917', 'http://[::1]:3917'],
+    ['IPv6 loopback written out in full', '[0:0:0:0:0:0:0:1]:3917', 'http://[::1]:3917'],
     ['both families', '[::]:3918\n0.0.0.0:3917', 'http://127.0.0.1:3917'],
     ['both families, IPv6 listed first', '[::1]:3918\n127.0.0.1:3917', 'http://127.0.0.1:3917'],
     ['a LAN address beside an IPv6 loopback', '192.0.2.10:3918\n[::1]:3917', 'http://[::1]:3917'],
