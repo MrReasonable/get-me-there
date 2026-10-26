@@ -9,7 +9,7 @@ import type {
   ServiceSpec,
   ServiceState,
 } from '../platform/types.js';
-import { assertPrintable, WORKER_STOP_SECONDS } from './specs.js';
+import { assertPrintable, stopWaitSeconds } from './specs.js';
 
 /**
  * macOS user agents (spec §13; `man launchd.plist`, `man launchctl`, brief §7): one plist per service in
@@ -113,7 +113,7 @@ export function launchdManager(uid: number, paths: Paths): ServiceManager {
       argv: ['launchctl', 'print', `${domain}/${label}`],
       describe: `launchctl print ${domain}/${label}`,
       // why: W7: the worker's agent may take its whole ExitTimeOut to let a page in flight finish
-      timeoutSeconds: (label === launchdLabel('camoufox-worker') ? WORKER_STOP_SECONDS : 30) + 15,
+      timeoutSeconds: stopWaitSeconds(label === launchdLabel('camoufox-worker')),
     },
   ];
   return {

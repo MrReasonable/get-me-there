@@ -32,7 +32,7 @@ import {
   runsAt,
 } from '../fixtures.wp10.js';
 import { server } from '../msw/server.js';
-import { renderWithProviders } from '../render.js';
+import { drawn, drawnText, renderWithProviders } from '../render.js';
 
 const routeRoute = `${API}/routes/:origin/:destination/history`;
 const itineraryRoute = `${API}/itineraries/:hash/history`;
@@ -320,27 +320,22 @@ describe('History view (spec §11 History, §10 history routes; plan decision 38
     const routeChart = getByRole('figure', {
       name: 'Vendor price history for a searched trip (indicative): price by date',
     });
-    expect(fetchChart.querySelector('svg[role="application"]')?.textContent).toContain(
-      'fetched (Europe/London)',
-    );
-    expect(routeChart.querySelector('svg[role="application"]')?.textContent).toContain(
-      'date of the vendor price',
-    );
-    expect(routeChart.querySelector('svg[role="application"]')?.textContent).toContain('10 Mar 2027');
+    // why: each chart draws after its box is measured, in renders after the figure's; wait for what is read below
+    const fetchText = await drawnText(fetchChart, 'fetched (Europe/London)');
+    const routeText = await drawnText(routeChart, 'date of the vendor price', '10 Mar 2027');
     expect(
       getByText(/^Each point is one run. A line joins two points only when they come from consecutive runs/),
     ).toBeInTheDocument();
     // why: decision 52 — no fare outside PriceCell, so neither figure is exempt and their axes print no "£".
-    for (const f of [fetchChart, routeChart]) {
-      expect(f).not.toHaveAttribute('data-scale');
-      expect(f.querySelector('svg[role="application"]')?.textContent).not.toContain('£');
-    }
-    await waitFor(() => expect(fetchChart.querySelector('.recharts-line-curve')).not.toBeNull());
-    const curve = fetchChart.querySelector('.recharts-line-curve');
+    for (const f of [fetchChart, routeChart]) expect(f).not.toHaveAttribute('data-scale');
+    expect(fetchText).not.toContain('£');
+    expect(routeText).not.toContain('£');
+    const curve = await drawn(fetchChart, '.recharts-line-curve');
     // why: the 300h run between the 500h and 170h points fetched nothing: two sub-paths, never a segment across it.
-    expect(curve?.getAttribute('d')?.match(/M/g)).toHaveLength(2);
-    expect(curve?.getAttribute('stroke-dasharray')).toBe('6 3');
-    expect(routeChart.querySelector('.recharts-line-curve')?.getAttribute('d')?.match(/M/g)).toHaveLength(1);
+    expect(curve.getAttribute('d')?.match(/M/g)).toHaveLength(2);
+    expect(curve.getAttribute('stroke-dasharray')).toBe('6 3');
+    const routeCurve = await drawn(routeChart, '.recharts-line-curve');
+    expect(routeCurve.getAttribute('d')?.match(/M/g)).toHaveLength(1);
   });
 
   it('a point from a catch-up says "ran <time>, catch-up for <missed time>" and keeps its own fetch time; other runs show nothing extra (spec §8.2 rev 36)', async () => {

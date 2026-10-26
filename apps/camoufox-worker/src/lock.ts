@@ -1,11 +1,13 @@
 import { closeSync, openSync, readdirSync, readFileSync, rmSync, unlinkSync, writeSync } from 'node:fs';
 import { join } from 'node:path';
+import { WORKER_LOCK_FILE } from '@gmt/core';
 
 /**
  * One worker per data directory (devops-006; decision 69): `<data>/worker.lock` holds the holder's pid. A lock whose
  * pid is not alive is taken over; a live one refuses, naming the pid. The recorder takes the same lock.
  */
-const FILE = 'worker.lock';
+// why: core's constant, so the CLI's restart waits on the same file the worker takes
+const FILE = WORKER_LOCK_FILE;
 
 export class LockHeld extends Error {
   constructor(readonly pid: number) {

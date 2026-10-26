@@ -9,7 +9,7 @@ import {
   DRY_RUN_LINE,
   PIN_FILE,
 } from '../camoufox/updateStep.js';
-import { workerStart } from '../camoufox/workerService.js';
+import { workerStart, workerStop } from '../camoufox/workerService.js';
 import { type Deps, EXIT } from '../deps.js';
 import { type Action, commandLine, type Plan, runAction } from '../plan/action.js';
 import { apply } from '../plan/apply.js';
@@ -158,7 +158,7 @@ export async function updateCommand(flags: Flags, _p: string | null, deps: Deps)
   const worker = entries.find((e) => e.name === 'camoufox-worker');
   const stop: Action[] = [
     ...(app === undefined ? [] : sm.stop(app.unit, appFacts)),
-    ...(worker === undefined ? [] : sm.stop(worker.unit, factOf(facts, worker.unit))),
+    ...(worker === undefined ? [] : workerStop(deps, worker.unit, factOf(facts, worker.unit))),
   ];
   const changeCode = !resuming && commit !== target;
   // why: decision 80: nothing is backed up before the app has stopped, and nothing changes the code before the backup

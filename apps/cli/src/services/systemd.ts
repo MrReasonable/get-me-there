@@ -8,7 +8,7 @@ import type {
   ServiceSpec,
   ServiceState,
 } from '../platform/types.js';
-import { assertPrintable } from './specs.js';
+import { assertPrintable, stopWaitSeconds } from './specs.js';
 
 /**
  * Linux user units (spec §13; systemd.service(5), systemd.timer(5), systemd.exec(5); brief §7): one `.service` per
@@ -135,7 +135,21 @@ export function systemdManager(): ServiceManager {
     },
 
     start: (unitName, f) => (f.onDisk === null || f.state === 'running' ? [] : [sc('start', unitName)]),
-    stop: (unitName, f) => (f.state === 'running' || f.state === 'failed' ? [sc('stop', unitName)] : []),
+    // why: U5's rule on Linux too: nothing starts the unit again until it reads inactive (or failed, its stop having
+    // ended in an error); `systemctl stop` blocks on its stop job, and the wait confirms the state it left
+    stop: (unitName, f) =>
+      f.state === 'running' || f.state === 'failed'
+        ? [
+            sc('stop', unitName),
+            {
+              kind: 'waitState',
+              argv: ['systemctl', '--user', 'show', '--property=ActiveState', '--value', unitName],
+              describe: `systemctl --user show --property=ActiveState --value ${unitName}`,
+              until: ['inactive', 'failed'],
+              timeoutSeconds: stopWaitSeconds(unitName === systemdUnit('camoufox-worker')),
+            },
+          ]
+        : [],
     restart: (unitName, f) => (f.onDisk === null ? [] : [sc('restart', unitName)]),
 
     remove(rendered, facts) {

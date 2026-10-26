@@ -1,10 +1,11 @@
+import { join } from 'node:path/posix';
 import type { StartRefusal } from '@gmt/core';
-import { startRefusalSchema } from '@gmt/core';
+import { startRefusalSchema, WORKER_LOCK_FILE } from '@gmt/core';
 import type { Deps } from '../deps.js';
 import type { Action } from '../plan/action.js';
-import type { ServiceFacts } from '../platform/types.js';
+import type { Paths, ServiceFacts } from '../platform/types.js';
 import { factOf, type ServiceEntry } from '../services/set.js';
-import { serviceEnvironment, workerRunArgv } from '../services/specs.js';
+import { serviceEnvironment, stopWaitSeconds, workerRunArgv } from '../services/specs.js';
 import { refusalWithFix } from '../worker/refusal.js';
 
 /**
@@ -64,4 +65,26 @@ export async function workerStart(
     actions: install.length === 0 ? sm.start(worker.unit, factOf(facts, worker.unit)) : install,
     notStarted: null,
   };
+}
+
+/**
+ * After the worker's service is stopped (WP16b ruling U5: nothing starts it again until the old process has exited):
+ * a bounded wait until no live process holds `<workerData>/worker.lock`, so its start check never meets the lock of
+ * the worker it replaces. The bound is the worker's stop timeout plus the margin.
+ */
+export const workerLockWait = (paths: Pick<Paths, 'workerData'>): Action => ({
+  kind: 'waitUnlocked',
+  path: join(paths.workerData, WORKER_LOCK_FILE),
+  holder: 'the worker',
+  timeoutSeconds: stopWaitSeconds(true),
+});
+
+/**
+ * The worker's stop wherever it is stopped for something else to follow (restart, `stop`, update, `browser install`,
+ * `browser counts`, `gmt consent`, setup's browser step): the service manager's stop and, when that stops anything, the
+ * lock wait above, so whatever follows never meets the old worker's lock. Nothing when the worker is not running.
+ */
+export function workerStop(deps: Pick<Deps, 'platform'>, unit: string, f: ServiceFacts): Action[] {
+  const stop = deps.platform.serviceManager.stop(unit, f);
+  return stop.length === 0 ? [] : [...stop, workerLockWait(deps.platform.paths)];
 }

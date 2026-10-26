@@ -97,6 +97,9 @@ export function machine(
         const u = a3 ?? '';
         return running.has(u) ? { code: 0, stdout: 'active\n' } : { code: 3, stdout: 'inactive\n' };
       }
+      // the stop's wait reads the unit's ActiveState (`show --property=ActiveState --value <unit>`)
+      if (a2 === 'show' && a3 === '--property=ActiveState')
+        return { code: 0, stdout: running.has(argv.at(-1) ?? '') ? 'active\n' : 'inactive\n' };
       const unit = argv.at(-1) ?? '';
       if (a2 === 'enable' || a2 === 'start' || a2 === 'restart') {
         if (unit === 'get-me-there-backup.service') writeBackup();

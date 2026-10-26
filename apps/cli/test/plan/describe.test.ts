@@ -50,6 +50,20 @@ describe('describePlan never shows a secret (brief WP16b §5, §10)', () => {
       { kind: 'remove', path: '/a', recursive: true },
       runAction(['launchctl', 'bootstrap', 'gui/501', '/p l.plist'], '/'),
       { kind: 'waitHealthy', url: 'http://127.0.0.1:3000/api/health', timeoutSeconds: 240 },
+      {
+        kind: 'waitGone',
+        argv: ['launchctl', 'print', 'x'],
+        describe: 'launchctl print x',
+        timeoutSeconds: 45,
+      },
+      {
+        kind: 'waitState',
+        argv: ['systemctl'],
+        describe: 'systemctl --user show u',
+        until: ['inactive', 'failed'],
+        timeoutSeconds: 45,
+      },
+      { kind: 'waitUnlocked', path: '/d/worker.lock', holder: 'the worker', timeoutSeconds: 285 },
     ];
     expect(all.map(describeAction)).toEqual([
       'make directory /d (0755)',
@@ -62,6 +76,9 @@ describe('describePlan never shows a secret (brief WP16b §5, §10)', () => {
       'remove /a and everything in it',
       "run launchctl bootstrap gui/501 '/p l.plist'",
       'wait up to 240 s for http://127.0.0.1:3000/api/health',
+      'wait up to 45 s until launchctl print x fails',
+      'wait up to 45 s until systemctl --user show u prints inactive or failed',
+      'wait up to 285 s until the worker lets go of /d/worker.lock',
     ]);
     expect(describePlan({ command: 'c', actions: [], notes: ['n1'] })).toBe('c: nothing to do\n  note: n1\n');
     expect(describePlan({ command: 'c', actions: all.slice(0, 1), notes: [] })).toBe(

@@ -76,3 +76,6 @@ export async function factsOf(
 export const NOT_INSTALLED: ServiceFacts = { onDisk: null, loaded: false, state: 'not-installed' };
 export const factOf = (facts: ReadonlyMap<string, ServiceFacts>, unit: string): ServiceFacts =>
   facts.get(unit) ?? NOT_INSTALLED;
+
+/** A service's facts once a stop has taken effect: its file unchanged, unloaded and stopped. */
+export const assumedStopped = (f: ServiceFacts): ServiceFacts => ({ ...f, loaded: false, state: 'stopped' });

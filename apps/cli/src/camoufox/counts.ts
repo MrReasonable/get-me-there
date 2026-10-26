@@ -12,7 +12,7 @@ import { factOf, factsOf, serviceSet, workerEntry } from '../services/set.js';
 import { appEnvPath, serviceEnvironment, workerRunArgv } from '../services/specs.js';
 import { readEnvText, readSettings } from '../setup/appEnv.js';
 import { workerEnvPath } from './workerEnv.js';
-import { workerStart } from './workerService.js';
+import { workerStart, workerStop } from './workerService.js';
 
 /**
  * `gmt browser counts` (W3; decision 82): the worker refuses every page while its monthly counts file is missing beside
@@ -205,7 +205,7 @@ export async function rewriteCounts(
     env: serviceEnvironment(deps.execPath, deps.home),
   };
   const r = await apply(
-    { command: o.command, actions: [...sm.stop(worker.unit, wf), write], notes: [] },
+    { command: o.command, actions: [...workerStop(deps, worker.unit, wf), write], notes: [] },
     deps.executor,
   );
   if (r.failed !== null) {

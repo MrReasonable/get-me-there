@@ -1,9 +1,12 @@
 // Spec §7, §13: the heartbeat, the graceful shutdown order, and a failed boot that leaves no lock behind.
-import { existsSync, statSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdtempSync, rmSync, statSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { asIsoDateTime, fixedClock } from '@gmt/core';
 import { AppLock, HEARTBEAT_INTERVAL_MS, openDatabase } from '@gmt/db';
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { bootApp, SHUTDOWN_DEADLINE_MS, shutdownHandler } from '../../src/bootstrap/app.js';
+import { takeStrays } from '@gmt/providers/testing';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { bootApp, type RunningApp, SHUTDOWN_DEADLINE_MS, shutdownHandler } from '../../src/bootstrap/app.js';
 import { assetPaths } from '../../src/bootstrap/paths.js';
 import { createLogger } from '../../src/logger.js';
 import { EXIT } from '../../src/tools/types.js';
@@ -11,8 +14,43 @@ import { loadConfigFromEnv } from '../../src/wiring.js';
 import { cleanEnv, silentLog } from '../helpers/env.js';
 import { tempDir } from '../helpers/tmp.js';
 
-/** Boot tests seed the full airports table; this file's tests may take longer than the default 5 s. */
+/** The one seeding boot below, and each test's boot of a copy, as a backstop on a loaded machine. */
 const BOOT_TIMEOUT_MS = 30_000;
+/** Every boot runs on a fixed clock (CodeRabbit, PR #20): what a test steps is its own fake timers, never the wall. */
+const T0 = asIsoDateTime('2026-10-14T12:00:00.000Z');
+/** Why a boot with `listen: true` fails in this process: the network guards refuse its address lookup. */
+const LISTEN_REFUSED = 'tests make no DNS lookups (127.0.0.1)';
+
+/**
+ * Each engine a boot creates, through the real `engineFor`. With `stub` set, the next one's shutdown never settles
+ * ('hang') or throws before it returns a promise ('throw'); its real shutdown is kept for the teardown.
+ */
+const engines = vi.hoisted(() => {
+  const real: Array<() => Promise<void>> = [];
+  const state: { stub: 'hang' | 'throw' | null; real: typeof real } = { stub: null, real };
+  return state;
+});
+vi.mock('../../src/bootstrap/engine.js', async (importOriginal) => {
+  const orig = await importOriginal<typeof import('../../src/bootstrap/engine.js')>();
+  return {
+    ...orig,
+    engineFor: (...args: Parameters<typeof orig.engineFor>) => {
+      const engine = orig.engineFor(...args);
+      const stub = engines.stub;
+      engines.stub = null;
+      if (stub !== null) {
+        engines.real.push(engine.shutdown);
+        engine.shutdown =
+          stub === 'hang'
+            ? () => new Promise<void>(() => undefined)
+            : () => {
+                throw new Error('shutdown threw before returning');
+              };
+      }
+      return engine;
+    },
+  };
+});
 
 function first(order: number[]): number {
   const v = order[0];
@@ -55,23 +93,67 @@ function lockRow(dbPath: string) {
   }
 }
 
-afterEach(() => {
+/**
+ * A database migrated and seeded once for this file; every test boots its own copy. why: on CI's windows-2025 leg a
+ * boot that seeded the full airports table took 15 to 25 s under load, so a test that booted and then stepped the 25 s
+ * fake deadline ran past its 30 s budget. A copy needs no seed (the boot finds the dataset in place), so what a test
+ * waits on is its own fake clock.
+ */
+const templateDir = mkdtempSync(join(tmpdir(), 'gmt-sd-seed-'));
+const template = join(templateDir, 'seed.db');
+beforeAll(async () => {
+  const running = await bootApp({
+    config: devConfig(template),
+    clock: fixedClock(T0),
+    log: silentLog,
+    listen: false,
+    assets: assetPaths(),
+  });
+  await running.close();
+}, BOOT_TIMEOUT_MS);
+afterAll(() => rmSync(templateDir, { recursive: true, force: true }));
+
+/** A fresh copy of the seeded database in this test's own temporary directory. */
+function seededDb(): string {
+  const dbPath = join(tempDir('gmt-sd-'), 's.db');
+  copyFileSync(template, dbPath);
+  return dbPath;
+}
+
+/**
+ * Every app a test booted. why: a test that stubs the engine's shutdown to hang leaves its scheduler running (croner's
+ * jobs, the FX refresh a minute after boot), which on a slow run fired a vendor request into a later test; each
+ * engine is shut down for real once the test's stubs are restored.
+ */
+const booted: RunningApp[] = [];
+const tracked = (running: RunningApp): RunningApp => {
+  booted.push(running);
+  return running;
+};
+
+afterEach(async () => {
   vi.useRealTimers();
   vi.restoreAllMocks();
+  for (const running of booted.splice(0)) await running.engine.shutdown();
+  for (const shutdown of engines.real.splice(0)) await shutdown();
+  engines.stub = null;
 });
 
 describe('graceful shutdown (spec §7, §13)', { timeout: BOOT_TIMEOUT_MS }, () => {
   it('heartbeats every 30 s and shuts down: engine → checkpoint → release lock → close', async () => {
-    const dbPath = join(tempDir('gmt-sd-'), 's.db');
+    const dbPath = seededDb();
     // why: only the interval timers are faked: the heartbeat is the app's one interval, croner and the engine use timeouts.
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
     const timers = intervalSpies();
-    const running = await bootApp({
-      config: devConfig(dbPath),
-      log: createLogger({ logLevel: 'error' }),
-      listen: false,
-      assets: assetPaths(),
-    });
+    const running = tracked(
+      await bootApp({
+        config: devConfig(dbPath),
+        clock: fixedClock(T0),
+        log: createLogger({ logLevel: 'error' }),
+        listen: false,
+        assets: assetPaths(),
+      }),
+    );
     const heartbeat = vi.spyOn(AppLock.prototype, 'heartbeat');
     vi.advanceTimersByTime(HEARTBEAT_INTERVAL_MS - 1);
     expect(heartbeat).not.toHaveBeenCalled();
@@ -97,15 +179,18 @@ describe('graceful shutdown (spec §7, §13)', { timeout: BOOT_TIMEOUT_MS }, () 
   });
 
   it('a shutdown that throws still clears the heartbeat, releases the lock and closes the database (review arch Minor)', async () => {
-    const dbPath = join(tempDir('gmt-sd-'), 's.db');
+    const dbPath = seededDb();
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
     const timers = intervalSpies();
-    const running = await bootApp({
-      config: devConfig(dbPath),
-      log: createLogger({ logLevel: 'error' }),
-      listen: false,
-      assets: assetPaths(),
-    });
+    const running = tracked(
+      await bootApp({
+        config: devConfig(dbPath),
+        clock: fixedClock(T0),
+        log: createLogger({ logLevel: 'error' }),
+        listen: false,
+        assets: assetPaths(),
+      }),
+    );
     vi.spyOn(running.engine, 'shutdown').mockRejectedValue(new Error('engine shutdown failed'));
     const close = vi.spyOn(running.ports.db, 'close');
     await expect(running.close()).rejects.toThrow('engine shutdown failed');
@@ -115,21 +200,70 @@ describe('graceful shutdown (spec §7, §13)', { timeout: BOOT_TIMEOUT_MS }, () 
   });
 
   it('a boot that fails after taking the lock releases it and stops the heartbeat (review arch-008)', async () => {
-    const dbPath = join(tempDir('gmt-sd-'), 's.db');
-    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    const dbPath = seededDb();
+    // why: the timeouts are faked too, so the scheduler's timers (croner's, the FX refresh a minute after boot) can be
+    // run on demand: a boot that failed after the engine booted must leave none behind to fire into a closed database
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'setTimeout', 'clearTimeout'] });
+    const log = createLogger({ logLevel: 'error' });
     const timers = intervalSpies();
     // why: listen is the last step, after the lock and the heartbeat; this process's network guards refuse its address
     // lookup, so it fails here deterministically.
     await expect(
-      bootApp({
-        config: devConfig(dbPath),
-        log: createLogger({ logLevel: 'error' }),
-        listen: true,
-        assets: assetPaths(),
-      }),
-    ).rejects.toThrow();
+      bootApp({ config: devConfig(dbPath), clock: fixedClock(T0), log, listen: true, assets: assetPaths() }),
+    ).rejects.toThrow(LISTEN_REFUSED);
     expect(lockRow(dbPath)).toBeNull();
     expect(timers.clear).toHaveBeenCalledWith(timers.heartbeat());
+    // two minutes on, past the FX refresh and the minute catch-up: no request was made and nothing logged an error
+    const errors = vi.spyOn(log, 'error');
+    await vi.advanceTimersByTimeAsync(2 * 60_000);
+    expect(takeStrays()).toEqual([]);
+    expect(errors).not.toHaveBeenCalled();
+  });
+});
+
+describe('a failed boot whose engine shutdown hangs (CodeRabbit, PR #20)', {
+  timeout: BOOT_TIMEOUT_MS,
+}, () => {
+  it('still releases the lock and closes the database at the deadline, logging the timeout once', async () => {
+    const dbPath = seededDb();
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'setTimeout', 'clearTimeout'] });
+    const log = createLogger({ logLevel: 'error' });
+    const errors = vi.spyOn(log, 'error');
+    engines.stub = 'hang';
+    const boot = bootApp({
+      config: devConfig(dbPath),
+      clock: fixedClock(T0),
+      log,
+      listen: true,
+      assets: assetPaths(),
+    });
+    // why: the boot's own error is what it rejects with, never the shutdown's (CodeRabbit, PR #20)
+    const settled = boot.then(
+      () => 'booted',
+      (e: unknown) => (e instanceof Error ? e.message : String(e)),
+    );
+    await vi.advanceTimersByTimeAsync(SHUTDOWN_DEADLINE_MS - 1);
+    expect(lockRow(dbPath)).not.toBeNull();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(await settled).toBe(LISTEN_REFUSED);
+    expect(lockRow(dbPath)).toBeNull();
+    expect(
+      errors.mock.calls.filter((c) => String(c[1]) === 'engine shutdown after a failed boot timed out'),
+    ).toHaveLength(1);
+  });
+
+  it('a shutdown that throws before returning is logged; the boot still rejects with its own error and hands back the lock', async () => {
+    const dbPath = seededDb();
+    const log = createLogger({ logLevel: 'error' });
+    const errors = vi.spyOn(log, 'error');
+    engines.stub = 'throw';
+    await expect(
+      bootApp({ config: devConfig(dbPath), clock: fixedClock(T0), log, listen: true, assets: assetPaths() }),
+    ).rejects.toThrow(LISTEN_REFUSED);
+    expect(lockRow(dbPath)).toBeNull();
+    expect(errors.mock.calls.map((c) => String(c[1]))).toContain(
+      'engine shutdown after a failed boot failed',
+    );
   });
 });
 
@@ -138,13 +272,16 @@ describe('shutdown deadline (review devops M4; compose stop_grace_period is 30 s
 }, () => {
   /** A booted app plus a recording logger and exit; only the timeout timers are faked, after boot. */
   async function booted() {
-    const dbPath = join(tempDir('gmt-sd-'), 's.db');
-    const running = await bootApp({
-      config: devConfig(dbPath),
-      log: silentLog,
-      listen: false,
-      assets: assetPaths(),
-    });
+    const dbPath = seededDb();
+    const running = tracked(
+      await bootApp({
+        config: devConfig(dbPath),
+        clock: fixedClock(T0),
+        log: silentLog,
+        listen: false,
+        assets: assetPaths(),
+      }),
+    );
     const errors = vi.spyOn(silentLog, 'error');
     const exit = vi.fn<(code: number) => void>();
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });

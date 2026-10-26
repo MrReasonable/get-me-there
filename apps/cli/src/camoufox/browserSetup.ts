@@ -6,8 +6,7 @@ import type { Deps } from '../deps.js';
 import type { Action } from '../plan/action.js';
 import { apply } from '../plan/apply.js';
 import { describeResult } from '../plan/describe.js';
-import type { ServiceFacts } from '../platform/types.js';
-import { factOf, factsOf, serviceSet, workerEntry } from '../services/set.js';
+import { assumedStopped, factOf, factsOf, serviceSet, workerEntry } from '../services/set.js';
 import { appEnvPath } from '../services/specs.js';
 import { readEnvText, readSettings } from '../setup/appEnv.js';
 import { rewriteCounts } from './counts.js';
@@ -33,7 +32,7 @@ import {
   workerEnvPath,
   workerUrlOf,
 } from './workerEnv.js';
-import { checkWords, workerCheck, workerStart } from './workerService.js';
+import { checkWords, workerCheck, workerStart, workerStop } from './workerService.js';
 
 /**
  * The browser provider in `gmt setup` (spec §13 "The gmt command"; decision 75; brief WP17 Task 17.6). The order is
@@ -60,8 +59,6 @@ interface Options {
   choice: BrowserChoice | null;
 }
 
-const assumedStopped = (f: ServiceFacts): ServiceFacts => ({ ...f, loaded: false, state: 'stopped' });
-
 /**
  * The worker's stop and the app's (when it restarts), the files written, then the worker's start once its check passes
  * and the app's, and the health wait: worker before app, so the app's first status read finds the worker up.
@@ -85,7 +82,7 @@ async function writeAndRestart(
     {
       command,
       actions: [
-        ...(wf.onDisk === null ? [] : sm.stop(worker.unit, wf)),
+        ...(wf.onDisk === null ? [] : workerStop(deps, worker.unit, wf)),
         ...(o.appRestart && app !== undefined ? sm.stop(app.unit, af) : []),
         ...files,
       ],

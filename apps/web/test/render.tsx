@@ -51,3 +51,27 @@ export type ProvenanceInput = Omit<Provenance, 'fetchedAt' | 'providerObservedAt
   providerObservedAt?: string;
   fx: { converted: false } | { converted: true; rateNano: number; rateDate: string; source: string };
 };
+
+/**
+ * The Recharts surface (the chart's `svg[role="application"]`) inside `figure`, once it has drawn `selector` (the surface
+ * itself by default). why: ResponsiveContainer draws nothing until an effect has measured its box, and the chart's
+ * axes and lines come in later renders, so a figure found by role may not hold its chart yet (a History test read the
+ * surface before it existed under load). waitFor re-checks on every DOM mutation, so this returns as soon as the chart
+ * has drawn it, with no fixed sleep.
+ */
+export async function drawn(figure: Element, selector = 'svg[role="application"]'): Promise<Element> {
+  return waitFor(() => {
+    const el = figure.querySelector(selector);
+    if (el === null) throw new Error(`the chart has not drawn ${selector} yet`);
+    return el;
+  });
+}
+
+/** The text of the chart surface inside `figure` once it has drawn every one of `texts` (its axis titles, ticks). */
+export async function drawnText(figure: Element, ...texts: string[]): Promise<string> {
+  return waitFor(() => {
+    const text = figure.querySelector('svg[role="application"]')?.textContent ?? '';
+    for (const t of texts) if (!text.includes(t)) throw new Error(`the chart has not drawn "${t}" yet`);
+    return text;
+  });
+}

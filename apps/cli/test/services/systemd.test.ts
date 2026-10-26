@@ -1,6 +1,7 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import { MemoryFs, memoryRunner } from '../../src/exec/memory.js';
+import { describeAction } from '../../src/plan/describe.js';
 import { currentPlatform } from '../../src/platform/current.js';
 import type { ServiceFacts } from '../../src/platform/types.js';
 import { appServiceSpec, backupServiceSpec } from '../../src/services/specs.js';
@@ -203,12 +204,22 @@ describe('systemd facts and planning', () => {
     ]);
     expect(show(sm.start(k, f({ onDisk: contents, loaded: true, state: 'running' })))).toEqual([]);
     expect(show(sm.start(k, f({})))).toEqual([]);
-    expect(show(sm.stop(k, f({ onDisk: contents, loaded: true, state: 'running' })))).toEqual([
-      `systemctl --user stop ${k}`,
-    ]);
-    expect(show(sm.stop(k, f({ onDisk: contents, loaded: true, state: 'failed' })))).toEqual([
-      `systemctl --user stop ${k}`,
-    ]);
+    // why: U5 on Linux: a stop is followed by a bounded wait until the unit reads inactive (or failed)
+    const waited = [`systemctl --user stop ${k}`, 'waitState '];
+    expect(show(sm.stop(k, f({ onDisk: contents, loaded: true, state: 'running' })))).toEqual(waited);
+    expect(show(sm.stop(k, f({ onDisk: contents, loaded: true, state: 'failed' })))).toEqual(waited);
+    expect(sm.stop(k, f({ onDisk: contents, state: 'running' })).map(describeAction)[1]).toBe(
+      `wait up to 45 s until systemctl --user show --property=ActiveState --value ${k} prints inactive or failed`,
+    );
+    // why: the worker's unit may take its whole TimeoutStopSec (270 s) to let a page in flight finish
+    const w = 'get-me-there-camoufox-worker.service';
+    expect(sm.stop(w, f({ onDisk: contents, state: 'running' }))[1]).toEqual({
+      kind: 'waitState',
+      argv: ['systemctl', '--user', 'show', '--property=ActiveState', '--value', w],
+      describe: `systemctl --user show --property=ActiveState --value ${w}`,
+      until: ['inactive', 'failed'],
+      timeoutSeconds: 285,
+    });
     expect(show(sm.stop(k, f({ onDisk: contents, state: 'stopped' })))).toEqual([]);
     expect(show(sm.restart(k, f({ onDisk: contents, state: 'stopped' })))).toEqual([
       `systemctl --user restart ${k}`,

@@ -432,9 +432,11 @@ describe('browserSetup’s outcomes and words', () => {
     expect(m.io.stdout).toContain(
       'A new worker key is in worker.env and app.env; the worker and the app restarted.\n',
     );
+    // why: U5: the worker starts again only after its old process has let go of its lock (CodeRabbit, PR #20)
     expect(show(m.executor.log)).toEqual([
       'run launchctl bootout gui/501/local.get-me-there.camoufox-worker',
       'waitGone ',
+      'waitUnlocked /Users/op/.local/state/get-me-there/camoufox/worker.lock',
       'run launchctl bootout gui/501/local.get-me-there.app',
       'waitGone ',
       `writeFile ${WORKER_ENV}`,

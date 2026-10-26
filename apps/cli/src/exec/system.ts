@@ -1,11 +1,12 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { createReadStream, createWriteStream } from 'node:fs';
-import { chmod, mkdir, open, readdir, readlink, rename, rm } from 'node:fs/promises';
+import { chmod, mkdir, open, readdir, readFile, readlink, rename, rm } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, normalize, relative, resolve } from 'node:path/posix';
 import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { REDIRECT_HOSTS } from '@gmt/core';
 import type { Action, Executor } from '../plan/action.js';
+import { liveHolder, stillHeld } from '../worker/lock.js';
 import type { Runner } from './runner.js';
 
 /**
@@ -36,6 +37,28 @@ export interface SystemExecutorOptions {
   downloadTotalMs?: number;
   /** The download bounds' timers (tests pass their own to fire a bound on demand); the real ones by default. */
   timers?: { set(fire: () => void, ms: number): unknown; clear(handle: unknown): void };
+  /** Whether a pid is a live process, for `waitUnlocked` (tests pass their own); `pidAlive` by default. */
+  isAlive?: (pid: number) => boolean;
+}
+
+/** process.kill(pid, 0): true while the process exists (EPERM: it exists under another user), as the worker's lock. */
+export function pidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return e instanceof Error && 'code' in e && e.code === 'EPERM';
+  }
+}
+
+/** A file's text, or null when it does not exist; any other read error is thrown. */
+async function textOrNull(path: string): Promise<string | null> {
+  try {
+    return await readFile(path, 'utf8');
+  } catch (e) {
+    if (e instanceof Error && 'code' in e && e.code === 'ENOENT') return null;
+    throw e;
+  }
 }
 
 const tempBeside = (path: string): string =>
@@ -167,6 +190,7 @@ export function systemExecutor(runner: Runner, opts: SystemExecutorOptions = {})
   const idleMs = opts.downloadIdleMs ?? 60_000;
   const totalMs = opts.downloadTotalMs ?? 60 * 60_000;
   const timers = opts.timers ?? realDownloadTimers();
+  const isAlive = opts.isAlive ?? pidAlive;
   const none = { stdout: '' };
   return {
     async run(a: Action): Promise<{ stdout: string }> {
@@ -316,6 +340,31 @@ export function systemExecutor(runner: Runner, opts: SystemExecutorOptions = {})
           for (;;) {
             if ((await runner(a.argv, { cwd: '/', timeoutMs: 15_000 })).code !== 0) return none;
             if (now() >= deadline) throw new Error(`${a.describe} still answers after ${a.timeoutSeconds} s`);
+            await sleep(1000);
+          }
+        }
+        // why: systemd's `stop` itself blocks until its stop job ends (the event); this probe confirms it, a second apart
+        case 'waitState': {
+          const deadline = now() + a.timeoutSeconds * 1000;
+          for (;;) {
+            const r = await runner(a.argv, { cwd: '/', timeoutMs: 15_000 });
+            const word = r.stdout.trim();
+            if (r.code === 0 && a.until.includes(word)) return none;
+            if (now() >= deadline)
+              throw new Error(
+                `${a.describe} still prints ${word === '' ? 'nothing' : word} after ${a.timeoutSeconds} s`,
+              );
+            await sleep(1000);
+          }
+        }
+        // why: no event marks another process's exit (it is not our child, and a killed holder leaves its file behind),
+        // so the lock is read a second apart on this executor's clock until no live process holds it
+        case 'waitUnlocked': {
+          const deadline = now() + a.timeoutSeconds * 1000;
+          for (;;) {
+            const pid = liveHolder(await textOrNull(a.path), isAlive);
+            if (pid === null) return none;
+            if (now() >= deadline) throw new Error(stillHeld(a, pid));
             await sleep(1000);
           }
         }

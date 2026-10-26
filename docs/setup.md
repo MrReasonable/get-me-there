@@ -978,7 +978,10 @@ changes it later.
   agent out and say "refused, not retrying: …" with the fix). `pnpm gmt start`, `restart`, `update`, `setup` and
   `browser install` run the worker's start check first and do not start it while the check reports a reason. A stop
   waits up to 270 s (the longest page, 240 s, and 30 s to close the browser) before it ends the worker, so a page in
-  flight finishes; the app's stop waits 30 s.
+  flight finishes; the app's stop waits 30 s. `pnpm gmt restart` starts the worker again only once the old process has
+  exited (the launchd agent gone or the systemd unit inactive) and no running process holds `worker.lock`, each wait
+  at most 285 s, and then only if its start check passes. When the check refuses, the worker stays stopped and the
+  restart says why with the fix and exits non-zero (78 for a refusal) instead of reporting done.
 
 ### Capture your consent choice
 

@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { Runner } from '../../src/exec/runner.js';
-import { entryProblem, systemExecutor } from '../../src/exec/system.js';
+import { entryProblem, pidAlive, systemExecutor } from '../../src/exec/system.js';
 import { runAction } from '../../src/plan/action.js';
 import { killTracked } from '../support/children.js';
 
@@ -663,6 +663,122 @@ describe('systemExecutor: waits, redirects and answers (survivors, PR #11)', () 
     // probes at 0, 1, 2 and 3 s: the one at the deadline still counts
     expect(calls).toHaveLength(4);
   });
+  // why: U5 on Linux: systemd's stop is confirmed by the unit's ActiveState, read until it is one of `until`
+  it('waitState probes until the trimmed output is one it waits for, a second apart; a non-zero exit never counts', async () => {
+    const outs = [
+      { code: 0, stdout: 'deactivating\n' },
+      { code: 1, stdout: 'inactive\n' },
+      { code: 0, stdout: ' inactive \n' },
+    ];
+    const calls: Array<{ argv: readonly string[]; cwd: string; timeoutMs: number }> = [];
+    const r: Runner = async (argv, opts) => {
+      calls.push({ argv, cwd: opts.cwd, timeoutMs: opts.timeoutMs });
+      return { ...(outs.shift() ?? { code: 0, stdout: '' }), stderr: '' };
+    };
+    const sleeps: number[] = [];
+    const e = systemExecutor(r, { sleep: async (ms) => void sleeps.push(ms), now: () => 0 });
+    const argv = ['systemctl', '--user', 'show', '--property=ActiveState', '--value', 'u.service'];
+    await expect(
+      e.run({ kind: 'waitState', argv, describe: 'u', until: ['inactive', 'failed'], timeoutSeconds: 45 }),
+    ).resolves.toEqual({ stdout: '' });
+    expect(calls).toEqual([0, 1, 2].map(() => ({ argv, cwd: '/', timeoutMs: 15_000 })));
+    expect(sleeps).toEqual([1000, 1000]);
+  });
+  it('waitState fails once its deadline is reached, inclusive, naming the state it last read (or nothing)', async () => {
+    let clock = 0;
+    let said = 'deactivating\n';
+    let probes = 0;
+    const r: Runner = async () => {
+      probes++;
+      return { code: 0, stdout: said, stderr: '' };
+    };
+    const e = systemExecutor(r, {
+      sleep: async (ms) => {
+        clock += ms;
+      },
+      now: () => clock,
+    });
+    const wait = {
+      kind: 'waitState' as const,
+      argv: ['x'],
+      describe: 'the unit',
+      until: ['inactive'],
+      timeoutSeconds: 2,
+    };
+    await expect(e.run(wait)).rejects.toThrow('the unit still prints deactivating after 2 s');
+    // probes at 0, 1 and 2 s: the one at the deadline still counts
+    expect(probes).toBe(3);
+    clock = 0;
+    said = '';
+    await expect(e.run(wait)).rejects.toThrow('the unit still prints nothing after 2 s');
+  });
+  // why: U5: restart starts the worker only once no live process holds its lock (the operator's 2026-10-26 report)
+  it('waitUnlocked reads the lock a second apart until its pid is no longer alive, then resolves', async () => {
+    const lock = join(tmp(), 'worker.lock');
+    writeFileSync(lock, '4242\n');
+    const asked: number[] = [];
+    const sleeps: number[] = [];
+    const e = systemExecutor(noChild, {
+      sleep: async (ms) => void sleeps.push(ms),
+      now: () => 0,
+      isAlive: (pid) => {
+        asked.push(pid);
+        return asked.length <= 3;
+      },
+    });
+    const wait = { kind: 'waitUnlocked' as const, path: lock, holder: 'the worker', timeoutSeconds: 285 };
+    await expect(e.run(wait)).resolves.toEqual({ stdout: '' });
+    expect(asked).toEqual([4242, 4242, 4242, 4242]);
+    expect(sleeps).toEqual([1000, 1000, 1000]);
+  });
+  it('waitUnlocked resolves at once with no lock file or no pid in it, and fails at its deadline naming the holder', async () => {
+    const d = tmp();
+    const never = () => {
+      throw new Error('no pid to ask about');
+    };
+    const e = systemExecutor(noChild, { sleep: async () => {}, now: () => 0, isAlive: never });
+    await expect(
+      e.run({ kind: 'waitUnlocked', path: join(d, 'absent.lock'), holder: 'the worker', timeoutSeconds: 1 }),
+    ).resolves.toEqual({ stdout: '' });
+    writeFileSync(join(d, 'empty.lock'), '');
+    await expect(
+      e.run({ kind: 'waitUnlocked', path: join(d, 'empty.lock'), holder: 'the worker', timeoutSeconds: 1 }),
+    ).resolves.toEqual({ stdout: '' });
+    const lock = join(d, 'worker.lock');
+    writeFileSync(lock, '4242');
+    let clock = 0;
+    let checks = 0;
+    const stuck = systemExecutor(noChild, {
+      sleep: async (ms) => {
+        clock += ms;
+      },
+      now: () => clock,
+      isAlive: () => ++checks > 0,
+    });
+    await expect(
+      stuck.run({ kind: 'waitUnlocked', path: lock, holder: 'the worker', timeoutSeconds: 3 }),
+    ).rejects.toThrow(`the worker (pid 4242) is still running and holds ${lock} after 3 s`);
+    // checks at 0, 1, 2 and 3 s: the one at the deadline still counts
+    expect(checks).toBe(4);
+  });
+  it('waitUnlocked passes on an error reading the lock other than its absence', async () => {
+    const d = tmp();
+    const e = systemExecutor(noChild, { sleep: async () => {}, now: () => 0, isAlive: () => true });
+    // why: a directory where the file should be: reading it fails with EISDIR, which is not "no lock"
+    await expect(
+      e.run({ kind: 'waitUnlocked', path: d, holder: 'the worker', timeoutSeconds: 1 }),
+    ).rejects.toThrow(/EISDIR/);
+  });
+  it('pidAlive: this process is alive; a pid no process has is not', () => {
+    expect(pidAlive(process.pid)).toBe(true);
+    expect(pidAlive(2_147_483_646)).toBe(false);
+  });
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
+    'pidAlive: a process of another user (pid 1, EPERM) is alive',
+    () => {
+      expect(pidAlive(1)).toBe(true);
+    },
+  );
   it('a 3xx is followed only with a Location; a 200 or a 400 with one is not; exactly five hops are allowed', async () => {
     const d = tmp();
     const run = (f: typeof fetch, to: string) =>

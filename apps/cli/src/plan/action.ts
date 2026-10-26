@@ -27,7 +27,19 @@ export type Action =
     }
   | { kind: 'waitHealthy'; url: string; timeoutSeconds: number }
   // why: U5: a probe run until it fails, within a bound; launchd's bootout returns before the label is gone
-  | { kind: 'waitGone'; argv: readonly string[]; describe: string; timeoutSeconds: number };
+  | { kind: 'waitGone'; argv: readonly string[]; describe: string; timeoutSeconds: number }
+  // why: a probe run until its trimmed standard output is one of `until`, within a bound: systemd's stop waits until
+  // `systemctl --user show` reads the unit inactive (its `is-active` exits non-zero while it is still deactivating)
+  | {
+      kind: 'waitState';
+      argv: readonly string[];
+      describe: string;
+      until: readonly string[];
+      timeoutSeconds: number;
+    }
+  // why: a pid file such as the worker's lock, waited on until it is gone or the pid in it is no longer a live
+  // process, within a bound; `holder` names that process for the operator (restart starts the worker only then)
+  | { kind: 'waitUnlocked'; path: string; holder: string; timeoutSeconds: number };
 
 export interface Plan {
   command: string;

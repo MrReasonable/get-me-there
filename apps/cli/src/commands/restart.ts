@@ -1,6 +1,9 @@
 import type { Flags } from '../args.js';
 import { checkWords, workerCheck } from '../camoufox/workerService.js';
 import { type Deps, EXIT } from '../deps.js';
+import { apply } from '../plan/apply.js';
+import { describePlan, describeResult } from '../plan/describe.js';
+import { assumedStopped, factOf } from '../services/set.js';
 import {
   installed,
   lifecycleActions,
@@ -11,8 +14,11 @@ import {
 } from './lifecycle.js';
 
 /**
- * `gmt restart`: the app restarted; a job is only made sure to be scheduled. The worker restarts only once its own
- * check passes (decision 75; CodeRabbit, PR #15); otherwise it is stopped and stays stopped, with its refusal printed.
+ * `gmt restart`: the app restarted; a job is only made sure to be scheduled. The worker is stopped first and started
+ * again only once its old process has let go (WP16b ruling U5: launchd's label gone or systemd's unit inactive, then
+ * its lock free of any live pid, each wait bounded by its stop timeout plus a margin) and its own check then passes
+ * (decision 75; CodeRabbit, PR #15). A check that refuses leaves it stopped, says so with the refusal's fix, and the
+ * command exits non-zero rather than reporting done.
  */
 export async function restartCommand(flags: Flags, _p: string | null, deps: Deps): Promise<number> {
   const win = refuseOnWindows(deps);
@@ -27,19 +33,51 @@ export async function restartCommand(flags: Flags, _p: string | null, deps: Deps
   const { facts } = all;
   const refused = await lifecycleGuard(deps, flags, entries, all.entries, facts);
   if (refused !== null) return refused;
-  const worker = entries.filter((e) => e.name === 'camoufox-worker');
-  if (worker.length > 0 && flags['dry-run'] !== true) {
-    const check = await workerCheck(deps);
-    if (check.kind !== 'ok') {
-      deps.io.out(`worker: not restarted: ${checkWords(check)}\n`);
-      const rest = entries.filter((e) => e.name !== 'camoufox-worker');
-      return runLifecycle(
-        'restart',
-        [...lifecycleActions(deps, 'stop', worker, facts), ...lifecycleActions(deps, 'restart', rest, facts)],
-        flags,
-        deps,
-      );
-    }
+  const worker = entries.find((e) => e.name === 'camoufox-worker');
+  if (worker === undefined)
+    return runLifecycle('restart', lifecycleActions(deps, 'restart', entries, facts), flags, deps);
+
+  const rest = entries.filter((e) => e !== worker);
+  const stop = [
+    ...lifecycleActions(deps, 'stop', [worker], facts),
+    ...lifecycleActions(deps, 'restart', rest, facts),
+  ];
+  // why: once stopped, the worker's start is its service manager's start from a stopped service
+  const start = deps.platform.serviceManager.start(worker.unit, assumedStopped(factOf(facts, worker.unit)));
+  if (flags['dry-run'] === true) {
+    deps.io.out(
+      describePlan({
+        command: 'restart',
+        actions: [...stop, ...start],
+        notes: ['the worker starts again only once its check passes, after its old process has let go'],
+      }),
+    );
+    return EXIT.ok;
   }
-  return runLifecycle('restart', lifecycleActions(deps, 'restart', entries, facts), flags, deps);
+  const stopped = await apply({ command: 'restart', actions: stop, notes: [] }, deps.executor);
+  if (stopped.failed !== null) {
+    deps.io.err(describeResult('restart', stopped));
+    return EXIT.failed;
+  }
+  const check = await workerCheck(deps);
+  if (check.kind !== 'ok') {
+    const left = deps.platform.os === 'darwin' ? 'its launchd agent booted out' : 'its unit stopped';
+    deps.io.err(
+      `worker: not restarted: ${checkWords(check)}\n` +
+        `restart: not done: the worker is stopped (${left}) and was not started again\n`,
+    );
+    return check.kind === 'refused' ? EXIT.badConfig : EXIT.failed;
+  }
+  const started = await apply({ command: 'restart', actions: start, notes: [] }, deps.executor);
+  const whole = {
+    ...started,
+    done: [...stopped.done, ...started.done],
+    outputs: [...stopped.outputs, ...started.outputs],
+  };
+  if (started.failed !== null) {
+    deps.io.err(describeResult('restart', whole));
+    return EXIT.failed;
+  }
+  deps.io.out(describeResult('restart', whole));
+  return EXIT.ok;
 }

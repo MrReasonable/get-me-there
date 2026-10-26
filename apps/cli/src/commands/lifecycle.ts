@@ -1,4 +1,5 @@
 import { type Flags, isOnlyService, type OnlyService } from '../args.js';
+import { workerStop } from '../camoufox/workerService.js';
 import { type Deps, EXIT } from '../deps.js';
 import type { Action } from '../plan/action.js';
 import { apply } from '../plan/apply.js';
@@ -53,7 +54,12 @@ export function lifecycleActions(
 ): Action[] {
   const sm = deps.platform.serviceManager;
   return entries.flatMap((e) => {
-    if (e.spec.calendar === null) return sm[verb](e.unit, factOf(facts, e.unit));
+    if (e.spec.calendar === null) {
+      // why: U5: a worker that was stopped has let go of its lock before the command reports it stopped
+      if (verb === 'stop' && e.name === 'camoufox-worker')
+        return workerStop(deps, e.unit, factOf(facts, e.unit));
+      return sm[verb](e.unit, factOf(facts, e.unit));
+    }
     const unit = scheduleUnit(e);
     const f = factOf(facts, unit);
     if (verb === 'stop') return sm.stop(unit, f);
