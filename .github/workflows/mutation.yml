@@ -35,8 +35,10 @@ jobs:
     # shard's Stryker config with no break of its own). Stryker runs incrementally, its file cached per shard under a key
     # of the package's tests, its config, the lockfile and the shard split, then every source; a restore falls back only
     # to a run of the same shard over the same tests (the command runner reports one test and cannot tell which test
-    # killed a mutant). The gate is the mutation-gate job below, once per package over all its shards. Cold runs measured
-    # on this runner: MEASURED.
+    # killed a mutant). The gate is the mutation-gate job below, once per package over all its shards. Each per-mutant
+    # command stops at its first failing test (--bail=1). Cold runs measured on this runner (run 40244374665,
+    # 2026-10-25), in minutes: core 20 and 22; engine 17, 32, 12 and 18; api 10; the worker 16, 18 and 11 (scores: core
+    # 99.82, engine 93.16, api 88.55, the worker 91.60). 120 minutes leaves room for the scope to grow.
     name: mutate ${{ matrix.package }} (${{ matrix.shard }} of ${{ matrix.shards }})
     runs-on: ubuntu-24.04
     timeout-minutes: 120
@@ -124,9 +126,10 @@ jobs:
           DIR: ${{ matrix.dir }}
           SHARDS: ${{ matrix.shards }}
           REPORTS: ${{ runner.temp }}/mutation
+        # why: download-artifact puts each of several artifacts in a directory of its own, but a single one at the top
         run: |
-          shopt -s nullglob
-          node scripts/mutation-gate.mjs --config "$DIR/stryker.config.json" --expect "$SHARDS" "$REPORTS"/*/mutation.json
+          mapfile -t reports < <(find "$REPORTS" -name mutation.json | sort)
+          node scripts/mutation-gate.mjs --config "$DIR/stryker.config.json" --expect "$SHARDS" "${reports[@]}"
   mutate-cli:
     # why: Ian's ruling on PR #11: the CLI's run has a job of its own, since GitHub stops a job at 6 hours. Stryker runs
     # incrementally: a mutant whose code did not change keeps its last result. The incremental file is cached under a

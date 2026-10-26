@@ -361,8 +361,11 @@ describe('WP16a: the mutation workflow runs every package’s Stryker gate and t
     const dl = job.steps.find((s) => String(s.uses ?? '').startsWith('actions/download-artifact@'));
     expect(dl.with.pattern).toBe(`mutation-${X} matrix.package }}-*`);
     const run = job.steps.find((s) => String(s.run ?? '').includes('mutation-gate.mjs'));
+    // one artifact lands at the top of the path, several in a directory each: the reports are found either way
+    expect(String(run.run)).toContain('mapfile -t reports < <(find "$REPORTS" -name mutation.json | sort)');
     expect(String(run.run)).toContain(
-      'node scripts/mutation-gate.mjs --config "$DIR/stryker.config.json" --expect "$SHARDS" "$REPORTS"/*/mutation.json',
+      // why: assembled, so the shell array is not read as a template placeholder
+      `node scripts/mutation-gate.mjs --config "$DIR/stryker.config.json" --expect "$SHARDS" "${['$', '{reports[@]}'].join('')}"`,
     );
     const up = YAML.parse(t()).jobs.mutate.steps.find((s) =>
       String(s.uses ?? '').startsWith('actions/upload-artifact@'),

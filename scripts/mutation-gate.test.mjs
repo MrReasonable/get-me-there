@@ -84,7 +84,8 @@ describe('mutation gate: timed-out mutants (ruling 10)', { timeout: 60_000 }, ()
     expect(wf).not.toMatch(/^\s*pull_request:/m);
     // the gate job runs this gate once per package over its shards (scripts/workflows.test.mjs pins the job)
     expect(wf).toContain(
-      'node scripts/mutation-gate.mjs --config "$DIR/stryker.config.json" --expect "$SHARDS" "$REPORTS"/*/mutation.json',
+      // why: assembled, so the shell array is not read as a template placeholder
+      `node scripts/mutation-gate.mjs --config "$DIR/stryker.config.json" --expect "$SHARDS" "${['$', '{reports[@]}'].join('')}"`,
     );
     expect(wf).toMatch(/run: pnpm --filter @gmt\/cli mutate\s*$/m);
     const ci = readFileSync(resolve(import.meta.dirname, '../.github/workflows/ci.yml'), 'utf8');
