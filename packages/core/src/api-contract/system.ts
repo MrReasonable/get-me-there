@@ -112,7 +112,9 @@ export const toolRunResponseSchema = z.object({
  * Spec §10 `GET /api/tools/smoke/plan` (ledgers nothing; `gmt smoke` prints it before it asks): the smoke's worst case
  * per configured provider, from the tool's own `smokeWorstCase`. SearchApi credits are split into the calendar tile and
  * the itinerary chain, with the trial's remaining lifetime credits (null off the trial); Travelpayouts' free calls; the
- * browser pages and, in grid mode, the scroll allowance (0 in list mode). A provider not configured is null.
+ * browser pages, in grid mode the scroll allowance (0 in list mode), and the page's bound: the seconds http-kit lets
+ * the smoke's page request run before it ends it (spec §5.3), which `gmt smoke` waits for on top of its own allowance
+ * for the rest of the run (spec §13). A provider not configured is null.
  */
 export const smokePlanResponseSchema = z.strictObject({
   searchApi: z
@@ -123,7 +125,13 @@ export const smokePlanResponseSchema = z.strictObject({
     })
     .nullable(),
   travelpayouts: z.strictObject({ freeCalls: z.number().int().min(0) }).nullable(),
-  camoufox: z.strictObject({ pages: z.number().int().min(0), scrolls: z.number().int().min(0) }).nullable(),
+  camoufox: z
+    .strictObject({
+      pages: z.number().int().min(0),
+      scrolls: z.number().int().min(0),
+      pageBoundSeconds: z.number().int().min(1),
+    })
+    .nullable(),
 });
 
 /**

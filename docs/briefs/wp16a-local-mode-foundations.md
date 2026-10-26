@@ -212,7 +212,8 @@ export const activeExecutionResponseSchema = z.strictObject({
 export const smokePlanResponseSchema = z.strictObject({
   searchApi: z.strictObject({ calendar: z.number().int(), itinerary: z.number().int(), trialLeft: z.number().int().nullable() }).nullable(),
   travelpayouts: z.strictObject({ freeCalls: z.number().int() }).nullable(),
-  camoufox: z.strictObject({ pages: z.number().int(), scrolls: z.number().int() }).nullable(), // scrolls 0 in list mode
+  // scrolls 0 in list mode; pageBoundSeconds: the request timeout the smoke's http-kit gives the page (spec §10, §13)
+  camoufox: z.strictObject({ pages: z.number().int(), scrolls: z.number().int(), pageBoundSeconds: z.number().int().min(1) }).nullable(),
 });
 
 // engine
@@ -384,8 +385,10 @@ allowlist), `packages/core/src/api-contract/executions.ts`, `packages/providers/
   run never in the past), or null without an estimate; `{ execution: null }` when idle;
   contract test. Smoke plan: its figures equal `smokeWorstCase(config)` for each provider combination (SearchApi on
   `trial` and `40usd`, Travelpayouts, camoufox in list and grid mode, none), split into calendar 1 and itinerary `1 + 2
-  × SMOKE_EXPAND_TOP`; `trialLeft` is the trial's remaining lifetime credits or null off `trial`; the ledger row count
-  is unchanged and no provider is called (a spy); contract test.
+  × SMOKE_EXPAND_TOP`; `trialLeft` is the trial's remaining lifetime credits or null off `trial`; `pageBoundSeconds`
+  equals the request timeout `httpLimitsFor(config)` gives camoufox (list: page timeout + 15 s; grid: 2 × page timeout
+  + scroll cap × (scroll spacing + 60 s) + 15 s, 2,145 s at the default settings, and at each setting's maximum); the
+  ledger row count is unchanged and no provider is called (a spy); contract test.
 - [ ] **Implement; commit.**
 
 ### Task 16a.4: The moved-database marker

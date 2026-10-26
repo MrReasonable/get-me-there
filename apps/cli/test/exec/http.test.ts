@@ -1,6 +1,6 @@
 // The CLI's requests to the app: each request's own bound (`timeoutMs`) is the one that ends it. fetch's dispatcher
-// has header and body timeouts of its own (undici's, 300 s each by default), below the smoke's 600 s, which once cut a
-// long grid page short. These tests stand in a dispatcher with a small timeout for that default, and a server that
+// has header and body timeouts of its own (undici's, 300 s each by default), below the smoke's wait (600 s and more),
+// which once cut a long grid page short. These tests stand in a dispatcher with a small timeout for that default, and a server that
 // holds its answer until a second request, made after the first, has run out of that small timeout.
 import { once } from 'node:events';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';

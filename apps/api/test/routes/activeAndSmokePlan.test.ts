@@ -3,6 +3,7 @@
 import { apiContract, type Estimate } from '@gmt/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { smokeWorstCase } from '../../src/tools/smokeArgs.js';
+import { httpLimitsFor } from '../../src/wiring.js';
 import { expectContract } from '../helpers/contract.js';
 import { SENTINEL_SA, SENTINEL_TP } from '../helpers/env.js';
 import { exampleDefinitionInput } from '../helpers/examples.js';
@@ -172,14 +173,34 @@ describe('GET /api/tools/smoke/plan (spec §10; ledgers nothing)', () => {
       { searchApi: null, travelpayouts: { freeCalls: 3 }, camoufox: null },
     ],
     [
+      // why: the page's bound is the page timeout (90 s by default) and 15 s
       'camoufox in list mode',
       CAMOUFOX,
-      { searchApi: null, travelpayouts: null, camoufox: { pages: 1, scrolls: 0 } },
+      { searchApi: null, travelpayouts: null, camoufox: { pages: 1, scrolls: 0, pageBoundSeconds: 105 } },
     ],
     [
+      // why: 2 × 90 + 12 × (5 + 60) + 15
       'camoufox in grid mode',
       { ...CAMOUFOX, CAMOUFOX_MODE: 'grid', CAMOUFOX_GRID_SCROLL_CAP: '12' },
-      { searchApi: null, travelpayouts: null, camoufox: { pages: 1, scrolls: 12 } },
+      { searchApi: null, travelpayouts: null, camoufox: { pages: 1, scrolls: 12, pageBoundSeconds: 975 } },
+    ],
+    [
+      // why: 2 × 90 + 30 × (5 + 60) + 15 at the default settings (spec §2), past the CLI's 600 s for the rest
+      'camoufox in grid mode at the default settings',
+      { ...CAMOUFOX, CAMOUFOX_MODE: 'grid' },
+      { searchApi: null, travelpayouts: null, camoufox: { pages: 1, scrolls: 30, pageBoundSeconds: 2145 } },
+    ],
+    [
+      // why: 2 × 240 + 60 × (30 + 60) + 15 at each setting's maximum
+      'camoufox in grid mode at the longest settings',
+      {
+        ...CAMOUFOX,
+        CAMOUFOX_MODE: 'grid',
+        CAMOUFOX_PAGE_TIMEOUT_SECONDS: '240',
+        CAMOUFOX_GRID_SCROLL_CAP: '60',
+        CAMOUFOX_GRID_SCROLL_SPACING_SECONDS: '30',
+      },
+      { searchApi: null, travelpayouts: null, camoufox: { pages: 1, scrolls: 60, pageBoundSeconds: 5895 } },
     ],
   ] as const)('%s: the worst case smokeWorstCase states, split per stage', async (_label, env, expected) => {
     const x = await harness(env);
@@ -196,6 +217,10 @@ describe('GET /api/tools/smoke/plan (spec §10; ledgers nothing)', () => {
     const worst = smokeWorstCase(x.ports.config);
     expect((plan.searchApi?.calendar ?? 0) + (plan.searchApi?.itinerary ?? 0)).toBe(worst.credits);
     expect(plan.travelpayouts?.freeCalls ?? 0).toBe(worst.freeCalls);
+    // why: the page's bound is the one http-kit ends the smoke's page attempt at, from the same settings
+    expect(plan.camoufox?.pageBoundSeconds).toBe(
+      httpLimitsFor(x.ports.config).camoufox?.requestTimeoutSeconds,
+    );
     expect(ledger()).toBe(before);
     expect(fetch).not.toHaveBeenCalled();
   });
