@@ -113,7 +113,7 @@ export function launchdManager(uid: number, paths: Paths): ServiceManager {
       argv: ['launchctl', 'print', `${domain}/${label}`],
       describe: `launchctl print ${domain}/${label}`,
       // why: W7: the worker's agent may take its whole ExitTimeOut to let a page in flight finish
-      timeoutSeconds: stopWaitSeconds(label === launchdLabel('camoufox-worker') ? 'camoufox-worker' : 'app'),
+      timeoutSeconds: stopWaitSeconds(label === launchdLabel('camoufox-worker')),
     },
   ];
   return {

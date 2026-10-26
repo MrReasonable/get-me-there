@@ -32,7 +32,7 @@ import {
   workerEnvPath,
   workerUrlOf,
 } from './workerEnv.js';
-import { checkWords, workerCheck, workerStart } from './workerService.js';
+import { checkWords, workerCheck, workerStart, workerStop } from './workerService.js';
 
 /**
  * The browser provider in `gmt setup` (spec §13 "The gmt command"; decision 75; brief WP17 Task 17.6). The order is
@@ -82,7 +82,7 @@ async function writeAndRestart(
     {
       command,
       actions: [
-        ...(wf.onDisk === null ? [] : sm.stop(worker.unit, wf)),
+        ...(wf.onDisk === null ? [] : workerStop(deps, worker.unit, wf)),
         ...(o.appRestart && app !== undefined ? sm.stop(app.unit, af) : []),
         ...files,
       ],

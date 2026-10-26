@@ -146,9 +146,7 @@ export function systemdManager(): ServiceManager {
               argv: ['systemctl', '--user', 'show', '--property=ActiveState', '--value', unitName],
               describe: `systemctl --user show --property=ActiveState --value ${unitName}`,
               until: ['inactive', 'failed'],
-              timeoutSeconds: stopWaitSeconds(
-                unitName === systemdUnit('camoufox-worker') ? 'camoufox-worker' : 'app',
-              ),
+              timeoutSeconds: stopWaitSeconds(unitName === systemdUnit('camoufox-worker')),
             },
           ]
         : [],

@@ -1,7 +1,7 @@
 import { join } from 'node:path/posix';
 import type { Flags } from '../args.js';
 import { workerEnvPath } from '../camoufox/workerEnv.js';
-import { workerStart } from '../camoufox/workerService.js';
+import { workerStart, workerStop } from '../camoufox/workerService.js';
 import { type Deps, EXIT } from '../deps.js';
 import type { Action } from '../plan/action.js';
 import { apply } from '../plan/apply.js';
@@ -87,7 +87,7 @@ export async function consentCommand(flags: Flags, positional: string | null, de
       deps.io.err(`${g.message}\n`);
       return EXIT.lockRefused;
     }
-    first.push(...deps.platform.serviceManager.stop(worker.unit, before));
+    first.push(...workerStop(deps, worker.unit, before));
   }
   const interrupt = new AbortController();
   // why: sec-b1-001, review X3, CodeRabbit (PR #18): from before the worker stops, SIGINT or SIGTERM is handled here

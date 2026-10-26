@@ -76,5 +76,15 @@ export const workerLockWait = (paths: Pick<Paths, 'workerData'>): Action => ({
   kind: 'waitUnlocked',
   path: join(paths.workerData, WORKER_LOCK_FILE),
   holder: 'the worker',
-  timeoutSeconds: stopWaitSeconds('camoufox-worker'),
+  timeoutSeconds: stopWaitSeconds(true),
 });
+
+/**
+ * The worker's stop wherever it is stopped for something else to follow (restart, `stop`, update, `browser install`,
+ * `browser counts`, `gmt consent`, setup's browser step): the service manager's stop and, when that stops anything, the
+ * lock wait above, so whatever follows never meets the old worker's lock. Nothing when the worker is not running.
+ */
+export function workerStop(deps: Pick<Deps, 'platform'>, unit: string, f: ServiceFacts): Action[] {
+  const stop = deps.platform.serviceManager.stop(unit, f);
+  return stop.length === 0 ? [] : [...stop, workerLockWait(deps.platform.paths)];
+}

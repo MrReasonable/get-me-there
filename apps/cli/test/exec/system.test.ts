@@ -687,7 +687,11 @@ describe('systemExecutor: waits, redirects and answers (survivors, PR #11)', () 
   it('waitState fails once its deadline is reached, inclusive, naming the state it last read (or nothing)', async () => {
     let clock = 0;
     let said = 'deactivating\n';
-    const r: Runner = async () => ({ code: 0, stdout: said, stderr: '' });
+    let probes = 0;
+    const r: Runner = async () => {
+      probes++;
+      return { code: 0, stdout: said, stderr: '' };
+    };
     const e = systemExecutor(r, {
       sleep: async (ms) => {
         clock += ms;
@@ -702,6 +706,8 @@ describe('systemExecutor: waits, redirects and answers (survivors, PR #11)', () 
       timeoutSeconds: 2,
     };
     await expect(e.run(wait)).rejects.toThrow('the unit still prints deactivating after 2 s');
+    // probes at 0, 1 and 2 s: the one at the deadline still counts
+    expect(probes).toBe(3);
     clock = 0;
     said = '';
     await expect(e.run(wait)).rejects.toThrow('the unit still prints nothing after 2 s');

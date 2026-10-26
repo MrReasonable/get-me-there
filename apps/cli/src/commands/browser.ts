@@ -2,7 +2,7 @@ import type { Flags } from '../args.js';
 import { countsCommand } from '../camoufox/counts.js';
 import { installCamoufox, oldBundleRemovals } from '../camoufox/installer.js';
 import { retiredWorkerLines, workerEnvPath } from '../camoufox/workerEnv.js';
-import { workerStart } from '../camoufox/workerService.js';
+import { workerStart, workerStop } from '../camoufox/workerService.js';
 import { type Deps, EXIT } from '../deps.js';
 import type { Action } from '../plan/action.js';
 import { apply } from '../plan/apply.js';
@@ -68,7 +68,7 @@ async function installAction(flags: Flags, deps: Deps): Promise<number> {
   const sm = deps.platform.serviceManager;
   const stopped: Action[] = [];
   if (worker !== undefined && workerText !== null) {
-    stopped.push(...sm.stop(worker.unit, factOf(facts, worker.unit)));
+    stopped.push(...workerStop(deps, worker.unit, factOf(facts, worker.unit)));
     const kept = retiredWorkerLines(workerText);
     if (kept.removed.length > 0) {
       deps.io.out(`worker.env: removing ${kept.removed.join(', ')} (the install owns these now)\n`);

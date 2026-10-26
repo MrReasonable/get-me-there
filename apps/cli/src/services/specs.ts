@@ -77,8 +77,7 @@ export const WORKER_STOP_SECONDS = PAGE_TIMEOUT_MAX_SECONDS + 30;
  * The bound on a wait after a stop (U5): the service's own stop timeout (the worker's 270 s, else 30 s) plus 15 s for the
  * service manager to let it go. launchd's label wait, systemd's inactive wait and the worker's lock wait all use it.
  */
-export const stopWaitSeconds = (name: ServiceSpec['name']): number =>
-  (name === 'camoufox-worker' ? WORKER_STOP_SECONDS : 30) + 15;
+export const stopWaitSeconds = (isWorker: boolean): number => (isWorker ? WORKER_STOP_SECONDS : 30) + 15;
 
 /**
  * The one argv that runs the worker's `run.ts <entry>` under tsx, and its directory (ca-b1-011): the service runs

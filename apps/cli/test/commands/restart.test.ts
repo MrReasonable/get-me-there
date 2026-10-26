@@ -1,9 +1,11 @@
 import { join } from 'node:path/posix';
 import { describe, expect, it } from 'vitest';
+import { workerStop } from '../../src/camoufox/workerService.js';
 import { runCli } from '../../src/cli.js';
+import { lifecycleActions } from '../../src/commands/lifecycle.js';
 import { memoryExecutor, type RunHandler } from '../../src/exec/memory.js';
 import type { Action } from '../../src/plan/action.js';
-import { workerEntry } from '../../src/services/set.js';
+import { assumedStopped, workerEntry } from '../../src/services/set.js';
 import { machine } from '../support/machine.js';
 
 /**
@@ -62,22 +64,20 @@ async function world(
   const lock = join(m.deps.platform.paths.workerData, 'worker.lock');
   m.fs.dir(m.deps.platform.paths.workerData, 0o700).file(lock, `${OLD_PID}\n`, 0o600);
   const releasesAfter = o.releasesAfter === undefined ? 0 : o.releasesAfter;
-  const executor = memoryExecutor(m.fs, {
-    runner: m.runner,
-    // why: the old process lives until it is stopped and then `releasesAfter` lock checks have passed
-    alive: (pid) => {
-      if (pid !== OLD_PID) return false;
-      if (state.stopped) {
-        state.lockChecks++;
-        if (releasesAfter !== null && state.lockChecks > releasesAfter) state.oldAlive = false;
-      }
-      return state.oldAlive;
-    },
-  });
+  // why: the old process lives until it is stopped and then `releasesAfter` lock checks have passed
+  const alive = (pid: number): boolean => {
+    if (pid !== OLD_PID) return false;
+    if (state.stopped) {
+      state.lockChecks++;
+      if (releasesAfter !== null && state.lockChecks > releasesAfter) state.oldAlive = false;
+    }
+    return state.oldAlive;
+  };
+  const executor = memoryExecutor(m.fs, { runner: m.runner, alive });
   m.deps.executor = executor;
   m.io.stdout = '';
   m.io.stderr = '';
-  return { ...m, executor, order, state, lock };
+  return { ...m, executor, order, state, lock, alive };
 }
 
 const kinds = (log: readonly Action[]) => log.map((a) => (a.kind === 'run' ? a.describe : a.kind));
@@ -186,6 +186,39 @@ describe('restart waits for the old worker to let go before it starts the new on
     expect(m.order).toEqual(['stop', 'check', 'start']);
   });
 
+  it('a start that fails after the check passed is not "done": every step done so far is named, exit 1', async () => {
+    const m = await world();
+    const run = m.deps.run;
+    m.deps.executor = memoryExecutor(m.fs, {
+      alive: m.alive,
+      runner: async (argv, opts) =>
+        argv[1] === 'bootstrap' && argv.at(-1)?.endsWith(`${WORKER_LABEL}.plist`) === true
+          ? { code: 5, stdout: '', stderr: 'Bootstrap failed' }
+          : run(argv, opts),
+    });
+    expect(await runCli(['restart', '--only', 'worker'], m.deps)).toBe(1);
+    expect(m.io.stderr).toContain('restart: stopped at a failed step; nothing was undone');
+    expect(m.io.stderr).toContain(`  done:    run launchctl bootout gui/501/${WORKER_LABEL}`);
+    expect(m.io.stderr).toContain(`  failed:  run launchctl bootstrap gui/501`);
+    expect(m.io.stdout).toBe('');
+  });
+
+  it('with no worker installed the restart is the services’ own, and says it is done', async () => {
+    const m = await world();
+    for (const r of workerEntry(m.deps).rendered) m.fs.delete(r.path);
+    expect(await runCli(['restart'], m.deps)).toBe(0);
+    expect(m.order).toEqual([]);
+    expect(m.io.stdout).toMatch(/^restart: done \(\d+ steps\)\n$/);
+  });
+
+  it('only a stop of a running worker waits for its lock: a restart verb or the app never does', async () => {
+    const m = await world();
+    const worker = workerEntry(m.deps);
+    const facts = new Map([[WORKER_LABEL, { onDisk: 'x', loaded: true, state: 'running' as const }]]);
+    expect(kinds(lifecycleActions(m.deps, 'restart', [worker], facts))).not.toContain('waitUnlocked');
+    expect(kinds(lifecycleActions(m.deps, 'stop', [worker], facts))).toContain('waitUnlocked');
+  });
+
   it('--dry-run prints the stop, both waits and the start, with the check rule, and changes nothing', async () => {
     const m = await world();
     expect(await runCli(['restart', '--only', 'worker', '--dry-run'], m.deps)).toBe(0);
@@ -215,5 +248,28 @@ describe('restart waits for the old worker to let go before it starts the new on
     m.executor.log.length = 0;
     expect(await runCli(['stop', '--only', 'worker'], m.deps)).toBe(0);
     expect(m.executor.log).toEqual([]);
+  });
+});
+
+describe('assumedStopped', () => {
+  it('keeps the file and reads the service as unloaded and stopped', () => {
+    expect(assumedStopped({ onDisk: 'unit', loaded: true, state: 'running' })).toEqual({
+      onDisk: 'unit',
+      loaded: false,
+      state: 'stopped',
+    });
+  });
+});
+
+describe('workerStop (every command that stops the worker for something to follow)', () => {
+  it('a running worker: the service manager’s stop, then the lock wait; a stopped one: nothing', async () => {
+    const m = await world();
+    const running = { onDisk: 'x', loaded: true, state: 'running' as const };
+    expect(kinds(workerStop(m.deps, WORKER_LABEL, running))).toEqual([
+      `launchctl bootout gui/501/${WORKER_LABEL}`,
+      'waitGone',
+      'waitUnlocked',
+    ]);
+    expect(workerStop(m.deps, WORKER_LABEL, { onDisk: 'x', loaded: false, state: 'stopped' })).toEqual([]);
   });
 });

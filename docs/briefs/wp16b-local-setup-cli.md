@@ -275,8 +275,9 @@ the worker's stop, the wait above, then a `waitUnlocked` on `<workerData>/worker
 when the file is gone or its pid is not a live process, the worker's own `lockHeld` rule; read a second apart on the
 executor's clock, since no event marks another process's exit), the app's own restart, and only then the worker's check
 and start; a check that refuses leaves the worker stopped, prints the refusal with its fix and that the worker is
-stopped (its agent booted out on macOS), and exits 78 (1 for a check that fails), never "done". `stop --only worker`
-waits for the lock too when it stopped a running worker. systemd's `activating` (an auto-restart) reads as failed.
+stopped (its agent booted out on macOS), and exits 78 (1 for a check that fails), never "done". Every command that
+stops a running worker for something to follow (`stop`, `update`, `browser install`, `browser counts`, `gmt consent`,
+setup's browser step) waits for the lock the same way (`workerStop`). systemd's `activating` (an auto-restart) reads as failed.
 
 ## 6. The wizard's prompts (pinned by a docs test against section 0 of `docs/setup.md`)
 
