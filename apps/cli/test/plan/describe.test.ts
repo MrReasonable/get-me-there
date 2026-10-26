@@ -64,6 +64,13 @@ describe('describePlan never shows a secret (brief WP16b §5, §10)', () => {
         timeoutSeconds: 45,
       },
       { kind: 'waitUnlocked', path: '/d/worker.lock', holder: 'the worker', timeoutSeconds: 285 },
+      {
+        kind: 'waitWorkerAnswers',
+        port: 8090,
+        log: '/l/camoufox-worker.log',
+        refusalFile: '/d/start-refusal.json',
+        timeoutSeconds: 60,
+      },
     ];
     expect(all.map(describeAction)).toEqual([
       'make directory /d (0755)',
@@ -79,6 +86,7 @@ describe('describePlan never shows a secret (brief WP16b §5, §10)', () => {
       'wait up to 45 s until launchctl print x fails',
       'wait up to 45 s until systemctl --user show u prints inactive or failed',
       'wait up to 285 s until the worker lets go of /d/worker.lock',
+      'wait up to 60 s until the worker answers on 127.0.0.1:8090',
     ]);
     expect(describePlan({ command: 'c', actions: [], notes: ['n1'] })).toBe('c: nothing to do\n  note: n1\n');
     expect(describePlan({ command: 'c', actions: all.slice(0, 1), notes: [] })).toBe(

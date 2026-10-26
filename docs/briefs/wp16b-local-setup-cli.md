@@ -162,8 +162,10 @@ export type Action =
   | { kind: 'waitGone'; argv: readonly string[]; describe: string; timeoutSeconds: number }  // a probe run until it fails
   | { kind: 'waitState'; argv: readonly string[]; describe: string; until: readonly string[]; timeoutSeconds: number }
                                                        // a probe run until its trimmed stdout is one of `until`
-  | { kind: 'waitUnlocked'; path: string; holder: string; timeoutSeconds: number }; // a pid file (the worker's lock)
+  | { kind: 'waitUnlocked'; path: string; holder: string; timeoutSeconds: number }  // a pid file (the worker's lock)
                                                        // until it is gone or its pid is not a live process
+  | { kind: 'waitWorkerAnswers'; port: number; log: string; refusalFile: string; timeoutSeconds: number };
+                                                       // the worker asked on 127.0.0.1:port until it answers
 export interface Plan { command: string; actions: readonly Action[]; notes: readonly string[] }
 export interface Executor { run(a: Action): Promise<{ stdout: string }> } // a run resolves the child's stdout, else ''
 export interface ApplyResult {
@@ -277,7 +279,19 @@ executor's clock, since no event marks another process's exit), the app's own re
 and start; a check that refuses leaves the worker stopped, prints the refusal with its fix and that the worker is
 stopped (its agent booted out on macOS), and exits 78 (1 for a check that fails), never "done". Every command that
 stops a running worker for something to follow (`stop`, `update`, `browser install`, `browser counts`, `gmt consent`,
-setup's browser step) waits for the lock the same way (`workerStop`). systemd's `activating` (an auto-restart) reads as failed.
+setup's browser step) waits for the lock the same way (`workerStop`). Every start of the worker's service (`start`,
+`restart`, `update`, setup's browser step, `browser install`, `browser counts`, `gmt consent`) is its service manager's
+start or install followed by a `waitWorkerAnswers` (`workerStarted`; folded in after the operator's report of
+2026-10-26, where a restart printed "done" while the worker, which listens only after its browser has launched, was not
+yet answering and `gmt status` reported it unreachable): `GET http://127.0.0.1:<port>/v1/status` with no key and
+`redirect: 'manual'`, the port worker.env's `CAMOUFOX_WORKER_PORT` (8090 unset), asked a second apart on the
+executor's clock, each try bounded on the executor's timers, until an answer of any status carries the worker's
+`x-gmt-google-contacted` header (its 401 comes from its HTTP layer before any route: no page, no cookie read, no log
+line); the bound is 60 s, against about 3 s measured from launchd's start to listening on the operator's Mac. At its
+bound it fails naming `127.0.0.1:<port>`, the worker's log (`<logs>/camoufox-worker.log` on macOS, `journalctl --user -u
+<unit>` on Linux) and, when present, `<workerData>/start-refusal.json` with its reason and fix (or that it cannot be
+read), so the command exits 1 and never prints "done". A start the check refuses plans no start and no wait.
+systemd's `activating` (an auto-restart) reads as failed.
 
 ## 6. The wizard's prompts (pinned by a docs test against section 0 of `docs/setup.md`)
 
@@ -630,6 +644,10 @@ removal command), `pnpm gmt logs`, and that a plain `pnpm gmt setup` finishes. R
     released after n checks starts it after the n + 1st; a lock never released ends the bounded wait with the pid and
     the path, exit 1, no start; a refused check exits 78 without "done", naming the refusal, its fix and the stopped
     worker (both on launchd and systemd, with the injected executor and runner and the executors' clock, no sleep).
+    Every start of the worker ends with its answer wait: a worker that answers when asked the n + 1st time is "done"
+    after it; one that never answers is 61 asks, then exit 1 with the port and the log (the journal's unit on Linux)
+    and, when the worker left one, the refusal file with its fix, never "done"; the port is worker.env's; a refused
+    check plans no wait; `start --only worker` waits, and a worker already running is neither started nor waited on.
   - `restore <file>` requires the app stopped and uses importDb's one placement: the backup copied to a 0600 temporary
     file, that copy checked with `PRAGMA integrity_check` before anything moves (a failing copy is removed, nothing
     changed), the current database kept whole with its `-wal` and `-shm` as `<name>.before-restore-<time>` (never over an
@@ -723,7 +741,10 @@ removal command), `pnpm gmt logs`, and that a plain `pnpm gmt setup` finishes. R
   beside the target, making the parent, removing it on failure; `waitHealthy` bounds each try (a server that never
   answers is one failed try); `waitGone` probes until the command fails, within its bound; `waitState` until the
   probe's trimmed output is one it waits for (a non-zero exit never counts); `waitUnlocked` until the pid file is gone or
-  its pid is not alive (`process.kill(pid, 0)`, EPERM counting as alive), naming the pid and the file at its bound. `Files` reads null only for
+  its pid is not alive (`process.kill(pid, 0)`, EPERM counting as alive), naming the pid and the file at its bound;
+  `waitWorkerAnswers` until an answer carries the worker's header (a refused connection or another server's answer
+  never counts; a try with no answer is ended by its own bound on the executor's timers), naming the port, the log and
+  the refusal file at its bound. `Files` reads null only for
   an absent path and throws for an unreadable one.
 - [ ] **Implement; commit.**
 

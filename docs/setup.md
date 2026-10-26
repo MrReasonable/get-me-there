@@ -984,7 +984,14 @@ changes it later.
   flight finishes; the app's stop waits 30 s. `pnpm gmt restart` starts the worker again only once the old process has
   exited (the launchd agent gone or the systemd unit inactive) and no running process holds `worker.lock`, each wait
   at most 285 s, and then only if its start check passes. When the check refuses, the worker stays stopped and the
-  restart says why with the fix and exits non-zero (78 for a refusal) instead of reporting done.
+  restart says why with the fix and exits non-zero (78 for a refusal) instead of reporting done. Every command that
+  starts the worker (`start`, `restart`, `update`, `setup`, `browser install`, `browser counts`, `consent`) reports done
+  only once the worker answers on its port (`127.0.0.1:8090` unless worker.env sets `CAMOUFOX_WORKER_PORT`); it
+  usually takes a few seconds, since the worker launches its browser before it listens. If it has not answered within
+  60 s the command exits 1 and says so, naming the port, the worker's log
+  (`~/Library/Logs/get-me-there/camoufox-worker.log` on macOS, `journalctl --user -u
+  get-me-there-camoufox-worker.service` on Linux) and, when the worker refused to start, its `start-refusal.json`
+  with the fix.
 
 ### Capture your consent choice
 

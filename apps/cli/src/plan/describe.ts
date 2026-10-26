@@ -1,3 +1,4 @@
+import { workerAddress } from '../worker/answer.js';
 import type { Action, ApplyResult, Plan } from './action.js';
 
 const octal = (mode: number): string => `0${mode.toString(8)}`;
@@ -41,6 +42,8 @@ export function describeAction(a: Action): string {
       return `wait up to ${a.timeoutSeconds} s until ${a.describe} prints ${a.until.join(' or ')}`;
     case 'waitUnlocked':
       return `wait up to ${a.timeoutSeconds} s until ${a.holder} lets go of ${a.path}`;
+    case 'waitWorkerAnswers':
+      return `wait up to ${a.timeoutSeconds} s until the worker answers on ${workerAddress(a.port)}`;
   }
 }
 

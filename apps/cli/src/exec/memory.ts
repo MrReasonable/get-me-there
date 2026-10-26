@@ -1,6 +1,8 @@
 import { dirname } from 'node:path/posix';
 import type { Action, Executor } from '../plan/action.js';
+import { notAnswering } from '../worker/answer.js';
 import { liveHolder, stillHeld } from '../worker/lock.js';
+import { refusalOfText } from '../worker/refusal.js';
 import type { Files } from './files.js';
 import type { Runner } from './runner.js';
 
@@ -147,6 +149,7 @@ export class MemoryFs implements Files {
       case 'waitGone':
       case 'waitState':
       case 'waitUnlocked':
+      case 'waitWorkerAnswers':
         return;
     }
   }
@@ -210,11 +213,14 @@ export function memoryExecutor(
     healthy?: (url: string) => boolean;
     /** Whether a pid is a live process, for `waitUnlocked`; none is by default. */
     alive?: (pid: number) => boolean;
+    /** Whether the worker answers on a port when asked, for `waitWorkerAnswers`; it does at once by default. */
+    answers?: (port: number) => boolean;
   } = {},
 ): Executor & { log: Action[] } {
   const log: Action[] = [];
   const runner = opts.runner ?? memoryRunner(fs);
   const alive = opts.alive ?? (() => false);
+  const answers = opts.answers ?? (() => true);
   return {
     log,
     async run(a: Action): Promise<{ stdout: string }> {
@@ -250,6 +256,17 @@ export function memoryExecutor(
           if (pid === null) return { stdout: '' };
         }
         throw new Error(stillHeld(a, pid ?? 0));
+      }
+      // why: one ask a simulated second, as the system executor's, so a bound of n seconds is n + 1 asks
+      if (a.kind === 'waitWorkerAnswers') {
+        for (let i = 0; i <= a.timeoutSeconds; i++) if (answers(a.port)) return { stdout: '' };
+        let refusal: ReturnType<typeof refusalOfText>;
+        try {
+          refusal = refusalOfText(fs.read(a.refusalFile));
+        } catch {
+          refusal = 'unreadable';
+        }
+        throw new Error(notAnswering(a, refusal));
       }
       if (a.kind === 'waitHealthy' && opts.healthy !== undefined && !opts.healthy(a.url))
         throw new Error(`${a.url} did not answer healthy within ${a.timeoutSeconds} s`);

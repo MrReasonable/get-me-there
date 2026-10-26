@@ -23,6 +23,11 @@ export function readStartRefusal(paths: Paths, files: Files): StartRefusal | 'no
   } catch {
     return 'unreadable';
   }
+  return refusalOfText(text);
+}
+
+/** A refusal file's text as readStartRefusal judges it: none for no file, unreadable for any other shape. */
+export function refusalOfText(text: string | null): StartRefusal | 'none' | 'unreadable' {
   if (text === null) return 'none';
   try {
     const r = startRefusalSchema.safeParse(JSON.parse(text));

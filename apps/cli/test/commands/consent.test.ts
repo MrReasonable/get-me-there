@@ -110,6 +110,9 @@ describe('gmt consent: the capture, with the worker stopped meanwhile', () => {
     const r = m.runs();
     expect(r[0]).toBe(`launchctl bootout gui/501/${LABEL}`);
     expect(r.some((x) => x.startsWith('launchctl bootstrap'))).toBe(true);
+    // why: spec §13: the worker started again is done only once it answers
+    expect(m.executor.log.at(-1)?.kind).toBe('waitWorkerAnswers');
+    expect(m.io.stdout).toContain('consent: the worker: done');
     expect(m.fs.read(REFUSAL)).toBeNull();
     expect(m.checks).toHaveLength(1);
     expect(m.loaded.has(LABEL)).toBe(true);

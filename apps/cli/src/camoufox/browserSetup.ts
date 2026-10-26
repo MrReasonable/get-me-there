@@ -32,7 +32,7 @@ import {
   workerEnvPath,
   workerUrlOf,
 } from './workerEnv.js';
-import { checkWords, workerCheck, workerStart, workerStop } from './workerService.js';
+import { checkWords, workerCheck, workerStart, workerStarted, workerStop } from './workerService.js';
 
 /**
  * The browser provider in `gmt setup` (spec §13 "The gmt command"; decision 75; brief WP17 Task 17.6). The order is
@@ -95,7 +95,13 @@ async function writeAndRestart(
   const stoppedFacts = new Map([[worker.unit, assumedStopped(wf)]]);
   if (o.startWorker === 'checked') {
     const install = sm.install(worker.rendered, stoppedFacts);
-    workerActions.push(...(install.length === 0 ? sm.start(worker.unit, assumedStopped(wf)) : install));
+    workerActions.push(
+      ...workerStarted(
+        deps,
+        worker.unit,
+        install.length === 0 ? sm.start(worker.unit, assumedStopped(wf)) : install,
+      ),
+    );
   } else if (o.startWorker) {
     const start = await workerStart(deps, worker, stoppedFacts);
     if (start.notStarted !== null) deps.io.out(`worker: not started: ${start.notStarted}\n`);

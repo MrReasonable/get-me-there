@@ -1,12 +1,20 @@
 import { join } from 'node:path/posix';
 import type { StartRefusal } from '@gmt/core';
-import { startRefusalSchema, WORKER_LOCK_FILE } from '@gmt/core';
+import {
+  START_REFUSAL_FILE,
+  startRefusalSchema,
+  WORKER_LOCK_FILE,
+  WORKER_PORT,
+  workerPortOf,
+} from '@gmt/core';
 import type { Deps } from '../deps.js';
 import type { Action } from '../plan/action.js';
 import type { Paths, ServiceFacts } from '../platform/types.js';
+import { launchdLogPath } from '../services/launchd.js';
 import { factOf, type ServiceEntry } from '../services/set.js';
 import { serviceEnvironment, stopWaitSeconds, workerRunArgv } from '../services/specs.js';
 import { refusalWithFix } from '../worker/refusal.js';
+import { readWorkerEnv } from './workerEnv.js';
 
 /**
  * The worker service's start rule (decision 75; spec §13 "The worker service starts only after worker start checks
@@ -62,9 +70,56 @@ export async function workerStart(
   const sm = deps.platform.serviceManager;
   const install = sm.install(worker.rendered, facts);
   return {
-    actions: install.length === 0 ? sm.start(worker.unit, factOf(facts, worker.unit)) : install,
+    actions: workerStarted(
+      deps,
+      worker.unit,
+      install.length === 0 ? sm.start(worker.unit, factOf(facts, worker.unit)) : install,
+    ),
     notStarted: null,
   };
+}
+
+/**
+ * How long a start of the worker waits for it to answer. Measured on the operator's Mac (2026-10-26): about 3 s from
+ * launchd's start to listening (the browser's launch is most of it), 1.4 to 3.0 s for a start from a checkout; 60 s
+ * leaves a slow first launch of a new browser build, or a loaded machine, a wide margin.
+ */
+export const WORKER_ANSWER_SECONDS = 60;
+
+/**
+ * The wait after the worker's service is started (spec §13): until the worker answers on its port (worker.env's
+ * CAMOUFOX_WORKER_PORT, its default when unset or unreadable, as the worker's own check would have refused a bad one),
+ * within WORKER_ANSWER_SECONDS. A worker that never answers fails it, naming its log (launchd's file, or the user
+ * journal's unit) and its start refusal file.
+ */
+export function workerAnswerWait(deps: Pick<Deps, 'platform' | 'files'>, unit: string): Action {
+  const paths = deps.platform.paths;
+  let record: Readonly<Record<string, string>> | null = null;
+  try {
+    record = readWorkerEnv(deps.files, paths);
+  } catch {
+    // why: an unreadable worker.env is the start check's to refuse; the wait asks the default port
+  }
+  return {
+    kind: 'waitWorkerAnswers',
+    port: workerPortOf(record?.CAMOUFOX_WORKER_PORT) ?? WORKER_PORT.default,
+    log: paths.logs === null ? `journalctl --user -u ${unit}` : launchdLogPath(paths.logs, 'camoufox-worker'),
+    refusalFile: join(paths.workerData, START_REFUSAL_FILE),
+    timeoutSeconds: WORKER_ANSWER_SECONDS,
+  };
+}
+
+/**
+ * A start of the worker's service (its start, restart or install) followed by the wait above, wherever the worker is
+ * started (start, restart, update, setup, `browser install`, `browser counts`, `gmt consent`); nothing when nothing
+ * starts it.
+ */
+export function workerStarted(
+  deps: Pick<Deps, 'platform' | 'files'>,
+  unit: string,
+  start: readonly Action[],
+): Action[] {
+  return start.length === 0 ? [] : [...start, workerAnswerWait(deps, unit)];
 }
 
 /**

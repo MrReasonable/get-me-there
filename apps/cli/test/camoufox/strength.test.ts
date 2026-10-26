@@ -20,6 +20,7 @@ import { checkWords, workerCheck } from '../../src/camoufox/workerService.js';
 import { runCli } from '../../src/cli.js';
 import { MemoryFs, memoryRunner, type RunHandler } from '../../src/exec/memory.js';
 import type { Action } from '../../src/plan/action.js';
+import { workerEntry } from '../../src/services/set.js';
 import { refusalWithFix } from '../../src/worker/refusal.js';
 import { scriptedAsk, stubHttp, unsetFlags } from '../support/deps.js';
 import { machine } from '../support/machine.js';
@@ -271,6 +272,8 @@ describe('browserSetup’s outcomes and words', () => {
       `writeFile ${ENV}`,
       'writeFile /Users/op/Library/LaunchAgents/local.get-me-there.camoufox-worker.plist',
       'run launchctl bootstrap gui/501 /Users/op/Library/LaunchAgents/local.get-me-there.camoufox-worker.plist',
+      // why: spec §13: the worker answers before the app starts, so the app's first status read finds it serving
+      'waitWorkerAnswers ',
       'run launchctl bootstrap gui/501 /Users/op/Library/LaunchAgents/local.get-me-there.app.plist',
       'waitHealthy http://127.0.0.1:3000/api/health',
     ]);
@@ -279,6 +282,20 @@ describe('browserSetup’s outcomes and words', () => {
         .filter((a) => a.kind === 'writeFile' && a.path === WORKER_ENV)
         .map((a) => a.kind === 'writeFile' && a.mode),
     ).toEqual([0o600]);
+  });
+  it('turning it on with the worker’s unit already in place starts that unit, then waits for the worker to answer', async () => {
+    const m = await world();
+    for (const r of workerEntry(m.deps).rendered) m.fs.file(r.path, r.contents, 0o644);
+    expect(await run(m)).toBe('on');
+    expect(show(m.executor.log).slice(-4)).toEqual([
+      'run launchctl bootstrap gui/501 /Users/op/Library/LaunchAgents/local.get-me-there.camoufox-worker.plist',
+      'waitWorkerAnswers ',
+      'run launchctl bootstrap gui/501 /Users/op/Library/LaunchAgents/local.get-me-there.app.plist',
+      'waitHealthy http://127.0.0.1:3000/api/health',
+    ]);
+    expect(show(m.executor.log)).not.toContain(
+      'writeFile /Users/op/Library/LaunchAgents/local.get-me-there.camoufox-worker.plist',
+    );
   });
   it('a second run with it on re-renders nothing and says on; a failed re-render is failed', async () => {
     const m = await world();
@@ -444,6 +461,8 @@ describe('browserSetup’s outcomes and words', () => {
       `writeFile ${WORKER_ENV}`,
       `writeFile ${ENV}`,
       'run launchctl bootstrap gui/501 /Users/op/Library/LaunchAgents/local.get-me-there.camoufox-worker.plist',
+      // why: spec §13: the worker answers before the app starts, so the app's first status read finds it serving
+      'waitWorkerAnswers ',
       'run launchctl bootstrap gui/501 /Users/op/Library/LaunchAgents/local.get-me-there.app.plist',
       'waitHealthy http://127.0.0.1:3000/api/health',
     ]);

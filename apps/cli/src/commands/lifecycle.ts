@@ -1,5 +1,5 @@
 import { type Flags, isOnlyService, type OnlyService } from '../args.js';
-import { workerStop } from '../camoufox/workerService.js';
+import { workerStarted, workerStop } from '../camoufox/workerService.js';
 import { type Deps, EXIT } from '../deps.js';
 import type { Action } from '../plan/action.js';
 import { apply } from '../plan/apply.js';
@@ -58,6 +58,9 @@ export function lifecycleActions(
       // why: U5: a worker that was stopped has let go of its lock before the command reports it stopped
       if (verb === 'stop' && e.name === 'camoufox-worker')
         return workerStop(deps, e.unit, factOf(facts, e.unit));
+      // why: spec §13: a start of the worker is done only once the worker answers
+      if (e.name === 'camoufox-worker')
+        return workerStarted(deps, e.unit, sm[verb](e.unit, factOf(facts, e.unit)));
       return sm[verb](e.unit, factOf(facts, e.unit));
     }
     const unit = scheduleUnit(e);

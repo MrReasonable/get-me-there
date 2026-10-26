@@ -114,4 +114,34 @@ describe('MemoryFs, memoryRunner and memoryExecutor', () => {
     expect(asked).toBe(5);
     expect(fs.paths()).toContain('/d/worker.lock');
   });
+
+  it('waitWorkerAnswers asks once a simulated second (n + 1 times for n seconds) and fails naming the port and log', async () => {
+    const fs = new MemoryFs();
+    const wait = {
+      kind: 'waitWorkerAnswers' as const,
+      port: 8191,
+      log: '/l/camoufox-worker.log',
+      refusalFile: '/d/start-refusal.json',
+      timeoutSeconds: 4,
+    };
+    // answers at once by default
+    await memoryExecutor(fs).run(wait);
+    const ports: number[] = [];
+    await memoryExecutor(fs, { answers: (p) => ports.push(p) >= 3 }).run(wait);
+    expect(ports).toEqual([8191, 8191, 8191]);
+    let asked = 0;
+    await expect(memoryExecutor(fs, { answers: () => ++asked < 0 }).run(wait)).rejects.toThrow(
+      'the worker did not answer on 127.0.0.1:8191 within 4 s; its log: /l/camoufox-worker.log',
+    );
+    expect(asked).toBe(5);
+    // a refusal file the worker left is named with its words; one this build cannot read is named as such
+    fs.file('/d/start-refusal.json', '{"reason":"signed-in","at":"2026-10-24T09:30:00.000Z"}', 0o600);
+    await expect(memoryExecutor(fs, { answers: () => false }).run(wait)).rejects.toThrow(
+      '; its start refusal file /d/start-refusal.json (written 2026-10-24T09:30:00.000Z) says: refused, not retrying: the browser profile is signed in',
+    );
+    fs.unreadable('/d/start-refusal.json');
+    await expect(memoryExecutor(fs, { answers: () => false }).run(wait)).rejects.toThrow(
+      'its log: /l/camoufox-worker.log; its start refusal file /d/start-refusal.json is there but cannot be read',
+    );
+  });
 });

@@ -18,6 +18,8 @@ import { assertPrintable, stopWaitSeconds } from './specs.js';
  * checkpoint and release its lock, and the worker finish a page in flight.
  */
 export const launchdLabel = (name: ServiceSpec['name']): string => `local.get-me-there.${name}`;
+/** A launchd service's log file, its standard output and error both (`gmt logs` follows every one of them). */
+export const launchdLogPath = (logs: string, name: ServiceSpec['name']): string => join(logs, `${name}.log`);
 
 const xml = (s: string): string =>
   s
@@ -77,7 +79,7 @@ export function renderPlist(spec: ServiceSpec, paths: Paths): string {
     );
   lines.push('  <key>ExitTimeOut</key>', `  <integer>${spec.stopSeconds}</integer>`);
   if (paths.logs !== null) {
-    const log = join(paths.logs, `${spec.name}.log`);
+    const log = launchdLogPath(paths.logs, spec.name);
     lines.push(
       '  <key>StandardOutPath</key>',
       `  ${str(log)}`,

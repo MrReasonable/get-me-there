@@ -1,5 +1,5 @@
 import type { Flags } from '../args.js';
-import { checkWords, workerCheck } from '../camoufox/workerService.js';
+import { checkWords, workerCheck, workerStarted } from '../camoufox/workerService.js';
 import { type Deps, EXIT } from '../deps.js';
 import { apply } from '../plan/apply.js';
 import { describePlan, describeResult } from '../plan/describe.js';
@@ -18,7 +18,8 @@ import {
  * again only once its old process has let go (WP16b ruling U5: launchd's label gone or systemd's unit inactive, then
  * its lock free of any live pid, each wait bounded by its stop timeout plus a margin) and its own check then passes
  * (decision 75; CodeRabbit, PR #15). A check that refuses leaves it stopped, says so with the refusal's fix, and the
- * command exits non-zero rather than reporting done.
+ * command exits non-zero rather than reporting done. A started worker is done only once it answers on its port (spec
+ * §13), within a bound; one that never does fails the restart, naming its port, its log and any start refusal file.
  */
 export async function restartCommand(flags: Flags, _p: string | null, deps: Deps): Promise<number> {
   const win = refuseOnWindows(deps);
@@ -42,14 +43,21 @@ export async function restartCommand(flags: Flags, _p: string | null, deps: Deps
     ...lifecycleActions(deps, 'stop', [worker], facts),
     ...lifecycleActions(deps, 'restart', rest, facts),
   ];
-  // why: once stopped, the worker's start is its service manager's start from a stopped service
-  const start = deps.platform.serviceManager.start(worker.unit, assumedStopped(factOf(facts, worker.unit)));
+  // why: once stopped, the worker's start is its service manager's start from a stopped service, then the wait until
+  // the new worker answers (spec §13), so "done" means it serves
+  const start = workerStarted(
+    deps,
+    worker.unit,
+    deps.platform.serviceManager.start(worker.unit, assumedStopped(factOf(facts, worker.unit))),
+  );
   if (flags['dry-run'] === true) {
     deps.io.out(
       describePlan({
         command: 'restart',
         actions: [...stop, ...start],
-        notes: ['the worker starts again only once its check passes, after its old process has let go'],
+        notes: [
+          'the worker starts again only once its check passes, after its old process has let go, and the restart is done once it answers',
+        ],
       }),
     );
     return EXIT.ok;

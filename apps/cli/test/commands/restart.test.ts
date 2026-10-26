@@ -1,6 +1,6 @@
 import { join } from 'node:path/posix';
 import { describe, expect, it } from 'vitest';
-import { workerStop } from '../../src/camoufox/workerService.js';
+import { WORKER_ANSWER_SECONDS, workerStart, workerStop } from '../../src/camoufox/workerService.js';
 import { runCli } from '../../src/cli.js';
 import { lifecycleActions } from '../../src/commands/lifecycle.js';
 import { memoryExecutor, type RunHandler } from '../../src/exec/memory.js';
@@ -12,8 +12,10 @@ import { machine } from '../support/machine.js';
  * `gmt restart` and the worker (WP16b ruling U5; the operator's 2026-10-26 report): the old worker gets up to 270 s to
  * finish a page in flight, and its lock (`<workerData>/worker.lock`, its pid) stays held until it has exited. The
  * restart stops it, waits until the service manager has let it go and no live process holds the lock, then runs the
- * worker's check and starts it; a refused check is said, with its fix, and exits non-zero. Time is the executors': the
- * memory executor checks the lock once a simulated second, so a bound of n seconds is n + 1 checks, and nothing sleeps.
+ * worker's check and starts it; a refused check is said, with its fix, and exits non-zero. Its service manager reports
+ * the new worker started before it listens (it launches its browser first), so the restart is done only once the worker
+ * answers on its port (spec §13), within a bound. Time is the executors': the memory executor checks the lock, and asks
+ * the worker, once a simulated second, so a bound of n seconds is n + 1 checks, and nothing sleeps.
  */
 const OLD_PID = 4242;
 const WORKER_LABEL = 'local.get-me-there.camoufox-worker';
@@ -27,7 +29,16 @@ const refusal = (reason: string) => `{"reason":"${reason}","at":"2026-10-24T09:3
  * check answers `locked` while that process lives, else `check`.
  */
 async function world(
-  o: { os?: 'darwin' | 'linux'; releasesAfter?: number | null; check?: string; deactivating?: number } = {},
+  o: {
+    os?: 'darwin' | 'linux';
+    releasesAfter?: number | null;
+    check?: string;
+    deactivating?: number;
+    /** How many times the new worker is asked before it answers (null: it never does); 0 by default. */
+    answersAfter?: number | null;
+    /** Called on each time the new worker is asked, with that count (a test's event to change the machine). */
+    onAsk?: (asked: number) => void;
+  } = {},
 ) {
   const os = o.os ?? 'darwin';
   const order: string[] = [];
@@ -73,11 +84,18 @@ async function world(
     }
     return state.oldAlive;
   };
-  const executor = memoryExecutor(m.fs, { runner: m.runner, alive });
+  const asked: number[] = [];
+  const answersAfter = o.answersAfter === undefined ? 0 : o.answersAfter;
+  const answers = (port: number): boolean => {
+    asked.push(port);
+    o.onAsk?.(asked.length);
+    return answersAfter !== null && asked.length > answersAfter;
+  };
+  const executor = memoryExecutor(m.fs, { runner: m.runner, alive, answers });
   m.deps.executor = executor;
   m.io.stdout = '';
   m.io.stderr = '';
-  return { ...m, executor, order, state, lock, alive };
+  return { ...m, executor, order, state, lock, alive, asked, answers };
 }
 
 const kinds = (log: readonly Action[]) => log.map((a) => (a.kind === 'run' ? a.describe : a.kind));
@@ -92,10 +110,12 @@ describe('restart waits for the old worker to let go before it starts the new on
       'waitGone',
       'waitUnlocked',
       `launchctl bootstrap gui/501 /Users/op/Library/LaunchAgents/${WORKER_LABEL}.plist`,
+      'waitWorkerAnswers',
     ]);
     // the lock was read until the old process had gone: three checks it outlived, and the one that found it free
     expect(m.state.lockChecks).toBe(4);
-    expect(m.io.stdout).toBe('restart: done (4 steps)\n');
+    expect(m.asked).toEqual([8090]);
+    expect(m.io.stdout).toBe('restart: done (5 steps)\n');
     expect(m.io.stderr).toBe('');
     expect(m.loaded.has(WORKER_LABEL)).toBe(true);
   });
@@ -124,6 +144,9 @@ describe('restart waits for the old worker to let go before it starts the new on
     );
     expect(m.io.stdout).toBe('');
     expect(m.loaded.has(WORKER_LABEL)).toBe(false);
+    // nothing was started, so nothing is waited on
+    expect(kinds(m.executor.log)).not.toContain('waitWorkerAnswers');
+    expect(m.asked).toEqual([]);
   });
 
   it('a check that fails (not a refusal) is not "done" either: exit 1, its words said', async () => {
@@ -144,11 +167,12 @@ describe('restart waits for the old worker to let go before it starts the new on
       'waitState',
       'waitUnlocked',
       `systemctl --user start ${WORKER_UNIT}`,
+      'waitWorkerAnswers',
     ]);
     // the unit was still deactivating for two probes; the old process outlived two lock checks
     expect(m.state.showProbes).toBe(2);
     expect(m.state.lockChecks).toBe(3);
-    expect(m.io.stdout).toBe('restart: done (4 steps)\n');
+    expect(m.io.stdout).toBe('restart: done (5 steps)\n');
   });
 
   it('linux: a lock never released and a refused start each exit non-zero without "done"', async () => {
@@ -164,6 +188,7 @@ describe('restart waits for the old worker to let go before it starts the new on
     expect(refused.io.stderr).toContain('the worker is stopped (its unit stopped) and was not started again');
     expect(`${refused.io.stdout}${refused.io.stderr}`).not.toContain('restart: done');
     expect(refused.running.has(WORKER_UNIT)).toBe(false);
+    expect(refused.asked).toEqual([]);
   });
 
   it('linux: a unit that never reads inactive is a bounded wait that names its state', async () => {
@@ -181,7 +206,10 @@ describe('restart waits for the old worker to let go before it starts the new on
     expect(await runCli(['restart'], m.deps), m.io.stderr).toBe(0);
     const k = kinds(m.executor.log);
     expect(k.slice(0, 3)).toEqual([`launchctl bootout gui/501/${WORKER_LABEL}`, 'waitGone', 'waitUnlocked']);
-    expect(k.at(-1)).toBe(`launchctl bootstrap gui/501 /Users/op/Library/LaunchAgents/${WORKER_LABEL}.plist`);
+    expect(k.slice(-2)).toEqual([
+      `launchctl bootstrap gui/501 /Users/op/Library/LaunchAgents/${WORKER_LABEL}.plist`,
+      'waitWorkerAnswers',
+    ]);
     expect(k).toContain('launchctl bootout gui/501/local.get-me-there.app');
     expect(m.order).toEqual(['stop', 'check', 'start']);
   });
@@ -200,6 +228,7 @@ describe('restart waits for the old worker to let go before it starts the new on
     expect(m.io.stderr).toContain('restart: stopped at a failed step; nothing was undone');
     expect(m.io.stderr).toContain(`  done:    run launchctl bootout gui/501/${WORKER_LABEL}`);
     expect(m.io.stderr).toContain(`  failed:  run launchctl bootstrap gui/501`);
+    expect(m.io.stderr).toContain('  not run: wait up to 60 s until the worker answers on 127.0.0.1:8090');
     expect(m.io.stdout).toBe('');
   });
 
@@ -219,7 +248,7 @@ describe('restart waits for the old worker to let go before it starts the new on
     expect(kinds(lifecycleActions(m.deps, 'stop', [worker], facts))).toContain('waitUnlocked');
   });
 
-  it('--dry-run prints the stop, both waits and the start, with the check rule, and changes nothing', async () => {
+  it('--dry-run prints the stop, both waits, the start and the answer wait, with the check rule, and changes nothing', async () => {
     const m = await world();
     expect(await runCli(['restart', '--only', 'worker', '--dry-run'], m.deps)).toBe(0);
     expect(m.executor.log).toEqual([]);
@@ -231,7 +260,8 @@ describe('restart waits for the old worker to let go before it starts the new on
         `  2. wait up to 285 s until launchctl print gui/501/${WORKER_LABEL} fails`,
         `  3. wait up to 285 s until the worker lets go of ${m.lock}`,
         `  4. run launchctl bootstrap gui/501 /Users/op/Library/LaunchAgents/${WORKER_LABEL}.plist`,
-        '  note: the worker starts again only once its check passes, after its old process has let go',
+        '  5. wait up to 60 s until the worker answers on 127.0.0.1:8090',
+        '  note: the worker starts again only once its check passes, after its old process has let go, and the restart is done once it answers',
         '',
       ].join('\n'),
     );
@@ -248,6 +278,139 @@ describe('restart waits for the old worker to let go before it starts the new on
     m.executor.log.length = 0;
     expect(await runCli(['stop', '--only', 'worker'], m.deps)).toBe(0);
     expect(m.executor.log).toEqual([]);
+  });
+});
+
+const LOG = '/Users/op/Library/Logs/get-me-there/camoufox-worker.log';
+const REFUSAL_FILE = '/Users/op/.local/state/get-me-there/camoufox/start-refusal.json';
+
+describe('every start of the worker is done only once the worker answers (spec §13)', () => {
+  it('a worker that answers when asked the fourth time: the restart waits for it, then says done', async () => {
+    const m = await world({ answersAfter: 3 });
+    expect(await runCli(['restart', '--only', 'worker'], m.deps), m.io.stderr).toBe(0);
+    expect(m.asked).toEqual([8090, 8090, 8090, 8090]);
+    expect(kinds(m.executor.log).at(-1)).toBe('waitWorkerAnswers');
+    expect(m.io.stdout).toBe('restart: done (5 steps)\n');
+    expect(m.io.stderr).toBe('');
+  });
+
+  it('a worker that never answers: a bounded wait, the port and the log named, no "done", exit 1', async () => {
+    const m = await world({ answersAfter: null });
+    expect(await runCli(['restart', '--only', 'worker'], m.deps)).toBe(1);
+    // why: the bound is 60 s, one ask a second: 61 asks
+    expect(WORKER_ANSWER_SECONDS).toBe(60);
+    expect(m.asked).toHaveLength(61);
+    expect(m.io.stderr).toContain(
+      `  failed:  wait up to 60 s until the worker answers on 127.0.0.1:8090: the worker did not answer on 127.0.0.1:8090 within 60 s; its log: ${LOG}\n`,
+    );
+    expect(m.io.stderr).not.toContain('start refusal file');
+    expect(`${m.io.stdout}${m.io.stderr}`).not.toContain('restart: done');
+    expect(m.order).toEqual(['stop', 'check', 'start']);
+  });
+
+  it('a worker that refused after its start: the failure names the refusal file it left, with its fix', async () => {
+    const m = await world({
+      answersAfter: null,
+      onAsk: (n) => {
+        if (n === 2) m.fs.file(REFUSAL_FILE, refusal('signed-in'), 0o600);
+      },
+    });
+    expect(await runCli(['restart', '--only', 'worker'], m.deps)).toBe(1);
+    expect(m.io.stderr).toContain(
+      `its log: ${LOG}; its start refusal file ${REFUSAL_FILE} (written 2026-10-24T09:30:00.000Z) says: refused, not retrying: the browser profile is signed in to an account: clear it; fix: pnpm --filter @gmt/camoufox-worker clear-signed-in\n`,
+    );
+    expect(`${m.io.stdout}${m.io.stderr}`).not.toContain('restart: done');
+  });
+
+  it('linux: the failure points at the worker’s journal', async () => {
+    const m = await world({ os: 'linux', answersAfter: null });
+    expect(await runCli(['restart', '--only', 'worker'], m.deps)).toBe(1);
+    expect(m.io.stderr).toContain(`within 60 s; its log: journalctl --user -u ${WORKER_UNIT}\n`);
+  });
+
+  it('the worker is asked on the port worker.env names', async () => {
+    const m = await world({ answersAfter: null });
+    m.fs.file(join(m.deps.platform.paths.workerData, 'worker.env'), 'CAMOUFOX_WORKER_PORT=8191\n', 0o600);
+    expect(await runCli(['restart', '--only', 'worker'], m.deps)).toBe(1);
+    expect(new Set(m.asked)).toEqual(new Set([8191]));
+    expect(m.io.stderr).toContain('the worker did not answer on 127.0.0.1:8191 within 60 s');
+  });
+
+  it('an unreadable worker.env leaves the start check to refuse it: the wait asks the default port', async () => {
+    const m = await world();
+    const env = join(m.deps.platform.paths.workerData, 'worker.env');
+    m.fs.file(env, 'CAMOUFOX_WORKER_PORT=8191\n', 0o600).unreadable(env);
+    expect(await runCli(['restart', '--only', 'worker'], m.deps), m.io.stderr).toBe(0);
+    expect(m.asked).toEqual([8090]);
+  });
+
+  it('start --only worker waits too; a worker already running is neither started nor waited on', async () => {
+    const m = await world({ answersAfter: 2 });
+    // why: start refuses a unit whose checkout is gone, so the worker's package is there
+    m.fs.dir(workerEntry(m.deps).spec.workingDirectory);
+    expect(await runCli(['stop', '--only', 'worker'], m.deps)).toBe(0);
+    m.executor.log.length = 0;
+    expect(await runCli(['start', '--only', 'worker'], m.deps), m.io.stderr).toBe(0);
+    expect(kinds(m.executor.log)).toEqual([
+      `launchctl bootstrap gui/501 /Users/op/Library/LaunchAgents/${WORKER_LABEL}.plist`,
+      'waitWorkerAnswers',
+    ]);
+    expect(m.asked).toHaveLength(3);
+    m.executor.log.length = 0;
+    expect(await runCli(['start', '--only', 'worker'], m.deps)).toBe(0);
+    expect(m.executor.log).toEqual([]);
+    expect(m.asked).toHaveLength(3);
+  });
+
+  it('start --only worker that never answers says so and exits 1, never "done"', async () => {
+    const m = await world({ answersAfter: null });
+    m.fs.dir(workerEntry(m.deps).spec.workingDirectory);
+    expect(await runCli(['stop', '--only', 'worker'], m.deps)).toBe(0);
+    m.io.stdout = '';
+    expect(await runCli(['start', '--only', 'worker'], m.deps)).toBe(1);
+    expect(m.io.stderr).toContain('the worker did not answer on 127.0.0.1:8090 within 60 s');
+    expect(m.io.stdout).not.toContain('start: done');
+  });
+
+  it('workerStart (browser install and counts, consent, update, setup) ends with the wait; a refused check plans nothing', async () => {
+    const m = await world();
+    m.state.oldAlive = false;
+    const worker = workerEntry(m.deps);
+    const stopped = new Map([
+      [
+        WORKER_LABEL,
+        { onDisk: worker.rendered[0]?.contents ?? '', loaded: false, state: 'stopped' as const },
+      ],
+    ]);
+    const started = await workerStart(m.deps, worker, stopped);
+    expect(started.notStarted).toBeNull();
+    expect(started.actions.at(-1)).toEqual({
+      kind: 'waitWorkerAnswers',
+      port: 8090,
+      log: LOG,
+      refusalFile: REFUSAL_FILE,
+      timeoutSeconds: 60,
+    });
+    // a unit that changed is re-rendered (its bootstrap starts it) and waited on the same way
+    const changed = new Map([[WORKER_LABEL, { onDisk: 'old', loaded: true, state: 'running' as const }]]);
+    expect(kinds((await workerStart(m.deps, worker, changed)).actions).slice(-2)).toEqual([
+      `launchctl bootstrap gui/501 /Users/op/Library/LaunchAgents/${WORKER_LABEL}.plist`,
+      'waitWorkerAnswers',
+    ]);
+    const refused = await world({ check: refusal('consent-expired') });
+    refused.state.oldAlive = false;
+    expect((await workerStart(refused.deps, worker, stopped)).actions).toEqual([]);
+  });
+
+  it('lifecycleActions: a start of the worker that starts something waits; the app, a stop and a no-op do not', async () => {
+    const m = await world();
+    const worker = workerEntry(m.deps);
+    const stopped = new Map([[WORKER_LABEL, { onDisk: 'x', loaded: false, state: 'stopped' as const }]]);
+    const running = new Map([[WORKER_LABEL, { onDisk: 'x', loaded: true, state: 'running' as const }]]);
+    expect(kinds(lifecycleActions(m.deps, 'start', [worker], stopped)).at(-1)).toBe('waitWorkerAnswers');
+    expect(kinds(lifecycleActions(m.deps, 'restart', [worker], running)).at(-1)).toBe('waitWorkerAnswers');
+    expect(lifecycleActions(m.deps, 'start', [worker], running)).toEqual([]);
+    expect(kinds(lifecycleActions(m.deps, 'stop', [worker], running))).not.toContain('waitWorkerAnswers');
   });
 });
 

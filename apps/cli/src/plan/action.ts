@@ -39,7 +39,11 @@ export type Action =
     }
   // why: a pid file such as the worker's lock, waited on until it is gone or the pid in it is no longer a live
   // process, within a bound; `holder` names that process for the operator (restart starts the worker only then)
-  | { kind: 'waitUnlocked'; path: string; holder: string; timeoutSeconds: number };
+  | { kind: 'waitUnlocked'; path: string; holder: string; timeoutSeconds: number }
+  // why: spec §13: a worker's service manager reports it started before it listens (it launches its browser first), so
+  // every start of the worker is done only once the worker answers a request on 127.0.0.1:`port`, asked a second
+  // apart, within a bound; `log` and `refusalFile` are where a worker that never answers says why
+  | { kind: 'waitWorkerAnswers'; port: number; log: string; refusalFile: string; timeoutSeconds: number };
 
 export interface Plan {
   command: string;
