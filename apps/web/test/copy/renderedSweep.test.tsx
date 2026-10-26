@@ -18,7 +18,7 @@ import {
 } from '../fixtures.js';
 import { poundsOutsidePrices, renderedCopy } from '../guards.js';
 import { server } from '../msw/server.js';
-import { renderWithProviders } from '../render.js';
+import { drawn, renderWithProviders } from '../render.js';
 
 /**
  * One landmark per view that exists only once the view's data has rendered, so the sweep cannot pass over a view that
@@ -28,7 +28,12 @@ const CONTENT: Record<(typeof VIEWS)[number], () => Promise<HTMLElement>> = {
   results: () => screen.findByRole('table', { name: 'Round trips found' }),
   calendar: () => screen.findByRole('table', { name: 'Mar 2027' }),
   duration: () => screen.findByRole('table', { name: COPY.durationView.tableCaption }),
-  history: () => screen.findByRole('figure', { name: COPY.historyView.fetchChartTitle }),
+  // why: the chart draws its axes after the figure renders; the sweep reads them, so it waits for the drawn surface
+  history: async () => {
+    const figure = await screen.findByRole('figure', { name: COPY.historyView.fetchChartTitle });
+    await drawn(figure);
+    return figure;
+  },
   coverage: () => screen.findByRole('heading', { name: COPY.coverageHeading }),
   definitions: () => screen.findByRole('button', { name: COPY.showEstimate }),
   alerts: () => screen.findByRole('heading', { name: COPY.alertsView.heading }),

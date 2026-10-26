@@ -1,4 +1,4 @@
-import { within } from '@testing-library/react';
+import { waitFor, within } from '@testing-library/react';
 import { delay, HttpResponse, http } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { COPY } from '../../src/copy.js';
@@ -8,7 +8,7 @@ import { barValue, buildDurationData, gapLabel, rowAt } from '../../src/views/Du
 import { API, definition } from '../fixtures.js';
 import { bare, cellAt, durationResponse, night, priceAt, provSyntheticAt } from '../fixtures.wp10.js';
 import { server } from '../msw/server.js';
-import { renderWithProviders } from '../render.js';
+import { drawn, drawnText, renderWithProviders } from '../render.js';
 
 // 10: both priced; 11: discovery searched, no itinerary search; 12: calendar only, itinerary-searched, no price;
 // 13: nothing searched; 14: omitted by the api.
@@ -235,23 +235,20 @@ describe('Duration view (spec §11 View C)', () => {
     const figure = await findByRole('figure', { name: 'Cheapest found by stay length' });
     expect(figure).toHaveAccessibleDescription(/Cheapest found per stay length, with provenance/);
     expect(figure).toHaveTextContent('n = priced cells behind each minimum');
-    // why: recharts draws legend icons as svgs too; the chart surface is the one with role="application".
-    const svg = figure.querySelector('svg[role="application"]');
-    expect(svg?.textContent).toContain('nights');
-    expect(svg?.textContent).toContain('13*');
+    // why: recharts draws legend icons as svgs too; the chart surface is the one with role="application", and it
+    // draws its axes in renders after the figure's, so the test waits for them
+    const svg = await drawnText(figure, 'nights', '13*', '14*', 'price (GBP)');
     // why: UI-008: the note's example is a symbol, never a numeral the chart may show as a searched tick.
     expect(COPY.durationView.chartNote).not.toMatch(/\d+\*/);
-    expect(svg?.textContent).toContain('14*');
-    expect(svg?.textContent).not.toContain('11*');
+    expect(svg).not.toContain('11*');
     // why: decision 52 — axis ticks print pounds without the sign; the figure carries no sweep exemption.
-    expect(svg?.textContent).toContain('price (GBP)');
-    expect(svg?.textContent).not.toContain('£');
+    expect(svg).not.toContain('£');
     expect(figure).not.toHaveAttribute('data-scale');
-    const legend = figure.querySelector('.recharts-legend-wrapper')?.textContent ?? '';
+    const legend = (await drawn(figure, '.recharts-legend-wrapper')).textContent ?? '';
     expect(legend).toContain('min among verified (class verified, n=3)');
     expect(legend).toContain('calendar, Aviasales cache (constraints not checked, n=9)');
     // why: three non-null values (10 verified, 10 and 12 calendar): a gap must never be drawn as a zero-height bar.
-    expect(figure.querySelectorAll('.recharts-rectangle')).toHaveLength(3);
+    await waitFor(() => expect(figure.querySelectorAll('.recharts-rectangle')).toHaveLength(3));
     const [verifiedBars, calendarBars] = [...figure.querySelectorAll('.recharts-bar')];
     expect(verifiedBars?.querySelectorAll('.recharts-rectangle')).toHaveLength(1);
     const dashed = [...(calendarBars?.querySelectorAll('.recharts-rectangle') ?? [])].map((b) =>
@@ -292,9 +289,9 @@ describe('Duration view (spec §11 View C)', () => {
     );
     const { findByRole } = renderWithProviders(<DurationView definition={def} />);
     const figure = await findByRole('figure');
-    const bar = figure.querySelector('.recharts-rectangle');
-    expect(bar?.getAttribute('stroke-width')).toBe('2');
-    expect(bar?.getAttribute('fill-opacity')).toBe('0.3');
+    const bar = await drawn(figure, '.recharts-rectangle');
+    expect(bar.getAttribute('stroke-width')).toBe('2');
+    expect(bar.getAttribute('fill-opacity')).toBe('0.3');
   });
 
   it('tables every price with provenance, destination and note, n and departure date; each gap by kind; nights link to Results', async () => {
