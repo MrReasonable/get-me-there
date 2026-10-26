@@ -144,7 +144,7 @@ describe('docs/setup.md operations rules (plan decision 63; round-1 review)', ()
 
   it('explains that trial definitions allow 0 billed calls and how to verify a cell anyway (N3, ruling 9; WP19: the date pair detail’s verify)', () => {
     expect(flat).toContain(
-      "On the trial plan new definitions allow 0 billed calls per run, so a date pair's \"Search <cell> for itineraries\" (in its detail, opened from the Dates view) is unavailable until you raise the definition's call cap in Definitions → Run budget (Max billed calls per run); 6 covers one cell.",
+      'On the trial plan new definitions allow 0 billed calls per run, so a date pair\'s "Search <cell> for itineraries" (in its detail, opened from the Dates view) is unavailable until you raise the definition\'s call cap in Definitions → Run budget (Max billed calls per run); 6 covers one cell.',
     );
     const limits = read('docs/api-limits.md').replace(/\s+/g, ' ');
     expect(limits).not.toContain('that call cap is the only stop');

@@ -27,11 +27,8 @@ import {
 } from './executions.js';
 import {
   calendarGapResponseSchema,
-  calendarQuerySchema,
-  calendarResponseSchema,
   cellDetailResponseSchema,
   coverageResponseSchema,
-  durationAnalysisResponseSchema,
   itineraryHistoryResponseSchema,
   resultsQuerySchema,
   resultsResponseSchema,
@@ -110,8 +107,6 @@ export const ROUTES: readonly RouteDef[] = [
   route('GET', '/definitions/:id/results', resultsResponseSchema, { query: resultsQuerySchema }),
   // why: spec §10 (WP19): the Dates view's source; its query is the wire form the api parses and answers 422 for itself
   route('GET', '/definitions/:id/date-pairs', datePairsResponseSchema, { query: datePairsQuerySchema }),
-  route('GET', '/definitions/:id/calendar', calendarResponseSchema, { query: calendarQuerySchema }),
-  route('GET', '/definitions/:id/duration-analysis', durationAnalysisResponseSchema),
   route('GET', '/definitions/:id/coverage', coverageResponseSchema),
   route('GET', '/definitions/:id/calendar-gap', calendarGapResponseSchema),
   route(

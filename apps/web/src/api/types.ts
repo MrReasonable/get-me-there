@@ -29,9 +29,6 @@ export type VerifyCellBody = z.input<typeof apiContract.verifyCellRequestSchema>
 export type StartExecutionBody = z.input<typeof apiContract.startExecutionRequestSchema>;
 
 // WP10 routes (plan "API contract", results.ts, with WP10's additions of decisions 38, 42 and 48).
-export type { CalendarDay } from '@gmt/core';
-export type CalendarResponse = z.output<typeof apiContract.calendarResponseSchema>;
-export type DurationResponse = z.output<typeof apiContract.durationAnalysisResponseSchema>;
 export type CellDetailResponse = z.output<typeof apiContract.cellDetailResponseSchema>;
 export type ItineraryHistoryResponse = z.output<typeof apiContract.itineraryHistoryResponseSchema>;
 export type RouteHistoryResponse = z.output<typeof apiContract.routeHistoryResponseSchema>;

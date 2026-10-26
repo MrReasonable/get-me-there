@@ -79,7 +79,7 @@ export function Readout({
                 {cell.model.pairs.length === 1 && cell.model.pairs[0] !== undefined ? (
                   <span>{howFarChecked(cell.model.pairs[0], airportPairs, journeyLimit).join(' · ')}</span>
                 ) : (
-                  <span>{O.buckets(COPY.calendarView.bucketBreakdown(cell.model.buckets))}</span>
+                  <span>{O.buckets(COPY.bucketBreakdown(cell.model.buckets))}</span>
                 )}
               </>
             )}

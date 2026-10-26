@@ -1,6 +1,11 @@
 import { fireEvent, screen, within } from '@testing-library/react';
+import { HttpResponse, http } from 'msw';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { ResultsView } from '../../src/views/Results/ResultsView.js';
 import { at, priced, pricedPair } from '../fixtures.dates.js';
+import { API, DETAIL_PAIR, DETAIL_SEARCH, definition, resultsResponse, verifiedRow } from '../fixtures.js';
+import { server } from '../msw/server.js';
+import { renderWithProviders } from '../render.js';
 import { setViewportWidth } from '../viewport.js';
 import { boardRows, findBoard, renderDates } from '../views/dates/render.js';
 
@@ -75,5 +80,19 @@ describe.each(ZONES)('the Dates view’s dates never shift under TZ=%s', (zone) 
     if (c === null) throw new Error('no cell');
     fireEvent.pointerOver(c);
     expect(screen.getByTestId('dates-readout')).toHaveTextContent('14 Mar 2027–24 Mar 2027 (10n)');
+  });
+
+  it('the date pair detail’s header reads 14 Mar and 28 Mar for a 2027-03-14 → 2027-03-28 date pair (WP19 Task 19.8)', async () => {
+    server.use(
+      http.get(`${API}/definitions/:id/results`, () =>
+        HttpResponse.json(resultsResponse({ rows: [verifiedRow()] })),
+      ),
+    );
+    renderWithProviders(<ResultsView definition={definition()} datePair={DETAIL_PAIR} />, {
+      search: DETAIL_SEARCH,
+    });
+    expect(
+      await screen.findByRole('heading', { name: '14 Mar 2027 to 28 Mar 2027 · 14 nights' }),
+    ).toBeInTheDocument();
   });
 });

@@ -1,12 +1,10 @@
 /** Spec §10 read routes over a definition's executions: results, the date pairs, the views, and the cell detail. */
 import { apiContract, type CellKey, iataSchema, isoDateSchema } from '@gmt/core';
 import { ApiError } from '../errors.js';
-import { assembleCalendar } from '../read/calendar.js';
 import { assembleCalendarGap } from '../read/calendarGap.js';
 import { assembleCellDetail } from '../read/cell.js';
 import { assembleCoverage } from '../read/coverageView.js';
 import { assembleDatePairs } from '../read/datePairs.js';
-import { assembleDuration } from '../read/duration.js';
 import { assembleResults } from '../read/results.js';
 import { API_TEXT } from '../text.js';
 import { NO_INPUT, plain, route } from './define.js';
@@ -35,17 +33,6 @@ export const resultHandlers: HandlerTable = {
     { request: NO_INPUT, query: apiContract.datePairsQuerySchema },
     (c, input, ctx) =>
       c.json(assembleDatePairs(getLiveDefinition(ctx, param(input, 'id')), input.query, ctx.ports)),
-  ),
-  // why: plan decision 53: both bases come back per day; `destination` narrows the day to one destination's cells.
-  'GET /api/definitions/:id/calendar': route(
-    { request: NO_INPUT, query: apiContract.calendarQuerySchema },
-    (c, input, ctx) =>
-      c.json(
-        assembleCalendar(getLiveDefinition(ctx, param(input, 'id')), input.query.destination, ctx.ports),
-      ),
-  ),
-  'GET /api/definitions/:id/duration-analysis': plain((c, input, ctx) =>
-    c.json(assembleDuration(getLiveDefinition(ctx, param(input, 'id')), ctx.ports)),
   ),
   'GET /api/definitions/:id/coverage': plain((c, input, ctx) =>
     c.json(assembleCoverage(getLiveDefinition(ctx, param(input, 'id')), ctx.ports, ctx.engine)),

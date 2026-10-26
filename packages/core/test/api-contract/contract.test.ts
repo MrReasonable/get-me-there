@@ -46,8 +46,6 @@ describe('api-contract (spec §10)', () => {
       'POST /cells/verify',
       'GET /definitions/:id/results',
       'GET /definitions/:id/date-pairs',
-      'GET /definitions/:id/calendar',
-      'GET /definitions/:id/duration-analysis',
       'GET /definitions/:id/coverage',
       'GET /definitions/:id/calendar-gap',
       'GET /definitions/:id/cells/:origin/:destination/:departureDate/:returnDate',
@@ -66,6 +64,24 @@ describe('api-contract (spec §10)', () => {
       expect(paths).toContain(p);
     expect(new Set(paths).size).toBe(paths.length);
     expect(ROUTES.filter((r) => r.auth === 'public').map((r) => r.path)).toEqual(['/api/health']);
+  });
+  it('the calendar and duration-analysis routes and their schemas are retired (spec §10, revision 48)', async () => {
+    const paths = ROUTES.map((r) => `${r.method} ${r.path.replace(/^\/api/, '')}`);
+    expect(paths).not.toContain('GET /definitions/:id/calendar');
+    expect(paths).not.toContain('GET /definitions/:id/duration-analysis');
+    // why: the Dates view's date-pairs route replaces both; the calendar gap and the cell route stay.
+    expect(paths).toContain('GET /definitions/:id/date-pairs');
+    const contract: Record<string, unknown> = await import('../../src/api-contract/index.js');
+    const core: Record<string, unknown> = await import('../../src/index.js');
+    for (const name of [
+      'calendarDaySchema',
+      'calendarQuerySchema',
+      'calendarResponseSchema',
+      'durationAnalysisResponseSchema',
+    ]) {
+      expect(contract[name], name).toBeUndefined();
+      expect(core[name], name).toBeUndefined();
+    }
   });
   it('every price-bearing response requires provenance', () => {
     const cell = { pricePence: 41200, provenance, stale: false, ageHours: 2, truncated: false };

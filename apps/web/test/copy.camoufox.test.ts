@@ -3,11 +3,6 @@ import { describe, expect, it } from 'vitest';
 import { COPY } from '../src/copy.js';
 
 describe('camoufox copy (prov-008, prov-015, ruling 11)', () => {
-  it('the phone legend names CF Camoufox and its source label', () => {
-    expect(COPY.calendarView.legend.phoneProviders).toContain(
-      ', CF Camoufox (Google Flights prices via Camoufox)',
-    );
-  });
   it('the Providers note says signed-out profile, own IP address and 1,500', () => {
     for (const w of [
       'signed-out profile',

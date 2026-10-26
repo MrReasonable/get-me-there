@@ -193,7 +193,7 @@ export type ResultRow;   // z.infer<typeof resultRowSchema>
 export function loadRows(def: SearchDefinition, ports: Ports, executionIds?: readonly string[]): Loaded;  // reworked, Task 19.2
 export function confirmedIn(loaded: Loaded): (r: ResultRow) => boolean;
 export function chooseBasis(loaded: Loaded, requested: Basis | undefined): { basis: Basis; reason: string };
-export function onDemandSearched(executions: readonly Execution[], ports: Ports, space: ResolvedSpace): Execution[];  // reworked, Task 19.2
+export function onDemandSearched(executions: readonly Execution[], ports: Ports, space: ResolvedSpace): Execution[];  // reworked, Task 19.2; deleted in Task 19.8 with its last callers (the calendar and duration reads)
 export function coverageSummaryFor(latestParent, executions, ports, space): CoverageSummary;  // replaced by summariseCells, Task 19.2
 export const SEARCHED: ReadonlySet<CellOutcomeStatus>;
 export function currentSpace(def, today: IsoDate): ResolvedSpace;
@@ -1391,7 +1391,14 @@ DetailHeader}.tsx`, `views/Results/panel.ts` (moved from `views/Calendar`), `sta
 **Files**: §7's Delete list; `packages/core/src/api-contract/{results,index}.ts`, `apps/api/src/routes/results.ts`,
 `apps/web/src/api/*`, `apps/web/package.json` (`test:tz` → `test/tz test/views/dates test/views/results/panel.test.tsx`), `apps/web/test/tz/dates.tz.test.tsx`
 (its Calendar cases removed; its Results and formatting cases stay), the tests that named them. The Dates view's own
-time-zone cases were written first, beside the view, in Tasks 19.4 and 19.5.
+time-zone cases were written first, beside the view, in Tasks 19.4 and 19.5. As built: `apps/web/src/copy.ts` loses
+`calendarView` and `durationView` (the Readout's `bucketBreakdown` moves to the top level, the panel's
+`unconfirmedShort` to `COPY.panel`), with their catalogue, plural, glyph and camoufox-copy cases; `apps/api`'s
+`read/coverage.ts` `onDemandSearched` and `read/pick.ts` `pickCalendar` go with their last callers; the
+duration-analysis route's two "one set of executions" rules are ported into `test/routes/datePairs.test.ts` first;
+and the smoke and its selectors (`apps/web/e2e/{smoke.spec.ts,selectors.ts}`, `test/e2e/selectors.test.tsx`), which
+named the Calendar and Duration views and so cannot typecheck without them, are rewritten for the Dates view in this
+task's commit (Task 19.9 adds the performance test).
 
 - [ ] **Write the failing tests first:**
   - `packages/core/test/api-contract/contract.test.ts`'s ROUTES list no longer has `GET /definitions/:id/calendar` or
@@ -1405,8 +1412,11 @@ time-zone cases were written first, beside the view, in Tasks 19.4 and 19.5.
 - [ ] **Implement**: delete (the calendar gap already lives in `read/calendarGap.ts`, Task 19.2); remove the query keys
   and invalidations for `calendar` and `duration` and add `date-pairs` to `useExecutionActions`' refresh list; keep
   `recharts` (History uses it). `grep -rn "duration-analysis\|/calendar'\|calendarState\|DurationView\|CalendarView\|
-  CoverageView" apps packages --include='*.ts' --include='*.tsx'` finds nothing. `test:tz` runs `test/tz
-  test/views/dates`, and `dates.tz.test.tsx` no longer imports `views/Calendar` or `fixtures.wp10`'s calendar builders.
+  CoverageView" apps packages --include='*.ts' --include='*.tsx'` finds only the fixture provider's own `/calendar`
+  endpoint (`packages/providers` and the engine's and api's tests that drive it) and the tests and comments that say
+  the routes are gone; no source file imports or serves a retired view or route. `test:tz` runs `test/tz
+  test/views/dates test/views/results/panel.test.tsx`, and `dates.tz.test.tsx` no longer imports `views/Calendar` or
+  `fixtures.wp10`'s calendar builders.
 - [ ] **Ported titles**: list every `it(…)` title of the deleted test files and print those no surviving test holds:
 
   ```bash

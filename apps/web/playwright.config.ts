@@ -22,10 +22,11 @@ export default defineConfig({
   use: { baseURL: WEB_ORIGIN, trace: 'retain-on-failure' },
   projects: [
     { name: 'desktop', use: { ...devices['Desktop Chrome'] }, grepInvert: /@phone/ },
-    // why: the phone project only checks layout on the run the desktop project made (it depends on it).
+    // why: the phone project only checks layout on the run the desktop project made (it depends on it). It has touch,
+    // so the smoke's tap on an overview cell is a touch (revision 50: a first tap shows the readout).
     {
       name: 'phone',
-      use: { ...devices['Desktop Chrome'], viewport: { width: 375, height: 812 } },
+      use: { ...devices['Desktop Chrome'], viewport: { width: 375, height: 812 }, hasTouch: true },
       dependencies: ['desktop'],
       grep: /@phone/,
     },

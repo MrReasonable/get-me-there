@@ -1,4 +1,4 @@
-import { BANNED_WORD_ALLOWLIST, findBannedWords, SOURCE_LABELS } from '@gmt/core';
+import { BANNED_WORD_ALLOWLIST, findBannedWords } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
 import { COPY } from '../../src/copy.js';
 
@@ -199,33 +199,7 @@ const SAMPLES: Record<string, unknown[]> = {
   'datesView.legend.band': [0, '£300', '£320', 9],
   'datesView.legend.flat': [4],
   'datesView.legend.markCount': ['no cached data', 12],
-  // WP10 (Task 10.3)
-  'calendarView.discoveryMarker': [{ priced: 1, empty: 2, no_data: 3, error: 4, skipped: 5, not_run: 6 }, 21],
-  'calendarView.verificationMarker': [1, 10, 2],
-  'calendarView.markerSource': [
-    'Aviasales cache',
-    '1 priced · 0 no fares · 0 no cached data · 0 error · 0 skipped · 0 not searched of 1',
-  ],
-  'calendarView.partlyVerified': [2],
-  'calendarView.bandAria': [0],
-  'calendarView.providerNotSearched': ['Google date grid via SearchApi'],
-  'calendarView.glyphCount': [47, 'not searched'],
-  'calendarView.unconfirmedCellsFor': [1, 'JFK'],
-  'calendarView.stay': [14, '28 Mar'],
-  'calendarView.phoneNights': [12],
-  'calendarView.bucketBreakdown': [{ priced: 3, empty: 0, no_data: 9, error: 0, skipped: 0, not_run: 0 }],
-  'calendarView.staleLine': [3, 40, '8d'],
-  'calendarView.unconfirmedCells': [2],
-  'calendarView.legend.scaleQuintile': ['itinerary-search basis', 12],
-  'calendarView.legend.scaleFlatFew': ['calendar basis', 4, 10],
-  'calendarView.legend.scaleFlatNarrow': ['calendar basis', 20, '£400', '£430'],
-  'calendarView.legend.scaleEmpty': ['calendar basis'],
-  'calendarView.legend.band': [0, '£400', '£450', 2],
-  'calendarView.legend.flatSwatch': [4],
-  'calendarView.legend.hatched': ['verified', 1],
-  'calendarView.panel.title': ['Sun 14 Mar 2027'],
-  'calendarView.panel.dayCell': [14, 'Sun 28 Mar'],
-  'calendarView.panel.cellOption': ['LHR', 'JFK', 14, 'Sun 28 Mar'],
+  bucketBreakdown: [{ priced: 3, empty: 0, no_data: 9, error: 0, skipped: 0, not_run: 0 }],
   'panel.run': ['14 Oct 2026'],
   'panel.heading': ['LHR', 'JFK'],
   'detailView.title': ['14 Mar 2027', '28 Mar 2027', 14],
@@ -240,17 +214,6 @@ const SAMPLES: Record<string, unknown[]> = {
   'panel.verifyCapRefused': ['budget cap: provider-month:searchapi 10000 of 10000 calls'],
   'panel.verifyZeroRunCap': [6],
   'panel.verifyConfirmRefused': ['the estimate is above the confirmation threshold'],
-  'durationView.tickNotSearched': [13],
-  'durationView.verifiedSeries': [3],
-  'durationView.calendarSeries': ['Aviasales cache', 9],
-  'durationView.calendarShort': ['Aviasales cache'],
-  'durationView.nightsLabel': [14],
-  'durationView.nightsLink': [14],
-  'durationView.tooltipDetail': [5, 'Sun 14 Mar'],
-  'durationView.seriesLine': ['calendar, Aviasales cache', 'not searched'],
-  'durationView.partlyItinerarySearchedNoPrice': [1, 4],
-  'durationView.cellDetail': [5, 'Sun 14 Mar'],
-  'durationView.staleLine': [1, 4],
   'historyView.calendarSeries': ['Aviasales cache', 'economy'],
   'historyView.routeSeries': ['Google', '5–15 Nov', 'economy'],
   'historyView.coloursRepeat': [8, 6],
@@ -335,17 +298,8 @@ describe('COPY catalogue (spec §11 banned words)', () => {
       // WP19: "verified" beside a class-verified figure; the class label "partially verified" with its count
       'datesView.howFar.verified',
       'datesView.howFar.partiallyVerified',
-      // WP10: each names the class or sits beside a class-verified value (spec §11 View B, View C wording)
-      'calendarView.partlyVerified',
-      'calendarView.legend.hatched',
-      'calendarView.panel.dayVerified',
-      'calendarView.panel.dayPartlyVerified',
+      // WP10: names the class beside a class-verified value (the panel's offer line)
       'panel.observation',
-      'durationView.verifiedSeries',
-      'durationView.verifiedShort',
-      'durationView.chartNote',
-      'durationView.itinerarySearchedNoPrice',
-      'durationView.partlyItinerarySearchedNoPrice',
     ]);
     // why: the exemption list must not outlive its strings: a renamed or removed key would otherwise leave a stale
     // entry, and a new string later added at that path would inherit the exemption unreviewed.
@@ -416,25 +370,19 @@ describe('COPY catalogue (spec §11 banned words)', () => {
 });
 
 describe('glyph set (review ui I2)', () => {
-  it('every symbol in the legend means one thing: no glyph appears twice', () => {
-    const all = [
-      ...Object.values(COPY.calendarView.glyphSymbol),
-      ...Object.values(COPY.calendarView.phoneMark),
-      ...Object.values(COPY.priceMarkGlyph),
-    ];
-    expect(new Set(all).size).toBe(all.length);
-  });
-  it('the phone provider-marks line names every provider mark with its full name, and the fixture as synthetic', () => {
-    const line = COPY.calendarView.legend.phoneProviders;
-    for (const id of ['travelpayouts', 'searchapi', 'camoufox', 'fixture'] as const) {
-      expect(line).toContain(`${COPY.providerMark[id]} `);
-      expect(line).toContain(COPY.provider[id]);
+  // why: WP19 retired the Calendar's glyphs and phone legend; the marks now drawn are the Dates overview's and
+  // PriceCell's, and a glyph both draw must mean the same thing in each
+  it('every symbol means one thing: a glyph in both the Dates marks and the price marks names the same mark', () => {
+    const dates = COPY.datesView.marks.glyph;
+    const price = COPY.priceMarkGlyph;
+    expect(new Set(Object.values(dates)).size).toBe(Object.keys(dates).length);
+    expect(new Set(Object.values(price)).size).toBe(Object.keys(price).length);
+    for (const [mark, glyph] of Object.entries(price)) {
+      const shared = Object.entries(dates).filter(([, g]) => g === glyph);
+      for (const [other] of shared) expect(other, glyph).toBe(mark);
     }
-    expect(line).toContain(SOURCE_LABELS.synthetic);
-    expect(new Set(Object.values(COPY.providerMark)).size).toBe(4);
   });
-  it('the phone legend line names every mark glyph', () => {
-    for (const g of [...Object.values(COPY.priceMarkGlyph), ...Object.values(COPY.calendarView.phoneMark)])
-      expect(COPY.calendarView.legend.phone).toContain(g);
+  it('the provider marks are four distinct short names', () => {
+    expect(new Set(Object.values(COPY.providerMark)).size).toBe(4);
   });
 });

@@ -1,4 +1,4 @@
-import { type Cabin, type CellKey, apiContract as c, type Iata } from '@gmt/core';
+import { type Cabin, type CellKey, apiContract as c } from '@gmt/core';
 import { call } from './client.js';
 import type {
   AlertRuleBody,
@@ -63,16 +63,6 @@ export const api = {
   calendarGap: (id: string) =>
     call(c.calendarGapResponseSchema, 'GET', '/api/definitions/:id/calendar-gap', { params: { id } }),
   airports: (q: string) => call(c.airportsResponseSchema, 'GET', '/api/airports', { query: { q } }),
-  // WP10 (spec §10; plan decision 53): both bases per day, for one destination when given, else every destination.
-  calendar: (id: string, destination: Iata | null) =>
-    call(c.calendarResponseSchema, 'GET', '/api/definitions/:id/calendar', {
-      params: { id },
-      query: { destination: destination ?? undefined },
-    }),
-  durationAnalysis: (id: string) =>
-    call(c.durationAnalysisResponseSchema, 'GET', '/api/definitions/:id/duration-analysis', {
-      params: { id },
-    }),
   cellDetail: (id: string, k: CellKey) =>
     call(
       c.cellDetailResponseSchema,

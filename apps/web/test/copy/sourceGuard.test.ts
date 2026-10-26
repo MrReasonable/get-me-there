@@ -42,10 +42,9 @@ const MONEY_FILES = new Set([
   'src/views/Dates/Legend.tsx',
   'src/views/Definitions/Confirmation.tsx',
   'src/views/Definitions/EstimatePanel.tsx',
-  // WP10 (plan decision 52): the heatmap legend's band ranges, scale values in [data-scale], never fares; the
-  // indicative route-level series, which spec §11 exempts from full provenance ([data-indicative] rows). The charts
-  // print fares only through PriceCell and their axes without "£" (format.ts formatAxisPounds), so they are not here.
-  'src/views/Calendar/CalendarLegend.tsx',
+  // WP10 (plan decision 52): the indicative route-level series, which spec §11 exempts from full provenance
+  // ([data-indicative] rows). The charts print fares only through PriceCell and their axes without "£"
+  // (format.ts formatAxisPounds), so they are not here. (WP19 retired the heatmap legend with the Calendar view.)
   'src/views/History/RouteTable.tsx',
 ]);
 

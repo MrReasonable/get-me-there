@@ -1,13 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
-  calendarDaySchema,
   calendarGapResponseSchema,
-  calendarQuerySchema,
   cellDetailResponseSchema,
-  durationAnalysisResponseSchema,
   historyPointSchema,
   itineraryHistoryResponseSchema,
-  ROUTES,
   routeHistoryResponseSchema,
 } from '../../src/api-contract/index.js';
 
@@ -32,47 +28,6 @@ const price = { pricePence: 41200, provenance, stale: false, ageHours: 50, trunc
 const point = { at: '2026-10-14T13:00:00.000Z', pricePence: 41200, provenance };
 
 describe('WP10 contract additions (plan decision 38)', () => {
-  it('duration analysis: each minimum carries its cell, and searched counts k of N per series', () => {
-    const night = {
-      nights: 14,
-      minVerified: { ...price, cell, n: 3, notSeenInLatest: null },
-      minCalendar: [{ providerId: 'travelpayouts', price: { ...price, cell, superseded: false }, n: 5 }],
-      searched: {
-        verification: { searched: 0, total: 4 },
-        discovery: [
-          {
-            providerId: 'travelpayouts',
-            searched: 30,
-            total: 48,
-            buckets: { priced: 0, empty: 0, no_data: 30, error: 0, skipped: 0, not_run: 18, reused: 0 },
-          },
-        ],
-      },
-    };
-    const ok = durationAnalysisResponseSchema.safeParse({ byNights: [night], executions: [] });
-    expect(ok.success).toBe(true);
-    // why: a flag cannot tell one searched cell of hundreds from all of them (review prov-r2-007).
-    const flags = { verification: true, discovery: [{ providerId: 'travelpayouts', searched: true }] };
-    expect(
-      durationAnalysisResponseSchema.safeParse({ byNights: [{ ...night, searched: flags }], executions: [] })
-        .success,
-    ).toBe(false);
-    const { cell: _c, ...noCell } = night.minVerified;
-    expect(
-      durationAnalysisResponseSchema.safeParse({
-        byNights: [{ ...night, minVerified: noCell }],
-        executions: [],
-      }).success,
-    ).toBe(false);
-    const bareCalendar = [{ providerId: 'travelpayouts', price, n: 5 }];
-    expect(
-      durationAnalysisResponseSchema.safeParse({
-        byNights: [{ ...night, minCalendar: bareCalendar }],
-        executions: [],
-      }).success,
-    ).toBe(false);
-  });
-
   it('history points on the wire carry stale and truncated; the stored point shape is unchanged', () => {
     const series = [
       { providerId: 'travelpayouts', cabin: 'economy', points: [{ ...point, cell, executionId: 'e1' }] },
@@ -157,68 +112,17 @@ describe('WP10 contract additions (plan decision 38)', () => {
     expect(cellDetailResponseSchema.safeParse({ ...detail, verify: { maxCalls: 6 } }).success).toBe(false);
   });
 
-  it('a calendar day counts its unconfirmed cells; the route takes an optional destination (decisions 51, 53)', () => {
-    const day = {
-      date: '2027-03-14',
-      discovery: [],
-      verification: { selected: 2, itinerarySearched: 2, onDemand: 0 },
-      cheapestVerified: null,
-      cheapestPartiallyVerified: null,
-      cheapestCalendar: null,
-      byDestination: [],
-    };
-    expect(calendarDaySchema.safeParse(day).success).toBe(false);
-    const verification = { ...day.verification, unconfirmedCells: 1 };
-    expect(calendarDaySchema.safeParse({ ...day, verification }).success).toBe(true);
-    expect(
-      calendarDaySchema.safeParse({ ...day, verification: { ...verification, unconfirmedCells: true } })
-        .success,
-    ).toBe(false);
-    expect(calendarQuerySchema.safeParse({}).success).toBe(true);
-    expect(calendarQuerySchema.safeParse({ destination: 'JFK' }).success).toBe(true);
-    expect(calendarQuerySchema.safeParse({ destination: 'not-an-airport' }).success).toBe(false);
-    const calendar = ROUTES.find((r) => r.method === 'GET' && r.path === '/api/definitions/:id/calendar');
-    expect(calendar?.query).toBe(calendarQuerySchema);
-  });
-
   it('decision 54: verified minima say when the latest search no longer returned them; calendar prices when superseded; route points their staleness', () => {
     const notSeen = { ageHours: 30 };
-    const day = {
-      date: '2027-03-14',
-      discovery: [],
-      verification: { selected: 1, itinerarySearched: 1, onDemand: 0, unconfirmedCells: 0 },
-      cheapestVerified: { ...price, cell, itineraryHash: 'h1', notSeenInLatest: notSeen },
-      cheapestPartiallyVerified: null,
-      cheapestCalendar: { ...price, cell, superseded: true },
-      byDestination: [],
-    };
-    expect(calendarDaySchema.safeParse(day).success).toBe(true);
-    const { notSeenInLatest: _n, ...noNotSeen } = day.cheapestVerified;
-    expect(calendarDaySchema.safeParse({ ...day, cheapestVerified: noNotSeen }).success).toBe(false);
-    expect(calendarDaySchema.safeParse({ ...day, cheapestCalendar: { ...price, cell } }).success).toBe(false);
     const gap = {
       cheapestVerified: { ...price, cell, itineraryHash: 'h1', notSeenInLatest: null },
       cells: [],
     };
     expect(calendarGapResponseSchema.safeParse(gap).success).toBe(true);
+    const notSeenGap = { ...gap, cheapestVerified: { ...gap.cheapestVerified, notSeenInLatest: notSeen } };
+    expect(calendarGapResponseSchema.safeParse(notSeenGap).success).toBe(true);
     const { notSeenInLatest: _g, ...bareGap } = gap.cheapestVerified;
     expect(calendarGapResponseSchema.safeParse({ ...gap, cheapestVerified: bareGap }).success).toBe(false);
-    const night = {
-      nights: 14,
-      minVerified: { ...price, cell, n: 1, notSeenInLatest: notSeen },
-      minCalendar: [{ providerId: 'travelpayouts', price: { ...price, cell, superseded: false }, n: 1 }],
-      searched: { verification: { searched: 1, total: 1 }, discovery: [] },
-    };
-    expect(durationAnalysisResponseSchema.safeParse({ byNights: [night], executions: [] }).success).toBe(
-      true,
-    );
-    const oldCalendar = [{ providerId: 'travelpayouts', price: { ...price, cell }, n: 1 }];
-    expect(
-      durationAnalysisResponseSchema.safeParse({
-        byNights: [{ ...night, minCalendar: oldCalendar }],
-        executions: [],
-      }).success,
-    ).toBe(false);
     const detail = {
       cell,
       outcomes: [],

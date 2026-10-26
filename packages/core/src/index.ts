@@ -8,7 +8,6 @@ export { DEFAULT_DISCOVERY_REFRESH_HOURS, evaluateAlertRules } from './alerts/ev
 export type {
   AlertEventPayload,
   BudgetFit,
-  CalendarDay,
   CoverageCheckRequest,
   CoverageCheckResponse,
   DatePairsResponse,

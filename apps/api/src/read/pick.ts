@@ -1,5 +1,5 @@
 /** Picking one figure out of rows (spec §8.1, §11 "The figure"; plan decisions 54, 58). */
-import { pickCalendarFigure, pickVerifiedFigure } from '@gmt/core';
+import { pickVerifiedFigure } from '@gmt/core';
 import type { ResultRow } from './rows.js';
 
 /**
@@ -10,9 +10,4 @@ import type { ResultRow } from './rows.js';
  */
 export function pickVerified(rows: readonly ResultRow[]): ResultRow | null {
   return pickVerifiedFigure(rows);
-}
-
-/** The calendar-basis figure: a current price before one a later search superseded (decision 54), then the cheapest. */
-export function pickCalendar(rows: readonly ResultRow[]): ResultRow | null {
-  return pickCalendarFigure(rows);
 }

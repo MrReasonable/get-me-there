@@ -699,3 +699,57 @@ describe('ported: superseded calendar prices on the views (decision 54)', () => 
     expect(jfk.figure).toMatchObject({ price: { pricePence: 30_000 }, superseded: true });
   });
 });
+
+// Ported from the duration-analysis route's "over one set of executions" tests (review prov-012) before the route went
+// (WP19 Task 19.8): the same seeds, read per date pair. A stay length's minimum is gone with the Duration view
+// (revision 48), so each rule is stated on the date pair that held the minimum.
+describe('ported: one set of executions per read (review prov-012)', () => {
+  const C1 = cell('LHR', 'JFK', '2026-11-02', '2026-11-12');
+  const C2 = cell('LHR', 'JFK', '2026-11-03', '2026-11-13');
+  async function bare() {
+    const x = await harness();
+    const s = seeder(x.ports);
+    const def = x.ports.repos.definitions.create(
+      exampleDefinitionInput({ origins: [LHR], destinations: [JFK], window: SMALL_WINDOW }),
+    );
+    return { x, s, def };
+  }
+
+  it('a cell the latest run reused counts as priced and reused, and its reused price is the figure (decision 58)', async () => {
+    const { x, s, def } = await bare();
+    s.execution('Eold', { def, status: 'completed', startedAt: at(-30), finishedAt: at(-29) });
+    s.cells('Eold', [C1]);
+    s.tile('Eold', C1, { status: 'priced', pricePence: 41_000, fetchedAt: at(-29) });
+    s.execution('Enew', { def, status: 'completed', startedAt: at(-2), finishedAt: at(-1) });
+    s.cells('Enew', [C1, C2]);
+    s.reuse('Enew', 'Eold', [C1], at(-100));
+    s.tile('Enew', C2, { status: 'priced', pricePence: 52_000, fetchedAt: at(-1), tileIndex: 1 });
+    const d = await datesOf(x, def.id);
+    const reused = pairOf(d, C1.departureDate, C1.returnDate);
+    expect(reused.buckets).toMatchObject({ priced: 1, reused: 1, not_run: 0 });
+    expect(reused.figure?.price.pricePence).toBe(41_000);
+    expect(pairOf(d, C2.departureDate, C2.returnDate).figure?.price.pricePence).toBe(52_000);
+    expect(d.summary.reused).toBe(1);
+  });
+
+  it("an older run's price on a cell the newer run did not search stays a figure from an earlier search, its cell not searched (revision 50)", async () => {
+    const { x, s, def } = await bare();
+    s.execution('E1', { def, status: 'completed', startedAt: at(-30), finishedAt: at(-29) });
+    s.cells('E1', [C1], { selected: [{ cell: C1, reason: 'top_n' }] });
+    s.tile('E1', C1, { status: 'priced', pricePence: 45_000, fetchedAt: at(-29) });
+    s.verified('E1', C1, [{ hash: 'hV', pricePence: 60_000, fetchedAt: at(-29) }]);
+    s.execution('E2', { def, status: 'completed', startedAt: at(-2), finishedAt: at(-1) });
+    s.cells('E2', [C2], { selected: [{ cell: C2, reason: 'top_n' }] });
+    s.verified('E2', C2, [{ hash: 'hW', pricePence: 61_000, fetchedAt: at(-1) }]);
+    const d = await datesOf(x, def.id);
+    const old = pairOf(d, C1.departureDate, C1.returnDate);
+    // why: revision 50 (settled by the orchestrator): the Duration view dropped such a price; the Dates view keeps it,
+    // says it comes from an earlier search, and counts its cell not searched by the latest run
+    expect(old.buckets.not_run).toBe(1);
+    expect([old.selected, old.itinerarySearched]).toEqual([0, 0]);
+    expect(old.figure).toMatchObject({ basis: 'verified', fromEarlierSearch: true });
+    const fresh = pairOf(d, C2.departureDate, C2.returnDate);
+    expect(fresh.figure).toMatchObject({ price: { pricePence: 61_000 }, fromEarlierSearch: false });
+    expect([fresh.selected, fresh.itinerarySearched]).toEqual([1, 1]);
+  });
+});

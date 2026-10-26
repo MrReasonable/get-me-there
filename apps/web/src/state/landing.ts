@@ -12,8 +12,8 @@ export type Landing =
   | { kind: 'row-lookup'; row: string; basis: 'verified' | 'calendar' | null };
 
 /**
- * The retired Calendar's URL keys (WP10's `CALENDAR_PARAMS`, which Task 19.8 deletes with the view): `cal.dest` was its
- * destination filter, the rest its own display state.
+ * The retired Calendar's URL keys (WP10's `CALENDAR_PARAMS`, deleted with the view in WP19 Task 19.8; bookmarks still
+ * carry them): `cal.dest` was its destination filter, the rest its own display state.
  */
 const CAL_PREFIX = 'cal.';
 const CAL_DEST = 'cal.dest';

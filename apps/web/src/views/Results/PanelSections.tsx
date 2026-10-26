@@ -104,7 +104,7 @@ export function CellDetailBody(props: {
                   {COPY.bucket[o.status]}
                   {/* why: decision 48: a priced verification outcome with no confirmed price says so beside its status */}
                   {o.status === 'priced' && isPriceUnconfirmed(o.reason) ? (
-                    <span className="block font-semibold">{COPY.calendarView.unconfirmedShort}</span>
+                    <span className="block font-semibold">{COPY.panel.unconfirmedShort}</span>
                   ) : null}
                 </td>
                 <td>
