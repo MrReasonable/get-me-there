@@ -186,6 +186,11 @@ export interface StatusBarProps {
   definition: DefinitionResponse | null;
   /** "Run now" appears only on Dates and Definitions (review UI-10; WP19 Task 19.7: Dates replaced Results). */
   showRunNow: boolean;
+  /**
+   * The view shows its own Run now while the search has never run (the Dates view's never-run state), so the bar leaves
+   * it out until a run exists: the action is offered once, as that state's primary action.
+   */
+  viewOwnsFirstRun?: boolean;
 }
 
 /**
@@ -202,7 +207,7 @@ export function StatusBar(props: StatusBarProps) {
 }
 
 /** The run's part of the bar: stage, progress, spend, paused reason + Resume, blocked schedule, Cancel. */
-function RunStatus({ definition, showRunNow }: StatusBarProps) {
+function RunStatus({ definition, showRunNow, viewOwnsFirstRun = false }: StatusBarProps) {
   const params = useSearchParams();
   const results = useResults(definition?.id ?? null, parseBasis(params.get(BASIS_PARAM)));
   const executions = results.data?.executions ?? [];
@@ -331,7 +336,10 @@ function RunStatus({ definition, showRunNow }: StatusBarProps) {
             </button>
           </>
         ) : null}
-        {showRunNow && !active && results.data !== undefined ? (
+        {showRunNow &&
+        !active &&
+        results.data !== undefined &&
+        !(viewOwnsFirstRun && executions.length === 0) ? (
           <RunNowButton definition={definition} start={actions.start} />
         ) : null}
       </div>

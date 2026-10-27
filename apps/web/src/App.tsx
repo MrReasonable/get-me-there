@@ -97,7 +97,11 @@ export function App() {
             <DefinitionSelector definitions={list} selectedId={selectedId} />
           ) : null}
         </header>
-        <StatusBar definition={selected} showRunNow={view === 'dates' || view === 'definitions'} />
+        <StatusBar
+          definition={selected}
+          showRunNow={view === 'dates' || view === 'definitions'}
+          viewOwnsFirstRun={view === 'dates'}
+        />
         <main id="main" tabIndex={-1} className="px-4 py-3">
           <AppBoundary>
             {noProviders ? (

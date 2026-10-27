@@ -295,6 +295,26 @@ describe('status bar (spec §11)', () => {
     await expect.poll(() => bodies).toEqual([{ confirmCostPence: 0, confirmCalls: 154 }]);
   });
 
+  it('where the view has its own never-run action, the bar shows no Run now until the search has run once', async () => {
+    server.use(
+      http.get(`${API}/definitions/:id/results`, () =>
+        HttpResponse.json(resultsResponse({ rows: [], total: 0, executions: [], cheapest: null })),
+      ),
+    );
+    const { unmount } = renderWithProviders(
+      <StatusBar definition={definition()} showRunNow viewOwnsFirstRun />,
+    );
+    await screen.findByText('No run yet for this definition.');
+    expect(screen.queryByRole('button', { name: /Run now/ })).toBeNull();
+    unmount();
+    server.use(
+      http.get(`${API}/executions/:id`, () => HttpResponse.json(execution({ status: 'completed' }))),
+    );
+    server.use(http.get(`${API}/definitions/:id/results`, () => HttpResponse.json(resultsResponse())));
+    renderWithProviders(<StatusBar definition={definition()} showRunNow viewOwnsFirstRun />);
+    expect(await screen.findByRole('button', { name: /Run now/ })).toBeInTheDocument();
+  });
+
   it('Run now is disabled while the estimate is above the confirmation, and absent where the view does not offer it', async () => {
     server.use(
       http.get(`${API}/definitions/:id/results`, () =>

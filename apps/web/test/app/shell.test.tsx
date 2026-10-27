@@ -355,6 +355,23 @@ describe('filters kept across views (spec §11: the filters live in the URL and 
 });
 
 describe('the status bar on Dates (spec §11, WP19 Task 19.7)', () => {
+  // why: the never-run state's Run now is the view's primary action; a second one in the bar would offer the same
+  // action twice, so the bar leaves it to the view until the search has run once
+  it('a never-run Dates view shows one Run now, the empty state’s, and the bar none', async () => {
+    server.use(
+      serveDates({ executions: [], executionId: null }),
+      http.get(`${API}/definitions/:id/results`, () =>
+        HttpResponse.json(resultsResponse({ rows: [], total: 0, executions: [], cheapest: null })),
+      ),
+    );
+    renderWithProviders(<App />, { search: '?view=dates&def=def-0001' });
+    await screen.findByText('Not run yet: nothing has been searched.');
+    const bar = await screen.findByRole('region', { name: 'Run status' });
+    await within(bar).findByText('No run yet for this definition.');
+    expect(screen.getAllByRole('button', { name: /Run now/ })).toHaveLength(1);
+    expect(within(bar).queryByRole('button', { name: /Run now/ })).toBeNull();
+  });
+
   it('Run now shows on Dates and Definitions, never on the detail', async () => {
     const dates = renderWithProviders(<App />, { search: '?view=dates&def=def-0001' });
     expect(await screen.findByRole('button', { name: /Run now/ })).toBeInTheDocument();

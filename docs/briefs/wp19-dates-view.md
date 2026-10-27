@@ -1122,7 +1122,8 @@ config also runs from Stryker's sandbox).
     the header's counts are always the sum of the decoded pairs in view, and the full stay range renders the same
     line as no filter; `bestPerWeek` applies after ranking when `d.week=best`.
   - **One component test per §11 state**: no search ("No search yet" linking to Definitions); never run, when
-    `executions` is empty ("Not run yet: nothing has been searched", the estimate and Run now); on-demand searches but
+    `executions` is empty ("Not run yet: nothing has been searched", the estimate and Run now, the one Run now on
+    the page: the status bar leaves its own out until the search has run once, `viewOwnsFirstRun`); on-demand searches but
     no parent run ("Not run yet" with the on-demand count and their figures, never "nothing has been searched"); run in
     progress (board captioned "partial: run in progress", date pairs not yet reached read not searched); paused and
     budget-stopped (the reason, Resume, "the board shows prices found before the pause", the not searched count); stale
