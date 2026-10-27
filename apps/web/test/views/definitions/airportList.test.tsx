@@ -33,10 +33,16 @@ const SEN = row('SEN', 'Southend Airport', 'Southend', 'LON');
 const LDB = row('LDB', 'Governador Jose Richa Airport', 'Londrina', null);
 const JFK = row('JFK', 'John F Kennedy International Airport', 'New York', 'NYC');
 const EWR = row('EWR', 'Newark Liberty International Airport', 'Newark', 'NYC');
+const LGA = row('LGA', 'La Guardia Airport', 'New York', 'NYC');
+const NYS = row('NYS', 'New York Skyports Seaplane Base', 'New York', null);
+const HAT = row('HAT', 'Heathlands Airport', 'Heathlands', null);
 const ANSWERS: Record<string, Row[]> = {
   lond: [LGW, LHR, SEN, LDB],
   LON: [LGW, LHR, SEN],
-  heathrow: [LHR],
+  // as the search answers: a matched metro comes whole, the matching airport first in its block
+  heathrow: [LHR, LGW, SEN],
+  heath: [LHR, LGW, SEN, HAT],
+  'new y': [JFK, LGA, EWR, NYS],
   LHR: [LHR],
   LGW: [LGW],
   SEN: [SEN],
@@ -156,6 +162,31 @@ describe('airport picker: a WAI-ARIA combobox over GET /api/airports?q= (plan a 
     expect(scrolled.mock.contexts[0]).toHaveAttribute('id', 'origins-option-3');
   });
 
+  it('a metro in the answer leads, from the metro column not the city: New York includes Newark', async () => {
+    airportsRoute();
+    const { user } = renderOnFakeClock();
+    await typeAndAnswer(user, 'new y');
+    expect(optionNames()).toEqual([
+      'New York, all airports (JFK, LGA, EWR)',
+      'John F Kennedy (JFK) · New York, US',
+      'La Guardia (LGA) · New York, US',
+      'Newark Liberty (EWR) · Newark, US',
+      'New York Skyports Seaplane Base (NYS) · New York, US',
+    ]);
+    // the text names the city, so the whole metro is highlighted
+    expect(input()).toHaveAttribute('aria-activedescendant', 'origins-option-0');
+  });
+
+  it('when the text names an airport, not its city, the airport is highlighted and Enter adds only it', async () => {
+    airportsRoute();
+    const { user } = renderOnFakeClock();
+    await typeAndAnswer(user, 'heath');
+    expect(optionNames()[0]).toBe('London, all airports (LHR, LGW, SEN)');
+    expect(input()).toHaveAttribute('aria-activedescendant', 'origins-option-1');
+    await user.keyboard('{Enter}');
+    expect(chipCodes()).toEqual(['LHR']);
+  });
+
   it('the metro option adds every airport of that metro, as the table lists them for the metro code', async () => {
     const asked = airportsRoute();
     const { user } = renderOnFakeClock();
@@ -170,7 +201,12 @@ describe('airport picker: a WAI-ARIA combobox over GET /api/airports?q= (plan a 
     airportsRoute();
     const { user } = renderOnFakeClock();
     await typeAndAnswer(user, 'heathrow');
-    expect(optionNames()).toEqual(['London Heathrow (LHR) · London, GB']);
+    expect(optionNames()).toEqual([
+      'London, all airports (LHR, LGW, SEN)',
+      'London Heathrow (LHR) · London, GB',
+      'London Gatwick (LGW) · London, GB',
+      'Southend (SEN) · Southend, GB',
+    ]);
     await user.click(screen.getByRole('option', { name: 'London Heathrow (LHR) · London, GB' }));
     expect(chipCodes()).toEqual(['LHR']);
     expect(input()).toHaveFocus();

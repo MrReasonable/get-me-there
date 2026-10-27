@@ -79,6 +79,23 @@ describe('airports seed and sanity check (spec §7 airports)', () => {
     expect(repo.count()).toBe(3);
   });
 
+  it('search over the vendored data: major airports lead, and a metro comes whole (plan-a-search)', {
+    timeout: 30_000,
+  }, () => {
+    // why: the operator's checks against the real table, kept offline: "heath" listed Heathlands (HAT) before
+    // Heathrow, "par" listed Beauvais first, and "new y" missed Newark, whose city is not New York.
+    const db = freshDb();
+    seedAirports(db, loadAirportsDataset(AIRPORTS_DATA_DIR));
+    const repo = new AirportsRepo(db);
+    const codes = (q: string) => repo.search(q, 20).map((a) => a.iata);
+    expect(codes('heath')[0]).toBe('LHR');
+    const paris = codes('par');
+    expect(paris.slice(0, 4)).toEqual(['CDG', 'LBG', 'ORY', 'BVA']);
+    expect(codes('new y').slice(0, 3)).toEqual(['JFK', 'LGA', 'EWR']);
+    expect(codes('lond').slice(0, 6).sort()).toEqual(['LCY', 'LGW', 'LHR', 'LTN', 'SEN', 'STN']);
+    expect(codes('toky').slice(0, 2).sort()).toEqual(['HND', 'NRT']);
+  });
+
   it('the vendored data carries the worked example, its metro members, one country per metro, and passes the sanity check', {
     // why: loads and seeds the whole vendored dataset (5,000+ rows); same size as the first test, so the same budget.
     timeout: 30_000,
@@ -267,9 +284,10 @@ describe('AirportsRepo', () => {
     expect(repo.search('field', 1)).toHaveLength(1);
   });
 
-  it('search by a city brings that city’s whole metro, its airports first; a name matches at a word start before inside a word', () => {
-    // why: the operator types a place, not a code; "lond" must offer every airport of the London metro (Southend's
-    // city is not London) ahead of other towns whose names merely contain the letters (plan-a-search).
+  it('search returns every airport of a matched metro as one block, metros first in a band, text matches first inside', () => {
+    // why: the operator types a place, not a code. The table has no size field, so belonging to a metro stands in for
+    // "a major airport" (plan-a-search): "heath" must offer Heathrow before Heathlands, "par" Paris's own airports before
+    // Beauvais (in the Paris metro, but its city is not Paris), and "new y" all of New York's, Newark included.
     const repo = seeded(
       [
         row('LHR', { name: 'London Heathrow Airport', city: 'London', country: 'GB' }),
@@ -278,26 +296,30 @@ describe('AirportsRepo', () => {
         row('BQH', { name: 'Biggin Hill Airport', city: 'London', country: 'GB' }),
         row('LDB', { name: 'Governador Jose Richa Airport', city: 'Londrina', country: 'BR' }),
         row('ELS', { name: 'Ben Schoeman Airport', city: 'East London', country: 'ZA' }),
+        row('HAT', { name: 'Heathlands Airport', city: '', country: 'AU' }),
         row('JFK', { name: 'John F Kennedy International Airport', city: 'New York', country: 'US' }),
         row('LGA', { name: 'La Guardia Airport', city: 'New York', country: 'US' }),
         row('EWR', { name: 'Newark Liberty International Airport', city: 'Newark', country: 'US' }),
+        row('NYS', { name: 'New York Skyports Seaplane Base', city: 'New York', country: 'US' }),
+        row('BVA', { name: 'Paris Beauvais Tille Airport', city: 'Beauvais/Tille', country: 'FR' }),
+        row('CDG', { name: 'Charles de Gaulle International Airport', city: 'Paris', country: 'FR' }),
+        row('ORY', { name: 'Paris-Orly Airport', city: 'Paris', country: 'FR' }),
+        row('PRX', { name: 'Cox Field', city: 'Paris', country: 'US' }),
         row('NHX', { name: 'Thornhill Field', city: 'Synthetic City' }),
       ],
-      { LON: ['LHR', 'LGW', 'SEN'], NYC: ['EWR', 'JFK', 'LGA'] },
+      { LON: ['LHR', 'LGW', 'SEN'], NYC: ['EWR', 'JFK', 'LGA'], PAR: ['BVA', 'CDG', 'ORY'] },
     );
     const codes = (q: string) => repo.search(q, 20).map((a) => a.iata);
-    expect(codes('lond')).toEqual(['LGW', 'LHR', 'SEN', 'BQH', 'LDB', 'ELS']);
-    expect(codes('new y')).toEqual(['EWR', 'JFK', 'LGA']);
-    // a city matched inside its name still brings its whole metro
-    expect(codes('york')).toEqual(['EWR', 'JFK', 'LGA']);
-    // a name match does not pull in the rest of the metro: "heathrow" means Heathrow
-    expect(codes('heathrow')).toEqual(['LHR']);
+    expect(codes('lond')).toEqual(['LGW', 'LHR', 'SEN', 'BQH', 'ELS', 'LDB']);
+    expect(codes('new y')).toEqual(['JFK', 'LGA', 'EWR', 'NYS']);
+    expect(codes('york')).toEqual(['JFK', 'LGA', 'EWR', 'NYS']);
+    expect(codes('heath')).toEqual(['LHR', 'LGW', 'SEN', 'HAT']);
+    expect(codes('par')).toEqual(['CDG', 'ORY', 'BVA', 'PRX']);
     // "hill" starts a word of Biggin Hill before it sits inside Thornhill
     expect(codes('hill')).toEqual(['BQH', 'NHX']);
-    // a code still comes first, alone: its metro siblings are not added
-    expect(codes('lhr')).toEqual(['LHR']);
-    // a metro code lists its airports first, then the places whose names start with the letters
-    expect(codes('LON')).toEqual(['LGW', 'LHR', 'SEN', 'BQH', 'LDB', 'ELS']);
+    // a code comes first, then the rest of its metro
+    expect(codes('lhr')).toEqual(['LHR', 'LGW', 'SEN']);
+    expect(codes('LON')).toEqual(['LGW', 'LHR', 'SEN', 'BQH', 'ELS', 'LDB']);
   });
 
   it('rejects a malformed country, an unknown time zone and a malformed metro code, writing nothing', () => {

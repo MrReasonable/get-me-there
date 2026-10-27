@@ -9,6 +9,7 @@ import {
   type AirportRow,
   airportChoices,
   airportOptionText,
+  preferredChoice,
   shortAirportName,
 } from './airports.js';
 import { normaliseIata } from './draft.js';
@@ -45,7 +46,7 @@ const choiceText = (c: AirportChoice) =>
 /**
  * An airport picker (WAI-ARIA 1.2 combobox, list autocomplete with automatic selection): typing searches the
  * airports table by city, airport name or code (`GET /api/airports?q=`, debounced) and lists the answers in a
- * listbox; the first option is highlighted, the arrow keys move the highlight, Enter or a click or tap picks it,
+ * listbox; the whole metro is highlighted when the text names it, else the first airport, the arrow keys move the highlight, Enter or a click or tap picks it,
  * Escape closes the list (or clears the box when it is closed) and Tab leaves without picking. When two or more
  * answers share a metro, the first option adds all of that metro's airports. A picked airport becomes a removable
  * chip and the box clears; a duplicate is refused with a message.
@@ -71,7 +72,7 @@ export function AirportListInput({
   const query = useDebounced(trimmed, AIRPORT_DEBOUNCE_MS);
   const search = useAirportSearch(query);
   const qc = useQueryClient();
-  // why: the highlight belongs to one answer; a new answer starts again at its first option (automatic selection).
+  // why: the highlight belongs to one answer; a new answer starts again at its preferred option (automatic selection).
   const [nav, setNav] = useState<{ query: string; index: number }>({ query: '', index: 0 });
   // why: addTyped awaits a lookup, so `add` must read the list and the change handler of the render that is current
   // when the answer arrives, not those of the render that started it (a second add in between would be overwritten).
@@ -85,7 +86,10 @@ export function AirportListInput({
   const choices = answered && search.data !== undefined ? airportChoices(search.data) : [];
   const popup = open && trimmed.length >= MIN_QUERY;
   const listShown = popup && choices.length > 0;
-  const active = nav.query === query ? Math.min(nav.index, Math.max(choices.length - 1, 0)) : 0;
+  const active =
+    nav.query === query
+      ? Math.min(nav.index, Math.max(choices.length - 1, 0))
+      : preferredChoice(choices, query);
   const optionId = (i: number) => `${id}-option-${i}`;
   const listboxId = `${id}-listbox`;
 

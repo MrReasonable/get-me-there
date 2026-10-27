@@ -40,8 +40,9 @@ function commonCity(rows: readonly AirportRow[]): string {
 }
 
 /**
- * The picker's options for a search answer: when two or more of the results share a metro, the first option adds the
- * whole metro (the first such metro in the answer's order), then every airport in the answer's order.
+ * The picker's options for a search answer: when the answer holds a metro (by the table's `metro` column, never by
+ * city name; the search returns every member of a metro it matches), the first option adds that whole metro, the
+ * first in the answer's order; then every airport in the answer's order.
  */
 export function airportChoices(rows: readonly AirportRow[]): AirportChoice[] {
   const byMetro = new Map<string, AirportRow[]>();
@@ -63,6 +64,19 @@ export function airportChoices(rows: readonly AirportRow[]): AirportChoice[] {
 export interface AirportDetails {
   rows: ReadonlyMap<string, AirportRow>;
   settled: boolean;
+}
+
+/**
+ * The option highlighted when an answer arrives (automatic selection): the whole metro when the text names it (its
+ * code, or the start of a word of its city, as "lond" or "new y"), else the first airport, so typing "heath" and
+ * pressing Enter adds Heathrow, not all of London.
+ */
+export function preferredChoice(choices: readonly AirportChoice[], text: string): number {
+  const first = choices[0];
+  if (first?.kind !== 'metro') return 0;
+  const t = text.trim().toLowerCase();
+  const namesCity = ` ${first.city.toLowerCase()}`.includes(` ${t}`);
+  return t === first.metro.toLowerCase() || namesCity ? 0 : Math.min(1, choices.length - 1);
 }
 
 /** The row for each listed code that the airports table knows, looked up with the autocomplete's own cached query. */
