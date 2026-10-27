@@ -20,7 +20,7 @@ const perFile: string[] = [];
 /** Env names `os.tmpdir()` reads on this platform. */
 const TMP_ENV = process.platform === 'win32' ? ['TEMP', 'TMP'] : ['TMPDIR'];
 /** Caches that Node and tsx create in the temp directory of any child process they run; they are not the tests'. */
-const TOOL_CACHES = /^(node-compile-cache|tsx-\d+)$/;
+const TOOL_CACHES = /^(node-compile-cache|tsx-.+)$/;
 let sandbox: string | undefined;
 /** The janitor's stdin, held for the life of the process: the pipe closing is the janitor's signal. */
 const heldPipes: unknown[] = [];

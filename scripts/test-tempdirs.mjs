@@ -20,7 +20,7 @@ const perFile = [];
 
 const TMP_ENV = process.platform === 'win32' ? ['TEMP', 'TMP'] : ['TMPDIR'];
 /** Caches that Node and tsx create in the temp directory of any child process they run; they are not the tests'. */
-const TOOL_CACHES = /^(node-compile-cache|tsx-\d+)$/;
+const TOOL_CACHES = /^(node-compile-cache|tsx-.+)$/;
 /** @type {string | undefined} */
 let sandbox;
 /**
