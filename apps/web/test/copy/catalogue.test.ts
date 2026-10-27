@@ -1,4 +1,4 @@
-import { BANNED_WORD_ALLOWLIST, findBannedWords } from '@gmt/core';
+import { BANNED_WORD_ALLOWLIST, findBannedWords, SOURCE_LABELS } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
 import { COPY } from '../../src/copy.js';
 
@@ -384,5 +384,18 @@ describe('glyph set (review ui I2)', () => {
   });
   it('the provider marks are four distinct short names', () => {
     expect(new Set(Object.values(COPY.providerMark)).size).toBe(4);
+  });
+  // why: the phone face prints a provider mark and one-glyph marks (spec §11 provenance); the Dates view's phone key
+  // names each in full, as the Calendar's phone legend did before revision 48 retired it
+  it('the Dates phone key names every provider mark with its full name, and the fixture as synthetic', () => {
+    const line = COPY.datesView.phoneKey.providers;
+    for (const id of ['travelpayouts', 'searchapi', 'camoufox', 'fixture'] as const) {
+      expect(line).toContain(`${COPY.providerMark[id]} `);
+      expect(line).toContain(COPY.provider[id]);
+    }
+    expect(line).toContain(SOURCE_LABELS.synthetic);
+  });
+  it('the Dates phone key names every price-mark glyph a face can show', () => {
+    for (const g of Object.values(COPY.priceMarkGlyph)) expect(COPY.datesView.phoneKey.glyphs).toContain(g);
   });
 });

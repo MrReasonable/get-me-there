@@ -2,6 +2,7 @@ import { decodeDatePairs } from '@gmt/core';
 import { screen, within } from '@testing-library/react';
 import { createRef } from 'react';
 import { describe, expect, it, vi } from 'vitest';
+import { COPY } from '../../../src/copy.js';
 import { parseDatesState } from '../../../src/state/datesState.js';
 import { BoardTable } from '../../../src/views/Dates/BoardTable.js';
 import { boardModel } from '../../../src/views/Dates/board.js';
@@ -189,6 +190,22 @@ describe('the board (spec §11 Board)', () => {
 });
 
 describe('the phone board (spec §11 Phone: below 900 px)', () => {
+  it('ends with the phone key naming the face’s provider marks and glyphs in words', async () => {
+    setViewportWidth(375);
+    renderDates({ body: workedDates() });
+    await screen.findAllByTestId('board-card');
+    const key = screen.getByTestId('phone-key');
+    expect(key).toHaveTextContent(COPY.datesView.phoneKey.providers);
+    expect(key).toHaveTextContent(COPY.datesView.phoneKey.glyphs);
+  });
+
+  it('the desktop board shows no phone key', async () => {
+    setViewportWidth(1280);
+    renderDates({ body: workedDates() });
+    await findBoard();
+    expect(screen.queryByTestId('phone-key')).toBeNull();
+  });
+
   it('is stacked cards, each a link to the detail: dates and the PriceCell face lead, then how far checked, journey, airports; no point of sale', async () => {
     setViewportWidth(375);
     renderDates({ body: workedDates() });

@@ -638,6 +638,14 @@ export const COPY = {
       `showing ${shown} of ${total} date ${noun(total, 'pair', 'pairs')} with a price`,
     bestPerWeek: (weeks: number) => `best per departure week: ${weeks} ${noun(weeks, 'week', 'weeks')}`,
     openDates: (dep: string, ret: string) => `Open ${dep} to ${ret}`,
+    // why: spec §11 provenance: a phone face shows the provider's short mark and one-glyph marks, so the phone board
+    // names each in full (the Calendar's phone legend did this before revision 48 retired that view)
+    phoneKey: {
+      providers:
+        'Each price card shows its provider: TP Travelpayouts (Aviasales cache), SA SearchApi (Google Flights via SearchApi), CF Camoufox (Google Flights prices via Camoufox), syn Fixture (synthetic fixture data).',
+      glyphs:
+        'Marks beside a price: ≠ price not confirmed, ◷ stale, … cheapest of the rows read, ↺ superseded by a later search, ◌ not seen in latest search. Under the amount: its age ("5d old", or "age unknown") and "not checked" on a calendar price.',
+    },
     journeyNotKnown: 'not known',
     journeyNotKnownFiltered: 'journey time not known',
     directionOut: 'out',

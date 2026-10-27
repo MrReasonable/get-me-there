@@ -179,6 +179,10 @@ export function BoardTable(props: BoardProps) {
               />
             ))}
           </ol>
+          <div data-testid="phone-key" className="space-y-1 pt-1 text-xs">
+            <p>{D.phoneKey.providers}</p>
+            <p>{D.phoneKey.glyphs}</p>
+          </div>
         </section>
       ) : (
         <table className="w-full border-collapse text-sm">
