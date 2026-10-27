@@ -1,19 +1,15 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
+import { tempDir } from './test-tempdirs.mjs';
 
 // why: WP16b: `gmt setup --import-db <path>` must know the checkout's app is not running (its app_lock is free) and may
 // not import @gmt/db, so it runs this thin wrapper over readOnlyLockState as a child (decision 72).
 const REPO = fileURLToPath(new URL('../', import.meta.url));
 const Database = createRequire(join(REPO, 'packages', 'db', 'package.json'))('better-sqlite3');
-const dirs = [];
-afterEach(() => {
-  for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
-});
 beforeAll(() => {
   execFileSync(process.execPath, [join(REPO, 'scripts', 'ensure-build.mjs')], {
     cwd: REPO,
@@ -28,8 +24,7 @@ const run = (args) =>
     timeout: 60_000,
   });
 function db(lock) {
-  const d = mkdtempSync(join(tmpdir(), 'gmt-lock-'));
-  dirs.push(d);
+  const d = tempDir('gmt-lock-');
   const path = join(d, 'dev.db');
   const h = new Database(path);
   h.exec(
@@ -56,8 +51,7 @@ describe('scripts/lock-state.mjs', { timeout: 60_000 }, () => {
     expect(run([]).status).toBe(64);
   });
   it('a lock it cannot read is a plain failure (1), its stdout empty: never a lock state (ca-b1-022)', () => {
-    const d = mkdtempSync(join(tmpdir(), 'gmt-lock-'));
-    dirs.push(d);
+    const d = tempDir('gmt-lock-');
     const bad = join(d, 'bad.db');
     writeFileSync(bad, 'not a database '.repeat(200));
     const r = run([bad]);

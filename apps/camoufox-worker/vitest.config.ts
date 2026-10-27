@@ -35,6 +35,7 @@ export default defineConfig({
   test: {
     name: 'camoufox-worker',
     include: ['test/**/*.test.ts'],
+    setupFiles: ['test/support/tempdirs.ts'],
     coverage: {
       provider: 'v8',
       include: ['src/**/*.ts'],

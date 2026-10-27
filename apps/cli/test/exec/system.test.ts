@@ -1,26 +1,20 @@
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { Runner } from '../../src/exec/runner.js';
 import { entryProblem, pidAlive, systemExecutor } from '../../src/exec/system.js';
 import { runAction } from '../../src/plan/action.js';
 import { killTracked } from '../support/children.js';
+import { tempDir } from '../support/tempdirs.js';
 
-const dirs: string[] = [];
 afterEach(() => {
   vi.useRealTimers();
-  for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
   // why: PR #11: no real child outlives its test
   expect(killTracked()).toEqual([]);
 });
-const tmp = () => {
-  const d = mkdtempSync(join(tmpdir(), 'gmt-sysexec-'));
-  dirs.push(d);
-  return d;
-};
+const tmp = () => tempDir('gmt-sysexec-');
 const mode = (p: string) => statSync(p).mode & 0o777;
 // why: PR #11: this file starts no real child (Stryker runs it per mutant, and a worker killed mid-spawn can leave a
 // child stuck); a step that would start one fails the test instead. system-children.test.ts has the real ones.

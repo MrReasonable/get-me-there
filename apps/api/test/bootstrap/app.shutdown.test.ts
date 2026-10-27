@@ -1,18 +1,17 @@
 // Spec §7, §13: the heartbeat, the graceful shutdown order, and a failed boot that leaves no lock behind.
-import { copyFileSync, existsSync, mkdtempSync, rmSync, statSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { copyFileSync, existsSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { asIsoDateTime, fixedClock } from '@gmt/core';
 import { AppLock, HEARTBEAT_INTERVAL_MS, openDatabase } from '@gmt/db';
 import { takeStrays } from '@gmt/providers/testing';
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { bootApp, type RunningApp, SHUTDOWN_DEADLINE_MS, shutdownHandler } from '../../src/bootstrap/app.js';
 import { assetPaths } from '../../src/bootstrap/paths.js';
 import { createLogger } from '../../src/logger.js';
 import { EXIT } from '../../src/tools/types.js';
 import { loadConfigFromEnv } from '../../src/wiring.js';
 import { cleanEnv, silentLog } from '../helpers/env.js';
-import { tempDir } from '../helpers/tmp.js';
+import { fileTempDir, tempDir } from '../helpers/tmp.js';
 
 /** The one seeding boot below, and each test's boot of a copy, as a backstop on a loaded machine. */
 const BOOT_TIMEOUT_MS = 30_000;
@@ -99,9 +98,9 @@ function lockRow(dbPath: string) {
  * fake deadline ran past its 30 s budget. A copy needs no seed (the boot finds the dataset in place), so what a test
  * waits on is its own fake clock.
  */
-const templateDir = mkdtempSync(join(tmpdir(), 'gmt-sd-seed-'));
-const template = join(templateDir, 'seed.db');
+let template = '';
 beforeAll(async () => {
+  template = join(fileTempDir('gmt-sd-seed-'), 'seed.db');
   const running = await bootApp({
     config: devConfig(template),
     clock: fixedClock(T0),
@@ -111,7 +110,6 @@ beforeAll(async () => {
   });
   await running.close();
 }, BOOT_TIMEOUT_MS);
-afterAll(() => rmSync(templateDir, { recursive: true, force: true }));
 
 /** A fresh copy of the seeded database in this test's own temporary directory. */
 function seededDb(): string {

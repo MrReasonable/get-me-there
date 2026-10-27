@@ -1,13 +1,4 @@
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parseEnv } from 'node:util';
 import { parseMovedMarker } from '@gmt/core';
@@ -15,25 +6,20 @@ import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { runCli } from '../../src/cli.js';
 import { databasePath } from '../../src/services/specs.js';
 import { guarded, killTracked } from '../support/children.js';
+import { fileTempDir, tempDir } from '../support/tempdirs.js';
 import { inspect, interrupting, realDeps, requireBuilt, sampleDb } from './support.js';
 
 // why: spec §9 item 9: the data-loss paths run for real in a temporary directory: a SQLite database with rows,
 // backed up by scripts/backup.mjs, imported or restored, reopened and counted. Nothing here runs a service manager or
 // docker: those commands are answered by the test's runner (test/real/support.ts).
-const homes: string[] = [];
 afterEach(() => {
-  for (const h of homes.splice(0)) rmSync(h, { recursive: true, force: true });
   // why: PR #11: no real child outlives its test
   expect(killTracked()).toEqual([]);
 });
 beforeAll(() => {
   requireBuilt();
 });
-const temp = (p: string) => {
-  const d = mkdtempSync(join(tmpdir(), p));
-  homes.push(d);
-  return d;
-};
+const temp = (p: string) => tempDir(p);
 const NI = (answers: string) => ['--non-interactive', '--answers', answers];
 const answers = (dir: string, body: unknown = {}) => {
   const p = join(dir, 'answers.json');
@@ -96,7 +82,7 @@ describe.skipIf(process.platform === 'win32')(
         // why: the shared afterEach would remove a concurrent sweep's homes mid-run; each sweep removes its own
         const mine: string[] = [];
         const own = (p: string) => {
-          const d = mkdtempSync(join(tmpdir(), p));
+          const d = fileTempDir(p);
           mine.push(d);
           return d;
         };

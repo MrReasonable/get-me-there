@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { appendFileSync, existsSync, readFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileTempDir } from './tempdirs.js';
 
 /**
  * Real `node -e` children the tests start (PR #11: a mutant or a killed test worker once left ~100 of them running).
@@ -10,11 +10,20 @@ import { join } from 'node:path';
  * `killTracked()`, in each such file's afterEach, kills every recorded child still running and returns them (a child that has
  * ended but is not yet reaped, which `ps` shows, is neither).
  */
-const TRACK = join(tmpdir(), `gmt-test-children-${process.pid}`);
+let trackFile: string | undefined;
+/**
+ * Where the children record their pids: a directory of its own, made on first use (inside a test, so under the
+ * private temp directory) and removed after the file, so a file that starts children but never calls killTracked
+ * leaves nothing in the temp directory.
+ */
+function track(): string {
+  trackFile ??= join(fileTempDir('gmt-test-children-'), 'pids');
+  return trackFile;
+}
 
 export function guarded(script: string): string {
   const prefix = [
-    `require('fs').appendFileSync(${JSON.stringify(TRACK)}, process.pid + '\\n');`,
+    `require('fs').appendFileSync(${JSON.stringify(track())}, process.pid + '\\n');`,
     '{ const p = process.ppid;',
     'setInterval(() => { if (process.ppid !== p) process.exit(97); }, 200).unref();',
     'setTimeout(() => process.exit(96), 30000).unref(); }',
@@ -53,9 +62,9 @@ function psState(pid: number): string | null {
  * subreaper, on macOS to launchd, either of which may take a moment) is not.
  */
 export function killTracked(): number[] {
-  if (!existsSync(TRACK)) return [];
+  if (trackFile === undefined || !existsSync(trackFile)) return [];
   const alive: number[] = [];
-  for (const line of readFileSync(TRACK, 'utf8').split('\n')) {
+  for (const line of readFileSync(trackFile, 'utf8').split('\n')) {
     const pid = Number(line);
     if (!Number.isInteger(pid) || pid <= 0) continue;
     // why: read before the kill, which itself ends a running child
@@ -68,7 +77,7 @@ export function killTracked(): number[] {
       // why: already gone (ESRCH), the expected case
     }
   }
-  rmSync(TRACK, { force: true });
+  rmSync(trackFile, { force: true });
   return alive;
 }
 
@@ -82,5 +91,4 @@ export function running(pid: number): boolean {
   }
 }
 
-export const trackFile = TRACK;
-export const record = (pid: number): void => appendFileSync(TRACK, `${pid}\n`);
+export const record = (pid: number): void => appendFileSync(track(), `${pid}\n`);

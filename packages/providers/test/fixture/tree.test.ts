@@ -1,6 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { cpSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { asIsoDateTime, fixedClock } from '@gmt/core';
@@ -10,6 +9,7 @@ import { loadRecordedJson } from '../../src/http/recordedFiles.js';
 import { createRecorder, withContentHash } from '../../src/http/recorder.js';
 import { verifyFixturesTree, verifyRecordedFile, verifyRecordedTree } from '../../src/testing/verify.js';
 import { ALL_SECRETS, req, SEARCH, SENTINELS } from '../fakes.js';
+import { tempDir } from '../support/tempdirs.js';
 
 const FIXTURES = fileURLToPath(new URL('../../fixtures', import.meta.url));
 const REPO = fileURLToPath(new URL('../../../../', import.meta.url));
@@ -18,7 +18,7 @@ const scanFixtures = (root: string): string[] => verifyFixturesTree(root, ALL_SE
 // why: ruling 11: lists the committed tree through git and scans every fixture file; 30 s survives a loaded runner.
 describe('fixture-tree scan (spec §9 item 2: every committed fixture scanned)', { timeout: 30_000 }, () => {
   it('reports each planted fault in a temporary tree (positive control, test-008)', async () => {
-    const root = join(mkdtempSync(join(tmpdir(), 'gmt-scan-')), 'fixtures');
+    const root = join(tempDir('gmt-scan-'), 'fixtures');
     cpSync(defaultFixtureRoot(), join(root, 'synthetic', 'fixture'), { recursive: true });
     const recordedRoot = join(root, 'recorded');
     mkdirSync(recordedRoot, { recursive: true });
@@ -95,7 +95,7 @@ describe('fixture-tree scan (spec §9 item 2: every committed fixture scanned)',
   });
 
   it('verifyRecordedTree and verifyRecordedFile check a recorded root on its own (WP4b record tool)', async () => {
-    const recordedRoot = join(mkdtempSync(join(tmpdir(), 'gmt-vr-')), 'fixtures', 'recorded');
+    const recordedRoot = join(tempDir('gmt-vr-'), 'fixtures', 'recorded');
     mkdirSync(recordedRoot, { recursive: true });
     const recorder = createRecorder({
       root: recordedRoot,

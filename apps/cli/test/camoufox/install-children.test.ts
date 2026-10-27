@@ -2,19 +2,16 @@ import { createHash } from 'node:crypto';
 import {
   existsSync,
   lstatSync,
-  mkdtempSync,
   readdirSync,
   readFileSync,
   realpathSync,
-  rmSync,
   statSync,
   writeFileSync,
 } from 'node:fs';
 import { createServer, type Server } from 'node:http';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CAMOUFOX_BUILDS, type CamoufoxBuild } from '@gmt/core';
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { planInstall } from '../../src/camoufox/install.js';
 import { planLayout } from '../../src/camoufox/layout.js';
 import { manifestArgv, manifestFor, parseManifest } from '../../src/camoufox/manifest.js';
@@ -22,21 +19,14 @@ import { systemFiles } from '../../src/exec/files.js';
 import { systemRunner } from '../../src/exec/runner.js';
 import { systemExecutor } from '../../src/exec/system.js';
 import { apply } from '../../src/plan/apply.js';
+import { tempDir } from '../support/tempdirs.js';
 import { LINUX_ENTRIES, MAC_ENTRIES, makeZip } from '../support/zip.js';
 
 // why: these tests start real children (unzip, ln) and serve the archive from a loopback HTTP server, so Stryker's
 // per-mutant command leaves this file out (PR #11); install.test.ts covers the planner with stand-ins. No release host
 // is ever contacted: the fetch the executor uses sends every request to the loopback server. Each child is the
 // executor's own, run to its end (or its bound) before the action resolves, so none outlives its test.
-const dirs: string[] = [];
-afterEach(() => {
-  for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
-});
-const tmp = () => {
-  const d = mkdtempSync(join(tmpdir(), 'gmt-install-'));
-  dirs.push(d);
-  return d;
-};
+const tmp = () => tempDir('gmt-install-');
 const sha = (b: Buffer) => createHash('sha256').update(b).digest('hex');
 
 let server: Server;

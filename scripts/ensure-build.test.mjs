@@ -1,8 +1,7 @@
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
   acquire,
   breakStale,
@@ -12,6 +11,7 @@ import {
   release,
   stopChildren,
 } from './ensure-build-lib.mjs';
+import { tempDir } from './test-tempdirs.mjs';
 
 // why: review code-architect M5 — two test files each ran `pnpm --filter @gmt/api... build`, and under the root
 // `pnpm test` they run in parallel, so one tsc could rewrite a dist file the other's script was importing. One script
@@ -85,9 +85,7 @@ describe('scripts/ensure-build-lib.mjs (re-review N1, N2)', () => {
 
   it('N2: a newer root tsconfig, package.json or lockfile makes the stamp stale', async () => {
     const { needsBuild } = await import('./ensure-build-lib.mjs');
-    const { mkdirSync, mkdtempSync, utimesSync, writeFileSync } = await import('node:fs');
-    const { tmpdir } = await import('node:os');
-    const repo = mkdtempSync(join(tmpdir(), 'gmt-eb-'));
+    const repo = tempDir('gmt-eb-');
     for (const p of ['packages/core', 'packages/db', 'packages/providers', 'packages/engine', 'apps/api']) {
       mkdirSync(join(repo, p, 'dist'), { recursive: true });
       mkdirSync(join(repo, p, 'src'), { recursive: true });
@@ -115,15 +113,8 @@ describe('scripts/ensure-build-lib.mjs (re-review N1, N2)', () => {
   });
 });
 
-/** @type {string[]} */
-const scratch = [];
-afterEach(() => {
-  for (const d of scratch.splice(0)) rmSync(d, { recursive: true, force: true });
-});
 function lockIn() {
-  const d = mkdtempSync(join(tmpdir(), 'gmt-lock-'));
-  scratch.push(d);
-  return join(d, 'build.lock');
+  return join(tempDir('gmt-lock-'), 'build.lock');
 }
 /** The pid of a process that has already exited. */
 const deadPid = () => spawnSync(process.execPath, ['-e', '']).pid;

@@ -1,5 +1,4 @@
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { asIsoDateTime, fixedClock, ProviderError } from '@gmt/core';
 import { HttpResponse, http } from 'msw/http';
@@ -8,6 +7,7 @@ import { createRecorder } from '../../src/http/recorder.js';
 import { containsSecret } from '../../src/http/scrub.js';
 import { ALL_SECRETS, makeKit, req, SEARCH, SENTINELS, TP } from '../fakes.js';
 import { hangUntilAborted, server } from '../support/msw.js';
+import { tempDir } from '../support/tempdirs.js';
 import { drive, useFakeTime } from '../support/time.js';
 
 const key = SENTINELS.searchapi.reveal();
@@ -35,7 +35,7 @@ describe('sentinel-key test (spec §5.3 secret scrubbing, §14)', () => {
   afterEach(() => vi.useRealTimers());
 
   it('no secret, in any form, reaches the ledger, cache, errors, bodies, recorder output or logs on any path', async () => {
-    const root = join(mkdtempSync(join(tmpdir(), 'gmt-sen-')), 'fixtures', 'recorded');
+    const root = join(tempDir('gmt-sen-'), 'fixtures', 'recorded');
     mkdirSync(root, { recursive: true });
     const recorder = createRecorder({
       root,

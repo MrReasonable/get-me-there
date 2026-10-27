@@ -1,22 +1,16 @@
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { makeRunner, systemRunner } from '../../src/exec/runner.js';
 import { guarded, killTracked, running } from '../support/children.js';
+import { tempDir } from '../support/tempdirs.js';
 
-const dirs: string[] = [];
 afterEach(() => {
-  for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
   expect(killTracked()).toEqual([]);
 });
-const tmp = () => {
-  const d = mkdtempSync(join(tmpdir(), 'gmt-runner-'));
-  dirs.push(d);
-  return d;
-};
+const tmp = () => tempDir('gmt-runner-');
 const node = process.execPath;
 
 describe('systemRunner (the one execFile wrapper)', { timeout: 30_000 }, () => {

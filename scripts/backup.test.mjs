@@ -3,18 +3,16 @@ import {
   copyFileSync,
   existsSync,
   mkdirSync,
-  mkdtempSync,
   readdirSync,
   realpathSync,
-  rmSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { createRequire } from 'node:module';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
+import { tempDir } from './test-tempdirs.mjs';
 
 // why: decision 49 keeps tests of root scripts beside them, run by the root Vitest project `scripts`. These test only
 // what the two CLIs own: arguments, the one output line, the defaults, forwarding --keep, and mapping a failure to an
@@ -23,12 +21,6 @@ import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 const REPO = fileURLToPath(new URL('../', import.meta.url));
 const NAME = /^get-me-there-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z\.db$/;
 const Database = createRequire(join(REPO, 'packages', 'db', 'package.json'))('better-sqlite3');
-
-/** @type {string[]} */
-const dirs = [];
-afterEach(() => {
-  for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
-});
 
 // why: both CLIs load the built packages and apps/api's build (as they do in the image), so those are built first.
 // why: ensure-build can wait up to 10 min for another suite's build lock and then build cold itself, so the call and
@@ -40,12 +32,6 @@ beforeAll(() => {
     timeout: 1_200_000,
   });
 }, 1_200_000);
-
-function tempDir() {
-  const d = mkdtempSync(join(tmpdir(), 'gmt-backup-cli-'));
-  dirs.push(d);
-  return d;
-}
 
 /** A small WAL database standing in for /data/get-me-there.db. @param {string} dir */
 function sampleDb(dir) {
@@ -78,7 +64,7 @@ function backups(dir) {
 // why: ruling 11: each case spawns node (up to about 1.3 s unloaded); 60 s survives a loaded runner.
 describe('scripts/backup.mjs (spec §13 Backup; the plan’s exit-code table)', { timeout: 60_000 }, () => {
   it('exits 0 and prints exactly one JSON line naming a copy that holds the data', () => {
-    const dir = tempDir();
+    const dir = tempDir('gmt-backup-cli-');
     const r = backup(['--db', sampleDb(dir), '--dir', join(dir, 'b')]);
     expect(r.stderr).toBe('');
     expect(r.status).toBe(0);
@@ -92,9 +78,9 @@ describe('scripts/backup.mjs (spec §13 Backup; the plan’s exit-code table)', 
   });
 
   it('defaults to DATABASE_PATH, resolved like the config, and the backups folder beside the real file', () => {
-    const dir = tempDir();
+    const dir = tempDir('gmt-backup-cli-');
     const real = sampleDb(dir);
-    const linkDir = join(tempDir(), 'link');
+    const linkDir = join(tempDir('gmt-backup-cli-'), 'link');
     mkdirSync(linkDir);
     symlinkSync(real, join(linkDir, 'get-me-there.db'));
     const r = backup([], { DATABASE_PATH: join(linkDir, 'get-me-there.db') });
@@ -104,7 +90,7 @@ describe('scripts/backup.mjs (spec §13 Backup; the plan’s exit-code table)', 
   });
 
   it('forwards --keep to the routine', () => {
-    const dir = tempDir();
+    const dir = tempDir('gmt-backup-cli-');
     const db = sampleDb(dir);
     for (let i = 0; i < 2; i++) expect(backup(['--db', db]).status).toBe(0);
     expect(backups(join(dir, 'backups'))).toHaveLength(2);
@@ -113,7 +99,7 @@ describe('scripts/backup.mjs (spec §13 Backup; the plan’s exit-code table)', 
   });
 
   it('exits 74 with the routine’s cause when the backup fails', () => {
-    const dir = tempDir();
+    const dir = tempDir('gmt-backup-cli-');
     const db = join(dir, 'get-me-there.db');
     writeFileSync(db, 'this is not a database file '.repeat(200));
     const r = backup(['--db', db]);
@@ -137,7 +123,7 @@ describe('scripts/backup.mjs (spec §13 Backup; the plan’s exit-code table)', 
   });
 
   it('exits 1 naming the build when the built packages are missing, never 74', () => {
-    const fake = tempDir();
+    const fake = tempDir('gmt-backup-cli-');
     mkdirSync(join(fake, 'scripts'));
     mkdirSync(join(fake, 'apps', 'api'), { recursive: true });
     writeFileSync(join(fake, 'apps', 'api', 'package.json'), '{"name":"@gmt/api","type":"module"}');
@@ -151,7 +137,7 @@ describe('scripts/backup.mjs (spec §13 Backup; the plan’s exit-code table)', 
 // why: ruling 11: each case spawns node (up to about 1.6 s unloaded); 60 s survives a loaded runner.
 describe('scripts/check-backup.mjs (spec §13 Restore)', { timeout: 60_000 }, () => {
   it('exits 0 for a good backup', () => {
-    const dir = tempDir();
+    const dir = tempDir('gmt-backup-cli-');
     const made = JSON.parse(backup(['--db', sampleDb(dir)]).stdout);
     const r = check([made.file]);
     expect(r.status).toBe(0);
@@ -159,7 +145,7 @@ describe('scripts/check-backup.mjs (spec §13 Restore)', { timeout: 60_000 }, ()
   });
 
   it('exits 74 for a file that is not a database or does not exist', () => {
-    const dir = tempDir();
+    const dir = tempDir('gmt-backup-cli-');
     const bad = join(dir, 'bad.db');
     writeFileSync(bad, 'not a database '.repeat(200));
     for (const f of [bad, join(dir, 'absent.db')]) {

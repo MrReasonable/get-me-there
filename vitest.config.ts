@@ -7,7 +7,15 @@ export default defineConfig({
     projects: [
       'packages/*/vitest.config.ts',
       'apps/*/vitest.config.ts',
-      { test: { name: 'scripts', include: ['scripts/*.test.mjs'], environment: 'node' } },
+      {
+        test: {
+          name: 'scripts',
+          include: ['scripts/*.test.mjs'],
+          environment: 'node',
+          // why: removes the temp directories the tests make and fails a file that leaves any behind
+          setupFiles: ['scripts/test-tempdirs.mjs'],
+        },
+      },
     ],
     coverage: { provider: 'v8', reporter: ['text', 'lcov'] },
   },

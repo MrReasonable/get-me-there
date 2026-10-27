@@ -1,15 +1,14 @@
 // Every predicate of the recorded-tree check passes on a known-good tree recorded from the stand-ins and fails on a
 // broken copy (r2-ts-002), before it ever meets the live recording; the stand-in tripwire catches a test tree
 // signed as a real one (prov-wp04b-006).
-import { copyFileSync, cpSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { copyFileSync, cpSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { loadParamsAllowlist, type ParamsAllowlist, type RecordedFixture } from '@gmt/providers';
 import { loadRecorded, withContentHash } from '@gmt/providers/testing';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { RECORDED_BY } from '../../src/tools/record.js';
 import { runRecording, TEST_RECORDED_BY } from '../helpers/recording.js';
-import { filesUnder, tempRecordedRoot } from '../helpers/tmp.js';
+import { filesUnder, fileTempDir, tempRecordedRoot } from '../helpers/tmp.js';
 import { STANDIN_MARKER } from '../helpers/vendors.js';
 import { checkWorkedExampleTree, holdsStandInMarker } from '../helpers/workedExampleTree.js';
 
@@ -54,10 +53,9 @@ function rewrite(
 let pristine = '';
 beforeAll(async () => {
   const { root } = await runRecording();
-  pristine = mkdtempSync(join(tmpdir(), 'gmt-worked-example-'));
+  pristine = fileTempDir('gmt-worked-example-');
   cpSync(root, pristine, { recursive: true });
 }, RECORDING_TIMEOUT_MS);
-afterAll(() => rmSync(pristine, { recursive: true, force: true }));
 
 /** A copy of the pristine recorded tree in a fresh recorded root, for one test to check or break. */
 function freshTree(): string {

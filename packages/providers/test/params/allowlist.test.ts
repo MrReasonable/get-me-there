@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -10,6 +10,7 @@ import {
   loadParamsHistory,
   ParamsNotAllowedError,
 } from '../../src/params/allowlist.js';
+import { tempDir } from '../support/tempdirs.js';
 
 const EP = '/api/v1/search';
 const good = {
@@ -35,7 +36,7 @@ const good = {
 };
 let root = '';
 function write(content: unknown): string {
-  root = join(mkdtempSync(join(tmpdir(), 'gmt-par-')), 'fixtures', 'recorded');
+  root = join(tempDir('gmt-par-'), 'fixtures', 'recorded');
   mkdirSync(join(root, 'searchapi'), { recursive: true });
   const p = join(root, 'searchapi', 'params-2026-10-14.json');
   writeFileSync(p, JSON.stringify(content));

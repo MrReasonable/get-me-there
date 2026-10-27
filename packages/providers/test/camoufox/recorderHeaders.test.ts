@@ -1,14 +1,14 @@
-import { mkdirSync, mkdtempSync, readFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { asIsoDateTime, fixedClock } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
 import { createRecorder } from '../../src/http/recorder.js';
 import { ALL_SECRETS, req, SENTINELS } from '../fakes.js';
+import { tempDir } from '../support/tempdirs.js';
 
 describe('the recorder drops the worker key (arch-013: x-gmt-worker-key is a credential header)', () => {
   it('a recorded camoufox request has no x-gmt-worker-key', async () => {
-    const root = join(mkdtempSync(join(tmpdir(), 'gmt-rec-')), 'fixtures', 'recorded');
+    const root = join(tempDir('gmt-rec-'), 'fixtures', 'recorded');
     mkdirSync(root, { recursive: true });
     const recorder = createRecorder({
       root,

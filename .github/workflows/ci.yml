@@ -35,6 +35,7 @@ jobs:
       - run: pnpm lint
       - run: pnpm boundaries
       - run: pnpm casts
+      - run: pnpm temp-dirs
       - run: pnpm -r typecheck
       # why: the root vitest config ignores each package's coverage thresholds (coverage is a root-only option), so every
       # package runs its own `test` script (its config, its thresholds, then its TZ runs); the root scripts project follows.

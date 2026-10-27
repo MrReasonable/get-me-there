@@ -1,13 +1,21 @@
 // Temporary directories for the worker's tests: each a fresh 0700 directory under the OS temp root, removed after the
-// run. Synthetic content only; nothing here is copied from a recording.
-import { chmodSync, mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+// test that made it (./tempdirs.ts, a setup file, also fails a file that leaves anything behind). Synthetic content
+// only; nothing here is copied from a recording.
+import { chmodSync, mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { bundleDirName, CAMOUFOX_BUILDS, type OsArch } from '@gmt/core';
+import { fileTempDir, tempDir } from './tempdirs.js';
 
 /** A fresh, empty directory with mode 0700 (the worker's data directory rule). */
 export function tmpDir(): string {
-  const d = mkdtempSync(join(tmpdir(), 'gmt-cfw-'));
+  const d = tempDir('gmt-cfw-');
+  chmodSync(d, 0o700);
+  return d;
+}
+
+/** As `tmpDir`, but removed after the last test of the file: for a directory made in `beforeAll` or while the file loads. */
+export function fileTmpDir(): string {
+  const d = fileTempDir('gmt-cfw-');
   chmodSync(d, 0o700);
   return d;
 }

@@ -1,20 +1,15 @@
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
+import { tempDir } from './test-tempdirs.mjs';
 
 // why: decisions 77, 78 (WP16b Task 16b.11): the Windows leg runs every suite with vitest's JSON reporter and this
 // script compares the results with ci/windows-known-failures.txt, so the list only shrinks; `guard` checks the list
 // against `vitest list --json`.
 const SCRIPT = join(import.meta.dirname, 'windows-known-failures.mjs');
-const dirs = [];
-afterEach(() => {
-  for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
-});
 function files({ list = '', results = null, listed = null }) {
-  const d = mkdtempSync(join(tmpdir(), 'gmt-wkf-'));
-  dirs.push(d);
+  const d = tempDir('gmt-wkf-');
   writeFileSync(join(d, 'known.txt'), list);
   if (results) writeFileSync(join(d, 'results.json'), JSON.stringify(results));
   if (listed) writeFileSync(join(d, 'list.json'), JSON.stringify(listed));

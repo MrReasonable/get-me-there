@@ -1,5 +1,3 @@
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { asIsoDateTime, type Logger } from '@gmt/core';
 import Database from 'better-sqlite3';
@@ -7,6 +5,7 @@ import { afterEach } from 'vitest';
 import { type Db, openDatabase } from '../../src/client.js';
 import { applyMigrations } from '../../src/migrate.js';
 import { MIGRATIONS_DIR } from '../../src/paths.js';
+import { tempDir } from '../support/tempdirs.js';
 
 /** The instant every test starts from unless it says otherwise. Minted, never cast (ruling 15). */
 export const T0 = asIsoDateTime('2026-10-14T12:00:00.000Z');
@@ -14,13 +13,11 @@ export const T0 = asIsoDateTime('2026-10-14T12:00:00.000Z');
 export const at = asIsoDateTime;
 
 const handles: Db[] = [];
-const dirs: string[] = [];
-// why: test-008. Every handle opened through these helpers is closed, and every temp directory removed,
-// after each test, including when the test failed half way. Registered at module scope, so it applies
-// to every test file that imports this helper.
+// why: test-008. Every handle opened through these helpers is closed after each test, including when the test failed
+// half way, before the setup file's own afterEach removes the temp directories. Registered at module scope, so it
+// applies to every test file that imports this helper.
 afterEach(() => {
   for (const db of handles.splice(0)) if (db.raw.open) db.close();
-  for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
 export function openTracked(path: string): Db {
@@ -38,9 +35,7 @@ export function freshDb(path = ':memory:'): Db {
 
 /** A fresh temp directory removed after the test. */
 export function tmpDir(): string {
-  const dir = mkdtempSync(join(tmpdir(), 'gmt-db-'));
-  dirs.push(dir);
-  return dir;
+  return tempDir('gmt-db-');
 }
 
 /** A unique file path ending in `.test.db` (the synthetic gate's test suffix, spec §5.5). */
