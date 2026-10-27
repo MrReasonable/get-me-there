@@ -1,7 +1,7 @@
 /**
  * The worker answer map (spec §5.2 rev 32; brief §6, Task 14.8): every non-2xx answer becomes one ProviderError with a
- * message that words the page kind as the operator reads it in `last_error` (brief Task 14.10's copy) and a bracketed
- * code. 423 `blocked` and `cooling-down` → `blocked`; 409 → `parse`; 504 `not-ready` → `parse` (`page-not-ready`);
+ * message that words the page kind as the operator reads it in `last_error` (brief Task 14.10's copy), a blocked page's
+ * rule when the worker names it, and a bracketed code. 423 `blocked` and `cooling-down` → `blocked`; 409 → `parse`; 504 `not-ready` → `parse` (`page-not-ready`);
  * 502 → `upstream`; 429 `spacing` → `rate-limit` (http-kit waits its Retry-After); 401 → `auth`; 400 → `parse`.
  * None is retried but the spacing (http-kit's NEVER_RETRIED and `retryTransport: false` hold the rest).
  */
@@ -62,7 +62,9 @@ export function classifyWorkerAnswer(f: ResponseFacts): ProviderError {
       return error(
         f,
         'blocked',
-        `${BLOCKED_WORDS[answer.page]}; cooling down until ${answer.cooldownUntil}`,
+        // why: the grid runs of 2026-10-26 stopped as unrecognised with nothing to say which check refused the page;
+        // the worker's rule (a bounded token, never page text) follows the page kind's words
+        `${BLOCKED_WORDS[answer.page]}${answer.rule === undefined ? '' : `; stopped by rule ${answer.rule}`}; cooling down until ${answer.cooldownUntil}`,
         `blocked:${answer.page}`,
         false,
         answer.cooldownUntil,

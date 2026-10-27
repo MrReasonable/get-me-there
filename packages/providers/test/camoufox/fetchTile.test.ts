@@ -296,6 +296,50 @@ describe('camoufox fetchTile (spec §2, §5.2)', () => {
       "camoufox /v1/page: Google's page was not one this app reads (it may have changed); cooling down until 2026-10-14T16:00:00.000Z [blocked:unrecognised]",
     );
   });
+  // why: the grid runs of 2026-10-26 stopped as unrecognised and last_error said only that: the worker's rule now
+  // follows the page kind's words, and the code stays the page kind (the engine reads the code, never the words)
+  it('a blocked answer that names its rule carries it into last_error', async () => {
+    const { p, tile } = setup();
+    server.use(
+      http.post(URL_, () =>
+        HttpResponse.json(
+          {
+            kind: 'blocked',
+            page: 'unrecognised',
+            cooldownUntil: '2026-10-14T16:00:00.000Z',
+            rule: 'grid:first-view:price',
+          },
+          { status: 423, ...contacted(true) },
+        ),
+      ),
+    );
+    const r = await p.discovery?.fetchTile(tile, Q, ctx);
+    if (r?.kind !== 'tile-error') throw new Error('tile-error');
+    expect(r.error.message).toBe(
+      "camoufox /v1/page: Google's page was not one this app reads (it may have changed); stopped by rule grid:first-view:price; cooling down until 2026-10-14T16:00:00.000Z [blocked:unrecognised]",
+    );
+    expect([r.error.kind, r.error.reason]).toEqual(['blocked', 'blocked:unrecognised']);
+  });
+  it('a blocked kind other than unrecognised names its rule the same way', async () => {
+    const { p, tile } = setup();
+    server.use(
+      http.post(URL_, () =>
+        HttpResponse.json(
+          {
+            kind: 'blocked',
+            page: 'captcha',
+            cooldownUntil: '2026-10-14T16:00:00.000Z',
+            rule: 'captcha-frame',
+          },
+          { status: 423, ...contacted(true) },
+        ),
+      ),
+    );
+    const r = await p.discovery?.fetchTile(tile, Q, ctx);
+    expect(r?.kind === 'tile-error' ? r.error.message : '').toBe(
+      'camoufox /v1/page: Google showed a challenge page (CAPTCHA); stopped by rule captcha-frame; cooling down until 2026-10-14T16:00:00.000Z [blocked:captcha]',
+    );
+  });
   // why: fix round 1 (arch I1): the end travels as data, so the engine's once-per-cool-down key never parses wording
   it('a blocked or cooling-down answer carries its cool-down end on the error', async () => {
     for (const body of [

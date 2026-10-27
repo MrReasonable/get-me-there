@@ -101,6 +101,35 @@ describe('camoufox grid mode through the engine (Task 15.8)', () => {
     expect(cf.calls).toHaveLength(1);
     expect(e.ledgerRows('camoufox')).toHaveLength(1);
   });
+  // why: the grid runs of 2026-10-26 stopped as unrecognised and every cell's last_error said only that; the rule the
+  // worker names now reaches each of the page's cells
+  it('an unrecognised grid page puts the worker’s rule in each of its cells’ last_error', async () => {
+    const cf = realCamoufox(
+      [
+        {
+          status: 423,
+          body: {
+            kind: 'blocked',
+            page: 'unrecognised',
+            cooldownUntil: B,
+            scrolls: 0,
+            rule: 'grid:first-view:price',
+          },
+        },
+      ],
+      14,
+      { executionPageCap: 100, executionScrollCap: 600 },
+    );
+    const e = engineWith([cf]);
+    const ex = await e.runToEnd();
+    const errors = outcomes(e, ex.id, 'camoufox').filter((x) => x.status === 'error');
+    expect(errors).toHaveLength(7);
+    for (const x of errors) {
+      expect(x.reason).toBe('blocked');
+      expect(x.lastError ?? '').toContain('stopped by rule grid:first-view:price');
+      expect(x.lastError ?? '').toContain('[blocked:unrecognised]');
+    }
+  });
 });
 
 // why: Ian's ruling of 2026-10-26 (spec §8.1 rev 49): camoufox pages that do not settle within the page timeout
