@@ -1,6 +1,6 @@
 # get-me-there — Flight Price Intelligence & Flexible-Date Optimiser
 
-**Design spec, revision 50.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
+**Design spec, revision 52.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
 four full-roster reviews (145, 140, 126 and 101 findings; zero Critical since
 revision 2) and the provider spike. Revision 9 folds in the three decisions
 taken at approval (the self-scraping fallback in §2, the dashboard readings in
@@ -226,7 +226,16 @@ module. Option names are read from each result link through Playwright's
 locators (the link's accessible name), never by parsing printed
 accessibility text, and parsed by one dated grammar; a name the grammar
 cannot read, or one longer than a generous limit, is counted as unparsed,
-never silently dropped.
+never silently dropped. The grammar's closing sentences are the stopovers,
+each either "Stopover (1 of 1) is a 1 hr 20 min stopover at <airport> in
+<city>." or, for a stopover that changes airports (observed 2026-10-27),
+"Stopover (1 of 1) is a 3 hrs stopover in <city>. Transfer here from
+<airport> to <airport>."; any other sentence leaves the name unparsed. The
+"Cheapest" tab's accessible name carries the text of an information pop-up
+about budget picks after its price ("Cheapest from £451Close
+dialogueLooking for the lowest fares? These additional budget picks …",
+in every recording since 2026-10-18); it is still one tab, and its price is
+the first one in its name.
 
 - **`list` (the only mode built):** one cell per page. Until a recording
   confirms the "Cheapest" tab's flow, the worker clicks nothing: it reads
@@ -264,7 +273,14 @@ never silently dropped.
   results-page structure rules (the Cheapest tab count, the Date grid
   button, the result links) do not apply once the dialog is open: the 2026-10-18
   exploration read them as `unrecognised` (rule `cheapest-tab-count`) with
-  the dialog open, because no dialog view existed. A dialog view,
+  the dialog open, because no dialog view existed. They are applied once,
+  to the settled Best view, before the "Price graph" click. A `--grid`
+  recording's `classification` is the dialog-open reading, so it is
+  `unrecognised` (`cheapest-tab-count`) in every recording and says nothing
+  about the page; each recording also keeps `resultsPage`, the Best view's
+  own classification and its Cheapest tab counts (all, and in the tablist)
+  read before anything was clicked, and each view's counts with the dialog
+  open. A dialog view,
   `dates-grid`, is recognised instead when the "Price insights" dialog is
   open, its "Dates" tab is selected and its panel holds the four scroll
   buttons; anything else is `unrecognised`.
@@ -647,7 +663,10 @@ cools down whenever a page is not a recognised results page: a challenge or
 verification page, a sign-in page, a consent page, or anything unrecognised.
 Either way the cell outcome is
 `error` with reason `blocked` (a `ProviderError` of kind `blocked`, never
-retried; the page kind, worded distinctly, goes to `last_error`), the
+retried; the page kind, worded distinctly, goes to `last_error`, followed by
+the rule that stopped the page, which the worker names on its answer as a
+bounded token such as `date-grid-buttons`, `search-form:mismatch`,
+`currency` or `grid:first-view:price`, never page text), the
 provider is disabled for the rest of that execution (including a manual
 resume of it), and the cool-down survives a worker restart. A page that does
 not settle within the page timeout is an `error` (`parse`, detail
@@ -3752,6 +3771,25 @@ as specified in §5.3; no secrets, no full URLs.
 ---
 
 ## 17. Changelog
+
+### Revision 52: a stopped page names its rule (2026-10-27)
+
+Revision 50 is WP19's and 51 is held for the open airports pull request, so this one is 52. The operator's
+grid runs of 2026-10-26 stopped twice, at 20:51 and 21:35, as `blocked:unrecognised`, after 49 pages read well, and each
+started the 1 h cool-down. `last_error` held only the page kind's words: the worker logs the rule that fired at debug,
+which its service does not keep, so nothing said which check refused the page. The two pages recorded afterwards
+(`results/2026-10-27/1` and `grid/2026-10-27/1`, `darwin-arm64`) read cleanly: the results page classifies as
+`results`, and the grid page's five views are read whole through the provider's path. Their Cheapest tab names carry an
+information pop-up's text about budget picks, but every recording since 2026-10-18 does too, and the grid recording's
+`classification` of `cheapest-tab-count` is the reading taken with the dialog open, which §2 "The classifier inside
+the dialog" already sets aside; neither is the cause, which these recordings cannot show. Now a blocked answer names
+its rule (`rule`, a bounded token the protocol checks), and the adapter puts it in `last_error` after the page kind's
+words (§2 "Navigation and the stops"), so the next such stop says which check refused the page; a grid page's refused
+first view names its failing check (`grid:first-view:selected-cell`, `:range` or `:price`). A `--grid` recording keeps
+the Best view's own classification and Cheapest tab counts (`resultsPage`) and each view's counts. The results
+recording also showed a stopover sentence the option grammar did not read (a stopover that changes airports, "…
+stopover in <city>. Transfer here from <airport> to <airport>."), so that option was counted unparsed; the grammar now
+reads it (§2). No other design rule changes.
 
 ### Revision 50: the Dates view's review (2026-10-26)
 
