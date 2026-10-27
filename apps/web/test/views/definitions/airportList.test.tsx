@@ -23,29 +23,28 @@ const row = (iata: string, name: string, city: string, metro: string | null): Ro
   iata: asIata(iata),
   name,
   city,
-  country: city === 'Londrina' ? 'BR' : city === 'New York' || city === 'Newark' ? 'US' : 'GB',
+  country: city === 'New York' || city === 'Newark' ? 'US' : 'GB',
   tz: 'Europe/London',
   metro,
 });
 const LGW = row('LGW', 'London Gatwick Airport', 'London', 'LON');
 const LHR = row('LHR', 'London Heathrow Airport', 'London', 'LON');
-const SEN = row('SEN', 'Southend Airport', 'Southend', 'LON');
-const LDB = row('LDB', 'Governador Jose Richa Airport', 'Londrina', null);
+const QQS = row('QQS', 'Synthetic Outer Airport', 'Outerby', 'LON');
+const QQD = row('QQD', 'Synthetic Field Airport', 'Londwell', null);
 const JFK = row('JFK', 'John F Kennedy International Airport', 'New York', 'NYC');
 const EWR = row('EWR', 'Newark Liberty International Airport', 'Newark', 'NYC');
-const LGA = row('LGA', 'La Guardia Airport', 'New York', 'NYC');
-const NYS = row('NYS', 'New York Skyports Seaplane Base', 'New York', null);
-const HAT = row('HAT', 'Heathlands Airport', 'Heathlands', null);
+const QQN = row('QQN', 'Synthetic Seaplane Base', 'New York', null);
+const QQH = row('QQH', 'Heathfield Airport', 'Heathfield', null);
 const ANSWERS: Record<string, Row[]> = {
-  lond: [LGW, LHR, SEN, LDB],
-  LON: [LGW, LHR, SEN],
+  lond: [LGW, LHR, QQS, QQD],
+  LON: [LGW, LHR, QQS],
   // as the search answers: a matched metro comes whole, the matching airport first in its block
-  heathrow: [LHR, LGW, SEN],
-  heath: [LHR, LGW, SEN, HAT],
-  'new y': [JFK, LGA, EWR, NYS],
+  heathrow: [LHR, LGW, QQS],
+  heath: [LHR, LGW, QQS, QQH],
+  'new y': [JFK, EWR, QQN],
   LHR: [LHR],
   LGW: [LGW],
-  SEN: [SEN],
+  QQS: [QQS],
 };
 
 /** Every q the airports route was asked, answered from ANSWERS ([] for any other text, 500 for "boom"). */
@@ -117,11 +116,11 @@ describe('airport picker: a WAI-ARIA combobox over GET /api/airports?q= (plan a 
     await vi.waitFor(() => expect(screen.getByRole('listbox')).toBeVisible());
     expect(asked).toEqual(['lond']);
     expect(optionNames()).toEqual([
-      'London, all airports (LGW, LHR, SEN)',
+      'London, all airports (LGW, LHR, QQS)',
       'London Gatwick (LGW) · London, GB',
       'London Heathrow (LHR) · London, GB',
-      'Southend (SEN) · Southend, GB',
-      'Governador Jose Richa (LDB) · Londrina, BR',
+      'Synthetic Outer (QQS) · Outerby, GB',
+      'Synthetic Field (QQD) · Londwell, GB',
     ]);
     expect(input()).toHaveAttribute('aria-expanded', 'true');
     expect(input()).toHaveAttribute('aria-controls', screen.getByRole('listbox').id);
@@ -133,12 +132,12 @@ describe('airport picker: a WAI-ARIA combobox over GET /api/airports?q= (plan a 
     await typeAndAnswer(user, 'lond');
     const active = () => document.getElementById(input().getAttribute('aria-activedescendant') ?? '');
     // automatic selection: the first option is highlighted until the operator moves
-    expect(active()).toHaveAttribute('aria-label', 'London, all airports (LGW, LHR, SEN)');
+    expect(active()).toHaveAttribute('aria-label', 'London, all airports (LGW, LHR, QQS)');
     expect(active()).toHaveAttribute('aria-selected', 'true');
     await user.keyboard('{ArrowDown}{ArrowDown}');
     expect(active()).toHaveAttribute('aria-label', 'London Heathrow (LHR) · London, GB');
     await user.keyboard('{ArrowUp}{ArrowUp}{ArrowUp}');
-    expect(active()).toHaveAttribute('aria-label', 'Governador Jose Richa (LDB) · Londrina, BR');
+    expect(active()).toHaveAttribute('aria-label', 'Synthetic Field (QQD) · Londwell, GB');
     await user.keyboard('{ArrowDown}{ArrowDown}{ArrowDown}{Enter}');
     expect(chipCodes()).toEqual(['LHR']);
     expect(input()).toHaveValue('');
@@ -167,11 +166,10 @@ describe('airport picker: a WAI-ARIA combobox over GET /api/airports?q= (plan a 
     const { user } = renderOnFakeClock();
     await typeAndAnswer(user, 'new y');
     expect(optionNames()).toEqual([
-      'New York, all airports (JFK, LGA, EWR)',
+      'New York, all airports (JFK, EWR)',
       'John F Kennedy (JFK) · New York, US',
-      'La Guardia (LGA) · New York, US',
       'Newark Liberty (EWR) · Newark, US',
-      'New York Skyports Seaplane Base (NYS) · New York, US',
+      'Synthetic Seaplane Base (QQN) · New York, US',
     ]);
     // the text names the city, so the whole metro is highlighted
     expect(input()).toHaveAttribute('aria-activedescendant', 'origins-option-0');
@@ -181,7 +179,7 @@ describe('airport picker: a WAI-ARIA combobox over GET /api/airports?q= (plan a 
     airportsRoute();
     const { user } = renderOnFakeClock();
     await typeAndAnswer(user, 'heath');
-    expect(optionNames()[0]).toBe('London, all airports (LHR, LGW, SEN)');
+    expect(optionNames()[0]).toBe('London, all airports (LHR, LGW, QQS)');
     expect(input()).toHaveAttribute('aria-activedescendant', 'origins-option-1');
     await user.keyboard('{Enter}');
     expect(chipCodes()).toEqual(['LHR']);
@@ -203,9 +201,9 @@ describe('airport picker: a WAI-ARIA combobox over GET /api/airports?q= (plan a 
     const { user } = renderOnFakeClock();
     await typeAndAnswer(user, 'lond');
     await user.keyboard('{Enter}');
-    await vi.waitFor(() => expect(chipCodes()).toEqual(['LGW', 'LHR', 'SEN']));
+    await vi.waitFor(() => expect(chipCodes()).toEqual(['LGW', 'LHR', 'QQS']));
     expect(asked).toContain('LON');
-    expect(screen.getByRole('status')).toHaveTextContent('Added London, all airports (LGW, LHR, SEN).');
+    expect(screen.getByRole('status')).toHaveTextContent('Added London, all airports (LGW, LHR, QQS).');
   });
 
   it('a click or tap picks an option and leaves focus in the box for the next airport', async () => {
@@ -213,10 +211,10 @@ describe('airport picker: a WAI-ARIA combobox over GET /api/airports?q= (plan a 
     const { user } = renderOnFakeClock();
     await typeAndAnswer(user, 'heathrow');
     expect(optionNames()).toEqual([
-      'London, all airports (LHR, LGW, SEN)',
+      'London, all airports (LHR, LGW, QQS)',
       'London Heathrow (LHR) · London, GB',
       'London Gatwick (LGW) · London, GB',
-      'Southend (SEN) · Southend, GB',
+      'Synthetic Outer (QQS) · Outerby, GB',
     ]);
     await user.click(screen.getByRole('option', { name: 'London Heathrow (LHR) · London, GB' }));
     expect(chipCodes()).toEqual(['LHR']);
@@ -317,17 +315,17 @@ describe('airport wording', () => {
   it('drops a trailing "Airport" and keeps the rest of the name, the city included', () => {
     expect(shortAirportName('London Heathrow Airport')).toBe('London Heathrow');
     expect(shortAirportName('Newark Liberty International Airport')).toBe('Newark Liberty');
-    expect(shortAirportName('Skyports Seaplane Base')).toBe('Skyports Seaplane Base');
+    expect(shortAirportName('Synthetic Seaplane Base')).toBe('Synthetic Seaplane Base');
     expect(shortAirportName('Airport')).toBe('Airport');
   });
 
   it('offers a metro only when two or more answers share it, named by the city most of them give', () => {
-    expect(airportChoices([LHR, LDB]).map((c) => c.kind)).toEqual(['airport', 'airport']);
-    expect(airportChoices([EWR, JFK, row('LGA', 'La Guardia Airport', 'New York', 'NYC')])[0]).toEqual({
+    expect(airportChoices([LHR, QQD]).map((c) => c.kind)).toEqual(['airport', 'airport']);
+    expect(airportChoices([EWR, JFK])[0]).toEqual({
       kind: 'metro',
       metro: 'NYC',
       city: 'New York',
-      codes: ['EWR', 'JFK', 'LGA'],
+      codes: ['EWR', 'JFK'],
     });
   });
 

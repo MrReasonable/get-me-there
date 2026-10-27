@@ -173,22 +173,22 @@ describe('search by OurAirports facts', () => {
     const r = new AirportsRepo(freshDb());
     r.upsertAll({
       version: 'synthetic',
-      metros: { LON: ['LHR', 'LGW', 'SEN'], PAR: ['BVA', 'CDG', 'LBG', 'ORY'] },
+      // invented airports (QQ*) beside the worked example's: QAR is an invented metro
+      metros: { LON: ['LHR', 'LGW', 'QQS'], QAR: ['QQC', 'QQL', 'QQO', 'QQV'] },
       airports: [
-        // as in the vendored data, Heathlands names no city
-        row('HAT', 'Heathlands Airport', '', 'small', true),
+        row('QQH', 'Heathfield Airport', '', 'small', true),
         row('LHR', 'London Heathrow Airport', 'London', 'large', true),
         row('LGW', 'London Gatwick Airport', 'London', 'large', true),
-        row('SEN', 'Southend Airport', 'Southend', 'medium', true),
-        row('NHT', 'RAF Northolt', 'London', 'medium', false),
-        row('NYS', 'New York Skyports Seaplane Base', 'New York', 'other', false),
-        row('BVA', 'Paris Beauvais Tille Airport', 'Beauvais/Tille', 'large', true),
-        row('CDG', 'Charles de Gaulle International Airport', 'Paris', 'large', true),
-        row('ORY', 'Paris-Orly Airport', 'Paris', 'large', true),
-        row('LBG', 'Paris-Le Bourget Airport', 'Paris', 'large', false),
-        row('PRX', 'Cox Field', 'Paris', 'small', true),
-        row('PAZ', 'Parma Field', 'Parma', 'medium', true),
-        row('PAU', 'Paradise Field', 'Paradise', null, null),
+        row('QQS', 'Synthetic Outer Airport', 'Outerby', 'medium', true),
+        row('QQR', 'Synthetic Air Base', 'London', 'medium', false),
+        row('QQN', 'Synthetic Seaplane Base', 'New York', 'other', false),
+        row('QQV', 'Qarville Valley Airport', 'Vallet', 'large', true),
+        row('QQC', 'Qarville Central Airport', 'Qarville', 'large', true),
+        row('QQO', 'Qarville South Airport', 'Qarville', 'large', true),
+        row('QQL', 'Qarville Business Airport', 'Qarville', 'large', false),
+        row('QQP', 'Cox Field', 'Qarville', 'small', true),
+        row('QQZ', 'Qarby Field', 'Qarby', 'medium', true),
+        row('QQU', 'Qarvista Field', 'Qarvista', null, null),
       ],
     });
     return r;
@@ -198,24 +198,24 @@ describe('search by OurAirports facts', () => {
       .search(q, limit)
       .map((a) => a.iata);
 
-  it('"heath" puts Heathrow (large, scheduled) before Heathlands (small)', () => {
-    expect(codes('heath')).toEqual(['LHR', 'LGW', 'SEN', 'HAT']);
+  it('a large scheduled airport leads its band: "heath" puts Heathrow before a small airfield whose name starts so', () => {
+    expect(codes('heath')).toEqual(['LHR', 'LGW', 'QQS', 'QQH']);
   });
 
-  it('"par" puts Paris\'s large airports first, Beauvais after them; medium before unknown in the next band', () => {
-    expect(codes('par')).toEqual(['CDG', 'ORY', 'BVA', 'PAZ', 'PAU', 'PRX']);
+  it("a metro code leads with its city's large airports, then a member named elsewhere; then medium before the rest", () => {
+    expect(codes('qar')).toEqual(['QQC', 'QQO', 'QQV', 'QQZ', 'QQP', 'QQU']);
   });
 
   it('hides airports with no scheduled service (an air base, a seaplane base), unless the exact code is typed', () => {
-    expect(codes('northolt')).toEqual([]);
-    expect(codes('lond')).not.toContain('NHT');
+    expect(codes('air base')).toEqual([]);
+    expect(codes('lond')).not.toContain('QQR');
     expect(codes('seaplane')).toEqual([]);
-    expect(codes('NHT')).toEqual(['NHT']);
-    expect(codes('lbg')).toEqual(['LBG', 'BVA', 'CDG', 'ORY']);
+    expect(codes('QQR')).toEqual(['QQR']);
+    expect(codes('qql')).toEqual(['QQL', 'QQC', 'QQO', 'QQV']);
   });
 
   it('never cuts a metro short: the limit counts it as one block', () => {
-    expect(codes('lond', 2)).toEqual(['LGW', 'LHR', 'SEN']);
-    expect(codes('heath', 1)).toEqual(['LHR', 'LGW', 'SEN']);
+    expect(codes('lond', 2)).toEqual(['LGW', 'LHR', 'QQS']);
+    expect(codes('heath', 1)).toEqual(['LHR', 'LGW', 'QQS']);
   });
 });

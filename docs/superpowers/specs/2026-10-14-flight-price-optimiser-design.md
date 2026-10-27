@@ -3806,9 +3806,9 @@ recorded tab name reads the same price as before. No other design rule changes.
 ### Revision 51: airport search ranked by OurAirports' type and scheduled service (2026-10-27)
 
 Ian ruled 2026-10-27: OurAirports type and scheduled-service data for ranking and filtering. The operator's checks of
-`GET /airports` found "heath" listing Heathlands before Heathrow, "par" listing Beauvais first and "new y" missing
-Newark, whose city is Newark, not New York; the airports table had no size or service field to rank by. §7 now adds
-`kind` (large, medium, small or other, from OurAirports' `type`) and `scheduled` (from `scheduled_service`) to
+`GET /airports` found a name fragment of Heathrow listing a small airfield first, a city's outlying metro airport
+leading that city's main ones, and "new y" missing Newark, whose city is Newark, not New York; the airports table had
+no size or service field to rank by. §7 now adds `kind` (large, medium, small or other, from OurAirports' `type`) and `scheduled` (from `scheduled_service`) to
 `airports`, from OurAirports' public-domain `airports.csv`, reduced to those two facts for the vendored dataset's IATA
 codes and vendored with its download date and SHA-256 (migration 0010; NULL for a code OurAirports does not list).
 §10 `GET /airports` ranks inside its match bands by them (large with scheduled service, then medium with scheduled

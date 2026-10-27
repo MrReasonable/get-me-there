@@ -27,17 +27,15 @@ const LHR = row('LHR', 'London Heathrow Airport', 'London', 'GB', 'LON');
 const LGW = row('LGW', 'London Gatwick Airport', 'London', 'GB', 'LON');
 const JFK = row('JFK', 'John F Kennedy International Airport', 'New York', 'US', 'NYC');
 const EWR = row('EWR', 'Newark Liberty International Airport', 'Newark', 'US', 'NYC');
-const LGA = row('LGA', 'La Guardia Airport', 'New York', 'US', 'NYC');
 const ANSWERS: Record<string, Row[]> = {
   lond: [LGW, LHR],
   LON: [LGW, LHR],
-  'new y': [EWR, JFK, LGA],
-  NYC: [EWR, JFK, LGA],
+  'new y': [JFK, EWR],
+  NYC: [EWR, JFK],
   LHR: [LHR],
   LGW: [LGW],
   JFK: [JFK],
   EWR: [EWR],
-  LGA: [LGA],
 };
 
 afterEach(() => {
@@ -111,7 +109,7 @@ describe('Plan a search (the short form)', () => {
     await pickPlace(user, 'From', 'lond');
     await vi.waitFor(() => expect(chipCodes('From')).toEqual(['LGW', 'LHR']));
     await pickPlace(user, 'To', 'new y');
-    await vi.waitFor(() => expect(chipCodes('To')).toEqual(['EWR', 'JFK', 'LGA']));
+    await vi.waitFor(() => expect(chipCodes('To')).toEqual(['EWR', 'JFK']));
     await user.click(screen.getByRole('button', { name: 'Next 9 months' }));
     await user.clear(screen.getByLabelText(PLAN_COPY.shortest));
     await user.type(screen.getByLabelText(PLAN_COPY.shortest), '7');
@@ -129,7 +127,7 @@ describe('Plan a search (the short form)', () => {
     const expected = {
       name: 'London → New York',
       origins: ['LGW', 'LHR'],
-      destinations: ['EWR', 'JFK', 'LGA'],
+      destinations: ['EWR', 'JFK'],
       window: { kind: 'relative', startOffsetDays: 7, lengthDays: 273 },
       minNights: 7,
       maxNights: 14,
