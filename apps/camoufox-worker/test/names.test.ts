@@ -104,6 +104,63 @@ describe('parseOptionName (dated grammar)', () => {
     );
     expect(parseOptionName(two)).toMatchObject({ stops: 2, durationMinutes: 760 });
   });
+  // why: observed 2026-10-27 (results/2026-10-27/1): a stopover that changes airports names its city only, then the
+  // transfer between the two airports, as its own sentence; the airports carry no full stop, as at every stopover
+  const TRANSFER =
+    'Stopover (1 of 1) is a 3 hrs 5 min stopover in Example City. Transfer here from Example North Airport to Example South Airport.';
+  const AT = 'Stopover (1 of 1) is a 1 hr 20 min stopover at Humberto Delgado Airport in Lisbon.';
+  it('reads a stopover that changes airports in its city', () => {
+    expect(parseOptionName(ONE_STOP.replace(AT, TRANSFER))).toMatchObject({
+      amountMinor: 47800,
+      stops: 1,
+      durationMinutes: 760,
+    });
+  });
+  it('reads a transfer stopover beside a stopover at one airport, either order', () => {
+    const second = 'Stopover (2 of 2) is a 55 min overnight stopover at Example Airport in Example City.';
+    const firstTransfer = TRANSFER.replace('(1 of 1)', '(1 of 2)');
+    for (const tail of [
+      `${firstTransfer} ${second}`,
+      `${AT.replace('(1 of 1)', '(1 of 2)')} ${TRANSFER.replace('(1 of 1)', '(2 of 2)')}`,
+    ])
+      expect(
+        parseOptionName(ONE_STOP.replace('1 stop flight', '2 stops flight').replace(AT, tail)),
+      ).toMatchObject({
+        stops: 2,
+      });
+  });
+  it.each([
+    [
+      'a transfer sentence with no stopover before it',
+      ONE_STOP.replace(AT, 'Transfer here from Example North Airport to Example South Airport.'),
+    ],
+    [
+      'a stopover in a city with no transfer after it',
+      ONE_STOP.replace(AT, 'Stopover (1 of 1) is a 3 hrs stopover in Example City.'),
+    ],
+    [
+      'a transfer with no destination airport',
+      ONE_STOP.replace(
+        AT,
+        'Stopover (1 of 1) is a 3 hrs stopover in Example City. Transfer here from Example North Airport.',
+      ),
+    ],
+    ['text appended to the transfer', ONE_STOP.replace(AT, `${TRANSFER} Bring your bags.`)],
+    // why: CodeRabbit on PR #33: a field of spaces only is no airport or city; such a name is unparsed, never read
+    [
+      'a transfer to a blank airport',
+      ONE_STOP.replace(AT, TRANSFER.replace('to Example South Airport.', 'to  .')),
+    ],
+    [
+      'a transfer from a blank airport',
+      ONE_STOP.replace(AT, TRANSFER.replace('from Example North Airport', 'from  ')),
+    ],
+    ['a stopover in a blank city', ONE_STOP.replace(AT, TRANSFER.replace('in Example City.', 'in  .'))],
+    ['a stopover at a blank airport', ONE_STOP.replace('at Humberto Delgado Airport in', 'at   in')],
+    ['a stopover at an airport in a blank city', ONE_STOP.replace('in Lisbon.', 'in  .')],
+  ])('refuses %s', (_n, name) => {
+    expect(parseOptionName(name)).toBeNull();
+  });
   it.each([
     [
       'an unknown appended sentence',

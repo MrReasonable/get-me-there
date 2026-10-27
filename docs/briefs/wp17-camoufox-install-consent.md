@@ -543,6 +543,20 @@ headless, from the operator's own address, with the build `152.0.4-beta.28` of e
   loopback, `CAMOUFOX_MODE=grid`, `CAMOUFOX_EXECUTION_PAGE_CAP=1`): a run of a nine-cell definition that one grid view
   covers priced 9 of 9 cells on each entry. (On `linux-arm64` a first try through `pnpm gmt smoke` loaded its grid page
   with 28 scrolls, but the smoke's request outlasted the CLI's wait and its answer was lost; that page counted.)
+- [x] **A stopped page names its rule (2026-10-27, spec rev 52; no page loaded).** The operator's grid runs of 2026-10-26
+  stopped twice as `blocked:unrecognised`, and `last_error` held only the page kind's words, since the worker logs its
+  rule at debug only. The two pages recorded afterwards (`results/2026-10-27/1`, `grid/2026-10-27/1`, `darwin-arm64`)
+  read cleanly; the Cheapest tab's budget-picks pop-up text and the grid recording's `cheapest-tab-count` (read with the
+  dialog open) are in every recording since 2026-10-18, so neither is the cause. Rule: a blocked answer carries `rule`
+  (`workerRuleSchema` in `protocol.ts`, a bounded token), set on every stop the session makes (`gridPage.ts` names a
+  refused first view's check, `grid:first-view:price`), and the adapter's `answer.ts` puts it in `last_error`; the
+  recorder keeps the Best view's classification and Cheapest tab counts (`resultsPage`) and each view's counts. The
+  results recording's transfer stopover ("… stopover in <city>. Transfer here from <airport> to <airport>.") is read by
+  the option grammar (`names.ts`, re-dated `2026-10-27-transfer`), and the tab price is read only right after
+  "Cheapest from" (`cheapestTabPrice` in `selectors.ts`, `2026-10-27-tab-price`; `cheapestTabPriceMinor` in
+  `classify.ts`), so a digit in the pop-up text is never a price. Tests: synthetic London → New York facts for the
+  pop-up tab name, the dialog-open reading, two Cheapest tabs and no tab with no results; every stop's rule through the
+  session; the rule into `last_error` through the adapter and the engine; the recorded suites over every recording.
 
 The session record:
 

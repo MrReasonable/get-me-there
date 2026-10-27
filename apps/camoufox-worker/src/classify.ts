@@ -64,6 +64,17 @@ export type ClassifyRule =
   | 'landing'
   | 'not-landing';
 
+/**
+ * The tab price in pence, read from the start of the Cheapest tab's name (`S.results.cheapestTabPrice`), or null when
+ * the name states none there. The name also carries an information pop-up's text, so a price or digit later in it is
+ * never the tab's (CodeRabbit on PR #33).
+ */
+export function cheapestTabPriceMinor(name: string, S: Selectors = SELECTORS): number | null {
+  const m = S.results.cheapestTabPrice.exec(name);
+  const digits = m?.[1] ?? m?.[2];
+  return digits === undefined ? null : Number(digits.replaceAll(',', '')) * 100;
+}
+
 export function classifyPage(f: PageFacts, S: Selectors = SELECTORS, view: View = 'best'): PageKind {
   return classifyPageWithRule(f, S, view).kind;
 }
@@ -93,7 +104,7 @@ export function classifyPageWithRule(
   if (view === 'best' && f.dateGridButtons !== 1) return blocked('unrecognised', 'date-grid-buttons');
   if (view === 'cheapest' && !tabs.every((x) => x.selected === true))
     return blocked('unrecognised', 'cheapest-tab-not-selected');
-  if (view === 'cheapest' && !tabs.every((x) => /\d/.test(x.name)))
+  if (view === 'cheapest' && !tabs.every((x) => cheapestTabPriceMinor(x.name, S) !== null))
     return blocked('unrecognised', 'cheapest-tab-unpriced');
   if (f.resultLinks <= 0) return blocked('unrecognised', 'no-result-links');
   return { kind: { kind: 'results' }, rule: 'results' };

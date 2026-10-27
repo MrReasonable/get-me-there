@@ -7,9 +7,10 @@
  */
 import type { BlockedPage, IsoDate, Logger } from '@gmt/core';
 import type { PageBudget } from './budget.js';
+import type { ClassifyRule, PageFacts } from './classify.js';
 import { CheapestStepFailed, type Driver, type PageLike, type StepOptions } from './driver.js';
 import { exploreGraph, stripSnapshotQueries } from './graph.js';
-import { exploreGrid } from './gridRecord.js';
+import { exploreGrid, tabCounts } from './gridRecord.js';
 import type { GuardState } from './guard.js';
 import type { View } from './ready.js';
 import { type GridDirection, RecordingRefused } from './recordArgs.js';
@@ -55,6 +56,8 @@ export interface DialogPage {
   stepMs: Record<string, number>;
   clicked: string[];
   stop(p: BlockedPage, rule: string, facts?: StopFacts | null): Promise<Outcome>;
+  /** The settled results page the dialog opens from: its classification and facts, read before anything is clicked. */
+  settled: { kind: { kind: string }; rule: ClassifyRule; facts: { page: PageFacts } };
   classifyAfterFailedStep(cur: Deadline, steps: StepOptions, view: View): Promise<Outcome | null>;
 }
 
@@ -103,6 +106,12 @@ export async function recordGrid(
         views: g.views.map((v) => ({ ...v, snapshot: stripSnapshotQueries(v.snapshot) })),
         moves: g.moves,
         clicked: c.clicked,
+        // why: the grid runs of 2026-10-26: `classification` below is read with the dialog open, where the results
+        // page's rules do not apply (spec §2); the results page's own decision and tab counts are kept beside it
+        resultsPage: {
+          classification: { kind: c.settled.kind.kind, rule: c.settled.rule },
+          cheapestTabs: tabCounts(c.settled.facts.page),
+        },
         classification: g.classification,
       },
       noFlights: false,

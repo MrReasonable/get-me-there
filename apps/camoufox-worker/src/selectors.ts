@@ -18,7 +18,7 @@ import { CAMOUFOX_BUILDS, FLAG_NAMES, type FlagName, flagsFor, type OsArch } fro
 
 export { FLAG_NAMES, type FlagName };
 
-export const SELECTORS_VERSION = '2026-10-25-landing';
+export const SELECTORS_VERSION = '2026-10-27-tab-price';
 
 /**
  * The module's default flags: the operator's Mac (darwin-arm64) on its pinned build, the 2026-10-18 recordings' values
@@ -78,6 +78,11 @@ export interface Selectors {
   results: {
     /** The Cheapest tab, whose name carries the tab price once settled. */
     cheapestTab: RegExp;
+    /**
+     * The tab price in the Cheapest tab's name: right after "Cheapest from" (and the hidden "Fetching results" label),
+     * as "£1,204" (group 1) or "451 British pounds" (group 2); any later price in the name is never read.
+     */
+    cheapestTabPrice: RegExp;
     dateGridButton: string;
     /** A result link's own accessible name (the result-name grammar then reads it whole). */
     resultLink: RegExp;
@@ -148,6 +153,11 @@ export const SELECTORS: Selectors = {
   landing: { heading: /^Flights$/ },
   results: {
     cheapestTab: /^Cheapest\b/,
+    // why: observed 2026-10-18 to 2026-10-27 (every results, cheapest and grid recording): the name runs on into an
+    // information pop-up's text after the price ("Cheapestfrom Fetching results £579Close dialogueLooking for the lowest
+    // fares? …"), so only the price at the name's start counts (CodeRabbit on PR #33: a digit in the pop-up is no price)
+    cheapestTabPrice:
+      /^Cheapest\s*from\s*(?:Fetching results\s*)?(?:£([0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)(?![0-9.,])|([0-9]{1,3}(?:,[0-9]{3})+|[0-9]+) British pounds)/,
     dateGridButton: 'Date grid',
     // why: observed 2026-10-18 (feasibility snapshot; recording run 3): the result lists carry no accessible name (a
     // level-3 heading "Top departing flights" / "Other departing flights" precedes each), so results are found by the

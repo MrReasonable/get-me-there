@@ -97,7 +97,7 @@ export async function readGrid(
     return {
       answer: blockedPlaceholderOf(r.page),
       stop: r.page,
-      rule: `grid:${r.notes.at(-1) ?? r.page}`,
+      rule: r.rule,
     };
   return { answer: grid(r.views, r.ended, r.notes, pointOfSaleOf(list.locationName)), stop: null };
 }

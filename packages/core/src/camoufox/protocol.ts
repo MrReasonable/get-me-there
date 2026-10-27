@@ -37,6 +37,16 @@ export const BLOCKED_PAGES = [
 export const blockedPageSchema = z.enum(BLOCKED_PAGES);
 export type BlockedPage = z.infer<typeof blockedPageSchema>;
 
+/**
+ * The rule that stopped a page (spec §2 "Navigation and the stops"): the classifier's rule (`cheapest-tab-count`), a
+ * check's (`search-form:mismatch`, `currency`) or a grid step's (`grid:first-view:price`). A bounded token of lower-case
+ * words joined by `:`, so it can never carry page text, a name or a URL; the app shows it in `last_error`.
+ */
+export const workerRuleSchema = z
+  .string()
+  .max(80)
+  .regex(/^[a-z][a-z0-9-]*(?::[a-z0-9-]+)*$/);
+
 // why: names from the airports dataset; bounded so a body stays well under the worker's 4 KiB limit.
 // why: fix round 1 (prov M2): at least one name, or no option could ever match and every page would read as unrecognised
 const airportNameList = z.array(z.string().min(1).max(120)).min(1).max(8);
@@ -217,6 +227,9 @@ export const workerAnswerSchema = z.discriminatedUnion('kind', [
     page: blockedPageSchema,
     cooldownUntil: isoDateTimeSchema,
     scrolls: count.exactOptional(),
+    // why: the grid runs of 2026-10-26 stopped as unrecognised with nothing to say why; optional, so an app reads a
+    // worker built before it
+    rule: workerRuleSchema.exactOptional(),
   }),
   z.strictObject({
     kind: z.literal('cooling-down'),

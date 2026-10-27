@@ -1730,6 +1730,38 @@ describe('record --grid', () => {
     ]);
     expect(cooldownOf(t)).toBeNull();
   });
+  // why: every grid recording since 2026-10-18 stored `classification: blocked/cheapest-tab-count`, read with the
+  // dialog open (spec §2 "The classifier inside the dialog"), and the grid runs of 2026-10-26 were first blamed on it.
+  // A recording now also keeps the results page's own decision, made before anything is clicked, and the Cheapest tab
+  // counts (all, and in the tablist) both there and in each view, so a later recording shows them
+  it('records the results page’s classification before the dialog, and the Cheapest tab counts there and in each view', async () => {
+    const { t, deps } = gridRun();
+    expect(await record(t.ctx([...G, '--moves', 'right']), cfg, deps)).toBe(0);
+    const rec = recOf(t);
+    expect(rec.resultsPage).toEqual({
+      classification: { kind: 'results', rule: 'results' },
+      cheapestTabs: { total: 1, inTablist: 1 },
+    });
+    // why: the synthetic dialog page, as the recordings show it, holds no results tablist
+    expect(rec.views.map((v: { cheapestTabs: unknown }) => v.cheapestTabs)).toEqual([
+      { total: 0, inTablist: 0 },
+      { total: 0, inTablist: 0 },
+    ]);
+    expect(rec.classification).toEqual({ kind: 'blocked', rule: 'cheapest-tab-count' });
+  });
+  // why: CodeRabbit on PR #33: the two counts are kept apart, so a tab outside any tablist counts in the total only
+  it('a Cheapest tab outside a tablist in a view counts in its total only', async () => {
+    const { t, deps } = gridRun({
+      view: (d, r) => [
+        n('document', '', [...formNodes(), gridTree({ depart: d, ret: r }), n('tab', 'Cheapest from £451')]),
+      ],
+    });
+    expect(await record(t.ctx([...G, '--moves', 'right']), cfg, deps)).toBe(0);
+    expect(recOf(t).views.map((v: { cheapestTabs: unknown }) => v.cheapestTabs)).toEqual([
+      { total: 1, inTablist: 0 },
+      { total: 1, inTablist: 0 },
+    ]);
+  });
   // why: the recordings of 2026-10-18: one scroll moves one day, and the page rotates its elements after a scroll
   it('measures a one-day step from rotated lines', async () => {
     let n0 = 0;

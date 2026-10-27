@@ -1,6 +1,14 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ANSWER_STATUS, asIata, asIsoDate, flagsFor, type PageRequest } from '@gmt/core';
+import {
+  ANSWER_STATUS,
+  asIata,
+  asIsoDate,
+  flagsFor,
+  type PageRequest,
+  workerAnswerSchema,
+  workerRuleSchema,
+} from '@gmt/core';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ACCOUNT_COOKIE_NAMES } from '../src/accountCookies.js';
 import { CooldownStore } from '../src/cooldown.js';
@@ -247,6 +255,7 @@ describe('PageSession (spec §2; brief Task 14.4)', () => {
         kind: 'blocked',
         page: 'consent-unhandled',
         cooldownUntil: '2026-10-20T05:00:02.000Z',
+        rule: 'socs-read-back',
       });
       expect(r.googleContacted).toBe(true);
       expect(existsSync(t.profileDir)).toBe(false);
@@ -272,7 +281,12 @@ describe('PageSession (spec §2; brief Task 14.4)', () => {
       },
     });
     const r = await t.session.page(REQ);
-    expect(r.answer).toEqual({ kind: 'blocked', page: 'captcha', cooldownUntil: '2026-10-20T05:00:00.000Z' });
+    expect(r.answer).toEqual({
+      kind: 'blocked',
+      page: 'captcha',
+      cooldownUntil: '2026-10-20T05:00:00.000Z',
+      rule: 'captcha-frame',
+    });
     expect(t.cooldown.active()?.cause).toBe('captcha');
     expect(existsSync(t.profileDir)).toBe(false);
   });
@@ -282,6 +296,7 @@ describe('PageSession (spec §2; brief Task 14.4)', () => {
       kind: 'blocked',
       page: 'unrecognised',
       cooldownUntil: '2026-10-20T05:00:02.000Z',
+      rule: 'search-form:mismatch',
     });
     expect(t.cooldown.active()?.cause).toBe('unrecognised');
   });
@@ -340,6 +355,7 @@ describe('PageSession (spec §2; brief Task 14.4)', () => {
       kind: 'blocked',
       page: 'unrecognised',
       cooldownUntil: '2026-10-18T06:00:02.000Z',
+      rule: 'search-form:mismatch',
     });
   });
   it('an absent form → unrecognised', async () => {
@@ -759,7 +775,12 @@ describe('PageSession (spec §2; brief Task 14.4)', () => {
       },
     });
     const r = await t.session.page(REQ);
-    expect(r.answer).toEqual({ kind: 'blocked', page: 'captcha', cooldownUntil: '2026-10-20T05:00:05.000Z' });
+    expect(r.answer).toEqual({
+      kind: 'blocked',
+      page: 'captcha',
+      cooldownUntil: '2026-10-20T05:00:05.000Z',
+      rule: 'captcha-frame',
+    });
     expect(t.cooldown.active()?.cause).toBe('captcha');
     expect(ctx0(t).closed).toBe(1);
   });
@@ -970,5 +991,70 @@ describe('PageSession (spec §2; brief Task 14.4)', () => {
       answer: { kind: 'cells', cell: { status: 'price', tabMinor: 44300 } },
     });
     expect(t.cooldown.active()).toBeNull();
+  });
+});
+
+// why: the grid runs of 2026-10-26 stopped twice as `blocked:unrecognised` and the app kept only that: the worker logged
+// its rule at debug, which the service's log level drops. Every stop now names its rule on the answer, a token the
+// protocol bounds, so the app can put it in last_error.
+describe('every stop names the rule that made it', () => {
+  const currency = (): FakeNode => {
+    const tree = resultsTree();
+    tree.children = (tree.children ?? []).map((c) =>
+      c.name === 'Currency GBP' ? n('button', 'Currency USD') : c,
+    );
+    return tree;
+  };
+  const twoDateGrids = (): FakeNode => resultsTree({ extra: [n('button', 'Date grid')] });
+  const captcha = (c: FakeContext) => {
+    c.navigations = [
+      {
+        hops: [URL0, LANDED],
+        tree: resultsTree(),
+        frames: ['https://www.google.com/recaptcha/api2/anchor?k=x'],
+      },
+    ];
+  };
+  it.each<[string, Parameters<typeof setup>[0], string, string]>([
+    [
+      'a form on other dates',
+      { tree: resultsTree({ form: formNodes({ dep: 'Fri, 6 Nov' }) }) },
+      'unrecognised',
+      'search-form:mismatch',
+    ],
+    ['no search form', { tree: resultsTree({ form: [] }) }, 'unrecognised', 'search-form:absent'],
+    ['another currency', { tree: currency() }, 'unrecognised', 'currency'],
+    ['two Date grid buttons', { tree: twoDateGrids() }, 'unrecognised', 'date-grid-buttons'],
+    ['a reCAPTCHA frame', { shape: captcha }, 'captcha', 'captcha-frame'],
+    [
+      'an off-allowlist navigation',
+      { hops: ['https://www.example.test/'] },
+      'off-allowlist',
+      'guard-refused:off-allowlist',
+    ],
+    ['SOCS changed on a settled page', { shape: changeSocs }, 'consent-unhandled', 'socs-read-back'],
+    [
+      'an account cookie before the page',
+      { shape: (c) => c.jar.push({ name: 'SID', value: 'x', domain: '.google.com', path: '/' }) },
+      'signed-in',
+      'account-cookie',
+    ],
+  ])('%s: the answer names its page kind and rule', async (_l, o, page, rule) => {
+    const t = setup(o);
+    const r = await t.session.page(REQ);
+    expect(r.answer).toMatchObject({ kind: 'blocked', page, rule });
+    expect(workerRuleSchema.safeParse(rule).success).toBe(true);
+    // why: the answer as the app's adapter parses it, the rule included
+    expect(workerAnswerSchema.safeParse(r.answer).success).toBe(true);
+  });
+  it('an unread list names its own rule: options that no grammar reads are no-options-read', async () => {
+    const t = setup({
+      tree: resultsTree({
+        top: [n('link', 'From 478 British pounds round trip total. Gibberish')],
+        other: [],
+      }),
+    });
+    const r = await t.session.page(REQ);
+    expect(r.answer).toMatchObject({ kind: 'blocked', page: 'unrecognised', rule: 'no-options-read' });
   });
 });

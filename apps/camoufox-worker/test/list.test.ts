@@ -101,6 +101,15 @@ describe('readList (spec §2 list mode)', () => {
     expect(tabPriceMinor('Cheapest from £1,204')).toBe(120400);
     expect(tabPriceMinor('Cheapest from 1,204 British pounds')).toBe(120400);
     expect(tabPriceMinor('Cheapest')).toBeNull();
+    // why: every recording since 2026-10-18: the tab's name carries its information pop-up's text after the price, with
+    // or without the hidden "Fetching results" label before it; the price is the tab's first, and the only one
+    const popup =
+      'Close dialogueLooking for the lowest fares? These additional budget picks help you save. Learn more';
+    expect(tabPriceMinor(`Cheapestfrom Fetching results £451${popup}`)).toBe(45100);
+    expect(tabPriceMinor(`Cheapestfrom  £1,204${popup}`)).toBe(120400);
+    expect(tabPriceMinor(`Cheapestfrom Fetching results ${popup}`)).toBeNull();
+    // why: CodeRabbit on PR #33: the first price, right after "Cheapest from", never one later in the pop-up's text
+    expect(tabPriceMinor('Cheapest from £451Close dialogueSave 100 British pounds')).toBe(45100);
     expect(readList(facts([name(451)], { tab: 'Cheapest' }), REQ).tabMinor).toBeNull();
   });
 });

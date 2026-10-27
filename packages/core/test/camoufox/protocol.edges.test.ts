@@ -9,6 +9,7 @@ import {
   listRequestSchema,
   pageCellSchema,
   workerAnswerSchema,
+  workerRuleSchema,
 } from '../../src/camoufox/protocol.js';
 
 beforeEach(() => {
@@ -205,5 +206,54 @@ describe('every value of each closed list is accepted, and nothing else', () => 
     expect(workerAnswerSchema.safeParse({ kind: 'browser-error', stage: '', detail: 'x' }).success).toBe(
       false,
     );
+  });
+});
+
+// why: the grid runs of 2026-10-26 stopped as `blocked:unrecognised` and the app kept only the page kind, so nobody could
+// see which check refused the page: a blocked answer now names the rule that fired, as a bounded token that can never
+// carry page text or a URL
+describe('a blocked answer names the rule that stopped the page', () => {
+  const BLOCKED = { kind: 'blocked', page: 'unrecognised', cooldownUntil: '2027-03-11T10:00:00.000Z' };
+  it.each([
+    'cheapest-tab-count',
+    'date-grid-buttons',
+    'search-form:mismatch',
+    'guard-refused:off-allowlist',
+    'grid:first-view:price',
+    'grid:no-price-graph-button',
+    'a',
+    `a${'b'.repeat(79)}`,
+  ])('accepts the rule %s', (rule) => {
+    expect(workerRuleSchema.safeParse(rule).success).toBe(true);
+    expect(workerAnswerSchema.safeParse({ ...BLOCKED, rule }).success).toBe(true);
+  });
+  it.each([
+    '',
+    `a${'b'.repeat(80)}`,
+    'Cheapest',
+    '1-rule',
+    'grid:',
+    ':grid',
+    'grid::x',
+    'grid first-view',
+    'https://www.google.com/travel/flights',
+    'grid:first-view\nprice',
+    'rule.with.dots',
+  ])('refuses %j', (rule) => {
+    expect(workerRuleSchema.safeParse(rule).success).toBe(false);
+    expect(workerAnswerSchema.safeParse({ ...BLOCKED, rule }).success).toBe(false);
+  });
+  it('a blocked answer without a rule still parses (a worker built before it)', () => {
+    expect(workerAnswerSchema.safeParse(BLOCKED).success).toBe(true);
+  });
+  it('a rule on any other answer is refused', () => {
+    expect(
+      workerAnswerSchema.safeParse({
+        kind: 'cooling-down',
+        cause: 'unrecognised',
+        cooldownUntil: '2027-03-11T10:00:00.000Z',
+        rule: 'cheapest-tab-count',
+      }).success,
+    ).toBe(false);
   });
 });

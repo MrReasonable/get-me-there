@@ -10,7 +10,13 @@
  */
 import { createHash } from 'node:crypto';
 import type { Logger } from '@gmt/core';
-import { type ClassifyRule, classifyPageWithRule, type PageFacts, type PageKind } from './classify.js';
+import {
+  type ClassifyRule,
+  cheapestTabPriceMinor,
+  classifyPageWithRule,
+  type PageFacts,
+  type PageKind,
+} from './classify.js';
 import { type GuardState, onAllowlist } from './guard.js';
 import { isSettled, type Previous, stableAcross, type View } from './ready.js';
 import { type Role, SELECTORS, type Selectors } from './selectors.js';
@@ -415,7 +421,8 @@ export function createDriver(page: PageLike, guard: GuardState, S: Selectors = S
       const settle: SettleFacts = {
         resultsReturned,
         fetching: visibleFetching > visibleInTabs,
-        cheapestPriced: cheapestTabs.length === 1 && cheapestTabs.every((t) => /\d/.test(t.name)),
+        cheapestPriced:
+          cheapestTabs.length === 1 && cheapestTabs.every((t) => cheapestTabPriceMinor(t.name, S) !== null),
         cheapestSelected: oneSelected,
         linkSignature: createHash('sha256').update(JSON.stringify(names)).digest('hex').slice(0, 16),
       };

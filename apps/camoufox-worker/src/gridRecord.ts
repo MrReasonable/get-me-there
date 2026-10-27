@@ -16,7 +16,7 @@ import {
   GRID_MOVE_RESERVE_MS,
   type IsoDate,
 } from '@gmt/core';
-import { type ClassifyRule, classifyPageWithRule } from './classify.js';
+import { type ClassifyRule, classifyPageWithRule, type PageFacts } from './classify.js';
 import { type Blocked, type Facts, panelOf, type Skipped, settle, snapshotOf, soft } from './dialogSettle.js';
 import {
   CheapestStepFailed,
@@ -86,6 +86,21 @@ export interface ViewRead {
    * drawing when its settle's bound came, recorded as it was.
    */
   drawn: boolean;
+  /** The Cheapest tabs the view's last poll counted, with the dialog open (see `tabCounts`). */
+  cheapestTabs: TabCounts;
+}
+
+/** How many Cheapest tabs a poll found: all of them, and those inside a tablist. */
+export interface TabCounts {
+  total: number;
+  inTablist: number;
+}
+/**
+ * The Cheapest tab counts of one poll's facts (the grid runs of 2026-10-26): what the classifier's tab rules read, kept
+ * in a recording so a later one shows whether a page changed them. Counts only, never a name.
+ */
+export function tabCounts(p: Pick<PageFacts, 'cheapestTabs'>): TabCounts {
+  return { total: p.cheapestTabs.length, inTablist: p.cheapestTabs.filter((t) => t.inTablist).length };
 }
 export type MoveRead =
   | {
@@ -301,6 +316,7 @@ export async function exploreGrid(
         selectedLines: (await texts(panel.getByText(SELECTED_LINE), st)).texts,
         polls: s.polls,
         drawn: !s.drawing,
+        cheapestTabs: tabCounts(s.facts.page),
       };
     });
     return { read, settleMs, readMs: timers.now() - r0, facts: s.facts, rule: s.rule };

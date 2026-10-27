@@ -15,6 +15,8 @@
 # (https://github.com/MrReasonable/get-me-there/actions/runs/40305929385).
 # The grid settle that waits for every cell (spec rev 46) adds its grid page and recorder tests, which share those
 # files' POSIX-mode setup (https://github.com/MrReasonable/get-me-there/actions/runs/40325418273).
+# A stopped page naming its rule (spec rev 52) adds session and recorder tests that share those files' POSIX-mode
+# setup (https://github.com/MrReasonable/get-me-there/actions/runs/40436004392).
 apps/api/test/bootstrap/app.backup.test.ts > backup preflight (spec §7 Migrations, §13 Backup) backs up into <db dir>/backups before applying pending migrations; the backup has the old schema
 apps/api/test/bootstrap/app.matrix.test.ts > injected-config boot matrix (spec §5.5) an unwritable data directory fails boot with exit code 73
 apps/api/test/bootstrap/app.spawn.test.ts > production boot lacks fixture (spec §5.5, §9 item 5) the real bootstrap under NODE_ENV=production never offers or accepts synthetic data
@@ -174,6 +176,7 @@ apps/camoufox-worker/test/record.test.ts > record --graph-explore the snapshot m
 apps/camoufox-worker/test/record.test.ts > record --graph-explore two Price graph buttons ends plainly at the find-graph-button step: no click, no cool-down, nothing written
 apps/camoufox-worker/test/record.test.ts > record --graph-explore when no dialog or region appears, the main landmark is recorded
 apps/camoufox-worker/test/record.test.ts > record --graph-explore without a chart region the chart is null, and without a Dates tab the dates are skipped and counted
+apps/camoufox-worker/test/record.test.ts > record --grid a Cheapest tab outside a tablist in a view counts in its total only
 apps/camoufox-worker/test/record.test.ts > record --grid a challenge after a scroll is that stop with its cool-down; only the stop record is written
 apps/camoufox-worker/test/record.test.ts > record --grid a panel holding an e-mail address is refused: nothing written
 apps/camoufox-worker/test/record.test.ts > record --grid a panel that is not the dates-grid view is recorded and no scroll is tried
@@ -184,6 +187,7 @@ apps/camoufox-worker/test/record.test.ts > record --grid a view whose cells draw
 apps/camoufox-worker/test/record.test.ts > record --grid clicks Price graph, Dates and each scroll 5 s apart, and records every view, move delta and timing
 apps/camoufox-worker/test/record.test.ts > record --grid logs each step as "grid step"
 apps/camoufox-worker/test/record.test.ts > record --grid measures a one-day step from rotated lines
+apps/camoufox-worker/test/record.test.ts > record --grid records the results page’s classification before the dialog, and the Cheapest tab counts there and in each view
 apps/camoufox-worker/test/record.test.ts > record --landing (Task 17.8) a challenge on the landing page stops and pauses
 apps/camoufox-worker/test/record.test.ts > record --landing (Task 17.8) a consent page is the stop it always is: the pause, the profile wiped, nothing recorded as the landing
 apps/camoufox-worker/test/record.test.ts > record --landing (Task 17.8) a read that fails other than by the deadline ends the recording with that error, writing nothing
@@ -346,6 +350,15 @@ apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14
 apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) two pages in a row, each preceded by addCookies with SOCS
 apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) with CHEAPEST_FLOW_VERIFIED injected true the Cheapest tab is clicked once; false, nothing is clicked
 apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) with the Cheapest flow verified, the tab’s pop-up is closed and the tab clicked
+apps/camoufox-worker/test/session.test.ts > every stop names the rule that made it SOCS changed on a settled page: the answer names its page kind and rule
+apps/camoufox-worker/test/session.test.ts > every stop names the rule that made it a form on other dates: the answer names its page kind and rule
+apps/camoufox-worker/test/session.test.ts > every stop names the rule that made it a reCAPTCHA frame: the answer names its page kind and rule
+apps/camoufox-worker/test/session.test.ts > every stop names the rule that made it an account cookie before the page: the answer names its page kind and rule
+apps/camoufox-worker/test/session.test.ts > every stop names the rule that made it an off-allowlist navigation: the answer names its page kind and rule
+apps/camoufox-worker/test/session.test.ts > every stop names the rule that made it an unread list names its own rule: options that no grammar reads are no-options-read
+apps/camoufox-worker/test/session.test.ts > every stop names the rule that made it another currency: the answer names its page kind and rule
+apps/camoufox-worker/test/session.test.ts > every stop names the rule that made it no search form: the answer names its page kind and rule
+apps/camoufox-worker/test/session.test.ts > every stop names the rule that made it two Date grid buttons: the answer names its page kind and rule
 apps/camoufox-worker/test/sessionLine.test.ts > run.ts session export (Task 17.8) counts of an ended window export as this window’s zero; an ended cool-down exports as none
 apps/camoufox-worker/test/sessionLine.test.ts > run.ts session export (Task 17.8) prints one JSON line: the last page, this window’s counts and the cool-down in force; writes nothing
 apps/camoufox-worker/test/sessionLine.test.ts > run.ts session merge (Task 17.8) a new host directory whose window differs gets this window’s zero counts beside the carried time

@@ -69,7 +69,16 @@ export type GridPageResult =
       ended: 'complete' | 'scroll-not-settled' | 'off-plan' | 'allowance';
       notes: string[];
     }
-  | { kind: 'stop'; page: BlockedPage; notes: string[] };
+  | {
+      kind: 'stop';
+      page: BlockedPage;
+      notes: string[];
+      /**
+       * The rule that stopped the page (spec §2 "Navigation and the stops"): the classifier's on a blocked poll inside
+       * the dialog, else `grid:<why>`, with the first view's failing check (`grid:first-view:price`).
+       */
+      rule: string;
+    };
 
 const plus = (iso: string, k: number): string => {
   const d = new Date(`${iso}T00:00:00Z`);
@@ -115,17 +124,27 @@ export async function gridPage(
   // a date or a URL), as the recorder's decision line does
   const unrecognised = (why: string, extra: Record<string, number | string> = {}): GridPageResult => {
     notes.push(why);
+    // why: the grid runs of 2026-10-26: the answer carries the rule to the app, the first view's check included, and
+    // the debug line names the same rule (CodeRabbit on PR #33)
+    const rule = `grid:${why}${typeof extra.check === 'string' ? `:${extra.check}` : ''}`;
     o.steps.log?.debug(
       {
         cause: 'unrecognised',
-        rule: `grid:${why}`,
+        rule,
         elapsedMs: timers.now() - (o.steps.startedAt ?? timers.now()),
         ...extra,
       },
       'classifier decision',
     );
-    return { kind: 'stop', page: 'unrecognised', notes };
+    return { kind: 'stop', page: 'unrecognised', notes, rule };
   };
+  /** A poll inside the dialog that met a blocked kind: that stop, with the classifier's own rule. */
+  const blocked = (b: { page: BlockedPage; rule: string }): GridPageResult => ({
+    kind: 'stop',
+    page: b.page,
+    notes,
+    rule: b.rule,
+  });
   const rejected = (r: Extract<Interpreted, { kind: 'unrecognised' }>, raw: RawView): GridPageResult =>
     unrecognised(r.why, { ...(r.check === undefined ? {} : { check: r.check }), ...viewCounts(raw) });
   const so = { timers, pollMs: o.pollMs, S, reserveMs: GRID_MOVE_RESERVE_MS };
@@ -147,7 +166,7 @@ export async function gridPage(
     const n = await countOf(dialog, st);
     return { value: n, id: `dialog:${n}`, snapshot: n === 0 ? '' : await snapshotOf(dialog, st) };
   });
-  if (opened.kind === 'blocked') return { kind: 'stop', page: opened.page, notes };
+  if (opened.kind === 'blocked') return blocked(opened);
   const tab = dialog.getByRole('tab', { name: G.datesTab, exact: true });
   if ((await runStep('find-dates-tab', LOOKUP_TIMEOUT_MS, d, steps, (st) => countOf(tab, st))) !== 1)
     return unrecognised('no-dates-tab');
@@ -195,7 +214,7 @@ export async function gridPage(
   });
 
   const firstRead = await view('dates', d, undefined, true);
-  if (firstRead.kind === 'blocked') return { kind: 'stop', page: firstRead.page, notes };
+  if (firstRead.kind === 'blocked') return blocked(firstRead);
   if (firstRead.read.kind === 'unrecognised') return rejected(firstRead.read, firstRead.raw);
   const views: GridView[] = [];
   let prev = firstRead.read;
@@ -242,7 +261,7 @@ export async function gridPage(
       if (e instanceof CheapestStepFailed) return { kind: 'grid', views, ended: 'scroll-not-settled', notes };
       throw e;
     }
-    if (next.kind === 'blocked') return { kind: 'stop', page: next.page, notes };
+    if (next.kind === 'blocked') return blocked(next);
     if (next.read.kind === 'unrecognised') return rejected(next.read, next.raw);
     const cur = next.read;
     const want = expected(prev, move, o.stepDays);

@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { classifyLanding, classifyPage, classifyPageWithRule, type PageFacts } from '../src/classify.js';
+import {
+  cheapestTabPriceMinor,
+  classifyLanding,
+  classifyPage,
+  classifyPageWithRule,
+  type PageFacts,
+} from '../src/classify.js';
 import { SELECTORS } from '../src/selectors.js';
 
 const RESULTS = 'https://www.google.com/travel/flights/search?tfs=x';
@@ -353,5 +359,111 @@ describe('classifyLanding (the consent command’s first view)', () => {
       kind: 'blocked',
       page: 'signed-in',
     });
+  });
+});
+
+// why: the grid runs of 2026-10-26 stopped as unrecognised, and the Cheapest tab's name was suspected: it carries the
+// text of an information pop-up about budget picks. Every recording since 2026-10-18 shows that text in the name, so
+// these pin what the classifier makes of it, in the worked example's shape (London → New York, £451)
+describe('the Cheapest tab carrying its information pop-up', () => {
+  const POPUP =
+    'Close dialogueLooking for the lowest fares? These additional budget picks help you save but may involve trade-offs, such as flying back to a different airport in the same city that you departed from, self-transferring luggage or booking via a third-party site. Learn more';
+  const LOADED = `Cheapestfrom Fetching results £451${POPUP}`;
+  const one = (name: string, selected?: boolean) => [
+    { name, inTablist: true, ...(selected === undefined ? {} : { selected }) },
+  ];
+  it('one tab carrying the pop-up text is a results page on the Best view and, selected, on the Cheapest view', () => {
+    expect(classifyPageWithRule(facts({ cheapestTabs: one(LOADED) }))).toEqual({
+      kind: { kind: 'results' },
+      rule: 'results',
+    });
+    expect(
+      classifyPageWithRule(
+        facts({ cheapestTabs: one(LOADED, true), dateGridButtons: 0 }),
+        SELECTORS,
+        'cheapest',
+      ),
+    ).toEqual({ kind: { kind: 'results' }, rule: 'results' });
+  });
+  it('the grid flow with the Price insights dialog open: no tab, no Date grid button, no result link is unrecognised, never a stop kind', () => {
+    // why: what every --grid recording's `classification` shows; the dialog's settle stops only on the other blocked
+    // kinds (dialogSettle.ts), and the page's rules were applied before the Price graph click
+    const r = classifyPageWithRule(facts({ cheapestTabs: [], dateGridButtons: 0, resultLinks: 0 }));
+    expect(r).toEqual({ kind: { kind: 'blocked', page: 'unrecognised' }, rule: 'cheapest-tab-count' });
+  });
+  it.each(['best', 'cheapest'] as const)(
+    'two different Cheapest tabs are still refused on the %s view (cheapest-tab-count)',
+    (view) => {
+      const tabs = [...one(LOADED, true), ...one('Cheapest from £389', true)];
+      expect(classifyPageWithRule(facts({ cheapestTabs: tabs }), SELECTORS, view)).toEqual({
+        kind: { kind: 'blocked', page: 'unrecognised' },
+        rule: 'cheapest-tab-count',
+      });
+    },
+  );
+  it('a second tab outside the tablist beside the pop-up tab is refused too', () => {
+    const tabs = [...one(LOADED), { name: '', inTablist: false }];
+    expect(classifyPageWithRule(facts({ cheapestTabs: tabs })).rule).toBe('cheapest-tab-count');
+  });
+  it('no tab and no result link is refused on either view', () => {
+    for (const view of ['best', 'cheapest'] as const)
+      expect(classifyPageWithRule(facts({ cheapestTabs: [], resultLinks: 0 }), SELECTORS, view).kind).toEqual(
+        { kind: 'blocked', page: 'unrecognised' },
+      );
+  });
+  // why: CodeRabbit on PR #33: the tab's name now carries the pop-up's text, so a digit anywhere in it (a pop-up saying
+  // "save 10%") must never read as the tab's price; the price is the one right after "Cheapest from"
+  it('a digit in the pop-up text is not a tab price: the tab is unpriced', () => {
+    const name = `Cheapestfrom Fetching results Close dialogueSave 10% with budget picks, from £39. Learn more`;
+    expect(cheapestTabPriceMinor(name)).toBeNull();
+    expect(
+      classifyPageWithRule(
+        facts({ cheapestTabs: one(name, true), dateGridButtons: 0 }),
+        SELECTORS,
+        'cheapest',
+      ).rule,
+    ).toBe('cheapest-tab-unpriced');
+  });
+  it.each([
+    ['Cheapest from 451 British pounds', 45100],
+    ['Cheapest from £443', 44300],
+    ['Cheapest from Fetching results 451 British pounds Learn more about ranking', 45100],
+    [LOADED, 45100],
+    [`Cheapestfrom  £1,204${POPUP}`, 120400],
+    ['Cheapest from £451Close dialogueSave 100 British pounds', 45100],
+    ['Cheapestfrom Fetching results£451', 45100],
+    ['Cheapest from £12,345', 1_234_500],
+    ['Cheapest from £1,234,567', 123_456_700],
+    ['Cheapest from 12,345 British pounds', 1_234_500],
+    ['Cheapest from 1,234,567 British pounds', 123_456_700],
+  ])('the tab price of %j is the one after "Cheapest from"', (name, minor) => {
+    expect(cheapestTabPriceMinor(name)).toBe(minor);
+  });
+  it.each([
+    'Cheapest',
+    'Cheapest from',
+    'Cheapest from Fetching results',
+    'Cheapest from 451',
+    'Cheapest from £',
+    'Cheapest flights 2 days from £451',
+    'Cheapest from £451.50',
+    'Best from £451',
+    'Best Cheapest from £451',
+  ])('%j states no tab price', (name) => {
+    expect(cheapestTabPriceMinor(name)).toBeNull();
+  });
+  it('the Best view never reads the tab price: its settle waits for one (an unpriced tab is not refused here)', () => {
+    expect(
+      classifyPageWithRule(facts({ cheapestTabs: one(`Cheapestfrom Fetching results ${POPUP}`) })).rule,
+    ).toBe('results');
+  });
+  it('an unpriced tab carrying the pop-up text is refused on the Cheapest view (cheapest-tab-unpriced)', () => {
+    expect(
+      classifyPageWithRule(
+        facts({ cheapestTabs: one(`Cheapestfrom Fetching results ${POPUP}`, true), dateGridButtons: 0 }),
+        SELECTORS,
+        'cheapest',
+      ).rule,
+    ).toBe('cheapest-tab-unpriced');
   });
 });
