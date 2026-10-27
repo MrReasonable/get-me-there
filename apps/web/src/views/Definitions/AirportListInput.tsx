@@ -272,6 +272,9 @@ export function AirportListInput({
           aria-describedby={messages.length > 0 ? `${helpId} ${errorId}` : helpId}
           onChange={(e) => {
             setText(e.target.value);
+            // why: typing starts a new search, so its answer opens on its preferred option even when the text repeats
+            // an earlier search the operator had moved through (no query is '', the shortest searched is 2 letters)
+            setNav({ query: '', index: 0 });
             setOpen(true);
             setLocalError(null);
           }}

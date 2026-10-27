@@ -187,6 +187,17 @@ describe('airport picker: a WAI-ARIA combobox over GET /api/airports?q= (plan a 
     expect(chipCodes()).toEqual(['LHR']);
   });
 
+  it('typing the same text again opens on the preferred option, not where the arrows were left', async () => {
+    airportsRoute();
+    const { user } = renderOnFakeClock();
+    await typeAndAnswer(user, 'heath');
+    await user.keyboard('{ArrowDown}{ArrowDown}');
+    expect(input()).toHaveAttribute('aria-activedescendant', 'origins-option-3');
+    await user.clear(input());
+    await typeAndAnswer(user, 'heath');
+    expect(input()).toHaveAttribute('aria-activedescendant', 'origins-option-1');
+  });
+
   it('the metro option adds every airport of that metro, as the table lists them for the metro code', async () => {
     const asked = airportsRoute();
     const { user } = renderOnFakeClock();
