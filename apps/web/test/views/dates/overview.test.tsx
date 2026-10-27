@@ -149,7 +149,7 @@ describe('rings both ways (spec §11 Rings)', () => {
     const table = await findBoard();
     const ringed = [...overview().querySelectorAll('[data-ringed]')];
     expect(ringed).toHaveLength(10);
-    expect(ringed[0]?.className).toContain('shadow-[inset_0_0_0_2px_#000]');
+    expect(ringed[0]?.className).toContain('shadow-[inset_0_0_0_2px_#000,inset_0_0_0_3px_#fff]');
     // the 11th-ranked date pair (not seen, 20 Mar) is not on the shown board
     expect(cell('2027-03-20', 10)).not.toHaveAttribute('data-ringed');
     fireEvent.pointerEnter(boardRows(table)[0] ?? table);

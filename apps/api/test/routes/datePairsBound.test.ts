@@ -4,7 +4,6 @@
 // The statement counts and byte sizes are exact gates; only the time is multiplied, and no test is retried.
 import { gzipSync } from 'node:zlib';
 import {
-  asIata,
   type CellKey,
   type DefinitionInput,
   generateCells,
@@ -274,12 +273,15 @@ describe('the 50,000-cell bound: time, size and the scope in the SQL (spec §9, 
       const s = seeder(x.ports);
       const def = x.ports.repos.definitions.create(
         exampleDefinitionInput({
-          // why: 250 × 50 × 8 airport pairs = 100,000 cells; AAA and BBB are the example's synthetic codes
-          origins: [asIata('AAA'), asIata('BBB'), LGW, LHR],
+          // why: 400 days × 62 nights × the example's 4 airport pairs = 99,200 cells, read with origins=LHR as
+          // 49,600 in scope. Only the example's airports may appear (another code may be an assigned IATA code, a real
+          // airport), and 50,000 in scope exactly can't be reached from them: with one origin of two in scope it
+          // needs 25,000 date pairs, which no days ≤ 400 × stays ≤ 91 factorisation gives.
+          origins: [LGW, LHR],
           destinations: [JFK, EWR],
-          window: { kind: 'relative', startOffsetDays: 7, lengthDays: 250 },
+          window: { kind: 'relative', startOffsetDays: 7, lengthDays: 400 },
           minNights: 10,
-          maxNights: 59,
+          maxNights: 71,
         }),
       );
       bulkRun(x, s, 'E0', def, cellsOf(x, def), 0);
@@ -328,16 +330,16 @@ describe('the 50,000-cell bound: time, size and the scope in the SQL (spec §9, 
     expect(m.gzip).toBeLessThanOrEqual(512 * KiB);
   });
 
-  it("a 100,000-cell definition (the operator's raised setting) read with origins=LGW,LHR answers its 50,000 cells within the bounds", {
+  it("a 99,200-cell definition (the operator's raised setting) read with origins=LHR answers its 49,600 cells within the bounds", {
     timeout: 60_000,
   }, async () => {
     const unscoped = await raised.x.request(`/api/definitions/${raised.def.id}/date-pairs`);
     expect(unscoped.status).toBe(422);
     const refusal = await errorOf(unscoped);
     expect(refusal.code).toBe('too_many_cells');
-    expect(refusal.details).toMatchObject({ cells: 100_000, bound: 50_000 });
-    const m = await measure(raised.x, `/api/definitions/${raised.def.id}/date-pairs?origins=LGW,LHR`);
-    expect([m.body.scope.cells, m.body.scope.origins]).toEqual([50_000, ['LGW', 'LHR']]);
+    expect(refusal.details).toMatchObject({ cells: 99_200, bound: 50_000 });
+    const m = await measure(raised.x, `/api/definitions/${raised.def.id}/date-pairs?origins=LHR`);
+    expect([m.body.scope.cells, m.body.scope.origins]).toEqual([49_600, ['LHR']]);
     expect(m.ms).toBeLessThan(3_000 * timingFactor);
     expect(m.bytes).toBeLessThanOrEqual(4 * MiB);
     expect(m.gzip).toBeLessThanOrEqual(512 * KiB);

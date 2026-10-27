@@ -150,13 +150,13 @@ const timesSchema = z.strictObject({
   departBack: z.array(z.string().nullable()),
   arriveBack: z.array(z.string().nullable()),
 });
-const TIME_COLUMNS = [
-  'figure',
-  'departOut',
-  'arriveOut',
-  'departBack',
-  'arriveBack',
-] as const satisfies ReadonlyArray<keyof typeof timesSchema.shape>;
+/** The four local times of a verified figure, as both the `times` group and the inline `datePairFigure` name them. */
+const TIME_KEYS = ['departOut', 'arriveOut', 'departBack', 'arriveBack'] as const satisfies ReadonlyArray<
+  keyof typeof timesSchema.shape
+>;
+const TIME_COLUMNS = ['figure', ...TIME_KEYS] as const satisfies ReadonlyArray<
+  keyof typeof timesSchema.shape
+>;
 
 const datePairsBodySchema = z.strictObject({
   /** the latest parent run; null before the first */
@@ -460,6 +460,9 @@ export const datePairFigureSchema = z
     } else {
       if (f.notSeenInLatest !== null) fail(['notSeenInLatest'], 'not seen in latest is for verified figures');
       if (f.cheaperCached !== null) fail(['cheaperCached'], 'a cheaper cached price is for verified figures');
+      // why: §10 refuses times on a calendar figure, as `refineGroups` refuses a `times` entry on one, so the two
+      // encodings of one figure accept the same shapes (no "arrives HH:MM" beside an unchecked calendar price)
+      for (const k of TIME_KEYS) if (f[k] !== null) fail([k], 'local times are for verified figures');
     }
     if (f.cheaperCached !== null && f.cheaperCached.pricePence >= f.price.pricePence)
       fail(['cheaperCached', 'pricePence'], "a cheaper cached price must be below the figure's");

@@ -2433,7 +2433,8 @@ First-failing-test per WP in §16.
    browser's route interception: 36,400 date pairs every one with a figure
    (400 days × 91 nights, one airport pair) and 50,000 cells (250 days × 50
    nights × 4 airport pairs, as the route's bound test seeds it: a fifth
-   airport pair would need a code outside the example's six); the board and
+   airport pair would need a code outside the example's four airports,
+   and any other code is a real airport); the board and
    the overview are drawn within 1.5 s of the response, a filter change and
    a re-rank each within 200 ms, and no main-thread task runs longer than
    200 ms (a `longtask` observer), each waited on its event with the timeout

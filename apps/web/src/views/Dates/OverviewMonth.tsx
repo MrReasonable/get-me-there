@@ -30,8 +30,12 @@ export const NEUTRAL_CLASS = 'border border-slate-400 bg-white text-black';
 /** Spec §11: focus always visible, a solid outline (asserted by class in jsdom; drawn by the browser in the smoke). */
 export const CELL_FOCUS =
   'focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-black';
-/** A board row's cell (spec §11 Rings): an outline, not colour alone; lit when its row or itself is pointed at. */
-export const RING_CLASS = 'shadow-[inset_0_0_0_2px_#000]';
+/**
+ * A board row's cell (spec §11 Rings): an outline, not colour alone; lit when its row or itself is pointed at. why: two
+ * tones, a 2 px black line over a 3 px white one (so 1 px of white shows inside the black), so one tone clears 3:1 on
+ * every band: black alone is about 2.2:1 on band 0's #134e4a, white is about 9.5:1 there (priceCellBands.test.tsx).
+ */
+export const RING_CLASS = 'shadow-[inset_0_0_0_2px_#000,inset_0_0_0_3px_#fff]';
 export const LIT_CLASS = 'outline-solid outline-[3px] outline-offset-1 outline-black';
 
 export interface CellView {
@@ -90,7 +94,7 @@ function Cell({
       className={`flex min-h-6 min-w-6 flex-1 items-center justify-center overflow-hidden rounded-sm text-[10px] leading-none ${fillOf(c.model)} ${patterns.join(' ')} ${c.ringed ? RING_CLASS : ''} ${lit ? LIT_CLASS : ''} ${CELL_FOCUS}`}
     >
       {c.model.marks.length > 0 ? (
-        <span aria-hidden="true" data-testid="cell-glyphs">
+        <span aria-hidden="true" data-testid="cell-glyphs" className="dates-glyphs">
           {c.model.marks.map((m) => M.glyph[m]).join('')}
         </span>
       ) : null}

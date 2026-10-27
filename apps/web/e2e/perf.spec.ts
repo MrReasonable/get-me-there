@@ -1,18 +1,6 @@
 import { expect, type Page, test } from '@playwright/test';
 import { COPY } from '../src/copy.js';
-import {
-  CELLS_CASE,
-  DATE_PAIRS_CASE,
-  datePairsBody,
-  definitionBody,
-  executionBody,
-  PERF_DEFINITION_ID,
-  PERF_EXECUTION_ID,
-  PERF_NOW,
-  type PerfCase,
-  providersBody,
-  resultsBody,
-} from './perfFixtures.js';
+import { CELLS_CASE, DATE_PAIRS_CASE, PERF_DEFINITION_ID, PERF_NOW, servePerfCase } from './perfFixtures.js';
 import { SMOKE } from './selectors.js';
 
 // Spec §9 item 6, the performance bound (WP19 Task 19.9): the decoded worst cases served through the browser's route
@@ -75,37 +63,15 @@ async function markTime(page: Page, name: string): Promise<number> {
 
 const clearMarks = (page: Page) => page.evaluate(() => Reflect.get(window, '__gmtPerf').clearMarks());
 
-async function serve(page: Page, c: PerfCase) {
-  const bodies = { first: datePairsBody(c, 0), second: datePairsBody(c, 1) };
-  const state = { datePairs: bodies.first, tick: 0, unknown: new Set<string>() };
-  const json = (body: string) => ({ status: 200, contentType: 'application/json', body });
-  await page.route('**/api/**', (route) => {
-    const path = new URL(route.request().url()).pathname;
-    if (path === '/api/providers') return route.fulfill(json(providersBody()));
-    if (path === '/api/definitions') return route.fulfill(json(definitionBody(c)));
-    if (path === `/api/definitions/${PERF_DEFINITION_ID}/date-pairs`)
-      return route.fulfill(json(state.datePairs));
-    if (path === `/api/definitions/${PERF_DEFINITION_ID}/results`) return route.fulfill(json(resultsBody(c)));
-    if (path === `/api/executions/${PERF_EXECUTION_ID}`)
-      return route.fulfill(json(executionBody(c, state.tick)));
-    state.unknown.add(path);
-    return route.fulfill({
-      status: 404,
-      contentType: 'application/json',
-      body: JSON.stringify({ error: { code: 'not_found', message: 'not served by the performance test' } }),
-    });
-  });
-  return { bodies, state };
-}
-
 for (const c of [DATE_PAIRS_CASE, CELLS_CASE]) {
   test(`${c.name}: drawn within 1.5 s, a stay change and a re-rank each within 200 ms, no long task over 200 ms @perf`, async ({
     page,
   }) => {
     test.setTimeout(180_000);
-    const { bodies, state } = await serve(page, c);
+    const { bodies, state } = await servePerfCase(page, c);
     await page.addInitScript(beforeClock);
-    await page.clock.install({ time: new Date(PERF_NOW) });
+    // why: Playwright takes the ISO instant as a string, so no `Date` is made outside `src/now.tsx`
+    await page.clock.install({ time: PERF_NOW });
     await page.addInitScript(afterClock);
 
     // (1) the first read: response to the board and the overview drawn

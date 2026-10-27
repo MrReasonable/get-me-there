@@ -1,4 +1,5 @@
 import {
+  addDays,
   apiContract,
   asIata,
   asIsoDate,
@@ -14,6 +15,7 @@ import {
   provenanceSchema,
   sortedAirportPairs,
 } from '@gmt/core';
+import type { Page } from '@playwright/test';
 
 /**
  * The performance test's world (spec §9 item 6, WP19 Task 19.9): a synthetic search and the responses the Dates view
@@ -41,11 +43,17 @@ export interface PerfCase {
   destinations: readonly string[];
   /** Every date pair priced (true), or every seventh left unpriced with a mixture of the other buckets. */
   everyPriced: boolean;
+  /**
+   * Every fifth priced date pair with one airport pair not searched yet, so the overview draws the "partly not
+   * searched" stripes (the marks test; the performance cases leave it out). Needs at least two airport pairs.
+   */
+  partly?: boolean;
 }
 
 /**
- * (a) 36,400 date pairs, every one with a figure: 400 days × 91 stays (0–90 nights) on one airport pair. Its
- * airports are the example's synthetic codes, AAA → BBB.
+ * (a) 36,400 date pairs, every one with a figure: 400 days × 91 stays (0–90 nights) on one of the worked example's
+ * airport pairs, LHR → JFK. why: only the example's airports appear in tests (any other three-letter code may be an
+ * assigned IATA code naming a real airport).
  */
 export const DATE_PAIRS_CASE: PerfCase = {
   name: '36,400 date pairs',
@@ -53,15 +61,15 @@ export const DATE_PAIRS_CASE: PerfCase = {
   days: 400,
   minNights: 0,
   maxNights: 90,
-  origins: ['AAA'],
-  destinations: ['BBB'],
+  origins: ['LHR'],
+  destinations: ['JFK'],
   everyPriced: true,
 };
 
 /**
  * (b) 50,000 cells, exactly the route's bound: 250 days × 50 stays (10–59 nights) × the worked example's 4 airport
  * pairs (LGW, LHR → EWR, JFK), as the api's bound test seeds it. why: the brief first said 400 days × 25 nights × 5
- * airport pairs, but a fifth airport pair needs a code outside the example's six (LHR, LGW, JFK, EWR, AAA, BBB).
+ * airport pairs, but a fifth airport pair needs a code outside the example's four airports (LHR, LGW, JFK, EWR).
  */
 export const CELLS_CASE: PerfCase = {
   name: '50,000 cells',
@@ -140,9 +148,12 @@ export function decodedRead(c: PerfCase, seed: number): DecodedDatePairs {
             cheaperCached: null,
           };
     // why: an unpriced date pair carries each unpriced bucket in turn, so the overview draws every mark
+    const partly = c.partly === true && !unpriced && airportPairs > 1 && i % 5 === 0;
     const buckets: Buckets = unpriced
       ? { ...NONE, ...unpricedBuckets(i, airportPairs) }
-      : { ...NONE, priced: airportPairs };
+      : partly
+        ? { ...NONE, priced: airportPairs - 1, not_run: 1 }
+        : { ...NONE, priced: airportPairs };
     return {
       index: i,
       departureDate: at.departureDate,
@@ -206,10 +217,9 @@ export function datePairsBody(c: PerfCase, seed: number): string {
   return JSON.stringify(apiContract.datePairsResponseSchema.parse(encodeDatePairs(decodedRead(c, seed))));
 }
 
+/** why: core's epoch-day arithmetic, so no `Date` is made outside `src/now.tsx` (the web app's one clock). */
 function addDaysText(iso: string, n: number): string {
-  const d = new Date(`${iso}T00:00:00.000Z`);
-  d.setUTCDate(d.getUTCDate() + n);
-  return d.toISOString().slice(0, 10);
+  return addDays(asIsoDate(iso), n);
 }
 
 function runSummary() {
@@ -395,4 +405,32 @@ export function executionBody(c: PerfCase, tick: number): string {
       disabledProviders: [],
     }),
   );
+}
+
+/**
+ * Serves a case's bodies through the browser's route interception: the definition, providers, results, the running
+ * execution (its progress from `state.tick`) and the date pairs (`state.datePairs`, which a test may swap for a
+ * re-read). Any other api path answers 404 and is recorded in `state.unknown`.
+ */
+export async function servePerfCase(page: Page, c: PerfCase) {
+  const bodies = { first: datePairsBody(c, 0), second: datePairsBody(c, 1) };
+  const state = { datePairs: bodies.first, tick: 0, unknown: new Set<string>() };
+  const json = (body: string) => ({ status: 200, contentType: 'application/json', body });
+  await page.route('**/api/**', (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === '/api/providers') return route.fulfill(json(providersBody()));
+    if (path === '/api/definitions') return route.fulfill(json(definitionBody(c)));
+    if (path === `/api/definitions/${PERF_DEFINITION_ID}/date-pairs`)
+      return route.fulfill(json(state.datePairs));
+    if (path === `/api/definitions/${PERF_DEFINITION_ID}/results`) return route.fulfill(json(resultsBody(c)));
+    if (path === `/api/executions/${PERF_EXECUTION_ID}`)
+      return route.fulfill(json(executionBody(c, state.tick)));
+    state.unknown.add(path);
+    return route.fulfill({
+      status: 404,
+      contentType: 'application/json',
+      body: JSON.stringify({ error: { code: 'not_found', message: 'not served by the performance test' } }),
+    });
+  });
+  return { bodies, state };
 }

@@ -22,7 +22,7 @@ import { API_TEXT } from '../text.js';
 import type { Ports } from '../wiring.js';
 import { zeroBuckets } from './coverage.js';
 import { executionSummary } from './executions.js';
-import { type Loaded, loadRows } from './load.js';
+import { type Loaded, loadRows, partiallyVerifiedCells } from './load.js';
 import { calendarStaleAfterHours, confirmedIn, priceOf, type ResultRow, type RowContext } from './rows.js';
 import {
   classifyCells,
@@ -136,18 +136,11 @@ export function assembleDatePairs(def: SearchDefinition, query: ScopeQuery, port
     });
   }
   const loaded = loadRows(def, ports, { scope });
-  const confirmed = confirmedIn(loaded);
   const classes = classifyCells(
     scope.space,
     parentFacts(ports, loaded.latestParent),
     ports.repos.cells.childVerificationRollUps(def.id),
-    {
-      partiallyVerified: new Set(
-        loaded.verified
-          .filter((r) => r.verdictClass === 'partially-verified' && confirmed(r))
-          .map((r) => `${r.cell.origin}|${r.cell.destination}|${r.cell.departureDate}|${r.cell.returnDate}`),
-      ),
-    },
+    { partiallyVerified: partiallyVerifiedCells(loaded) },
   );
   const { figures, journeyLeftOut } = datePairFigures(loaded, scope, loaded.rc);
   const pairs: DatePair[] = [];

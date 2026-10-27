@@ -69,7 +69,10 @@ The plan's file map and its WP9 and WP10 sections yield to spec revisions 48 and
   ruling (the words `scripts/wording.test.mjs` refuses, and nothing about how the browser provider's pages look to a
   site); commit messages stay neutral and name no vendor's site and no data-collection method. Before every push, run
   the wording test and grep the diff, including `git diff main...HEAD | grep -nP '\b[Bb][Oo][t](s?\b|[A-Z_-])'`.
-- **The only example route** is London → New York (`LHR`, `LGW` → `JFK`, `EWR`; synthetic codes `AAA`, `BBB`).
+- **The only example route** is London → New York (`LHR`, `LGW` → `JFK`, `EWR`). There are no synthetic codes: `AAA`
+  (Anaa) and `BBB` are assigned IATA codes, so they name real airports and routes; a case that needs an airport outside
+  a scope narrows the scope to some of the example's four instead. Only a test proving that a code outside the airports
+  table is refused may use another code.
   Every web and e2e fixture provenance is `providerId: 'fixture'`, `sourceKind: 'synthetic'` by default; a test that
   needs a price that is not synthetic (the synthetic banner's absent case, Task 19.4) overrides it with a real
   provider's shape (`provCached`, `provSearched` in `test/fixtures.dates.ts`); no fixture reads `fixtures/recorded`.
@@ -299,8 +302,9 @@ times entry holding no time; `truncated` true on a verified figure; money not in
 //                                                                   // the scoped rows, the same figure the board shows
 // datePairFigureSchema (in api-contract/datePairs.ts): a strict object with DatePairFigure's fields below, less
 // `airportPair`, each provenance inline (provenanceSchema), money as moneyPenceSchema, refined by the board's per-figure
-// rules (superseded and truncated only on a calendar figure, a not-seen age and a cheaper-cached price only on a verified
-// one, the cheaper-cached price below the figure's); the codec test compares it with the board's decoded figure.
+// rules (superseded and truncated only on a calendar figure, a not-seen age, a cheaper-cached price and local times
+// only on a verified one, as the `times` group refuses an entry for a calendar figure; the cheaper-cached price below
+// the figure's); the codec test compares it with the board's decoded figure.
 
 // packages/core/src/space/limits.ts (new; validate.ts's private MAX_WINDOW_DAYS and MAX_NIGHTS move here, and
 // api-contract/datePairs.ts and config/schema.ts both import from it, so config never depends on api-contract)
@@ -1000,10 +1004,12 @@ summary.
     else the test throws; the `it`'s own timeout is a backstop only),
     the uncompressed body is at most 4 MiB (4 × 1024 × 1024 bytes) and the gzip body at most 512 KiB. A second case at
     36,400 date pairs (400 × 91, one airport pair, every one with a figure) holds the same bounds. A third: a
-    100,000-cell definition (the operator's raised setting; 250 × 50 × 8 airport pairs, origins AAA, BBB, LGW, LHR →
-    EWR, JFK, AAA and BBB being the example's synthetic codes) read with `origins=LGW,LHR` bringing the scope to 50,000
-    answers 200 within the same bounds, reading only the scope's cells (the SQL carries the scope), and its unscoped
-    read is 422 `too_many_cells` with `cells: 100000`. Axis (d) compares 1,000 cells with the 50,000-cell seed. The
+    99,200-cell definition (the operator's raised setting; 400 days × 62 nights × the example's 4 airport pairs) read
+    with `origins=LHR` bringing the scope to 49,600 answers 200 within the same bounds, reading only the scope's cells
+    (the SQL carries the scope), and its unscoped read is 422 `too_many_cells` with `cells: 99200`. Exactly 50,000 in
+    scope can't be reached from the example's airports by an airport filter (one origin of two needs 25,000 date pairs,
+    which no days ≤ 400 × stays ≤ 91 factorisation gives), and no other code may stand in (`AAA`, `BBB` are assigned
+    IATA codes; §0). Axis (d) compares 1,000 cells with the 50,000-cell seed. The
     first run's bulk rows are written with raw statements in one transaction, each later run copied from it in SQL
     (INSERT … SELECT, prices and fetch times moved per run) to stay inside the 120 s seed budget (the repositories'
     per-tile writes would take minutes), the verified cells through the repositories; their harnesses are built with `createHarness({ persistent: true })`, which the file closes in
@@ -1104,7 +1110,9 @@ config also runs from Stryker's sandbox).
     "Clear filters") has an accessible label and is operable by keyboard; a journey limit outside 60..6000 typed by
     the operator is explained in words beside the field ("between 60 and 6000 minutes") and not sent; the filters and
     header stay mounted while a new read loads, focus stays on the control that changed, and the board and overview
-    show a labelled loading state in place (`role="status"` "Loading dates for these filters").
+    show a labelled loading state in place (`role="status"` "Loading dates for these filters"). Because the form stays
+    mounted, its typed stay range and journey limit follow a URL change made outside it ("Clear filters" on the empty
+    state, back and forward), half-typed text included, while the operator's own typing is never rewritten.
   - **Query**: the endpoint sends `origins`, `destinations` and `maxJourneyMinutes` from the state and nothing for the
     stay range or the week switch; changing `d.to` issues a new request and, until it answers, the board shows that
     loading state, never the previous (unfiltered) figures (the msw handler holds the filtered answer on a promise the
@@ -1231,7 +1239,9 @@ among them).
     the "not checked", "superseded" and "not seen" marks render pairwise-distinct non-colour glyphs or patterns (by
     class or SVG pattern id) in the cells and the same ones in the legend with the word beside each, and no mark is
     drawn by `background-color` alone (a class-level guard; jsdom cannot apply `forced-colors`, so the browser check is
-    the smoke's, Task 19.9); each mark meets the contrast test (`test/contrast.ts`) on every band shade.
+    the smoke's, Task 19.9); each mark meets the contrast test (`test/contrast.ts`) on every band shade. The striped
+    mark is drawn in the cell's ink, the glyphs' colour, so the glyphs sit on the cell's own fill (`dates.css`) and no
+    stripe crosses their strokes (the browser check is `marks.spec.ts`, Task 19.9).
   - **Shading** (`logic/shade.test.ts`, with the ported scale tests): one scale for current verified and calendar figures
     together, by `quintileBand` over their prices in view (ties share a band); fewer than ten figures, or a spread under
     10% of the cheapest, gives the flat shade and the legend says so; superseded and not-seen figures are not on the
@@ -1257,7 +1267,9 @@ among them).
   - **Touch** (revision 50): a first tap on a cell focuses it and shows its readout (one line at 375 px); a second tap on
     the same cell, or the readout's "Open these dates" link, opens the detail; the readout stays visible while a month is
     swiped.
-  - **Rings both ways**: the board's shown rows are ringed (an outline class, not colour alone); hovering or focusing a
+  - **Rings both ways**: the board's shown rows are ringed (an outline class, not colour alone, of two tones, a black
+    line over a white one, so one tone clears 3:1 against every band's fill: black alone is about 2.2:1 on band 0;
+    `priceCellBands.test.tsx` checks each band with `test/contrast.ts`); hovering or focusing a
     row lights its cell and a ringed cell lights its row; neither calls `scrollIntoView` (spy).
   - **Phone**: one month at a time with Previous and Next month buttons and a swipe (pointer events), each day a row
     with its strip across the width, the legend and readout present (sizes in Task 19.9).
@@ -1434,7 +1446,7 @@ task's commit (Task 19.9 adds the performance test).
 
 ### Task 19.9: The Playwright smoke and the performance test
 
-**Files**: `apps/web/e2e/{smoke.spec.ts,selectors.ts,perf.spec.ts,perfFixtures.ts}`, `apps/web/playwright.config.ts`,
+**Files**: `apps/web/e2e/{smoke.spec.ts,selectors.ts,perf.spec.ts,perfFixtures.ts,marks.spec.ts}`, `apps/web/playwright.config.ts`,
 `.github/workflows/e2e.yml` and `scripts/workflows.test.mjs` (the `e2e` job),
 `apps/web/test/e2e/selectors.test.tsx`.
 
@@ -1457,13 +1469,17 @@ task's commit (Task 19.9 adds the performance test).
     `page.emulateMedia({ forcedColors: 'active' })`: on Dates each mark of the legend and of an overview cell that
     carries one still has its glyph or pattern (the glyph element is visible, or the computed `background-image` /
     SVG `fill` names the pattern), and the current nav entry keeps its non-colour cue.
+  - **Marks** (`marks.spec.ts`, desktop): the smoke's fixture run searches every cell, so it has no "partly not
+    searched" cell; this case is served through route interception (`servePerfCase` with `partly: true`: four weeks ×
+    3 stays × the example's 4 airport pairs, every fifth date pair with one airport pair not searched). Each partly
+    cell keeps its stripes, and its glyphs' computed background colour is the cell's own, never transparent.
   - **Performance** (`perf.spec.ts`, tagged `@perf`, desktop project): an init script installs a `longtask`
     `PerformanceObserver`; `page.route('**/api/**')` serves a synthetic definition, providers (the fixture provider,
     synthetic), status and executions, and the date-pairs body built by `@gmt/core`'s `encodeDatePairs` in
     `perfFixtures.ts` (every provenance `fixture`/`synthetic`) for (a) 36,400 date pairs every one with a figure (400 ×
-    91, one airport pair, `AAA` → `BBB`) and (b) 50,000 cells (250 days × 50 nights × the example's 4 airport pairs, as
+    91, one airport pair, the example's `LHR` → `JFK`) and (b) 50,000 cells (250 days × 50 nights × the example's 4 airport pairs, as
     the api's bound test seeds it: 400 × 25 × 5 needs a fifth airport pair, which needs a code outside the example's
-    six; every seventh date pair unpriced, its buckets cycling through the unpriced ones); the red
+    four airports; every seventh date pair unpriced, its buckets cycling through the unpriced ones); the red
     banner shows; with marks cleared before each step, the board and overview are drawn within 1.5 s of the response
     (`gmt:dates-drawn` minus `gmt:dates-response`); a stay filter change redraws within 200 ms; a re-rank redraws
     within 200 ms, triggered without waiting: the page is loaded under `page.clock.install()`, the served status and

@@ -4,6 +4,7 @@
  */
 import {
   type CellKey,
+  cellKeyString,
   type Execution,
   isTruncated,
   type ResolvedSpace,
@@ -12,6 +13,7 @@ import {
 import type { Ports } from '../wiring.js';
 import {
   calendarRow,
+  confirmedIn,
   latestPerOffer,
   notSeenResolver,
   type ResultRow,
@@ -132,4 +134,18 @@ export function loadRows(def: SearchDefinition, ports: Ports, opts: LoadOptions 
       calendar: calendarAll.length - calendarIn.length,
     },
   };
+}
+
+/**
+ * The cells in scope with a confirmed partially-verified price (spec §10 `partiallyVerified`; never a figure), keyed
+ * by `cellKeyString` as `classifyCells` looks them up. Here, beside `Loaded`, so `/results` and the date-pair route
+ * share one key path without importing each other (a hand-built key would drift from `cellKeyString`).
+ */
+export function partiallyVerifiedCells(loaded: Loaded): Set<string> {
+  const confirmed = confirmedIn(loaded);
+  return new Set(
+    loaded.verified
+      .filter((r) => r.verdictClass === 'partially-verified' && confirmed(r))
+      .map((r) => cellKeyString(r.cell)),
+  );
 }

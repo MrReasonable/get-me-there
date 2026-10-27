@@ -28,9 +28,25 @@ export function Filters({ definition, state }: { definition: DefinitionResponse;
   // why: typed text is held here until it is a value the URL can carry; a half-typed "1" of "14" never filters
   const [stay, setStay] = useState({ min: textOf(state.nights?.min), max: textOf(state.nights?.max) });
   const [journey, setJourney] = useState(textOf(state.journey ?? undefined));
+  // why: the form stays mounted for the view's life, so a URL change made outside it ("Clear filters" on the empty
+  // state, back and forward, a link) must reach the typed text, or the fields disagree with the filter applied. The
+  // text is replaced only when it doesn't already say the URL's value, so the operator's own edit (which wrote the
+  // URL) is never rewritten mid-typing; half-typed text the filter couldn't apply is replaced like any other.
+  // React's "adjust state while rendering" pattern: no effect, so no frame shows the stale text.
+  const urlStay = stayKey(state.nights?.min, state.nights?.max);
+  const [seenStay, setSeenStay] = useState(urlStay);
+  if (seenStay !== urlStay) {
+    setSeenStay(urlStay);
+    if (typedStayKey(stay.min, stay.max) !== urlStay)
+      setStay({ min: textOf(state.nights?.min), max: textOf(state.nights?.max) });
+  }
+  const [seenJourney, setSeenJourney] = useState(state.journey);
+  if (seenJourney !== state.journey) {
+    setSeenJourney(state.journey);
+    if (typedJourney(journey) !== state.journey) setJourney(textOf(state.journey ?? undefined));
+  }
   const stayError = stayProblem(stay.min, stay.max);
-  const typed = journey.trim();
-  const journeyError = typed !== '' && !(/^\d+$/.test(typed) && journeyInBounds(Number(typed)));
+  const journeyError = journey.trim() !== '' && typedJourney(journey) === undefined;
 
   const editStay = (next: { min: string; max: string }) => {
     setStay(next);
@@ -41,9 +57,8 @@ export function Filters({ definition, state }: { definition: DefinitionResponse;
   // why: the limit is sent to the route, so it applies on Enter or when the field is left, never on every key, and a
   // value outside the route's bounds is explained beside the field and never sent (the route would refuse it)
   const commitJourney = () => {
-    const t = journey.trim();
-    if (t === '') apply({ journey: null });
-    else if (/^\d+$/.test(t) && journeyInBounds(Number(t))) apply({ journey: Number(t) });
+    const limit = typedJourney(journey);
+    if (limit !== undefined) apply({ journey: limit });
   };
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();
@@ -184,6 +199,23 @@ function AirportPicker({
 }
 
 const textOf = (n: number | undefined): string => (n === undefined ? '' : String(n));
+
+/** A stay range as one comparable string: `-` for no range. */
+const stayKey = (min: number | undefined, max: number | undefined): string => `${min ?? ''}-${max ?? ''}`;
+
+/** The typed stay range's key when the filter can apply it, else null (it then matches no URL value). */
+function typedStayKey(min: string, max: string): string | null {
+  if (min.trim() === '' && max.trim() === '') return stayKey(undefined, undefined);
+  const r = nightsRange(`${min.trim()}-${max.trim()}`);
+  return r === null ? null : stayKey(r.min, r.max);
+}
+
+/** The typed journey limit as the URL carries it: null for blank, the minutes when in bounds, else undefined. */
+function typedJourney(text: string): number | null | undefined {
+  const t = text.trim();
+  if (t === '') return null;
+  return /^\d+$/.test(t) && journeyInBounds(Number(t)) ? Number(t) : undefined;
+}
 
 /** True when the typed stay range is not one the filter can apply (blank on both sides is "no range", not an error). */
 function stayProblem(min: string, max: string): boolean {

@@ -7,6 +7,14 @@
   background-image: repeating-linear-gradient(45deg, currentColor 0 1px, transparent 1px 5px);
 }
 
+/* The glyphs sit on the cell's own fill (the button's background colour, inherited), so a stripe in the glyphs' own ink
+   never crosses their strokes: the glyph is the cue that must not rely on colour, and it keeps the band's text-on-fill
+   contrast on every shade. */
+.dates-partly .dates-glyphs {
+  background-color: inherit;
+  padding: 0 1px;
+}
+
 /* A month of the overview off screen skips style, layout and paint until it nears the viewport (WP19 Task 19.9: the
    performance bound over 400 days). `auto` keeps the size it last rendered at, so the page does not jump; its cells
    stay in the accessibility tree and reachable by keyboard, and find-in-page still finds them. */

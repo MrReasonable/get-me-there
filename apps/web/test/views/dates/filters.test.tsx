@@ -1,5 +1,6 @@
-import { screen, waitFor, within } from '@testing-library/react';
+import { act, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
+import { updateSearchParams } from '../../../src/state/urlState.js';
 import { at, priced, pricedPair, workedDates } from '../../fixtures.dates.js';
 import { heldDates } from '../../msw/datesHandlers.js';
 import { server } from '../../msw/server.js';
@@ -98,6 +99,67 @@ describe('the filters (spec §11)', () => {
     await user.click(screen.getByRole('button', { name: 'Clear filters' }));
     expect(Object.fromEntries(url())).toEqual({ view: 'dates', def: 'def-0001', 'd.sort': 'nights.asc' });
     expect(screen.getByRole('textbox', { name: 'Stay from (nights)' })).toHaveValue('');
+  });
+
+  // why: Filters stays mounted for the view's life, so its typed text must follow a URL change made outside the form
+  // (CodeRabbit on PR #32): the fields never disagree with the filter applied
+  it('"Clear filters" on the empty state empties the typed stay range and journey limit', async () => {
+    const { user } = renderDates({
+      body: { destinations: ['JFK'] },
+      search: '?view=dates&def=def-0001&d.to=JFK&d.nights=10-10&d.journey=900',
+    });
+    const line = await screen.findByText('No date pair in these filters has a price found so far.');
+    const form = screen.getByRole('form', { name: 'Filters' });
+    const field = (name: string) => within(form).getByRole('textbox', { name });
+    expect(field('Stay from (nights)')).toHaveValue('10');
+    expect(field('Stay to (nights)')).toHaveValue('10');
+    expect(field('Max journey time (minutes)')).toHaveValue('900');
+    await user.click(
+      within(line.closest('div') ?? document.body).getByRole('button', { name: 'Clear filters' }),
+    );
+    expect([url().get('d.nights'), url().get('d.journey')]).toEqual([null, null]);
+    expect(field('Stay from (nights)')).toHaveValue('');
+    expect(field('Stay to (nights)')).toHaveValue('');
+    expect(field('Max journey time (minutes)')).toHaveValue('');
+  });
+
+  it('back and forward set the typed fields from the URL, half-typed text included', async () => {
+    const { user } = renderDates({ body: workedDates() });
+    await findBoard();
+    const stayFrom = screen.getByRole('textbox', { name: 'Stay from (nights)' });
+    const stayTo = screen.getByRole('textbox', { name: 'Stay to (nights)' });
+    const journey = screen.getByRole('textbox', { name: 'Max journey time (minutes)' });
+    // a navigation to a filtered URL (a pushed entry, as a link would make) fills the fields
+    act(() => updateSearchParams({ 'd.nights': '11-12', 'd.journey': '900' }, 'push'));
+    expect([stayFrom, stayTo, journey].map((f) => (f instanceof HTMLInputElement ? f.value : null))).toEqual([
+      '11',
+      '12',
+      '900',
+    ]);
+    // half-typed text the filter can't apply yet (11 to 5) is replaced too, never left beside another filter
+    await user.clear(stayTo);
+    await user.type(stayTo, '5');
+    expect(url().get('d.nights')).toBe('11-12');
+    const popped = new Promise((resolve) => window.addEventListener('popstate', resolve, { once: true }));
+    act(() => window.history.back());
+    await act(() => popped);
+    expect(url().get('d.nights')).toBeNull();
+    expect([stayFrom, stayTo, journey].map((f) => (f instanceof HTMLInputElement ? f.value : null))).toEqual([
+      '',
+      '',
+      '',
+    ]);
+  });
+
+  it('typing a stay range keeps the text as typed while the URL follows it', async () => {
+    const { user } = renderDates({ body: workedDates() });
+    await findBoard();
+    const stayTo = screen.getByRole('textbox', { name: 'Stay to (nights)' });
+    await user.type(screen.getByRole('textbox', { name: 'Stay from (nights)' }), '011');
+    await user.type(stayTo, '12');
+    expect(url().get('d.nights')).toBe('11-12');
+    // why: the URL now says 11, and the field keeps the operator's "011" rather than being rewritten mid-edit
+    expect(screen.getByRole('textbox', { name: 'Stay from (nights)' })).toHaveValue('011');
   });
 });
 

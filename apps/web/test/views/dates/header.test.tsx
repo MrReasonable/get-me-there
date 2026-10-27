@@ -2,6 +2,7 @@ import { asIata } from '@gmt/core';
 import { screen, within } from '@testing-library/react';
 import { HttpResponse, http } from 'msw';
 import { describe, expect, it } from 'vitest';
+import { qk } from '../../../src/api/queries.js';
 import { COPY } from '../../../src/copy.js';
 import {
   at,
@@ -18,6 +19,7 @@ import {
 } from '../../fixtures.dates.js';
 import { API, calendarGap, cell, execution, provCalendar } from '../../fixtures.js';
 import { server } from '../../msw/server.js';
+import { settled } from '../../render.js';
 import { findBoard, renderDates } from './render.js';
 
 // Spec §11 Dates "Header line", the calendar-gap banner on Dates and the red synthetic banner (revision 50).
@@ -153,6 +155,35 @@ describe('the calendar-gap banner on Dates (spec §11, revision 50)', () => {
   });
 
   it('under d.nights=10-14 a 20-night gap cell is not listed and the reference is unchanged', async () => {
+    const asked: string[] = [];
+    const [twelve, , twenty] = gap().cells;
+    server.use(
+      http.get(`${API}/definitions/:id/calendar-gap`, ({ request }) => {
+        asked.push(new URL(request.url).search);
+        return HttpResponse.json(
+          calendarGap({ cells: [twelve, twenty].flatMap((c) => (c === undefined ? [] : [c])) }),
+        );
+      }),
+    );
+    renderDates({
+      body: workedDates({ space: WIDE }),
+      search: '?view=dates&def=def-0001&d.nights=10-14',
+    });
+    const section = await screen.findByRole('region', { name: 'Cells to search' });
+    // the 12-night cell is listed, the 20-night one is not
+    expect(
+      within(section)
+        .getAllByRole('link')
+        .map((l) => l.textContent),
+    ).toEqual(['LHR → JFK 20 Mar 2027–1 Apr 2027 (12n)']);
+    // why: the reference is the whole search's cheapest verified price (£412, a 14-night cell): the stay filter
+    // never reaches the gap read, so the reference is the one an unfiltered read shows
+    expect(section).toHaveTextContent('reference across the whole search:');
+    expect(within(section).getAllByTestId('price-cell')[0]).toHaveTextContent('£412');
+    expect(asked).toEqual(['']);
+  });
+
+  it('under d.nights=10-14 a gap of only a 20-night cell shows no banner', async () => {
     server.use(
       http.get(`${API}/definitions/:id/calendar-gap`, () =>
         HttpResponse.json(
@@ -160,11 +191,17 @@ describe('the calendar-gap banner on Dates (spec §11, revision 50)', () => {
         ),
       ),
     );
-    renderDates({
+    const { client } = renderDates({
       body: workedDates({ space: WIDE }),
       search: '?view=dates&def=def-0001&d.nights=10-14',
     });
     await findBoard();
+    // why: the gap read must have answered, so an absent banner is the stay filter's doing, not a pending read
+    // (review tsr2-002's guard, as basisAndGap.test.tsx)
+    await settled(client);
+    expect(client.getQueryCache().find({ queryKey: qk.calendarGap('def-0001') })?.state.status).toBe(
+      'success',
+    );
     expect(screen.queryByRole('region', { name: 'Cells to search' })).toBeNull();
   });
 
@@ -200,8 +237,10 @@ describe('the calendar-gap banner on Dates (spec §11, revision 50)', () => {
         return HttpResponse.json(gap());
       }),
     );
-    renderDates({ body: { ...workedDates(), verificationProviderConfigured: false } });
+    const { client } = renderDates({ body: { ...workedDates(), verificationProviderConfigured: false } });
     await findBoard();
+    // why: settle first, so a gap request the render fired late would be counted (review tsr2-002)
+    await settled(client);
     expect(asked).toBe(0);
   });
 });

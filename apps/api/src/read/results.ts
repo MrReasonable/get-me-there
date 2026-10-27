@@ -1,7 +1,6 @@
 /** Spec §6.5, §6.9, §10 `/results`: the date pair detail's source, and the basis rule every view shares. */
 import {
   type apiContract,
-  cellKeyString,
   datePairIndex,
   dedupByItinerary,
   rankRows,
@@ -13,8 +12,8 @@ import { API_TEXT } from '../text.js';
 import type { Ports } from '../wiring.js';
 import { datePairFigures } from './datePairs.js';
 import { executionSummary } from './executions.js';
-import { type Loaded, loadRows } from './load.js';
-import { type Basis, confirmedIn } from './rows.js';
+import { type Loaded, loadRows, partiallyVerifiedCells } from './load.js';
+import type { Basis } from './rows.js';
 import { classifyCells, parentFacts, parseScope, summariseCells } from './scope.js';
 import { currentSpace } from './space.js';
 
@@ -63,16 +62,6 @@ function scopeRequested(q: ResultsQuery): boolean {
     q.origins !== undefined ||
     q.destinations !== undefined ||
     q.maxJourneyMinutes !== undefined
-  );
-}
-
-/** The cells in scope with a confirmed partially-verified price (spec §10 `partiallyVerified`; never a figure). */
-export function partiallyVerifiedCells(loaded: Loaded): Set<string> {
-  const confirmed = confirmedIn(loaded);
-  return new Set(
-    loaded.verified
-      .filter((r) => r.verdictClass === 'partially-verified' && confirmed(r))
-      .map((r) => cellKeyString(r.cell)),
   );
 }
 

@@ -395,19 +395,26 @@ describe("datePairFigureSchema (the detail's figure, the board's less its airpor
   it('parses a verified figure with inline provenance', () => {
     expect(datePairFigureSchema.parse(figure)).toEqual(figure);
   });
+  /** The verified figure's times cleared, so a calendar case breaks only the rule it names. */
+  const noTimes = { departOut: null, arriveOut: null, departBack: null, arriveBack: null };
+  const calendar = { ...figure, ...noTimes, basis: 'calendar', notSeenInLatest: null };
+  it('parses a calendar figure with no local times', () => {
+    expect(datePairFigureSchema.parse(calendar)).toEqual(calendar);
+  });
   it.each([
     ['superseded on a verified figure', { superseded: true }, 'superseded'],
     ['truncated on a verified figure', { price: { ...figure.price, truncated: true } }, 'price.truncated'],
-    ['a not-seen age on a calendar figure', { basis: 'calendar' }, 'notSeenInLatest'],
+    ['a not-seen age on a calendar figure', { ...noTimes, basis: 'calendar' }, 'notSeenInLatest'],
     [
       'a cheaper-cached price on a calendar figure',
-      {
-        basis: 'calendar',
-        notSeenInLatest: null,
-        cheaperCached: cheaper(1),
-      },
+      { ...calendar, cheaperCached: cheaper(1) },
       'cheaperCached',
     ],
+    // why: §10 refuses times on a calendar figure; the board's `times` group refuses them too, so the two encodings
+    // of one figure accept the same shapes (an "arrives HH:MM" beside a price whose constraints were never checked)
+    ...(['departOut', 'arriveOut', 'departBack', 'arriveBack'] as const).map(
+      (k) => [`a local time (${k}) on a calendar figure`, { ...calendar, [k]: '08:15' }, k] as const,
+    ),
     [
       "a cheaper-cached price not below the figure's",
       { cheaperCached: cheaper(figure.price.pricePence) },

@@ -341,11 +341,13 @@ describe('figuresByDatePair (spec §10 maxJourneyMinutes; decision 53)', () => {
     const rows = [
       cal(10_000, { cell: at('LHR', 'JFK', '2027-03-16') }), // departs after the window
       cal(10_000, { cell: cellAt('LHR', 'JFK', '2027-03-14', '2027-03-26', 12) }), // 12 nights, outside 10..11
-      cal(10_000, { cell: at('LHR', 'BBB') }), // destination outside the scope
-      cal(10_000, { cell: at('AAA', 'JFK') }), // origin outside the scope
+      cal(10_000, { cell: at('LHR', 'EWR') }), // destination outside the scope
+      cal(10_000, { cell: at('LGW', 'JFK') }), // origin outside the scope
       cal(31_200, { cell: at('LHR', 'JFK', '2027-03-15', 11) }),
     ];
-    const { figures } = figuresByDatePair(rows, withLimit(null), NOW);
+    // why: an LHR → JFK scope, so the example's other airports stand outside it (no code outside the example needed)
+    const narrow = { ...space, origins: [asIata('LHR')], destinations: [asIata('JFK')] };
+    const { figures } = figuresByDatePair(rows, { space: narrow, maxJourneyMinutes: null }, NOW);
     // 15 Mar, 11 nights is index 1 × 2 + 1 = 3
     expect([...figures.keys()]).toEqual([3]);
     expect(figures.get(3)?.chosen.pricePence).toBe(31_200);
