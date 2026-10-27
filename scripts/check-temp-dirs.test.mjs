@@ -7,7 +7,8 @@ import { HELPER_PACKAGES, helperProblems, isTestFile, mkdtempIn } from './check-
 
 const REPO = fileURLToPath(new URL('../', import.meta.url));
 
-describe('scripts/check-temp-dirs.mjs', () => {
+// why: the first case scans every file git lists, in a child process allowed 60 s; the test allows the same
+describe('scripts/check-temp-dirs.mjs', { timeout: 60_000 }, () => {
   it('passes on this repository', () => {
     const r = spawnSync(process.execPath, [join(REPO, 'scripts', 'check-temp-dirs.mjs')], {
       cwd: REPO,
