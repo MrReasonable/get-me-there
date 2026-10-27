@@ -267,6 +267,39 @@ describe('AirportsRepo', () => {
     expect(repo.search('field', 1)).toHaveLength(1);
   });
 
+  it('search by a city brings that city’s whole metro, its airports first; a name matches at a word start before inside a word', () => {
+    // why: the operator types a place, not a code; "lond" must offer every airport of the London metro (Southend's
+    // city is not London) ahead of other towns whose names merely contain the letters (plan-a-search).
+    const repo = seeded(
+      [
+        row('LHR', { name: 'London Heathrow Airport', city: 'London', country: 'GB' }),
+        row('LGW', { name: 'London Gatwick Airport', city: 'London', country: 'GB' }),
+        row('SEN', { name: 'Southend Airport', city: 'Southend', country: 'GB' }),
+        row('BQH', { name: 'Biggin Hill Airport', city: 'London', country: 'GB' }),
+        row('LDB', { name: 'Governador Jose Richa Airport', city: 'Londrina', country: 'BR' }),
+        row('ELS', { name: 'Ben Schoeman Airport', city: 'East London', country: 'ZA' }),
+        row('JFK', { name: 'John F Kennedy International Airport', city: 'New York', country: 'US' }),
+        row('LGA', { name: 'La Guardia Airport', city: 'New York', country: 'US' }),
+        row('EWR', { name: 'Newark Liberty International Airport', city: 'Newark', country: 'US' }),
+        row('NHX', { name: 'Thornhill Field', city: 'Synthetic City' }),
+      ],
+      { LON: ['LHR', 'LGW', 'SEN'], NYC: ['EWR', 'JFK', 'LGA'] },
+    );
+    const codes = (q: string) => repo.search(q, 20).map((a) => a.iata);
+    expect(codes('lond')).toEqual(['LGW', 'LHR', 'SEN', 'BQH', 'LDB', 'ELS']);
+    expect(codes('new y')).toEqual(['EWR', 'JFK', 'LGA']);
+    // a city matched inside its name still brings its whole metro
+    expect(codes('york')).toEqual(['EWR', 'JFK', 'LGA']);
+    // a name match does not pull in the rest of the metro: "heathrow" means Heathrow
+    expect(codes('heathrow')).toEqual(['LHR']);
+    // "hill" starts a word of Biggin Hill before it sits inside Thornhill
+    expect(codes('hill')).toEqual(['BQH', 'NHX']);
+    // a code still comes first, alone: its metro siblings are not added
+    expect(codes('lhr')).toEqual(['LHR']);
+    // a metro code lists its airports first, then the places whose names start with the letters
+    expect(codes('LON')).toEqual(['LGW', 'LHR', 'SEN', 'BQH', 'LDB', 'ELS']);
+  });
+
   it('rejects a malformed country, an unknown time zone and a malformed metro code, writing nothing', () => {
     // why: a malformed IATA code cannot be built without a cast (asIata throws), so the typed path proves the other rules.
     const repo = new AirportsRepo(freshDb());

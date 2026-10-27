@@ -69,18 +69,41 @@ export class AirportsRepo {
     );
   }
 
-  /** Autocomplete (spec §11, `GET /api/airports`): exact code, then a metro code's members (po-003), then code prefix, then name/city substring. */
+  /**
+   * Autocomplete (spec §11, `GET /api/airports`). Rank: exact code, then a metro code's members (po-003), then code
+   * prefix, then a city that starts with the text, then a name word that starts with it, then any other name or city
+   * substring. An airport whose city matches brings the rest of its metro at its rank (a metro's outlying airport has
+   * a neighbouring town as its city), so typing a place offers all its airports, and a name match ("heathrow") brings
+   * only that airport. Metro members sort first within a rank, grouped by metro.
+   */
   search(q: string, limit: number): Airport[] {
     const needle = q.trim();
     if (needle.length === 0) return [];
-    // why: the operator's text is matched literally; % and _ are escaped for LIKE.
+    // why: the operator's text is matched literally; % and _ are escaped for LIKE (case-insensitive for ASCII).
     const e = needle.replace(/[\\%_]/g, (c) => `\\${c}`);
     return this.db.raw
       .prepare<Record<string, unknown>, AirportDbRow>(
-        `SELECT * FROM airports
-         WHERE iata = upper(@q) OR metro = upper(@q) OR iata LIKE upper(@e) || '%' ESCAPE '\\'
-            OR name LIKE '%' || @e || '%' ESCAPE '\\' OR city LIKE '%' || @e || '%' ESCAPE '\\'
-         ORDER BY CASE WHEN iata = upper(@q) THEN 0 WHEN metro = upper(@q) THEN 1 WHEN iata LIKE upper(@e) || '%' ESCAPE '\\' THEN 2 ELSE 3 END, iata
+        `WITH ranked AS (
+           SELECT iata, metro, city LIKE '%' || @e || '%' ESCAPE '\\' AS city_hit, CASE
+             WHEN iata = upper(@q) THEN 0
+             WHEN metro = upper(@q) THEN 1
+             WHEN iata LIKE upper(@e) || '%' ESCAPE '\\' THEN 2
+             WHEN city LIKE @e || '%' ESCAPE '\\' THEN 3
+             WHEN ' ' || name LIKE '% ' || @e || '%' ESCAPE '\\' THEN 4
+             WHEN name LIKE '%' || @e || '%' ESCAPE '\\' OR city LIKE '%' || @e || '%' ESCAPE '\\' THEN 5
+           END AS r
+           FROM airports
+         ),
+         hits AS (SELECT iata, metro, city_hit, r FROM ranked WHERE r IS NOT NULL),
+         city_metros AS (
+           SELECT metro, min(r) AS r FROM hits WHERE city_hit AND metro IS NOT NULL GROUP BY metro
+         )
+         SELECT a.*, min(coalesce(h.r, 9), coalesce(c.r, 9)) AS rank
+         FROM airports a
+         LEFT JOIN hits h ON h.iata = a.iata
+         LEFT JOIN city_metros c ON c.metro = a.metro
+         WHERE h.iata IS NOT NULL OR c.metro IS NOT NULL
+         ORDER BY rank, a.metro IS NULL, a.metro, a.iata
          LIMIT @limit`,
       )
       .all({ q: needle, e, limit: Math.max(1, Math.trunc(limit)) })

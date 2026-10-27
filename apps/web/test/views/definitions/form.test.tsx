@@ -2,6 +2,7 @@ import { CONSTRAINT_LABELS } from '@gmt/core';
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { delay, HttpResponse, http } from 'msw';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { PLAN_COPY } from '../../../src/copy/plan.js';
 import { SETUP_COPY } from '../../../src/copy/setup.js';
 import { COPY } from '../../../src/copy.js';
 import { EXAMPLE_LABEL } from '../../../src/example.js';
@@ -52,20 +53,25 @@ function estimateBodies() {
 describe('Definitions form defaults (spec §11)', () => {
   it('starts with empty airports and the spec defaults; the plan preset fills providers, policy and budget', async () => {
     const { user } = renderForm();
-    expect(chipCodes('Origins')).toEqual([]);
-    expect(screen.getByRole('radio', { name: 'Relative to today' })).toBeChecked();
+    expect(chipCodes('From')).toEqual([]);
+    expect(chipCodes('To')).toEqual([]);
+    // the default rolling window is the "Next 6 months" quick choice; the dates show what it covers today
+    expect(screen.getByRole('button', { name: 'Next 6 months' })).toHaveAttribute('aria-pressed', 'true');
+    expect(fieldValue(PLAN_COPY.earliest)).toBe('2026-10-21');
+    expect(fieldValue(PLAN_COPY.latest)).toBe('2027-04-20');
+    expect(screen.getByText(PLAN_COPY.rolling(7, 182))).toBeInTheDocument();
     expect(fieldValue('Starts in (days)')).toBe('7');
     expect(fieldValue('Length (days)')).toBe('182');
     expect(
       screen.getByText('departures from 21 Oct 2026 to 20 Apr 2027, as resolved today'),
     ).toBeInTheDocument();
-    expect(fieldValue('Min nights')).toBe('10');
-    expect(fieldValue('Max nights')).toBe('21');
+    expect(fieldValue('Shortest stay')).toBe('10');
+    expect(fieldValue('Longest stay')).toBe('21');
     expect(fieldValue('Cabin')).toBe('economy');
-    await user.click(screen.getByText('Advanced: constraints and policy'));
+    await user.click(screen.getByText(PLAN_COPY.moreOptions));
     // 1500 minutes, entered and shown as 25 hours 0 minutes
     const D = SETUP_COPY.definitions;
-    const journey = CONSTRAINT_LABELS.maxJourneyMinutes;
+    const journey = PLAN_COPY.journey;
     expect(fieldValue(D.journeyPart(journey, D.journeyHours))).toBe('25');
     expect(fieldValue(D.journeyPart(journey, D.journeyMinutes))).toBe('0');
     expect(fieldValue(`${CONSTRAINT_LABELS.arrivalWindowLocal} from`)).toBe('06:00');
@@ -106,9 +112,9 @@ describe('Definitions form defaults (spec §11)', () => {
   it('every money field takes pounds and sends integer pence (review po-012)', async () => {
     const bodies = estimateBodies();
     const { user } = renderForm();
-    await user.type(screen.getByLabelText('Origins'), 'LHR{Enter}');
-    await user.type(screen.getByLabelText('Destinations'), 'JFK{Enter}');
-    await user.click(screen.getByText('Advanced: constraints and policy'));
+    await user.type(screen.getByLabelText('From'), 'LHR{Enter}');
+    await user.type(screen.getByLabelText('To'), 'JFK{Enter}');
+    await user.click(screen.getByText(PLAN_COPY.moreOptions));
     await user.type(screen.getByLabelText(`${CONSTRAINT_LABELS.maxPricePence} (£)`), '480');
     await user.type(screen.getByLabelText('Price ceiling in £ (optional)'), '500.50');
     await user.clear(screen.getByLabelText('Max cost per run in £'));
@@ -125,7 +131,7 @@ describe('Definitions form defaults (spec §11)', () => {
   it('airline constraints parse like the carriers filter: codes kept, other entries shown as ignored (review arch-r2-009)', async () => {
     const bodies = estimateBodies();
     const { user } = renderForm();
-    await user.click(screen.getByText('Advanced: constraints and policy'));
+    await user.click(screen.getByText(PLAN_COPY.moreOptions));
     await user.type(screen.getByLabelText(CONSTRAINT_LABELS.includeAirlines), 'zz, British');
     await user.tab();
     expect(screen.getByText('ignored, not two-character carrier codes: BRITISH')).toBeInTheDocument();
@@ -134,16 +140,47 @@ describe('Definitions form defaults (spec §11)', () => {
     expect(bodies[0]).toMatchObject({ constraints: { includeAirlines: ['ZZ'] } });
   });
 
-  it('switching the window mode keeps the other mode values (review PFT-08)', async () => {
+  it('a quick choice is a rolling window; a changed date fixes the window; a quick choice again keeps the rolling start (review PFT-08)', async () => {
+    const bodies = estimateBodies();
     const { user } = renderForm();
+    await user.click(screen.getByText(PLAN_COPY.moreOptions));
     await user.clear(screen.getByLabelText('Starts in (days)'));
     await user.type(screen.getByLabelText('Starts in (days)'), '14');
-    await user.click(screen.getByRole('radio', { name: 'Fixed dates' }));
-    await user.type(screen.getByLabelText('From'), '2027-04-01');
-    await user.click(screen.getByRole('radio', { name: 'Relative to today' }));
+    await user.click(screen.getByRole('button', { name: 'Next 3 months' }));
+    expect(fieldValue(PLAN_COPY.earliest)).toBe('2026-10-28');
+    expect(fieldValue(PLAN_COPY.latest)).toBe('2027-01-26');
+    fireEvent.change(screen.getByLabelText(PLAN_COPY.latest), { target: { value: '2027-04-01' } });
+    // fixed dates: the other end is the date the rolling window had today, and no quick choice is pressed
+    expect(fieldValue(PLAN_COPY.earliest)).toBe('2026-10-28');
+    expect(screen.getByText(PLAN_COPY.fixed)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Next 3 months' })).toHaveAttribute('aria-pressed', 'false');
+    await user.click(screen.getByRole('button', { name: 'Show estimate' }));
+    await expect.poll(() => bodies.length).toBe(1);
+    expect(bodies[0]).toMatchObject({ window: { kind: 'absolute', from: '2026-10-28', to: '2027-04-01' } });
+    await user.click(screen.getByRole('button', { name: 'Next 12 months' }));
     expect(fieldValue('Starts in (days)')).toBe('14');
-    await user.click(screen.getByRole('radio', { name: 'Fixed dates' }));
-    expect(fieldValue('From')).toBe('2027-04-01');
+    expect(fieldValue('Length (days)')).toBe('365');
+    await user.click(screen.getByRole('button', { name: 'Show estimate' }));
+    await expect.poll(() => bodies.length).toBe(2);
+    expect(bodies[1]).toMatchObject({ window: { kind: 'relative', startOffsetDays: 14, lengthDays: 365 } });
+  });
+
+  it.each([
+    [3, 91],
+    [6, 182],
+    [9, 273],
+    [12, 365],
+  ])('the "Next %i months" quick choice is a rolling window of %i days', async (months, days) => {
+    const bodies = estimateBodies();
+    const { user } = renderForm();
+    await user.click(screen.getByRole('button', { name: `Next ${months} months` }));
+    expect(screen.getByRole('button', { name: `Next ${months} months` })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    await user.click(screen.getByRole('button', { name: 'Show estimate' }));
+    await expect.poll(() => bodies.length).toBe(1);
+    expect(bodies[0]).toMatchObject({ window: { kind: 'relative', startOffsetDays: 7, lengthDays: days } });
   });
 
   it('editing a disabled definition keeps it disabled (review po-011)', async () => {
@@ -170,12 +207,13 @@ describe('airport entry (review focus 1)', () => {
       'lhrx',
     ]);
     const { user } = renderForm();
-    const input = screen.getByLabelText('Origins');
+    const input = screen.getByLabelText('From');
     await user.type(input, 'lhr');
     await user.tab();
     expect(input).toHaveValue('LHR');
-    await user.click(screen.getByRole('button', { name: 'Add origin' }));
-    expect(chipCodes('Origins')).toEqual(['LHR']);
+    await user.click(input);
+    await user.keyboard('{Enter}');
+    await waitFor(() => expect(chipCodes('From')).toEqual(['LHR']));
     expect(screen.getByRole('button', { name: 'Remove LHR' })).toHaveClass('min-h-11');
     expect(input).toHaveValue('');
     await user.type(input, 'London');
@@ -185,26 +223,26 @@ describe('airport entry (review focus 1)', () => {
 
   it('Enter adds without a blur, a pasted " lgw " is trimmed, and a duplicate is refused', async () => {
     const { user } = renderForm();
-    const input = screen.getByLabelText('Origins');
+    const input = screen.getByLabelText('From');
     await user.click(input);
     await user.paste(' lgw ');
     await user.keyboard('{Enter}');
-    expect(chipCodes('Origins')).toEqual(['LGW']);
+    expect(chipCodes('From')).toEqual(['LGW']);
     await user.type(input, 'lgw{Enter}');
     expect(screen.getByText('LGW is already in the list.')).toBeInTheDocument();
-    expect(chipCodes('Origins')).toEqual(['LGW']);
+    expect(chipCodes('From')).toEqual(['LGW']);
   });
 
   it.each(['L1', 'LHRX'])('rejects "%s" locally, and links the message to the input', async (code) => {
     const { user } = renderForm();
-    const input = screen.getByLabelText('Origins');
+    const input = screen.getByLabelText('From');
     await user.type(input, `${code}{Enter}`);
-    expect(screen.getByText('An airport code is three letters.')).toBeInTheDocument();
+    expect(screen.getByText(PLAN_COPY.pickOrCode)).toBeInTheDocument();
     expect(input).toHaveAttribute('aria-invalid', 'true');
     expect(input.getAttribute('aria-describedby')).toContain('origins-errors');
   });
 
-  it('autocompletes from GET /api/airports?q= once the debounce has passed', async () => {
+  it('autocompletes from GET /api/airports?q= once the debounce has passed, in a listbox', async () => {
     // why: fake the clear functions too, or a cleared debounce timer still fires on the real clock.
     vi.useFakeTimers({
       toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'],
@@ -222,15 +260,21 @@ describe('airport entry (review focus 1)', () => {
     const { user } = renderWithProviders(<DefinitionForm existing={null} providers={providersResponse()} />, {
       fakeTimers: true,
     });
-    await user.type(screen.getByLabelText('Origins'), 'lon');
+    await user.type(screen.getByLabelText('From'), 'lon');
     expect(queries).toEqual([]);
     await act(() => vi.advanceTimersByTimeAsync(AIRPORT_DEBOUNCE_MS));
     // why: vi.waitFor steps the fake clock itself, so nothing here depends on the real one
-    await vi.waitFor(() => expect(document.querySelectorAll('#origins-options option')).toHaveLength(2));
-    const options = [...document.querySelectorAll('#origins-options option')].map(
-      (o) => `${o.getAttribute('value')} ${o.textContent}`,
-    );
-    expect(options).toEqual(['LHR Heathrow, London, United Kingdom', 'LGW Gatwick, London, United Kingdom']);
+    const listbox = () => screen.getByRole('listbox', { name: 'From: matching airports' });
+    await vi.waitFor(() => expect(within(listbox()).getAllByRole('option')).toHaveLength(3));
+    expect(
+      within(listbox())
+        .getAllByRole('option')
+        .map((o) => o.getAttribute('aria-label')),
+    ).toEqual([
+      'London, all airports (LHR, LGW)',
+      'Heathrow (LHR) · London, United Kingdom',
+      'Gatwick (LGW) · London, United Kingdom',
+    ]);
     expect(queries).toEqual(['lon']);
     vi.useRealTimers();
   });
@@ -238,14 +282,15 @@ describe('airport entry (review focus 1)', () => {
   it.each([
     [
       'Enter',
-      async (u: ReturnType<typeof renderForm>['user']) =>
-        u.type(screen.getByLabelText('Origins'), 'lon{Enter}'),
+      async (u: ReturnType<typeof renderForm>['user']) => u.type(screen.getByLabelText('From'), 'lon{Enter}'),
     ],
     [
-      'Add',
+      'Enter after a blur',
       async (u: ReturnType<typeof renderForm>['user']) => {
-        await u.type(screen.getByLabelText('Origins'), 'LON');
-        await u.click(screen.getByRole('button', { name: 'Add origin' }));
+        await u.type(screen.getByLabelText('From'), 'lon');
+        await u.tab();
+        await u.click(screen.getByLabelText('From'));
+        await u.keyboard('{Enter}');
       },
     ],
   ])(
@@ -260,31 +305,27 @@ describe('airport entry (review focus 1)', () => {
       server.use(held);
       const { user } = renderForm();
       await enter(user);
-      await waitFor(() => expect(chipCodes('Origins')).toEqual(['LHR', 'LGW']));
+      await waitFor(() => expect(chipCodes('From')).toEqual(['LHR', 'LGW']));
       expect(screen.getByRole('status')).toHaveTextContent('LON is a city code: added LHR, LGW.');
-      expect(chipCodes('Origins')).not.toContain('LON');
+      expect(chipCodes('From')).not.toContain('LON');
     },
   );
 
   it('a code the airports table does not map is added as typed and left to the API to judge', async () => {
     server.use(http.get(`${API}/airports`, () => HttpResponse.json([])));
     const { user } = renderForm();
-    await user.type(screen.getByLabelText('Destinations'), 'jfk{Enter}');
-    await waitFor(() => expect(chipCodes('Destinations')).toEqual(['JFK']));
+    await user.type(screen.getByLabelText('To'), 'jfk{Enter}');
+    await waitFor(() => expect(chipCodes('To')).toEqual(['JFK']));
   });
 });
 
 describe("the API's field errors (422 details.fields) land under the field they name (review tsr-013)", () => {
   it.each<[string, string, () => HTMLElement]>([
-    ['origins.0', 'LON is a city code; use one of LHR, LGW', () => screen.getByLabelText('Origins')],
-    [
-      'destinations',
-      'origins and destinations must be disjoint',
-      () => screen.getByLabelText('Destinations'),
-    ],
+    ['origins.0', 'LON is a city code; use one of LHR, LGW', () => screen.getByLabelText('From')],
+    ['destinations', 'origins and destinations must be disjoint', () => screen.getByLabelText('To')],
     ['name', 'name: required', () => screen.getByLabelText('Name')],
     ['window.lengthDays', 'lengthDays must be at most 400', () => screen.getByLabelText('Length (days)')],
-    ['maxNights', 'maxNights must be at least minNights', () => screen.getByLabelText('Max nights')],
+    ['maxNights', 'maxNights must be at least minNights', () => screen.getByLabelText('Longest stay')],
   ])('%s', async (field, message, input) => {
     server.use(
       http.post(`${API}/definitions/estimate`, () =>
@@ -345,15 +386,15 @@ describe('blocking, required fields, pending and focus (fix round 1)', () => {
   it('a cleared nights box is "required", blocks estimating, and is never sent as 0 (UI-10)', async () => {
     const bodies = estimateBodies();
     const { user } = renderForm();
-    await user.clear(screen.getByLabelText('Min nights'));
+    await user.clear(screen.getByLabelText('Shortest stay'));
     expect(screen.getByRole('alert')).toHaveTextContent('required');
-    expect(screen.getByLabelText('Min nights')).toBeInvalid();
+    expect(screen.getByLabelText('Shortest stay')).toBeInvalid();
     const estimate = screen.getByRole('button', { name: 'Show estimate' });
     expect(estimate).toBeDisabled();
     expect(estimate).toHaveAccessibleDescription(
       'Cannot estimate or save: fill in the required number fields.',
     );
-    await user.type(screen.getByLabelText('Min nights'), '8');
+    await user.type(screen.getByLabelText('Shortest stay'), '8');
     expect(screen.getByRole('button', { name: 'Show estimate' })).toBeEnabled();
     await user.click(screen.getByRole('button', { name: 'Show estimate' }));
     await expect.poll(() => bodies.length).toBe(1);
@@ -403,12 +444,12 @@ describe('blocking, required fields, pending and focus (fix round 1)', () => {
     const summary = await screen.findByRole('alert');
     expect(summary).toHaveTextContent('constraints.maxStops: too many');
     await waitFor(() => expect(summary).toHaveFocus());
-    expect(screen.getByText('Advanced: constraints and policy').closest('details')).toHaveAttribute('open');
+    expect(screen.getByText(PLAN_COPY.moreOptions).closest('details')).toHaveAttribute('open');
   });
 
   it('a pounds box with text that is not an amount says so instead of silently keeping the old value (UI-8)', async () => {
     const { user } = renderForm();
-    await user.type(screen.getByLabelText('Destinations'), 'JFK{Enter}');
+    await user.type(screen.getByLabelText('To'), 'JFK{Enter}');
     const box = screen.getByLabelText(/^Onward cost to JFK in £/);
     await user.type(box, '12.5.0');
     expect(box).toBeInvalid();
@@ -422,8 +463,8 @@ describe('per-destination fields and the example (spec §11)', () => {
   it('note and onward cost per destination reach the estimate request, the cost in pence', async () => {
     const bodies = estimateBodies();
     const { user } = renderForm();
-    await user.type(screen.getByLabelText('Origins'), 'LHR{Enter}');
-    await user.type(screen.getByLabelText('Destinations'), 'JFK{Enter}');
+    await user.type(screen.getByLabelText('From'), 'LHR{Enter}');
+    await user.type(screen.getByLabelText('To'), 'JFK{Enter}');
     await user.type(screen.getByLabelText('Note for JFK (shown on every row)'), 'onward leg not included');
     await user.type(
       screen.getByLabelText('Onward cost to JFK in £ (optional, shown as a separate adjusted column)'),
@@ -443,7 +484,7 @@ describe('per-destination fields and the example (spec §11)', () => {
   it('the time-window boxes follow the draft: Import example shows its 06:00–23:00 arrival window (review arch-r3-004)', async () => {
     const bodies = estimateBodies();
     const { user } = renderForm();
-    await user.click(screen.getByText('Advanced: constraints and policy'));
+    await user.click(screen.getByText(PLAN_COPY.moreOptions));
     const from = `${CONSTRAINT_LABELS.arrivalWindowLocal} from`;
     const to = `${CONSTRAINT_LABELS.arrivalWindowLocal} to`;
     await user.clear(screen.getByLabelText(from));
@@ -458,7 +499,7 @@ describe('per-destination fields and the example (spec §11)', () => {
 
   it('a half-filled time window shows "both ends needed" instead of being dropped, and filling the other end clears it (controller-directed)', async () => {
     const { user } = renderForm();
-    await user.click(screen.getByText('Advanced: constraints and policy'));
+    await user.click(screen.getByText(PLAN_COPY.moreOptions));
     const from = `${CONSTRAINT_LABELS.arrivalWindowLocal} from`;
     const to = `${CONSTRAINT_LABELS.arrivalWindowLocal} to`;
     expect(screen.queryByText('both ends needed')).toBeNull();
@@ -473,7 +514,7 @@ describe('per-destination fields and the example (spec §11)', () => {
   it('a half-filled time window disables Show estimate, says why beside it, sends nothing, and re-enables once fixed (coordinator correction)', async () => {
     const bodies = estimateBodies();
     const { user, client } = renderForm();
-    await user.click(screen.getByText('Advanced: constraints and policy'));
+    await user.click(screen.getByText(PLAN_COPY.moreOptions));
     const to = `${CONSTRAINT_LABELS.arrivalWindowLocal} to`;
     await user.clear(screen.getByLabelText(to));
     const estimate = screen.getByRole('button', { name: 'Show estimate' });
@@ -492,7 +533,7 @@ describe('per-destination fields and the example (spec §11)', () => {
 
   it('a half-filled time window also disables Save changes on an existing definition (coordinator correction)', async () => {
     const { user } = renderForm(definition());
-    await user.click(screen.getByText('Advanced: constraints and policy'));
+    await user.click(screen.getByText(PLAN_COPY.moreOptions));
     await user.clear(screen.getByLabelText(`${CONSTRAINT_LABELS.arrivalWindowLocal} to`));
     expect(screen.getByRole('button', { name: 'Save changes' })).toBeDisabled();
     expect(screen.getByText(/Cannot estimate or save/)).toBeInTheDocument();
@@ -502,10 +543,10 @@ describe('per-destination fields and the example (spec §11)', () => {
     const { user } = renderForm();
     await user.click(screen.getByRole('button', { name: `Import example (${EXAMPLE_LABEL})` }));
     expect(fieldValue('Name')).not.toBe('');
-    expect(chipCodes('Origins')).toEqual(['LHR', 'LGW']);
-    expect(chipCodes('Destinations')).toEqual(['JFK', 'EWR']);
-    expect(fieldValue('Min nights')).toBe('10');
-    expect(fieldValue('Max nights')).toBe('21');
+    expect(chipCodes('From')).toEqual(['LHR', 'LGW']);
+    expect(chipCodes('To')).toEqual(['JFK', 'EWR']);
+    expect(fieldValue('Shortest stay')).toBe('10');
+    expect(fieldValue('Longest stay')).toBe('21');
   });
 
   it('"import example" leaves the per-execution budget from the plan preset (the api\'s new-definition source), never zeroed or the file\'s', async () => {
@@ -516,7 +557,7 @@ describe('per-destination fields and the example (spec §11)', () => {
     };
     const { user } = renderWithProviders(<DefinitionForm existing={null} providers={providers} />);
     await user.click(screen.getByRole('button', { name: `Import example (${EXAMPLE_LABEL})` }));
-    await user.click(screen.getByText(COPY.advanced));
+    await user.click(screen.getByText(PLAN_COPY.moreOptions));
     expect(fieldValue(COPY.maxCalls)).toBe('321');
     expect(fieldValue(COPY.maxFreeCalls)).toBe('654');
   });

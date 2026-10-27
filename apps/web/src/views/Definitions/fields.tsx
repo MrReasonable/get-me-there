@@ -51,6 +51,7 @@ export function NumberField({
   hint,
   description,
   errors = [],
+  labelClassName,
 }: {
   id: string;
   label: string;
@@ -59,12 +60,16 @@ export function NumberField({
   hint?: string;
   description?: string;
   errors?: readonly string[];
+  /** Classes for the label, e.g. `sr-only` where a visible group label already says what the box is. */
+  labelClassName?: string;
 }) {
   const errorId = `${id}-errors`;
   const hintId = `${id}-hint`;
   return (
     <span className="flex max-w-xs flex-col gap-0.5">
-      <label htmlFor={id}>{label}</label>
+      <label htmlFor={id} className={labelClassName}>
+        {label}
+      </label>
       <span className="flex items-center gap-1">
         <input
           id={id}
@@ -99,13 +104,19 @@ export function HoursMinutesField({
   label,
   value,
   onChange,
+  description,
+  legendClassName,
 }: {
   id: string;
   label: string;
   value: number | undefined;
   onChange: (minutes: number | undefined) => void;
+  description?: string;
+  legendClassName?: string;
 }) {
   const [text, setText] = useState(() => splitMinutes(value));
+  const hintId = `${id}-hint`;
+  const describedById = description !== undefined ? hintId : undefined;
   // why: the boxes follow the value when it changes elsewhere (Import example), and keep what was typed while it
   // already means the value ("20" and "75" for 1275).
   useEffect(() => {
@@ -126,12 +137,13 @@ export function HoursMinutesField({
   const shownTotal = total.kind === 'value' && Number(text.minutes) > 59 ? total.minutes : null;
   return (
     <fieldset className="flex flex-col gap-0.5">
-      <legend>{label}</legend>
+      <legend className={legendClassName}>{label}</legend>
       <span className="flex flex-wrap items-center gap-1">
         <input
           id={`${id}-h`}
           inputMode="numeric"
           aria-label={D.journeyPart(label, D.journeyHours)}
+          aria-describedby={describedById}
           value={text.hours}
           onChange={(e) => update({ ...text, hours: e.target.value })}
           className={`w-16 ${input}`}
@@ -141,6 +153,7 @@ export function HoursMinutesField({
           id={`${id}-m`}
           inputMode="numeric"
           aria-label={D.journeyPart(label, D.journeyMinutes)}
+          aria-describedby={describedById}
           value={text.minutes}
           onChange={(e) => update({ ...text, minutes: e.target.value })}
           className={`ml-2 w-16 ${input}`}
@@ -150,6 +163,7 @@ export function HoursMinutesField({
           <span className="text-xs">{COPY.minutesAsHours(formatMinutes(shownTotal))}</span>
         )}
       </span>
+      <Hint id={hintId} text={description} />
     </fieldset>
   );
 }

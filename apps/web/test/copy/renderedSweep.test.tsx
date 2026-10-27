@@ -3,6 +3,7 @@ import { screen, waitFor } from '@testing-library/react';
 import { HttpResponse, http } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { App } from '../../src/App.js';
+import { PLAN_COPY } from '../../src/copy/plan.js';
 import { COPY } from '../../src/copy.js';
 import { VIEWS } from '../../src/state/view.js';
 import {
@@ -77,8 +78,7 @@ describe('rendered views contain no banned word, and no "£" outside a price or 
         for (const b of screen.getAllByRole('button', { name: /Show details/ })) await user.click(b);
         expect(screen.getAllByRole('button', { name: /Hide details/ })).toHaveLength(4);
       }
-      if (view === 'definitions')
-        await user.click(await screen.findByText('Advanced: constraints and policy'));
+      if (view === 'definitions') await user.click(await screen.findByText(PLAN_COPY.moreOptions));
       const hits = findBannedWords(renderedCopy(), BANNED_WORD_ALLOWLIST);
       expect(hits.map((h) => h.word)).toEqual([]);
       expect(poundsOutsidePrices()).toEqual([]);
