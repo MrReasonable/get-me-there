@@ -51,7 +51,7 @@ export const SETUP_COPY = {
       '0 allows no billed calls: SearchApi does not run for this search, so its date grid and itinerary search are skipped. Raise this number to let it run. New searches start from EXECUTION_MAX_CALLS in .env.',
     maxCallsHint: 'Calls to paid sources (SearchApi). New searches start from EXECUTION_MAX_CALLS in .env.',
     hardStopZero: (calls: number) =>
-      `Hard stop 0: this search allows no billed calls, so SearchApi's ${calls} estimated ${noun(calls, 'call', 'calls')} will not run and no itinerary search checks these prices. To let them run, raise Max billed calls per run (Advanced, Run budget) to at least ${calls}.`,
+      `Hard stop 0: this search allows no billed calls, so SearchApi's ${calls} estimated ${noun(calls, 'call', 'calls')} will not run and no itinerary search checks these prices. To let them run, raise Max billed calls per run (More options, Run budget) to at least ${calls}.`,
     journeyHours: 'hours',
     journeyMinutes: 'minutes',
     journeyPart: (label: string, part: string) => `${label}, ${part}`,

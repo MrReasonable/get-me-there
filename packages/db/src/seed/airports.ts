@@ -1,10 +1,10 @@
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { asIata, type Iata } from '@gmt/core';
 import type { Db } from '../client.js';
 import { isRecord } from '../internal/read.js';
 import { AirportsRepo, metroIndex } from '../repositories/airports.js';
-import type { AirportsDataset } from '../types.js';
+import { AIRPORT_KINDS, type AirportKind, type AirportsDataset } from '../types.js';
 
 /** Spec §7: boot fails unless at least this many airports carry an IATA code and a tz. */
 export const AIRPORTS_MIN_ROWS = 5000;
@@ -39,6 +39,7 @@ export function loadAirportsDataset(dir: string): AirportsDataset {
     metros[code] = members.map((x, i) => str('metros.json', `metros.${code}[${i}]`, x));
   }
   const index = metroIndex(metros);
+  const oa = loadOurAirports(dir);
   const airports = a.airports.map((x: unknown, i: number) => {
     const f = `airports[${i}]`;
     if (!isRecord(x)) return fail(file, f, 'must be an object');
@@ -59,9 +60,38 @@ export function loadAirportsDataset(dir: string): AirportsDataset {
       lat: num(file, `${f}.lat`, x.lat),
       lon: num(file, `${f}.lon`, x.lon),
       metro: index.get(iata) ?? null,
+      kind: oa?.kinds.get(iata) ?? null,
+      // why: a code OurAirports does not list is unknown (null), not "no scheduled service"
+      scheduled: oa === null || !oa.kinds.has(iata) ? null : oa.scheduled.has(iata),
     };
   });
-  return { version: `${version}+metros-${revision}.${rules}`, airports, metros };
+  // why: the OurAirports retrieval date is part of the version, so new facts alone re-seed an existing database
+  const oaVersion = oa === null ? '' : `+ourairports-${oa.retrieved}`;
+  return { version: `${version}+metros-${revision}.${rules}${oaVersion}`, airports, metros };
+}
+
+/**
+ * The vendored OurAirports facts (`ourairports.json`, public domain; spec §7, revision 51), or null when the directory
+ * has none: every airport's kind and scheduled service are then unknown.
+ */
+function loadOurAirports(
+  dir: string,
+): { retrieved: string; kinds: Map<string, AirportKind>; scheduled: Set<string> } | null {
+  const file = 'ourairports.json';
+  if (!existsSync(join(dir, file))) return null;
+  const o: unknown = JSON.parse(readFileSync(join(dir, file), 'utf8'));
+  if (!isRecord(o) || !isRecord(o.kinds) || !Array.isArray(o.scheduled))
+    fail(file, 'kinds/scheduled', 'must be an object and an array');
+  const retrieved = str(file, 'retrieved', o.retrieved);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(retrieved)) fail(file, 'retrieved', 'must be a YYYY-MM-DD date');
+  const kinds = new Map<string, AirportKind>();
+  for (const kind of AIRPORT_KINDS) {
+    const codes = o.kinds[kind];
+    if (!Array.isArray(codes)) fail(file, `kinds.${kind}`, 'must be an array');
+    for (const [i, c] of codes.entries()) kinds.set(str(file, `kinds.${kind}[${i}]`, c), kind);
+  }
+  const scheduled = new Set(o.scheduled.map((c, i) => str(file, `scheduled[${i}]`, c)));
+  return { retrieved, kinds, scheduled };
 }
 
 /** Seeds or re-seeds `airports` by upsert when the dataset version changes (spec §7); skips when every row is present at this version. */

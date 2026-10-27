@@ -3,14 +3,7 @@ import { SETUP_COPY } from '../../copy/setup.js';
 import { COPY } from '../../copy.js';
 import { type OptionalKeys, withKey } from '../../state/withKey.js';
 import type { Draft } from './draft.js';
-import {
-  AirlinesField,
-  Check,
-  HoursMinutesField,
-  NumberField,
-  PoundsField,
-  TimeWindowField,
-} from './fields.js';
+import { AirlinesField, Check, NumberField, PoundsField, TimeWindowField } from './fields.js';
 import { ScheduleField } from './ScheduleField.js';
 
 type DraftConstraints = Draft['constraints'];
@@ -25,7 +18,10 @@ export interface ProviderCapabilities {
   verification: boolean;
 }
 
-/** Spec §11 advanced fold: every constraint, the verification policy, providers, budget and schedule. */
+/**
+ * Spec §11 advanced fold (More options): every constraint but the journey time (asked in the short form), the
+ * verification policy, providers, budget and schedule.
+ */
 export function AdvancedFields({
   draft,
   setDraft,
@@ -64,12 +60,6 @@ export function AdvancedFields({
           label={COPY.constraint.maxStops}
           value={c.maxStops}
           onChange={(n) => setC('maxStops', n)}
-        />
-        <HoursMinutesField
-          id="c-maxJourney"
-          label={COPY.constraint.maxJourneyMinutes}
-          value={c.maxJourneyMinutes}
-          onChange={(n) => setC('maxJourneyMinutes', n)}
         />
         <NumberField
           id="c-minLayover"

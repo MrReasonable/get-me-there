@@ -2,6 +2,7 @@ import { screen, within } from '@testing-library/react';
 import { HttpResponse, http } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { App } from '../../../src/App.js';
+import { PLAN_COPY } from '../../../src/copy/plan.js';
 import { COPY } from '../../../src/copy.js';
 import { EXAMPLE_LABEL } from '../../../src/example.js';
 import { DefinitionsView } from '../../../src/views/Definitions/DefinitionsView.js';
@@ -98,8 +99,8 @@ describe('coverage check before saving (spec §1, §10, §11)', () => {
     await user.click(screen.getByRole('button', { name: 'Check free coverage' }));
     await screen.findByRole('table', { name: 'Check free coverage' });
     expect(screen.queryByText(/changed since this check/)).toBeNull();
-    await user.clear(screen.getByLabelText('Max nights'));
-    await user.type(screen.getByLabelText('Max nights'), '14');
+    await user.clear(screen.getByLabelText('Longest stay'));
+    await user.type(screen.getByLabelText('Longest stay'), '14');
     expect(
       screen.getByText('The airports, window or nights changed since this check; run it again.'),
     ).toBeInTheDocument();
@@ -119,8 +120,8 @@ describe('coverage check before saving (spec §1, §10, §11)', () => {
     const { user } = renderWithProviders(<DefinitionsView />);
     await user.click(await screen.findByRole('button', { name: importButton }));
     await user.click(screen.getByRole('button', { name: 'Check free coverage' }));
-    await user.clear(screen.getByLabelText('Max nights'));
-    await user.type(screen.getByLabelText('Max nights'), '14');
+    await user.clear(screen.getByLabelText('Longest stay'));
+    await user.type(screen.getByLabelText('Longest stay'), '14');
     release();
     await screen.findByRole('table', { name: 'Check free coverage' });
     expect(
@@ -199,7 +200,7 @@ describe('estimate, then the create click as the explicit confirmation (spec §8
     await importAndEstimate(user);
     const create = await screen.findByRole('button', { name: /^Create and confirm/ });
     expect(create).toBeEnabled();
-    await user.click(screen.getByText('Advanced: constraints and policy'));
+    await user.click(screen.getByText(PLAN_COPY.moreOptions));
     await user.clear(screen.getByLabelText('arrival time window to'));
     expect(create).toBeDisabled();
     expect(create).toHaveAccessibleDescription(
@@ -212,8 +213,8 @@ describe('estimate, then the create click as the explicit confirmation (spec §8
     const { user } = renderWithProviders(<DefinitionsView />);
     await importAndEstimate(user);
     await screen.findByRole('button', { name: /Create and confirm/ });
-    await user.clear(screen.getByLabelText('Max nights'));
-    await user.type(screen.getByLabelText('Max nights'), '14');
+    await user.clear(screen.getByLabelText('Longest stay'));
+    await user.type(screen.getByLabelText('Longest stay'), '14');
     expect(screen.queryByRole('button', { name: /Create and confirm/ })).toBeNull();
     expect(
       screen.getByText('The draft changed since this estimate; show the estimate again before creating.'),
@@ -239,8 +240,8 @@ describe('estimate, then the create click as the explicit confirmation (spec §8
     await importAndEstimate(user);
     await expect.poll(() => sent.length).toBe(1);
     // why: the form fields stay editable while the request is in flight
-    await user.clear(screen.getByLabelText('Max nights'));
-    await user.type(screen.getByLabelText('Max nights'), '14');
+    await user.clear(screen.getByLabelText('Longest stay'));
+    await user.type(screen.getByLabelText('Longest stay'), '14');
     release();
     expect(
       await screen.findByText(
@@ -337,7 +338,7 @@ describe('saved definitions (spec §8.1)', () => {
 
   it('an edit= link to a definition that does not exist says so instead of showing a blank create form', async () => {
     renderWithProviders(<DefinitionsView />, { search: '?view=definitions&edit=no-such-definition' });
-    expect(await screen.findByRole('alert')).toHaveTextContent(COPY.definitionNotFound);
+    expect(await screen.findByRole('alert')).toHaveTextContent(PLAN_COPY.notFound);
     // why: no create flow behind a dead link: nothing to estimate or confirm
     expect(screen.queryByRole('button', { name: 'Show estimate' })).toBeNull();
     expect(screen.queryByRole('button', { name: /^Create and confirm/ })).toBeNull();
@@ -347,11 +348,11 @@ describe('saved definitions (spec §8.1)', () => {
   it('edit=new and an existing definition show no not-found alert', async () => {
     const first = renderWithProviders(<DefinitionsView />, { search: '?view=definitions&edit=new' });
     await screen.findByRole('button', { name: importButton });
-    expect(screen.queryByText(COPY.definitionNotFound)).toBeNull();
+    expect(screen.queryByText(PLAN_COPY.notFound)).toBeNull();
     first.unmount();
     renderWithProviders(<DefinitionsView />, { search: '?view=definitions&edit=def-0001' });
     await screen.findByRole('button', { name: 'Save changes' });
-    expect(screen.queryByText(COPY.definitionNotFound)).toBeNull();
+    expect(screen.queryByText(PLAN_COPY.notFound)).toBeNull();
   });
 
   it('a failed definitions load shows the reason and a retry', async () => {

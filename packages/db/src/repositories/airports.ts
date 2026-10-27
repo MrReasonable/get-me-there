@@ -2,7 +2,7 @@ import { type Iata, isValidTimeZone } from '@gmt/core';
 import type { Db } from '../client.js';
 import { readIata } from '../internal/read.js';
 import { RowRejected } from '../internal/validate.js';
-import type { Airport, AirportsDataset } from '../types.js';
+import { AIRPORT_KINDS, type Airport, type AirportsDataset } from '../types.js';
 
 interface AirportDbRow {
   iata: string;
@@ -14,6 +14,8 @@ interface AirportDbRow {
   lat: number;
   lon: number;
   metro: string | null;
+  kind: string | null;
+  scheduled: number | null;
   source: string;
   dataset_version: string;
 }
@@ -27,6 +29,8 @@ const toAirport = (r: AirportDbRow): Airport => ({
   lat: r.lat,
   lon: r.lon,
   metro: r.metro,
+  kind: AIRPORT_KINDS.find((k) => k === r.kind) ?? null,
+  scheduled: r.scheduled === null ? null : r.scheduled === 1,
   source: r.source,
   datasetVersion: r.dataset_version,
 });
@@ -69,19 +73,69 @@ export class AirportsRepo {
     );
   }
 
-  /** Autocomplete (spec §11, `GET /api/airports`): exact code, then a metro code's members (po-003), then code prefix, then name/city substring. */
+  /**
+   * Autocomplete (spec §11, `GET /api/airports`; spec §7, revision 51). Each airport gets a code band (0 exact code,
+   * 1 a metro code's member (po-003), 2 code prefix) and a text band (3 a city word starting with the text, 4 a name
+   * word starting with it, 5 any other name or city substring); its band is the better of the two. Inside a band,
+   * OurAirports' facts rank it: a large airport with scheduled service, then a medium one, then the rest (unknown
+   * included). An airport OurAirports lists with no scheduled service is left out, unless its exact code was typed.
+   * Every listed airport of a metro any hit belongs to is returned (a metro's outlying airport may name a neighbouring
+   * town as its city), as one block at its best member's band and rank, ahead of single airports that tie with it;
+   * inside a block, a typed exact code leads, then text matches, then rank, then code. The limit counts blocks by where they start, so a metro is
+   * never cut short: the picker offers it whole.
+   */
   search(q: string, limit: number): Airport[] {
     const needle = q.trim();
     if (needle.length === 0) return [];
-    // why: the operator's text is matched literally; % and _ are escaped for LIKE.
+    // why: the operator's text is matched literally; % and _ are escaped for LIKE (case-insensitive for ASCII).
     const e = needle.replace(/[\\%_]/g, (c) => `\\${c}`);
     return this.db.raw
       .prepare<Record<string, unknown>, AirportDbRow>(
-        `SELECT * FROM airports
-         WHERE iata = upper(@q) OR metro = upper(@q) OR iata LIKE upper(@e) || '%' ESCAPE '\\'
-            OR name LIKE '%' || @e || '%' ESCAPE '\\' OR city LIKE '%' || @e || '%' ESCAPE '\\'
-         ORDER BY CASE WHEN iata = upper(@q) THEN 0 WHEN metro = upper(@q) THEN 1 WHEN iata LIKE upper(@e) || '%' ESCAPE '\\' THEN 2 ELSE 3 END, iata
-         LIMIT @limit`,
+        `WITH banded AS (
+           SELECT iata, metro,
+             CASE
+               WHEN iata = upper(@q) THEN 0
+               WHEN metro = upper(@q) THEN 1
+               WHEN iata LIKE upper(@e) || '%' ESCAPE '\\' THEN 2
+               ELSE 9
+             END AS code_r,
+             CASE
+               WHEN ' ' || city LIKE '% ' || @e || '%' ESCAPE '\\' THEN 3
+               WHEN ' ' || name LIKE '% ' || @e || '%' ESCAPE '\\' THEN 4
+               WHEN name LIKE '%' || @e || '%' ESCAPE '\\' OR city LIKE '%' || @e || '%' ESCAPE '\\' THEN 5
+               ELSE 9
+             END AS text_r,
+             CASE
+               WHEN kind = 'large' AND scheduled = 1 THEN 0
+               WHEN kind = 'medium' AND scheduled = 1 THEN 1
+               ELSE 2
+             END AS importance,
+             coalesce(scheduled = 0, 0) AS unscheduled
+           FROM airports
+         ),
+         hits AS (
+           SELECT iata, metro, text_r, importance, min(code_r, text_r) AS r FROM banded
+           WHERE min(code_r, text_r) < 9 AND (NOT unscheduled OR code_r = 0)
+         ),
+         metro_hits AS (
+           SELECT metro, min(r) AS r, min(importance) AS importance FROM hits WHERE metro IS NOT NULL GROUP BY metro
+         ),
+         listed AS (
+           SELECT a.*, row_number() OVER (
+             ORDER BY coalesce(m.r, h.r), coalesce(m.importance, h.importance), a.metro IS NULL, a.metro,
+               coalesce(h.r, 9) <> 0, coalesce(h.text_r, 9), b.importance, coalesce(h.r, 9), a.iata
+           ) AS pos
+           FROM airports a
+           JOIN banded b ON b.iata = a.iata
+           LEFT JOIN hits h ON h.iata = a.iata
+           LEFT JOIN metro_hits m ON m.metro = a.metro
+           WHERE h.iata IS NOT NULL OR (m.metro IS NOT NULL AND NOT b.unscheduled)
+         )
+         SELECT * FROM (
+           SELECT *, min(pos) OVER (PARTITION BY coalesce('metro:' || metro, iata)) AS block_start FROM listed
+         )
+         WHERE block_start <= @limit
+         ORDER BY pos`,
       )
       .all({ q: needle, e, limit: Math.max(1, Math.trunc(limit)) })
       .map(toAirport);
@@ -143,14 +197,23 @@ export class AirportsRepo {
     }
     const source = `mwgg/Airports ${dataset.version}`;
     const stmt = this.db.raw.prepare(
-      `INSERT INTO airports (iata, icao, name, city, country, tz, lat, lon, metro, source, dataset_version)
-       VALUES (@iata, @icao, @name, @city, @country, @tz, @lat, @lon, @metro, @source, @datasetVersion)
+      `INSERT INTO airports (iata, icao, name, city, country, tz, lat, lon, metro, kind, scheduled, source, dataset_version)
+       VALUES (@iata, @icao, @name, @city, @country, @tz, @lat, @lon, @metro, @kind, @scheduled, @source, @datasetVersion)
        ON CONFLICT(iata) DO UPDATE SET icao = excluded.icao, name = excluded.name, city = excluded.city, country = excluded.country, tz = excluded.tz,
-         lat = excluded.lat, lon = excluded.lon, metro = excluded.metro, source = excluded.source, dataset_version = excluded.dataset_version`,
+         lat = excluded.lat, lon = excluded.lon, metro = excluded.metro, kind = excluded.kind, scheduled = excluded.scheduled,
+         source = excluded.source, dataset_version = excluded.dataset_version`,
     );
     this.db.transaction(() => {
       for (const a of dataset.airports)
-        stmt.run({ ...a, metro: metros.get(a.iata) ?? null, source, datasetVersion: dataset.version });
+        stmt.run({
+          ...a,
+          metro: metros.get(a.iata) ?? null,
+          // why: a row OurAirports does not list stays unknown (NULL), never "no scheduled service"
+          kind: a.kind ?? null,
+          scheduled: a.scheduled === undefined || a.scheduled === null ? null : a.scheduled ? 1 : 0,
+          source,
+          datasetVersion: dataset.version,
+        });
       // why: a row the new dataset no longer lists is kept (definitions may reference it) but must not keep a metro
       // the vendored list no longer gives it (dm-M4).
       this.db.raw

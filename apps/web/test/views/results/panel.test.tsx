@@ -518,11 +518,11 @@ describe('the per-airport-pair panel (spec §11 Date pair detail, §10 cells rou
     const { findByText, getByRole, queryByText } = renderPanel(zero);
     expect(
       await findByText(
-        "This definition allows 0 billed calls, so this search cannot start. Raise the definition's call cap to at least 6 in Definitions → Run budget (Max billed calls per run).",
+        "This definition allows 0 billed calls, so this search cannot start. Raise the definition's call cap to at least 6 in Searches → More options → Run budget (Max billed calls per run).",
       ),
     ).toBeInTheDocument();
     expect(COPY.panel.verifyZeroRunCap(6)).toBe(
-      "This definition allows 0 billed calls, so this search cannot start. Raise the definition's call cap to at least 6 in Definitions → Run budget (Max billed calls per run).",
+      "This definition allows 0 billed calls, so this search cannot start. Raise the definition's call cap to at least 6 in Searches → More options → Run budget (Max billed calls per run).",
     );
     // why: the jargon line is for real headroom exhaustion by a running parent or child, not for a 0-call definition.
     expect(queryByText('No budget headroom left for this search.')).toBeNull();

@@ -4,6 +4,7 @@ import { CONSTRAINT_LABELS } from '@gmt/core';
 import { screen, within } from '@testing-library/react';
 import { HttpResponse, http } from 'msw';
 import { describe, expect, it } from 'vitest';
+import { PLAN_COPY } from '../../../src/copy/plan.js';
 import { SETUP_COPY } from '../../../src/copy/setup.js';
 import { COPY } from '../../../src/copy.js';
 import { DefinitionForm } from '../../../src/views/Definitions/DefinitionForm.js';
@@ -36,7 +37,7 @@ function estimateBodies() {
 }
 
 async function openAdvanced(user: ReturnType<typeof renderForm>['user']) {
-  await user.click(screen.getByText(COPY.advanced));
+  await user.click(screen.getByText(PLAN_COPY.moreOptions));
 }
 
 describe('plain labels, each with a short hint (critique heuristic 2)', () => {
@@ -112,7 +113,7 @@ describe('journey time in hours and minutes', () => {
     const bodies = estimateBodies();
     const { user } = renderForm();
     await openAdvanced(user);
-    const label = CONSTRAINT_LABELS.maxJourneyMinutes;
+    const label = PLAN_COPY.journey;
     const hours = screen.getByLabelText(D.journeyPart(label, D.journeyHours));
     const minutes = screen.getByLabelText(D.journeyPart(label, D.journeyMinutes));
     expect(screen.getByRole('group', { name: label })).toBeInTheDocument();
@@ -131,7 +132,7 @@ describe('journey time in hours and minutes', () => {
     const bodies = estimateBodies();
     const { user } = renderForm();
     await openAdvanced(user);
-    const label = CONSTRAINT_LABELS.maxJourneyMinutes;
+    const label = PLAN_COPY.journey;
     const hours = screen.getByLabelText(D.journeyPart(label, D.journeyHours));
     const minutes = screen.getByLabelText(D.journeyPart(label, D.journeyMinutes));
     await user.type(hours, 'x');

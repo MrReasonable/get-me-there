@@ -1626,11 +1626,18 @@ Conventions: `*_pence`, `*_micro_gbp`, `*_nano` are `integer`; timestamps
 are `toISOString()` text; booleans are integers 0/1.
 
 - `airports` (iata PK, icao, name, city, country, tz NOT NULL, lat, lon,
-  metro NULL, source, dataset_version). Seeded from a vendored, versioned
+  metro NULL, kind NULL ∈ large | medium | small | other, scheduled NULL,
+  source, dataset_version). Seeded from a vendored, versioned
   `mwgg/Airports` dataset (MIT, has IANA `tz`; it carries no metropolitan
   codes, so `metro` comes from a separately vendored, attributed list of
-  IATA metropolitan area codes beside it); re-seeded by upsert when the
-  dataset version changes; the sanity check that the table holds at least
+  IATA metropolitan area codes beside it, and no size or service facts, so
+  `kind` (from the `type` column) and `scheduled` (from `scheduled_service`)
+  come from OurAirports' `airports.csv`, public domain, reduced by the build
+  script to those two facts for the dataset's IATA codes and vendored with
+  its download date and SHA-256; the CSV itself is not in the repository;
+  NULL for a code OurAirports does not list, read as unknown);
+  re-seeded by upsert when the dataset version (which includes the metro
+  list's revision and the OurAirports download date) changes; the sanity check that the table holds at least
   5,000 rows with IATA code and tz, and that every airport referenced by an
   enabled definition exists, **fails boot** if it fails; no network at
   seed. No specific airport is named in code.
@@ -2580,7 +2587,7 @@ shape carries `provenance` and `stale`.
 | `GET /status` | authenticated; never spends, never waits on a vendor, never loads a page: `{ generatedAt, mode: 'native' \| 'container' \| 'dev', version, checks }`, each check `{ id, area, providerId, label, state: 'ok' \| 'warn' \| 'fail' \| 'off', summary, note, offReason, fix: { text, command } \| null }` (`label` names a card among several of its area, a search's name; `note` an aside on any check, such as "caught up the run missed at 01:30, ran 07:02", which never counts toward the status bar; `offReason` ∈ `not-set-up`, `not-visible`, `awaiting-verification`, `disabled` (a disabled search, so a parked one never nags the bar), only when `off`; nothing a state rests on is ever truncated), worst first; `command` is a `pnpm gmt …` line in native mode and always null in container and dev mode, where the text names the compose action or the docs section; areas `app`, `database`, `backups`, `schedule`, `data` (per definition, its latest finished parent run's discovery coverage per cell in the six buckets with their spec labels, both ends of its priced observations' effective ages, never "fresh", "complete" or "all"), `provider` (one per provider plus `price-sources`, which warns "no usable price source" unless a non-synthetic provider can price a scheduled search), `worker` (whose card also states the app's `CAMOUFOX_BROWSER_WINDOW`; a worker that answers but will refuse pages is `fail`, judged by the same rule as the engine's preflight: a signed-in profile, shared settings that differ, an unverified or differing grid setup), `consent` ("consent rejected" only for a stored value whose mark is `reject`, any other mark a `fail` with the fix; a worker that does not report the mark cannot be checked, its capture's latest expiry stated as an upper bound, "expires by … at the latest"), `email` (the newest send of any kind since the app started: alert digest, notice or test; `fail` when it failed); a provider card's auth or quota class is the adapters' own, recorded on the ledger row where the call is classified (migration 0008, `error_kind`), and a 2xx whose body was rejected is not a success; summaries come from fixed templates and error classes, never from vendor, worker or SMTP text; the worker check reads the worker's `/v1/status` through http-kit with a 2 s timeout and picks named fields (`workerStatusSchema` gains a field one work package before any worker emits it, so an app parses the status of a worker one package newer); no field carries a key, password, database path or `SOCS` value |
 | `GET /executions/active` | authenticated: `{ execution: { id, definitionId, definitionName, kind: 'run' \| 'cell-verification', startedAt, estimatedFinishAt } \| null }`, the oldest execution with a pass in flight (pending or running), a parent run or a single-cell verification (which spends credits too), read as one row; its estimated finish is now plus the seconds its remaining cells are estimated to take (so a resumed run never reads as finished in the past), or null without an estimate; `gmt update` reads it |
 | `POST /alerts/test-email` | sends one fixed test message through the configured email notifier, apart from `ALERT_EMAIL_MAX_PER_HOUR` (a test has its own limit of one a minute and an in-flight guard, so pressing it never crowds out an alert; 429 past it); 409 when email is not configured; the class of the send (sent, failed; never the server's text) is kept in the notifier and shown as "since the app started" |
-| `GET /airports?q=` | airport-table autocomplete: up to 20 rows `{ iata, name, city, country, tz, metro }` |
+| `GET /airports?q=` | airport-table autocomplete: up to 20 rows `{ iata, name, city, country, tz, metro }`, a matched metro never cut short. Bands: exact code, a metro code's members, code prefix, a city word, a name word, any other substring; inside a band a large airport with scheduled service first, then a medium one, then the rest; every listed airport of a metro any row belongs to is returned as one block at its best member's place; an airport OurAirports lists with no scheduled service is left out unless its exact code is typed (§7) |
 | `GET /providers` | capabilities, plan, usage vs caps with window bounds for the one window each plan uses (the month on a monthly plan, the lifetime on the trial; the unused window is not sent, so a null cap means no cap); "verification will not run: spend cap is 0" when a provider whose calls cost money is enabled under a zero spend cap; on a billed plan whose calls cost £0, a `capNote` naming the call cap that is the hard stop |
 | `GET/POST/PUT/DELETE /definitions[/:id]` | CRUD; `POST` with no body creates the **default definition for the configured plan**; response includes `budgetFit`; `PUT` re-registers the schedule; a zero-cell window returns 422 |
 | `POST /definitions/estimate`, `POST /definitions/:id/estimate` | for an unsaved body or a saved definition: cells, per-provider calls (pre-factor and factored), cost (micro-GBP and pence), seconds, assumptions |
@@ -3795,6 +3802,19 @@ stopover in <city>. Transfer here from <airport> to <airport>."), so that option
 reads it (§2). Because the pop-up's text sits in the tab's name, the tab price is read only right after "Cheapest from" (the
 selectors' dated `cheapestTabPrice`), so a digit in the pop-up never makes an unpriced tab read as priced; every
 recorded tab name reads the same price as before. No other design rule changes.
+
+### Revision 51: airport search ranked by OurAirports' type and scheduled service (2026-10-27)
+
+Ian ruled 2026-10-27: OurAirports type and scheduled-service data for ranking and filtering. The operator's checks of
+`GET /airports` found a name fragment of Heathrow listing a small airfield first, a city's outlying metro airport
+leading that city's main ones, and "new y" missing Newark, whose city is Newark, not New York; the airports table had
+no size or service field to rank by. §7 now adds `kind` (large, medium, small or other, from OurAirports' `type`) and `scheduled` (from `scheduled_service`) to
+`airports`, from OurAirports' public-domain `airports.csv`, reduced to those two facts for the vendored dataset's IATA
+codes and vendored with its download date and SHA-256 (migration 0010; NULL for a code OurAirports does not list).
+§10 `GET /airports` ranks inside its match bands by them (large with scheduled service, then medium with scheduled
+service, then the rest), returns every listed airport of a matched metro (from the `metro` column) as one block,
+never cut short, and leaves out airports with no scheduled service unless their exact code is typed, so a code that
+works today still works. No other design rule changes.
 
 ### Revision 50: the Dates view's review (2026-10-26)
 

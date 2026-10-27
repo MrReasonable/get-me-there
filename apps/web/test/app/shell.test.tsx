@@ -27,7 +27,7 @@ describe('shell (spec §11 layout)', () => {
       within(setup)
         .getAllByRole('link')
         .map((l) => l.textContent),
-    ).toEqual(['Definitions', 'Providers', 'Alerts', 'Status']);
+    ).toEqual(['Searches', 'Providers', 'Alerts', 'Status']);
     // each tier's name is text, first in its row
     expect(within(nav).getByText('Decide')).toBeInTheDocument();
     expect(within(nav).getByText('Set up')).toBeInTheDocument();
@@ -175,9 +175,7 @@ describe('shell (spec §11 layout)', () => {
   it('no definitions, and a def= that names a missing one, say different things', async () => {
     server.use(http.get(`${API}/definitions`, () => HttpResponse.json([])));
     const { unmount } = renderWithProviders(<App />, { search: '?view=history' });
-    expect(
-      await screen.findAllByText('No search definitions yet. Create one under Definitions.'),
-    ).not.toHaveLength(0);
+    expect(await screen.findAllByText('No searches yet. Plan one under Searches.')).not.toHaveLength(0);
     unmount();
     server.resetHandlers();
     renderWithProviders(<App />, { search: '?view=dates&def=gone' });

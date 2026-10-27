@@ -25,6 +25,10 @@ import type {
   VendorPriceMark,
 } from '@gmt/core';
 
+/** OurAirports' size class of an airport (spec §7, revision 51). */
+export type AirportKind = 'large' | 'medium' | 'small' | 'other';
+export const AIRPORT_KINDS: readonly AirportKind[] = ['large', 'medium', 'small', 'other'];
+
 /** Spec §7 `airports` row. */
 export interface Airport {
   iata: Iata;
@@ -36,13 +40,21 @@ export interface Airport {
   lat: number;
   lon: number;
   metro: string | null;
+  /** OurAirports' size class; null for an airport OurAirports does not list. */
+  kind: AirportKind | null;
+  /** OurAirports' scheduled service; null when unknown. An airport with none is left out of search suggestions. */
+  scheduled: boolean | null;
   source: string;
   datasetVersion: string;
 }
 /** The vendored airports dataset plus the attributed metro-code list (decision 11). */
 export interface AirportsDataset {
   version: string;
-  airports: Array<Omit<Airport, 'source' | 'datasetVersion'>>;
+  /** `kind` and `scheduled` may be left out (unknown), as for a dataset built without the OurAirports facts. */
+  airports: Array<
+    Omit<Airport, 'source' | 'datasetVersion' | 'kind' | 'scheduled'> &
+      Partial<Pick<Airport, 'kind' | 'scheduled'>>
+  >;
   metros: Record<string, string[]>;
 }
 /** Repositories refuse synthetic rows unless this is true (`syntheticAllowed(config)`, spec §5.5). */

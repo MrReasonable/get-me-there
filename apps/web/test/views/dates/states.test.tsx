@@ -25,10 +25,10 @@ const serveRun = (over: Parameters<typeof execution>[0]) =>
 const noFlights = () => expect(renderedCopy()).not.toMatch(/no flights/i);
 
 describe('the Dates view’s states (spec §11)', () => {
-  it('no search: "No search yet" with a link to Definitions', async () => {
+  it('no search: "No search yet" with a link to Searches', async () => {
     renderDates({ def: null });
     expect(screen.getByText(/^No search yet\./)).toBeInTheDocument();
-    const link = screen.getByRole('link', { name: 'Create one under Definitions' });
+    const link = screen.getByRole('link', { name: 'Plan one under Searches' });
     expect(link.getAttribute('href')).toContain('view=definitions');
   });
 

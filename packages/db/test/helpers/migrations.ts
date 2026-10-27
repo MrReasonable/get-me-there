@@ -71,6 +71,7 @@ export function seedEveryRebuiltTableAt0004(): {
       '0007_catch_up',
       '0008_wp18_error_kind',
       '0009_wp19_latest_price_idx',
+      '0010_airport_kind',
     ]),
   );
   const run = (sql: string, p: Record<string, unknown> = {}): void => {

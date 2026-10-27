@@ -36,6 +36,7 @@ describe('migration 0006 (spec §7 rev 34)', () => {
         '0007_catch_up',
         '0008_wp18_error_kind',
         '0009_wp19_latest_price_idx',
+        '0010_airport_kind',
       ]),
     );
     for (const s of SEED) db.raw.prepare(s).run({ at: T0 });

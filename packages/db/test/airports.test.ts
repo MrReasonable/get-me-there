@@ -2,6 +2,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { asIata } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
+import { isRecord } from '../src/internal/read.js';
 import { RowRejected } from '../src/internal/validate.js';
 import { AIRPORTS_DATA_DIR } from '../src/paths.js';
 import { AirportsRepo } from '../src/repositories/airports.js';
@@ -79,13 +80,31 @@ describe('airports seed and sanity check (spec §7 airports)', () => {
     expect(repo.count()).toBe(3);
   });
 
+  it("search over the vendored data: the worked example's airports lead, a metro comes whole, and none without scheduled service is suggested (plan-a-search)", {
+    // why: loads and seeds the whole vendored dataset (5,000+ rows), as the test below does, so the same budget.
+    timeout: 30_000,
+  }, () => {
+    // why: the operator's checks against the real table, kept offline and to the worked example's airports: a name
+    // fragment listed a small airfield before Heathrow, and "new y" missed Newark, whose city is not New York.
+    const db = freshDb();
+    seedAirports(db, loadAirportsDataset(AIRPORTS_DATA_DIR));
+    const repo = new AirportsRepo(db);
+    const codes = (q: string) => repo.search(q, 20).map((a) => a.iata);
+    expect(codes('heath')[0]).toBe('LHR');
+    expect(codes('new y').slice(0, 3)).toEqual(expect.arrayContaining(['JFK', 'EWR']));
+    expect(codes('lond').slice(0, 6)).toEqual(expect.arrayContaining(['LHR', 'LGW']));
+    for (const q of ['lond', 'new y', 'heath', 'airport'])
+      expect(repo.search(q, 20).filter((a) => a.scheduled === false)).toEqual([]);
+    expect(repo.get(LHR)).toMatchObject({ kind: 'large', scheduled: true });
+  });
+
   it('the vendored data carries the worked example, its metro members, one country per metro, and passes the sanity check', {
     // why: loads and seeds the whole vendored dataset (5,000+ rows); same size as the first test, so the same budget.
     timeout: 30_000,
   }, () => {
     const ds = loadAirportsDataset(AIRPORTS_DATA_DIR);
     // the metro rules are versioned too, so a rule change re-seeds an existing database (dm-M3 re-review)
-    expect(ds.version).toBe('2026-10-01-a89e4e0+metros-1378312633.r2');
+    expect(ds.version).toBe('2026-10-01-a89e4e0+metros-1378312633.r2+ourairports-2026-10-27');
     expect(
       ds.airports.filter((a) => /^[A-Z]{3}$/.test(a.iata) && a.tz.length > 0).length,
     ).toBeGreaterThanOrEqual(AIRPORTS_MIN_ROWS);
@@ -169,6 +188,16 @@ describe('airports seed and sanity check (spec §7 airports)', () => {
     expect(attribution).toContain('CC BY-SA 4.0');
     expect(attribution).toContain('1378312633');
     expect(existsSync(join(AIRPORTS_DATA_DIR, 'metros.json'))).toBe(true);
+    // the OurAirports facts carry their source, download date, checksum and licence (spec §7, revision 51)
+    const oa = readFileSync(join(AIRPORTS_DATA_DIR, 'ourairports.ATTRIBUTION'), 'utf8');
+    expect(oa).toMatch(/public domain/i);
+    const facts: unknown = JSON.parse(readFileSync(join(AIRPORTS_DATA_DIR, 'ourairports.json'), 'utf8'));
+    expect(facts).toMatchObject({
+      source: 'https://ourairports.com/data/airports.csv',
+      retrieved: '2026-10-27',
+    });
+    expect(facts).toHaveProperty('sha256', expect.stringMatching(/^[0-9a-f]{64}$/));
+    expect(oa).toContain(isRecord(facts) ? String(facts.sha256) : 'missing');
   });
 
   it('loadAirportsDataset rejects a malformed file naming the file and field (po-007)', () => {
@@ -265,6 +294,44 @@ describe('AirportsRepo', () => {
     expect(repo.search('%', 10).map((a) => a.iata)).toEqual(['CCC']);
     expect(repo.search('  ', 10)).toEqual([]);
     expect(repo.search('field', 1)).toHaveLength(1);
+  });
+
+  it('search returns every airport of a matched metro as one block, metros first in a band, text matches first inside', () => {
+    // why: the operator types a place, not a code. Invented airports (QQ*) beside the worked example's: a metro
+    // member whose city is a neighbouring town (QQS, as Newark is to New York) comes with its metro, and a name
+    // fragment matching both Heathrow and an invented airfield puts the London block first.
+    const repo = seeded(
+      [
+        row('LHR', { name: 'London Heathrow Airport', city: 'London', country: 'GB' }),
+        row('LGW', { name: 'London Gatwick Airport', city: 'London', country: 'GB' }),
+        row('QQS', { name: 'Synthetic Outer Airport', city: 'Outerby', country: 'GB' }),
+        row('QQB', { name: 'Synthetic Hill Airport', city: 'London', country: 'GB' }),
+        row('QQD', { name: 'Synthetic Field', city: 'Londwell' }),
+        row('QQE', { name: 'Synthetic Strip', city: 'East London' }),
+        row('QQH', { name: 'Heathfield Airport', city: '' }),
+        row('JFK', { name: 'John F Kennedy International Airport', city: 'New York', country: 'US' }),
+        row('EWR', { name: 'Newark Liberty International Airport', city: 'Newark', country: 'US' }),
+        row('QQN', { name: 'Synthetic Seaplane Base', city: 'New York', country: 'US' }),
+        row('QQC', { name: 'Qarville Central Airport', city: 'Qarville' }),
+        row('QQO', { name: 'Qarville South Airport', city: 'Qarville' }),
+        row('QQV', { name: 'Qarville Valley Airport', city: 'Vallet' }),
+        row('QQP', { name: 'Cox Field', city: 'Qarville' }),
+        row('QQT', { name: 'Thornhill Field', city: 'Synthetic City' }),
+      ],
+      { LON: ['LHR', 'LGW', 'QQS'], NYC: ['EWR', 'JFK'], QAR: ['QQC', 'QQO', 'QQV'] },
+    );
+    const codes = (q: string) => repo.search(q, 20).map((a) => a.iata);
+    expect(codes('lond')).toEqual(['LGW', 'LHR', 'QQS', 'QQB', 'QQD', 'QQE']);
+    expect(codes('new y')).toEqual(['JFK', 'EWR', 'QQN']);
+    expect(codes('york')).toEqual(['JFK', 'EWR', 'QQN']);
+    expect(codes('heath')).toEqual(['LHR', 'LGW', 'QQS', 'QQH']);
+    // a metro code leads with its own city's airports; a member named after the city but elsewhere comes after them
+    expect(codes('qar')).toEqual(['QQC', 'QQO', 'QQV', 'QQP']);
+    // "hill" starts a word of one name before it sits inside another
+    expect(codes('hill')).toEqual(['QQB', 'QQT']);
+    // a code comes first, then the rest of its metro
+    expect(codes('lhr')).toEqual(['LHR', 'LGW', 'QQS']);
+    expect(codes('LON')).toEqual(['LGW', 'LHR', 'QQS', 'QQB', 'QQD', 'QQE']);
   });
 
   it('rejects a malformed country, an unknown time zone and a malformed metro code, writing nothing', () => {

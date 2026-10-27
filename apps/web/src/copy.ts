@@ -74,13 +74,14 @@ export const COPY = {
     // why: the date pair detail is not in the nav (spec §11); the word names the view in the Record every ViewId keys
     results: 'Results',
     history: 'History',
-    definitions: 'Definitions',
+    // why: the view's key stays `definitions` (its ?view= value); the operator reads it as Searches (plan a search)
+    definitions: 'Searches',
     alerts: 'Alerts',
     providers: 'Providers',
     status: 'Status',
   },
   definitionSelectorLabel: 'Search definition',
-  noDefinitions: 'No search definitions yet. Create one under Definitions.',
+  noDefinitions: 'No searches yet. Plan one under Searches.',
   definitionNotFound: 'The definition in this link no longer exists. Pick another one above.',
   loading: 'Loading…',
   loadFailed: (message: string) => `Could not load: ${message}`,
@@ -306,7 +307,7 @@ export const COPY = {
   runDetails: 'Progress and spend',
   // WP19 Task 19.7 (spec §11): the status bar's progress breakdown links to the Dates view's coverage section
   progressCoverageLink: 'Coverage in the Dates view',
-  runNowBlocked: 'The estimate is above what you confirmed; confirm it under Definitions before running.',
+  runNowBlocked: 'The estimate is above what you confirmed; confirm it under Searches before running.',
 
   // filters (spec §6.5)
   filtersHeading: 'Filter',
@@ -681,7 +682,7 @@ export const COPY = {
       `${n} ${noun(n, 'change', 'changes')} to Best dates; Update board to see them`,
     // states
     noSearch: 'No search yet.',
-    noSearchLink: 'Create one under Definitions',
+    noSearchLink: 'Plan one under Searches',
     neverRun: 'Not run yet: nothing has been searched.',
     onDemandOnly: (n: number) =>
       `Not run yet: ${n} on-demand itinerary ${noun(n, 'search', 'searches')} so far, and the prices ${noun(n, 'it', 'they')} found are below.`,
@@ -851,7 +852,7 @@ export const COPY = {
     verifyNoHeadroom: 'No budget headroom left for this search.',
     // why: N2 (ruling 9): a 0-call definition is not out of headroom; it allows no billed call, and one setting fixes it.
     verifyZeroRunCap: (n: number) =>
-      `This definition allows 0 billed calls, so this search cannot start. Raise the definition's call cap to at least ${n} in Definitions → Run budget (Max billed calls per run).`,
+      `This definition allows 0 billed calls, so this search cannot start. Raise the definition's call cap to at least ${n} in Searches → More options → Run budget (Max billed calls per run).`,
     verifyCostLoading: 'Loading what this search may spend…',
     verifyCapRefused: (message: string) => `Refused by a budget cap: ${message}`,
     verifyConfirmRefused: (message: string) => `Needs confirmation: ${message}`,

@@ -12,7 +12,8 @@
       "!**/.stryker-tmp",
       "!**/drizzle/meta",
       "!**/pnpm-lock.yaml",
-      "!**/packages/db/data/airports.*.json"
+      "!**/packages/db/data/airports.*.json",
+      "!**/packages/db/data/ourairports.json"
     ]
   },
   "formatter": {

@@ -43,6 +43,7 @@ export {
 } from './seed/airports.js';
 export type {
   Airport,
+  AirportKind,
   AirportsDataset,
   CalendarMarks,
   CalendarPriceInsert,
