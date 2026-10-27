@@ -11,8 +11,9 @@
  * flight"
  */
 // why: re-dated 2026-10-18 from the recordings (operator ruling): the "Operated by …." sentence after the carriers,
-// and runs of spaces between the closing sentences
-export const GRAMMAR_VERSION = '2026-10-18-recordings';
+// and runs of spaces between the closing sentences; re-dated 2026-10-27 (results/2026-10-27/1): a stopover that changes
+// airports in its city
+export const GRAMMAR_VERSION = '2026-10-27-transfer';
 
 export interface Interstitial {
   sentence: string;
@@ -54,11 +55,16 @@ const esc = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const DATE = '[A-Z][a-z]+, [A-Z][a-z]+ [0-9]{1,2}';
 const DURATION = '[0-9]+ hrs?(?: [0-9]+ min)?|[0-9]+ min';
 /**
- * The tail after the duration (fix round 1, prov-int M3): only the feasibility load's stopover sentences, repeated.
- * The airport and city carry no full stop, so an appended sentence can never hide inside one; a stopover whose name
- * holds a dot leaves the option unparsed (counted, never misread).
+ * The tail after the duration (fix round 1, prov-int M3): only the stopover sentences, repeated. The feasibility load's
+ * form names the airport and the city ("… stopover at Humberto Delgado Airport in Lisbon."); a stopover that changes
+ * airports (observed 2026-10-27, results/2026-10-27/1) names the city, then the transfer as one sentence of its own
+ * ("… stopover in Paris. Transfer here from Paris Charles de Gaulle Airport to Paris Orly Airport."). The airports and
+ * cities carry no full stop, so an appended sentence can never hide inside one; a stopover whose name holds a dot
+ * leaves the option unparsed (counted, never misread).
  */
-const STOPOVER = `Stopover \\([0-9]+ of [0-9]+\\) is a (?:${DURATION})(?: overnight)? stopover at [^.]+ in [^.]+\\.`;
+const STOPOVER =
+  `Stopover \\([0-9]+ of [0-9]+\\) is a (?:${DURATION})(?: overnight)? stopover ` +
+  '(?:at [^.]+ in [^.]+\\.|in [^.]+\\. Transfer here from [^.]+ to [^.]+\\.)';
 
 function grammarFor(interstitials: readonly Interstitial[]): RegExp {
   // why: the group is always present (empty when no interstitial is listed), so it is defined whenever the name matches.

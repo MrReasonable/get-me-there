@@ -466,13 +466,27 @@ describe.skipIf(!present)(
       }
       expect([...seen].sort()).toEqual(['no-flights', 'price', 'price-unknown']);
     });
-    it('without GRID_UNPRICED_VERIFIED the same views are refused whole, as the first run refused them', async () => {
+    // why: grid/2026-10-27/1 holds one unpriced cell, in its third view only. Without the flag an unpriced name is never
+    // read as a cell, only counted unparsed; a view is refused whole when that leaves a day of its lines with no cell
+    // named (the first run's views, grid/2026-10-26/7 and 8), and is read with that one pair unparsed otherwise
+    it('without GRID_UNPRICED_VERIFIED no unpriced name is read as a cell; the first run’s views are refused whole', async () => {
+      let refused = 0;
       for (const { file, rec } of sparse()) {
         const r = await serve(rec, new Map(), memoryLog(), { GRID_UNPRICED_VERIFIED: false });
         if (r.answer.kind !== 'grid') throw new Error(`${file}: ${JSON.stringify(r.answer)}`);
-        for (const v of r.answer.views)
-          expect([v.structural, v.cells.length], `${file} view ${v.index}`).toEqual(['unparsed', 0]);
+        for (const v of r.answer.views) {
+          const unpriced = (rec.views[v.index]?.candidates ?? []).filter(
+            (c) => c !== null && parseUnpricedCellName(c) !== null,
+          ).length;
+          expect(v.cells.every((c) => c.status === 'price')).toBe(true);
+          expect(v.unparsed, `${file} view ${v.index}`).toBeGreaterThanOrEqual(unpriced);
+          if (file.startsWith('2026-10-26/')) {
+            expect([v.structural, v.cells.length], `${file} view ${v.index}`).toEqual(['unparsed', 0]);
+            refused++;
+          }
+        }
       }
+      expect(refused).toBeGreaterThan(0);
     });
   },
 );

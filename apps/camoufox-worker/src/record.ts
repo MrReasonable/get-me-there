@@ -589,6 +589,7 @@ async function interact(
       clicked,
       stop,
       classifyAfterFailedStep,
+      settled,
     };
     return kind === 'grid' ? await recordGrid(c, shown, grid) : await recordGraph(c, shown);
   }

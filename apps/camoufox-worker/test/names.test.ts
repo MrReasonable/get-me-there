@@ -104,6 +104,51 @@ describe('parseOptionName (dated grammar)', () => {
     );
     expect(parseOptionName(two)).toMatchObject({ stops: 2, durationMinutes: 760 });
   });
+  // why: observed 2026-10-27 (results/2026-10-27/1): a stopover that changes airports names its city only, then the
+  // transfer between the two airports, as its own sentence; the airports carry no full stop, as at every stopover
+  const TRANSFER =
+    'Stopover (1 of 1) is a 3 hrs 5 min stopover in Paris. Transfer here from Paris Charles de Gaulle Airport to Paris Orly Airport.';
+  const AT = 'Stopover (1 of 1) is a 1 hr 20 min stopover at Humberto Delgado Airport in Lisbon.';
+  it('reads a stopover that changes airports in its city', () => {
+    expect(parseOptionName(ONE_STOP.replace(AT, TRANSFER))).toMatchObject({
+      amountMinor: 47800,
+      stops: 1,
+      durationMinutes: 760,
+    });
+  });
+  it('reads a transfer stopover beside a stopover at one airport, either order', () => {
+    const second = 'Stopover (2 of 2) is a 55 min overnight stopover at Example Airport in Example City.';
+    const firstTransfer = TRANSFER.replace('(1 of 1)', '(1 of 2)');
+    for (const tail of [
+      `${firstTransfer} ${second}`,
+      `${AT.replace('(1 of 1)', '(1 of 2)')} ${TRANSFER.replace('(1 of 1)', '(2 of 2)')}`,
+    ])
+      expect(
+        parseOptionName(ONE_STOP.replace('1 stop flight', '2 stops flight').replace(AT, tail)),
+      ).toMatchObject({
+        stops: 2,
+      });
+  });
+  it.each([
+    [
+      'a transfer sentence with no stopover before it',
+      ONE_STOP.replace(AT, 'Transfer here from Paris Charles de Gaulle Airport to Paris Orly Airport.'),
+    ],
+    [
+      'a stopover in a city with no transfer after it',
+      ONE_STOP.replace(AT, 'Stopover (1 of 1) is a 3 hrs stopover in Paris.'),
+    ],
+    [
+      'a transfer with no destination airport',
+      ONE_STOP.replace(
+        AT,
+        'Stopover (1 of 1) is a 3 hrs stopover in Paris. Transfer here from Paris Charles de Gaulle Airport.',
+      ),
+    ],
+    ['text appended to the transfer', ONE_STOP.replace(AT, `${TRANSFER} Bring your bags.`)],
+  ])('refuses %s', (_n, name) => {
+    expect(parseOptionName(name)).toBeNull();
+  });
   it.each([
     [
       'an unknown appended sentence',

@@ -11,6 +11,7 @@ import {
   stripUrlsInText,
   type Versions,
   type WorkerAnswer,
+  workerRuleSchema,
 } from '@gmt/core';
 import { checkAccountCookies } from './accountCookies.js';
 import { type PageBudget, pageBudget } from './budget.js';
@@ -377,7 +378,16 @@ export class PageSession {
           : this.d.cooldown.hoursFor(stop);
         const rec = this.d.cooldown.start(stop, hours);
         if (stop === 'signed-in') this.d.refusal.set('a signed-in account control or account cookie');
-        answer = { kind: 'blocked', page: stop, cooldownUntil: rec.until, ...scrolls() };
+        // why: the grid runs of 2026-10-26 stopped as unrecognised with nothing to say why: the rule goes on the answer
+        // for the app's last_error, only as the bounded token the protocol accepts (never free text)
+        const named = workerRuleSchema.safeParse(rule);
+        answer = {
+          kind: 'blocked',
+          page: stop,
+          cooldownUntil: rec.until,
+          ...scrolls(),
+          ...(named.success ? { rule: named.data } : {}),
+        };
       } catch (e) {
         return {
           answer: {
@@ -430,16 +440,21 @@ export class PageSession {
         rule: `search-form:${form}`,
       };
     // why: the worker clicks only flows its selectors module marks verified (PIE-09), re-reading the facts after each.
-    const after = async (view: 'best' | 'cheapest'): Promise<WorkerAnswer | null> => {
+    const after = async (
+      view: 'best' | 'cheapest',
+    ): Promise<{ answer: WorkerAnswer; stop: BlockedPage; rule: string } | null> => {
       settled = await poll(view);
       if (settled.kind.kind === 'results') return null;
-      return this.blockedPlaceholder(settled.kind.kind === 'blocked' ? settled.kind.page : 'unrecognised');
+      const page = settled.kind.kind === 'blocked' ? settled.kind.page : 'unrecognised';
+      // why: a no-flights page after a click names that, as the recorder does (`no-flights-after-click`)
+      const rule = settled.kind.kind === 'blocked' ? settled.rule : `${settled.kind.kind}-after-click`;
+      return { answer: this.blockedPlaceholder(page), stop: page, rule };
     };
     if (S.CHEAPEST_FLOW_VERIFIED && settled.facts.page.cheapestTabs.length === 1) {
       d = budget.next();
       const steps = { timers: this.d.timers, log: this.d.log, startedAt: started };
       const lookups = { timers: this.d.timers, lookupMs: LOOKUP_TIMEOUT_MS };
-      let cheapStop: WorkerAnswer | null = null;
+      let cheapStop: Awaited<ReturnType<typeof after>> = null;
       fellBack = false;
       try {
         await driver.clickCheapest(d, steps);
@@ -464,16 +479,15 @@ export class PageSession {
         if (seen !== null) {
           const k = classifyPageWithRule(seen.page, S, 'cheapest');
           if (k.kind.kind === 'blocked' && k.kind.page !== 'unrecognised')
-            return { answer: this.blockedPlaceholder(k.kind.page), stop: k.kind.page };
+            return { answer: this.blockedPlaceholder(k.kind.page), stop: k.kind.page, rule: k.rule };
         }
       }
-      if (cheapStop !== null && cheapStop.kind === 'blocked')
-        return { answer: cheapStop, stop: cheapStop.page };
+      if (cheapStop !== null) return cheapStop;
     }
     if (S.VIEW_MORE_ADDS_CHEAPER) {
       await driver.click('button', S.results.viewMoreButton, d);
       const stop = await after(settled.facts.settle.cheapestSelected ? 'cheapest' : 'best');
-      if (stop !== null && stop.kind === 'blocked') return { answer: stop, stop: stop.page };
+      if (stop !== null) return stop;
     }
     const list = readList(await driver.listFacts(d), req);
     // why: ruling of 2026-10-18: a Cheapest view that never settled and left no list to read is a page that did not
@@ -485,8 +499,14 @@ export class PageSession {
       };
     // why: decision 69: a page in another currency, or one with no option read for any cell, is not a page this app
     // reads; one whose options are all for another cell was read (fix round 1, prov I1): a cell issue, never a block
-    if (list.currency !== 'GBP' || (list.minMinor === null && list.optionsOtherCell === 0))
-      return { answer: this.blockedPlaceholder('unrecognised'), stop: 'unrecognised' };
+    if (list.currency !== 'GBP')
+      return { answer: this.blockedPlaceholder('unrecognised'), stop: 'unrecognised', rule: 'currency' };
+    if (list.minMinor === null && list.optionsOtherCell === 0)
+      return {
+        answer: this.blockedPlaceholder('unrecognised'),
+        stop: 'unrecognised',
+        rule: 'no-options-read',
+      };
     if (list.minMinor === null)
       return {
         answer: this.cells(

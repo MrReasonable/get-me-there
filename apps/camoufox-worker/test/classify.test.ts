@@ -355,3 +355,63 @@ describe('classifyLanding (the consent command’s first view)', () => {
     });
   });
 });
+
+// why: the grid runs of 2026-10-26 stopped as unrecognised, and the Cheapest tab's name was suspected: it carries the
+// text of an information pop-up about budget picks. Every recording since 2026-10-18 shows that text in the name, so
+// these pin what the classifier makes of it, in the worked example's shape (London → New York, £451)
+describe('the Cheapest tab carrying its information pop-up', () => {
+  const POPUP =
+    'Close dialogueLooking for the lowest fares? These additional budget picks help you save but may involve trade-offs, such as flying back to a different airport in the same city that you departed from, self-transferring luggage or booking via a third-party site. Learn more';
+  const LOADED = `Cheapestfrom Fetching results £451${POPUP}`;
+  const one = (name: string, selected?: boolean) => [
+    { name, inTablist: true, ...(selected === undefined ? {} : { selected }) },
+  ];
+  it('one tab carrying the pop-up text is a results page on the Best view and, selected, on the Cheapest view', () => {
+    expect(classifyPageWithRule(facts({ cheapestTabs: one(LOADED) }))).toEqual({
+      kind: { kind: 'results' },
+      rule: 'results',
+    });
+    expect(
+      classifyPageWithRule(
+        facts({ cheapestTabs: one(LOADED, true), dateGridButtons: 0 }),
+        SELECTORS,
+        'cheapest',
+      ),
+    ).toEqual({ kind: { kind: 'results' }, rule: 'results' });
+  });
+  it('the grid flow with the Price insights dialog open: no tab, no Date grid button, no result link is unrecognised, never a stop kind', () => {
+    // why: what every --grid recording's `classification` shows; the dialog's settle stops only on the other blocked
+    // kinds (dialogSettle.ts), and the page's rules were applied before the Price graph click
+    const r = classifyPageWithRule(facts({ cheapestTabs: [], dateGridButtons: 0, resultLinks: 0 }));
+    expect(r).toEqual({ kind: { kind: 'blocked', page: 'unrecognised' }, rule: 'cheapest-tab-count' });
+  });
+  it.each(['best', 'cheapest'] as const)(
+    'two different Cheapest tabs are still refused on the %s view (cheapest-tab-count)',
+    (view) => {
+      const tabs = [...one(LOADED, true), ...one('Cheapest from £389', true)];
+      expect(classifyPageWithRule(facts({ cheapestTabs: tabs }), SELECTORS, view)).toEqual({
+        kind: { kind: 'blocked', page: 'unrecognised' },
+        rule: 'cheapest-tab-count',
+      });
+    },
+  );
+  it('a second tab outside the tablist beside the pop-up tab is refused too', () => {
+    const tabs = [...one(LOADED), { name: '', inTablist: false }];
+    expect(classifyPageWithRule(facts({ cheapestTabs: tabs })).rule).toBe('cheapest-tab-count');
+  });
+  it('no tab and no result link is refused on either view', () => {
+    for (const view of ['best', 'cheapest'] as const)
+      expect(classifyPageWithRule(facts({ cheapestTabs: [], resultLinks: 0 }), SELECTORS, view).kind).toEqual(
+        { kind: 'blocked', page: 'unrecognised' },
+      );
+  });
+  it('an unpriced tab carrying the pop-up text is refused on the Cheapest view (cheapest-tab-unpriced)', () => {
+    expect(
+      classifyPageWithRule(
+        facts({ cheapestTabs: one(`Cheapestfrom Fetching results ${POPUP}`, true), dateGridButtons: 0 }),
+        SELECTORS,
+        'cheapest',
+      ).rule,
+    ).toBe('cheapest-tab-unpriced');
+  });
+});

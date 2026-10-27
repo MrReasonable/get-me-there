@@ -206,7 +206,12 @@ describe('grid pages: the live run’s first page', () => {
       log,
     });
     const r = await t.session.page(req([], { dep: '2027-03-11', ret: '2027-03-21' }));
-    expect(r.answer).toMatchObject({ kind: 'blocked', page: 'unrecognised' });
+    // why: the grid runs of 2026-10-26: the answer names the rule and the first view's failing check, for last_error
+    expect(r.answer).toMatchObject({
+      kind: 'blocked',
+      page: 'unrecognised',
+      rule: 'grid:first-view:selected-cell',
+    });
     const lines = log.lines.filter((l) => l.msg === 'classifier decision').map((l) => l.o);
     expect(lines[0]).toMatchObject({
       cause: 'unrecognised',
@@ -216,7 +221,7 @@ describe('grid pages: the live run’s first page', () => {
       ranges: 1,
       prices: 1,
     });
-    expect(lines[1]).toMatchObject({ cause: 'unrecognised', rule: 'grid:first-view' });
+    expect(lines[1]).toMatchObject({ cause: 'unrecognised', rule: 'grid:first-view:selected-cell' });
     expect(JSON.stringify(lines)).not.toMatch(/Mar|£|https?:/);
   });
 });
@@ -265,6 +270,7 @@ describe('grid pages: the flow', () => {
       kind: 'blocked',
       page: 'unrecognised',
       scrolls: 0,
+      rule: 'search-form:mismatch',
     });
     expect(clicksOf(two)).toEqual([]);
     const usd = resultsTree({
@@ -275,6 +281,7 @@ describe('grid pages: the flow', () => {
     const other = setup({ tree: usd });
     expect((await other.session.page(req(['down']))).answer).toMatchObject({
       kind: 'blocked',
+      rule: 'currency',
       page: 'unrecognised',
     });
     expect(clicksOf(other)).toEqual([]);
@@ -287,7 +294,13 @@ describe('grid pages: the flow', () => {
           : [n('document', '', [text('Our systems have detected unusual traffic')])],
     });
     const r = await t.session.page(req(['down', 'down', 'down']));
-    expect(r.answer).toMatchObject({ kind: 'blocked', page: 'unusual-traffic', scrolls: 2 });
+    // why: a stop inside the dialog keeps the classifier's own rule
+    expect(r.answer).toMatchObject({
+      kind: 'blocked',
+      page: 'unusual-traffic',
+      scrolls: 2,
+      rule: 'unusual-traffic-text',
+    });
     expect(t.cooldown.active()?.cause).toBe('unusual-traffic');
   });
   it('a view that never changes after a scroll ends the page scroll-not-settled with the views read, no cool-down', async () => {
@@ -599,7 +612,12 @@ describe('grid pages: fix round 1 (the moves, the lookups and the settle)', () =
       const log = memoryLog();
       const t = setup({ moveOf, log });
       const r = await t.session.page(req(['right', 'right']));
-      expect(r.answer).toMatchObject({ kind: 'blocked', page: 'unrecognised', scrolls: 1 });
+      expect(r.answer).toMatchObject({
+        kind: 'blocked',
+        page: 'unrecognised',
+        scrolls: 1,
+        rule: 'grid:wrong-move',
+      });
       expect(clicksOf(t).filter((c) => c.startsWith('button:Scroll'))).toEqual(['button:Scroll right']);
       expect(decisions(log)[0]).toMatchObject({ cause: 'unrecognised', rule: 'grid:wrong-move', move: 1 });
     },
@@ -618,7 +636,12 @@ describe('grid pages: fix round 1 (the moves, the lookups and the settle)', () =
       log,
     });
     const r = await t.session.page(req(['down']));
-    expect(r.answer).toMatchObject({ kind: 'blocked', page: 'unrecognised', scrolls: 0 });
+    expect(r.answer).toMatchObject({
+      kind: 'blocked',
+      page: 'unrecognised',
+      scrolls: 0,
+      rule: 'grid:no-price-graph-button',
+    });
     expect(clicksOf(t)).toEqual([]);
     expect(decisions(log)[0]).toMatchObject({ rule: 'grid:no-price-graph-button' });
   });
@@ -663,7 +686,7 @@ describe('grid pages: fix round 1 (the moves, the lookups and the settle)', () =
       ],
     });
     const r = await t.session.page(req([]));
-    expect(r.answer).toMatchObject({ kind: 'blocked', page: 'unrecognised' });
+    expect(r.answer).toMatchObject({ kind: 'blocked', page: 'unrecognised', rule: 'grid:not-dates-grid' });
     expect(decisions(log)[0]).toMatchObject({ rule: 'grid:not-dates-grid', dialog: 2 });
   });
   it('a scroll click that overruns its step is counted: the ledger never undercounts (CodeRabbit)', async () => {
