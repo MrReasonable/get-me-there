@@ -10,6 +10,7 @@
 // Usage: node scripts/check-temp-dirs.mjs
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
+import { pathToFileURL } from 'node:url';
 
 /** The packages that carry a copy of the helper, each with the config that lists it as a setup file. */
 export const HELPER_PACKAGES = [
@@ -69,7 +70,8 @@ function trackedFiles() {
     .filter((f) => f !== '');
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+// why: argv[1] is a path and import.meta.url a file URL; on Windows (C:\...) only a converted path compares equal
+if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const files = trackedFiles().filter(isTestFile);
   if (files.length === 0) {
     console.error('check-temp-dirs: no test files found; refusing to pass on an empty list');
