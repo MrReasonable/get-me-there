@@ -9,7 +9,7 @@
 //
 // Usage: node scripts/check-temp-dirs.mjs
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
 /** The packages that carry a copy of the helper, each with the config that lists it as a setup file. */
@@ -62,12 +62,15 @@ export function helperProblems(read) {
 }
 
 function trackedFiles() {
-  return execFileSync('git', ['ls-files', '--cached', '--others', '--exclude-standard'], {
-    encoding: 'utf8',
-    maxBuffer: 64 * 1024 * 1024,
-  })
-    .split('\n')
-    .filter((f) => f !== '');
+  return (
+    execFileSync('git', ['ls-files', '--cached', '--others', '--exclude-standard'], {
+      encoding: 'utf8',
+      maxBuffer: 64 * 1024 * 1024,
+    })
+      .split('\n')
+      // why: a file deleted or renamed in the working tree is still listed until staged; there is nothing to read
+      .filter((f) => f !== '' && existsSync(f))
+  );
 }
 
 // why: argv[1] is a path and import.meta.url a file URL; on Windows (C:\...) only a converted path compares equal
