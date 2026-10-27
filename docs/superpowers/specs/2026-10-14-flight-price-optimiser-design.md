@@ -230,7 +230,8 @@ never silently dropped. The grammar's closing sentences are the stopovers,
 each either "Stopover (1 of 1) is a 1 hr 20 min stopover at <airport> in
 <city>." or, for a stopover that changes airports (observed 2026-10-27),
 "Stopover (1 of 1) is a 3 hrs stopover in <city>. Transfer here from
-<airport> to <airport>."; any other sentence leaves the name unparsed. The
+<airport> to <airport>."; any other sentence, or an airport or city of
+spaces only, leaves the name unparsed. The
 "Cheapest" tab's accessible name carries the text of an information pop-up
 about budget picks after its price ("Cheapest from £451Close
 dialogueLooking for the lowest fares? These additional budget picks …",

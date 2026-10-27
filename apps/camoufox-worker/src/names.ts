@@ -62,9 +62,12 @@ const DURATION = '[0-9]+ hrs?(?: [0-9]+ min)?|[0-9]+ min';
  * cities carry no full stop, so an appended sentence can never hide inside one; a stopover whose name holds a dot
  * leaves the option unparsed (counted, never misread).
  */
+// why: CodeRabbit on PR #33: each airport or city starts with a character other than a space, so a field of spaces only
+// leaves the name unparsed
+const FIELD = '[^.\\s][^.]*';
 const STOPOVER =
   `Stopover \\([0-9]+ of [0-9]+\\) is a (?:${DURATION})(?: overnight)? stopover ` +
-  '(?:at [^.]+ in [^.]+\\.|in [^.]+\\. Transfer here from [^.]+ to [^.]+\\.)';
+  `(?:at ${FIELD} in ${FIELD}\\.|in ${FIELD}\\. Transfer here from ${FIELD} to ${FIELD}\\.)`;
 
 function grammarFor(interstitials: readonly Interstitial[]): RegExp {
   // why: the group is always present (empty when no interstitial is listed), so it is defined whenever the name matches.

@@ -1749,6 +1749,19 @@ describe('record --grid', () => {
     ]);
     expect(rec.classification).toEqual({ kind: 'blocked', rule: 'cheapest-tab-count' });
   });
+  // why: CodeRabbit on PR #33: the two counts are kept apart, so a tab outside any tablist counts in the total only
+  it('a Cheapest tab outside a tablist in a view counts in its total only', async () => {
+    const { t, deps } = gridRun({
+      view: (d, r) => [
+        n('document', '', [...formNodes(), gridTree({ depart: d, ret: r }), n('tab', 'Cheapest from £451')]),
+      ],
+    });
+    expect(await record(t.ctx([...G, '--moves', 'right']), cfg, deps)).toBe(0);
+    expect(recOf(t).views.map((v: { cheapestTabs: unknown }) => v.cheapestTabs)).toEqual([
+      { total: 1, inTablist: 0 },
+      { total: 1, inTablist: 0 },
+    ]);
+  });
   // why: the recordings of 2026-10-18: one scroll moves one day, and the page rotates its elements after a scroll
   it('measures a one-day step from rotated lines', async () => {
     let n0 = 0;

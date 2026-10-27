@@ -471,22 +471,37 @@ describe.skipIf(!present)(
     // named (the first run's views, grid/2026-10-26/7 and 8), and is read with that one pair unparsed otherwise
     it('without GRID_UNPRICED_VERIFIED no unpriced name is read as a cell; the first run’s views are refused whole', async () => {
       let refused = 0;
+      let partly = 0;
       for (const { file, rec } of sparse()) {
         const r = await serve(rec, new Map(), memoryLog(), { GRID_UNPRICED_VERIFIED: false });
         if (r.answer.kind !== 'grid') throw new Error(`${file}: ${JSON.stringify(r.answer)}`);
+        // why: CodeRabbit on PR #33: every recorded view is answered, so none can pass by being left out
+        expect(
+          r.answer.views.map((v) => v.index),
+          file,
+        ).toEqual(rec.views.map((_v, i) => i));
         for (const v of r.answer.views) {
-          const unpriced = (rec.views[v.index]?.candidates ?? []).filter(
-            (c) => c !== null && parseUnpricedCellName(c) !== null,
-          ).length;
-          expect(v.cells.every((c) => c.status === 'price')).toBe(true);
-          expect(v.unparsed, `${file} view ${v.index}`).toBeGreaterThanOrEqual(unpriced);
+          const names = rec.views[v.index]?.candidates ?? [];
+          const unpriced = names.filter((c) => c !== null && parseUnpricedCellName(c) !== null).length;
+          const at = `${file} view ${v.index}`;
           if (file.startsWith('2026-10-26/')) {
-            expect([v.structural, v.cells.length], `${file} view ${v.index}`).toEqual(['unparsed', 0]);
+            // why: the first run's views: a day of their lines has no priced cell, so the set check refuses them
+            expect([v.structural, v.cells.length], at).toEqual(['unparsed', 0]);
             refused++;
+          } else {
+            // why: grid/2026-10-27/1: every day keeps a priced cell, so each view is read, its priced cells kept and
+            // each unpriced name counted unparsed, never read as a cell
+            expect([v.structural, v.unparsed, v.cells.length], at).toEqual([
+              'ok',
+              unpriced,
+              names.length - unpriced,
+            ]);
+            expect(v.cells.every((c) => c.status === 'price')).toBe(true);
+            if (unpriced > 0) partly++;
           }
         }
       }
-      expect(refused).toBeGreaterThan(0);
+      expect([refused > 0, partly > 0]).toEqual([true, true]);
     });
   },
 );

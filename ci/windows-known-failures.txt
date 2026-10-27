@@ -176,6 +176,7 @@ apps/camoufox-worker/test/record.test.ts > record --graph-explore the snapshot m
 apps/camoufox-worker/test/record.test.ts > record --graph-explore two Price graph buttons ends plainly at the find-graph-button step: no click, no cool-down, nothing written
 apps/camoufox-worker/test/record.test.ts > record --graph-explore when no dialog or region appears, the main landmark is recorded
 apps/camoufox-worker/test/record.test.ts > record --graph-explore without a chart region the chart is null, and without a Dates tab the dates are skipped and counted
+apps/camoufox-worker/test/record.test.ts > record --grid a Cheapest tab outside a tablist in a view counts in its total only
 apps/camoufox-worker/test/record.test.ts > record --grid a challenge after a scroll is that stop with its cool-down; only the stop record is written
 apps/camoufox-worker/test/record.test.ts > record --grid a panel holding an e-mail address is refused: nothing written
 apps/camoufox-worker/test/record.test.ts > record --grid a panel that is not the dates-grid view is recorded and no scroll is tried
