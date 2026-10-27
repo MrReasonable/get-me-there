@@ -215,7 +215,7 @@ describe('grid pages: the live run’s first page', () => {
     const lines = log.lines.filter((l) => l.msg === 'classifier decision').map((l) => l.o);
     expect(lines[0]).toMatchObject({
       cause: 'unrecognised',
-      rule: 'grid:first-view',
+      rule: 'grid:first-view:selected-cell',
       check: 'selected-cell',
       candidates: 49,
       ranges: 1,
@@ -574,7 +574,7 @@ describe('grid pages: a view still drawing its cells', () => {
     const r = await t.session.page(req(['down']));
     expect(r.answer).toMatchObject({ kind: 'blocked', page: 'unrecognised', scrolls: 0 });
     expect(decisions(log)[0]).toMatchObject({
-      rule: 'grid:first-view',
+      rule: 'grid:first-view:selected-cell',
       check: 'selected-cell',
       candidates: 0,
     });

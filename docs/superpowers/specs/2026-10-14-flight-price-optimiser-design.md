@@ -235,7 +235,9 @@ each either "Stopover (1 of 1) is a 1 hr 20 min stopover at <airport> in
 about budget picks after its price ("Cheapest from £451Close
 dialogueLooking for the lowest fares? These additional budget picks …",
 in every recording since 2026-10-18); it is still one tab, and its price is
-the first one in its name.
+the one right after "Cheapest from" (and the hidden "Fetching results"
+label), as "£1,204" or "451 British pounds", never a price or digit later in
+the name: a tab with none there is unpriced.
 
 - **`list` (the only mode built):** one cell per page. Until a recording
   confirms the "Cheapest" tab's flow, the worker clicks nothing: it reads
@@ -3789,7 +3791,9 @@ first view names its failing check (`grid:first-view:selected-cell`, `:range` or
 the Best view's own classification and Cheapest tab counts (`resultsPage`) and each view's counts. The results
 recording also showed a stopover sentence the option grammar did not read (a stopover that changes airports, "…
 stopover in <city>. Transfer here from <airport> to <airport>."), so that option was counted unparsed; the grammar now
-reads it (§2). No other design rule changes.
+reads it (§2). Because the pop-up's text sits in the tab's name, the tab price is read only right after "Cheapest from" (the
+selectors' dated `cheapestTabPrice`), so a digit in the pop-up never makes an unpriced tab read as priced; every
+recorded tab name reads the same price as before. No other design rule changes.
 
 ### Revision 50: the Dates view's review (2026-10-26)
 

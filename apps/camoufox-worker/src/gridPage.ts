@@ -124,18 +124,19 @@ export async function gridPage(
   // a date or a URL), as the recorder's decision line does
   const unrecognised = (why: string, extra: Record<string, number | string> = {}): GridPageResult => {
     notes.push(why);
+    // why: the grid runs of 2026-10-26: the answer carries the rule to the app, the first view's check included, and
+    // the debug line names the same rule (CodeRabbit on PR #33)
+    const rule = `grid:${why}${typeof extra.check === 'string' ? `:${extra.check}` : ''}`;
     o.steps.log?.debug(
       {
         cause: 'unrecognised',
-        rule: `grid:${why}`,
+        rule,
         elapsedMs: timers.now() - (o.steps.startedAt ?? timers.now()),
         ...extra,
       },
       'classifier decision',
     );
-    // why: the grid runs of 2026-10-26: the answer carries the rule to the app, the first view's check included
-    const check = typeof extra.check === 'string' ? `:${extra.check}` : '';
-    return { kind: 'stop', page: 'unrecognised', notes, rule: `grid:${why}${check}` };
+    return { kind: 'stop', page: 'unrecognised', notes, rule };
   };
   /** A poll inside the dialog that met a blocked kind: that stop, with the classifier's own rule. */
   const blocked = (b: { page: BlockedPage; rule: string }): GridPageResult => ({

@@ -108,6 +108,8 @@ describe('readList (spec §2 list mode)', () => {
     expect(tabPriceMinor(`Cheapestfrom Fetching results £451${popup}`)).toBe(45100);
     expect(tabPriceMinor(`Cheapestfrom  £1,204${popup}`)).toBe(120400);
     expect(tabPriceMinor(`Cheapestfrom Fetching results ${popup}`)).toBeNull();
+    // why: CodeRabbit on PR #33: the first price, right after "Cheapest from", never one later in the pop-up's text
+    expect(tabPriceMinor('Cheapest from £451Close dialogueSave 100 British pounds')).toBe(45100);
     expect(readList(facts([name(451)], { tab: 'Cheapest' }), REQ).tabMinor).toBeNull();
   });
 });

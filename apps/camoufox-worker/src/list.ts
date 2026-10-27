@@ -1,5 +1,6 @@
 import type { ListRequest } from '@gmt/core';
 import { airportMatches } from './airports.js';
+import { cheapestTabPriceMinor } from './classify.js';
 import type { ListFacts } from './driver.js';
 import { INTERSTITIALS, type Interstitial, parseOptionName } from './names.js';
 import { pointOfSaleOf } from './pointOfSale.js';
@@ -23,13 +24,12 @@ export interface ListRead {
   pointOfSale: string;
 }
 
-/** "Cheapest from 451 British pounds" or "Cheapest from £1,204" → pence; null when the name states no price. */
+/**
+ * "Cheapest from 451 British pounds" or "Cheapest from £1,204" → pence; null when the name states no price at its start
+ * (the selectors' dated tab-price grammar; the pop-up text after it is never read).
+ */
 export function tabPriceMinor(name: string): number | null {
-  const m =
-    /([0-9]{1,3}(?:,[0-9]{3})+|[0-9]+) British pounds/.exec(name) ??
-    /£([0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)/.exec(name);
-  const digits = m?.[1];
-  return digits === undefined ? null : Number(digits.replaceAll(',', '')) * 100;
+  return cheapestTabPriceMinor(name);
 }
 
 export function readList(

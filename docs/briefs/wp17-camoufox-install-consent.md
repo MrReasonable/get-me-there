@@ -552,7 +552,9 @@ headless, from the operator's own address, with the build `152.0.4-beta.28` of e
   refused first view's check, `grid:first-view:price`), and the adapter's `answer.ts` puts it in `last_error`; the
   recorder keeps the Best view's classification and Cheapest tab counts (`resultsPage`) and each view's counts. The
   results recording's transfer stopover ("… stopover in <city>. Transfer here from <airport> to <airport>.") is read by
-  the option grammar (`names.ts`, re-dated `2026-10-27-transfer`). Tests: synthetic London → New York facts for the
+  the option grammar (`names.ts`, re-dated `2026-10-27-transfer`), and the tab price is read only right after
+  "Cheapest from" (`cheapestTabPrice` in `selectors.ts`, `2026-10-27-tab-price`; `cheapestTabPriceMinor` in
+  `classify.ts`), so a digit in the pop-up text is never a price. Tests: synthetic London → New York facts for the
   pop-up tab name, the dialog-open reading, two Cheapest tabs and no tab with no results; every stop's rule through the
   session; the rule into `last_error` through the adapter and the engine; the recorded suites over every recording.
 
