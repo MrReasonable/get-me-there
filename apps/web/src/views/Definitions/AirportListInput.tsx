@@ -89,10 +89,18 @@ export function AirportListInput({
   const optionId = (i: number) => `${id}-option-${i}`;
   const listboxId = `${id}-listbox`;
 
-  // why: the highlighted option stays visible while the arrow keys move through a list taller than its box.
+  // why: the highlighted option stays visible while the arrow keys move through a list taller than its box; a pointer
+  // moving over the options must not scroll the list under it, so only an arrow key asks for the scroll.
+  const scrollToActive = useRef(false);
   useEffect(() => {
-    if (listShown) document.getElementById(optionId(active))?.scrollIntoView({ block: 'nearest' });
-  });
+    if (!listShown) {
+      scrollToActive.current = false;
+      return;
+    }
+    if (!scrollToActive.current) return;
+    scrollToActive.current = false;
+    document.getElementById(`${id}-option-${active}`)?.scrollIntoView({ block: 'nearest' });
+  }, [listShown, active, id]);
 
   /** Adds the codes not already listed; false (with the duplicate error) when there were none to add. */
   const add = (list: readonly string[]): boolean => {
@@ -161,6 +169,7 @@ export function AirportListInput({
         }
         if (n === 0) return;
         const step = e.key === 'ArrowDown' ? 1 : -1;
+        scrollToActive.current = true;
         setNav({ query, index: (active + step + n) % n });
         return;
       }

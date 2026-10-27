@@ -143,6 +143,19 @@ describe('airport picker: a WAI-ARIA combobox over GET /api/airports?q= (plan a 
     expect(screen.getByRole('button', { name: 'Remove LHR' })).toHaveClass('min-h-11');
   });
 
+  it('the arrow keys scroll the highlighted option into view; a pointer over the options does not', async () => {
+    airportsRoute();
+    const scrolled = vi.spyOn(Element.prototype, 'scrollIntoView');
+    const { user } = renderOnFakeClock();
+    await typeAndAnswer(user, 'lond');
+    await user.hover(screen.getByRole('option', { name: 'London Heathrow (LHR) · London, GB' }));
+    expect(input()).toHaveAttribute('aria-activedescendant', 'origins-option-2');
+    expect(scrolled).not.toHaveBeenCalled();
+    await user.keyboard('{ArrowDown}');
+    expect(scrolled).toHaveBeenCalledTimes(1);
+    expect(scrolled.mock.contexts[0]).toHaveAttribute('id', 'origins-option-3');
+  });
+
   it('the metro option adds every airport of that metro, as the table lists them for the metro code', async () => {
     const asked = airportsRoute();
     const { user } = renderOnFakeClock();
