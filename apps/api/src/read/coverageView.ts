@@ -6,9 +6,9 @@ import type { z } from 'zod';
 import { ApiError } from '../errors.js';
 import { API_TEXT } from '../text.js';
 import type { Ports } from '../wiring.js';
-import { coverageSummaryFor } from './coverage.js';
 import { executionResponse, overrunOf, planCallsOf } from './executions.js';
 import { withNights } from './rows.js';
+import { classifyCells, parentFacts, summariseCells } from './scope.js';
 import { currentSpace } from './space.js';
 
 export type CoverageResponse = z.infer<typeof apiContract.coverageResponseSchema>;
@@ -38,7 +38,18 @@ export function assembleCoverage(def: SearchDefinition, ports: Ports, engine: En
   const all = ports.repos.executions.listForDefinition(def.id, { limit: 'all', includeChildren: true });
   const parent = all.find((e) => !e.isChild) ?? null;
   if (parent === null) throw new ApiError(404, 'no_execution', API_TEXT.noExecution);
-  const summary = coverageSummaryFor(parent, all, ports, currentSpace(def, ports.clock.todayLondon()));
+  // why: revision 50: the summary is the per-cell classification's sum over the current space, so it equals the
+  // unfiltered date-pairs summary (days a relative window rolled in, widened nights and added airports count as not
+  // searched); the per-stage × provider breakdown below stays the run's own cells.
+  const summary = summariseCells(
+    classifyCells(
+      currentSpace(def, ports.clock.todayLondon()),
+      parentFacts(ports, parent),
+      ports.repos.cells.childVerificationRollUps(def.id),
+      // why: the summary counts no partially-verified prices, so no rows are read for it
+      { partiallyVerified: new Set() },
+    ),
+  );
   const counts = ports.repos.ledger.countsFor(parent.id);
   const parityBreak = ports.repos.notifications.wasSent('parity_break', parent.id, def.id);
   const perStage = executionResponse(ports, parent).progress.map((p) => {

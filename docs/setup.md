@@ -322,7 +322,8 @@ SEARCHAPI_BILLING_DAY=1      # the day of the month your subscription renews (1â
 
 then `docker compose up -d`. Without `SEARCHAPI_PLAN=40usd` the key runs on the one-off
 `trial` allowance and scheduled runs leave SearchApi out. On the trial plan new definitions
-allow 0 billed calls per run, so Verify in the calendar is unavailable until you raise the
+allow 0 billed calls per run, so a date pair's "Search <cell> for itineraries" (in its detail, opened from the
+Dates view) is unavailable until you raise the
 definition's call cap in Definitions â†’ Run budget (Max billed calls per run); 6 covers one
 cell. If `.env` has a `SEARCHAPI_TRIAL_USED` line from the trial, delete it (or set it to 0):
 on `40usd` the app refuses to start with it (exit 78).
@@ -919,7 +920,7 @@ Coverage, stated plainly: in `list` mode a page prices one day pair, so a run pr
 `CAMOUFOX_EXECUTION_PAGE_CAP` day pairs and a month at most `CAMOUFOX_MONTHLY_PAGE_CAP`: with the defaults, 100 a run and
 1,500 a month, against 2,184 day pairs for one worked-example airport pair (8,736 for its four pairs). The estimate says
 how many cells a run will price and how many runs a full pass takes; the rest of the cells read skipped or not searched
-in View D. Google's "no flights" line is verified (the 2026-10-18 recordings), so a day pair with no service reads as no data,
+in the Dates view's coverage section. Google's "no flights" line is verified (the 2026-10-18 recordings), so a day pair with no service reads as no data,
 with no pause, as long as the line shows and the page has no result links. A page change that needs new recordings
 sets the flag back, and empty routes then read as not searched again.
 

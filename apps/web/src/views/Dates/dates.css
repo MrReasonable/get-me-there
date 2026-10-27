@@ -1,0 +1,24 @@
+/* The Dates overview's patterns (spec §11 Overview). Stylesheet rules, not inline styles: spec §4's CSP blocks inline
+   styles. A pattern, not a colour, so the meaning survives greyscale, colour-blindness and forced colours (where the
+   glyph beside it carries it too). */
+
+/* Partly not searched: stripes in the cell's own text colour, so they keep that colour's contrast on every shade. */
+.dates-partly {
+  background-image: repeating-linear-gradient(45deg, currentColor 0 1px, transparent 1px 5px);
+}
+
+/* The glyphs sit on the cell's own fill (the button's background colour, inherited), so a stripe in the glyphs' own ink
+   never crosses their strokes: the glyph is the cue that must not rely on colour, and it keeps the band's text-on-fill
+   contrast on every shade. */
+.dates-partly .dates-glyphs {
+  background-color: inherit;
+  padding: 0 1px;
+}
+
+/* A month of the overview off screen skips style, layout and paint until it nears the viewport (WP19 Task 19.9: the
+   performance bound over 400 days). `auto` keeps the size it last rendered at, so the page does not jump; its cells
+   stay in the accessibility tree and reachable by keyboard, and find-in-page still finds them. */
+.dates-month {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 18rem;
+}

@@ -3,7 +3,6 @@ import {
   apiContract,
   asIata,
   asIsoDate,
-  type Buckets,
   type Cell,
   type CellKey,
   effectiveAge,
@@ -17,22 +16,19 @@ import {
 } from '@gmt/core';
 import type { z } from 'zod';
 import type {
-  CalendarDay,
-  CalendarResponse,
   CellDetailResponse,
-  DurationResponse,
   ExecutionSummary,
   ItineraryHistoryResponse,
   PriceCellData,
   RouteHistoryResponse,
 } from '../src/api/types.js';
-import { bucketTotal, type SliceOptions, sliceOf } from '../src/views/Calendar/marker.js';
-import type { DaySlice, GridDay } from '../src/views/Calendar/types.js';
-import { provCalendar, provSearch, provSynthetic, summary } from './fixtures.js';
+import { provCalendar, provSearch, summary } from './fixtures.js';
 import { NOW, type ProvenanceInput } from './render.js';
 
 // WP10's builders on top of WP9's test/fixtures.ts (provenance and execution builders come from there). Every builder
 // that returns a contract shape runs it through the contract schema, so a schema change breaks here, at the fixture.
+// WP19 removed the Calendar and Duration views with their builders; what stays serves the date pair detail's
+// airport-pair panels (the cell route) and History.
 
 /** An instant h hours before NOW, through core's instant helper. */
 export function hoursBefore(h: number): IsoDateTime {
@@ -70,19 +66,9 @@ export function provItinerary(h: number): Provenance {
   return prov(provSearch, h, { maxAgeHours: 'unknown' });
 }
 
-/** A known-age itinerary provenance; no current provider produces one, so only the precedence tie test uses it. */
-export function provItineraryKnownAge(h: number, maxAgeHours: number): Provenance {
-  return prov(provSearch, h, { maxAgeHours });
-}
-
 /** Travelpayouts calendar provenance fetched h hours before NOW. */
 export function provCalendarAt(h: number, maxAgeHours: number | 'unknown' = 48): Provenance {
   return prov(provCalendar, h, { maxAgeHours });
-}
-
-/** The fixture provider's synthetic provenance, from WP9's provSynthetic (spec §5.5). */
-export function provSyntheticAt(h: number): Provenance {
-  return prov(provSynthetic, h);
 }
 
 /** Decision 54's marks on a view figure; a builder that does not set them sends neither. */
@@ -92,8 +78,8 @@ export interface Marks {
 }
 
 /**
- * A day price as calendarDaySchema sends it, its age from core's effective-age rule. It carries both decision-54
- * fields, so it fits a verified or a calendar minimum (the contract parse keeps the one each shape declares).
+ * A cell price, its age from core's effective-age rule. It carries both decision-54 fields, so it fits a verified or a
+ * calendar figure (the contract parse keeps the one each shape declares); `bare` strips it for the panel's prices.
  */
 export function priceAt(
   pricePence: number,
@@ -128,59 +114,6 @@ export function bare(p: PriceCellData & { cell: Cell }): PriceCellData {
   };
 }
 
-export function buckets(partial: Partial<Buckets>): Buckets {
-  return { priced: 0, empty: 0, no_data: 0, error: 0, skipped: 0, not_run: 0, reused: 0, ...partial };
-}
-
-/** One provider's discovery entry; total is the six buckets' sum unless a test needs it to disagree. */
-export function disc(
-  providerId: ProviderId,
-  partial: Partial<Buckets>,
-  total?: number,
-): CalendarDay['discovery'][number] {
-  const b = buckets(partial);
-  return { providerId, buckets: b, total: total ?? bucketTotal(b) };
-}
-
-/** A calendar day through the contract schema. */
-export function day(date: string, partial: Partial<Omit<CalendarDay, 'date'>> = {}): CalendarDay {
-  return apiContract.calendarDaySchema.parse({
-    date,
-    discovery: [],
-    verification: { selected: 0, itinerarySearched: 0, onDemand: 0, unconfirmedCells: 0 },
-    cheapestVerified: null,
-    cheapestPartiallyVerified: null,
-    cheapestCalendar: null,
-    ...partial,
-  });
-}
-
-/** Definition options with both stages configured. */
-export const BOTH: SliceOptions = { verificationConfigured: true, discoveryProviders: ['travelpayouts'] };
-
-export function slice(partial: Partial<DaySlice>): DaySlice {
-  return {
-    discovery: [],
-    discoveryProviders: ['travelpayouts'],
-    verification: null,
-    unconfirmedCells: 0,
-    cheapestVerified: null,
-    cheapestPartiallyVerified: null,
-    cheapestCalendar: null,
-    destination: null,
-    ...partial,
-  };
-}
-
-/** A grid day as the unfiltered calendar returns it. */
-export function gridDay(
-  date: string,
-  partial: Partial<Omit<CalendarDay, 'date'>> = {},
-  o: SliceOptions = BOTH,
-): GridDay {
-  return { date: asIsoDate(date), slice: sliceOf(day(date, partial), o, null) };
-}
-
 /**
  * Parent runs started h hours before NOW, newest first as the executions list sends them, each with id `exec-<h>`
  * (the run ids fetchPoint and offerPoint give their points), so History's run order can be set per test.
@@ -191,90 +124,6 @@ export function runsAt(...hours: number[]): ExecutionSummary[] {
     .map((h) =>
       summary({ id: `exec-${h}`, startedAt: hoursBefore(h), finishedAt: hoursBefore(h), ageHours: h }),
     );
-}
-
-export function calendarResponse(
-  days: CalendarDay[],
-  over: Partial<CalendarResponse> = {},
-): CalendarResponse {
-  return apiContract.calendarResponseSchema.parse({
-    days,
-    executions: [summary()],
-    staleAfterHours: 192,
-    calendarStaleAfterHours: { travelpayouts: 216, searchapi: 192 },
-    ...over,
-  });
-}
-
-type Night = DurationResponse['byNights'][number];
-
-/** How much of a nights value a series searched: all of it, none of it, or [searched, total] cells. */
-type Searched = boolean | [number, number];
-function searchedOf(s: Searched, total: number): { searched: number; total: number } {
-  if (s === true) return { searched: total, total };
-  if (s === false) return { searched: 0, total };
-  return { searched: s[0], total: s[1] };
-}
-
-/** A discovery count whose answered cells all came back "no cached data" (the Aviasales-cache case, N1). */
-function discoveryOf(s: Searched, total: number) {
-  const c = searchedOf(s, total);
-  return {
-    ...c,
-    buckets: {
-      priced: 0,
-      empty: 0,
-      no_data: c.searched,
-      error: 0,
-      skipped: 0,
-      not_run: total - c.searched,
-      reused: 0,
-    },
-  };
-}
-
-/** One nights value; verified/calendar are [pence, n] or null; `searched` says how much each series searched. */
-export function night(
-  nights: number,
-  verified: [number, number] | null,
-  calendar: [number, number] | null,
-  searched: { verification: Searched; travelpayouts: Searched } = { verification: true, travelpayouts: true },
-  at: Cell = cellAt('2027-03-14', nights),
-): Night {
-  return {
-    nights,
-    minVerified:
-      verified === null
-        ? null
-        : {
-            ...bare(priceAt(verified[0], provItinerary(5), false, at)),
-            cell: at,
-            n: verified[1],
-            notSeenInLatest: null,
-          },
-    minCalendar:
-      calendar === null
-        ? []
-        : [
-            {
-              providerId: 'travelpayouts',
-              price: {
-                ...bare(priceAt(calendar[0], provCalendarAt(2), false, at)),
-                cell: at,
-                superseded: false,
-              },
-              n: calendar[1],
-            },
-          ],
-    searched: {
-      verification: searchedOf(searched.verification, 4),
-      discovery: [{ providerId: 'travelpayouts', ...discoveryOf(searched.travelpayouts, 48) }],
-    },
-  };
-}
-
-export function durationResponse(byNights: Night[], over: Partial<DurationResponse> = {}): DurationResponse {
-  return apiContract.durationAnalysisResponseSchema.parse({ byNights, executions: [summary()], ...over });
 }
 
 type Outcome = CellDetailResponse['outcomes'][number];
@@ -430,17 +279,4 @@ export function itineraryHistory(over: Partial<ItineraryHistoryResponse> = {}): 
     ],
     ...over,
   });
-}
-
-/** The default calendar the shared msw handlers serve: a priced day, a glyph day and a day no run has reached. */
-export function defaultCalendar(): CalendarResponse {
-  const c = cellAt('2027-03-14', 14);
-  return calendarResponse([
-    day('2027-03-14', {
-      discovery: [disc('travelpayouts', { priced: 40, no_data: 8 })],
-      cheapestCalendar: priceAt(41200, provCalendarAt(2), false, c),
-    }),
-    day('2027-03-15', { discovery: [disc('travelpayouts', { no_data: 40, not_run: 8 })] }),
-    day('2027-03-16'),
-  ]);
 }

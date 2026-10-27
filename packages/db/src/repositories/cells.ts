@@ -7,6 +7,7 @@ import {
   type Clock,
   cellKeyString,
   type IsoDate,
+  type IsoDateTime,
   type NoDataReason,
   type ProviderId,
   type RollUp,
@@ -37,7 +38,7 @@ import {
   toOutcome,
 } from '../internal/outcomeRow.js';
 import { nextOutcome, readOutcome, storeOutcome } from '../internal/outcomeWrite.js';
-import { nullableOneOf, oneOf, readDate } from '../internal/read.js';
+import { nullableOneOf, oneOf, readDate, readTime } from '../internal/read.js';
 import { writeReusedCopies } from '../internal/reuseCopy.js';
 import { storeRollUps } from '../internal/rollUps.js';
 import { writeTileRows } from '../internal/tileWrite.js';
@@ -466,6 +467,51 @@ export class CellsRepo {
         cell: toCellKey(r),
         reason: oneOf('search_cells.selection_reason', SELECTION_REASONS, r.selection_reason),
       }));
+  }
+
+  /**
+   * WP19 §5: every completed child execution of the definition with its cell and that cell's verification roll-up
+   * status (null when the child stored none), newest first, in one statement. The api reads it once per request for
+   * "+C on demand" (spec §8.1) instead of a roll-up read per child.
+   */
+  childVerificationRollUps(
+    definitionId: string,
+  ): Array<{ executionId: string; createdAt: IsoDateTime; cell: CellKey; status: CellOutcomeStatus | null }> {
+    return this.db.raw
+      .prepare<
+        [string],
+        CellKeyDbRow & { execution_id: string; created_at: string; verification_status: string | null }
+      >(
+        `SELECT e.id AS execution_id, e.created_at, e.child_origin AS origin, e.child_destination AS destination,
+           e.child_departure_date AS departure_date, e.child_return_date AS return_date, c.verification_status
+         FROM search_executions e
+         LEFT JOIN search_cells c ON c.execution_id = e.id AND c.origin = e.child_origin AND c.destination = e.child_destination
+           AND c.departure_date = e.child_departure_date AND c.return_date = e.child_return_date
+         WHERE e.definition_id = ? AND e.is_child = 1 AND e.status = 'completed' AND e.child_origin IS NOT NULL
+         ORDER BY e.created_at DESC, e.rowid DESC`,
+      )
+      .all(definitionId)
+      .map((r) => ({
+        executionId: r.execution_id,
+        createdAt: readTime('search_executions.created_at', r.created_at),
+        cell: toCellKey(r),
+        status: nullableOneOf('search_cells.verification_status', OUTCOME_STATUSES, r.verification_status),
+      }));
+  }
+
+  /**
+   * The cells whose discovery result this execution reused from an earlier run (spec §8.1 reuse), keyed by core's
+   * `cellKeyString`, in one statement: the coverage summary's "(R reused)" (WP19 §5 `ParentFacts.reusedCells`).
+   */
+  reusedCells(executionId: string): Set<string> {
+    return new Set(
+      this.db.raw
+        .prepare<[string], { k: string }>(
+          `SELECT DISTINCT ${CELL_KEY_SQL} AS k FROM cell_outcomes WHERE execution_id = ? AND stage = 'discovery' AND reused_from_execution_id IS NOT NULL`,
+        )
+        .all(executionId)
+        .map((r) => r.k),
+    );
   }
 
   /** Spec §7: resume re-runs selection only when no verification outcomes exist. */

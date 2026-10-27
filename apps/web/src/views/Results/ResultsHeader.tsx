@@ -4,6 +4,7 @@ import { PriceBoundary } from '../../components/PriceBoundary.js';
 import { PriceCell } from '../../components/PriceCell.js';
 import { COPY } from '../../copy.js';
 import { formatIsoDate } from '../../format.js';
+import { coverageLineText } from '../../lib/coverageLine.js';
 import { isThinCoverage } from '../../lib/thinCoverage.js';
 import { hrefWith, navigateTo } from '../../state/urlState.js';
 
@@ -15,6 +16,7 @@ import { hrefWith, navigateTo } from '../../state/urlState.js';
 function Headline({ row, overall }: { row: ResultRow; overall: boolean }) {
   return (
     <div
+      data-testid="detail-headline"
       className={`flex flex-wrap items-start gap-2 text-lg font-semibold ${row.basis === 'calendar' ? 'rounded border border-dashed border-slate-500 px-1' : ''}`}
     >
       <span>{COPY.headlineLead}</span>
@@ -49,41 +51,80 @@ function Headline({ row, overall }: { row: ResultRow; overall: boolean }) {
   );
 }
 
+type BoardFigureData = NonNullable<ResultsResponse['datePairFigure']>;
+
+/**
+ * Whether the board's figure for this date pair is another price than the detail's cheapest row (revision 50): another
+ * amount, basis, airport pair or provider. The board prefers a price the latest search returned, then a fresh one, so
+ * a cheaper row the latest search no longer returned leads here while the board shows the current one.
+ */
+function figureDiffers(figure: BoardFigureData, cheapest: ResultRow | null): boolean {
+  return (
+    cheapest === null ||
+    figure.price.pricePence !== cheapest.pricePence ||
+    figure.basis !== cheapest.basis ||
+    figure.origin !== cheapest.cell.origin ||
+    figure.destination !== cheapest.cell.destination ||
+    figure.price.provenance.providerId !== cheapest.provenance.providerId
+  );
+}
+
+/** "Dates board price: £X · <airport pair> · <basis>" through PriceCell, and why it differs (spec §11, revision 50). */
+function BoardFigure({ figure }: { figure: BoardFigureData }) {
+  const D = COPY.detailView;
+  return (
+    <div
+      data-testid="board-figure"
+      className={`flex flex-wrap items-start gap-2 text-sm ${figure.basis === 'calendar' ? 'rounded border border-dashed border-slate-500 px-1' : ''}`}
+    >
+      <span>{D.boardPriceLead}</span>
+      <PriceBoundary>
+        <PriceCell
+          pricePence={figure.price.pricePence}
+          provenance={figure.price.provenance}
+          calendar={figure.basis === 'calendar'}
+          stale={figure.price.stale}
+          truncated={figure.price.truncated}
+          superseded={figure.superseded}
+          destination={figure.destination}
+          notSeenInLatestHours={figure.notSeenInLatest?.ageHours ?? null}
+        />
+      </PriceBoundary>
+      <span>
+        {D.boardPriceRest(
+          COPY.datesView.airports(figure.origin, figure.destination),
+          COPY.basisName[figure.basis],
+        )}
+      </span>
+      <span className="w-full">{D.boardDiffers}</span>
+    </div>
+  );
+}
+
 export interface ResultsHeaderProps {
   data: ResultsResponse;
   /** The first row of the filtered set in server order (decision 36); null when the filters leave none. */
   filteredFirst: ResultRow | null;
+  /** Where the coverage line links: the Dates view's coverage section (spec §11 Date pair detail). */
+  coveragePatch: Record<string, string | null>;
 }
 
-/** Spec §11: the two-line Results header, plus the truncation and current-space notes. */
-export function ResultsHeader({ data, filteredFirst }: ResultsHeaderProps) {
+/**
+ * Spec §11 Date pair detail: the headline, the board's figure when it is not the cheapest row (revision 50), and the
+ * coverage line over the date pair's cells; then the thin-coverage, truncation and current-space notes.
+ */
+export function ResultsHeader({ data, filteredFirst, coveragePatch }: ResultsHeaderProps) {
   // why: the headline follows what the operator is looking at; when the filters leave nothing, the API's
   // overall cheapest is shown and labelled as such, never passed off as matching the filters.
   const headline = filteredFirst ?? data.cheapest;
   const overall = filteredFirst === null && data.cheapest !== null;
   const c = data.coverage;
   const b = c.buckets;
-  const latestParent = data.executions.find((e) => !e.isChild);
-  // why: "(E outbounds each)" is the shown run's own policy from its summary (decision 42), never the
-  // current definition's, which the operator may have edited since.
-  const itinerary = { searched: c.itinerarySearched, selected: c.selected, onDemand: c.onDemand };
-  const line2 =
-    COPY.coverageLine({
-      priced: b.priced,
-      empty: b.empty,
-      noData: b.no_data,
-      error: b.error,
-      skipped: b.skipped,
-      notRun: b.not_run,
-      total: c.total,
-      reused: c.reused,
-    }) +
-    // why: the line describes the shown run, so the current configuration only speaks when the run itinerary-searched nothing.
-    (!data.verificationProviderConfigured && c.itinerarySearched === 0 && c.onDemand === 0
-      ? COPY.noItinerarySearch
-      : latestParent !== undefined
-        ? COPY.itineraryLineExpand({ ...itinerary, expandTop: latestParent.expandTop })
-        : COPY.itineraryLine(itinerary));
+  const line2 = coverageLineText(
+    c,
+    data.verificationProviderConfigured,
+    data.executions.find((e) => !e.isChild),
+  );
   return (
     <div className="space-y-1">
       {headline !== null ? (
@@ -91,12 +132,11 @@ export function ResultsHeader({ data, filteredFirst }: ResultsHeaderProps) {
       ) : (
         <p className="text-lg font-semibold">{COPY.noHeadline}</p>
       )}
+      {data.datePairFigure !== null && figureDiffers(data.datePairFigure, data.cheapest) ? (
+        <BoardFigure figure={data.datePairFigure} />
+      ) : null}
       <p className="text-sm">
-        <a
-          href={hrefWith({ view: 'coverage' })}
-          onClick={navigateTo({ view: 'coverage' })}
-          className="underline"
-        >
+        <a href={hrefWith(coveragePatch)} onClick={navigateTo(coveragePatch)} className="underline">
           {line2}
         </a>
       </p>

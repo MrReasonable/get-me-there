@@ -29,12 +29,29 @@ export type VerifyCellBody = z.input<typeof apiContract.verifyCellRequestSchema>
 export type StartExecutionBody = z.input<typeof apiContract.startExecutionRequestSchema>;
 
 // WP10 routes (plan "API contract", results.ts, with WP10's additions of decisions 38, 42 and 48).
-export type { CalendarDay } from '@gmt/core';
-export type CalendarResponse = z.output<typeof apiContract.calendarResponseSchema>;
-export type DurationResponse = z.output<typeof apiContract.durationAnalysisResponseSchema>;
 export type CellDetailResponse = z.output<typeof apiContract.cellDetailResponseSchema>;
 export type ItineraryHistoryResponse = z.output<typeof apiContract.itineraryHistoryResponseSchema>;
 export type RouteHistoryResponse = z.output<typeof apiContract.routeHistoryResponseSchema>;
+
+/**
+ * The date-pairs route's scope (spec §10, WP19): its wire form, every value a string or absent. Built by datesState's
+ * `scopeQuery`, sorted so one scope is one query key.
+ */
+export interface DatePairsScope {
+  origins: string | undefined;
+  destinations: string | undefined;
+  maxJourneyMinutes: string | undefined;
+}
+
+/**
+ * `/results`' scope (spec §10, WP19 Task 19.6): the date pair detail's read, scoped to one date pair and to the Dates
+ * airport filter and journey limit. Its wire form, every value a string or absent; built by resultsState's
+ * `detailScope` from the URL, so one scope is one query key.
+ */
+export interface ResultsScope extends DatePairsScope {
+  departureDate: string;
+  returnDate: string;
+}
 
 /** An alert rule as the form sends it: the schema's input shape (cooldownHours may be left to its default of 336). */
 export type AlertRuleBody = z.input<typeof apiContract.alertRuleInputSchema>;

@@ -1,10 +1,12 @@
-import { apiContract, type ResultFilters, type SortKey } from '@gmt/core';
-import type { Basis } from '../api/types.js';
+import { apiContract, DETAIL_LINK_PARAMS, type IsoDate, type ResultFilters, type SortKey } from '@gmt/core';
+import type { Basis, ResultsScope } from '../api/types.js';
+import { type DatesUiState, datesPatch, scopeQuery } from './datesState.js';
 import { oneOf } from './oneOf.js';
+import { int, list, nightsRange, type SortDir, sortToken, uniqueIataList } from './parse.js';
 import { withKey } from './withKey.js';
 
 /** sortRows's direction parameter (plan "Core domain functions": `dir: 'asc' | 'desc'`). */
-export type SortDir = 'asc' | 'desc';
+export type { SortDir };
 
 /** View A state held in the URL (spec §11). `sort: null` keeps the server's class-then-price order. */
 export interface ResultsUiState {
@@ -34,14 +36,6 @@ const isClass = oneOf(CLASSES);
 const isProvider = oneOf(apiContract.providerIdSchema.options);
 const isConstraint = oneOf(apiContract.constraintNameSchema.options);
 
-const list = (v: string | null): string[] => (v ? v.split(',').filter((s) => s.length > 0) : []);
-// why: a limit the URL spells beyond 2^53 would round (or become Infinity) and silently be a different limit; such a
-// token is malformed like any other and is dropped.
-const safeInt = (v: string): number | undefined => {
-  const n = Number(v);
-  return /^\d+$/.test(v) && Number.isSafeInteger(n) ? n : undefined;
-};
-const int = (v: string | null): number | undefined => (v === null ? undefined : safeInt(v));
 const CARRIER = /^[A-Z0-9]{2}$/;
 
 /** The URL parameter that carries the results basis; the status bar, Results and History all read it through this. */
@@ -72,15 +66,7 @@ export function activeFilterCount(f: ResultFilters): number {
  * schemas, which also give the branded types the filter takes (no casts).
  */
 export function parseResultsState(p: URLSearchParams): ResultsUiState {
-  const rawSort = p.get('sort');
-  let sort: ResultsUiState['sort'] = null;
-  if (rawSort !== null) {
-    // why: exactly two segments; `price.asc.extra` is malformed, never trimmed to `price.asc` (CodeRabbit batch 3)
-    const parts = rawSort.split('.');
-    const [k, d] = parts;
-    if (parts.length === 2 && k !== undefined && isSortKey(k) && (d === 'asc' || d === 'desc'))
-      sort = { key: k, dir: d };
-  }
+  const sort: ResultsUiState['sort'] = sortToken(p.get('sort'), isSortKey);
   let f: ResultFilters = {};
   const classes = list(p.get('f.class')).filter(isClass);
   if (classes.length > 0) f = withKey(f, 'verdictClass', classes);
@@ -90,18 +76,11 @@ export function parseResultsState(p: URLSearchParams): ResultsUiState {
   const carriers = list(p.get('f.carriers')).filter((c) => CARRIER.test(c));
   if (carriers.length > 0) f = withKey(f, 'carriers', carriers);
   // why: the URL is operator-editable; only codes core's iataSchema accepts become the Iata the filter takes.
-  const dests = list(p.get('f.dest')).flatMap((c) => {
-    const r = apiContract.cellKeySchema.shape.destination.safeParse(c);
-    return r.success && c === r.data ? [r.data] : [];
-  });
+  const dests = uniqueIataList(p.get('f.dest'));
   if (dests.length > 0) f = withKey(f, 'destination', dests);
   f = withKey(f, 'maxPricePence', int(p.get('f.maxPrice')));
-  const nights = /^(\d+)-(\d+)$/.exec(p.get('f.nights') ?? '');
-  const nightsMin = nights?.[1] === undefined ? undefined : safeInt(nights[1]);
-  const nightsMax = nights?.[2] === undefined ? undefined : safeInt(nights[2]);
-  if (nightsMin !== undefined && nightsMax !== undefined && nightsMin <= nightsMax) {
-    f = withKey(f, 'nights', { min: nightsMin, max: nightsMax });
-  }
+  const nights = nightsRange(p.get('f.nights'));
+  if (nights !== null) f = withKey(f, 'nights', nights);
   // why: exactly two dates; a third `..` segment makes the range malformed (CodeRabbit batch 3)
   const range = (p.get('f.depart') ?? '').split('..');
   const [from, to] = range;
@@ -143,3 +122,61 @@ export function resultsStatePatch(s: ResultsUiState): Record<string, string | nu
     'f.unverified': joined(f.unverified),
   };
 }
+
+// --- WP19 Task 19.6: the date pair detail (spec §11 Date pair detail, URLs) ---
+
+/** The date pair a detail URL names. */
+export interface DetailPair {
+  departureDate: IsoDate;
+  returnDate: IsoDate;
+}
+
+/**
+ * `depart=` and `return=` as two well-formed `YYYY-MM-DD` dates with the return on or after the departure, else null.
+ * Format only (spec §11 URLs; WP19 Task 19.7): whether the date pair is inside the current resolved space is the
+ * server's answer (`/results`' 422 `date_pair_outside_space`), never the browser's, which has no clock to judge it by.
+ */
+export function parseDetailPair(p: URLSearchParams): DetailPair | null {
+  const dateOf = apiContract.cellKeySchema.shape.departureDate;
+  const dep = dateOf.safeParse(p.get(DETAIL_LINK_PARAMS.depart));
+  const ret = dateOf.safeParse(p.get(DETAIL_LINK_PARAMS.return));
+  return dep.success && ret.success && dep.data <= ret.data
+    ? { departureDate: dep.data, returnDate: ret.data }
+    : null;
+}
+
+/**
+ * Results' filters inside the detail (spec §11): the stay, departure and destination filters are fixed by the date pair
+ * and the Dates airport filter, so a stale `f.nights`, `f.depart` or `f.dest` in the URL is ignored rather than
+ * emptying a detail opened from the board; class, provider, stops, carriers, maximum price, unverified constraint and
+ * stale stay.
+ */
+export function detailState(s: ResultsUiState): ResultsUiState {
+  let f = withKey(s.filters, 'nights', undefined);
+  f = withKey(f, 'departure', undefined);
+  f = withKey(f, 'destination', undefined);
+  return { sort: s.sort, filters: f };
+}
+
+/** `/results`' scope for the detail (spec §10): the date pair, and the Dates airport filter and journey limit. */
+export function detailScope(dates: DatesUiState, pair: DetailPair): ResultsScope {
+  return { ...scopeQuery(dates), departureDate: pair.departureDate, returnDate: pair.returnDate };
+}
+
+/**
+ * "Back to dates" (spec §11): the Dates view with every `d.*` parameter kept (hrefWith keeps every parameter the patch
+ * does not name) and the detail's own parameters removed, names from core's one constant.
+ */
+export const BACK_TO_DATES: Readonly<Record<string, string | null>> = {
+  [DETAIL_LINK_PARAMS.view]: 'dates',
+  [DETAIL_LINK_PARAMS.depart]: null,
+  [DETAIL_LINK_PARAMS.return]: null,
+  [DETAIL_LINK_PARAMS.basis]: null,
+  [DETAIL_LINK_PARAMS.row]: null,
+};
+
+/** The Dates view's coverage section, opened (spec §11: the detail's coverage line and empty state link to it). */
+export const DATES_COVERAGE: Readonly<Record<string, string | null>> = {
+  ...BACK_TO_DATES,
+  ...datesPatch({ coverageOpen: true }),
+};

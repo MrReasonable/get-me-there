@@ -1,7 +1,7 @@
-// Spec §10 calendar, duration analysis, coverage, calendar gap and cell detail (Views B, C, D and the side panel).
-import { apiContract, asIata, daysBetween, generateCells } from '@gmt/core';
+// Spec §10 coverage, calendar gap and cell detail (the Dates view's coverage section and the date pair detail's
+// per-airport-pair panels; WP19 retired the calendar and duration-analysis routes).
+import { apiContract } from '@gmt/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { currentSpace } from '../../src/read/space.js';
 import { errorOf, expectContract } from '../helpers/contract.js';
 import { exampleDefinitionInput } from '../helpers/examples.js';
 import { createHarness, type Harness } from '../helpers/harness.js';
@@ -53,379 +53,20 @@ const get = <S extends Parameters<typeof expectContract>[3]>(
   schema: S,
 ) => x.request(path).then((r) => expectContract(r, 'GET', route, schema));
 
-describe('GET /api/definitions/:id/calendar (spec §10, View B)', () => {
-  it('per day: six buckets per provider, selection, the three cheapest, stale thresholds', async () => {
-    const { x, def } = await world();
-    const cal = await get(
-      x,
-      `/api/definitions/${def.id}/calendar`,
-      '/api/definitions/:id/calendar',
-      apiContract.calendarResponseSchema,
-    );
-    const space = currentSpace(def, x.clock.todayLondon());
-    expect(cal.days).toHaveLength(daysBetween(space.departureFrom, space.departureTo) + 1);
-    expect(cal.staleAfterHours).toBe(192);
-    expect(cal.calendarStaleAfterHours.fixture).toBe(168);
-    const day = (d: string) => cal.days.find((y) => y.date === d);
-    expect(day('2026-11-02')?.discovery).toEqual([
-      {
-        providerId: 'fixture',
-        buckets: { priced: 1, empty: 0, no_data: 0, error: 0, skipped: 0, not_run: 0, reused: 0 },
-        total: 1,
-      },
-    ]);
-    expect(day('2026-11-02')?.verification).toEqual({
-      selected: 1,
-      itinerarySearched: 1,
-      onDemand: 0,
-      unconfirmedCells: 0,
-    });
-    expect(day('2026-11-02')?.cheapestVerified).toMatchObject({
-      pricePence: 60_000,
-      itineraryHash: 'hV',
-      truncated: false,
-    });
-    expect(day('2026-11-02')?.cheapestCalendar?.pricePence).toBe(45_000);
-    expect(day('2026-11-02')?.cheapestPartiallyVerified).toBeNull();
-    expect(Object.keys(day('2026-11-02') ?? {})).not.toContain('byDestination'); // decision 58
-    expect(day('2026-11-03')?.discovery[0]?.buckets.no_data).toBe(1);
-    expect(day('2026-11-03')?.cheapestPartiallyVerified).toMatchObject({
-      pricePence: 40_000,
-      count: 1,
-      itineraryHash: 'hP',
-    });
-    expect(day('2026-11-04')?.discovery[0]?.buckets.empty).toBe(1);
-    expect(day('2026-11-04')?.cheapestVerified).toBeNull(); // why: hF is class failed
-    expect(day('2026-11-05')?.discovery[0]?.buckets.error).toBe(1);
-  });
-
-  it('an offer whose price the final step did not confirm is never a cheapest itinerary-search price (decisions 45, 48)', async () => {
-    const { x, def, s } = await world();
-    s.verified('E1', C2, [
-      { hash: 'hX', pricePence: 20_000, fetchedAt: at(-1), baggage: null, confirmed: false },
-    ]);
-    const cal = await get(
-      x,
-      `/api/definitions/${def.id}/calendar`,
-      '/api/definitions/:id/calendar',
-      apiContract.calendarResponseSchema,
-    );
-    expect(cal.days.find((d) => d.date === '2026-11-03')?.cheapestPartiallyVerified).toMatchObject({
-      itineraryHash: 'hP',
-    });
-  });
-
-  it('counts a selected cell whose itinerary search priced but confirmed no price (decision 51)', async () => {
-    const { x, def, s } = await world();
-    s.execution('E2', { def, status: 'completed', startedAt: at(-0.5), finishedAt: at(-0.4) });
-    s.cells('E2', [C4], { selected: [{ cell: C4, reason: 'always_include' }] });
-    s.verified('E2', C4, [{ hash: 'hU', pricePence: 20_000, fetchedAt: at(-0.4), confirmed: false }]);
-    const cal = await get(
-      x,
-      `/api/definitions/${def.id}/calendar`,
-      '/api/definitions/:id/calendar',
-      apiContract.calendarResponseSchema,
-    );
-    const day = cal.days.find((d) => d.date === '2026-11-05');
-    expect(day?.verification).toMatchObject({ selected: 1, itinerarySearched: 1, unconfirmedCells: 1 });
-    expect(day?.cheapestVerified).toBeNull();
-    const other = cal.days.find((d) => d.date === '2026-11-03');
-    expect(other?.verification.unconfirmedCells).toBe(0); // why: hP's price is confirmed
-  });
-});
-
-describe('calendar selection rules (plan decisions 53, 54; review prov-009)', () => {
-  const calendar = (x: Harness, defId: string, query = '') =>
-    get(
-      x,
-      `/api/definitions/${defId}/calendar${query}`,
-      '/api/definitions/:id/calendar',
-      apiContract.calendarResponseSchema,
-    );
-  async function bare(destinations = ['JFK']) {
-    const x = await createHarness();
-    h = x;
-    const s = seeder(x.ports);
-    const def = x.ports.repos.definitions.create(
-      exampleDefinitionInput({ destinations: destinations.map(asIata) }),
-    );
-    return { x, s, def };
-  }
-
-  it('with destination=, buckets, selection and minima count that destination only; 422 for another', async () => {
-    const { x, s, def } = await bare(['JFK', 'EWR']);
-    const J = cell('LHR', 'JFK', '2026-11-02', '2026-11-12');
-    const E = cell('LHR', 'EWR', '2026-11-02', '2026-11-12');
-    s.execution('E1', { def, status: 'completed', startedAt: at(-2), finishedAt: at(-1) });
-    s.cells('E1', [J, E], { selected: [J, E].map((c) => ({ cell: c, reason: 'top_n' as const })) });
-    s.tile('E1', J, { status: 'priced', pricePence: 45_000, fetchedAt: at(-1) });
-    s.tile('E1', E, { status: 'priced', pricePence: 35_000, fetchedAt: at(-1), tileIndex: 1 });
-    s.verified('E1', J, [{ hash: 'hJ', pricePence: 60_000, fetchedAt: at(-1) }]);
-    s.verified('E1', E, [{ hash: 'hE', pricePence: 50_000, fetchedAt: at(-1) }]);
-    const both = (await calendar(x, def.id)).days.find((d) => d.date === '2026-11-02');
-    expect([
-      both?.cheapestVerified?.pricePence,
-      both?.verification.selected,
-      both?.discovery[0]?.total,
-    ]).toEqual([50_000, 2, 2]);
-    const jfk = (await calendar(x, def.id, '?destination=JFK')).days.find((d) => d.date === '2026-11-02');
-    expect([jfk?.cheapestVerified?.pricePence, jfk?.cheapestCalendar?.pricePence]).toEqual([60_000, 45_000]);
-    expect([jfk?.verification.selected, jfk?.discovery[0]?.total]).toEqual([1, 1]);
-    const bos = await x.request(`/api/definitions/${def.id}/calendar?destination=BOS`);
-    expect(bos.status).toBe(422);
-    expect((await errorOf(bos)).code).toBe('unknown_destination');
-  });
-
-  it('prefers a price the newest search returned over a cheaper one it did not, and marks the latter', async () => {
-    const { x, s, def } = await bare();
-    s.execution('E1', { def, status: 'completed', startedAt: at(-30), finishedAt: at(-29) });
-    s.cells('E1', [C1], { selected: [{ cell: C1, reason: 'top_n' }] });
-    s.verified('E1', C1, [{ hash: 'hOld', pricePence: 55_000, fetchedAt: at(-29) }]);
-    s.execution('E2', { def, status: 'completed', startedAt: at(-2), finishedAt: at(-1) });
-    s.cells('E2', [C1], { selected: [{ cell: C1, reason: 'top_n' }] });
-    s.verified('E2', C1, [{ hash: 'hNew', pricePence: 65_000, fetchedAt: at(-1) }]);
-    const day = (await calendar(x, def.id)).days.find((d) => d.date === '2026-11-02');
-    expect(day?.cheapestVerified).toMatchObject({ itineraryHash: 'hNew', notSeenInLatest: null });
-    const gap = await get(
-      x,
-      `/api/definitions/${def.id}/calendar-gap`,
-      '/api/definitions/:id/calendar-gap',
-      apiContract.calendarGapResponseSchema,
-    );
-    expect(gap.cheapestVerified).toMatchObject({ itineraryHash: 'hNew', notSeenInLatest: null });
-  });
-
-  it('prefers a fresh price over a cheaper stale one on the same day', async () => {
-    const { x, s, def } = await bare();
-    const C1b = cell('LHR', 'JFK', '2026-11-02', '2026-11-13');
-    s.execution('E1', { def, status: 'completed', startedAt: at(-300), finishedAt: at(-1) });
-    s.cells('E1', [C1, C1b], { selected: [C1, C1b].map((c) => ({ cell: c, reason: 'top_n' as const })) });
-    s.verified('E1', C1, [{ hash: 'hStale', pricePence: 50_000, fetchedAt: at(-250) }]); // 250 h > 192
-    s.verified('E1', C1b, [{ hash: 'hFresh', pricePence: 58_000, fetchedAt: at(-1) }]);
-    const day = (await calendar(x, def.id)).days.find((d) => d.date === '2026-11-02');
-    expect(day?.cheapestVerified).toMatchObject({ itineraryHash: 'hFresh', stale: false });
-  });
-
-  it('a fresh offer from another seller is shown before a cheaper stale offer of the same itinerary (decision 58)', async () => {
-    const { x, s, def } = await bare();
-    s.execution('E1', { def, status: 'completed', startedAt: at(-300), finishedAt: at(-1) });
-    s.cells('E1', [C1], { selected: [{ cell: C1, reason: 'top_n' }] });
-    s.verified('E1', C1, [
-      { hash: 'hS', pricePence: 40_000, fetchedAt: at(-250), seller: 'Stale Air' }, // 250 h > 192
-      { hash: 'hS', pricePence: 42_000, fetchedAt: at(-1), seller: 'Fresh Travel' },
-    ]);
-    const day = (await calendar(x, def.id)).days.find((d) => d.date === '2026-11-02');
-    expect(day?.cheapestVerified).toMatchObject({ itineraryHash: 'hS', pricePence: 42_000, stale: false });
-  });
-
-  it('a confirmed £400 offer is the cheapest even when the same itinerary has an unconfirmed £380 offer', async () => {
-    const { x, s, def } = await bare();
-    s.execution('E1', { def, status: 'completed', startedAt: at(-2), finishedAt: at(-1) });
-    s.cells('E1', [C1], { selected: [{ cell: C1, reason: 'top_n' }] });
-    s.verified('E1', C1, [
-      { hash: 'hD', pricePence: 40_000, fetchedAt: at(-1), seller: 'Confirmed Air' },
-      { hash: 'hD', pricePence: 38_000, fetchedAt: at(-1), seller: 'Unconfirmed Travel', confirmed: false },
-    ]);
-    const day = (await calendar(x, def.id)).days.find((d) => d.date === '2026-11-02');
-    expect(day?.cheapestVerified).toMatchObject({ itineraryHash: 'hD', pricePence: 40_000 });
-    expect(day?.verification.unconfirmedCells).toBe(0);
-  });
-
-  it("unconfirmedCells follows the latest run: an older run's confirmed price does not hide it", async () => {
-    const { x, s, def } = await bare();
-    s.execution('E1', { def, status: 'completed', startedAt: at(-30), finishedAt: at(-29) });
-    s.cells('E1', [C1], { selected: [{ cell: C1, reason: 'top_n' }] });
-    s.verified('E1', C1, [{ hash: 'hC', pricePence: 60_000, fetchedAt: at(-29) }]);
-    s.execution('E2', { def, status: 'completed', startedAt: at(-2), finishedAt: at(-1) });
-    s.cells('E2', [C1], { selected: [{ cell: C1, reason: 'top_n' }] });
-    s.verified('E2', C1, [{ hash: 'hU', pricePence: 55_000, fetchedAt: at(-1), confirmed: false }]);
-    const day = (await calendar(x, def.id)).days.find((d) => d.date === '2026-11-02');
-    expect(day?.verification.unconfirmedCells).toBe(1);
-  });
-});
-
-describe('GET /api/definitions/:id/duration-analysis (spec §10, View C)', () => {
-  it('per nights: minimum with its cell and n, calendar per provider, searched per series, gaps as null / empty', async () => {
-    const { x, def } = await world();
-    const d = await get(
-      x,
-      `/api/definitions/${def.id}/duration-analysis`,
-      '/api/definitions/:id/duration-analysis',
-      apiContract.durationAnalysisResponseSchema,
-    );
-    expect(d.byNights.map((n) => n.nights)).toEqual([10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21]);
-    const ten = d.byNights[0];
-    expect(ten?.minVerified).toMatchObject({ n: 1, pricePence: 60_000, cell: { ...C1, nights: 10 } });
-    expect(ten?.minCalendar).toEqual([
-      expect.objectContaining({
-        providerId: 'fixture',
-        n: 1,
-        price: expect.objectContaining({ pricePence: 45_000 }),
-      }),
-    ]);
-    // why: WP10's per-series counts: three of the four selected 10-night cells were itinerary-searched (C4 was not
-    // reached); the fixture answered C1, C2 and C3 of every 10-night cell of the window (C4's tile failed)
-    const tenTotal = generateCells(currentSpace(def, x.clock.todayLondon())).filter(
-      (c) => c.nights === 10,
-    ).length;
-    expect(ten?.searched).toEqual({
-      verification: { searched: 3, total: 4 },
-      // why: N1: the per-provider buckets, so View C names cache misses as such (C4's tile failed; the rest not run).
-      discovery: [
-        {
-          providerId: 'fixture',
-          searched: 3,
-          total: tenTotal,
-          buckets: {
-            priced: 1,
-            empty: 1,
-            no_data: 1,
-            error: 1,
-            skipped: 0,
-            not_run: tenTotal - 4,
-            reused: 0,
-          },
-        },
-      ],
-    });
-    expect(d.byNights[1]).toMatchObject({
-      nights: 11,
-      minVerified: null,
-      minCalendar: [],
-      searched: {
-        verification: { searched: 0, total: 0 },
-        discovery: [
-          {
-            providerId: 'fixture',
-            searched: 0,
-            total: tenTotal,
-            buckets: { priced: 0, empty: 0, no_data: 0, error: 0, skipped: 0, not_run: tenTotal, reused: 0 },
-          },
-        ],
-      },
-    });
-  });
-});
-
-describe('an assumed calendar bound reaches every price as such (N4, pie-007)', () => {
-  it('a calendar price from a provider whose bound is assumed carries maxAgeAssumed; a stated bound does not', async () => {
+// why: WP19 Task 19.8 retired the calendar and duration-analysis routes; their rules were ported to the date-pairs
+// route's tests (test/routes/datePairs.test.ts, "ported: …"). The cell route keeps decision 54's mark here.
+describe('superseded calendar prices in the cell detail (decision 54, WP10 Task 10.1 shapes)', () => {
+  it('the cell detail marks a price a later search found empty', async () => {
     const x = await createHarness();
     h = x;
     const s = seeder(x.ports);
     const def = x.ports.repos.definitions.create(exampleDefinitionInput());
-    s.execution('E1', { def, status: 'completed', startedAt: at(-3), finishedAt: at(-2) });
-    s.cells('E1', [C1]);
-    s.tile('E1', C1, { status: 'priced', pricePence: 30_000, fetchedAt: at(-2) });
-    const calendar = async () =>
-      (
-        await get(
-          x,
-          `/api/definitions/${def.id}/calendar`,
-          '/api/definitions/:id/calendar',
-          apiContract.calendarResponseSchema,
-        )
-      ).days.find((d) => d.date === '2026-11-02')?.cheapestCalendar?.provenance;
-    expect(await calendar()).not.toHaveProperty('maxAgeAssumed');
-    // why: SearchApi's date grid states no cache age; the app assumes 24 h and its capability says so (pie-007)
-    x.ports.providers.splice(
-      0,
-      x.ports.providers.length,
-      ...x.ports.providers.map((p) =>
-        p.discovery === undefined
-          ? p
-          : { ...p, discovery: { ...p.discovery, info: { ...p.discovery.info, maxAgeAssumed: true } } },
-      ),
-    );
-    expect(await calendar()).toMatchObject({ maxAgeHours: 24, maxAgeAssumed: true });
-  });
-  it('a stored grid-cell price is assumed from its own row, with camoufox off or in list mode (fix round 1, PA I2)', async () => {
-    const x = await createHarness();
-    h = x;
-    const s = seeder(x.ports);
-    const def = x.ports.repos.definitions.create(exampleDefinitionInput());
-    s.execution('E1', { def, status: 'completed', startedAt: at(-3), finishedAt: at(-2) });
-    s.cells('E1', [C1]);
-    s.tile('E1', C1, { status: 'priced', pricePence: 30_000, fetchedAt: at(-2) });
-    // why: the row as a grid page stored it; no provider in the list says its bound is assumed
-    x.ports.db.raw
-      .prepare(
-        "UPDATE calendar_prices SET provider_id = 'camoufox', source_kind = 'scraped-self', return_date_source = 'grid-cell', vendor_price_mark = 'none'",
-      )
-      .run();
-    expect(x.ports.providers.some((p) => p.id === 'camoufox')).toBe(false);
-    const provenance = async () =>
-      (
-        await get(
-          x,
-          `/api/definitions/${def.id}/calendar`,
-          '/api/definitions/:id/calendar',
-          apiContract.calendarResponseSchema,
-        )
-      ).days.find((d) => d.date === '2026-11-02')?.cheapestCalendar?.provenance;
-    expect(await provenance()).toMatchObject({
-      providerId: 'camoufox',
-      maxAgeHours: 24,
-      maxAgeAssumed: true,
-    });
-  });
-  it('a stored SearchApi calendar price is assumed from its own row, with SearchApi turned off (fix round 2)', async () => {
-    const x = await createHarness();
-    h = x;
-    const s = seeder(x.ports);
-    const def = x.ports.repos.definitions.create(exampleDefinitionInput());
-    s.execution('E1', { def, status: 'completed', startedAt: at(-3), finishedAt: at(-2) });
-    s.cells('E1', [C1]);
-    s.tile('E1', C1, { status: 'priced', pricePence: 30_000, fetchedAt: at(-2) });
-    x.ports.db.raw
-      .prepare(
-        "UPDATE calendar_prices SET provider_id = 'searchapi', source_kind = 'scraped-aggregate', return_date_source = 'vendor', vendor_price_mark = 'none'",
-      )
-      .run();
-    expect(x.ports.providers.some((p) => p.id === 'searchapi')).toBe(false);
-    const provenance = (
-      await get(
-        x,
-        `/api/definitions/${def.id}/calendar`,
-        '/api/definitions/:id/calendar',
-        apiContract.calendarResponseSchema,
-      )
-    ).days.find((d) => d.date === '2026-11-02')?.cheapestCalendar?.provenance;
-    expect(provenance).toMatchObject({ providerId: 'searchapi', maxAgeHours: 24, maxAgeAssumed: true });
-  });
-});
-
-describe('superseded calendar prices on the views (decision 54, WP10 Task 10.1 shapes)', () => {
-  it('a day, a stay length and the cell detail mark a price a later search found empty, and prefer a current one', async () => {
-    const x = await createHarness();
-    h = x;
-    const s = seeder(x.ports);
-    const def = x.ports.repos.definitions.create(exampleDefinitionInput());
-    const C1b = cell('LHR', 'JFK', '2026-11-02', '2026-11-13'); // same day, 11 nights
     s.execution('Eold', { def, status: 'completed', startedAt: at(-30), finishedAt: at(-29) });
-    s.cells('Eold', [C1, C1b]);
+    s.cells('Eold', [C1]);
     s.tile('Eold', C1, { status: 'priced', pricePence: 30_000, fetchedAt: at(-29) });
-    s.tile('Eold', C1b, { status: 'priced', pricePence: 50_000, fetchedAt: at(-29), tileIndex: 1 });
     s.execution('Enew', { def, status: 'completed', startedAt: at(-3), finishedAt: at(-2) });
-    s.cells('Enew', [C1, C1b]);
+    s.cells('Enew', [C1]);
     s.tile('Enew', C1, { status: 'empty', fetchedAt: at(-2) });
-    s.tile('Enew', C1b, { status: 'priced', pricePence: 52_000, fetchedAt: at(-2), tileIndex: 1 });
-    const day = (
-      await get(
-        x,
-        `/api/definitions/${def.id}/calendar`,
-        '/api/definitions/:id/calendar',
-        apiContract.calendarResponseSchema,
-      )
-    ).days.find((d) => d.date === '2026-11-02');
-    expect(day?.cheapestCalendar).toMatchObject({ pricePence: 52_000, superseded: false });
-    const d = await get(
-      x,
-      `/api/definitions/${def.id}/duration-analysis`,
-      '/api/definitions/:id/duration-analysis',
-      apiContract.durationAnalysisResponseSchema,
-    );
-    // why: the duration reads the latest parent's own fetches, so the 10-night minimum is gone, not superseded
-    expect(d.byNights.find((n) => n.nights === 10)?.minCalendar).toEqual([]);
     const detail = await get(
       x,
       `/api/definitions/${def.id}/cells/LHR/JFK/2026-11-02/2026-11-12`,
@@ -433,57 +74,6 @@ describe('superseded calendar prices on the views (decision 54, WP10 Task 10.1 s
       apiContract.cellDetailResponseSchema,
     );
     expect(detail.calendarPrices.map((p) => [p.pricePence, p.superseded])).toEqual([[30_000, true]]);
-  });
-});
-
-describe('duration analysis over one set of executions (review prov-012)', () => {
-  it('counts a cell the latest run reused as searched and takes its reused price as the minimum (decision 58)', async () => {
-    const x = await createHarness();
-    h = x;
-    const s = seeder(x.ports);
-    const def = x.ports.repos.definitions.create(exampleDefinitionInput());
-    s.execution('Eold', { def, status: 'completed', startedAt: at(-30), finishedAt: at(-29) });
-    s.cells('Eold', [C1]);
-    s.tile('Eold', C1, { status: 'priced', pricePence: 41_000, fetchedAt: at(-29) });
-    s.execution('Enew', { def, status: 'completed', startedAt: at(-2), finishedAt: at(-1) });
-    s.cells('Enew', [C1, C2]);
-    s.reuse('Enew', 'Eold', [C1], at(-100));
-    s.tile('Enew', C2, { status: 'priced', pricePence: 52_000, fetchedAt: at(-1), tileIndex: 1 });
-    const d = await get(
-      x,
-      `/api/definitions/${def.id}/duration-analysis`,
-      '/api/definitions/:id/duration-analysis',
-      apiContract.durationAnalysisResponseSchema,
-    );
-    const ten = d.byNights.find((n) => n.nights === 10);
-    expect(ten?.minCalendar.map((m) => [m.price.pricePence, m.n])).toEqual([[41_000, 2]]);
-    expect(ten?.searched.discovery[0]?.searched).toBe(2);
-  });
-
-  it("an older run's price is neither a minimum nor marks a nights value searched once a newer run skipped it", async () => {
-    const x = await createHarness();
-    h = x;
-    const s = seeder(x.ports);
-    const def = x.ports.repos.definitions.create(exampleDefinitionInput());
-    s.execution('E1', { def, status: 'completed', startedAt: at(-30), finishedAt: at(-29) });
-    s.cells('E1', [C1], { selected: [{ cell: C1, reason: 'top_n' }] });
-    s.tile('E1', C1, { status: 'priced', pricePence: 45_000, fetchedAt: at(-29) });
-    s.verified('E1', C1, [{ hash: 'hV', pricePence: 60_000, fetchedAt: at(-29) }]);
-    s.execution('E2', { def, status: 'completed', startedAt: at(-2), finishedAt: at(-1) });
-    s.cells('E2', [C2], { selected: [{ cell: C2, reason: 'top_n' }] });
-    s.verified('E2', C2, [{ hash: 'hW', pricePence: 61_000, fetchedAt: at(-1) }]);
-    const d = await get(
-      x,
-      `/api/definitions/${def.id}/duration-analysis`,
-      '/api/definitions/:id/duration-analysis',
-      apiContract.durationAnalysisResponseSchema,
-    );
-    const ten = d.byNights.find((n) => n.nights === 10);
-    expect(ten?.minVerified).toMatchObject({ pricePence: 61_000, n: 1, cell: { ...C2, nights: 10 } });
-    expect(ten?.minVerified?.cell.departureDate).toBe('2026-11-03');
-    expect(ten?.searched.verification).toEqual({ searched: 1, total: 1 });
-    expect(ten?.minCalendar).toEqual([]);
-    expect(ten?.searched.discovery.map((s) => s.searched)).toEqual([0]);
   });
 });
 
@@ -497,9 +87,11 @@ describe('GET /api/definitions/:id/coverage (spec §10, View D)', () => {
       apiContract.coverageResponseSchema,
     );
     expect(cov.executionId).toBe(s.id('E1'));
+    // why: revision 50: the summary is the per-cell classification over the current space (182 days × 12 nights of
+    // one airport pair), so the 2,180 cells the run has no discovery result for count as not searched
     expect(cov.summary).toEqual({
-      buckets: { priced: 1, empty: 1, no_data: 1, error: 1, skipped: 0, not_run: 0, reused: 0 },
-      total: 4,
+      buckets: { priced: 1, empty: 1, no_data: 1, error: 1, skipped: 0, not_run: 2_180, reused: 0 },
+      total: 2_184,
       selected: 4,
       itinerarySearched: 3,
       onDemand: 0,

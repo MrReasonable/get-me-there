@@ -12,6 +12,7 @@ import {
   resultsResponse,
   statusReport,
 } from '../fixtures.js';
+import { datesHandlers } from './datesHandlers.js';
 import { wp10Handlers } from './wp10Handlers.js';
 
 /** A valid response body for each mutation the views send. */
@@ -43,6 +44,8 @@ const url = (path: string) => `${API}${path.slice('/api'.length)}`;
 /** Default API: one definition, both providers, a completed run with two itinerary rows. */
 export const handlers = [
   ...wp10Handlers,
+  // WP19: the Dates view's route, the worked example
+  ...datesHandlers,
   http.get(url('/api/alerts'), () => HttpResponse.json([])),
   http.get(url('/api/alerts/events'), () => HttpResponse.json([])),
   http.get(url('/api/providers'), () => HttpResponse.json(providersResponse())),

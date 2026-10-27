@@ -15,6 +15,11 @@ jobs:
       matrix:
         runner: [ubuntu-24.04, ubuntu-24.04-arm, macos-15, windows-2025]
     runs-on: ${{ matrix.runner }}
+    # why: spec revision 50: §9's time limits (the date-pairs route's 3 s among them) are multiplied by this factor here,
+    # because shared runners are slower and noisier than the operator's machine and a limit that fails on noise proves
+    # nothing; statement counts and byte sizes are never multiplied, and no test is retried
+    env:
+      GMT_TIMING_FACTOR: 3
     defaults:
       run:
         shell: bash

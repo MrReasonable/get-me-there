@@ -44,6 +44,7 @@ export {
 export type {
   Airport,
   AirportsDataset,
+  CalendarMarks,
   CalendarPriceInsert,
   CalendarPriceRow,
   ExecutionCreateInput,

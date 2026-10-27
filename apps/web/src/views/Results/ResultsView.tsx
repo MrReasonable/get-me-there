@@ -1,17 +1,29 @@
-import { bandCheapest, filterRows, type SortKey, sortRows } from '@gmt/core';
-import { useCallback, useMemo } from 'react';
-import { useCalendarGap, useProviders, useResults } from '../../api/queries.js';
-import type { CalendarGapResponse, DefinitionResponse, ResultsResponse } from '../../api/types.js';
+import { bandCheapest, cellKeyString, filterRows, type Provenance, type SortKey, sortRows } from '@gmt/core';
+import { useCallback, useEffect, useMemo } from 'react';
+import { ApiError } from '../../api/client.js';
+import { useCalendarGap, useProvidersWatch, useResults } from '../../api/queries.js';
+import type {
+  CalendarGapResponse,
+  DefinitionResponse,
+  ExecutionSummary,
+  ResultsResponse,
+} from '../../api/types.js';
 import { LoadError, Loading } from '../../components/LoadState.js';
 import { SyntheticBanner } from '../../components/SyntheticBanner.js';
-import { ViewHeader } from '../../components/ViewHeader.js';
 import { COPY } from '../../copy.js';
 import { NARROW_QUERY, useMediaQuery } from '../../hooks/useMediaQuery.js';
+import { coverageLineText } from '../../lib/coverageLine.js';
+import { parseDatesState } from '../../state/datesState.js';
 import { oneOf } from '../../state/oneOf.js';
 import {
   activeFilterCount,
+  BACK_TO_DATES,
   BASIS_PARAM,
   CLASSES,
+  DATES_COVERAGE,
+  type DetailPair,
+  detailScope,
+  detailState,
   parseBasis,
   parseResultsState,
   parseSelectedRow,
@@ -20,11 +32,13 @@ import {
 } from '../../state/resultsState.js';
 import { hrefWith, navigateTo, updateSearchParams, useSearchParams } from '../../state/urlState.js';
 import { withKey } from '../../state/withKey.js';
+import { AirportPairPanel, type GapMark } from './AirportPairPanel.js';
 import { BasisSwitch } from './BasisSwitch.js';
-import { CalendarGapBanner } from './CalendarGapBanner.js';
+import { DetailHeader } from './DetailHeader.js';
 import { Filters } from './Filters.js';
+import { cellsForDatePair } from './panel.js';
 import { ResultsHeader } from './ResultsHeader.js';
-import { BAND_HOURS, ResultsTable, SORT_LABEL } from './ResultsTable.js';
+import { BAND_HOURS, ResultsTable, rowId, SORT_LABEL } from './ResultsTable.js';
 
 /** Spec §6.5: travel-time band width for bandCheapest. */
 const SORT_VALUES = SORT_KEYS.flatMap((k) => [`${k}.asc`, `${k}.desc`]);
@@ -57,33 +71,79 @@ function SortSelect({ value, onChange }: { value: string; onChange: (v: string) 
 }
 
 /**
- * Every provenance a Results page received: rows, their other sellers, the overall cheapest and the
- * calendar-gap prices. Any synthetic one raises the red banner, whatever /providers said (spec §5.5).
+ * The calendar-gap marks of this date pair's cells, keyed by cell (spec §11: "the calendar-gap cells of this date pair
+ * are marked in their panels"). The gap route answers for the whole search; only this date pair's cells on the airport
+ * pairs in scope are marked.
  */
-function anySynthetic(data: ResultsResponse, gap: CalendarGapResponse | undefined): boolean {
+function gapMarks(gap: CalendarGapResponse | undefined, inScope: ReadonlySet<string>): Map<string, GapMark> {
+  const out = new Map<string, GapMark>();
+  if (gap === undefined || gap.cheapestVerified === null) return out;
+  for (const c of gap.cells) {
+    const { nights: _nights, ...key } = c.cell;
+    const k = cellKeyString(key);
+    if (inScope.has(k)) out.set(k, { calendar: c.calendar, reference: gap.cheapestVerified });
+  }
+  return out;
+}
+
+/**
+ * Every provenance the detail received or marks (revision 50): rows, their other sellers, the cheapest, the board's
+ * figure and its cheaper-cached price, and the calendar-gap prices the panels mark with their reference. Any synthetic
+ * one, or the fixture provider's, raises the red banner whatever /providers said (spec §5.5; ruling 3).
+ */
+function anySynthetic(data: ResultsResponse, marks: ReadonlyMap<string, GapMark>): boolean {
   const rows = data.cheapest === null ? data.rows : [...data.rows, data.cheapest];
-  const kinds = [
+  const figure = data.datePairFigure;
+  const kinds: Provenance[] = [
     ...rows.flatMap((r) => [r.provenance, ...r.otherOffers.map((o) => o.provenance)]),
-    ...(gap === undefined
+    ...(figure === null
       ? []
       : [
-          ...gap.cells.map((c) => c.calendar.provenance),
-          ...(gap.cheapestVerified === null ? [] : [gap.cheapestVerified.provenance]),
+          figure.price.provenance,
+          ...(figure.cheaperCached === null ? [] : [figure.cheaperCached.provenance]),
         ]),
+    ...[...marks.values()].flatMap((m) => [m.calendar.provenance, m.reference.provenance]),
   ];
-  // why: a fixture-provider provenance raises the banner even when its source kind is not tagged synthetic (ruling 3).
   return kinds.some((p) => p.sourceKind === 'synthetic' || p.providerId === 'fixture');
 }
 
-/** View A (spec §11): one fetch per basis; every sort and filter is core's pure function over that page. */
-export function ResultsView({ definition }: { definition: DefinitionResponse }) {
+export interface ResultsViewProps {
+  definition: DefinitionResponse;
+  /** The date pair the URL names (the landing rules hand it over only when it is well formed, WP19 Task 19.7). */
+  datePair: DetailPair;
+}
+
+/**
+ * Spec §11 Date pair detail (what was View A, Results): one date pair's itineraries and calendar prices, read from
+ * `/results` scoped to the date pair, the Dates airport filter and its journey limit, so every rule below holds over that
+ * date pair's cells; one fetch per basis, every sort and filter core's pure function over that page; one panel per
+ * airport pair in scope beneath.
+ */
+export function ResultsView({ definition, datePair }: ResultsViewProps) {
   const params = useSearchParams();
   const basis = parseBasis(params.get(BASIS_PARAM));
-  const ui = useMemo(() => parseResultsState(params), [params]);
-  const results = useResults(definition.id, basis);
-  const providers = useProviders();
-  // why: the same cached query the calendar-gap banner reads; it only runs when a verification provider is configured.
+  const ui = useMemo(() => detailState(parseResultsState(params)), [params]);
+  const dates = useMemo(() => parseDatesState(params, definition), [params, definition]);
+  const results = useResults(definition.id, basis, detailScope(dates, datePair));
+  const providers = useProvidersWatch();
+  // why: the gap read runs only when a verification provider is configured (spec §6.9: never on the £0 configuration)
   const gap = useCalendarGap(definition.id, results.data?.verificationProviderConfigured === true);
+  const cells = useMemo(
+    () =>
+      cellsForDatePair(
+        dates.from.length > 0 ? dates.from : definition.origins,
+        dates.to.length > 0 ? dates.to : definition.destinations,
+        datePair,
+      ),
+    [dates.from, dates.to, definition.origins, definition.destinations, datePair],
+  );
+  const marks = useMemo(() => gapMarks(gap.data, new Set(cells.map(cellKeyString))), [gap.data, cells]);
+  // why: spec §11 URLs (WP19 Task 19.7): the landing rules judge the date pair's format only; one outside the current
+  // resolved space is the server's answer, and the detail then replaces the URL with Dates, keeping def= and d.*
+  const outside = results.error instanceof ApiError && results.error.code === 'date_pair_outside_space';
+  useEffect(() => {
+    if (outside) updateSearchParams(BACK_TO_DATES, 'replace');
+  }, [outside]);
   const narrow = useMediaQuery(NARROW_QUERY);
   const { filtered, rows, banded, staleHidden } = useMemo(() => {
     if (results.data === undefined)
@@ -105,7 +165,8 @@ export function ResultsView({ definition }: { definition: DefinitionResponse }) 
     };
   }, [results.data, ui]);
   const setSort = useCallback((value: string) => {
-    const current = parseResultsState(new URLSearchParams(window.location.search));
+    // why: the detail's own state, so a stale f.nights, f.depart or f.dest is cleared rather than written back
+    const current = detailState(parseResultsState(new URLSearchParams(window.location.search)));
     const sort = isSortValue(value) ? parseResultsState(new URLSearchParams({ sort: value })).sort : null;
     updateSearchParams(resultsStatePatch({ ...current, sort }));
   }, []);
@@ -117,6 +178,7 @@ export function ResultsView({ definition }: { definition: DefinitionResponse }) 
     [setSort],
   );
 
+  if (outside) return <Loading />;
   if (results.error) return <LoadError error={results.error} retry={() => void results.refetch()} />;
   if (results.data === undefined) return <Loading />;
   const data = results.data;
@@ -124,22 +186,25 @@ export function ResultsView({ definition }: { definition: DefinitionResponse }) 
   const f = ui.filters;
   const failedHidden =
     f.verdictClass === undefined ? data.rows.filter((r) => r.verdictClass === 'failed').length : 0;
-  const synthetic = providers.data?.synthetic !== true && anySynthetic(data, gap.data);
+  const synthetic = providers.data?.synthetic !== true && anySynthetic(data, marks);
   const order =
     ui.sort === null ? COPY.serverOrder : COPY.sortOption(SORT_LABEL[ui.sort.key], COPY.sortDir[ui.sort.dir]);
+  const headline = filtered[0] ?? data.cheapest;
+  const selectedRow = parseSelectedRow(params);
   return (
     <div className="space-y-3">
       {synthetic ? <SyntheticBanner /> : null}
-      <ViewHeader
-        title={COPY.nav.results}
+      <DetailHeader
+        datePair={datePair}
+        airportPairs={{
+          inScope: cells.length,
+          total: definition.origins.length * definition.destinations.length,
+        }}
         executions={data.executions}
         stale={data.rows.length > 0 && data.rows.every((r) => r.stale)}
       />
-      <ResultsHeader data={data} filteredFirst={filtered[0] ?? null} />
+      <ResultsHeader data={data} filteredFirst={filtered[0] ?? null} coveragePatch={DATES_COVERAGE} />
       <BasisSwitch basis={data.basis} reason={data.basisReason} />
-      {verificationConfigured ? (
-        <CalendarGapBanner definitionId={definition.id} destinationNotes={definition.destinationNotes} />
-      ) : null}
       <Filters state={ui} rows={data.rows} calendarBasis={data.basis === 'calendar'} narrow={narrow} />
       <div className="flex flex-wrap items-end gap-3 text-sm">
         {narrow ? (
@@ -168,16 +233,26 @@ export function ResultsView({ definition }: { definition: DefinitionResponse }) 
           </span>
         ) : null}
       </div>
+      {selectedRow !== null && !data.rows.some((r) => rowId(r) === selectedRow) ? (
+        <p role="status">{COPY.detailView.rowGone}</p>
+      ) : null}
       {data.rows.length === 0 ? (
-        <p>
-          <a
-            href={hrefWith({ view: 'coverage' })}
-            onClick={navigateTo({ view: 'coverage' })}
-            className="underline"
-          >
-            {COPY.noRowsFromRun}
-          </a>
-        </p>
+        // why: spec §11: a date pair without a row says so with its coverage line, never "no flights"
+        <div data-testid="detail-empty" className="space-y-1 rounded border border-slate-300 p-2">
+          <p className="font-semibold">{COPY.detailView.noRows}</p>
+          <p className="text-sm">
+            {coverageLineText(
+              data.coverage,
+              verificationConfigured,
+              data.executions.find((e) => !e.isChild),
+            )}
+          </p>
+          <p>
+            <a href={hrefWith(DATES_COVERAGE)} onClick={navigateTo(DATES_COVERAGE)} className="underline">
+              {COPY.detailView.coverageSection}
+            </a>
+          </p>
+        </div>
       ) : rows.length === 0 ? (
         <p className="flex items-center gap-2">
           {COPY.noRowsAfterFilter}
@@ -193,14 +268,47 @@ export function ResultsView({ definition }: { definition: DefinitionResponse }) 
         <ResultsTable
           rows={rows}
           banded={banded}
-          selectedRow={parseSelectedRow(params)}
+          selectedRow={selectedRow}
           sort={ui.sort}
           onSort={onSort}
           narrow={narrow}
           verificationConfigured={verificationConfigured}
           definitionId={definition.id}
+          bookingRow={headline === null ? null : rowId(headline)}
         />
       )}
+      {gap.error ? <LoadError error={gap.error} retry={() => void gap.refetch()} /> : null}
+      <Panels definition={definition} cells={cells} executions={data.executions} marks={marks} />
     </div>
+  );
+}
+
+/** One panel per airport pair in scope (spec §11 Date pair detail, "Per airport pair"). */
+function Panels({
+  definition,
+  cells,
+  executions,
+  marks,
+}: {
+  definition: DefinitionResponse;
+  cells: ReturnType<typeof cellsForDatePair>;
+  executions: readonly ExecutionSummary[];
+  marks: ReadonlyMap<string, GapMark>;
+}) {
+  return (
+    <section aria-label={COPY.panel.regionLabel} className="space-y-3">
+      {cells.map((c) => {
+        const k = cellKeyString(c);
+        return (
+          <AirportPairPanel
+            key={k}
+            definition={definition}
+            cell={c}
+            executions={executions}
+            gap={marks.get(k) ?? null}
+          />
+        );
+      })}
+    </section>
   );
 }

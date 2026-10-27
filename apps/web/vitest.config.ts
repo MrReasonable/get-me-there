@@ -1,7 +1,30 @@
-import { fileURLToPath } from 'node:url';
+import { existsSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vitest/config';
-import { gmtAliases } from '../../vitest.aliases.js';
+
+/**
+ * The repository root, found upwards from this file. why: WP19's mutation run (Stryker, `inPlace: false`) runs this
+ * config from a sandbox copy nested under the package (`.stryker-tmp/sandbox-…`), where a fixed `../..` is not the
+ * root; the same reason and the same loader as apps/api's config (WP18).
+ */
+function repoRoot(): string {
+  for (let d = dirname(fileURLToPath(import.meta.url)); d !== dirname(d); d = dirname(d))
+    if (existsSync(join(d, 'pnpm-workspace.yaml'))) return d;
+  throw new Error('no pnpm-workspace.yaml above the web app');
+}
+const ROOT = repoRoot();
+// why: the one alias table, loaded by absolute path (a static relative import would not resolve from the sandbox)
+const ALIASES_MODULE: unknown = await import(pathToFileURL(join(ROOT, 'vitest.aliases.ts')).href);
+if (
+  typeof ALIASES_MODULE !== 'object' ||
+  ALIASES_MODULE === null ||
+  !('gmtAliases' in ALIASES_MODULE) ||
+  typeof ALIASES_MODULE.gmtAliases !== 'function'
+)
+  throw new Error('vitest.aliases.ts exports no gmtAliases function');
+const ALIASES = ALIASES_MODULE.gmtAliases(ROOT);
 
 /** Provenance and booking safety components and the URL parsers: a gap here is a provenance or link gap (spec §9 item 6). */
 const FULL = { lines: 100, branches: 100, functions: 100, statements: 100 };
@@ -12,7 +35,14 @@ const VIEW_MODEL = { lines: 95, branches: 85, functions: 95, statements: 95 };
 // Coverage counts src/ only; barrels and the browser entry point are excluded.
 export default defineConfig({
   plugins: [react()],
-  resolve: { alias: gmtAliases(fileURLToPath(new URL('../..', import.meta.url))) },
+  resolve: {
+    alias: [
+      ...ALIASES,
+      // why: src/example.ts reads the worked example from the repository's docs by a relative path, which from the
+      // mutation sandbox points inside apps/web; this maps it to the one file wherever the config runs from
+      { find: /^(?:\.\.\/)+docs\/examples\//, replacement: `${join(ROOT, 'docs', 'examples')}/` },
+    ],
+  },
   test: {
     name: 'web',
     include: ['test/**/*.test.tsx', 'test/**/*.test.ts'],
@@ -39,9 +69,9 @@ export default defineConfig({
         functions: 70,
         statements: 70,
         'src/components/{Provenance,PriceCell,PriceBoundary,BookingAction}.tsx': FULL,
-        'src/state/{urlState,resultsState,calendarState}.ts': FULL,
+        'src/state/{urlState,resultsState,parse,datesState}.ts': FULL,
         'src/lib/**': VIEW_MODEL,
-        'src/views/{Calendar,Duration,History}/*.ts': VIEW_MODEL,
+        'src/views/{History,Dates}/*.ts': VIEW_MODEL,
       },
     },
   },

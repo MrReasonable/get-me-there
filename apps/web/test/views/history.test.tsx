@@ -554,7 +554,13 @@ describe('History view (spec §11 History, §10 history routes; plan decision 38
     serveRuns();
     server.use(
       http.get(routeRoute, () => HttpResponse.json(threeRuns)),
+      // why: the calendar route is retired (spec §10, revision 48) and the Dates view's date-pairs route took its
+      // place; History reads neither, so a stray request to either fails here rather than passing unnoticed.
       http.get(`${API}/definitions/:id/calendar`, ({ request }) => {
+        paths.push(new URL(request.url).pathname);
+        return HttpResponse.json({});
+      }),
+      http.get(`${API}/definitions/:id/date-pairs`, ({ request }) => {
         paths.push(new URL(request.url).pathname);
         return HttpResponse.json({});
       }),

@@ -136,6 +136,35 @@ describe('api client (derived from core/api-contract ROUTES)', () => {
     expect([err.status, err.code, err.fieldErrors()]).toEqual([status, code, []]);
   });
 
+  it('keeps the envelope’s other details: the date-pairs route’s 422 too_many_cells carries its cell count and bound (WP19)', async () => {
+    server.use(
+      http.get(`${API}/definitions/:id/date-pairs`, () =>
+        HttpResponse.json(
+          {
+            error: {
+              code: 'too_many_cells',
+              message: 'too many cells',
+              details: { cells: 100_000, bound: 50_000, note: 'x' },
+            },
+          },
+          { status: 422 },
+        ),
+      ),
+    );
+    const err = await failure(
+      api.datePairs('def-0001', { origins: 'LHR', destinations: undefined, maxJourneyMinutes: undefined }),
+    );
+    expect([err.status, err.code, err.detailNumber('cells'), err.detailNumber('bound')]).toEqual([
+      422,
+      'too_many_cells',
+      100_000,
+      50_000,
+    ]);
+    // a detail that is not a whole number, or is absent, reads as null
+    expect([err.detailNumber('note'), err.detailNumber('missing')]).toEqual([null, null]);
+    expect(new ApiError(500, 'http', 'x').detailNumber('cells')).toBeNull();
+  });
+
   it("refuses a route that is not in ROUTES, and a schema that is not the route's", async () => {
     expect(() => findRoute('GET', '/api/not-a-route')).toThrow(
       'route GET /api/not-a-route is not in core/api-contract ROUTES',

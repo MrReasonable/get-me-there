@@ -1,0 +1,39 @@
+{
+  "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
+  "testRunner": "command",
+  "commandRunner": {
+    "command": "pnpm exec vitest run --coverage.enabled=false --bail=1 test/views/dates/logic test/state",
+    "$comment": "Revision 50 (WP19 Task 19.4): the web's pure-logic files, run over their pure unit tests only (test/views/dates/logic and test/state, every one a .test.ts), never the jsdom component tests. StringLiteral mutants are left out for the reason apps/api gives: the words are the catalogue's, pinned phrase by phrase in those tests and swept for banned words, and a mutant that changes a word the tests do not quote proves nothing about a rule. Every condition, threshold, branch and arithmetic mutant is kept."
+  },
+  "incremental": true,
+  "incrementalFile": "reports/stryker-incremental.json",
+  "mutate": [
+    "src/state/parse.ts",
+    "src/state/datesState.ts",
+    "src/views/Dates/board.ts",
+    "src/views/Dates/howFar.ts",
+    "src/views/Dates/stayScope.ts",
+    "src/views/Dates/refresh.ts",
+    "src/views/Dates/shade.ts",
+    "src/views/Dates/overview.ts",
+    "src/views/Dates/keys.ts",
+    "src/state/landing.ts"
+  ],
+  "thresholds": {
+    "high": 90,
+    "low": 80,
+    "break": 80
+  },
+  "reporters": ["html", "json", "progress"],
+  "jsonReporter": {
+    "fileName": "reports/mutation/mutation.json"
+  },
+  "timeoutMS": 60000,
+  "timeoutFactor": 3,
+  "concurrency": 2,
+  "ignorePatterns": ["dist", "/coverage", "reports", "test-results", "playwright-report"],
+  "inPlace": false,
+  "mutator": {
+    "excludedMutations": ["StringLiteral"]
+  }
+}

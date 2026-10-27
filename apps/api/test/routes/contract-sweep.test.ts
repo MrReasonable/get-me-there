@@ -1,6 +1,12 @@
 // Spec §9 item 5 sweeps: strict mounting, auth flags, every GET against core/api-contract with provenance on every
 // price, banned words in every API string, sentinel secrets never in a body or a log line.
-import { apiContract, BANNED_WORD_ALLOWLIST, findBannedWords, TRUNCATED_NOTE } from '@gmt/core';
+import {
+  apiContract,
+  BANNED_WORD_ALLOWLIST,
+  decodeDatePairs,
+  findBannedWords,
+  TRUNCATED_NOTE,
+} from '@gmt/core';
 import { AIRPORTS_DATA_DIR, loadAirportsDataset } from '@gmt/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
@@ -161,6 +167,12 @@ function apiTexts(): string[] {
     API_TEXT.alreadyRunning,
     API_TEXT.unknownProvider('fixture'),
     API_TEXT.unknownDestination,
+    API_TEXT.unknownScopeAirport('ZZZ'),
+    API_TEXT.invalidJourneyLimit(60, 6000),
+    API_TEXT.tooManyCells(60_000, 50_000),
+    API_TEXT.datePairIncomplete,
+    API_TEXT.invalidDatePair,
+    API_TEXT.datePairOutsideSpace,
     API_TEXT.itineraryNotFound,
     API_TEXT.draftNotice,
     API_TEXT.draftCannotEnable,
@@ -243,6 +255,24 @@ describe('every GET route against the contract, with provenance on every price (
       expect(unlabelledPrices(body), route.path).toEqual([]);
       expect(JSON.stringify(body), route.path).not.toContain('evil.example:8443'); // the hostile stored link
     }
+  });
+});
+
+describe('the date-pairs route by shape (spec §10, WP19)', () => {
+  it("every decoded figure and cheaper-cached price carries its provenance and stale flag; the body's strings pass", async () => {
+    const x = await harness();
+    const ids = seedWorld(x);
+    const res = await x.request(`/api/definitions/${ids.def}/date-pairs`);
+    const body = apiContract.datePairsResponseSchema.parse(await res.json());
+    // why: the wire's columns index a provenance table, so the shape check runs on the decoder's records, which are
+    // the only form the web reads (spec §10)
+    const figures = decodeDatePairs(body).pairs.flatMap((p) => (p.figure === null ? [] : [p.figure]));
+    expect(figures.length).toBeGreaterThan(0);
+    expect(unlabelledPrices(figures.map((f) => f.price))).toEqual([]);
+    expect(
+      unlabelledPrices(figures.flatMap((f) => (f.cheaperCached === null ? [] : [f.cheaperCached]))),
+    ).toEqual([]);
+    for (const t of userStrings(body)) expect(findBannedWords(t, BANNED_WORD_ALLOWLIST), t).toEqual([]);
   });
 });
 

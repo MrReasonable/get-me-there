@@ -3,11 +3,20 @@ import { expect, type Locator, type Page, test } from '@playwright/test';
 import { COPY } from '../src/copy.js';
 import { SMOKE } from './selectors.js';
 
-// Spec §9 item 6: one Playwright smoke in fixture mode, through the real api and the built SPA. Every price here is
-// synthetic, and every view must say so beside the red banner (spec §5.5).
-test('fixture mode: import, run, then Results, Calendar, Duration and History show synthetic prices with provenance', async ({
+// Spec §9 item 6: one Playwright smoke in fixture mode, through the real api and the built SPA (WP19 Task 19.9, the
+// Dates view). Every price here is synthetic, and every view must say so beside the red banner (spec §5.5).
+
+const EXAMPLE = COPY.datesView;
+/** The example's stay range is 10–21 nights; the smoke narrows it so "Back to dates" has a filter to keep. */
+const NIGHTS = '10-14';
+
+const board = (page: Page) => page.getByRole('table', { name: SMOKE.boardTable });
+const banner = (page: Page) => page.getByRole('alert').filter({ hasText: COPY.syntheticBanner });
+
+test('fixture mode: import, run, then Dates, the date pair detail and History show synthetic prices with provenance', async ({
   page,
 }) => {
+  // (1) import the example, switch both stages to the fixture provider, enable, estimate, create, run now
   await page.goto('/?view=definitions');
   await page.getByRole('button', { name: /^Import example/ }).click();
   // why: the provider checkboxes sit in WP9's advanced fold.
@@ -25,42 +34,70 @@ test('fixture mode: import, run, then Results, Calendar, Duration and History sh
   await page.getByRole('button', { name: COPY.showEstimate }).click();
   await page.getByRole('button', { name: /^Create and confirm about/ }).click();
   await page.getByRole('button', { name: /^Run now/ }).click();
+  // why: the status bar polls the run (spec §11); its status words say "completed" once the run has finished. The
+  // timeout is a backstop for the fixture run, never a wait in itself.
+  const status = page.getByRole('region', { name: COPY.statusBarLabel });
+  await expect(status).toContainText(COPY.statusName.completed, { timeout: 90_000 });
 
-  // why: WP9's headline is a flex div whose first child is the lead span.
-  const headline = page.getByText(COPY.headlineLead, { exact: true }).first().locator('..');
-  await expect(async () => {
-    await page.goto('/?view=results');
-    await expect(headline).toBeVisible({ timeout: 2_000 });
-  }).toPass({ timeout: 90_000 });
-  await expect(headline).toContainText(SOURCE_LABELS.synthetic);
-  await expect(headline).toContainText(/ago|just now/);
-  const banner = page.getByRole('alert').filter({ hasText: COPY.syntheticBanner });
-  await expect(banner).toBeVisible();
-  await expect(banner).toHaveClass(/bg-red-700/);
-
-  // View B: month tables of day buttons, a priced day carrying the synthetic badge, visible focus in a real browser.
-  await page.goto('/?view=calendar');
-  await expect(page.getByRole('table', { name: SMOKE.monthTable }).first()).toBeVisible();
-  const priced = page.locator(SMOKE.pricedDay).first();
-  await expect(priced).toContainText(COPY.providerShort.fixture);
-  await expect(page.getByTestId('calendar-legend')).toBeVisible();
-  await expect(banner).toBeVisible();
-  await expect(page.locator(SMOKE.dayTabStop)).toHaveCount(1);
-  // why: focus-visible applies once the keyboard is in use: focus() puts focus on the tab stop and the arrow keys that
-  // follow switch the page to keyboard modality, so the outline is then computed as for a Tab user.
-  await page.locator(SMOKE.dayTabStop).focus();
+  // (2) Dates: the header line, the banner, the first row's provenance, the legend, the overview's keyboard and rings
+  await page.goto(`/?view=dates&d.nights=${NIGHTS}`);
+  await expect(board(page)).toBeVisible();
+  await expect(page.getByRole('heading', { level: 2 })).toHaveText('London → New York (example)');
+  await expect(page.getByTestId('dates-run')).toHaveText(/^run finished (just now|.+ ago)$/);
+  await expect(banner(page)).toBeVisible();
+  await expect(banner(page)).toHaveClass(/bg-red-700/);
+  const first = board(page).locator(SMOKE.boardRow).first();
+  await expect(first).toContainText(SOURCE_LABELS.synthetic);
+  await expect(first.getByTestId('price-cell')).toContainText(/ago|just now|old/);
+  await expect(page.locator(SMOKE.legend)).toBeVisible();
+  const stop = page.locator(SMOKE.overviewTabStop);
+  await expect(stop).toHaveCount(1);
+  const before = await stop.getAttribute('data-cell');
+  // why: focus-visible applies once the keyboard is in use: focus() puts focus on the tab stop and the arrow key that
+  // follows switches the page to keyboard modality, so the outline is then computed as for a Tab user.
+  await stop.focus();
   await page.keyboard.press('ArrowRight');
-  await page.keyboard.press('ArrowLeft');
-  await expect(page.locator(SMOKE.dayTabStop)).toHaveCSS('outline-style', 'solid');
+  await expect(stop).toHaveCount(1);
+  await expect(stop).not.toHaveAttribute('data-cell', before ?? '');
+  await expect(stop).toBeFocused();
+  await expect(stop).toHaveCSS('outline-style', 'solid');
+  await first.hover();
+  const lit = page.locator(SMOKE.litCell);
+  await expect(lit).toHaveCount(1);
+  await expect(lit).toHaveAttribute('data-ringed', '');
 
-  // View C and History: the charts draw in a real layout and their tables name the synthetic source.
-  await page.goto('/?view=duration');
-  await expect(
-    page.getByRole('figure', { name: COPY.durationView.chartTitle }).locator('svg[role="application"]'),
-  ).toBeVisible();
-  await expect(page.getByRole('table', { name: COPY.durationView.tableCaption })).toContainText(
-    SOURCE_LABELS.synthetic,
+  // (3) the first row opens the detail, whose headline names the synthetic source and whose URL carries the date pair;
+  // "Back to dates" returns with the stay filter kept
+  await first.getByRole('link', { name: SMOKE.rowLink }).click();
+  await expect(page.getByRole('table', { name: SMOKE.detailTable })).toBeVisible();
+  const url = new URL(page.url());
+  expect(url.searchParams.get('view')).toBe('results');
+  expect(url.searchParams.get('depart')).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  expect(url.searchParams.get('return')).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  expect(url.searchParams.get('d.nights')).toBe(NIGHTS);
+  await expect(page.locator(SMOKE.detailHeadline)).toContainText(SOURCE_LABELS.synthetic);
+  await expect(page.locator(SMOKE.airportPairPanel).first()).toBeVisible();
+  await page.locator(SMOKE.backToDates).click();
+  await expect(board(page)).toBeVisible();
+  const back = new URL(page.url()).searchParams;
+  expect(back.get('view')).toBe('dates');
+  expect(back.get('d.nights')).toBe(NIGHTS);
+  expect(back.get('depart')).toBeNull();
+
+  // (4) the retired views' URLs land on Dates; ?view=coverage opens the coverage section
+  await page.goto('/?view=calendar');
+  await expect(board(page)).toBeVisible();
+  expect(new URL(page.url()).searchParams.get('view')).toBe('dates');
+  await page.goto('/?view=coverage');
+  await expect(board(page)).toBeVisible();
+  expect(new URL(page.url()).searchParams.get('d.coverage')).toBe('open');
+  await expect(page.getByRole('button', { name: SMOKE.coverageToggle })).toHaveAttribute(
+    'aria-expanded',
+    'true',
   );
+  await expect(page.getByRole('table', { name: COPY.coverageHeading })).toBeVisible();
+
+  // (5) History: the charts draw in a real layout and the table names the synthetic source
   await page.goto('/?view=history');
   await expect(
     page.getByRole('figure', { name: COPY.historyView.fetchChartTitle }).locator('svg[role="application"]'),
@@ -68,53 +105,113 @@ test('fixture mode: import, run, then Results, Calendar, Duration and History sh
   await expect(page.getByRole('table').first()).toContainText(SOURCE_LABELS.synthetic);
 });
 
-test('at 375px the calendar shows one month of compact days, nothing spilling out of its cell @phone', async ({
+test('forced colours: every mark keeps its glyph, and the current nav entry its bar', async ({ page }) => {
+  // (7) spec §11: nothing by colour alone; jsdom cannot apply forced colours, so the browser checks it here
+  await page.emulateMedia({ forcedColors: 'active' });
+  await page.goto('/?view=dates');
+  await expect(board(page)).toBeVisible();
+  const marks = page.locator(SMOKE.legendMark);
+  expect(await marks.count()).toBeGreaterThan(0);
+  for (const m of await marks.all()) {
+    const glyph = m.locator(SMOKE.legendGlyph);
+    await expect(glyph).toBeVisible();
+    await expect(glyph).not.toHaveText('');
+  }
+  // every overview cell that carries a mark still shows its glyphs; the striped mark keeps its pattern too
+  const marked = page.locator(`${SMOKE.overviewCell}:not([data-marks=""])`);
+  const count = await marked.count();
+  expect(count).toBeGreaterThan(0);
+  const unseen = await marked.evaluateAll((cells) =>
+    cells
+      .filter((c) => {
+        const g = c.querySelector<HTMLElement>('[data-testid="cell-glyphs"]');
+        const box = g?.getBoundingClientRect();
+        return g === null || g === undefined || box === undefined || box.width === 0 || g.textContent === '';
+      })
+      .map((c) => c.getAttribute('data-cell')),
+  );
+  expect(unseen).toEqual([]);
+  const striped = page.locator(`${SMOKE.overviewCell}[data-marks~="partly"]`).first();
+  if ((await striped.count()) > 0)
+    await expect(striped).toHaveCSS('background-image', /repeating-linear-gradient/);
+  const current = page.getByRole('navigation', { name: SMOKE.nav }).locator(SMOKE.navCurrent);
+  await expect(current).toHaveCSS('border-bottom-style', 'solid');
+  await expect(current).toHaveCSS('border-bottom-width', '4px');
+});
+
+test('at 375px Dates shows stacked cards and one month of 24px cells, a tap shows the readout, and the filters fit @phone', async ({
   page,
 }) => {
-  await page.goto('/?view=calendar');
-  await expect(page.getByRole('table', { name: SMOKE.monthTable })).toHaveCount(1);
+  await page.goto('/?view=dates');
+  await expect(page.locator(SMOKE.phoneCard).first()).toBeVisible();
+  await expect(board(page)).toHaveCount(0);
+  await expect(page.getByRole('button', { name: SMOKE.previousMonth })).toBeVisible();
   await expect(page.getByRole('button', { name: SMOKE.nextMonth })).toBeVisible();
-  await expect(page.getByTestId('calendar-legend')).toBeVisible();
-  const overflow = await page.evaluate(
-    () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+  const cells = page.locator(SMOKE.overviewCell);
+  const months = await cells.evaluateAll(
+    (all) => new Set(all.map((c) => c.getAttribute('data-date')?.slice(0, 7))).size,
   );
-  expect(overflow).toBeLessThanOrEqual(0);
-  // why: ui-r2-001 — every day's content stays inside its button, and the amount is never cut off.
-  const spilled = await page
-    .locator(SMOKE.dayButton)
-    .evaluateAll((days) =>
-      days.filter((d) => d.scrollWidth > d.clientWidth).map((d) => d.getAttribute('data-date')),
-    );
+  expect(months).toBe(1);
+  // why: spec §11 Phone: every cell's box is at least 24 × 24 px, and nothing spills out of a cell
+  const small = await cells.evaluateAll((all) =>
+    all
+      .filter((c) => {
+        const r = c.getBoundingClientRect();
+        return r.width < 24 || r.height < 24;
+      })
+      .map((c) => c.getAttribute('data-cell')),
+  );
+  expect(small).toEqual([]);
+  const spilled = await cells.evaluateAll((all) =>
+    all
+      .filter((c) => c.scrollWidth > c.clientWidth || c.scrollHeight > c.clientHeight)
+      .map((c) => c.getAttribute('data-cell')),
+  );
   expect(spilled).toEqual([]);
-  const face = page.locator(SMOKE.pricedDayPhone).first();
-  await expect(face).toContainText('£');
-  await expect(face.getByTestId('price-cell')).toHaveAttribute('title', new RegExp(COPY.provider.fixture));
+  // revision 50: a first tap on a cell shows its readout (and does not leave the view)
+  const cell = cells.nth(3);
+  await cell.tap();
+  await expect(page.locator(SMOKE.readout)).toContainText(/\d{1,2} [A-Z][a-z]{2} \d{4}/);
+  expect(new URL(page.url()).searchParams.get('view')).toBe('dates');
+  const form = page.getByRole('form', { name: EXAMPLE.filtersLabel });
+  const box = await form.boundingBox();
+  expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(375);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
 });
 
 /** What each view shows only once its data has loaded: a named heading, table or row, never a timeout. */
 const LOADED: Record<string, (page: Page) => Locator> = {
-  results: (p) => p.getByRole('table', { name: COPY.resultsTableLabel }),
-  calendar: (p) => p.getByRole('table', { name: SMOKE.monthTable }),
-  duration: (p) => p.getByRole('table', { name: COPY.durationView.tableCaption }),
+  dates: (p) => p.locator(SMOKE.phoneCard),
+  // why: the detail is reached from the first card's link (its URL carries the date pair)
+  results: (p) => p.getByRole('table', { name: SMOKE.detailTable }),
   history: (p) => p.getByRole('figure', { name: COPY.historyView.fetchChartTitle }),
-  coverage: (p) => p.getByRole('table', { name: COPY.coverageHeading }),
   definitions: (p) => p.getByRole('button', { name: COPY.showEstimate }),
   // why: the fixture run fires no alert, so the loaded Alerts view is the one that says there are no rules yet
   alerts: (p) => p.getByText(COPY.alertsView.noRules),
   providers: (p) => p.getByRole('region', { name: COPY.provider.fixture }),
+  // why: the report's area headings draw only once the report has loaded
+  status: (p) => p.getByRole('heading', { level: 3 }),
 };
 
-test('at 375px the nav shows every view in at most two rows, and no loaded view scrolls the page sideways (UI-005, UI-009, UI-011) @phone', async ({
+test('at 375px the nav keeps every link in view in two tiers of 44px links, and no loaded view scrolls the page sideways (UI-005, UI-009, UI-011) @phone', async ({
   page,
 }) => {
   for (const [view, loaded] of Object.entries(LOADED)) {
-    await page.goto(`/?view=${view}`);
-    const nav = page.getByRole('navigation', { name: COPY.navLabel });
+    if (view === 'results') {
+      await page.goto('/?view=dates');
+      await page.locator(SMOKE.phoneCard).first().getByRole('link').click();
+    } else await page.goto(`/?view=${view}`);
+    const nav = page.getByRole('navigation', { name: SMOKE.nav });
     await expect(nav).toBeVisible();
-    for (const link of await nav.getByRole('link').all()) await expect(link).toBeInViewport({ ratio: 1 });
+    for (const name of SMOKE.navTiers) await expect(nav.getByRole('list', { name })).toBeVisible();
+    for (const link of await nav.getByRole('link').all()) {
+      await expect(link).toBeInViewport({ ratio: 1 });
+      const box = await link.boundingBox();
+      expect(box?.height ?? 0, view).toBeGreaterThanOrEqual(44);
+    }
     const box = await nav.boundingBox();
     // why: two rows of 44 px links and their gap; a third row would push the content down for nothing.
-    expect(box?.height ?? 0).toBeLessThanOrEqual(2 * 44 + 8);
+    expect(box?.height ?? 0, view).toBeLessThanOrEqual(2 * 44 + 8);
     // why: measured only after the view's own content is on the page, never on its loading state
     await expect(loaded(page).first(), view).toBeVisible();
     const scrollWidth = await page.evaluate(() => document.documentElement.scrollWidth);

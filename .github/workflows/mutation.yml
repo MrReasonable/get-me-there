@@ -1,7 +1,7 @@
 name: mutation
 # Ruling 10 (plan decision 67): the Stryker gate on core's hard-rule predicates (spec §9, break 80%), the engine's
 # catch-up, browser-window and heartbeat rules (WP16a), the worker's safety modules and the gmt CLI's planners and
-# system executor (WP16b, decision 77) runs sandboxed,
+# system executor (WP16b, decision 77), and the web's pure-logic files (WP19, revision 50) runs sandboxed,
 # fails when timed-out mutants exceed 5% of those tested, and runs on demand and weekly in a job of its own, never on
 # every push, so its load never shares a runner with another suite. The CLI's run is a job of its own (below).
 on:
@@ -56,6 +56,9 @@ jobs:
           - { package: camoufox-worker, dir: apps/camoufox-worker, shard: 1, shards: 3 }
           - { package: camoufox-worker, dir: apps/camoufox-worker, shard: 2, shards: 3 }
           - { package: camoufox-worker, dir: apps/camoufox-worker, shard: 3, shards: 3 }
+          # why: revision 50 (WP19): the web's pure-logic files over their pure tests, which run in seconds, so one
+          # shard's run is expected well under 30 minutes
+          - { package: web, dir: apps/web, shard: 1, shards: 1 }
     env:
       SHARD: ${{ matrix.shard }}
       SHARDS: ${{ matrix.shards }}
@@ -116,6 +119,7 @@ jobs:
           - { package: engine, dir: packages/engine, shards: 4 }
           - { package: api, dir: apps/api, shards: 1 }
           - { package: camoufox-worker, dir: apps/camoufox-worker, shards: 3 }
+          - { package: web, dir: apps/web, shards: 1 }
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

@@ -23,7 +23,12 @@ function hostileSegment(marketingCarrier: string): Segment {
   };
 }
 
-const ROW = `/?view=results&def=def-1&basis=verified&row=${HASH}`;
+// why: WP19 Task 19.3 (spec §8.3): a POST booking opens the row's date pair detail; the query is core's detailLinkQuery
+const ROW = `/?view=results&def=def-1&depart=2027-03-14&return=2027-03-28&basis=verified&row=${HASH}`;
+/** The literal core's detailLink.test.ts and the web landing test also hold (WP19 Task 19.1). */
+const LITERAL_HASH = '9f3c2a7b41d0e6f85a1c3b2d4e6f708192a3b4c5d6e7f8091a2b3c4d5e6f7a8b9';
+const LITERAL = `view=results&def=def-1&depart=2027-03-14&return=2027-03-28&basis=verified&row=${LITERAL_HASH}`;
+const TRIP = { departureDate: asIsoDate('2027-03-14'), returnDate: asIsoDate('2027-03-28') };
 const VERIFIED_SUBJECT =
   "[get-me-there] £412 LHR→JFK 14 Mar–28 Mar (14n) · Google Flights via SearchApi · fetched 5h ago · vendor's cache age unknown · 1 constraint unverified";
 
@@ -91,7 +96,7 @@ describe('itinerary-search item body (spec §8.3)', () => {
       ].join('\n'),
     );
   });
-  it('POST booking: links to the app results row (relative, absolute, under a path prefix), never the vendor form', () => {
+  it("POST booking: links to the row's date pair detail with the item's cell dates (relative, absolute, under a path prefix), never the vendor form", () => {
     const post = verifiedItem({
       booking: {
         kind: 'post',
@@ -104,17 +109,18 @@ describe('itinerary-search item body (spec §8.3)', () => {
     expect(relative).toContain(`get-me-there: ${ROW}`);
     expect(relative).not.toContain('u=formdata');
     expect(relative).not.toContain('https://www.google.com/travel/clk/f');
-    expect(appRowLink(null, 'def-1', 'verified', HASH)).toBe(ROW);
-    expect(appRowLink(null, 'def 1', 'calendar', 'calendar:5')).toBe(
-      '/?view=results&def=def+1&basis=calendar&row=calendar%3A5',
+    expect(appRowLink(null, 'def-1', 'verified', LITERAL_HASH, TRIP)).toBe(`/?${LITERAL}`);
+    expect(appRowLink(null, 'def-1', 'verified', HASH, TRIP)).toBe(ROW);
+    expect(appRowLink(null, 'def 1', 'calendar', 'calendar:5', TRIP)).toBe(
+      '/?view=results&def=def+1&depart=2027-03-14&return=2027-03-28&basis=calendar&row=calendar%3A5',
     );
-    expect(appRowLink('https://gmt.example.ts.net', 'def-1', 'verified', HASH)).toBe(
+    expect(appRowLink('https://gmt.example.ts.net', 'def-1', 'verified', HASH, TRIP)).toBe(
       `https://gmt.example.ts.net${ROW}`,
     );
-    expect(appRowLink('https://gmt.example.ts.net/', 'def-1', 'verified', HASH)).toBe(
+    expect(appRowLink('https://gmt.example.ts.net/', 'def-1', 'verified', HASH, TRIP)).toBe(
       `https://gmt.example.ts.net${ROW}`,
     );
-    expect(appRowLink('https://example.org/gmt/', 'def-1', 'verified', HASH)).toBe(
+    expect(appRowLink('https://example.org/gmt/', 'def-1', 'verified', HASH, TRIP)).toBe(
       `https://example.org/gmt${ROW}`,
     );
     const absolute = renderBody(

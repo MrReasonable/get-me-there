@@ -1,17 +1,18 @@
-import type {
-  Cabin,
-  CellKey,
-  CellOutcome,
-  Clock,
-  FxInfo,
-  IsoDateTime,
-  NormalisedItinerary,
-  Observation,
-  Offer,
-  Provenance,
-  ProviderId,
-  ResolvedSpace,
-  Segment,
+import {
+  type Cabin,
+  type CellKey,
+  type CellOutcome,
+  type Clock,
+  cellKeyString,
+  type FxInfo,
+  type IsoDateTime,
+  type NormalisedItinerary,
+  type Observation,
+  type Offer,
+  type Provenance,
+  type ProviderId,
+  type ResolvedSpace,
+  type Segment,
 } from '@gmt/core';
 import type { Db } from '../client.js';
 import { CABINS, PROVIDER_IDS, SOURCE_KINDS } from '../internal/enums.js';
@@ -93,6 +94,7 @@ interface ItineraryDbRow {
   first_seen_at: string;
 }
 interface SegmentDbRow {
+  itinerary_hash: string;
   direction: string;
   marketing_carrier: string;
   operating_carrier: string | null;
@@ -105,6 +107,32 @@ interface SegmentDbRow {
   arrive_utc: string | null;
   duration_minutes: number | null;
   aircraft: string | null;
+}
+
+/** An itinerary row and its segments (in position order) as the domain type (spec §7). */
+function toItinerary(
+  r: ItineraryDbRow,
+  segs: readonly SegmentDbRow[],
+): NormalisedItinerary & { firstSeenAt: IsoDateTime } {
+  const I = 'itineraries';
+  return {
+    hash: r.hash,
+    origin: readIata(`${I}.origin`, r.origin),
+    destination: readIata(`${I}.destination`, r.destination),
+    departureDate: readDate(`${I}.departure_date`, r.departure_date),
+    returnDate: readDate(`${I}.return_date`, r.return_date),
+    nights: r.nights,
+    outbound: segs.filter((s) => s.direction === 'outbound').map(toSegment),
+    inbound: segs.filter((s) => s.direction === 'inbound').map(toSegment),
+    ...(r.outbound_minutes === null ? {} : { outboundMinutes: r.outbound_minutes }),
+    ...(r.inbound_minutes === null ? {} : { inboundMinutes: r.inbound_minutes }),
+    stopsOut: r.stops_out,
+    stopsIn: r.stops_in,
+    layovers: readLayovers(`${I}.layovers_json`, readJson(`${I}.layovers_json`, r.layovers_json)),
+    ...(r.airport_change === null ? {} : { airportChange: r.airport_change === 1 }),
+    marketingCarriers: readStringArray(`${I}.carriers_json`, readJson(`${I}.carriers_json`, r.carriers_json)),
+    firstSeenAt: readTime(`${I}.first_seen_at`, r.first_seen_at),
+  };
 }
 
 const O = 'price_observations';
@@ -196,6 +224,17 @@ UPDATE fare_offers SET
   latest_price_pence = (SELECT price_pence FROM price_observations WHERE offer_id = @id ORDER BY fetched_at DESC, id DESC LIMIT 1)
 WHERE id = @id`;
 
+/** The space's bind parameters for a `@spaced` filter (null reads every cell). */
+const spaceParams = (s: ResolvedSpace | null) => ({
+  spaced: s === null ? 0 : 1,
+  origins: JSON.stringify(s?.origins ?? []),
+  destinations: JSON.stringify(s?.destinations ?? []),
+  from: s?.departureFrom ?? '',
+  to: s?.departureTo ?? '',
+  minNights: s?.minNights ?? 0,
+  maxNights: s?.maxNights ?? 0,
+});
+
 /** Spec §7 itineraries, segments, fare offers and price observations. */
 export class ItinerariesRepo {
   constructor(
@@ -279,28 +318,7 @@ export class ItinerariesRepo {
     const segs = this.db.raw
       .prepare<[string], SegmentDbRow>('SELECT * FROM segments WHERE itinerary_hash = ? ORDER BY position')
       .all(hash);
-    const I = 'itineraries';
-    return {
-      hash: r.hash,
-      origin: readIata(`${I}.origin`, r.origin),
-      destination: readIata(`${I}.destination`, r.destination),
-      departureDate: readDate(`${I}.departure_date`, r.departure_date),
-      returnDate: readDate(`${I}.return_date`, r.return_date),
-      nights: r.nights,
-      outbound: segs.filter((s) => s.direction === 'outbound').map(toSegment),
-      inbound: segs.filter((s) => s.direction === 'inbound').map(toSegment),
-      ...(r.outbound_minutes === null ? {} : { outboundMinutes: r.outbound_minutes }),
-      ...(r.inbound_minutes === null ? {} : { inboundMinutes: r.inbound_minutes }),
-      stopsOut: r.stops_out,
-      stopsIn: r.stops_in,
-      layovers: readLayovers(`${I}.layovers_json`, readJson(`${I}.layovers_json`, r.layovers_json)),
-      ...(r.airport_change === null ? {} : { airportChange: r.airport_change === 1 }),
-      marketingCarriers: readStringArray(
-        `${I}.carriers_json`,
-        readJson(`${I}.carriers_json`, r.carriers_json),
-      ),
-      firstSeenAt: readTime(`${I}.first_seen_at`, r.first_seen_at),
-    };
+    return toItinerary(r, segs);
   }
 
   /** Returns the offer id for (itinerary, provider, seller, cabin), creating it if absent. */
@@ -413,13 +431,7 @@ export class ItinerariesRepo {
         children: opts.includeChildren ? 1 : 0,
         ids: opts.executionIds === 'all' ? null : JSON.stringify(opts.executionIds),
         cabin: opts.cabin,
-        spaced: s === null ? 0 : 1,
-        origins: JSON.stringify(s?.origins ?? []),
-        destinations: JSON.stringify(s?.destinations ?? []),
-        from: s?.departureFrom ?? '',
-        to: s?.departureTo ?? '',
-        minNights: s?.minNights ?? 0,
-        maxNights: s?.maxNights ?? 0,
+        ...spaceParams(s),
       },
     );
   }
@@ -484,10 +496,43 @@ export class ItinerariesRepo {
         `SELECT o.* FROM cell_outcomes o JOIN search_executions e ON e.id = o.execution_id
          WHERE e.definition_id = @definitionId AND o.stage = 'verification' AND o.status IN ('priced', 'empty') AND o.cabin = @cabin
            AND o.origin = @origin AND o.destination = @destination AND o.departure_date = @departureDate AND o.return_date = @returnDate
-         ORDER BY o.fetched_at DESC, e.created_at DESC, e.rowid DESC LIMIT 1`,
+         ORDER BY o.fetched_at DESC, e.created_at DESC, e.rowid DESC, o.provider_id LIMIT 1`,
       )
       .get({ definitionId, cabin, ...cell });
     return r === undefined ? null : toOutcome(r);
+  }
+
+  /**
+   * `latestVerificationOutcomeForCell` for every cell at once (WP19 §5), keyed by core's `cellKeyString`: per cell of
+   * the definition in the cabin (inside `space` when given), the newest priced or empty verification outcome. One
+   * statement. why: both reads end their order with `o.provider_id`, so two verification providers' outcomes fetched
+   * in the same second of one execution resolve the same way in each, whatever the query plan.
+   */
+  latestVerificationOutcomes(
+    definitionId: string,
+    cabin: Cabin,
+    space: ResolvedSpace | null,
+  ): Map<string, CellOutcome> {
+    const rows = this.db.raw
+      .prepare<Record<string, unknown>, OutcomeDbRow>(
+        `WITH ranked AS (
+           SELECT o.*, ROW_NUMBER() OVER (PARTITION BY o.origin, o.destination, o.departure_date, o.return_date
+             ORDER BY o.fetched_at DESC, e.created_at DESC, e.rowid DESC, o.provider_id) AS rn
+           FROM cell_outcomes o JOIN search_executions e ON e.id = o.execution_id
+           WHERE e.definition_id = @definitionId AND o.stage = 'verification' AND o.status IN ('priced', 'empty') AND o.cabin = @cabin
+             AND (@spaced = 0 OR (o.origin IN (SELECT value FROM json_each(@origins)) AND o.destination IN (SELECT value FROM json_each(@destinations))
+               AND o.departure_date BETWEEN @from AND @to
+               AND CAST(julianday(o.return_date) - julianday(o.departure_date) AS INTEGER) BETWEEN @minNights AND @maxNights))
+         )
+         SELECT * FROM ranked WHERE rn = 1`,
+      )
+      .all({ definitionId, cabin, ...spaceParams(space) });
+    return new Map(
+      rows.map((r) => {
+        const o = toOutcome(r);
+        return [cellKeyString(o), o];
+      }),
+    );
   }
 
   /** The cell's `best_observation_id` in this execution: the cheapest observation written (ruling 13). */
@@ -501,41 +546,57 @@ export class ItinerariesRepo {
     );
   }
 
+  /**
+   * The observations `sql` selects, each with its itinerary and segments. why: WP19 §5, spec §10 bounds: the
+   * itineraries and their segments are read by hash list (`json_each`) in two statements, whether there are 1 or 500
+   * distinct itineraries, instead of a `get(hash)` per itinerary.
+   */
   private rows(sql: string, params: Record<string, unknown>): ObservationRow[] {
-    const cache = new Map<string, NormalisedItinerary>();
-    return this.db.raw
-      .prepare<Record<string, unknown>, ObservationDbRow>(sql)
-      .all(params)
-      .map((r) => {
-        let it = cache.get(r.itinerary_hash);
-        if (it === undefined) {
-          const full = this.get(r.itinerary_hash);
-          if (full === null)
-            throw new Error(`observation ${r.id} points at missing itinerary ${r.itinerary_hash}`);
-          const { firstSeenAt: _firstSeenAt, ...itinerary } = full;
-          it = itinerary;
-          cache.set(r.itinerary_hash, it);
-        }
-        const o = toObservation(r);
-        return {
-          ...o,
-          offer: {
-            id: r.offer_id,
-            itineraryHash: r.itinerary_hash,
-            providerId: o.provenance.providerId,
-            seller: r.seller,
-            cabin: o.provenance.cabin,
-          },
-          itinerary: it,
+    const found = this.db.raw.prepare<Record<string, unknown>, ObservationDbRow>(sql).all(params);
+    const hashes = JSON.stringify([...new Set(found.map((r) => r.itinerary_hash))]);
+    const segments = new Map<string, SegmentDbRow[]>();
+    for (const g of this.db.raw
+      .prepare<[string], SegmentDbRow>(
+        'SELECT * FROM segments WHERE itinerary_hash IN (SELECT value FROM json_each(?)) ORDER BY itinerary_hash, position',
+      )
+      .all(hashes)) {
+      const list = segments.get(g.itinerary_hash);
+      if (list === undefined) segments.set(g.itinerary_hash, [g]);
+      else list.push(g);
+    }
+    const itineraries = new Map<string, NormalisedItinerary>();
+    for (const r of this.db.raw
+      .prepare<[string], ItineraryDbRow>(
+        'SELECT * FROM itineraries WHERE hash IN (SELECT value FROM json_each(?))',
+      )
+      .all(hashes)) {
+      const { firstSeenAt: _firstSeenAt, ...itinerary } = toItinerary(r, segments.get(r.hash) ?? []);
+      itineraries.set(r.hash, itinerary);
+    }
+    return found.map((r) => {
+      const it = itineraries.get(r.itinerary_hash);
+      if (it === undefined)
+        throw new Error(`observation ${r.id} points at missing itinerary ${r.itinerary_hash}`);
+      const o = toObservation(r);
+      return {
+        ...o,
+        offer: {
+          id: r.offer_id,
+          itineraryHash: r.itinerary_hash,
+          providerId: o.provenance.providerId,
           seller: r.seller,
-          cell: {
-            origin: it.origin,
-            destination: it.destination,
-            departureDate: it.departureDate,
-            returnDate: it.returnDate,
-            nights: it.nights,
-          },
-        };
-      });
+          cabin: o.provenance.cabin,
+        },
+        itinerary: it,
+        seller: r.seller,
+        cell: {
+          origin: it.origin,
+          destination: it.destination,
+          departureDate: it.departureDate,
+          returnDate: it.returnDate,
+          nights: it.nights,
+        },
+      };
+    });
   }
 }

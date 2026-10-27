@@ -64,6 +64,13 @@
       "when": 1792926154303,
       "tag": "0008_wp18_error_kind",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1793052168835,
+      "tag": "0009_wp19_latest_price_idx",
+      "breakpoints": true
     }
   ]
 }

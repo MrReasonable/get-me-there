@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { POLL_MS } from '../../src/api/queries.js';
 import { near, StatusBar } from '../../src/components/StatusBar.js';
 import { ViewHeader } from '../../src/components/ViewHeader.js';
+import { COPY } from '../../src/copy.js';
 import {
   API,
   coverageResponse,
@@ -40,6 +41,17 @@ describe('status bar (spec §11)', () => {
       ['116', '126'],
       ['0', '10'],
     ]);
+  });
+
+  it("the progress breakdown links to the Dates view's coverage section, keeping the other parameters (WP19 Task 19.7)", async () => {
+    server.use(http.get(`${API}/executions/:id`, () => HttpResponse.json(execution())));
+    const { user } = renderWithProviders(bar(), {
+      search: '?view=results&def=def-0001&d.to=JFK&depart=2027-03-14&return=2027-03-28&row=x',
+    });
+    const link = await screen.findByRole('link', { name: COPY.progressCoverageLink });
+    expect(link).toHaveAttribute('href', '/?view=dates&def=def-0001&d.to=JFK&d.coverage=open');
+    await user.click(link);
+    expect(window.location.search).toBe('?view=dates&def=def-0001&d.to=JFK&d.coverage=open');
   });
 
   it('shows spend used / cap for the run, the month and each provider-month call cap, marking a cap that is near', async () => {
@@ -281,6 +293,26 @@ describe('status bar (spec §11)', () => {
     await user.click(screen.getByRole('button', { name: 'Run now: about 154 calls, hard stop 2000 · £0' }));
     // why: decision 43: the stored confirmation covers a run only with both its pence and its calls.
     await expect.poll(() => bodies).toEqual([{ confirmCostPence: 0, confirmCalls: 154 }]);
+  });
+
+  it('where the view has its own never-run action, the bar shows no Run now until the search has run once', async () => {
+    server.use(
+      http.get(`${API}/definitions/:id/results`, () =>
+        HttpResponse.json(resultsResponse({ rows: [], total: 0, executions: [], cheapest: null })),
+      ),
+    );
+    const { unmount } = renderWithProviders(
+      <StatusBar definition={definition()} showRunNow viewOwnsFirstRun />,
+    );
+    await screen.findByText('No run yet for this definition.');
+    expect(screen.queryByRole('button', { name: /Run now/ })).toBeNull();
+    unmount();
+    server.use(
+      http.get(`${API}/executions/:id`, () => HttpResponse.json(execution({ status: 'completed' }))),
+    );
+    server.use(http.get(`${API}/definitions/:id/results`, () => HttpResponse.json(resultsResponse())));
+    renderWithProviders(<StatusBar definition={definition()} showRunNow viewOwnsFirstRun />);
+    expect(await screen.findByRole('button', { name: /Run now/ })).toBeInTheDocument();
   });
 
   it('Run now is disabled while the estimate is above the confirmation, and absent where the view does not offer it', async () => {

@@ -8,8 +8,10 @@ import {
   priceCellSchema,
   ROUTES,
   resultRowSchema,
+  resultsQuerySchema,
   resultsResponseSchema,
 } from '../../src/api-contract/index.js';
+import { verifiedFigure } from '../helpers/datePairs.js';
 
 const provenance = {
   providerId: 'searchapi',
@@ -43,8 +45,7 @@ describe('api-contract (spec §10)', () => {
       'POST /executions/:id/resume',
       'POST /cells/verify',
       'GET /definitions/:id/results',
-      'GET /definitions/:id/calendar',
-      'GET /definitions/:id/duration-analysis',
+      'GET /definitions/:id/date-pairs',
       'GET /definitions/:id/coverage',
       'GET /definitions/:id/calendar-gap',
       'GET /definitions/:id/cells/:origin/:destination/:departureDate/:returnDate',
@@ -63,6 +64,24 @@ describe('api-contract (spec §10)', () => {
       expect(paths).toContain(p);
     expect(new Set(paths).size).toBe(paths.length);
     expect(ROUTES.filter((r) => r.auth === 'public').map((r) => r.path)).toEqual(['/api/health']);
+  });
+  it('the calendar and duration-analysis routes and their schemas are retired (spec §10, revision 48)', async () => {
+    const paths = ROUTES.map((r) => `${r.method} ${r.path.replace(/^\/api/, '')}`);
+    expect(paths).not.toContain('GET /definitions/:id/calendar');
+    expect(paths).not.toContain('GET /definitions/:id/duration-analysis');
+    // why: the Dates view's date-pairs route replaces both; the calendar gap and the cell route stay.
+    expect(paths).toContain('GET /definitions/:id/date-pairs');
+    const contract: Record<string, unknown> = await import('../../src/api-contract/index.js');
+    const core: Record<string, unknown> = await import('../../src/index.js');
+    for (const name of [
+      'calendarDaySchema',
+      'calendarQuerySchema',
+      'calendarResponseSchema',
+      'durationAnalysisResponseSchema',
+    ]) {
+      expect(contract[name], name).toBeUndefined();
+      expect(core[name], name).toBeUndefined();
+    }
   });
   it('every price-bearing response requires provenance', () => {
     const cell = { pricePence: 41200, provenance, stale: false, ageHours: 2, truncated: false };
@@ -261,6 +280,7 @@ describe('api-contract (spec §10)', () => {
       excludedByCurrentSpace: 0,
       verificationProviderConfigured: false,
       cheapest: null,
+      datePairFigure: null,
     });
     expect(r.success).toBe(true);
     expect(healthResponseSchema.safeParse({ ok: true, degraded: false }).success).toBe(true);
@@ -273,5 +293,64 @@ describe('alertRuleUpdateRequestSchema (partial PUT)', () => {
     expect(alertRuleUpdateRequestSchema.parse({})).toEqual({});
     expect(alertRuleUpdateRequestSchema.parse({ cooldownHours: 24 })).toEqual({ cooldownHours: 24 });
     expect(alertRuleUpdateRequestSchema.safeParse({ cooldownHours: 0 }).success).toBe(false);
+  });
+});
+
+describe('/results scope parameters and datePairFigure (WP19; spec §10)', () => {
+  it('the query takes the five scope strings as the wire gives them; the api answers 422 for their values', () => {
+    const scope = {
+      departureDate: '2027-03-14',
+      returnDate: '2027-03-28',
+      origins: 'LHR,LGW',
+      destinations: 'JFK',
+      maxJourneyMinutes: '600',
+    };
+    expect(resultsQuerySchema.parse({ basis: 'calendar', ...scope })).toEqual({
+      basis: 'calendar',
+      ...scope,
+    });
+    expect(resultsQuerySchema.parse({ departureDate: '14/03/2027', maxJourneyMinutes: 'abc' })).toEqual({
+      departureDate: '14/03/2027',
+      maxJourneyMinutes: 'abc',
+    });
+    for (const [key, max] of [
+      ['departureDate', 40],
+      ['returnDate', 40],
+      ['origins', 200],
+      ['destinations', 200],
+      ['maxJourneyMinutes', 10],
+    ] as const) {
+      expect(resultsQuerySchema.safeParse({ [key]: '1'.repeat(max) }).success, key).toBe(true);
+      expect(resultsQuerySchema.safeParse({ [key]: '1'.repeat(max + 1) }).success, key).toBe(false);
+    }
+  });
+
+  it("the response requires datePairFigure: null, or the board's figure less its airport pair", () => {
+    const base = {
+      rows: [],
+      total: 0,
+      truncated: false,
+      basis: 'verified',
+      basisReason: 'itinerary-searched observations exist',
+      executions: [],
+      coverage: {
+        buckets: { priced: 0, empty: 0, no_data: 0, error: 0, skipped: 0, not_run: 0, reused: 0 },
+        total: 0,
+        selected: 0,
+        itinerarySearched: 0,
+        onDemand: 0,
+        reused: 0,
+      },
+      excludedByCurrentSpace: 0,
+      verificationProviderConfigured: true,
+      cheapest: null,
+    };
+    expect(resultsResponseSchema.safeParse(base).success).toBe(false);
+    expect(resultsResponseSchema.safeParse({ ...base, datePairFigure: null }).success).toBe(true);
+    const { airportPair, ...figure } = verifiedFigure();
+    expect(resultsResponseSchema.parse({ ...base, datePairFigure: figure }).datePairFigure).toEqual(figure);
+    expect(
+      resultsResponseSchema.safeParse({ ...base, datePairFigure: { ...figure, airportPair } }).success,
+    ).toBe(false);
   });
 });

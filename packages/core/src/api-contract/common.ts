@@ -48,6 +48,7 @@ export const coverageSummarySchema = z.object({
   onDemand: count,
   reused: count,
 });
+export type CoverageSummary = z.output<typeof coverageSummarySchema>;
 /** A bounded string only; semantic validation is `parseCron` in engine (spec §8.2). */
 export const cronSchema = z
   .string()
@@ -113,6 +114,7 @@ export const executionSummarySchema = z.object({
   /** Spec §8.2 rev 36: why a `skipped_missed` firing was not caught up, as the row recorded it; null otherwise. */
   skipCode: z.enum(SKIP_CODES).nullable(),
 });
+export type ExecutionSummary = z.output<typeof executionSummarySchema>;
 export const usageSchema = z.object({
   scope: z.string(),
   calls: count,

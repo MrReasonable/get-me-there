@@ -1,19 +1,18 @@
-import { asIata, asIsoDate, asIsoMonth } from '@gmt/core';
+import { asIata, asIsoDate } from '@gmt/core';
 import { HttpResponse, http } from 'msw';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { formatIsoDate, formatIsoDateLong, WEEK_HEADERS } from '../../src/format.js';
-import { CalendarGrid } from '../../src/views/Calendar/CalendarGrid.js';
-import { buildCalendarModel } from '../../src/views/Calendar/model.js';
 import { ResultsView } from '../../src/views/Results/ResultsView.js';
-import { API, calendarRow, definition, resultsResponse } from '../fixtures.js';
-import { cellAt, gridDay, priceAt, provItinerary } from '../fixtures.wp10.js';
+import { API, calendarRow, DETAIL_PAIR, DETAIL_SEARCH, definition, resultsResponse } from '../fixtures.js';
 import { server } from '../msw/server.js';
-import { NOW, renderWithProviders } from '../render.js';
+import { renderWithProviders } from '../render.js';
 
 const ZONES = ['America/Los_Angeles', 'Asia/Tokyo'] as const;
 // why: the 2027-01-01 offsets prove the zone is in effect, so these tests cannot pass vacuously in UTC.
 const JAN_OFFSET_MINUTES = { 'America/Los_Angeles': 480, 'Asia/Tokyo': -540 } as const;
-// why: the control proves the bug is real in each zone: a naive Date moves the day.
+// why: the control proves the bug is real in each zone: a naive Date moves the day. The Dates view's own zone cases
+// (board, cards, overview, readout, the detail's header) are in datesView.tz.test.tsx (WP19); this file keeps the
+// shared formatters and the Results columns.
 const NAIVE_SHIFT = {
   'America/Los_Angeles': { input: '2027-03-14', localDay: 13 },
   'Asia/Tokyo': { input: '2027-03-14T20:00:00.000Z', localDay: 15 },
@@ -23,16 +22,6 @@ const naiveDayLong = (iso: string) => {
   const d = new Date(iso);
   return `${WEEK_HEADERS[(d.getDay() + 6) % 7]} ${d.getDate()}`;
 };
-
-/** A day's button and its weekday column (Monday = 0). */
-function cell(date: string): HTMLButtonElement {
-  const el = document.querySelector(`button[data-date="${date}"]`);
-  if (!(el instanceof HTMLButtonElement)) throw new Error(`no day ${date}`);
-  return el;
-}
-function column(date: string): number {
-  return cell(date).closest('td')?.cellIndex ?? -1;
-}
 
 describe.each(ZONES)('dates never shift under TZ=%s (review focus 3)', (zone) => {
   let previous: string | undefined;
@@ -63,30 +52,6 @@ describe.each(ZONES)('dates never shift under TZ=%s (review focus 3)', (zone) =>
     expect(formatIsoDate('2027-03-14')).toBe('14 Mar 2027'); // WP9's Results form, the same module
   });
 
-  it('the calendar grid renders each day under its own date and weekday', () => {
-    const days = ['2027-03-13', '2027-03-14', '2027-03-15', '2027-03-28', '2027-04-01'].map((d) =>
-      gridDay(d, { cheapestVerified: priceAt(41200, provItinerary(5), false, cellAt(d, 14)) }),
-    );
-    renderWithProviders(
-      <CalendarGrid
-        days={days}
-        model={buildCalendarModel(days, 'verified', NOW)}
-        months={[asIsoMonth('2027-03'), asIsoMonth('2027-04')]}
-        destinationNotes={{}}
-        compact={false}
-        onOpen={() => undefined}
-      />,
-    );
-    expect(column('2027-03-13')).toBe(5);
-    expect(column('2027-03-14')).toBe(6);
-    expect(column('2027-03-15')).toBe(0);
-    expect(cell('2027-03-14').querySelector('[aria-hidden="true"]')?.textContent).toBe('14');
-    expect(cell('2027-03-14')).toHaveTextContent('Sun 14 Mar 2027');
-    expect(cell('2027-03-28')).toHaveTextContent('Sun 28 Mar 2027');
-    expect(cell('2027-04-01').closest('table')).toHaveAccessibleName('Apr 2027');
-    expect(column('2027-04-01')).toBe(3);
-  });
-
   it('the Results date columns render departure and return from their strings', async () => {
     const row = calendarRow({
       cell: {
@@ -102,7 +67,10 @@ describe.each(ZONES)('dates never shift under TZ=%s (review focus 3)', (zone) =>
         HttpResponse.json(resultsResponse({ rows: [row], total: 1 })),
       ),
     );
-    const { findAllByText, queryAllByText } = renderWithProviders(<ResultsView definition={definition()} />);
+    const { findAllByText, queryAllByText } = renderWithProviders(
+      <ResultsView definition={definition()} datePair={DETAIL_PAIR} />,
+      { search: DETAIL_SEARCH },
+    );
     expect((await findAllByText(/14 Mar 2027/)).length).toBeGreaterThan(0);
     expect((await findAllByText(/28 Mar 2027/)).length).toBeGreaterThan(0);
     expect(queryAllByText(/\b(13|15) Mar 2027\b|\b(27|29) Mar 2027\b/)).toHaveLength(0);

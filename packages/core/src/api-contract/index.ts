@@ -8,6 +8,7 @@ import {
   alertRulesQuerySchema,
   alertRuleUpdateRequestSchema,
 } from './alerts.js';
+import { datePairsQuerySchema, datePairsResponseSchema } from './datePairs.js';
 import {
   coverageCheckRequestSchema,
   coverageCheckResponseSchema,
@@ -26,11 +27,8 @@ import {
 } from './executions.js';
 import {
   calendarGapResponseSchema,
-  calendarQuerySchema,
-  calendarResponseSchema,
   cellDetailResponseSchema,
   coverageResponseSchema,
-  durationAnalysisResponseSchema,
   itineraryHistoryResponseSchema,
   resultsQuerySchema,
   resultsResponseSchema,
@@ -54,6 +52,7 @@ export { barSummary, STATE_ORDER, sortChecks } from '../status/report.js';
 export * from './airports.js';
 export * from './alerts.js';
 export * from './common.js';
+export * from './datePairs.js';
 export * from './definitions.js';
 export * from './executions.js';
 export * from './results.js';
@@ -106,8 +105,8 @@ export const ROUTES: readonly RouteDef[] = [
   route('POST', '/executions/:id/resume', executionResponseSchema),
   route('POST', '/cells/verify', startExecutionResponseSchema, { request: verifyCellRequestSchema }),
   route('GET', '/definitions/:id/results', resultsResponseSchema, { query: resultsQuerySchema }),
-  route('GET', '/definitions/:id/calendar', calendarResponseSchema, { query: calendarQuerySchema }),
-  route('GET', '/definitions/:id/duration-analysis', durationAnalysisResponseSchema),
+  // why: spec §10 (WP19): the Dates view's source; its query is the wire form the api parses and answers 422 for itself
+  route('GET', '/definitions/:id/date-pairs', datePairsResponseSchema, { query: datePairsQuerySchema }),
   route('GET', '/definitions/:id/coverage', coverageResponseSchema),
   route('GET', '/definitions/:id/calendar-gap', calendarGapResponseSchema),
   route(

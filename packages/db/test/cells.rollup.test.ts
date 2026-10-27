@@ -13,6 +13,7 @@ import { RowRejected } from '../src/internal/validate.js';
 import { CellsRepo } from '../src/repositories/cells.js';
 import { freshDb, sqliteCode, T0 } from './helpers/db.js';
 import { cell, EWR, newExecution, withNights } from './helpers/factories.js';
+import { historySeed, statementsOf } from './helpers/history.js';
 
 const PROVIDERS: ProviderId[] = ['travelpayouts', 'searchapi'];
 const dayCell = (j: number): CellKey =>
@@ -283,5 +284,49 @@ describe('CellsRepo seeding and stored roll-ups (spec §3, §6.6, §7)', () => {
     expect(
       db.raw.prepare('SELECT status FROM cell_outcomes WHERE execution_id = ?').get(executionId),
     ).toEqual({ status: 'priced' });
+  });
+});
+
+describe('CellsRepo grouped reads (WP19 Task 19.2)', () => {
+  it("childVerificationRollUps: every completed child's verification roll-up for its cell, newest first, in one statement", () => {
+    const seed = historySeed();
+    const { result, statements } = statementsOf(seed.db, () =>
+      seed.cells.childVerificationRollUps(seed.definition.id),
+    );
+    expect(statements).toBe(1);
+    const reference = seed.executions
+      .listForDefinition(seed.definition.id, { limit: 'all', includeChildren: true })
+      .filter((e) => e.isChild && e.status === 'completed')
+      .flatMap((e) =>
+        e.cell === null
+          ? []
+          : [
+              {
+                executionId: e.id,
+                createdAt: e.createdAt,
+                cell: e.cell,
+                status: seed.cells.rollUps(e.id).get(cellKeyString(e.cell))?.verification.status ?? null,
+              },
+            ],
+      );
+    expect(result).toEqual(reference);
+    expect(result.map((r) => r.status)).toEqual(['error', 'priced']); // the cancelled child is not listed
+  });
+
+  it('reusedCells: the cells whose discovery result the run copied from an earlier one, in one statement', () => {
+    const seed = historySeed();
+    for (const run of seed.runs) {
+      const { result, statements } = statementsOf(seed.db, () => seed.cells.reusedCells(run));
+      expect(statements).toBe(1);
+      expect(result).toEqual(
+        new Set(
+          seed.cells
+            .outcomes(run, { stage: 'discovery' })
+            .filter((o) => o.reusedFromExecutionId !== null)
+            .map(cellKeyString),
+        ),
+      );
+    }
+    expect(seed.runs.some((run) => seed.cells.reusedCells(run).size > 0)).toBe(true);
   });
 });

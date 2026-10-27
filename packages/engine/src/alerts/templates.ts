@@ -5,8 +5,10 @@
 import {
   type AlertDigest,
   type AlertRule,
+  type CellKey,
   CONSTRAINT_LABELS,
   type DigestItem,
+  detailLinkQuery,
   effectiveAge,
   formatAgeFull,
   formatDuration,
@@ -112,17 +114,26 @@ export function renderSubject(item: DigestItem, now: IsoDateTime): string {
 }
 
 /**
- * The app URL of a results row with WP9's parameters (`view`, `def`, `basis`, `row`): under APP_BASE_URL (an https
- * base with no credentials, query or fragment, which core's config enforces; a path prefix is kept), else a relative
- * path (spec §12).
+ * The app URL of a row's date pair detail (spec §8.3, WP19): `view`, `def`, `depart`, `return`, `basis`, `row`, in
+ * core's `detailLinkQuery` order, under APP_BASE_URL (an https base with no credentials, query or fragment, which
+ * core's config enforces; a path prefix is kept), else a relative path (spec §12).
  */
 export function appRowLink(
   appBaseUrl: string | null,
   definitionId: string,
   basis: ResultBasis,
   rowKey: string,
+  cell: Pick<CellKey, 'departureDate' | 'returnDate'>,
 ): string {
-  const query = new URLSearchParams({ view: 'results', def: definitionId, basis, row: rowKey }).toString();
+  // why: spec §8.3 (WP19): the link opens the row's date pair detail; core's detailLinkQuery is the one place the
+  // detail URL's names and order live, so the email and the web's landing cannot drift apart
+  const query = detailLinkQuery({
+    definitionId,
+    departureDate: cell.departureDate,
+    returnDate: cell.returnDate,
+    basis,
+    row: rowKey,
+  });
   if (appBaseUrl === null) return `/?${query}`;
   const u = new URL(appBaseUrl);
   u.pathname = `${u.pathname.replace(/\/+$/, '')}/`;
@@ -184,7 +195,7 @@ function expiryText(expiresAt: IsoDateTime | null, now: IsoDateTime): string {
 function verifiedLinkLine(item: DigestItem, input: DigestRenderInput): string {
   const b = item.booking;
   if (b.kind === 'post') {
-    const row = appRowLink(input.appBaseUrl, input.digest.definitionId, 'verified', item.rowKey);
+    const row = appRowLink(input.appBaseUrl, input.digest.definitionId, 'verified', item.rowKey, item.cell);
     return `Link: this fare is booked through a form, which email cannot submit; open the results row in get-me-there: ${row}`;
   }
   if (b.kind === 'none') return searchLine(item);

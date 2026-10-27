@@ -166,7 +166,7 @@ describe('EmailNotifier with a jsonTransport (spec §8.3)', () => {
     );
   });
 
-  it('a POST booking links to the app results row instead', async () => {
+  it("a POST booking links to the row's date pair detail instead", async () => {
     const { n, t } = notifier();
     await n.send(
       digestMessage([
@@ -180,7 +180,9 @@ describe('EmailNotifier with a jsonTransport (spec §8.3)', () => {
         }),
       ]),
     );
-    expect(t.messages[0]?.parsed.text).toContain(`/?view=results&def=def-1&basis=verified&row=${HASH}`);
+    expect(t.messages[0]?.parsed.text).toContain(
+      `/?view=results&def=def-1&depart=2027-03-14&return=2027-03-28&basis=verified&row=${HASH}`,
+    );
   });
 
   it('refuses synthetic rows before anything is sent', async () => {

@@ -39,31 +39,6 @@ const cases: ReadonlyArray<[string, string, string]> = [
   ],
   ['confirmedWas', COPY.confirmedWas('1', '£1'), COPY.confirmedWas('2', '£1')],
   ['confirmNew', COPY.confirmNew(1, 5, '£1'), COPY.confirmNew(2, 5, '£1')],
-  ['calendar staleLine', COPY.calendarView.staleLine(0, 1, 'x'), COPY.calendarView.staleLine(0, 2, 'x')],
-  [
-    'scaleQuintile',
-    COPY.calendarView.legend.scaleQuintile('b', 1),
-    COPY.calendarView.legend.scaleQuintile('b', 5),
-  ],
-  [
-    'scaleFlatNarrow',
-    COPY.calendarView.legend.scaleFlatNarrow('b', 1, '£1', '£2'),
-    COPY.calendarView.legend.scaleFlatNarrow('b', 3, '£1', '£2'),
-  ],
-  ['dayCell', COPY.calendarView.panel.dayCell(1, 'x'), COPY.calendarView.panel.dayCell(14, 'x')],
-  [
-    'cellOption',
-    COPY.calendarView.panel.cellOption('A', 'B', 1, 'x'),
-    COPY.calendarView.panel.cellOption('A', 'B', 14, 'x'),
-  ],
-  ['nightsLabel', COPY.durationView.nightsLabel(1), COPY.durationView.nightsLabel(14)],
-  ['nightsLink', COPY.durationView.nightsLink(1), COPY.durationView.nightsLink(14)],
-  [
-    'partlyItinerarySearchedNoPrice',
-    COPY.durationView.partlyItinerarySearchedNoPrice(0, 1),
-    COPY.durationView.partlyItinerarySearchedNoPrice(1, 3),
-  ],
-  ['duration staleLine', COPY.durationView.staleLine(0, 1), COPY.durationView.staleLine(0, 2)],
   ['coloursRepeat', COPY.historyView.coloursRepeat(2, 1), COPY.historyView.coloursRepeat(3, 2)],
 ];
 
@@ -112,20 +87,7 @@ describe('user-facing counts agree with their noun', () => {
       COPY.requestRowTiles(2, '5', 3, 2, '£1'),
       '2 of 5 planned tiles (3 calls) · 2 cache hits · ledger cost £1, from configured rates',
     ],
-    [
-      'nightsLabel',
-      COPY.durationView.nightsLabel(1),
-      '1 night',
-      COPY.durationView.nightsLabel(14),
-      '14 nights',
-    ],
-    [
-      'duration staleLine',
-      COPY.durationView.staleLine(0, 1),
-      '0 of 1 shown price is stale (older than one refresh cycle by fetch age plus any known vendor age)',
-      COPY.durationView.staleLine(1, 2),
-      '1 of 2 shown prices are stale (older than one refresh cycle by fetch age plus any known vendor age)',
-    ],
+
     [
       'estimateTotal',
       COPY.estimateTotal(1, 5, '£1', '1m'),

@@ -154,54 +154,66 @@ const SAMPLES: Record<string, unknown[]> = {
   budgetScope: ['provider-month:searchapi', 616, '10000'],
   needsConfirmation: [{ calls: 154, cap: 2000, estimate: '£2', confirmed: '120 calls, £1' }],
   confirmNew: [154, 2000, '£2'],
-  // WP10 (Task 10.3)
-  'calendarView.discoveryMarker': [{ priced: 1, empty: 2, no_data: 3, error: 4, skipped: 5, not_run: 6 }, 21],
-  'calendarView.verificationMarker': [1, 10, 2],
-  'calendarView.markerSource': [
-    'Aviasales cache',
-    '1 priced · 0 no fares · 0 no cached data · 0 error · 0 skipped · 0 not searched of 1',
-  ],
-  'calendarView.partlyVerified': [2],
-  'calendarView.bandAria': [0],
-  'calendarView.providerNotSearched': ['Google date grid via SearchApi'],
-  'calendarView.glyphCount': [47, 'not searched'],
-  'calendarView.unconfirmedCellsFor': [1, 'JFK'],
-  'calendarView.stay': [14, '28 Mar'],
-  'calendarView.phoneNights': [12],
-  'calendarView.bucketBreakdown': [{ priced: 3, empty: 0, no_data: 9, error: 0, skipped: 0, not_run: 0 }],
-  'calendarView.staleLine': [3, 40, '8d'],
-  'calendarView.unconfirmedCells': [2],
-  'calendarView.legend.scaleQuintile': ['itinerary-search basis', 12],
-  'calendarView.legend.scaleFlatFew': ['calendar basis', 4, 10],
-  'calendarView.legend.scaleFlatNarrow': ['calendar basis', 20, '£400', '£430'],
-  'calendarView.legend.scaleEmpty': ['calendar basis'],
-  'calendarView.legend.band': [0, '£400', '£450', 2],
-  'calendarView.legend.flatSwatch': [4],
-  'calendarView.legend.hatched': ['verified', 1],
-  'calendarView.panel.title': ['Sun 14 Mar 2027'],
-  'calendarView.panel.dayCell': [14, 'Sun 28 Mar'],
-  'calendarView.panel.cellOption': ['LHR', 'JFK', 14, 'Sun 28 Mar'],
-  'calendarView.panel.run': ['14 Oct 2026'],
-  'calendarView.panel.offersDropped': [3],
-  'calendarView.panel.reasonRaw': ['something-new'],
-  'calendarView.panel.reusedFrom': ['run 7 Oct 2026'],
-  'calendarView.panel.calendarPriceRun': ['run 7 Oct 2026'],
-  'calendarView.panel.observation': ['Example Air', 'verified'],
-  'calendarView.panel.verifyCost': [6, 1840],
-  'calendarView.panel.verifyCapRefused': ['budget cap: provider-month:searchapi 10000 of 10000 calls'],
-  'calendarView.panel.verifyZeroRunCap': [6],
-  'calendarView.panel.verifyConfirmRefused': ['the estimate is above the confirmation threshold'],
-  'durationView.tickNotSearched': [13],
-  'durationView.verifiedSeries': [3],
-  'durationView.calendarSeries': ['Aviasales cache', 9],
-  'durationView.calendarShort': ['Aviasales cache'],
-  'durationView.nightsLabel': [14],
-  'durationView.nightsLink': [14],
-  'durationView.tooltipDetail': [5, 'Sun 14 Mar'],
-  'durationView.seriesLine': ['calendar, Aviasales cache', 'not searched'],
-  'durationView.partlyItinerarySearchedNoPrice': [1, 4],
-  'durationView.cellDetail': [5, 'Sun 14 Mar'],
-  'durationView.staleLine': [1, 4],
+  // WP19 (Task 19.4): the Dates view
+  'datesView.runFinished': ['2h ago'],
+  'datesView.runInProgress': ['40 min ago'],
+  'datesView.runPaused': ['3h ago', 'searchapi provider-month cap reached'],
+  'datesView.runEnded': ['cancelled', '2h ago'],
+  'datesView.runNotStarted': ['pending'],
+  'datesView.minutesAgo': [40],
+  'datesView.scopeAirports': [2, 4],
+  'datesView.scopeNights': [10, 14],
+  'datesView.journeyBounds': [60, 6000],
+  'datesView.showMore': [10],
+  'datesView.showing': [10, 42],
+  'datesView.bestPerWeek': [26],
+  'datesView.openDates': ['14 Mar 2027', '28 Mar 2027'],
+  'datesView.arrives': ['06:40', 1],
+  'datesView.arrivesOn': ['Monday 15 March 2027'],
+  'datesView.airports': ['LHR', 'JFK'],
+  'datesView.cachedFromPair': ['LGW', 'EWR'],
+  'datesView.howFar.itinerarySearched': [1, 4],
+  'datesView.howFar.notReached': [2],
+  'datesView.howFar.selectedOther': [1],
+  'datesView.howFar.onDemand': [1],
+  'datesView.howFar.partiallyVerified': [2],
+  'datesView.howFar.unconfirmed': [1],
+  'datesView.howFar.bucket': [3, 'no cached data'],
+  'datesView.howFar.notSearched': [1, 2],
+  'datesView.howFar.noneWithin': ['10h 00m'],
+  'datesView.updateBoard': [3],
+  'datesView.pendingChanges': [3],
+  'datesView.onDemandOnly': [2],
+  'datesView.notSearchedCount': [368],
+  'datesView.tooManyCells': [100000, 50000],
+  // WP19 (Task 19.5): the overview, its legend and readout
+  'datesView.overview.stay': [10, 13],
+  'datesView.overview.closeBand': ['10–13 nights', 'Mar 2027'],
+  'datesView.overview.cellName': ['14 Mar 2027–24 Mar 2027 (10n)', '10 nights', 'rank 3'],
+  'datesView.overview.rank': [3],
+  'datesView.overview.bandDates': ['14 Mar 2027'],
+  'datesView.overview.buckets': ['3 no cached data, 1 not searched'],
+  'datesView.legend.scaleQuintile': [42],
+  'datesView.legend.scaleFlatFew': [4, 10],
+  'datesView.legend.scaleFlatNarrow': [20, '£400', '£430'],
+  'datesView.legend.band': [0, '£300', '£320', 9],
+  'datesView.legend.flat': [4],
+  'datesView.legend.markCount': ['no cached data', 12],
+  bucketBreakdown: [{ priced: 3, empty: 0, no_data: 9, error: 0, skipped: 0, not_run: 0 }],
+  'panel.run': ['14 Oct 2026'],
+  'panel.heading': ['LHR', 'JFK'],
+  'detailView.title': ['14 Mar 2027', '28 Mar 2027', 14],
+  'landing.rowNotRead': [1000],
+  'detailView.boardPriceRest': ['LHR → JFK', 'itinerary-search basis'],
+  'panel.offersDropped': [3],
+  'panel.reasonRaw': ['something-new'],
+  'panel.reusedFrom': ['run 7 Oct 2026'],
+  'panel.calendarPriceRun': ['run 7 Oct 2026'],
+  'panel.observation': ['Example Air', 'verified'],
+  'panel.verifyCost': [6, 1840],
+  'panel.verifyCapRefused': ['budget cap: provider-month:searchapi 10000 of 10000 calls'],
+  'panel.verifyZeroRunCap': [6],
+  'panel.verifyConfirmRefused': ['the estimate is above the confirmation threshold'],
   'historyView.calendarSeries': ['Aviasales cache', 'economy'],
   'historyView.routeSeries': ['Google', '5–15 Nov', 'economy'],
   'historyView.coloursRepeat': [8, 6],
@@ -283,17 +295,11 @@ describe('COPY catalogue (spec §11 banned words)', () => {
       'classLabel.partially-verified',
       'calendarGapLead',
       'headlineRest',
-      // WP10: each names the class or sits beside a class-verified value (spec §11 View B, View C wording)
-      'calendarView.partlyVerified',
-      'calendarView.legend.hatched',
-      'calendarView.panel.dayVerified',
-      'calendarView.panel.dayPartlyVerified',
-      'calendarView.panel.observation',
-      'durationView.verifiedSeries',
-      'durationView.verifiedShort',
-      'durationView.chartNote',
-      'durationView.itinerarySearchedNoPrice',
-      'durationView.partlyItinerarySearchedNoPrice',
+      // WP19: "verified" beside a class-verified figure; the class label "partially verified" with its count
+      'datesView.howFar.verified',
+      'datesView.howFar.partiallyVerified',
+      // WP10: names the class beside a class-verified value (the panel's offer line)
+      'panel.observation',
     ]);
     // why: the exemption list must not outlive its strings: a renamed or removed key would otherwise leave a stale
     // entry, and a new string later added at that path would inherit the exemption unreviewed.
@@ -364,25 +370,32 @@ describe('COPY catalogue (spec §11 banned words)', () => {
 });
 
 describe('glyph set (review ui I2)', () => {
-  it('every symbol in the legend means one thing: no glyph appears twice', () => {
-    const all = [
-      ...Object.values(COPY.calendarView.glyphSymbol),
-      ...Object.values(COPY.calendarView.phoneMark),
-      ...Object.values(COPY.priceMarkGlyph),
-    ];
-    expect(new Set(all).size).toBe(all.length);
+  // why: WP19 retired the Calendar's glyphs and phone legend; the marks now drawn are the Dates overview's and
+  // PriceCell's, and a glyph both draw must mean the same thing in each
+  it('every symbol means one thing: a glyph in both the Dates marks and the price marks names the same mark', () => {
+    const dates = COPY.datesView.marks.glyph;
+    const price = COPY.priceMarkGlyph;
+    expect(new Set(Object.values(dates)).size).toBe(Object.keys(dates).length);
+    expect(new Set(Object.values(price)).size).toBe(Object.keys(price).length);
+    for (const [mark, glyph] of Object.entries(price)) {
+      const shared = Object.entries(dates).filter(([, g]) => g === glyph);
+      for (const [other] of shared) expect(other, glyph).toBe(mark);
+    }
   });
-  it('the phone provider-marks line names every provider mark with its full name, and the fixture as synthetic', () => {
-    const line = COPY.calendarView.legend.phoneProviders;
+  it('the provider marks are four distinct short names', () => {
+    expect(new Set(Object.values(COPY.providerMark)).size).toBe(4);
+  });
+  // why: the phone face prints a provider mark and one-glyph marks (spec §11 provenance); the Dates view's phone key
+  // names each in full, as the Calendar's phone legend did before revision 48 retired it
+  it('the Dates phone key names every provider mark with its full name, and the fixture as synthetic', () => {
+    const line = COPY.datesView.phoneKey.providers;
     for (const id of ['travelpayouts', 'searchapi', 'camoufox', 'fixture'] as const) {
       expect(line).toContain(`${COPY.providerMark[id]} `);
       expect(line).toContain(COPY.provider[id]);
     }
     expect(line).toContain(SOURCE_LABELS.synthetic);
-    expect(new Set(Object.values(COPY.providerMark)).size).toBe(4);
   });
-  it('the phone legend line names every mark glyph', () => {
-    for (const g of [...Object.values(COPY.priceMarkGlyph), ...Object.values(COPY.calendarView.phoneMark)])
-      expect(COPY.calendarView.legend.phone).toContain(g);
+  it('the Dates phone key names every price-mark glyph a face can show', () => {
+    for (const g of Object.values(COPY.priceMarkGlyph)) expect(COPY.datesView.phoneKey.glyphs).toContain(g);
   });
 });

@@ -15,6 +15,7 @@ import {
   snapshotOf,
   withNights,
 } from './helpers/factories.js';
+import { CELLS, historySeed, hoursAfterT0, statementsOf, verifiedCell } from './helpers/history.js';
 
 const offerOf = (hash = 'a'.repeat(64), seller = 'British Airways') =>
   ({ itineraryHash: hash, providerId: 'searchapi', seller, cabin: 'economy' }) as const;
@@ -725,5 +726,85 @@ describe('ItinerariesRepo reads', () => {
         'economy',
       ),
     ).toBeNull();
+  });
+});
+
+// WP19 Task 19.2: the grouped reads, a fixed number of statements, equal to the per-cell and per-hash reads they replace.
+describe('ItinerariesRepo grouped reads (WP19 Task 19.2, spec §10 bounds)', () => {
+  it('latestVerificationOutcomes equals latestVerificationOutcomeForCell for every cell, a provider tie included, in one statement', () => {
+    const seed = historySeed();
+    const [c3, c5] = [CELLS[3], CELLS[5]];
+    const run = seed.runs[4];
+    if (c3 === undefined || c5 === undefined || run === undefined) throw new Error('seed');
+    // why: two verification providers' outcomes on one cell, fetched in the same second of one execution
+    seed.cells.seedVerification(
+      run,
+      [c3, c5].map((c) => ({ cell: c, reason: 'top_n' as const })),
+      CELLS,
+      ['fixture', 'searchapi'],
+    );
+    const t = hoursAfterT0(230);
+    verifiedCell(seed.cells, run, c3, ['d'.repeat(64)], t, 'searchapi');
+    verifiedCell(seed.cells, run, c3, ['e'.repeat(64)], t, 'fixture');
+    seed.cells.setOutcome(run, c5, 'verification', 'searchapi', { status: 'error', reason: 'upstream' });
+    seed.cells.setOutcome(run, c5, 'verification', 'fixture', { status: 'error', reason: 'upstream' });
+    const { result, statements } = statementsOf(seed.db, () =>
+      seed.itineraries.latestVerificationOutcomes(seed.definition.id, 'economy', null),
+    );
+    expect(statements).toBe(1);
+    for (const c of CELLS) {
+      const one = seed.itineraries.latestVerificationOutcomeForCell(seed.definition.id, c, 'economy');
+      expect(result.get(cellKeyString(c)) ?? null).toEqual(one);
+    }
+    // the tie goes to the first provider id in both reads
+    expect(result.get(cellKeyString(c3))).toMatchObject({ executionId: run, providerId: 'fixture' });
+    // a cell whose only verification outcomes are errors is absent (the child's error cell, and c5)
+    expect(result.has(cellKeyString(c5))).toBe(false);
+    expect(result.has(cellKeyString(CELLS[1] ?? c5))).toBe(false);
+    expect(result.has(cellKeyString(CELLS[0] ?? c5))).toBe(true);
+    expect(seed.itineraries.latestVerificationOutcomes(seed.definition.id, 'business', null).size).toBe(0);
+    const narrow = seed.itineraries.latestVerificationOutcomes(seed.definition.id, 'economy', {
+      origins: [c3.origin],
+      destinations: [c3.destination],
+      departureFrom: c3.departureDate,
+      departureTo: c3.departureDate,
+      minNights: 14,
+      maxNights: 14,
+    });
+    expect([...narrow.keys()]).toEqual([cellKeyString(c3)]);
+  });
+
+  it('observationsForDefinition and writtenBy hydrate itineraries and segments in two statements, for 1 or 500 itineraries, as get(hash) does', () => {
+    const counts: number[] = [];
+    for (const n of [1, 500]) {
+      const seed = historySeed();
+      const run = seed.runs[4];
+      const c = CELLS[3];
+      if (run === undefined || c === undefined) throw new Error('seed');
+      seed.cells.seedVerification(run, [{ cell: c, reason: 'top_n' }], CELLS, ['searchapi']);
+      const hashes = Array.from({ length: n }, (_, i) => i.toString(16).padStart(64, 'f'));
+      verifiedCell(seed.cells, run, c, hashes, hoursAfterT0(230));
+      const read = () =>
+        seed.itineraries.observationsForDefinition(seed.definition.id, {
+          executionIds: 'all',
+          space: null,
+          cabin: 'economy',
+          includeChildren: true,
+        });
+      const { result, statements } = statementsOf(seed.db, read);
+      counts.push(statements);
+      // the reference: each observation's itinerary as get(hash) builds it
+      expect(result).toHaveLength(n + 2); // two children's observations besides the run's n
+      for (const o of result) {
+        const full = seed.itineraries.get(o.itinerary.hash);
+        if (full === null) throw new Error('missing');
+        const { firstSeenAt: _f, ...it } = full;
+        expect(o.itinerary).toEqual(it);
+      }
+      const written = statementsOf(seed.db, () => seed.itineraries.writtenBy(run));
+      expect(written.result).toHaveLength(n);
+      expect(written.statements).toBe(3);
+    }
+    expect(counts).toEqual([3, 3]);
   });
 });

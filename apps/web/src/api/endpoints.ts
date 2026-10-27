@@ -1,11 +1,13 @@
-import { type Cabin, type CellKey, apiContract as c, type Iata } from '@gmt/core';
+import { type Cabin, type CellKey, apiContract as c } from '@gmt/core';
 import { call } from './client.js';
 import type {
   AlertRuleBody,
   Basis,
   CoverageCheckBody,
+  DatePairsScope,
   DefinitionBody,
   DefinitionUpdateBody,
+  ResultsScope,
   StartExecutionBody,
   VerifyCellBody,
 } from './types.js';
@@ -38,26 +40,29 @@ export const api = {
     call(c.executionResponseSchema, 'POST', '/api/executions/:id/resume', { params: { id } }),
   verifyCell: (body: VerifyCellBody) =>
     call(c.startExecutionResponseSchema, 'POST', '/api/cells/verify', { body }),
-  results: (id: string, basis: Basis | null) =>
+  // WP19 (spec §10): with a scope, the date pair detail's read (one date pair, the Dates airport filter and journey
+  // limit); without one, the whole space (the status bar's run, the row lookup of an old alert link).
+  results: (id: string, basis: Basis | null, scope?: ResultsScope) =>
     call(c.resultsResponseSchema, 'GET', '/api/definitions/:id/results', {
       params: { id },
-      query: { basis: basis ?? undefined },
+      query: { basis: basis ?? undefined, ...scope },
+    }),
+  // WP19 (spec §10): every date pair of the current space with its figure over the airport pairs in scope; the body is
+  // read only through core's decodeDatePairs (useDatePairs), never column by column.
+  datePairs: (id: string, scope: DatePairsScope) =>
+    call(c.datePairsResponseSchema, 'GET', '/api/definitions/:id/date-pairs', {
+      params: { id },
+      query: {
+        origins: scope.origins,
+        destinations: scope.destinations,
+        maxJourneyMinutes: scope.maxJourneyMinutes,
+      },
     }),
   coverage: (id: string) =>
     call(c.coverageResponseSchema, 'GET', '/api/definitions/:id/coverage', { params: { id } }),
   calendarGap: (id: string) =>
     call(c.calendarGapResponseSchema, 'GET', '/api/definitions/:id/calendar-gap', { params: { id } }),
   airports: (q: string) => call(c.airportsResponseSchema, 'GET', '/api/airports', { query: { q } }),
-  // WP10 (spec §10; plan decision 53): both bases per day, for one destination when given, else every destination.
-  calendar: (id: string, destination: Iata | null) =>
-    call(c.calendarResponseSchema, 'GET', '/api/definitions/:id/calendar', {
-      params: { id },
-      query: { destination: destination ?? undefined },
-    }),
-  durationAnalysis: (id: string) =>
-    call(c.durationAnalysisResponseSchema, 'GET', '/api/definitions/:id/duration-analysis', {
-      params: { id },
-    }),
   cellDetail: (id: string, k: CellKey) =>
     call(
       c.cellDetailResponseSchema,

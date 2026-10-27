@@ -3,11 +3,6 @@ import { describe, expect, it } from 'vitest';
 import { COPY } from '../src/copy.js';
 
 describe('camoufox copy (prov-008, prov-015, ruling 11)', () => {
-  it('the phone legend names CF Camoufox and its source label', () => {
-    expect(COPY.calendarView.legend.phoneProviders).toContain(
-      ', CF Camoufox (Google Flights prices via Camoufox)',
-    );
-  });
   it('the Providers note says signed-out profile, own IP address and 1,500', () => {
     for (const w of [
       'signed-out profile',
@@ -47,9 +42,9 @@ describe('camoufox copy (prov-008, prov-015, ruling 11)', () => {
     );
   });
   it('the outcome reasons word blocked and provider_unavailable', () => {
-    expect(COPY.calendarView.panel.reasons.blocked).toBe(
+    expect(COPY.panel.reasons.blocked).toBe(
       'stopped: Google showed a page this app does not read, or a check (the detail says which)',
     );
-    expect(COPY.calendarView.panel.reasons.provider_unavailable).toBe('browser worker not reachable');
+    expect(COPY.panel.reasons.provider_unavailable).toBe('browser worker not reachable');
   });
 });

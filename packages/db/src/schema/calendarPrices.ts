@@ -58,6 +58,20 @@ export const calendarPrices = sqliteTable(
     ),
     index('calendar_prices_route_fetched_idx').on(t.origin, t.destination, t.fetchedAt),
     index('calendar_prices_execution_idx').on(t.executionId),
+    // why: WP19 (spec §10 bounds): the latest price per (provider, cell) is a grouped scan of this covering index in its
+    // own order, so a history 20 runs deep is read without sorting every row it holds
+    index('calendar_prices_latest_idx').on(
+      t.providerId,
+      t.origin,
+      t.destination,
+      t.departureDate,
+      t.returnDate,
+      t.fetchedAt,
+      t.id,
+      t.executionId,
+      t.cabin,
+      t.reusedFromExecutionId,
+    ),
     ...priceTableChecks('calendar_prices'),
     check('calendar_prices_provider_ck', isOneOf('provider_id', PROVIDER_IDS)),
     check('calendar_prices_provider_kind_ck', isProviderKind()),

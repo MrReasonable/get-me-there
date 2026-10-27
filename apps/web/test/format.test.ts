@@ -4,6 +4,7 @@ import {
   formatIsoDate,
   formatIsoDateLong,
   formatIsoDateShort,
+  formatIsoDateWords,
   formatLocalDateTime,
   formatMicroGbp,
   formatMinutes,
@@ -73,5 +74,13 @@ describe('money in pounds, held as integer pence', () => {
   it('micro-GBP rounds up, so a cost is never understated, and refuses non-integers', () => {
     expect(formatMicroGbp(12_345)).toBe('£0.02');
     expect(() => formatMicroGbp(1.5)).toThrow(RangeError);
+  });
+});
+
+describe('formatIsoDateWords (WP19: an arrival date for assistive technology)', () => {
+  it('names the weekday and the month in words, from the string', () => {
+    expect(formatIsoDateWords(asIsoDate('2027-03-15'))).toBe('Monday 15 March 2027');
+    expect(formatIsoDateWords(asIsoDate('2028-02-29'))).toBe('Tuesday 29 February 2028');
+    expect(formatIsoDateWords(asIsoDate('2027-12-05'))).toBe('Sunday 5 December 2027');
   });
 });

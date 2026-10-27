@@ -25,6 +25,7 @@ import {
   verdictClassSchema,
   verdictsSchema,
 } from './common.js';
+import { datePairFigureSchema } from './datePairs.js';
 
 const count = z.number().int().min(0);
 /** A vendor search link (spec §5.2): re-validated on the wire like a booking link (plan decision 54). */
@@ -100,6 +101,17 @@ export const resultsQuerySchema = z.object({
   basis: resultBasisSchema.optional(),
   executionId: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(1000).optional(),
+  /**
+   * Spec §10 scope parameters (WP19), the wire form as the date-pairs query's: strings the api parses and answers 422
+   * for itself (`date_pair_incomplete`, `invalid_date_pair`, `date_pair_outside_space`, `unknown_airport`,
+   * `invalid_journey_limit`), so only length bounds live here. The dates are `YYYY-MM-DD`; the bound leaves room for a
+   * malformed one to reach the api's 422 rather than the route wrapper's 400.
+   */
+  departureDate: z.string().max(40).optional(),
+  returnDate: z.string().max(40).optional(),
+  origins: z.string().max(200).optional(),
+  destinations: z.string().max(200).optional(),
+  maxJourneyMinutes: z.string().max(10).optional(),
 });
 export const resultsResponseSchema = z.object({
   rows: z.array(resultRowSchema),
@@ -112,72 +124,22 @@ export const resultsResponseSchema = z.object({
   excludedByCurrentSpace: count,
   verificationProviderConfigured: z.boolean(),
   cheapest: resultRowSchema.nullable(),
+  /**
+   * Spec §10 (WP19): on a date-pair-scoped read only (else null), the figure the Dates board shows for that date pair,
+   * from the same function as the board's (`pickFigure` over the scoped rows, the journey limit applied), so the
+   * detail can show it beside its own cheapest row and say why they differ (revision 50).
+   */
+  datePairFigure: datePairFigureSchema.nullable(),
 });
 const pricedCell = priceCellSchema.extend({ cell: cellSchema });
 /**
- * Plan decision 54 on the views' figures. A verified-basis minimum the latest search no longer returned carries
- * `notSeenInLatest` (the same shape as a results row's); a calendar-basis price whose cell a newer parent execution
- * found empty or no_data is `superseded` (WP8 ranks such prices after current ones).
+ * Plan decision 54 on the calendar gap's reference price: a verified-basis minimum the latest search no longer
+ * returned carries `notSeenInLatest` (the same shape as a results row's). (The calendar-basis figure with its
+ * `superseded` mark went with the calendar and duration-analysis routes, WP19; the Dates view's figures are
+ * `datePairFigureSchema`'s.)
  */
 const notSeenInLatest = z.object({ ageHours: ageHoursSchema }).nullable();
 const verifiedFigure = pricedCell.extend({ itineraryHash: z.string(), notSeenInLatest });
-const calendarFigure = pricedCell.extend({ superseded: z.boolean() });
-export const calendarDaySchema = z.object({
-  /** departure date */
-  date: isoDateSchema,
-  discovery: z.array(z.object({ providerId: providerIdSchema, buckets: bucketsSchema, total: count })),
-  /**
-   * `unconfirmedCells`: cells of the day whose itinerary search priced but confirmed no price (reason part
-   * `price-unconfirmed`; plan decisions 45, 48, 51), for the destination the request names, else every destination.
-   */
-  verification: z.object({
-    selected: count,
-    itinerarySearched: count,
-    onDemand: count,
-    unconfirmedCells: count,
-  }),
-  cheapestVerified: verifiedFigure.nullable(),
-  cheapestPartiallyVerified: verifiedFigure.extend({ count }).nullable(),
-  cheapestCalendar: calendarFigure.nullable(),
-  // why: plan decision 58: no per-destination figures; `?destination=` (decision 53) scopes the whole day instead.
-});
-/**
- * Plan decision 53: the calendar route's optional destination. With it, every day's buckets, selection counts, minimums
- * and `unconfirmedCells` cover that destination's cells only, so a filtered calendar is as honest as the unfiltered one.
- */
-export const calendarQuerySchema = z.object({ destination: iataSchema.optional() });
-export const calendarResponseSchema = z.object({
-  days: z.array(calendarDaySchema),
-  executions: z.array(executionSummarySchema),
-  staleAfterHours: count,
-  calendarStaleAfterHours: z.partialRecord(providerIdSchema, count),
-});
-/**
- * Spec §11 View C per nights value. Each minimum carries the cell it came from (plan decision 38), so the view can name
- * its departure date and destination. `searched` counts per series: `total` is the cells of this nights value in the
- * series' scope (verification: the selected cells; discovery: every cell) and `searched` those whose outcome is
- * `priced`, `empty` or `no_data` (verification: any verification provider's outcome; discovery: that provider's), so
- * "not searched" and partial coverage stay distinct per series. A discovery series also carries its six buckets, so the
- * view words a gap by bucket ("12 no cached data"), never with the "searched" umbrella View D alone shows (ruling 4).
- */
-const searchedCount = z.object({ searched: count, total: count });
-export const durationAnalysisResponseSchema = z.object({
-  byNights: z.array(
-    z.object({
-      nights: count,
-      /** n = cells of this nights value with a class-verified price */
-      minVerified: pricedCell.extend({ n: count, notSeenInLatest }).nullable(),
-      /** n = cells of this nights value the provider priced */
-      minCalendar: z.array(z.object({ providerId: providerIdSchema, price: calendarFigure, n: count })),
-      searched: z.object({
-        verification: searchedCount,
-        /** `buckets` (N1, ruling 4): the six buckets of the provider's cells at this nights value, which View C names. */
-        discovery: z.array(searchedCount.extend({ providerId: providerIdSchema, buckets: bucketsSchema })),
-      }),
-    }),
-  ),
-  executions: z.array(executionSummarySchema),
-});
 export const coverageResponseSchema = z.object({
   executionId: z.string(),
   summary: coverageSummarySchema,
@@ -403,4 +365,3 @@ export const routeHistoryResponseSchema = z.object({
 export type ResultRow = z.infer<typeof resultRowSchema>;
 export type HistoryPoint = z.infer<typeof historyPointSchema>;
 export type RouteSeriesPoint = z.infer<typeof routeSeriesPointSchema>;
-export type CalendarDay = z.infer<typeof calendarDaySchema>;

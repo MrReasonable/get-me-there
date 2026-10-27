@@ -17,12 +17,15 @@ const LAST = '0007_catch_up';
 function upTo0002(): string {
   const dir = join(tmpDir(), 'drizzle');
   cpSync(MIGRATIONS_DIR, dir, { recursive: true });
-  for (const tag of [TAG, LATER, LATEST, NEWEST, LAST, '0008_wp18_error_kind'])
+  for (const tag of [TAG, LATER, LATEST, NEWEST, LAST, '0008_wp18_error_kind', '0009_wp19_latest_price_idx'])
     rmSync(join(dir, `${tag}.sql`));
   const journalPath = join(dir, 'meta', '_journal.json');
   const journal: { entries: Array<{ tag: string }> } = JSON.parse(readFileSync(journalPath, 'utf8'));
   journal.entries = journal.entries.filter(
-    (e) => ![TAG, LATER, LATEST, NEWEST, LAST, '0008_wp18_error_kind'].includes(e.tag),
+    (e) =>
+      ![TAG, LATER, LATEST, NEWEST, LAST, '0008_wp18_error_kind', '0009_wp19_latest_price_idx'].includes(
+        e.tag,
+      ),
   );
   writeFileSync(journalPath, JSON.stringify(journal));
   return dir;
@@ -44,6 +47,7 @@ describe('migration 0003: route price history keyed by trip (ruling 6, spec §7 
       NEWEST,
       LAST,
       '0008_wp18_error_kind',
+      '0009_wp19_latest_price_idx',
     ]);
     applyMigrations(db, MIGRATIONS_DIR);
     const rows = db.raw

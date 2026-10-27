@@ -1,8 +1,9 @@
-import type { apiContract } from '@gmt/core';
+import { type apiContract, DETAIL_LINK_PARAMS } from '@gmt/core';
 import { useEffect, useRef, useState } from 'react';
 import { ApiError } from '../api/client.js';
 import { useSendTestEmail } from '../api/statusQuery.js';
 import { COPY } from '../copy.js';
+import { DATES_COVERAGE } from '../state/resultsState.js';
 import { hrefWith, navigateTo } from '../state/urlState.js';
 
 export type StatusCheck = apiContract.StatusCheck;
@@ -13,10 +14,13 @@ export function cardName(c: StatusCheck): string | null {
   return c.label;
 }
 
-/** The Coverage view of a data card's search, by the definition id its check id carries (`data-<id>`). */
-function coverageHref(c: StatusCheck): string | null {
+/**
+ * A data card's search opened on the Dates view with its coverage section open (spec §11 Status; WP19 Task 19.7), by
+ * the definition id its check id carries (`data-<id>`); null for any other card.
+ */
+function coveragePatch(c: StatusCheck): Record<string, string | null> | null {
   return c.area === 'data' && c.id.startsWith('data-')
-    ? hrefWith({ view: 'coverage', def: c.id.slice(5) })
+    ? { [DETAIL_LINK_PARAMS.view]: 'dates', [DETAIL_LINK_PARAMS.def]: c.id.slice(5), ...DATES_COVERAGE }
     : null;
 }
 
@@ -113,6 +117,7 @@ function SendTest() {
  */
 export function StatusCard({ check }: { check: StatusCheck }) {
   const label = COPY.statusView.cardLabel(COPY.statusView.areaName[check.area], cardName(check));
+  const coverage = coveragePatch(check);
   const border =
     check.state === 'fail'
       ? 'border-red-700'
@@ -144,11 +149,11 @@ export function StatusCard({ check }: { check: StatusCheck }) {
           )}
         </div>
       ) : null}
-      {coverageHref(check) !== null ? (
+      {coverage !== null ? (
         <p>
           <a
-            href={coverageHref(check) ?? undefined}
-            onClick={navigateTo({ view: 'coverage', def: check.id.slice(5) })}
+            href={hrefWith(coverage)}
+            onClick={navigateTo(coverage)}
             className="inline-flex min-h-11 items-center underline"
           >
             {COPY.statusView.coverageLink}

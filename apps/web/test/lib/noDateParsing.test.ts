@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 // why: under jsdom `new URL(…, import.meta.url)` is not a file: URL that node:url accepts; import.meta.dirname is a path.
 const SRC = join(import.meta.dirname, '..', '..', 'src');
+const E2E = join(import.meta.dirname, '..', '..', 'e2e');
 // why: a Date object renders in the browser's zone: built from 'YYYY-MM-DD' it is UTC midnight, and its local getters
 // and toLocale*String show the previous day west of Greenwich. So no file but now.tsx (WP9: the current instant) builds a
 // Date. Date.parse, Date.UTC and Date.now return epoch milliseconds, which carry no zone, so they are not hazards; the
@@ -123,6 +124,14 @@ describe('no Date object outside WP9’s clock (review focus 3)', () => {
     const hits = files
       .filter((f) => !ALLOWLIST.has(relative(SRC, f).split(sep).join('/')))
       .flatMap((f) => scan(readFileSync(f, 'utf8')).map((h) => `${relative(SRC, f)}:${h}`));
+    expect(hits).toEqual([]);
+  });
+  // why: the e2e fixtures build the bodies the app reads, so their days follow the same rule: core's epoch-day helpers
+  // (`addDays`, `asIsoDate`), and an ISO instant handed to Playwright as a string (CodeRabbit on PR #32)
+  it('finds no Date object in apps/web/e2e', () => {
+    const files = walk(E2E);
+    expect(files.length).toBeGreaterThan(2); // why: a wrong E2E path must not make this vacuous
+    const hits = files.flatMap((f) => scan(readFileSync(f, 'utf8')).map((h) => `${relative(E2E, f)}:${h}`));
     expect(hits).toEqual([]);
   });
   it('the allowlist is exactly WP9’s clock, and it exists', () => {

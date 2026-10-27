@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { PriceCell } from '../../src/components/PriceCell.js';
-import { BAND_CLASSES, BAND_COLOURS, type Band } from '../../src/views/Calendar/scale.js';
+import { RING_CLASS } from '../../src/views/Dates/OverviewMonth.js';
+import { BAND_CLASSES, BAND_COLOURS, type Band } from '../../src/views/Dates/shade.js';
 import { contrast } from '../contrast.js';
 import { provCalendar, provSearch } from '../fixtures.js';
 import { renderWithProviders } from '../render.js';
@@ -64,5 +65,23 @@ describe.each(bands)('PriceCell inside band %i (review ui C1)', (band) => {
     );
     const badge = [...container.querySelectorAll('span')].find((e) => e.classList.contains('bg-slate-200'));
     expect(badge?.className).toContain('text-slate-900');
+  });
+});
+
+/** A CSS hex colour as #rrggbb (`#000` → `#000000`), the form `contrast` reads. */
+const sixDigit = (hex: string): string =>
+  hex.length === 4 ? `#${[...hex.slice(1)].map((c) => c + c).join('')}` : hex.toLowerCase();
+
+// Spec §11 Rings: the board's shown rows are ringed in the overview by an outline, the non-colour cue, so the ring must
+// stand out from every band's fill (WCAG 1.4.11, 3:1 for a non-text indicator). A one-tone black ring is about 2.2:1 on
+// band 0's #134e4a (CodeRabbit on PR #32), so the ring has two tones: at least one of them clears 3:1 on each band.
+describe('the overview ring on every band (spec §11 Rings)', () => {
+  const tones = [...RING_CLASS.matchAll(/#(?:[0-9a-f]{6}|[0-9a-f]{3})\b/gi)].map((m) => sixDigit(m[0]));
+  it('names its tones as hex colours', () => {
+    expect(tones.length).toBeGreaterThan(0);
+  });
+  it.each(bands)('band %i: a ring tone reaches 3:1 against the fill', (band) => {
+    const { fill } = BAND_COLOURS[band];
+    expect(Math.max(...tones.map((t) => contrast(t, fill)))).toBeGreaterThanOrEqual(3);
   });
 });

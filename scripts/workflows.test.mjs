@@ -104,6 +104,15 @@ describe('GitHub workflows (least privilege)', () => {
 // (an `ENV NAME value` layer, a JSON "token": value) passed; and the compose step's throwaway credentials are said to
 // be CI-only and never a real value. The check's own grep patterns are run over sample history lines here.
 // why: ruling 11: each case spawns grep; 60 s survives a loaded runner.
+describe('WP19: the test job multiplies time limits only (spec revision 50)', () => {
+  it('sets GMT_TIMING_FACTOR: 3 on the job that runs the package suites', () => {
+    const ci = text('ci.yml');
+    const job = ci.split('\n  test:\n')[1]?.split('\n  docker:\n')[0] ?? '';
+    expect(job).toContain('pnpm -r --workspace-concurrency=1 test');
+    expect(job).toMatch(/\n {4}env:\n {6}GMT_TIMING_FACTOR: 3\n/);
+  });
+});
+
 describe('the docker job keeps credentials out of the image history', { timeout: 60_000 }, () => {
   const ci = text('ci.yml');
   const line = ci.split('\n').find((l) => l.includes('docker history --no-trunc get-me-there:local')) ?? '';
@@ -338,7 +347,8 @@ describe('WP16a: the mutation workflow runs every package’s Stryker gate and t
   // why: the follow-ups PR: one job held core, engine, api and the worker in a row and ran past its 120 minutes (run
   // 40173525400; main's weekly run on 2026-10-19); core alone needed about 3.2 hours. Each package now has a job of its
   // own (a shard of one, or several where a cold run would not fit), incremental like the CLI's.
-  const MUTATED = ['packages/core', 'packages/engine', 'apps/api', 'apps/camoufox-worker'];
+  // WP19 (revision 50): the web's pure-logic files, over their pure unit tests, in one shard of their own
+  const MUTATED = ['packages/core', 'packages/engine', 'apps/api', 'apps/camoufox-worker', 'apps/web'];
   it('runs the mutation-glob check in a job of its own, each package in its own shards and the CLI in its own job', () => {
     const jobs = YAML.parse(t()).jobs;
     expect(Object.keys(jobs)).toEqual(['mutation-globs', 'mutate', 'mutation-gate', 'mutate-cli']);
@@ -503,11 +513,34 @@ describe('WP16a: the mutation workflow runs every package’s Stryker gate and t
     expect(cfg.commandRunner.command).toContain('--exclude test/exec/runner.test.ts');
     expect(cfg.commandRunner.command).toContain('--exclude test/exec/system-children.test.ts');
   });
-  it('pnpm mutate runs @gmt/engine, @gmt/api and @gmt/cli mutate beside core and the worker (WP16b, decision 77; WP18)', () => {
+  it('pnpm mutate runs @gmt/engine, @gmt/api, @gmt/web and @gmt/cli mutate beside core and the worker (WP16b, decision 77; WP18; WP19)', () => {
     const pkg = JSON.parse(readFileSync(join(import.meta.dirname, '..', 'package.json'), 'utf8'));
     expect(pkg.scripts.mutate).toBe(
-      'pnpm --filter @gmt/core mutate && pnpm --filter @gmt/engine mutate && pnpm --filter @gmt/api mutate && pnpm --filter @gmt/camoufox-worker mutate && pnpm --filter @gmt/cli mutate',
+      'pnpm --filter @gmt/core mutate && pnpm --filter @gmt/engine mutate && pnpm --filter @gmt/api mutate && pnpm --filter @gmt/camoufox-worker mutate && pnpm --filter @gmt/web mutate && pnpm --filter @gmt/cli mutate',
     );
+  });
+  // why: revision 50 (WP19 Task 19.4): Stryker runs the web's pure tests only, never the jsdom component tests, so a
+  // mutant is judged by the tests that pin its rule and the shard stays short
+  it('the web shard mutates its pure-logic files over the pure .test.ts files only, with StringLiteral left out', () => {
+    const cfg = JSON.parse(readFileSync(join(REPO, 'apps/web', 'stryker.config.json'), 'utf8'));
+    expect(cfg.commandRunner.command).toBe(
+      'pnpm exec vitest run --coverage.enabled=false --bail=1 test/views/dates/logic test/state',
+    );
+    for (const d of ['test/views/dates/logic', 'test/state']) {
+      const files = readdirSync(join(REPO, 'apps/web', d));
+      expect(files.length, d).toBeGreaterThan(0);
+      expect(
+        files.filter((f) => !f.endsWith('.test.ts')),
+        d,
+      ).toEqual([]);
+    }
+    expect(cfg.mutator.excludedMutations).toEqual(['StringLiteral']);
+    const include = YAML.parse(t()).jobs.mutate.strategy.matrix.include.filter((e) => e.dir === 'apps/web');
+    expect(include).toEqual([{ package: 'web', dir: 'apps/web', shard: 1, shards: 1 }]);
+    const gate = YAML.parse(t()).jobs['mutation-gate'].strategy.matrix.include.filter(
+      (e) => e.dir === 'apps/web',
+    );
+    expect(gate).toEqual([{ package: 'web', dir: 'apps/web', shards: 1 }]);
   });
 });
 
@@ -959,5 +992,41 @@ describe('WP17: the camoufox-install job', () => {
     expect(guardProblems(wfText('build'))).toContain(
       'build: host release-assets.githubusercontent.com is off its allowlist',
     );
+  });
+});
+
+// why: WP19 Task 19.9 (spec §9 item 6, §17 revision 50, settled by the orchestrator): CI runs the Playwright suite, the
+// smoke on both projects and the @perf test, at GMT_TIMING_FACTOR 3, whenever a package it drives changes
+describe('WP19: the e2e job', () => {
+  const wf = () => YAML.parse(text('e2e.yml'));
+  const PATHS = [
+    'apps/web/**',
+    'apps/api/**',
+    'packages/core/**',
+    'packages/db/**',
+    'packages/engine/**',
+    '.github/workflows/e2e.yml',
+  ];
+  it('runs on the web, api, core, db and engine packages’ paths and its own, on push and pull request', () => {
+    const on = wf().on;
+    expect(on.push.paths).toEqual(PATHS);
+    expect(on.pull_request.paths).toEqual(PATHS);
+  });
+  it('runs on ubuntu-24.04 with a timeout and the timing factor 3, never retried or allowed to fail', () => {
+    const job = wf().jobs.e2e;
+    expect(job['runs-on']).toBe('ubuntu-24.04');
+    expect(job['timeout-minutes']).toBe(30);
+    expect(job.env).toEqual({ GMT_TIMING_FACTOR: 3 });
+    expect(job['continue-on-error']).toBeUndefined();
+    expect(job.steps.every((s) => s['continue-on-error'] === undefined)).toBe(true);
+  });
+  it('installs Chromium with the web package’s script, then runs its e2e script (both projects, @perf included)', () => {
+    const runs = wf().jobs.e2e.steps.map((s) => String(s.run ?? ''));
+    const install = runs.indexOf('pnpm --filter @gmt/web e2e:install');
+    const e2e = runs.indexOf('pnpm --filter @gmt/web e2e');
+    expect(install).toBeGreaterThan(runs.indexOf('pnpm install --frozen-lockfile'));
+    expect(e2e).toBeGreaterThan(install);
+    // why: no --project, --grep or --grep-invert narrows the run; the projects in playwright.config.ts decide
+    expect(runs.join('\n')).not.toMatch(/--project|--grep/);
   });
 });

@@ -29,8 +29,8 @@ journey duration, stops) in view. Watching a chosen itinerary's price over time 
 alerts) supports that decision; it does not replace it. The app never books: the operator books
 with the airline or an agent.
 
-Success: scheduled searches keep the ranked table, the calendar heatmap and the price-vs-stay
-chart current for the configured search, within budgets the operator sets, and an email arrives
+Success: scheduled searches keep the Dates view's board of best date pairs and its overview of
+months current for the configured search, within budgets the operator sets, and an email arrives
 when an itinerary that meets the operator's constraints drops under their threshold.
 
 ## Positioning
@@ -40,7 +40,8 @@ Honest coverage and provenance, within a hard budget the operator controls.
 - Every price states its source, its age and whether its constraints were checked, visible
   without hovering. The headline is the cheapest round trip **found**, with its basis, verdict
   class, provider and age.
-- Coverage is stated cell by cell (a cell is one departure and return date pair), so "not
+- Coverage is stated cell by cell: a date pair is a departure and a return date; a cell is one
+  airport pair on one date pair; coverage is stated per date pair over its airport pairs, so "not
   searched" or "no cached data" can never be mistaken for "no flights".
 - The operator sets caps on vendor calls, spend and browser pages, per run and per month, sees
   the estimate before saving or running a search, and the app stops at the caps.
@@ -49,11 +50,12 @@ Honest coverage and provenance, within a hard budget the operator controls.
 
 The operator uses it in four situations, all of which matter:
 
-- **At a desk, deliberately:** studying Results, Calendar, Duration, Coverage and History to
-  choose dates, then booking elsewhere.
+- **At a desk, deliberately:** studying the Dates board and overview, a date pair's detail and
+  History to choose dates, then booking elsewhere.
 - **A quick glance between runs:** has anything moved, is anything failing or waiting on them.
   The status bar on every view carries this.
-- **From an alert email:** opening the one itinerary whose price dropped.
+- **From an alert email:** its link opens that fare's date pair, with the itinerary whose price
+  dropped.
 - **On a phone:** checking results and status. This needs an install the phone can reach (a
   server or VPS, behind the app's sign-in); a laptop install bound to localhost is not
   reachable from a phone.
@@ -65,10 +67,12 @@ the operator's own machine, which must be awake for it. Setup and operation happ
 
 ## Capabilities and Constraints
 
-- **Views:** Results (cheapest journeys), Calendar (price heatmap by date pair), Duration (price
-  against stay and journey length), Coverage (what was and was not searched, cell by cell),
-  History (price over time for a route or an itinerary), Definitions (setting up a search, with
-  its estimate and budget fit shown before saving), Providers, Alerts and Status.
+- **Views:** in two tiers. Decide: Dates (a ranked board of the best date pairs, an overview of
+  months with a strip of stay lengths per day, and a coverage section saying what was and was
+  not searched) and History (price over time for a route or an itinerary). Set up: Definitions
+  (setting up a search, with its estimate and budget fit shown before saving), Providers, Alerts
+  and Status. A date pair's detail (its itineraries and calendar prices, one panel per airport
+  pair) opens from the Dates board, the overview or an alert email, not from the nav.
 - **Price sources:**
   - Aviasales cache (Travelpayouts): free, cached prices up to 48 hours old.
   - Google Flights via SearchApi: paid per call; date grid and itinerary search with booking

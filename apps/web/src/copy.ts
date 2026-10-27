@@ -67,12 +67,13 @@ export const COPY = {
   appTitle: 'get-me-there',
   skipToContent: 'Skip to the main content',
   navLabel: 'Views',
+  // WP19 Task 19.7 (spec §11 layout): the nav's two tiers
+  navTier: { decide: 'Decide', setup: 'Set up' },
   nav: {
+    dates: 'Dates',
+    // why: the date pair detail is not in the nav (spec §11); the word names the view in the Record every ViewId keys
     results: 'Results',
-    calendar: 'Calendar',
-    duration: 'Duration',
     history: 'History',
-    coverage: 'Coverage',
     definitions: 'Definitions',
     alerts: 'Alerts',
     providers: 'Providers',
@@ -303,6 +304,8 @@ export const COPY = {
   runNowUnestimated: 'Run now',
   working: 'Working…',
   runDetails: 'Progress and spend',
+  // WP19 Task 19.7 (spec §11): the status bar's progress breakdown links to the Dates view's coverage section
+  progressCoverageLink: 'Coverage in the Dates view',
   runNowBlocked: 'The estimate is above what you confirmed; confirm it under Definitions before running.',
 
   // filters (spec §6.5)
@@ -313,12 +316,7 @@ export const COPY = {
   filterMaxStops: 'Max stops',
   filterCarriers: 'Carriers (comma-separated codes)',
   carriersIgnored: (entries: string) => `ignored, not two-character carrier codes: ${entries}`,
-  filterDestinations: 'Destination',
   filterMaxPrice: 'Max price (£)',
-  filterNightsMin: 'Min nights',
-  filterNightsMax: 'Max nights',
-  filterDepartFrom: 'Departs on or after',
-  filterDepartTo: 'Departs on or before',
   filterHideStale: 'Hide stale rows',
   filterUnverified: 'Has this constraint unverified',
   any: 'any',
@@ -525,7 +523,6 @@ export const COPY = {
   // why: one end of a time window alone is an unfinished constraint; say so rather than dropping it silently.
   required: 'required',
   invalidPounds: 'not an amount in pounds (for example 450 or 450.50)',
-  invalidWholeNumber: 'not a whole number',
   blockedByRequired: 'Cannot estimate or save: fill in the required number fields.',
   creatingBlocked: 'Cannot create while a field above has an error.',
   bothEndsNeeded: 'both ends needed',
@@ -592,214 +589,293 @@ export const COPY = {
   confirmNew: (calls: number, cap: number, amount: string) =>
     `Confirm about ${calls} ${noun(calls, 'call', 'calls')} (hard stop ${cap}), ${amount} per run`,
   none: 'none',
-  // --- WP10 (spec §11 View B, View C, History; plan decisions 38, 44, 46, 48) ---
-  calendarView: {
-    title: 'Calendar',
-    discoveryMarker: (
-      b: { priced: number; empty: number; no_data: number; error: number; skipped: number; not_run: number },
-      total: number,
-    ) =>
-      `${b.priced} priced · ${b.empty} no fares · ${b.no_data} no cached data · ${b.error} error · ${b.skipped} skipped · ${b.not_run} not searched of ${total}`,
-    countsInconsistent: 'counts inconsistent',
-    verificationMarker: (searched: number, selected: number, onDemand: number) =>
-      `itinerary-searched ${searched} of ${selected} selected +${onDemand} on demand`,
-    verificationNotConfigured: 'itinerary search: no verification provider configured',
-    noDiscoveryProvider: 'no discovery provider configured',
-    noRunCoversDay: 'not searched yet: no run covers this day',
-    providerNotSearched: (source: string) => `${source}: not searched yet for this day`,
-    markerSource: (source: string, marker: string) => `${source}: ${marker}`,
-    partlyVerified: (count: number) =>
-      `${count} partially verified ${count === 1 ? 'itinerary' : 'itineraries'} found for this day (never the day price)`,
-    glyphSymbol: { empty: '∅', no_data: '◇', error: '✕', skipped: '–', not_run: '○' },
-    calendarPrice: 'calendar price',
-    bandAria: (band: number) => `price band ${band + 1} of 5${band === 0 ? ', cheapest' : ''}`,
-    flatAria: 'one shade: the scale is flat',
-    hatchedAria: 'not on the colour scale',
-    stay: (nights: number, back: string) => `${nights}n · back ${back}`,
+  // --- WP19: the Dates view (spec §11 Dates; revision 50) ---
+  datesView: {
+    title: 'Dates',
+    // header line
+    runFinished: (ago: string) => `run finished ${ago}`,
+    runInProgress: (ago: string) => `run in progress, started ${ago}`,
+    runPaused: (ago: string, reason: string) => `run paused ${ago}: ${reason}`,
+    runEnded: (status: string, ago: string) => `run ${status} ${ago}`,
+    runNotStarted: (status: string) => `run not started yet (${status})`,
+    minutesAgo: (minutes: number) => `${minutes} min ago`,
+    noRunYet: 'no run yet',
+    staleAll: 'Every price shown is older than one refresh cycle.',
+    scopeAirports: (inScope: number, total: number) =>
+      `${inScope} of ${total} airport ${noun(total, 'pair', 'pairs')}`,
+    scopeNights: (min: number, max: number) =>
+      min === max ? `${min} ${noun(min, 'night', 'nights')}` : `${min}–${max} nights`,
+    coverageCheckLink: 'Open the coverage check for this search',
+    gapReference: 'reference across the whole search:',
+    // filters
+    filtersLabel: 'Filters',
+    stayMin: 'Stay from (nights)',
+    stayMax: 'Stay to (nights)',
+    stayInvalid: 'a stay range is two whole numbers, the first no larger than the second',
+    origins: 'Origins',
+    destinations: 'Destinations',
+    journeyLimit: 'Max journey time (minutes)',
+    journeyBounds: (min: number, max: number) => `between ${min} and ${max} minutes`,
+    weekSwitch: 'Best per departure week',
+    loadingFiltered: 'Loading dates for these filters',
+    // board
+    boardCaption: 'Best dates',
+    boardOrderNote: 'Prices a later search no longer found rank after current ones.',
+    partial: 'partial: run in progress',
+    columns: {
+      rank: 'Rank',
+      depart: 'Depart',
+      return: 'Return',
+      nights: 'Nights',
+      price: 'Price',
+      howFar: 'How far checked',
+      journey: 'Journey time',
+      airports: 'Airports',
+    },
+    priceSortNote: 'current prices first, then by price',
+    showMore: (n: number) => `Show ${n} more`,
+    showing: (shown: number, total: number) =>
+      `showing ${shown} of ${total} date ${noun(total, 'pair', 'pairs')} with a price`,
+    bestPerWeek: (weeks: number) => `best per departure week: ${weeks} ${noun(weeks, 'week', 'weeks')}`,
+    openDates: (dep: string, ret: string) => `Open ${dep} to ${ret}`,
+    // why: spec §11 provenance: a phone face shows the provider's short mark and one-glyph marks, so the phone board
+    // names each in full (the Calendar's phone legend did this before revision 48 retired that view)
+    phoneKey: {
+      providers:
+        'Each price card shows its provider: TP Travelpayouts (Aviasales cache), SA SearchApi (Google Flights via SearchApi), CF Camoufox (Google Flights prices via Camoufox), syn Fixture (synthetic fixture data).',
+      glyphs:
+        'Marks beside a price: ≠ price not confirmed, ◷ stale, … cheapest of the rows read, ↺ superseded by a later search, ◌ not seen in latest search. Under the amount: its age ("5d old", or "age unknown") and "not checked" on a calendar price.',
+    },
+    journeyNotKnown: 'not known',
+    journeyNotKnownFiltered: 'journey time not known',
+    directionOut: 'out',
+    directionBack: 'back',
+    arrives: (time: string, dayOffset: number) =>
+      dayOffset > 0 ? `arrives ${time} +${dayOffset}` : `arrives ${time}`,
+    arrivesOn: (date: string) => `(arrives on ${date})`,
+    airports: (origin: string, destination: string) => `${origin} → ${destination}`,
     cachedFrom: 'cached from',
-    glyphCount: (n: number, words: string) => `${n} ${words}`,
-    // why: one symbol per meaning across the whole legend (review ui I2); the unconfirmed mark is priceMarkGlyph.unconfirmed.
-    phoneMark: { partial: '◐', inconsistent: '?' },
-    phonePartial: 'part of the day not searched',
-    phoneNights: (n: number) => `${n}n`,
-    // why: ruling 4: the buckets that apply, in the spec §3 order, zero buckets left out; never the "searched" umbrella.
-    bucketBreakdown: (b: {
-      priced: number;
-      empty: number;
-      no_data: number;
-      error: number;
-      skipped: number;
-      not_run: number;
-    }) =>
-      (
-        [
-          [b.priced, 'priced'],
-          [b.empty, 'no fares'],
-          [b.no_data, 'no cached data'],
-          [b.error, 'error'],
-          [b.skipped, 'skipped'],
-          [b.not_run, 'not searched'],
-        ] as const
-      )
-        .filter(([n]) => n > 0)
-        .map(([n, words]) => `${n} ${words}`)
-        .join(', '),
-    destinationFilter: 'Destination',
-    allDestinations: 'All destinations',
-    colourBy: 'Colour by',
-    empty: 'No days to show yet. The calendar fills in as cells are searched.',
-    staleLine: (stale: number, shown: number, verifiedAfter: string) =>
-      `${stale} of ${shown} shown ${noun(shown, 'price is', 'prices are')} stale by fetch age plus any known vendor age (itinerary prices after ${verifiedAfter}, calendar prices after their provider's refresh interval)`,
-    unconfirmedShort: 'price not confirmed',
-    unconfirmedCells: (n: number) =>
-      `price not confirmed: ${n} itinerary-searched ${n === 1 ? 'cell' : 'cells'} priced nothing the final step confirmed`,
-    unconfirmedCellsFor: (n: number, destination: string) =>
-      `price not confirmed: ${n} itinerary-searched ${destination} ${n === 1 ? 'cell' : 'cells'} priced nothing the final step confirmed`,
-    monthNav: 'Month',
-    previousMonth: 'Previous month',
-    nextMonth: 'Next month',
+    cachedFromPair: (origin: string, destination: string) => `(${origin} → ${destination})`,
+    howFar: {
+      verified: 'verified',
+      calendar: 'calendar price, constraints not checked',
+      itinerarySearched: (k: number, of: number) =>
+        `itinerary-searched ${k} of ${of} airport ${noun(of, 'pair', 'pairs')}`,
+      notReached: (n: number) => `${n} selected but not reached`,
+      selectedOther: (n: number) => `${n} selected, itinerary search error or skipped`,
+      notSelected: 'not selected for itinerary search',
+      onDemand: (n: number) => `+${n} on demand`,
+      partiallyVerified: (n: number) => `${n} partially verified`,
+      unconfirmed: (n: number) => `${n} ${noun(n, 'price', 'prices')} not confirmed`,
+      bucket: (n: number, words: string) => `${n} ${words}`,
+      notSearched: (n: number, of: number) =>
+        `${n} of ${of} airport ${noun(of, 'pair', 'pairs')} not searched`,
+      earlierSearch: 'price from an earlier search',
+      cutShort: 'read was cut short',
+      noneWithin: (limit: string) => `none within ${limit}`,
+    },
+    // run updates (revision 50, Ian ruled)
+    updateBoard: (n: number) => `${n} ${noun(n, 'change', 'changes')} · Update board`,
+    updated: 'Best dates updated',
+    pendingChanges: (n: number) =>
+      `${n} ${noun(n, 'change', 'changes')} to Best dates; Update board to see them`,
+    // states
+    noSearch: 'No search yet.',
+    noSearchLink: 'Create one under Definitions',
+    neverRun: 'Not run yet: nothing has been searched.',
+    onDemandOnly: (n: number) =>
+      `Not run yet: ${n} on-demand itinerary ${noun(n, 'search', 'searches')} so far, and the prices ${noun(n, 'it', 'they')} found are below.`,
+    pausedNote: 'The board shows prices found before the pause.',
+    notSearchedCount: (n: number) => `${n} ${noun(n, 'cell', 'cells')} not searched`,
+    noPricesInRun: 'No prices in this run.',
+    tooManyCells: (cells: number, bound: number) =>
+      `This search has ${cells} cells in scope, more than the ${bound} the Dates view reads at once. Narrow the origins or destinations in the filters above to bring it under ${bound}.`,
+    noPriceInFilters: 'No date pair in these filters has a price found so far.',
+    // the overview (Task 19.5; spec §11 Overview)
+    overview: {
+      heading: 'Overview',
+      monthsLabel: 'Months of the window',
+      previousMonth: 'Previous month',
+      nextMonth: 'Next month',
+      stay: (from: number, to: number) =>
+        from === to ? `${from} ${noun(from, 'night', 'nights')}` : `${from}–${to} nights`,
+      closeBand: (stay: string, month: string) => `Close ${stay} in ${month}`,
+      cellName: (dates: string, stay: string, what: string) => `${dates}, ${stay}: ${what}`,
+      rank: (n: number) => `rank ${n}`,
+      bandDates: (date: string) => `departing ${date}`,
+      openBand: 'opens its stay lengths',
+      noMark: 'no airport pair in scope',
+      readoutLabel: 'Date pair readout',
+      readoutEmpty: 'Point at or focus a cell to read its date pair here.',
+      openThese: 'Open these dates',
+      buckets: (breakdown: string) => `by airport pair: ${breakdown}`,
+    },
+    marks: {
+      words: {
+        empty: 'no fares',
+        no_data: 'no cached data',
+        error: 'error',
+        skipped: 'skipped',
+        not_run: 'not searched',
+        partly: 'partly not searched',
+        notChecked: 'not checked',
+        superseded: 'superseded by a later search',
+        notSeen: 'not seen in latest search',
+        noneWithin: 'none within the journey limit',
+        unshown: 'priced, but no price can be shown here',
+      },
+      glyph: {
+        empty: '∅',
+        no_data: '◇',
+        error: '✕',
+        skipped: '–',
+        not_run: '○',
+        partly: '▨',
+        notChecked: '◫',
+        superseded: '↺',
+        notSeen: '◌',
+        noneWithin: '⧗',
+        unshown: '◑',
+      },
+    },
     legend: {
       title: 'Legend',
-      scaleQuintile: (basis: string, days: number) =>
-        `Colour: ${basis} prices on ${days} ${noun(days, 'day', 'days')}, in five price bands (quintiles of the days shown)`,
-      scaleFlatFew: (basis: string, days: number, min: number) =>
-        `Colour: one shade for ${basis} prices on ${days} ${noun(days, 'day', 'days')}; fewer than ${min} days are too few for price bands`,
-      scaleFlatNarrow: (basis: string, days: number, min: string, max: string) =>
-        `Colour: one shade for ${basis} prices on ${days} ${noun(days, 'day', 'days')}; they span ${min}–${max}, less than 10%, too narrow for price bands`,
-      scaleEmpty: (basis: string) => `Colour: no ${basis} prices to colour yet`,
-      band: (band: number, min: string, max: string, days: number) =>
-        `band ${band + 1}: ${min}–${max} (${days} ${days === 1 ? 'day' : 'days'})`,
-      flatSwatch: (days: number) => `one shade: ${days} ${days === 1 ? 'day' : 'days'}`,
-      hatched: (shown: 'verified' | 'calendar', days: number) =>
-        `hatched: ${days} ${days === 1 ? 'day shows' : 'days show'} a ${shown === 'verified' ? 'class-verified' : 'calendar'} price instead and ${days === 1 ? 'is' : 'are'} not on this scale`,
-      priceless: 'grey with a label: no price for this day',
-      more: 'What the marks mean',
-      dashed: 'dashed outline: a calendar price; constraints not checked',
-      stale:
-        'stale: older than one refresh cycle by fetch age plus any known vendor age; shown and labelled, never hidden. A price whose vendor age is unknown says "vendor\'s cache age unknown" instead',
-      coveragePartial:
-        'counts under the price (e.g. "3 priced, 9 no cached data") name the buckets of its best-covered source; a striped square: part of the day not searched; per-source counts are in the panel',
-      cachedFrom:
-        '"cached from" and a price: a cheaper calendar price exists for this day, with its destination and stay; constraints not checked',
-      unconfirmed:
-        'price not confirmed: an itinerary search priced this day, but the final step confirmed none of its prices',
-      truncated: 'cheapest of the rows read: the provider returned more rows than were read for that month',
-      stay: 'Nn · back <date>: the stay of the cheapest cell; the panel lists every cell of the day',
-      bandNumber: 'the small number beside the day is its price band, 1 cheapest to 5 dearest',
-      phone:
-        'On a narrow screen a day shows its number, band, amount and one-glyph marks: ≠ price not confirmed, ◷ stale, … cheapest of the rows read, ↺ superseded by a later search, ◌ not seen in latest search, ◐ part of the day not searched, ? the counts of a day disagree with its total; under the amount its provider, its age ("5d old", or "5h ago · age unknown" when the vendor gives none) and "not checked" on a calendar price. A day without a price shows each glyph with its count. Open a day for the rest.',
-      phoneProviders:
-        'On a narrow screen the amount is followed by the provider: TP Travelpayouts (Aviasales cache), SA SearchApi (Google Flights via SearchApi), CF Camoufox (Google Flights prices via Camoufox), syn Fixture (synthetic fixture data).',
-      glyphs: 'Days without a price show, with how many cells of the best-covered source:',
-      skippedWhy: ' (a budget stop, a disabled provider or a passed date; reasons in the panel)',
+      scaleQuintile: (n: number) =>
+        `Shade: ${n} current ${noun(n, 'price', 'prices')} in view, in five bands by rank, darkest cheapest`,
+      scaleFlatFew: (n: number, min: number) =>
+        `One shade for ${n} current ${noun(n, 'price', 'prices')}: fewer than ${min} are too few for price bands`,
+      scaleFlatNarrow: (n: number, min: string, max: string) =>
+        `One shade for ${n} current prices: they span ${min}–${max}, less than 10%, too narrow for price bands`,
+      scaleEmpty: 'No current price in view to shade',
+      band: (band: number, min: string, max: string, n: number) =>
+        `band ${band + 1}: ${min}–${max} (${n} date ${noun(n, 'pair', 'pairs')})`,
+      flat: (n: number) => `one shade: ${n} date ${noun(n, 'pair', 'pairs')}`,
+      offScale:
+        'Prices a later search no longer found (superseded, not seen) are on a plain fill with their mark, never on the scale.',
+      markCount: (words: string, n: number) => `${words}: ${n}`,
+      notChecked:
+        'not checked: a calendar price; its constraints (stops, journey time, arrival times) were not checked.',
+      noAmount: 'Cells print no amount: point at or focus one to read its price beside the legend.',
+      ring: 'outlined: on the board above',
     },
-    panel: {
-      title: (date: string) => `Departing ${date}`,
-      close: 'Close',
-      dayHeading: 'This day',
-      dayVerified: 'cheapest class-verified price',
-      dayPartlyVerified: 'cheapest partially verified itinerary',
-      dayCalendar: 'cheapest calendar price',
-      dayCell: (nights: number, back: string) =>
-        `${nights} ${noun(nights, 'night', 'nights')} · back ${back}`,
-      cellPicker: 'Cell',
-      cellOption: (origin: string, destination: string, nights: number, back: string) =>
-        `${origin}→${destination} · ${nights} ${noun(nights, 'night', 'nights')} · back ${back}`,
-      outcomes: 'Outcomes per run, stage and provider (newest run first)',
-      columns: {
-        run: 'Run',
-        stage: 'Stage',
-        provider: 'Provider',
-        status: 'Outcome',
-        reason: 'Reason',
-        attempts: 'Attempts',
-        fetched: 'Fetched (Europe/London)',
-        detail: 'Detail',
-        reused: 'Reused from',
-      },
-      run: (label: string) => `run ${label}`,
-      latestRun: 'latest run',
-      reasons: {
-        not_selected: 'not selected for itinerary search',
-        budget: 'stopped: a budget cap was reached',
-        provider_disabled: 'provider disabled',
-        provider_unavailable: 'browser worker not reachable',
-        // why: spec §3 rev 36 — the panel shows core's scheduledOnlyText for the stored detail; this is the word for a
-        // row that has none, which names no run because it cannot know which one fetches it
-        scheduled_only: 'left for a later run',
-        departed: 'departure date has passed',
-        'cabin-not-offered': "the provider does not offer this definition's cabin",
-        auth: 'the provider refused the credentials',
-        'rate-limit': 'the provider rate-limited the request',
-        quota: "the provider's quota is used up",
-        upstream: 'the provider failed',
-        parse: "the provider's answer could not be read",
-        network: 'network failure',
-        'limiter-timeout': 'waited too long for a request slot',
-        blocked: 'stopped: Google showed a page this app does not read, or a check (the detail says which)',
-        'provider-unavailable': 'browser worker not reachable',
-        'fx-unavailable': 'no exchange rate available',
-        'currency-unsupported': 'currency not supported',
-        'unknown-airport-tz': 'airport time zone unknown',
-        'no-return-legs': 'no return legs offered',
-        'unmappable-carrier': 'carrier code not recognised',
-        'bad-local-time': 'a flight time could not be read',
-        'cell-mismatch': 'the answer was for different dates or airports',
-        'no-priced-options': 'the provider answered with no priced options',
-        mixed: 'several different errors',
-        'partial-expansion': 'some outbound flights could not be expanded',
-        'price-unconfirmed': 'price not confirmed by the final step',
-      } satisfies Record<OutcomeReasonKey, string>,
-      offersDropped: (n: number) => `${n} ${n === 1 ? 'offer' : 'offers'} could not be read and were dropped`,
-      reasonRaw: (reason: string) => `other: ${reason}`,
-      dash: '—',
-      reusedFrom: (run: string) => `reused from ${run}`,
-      prices: 'Prices for this cell',
-      noPrices: 'No prices stored for this cell.',
-      calendarPriceRun: (run: string) => `calendar price · ${run}`,
-      observation: (seller: string, cls: string) => `itinerary offer · ${seller} · ${cls}`,
-      showInResults: 'show in results',
-      verifyCost: (maxCalls: number, headroom: number) =>
-        `hard stop ${maxCalls} ${maxCalls === 1 ? 'call' : 'calls'} · ${headroom} ${headroom === 1 ? 'call' : 'calls'} of budget headroom left`,
-      verifyNoHeadroom: 'No budget headroom left for this search.',
-      // why: N2 (ruling 9): a 0-call definition is not out of headroom; it allows no billed call, and one setting fixes it.
-      verifyZeroRunCap: (n: number) =>
-        `This definition allows 0 billed calls, so this search cannot start. Raise the definition's call cap to at least ${n} in Definitions → Run budget (Max billed calls per run).`,
-      verifyCostLoading: 'Loading what this search may spend…',
-      verifyCapRefused: (message: string) => `Refused by a budget cap: ${message}`,
-      verifyConfirmRefused: (message: string) => `Needs confirmation: ${message}`,
-      verifyConflict: 'An itinerary search for this cell is already running.',
-    },
+    // the coverage section (Task 19.5; what the Coverage view held)
+    coverageToggle: 'Coverage of the latest run',
+    coverageNotFiltered:
+      'The filters above do not narrow this section: it covers the latest run over the whole search.',
   },
-  durationView: {
-    title: 'Duration',
-    chartTitle: 'Cheapest found by stay length',
-    chartNote:
-      'n = priced cells behind each minimum; the legend gives n summed over all stay lengths. A tick marked with a star (*) = no source has answered for that stay length yet (its cells are not searched). A missing bar elsewhere means that series found no class-verified or calendar price; the table names each gap. Calendar bars are paler with a dashed outline (constraints not checked); a faded bar with a black outline is stale.',
-    xAxis: 'nights',
-    yAxis: 'price (GBP)',
-    tickNotSearched: (nights: number) => `${nights}*`,
-    verifiedSeries: (n: number) => `min among verified (class verified, n=${n})`,
-    verifiedShort: 'min among verified',
-    calendarSeries: (source: string, n: number) => `calendar, ${source} (constraints not checked, n=${n})`,
-    calendarShort: (source: string) => `calendar, ${source}`,
-    nightsLabel: (n: number) => `${n} ${noun(n, 'night', 'nights')}`,
-    nightsLink: (n: number) => `${n} ${noun(n, 'night', 'nights')}: show in results`,
-    tooltipDetail: (n: number, departs: string) => `n=${n} · departs ${departs}`,
-    seriesLine: (series: string, value: string) => `${series}: ${value}`,
-    cellDetail: (n: number, departs: string) => `n=${n} · departs ${departs}`,
-    notSearched: 'not searched',
-    notItinerarySearched: 'not itinerary-searched',
-    itinerarySearchedNoPrice: 'itinerary-searched, no class-verified price',
-    partlyItinerarySearchedNoPrice: (k: number, total: number) =>
-      `itinerary-searched ${k} of ${total} selected ${noun(total, 'cell', 'cells')}, no class-verified price`,
-    tableCaption: 'Cheapest found per stay length, with provenance',
-    chartScroll: 'Cheapest found by stay length, chart (scrolls sideways on a narrow screen)',
-    tableScroll: 'Cheapest found per stay length, table (scrolls sideways on a narrow screen)',
-    staleLine: (stale: number, shown: number) =>
-      `${stale} of ${shown} shown ${noun(shown, 'price is', 'prices are')} stale (older than one refresh cycle by fetch age plus any known vendor age)`,
-    empty:
-      "No prices yet for any stay length in this definition's range. Run a search; Coverage shows what has been searched.",
+  // --- WP10 (spec §11 History; plan decisions 38, 44, 46, 48). WP19 retired View B (Calendar) and View C (Duration)
+  // with their words; the two that outlived them are bucketBreakdown (the Dates readout) and panel.unconfirmedShort ---
+  // why: ruling 4: the buckets that apply, in the spec §3 order, zero buckets left out; never the "searched" umbrella.
+  bucketBreakdown: (b: {
+    priced: number;
+    empty: number;
+    no_data: number;
+    error: number;
+    skipped: number;
+    not_run: number;
+  }) =>
+    (
+      [
+        [b.priced, 'priced'],
+        [b.empty, 'no fares'],
+        [b.no_data, 'no cached data'],
+        [b.error, 'error'],
+        [b.skipped, 'skipped'],
+        [b.not_run, 'not searched'],
+      ] as const
+    )
+      .filter(([n]) => n > 0)
+      .map(([n, words]) => `${n} ${words}`)
+      .join(', '),
+  // --- WP19 Task 19.6: the per-airport-pair panel of the date pair detail (spec §11), the Calendar side panel's
+  // outcome, price and verify sections moved here so they outlive the Calendar view ---
+  panel: {
+    heading: (origin: string, destination: string) => `${origin} → ${destination}`,
+    regionLabel: 'Per airport pair',
+    outcomes: 'Outcomes per run, stage and provider (newest run first)',
+    columns: {
+      run: 'Run',
+      stage: 'Stage',
+      provider: 'Provider',
+      status: 'Outcome',
+      reason: 'Reason',
+      attempts: 'Attempts',
+      fetched: 'Fetched (Europe/London)',
+      detail: 'Detail',
+      reused: 'Reused from',
+    },
+    run: (label: string) => `run ${label}`,
+    latestRun: 'latest run',
+    reasons: {
+      not_selected: 'not selected for itinerary search',
+      budget: 'stopped: a budget cap was reached',
+      provider_disabled: 'provider disabled',
+      provider_unavailable: 'browser worker not reachable',
+      // why: spec §3 rev 36 — the panel shows core's scheduledOnlyText for the stored detail; this is the word for a
+      // row that has none, which names no run because it cannot know which one fetches it
+      scheduled_only: 'left for a later run',
+      departed: 'departure date has passed',
+      'cabin-not-offered': "the provider does not offer this definition's cabin",
+      auth: 'the provider refused the credentials',
+      'rate-limit': 'the provider rate-limited the request',
+      quota: "the provider's quota is used up",
+      upstream: 'the provider failed',
+      parse: "the provider's answer could not be read",
+      network: 'network failure',
+      'limiter-timeout': 'waited too long for a request slot',
+      blocked: 'stopped: Google showed a page this app does not read, or a check (the detail says which)',
+      'provider-unavailable': 'browser worker not reachable',
+      'fx-unavailable': 'no exchange rate available',
+      'currency-unsupported': 'currency not supported',
+      'unknown-airport-tz': 'airport time zone unknown',
+      'no-return-legs': 'no return legs offered',
+      'unmappable-carrier': 'carrier code not recognised',
+      'bad-local-time': 'a flight time could not be read',
+      'cell-mismatch': 'the answer was for different dates or airports',
+      'no-priced-options': 'the provider answered with no priced options',
+      mixed: 'several different errors',
+      'partial-expansion': 'some outbound flights could not be expanded',
+      'price-unconfirmed': 'price not confirmed by the final step',
+    } satisfies Record<OutcomeReasonKey, string>,
+    offersDropped: (n: number) => `${n} ${n === 1 ? 'offer' : 'offers'} could not be read and were dropped`,
+    reasonRaw: (reason: string) => `other: ${reason}`,
+    dash: '—',
+    reusedFrom: (run: string) => `reused from ${run}`,
+    prices: 'Prices for this cell',
+    noPrices: 'No prices stored for this cell.',
+    calendarPriceRun: (run: string) => `calendar price · ${run}`,
+    observation: (seller: string, cls: string) => `itinerary offer · ${seller} · ${cls}`,
+    showInResults: 'show in results',
+    verifyCost: (maxCalls: number, headroom: number) =>
+      `hard stop ${maxCalls} ${maxCalls === 1 ? 'call' : 'calls'} · ${headroom} ${headroom === 1 ? 'call' : 'calls'} of budget headroom left`,
+    verifyNoHeadroom: 'No budget headroom left for this search.',
+    // why: N2 (ruling 9): a 0-call definition is not out of headroom; it allows no billed call, and one setting fixes it.
+    verifyZeroRunCap: (n: number) =>
+      `This definition allows 0 billed calls, so this search cannot start. Raise the definition's call cap to at least ${n} in Definitions → Run budget (Max billed calls per run).`,
+    verifyCostLoading: 'Loading what this search may spend…',
+    verifyCapRefused: (message: string) => `Refused by a budget cap: ${message}`,
+    verifyConfirmRefused: (message: string) => `Needs confirmation: ${message}`,
+    verifyConflict: 'An itinerary search for this cell is already running.',
+    unconfirmedShort: 'price not confirmed',
+  },
+  // --- WP19 Task 19.6: the date pair detail, what was Results (spec §11 Date pair detail) ---
+  // WP19 Task 19.7 (spec §11 URLs): an old alert link whose row the whole-space read no longer holds lands on Dates
+  landing: {
+    rowGone: "That result is no longer in this search's results.",
+    rowNotRead: (n: number) => `That result is not among the first ${n} results read for this search.`,
+  },
+  detailView: {
+    title: (departure: string, back: string, nights: number) =>
+      `${departure} to ${back} · ${nights} ${noun(nights, 'night', 'nights')}`,
+    backToDates: 'Back to dates',
+    boardPriceLead: 'Dates board price:',
+    boardPriceRest: (airports: string, basis: string) => `· ${airports} · ${basis}`,
+    // why: revision 50: the two figures differ because the board ranks by the newest search, then freshness
+    boardDiffers:
+      'It differs from the cheapest found here because the board prefers a price the latest search returned, then a fresh one.',
+    rowGone: "That result is no longer among this date pair's results.",
+    noRows: 'No round trip found for these dates on this basis.',
+    coverageSection: 'Open the coverage section',
   },
   historyView: {
     title: 'History',
@@ -969,7 +1045,7 @@ export const COPY = {
     copied: 'Copied',
     selectedInstead: (command: string) => `Command, selected: ${command}`,
     providersLink: 'Providers view',
-    coverageLink: 'Coverage view',
+    coverageLink: 'Coverage in the Dates view',
     sendTest: 'Send test',
     sending: 'Sending…',
     testSent: 'Test email sent. Check the inbox, and the spam folder.',

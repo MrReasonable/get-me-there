@@ -28,7 +28,13 @@ import {
 import { RowCorrupt } from '../internal/read.js';
 import { storeRollUps } from '../internal/rollUps.js';
 import { assertIsoDateTime, RowRejected } from '../internal/validate.js';
-import type { CalendarPriceInsert, CalendarPriceRow, RepoOptions, ReusedCopy } from '../types.js';
+import type {
+  CalendarMarks,
+  CalendarPriceInsert,
+  CalendarPriceRow,
+  RepoOptions,
+  ReusedCopy,
+} from '../types.js';
 import { ExecutionsRepo } from './executions.js';
 
 /**
@@ -51,20 +57,85 @@ const PRICE_FOR_OUTCOME_SQL = `SELECT * FROM calendar_prices WHERE execution_id 
 /** Nights of a stored cell, computed in SQL the same way `withNights` does (UTC calendar days). */
 const NIGHTS = 'CAST(julianday(p.return_date) - julianday(p.departure_date) AS INTEGER)';
 
+/** The scope's airports and departures over alias `a`: cheap tests, applied to every row a grouped read scans. */
+const airportsAndDays = (
+  a: string,
+) => `(@spaced = 0 OR (${a}.origin IN (SELECT value FROM json_each(@origins))
+  AND ${a}.destination IN (SELECT value FROM json_each(@destinations)) AND ${a}.departure_date BETWEEN @from AND @to))`;
+/** The scope's stay lengths over alias `a`; a date function, so applied to the one row per cell a read keeps. */
+const stays = (a: string) =>
+  `(@spaced = 0 OR CAST(julianday(${a}.return_date) - julianday(${a}.departure_date) AS INTEGER) BETWEEN @minNights AND @maxNights)`;
+
+/**
+ * The latest row per (provider, cell) among the calendar prices `where` admits: max fetched_at, then max id (fetched_at
+ * is a fixed-width ISO instant by the table's CHECK, and the id is zero-padded, so one string orders both). `index`
+ * names the index the scan walks in its own (provider, cell, fetched_at, id) order. why: spec §10 bounds: grouping in
+ * index order never sorts a history many runs deep, which a ROW_NUMBER window over every row did (several seconds at
+ * 20 runs × 50,000 cells); the stay filter is applied to the winners only.
+ */
+const latestOf = (where: string, index: string) => `
+SELECT q.* FROM (
+  SELECT MAX(printf('%s%020d', p.fetched_at, p.id)) AS k
+  FROM calendar_prices p ${index}
+  WHERE ${where} AND p.cabin = @cabin AND ${airportsAndDays('p')}
+  GROUP BY p.provider_id, p.origin, p.destination, p.departure_date, p.return_date
+) r JOIN calendar_prices q ON q.id = CAST(substr(r.k, -20) AS INTEGER)
+WHERE ${stays('q')}`;
+
+/**
+ * WP19 §5: a calendar price row with its two marks, read in the same statement. `latest` is a statement yielding whole
+ * `calendar_prices` rows.
+ *
+ * - `source_last_error`: the `last_error` of the discovery outcome that fetched the price (decisions 36, 47: a
+ *   truncated tile), through `reused_from_execution_id` for a reused copy (decision 58: the copying run read no pages).
+ * - `searched_empty_later`: the newest searched (priced, empty or no_data), non-reused discovery outcome of a parent
+ *   execution of the price's definition for that (provider, cell) is newer than the price's execution, by the
+ *   executions' (created_at, rowid) order, and found the cell empty or no_data (decision 54). A newer run that skipped,
+ *   errored on or reused the cell did not search it, so an older "no fares" still marks the price (review prov M1).
+ *   Only the executions newer than the price's are probed, each by the outcome's primary key: the newest search is
+ *   newer than the price exactly when one of those searched.
+ *
+ * why: one statement whatever the history's depth (spec §10 bounds): the per-execution outcome reads this replaces
+ * grew with every past run.
+ */
+const withMarks = (latest: string) => `
+WITH latest AS (${latest})
+SELECT l.*, src.last_error AS source_last_error,
+  COALESCE((
+    SELECT o.status IN ('empty', 'no_data')
+    FROM search_executions s JOIN cell_outcomes o ON o.execution_id = s.id AND o.origin = l.origin AND o.destination = l.destination
+      AND o.departure_date = l.departure_date AND o.return_date = l.return_date AND o.stage = 'discovery' AND o.provider_id = l.provider_id
+    WHERE s.definition_id = pe.definition_id AND s.is_child = 0 AND (s.created_at > pe.created_at OR (s.created_at = pe.created_at AND s.rowid > pe.rowid))
+      AND o.status IN ('priced', 'empty', 'no_data') AND o.reused_from_execution_id IS NULL
+    ORDER BY s.created_at DESC, s.rowid DESC LIMIT 1
+  ), 0) AS searched_empty_later
+FROM latest l
+JOIN search_executions pe ON pe.id = l.execution_id
+LEFT JOIN cell_outcomes src ON src.execution_id = COALESCE(l.reused_from_execution_id, l.execution_id) AND src.origin = l.origin
+  AND src.destination = l.destination AND src.departure_date = l.departure_date AND src.return_date = l.return_date
+  AND src.stage = 'discovery' AND src.provider_id = l.provider_id
+ORDER BY l.origin, l.destination, l.departure_date, l.return_date, l.provider_id`;
+
 /** Spec §6.9 calendar basis: latest fetched per (provider, cell) in the cabin, reused copies ignored, inside the space when given. */
-const LATEST_PER_CELL_SQL = `
-WITH ranked AS (
-  SELECT p.*, ROW_NUMBER() OVER (PARTITION BY p.provider_id, p.origin, p.destination, p.departure_date, p.return_date ORDER BY p.fetched_at DESC, p.id DESC) AS rn
-  FROM calendar_prices p JOIN search_executions e ON e.id = p.execution_id
-  WHERE e.definition_id = @definitionId AND p.cabin = @cabin AND p.reused_from_execution_id IS NULL
-    AND (@spaced = 0 OR (p.origin IN (SELECT value FROM json_each(@origins)) AND p.destination IN (SELECT value FROM json_each(@destinations))
-         AND p.departure_date BETWEEN @from AND @to AND ${NIGHTS} BETWEEN @minNights AND @maxNights))
-)
-SELECT * FROM ranked WHERE rn = 1 ORDER BY origin, destination, departure_date, return_date, provider_id`;
+const LATEST_PER_CELL_SQL = withMarks(
+  latestOf(
+    'p.execution_id IN (SELECT id FROM search_executions WHERE definition_id = @definitionId) AND p.reused_from_execution_id IS NULL',
+    // why: migration 0009's covering index; named, so the planner never falls back to sorting the whole history
+    'INDEXED BY calendar_prices_latest_idx',
+  ),
+);
+
+/**
+ * `/results?executionId=` (decision 58, review prov-003): the latest price each (provider, cell) holds among the
+ * executions, reused copies included, so a run's prices agree with its coverage. why: the executions' own rows are
+ * reached through calendar_prices_execution_idx; the planner chooses.
+ */
+const LATEST_HELD_BY_SQL = withMarks(latestOf('p.execution_id IN (SELECT value FROM json_each(@ids))', ''));
 
 /**
  * Ruling 8: per (provider, execution) the cheapest fetched price on the pair (ties: earliest fetched, lowest id).
- * Children are excluded: a child fetches one cell, which is not a route minimum.
+ * Children are excluded: a child fetches one cell, which is not a route minimum. Each point carries the `last_error` of
+ * the discovery outcome that fetched it, for truncation (decisions 36, 47), in the same statement (WP19).
  */
 const HISTORY_SQL = `
 WITH ranked AS (
@@ -73,7 +144,10 @@ WITH ranked AS (
   WHERE p.origin = @origin AND p.destination = @destination AND p.cabin = @cabin AND p.reused_from_execution_id IS NULL AND e.is_child = 0
     AND (@definitionId IS NULL OR (e.definition_id = @definitionId AND p.departure_date BETWEEN @from AND @to AND ${NIGHTS} BETWEEN @minNights AND @maxNights))
 )
-SELECT ranked.*, CAST(julianday(return_date) - julianday(departure_date) AS INTEGER) AS nights FROM ranked WHERE rn = 1 ORDER BY provider_id, fetched_at, id`;
+SELECT ranked.*, CAST(julianday(ranked.return_date) - julianday(ranked.departure_date) AS INTEGER) AS nights, src.last_error AS source_last_error
+FROM ranked LEFT JOIN cell_outcomes src ON src.execution_id = ranked.execution_id AND src.origin = ranked.origin AND src.destination = ranked.destination
+  AND src.departure_date = ranked.departure_date AND src.return_date = ranked.return_date AND src.stage = 'discovery' AND src.provider_id = ranked.provider_id
+WHERE ranked.rn = 1 ORDER BY ranked.provider_id, ranked.fetched_at, ranked.id`;
 
 const spaceParams = (space: ResolvedSpace | null) => ({
   spaced: space === null ? 0 : 1,
@@ -84,6 +158,16 @@ const spaceParams = (space: ResolvedSpace | null) => ({
   minNights: space?.minNights ?? 0,
   maxNights: space?.maxNights ?? 0,
 });
+
+type MarkedDbRow = CalendarPriceDbRow & { source_last_error: string | null; searched_empty_later: number };
+
+function toMarkedRow(r: MarkedDbRow): CalendarPriceRow & CalendarMarks {
+  return {
+    ...toCalendarPriceRow(r),
+    sourceLastError: r.source_last_error,
+    searchedEmptyLater: r.searched_empty_later === 1,
+  };
+}
 
 interface ExecutionScopeRow {
   is_child: number;
@@ -253,11 +337,36 @@ export class CalendarPricesRepo {
     return out;
   }
 
-  latestPerCell(definitionId: string, cabin: Cabin, space: ResolvedSpace | null): CalendarPriceRow[] {
+  /**
+   * The calendar basis (spec §6.9): the latest fetched price per (provider, cell) of the definition in the cabin,
+   * reused copies ignored, inside `space` when given (the scope pushed into the SQL), each with its truncation and
+   * supersession marks. One statement.
+   */
+  latestPerCell(
+    definitionId: string,
+    cabin: Cabin,
+    space: ResolvedSpace | null,
+  ): Array<CalendarPriceRow & CalendarMarks> {
     return this.db.raw
-      .prepare<Record<string, unknown>, CalendarPriceDbRow>(LATEST_PER_CELL_SQL)
+      .prepare<Record<string, unknown>, MarkedDbRow>(LATEST_PER_CELL_SQL)
       .all({ definitionId, cabin, ...spaceParams(space) })
-      .map(toCalendarPriceRow);
+      .map(toMarkedRow);
+  }
+
+  /**
+   * `/results?executionId=`'s calendar rows: the latest price held per (provider, cell) among `executionIds` (fetched
+   * or reused within its refresh window), in the cabin and inside `space` when given, with the same marks as
+   * `latestPerCell` (a reused copy's truncation is its source run's). One statement, however many executions.
+   */
+  latestHeldBy(
+    executionIds: readonly string[],
+    cabin: Cabin,
+    space: ResolvedSpace | null,
+  ): Array<CalendarPriceRow & CalendarMarks> {
+    return this.db.raw
+      .prepare<Record<string, unknown>, MarkedDbRow>(LATEST_HELD_BY_SQL)
+      .all({ ids: JSON.stringify(executionIds), cabin, ...spaceParams(space) })
+      .map(toMarkedRow);
   }
 
   /** Calendar-gap source (spec §10): latest calendar prices strictly below the cheapest verified price. */
@@ -300,7 +409,10 @@ export class CalendarPricesRepo {
     destination: Iata,
     cabin: Cabin,
     opts: { definitionId?: string } = {},
-  ): Array<{ providerId: ProviderId; points: Array<HistoryPoint & { cell: Cell; executionId: string }> }> {
+  ): Array<{
+    providerId: ProviderId;
+    points: Array<HistoryPoint & { cell: Cell; executionId: string; sourceLastError: string | null }>;
+  }> {
     let scope: {
       definitionId: string | null;
       from: string;
@@ -323,9 +435,15 @@ export class CalendarPricesRepo {
         maxNights: def.maxNights,
       };
     }
-    const out = new Map<ProviderId, Array<HistoryPoint & { cell: Cell; executionId: string }>>();
+    const out = new Map<
+      ProviderId,
+      Array<HistoryPoint & { cell: Cell; executionId: string; sourceLastError: string | null }>
+    >();
     for (const r of this.db.raw
-      .prepare<Record<string, unknown>, CalendarPriceDbRow & { nights: number }>(HISTORY_SQL)
+      .prepare<
+        Record<string, unknown>,
+        CalendarPriceDbRow & { nights: number; source_last_error: string | null }
+      >(HISTORY_SQL)
       .all({ origin, destination, cabin, ...scope })) {
       const row = toCalendarPriceRow(r);
       const points = out.get(row.providerId) ?? [];
@@ -336,6 +454,7 @@ export class CalendarPricesRepo {
         provenance: row.provenance,
         cell: { ...row.cell, nights: r.nights },
         executionId: row.executionId,
+        sourceLastError: r.source_last_error,
       });
       out.set(row.providerId, points);
     }

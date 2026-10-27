@@ -27,11 +27,6 @@ const intOrUndefined = (s: string): number | undefined => {
   return /^\d+$/.test(s.trim()) && Number.isSafeInteger(n) ? n : undefined;
 };
 
-const intMeaning = (t: string) => {
-  const n = intOrUndefined(t);
-  return n === undefined ? '' : String(n);
-};
-
 const field = 'min-h-11 rounded border border-slate-400 px-1';
 
 export interface FiltersProps {
@@ -43,81 +38,38 @@ export interface FiltersProps {
 }
 
 /**
- * Spec §6.5 filters, all client-side; state lives in the URL so it persists across views. Checkboxes,
- * selects and dates apply on change; typed boxes apply on Enter, on Apply and on leaving the box.
+ * Spec §6.5 filters, all client-side; state lives in the URL so it persists across views. Checkboxes and selects apply
+ * on change; typed boxes apply on Enter, on Apply and on leaving the box. Inside the date pair detail (spec §11, WP19
+ * Task 19.6) the stay, departure and destination filters are gone: the date pair and the Dates airport filter fix them.
  */
 export function Filters({ state, rows, calendarBasis, narrow }: FiltersProps) {
   const f = state.filters;
   const apply = (next: ResultFilters) => updateSearchParams(resultsStatePatch({ ...state, filters: next }));
   const [carriers, setCarriers] = useSynced((f.carriers ?? []).join(','), carriersText);
   const [maxPrice, setMaxPrice] = useSynced(penceToPoundsInput(f.maxPricePence), poundsText);
-  const [nightsMin, setNightsMin] = useSynced(f.nights === undefined ? '' : String(f.nights.min), intMeaning);
-  const [nightsMax, setNightsMax] = useSynced(f.nights === undefined ? '' : String(f.nights.max), intMeaning);
   // why: a value the URL filters on stays in its list even when no shown row has it, so it can still be seen and unticked.
   const providers = unique([...rows.map((r) => r.provenance.providerId), ...(f.providerId ?? [])]);
-  const destinations = unique([...rows.map((r) => r.cell.destination), ...(f.destination ?? [])]);
   const constraints = apiContract.constraintNameSchema.options.filter(
     (c) => rows.some((r) => r.unverified.includes(c)) || (f.unverified?.includes(c) ?? false),
   );
   const classes = effectiveClasses(f);
-  const nights = rows.map((r) => r.cell.nights);
-  const dates = rows.map((r) => r.cell.departureDate).sort();
   const ignored = parseCarriers(carriers).ignored;
 
-  /** Applies every typed box at once; a nights box left blank takes the data's own end of the range. */
+  /** Applies every typed box at once. */
   const typed = (base: ResultFilters): ResultFilters => {
-    const min = intOrUndefined(nightsMin);
-    const max = intOrUndefined(nightsMax);
-    const range =
-      min === undefined && max === undefined
-        ? undefined
-        : { min: min ?? Math.min(...nights, max ?? 0), max: max ?? Math.max(...nights, min ?? 0) };
     const codes = parseCarriers(carriers).codes;
-    let next = withKey(base, 'carriers', codes.length > 0 ? codes : undefined);
-    next = withKey(next, 'maxPricePence', parsePoundsToPence(maxPrice));
-    return withKey(
-      next,
-      'nights',
-      range === undefined
-        ? undefined
-        : { min: Math.min(range.min, range.max), max: Math.max(range.min, range.max) },
-    );
+    const next = withKey(base, 'carriers', codes.length > 0 ? codes : undefined);
+    return withKey(next, 'maxPricePence', parsePoundsToPence(maxPrice));
   };
   // why: typed text that does not parse is flagged, not silently ignored (UI-8).
   const priceInvalid = maxPrice.trim() !== '' && parsePoundsToPence(maxPrice) === undefined;
-  const nightsMinInvalid = nightsMin.trim() !== '' && intOrUndefined(nightsMin) === undefined;
-  const nightsMaxInvalid = nightsMax.trim() !== '' && intOrUndefined(nightsMax) === undefined;
-  // why: while any typed box is invalid nothing typed is applied, so an active filter is never dropped by bad text (UI-8).
+  // why: while a typed box is invalid nothing typed is applied, so an active filter is never dropped by bad text (UI-8).
   const applyTyped = () => {
-    if (!(priceInvalid || nightsMinInvalid || nightsMaxInvalid)) apply(typed(f));
+    if (!priceInvalid) apply(typed(f));
   };
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();
     applyTyped();
-  };
-  const setDeparture = (end: 'from' | 'to', value: string) => {
-    const parsed = apiContract.cellKeySchema.shape.departureDate.safeParse(value);
-    const current = f.departure;
-    const first = dates[0];
-    const last = dates.at(-1);
-    if (!parsed.success) {
-      // why: clearing one end leaves the range open-ended on that side (the data's own bound); only clearing
-      // the last explicit end removes the filter (UI-9).
-      const other = end === 'from' ? current?.to : current?.from;
-      const bound = end === 'from' ? first : last;
-      if (other === undefined || bound === undefined) {
-        apply(withKey(f, 'departure', undefined));
-        return;
-      }
-      apply(
-        withKey(f, 'departure', end === 'from' ? { from: bound, to: other } : { from: other, to: bound }),
-      );
-      return;
-    }
-    const from = end === 'from' ? parsed.data : (current?.from ?? first);
-    const to = end === 'to' ? parsed.data : (current?.to ?? last);
-    if (from === undefined || to === undefined) return;
-    apply(withKey(f, 'departure', from <= to ? { from, to } : { from: to, to: from }));
   };
 
   return (
@@ -153,19 +105,6 @@ export function Filters({ state, rows, calendarBasis, narrow }: FiltersProps) {
                 onChange={() => apply(withKey(f, 'providerId', toggle(f.providerId ?? [], p)))}
               />
               {COPY.provider[p]}
-            </label>
-          ))}
-        </fieldset>
-        <fieldset className="flex flex-wrap gap-2">
-          <legend className="font-semibold">{COPY.filterDestinations}</legend>
-          {destinations.map((d) => (
-            <label key={d} className="flex min-h-11 items-center gap-1">
-              <input
-                type="checkbox"
-                checked={f.destination?.includes(d) ?? false}
-                onChange={() => apply(withKey(f, 'destination', toggle(f.destination ?? [], d)))}
-              />
-              {d}
             </label>
           ))}
         </fieldset>
@@ -218,62 +157,6 @@ export function Filters({ state, rows, calendarBasis, narrow }: FiltersProps) {
               {COPY.invalidPounds}
             </span>
           ) : null}
-        </span>
-        <span className="flex flex-col">
-          <label htmlFor="filter-nights-min">{COPY.filterNightsMin}</label>
-          <input
-            id="filter-nights-min"
-            className={field}
-            aria-invalid={nightsMinInvalid}
-            aria-describedby={nightsMinInvalid ? 'filter-nights-min-error' : undefined}
-            inputMode="numeric"
-            value={nightsMin}
-            onChange={(e) => setNightsMin(e.target.value)}
-            onBlur={applyTyped}
-          />
-          {nightsMinInvalid ? (
-            <span id="filter-nights-min-error" role="alert" className="text-xs text-red-800">
-              {COPY.invalidWholeNumber}
-            </span>
-          ) : null}
-        </span>
-        <span className="flex flex-col">
-          <label htmlFor="filter-nights-max">{COPY.filterNightsMax}</label>
-          <input
-            id="filter-nights-max"
-            className={field}
-            aria-invalid={nightsMaxInvalid}
-            aria-describedby={nightsMaxInvalid ? 'filter-nights-max-error' : undefined}
-            inputMode="numeric"
-            value={nightsMax}
-            onChange={(e) => setNightsMax(e.target.value)}
-            onBlur={applyTyped}
-          />
-          {nightsMaxInvalid ? (
-            <span id="filter-nights-max-error" role="alert" className="text-xs text-red-800">
-              {COPY.invalidWholeNumber}
-            </span>
-          ) : null}
-        </span>
-        <span className="flex flex-col">
-          <label htmlFor="filter-depart-from">{COPY.filterDepartFrom}</label>
-          <input
-            id="filter-depart-from"
-            className={field}
-            type="date"
-            value={f.departure?.from ?? ''}
-            onChange={(e) => setDeparture('from', e.target.value)}
-          />
-        </span>
-        <span className="flex flex-col">
-          <label htmlFor="filter-depart-to">{COPY.filterDepartTo}</label>
-          <input
-            id="filter-depart-to"
-            className={field}
-            type="date"
-            value={f.departure?.to ?? ''}
-            onChange={(e) => setDeparture('to', e.target.value)}
-          />
         </span>
         <label className="flex min-h-11 items-center gap-1">
           <input

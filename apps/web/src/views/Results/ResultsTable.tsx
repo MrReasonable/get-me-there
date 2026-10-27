@@ -15,6 +15,7 @@ import {
 } from '@tanstack/react-table';
 import { createContext, Fragment, useContext, useEffect, useMemo, useState } from 'react';
 import type { ResultRow } from '../../api/types.js';
+import { BookingAction } from '../../components/BookingAction.js';
 import { ClassBadge } from '../../components/ClassBadge.js';
 import { PriceBoundary } from '../../components/PriceBoundary.js';
 import { PriceCell } from '../../components/PriceCell.js';
@@ -23,6 +24,7 @@ import { COPY } from '../../copy.js';
 import { formatIsoDate, formatIsoDateShort, formatMinutes } from '../../format.js';
 import { useNow } from '../../now.js';
 import { SORT_KEYS, type SortDir } from '../../state/resultsState.js';
+import { Arrives } from '../Dates/BoardCard.js';
 import { ExpandedRow, rowName } from './ExpandedRow.js';
 
 // why: only the expanding feature; sorting and filtering are core's functions over the fetched page (spec §6.5).
@@ -95,13 +97,17 @@ const rowDomId = (id: string) => `row-${id.replace(/[^A-Za-z0-9_-]/g, '_')}`;
  * The sort and the band marks reach the cells through context, so the column definitions never change
  * when the sort or the filters do, and a header keeps keyboard focus after Enter (spec §11 keyboard-operable table).
  */
-const TableContext = createContext<{ sort: Sort; onSort: (k: SortKey) => void; banded: ReadonlySet<string> }>(
-  {
-    sort: null,
-    onSort: () => undefined,
-    banded: new Set(),
-  },
-);
+const TableContext = createContext<{
+  sort: Sort;
+  onSort: (k: SortKey) => void;
+  banded: ReadonlySet<string>;
+  bookingRow: string | null;
+}>({
+  sort: null,
+  onSort: () => undefined,
+  banded: new Set(),
+  bookingRow: null,
+});
 
 function SortHeader({ id }: { id: ColumnId }) {
   const { sort, onSort } = useContext(TableContext);
@@ -145,7 +151,11 @@ function FetchedAgo({ row }: { row: ResultRow }) {
  * mark, destination, short age and "not checked" on the face, the long form in the title, and the class badge below.
  */
 function PriceColumn({ row, narrow }: { row: ResultRow; narrow: boolean }) {
-  const banded = useContext(TableContext).banded.has(rowId(row));
+  const context = useContext(TableContext);
+  const banded = context.banded.has(rowId(row));
+  // why: spec §11 Date pair detail: the cheapest row carries its booking link on its primary row, desktop and 375px,
+  // beside its PriceCell age and class badge; a withheld row (inconsistent provenance) offers none (ruling 3)
+  const booking = context.bookingRow === rowId(row) && provenanceConsistent(row.provenance);
   return (
     <div className={`flex flex-col gap-0.5 ${narrow ? 'min-w-[7.5rem]' : ''}`}>
       <PriceBoundary>
@@ -171,7 +181,39 @@ function PriceColumn({ row, narrow }: { row: ResultRow; narrow: boolean }) {
       ) : null}
       {banded ? <span className="text-xs font-medium">{COPY.bandCheapest(BAND_HOURS)}</span> : null}
       {narrow ? <ClassBadge cls={row.verdictClass} /> : null}
+      {booking ? <BookingAction booking={row.booking} providerId={row.provenance.providerId} /> : null}
     </div>
+  );
+}
+
+/**
+ * One direction's date with "arrives HH:MM" beneath it where the row has segments (spec §11 Date pair detail: the day
+ * offset as on the board, the Dates board's own component and rule), from the first segment's departure and the last
+ * segment's arrival as the source states them.
+ */
+function DirectionDate({
+  date,
+  segments,
+  label,
+  narrow,
+}: {
+  date: string;
+  segments: ResultRow['outbound'];
+  label: string;
+  narrow: boolean;
+}) {
+  return (
+    <span className="flex flex-col">
+      {/* why: UI-005: the short date form at phone width, so both dates fit beside the price; the full form is in the row. */}
+      <span>{(narrow ? formatIsoDateShort : formatIsoDate)(date)}</span>
+      {segments === null || segments.length === 0 ? null : (
+        <Arrives
+          label={label}
+          depart={segments[0]?.departLocal ?? null}
+          arrive={segments.at(-1)?.arriveLocal ?? null}
+        />
+      )}
+    </span>
   );
 }
 
@@ -217,11 +259,25 @@ function cellFor(id: ColumnId, r: ResultRow, narrow: boolean) {
       return <PriceColumn row={r} narrow={narrow} />;
     case 'totalTime':
       return <span>{r.totalMinutes === null ? COPY.notChecked : formatMinutes(r.totalMinutes)}</span>;
-    // why: UI-005: the short date form at phone width, so both dates fit beside the price; the full form is in the row.
+    // why: a withheld row shows no segments (ruling 3), so no arrival either
     case 'departure':
-      return <span>{(narrow ? formatIsoDateShort : formatIsoDate)(r.cell.departureDate)}</span>;
+      return (
+        <DirectionDate
+          date={r.cell.departureDate}
+          segments={withheld ? null : r.outbound}
+          label={COPY.datesView.directionOut}
+          narrow={narrow}
+        />
+      );
     case 'return':
-      return <span>{(narrow ? formatIsoDateShort : formatIsoDate)(r.cell.returnDate)}</span>;
+      return (
+        <DirectionDate
+          date={r.cell.returnDate}
+          segments={withheld ? null : r.inbound}
+          label={COPY.datesView.directionBack}
+          narrow={narrow}
+        />
+      );
     case 'nights':
       return <span>{COPY.nightsValue(r.cell.nights)}</span>;
     case 'destination':
@@ -287,6 +343,8 @@ export interface ResultsTableProps {
   narrow: boolean;
   verificationConfigured: boolean;
   definitionId: string;
+  /** The row the header names as the cheapest found: it carries its booking link on its primary row (spec §11). */
+  bookingRow: string | null;
 }
 
 /** View A table. Rows arrive filtered and sorted by core's functions; the table renders and expands. */
@@ -299,6 +357,7 @@ export function ResultsTable({
   narrow,
   verificationConfigured,
   definitionId,
+  bookingRow,
 }: ResultsTableProps) {
   const [expanded, setExpanded] = useState<ExpandedState>(() =>
     selectedRow === null ? {} : { [selectedRow]: true },
@@ -315,7 +374,7 @@ export function ResultsTable({
     [narrow, adjusted],
   );
   const columns = useMemo(() => buildColumns(ids, narrow), [ids, narrow]);
-  const context = useMemo(() => ({ sort, onSort, banded }), [sort, onSort, banded]);
+  const context = useMemo(() => ({ sort, onSort, banded, bookingRow }), [sort, onSort, banded, bookingRow]);
   const data = useMemo(() => [...rows], [rows]);
   const table = useTable({
     features,
