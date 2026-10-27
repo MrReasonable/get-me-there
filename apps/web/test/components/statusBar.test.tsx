@@ -333,9 +333,7 @@ describe('status bar (spec §11)', () => {
     );
     expect(await screen.findByRole('button', { name: /Run now/ })).toBeDisabled();
     expect(
-      screen.getByText(
-        'The estimate is above what you confirmed; confirm it under Definitions before running.',
-      ),
+      screen.getByText('The estimate is above what you confirmed; confirm it under Searches before running.'),
     ).toBeInTheDocument();
     unmount();
     renderWithProviders(bar({}, false));

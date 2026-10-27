@@ -5,7 +5,7 @@ import { NAV_TIERS, navPatch, type ViewId } from '../state/view.js';
 
 /**
  * Spec §11 layout (revision 48, WP19 Task 19.7): one nav for all views in two labelled tiers, Decide (Dates, History)
- * and Set up (Definitions, Providers, Alerts, Status). Each tier is a list of real links headed by its name in text, so
+ * and Set up (Searches, Providers, Alerts, Status). Each tier is a list of real links headed by its name in text, so
  * they work with the keyboard and new tabs; every link is at least 44 px tall (review UI-15). The current view carries
  * `aria-current="page"` and a cue that is not colour alone. Every link keeps the URL's filters (`navPatch`).
  */

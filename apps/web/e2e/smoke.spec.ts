@@ -1,5 +1,6 @@
 import { SOURCE_LABELS } from '@gmt/core';
 import { expect, type Locator, type Page, test } from '@playwright/test';
+import { PLAN_COPY } from '../src/copy/plan.js';
 import { COPY } from '../src/copy.js';
 import { SMOKE } from './selectors.js';
 
@@ -19,8 +20,8 @@ test('fixture mode: import, run, then Dates, the date pair detail and History sh
   // (1) import the example, switch both stages to the fixture provider, enable, estimate, create, run now
   await page.goto('/?view=definitions');
   await page.getByRole('button', { name: /^Import example/ }).click();
-  // why: the provider checkboxes sit in WP9's advanced fold.
-  await page.getByText(COPY.advanced).click();
+  // why: the provider checkboxes sit behind More options, below the Plan a search form.
+  await page.getByText(PLAN_COPY.moreOptions, { exact: true }).click();
   // why: the example JSON names the real providers, which fixture mode does not configure; switch both stages to the fixture provider.
   for (const prefix of ['p-d-', 'p-v-']) {
     for (const box of await page.locator(`input[type="checkbox"][id^="${prefix}"]`).all())

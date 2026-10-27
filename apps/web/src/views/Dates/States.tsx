@@ -10,7 +10,7 @@ import { hrefWith, navigateTo, updateSearchParams } from '../../state/urlState.j
 
 const D = COPY.datesView;
 
-/** No definition at all: "No search yet" with a link to Definitions. */
+/** No definition at all: "No search yet" with a link to Searches. */
 export function NoSearch() {
   return (
     <p>
