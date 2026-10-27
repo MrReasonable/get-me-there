@@ -2,6 +2,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { asIata } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
+import { isRecord } from '../src/internal/read.js';
 import { RowRejected } from '../src/internal/validate.js';
 import { AIRPORTS_DATA_DIR } from '../src/paths.js';
 import { AirportsRepo } from '../src/repositories/airports.js';
@@ -90,9 +91,15 @@ describe('airports seed and sanity check (spec §7 airports)', () => {
     const codes = (q: string) => repo.search(q, 20).map((a) => a.iata);
     expect(codes('heath')[0]).toBe('LHR');
     const paris = codes('par');
-    expect(paris.slice(0, 4)).toEqual(['CDG', 'LBG', 'ORY', 'BVA']);
+    // Le Bourget has no scheduled service, so it is not suggested
+    expect(paris.slice(0, 3)).toEqual(['CDG', 'ORY', 'BVA']);
+    expect(paris).not.toContain('LBG');
+    // RAF Northolt (no scheduled service) is not suggested for London, but its exact code still finds it
+    expect(codes('lond')).not.toContain('NHT');
+    expect(codes('nht')[0]).toBe('NHT');
     expect(codes('new y').slice(0, 3)).toEqual(['JFK', 'LGA', 'EWR']);
     expect(codes('lond').slice(0, 6).sort()).toEqual(['LCY', 'LGW', 'LHR', 'LTN', 'SEN', 'STN']);
+    expect(repo.get(LHR)).toMatchObject({ kind: 'large', scheduled: true });
     expect(codes('toky').slice(0, 2).sort()).toEqual(['HND', 'NRT']);
   });
 
@@ -102,7 +109,7 @@ describe('airports seed and sanity check (spec §7 airports)', () => {
   }, () => {
     const ds = loadAirportsDataset(AIRPORTS_DATA_DIR);
     // the metro rules are versioned too, so a rule change re-seeds an existing database (dm-M3 re-review)
-    expect(ds.version).toBe('2026-10-01-a89e4e0+metros-1378312633.r2');
+    expect(ds.version).toBe('2026-10-01-a89e4e0+metros-1378312633.r2+ourairports-2026-10-27');
     expect(
       ds.airports.filter((a) => /^[A-Z]{3}$/.test(a.iata) && a.tz.length > 0).length,
     ).toBeGreaterThanOrEqual(AIRPORTS_MIN_ROWS);
@@ -186,6 +193,16 @@ describe('airports seed and sanity check (spec §7 airports)', () => {
     expect(attribution).toContain('CC BY-SA 4.0');
     expect(attribution).toContain('1378312633');
     expect(existsSync(join(AIRPORTS_DATA_DIR, 'metros.json'))).toBe(true);
+    // the OurAirports facts carry their source, download date, checksum and licence (spec §7, revision 51)
+    const oa = readFileSync(join(AIRPORTS_DATA_DIR, 'ourairports.ATTRIBUTION'), 'utf8');
+    expect(oa).toMatch(/public domain/i);
+    const facts: unknown = JSON.parse(readFileSync(join(AIRPORTS_DATA_DIR, 'ourairports.json'), 'utf8'));
+    expect(facts).toMatchObject({
+      source: 'https://ourairports.com/data/airports.csv',
+      retrieved: '2026-10-27',
+    });
+    expect(facts).toHaveProperty('sha256', expect.stringMatching(/^[0-9a-f]{64}$/));
+    expect(oa).toContain(isRecord(facts) ? String(facts.sha256) : 'missing');
   });
 
   it('loadAirportsDataset rejects a malformed file naming the file and field (po-007)', () => {

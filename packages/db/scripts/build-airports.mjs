@@ -3,7 +3,10 @@
 //
 //   node packages/db/scripts/build-airports.mjs --input <mwgg airports.json> --commit <40-hex sha> --date <YYYY-MM-DD>
 //   node packages/db/scripts/build-airports.mjs --wikitext <section wikitext> --revision <Wikipedia revision id> [--retrieved <YYYY-MM-DD>]
-// The second form needs the first's output: metro members are checked against the built airports file (po-002).
+//   node --import tsx packages/db/scripts/build-airports.mjs --ourairports <OurAirports airports.csv> --retrieved <YYYY-MM-DD>
+// The second and third forms need the first's output: metro members are checked against the built airports file (po-002),
+// and the OurAirports facts (spec §7, revision 51) are kept only for its IATA codes.
+import { createHash } from 'node:crypto';
 import { readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
@@ -35,8 +38,40 @@ const { values } = parseArgs({
     wikitext: { type: 'string' },
     revision: { type: 'string' },
     retrieved: { type: 'string' },
+    ourairports: { type: 'string' },
   },
 });
+
+/** The one built airports file's IATA codes (loadAirportsDataset requires exactly one). */
+function builtCodes() {
+  const built = readdirSync(dataDir).filter((f) => /^airports\..+\.json$/.test(f));
+  if (built.length !== 1) throw new Error(`expected exactly one built airports file, found ${built.length}`);
+  return new Set(JSON.parse(readFileSync(dataDir + built[0], 'utf8')).airports.map((a) => a.iata));
+}
+
+if (values.ourairports) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(values.retrieved ?? ''))
+    throw new Error('--retrieved <YYYY-MM-DD> (the download date) is required with --ourairports');
+  // why: the reduction is the tested TypeScript in src, so this form runs under tsx (see the usage above).
+  const { ourAirportsFacts } = await import('../src/seed/ourairports.ts');
+  const bytes = readFileSync(values.ourairports);
+  const { facts, duplicates } = ourAirportsFacts(bytes.toString('utf8'), builtCodes());
+  const out = {
+    source: 'https://ourairports.com/data/airports.csv',
+    retrieved: values.retrieved,
+    sha256: createHash('sha256').update(bytes).digest('hex'),
+    licence: 'Public Domain; see ourairports.ATTRIBUTION',
+    fields:
+      'kinds: IATA codes by OurAirports type (large_airport, medium_airport, small_airport, other); scheduled: IATA codes with scheduled_service = yes',
+    ...facts,
+  };
+  writeFileSync(`${dataDir}ourairports.json`, `${JSON.stringify(out)}\n`);
+  const n = Object.values(facts.kinds).reduce((t, l) => t + l.length, 0);
+  console.log(
+    `wrote ourairports.json: ${n} airports (${facts.kinds.large.length} large, ${facts.kinds.medium.length} medium), ${facts.scheduled.length} with scheduled service; codes on several rows: ${duplicates.length}`,
+  );
+  process.exit(0);
+}
 
 if (values.wikitext) {
   if (!/^\d+$/.test(values.revision ?? ''))

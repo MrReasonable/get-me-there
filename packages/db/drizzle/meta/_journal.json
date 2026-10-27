@@ -71,6 +71,13 @@
       "when": 1793052168835,
       "tag": "0009_wp19_latest_price_idx",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1793067470096,
+      "tag": "0010_airport_kind",
+      "breakpoints": true
     }
   ]
 }

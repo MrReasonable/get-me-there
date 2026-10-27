@@ -143,7 +143,7 @@ describe('@gmt/db public surface (plan "Database" contract)', () => {
     expect(repos.routeHistory).toBeInstanceOf(db.RoutePriceHistoryRepo);
   });
 
-  it('the migrations create exactly the spec §7 tables (0000, plus 0001 adding a column, decision 37, 0002 rebuilding alert_events, decision 56, 0003 rebuilding route_price_history, decision 67, 0004 rebuilding it with point_of_sale, CodeRabbit batch 3, 0005 widening the provider and source CHECKs with operator_notice_keys, WP14, 0006 adding the grid columns, WP15, 0007 the catch-up columns, the firing index and app_meta, WP16a, 0008 the ledger error_kind, WP18, and 0009 the latest-price index, WP19)', () => {
+  it('the migrations create exactly the spec §7 tables (0000, plus 0001 adding a column, decision 37, 0002 rebuilding alert_events, decision 56, 0003 rebuilding route_price_history, decision 67, 0004 rebuilding it with point_of_sale, CodeRabbit batch 3, 0005 widening the provider and source CHECKs with operator_notice_keys, WP14, 0006 adding the grid columns, WP15, 0007 the catch-up columns, the firing index and app_meta, WP16a, 0008 the ledger error_kind, WP18, 0009 the latest-price index, WP19, and 0010 the airport kind and scheduled columns, plan-a-search)', () => {
     const d = freshDb();
     const tables = d.raw
       .prepare<[], { name: string }>(
@@ -152,7 +152,31 @@ describe('@gmt/db public surface (plan "Database" contract)', () => {
       .all()
       .map((r) => r.name);
     expect(tables).toEqual([...SPEC_TABLES].sort());
-    expect(d.raw.prepare('SELECT COUNT(*) AS n FROM __drizzle_migrations').get()).toEqual({ n: 10 });
+    expect(d.raw.prepare('SELECT COUNT(*) AS n FROM __drizzle_migrations').get()).toEqual({ n: 11 });
+  });
+
+  it("0010 adds the airports' kind and scheduled, nullable and checked", () => {
+    const d = freshDb();
+    const cols = d.raw
+      .prepare<[], { name: string; notnull: number }>(
+        'SELECT name, "notnull" FROM pragma_table_info(\'airports\')',
+      )
+      .all();
+    expect(cols.filter((c) => c.name === 'kind' || c.name === 'scheduled')).toEqual([
+      { name: 'kind', notnull: 0 },
+      { name: 'scheduled', notnull: 0 },
+    ]);
+    const insert = (kind: string | null, scheduled: number | null) =>
+      sqliteCode(() =>
+        d.raw
+          .prepare(
+            `INSERT INTO airports (iata, name, city, country, tz, lat, lon, kind, scheduled, source, dataset_version) VALUES ('AAA', 'Synthetic', '', 'ZZ', 'UTC', 0, 0, ?, ?, 's', 'v')`,
+          )
+          .run(kind, scheduled),
+      );
+    expect(insert('huge', 1)).toBe('SQLITE_CONSTRAINT_CHECK');
+    expect(insert('large', 2)).toBe('SQLITE_CONSTRAINT_CHECK');
+    expect(insert(null, null)).toBeNull();
   });
 
   it('foreign keys are declared and enforced', () => {

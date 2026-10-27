@@ -1,0 +1,7 @@
+ourairports.json: two facts per airport, by IATA code, derived from OurAirports' airports.csv
+(https://ourairports.com/data/airports.csv), downloaded 2026-10-27, sha256
+27c6500d0a742edece15c5aaf960e08c01df0d4356c5c86255897b5d3749ad3b. OurAirports releases its data into the public domain
+(https://ourairports.com/data/).
+Changes: only the `type` (as large, medium, small or other) and `scheduled_service` of the rows whose `iata_code` is
+in airports.2026-10-01-a89e4e0.json were kept; a code on several rows takes the larger type, then scheduled service.
+Built by packages/db/scripts/build-airports.mjs --ourairports. The CSV itself is not in the repository.
