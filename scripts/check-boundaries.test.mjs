@@ -1,16 +1,8 @@
 import { spawnSync } from 'node:child_process';
-import {
-  copyFileSync,
-  mkdirSync,
-  mkdtempSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
-import { tmpdir } from 'node:os';
+import { copyFileSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
+import { tempDir } from './test-tempdirs.mjs';
 
 // why: the boundary script guards the whole repository, so it is run, not imported (it exits the process);
 // a scratch tree holds only what it reads, with planted files (reviews tsr2-012, arch-r3-006; decision 49:
@@ -27,11 +19,9 @@ const PACKAGES = [
   'apps/camoufox-worker',
   'apps/cli',
 ];
-let scratch = null;
-
 /** A scratch repository with every package.json, the airports data and the given files. */
 function tree(files) {
-  const root = mkdtempSync(join(tmpdir(), 'gmt-boundaries-'));
+  const root = tempDir('gmt-boundaries-');
   for (const p of PACKAGES) {
     mkdirSync(join(root, p), { recursive: true });
     copyFileSync(join(REPO, p, 'package.json'), join(root, p, 'package.json'));
@@ -44,16 +34,10 @@ function tree(files) {
     mkdirSync(dirname(join(root, path)), { recursive: true });
     writeFileSync(join(root, path), text);
   }
-  scratch = root;
   return root;
 }
 
 const run = (root) => spawnSync(process.execPath, [SCRIPT], { cwd: root, encoding: 'utf8' });
-
-afterEach(() => {
-  if (scratch !== null) rmSync(scratch, { recursive: true, force: true });
-  scratch = null;
-});
 
 // why: ruling 11: each case spawns node over a scratch tree; 60 s survives a loaded runner.
 describe('scripts/check-boundaries.mjs place and suppression checks (decisions 36, 46)', {

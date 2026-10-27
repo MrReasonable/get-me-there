@@ -14,6 +14,7 @@
     "lint:fix": "biome check --write .",
     "boundaries": "node scripts/check-boundaries.mjs",
     "casts": "node scripts/check-casts.mjs",
+    "temp-dirs": "node scripts/check-temp-dirs.mjs",
     "test": "node scripts/ensure-build.mjs && vitest run",
     "test:coverage": "pnpm -r --workspace-concurrency=1 test",
     "mutate": "pnpm --filter @gmt/core mutate && pnpm --filter @gmt/engine mutate && pnpm --filter @gmt/api mutate && pnpm --filter @gmt/camoufox-worker mutate && pnpm --filter @gmt/cli mutate",

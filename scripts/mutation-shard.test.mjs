@@ -1,22 +1,17 @@
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { mutatedFiles, shardOf } from './mutation-shard.mjs';
+import { tempDir } from './test-tempdirs.mjs';
 
 // The mutation workflow splits a package's Stryker `mutate` files across jobs (shards) so each job fits its limit. The
 // shards must cover every mutated file exactly once, whatever the file list, so a file can never drop out of CI.
 const SCRIPT = resolve(import.meta.dirname, 'mutation-shard.mjs');
-const made = [];
-afterEach(() => {
-  for (const d of made.splice(0)) rmSync(d, { recursive: true, force: true });
-});
 
 /** A package with this Stryker `mutate` list and these files (path → byte count). */
 function pkg(mutate, files) {
-  const dir = mkdtempSync(join(tmpdir(), 'gmt-shard-'));
-  made.push(dir);
+  const dir = tempDir('gmt-shard-');
   writeFileSync(join(dir, 'stryker.config.json'), JSON.stringify({ mutate }));
   for (const [p, size] of Object.entries(files)) {
     mkdirSync(join(dir, p, '..'), { recursive: true });

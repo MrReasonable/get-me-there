@@ -1,5 +1,4 @@
-import { cpSync, mkdtempSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { cpSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { asIsoDate } from '@gmt/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -16,6 +15,7 @@ import { calendarPriceMinor, defaultFixtureRoot, loadFixtureTree } from '../../s
 import { fixtureHandlers } from '../../src/testing/handlers.js';
 import { arr, jsonOf, obj } from '../support/guards.js';
 import { server } from '../support/msw.js';
+import { tempDir } from '../support/tempdirs.js';
 
 const ROOT = defaultFixtureRoot();
 const GATE = {
@@ -61,7 +61,7 @@ const withScenario = (respond: FixtureResponse | Record<string, unknown>) => ({
 });
 const scenario = (rules: FixtureRule[]) => fetch(scenarioRequest(rules));
 function brokenTree(file: string, content: unknown): string {
-  const copy = join(mkdtempSync(join(tmpdir(), 'gmt-t-')), 'fixtures', 'synthetic', 'fixture');
+  const copy = join(tempDir('gmt-t-'), 'fixtures', 'synthetic', 'fixture');
   cpSync(ROOT, copy, { recursive: true });
   writeFileSync(join(copy, file), JSON.stringify(content));
   return copy;
@@ -77,9 +77,7 @@ describe('fixture tree loader (spec §5.5)', () => {
     expect(t.itinerary.get('LHR-JFK')?.chain).toBe(false);
   });
   it('refuses a tree that is not fixtures/synthetic/fixture', () => {
-    expect(() => loadFixtureTree(mkdtempSync(join(tmpdir(), 'gmt-t-')))).toThrow(
-      /fixtures\/synthetic\/fixture/,
-    );
+    expect(() => loadFixtureTree(tempDir('gmt-t-'))).toThrow(/fixtures\/synthetic\/fixture/);
   });
   const goodCal = {
     synthetic: true,

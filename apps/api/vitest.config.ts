@@ -31,7 +31,7 @@ export default defineConfig({
   test: {
     name: 'api',
     include: ['test/**/*.test.ts'],
-    setupFiles: ['test/support/setup.ts'],
+    setupFiles: ['test/support/setup.ts', 'test/support/tempdirs.ts'],
     coverage: {
       provider: 'v8',
       include: ['src/**/*.ts'],

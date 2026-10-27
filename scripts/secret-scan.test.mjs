@@ -1,26 +1,16 @@
 import { spawnSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { chmodSync, mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
+import { tempDir } from './test-tempdirs.mjs';
 
 // why: decision 49 keeps tests of root scripts beside them. The sentinel tests in apps/api/test/security prove what the
 // scan finds; these pin what it may skip: only a fixture root that is absent (spec §5.3). Any other error while
 // walking an existing root fails the scan, so an unreadable or broken tree never prints "clean" (CodeRabbit batch 3).
 const SCRIPT = resolve(import.meta.dirname, 'secret-scan.mjs');
 const ROOT = 'packages/providers/fixtures';
-/** @type {string[]} */
-const dirs = [];
-afterEach(() => {
-  for (const d of dirs.splice(0)) {
-    spawnSync('chmod', ['-R', 'u+rwx', d]);
-    rmSync(d, { recursive: true, force: true });
-  }
-});
-
 function repo() {
-  const d = mkdtempSync(join(tmpdir(), 'gmt-secret-scan-'));
-  dirs.push(d);
+  const d = tempDir('gmt-secret-scan-');
   return d;
 }
 // why: an empty environment, so no secret a developer's shell holds reaches the scan and the cases stay deterministic;

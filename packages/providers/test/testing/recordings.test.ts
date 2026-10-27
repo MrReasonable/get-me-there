@@ -1,23 +1,15 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
   recordingsPresent,
   recordingsPresentForKind,
   SKIP_SUFFIX,
   skipTitle,
 } from '../../src/testing/recordings.js';
+import { tempDir } from '../support/tempdirs.js';
 
-const dirs: string[] = [];
-const tmp = (): string => {
-  const d = mkdtempSync(join(tmpdir(), 'gmt-recpresent-'));
-  dirs.push(d);
-  return d;
-};
-afterEach(() => {
-  for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
-});
+const tmp = (): string => tempDir('gmt-recpresent-');
 
 describe('recordingsPresent', () => {
   it('reports absent on an empty directory and on a missing one', () => {

@@ -1,21 +1,15 @@
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { chmodSync, mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { systemFiles } from '../../src/exec/files.js';
 import { MemoryFs } from '../../src/exec/memory.js';
-
-const dirs: string[] = [];
-afterEach(() => {
-  for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
-});
+import { tempDir } from '../support/tempdirs.js';
 
 // why: the two Files implementations must report the same facts for the same tree, so a planner tested on MemoryFs
 // behaves the same on the real disk
 describe.skipIf(process.platform === 'win32')('systemFiles and MemoryFs agree (POSIX modes)', () => {
   it('report text, mode, owner, size, directories, symlinks and listings alike', () => {
-    const d = mkdtempSync(join(tmpdir(), 'gmt-files-'));
-    dirs.push(d);
+    const d = tempDir('gmt-files-');
     mkdirSync(join(d, 'sub'));
     chmodSync(join(d, 'sub'), 0o700);
     writeFileSync(join(d, 'sub', 'a.env'), 'A=1\n');
@@ -56,8 +50,7 @@ describe.skipIf(process.platform === 'win32')('systemFiles and MemoryFs agree (P
 // mistakes an unreadable app.env for a missing one and writes a new one over it
 describe.skipIf(process.platform === 'win32' || process.getuid?.() === 0)('unreadable is not absent', () => {
   it('systemFiles.read throws for a file it may not read, and returns null only when there is none', () => {
-    const d = mkdtempSync(join(tmpdir(), 'gmt-files-'));
-    dirs.push(d);
+    const d = tempDir('gmt-files-');
     writeFileSync(join(d, 'locked.env'), 'A=1\n');
     chmodSync(join(d, 'locked.env'), 0o000);
     expect(() => systemFiles.read(join(d, 'locked.env'))).toThrow(/EACCES|permission/i);

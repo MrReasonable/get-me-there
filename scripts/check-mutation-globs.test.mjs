@@ -1,9 +1,9 @@
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { checkMutationGlobs, mutatedBy, scopeOf } from './check-mutation-globs.mjs';
+import { tempDir } from './test-tempdirs.mjs';
 
 // Decision 77, ts3-005 (WP16a Task 16a.8; review R28): a brief's front-matter mutation scope must sit in its package's
 // Stryker `mutate` list, or the mutation run silently leaves the file out.
@@ -14,7 +14,7 @@ const brief = (fields, status = 'draft') => `---\nwp: 99\n${fields}\nstatus: ${s
 
 /** A tiny workspace: one package with a Stryker config and three source files, and one brief. */
 function workspace(mutate, text) {
-  const root = mkdtempSync(join(tmpdir(), 'gmt-globs-'));
+  const root = tempDir('gmt-globs-');
   writeFileSync(join(root, 'pnpm-workspace.yaml'), 'packages:\n  - packages/*\n');
   const pkg = join(root, 'packages', 'core');
   mkdirSync(join(pkg, 'src', 'camoufox'), { recursive: true });

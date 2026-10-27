@@ -1,9 +1,9 @@
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { MAX_TIMEOUT_SHARE, mergeReports, mutationScore, timeoutShare } from './mutation-gate.mjs';
+import { tempDir } from './test-tempdirs.mjs';
 
 // Ruling 10 (decision 67): Stryker scores a timed-out mutant as detected, so a loaded machine can push the score up.
 // The gate fails a run whose timed-out mutants exceed 5% of those tested, so load can never pass the 80% threshold.
@@ -11,7 +11,7 @@ const report = (statuses) => ({
   files: { 'src/a.ts': { mutants: statuses.map((status, i) => ({ id: String(i), status })) } },
 });
 const run = (r) => {
-  const dir = mkdtempSync(join(tmpdir(), 'gmt-mutation-'));
+  const dir = tempDir('gmt-mutation-');
   const file = join(dir, 'mutation.json');
   writeFileSync(file, JSON.stringify(r));
   return spawnSync(process.execPath, [resolve(import.meta.dirname, 'mutation-gate.mjs'), file], {
@@ -102,7 +102,7 @@ describe('mutation gate over a package’s shards', { timeout: 60_000 }, () => {
     files: { [file]: { mutants: statuses.map((status, i) => ({ id: `${file}-${i}`, status })) } },
   });
   const write = (reports, brk = 80) => {
-    const dir = mkdtempSync(join(tmpdir(), 'gmt-mutation-'));
+    const dir = tempDir('gmt-mutation-');
     const config = join(dir, 'stryker.config.json');
     writeFileSync(config, JSON.stringify({ thresholds: { high: 90, low: 80, break: brk } }));
     const files = reports.map((r, i) => {

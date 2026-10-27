@@ -1,5 +1,4 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { asIsoDate, asIsoDateTime, fixedClock, type IsoDateTime } from '@gmt/core';
 import { HttpResponse, http } from 'msw/http';
@@ -11,11 +10,12 @@ import { loadRecorded, replayHandlers } from '../../src/testing/replay.js';
 import { ALL_SECRETS, makeKit, req, SEARCH } from '../fakes.js';
 import { arr, jsonOf, obj, str } from '../support/guards.js';
 import { server } from '../support/msw.js';
+import { tempDir } from '../support/tempdirs.js';
 import { driveError, useFakeTime } from '../support/time.js';
 
 const T0 = '2026-10-14T15:00:00.000Z';
 function tree(): string {
-  const root = join(mkdtempSync(join(tmpdir(), 'gmt-rep-')), 'fixtures', 'recorded');
+  const root = join(tempDir('gmt-rep-'), 'fixtures', 'recorded');
   mkdirSync(root, { recursive: true });
   return root;
 }

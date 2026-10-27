@@ -1,28 +1,21 @@
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
+import { tempDir } from './test-tempdirs.mjs';
 
 // why: decision 49 keeps tests of root scripts beside them, run by the root Vitest project `scripts`.
 // The cast check is the project's one enforcement of "no `as` except `as const`" (decision 45); this pins what it
 // catches and what it lets through, and that it never passes on an empty file list
 const REPO = fileURLToPath(new URL('../', import.meta.url));
 const SCRIPT = join(REPO, 'scripts', 'check-casts.mjs');
-/** @type {string[]} */
-const dirs = [];
-afterEach(() => {
-  for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
-});
-
 /**
  * @param {Record<string, string>} files
  * @param {string} [cwd]
  */
 function check(files, cwd = REPO) {
-  const dir = mkdtempSync(join(tmpdir(), 'casts-'));
-  dirs.push(dir);
+  const dir = tempDir('casts-');
   const paths = Object.entries(files).map(([name, text]) => {
     const p = join(dir, name);
     writeFileSync(p, text);
@@ -73,8 +66,7 @@ describe('scripts/check-casts.mjs', { timeout: 60_000 }, () => {
     expect(r.stderr).toContain('c.tsx:2: v as string');
   });
   it('refuses an empty file list instead of passing', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'casts-empty-'));
-    dirs.push(dir);
+    const dir = tempDir('casts-empty-');
     // why: outside a git work tree with no files given, git lists nothing (or fails); either way the check must fail
     const r = spawnSync('git', ['init', '-q'], { cwd: dir });
     expect(r.status).toBe(0);
@@ -85,8 +77,7 @@ describe('scripts/check-casts.mjs', { timeout: 60_000 }, () => {
   it('with no arguments scans files directly under src/ and test/, nested ones and package-root config files', () => {
     // why: plain git pathspecs need a subdirectory to match `src/**/*.ts`, so files directly under src/ were never read
     // (code-architect review 1); a temporary repository pins every location the default list must reach
-    const dir = mkdtempSync(join(tmpdir(), 'casts-repo-'));
-    dirs.push(dir);
+    const dir = tempDir('casts-repo-');
     expect(spawnSync('git', ['init', '-q'], { cwd: dir }).status).toBe(0);
     const cast = 'const v: unknown = 1;\nexport const w = v as string;\n';
     const planted = [

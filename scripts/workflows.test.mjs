@@ -1,9 +1,9 @@
 import { spawnSync } from 'node:child_process';
-import { chmodSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { chmodSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import YAML from 'yaml';
+import { tempDir } from './test-tempdirs.mjs';
 
 // why: review wp12-security I1 — a workflow without a permissions block runs with the repository's default token scope,
 // which may be read-write. Every workflow must say what it needs, and none may ask to write (decision 63).
@@ -119,7 +119,7 @@ describe('the docker job keeps credentials out of the image history', { timeout:
   // public CI log. The step's own line runs here against a stub docker whose history holds a planted credential: it
   // must fail and say how many lines matched, and its output must hold no part of the planted value.
   it('a planted credential fails the step without any part of it reaching the log', () => {
-    const stub = mkdtempSync(join(tmpdir(), 'gmt-docker-stub-'));
+    const stub = tempDir('gmt-docker-stub-');
     try {
       const planted = 'PLANTEDzq7Xv9Lm2Rk4Tw8Yp';
       writeFileSync(
@@ -143,7 +143,7 @@ describe('the docker job keeps credentials out of the image history', { timeout:
   });
 
   it('a clean history passes the step silently', () => {
-    const stub = mkdtempSync(join(tmpdir(), 'gmt-docker-stub-'));
+    const stub = tempDir('gmt-docker-stub-');
     try {
       writeFileSync(join(stub, 'docker'), "#!/bin/sh\nprintf '%s\\n' 'ENV NODE_ENV=production'\n");
       chmodSync(join(stub, 'docker'), 0o755);

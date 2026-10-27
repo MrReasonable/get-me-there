@@ -1,6 +1,5 @@
-import { copyFileSync, existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { Deps } from '../../src/deps.js';
 import { systemFiles } from '../../src/exec/files.js';
@@ -9,6 +8,7 @@ import { systemExecutor } from '../../src/exec/system.js';
 import type { Action, Executor } from '../../src/plan/action.js';
 import { currentPlatform } from '../../src/platform/current.js';
 import { scriptedAsk, stubHttp, type TestIo, testIo } from '../support/deps.js';
+import { tempDir } from '../support/tempdirs.js';
 
 /**
  * The repository root, found upwards: why: the mutation run (U10) runs these tests from a Stryker sandbox copy nested
@@ -61,7 +61,7 @@ export function sampleDb(path: string, rows: number, inWal = 0) {
  */
 export function inspect(path: string): { rows: number; ok: string } | null {
   if (!existsSync(path)) return null;
-  const dir = mkdtempSync(join(tmpdir(), 'gmt-inspect-'));
+  const dir = tempDir('gmt-inspect-');
   try {
     copyFileSync(path, join(dir, 'copy.db'));
     const db = new Database(join(dir, 'copy.db'));
@@ -180,7 +180,7 @@ export function realDeps(
   home: string;
   io: TestIo;
 } {
-  const home = opts.home ?? mkdtempSync(join(tmpdir(), 'gmt-real-'));
+  const home = opts.home ?? tempDir('gmt-real-');
   const run = realRunner({
     ...(opts.volume ? { volume: opts.volume } : {}),
     ...(opts.log ? { log: opts.log } : {}),

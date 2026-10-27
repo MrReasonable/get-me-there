@@ -1,15 +1,5 @@
 import { createHash } from 'node:crypto';
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-} from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { Runner } from '../../src/exec/runner.js';
@@ -17,20 +7,15 @@ import { systemRunner } from '../../src/exec/runner.js';
 import { systemExecutor } from '../../src/exec/system.js';
 import { runAction } from '../../src/plan/action.js';
 import { guarded, killTracked } from '../support/children.js';
+import { tempDir } from '../support/tempdirs.js';
 
 // why: these tests start real children (node, tar, zip). Stryker's per-mutant command leaves this file out: a bailed
 // test worker killed while a child is being started can leave that child stuck in the kernel (PR #11), and
 // system.test.ts covers the same rules with stand-in runners. The normal suite runs it on every push.
-const dirs: string[] = [];
 afterEach(() => {
-  for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
   expect(killTracked()).toEqual([]);
 });
-const tmp = () => {
-  const d = mkdtempSync(join(tmpdir(), 'gmt-sysexec-'));
-  dirs.push(d);
-  return d;
-};
+const tmp = () => tempDir('gmt-sysexec-');
 const mode = (p: string) => statSync(p).mode & 0o777;
 const sha = (b: Buffer | string) => createHash('sha256').update(b).digest('hex');
 

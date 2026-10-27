@@ -3,14 +3,12 @@ import {
   cpSync,
   existsSync,
   mkdirSync,
-  mkdtempSync,
   readdirSync,
   readFileSync,
   realpathSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { asIsoDateTime, fixedClock } from '@gmt/core';
 import { HttpResponse, http } from 'msw/http';
@@ -28,12 +26,13 @@ import {
 import { ALL_SECRETS, makeKit, req, SEARCH, SENTINELS } from '../fakes.js';
 import { obj } from '../support/guards.js';
 import { server } from '../support/msw.js';
+import { tempDir } from '../support/tempdirs.js';
 import { drive, driveError, useFakeTime } from '../support/time.js';
 
 const T0 = '2026-10-14T15:00:00.000Z';
 const key = SENTINELS.searchapi.reveal();
 function tree(): string {
-  const root = join(mkdtempSync(join(tmpdir(), 'gmt-rec-')), 'fixtures', 'recorded');
+  const root = join(tempDir('gmt-rec-'), 'fixtures', 'recorded');
   mkdirSync(root, { recursive: true });
   return root;
 }
@@ -220,7 +219,7 @@ describe('createRecorder (spec §5.3 "Recorder", §5.5)', () => {
     const clock = fixedClock(asIsoDateTime(T0));
     expect(() =>
       createRecorder({
-        root: mkdtempSync(join(tmpdir(), 'gmt-x-')),
+        root: tempDir('gmt-x-'),
         secrets: ALL_SECRETS,
         clock,
         recordedBy: 'x',
@@ -239,7 +238,7 @@ describe('createRecorder (spec §5.3 "Recorder", §5.5)', () => {
 
   it('refuses a provider or endpoint directory that is a symlink, creating nothing outside the tree (review I1)', async () => {
     const root = tree();
-    const outside = mkdtempSync(join(tmpdir(), 'gmt-out-'));
+    const outside = tempDir('gmt-out-');
     symlinkSync(outside, join(root, 'searchapi'));
     expect(
       await recorder(root)
@@ -249,7 +248,7 @@ describe('createRecorder (spec §5.3 "Recorder", §5.5)', () => {
     expect(readdirSync(outside)).toEqual([]);
 
     const root2 = tree();
-    const outside2 = mkdtempSync(join(tmpdir(), 'gmt-out-'));
+    const outside2 = tempDir('gmt-out-');
     mkdirSync(join(root2, 'searchapi'));
     symlinkSync(outside2, join(root2, 'searchapi', '_api_v1_search'));
     expect(
@@ -261,8 +260,8 @@ describe('createRecorder (spec §5.3 "Recorder", §5.5)', () => {
   });
 
   it('refuses a root that is a symlink ending in fixtures/recorded whose real path does not (review I1)', () => {
-    const real = mkdtempSync(join(tmpdir(), 'gmt-real-'));
-    const parent = join(mkdtempSync(join(tmpdir(), 'gmt-lnk-')), 'fixtures');
+    const real = tempDir('gmt-real-');
+    const parent = join(tempDir('gmt-lnk-'), 'fixtures');
     mkdirSync(parent);
     symlinkSync(real, join(parent, 'recorded'));
     expect(() =>
@@ -330,7 +329,7 @@ describe('createRecorder (spec §5.3 "Recorder", §5.5)', () => {
   });
 
   it('reports a root it cannot resolve for a reason other than absence as that error, not as missing (re-review low 1)', () => {
-    const parent = join(mkdtempSync(join(tmpdir(), 'gmt-loop-')), 'fixtures');
+    const parent = join(tempDir('gmt-loop-'), 'fixtures');
     mkdirSync(parent);
     const loop = join(parent, 'recorded');
     symlinkSync(loop, loop);
@@ -359,7 +358,7 @@ describe('createRecorder (spec §5.3 "Recorder", §5.5)', () => {
   it('assertRecordedRoot returns the real root, and refuses a missing root, a wrong suffix and a symlink pointing elsewhere (WP4b I-3)', () => {
     const root = tree();
     expect(assertRecordedRoot(root)).toBe(realpathSync(root));
-    const base = mkdtempSync(join(tmpdir(), 'gmt-root-'));
+    const base = tempDir('gmt-root-');
     expect(() => assertRecordedRoot(join(base, 'absent', 'fixtures', 'recorded'))).toThrow(
       RecorderRefusedError,
     );
@@ -406,9 +405,9 @@ describe('recorded-tree loaders (spec §9 item 2 fixture-tree rules)', () => {
   it('loadRecordedJson tests the fixtures/recorded suffix on the real root, as the recorder does (re-review low 2)', async () => {
     const realRoot = tree();
     const path = await recorder(realRoot).record(call(SEARCH, { price: 1 }));
-    const elsewhere = mkdtempSync(join(tmpdir(), 'gmt-else-'));
+    const elsewhere = tempDir('gmt-else-');
     cpSync(join(realRoot, 'searchapi'), join(elsewhere, 'searchapi'), { recursive: true });
-    const parent = join(mkdtempSync(join(tmpdir(), 'gmt-lnk-')), 'fixtures');
+    const parent = join(tempDir('gmt-lnk-'), 'fixtures');
     mkdirSync(parent);
     symlinkSync(elsewhere, join(parent, 'recorded'));
     const viaLink = join(parent, 'recorded', relative(realRoot, path));
@@ -418,7 +417,7 @@ describe('recorded-tree loaders (spec §9 item 2 fixture-tree rules)', () => {
 
   it('refuses a file outside the recorded root and a synthetic file inside it', () => {
     const root = tree();
-    const outside = join(mkdtempSync(join(tmpdir(), 'gmt-o-')), 'x.json');
+    const outside = join(tempDir('gmt-o-'), 'x.json');
     writeFileSync(outside, JSON.stringify(withContentHash({ recordedAt: T0, recordedBy: 'x' })));
     expect(() => loadRecordedJson(outside, root)).toThrow(/recorded root/);
     const syn = join(root, 'syn.json');

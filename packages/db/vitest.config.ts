@@ -9,6 +9,7 @@ export default defineConfig({
   test: {
     name: 'db',
     include: ['test/**/*.test.ts'],
+    setupFiles: ['test/support/tempdirs.ts'],
     coverage: {
       provider: 'v8',
       include: ['src/**/*.ts'],
