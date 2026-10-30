@@ -623,9 +623,21 @@
     0 0 0 2px var(--focus-in),
     0 0 0 7px var(--focus-in);
 }
-main:focus,
-main:focus-visible {
+/* The overview's ringed lamp keeps its inset selection ring under the focus ring (spec §11 Rings: never colour alone) */
+[data-ringed]:focus-visible {
+  box-shadow:
+    inset 0 0 0 2px #000,
+    inset 0 0 0 3px #fff,
+    0 0 0 2px var(--focus-in),
+    0 0 0 7px var(--focus-in);
+}
+/* The skip link's target: a ring inside the edge for keyboard focus, so it never draws around the page from outside;
+   none for a pointer's focus */
+main:focus:not(:focus-visible) {
   outline: none;
+}
+main:focus-visible {
+  outline-offset: -3px;
   box-shadow: none;
 }
 

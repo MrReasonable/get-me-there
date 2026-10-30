@@ -64,7 +64,10 @@ test('fixture mode: import, run, then Dates, the date pair detail and History sh
   await expect(stop).toBeFocused();
   await expect(stop).toHaveCSS('outline-style', 'solid');
   // the black gap of the one focus ring (world.css, unlayered): no lamp's own ring shadow may take its place
-  await expect(stop).toHaveCSS('box-shadow', /0px 0px 0px 7px/);
+  await expect(stop).toHaveCSS(
+    'box-shadow',
+    /rgb\(0, 0, 0\) 0px 0px 0px 2px, rgb\(0, 0, 0\) 0px 0px 0px 7px$/,
+  );
   await first.hover();
   const lit = page.locator(SMOKE.litCell);
   await expect(lit).toHaveCount(1);
