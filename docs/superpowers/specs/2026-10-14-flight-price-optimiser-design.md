@@ -1,6 +1,6 @@
 # get-me-there — Flight Price Intelligence & Flexible-Date Optimiser
 
-**Design spec, revision 52.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
+**Design spec, revision 53.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
 four full-roster reviews (145, 140, 126 and 101 findings; zero Critical since
 revision 2) and the provider spike. Revision 9 folds in the three decisions
 taken at approval (the self-scraping fallback in §2, the dashboard readings in
@@ -325,8 +325,13 @@ the name: a tab with none there is unpriced.
   `unrecognised`; so a view across 31 December rolls over. The selected-pair
   line ("14 – 24 Mar 2027", "28 Mar – 7 Apr 2027", "27 Dec 2026 – 6 Jan
   2027", or "20 – 23 Oct" in the current year) must name the query's pair;
-  the first view's selected cell must be that pair, at the price line's price
-  ("£462 · Round trip"), else `unrecognised`.
+  the first view has exactly one selected cell and it must be that pair, at
+  the price line's price ("£462 · Round trip"), else `unrecognised`. Where the
+  unpriced forms are read, the query's pair may itself be unpriced: the grid
+  still selects it ("no flights, 14 Nov to 22 Nov, selected") and prints no
+  range or price line for it, and that first view is good; a range line that
+  is printed must still name the pair, and a price line beside an unpriced
+  selected pair is `unrecognised`.
   **Stay range.** A block of departures `d…d+6` and returns `r…r+6` holds
   stays of `r − d − 6` to `r − d + 6` nights on its 13 diagonals. Blocks are
   laid on a lattice anchored at the later of the window's first departure and
@@ -3781,6 +3786,18 @@ as specified in §5.3; no secrets, no full URLs.
 ---
 
 ## 17. Changelog
+
+### Revision 53: an unpriced searched pair is a good first view (2026-10-27)
+
+The operator's run of 2026-10-27 07:41 priced its first page, then stopped as `blocked:unrecognised` by rule
+`grid:first-view:selected-cell`, which started the 1 h cool-down and skipped the rest of the run. A grid recording of a
+query whose own pair the grid shows without a price (grid/2026-10-27/2, darwin-arm64) shows the grid still selects
+that pair, naming the cell "no flights, <d> <Mon> to <d> <Mon>, selected", and prints no range or price line for it.
+The reader took the selection from priced cells only and its unpriced grammar refused the ", selected" suffix, so it
+found no selection and refused a good page; the same suffix made that cell `cell-unparsed`. §2 "Years" now states the
+unpriced first view: exactly one selected cell, the query's pair, no range line or one naming the pair, and no price
+line. The cool-down that stop started was the reader's error, not the site's; it was cleared by hand, per the
+operator's standing rule.
 
 ### Revision 52: a stopped page names its rule (2026-10-27)
 

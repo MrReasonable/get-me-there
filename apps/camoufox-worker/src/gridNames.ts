@@ -39,7 +39,9 @@ const POUNDS = '([1-9]\\d{0,2}(?:,\\d{3})*)';
 const CELL = new RegExp(
   `^£${POUNDS}(, cheapest price|, low price)?, (\\d{1,2}) (${MON}) to (\\d{1,2}) (${MON})(, selected)?$`,
 );
-const UNPRICED = new RegExp(`^(no flights|price unknown), (\\d{1,2}) (${MON}) to (\\d{1,2}) (${MON})$`);
+const UNPRICED = new RegExp(
+  `^(no flights|price unknown), (\\d{1,2}) (${MON}) to (\\d{1,2}) (${MON})(, selected)?$`,
+);
 const LABEL = new RegExp(`(Mon|Tue|Wed|Thu|Fri|Sat|Sun) (\\d{1,2}) (${MON})`, 'g');
 const RANGE = new RegExp(`^(\\d{1,2})(?: (${MON}))?(?: (\\d{4}))? – (\\d{1,2}) (${MON})(?: (\\d{4}))?$`);
 const PRICE_LINE = new RegExp(`^£${POUNDS} · Round trip$`);
@@ -81,11 +83,14 @@ export interface UnpricedCellName {
   status: 'no-flights' | 'price-unknown';
   dep: DayMonth;
   ret: DayMonth;
+  /** The query's own pair, when the grid shows it without a price (grid/2026-10-27/2: "no flights, 14 Nov to 22 Nov, selected"). */
+  selected: boolean;
 }
 
 /**
  * "no flights, 14 Nov to 20 Nov" and "price unknown, 10 Nov to 24 Nov", exactly as grid/2026-10-26/7 and 8 recorded
- * them (no mark and no ", selected" was ever seen on one, so a name carrying either is unparsed). Read only where
+ * them, with ", selected" when the pair is the query's own (grid/2026-10-27/2: the grid selects the searched pair even
+ * when it has no price). No mark was ever seen on one, so a name carrying a mark is unparsed. Read only where
  * GRID_UNPRICED_VERIFIED is set; the caller decides.
  */
 export function parseUnpricedCellName(name: string): UnpricedCellName | null {
@@ -94,7 +99,12 @@ export function parseUnpricedCellName(name: string): UnpricedCellName | null {
   const dep = dayMonth(at(m, 2), at(m, 3));
   const ret = dayMonth(at(m, 4), at(m, 5));
   if (dep === null || ret === null) return null;
-  return { status: at(m, 1) === 'no flights' ? 'no-flights' : 'price-unknown', dep, ret };
+  return {
+    status: at(m, 1) === 'no flights' ? 'no-flights' : 'price-unknown',
+    dep,
+    ret,
+    selected: at(m, 6) !== '',
+  };
 }
 
 export function parseCellName(name: string): CellName | null {

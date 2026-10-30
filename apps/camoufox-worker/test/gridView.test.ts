@@ -357,12 +357,98 @@ describe('interpretView with the unpriced cells (GRID_UNPRICED_VERIFIED)', () =>
       unparsed: 49,
     });
   });
-  it('the first view’s selected cell must still be priced: an unpriced name never carries the selection', () => {
+  // why: grid/2026-10-27/2: the grid selects the query's pair even when it shows no price for it, and prints no range
+  // or price line for it; a refused first view there stopped a real run (rule grid:first-view:selected-cell)
+  function unpricedQuery(o: { ranges?: string[]; prices?: string[] } = {}): RawView {
     const r = sparse();
-    const names = r.candidates.map((x) =>
-      x === '£462, 14 Mar to 24 Mar, selected' ? 'no flights, 14 Mar to 24 Mar, selected' : x,
+    return {
+      ...r,
+      candidates: r.candidates.map((x) =>
+        x === '£462, 14 Mar to 24 Mar, selected' ? 'no flights, 14 Mar to 24 Mar, selected' : x,
+      ),
+      ranges: o.ranges ?? [],
+      prices: o.prices ?? [],
+    };
+  }
+  it('an unpriced query pair that is selected, with no range or price line, is a good first view', () => {
+    const v = interpretView(unpricedQuery(), Q.dep, Q, ON);
+    if (v.kind !== 'view') throw new Error(v.why);
+    expect(v.structural).toBe('ok');
+    expect(v.cells.find((c) => c.departureDate === Q.dep && c.returnDate === Q.ret)).toEqual({
+      status: 'no-flights',
+      departureDate: Q.dep,
+      returnDate: Q.ret,
+    });
+  });
+  it('a range line printed for an unpriced query pair must still name its dates', () => {
+    expect(interpretView(unpricedQuery({ ranges: ['14 – 24 Mar 2027'] }), Q.dep, Q, ON)).toMatchObject({
+      kind: 'view',
+    });
+    expect(interpretView(unpricedQuery({ ranges: ['15 – 24 Mar 2027'] }), Q.dep, Q, ON)).toEqual({
+      kind: 'unrecognised',
+      why: 'first-view',
+      check: 'range',
+    });
+  });
+  it('surplus lines beside an unpriced query pair are refused: two range lines, or any price line', () => {
+    expect(
+      interpretView(unpricedQuery({ ranges: ['14 – 24 Mar 2027', '15 – 24 Mar 2027'] }), Q.dep, Q, ON),
+    ).toEqual({ kind: 'unrecognised', why: 'first-view', check: 'range' });
+    expect(
+      interpretView(unpricedQuery({ prices: ['£462 · Round trip', '£463 · Round trip'] }), Q.dep, Q, ON),
+    ).toEqual({ kind: 'unrecognised', why: 'first-view', check: 'price' });
+  });
+  it('a second selection the reading discards (dates off the lines) still refuses the first view', () => {
+    const r = unpricedQuery();
+    const extra = [...r.candidates, 'no flights, 1 Jan to 2 Jan, selected'];
+    expect(interpretView({ ...r, candidates: extra }, Q.dep, Q, ON)).toEqual({
+      kind: 'unrecognised',
+      why: 'first-view',
+      check: 'selected-cell',
+    });
+  });
+  it('a price line beside an unpriced query pair is a contradiction: refused', () => {
+    expect(interpretView(unpricedQuery({ prices: ['£462 · Round trip'] }), Q.dep, Q, ON)).toEqual({
+      kind: 'unrecognised',
+      why: 'first-view',
+      check: 'price',
+    });
+  });
+  it('the selection must still be the query pair, and only one cell may carry it', () => {
+    const r = unpricedQuery();
+    const other = r.candidates.map((x) =>
+      x === 'no flights, 14 Mar to 24 Mar, selected'
+        ? 'no flights, 14 Mar to 24 Mar'
+        : x === 'no flights, 16 Mar to 24 Mar'
+          ? 'no flights, 16 Mar to 24 Mar, selected'
+          : x,
     );
-    expect(interpretView({ ...r, candidates: names }, Q.dep, Q, ON)).toEqual({
+    expect(interpretView({ ...r, candidates: other }, Q.dep, Q, ON)).toEqual({
+      kind: 'unrecognised',
+      why: 'first-view',
+      check: 'selected-cell',
+    });
+    const twice = r.candidates.map((x) =>
+      x === 'no flights, 16 Mar to 24 Mar' ? 'no flights, 16 Mar to 24 Mar, selected' : x,
+    );
+    expect(interpretView({ ...r, candidates: twice }, Q.dep, Q, ON)).toEqual({
+      kind: 'unrecognised',
+      why: 'first-view',
+      check: 'selected-cell',
+    });
+    // why: a second selection ahead of the query pair, so the last one read is the query's own: only the count refuses
+    const first = r.candidates.findIndex((x) => x !== 'no flights, 14 Mar to 24 Mar, selected');
+    const query = r.candidates.indexOf('no flights, 14 Mar to 24 Mar, selected');
+    expect(first).toBeLessThan(query);
+    const ahead = r.candidates.map((x, i) => (i === first ? `${x ?? ''}, selected` : x));
+    expect(interpretView({ ...r, candidates: ahead }, Q.dep, Q, ON)).toEqual({
+      kind: 'unrecognised',
+      why: 'first-view',
+      check: 'selected-cell',
+    });
+  });
+  it('without the flag an unpriced selected name is unparsed, so nothing is selected: refused', () => {
+    expect(interpretView(unpricedQuery(), Q.dep, Q)).toEqual({
       kind: 'unrecognised',
       why: 'first-view',
       check: 'selected-cell',
