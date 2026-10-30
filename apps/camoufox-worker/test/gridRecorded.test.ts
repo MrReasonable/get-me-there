@@ -147,7 +147,9 @@ async function serve(
 ) {
   const first = queryView(rec);
   const anchor = anchorOf(rec);
-  const sel = parseCellName(first.candidates.find((c) => c?.endsWith(', selected')) ?? '');
+  const selName = first.candidates.find((c) => c?.endsWith(', selected')) ?? '';
+  // why: the query pair may be unpriced and still selected (grid/2026-10-27/2)
+  const sel = parseCellName(selName) ?? parseUnpricedCellName(selName);
   if (sel === null) throw new Error('no selected cell');
   const dep = resolveDay(sel.dep, anchor);
   const ret = resolveDay(sel.ret, anchor);
@@ -449,7 +451,10 @@ describe.skipIf(!present)(
               c.status === 'price'
                 ? own.length === 1 && (own[0] ?? '').startsWith('£')
                 : own.length === 1 &&
-                  own[0] === `${c.status === 'no-flights' ? 'no flights' : 'price unknown'}, ${pair}`;
+                  [`${c.status === 'no-flights' ? 'no flights' : 'price unknown'}, ${pair}`].some(
+                    // why: the query pair carries ", selected" even unpriced (grid/2026-10-27/2)
+                    (base) => own[0] === base || own[0] === `${base}, selected`,
+                  );
             expect(want, `${file} view ${i} ${pair}`).toBe(true);
             seen.add(c.status);
           }
@@ -474,6 +479,16 @@ describe.skipIf(!present)(
       let partly = 0;
       for (const { file, rec } of sparse()) {
         const r = await serve(rec, new Map(), memoryLog(), { GRID_UNPRICED_VERIFIED: false });
+        // why: grid/2026-10-27/2: the query pair itself is unpriced, so without the flag its selected name is unparsed and
+        // the first view has no selection: refused before any view is read, never priced partly
+        const queryUnpriced = queryView(rec).candidates.some(
+          (c) => c?.endsWith(', selected') === true && !c.startsWith('£'),
+        );
+        if (queryUnpriced) {
+          expect(r.answer, file).toMatchObject({ kind: 'blocked', rule: 'grid:first-view:selected-cell' });
+          refused++;
+          continue;
+        }
         if (r.answer.kind !== 'grid') throw new Error(`${file}: ${JSON.stringify(r.answer)}`);
         // why: CodeRabbit on PR #33: every recorded view is answered, so none can pass by being left out
         expect(

@@ -373,7 +373,8 @@ describe('verification flags (TS-13; runs on every checkout)', () => {
        * price line, and a scroll never moves the selection.
        */
       const anyAnchorOf = (rec: z.infer<typeof fileSchema>) => {
-        const v = rec.views.find((x) => parseSelectedRange(rangeOf(x.snapshot)) !== null);
+        // why: a first view whose query pair is unpriced prints no range line (grid/2026-10-27/2); its selected cell names it
+        const v = rec.views.find((x) => parseSelectedRange(rangeOf(x.snapshot)) !== null) ?? rec.views[0];
         return recordedAnchor(v?.snapshot ?? '', rec.recordedAt);
       };
       const isSuperseded = (rec: z.infer<typeof fileSchema>, recs: ReturnType<typeof all>): boolean =>
@@ -415,7 +416,15 @@ describe('verification flags (TS-13; runs on every checkout)', () => {
         expect(recs.length).toBeGreaterThan(0);
         for (const { file, rec } of recs) {
           // why: a first view with no range line (nothing rendered yet) gives the reading no anchor: refused too
-          const anchored = parseSelectedRange(rangeOf(rec.views[0]?.snapshot ?? '')) !== null;
+          // (a first view whose query pair is unpriced prints none, but its selected cell anchors it: grid/2026-10-27/2)
+          const anchored = (() => {
+            try {
+              recordedAnchor(rec.views[0]?.snapshot ?? '', rec.recordedAt);
+              return true;
+            } catch {
+              return false;
+            }
+          })();
           const refused =
             !anchored ||
             rec.views.some((v) => v.drawn === false) ||
@@ -444,8 +453,11 @@ describe('verification flags (TS-13; runs on every checkout)', () => {
             expect(r.kind === 'view' && [r.unparsed, r.structural], `${file} view ${i}`).toEqual([0, 'ok']);
             if (underDrawnSettle(rec)) expect(v.drawn, `${file} view ${i}`).toBe(true);
             const sel = v.candidates.find((c) => c?.endsWith(', selected'));
-            if (sel !== undefined && sel !== null)
+            // why: an unpriced selected pair prints no price line (grid/2026-10-27/2)
+            if (sel !== undefined && sel !== null && sel.startsWith('£'))
               expect(parseSelectedPrice(v.selectedLines[0] ?? ''), file).toBe(parseCellName(sel)?.pounds);
+            if (sel !== undefined && sel !== null && !sel.startsWith('£'))
+              expect(v.selectedLines, file).toEqual([]);
           }
         }
       });

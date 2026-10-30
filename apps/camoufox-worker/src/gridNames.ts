@@ -39,7 +39,9 @@ const POUNDS = '([1-9]\\d{0,2}(?:,\\d{3})*)';
 const CELL = new RegExp(
   `^£${POUNDS}(, cheapest price|, low price)?, (\\d{1,2}) (${MON}) to (\\d{1,2}) (${MON})(, selected)?$`,
 );
-const UNPRICED = new RegExp(`^(no flights|price unknown), (\\d{1,2}) (${MON}) to (\\d{1,2}) (${MON})(, selected)?$`);
+const UNPRICED = new RegExp(
+  `^(no flights|price unknown), (\\d{1,2}) (${MON}) to (\\d{1,2}) (${MON})(, selected)?$`,
+);
 const LABEL = new RegExp(`(Mon|Tue|Wed|Thu|Fri|Sat|Sun) (\\d{1,2}) (${MON})`, 'g');
 const RANGE = new RegExp(`^(\\d{1,2})(?: (${MON}))?(?: (\\d{4}))? – (\\d{1,2}) (${MON})(?: (\\d{4}))?$`);
 const PRICE_LINE = new RegExp(`^£${POUNDS} · Round trip$`);
@@ -97,7 +99,12 @@ export function parseUnpricedCellName(name: string): UnpricedCellName | null {
   const dep = dayMonth(at(m, 2), at(m, 3));
   const ret = dayMonth(at(m, 4), at(m, 5));
   if (dep === null || ret === null) return null;
-  return { status: at(m, 1) === 'no flights' ? 'no-flights' : 'price-unknown', dep, ret, selected: at(m, 6) !== '' };
+  return {
+    status: at(m, 1) === 'no flights' ? 'no-flights' : 'price-unknown',
+    dep,
+    ret,
+    selected: at(m, 6) !== '',
+  };
 }
 
 export function parseCellName(name: string): CellName | null {

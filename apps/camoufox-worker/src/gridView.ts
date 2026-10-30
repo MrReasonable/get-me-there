@@ -294,7 +294,10 @@ export function interpretView(
     if (selected.pounds === null) {
       // why: grid/2026-10-27/2: an unpriced query pair is selected but the dialog prints no range or price line for
       // it; a line that is there must still name the query's dates, and a price for an unpriced pair is a contradiction
-      if (rangeLine !== null && (range === null || !named(range.dep, first.dep) || !named(range.ret, first.ret)))
+      if (
+        rangeLine !== null &&
+        (range === null || !named(range.dep, first.dep) || !named(range.ret, first.ret))
+      )
         return { kind: 'unrecognised', why: 'first-view', check: 'range' };
       if (priceLine !== null) return { kind: 'unrecognised', why: 'first-view', check: 'price' };
     } else {

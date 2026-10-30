@@ -2,19 +2,38 @@
 // anchored on the selected pair's return date as the page's own range line printed it (its year when printed, else the
 // recording's year), never on a guessed offset from the recording time.
 import { asIsoDate, type IsoDate } from '@gmt/core';
-import { parseSelectedRange } from '../../src/gridNames.js';
+import { monthOf, parseSelectedRange } from '../../src/gridNames.js';
 import { stillDrawing } from '../../src/gridView.js';
 
 /** The range line the stored snapshot holds ("14 – 24 Mar 2027"), run into the price line as the page prints it. */
 export const rangeOf = (snapshot: string): string =>
   /text: (\d{1,2}(?: \w{3})?(?: \d{4})? – \d{1,2} \w{3}(?: \d{4})?)£/.exec(snapshot)?.[1] ?? '';
 
-/** The selected return date of a recorded first view, from its range line. */
+/** The selected unpriced cell's return day and month ("no flights, 14 Nov to 22 Nov, selected"), when the snapshot has one. */
+function unpricedSelectedReturn(snapshot: string): { day: number; month: number } | null {
+  const m = /(?:no flights|price unknown), \d{1,2} \w{3} to (\d{1,2}) (\w{3}), selected/.exec(snapshot);
+  const month = m === null ? null : monthOf(m[2] ?? '');
+  return m === null || month === null ? null : { day: Number(m[1]), month };
+}
+
+/**
+ * The selected return date of a recorded first view, from its range line; a first view whose query pair is unpriced
+ * prints no range line (grid/2026-10-27/2), so its selected cell's name gives the date, in the recording's year or,
+ * for a month already past, the next.
+ */
 export function recordedAnchor(snapshot: string, recordedAt: string): IsoDate {
   const r = parseSelectedRange(rangeOf(snapshot));
-  if (r === null) throw new Error('the recorded first view has no range line');
-  const year = r.ret.year ?? Number(recordedAt.slice(0, 4));
-  return asIsoDate(`${year}-${String(r.ret.month).padStart(2, '0')}-${String(r.ret.day).padStart(2, '0')}`);
+  const at = Number(recordedAt.slice(0, 4));
+  const ret =
+    r !== null
+      ? { day: r.ret.day, month: r.ret.month, year: r.ret.year ?? at }
+      : (() => {
+          const u = unpricedSelectedReturn(snapshot);
+          if (u === null)
+            throw new Error('the recorded first view has no range line and no selected unpriced cell');
+          return { ...u, year: u.month < Number(recordedAt.slice(5, 7)) ? at + 1 : at };
+        })();
+  return asIsoDate(`${ret.year}-${String(ret.month).padStart(2, '0')}-${String(ret.day).padStart(2, '0')}`);
 }
 
 /** What a recording's views hold for the checks below. */
