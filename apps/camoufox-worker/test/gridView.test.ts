@@ -419,6 +419,16 @@ describe('interpretView with the unpriced cells (GRID_UNPRICED_VERIFIED)', () =>
       why: 'first-view',
       check: 'selected-cell',
     });
+    // why: a second selection ahead of the query pair, so the last one read is the query's own: only the count refuses
+    const first = r.candidates.findIndex((x) => x !== 'no flights, 14 Mar to 24 Mar, selected');
+    const query = r.candidates.indexOf('no flights, 14 Mar to 24 Mar, selected');
+    expect(first).toBeLessThan(query);
+    const ahead = r.candidates.map((x, i) => (i === first ? `${x ?? ''}, selected` : x));
+    expect(interpretView({ ...r, candidates: ahead }, Q.dep, Q, ON)).toEqual({
+      kind: 'unrecognised',
+      why: 'first-view',
+      check: 'selected-cell',
+    });
   });
   it('without the flag an unpriced selected name is unparsed, so nothing is selected: refused', () => {
     expect(interpretView(unpricedQuery(), Q.dep, Q)).toEqual({
