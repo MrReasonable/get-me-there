@@ -1,0 +1,32 @@
+/* Alerts (the departure board): the rule form and the rules on enamel plates side by side on a desk, stacked on a
+   phone; the events table full width on its own plate, scrolling sideways in its region. */
+@layer components {
+  .alerts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  @media (min-width: 900px) {
+    .alerts {
+      grid-template-columns: minmax(0, 28rem) minmax(0, 1fr);
+      align-items: start;
+    }
+    .alerts-wide {
+      grid-column: 1 / -1;
+    }
+  }
+  .alerts-rule-list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .alerts-rule-list > li {
+    padding: 8px 0;
+    border-top: 1px solid var(--line);
+  }
+  .alerts-rule-list > li:first-child {
+    border-top: 0;
+  }
+  .alerts-events {
+    min-width: 100%;
+    font-size: 14px;
+  }
+}

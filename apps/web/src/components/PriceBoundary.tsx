@@ -21,7 +21,7 @@ export class PriceBoundary extends Component<{ children: ReactNode }, State> {
   override render(): ReactNode {
     if (this.state.failed) {
       return (
-        <span role="alert" className="text-sm font-medium text-red-800">
+        <span role="alert" className="text-sm bad-text">
           {COPY.priceWithheld}
         </span>
       );

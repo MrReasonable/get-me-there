@@ -62,17 +62,17 @@ export function ExpandedRow({ row, extras, verificationConfigured, definitionId 
   const providerId = row.provenance.providerId;
   if (!provenanceConsistent(row.provenance)) {
     return (
-      <section aria-label={COPY.detailsFor(rowName(row))} className="p-2 text-sm">
+      <section aria-label={COPY.detailsFor(rowName(row))} className="expanded-panel">
         <p role="alert">{COPY.rowWithheld}</p>
       </section>
     );
   }
   return (
-    <section aria-label={COPY.detailsFor(rowName(row))} className="grid gap-3 p-2 text-sm md:grid-cols-2">
+    <section aria-label={COPY.detailsFor(rowName(row))} className="expanded-panel grid gap-4 md:grid-cols-2">
       {extras ? (
         <div>
-          <h3 className="font-semibold">{COPY.summary}</h3>
-          <dl className="grid grid-cols-2 gap-x-2">
+          <h3>{COPY.summary}</h3>
+          <dl className="grid grid-cols-2 gap-x-3 gap-y-0.5">
             <dt>{COPY.columns.destination}</dt>
             <dd>{row.cell.destination}</dd>
             <dt>{COPY.columns.totalTime}</dt>
@@ -110,15 +110,15 @@ export function ExpandedRow({ row, extras, verificationConfigured, definitionId 
         </div>
       ) : null}
       <div>
-        <h3 className="font-semibold">{COPY.outbound}</h3>
+        <h3>{COPY.outbound}</h3>
         <Segments segments={row.outbound} />
       </div>
       <div>
-        <h3 className="font-semibold">{COPY.inbound}</h3>
+        <h3>{COPY.inbound}</h3>
         <Segments segments={row.inbound} />
       </div>
       <div>
-        <h3 className="font-semibold">{COPY.layovers}</h3>
+        <h3>{COPY.layovers}</h3>
         {row.layovers.length === 0 ? (
           <p>{COPY.noLayovers}</p>
         ) : (
@@ -126,16 +126,16 @@ export function ExpandedRow({ row, extras, verificationConfigured, definitionId 
             {row.layovers.map((l, i) => (
               <li key={`${l.at}-${i}`}>
                 {COPY.layover(l.at, formatMinutes(l.minutes))}
-                {l.overnight ? <span className="ml-1 font-semibold">{COPY.overnightLayover}</span> : null}
-                {l.airportChange ? <span className="ml-1 font-semibold">{COPY.airportChange}</span> : null}
+                {l.overnight ? <span className="ml-1 font-bold">{COPY.overnightLayover}</span> : null}
+                {l.airportChange ? <span className="ml-1 font-bold">{COPY.airportChange}</span> : null}
               </li>
             ))}
           </ul>
         )}
-        {row.selfTransfer === true ? <p className="font-semibold">{COPY.selfTransfer}</p> : null}
+        {row.selfTransfer === true ? <p className="font-bold">{COPY.selfTransfer}</p> : null}
       </div>
       <div>
-        <h3 className="font-semibold">{COPY.baggage}</h3>
+        <h3>{COPY.baggage}</h3>
         <p>
           {row.baggage?.cabinBag !== undefined ? COPY.cabinBag[row.baggage.cabinBag] : COPY.cabinBagUnknown}
         </p>
@@ -146,19 +146,19 @@ export function ExpandedRow({ row, extras, verificationConfigured, definitionId 
         </p>
       </div>
       <div>
-        <h3 className="font-semibold">{COPY.conditions}</h3>
+        <h3>{COPY.conditions}</h3>
         <p>{COPY.refundable(row.fareConditions?.refundable)}</p>
         <p>{COPY.changeable(row.fareConditions?.changeable)}</p>
       </div>
       <div>
-        <h3 className="font-semibold">{COPY.verdictsHeading}</h3>
+        <h3>{COPY.verdictsHeading}</h3>
         <VerdictList verdicts={row.verdicts} unverified={row.unverified} />
         {row.notApplied.length > 0 ? (
           <p>{COPY.notApplied(row.notApplied.map((n) => COPY.constraint[n]).join(', '))}</p>
         ) : null}
       </div>
       <div>
-        <h3 className="font-semibold">{COPY.booking}</h3>
+        <h3>{COPY.booking}</h3>
         {row.seller !== null ? <p>{COPY.seller(row.seller)}</p> : null}
         <BookingAction booking={row.booking} providerId={providerId} />
         <SearchLink link={row.searchLink} providerId={providerId} />
@@ -166,7 +166,7 @@ export function ExpandedRow({ row, extras, verificationConfigured, definitionId 
           <a
             href={historyHref(row.itineraryHash)}
             onClick={navigateTo({ view: 'history', [HISTORY_PARAMS.hash]: row.itineraryHash })}
-            className="block underline"
+            className="link"
           >
             {COPY.historyView.rowLink}
           </a>
@@ -174,7 +174,7 @@ export function ExpandedRow({ row, extras, verificationConfigured, definitionId 
       </div>
       {row.otherOffers.length > 0 ? (
         <div>
-          <h3 className="font-semibold">{COPY.otherOffers}</h3>
+          <h3>{COPY.otherOffers}</h3>
           <ul aria-label={COPY.otherOffers}>
             {row.otherOffers.map((o, i) => (
               <li key={`${o.seller}-${i}`} className="flex flex-wrap items-center gap-2">

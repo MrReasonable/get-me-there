@@ -46,7 +46,8 @@ test('fixture mode: import, run, then Dates, the date pair detail and History sh
   await expect(page.getByRole('heading', { level: 2 })).toHaveText('London → New York (example)');
   await expect(page.getByTestId('dates-run')).toHaveText(/^run finished (just now|.+ ago)$/);
   await expect(banner(page)).toBeVisible();
-  await expect(banner(page)).toHaveClass(/bg-red-700/);
+  // the alarm plate: the red of spec §5.5, with white words (styles/world.css --alarm)
+  await expect(banner(page)).toHaveCSS('background-color', 'rgb(163, 35, 26)');
   const first = board(page).locator(SMOKE.boardRow).first();
   await expect(first).toContainText(SOURCE_LABELS.synthetic);
   await expect(first.getByTestId('price-cell')).toContainText(/ago|just now|old/);
@@ -62,6 +63,11 @@ test('fixture mode: import, run, then Dates, the date pair detail and History sh
   await expect(stop).not.toHaveAttribute('data-cell', before ?? '');
   await expect(stop).toBeFocused();
   await expect(stop).toHaveCSS('outline-style', 'solid');
+  // the black gap of the one focus ring (world.css, unlayered): no lamp's own ring shadow may take its place
+  await expect(stop).toHaveCSS(
+    'box-shadow',
+    /rgb\(0, 0, 0\) 0px 0px 0px 2px, rgb\(0, 0, 0\) 0px 0px 0px 7px$/,
+  );
   await first.hover();
   const lit = page.locator(SMOKE.litCell);
   await expect(lit).toHaveCount(1);
@@ -145,7 +151,9 @@ test('at 375px Dates shows stacked cards and one month of 24px cells, a tap show
 }) => {
   await page.goto('/?view=dates');
   await expect(page.locator(SMOKE.phoneCard).first()).toBeVisible();
-  await expect(board(page)).toHaveCount(0);
+  // the cards are the board table's own rows: one semantic table at every width, its roles written out
+  await expect(board(page).locator(SMOKE.phoneCard).first()).toBeVisible();
+  await expect(page.locator(SMOKE.phoneCard).first()).toHaveAttribute('role', 'row');
   await expect(page.getByRole('button', { name: SMOKE.previousMonth })).toBeVisible();
   await expect(page.getByRole('button', { name: SMOKE.nextMonth })).toBeVisible();
   const cells = page.locator(SMOKE.overviewCell);
@@ -174,7 +182,10 @@ test('at 375px Dates shows stacked cards and one month of 24px cells, a tap show
   await cell.tap();
   await expect(page.locator(SMOKE.readout)).toContainText(/\d{1,2} [A-Z][a-z]{2} \d{4}/);
   expect(new URL(page.url()).searchParams.get('view')).toBe('dates');
+  // why: on a phone the filters fold to one line (the departure board, Ian 2026-10-27); opened, the form must fit
+  await page.locator('summary', { hasText: EXAMPLE.filtersLabel }).click();
   const form = page.getByRole('form', { name: EXAMPLE.filtersLabel });
+  await expect(form).toBeVisible();
   const box = await form.boundingBox();
   expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(375);
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
@@ -194,7 +205,7 @@ const LOADED: Record<string, (page: Page) => Locator> = {
   status: (p) => p.getByRole('heading', { level: 3 }),
 };
 
-test('at 375px the nav keeps every link in view in two tiers of 44px links, and no loaded view scrolls the page sideways (UI-005, UI-009, UI-011) @phone', async ({
+test('at 375px the nav is one row whose menu opens both tiers of 44px links, and no loaded view scrolls the page sideways (UI-005, UI-009, UI-011) @phone', async ({
   page,
 }) => {
   for (const [view, loaded] of Object.entries(LOADED)) {
@@ -204,18 +215,35 @@ test('at 375px the nav keeps every link in view in two tiers of 44px links, and 
     } else await page.goto(`/?view=${view}`);
     const nav = page.getByRole('navigation', { name: SMOKE.nav });
     await expect(nav).toBeVisible();
+    // why: the departure board (Ian, 2026-10-27): one row (the current tier and view, and the menu), so the view
+    // starts in the first screen
+    const row = await nav.boundingBox();
+    expect(row?.height ?? 0, view).toBeLessThanOrEqual(44 + 8);
+    const menu = nav.getByRole('button', { name: COPY.navMenu });
+    await expect(menu).toHaveAttribute('aria-expanded', 'false');
+    await menu.click();
+    await expect(menu).toHaveAttribute('aria-expanded', 'true');
     for (const name of SMOKE.navTiers) await expect(nav.getByRole('list', { name })).toBeVisible();
     for (const link of await nav.getByRole('link').all()) {
       await expect(link).toBeInViewport({ ratio: 1 });
       const box = await link.boundingBox();
       expect(box?.height ?? 0, view).toBeGreaterThanOrEqual(44);
     }
-    const box = await nav.boundingBox();
-    // why: two rows of 44 px links and their gap; a third row would push the content down for nothing.
-    expect(box?.height ?? 0, view).toBeLessThanOrEqual(2 * 44 + 8);
+    await page.keyboard.press('Escape');
+    await expect(menu).toHaveAttribute('aria-expanded', 'false');
+    await expect(menu).toBeFocused();
     // why: measured only after the view's own content is on the page, never on its loading state
     await expect(loaded(page).first(), view).toBeVisible();
     const scrollWidth = await page.evaluate(() => document.documentElement.scrollWidth);
     expect(scrollWidth, view).toBeLessThanOrEqual(375);
   }
+});
+
+test('at 375 x 812 the board starts in the first screen (Ian, 2026-10-27) @phone', async ({ page }) => {
+  await page.goto('/?view=dates');
+  const table = board(page);
+  await expect(table).toBeVisible();
+  const box = await table.boundingBox();
+  // the board's caption is in the first screen, so the operator sees the board without scrolling
+  expect(box?.y ?? Number.POSITIVE_INFINITY).toBeLessThan(812);
 });

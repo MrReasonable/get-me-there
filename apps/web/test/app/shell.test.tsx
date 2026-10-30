@@ -97,7 +97,8 @@ describe('shell (spec §11 layout)', () => {
     server.use(http.get(`${API}/providers`, () => HttpResponse.json(providersResponse({ synthetic: true }))));
     renderWithProviders(<App />, { search: '?view=history&def=def-0001' });
     const banner = await screen.findByText(/Synthetic data: the fixture provider is enabled/);
-    expect(banner.closest('[role="alert"]')?.className).toContain('bg-red-700');
+    // the alarm plate: red, with a cross beside the words (styles/world.css .alarm)
+    expect(banner.closest('[role="alert"]')).toHaveClass('alarm');
   });
 
   it('negative: no synthetic banner and no provider alert for real data', async () => {

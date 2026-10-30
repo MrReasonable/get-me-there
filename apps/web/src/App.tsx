@@ -7,6 +7,8 @@ import { Nav } from './components/Nav.js';
 import { StatusBar } from './components/StatusBar.js';
 import { SyntheticBanner } from './components/SyntheticBanner.js';
 import { COPY } from './copy.js';
+import { Flaps } from './flaps/Flaps.js';
+import { PHONE_QUERY, useMediaQuery } from './hooks/useMediaQuery.js';
 import { land } from './state/landing.js';
 import { parseDetailPair } from './state/resultsState.js';
 import { updateSearchParams, useSearchParams } from './state/urlState.js';
@@ -43,6 +45,9 @@ export function App() {
   // alert link's row= is looked up; the view drawn follows the landing at once, and the URL is rewritten to it
   const landing = useMemo(() => land(params, selected), [params, selected]);
   const view: ViewId = landing.kind === 'view' ? landing.view : 'results';
+  const phone = useMediaQuery(PHONE_QUERY);
+  const selector =
+    definitions.data !== undefined ? <DefinitionSelector definitions={list} selectedId={selectedId} /> : null;
   // why: Results is the date pair detail (spec §11, WP19 Task 19.6): it renders only for a well-formed date pair
   const datePair = parseDetailPair(params);
   // why: the rewrite waits for the definitions, so a Calendar link's cal.dest is judged against the selected one
@@ -75,38 +80,40 @@ export function App() {
   // keeps a failing view from taking the nav and status bar with it.
   return (
     <AppBoundary>
-      <div className="min-h-screen bg-white text-slate-900">
+      <div className="min-h-screen">
         {providers.data?.synthetic === true ? <SyntheticBanner /> : null}
         {providers.error ? (
-          <p role="alert" className="bg-red-100 px-4 py-2 font-semibold text-red-900">
+          <p role="alert" className="alarm px-[var(--gutter)] py-2">
             {COPY.providersUnknown(providers.error.message)}
           </p>
         ) : null}
-        <a
-          href="#main"
-          className="sr-only focus:not-sr-only focus:absolute focus:z-10 focus:bg-white focus:p-2 focus:underline"
-        >
+        <a href="#main" className="skip-link">
           {COPY.skipToContent}
         </a>
-        <header className="flex flex-wrap items-center gap-4 border-b border-slate-300 px-4 py-2">
-          <h1 className="text-lg font-bold">{COPY.appTitle}</h1>
-          <Nav current={view} />
-          {/* why: only a successful load can say there are no definitions; while loading or after a failure (shown with
-          a retry in the main region) the selector waits (CodeRabbit batch 3) */}
-          {definitions.data !== undefined ? (
-            <DefinitionSelector definitions={list} selectedId={selectedId} />
-          ) : null}
-        </header>
-        <StatusBar
-          definition={selected}
-          showRunNow={view === 'dates' || view === 'definitions'}
-          viewOwnsFirstRun={view === 'dates'}
-        />
-        <main id="main" tabIndex={-1} className="px-4 py-3">
+        <div className="steel-strip topbar">
+          <header className="flex flex-wrap items-center gap-x-6 gap-y-2">
+            <h1 className="brand">
+              {/* why: the name is the heading's words; on a phone, where flap cells would be too small to read, the
+              words are shown in painted caps and the cells hidden */}
+              <span className="brand-words">{COPY.appTitle}</span>
+              <Flaps text={COPY.appTitle} className="brand-flaps" />
+            </h1>
+            <Nav current={view} menu={phone ? selector : null} />
+            {/* why: only a successful load can say there are no definitions; while loading or after a failure (shown
+            with a retry in the main region) the selector waits (CodeRabbit batch 3) */}
+            {phone ? null : <span className="ml-auto flex min-w-0">{selector}</span>}
+          </header>
+          <div className="statusbar-row">
+            <StatusBar
+              definition={selected}
+              showRunNow={view === 'dates' || view === 'definitions'}
+              viewOwnsFirstRun={view === 'dates'}
+            />
+          </div>
+        </div>
+        <main id="main" tabIndex={-1} className="view-main pt-5">
           <AppBoundary>
-            {noProviders ? (
-              <p className="mb-3 rounded border border-slate-400 p-3">{COPY.emptyNoProviders}</p>
-            ) : null}
+            {noProviders ? <p className="plate notice mb-4">{COPY.emptyNoProviders}</p> : null}
             {definitions.error ? (
               <LoadError error={definitions.error} retry={() => void definitions.refetch()} />
             ) : null}
@@ -114,13 +121,15 @@ export function App() {
             region says it is loading rather than staying blank */}
             {needsDefinition && definitions.isPending ? <Loading /> : null}
             {needsDefinition && definitions.data !== undefined && selected === null && !datesWithoutSearch ? (
-              <p>{requested !== null ? COPY.definitionNotFound : COPY.noDefinitions}</p>
+              <p className="plate notice">
+                {requested !== null ? COPY.definitionNotFound : COPY.noDefinitions}
+              </p>
             ) : null}
             {needsDefinition && selected !== null && !providerStatusKnown ? <Loading /> : null}
             {!landed && definitionsKnown ? <Loading /> : null}
             {datesWithoutSearch ? <DatesView definition={null} /> : null}
             {show('dates') && notice !== null && notice.search === params.toString() ? (
-              <p role="status" className="mb-3 rounded border border-slate-400 p-2">
+              <p role="status" className="plate notice mb-4">
                 {notice.text}
               </p>
             ) : null}

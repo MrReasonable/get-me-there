@@ -1,6 +1,3 @@
-// The Definitions form after the set-up polish pass: plain labels with their hints, the schedule picker, journey time in
-// hours and minutes, the 0-billed-calls explanation and the run time beside the estimate. The worked example only.
-import { CONSTRAINT_LABELS } from '@gmt/core';
 import { screen, within } from '@testing-library/react';
 import { HttpResponse, http } from 'msw';
 import { describe, expect, it } from 'vitest';

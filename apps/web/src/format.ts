@@ -54,6 +54,12 @@ export function formatTripShort(departure: string, back: string): string {
   return monthFrom !== undefined && to.endsWith(` ${monthFrom}`) ? `${dayFrom}–${to}` : `${from}–${to}`;
 }
 
+/** A date on the departure board's flaps, "2027-03-14" → "Sun 14 Mar 27" (the cells upper-case it); string slicing only. */
+export function formatFlapDate(d: IsoDate): string {
+  const [day = '', month = ''] = formatIsoDateShort(d).split(' ');
+  return `${formatWeekday(d)} ${day.padStart(2, '0')} ${month} ${d.slice(2, 4)}`;
+}
+
 /** Weekday form, "2027-03-14" → "Sun", from core's epoch-day arithmetic (never a Date). */
 export function formatWeekday(d: IsoDate): string {
   return WEEKDAYS[(((toEpochDay(d) + 4) % 7) + 7) % 7] ?? '';

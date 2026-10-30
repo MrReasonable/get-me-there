@@ -21,6 +21,9 @@
     "mutate": "stryker run && node ../../scripts/mutation-gate.mjs reports/mutation/mutation.json"
   },
   "dependencies": {
+    "@fontsource/atkinson-hyperlegible-mono": "5.3.0",
+    "@fontsource/atkinson-hyperlegible-next": "5.3.0",
+    "@fontsource/barlow-condensed": "5.3.0",
     "@gmt/core": "workspace:*",
     "@tanstack/react-query": "5.104.2",
     "@tanstack/react-table": "9.3.1",

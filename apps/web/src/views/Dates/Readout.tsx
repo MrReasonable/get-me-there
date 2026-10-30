@@ -57,14 +57,14 @@ export function Readout({
     <section
       aria-label={O.readoutLabel}
       aria-live="polite"
-      className="flex min-h-11 flex-wrap items-center gap-2 rounded border border-slate-300 p-1 text-xs"
+      className="ov-readout flex min-h-11 flex-wrap items-center gap-2 text-[13px]"
     >
       <span id={id} className="flex flex-wrap items-center gap-2" data-testid="dates-readout">
         {cell === null ? (
           O.readoutEmpty
         ) : (
           <>
-            <span className="font-semibold">{cellDates(cell)}</span>
+            <span className="font-bold text-fg">{cellDates(cell)}</span>
             {lead !== null && f !== null ? (
               <>
                 <FigurePrice figure={f} notes={notes} />
@@ -90,7 +90,7 @@ export function Readout({
         <a
           href={detailHref(cell.model.pairs[0])}
           onClick={navigateTo(detailPatch(cell.model.pairs[0]))}
-          className="inline-flex min-h-11 items-center underline"
+          className="link"
         >
           {O.openThese}
         </a>

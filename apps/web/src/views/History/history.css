@@ -1,0 +1,24 @@
+/* History (the departure board): the route picker, each chart and its point tables sit on enamel plates; the series
+   inks are lib/palette.ts's, each backed by its dash style and its legend label. */
+@layer components {
+  .history-chart {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin: 0;
+  }
+  .history-chart .recharts-text {
+    font-family: var(--font-ui);
+  }
+  .history-tables {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+  .history-tables caption {
+    caption-side: top;
+  }
+  .history-picker {
+    max-width: 52rem;
+  }
+}

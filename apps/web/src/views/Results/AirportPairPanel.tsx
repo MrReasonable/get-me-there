@@ -39,19 +39,23 @@ export function AirportPairPanel({ definition, cell, executions, gap }: AirportP
   const canVerify = definition.providers.verification.length > 0;
   const note = definition.destinationNotes[cell.destination] ?? null;
   return (
-    <section
-      aria-labelledby={headingId}
-      data-testid="airport-pair-panel"
-      className="rounded border border-slate-300 p-3"
-    >
-      <h3 id={headingId} className="text-base font-semibold">
+    <section aria-labelledby={headingId} data-testid="airport-pair-panel" className="plate pair-plate">
+      <h3 id={headingId} className="h-section">
         {P.heading(cell.origin, cell.destination)}
       </h3>
       {gap !== null ? (
         <Gap gap={gap} destination={cell.destination} notes={definition.destinationNotes} />
       ) : null}
-      {detail.isPending ? <p role="status">{COPY.loading}</p> : null}
-      {detail.isError ? <p role="alert">{COPY.loadFailed(detail.error.message)}</p> : null}
+      {detail.isPending ? (
+        <p role="status" className="loading-line">
+          {COPY.loading}
+        </p>
+      ) : null}
+      {detail.isError ? (
+        <p role="alert" className="bad-text">
+          {COPY.loadFailed(detail.error.message)}
+        </p>
+      ) : null}
       {detail.data !== undefined ? (
         <CellDetailBody detail={detail.data} executions={executions} note={note} />
       ) : null}
@@ -77,11 +81,11 @@ function Gap({
 }) {
   const ref = gap.reference;
   return (
-    <div
-      data-testid="gap-mark"
-      className="mt-2 flex flex-wrap items-center gap-2 rounded border border-amber-700 bg-amber-50 p-2 text-sm"
-    >
-      <span>{COPY.calendarGapLead(1)}</span>
+    <div data-testid="gap-mark" className="inset mt-3 flex flex-wrap items-center gap-2 p-3 text-sm">
+      <span aria-hidden="true" className="tag tag-warn">
+        ▲
+      </span>
+      <span className="font-bold">{COPY.calendarGapLead(1)}</span>
       <PriceBoundary>
         <PriceCell
           pricePence={gap.calendar.pricePence}

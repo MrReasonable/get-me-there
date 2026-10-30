@@ -1,7 +1,7 @@
 import type { IsoDate, IsoMonth } from '@gmt/core';
 import { memo } from 'react';
 import { COPY } from '../../copy.js';
-import { formatDayOfMonth, formatIsoMonth, formatWeekday, WEEK_HEADERS } from '../../format.js';
+import { formatDayOfMonth, formatIsoMonth, formatWeekday, WEEK_HEADERS, weekdayIndex } from '../../format.js';
 import { type CellModel, type Column, type Mark, weeksOf } from './overview.js';
 import { BAND_CLASSES, FLAT_CLASS } from './shade.js';
 import './dates.css';
@@ -25,18 +25,18 @@ export const MARK_CLASS: Readonly<Record<Mark, string>> = {
   noneWithin: '',
   unshown: '',
 };
-/** A cell with no current figure: a plain fill, never a band colour, with black ink for its glyphs. */
-export const NEUTRAL_CLASS = 'border border-slate-400 bg-white text-black';
+/** A cell with no current figure: an unlit socket, never a band colour, with the board's white ink for its glyphs. */
+export const NEUTRAL_CLASS = 'lamp-none bg-[#2a2d30] text-[#f1f1ec]';
 /** Spec §11: focus always visible, a solid outline (asserted by class in jsdom; drawn by the browser in the smoke). */
 export const CELL_FOCUS =
-  'focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-black';
+  'focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white';
 /**
  * A board row's cell (spec §11 Rings): an outline, not colour alone; lit when its row or itself is pointed at. why: two
  * tones, a 2 px black line over a 3 px white one (so 1 px of white shows inside the black), so one tone clears 3:1 on
  * every band: black alone is about 2.2:1 on band 0's #134e4a, white is about 9.5:1 there (priceCellBands.test.tsx).
  */
 export const RING_CLASS = 'shadow-[inset_0_0_0_2px_#000,inset_0_0_0_3px_#fff]';
-export const LIT_CLASS = 'outline-solid outline-[3px] outline-offset-1 outline-black';
+export const LIT_CLASS = 'outline-solid outline-[3px] outline-offset-1 outline-[#ffb22e]';
 
 export interface CellView {
   key: string;
@@ -59,6 +59,12 @@ export interface OverviewMonthProps {
   readoutId: string;
   phone: boolean;
 }
+
+/** Saturday and Sunday read brighter in the day column, as a concourse board marks them. */
+const weekend = (d: IsoDate) => {
+  // why: Monday-first, so Saturday is 5 and Sunday 6
+  return weekdayIndex(d) >= 5;
+};
 
 function fillOf(m: CellModel): string {
   if (m.shade === null) return NEUTRAL_CLASS;
@@ -91,7 +97,7 @@ function Cell({
       tabIndex={tabStop ? 0 : -1}
       aria-label={c.name}
       aria-describedby={readoutId}
-      className={`flex min-h-6 min-w-6 flex-1 items-center justify-center overflow-hidden rounded-sm text-[10px] leading-none ${fillOf(c.model)} ${patterns.join(' ')} ${c.ringed ? RING_CLASS : ''} ${lit ? LIT_CLASS : ''} ${CELL_FOCUS}`}
+      className={`lamp ${fillOf(c.model)} ${patterns.join(' ')} ${c.ringed ? RING_CLASS : ''} ${lit ? LIT_CLASS : ''} ${CELL_FOCUS}`}
     >
       {c.model.marks.length > 0 ? (
         <span aria-hidden="true" data-testid="cell-glyphs" className="dates-glyphs">
@@ -122,16 +128,16 @@ export const OverviewMonth = memo(function OverviewMonth({
   if (phone) {
     return (
       <section aria-label={formatIsoMonth(month)} className="space-y-1">
-        <h4 className="font-semibold">{formatIsoMonth(month)}</h4>
-        <ol className="space-y-1">
+        <h4 className="h-sub">{formatIsoMonth(month)}</h4>
+        <ol className="space-y-px">
           {[...days.keys()].map((date) => (
             // why: WP19 Task 19.9 (the 375 px smoke): twelve 24 px cells and their 1 px gaps take 299 px of the 343 px
             // inside the page's gutters, so the day's label is its weekday and number (the month is the heading above)
-            <li key={date} className="flex items-center gap-0.5">
-              <span className="w-10 shrink-0 text-[10px] leading-tight">
+            <li key={date} className={`flex items-center gap-0.5 ${weekend(date) ? 'ov-weekend' : ''}`}>
+              <span className="ov-day w-10 shrink-0">
                 {`${formatWeekday(date)} ${formatDayOfMonth(date)}`}
               </span>
-              <span className="flex flex-1 gap-px">{strip(date)}</span>
+              <span className="lamp-strip flex flex-1 gap-px">{strip(date)}</span>
             </li>
           ))}
         </ol>
@@ -142,12 +148,12 @@ export const OverviewMonth = memo(function OverviewMonth({
     // why: WP19 Task 19.9: a month off screen skips style, layout and paint (dates.css), so a read or a filter change
     // over 400 days lays out the months in view, not every cell of the window
     <div className="dates-month">
-      <table className="w-full table-fixed border-separate border-spacing-1">
-        <caption className="text-left font-semibold">{formatIsoMonth(month)}</caption>
+      <table className="ov-table w-full table-fixed border-separate border-spacing-1">
+        <caption className="h-sub pb-1 text-left">{formatIsoMonth(month)}</caption>
         <thead>
           <tr>
             {WEEK_HEADERS.map((w) => (
-              <th key={w} scope="col" className="text-xs font-medium">
+              <th key={w} scope="col" className="label-caps text-xs">
                 {w}
               </th>
             ))}
@@ -161,10 +167,10 @@ export const OverviewMonth = memo(function OverviewMonth({
                   <td key={`pad-${month}-${i}`} />
                 ) : (
                   <td key={date} className="align-top">
-                    <span className="block text-[10px] text-slate-700" aria-hidden="true">
+                    <span className="ov-day block pb-0.5" aria-hidden="true">
                       {formatDayOfMonth(date)}
                     </span>
-                    {days.has(date) ? <span className="flex gap-px">{strip(date)}</span> : null}
+                    {days.has(date) ? <span className="lamp-strip flex gap-px">{strip(date)}</span> : null}
                   </td>
                 ),
               )}

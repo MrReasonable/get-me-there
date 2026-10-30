@@ -11,6 +11,7 @@ import { LoadError, Loading } from '../../components/LoadState.js';
 import { SETUP_COPY } from '../../copy/setup.js';
 import { COPY } from '../../copy.js';
 import { formatIsoDate } from '../../format.js';
+import './providers.css';
 
 function maxAgeText(info: CapabilityInfo): string {
   const h = info.maxAgeHours;
@@ -24,11 +25,11 @@ const P = SETUP_COPY.providers;
 
 function Capability({ title, info }: { title: string; info: CapabilityInfo }) {
   return (
-    <div>
-      <p>{COPY.capability(title, sourceLabel(info), maxAgeText(info))}</p>
-      <p className="text-slate-700">{info.provenanceNote}</p>
+    <div className="inset provider-capability">
+      <p className="font-semibold">{COPY.capability(title, sourceLabel(info), maxAgeText(info))}</p>
+      <p className="text-fg-2">{info.provenanceNote}</p>
       {/* why: the critique: "vendor's cache age unknown" is said where it appears, in plain words */}
-      {info.maxAgeHours === 'unknown' ? <p className="text-xs text-slate-700">{P.ageUnknownHint}</p> : null}
+      {info.maxAgeHours === 'unknown' ? <p className="hint">{P.ageUnknownHint}</p> : null}
     </div>
   );
 }
@@ -36,27 +37,24 @@ function Capability({ title, info }: { title: string; info: CapabilityInfo }) {
 /** No provider configured: what each source is, what it costs, and where to set it up (critique, onboard pass). */
 function NoProviders() {
   return (
-    <section
-      aria-labelledby="providers-empty"
-      className="max-w-prose space-y-2 rounded border border-amber-600 p-3"
-    >
-      <h3 id="providers-empty" className="font-semibold">
+    <section aria-labelledby="providers-empty" className="plate plate-pad max-w-prose space-y-3">
+      <h3 id="providers-empty" className="h-section">
         {P.emptyHeading}
       </h3>
       <p>{P.emptyLead}</p>
       <ul className="space-y-3">
         {P.sources.map((s) => (
           <li key={s.id}>
-            <p className="font-medium">{s.name}</p>
+            <p className="h-sub">{s.name}</p>
             <p>
-              <span className="font-medium">{P.whatLabel}</span> {s.what}
+              <span className="font-bold">{P.whatLabel}</span> {s.what}
             </p>
             <p>
-              <span className="font-medium">{P.costLabel}</span> {s.cost}
+              <span className="font-bold">{P.costLabel}</span> {s.cost}
             </p>
             <p>
-              <span className="font-medium">{P.setupLabel}</span>{' '}
-              <code className="break-all rounded bg-slate-100 px-1">{s.command}</code> {s.doc}
+              <span className="font-bold">{P.setupLabel}</span> <code className="cmd">{s.command}</code>{' '}
+              {s.doc}
             </p>
           </li>
         ))}
@@ -96,9 +94,11 @@ export function ProvidersView() {
   if (q.error) return <LoadError error={q.error} retry={() => void q.refetch()} />;
   if (q.data === undefined) return <Loading />;
   return (
-    <div className="space-y-3 text-sm">
-      <h2 className="text-xl font-semibold">{COPY.providersHeading}</h2>
-      <p className="max-w-prose text-slate-700">{P.intro}</p>
+    <div className="providers pt-5">
+      <div className="space-y-2">
+        <h2 className="h-view">{COPY.providersHeading}</h2>
+        <p className="lede">{P.intro}</p>
+      </div>
       {q.data.providers.length === 0 ? <NoProviders /> : null}
       {q.data.providers.map((p) => (
         // why: UI-003: the card is headed by the provider's name, the word the status bar, filters and marks use; the
@@ -106,21 +106,28 @@ export function ProvidersView() {
         <section
           key={p.providerId}
           aria-label={COPY.provider[p.providerId]}
-          className="rounded border border-slate-300 p-2"
+          data-enabled={p.enabled}
+          className="plate plate-pad provider-plate space-y-2 text-[15px]"
         >
-          <h3 className="font-semibold">
-            {COPY.provider[p.providerId]}{' '}
-            <span className="font-normal">{p.enabled ? COPY.providerEnabled : COPY.providerDisabled}</span>
+          <h3 className="provider-name">
+            <span className="h-section">{COPY.provider[p.providerId]}</span>{' '}
+            <span className={p.enabled ? 'tag' : 'tag tag-dim'}>
+              {p.enabled ? COPY.providerEnabled : COPY.providerDisabled}
+            </span>
           </h3>
           {p.notices.map((n) => (
-            <p key={n} role="alert" className="rounded border border-red-700 p-1 font-medium">
+            <p key={n} role="alert" className="inset provider-notice bad-text">
               {n}
             </p>
           ))}
           <p>{COPY.plan(COPY.planName[p.plan])}</p>
-          <p className="text-slate-700">{P.markLine(COPY.providerShort[p.providerId])}</p>
+          <p className="text-fg-2">{P.markLine(COPY.providerShort[p.providerId])}</p>
           {/* why: ruling 5: which call cap stops a £0-per-call plan; information, not a warning, so no alert role */}
-          {p.capNote !== null ? <p data-cost="">{p.capNote}</p> : null}
+          {p.capNote !== null ? (
+            <p data-cost="" className="provider-cap">
+              {p.capNote}
+            </p>
+          ) : null}
           {p.excludedFromSchedule ? <p>{COPY.excludedFromSchedule}</p> : null}
           {/* why: WP14 Task 14.10: what camoufox costs and covers, said where the operator turns it on */}
           {p.providerId === 'camoufox' ? <p>{COPY.camoufox.note}</p> : null}
@@ -130,7 +137,7 @@ export function ProvidersView() {
           {p.capabilities.verification !== null ? (
             <Capability title={COPY.capabilityVerification} info={p.capabilities.verification} />
           ) : null}
-          <ul>
+          <ul className="provider-usage">
             {p.usage.map((u) => (
               <li key={u.scope}>{usageText(u, p.providerId)}</li>
             ))}

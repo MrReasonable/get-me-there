@@ -2,9 +2,9 @@ import { apiContract, type ConstraintName, type Verdict, type Verdicts } from '@
 import { COPY } from '../copy.js';
 
 const STYLE: Record<Verdict, string> = {
-  pass: 'text-green-900',
-  fail: 'font-semibold text-red-900',
-  unverified: 'italic text-slate-700',
+  pass: 'text-fg',
+  fail: 'bad-text',
+  unverified: 'italic text-fg-2',
 };
 
 /**

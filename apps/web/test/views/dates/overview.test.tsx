@@ -67,7 +67,7 @@ describe('the overview (spec §11 Overview)', () => {
     expect(cell('2027-03-25', 10)).toHaveAttribute('data-shade', '4');
     const legend = screen.getByTestId('dates-legend');
     expect(legend).toHaveTextContent(
-      'Shade: 12 current prices in view, in five bands by rank, darkest cheapest',
+      'Shade: 12 current prices in view, in five bands by rank, brightest cheapest',
     );
     expect(legend).toHaveTextContent('band 1: £300–£320 (3 date pairs)');
     expect(legend).toHaveTextContent('band 5: £400–£410 (2 date pairs)');

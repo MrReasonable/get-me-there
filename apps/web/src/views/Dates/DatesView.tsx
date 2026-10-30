@@ -174,7 +174,7 @@ function DatesOf({
     [model, visible],
   );
   return (
-    <div className="space-y-4">
+    <div className="dates-view space-y-5">
       {/* why: the shell already shows the banner when /providers says synthetic (spec §5.5: one banner, WP19 Task 19.7) */}
       {data !== null && providers.data?.synthetic !== true && isSyntheticRead(data, run) ? (
         <SyntheticBanner />
@@ -260,7 +260,7 @@ function Body({
     }
     if (e !== null) return <LoadError error={e} retry={() => void query.refetch()} />;
     return (
-      <p role="status" className="rounded border border-slate-300 p-2">
+      <p role="status" className="loading-line">
         {D.loadingFiltered}
       </p>
     );
@@ -273,7 +273,9 @@ function Body({
   return (
     <>
       {query.error !== null ? <LoadError error={query.error} retry={() => void query.refetch()} /> : null}
-      {data.executionId === null ? <p className="font-semibold">{D.onDemandOnly(onDemand)}</p> : null}
+      {data.executionId === null ? (
+        <p className="plate notice font-semibold">{D.onDemandOnly(onDemand)}</p>
+      ) : null}
       {latest !== undefined && status !== undefined && PAUSED.has(status) ? (
         <Paused
           executionId={latest.id}
@@ -289,7 +291,7 @@ function Body({
           coverageLine={coverageLineText(counts, data.verificationProviderConfigured, latest)}
         />
       ) : (
-        <p className="font-semibold">{runActive ? D.partial : D.noPricesInRun}</p>
+        <p className="plate notice font-semibold">{runActive ? D.partial : D.noPricesInRun}</p>
       )}
     </>
   );

@@ -1,0 +1,274 @@
+/* The date pair detail in the departure board (approved 2026-10-26/27): the dates on a flap name board, the headline
+   on steel, the basis as segmented flap tiles, the itineraries on a black board in a bolted frame, and one enamel plate
+   per airport pair. Amber and the failed red only ever on black; on enamel, failed is --ink-bad. */
+
+@layer components {
+  .outcomes th,
+  .outcomes td {
+    padding: 6px 8px;
+  }
+  /* ------------------------------------------------------------------------------------------------------------------
+     Header: the back link, the name board, the run line (ViewHeader's title stays for readers, the flaps show it)
+     ------------------------------------------------------------------------------------------------------------------ */
+  .detail-head {
+    padding-top: 6px;
+  }
+  .detail-name {
+    --cw: clamp(11px, calc((100vw - 2 * var(--gutter) - 40px) / 34), 24px);
+    --cg: 2px;
+    align-items: center;
+  }
+  .detail-name .flaps-gap {
+    margin-left: calc(var(--cw) * 0.6);
+  }
+  /* The title is on the flaps above; the heading keeps its words for readers and the document outline */
+  .detail-head .detail-title h2 {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  /* The headline: "cheapest found £X · …" in Atkinson on steel; a calendar headline keeps its dashed edge */
+  .detail-headline {
+    font: 700 18px / 1.4 var(--font-ui);
+  }
+  .detail-headline .figure {
+    font-size: 1.2em;
+  }
+
+  /* ------------------------------------------------------------------------------------------------------------------
+     The basis switch: segmented flap tiles; the chosen one inverted, with a bar under its label (not colour alone)
+     ------------------------------------------------------------------------------------------------------------------ */
+  .seg-tile {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    padding: 0 14px;
+    font: 600 16px / 1 var(--font-flap);
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--ink);
+    background: var(--field);
+    border: 1px solid var(--steel-deep);
+    border-radius: var(--radius);
+    cursor: pointer;
+  }
+  .seg-tile:hover {
+    background: #fff;
+  }
+  .seg-tile:has(input:checked) {
+    color: var(--flap-ink);
+    background: var(--board);
+    border-color: #000;
+    box-shadow: inset 0 -4px 0 var(--flap-ink);
+  }
+  .seg-tile:has(input:focus-visible) {
+    outline: 3px solid var(--focus-out);
+    outline-offset: 2px;
+    box-shadow:
+      0 0 0 2px var(--focus-in),
+      0 0 0 7px var(--focus-in);
+  }
+  .seg-tile:has(input:checked:focus-visible) {
+    box-shadow:
+      inset 0 -4px 0 var(--flap-ink),
+      0 0 0 2px var(--focus-in),
+      0 0 0 7px var(--focus-in);
+  }
+  .seg-tile input {
+    position: absolute;
+    opacity: 0;
+    width: 1px;
+    height: 1px;
+  }
+
+  /* ------------------------------------------------------------------------------------------------------------------
+     The itineraries board: a black board in a bolted steel frame
+     ------------------------------------------------------------------------------------------------------------------ */
+  .itins-frame {
+    padding: 12px 14px 14px;
+  }
+  .itins {
+    --cw: 14px;
+    --cg: 2px;
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    font-size: 14px;
+    line-height: 1.4;
+    color: var(--flap-ink);
+  }
+  .itins thead th {
+    padding: 0 8px 8px;
+    text-align: left;
+    vertical-align: bottom;
+    white-space: nowrap;
+    font: 600 14px / 1 var(--font-flap);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--flap-ink-2);
+    border-bottom: 1px solid var(--board-line);
+  }
+  /* a sort button takes its column name's painted caps (a button does not inherit them by default) */
+  .itins thead th button {
+    font: inherit;
+    letter-spacing: inherit;
+    text-transform: inherit;
+  }
+  .itins thead th .btn-text {
+    color: var(--flap-ink);
+    text-decoration-color: #6b7176;
+  }
+  .itins thead th[aria-sort="ascending"] .btn-text,
+  .itins thead th[aria-sort="descending"] .btn-text {
+    text-decoration-color: var(--flap-ink);
+  }
+  .itins tbody td {
+    padding: 10px 8px;
+    vertical-align: top;
+    border-top: 1px solid #1f2326;
+  }
+  .itins tbody tr:first-child > td {
+    border-top: 0;
+  }
+  .itins .row-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .itins .toggle {
+    display: inline-grid;
+    place-items: center;
+    min-width: 44px;
+    min-height: 44px;
+    font: 600 20px / 1 var(--font-flap);
+    color: var(--flap-ink);
+    background: var(--flap-top);
+    border: 1px solid var(--board-edge);
+    border-radius: 2px;
+    cursor: pointer;
+  }
+  .itins .toggle:hover,
+  .itins .toggle[aria-expanded="true"] {
+    border-color: var(--flap-ink);
+  }
+  /* Row inks: failed rows in the dim red with their cross and words, calendar prices and their class in amber */
+  .itins tbody tr[data-class="failed"] > td {
+    color: var(--red);
+  }
+  .itins tr[data-class="unchecked"] .price-flaps,
+  .itins tr[data-class="partially-verified"] .price-flaps {
+    color: var(--amber);
+  }
+  /* Each class tag carries a glyph beside its word: ✓ verified, ◐ partly, ✕ failed, ○ not checked (silent to readers) */
+  .itins [data-testid="class-badge"]::before {
+    content: "✓" / "";
+    margin-right: 2px;
+  }
+  .itins tr[data-class="partially-verified"] [data-testid="class-badge"]::before {
+    content: "◐" / "";
+  }
+  .itins tr[data-class="failed"] [data-testid="class-badge"]::before {
+    content: "✕" / "";
+  }
+  .itins tr[data-class="unchecked"] [data-testid="class-badge"]::before {
+    content: "○" / "";
+  }
+  /* The row an email link opened: an amber rule round it, on black */
+  .itins tbody tr[aria-current="true"] > td {
+    background: var(--board-2);
+    box-shadow:
+      inset 0 2px 0 var(--amber),
+      inset 0 -2px 0 var(--amber);
+  }
+  .itins tbody tr[aria-current="true"] > td:first-child {
+    box-shadow:
+      inset 2px 0 0 var(--amber),
+      inset 0 2px 0 var(--amber),
+      inset 0 -2px 0 var(--amber);
+  }
+  /* The legs and verdicts of an expanded row, on a slightly lifted black panel */
+  .itins .expanded-cell {
+    padding: 0 8px 16px;
+    border-top: 0;
+  }
+  .expanded-panel {
+    padding: 14px 16px;
+    background: #111315;
+    border: 1px solid var(--board-line);
+    border-radius: 3px;
+    font-size: 14.5px;
+    line-height: 1.5;
+  }
+  .expanded-panel h3 {
+    margin: 0 0 6px;
+    font: 600 14px / 1 var(--font-flap);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--flap-ink-2);
+  }
+  .expanded-panel ul {
+    display: grid;
+    gap: 3px;
+  }
+  .expanded-panel dt {
+    color: var(--flap-ink-2);
+  }
+
+  /* ------------------------------------------------------------------------------------------------------------------
+     The per-airport-pair plates: two columns on a desk, one on a phone
+     ------------------------------------------------------------------------------------------------------------------ */
+  .pair-plates {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+    align-items: start;
+  }
+  .pair-plate {
+    padding: 22px 22px 20px 34px;
+    min-width: 0;
+  }
+  .pair-plate .outcomes {
+    font-size: 13px;
+  }
+  .pair-plate .prices > li {
+    padding: 8px 0;
+    border-top: 1px solid var(--enamel-edge);
+  }
+  .pair-plate .prices > li:first-child {
+    border-top: 0;
+  }
+}
+
+@media (max-width: 899px) {
+  .pair-plates {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .pair-plate {
+    padding: 20px 14px 16px;
+  }
+  .itins-frame {
+    padding: 8px 6px 10px;
+  }
+  .itins tbody td,
+  .itins thead th {
+    padding-left: 5px;
+    padding-right: 5px;
+  }
+}
+
+@media (forced-colors: active) {
+  .seg-tile:has(input:checked) {
+    border: 2px solid Highlight;
+  }
+  .itins tbody tr[aria-current="true"] > td {
+    outline: 2px solid Highlight;
+  }
+}

@@ -25,6 +25,7 @@ import {
   runOrder,
 } from './lines.js';
 import { RouteTable } from './RouteTable.js';
+import './history.css';
 
 const H = COPY.historyView;
 /** The overlay of every pair draws at most this many pairs, one palette colour each (review ui-r2-009). */
@@ -97,10 +98,10 @@ export function HistoryView({ definition }: { definition: DefinitionResponse }) 
   const loaded = !pending && error === null;
 
   return (
-    <section aria-label={H.title} className="flex flex-col gap-4">
+    <section aria-label={H.title} className="history flex flex-col gap-4 pt-5">
       <ViewHeader title={H.title} variant="span" executions={executions} stale={newestAllStale(fetchLines)} />
       {span !== null ? (
-        <p className="text-sm">
+        <p className="lede text-[15px]">
           <span>
             {H.spanLine(
               span.runs,
@@ -119,30 +120,30 @@ export function HistoryView({ definition }: { definition: DefinitionResponse }) 
           ) : null}
         </p>
       ) : loaded && parentIds.length > 0 ? (
-        <p className="text-sm">
+        <p className="lede text-[15px]">
           {SETUP_COPY.history.runsWithoutPrice(withoutPrice, parentIds.length, subject)}
         </p>
       ) : null}
       {hash !== null ? (
-        <div>
-          {heading !== null ? <p className="font-medium">{heading}</p> : null}
-          <p className="text-xs">{H.itineraryHash(hash)}</p>
+        <div className="plate plate-pad history-picker">
+          {heading !== null ? <p className="h-sub">{heading}</p> : null}
+          <p className="mono mt-1 text-xs text-fg-2">{H.itineraryHash(hash)}</p>
           <a
             href={hrefWith({ [HISTORY_PARAMS.hash]: null })}
             onClick={navigateTo({ [HISTORY_PARAMS.hash]: null })}
-            className="underline"
+            className="link"
           >
             {H.backToRoute}
           </a>
         </div>
       ) : (
-        <div>
-          <label className="flex max-w-xs flex-col text-sm">
+        <div className="plate plate-pad history-picker">
+          <label className="field-label flex max-w-xs flex-col gap-1.5">
             {H.routePicker}
             <select
               value={overlay ? ALL : chosen === undefined ? '' : pairKey(chosen)}
               onChange={(e) => updateSearchParams({ [HISTORY_PARAMS.pair]: e.target.value }, 'replace')}
-              className="min-h-11 max-w-full rounded border border-slate-400 px-1"
+              className="input min-h-11 max-w-full"
             >
               {pairs.map((p) => (
                 <option key={pairKey(p)} value={pairKey(p)}>
@@ -154,21 +155,25 @@ export function HistoryView({ definition }: { definition: DefinitionResponse }) 
               </option>
             </select>
           </label>
-          <p className="mt-1 text-sm text-slate-700">{H.offersPerItinerary}</p>
+          <p className="hint mt-2 max-w-prose">{H.offersPerItinerary}</p>
         </div>
       )}
       {pending ? (
-        <p role="status">{COPY.loading}</p>
+        <p role="status" className="loading-line">
+          {COPY.loading}
+        </p>
       ) : error !== null ? (
-        <p role="alert">{COPY.loadFailed(error.message)}</p>
+        <p role="alert" className="plate notice bad-text">
+          {COPY.loadFailed(error.message)}
+        </p>
       ) : fetchLines.length === 0 && routeLines.length === 0 ? (
-        <p>{H.empty}</p>
+        <p className="plate plate-pad max-w-prose">{H.empty}</p>
       ) : (
         <>
           {fetchLines.length > 0 ? (
             <>
               <HistoryChart lines={fetchLines} tablesId={tablesId} />
-              <div id={tablesId} className="flex flex-col gap-3">
+              <div id={tablesId} className="plate plate-pad history-tables">
                 {fetchLines.map((l) => (
                   <HistoryTable key={l.key} line={l} destination={destination} notes={notes} />
                 ))}
@@ -178,7 +183,7 @@ export function HistoryView({ definition }: { definition: DefinitionResponse }) 
           {routeLines.length > 0 ? (
             <>
               <RouteChart lines={routeLines} tablesId={routeTablesId} />
-              <div id={routeTablesId} className="flex flex-col gap-3">
+              <div id={routeTablesId} className="plate plate-pad history-tables">
                 {routeLines.map((l) => (
                   <RouteTable key={l.key} line={l} now={now} />
                 ))}

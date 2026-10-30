@@ -67,7 +67,10 @@ describe('the Playwright smoke’s Dates selectors match the rendered view', () 
     renderDates({ body: workedDates() });
     expect(await screen.findAllByTestId('board-card')).toHaveLength(10);
     expect(document.querySelectorAll(SMOKE.phoneCard)).toHaveLength(10);
-    expect(screen.queryByRole('table', { name: SMOKE.boardTable })).toBeNull();
+    // the cards are the board table's own rows (one semantic table at every width)
+    expect(
+      screen.getByRole('table', { name: SMOKE.boardTable }).querySelectorAll(SMOKE.phoneCard),
+    ).toHaveLength(10);
     expect(screen.getByRole('button', { name: SMOKE.previousMonth })).toBeDisabled();
     expect(screen.getByRole('button', { name: SMOKE.nextMonth })).toBeEnabled();
     const dates = new Set(

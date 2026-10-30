@@ -2,6 +2,8 @@ import { apiContract, type Iata } from '@gmt/core';
 import { type FormEvent, useId, useState } from 'react';
 import type { DefinitionResponse } from '../../api/types.js';
 import { COPY } from '../../copy.js';
+import { Flaps } from '../../flaps/Flaps.js';
+import { PHONE_QUERY, useMediaQuery } from '../../hooks/useMediaQuery.js';
 import { CLEARED_FILTERS, type DatesUiState, datesPatch, journeyInBounds } from '../../state/datesState.js';
 import { nightsRange } from '../../state/parse.js';
 import { updateSearchParams } from '../../state/urlState.js';
@@ -11,7 +13,7 @@ const JOURNEY_BOUNDS = D.journeyBounds(
   apiContract.MIN_JOURNEY_LIMIT_MINUTES,
   apiContract.MAX_JOURNEY_LIMIT_MINUTES,
 );
-const FIELD = 'min-h-11 w-24 rounded border border-slate-500 px-2';
+const FIELD = 'input min-h-11 w-24';
 
 /** A filter edit replaces the URL (spec §11: the filters are in the URL; an edit is not a navigation). */
 const apply = (s: Partial<DatesUiState>) => updateSearchParams(datesPatch(s), 'replace');
@@ -25,6 +27,7 @@ const apply = (s: Partial<DatesUiState>) => updateSearchParams(datesPatch(s), 'r
  */
 export function Filters({ definition, state }: { definition: DefinitionResponse; state: DatesUiState }) {
   const id = useId();
+  const phone = useMediaQuery(PHONE_QUERY);
   // why: typed text is held here until it is a value the URL can carry; a half-typed "1" of "14" never filters
   const [stay, setStay] = useState({ min: textOf(state.nights?.min), max: textOf(state.nights?.max) });
   const [journey, setJourney] = useState(textOf(state.journey ?? undefined));
@@ -71,11 +74,11 @@ export function Filters({ definition, state }: { definition: DefinitionResponse;
     return next.length === all.length ? [] : all.filter((c) => next.includes(c));
   };
 
-  return (
-    <form aria-label={D.filtersLabel} onSubmit={onSubmit} className="flex flex-wrap items-end gap-4 text-sm">
+  const form = (
+    <form aria-label={D.filtersLabel} onSubmit={onSubmit} className="dates-filters">
       <div className="flex flex-wrap items-end gap-2">
-        <label className="flex flex-col">
-          {D.stayMin}
+        <label className="filter-field">
+          <span className="label-caps">{D.stayMin}</span>
           <input
             type="text"
             inputMode="numeric"
@@ -85,8 +88,8 @@ export function Filters({ definition, state }: { definition: DefinitionResponse;
             onChange={(e) => editStay({ ...stay, min: e.target.value })}
           />
         </label>
-        <label className="flex flex-col">
-          {D.stayMax}
+        <label className="filter-field">
+          <span className="label-caps">{D.stayMax}</span>
           <input
             type="text"
             inputMode="numeric"
@@ -97,7 +100,7 @@ export function Filters({ definition, state }: { definition: DefinitionResponse;
           />
         </label>
         {stayError ? (
-          <span id={`${id}-stay`} className="font-medium text-red-800">
+          <span id={`${id}-stay`} className="bad-text">
             {D.stayInvalid}
           </span>
         ) : null}
@@ -114,8 +117,10 @@ export function Filters({ definition, state }: { definition: DefinitionResponse;
         chosen={state.to}
         onToggle={(c) => apply({ to: toggle(state.to, definition.destinations, c) })}
       />
-      <div className="flex flex-col">
-        <label htmlFor={`${id}-journey`}>{D.journeyLimit}</label>
+      <div className="filter-field">
+        <label htmlFor={`${id}-journey`} className="label-caps">
+          {D.journeyLimit}
+        </label>
         <input
           id={`${id}-journey`}
           type="text"
@@ -133,24 +138,24 @@ export function Filters({ definition, state }: { definition: DefinitionResponse;
             }
           }}
         />
-        <span
-          id={`${id}-journey-bounds`}
-          className={journeyError ? 'font-medium text-red-800' : 'text-slate-700'}
-        >
+        <span id={`${id}-journey-bounds`} className={journeyError ? 'bad-text text-xs' : 'text-xs text-fg-2'}>
           {JOURNEY_BOUNDS}
         </span>
       </div>
-      <label className="flex min-h-11 items-center gap-2">
+      <label className="week-switch min-h-11">
         <input
           type="checkbox"
           checked={state.bestPerWeek}
           onChange={(e) => apply({ bestPerWeek: e.target.checked })}
         />
-        {D.weekSwitch}
+        <span className="font-semibold">{D.weekSwitch}</span>
+        <span aria-hidden="true" className="flap-strip switch-flap">
+          <Flaps text={state.bestPerWeek ? D.switchFlap.on : D.switchFlap.off} cells={3} />
+        </span>
       </label>
       <button
         type="button"
-        className="min-h-11 rounded border border-slate-500 px-3"
+        className="btn-text min-h-11 font-semibold"
         onClick={() => {
           setStay({ min: '', max: '' });
           setJourney('');
@@ -160,6 +165,16 @@ export function Filters({ definition, state }: { definition: DefinitionResponse;
         {COPY.clearFilters}
       </button>
     </form>
+  );
+  // why: on a phone the filters fold to one line, so the board starts in the first screen (Ian, 2026-10-27); the
+  // fold opens on a tap and the form inside is the same form
+  return phone ? (
+    <details className="fold filters-fold">
+      <summary className="min-h-11">{D.filtersLabel}</summary>
+      {form}
+    </details>
+  ) : (
+    form
   );
 }
 
@@ -177,12 +192,12 @@ function AirportPicker({
 }) {
   const ticked = chosen.length === 0 ? all : chosen;
   return (
-    <fieldset className="flex flex-wrap items-center gap-2">
-      <legend>{legend}</legend>
+    <fieldset className="airport-pick">
+      <legend className="label-caps">{legend}</legend>
       {all.map((c) => {
         const on = ticked.includes(c);
         return (
-          <label key={c} className="flex min-h-11 items-center gap-1">
+          <label key={c} className="airport-check min-h-11">
             <input
               type="checkbox"
               checked={on}

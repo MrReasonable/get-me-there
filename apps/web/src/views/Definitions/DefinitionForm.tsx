@@ -35,16 +35,14 @@ import { SCHEDULE_FIELD_ID } from './ScheduleField.js';
 const errorsFor = (errors: readonly FieldError[], field: string) =>
   errors.filter((e) => e.field === field || e.field.startsWith(`${field}.`)).map((e) => e.message);
 
-const input =
-  'min-h-11 rounded-md border border-slate-400 bg-white px-3 text-base focus-visible:border-slate-900 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-slate-900 aria-invalid:border-red-700';
+const input = 'input min-h-11';
 /** Fields that live inside the collapsed More options fold; the journey time and the window's dates are in the short form. */
 const ADVANCED_FIELDS =
   /^(constraints(?!\.maxJourneyMinutes)|verification|budget|providers|schedule|enabled|destinationNotes|onwardCostPence|window\.(startOffsetDays|lengthDays))/;
 /** The short form's group titles (From, Departing between, Stay, Longest journey each way): one weight and size. */
-const GROUP_TITLE = 'mb-1 text-base font-semibold text-slate-900';
+const GROUP_TITLE = 'def-group-title';
 const SR_ONLY = 'sr-only';
-const primary =
-  'min-h-11 rounded-md border border-slate-900 bg-slate-900 px-5 font-semibold text-white hover:bg-slate-800 disabled:border-slate-400 disabled:bg-slate-400';
+const primary = 'btn btn-primary min-h-11';
 type EstimateBody = ReturnType<typeof draftToRequest>;
 /** A draft as it was when Show estimate was clicked: its comparison key and the request body built from it. */
 interface DraftSnapshot {
@@ -183,285 +181,294 @@ export function DefinitionForm({
 
   const fresh = estimate !== null && estimatedFor === current;
   return (
-    <form onSubmit={(e) => e.preventDefault()} className="space-y-5 text-sm">
-      {fieldErrors.length > 0 ? (
-        <div ref={summaryRef} tabIndex={-1} role="alert" className="rounded border border-red-700 p-2">
-          <p className="font-semibold">{COPY.fieldErrorsHeading}</p>
-          <ul>
-            {fieldErrors.map((e) => (
-              <li key={`${e.field}-${e.message}`}>{COPY.fieldError(e.field, e.message)}</li>
+    // why: the departure board's form plate: fields on the left, the estimate and its actions in a side column that
+    // stays in view on a desk (definitions.css); one column on a phone, in the same reading order
+    <form onSubmit={(e) => e.preventDefault()} className="plate plate-pad def-form text-[15px]">
+      <div className="def-main">
+        {fieldErrors.length > 0 ? (
+          <div ref={summaryRef} tabIndex={-1} role="alert" className="def-errors">
+            <p className="bad-text">{COPY.fieldErrorsHeading}</p>
+            <ul>
+              {fieldErrors.map((e) => (
+                <li key={`${e.field}-${e.message}`}>{COPY.fieldError(e.field, e.message)}</li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+        {saved !== null && saved.notices.length > 0 ? (
+          <ul aria-label={COPY.definitionNotices} className="def-notices">
+            {saved.notices.map((m) => (
+              <li key={m}>{m}</li>
             ))}
           </ul>
-        </div>
-      ) : null}
-      {saved !== null && saved.notices.length > 0 ? (
-        <ul aria-label={COPY.definitionNotices} className="rounded border border-amber-700 bg-amber-50 p-2">
-          {saved.notices.map((m) => (
-            <li key={m}>{m}</li>
-          ))}
-        </ul>
-      ) : null}
-      <section
-        aria-labelledby="plan-heading"
-        className="space-y-6 rounded-lg border border-slate-300 bg-white p-4 shadow-[0_1px_3px_rgb(15_23_42/0.08)] sm:p-6"
-      >
-        <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-2">
-          <div className="space-y-1">
-            <h3 id="plan-heading" className="text-lg font-semibold text-slate-950">
-              {PLAN_COPY.heading}
-            </h3>
-            <p className="max-w-prose text-slate-700">{PLAN_COPY.lead}</p>
-          </div>
-          <button
-            type="button"
-            className="min-h-11 rounded-md px-2 text-sm text-slate-700 underline underline-offset-2 hover:text-slate-950"
-            onClick={() => {
-              setDraft(applyExample(draft, EXAMPLE_DEFINITION));
-              setNameTouched(true);
-              setBlank([]);
-            }}
-          >
-            {COPY.importExample(EXAMPLE_LABEL)}
-          </button>
-        </div>
-        <div className="grid gap-5 md:grid-cols-2">
-          <AirportListInput
-            id="origins"
-            label={PLAN_COPY.from}
-            placeholder={PLAN_COPY.fromPlaceholder}
-            codes={draft.origins}
-            details={details}
-            onChange={(origins) => setDraft({ ...draft, origins })}
-            errors={errorsFor(fieldErrors, 'origins')}
-          />
-          <AirportListInput
-            id="destinations"
-            label={PLAN_COPY.to}
-            placeholder={PLAN_COPY.toPlaceholder}
-            codes={draft.destinations}
-            details={details}
-            onChange={(destinations) => setDraft({ ...draft, destinations })}
-            errors={errorsFor(fieldErrors, 'destinations')}
-          />
-        </div>
-        <DepartureWindowField
-          window={draft.window}
-          setWindow={(window) => setDraft({ ...draft, window })}
-          otherWindow={otherWindow}
-          setOtherWindow={setOtherWindow}
-          errorsFor={(field) => errorsFor(fieldErrors, field)}
-          clearBlank={() => {
-            for (const id of ['w-offset', 'w-length']) markBlank(id, false);
-          }}
-        />
-        <div className="flex flex-wrap items-start gap-x-8 gap-y-5">
-          <fieldset className="flex flex-col gap-1">
-            <legend className="mb-1 text-base font-semibold text-slate-900">{PLAN_COPY.stay}</legend>
-            {/* why: "[10] to [21] nights" reads as one range; each box keeps its own label for a screen reader */}
-            <span className="flex flex-wrap items-start gap-2">
-              <NumberField
-                id="n-min"
-                label={PLAN_COPY.shortest}
-                labelClassName={SR_ONLY}
-                value={blank.includes('n-min') ? undefined : draft.minNights}
-                errors={[
-                  ...errorsFor(fieldErrors, 'minNights'),
-                  ...(blank.includes('n-min') ? [COPY.required] : []),
-                ]}
-                onChange={(v) => {
-                  markBlank('n-min', v === undefined);
-                  if (v !== undefined) setDraft({ ...draft, minNights: v });
-                }}
-              />
-              <span aria-hidden="true" className="flex min-h-11 items-center text-slate-700">
-                {PLAN_COPY.stayTo}
-              </span>
-              <NumberField
-                id="n-max"
-                label={PLAN_COPY.longest}
-                labelClassName={SR_ONLY}
-                hint={PLAN_COPY.nights}
-                value={blank.includes('n-max') ? undefined : draft.maxNights}
-                errors={[
-                  ...errorsFor(fieldErrors, 'maxNights'),
-                  ...(blank.includes('n-max') ? [COPY.required] : []),
-                ]}
-                onChange={(v) => {
-                  markBlank('n-max', v === undefined);
-                  if (v !== undefined) setDraft({ ...draft, maxNights: v });
-                }}
-              />
-            </span>
-          </fieldset>
-          <HoursMinutesField
-            id="c-maxJourney"
-            label={PLAN_COPY.journey}
-            legendClassName={GROUP_TITLE}
-            description={PLAN_COPY.journeyHint}
-            value={draft.constraints.maxJourneyMinutes}
-            onChange={(n) =>
-              setDraft({ ...draft, constraints: withKey(draft.constraints, 'maxJourneyMinutes', n) })
-            }
-          />
-          <span className="flex flex-col gap-1">
-            <label htmlFor="d-cabin" className="text-base font-semibold text-slate-900">
-              {COPY.cabin}
-            </label>
-            <select
-              id="d-cabin"
-              className={input}
-              value={draft.cabin}
-              onChange={(e) => {
-                const cabin = apiContract.cabinSchema.safeParse(e.target.value);
-                if (cabin.success) setDraft({ ...draft, cabin: cabin.data });
+        ) : null}
+        <section aria-labelledby="plan-heading" className="space-y-6">
+          <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-2">
+            <div className="space-y-1">
+              <h3 id="plan-heading" className="h-section">
+                {PLAN_COPY.heading}
+              </h3>
+              <p className="lede">{PLAN_COPY.lead}</p>
+            </div>
+            <button
+              type="button"
+              className="btn-text min-h-11 text-fg-2"
+              onClick={() => {
+                setDraft(applyExample(draft, EXAMPLE_DEFINITION));
+                setNameTouched(true);
+                setBlank([]);
               }}
             >
-              {apiContract.cabinSchema.options.map((c) => (
-                <option key={c} value={c}>
-                  {COPY.cabinName[c]}
-                </option>
-              ))}
-            </select>
-          </span>
-        </div>
-        <span className="flex max-w-md flex-col gap-1">
-          <label htmlFor="d-name" className="text-base font-semibold text-slate-900">
-            {PLAN_COPY.name}
-          </label>
-          <input
-            id="d-name"
-            value={draft.name}
-            aria-invalid={errorsFor(fieldErrors, 'name').length > 0}
-            aria-describedby={
-              errorsFor(fieldErrors, 'name').length > 0 ? 'd-name-hint d-name-errors' : 'd-name-hint'
-            }
-            onChange={(e) => {
-              setNameTouched(true);
-              setDraft({ ...draft, name: e.target.value });
-            }}
-            onBlur={(e) => {
-              if (e.target.value.trim() === '') setNameTouched(false);
-            }}
-            className={input}
-          />
-          <span id="d-name-hint" className="text-xs text-slate-700">
-            {PLAN_COPY.nameHint}
-          </span>
-          <FieldErrors id="d-name-errors" messages={errorsFor(fieldErrors, 'name')} />
-        </span>
-      </section>
-      <details
-        open={advancedOpen}
-        onToggle={(e) => setAdvancedOpen(e.currentTarget.open)}
-        className="rounded-lg border border-slate-200 bg-slate-50 px-4 sm:px-6"
-      >
-        <summary className="flex min-h-12 cursor-pointer flex-wrap items-baseline gap-x-3 py-3 marker:text-slate-500">
-          <span className="font-semibold text-slate-900">{PLAN_COPY.moreOptions}</span>
-          <span className="text-xs text-slate-600">{PLAN_COPY.moreOptionsHint}</span>
-        </summary>
-        <div className="space-y-4 pb-5">
-          <RollingWindowFields
+              {COPY.importExample(EXAMPLE_LABEL)}
+            </button>
+          </div>
+          <div className="grid gap-5 md:grid-cols-2">
+            <AirportListInput
+              id="origins"
+              label={PLAN_COPY.from}
+              placeholder={PLAN_COPY.fromPlaceholder}
+              codes={draft.origins}
+              details={details}
+              onChange={(origins) => setDraft({ ...draft, origins })}
+              errors={errorsFor(fieldErrors, 'origins')}
+            />
+            <AirportListInput
+              id="destinations"
+              label={PLAN_COPY.to}
+              placeholder={PLAN_COPY.toPlaceholder}
+              codes={draft.destinations}
+              details={details}
+              onChange={(destinations) => setDraft({ ...draft, destinations })}
+              errors={errorsFor(fieldErrors, 'destinations')}
+            />
+          </div>
+          <DepartureWindowField
             window={draft.window}
             setWindow={(window) => setDraft({ ...draft, window })}
+            otherWindow={otherWindow}
+            setOtherWindow={setOtherWindow}
             errorsFor={(field) => errorsFor(fieldErrors, field)}
-            blank={blank}
-            markBlank={markBlank}
+            clearBlank={() => {
+              for (const id of ['w-offset', 'w-length']) markBlank(id, false);
+            }}
           />
-          <fieldset className="flex flex-col gap-3">
-            <legend className="font-semibold">{PLAN_COPY.notesHeading}</legend>
-            {draft.destinations.length === 0 ? (
-              <p className="text-slate-700">{PLAN_COPY.notesEmpty}</p>
-            ) : null}
-            {draft.destinations.map((d) => (
-              <span key={d} className="flex flex-wrap gap-3">
-                <span className="flex flex-col">
-                  <label htmlFor={`note-${d}`}>{COPY.destinationNote(d)}</label>
-                  <input
-                    id={`note-${d}`}
-                    value={draft.destinationNotes[d] ?? ''}
-                    onChange={(e) =>
-                      setDraft({
-                        ...draft,
-                        destinationNotes: { ...draft.destinationNotes, [d]: e.target.value },
-                      })
-                    }
-                    className={input}
-                  />
+          <div className="flex flex-wrap items-start gap-x-8 gap-y-5">
+            <fieldset className="flex flex-col gap-1">
+              <legend className={GROUP_TITLE}>{PLAN_COPY.stay}</legend>
+              {/* why: "[10] to [21] nights" reads as one range; each box keeps its own label for a screen reader */}
+              <span className="flex flex-wrap items-start gap-2">
+                <NumberField
+                  id="n-min"
+                  label={PLAN_COPY.shortest}
+                  labelClassName={SR_ONLY}
+                  value={blank.includes('n-min') ? undefined : draft.minNights}
+                  errors={[
+                    ...errorsFor(fieldErrors, 'minNights'),
+                    ...(blank.includes('n-min') ? [COPY.required] : []),
+                  ]}
+                  onChange={(v) => {
+                    markBlank('n-min', v === undefined);
+                    if (v !== undefined) setDraft({ ...draft, minNights: v });
+                  }}
+                />
+                <span aria-hidden="true" className="flex min-h-11 items-center text-fg-2">
+                  {PLAN_COPY.stayTo}
                 </span>
-                <PoundsField
-                  id={`onward-${d}`}
-                  label={COPY.onwardCost(d)}
-                  pence={draft.onwardCostPence[d]}
-                  onChange={(p) =>
-                    setDraft({ ...draft, onwardCostPence: withKey(draft.onwardCostPence, d, p) })
-                  }
+                <NumberField
+                  id="n-max"
+                  label={PLAN_COPY.longest}
+                  labelClassName={SR_ONLY}
+                  hint={PLAN_COPY.nights}
+                  value={blank.includes('n-max') ? undefined : draft.maxNights}
+                  errors={[
+                    ...errorsFor(fieldErrors, 'maxNights'),
+                    ...(blank.includes('n-max') ? [COPY.required] : []),
+                  ]}
+                  onChange={(v) => {
+                    markBlank('n-max', v === undefined);
+                    if (v !== undefined) setDraft({ ...draft, maxNights: v });
+                  }}
                 />
               </span>
-            ))}
-          </fieldset>
-          <AdvancedFields
-            draft={draft}
-            setDraft={setDraft}
-            capabilities={capabilities}
-            onIncomplete={markIncomplete}
+            </fieldset>
+            <HoursMinutesField
+              id="c-maxJourney"
+              label={PLAN_COPY.journey}
+              legendClassName={GROUP_TITLE}
+              description={PLAN_COPY.journeyHint}
+              value={draft.constraints.maxJourneyMinutes}
+              onChange={(n) =>
+                setDraft({ ...draft, constraints: withKey(draft.constraints, 'maxJourneyMinutes', n) })
+              }
+            />
+            <span className="flex flex-col gap-1">
+              <label htmlFor="d-cabin" className={GROUP_TITLE}>
+                {COPY.cabin}
+              </label>
+              <select
+                id="d-cabin"
+                className={input}
+                value={draft.cabin}
+                onChange={(e) => {
+                  const cabin = apiContract.cabinSchema.safeParse(e.target.value);
+                  if (cabin.success) setDraft({ ...draft, cabin: cabin.data });
+                }}
+              >
+                {apiContract.cabinSchema.options.map((c) => (
+                  <option key={c} value={c}>
+                    {COPY.cabinName[c]}
+                  </option>
+                ))}
+              </select>
+            </span>
+          </div>
+          <span className="flex max-w-md flex-col gap-1">
+            <label htmlFor="d-name" className={GROUP_TITLE}>
+              {PLAN_COPY.name}
+            </label>
+            <input
+              id="d-name"
+              value={draft.name}
+              aria-invalid={errorsFor(fieldErrors, 'name').length > 0}
+              aria-describedby={
+                errorsFor(fieldErrors, 'name').length > 0 ? 'd-name-hint d-name-errors' : 'd-name-hint'
+              }
+              onChange={(e) => {
+                setNameTouched(true);
+                setDraft({ ...draft, name: e.target.value });
+              }}
+              onBlur={(e) => {
+                if (e.target.value.trim() === '') setNameTouched(false);
+              }}
+              className={input}
+            />
+            <span id="d-name-hint" className="hint">
+              {PLAN_COPY.nameHint}
+            </span>
+            <FieldErrors id="d-name-errors" messages={errorsFor(fieldErrors, 'name')} />
+          </span>
+        </section>
+        <details
+          open={advancedOpen}
+          onToggle={(e) => setAdvancedOpen(e.currentTarget.open)}
+          className="fold def-more"
+        >
+          <summary className="min-h-12">
+            <span>{PLAN_COPY.moreOptions}</span>
+            <span className="hint font-normal">{PLAN_COPY.moreOptionsHint}</span>
+          </summary>
+          <div className="space-y-5 pt-2 pb-6">
+            <RollingWindowFields
+              window={draft.window}
+              setWindow={(window) => setDraft({ ...draft, window })}
+              errorsFor={(field) => errorsFor(fieldErrors, field)}
+              blank={blank}
+              markBlank={markBlank}
+            />
+            <fieldset className="def-fold-group flex flex-col gap-3">
+              <legend className="def-fold-legend">{PLAN_COPY.notesHeading}</legend>
+              {draft.destinations.length === 0 ? <p className="text-fg-2">{PLAN_COPY.notesEmpty}</p> : null}
+              {draft.destinations.map((d) => (
+                <span key={d} className="flex flex-wrap gap-3">
+                  <span className="flex flex-col gap-1">
+                    <label htmlFor={`note-${d}`} className="field-label">
+                      {COPY.destinationNote(d)}
+                    </label>
+                    <input
+                      id={`note-${d}`}
+                      value={draft.destinationNotes[d] ?? ''}
+                      onChange={(e) =>
+                        setDraft({
+                          ...draft,
+                          destinationNotes: { ...draft.destinationNotes, [d]: e.target.value },
+                        })
+                      }
+                      className={input}
+                    />
+                  </span>
+                  <PoundsField
+                    id={`onward-${d}`}
+                    label={COPY.onwardCost(d)}
+                    pence={draft.onwardCostPence[d]}
+                    onChange={(p) =>
+                      setDraft({ ...draft, onwardCostPence: withKey(draft.onwardCostPence, d, p) })
+                    }
+                  />
+                </span>
+              ))}
+            </fieldset>
+            <AdvancedFields
+              draft={draft}
+              setDraft={setDraft}
+              capabilities={capabilities}
+              onIncomplete={markIncomplete}
+            />
+          </div>
+        </details>
+        <CoverageCheck draft={draft} available={travelpayouts} />
+      </div>
+      <div className="def-side">
+        {saved === null ? (
+          <button
+            type="button"
+            className={primary}
+            disabled={blocked || estimateDraft.isPending}
+            aria-busy={estimateDraft.isPending ? true : undefined}
+            aria-describedby={blocked ? 'd-blocked' : undefined}
+            onClick={() => estimateDraft.mutate({ key: current, body: draftToRequest(draft) })}
+          >
+            {estimateDraft.isPending ? COPY.working : COPY.showEstimate}
+          </button>
+        ) : (
+          <button
+            type="button"
+            className={primary}
+            disabled={blocked || save.isPending}
+            aria-busy={save.isPending ? true : undefined}
+            aria-describedby={blocked ? 'd-blocked' : undefined}
+            onClick={() => save.mutate(saved)}
+          >
+            {save.isPending ? COPY.working : COPY.save}
+          </button>
+        )}
+        {blocked ? (
+          <p id="d-blocked" className="bad-text">
+            {[
+              ...(incomplete.some((id) => id !== SCHEDULE_FIELD_ID) ? [COPY.blockedByTimeWindow] : []),
+              ...(incomplete.includes(SCHEDULE_FIELD_ID) ? [SETUP_COPY.schedule.blocked] : []),
+              ...(blank.length > 0 ? [COPY.blockedByRequired] : []),
+            ].join(' ')}
+          </p>
+        ) : null}
+        {saved === null && estimate !== null ? (
+          <CreateConfirmation
+            estimate={estimate}
+            fresh={fresh}
+            blocked={blocked}
+            pending={create.isPending}
+            hardStop={draft.budget.maxCalls}
+            onCreate={() => {
+              if (estimatedBody !== null) create.mutate({ e: estimate, body: estimatedBody });
+            }}
           />
-        </div>
-      </details>
-      <CoverageCheck draft={draft} available={travelpayouts} />
-      {saved === null ? (
-        <button
-          type="button"
-          className={primary}
-          disabled={blocked || estimateDraft.isPending}
-          aria-busy={estimateDraft.isPending ? true : undefined}
-          aria-describedby={blocked ? 'd-blocked' : undefined}
-          onClick={() => estimateDraft.mutate({ key: current, body: draftToRequest(draft) })}
-        >
-          {estimateDraft.isPending ? COPY.working : COPY.showEstimate}
-        </button>
-      ) : (
-        <button
-          type="button"
-          className={primary}
-          disabled={blocked || save.isPending}
-          aria-busy={save.isPending ? true : undefined}
-          aria-describedby={blocked ? 'd-blocked' : undefined}
-          onClick={() => save.mutate(saved)}
-        >
-          {save.isPending ? COPY.working : COPY.save}
-        </button>
-      )}
-      {blocked ? (
-        <p id="d-blocked" className="text-red-800">
-          {[
-            ...(incomplete.some((id) => id !== SCHEDULE_FIELD_ID) ? [COPY.blockedByTimeWindow] : []),
-            ...(incomplete.includes(SCHEDULE_FIELD_ID) ? [SETUP_COPY.schedule.blocked] : []),
-            ...(blank.length > 0 ? [COPY.blockedByRequired] : []),
-          ].join(' ')}
-        </p>
-      ) : null}
-      {saved === null && estimate !== null ? (
-        <CreateConfirmation
-          estimate={estimate}
-          fresh={fresh}
-          blocked={blocked}
-          pending={create.isPending}
-          hardStop={draft.budget.maxCalls}
-          onCreate={() => {
-            if (estimatedBody !== null) create.mutate({ e: estimate, body: estimatedBody });
-          }}
-        />
-      ) : null}
-      {saved !== null ? (
-        <Reconfirmation
-          definition={saved}
-          pending={confirm.isPending}
-          onConfirm={(v) => confirm.mutate({ id: saved.id, ...v })}
-        />
-      ) : null}
-      {saved?.estimate ? <EstimatePanel estimate={saved.estimate} hardStop={saved.budget.maxCalls} /> : null}
-      {saved !== null ? <BudgetFitPanel fit={saved.budgetFit} /> : null}
-      {notice !== null ? <p role="status">{notice}</p> : null}
+        ) : null}
+        {saved !== null ? (
+          <Reconfirmation
+            definition={saved}
+            pending={confirm.isPending}
+            onConfirm={(v) => confirm.mutate({ id: saved.id, ...v })}
+          />
+        ) : null}
+        {saved?.estimate ? (
+          <EstimatePanel estimate={saved.estimate} hardStop={saved.budget.maxCalls} />
+        ) : null}
+        {saved !== null ? <BudgetFitPanel fit={saved.budgetFit} /> : null}
+        {notice !== null ? (
+          <p role="status" className="font-semibold">
+            {notice}
+          </p>
+        ) : null}
+      </div>
     </form>
   );
 }

@@ -106,6 +106,10 @@ const NON_COPY_PROPS = new Set([
   'htmlFor',
   'inputMode',
   'value',
+  // the departure board's flap groups: an alignment and a board slot's name, never copy
+  'align',
+  'slot',
+  'flapSlot',
   // WP10: Recharts' identifier props (a data field, an axis scale, a legend position), never copy
   'dataKey',
   'scale',

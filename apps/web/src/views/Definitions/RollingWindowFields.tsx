@@ -15,7 +15,7 @@ function ResolvedWindow({ window: w }: { window: DraftWindow }) {
     londonDateOf(now),
   );
   return (
-    <p className="w-full text-xs">
+    <p className="hint w-full">
       {COPY.resolvedWindow(formatIsoDate(r.departureFrom), formatIsoDate(r.departureTo))}
     </p>
   );
@@ -41,8 +41,8 @@ export function RollingWindowFields({
 }) {
   if (w.kind !== 'relative') return null;
   return (
-    <fieldset className="flex flex-wrap items-end gap-3">
-      <legend className="font-semibold">{PLAN_COPY.rollingHeading}</legend>
+    <fieldset className="def-fold-group flex flex-wrap items-end gap-4">
+      <legend className="def-fold-legend">{PLAN_COPY.rollingHeading}</legend>
       <NumberField
         id="w-offset"
         label={COPY.startOffsetDays}

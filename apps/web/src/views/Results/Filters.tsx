@@ -27,7 +27,7 @@ const intOrUndefined = (s: string): number | undefined => {
   return /^\d+$/.test(s.trim()) && Number.isSafeInteger(n) ? n : undefined;
 };
 
-const field = 'min-h-11 rounded border border-slate-400 px-1';
+const field = 'input min-h-11';
 
 export interface FiltersProps {
   state: ResultsUiState;
@@ -73,17 +73,15 @@ export function Filters({ state, rows, calendarBasis, narrow }: FiltersProps) {
   };
 
   return (
-    <details open={!narrow} className="text-sm">
-      <summary className="min-h-11 cursor-pointer font-semibold">
-        {COPY.filtersSummary(activeFilterCount(f))}
-      </summary>
+    <details open={!narrow} className="fold text-sm">
+      <summary className="min-h-11 cursor-pointer">{COPY.filtersSummary(activeFilterCount(f))}</summary>
       <form
         aria-label={COPY.filtersHeading}
         onSubmit={onSubmit}
-        className="flex flex-wrap items-start gap-3 pt-2"
+        className="flex flex-wrap items-start gap-x-5 gap-y-3 pt-2"
       >
         <fieldset className="flex flex-wrap gap-2">
-          <legend className="font-semibold">{COPY.filterClass}</legend>
+          <legend className="label-caps mb-1">{COPY.filterClass}</legend>
           {CLASSES.map((c) => (
             <label key={c} className="flex min-h-11 items-center gap-1">
               <input
@@ -96,7 +94,7 @@ export function Filters({ state, rows, calendarBasis, narrow }: FiltersProps) {
           ))}
         </fieldset>
         <fieldset className="flex flex-wrap gap-2">
-          <legend className="font-semibold">{COPY.filterProvider}</legend>
+          <legend className="label-caps mb-1">{COPY.filterProvider}</legend>
           {providers.map((p) => (
             <label key={p} className="flex min-h-11 items-center gap-1">
               <input
@@ -108,8 +106,10 @@ export function Filters({ state, rows, calendarBasis, narrow }: FiltersProps) {
             </label>
           ))}
         </fieldset>
-        <span className="flex flex-col">
-          <label htmlFor="filter-max-stops">{COPY.filterMaxStops}</label>
+        <span className="flex flex-col gap-1">
+          <label className="field-label" htmlFor="filter-max-stops">
+            {COPY.filterMaxStops}
+          </label>
           <select
             id="filter-max-stops"
             className={field}
@@ -123,8 +123,10 @@ export function Filters({ state, rows, calendarBasis, narrow }: FiltersProps) {
             <option value="2">2</option>
           </select>
         </span>
-        <span className="flex flex-col">
-          <label htmlFor="filter-carriers">{COPY.filterCarriers}</label>
+        <span className="flex flex-col gap-1">
+          <label className="field-label" htmlFor="filter-carriers">
+            {COPY.filterCarriers}
+          </label>
           <input
             id="filter-carriers"
             className={field}
@@ -135,13 +137,15 @@ export function Filters({ state, rows, calendarBasis, narrow }: FiltersProps) {
             onBlur={applyTyped}
           />
           {ignored.length > 0 ? (
-            <span id="filter-carriers-ignored" className="text-xs text-red-800">
+            <span id="filter-carriers-ignored" className="text-xs bad-text">
               {COPY.carriersIgnored(ignored.join(', '))}
             </span>
           ) : null}
         </span>
-        <span className="flex flex-col">
-          <label htmlFor="filter-max-price">{COPY.filterMaxPrice}</label>
+        <span className="flex flex-col gap-1">
+          <label className="field-label" htmlFor="filter-max-price">
+            {COPY.filterMaxPrice}
+          </label>
           <input
             id="filter-max-price"
             className={field}
@@ -153,7 +157,7 @@ export function Filters({ state, rows, calendarBasis, narrow }: FiltersProps) {
             onBlur={applyTyped}
           />
           {priceInvalid ? (
-            <span id="filter-max-price-error" role="alert" className="text-xs text-red-800">
+            <span id="filter-max-price-error" role="alert" className="text-xs bad-text">
               {COPY.invalidPounds}
             </span>
           ) : null}
@@ -166,8 +170,10 @@ export function Filters({ state, rows, calendarBasis, narrow }: FiltersProps) {
           />
           {COPY.filterHideStale}
         </label>
-        <span className="flex flex-col">
-          <label htmlFor="filter-unverified">{COPY.filterUnverified}</label>
+        <span className="flex flex-col gap-1">
+          <label className="field-label" htmlFor="filter-unverified">
+            {COPY.filterUnverified}
+          </label>
           <select
             id="filter-unverified"
             className={field}
@@ -187,17 +193,13 @@ export function Filters({ state, rows, calendarBasis, narrow }: FiltersProps) {
             ))}
           </select>
         </span>
-        <button type="submit" className="min-h-11 rounded border border-slate-500 px-3">
+        <button type="submit" className="btn btn-primary min-h-11 self-end">
           {COPY.applyFilters}
         </button>
-        <button
-          type="button"
-          className="min-h-11 rounded border border-slate-500 px-3"
-          onClick={() => apply({})}
-        >
+        <button type="button" className="btn min-h-11 self-end" onClick={() => apply({})}>
           {COPY.clearFilters}
         </button>
-        {calendarBasis ? <p className="w-full">{COPY.filtersDisabledCalendar}</p> : null}
+        {calendarBasis ? <p className="w-full text-fg-2">{COPY.filtersDisabledCalendar}</p> : null}
       </form>
     </details>
   );

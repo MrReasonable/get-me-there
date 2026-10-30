@@ -3,6 +3,7 @@ import { LoadError, Loading } from '../../components/LoadState.js';
 import { PLAN_COPY } from '../../copy/plan.js';
 import { hrefWith, navigateTo, useSearchParams } from '../../state/urlState.js';
 import { DefinitionForm } from './DefinitionForm.js';
+import './definitions.css';
 
 /**
  * Spec §11 Definitions, shown to the operator as "Searches": pick a search to edit or start a new one (`edit=new`, the default). It
@@ -22,16 +23,20 @@ export function DefinitionsView() {
   // why: an old link to a deleted or unknown definition must not look like a fresh create form (a duplicate waiting to happen).
   const missing = editing !== 'new' && existing === null;
   return (
-    <div className="space-y-4">
-      <h2 className="text-xl font-semibold">{PLAN_COPY.viewHeading}</h2>
-      {missing ? <p role="alert">{PLAN_COPY.notFound}</p> : null}
-      <ul aria-label={PLAN_COPY.searchList} className="flex flex-wrap gap-2 text-sm">
+    <div className="space-y-5 pt-6">
+      <h2 className="h-view">{PLAN_COPY.viewHeading}</h2>
+      {missing ? (
+        <p role="alert" className="plate notice font-semibold text-bad">
+          {PLAN_COPY.notFound}
+        </p>
+      ) : null}
+      <ul aria-label={PLAN_COPY.searchList} className="def-searches">
         <li>
           <a
             href={hrefWith({ edit: 'new' })}
             onClick={navigateTo({ edit: 'new' })}
             aria-current={editing === 'new' ? 'page' : undefined}
-            className="inline-flex min-h-11 items-center underline"
+            className="def-search-link min-h-11"
           >
             {PLAN_COPY.newSearch}
           </a>
@@ -42,7 +47,7 @@ export function DefinitionsView() {
               href={hrefWith({ edit: d.id })}
               onClick={navigateTo({ edit: d.id })}
               aria-current={editing === d.id ? 'page' : undefined}
-              className="inline-flex min-h-11 items-center underline"
+              className="def-search-link min-h-11"
             >
               {PLAN_COPY.editSearch(d.name)}
             </a>

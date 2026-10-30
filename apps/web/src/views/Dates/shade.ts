@@ -39,29 +39,30 @@ export interface BandColour {
 }
 
 /**
- * Sequential single-hue fills (dataviz skill), every one with text at WCAG AA 4.5:1 or better and neighbours spread
- * far enough in lightness to tell apart (scale.test.ts checks both). The lightest band stays tinted and bordered, so
- * "dearest" never reads as a priceless day (slate-100 with text); the band number is printed on the face as well.
+ * The departure board's lamps (dataviz skill: one sequential hue, neighbours apart in lightness): band 0, the cheapest
+ * fifth, burns brightest and each dearer band dimmer, on the overview's black board. Every lamp's glyph ink reads at
+ * WCAG AA 4.5:1 on it, every lamp clears 3:1 against the board, and the dimmest is ringed so it never reads as an
+ * unlit socket (a cell without a figure). The band number is in the legend and the readout as well.
  */
 export const BAND_COLOURS: Readonly<Record<Band, BandColour>> = {
-  0: { fill: '#134e4a', text: '#ffffff' },
-  1: { fill: '#0f766e', text: '#ffffff' },
-  2: { fill: '#14b8a6', text: '#000000' },
-  3: { fill: '#5eead4', text: '#000000' },
-  4: { fill: '#ccfbf1', text: '#000000' },
+  0: { fill: '#fff1cc', text: '#000000' },
+  1: { fill: '#d9cfb4', text: '#000000' },
+  2: { fill: '#b0a68d', text: '#000000' },
+  3: { fill: '#8a826c', text: '#000000' },
+  4: { fill: '#6b6556', text: '#ffffff' },
 };
 // why: Tailwind generates only class names it finds written out, so each arbitrary value is spelled in full here.
 export const BAND_CLASSES: Readonly<Record<Band, string>> = {
-  0: 'bg-[#134e4a] text-white',
-  1: 'bg-[#0f766e] text-white',
-  2: 'bg-[#14b8a6] text-black',
-  3: 'bg-[#5eead4] text-black',
-  4: 'border border-[#0f766e] bg-[#ccfbf1] text-black',
+  0: 'lamp-lit bg-[#fff1cc] text-black',
+  1: 'lamp-lit bg-[#d9cfb4] text-black',
+  2: 'lamp-lit bg-[#b0a68d] text-black',
+  3: 'lamp-lit bg-[#8a826c] text-black',
+  4: 'lamp-lit border border-[#b0a68d] bg-[#6b6556] text-white',
 };
 /** The one shade of a flat scale. */
-export const FLAT_CLASS = 'bg-[#5eead4] text-black';
-/** A day with no price: neutral, never a band colour; it always carries text saying why. */
-export const PRICELESS_CLASS = 'border border-slate-300 bg-slate-100 text-black';
+export const FLAT_CLASS = 'lamp-lit bg-[#8a826c] text-black';
+/** A day with no price: an unlit socket, never a band colour; it always carries text saying why. */
+export const PRICELESS_CLASS = 'lamp-none';
 
 /** Band of v within `sorted` (ascending): floor(r × 5 / n), r = count of values strictly below v. */
 export function quintileBand(sorted: readonly number[], v: number): Band {

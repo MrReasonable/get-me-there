@@ -13,7 +13,7 @@ import {
 } from './schedule.js';
 
 const S = SETUP_COPY.schedule;
-const input = 'min-h-11 rounded border border-slate-400 px-1';
+const input = 'input min-h-11';
 /** The id the form's "incomplete" list knows this field by. */
 export const SCHEDULE_FIELD_ID = 's-schedule';
 
@@ -56,8 +56,10 @@ export function ScheduleField({
   return (
     <div className="flex w-full flex-col gap-2">
       <span className="flex flex-wrap items-end gap-3">
-        <span className="flex flex-col">
-          <label htmlFor="s-mode">{S.repeat}</label>
+        <span className="flex flex-col gap-1">
+          <label htmlFor="s-mode" className="field-label">
+            {S.repeat}
+          </label>
           <select
             id="s-mode"
             className={input}
@@ -72,8 +74,10 @@ export function ScheduleField({
           </select>
         </span>
         {timed !== null ? (
-          <span className="flex flex-col">
-            <label htmlFor="s-time">{S.time}</label>
+          <span className="flex flex-col gap-1">
+            <label htmlFor="s-time" className="field-label">
+              {S.time}
+            </label>
             <input
               id="s-time"
               type="time"
@@ -84,8 +88,10 @@ export function ScheduleField({
           </span>
         ) : null}
         {schedule.kind === 'custom' ? (
-          <span className="flex max-w-xs flex-col gap-0.5">
-            <label htmlFor="s-cron">{S.cron}</label>
+          <span className="flex max-w-xs flex-col gap-1">
+            <label htmlFor="s-cron" className="field-label">
+              {S.cron}
+            </label>
             <input
               id="s-cron"
               className={`font-mono ${input}`}
@@ -93,15 +99,15 @@ export function ScheduleField({
               value={schedule.cron}
               onChange={(e) => pick({ kind: 'custom', cron: e.target.value })}
             />
-            <span id="s-cron-hint" className="text-xs text-slate-700">
+            <span id="s-cron-hint" className="hint">
               {S.cronHint}
             </span>
           </span>
         ) : null}
       </span>
       {schedule.kind === 'weekly' ? (
-        <fieldset className="flex flex-wrap gap-x-3">
-          <legend>{S.days}</legend>
+        <fieldset className="flex flex-wrap gap-x-4">
+          <legend className="field-label">{S.days}</legend>
           {WEEK_ORDER.map((d) => (
             <Check
               key={d}
@@ -119,17 +125,15 @@ export function ScheduleField({
         </fieldset>
       ) : null}
       {missing !== null ? (
-        <p role="alert" className="text-red-800">
+        <p role="alert" className="bad-text">
           {missing}
         </p>
       ) : (
         <p aria-live="polite">
-          <span className="font-medium">{S.reads}</span> {describeSchedule(next ?? null, tz)}
+          <span className="font-bold">{S.reads}</span> {describeSchedule(next ?? null, tz)}
         </p>
       )}
-      {!enabled && next !== null && next !== undefined ? (
-        <p className="text-slate-700">{S.disabled}</p>
-      ) : null}
+      {!enabled && next !== null && next !== undefined ? <p className="text-fg-2">{S.disabled}</p> : null}
     </div>
   );
 }

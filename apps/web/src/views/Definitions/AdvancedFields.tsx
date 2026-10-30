@@ -8,7 +8,7 @@ import { ScheduleField } from './ScheduleField.js';
 
 type DraftConstraints = Draft['constraints'];
 type DraftPolicy = Draft['verification'];
-const input = 'min-h-11 rounded border border-slate-400 px-1';
+const input = 'input min-h-11';
 const D = SETUP_COPY.definitions;
 
 export interface ProviderCapabilities {
@@ -52,9 +52,9 @@ export function AdvancedFields({
     setDraft({ ...draft, providers, verification });
   };
   return (
-    <div className="mt-2 space-y-3">
-      <fieldset className="flex flex-wrap gap-3">
-        <legend className="font-semibold">{COPY.constraintsHeading}</legend>
+    <div className="space-y-5">
+      <fieldset className="def-fold-group flex flex-wrap items-start gap-4">
+        <legend className="def-fold-legend">{COPY.constraintsHeading}</legend>
         <NumberField
           id="c-maxStops"
           label={COPY.constraint.maxStops}
@@ -142,10 +142,10 @@ export function AdvancedFields({
           onChange={(p) => setC('maxPricePence', p)}
         />
       </fieldset>
-      <fieldset className="flex flex-wrap gap-3">
-        <legend className="font-semibold">{COPY.providersSection}</legend>
+      <fieldset className="def-fold-group flex flex-wrap items-start gap-4">
+        <legend className="def-fold-legend">{COPY.providersSection}</legend>
         <span className="flex flex-col">
-          <span>{D.discoveryProviders}</span>
+          <span className="field-label">{D.discoveryProviders}</span>
           {capabilities
             .filter((p) => p.discovery)
             .map((p) => (
@@ -159,7 +159,7 @@ export function AdvancedFields({
             ))}
         </span>
         <span className="flex flex-col">
-          <span>{D.verificationProviders}</span>
+          <span className="field-label">{D.verificationProviders}</span>
           {capabilities
             .filter((p) => p.verification)
             .map((p) => (
@@ -190,10 +190,10 @@ export function AdvancedFields({
           />
         ))}
       </fieldset>
-      <fieldset className="flex flex-wrap gap-3">
-        <legend className="font-semibold">{D.policyHeading}</legend>
+      <fieldset className="def-fold-group flex flex-wrap items-start gap-4">
+        <legend className="def-fold-legend">{D.policyHeading}</legend>
         <div className="w-full">
-          <p className="max-w-prose text-slate-700">{D.policyIntro}</p>
+          <p className="lede">{D.policyIntro}</p>
         </div>
         <NumberField
           id="v-maxCells"
@@ -239,11 +239,11 @@ export function AdvancedFields({
             disabled={forcedBooking}
             onChange={(b) => setV('bookingLinks', b)}
           />
-          {forcedBooking ? <span className="text-xs">{COPY.bookingLinksForced}</span> : null}
+          {forcedBooking ? <span className="hint">{COPY.bookingLinksForced}</span> : null}
         </span>
       </fieldset>
-      <fieldset className="flex flex-wrap gap-3">
-        <legend className="font-semibold">{COPY.budgetHeading}</legend>
+      <fieldset className="def-fold-group flex flex-wrap items-start gap-4">
+        <legend className="def-fold-legend">{COPY.budgetHeading}</legend>
         <NumberField
           id="b-calls"
           label={COPY.maxCalls}
@@ -267,8 +267,8 @@ export function AdvancedFields({
           }
         />
       </fieldset>
-      <fieldset className="flex flex-wrap gap-3">
-        <legend className="font-semibold">{COPY.scheduleHeading}</legend>
+      <fieldset className="def-fold-group flex flex-wrap items-start gap-4">
+        <legend className="def-fold-legend">{COPY.scheduleHeading}</legend>
         <ScheduleField
           cron={draft.scheduleCron}
           tz={draft.scheduleTz}
@@ -276,8 +276,10 @@ export function AdvancedFields({
           onChange={(scheduleCron) => setDraft({ ...draft, scheduleCron })}
           {...(onIncomplete ? { onIncomplete } : {})}
         />
-        <span className="flex flex-col">
-          <label htmlFor="s-tz">{COPY.scheduleTz}</label>
+        <span className="flex flex-col gap-1">
+          <label htmlFor="s-tz" className="field-label">
+            {COPY.scheduleTz}
+          </label>
           <input
             id="s-tz"
             value={draft.scheduleTz}

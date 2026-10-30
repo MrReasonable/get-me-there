@@ -147,8 +147,9 @@ describe('distinct marks, never colour alone (spec §9, §11)', () => {
       const { fill, text } = BAND_COLOURS[b];
       expect(contrast(fill, text), `band ${b}`).toBeGreaterThanOrEqual(4.5);
     }
-    expect(NEUTRAL_CLASS).toContain('bg-white');
-    expect(NEUTRAL_CLASS).toContain('text-black');
-    expect(contrast('#ffffff', '#000000')).toBeGreaterThanOrEqual(4.5);
+    // the plain fill is an unlit socket on the board: the board's white ink on the lamp-off grey
+    expect(NEUTRAL_CLASS).toContain('bg-[#2a2d30]');
+    expect(NEUTRAL_CLASS).toContain('text-[#f1f1ec]');
+    expect(contrast('#2a2d30', '#f1f1ec')).toBeGreaterThanOrEqual(4.5);
   });
 });

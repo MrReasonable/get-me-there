@@ -7,7 +7,6 @@ import type { DefinitionResponse, ExecutionResponse, UsageRow } from '../api/typ
 import { COPY } from '../copy.js';
 import { formatIsoDate, formatMicroGbp, formatRunInstant } from '../format.js';
 import { useCheckedWords } from '../hooks/useCheckedWords.js';
-import { NARROW_QUERY, useMediaQuery } from '../hooks/useMediaQuery.js';
 import { BASIS_PARAM, DATES_COVERAGE, parseBasis } from '../state/resultsState.js';
 import { hrefWith, navigateTo, useSearchParams } from '../state/urlState.js';
 import { LoadError } from './LoadState.js';
@@ -59,9 +58,7 @@ function Spend({ text, used, cap }: { text: string; used: number; cap: number | 
   return (
     <span data-cost="">
       {text}
-      {near(used, cap) ? (
-        <span className="ml-1 rounded bg-amber-200 px-1 font-medium">{COPY.nearCap}</span>
-      ) : null}
+      {near(used, cap) ? <span className="tag tag-warn ml-1">{COPY.nearCap}</span> : null}
     </span>
   );
 }
@@ -104,7 +101,8 @@ export function StatusLink() {
   const q = useStatus();
   const checked = useCheckedWords(q.data?.generatedAt ?? null);
   let text: string | null = null;
-  let tone = 'text-slate-900';
+  let tone = '';
+  let glyph = '';
   if (q.data === undefined) {
     if (q.error) {
       text = {
@@ -112,30 +110,34 @@ export function StatusLink() {
         'sign-in-refused': COPY.statusLink.signInRefused,
         'report-failed': COPY.statusLink.reportFailed,
       }[failureOf(q.error)];
-      tone = 'font-medium text-red-900';
+      tone = 'font-semibold text-bad';
+      glyph = '✕';
     }
   } else if (q.isRefetchError && checked !== null) {
     text = COPY.statusLink.stale(checked);
-    tone = 'font-medium text-amber-900';
+    tone = 'text-warn';
+    glyph = '▲';
   } else {
     const bar = apiContract.barSummary(q.data.checks);
     if (bar.kind !== 'clean') {
       text = bar.text;
-      tone = bar.kind === 'fail' ? 'font-semibold text-red-900' : 'text-amber-900';
+      tone = bar.kind === 'fail' ? 'font-semibold text-bad' : 'text-warn';
+      glyph = bar.kind === 'fail' ? '✕' : '▲';
     }
   }
   if (text === null) return null;
   return (
     // why: V11 (ui-b1-004): the key labels the landmark; the link keeps its own text as its name, so the count is read
-    <section
-      aria-label={COPY.statusLink.label}
-      className="border-b border-slate-300 bg-slate-50 px-4 text-sm"
-    >
+    <section aria-label={COPY.statusLink.label} className="statusline">
       <a
         href={hrefWith({ view: 'status' })}
         onClick={navigateTo({ view: 'status' })}
-        className={`inline-flex min-h-11 items-center underline ${tone}`}
+        className={`inline-flex min-h-11 items-center gap-1.5 underline ${tone}`}
       >
+        {/* why: a glyph beside the words, so failing and to check differ in more than colour */}
+        <span aria-hidden="true" className="tag-glyph">
+          {glyph}
+        </span>
         {text}
       </a>
     </section>
@@ -160,7 +162,7 @@ export function RunNowButton({
       <button
         type="button"
         data-cost=""
-        className="min-h-11 rounded border border-slate-500 px-3 disabled:opacity-60"
+        className="btn btn-primary btn-sm min-h-11"
         disabled={definition.needsConfirmation !== null || start.isPending}
         aria-busy={start.isPending ? true : undefined}
         onClick={() =>
@@ -220,7 +222,6 @@ function RunStatus({ definition, showRunNow, viewOwnsFirstRun = false }: StatusB
   const qc = useQueryClient();
   // why: the confirmation is bound to the run it was opened for; if the bar moves to another run, it must be asked again.
   const [confirmingCancelId, setConfirmingCancelId] = useState<string | null>(null);
-  const narrow = useMediaQuery(NARROW_QUERY);
   // why: a confirmation belongs to the run on display; once another run (or none) is shown it is abandoned, and coming
   // back to the first run must ask for Cancel again rather than revive it.
   const displayedId = execution.data?.id;
@@ -262,23 +263,22 @@ function RunStatus({ definition, showRunNow, viewOwnsFirstRun = false }: StatusB
   const busy = (m: { isPending: boolean }) => (m.isPending ? true : undefined);
 
   return (
-    <section
-      aria-label={COPY.statusBarLabel}
-      className="flex flex-col gap-1 border-b border-slate-300 bg-slate-50 px-4 py-2 text-sm"
-    >
+    <section aria-label={COPY.statusBarLabel} className="statusline run-status">
       <div className="flex flex-wrap items-center gap-3">
         {/* why: only the status words are announced as they change; the child-run line and the numbers are not. */}
-        <span aria-live="polite" className="flex flex-wrap items-center gap-3">
+        <span aria-live="polite" className="flex flex-wrap items-center gap-x-3">
           {e === undefined ? (
             loadError ? null : (
               <span>{results.data !== undefined && latestId === null ? COPY.noExecution : COPY.loading}</span>
             )
           ) : (
             <>
-              <span className="font-semibold">{COPY.statusName[e.status]}</span>
+              <span className="status-word" data-status={e.status}>
+                {COPY.statusName[e.status]}
+              </span>
               {e.stage !== null ? <span>{COPY.stageName[e.stage]}</span> : null}
               {e.status === 'paused_budget' || e.status === 'paused_error' ? (
-                <span className="font-medium">
+                <span className="warn-text">
                   {COPY.paused(e.reason ?? COPY.statusName[e.status])}
                   {e.resumeAfter !== null ? ` · ${COPY.resumesAt(formatRunInstant(e.resumeAfter))}` : null}
                 </span>
@@ -289,14 +289,12 @@ function RunStatus({ definition, showRunNow, viewOwnsFirstRun = false }: StatusB
         {loadError ? <LoadError error={loadError} retry={retryLoad} /> : null}
         {child !== null ? <span>{COPY.childRun(COPY.statusName[child.status])}</span> : null}
         {blockedSince !== null ? (
-          <span className="font-medium">
-            {COPY.scheduleBlocked(formatIsoDate(blockedSince.slice(0, 10)))}
-          </span>
+          <span className="warn-text">{COPY.scheduleBlocked(formatIsoDate(blockedSince.slice(0, 10)))}</span>
         ) : null}
         {e && canResume ? (
           <button
             type="button"
-            className="min-h-11 rounded border border-slate-500 px-3"
+            className="btn btn-sm min-h-11"
             disabled={actions.resume.isPending}
             aria-busy={busy(actions.resume)}
             onClick={() => actions.resume.mutate(e.id)}
@@ -305,11 +303,7 @@ function RunStatus({ definition, showRunNow, viewOwnsFirstRun = false }: StatusB
           </button>
         ) : null}
         {e && active && !confirmingCancel ? (
-          <button
-            type="button"
-            className="min-h-11 rounded border border-slate-500 px-3"
-            onClick={() => setConfirmingCancelId(e.id)}
-          >
+          <button type="button" className="btn btn-sm min-h-11" onClick={() => setConfirmingCancelId(e.id)}>
             {COPY.cancel}
           </button>
         ) : null}
@@ -317,7 +311,7 @@ function RunStatus({ definition, showRunNow, viewOwnsFirstRun = false }: StatusB
           <>
             <button
               type="button"
-              className="min-h-11 rounded border border-red-800 px-3 font-medium text-red-900"
+              className="btn btn-danger btn-sm min-h-11"
               disabled={actions.cancel.isPending}
               aria-busy={busy(actions.cancel)}
               onClick={() => {
@@ -327,11 +321,7 @@ function RunStatus({ definition, showRunNow, viewOwnsFirstRun = false }: StatusB
             >
               {COPY.confirmCancel}
             </button>
-            <button
-              type="button"
-              className="min-h-11 rounded border border-slate-500 px-3"
-              onClick={() => setConfirmingCancelId(null)}
-            >
+            <button type="button" className="btn btn-sm min-h-11" onClick={() => setConfirmingCancelId(null)}>
               {COPY.keepRunning}
             </button>
           </>
@@ -346,9 +336,10 @@ function RunStatus({ definition, showRunNow, viewOwnsFirstRun = false }: StatusB
       {e !== undefined ? (
         // why: on a phone a finished run's numbers fold into one line (spec §11 375px); Cancel, Resume and the status stay
         // visible above. An active or paused run keeps them open (ruling 15, UI-006): spend is never hidden while it grows.
-        <details open={!narrow || active} className="text-sm">
-          <summary className="min-h-11 cursor-pointer py-2">{COPY.runDetails}</summary>
-          <div className="flex flex-wrap items-center gap-3">
+        // On a desk an idle run's numbers fold too (the departure board: the board starts in the first screen).
+        <details open={active} className="fold statusline-details">
+          <summary className="min-h-11">{COPY.runDetails}</summary>
+          <div className="run-numbers">
             {progressLines(e, results.data?.coverage.selected ?? null).map((l) => (
               <span
                 key={l.key}
@@ -363,11 +354,7 @@ function RunStatus({ definition, showRunNow, viewOwnsFirstRun = false }: StatusB
               </span>
             ))}
             {/* why: spec §11: the progress breakdown links to the Dates view's coverage section (WP19 Task 19.7) */}
-            <a
-              href={hrefWith(DATES_COVERAGE)}
-              onClick={navigateTo(DATES_COVERAGE)}
-              className="inline-flex min-h-11 items-center underline"
-            >
+            <a href={hrefWith(DATES_COVERAGE)} onClick={navigateTo(DATES_COVERAGE)} className="link">
               {COPY.progressCoverageLink}
             </a>
             {runCalls ? (
@@ -406,7 +393,7 @@ function RunStatus({ definition, showRunNow, viewOwnsFirstRun = false }: StatusB
         </details>
       ) : null}
       {failure ? (
-        <span role="alert" className="text-red-800">
+        <span role="alert" className="bad-text">
           {COPY.actionFailed(failure.message)}
         </span>
       ) : null}

@@ -3,7 +3,6 @@ import { HttpResponse, http } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { App } from '../../../src/App.js';
 import { PLAN_COPY } from '../../../src/copy/plan.js';
-import { COPY } from '../../../src/copy.js';
 import { EXAMPLE_LABEL } from '../../../src/example.js';
 import { DefinitionsView } from '../../../src/views/Definitions/DefinitionsView.js';
 import { API, coverageCheck, definition, estimate, providersResponse } from '../../fixtures.js';

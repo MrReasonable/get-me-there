@@ -210,7 +210,10 @@ describe('the phone board (spec §11 Phone: below 900 px)', () => {
     setViewportWidth(375);
     renderDates({ body: workedDates() });
     const cards = await screen.findAllByTestId('board-card');
-    expect(screen.queryByRole('table', { name: /^Best dates/ })).toBeNull();
+    // the departure board: the cards are the same table's rows, its roles kept explicitly for the stacked layout
+    const table = screen.getByRole('table', { name: /^Best dates/ });
+    expect(boardRows(table)).toEqual(cards);
+    for (const c of cards) expect(c).toHaveAttribute('role', 'row');
     expect(cards).toHaveLength(10);
     const first = cards[0] ?? document.body;
     const link = within(first).getByRole('link');

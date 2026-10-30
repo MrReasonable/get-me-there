@@ -8,13 +8,13 @@ import { joinHoursMinutes, splitMinutes } from './hoursMinutes.js';
 
 // The Definitions form's field primitives (review arch-r2-008): the form and its advanced fold both use them.
 
-const input = 'min-h-11 rounded border border-slate-400 px-1';
+const input = 'input min-h-11';
 
 /** Error messages under a field, tied to its input by id (review tsr-013). */
 export function FieldErrors({ id, messages }: { id: string; messages: readonly string[] }) {
   if (messages.length === 0) return null;
   return (
-    <div id={id} role="alert" className="text-red-800">
+    <div id={id} role="alert" className="bad-text text-sm">
       {messages.map((m) => (
         <p key={m}>{m}</p>
       ))}
@@ -32,7 +32,7 @@ function describedBy(...ids: Array<string | null>): string | undefined {
 function Hint({ id, text }: { id: string; text: string | undefined }) {
   if (text === undefined) return null;
   return (
-    <span id={id} className="text-xs text-slate-700">
+    <span id={id} className="hint">
       {text}
     </span>
   );
@@ -66,8 +66,8 @@ export function NumberField({
   const errorId = `${id}-errors`;
   const hintId = `${id}-hint`;
   return (
-    <span className="flex max-w-xs flex-col gap-0.5">
-      <label htmlFor={id} className={labelClassName}>
+    <span className="flex max-w-xs flex-col gap-1">
+      <label htmlFor={id} className={labelClassName ?? 'field-label'}>
         {label}
       </label>
       <span className="flex items-center gap-1">
@@ -87,7 +87,7 @@ export function NumberField({
           }}
           className={`w-28 ${input}`}
         />
-        {hint !== undefined ? <span className="text-xs">{hint}</span> : null}
+        {hint !== undefined ? <span className="text-fg-2">{hint}</span> : null}
       </span>
       <Hint id={hintId} text={description} />
       <FieldErrors id={errorId} messages={errors} />
@@ -138,7 +138,7 @@ export function HoursMinutesField({
   return (
     <fieldset className="flex flex-col gap-0.5">
       <legend className={legendClassName}>{label}</legend>
-      <span className="flex flex-wrap items-center gap-1">
+      <span className="flex flex-wrap items-center gap-1.5">
         <input
           id={`${id}-h`}
           inputMode="numeric"
@@ -160,7 +160,7 @@ export function HoursMinutesField({
         />
         <span aria-hidden="true">{D.journeyMinutes}</span>
         {shownTotal === null ? null : (
-          <span className="text-xs">{COPY.minutesAsHours(formatMinutes(shownTotal))}</span>
+          <span className="hint">{COPY.minutesAsHours(formatMinutes(shownTotal))}</span>
         )}
       </span>
       <Hint id={hintId} text={description} />
@@ -191,8 +191,10 @@ export function PoundsField({
   const errorId = `${id}-errors`;
   const hintId = `${id}-hint`;
   return (
-    <span className="flex max-w-xs flex-col gap-0.5">
-      <label htmlFor={id}>{label}</label>
+    <span className="flex max-w-xs flex-col gap-1">
+      <label htmlFor={id} className="field-label">
+        {label}
+      </label>
       <input
         id={id}
         inputMode="decimal"
@@ -250,8 +252,8 @@ export function TimeWindowField({
   return (
     <span className="flex flex-col gap-1">
       <span className="flex gap-2">
-        <span className="flex flex-col">
-          <label htmlFor={`${id}-from`}>{`${name} ${COPY.timeFrom}`}</label>
+        <span className="flex flex-col gap-1">
+          <label htmlFor={`${id}-from`} className="field-label">{`${name} ${COPY.timeFrom}`}</label>
           <input
             id={`${id}-from`}
             type="time"
@@ -265,8 +267,8 @@ export function TimeWindowField({
             }}
           />
         </span>
-        <span className="flex flex-col">
-          <label htmlFor={`${id}-to`}>{`${name} ${COPY.timeTo}`}</label>
+        <span className="flex flex-col gap-1">
+          <label htmlFor={`${id}-to`} className="field-label">{`${name} ${COPY.timeTo}`}</label>
           <input
             id={`${id}-to`}
             type="time"
@@ -304,8 +306,10 @@ export function AirlinesField({
   const [text, setText] = useSynced((value ?? []).join(','), carriersText);
   const ignored = parseCarriers(text).ignored;
   return (
-    <span className="flex flex-col">
-      <label htmlFor={id}>{label}</label>
+    <span className="flex flex-col gap-1">
+      <label htmlFor={id} className="field-label">
+        {label}
+      </label>
       <input
         id={id}
         value={text}
@@ -317,11 +321,11 @@ export function AirlinesField({
         }}
         className={input}
       />
-      <span id={`${id}-help`} className="text-xs">
+      <span id={`${id}-help`} className="hint">
         {COPY.airlinesHelp}
       </span>
       {ignored.length > 0 ? (
-        <span id={`${id}-ignored`} className="text-xs text-red-800">
+        <span id={`${id}-ignored`} className="bad-text text-sm">
           {COPY.carriersIgnored(ignored.join(', '))}
         </span>
       ) : null}
@@ -344,7 +348,7 @@ export function Check({
   onChange: (v: boolean) => void;
 }) {
   return (
-    <span className="flex items-center gap-1">
+    <span className="flex items-center gap-2">
       <input
         id={id}
         type="checkbox"

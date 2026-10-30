@@ -3,7 +3,8 @@ import type { DefinitionResponse } from '../../api/types.js';
 import { PriceBoundary } from '../../components/PriceBoundary.js';
 import { PriceCell } from '../../components/PriceCell.js';
 import { COPY } from '../../copy.js';
-import { formatIsoDate, formatIsoDateWords, formatMinutes } from '../../format.js';
+import { Flaps } from '../../flaps/Flaps.js';
+import { formatFlapDate, formatIsoDate, formatIsoDateWords, formatMinutes } from '../../format.js';
 import { detailHref, detailPatch } from '../../state/datesState.js';
 import { navigateTo } from '../../state/urlState.js';
 import { arrival } from './board.js';
@@ -18,10 +19,13 @@ export function FigurePrice({
   figure,
   notes,
   face = false,
+  flapSlot,
 }: {
   figure: DatePairFigure;
   notes: DefinitionResponse['destinationNotes'];
   face?: boolean;
+  /** On the board: the amount on flap cells that flip in this slot. */
+  flapSlot?: string;
 }) {
   const p = figure.price;
   return (
@@ -37,6 +41,8 @@ export function FigurePrice({
         destination={figure.destination}
         destinationNote={notes[figure.destination] ?? null}
         face={face}
+        flaps={flapSlot !== undefined}
+        flapSlot={flapSlot}
       />
     </PriceBoundary>
   );
@@ -56,7 +62,10 @@ export function CheaperCached({
   const c = figure.cheaperCached;
   if (c === null) return null;
   return (
-    <span className="flex flex-wrap items-baseline gap-1 text-xs" data-testid="cheaper-cached">
+    <span
+      className="mt-1.5 flex flex-wrap items-baseline gap-1 text-xs text-fg-2"
+      data-testid="cheaper-cached"
+    >
       <span>{D.cachedFrom}</span>
       <PriceBoundary>
         <PriceCell
@@ -88,7 +97,7 @@ export function Arrives({
   const a = arrival(depart, arrive);
   if (a === null) return null;
   return (
-    <span className="block text-xs" data-testid="arrives">
+    <span className="block text-xs text-fg-2" data-testid="arrives">
       {label}
       {': '}
       {D.arrives(a.time, a.dayOffset)}
@@ -101,30 +110,93 @@ export function Arrives({
 
 /** Journey time (the figure's own, else "not known") and the arrivals the figure's segments state. */
 export function Journey({ figure, filtered }: { figure: DatePairFigure; filtered: boolean }) {
+  const m = figure.journeyMinutes;
   return (
     <>
-      <span className="block">
-        {figure.journeyMinutes !== null
-          ? formatMinutes(figure.journeyMinutes)
-          : filtered
-            ? D.journeyNotKnownFiltered
-            : D.journeyNotKnown}
-      </span>
+      {m !== null ? (
+        <span className="block">
+          <span className="sr-only">{formatMinutes(m)}</span>
+          <Flaps text={formatMinutes(m)} cells={7} align="right" slot="journey" />
+        </span>
+      ) : (
+        <span className="block text-fg-2">{filtered ? D.journeyNotKnownFiltered : D.journeyNotKnown}</span>
+      )}
       <Arrives label={D.directionOut} depart={figure.departOut} arrive={figure.arriveOut} />
       <Arrives label={D.directionBack} depart={figure.departBack} arrive={figure.arriveBack} />
     </>
   );
 }
 
+/** A row's state on the board: its lamp, its glyph flap and its ink; the words beside it say the same. */
+export type RowState = 'verified' | 'calendar' | 'stale' | 'superseded';
+export function rowState(f: DatePairFigure): RowState {
+  if (f.superseded || f.notSeenInLatest !== null) return 'superseded';
+  if (f.price.stale) return 'stale';
+  return f.basis === 'verified' ? 'verified' : 'calendar';
+}
+const LAMP: Readonly<Record<RowState, string>> = {
+  verified: 'white',
+  calendar: 'amber',
+  stale: 'amber',
+  superseded: 'hollow',
+};
+
+/** The row's lamp and its rank on flaps; the rank in words is beside them. */
+export function RankFlaps({ rank, state, digits }: { rank: number; state: RowState; digits: number }) {
+  return (
+    <span className="row-head">
+      <span aria-hidden="true" className="lamp-dot" data-lamp={LAMP[state]} />
+      <span className="sr-only">{rank}</span>
+      <Flaps text={String(rank).padStart(2, '0')} cells={digits} align="right" slot="rank" />
+    </span>
+  );
+}
+
 /**
- * Spec §11 Phone: a stacked card, the whole card a link to the detail: the dates and the price lead (PriceCell's phone
- * face: provider mark, destination, short age, "not checked" on a calendar price, "≈" on a converted one), then how
- * far checked ("cheapest of the rows read" on a truncated figure), then journey time and arrivals, then airports.
- * Point of sale is not on the card (it is not a face item).
+ * The row's state on the board's flaps: its glyph, then its word (VERIFIED, NOT CHECKED, STALE, SUPERSEDED), in the
+ * state's own ink; how far checked says it in full beside them, so the flaps are decorative.
+ */
+export function StateFlap({ state }: { state: RowState }) {
+  return (
+    <span aria-hidden="true" className="state-flaps howfar-flap">
+      <StateGlyph state={state} />
+      <Flaps text={D.stateFlap[state]} cells={11} slot="state" />
+    </span>
+  );
+}
+
+/** The state glyph on one flap: ✓ verified, ○ calendar price, ◷ stale, – superseded. */
+function StateGlyph({ state }: { state: RowState }) {
+  return (
+    <span className="flaps">
+      <span className="f f-icon">
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          {state === 'verified' ? <polyline points="5 12.5 10 17.5 19.5 6.5" /> : null}
+          {state === 'calendar' ? <circle cx="12" cy="12" r="6.5" /> : null}
+          {state === 'stale' ? (
+            <>
+              <circle cx="12" cy="12" r="7.5" />
+              <polyline points="12 7.5 12 12 15 14" />
+            </>
+          ) : null}
+          {state === 'superseded' ? <line x1="5" y1="12" x2="19" y2="12" /> : null}
+        </svg>
+      </span>
+    </span>
+  );
+}
+
+/**
+ * Spec §11 Phone: a stacked card, the board's row below 900 px (the same table, its roles kept explicitly): the dates
+ * and the price lead (PriceCell's phone face: provider mark, destination, short age, "not checked" on a calendar
+ * price, "≈" on a converted one), then how far checked ("cheapest of the rows read" on a truncated figure), then
+ * journey time and arrivals, then airports. Its dates are the link to the detail; a tap anywhere on the card follows
+ * it. Point of sale is not on the card (it is not a face item).
  */
 export function BoardCard({
   pair,
   rank,
+  digits,
   howFar,
   notes,
   journeyFiltered,
@@ -133,6 +205,7 @@ export function BoardCard({
 }: {
   pair: DatePair & { figure: DatePairFigure };
   rank: number;
+  digits: number;
   howFar: readonly string[];
   notes: DefinitionResponse['destinationNotes'];
   journeyFiltered: boolean;
@@ -140,31 +213,53 @@ export function BoardCard({
   onLight: (index: number | null) => void;
 }) {
   const f = pair.figure;
+  const state = rowState(f);
+  const open = navigateTo(detailPatch(pair));
   return (
-    <li data-pair={pair.index} data-testid="board-card" data-lit={lit ? '' : undefined}>
-      <a
-        href={detailHref(pair)}
-        onClick={navigateTo(detailPatch(pair))}
-        onFocus={() => onLight(pair.index)}
-        onBlur={() => onLight(null)}
-        className={`block rounded border border-slate-400 p-2 ${lit ? 'outline outline-2 outline-black' : ''}`}
-      >
-        <span className="flex items-start justify-between gap-2">
-          <span className="font-semibold">
-            <span className="mr-1 text-slate-700">{rank}</span>
-            {COPY.dateRange(formatIsoDate(pair.departureDate), formatIsoDate(pair.returnDate), pair.nights)}
-          </span>
-          <FigurePrice figure={f} notes={notes} face />
+    <tr
+      data-pair={pair.index}
+      data-testid="board-card"
+      data-state={state}
+      data-lit={lit ? '' : undefined}
+      onClick={(e) => {
+        if (e.target instanceof Element && e.target.closest('a, button') !== null) return;
+        open(e);
+      }}
+    >
+      <th scope="row" className="card-dates">
+        <span className="flex items-center gap-2">
+          <RankFlaps rank={rank} state={state} digits={digits} />
+          <a
+            href={detailHref(pair)}
+            onClick={open}
+            onFocus={() => onLight(pair.index)}
+            onBlur={() => onLight(null)}
+            className="card-link"
+          >
+            <span className="sr-only">
+              {COPY.dateRange(formatIsoDate(pair.departureDate), formatIsoDate(pair.returnDate), pair.nights)}
+            </span>
+            <span aria-hidden="true" className="card-flap-dates">
+              <Flaps text={formatFlapDate(pair.departureDate)} slot="dep" />
+              <Flaps text={formatFlapDate(pair.returnDate)} slot="ret" />
+            </span>
+          </a>
         </span>
-        <span className="block text-xs">
+      </th>
+      <td className="card-price">
+        <FigurePrice figure={f} notes={notes} face />
+      </td>
+      <td className="card-rest">
+        <StateFlap state={state} />
+        <span className="mt-1 block">
           {f.price.truncated ? `${COPY.truncatedNote} · ` : null}
           {howFar.join(' · ')}
         </span>
-        <span className="block text-xs">
+        <span className="mt-1 block">
           <Journey figure={f} filtered={journeyFiltered} />
         </span>
-        <span className="block text-xs">{D.airports(f.origin, f.destination)}</span>
-      </a>
-    </li>
+        <span className="mt-1 block">{D.airports(f.origin, f.destination)}</span>
+      </td>
+    </tr>
   );
 }

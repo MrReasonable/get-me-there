@@ -5,6 +5,7 @@ import { LoadError } from '../../components/LoadState.js';
 import { PriceBoundary } from '../../components/PriceBoundary.js';
 import { PriceCell } from '../../components/PriceCell.js';
 import { COPY } from '../../copy.js';
+import { Flaps } from '../../flaps/Flaps.js';
 import { formatIsoDate } from '../../format.js';
 import { coverageLineText } from '../../lib/coverageLine.js';
 import { isThinCoverage } from '../../lib/thinCoverage.js';
@@ -81,25 +82,35 @@ export function DatesHeader({ definition, data, model, state, run, now }: DatesH
       : []),
   ];
   return (
-    <div className="space-y-1">
-      <h2 className="text-xl font-semibold">{definition.name}</h2>
+    <div className="dates-head space-y-2">
+      <h2 className="name-board">
+        <span className="sr-only">{definition.name}</span>
+        {/* why: the search's name in large flaps, a word to a group so a long name wraps between words */}
+        <span aria-hidden="true" className="flap-strip">
+          {definition.name.split(/\s+/).map((word, i) => (
+            <Flaps key={i} text={word} />
+          ))}
+        </span>
+      </h2>
       {data !== null ? (
-        <p className="text-sm text-slate-700" data-testid="dates-run">
+        <p className="run-line" data-testid="dates-run">
           {runLine(latest, run, now)}
         </p>
       ) : null}
       {stale ? (
         <p className="text-sm">
-          <span className="mr-1 rounded bg-amber-200 px-1">{COPY.stale}</span>
+          <span className="tag tag-warn mr-2">{COPY.stale}</span>
           {D.staleAll}
         </p>
       ) : null}
       {data !== null && counts !== null ? (
-        <p className="text-sm">
+        <p className="text-[15px] text-fg-2">
           <a href={hrefWith(openCoverage)} onClick={navigateTo(openCoverage)} className="underline">
             {coverageLineText(counts, data.verificationProviderConfigured, latest)}
           </a>
-          {scope.length > 0 ? <span className="ml-1 font-medium">{` · ${scope.join(' · ')}`}</span> : null}
+          {scope.length > 0 ? (
+            <span className="ml-1 font-bold text-fg">{` · ${scope.join(' · ')}`}</span>
+          ) : null}
         </p>
       ) : null}
       {counts !== null && isThinCoverage(counts.buckets.no_data, counts.total) ? (
@@ -150,55 +161,61 @@ function DatesGap({
   if (cells.length === 0) return null;
   const cv = g.cheapestVerified;
   return (
-    <section
-      aria-label={COPY.calendarGapList}
-      className="rounded border border-amber-700 bg-amber-50 p-2 text-sm"
-    >
-      <div className="flex flex-wrap items-center gap-1">
-        <span>{COPY.calendarGapLead(cells.length)}</span>
-        <span>{D.gapReference}</span>
-        <PriceBoundary>
-          <PriceCell
-            pricePence={cv.pricePence}
-            provenance={cv.provenance}
-            calendar={false}
-            stale={cv.stale}
-            truncated={cv.truncated}
-            destination={cv.cell.destination}
-            destinationNote={definition.destinationNotes[cv.cell.destination] ?? null}
-            notSeenInLatestHours={cv.notSeenInLatest?.ageHours ?? null}
-          />
-        </PriceBoundary>
-      </div>
-      <ul className="mt-1 space-y-1">
-        {cells.map((c) => {
-          const { nights: n, ...key } = c.cell;
-          const patch = detailPatchOf(c.cell, 'calendar');
-          const label = `${COPY.coverageCheckPair(c.cell.origin, c.cell.destination)} ${COPY.dateRange(
-            formatIsoDate(c.cell.departureDate),
-            formatIsoDate(c.cell.returnDate),
-            n,
-          )}`;
-          return (
-            <li key={cellKeyString(key)} className="flex flex-wrap items-center gap-2">
-              <a href={hrefWith(patch)} onClick={navigateTo(patch)} className="underline">
-                {label}
-              </a>
-              <PriceBoundary>
-                <PriceCell
-                  pricePence={c.calendar.pricePence}
-                  provenance={c.calendar.provenance}
-                  calendar
-                  stale={c.calendar.stale}
-                  truncated={c.calendar.truncated}
-                  destination={c.cell.destination}
-                  destinationNote={definition.destinationNotes[c.cell.destination] ?? null}
-                />
-              </PriceBoundary>
-            </li>
-          );
-        })}
-      </ul>
+    <section aria-label={COPY.calendarGapList} className="plate notice gap-plate text-sm">
+      {/* why: the list can run to dozens of cells; it folds under its lead line so the board stays near the top */}
+      <details className="fold gap-fold">
+        <summary className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <span aria-hidden="true" className="tag tag-warn">
+            ▲
+          </span>
+          <span className="gap-lead">{COPY.calendarGapLead(cells.length)}</span>
+          {/* why: the reference's label and its price stay together on one line */}
+          <span className="gap-ref inline-flex flex-wrap items-baseline gap-x-2">
+            <span>{D.gapReference}</span>
+            <PriceBoundary>
+              <PriceCell
+                pricePence={cv.pricePence}
+                provenance={cv.provenance}
+                calendar={false}
+                stale={cv.stale}
+                truncated={cv.truncated}
+                destination={cv.cell.destination}
+                destinationNote={definition.destinationNotes[cv.cell.destination] ?? null}
+                notSeenInLatestHours={cv.notSeenInLatest?.ageHours ?? null}
+              />
+            </PriceBoundary>
+          </span>
+        </summary>
+        <ul className="mt-2 space-y-1">
+          {cells.map((c) => {
+            const { nights: n, ...key } = c.cell;
+            const patch = detailPatchOf(c.cell, 'calendar');
+            const label = `${COPY.coverageCheckPair(c.cell.origin, c.cell.destination)} ${COPY.dateRange(
+              formatIsoDate(c.cell.departureDate),
+              formatIsoDate(c.cell.returnDate),
+              n,
+            )}`;
+            return (
+              <li key={cellKeyString(key)} className="flex flex-wrap items-center gap-2">
+                <a href={hrefWith(patch)} onClick={navigateTo(patch)} className="underline">
+                  {label}
+                </a>
+                <PriceBoundary>
+                  <PriceCell
+                    pricePence={c.calendar.pricePence}
+                    provenance={c.calendar.provenance}
+                    calendar
+                    stale={c.calendar.stale}
+                    truncated={c.calendar.truncated}
+                    destination={c.cell.destination}
+                    destinationNote={definition.destinationNotes[c.cell.destination] ?? null}
+                  />
+                </PriceBoundary>
+              </li>
+            );
+          })}
+        </ul>
+      </details>
     </section>
   );
 }

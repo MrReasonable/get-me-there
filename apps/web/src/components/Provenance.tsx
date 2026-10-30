@@ -76,13 +76,9 @@ export function Provenance({
   return (
     <span
       data-testid="provenance"
-      className={`inline-flex flex-wrap items-center gap-1 text-xs text-slate-700 ${isCalendar ? 'rounded border border-dashed border-slate-500 px-1' : ''}`}
+      className={`inline-flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-fg-2 ${isCalendar ? 'rounded border border-dashed border-line-strong px-1' : ''}`}
     >
-      {showProvider ? (
-        <span className="rounded bg-slate-200 px-1 font-medium text-slate-900">
-          {COPY.provider[p.providerId]}
-        </span>
-      ) : null}
+      {showProvider ? <span className="chip">{COPY.provider[p.providerId]}</span> : null}
       <span>{sourceLabel(p)}</span>
       <span data-testid="point-of-sale">{pointOfSaleLabel(p)}</span>
       {fullAge ? (
@@ -90,7 +86,7 @@ export function Provenance({
       ) : (
         <span title={formatAgeFull(age)}>{formatAgeCompact(age)}</span>
       )}
-      {isCalendar ? <span className="font-medium">{COPY.constraintsNotChecked}</span> : null}
+      {isCalendar ? <span className="warn-text">{COPY.constraintsNotChecked}</span> : null}
       {p.returnDateSource === 'grid-cell' ? <span>{COPY.returnDateFromGrid}</span> : null}
       {p.returnDateSource === 'asked' ? <span>{COPY.returnDateAsked}</span> : null}
       {p.providerId === 'camoufox' && (p.vendorPriceMark === 'cheapest' || p.vendorPriceMark === 'low') ? (

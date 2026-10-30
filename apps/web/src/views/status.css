@@ -1,0 +1,58 @@
+/* Status (the departure board): a station information board, worst first, beside the enamel notice cards that say
+   each state in words with its fix. On a phone the board sits above the cards. */
+@layer components {
+  .status-layout {
+    display: grid;
+    gap: 24px;
+    align-items: start;
+  }
+  /* why: two columns only once the board's column fits its longest name (22 flap cells at the desk size, about 420px) */
+  @media (min-width: 1200px) {
+    .status-layout {
+      grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+    }
+    .status-board {
+      position: sticky;
+      top: 16px;
+    }
+  }
+  .status-board {
+    --cw: clamp(11px, calc((100vw - 2 * var(--gutter)) / 46), 17px);
+    --cg: 2px;
+  }
+  @media (max-width: 899px) {
+    .status-board {
+      --cw: 12px;
+      --cg: 1px;
+    }
+  }
+  .status-board-rows {
+    display: grid;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .status-board-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 14px;
+    padding: 9px 2px;
+    border-top: 1px solid var(--board-line);
+  }
+  .status-board-row:first-child {
+    border-top: 0;
+  }
+  .status-board-row[data-state="warn"] .status-board-word {
+    color: var(--amber);
+  }
+  .status-board-row[data-state="fail"] .status-board-word {
+    color: var(--red);
+  }
+  .status-board-row[data-state="off"] {
+    color: var(--dim);
+  }
+  .status-off {
+    color: var(--fg-2);
+  }
+}

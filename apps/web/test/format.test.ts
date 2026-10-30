@@ -1,6 +1,7 @@
 import { asIsoDate } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
 import {
+  formatFlapDate,
   formatIsoDate,
   formatIsoDateLong,
   formatIsoDateShort,
@@ -82,5 +83,12 @@ describe('formatIsoDateWords (WP19: an arrival date for assistive technology)', 
     expect(formatIsoDateWords(asIsoDate('2027-03-15'))).toBe('Monday 15 March 2027');
     expect(formatIsoDateWords(asIsoDate('2028-02-29'))).toBe('Tuesday 29 February 2028');
     expect(formatIsoDateWords(asIsoDate('2027-12-05'))).toBe('Sunday 5 December 2027');
+  });
+});
+
+describe('formatFlapDate (the departure board: a date on its flaps)', () => {
+  it('names the weekday, the day in two digits, the month and the year in two', () => {
+    expect(formatFlapDate(asIsoDate('2027-03-04'))).toBe('Thu 04 Mar 27');
+    expect(formatFlapDate(asIsoDate('2026-12-31'))).toBe('Thu 31 Dec 26');
   });
 });

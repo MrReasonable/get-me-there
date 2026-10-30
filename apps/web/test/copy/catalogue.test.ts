@@ -298,6 +298,8 @@ describe('COPY catalogue (spec §11 banned words)', () => {
       // WP19: "verified" beside a class-verified figure; the class label "partially verified" with its count
       'datesView.howFar.verified',
       'datesView.howFar.partiallyVerified',
+      // the departure board: a row's state word on its flaps, shown only on a row whose figure is class verified
+      'datesView.stateFlap.verified',
       // WP10: names the class beside a class-verified value (the panel's offer line)
       'panel.observation',
     ]);
