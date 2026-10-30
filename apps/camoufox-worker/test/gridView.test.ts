@@ -390,6 +390,23 @@ describe('interpretView with the unpriced cells (GRID_UNPRICED_VERIFIED)', () =>
       check: 'range',
     });
   });
+  it('surplus lines beside an unpriced query pair are refused: two range lines, or any price line', () => {
+    expect(
+      interpretView(unpricedQuery({ ranges: ['14 – 24 Mar 2027', '15 – 24 Mar 2027'] }), Q.dep, Q, ON),
+    ).toEqual({ kind: 'unrecognised', why: 'first-view', check: 'range' });
+    expect(
+      interpretView(unpricedQuery({ prices: ['£462 · Round trip', '£463 · Round trip'] }), Q.dep, Q, ON),
+    ).toEqual({ kind: 'unrecognised', why: 'first-view', check: 'price' });
+  });
+  it('a second selection the reading discards (dates off the lines) still refuses the first view', () => {
+    const r = unpricedQuery();
+    const extra = [...r.candidates, 'no flights, 1 Jan to 2 Jan, selected'];
+    expect(interpretView({ ...r, candidates: extra }, Q.dep, Q, ON)).toEqual({
+      kind: 'unrecognised',
+      why: 'first-view',
+      check: 'selected-cell',
+    });
+  });
   it('a price line beside an unpriced query pair is a contradiction: refused', () => {
     expect(interpretView(unpricedQuery({ prices: ['£462 · Round trip'] }), Q.dep, Q, ON)).toEqual({
       kind: 'unrecognised',

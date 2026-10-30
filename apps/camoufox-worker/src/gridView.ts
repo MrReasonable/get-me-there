@@ -236,7 +236,9 @@ export function interpretView(
   // why: `pounds` is null when the selected pair is unpriced (spec §2: the grid selects the query's pair even when it
   // shows "no flights" or "price unknown" for it, grid/2026-10-27/2); more than one selected cell is never one query
   let selected: { key: string; pounds: number | null } | null = null;
-  let selectedCount = 0;
+  // why: CodeRabbit on PR #34: counted from the names, so a second selection the reading discards (dates off the
+  // lines, a name it does not parse) still makes the first view's selection ambiguous
+  const selectedCount = r.candidates.filter((x) => x !== null && spaced(x).endsWith(', selected')).length;
   for (const raw of r.candidates) {
     const name = raw === null ? null : spaced(raw);
     const looksPriced = name?.startsWith('£') === true;
@@ -256,17 +258,11 @@ export function interpretView(
     seen.add(key);
     if ('status' in c) {
       // why: an unpriced cell explains its pair (it is shown, and says why it has no price) but is never priced
-      if (c.selected) {
-        selected = { key, pounds: null };
-        selectedCount++;
-      }
+      if (c.selected) selected = { key, pounds: null };
       cells.push({ status: c.status, departureDate: dep, returnDate: ret });
       continue;
     }
-    if (c.selected) {
-      selected = { key, pounds: c.pounds };
-      selectedCount++;
-    }
+    if (c.selected) selected = { key, pounds: c.pounds };
     cells.push({
       status: 'price',
       departureDate: dep,
@@ -294,12 +290,14 @@ export function interpretView(
     if (selected.pounds === null) {
       // why: grid/2026-10-27/2: an unpriced query pair is selected but the dialog prints no range or price line for
       // it; a line that is there must still name the query's dates, and a price for an unpriced pair is a contradiction
+      // why: counted from the lines themselves (CodeRabbit on PR #34): `one` is null for two lines as for none
       if (
-        rangeLine !== null &&
-        (range === null || !named(range.dep, first.dep) || !named(range.ret, first.ret))
+        r.ranges.length > 1 ||
+        (rangeLine !== null &&
+          (range === null || !named(range.dep, first.dep) || !named(range.ret, first.ret)))
       )
         return { kind: 'unrecognised', why: 'first-view', check: 'range' };
-      if (priceLine !== null) return { kind: 'unrecognised', why: 'first-view', check: 'price' };
+      if (r.prices.length > 0) return { kind: 'unrecognised', why: 'first-view', check: 'price' };
     } else {
       if (range === null || !named(range.dep, first.dep) || !named(range.ret, first.ret))
         return { kind: 'unrecognised', why: 'first-view', check: 'range' };

@@ -11,7 +11,11 @@ export const rangeOf = (snapshot: string): string =>
 
 /** The selected unpriced cell's return day and month ("no flights, 14 Nov to 22 Nov, selected"), when the snapshot has one. */
 function unpricedSelectedReturn(snapshot: string): { day: number; month: number } | null {
-  const m = /(?:no flights|price unknown), \d{1,2} \w{3} to (\d{1,2}) (\w{3}), selected/.exec(snapshot);
+  // why: the grid grammar's month tokens include "Sept" (CodeRabbit on PR #34)
+  const m =
+    /(?:no flights|price unknown), \d{1,2} [A-Z][a-z]{2,3} to (\d{1,2}) ([A-Z][a-z]{2,3}), selected/.exec(
+      snapshot,
+    );
   const month = m === null ? null : monthOf(m[2] ?? '');
   return m === null || month === null ? null : { day: Number(m[1]), month };
 }
