@@ -4,7 +4,7 @@ import { COPY } from '../../copy.js';
 import { formatMicroGbp, formatPence } from '../../format.js';
 import { BudgetFitPanel, EstimatePanel } from './EstimatePanel.js';
 
-const button = 'min-h-11 rounded border border-slate-700 px-3';
+const button = 'btn btn-primary min-h-11';
 
 /**
  * Spec §11 / §8.1, a new definition: the estimate and every budget scope, then the create click, which is
@@ -36,7 +36,7 @@ export function CreateConfirmation({
         <button
           type="button"
           data-cost=""
-          className="min-h-11 rounded bg-slate-900 px-3 text-white disabled:opacity-60"
+          className="btn btn-primary min-h-11 w-full"
           disabled={blocked || pending}
           aria-busy={pending ? true : undefined}
           aria-describedby={blocked ? 'd-blocked' : undefined}
@@ -51,7 +51,7 @@ export function CreateConfirmation({
               )}
         </button>
       ) : (
-        <p role="status" className="font-medium">
+        <p role="status" className="def-warn font-semibold">
           {COPY.estimateStale}
         </p>
       )}
@@ -76,7 +76,7 @@ export function Reconfirmation({
   if (n === null) return null;
   const pence = microGbpToPence(n.estimateMicroGbp);
   return (
-    <div role="alert" data-cost="" className="rounded border border-amber-700 bg-amber-50 p-2">
+    <div role="alert" data-cost="" className="def-warn space-y-2">
       <p>
         {COPY.needsConfirmation({
           calls: n.totalCalls,

@@ -49,12 +49,12 @@ export function ViewHeader({ title, executions, stale, variant = 'single' }: Vie
   const list = executions.map(itemText).join(', ');
   return (
     <div className="mb-2 space-y-1">
-      <h2 className="text-xl font-semibold">{title}</h2>
-      <p className="text-sm text-slate-700">
+      <h2 className="h-section">{title}</h2>
+      <p className="text-sm text-fg-2">
         {executions.length === 0 ? COPY.noExecution : COPY.executionsShown(list)}
       </p>
       {span && executions.length > 0 ? (
-        <p className="text-sm text-slate-700">
+        <p className="text-sm text-fg-2">
           {COPY.spanExecutions(
             executions.filter((e) => !e.isChild).length,
             executions.filter((e) => e.isChild).length,
@@ -63,12 +63,12 @@ export function ViewHeader({ title, executions, stale, variant = 'single' }: Vie
       ) : null}
       {stale ? (
         <p className="text-sm">
-          <span className="mr-1 rounded bg-amber-200 px-1">{COPY.stale}</span>
+          <span className="tag tag-warn mr-2">{COPY.stale}</span>
           {COPY.staleView}
         </p>
       ) : null}
       {!span && latest !== undefined && latest.status !== 'completed' ? (
-        <p role="status" className="rounded bg-amber-100 px-2 py-1 text-sm">
+        <p role="status" className="plate notice text-sm font-semibold">
           {COPY.notCompletedBanner(COPY.statusName[latest.status])}
         </p>
       ) : null}

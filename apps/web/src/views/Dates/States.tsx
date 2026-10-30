@@ -13,12 +13,12 @@ const D = COPY.datesView;
 /** No definition at all: "No search yet" with a link to Searches. */
 export function NoSearch() {
   return (
-    <p>
+    <p className="plate notice text-[17px]">
       {D.noSearch}{' '}
       <a
         href={hrefWith({ view: 'definitions' })}
         onClick={navigateTo({ view: 'definitions' })}
-        className="underline"
+        className="font-bold underline"
       >
         {D.noSearchLink}
       </a>
@@ -30,10 +30,14 @@ export function NoSearch() {
 export function NeverRun({ definition }: { definition: DefinitionResponse }) {
   const { start } = useExecutionActions();
   return (
-    <div className="flex flex-wrap items-center gap-2 rounded border border-slate-400 p-2">
-      <p className="font-semibold">{D.neverRun}</p>
+    <div className="plate notice flex flex-wrap items-center gap-3">
+      <p className="font-bold">{D.neverRun}</p>
       <RunNowButton definition={definition} start={start} />
-      {start.error ? <p role="alert">{COPY.actionFailed(start.error.message)}</p> : null}
+      {start.error ? (
+        <p role="alert" className="bad-text">
+          {COPY.actionFailed(start.error.message)}
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -52,21 +56,28 @@ export function Paused({
 }) {
   const { resume } = useExecutionActions();
   return (
-    <div className="flex flex-wrap items-center gap-2 rounded border border-amber-700 bg-amber-50 p-2 text-sm">
-      <span className="font-medium">{COPY.paused(reason)}</span>
+    <div className="plate notice flex flex-wrap items-center gap-x-3 gap-y-1 text-[15px]">
+      <span aria-hidden="true" className="tag tag-warn">
+        ▲
+      </span>
+      <span className="font-bold">{COPY.paused(reason)}</span>
       <span>{D.pausedNote}</span>
       <span>{D.notSearchedCount(notSearched)}</span>
       {canResume ? (
         <button
           type="button"
-          className="min-h-11 rounded border border-slate-500 px-3"
+          className="btn btn-primary min-h-11"
           disabled={resume.isPending}
           onClick={() => resume.mutate(executionId)}
         >
           {resume.isPending ? COPY.working : COPY.resume}
         </button>
       ) : null}
-      {resume.error ? <p role="alert">{COPY.actionFailed(resume.error.message)}</p> : null}
+      {resume.error ? (
+        <p role="alert" className="bad-text">
+          {COPY.actionFailed(resume.error.message)}
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -77,12 +88,12 @@ export function Paused({
  */
 export function NoPriceInFilters({ coverageLine }: { coverageLine: string }) {
   return (
-    <div className="space-y-1 rounded border border-slate-400 p-2">
-      <p className="font-semibold">{D.noPriceInFilters}</p>
-      <p className="text-sm">{coverageLine}</p>
+    <div className="plate notice space-y-2">
+      <p className="font-bold">{D.noPriceInFilters}</p>
+      <p className="text-sm text-fg-2">{coverageLine}</p>
       <button
         type="button"
-        className="min-h-11 rounded border border-slate-500 px-3"
+        className="btn min-h-11"
         onClick={() => updateSearchParams(datesPatch(CLEARED_FILTERS))}
       >
         {COPY.clearFilters}
@@ -94,7 +105,7 @@ export function NoPriceInFilters({ coverageLine }: { coverageLine: string }) {
 /** The route's 422 `too_many_cells`: the scope's cell count, the bound, and the airport filter as the way under it. */
 export function TooManyCells({ cells, bound }: { cells: number; bound: number }) {
   return (
-    <p role="alert" className="rounded border border-red-700 p-2">
+    <p role="alert" className="plate notice font-semibold text-bad">
       {D.tooManyCells(cells, bound)}
     </p>
   );

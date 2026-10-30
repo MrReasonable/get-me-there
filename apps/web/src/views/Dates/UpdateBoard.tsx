@@ -7,11 +7,9 @@ import { COPY } from '../../copy.js';
  */
 export function UpdateBoard({ changes, onApply }: { changes: number; onApply: () => void }) {
   return (
-    <button
-      type="button"
-      className="min-h-11 rounded border-2 border-slate-900 px-3 font-semibold"
-      onClick={onApply}
-    >
+    // why: a board button whose lamp is lit amber while changes wait; the count and the words say the same
+    <button type="button" className="btn btn-primary update-board min-h-11" onClick={onApply}>
+      <span aria-hidden="true" className="lamp-dot" data-lamp="amber" />
       {COPY.datesView.updateBoard(changes)}
     </button>
   );

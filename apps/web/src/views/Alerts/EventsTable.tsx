@@ -104,7 +104,7 @@ export function EventsTable(props: { events: readonly AlertEvent[]; ruleText: Re
   // Results, Coverage, Duration and calendar-panel tables do, never the page body.
   return (
     <section aria-label={C.eventsScroll} className="overflow-x-auto">
-      <table aria-label={C.eventsTable}>
+      <table aria-label={C.eventsTable} className="data-table alerts-events">
         <thead>
           <tr>
             <th scope="col">{C.colFired}</th>

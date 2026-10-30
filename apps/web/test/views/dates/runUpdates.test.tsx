@@ -106,7 +106,12 @@ afterEach(() => vi.restoreAllMocks());
 async function start(reads: DatesOptions[], search = '?view=dates&def=def-0001') {
   const requests = serveReads(...reads);
   const time = fakeClock();
-  const animate = vi.fn();
+  const rows: Array<string | null> = [];
+  const animate = vi.fn((el: Element, _frames: Keyframe[], _options: KeyframeAnimationOptions) => {
+    rows.push(el.closest('[data-pair]')?.getAttribute('data-pair') ?? null);
+    return undefined;
+  });
+  flipped.set(animate, rows);
   const r = renderDates({ props: { clock: time.clock, animate }, search });
   const table = await findBoard();
   // the status bar's execution query has answered: its first answer is the run as the read saw it
@@ -117,6 +122,9 @@ async function start(reads: DatesOptions[], search = '?view=dates&def=def-0001')
     });
   return { ...r, requests, time, animate, table, progressTo };
 }
+/** The board rows the flip's half-cells were laid over, noted as each is animated (a half-cell goes when it ends). */
+const flipped = new WeakMap<object, Array<string | null>>();
+const flippedRows = (animate: object) => flipped.get(animate) ?? [];
 const order = (table: HTMLElement) =>
   boardRows(table).map((row) => row.querySelectorAll('td')[1]?.textContent);
 
@@ -147,7 +155,7 @@ describe('the 30 s re-read during a run', () => {
 });
 
 describe('a read that changes the order, not held', () => {
-  it('moves the rows in one transition of at most 200 ms, only the rows that moved, and says "Best dates updated" once', async () => {
+  it('flips the rows in place: only the cells of the positions that changed, each flap at most 200 ms, and says "Best dates updated" once', async () => {
     const { table, time, progressTo, animate } = await start([first, swapped]);
     expect(order(table)).toEqual(['14 Mar 2027', '15 Mar 2027', '16 Mar 2027', '17 Mar 2027']);
     await act(async () => time.advance(31 * S));
@@ -155,15 +163,13 @@ describe('a read that changes the order, not held', () => {
     await waitFor(() =>
       expect(order(table)).toEqual(['15 Mar 2027', '14 Mar 2027', '16 Mar 2027', '17 Mar 2027']),
     );
-    expect(animate).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(animate).toHaveBeenCalled());
     for (const [, frames, options] of animate.mock.calls) {
       expect(frames).toHaveLength(2);
       expect(options.duration).toBeLessThanOrEqual(200);
     }
-    const moved = animate.mock.calls.map(([el]) =>
-      el instanceof Element ? el.getAttribute('data-pair') : null,
-    );
-    expect(moved.sort()).toEqual(['0', '3']);
+    // the half-cells laid over the cells of the two rows that swapped places, and no other row's
+    expect(new Set(flippedRows(animate))).toEqual(new Set(['0', '3']));
     expect(screen.getAllByRole('status').filter((s) => s.textContent === 'Best dates updated')).toHaveLength(
       1,
     );
@@ -228,8 +234,8 @@ describe('a read held while the operator is in the board (revision 50, Ian ruled
     expect(document.activeElement).toBe(button);
     await user.keyboard('{Enter}');
     expect(order(table)).toEqual(['15 Mar 2027', '14 Mar 2027', '16 Mar 2027', '17 Mar 2027']);
-    expect(animate).toHaveBeenCalledTimes(2);
     expect(document.activeElement?.textContent).toMatch(/^Best dates/);
+    await waitFor(() => expect(new Set(flippedRows(animate))).toEqual(new Set(['0', '3'])));
     expect(screen.queryByRole('button', { name: /Update board/ })).toBeNull();
   });
 

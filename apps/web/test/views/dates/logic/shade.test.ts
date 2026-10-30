@@ -117,14 +117,19 @@ describe('band colours (review ui-r2-005)', () => {
       expect(hasClass(BAND_CLASSES[b], textClass(text))).toBe(true);
     }
   });
-  it('neighbouring bands differ in lightness by a ratio of 1.3 or more, darkest to lightest', () => {
+  it('neighbouring lamps differ in lightness by a ratio of 1.3 or more, brightest (cheapest) to dimmest, and each clears 3:1 on the board', () => {
     for (const b of [0, 1, 2, 3] as const) {
       const next = BAND_COLOURS[quintileNext(b)].fill;
-      expect(luminance(next)).toBeGreaterThan(luminance(BAND_COLOURS[b].fill));
+      expect(luminance(next)).toBeLessThan(luminance(BAND_COLOURS[b].fill));
       expect(contrast(BAND_COLOURS[b].fill, next)).toBeGreaterThanOrEqual(1.3);
     }
+    // the overview's board (#0b0c0d) and an unlit socket (#2a2d30): a lamp is a graphic, so 3:1 and 2:1 (WCAG 1.4.11)
+    for (const b of bands) {
+      expect(contrast(BAND_COLOURS[b].fill, '#0b0c0d')).toBeGreaterThanOrEqual(3);
+      expect(contrast(BAND_COLOURS[b].fill, '#2a2d30')).toBeGreaterThanOrEqual(2);
+    }
   });
-  it('the lightest band is bordered and the flat shade is a band colour, so neither reads as priceless', () => {
+  it('the dimmest lamp is ringed and the flat shade is a band colour, so neither reads as priceless', () => {
     expect(BAND_CLASSES[4]).toContain('border');
     expect(FLAT_CLASS).toContain(`bg-[${BAND_COLOURS[3].fill}]`);
     // the flat shade's own text must read on its fill at 4.5:1, and its class must spell the band-3 text colour

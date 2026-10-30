@@ -55,9 +55,9 @@ describe('Providers', () => {
 describe('Alerts', () => {
   it('the heading matches every other view, and every rule field has a visible box', async () => {
     renderWithProviders(<AlertsView definitionId="def-1" />);
+    // the departure board: every Set up view's page heading is the same painted-caps title (h-view)
     expect(await screen.findByRole('heading', { level: 2, name: COPY.alertsView.heading })).toHaveClass(
-      'text-xl',
-      'font-semibold',
+      'h-view',
     );
     const form = screen.getByRole('form', { name: COPY.alertsView.formLabel });
     const fields = [
@@ -66,7 +66,8 @@ describe('Alerts', () => {
       within(form).getByLabelText(COPY.alertsView.cooldown),
     ];
     expect(fields.length).toBeGreaterThanOrEqual(4);
-    for (const f of fields) expect(f).toHaveClass('border', 'border-slate-400', 'min-h-11');
+    // each field is the world's one enamel input box (a ruled, white field), 44 px tall
+    for (const f of fields) expect(f).toHaveClass('input', 'min-h-11');
     // the labels stay visible text, not only accessible names
     expect(within(form).getByText(COPY.alertsView.threshold)).toBeVisible();
   });

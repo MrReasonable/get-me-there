@@ -219,24 +219,21 @@ export function AirportListInput({
           : null;
   return (
     <fieldset className="flex min-w-0 flex-col gap-1.5">
-      <legend className="mb-1 text-base font-semibold text-slate-900">{label}</legend>
+      <legend className="def-group-title">{label}</legend>
       {/* why: the chip list has no label of its own, so getByLabelText(label) finds only the input */}
       <ul className="flex flex-wrap gap-1.5 empty:hidden">
         {codes.map((c) => {
           const row = details.get(c);
           return (
-            <li
-              key={c}
-              className="flex items-center gap-1.5 rounded-full border border-slate-300 bg-slate-100 py-0 pl-3"
-            >
-              <span className="font-mono text-sm font-semibold">{c}</span>
+            <li key={c} className="airport-chip">
+              <span className="airport-chip-code">{c}</span>
               {row !== undefined ? (
-                <span className="text-sm text-slate-700">{shortAirportName(row.name)}</span>
+                <span className="airport-chip-name">{shortAirportName(row.name)}</span>
               ) : null}
               <button
                 type="button"
                 aria-label={PLAN_COPY.remove(c)}
-                className="min-h-11 min-w-11 rounded-full text-lg leading-none text-slate-700 hover:bg-slate-200 hover:text-slate-950 focus-visible:outline-2 focus-visible:outline-offset-[-4px] focus-visible:outline-slate-900"
+                className="airport-chip-remove min-h-11 min-w-11"
                 onClick={() => {
                   setLocalError(null);
                   setStatus(null);
@@ -286,14 +283,14 @@ export function AirportListInput({
             setText((t) => normaliseIata(t));
           }}
           onKeyDown={onKeyDown}
-          className="min-h-11 w-full rounded-md border border-slate-400 bg-white px-3 text-base placeholder:text-slate-500 focus-visible:border-slate-900 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-slate-900 aria-invalid:border-red-700"
+          className="input min-h-11 w-full"
         />
         <div
           id={listboxId}
           role="listbox"
           aria-label={PLAN_COPY.listbox(label)}
           hidden={!listShown}
-          className="absolute inset-x-0 top-full z-30 mt-1 max-h-80 overflow-y-auto rounded-md border border-slate-300 bg-white py-1 shadow-[0_8px_24px_-6px_rgb(15_23_42/0.25)]"
+          className="combo-list"
         >
           {choices.map((choice, i) => (
             // why: the input keeps focus (aria-activedescendant); a mousedown here must not move it, or the list would
@@ -313,14 +310,10 @@ export function AirportListInput({
               onKeyDown={(e) => {
                 if (e.key === 'Enter') void pick(choice);
               }}
-              className={`flex min-h-11 cursor-pointer items-center gap-3 px-3 py-1.5 ${
-                i === active ? 'bg-slate-900 text-white' : 'text-slate-900'
-              } ${choice.kind === 'metro' ? 'border-b border-slate-200' : ''}`}
+              // why: the active option is lit and carries a bar at its left edge (definitions.css), not colour alone
+              className={`combo-option ${choice.kind === 'metro' ? 'combo-option-metro' : ''}`}
             >
-              <span
-                aria-hidden="true"
-                className={`w-12 shrink-0 font-mono text-sm font-semibold ${i === active ? '' : 'text-slate-700'}`}
-              >
+              <span aria-hidden="true" className="combo-code">
                 {choice.kind === 'metro' ? choice.metro : choice.row.iata}
               </span>
               <span aria-hidden="true" className="min-w-0">
@@ -329,7 +322,7 @@ export function AirportListInput({
                 ) : (
                   <>
                     <span className="font-medium">{shortAirportName(choice.row.name)}</span>
-                    <span className={i === active ? 'text-slate-200' : 'text-slate-600'}>
+                    <span className="combo-meta">
                       {PLAN_COPY.placeLine(choice.row.city, choice.row.country)}
                     </span>
                   </>
@@ -340,23 +333,19 @@ export function AirportListInput({
         </div>
         {/* why: the live region is always mounted, so the searching and no-match messages put into it are announced */}
         <div aria-live="polite">
-          {popupMessage !== null ? (
-            <div className="absolute inset-x-0 top-full z-30 mt-1 rounded-md border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-700 shadow-[0_8px_24px_-6px_rgb(15_23_42/0.25)]">
-              {popupMessage}
-            </div>
-          ) : null}
+          {popupMessage !== null ? <div className="combo-message">{popupMessage}</div> : null}
         </div>
       </div>
       <span id={helpId} className="sr-only">
         {PLAN_COPY.airportHelp}
       </span>
       {status !== null ? (
-        <p role="status" className="text-sm text-slate-700">
+        <p role="status" className="hint">
           {status}
         </p>
       ) : null}
       {messages.length > 0 ? (
-        <div id={errorId} role="alert" className="text-sm text-red-800">
+        <div id={errorId} role="alert" className="bad-text text-sm">
           {messages.map((m) => (
             <p key={m}>{m}</p>
           ))}

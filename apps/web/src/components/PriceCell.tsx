@@ -1,5 +1,6 @@
 import { effectiveAge, formatAgeFull, formatAgeShort, formatFetchedAgo, sourceLabel } from '@gmt/core';
 import { COPY } from '../copy.js';
+import { Flaps } from '../flaps/Flaps.js';
 import { formatPence } from '../format.js';
 import { useNow } from '../now.js';
 import { assertProvenance, isCalendarPrice, Provenance } from './Provenance.js';
@@ -41,11 +42,17 @@ export interface PriceCellProps {
    * title and in spoken text, so nothing is lost.
    */
   face?: boolean;
+  /**
+   * The row form's amount on split-flap cells (the departure board): the amount is still written out for readers, and
+   * the cells beside it are decorative. `flapSlot` names the board slot the cells flip in (BoardTable).
+   */
+  flaps?: boolean;
+  flapSlot?: string | undefined;
 }
 
-// why: a badge sits on its own pale fill, so it names its text colour; inside a dark calendar band it would otherwise
-// inherit the band's white text (white on slate-200 is about 1.2:1; review ui C1).
-const badge = 'ml-1 rounded px-1 text-xs font-normal text-slate-900';
+// why: a badge is a state tag, a black flap chip carrying its own ink (white, amber or red), so it reads the same on
+// steel, on an enamel plate and on a board, and never inherits its surroundings' colour (review ui C1).
+const badge = 'tag ml-1';
 
 /**
  * The only component that prints a price (spec §11, §9 item 6); wrap it in PriceBoundary. The "≈"
@@ -96,7 +103,7 @@ export function PriceCell(props: PriceCellProps) {
             <span className="sr-only">{COPY.fxSpoken(fxTitle)}</span>
           </>
         ) : null}
-        {formatPence(props.pricePence)}
+        <span className="figure text-[1.35em]">{formatPence(props.pricePence)}</span>
         {marks.length > 0 ? <span aria-hidden="true">{marks.map((m) => m.glyph).join('')}</span> : null}
         {/* why: provenance visible without hover (spec §11): the provider's short mark and the destination, since touch
         has no title and two destinations would otherwise leave a price without its airport (CodeRabbit batch 3) */}
@@ -129,7 +136,7 @@ export function PriceCell(props: PriceCellProps) {
       }
       className={`flex flex-col gap-0.5 ${compact && calendar ? 'rounded border border-dashed border-current px-1' : ''}`}
     >
-      <span className="font-semibold tabular-nums">
+      <span className="figure inline-flex flex-wrap items-center gap-x-1">
         {fxTitle !== null ? (
           <>
             <span aria-hidden="true" title={fxTitle}>
@@ -138,25 +145,32 @@ export function PriceCell(props: PriceCellProps) {
             <span className="sr-only">{COPY.fxSpoken(fxTitle)}</span>
           </>
         ) : null}
-        {formatPence(props.pricePence)}
+        {props.flaps === true ? (
+          <>
+            <span className="sr-only">{formatPence(props.pricePence)}</span>
+            <Flaps
+              text={formatPence(props.pricePence)}
+              cells={6}
+              align="right"
+              slot={props.flapSlot}
+              className="price-flaps"
+            />
+          </>
+        ) : (
+          formatPence(props.pricePence)
+        )}
         {props.qualifier !== undefined ? (
           <span className="ml-1 text-xs font-normal">{props.qualifier}</span>
         ) : null}
         {props.unconfirmed === true ? (
-          <span className={`${badge} border border-red-800 bg-red-50 font-semibold text-red-900`}>
-            {COPY.priceNotConfirmed}
-          </span>
+          <span className={`${badge} tag-bad`}>{COPY.priceNotConfirmed}</span>
         ) : null}
-        {props.stale ? <span className={`${badge} bg-amber-200`}>{COPY.stale}</span> : null}
-        {age.kind === 'unknown' ? (
-          <span className={`${badge} bg-slate-100`}>{COPY.vendorAgeUnknown}</span>
-        ) : null}
+        {props.stale ? <span className={`${badge} tag-warn`}>{COPY.stale}</span> : null}
+        {age.kind === 'unknown' ? <span className={`${badge} tag-dim`}>{COPY.vendorAgeUnknown}</span> : null}
       </span>
       {compact ? (
         <span className="inline-flex gap-1 text-xs">
-          <span className="rounded bg-slate-200 px-1 font-medium text-slate-900">
-            {COPY.providerShort[p.providerId]}
-          </span>
+          <span className="chip">{COPY.providerShort[p.providerId]}</span>
           {props.destination !== undefined ? <span>{props.destination}</span> : null}
         </span>
       ) : null}

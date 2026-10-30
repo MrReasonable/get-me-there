@@ -1,8 +1,38 @@
-/* Tailwind v4, CSS-first: no tailwind.config.js. */
+/* Tailwind v4, CSS-first: no tailwind.config.js. Tailwind keeps layout utilities; the look is the departure board
+   (styles/world.css and styles/board.css), whose colours reach utilities through the theme below. */
 @import "tailwindcss";
 
-/* Visible focus on every interactive element (spec §11 accessibility). */
-:focus-visible {
-  outline: 2px solid #1d4ed8;
-  outline-offset: 2px;
+/* Self-hosted faces (OFL-1.1, @fontsource): the app is local and works offline, so nothing loads from a CDN. */
+@import "@fontsource/barlow-condensed/500.css";
+@import "@fontsource/barlow-condensed/600.css";
+@import "@fontsource/barlow-condensed/700.css";
+@import "@fontsource/atkinson-hyperlegible-next/400.css";
+@import "@fontsource/atkinson-hyperlegible-next/400-italic.css";
+@import "@fontsource/atkinson-hyperlegible-next/600.css";
+@import "@fontsource/atkinson-hyperlegible-next/700.css";
+@import "@fontsource/atkinson-hyperlegible-mono/400.css";
+
+@import "./styles/world.css";
+@import "./styles/board.css";
+
+/* The world's context colours as utilities (text-fg, text-fg-2, border-line, text-bad, text-warn, bg-board …). They
+   read the context variables, so one class reads right on steel, on an enamel plate and on a black board. */
+@theme inline {
+  --color-fg: var(--fg);
+  --color-fg-2: var(--fg-2);
+  --color-fg-3: var(--fg-3);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-bad: var(--bad);
+  --color-warn: var(--warn);
+  --color-board: var(--board);
+  --color-enamel: var(--enamel);
+  --color-steel: var(--steel);
+  --color-flap: var(--flap-ink);
+  --color-flap-2: var(--flap-ink-2);
+  --color-amber: var(--amber);
+  --color-lamp-red: var(--red);
+  --font-flap: var(--font-flap);
+  --font-ui: var(--font-ui);
+  --font-mono: var(--font-mono);
 }

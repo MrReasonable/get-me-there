@@ -1,11 +1,13 @@
 import type { VerdictClass } from '@gmt/core';
 import { COPY } from '../copy.js';
 
+// why: state tags, black chips in the board's lamp inks: white for verified, amber for partly verified and not checked
+// (dashed, as a calendar price is), red and struck through for failed; the word carries the meaning, never the ink
 const STYLE: Record<VerdictClass | 'unchecked', string> = {
-  verified: 'border-green-800 bg-green-100 text-green-900',
-  'partially-verified': 'border-amber-800 bg-amber-100 text-amber-900',
-  failed: 'border-red-800 bg-red-100 text-red-900 line-through decoration-1',
-  unchecked: 'border-dashed border-slate-600 bg-white text-slate-800',
+  verified: 'tag',
+  'partially-verified': 'tag tag-warn',
+  failed: 'tag tag-bad line-through decoration-1',
+  unchecked: 'tag tag-warn border-dashed border-amber',
 };
 
 /**
@@ -14,7 +16,7 @@ const STYLE: Record<VerdictClass | 'unchecked', string> = {
  */
 export function ClassBadge({ cls }: { cls: VerdictClass | 'unchecked' }) {
   return (
-    <span data-testid="class-badge" className={`inline-block rounded border px-1 text-xs ${STYLE[cls]}`}>
+    <span data-testid="class-badge" className={STYLE[cls]}>
       <span className="sr-only">{COPY.classSpoken} </span>
       {COPY.classLabel[cls]}
     </span>

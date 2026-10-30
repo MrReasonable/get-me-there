@@ -1,8 +1,13 @@
 /**
- * The categorical series palette for every WP10 chart (dataviz skill: one hue per series, never the only cue; dash
- * styles and labels back every colour). Defined once; Duration and History import it.
+ * The categorical series palette for every chart (dataviz skill: one hue per series, never the only cue; dash styles
+ * and labels back every colour). The departure board's own inks, as a station's painted signs use them: board black,
+ * signal red, signage blue, ochre, signal green and violet, each at least 5:1 on the enamel plate the charts sit on
+ * and on the white of a hollow (stale) dot (test/lib/palette.test.ts). Defined once; History imports it.
  */
-export const SERIES_COLOURS = ['#1d4ed8', '#c2410c', '#7c3aed', '#047857', '#be185d', '#4d7c0f'] as const;
+export const SERIES_COLOURS = ['#111315', '#a3231a', '#1f5f8b', '#8a5a00', '#3f6b2a', '#6b3f8f'] as const;
+
+/** The plate the charts are drawn on (world.css `--enamel`), for the palette's contrast test. */
+export const CHART_GROUND = '#eef0ed';
 
 /** Colour of the i-th series, cycling. */
 export function seriesColour(i: number): string {

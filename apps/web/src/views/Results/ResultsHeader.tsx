@@ -17,7 +17,7 @@ function Headline({ row, overall }: { row: ResultRow; overall: boolean }) {
   return (
     <div
       data-testid="detail-headline"
-      className={`flex flex-wrap items-start gap-2 text-lg font-semibold ${row.basis === 'calendar' ? 'rounded border border-dashed border-slate-500 px-1' : ''}`}
+      className={`detail-headline flex flex-wrap items-start gap-x-2 gap-y-1 ${row.basis === 'calendar' ? 'rounded border border-dashed border-line-strong px-2 py-1' : ''}`}
     >
       <span>{COPY.headlineLead}</span>
       <PriceBoundary>
@@ -46,7 +46,7 @@ function Headline({ row, overall }: { row: ResultRow; overall: boolean }) {
           cls: COPY.classLabel[row.verdictClass],
         })}
       </span>
-      {overall ? <span className="font-normal italic">{COPY.headlineOverall}</span> : null}
+      {overall ? <span className="font-normal italic text-fg-2">{COPY.headlineOverall}</span> : null}
     </div>
   );
 }
@@ -75,7 +75,7 @@ function BoardFigure({ figure }: { figure: BoardFigureData }) {
   return (
     <div
       data-testid="board-figure"
-      className={`flex flex-wrap items-start gap-2 text-sm ${figure.basis === 'calendar' ? 'rounded border border-dashed border-slate-500 px-1' : ''}`}
+      className={`flex flex-wrap items-start gap-x-2 gap-y-1 text-sm ${figure.basis === 'calendar' ? 'rounded border border-dashed border-line-strong px-2 py-1' : ''}`}
     >
       <span>{D.boardPriceLead}</span>
       <PriceBoundary>
@@ -96,7 +96,7 @@ function BoardFigure({ figure }: { figure: BoardFigureData }) {
           COPY.basisName[figure.basis],
         )}
       </span>
-      <span className="w-full">{D.boardDiffers}</span>
+      <span className="w-full text-fg-2">{D.boardDiffers}</span>
     </div>
   );
 }
@@ -126,17 +126,21 @@ export function ResultsHeader({ data, filteredFirst, coveragePatch }: ResultsHea
     data.executions.find((e) => !e.isChild),
   );
   return (
-    <div className="space-y-1">
+    <div className="space-y-1.5">
       {headline !== null ? (
         <Headline row={headline} overall={overall} />
       ) : (
-        <p className="text-lg font-semibold">{COPY.noHeadline}</p>
+        <p className="detail-headline">{COPY.noHeadline}</p>
       )}
       {data.datePairFigure !== null && figureDiffers(data.datePairFigure, data.cheapest) ? (
         <BoardFigure figure={data.datePairFigure} />
       ) : null}
       <p className="text-sm">
-        <a href={hrefWith(coveragePatch)} onClick={navigateTo(coveragePatch)} className="underline">
+        <a
+          href={hrefWith(coveragePatch)}
+          onClick={navigateTo(coveragePatch)}
+          className="text-fg-2 underline decoration-1 underline-offset-4"
+        >
           {line2}
         </a>
       </p>

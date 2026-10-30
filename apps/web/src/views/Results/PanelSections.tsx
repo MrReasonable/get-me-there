@@ -36,7 +36,7 @@ const COLUMNS = [
   'reused',
 ] as const;
 // why: ui-r2-010 — the Run column stays in view while the nine-column table scrolls sideways on a phone.
-const STICKY = 'sticky left-0 bg-white';
+const STICKY = 'sticky left-0 bg-enamel';
 
 /**
  * "hard stop N calls · M calls of budget headroom left" beside the button (decisions 38, 42, 45: WP7's childCapPreview;
@@ -53,14 +53,14 @@ export function VerifyCost({
   if (verify === null) return null;
   if (runCapZero)
     return (
-      <p data-testid="verify-cost" className="text-xs font-medium">
+      <p data-testid="verify-cost" className="text-xs font-semibold">
         {P.verifyZeroRunCap(verify.needCalls)}
       </p>
     );
   return (
     <p data-testid="verify-cost" className="text-xs">
       {P.verifyCost(verify.maxCalls, verify.headroomCalls)}
-      {noHeadroom(verify) ? <span className="block font-medium">{P.verifyNoHeadroom}</span> : null}
+      {noHeadroom(verify) ? <span className="block font-bold">{P.verifyNoHeadroom}</span> : null}
     </p>
   );
 }
@@ -76,9 +76,9 @@ export function CellDetailBody(props: {
   const empty = detail.calendarPrices.length + detail.observations.length === 0;
   return (
     <>
-      <h3 className="mt-4 font-medium">{P.outcomes}</h3>
+      <h3 className="h-sub mt-4 mb-1">{P.outcomes}</h3>
       <div className="overflow-x-auto">
-        <table className="w-full text-xs">
+        <table className="data-table outcomes w-full">
           <thead>
             <tr>
               {COLUMNS.map((k) => (
@@ -96,7 +96,7 @@ export function CellDetailBody(props: {
               >
                 <th scope="row" className={`text-left font-normal ${STICKY}`}>
                   {runLabel(o.executionId, executions)}
-                  {o.executionId === latest ? <span className="block font-medium">{P.latestRun}</span> : null}
+                  {o.executionId === latest ? <span className="block font-bold">{P.latestRun}</span> : null}
                 </th>
                 <td>{COPY.stageName[o.stage]}</td>
                 <td>{COPY.provider[o.providerId]}</td>
@@ -126,14 +126,16 @@ export function CellDetailBody(props: {
           </tbody>
         </table>
       </div>
-      <h3 className="mt-4 font-medium">{P.prices}</h3>
+      <h3 className="h-sub mt-4 mb-1">{P.prices}</h3>
       {empty ? (
         <p>{P.noPrices}</p>
       ) : (
-        <ul className="flex flex-col gap-2">
+        <ul className="prices flex flex-col">
           {orderCalendarPrices(detail.calendarPrices).map((p) => (
             <li key={`cal-${p.calendarPriceId}`}>
-              <span className="text-xs">{P.calendarPriceRun(runLabel(p.executionId, executions))}</span>
+              <span className="text-xs text-fg-2">
+                {P.calendarPriceRun(runLabel(p.executionId, executions))}
+              </span>
               <PriceBoundary>
                 <PriceCell
                   pricePence={p.pricePence}
@@ -153,14 +155,14 @@ export function CellDetailBody(props: {
               key={`obs-${o.observationId ?? o.itineraryHash}-${o.seller ?? ''}`}
               data-testid="panel-observation"
             >
-              <span className="text-xs">
+              <span className="text-xs text-fg-2">
                 {P.observation(o.seller ?? COPY.none, COPY.classLabel[o.verdictClass])}
               </span>{' '}
               {/* why: WP9 owns ?row=<resultRowKey>, which selects and scrolls to that results row (plan decision 14) */}
               <a
                 href={hrefWith({ view: 'results', row: resultRowKey(o) })}
                 onClick={navigateTo({ view: 'results', row: resultRowKey(o) })}
-                className="text-xs underline"
+                className="text-xs font-semibold underline"
               >
                 {P.showInResults}
               </a>
@@ -207,7 +209,7 @@ export function VerifySection({
   // why: the cell the last verify was sent for; the mutation's own status says nothing about which cell that was.
   const [submittedKey, setSubmittedKey] = useState<string | null>(null);
   return (
-    <div className="mt-4 flex flex-col gap-1">
+    <div className="mt-4 flex flex-col gap-2 border-t border-line pt-4">
       {detail === undefined ? (
         <p data-testid="verify-cost" className="text-xs">
           {P.verifyCostLoading}
@@ -228,7 +230,7 @@ export function VerifySection({
             ...(detail?.verify ? { confirmCalls: detail.verify.maxCalls, confirmCostPence: 0 } : {}),
           });
         }}
-        className="min-h-11 self-start rounded bg-slate-900 px-3 py-1 text-white disabled:bg-slate-400"
+        className="btn btn-primary min-h-11 self-start"
       >
         {COPY.verifyCellFor(verifyCellName(cell))}
       </button>

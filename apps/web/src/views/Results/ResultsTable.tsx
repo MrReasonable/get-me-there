@@ -119,7 +119,7 @@ function SortHeader({ id }: { id: ColumnId }) {
   return (
     <button
       type="button"
-      className="min-h-11 underline"
+      className="btn-text min-h-11"
       onClick={() => onSort(key)}
       aria-label={COPY.sortBy(label, COPY.sortDir[next])}
     >
@@ -140,7 +140,7 @@ function FetchedAgo({ row }: { row: ResultRow }) {
   return (
     <span className="flex flex-col">
       <span>{formatAgeShort(age)}</span>
-      <span className="text-xs text-slate-700">{formatFetchedAgo(age)}</span>
+      <span className="text-xs text-fg-2">{formatFetchedAgo(age)}</span>
     </span>
   );
 }
@@ -172,6 +172,7 @@ function PriceColumn({ row, narrow }: { row: ResultRow; narrow: boolean }) {
           notSeenInLatestHours={row.notSeenInLatest?.ageHours ?? null}
           besideColumns={!narrow}
           unconfirmed={priceUnconfirmed(row)}
+          flaps={!narrow}
         />
       </PriceBoundary>
       {row.basis === 'calendar' && row.notApplied.length > 0 ? (
@@ -305,6 +306,14 @@ function cellFor(id: ColumnId, r: ResultRow, narrow: boolean) {
   }
 }
 
+/** Each row's lamp (the board's row lamp): white verified, amber partly verified or not checked, red failed. */
+const LAMP: Readonly<Record<ResultRow['verdictClass'], string>> = {
+  verified: 'white',
+  'partially-verified': 'amber',
+  failed: 'red',
+  unchecked: 'amber',
+};
+
 function buildColumns(ids: readonly ColumnId[], narrow: boolean) {
   return ids.map((id) =>
     helper.display({
@@ -315,16 +324,19 @@ function buildColumns(ids: readonly ColumnId[], narrow: boolean) {
         const open = row.getIsExpanded();
         const name = rowName(row.original);
         return (
-          <button
-            type="button"
-            className="min-h-11 min-w-11 rounded border border-slate-500"
-            aria-expanded={open}
-            aria-controls={detailId(row.id)}
-            aria-label={open ? COPY.hideDetails(name) : COPY.showDetails(name)}
-            onClick={row.getToggleExpandedHandler()}
-          >
-            {open ? '−' : '+'}
-          </button>
+          <span className="row-toggle">
+            <span aria-hidden="true" className="lamp-dot" data-lamp={LAMP[row.original.verdictClass]} />
+            <button
+              type="button"
+              className="toggle min-h-11 min-w-11"
+              aria-expanded={open}
+              aria-controls={detailId(row.id)}
+              aria-label={open ? COPY.hideDetails(name) : COPY.showDetails(name)}
+              onClick={row.getToggleExpandedHandler()}
+            >
+              {open ? '−' : '+'}
+            </button>
+          </span>
         );
       },
     }),
@@ -388,66 +400,64 @@ export function ResultsTable({
   return (
     <TableContext.Provider value={context}>
       {/* why: a labelled scroll region, so a table wider than the screen scrolls inside itself, not the page (UI-3). */}
-      <section aria-label={COPY.resultsScroll} className="overflow-x-auto">
-        <table aria-label={COPY.resultsTableLabel} className="w-full border-collapse text-sm">
-          <thead>
-            {table.getHeaderGroups().map((group) => (
-              <tr key={group.id}>
-                {group.headers.map((h) => {
-                  const key = SORT_KEY.get(h.column.id);
-                  const ariaSort =
-                    key === undefined
-                      ? undefined
-                      : sort?.key === key
-                        ? sort.dir === 'asc'
-                          ? 'ascending'
-                          : 'descending'
-                        : 'none';
-                  return (
-                    <th
-                      key={h.id}
-                      scope="col"
-                      aria-sort={ariaSort}
-                      className="border-b border-slate-400 p-1 text-left"
-                    >
-                      <table.FlexRender header={h} />
-                    </th>
-                  );
-                })}
-              </tr>
-            ))}
-          </thead>
-          <tbody>
-            {table.getRowModel().rows.map((row) => (
-              <Fragment key={row.id}>
-                <tr
-                  id={rowDomId(row.id)}
-                  aria-current={row.id === selectedRow ? 'true' : undefined}
-                  className={`border-b border-slate-200 align-top ${row.id === selectedRow ? 'bg-amber-50 outline outline-2 outline-amber-600' : ''}`}
-                >
-                  {row.getAllCells().map((c) => (
-                    <td key={c.id} className="p-1">
-                      <table.FlexRender cell={c} />
-                    </td>
-                  ))}
+      {/* why: the board's bolted frame sits outside the scroll region, so its rivets are never clipped */}
+      <div className="frame itins-frame">
+        <section aria-label={COPY.resultsScroll} className="overflow-x-auto">
+          <table aria-label={COPY.resultsTableLabel} className="itins">
+            <thead>
+              {table.getHeaderGroups().map((group) => (
+                <tr key={group.id}>
+                  {group.headers.map((h) => {
+                    const key = SORT_KEY.get(h.column.id);
+                    const ariaSort =
+                      key === undefined
+                        ? undefined
+                        : sort?.key === key
+                          ? sort.dir === 'asc'
+                            ? 'ascending'
+                            : 'descending'
+                          : 'none';
+                    return (
+                      <th key={h.id} scope="col" aria-sort={ariaSort}>
+                        <table.FlexRender header={h} />
+                      </th>
+                    );
+                  })}
                 </tr>
-                {row.getIsExpanded() ? (
-                  <tr id={detailId(row.id)}>
-                    <td colSpan={ids.length} className="bg-slate-50">
-                      <ExpandedRow
-                        row={row.original}
-                        extras={narrow}
-                        verificationConfigured={verificationConfigured}
-                        definitionId={definitionId}
-                      />
-                    </td>
+              ))}
+            </thead>
+            <tbody>
+              {table.getRowModel().rows.map((row) => (
+                <Fragment key={row.id}>
+                  <tr
+                    id={rowDomId(row.id)}
+                    aria-current={row.id === selectedRow ? 'true' : undefined}
+                    data-class={row.original.verdictClass}
+                  >
+                    {row.getAllCells().map((c) => (
+                      <td key={c.id}>
+                        <table.FlexRender cell={c} />
+                      </td>
+                    ))}
                   </tr>
-                ) : null}
-              </Fragment>
-            ))}
-          </tbody>
-        </table>
-      </section>
+                  {row.getIsExpanded() ? (
+                    <tr id={detailId(row.id)}>
+                      <td colSpan={ids.length} className="expanded-cell">
+                        <ExpandedRow
+                          row={row.original}
+                          extras={narrow}
+                          verificationConfigured={verificationConfigured}
+                          definitionId={definitionId}
+                        />
+                      </td>
+                    </tr>
+                  ) : null}
+                </Fragment>
+              ))}
+            </tbody>
+          </table>
+        </section>
+      </div>
     </TableContext.Provider>
   );
 }

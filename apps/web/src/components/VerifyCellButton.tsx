@@ -27,7 +27,7 @@ export function VerifyCellButton({ definitionId, cell }: { definitionId: string;
     <span className="flex flex-col gap-1">
       <button
         type="button"
-        className="min-h-11 rounded border border-slate-500 px-3"
+        className="btn btn-sm min-h-11"
         disabled={verify.isPending}
         aria-busy={verify.isPending ? true : undefined}
         onClick={() => verify.mutate({ definitionId, cell })}

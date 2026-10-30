@@ -8,6 +8,14 @@ import { hrefWith, navigateTo } from '../state/urlState.js';
 
 export type StatusCheck = apiContract.StatusCheck;
 
+/** Each state's tag ink: white ok, amber to check, red failing, dim off; the state's word is always written in it. */
+const STATE_TAG: Readonly<Record<StatusCheck['state'], string>> = {
+  ok: '',
+  warn: 'tag-warn',
+  fail: 'tag-bad',
+  off: 'tag-dim',
+};
+
 /** The words a card is labelled by besides its area: a provider's own name, or a search's name (V11); else none. */
 export function cardName(c: StatusCheck): string | null {
   if (c.area === 'provider' && c.providerId !== null) return COPY.provider[c.providerId];
@@ -56,11 +64,11 @@ function FixCommand({ command }: { command: string }) {
   };
   return (
     <span className="flex flex-wrap items-center gap-2">
-      <code className="rounded bg-slate-100 px-1">{command}</code>
+      <code className="cmd">{command}</code>
       <button
         type="button"
         aria-label={COPY.statusView.copyCommand(command)}
-        className="min-h-11 rounded border border-slate-500 px-3 focus-visible:outline focus-visible:outline-2"
+        className="btn btn-sm min-h-11"
         onClick={() => void copy()}
       >
         {COPY.statusView.copy}
@@ -73,7 +81,7 @@ function FixCommand({ command }: { command: string }) {
           value={command}
           size={Math.max(20, command.length)}
           aria-label={COPY.statusView.selectedInstead(command)}
-          className="min-h-11 max-w-full rounded border border-slate-500 px-2 font-mono"
+          className="input min-h-11 max-w-full font-mono"
         />
       ) : null}
     </span>
@@ -98,7 +106,7 @@ function SendTest() {
     <div className="flex flex-wrap items-center gap-2">
       <button
         type="button"
-        className="min-h-11 rounded border border-slate-500 px-3 focus-visible:outline focus-visible:outline-2 disabled:opacity-60"
+        className="btn btn-sm min-h-11"
         disabled={send.isPending}
         aria-busy={send.isPending ? true : undefined}
         onClick={() => send.mutate()}
@@ -118,30 +126,23 @@ function SendTest() {
 export function StatusCard({ check }: { check: StatusCheck }) {
   const label = COPY.statusView.cardLabel(COPY.statusView.areaName[check.area], cardName(check));
   const coverage = coveragePatch(check);
-  const border =
-    check.state === 'fail'
-      ? 'border-red-700'
-      : check.state === 'warn'
-        ? 'border-amber-600'
-        : 'border-slate-300';
   return (
-    <section aria-label={label} className={`space-y-1 rounded border p-2 text-sm ${border}`}>
+    <section aria-label={label} data-state={check.state} className="plate status-card space-y-2 text-[15px]">
       {/* why: a search's card is named by its search; the name is shown, not only in the region's label (critique) */}
-      {check.area === 'data' && check.label !== null ? (
-        <h4 className="font-semibold">{check.label}</h4>
-      ) : null}
+      {check.area === 'data' && check.label !== null ? <h4 className="h-sub">{check.label}</h4> : null}
       <p>
-        <span className="font-semibold">{COPY.statusView.state[check.state]}</span> {check.summary}
+        <span className={`tag mr-2 ${STATE_TAG[check.state]}`}>{COPY.statusView.state[check.state]}</span>{' '}
+        {check.summary}
       </p>
       {check.note !== null ? (
-        <p className="text-slate-700">
+        <p className="text-fg-2">
           <span className="font-medium">{COPY.statusView.noteLabel}</span> {check.note}
         </p>
       ) : null}
       {check.state !== 'ok' && check.fix !== null ? (
         <div className="space-y-1">
           <p>
-            <span className="font-medium">{COPY.statusView.fixLabel}</span> {check.fix.text}
+            <span className="font-bold">{COPY.statusView.fixLabel}</span> {check.fix.text}
           </p>
           {/* why: V11 (ui-b1-005): keyed by the command, so "Copied" never outlives the command it was for */}
           {check.fix.command === null ? null : (
@@ -151,11 +152,7 @@ export function StatusCard({ check }: { check: StatusCheck }) {
       ) : null}
       {coverage !== null ? (
         <p>
-          <a
-            href={hrefWith(coverage)}
-            onClick={navigateTo(coverage)}
-            className="inline-flex min-h-11 items-center underline"
-          >
+          <a href={hrefWith(coverage)} onClick={navigateTo(coverage)} className="link">
             {COPY.statusView.coverageLink}
           </a>
         </p>
@@ -165,7 +162,7 @@ export function StatusCard({ check }: { check: StatusCheck }) {
           <a
             href={hrefWith({ view: 'providers' })}
             onClick={navigateTo({ view: 'providers' })}
-            className="inline-flex min-h-11 items-center underline"
+            className="link"
           >
             {COPY.statusView.providersLink}
           </a>

@@ -15,7 +15,7 @@ export class AppBoundary extends Component<{ children: ReactNode }, { failed: bo
 
   override render(): ReactNode {
     return this.state.failed ? (
-      <p role="alert" className="p-4 font-medium text-red-800">
+      <p role="alert" className="plate notice m-4 font-semibold text-bad">
         {COPY.appFailed}
       </p>
     ) : (

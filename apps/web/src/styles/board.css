@@ -1,0 +1,601 @@
+/* =====================================================================================================================
+   Split-flap cells, the boards they sit on, the overview's lamp matrix and the concourse shell.
+   ===================================================================================================================== */
+
+@layer components {
+  /* ------------------------------------------------------------------------------------------------------------------
+     Split-flap cells. Each character sits in its own fixed cell; its glyph is drawn from data-ch by ::before, so the
+     cells carry no text of their own (the words beside them are the accessible text) and the hinge is drawn by ::after.
+     The cell width --cw is set per context; a flip lays three half-cells over a cell for its length (flapEngine.ts).
+     ------------------------------------------------------------------------------------------------------------------ */
+  .flaps {
+    display: inline-flex;
+    gap: var(--cg, 2px);
+    white-space: nowrap;
+    vertical-align: middle;
+  }
+  .f,
+  .fl {
+    width: var(--cw, 16px);
+    height: calc(var(--cw, 16px) * 1.62);
+    border-radius: 2px;
+  }
+  .f {
+    position: relative;
+    flex: none;
+    display: inline-block;
+    color: inherit;
+    background: linear-gradient(180deg, var(--flap-top) 0 50%, var(--flap-bot) 50%);
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.09),
+      inset 0 -1px 0 rgb(0 0 0 / 0.5),
+      0 1px 1px rgb(0 0 0 / 0.9);
+    contain: layout style;
+  }
+  .f::before,
+  .fl::before {
+    content: attr(data-ch);
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    font: 600 calc(var(--cw, 16px) * 1.3) / 1 var(--font-flap);
+    font-variant-numeric: tabular-nums lining-nums;
+    text-transform: uppercase;
+  }
+  /* The hinge: a hairline across the middle of every cell */
+  .f::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: calc(50% - 0.5px);
+    height: 1px;
+    background: rgb(0 0 0 / 0.75);
+    z-index: 4;
+  }
+  /* A drawn arrow (the font's own arrow reads thin at flap size, Ian 2026-10-27) */
+  .f[data-ch="→"]::before {
+    content: "";
+  }
+  .f > svg {
+    position: absolute;
+    inset: 14%;
+    width: 72%;
+    height: 72%;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 3.6;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  /* The three half-cells of a flip: the old top falls, the old bottom waits, the new bottom lands */
+  .fl {
+    position: absolute;
+    inset: 0;
+    color: inherit;
+    backface-visibility: hidden;
+    transform-origin: 50% 50%;
+  }
+  .fl-top {
+    z-index: 3;
+    clip-path: inset(0 0 50% 0);
+    background: var(--flap-top);
+  }
+  .fl-old {
+    z-index: 1;
+    clip-path: inset(50% 0 0 0);
+    background: var(--flap-bot);
+  }
+  .fl-land {
+    z-index: 2;
+    clip-path: inset(50% 0 0 0);
+    background: var(--flap-bot);
+    transform: perspective(160px) rotateX(90deg);
+  }
+  /* The next character's top, revealed as the old top falls */
+  .fl-under {
+    z-index: 0;
+  }
+
+  /* A black strip that holds flaps on steel or enamel: the brand, the name board, the estimate */
+  .flap-strip {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 8px 12px;
+    padding: 6px;
+    color: var(--flap-ink);
+    background: var(--board);
+    border-radius: 3px;
+    box-shadow:
+      inset 0 0 0 1px #000,
+      0 1px 0 rgb(255 255 255 / 0.45),
+      0 3px 8px rgb(0 0 0 / 0.25);
+  }
+
+  /* An icon flap: the state glyph of a row */
+  .f-icon > svg {
+    inset: 14%;
+    width: 72%;
+    height: 72%;
+  }
+
+  /* The row lamp: white verified, amber not checked or stale, hollow superseded */
+  .lamp-dot {
+    flex: none;
+    display: inline-block;
+    width: 11px;
+    height: 11px;
+    border-radius: 50%;
+    background: var(--lamp-off);
+    box-shadow:
+      inset 0 0 0 1px #000,
+      0 0 0 1px #34383b;
+  }
+  .lamp-dot[data-lamp="white"] {
+    background: #e9e7de;
+  }
+  .lamp-dot[data-lamp="amber"] {
+    background: var(--amber);
+    box-shadow:
+      0 0 8px rgb(255 178 46 / 0.75),
+      inset 0 0 0 1px #000;
+  }
+  .lamp-dot[data-lamp="red"] {
+    background: var(--red);
+    box-shadow:
+      0 0 8px rgb(240 90 78 / 0.7),
+      inset 0 0 0 1px #000;
+  }
+  .lamp-dot[data-lamp="hollow"] {
+    background: transparent;
+    box-shadow: inset 0 0 0 1.5px var(--dim);
+  }
+
+  /* ------------------------------------------------------------------------------------------------------------------
+     The concourse shell: steel strip, brand flaps, two-tier nav, status line
+     ------------------------------------------------------------------------------------------------------------------ */
+  .topbar {
+    padding: 10px var(--gutter) 8px;
+  }
+  .brand {
+    --cw: 13px;
+    --cg: 1px;
+    display: inline-flex;
+    padding: 5px;
+    color: var(--flap-ink);
+    background: var(--board);
+    border-radius: 3px;
+    box-shadow:
+      inset 0 0 0 1px #000,
+      0 1px 0 rgb(255 255 255 / 0.5);
+  }
+  .nav-tier-name {
+    font: 600 14px / 1 var(--font-flap);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-2);
+    padding-right: 4px;
+  }
+  .nav-link {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    padding: 0 12px;
+    font: 600 15px / 1 var(--font-ui);
+    color: var(--ink);
+    text-decoration: none;
+    border-radius: 3px 3px 0 0;
+    border-bottom: 4px solid transparent;
+  }
+  .nav-link:hover {
+    background: rgb(255 255 255 / 0.35);
+    text-decoration: underline;
+  }
+  /* The current view: an inverted flap tile with a solid bar under the label, so the cue survives forced colours */
+  .nav-link[aria-current="page"] {
+    color: var(--flap-ink);
+    background: var(--board);
+    border-bottom: 4px solid currentColor;
+  }
+  .nav-menu-button {
+    min-height: 44px;
+  }
+
+  /* The status line: the run, the failing checks, the spend */
+  .statusline {
+    font-size: 14px;
+    color: var(--ink-2);
+  }
+  .statusline .status-word {
+    font-weight: 700;
+    color: var(--ink);
+  }
+
+  .view-main {
+    padding: 0 var(--gutter) 64px;
+  }
+
+  /* ------------------------------------------------------------------------------------------------------------------
+     The Dates headline: the search name in large flaps over the run and coverage lines
+     ------------------------------------------------------------------------------------------------------------------ */
+  .name-board {
+    --cw: clamp(11px, calc((100vw - 2 * var(--gutter) - 40px) / 34), 24px);
+    --cg: 2px;
+  }
+  .name-board .flaps + .flaps {
+    margin-left: calc(var(--cw) * 0.6);
+  }
+
+  /* ------------------------------------------------------------------------------------------------------------------
+     The board: a semantic table on black. Column names are painted on the frame; every row is a flap line with its
+     words beneath, in the board's second ink.
+     ------------------------------------------------------------------------------------------------------------------ */
+  .board-frame {
+    container-type: inline-size;
+  }
+  .board {
+    --cw: clamp(10px, calc((100cqi - 520px) / 56 - 2px), 17px);
+    --cg: 2px;
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    color: var(--flap-ink);
+  }
+  .board caption {
+    caption-side: top;
+    text-align: left;
+    padding: 0 0 12px;
+    font-size: 14px;
+    line-height: 1.35;
+    color: var(--flap-ink-2);
+  }
+  .board-title {
+    font: 700 21px / 1.1 var(--font-flap);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--flap-ink);
+  }
+  .board thead th {
+    padding: 0 8px 8px;
+    text-align: left;
+    vertical-align: bottom;
+    white-space: nowrap;
+    font: 600 14px / 1 var(--font-flap);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--flap-ink-2);
+    border-bottom: 1px solid var(--board-line);
+  }
+  .board thead th .btn-text {
+    min-height: 44px;
+    align-items: flex-end;
+    padding-bottom: 1px;
+    text-transform: inherit;
+    letter-spacing: inherit;
+    font: inherit;
+    color: var(--flap-ink);
+    text-decoration-color: #6b7176;
+  }
+  .board thead th[aria-sort] .btn-text {
+    text-decoration-color: var(--flap-ink);
+  }
+  .board thead th[aria-sort="ascending"] .btn-text::after {
+    content: "▲";
+    font-size: 10px;
+  }
+  .board thead th[aria-sort="descending"] .btn-text::after {
+    content: "▼";
+    font-size: 10px;
+  }
+  .board tbody td,
+  .board tbody th {
+    padding: 10px 8px 10px;
+    vertical-align: top;
+    text-align: left;
+    font-weight: inherit;
+    border-top: 1px solid #1f2326;
+  }
+  .board tbody tr:first-child > * {
+    border-top: 0;
+  }
+  .board tbody tr {
+    cursor: pointer;
+  }
+  .board tbody tr:hover,
+  .board tbody tr[data-lit] {
+    background: var(--board-2);
+  }
+  /* A lit row also carries a bar, not colour alone */
+  .board tbody tr[data-lit] > :first-child {
+    box-shadow: inset 3px 0 0 var(--flap-ink);
+  }
+  .board a {
+    text-decoration: none;
+  }
+  .board a:hover .flaps {
+    filter: brightness(1.15);
+  }
+  .board .words {
+    display: block;
+    margin-top: 6px;
+    font: 400 13.5px / 1.4 var(--font-ui);
+    color: var(--flap-ink-2);
+    white-space: normal;
+  }
+  .row-head {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .nowrap {
+    white-space: nowrap;
+  }
+  .cell-right {
+    text-align: right;
+  }
+  /* State inks. Calendar: the price and how far checked in amber; stale: how far checked; superseded: dim. Each also
+     has its lamp, its glyph flap and its words. */
+  .board tr[data-state="calendar"] .price-flaps,
+  .board tr[data-state="calendar"] .howfar-flap,
+  .board tr[data-state="stale"] .howfar-flap {
+    color: var(--amber);
+  }
+  .board tr[data-state="superseded"] {
+    color: var(--dim);
+  }
+  .board tr[data-state="superseded"] .price-flaps {
+    text-decoration: line-through;
+  }
+}
+
+/* Phone: the same table, each row a stacked card. The rows keep their table roles explicitly (role="table" and the
+   rest are set in markup), since display: block takes a table's implicit roles away in some browsers. */
+@media (max-width: 899px) {
+  .board {
+    --cw: 13px;
+    --cg: 1px;
+  }
+  .board,
+  .board tbody,
+  .board tr,
+  .board td,
+  .board th {
+    display: block;
+  }
+  .board caption {
+    display: block;
+  }
+  .board thead {
+    display: none;
+  }
+  .board tbody tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 6px 10px;
+    padding: 12px 2px;
+    border-top: 1px solid var(--board-line);
+  }
+  .board tbody tr:first-child {
+    border-top: 0;
+  }
+  .board tbody tr > td,
+  .board tbody tr > th {
+    padding: 0;
+    border: 0;
+  }
+  .board .card-dates {
+    grid-column: 1;
+  }
+  .board .card-price {
+    grid-column: 2;
+    grid-row: 1;
+    justify-self: end;
+    text-align: right;
+  }
+  .board .card-rest {
+    grid-column: 1 / -1;
+    font: 400 14px / 1.4 var(--font-ui);
+    color: var(--flap-ink-2);
+  }
+}
+
+/* ------------------------------------------------------------------------------------------------------------------
+   The overview: a lamp matrix. Each day a row of stay-length lamps; brighter is cheaper. A lamp without a figure is
+   dark and carries its mark's glyph; "partly not searched" adds stripes in the lamp's own ink.
+   ------------------------------------------------------------------------------------------------------------------ */
+@layer components {
+  .lamp {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 24px;
+    min-height: 24px;
+    flex: 1 1 0;
+    overflow: hidden;
+    padding: 0;
+    font: 700 10px / 1 var(--font-ui);
+    border-radius: 50%;
+    cursor: pointer;
+    border: 0;
+  }
+  /* Neutral: a dark socket with light glyphs */
+  .lamp-none {
+    color: var(--flap-ink);
+    background: var(--lamp-off);
+    border-radius: 2px;
+    box-shadow: inset 0 0 0 1px #4a5055;
+  }
+  .lamp[data-ringed] {
+    outline: 2px solid var(--flap-ink);
+    outline-offset: 1px;
+  }
+  .lamp[data-lit] {
+    outline: 3px solid var(--amber);
+    outline-offset: 2px;
+    z-index: 2;
+  }
+  .lamp:focus-visible {
+    z-index: 3;
+  }
+  .ov-day {
+    font: 500 12px / 1 var(--font-flap);
+    letter-spacing: 0.04em;
+    color: var(--flap-ink-2);
+    white-space: nowrap;
+  }
+  .ov-weekend .ov-day {
+    color: var(--flap-ink);
+    font-weight: 700;
+  }
+  .ov-month-name {
+    --cw: 12px;
+    --cg: 1px;
+  }
+  .legend-swatch {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    font: 700 10px / 1 var(--font-ui);
+    border-radius: 50%;
+  }
+}
+
+@media (forced-colors: active) {
+  .f {
+    border: 1px solid CanvasText;
+  }
+  .lamp,
+  .legend-swatch {
+    border: 1px solid CanvasText;
+  }
+  .lamp[data-ringed] {
+    outline-color: CanvasText;
+  }
+  .lamp[data-lit] {
+    outline-color: Highlight;
+  }
+}
+
+/* ------------------------------------------------------------------------------------------------------------------
+   The shell's smaller parts
+   ------------------------------------------------------------------------------------------------------------------ */
+@layer components {
+  .skip-link {
+    position: absolute;
+    left: 8px;
+    top: -80px;
+    z-index: 50;
+    padding: 10px 14px;
+    color: var(--flap-ink);
+    background: var(--board);
+    border-radius: var(--radius);
+  }
+  .skip-link:focus {
+    top: 8px;
+  }
+  .brand {
+    margin: 0;
+  }
+  .nav-here {
+    color: var(--flap-ink);
+    background: var(--board);
+  }
+  .topbar {
+    position: relative;
+  }
+  /* The phone's full nav: a steel shelf that drops over the page from under the strip */
+  .nav-panel {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 100%;
+    z-index: 40;
+    display: grid;
+    gap: 6px;
+    padding: 10px var(--gutter) 14px;
+    background: linear-gradient(180deg, var(--steel-hi), var(--steel));
+    border-bottom: 1px solid var(--steel-edge);
+    box-shadow: 0 8px 18px rgb(0 0 0 / 0.28);
+  }
+  .nav-panel[hidden] {
+    display: none;
+  }
+  .statusline {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    column-gap: 18px;
+  }
+  .statusbar-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    column-gap: 22px;
+    margin-top: 4px;
+  }
+  .run-status {
+    flex: 1 1 auto;
+    align-items: center;
+    column-gap: 16px;
+  }
+  .statusline-details > summary {
+    font-weight: 600;
+  }
+  .statusline-details[open] {
+    flex-basis: 100%;
+  }
+  .run-numbers {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    column-gap: 16px;
+    padding: 0 0 4px 36px;
+    font-size: 13px;
+  }
+  .run-numbers .link {
+    min-height: 32px;
+  }
+  .tag-glyph:empty {
+    display: none;
+  }
+  .topbar .statusline .status-word[data-status="failed"],
+  .topbar .statusline .status-word[data-status="cancelled"] {
+    color: var(--ink-bad);
+  }
+}
+
+@media (max-width: 899px) {
+  .topbar {
+    padding: 6px var(--gutter) 4px;
+  }
+  .brand {
+    --cw: 9px;
+    padding: 4px;
+  }
+  .nav-tier-name {
+    font-size: 13px;
+  }
+  .nav-link {
+    padding: 0 10px;
+    font-size: 14px;
+  }
+  .statusline {
+    column-gap: 12px;
+    font-size: 13.5px;
+  }
+  .brand {
+    --cw: 8px;
+  }
+  .topbar header {
+    flex-wrap: nowrap;
+    column-gap: 10px;
+  }
+  .run-numbers {
+    padding-left: 0;
+  }
+}

@@ -7,7 +7,7 @@ import { parsePoundsToPence } from '../../format.js';
 
 const C = COPY.alertsView;
 /** The same box as every other form field (Definitions), so each field shows where to type. */
-const field = 'min-h-11 w-full min-w-0 rounded border border-slate-400 px-1';
+const field = 'input min-h-11 w-full min-w-0';
 const RULE_TYPES = ['absolute', 'dropPct', 'dropAbs'] as const;
 const BASES = ['verified', 'calendar'] as const;
 type RuleType = (typeof RULE_TYPES)[number];
@@ -77,11 +77,11 @@ export function RuleForm(props: {
   return (
     <form
       onSubmit={submit}
-      className="grid max-w-md grid-cols-[minmax(0,1fr)] gap-3 [&_label]:min-w-0"
+      className="plate plate-pad alerts-form grid grid-cols-[minmax(0,1fr)] gap-4 [&_label]:min-w-0"
       aria-label={C.formLabel}
     >
-      <label className="grid gap-1">
-        <span>{C.ruleType}</span>
+      <label className="grid gap-1.5">
+        <span className="field-label">{C.ruleType}</span>
         <select
           aria-label={C.ruleType}
           className={field}
@@ -94,8 +94,8 @@ export function RuleForm(props: {
         </select>
       </label>
       {type === 'dropPct' ? (
-        <label className="grid gap-1">
-          <span>{C.dropPct}</span>
+        <label className="grid gap-1.5">
+          <span className="field-label">{C.dropPct}</span>
           <input
             aria-label={C.dropPct}
             className={field}
@@ -105,8 +105,8 @@ export function RuleForm(props: {
           />
         </label>
       ) : (
-        <label className="grid gap-1">
-          <span>{C.threshold}</span>
+        <label className="grid gap-1.5">
+          <span className="field-label">{C.threshold}</span>
           <input
             aria-label={C.threshold}
             className={field}
@@ -116,8 +116,8 @@ export function RuleForm(props: {
           />
         </label>
       )}
-      <label className="grid gap-1">
-        <span>{C.basis}</span>
+      <label className="grid gap-1.5">
+        <span className="field-label">{C.basis}</span>
         <select
           aria-label={C.basis}
           className={field}
@@ -136,11 +136,11 @@ export function RuleForm(props: {
           checked={basis === 'verified' && requireAll}
           onChange={(e) => setRequireAll(e.target.checked)}
         />
-        <span>{C.requireAll}</span>
+        <span className="font-semibold">{C.requireAll}</span>
       </label>
-      {basis === 'calendar' ? <p className="text-slate-700">{C.requireAllCalendarNote}</p> : null}
-      <label className="grid gap-1">
-        <span>{C.cooldown}</span>
+      {basis === 'calendar' ? <p className="hint">{C.requireAllCalendarNote}</p> : null}
+      <label className="grid gap-1.5">
+        <span className="field-label">{C.cooldown}</span>
         <input
           aria-label={C.cooldown}
           className={field}
@@ -149,20 +149,16 @@ export function RuleForm(props: {
           value={cooldown}
           onChange={(e) => setCooldown(e.target.value)}
         />
-        <span className="text-xs text-slate-700">{C.cooldownHint}</span>
+        <span className="hint">{C.cooldownHint}</span>
       </label>
       {errors.length > 0 ? (
-        <div role="alert" className="text-sm text-red-800">
+        <div role="alert" className="inset bad-text px-3 py-2 text-sm">
           {errors.map((m) => (
             <p key={m}>{m}</p>
           ))}
         </div>
       ) : null}
-      <button
-        type="submit"
-        className="min-h-11 justify-self-start rounded border border-slate-700 px-3"
-        disabled={props.busy}
-      >
+      <button type="submit" className="btn btn-primary min-h-11 justify-self-start" disabled={props.busy}>
         {C.addRule}
       </button>
     </form>

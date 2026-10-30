@@ -18,8 +18,8 @@ export function RouteTable({ line, now }: { line: RouteLine; now: IsoDateTime })
   const cabin = line.cabin === 'unknown' ? H.cabinNotStated : COPY.cabinName[line.cabin];
   return (
     <section aria-label={H.tableScroll(line.name)} className="max-h-64 overflow-auto">
-      <table className="w-full text-xs">
-        <caption className="text-left font-medium">{H.tableCaption(line.name)}</caption>
+      <table className="data-table w-full text-sm">
+        <caption className="h-sub pb-2 text-left">{H.tableCaption(line.name)}</caption>
         <thead>
           <tr>
             <th scope="col">{H.travelDateColumn}</th>
@@ -33,10 +33,12 @@ export function RouteTable({ line, now }: { line: RouteLine; now: IsoDateTime })
               <td>{formatIsoDateLong(p.route.date)}</td>
               <td>
                 {/* why: prov-004: every point is vendor-stated GBP, so no "≈"; the title and spoken text say so */}
-                <span title={H.routeGbp}>{formatPence(p.pricePence)}</span>
+                <span title={H.routeGbp} className="figure">
+                  {formatPence(p.pricePence)}
+                </span>
                 <span className="sr-only">{H.routeGbp}</span>
                 {/* why: decision 54 — stale by fetch age, labelled like every other price */}
-                {p.route.stale ? <span className="ml-1 rounded bg-amber-200 px-1">{COPY.stale}</span> : null}
+                {p.route.stale ? <span className="tag tag-warn ml-1">{COPY.stale}</span> : null}
               </td>
               <td>
                 {H.routeProvenance(

@@ -1,63 +1,77 @@
-import { render } from '@testing-library/react';
+import { render, waitFor } from '@testing-library/react';
 import { useRef } from 'react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { STEP_MS } from '../../../src/flaps/engine.js';
+import { Flaps } from '../../../src/flaps/Flaps.js';
 import { type Animate, useFlip } from '../../../src/views/Dates/flip.js';
 
-// WP19 Task 19.9 (the performance test): measuring a row's place forces the browser to lay out the whole page, the
-// overview's thousands of cells included, so the board measures its rows only on the commit that applies a new read
-// (the one a transition can follow), never on a hover, a stay filter change or a "Show 10 more".
+// The departure board (Ian, 2026-10-26/27): a new read flips the board's rows in place. Each row position is a slot;
+// its flap groups turn from what that position showed to what it shows now. WP19 Task 19.9: only a new read is looked
+// at (a hover, a stay filter change or "Show 10 more" flips nothing), and only text is read, never layout.
 
-/** jsdom has no layout: a row's top is its place among its siblings, 40 px apart, read from the DOM as it stands. */
-const rect = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect');
-afterEach(() => rect.mockClear());
-rect.mockImplementation(function (this: HTMLElement) {
-  const top = [...(this.parentElement?.children ?? [])].indexOf(this) * 40;
-  return {
-    top,
-    bottom: top + 40,
-    left: 0,
-    right: 100,
-    width: 100,
-    height: 40,
-    x: 0,
-    y: top,
-    toJSON: () => ({}),
-  };
-});
-
-function Rows({ pairs, token, animate }: { pairs: string[]; token: number; animate: Animate }) {
+function Rows({
+  pairs,
+  token,
+  animate,
+  reduced = false,
+}: {
+  pairs: string[];
+  token: number;
+  animate: Animate;
+  reduced?: boolean;
+}) {
   const root = useRef<HTMLDivElement>(null);
-  useFlip(root, token, animate, false);
+  useFlip(root, token, animate, reduced);
   return (
     <div ref={root}>
       {pairs.map((p) => (
-        <div key={p} data-pair={p} />
+        <div key={p} data-pair={p}>
+          <Flaps text={p} slot="dep" />
+        </div>
       ))}
     </div>
   );
 }
 
-describe('useFlip measures only for a new read (WP19 Task 19.9)', () => {
-  it('a commit with the same token measures nothing; a new token animates each row that moved, once', () => {
-    const animate = vi.fn<Animate>();
-    const r = render(<Rows pairs={['1', '2', '3']} token={0} animate={animate} />);
+/** A spy that notes the row each half-cell sits in when it is animated (a half-cell goes when its flip ends). */
+function spy() {
+  const rows: Array<string | null> = [];
+  const animate = vi.fn<Animate>((el) => {
+    rows.push(el.closest('[data-pair]')?.getAttribute('data-pair') ?? null);
+    return undefined;
+  });
+  return { animate, rows };
+}
+
+describe('useFlip flips a new read in place', () => {
+  it('a commit with the same token flips nothing; a new token flips each changed cell of each position, once', async () => {
+    const { animate, rows } = spy();
+    const r = render(<Rows pairs={['AB', 'CD', 'EF']} token={0} animate={animate} />);
     // a commit that is not a new read: a hover, a stay filter change, "Show 10 more"
-    r.rerender(<Rows pairs={['1', '2', '3', '4']} token={0} animate={animate} />);
-    expect(rect).not.toHaveBeenCalled();
-    // a new read swaps the first two rows
-    r.rerender(<Rows pairs={['2', '1', '3', '4']} token={1} animate={animate} />);
-    expect(animate).toHaveBeenCalledTimes(2);
-    expect(animate.mock.calls.map(([el]) => (el instanceof HTMLElement ? el.dataset.pair : null))).toEqual([
-      '2',
-      '1',
-    ]);
-    expect(animate.mock.calls.map(([, frames]) => frames[0]?.transform)).toEqual([
-      'translateY(40px)',
-      'translateY(-40px)',
-    ]);
-    // the next commit without a new read measures nothing again
-    rect.mockClear();
-    r.rerender(<Rows pairs={['2', '1', '3', '4']} token={1} animate={animate} />);
-    expect(rect).not.toHaveBeenCalled();
+    r.rerender(<Rows pairs={['AB', 'CD', 'EF', 'GH']} token={0} animate={animate} />);
+    // why: nothing is even scheduled for a commit without a new read, so there is nothing to wait for
+    expect(animate).not.toHaveBeenCalled();
+    // a new read swaps the first two rows: positions 0 and 1 change, each in both of its cells
+    r.rerender(<Rows pairs={['CD', 'AB', 'EF', 'GH']} token={1} animate={animate} />);
+    // the words are current at once: each group already holds its new text before any motion
+    const groups = [...r.container.querySelectorAll<HTMLElement>('[data-slot]')].map((g) => g.dataset.flaps);
+    expect(groups).toEqual(['CD', 'AB', 'EF', 'GH']);
+    await waitFor(() => expect(animate).toHaveBeenCalledTimes(4));
+    expect(new Set(rows)).toEqual(new Set(['CD', 'AB']));
+    for (const [, frames, options] of animate.mock.calls) {
+      expect(frames).toHaveLength(2);
+      expect(Number(options.duration)).toBeLessThanOrEqual(STEP_MS);
+    }
+  });
+
+  it('flips nothing under prefers-reduced-motion: one update, no cascade', () => {
+    const { animate } = spy();
+    const r = render(<Rows pairs={['AB', 'CD']} token={0} animate={animate} reduced />);
+    r.rerender(<Rows pairs={['CD', 'AB']} token={1} animate={animate} reduced />);
+    // why: under reduced motion the hook schedules no cascade at all, so nothing can start later
+    expect(animate).not.toHaveBeenCalled();
+    expect([...r.container.querySelectorAll<HTMLElement>('[data-slot]')].map((g) => g.dataset.flaps)).toEqual(
+      ['CD', 'AB'],
+    );
   });
 });

@@ -6,21 +6,22 @@ import { contrast } from '../contrast.js';
 import { provCalendar, provSearch } from '../fixtures.js';
 import { renderWithProviders } from '../render.js';
 
-// Review ui C1: PriceCell sits inside a day button whose band sets the inherited text colour (white on the two darkest
-// bands). Every badge must name its own text colour on its own fill, and the dashed calendar outline must take the
-// band's text colour (border-current), which holds the band's own 4.5:1 against its fill.
-const BADGE_FILLS: Readonly<Record<string, string>> = {
-  'bg-slate-200': '#e2e8f0',
-  'bg-slate-100': '#f1f5f9',
-  'bg-amber-200': '#fde68a',
-  'bg-red-50': '#fef2f2',
+// Review ui C1: PriceCell can sit on a lamp whose band sets the inherited text colour. Every badge is a state tag, a
+// black flap chip that names its own ink (white, amber, red or dim), so it never inherits the band's colour; the dashed
+// calendar outline takes the band's text colour (border-current), which holds the band's own 4.5:1 against its fill.
+/** A tag's ink by its class (styles/world.css): the board's white, amber, dim red and dim grey, on the tag's black. */
+const TAG_INKS: Readonly<Record<string, string>> = {
+  'tag-warn': '#ffb22e',
+  'tag-bad': '#ff6b5f',
+  'tag-dim': '#9ca1a5',
 };
-const BADGE_TEXT = '#0f172a'; // text-slate-900 and text-red-900 are at least this dark; slate-900 is the lightest used
+const TAG_FILL = '#0b0c0d';
+const TAG_WHITE = '#f1f1ec';
 const bands: Band[] = [0, 1, 2, 3, 4];
 
 describe.each(bands)('PriceCell inside band %i (review ui C1)', (band) => {
   for (const form of ['compact', 'face'] as const) {
-    it(`${form}: every badge has its own text colour at 4.5:1 and the outline follows the band's text`, () => {
+    it(`${form}: every badge is a tag with its own ink at 4.5:1 and the outline follows the band's text`, () => {
       const { getByTestId, container } = renderWithProviders(
         <div className={BAND_CLASSES[band]}>
           <PriceCell
@@ -39,9 +40,7 @@ describe.each(bands)('PriceCell inside band %i (review ui C1)', (band) => {
       const { fill, text } = BAND_COLOURS[band];
       // why: the face's spans inherit the band's text colour, so this is the contrast of the face's own text (spec: 4.5:1)
       expect(contrast(fill, text)).toBeGreaterThanOrEqual(4.5);
-      const badges = [...container.querySelectorAll('span')].filter((e) =>
-        Object.keys(BADGE_FILLS).some((f) => e.classList.contains(f)),
-      );
+      const badges = [...container.querySelectorAll('span')].filter((e) => e.classList.contains('tag'));
       if (form === 'compact') expect(badges.length).toBeGreaterThanOrEqual(3);
       else {
         // why: the face renders no badge, so the loop below would run zero times; a future badge on it must be covered
@@ -51,20 +50,23 @@ describe.each(bands)('PriceCell inside band %i (review ui C1)', (band) => {
           expect(e.className, e.textContent ?? '').not.toMatch(/\btext-(white|slate-(50|100|200|300))\b/);
       }
       for (const b of badges) {
-        expect(b.className, b.textContent ?? '').toMatch(/text-(slate|red)-900/);
-        const f = Object.keys(BADGE_FILLS).find((k) => b.classList.contains(k));
-        expect(contrast(BADGE_FILLS[f ?? ''] ?? '#000000', BADGE_TEXT)).toBeGreaterThanOrEqual(4.5);
+        const ink = Object.keys(TAG_INKS).find((k) => b.classList.contains(k));
+        expect(
+          contrast(TAG_FILL, ink === undefined ? TAG_WHITE : (TAG_INKS[ink] ?? TAG_WHITE)),
+        ).toBeGreaterThanOrEqual(4.5);
       }
     });
   }
-  it('the provider badge of the compact form names its text colour too', () => {
+  it('the provider mark of the compact form is an outlined chip in the band’s own text colour', () => {
     const { container } = renderWithProviders(
       <div className={BAND_CLASSES[band]}>
         <PriceCell compact pricePence={41200} provenance={provSearch} calendar={false} stale={false} />
       </div>,
     );
-    const badge = [...container.querySelectorAll('span')].find((e) => e.classList.contains('bg-slate-200'));
-    expect(badge?.className).toContain('text-slate-900');
+    const chip = [...container.querySelectorAll('span')].find((e) => e.classList.contains('chip'));
+    expect(chip).toBeDefined();
+    // why: no colour of its own, so it inherits the band's text, which holds 4.5:1 on the band's fill
+    expect(chip?.className).not.toMatch(/\btext-/);
   });
 });
 

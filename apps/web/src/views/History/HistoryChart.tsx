@@ -39,6 +39,13 @@ const DASH: Readonly<Record<PlotLine['kind'], string | null>> = {
 
 const fetchValue = (p: PlotPoint) => p.pricePence;
 
+// The chart's furniture in the plate's inks (world.css): rules in the enamel's edge, axes in steel, ticks in ink-2
+// (11:1 on enamel). SVG attributes, never inline styles (spec §4's CSP).
+const GRID = '#c3c8c6';
+const AXIS = '#50565a';
+const INK_2 = '#2c3236';
+const TICK = { fill: INK_2, fontSize: 12 } as const;
+
 /** True for a plotted fetch point whose price is stale (decision 54's flag from the api). */
 function isStalePoint(payload: unknown): boolean {
   return typeof payload === 'object' && payload !== null && 'stale' in payload && payload.stale === true;
@@ -81,19 +88,19 @@ const routeValue = (p: RoutePlotPoint) => p.pricePence;
 export function HistoryChart({ lines, tablesId }: { lines: readonly PlotLine[]; tablesId: string }) {
   const captionId = useId();
   return (
-    <figure aria-labelledby={captionId} aria-describedby={tablesId} className="flex flex-col gap-1">
-      <figcaption id={captionId} className="font-medium">
+    <figure aria-labelledby={captionId} aria-describedby={tablesId} className="plate plate-pad history-chart">
+      <figcaption id={captionId} className="h-section">
         {H.fetchChartTitle}
       </figcaption>
-      <p className="text-xs">{H.connectorNote}</p>
+      <p className="hint">{H.connectorNote}</p>
       {coloursRepeat(lines) ? (
-        <p className="text-xs">{H.coloursRepeat(lines.length, SERIES_COLOURS.length)}</p>
+        <p className="hint">{H.coloursRepeat(lines.length, SERIES_COLOURS.length)}</p>
       ) : null}
       <section aria-label={H.chartScroll(H.fetchChartTitle)} className="overflow-x-auto">
         <div className="h-80 min-w-[36rem]">
           <ResponsiveContainer width="100%" height="100%">
             <LineChart margin={{ top: 8, right: 16, bottom: 28, left: 24 }}>
-              <CartesianGrid strokeDasharray="3 3" />
+              <CartesianGrid strokeDasharray="3 3" stroke={GRID} />
               <XAxis
                 dataKey="t"
                 type="number"
@@ -101,11 +108,15 @@ export function HistoryChart({ lines, tablesId }: { lines: readonly PlotLine[]; 
                 domain={['dataMin', 'dataMax']}
                 allowDuplicatedCategory={false}
                 tickFormatter={(v: number) => formatInstantDateLondon(v)}
-                label={{ value: H.xAxisFetched, position: 'insideBottom', offset: -16 }}
+                stroke={AXIS}
+                tick={TICK}
+                label={{ value: H.xAxisFetched, position: 'insideBottom', offset: -16, fill: INK_2 }}
               />
               <YAxis
                 tickFormatter={(v: number) => formatAxisPounds(v)}
-                label={{ value: H.yAxis, angle: -90, position: 'insideLeft' }}
+                stroke={AXIS}
+                tick={TICK}
+                label={{ value: H.yAxis, angle: -90, position: 'insideLeft', fill: INK_2 }}
               />
               <Legend verticalAlign="top" />
               {lines.map((l) => {
@@ -141,16 +152,16 @@ export function HistoryChart({ lines, tablesId }: { lines: readonly PlotLine[]; 
 export function RouteChart({ lines, tablesId }: { lines: readonly RouteLine[]; tablesId: string }) {
   const captionId = useId();
   return (
-    <figure aria-labelledby={captionId} aria-describedby={tablesId} className="flex flex-col gap-1">
-      <figcaption id={captionId} className="font-medium">
+    <figure aria-labelledby={captionId} aria-describedby={tablesId} className="plate plate-pad history-chart">
+      <figcaption id={captionId} className="h-section">
         {H.routeChartTitle}
       </figcaption>
-      <p className="text-xs">{H.routeChartNote}</p>
+      <p className="hint">{H.routeChartNote}</p>
       <section aria-label={H.chartScroll(H.routeChartTitle)} className="overflow-x-auto">
         <div className="h-64 min-w-[36rem]">
           <ResponsiveContainer width="100%" height="100%">
             <LineChart margin={{ top: 8, right: 16, bottom: 28, left: 24 }}>
-              <CartesianGrid strokeDasharray="3 3" />
+              <CartesianGrid strokeDasharray="3 3" stroke={GRID} />
               <XAxis
                 dataKey="t"
                 type="number"
@@ -158,11 +169,15 @@ export function RouteChart({ lines, tablesId }: { lines: readonly RouteLine[]; t
                 domain={['dataMin', 'dataMax']}
                 allowDuplicatedCategory={false}
                 tickFormatter={(v: number) => formatIsoDate(dateOfMs(v))}
-                label={{ value: H.xAxisTravelDate, position: 'insideBottom', offset: -16 }}
+                stroke={AXIS}
+                tick={TICK}
+                label={{ value: H.xAxisTravelDate, position: 'insideBottom', offset: -16, fill: INK_2 }}
               />
               <YAxis
                 tickFormatter={(v: number) => formatAxisPounds(v)}
-                label={{ value: H.yAxis, angle: -90, position: 'insideLeft' }}
+                stroke={AXIS}
+                tick={TICK}
+                label={{ value: H.yAxis, angle: -90, position: 'insideLeft', fill: INK_2 }}
               />
               <Legend verticalAlign="top" />
               {lines.map((l) => (
@@ -212,8 +227,8 @@ export function HistoryTable(props: {
   const points = line.points.filter((p): p is Priced => p.kind === 'price').reverse();
   return (
     <section aria-label={H.tableScroll(line.name)} className="max-h-64 overflow-auto">
-      <table className="w-full text-xs">
-        <caption className="text-left font-medium">{H.tableCaption(line.name)}</caption>
+      <table className="data-table w-full text-sm">
+        <caption className="h-sub pb-2 text-left">{H.tableCaption(line.name)}</caption>
         <thead>
           <tr>
             <th scope="col">{H.whenColumn}</th>

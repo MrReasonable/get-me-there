@@ -69,6 +69,8 @@ export const COPY = {
   navLabel: 'Views',
   // WP19 Task 19.7 (spec §11 layout): the nav's two tiers
   navTier: { decide: 'Decide', setup: 'Set up' },
+  /** The phone's one nav row opens the full nav and the search selector (departure board, Ian 2026-10-27). */
+  navMenu: 'All views',
   nav: {
     dates: 'Dates',
     // why: the date pair detail is not in the nav (spec §11); the word names the view in the Record every ViewId keys
@@ -618,6 +620,8 @@ export const COPY = {
     journeyLimit: 'Max journey time (minutes)',
     journeyBounds: (min: number, max: number) => `between ${min} and ${max} minutes`,
     weekSwitch: 'Best per departure week',
+    /** The week switch's own flaps (decorative; the checkbox's state is the accessible one). */
+    switchFlap: { on: 'On', off: 'Off' },
     loadingFiltered: 'Loading dates for these filters',
     // board
     boardCaption: 'Best dates',
@@ -742,7 +746,7 @@ export const COPY = {
     legend: {
       title: 'Legend',
       scaleQuintile: (n: number) =>
-        `Shade: ${n} current ${noun(n, 'price', 'prices')} in view, in five bands by rank, darkest cheapest`,
+        `Shade: ${n} current ${noun(n, 'price', 'prices')} in view, in five bands by rank, brightest cheapest`,
       scaleFlatFew: (n: number, min: number) =>
         `One shade for ${n} current ${noun(n, 'price', 'prices')}: fewer than ${min} are too few for price bands`,
       scaleFlatNarrow: (n: number, min: string, max: string) =>

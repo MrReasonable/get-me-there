@@ -18,12 +18,7 @@ export function BookingAction({ booking, providerId }: { booking: Booking; provi
   if (href === null) return <span>{COPY.noLink}</span>;
   if (booking.kind === 'get') {
     return (
-      <a
-        href={href}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="inline-flex min-h-11 items-center underline"
-      >
+      <a href={href} target="_blank" rel="noopener noreferrer" className="link">
         {COPY.openOn(booking.host)}
       </a>
     );
@@ -34,7 +29,7 @@ export function BookingAction({ booking, providerId }: { booking: Booking; provi
       {fields.map(([name, value], i) => (
         <input key={`${name}-${i}`} type="hidden" name={name} value={value} />
       ))}
-      <button type="submit" className="min-h-11 rounded border border-slate-500 px-3 underline">
+      <button type="submit" className="btn btn-sm min-h-11">
         {COPY.continueOnForm(booking.host)}
       </button>
     </form>
@@ -56,12 +51,7 @@ export function SearchLink({
   if (link === null || href === null) return <span>{COPY.noSearchLink}</span>;
   return (
     <span className="flex flex-wrap items-center gap-1">
-      <a
-        href={href}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="inline-flex min-h-11 items-center underline"
-      >
+      <a href={href} target="_blank" rel="noopener noreferrer" className="link">
         {link.label}
       </a>
       <span>{COPY.hostShown(link.host)}</span>

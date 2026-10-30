@@ -257,61 +257,59 @@ export function Overview({ definition, data, model, state, ringed, lit, onLight 
   const openMonth = open === null ? null : open.month;
   const openBand = open === null ? null : bands.find((b) => b.from === open.from);
   return (
-    <section aria-labelledby={`${readoutId}-h`} className="space-y-2">
-      <h3 id={`${readoutId}-h`} className="text-lg font-semibold">
+    <section aria-labelledby={`${readoutId}-h`} className="space-y-3">
+      <h3 id={`${readoutId}-h`} className="h-section">
         {O.heading}
       </h3>
-      <div className="flex flex-col gap-2 lg:flex-row lg:items-start">
-        <Legend scale={scale} counts={counts} />
-        <Readout
-          id={readoutId}
-          cell={activeCell}
-          airportPairs={data.scope.airportPairs}
-          journeyLimit={state.journey}
-          notes={definition.destinationNotes}
-        />
-      </div>
-      {openMonth !== null && openBand !== undefined && openBand !== null ? (
-        <button
-          type="button"
-          className="min-h-11 rounded border border-slate-500 px-3"
-          onClick={() => setOpen(null)}
-        >
-          {O.closeBand(O.stay(openBand.from, openBand.to), formatIsoMonth(openMonth))}
-        </button>
-      ) : null}
-      {phone ? (
-        <nav aria-label={O.monthsLabel} className="flex items-center justify-between gap-2">
-          <button
-            type="button"
-            className="min-h-11 rounded border border-slate-500 px-3 disabled:opacity-50"
-            disabled={monthIndex === 0}
-            onClick={() => turn(-1)}
-          >
-            {O.previousMonth}
-          </button>
-          <button
-            type="button"
-            className="min-h-11 rounded border border-slate-500 px-3 disabled:opacity-50"
-            disabled={monthIndex >= months.length - 1}
-            onClick={() => turn(1)}
-          >
-            {O.nextMonth}
-          </button>
-        </nav>
-      ) : null}
-      <div ref={root} className="flex flex-col gap-4" data-testid="dates-overview">
-        {shownMonths.map((m) => (
-          <OverviewMonth
-            key={m}
-            month={m}
-            days={grid.byMonth.get(m) ?? EMPTY}
-            tabStop={tabStop?.startsWith(m) ? tabStop : null}
-            lit={litCell?.startsWith(m) ? litCell : null}
-            readoutId={readoutId}
-            phone={phone}
+      <div className="frame space-y-4">
+        <div className="ov-key grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(18rem,26rem)] lg:items-start">
+          <Legend scale={scale} counts={counts} />
+          <Readout
+            id={readoutId}
+            cell={activeCell}
+            airportPairs={data.scope.airportPairs}
+            journeyLimit={state.journey}
+            notes={definition.destinationNotes}
           />
-        ))}
+        </div>
+        {openMonth !== null && openBand !== undefined && openBand !== null ? (
+          <button type="button" className="btn btn-quiet min-h-11" onClick={() => setOpen(null)}>
+            {O.closeBand(O.stay(openBand.from, openBand.to), formatIsoMonth(openMonth))}
+          </button>
+        ) : null}
+        {phone ? (
+          <nav aria-label={O.monthsLabel} className="flex items-center justify-between gap-2">
+            <button
+              type="button"
+              className="btn btn-quiet min-h-11"
+              disabled={monthIndex === 0}
+              onClick={() => turn(-1)}
+            >
+              {O.previousMonth}
+            </button>
+            <button
+              type="button"
+              className="btn btn-quiet min-h-11"
+              disabled={monthIndex >= months.length - 1}
+              onClick={() => turn(1)}
+            >
+              {O.nextMonth}
+            </button>
+          </nav>
+        ) : null}
+        <div ref={root} className="ov-months" data-testid="dates-overview">
+          {shownMonths.map((m) => (
+            <OverviewMonth
+              key={m}
+              month={m}
+              days={grid.byMonth.get(m) ?? EMPTY}
+              tabStop={tabStop?.startsWith(m) ? tabStop : null}
+              lit={litCell?.startsWith(m) ? litCell : null}
+              readoutId={readoutId}
+              phone={phone}
+            />
+          ))}
+        </div>
       </div>
     </section>
   );

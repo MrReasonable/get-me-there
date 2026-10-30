@@ -23,5 +23,11 @@ export default defineConfig({
     // why: no changeOrigin, so the api sees Host localhost:5173, which spec §4 allowlists in development.
     proxy: { '/api': { target: API_ORIGIN } },
   },
-  build: { outDir: 'dist', emptyOutDir: true },
+  build: {
+    outDir: 'dist',
+    emptyOutDir: true,
+    // why: spec §4's CSP (default-src 'self') refuses data: URLs, so a small font subset must ship as its own file,
+    // never inlined; everything else keeps Vite's default
+    assetsInlineLimit: (file) => (/\.woff2?$/.test(file) ? false : undefined),
+  },
 });

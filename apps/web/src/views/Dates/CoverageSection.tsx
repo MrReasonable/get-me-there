@@ -38,60 +38,47 @@ const reasonText = (r: 'not_run' | 'skipped:budget') =>
 function OnDemand({ rows }: { rows: CoverageResponse['onDemand'] }) {
   return (
     <div className="text-sm">
-      <h3 className="font-semibold">{COPY.coverageOnDemandHeading}</h3>
+      <h3 className="h-sub mb-1">{COPY.coverageOnDemandHeading}</h3>
       {rows.length === 0 ? (
         <p>{COPY.coverageOnDemandNone}</p>
       ) : (
         <section aria-label={COPY.coverageOnDemandScroll} className="overflow-x-auto">
-          <table aria-label={COPY.coverageOnDemandHeading} className="border-collapse">
+          <table aria-label={COPY.coverageOnDemandHeading} className="data-table">
             <thead>
               <tr>
-                <th scope="col" className="p-1 text-left">
-                  {COPY.coverageOnDemandCell}
-                </th>
-                <th scope="col" className="p-1 text-left">
-                  {COPY.coverageOnDemandRun}
-                </th>
-                <th scope="col" className="p-1 text-left">
-                  {COPY.coverageStage}
-                </th>
-                <th scope="col" className="p-1 text-left">
-                  {COPY.coverageProvider}
-                </th>
+                <th scope="col">{COPY.coverageOnDemandCell}</th>
+                <th scope="col">{COPY.coverageOnDemandRun}</th>
+                <th scope="col">{COPY.coverageStage}</th>
+                <th scope="col">{COPY.coverageProvider}</th>
                 {BUCKETS.map((b) => (
-                  <th key={b} scope="col" className="p-1 text-right">
+                  <th key={b} scope="col" className="text-right">
                     {COPY.bucket[b]}
                   </th>
                 ))}
-                <th scope="col" className="p-1 text-left">
-                  {COPY.requestsHeading}
-                </th>
+                <th scope="col">{COPY.requestsHeading}</th>
               </tr>
             </thead>
             <tbody>
               {rows.flatMap((r) =>
                 r.perStage.map((s) => (
-                  <tr
-                    key={`${r.executionId}-${s.stage}-${s.providerId}`}
-                    className="border-t border-slate-200"
-                  >
-                    <th scope="row" className="p-1 text-left font-normal">
+                  <tr key={`${r.executionId}-${s.stage}-${s.providerId}`}>
+                    <th scope="row" className="font-normal">
                       {cellText(r.cell)}
                     </th>
-                    <td className="p-1">
+                    <td>
                       {COPY.coverageOnDemandRunText(
                         COPY.statusName[r.status],
                         r.startedAt === null ? COPY.none : formatRunInstant(r.startedAt),
                       )}
                     </td>
-                    <td className="p-1">{COPY.stageName[s.stage]}</td>
-                    <td className="p-1">{COPY.provider[s.providerId]}</td>
+                    <td>{COPY.stageName[s.stage]}</td>
+                    <td>{COPY.provider[s.providerId]}</td>
                     {BUCKETS.map((b) => (
-                      <td key={b} className="p-1 text-right tabular-nums">
+                      <td key={b} className="text-right tabular-nums">
                         {s.buckets[b]}
                       </td>
                     ))}
-                    <td className="p-1" data-cost="">
+                    <td data-cost="">
                       {COPY.coverageOnDemandCalls(
                         s.requests.calls,
                         s.requests.cacheHits,
@@ -158,32 +145,26 @@ export function CoverageBody({ definition }: { definition: DefinitionResponse })
       ) : (
         // why: a labelled region without tabIndex (decision 46); browsers make a scrollable overflow box keyboard-focusable themselves.
         <section aria-label={COPY.coverageScroll} className="overflow-x-auto">
-          <table aria-label={COPY.coverageHeading} className="border-collapse text-sm">
+          <table aria-label={COPY.coverageHeading} className="data-table">
             <thead>
               <tr>
-                <th scope="col" className="p-1 text-left">
-                  {COPY.coverageStage}
-                </th>
-                <th scope="col" className="p-1 text-left">
-                  {COPY.coverageProvider}
-                </th>
+                <th scope="col">{COPY.coverageStage}</th>
+                <th scope="col">{COPY.coverageProvider}</th>
                 {BUCKETS.map((b) => (
-                  <th key={b} scope="col" className="p-1 text-right">
+                  <th key={b} scope="col" className="text-right">
                     {COPY.bucket[b]}
                   </th>
                 ))}
-                <th scope="col" className="p-1 text-right">
+                <th scope="col" className="text-right">
                   {COPY.coverageCells}
                 </th>
-                <th scope="col" className="border-l border-slate-400 p-1 text-right">
+                <th scope="col" className="border-l border-line-strong text-right">
                   {COPY.coverageSearched}
                 </th>
-                <th scope="col" className="p-1 text-right">
+                <th scope="col" className="text-right">
                   {COPY.coverageWithPrice}
                 </th>
-                <th scope="col" className="p-1 text-left">
-                  {COPY.requestsHeading}
-                </th>
+                <th scope="col">{COPY.requestsHeading}</th>
               </tr>
             </thead>
             <tbody>
@@ -193,22 +174,22 @@ export function CoverageBody({ definition }: { definition: DefinitionResponse })
                 const searched = s.buckets.priced + s.buckets.empty + s.buckets.no_data;
                 const planned = s.requests.planCalls === null ? COPY.none : String(s.requests.planCalls);
                 return (
-                  <tr key={`${s.stage}-${s.providerId}`} className="border-t border-slate-200 align-top">
-                    <th scope="row" className="p-1 text-left font-normal">
+                  <tr key={`${s.stage}-${s.providerId}`}>
+                    <th scope="row" className="font-normal">
                       {COPY.stageName[s.stage]}
                     </th>
-                    <td className="p-1">{COPY.provider[s.providerId]}</td>
+                    <td>{COPY.provider[s.providerId]}</td>
                     {BUCKETS.map((b) => (
-                      <td key={b} className="p-1 text-right tabular-nums">
+                      <td key={b} className="text-right tabular-nums">
                         {s.buckets[b]}
                       </td>
                     ))}
-                    <td className="p-1 text-right tabular-nums">{s.total}</td>
-                    <td className="border-l border-slate-400 p-1 text-right tabular-nums">{searched}</td>
-                    <td className="p-1 text-right tabular-nums">
+                    <td className="text-right tabular-nums">{s.total}</td>
+                    <td className="border-l border-line-strong text-right tabular-nums">{searched}</td>
+                    <td className="text-right tabular-nums">
                       {COPY.withPriceValue(s.buckets.priced, s.total)}
                     </td>
-                    <td className="p-1" data-cost="">
+                    <td data-cost="">
                       {s.stage === 'discovery'
                         ? COPY.requestRowTiles(
                             s.requests.tiles,
@@ -233,7 +214,7 @@ export function CoverageBody({ definition }: { definition: DefinitionResponse })
                       ) : null}
                       {s.parityBreak ? <p className="font-semibold">{COPY.parityFlag}</p> : null}
                       {sum !== s.total ? (
-                        <p role="alert" className="font-semibold text-red-800">
+                        <p role="alert" className="bad-text">
                           {COPY.sumMismatch(sum, s.total)}
                         </p>
                       ) : null}
@@ -248,7 +229,7 @@ export function CoverageBody({ definition }: { definition: DefinitionResponse })
       {c.summary.reused > 0 ? <p className="text-sm">{COPY.reusedNote(c.summary.reused)}</p> : null}
       <OnDemand rows={c.onDemand} />
       <div className="text-sm">
-        <h3 className="font-semibold">{COPY.coverageLegend}</h3>
+        <h3 className="h-sub mb-1">{COPY.coverageLegend}</h3>
         <ul aria-label={COPY.coverageLegend}>
           {BUCKETS.map((b) => (
             <li key={b}>{COPY.bucketHelp[b]}</li>
@@ -258,7 +239,7 @@ export function CoverageBody({ definition }: { definition: DefinitionResponse })
         </ul>
       </div>
       <div>
-        <h3 className="font-semibold">{COPY.selectedNotReached}</h3>
+        <h3 className="h-sub mb-1">{COPY.selectedNotReached}</h3>
         {c.selectedNotReached.length === 0 ? (
           <p className="text-sm">{COPY.noneSelectedNotReached}</p>
         ) : (
@@ -273,7 +254,7 @@ export function CoverageBody({ definition }: { definition: DefinitionResponse })
       </div>
       {c.scheduledOnly.length > 0 ? (
         <div>
-          <h3 className="font-semibold">{COPY.scheduledOnlyHeading(LEFT_FOR_TEXT[c.browserLeftFor])}</h3>
+          <h3 className="h-sub mb-1">{COPY.scheduledOnlyHeading(LEFT_FOR_TEXT[c.browserLeftFor])}</h3>
           <ul aria-label={COPY.scheduledOnlyHeading(LEFT_FOR_TEXT[c.browserLeftFor])} className="text-sm">
             {c.scheduledOnly.map((g) => (
               <li key={`${g.stage}${g.providerId}${g.detail}`}>
@@ -289,7 +270,7 @@ export function CoverageBody({ definition }: { definition: DefinitionResponse })
         </div>
       ) : null}
       <div>
-        <h3 className="font-semibold">{COPY.errorsHeading}</h3>
+        <h3 className="h-sub mb-1">{COPY.errorsHeading}</h3>
         {c.errors.length === 0 ? (
           <p className="text-sm">{COPY.noErrors}</p>
         ) : (
@@ -307,13 +288,17 @@ export function CoverageBody({ definition }: { definition: DefinitionResponse })
         {retryable ? (
           <button
             type="button"
-            className="mt-1 min-h-11 rounded border border-slate-500 px-3"
+            className="btn mt-2 min-h-11"
             onClick={() => actions.resume.mutate(c.executionId)}
           >
             {COPY.retry}
           </button>
         ) : null}
-        {actions.resume.error ? <p role="alert">{COPY.actionFailed(actions.resume.error.message)}</p> : null}
+        {actions.resume.error ? (
+          <p role="alert" className="bad-text">
+            {COPY.actionFailed(actions.resume.error.message)}
+          </p>
+        ) : null}
       </div>
     </div>
   );
@@ -327,21 +312,23 @@ export function CoverageBody({ definition }: { definition: DefinitionResponse })
 export function CoverageSection({ definition, open }: { definition: DefinitionResponse; open: boolean }) {
   const id = useId();
   return (
-    <section aria-labelledby={`${id}-toggle`} className="space-y-2 border-t border-slate-300 pt-2">
+    <section aria-labelledby={`${id}-toggle`} className="plate coverage-plate">
       <h3>
         <button
           id={`${id}-toggle`}
           type="button"
           aria-expanded={open}
           aria-controls={`${id}-body`}
-          className="min-h-11 font-semibold underline"
+          className="coverage-toggle min-h-11"
           onClick={() => updateSearchParams(datesPatch({ coverageOpen: !open }), 'replace')}
         >
           {COPY.datesView.coverageToggle}
         </button>
       </h3>
-      <p className="text-sm">{COPY.datesView.coverageNotFiltered}</p>
-      <div id={`${id}-body`}>{open ? <CoverageBody definition={definition} /> : null}</div>
+      <p className="px-[18px] pb-3 text-sm text-fg-2">{COPY.datesView.coverageNotFiltered}</p>
+      <div id={`${id}-body`} className="coverage-body">
+        {open ? <CoverageBody definition={definition} /> : null}
+      </div>
     </section>
   );
 }

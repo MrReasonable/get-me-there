@@ -6,7 +6,7 @@ import { COPY } from '../copy.js';
  */
 export function SyntheticBanner() {
   return (
-    <div role="alert" className="bg-red-700 px-4 py-2 font-semibold text-white">
+    <div role="alert" className="alarm px-[var(--gutter)] py-2">
       {COPY.syntheticBanner}
     </div>
   );

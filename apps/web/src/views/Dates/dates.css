@@ -22,3 +22,220 @@
   content-visibility: auto;
   contain-intrinsic-size: auto 18rem;
 }
+
+/* =====================================================================================================================
+   The Dates view on the departure board
+   ===================================================================================================================== */
+@layer components {
+  /* The headline: the run in bold, the coverage line in the second ink */
+  .run-line {
+    font-size: 17px;
+    font-weight: 700;
+  }
+
+  /* Filters on steel: painted labels over white fields; airports as ticked codes in the flap face */
+  .dates-filters {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 10px 22px;
+  }
+  .filter-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .airport-pick {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0 12px;
+    min-width: 0;
+  }
+  .airport-pick > legend {
+    float: left;
+    width: 100%;
+    margin-bottom: 2px;
+  }
+  .airport-check {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font: 600 17px / 1 var(--font-flap);
+    letter-spacing: 0.08em;
+  }
+  .week-switch {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    cursor: pointer;
+  }
+  .switch-flap {
+    --cw: 14px;
+    --cg: 1px;
+    padding: 4px;
+  }
+  .week-switch:has(input:checked) .switch-flap {
+    box-shadow:
+      inset 0 0 0 1px #000,
+      0 0 0 2px var(--board);
+  }
+  .filters-fold {
+    border: 1px solid var(--steel-edge);
+    border-radius: var(--radius);
+    background: rgb(255 255 255 / 0.22);
+    padding: 0 12px;
+  }
+  .filters-fold[open] {
+    padding-bottom: 12px;
+  }
+
+  /* The board's columns */
+  .board-price .figure {
+    justify-content: flex-end;
+  }
+  .board-price {
+    text-align: right;
+    min-width: 9rem;
+  }
+  .board-price [data-testid="provenance"] {
+    justify-content: flex-end;
+    margin-top: 6px;
+    text-align: right;
+  }
+  .board-howfar {
+    min-width: 12rem;
+  }
+  .board-howfar .words {
+    margin-top: 2px;
+  }
+  .board-journey [data-testid="arrives"] {
+    margin-top: 4px;
+  }
+  .update-board {
+    color: var(--amber);
+    box-shadow:
+      0 0 0 1px var(--amber) inset,
+      0 1px 0 rgb(255 255 255 / 0.3);
+  }
+  .card-link {
+    display: inline-flex;
+    min-height: 44px;
+    align-items: center;
+  }
+  .card-flap-dates {
+    display: inline-flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  /* The overview: months of lamps on one board */
+  .ov-months {
+    display: grid;
+    gap: 22px;
+  }
+  .ov-table th {
+    color: var(--flap-ink-2);
+  }
+  .ov-table td {
+    padding: 2px 3px 6px;
+    border-top: 1px solid var(--board-line);
+  }
+  .lamp-strip {
+    gap: 2px;
+  }
+  .lamp {
+    min-width: 13px;
+    min-height: 13px;
+    aspect-ratio: 1;
+  }
+  .lamp-lit {
+    border-radius: 50%;
+    box-shadow: 0 0 6px rgb(255 241 204 / 0.25);
+  }
+  .ov-legend .legend-swatch.lamp-none {
+    border-radius: 2px;
+  }
+  .ov-readout {
+    padding: 8px 12px;
+    color: var(--flap-ink);
+    background: #111315;
+    border: 1px solid #34393d;
+    border-radius: 3px;
+  }
+
+  /* The coverage section: one enamel plate, its toggle a painted header */
+  .coverage-plate {
+    padding: 6px 0 0;
+  }
+  .coverage-toggle {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    padding: 8px 18px;
+    font: 700 19px / 1.1 var(--font-flap);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    text-align: left;
+    cursor: pointer;
+  }
+  .coverage-toggle::before {
+    content: "+";
+    flex: none;
+    display: inline-grid;
+    place-items: center;
+    width: 24px;
+    height: 24px;
+    color: var(--flap-ink);
+    background: var(--board);
+    border-radius: 2px;
+    font: 600 18px / 1 var(--font-flap);
+  }
+  .coverage-toggle[aria-expanded="true"]::before {
+    content: "−";
+  }
+  .coverage-body:not(:empty) {
+    padding: 0 18px 20px;
+  }
+}
+
+@media (max-width: 899px) {
+  .run-line {
+    font-size: 15px;
+  }
+  .dates-head > p {
+    font-size: 13.5px;
+    line-height: 1.4;
+  }
+  /* the gap's long lead folds away with its list; its tag and count stay on the summary */
+  .gap-fold:not([open]) .gap-lead {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .gap-fold:not([open]) > summary [data-testid='price-cell'] {
+    display: none;
+  }
+  .dates-filters {
+    gap: 10px 16px;
+  }
+  .lamp {
+    min-width: 24px;
+    min-height: 24px;
+    aspect-ratio: auto;
+  }
+  .lamp-lit {
+    border-radius: 3px;
+  }
+  .board-price {
+    min-width: 0;
+  }
+}
+
+@layer components {
+  .board .rank-head::after {
+    content: "#";
+  }
+}

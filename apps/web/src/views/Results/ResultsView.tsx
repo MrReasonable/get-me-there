@@ -39,6 +39,7 @@ import { Filters } from './Filters.js';
 import { cellsForDatePair } from './panel.js';
 import { ResultsHeader } from './ResultsHeader.js';
 import { BAND_HOURS, ResultsTable, rowId, SORT_LABEL } from './ResultsTable.js';
+import './results.css';
 
 /** Spec §6.5: travel-time band width for bandCheapest. */
 const SORT_VALUES = SORT_KEYS.flatMap((k) => [`${k}.asc`, `${k}.desc`]);
@@ -49,11 +50,13 @@ function SortSelect({ value, onChange }: { value: string; onChange: (v: string) 
   return (
     // why: at 375 px the longest option ("server ranking (class, then price)") must not widen the page, so the control
     // may shrink to its container.
-    <span className="flex min-w-0 max-w-full flex-col text-sm">
-      <label htmlFor="sort-select">{COPY.sortSelect}</label>
+    <span className="flex min-w-0 max-w-full flex-col gap-1 text-sm">
+      <label htmlFor="sort-select" className="field-label">
+        {COPY.sortSelect}
+      </label>
       <select
         id="sort-select"
-        className="min-h-11 w-full min-w-0 rounded border border-slate-400 px-1"
+        className="input min-h-11 w-full min-w-0"
         value={value}
         onChange={(e) => onChange(e.target.value)}
       >
@@ -192,7 +195,7 @@ export function ResultsView({ definition, datePair }: ResultsViewProps) {
   const headline = filtered[0] ?? data.cheapest;
   const selectedRow = parseSelectedRow(params);
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
       {synthetic ? <SyntheticBanner /> : null}
       <DetailHeader
         datePair={datePair}
@@ -206,7 +209,7 @@ export function ResultsView({ definition, datePair }: ResultsViewProps) {
       <ResultsHeader data={data} filteredFirst={filtered[0] ?? null} coveragePatch={DATES_COVERAGE} />
       <BasisSwitch basis={data.basis} reason={data.basisReason} />
       <Filters state={ui} rows={data.rows} calendarBasis={data.basis === 'calendar'} narrow={narrow} />
-      <div className="flex flex-wrap items-end gap-3 text-sm">
+      <div className="flex flex-wrap items-end gap-x-4 gap-y-2 text-sm text-fg-2">
         {narrow ? (
           <SortSelect value={ui.sort === null ? '' : `${ui.sort.key}.${ui.sort.dir}`} onChange={setSort} />
         ) : null}
@@ -217,11 +220,11 @@ export function ResultsView({ definition, datePair }: ResultsViewProps) {
         {activeFilterCount(f) > 0 ? <span>{COPY.showingRows(filtered.length, data.rows.length)}</span> : null}
         {staleHidden > 0 ? <span>{COPY.staleHidden(staleHidden)}</span> : null}
         {failedHidden > 0 ? (
-          <span className="flex items-center gap-1">
+          <span className="flex flex-wrap items-center gap-2">
             {COPY.failedHidden(failedHidden)}
             <button
               type="button"
-              className="min-h-11 rounded border border-slate-500 px-3"
+              className="btn btn-sm min-h-11"
               onClick={() =>
                 updateSearchParams(
                   resultsStatePatch({ ...ui, filters: withKey(f, 'verdictClass', [...CLASSES]) }),
@@ -238,8 +241,8 @@ export function ResultsView({ definition, datePair }: ResultsViewProps) {
       ) : null}
       {data.rows.length === 0 ? (
         // why: spec §11: a date pair without a row says so with its coverage line, never "no flights"
-        <div data-testid="detail-empty" className="space-y-1 rounded border border-slate-300 p-2">
-          <p className="font-semibold">{COPY.detailView.noRows}</p>
+        <div data-testid="detail-empty" className="plate plate-pad space-y-2">
+          <p className="h-sub">{COPY.detailView.noRows}</p>
           <p className="text-sm">
             {coverageLineText(
               data.coverage,
@@ -248,17 +251,17 @@ export function ResultsView({ definition, datePair }: ResultsViewProps) {
             )}
           </p>
           <p>
-            <a href={hrefWith(DATES_COVERAGE)} onClick={navigateTo(DATES_COVERAGE)} className="underline">
+            <a href={hrefWith(DATES_COVERAGE)} onClick={navigateTo(DATES_COVERAGE)} className="link">
               {COPY.detailView.coverageSection}
             </a>
           </p>
         </div>
       ) : rows.length === 0 ? (
-        <p className="flex items-center gap-2">
+        <p className="plate notice flex flex-wrap items-center gap-3">
           {COPY.noRowsAfterFilter}
           <button
             type="button"
-            className="min-h-11 rounded border border-slate-500 px-3"
+            className="btn btn-sm min-h-11"
             onClick={() => updateSearchParams(resultsStatePatch({ ...ui, filters: {} }))}
           >
             {COPY.clearFilters}
@@ -296,7 +299,7 @@ function Panels({
   marks: ReadonlyMap<string, GapMark>;
 }) {
   return (
-    <section aria-label={COPY.panel.regionLabel} className="space-y-3">
+    <section aria-label={COPY.panel.regionLabel} className="pair-plates">
       {cells.map((c) => {
         const k = cellKeyString(c);
         return (

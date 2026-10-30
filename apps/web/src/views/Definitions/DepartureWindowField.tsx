@@ -21,8 +21,7 @@ function datesOf(w: DraftWindow, now: IsoDateTime): { from: string; to: string }
 
 const startOf = (w: DraftWindow): number | null => (w.kind === 'relative' ? w.startOffsetDays : null);
 
-const dateInput =
-  'min-h-11 rounded-md border border-slate-400 bg-white px-3 text-base focus-visible:border-slate-900 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-slate-900 aria-invalid:border-red-700';
+const dateInput = 'input min-h-11';
 
 /**
  * "Departing between": two dates and quick choices. A quick choice ("Next 6 months") is the spec §11 relative window
@@ -67,7 +66,7 @@ export function DepartureWindowField({
   const toErrors = errorsFor('window.to');
   return (
     <fieldset className="flex flex-col gap-2">
-      <legend className="mb-1 text-base font-semibold text-slate-900">{PLAN_COPY.departing}</legend>
+      <legend className="def-group-title">{PLAN_COPY.departing}</legend>
       <fieldset aria-label={PLAN_COPY.presets} className="flex flex-wrap gap-1.5">
         {WINDOW_PRESET_MONTHS.map((m) => {
           const on = w.kind === 'relative' && w.lengthDays === presetDays(m);
@@ -77,11 +76,9 @@ export function DepartureWindowField({
               type="button"
               aria-pressed={on}
               onClick={() => choose(m)}
-              className={`min-h-11 rounded-full border px-3.5 text-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-900 ${
-                on
-                  ? 'border-slate-900 bg-slate-900 font-semibold text-white'
-                  : 'border-slate-400 bg-white text-slate-800 hover:border-slate-700'
-              }`}
+              // why: the chosen preset is an inverted flap tile, heavier, with a bar under it (definitions.css), so the
+              // choice never rests on colour; aria-pressed says it to a screen reader
+              className="seg min-h-11"
             >
               {PLAN_COPY.preset(m)}
             </button>
@@ -90,7 +87,7 @@ export function DepartureWindowField({
       </fieldset>
       <div className="flex flex-wrap items-start gap-3">
         <span className="flex flex-col gap-1">
-          <label htmlFor="w-from" className="text-sm font-medium text-slate-800">
+          <label htmlFor="w-from" className="field-label">
             {PLAN_COPY.earliest}
           </label>
           <input
@@ -105,7 +102,7 @@ export function DepartureWindowField({
           <FieldErrors id="w-from-errors" messages={fromErrors} />
         </span>
         <span className="flex flex-col gap-1">
-          <label htmlFor="w-to" className="text-sm font-medium text-slate-800">
+          <label htmlFor="w-to" className="field-label">
             {PLAN_COPY.latest}
           </label>
           <input
@@ -120,7 +117,7 @@ export function DepartureWindowField({
           <FieldErrors id="w-to-errors" messages={toErrors} />
         </span>
       </div>
-      <p id="w-mode" className="max-w-prose text-sm text-slate-700">
+      <p id="w-mode" className="hint max-w-prose">
         {w.kind === 'relative' ? PLAN_COPY.rolling(w.startOffsetDays, w.lengthDays) : PLAN_COPY.fixed}
       </p>
     </fieldset>

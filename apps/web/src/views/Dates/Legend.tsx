@@ -1,6 +1,6 @@
 import { COPY } from '../../copy.js';
 import { formatPence } from '../../format.js';
-import { MARK_CLASS } from './OverviewMonth.js';
+import { MARK_CLASS, RING_CLASS } from './OverviewMonth.js';
 import { MARK_ORDER, type Mark } from './overview.js';
 import { BAND_CLASSES, FLAT_CLASS, MIN_BANDED_DAYS, type QuintileScale } from './shade.js';
 
@@ -28,32 +28,36 @@ function scaleText(s: QuintileScale): string {
  */
 export function Legend({ scale, counts }: { scale: QuintileScale; counts: Readonly<Record<Mark, number>> }) {
   return (
-    <section aria-label={L.title} className="space-y-1 text-xs" data-testid="dates-legend">
-      <h4 className="font-semibold">{L.title}</h4>
+    <section
+      aria-label={L.title}
+      className="ov-legend space-y-2 text-[13px] text-fg-2"
+      data-testid="dates-legend"
+    >
+      <h4 className="label-caps">{L.title}</h4>
       <p data-scale="">{scaleText(scale)}</p>
       {scale.mode === 'quintile' ? (
-        <ul className="flex flex-wrap gap-2" data-scale="">
+        <ul className="flex flex-wrap gap-x-4 gap-y-1" data-scale="">
           {scale.legend.map((e) => (
             <li key={e.band} className="flex items-center gap-1">
-              <span aria-hidden="true" className={`inline-block h-4 w-4 rounded ${BAND_CLASSES[e.band]}`} />
+              <span aria-hidden="true" className={`legend-swatch ${BAND_CLASSES[e.band]}`} />
               {L.band(e.band, formatPence(e.minPence), formatPence(e.maxPence), e.count)}
             </li>
           ))}
         </ul>
       ) : scale.mode !== 'empty' ? (
         <p className="flex items-center gap-1">
-          <span aria-hidden="true" className={`inline-block h-4 w-4 rounded ${FLAT_CLASS}`} />
+          <span aria-hidden="true" className={`legend-swatch ${FLAT_CLASS}`} />
           {L.flat(scale.count)}
         </p>
       ) : null}
       <p>{L.offScale}</p>
-      <ul className="flex flex-wrap gap-x-3 gap-y-1" aria-label={L.title}>
+      <ul className="grid gap-x-4 gap-y-1 sm:grid-cols-2 xl:grid-cols-3" aria-label={L.title}>
         {MARK_ORDER.map((m) => (
           <li key={m} className="flex items-center gap-1" data-mark={m}>
             <span
               aria-hidden="true"
               data-testid="legend-glyph"
-              className={`inline-flex h-4 w-4 items-center justify-center rounded border border-slate-500 bg-white text-black ${MARK_CLASS[m]}`}
+              className={`legend-swatch lamp-none ${MARK_CLASS[m]}`}
             >
               {M.glyph[m]}
             </span>
@@ -61,7 +65,7 @@ export function Legend({ scale, counts }: { scale: QuintileScale; counts: Readon
           </li>
         ))}
         <li className="flex items-center gap-1">
-          <span aria-hidden="true" className="inline-block h-4 w-4 rounded border-2 border-black" />
+          <span aria-hidden="true" className={`legend-swatch lamp-lit bg-[#d9cfb4] ${RING_CLASS}`} />
           {L.ring}
         </li>
       </ul>
