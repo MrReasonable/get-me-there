@@ -5,18 +5,19 @@ import { BAND_CLASSES, BAND_COLOURS, type Band } from '../../src/views/Dates/sha
 import { contrast } from '../contrast.js';
 import { provCalendar, provSearch } from '../fixtures.js';
 import { renderWithProviders } from '../render.js';
+import { classToken } from '../world/tokens.js';
 
 // Review ui C1: PriceCell can sit on a lamp whose band sets the inherited text colour. Every badge is a state tag, a
 // black flap chip that names its own ink (white, amber, red or dim), so it never inherits the band's colour; the dashed
 // calendar outline takes the band's text colour (border-current), which holds the band's own 4.5:1 against its fill.
-/** A tag's ink by its class (styles/world.css): the board's white, amber, dim red and dim grey, on the tag's black. */
+/** A tag's ink by its class, and the tag's own fill, read from styles/world.css (never copied here). */
 const TAG_INKS: Readonly<Record<string, string>> = {
-  'tag-warn': '#ffb22e',
-  'tag-bad': '#ff6b5f',
-  'tag-dim': '#9ca1a5',
+  'tag-warn': classToken('.tag-warn', 'color'),
+  'tag-bad': classToken('.tag-bad', 'color'),
+  'tag-dim': classToken('.tag-dim', 'color'),
 };
-const TAG_FILL = '#0b0c0d';
-const TAG_WHITE = '#f1f1ec';
+const TAG_FILL = classToken('.tag', 'background');
+const TAG_WHITE = classToken('.tag', 'color');
 const bands: Band[] = [0, 1, 2, 3, 4];
 
 describe.each(bands)('PriceCell inside band %i (review ui C1)', (band) => {

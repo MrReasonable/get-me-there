@@ -6,7 +6,8 @@
     gap: 24px;
     align-items: start;
   }
-  @media (min-width: 900px) {
+  /* why: two columns only once the board's column fits its longest name (22 flap cells at the desk size, about 420px) */
+  @media (min-width: 1200px) {
     .status-layout {
       grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
     }

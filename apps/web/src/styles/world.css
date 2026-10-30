@@ -102,21 +102,6 @@
     overflow-x: hidden;
   }
 
-  /* One focus treatment for every surface: a white ring with a black gap, readable on steel, enamel and board. The
-     outline survives forced colours; the shadow is the gap. */
-  :focus-visible {
-    outline: 3px solid var(--focus-out);
-    outline-offset: 2px;
-    box-shadow:
-      0 0 0 2px var(--focus-in),
-      0 0 0 7px var(--focus-in);
-  }
-  :where(main):focus,
-  :where(main):focus-visible {
-    outline: none;
-    box-shadow: none;
-  }
-
   a {
     color: inherit;
     text-underline-offset: 3px;
@@ -626,6 +611,22 @@
   .input {
     border: 1px solid CanvasText;
   }
+}
+
+/* One focus treatment for every surface: a white ring with a black gap, readable on steel, enamel and board. The
+   outline survives forced colours; the shadow is the gap. Unlayered, so no component's or utility's own shadow (a
+   button's, a lamp's ring) can take the ring away from a focused control. */
+:focus-visible {
+  outline: 3px solid var(--focus-out);
+  outline-offset: 2px;
+  box-shadow:
+    0 0 0 2px var(--focus-in),
+    0 0 0 7px var(--focus-in);
+}
+main:focus,
+main:focus-visible {
+  outline: none;
+  box-shadow: none;
 }
 
 @media (prefers-reduced-motion: reduce) {

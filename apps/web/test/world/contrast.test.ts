@@ -1,18 +1,10 @@
-import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { contrast } from '../contrast.js';
+import { token } from './tokens.js';
 
 // The departure board's text pairs (styles/world.css): every token the world's text uses, read from the stylesheet
 // itself, against every ground it sits on, at WCAG AA (4.5:1 for text). Amber and the dim red are lamps on black: they
 // are never paired with enamel or steel, so a light-ground "failed" or "warn" uses its own dark ink.
-const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../../src/styles/world.css'), 'utf8');
-function token(name: string): string {
-  const m = new RegExp(`--${name}:\\s*(#[0-9a-f]{6})`, 'i').exec(css);
-  if (m?.[1] === undefined) throw new Error(`no --${name} in world.css`);
-  return m[1];
-}
 
 const LIGHT_GROUNDS = ['steel', 'enamel', 'enamel-lo', 'field', 'steel-hi'] as const;
 const DARK_GROUNDS = ['board', 'flap-top', 'flap-low', 'board-2', 'lamp-off'] as const;
