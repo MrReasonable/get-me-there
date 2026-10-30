@@ -4,6 +4,7 @@
 import { asIsoDate } from '@gmt/core';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  cellCandidates,
   cellsCalledFor,
   changeKeyOf,
   interpretView,
@@ -536,7 +537,7 @@ describe('cellsCalledFor and stillDrawing', () => {
 });
 
 describe('viewCounts', () => {
-  it('counts the candidates, the priced-looking ones, the lines and their labels, and the selected lines', () => {
+  it('counts the candidates, the priced-looking and selected ones, the lines and their labels, and the selected lines', () => {
     const r = raw({ depart: '2027-03-11', ret: '2027-03-21' });
     const names = [...r.candidates];
     names[0] = null;
@@ -544,6 +545,7 @@ describe('viewCounts', () => {
     expect(viewCounts({ ...r, candidates: names })).toEqual({
       candidates: 49,
       pricedLooking: 47,
+      selected: 1,
       lines: 2,
       labelsLine1: 7,
       labelsLine2: 7,
@@ -555,9 +557,37 @@ describe('viewCounts', () => {
       scrollButtons: 4,
     });
   });
+  it('counts every selected name, an unpriced one and a spaced one included, and none when nothing is selected', () => {
+    const r = raw({ depart: '2027-03-11', ret: '2027-03-21' });
+    const names = [...r.candidates];
+    names[0] = 'no flights, 11 Mar to 21 Mar, selected';
+    names[2] = '£450, 13 Mar to 21 Mar,\u00a0selected';
+    expect(viewCounts({ ...r, candidates: names }).selected).toBe(3);
+    const none = r.candidates.map((x) => x?.replace(', selected', '') ?? null);
+    expect(viewCounts({ ...r, candidates: none }).selected).toBe(0);
+  });
   it('counts a view with no lines as no labels', () => {
     const r = raw({ depart: '2027-03-11', ret: '2027-03-21' });
     expect(viewCounts({ ...r, lines: [] })).toMatchObject({ lines: 0, labelsLine1: 0, labelsLine2: 0 });
+  });
+});
+
+// why: spec §2 rev 54 (grid/2026-10-30/1): once the query's pair scrolls out of view the panel holds a button "Reset
+// back to centre"; read as a cell it made every such view one too many, and the live run of 2026-10-30 lost them all
+describe('cellCandidates', () => {
+  const G = SELECTORS.results.dateGrid;
+  it('drops the grid’s own controls by exact name and keeps every other button, a nameless one included', () => {
+    const cell = '£645, low price, 9 Feb to 26 Feb';
+    expect(
+      cellCandidates(
+        ['Scroll left', cell, 'Scroll right', 'Reset back to centre', null, 'Scroll up', 'Scroll down'],
+        G,
+      ),
+    ).toEqual([cell, null]);
+  });
+  it('a name that only contains a control’s name, or differs in case, is still a candidate (and is unparsed)', () => {
+    const names = ['Reset back to centre now', 'reset back to centre', 'Scroll Down'];
+    expect(cellCandidates(names, G)).toEqual(names);
   });
 });
 
@@ -576,6 +606,32 @@ describe('readRawView over the synthetic dialog', () => {
       SELECTORS,
     );
     expect(r.datesGrid.scrollButtons).toBe(0);
+  });
+  it('the reset control in the panel is not a candidate: a whole view names its 49 cells', async () => {
+    const page = new FakePage(null);
+    page.setTrees([
+      n('document', '', [
+        gridTree({
+          depart: '2027-03-11',
+          ret: '2027-03-28',
+          selected: ['2027-03-14', '2027-03-24'],
+          extra: [n('button', 'Reset back to centre')],
+        }),
+      ]),
+    ]);
+    page.url();
+    const dialog = page.getByRole('dialog', { name: 'Price insights', exact: true });
+    const r = await readRawView(
+      dialog,
+      dialog.getByRole('tabpanel').nth(0),
+      fakeTimers().deadline(10_000),
+      SELECTORS,
+    );
+    expect([
+      r.candidates.length,
+      r.candidates.includes('Reset back to centre'),
+      r.datesGrid.scrollButtons,
+    ]).toEqual([49, false, 4]);
   });
   it('an element whose text reads as null is read as no text, and matches nothing', async () => {
     const page = new FakePage(null);
