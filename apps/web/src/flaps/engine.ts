@@ -4,12 +4,17 @@
 // length: the old top falls, the old bottom waits, the new bottom lands, then the half-cells go. Under
 // `prefers-reduced-motion: reduce` nothing is laid over: the text changes in one update, with no cascade.
 
+/** What a flip reads of a running animation: when it has finished (an Animation has it). */
+export interface Running {
+  finished: Promise<unknown>;
+}
+
 /** The Web Animations call, injected so jsdom tests (no `animate`) can spy on it (WP19 §6). */
 export type Animate = (
   el: Element,
   keyframes: Keyframe[],
   options: KeyframeAnimationOptions,
-) => Animation | undefined;
+) => Running | undefined;
 
 /** The browser's own Web Animations API; a browser without it simply shows the new text. */
 export const browserAnimate: Animate = (el, keyframes, options) =>

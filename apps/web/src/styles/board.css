@@ -534,12 +534,13 @@
   .statusbar-row {
     display: flex;
     flex-wrap: wrap;
-    align-items: center;
+    align-items: flex-start;
     column-gap: 22px;
     margin-top: 4px;
   }
   .run-status {
-    flex: 1 1 auto;
+    flex: 1 1 0;
+    min-width: min(100%, 18rem);
     align-items: center;
     column-gap: 16px;
   }
@@ -597,5 +598,22 @@
   }
   .run-numbers {
     padding-left: 0;
+  }
+  .statusbar-row {
+    column-gap: 14px;
+    margin-top: 0;
+  }
+  /* One nav row: the current tier and view, and the menu */
+  .topbar nav {
+    flex-wrap: nowrap;
+  }
+  .topbar .nav-tier-name {
+    font-size: 12px;
+    letter-spacing: 0.06em;
+  }
+  .nav-menu-button {
+    flex: none;
+    padding: 2px 8px;
+    font-size: 14px;
   }
 }

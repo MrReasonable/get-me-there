@@ -38,7 +38,7 @@ export function AlertsView(props: { definitionId: string }) {
   const ruleText = new Map(list.map((r) => [r.id, describeRule(r)] as const));
 
   return (
-    <section aria-labelledby="alerts-heading" className="alerts grid grid-cols-[minmax(0,1fr)] gap-5 pt-5">
+    <section aria-labelledby="alerts-heading" className="alerts grid gap-5 pt-5">
       <div className="alerts-wide space-y-2">
         <h2 id="alerts-heading" className="h-view">
           {C.heading}

@@ -121,8 +121,14 @@ const LAMP: Readonly<Record<Check['state'], string>> = {
   off: 'hollow',
 };
 
-/** The longest name the board's flaps print; a longer one is cut there (the card below names it in full). */
-const BOARD_NAME_CELLS = 16;
+/** The longest name the board's flaps print; a longer one is cut at its last whole word (the card names it in full). */
+const BOARD_NAME_CELLS = 22;
+function boardName(name: string): string {
+  if (name.length <= BOARD_NAME_CELLS) return name;
+  const cut = name.slice(0, BOARD_NAME_CELLS + 1);
+  const space = cut.lastIndexOf(' ');
+  return (space > 0 ? cut.slice(0, space) : cut.slice(0, BOARD_NAME_CELLS)).trimEnd();
+}
 
 /**
  * The station information board: the shown checks, worst first, each a lamp, its area (or its search's or provider's
@@ -135,12 +141,13 @@ function StationBoard({ checks }: { checks: readonly Check[] }) {
   const rows = checks.map((c) => ({
     id: c.id,
     state: c.state,
-    name: (c.area === 'data'
-      ? (cardName(c) ?? COPY.statusView.areaName[c.area])
-      : c.area === 'provider'
-        ? `${COPY.statusView.areaName[c.area]} ${c.providerId === null ? '' : COPY.providerShort[c.providerId]}`
-        : COPY.statusView.areaName[c.area]
-    ).slice(0, BOARD_NAME_CELLS),
+    name: boardName(
+      c.area === 'data'
+        ? (cardName(c) ?? COPY.statusView.areaName[c.area])
+        : c.area === 'provider'
+          ? `${COPY.statusView.areaName[c.area]} ${c.providerId === null ? '' : COPY.providerShort[c.providerId]}`
+          : COPY.statusView.areaName[c.area],
+    ),
     word: COPY.statusView.state[c.state],
   }));
   const nameCells = Math.max(...rows.map((r) => r.name.length));

@@ -215,7 +215,8 @@
     -webkit-box-orient: vertical;
     overflow: hidden;
   }
-  .gap-fold:not([open]) > summary [data-testid='price-cell'] {
+  .gap-fold:not([open]) > summary [data-testid="price-cell"],
+  .gap-fold:not([open]) > summary .gap-ref {
     display: none;
   }
   .dates-filters {

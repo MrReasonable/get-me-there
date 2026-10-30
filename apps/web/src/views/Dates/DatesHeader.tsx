@@ -169,7 +169,7 @@ function DatesGap({
             ▲
           </span>
           <span className="gap-lead">{COPY.calendarGapLead(cells.length)}</span>
-          <span>{D.gapReference}</span>
+          <span className="gap-ref">{D.gapReference}</span>
           <PriceBoundary>
             <PriceCell
               pricePence={cv.pricePence}
