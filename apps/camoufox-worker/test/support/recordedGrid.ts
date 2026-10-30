@@ -54,7 +54,9 @@ export const recordedCells = (candidates: ReadonlyArray<string | null>): Array<s
 
 /** What a recording's views hold for the checks below. */
 interface RecordedViews {
+  recordedAt: string;
   osArch: string;
+  versions?: { binary: string } | undefined;
   views: ReadonlyArray<{
     lines: { texts: string[] };
     candidates: ReadonlyArray<string | null>;
@@ -66,18 +68,35 @@ interface RecordedViews {
 export const underDrawnSettle = (rec: RecordedViews): boolean =>
   rec.views.length > 0 && rec.views.every((v) => Object.hasOwn(v, 'drawn'));
 
+/** A view taken while still drawing, by the cells the reader counts (spec §2 rev 54), that its settle took as drawn. */
+const takenEarly = (v: RecordedViews['views'][number], anchor: IsoDate): boolean =>
+  v.drawn !== false && stillDrawing(v.lines.texts, recordedCells(v.candidates).length, anchor);
+
 /**
  * Whether a recording is one a later settle supersedes: it holds a view taken while still drawing that the settle of
- * its day took as drawn, and its entry has been recorded since. Before spec §2 rev 46 the settle took a view that held
- * still (darwin-x64's grid 3 and 4 of 2026-10-26, superseded by its grid 5 and 6); before rev 54 it counted "Reset back
- * to centre" as a cell, so a view one cell short looked whole (grid/2026-10-30/1's view 6). Such a recording is held to
- * the wait-or-refuse checks of gridRecorded.test.ts instead of the strict ones; an entry with no other recording under
- * the drawn settle is excused nothing, and a view the settle marked not drawn is never excused.
+ * its day took as drawn, and its entry has been recorded whole since. Before spec §2 rev 46 the settle took a view that
+ * held still (darwin-x64's grid 3 and 4 of 2026-10-26, superseded by its grid 5 and 6); before rev 54 it counted "Reset
+ * back to centre" as a cell, so a view one cell short looked whole (grid/2026-10-30/1's view 6). Such a recording is
+ * held to the wait-or-refuse checks of gridRecorded.test.ts instead of the strict ones. Only a later recording on the
+ * same entry and browser build excuses it, and only one whose every view the settle marked drawn and which is drawn
+ * whole by that count (CodeRabbit on PR #36); a view the settle marked not drawn is never excused.
  */
-export function superseded(rec: RecordedViews, all: readonly RecordedViews[], anchor: IsoDate): boolean {
+export function superseded<T extends RecordedViews>(
+  rec: T,
+  all: readonly T[],
+  anchorOf: (r: T) => IsoDate,
+): boolean {
+  const anchor = anchorOf(rec);
   return (
-    rec.views.some(
-      (v) => v.drawn !== false && stillDrawing(v.lines.texts, recordedCells(v.candidates).length, anchor),
-    ) && all.some((o) => o !== rec && o.osArch === rec.osArch && underDrawnSettle(o))
+    rec.views.some((v) => takenEarly(v, anchor)) &&
+    all.some(
+      (o) =>
+        o !== rec &&
+        o.recordedAt > rec.recordedAt &&
+        o.osArch === rec.osArch &&
+        o.versions?.binary === rec.versions?.binary &&
+        underDrawnSettle(o) &&
+        o.views.every((v) => v.drawn === true && !takenEarly(v, anchorOf(o))),
+    )
   );
 }

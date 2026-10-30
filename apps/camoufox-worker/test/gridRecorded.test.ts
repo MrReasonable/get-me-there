@@ -117,7 +117,7 @@ const recordings = () => {
       !superseded(
         rec,
         all.map((o) => o.rec),
-        anchorOf(rec),
+        anchorOf,
       ),
   );
 };
@@ -430,7 +430,7 @@ describe.skipIf(!present)(
           !superseded(
             rec,
             all.map((o) => o.rec),
-            anchorOf(rec),
+            anchorOf,
           ),
       );
     };

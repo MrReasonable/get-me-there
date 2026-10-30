@@ -387,7 +387,7 @@ describe('verification flags (TS-13; runs on every checkout)', () => {
         superseded(
           rec,
           recs.map((r) => r.rec),
-          anyAnchorOf(rec),
+          anyAnchorOf,
         );
       /**
        * The recordings of entries whose GRID_VERIFIED is set: the strict checks below hold on every one of them but a
