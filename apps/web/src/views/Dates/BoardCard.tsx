@@ -152,10 +152,23 @@ export function RankFlaps({ rank, state, digits }: { rank: number; state: RowSta
   );
 }
 
-/** The state glyph on one flap: ✓ verified, ○ calendar price, ◷ stale, – superseded (each also said in words). */
+/**
+ * The row's state on the board's flaps: its glyph, then its word (VERIFIED, NOT CHECKED, STALE, SUPERSEDED), in the
+ * state's own ink; how far checked says it in full beside them, so the flaps are decorative.
+ */
 export function StateFlap({ state }: { state: RowState }) {
   return (
-    <span aria-hidden="true" className="flaps howfar-flap">
+    <span aria-hidden="true" className="state-flaps howfar-flap">
+      <StateGlyph state={state} />
+      <Flaps text={D.stateFlap[state]} cells={11} slot="state" />
+    </span>
+  );
+}
+
+/** The state glyph on one flap: ✓ verified, ○ calendar price, ◷ stale, – superseded. */
+function StateGlyph({ state }: { state: RowState }) {
+  return (
+    <span className="flaps">
       <span className="f f-icon">
         <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
           {state === 'verified' ? <polyline points="5 12.5 10 17.5 19.5 6.5" /> : null}
@@ -237,12 +250,10 @@ export function BoardCard({
         <FigurePrice figure={f} notes={notes} face />
       </td>
       <td className="card-rest">
-        <span className="flex items-start gap-2">
-          <StateFlap state={state} />
-          <span>
-            {f.price.truncated ? `${COPY.truncatedNote} · ` : null}
-            {howFar.join(' · ')}
-          </span>
+        <StateFlap state={state} />
+        <span className="mt-1 block">
+          {f.price.truncated ? `${COPY.truncatedNote} · ` : null}
+          {howFar.join(' · ')}
         </span>
         <span className="mt-1 block">
           <Journey figure={f} filtered={journeyFiltered} />

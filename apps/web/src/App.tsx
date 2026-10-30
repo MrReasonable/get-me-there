@@ -93,8 +93,10 @@ export function App() {
         <div className="steel-strip topbar">
           <header className="flex flex-wrap items-center gap-x-6 gap-y-2">
             <h1 className="brand">
-              <span className="sr-only">{COPY.appTitle}</span>
-              <Flaps text={COPY.appTitle} />
+              {/* why: the name is the heading's words; on a phone, where flap cells would be too small to read, the
+              words are shown in painted caps and the cells hidden */}
+              <span className="brand-words">{COPY.appTitle}</span>
+              <Flaps text={COPY.appTitle} className="brand-flaps" />
             </h1>
             <Nav current={view} menu={phone ? selector : null} />
             {/* why: only a successful load can say there are no definitions; while loading or after a failure (shown

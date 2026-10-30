@@ -177,7 +177,10 @@ test('at 375px Dates shows stacked cards and one month of 24px cells, a tap show
   await cell.tap();
   await expect(page.locator(SMOKE.readout)).toContainText(/\d{1,2} [A-Z][a-z]{2} \d{4}/);
   expect(new URL(page.url()).searchParams.get('view')).toBe('dates');
+  // why: on a phone the filters fold to one line (the departure board, Ian 2026-10-27); opened, the form must fit
+  await page.locator('summary', { hasText: EXAMPLE.filtersLabel }).click();
   const form = page.getByRole('form', { name: EXAMPLE.filtersLabel });
+  await expect(form).toBeVisible();
   const box = await form.boundingBox();
   expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(375);
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);

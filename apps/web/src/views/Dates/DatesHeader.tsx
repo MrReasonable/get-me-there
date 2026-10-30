@@ -169,19 +169,22 @@ function DatesGap({
             ▲
           </span>
           <span className="gap-lead">{COPY.calendarGapLead(cells.length)}</span>
-          <span className="gap-ref">{D.gapReference}</span>
-          <PriceBoundary>
-            <PriceCell
-              pricePence={cv.pricePence}
-              provenance={cv.provenance}
-              calendar={false}
-              stale={cv.stale}
-              truncated={cv.truncated}
-              destination={cv.cell.destination}
-              destinationNote={definition.destinationNotes[cv.cell.destination] ?? null}
-              notSeenInLatestHours={cv.notSeenInLatest?.ageHours ?? null}
-            />
-          </PriceBoundary>
+          {/* why: the reference's label and its price stay together on one line */}
+          <span className="gap-ref inline-flex flex-wrap items-baseline gap-x-2">
+            <span>{D.gapReference}</span>
+            <PriceBoundary>
+              <PriceCell
+                pricePence={cv.pricePence}
+                provenance={cv.provenance}
+                calendar={false}
+                stale={cv.stale}
+                truncated={cv.truncated}
+                destination={cv.cell.destination}
+                destinationNote={definition.destinationNotes[cv.cell.destination] ?? null}
+                notSeenInLatestHours={cv.notSeenInLatest?.ageHours ?? null}
+              />
+            </PriceBoundary>
+          </span>
         </summary>
         <ul className="mt-2 space-y-1">
           {cells.map((c) => {

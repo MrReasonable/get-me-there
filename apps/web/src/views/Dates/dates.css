@@ -37,13 +37,24 @@
   .dates-filters {
     display: flex;
     flex-wrap: wrap;
-    align-items: flex-end;
-    gap: 10px 22px;
+    align-items: center;
+    gap: 6px 26px;
   }
+  /* One compact row on a desk: each label beside its field */
   .filter-field {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
+    display: grid;
+    grid-template-columns: auto auto;
+    align-items: center;
+    column-gap: 8px;
+  }
+  .filter-field > :nth-child(n + 3) {
+    grid-column: 2;
+  }
+  .dates-filters .input {
+    width: 4.5rem;
+  }
+  .dates-filters .filter-field:has([aria-describedby]) .input {
+    width: 5.5rem;
   }
   .airport-pick {
     display: flex;
@@ -54,8 +65,7 @@
   }
   .airport-pick > legend {
     float: left;
-    width: 100%;
-    margin-bottom: 2px;
+    margin-right: 4px;
   }
   .airport-check {
     display: inline-flex;
@@ -107,7 +117,7 @@
     min-width: 12rem;
   }
   .board-howfar .words {
-    margin-top: 2px;
+    margin-top: 6px;
   }
   .board-journey [data-testid="arrives"] {
     margin-top: 4px;

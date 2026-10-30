@@ -36,7 +36,7 @@
     --board-line: #2c3034;
     --board-edge: #5b6166;
     --flap-top: #282b2e;
-    --flap-bot: #202326;
+    --flap-low: #202326;
     --flap-ink: #f1f1ec; /* 12.6:1 on a flap, 17.3:1 on the board */
     --flap-ink-2: #b8bcbf; /* 7.4:1 on a flap, 10.2:1 on the board, 9.2:1 on a lit row */
     --amber: #ffb22e; /* 7.9:1 on a flap, 10.9:1 on the board */
@@ -134,7 +134,10 @@
 
   /* Amounts never wear the slashed zero (Ian, 2026-10-27): money is set in the flap face's tabular lining figures */
   [data-cost] {
-    font-variant-numeric: tabular-nums;
+    font-family: var(--font-flap);
+    font-weight: 500;
+    font-variant-numeric: tabular-nums lining-nums;
+    letter-spacing: 0.02em;
   }
 
   input,

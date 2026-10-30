@@ -7,7 +7,6 @@ import type { DefinitionResponse, ExecutionResponse, UsageRow } from '../api/typ
 import { COPY } from '../copy.js';
 import { formatIsoDate, formatMicroGbp, formatRunInstant } from '../format.js';
 import { useCheckedWords } from '../hooks/useCheckedWords.js';
-import { NARROW_QUERY, useMediaQuery } from '../hooks/useMediaQuery.js';
 import { BASIS_PARAM, DATES_COVERAGE, parseBasis } from '../state/resultsState.js';
 import { hrefWith, navigateTo, useSearchParams } from '../state/urlState.js';
 import { LoadError } from './LoadState.js';
@@ -223,7 +222,6 @@ function RunStatus({ definition, showRunNow, viewOwnsFirstRun = false }: StatusB
   const qc = useQueryClient();
   // why: the confirmation is bound to the run it was opened for; if the bar moves to another run, it must be asked again.
   const [confirmingCancelId, setConfirmingCancelId] = useState<string | null>(null);
-  const narrow = useMediaQuery(NARROW_QUERY);
   // why: a confirmation belongs to the run on display; once another run (or none) is shown it is abandoned, and coming
   // back to the first run must ask for Cancel again rather than revive it.
   const displayedId = execution.data?.id;
@@ -338,7 +336,8 @@ function RunStatus({ definition, showRunNow, viewOwnsFirstRun = false }: StatusB
       {e !== undefined ? (
         // why: on a phone a finished run's numbers fold into one line (spec §11 375px); Cancel, Resume and the status stay
         // visible above. An active or paused run keeps them open (ruling 15, UI-006): spend is never hidden while it grows.
-        <details open={!narrow || active} className="fold statusline-details">
+        // On a desk an idle run's numbers fold too (the departure board: the board starts in the first screen).
+        <details open={active} className="fold statusline-details">
           <summary className="min-h-11">{COPY.runDetails}</summary>
           <div className="run-numbers">
             {progressLines(e, results.data?.coverage.selected ?? null).map((l) => (

@@ -622,6 +622,8 @@ export const COPY = {
     weekSwitch: 'Best per departure week',
     /** The week switch's own flaps (decorative; the checkbox's state is the accessible one). */
     switchFlap: { on: 'On', off: 'Off' },
+    /** A board row's state on its flaps (decorative; how far checked says it in full beside them). */
+    stateFlap: { verified: 'verified', calendar: 'not checked', stale: 'stale', superseded: 'superseded' },
     loadingFiltered: 'Loading dates for these filters',
     // board
     boardCaption: 'Best dates',

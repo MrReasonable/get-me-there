@@ -116,6 +116,12 @@
     color: var(--flap-ink-2);
     border-bottom: 1px solid var(--board-line);
   }
+  /* a sort button takes its column name's painted caps (a button does not inherit them by default) */
+  .itins thead th button {
+    font: inherit;
+    letter-spacing: inherit;
+    text-transform: inherit;
+  }
   .itins thead th .btn-text {
     color: var(--flap-ink);
     text-decoration-color: #6b7176;

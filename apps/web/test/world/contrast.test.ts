@@ -15,7 +15,7 @@ function token(name: string): string {
 }
 
 const LIGHT_GROUNDS = ['steel', 'enamel', 'enamel-lo', 'field', 'steel-hi'] as const;
-const DARK_GROUNDS = ['board', 'flap-top', 'flap-bot', 'board-2', 'lamp-off'] as const;
+const DARK_GROUNDS = ['board', 'flap-top', 'flap-low', 'board-2', 'lamp-off'] as const;
 
 describe('the departure board’s text contrast (WCAG AA)', () => {
   it.each(['ink', 'ink-2', 'ink-bad', 'ink-warn'])('--%s reads at 4.5:1 on every light ground', (ink) => {

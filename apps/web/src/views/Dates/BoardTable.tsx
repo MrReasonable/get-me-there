@@ -341,10 +341,8 @@ function BoardRow({
         <CheaperCached figure={f} notes={notes} />
       </td>
       <td className="board-howfar">
-        <span className="flex items-start gap-2">
-          <StateFlap state={state} />
-          <span className="words mt-0">{howFar.join(' · ')}</span>
-        </span>
+        <StateFlap state={state} />
+        <span className="words">{howFar.join(' · ')}</span>
       </td>
       <td className="board-journey cell-right">
         <Journey figure={f} filtered={journeyFiltered} />
