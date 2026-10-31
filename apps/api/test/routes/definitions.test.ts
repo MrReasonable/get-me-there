@@ -263,6 +263,40 @@ describe('PUT / DELETE /api/definitions/:id and the schedule (spec §8.2)', () =
     });
   });
 
+  it("Repeat weekly's Save (confirmShown: true) stores the shown runnable totals the sent figures cover (rev 55 §7, §10; ruling A13)", async () => {
+    const x = await harness();
+    // a runnable 300p / 30-call line and a 200p / 10-call line a cap blocks today: the sentence shows 300p and 30 calls
+    vi.spyOn(x.engine, 'estimate').mockReturnValue({
+      ...estimateOf(3_000_000, 30, [line(2_000_000, 10, 'provider-month')]),
+    });
+    const created = await create(x, exampleDefinitionInput({ scheduleCron: null, enabled: false }));
+    const put = (json: unknown) =>
+      x
+        .request(`/api/definitions/${created.id}`, { method: 'PUT', json })
+        .then((r) => expectContract(r, 'PUT', '/api/definitions/:id', DEF));
+    const stored = () => {
+      const d = x.ports.repos.definitions.get(created.id);
+      return [d?.confirmedCostPence, d?.confirmedCalls];
+    };
+    // figures short of the shown totals, in pence or in calls, store nothing
+    await put({ confirmedCostPence: 299, confirmedCalls: 30, confirmShown: true });
+    await put({ confirmedCostPence: 300, confirmedCalls: 29, confirmShown: true });
+    expect(stored()).toEqual([null, null]);
+    // the same shown figures without confirmShown are judged against the worst case (WP8's PUT), so nothing is stored
+    await put({ confirmedCostPence: 300, confirmedCalls: 30 });
+    expect(stored()).toEqual([null, null]);
+    const saved = await put({
+      scheduleCron: '0 5 * * 1',
+      enabled: true,
+      confirmedCostPence: 300,
+      confirmedCalls: 30,
+      confirmShown: true,
+    });
+    expect([saved.confirmedCostPence, saved.confirmedCalls]).toEqual([300, 30]);
+    expect(stored()).toEqual([300, 30]);
+    expect(jobIds(x)).toContain(created.id);
+  });
+
   it('with the real engine: an over-threshold run needs a confirmation, and a confirmation of its figures clears it', async () => {
     // why: review TS-1: the rule runs against a real estimate, not a mocked one (the fixture billed at 10p a call)
     const x = await harness({ FIXTURE_COST_MICRO_GBP: '100000' });

@@ -1,11 +1,12 @@
 /** The definition response and the confirmation rule (spec §7, §8.1, §10; plan decisions 25, 37, 42, 43). */
-import type {
-  apiContract,
-  BudgetFit,
-  DefinitionInput,
-  Estimate,
-  ProviderId,
-  SearchDefinition,
+import {
+  type apiContract,
+  type BudgetFit,
+  type DefinitionInput,
+  type Estimate,
+  microGbpToPence,
+  type ProviderId,
+  type SearchDefinition,
 } from '@gmt/core';
 import {
   type Confirmation,
@@ -58,6 +59,25 @@ function blockedLines(estimate: Estimate): Set<LineKey> {
 export function sentCovers(c: Confirmation, estimate: Estimate): boolean {
   const worst = confirmationOf(estimate);
   return c.pence !== null && c.calls !== null && c.pence >= worst.pence && c.calls >= worst.calls;
+}
+
+/**
+ * Spec revision 55 §7, §10: the shown totals of an estimate, the runnable (unblocked) lines' pence and calls, which the
+ * sentence beside Search now and Repeat weekly's Save shows and which they store as the confirmation when the sent
+ * figures cover them. WP8's PUT keeps storing `confirmationOf`'s worst case over every line.
+ */
+export function runnableTotalsOf(e: Pick<Estimate, 'perProvider'>): { pence: number; calls: number } {
+  const runnable = e.perProvider.filter((p) => p.blocked === null);
+  return {
+    pence: microGbpToPence(runnable.reduce((a, p) => a + p.costMicroGbp, 0)),
+    calls: runnable.reduce((a, p) => a + p.calls, 0),
+  };
+}
+
+/** True when a sent confirmation names at least the shown runnable totals (`runnableTotalsOf`) in pence and in calls. */
+export function sentCoversShown(c: { pence: number; calls: number }, estimate: Estimate): boolean {
+  const shown = runnableTotalsOf(estimate);
+  return c.pence >= shown.pence && c.calls >= shown.calls;
 }
 
 /**

@@ -239,9 +239,9 @@ describe('a failed definitions load never reads as "no definitions" (CodeRabbit 
   });
 
   it('once the definitions load, the loading line goes', async () => {
-    renderWithProviders(<App />, { search: '?view=definitions&edit=new' });
-    await screen.findByRole('heading', { name: 'Searches' });
-    await screen.findByRole('button', { name: COPY.showEstimate });
+    renderWithProviders(<App />, { search: '?view=definitions&edit=def-0001' });
+    await screen.findByRole('heading', { name: COPY.editSearch.heading('Worked example') });
+    await screen.findByRole('button', { name: COPY.editSearch.save });
     expect(within(screen.getByRole('main')).queryByText(COPY.loading)).not.toBeInTheDocument();
   });
 });
@@ -291,8 +291,8 @@ describe('the ?view= landing rules through the App (spec §11 URLs, WP19 Task 19
     expect(await screen.findByRole('list', { name: COPY.searchesView.listLabel })).toBeInTheDocument();
     await waitFor(() => expect(search()).toBe('?view=searches'));
     first.unmount();
-    renderWithProviders(<App />, { search: '?view=definitions&edit=new' });
-    expect(await screen.findByRole('button', { name: COPY.showEstimate })).toBeInTheDocument();
+    renderWithProviders(<App />, { search: '?view=definitions&edit=def-0001' });
+    expect(await screen.findByRole('button', { name: COPY.editSearch.save })).toBeInTheDocument();
   });
 
   it('a retired ?view=calendar without def= lands on Searches too (there is no search to open)', async () => {

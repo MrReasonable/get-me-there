@@ -5,8 +5,8 @@ import type { SearchCard as Card } from '../../api/types.js';
 import { LoadError, Loading } from '../../components/LoadState.js';
 import { SyntheticBanner } from '../../components/SyntheticBanner.js';
 import { COPY } from '../../copy.js';
-import { DefinitionForm } from '../Definitions/DefinitionForm.js';
 import '../Definitions/definitions.css';
+import { NewSearchForm } from './NewSearchForm.js';
 import { RemovedLine } from './RemovedLine.js';
 import { SearchCard } from './SearchCard.js';
 import './searches.css';
@@ -56,8 +56,7 @@ const hasSyntheticCheapest = (cards: readonly Card[]): boolean =>
  *
  * Remove asks inline on its card; once it succeeds the card is replaced, in its place, by "Removed <name>. Undo" for
  * `UNDO_MS`, kept through any re-read. Undo restores the search and puts its card back where the api's order puts it,
- * with focus on its heading. Until Task 20.5 replaces it, the side column mounts the existing new-search form unchanged
- * (ruling A18).
+ * with focus on its heading. The side column holds the new-search form and Search now (Task 20.5, ruling A18).
  */
 export function SearchesView() {
   const cards = useCards();
@@ -144,7 +143,7 @@ export function SearchesView() {
       ) : providers.data === undefined ? (
         <Loading />
       ) : (
-        <DefinitionForm key="new" existing={null} providers={providers.data} />
+        <NewSearchForm providers={providers.data} />
       )}
     </section>
   );

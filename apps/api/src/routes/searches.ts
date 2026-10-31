@@ -7,16 +7,14 @@ import {
   BUDGET_SCOPE_KINDS,
   type CreateAndStartRequest,
   type CreateAndStartResponse,
-  type Estimate,
   type IsoDateTime,
-  microGbpToPence,
   type StartRefusalCode,
 } from '@gmt/core';
 import type { StartResult } from '@gmt/engine';
 import { z } from 'zod';
 import { ApiError } from '../errors.js';
 import { assembleCards } from '../read/cards.js';
-import { definitionResponse } from '../read/definitions.js';
+import { definitionResponse, sentCoversShown } from '../read/definitions.js';
 import { safeMessage } from '../safeMessage.js';
 import { API_TEXT } from '../text.js';
 import { NO_INPUT, plain, route } from './define.js';
@@ -27,18 +25,9 @@ import type { HandlerTable, RouteContext } from './types.js';
 /** How many `requestKey`s create-and-start remembers (spec revision 55 §10): the oldest goes first. */
 export const REQUEST_KEYS_KEPT = 100;
 
-/**
- * Spec revision 55 §7, §10: the shown totals of an estimate, the runnable (unblocked) lines' pence and calls, which the
- * sentence beside Search now and Repeat weekly's Save shows and which they store as the confirmation when the sent
- * figures cover them. WP8's PUT keeps storing `confirmationOf`'s worst case over every line.
- */
-export function runnableTotalsOf(e: Pick<Estimate, 'perProvider'>): { pence: number; calls: number } {
-  const runnable = e.perProvider.filter((p) => p.blocked === null);
-  return {
-    pence: microGbpToPence(runnable.reduce((a, p) => a + p.costMicroGbp, 0)),
-    calls: runnable.reduce((a, p) => a + p.calls, 0),
-  };
-}
+// why: the shown totals moved to read/definitions.ts beside the worst-case rule, so the PUT path (Repeat weekly's Save)
+// and create-and-start judge a confirmation by one function; re-exported for the callers that name it here
+export { runnableTotalsOf } from '../read/definitions.js';
 
 const confirmDetails = z.looseObject({ estimatePence: z.number().int(), totalCalls: z.number().int() });
 const capDetails = z.looseObject({
@@ -95,8 +84,10 @@ async function createAndStart(
 ): Promise<CreateAndStartResponse> {
   const { confirmCostPence, confirmCalls, requestKey: _key, ...fields } = body;
   const input = validateForSave(fields, ctx, null);
-  const shown = runnableTotalsOf(ctx.engine.estimate(input, ctx.ports.clock.todayLondon()));
-  const covers = confirmCostPence >= shown.pence && confirmCalls >= shown.calls;
+  const covers = sentCoversShown(
+    { pence: confirmCostPence, calls: confirmCalls },
+    ctx.engine.estimate(input, ctx.ports.clock.todayLondon()),
+  );
   const created = ctx.ports.repos.definitions.create(
     covers ? { ...input, confirmedCostPence: confirmCostPence, confirmedCalls: confirmCalls } : input,
   );

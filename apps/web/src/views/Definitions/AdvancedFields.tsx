@@ -1,4 +1,5 @@
 import { microGbpToPence, PENCE_TO_MICRO, type ProviderId } from '@gmt/core';
+import { PLAN_COPY } from '../../copy/plan.js';
 import { SETUP_COPY } from '../../copy/setup.js';
 import { COPY } from '../../copy.js';
 import { type OptionalKeys, withKey } from '../../state/withKey.js';
@@ -19,19 +20,25 @@ export interface ProviderCapabilities {
 }
 
 /**
- * Spec §11 advanced fold (More options): every constraint but the journey time (asked in the short form), the
- * verification policy, providers, budget and schedule.
+ * Spec §11 advanced fold (More options): every constraint but the journey time (its own field in More options), the
+ * verification policy, providers, budget and, on the Edit page, the schedule.
  */
 export function AdvancedFields({
   draft,
   setDraft,
   capabilities,
   onIncomplete,
+  schedule = true,
 }: {
   draft: Draft;
   setDraft: (d: Draft) => void;
   capabilities: readonly ProviderCapabilities[];
   onIncomplete?: (id: string, incomplete: boolean) => void;
+  /**
+   * Whether the schedule fields are shown: the Edit page keeps them, the new-search form has none (spec rev 55 §8.2: a
+   * new search has no schedule; repeating is added from its page, Repeat weekly…).
+   */
+  schedule?: boolean;
 }) {
   const c = draft.constraints;
   const v = draft.verification;
@@ -82,6 +89,7 @@ export function AdvancedFields({
         <TimeWindowField
           id="c-departure"
           name={COPY.constraint.departureWindowLocal}
+          hint={PLAN_COPY.onlyIfSet}
           value={c.departureWindowLocal}
           onChange={(w) => setC('departureWindowLocal', w)}
           {...(onIncomplete ? { onIncomplete } : {})}
@@ -89,6 +97,7 @@ export function AdvancedFields({
         <TimeWindowField
           id="c-arrival"
           name={COPY.constraint.arrivalWindowLocal}
+          hint={PLAN_COPY.onlyIfSet}
           value={c.arrivalWindowLocal}
           onChange={(w) => setC('arrivalWindowLocal', w)}
           {...(onIncomplete ? { onIncomplete } : {})}
@@ -267,33 +276,35 @@ export function AdvancedFields({
           }
         />
       </fieldset>
-      <fieldset className="def-fold-group flex flex-wrap items-start gap-4">
-        <legend className="def-fold-legend">{COPY.scheduleHeading}</legend>
-        <ScheduleField
-          cron={draft.scheduleCron}
-          tz={draft.scheduleTz}
-          enabled={draft.enabled}
-          onChange={(scheduleCron) => setDraft({ ...draft, scheduleCron })}
-          {...(onIncomplete ? { onIncomplete } : {})}
-        />
-        <span className="flex flex-col gap-1">
-          <label htmlFor="s-tz" className="field-label">
-            {COPY.scheduleTz}
-          </label>
-          <input
-            id="s-tz"
-            value={draft.scheduleTz}
-            onChange={(e) => setDraft({ ...draft, scheduleTz: e.target.value })}
-            className={input}
+      {schedule ? (
+        <fieldset className="def-fold-group flex flex-wrap items-start gap-4">
+          <legend className="def-fold-legend">{COPY.scheduleHeading}</legend>
+          <ScheduleField
+            cron={draft.scheduleCron}
+            tz={draft.scheduleTz}
+            enabled={draft.enabled}
+            onChange={(scheduleCron) => setDraft({ ...draft, scheduleCron })}
+            {...(onIncomplete ? { onIncomplete } : {})}
           />
-        </span>
-        <Check
-          id="d-enabled"
-          label={COPY.enabled}
-          checked={draft.enabled}
-          onChange={(b) => setDraft({ ...draft, enabled: b })}
-        />
-      </fieldset>
+          <span className="flex flex-col gap-1">
+            <label htmlFor="s-tz" className="field-label">
+              {COPY.scheduleTz}
+            </label>
+            <input
+              id="s-tz"
+              value={draft.scheduleTz}
+              onChange={(e) => setDraft({ ...draft, scheduleTz: e.target.value })}
+              className={input}
+            />
+          </span>
+          <Check
+            id="d-enabled"
+            label={COPY.enabled}
+            checked={draft.enabled}
+            onChange={(b) => setDraft({ ...draft, enabled: b })}
+          />
+        </fieldset>
+      ) : null}
     </div>
   );
 }

@@ -587,25 +587,9 @@ export const COPY = {
   coverageCheckStale: 'The airports, window or nights changed since this check; run it again.',
   cachedOf: (rows: number, cells: number) => `${rows} of ${cells}`,
   importExample: (label: string) => `Import example (${label})`,
-  showEstimate: 'Show estimate',
-  estimateStale: 'The draft changed since this estimate; show the estimate again before creating.',
-  save: 'Save changes',
-  createConfirm: (calls: number, cap: number, amount: string) =>
-    `Create and confirm about ${calls} ${noun(calls, 'call', 'calls')} (hard stop ${cap}), ${amount} per run`,
-  created: 'Created. Scheduled runs use the calls and cost you confirmed.',
-  saved: 'Saved.',
   fieldErrorsHeading: 'Fix these before saving:',
   fieldError: (field: string, message: string) => `${field}: ${message}`,
-  estimateHeading: 'Estimate',
-  estimateCells: (n: number) => `${n} ${noun(n, 'cell', 'cells')}`,
-  estimateRow: (provider: string, stage: string, calls: number, cost: string, time: string) =>
-    `${provider} ${stage}: ${calls} ${noun(calls, 'call', 'calls')} · ${cost} · about ${time}`,
-  estimateTotal: (calls: number, cap: number, cost: string, time: string) =>
-    `about ${calls} ${noun(calls, 'call', 'calls')} (hard stop ${cap}), ${cost} per run · about ${time}`,
-  windowClamped: 'The window was moved to start tomorrow.',
-  estimateBlocked: (reason: string) => `blocked: ${reason}`,
   definitionNotices: 'Notices for this definition',
-  assumptions: 'Assumptions',
   budgetFitOk: (runs: number) => `Fits every cap at ${runs} ${noun(runs, 'run', 'runs')} a month:`,
   budgetFitWarn: (runs: number) => `Does not fit every cap at ${runs} ${noun(runs, 'run', 'runs')} a month:`,
   budgetScope: (scope: string, estimated: number, cap: string) =>
@@ -682,12 +666,130 @@ export const COPY = {
     refused: {
       active: 'Already searching',
       cap: 'A spending limit stops this search from starting. Raise the limit in Edit, or search again when it resets.',
-      confirm: "Today's estimate is above what was confirmed for this search. Check Edit, then search again.",
       disabled: 'No price source is set up, so nothing was searched. Set up a price source (Providers).',
       window: 'None of the dates in this search are still ahead. Change the dates in Edit.',
       'shutting-down': 'The app is shutting down, so nothing was started.',
       not_found: 'This search no longer exists.',
     } satisfies Record<string, string>,
+  },
+  // --- WP20 Task 20.5: the new-search form's press, its reasons and its failures (spec rev 55 §11) ---
+  newSearch: {
+    estimateRegion: 'Estimate',
+    working: 'Working out the estimate…',
+    // why: the first reason the form cannot be estimated, as the button's accessible description (spec rev 55 §11)
+    reasons: {
+      airports: 'Enter From and To',
+      dateText: 'Enter the date in Leave between as 10 Jan 2027',
+      dates: 'Enter the dates',
+      dateOrder: 'The last date is before the first',
+      stay: 'Enter the stay',
+      stayOrder: 'The shortest stay is longer than the longest',
+      fields: 'Fix the fields marked above',
+    },
+    dateFormat: 'Enter the date as 10 Jan 2027',
+    estimateFailed: (message: string) => `Couldn't work out the estimate: ${message}`,
+    saveFailed: (message: string) => `Couldn't save the search: ${message}`,
+  },
+  // --- WP20 Task 20.5: a refused Search now, on the new search's page (`refused=<code>`; ruling A24) ---
+  refusedPage: {
+    disabled: 'No price source is set up, so nothing was searched',
+    disabledFix: 'Set up a price source (Providers)',
+    capResets: (date: string) => `This month's limit is used up; it resets on ${date}`,
+    cap: 'A spending limit stops this search from starting',
+    window: 'Nothing to search: the dates have passed',
+    'shutting-down': 'The app is restarting; try again in a moment',
+    failed: 'The search was saved but could not start',
+    confirm: 'Check the estimate, then search again',
+    edit: 'Edit',
+  },
+  // --- WP20 Task 20.5: Edit's two presses (spec rev 55 §11 Edit) ---
+  editSearch: {
+    heading: (name: string) => `Edit ${name}`,
+    saveAndSearch: 'Save and search again',
+    save: 'Save',
+    saved: 'Saved.',
+    startFailed: (message: string) => `Saved, but the search could not start: ${message}`,
+  },
+  // --- WP20 Task 20.5: Repeat weekly… on a search's page (spec rev 55 §8.2, §11) ---
+  repeatWeekly: {
+    open: 'Repeat weekly…',
+    fieldsLabel: 'Repeat this search',
+    save: 'Save',
+    cancel: 'Cancel',
+    saved: 'Saved: this search now repeats.',
+    stopped: 'This search no longer repeats.',
+    stop: 'Stop repeating',
+    change: 'Change',
+    repeats: (days: string, time: string) => `Repeats ${days} ${time}`,
+    repeatsDaily: (time: string) => `Repeats every day ${time}`,
+    repeatsOther: 'Repeats on a set schedule',
+    overBudget:
+      'Repeating on this schedule would go over a monthly limit; see the monthly figure, or choose fewer runs.',
+    monthHeading: 'Each month',
+    pickSchedule: 'Choose when it repeats',
+  },
+  // --- WP20 Task 20.5: the estimate sentence beside Search now, Search again and Save and search again (spec rev 55
+  // §11). Coverage is worded as what is asked, never as prices found; counts arrive already grouped ("9,880"). ---
+  estimateLine: {
+    separator: ' · ',
+    underAMinute: 'under a minute',
+    aboutMinutes: (n: number) => `about ${n} ${noun(n, 'minute', 'minutes')}`,
+    // why: "about 1 hour", "about 1½ hours": a half takes the plural, as it is read aloud
+    aboutHours: (whole: number, half: boolean) =>
+      `about ${whole}${half ? '½' : ''} ${whole === 1 && !half ? 'hour' : 'hours'}`,
+    free: 'free',
+    about: (money: string) => `about ${money}`,
+    asksAll: (total: string) => `asks about all ${total} date ${noun(total, 'pair', 'pairs')}`,
+    asksSome: (asked: string, total: string) =>
+      `asks about ${asked} of ${total} date ${noun(total, 'pair', 'pairs')}`,
+    thisRun: 'this run',
+    partly: (n: string) => `(${n} on some airports only)`,
+    reused: (n: string) => `(${n} reused from earlier runs)`,
+    restAgain: 'the rest when you search again',
+    restNext: (day: string) => `the rest next ${day}`,
+    restScheduled: 'the rest at the next scheduled run',
+    nothingNew: (n: string) =>
+      `Nothing new to ask: ${n} date ${noun(n, 'pair', 'pairs')} reused from earlier runs`,
+    nothingToAsk: 'Nothing can be asked this run',
+    cachedOnly: 'cached prices only where travellers searched recently',
+    billed: (calls: string, left: string, name: string, window: 'month' | 'lifetime') =>
+      window === 'month'
+        ? `uses about ${calls} of the ${left} ${name} searches left this month`
+        : `uses about ${calls} of the ${left} ${name} searches left on your trial`,
+    billedNoCap: (calls: string, name: string) => `uses about ${calls} ${name} searches`,
+    searchesTag: (calls: string, name: string) => `${calls} ${name} searches`,
+    withTag: (verb: string, tag: string) => `${verb} · ${tag}`,
+    monthlyPages: (planned: string, left: string) =>
+      `uses about ${planned} of your ${left} browser pages left this month`,
+    notUsed: (source: string, why: string, cost: string | null) =>
+      `${source} is not used: ${why}${cost === null ? '' : ` (about ${cost} not included)`}`,
+    // why: a blocked line names the budget scope that blocked it (engine checkBudget); a browser page cap is pages
+    blockedWhy: {
+      'execution-calls': "over this search's limit of paid calls a run",
+      'execution-free-calls': "over this search's limit of free calls a run",
+      'execution-cost': "over this search's spending limit a run",
+      'provider-execution': 'over its page limit for one run',
+      'provider-month': 'no calls left this month',
+      'provider-month-pages': 'no browser pages left this month',
+      'provider-lifetime': 'no trial searches left',
+      'global-month': "this month's spending limit is reached",
+      unknown: 'a limit stops it this run',
+    },
+    softCost: (estimate: string, threshold: string, press: string) =>
+      `This costs about ${estimate}, above your ${threshold} check; pressing ${press} confirms it`,
+    softShare: (name: string, window: 'month' | 'lifetime', press: string) =>
+      window === 'month'
+        ? `This uses more than a fifth of this month's ${name} searches; pressing ${press} confirms it`
+        : `This uses more than a fifth of your ${name} trial searches; pressing ${press} confirms it`,
+    /** The billable-plan sources by the name their calls are counted in ("120 SearchApi searches"). */
+    searchesOf: {
+      searchapi: 'SearchApi',
+      travelpayouts: 'Aviasales',
+      camoufox: 'browser',
+      fixture: 'test source',
+    } satisfies Record<ProviderId, string>,
+    /** Cron day-of-week (0 = Sunday) as "the rest next Monday" says it. */
+    dayName: ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'],
   },
   // --- WP19: the Dates view (spec §11 Dates; revision 50) ---
   datesView: {

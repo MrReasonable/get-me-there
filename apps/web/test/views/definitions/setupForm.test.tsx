@@ -1,12 +1,14 @@
-import { screen, within } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
 import { HttpResponse, http } from 'msw';
 import { describe, expect, it } from 'vitest';
+import type { DefinitionResponse } from '../../../src/api/types.js';
 import { PLAN_COPY } from '../../../src/copy/plan.js';
 import { SETUP_COPY } from '../../../src/copy/setup.js';
 import { COPY } from '../../../src/copy.js';
 import { DefinitionForm } from '../../../src/views/Definitions/DefinitionForm.js';
-import { BudgetFitPanel, EstimatePanel } from '../../../src/views/Definitions/EstimatePanel.js';
-import { API, definition, estimate, estimateResponse, providersResponse } from '../../fixtures.js';
+import { BudgetFitPanel } from '../../../src/views/Definitions/EstimatePanel.js';
+import { NewSearchForm } from '../../../src/views/Searches/NewSearchForm.js';
+import { API, definition, estimateResponse, providersResponse } from '../../fixtures.js';
 import { server } from '../../msw/server.js';
 import { renderWithProviders } from '../../render.js';
 
@@ -18,8 +20,10 @@ function zeroCallPresets() {
   return { ...base, presets: { ...base.presets, budget: { ...base.presets.budget, maxCalls: 0 } } };
 }
 
-const renderForm = (providers = providersResponse()) =>
-  renderWithProviders(<DefinitionForm existing={null} providers={providers} />);
+// why: these tests are about the fields, not the estimate's debounce, so it is injected as 0 (searches/form.test.tsx
+// steps the real one on the fake clock); the Edit page holds every field the new-search form has, and the schedule
+const renderForm = (existing: DefinitionResponse = definition()) =>
+  renderWithProviders(<DefinitionForm existing={existing} providers={providersResponse()} debounceMs={0} />);
 
 /** The bodies POSTed to the estimate route, in order. */
 function estimateBodies() {
@@ -64,15 +68,6 @@ describe('plain labels, each with a short hint (critique heuristic 2)', () => {
     expect(screen.getByText(D.verificationProviders)).toBeInTheDocument();
   });
 
-  it('the estimate says what a cell is and how long a run takes', () => {
-    renderWithProviders(<EstimatePanel estimate={estimate()} hardStop={2000} />);
-    const panel = screen.getByRole('region', { name: COPY.estimateHeading });
-    expect(within(panel).getByText('126 cells')).toBeInTheDocument();
-    expect(within(panel).getByText(D.estimateCellsHint)).toBeInTheDocument();
-    // 620 s, the estimate's own seconds
-    expect(within(panel).getByText('A run of this search takes about 10m.')).toBeInTheDocument();
-  });
-
   it('the Name field does not stretch the full width', () => {
     renderForm();
     expect(screen.getByLabelText(COPY.name).closest('span')).toHaveClass('max-w-md');
@@ -81,27 +76,13 @@ describe('plain labels, each with a short hint (critique heuristic 2)', () => {
 
 describe('Max billed calls per run 0 explains itself where it appears', () => {
   it('beside the field: why SearchApi does not run, and how to raise it', async () => {
-    const { user } = renderForm(zeroCallPresets());
+    const { user } = renderWithProviders(<NewSearchForm providers={zeroCallPresets()} debounceMs={0} />);
     await openAdvanced(user);
     expect(screen.getByLabelText(COPY.maxCalls)).toHaveValue('0');
     expect(screen.getByLabelText(COPY.maxCalls)).toHaveAccessibleDescription(D.maxCallsZero);
     await user.clear(screen.getByLabelText(COPY.maxCalls));
     await user.type(screen.getByLabelText(COPY.maxCalls), '200');
     expect(screen.getByLabelText(COPY.maxCalls)).toHaveAccessibleDescription(D.maxCallsHint);
-  });
-
-  it('beside the estimate: the hard stop of 0 names the calls that will not run and the number to raise it to', () => {
-    renderWithProviders(<EstimatePanel estimate={estimate()} hardStop={0} />);
-    expect(screen.getByText(D.hardStopZero(140))).toBeInTheDocument();
-  });
-
-  it('says nothing extra when the search uses no billed source', () => {
-    const free = estimate({
-      perProvider: estimate().perProvider.filter((p) => p.providerId === 'travelpayouts'),
-      totalCalls: 14,
-    });
-    renderWithProviders(<EstimatePanel estimate={free} hardStop={0} />);
-    expect(screen.queryByText(/^Hard stop 0/)).toBeNull();
   });
 });
 
@@ -120,9 +101,7 @@ describe('journey time in hours and minutes', () => {
     await user.type(hours, '20');
     await user.clear(minutes);
     await user.type(minutes, '30');
-    await user.click(screen.getByRole('button', { name: COPY.showEstimate }));
-    await screen.findByRole('region', { name: COPY.estimateHeading });
-    expect(bodies[0]).toMatchObject({ constraints: { maxJourneyMinutes: 1230 } });
+    await waitFor(() => expect(bodies.at(-1)).toMatchObject({ constraints: { maxJourneyMinutes: 1230 } }));
   });
 
   it('a letter is not taken, and clearing both boxes removes the constraint', async () => {
@@ -136,16 +115,16 @@ describe('journey time in hours and minutes', () => {
     expect(hours).toHaveValue('25');
     await user.clear(hours);
     await user.clear(minutes);
-    await user.click(screen.getByRole('button', { name: COPY.showEstimate }));
-    await screen.findByRole('region', { name: COPY.estimateHeading });
-    expect(bodies[0]).toHaveProperty('constraints');
-    expect(bodies[0]).not.toMatchObject({ constraints: { maxJourneyMinutes: expect.anything() } });
+    await waitFor(() => {
+      expect(bodies.at(-1)).toHaveProperty('constraints');
+      expect(bodies.at(-1)).not.toMatchObject({ constraints: { maxJourneyMinutes: expect.anything() } });
+    });
   });
 });
 
 describe('the schedule picker', () => {
-  it('starts a new search with no schedule; Weekly starts on Mondays at 05:00, in words', async () => {
-    const { user } = renderForm();
+  it('a search with no schedule shows none; Weekly starts on Mondays at 05:00, in words', async () => {
+    const { user } = renderForm(definition({ scheduleCron: null, enabled: false }));
     await openAdvanced(user);
     // why: spec rev 55 §8.2: a new search has no schedule
     expect(screen.getByLabelText(S.repeat)).toHaveValue('none');
@@ -160,62 +139,56 @@ describe('the schedule picker', () => {
 
   it('weekly days, daily, none and custom each send their cron', async () => {
     const bodies = estimateBodies();
-    const { user } = renderForm();
+    const { user } = renderForm(definition({ scheduleCron: null, enabled: false }));
     await openAdvanced(user);
-    const estimateOnce = async () => {
-      await user.click(screen.getByRole('button', { name: COPY.showEstimate }));
-      await screen.findByRole('region', { name: COPY.estimateHeading });
-    };
+    // why: each change asks for the estimate itself; the last body asked for carries the picked cron
+    const sent = (cron: string | null) =>
+      waitFor(() => expect(bodies.at(-1)).toMatchObject({ scheduleCron: cron }));
     await user.selectOptions(screen.getByLabelText(S.repeat), 'weekly');
     await user.click(screen.getByRole('checkbox', { name: 'Thu' }));
     expect(screen.getByText('Mondays and Thursdays at 05:00 (Europe/London)')).toBeInTheDocument();
-    await estimateOnce();
-    expect(bodies.at(-1)).toMatchObject({ scheduleCron: '0 5 * * 1,4' });
+    await sent('0 5 * * 1,4');
 
     await user.selectOptions(screen.getByLabelText(S.repeat), 'daily');
     expect(screen.getByText('Every day at 05:00 (Europe/London)')).toBeInTheDocument();
-    await estimateOnce();
-    expect(bodies.at(-1)).toMatchObject({ scheduleCron: '0 5 * * *' });
+    await sent('0 5 * * *');
 
     await user.selectOptions(screen.getByLabelText(S.repeat), 'custom');
     expect(screen.getByLabelText(S.cron)).toHaveValue('0 5 * * *');
     await user.clear(screen.getByLabelText(S.cron));
     await user.type(screen.getByLabelText(S.cron), '*/30 6 1 * *');
     expect(screen.getByText('On the cron schedule "*/30 6 1 * *" (Europe/London)')).toBeInTheDocument();
-    await estimateOnce();
-    expect(bodies.at(-1)).toMatchObject({ scheduleCron: '*/30 6 1 * *' });
+    await sent('*/30 6 1 * *');
 
     await user.selectOptions(screen.getByLabelText(S.repeat), 'none');
     expect(screen.getByText(S.none)).toBeInTheDocument();
-    await estimateOnce();
-    expect(bodies.at(-1)).toMatchObject({ scheduleCron: null });
+    await sent(null);
   });
 
-  it('a weekly schedule with every day unticked says so and blocks estimating', async () => {
-    const { user } = renderForm();
+  it('a weekly schedule with every day unticked says so and holds both presses, with the reason', async () => {
+    const { user } = renderForm(definition({ scheduleCron: null, enabled: false }));
     await openAdvanced(user);
     await user.selectOptions(screen.getByLabelText(S.repeat), 'weekly');
     await user.click(screen.getByRole('checkbox', { name: 'Mon' }));
     expect(screen.getByText(S.noDays)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: COPY.showEstimate })).toBeDisabled();
+    for (const press of [
+      screen.getByRole('button', { name: COPY.editSearch.save }),
+      screen.getByRole('button', { name: /^Save and search again/ }),
+    ]) {
+      expect(press).toHaveAttribute('aria-disabled', 'true');
+      expect(press).toHaveAccessibleDescription(S.blocked);
+    }
   });
 
   it('a saved custom cron is kept as it is until the operator changes it', async () => {
-    const existing = definition({ scheduleCron: '0 5 1,15 * *' });
-    const { user } = renderWithProviders(
-      <DefinitionForm existing={existing} providers={providersResponse()} />,
-    );
+    const { user } = renderForm(definition({ scheduleCron: '0 5 1,15 * *' }));
     await openAdvanced(user);
     expect(screen.getByLabelText(S.repeat)).toHaveValue('custom');
     expect(screen.getByLabelText(S.cron)).toHaveValue('0 5 1,15 * *');
   });
 });
 
-describe('the estimate and budget fit read plainly', () => {
-  it('a run every line of which a cap blocks states no duration', () => {
-    renderWithProviders(<EstimatePanel estimate={estimate({ seconds: 0 })} hardStop={0} />);
-    expect(screen.queryByText(/^A run of this search takes/)).toBeNull();
-  });
+describe('the budget fit reads plainly', () => {
   it('budget fit rounds the runs a month to one decimal', () => {
     const fit = { ...definition().budgetFit, runsPerMonth: 52 / 12, fits: false };
     renderWithProviders(<BudgetFitPanel fit={fit} />);

@@ -221,11 +221,14 @@ export function TimeWindowField({
   value,
   onChange,
   onIncomplete,
+  hint,
 }: {
   id: string;
   name: string;
   value: { from: string; to: string } | undefined;
   onChange: (v: { from: string; to: string } | undefined) => void;
+  /** A plain line under the boxes, read with each of them (spec rev 55 §11: "only if you set one"). */
+  hint?: string;
   /** Told whenever the window is half-filled, so the form can refuse to save or estimate it. */
   onIncomplete?: (id: string, incomplete: boolean) => void;
 }) {
@@ -245,6 +248,8 @@ export function TimeWindowField({
   // why: a half-filled window is an error the operator sees, not a constraint that vanishes (controller-directed).
   const half = (from === '') !== (to === '');
   const errorId = `${id}-errors`;
+  const hintId = `${id}-hint`;
+  const described = describedBy(hint !== undefined ? hintId : null, half ? errorId : null);
   useEffect(() => {
     onIncomplete?.(id, half);
     return () => onIncomplete?.(id, false);
@@ -258,7 +263,7 @@ export function TimeWindowField({
             id={`${id}-from`}
             type="time"
             aria-invalid={half}
-            aria-describedby={half ? errorId : undefined}
+            aria-describedby={described}
             className={input}
             value={from}
             onChange={(e) => {
@@ -273,7 +278,7 @@ export function TimeWindowField({
             id={`${id}-to`}
             type="time"
             aria-invalid={half}
-            aria-describedby={half ? errorId : undefined}
+            aria-describedby={described}
             className={input}
             value={to}
             onChange={(e) => {
@@ -283,6 +288,7 @@ export function TimeWindowField({
           />
         </span>
       </span>
+      <Hint id={hintId} text={hint} />
       <FieldErrors id={errorId} messages={half ? [COPY.bothEndsNeeded] : []} />
     </span>
   );

@@ -31,8 +31,9 @@ test('fixture mode: import, run, then Dates, the date pair detail and History sh
   // why: a new definition is created disabled (spec rev 27), and the api refuses "Run now" for a disabled one (409).
   // The budget is not touched: Import example leaves the plan preset's budget, which the api's EXECUTION_MAX_CALLS sets.
   await page.getByLabel(COPY.enabled).check();
-  // why: WP9's form offers the create click only after an estimate for the current draft.
-  await page.getByRole('button', { name: COPY.showEstimate }).click();
+  // why: Task 20.5 removed Show estimate (the estimate is asked for automatically); Task 20.11 rewrites this smoke
+  // for the first screen and Search now (ruling 20.3 concern), so this step only names the press that replaced it.
+  await page.getByRole('button', { name: /^Search now/ }).click();
   await page.getByRole('button', { name: /^Create and confirm about/ }).click();
   await page.getByRole('button', { name: /^Run now/ }).click();
   // why: the status bar polls the run (spec §11); its status words say "completed" once the run has finished. The
@@ -197,7 +198,7 @@ const LOADED: Record<string, (page: Page) => Locator> = {
   // why: the detail is reached from the first card's link (its URL carries the date pair)
   results: (p) => p.getByRole('table', { name: SMOKE.detailTable }),
   history: (p) => p.getByRole('figure', { name: COPY.historyView.fetchChartTitle }),
-  definitions: (p) => p.getByRole('button', { name: COPY.showEstimate }),
+  definitions: (p) => p.getByRole('button', { name: /^Search now/ }),
   // why: the fixture run fires no alert, so the loaded Alerts view is the one that says there are no rules yet
   alerts: (p) => p.getByText(COPY.alertsView.noRules),
   providers: (p) => p.getByRole('region', { name: COPY.provider.fixture }),

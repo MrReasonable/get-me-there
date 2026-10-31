@@ -17,6 +17,7 @@ import {
   inputOf,
   mergeDefinition,
   sentCovers,
+  sentCoversShown,
   softConfirmOf,
 } from '../read/definitions.js';
 import { airportLookup, currentSpace, isDraft } from '../read/space.js';
@@ -36,18 +37,26 @@ interface SentConfirmation {
 
 /**
  * Spec §7, decisions 37, 43 and 54: the stored confirmation is set only from an explicit operator value carrying both
- * pence and calls that cover the worst-case figures, and what is stored is WP7's `confirmationOf(estimate)` (every
- * line, blocked ones included), never the shown totals; otherwise nothing is stored and the response carries
- * needsConfirmation.
+ * pence and calls. By default (WP8's create and PUT) they must cover the worst-case figures, and what is stored is WP7's
+ * `confirmationOf(estimate)` (every line, blocked ones included). With `shown` (spec revision 55 §10: a PUT carrying
+ * `confirmShown: true`, Repeat weekly's Save) they must cover the recomputed shown runnable totals instead, and the
+ * sent figures are stored, as create-and-start stores them: the schedule's confirmation is what its sentence showed.
+ * Otherwise nothing is stored and the response carries needsConfirmation.
  */
 function applyConfirmation(
   def: SearchDefinition,
   sent: SentConfirmation,
   ctx: RouteContext,
+  shown = false,
 ): SearchDefinition {
   const { confirmedCostPence: pence, confirmedCalls: calls } = sent;
   if (pence === undefined || calls === undefined || isDraft(def)) return def;
   const estimate = ctx.engine.estimate(def, ctx.ports.clock.todayLondon());
+  if (shown) {
+    if (!sentCoversShown({ pence, calls }, estimate)) return def;
+    ctx.ports.repos.definitions.setConfirmed(def.id, { pence, calls });
+    return { ...def, confirmedCostPence: pence, confirmedCalls: calls };
+  }
   if (!sentCovers({ pence, calls }, estimate)) return def;
   const worst = confirmationOf(estimate);
   ctx.ports.repos.definitions.setConfirmed(def.id, worst);
@@ -213,12 +222,13 @@ export const definitionHandlers: HandlerTable = {
     { request: apiContract.definitionUpdateRequestSchema, query: NO_INPUT },
     (c, input, ctx) => {
       const existing = getLiveDefinition(ctx, param(input, 'id'));
-      const { confirmedCostPence, confirmedCalls, ...patch } = input.body;
+      const { confirmedCostPence, confirmedCalls, confirmShown, ...patch } = input.body;
       const merged = validateForSave(mergeDefinition(inputOf(existing), patch), ctx, existing);
       const updated = applyConfirmation(
         ctx.ports.repos.definitions.update(existing.id, merged),
         { confirmedCostPence, confirmedCalls },
         ctx,
+        confirmShown === true,
       );
       syncSchedule(updated, ctx);
       return c.json(definitionResponse(updated, ctx));

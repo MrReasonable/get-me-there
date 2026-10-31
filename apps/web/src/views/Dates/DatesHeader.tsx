@@ -20,6 +20,7 @@ import { instantMs } from '../../lib/time.js';
 import { type DatesUiState, datesPatch, detailPatchOf } from '../../state/datesState.js';
 import { hrefWith, navigateTo } from '../../state/urlState.js';
 import type { BoardModel } from './board.js';
+import { RepeatWeekly } from './RepeatWeekly.js';
 import { countsOf, isFullStay, stayRange } from './stayScope.js';
 
 const D = COPY.datesView;
@@ -106,6 +107,11 @@ export function DatesHeader({ definition, data, model, state, run, now }: DatesH
           {runLine(latest, run, now)}
         </p>
       ) : null}
+      {/* why: spec rev 55 §8.2, §11 — repeating is added from the search's page (WP20 Task 20.5 builds Repeat weekly…;
+      Task 20.6 places it among the header's actions with Search again and Edit) */}
+      <div className="dates-actions flex flex-wrap items-center gap-2">
+        <RepeatWeekly definition={definition} />
+      </div>
       {stale ? (
         <p className="text-sm">
           <span className="tag tag-warn mr-2">{COPY.stale}</span>

@@ -7,8 +7,17 @@ import {
   IN_FLIGHT_STATUSES,
 } from '@gmt/core';
 import { skipToken, useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useEffect, useRef, useState } from 'react';
 import { api } from './endpoints.js';
-import type { Basis, DatePairsScope, ResultsScope, VerifyCellBody } from './types.js';
+import type {
+  Basis,
+  DatePairsScope,
+  DefinitionBody,
+  EstimateResponse,
+  ResultsScope,
+  StartRefusal,
+  VerifyCellBody,
+} from './types.js';
 
 /** Query keys; prefixes are what mutations invalidate. */
 export const qk = {
@@ -36,12 +45,90 @@ export const qk = {
     ['date-pairs', id, s.origins ?? '', s.destinations ?? '', s.maxJourneyMinutes ?? ''] as const,
   calendarGap: (id: string) => ['calendar-gap', id] as const,
   airports: (q: string) => ['airports', q] as const,
+  // WP20 Task 20.5: an unsaved form's estimate, keyed by the very body it was asked for; a saved search's estimate; and
+  // a refused Search now's answer, handed from the form to the page it opens (never fetched: see useRefusal)
+  estimateDraft: (bodyKey: string) => ['estimate', 'draft', bodyKey] as const,
+  estimateOf: (id: string) => ['estimate', 'definition', id] as const,
+  refusal: (id: string) => ['refusal', id] as const,
   // WP10
   cell: (id: string, key: string | null) => ['cell', id, key] as const,
   itineraryHistory: (hash: string | null) => ['history', 'itinerary', hash] as const,
   routeHistory: (origin: string, destination: string, cabin: string) =>
     ['history', 'route', origin, destination, cabin] as const,
 };
+
+/** Spec rev 55 §11: the estimate is asked for this long after the last change of the form, and never before. */
+export const ESTIMATE_DEBOUNCE_MS = 400;
+
+/** What the form knows of its estimate: the one asked for its current body, or why there is none to show. */
+export interface DraftEstimate {
+  /** The estimate of exactly the current body; null while it is being asked for, or when there is no body. */
+  estimate: EstimateResponse | null;
+  /** The request for the current body failed (a 422 names its fields). */
+  error: Error | null;
+}
+
+/**
+ * Spec rev 55 §11 (WP20 Task 20.5): the estimate of an unsaved body, asked for `debounceMs` after the body last changed
+ * and never before, and keyed by the body it was fetched for, so an estimate is shown only beside the form it
+ * describes: from the first change until the new body's answer arrives, `estimate` is null. A null body (the form is
+ * incomplete) asks nothing. `immediate` asks for the first body at once (Repeat weekly opens on a whole search).
+ * The debounce is a `setTimeout` cleared on change; tests step it on Vitest's fake clock.
+ */
+export function useEstimateDraft(
+  body: DefinitionBody | null,
+  opts: { debounceMs?: number; immediate?: boolean } = {},
+): DraftEstimate {
+  const { debounceMs = ESTIMATE_DEBOUNCE_MS, immediate = false } = opts;
+  const key = body === null ? null : JSON.stringify(body);
+  const [asked, setAsked] = useState<{ key: string; body: DefinitionBody } | null>(() =>
+    immediate && body !== null && key !== null ? { key, body } : null,
+  );
+  // why: the timer reads the body of the key it settles, never an older render's
+  const latest = useRef(body);
+  latest.current = body;
+  useEffect(() => {
+    if (key === null) return;
+    const t = setTimeout(() => {
+      const b = latest.current;
+      if (b !== null) setAsked((a) => (a?.key === key ? a : { key, body: b }));
+    }, debounceMs);
+    return () => clearTimeout(t);
+  }, [key, debounceMs]);
+  const q = useQuery({
+    queryKey: qk.estimateDraft(asked?.key ?? ''),
+    queryFn: asked === null ? skipToken : () => api.estimateDraft(asked.body),
+    // why: a refused body (422) is the form's to fix, never retried; the estimate depends on this month's usage, so it
+    // is never served from an older answer for the same body without a re-read
+    retry: false,
+    staleTime: 0,
+  });
+  const current = key !== null && asked?.key === key;
+  return { estimate: current ? (q.data ?? null) : null, error: current ? q.error : null };
+}
+
+/**
+ * A saved search's estimate (`POST /definitions/:id/estimate`), asked while `enabled`: Search again's second look and a
+ * refused Search now's page (spec rev 55 §11). Re-asked on every mount, never retried.
+ */
+export function useDefinitionEstimate(id: string, enabled: boolean) {
+  return useQuery({
+    queryKey: qk.estimateOf(id),
+    queryFn: () => api.estimateDefinition(id),
+    enabled,
+    retry: false,
+    staleTime: 0,
+  });
+}
+
+/**
+ * The refusal a Search now press answered, as the form left it for the page it opened (spec rev 55 §11: "it resets on
+ * <date>" needs the refusal's `resetsAt`, which the URL does not carry). An observer only: it never fetches, so after a
+ * reload it is undefined and the page words the code alone.
+ */
+export function useRefusal(id: string) {
+  return useQuery<StartRefusal>({ queryKey: qk.refusal(id), queryFn: skipToken, enabled: false });
+}
 
 /** Polling interval while a run is moving (spec §10 "updates during run"). */
 export const POLL_MS = 2_000;

@@ -4,6 +4,7 @@ import type {
   AlertRuleBody,
   Basis,
   CoverageCheckBody,
+  CreateAndStartBody,
   DatePairsScope,
   DefinitionBody,
   DefinitionUpdateBody,
@@ -32,8 +33,13 @@ export const api = {
     call(c.definitionResponseSchema, 'POST', '/api/definitions/:id/restore', { params: { id } }),
   estimateDraft: (body: DefinitionBody) =>
     call(c.estimateResponseSchema, 'POST', '/api/definitions/estimate', { body }),
-  createDefinition: (body: DefinitionBody) =>
-    call(c.definitionResponseSchema, 'POST', '/api/definitions', { body }),
+  // WP20 Task 20.5 (spec rev 55 §10): a saved search's estimate, for Search again's second look and its page after a
+  // refused Search now (ruling A24: the page asks it again rather than carrying figures in the URL)
+  estimateDefinition: (id: string) =>
+    call(c.estimateResponseSchema, 'POST', '/api/definitions/:id/estimate', { params: { id } }),
+  // Search now's one press: save the search, start its run with the shown figures; a refusal is in the body
+  createAndStart: (body: CreateAndStartBody) =>
+    call(c.createAndStartResponseSchema, 'POST', '/api/definitions/create-and-start', { body }),
   updateDefinition: (id: string, body: DefinitionUpdateBody) =>
     call(c.definitionResponseSchema, 'PUT', '/api/definitions/:id', { params: { id }, body }),
   coverageCheck: (body: CoverageCheckBody) =>

@@ -28,8 +28,6 @@ export function listText(items: readonly string[]): string {
 export const SETUP_COPY = {
   // --- Definitions: hints under plain labels (spec §11 terms kept in brackets where they are bound) ---
   definitions: {
-    estimateCellsHint: '(a cell is one departure date and return date pair)',
-    runTakes: (time: string) => `A run of this search takes about ${time}.`,
     policyHeading: 'Checking fares (itinerary search)',
     policyIntro:
       'Discovery is the first pass: it prices date pairs across the whole window from the cheaper sources. Itinerary search then looks up full itineraries, with booking options, for the cheapest of those date pairs. These settings choose which date pairs it checks.',
@@ -50,8 +48,6 @@ export const SETUP_COPY = {
     maxCallsZero:
       '0 allows no billed calls: SearchApi does not run for this search, so its date grid and itinerary search are skipped. Raise this number to let it run. New searches start from EXECUTION_MAX_CALLS in .env.',
     maxCallsHint: 'Calls to paid sources (SearchApi). New searches start from EXECUTION_MAX_CALLS in .env.',
-    hardStopZero: (calls: number) =>
-      `Hard stop 0: this search allows no billed calls, so SearchApi's ${calls} estimated ${noun(calls, 'call', 'calls')} will not run and no itinerary search checks these prices. To let them run, raise Max billed calls per run (More options, Run budget) to at least ${calls}.`,
     journeyHours: 'hours',
     journeyMinutes: 'minutes',
     journeyPart: (label: string, part: string) => `${label}, ${part}`,
@@ -61,7 +57,7 @@ export const SETUP_COPY = {
   schedule: {
     repeat: 'Repeat',
     mode: {
-      none: 'No schedule (Run now only)',
+      none: 'No schedule (it runs when you press Search again)',
       daily: 'Every day',
       weekly: 'Weekly, on chosen days',
       custom: 'Custom (cron)',
@@ -75,7 +71,7 @@ export const SETUP_COPY = {
     noTime: 'Enter a time, for example 05:00.',
     blocked: 'Cannot estimate or save: the schedule needs at least one day and a time.',
     reads: 'Runs:',
-    none: 'No scheduled runs; start one with Run now.',
+    none: 'No scheduled runs; start one with Search again.',
     daily: (time: string, tz: string) => `Every day at ${time} (${tz})`,
     weekly: (days: readonly number[], time: string, tz: string) =>
       days.length === 7

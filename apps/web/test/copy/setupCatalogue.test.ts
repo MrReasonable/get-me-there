@@ -6,9 +6,7 @@ import { SETUP_COPY } from '../../src/copy/setup.js';
 
 /** Sample arguments for every function entry, keyed by dotted path. A missing key fails the test. */
 const SAMPLES: Record<string, unknown[][]> = {
-  'definitions.runTakes': [['45m']],
   'definitions.expandTopHint': [[1], [5]],
-  'definitions.hardStopZero': [[1], [140]],
   'definitions.journeyPart': [['max journey time', 'hours']],
   'schedule.daily': [['05:00', 'Europe/London']],
   'schedule.weekly': [

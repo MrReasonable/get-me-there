@@ -35,7 +35,7 @@ const CONTENT: Record<(typeof VIEWS)[number], () => Promise<HTMLElement>> = {
     await drawn(figure);
     return figure;
   },
-  definitions: () => screen.findByRole('button', { name: COPY.showEstimate }),
+  definitions: () => screen.findByRole('button', { name: COPY.editSearch.save }),
   alerts: () => screen.findByRole('heading', { name: COPY.alertsView.heading }),
   providers: () => screen.findByRole('heading', { name: COPY.providersHeading }),
   status: () => screen.findByRole('heading', { name: COPY.statusView.heading }),
@@ -72,8 +72,8 @@ describe('rendered views contain no banned word, and no "£" outside a price or 
       const classes = 'f.class=verified,partially-verified,failed,unchecked';
       // why: Results is the date pair detail (WP19 Task 19.6): its URL names the date pair
       const pair = view === 'results' ? '&depart=2027-03-14&return=2027-03-28' : '';
-      // why: the Edit page needs `edit=` (spec rev 55 §11 URLs); `new` is the form the first screen also shows
-      const edit = view === 'definitions' ? '&edit=new' : '';
+      // why: the Edit page needs `edit=` (spec rev 55 §11 URLs); the first screen's sweep covers the new-search form
+      const edit = view === 'definitions' ? '&edit=def-0001' : '';
       const { user } = renderWithProviders(<App />, {
         search: `?view=${view}&def=def-0001&${classes}${pair}${edit}`,
       });

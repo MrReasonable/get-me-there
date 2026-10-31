@@ -1,4 +1,10 @@
-import { type DecodedDatePairs, IN_FLIGHT_STATUSES, type IsoDateTime } from '@gmt/core';
+import {
+  apiContract,
+  type DecodedDatePairs,
+  IN_FLIGHT_STATUSES,
+  type IsoDateTime,
+  type StartRefusalCode,
+} from '@gmt/core';
 import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { ApiError } from '../../api/client.js';
 import { DATES_DRAWN_MARK, useDatePairs, useExecutionWatch, useProvidersWatch } from '../../api/queries.js';
@@ -20,7 +26,7 @@ import { Filters } from './Filters.js';
 import { type Animate, browserAnimate } from './flip.js';
 import { Overview } from './OverviewGrid.js';
 import { changeCount, IDLE, onProgress, onTerminal, onTimer, type Reread, readDecision } from './refresh.js';
-import { NeverRun, NoPriceInFilters, NoSearch, Paused, TooManyCells } from './States.js';
+import { NeverRun, NoPriceInFilters, NoSearch, Paused, Refused, TooManyCells } from './States.js';
 import { countsOf } from './stayScope.js';
 import { UpdateBoard } from './UpdateBoard.js';
 
@@ -89,6 +95,9 @@ function DatesOf({
   // why: spec rev 55 §11 — opening a search's page remembers it as the search last opened (the nav names it)
   useEffect(() => writeLastSearch(definition.id), [definition.id]);
   const state = useMemo(() => parseDatesState(params, definition), [params, definition]);
+  // why: spec rev 55 §11 URLs — a refused Search now opens the new search's page with `refused=<code>`; a value that is
+  // no refusal code is ignored, never an error
+  const refused = refusalOf(params.get('refused'));
   const scope = scopeQuery(state);
   const scopeKey = JSON.stringify(scope);
   const query = useDatePairs(definition.id, scope);
@@ -188,8 +197,13 @@ function DatesOf({
       <p role="status" className="sr-only">
         {track.message}
       </p>
+      {/* why: the refusal speaks only while the search has no run: once a press starts one, the page shows that run */}
+      {refused !== null && data !== null && data.executions.length === 0 ? (
+        <Refused definitionId={definition.id} code={refused} />
+      ) : null}
       <Body
         definition={definition}
+        refused={refused !== null}
         query={query}
         data={data}
         model={model}
@@ -235,9 +249,15 @@ function DatesOf({
   );
 }
 
+/** The `refused=` value as a start refusal code, or null when it is absent or names none (spec rev 55 §11 URLs). */
+function refusalOf(v: string | null): StartRefusalCode | null {
+  return apiContract.startRefusalCodes.find((c) => c === v) ?? null;
+}
+
 /** The board's place: the state the read is in (spec §11 States), or the board itself. */
 function Body({
   definition,
+  refused,
   query,
   data,
   model,
@@ -247,6 +267,8 @@ function Body({
   board,
 }: {
   definition: DefinitionResponse;
+  /** A refused Search now is being worded above: its own press replaces the never-run state's. */
+  refused: boolean;
   query: ReturnType<typeof useDatePairs>;
   data: DecodedDatePairs | null;
   model: BoardModel | null;
@@ -269,7 +291,7 @@ function Body({
       </p>
     );
   }
-  if (data.executions.length === 0) return <NeverRun definition={definition} />;
+  if (data.executions.length === 0) return refused ? null : <NeverRun definition={definition} />;
   const latest = data.executions.find((e) => !e.isChild);
   const status = run?.status ?? latest?.status;
   const counts = countsOf(model.inView);

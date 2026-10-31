@@ -152,7 +152,15 @@ export const definitionShapeSchema = z
 export const definitionCreateRequestSchema = z.object(definitionFields).superRefine(refineDefinition);
 /** `POST /definitions` takes no body (the plan default, a draft) or a create body; one object, so handlers can name it. */
 export const definitionCreateOptionalSchema = definitionCreateRequestSchema.optional();
-export const definitionUpdateRequestSchema = z.object(definitionFields).partial();
+/**
+ * `PUT /definitions/:id` (spec revision 55 §10): any of the fields, and `confirmShown: true` when the sent confirmation
+ * is the estimate sentence's shown runnable totals (Repeat weekly's Save), which the route then stores when they cover
+ * its own recomputation of them; without it a sent confirmation must cover the worst case over every line (WP8).
+ */
+export const definitionUpdateRequestSchema = z
+  .object(definitionFields)
+  .partial()
+  .extend({ confirmShown: z.boolean().optional() });
 
 export const budgetFitSchema = z.object({
   fits: z.boolean(),

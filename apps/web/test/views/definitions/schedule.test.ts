@@ -80,7 +80,7 @@ describe('the plain reading of a schedule', () => {
     ['0 5 * * 0,1,3', 'Mondays, Wednesdays and Sundays at 05:00 (Europe/London)'],
     ['0 5 * * 0-6', 'Every day at 05:00 (Europe/London)'],
     ['30 7 * * *', 'Every day at 07:30 (Europe/London)'],
-    [null, 'No scheduled runs; start one with Run now.'],
+    [null, 'No scheduled runs; start one with Search again.'],
     ['*/15 * * * *', 'On the cron schedule "*/15 * * * *" (Europe/London)'],
   ])('%j reads %j', (cron, text) => {
     expect(describeSchedule(cron, 'Europe/London')).toBe(text);

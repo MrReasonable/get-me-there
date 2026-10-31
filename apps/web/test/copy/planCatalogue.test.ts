@@ -6,12 +6,12 @@ import { PLAN_COPY } from '../../src/copy/plan.js';
 
 /** Sample arguments for every function entry. A missing key fails the test. */
 const SAMPLES: Record<string, unknown[][]> = {
-  editSearch: [['Worked example']],
-  preset: [[3], [12]],
-  rolling: [
+  rollingDates: [['21 Oct 2026', '20 Apr 2027']],
+  rollingLine: [
     [1, 1],
     [7, 182],
   ],
+  rollingResolved: [['starts in 7 days, lasts 182 days', 'departures from 21 Oct 2026 to 20 Apr 2027']],
   nameArrow: [['Origin city', 'Destination city']],
   airportOption: [['Some Field', 'AAA', 'Some City', 'ZZ']],
   listbox: [['From']],
@@ -60,8 +60,7 @@ describe('PLAN_COPY catalogue (spec §11 banned words)', () => {
     expect(PLAN_COPY.airportOption('Some Field', 'AAA', 'Some City', 'ZZ')).toBe(
       'Some Field (AAA) · Some City, ZZ',
     );
-    expect(PLAN_COPY.rolling(1, 1)).toMatch(
-      /^Rolling window: each run searches departures from 1 day ahead, for 1 day\./,
-    );
+    expect(PLAN_COPY.rollingLine(1, 1)).toBe('starts in 1 day, lasts 1 day');
+    expect(PLAN_COPY.rollingLine(7, 182)).toBe('starts in 7 days, lasts 182 days');
   });
 });

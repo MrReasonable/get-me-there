@@ -28,6 +28,11 @@ export type DefinitionUpdateBody = z.input<typeof apiContract.definitionUpdateRe
 export type CoverageCheckBody = z.input<typeof apiContract.coverageCheckRequestSchema>;
 export type VerifyCellBody = z.input<typeof apiContract.verifyCellRequestSchema>;
 export type StartExecutionBody = z.input<typeof apiContract.startExecutionRequestSchema>;
+/** Search now's one press (spec rev 55 §10 `POST /definitions/create-and-start`), in the schema's input shape. */
+export type CreateAndStartBody = z.input<typeof apiContract.createAndStartRequestSchema>;
+export type CreateAndStartResponse = z.output<typeof apiContract.createAndStartResponseSchema>;
+/** A refused start in the create-and-start answer: its code (worded by the web) and the figures the words need. */
+export type StartRefusal = NonNullable<CreateAndStartResponse['refusal']>;
 
 // WP10 routes (plan "API contract", results.ts, with WP10's additions of decisions 38, 42 and 48).
 export type CellDetailResponse = z.output<typeof apiContract.cellDetailResponseSchema>;

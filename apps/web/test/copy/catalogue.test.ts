@@ -142,12 +142,7 @@ const SAMPLES: Record<string, unknown[]> = {
   coverageCheckCalls: [14],
   cachedOf: [5, 372],
   importExample: ['the worked example'],
-  createConfirm: [154, 2000, '£0'],
   fieldError: ['origins.0', 'LON is a city code'],
-  estimateCells: [126],
-  estimateRow: ['SearchApi', 'discovery', 92, '£0', '30m'],
-  estimateTotal: [154, 2000, '£0', '45m'],
-  estimateBlocked: ['searchapi provider-month cap 10000, estimated 12000'],
   budgetFitOk: [4],
   budgetFitWarn: [4],
   budgetScope: ['provider-month:searchapi', 616, '10000'],
@@ -157,6 +152,31 @@ const SAMPLES: Record<string, unknown[]> = {
   'datesView.runFinished': ['2h ago'],
   'datesView.runInProgress': ['40 min ago'],
   // WP20 (Task 20.3): the Searches view's cards
+  // WP20 Task 20.5: the new-search form, the estimate sentence, a refused Search now, Edit and Repeat weekly
+  'newSearch.estimateFailed': ['database is locked'],
+  'newSearch.saveFailed': ['database is locked'],
+  'refusedPage.capResets': ['1 Nov 2026'],
+  'editSearch.heading': ['Birmingham → Frankfurt'],
+  'editSearch.startFailed': ['database is locked'],
+  'repeatWeekly.repeats': ['Mondays', '05:00'],
+  'repeatWeekly.repeatsDaily': ['05:00'],
+  'estimateLine.aboutMinutes': [12],
+  'estimateLine.aboutHours': [2, true],
+  'estimateLine.about': ['£1.20'],
+  'estimateLine.asksAll': ['405'],
+  'estimateLine.asksSome': ['300', '405'],
+  'estimateLine.partly': ['20'],
+  'estimateLine.reused': ['105'],
+  'estimateLine.restNext': ['Monday'],
+  'estimateLine.nothingNew': ['405'],
+  'estimateLine.billed': ['120', '9,880', 'SearchApi', 'month'],
+  'estimateLine.billedNoCap': ['120', 'SearchApi'],
+  'estimateLine.searchesTag': ['120', 'SearchApi'],
+  'estimateLine.withTag': ['Search now', 'about £1.20'],
+  'estimateLine.monthlyPages': ['110', '1,400'],
+  'estimateLine.notUsed': ['Google Flights via SearchApi', 'no calls left this month', '£3.40'],
+  'estimateLine.softCost': ['£1.20', '£1.00', 'Search now'],
+  'estimateLine.softShare': ['SearchApi', 'lifetime', 'Search now'],
   'searchesView.codes': ['BHX', 'FRA'],
   'searchesView.windowSpan': ['10 Jan', '31 Mar'],
   'searchesView.windowRolling': [182, 7],
@@ -378,17 +398,23 @@ describe('COPY catalogue (spec §11 banned words)', () => {
     );
   });
 
-  it('confirmations state the estimated calls with the hard stop, and pounds (decisions 36, 44)', () => {
-    expect(COPY.createConfirm(154, 2000, '£0')).toBe(
-      'Create and confirm about 154 calls (hard stop 2000), £0 per run',
-    );
+  it('a reconfirmation states the estimated calls with the hard stop, and pounds (decisions 36, 44)', () => {
     expect(COPY.confirmNew(154, 2000, '£2')).toBe('Confirm about 154 calls (hard stop 2000), £2 per run');
-    const copy = [
-      COPY.createConfirm(1, 2, '£0'),
-      COPY.confirmNew(1, 2, '£0'),
-      COPY.estimateTotal(1, 2, '£0', '1m'),
-    ];
-    expect(copy.filter((c) => /\bup to\b/.test(c))).toEqual([]);
+    expect([COPY.confirmNew(1, 2, '£0')].filter((c) => /\bup to\b/.test(c))).toEqual([]);
+  });
+
+  it('the estimate sentence and its press read as the spec words them (spec rev 55 §11)', () => {
+    const L = COPY.estimateLine;
+    expect(L.withTag('Search now', 'about £1.20')).toBe('Search now · about £1.20');
+    expect(L.billed('120', '9,880', 'SearchApi', 'month')).toBe(
+      'uses about 120 of the 9,880 SearchApi searches left this month',
+    );
+    expect(L.billed('12', '91', 'SearchApi', 'lifetime')).toBe(
+      'uses about 12 of the 91 SearchApi searches left on your trial',
+    );
+    expect(L.aboutHours(1, false)).toBe('about 1 hour');
+    expect(L.aboutHours(1, true)).toBe('about 1½ hours');
+    expect(L.nothingNew('1')).toBe('Nothing new to ask: 1 date pair reused from earlier runs');
   });
 
   it('the first screen speaks in main-path words: no set-up term (spec rev 55 §11)', () => {
