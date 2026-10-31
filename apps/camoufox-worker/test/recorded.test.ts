@@ -24,7 +24,13 @@ import { onAllowlist } from '../src/guard.js';
 import { parseOptionName } from '../src/names.js';
 import { KINDS, RECORDED_BY, type RecordingKind } from '../src/record.js';
 import { FLAG_NAMES, flagsOf, PROOFS, SELECTORS, selectorsFor } from '../src/selectors.js';
-import { rangeOf, recordedAnchor, superseded, underDrawnSettle } from './support/recordedGrid.js';
+import {
+  rangeOf,
+  recordedAnchor,
+  recordedCells,
+  superseded,
+  underDrawnSettle,
+} from './support/recordedGrid.js';
 
 const ROOT = fileURLToPath(new URL('../fixtures/recorded/', import.meta.url));
 
@@ -381,7 +387,7 @@ describe('verification flags (TS-13; runs on every checkout)', () => {
         superseded(
           rec,
           recs.map((r) => r.rec),
-          anyAnchorOf(rec),
+          anyAnchorOf,
         );
       /**
        * The recordings of entries whose GRID_VERIFIED is set: the strict checks below hold on every one of them but a
@@ -396,7 +402,7 @@ describe('verification flags (TS-13; runs on every checkout)', () => {
           interpretView(
             {
               lines: v.lines.texts,
-              candidates: v.candidates,
+              candidates: recordedCells(v.candidates),
               ranges: [],
               prices: v.selectedLines,
               datesGrid: v.datesGrid,
@@ -441,7 +447,7 @@ describe('verification flags (TS-13; runs on every checkout)', () => {
             const r = interpretView(
               {
                 lines: v.lines.texts,
-                candidates: v.candidates,
+                candidates: recordedCells(v.candidates),
                 ranges: [],
                 prices: v.selectedLines,
                 datesGrid: v.datesGrid,
@@ -469,7 +475,7 @@ describe('verification flags (TS-13; runs on every checkout)', () => {
         let shown = 0;
         for (const { file, rec } of recs) {
           const names = rec.views
-            .flatMap((v) => v.candidates)
+            .flatMap((v) => recordedCells(v.candidates))
             .filter((c) => c !== null && !c.startsWith('£'));
           if (names.length > 0 && unpricedOn(rec).unpriced) {
             shown++;

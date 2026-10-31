@@ -80,6 +80,27 @@ async function texts(l: LocatorLike, d: Deadline): Promise<string[]> {
   return out;
 }
 
+/**
+ * The panel's buttons that may be cells: every one but the grid's own controls, the four scroll buttons and "Reset back
+ * to centre" (spec §2 rev 54; grid/2026-10-30/1), each by its exact name. A nameless button stays, and is unparsed.
+ */
+export function cellCandidates(
+  names: ReadonlyArray<string | null>,
+  G: Selectors['results']['dateGrid'],
+): Array<string | null> {
+  const controls = new Set<string | null>(gridControls(G));
+  return names.filter((name) => !controls.has(name));
+}
+
+/** The grid's own controls by exact name: the four scroll buttons and "Reset back to centre" (spec §2 rev 54). */
+export const gridControls = (G: Selectors['results']['dateGrid']): string[] => [
+  G.scroll.left,
+  G.scroll.right,
+  G.scroll.up,
+  G.scroll.down,
+  G.reset,
+];
+
 /** Reads one view through locators: the lines, the cell candidates, the selected lines and the dates-grid check. */
 export async function readRawView(
   dialog: LocatorLike,
@@ -90,11 +111,9 @@ export async function readRawView(
   const G = S.results.dateGrid;
   const scrollNames: string[] = [G.scroll.left, G.scroll.right, G.scroll.up, G.scroll.down];
   const buttons = panel.getByRole('button');
-  const candidates: Array<string | null> = [];
-  for (let i = 0, n = await countOf(buttons, d); i < n; i++) {
-    const name = await nameOf(buttons.nth(i), d);
-    if (name === null || !scrollNames.includes(name)) candidates.push(name);
-  }
+  const names: Array<string | null> = [];
+  for (let i = 0, n = await countOf(buttons, d); i < n; i++) names.push(await nameOf(buttons.nth(i), d));
+  const candidates = cellCandidates(names, G);
   let scrollButtons = 0;
   for (const name of scrollNames)
     if ((await countOf(panel.getByRole('button', { name, exact: true }), d)) === 1) scrollButtons++;
@@ -153,6 +172,9 @@ export function viewCounts(r: RawView): Record<string, number> {
   return {
     candidates: r.candidates.length,
     pricedLooking: r.candidates.filter((x) => x?.startsWith('£') === true).length,
+    // why: the live run of 2026-10-30 stopped on grid:first-view:selected-cell once; the count tells none, two, or one
+    // on another pair apart
+    selected: r.candidates.filter((x) => x !== null && spaced(x).endsWith(', selected')).length,
     lines: r.lines.length,
     labelsLine1: dayLabels(r.lines.slice(0, 1).join('')).length,
     labelsLine2: dayLabels(r.lines.slice(1, 2).join('')).length,

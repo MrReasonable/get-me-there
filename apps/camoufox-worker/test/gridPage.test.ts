@@ -602,6 +602,68 @@ describe('grid pages: a view still drawing its cells', () => {
   });
 });
 
+// why: spec §2 rev 54 (grid/2026-10-30/1, the live run of 2026-10-30): the grid adds a button "Reset back to centre"
+// to the panel once the query's pair has scrolled out of view. Counted as a cell, it refused every whole view after the
+// query's pair left it (49 + 1 names: the count check) and took a view one cell short as drawn
+describe('grid pages: the grid’s reset control', () => {
+  const query: [string, string] = ['2027-03-14', '2027-03-24'];
+  const inView = (d: string, r: string): boolean =>
+    d <= query[0] && query[0] <= plusDays(d, 6) && r <= query[1] && query[1] <= plusDays(r, 6);
+  const tree = (d: string, r: string, i: number, undrawn?: (d: string, r: string) => boolean): FakeNode =>
+    dialogPage(
+      gridTree({
+        depart: d,
+        ret: r,
+        rotate: i,
+        selected: query,
+        extra: inView(d, r) ? [] : [n('button', 'Reset back to centre')],
+        ...(undrawn === undefined ? {} : { undrawn }),
+      }),
+    );
+  const down7: GridMove[] = ['down', 'down', 'down', 'down', 'down', 'down', 'down'];
+  it('a block-to-block move of seven scrolls down reads every view whole, the four holding the control included', async () => {
+    const t = setup({ view: (d, r, i) => [tree(d, r, i)] });
+    const r = await t.session.page(req(down7));
+    expect(r.answer).toMatchObject({ kind: 'grid', ended: 'complete', scrolls: 7 });
+    if (r.answer.kind !== 'grid') throw new Error('not a grid answer');
+    expect(r.answer.views.map((v) => [v.cells.length, v.structural, v.unparsed])).toEqual(
+      Array.from({ length: 8 }, () => [49, 'ok', 0]),
+    );
+    // why: the query's return leaves the view on the fourth scroll, as it did live
+    expect(r.answer.views.map((v) => inView(v.departures[0] ?? '', v.returns[0] ?? ''))).toEqual([
+      true,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false,
+      false,
+    ]);
+  });
+  it('a view holding the control and one cell short is waited on until that cell draws, then read whole', async () => {
+    const log = memoryLog();
+    const t = setup({
+      log,
+      view: (d, r, i) => {
+        const whole = tree(d, r, i);
+        if (i !== 6) return [whole];
+        const part = tree(d, r, i, (dd, rr) => dd === plusDays(d, 3) && rr === plusDays(r, 6));
+        return [part, part, part, part, whole];
+      },
+    });
+    const r = await t.session.page(req(down7));
+    expect(r.answer).toMatchObject({ kind: 'grid', ended: 'complete', scrolls: 7 });
+    expect(r.answer.kind === 'grid' && r.answer.views.map((v) => [v.cells.length, v.structural])).toEqual(
+      Array.from({ length: 8 }, () => [49, 'ok']),
+    );
+    const polls = log.lines
+      .filter((l) => l.msg === 'dialog poll' && Reflect.get(l.o, 'view') === 'move-6')
+      .map((l) => Reflect.get(l.o, 'drawing'));
+    expect(polls).toEqual([true, true, true, true, false, false]);
+  });
+});
+
 describe('grid pages: fix round 1 (the moves, the lookups and the settle)', () => {
   it.each([
     ['moves the other axis too', (dir: string): [number, number] => (dir === 'right' ? [1, 1] : [0, 0])],

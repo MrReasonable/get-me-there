@@ -33,7 +33,7 @@ import {
   type StepOptions,
   timeoutOf,
 } from './driver.js';
-import { stillDrawing } from './gridView.js';
+import { gridControls, stillDrawing } from './gridView.js';
 import { parseOptionName } from './names.js';
 import type { GridDirection } from './recordArgs.js';
 import type { Selectors } from './selectors.js';
@@ -76,7 +76,10 @@ export interface ViewRead {
   snapshot: string;
   lines: { count: number; texts: string[] };
   labels: { count: number; texts: string[] };
-  /** The panel's buttons other than the four scroll buttons, in document order (the cell candidates). */
+  /**
+   * The panel's buttons other than the four scroll buttons, in document order: the cells, and "Reset back to centre"
+   * where the page shows it (the reader drops it: spec §2 rev 54).
+   */
   candidates: Array<string | null>;
   datesGrid: { dialog: number; datesSelected: number; grid: number; scrollButtons: number };
   selectedLines: string[];
@@ -269,10 +272,10 @@ export async function exploreGrid(
         const p = await panelOf(dialog, st);
         const lines = await texts(p.locator.getByText(LINE), st);
         const labels = await texts(p.locator.getByText(LABEL), st);
-        // why: spec §2 rev 46: the cells are counted on every poll (the panel's buttons less the scroll buttons there),
-        // so a view still drawing is waited on as the provider waits; their names are read once it has settled
+        // why: spec §2 rev 46: the cells are counted on every poll (the panel's buttons less the grid's controls there,
+        // rev 54), so a view still drawing is waited on as the provider waits; their names are read once it has settled
         let cells = await countOf(p.locator.getByRole('button'), st);
-        for (const nm of scrollNames)
+        for (const nm of gridControls(G))
           cells -= await countOf(p.locator.getByRole('button', { name: nm, exact: true }), st);
         return {
           value: p.locator,

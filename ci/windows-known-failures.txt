@@ -17,6 +17,8 @@
 # files' POSIX-mode setup (https://github.com/MrReasonable/get-me-there/actions/runs/40325418273).
 # A stopped page naming its rule (spec rev 52) adds session and recorder tests that share those files' POSIX-mode
 # setup (https://github.com/MrReasonable/get-me-there/actions/runs/40436004392).
+# The grid's reset control (spec rev 54) adds two grid-page tests that share that file's POSIX-mode setup
+# (https://github.com/MrReasonable/get-me-there/actions/runs/41145793523).
 apps/api/test/bootstrap/app.backup.test.ts > backup preflight (spec §7 Migrations, §13 Backup) backs up into <db dir>/backups before applying pending migrations; the backup has the old schema
 apps/api/test/bootstrap/app.matrix.test.ts > injected-config boot matrix (spec §5.5) an unwritable data directory fails boot with exit code 73
 apps/api/test/bootstrap/app.spawn.test.ts > production boot lacks fixture (spec §5.5, §9 item 5) the real bootstrap under NODE_ENV=production never offers or accepts synthetic data
@@ -104,6 +106,8 @@ apps/camoufox-worker/test/gridPage.test.ts > grid pages: the flow the whole rese
 apps/camoufox-worker/test/gridPage.test.ts > grid pages: the flow with S monthly scrolls left and a request of 4, the allowance is S: ended allowance, views kept, counts settled
 apps/camoufox-worker/test/gridPage.test.ts > grid pages: the flow with a scroll spacing of 0 the scrolls do not wait; with 5 s they do
 apps/camoufox-worker/test/gridPage.test.ts > grid pages: the flow with page room but no monthly scroll left, the page loads, reads its first block and makes no scroll
+apps/camoufox-worker/test/gridPage.test.ts > grid pages: the grid’s reset control a block-to-block move of seven scrolls down reads every view whole, the four holding the control included
+apps/camoufox-worker/test/gridPage.test.ts > grid pages: the grid’s reset control a view holding the control and one cell short is waited on until that cell draws, then read whole
 apps/camoufox-worker/test/gridPage.test.ts > grid pages: the live run’s first page a refused view logs the rule and the failing check with counts only
 apps/camoufox-worker/test/gridPage.test.ts > grid pages: the live run’s first page the planner’s first block for 8–21 Mar, 10–12 nights, is read
 apps/camoufox-worker/test/install.test.ts > ensureInstallLayout on macOS (decision 73; Task 17.2): verifies only a bundle without its binary or properties.json refuses naming the file

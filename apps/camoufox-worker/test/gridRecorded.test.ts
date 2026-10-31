@@ -22,7 +22,7 @@ import { loadSocs } from '../src/socs.js';
 import { FakeContext } from './support/fakeContext.js';
 import { type FakeNode, formNodes, n, resultsTree, text } from './support/fakePage.js';
 import { memoryLog } from './support/log.js';
-import { rangeOf, recordedAnchor, superseded } from './support/recordedGrid.js';
+import { rangeOf, recordedAnchor, recordedCells, superseded } from './support/recordedGrid.js';
 import { SYNTHETIC_REJECT } from './support/socsValues.js';
 import { fakeTimers } from './support/timers.js';
 import { tmpDir } from './support/tmp.js';
@@ -117,7 +117,7 @@ const recordings = () => {
       !superseded(
         rec,
         all.map((o) => o.rec),
-        anchorOf(rec),
+        anchorOf,
       ),
   );
 };
@@ -274,7 +274,7 @@ describe.skipIf(!present)(
         expect(
           r.answer.views.map((v) => v.cells.length),
           file,
-        ).toEqual(rec.views.slice(0, r.answer.views.length).map((v) => v.candidates.length));
+        ).toEqual(rec.views.slice(0, r.answer.views.length).map((v) => recordedCells(v.candidates).length));
       }
       expect([onPlan > 0, nearToday > 0]).toEqual([true, true]);
     });
@@ -349,7 +349,7 @@ describe.skipIf(!present)(
       allRecordings().flatMap(({ file, rec }) => {
         const anchor = anchorOf(rec);
         const idx = rec.views.flatMap((v, i) =>
-          stillDrawing(v.lines.texts, v.candidates.length, anchor) ? [i] : [],
+          stillDrawing(v.lines.texts, recordedCells(v.candidates).length, anchor) ? [i] : [],
         );
         return idx.length === 0 ? [] : [{ file, rec, idx }];
       });
@@ -388,7 +388,7 @@ describe.skipIf(!present)(
               o.rec.views.filter(
                 (w) =>
                   changeKeyOf({ lines: w.lines.texts }) === key &&
-                  !stillDrawing(w.lines.texts, w.candidates.length, anchorOf(o.rec)),
+                  !stillDrawing(w.lines.texts, recordedCells(w.candidates).length, anchorOf(o.rec)),
               ),
             )[0];
           if (whole !== undefined) later.set(i, whole);
@@ -420,10 +420,20 @@ describe.skipIf(!present)(
 describe.skipIf(!present)(
   skipTitle('recorded grid views holding unpriced cells (spec §2 "Cells by name")', present),
   () => {
-    const sparse = () =>
-      allRecordings().filter(({ rec }) =>
-        rec.views.some((v) => v.candidates.some((c) => c !== null && parseUnpricedCellName(c) !== null)),
+    // why: a recording a later settle supersedes (grid/2026-10-30/1's view 6, taken one cell short) is held to the
+    // wait-or-refuse checks above, not to these
+    const sparse = () => {
+      const all = allRecordings();
+      return all.filter(
+        ({ rec }) =>
+          rec.views.some((v) => v.candidates.some((c) => c !== null && parseUnpricedCellName(c) !== null)) &&
+          !superseded(
+            rec,
+            all.map((o) => o.rec),
+            anchorOf,
+          ),
       );
+    };
     it('each view is read whole: every pair priced, no flights or price unknown, as its cell names it', async () => {
       const recs = sparse();
       expect(recs.length).toBeGreaterThan(0);
@@ -438,7 +448,7 @@ describe.skipIf(!present)(
         for (const [i, v] of r.answer.views.entries()) {
           const called = v.departures.flatMap((d) => v.returns.filter((x) => x >= d)).length;
           expect([v.structural, v.unparsed, v.cells.length], `${file} view ${i}`).toEqual(['ok', 0, called]);
-          const names = rec.views[i]?.candidates ?? [];
+          const names = recordedCells(rec.views[i]?.candidates ?? []);
           // why: every cell's status is its own name's words, never inferred from a neighbour or a weekday
           const dm = (iso: string): string =>
             `${Number(iso.slice(8, 10))} ${MONS[Number(iso.slice(5, 7)) - 1] ?? ''}`;
@@ -496,11 +506,21 @@ describe.skipIf(!present)(
           file,
         ).toEqual(rec.views.map((_v, i) => i));
         for (const v of r.answer.views) {
-          const names = rec.views[v.index]?.candidates ?? [];
+          const names = recordedCells(rec.views[v.index]?.candidates ?? []);
           const unpriced = names.filter((c) => c !== null && parseUnpricedCellName(c) !== null).length;
           const at = `${file} view ${v.index}`;
-          if (file.startsWith('2026-10-26/')) {
-            // why: the first run's views: a day of their lines has no priced cell, so the set check refuses them
+          // why: worked out from the view's own names, not its file: a day of its lines with no priced cell (the first
+          // run's views, grid/2026-10-26/7 and 8; a departure day of grid/2026-10-30/2 with no flights at all)
+          const priced = names.flatMap((c) => {
+            const p = c === null ? null : parseCellName(c);
+            return p === null ? [] : [p];
+          });
+          const dayOf = (iso: string): string => `${Number(iso.slice(8, 10))}-${Number(iso.slice(5, 7))}`;
+          const everyDayPriced =
+            v.departures.every((d) => priced.some((p) => `${p.dep.day}-${p.dep.month}` === dayOf(d))) &&
+            v.returns.every((x) => priced.some((p) => `${p.ret.day}-${p.ret.month}` === dayOf(x)));
+          if (!everyDayPriced) {
+            // why: without those names read as cells, that day names no cell, so the set check refuses the view
             expect([v.structural, v.cells.length], at).toEqual(['unparsed', 0]);
             refused++;
           } else {

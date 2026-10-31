@@ -103,6 +103,8 @@ export interface Selectors {
       datesTab: string;
       grid: string;
       scroll: { left: string; right: string; up: string; down: string };
+      /** The button the grid adds once the query's pair has scrolled out of view; a control, never a cell. */
+      reset: string;
     };
     /** Google's own "no flights" line; a hypothesis until NO_FLIGHTS_VERIFIED. */
     noFlights: RegExp;
@@ -186,6 +188,9 @@ export const SELECTORS: Selectors = {
       datesTab: 'Dates',
       grid: 'Date grid',
       scroll: { left: 'Scroll left', right: 'Scroll right', up: 'Scroll up', down: 'Scroll down' },
+      // why: observed 2026-10-30 (grid/2026-10-30/1): once the selected pair scrolls out of view the panel holds this
+      // button too; read as a cell, it made a whole view one too many (and a view one short look drawn)
+      reset: 'Reset back to centre',
     },
     noFlights: /^No (?:results|flights) (?:returned|found)/,
   },

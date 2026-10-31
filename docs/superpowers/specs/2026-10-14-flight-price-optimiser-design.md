@@ -1,6 +1,6 @@
 # get-me-there — Flight Price Intelligence & Flexible-Date Optimiser
 
-**Design spec, revision 53.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
+**Design spec, revision 54.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
 four full-roster reviews (145, 140, 126 and 101 findings; zero Critical since
 revision 2) and the provider spike. Revision 9 folds in the three decisions
 taken at approval (the self-scraping fallback in §2, the dashboard readings in
@@ -289,8 +289,11 @@ the name: a tab with none there is unpriced.
   buttons; anything else is `unrecognised`.
   **Cells by name** (the `--grid` recordings of 2026-10-18: after a scroll
   the page reuses its elements and rotates their order, so position says
-  nothing). The cell candidates are the panel's buttons other than the four
-  scroll buttons, whatever their names; each name carries both of its dates,
+  nothing). The cell candidates are the panel's buttons other than the grid's
+  own controls, whatever their names: the four scroll buttons and "Reset back
+  to centre", which the grid adds once the query's own pair has scrolled out
+  of view (grid/2026-10-30/1), each matched by its exact name. A drawn view's
+  count (below) counts candidates only. Each name carries both of its dates,
   and the departures and returns lines are only a set check: the dates the
   cells name must equal the lines' sets. A view holds 49 cells less the pairs
   whose return precedes the departure (a same-day pair is shown; 39 near
@@ -3786,6 +3789,19 @@ as specified in §5.3; no secrets, no full URLs.
 ---
 
 ## 17. Changelog
+
+### Revision 54: the grid's reset control is not a cell (2026-10-30)
+
+The operator's run of 2026-10-30 19:31 read 31 pages and priced 812 date pairs, but every view it reached by
+scrolling past its query's pair was refused whole (`view-unparsed`), about 1,400 date pairs. A grid recording of a
+seven-scroll block move (grid/2026-10-30/1, darwin-arm64) shows why: once the query's pair leaves the view, the grid
+adds a button "Reset back to centre" to the panel. The reader took every button but the four scroll buttons as a cell
+candidate, so each such view named 50 candidates where 49 were called for and failed the count check, and a view one
+cell short (48 cells and the button) counted as drawn and was taken before its last cell had drawn. §2 "Cells by name"
+now names the grid's controls, the reset button among them, and keeps them out of the candidates and the drawn count;
+the recorder counts the same way. The run then stopped on `grid:first-view:selected-cell` at a page whose recording
+(grid/2026-10-30/2) the reader accepts; the refusal's debug line now counts the selected names, so a repeat shows which
+part of the selection failed. That cool-down was cleared by hand, per the operator's standing rule.
 
 ### Revision 53: an unpriced searched pair is a good first view (2026-10-27)
 
