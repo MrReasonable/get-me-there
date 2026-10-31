@@ -3,7 +3,7 @@ import { HttpResponse, http } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { COPY } from '../../../src/copy.js';
 import { SearchAgainButton } from '../../../src/views/Dates/SearchAgainButton.js';
-import { API, definition } from '../../fixtures.js';
+import { API, definition, execution } from '../../fixtures.js';
 import { server } from '../../msw/server.js';
 import { renderWithProviders, settled } from '../../render.js';
 
@@ -20,6 +20,9 @@ function serveStart(
 ) {
   const bodies: unknown[] = [];
   server.use(
+    http.get(`${API}/executions/:id`, () =>
+      HttpResponse.json(execution({ id: 'exec-2', status: 'running' })),
+    ),
     http.get(`${API}/definitions`, () => HttpResponse.json([definition(confirmed)])),
     http.post(`${API}/definitions/:id/executions`, async ({ request }) => {
       bodies.push(await request.json());
@@ -135,5 +138,24 @@ describe('SearchAgainButton, the first press (spec rev 55 §8.1)', () => {
     server.use(http.get(`${API}/definitions`, () => new Promise<never>(() => undefined)));
     renderWithProviders(<SearchAgainButton definitionId="def-0001" />);
     expect(await button()).toBeDisabled();
+  });
+
+  it('"Searching…" clears once the started run is no longer pending or running', async () => {
+    let status: 'running' | 'completed' = 'running';
+    const bodies = serveStart({ confirmedCostPence: 0, confirmedCalls: 154 });
+    server.use(
+      http.get(`${API}/executions/:id`, () => HttpResponse.json(execution({ id: 'exec-2', status }))),
+    );
+    const { user, client } = renderWithProviders(<SearchAgainButton definitionId="def-0001" />);
+    const b = await button();
+    await waitFor(() => expect(b).toBeEnabled());
+    await user.click(b);
+    await waitFor(() => expect(bodies).toHaveLength(1));
+    expect(await screen.findByRole('status')).toHaveTextContent(COPY.searchAgain.working);
+    // the run ends; its next read (the run is polled while in flight, and the press invalidated it) says so
+    status = 'completed';
+    await client.invalidateQueries({ queryKey: ['execution'] });
+    await waitFor(() => expect(screen.queryByRole('status')).toBeNull());
+    expect(screen.getByRole('button', { name: COPY.searchAgain.label })).toBeEnabled();
   });
 });

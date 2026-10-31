@@ -13,12 +13,12 @@ export function stopOrNone(stop: StopWords | null | undefined): StopWords {
   return stop ?? NO_STOP_CAUSE_TEXT;
 }
 
-/** The word a fix names a Resume with (core's stop-cause fixes: "Raise the limit in Edit, then Resume"). */
-const RESUME_WORD = /\bResume\b/;
-
-/** True when the stop's fix names Resume: only then does a Resume button belong with the sentence (spec §11 status bar). */
+/**
+ * True when the stop's fix offers Resume: core's structured `fix.resume` flag (never matched on words), so a fix that
+ * offers a fresh search instead (a browser page limit, a row with no cause) hides the Resume button.
+ */
 export function fixNamesResume(stop: StopWords): boolean {
-  return stop.fix !== null && RESUME_WORD.test(stop.fix.text);
+  return stop.fix?.resume === true;
 }
 
 /**

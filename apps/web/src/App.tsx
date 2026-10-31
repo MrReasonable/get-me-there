@@ -25,9 +25,6 @@ import { StatusView } from './views/Status.js';
 /** The views that need no definition (spec §11: the Set up views other than Alerts). */
 const NO_DEFINITION: ReadonlySet<ViewId> = new Set(['searches', 'definitions', 'providers', 'status']);
 
-/** Searches, with `view=searches` written into the URL (spec rev 55 §11 URLs). */
-const SEARCHES_LANDING: Landing = { kind: 'view', view: 'searches', patch: { view: 'searches' } };
-
 /**
  * Spec rev 55 §11 layout: synthetic banner, header with the nav (no search selector: every action lives on the search it
  * acts on), status bar on every view. When /providers fails, the page says provider status is unknown instead of silently showing
@@ -52,9 +49,7 @@ export function App() {
   // why: spec §11 URLs (WP20 Task 20.3): an absent or unknown view, a search's page without def= and an Edit page without
   // edit= land on Searches; the retired views and a Results URL without a date pair land on a search's page, which with
   // no def= is Searches too. The view drawn follows the landing at once, and the URL is rewritten to it
-  const landed0 = useMemo(() => land(params, selected), [params, selected]);
-  const landing: Landing =
-    landed0.kind === 'view' && landed0.view === 'dates' && requested === null ? SEARCHES_LANDING : landed0;
+  const landing: Landing = useMemo(() => land(params, selected), [params, selected]);
   const view: ViewId = landing.kind === 'view' ? landing.view : 'results';
   // why: Results is the date pair detail (spec §11, WP19 Task 19.6): it renders only for a well-formed date pair
   const datePair = parseDetailPair(params);
@@ -75,6 +70,13 @@ export function App() {
       text === null ? null : { search: new URLSearchParams(window.location.search).toString(), text },
     );
   }, []);
+  const editing = params.get('edit');
+  const barSearch =
+    view === 'dates' || view === 'results'
+      ? selected
+      : view === 'definitions'
+        ? (list.find((d) => d.id === editing) ?? null)
+        : null;
   const noProviders = providers.data !== undefined && !providers.data.providers.some((p) => p.enabled);
   // why: until /providers answers (or fails, which the page then says), the page cannot tell whether its prices are
   // synthetic, so no price view renders: a fixture price must never look real for the moment before the banner.
@@ -113,9 +115,9 @@ export function App() {
             />
           </header>
           <div className="statusbar-row">
-            {/* why: the first screen names no search, so the bar's run part follows only a search the URL names (`def=`);
-            every run action lives on the search it acts on (spec rev 55 §11) */}
-            <StatusBar definition={view === 'searches' && requested === null ? null : selected} />
+            {/* why: ruling R-bar — the bar follows the search the view shows (its page and detail by `def=`, the Edit page by
+            `edit=`), with Cancel and Resume; on every other view it follows any search's run, named, with no controls */}
+            <StatusBar definition={barSearch} />
           </div>
         </div>
         <main id="main" tabIndex={-1} className="view-main pt-5">

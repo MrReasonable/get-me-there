@@ -18,6 +18,8 @@ beforeEach(() => {
   });
 });
 afterEach(() => {
+  // why: gmt.lastSearch and any other stored value must not leak from one test into the next
+  window.localStorage.clear();
   // why: Vitest runs without globals, so RTL's automatic cleanup never registers.
   cleanup();
   // why: per-test handlers prepended with server.use() must not leak into the next test.

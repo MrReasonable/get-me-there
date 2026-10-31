@@ -70,7 +70,7 @@ export const COPY = {
   navLabel: 'Views',
   // WP19 Task 19.7 (spec §11 layout): the nav's two tiers
   navTier: { decide: 'Decide', setup: 'Set up' },
-  /** The phone's one nav row opens the full nav and the search selector (departure board, Ian 2026-10-27). */
+  /** The phone's one nav row opens the full nav (departure board, Ian 2026-10-27). */
   navMenu: 'All views',
   nav: {
     searches: 'Searches',
@@ -322,7 +322,10 @@ export const COPY = {
   noCap: 'no cap',
   resumesAt: (when: string) => `resumes ${when}`,
   scheduleBlocked: (date: string) => `schedule blocked since ${date}`,
-  childRun: (status: string) => `itinerary search for one cell: ${status}`,
+  childRun: (status: string) => `checking fares for one date pair: ${status}`,
+  /** The bar names the search whose run it shows when the view does not (ruling R-bar). */
+  barSearchName: (name: string) => `${name}:`,
+  monthSpendLabel: 'Spend this month',
   resume: 'Resume',
   cancel: 'Cancel',
   confirmCancel: 'Confirm: cancel this run',
@@ -330,7 +333,7 @@ export const COPY = {
   working: 'Working…',
   runDetails: 'Progress and spend',
   // WP19 Task 19.7 (spec §11): the status bar's progress breakdown links to the Dates view's coverage section
-  progressCoverageLink: 'Coverage in the Dates view',
+  progressCoverageLink: 'Coverage of this search',
 
   // filters (spec §6.5)
   filtersHeading: 'Filter',
@@ -618,7 +621,6 @@ export const COPY = {
     heading: 'Searches',
     listLabel: 'Your searches',
     sideHeading: 'New search',
-    /** Until the form is mounted beside the list (Task 20.5), the column links to the form on the Edit page. */
     noSearches: 'No searches yet',
     codes: (origins: string, destinations: string) => `${origins} → ${destinations}`,
     windowSpan: (from: string, to: string) => `${from} – ${to}`,
@@ -636,10 +638,15 @@ export const COPY = {
     readingFlights: (read: number, planned: number) => `Reading flights · ${read} of ${planned}`,
     left: (span: string) => `about ${span} left`,
     searchedAgo: (ago: string) => `Searched ${ago}`,
-    datesChanged: (notSearched: number) =>
-      notSearched > 0
-        ? `Dates changed: ${notSearched} date ${noun(notSearched, 'pair', 'pairs')} not searched yet`
-        : 'Dates changed since this was last searched',
+    // why: the card's screen-reader line says only the kind of state, so a poll that changes a count announces nothing
+    stateKind: {
+      searching: 'Searching',
+      flights: 'Reading flights',
+      changed: 'Dates changed',
+      searched: 'Searched',
+      never: 'Not searched yet',
+    },
+    datesChanged: 'Dates changed since this was last searched',
     notSearchedYet: 'Not searched yet',
     neverSearched: (never: number, total: number) =>
       `${never} of ${total} date ${noun(total, 'pair', 'pairs')} never searched`,

@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { ACTIVE_STATUSES, PAUSED_STATUSES, RESUMABLE_STATUSES } from '../../src/types/execution.js';
+import {
+  ACTIVE_STATUSES,
+  IN_FLIGHT_STATUSES,
+  PAUSED_STATUSES,
+  RESUMABLE_STATUSES,
+  STOPPED_STATUSES,
+} from '../../src/types/execution.js';
 
 describe('execution status sets (spec §7)', () => {
   it('active statuses are the ones the parent and child partial unique indexes cover', () => {
@@ -17,5 +23,25 @@ describe('execution status sets (spec §7)', () => {
       'cancelled',
       'completed',
     ]);
+  });
+});
+
+describe('the status sets the cards, the bar and the api share (review finding 11)', () => {
+  it('in flight is pending and running; stopped is every status a run stops or is skipped in, and never completed or in flight', () => {
+    expect(IN_FLIGHT_STATUSES).toEqual(['pending', 'running']);
+    expect([...STOPPED_STATUSES].sort()).toEqual(
+      [
+        'cancelled',
+        'interrupted',
+        'paused_budget',
+        'paused_error',
+        'skipped_budget',
+        'skipped_confirm',
+        'skipped_missed',
+        'skipped_window',
+      ].sort(),
+    );
+    expect(STOPPED_STATUSES).not.toContain('completed');
+    for (const s of IN_FLIGHT_STATUSES) expect(STOPPED_STATUSES).not.toContain(s);
   });
 });

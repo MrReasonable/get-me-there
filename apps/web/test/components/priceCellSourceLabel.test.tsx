@@ -1,6 +1,8 @@
+import { sourceLabel } from '@gmt/core';
 import { screen, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { PriceCell } from '../../src/components/PriceCell.js';
+import { assertProvenance } from '../../src/components/Provenance.js';
 import { provSearch } from '../fixtures.js';
 import { renderWithProviders } from '../render.js';
 
@@ -41,7 +43,9 @@ describe('PriceCell sourceLabel', () => {
     renderWithProviders(
       <PriceCell pricePence={8600} provenance={provSearch} calendar={false} stale={false} />,
     );
-    expect(within(screen.getByTestId('provenance')).queryByText(LABEL)).toBeNull();
+    const provenance = screen.getByTestId('provenance');
+    expect(within(provenance).queryByText(LABEL)).toBeNull();
+    expect(within(provenance).getByText(sourceLabel(assertProvenance(provSearch)))).toBeInTheDocument();
   });
 
   it('still refuses an amount whose provenance is incomplete', () => {

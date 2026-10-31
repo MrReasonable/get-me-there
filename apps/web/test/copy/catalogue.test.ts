@@ -166,7 +166,7 @@ const SAMPLES: Record<string, unknown[]> = {
   'searchesView.readingFlights': [3, 10],
   'searchesView.left': ['1h 40m'],
   'searchesView.searchedAgo': ['2h ago'],
-  'searchesView.datesChanged': [24],
+  barSearchName: ['Birmingham → Frankfurt'],
   'searchesView.neverSearched': [85, 405],
   'searchesView.trip': ['12', '23 Jan'],
   'searchesView.seeDatesOf': ['Birmingham → Frankfurt'],

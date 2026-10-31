@@ -12,6 +12,10 @@
     .searches-layout {
       grid-template-columns: minmax(0, 1fr);
     }
+    /* the form above the list; the DOM keeps one order, so crossing the breakpoint remounts nothing */
+    .searches-side {
+      order: -1;
+    }
   }
   .searches-side {
     min-width: 0;

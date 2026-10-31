@@ -1,4 +1,4 @@
-import type { DecodedDatePairs, IsoDateTime } from '@gmt/core';
+import { type DecodedDatePairs, IN_FLIGHT_STATUSES, type IsoDateTime } from '@gmt/core';
 import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { ApiError } from '../../api/client.js';
 import { DATES_DRAWN_MARK, useDatePairs, useExecutionWatch, useProvidersWatch } from '../../api/queries.js';
@@ -25,7 +25,7 @@ import { countsOf } from './stayScope.js';
 import { UpdateBoard } from './UpdateBoard.js';
 
 const D = COPY.datesView;
-const RUNNING: ReadonlySet<string> = new Set(['pending', 'running']);
+const RUNNING: ReadonlySet<string> = new Set(IN_FLIGHT_STATUSES);
 const PAUSED: ReadonlySet<string> = new Set(['paused_budget', 'paused_error']);
 const RESUMABLE: ReadonlySet<string> = new Set(['paused_budget', 'paused_error', 'interrupted']);
 

@@ -167,6 +167,8 @@ export const stopTextSchema = z.strictObject({
     .strictObject({
       text: z.string().max(200),
       command: z.string().startsWith('pnpm gmt ').max(200).nullable(),
+      /** Present (true) only when the run can be resumed: only then does a Resume button belong with the sentence (never matched on words). */
+      resume: z.literal(true).optional(),
     })
     .nullable(),
 });

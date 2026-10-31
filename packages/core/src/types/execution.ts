@@ -29,6 +29,22 @@ export const ACTIVE_STATUSES: readonly ExecutionStatus[] = [
  * "paused catch-up", which never covers a later firing and is superseded by it (spec §8.2 rev 36, decision 79).
  */
 export const PAUSED_STATUSES: readonly ExecutionStatus[] = ['paused_budget', 'paused_error', 'interrupted'];
+/** Spec rev 55 §10: a run with a pass going or about to (pending or running); the cards poll and the bar cancels. */
+export const IN_FLIGHT_STATUSES: readonly ExecutionStatus[] = ['pending', 'running'];
+/**
+ * Spec rev 55 §10: the statuses a run stops or is skipped in, the ones whose `stop` the api fills. A completed row (even
+ * one that was once paused) has none.
+ */
+export const STOPPED_STATUSES: readonly ExecutionStatus[] = [
+  'paused_budget',
+  'paused_error',
+  'interrupted',
+  'cancelled',
+  'skipped_budget',
+  'skipped_confirm',
+  'skipped_window',
+  'skipped_missed',
+];
 export const RESUMABLE_STATUSES: readonly ExecutionStatus[] = [
   'interrupted',
   'paused_budget',

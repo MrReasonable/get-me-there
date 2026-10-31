@@ -10,7 +10,15 @@ import { hrefWith, navigateTo } from '../../state/urlState.js';
 import { navPatch } from '../../state/view.js';
 import { SearchAgainButton } from '../Dates/SearchAgainButton.js';
 import { suggestedName, useAirportDetails } from '../Definitions/airports.js';
-import { isActive, neverSearchedText, scheduleText, stateLine, tripText, windowText } from './cardWords.js';
+import {
+  announcement,
+  isActive,
+  neverSearchedText,
+  scheduleText,
+  stateLine,
+  tripText,
+  windowText,
+} from './cardWords.js';
 import { RemoveSearch } from './RemoveSearch.js';
 
 const S = COPY.searchesView;
@@ -72,13 +80,18 @@ export function SearchCard({
           ...(card.schedule === null ? [] : [scheduleText(card.schedule)]),
         ].join(' · ')}
       </p>
-      <div role="status" className="search-card-state">
-        {state.kind === 'stop' ? (
+      {/* why: the visible line carries the counts and is not live (it changes every poll); the hidden line below
+      announces only the kind of state, or a stop's sentence, so a poll announces nothing new */}
+      <div data-testid="card-state" className="search-card-state">
+        {state.kind === 'stopped' ? (
           <StopSentence stop={state.stop} className="warn-text" />
         ) : (
-          <p>{state.text}</p>
+          <p>{state.words}</p>
         )}
       </div>
+      <p role="status" className="sr-only">
+        {announcement(state)}
+      </p>
       {never === null ? null : <p className="text-sm">{never}</p>}
       {cheapest === null ? null : (
         <div className="search-card-cheapest">
@@ -88,6 +101,7 @@ export function SearchCard({
               provenance={cheapest.provenance}
               calendar={cheapest.basis === 'calendar'}
               stale={cheapest.stale}
+              destination={cheapest.destination}
               compact
             />
           </PriceBoundary>

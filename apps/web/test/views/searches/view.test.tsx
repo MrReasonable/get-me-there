@@ -1,14 +1,17 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { act, screen, waitFor, within } from '@testing-library/react';
 import { HttpResponse, http } from 'msw';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { POLL_MS } from '../../../src/api/queries.js';
+import { PLAN_COPY } from '../../../src/copy/plan.js';
 import { COPY } from '../../../src/copy.js';
 import { SearchesView } from '../../../src/views/Searches/SearchesView.js';
-import { API } from '../../fixtures.js';
+import { API, definition as definitionFixture } from '../../fixtures.js';
 import { calendarCheapest, cheapest, latestRun, searchCard } from '../../fixtures.searches.js';
 import { type CardRequests, serveCards, serveCardsBy } from '../../msw/searchesHandlers.js';
 import { server } from '../../msw/server.js';
-import { setViewportWidth } from '../../viewport.js';
+import { controllableViewport } from '../../viewport.js';
 import { airportRows, renderInShell } from './support.js';
 
 // Spec rev 55 §11 "Searches" (WP20 Task 20.3): the cards in the served order, their words, the cheapest through
@@ -183,19 +186,20 @@ describe('what a card shows', () => {
     ],
     ['searched', {}, 'Searched 2h ago'],
     [
+      // ruling R-changed: the card has no count over the current space, so the line states none
       'dates changed',
       {
         spaceChangedSince: true,
         latestRun: latestRun({ datePairsSearched: 381, datePairsNeverSearched: 0 }),
       },
-      'Dates changed: 24 date pairs not searched yet',
+      'Dates changed since this was last searched',
     ],
     ['not searched yet', { latestRun: null, cheapest: null }, 'Not searched yet'],
   ])('the state line, %s', async (_name, over, line) => {
     server.use(serveCards([searchCard(over)]));
     renderInShell(<SearchesView />);
     const card = await cardOf('Birmingham → Frankfurt');
-    expect(within(card).getByRole('status')).toHaveTextContent(line);
+    expect(within(card).getByTestId('card-state')).toHaveTextContent(line);
   });
 
   it('a stopped search prints its stop’s sentence as-is with its fix, and a row with no cause reads NO_STOP_CAUSE_TEXT', async () => {
@@ -221,12 +225,12 @@ describe('what a card shows', () => {
       ]),
     );
     renderInShell(<SearchesView />);
-    const stopped = within(await cardOf('Stopped')).getByRole('status');
+    const stopped = within(await cardOf('Stopped')).getByTestId('card-state');
     expect(stopped).toHaveTextContent(
       'Stopped at 14 Oct 15:00: its spending limit of £5 was reached.Raise the limit in Edit, then Resume',
     );
     expect(within(stopped).getByTestId('stop-sentence')).toHaveTextContent(/^Stopped at 14 Oct 15:00/);
-    const old = within(await cardOf('Old')).getByRole('status');
+    const old = within(await cardOf('Old')).getByTestId('card-state');
     expect(old).toHaveTextContent('No reason was recorded for this run.');
     expect(old.textContent).not.toContain('paused: error');
   });
@@ -363,13 +367,24 @@ describe('the side column (ruling A18)', () => {
     expect(within(side).queryByRole('link', { name: /New search/ })).toBeNull();
   });
 
-  it('at 375 px the side column renders above the list', async () => {
-    setViewportWidth(375);
+  it('below 900 px the stylesheet puts the form above the list, with one DOM order (so nothing remounts)', () => {
+    const css = readFileSync(join(process.cwd(), 'src/views/Searches/searches.css'), 'utf8');
+    expect(css).toMatch(/@media \(max-width: 899px\)[\s\S]*\.searches-side\s*\{\s*order: -1;/);
+  });
+
+  it('crossing 900 px keeps the form’s draft: the same field node, the same typed text', async () => {
+    const viewport = controllableViewport(1280);
     server.use(serveCards([searchCard()]));
-    renderInShell(<SearchesView />);
+    const { user } = renderInShell(<SearchesView />);
     const side = await screen.findByRole('region', { name: S.sideHeading });
-    const main = screen.getByRole('region', { name: S.listLabel });
-    expect(side.compareDocumentPosition(main) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const field = await within(side).findByLabelText(PLAN_COPY.from);
+    await user.type(field, 'Birm');
+    expect(field).toHaveValue('Birm');
+    await act(async () => viewport.set(375));
+    await act(async () => viewport.set(1280));
+    const after = within(screen.getByRole('region', { name: S.sideHeading })).getByLabelText(PLAN_COPY.from);
+    expect(after).toBe(field);
+    expect(after).toHaveValue('Birm');
   });
 });
 
@@ -417,8 +432,6 @@ function definitionOf(id: string, name: string) {
   return definitionFixture({ id, name });
 }
 
-import { definition as definitionFixture } from '../../fixtures.js';
-
 describe('the schedule in words', () => {
   it.each<[string, string, string]>([
     ['every day', '30 6 * * *', 'repeats every day 06:30'],
@@ -447,5 +460,86 @@ describe('the schedule in words', () => {
     expect(within(await cardOf('Birmingham → Frankfurt')).getByRole('status')).toHaveTextContent(
       'Not searched yet',
     );
+  });
+});
+
+describe('what a card announces (review finding 16)', () => {
+  const live = (card: HTMLElement) => within(card).getByRole('status');
+
+  it('the polite line carries the kind of state, not the counts, so a poll that moves a count announces nothing', async () => {
+    let searched = 120;
+    server.use(
+      serveCardsBy(() => [
+        searchCard({
+          latestRun: latestRun({
+            status: 'running',
+            finishedAt: null,
+            datePairsSearched: searched,
+            estimatedFinishAt: null,
+          }),
+        }),
+      ]),
+    );
+    const { client } = renderInShell(<SearchesView />);
+    const card = await cardOf('Birmingham → Frankfurt');
+    expect(live(card)).toHaveTextContent(/^Searching$/);
+    expect(live(card)).toHaveClass('sr-only');
+    expect(within(card).getByTestId('card-state')).toHaveTextContent('120 of 405');
+    const spoken = live(card).firstChild;
+    searched = 200;
+    await act(() => client.refetchQueries({ queryKey: ['cards'] }));
+    await waitFor(() => expect(within(card).getByTestId('card-state')).toHaveTextContent('200 of 405'));
+    // the same text node: nothing changed in the live region
+    expect(live(card).firstChild).toBe(spoken);
+    expect(live(card)).toHaveTextContent(/^Searching$/);
+    // the visible line is not itself a live region
+    expect(within(card).getByTestId('card-state').closest('[role="status"], [aria-live]')).toBeNull();
+  });
+
+  it('a change of kind is announced: running becomes searched', async () => {
+    let status: 'running' | 'completed' = 'running';
+    server.use(
+      serveCardsBy(() => [
+        searchCard({
+          latestRun: latestRun({
+            status,
+            finishedAt: status === 'running' ? null : '2026-10-14T14:00:00.000Z',
+          }),
+        }),
+      ]),
+    );
+    const { client } = renderInShell(<SearchesView />);
+    const card = await cardOf('Birmingham → Frankfurt');
+    expect(live(card)).toHaveTextContent(/^Searching$/);
+    status = 'completed';
+    await act(() => client.refetchQueries({ queryKey: ['cards'] }));
+    await waitFor(() => expect(live(card)).toHaveTextContent(/^Searched$/));
+  });
+
+  it('a stop is announced as its sentence', async () => {
+    server.use(
+      serveCards([
+        searchCard({
+          latestRun: latestRun({
+            status: 'paused_error',
+            finishedAt: null,
+            stop: { sentence: 'The source asked the app to slow down.', fix: null },
+          }),
+        }),
+      ]),
+    );
+    renderInShell(<SearchesView />);
+    expect(live(await cardOf('Birmingham → Frankfurt'))).toHaveTextContent(
+      'The source asked the app to slow down.',
+    );
+  });
+});
+
+describe('the cheapest names its airport (review finding 9)', () => {
+  it('the compact face carries the destination code the card serves', async () => {
+    server.use(serveCards([searchCard({ cheapest: cheapest({ destination: 'FRA' }) })]));
+    renderInShell(<SearchesView />);
+    const cell = within(await cardOf('Birmingham → Frankfurt')).getByTestId('price-cell');
+    expect(cell).toHaveTextContent('FRA');
   });
 });

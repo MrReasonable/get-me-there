@@ -6,7 +6,8 @@ const S = COPY.searchesView;
 /**
  * Spec rev 55 §11 "Searches", Remove: it asks inline, with no modal ("Remove <name>? Remove · Keep", focus on Remove; on
  * a pending or running search "Cancel and remove <name>?", which cancels its run). Keep puts the actions back and
- * returns focus to the Remove button that was pressed. The remove itself, the "Removed … Undo" line and the re-read belong
+ * returns focus to the Remove button that was pressed; while the request is in flight focus rests on the group, and
+ * after a failure it returns to the Remove button. The remove itself, the "Removed … Undo" line and the re-read belong
  * to the view (`onRemove`), so they outlast this card. A failed remove is said in words beside the action.
  */
 export function RemoveSearch({
@@ -28,6 +29,9 @@ export function RemoveSearch({
   const [asking, setAsking] = useState(false);
   const confirmRef = useRef<HTMLButtonElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  // why: a stable element to hold focus while the request is in flight: the Remove button it was on is gone and the
+  // trigger is disabled until the request settles, and focus must never fall back to the page
+  const groupRef = useRef<HTMLSpanElement>(null);
   // why: focus follows the state change, not the click: the button it moves to does not exist until the render
   const returnFocus = useRef(false);
   useEffect(() => {
@@ -37,8 +41,12 @@ export function RemoveSearch({
       triggerRef.current?.focus();
     }
   }, [asking]);
+  // why: a failed remove leaves the card in place, so focus returns to the trigger that started it
+  useEffect(() => {
+    if (error !== null) triggerRef.current?.focus();
+  }, [error]);
   return (
-    <span className="search-remove">
+    <span ref={groupRef} tabIndex={-1} className="search-remove">
       {asking ? (
         <span className="search-remove-ask">
           <span className="font-semibold">{active ? S.cancelAndRemoveAsk(name) : S.removeAsk(name)}</span>
@@ -50,6 +58,7 @@ export function RemoveSearch({
             aria-busy={pending ? true : undefined}
             onClick={() => {
               setAsking(false);
+              groupRef.current?.focus();
               onRemove();
             }}
           >

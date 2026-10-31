@@ -24,7 +24,7 @@ const CAL_DEST = 'cal.dest';
  * Searches. `definitions` is the Edit page and needs `edit=`: without it, Searches. The retired values land on a
  * search's page, keeping `def=`: `calendar` and `duration` open it as it stands (a Calendar `cal.dest=<IATA>` of the
  * definition becomes the Dates destination filter; every other `cal.*` is removed), `coverage` opens it with its coverage
- * section open (the shell sends such a URL to Searches when it has no `def=`). `results` with a well-formed date pair is
+ * section open (all of them land on Searches when they name no `def=`). `results` with a well-formed date pair is
  * the detail; without one but with `row=` (an alert email sent before revision 48) it is a row lookup; otherwise the
  * search's page. A parameter that no longer applies is ignored, never an error.
  *
@@ -38,10 +38,10 @@ export function land(params: URLSearchParams, def: { destinations: readonly Iata
     if (parseDetailPair(params) !== null) return { kind: 'view', view: 'results', patch: {} };
     const row = parseSelectedRow(params);
     if (row !== null) return { kind: 'row-lookup', row, basis: parseBasis(params.get(BASIS_PARAM)) };
-    return dates(BACK_TO_DATES);
+    return dates(params, BACK_TO_DATES);
   }
-  if (v === 'calendar' || v === 'duration') return dates(calendarPatch(params, def));
-  if (v === 'coverage') return dates(datesPatch({ coverageOpen: true }));
+  if (v === 'calendar' || v === 'duration') return dates(params, calendarPatch(params, def));
+  if (v === 'coverage') return dates(params, datesPatch({ coverageOpen: true }));
   // why: a search's page without `def=` has no search to show; the Edit page without `edit=` has none to edit
   if (v === 'dates')
     return named(params, DEF_PARAM) ? { kind: 'view', view: 'dates', patch: {} } : searches();
@@ -63,8 +63,12 @@ function searches(): Landing {
   return { kind: 'view', view: 'searches', patch: { [DETAIL_LINK_PARAMS.view]: 'searches' } };
 }
 
-/** Dates, with `view=dates` written into the URL and `extra` applied. */
-function dates(extra: Readonly<Record<string, string | null>>): Landing {
+/**
+ * A search's page with `view=dates` written into the URL and `extra` applied; with no search named (`def=` missing or
+ * empty) there is no page to open, so Searches (spec rev 55 §11 URLs).
+ */
+function dates(params: URLSearchParams, extra: Readonly<Record<string, string | null>>): Landing {
+  if (!named(params, DEF_PARAM)) return searches();
   return { kind: 'view', view: 'dates', patch: { [DETAIL_LINK_PARAMS.view]: 'dates', ...extra } };
 }
 

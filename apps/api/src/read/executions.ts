@@ -11,6 +11,7 @@ import {
   type ProviderId,
   runModeOf,
   type SearchDefinition,
+  STOPPED_STATUSES,
   type Stage,
   type StopText,
   stopText,
@@ -25,20 +26,7 @@ export type ExecutionSummary = z.infer<typeof apiContract.executionSummarySchema
 /** Spec §8.1: an overrun is more than 10% above the pre-factor plan. */
 export const OVERRUN_TOLERANCE = 1.1;
 
-/**
- * Spec revision 55 §10: the statuses a run stops or is skipped in, the ones whose `stop` is non-null. A completed row
- * (even one that was once paused) has none.
- */
-const STOPPED = new Set<Execution['status']>([
-  'paused_budget',
-  'paused_error',
-  'interrupted',
-  'cancelled',
-  'skipped_budget',
-  'skipped_confirm',
-  'skipped_window',
-  'skipped_missed',
-]);
+const STOPPED: ReadonlySet<Execution['status']> = new Set(STOPPED_STATUSES);
 
 /**
  * Spec revision 55 §8.1, §10 `stop`: the stored cause's words (`stopText`, worded for this install's run mode, the run's

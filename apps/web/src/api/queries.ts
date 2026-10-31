@@ -1,4 +1,11 @@
-import { type Cabin, type CellKey, cellKeyString, decodeDatePairs, type Iata } from '@gmt/core';
+import {
+  type Cabin,
+  type CellKey,
+  cellKeyString,
+  decodeDatePairs,
+  type Iata,
+  IN_FLIGHT_STATUSES,
+} from '@gmt/core';
 import { skipToken, useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from './endpoints.js';
 import type { Basis, DatePairsScope, ResultsScope, VerifyCellBody } from './types.js';
@@ -38,7 +45,7 @@ export const qk = {
 
 /** Polling interval while a run is moving (spec §10 "updates during run"). */
 export const POLL_MS = 2_000;
-const POLLING: ReadonlySet<string> = new Set(['pending', 'running']);
+const POLLING: ReadonlySet<string> = new Set(IN_FLIGHT_STATUSES);
 
 export function useProviders() {
   return useQuery({ queryKey: qk.providers, queryFn: () => api.providers() });
@@ -54,11 +61,14 @@ export function useProvidersWatch() {
   return useQuery({ queryKey: qk.providers, queryFn: () => api.providers(), enabled: false });
 }
 
+/** The month's spend (GET /budget): read by the status bar on every view, re-read every minute. */
+export function useBudget() {
+  return useQuery({ queryKey: ['budget'] as const, queryFn: () => api.budget(), refetchInterval: 60_000 });
+}
+
 export function useDefinitions() {
   return useQuery({ queryKey: qk.definitions, queryFn: () => api.definitions() });
 }
-
-const ACTIVE_RUN: ReadonlySet<string> = new Set(['pending', 'running']);
 
 /**
  * The first screen's read (spec rev 55 §10, §11): the cards in the served order. It re-reads at the status bar's poll
@@ -69,7 +79,7 @@ export function useCards() {
     queryKey: qk.cards,
     queryFn: () => api.cards(),
     refetchInterval: (query) =>
-      query.state.data?.cards.some((c) => c.latestRun !== null && ACTIVE_RUN.has(c.latestRun.status))
+      query.state.data?.cards.some((c) => c.latestRun !== null && POLLING.has(c.latestRun.status))
         ? POLL_MS
         : false,
   });

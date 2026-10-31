@@ -1,5 +1,6 @@
+import { IN_FLIGHT_STATUSES } from '@gmt/core';
 import { ApiError } from '../../api/client.js';
-import { useDefinitions, useExecutionActions } from '../../api/queries.js';
+import { useDefinitions, useExecution, useExecutionActions } from '../../api/queries.js';
 import { COPY } from '../../copy.js';
 
 /**
@@ -28,6 +29,11 @@ export function SearchAgainButton({
   const definitions = useDefinitions();
   const { start } = useExecutionActions();
   const definition = definitions.data?.find((d) => d.id === definitionId);
+  // why: "Searching…" says the press took effect only while its run is going: it clears once that run is read as no
+  // longer pending or running (the run is polled here, so the cards and the Dates page both see it end)
+  const started = useExecution(start.data?.executionId ?? null);
+  const searching =
+    start.isSuccess && (started.data === undefined || IN_FLIGHT_STATUSES.includes(started.data.status));
   const refusal = start.error === null ? null : refusalText(start.error);
   return (
     <>
@@ -51,7 +57,7 @@ export function SearchAgainButton({
       >
         {start.isPending ? COPY.searchAgain.working : label}
       </button>
-      {start.isSuccess ? (
+      {searching ? (
         <span role="status" className="text-sm">
           {COPY.searchAgain.working}
         </span>

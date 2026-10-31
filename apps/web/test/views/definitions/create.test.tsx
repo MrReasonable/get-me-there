@@ -3,6 +3,7 @@ import { HttpResponse, http } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { App } from '../../../src/App.js';
 import { PLAN_COPY } from '../../../src/copy/plan.js';
+import { COPY } from '../../../src/copy.js';
 import { EXAMPLE_LABEL } from '../../../src/example.js';
 import { DefinitionsView } from '../../../src/views/Definitions/DefinitionsView.js';
 import { API, coverageCheck, definition, estimate, providersResponse } from '../../fixtures.js';
@@ -375,7 +376,8 @@ describe('the App (spec §11 layout)', () => {
     const nav = screen.getByRole('navigation', { name: 'Views' });
     await user.click(within(nav).getByRole('link', { name: 'Providers' }));
     expect(await screen.findByRole('heading', { name: 'Providers' })).toBeInTheDocument();
-    expect(screen.getByRole('region', { name: 'Run status' })).toBeInTheDocument();
+    // why: ruling R-bar — the bar always carries the month's spend, whichever view is open
+    expect(await screen.findByRole('region', { name: COPY.monthSpendLabel })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Run now/ })).toBeNull();
     // why: WP19 Task 19.7: the detail is not in the nav; a card's See dates opens the search's page (WP20 Task 20.3), and a
     // board row opens the detail again

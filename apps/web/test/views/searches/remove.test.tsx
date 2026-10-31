@@ -26,7 +26,7 @@ const cardOf = async (name: string) => {
 };
 
 /** A server with three searches: the middle one is the subject; the last is running (so the view polls). */
-function serveThree() {
+function serveThree(gates: Record<string, Promise<void>> = {}) {
   const original: SearchCard[] = [
     searchCard({ id: 'a', name: 'Alpha' }),
     searchCard({ id: 'b', name: NAME }),
@@ -45,15 +45,17 @@ function serveThree() {
     http.get(`${API}/definitions`, () =>
       HttpResponse.json(original.map((c) => definition({ id: c.id, name: c.name }))),
     ),
-    http.delete(`${API}/definitions/:id`, ({ params }) => {
+    http.delete(`${API}/definitions/:id`, async ({ params }) => {
       const id = String(params.id);
       calls.deleted.push(id);
+      await gates[id];
       live = live.filter((c) => c.id !== id);
       return HttpResponse.json({ id, deletedAt: '2026-10-14T15:00:00.000Z' });
     }),
-    http.post(`${API}/definitions/:id/restore`, ({ params }) => {
+    http.post(`${API}/definitions/:id/restore`, async ({ params }) => {
       const id = String(params.id);
       calls.restored.push(id);
+      await gates[`restore-${id}`];
       live = original.filter((c) => live.some((l) => l.id === c.id) || c.id === id);
       return HttpResponse.json(definition({ id }));
     }),
@@ -161,5 +163,83 @@ describe('Remove, the undo line and Undo', () => {
       .getAllByRole('heading', { level: 3 })
       .map((h) => h.textContent);
     expect(names).toEqual(['Alpha', NAME, 'Charlie']);
+  });
+});
+
+/** A promise and the function that settles it, so a test holds a request open and releases it on an event. */
+function gate(): { promise: Promise<void>; release: () => void } {
+  let release: () => void = () => undefined;
+  const promise = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  return { promise, release };
+}
+
+describe('back-to-back Remove and Undo each keep their own outcome (review finding 5)', () => {
+  const confirmRemove = async (user: ReturnType<typeof renderInShell>['user'], name: string) => {
+    const card = await cardOf(name);
+    await user.click(within(card).getByRole('button', { name: `Remove ${name}` }));
+    await user.click(within(card).getByRole('button', { name: 'Remove' }));
+  };
+
+  it('removing two cards while the first DELETE is still open leaves a "Removed" line for each', async () => {
+    const first = gate();
+    const calls = serveThree({ a: first.promise });
+    const { user } = renderInShell(<SearchesView />);
+    await confirmRemove(user, 'Alpha');
+    await waitFor(() => expect(calls.deleted).toEqual(['a']));
+    await confirmRemove(user, NAME);
+    expect(await screen.findByRole('button', { name: `Undo removing ${NAME}` })).toBeInTheDocument();
+    first.release();
+    expect(await screen.findByRole('button', { name: 'Undo removing Alpha' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: `Undo removing ${NAME}` })).toBeInTheDocument();
+    expect(calls.deleted).toEqual(['a', 'b']);
+  });
+
+  it('undoing two removed cards quickly puts both back', async () => {
+    const hold = gate();
+    const calls = serveThree({ 'restore-a': hold.promise });
+    const { user } = renderInShell(<SearchesView />);
+    await confirmRemove(user, 'Alpha');
+    await screen.findByRole('button', { name: 'Undo removing Alpha' });
+    await confirmRemove(user, NAME);
+    await screen.findByRole('button', { name: `Undo removing ${NAME}` });
+    await user.click(screen.getByRole('button', { name: 'Undo removing Alpha' }));
+    await waitFor(() => expect(calls.restored).toEqual(['a']));
+    await user.click(screen.getByRole('button', { name: `Undo removing ${NAME}` }));
+    hold.release();
+    expect(await screen.findByRole('heading', { level: 3, name: 'Alpha' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { level: 3, name: NAME })).toBeInTheDocument();
+    expect(screen.queryByText(/^Removed /)).toBeNull();
+  });
+});
+
+describe('focus around Remove (review finding 7)', () => {
+  it('rests on the card’s Remove group while the request is open, never on the page', async () => {
+    const open = gate();
+    serveThree({ b: open.promise });
+    const { user } = renderInShell(<SearchesView />);
+    const card = await cardOf(NAME);
+    await user.click(within(card).getByRole('button', { name: `Remove ${NAME}` }));
+    await user.click(within(card).getByRole('button', { name: 'Remove' }));
+    expect(document.activeElement).not.toBe(document.body);
+    expect(card.contains(document.activeElement)).toBe(true);
+    open.release();
+    await screen.findByRole('button', { name: `Undo removing ${NAME}` });
+  });
+
+  it('returns to the Remove button after a failed remove', async () => {
+    serveThree();
+    server.use(
+      http.delete(`${API}/definitions/:id`, () =>
+        HttpResponse.json({ error: { code: 'internal', message: 'db is down' } }, { status: 500 }),
+      ),
+    );
+    const { user } = renderInShell(<SearchesView />);
+    const card = await cardOf(NAME);
+    await user.click(within(card).getByRole('button', { name: `Remove ${NAME}` }));
+    await user.click(within(card).getByRole('button', { name: 'Remove' }));
+    await within(card).findByRole('alert');
+    await waitFor(() => expect(within(card).getByRole('button', { name: `Remove ${NAME}` })).toHaveFocus());
   });
 });

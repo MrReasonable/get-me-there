@@ -2,6 +2,7 @@ import { HttpResponse, http, type JsonBodyType } from 'msw';
 import {
   API,
   airports,
+  budgetResponse,
   calendarGap,
   coverageCheck,
   coverageResponse,
@@ -51,6 +52,7 @@ export const handlers = [
   ...searchesHandlers,
   http.get(url('/api/alerts'), () => HttpResponse.json([])),
   http.get(url('/api/alerts/events'), () => HttpResponse.json([])),
+  http.get(url('/api/budget'), () => HttpResponse.json(budgetResponse())),
   http.get(url('/api/providers'), () => HttpResponse.json(providersResponse())),
   // WP18: a clean report, so the status bar's link shows nothing unless a test says otherwise
   http.get(url('/api/status'), () => HttpResponse.json(statusReport())),

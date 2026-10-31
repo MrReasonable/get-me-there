@@ -2,6 +2,7 @@ import {
   cellKeyString,
   type DecodedDatePairs,
   formatAgo,
+  IN_FLIGHT_STATUSES,
   type IsoDateTime,
   NO_STOP_CAUSE_TEXT,
 } from '@gmt/core';
@@ -22,7 +23,7 @@ import type { BoardModel } from './board.js';
 import { countsOf, isFullStay, stayRange } from './stayScope.js';
 
 const D = COPY.datesView;
-const RUNNING: ReadonlySet<string> = new Set(['pending', 'running']);
+const RUNNING: ReadonlySet<string> = new Set(IN_FLIGHT_STATUSES);
 const PAUSED: ReadonlySet<string> = new Set(['paused_budget', 'paused_error']);
 
 /** "40 min ago" under an hour (the run line of spec §11), else core's "2h ago" / "3d ago". */

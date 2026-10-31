@@ -1,4 +1,11 @@
-import { formatAgo, hoursSince, type IsoDateTime, NO_STOP_CAUSE_TEXT } from '@gmt/core';
+import {
+  formatAgo,
+  hoursSince,
+  IN_FLIGHT_STATUSES,
+  type IsoDateTime,
+  NO_STOP_CAUSE_TEXT,
+  STOPPED_STATUSES,
+} from '@gmt/core';
 import type { SearchCard } from '../../api/types.js';
 import type { StopWords } from '../../components/StopWords.js';
 import { COPY } from '../../copy.js';
@@ -45,51 +52,47 @@ export function scheduleText(schedule: NonNullable<SearchCard['schedule']>): str
   }
 }
 
-const ACTIVE: ReadonlySet<string> = new Set(['pending', 'running']);
-const STOPPED: ReadonlySet<string> = new Set([
-  'paused_budget',
-  'paused_error',
-  'interrupted',
-  'cancelled',
-  'skipped_budget',
-  'skipped_confirm',
-  'skipped_window',
-  'skipped_missed',
-]);
+const ACTIVE: ReadonlySet<string> = new Set(IN_FLIGHT_STATUSES);
+const STOPPED: ReadonlySet<string> = new Set(STOPPED_STATUSES);
 
 /** A card is pending or running: its state line reads "Searching", it polls and Remove asks "Cancel and remove". */
 export function isActive(card: SearchCard): boolean {
   return card.latestRun !== null && ACTIVE.has(card.latestRun.status);
 }
 
-/** What a card's state line says: plain words, or a stop (the sentence as-is, with its fix). */
-export type StateLine = { kind: 'words'; text: string } | { kind: 'stop'; stop: StopWords };
+/**
+ * What a card's state line says: plain words or a stop (the sentence as-is, with its fix), and the `kind` of state, which
+ * the card's screen-reader line announces (the counts change every poll and are not announced).
+ */
+export type StateLine =
+  | { kind: 'searching' | 'flights' | 'changed' | 'searched' | 'never'; words: string }
+  | { kind: 'stopped'; stop: StopWords };
 
 /**
  * The card's state line (spec rev 55 §11): "Searching · 120 of 405 date pairs · about 1h 40m left" while pending or
  * running (no "left" clause without `estimatedFinishAt`), "Reading flights · 3 of 10" once flights are planned and read
  * below planned, the stop's sentence as-is with its fix when the latest run stopped (`NO_STOP_CAUSE_TEXT` when the read
- * carried none), "Dates changed: 24 date pairs not searched yet" for a completed run of an earlier space, "Searched 2h
- * ago", and "Not searched yet" for a search with no run (or a finished one with no recorded time).
+ * carried none), "Dates changed since this was last searched" for a completed run of an earlier space (ruling R-changed:
+ * the card has no count over the current space, so none is stated), "Searched 2h ago", and "Not searched yet" for a
+ * search with no run (or a finished one with no recorded time).
  */
 export function stateLine(card: SearchCard, now: IsoDateTime): StateLine {
   const run = card.latestRun;
-  if (run === null) return { kind: 'words', text: S.notSearchedYet };
+  if (run === null) return { kind: 'never', words: S.notSearchedYet };
   if (ACTIVE.has(run.status)) {
     const f = run.flights;
     if (run.status === 'running' && f !== null && f.read < f.planned)
-      return { kind: 'words', text: S.readingFlights(f.read, f.planned) };
+      return { kind: 'flights', words: S.readingFlights(f.read, f.planned) };
     return {
-      kind: 'words',
-      text: S.searching(run.datePairsSearched, run.datePairs, leftWords(run.estimatedFinishAt, now)),
+      kind: 'searching',
+      words: S.searching(run.datePairsSearched, run.datePairs, leftWords(run.estimatedFinishAt, now)),
     };
   }
-  if (STOPPED.has(run.status)) return { kind: 'stop', stop: run.stop ?? NO_STOP_CAUSE_TEXT };
-  if (card.spaceChangedSince)
-    return { kind: 'words', text: S.datesChanged(Math.max(0, run.datePairs - run.datePairsSearched)) };
+  if (STOPPED.has(run.status)) return { kind: 'stopped', stop: run.stop ?? NO_STOP_CAUSE_TEXT };
+  if (card.spaceChangedSince) return { kind: 'changed', words: S.datesChanged };
   const at = run.finishedAt ?? run.startedAt;
-  if (at === null) return { kind: 'words', text: S.notSearchedYet };
-  return { kind: 'words', text: S.searchedAgo(formatAgo(hoursSince(at, now))) };
+  if (at === null) return { kind: 'never', words: S.notSearchedYet };
+  return { kind: 'searched', words: S.searchedAgo(formatAgo(hoursSince(at, now))) };
 }
 
 /** "85 of 405 date pairs never searched" whenever that count is not zero, else null. */
@@ -98,4 +101,9 @@ export function neverSearchedText(card: SearchCard): string | null {
   return run === null || run.datePairsNeverSearched === 0
     ? null
     : S.neverSearched(run.datePairsNeverSearched, run.datePairs);
+}
+
+/** What the card's hidden live line says: the kind of state, or a stop's sentence (counts are never announced). */
+export function announcement(line: StateLine): string {
+  return line.kind === 'stopped' ? line.stop.sentence : S.stateKind[line.kind];
 }

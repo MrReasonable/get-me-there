@@ -81,7 +81,7 @@ describe('the Dates view’s states (spec §11)', () => {
       status: 'paused_budget',
       stop: {
         sentence: "Stopped at 1 Nov 00:00: SearchApi's monthly limit was reached.",
-        fix: { text: 'Raise the limit in Edit, then Resume', command: null },
+        fix: { text: 'Raise the limit in Edit, then Resume', command: null, resume: true },
       },
     });
     const { user } = renderDates({

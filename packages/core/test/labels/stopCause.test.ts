@@ -58,7 +58,7 @@ const START_NATIVE = { text: 'Start it with pnpm gmt start, then Search again', 
 const START_OTHER = { text: 'Start the browser worker, then Search again', command: null };
 const CHECK_STATUS = { text: 'Check Status, then Search again', command: null };
 const CHECK_PROVIDERS = { text: 'Check Providers, then Search again', command: null };
-const RAISE = { text: 'Raise the limit in Edit, then Resume', command: null };
+const RAISE = { text: 'Raise the limit in Edit, then Resume', command: null, resume: true };
 const CARRY_ON = { text: 'Search again to carry on (prices already found are reused)', command: null };
 
 type Row = [name: string, cause: StopCause, facts: Partial<StopTextFacts>, sentence: string, fix: unknown];
@@ -215,7 +215,7 @@ const ROWS: Row[] = [
     }),
     {},
     "The Aviasales cache's monthly call limit is used up; it resets on 1 Apr 00:00.",
-    { text: 'Search again after 1 Apr 00:00, or Resume', command: null },
+    { text: 'Search again after 1 Apr 00:00, or Resume', command: null, resume: true },
   ],
   [
     "another source's monthly call limit, scheduled with a resume set",
@@ -236,7 +236,7 @@ const ROWS: Row[] = [
     budget({ scope: 'provider-month', providerId: 'searchapi', unit: 'calls', cap: 1000 }),
     {},
     "Google Flights via SearchApi's monthly call limit is used up.",
-    { text: 'Search again, or Resume', command: null },
+    { text: 'Search again, or Resume', command: null, resume: true },
   ],
   [
     'the monthly page limit, scheduled, with no reset stated',
@@ -348,28 +348,28 @@ const ROWS: Row[] = [
     budget({ scope: 'global-month', providerId: null, unit: 'pence', cap: 3500, resetsAt: RESETS }),
     {},
     "This month's spending limit is used up; it resets on 1 Apr 00:00.",
-    { text: 'Search again after 1 Apr 00:00, or Resume', command: null },
+    { text: 'Search again after 1 Apr 00:00, or Resume', command: null, resume: true },
   ],
   [
     "the month's spending limit, scheduled but no resume stored",
     budget({ scope: 'global-month', providerId: null, unit: 'pence', cap: 3500, resetsAt: RESETS }),
     { scheduled: true },
     "This month's spending limit is used up; it resets on 1 Apr 00:00.",
-    { text: 'Search again after 1 Apr 00:00, or Resume', command: null },
+    { text: 'Search again after 1 Apr 00:00, or Resume', command: null, resume: true },
   ],
   [
     "the month's spending limit, no reset stated",
     budget({ scope: 'global-month', providerId: null, unit: 'pence', cap: 3500 }),
     {},
     "This month's spending limit is used up.",
-    { text: 'Search again, or Resume', command: null },
+    { text: 'Search again, or Resume', command: null, resume: true },
   ],
   [
     "the month's spending limit naming the browser worker (the guard's provider) is still the month's",
     budget({ scope: 'global-month', providerId: 'camoufox', unit: 'pence', cap: 3500, resetsAt: RESETS }),
     { scheduled: true },
     "This month's spending limit is used up; it resets on 1 Apr 00:00.",
-    { text: 'Search again after 1 Apr 00:00, or Resume', command: null },
+    { text: 'Search again after 1 Apr 00:00, or Resume', command: null, resume: true },
   ],
   [
     'the per-run call limit naming the provider whose reserve tripped it',
@@ -397,14 +397,14 @@ const ROWS: Row[] = [
     { kind: 'limiter-timeout', providerId: 'travelpayouts', resumeAfter: UNTIL },
     {},
     'The Aviasales cache is limiting how fast it answers.',
-    { text: 'Resume', command: null },
+    { text: 'Resume', command: null, resume: true },
   ],
   [
     'a limiter pause with no resume',
     { kind: 'limiter-timeout', providerId: 'camoufox', resumeAfter: null },
     { scheduled: true },
     'The browser worker is limiting how fast it answers.',
-    { text: 'Resume', command: null },
+    { text: 'Resume', command: null, resume: true },
   ],
   ['cancelled', { kind: 'cancelled' }, {}, 'Stopped by you.', SEARCH_AGAIN],
   [
@@ -441,14 +441,14 @@ const ROWS: Row[] = [
     { kind: 'interrupted' },
     {},
     'The app stopped during this search.',
-    { text: 'Resume, or Search again', command: null },
+    { text: 'Resume, or Search again', command: null, resume: true },
   ],
   [
     'fatal',
     { kind: 'fatal' },
     {},
     'The app hit an error and stopped this search.',
-    { text: 'Check Status, then Resume', command: null },
+    { text: 'Check Status, then Resume', command: null, resume: true },
   ],
   ['child cap', { kind: 'child-cap' }, {}, "Stopped at the on-demand search's limit.", null],
   [
@@ -771,6 +771,8 @@ describe('stopText (spec rev 55 §8.1 "Stop causes")', () => {
         if (c.kind !== 'budget' || c.providerId !== 'camoufox') continue;
         if (c.scope !== 'provider-month' && c.scope !== 'provider-execution') continue;
         expect(t.fix?.text ?? '').not.toMatch(/Resume/);
+        // why: the structured flag the web reads, never matched on words
+        expect(t.fix?.resume).toBeUndefined();
       }
     });
 
@@ -778,5 +780,14 @@ describe('stopText (spec rev 55 §8.1 "Stop causes")', () => {
       for (const { f, t } of all)
         if (!f.scheduled) expect(t.sentence).not.toMatch(/resumes|picks these pages up/);
     });
+  });
+});
+
+describe('the structured resume flag on a fix (review finding 10)', () => {
+  it('is set exactly when the fix offers Resume, and absent on a fresh-search fix and on NO_STOP_CAUSE_TEXT', () => {
+    const facts = { tz: 'Europe/London', mode: 'native', scheduled: true } as const;
+    expect(stopText({ kind: 'interrupted' }, facts).fix?.resume).toBe(true);
+    expect(stopText({ kind: 'cancelled' }, facts).fix?.resume).toBeUndefined();
+    expect(NO_STOP_CAUSE_TEXT.fix?.resume).toBeUndefined();
   });
 });

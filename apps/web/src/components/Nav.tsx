@@ -17,8 +17,12 @@ export interface NavSearch {
 }
 
 /** A nav link's patch: the view's, and for a search's page the search's `def=`. */
-const patchFor = (v: ViewId, search: NavSearch | null) =>
-  v === 'dates' && search !== null ? { ...navPatch(v), def: search.id } : navPatch(v);
+const patchFor = (v: ViewId, search: NavSearch | null) => {
+  if (v === 'dates' && search !== null) return { ...navPatch(v), def: search.id };
+  // why: ruling R-bar — Searches names no search, so its link drops `def=`
+  if (v === 'searches') return { ...navPatch(v), def: null };
+  return navPatch(v);
+};
 
 /** Both tiers: each a list of real links headed by its name in text. */
 function Tiers({

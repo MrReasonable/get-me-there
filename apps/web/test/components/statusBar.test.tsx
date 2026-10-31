@@ -1,4 +1,5 @@
-import { act, screen } from '@testing-library/react';
+import { NO_STOP_CAUSE_TEXT } from '@gmt/core';
+import { act, screen, waitFor } from '@testing-library/react';
 import { HttpResponse, http } from 'msw';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { POLL_MS } from '../../src/api/queries.js';
@@ -11,6 +12,7 @@ import {
   definition,
   execution,
   resultsResponse,
+  statusReport,
   summary,
   usage,
 } from '../fixtures.js';
@@ -23,7 +25,7 @@ const bar = (over: Parameters<typeof definition>[0] = {}) => <StatusBar definiti
 /** A stop whose fix names Resume (core's "Raise the limit in Edit, then Resume"): the bar then offers Resume. */
 const RESUME_STOP = {
   sentence: "Stopped at 1 Nov 2026 00:00: SearchApi's monthly limit was reached.",
-  fix: { text: 'Raise the limit in Edit, then Resume', command: null },
+  fix: { text: 'Raise the limit in Edit, then Resume', command: null, resume: true as const },
 };
 
 afterEach(() => vi.useRealTimers());
@@ -260,6 +262,135 @@ describe('status bar (spec §11)', () => {
     expect(await screen.findByText('schedule blocked since 12 Oct 2026')).toBeInTheDocument();
   });
 
+  // WP20 Task 20.3 (spec rev 55 §8.1, §11; ruling A11): Run now is gone from the bar, and a stopped run reads as its stop
+  it.each<[string, Parameters<typeof execution>[0], Parameters<typeof resultsResponse>[0]]>([
+    ['never run', {}, { rows: [], total: 0, executions: [], cheapest: null }],
+    ['completed', { status: 'completed' }, {}],
+    ['stopped', { status: 'paused_budget', stop: RESUME_STOP }, {}],
+  ])(
+    'no "Run now" button on a search that is %s, whatever the estimate (ruling A11)',
+    async (_name, run, results) => {
+      server.use(
+        http.get(`${API}/definitions/:id/results`, () => HttpResponse.json(resultsResponse(results))),
+        http.get(`${API}/executions/:id`, () => HttpResponse.json(execution(run))),
+      );
+      renderWithProviders(
+        bar({
+          needsConfirmation: {
+            estimateMicroGbp: 2_500_000,
+            totalCalls: 300,
+            confirmedCostPence: 100,
+            confirmedCalls: 154,
+          },
+        }),
+      );
+      await screen.findByRole('region', { name: COPY.statusBarLabel });
+      await waitFor(() => expect(screen.queryByText('Loading…')).toBeNull());
+      expect(screen.queryByRole('button', { name: /Run now/ })).toBeNull();
+      expect(screen.queryByText(/confirm it under Searches/)).toBeNull();
+    },
+  );
+
+  it.each<[string, Parameters<typeof execution>[0]]>([
+    ['the api’s NO_STOP_CAUSE_TEXT', { status: 'paused_error', stop: NO_STOP_CAUSE_TEXT }],
+    ['a read that carried no stop at all', { status: 'paused_error', stop: null }],
+  ])(
+    'a stopped run with no stored cause (a row from before migration 0011), as %s, reads NO_STOP_CAUSE_TEXT: its sentence and fix, never "paused: error" or "Stopped: Stopped", and no Resume (Review Focus 4)',
+    async (_name, run) => {
+      server.use(http.get(`${API}/executions/:id`, () => HttpResponse.json(execution(run))));
+      renderWithProviders(bar());
+      expect(await screen.findByText(NO_STOP_CAUSE_TEXT.sentence)).toBeInTheDocument();
+      expect(screen.getByText(NO_STOP_CAUSE_TEXT.fix?.text ?? '')).toBeInTheDocument();
+      const text = screen.getByRole('region', { name: COPY.statusBarLabel }).textContent ?? '';
+      expect(text).not.toContain('paused: error');
+      expect(text).not.toContain('Stopped: Stopped');
+      expect(screen.queryByRole('button', { name: 'Resume' })).toBeNull();
+    },
+  );
+
+  it('a browser page limit’s fix is a fresh search: the structured flag, not the words, hides Resume (finding 10)', async () => {
+    server.use(
+      http.get(`${API}/executions/:id`, () =>
+        HttpResponse.json(
+          execution({
+            status: 'paused_budget',
+            stop: {
+              sentence: "Stopped: the browser worker's monthly page limit was reached.",
+              // why: the words even mention Resume; only the missing flag decides
+              fix: { text: 'Search again to carry on (not Resume)', command: null },
+            },
+          }),
+        ),
+      ),
+    );
+    renderWithProviders(bar());
+    await screen.findByText("Stopped: the browser worker's monthly page limit was reached.");
+    expect(screen.queryByRole('button', { name: 'Resume' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
+  });
+
+  it('a native fix command shows as code', async () => {
+    server.use(
+      http.get(`${API}/executions/:id`, () =>
+        HttpResponse.json(
+          execution({
+            status: 'paused_error',
+            stop: {
+              sentence: 'The browser worker is not running.',
+              fix: { text: 'Start it, then Search again', command: 'pnpm gmt start' },
+            },
+          }),
+        ),
+      ),
+    );
+    renderWithProviders(bar());
+    expect(await screen.findByText('The browser worker is not running.')).toBeInTheDocument();
+    expect(screen.getByText('pnpm gmt start').tagName).toBe('CODE');
+  });
+
+  it('the failing count still links to Status', async () => {
+    server.use(
+      http.get(`${API}/status`, () =>
+        HttpResponse.json(
+          statusReport([{ id: 'schedule', area: 'schedule', state: 'fail', summary: 'down' }]),
+        ),
+      ),
+    );
+    renderWithProviders(bar());
+    expect(await screen.findByRole('link', { name: 'Status: schedule failing' })).toHaveAttribute(
+      'href',
+      '/?view=status',
+    );
+  });
+
+  it('the child-run line speaks in main-path words, even for a stopped child (finding 4)', async () => {
+    server.use(
+      http.get(`${API}/definitions/:id/results`, () =>
+        HttpResponse.json(
+          resultsResponse({
+            executions: [
+              summary({ id: 'exec-child-1', isChild: true, status: 'paused_error' }),
+              summary({ id: 'exec-0001', status: 'running' }),
+            ],
+          }),
+        ),
+      ),
+      http.get(`${API}/executions/:id`, () => HttpResponse.json(execution())),
+    );
+    renderWithProviders(bar());
+    expect(await screen.findByText('checking fares for one date pair: stopped')).toBeInTheDocument();
+    const text = screen.getByRole('region', { name: COPY.statusBarLabel }).textContent ?? '';
+    expect(text).not.toContain('paused: error');
+    expect(text).not.toContain('itinerary search for one cell');
+  });
+
+  it('always shows the month’s spend, from /budget, whether or not a run is shown (ruling R-bar)', async () => {
+    renderWithProviders(<StatusBar definition={null} />);
+    const month = await screen.findByRole('region', { name: COPY.monthSpendLabel });
+    expect(month).toHaveTextContent('this month: £32 of £35');
+    expect(screen.queryByRole('region', { name: COPY.statusBarLabel })).toBeNull();
+  });
+
   it.each<[number, number | null, boolean]>([
     [79, 100, false],
     [80, 100, true],
@@ -327,7 +458,7 @@ describe('status bar (spec §11)', () => {
       }),
     );
     renderWithProviders(bar());
-    expect(await screen.findByText('itinerary search for one cell: running')).toBeInTheDocument();
+    expect(await screen.findByText('checking fares for one date pair: running')).toBeInTheDocument();
     expect(await screen.findByRole('button', { name: 'Resume' })).toBeInTheDocument();
     expect(ids).toEqual(['exec-0001']);
   });

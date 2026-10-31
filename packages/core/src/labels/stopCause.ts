@@ -41,7 +41,13 @@ export const NO_STOP_CAUSE_TEXT: StopText = {
   fix: { text: 'Search again', command: null },
 };
 
-const fix = (text: string): Fix => ({ text, command: null });
+/** The word that makes a fix a Resume offer; the structured `resume` flag is set here, once, and read by the web. */
+const RESUME_WORD = /\bResume\b/;
+const fix = (text: string): Fix => ({
+  text,
+  command: null,
+  ...(RESUME_WORD.test(text) ? { resume: true as const } : {}),
+});
 const SEARCH_AGAIN = fix('Search again');
 const CHECK_STATUS = fix('Check Status, then Search again');
 const CHECK_PROVIDERS = fix('Check Providers, then Search again');

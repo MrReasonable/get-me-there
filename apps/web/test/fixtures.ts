@@ -393,6 +393,20 @@ export function usage(
 
 const OCTOBER = ['2026-10-01T00:00:00.000Z', '2026-11-01T00:00:00.000Z'] as const;
 
+/** `GET /budget`: the status bar's always-on month line (£32 of £35 by default). */
+export function budgetResponse(
+  over: Partial<In<typeof apiContract.budgetResponseSchema>> = {},
+): z.output<typeof apiContract.budgetResponseSchema> {
+  return apiContract.budgetResponseSchema.parse({
+    scopes: [usage('global-month', 0, 35_000_000, 32_000_000)],
+    monthlyCapMicroGbp: 35_000_000,
+    monthlyCapPence: 3500,
+    fixedFeesMicroGbp: 0,
+    ceilingNote: 'a note',
+    ...over,
+  });
+}
+
 export function providersResponse(
   over: Partial<In<typeof apiContract.providersResponseSchema>> = {},
 ): ProvidersResponse {

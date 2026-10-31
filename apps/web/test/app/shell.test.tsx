@@ -6,9 +6,11 @@ import { App } from '../../src/App.js';
 import { AppBoundary } from '../../src/components/AppBoundary.js';
 import { COPY } from '../../src/copy.js';
 import { workedDates } from '../fixtures.dates.js';
-import { API, providersResponse, resultsResponse } from '../fixtures.js';
+import { API, execution, providersResponse, resultsResponse } from '../fixtures.js';
+import { latestRun, searchCard } from '../fixtures.searches.js';
 import { expectConsoleErrors } from '../guards.js';
 import { datesError, serveDates } from '../msw/datesHandlers.js';
+import { serveCards } from '../msw/searchesHandlers.js';
 import { server } from '../msw/server.js';
 import { renderWithProviders } from '../render.js';
 
@@ -407,9 +409,10 @@ describe('filters kept across views (spec §11: the filters live in the URL and 
       'href',
       '/?view=history&def=def-0001&d.to=JFK&basis=verified',
     );
+    // ruling R-bar: Searches names no search, so its link drops def=
     expect(within(nav).getByRole('link', { name: 'Searches' })).toHaveAttribute(
       'href',
-      '/?view=searches&def=def-0001&d.to=JFK&basis=verified',
+      '/?view=searches&d.to=JFK&basis=verified',
     );
   });
 });
@@ -432,7 +435,7 @@ describe('the status bar has no Run now (spec rev 55 §11; WP20 Task 20.3)', () 
     expect(screen.queryByRole('button', { name: /Run now/ })).toBeNull();
   });
 
-  it.each(['dates&def=def-0001', 'definitions&edit=def-0001', 'history&def=def-0001'])(
+  it.each(['dates&def=def-0001', 'definitions&edit=def-0001'])(
     'no Run now on the %s view, and none on the detail',
     async (view) => {
       renderWithProviders(<App />, { search: `?view=${view}` });
@@ -456,5 +459,116 @@ describe('the status bar has no Run now (spec rev 55 §11; WP20 Task 20.3)', () 
     await screen.findByRole('table', { name: 'Round trips found' });
     await screen.findByRole('region', { name: 'Run status' });
     expect(screen.queryByRole('button', { name: /Run now/ })).toBeNull();
+  });
+});
+
+describe('which run the bar shows (ruling R-bar; spec rev 55 §11)', () => {
+  const RESUME = {
+    sentence: 'Stopped at 14 Oct 15:00: its spending limit was reached.',
+    fix: { text: 'Raise the limit in Edit, then Resume', command: null, resume: true as const },
+  };
+  const running = searchCard({
+    id: 'def-0001',
+    name: 'Birmingham → Frankfurt',
+    latestRun: latestRun({ id: 'exec-run', status: 'running', finishedAt: null, estimatedFinishAt: null }),
+  });
+  const stoppedAt = (id: string, name: string, startedAt: string, sentence: string) =>
+    searchCard({
+      id,
+      name,
+      latestRun: latestRun({
+        id: `exec-${id}`,
+        status: 'paused_budget',
+        startedAt,
+        finishedAt: null,
+        stop: { sentence, fix: RESUME.fix },
+      }),
+    });
+  const serveRuns = (cards: ReturnType<typeof searchCard>[]) =>
+    server.use(
+      serveCards(cards),
+      http.get(`${API}/executions/:id`, ({ params }) => {
+        const card = cards.find((c) => c.latestRun?.id === params.id);
+        const run = card?.latestRun;
+        return HttpResponse.json(
+          execution(
+            run === undefined || run === null
+              ? {}
+              : { id: run.id, status: run.status, stop: run.stop, finishedAt: null },
+          ),
+        );
+      }),
+    );
+  const bar = () => screen.findByRole('region', { name: 'Run status' });
+
+  it.each(['searches', 'providers', 'alerts', 'status', 'history'])(
+    'on the %s view the active run of any search shows with its search named and no Cancel or Resume',
+    async (view) => {
+      serveRuns([running, stoppedAt('d2', 'Other', '2026-10-14T14:00:00.000Z', 'Older stop.')]);
+      renderWithProviders(<App />, {
+        search: `?view=${view}${view === 'history' || view === 'alerts' ? '&def=def-0001' : ''}`,
+      });
+      const region = await bar();
+      const name = await within(region).findByRole('link', { name: 'Birmingham → Frankfurt:' });
+      expect(name).toHaveAttribute('href', '/?view=dates&def=def-0001');
+      expect(await within(region).findByText('running')).toBeInTheDocument();
+      expect(within(region).queryByRole('button', { name: 'Cancel' })).toBeNull();
+      expect(within(region).queryByRole('button', { name: 'Resume' })).toBeNull();
+      expect(screen.getByRole('region', { name: COPY.monthSpendLabel })).toHaveTextContent(
+        'this month: £32 of £35',
+      );
+    },
+  );
+
+  it('with no active run it shows the latest stopped run of any search, named, with its sentence and no Resume', async () => {
+    serveRuns([
+      stoppedAt('d1', 'Older', '2026-10-13T10:00:00.000Z', 'The older stop.'),
+      stoppedAt('d2', 'Newer', '2026-10-14T10:00:00.000Z', 'The newer stop.'),
+      searchCard({ id: 'd3', name: 'Done' }),
+    ]);
+    renderWithProviders(<App />, { search: '?view=providers' });
+    const region = await bar();
+    expect(await within(region).findByRole('link', { name: 'Newer:' })).toBeInTheDocument();
+    expect(await within(region).findByText('The newer stop.')).toBeInTheDocument();
+    expect(within(region).queryByText('The older stop.')).toBeNull();
+    expect(within(region).queryByRole('button', { name: 'Resume' })).toBeNull();
+  });
+
+  it('with no run to show, only the month’s spend is there', async () => {
+    serveRuns([searchCard()]);
+    renderWithProviders(<App />, { search: '?view=status' });
+    expect(await screen.findByRole('region', { name: COPY.monthSpendLabel })).toBeInTheDocument();
+    await screen.findByRole('navigation', { name: 'Views' });
+    expect(screen.queryByRole('region', { name: 'Run status' })).toBeNull();
+  });
+
+  it('on a search’s page (def=) the bar follows that search, unnamed, with Cancel; a stopped one offers Resume', async () => {
+    serveRuns([running]);
+    const first = renderWithProviders(<App />, { search: '?view=dates&def=def-0001' });
+    // why: the region is re-read after the definitions arrive (the bar swaps from "any run" to the page's search)
+    expect(await screen.findByRole('button', { name: 'Cancel' })).toBeInTheDocument();
+    expect(within(await bar()).queryByRole('link', { name: /:$/ })).toBeNull();
+    first.unmount();
+    server.use(
+      http.get(`${API}/executions/:id`, () =>
+        HttpResponse.json(execution({ status: 'paused_budget', stop: RESUME })),
+      ),
+    );
+    renderWithProviders(<App />, { search: '?view=dates&def=def-0001' });
+    expect(await screen.findByRole('button', { name: 'Resume' })).toBeInTheDocument();
+  });
+
+  it('on the date pair detail the bar follows the search by def=, with controls', async () => {
+    serveRuns([running]);
+    renderWithProviders(<App />, {
+      search: '?view=results&def=def-0001&depart=2027-03-14&return=2027-03-28',
+    });
+    expect(await screen.findByRole('button', { name: 'Cancel' })).toBeInTheDocument();
+  });
+
+  it('on the Edit page the bar follows the edit= search, with controls, whatever def= says', async () => {
+    serveRuns([running]);
+    renderWithProviders(<App />, { search: '?view=definitions&edit=def-0001&def=other' });
+    expect(await screen.findByRole('button', { name: 'Cancel' })).toBeInTheDocument();
   });
 });
