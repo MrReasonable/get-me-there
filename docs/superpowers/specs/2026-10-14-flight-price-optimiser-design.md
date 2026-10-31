@@ -1,6 +1,6 @@
 # get-me-there — Flight Price Intelligence & Flexible-Date Optimiser
 
-**Design spec, revision 54.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
+**Design spec, revision 55.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
 four full-roster reviews (145, 140, 126 and 101 findings; zero Critical since
 revision 2) and the provider spike. Revision 9 folds in the three decisions
 taken at approval (the self-scraping fallback in §2, the dashboard readings in
@@ -14,7 +14,11 @@ The implementation plan under `docs/superpowers/plans/` and the work briefs
 under `docs/briefs/` derive from this revision. That approval is historical
 for the later revisions: Ian ruled on revision 48 (the Dates view, §17) on
 2026-10-26, and revision 50 records the rulings and settlements of its work
-brief's review, which work package 19 builds.
+brief's review, which work package 19 builds. Ian approved the Search now
+design (`docs/superpowers/specs/2026-10-31-search-now-design.md`, kept as the
+record of that conversation) on 2026-10-31 and ruled on its work brief's
+review the same day; revision 55 folds both into the sections they change
+(§17), which work package 20 builds.
 
 This document is the single source of truth for what gets built. The
 implementation plan and every per-package work brief derive from it. Where
@@ -42,13 +46,17 @@ used throughout this spec and in `docs/setup.md` (importable as JSON) is
 anyone technical who clones the public repository, not only for the
 original operator; multi-user use stays a non-goal.
 
-**Success looks like:** with provider credentials configured, scheduled
-searches keep the Dates view current for the configured space (a ranked
-board of the cheapest date pairs found, and an overview of every date pair
-by stay length), within a configurable spend ceiling, and
+**Success looks like:** with provider credentials configured, a search for
+a new trip starts from the first screen with From, To, a departure window, a
+stay range and one **Search now** press, and its page says in plain words
+what is happening; that press and the searches the operator schedules keep
+a search's page current for the configured space (a ranked board of the
+cheapest date pairs found, with the flights the browser worker read for
+them, and an overview of every date pair by stay length), within a
+configurable spend ceiling, and
 email Ian when an itinerary that satisfies his constraints drops under a
 threshold. Every price on screen says where it came from, how old it is,
-and whether its constraints were checked. The Dates view's coverage marks
+and whether its constraints were checked. The coverage marks of a search's page
 and its coverage section make it impossible to mistake "not searched" for
 "no flights".
 
@@ -65,14 +73,15 @@ subscribing to (decision 2026-10-14).
 | Providers | Discovery | Verification | What the operator gets |
 |---|---|---|---|
 | none | – | – | empty state explaining what to configure |
-| Travelpayouts only (£0) | Travelpayouts | none | calendar basis (§6.9) from whatever Aviasales users recently searched for the definition's pairs; every row labelled "constraints not checked" with the inapplicable constraints named and a search link. Coverage is route-dependent and often thin: the Definitions form's **coverage check** (free, §10) reports cached rows per pair before anything is saved. The spike measured a thin long-haul route at zero cached rows over eight months and busy gateways on the same country pair at four to six a month |
+| Travelpayouts only (£0) | Travelpayouts | none | calendar basis (§6.9) from whatever Aviasales users recently searched for the definition's pairs; every row labelled "constraints not checked" with the inapplicable constraints named and a search link. Coverage is route-dependent and often thin: a search's Edit page has a **coverage check** (free, §10) that reports cached rows per pair before the change is saved. The spike measured a thin long-haul route at zero cached rows over eight months and busy gateways on the same country pair at four to six a month |
 | SearchApi $40 | SearchApi calendar | SearchApi | full product, scraping-derived, labelled |
 | both (recommended at $40) | both | SearchApi | authorised cached baseline plus scraped verification |
 
 **What £0 gives, honestly:** cached calendar prices only, no constraints
 checked, and coverage that depends entirely on what Aviasales users have
-searched for the chosen pairs. The coverage check shows this before a
-definition is saved, the Dates view's header shows the coverage line on every
+searched for the chosen pairs. The estimate sentence beside Search now says
+so ("cached prices only where travellers searched recently", §11), the Edit
+page's coverage check shows it per pair, a search's page states it on every
 run, and per-cell verify is hidden. The spike (2026-10-14) found that a
 thin long-haul destination can have **no** cached rows at all across eight
 months while the busy gateways of the same country have four to six a
@@ -114,7 +123,7 @@ Google has no public API.
 | Travelpayouts `/aviasales/v3/prices_for_dates` (`month` tiles: `departure_at=YYYY-MM`, `one_way=false`, no `return_at`; origin is always an airport code (a metro query returns one cheapest row per date pair across the whole metro and hides the definition's own fares, recorded 2026-10-15), rows attributed by `origin_airport`; paginated at 1000) | Authorised. Cached from Aviasales user searches, declared last 48h; **no** `found_at` on rows, but each row's `link` carries `search_date=DDMMYYYY` (the recordings show 4–7-day-old rows), which becomes `providerObservedAt`; `market` ignored; economy only; coverage of thin routes can be zero (spike) | Free, 600/min | Discovery baseline | `authorised-cached` | 48 |
 | SearchApi `google_flights_calendar` | Scraping-derived aggregate of Google's date grid; ≤200 combinations per call (HTTP 400 above); per airport only (city codes rejected); entries `{departure, return, price, is_lowest_price}` in the request currency; 126/126 cells priced on every probed route including a thin one (spike); 9–29 s per call | trial 100 once; $40/10k per month | Discovery, opt-in | `scraped-aggregate` | 24 (the app's own conservative assumption, flagged as assumed and shown as "assumed ≤24h (undocumented)": a repeat call answered in 3 s and was not billed, so a vendor cache exists; its window is undocumented) |
 | SearchApi `google_flights` | Scraping-derived itinerary search, three steps; some options carry no `price`; step 3 reveals OTA prices below the airline fare, so step 3 is always run (§5.4) | same plan | Verification, opt-in | `scraped-search` | `'unknown'` (the vendor may serve a cached answer of undocumented age, rev 15) |
-| `camoufox`: Google Flights read by Camoufox (the pinned build `gmt setup` or `gmt browser install` installs on the machine running the worker) that a host-side worker launches itself through `camoufox-js` | Self-scraped by this app from the address of the machine running the browser worker, in the worker's own signed-out profile; `list` mode reads one cell's cheapest round-trip total per page load from every result the page lists (structure seen in the feasibility load of 2026-10-18); `grid` mode (designed from the 2026-10-18 recordings, not built) reads up to 49 day pairs per view from the Dates tab's 7 × 7 grid; no return legs, flight numbers or sellers | £0 in money; the operator's IP and selector upkeep; the operator is responsible for how it is used | Discovery only, opt-in, off by default (continuity fallback) | `scraped-self` | 0 (the page as Google showed it when it was read) |
+| `camoufox`: Google Flights read by Camoufox (the pinned build `gmt setup` or `gmt browser install` installs on the machine running the worker) that a host-side worker launches itself through `camoufox-js` | Self-scraped by this app from the address of the machine running the browser worker, in the worker's own signed-out profile; `list` mode reads one cell's cheapest round-trip total per page load from every result the page lists (structure seen in the feasibility load of 2026-10-18); `grid` mode (designed from the 2026-10-18 recordings, not built) reads up to 49 day pairs per view from the Dates tab's 7 × 7 grid; no return legs, flight numbers or sellers | £0 in money; the operator's IP and selector upkeep; the operator is responsible for how it is used | Discovery only, plus the flight-list read beside it (outbound flights for the cheapest date pairs, never itinerary search); opt-in, off by default (continuity fallback) | `scraped-self` | 0 (the page as Google showed it when it was read) |
 
 **Decision (Ian, 2026-10-14):** SearchApi is accepted as an opt-in provider,
 on the understanding that its data is obtained in a way Google's terms
@@ -130,7 +139,11 @@ above the ceiling or loses Google's date grid, discovery can fall back to a
 machine), behind the
 same contract, ledger, caps and labels as every other provider. It is **off
 by default**: nothing runs until the operator starts the worker and sets
-`CAMOUFOX_ENABLED=true` (§12, §13), and a definition must still name it.
+`CAMOUFOX_ENABLED=true` (§12, §13), which stays the install-level opt-in.
+A search uses it only when it names it: a new search names it, stored on the
+search when it is created, once the install has it configured and enabled
+(the defaults of §8.2), and a search created before the worker was set up
+keeps the sources it names until it is edited.
 
 *Method.* A host-side worker (`apps/camoufox-worker`, a Node process on the
 operator's own machine, macOS or Linux; Windows is a later work package, and
@@ -455,6 +468,62 @@ could not be built without inventing fields, and no seller can be reached
 inside the allowlist (`RawOffer.verified`). Its prices are calendar basis
 (§6.9): "constraints not checked", with the search link.
 
+*The flight-list read, beside discovery.* The provider offers a second
+capability, `flightLists` (§5.1), which is still not itinerary search. For one
+cell, economy only, it opens the same list page a `list` tile opens, in the
+worker's verified URL form (`core/camoufox/url.ts`'s `pageUrl`: returning,
+`hl=en-GB`, `gl=` the point of sale), through the worker's own route
+`POST /v1/flights` (it admits only a `mode: 'flights'` request, under the same
+4,096-byte body cap as `/v1/page`), and answers what the page showed for the
+pair (`listed`: `flights`, at least one flight read for the pair;
+`no-flights`, Google's own no-flights line, which the session already
+recognises and the route maps; `none-for-cell`, options present but none this
+app could read or match to the cell's airports and dates) with the
+**30 cheapest flights** listed for the cell (`FLIGHT_LIST_MAX_FLIGHTS`), in
+page order. Each flight carries the outbound's local departure and arrival
+times and the arrival's day offset (0 to 3, from the dates the option's name
+states), its duration, stops, marketing carriers and operating carrier as
+named (trimmed, whitespace collapsed, no control or format characters, at
+most 80 characters each), and the lowest round-trip total Google listed with
+that outbound (its "From" price, GBP pence, above 0); the return flight is
+neither chosen nor read. The page's own minimum over every parsed option of
+the cell, its Cheapest-tab price and which view was read are kept as the
+list read keeps them, with the counts of options unparsed, for another cell
+and stated by the page. The option grammar gains optional groups for the
+times and the arrival date, so a name without them still parses and `list`
+mode reads exactly as before (`GRAMMAR_VERSION` `2026-10-31-times`). A flight
+list has no return leg, no flight numbers and no airport code per segment,
+so it builds no `RawOffer`, no itinerary identity and no verdict (§6.3,
+§6.4); it never says "verified". Its pages are one Google document load
+each under every rule above and below: the spacing, the cool-downs (a
+blocked flight page stops the provider and starts its cool-down as a
+discovery page does), the consent cookie, the signed-out profile, the
+page gate and the GBP check (a page in another currency is `blocked`,
+`unrecognised`, rule `currency`); each is one ledger row of `page_class`
+`page` with `endpoint_path` `/v1/flights`, counted in
+`CAMOUFOX_MONTHLY_PAGE_CAP` and in `EXECUTION_MAX_FREE_CALLS`, and the
+answer stays under about 25 KB at the schema's limits. A run reads flight
+lists for the **10 cheapest date pairs on its search's board**
+(`FLIGHT_LIST_COUNT`) on an allowance of 10 pages of its own, outside
+`CAMOUFOX_EXECUTION_PAGE_CAP` and frozen into the budget snapshot as
+`flightListPages`, so a first pass that used its whole page cap still reads
+its flights (§8.1 "The flight-list step"). On demand one date pair's list is
+read against the monthly cap only, refused while any run that names the
+provider is pending or running or another read is in flight, and refused as
+`fresh` while its newest list is younger than 0.9 × the search's camoufox
+refresh (§8.1 "Reading one date pair's flights"). Source label "Google
+Flights flight list via Camoufox" (the main path names it "the browser
+worker's flight list", §3); `sourceKind` `scraped-self`, `maxAgeHours` 0, fx
+not converted, the point of sale as the page stated it; `provenanceNote`:
+"Google Flights flight list via Camoufox: the outbound flights Google
+Flights listed for this day pair, each with the lowest round-trip total
+Google listed with that outbound (its "From" price; the return flight is
+neither chosen nor read), when this app's own Camoufox browser read the page
+on the machine running this app's browser worker, from that machine's
+address, in the currency the page states. Times are the page's local times.
+Flight numbers, seller and baggage are not read; nothing is checked with the
+airline." The fixture provider has no flight lists.
+
 *Limits (operator rulings of 2026-10-18, plan decisions 68 and 69).* Camoufox
 is the browser as the operator installed it; the worker adds no
 humanised input, no geolocation lookup and no add-on, and passes the browser
@@ -480,9 +549,12 @@ starts; the worker enforces the same spacing with a fixed 2 s tolerance for
 arrival jitter. The last page time is persisted, so a restart keeps the
 spacing. A value of 0 means no pause: pages go back to back, from your own
 address, still one at a time, with no rate limit beyond the page caps. At most
-`CAMOUFOX_EXECUTION_PAGE_CAP` page loads per execution (default 100, at most
-400; frozen into the execution's budget snapshot at creation) and
-`CAMOUFOX_MONTHLY_PAGE_CAP` per month (default 1,500).
+`CAMOUFOX_EXECUTION_PAGE_CAP` discovery page loads (list or grid) per
+execution (default 100, at most 400; frozen into the execution's budget
+snapshot at creation), plus at most `FLIGHT_LIST_COUNT` (10) flight-list pages
+on an allowance of their own outside it (the flight-list read, below), and
+`CAMOUFOX_MONTHLY_PAGE_CAP` per month (default 1,500), which counts every page
+of both kinds.
 
 *Caps across callers.* The worker enforces `CAMOUFOX_MONTHLY_PAGE_CAP` and
 `CAMOUFOX_MONTHLY_SCROLL_CAP` itself, for every caller together, over the
@@ -740,7 +812,15 @@ contacted no Google page (spacing 429, cooling-down 423, mode-unavailable
 outcome class `no-page`, and the page caps (`provider-month` and
 `provider-execution` for camoufox) and every "pages" figure count only the
 other rows. `provider-execution` is checked after `provider-month` and before
-`execution-free-calls`, which camoufox page rows also draw on. Transport
+`execution-free-calls`, which camoufox page rows also draw on; it splits the
+rows by `endpoint_path` with one predicate (keeping the `no-page` filter on
+both halves), counting `/v1/page` rows against `CAMOUFOX_EXECUTION_PAGE_CAP`
+and `/v1/flights` rows against the snapshot's `flightListPages` (a snapshot
+without it allows no flight page, so the check fails closed), and `usage`
+reports the two as separate entries. An on-demand flight read
+(`execution_id` NULL) is checked at `provider-month` only. The ledger's
+per-execution counts report flight pages as a count of their own beside the
+per-stage lines, never as verification. Transport
 failures after the request was sent (a timeout, a dropped socket) are never
 retried for camoufox, so one tile never costs two Google loads. In `grid`
 mode a scroll is not a page load: a page's row carries `scroll_count`, the
@@ -770,7 +850,11 @@ stated (assumed ≤24h). Return date: read from the grid cell, checked against
 the grid's return row. A "cheapest" or "low" mark means Google's date grid
 marked this price so among the prices shown in that view; it is Google's, not
 this app's. The operator turned this provider on. Constraints are not checked; no
-return leg, seller or baggage is read." Vendor links: `google.com` only.
+return leg, seller or baggage is read." Vendor links: `google.com` only. The
+search link for a camoufox cell (§6.9) is the page URL form the worker loads
+(`pageUrl`, with `gl` the install's point of sale, `'unknown'` read as `GB`),
+re-checked against the allowlist on output, so the page the operator opens is
+the page that was read.
 `pointOfSale` is the ISO country of the page's stated location, through a
 dated table, or `'unknown'` when the page states none; it is stored as
 stated, so a page that ignored `gl` never passes for the requested market.
@@ -781,7 +865,7 @@ most `CAMOUFOX_MONTHLY_PAGE_CAP`: with the defaults, 100 a run and 1,500 a
 month, against 2,184 day pairs for one worked-example airport pair (8,736 for
 its four pairs). The estimate says how many cells a run will price and how
 many runs a full pass takes; the rest of the cells read skipped or not
-searched in the Dates view's coverage section. The `grid` mode changes the arithmetic: 7 × 7
+searched in a search's coverage section. The `grid` mode changes the arithmetic: 7 × 7
 blocks laid over a 12-night band need `⌈182 / 7⌉ × ⌈18 / 7⌉ = 26 × 3 = 78`
 blocks a pair (3,822 grid cells, of which the 2,184 in the band are stored,
 57%), 312 for the four pairs. At the measured one-day step a block-to-block
@@ -912,9 +996,21 @@ verification as a free history source (§7 `route_price_history`).
 - **Search definition** — the operator's intent: origins, destinations,
   window (absolute or **relative**), nights range, cabin, constraints,
   verification policy, budget, providers, optional schedule, optional
-  standing cost confirmation, optional onward-cost estimates.
+  standing cost confirmation, optional onward-cost estimates. On the main
+  path (below) it is a **search**; "definition" stays a code and set-up
+  term.
 - **Cell** — `(origin, destination, departureDate, returnDate)`. The atomic
   unit of coverage. The **search space** is resolved at execution start.
+- **Date pair** — a departure date and a stay length (its return date is the
+  departure date plus the nights), over the airport pairs in scope: the
+  main-path word for a cell's dates, with "airport pair" where both matter.
+- **Flight list** — what the browser provider's flight-list read (§2) stored
+  for one cell at one moment: the outbound flights Google's list page showed,
+  each with the lowest round-trip total listed with it (`ListedFlight` in
+  `core/flights/types.ts`), and the page's outcome for the pair (`Listed`:
+  `flights`, `no-flights` or `none-for-cell`). It is neither a fare offer
+  nor an itinerary, carries no verdict class and is not a results basis
+  (§6.9).
 - **Search execution** — one run over a resolved space with a definition
   snapshot, stages, seeded per-cell-per-provider outcomes, an estimate and
   a ledger. Resumable. A **child execution** verifies one cell on demand.
@@ -950,12 +1046,17 @@ verification as a free history source (§7 `route_price_history`).
     `currency-unsupported`, `unknown-airport-tz`, `no-return-legs`,
     `no-priced-options`, `unmappable-carrier`; the vendor's message,
     URL-stripped, is in `last_error`, never in `reason`.
-  - `skipped`: `reason ∈ not_selected | budget | provider_disabled | provider_unavailable | scheduled_only | departed` (`provider_unavailable`: the `camoufox` worker could not be reached, §2; `scheduled_only`: a `camoufox` cell left for a later run, with a detail code in `cell_outcomes.skip_detail` (migration 0007): `catch-up-no-browser`, a catch-up's cell that reuse did not fill, shown "…: a catch-up loads no browser pages", or `outside-browser-window`, a cell a run reached past its browser window, shown "…: outside this run's browser window" (§8.2); the words before the colon name who fetches it, read when it is shown: "left for the next scheduled run" only when the definition is scheduled and enabled and its scheduled runs still use the browser provider (configured and enabled), "left for your next run of this search" when only a run started by hand would, else "not fetched: this search no longer uses the browser provider" (`core`'s `leftForOf` and `scheduledOnlyText`, one text for the Dates view's coverage section, the date pair detail's per-airport-pair panel, the notice and the Status view; the engine's `browserLeftFor` answers it and the api returns it as `browserLeftFor`); the promise is made only for the latest parent run's cells, and an earlier run's left cell reads in the past tense, "left by that run: <why>").
+  - `skipped`: `reason ∈ not_selected | budget | provider_disabled | provider_unavailable | scheduled_only | departed` (`provider_unavailable`: the `camoufox` worker could not be reached, §2; `scheduled_only`: a `camoufox` cell left for a later run, with a detail code in `cell_outcomes.skip_detail` (migration 0007): `catch-up-no-browser`, a catch-up's cell that reuse did not fill, shown "…: a catch-up loads no browser pages", or `outside-browser-window`, a cell a run reached past its browser window, shown "…: outside this run's browser window" (§8.2); the words before the colon name who fetches it, read when it is shown: "left for the next scheduled run" only when the definition is scheduled and enabled and its scheduled runs still use the browser provider (configured and enabled), "left for your next run of this search" when only a run started by hand would, else "not fetched: this search no longer uses the browser provider" (`core`'s `leftForOf` and `scheduledOnlyText`, one text for a search's coverage section, the date pair detail's per-airport-pair panel, the notice and the Status view; the engine's `browserLeftFor` answers it and the api returns it as `browserLeftFor`); the promise is made only for the latest parent run's cells, and an earlier run's left cell reads in the past tense, "left by that run: <why>").
   - Coverage is always shown as **six buckets**: priced, no fares (`empty`),
     no cached data (`no_data`), error, skipped (reasons in the drill-down),
-    not searched (`not_run`); they sum to the cell count. "Searched" as an
-    umbrella (`priced + empty + no_data`) appears only in the Dates view's
-    coverage section (§11) beside the breakdown. Reused outcomes count in their bucket and the header adds
+    not searched (`not_run`); they sum to the cell count and are the basis
+    of every count the app shows. "Searched" as an umbrella (`priced + empty
+    + no_data`) appears in the coverage section of a search's page (§11)
+    beside the breakdown, and, counted per date pair over its airport pairs
+    by `core`'s one reading of the buckets (§6.6), in three main-path lines,
+    each with the breakdown under the count: a search's progress line ("120
+    of 405 date pairs"), its stopped line ("0 of 405 searched") and its
+    header line (§11). Reused outcomes count in their bucket and the header adds
     "(R reused from earlier runs)".
   - A cell interrupted mid-flight returns to `not_run`.
 - **Cell roll-up** — §6.6 precedence, stored, recomputed with every write.
@@ -972,6 +1073,39 @@ verification as a free history source (§7 `route_price_history`).
   headers and email, and the compact row form "2h ago · ≤7d" for table
   cells; where even that does not fit (a phone board card, §11) the
   short face form "5d old", "≤2d old" or "age unknown", also from `core`.
+- **Main-path words** — the first screen, a search's page, the new-search
+  form, a search's Edit page and its More options, and the status bar speak
+  in these words; the set-up views (Providers, Alerts, Status) keep their exact
+  terms, each with a one-line explanation where first shown, and a set-up term
+  that stays under More options carries one too.
+
+  | Set-up and code term | Main path |
+  |---|---|
+  | definition, search definition | search |
+  | cells, discovery tiles | date pairs (and airport pairs where both matter) |
+  | discovery / itinerary search | the first pass across your dates / reading flights |
+  | about 0 calls, hard stop 6 | free / about £1.20, stops at £5 |
+  | the six buckets | five marks, details under the count (below) |
+  | STALE | the stale mark's words, only when true (below) |
+  | a stored reason such as "paused: error" | the stop's cause in a sentence (§8.1 "Stop causes") |
+  | verdict class, calendar basis, itinerary-search basis | "from Google's date grid" / "flights read" / "checked fares" |
+
+  The sources' main-path names come from one table in `core`
+  (`labels/mainPath.ts`): `camoufox` "the browser worker", `travelpayouts`
+  "the Aviasales cache", `searchapi` "Google Flights via SearchApi", `fixture`
+  "the test source"; the set-up views and provenance labels keep §2's names.
+  The six buckets stay the coverage section's and every count's basis, and
+  the main path shows a date pair as one of **five marks**, from §6.6's
+  precedence bucket over its airport pairs: priced; no price shown (no fares
+  and no cached data); couldn't be read (error); not reached (skipped); not
+  searched (not run). "Not searched", "not reached" and "couldn't be read" are
+  never shown as "no flights" or "no price shown". The stale mark reads
+  "older than this search's refresh" for a calendar price under the per-price
+  rule (§8.1), and "older than your stale setting" under
+  `CALENDAR_STALE_AFTER_HOURS` or on the verified basis; it is shown only when
+  true. "Verified" still appears only beside class-verified values, and a
+  flight list carries no verdict class. The binding terminology of §11 holds
+  over every main-path word.
 
 ---
 
@@ -1050,8 +1184,9 @@ export interface DiscoveryQuery {
   departureFrom: IsoDate; departureTo: IsoDate; minNights: number; maxNights: number;
   cabin: Cabin; currency: 'GBP';
   cells?: CellKey[];     // when set, discovery.plan RE-PLANS over this subset (fewer calls); tiles still partition it
-  airportNames?: { origin: string[]; destination: string[] };   // names from the airports dataset, set by the engine for a provider that matches airports by name (camoufox)
+  airportNames?: CellAirportNames;   // names from the airports dataset, set by the engine for a provider that matches airports by name (camoufox)
 }
+export interface CellAirportNames { origin: string[]; destination: string[] }
 export interface TilePlan { index: number; coveredCells: CellKey[]; request: TileRequest }   // vendor-neutral, typed
 export type TileRequest =
   | { kind: 'month'; month: IsoMonth }                                   // Travelpayouts month tiles
@@ -1091,10 +1226,17 @@ export interface ProviderContext { executionId: string | null; signal: AbortSign
 export interface DiscoveryCapability { info: CapabilityInfo; plan(q: DiscoveryQuery): TilePlan[]; fetchTile(plan: TilePlan, q: DiscoveryQuery, ctx: ProviderContext): Promise<DiscoveryTileResult>;
   preflight?(ctx: ProviderContext): Promise<{ ok: true } | { ok: false; skip: 'provider_disabled' | 'provider_unavailable'; detail: string; until?: IsoDateTime }> }   // unledgered; camoufox reads the worker's /v1/status
 export interface VerificationCapability { info: CapabilityInfo; estimate(q: ItineraryQuery): CostEstimate; search(q: ItineraryQuery, ctx: ProviderContext): Promise<ItinerarySearchResult> }
+export interface FlightListQuery { cell: CellKey; airportNames: CellAirportNames }   // economy only; the adapter's own gl and point of sale (§2 "The flight-list read")
+export type FlightListResult =
+  | { kind: 'list'; fetchedAt: IsoDateTime; pointOfSale: PointOfSale; listed: Listed; flights: ListedFlight[]; minMinor: number | null; tabMinor: number | null;
+      cheapestView: 'cheapest' | 'best-fallback' | null; optionsUnparsed: number; optionsOtherCell: number; resultsStated: number | null; notes: string[] }
+  | { kind: 'list-error'; error: ProviderError };   // BudgetExceeded is thrown, as fetchTile throws it; a query without airport names fails closed (parse, reason no-airport-names) before any request
+export interface FlightListCapability { info: CapabilityInfo; read(q: FlightListQuery, ctx: ProviderContext): Promise<FlightListResult> }   // camoufox only; its preflight is discovery's
 export interface FlightProvider {
   readonly id: ProviderId; readonly displayName: string;
   readonly suppliedFields: readonly SuppliedField[]; readonly cabins: readonly Cabin[];
   readonly discovery?: DiscoveryCapability; readonly verification?: VerificationCapability;
+  readonly flightLists?: FlightListCapability;
   healthcheck(ctx: ProviderContext): Promise<{ ok: boolean; detail: string }>;
 }
 export interface CostEstimate { calls: number; costMicroGbp: number; seconds: number; notes: string[] }
@@ -1397,8 +1539,9 @@ lengthDays }`. Relative windows resolve at execution start in
 `Europe/London` and are frozen into the execution snapshot. Absolute
 windows are clamped to start no earlier than tomorrow (noted in the
 estimate). A window that resolves to zero cells makes a scheduled tick
-record status `skipped_window` with an operator notification and disable
-the schedule, and makes `POST` return 422.
+record status `skipped_window` with an operator notification and unschedule
+the search (`enabled` 0: scheduled runs stop, a manual start is unaffected, §7),
+and makes `POST` return 422.
 
 Dates are **calendar dates** independent of process timezone: epoch-day
 integers and `Intl` only, never `Date`-local arithmetic.
@@ -1442,7 +1585,7 @@ window or nights range are excluded from results and labelled in history.
 | maxJourneyMinutes (default 1500 per direction in the default definition) | segment times | per direction |
 | minLayoverMinutes / maxLayoverMinutes | segment times | every layover |
 | noOvernightLayover | segment times + tz | layover spanning 00:00–05:00 local |
-| departureWindowLocal / arrivalWindowLocal | first/last segment local times | outbound and inbound |
+| departureWindowLocal / arrivalWindowLocal (no default: only when the operator sets one) | first/last segment local times | outbound and inbound |
 | noSelfTransfer | observation `selfTransfer` | unverified if absent |
 | noAirportChange | segment airports | |
 | includeAirlines / excludeAirlines | marketing carrier | any segment |
@@ -1539,9 +1682,26 @@ discovery source, or no parent run yet) counts as not searched, so a date
 pair's six buckets always sum to its airport pairs in scope, and every
 coverage summary the api sends is the sum of one per-cell classification of
 the current space (§10), so the totals always agree. "Searched" as an umbrella
-appears only in the Dates view's coverage section beside the breakdown. "Selected but not reached" = `selected ∧ (not_run ∨
+appears in a search's coverage section beside the breakdown and in the three
+main-path lines of §3 (the progress, stopped and header lines). "Selected but not reached" = `selected ∧ (not_run ∨
 skipped:budget)`. Property test from an independent enumeration of the
 table.
+
+**The main path's reading of a date pair** is one pure module in `core`
+(`datePairs/marks.ts`), so the search cards, a search's header, progress and
+stopped lines, the stop cause's `searched` count (§8.1) and the overview's
+marks count alike. `reducedMark(buckets)` takes the date pair's precedence
+bucket over its airport pairs in scope by the table above and maps it to one
+of five marks: `priced` → priced; `empty` or `no_data` → no price shown; `error`
+→ couldn't be read; `skipped` → not reached; `not_run` → not searched. So a
+date pair with one airport pair `empty` and three `not_run` is not searched,
+never "no price shown", and one with one `priced` and three `not_run` is
+priced. `datePairSearched(buckets)` is true exactly when the mark is priced or
+no price shown, and is the one predicate behind every "searched" count of a
+date pair. The six buckets are unchanged and stay in every response and in the
+coverage section; the overview keeps its striped "partly not searched" overlay
+over a date pair some of whose airport pairs in scope were not searched,
+whatever its mark.
 
 ### 6.7 Candidate selection
 `policy = { maxCells; topN ≤ maxCells; priceCeilingPence?; perDepartureDateBest?; alwaysInclude: CellKey[] (|·| ≤ maxCells, members of the resolved space) }`.
@@ -1624,8 +1784,25 @@ Every row on either basis carries a labelled **search link** whenever
 against the provider's allowlist, comes first, labelled "the vendor's link
 for this cached row, not a fare link"; otherwise a generic search (an
 Aviasales search for Travelpayouts, a Google Flights search URL for
-SearchApi cells, which may not prefill every field), labelled "search link,
-not a fare link". Synthetic rows carry none.
+SearchApi cells, which may not prefill every field, and for a camoufox cell
+the page URL form the worker loads, §2), labelled "search link, not a fare
+link". Synthetic rows carry none.
+
+**Flight lists are not a results basis.** A flight list (§3) feeds no basis,
+no ranking, no figure, no coverage count, no alert, no History series and no
+calendar-gap comparison; a flight read never changes a date pair's price,
+rank, coverage or bucket, and the figure and its source stay what the date
+grid or cache gave. The page states the read's outcome beside the figure,
+on the date pair's main line: "Google's list: from £92, 11:44" (the list's
+cheapest flight read and when it was read), "not in Google's list" (the
+page listed options, none for this cell), or "Google's list showed no
+flights"; and when the list's cheapest flight differs from the figure, one
+line says so worded from the figure's own source ("Google's flight list
+showed £92 as the cheapest read, 12 Mar 11:44; the Aviasales cache showed £86,
+10 Mar 09:30", or "the date grid" for a grid figure). Only the newest list
+for the figure's own airport pair, cabin and point of sale feeds that
+outcome and that line; a list for another airport pair of the current space
+is shown only inside the flights block under its airport-pair label (§11).
 
 ---
 
@@ -1646,8 +1823,8 @@ are `toISOString()` text; booleans are integers 0/1.
   NULL for a code OurAirports does not list, read as unknown);
   re-seeded by upsert when the dataset version (which includes the metro
   list's revision and the OurAirports download date) changes; the sanity check that the table holds at least
-  5,000 rows with IATA code and tz, and that every airport referenced by an
-  enabled definition exists, **fails boot** if it fails; no network at
+  5,000 rows with IATA code and tz, and that every airport referenced by a
+  live (not soft-deleted) definition exists, scheduled or not, **fails boot** if it fails; no network at
   seed. No specific airport is named in code.
 - `search_definitions` (id, name, origins_json, destinations_json,
   window_json {kind: absolute|relative, …}, min_nights, max_nights, cabin,
@@ -1657,10 +1834,25 @@ are `toISOString()` text; booleans are integers 0/1.
   destination_notes_json {dest: text} NULL, onward_cost_json {dest: pence} NULL, schedule_cron NULL, schedule_tz NOT
   NULL, confirmed_cost_pence NULL (set **only** from an explicit
   confirmation the operator submits after seeing the estimate; never
-  recomputed automatically), confirmed_calls NULL (set together with
+  recomputed automatically: the WP8 `PUT` path stores a sent confirmation
+  that covers the worst case over every line, while Search now's
+  create-and-start and Repeat weekly's Save store the shown runnable totals,
+  the unblocked lines' pence and calls the sentence beside the button showed,
+  when the sent values cover the server's recomputation of them (§8.2, §10);
+  a Search again press stores nothing, since a confirmation covers that run
+  only), confirmed_calls NULL (set together with
   confirmed_cost_pence from the same explicit confirmation; the pre-start
   comparison covers both), enabled, deleted_at NULL, created_at,
-  updated_at). Soft-deleted.
+  updated_at). Soft-deleted. **`enabled` means scheduled runs happen** and
+  nothing else: a manual start never reads it (§8.1); a search is scheduled
+  exactly when `enabled` is 1, `schedule_cron` is set and `deleted_at` is NULL
+  (`core`'s `isScheduled`, the engine's one schedule predicate, read live). A
+  new search has `schedule_cron` NULL and `enabled` 0; existing rows keep their
+  values (no backfill). The engine's `skipped_window` disable (§6.1) now
+  unschedules. A soft delete no longer clears `enabled` (every scheduling
+  reader checks `deleted_at`), so a restore (§10) brings the schedule back as
+  it was; a definition whose only executions are tool runs cannot be
+  restored.
 - `search_executions` (id, definition_id, is_child NOT NULL default 0,
   child_origin, child_destination, child_departure_date, child_return_date
   (NULL for parents), definition_snapshot_json NOT NULL (with the resolved
@@ -1686,7 +1878,17 @@ are `toISOString()` text; booleans are integers 0/1.
   'running')` (the one-probe read of `GET /api/executions/active`),
   `cell_outcomes.skip_detail` NULL (`catch-up-no-browser` |
   `outside-browser-window`, only with `skipped:scheduled_only`), the
-  `browser_window` notification kind, and `app_meta`)).
+  `browser_window` notification kind, and `app_meta`), stop_cause_json NULL
+  (migration 0011: the run's `StopCause`, §8.1 "Stop causes"; every status
+  write that stops a run writes one, with its sentence in `error_text`, and
+  the write that makes the row `pending`, `running` or `completed`, the
+  resume claim included, clears it; NULL on a stopped row means it was
+  written before 0011, and it reads "No reason was recorded for this run.",
+  never the stored `error_text`), flight_lists_json NULL (migration 0011:
+  `{ planned, cells, reused, ended }`, the run's flight-list plan, §8.1,
+  written once when the step selects at least one date pair, to read or to
+  reuse, with `ended` ∈ `window` | `monthly-cap` | `stopped` | NULL set when
+  the step ends early; a resume never changes its `planned` or `cells`)).
   **Firing unique index** `(definition_id, scheduled_for) WHERE is_child = 0
   AND scheduled_for IS NOT NULL`, so one firing can never start or skip
   twice. A scheduled start or skip inserts with `INSERT … ON
@@ -1752,6 +1954,36 @@ are `toISOString()` text; booleans are integers 0/1.
   destination, departure_date, return_date, fetched_at), (origin,
   destination, fetched_at), (execution_id). History and route series read
   only `reused_from_execution_id IS NULL`.
+- `flight_lists` (migration 0011; the flight-list read's record, §2, §3:
+  neither a price row nor an observation): id INTEGER PRIMARY KEY
+  AUTOINCREMENT, definition_id NOT NULL FK, execution_id NULL FK (NULL for an
+  on-demand read), provider_id NOT NULL CHECK `= 'camoufox'`, source_kind NOT
+  NULL CHECK `= 'scraped-self'`, cabin NOT NULL CHECK `= 'economy'`, origin,
+  destination (IATA), departure_date, return_date (dates), fetched_at (ISO
+  instant), point_of_sale (a point of sale), currency_native NOT NULL CHECK `=
+  'GBP'` (the stored fact behind the list's `fx { converted: false }`), status
+  ∈ read | failed, reason NULL (one of `STOP_DETAILS`, §8.1), listed NULL (one
+  of `LISTED`), min_minor NULL and tab_minor NULL (integers above 0 when set),
+  cheapest_view NULL ∈ cheapest | best-fallback, options_unparsed and
+  options_other_cell NOT NULL (integers ≥ 0), results_stated NULL;
+  `CHECK ((status = 'failed') = (reason IS NOT NULL))` and `CHECK ((status =
+  'read') = (listed IS NOT NULL))`. Indexes `flight_lists_cell_idx
+  (definition_id, origin, destination, departure_date, return_date, cabin,
+  point_of_sale, fetched_at DESC, id DESC)` and `flight_lists_execution_idx
+  (execution_id)`. The repository refuses a provider other than `camoufox`
+  and a synthetic source kind before any SQL, writes a list and its flights
+  in one transaction (a refused flight rolls the list back), and reads the
+  newest list per requested cell for one point of sale, the newest per date
+  pair over the airport pairs of a space, and an execution's read and failed
+  counts over its planned cells, each in one statement. The page shows the
+  newest list, `read` or `failed`.
+- `flight_list_flights` (migration 0011): list_id NOT NULL FK
+  `flight_lists.id` ON DELETE CASCADE, position (integer ≥ 0, page order),
+  departs_local and arrives_local (`HH:MM`), arrives_day_offset (0 to 3),
+  duration_minutes (above 0), stops (≥ 0), carriers_json NOT NULL (a JSON
+  array), operated_by NULL, price_pence (above 0: the lowest round-trip total
+  listed with that outbound); PRIMARY KEY (list_id, position); at most 30 a
+  list.
 - `itineraries` (hash PK, kind default 'flight', origin, destination,
   departure_date, return_date, nights, outbound_minutes, inbound_minutes,
   stops_out, stops_in, airport_change NULL, carriers_json, layovers_json,
@@ -1792,6 +2024,8 @@ are `toISOString()` text; booleans are integers 0/1.
   made, ≥ 0, or the planned scrolls when an `unknown` call ended with no
   answer; NULL on every other row, camoufox `list` included, and on a grid
   call refused before any page; migration 0006)). Inserted at reserve.
+  A camoufox flight-list page is a row with `endpoint_path` `/v1/flights`
+  (`FLIGHT_LIST_ENDPOINT_PATH`), a grid or list page one with `/v1/page`.
   Index (provider_id, started_at, outcome, billable), (execution_id).
 - `provider_cache` (key PK, provider_id NULL, body_json, stored_at,
   expires_at).
@@ -1893,7 +2127,10 @@ window's bounds.
 
 ### 8.1 Execution lifecycle
 ```
-pre-start (scheduler tick and POST): resolve window (§6.1); estimate per provider and stage;
+pre-start (scheduler tick and POST): a manual start (Search now, Search again, Save and search again, the
+   POST) never reads `enabled`; only a scheduled firing of a search whose `enabled` is 0 is refused `disabled`, and
+   `disabled` stays the code, on every trigger, for a search that names no runnable source;
+   resolve window (§6.1); estimate per provider and stage;
    for every scope check usage(scope) + estimate(scope) ≤ cap (execution calls, execution free calls,
    execution cost, each provider's month/lifetime, global month). A breach on a provider-specific or
    billed scope seeds that provider's cells skipped:budget and the run proceeds with the rest; only when
@@ -1902,6 +2139,13 @@ pre-start (scheduler tick and POST): resolve window (§6.1); estimate per provid
    estimate > SOFT_CONFIRM → POST needs confirmCostPence × 10 000 ≥ estimateMicroGbp;
    a scheduled run needs definition.confirmed_cost_pence × 10 000 ≥ estimateMicroGbp else skipped_confirm
    + notified; a PUT that raises the estimate above the stored confirmation returns needsConfirmation
+   requireCovered (every main-path start): refused `confirm` whenever the runnable estimate (unblocked lines)
+   exceeds the confirmation sent, in pence or in calls (a camoufox line's calls are its pages), whatever
+   SOFT_CONFIRM_PENCE; covered figures start on the first press
+   replaceStopped (a manual start): a `paused_*` or `interrupted` latest parent of the search is cancelled with
+   cause superseded 'search-again' and the new run inserted in one immediate transaction (a failed insert rolls
+   the cancel back); a running or pending parent still refuses `active`, and without the flag a stopped parent
+   refuses `active` as before; a scheduled firing supersedes its definition's stopped parent the same way (§8.2)
 start: snapshot; seed search_cells + cell_outcomes(not_run) for every cell × discovery provider; status=running
    (a catch-up, §8.2: camoufox's cells are reused as below and the rest seeded skipped:scheduled_only)
    a provider whose `cabins` excludes the snapshot's cabin is not called in either stage: its cells become
@@ -1916,12 +2160,14 @@ discovery, per discovery provider, per (origin, destination) pair:
       fetchTile → 'tile'       ⇒ normalise (§5.6) ⇒ one price per cell ⇒ write atomically
                → 'tile-error' ⇒ covered cells error(reason = error.reason ?? kind), attempts+1
       errors per the table below
+flight lists (camoufox only; after discovery, before verification; `stage` stays discovery; "The flight-list
+   step" below): the 10 cheapest date pairs on the board, one page each on the step's own allowance
 verification:
    selection (§6.7) persisted + verification outcomes seeded in one transaction
    bounded pool of cells (provider CONCURRENCY): verification.search → normalise → write atomically → priced|empty
    errors per the table below; on a stopping condition, abort sibling cells, return them to not_run, then set the status
 alerts: evaluateAlertRules → persist events → notify digests
-completed
+finish: completed, or the stop's status with its stored cause ("Stop causes" below)
 ```
 
 **Error table (both stages, tested per row):**
@@ -1935,16 +2181,204 @@ completed
 | `ProviderError` blocked (`camoufox` only, §2) | `error` reason `blocked`, non-retryable on resume; provider disabled for the run, remaining cells `skipped:provider_disabled`, and kept disabled by a manual resume of that run | continue other providers; if none remain, `paused_error` + one notification per cool-down (keyed by its end), never one per run |
 | `ProviderError` provider-unavailable (`camoufox` worker refused the connection) | `error` on that tile's cells; provider disabled for the run, remaining cells `skipped:provider_unavailable` | continue other providers; if none remain, `paused_error` + notify |
 | Preflight refusal before a stage (`camoufox` cooling down or unreachable, §2) | every cell of the provider in the stage `skipped:provider_disabled` (cooling down until <time>) or `skipped:provider_unavailable`; no ledger rows | continue; one notification per cool-down |
-| `BudgetExceeded` provider-execution (`camoufox` page cap) | remaining cells for that provider and stage `skipped:budget` | continue if another provider remains in the stage, else `paused_budget` + notify; needs a manual `/resume` |
+| `BudgetExceeded` provider-execution (`camoufox` page cap) | remaining cells for that provider and stage `skipped:budget` | continue if another provider remains in the stage, else `paused_budget` + notify, with no `resume_after`; never resumed (a manual `/resume` is refused `cap`): its stop offers Search again, which reuses the prices already found; the flight-list step still runs after it |
 | `BudgetExceeded` on a new reservation | the cell stays `not_run`; calls already reserved finish and write (plan decision 25) | `paused_budget` per §5.3; sibling calls are never aborted |
-| `limiter-timeout` | cell returns to `not_run` | `paused_error` with `resume_after` = window reopen; a **one-shot croner job** resumes it at that instant (re-registered at boot, cancelled on cancel or manual resume) |
+| `limiter-timeout` | cell returns to `not_run` | `paused_error`; on a scheduled search `resume_after` = window reopen and a **one-shot croner job** resumes it at that instant (re-registered at boot, cancelled on cancel or manual resume); on an unscheduled search no `resume_after` and no job (its stop offers Resume) |
 | `BudgetExceeded` provider-month / provider-lifetime, other providers remain in the stage | remaining cells for that provider and stage `skipped:budget` | continue; notify once; no one-shot job |
-| `BudgetExceeded` provider-month / provider-lifetime, no other provider remains | remaining cells `skipped:budget` | `paused_budget` with `resume_after` = next cap window start; a one-shot job resumes it; exempt from the stale-run supersede while `resume_after` is in the future |
+| `BudgetExceeded` provider-month / provider-lifetime, no other provider remains | remaining cells `skipped:budget` | `paused_budget`; on a scheduled search, `resume_after` = next cap window start and a one-shot job resumes it, exempt from the stale-run supersede while `resume_after` is in the future; on an unscheduled search, and for camoufox's monthly page cap on every search, no `resume_after` and no job (the cause keeps `resetsAt`, the window's end, for its sentence) |
 | `BudgetExceeded` global-month (billed providers only; free providers continue) | billed providers' remaining cells `skipped:budget`; in-flight billed siblings aborted → `not_run` | continue if a free provider remains, else `paused_budget` as above |
 | `BudgetExceeded` execution-* | in-flight siblings aborted → `not_run` | `paused_budget` + notify; needs a manual `/resume`, which copies the definition's current `budget` into the snapshot (nothing else) and re-checks the caps |
 | `AbortedError` (cancel / SIGTERM) | `not_run` | `cancelled` (operator) / `interrupted` (SIGTERM) |
 | normalisation `fx-unavailable` / `currency-unsupported` / `unknown-airport-tz` / unmappable carrier | offers that fail are dropped and counted `offers-dropped:n` on a `priced` outcome; `error` with the reason only when no offer survives | continue |
 | `BudgetExceeded` is never recorded as `error`. | | |
+
+- **Manual and scheduled starts.** `enabled` means only that scheduled runs
+  happen (§7): a manual start is never refused because a search is not
+  enabled, and the engine's `disabled` refusal for `enabled = 0` applies to
+  scheduled firings only, while `disabled` stays the code for a search naming
+  no runnable source on every trigger (so a Search now on an install with no
+  price source saves the search and is refused `disabled`, §11). Nothing runs
+  unattended without the operator's say: an unscheduled search runs only when
+  pressed, and a run of one is never carried on by a timer or at boot (below).
+  Every main-path start sends `requireCovered` with the figures shown beside
+  its button; a camoufox-only start sends the estimate's calls, its pages,
+  and the comparison covers them. A **fresh start over a stopped run** (Ian's
+  ruling of 2026-10-31): Search again, Save and search again, and a Search now
+  on an edited search send `replaceStopped`, so a `paused_*` or `interrupted`
+  latest parent is cancelled with its cause recorded and the new run started
+  in one immediate transaction (the transaction a paused catch-up's
+  replacement uses); a separate Resume stays where carrying on makes sense.
+  A confirmation covers that run only (Ian's ruling of 2026-10-31): a press
+  that confirms a run stores no standing confirmation, except Search now's
+  create-and-start, which stores the shown runnable totals on the new search
+  (§7), and Repeat weekly's Save, which stores the schedule's (§8.2).
+- **Stop causes.** Every status write that stops or skips a run stores a
+  `StopCause` in `stop_cause_json` (§7) and its sentence in `error_text`:
+  `finalStatus` for every stop the run met; `Orchestrator.cancel(id, cause)`
+  for a live run (through `stopRun`) and for a stopped one; the resume's stale
+  supersede (`superseded 'stale'`) and its never-started cancel; `cancelPaused`
+  for a catch-up its firing replaced and for a stopped run a scheduled firing
+  supersedes (`superseded 'schedule'`); the boot sweep's `interrupted` rows,
+  written by its UPDATE; and the scheduler's `skipped_confirm` (with today's
+  estimate and the confirmation, both in pence), `skipped_budget`,
+  `skipped_window` and `skipped_missed` rows (a scheduled firing refused for
+  no runnable provider writes no row, as before: it is a notice only). The
+  kinds (`stopCauseSchema` in `core/api-contract`): `sources-unavailable`
+  (the stage, the date pairs searched before the stop by `datePairSearched`,
+  §6.6, and each unavailable source with its skip, its detail word and the
+  instant a pause ends; at least one source, also on a resumed pass whose
+  only provider an earlier pass disabled), `budget` (the cap's scope, its
+  provider, its unit, pages, scrolls, pence or calls, its limit, `resumeAfter`,
+  `resetsAt` (the cap window's end, kept even when no resume is scheduled)
+  and, when the flight-list step ran after the stop, the flights read of
+  planned), `limiter-timeout` (its provider and `resumeAfter`), `cancelled`,
+  `superseded` (by `schedule`, `search-again`, `stale` or `remove`),
+  `never-started`, `interrupted`, `fatal`, `child-cap`, `skipped-confirm`,
+  `skipped-budget` (scope and provider), `skipped-window` and
+  `skipped-missed` (its code). Every detail or reason the app stores is one
+  word of `STOP_DETAILS` (the nine `ProviderError` kinds, the blocked page
+  kinds, `settings-differ`, `grid-unverified`, `counts-unreadable`,
+  `no-airport-names`, `none-for-cell`, `unparsed`, `monthly-cap`,
+  `execution-cap`, `free-call-cap`, `outside-browser-window`, `fatal`,
+  `aborted`), never free text, so no vendor or engine sentence reaches a
+  cause (a preflight's vendor detail is stored as its class word only). One
+  pure function in `core`, `stopText(cause, { tz, mode, scheduled })`, words
+  every cause as a full sentence and one fix (`{ text, command }`, the
+  command a `pnpm gmt …` line in native mode only) from one template table:
+  sources through their main-path names (§3), instants as "14 Mar 15:00"
+  (`formatInstantShort`, assembled from `Intl` parts in 24-hour form), money
+  through `core`'s pence formatter. No caller adds a prefix, and no sentence
+  starts "Stopped:" or "Paused:" (only the skipped rows start "Skipped:"), so
+  the old "Paused: paused: error" cannot appear. For example: "The browser
+  worker isn't answering, so nothing was searched." with "Start it with `pnpm
+  gmt start`, then Search again" (in container mode "Start the browser worker,
+  then Search again"); "The browser worker stopped answering, so the search
+  stopped after 120 date pairs."; "The browser worker is pausing until 14 Mar
+  15:00, so nothing was searched."; "The Aviasales cache couldn't be used
+  because its token was refused, so nothing was searched." with "Check
+  Providers, then Search again"; "This search stopped at £5, its spending
+  limit for one run." with "Raise the limit in Edit, then Resume"; "This
+  search stopped at its limit of browser pages for one run; flights were read
+  for 8 of 10 date pairs." with "Search again to carry on (prices already
+  found are reused)"; "The browser worker's monthly page limit is used up; it
+  resets on 1 Apr 00:00, and the next scheduled run picks these pages up." (the
+  last clause on a scheduled search only) with "Search again after 1 Apr
+  00:00"; "The Aviasales cache is limiting how fast it answers; this search
+  resumes at 14 Mar 15:00." on a scheduled search only, and on an unscheduled
+  one the sentence without the resume and the fix "Resume"; "Stopped by you.";
+  "Replaced by a search you started."; "Replaced by a scheduled run."; "Too old
+  to carry on; a fresh run replaced it."; "Stopped when the search was
+  removed."; "The app stopped during this search." with "Resume, or Search
+  again"; "Skipped: today's estimate (about £1.20) is above the confirmation
+  you gave when you set the schedule (£1.00)." with "Change the schedule's
+  confirmation in Edit". A stopped row with no stored cause (written before
+  migration 0011) reads `NO_STOP_CAUSE_TEXT`, "No reason was recorded for this
+  run." with "Search again", whatever its `error_text` holds; the api never
+  sends that stored text. A row that becomes `pending`, `running` or
+  `completed` has its cause cleared, so a run paused, resumed and completed
+  shows none.
+- **Automatic resume and the unscheduled search** (Ian's ruling of
+  2026-10-31). A run whose search is not scheduled when it stops (`isScheduled`
+  read live at finish; in practice a manual run of a search with no schedule)
+  stores `resume_after` NULL on every pause and is never carried on by the
+  one-shot resume job or the boot's auto-resume (both go through `autoResume`,
+  which reads `isScheduled` live and skips such a run); its stop sentence says
+  when the limit resets and its fix offers Search again or Resume. Scheduled
+  searches keep the automatic resume. Two stops follow for every search,
+  scheduled or not: a stop at the browser provider's **monthly** page limit
+  stores `resume_after` NULL and never offers Resume (a resume past the run's
+  browser window reads no browser pages, §8.2); its sentence says when the
+  limit resets and offers Search again, a fresh run, and on a scheduled search
+  adds that the next scheduled run picks the pages up; and a stop at its
+  **per-run** page limit (`provider-execution`) offers Search again, which
+  reuses the prices already found, never Resume, and a manual `/resume` of it
+  is refused `cap`. A scheduled firing supersedes a stopped run of its own
+  search (§8.2), so adding a schedule is never blocked by an old stopped
+  manual run.
+- **The flight-list step** (the browser provider's flight-list read, §2). A
+  step of its own between discovery and verification (the execution's `stage`
+  stays `discovery`; the run reads "Reading flights · 3 of 10 date pairs"
+  while it runs), in `camoufox` only and for no other provider. **Entry**: it
+  runs when the run has not stopped, or when its only stop is camoufox's own
+  `provider-execution` budget stop (the per-run page cap), in which case it
+  still runs on its own allowance and the run stays stopped, its cause
+  carrying the flights read; never on a catch-up or a child (single-cell
+  verification), never when camoufox's discovery lane left past its browser
+  window or stopped at `provider-month`, `provider-lifetime` or
+  `global-month`, never when camoufox is disabled for the run (its preflight
+  refused it, or a stop disabled it), never on a resumed pass whose camoufox
+  is among those the resume left past their browser window
+  (`browserLeftAtResume`), never on a snapshot without `flightListPages`, and
+  never for a cabin other than economy. **Candidates**: the board's ranking
+  (`rankDatePairs`, §11) over the run's snapshot space and cabin with the
+  definition's journey limit, date pairs departing on or before today in
+  London left out, the first `FLIGHT_LIST_COUNT` (10), one airport pair each
+  (the figure's); a date pair whose newest flight list for the same cell,
+  cabin and point of sale is `read` and younger than 0.9 × the search's
+  camoufox refresh is **reused** (shown with its age, counted in the 10, no
+  page), and a `failed` newest list of any age is read again. The plan
+  (`flight_lists_json`, §7) is written once per execution, before its first
+  page, only when at least one date pair was selected to read or reuse. The
+  step reads its date pairs one at a time; each page carries the run's own
+  cancel signal (cancel, SIGTERM, a fatal error) with an intake of its own,
+  never a lane's intake or the run's discovery intake, which a budget stop
+  has already aborted; and before every page it passes a gate of its own that
+  re-reads the browser window and the heartbeat's suspension mark (checks (a)
+  and (c) of §8.2) and awaits the browser lease (below). A gate refusal ends
+  the step with no row, no discovery cell marked and no notice (`ended
+  'window'`) and is not a cancel; the run's status is unchanged. A cancel or
+  SIGTERM during the step after a budget stop ends the run `cancelled` or
+  `interrupted` (the step records it, and finish prefers it to the budget
+  stop). Each page writes one flight-list row, `read` with every field or
+  `failed` with its reason word; **its error table**, under which no flight
+  page ever calls discovery's failure path, changes a cell outcome, the
+  run's status, its stop or a notice, except the once-per-cool-down notice a
+  blocked answer sends:
+
+  | The page's result | This date pair | The rest | The step |
+  |---|---|---|---|
+  | `BudgetExceeded`, any scope (the worker's `monthly-cap`, the guard's `provider-month`, `execution-free-calls`, `provider-execution`) | `failed`, reason `monthly-cap`, `free-call-cap` or `execution-cap` | `failed` with the same reason, no request sent | ends, `ended 'monthly-cap'` or `'stopped'` |
+  | `list-error` `blocked`, `provider-unavailable`, `auth`, `quota` | `failed`, reason the error's `STOP_DETAILS` word when it has one (`no-airport-names`), else its kind | `failed` the same, no request | ends; a blocked answer also disables camoufox for the run and sends the once-per-cool-down notice, as discovery does |
+  | `list-error` `limiter-timeout` | `failed`, reason `limiter-timeout` | `failed` the same | ends, never pausing the run |
+  | `list-error` `parse`, `upstream`, `network`, `rate-limit` | `failed`, reason as above | continue | continues |
+  | the step's gate refuses (window closed or a suspension, not a cancel) | no row | no row | ends, `ended 'window'` |
+  | cancel or SIGTERM during a page | no row | no row | the stop propagates |
+
+  An eleventh flight page is refused at `provider-execution` before any call,
+  so a run sends at most 10 `/v1/flights` pages, which count toward
+  `execution-free-calls` too. A **resumed pass** keeps `planned` and `cells`,
+  reads only planned cells with no row of this execution, skips (no row) a
+  planned cell that has since departed, and never writes a pair twice; a
+  retry-errors resume of a `completed` run re-reads nothing. **What the run
+  reports**: `GET /executions/:id` carries `flights { planned, read, reused,
+  failed, ended }` from the stored plan, `read` and `failed` from the newest
+  row per planned cell of this execution, with `read + reused + failed ≤
+  planned`; when the run stored no plan, `flights` is null and the page says
+  nothing about flights, and the page words an early end only from an `ended`
+  that was stored. A flight page never changes an outcome, a price, a rank or
+  a coverage count (§6.9).
+- **Reading one date pair's flights** (on demand, `POST
+  /definitions/:id/flight-lists`, §10). It reads the figure's airport pair of
+  one date pair of the current space and is refused, before any worker call or
+  ledger row: `busy` while any parent run whose snapshot names camoufox is
+  `pending` or `running` (a Travelpayouts-only run does not count) or another
+  read is in flight; `not_available` with its reason when the search does not
+  name camoufox (`not-named`), the install has not configured it
+  (`not-configured`) or the cabin is not economy (`cabin`); `fresh` when the
+  newest list for that cell is `read` and younger than 0.9 × the refresh;
+  `outside_space` for a departed or out-of-space date pair; `no_price` when the
+  date pair has no figure; `not_found` and `shutting-down` as for a start.
+  The busy check and the taking of the **browser lease** (one in-flight slot)
+  run in one synchronous turn, so a start admitted in the same turn sees the
+  lease held; every browser page of a pass, grid lane and flight step alike,
+  waits for the lease to be free before it is sent, so a run that goes
+  pending while a read is in flight waits for it. The read runs camoufox's
+  discovery preflight first (a refusal records `failed` with its detail word),
+  ignores `CAMOUFOX_BROWSER_WINDOW` (it is its own anchor, like a manual
+  start), counts against the monthly page cap only, and writes one row with
+  `execution_id` NULL; a throw inside it records `failed` reason `fatal`.
+  Shutdown aborts a read in flight and waits for it within the drain, and
+  nothing is written after the engine is closed.
 
 - **Estimate** = Σ discovery `plan(q with cells = non-reused cells).length`
   per pair, using the same reuse query as the run, + `maxCells ×
@@ -1956,12 +2390,32 @@ completed
   "ledger cost, from configured rates". **Parity** = distinct tile requests
   (first-attempt ledger rows + cache hits) for one uninterrupted pass =
   `plan` length; a parity break raises an operator notification and a flag
-  in the Dates view's coverage section (§11), which otherwise flags
+  in a search's coverage section (§11), which otherwise flags
   **overruns** only: usage above the
   **pre-factor plan** by more than 10% (the stored estimate already carries
   the 1.2 factor, so it is not the comparison baseline), judged on distinct
   tiles for discovery (its plan counts tiles, and a paged tile is one tile)
   and on calls for itinerary search; the section words each line by its unit.
+  With camoufox in discovery the estimate carries `flightLists { pages,
+  seconds }`, where `pages` is the least of 10 less the reusable date pairs,
+  the monthly pages left after the grid or list plan, and `maxFreeCalls` less
+  the plan's free calls and the other free providers' calls, and `seconds` is
+  `pages × (CAMOUFOX_MIN_SPACING_SECONDS + 40)` (700 at the defaults); its
+  seconds count in the estimate's total and in the browser window's end, and
+  its pages in camoufox's calls for the soft confirmation and in `budgetFit`'s
+  monthly pages, never in `totalCalls`; `estimateRemaining` counts the planned
+  flight cells with no row yet. Its assumptions say "+ flights for up to N date
+  pairs, about M minutes", and name a cap that binds ("flights for 4 date
+  pairs: the browser worker's monthly page cap", "flights for 5 date pairs:
+  the run's free-call limit"). Without camoufox the stored estimate has no
+  `flightLists` key. The estimate also states what it asks, over the distinct
+  planned cells of its runnable lines (each provider's plan cut at the lesser
+  of its execution cap and its monthly window's pages or calls left): the date
+  pairs of the space, those every one of whose airport pairs in scope is
+  planned (covered), those some of whose are (partly), and those every one of
+  whose airport pairs is reused (reused, never counted as asked); a blocked
+  line contributes nothing, and two providers planning the same date pairs
+  count them once (§10's estimate response).
 - **Resume**: on `interrupted | paused_* | cancelled`, and on `completed`
   when `error` outcomes with headroom remain (retry-errors), continue per
   §7. Resume is a **compare-and-set**: `UPDATE … SET status = 'running'
@@ -1973,27 +2427,42 @@ completed
   `skipped` outcomes in either stage for cells with `departureDate ≤
   todayLondon` become `skipped:departed`, their attempts and `last_error`
   kept as evidence (an error on a flight that has left is not retryable;
-  priced/empty/no_data rows are untouched). The Dates view's coverage section
+  priced/empty/no_data rows are untouched). A search's coverage section
   offers Retry only for an error on a cell that has not departed.
   Resume uses `estimateRemaining` (resumable tiles + remaining selected
   cells × estimate × factor) for its per-scope cap check, on both the
   tick and `/resume`. **Any** paused run older than `discoveryRefreshHours`
-  whose `resume_after` is not in the future is cancelled and a fresh run
-  started (the tick checks this before trying to resume). Manual `/resume`
-  re-enables providers disabled in the previous pass; automatic resume does
-  not.
+  whose `resume_after` is not in the future is cancelled (cause `superseded
+  'stale'`) and a fresh run started (the tick checks this before trying to
+  resume). Manual `/resume` re-enables providers disabled in the previous pass;
+  automatic resume does not. A manual `/resume` of a stop at camoufox's
+  per-run page cap is refused `cap` (its stop offers Search again), and
+  `autoResume` never carries on a run of an unscheduled search (above).
 - **Boot order**: `pending` executions older than the boot and `running`
   executions become `interrupted` (crash-marked rows increment
-  `auto_resume_count`); if `AUTO_RESUME`, every `interrupted` execution
-  with count ≤ `MAX_AUTO_RESUMES` resumes (never an execution whose
-  definition is soft-deleted); one-shot jobs for `resume_after` are
+  `auto_resume_count`; the sweep's UPDATE writes the `interrupted` cause); if
+  `AUTO_RESUME`, every `interrupted` execution with count ≤
+  `MAX_AUTO_RESUMES` resumes (never an execution whose definition is
+  soft-deleted, and never one whose definition `isScheduled` says is
+  unscheduled, read live); one-shot jobs for `resume_after` are
   re-registered; **then** cron. Boot makes no network call. SIGTERM: stop scheduler, abort in-flight
   (cells → `not_run`), status `interrupted` without incrementing the
   counter, checkpoint, exit.
 - **Staleness per price**: effective age (§3) vs `STALE_AFTER_HOURS`
   (default 192 = one weekly cycle + 24 h, verified basis) or, for calendar
-  basis, `discoveryRefreshHours + maxAgeHours` of the provider (overridable
-  by `CALENDAR_STALE_AFTER_HOURS`).
+  basis, a threshold built per price: the definition's `discoveryRefreshHours`
+  for the price's provider plus the price's **own stored** `max_age_hours` (0
+  when unknown), never the currently registered provider's declared age.
+  Because the effective age is the fetch age plus that same stored age, a
+  bounded- or unknown-age price is stale exactly when its fetch age passes the
+  refresh (never stale within the refresh, whichever run fetched it), while a
+  vendor-dated price keeps its own age, so an old price the vendor dates is
+  never hidden; `CALENDAR_STALE_AFTER_HOURS`, when set, replaces the threshold
+  outright. One pure rule in `core` (`calendarStaleThreshold`, `stalenessOf`
+  and `staleMarkText`, the mark's words of §3) is read by the board, the date
+  pair detail, the search cards, History, Status, the engine's alert marks and
+  the alert email; the age shown keeps its assumed or unknown vendor age
+  visible in §3's label formats.
   Every row shows its effective age as a number; "stale" is reserved for
   older than one full refresh cycle. Stale rows are **returned and
   labelled, never hidden**; hiding is an opt-in filter. Ordering with
@@ -2031,21 +2500,35 @@ completed
   index.
 
 ### 8.2 Scheduler
-`croner` with `timezone: definition.schedule_tz`. Jobs are (re)registered on
-create, `PUT`, disable, enable and delete, in the same request; a test
+`croner` with `timezone: definition.schedule_tz`. A job exists only for a
+scheduled search (`isScheduled`, §7). Jobs are (re)registered on
+create, `PUT` (Repeat weekly's Save and Stop repeating included), disable,
+enable, delete and restore, in the same request; a test
 covers each. A tick, in order: cancel and supersede any paused run older
 than `discoveryRefreshHours` whose `resume_after` is not in the future, and
 any paused catch-up (the scheduled firing replaces it and starts with
 `scheduled_for` set); else if an execution is `paused_error` with `resume_after ≤ now`, or
 `paused_budget` and `estimateRemaining` now passes the cap check, **resume
-it** (through the compare-and-set); else if any execution is active, record
+it** (through the compare-and-set); else if the definition's own latest
+parent is `paused_*` or `interrupted` with no `resume_after` in the future (a
+manual run stopped while the search had no schedule, a page-limit stop, a
+stop every source's refusal caused), the firing **supersedes it** (cancelled
+with cause `superseded 'schedule'`) and starts, in the one immediate
+transaction of the firing's insert, never recording "schedule blocked since",
+so an old stopped manual run never blocks a schedule added afterwards (a
+paused run with a future `resume_after` is left to its one-shot job, as
+before); else if any execution is active, record
 nothing and show "schedule blocked since <date>" in the status bar (cleared
 when a run of the definition starts, by a tick, a catch-up or by hand, or
 once the blocking run is no longer active; the date is the blocking run's
 own, so another run blocking later starts a new one); else
-run the pre-start checks and start. A `paused_error` with no `resume_after`
-(every provider disabled) blocks the schedule until a manual resume or the
-supersede above. The definition's own `croner` job is the live tick.
+run the pre-start checks and start. A scheduled run whose estimate exceeds
+the confirmation stored when the schedule was set is `skipped_confirm`, its
+cause shown on the search's page ("Skipped: today's estimate (about £1.20) is
+above the confirmation you gave when you set the schedule (£1.00)." with
+"Change the schedule's confirmation in Edit"). The one-shot resume job and the
+boot's auto-resume (both through `autoResume`) skip the runs of a search
+`isScheduled` says is unscheduled, read live (§8.1). The definition's own `croner` job is the live tick.
 `croner` 10.0.1 re-arms its timer at most 30 s ahead and, on waking from
 sleep, fires an overdue firing once, so the tick computes its firing as
 `previousFiring(expr, tz, now + 2 s)` (croner answers strictly before the
@@ -2187,7 +2670,7 @@ cells as §3's texts do. SearchApi and Travelpayouts resume and continue as
 usual, and the next scheduled run (on a definition with no schedule, the
 operator's next run of it) fetches the browser provider's cells. A pass the
 window cut left its planned tiles unrequested on purpose, so it is no parity
-break, and the Dates view's coverage section offers no Retry on a browser
+break, and a search's coverage section offers no Retry on a browser
 error a resume would only leave (the resume's own rule). So browser pages load near the times the operator chose, and never
 late; the Status view warns when two definitions that use the browser
 provider share a firing time and suggests staggering them. Under `any`, a
@@ -2217,10 +2700,25 @@ under the §5.2 tilings measured by the spike:
 | SearchApi $40, weekly discovery, `maxCells 10, expandTop 2, bookingLinks true` | ~21 tiles per pair + `maxCells × 5` (worked example ~84 + 50 = ~134) | see `docs/scheduling.md` (generated) | yes: ~£32 subscription, marginal cost 0; the call cap is the hard stop; headroom for `maxCells` ~200 (~1,084/run planned) or daily runs (~2,330/month with the reserve: discovery refetches once per weekly refresh, at most 5 times a month, and itinerary searches run daily) |
 | SearchApi trial | one discovery exceeds 100 | — | spike and smoke only; scheduled runs exclude SearchApi on `trial` |
 
-There is no built-in definition with airports in it. The Definitions form
-starts with empty origin and destination fields and a plan-aware **policy
-preset** (`trial`/£0: Travelpayouts discovery only; `40usd`: both providers,
-`maxCells 10, expandTop 2`); execution caps come from the plan preset.
+There is no built-in definition with airports in it. A new search (the
+first screen's form, §11) starts with empty From and To fields and the
+**presets** (`GET /providers`): **no schedule** (`schedule_cron` NULL,
+`enabled` 0) and **no arrival window** (a time window applies only when the
+operator sets one; the journey limit stays 25 h each way); discovery names
+**every free source the install has configured and enabled**, stored on the
+search when it is created (`travelpayouts` when `TRAVELPAYOUTS_TOKEN` is set,
+`camoufox` when `CAMOUFOX_ENABLED` is true with its worker URL and key), plus
+the plan-aware paid rule (`trial`/£0: no SearchApi; `40usd`: SearchApi in
+both stages, `maxCells 10, expandTop 2`); execution caps come from the plan
+preset. A search keeps the sources it names; a source set up later is added
+by editing. Repeating is added from a search's page: "Repeat weekly…" opens
+the schedule fields (the stored cron, else `0 5 * * 1`, in
+`SCHEDULER_TIMEZONE`) with the estimate sentence and the monthly figure, and
+sends nothing until Save; Save checks the month's fit (a 422 is shown in
+words beside the fields), registers the schedule (`enabled` 1) and stores the
+sentence's shown runnable totals as the schedule's confirmation (§7), which
+scheduled runs use; "Stop repeating" sets `enabled` 0. A search whose latest
+run is stopped needs no warning there: its first firing supersedes it.
 `docs/setup.md` carries the London → New York example as importable JSON. `budgetFit` at save time
 compares `runsPerMonth × estimate` with every cap and warns. The
 `discoveryRefreshHours` comparison uses a 10% tolerance (reuse iff age <
@@ -2409,8 +2907,8 @@ First-failing-test per WP in §16.
    parameters (a date pair's cells only, both dates or neither, airports and
    the journey limit as above, 422 outside the space) and its
    `datePairFigure` equal to the board's figure.
-6. **`web`**: the Dates view, a component test per state of §11 (no
-   search, never run, run in progress with a partial board, paused,
+6. **`web`**: a search's page (the Dates view), a component test per state of §11 (no
+   search, never run, run in progress with a partial board, reading flights, paused,
    budget-stopped, stale, no prices but coverage, thin coverage with its
    next move, synthetic banner, too many cells, no price within the
    filters (its coverage line shown, with a filtered scope that is partly
@@ -2450,20 +2948,29 @@ First-failing-test per WP in §16.
    web, engine templates and API strings; booking links render with
    `rel="noopener noreferrer"`, host shown, POST bookings as forms, no
    auto-navigation; History's chart empty and loading states. **Playwright,
-   fixture mode**, through the real api and the built SPA: (1) import the
-   example, switch both stages to the fixture provider, enable, estimate,
-   create and run now; (2) Dates: the header line names the run and its
+   fixture mode**, through the real api and the built SPA: (1) on the first
+   screen, fill From and To with the example's codes through the picker, Leave
+   between "14 Mar 2027" and "15 Mar 2027", Stay 10 to 11, switch the sources
+   under More options to the fixture provider, press Search now, and wait on
+   the page's state line reading "Searched" (the flights area reads "Flight
+   times need the browser worker", with no read button); (2) the search's
+   page: the header line names the run and its
    age, the red banner shows, the board's first row carries the synthetic
    source and its age, the overview's legend is visible, its one tab stop
    moves by arrow with a solid focus outline, and pointing at the first row
    lights its ringed cell; (3) the first row opens the date pair detail,
    whose headline names the synthetic source and whose URL carries the date
-   pair; "Back to dates" returns with the filters kept; (4) `?view=calendar`
-   lands on Dates and `?view=coverage` on Dates with the coverage section
-   open; (5) History's charts draw and its table names the synthetic
-   source; (6) at 375 px the board is stacked cards, the overview shows one
-   month with Previous and Next, nothing spills out of a cell, and on every
-   loaded view (Dates, the detail, History, Definitions, Alerts, Providers,
+   pair; "Back to dates" returns with the filters kept; (4) `?view=dates&def=<id>`
+   lands on the search's page and the nav's entry names the search,
+   `?view=definitions` without `edit=` lands on Searches, `?view=calendar&def=<id>`
+   lands on the search's page and `?view=coverage&def=<id>` on it with the
+   coverage section open; (5) History's charts draw and its table names the synthetic
+   source; (6) at 375 px the new-search form sits above the cards, card
+   actions are at least 44 px, the board is stacked cards, the overview shows one
+   month with Previous and Next, nothing spills out of a cell, nothing
+   scrolls sideways on a search's page with its flights block or on the cards
+   list, and on every
+   loaded view (Searches, a search's page, the detail, History, Edit, Alerts, Providers,
    Status) the nav's two tiers keep every link in view in at most two rows
    and the page does not scroll sideways. **The performance bound**, a
    second Playwright test, serves the decoded worst cases through the
@@ -2592,22 +3099,27 @@ shape carries `provenance` and `stale`.
 | Route | Purpose |
 |---|---|
 | `GET /health` | unauthenticated and exempt from the Host allowlist: `{ ok, degraded }` where `degraded` = job count ≠ enabled scheduled definitions, or an execution running past `STUCK_AFTER_HOURS`, with no detail; authenticated detail `{ db, providers, scheduler: { jobCount, nextRun, lastExecutionAt, degraded } }` |
-| `GET /status` | authenticated; never spends, never waits on a vendor, never loads a page: `{ generatedAt, mode: 'native' \| 'container' \| 'dev', version, checks }`, each check `{ id, area, providerId, label, state: 'ok' \| 'warn' \| 'fail' \| 'off', summary, note, offReason, fix: { text, command } \| null }` (`label` names a card among several of its area, a search's name; `note` an aside on any check, such as "caught up the run missed at 01:30, ran 07:02", which never counts toward the status bar; `offReason` ∈ `not-set-up`, `not-visible`, `awaiting-verification`, `disabled` (a disabled search, so a parked one never nags the bar), only when `off`; nothing a state rests on is ever truncated), worst first; `command` is a `pnpm gmt …` line in native mode and always null in container and dev mode, where the text names the compose action or the docs section; areas `app`, `database`, `backups`, `schedule`, `data` (per definition, its latest finished parent run's discovery coverage per cell in the six buckets with their spec labels, both ends of its priced observations' effective ages, never "fresh", "complete" or "all"), `provider` (one per provider plus `price-sources`, which warns "no usable price source" unless a non-synthetic provider can price a scheduled search), `worker` (whose card also states the app's `CAMOUFOX_BROWSER_WINDOW`; a worker that answers but will refuse pages is `fail`, judged by the same rule as the engine's preflight: a signed-in profile, shared settings that differ, an unverified or differing grid setup), `consent` ("consent rejected" only for a stored value whose mark is `reject`, any other mark a `fail` with the fix; a worker that does not report the mark cannot be checked, its capture's latest expiry stated as an upper bound, "expires by … at the latest"), `email` (the newest send of any kind since the app started: alert digest, notice or test; `fail` when it failed); a provider card's auth or quota class is the adapters' own, recorded on the ledger row where the call is classified (migration 0008, `error_kind`), and a 2xx whose body was rejected is not a success; summaries come from fixed templates and error classes, never from vendor, worker or SMTP text; the worker check reads the worker's `/v1/status` through http-kit with a 2 s timeout and picks named fields (`workerStatusSchema` gains a field one work package before any worker emits it, so an app parses the status of a worker one package newer); no field carries a key, password, database path or `SOCS` value |
+| `GET /status` | authenticated; never spends, never waits on a vendor, never loads a page: `{ generatedAt, mode: 'native' \| 'container' \| 'dev', version, checks }`, each check `{ id, area, providerId, label, state: 'ok' \| 'warn' \| 'fail' \| 'off', summary, note, offReason, fix: { text, command } \| null }` (`label` names a card among several of its area, a search's name; `note` an aside on any check, such as "caught up the run missed at 01:30, ran 07:02", which never counts toward the status bar; `offReason` ∈ `not-set-up`, `not-visible`, `awaiting-verification`, `disabled` (a removed search's card only: an unscheduled search is judged by its latest run and notes "not scheduled", so a search without a schedule never nags the bar for having none), only when `off`; nothing a state rests on is ever truncated), worst first; `command` is a `pnpm gmt …` line in native mode and always null in container and dev mode, where the text names the compose action or the docs section; areas `app`, `database`, `backups`, `schedule`, `data` (per live definition, scheduled or not, its latest finished parent run's discovery coverage per cell in the six buckets with their spec labels, both ends of its priced observations' effective ages, never "fresh", "complete" or "all"), `provider` (one per provider plus `price-sources`, which warns "no usable price source" unless a non-synthetic provider can price a scheduled search), `worker` (whose card also states the app's `CAMOUFOX_BROWSER_WINDOW`; a worker that answers but will refuse pages is `fail`, judged by the same rule as the engine's preflight: a signed-in profile, shared settings that differ, an unverified or differing grid setup), `consent` ("consent rejected" only for a stored value whose mark is `reject`, any other mark a `fail` with the fix; a worker that does not report the mark cannot be checked, its capture's latest expiry stated as an upper bound, "expires by … at the latest"), `email` (the newest send of any kind since the app started: alert digest, notice or test; `fail` when it failed); a provider card's auth or quota class is the adapters' own, recorded on the ledger row where the call is classified (migration 0008, `error_kind`), and a 2xx whose body was rejected is not a success; summaries come from fixed templates and error classes, never from vendor, worker or SMTP text; the worker check reads the worker's `/v1/status` through http-kit with a 2 s timeout and picks named fields (`workerStatusSchema` gains a field one work package before any worker emits it, so an app parses the status of a worker one package newer); no field carries a key, password, database path or `SOCS` value |
 | `GET /executions/active` | authenticated: `{ execution: { id, definitionId, definitionName, kind: 'run' \| 'cell-verification', startedAt, estimatedFinishAt } \| null }`, the oldest execution with a pass in flight (pending or running), a parent run or a single-cell verification (which spends credits too), read as one row; its estimated finish is now plus the seconds its remaining cells are estimated to take (so a resumed run never reads as finished in the past), or null without an estimate; `gmt update` reads it |
 | `POST /alerts/test-email` | sends one fixed test message through the configured email notifier, apart from `ALERT_EMAIL_MAX_PER_HOUR` (a test has its own limit of one a minute and an in-flight guard, so pressing it never crowds out an alert; 429 past it); 409 when email is not configured; the class of the send (sent, failed; never the server's text) is kept in the notifier and shown as "since the app started" |
-| `GET /airports?q=` | airport-table autocomplete: up to 20 rows `{ iata, name, city, country, tz, metro }`, a matched metro never cut short. Bands: exact code, a metro code's members, code prefix, a city word, a name word, any other substring; inside a band a large airport with scheduled service first, then a medium one, then the rest; every listed airport of a metro any row belongs to is returned as one block at its best member's place; an airport OurAirports lists with no scheduled service is left out unless its exact code is typed (§7) |
+| `GET /airports?q=` | airport-table autocomplete: up to 20 rows `{ iata, name, city, country, tz, metro }`, a matched metro never cut short. Bands: exact code, a metro code's members, code prefix, a city word, a name word, any other substring; inside a band an airport in the install's own country (`POINT_OF_SALE`, when it is a code; the point of sale is the install's market, where a browser locale varies by viewer) first, then a large airport with scheduled service, then a medium one, then the rest, so Birmingham GB lists before Birmingham US on a GB install; every listed airport of a metro any row belongs to is returned as one block at its best member's place; an airport OurAirports lists with no scheduled service is left out unless its exact code is typed (§7) |
 | `GET /providers` | capabilities, plan, usage vs caps with window bounds for the one window each plan uses (the month on a monthly plan, the lifetime on the trial; the unused window is not sent, so a null cap means no cap); "verification will not run: spend cap is 0" when a provider whose calls cost money is enabled under a zero spend cap; on a billed plan whose calls cost £0, a `capNote` naming the call cap that is the hard stop |
-| `GET/POST/PUT/DELETE /definitions[/:id]` | CRUD; `POST` with no body creates the **default definition for the configured plan**; response includes `budgetFit`; `PUT` re-registers the schedule; a zero-cell window returns 422 |
-| `POST /definitions/estimate`, `POST /definitions/:id/estimate` | for an unsaved body or a saved definition: cells, per-provider calls (pre-factor and factored), cost (micro-GBP and pence), seconds, assumptions |
+| `GET/POST/PUT/DELETE /definitions[/:id]` | CRUD; `POST` with no body creates the **default definition for the configured plan** (the §8.2 presets: no schedule, no arrival window, every configured free source); response includes `budgetFit`; `PUT` re-registers the schedule, and stores a sent confirmation that covers the worst case over every line, or, from Repeat weekly's Save, one that covers the shown runnable totals (§7); a zero-cell window returns 422; `DELETE` soft-deletes the search first (so no firing can start a run of it in between) and then cancels its pending, running or paused parent through `Orchestrator.cancel(id, { kind: 'superseded', by: 'remove' })`, leaving its alert rules untouched |
+| `GET /definitions/cards` | the first screen's cards (`searchCardsResponseSchema`), in the order the api owns: pending or running first (oldest start first), then by the latest run's start, newest first, then never-run searches in creation order; tool-run and deleted definitions are absent. Each card: id, name, origins, destinations, the window (absolute or relative, with its resolved dates), the stay, cabin, `schedule` (`{ cron, tz }` only when scheduled), the sources it names, `latestRun` (`{ id, status, trigger, startedAt, finishedAt, datePairs, datePairsSearched, datePairsNeverSearched, flights { planned, read } \| null, estimatedFinishAt, stop }` or null; the counts over the run's snapshot space by `datePairSearched`, §6.6, never-searched being the date pairs no run searched; `estimatedFinishAt` now plus that run's own remaining seconds while pending or running, for each such run; `stop` the stored cause's text, `NO_STOP_CAUSE_TEXT` for a stopped row without one, null on every other status), `spaceChangedSince` (the search's space changed after its latest run started), and `cheapest` (the board's first-ranked figure through the same ranking, with its full provenance, `stale` by the per-price rule, age, basis, dates and airport pair, and `fromLatestRun`) or null; no field carries `error_text`, a key, a password or a path; read once per definition through grouped statements |
+| `POST /definitions/create-and-start` | Search now: body = the definition's fields without the stored confirmation pair, plus `confirmCostPence`, `confirmCalls` and a `requestKey` (a UUID). The route recomputes the estimate, creates the search, stores the sent figures as its confirmation only when they cover the recomputed shown runnable totals (the unblocked lines, `runnableTotalsOf`), then starts a manual run with them and `requireCovered`; answers 201 `{ definition, executionId, refusal }`, where a refused start keeps the saved search and answers `refusal { code, estimatePence, totalCalls, resetsAt }` in the body (codes `cap`, `confirm`, `window`, `disabled`, `shutting-down`, `failed`, worded by the web; no message), never a thrown error, and a start that throws answers `failed`; a zero-cell window is 422 and creates nothing; the same `requestKey` again, while the first is pending or after it settled, creates nothing more and answers the first request's result (200), from a bounded map of the last 100 keys that evicts a rejected request's key |
+| `POST /definitions/:id/restore` | the undo of a remove: clears `deleted_at`, keeps the pre-delete `enabled` and schedule and re-registers the job when the search is scheduled, answers 200 with the live definition; 404 `definition_not_found` for a live or tool-only definition |
+| `GET /definitions/:id/flight-lists?pairs=` | the flights on a search's page (`flightListsResponseSchema`): `pairs` is 1 to 50 date pairs (`MAX_FLIGHT_LIST_PAIRS`) as `<departure>_<return>`, comma separated, else 422 `invalid_pairs`. Answers `available` with `unavailableReason` (`not-named`, `not-configured` or `cabin`), the camoufox `refreshHours`, `monthlyPagesLeft`, `reading` (the date pair a read in flight is reading, or null), and per pair, in order: the figure's airport pair, its search `link` (`searchLinkFor('camoufox', cell, cabin, POINT_OF_SALE)` through the allowlist, null for a synthetic figure), `list` (the newest list for the figure's cell, cabin and point of sale, with full provenance, `ageHours` and `stale` against the camoufox refresh; the only list that feeds the outcome beside the price, the difference line and the tie order) and `listOtherPair` (else the newest list for another airport pair of the current space, shown only inside the flights block) |
+| `POST /definitions/:id/flight-lists` | body `{ departureDate, returnDate }`: reads that date pair's flight list on demand (§8.1); 202 `{ accepted: true }`, after which `GET` reports `reading`; 409 `browser_busy`, 409 `fresh`, 409 `not_available` with its reason, 422 `outside_space` and `no_price`, 404 `definition_not_found` |
+| `POST /definitions/estimate`, `POST /definitions/:id/estimate` | for an unsaved body or a saved definition: cells, per-provider calls (pre-factor and factored), cost (micro-GBP and pence), seconds, assumptions, `flightLists` when camoufox is named; beside `budgetFit`, what it asks: `datePairs`, `datePairsCovered`, `datePairsPartly` and `datePairsReused` (§8.1: planned cells only, reused apart), `softConfirm` (null, or the reason the press confirms as a code with its figures: `cost`, the estimate above `SOFT_CONFIRM_PENCE`, or `call-share`, a provider's calls above a fifth of its monthly cap, with that provider; never engine text), `billedCalls` (each runnable line of a billable-plan provider with its calls and the calls left in its month, null without a cap) and `monthlyPages` (`{ planned, left }` for the browser worker's month, flight pages included, when camoufox is a runnable line; else null) |
 | `POST /definitions/coverage-check` | body: origins, destinations, window, nights; runs Travelpayouts month tiles (free, ledgered, subject to the free-call caps) and returns cached rows per pair per month; never calls a billed provider |
-| `POST /definitions/:id/executions` | pre-start checks; `confirmCostPence?`; 409 on active execution or cap breach naming the cap |
-| `GET /executions/:id` | status, stage, reason, `resumeAfter`, progress per stage × provider, budget usage for every scope (each provider in the one window its plan uses), estimate vs ledger (updates during run) |
+| `POST /definitions/:id/executions` | pre-start checks; `confirmCostPence?`, `confirmCalls?`, `requireCovered?` and `replaceStopped?` (§8.1), passed through to the engine; a search whose `enabled` is 0 starts (202); 409 on active execution (a stopped one without `replaceStopped`) or cap breach naming the cap |
+| `GET /executions/:id` | status, stage, reason, `resumeAfter`, progress per stage × provider, budget usage for every scope (each provider in the one window its plan uses), estimate vs ledger (updates during run), `stop` (the stored cause's `{ sentence, fix }` from `core`'s `stopText`; `NO_STOP_CAUSE_TEXT` on a stopped row with no cause; null on every other status), `flights` (`{ planned, read, reused, failed, ended }` from the stored flight-list plan, §8.1, or null when none was stored) and `estimatedFinishAt` (now plus the run's remaining seconds while pending or running, else null) |
 | `POST /executions/:id/cancel`, `/resume` | `/resume` 409 if another is active or the compare-and-set loses; manual resume re-enables disabled providers and, on a `completed` execution, retries `error` outcomes with headroom |
 | `POST /cells/verify` | validated cell → child execution; 409 if a child is active for that cell |
 | `GET /definitions/:id/results?basis=&executionId=&limit=&departureDate=&returnDate=&origins=&destinations=&maxJourneyMinutes=` | the date pair detail's source (§11): `{ rows, total, truncated, basis, basisReason, executions: [{ id, status, age }], coverage, datePairFigure }`; default basis per §6.9; **scope parameters**: `departureDate` and `returnDate` (both or neither, else 422 `date_pair_incomplete`; a malformed date 422 `invalid_date_pair`; a date pair outside the current resolved space 422 `date_pair_outside_space`) narrow the rows and `coverage` to that date pair's cells before the basis is chosen and the rows ranked, and `origins`, `destinations` and `maxJourneyMinutes` narrow by the date-pair route's rule and 422s (plan decision 53: no row or count from a cell outside the scope; a row whose known journey time is above the limit is left out); `datePairFigure` is, on a date-pair read only (else null), the figure the Dates board shows for that date pair, from the same function; without them the read is the whole space, as an alert email sent before revision 48 needs; one row per itinerary (§6.5 dedup) from this definition's executions **including children**, filtered to the current resolved space and cabin, verdicts recomputed, **all verdict classes returned**, ranked by class then price so `failed` rows never consume the cap ahead of better ones, stale labelled, rows carry `notSeenInLatest`; calendar basis per §6.9; cap 1000 with `truncated`; read through a fixed number of grouped statements, `?executionId=` included with its truncation and supersession marks; `coverage` is the per-cell classification's sum (§6.6). **No sort or filter parameters**: sorting and filtering are client-side (§6.5); the scope parameters only choose which cells are read |
-| `GET /definitions/:id/date-pairs?origins=&destinations=&maxJourneyMinutes=` | the Dates view's source (§11), shape below: for the definition's latest parent run, one entry per date pair of the current resolved space with its six discovery buckets over the airport pairs in scope, its verification counts, and its **figure**, the cheapest price found across those airport pairs by §11's precedence, with the airport pair it came from, its basis and class, provenance, `stale`, age, and the decision 54 marks; the same execution set and price rules as `/results` (children included, current space and cabin, plan decisions 53, 54, 58); `origins` and `destinations` scope every count, figure and the summary to those airport pairs alone (decision 53); `maxJourneyMinutes` leaves out of a figure any price whose journey time is known and above it, never one whose time is unknown; columns, not paged, gzip, at most 50,000 cells read through a fixed number of grouped statements |
-| `GET /definitions/:id/coverage` | the latest parent run's coverage, read by the status bar (its blocked-schedule line) and the Dates view's coverage section: summary (the per-cell classification's sum over the current space, §6.6, so it equals the unfiltered date-pair summary and counts days a relative window rolled in, widened nights and added airports as not searched), per-provider request counts (tiles and calls), overrun and parity flags, "selected but not reached", errors with retry (only on cells that have not departed), and the on-demand children with their own buckets and calls |
-| `GET /definitions/:id/calendar-gap` | the Dates view's calendar-gap banner and the date pair detail: cells whose calendar price is below the cheapest class-`verified` observation (incl. children); empty when the definition has no verification provider |
+| `GET /definitions/:id/date-pairs?origins=&destinations=&maxJourneyMinutes=` | the source of a search's page (§11), shape below: for the definition's latest parent run, one entry per date pair of the current resolved space with its six discovery buckets over the airport pairs in scope, its verification counts, and its **figure**, the cheapest price found across those airport pairs by §11's precedence, with the airport pair it came from, its basis and class, provenance, `stale`, age, and the decision 54 marks; the same execution set and price rules as `/results` (children included, current space and cabin, plan decisions 53, 54, 58); `origins` and `destinations` scope every count, figure and the summary to those airport pairs alone (decision 53); `maxJourneyMinutes` leaves out of a figure any price whose journey time is known and above it, never one whose time is unknown; columns, not paged, gzip, at most 50,000 cells read through a fixed number of grouped statements |
+| `GET /definitions/:id/coverage` | the latest parent run's coverage, read by the status bar (its blocked-schedule line) and a search's coverage section: summary (the per-cell classification's sum over the current space, §6.6, so it equals the unfiltered date-pair summary and counts days a relative window rolled in, widened nights and added airports as not searched), per-provider request counts (tiles and calls), overrun and parity flags, "selected but not reached", errors with retry (only on cells that have not departed), and the on-demand children with their own buckets and calls |
+| `GET /definitions/:id/calendar-gap` | the calendar-gap banner of a search's page and the date pair detail: cells whose calendar price is below the cheapest class-`verified` observation (incl. children); empty when the definition has no verification provider |
 | `GET /definitions/:id/cells/:origin/:destination/:departureDate/:returnDate` | that cell's outcomes per stage and provider and its prices, each with full provenance (the source of the date pair detail's per-airport-pair panel, §11) |
 | `POST /tools/smoke`, `POST /tools/record` | the live smoke and recording scripts run inside the app process (authenticated), for use while the app holds `app_lock`; the response's `searchApiCreditsLedgered` is the smoke's running total (the SearchApi credits tool runs had already ledgered in the window at its spend check, null before that check and for `record`), which `gmt smoke` prints and confirms |
 | `GET /tools/smoke/plan` | authenticated, ledgers nothing: the smoke's worst case from `smokeWorstCase` (SearchApi credits split into calendar and itinerary, Travelpayouts free calls, browser pages and, in grid mode, the scroll allowance), the SearchApi trial credits left, and the browser page's bound (`pageBoundSeconds`: the per-request timeout the smoke's http-kit gives that page, from the same limits, §5.3); `gmt smoke` prints all of it before it asks, and waits for the page's bound (§13) |
@@ -2615,11 +3127,18 @@ shape carries `provenance` and `stale`.
 | `GET/POST/PUT/DELETE /alerts[/:id]`, `GET /alerts/events` | |
 | `GET /scheduler/jobs`, `GET /budget` | |
 
+Every route is an entry of `core`'s one route table (`ROUTES` in
+`core/api-contract`), which the app walks in order (so `GET
+/definitions/cards` and `POST /definitions/create-and-start` sit before `GET
+/definitions/:id`), each with its handler. The cards, create-and-start,
+restore and both flight-lists routes are behind the auth gate like every
+route but `/health`, and the mutating ones require the write headers (§4).
+
 **The date-pair route's shape** (`datePairsQuerySchema` and
 `datePairsResponseSchema` in `core/api-contract`, beside the results
 schemas). A **date pair** is a departure date and a stay length (its return
 date is the departure date plus the nights); a **figure** is the one price
-the Dates view shows for a date pair (§11 states the precedence that picks
+a search's page shows for a date pair (§11 states the precedence that picks
 it).
 
 ```ts
@@ -2633,8 +3152,7 @@ datePairsResponseSchema = {
   executions: ExecutionSummary[];   // the runs read, newest first, children included (as /results)
   discoveryProviders: ProviderId[]; // the definition's; [] means no discovery stage
   verificationProviderConfigured: boolean;
-  staleAfterHours: number;
-  calendarStaleAfterHours: Partial<Record<ProviderId, number>>;
+  staleAfterHours: number;     // the verified basis's threshold; a calendar figure's `stale` is the per-price rule's (§8.1)
   space: { departureFrom: IsoDate; departureTo: IsoDate; minNights: number; maxNights: number }; // current resolved space
   scope: {                      // what the server applied
     origins: Iata[]; destinations: Iata[];   // sorted and unique
@@ -2714,7 +3232,7 @@ output, so no amount reaches `PriceCell` without its provenance (§11).
 **Bounds.** The route reads at most **50,000 cells** in scope (fixed, the
 `MAX_CELLS_PER_DEFINITION` default): a scope above it, possible only where
 the operator raised that setting, is refused with 422 `too_many_cells`
-naming the scope's cells and the bound, and the Dates view asks for an
+naming the scope's cells and the bound, and a search's page asks for an
 airport filter that brings it under. Whatever the airports, it returns at
 most 400 × 91 = 36,400 date pairs (§6.1's longest window and widest stay
 range). It reads what the latest parent run, its on-demand children and the
@@ -2741,8 +3259,8 @@ plan decision 52, and neither the status bar, the Status view, the alert
 email nor `gmt` reads them), so they are **removed** with their contract
 schemas, read modules and tests in the Dates view's work package.
 `GET /definitions/:id/coverage` is **kept**: the status bar reads its
-blocked-schedule line and the Dates view's coverage section reads the rest.
-`calendar-gap` and the cell route are kept for the Dates view and the date
+blocked-schedule line and a search's coverage section reads the rest.
+`calendar-gap` and the cell route are kept for a search's page and the date
 pair detail.
 
 ---
@@ -2757,59 +3275,82 @@ Flights via SearchApi" (itinerary search), "Google date grid via SearchApi"
 mark `CF`), "Aviasales cache", "estimate vs ledger". The word "verified"
 appears only beside class-`verified` values; the `verified` basis is
 labelled "itinerary-search basis"; stage counts say "itinerary-searched".
+The first screen, a search's page, the new-search form, the Edit page with
+its More options, and the status bar use §3's main-path words: no
+"definition", "cells", "discovery", "hard stop", "verdict class", "tile",
+"retry factor", "STALE", "calendar basis" or variable names, and no
+"Camoufox" outside provenance notes; a set-up term that stays (under More
+options) carries a one-line explanation. Sentences come from one catalogue
+of templates (`COPY`) and `core`'s labels, never inline text, so the
+banned-word and rendered-sweep tests cover them.
 
-Layout: one nav for all views, in two labelled tiers: **Decide** (Dates,
-History) and **Set up** (Definitions, Providers, Alerts, Status). Each tier
+Layout: one nav for all views, in two labelled tiers: **Decide** (Searches;
+the search last opened, named by it, absent until a search's page has been
+opened, kept in the browser as `gmt.lastSearch`; History) and **Set up**
+(Providers, Alerts, Status). Each tier
 is a list of real links headed by its name in text; the current view carries
 `aria-current="page"` and a non-colour cue; every link is at least 44 px
 tall. On a phone each tier is one row at 375 px, its name first, so every
 view stays in sight and nothing scrolls sideways. The date pair detail
-(Results) is not in the nav: it opens from a Dates board row or overview
-cell, and from an alert email's link. Definition selector; **status bar**
+(Results) is not in the nav: it opens from a board row or overview cell of
+a search's page, and from an alert email's link; the Edit page opens from a
+card or a search's page. There is no search selector in the header and no
+Run now: every run action lives on the search it acts on (its card or its
+page), so no action can run a search other than the one shown. **Status bar**
 on every view (it reads `GET /status` through the same query as the Status
 view, every 60 s: any `fail` shows a "Status: n failing" link, any `warn` a
 quieter "Status: n to check" link, each naming the area when there is one
 ("Status: consent to check"); a `degraded` app is a `fail` on `schedule`;
 after a failed refresh the bar shows "Status: stale, checked N min ago" and,
 with no report, "Status: app not answering", never a clean state from old
-data): stage, progress as the six-bucket breakdown per stage ×
-provider (never an "attempted" or "searched" umbrella), spend used / cap
+data): the run's pass in main-path words (§3: "the first pass across your
+dates", "reading flights"), progress per source in the five marks with the
+six buckets under the count (never an "attempted" umbrella), spend used / cap
 for the execution and the month, and each provider's call usage against
 its binding window, worded as the Providers view words it ("this month:
 Travelpayouts 2 of 50000 calls", "SearchApi 7 of 24 calls over the plan's
-lifetime"), paused state with reason and Resume, "schedule blocked since
-<date>", Cancel; its progress breakdown links to the Dates view's coverage
-section. On a phone the numbers fold for a finished run and stay
+lifetime"), a stopped run's sentence (§8.1 "Stop causes") as-is with its fix
+and Resume when the fix names it (`NO_STOP_CAUSE_TEXT` for a row with no
+cause, never "paused: error"), "schedule blocked since
+<date>", Cancel; its progress breakdown links to the search's coverage
+section; its failing count links to Status. On a phone the numbers fold for a finished run and stay
 open while a run is active or paused. Every view header: execution(s) shown, status, age, stale label,
 banner when not completed. The **coverage line** is
 **"discovery: P priced · E no fares · X no cached data · R
 error · S skipped · U not searched of M (R′ reused) · itinerary-searched K
 of N selected (E outbounds each) +C on demand"** ("outbound" agrees with E;
 a run that selected nothing beside on-demand searches reads
-"itinerary-searched C cells on demand; none selected by the run"); the
-Dates view's header line and the date pair detail's header each carry it
-over their own cells, linking to the Dates view's coverage section. When
-more than half the counted cells are "no cached data", the Dates view and
+"itinerary-searched C cells on demand; none selected by the run"); a
+search's coverage section and the date pair detail's header each carry it
+over their own cells, and a search's header line (below) speaks the plain
+line instead, linking to the coverage section. When
+more than half the counted cells are "no cached data", a search's page and
 the date pair detail add one line naming the next move: add SearchApi
 discovery, widen the airports, or run the coverage check (a link to the
-Definitions form's coverage check for this search); the line says "no
+Edit page's coverage check for this search); the line says "no
 cached data" is not evidence that no flights exist. Empty state for no
 providers. Red synthetic banner (§5.5).
 
-**URLs.** `?view=` names the view: `dates` (also for an absent or unknown
-value), `results` (the date pair detail, with `depart=` and `return=` as
-`YYYY-MM-DD`), `history`, `definitions`, `providers`, `alerts`, `status`;
-`def=` names the search. The retired values land on Dates, keeping `def=`:
-`?view=calendar` and `?view=duration` open it as it stands (a Calendar
-`cal.dest=<IATA>` becomes the Dates destination filter; other `cal.*`
+**URLs.** `?view=` names the view: `searches` (the first screen, also for an
+absent or unknown value, whatever the number of searches), `dates` (a
+search's page, with `def=`; without `def=` it lands on Searches), `results`
+(the date pair detail, with `depart=` and `return=` as `YYYY-MM-DD`),
+`history`, `definitions` (the Edit page, with `edit=<id>`; without `edit=` it
+lands on Searches), `providers`, `alerts`, `status`; `def=` names the search,
+and `refused=<code>` on a search's page carries a refused Search now (below).
+The retired values land on a search's page, keeping `def=` (and on Searches
+without it): `?view=calendar` and `?view=duration` open it as it stands (a
+Calendar `cal.dest=<IATA>` becomes its destination filter; other `cal.*`
 parameters are ignored), and `?view=coverage` opens it with its coverage
 section open. A `?view=results` URL without a valid date pair in the current
-resolved space opens Dates, except that one carrying `row=` (an alert email
+resolved space opens the search's page, except that one carrying `row=` (an alert email
 sent before revision 48) opens the detail of that row's date pair when the
 row is among the definition's results (the whole-space `/results` read),
-else Dates with the line "That result is no longer in this search's
+else the search's page with the line "That result is no longer in this search's
 results.", or, when that read was truncated, "That result is not among the
 first 1000 results read for this search." A parameter that no longer applies is ignored, never an error.
+Opening a search's page, or a card's See dates, remembers it as the search
+last opened.
 
 **Provenance on every price, visible without hover**: provider badge,
 source in words, effective age in the `core` compact row format ("2h ago ·
@@ -2822,8 +3363,12 @@ line from `core` ("5d old", "≤2d old", "age unknown", or the "vendor's
 cache age unknown" badge) and, on a calendar price, "not checked"; the
 title attribute may carry the long form, never the only form, and these
 faces keep their tested contrast and their fit at 375px. Every amount the
-Dates view (board, overview readout, phone cards) and the date pair detail
-show renders through `PriceCell` with its complete provenance, and every such face is
+first screen (each card's cheapest, through the compact face) and a search's
+page (board, overview readout, phone cards, the flights block, the flight
+read's outcome and difference lines) and the date pair detail show renders
+through `PriceCell` with its complete provenance (the tie line, the estimate
+sentence and the monthly-pages note format money and counts through the
+estimate panel's one cost formatter instead), and every such face is
 a variant of `PriceCell`, never a second price renderer: `PriceCell`
 validates the complete provenance (provider, source kind, fetched and
 observed time, point of sale, FX status) before it prints an amount, and a
@@ -2843,37 +3388,177 @@ for that destination. Optional operator-entered onward cost per destination
 renders as an "adjusted" column, labelled operator-entered, sortable, never
 merged into price.
 
-- **Definitions form** (one screen): origins and destinations entered by
-  the operator with airport-table autocomplete (no preset airports); a
-  **coverage check** button that runs the free Travelpayouts month tiles
-  for the entered pairs and shows cached rows per pair before saving;
-  per-destination note and onward-cost fields; defaults for everything
-  else: relative window offset 7 days, length 182; 10–21 nights; economy;
-  `maxJourneyMinutes` 1500; arrival 06:00–23:00 local; providers and
-  policy from the plan preset (§8.2) with `discoveryRefreshHours` 168,
+- **Searches** (`?view=searches`, the first screen and always the landing
+  view): layout B, the operator's searches as the main column and the
+  new-search form beside it on the right; narrower than 900 px the form sits
+  above the list. With no search the column says "No searches yet". It reads
+  `GET /definitions/cards` (§10) and keeps the served order (a mutation of
+  this view pending keeps it until the next settled read), re-reading at the
+  status bar's poll interval only while a card is pending or running. **Each
+  card**: the route in words ("Birmingham → Frankfurt", from the airports'
+  cities, codes beside), the window ("10 Jan – 31 Mar"; "10 Dec 2026 – 31 Mar
+  2027" when it crosses a year; "rolling: 182 days from 7 days ahead" for a
+  relative window), the stay ("10–14 nights") and "repeats Mondays 05:00"
+  only when scheduled; its state line in a polite status region:
+  "Searching · 120 of 405 date pairs · about 1h 40m left" (no "left" clause
+  without `estimatedFinishAt`), "Reading flights · 3 of 10", "Searched 2h ago",
+  "Dates changed: 24 date pairs not searched yet" (`spaceChangedSince`), the
+  stop's sentence as-is with its fix as a line or button, or "Not searched
+  yet"; "85 of 405 date pairs never searched" whenever that count is not zero;
+  the cheapest found by its latest run's board and its dates ("£86 · 12 → 23
+  Jan") **always** through `PriceCell`'s compact face (source mark, short age,
+  "not checked" on a calendar price, the stale mark), so its own source and
+  age show whichever run fetched it, with "cheapest so far" while running and
+  nothing when there is none; the red synthetic banner when any card's
+  cheapest is the fixture provider's or synthetic. Actions: **See dates** (its
+  page), **Search again**, **Edit** and **Remove**, visually apart from Search
+  again. Remove asks inline, with no modal ("Remove <name>? Remove · Keep",
+  focus on Remove; on a pending or running search "Cancel and remove
+  <name>?", which cancels its run, §10), then replaces the card with a status
+  line "Removed <name>. Undo" for 30 s, kept through any re-read; Undo
+  restores the search as it was, its schedule included, back in its place
+  (`POST /definitions/:id/restore`), and focus moves to its heading. Tool-run
+  and deleted definitions are not listed; searches that exist today, old test
+  searches included, are listed and can be removed. A failed read, remove or
+  start is said in plain words beside its action, with Retry for the read.
+- **The new-search form and Search now.** Shown: **From** and **To** (the
+  airport search, one or more airports each, ranked by §10's `GET /airports`),
+  **Leave between** two dates and **Stay** min to max nights, and the
+  **Search now** button. Dates are shown and entered as "10 Jan 2027" (also
+  "10 january 2027", "10 Sept 2027" and `2027-01-10`); a day and month with
+  no year ("10 Jan", "Jan 10") is their next occurrence on or after today,
+  echoed beside the field as "10 Jan 2027"; a date in another form
+  ("10/01/2027") or one that does not exist is refused beside the field
+  ("Enter the date as 10 Jan 2027"), and no estimate is asked for it. Under
+  **More options**, already filled in from the presets (§8.2): longest journey
+  each way (25 h), cabin (economy), rolling instead of fixed dates ("starts in
+  N days", "lasts M days"), the sources (every free source the install has
+  configured and enabled, ticked, the browser worker included), the name (suggested from
+  the airports), the budget fields and the budget-fit table, each set-up term
+  with its one-line explanation; no arrival or departure window is filled in
+  (the time fields are empty, labelled "only if you set one"). Policy and
+  budget come from the plan preset as before: `discoveryRefreshHours` 168,
   `maxCells 10, topN 10, expandTop 2, bookingLinks true` (forced for
-  SearchApi); execution budget from `EXECUTION_MAX_CALLS` /
-  `EXECUTION_MAX_FREE_CALLS` / `EXECUTION_MAX_COST_PENCE`; schedule
-  `0 5 * * 1` in `SCHEDULER_TIMEZONE`. The creation screen shows the
-  estimate and the operator's "create" click is the explicit confirmation
-  that sets `confirmed_cost_pence = ceil(estimateMicroGbp / 10 000)`.
-  Advanced fold for constraints and policy. An "import example" action
-  loads the JSON from `docs/setup.md`. The £0 path needs a three-line
-  `.env` (`TRAVELPAYOUTS_TOKEN`, auth user, auth pass).
-- **Dates** (`?view=dates`, the default view): answers which dates to fly.
-  Within seconds the operator can name the cheapest acceptable date pair and
-  how far its price was checked. It reads `GET /definitions/:id/date-pairs`
-  (§10) through `core`'s decoder. Its sizes and timings (the 900 px phone
+  SearchApi), the execution budget from `EXECUTION_MAX_CALLS`,
+  `EXECUTION_MAX_FREE_CALLS` and `EXECUTION_MAX_COST_PENCE`. **The estimate
+  sentence**: the estimate is asked for 400 ms after the last change (there is
+  no Show estimate step) and shown beside the button in a polite live region,
+  as one sentence built from it: "About 2½ hours · free · asks about all 405
+  date pairs"; "About 3 hours · about £1.20 · asks about 300 of 405 date pairs
+  this run, the rest when you search again" ("the rest next Monday", from the
+  schedule, on a scheduled search; "(20 on some airports only)" and "(105
+  reused from earlier runs)" when they apply; "Nothing new to ask: 405 date
+  pairs reused from earlier runs" when nothing is asked); "· cached prices
+  only where travellers searched recently" when the Aviasales cache is the
+  only source used; "free" only when no source on a billable plan is used,
+  and capped calls are named ("uses about 120 of the 9,880 SearchApi searches
+  left this month"); "+ flights for up to 10 date pairs, about 12 minutes"
+  when the browser worker reads flights. Notes under it: the browser worker's
+  month ("uses about 110 of your 1,400 browser pages left this month", flight
+  pages included), a source not used and why, a blocked paid line's cost as
+  not included ("Google Flights via SearchApi is not used: no calls left this
+  month (about £3.40 not included)"), and the soft confirmation in words
+  ("This costs about £1.20, above your £1.00 check; pressing Search now
+  confirms it"; "This uses more than a fifth of this month's SearchApi
+  searches; pressing Search now confirms it"). The coverage is worded as what
+  is asked, never as prices found ("priced", "prices for", "all combinations"
+  and "will find" never appear). The button carries the cost when the run
+  costs money ("Search now · about £1.20") or capped calls ("Search now · 120
+  SearchApi searches"), and from the first change until the estimate for the
+  current form arrives, or while the form is incomplete, it is disabled with
+  the reason as its accessible description ("Working out the estimate…",
+  "Enter From and To", "Enter the dates", "Enter the stay", "The shortest stay
+  is longer than the longest", "The last date is before the first", or the
+  refused date field named, "Leave between"). **The press is the
+  confirmation** (§7) of exactly the figures beside it, for that run only:
+  `POST /definitions/create-and-start` with the form, the sentence's shown
+  runnable totals, a fresh request key and no schedule; the server recomputes
+  them, and the new search's page opens (`?view=dates&def=<id>`) showing its
+  progress. A refused start keeps the saved search and opens its page with
+  `refused=<code>`, worded there: `disabled` "No price source is set up, so
+  nothing was searched" with "Set up a price source (Providers)"; `confirm`
+  the estimate fetched again and its sentence inline with "Search again ·
+  about £X"; `cap` "This month's limit is used up; it resets on <date>";
+  `window` "Nothing to search: the dates have passed" with Edit;
+  `shutting-down` "The app is restarting; try again in a moment"; `failed`
+  "The search was saved but could not start" with Search again. A 422 keeps
+  the form with its field errors; a failed save says "Couldn't save the
+  search" beside the button.
+- **Search again** (on a card and on a search's page; on a never-run search's
+  page it reads "Search now"). The first press starts a run with the
+  search's stored confirmed values, the rule scheduled runs follow, with
+  `requireCovered` and `replaceStopped`: over a paused or interrupted run it
+  starts fresh (§8.1), and a free search inside its stored confirmation starts
+  at once ("Searching…"; "Already searching" when a run is going). When the
+  search has no stored confirmation, today's estimate exceeds it, or the soft
+  confirmation would trip, the press starts nothing: the estimate sentence
+  appears inline beside the button, now labelled with the cost ("Search again
+  · about £1.20"), and a second press confirms and starts that run with the
+  shown figures and stores nothing (Ian's ruling of 2026-10-31: a confirmation
+  covers that run only; the "the rest …" clause follows the schedule). The
+  button is disabled while its request is pending.
+- **Edit** (`?view=definitions&edit=<id>`, what was the Definitions form):
+  the search's fields as the new-search form shows them, with More options,
+  per-destination note and onward-cost fields, the **coverage check** (runs
+  the free Travelpayouts month tiles for the entered pairs and shows cached
+  rows per pair before saving), the advanced fold for constraints and policy,
+  and an "import example" action that loads the JSON from `docs/setup.md`; the
+  same estimate sentence; it ends with **Save and search again**, carrying the
+  cost as Search now does ("Save and search again · about £1.20"), which saves
+  and then starts **that** search, never another, with the sentence's figures,
+  `requireCovered` and `replaceStopped`, and opens its page; and **Save**,
+  which, when the change altered the search's space, opens the page reading
+  "Dates changed: N date pairs not searched yet · Search again". The £0 path
+  needs a three-line `.env` (`TRAVELPAYOUTS_TOKEN`, auth user, auth pass).
+- **A search's page** (`?view=dates&def=<id>`, what was the Dates view;
+  opened from its card, from the nav's entry for the search last opened and
+  from alert emails): answers which dates to fly, and says in plain words what
+  is happening. Within seconds the operator can name the cheapest acceptable
+  date pair and how far its price was checked. It reads `GET
+  /definitions/:id/date-pairs` (§10) through `core`'s decoder, its latest run
+  through `GET /executions/:id` (the status bar's shared query when it is the
+  run in flight, else its own poll while pending or running), and its flights
+  through `GET /definitions/:id/flight-lists`. Its sizes and timings (the 900 px phone
   breakpoint, 24 px phone cells, at most 12 bands, the 200 ms transition,
   the 30 s re-read during a run, and §9's 1.5 s and 200 ms performance
   limits) are starting defaults the build may tune. Top to bottom:
-  - **Header line**: the search's name; the run it shows (the latest parent
-    run) with its status and age ("run finished 2h ago", "run in progress,
-    started 40 min ago", "run paused 3h ago: <reason>") and the stale label
-    when every figure is stale; then the coverage line (above) over the
-    cells in scope, linking to the coverage section. With a filter set, the
+  - **Header**: the route, window and stay in words (dates as "10 Jan
+    2027"); one plain line from the latest parent run's buckets, by `core`'s
+    reading of a date pair (§6.6): "Searched today 09:12–11:41 · 300 of 405
+    date pairs priced, 20 showed no price, 60 not searched, 20 not reached, 5
+    couldn't be read (120 reused from earlier runs) · the browser worker"
+    (clauses at zero left out; "yesterday", else the date, "12 Mar"; two
+    sources joined, "the Aviasales cache and the browser worker"; never "all"
+    or "every"), linking to the coverage section, with the stale label when
+    every figure is stale; then the actions **Search again**, **Edit** and
+    **Repeat weekly…** (§8.2; when scheduled, the schedule in words with
+    Change, "Repeats Mondays 05:00 · Change"). With a filter set, the
     line covers the date pairs and airport pairs in scope and says so ("2 of
-    4 airport pairs · 10–14 nights"). Below it, when a verification provider
+    4 airport pairs · 10–14 nights").
+  - **State line** (a polite status region), one of: *searching* ("Searching
+    · 120 of 405 date pairs · about 1h 40m left", from the run's progress and
+    `estimatedFinishAt`, with Cancel beside it; prices land on the board as
+    they arrive, captioned "partial: still searching", and the date pairs not
+    yet reached read not searched); *reading flights* ("Reading flights · 3 of
+    10 date pairs · about 8m left", with Cancel); *searched*, only once the
+    flight step is done, the header line above, and when flights were read for
+    fewer date pairs than planned never a bare "Searched": "… · flights read
+    for 4 of 10 date pairs; the rest were left: outside this run's browser
+    window", "…; the rest were not read: the browser worker's monthly page
+    limit", "…; the rest were not read: a limit for this run" (from the stored
+    `ended`; with no stored plan the page says nothing about flights);
+    *stopped* (the stop's sentence as-is with its fix as a button or line:
+    Resume when the fix names Resume, Search again otherwise, both when it
+    names both, a `pnpm gmt …` command in a code element in native mode; "0
+    of 405 searched" beside it when nothing was searched, never "0 error"; a
+    run with no stored cause reads `NO_STOP_CAUSE_TEXT`; the board shows the
+    prices found before the stop); *changed* ("Dates changed: N date pairs not
+    searched yet · Search again", when the search's space changed after its
+    latest run started); *never* ("Not searched yet" with Search now; a search
+    naming no source reads "No price source is set up, so nothing was
+    searched" with "Set up a price source (Providers)", from its own data); and
+    a `refused=<code>` from Search now, worded as above. A run in its flight
+    step, or stopped, reads one of these, never "Paused: paused: error". Below it, when a verification provider
     is configured, the calendar-gap banner: "N cells have calendar prices
     below your reference verified price (latest seen, then fresh, then
     cheapest) (£X)", the reference named as "across the whole search" (no
@@ -2947,10 +3632,73 @@ merged into price.
     the banned-word list and the "verified" rule. Each row opens the date
     pair detail: its dates are a real link to the detail URL, carrying the
     figure's basis, and a click anywhere on the row follows it.
+  - **Flights** (the browser worker's flight lists, §2, §6.9). For the date
+    pairs of every tie group that touches the shown rows (at most
+    `MAX_FLIGHT_LIST_PAIRS`, 50, a request; "Show 10 more" asks for the next)
+    the page reads the flight lists. Each shown row (and its phone card) states
+    the read's outcome on its main line beside the figure ("Google's list:
+    from £92, 11:44", "not in Google's list", "Google's list showed no
+    flights"; a flight-read instant reads "11:44" today, "yesterday 11:44",
+    else "12 Mar 11:44"), from the figure's own airport pair's list only; the
+    figure's `PriceCell`, its rank and its coverage are unchanged when a list
+    arrives. Below it a flights block headed "Outbound flights only · each
+    price is the lowest round trip listed with it · read 3d ago, 12 Mar 11:44
+    · prices from Google Flights, not checked with the airline" shows up to
+    three flights (`FLIGHTS_SHOWN`), each "depart 07:15, arrive 18:05 +1 · 10h
+    50m · 1 change · Virgin Atlantic · from £478 round trip", the amount
+    through `PriceCell`'s compact face with the main-path flight-list source
+    label, the calendar style (dashed outline, "not checked") and the list's
+    stale mark, "+1" with the arrival's full date for assistive technology.
+    **Which flights** (`core`'s `chooseFlightsToShow`): those within the
+    search's longest journey (on the outbound duration) and, when set, its
+    arrival and departure windows, cheapest first, then shortest, then fewer
+    stops, then earlier departure, always including the shortest flight within
+    them; when none fits, the cheapest three, each marked; a flight reads
+    "outbound 10h 50m, within your 25h limit; return not read", or "outbound
+    26h: over your 25h limit", "arrives 03:10, outside your window", "departs
+    06:10, outside your window". A line "3 more read, 1 outside your limits ·
+    show all" expands to every flight read, and one line per list says "return
+    leg not read; stops and airline settings not applied to flights read". A
+    `failed` list reads "Flights not read: <its reason in words>"; `no-flights`
+    "Google's list showed no flights for these dates when read 11:44";
+    `none-for-cell` "Google listed flights, none this app could read for these
+    airports and dates (2 for other airports or days, 1 unread)", never "no
+    flights". A list for another airport pair of the space shows only inside
+    the block, under "Flights read for LGW → EWR, not the priced airports",
+    with no outcome beside the price and no difference line. A date pair with
+    no list reads "Flights not read yet" with **Read flights for this date
+    (free, 1 page)** when the worker is set up for the search, adding "; N
+    pages left this month" only when the worker's monthly pages left are fewer
+    than one run of this search would use, flight pages included; a press reads
+    it (§8.1), shows "Reading flights…", disables every other read button while
+    one is reading, and re-reads at the poll interval until the newer list
+    arrives; a refusal is worded ("The browser worker is busy with a search;
+    try again when it finishes", "Read within this search's refresh"). When
+    flight lists are not available, no row carries a flights line and one line
+    under the list says "Flight times need the browser worker; set it up in
+    Providers". The difference line of §6.9 appears when the list's cheapest
+    differs from the figure (both amounts through `PriceCell`, both instants in
+    the one form), with "Google shows a lower fare it could not read (£x)"
+    when the page's Cheapest-tab price is below what was read. Every date pair
+    row has **Open in Google Flights ↗** with its search link (§6.9, §2: the
+    page the worker reads), opening a new tab (`rel="noopener noreferrer"`),
+    named "Open in Google Flights for 12 → 23 Jan, opens in a new tab", with
+    the search-link label beside it, whatever the flight lists' availability,
+    and none when there is no link or it is not an `https://www.google.com/`
+    URL. "Verified" never appears in a flights block, and carrier names render
+    as text only.
+  - **Ties** (`core`'s `tieGroups` and `orderWithinTie`): each run of shown
+    rows at one price (and of one current or superseded kind) has its own
+    line, "4 date pairs tie at £86, listed by shortest flight time" when at
+    least one member has flights shown, else "… in date order"; within it,
+    the date pairs with flights shown come first by their first shown
+    flight's outbound time, then fewer changes, then earlier departure, and
+    the rest keep the board's order after them (a failed, empty or other
+    airport pair's list counts as none); the rank column stays the price rank.
   - **Run landing and re-ranking**: while the latest parent run is pending or
     running, the view re-reads the route when the run's progress changes (the
     status bar's execution poll), at most once every 30 s, and the board's
-    caption says "partial: run in progress"; prices from earlier runs keep
+    caption says "partial: still searching"; prices from earlier runs keep
     their own ages. When a read changes the order, rows move to their new
     places in one transition of at most 200 ms, and with no transition under
     `prefers-reduced-motion: reduce`; focus stays on the same date pair's row
@@ -2974,14 +3722,19 @@ merged into price.
     says so, decision 38), and a calendar-price figure also carries a "not
     checked" mark. Superseded and not-seen figures are not on the scale: they
     are drawn with their mark on a neutral fill and counted in the legend, so
-    every printed band range holds every price shaded in it. A cell without a figure carries one distinct non-colour
-    mark for its bucket: not searched, no fares, no cached data, error or
-    skipped (with several airport pairs, the bucket §6.6's precedence gives
-    over their roll-ups), and a striped "partly not searched" mark when some
-    of its airport pairs in scope were not searched, priced or not; a not
-    searched date pair is never shaded. The legend is numeric and always
-    open: each mark in words with its count in view, the shading's price
-    bands as scale values, and what "not checked" means. The shading's
+    every printed band range holds every price shaded in it. A cell without a
+    figure carries one of the five marks of §3 (`core`'s `reducedMark`, §6.6:
+    no price shown, couldn't be read, not reached, not searched; priced cells
+    are shaded), each with a distinct glyph and its words in the cell's
+    accessible name ("couldn't be read" for an error), and a striped "partly
+    not searched" overlay when some of its airport pairs in scope were not
+    searched, priced or not; a not searched date pair is never shaded, and no
+    mark reads "no flights". The legend, the key in plain words, is numeric
+    and always open: the five marks with their counts in view (the same counts
+    as the header and the card, by `datePairSearched`), "no price shown" with
+    its parts beneath ("12 no fares, 3 no cached data"), "darker is cheaper"
+    with the shading's price bands as scale values, "striped: partly not
+    searched", "each dot is one stay length", and what "not checked" means. The shading's
     colours are the later "colorize" step's, within the existing palette.
     **Readout**: the cell under the pointer or the focus shows its date pair
     in one line beside the legend: dates, nights, the figure through
@@ -3030,8 +3783,10 @@ merged into price.
     arrival-time filter. "Clear filters" resets them.
   - **Coverage section** (folded; the header line's coverage link and
     `?view=coverage` open it, `d.coverage=open`), over the latest parent
-    run: counts per stage × provider with the six-bucket breakdown and
-    "searched" as the umbrella beside it (the one place that shows it), with
+    run: the coverage line (above) over the cells in scope, its set-up terms
+    each with a one-line explanation where first shown; counts per stage ×
+    provider with the six-bucket breakdown and
+    "searched" as the umbrella beside it, with
     the "with a price" share; selected but not reached with reason; the
     browser provider's left cells with §3's texts; overrun and parity flags,
     each line worded by its unit (§8.1); the error list with Retry (only on
@@ -3046,15 +3801,16 @@ merged into price.
     price), then how far checked, then journey time and airports. The
     overview follows, one month at a time, with Previous and Next month
     buttons and a swipe; each day is a row with its strip across the width
-    and every cell at least 24 px square; nothing scrolls sideways at 375 px.
-  - **States**, each in words, never colour alone: *no search* (no
-    definition: "No search yet" with a link to Definitions); *never run*
-    ("Not run yet: nothing has been searched", the estimate, and Run now; the
+    and every cell at least 24 px square; the flights block wraps within the
+    card, and nothing scrolls sideways at 375 px.
+  - **States**, each in words, never colour alone: *no search* (a `def=`
+    naming no live search lands on Searches); *never run*
+    ("Not searched yet", the estimate sentence, and Search now; the
     overview shows every date pair not searched);
-    *run in progress* (the board fills as prices land, captioned partial;
-    date pairs not yet reached read not searched); *paused or budget-stopped*
-    (the reason and Resume as the status bar gives them, "the board shows
-    prices found before the pause", and the not searched count); *stale*
+    *run in progress* and *reading flights* (the state line above; the board
+    fills as prices land, captioned partial; date pairs not yet reached read
+    not searched); *stopped* (the state line's sentence and fix, the board
+    showing the prices found before the stop, and the not searched count); *stale*
     (the header's stale label when every figure is stale, and each stale
     figure labelled); *no prices but coverage* ("No prices in this run" with
     the coverage line and the marks, never "no flights"); *thin coverage*
@@ -3069,8 +3825,8 @@ merged into price.
 - **Date pair detail** (`?view=results&depart=…&return=…`; what was View A,
   Results): one date pair's itineraries and calendar prices, opened from a
   board row, an overview cell or an alert email, never from the nav. A
-  "Back to dates" link returns with the Dates filters and sort kept. It
-  reads `/results` scoped to the date pair and to the Dates airport filter
+  "Back to dates" link returns to the search's page with its filters and sort
+  kept. It reads `/results` scoped to the date pair and to the page's airport filter
   (§10) and to its journey limit, so every rule below holds over that date
   pair's cells. Header: the dates and nights, the airport pairs in scope
   ("2 of 4 airport pairs"), then two lines: **"cheapest found £X ·
@@ -3133,13 +3889,14 @@ merged into price.
   this build: browser provider"); container-mode backups keep a card of their
   own ("not visible from the container: check your host's backup job,
   docs/setup.md section 6"). Provider cards use the Providers view's wording
-  and link to it; a search's `data` card links to that search's Dates view
+  and link to it; a search's `data` card links to that search's page
   with its coverage section open. Refreshes on focus and every 60 s; read only, except the
   email card's "Send test" (`POST /alerts/test-email`), disabled while
   sending, with distinct messages for sent, not configured (409), hourly
   limit (429) and failed. Settings are not edited here.
-- **Definitions / Alerts / Providers**: forms with estimate, `budgetFit`,
-  standing confirmation, onward-cost entries, plan presets shown.
+- **Edit / Alerts / Providers**: forms with estimate, `budgetFit`,
+  standing confirmation, onward-cost entries, plan presets shown; Alerts and
+  Providers keep their set-up terms.
 - **Accessibility**: 375px layout as above; keyboard-operable board,
   overview and detail table; visible focus; labelled controls; no
   colour-only meaning; numeric legend on the overview.
@@ -3153,7 +3910,9 @@ Parsed once in `api` bootstrap through the `core` zod schema; empty = unset;
 invalid or half-set config fails boot naming the field; nothing defaults to
 unlimited. Plan presets fill caps, rates, TTLs and costs; individual
 variables override. The full preset table (every field per plan) lives in
-`docs/api-limits.md` and the zod schema.
+`docs/api-limits.md` and the zod schema. Revision 55 adds no setting: the
+flight-list counts (`FLIGHT_LIST_COUNT` 10 a run, `FLIGHT_LIST_MAX_FLIGHTS`
+30 a list, `FLIGHTS_SHOWN` 3) are constants in `core/flights/limits.ts`.
 
 ```
 # For the container, write only the lines you set. NODE_ENV, IN_CONTAINER, DATABASE_PATH, PORT and BIND_ADDRESS are
@@ -3173,7 +3932,7 @@ TRUST_PROXY=false                        # read the client IP from X-Forwarded-F
 LOG_LEVEL=info
 POINT_OF_SALE=GB                         # ISO 3166 country for the vendors' point-of-sale parameters; base currency is fixed at GBP in this build
 STALE_AFTER_HOURS=192                    # verified basis: one weekly cycle + 24 h
-CALENDAR_STALE_AFTER_HOURS=              # optional override; default = discoveryRefreshHours + provider maxAgeHours
+CALENDAR_STALE_AFTER_HOURS=              # optional override, replacing the threshold outright; default per price = discoveryRefreshHours + the price's own stored max_age_hours (§8.1)
 STUCK_AFTER_HOURS=12
 MAX_CELLS_PER_DEFINITION=50000
 SCHEDULER_TIMEZONE=Europe/London         # default schedule_tz for new definitions (single source)
@@ -3208,12 +3967,12 @@ SEARCHAPI_CACHE_TTL_HOURS=1              # local cache window; the vendor does n
 SEARCHAPI_TRIAL_USED=0                   # trial only: seed for the lifetime window when the trial was partly spent elsewhere; above 0 on 40usd fails boot
 # overrides: SEARCHAPI_MONTHLY_CALL_CAP, _RATE_PER_MINUTE, _RATE_PER_HOUR, _CONCURRENCY, _COST_PER_CALL_MICRO_GBP, _PLAN_FIXED_PENCE
 # the hourly rate is clamped to 20% of the call cap, the vendor's own hourly rule
-# --- camoufox (self-scraped Google Flights, list mode, discovery only, off by default; see docs/providers.md and §2) ---
-CAMOUFOX_ENABLED=false                   # true only with the host-side worker running; false = the provider does not exist
+# --- camoufox (self-scraped Google Flights, list mode, discovery only plus the flight-list read, off by default; see docs/providers.md and §2) ---
+CAMOUFOX_ENABLED=false                   # true only with the host-side worker running (a new search then names it); false = the provider does not exist
 CAMOUFOX_WORKER_URL=                     # http://127.0.0.1:8090 (pnpm dev) or http://host.docker.internal:8090 (app in Docker; the compose default); loopback or host.docker.internal only, explicit port, no path
 CAMOUFOX_WORKER_KEY=                     # ≥ 32 chars, shared by app and worker; required when CAMOUFOX_ENABLED=true
 CAMOUFOX_MIN_SPACING_SECONDS=30          # start to start; 0–600 (0 means no pause: pages go back to back, still one at a time, from your own address); never randomised; a shared setting, kept equal in worker.env (a difference skips the provider)
-CAMOUFOX_EXECUTION_PAGE_CAP=100          # page loads per execution (BudgetExceeded provider-execution), frozen into the execution's budget snapshot; 1–400
+CAMOUFOX_EXECUTION_PAGE_CAP=100          # discovery page loads per execution (BudgetExceeded provider-execution), frozen into the execution's budget snapshot; 1–400; the 10 flight-list pages have their own allowance
 CAMOUFOX_MONTHLY_PAGE_CAP=1500           # page loads per billing month (provider-month; no-page rows not counted); the app's ledger enforces it; the worker enforces it too
 CAMOUFOX_BILLING_DAY=1                   # 1–28: the month starts 00:00 UTC that day, for both monthly caps, in the ledger and the worker
 CAMOUFOX_COOLDOWN_HOURS=48               # pause after a challenge, sign-in or consent page; 24–100000 (an unrecognised page pauses a fixed 1 h)
@@ -3591,8 +4350,9 @@ or a `.fixture.db` path. Setup ends by printing the URL, the user name,
 where the password lives and `pnpm gmt password` (which prints it to the
 terminal only, never to a log; if scrollback or a shared screen may have
 kept it, `--reconfigure password` replaces it), offers to open the browser,
-always names the next step (open the app, choose Definitions, add a search),
-says that nothing runs on a schedule until a search is given one, says what
+always names the next step (open the app and start a search from the first
+screen with Search now), says that nothing runs on a schedule until a search
+is given one (Repeat weekly… on its page), says what
 keeps the app running (macOS: while the user is logged in; Linux: after logout
 only with linger), says how to reach the app from another device, labelled as
 only for that (an SSH tunnel, `ssh -L 3000:127.0.0.1:3000`, or §3's Tailscale
@@ -3785,10 +4545,114 @@ as specified in §5.3; no secrets, no full URLs.
 | 17 | Camoufox install and consent: the verified install from `CAMOUFOX_BUILDS` with the CLI-owned layout, the worker's install directory and Linux fonts, flags per `<os>-<arch>` bound to their build, the `consent` command with export, import and check, the worker's own monthly caps, key rotation under `--reconfigure browser`, the worker service and its refusal file, the provenance notes' wording, the recording sessions for the other three entries, the `camoufox-install` CI job | Opus | 16a, 16b | a download whose SHA-256 differs from the manifest is refused and nothing is moved into place |
 | 18 | Status: `statusResponseSchema`, `GET /api/status` with every check (the worker's through http-kit), `POST /alerts/test-email`, the consent email on the maintenance tick, `gmt status`, the Status view and the status bar link, redaction tests | Sonnet | 16a, 16b | a status response holding the basic-auth password, the worker key or a `SOCS` value fails the redaction test |
 | 19 | The Dates view: `core`'s date-pair encoder and decoder (`encodeDatePairs`, `decodeDatePairs`), figure precedence, `rankDatePairs`, `bestPerWeek` and band folding; the grouped `db` reads (the latest verification outcomes, calendar prices with their truncation and supersession marks, observations hydrated by hash list, the children's roll-ups); the per-cell classification behind every coverage summary; `GET /definitions/:id/date-pairs` and `/results`' scope parameters; the Dates view, Results as the date pair detail with the per-airport-pair panels, the two-tier nav, the `?view=` landing rules; the alert email's date-pair link; removal of the Calendar, Duration and Coverage views and of the calendar and duration-analysis routes; the Playwright smoke and the performance test, and the CI job that runs them; `apps/web/PRODUCT.md` brought in line with the Dates view in its build PR | Opus | 18 | a date pair priced only on a filtered-out airport pair has no figure |
+| 20 | Search now: spec revision 55; `core`'s defaults with no schedule or arrival window, the main-path name table, `isScheduled`, `stopCauseSchema` and `stopText`, `formatInstantShort`, the per-price stale rule, `reducedMark` and `datePairSearched`, the search-card, create-and-start, flight-list and estimate-response contracts, `pageUrl` in `core`, the flight-list constants, `chooseFlightsToShow` and the tie order; manual runs that ignore `enabled`, `requireCovered`, fresh starts over stopped runs and the scheduled firing's supersede, no automatic resume for unscheduled searches, a stored cause on every stop; migration 0011 (`stop_cause_json`, `flight_lists_json`, `flight_lists`, `flight_list_flights`), `DefinitionsRepo.restore`, `latestParentPerDefinition`, airport ranking by the install's country, the budget guard's flight-page split; the worker's flight capture and `POST /v1/flights`, the provider's `flightLists` capability; the engine's flight-list step with its allowance, gate, reuse, resume and error table, the browser lease and the on-demand read; the cards, create-and-start, restore and flight-lists routes; the Searches view with its cards and new-search form, Search again, Edit's Save and search again, Remove with undo, a search's page with its header, state lines, Repeat weekly, flights, ties and five-mark key, nav and landing, Run now and the search selector removed; the smoke, `apps/web/PRODUCT.md`, `docs/setup.md` and `docs/providers.md` | Opus | 19 | a manual start of a search with `enabled = 0` starts a run |
 
 ---
 
 ## 17. Changelog
+
+### Revision 55: Search now (2026-10-31)
+
+A first-time walkthrough on a copy of the app (Birmingham to Frankfurt, leave 10 January to 31 March, 10 to 14 nights)
+took 18 clicks and three presses of Run now: the new search was disabled and only a schedule tick box enabled it, no
+price source was ticked, the form had no Search button, Run now ran the header's selected search rather than the one
+being edited, the run paused reading "Paused: paused: error", hour-old prices read STALE against the registered
+provider's declared age, and the page spoke in cells, discovery, definitions and hard stops. The design that answers
+it, `docs/superpowers/specs/2026-10-31-search-now-design.md`, stays as the record of the conversation; its work brief
+(`docs/briefs/wp20-search-now.md`) was reviewed by the core roster (190 findings: 57 High, 102 Medium, 31 Low) and,
+once revised, by a quick re-review (54 findings: 6 High, 32 Medium, 16 Low), every finding answered. The rulings below
+are folded into the sections they change; nothing here is an amendment to read beside them.
+
+**Ian decided 2026-10-31** (the design, agreed in conversation, its first screen and finished-search page from
+mockups, every *my call* included). The goals: a search for a new trip starts from the first screen with From, To, a
+departure window, a stay range and one Search now press; a search's page says what is happening in plain words; a
+finished search leads with its cheapest date pairs and, where the browser worker read them, their flights, states ties
+once and links every date pair to Google Flights; and the main path's words are plain (§1, §3, §11). The first screen is
+layout B, the searches as the main column and the new-search form beside it, above it on a phone (§11). A removed
+search is soft-deleted after an inline confirm, with an undo line and no modal (§10, §11). Cards list running searches
+first, then by latest run, newest first (§10). Dates are shown and entered as "10 Jan 2027" (§11). The pre-set arrival
+window of 06:00 to 23:00 is removed from the defaults, so a time window applies only when the operator sets one (§8.2).
+A new search names every free source the install has configured and enabled, stored on the search when it is created
+(§2, §8.2). Search again, on a card or a search's page, starts with the search's stored confirmed values and asks a
+second press when today's estimate exceeds them (§11). Within a tie, date pairs with flights read sort by shortest
+outbound flight time, then fewest changes, then earliest departure, the rest after them in today's order (§11). A
+search's page lists its 10 cheapest date pairs first, with the filters and "show more" (§11). A date pair whose flight
+list was read within the search's camoufox refresh is not read again (§8.1). Flight-list pages have their own per-run
+allowance of 10 outside `CAMOUFOX_EXECUTION_PAGE_CAP` and count against the monthly page cap, with no new setting
+(§2, §12). Reading one date pair's flights is refused while any run is using the browser worker (§8.1). The worker
+returns every flight the list page shows, up to 30 (§2). A date pair shows up to three flights, those within the
+search's limits first, cheapest then shortest, with a count of the rest (§11). A flight read never changes a date
+pair's price, coverage or tie, and a differing cheapest flight is said in one line (§6.9).
+
+**Ian ruled 2026-10-31.** (1) A Search again on a stopped search starts fresh: when the latest run is paused or
+interrupted, Search again (and Search now on an edited search) cancels it with its cause recorded and starts a new run
+in one immediate transaction, and a separate Resume stays where carrying on makes sense (§8.1, §10). (2) A manual run
+of an unscheduled search is never resumed by a timer or at boot: it stores no `resume_after`, the one-shot job and the
+boot's auto-resume skip it, and its stop sentence says when the limit resets and offers Search again or Resume (§8.1,
+§8.2). (3) A confirmation covers that run only: the press that confirms a run stores no standing confirmation, and
+scheduled runs keep the confirmation given when the schedule was set, skipping, with the page saying so, when their cost
+rises past it (§7, §8.2, §11).
+
+**Rulings on the brief's review** (the orchestrator's, on the reviews' open items). The flight-list step runs after
+discovery when the run has not stopped or its only stop is camoufox's per-run page cap, and never on a catch-up, a
+child, past the browser window, with camoufox disabled or at a monthly, lifetime or global cap (§8.1).
+Create-and-start stores the shown runnable totals, not the worst case, as the new search's confirmation (§7, §10).
+Undo of a remove restores the search with its schedule (§7, §10). The flight read's outcome is stated on the date
+pair's main line beside its price, which it never changes (§6.9, §11). A flight outside the search's arrival or
+departure window is marked as an over-limit one is, and the shortest flight within the limits is always shown (§11).
+The month key has five marks: priced, no price shown, couldn't be read, not reached and not searched (§3, §6.6, §11).
+The app always lands on Searches, the header's search selector is removed, and the nav's page entry is the search
+last opened (§11). The estimate's coverage clause ends "the rest when you search again", or "the rest next Monday" on
+a scheduled search (§11). A card's cheapest always renders through `PriceCell`'s compact face, its own source and age
+shown whichever run fetched it (§11). Coverage is worded as what is asked, never as prices found (§8.1, §11). The search
+link of a camoufox date pair is the page URL form the worker loads (§2, §6.9). Flight lists are keyed and shown by
+airport pair, dates, cabin and point of sale (§7, §8.1). Rows stopped before migration 0011 read
+`NO_STOP_CAUSE_TEXT`, never their stored text (§7, §8.1). The main-path word sweep covers the Edit page and More options
+(§3, §11). Following from Ian's rulings: a stop at the browser provider's monthly or per-run page limit offers Search
+again and never Resume, and a manual resume of the per-run stop is refused `cap` (§8.1); a scheduled firing supersedes a
+stopped manual run of its own search (§8.2); Repeat weekly's Save stores the shown confirmation as the schedule's (§7,
+§8.2); and `replaceStopped` travels from the button to the engine (§10).
+
+**Rulings on the build's preflight** (the orchestrator's, before the first task). A manual start is never refused for
+`enabled = 0`, and `disabled` stays the code for a search naming no runnable source (§8.1). The stored budget cause
+carries its cap's scope and limit, so "stopped at £5, its spending limit" can be worded (§8.1). A camoufox-only start
+sends its pages as its calls, and `requireCovered` compares them (§8.1). The "resumes at" limiter sentence applies to
+scheduled searches only (§8.1). Search again's stored confirmation is the search's confirmed values, and with none the
+first press shows the estimate and needs the second (§11). When a run stored no flight plan its `flights` is null and the
+page says nothing about flights, wording an early end only from a stored one (§8.1, §10, §11). The soft confirmation's
+reason is a code with its figures, worded by the web (§10). The estimate's monthly pages include the flight pages (§8.1,
+§10). A flight list's prices are above 0 in the database and the contract (§7). A missing airport name stores the reason
+`no-airport-names` (§8.1). The read button's pages-left clause shows only when the month's pages left are fewer than one
+run of the search would use (§11). Flight pages are a count of their own in the ledger's counts, never a stage (§2). An
+on-demand read refused as not available carries its reason (§8.1, §10). Where the design's examples and the brief's
+reviewed wording differ, the brief's wins: no sentence starts "Stopped:", and the key reads "striped: partly not
+searched" (§8.1, §11).
+
+**Builder's choices** (the design's §11 left them to the work). The airport search ranks a same-country airport first
+by the install's `POINT_OF_SALE`, the install's market, since a browser locale varies by viewer (§10). The flight
+list is a step of its own after discovery, inside the `discovery` stage, not a new stage (§8.1). Its record is the
+`flight_lists` and `flight_list_flights` tables, the worker's route `POST /v1/flights` and the app's two
+`/definitions/:id/flight-lists` routes (§2, §7, §10). The reduced month key is the five marks above, each with its own
+glyph (§11). A search with several airport pairs shows the flights of the figure's airport pair, and another airport
+pair's list only inside the flights block under its label (§6.9, §11). Thirty flights fit the answer's limits, at most
+about 25 KB, and the flight-list count is a constant, not a setting (§2, §12).
+
+**What moves.** Run now and the definition selector leave the shell: every run action lives on the search it acts on.
+The Definitions view becomes the first screen's new-search form and a search's Edit page; the Dates view becomes a
+search's page; Searches is the landing view and the nav's first entry.
+
+What changed. §1: the success line and where the coverage check lives. §2: the opt-in sentence, the flight-list read,
+the page caps, the camoufox search link, the ledger's split by endpoint. §3: search, date pair, flight list, the
+"searched" lines, main-path words. §5.1: `FlightListCapability`. §6.1: `skipped_window` unschedules. §6.6: the main
+path's reading of a date pair. §6.9: flight lists are not a basis; the camoufox search link. §7: `enabled`, the stored
+confirmation's sources, soft delete and restore, `stop_cause_json`, `flight_lists_json`, `flight_lists`,
+`flight_list_flights`, the boot airport check over every live search. §8.1: manual starts, `requireCovered`,
+`replaceStopped`, stop causes, automatic resume, the error table's page-limit and resume rows, the flight-list step,
+reading one date pair's flights, the estimate's flights and coverage, per-price staleness. §8.2: job registration, the
+firing's supersede, `skipped_confirm`'s words, `autoResume`, the presets, Repeat weekly. §9: the smoke's steps. §10:
+the new routes, the start flags, the execution and estimate responses, DELETE, `GET /airports`, the date-pair response,
+the route table. §11: words, nav, status bar, URLs, the first screen, the form, Search again, Edit, a search's page.
+§12: comments and the constants. §13: setup's next step. §16: row 20.
 
 ### Revision 54: the grid's reset control is not a cell (2026-10-30)
 
