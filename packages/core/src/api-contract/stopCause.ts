@@ -1,15 +1,17 @@
 import { z } from 'zod';
 import { BLOCKED_PAGES } from '../camoufox/protocol.js';
-import { BUDGET_SCOPE_KINDS, PROVIDER_ERROR_KINDS } from '../errors.js';
+import { BUDGET_SCOPE_KINDS, type BudgetScopeKind, PROVIDER_ERROR_KINDS } from '../errors.js';
 import { SKIP_CODES } from '../types/execution.js';
 import { isoDateTimeSchema } from '../types/ids.js';
-import { moneyPenceSchema, providerIdSchema, stageSchema } from './common.js';
+import type { NonEmpty } from '../types/nonEmpty.js';
+import type { ProviderId } from '../types/provenance.js';
+import { countSchema, moneyPenceSchema, providerIdSchema, stageSchema } from './common.js';
 
 // Spec revision 55 §7 `search_executions.stop_cause_json` and §8.1 "Stop causes". The schema lives in api-contract
 // because db parses stored JSON through api-contract schemas (as `estimate_json` is read), and `core/labels/stopCause.ts`
 // words every cause it accepts.
 
-const count = z.number().int().min(0);
+const count = countSchema;
 
 /**
  * Every detail or reason the app stores in a stop cause or a flight list is one of these words, never free text, so no
@@ -38,6 +40,34 @@ export type StopDetail = (typeof STOP_DETAILS)[number];
 export const BUDGET_UNITS = ['calls', 'pages', 'scrolls', 'pence'] as const;
 export type BudgetUnit = (typeof BUDGET_UNITS)[number];
 
+/**
+ * The units a budget cause may carry for its scope and provider (spec §5.1 scopes; revision 55 §8.1): the spending
+ * scopes count pence; the run's call scopes and a plan's lifetime count calls; a provider's own run and month caps count
+ * the browser worker's pages or scrolls, and every other provider's calls. Writers and the schema read this one rule.
+ */
+export function budgetUnitsFor(scope: BudgetScopeKind, providerId: ProviderId | null): NonEmpty<BudgetUnit> {
+  switch (scope) {
+    case 'execution-cost':
+    case 'global-month':
+      return ['pence'];
+    case 'execution-calls':
+    case 'execution-free-calls':
+    case 'provider-lifetime':
+      return ['calls'];
+    case 'provider-execution':
+    case 'provider-month':
+      return providerId === 'camoufox' ? ['pages', 'scrolls'] : ['calls'];
+  }
+}
+
+/**
+ * Whether a cause's provider fits its scope: the run's own caps and the month's spending cap belong to no provider, so
+ * they name none (a provider scope may name one, or none when the guard did not say which).
+ */
+export function providerFitsScope(scope: BudgetScopeKind, providerId: ProviderId | null): boolean {
+  return scope.startsWith('provider-') || providerId === null;
+}
+
 /** One source a run could not use: how it was left out (§6.6 skip reasons), its detail word, and when a pause ends. */
 const unavailableSourceSchema = z.strictObject({
   providerId: providerIdSchema,
@@ -53,12 +83,46 @@ const flightsReadSchema = z.strictObject({ read: count, planned: count }).refine
 });
 
 /**
+ * A budget stop (spec revision 55 §8.1): the cap's scope, its provider (null for the run's and the month's own caps),
+ * its unit (`budgetUnitsFor`), its limit, the scheduled resume, the cap window's end (`resetsAt`, kept even when no
+ * resume is scheduled) and, when the flight-list step ran after the stop, its counts. `cap` is the limit in `unit`:
+ * pence for the spending scopes (`execution-cost`, `global-month`), which the writer converts from the guard's µGBP
+ * (ruling A2); calls, pages or scrolls otherwise. `flights` is set only on the browser worker's per-run page cap, the
+ * one stop the flight-list step runs after (Review Focus 3).
+ */
+const budgetCauseSchema = z
+  .strictObject({
+    kind: z.literal('budget'),
+    scope: z.enum(BUDGET_SCOPE_KINDS),
+    providerId: providerIdSchema.nullable(),
+    unit: z.enum(BUDGET_UNITS),
+    cap: count,
+    resumeAfter: isoDateTimeSchema.nullable(),
+    resetsAt: isoDateTimeSchema.nullable(),
+    flights: flightsReadSchema.nullable(),
+  })
+  .superRefine((c, ctx) => {
+    if (!providerFitsScope(c.scope, c.providerId)) {
+      ctx.addIssue({ code: 'custom', path: ['providerId'], message: `${c.scope} names no provider` });
+    }
+    if (!budgetUnitsFor(c.scope, c.providerId).includes(c.unit)) {
+      ctx.addIssue({ code: 'custom', path: ['unit'], message: `${c.scope} does not count ${c.unit}` });
+    }
+    if (c.flights !== null && !(c.scope === 'provider-execution' && c.providerId === 'camoufox')) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['flights'],
+        message: "flights only follow the browser worker's per-run page cap",
+      });
+    }
+  });
+
+/**
  * Spec revision 55 §8.1 "Stop causes": why a run stopped or was skipped, stored by every status write that stops or skips
  * one (§7 `stop_cause_json`) and worded by `stopText`. `sources-unavailable.searched` is the date pairs searched before
- * the stop (`datePairSearched`, §6.6). A `budget` cause carries the cap's scope, provider, unit and limit (`cap`, in
- * `unit`: pence for a spending cap, converted from µGBP by its writer; ruling A2), the scheduled resume, the cap
- * window's end (`resetsAt`, kept even when no resume is scheduled) and, when the flight-list step ran after the stop,
- * its counts. Every object is strict: a stored cause with an unknown key is refused, so free text cannot ride along.
+ * the stop (`datePairSearched`, §6.6); its `sources` is a non-empty tuple where §5 writes `z.array(…).min(1)` (the same
+ * values, typed so a reader's first source needs no assertion; writers build it with `nonEmpty`). Every object is
+ * strict: a stored cause with an unknown key is refused, so free text cannot ride along.
  */
 export const stopCauseSchema = z.discriminatedUnion('kind', [
   z.strictObject({
@@ -68,16 +132,7 @@ export const stopCauseSchema = z.discriminatedUnion('kind', [
     // why: a non-empty tuple, so the type itself says there is a first source (its fix is the sentence's fix)
     sources: z.tuple([unavailableSourceSchema], unavailableSourceSchema),
   }),
-  z.strictObject({
-    kind: z.literal('budget'),
-    scope: z.enum(BUDGET_SCOPE_KINDS),
-    providerId: providerIdSchema.nullable(),
-    unit: z.enum(BUDGET_UNITS),
-    cap: count,
-    resumeAfter: isoDateTimeSchema.nullable(),
-    resetsAt: isoDateTimeSchema.nullable(),
-    flights: flightsReadSchema.nullable(),
-  }),
+  budgetCauseSchema,
   z.strictObject({
     kind: z.literal('limiter-timeout'),
     providerId: providerIdSchema,
@@ -99,11 +154,16 @@ export const stopCauseSchema = z.discriminatedUnion('kind', [
     estimatePence: moneyPenceSchema,
     confirmedPence: moneyPenceSchema.nullable(),
   }),
-  z.strictObject({
-    kind: z.literal('skipped-budget'),
-    scope: z.enum(BUDGET_SCOPE_KINDS),
-    providerId: providerIdSchema.nullable(),
-  }),
+  z
+    .strictObject({
+      kind: z.literal('skipped-budget'),
+      scope: z.enum(BUDGET_SCOPE_KINDS),
+      providerId: providerIdSchema.nullable(),
+    })
+    .refine((c) => providerFitsScope(c.scope, c.providerId), {
+      message: 'this scope names no provider',
+      path: ['providerId'],
+    }),
   z.strictObject({ kind: z.literal('skipped-window') }),
   z.strictObject({ kind: z.literal('skipped-missed'), code: z.enum(SKIP_CODES) }),
 ]);

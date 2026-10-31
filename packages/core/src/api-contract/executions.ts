@@ -4,16 +4,18 @@ import { isoDateTimeSchema } from '../types/ids.js';
 import {
   bucketsSchema,
   cellKeySchema,
+  countSchema,
   executionStatusSchema,
   microGbpSchema,
   moneyPenceSchema,
   providerIdSchema,
   stageSchema,
+  triggerSchema,
   usageSchema,
 } from './common.js';
 import { estimateSchema } from './definitions.js';
 
-const count = z.number().int().min(0);
+const count = countSchema;
 export const executionResponseSchema = z.object({
   id: z.string(),
   definitionId: z.string(),
@@ -23,7 +25,7 @@ export const executionResponseSchema = z.object({
   stage: stageSchema.nullable(),
   reason: z.string().nullable(),
   resumeAfter: isoDateTimeSchema.nullable(),
-  trigger: z.enum(['manual', 'schedule', 'tool']),
+  trigger: triggerSchema,
   startedAt: isoDateTimeSchema.nullable(),
   finishedAt: isoDateTimeSchema.nullable(),
   errorText: z.string().nullable(),

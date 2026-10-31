@@ -3,6 +3,7 @@ import {
   STOP_DETAILS,
   type StopCause,
   type StopDetail,
+  stopCauseSchema,
   stopTextSchema,
 } from '../../src/api-contract/stopCause.js';
 import { BUDGET_SCOPE_KINDS } from '../../src/errors.js';
@@ -245,11 +246,11 @@ const ROWS: Row[] = [
     SEARCH_AGAIN,
   ],
   [
-    "a source's monthly spending limit",
-    budget({ scope: 'provider-month', providerId: 'searchapi', unit: 'pence', cap: 4000 }),
-    {},
-    "Google Flights via SearchApi's monthly spending limit is used up.",
-    { text: 'Search again, or Resume', command: null },
+    "the monthly scroll limit, scheduled: the next run picks up scrolls, in the cause's unit",
+    budget({ scope: 'provider-month', unit: 'scrolls', cap: 1500, resetsAt: RESETS }),
+    { scheduled: true },
+    "The browser worker's monthly scroll limit is used up; it resets on 1 Apr 00:00, and the next scheduled run picks these scrolls up.",
+    { text: 'Search again after 1 Apr 00:00', command: null },
   ],
   [
     'the browser worker stopping at the start of checking fares',
@@ -315,16 +316,10 @@ const ROWS: Row[] = [
     RAISE,
   ],
   [
-    'the per-run spending limit of 250 p, with flights read after it',
-    budget({
-      scope: 'execution-cost',
-      providerId: null,
-      unit: 'pence',
-      cap: 250,
-      flights: { read: 3, planned: 10 },
-    }),
+    'the per-run spending limit of 250 p',
+    budget({ scope: 'execution-cost', providerId: null, unit: 'pence', cap: 250 }),
     {},
-    'This search stopped at £2.50, its spending limit for one run; flights were read for 3 of 10 date pairs.',
+    'This search stopped at £2.50, its spending limit for one run.',
     RAISE,
   ],
   [
@@ -686,7 +681,17 @@ describe('stopText (spec rev 55 §8.1 "Stop causes")', () => {
       causes.push({ kind: 'limiter-timeout', providerId, resumeAfter: UNTIL });
     }
     for (const code of SKIP_CODES) causes.push({ kind: 'skipped-missed', code });
-    const all = causes.flatMap((c) => facts.map((f) => ({ c, f, t: stopText(c, f) })));
+    // why: the generated set crosses every scope with every unit and provider; only the causes the schema stores are
+    // worded, and the pinned rows above must all be among them
+    const stored = causes.filter((c) => stopCauseSchema.safeParse(c).success);
+    const all = stored.flatMap((c) => facts.map((f) => ({ c, f, t: stopText(c, f) })));
+
+    it('covers every pinned row, and a stored budget cause of every scope', () => {
+      for (const [name, cause] of ROWS) expect(stopCauseSchema.safeParse(cause).success, name).toBe(true);
+      for (const [cause] of SKIPPED_BUDGET) expect(stopCauseSchema.safeParse(cause).success).toBe(true);
+      const scopes = new Set(stored.flatMap((c) => (c.kind === 'budget' ? [c.scope] : [])));
+      expect([...scopes].sort()).toEqual([...BUDGET_SCOPE_KINDS].sort());
+    });
 
     it('fits the stop-text schema', () => {
       for (const { c, t } of all) expect(stopTextSchema.safeParse(t).success, JSON.stringify(c)).toBe(true);

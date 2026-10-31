@@ -4,10 +4,12 @@ import { provenanceSchema } from '../types/provenance.js';
 import {
   ageHoursSchema,
   cabinSchema,
+  countSchema,
   cronSchema,
   executionStatusSchema,
   moneyPenceSchema,
   providerIdSchema,
+  triggerSchema,
 } from './common.js';
 import { definitionFields, definitionResponseSchema, refineDefinition } from './definitions.js';
 import { stopTextSchema } from './stopCause.js';
@@ -15,7 +17,7 @@ import { stopTextSchema } from './stopCause.js';
 // Spec revision 55 §10: the first screen's cards (`GET /definitions/cards`) and Search now's one press
 // (`POST /definitions/create-and-start`). The route table entries and their handlers arrive with Task 20.2.
 
-const count = z.number().int().min(0);
+const count = countSchema;
 const nights = z.number().int().min(0).max(90);
 
 /**
@@ -59,7 +61,7 @@ const latestRunSchema = z
   .strictObject({
     id: z.string(),
     status: executionStatusSchema,
-    trigger: z.enum(['manual', 'schedule', 'tool']),
+    trigger: triggerSchema,
     startedAt: isoDateTimeSchema.nullable(),
     finishedAt: isoDateTimeSchema.nullable(),
     datePairs: count,

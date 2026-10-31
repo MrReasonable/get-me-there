@@ -106,4 +106,5 @@ export * from './types/definitionDefaults.js';
 export * from './types/execution.js';
 export * from './types/ids.js';
 export * from './types/itinerary.js';
+export { mapNonEmpty, type NonEmpty, nonEmpty } from './types/nonEmpty.js';
 export * from './types/provenance.js';

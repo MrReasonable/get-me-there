@@ -86,6 +86,8 @@ describe('@gmt/core barrel', () => {
       'reducedMark',
       'datePairSearched',
       'LISTED',
+      'nonEmpty',
+      'mapNonEmpty',
     ]) {
       expect(core, name).toHaveProperty(name);
     }
@@ -93,6 +95,10 @@ describe('@gmt/core barrel', () => {
     for (const name of [
       'STOP_DETAILS',
       'BUDGET_UNITS',
+      'budgetUnitsFor',
+      'providerFitsScope',
+      'countSchema',
+      'triggerSchema',
       'stopCauseSchema',
       'stopTextSchema',
       'searchCardSchema',

@@ -1,11 +1,20 @@
-import type { BudgetUnit, StopCause, StopDetail, StopText } from '../api-contract/stopCause.js';
+import {
+  type BudgetUnit,
+  budgetUnitsFor,
+  type StopCause,
+  type StopDetail,
+  type StopText,
+} from '../api-contract/stopCause.js';
 import { BLOCKED_PAGES } from '../camoufox/protocol.js';
+import type { BudgetScopeKind } from '../errors.js';
 import { formatInstantShort } from '../status/time.js';
 import { formatPence, groupThousands } from '../text/money.js';
 import type { SkipCode } from '../types/execution.js';
 import type { IsoDateTime } from '../types/ids.js';
+import { mapNonEmpty } from '../types/nonEmpty.js';
 import type { ProviderId } from '../types/provenance.js';
 import { mainPathSource } from './mainPath.js';
+import { SKIP_CODE_TEXT } from './skip.js';
 
 // Spec revision 55 §8.1 "Stop causes": every stored cause is worded here, from one template table, as one full sentence
 // and one fix. Sources are named through their main-path names (§3, `mainPathSource`), instants as "14 Mar 15:00"
@@ -98,8 +107,9 @@ const WORKER_REFUSALS: ReadonlySet<StopDetail> = new Set<StopDetail>([
   'outside-browser-window',
 ]);
 
+/** A missed firing's words: `SKIP_CODE_TEXT`'s, with the browser worker in its main-path name (spec rev 55 §3). */
 const SKIP_CODE_SENTENCE: Readonly<Record<SkipCode, string>> = {
-  'half-cadence': 'the next scheduled run was less than half the gap away',
+  'half-cadence': SKIP_CODE_TEXT['half-cadence'],
   'browser-only-definition': `only ${mainPathSource('camoufox')} could run it, and a catch-up loads no browser pages`,
 };
 
@@ -110,7 +120,7 @@ const SUPERSEDED_SENTENCE: Readonly<Record<Extract<StopCause, { kind: 'supersede
   remove: 'Stopped when the search was removed.',
 };
 
-/** The words for a monthly limit's unit: "page limit", "call limit", "spending limit". */
+/** A monthly limit's unit as its noun: "page limit", "scroll limit", "call limit", "spending limit". */
 const MONTHLY_UNIT: Readonly<Record<BudgetUnit, string>> = {
   calls: 'call',
   pages: 'page',
@@ -125,12 +135,10 @@ const capitalise = (s: string) => `${s.charAt(0).toUpperCase()}${s.slice(1)}`;
 /** A source's main-path name, or "a source" when the cause names none. */
 const nameOf = (id: ProviderId | null) => (id === null ? 'a source' : mainPathSource(id));
 const possessive = (name: string) => `${name}'s`;
-/** "A", "A and B", "A, B and C". */
-function listOf(items: readonly string[]): string {
-  // why: a one-element slice's string form is its element, with no branch for an empty list the callers never pass
-  const last = String(items.slice(-1));
-  const head = items.slice(0, -1);
-  return head.length === 0 ? last : `${head.join(', ')} and ${last}`;
+/** "A", "A and B", "A, B and C": a non-empty list, so there is always a first item to start from. */
+function listOf(items: readonly [string, ...string[]]): string {
+  const [first, ...rest] = items;
+  return rest.reduce((text, item, i) => `${text}${i === rest.length - 1 ? ' and ' : ', '}${item}`, first);
 }
 
 /**
@@ -194,11 +202,11 @@ function sourcesText(c: Sources, f: StopTextFacts, at: (i: IsoDateTime) => strin
       : c.searched === 0
         ? 'nothing was searched'
         : `the search stopped after ${groupThousands(c.searched)} date ${c.searched === 1 ? 'pair' : 'pairs'}`;
-  const clauses = c.sources.map((s) => sourceClause(s, past, at));
+  const clauses = mapNonEmpty(c.sources, (s) => sourceClause(s, past, at));
   let sentence = `${capitalise(listOf(clauses))}, so ${tail}.`;
   // why: four sources with long reasons can pass the stop-text limit; the names alone still say what was left out.
   if (sentence.length > MAX_SENTENCE) {
-    sentence = `${capitalise(listOf(c.sources.map((s) => mainPathSource(s.providerId))))} couldn't be used, so ${tail}.`;
+    sentence = `${capitalise(listOf(mapNonEmpty(c.sources, (s) => mainPathSource(s.providerId))))} couldn't be used, so ${tail}.`;
   }
   return { sentence, fix: sourceFix(c.sources[0], f, at) };
 }
@@ -219,7 +227,8 @@ function sourceFix(s: Source, f: StopTextFacts, at: (i: IsoDateTime) => string):
   if (s.providerId !== 'camoufox') return CHECK_PROVIDERS;
   if (s.skip === 'provider_disabled') return CHECK_STATUS;
   // why: §8.1: the command is a `pnpm gmt …` line in native mode only; a container or dev install starts its worker
-  // its own way.
+  // its own way. The text names the command without backticks (controller ruling on Task 20.1): the command travels
+  // in `fix.command`, which the web renders as code.
   return f.mode === 'native'
     ? { text: 'Start it with pnpm gmt start, then Search again', command: 'pnpm gmt start' }
     : fix('Start the browser worker, then Search again');
@@ -233,83 +242,84 @@ function budgetText(c: Budget, f: StopTextFacts, at: (i: IsoDateTime) => string)
   return { sentence: `${head}${flights}.`, fix: action };
 }
 
+/**
+ * A budget scope's limit in words, the one table a stop and a skipped firing both read. A per-run limit is a noun phrase
+ * ("limit of browser pages for one run"); a standing limit (a month's, a plan's) is a statement of its state.
+ */
+type LimitWords = { limit: string } | { usedUp: string };
+
+function limitOf(scope: BudgetScopeKind, providerId: ProviderId | null, unit: BudgetUnit): LimitWords {
+  const name = nameOf(providerId);
+  switch (scope) {
+    case 'execution-calls':
+      return { limit: 'limit of calls for one run' };
+    case 'execution-free-calls':
+      return { limit: 'limit of free calls for one run' };
+    case 'execution-cost':
+      return { limit: 'spending limit for one run' };
+    case 'provider-execution': {
+      // why: `budgetUnitsFor`: pages and scrolls are the browser worker's; every other provider's run cap counts calls
+      const what =
+        unit === 'scrolls' ? 'page scrolls' : unit === 'pages' ? 'browser pages' : `calls to ${name}`;
+      return { limit: `limit of ${what} for one run` };
+    }
+    case 'provider-month':
+      return {
+        usedUp: `${possessive(name)} monthly ${MONTHLY_UNIT[unit]} limit is used up`,
+      };
+    case 'provider-lifetime':
+      return { usedUp: `${name} has no calls left on its plan` };
+    case 'global-month':
+      return { usedUp: `this month's ${MONTHLY_UNIT[unit]} limit is used up` };
+  }
+}
+
 function budgetHead(
   c: Budget,
   f: StopTextFacts,
   at: (i: IsoDateTime) => string,
 ): { head: string; fix: Fix | null } {
-  const browser = c.providerId === 'camoufox';
-  // why: a scheduled search whose run stored a resume carries on by itself, so it needs nothing from the operator.
-  const resumes = f.scheduled && c.resumeAfter !== null;
+  const words = limitOf(c.scope, c.providerId, c.unit);
+  if ('limit' in words) {
+    const head =
+      c.scope === 'execution-cost'
+        ? `This search stopped at ${formatPence(c.cap)}, its ${words.limit}`
+        : `This search stopped at its ${words.limit}`;
+    // why: a provider's own run cap is set by the app, not in Edit; a fresh run gets a fresh allowance (Ian's ruling)
+    return { head, fix: c.scope === 'provider-execution' ? CARRY_ON : RAISE_AND_RESUME };
+  }
+  const limit = capitalise(words.usedUp);
+  if (c.scope === 'provider-lifetime') return { head: limit, fix: fix('Check Providers') };
   const resets = c.resetsAt === null ? null : at(c.resetsAt);
   const resetsClause = resets === null ? '' : `; it resets on ${resets}`;
-  const afterResetOrResume = fix(
-    resets === null ? 'Search again, or Resume' : `Search again after ${resets}, or Resume`,
-  );
-  switch (c.scope) {
-    case 'provider-month': {
-      const limit = `${capitalise(possessive(nameOf(c.providerId)))} monthly ${MONTHLY_UNIT[c.unit]} limit is used up`;
-      if (!browser) return { head: `${limit}${resetsClause}`, fix: resumes ? null : afterResetOrResume };
-      // why: a browser page limit is never resumed (Ian's ruling); a scheduled search's next run picks the pages up.
-      const next = f.scheduled
-        ? `${resets === null ? '; ' : ', and '}the next scheduled run picks these pages up`
-        : '';
-      return {
-        head: `${limit}${resetsClause}${next}`,
-        fix: fix(resets === null ? 'Search again' : `Search again after ${resets}`),
-      };
-    }
-    case 'provider-execution': {
-      const what =
-        c.unit === 'scrolls'
-          ? 'page scrolls'
-          : browser
-            ? 'browser pages'
-            : `calls to ${nameOf(c.providerId)}`;
-      return { head: `This search stopped at its limit of ${what} for one run`, fix: CARRY_ON };
-    }
-    case 'provider-lifetime':
-      return {
-        head: `${capitalise(nameOf(c.providerId))} has no calls left on its plan`,
-        fix: fix('Check Providers'),
-      };
-    case 'execution-calls':
-      return { head: 'This search stopped at its limit of calls for one run', fix: RAISE_AND_RESUME };
-    case 'execution-free-calls':
-      return { head: 'This search stopped at its limit of free calls for one run', fix: RAISE_AND_RESUME };
-    case 'execution-cost':
-      return {
-        head: `This search stopped at ${formatPence(c.cap)}, its spending limit for one run`,
-        fix: RAISE_AND_RESUME,
-      };
-    case 'global-month':
-      return {
-        head: `This month's spending limit is used up${resetsClause}`,
-        fix: resumes ? null : afterResetOrResume,
-      };
+  // why: the lifetime scope returned above, and the month's spending cap names no provider (`providerFitsScope`), so a
+  // standing limit of the browser worker is its monthly one
+  if (c.providerId === 'camoufox') {
+    // why: a browser limit is never resumed (Ian's ruling); a scheduled search's next run picks up what is left, in the
+    // cause's own unit.
+    const next = f.scheduled
+      ? `${resets === null ? '; ' : ', and '}the next scheduled run picks these ${c.unit} up`
+      : '';
+    return {
+      head: `${limit}${resetsClause}${next}`,
+      fix: fix(resets === null ? 'Search again' : `Search again after ${resets}`),
+    };
   }
+  // why: a scheduled search whose run stored a resume carries on by itself, so it needs nothing from the operator.
+  const resumes = f.scheduled && c.resumeAfter !== null;
+  return {
+    head: `${limit}${resetsClause}`,
+    fix: resumes
+      ? null
+      : fix(resets === null ? 'Search again, or Resume' : `Search again after ${resets}, or Resume`),
+  };
 }
 
-/** A skipped firing's budget words, from its scope and provider alone (a skipped row stores no unit or figures). */
-function skippedBudgetWords(scope: Budget['scope'], providerId: ProviderId | null): string {
-  const browser = providerId === 'camoufox';
-  const name = nameOf(providerId);
-  switch (scope) {
-    case 'provider-month':
-      return `${possessive(name)} monthly ${browser ? 'page' : 'call'} limit is used up`;
-    case 'provider-lifetime':
-      return `${name} has no calls left on its plan`;
-    case 'provider-execution':
-      return `the estimate is above this search's limit of ${browser ? 'browser pages' : `calls to ${name}`} for one run`;
-    case 'execution-calls':
-      return "the estimate is above this search's limit of calls for one run";
-    case 'execution-free-calls':
-      return "the estimate is above this search's limit of free calls for one run";
-    case 'execution-cost':
-      return "the estimate is above this search's spending limit for one run";
-    case 'global-month':
-      return "this month's spending limit is used up";
-  }
+/** A skipped firing's budget words, from its scope and provider alone, through the same limit table. */
+function skippedBudgetWords(scope: BudgetScopeKind, providerId: ProviderId | null): string {
+  // why: a skipped row stores no unit; its scope's first unit is the one its cap counts (`budgetUnitsFor`)
+  const words = limitOf(scope, providerId, budgetUnitsFor(scope, providerId)[0]);
+  return 'limit' in words ? `the estimate is above this search's ${words.limit}` : words.usedUp;
 }
 
 /**
@@ -320,8 +330,8 @@ function confirmWords(estimatePence: number, confirmedPence: number | null): str
   if (confirmedPence === null) {
     return `today's estimate (about ${formatPence(estimatePence)}) needs a confirmation, and none was given when the schedule was set`;
   }
-  const withPence = estimatePence % 100 !== 0 || confirmedPence % 100 !== 0;
-  const pounds = (p: number) => (withPence && p % 100 === 0 ? `${formatPence(p)}.00` : formatPence(p));
+  const showPence = estimatePence % 100 !== 0 || confirmedPence % 100 !== 0;
+  const pounds = (p: number) => formatPence(p, { showPence });
   const estimate = `today's estimate (about ${pounds(estimatePence)})`;
   // why: a schedule's confirmation covers pence and calls together (decision 37); an estimate within the pence was
   // skipped for its calls, and saying it is "above" the amount would be false.

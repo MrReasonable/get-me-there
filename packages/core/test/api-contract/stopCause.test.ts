@@ -1,5 +1,7 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import {
+  budgetUnitsFor,
+  providerFitsScope,
   STOP_DETAILS,
   type StopCause,
   stopCauseSchema,
@@ -115,6 +117,58 @@ describe('stopCauseSchema', () => {
     expect(stopCauseSchema.safeParse({ kind: 'cancelled', message: 'error' }).success).toBe(false);
     expect(stopCauseSchema.safeParse(sources({ searched: -1 })).success).toBe(false);
     expect(stopCauseSchema.safeParse(budget({ cap: -1 })).success).toBe(false);
+  });
+
+  it('refuses a unit its scope does not count (budgetUnitsFor)', () => {
+    const ok = (o: Record<string, unknown>) =>
+      stopCauseSchema.safeParse(budget({ flights: null, ...o })).success;
+    expect(ok({ scope: 'execution-cost', providerId: null, unit: 'calls' })).toBe(false);
+    expect(ok({ scope: 'global-month', providerId: null, unit: 'calls' })).toBe(false);
+    expect(ok({ scope: 'execution-calls', providerId: null, unit: 'pence' })).toBe(false);
+    expect(ok({ scope: 'provider-lifetime', providerId: 'searchapi', unit: 'pages' })).toBe(false);
+    // why: pages and scrolls are the browser worker's; another provider's month and run caps count calls
+    expect(ok({ scope: 'provider-month', providerId: 'searchapi', unit: 'pages' })).toBe(false);
+    expect(ok({ scope: 'provider-execution', unit: 'calls' })).toBe(false);
+    expect(ok({ scope: 'provider-month', unit: 'scrolls' })).toBe(true);
+    expect(ok({ scope: 'provider-month', providerId: 'travelpayouts', unit: 'calls' })).toBe(true);
+    expect(ok({ scope: 'execution-cost', providerId: null, unit: 'pence' })).toBe(true);
+  });
+
+  it("refuses a provider on the run's own caps and the month's spending cap, skipped or stopped", () => {
+    const ok = (o: Record<string, unknown>) =>
+      stopCauseSchema.safeParse(budget({ flights: null, ...o })).success;
+    expect(ok({ scope: 'global-month', providerId: 'camoufox', unit: 'pence' })).toBe(false);
+    expect(ok({ scope: 'execution-calls', providerId: 'searchapi', unit: 'calls' })).toBe(false);
+    expect(ok({ scope: 'provider-lifetime', providerId: null, unit: 'calls' })).toBe(true);
+    const skipped = (scope: string, providerId: string | null) =>
+      stopCauseSchema.safeParse({ kind: 'skipped-budget', scope, providerId }).success;
+    expect(skipped('execution-cost', 'searchapi')).toBe(false);
+    expect(skipped('execution-cost', null)).toBe(true);
+    expect(skipped('provider-month', 'camoufox')).toBe(true);
+    expect(providerFitsScope('provider-execution', null)).toBe(true);
+    expect(providerFitsScope('global-month', null)).toBe(true);
+    expect(providerFitsScope('global-month', 'travelpayouts')).toBe(false);
+  });
+
+  it("refuses flights on any cause but the browser worker's per-run page cap", () => {
+    const flights = { read: 2, planned: 10 };
+    const ok = (o: Record<string, unknown>) => stopCauseSchema.safeParse(budget({ flights, ...o })).success;
+    expect(ok({})).toBe(true);
+    expect(ok({ scope: 'provider-month' })).toBe(false);
+    expect(ok({ scope: 'provider-execution', providerId: 'searchapi', unit: 'calls' })).toBe(false);
+    expect(ok({ scope: 'execution-cost', providerId: null, unit: 'pence' })).toBe(false);
+  });
+
+  it('budgetUnitsFor names the units of every scope', () => {
+    expect(budgetUnitsFor('execution-cost', null)).toEqual(['pence']);
+    expect(budgetUnitsFor('global-month', null)).toEqual(['pence']);
+    expect(budgetUnitsFor('execution-calls', null)).toEqual(['calls']);
+    expect(budgetUnitsFor('execution-free-calls', null)).toEqual(['calls']);
+    expect(budgetUnitsFor('provider-lifetime', 'searchapi')).toEqual(['calls']);
+    expect(budgetUnitsFor('provider-execution', 'camoufox')).toEqual(['pages', 'scrolls']);
+    expect(budgetUnitsFor('provider-month', 'camoufox')).toEqual(['pages', 'scrolls']);
+    expect(budgetUnitsFor('provider-month', 'travelpayouts')).toEqual(['calls']);
+    expect(budgetUnitsFor('provider-execution', null)).toEqual(['calls']);
   });
 
   it('refuses flights read above the flights planned', () => {

@@ -30,7 +30,9 @@ export const priceCellSchema = z.object({
   ageHours: ageHoursSchema,
   truncated: z.boolean(),
 });
-const count = z.number().int().min(0);
+/** A non-negative integer count: the one shape every count on the wire shares. */
+export const countSchema = z.number().int().min(0);
+const count = countSchema;
 export const bucketsSchema: z.ZodType<Buckets> = z.object({
   priced: count,
   empty: count,
@@ -95,6 +97,8 @@ export const executionStatusSchema = z.enum([
   'skipped_missed',
 ]);
 export const stageSchema = z.enum(['discovery', 'verification']);
+/** What started an execution (spec §7 `search_executions.trigger`): an operator, the scheduler, or a tool run. */
+export const triggerSchema = z.enum(['manual', 'schedule', 'tool']);
 /** Lists are newest first. */
 export const executionSummarySchema = z.object({
   id: z.string(),
