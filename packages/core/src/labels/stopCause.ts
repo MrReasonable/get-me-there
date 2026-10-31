@@ -292,9 +292,9 @@ function budgetHead(
   if (c.scope === 'provider-lifetime') return { head: limit, fix: fix('Check Providers') };
   const resets = c.resetsAt === null ? null : at(c.resetsAt);
   const resetsClause = resets === null ? '' : `; it resets on ${resets}`;
-  // why: the lifetime scope returned above, and the month's spending cap names no provider (`providerFitsScope`), so a
-  // standing limit of the browser worker is its monthly one
-  if (c.providerId === 'camoufox') {
+  // why: keyed on the scope as well as the provider: the guard names its provider on every scope, so a month's spending
+  // stop that names the browser worker is still the month's spending limit
+  if (c.scope === 'provider-month' && c.providerId === 'camoufox') {
     // why: a browser limit is never resumed (Ian's ruling); a scheduled search's next run picks up what is left, in the
     // cause's own unit.
     const next = f.scheduled

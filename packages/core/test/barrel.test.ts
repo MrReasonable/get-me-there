@@ -96,7 +96,6 @@ describe('@gmt/core barrel', () => {
       'STOP_DETAILS',
       'BUDGET_UNITS',
       'budgetUnitsFor',
-      'providerFitsScope',
       'countSchema',
       'triggerSchema',
       'stopCauseSchema',

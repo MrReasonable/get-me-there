@@ -365,6 +365,27 @@ const ROWS: Row[] = [
     { text: 'Search again, or Resume', command: null },
   ],
   [
+    "the month's spending limit naming the browser worker (the guard's provider) is still the month's",
+    budget({ scope: 'global-month', providerId: 'camoufox', unit: 'pence', cap: 3500, resetsAt: RESETS }),
+    { scheduled: true },
+    "This month's spending limit is used up; it resets on 1 Apr 00:00.",
+    { text: 'Search again after 1 Apr 00:00, or Resume', command: null },
+  ],
+  [
+    'the per-run call limit naming the provider whose reserve tripped it',
+    budget({ scope: 'execution-calls', providerId: 'searchapi', unit: 'calls', cap: 6 }),
+    {},
+    'This search stopped at its limit of calls for one run.',
+    RAISE,
+  ],
+  [
+    'the per-run spending limit naming a provider',
+    budget({ scope: 'execution-cost', providerId: 'camoufox', unit: 'pence', cap: 500 }),
+    {},
+    'This search stopped at £5, its spending limit for one run.',
+    RAISE,
+  ],
+  [
     'a limiter pause on a scheduled search with a resume set',
     { kind: 'limiter-timeout', providerId: 'travelpayouts', resumeAfter: UNTIL },
     { scheduled: true },
@@ -534,6 +555,14 @@ const SKIPPED_BUDGET: Array<[Extract<StopCause, { kind: 'skipped-budget' }>, str
   [
     { kind: 'skipped-budget', scope: 'provider-lifetime', providerId: null },
     'Skipped: a source has no calls left on its plan.',
+  ],
+  [
+    { kind: 'skipped-budget', scope: 'global-month', providerId: 'camoufox' },
+    "Skipped: this month's spending limit is used up.",
+  ],
+  [
+    { kind: 'skipped-budget', scope: 'execution-cost', providerId: 'searchapi' },
+    "Skipped: the estimate is above this search's spending limit for one run.",
   ],
   [
     { kind: 'skipped-budget', scope: 'execution-calls', providerId: null },

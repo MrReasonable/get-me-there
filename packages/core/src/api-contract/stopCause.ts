@@ -60,14 +60,6 @@ export function budgetUnitsFor(scope: BudgetScopeKind, providerId: ProviderId | 
   }
 }
 
-/**
- * Whether a cause's provider fits its scope: the run's own caps and the month's spending cap belong to no provider, so
- * they name none (a provider scope may name one, or none when the guard did not say which).
- */
-export function providerFitsScope(scope: BudgetScopeKind, providerId: ProviderId | null): boolean {
-  return scope.startsWith('provider-') || providerId === null;
-}
-
 /** One source a run could not use: how it was left out (§6.6 skip reasons), its detail word, and when a pause ends. */
 const unavailableSourceSchema = z.strictObject({
   providerId: providerIdSchema,
@@ -83,7 +75,7 @@ const flightsReadSchema = z.strictObject({ read: count, planned: count }).refine
 });
 
 /**
- * A budget stop (spec revision 55 §8.1): the cap's scope, its provider (null for the run's and the month's own caps),
+ * A budget stop (spec revision 55 §8.1): the cap's scope, its provider (the guard's, on any scope, or null),
  * its unit (`budgetUnitsFor`), its limit, the scheduled resume, the cap window's end (`resetsAt`, kept even when no
  * resume is scheduled) and, when the flight-list step ran after the stop, its counts. `cap` is the limit in `unit`:
  * pence for the spending scopes (`execution-cost`, `global-month`), which the writer converts from the guard's µGBP
@@ -102,9 +94,6 @@ const budgetCauseSchema = z
     flights: flightsReadSchema.nullable(),
   })
   .superRefine((c, ctx) => {
-    if (!providerFitsScope(c.scope, c.providerId)) {
-      ctx.addIssue({ code: 'custom', path: ['providerId'], message: `${c.scope} names no provider` });
-    }
     if (!budgetUnitsFor(c.scope, c.providerId).includes(c.unit)) {
       ctx.addIssue({ code: 'custom', path: ['unit'], message: `${c.scope} does not count ${c.unit}` });
     }
@@ -154,16 +143,13 @@ export const stopCauseSchema = z.discriminatedUnion('kind', [
     estimatePence: moneyPenceSchema,
     confirmedPence: moneyPenceSchema.nullable(),
   }),
-  z
-    .strictObject({
-      kind: z.literal('skipped-budget'),
-      scope: z.enum(BUDGET_SCOPE_KINDS),
-      providerId: providerIdSchema.nullable(),
-    })
-    .refine((c) => providerFitsScope(c.scope, c.providerId), {
-      message: 'this scope names no provider',
-      path: ['providerId'],
-    }),
+  // why: the provider is the guard's (`BudgetExceeded.providerId`), on any scope: a run or month cap may name the
+  // provider whose reserve tripped it (controller ruling on Task 20.1)
+  z.strictObject({
+    kind: z.literal('skipped-budget'),
+    scope: z.enum(BUDGET_SCOPE_KINDS),
+    providerId: providerIdSchema.nullable(),
+  }),
   z.strictObject({ kind: z.literal('skipped-window') }),
   z.strictObject({ kind: z.literal('skipped-missed'), code: z.enum(SKIP_CODES) }),
 ]);

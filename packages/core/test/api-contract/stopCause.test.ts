@@ -1,7 +1,6 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import {
   budgetUnitsFor,
-  providerFitsScope,
   STOP_DETAILS,
   type StopCause,
   stopCauseSchema,
@@ -134,20 +133,18 @@ describe('stopCauseSchema', () => {
     expect(ok({ scope: 'execution-cost', providerId: null, unit: 'pence' })).toBe(true);
   });
 
-  it("refuses a provider on the run's own caps and the month's spending cap, skipped or stopped", () => {
+  it("keeps the guard's provider on every scope, skipped or stopped (BudgetExceeded names it on each)", () => {
     const ok = (o: Record<string, unknown>) =>
       stopCauseSchema.safeParse(budget({ flights: null, ...o })).success;
-    expect(ok({ scope: 'global-month', providerId: 'camoufox', unit: 'pence' })).toBe(false);
-    expect(ok({ scope: 'execution-calls', providerId: 'searchapi', unit: 'calls' })).toBe(false);
+    expect(ok({ scope: 'global-month', providerId: 'camoufox', unit: 'pence' })).toBe(true);
+    expect(ok({ scope: 'execution-calls', providerId: 'searchapi', unit: 'calls' })).toBe(true);
+    expect(ok({ scope: 'execution-cost', providerId: 'searchapi', unit: 'pence' })).toBe(true);
     expect(ok({ scope: 'provider-lifetime', providerId: null, unit: 'calls' })).toBe(true);
     const skipped = (scope: string, providerId: string | null) =>
       stopCauseSchema.safeParse({ kind: 'skipped-budget', scope, providerId }).success;
-    expect(skipped('execution-cost', 'searchapi')).toBe(false);
-    expect(skipped('execution-cost', null)).toBe(true);
-    expect(skipped('provider-month', 'camoufox')).toBe(true);
-    expect(providerFitsScope('provider-execution', null)).toBe(true);
-    expect(providerFitsScope('global-month', null)).toBe(true);
-    expect(providerFitsScope('global-month', 'travelpayouts')).toBe(false);
+    expect(skipped('execution-cost', 'searchapi')).toBe(true);
+    expect(skipped('global-month', 'camoufox')).toBe(true);
+    expect(skipped('provider-month', null)).toBe(true);
   });
 
   it("refuses flights on any cause but the browser worker's per-run page cap", () => {
@@ -159,12 +156,31 @@ describe('stopCauseSchema', () => {
     expect(ok({ scope: 'execution-cost', providerId: null, unit: 'pence' })).toBe(false);
   });
 
+  it('names the field and the rule in each refusal it makes', () => {
+    const issues = (c: unknown) =>
+      stopCauseSchema.safeParse(c).error?.issues.map(({ code, path, message }) => ({ code, path, message }));
+    expect(
+      issues(budget({ scope: 'execution-cost', providerId: null, unit: 'calls', flights: null })),
+    ).toEqual([{ code: 'custom', path: ['unit'], message: 'execution-cost does not count calls' }]);
+    expect(issues(budget({ scope: 'provider-month' }))).toEqual([
+      {
+        code: 'custom',
+        path: ['flights'],
+        message: "flights only follow the browser worker's per-run page cap",
+      },
+    ]);
+    expect(issues(budget({ flights: { read: 11, planned: 10 } }))).toEqual([
+      { code: 'custom', path: ['flights', 'read'], message: 'flights read must not exceed flights planned' },
+    ]);
+  });
+
   it('budgetUnitsFor names the units of every scope', () => {
     expect(budgetUnitsFor('execution-cost', null)).toEqual(['pence']);
     expect(budgetUnitsFor('global-month', null)).toEqual(['pence']);
     expect(budgetUnitsFor('execution-calls', null)).toEqual(['calls']);
     expect(budgetUnitsFor('execution-free-calls', null)).toEqual(['calls']);
     expect(budgetUnitsFor('provider-lifetime', 'searchapi')).toEqual(['calls']);
+    expect(budgetUnitsFor('provider-lifetime', 'camoufox')).toEqual(['calls']);
     expect(budgetUnitsFor('provider-execution', 'camoufox')).toEqual(['pages', 'scrolls']);
     expect(budgetUnitsFor('provider-month', 'camoufox')).toEqual(['pages', 'scrolls']);
     expect(budgetUnitsFor('provider-month', 'travelpayouts')).toEqual(['calls']);
