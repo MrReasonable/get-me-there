@@ -6,7 +6,7 @@ import { SETUP_COPY } from '../../../src/copy/setup.js';
 import { COPY } from '../../../src/copy.js';
 import { DefinitionForm } from '../../../src/views/Definitions/DefinitionForm.js';
 import { BudgetFitPanel, EstimatePanel } from '../../../src/views/Definitions/EstimatePanel.js';
-import { API, definition, estimate, providersResponse } from '../../fixtures.js';
+import { API, definition, estimate, estimateResponse, providersResponse } from '../../fixtures.js';
 import { server } from '../../msw/server.js';
 import { renderWithProviders } from '../../render.js';
 
@@ -27,7 +27,7 @@ function estimateBodies() {
   server.use(
     http.post(`${API}/definitions/estimate`, async ({ request }) => {
       bodies.push(await request.json());
-      return HttpResponse.json({ estimate: estimate(), budgetFit: definition().budgetFit });
+      return HttpResponse.json(estimateResponse());
     }),
   );
   return bodies;

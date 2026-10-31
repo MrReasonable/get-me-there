@@ -51,7 +51,7 @@ export function uncovered(
   estimate: Estimate,
   blocked: ReadonlySet<LineKey>,
   confirmed: Confirmation,
-): ReturnType<typeof confirmationNeeded> {
+): Omit<NonNullable<ReturnType<typeof confirmationNeeded>>, 'why'> | null {
   const runnable = estimate.perProvider.filter((p) => !blocked.has(lineKey(p.stage, p.providerId)));
   const cost = runnable.reduce((a, p) => a + p.costMicroGbp, 0);
   const totalCalls = runnable.reduce((a, p) => a + p.calls, 0);
@@ -198,6 +198,17 @@ export async function recordSkipped(
   return { recorded: true, executionId: exec.id };
 }
 
+/** Why the press confirms (ruling A22): a code with its figures, worded by the web from its own copy. */
+export type SoftConfirmWhy =
+  | { reason: 'cost'; estimatePence: number; thresholdPence: number }
+  | {
+      reason: 'call-share';
+      providerId: ProviderId;
+      calls: number;
+      cap: number;
+      window: 'month' | 'lifetime';
+    };
+
 /**
  * What `confirmationNeeded` reads: the soft-confirm threshold, the budget guard's caps and each provider's cap scope.
  * Narrow so the api can call the same rule over its own ports (plan decision 58).
@@ -228,6 +239,8 @@ export function confirmationNeeded(
   calls: Partial<Record<ProviderId, number>>;
   totalCalls: number;
   reason: string;
+  /** The same reason as a code with its figures (ruling A22): what the form words, never the English above. */
+  why: SoftConfirmWhy;
 } | null {
   const runnable = estimate.perProvider.filter((p) => !blocked.has(lineKey(p.stage, p.providerId)));
   const cost = runnable.reduce((a, p) => a + p.costMicroGbp, 0);
@@ -239,7 +252,16 @@ export function confirmationNeeded(
     const cap = ctx.budget.usage({ kind, providerId: id }).cap;
     return cap !== null && n > SOFT_CONFIRM_CALL_SHARE * cap
       ? [
-          `${n} ${id} calls, more than ${SOFT_CONFIRM_CALL_SHARE * 100}% of its ${kind === 'provider-lifetime' ? 'lifetime' : 'monthly'} call cap`,
+          {
+            text: `${n} ${id} calls, more than ${SOFT_CONFIRM_CALL_SHARE * 100}% of its ${kind === 'provider-lifetime' ? 'lifetime' : 'monthly'} call cap`,
+            why: {
+              reason: 'call-share' as const,
+              providerId: id,
+              calls: n,
+              cap,
+              window: kind === 'provider-lifetime' ? ('lifetime' as const) : ('month' as const),
+            },
+          },
         ]
       : [];
   });
@@ -255,8 +277,26 @@ export function confirmationNeeded(
   const estimatePence = microGbpToPence(cost);
   const reason = overPence
     ? `the estimate of ${formatPence(estimatePence)} is above the confirmation threshold`
-    : `this run needs ${heavy.join(' and ')}`;
-  return { estimateMicroGbp: cost, estimatePence, calls: Object.fromEntries(calls), totalCalls, reason };
+    : `this run needs ${heavy.map((h) => h.text).join(' and ')}`;
+  // why: ruling A22 — a cost beyond the threshold is named first; else the first provider over its share (the form
+  // words one reason, and pressing the button confirms them all)
+  const first = heavy[0];
+  const why: SoftConfirmWhy =
+    overPence || first === undefined
+      ? {
+          reason: 'cost',
+          estimatePence,
+          thresholdPence: microGbpToPence(ctx.config.spend.softConfirmMicroGbp),
+        }
+      : first.why;
+  return {
+    estimateMicroGbp: cost,
+    estimatePence,
+    calls: Object.fromEntries(calls),
+    totalCalls,
+    reason,
+    why,
+  };
 }
 
 /**

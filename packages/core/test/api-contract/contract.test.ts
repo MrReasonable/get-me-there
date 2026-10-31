@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
   alertRuleInputSchema,
   alertRuleUpdateRequestSchema,
+  billedCallsSchema,
   cronSchema,
   definitionCreateRequestSchema,
+  estimateResponseSchema,
   executionFlightsSchema,
   executionResponseSchema,
   flightListsStateSchema,
@@ -13,6 +15,7 @@ import {
   resultRowSchema,
   resultsQuerySchema,
   resultsResponseSchema,
+  softConfirmSchema,
   startExecutionRequestSchema,
 } from '../../src/api-contract/index.js';
 import { verifiedFigure } from '../helpers/datePairs.js';
@@ -402,5 +405,45 @@ describe('executionResponseSchema (spec rev 55 §10: stop, estimatedFinishAt and
     expect(flightListsStateSchema.parse(plan)).toEqual(plan);
     expect(flightListsStateSchema.safeParse({ ...plan, ended: 'disabled' }).success).toBe(false);
     expect(flightListsStateSchema.safeParse({ ...plan, note: 'x' }).success).toBe(false);
+  });
+});
+
+describe('estimateResponseSchema (spec rev 55 §10: what the estimate asks)', () => {
+  const asks = {
+    datePairs: 2184,
+    datePairsCovered: 1288,
+    datePairsPartly: 0,
+    datePairsReused: 0,
+    softConfirm: null,
+    billedCalls: [],
+    monthlyPages: null,
+  };
+  it('the fields are required: a response without them is refused', () => {
+    expect(estimateResponseSchema.shape.datePairs.safeParse(undefined).success).toBe(false);
+    expect(estimateResponseSchema.shape.softConfirm.safeParse(undefined).success).toBe(false);
+    expect(estimateResponseSchema.shape.billedCalls.safeParse(undefined).success).toBe(false);
+    expect(estimateResponseSchema.shape.monthlyPages.safeParse(undefined).success).toBe(false);
+    expect(estimateResponseSchema.shape.monthlyPages.parse(asks.monthlyPages)).toBeNull();
+  });
+  it('softConfirm is a code with its figures and no English', () => {
+    const cost = { reason: 'cost', estimatePence: 120, thresholdPence: 100 };
+    const share = {
+      reason: 'call-share',
+      providerId: 'searchapi',
+      calls: 2001,
+      cap: 10_000,
+      window: 'month',
+    };
+    expect(softConfirmSchema.parse(cost)).toEqual(cost);
+    expect(softConfirmSchema.parse(share)).toEqual(share);
+    expect(softConfirmSchema.safeParse({ ...cost, message: 'above your check' }).success).toBe(false);
+    expect(softConfirmSchema.safeParse({ ...share, window: 'week' }).success).toBe(false);
+    expect(softConfirmSchema.safeParse({ reason: 'other' }).success).toBe(false);
+  });
+  it('billedCalls entries carry the provider, calls, the calls left (null without a cap) and the window', () => {
+    const entry = { providerId: 'searchapi', calls: 120, left: 9880, window: 'month' };
+    expect(billedCallsSchema.parse(entry)).toEqual(entry);
+    expect(billedCallsSchema.parse({ ...entry, left: null }).left).toBeNull();
+    expect(billedCallsSchema.safeParse({ ...entry, left: -1 }).success).toBe(false);
   });
 });

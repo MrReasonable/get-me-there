@@ -28,6 +28,14 @@ import type { Db, Repos } from '@gmt/db';
 import type { HttpKit } from '@gmt/providers';
 
 // why: core already exports these five as types (plan decisions 16 and 17); the engine re-exports core's, never its own copies
+import type { AskedPairs, BilledCalls, MonthlyPages } from './estimate.js';
+
+/** What the estimate response states beside the estimate (spec §10). */
+export interface EstimateAsk extends AskedPairs {
+  billedCalls: BilledCalls[];
+  monthlyPages: MonthlyPages | null;
+}
+
 export type {
   BudgetFit,
   CoverageCheckRequest,
@@ -192,6 +200,15 @@ export interface Engine {
   /** Review S6: who fetches the definition's left browser cells now (its scheduled and manual runs' providers). */
   browserLeftFor(definition: SearchDefinition): LeftFor;
   estimate(definition: DefinitionInput | SearchDefinition, todayLondon: IsoDate): Estimate;
+  /**
+   * Spec §10 estimate response, beside the estimate: the date pairs it asks about (reuse applies to a saved
+   * definition), the billed calls and the browser worker's month, all read from the estimate's runnable lines.
+   */
+  estimateAsk(
+    definition: DefinitionInput | SearchDefinition,
+    todayLondon: IsoDate,
+    estimate: Estimate,
+  ): EstimateAsk;
   estimateRemaining(executionId: string): Estimate;
   budgetFit(definition: DefinitionInput | SearchDefinition): BudgetFit;
   coverageCheck(req: CoverageCheckRequest): Promise<CoverageCheckResponse>;

@@ -190,8 +190,49 @@ export const estimateSchema: z.ZodType<Estimate> = z.object({
   windowClamped: z.boolean(),
   retryFactor: z.number().min(1),
 });
-/** Both estimate routes return the estimate with its budget fit, so the form shows both before the create click. */
-export const estimateResponseSchema = z.object({ estimate: estimateSchema, budgetFit: budgetFitSchema });
+/**
+ * Why pressing Search now confirms a run (spec §10, ruling A22): a code with its figures, never engine English; the web
+ * words it from its own copy. `cost`: the estimate is above `SOFT_CONFIRM_PENCE`. `call-share`: a provider's calls are
+ * above a fifth of its call cap (its month's, or its lifetime's on a trial).
+ */
+export const softConfirmSchema = z.discriminatedUnion('reason', [
+  z.strictObject({
+    reason: z.literal('cost'),
+    estimatePence: moneyPenceSchema,
+    thresholdPence: moneyPenceSchema,
+  }),
+  z.strictObject({
+    reason: z.literal('call-share'),
+    providerId: providerIdSchema,
+    calls: positiveInt,
+    cap: positiveInt,
+    window: z.enum(['month', 'lifetime']),
+  }),
+]);
+/** One billable-plan provider's runnable calls and the calls its window has left (null without a cap). */
+export const billedCallsSchema = z.strictObject({
+  providerId: providerIdSchema,
+  calls: positiveInt,
+  left: positiveInt.nullable(),
+  window: z.enum(['month', 'lifetime']),
+});
+/**
+ * Both estimate routes return the estimate with its budget fit, so the form shows both before the create click, and
+ * what the estimate asks (spec §10, §8.1 rev 55): the date pairs, how many the plan covers fully or partly (planned
+ * cells only) and how many are reused apart, whether the press confirms the run, the billed calls and the browser
+ * worker's month. `flightLists` joins the estimate in Task 20.9.
+ */
+export const estimateResponseSchema = z.object({
+  estimate: estimateSchema,
+  budgetFit: budgetFitSchema,
+  datePairs: positiveInt,
+  datePairsCovered: positiveInt,
+  datePairsPartly: positiveInt,
+  datePairsReused: positiveInt,
+  softConfirm: softConfirmSchema.nullable(),
+  billedCalls: z.array(billedCallsSchema),
+  monthlyPages: z.strictObject({ planned: positiveInt, left: positiveInt }).nullable(),
+});
 export const definitionResponseSchema = z.object({
   ...storedFields,
   confirmedCostPence: moneyPenceSchema.nullable(),

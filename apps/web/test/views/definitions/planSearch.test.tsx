@@ -10,7 +10,7 @@ import { EXAMPLE_DEFINITION, EXAMPLE_LABEL } from '../../../src/example.js';
 import { AIRPORT_DEBOUNCE_MS } from '../../../src/views/Definitions/AirportListInput.js';
 import { DefinitionForm } from '../../../src/views/Definitions/DefinitionForm.js';
 import { DefinitionsView } from '../../../src/views/Definitions/DefinitionsView.js';
-import { API, definition, estimate, providersResponse } from '../../fixtures.js';
+import { API, definition, estimate, estimateResponse, providersResponse } from '../../fixtures.js';
 import { server } from '../../msw/server.js';
 import { renderWithProviders } from '../../render.js';
 
@@ -53,7 +53,7 @@ function setUp() {
     ),
     http.post(`${API}/definitions/estimate`, async ({ request }) => {
       estimates.push(await request.json());
-      return HttpResponse.json({ estimate: estimate(), budgetFit: definition().budgetFit });
+      return HttpResponse.json(estimateResponse());
     }),
     http.post(`${API}/definitions`, async ({ request }) => {
       creates.push(await request.json());

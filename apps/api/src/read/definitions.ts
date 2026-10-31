@@ -81,6 +81,21 @@ export function needsConfirmation(
   };
 }
 
+/**
+ * Why pressing Search now confirms this estimate, as a code with its figures (spec §10, ruling A22): the engine's own
+ * rule with nothing confirmed yet, so it is null exactly for a search within the thresholds and caps.
+ */
+export function softConfirmOf(
+  estimate: Estimate,
+  ports: Ports,
+): z.infer<typeof apiContract.softConfirmSchema> | null {
+  const needed = confirmationNeeded(confirmationContext(ports), estimate, blockedLines(estimate), {
+    pence: null,
+    calls: null,
+  });
+  return needed === null ? null : needed.why;
+}
+
 /** A partial record as the plain JSON object the contract declares (absent keys stay absent). */
 function plain<V>(r: Partial<Record<string, V>>): Record<string, V> {
   const out: Record<string, V> = {};

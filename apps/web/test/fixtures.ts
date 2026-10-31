@@ -7,6 +7,7 @@ import type {
   CoverageResponse,
   DefinitionResponse,
   Estimate,
+  EstimateResponse,
   ExecutionResponse,
   ExecutionSummary,
   ProvidersResponse,
@@ -289,6 +290,31 @@ export function resultsResponse(
     verificationProviderConfigured: true,
     cheapest: rows[0] ?? null,
     datePairFigure: null,
+    ...over,
+  });
+}
+
+/**
+ * The estimate routes' answer (spec §10): the estimate, its budget fit and what it asks: 126 date pairs all covered, no
+ * confirmation needed, no billed calls and no browser pages (the fixture's lines are Travelpayouts and SearchApi).
+ */
+export function estimateResponse(
+  over: Partial<In<typeof apiContract.estimateResponseSchema>> = {},
+): EstimateResponse {
+  return apiContract.estimateResponseSchema.parse({
+    estimate: estimate(),
+    budgetFit: {
+      fits: true,
+      runsPerMonth: 4,
+      perScope: [{ scope: 'provider-month:searchapi', estimated: 616, cap: 10000, fits: true }],
+    },
+    datePairs: 126,
+    datePairsCovered: 126,
+    datePairsPartly: 0,
+    datePairsReused: 0,
+    softConfirm: null,
+    billedCalls: [],
+    monthlyPages: null,
     ...over,
   });
 }

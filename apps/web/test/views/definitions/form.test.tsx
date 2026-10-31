@@ -14,7 +14,7 @@ import {
   draftToRequest,
   normaliseIata,
 } from '../../../src/views/Definitions/draft.js';
-import { API, airports, definition, estimate, providersResponse } from '../../fixtures.js';
+import { API, airports, definition, estimateResponse, providersResponse } from '../../fixtures.js';
 import { server } from '../../msw/server.js';
 import { renderWithProviders, settled } from '../../render.js';
 
@@ -44,7 +44,7 @@ function estimateBodies() {
   server.use(
     http.post(`${API}/definitions/estimate`, async ({ request }) => {
       bodies.push(await request.json());
-      return HttpResponse.json({ estimate: estimate(), budgetFit: definition().budgetFit });
+      return HttpResponse.json(estimateResponse());
     }),
   );
   return bodies;
@@ -377,7 +377,7 @@ describe("the API's field errors (422 details.fields) land under the field they 
     await user.click(screen.getByRole('button', { name: 'Show estimate' }));
     expect(await screen.findByText('That did not work: database is locked')).toBeInTheDocument();
     expect(screen.queryByText('Fix these before saving:')).toBeNull();
-    reply = () => HttpResponse.json({ estimate: estimate(), budgetFit: definition().budgetFit });
+    reply = () => HttpResponse.json(estimateResponse());
     await user.click(screen.getByRole('button', { name: 'Show estimate' }));
     await screen.findByRole('region', { name: 'Estimate' });
     expect(screen.queryByText('That did not work: database is locked')).toBeNull();
@@ -413,7 +413,7 @@ describe('blocking, required fields, pending and focus (fix round 1)', () => {
       http.post(`${API}/definitions/estimate`, async () => {
         posts += 1;
         await gate;
-        return HttpResponse.json({ estimate: estimate(), budgetFit: definition().budgetFit });
+        return HttpResponse.json(estimateResponse());
       }),
     );
     const { user } = renderForm();

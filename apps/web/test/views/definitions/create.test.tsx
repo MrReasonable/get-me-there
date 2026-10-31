@@ -6,12 +6,20 @@ import { PLAN_COPY } from '../../../src/copy/plan.js';
 import { COPY } from '../../../src/copy.js';
 import { EXAMPLE_LABEL } from '../../../src/example.js';
 import { DefinitionsView } from '../../../src/views/Definitions/DefinitionsView.js';
-import { API, coverageCheck, definition, estimate, providersResponse } from '../../fixtures.js';
+import {
+  API,
+  coverageCheck,
+  definition,
+  estimate,
+  estimateResponse,
+  providersResponse,
+} from '../../fixtures.js';
 import { server } from '../../msw/server.js';
 import { renderWithProviders } from '../../render.js';
 
 const pricedEstimate = estimate({ totalCostMicroGbp: 12_345, totalCostPence: 2 });
-const estimateBody = (budgetFit = definition().budgetFit) => ({ estimate: pricedEstimate, budgetFit });
+const estimateBody = (budgetFit = definition().budgetFit) =>
+  estimateResponse({ estimate: pricedEstimate, budgetFit });
 const importButton = `Import example (${EXAMPLE_LABEL})`;
 
 async function importAndEstimate(user: ReturnType<typeof renderWithProviders>['user']) {

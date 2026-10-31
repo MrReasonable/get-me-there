@@ -41,6 +41,7 @@ export {
   type ConfirmationContext,
   confirmationNeeded,
   SOFT_CONFIRM_CALL_SHARE,
+  type SoftConfirmWhy,
 } from './start.js';
 export type {
   AlertsPass,
@@ -53,6 +54,7 @@ export type {
   EngineDeps,
   EngineOptions,
   Estimate,
+  EstimateAsk,
   RankedDatePair,
   RankedDatePairsReader,
   SchedulerJob,

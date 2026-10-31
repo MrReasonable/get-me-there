@@ -324,6 +324,86 @@ describe('estimates and the coverage check', () => {
     expect((await errorOf(refused)).code).toBe('draft_definition');
   });
 
+  // Task 20.4 (spec §10 estimate response): what the estimate asks, beside the estimate and budgetFit
+  describe('the estimate response states what it asks', () => {
+    const bothRoutes = async (x: Harness) => {
+      const d = await create(x, exampleDefinitionInput());
+      const unsaved = await expectContract(
+        await x.request('/api/definitions/estimate', { json: exampleDefinitionInput() }),
+        'POST',
+        '/api/definitions/estimate',
+        apiContract.estimateResponseSchema,
+      );
+      const saved = await expectContract(
+        await x.request(`/api/definitions/${d.id}/estimate`, { method: 'POST', json: {} }),
+        'POST',
+        '/api/definitions/:id/estimate',
+        apiContract.estimateResponseSchema,
+      );
+      return { unsaved, saved };
+    };
+
+    it('counts the date pairs the plan asks about: the example is covered in full by the fixture provider', async () => {
+      const x = await harness();
+      const { unsaved, saved } = await bothRoutes(x);
+      for (const r of [unsaved, saved]) {
+        expect(r.datePairs).toBeGreaterThan(0);
+        expect(r.datePairsCovered).toBe(r.datePairs);
+        expect([r.datePairsPartly, r.datePairsReused]).toEqual([0, 0]);
+      }
+    });
+
+    it('softConfirm is the cost code with its figures for both routes when the estimate is above the threshold', async () => {
+      const x = await harness();
+      vi.spyOn(x.engine, 'estimate').mockReturnValue(estimateOf(5_000_000, 40)); // 500p, threshold 100p
+      const { unsaved, saved } = await bothRoutes(x);
+      for (const r of [unsaved, saved])
+        expect(r.softConfirm).toEqual({ reason: 'cost', estimatePence: 500, thresholdPence: 100 });
+    });
+
+    it('softConfirm is the call-share code with the provider, calls, cap and window when calls pass a fifth of the cap', async () => {
+      const x = await harness();
+      const cap = x.ports.budget.usage({ kind: 'provider-month', providerId: 'fixture' }).cap ?? 0;
+      const calls = Math.floor(SOFT_CONFIRM_CALL_SHARE * cap) + 1;
+      vi.spyOn(x.engine, 'estimate').mockReturnValue(estimateOf(0, calls));
+      const { unsaved, saved } = await bothRoutes(x);
+      for (const r of [unsaved, saved])
+        expect(r.softConfirm).toEqual({
+          reason: 'call-share',
+          providerId: 'fixture',
+          calls,
+          cap,
+          window: 'month',
+        });
+    });
+
+    it('softConfirm is null for a free search within its caps', async () => {
+      const x = await harness();
+      vi.spyOn(x.engine, 'estimate').mockReturnValue(estimateOf(0, 1));
+      const { unsaved, saved } = await bothRoutes(x);
+      expect([unsaved.softConfirm, saved.softConfirm]).toEqual([null, null]);
+    });
+
+    it('billedCalls lists each runnable line of a billable-plan provider with its calls and the month’s calls left', async () => {
+      const x = await harness();
+      const cap = x.ports.budget.usage({ kind: 'provider-month', providerId: 'fixture' }).cap;
+      vi.spyOn(x.engine, 'estimate').mockReturnValue(estimateOf(0, 7));
+      const { unsaved } = await bothRoutes(x);
+      expect(unsaved.billedCalls).toEqual([{ providerId: 'fixture', calls: 7, left: cap, window: 'month' }]);
+      // a line a cap blocks is not runnable, so it is not listed
+      vi.spyOn(x.engine, 'estimate').mockReturnValue({
+        ...estimateOf(0, 0),
+        perProvider: [line(0, 7, 'provider-month')],
+      });
+      expect((await bothRoutes(x)).unsaved.billedCalls).toEqual([]);
+    });
+
+    it('monthlyPages is null when camoufox is not a runnable line', async () => {
+      const x = await harness();
+      expect((await bothRoutes(x)).unsaved.monthlyPages).toBeNull();
+    });
+  });
+
   const coverageBody = {
     origins: ['LHR'],
     destinations: ['JFK'],

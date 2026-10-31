@@ -7,7 +7,7 @@ import {
   coverageCheck,
   coverageResponse,
   definition,
-  estimate,
+  estimateResponse,
   execution,
   providersResponse,
   resultsResponse,
@@ -26,7 +26,7 @@ const MUTATIONS: ReadonlyArray<{ method: 'POST' | 'PUT'; path: string; body: Jso
   {
     method: 'POST',
     path: '/api/definitions/estimate',
-    body: { estimate: estimate(), budgetFit: definition().budgetFit },
+    body: estimateResponse(),
   },
   { method: 'POST', path: '/api/definitions/coverage-check', body: coverageCheck() },
   { method: 'POST', path: '/api/definitions', body: definition({ id: 'def-0002' }) },

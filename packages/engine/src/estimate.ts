@@ -3,6 +3,7 @@ import {
   type CellKey,
   cellKeyString,
   type DefinitionSnapshot,
+  type DiscoveryCapability,
   type Execution,
   microGbpToPence,
   type ProviderId,
@@ -12,7 +13,7 @@ import {
 import type { EngineContext } from './context.js';
 import { type LineKey, lineKey } from './lines.js';
 import { disabledFor, resumableCells } from './run.js';
-import { planTiles } from './stages/discovery.js';
+import { type PlannedTile, planTiles } from './stages/discovery.js';
 import { reusableFor, reuseCriteriaFor } from './stages/reuse.js';
 import { itineraryQuery } from './stages/verification.js';
 import type { Estimate } from './types.js';
@@ -118,6 +119,39 @@ function waitSeconds(
   return Math.max(minute, hour, pool);
 }
 
+/**
+ * One discovery provider's plan over the cells: the cells it can reuse, the rest (`fresh`) and the tiles planned for
+ * those. The one place the estimate's calls (discoveryLine) and the date pairs it asks about (`askedPairs`) read the
+ * plan from, so the two can never disagree about which cells a provider would fetch.
+ */
+function planDiscovery(
+  ctx: EngineContext,
+  snapshot: DefinitionSnapshot,
+  providerId: ProviderId,
+  cap: DiscoveryCapability,
+  cells: readonly CellKey[],
+  definitionId: string | null,
+): { reused: CellKey[]; fresh: CellKey[]; planned: PlannedTile[] } {
+  const reusedCopies =
+    definitionId === null
+      ? []
+      : reusableFor(
+          ctx,
+          definitionId,
+          snapshot,
+          providerId,
+          reuseCriteriaFor(ctx, snapshot, providerId, cap.info),
+          cells,
+        );
+  const reusedKeys = new Set(reusedCopies.map((r) => cellKeyString(r.cell)));
+  const fresh = cells.filter((c) => !reusedKeys.has(cellKeyString(c)));
+  return {
+    reused: reusedCopies.map((r) => r.cell),
+    fresh,
+    planned: fresh.length === 0 ? [] : planTiles(providerId, cap, snapshot, fresh),
+  };
+}
+
 function discoveryLine(
   ctx: EngineContext,
   snapshot: DefinitionSnapshot,
@@ -135,22 +169,9 @@ function discoveryLine(
     notes.push(`${providerId}: does not offer ${snapshot.cabin}; no calls (cabin-not-offered)`);
     return { providerId, stage: 'discovery', rawCalls: 0, rawCostMicroGbp: 0, rawSeconds: 0 };
   }
-  const reused =
-    definitionId === null
-      ? []
-      : reusableFor(
-          ctx,
-          definitionId,
-          snapshot,
-          providerId,
-          reuseCriteriaFor(ctx, snapshot, providerId, cap.info),
-          cells,
-        );
+  const { reused, fresh, planned } = planDiscovery(ctx, snapshot, providerId, cap, cells, definitionId);
   if (reused.length > 0)
     notes.push(`${providerId}: ${reused.length} cells reuse earlier prices and are not planned`);
-  const reusedKeys = new Set(reused.map((r) => cellKeyString(r.cell)));
-  const fresh = cells.filter((c) => !reusedKeys.has(cellKeyString(c)));
-  const planned = fresh.length === 0 ? [] : planTiles(providerId, cap, snapshot, fresh);
   const tiles = planned.length;
   // why: cost-r1-007 — planCalls counts tiles; a tile that pages spends a call a page, so discovery overrun is judged on
   // distinct tiles (LedgerRepo.countsFor tiles), never on calls
@@ -386,4 +407,127 @@ export function withBlocked(e: Estimate, blockedBy: ReadonlyMap<LineKey, string>
 export function confirmationOf(e: Pick<Estimate, 'perProvider'>): { pence: number; calls: number } {
   const all = totalsOf(e.perProvider);
   return { pence: all.totalCostPence, calls: all.totalCalls };
+}
+
+/**
+ * What an estimate asks of the date pairs (spec §8.1 rev 55; the date-pairs words of §10): counts over the distinct
+ * (departure, return) pairs of the search space. A date pair is **covered** when every one of its airport pairs is
+ * planned, **partly** covered when some but not all are, and **reused** when none is planned and every airport pair is
+ * reused from an earlier run. Coverage counts planned cells only; a reused cell is never counted as asked.
+ */
+export interface AskedPairs {
+  datePairs: number;
+  datePairsCovered: number;
+  datePairsPartly: number;
+  datePairsReused: number;
+}
+
+/** The calls a provider's month (or lifetime) still allows; null without a cap. */
+function windowLeft(ctx: EngineContext, providerId: ProviderId): number | null {
+  const { cap, calls } = ctx.budget.usage({ kind: ctx.limitsOf(providerId).capKind, providerId });
+  return cap === null ? null : Math.max(0, cap - calls);
+}
+
+/**
+ * The cells the runnable discovery lines would plan, and the cells they would reuse (spec §8.1 rev 55). Each
+ * provider's plan is cut at the lesser of its per-run page cap (a provider with page spacing, camoufox) and what its
+ * monthly or lifetime window has left; a blocked line (`blocked` set by a budget check) plans nothing, but its reused
+ * cells still stand, since reuse makes no call. Two providers planning the same cell count it once.
+ */
+export function askedPairs(
+  ctx: EngineContext,
+  snapshot: DefinitionSnapshot,
+  cells: readonly CellKey[],
+  definitionId: string | null,
+  blocked: ReadonlySet<LineKey>,
+): AskedPairs {
+  const planned = new Set<string>();
+  const reused = new Set<string>();
+  for (const id of snapshot.providers.discovery) {
+    const provider = ctx.providers.get(id);
+    const cap = provider?.discovery;
+    if (provider === undefined || cap === undefined || !provider.cabins.includes(snapshot.cabin)) continue;
+    const plan = planDiscovery(ctx, snapshot, id, cap, cells, definitionId);
+    for (const c of plan.reused) reused.add(cellKeyString(c));
+    if (blocked.has(lineKey('discovery', id))) continue;
+    const pageCap = snapshot.budget.providerMaxCalls?.[id];
+    const perRun = pageCap !== undefined && ctx.limitsOf(id).minSpacingSeconds !== null ? pageCap : Infinity;
+    const allowed = Math.min(plan.planned.length, perRun, windowLeft(ctx, id) ?? Infinity);
+    for (const tile of plan.planned.slice(0, allowed))
+      for (const c of tile.plan.coveredCells) planned.add(cellKeyString(c));
+  }
+  const byPair = new Map<string, CellKey[]>();
+  for (const c of cells) {
+    const key = `${c.departureDate}|${c.returnDate}`;
+    const list = byPair.get(key);
+    if (list === undefined) byPair.set(key, [c]);
+    else list.push(c);
+  }
+  let covered = 0;
+  let partly = 0;
+  let reusedPairs = 0;
+  for (const pair of byPair.values()) {
+    const asked = pair.filter((c) => planned.has(cellKeyString(c))).length;
+    if (asked === pair.length) covered++;
+    else if (asked > 0) partly++;
+    else if (pair.every((c) => reused.has(cellKeyString(c)))) reusedPairs++;
+  }
+  return {
+    datePairs: byPair.size,
+    datePairsCovered: covered,
+    datePairsPartly: partly,
+    datePairsReused: reusedPairs,
+  };
+}
+
+/** One billable-plan provider's runnable calls and what its window has left (spec §10 estimate `billedCalls`). */
+export interface BilledCalls {
+  providerId: ProviderId;
+  calls: number;
+  /** The calls left in the provider's window; null without a cap. */
+  left: number | null;
+  /** Which window `left` is: the month, or the lifetime of a trial. */
+  window: 'month' | 'lifetime';
+}
+
+/** The browser worker's month as the estimate sees it: this run's pages and the pages the month has left. */
+export interface MonthlyPages {
+  planned: number;
+  left: number;
+}
+
+/**
+ * The runnable (unblocked) lines of billable-plan providers, one entry a provider with its calls summed over stages
+ * and the calls its window has left (cost-003): what the form words as "uses about 120 of the 9,880 searches left".
+ */
+export function billedCallsOf(ctx: EngineContext, estimate: Pick<Estimate, 'perProvider'>): BilledCalls[] {
+  const byProvider = new Map<ProviderId, number>();
+  for (const p of estimate.perProvider) {
+    if (p.blocked !== null || !ctx.limitsOf(p.providerId).billed) continue;
+    byProvider.set(p.providerId, (byProvider.get(p.providerId) ?? 0) + p.calls);
+  }
+  return [...byProvider].map(([providerId, calls]) => ({
+    providerId,
+    calls,
+    left: windowLeft(ctx, providerId),
+    window: ctx.limitsOf(providerId).capKind === 'provider-lifetime' ? 'lifetime' : 'month',
+  }));
+}
+
+/**
+ * The browser worker's pages this run asks for and the pages its month has left, when camoufox is a runnable line;
+ * else null (cost-018, persona-005, ruling A31). Flight-list pages join `planned` in Task 20.9 (ruling A23).
+ */
+export function monthlyPagesOf(
+  ctx: EngineContext,
+  estimate: Pick<Estimate, 'perProvider'>,
+): MonthlyPages | null {
+  const lines = estimate.perProvider.filter((p) => p.providerId === 'camoufox' && p.blocked === null);
+  if (lines.length === 0) return null;
+  const limits = ctx.limitsOf('camoufox');
+  const { cap, calls } = ctx.budget.usage({ kind: limits.capKind, providerId: 'camoufox' });
+  return {
+    planned: lines.reduce((a, p) => a + p.calls, 0),
+    left: Math.max(0, (cap ?? limits.monthlyCallCap) - calls),
+  };
 }

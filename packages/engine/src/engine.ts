@@ -6,7 +6,15 @@ import { childCapPreview } from './child.js';
 import { runConsentNoticeSafely } from './consentNotice.js';
 import { buildContext, type EngineContext } from './context.js';
 import { coverageCheckFor } from './coverageCheck.js';
-import { estimateRemainingFor, estimateStart, withBlocked } from './estimate.js';
+import {
+  askedPairs,
+  billedCallsOf,
+  estimateRemainingFor,
+  estimateStart,
+  monthlyPagesOf,
+  withBlocked,
+} from './estimate.js';
+import { lineKey } from './lines.js';
 import { runSystemJob } from './maintenance.js';
 import { SMTP_TIMEOUTS } from './notifiers/email.js';
 import { createOrchestrator, type Orchestrator } from './orchestrator.js';
@@ -159,6 +167,20 @@ export function createEngine(deps: EngineDeps, options: EngineOptions = {}): Eng
       // why: cost-r1-014 — the form shows beforehand which provider the caps would leave out
       const check = checkBudget(ctx, spendOf(est), b.snapshot.budget, null, 'id' in input ? input.id : null);
       return withBlocked(est, check.blockedBy);
+    },
+    estimateAsk: (input, today, est) => {
+      // why: a saved definition's reusable prices are not asked again (spec §8.1 rev 55); the estimate itself stays the
+      // worst case without reuse (ruling 9), so this is the only place reuse shows
+      const { def, definitionId } = asDefinition(ctx, input);
+      const b = buildSnapshot(ctx, def, 'manual', today);
+      const blocked = new Set(
+        est.perProvider.filter((p) => p.blocked !== null).map((p) => lineKey(p.stage, p.providerId)),
+      );
+      return {
+        ...askedPairs(ctx, b.snapshot, b.cells, definitionId, blocked),
+        billedCalls: billedCallsOf(ctx, est),
+        monthlyPages: monthlyPagesOf(ctx, est),
+      };
     },
     estimateRemaining: (id) => {
       const e = ctx.repos.executions.get(id);

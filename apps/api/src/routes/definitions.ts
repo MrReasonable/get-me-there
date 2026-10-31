@@ -17,6 +17,7 @@ import {
   inputOf,
   mergeDefinition,
   sentCovers,
+  softConfirmOf,
 } from '../read/definitions.js';
 import { airportLookup, currentSpace, isDraft } from '../read/space.js';
 import { API_TEXT } from '../text.js';
@@ -55,9 +56,13 @@ function applyConfirmation(
 
 /** Spec §10 estimate routes: `{ estimate, budgetFit }` so the form shows both before the create click. */
 function estimateResponse(def: DefinitionInput | SearchDefinition, ctx: RouteContext) {
+  const today = ctx.ports.clock.todayLondon();
+  const estimate = ctx.engine.estimate(def, today);
   return {
-    estimate: ctx.engine.estimate(def, ctx.ports.clock.todayLondon()),
+    estimate,
     budgetFit: ctx.engine.budgetFit(def),
+    ...ctx.engine.estimateAsk(def, today, estimate),
+    softConfirm: softConfirmOf(estimate, ctx.ports),
   };
 }
 
