@@ -345,12 +345,13 @@ describe('stopCauseOf edges (mutation pins)', () => {
         ['camoufox', { skip: 'provider_disabled', detail: 'captcha', until: null }],
         ['fixture', { skip: 'provider_disabled', detail: 'auth', until: null }],
       ]),
-      disabled: new Set<ProviderId>(['travelpayouts', 'searchapi', 'camoufox']),
+      // why: searchapi verifies too but is not disabled, so it is never named
+      disabled: new Set<ProviderId>(['travelpayouts', 'camoufox']),
       disabledReason: new Map(),
       snapshot: {
         providers: {
           discovery: ['camoufox', 'searchapi'],
-          verification: ['travelpayouts', 'fixture'],
+          verification: ['travelpayouts', 'searchapi', 'fixture'],
           discoveryRefreshHours: {},
         },
       },
