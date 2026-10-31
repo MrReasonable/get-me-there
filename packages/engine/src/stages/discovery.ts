@@ -212,6 +212,13 @@ async function preflightPasses(
   });
   run.disabled.add(providerId);
   run.disabledReason.set(providerId, r.skip);
+  // why: revision 55 §8.1 — the cause stores the refusal's class word only, never the provider's sentence (`detail`
+  // stays in last_error and the log): the provider's own word, else one from how it was left out
+  run.disabledDetail.set(providerId, {
+    skip: r.skip,
+    detail: r.reason ?? (r.skip === 'provider_unavailable' ? 'provider-unavailable' : 'blocked'),
+    until: r.until ?? null,
+  });
   run.log.child({ providerId }).warn({ skip: r.skip, detail: r.detail }, 'discovery: preflight refused');
   if (r.until !== undefined)
     run.notices.push({

@@ -499,6 +499,10 @@ export function execution(
     parityBreak: false,
     overrun: false,
     disabledProviders: [],
+    // why: revision 55 §10 — no stop on a running row, no flight plan stored, no estimate of the finish here
+    stop: null,
+    estimatedFinishAt: null,
+    flights: null,
     ...over,
   });
 }

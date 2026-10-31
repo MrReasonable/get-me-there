@@ -4,6 +4,9 @@ import {
   alertRuleUpdateRequestSchema,
   cronSchema,
   definitionCreateRequestSchema,
+  executionFlightsSchema,
+  executionResponseSchema,
+  flightListsStateSchema,
   healthResponseSchema,
   priceCellSchema,
   ROUTES,
@@ -369,5 +372,35 @@ describe("startExecutionRequestSchema (spec rev 55 §8.1: Search again's start f
     expect(startExecutionRequestSchema.parse({})).toEqual({});
     expect(startExecutionRequestSchema.safeParse({ requireCovered: 'yes' }).success).toBe(false);
     expect(startExecutionRequestSchema.safeParse({ replaceStopped: 1 }).success).toBe(false);
+  });
+});
+
+describe('executionResponseSchema (spec rev 55 §10: stop, estimatedFinishAt and flights)', () => {
+  const flights = { planned: 10, read: 6, reused: 2, failed: 2, ended: null };
+  it('carries the three fields, each nullable', () => {
+    for (const k of ['stop', 'estimatedFinishAt', 'flights'] as const)
+      expect(executionResponseSchema.shape[k].safeParse(null).success, k).toBe(true);
+    expect(
+      executionResponseSchema.shape.stop.parse({
+        sentence: 'Stopped by you.',
+        fix: { text: 'Search again', command: null },
+      }),
+    ).toEqual({ sentence: 'Stopped by you.', fix: { text: 'Search again', command: null } });
+    expect(executionResponseSchema.shape.estimatedFinishAt.parse('2026-10-14T15:00:00.000Z')).toBe(
+      '2026-10-14T15:00:00.000Z',
+    );
+  });
+  it('flights: read + reused + failed never above planned, and an end word of the four only', () => {
+    expect(executionFlightsSchema.parse(flights)).toEqual(flights);
+    for (const ended of ['window', 'monthly-cap', 'stopped', 'disabled'])
+      expect(executionFlightsSchema.safeParse({ ...flights, ended }).success, ended).toBe(true);
+    expect(executionFlightsSchema.safeParse({ ...flights, failed: 3 }).success).toBe(false);
+    expect(executionFlightsSchema.safeParse({ ...flights, ended: 'gate' }).success).toBe(false);
+  });
+  it('the stored flight-list plan is strict', () => {
+    const plan = { planned: 1, cells: [], reused: 0, ended: 'window' };
+    expect(flightListsStateSchema.parse(plan)).toEqual(plan);
+    expect(flightListsStateSchema.safeParse({ ...plan, ended: 'disabled' }).success).toBe(false);
+    expect(flightListsStateSchema.safeParse({ ...plan, note: 'x' }).success).toBe(false);
   });
 });

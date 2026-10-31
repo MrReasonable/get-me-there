@@ -14,7 +14,12 @@ describe('migration 0008', () => {
     const db = openTracked(tmpDbPath());
     applyMigrations(
       db,
-      migrationsWithout(['0008_wp18_error_kind', '0009_wp19_latest_price_idx', '0010_airport_kind']),
+      migrationsWithout([
+        '0008_wp18_error_kind',
+        '0009_wp19_latest_price_idx',
+        '0010_airport_kind',
+        '0011_wp20_flight_lists',
+      ]),
     );
     db.raw
       .prepare(
@@ -32,6 +37,7 @@ describe('migration 0008', () => {
       '0008_wp18_error_kind',
       '0009_wp19_latest_price_idx',
       '0010_airport_kind',
+      '0011_wp20_flight_lists',
     ]);
     expect(db.raw.prepare('SELECT error_kind AS k FROM provider_requests').all()).toEqual([{ k: null }]);
     db.raw.prepare(`UPDATE provider_requests SET error_kind = 'quota'`).run();

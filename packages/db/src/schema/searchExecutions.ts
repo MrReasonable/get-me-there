@@ -41,6 +41,14 @@ export const searchExecutions = sqliteTable(
     browserWindowEnd: text('browser_window_end'),
     skipCode: text('skip_code'),
     pausedAt: text('paused_at'),
+    /**
+     * Spec revision 55 §7 (migration 0011): the run's `StopCause`, written by every status write that stops or skips it
+     * and cleared by the write that makes it pending, running or completed; NULL on a stopped row means it was written
+     * before 0011 (it reads `NO_STOP_CAUSE_TEXT`, never `error_text`).
+     */
+    stopCauseJson: text('stop_cause_json'),
+    /** Spec revision 55 §7 (migration 0011): the run's flight-list plan `{ planned, cells, reused, ended }`. */
+    flightListsJson: text('flight_lists_json'),
   },
   (t) => [
     check('search_executions_status_ck', isOneOf('status', EXECUTION_STATUSES)),
@@ -57,6 +65,18 @@ export const searchExecutions = sqliteTable(
     check('search_executions_window_end_ck', isIsoTimestamp('browser_window_end', true)),
     check('search_executions_is_catch_up_ck', isBool('is_catch_up')),
     check('search_executions_paused_at_ck', isIsoTimestamp('paused_at', true)),
+    check(
+      'search_executions_stop_cause_ck',
+      sql.raw(
+        "stop_cause_json IS NULL OR (json_valid(stop_cause_json) AND json_type(stop_cause_json) = 'object')",
+      ),
+    ),
+    check(
+      'search_executions_flight_lists_ck',
+      sql.raw(
+        "flight_lists_json IS NULL OR (json_valid(flight_lists_json) AND json_type(flight_lists_json) = 'object')",
+      ),
+    ),
     // why: a firing is a parent's: a scheduled start or skip carries one, and a live-tick resume re-anchors a paused run
     // (manual or scheduled) to its firing (decision 83); a child never carries one, and a catch-up always does
     check('search_executions_firing_ck', sql.raw('scheduled_for IS NULL OR is_child = 0')),

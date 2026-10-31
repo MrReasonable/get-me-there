@@ -9,10 +9,12 @@ import {
   type CellKey,
   type Estimate,
   type FareConditions,
+  type FlightListsState,
   type Iata,
   type IsoDate,
   type IsoDateTime,
   type Layover,
+  type StopCause,
   type SuppliedField,
   type VerificationPolicy,
 } from '@gmt/core';
@@ -115,6 +117,12 @@ export const readBooking = (column: string, text: string): Booking =>
   parseWith(column, apiContract.storedBookingSchema, readJson(column, text));
 export const readEstimate = (column: string, text: string): Estimate =>
   parseWith(column, apiContract.estimateSchema, readJson(column, text));
+/** Spec revision 55 §7 `stop_cause_json`: parsed through core's `stopCauseSchema`, strict, so free text never rides along. */
+export const readStopCause = (column: string, text: string): StopCause =>
+  parseWith(column, apiContract.stopCauseSchema, readJson(column, text));
+/** Spec revision 55 §7 `flight_lists_json`: the run's flight-list plan. */
+export const readFlightLists = (column: string, text: string): FlightListsState =>
+  parseWith(column, apiContract.flightListsStateSchema, readJson(column, text));
 
 /**
  * A stored verification policy, read field by field. // why: core's policy schema refines topN ≤ maxCells and

@@ -319,7 +319,7 @@ describe('pre-start checks (spec §8.1 "for every scope check usage(scope) + est
 });
 
 describe('not_found, disabled and no runnable provider (plan contract StartResult codes, po-003)', () => {
-  it('a missing or soft-deleted definition → not_found; a disabled one → disabled; nothing is created', async () => {
+  it('a missing or soft-deleted definition → not_found; a scheduled firing of a disabled one → disabled; nothing is created', async () => {
     const h = createHarness();
     const o = h.orch();
     expect(await o.start('no-such-definition', { trigger: 'manual' })).toMatchObject({
@@ -330,7 +330,8 @@ describe('not_found, disabled and no runnable provider (plan contract StartResul
     h.repos.definitions.softDelete(gone.id);
     expect(await o.start(gone.id, { trigger: 'schedule' })).toMatchObject({ ok: false, code: 'not_found' });
     const off = h.createDefinition({ enabled: false });
-    expect(await o.start(off.id, { trigger: 'manual' })).toMatchObject({
+    // why: revision 55 §8.1 — only a scheduled firing reads `enabled` (a manual start of it is start.test.ts's)
+    expect(await o.start(off.id, { trigger: 'schedule' })).toMatchObject({
       ok: false,
       code: 'disabled',
       message: 'this definition is disabled',

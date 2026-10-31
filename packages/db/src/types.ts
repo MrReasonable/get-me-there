@@ -21,6 +21,7 @@ import type {
   ReturnDateSource,
   SkipCode,
   SourceKind,
+  StopCause,
   SuppliedField,
   VendorPriceMark,
 } from '@gmt/core';
@@ -76,6 +77,12 @@ export type ExecutionCreateInput = {
   browserWindowEnd?: IsoDateTime | null;
   /** Spec §8.2: only on a `skipped_missed` row. */
   skipCode?: SkipCode | null;
+  /**
+   * Spec revision 55 §8.1 "Stop causes": a `skipped_*` row is written with its cause and that cause's sentence (the
+   * scheduler's skips); a pending or running row carries none.
+   */
+  stopCause?: StopCause | null;
+  errorText?: string | null;
 };
 export type ExecutionPatch = Partial<
   Pick<
@@ -89,6 +96,8 @@ export type ExecutionPatch = Partial<
     | 'estimate'
     | 'snapshot'
     | 'browserWindowEnd'
+    | 'stopCause'
+    | 'flightLists'
   >
 >;
 /** One discovery tile's write (spec §7 atomic unit). `discards` is validated and reported by the engine, not stored. */

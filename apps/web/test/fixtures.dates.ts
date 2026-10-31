@@ -234,7 +234,6 @@ export function decodedDates(o: DatesOptions = {}): DecodedDatePairs {
     discoveryProviders: o.discoveryProviders ?? ['fixture'],
     verificationProviderConfigured: o.verificationProviderConfigured ?? true,
     staleAfterHours: 192,
-    calendarStaleAfterHours: { fixture: 168 },
     space,
     scope: {
       origins,

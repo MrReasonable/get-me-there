@@ -14,11 +14,7 @@ import { createOrchestrator } from '../../src/orchestrator.js';
 import { laneFor, newRun } from '../../src/run.js';
 import { windowAnchor } from '../../src/scheduler/browserWindow.js';
 import { catchUpDefinition, findMissedFiring } from '../../src/scheduler/catchUp.js';
-import {
-  plannedSnapshot,
-  SUPERSEDED_BY_FIRING,
-  seedCatchUpBrowser,
-} from '../../src/scheduler/catchUpStart.js';
+import { plannedSnapshot, seedCatchUpBrowser } from '../../src/scheduler/catchUpStart.js';
 import { buildSnapshot } from '../../src/snapshot.js';
 import {
   BROWSER_WINDOW_NOTICE,
@@ -36,6 +32,9 @@ import {
   stubTravelpayouts,
 } from '../support/camoufox.js';
 import { createHarness, type Harness, HOUR } from '../support/harness.js';
+
+/** Revision 55 §8.1: the sentence a run its firing replaced is stored with (`superseded 'schedule'`). */
+const SUPERSEDED_BY_FIRING = 'Replaced by a scheduled run.';
 
 beforeEach(() => {
   expect.hasAssertions();
@@ -66,8 +65,8 @@ function world() {
 }
 
 describe('the start side of the catch-up (catchUpStart.ts)', () => {
-  it('SUPERSEDED_BY_FIRING is the words the operator reads on the replaced row', () => {
-    expect(SUPERSEDED_BY_FIRING).toBe('superseded: a later scheduled firing replaced this catch-up');
+  it("a catch-up its firing replaces reads the firing's supersede, worded once by core", () => {
+    expect(SUPERSEDED_BY_FIRING).toBe('Replaced by a scheduled run.');
   });
 
   it('a catch-up plans without its browser provider; any other start plans its snapshot as it is', () => {
@@ -244,7 +243,7 @@ describe('the browser gate’s own refusals, notice and logs', () => {
     const disabled = pendingRun();
     disabled.disabled.add('travelpayouts');
     const capped = pendingRun();
-    laneFor(capped, 'discovery', 'travelpayouts').budgetOut = true;
+    laneFor(capped, 'discovery', 'travelpayouts').budgetOutScope = 'provider-month';
     const cabin = pendingRun();
     const business = { ...cabin, snapshot: { ...cabin.snapshot, cabin: 'business' as const } };
     for (const r of [stopped, blocked, disabled, capped, business]) expect(pendingNotice(r)).toBe(STOPS);
@@ -359,6 +358,9 @@ describe('the tick’s guards, blocked record, resume arguments and log lines', 
     const def = h.createDefinition({ scheduleCron: '0 * * * *', window: RELATIVE });
     return { ...def, ...patch };
   }
+  // why: revision 55 §8.2 — a stopped run with no resume_after never blocks a firing (the firing supersedes it), so a
+  // run that blocks is one whose resume is still ahead
+  const LATER = '2026-10-15T09:00:00.000Z';
   /** A parent run of `def` left in `status`, with `resumeAfter`, as an earlier pass would have left it. */
   function leftIn(h: Harness, def: SearchDefinition, status: ExecutionStatus, resumeAfter: string | null) {
     const ctx = buildContext(h.deps, h.options);
@@ -387,7 +389,7 @@ describe('the tick’s guards, blocked record, resume arguments and log lines', 
       const h = createHarness();
       const def = hourly(h);
       const o = h.orch();
-      leftIn(h, def, 'paused_error', null);
+      leftIn(h, def, 'paused_error', LATER);
       await o.tick(def.id); // blocked by the paused run
       expect(o.blockedSince()).toBe(h.clock.now());
       h.repos.definitions.update(
@@ -462,7 +464,7 @@ describe('the tick’s guards, blocked record, resume arguments and log lines', 
     const h = createHarness();
     const def = hourly(h);
     const o = h.orch();
-    const blocker = leftIn(h, def, 'paused_error', null);
+    const blocker = leftIn(h, def, 'paused_error', LATER);
     await o.tick(def.id);
     expect(o.blockedSince()).toBe(h.clock.now());
     h.repos.executions.setStatus(blocker.id, 'cancelled', { finishedAt: h.clock.now() });
@@ -478,10 +480,10 @@ describe('the tick’s guards, blocked record, resume arguments and log lines', 
     const h = createHarness();
     const def = hourly(h);
     const o = h.orch();
-    const first = leftIn(h, def, 'paused_error', null);
+    const first = leftIn(h, def, 'paused_error', LATER);
     await o.tick(def.id); // blocked by the first run at 09:00
     h.repos.executions.setStatus(first.id, 'cancelled', { finishedAt: h.clock.now() });
-    leftIn(h, def, 'interrupted', null);
+    leftIn(h, def, 'interrupted', LATER);
     h.clock.advance(HOUR);
     await o.tick(def.id); // blocked by another run at 10:00, with no read of blockedSince in between
     expect(o.blockedSince()).toBe(h.clock.now());
@@ -494,7 +496,7 @@ describe('the tick’s guards, blocked record, resume arguments and log lines', 
     const h = createHarness();
     const def = hourly(h);
     const o = h.orch();
-    const blocker = leftIn(h, def, 'paused_error', null);
+    const blocker = leftIn(h, def, 'paused_error', LATER);
     await o.tick(def.id);
     expect(o.blockedSince()).toBe(h.clock.now());
     h.repos.executions.setStatus(blocker.id, 'cancelled', { finishedAt: h.clock.now() });

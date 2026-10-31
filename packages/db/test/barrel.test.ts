@@ -26,6 +26,8 @@ const SPEC_TABLES = [
   'route_price_history',
   'app_lock',
   'app_meta',
+  'flight_lists',
+  'flight_list_flights',
 ];
 
 describe('@gmt/db public surface (plan "Database" contract)', () => {
@@ -143,7 +145,7 @@ describe('@gmt/db public surface (plan "Database" contract)', () => {
     expect(repos.routeHistory).toBeInstanceOf(db.RoutePriceHistoryRepo);
   });
 
-  it('the migrations create exactly the spec §7 tables (0000, plus 0001 adding a column, decision 37, 0002 rebuilding alert_events, decision 56, 0003 rebuilding route_price_history, decision 67, 0004 rebuilding it with point_of_sale, CodeRabbit batch 3, 0005 widening the provider and source CHECKs with operator_notice_keys, WP14, 0006 adding the grid columns, WP15, 0007 the catch-up columns, the firing index and app_meta, WP16a, 0008 the ledger error_kind, WP18, 0009 the latest-price index, WP19, and 0010 the airport kind and scheduled columns, plan-a-search)', () => {
+  it('the migrations create exactly the spec §7 tables (0000, plus 0001 adding a column, decision 37, 0002 rebuilding alert_events, decision 56, 0003 rebuilding route_price_history, decision 67, 0004 rebuilding it with point_of_sale, CodeRabbit batch 3, 0005 widening the provider and source CHECKs with operator_notice_keys, WP14, 0006 adding the grid columns, WP15, 0007 the catch-up columns, the firing index and app_meta, WP16a, 0008 the ledger error_kind, WP18, 0009 the latest-price index, WP19, 0010 the airport kind and scheduled columns, plan-a-search, and 0011 the stop cause, the flight-list plan and the two flight-list tables, WP20)', () => {
     const d = freshDb();
     const tables = d.raw
       .prepare<[], { name: string }>(
@@ -152,7 +154,7 @@ describe('@gmt/db public surface (plan "Database" contract)', () => {
       .all()
       .map((r) => r.name);
     expect(tables).toEqual([...SPEC_TABLES].sort());
-    expect(d.raw.prepare('SELECT COUNT(*) AS n FROM __drizzle_migrations').get()).toEqual({ n: 11 });
+    expect(d.raw.prepare('SELECT COUNT(*) AS n FROM __drizzle_migrations').get()).toEqual({ n: 12 });
   });
 
   it("0010 adds the airports' kind and scheduled, nullable and checked", () => {

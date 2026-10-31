@@ -20,6 +20,7 @@ import { throwOnSearch } from './support/wrappers.js';
 const twoPairs = (h: Harness, patch = {}) =>
   h.createDefinition({ origins: [LHR, LGW], destinations: [JFK], ...patch });
 const confirmed = { trigger: 'manual', confirmCostPence: 100, confirmCalls: 1000 } as const;
+const WEEKLY = { scheduleCron: '0 5 * * 1' } as const;
 
 async function interruptedAfter(h: Harness, k: number, defId = twoPairs(h).id): Promise<string> {
   const first = h.orch();
@@ -51,7 +52,7 @@ describe('resume (spec §8.1 "Resume", §7 resume query)', () => {
     const def = twoPairs(h);
     const id = await interruptedAfter(h, 1, def.id);
     const o = h.orch();
-    expect(await o.cancel(id)).toBe(true); // cancelled: resumable, no longer active
+    expect(await o.cancel(id, { kind: 'cancelled' })).toBe(true); // cancelled: resumable, no longer active
     await h.fixtureScenario([{ match: { path: '/calendar' }, respond: FIXTURE_RULES.hold }]);
     const other = await o.start(def.id, { trigger: 'manual' });
     expect(other.ok).toBe(true);
@@ -296,7 +297,8 @@ describe('resume (spec §8.1 "Resume", §7 resume query)', () => {
     h.onStageStart('discovery', () =>
       h.spendLedger({ providerId: 'fixture', rows: 19, costMicroGbpEach: FIXTURE_COST_MICRO_GBP }),
     );
-    const def = twoPairs(h);
+    // why: a scheduled search, so its provider-month pause keeps resume_after (revision 55 §8.1, Ian's ruling 2)
+    const def = twoPairs(h, WEEKLY);
     const e = await h.runToCompletion(h.orch(), def.id, confirmed);
     h.clearHooks();
     expect(e.status).toBe('paused_budget');
@@ -346,7 +348,7 @@ describe('resume (spec §8.1 "Resume", §7 resume query)', () => {
     h.onStageStart('discovery', () =>
       h.spendLedger({ providerId: 'fixture', rows: 19, costMicroGbpEach: FIXTURE_COST_MICRO_GBP }),
     );
-    const e = await h.runToCompletion(h.orch(), twoPairs(h).id, confirmed);
+    const e = await h.runToCompletion(h.orch(), twoPairs(h, WEEKLY).id, confirmed);
     expect(e.status).toBe('paused_budget');
     expect(await h.orch().resume(e.id, { manual: false })).toMatchObject({ ok: false, code: 'cap' });
     if (e.resumeAfter === null) throw new Error('expected resume_after');

@@ -177,7 +177,6 @@ export function decodedRead(c: PerfCase, seed: number): DecodedDatePairs {
     discoveryProviders: ['fixture'],
     verificationProviderConfigured: false,
     staleAfterHours: 192,
-    calendarStaleAfterHours: { fixture: 24 },
     space,
     scope: {
       origins,
@@ -403,6 +402,9 @@ export function executionBody(c: PerfCase, tick: number): string {
       parityBreak: false,
       overrun: false,
       disabledProviders: [],
+      stop: null,
+      estimatedFinishAt: null,
+      flights: null,
     }),
   );
 }

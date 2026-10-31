@@ -3,6 +3,7 @@ import {
   type Execution,
   type ExecutionStatus,
   type IsoDateTime,
+  isScheduled,
   RESUMABLE_STATUSES,
 } from '@gmt/core';
 import { breachMessage, checkBudget, spendOf } from './budgetCheck.js';
@@ -24,6 +25,7 @@ import {
   skipBlockedDiscovery,
 } from './stages/reuse.js';
 import { confirmationNeeded, nothingToSearch, refused } from './start.js';
+import { stopPatch } from './stopCause.js';
 import type { StartResult } from './types.js';
 import { HOUR_MS } from './units.js';
 
@@ -90,10 +92,28 @@ export async function resumeExecution(
     ctx.repos.executions.setStatus(executionId, 'cancelled', {
       finishedAt: ctx.clock.now(),
       resumeAfter: null,
-      errorText: NEVER_STARTED,
+      ...stopPatch({ kind: 'never-started' }, exec.snapshot.scheduleTz, isScheduled(def)),
     });
     return refused('not_found', `this execution ${NEVER_STARTED}; start a new run`, { executionId });
   }
+  // why: revision 55 §8.1 — a stop at the browser worker's per-run page limit offers Search again, which reuses the
+  // prices already found, never Resume (a resume past the run's browser window reads no browser pages)
+  const c = exec.stopCause;
+  if (
+    exec.status === 'paused_budget' &&
+    c?.kind === 'budget' &&
+    c.scope === 'provider-execution' &&
+    c.providerId === 'camoufox'
+  )
+    return refused(
+      'cap',
+      "budget cap: camoufox's page cap for one run (provider-execution) is used up; this stop is never resumed, a fresh run (Search again) carries on",
+      {
+        executionId,
+        scope: c.scope,
+        providerId: c.providerId,
+      },
+    );
   const refresh = opts.manual && exec.status === 'paused_budget' && !exec.isChild;
   const refreshed = refresh
     ? {
@@ -320,10 +340,6 @@ export function isStalePaused(
   return olderThanRefresh(exec, now);
 }
 
-/** error_text of a run cancelled because it went stale (spec §8.2 supersede; ssr2-06, ssr2-09). */
-export const SUPERSEDED =
-  'superseded: older than its discovery refresh allows; the next run starts with fresh prices';
-
 /**
  * Cancels a stale run (its one-shot job with it) and records why. It never starts a run: the tick starts the fresh one
  * at a scheduled firing, and for a definition without a schedule the next run is the operator's (ssr2-06). False when
@@ -334,8 +350,8 @@ export async function supersede(
   orch: Pick<Orchestrator, 'cancel'>,
   exec: Pick<Execution, 'id' | 'definitionId' | 'startedAt'>,
 ): Promise<boolean> {
-  if (!(await orch.cancel(exec.id))) return false;
-  ctx.repos.executions.patch(exec.id, { errorText: SUPERSEDED });
+  // why: revision 55 §8.1 — the cancel stores the stale supersede's own cause and sentence
+  if (!(await orch.cancel(exec.id, { kind: 'superseded', by: 'stale' }))) return false;
   ctx.log.info(
     { executionId: exec.id, definitionId: exec.definitionId, startedAt: exec.startedAt },
     'execution: superseded a stale run',

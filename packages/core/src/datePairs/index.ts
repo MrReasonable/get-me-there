@@ -19,7 +19,13 @@ export {
   pickFigure,
   pickVerifiedFigure,
 } from './figure.js';
-export { datePairSearched, type ReducedMark, reducedMark } from './marks.js';
+export {
+  datePairBuckets,
+  datePairSearched,
+  type ReducedMark,
+  reducedMark,
+  searchedDatePairCount,
+} from './marks.js';
 export { bestPerWeek, rankDatePairs } from './rank.js';
 export {
   type DatePairSpace,

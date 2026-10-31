@@ -14,8 +14,39 @@ import {
   usageSchema,
 } from './common.js';
 import { estimateSchema } from './definitions.js';
+import { stopTextSchema } from './stopCause.js';
 
 const count = countSchema;
+
+/**
+ * Spec revision 55 §7 `flight_lists_json`: the run's stored flight-list plan (`FlightListsState`), read back through
+ * this schema as `estimate_json` is through `estimateSchema`, so a stored value is judged by the rules that wrote it.
+ */
+export const flightListsStateSchema = z.strictObject({
+  planned: count,
+  cells: z.array(cellKeySchema),
+  reused: count,
+  ended: z.enum(['window', 'monthly-cap', 'stopped']).nullable(),
+});
+
+/**
+ * Spec revision 55 §8.1 "What the run reports", §10 `GET /executions/:id`: the flight-list step's counts, from the
+ * stored plan (`planned`, `reused`, `ended`) and the newest row per planned cell of this execution (`read`, `failed`).
+ * Null when the run stored no plan (ruling A14: the page then says nothing about flights).
+ */
+export const executionFlightsSchema = z
+  .strictObject({
+    planned: count,
+    read: count,
+    reused: count,
+    failed: count,
+    ended: z.enum(['window', 'monthly-cap', 'stopped', 'disabled']).nullable(),
+  })
+  .refine((f) => f.read + f.reused + f.failed <= f.planned, {
+    message: 'flights read, reused and failed must not exceed flights planned',
+    path: ['read'],
+  });
+
 export const executionResponseSchema = z.object({
   id: z.string(),
   definitionId: z.string(),
@@ -56,6 +87,14 @@ export const executionResponseSchema = z.object({
   parityBreak: z.boolean(),
   overrun: z.boolean(),
   disabledProviders: z.array(providerIdSchema),
+  /**
+   * Spec revision 55 §10: the stored cause's words (`stopText`); `NO_STOP_CAUSE_TEXT` on a stopped row with no cause
+   * (written before migration 0011, whatever its `errorText` holds); null on every other status.
+   */
+  stop: stopTextSchema.nullable(),
+  /** Spec revision 55 §10: now plus the run's remaining seconds while it is pending or running, else null. */
+  estimatedFinishAt: isoDateTimeSchema.nullable(),
+  flights: executionFlightsSchema.nullable(),
 });
 /**
  * Decision 37: a manual start confirms the pence and the calls the operator saw; one without the other covers nothing.

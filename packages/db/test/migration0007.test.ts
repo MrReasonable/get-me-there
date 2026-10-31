@@ -44,6 +44,7 @@ function populatedAt0006(): Db {
       '0008_wp18_error_kind',
       '0009_wp19_latest_price_idx',
       '0010_airport_kind',
+      '0011_wp20_flight_lists',
     ]),
   );
   const run = (sql: string, p: Record<string, unknown> = {}) => db.raw.prepare(sql).run(p);
@@ -340,7 +341,12 @@ describe('migration 0007 (spec §7 rev 36)', () => {
     expect(
       applyMigrations(
         db,
-        migrationsWithout(['0008_wp18_error_kind', '0009_wp19_latest_price_idx', '0010_airport_kind']),
+        migrationsWithout([
+          '0008_wp18_error_kind',
+          '0009_wp19_latest_price_idx',
+          '0010_airport_kind',
+          '0011_wp20_flight_lists',
+        ]),
       ).applied,
     ).toEqual(['0007_catch_up']);
     const after = everyRow(db);
@@ -373,7 +379,12 @@ describe('migration 0007 (spec §7 rev 36)', () => {
     expect(
       applyMigrations(
         db,
-        migrationsWithout(['0008_wp18_error_kind', '0009_wp19_latest_price_idx', '0010_airport_kind']),
+        migrationsWithout([
+          '0008_wp18_error_kind',
+          '0009_wp19_latest_price_idx',
+          '0010_airport_kind',
+          '0011_wp20_flight_lists',
+        ]),
       ).applied,
     ).toEqual([]);
   });
@@ -458,7 +469,13 @@ describe('migration 0007 (spec §7 rev 36)', () => {
         .get(t)
         ?.sql.match(/CONSTRAINT "([a-z_]+)"/g)
         ?.map((m) => m.slice(12, -1)) ?? [];
-    expect(Object.keys(executions.checkConstraints).sort()).toEqual(checks('search_executions').sort());
+    // why: migration 0011 adds two CHECKs of its own (its test pins them against the 0011 snapshot)
+    const since0011 = ['search_executions_stop_cause_ck', 'search_executions_flight_lists_ck'];
+    expect(Object.keys(executions.checkConstraints).sort()).toEqual(
+      checks('search_executions')
+        .filter((c) => !since0011.includes(c))
+        .sort(),
+    );
     expect(Object.keys(snapshot.tables.cell_outcomes.checkConstraints).sort()).toEqual(
       checks('cell_outcomes').sort(),
     );

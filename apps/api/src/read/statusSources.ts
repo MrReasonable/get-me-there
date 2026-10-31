@@ -17,6 +17,7 @@ import {
   isLoopbackHost,
   isStale,
   type ProviderId,
+  runModeOf,
   type SearchDefinition,
   START_REFUSAL_FILE,
   scheduledOnlyText,
@@ -72,8 +73,7 @@ export interface StatusEnv {
 }
 
 export function modeOf(ports: Pick<Ports, 'config'>): StatusMode {
-  const c = ports.config;
-  return c.inContainer ? 'container' : c.nodeEnv === 'development' ? 'dev' : 'native';
+  return runModeOf(ports.config);
 }
 
 function newestBackup(databasePath: string): IsoDateTime | null {

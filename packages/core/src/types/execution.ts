@@ -1,3 +1,4 @@
+import type { StopCause } from '../api-contract/stopCause.js';
 import type { NormalisationReason, ProviderErrorKind } from '../errors.js';
 import type { CellKey, DefinitionSnapshot } from './definition.js';
 import type { IsoDateTime } from './ids.js';
@@ -124,6 +125,20 @@ export interface Estimate {
   retryFactor: number;
 }
 
+/**
+ * Spec revision 55 §7 `search_executions.flight_lists_json`, §8.1 "The flight-list step": the run's flight-list plan,
+ * written once when the step selects at least one date pair to read or to reuse. `cells` are the planned cells (one
+ * airport pair per date pair, the figure's), `reused` how many of them a fresh enough list covered with no page, and
+ * `ended` why the step ended early (null while it has not, or when it read every planned cell). A resume never changes
+ * `planned` or `cells`. The `disabled` end the execution response can report is derived at read time, never stored.
+ */
+export interface FlightListsState {
+  planned: number;
+  cells: CellKey[];
+  reused: number;
+  ended: 'window' | 'monthly-cap' | 'stopped' | null;
+}
+
 /** Spec §7 `search_executions` as read back. */
 export interface Execution {
   id: string;
@@ -159,6 +174,14 @@ export interface Execution {
    * rows. The coverage read uses it to tell a catch-up paused at a firing from one in flight there.
    */
   pausedAt: IsoDateTime | null;
+  /**
+   * Spec revision 55 §7 (migration 0011): why the run stopped or was skipped, stored by every status write that stops
+   * or skips one and cleared by the write that makes it pending, running or completed (the resume claim included).
+   * Null on a stopped row means it was written before 0011, and it reads `NO_STOP_CAUSE_TEXT`, never `errorText`.
+   */
+  stopCause: StopCause | null;
+  /** Spec revision 55 §7 (migration 0011): the run's flight-list plan, or null when the step selected nothing. */
+  flightLists: FlightListsState | null;
 }
 
 /** Spec §3: the six coverage buckets plus the reused count shown beside them. */

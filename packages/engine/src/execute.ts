@@ -1,4 +1,10 @@
-import { type ExecutionStatus, formatInstant, type IsoDateTime, type OperatorMessageKind } from '@gmt/core';
+import {
+  type ExecutionStatus,
+  formatInstant,
+  type IsoDateTime,
+  isScheduled,
+  type OperatorMessageKind,
+} from '@gmt/core';
 import type { ExecutionPatch } from '@gmt/db';
 import type { EngineContext } from './context.js';
 import { errorText } from './errors.js';
@@ -6,6 +12,7 @@ import { notifyOperator } from './notify.js';
 import { type RunState, type StopReason, stopRun } from './run.js';
 import { runDiscovery } from './stages/discovery.js';
 import { runVerification } from './stages/verification.js';
+import { stopCauseOf, stopPatch } from './stopCause.js';
 import { budgetText } from './text.js';
 
 /**
@@ -68,11 +75,22 @@ export interface Notice {
   key?: string;
 }
 
-/** Maps a stop reason to the execution status, patch and operator notice of spec §8.1. Pure; `tz` renders instants. */
+/** The run state `finalStatus` reads to build a stop's cause (revision 55 §8.1). */
+export type CauseRun = Parameters<typeof stopCauseOf>[1];
+
+/**
+ * Maps a stop reason to the execution status, patch and operator notice of spec §8.1. Pure; `tz` renders instants.
+ * Revision 55 §8.1: every non-null stop stores its cause (`stopCauseOf`) with its sentence as `error_text` (a fatal
+ * stop's own message stays in the log), and its `resumeAfter` is the cause's: null when the search is not scheduled
+ * (`scheduled`, `isScheduled` read live at finish; Ian's ruling 2) or the stop is the browser worker's monthly or
+ * per-run page limit, so no one-shot job is registered for either.
+ */
 export function finalStatus(
   stop: StopReason | null,
   now: IsoDateTime,
   tz: string,
+  run: CauseRun,
+  scheduled: boolean,
 ): { status: ExecutionStatus; patch: ExecutionPatch; notice: Notice | null } {
   if (stop === null)
     return {
@@ -80,40 +98,45 @@ export function finalStatus(
       patch: { finishedAt: now, resumeAfter: null, errorText: null },
       notice: null,
     };
+  const cause = stopCauseOf(stop, run, scheduled);
+  const stored = stopPatch(cause, tz, scheduled);
+  const resumeAfter = 'resumeAfter' in cause ? cause.resumeAfter : null;
   switch (stop.kind) {
     case 'sigterm':
       // why: spec §8.1 "SIGTERM: … status interrupted without incrementing the counter"
       return {
         status: 'interrupted',
-        patch: {},
+        patch: { ...stored },
         notice: {
           kind: 'interrupted',
           detail: 'The app stopped during this run; cells that were in flight went back to not searched.',
         },
       };
     case 'cancel':
-      return { status: 'cancelled', patch: { finishedAt: now, resumeAfter: null }, notice: null };
+      return { status: 'cancelled', patch: { finishedAt: now, resumeAfter: null, ...stored }, notice: null };
     case 'limiter-timeout':
       return {
         status: 'paused_error',
-        patch: { resumeAfter: stop.resumeAfter },
+        patch: { resumeAfter, ...stored },
         notice: {
           kind: 'paused_error',
           detail:
-            stop.resumeAfter === null
-              ? 'A provider rate window is full and its reopening time is not known; resume the run manually.'
-              : `A provider rate window is full; the run resumes automatically on ${formatInstant(stop.resumeAfter, tz)}.`,
+            resumeAfter === null
+              ? stop.resumeAfter === null
+                ? 'A provider rate window is full and its reopening time is not known; resume the run manually.'
+                : 'A provider rate window is full; this search has no schedule, so resume the run when you are ready.'
+              : `A provider rate window is full; the run resumes automatically on ${formatInstant(resumeAfter, tz)}.`,
         },
       };
     case 'budget': {
       const e = stop.error;
       const when =
-        stop.resumeAfter === null
+        resumeAfter === null
           ? 'It needs a cap change, or a manual resume after editing the definition.'
-          : `It resumes automatically on ${formatInstant(stop.resumeAfter, tz)}, when the cap window reopens; if by then it is older than its discovery refresh allows, it is cancelled instead and the next run starts with fresh prices.`;
+          : `It resumes automatically on ${formatInstant(resumeAfter, tz)}, when the cap window reopens; if by then it is older than its discovery refresh allows, it is cancelled instead and the next run starts with fresh prices.`;
       return {
         status: 'paused_budget',
-        patch: { resumeAfter: stop.resumeAfter },
+        patch: { resumeAfter, ...stored },
         notice: {
           kind: 'paused_budget',
           detail: `The cap was reached: ${budgetText(e, 'the next call needed')}. ${when}`,
@@ -121,16 +144,16 @@ export function finalStatus(
       };
     }
     case 'child-cap':
-      // why: ruling 7 — a child never pauses on a cap; it ends, with the scope in the log and this text on the row
+      // why: ruling 7 — a child never pauses on a cap; it ends, with the scope in the log and its cause on the row
       return {
         status: 'cancelled',
-        patch: { finishedAt: now, resumeAfter: null, errorText: CHILD_CAP_REACHED },
+        patch: { finishedAt: now, resumeAfter: null, ...stored },
         notice: null,
       };
     case 'all-disabled':
       return {
         status: 'paused_error',
-        patch: { resumeAfter: null },
+        patch: { resumeAfter: null, ...stored },
         notice: {
           kind: 'paused_error',
           detail: `Every ${stop.stage} provider was disabled after errors; resume manually once the cause is fixed.`,
@@ -139,7 +162,7 @@ export function finalStatus(
     case 'fatal':
       return {
         status: 'paused_error',
-        patch: { resumeAfter: null, errorText: stop.message },
+        patch: { resumeAfter: null, ...stored },
         notice: { kind: 'paused_error', detail: `The run stopped on an internal error: ${stop.message}` },
       };
   }
@@ -150,7 +173,16 @@ export function finalStatus(
  * final status also observes every write and notification of the pass.
  */
 export async function finish(ctx: EngineContext, run: RunState, alertsRan: boolean): Promise<void> {
-  const { status, patch, notice } = finalStatus(run.stop, ctx.clock.now(), run.snapshot.scheduleTz);
+  // why: revision 55 §8.1 — a cancel or SIGTERM during the flight-list step after a budget stop wins over that stop
+  const stop = run.flightStop ?? run.stop;
+  const scheduled = scheduledNow(ctx, run.definitionId);
+  const { status, patch, notice } = finalStatus(
+    stop,
+    ctx.clock.now(),
+    run.snapshot.scheduleTz,
+    run,
+    scheduled,
+  );
   const notices = notice === null ? [...run.notices] : [...run.notices, notice];
   const parity = parityNotice(ctx, run);
   if (parity !== null) notices.push(parity);
@@ -191,7 +223,7 @@ export function parityNotice(ctx: EngineContext, run: RunState): Notice | null {
     if (
       planned === 0 ||
       run.disabled.has(providerId) ||
-      lane?.budgetOut === true ||
+      (lane !== undefined && lane.budgetOutScope !== null) ||
       (lane !== undefined && lane.windowOut !== null)
     )
       continue;
@@ -207,5 +239,11 @@ export function parityNotice(ctx: EngineContext, run: RunState): Notice | null {
   return { kind: 'parity_break', detail: `${breaks.join('. ')}.` };
 }
 
-/** The error_text of a child execution that reached a cap (ruling 7). */
-export const CHILD_CAP_REACHED = 'child cap reached';
+/**
+ * Revision 55 §7, §8.1: whether the run's search is scheduled now (`isScheduled` over the live definition): the one
+ * schedule predicate finish and `autoResume` read. A deleted or missing definition is not.
+ */
+export function scheduledNow(ctx: Pick<EngineContext, 'repos'>, definitionId: string): boolean {
+  const def = ctx.repos.definitions.get(definitionId);
+  return def !== null && isScheduled(def);
+}

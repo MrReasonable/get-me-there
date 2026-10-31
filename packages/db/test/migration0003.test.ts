@@ -26,6 +26,7 @@ function upTo0002(): string {
     '0008_wp18_error_kind',
     '0009_wp19_latest_price_idx',
     '0010_airport_kind',
+    '0011_wp20_flight_lists',
   ])
     rmSync(join(dir, `${tag}.sql`));
   const journalPath = join(dir, 'meta', '_journal.json');
@@ -41,6 +42,7 @@ function upTo0002(): string {
         '0008_wp18_error_kind',
         '0009_wp19_latest_price_idx',
         '0010_airport_kind',
+        '0011_wp20_flight_lists',
       ].includes(e.tag),
   );
   writeFileSync(journalPath, JSON.stringify(journal));
@@ -65,6 +67,7 @@ describe('migration 0003: route price history keyed by trip (ruling 6, spec §7 
       '0008_wp18_error_kind',
       '0009_wp19_latest_price_idx',
       '0010_airport_kind',
+      '0011_wp20_flight_lists',
     ]);
     applyMigrations(db, MIGRATIONS_DIR);
     const rows = db.raw

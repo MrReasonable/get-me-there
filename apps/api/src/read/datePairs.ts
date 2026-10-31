@@ -12,7 +12,6 @@ import {
   encodeDatePairs,
   type Figure,
   figuresByDatePair,
-  type ProviderId,
   type SearchDefinition,
   sortedAirportPairs,
 } from '@gmt/core';
@@ -23,7 +22,7 @@ import type { Ports } from '../wiring.js';
 import { zeroBuckets } from './coverage.js';
 import { executionSummary } from './executions.js';
 import { type Loaded, loadRows, partiallyVerifiedCells } from './load.js';
-import { calendarStaleAfterHours, confirmedIn, priceOf, type ResultRow, type RowContext } from './rows.js';
+import { confirmedIn, priceOf, type ResultRow, type RowContext } from './rows.js';
 import {
   classifyCells,
   type ParsedScope,
@@ -177,15 +176,12 @@ export function assembleDatePairs(def: SearchDefinition, query: ScopeQuery, port
     if (c.unconfirmed) p.unconfirmed += 1;
     if (c.partiallyVerified) p.partiallyVerified += 1;
   }
-  const calendarStale: Partial<Record<ProviderId, number>> = {};
-  for (const id of def.providers.discovery) calendarStale[id] = calendarStaleAfterHours(loaded.rc, id);
   const decoded: DecodedDatePairs = {
     executionId: loaded.latestParent?.id ?? null,
     executions: loaded.scoped.map((e) => executionSummary(e, loaded.rc.now)),
     discoveryProviders: def.providers.discovery,
     verificationProviderConfigured: def.providers.verification.length > 0,
     staleAfterHours: ports.config.staleAfterHours,
-    calendarStaleAfterHours: calendarStale,
     space: scope.space,
     scope: {
       origins: scope.space.origins,

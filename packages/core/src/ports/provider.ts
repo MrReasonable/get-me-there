@@ -1,3 +1,4 @@
+import type { StopDetail } from '../api-contract/stopCause.js';
 import type { GridMove } from '../camoufox/protocol.js';
 import type { CellKey } from '../types/definition.js';
 import type { ErrorReason } from '../types/execution.js';
@@ -213,7 +214,9 @@ export interface CostEstimate {
 /**
  * Spec §5.1 rev 32: an unledgered check before a stage plans tiles (camoufox reads its worker's `/v1/status`). A refusal
  * skips every cell of the provider in the stage with `skip` as the reason and `detail` in `last_error`; `until` is the
- * end of a cool-down, which keys the once-per-cool-down notice.
+ * end of a cool-down, which keys the once-per-cool-down notice. Revision 55 §8.1 "Stop causes": `reason` is the refusal's
+ * class word, the only part of it a stop cause stores (`detail` is the provider's own sentence, kept in `last_error` and
+ * the log); a provider that states none is classed by the engine from `skip` and `until`.
  */
 export type PreflightResult =
   | { ok: true }
@@ -222,6 +225,7 @@ export type PreflightResult =
       skip: 'provider_disabled' | 'provider_unavailable';
       detail: string;
       until?: IsoDateTime;
+      reason?: StopDetail;
     };
 export interface DiscoveryCapability {
   info: CapabilityInfo;

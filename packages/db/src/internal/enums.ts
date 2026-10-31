@@ -5,6 +5,7 @@ import type {
   CellOutcomeStatus,
   ErrorReason,
   ExecutionStatus,
+  Listed,
   NoDataReason,
   OperatorMessageKind,
   ProviderId,
@@ -16,6 +17,7 @@ import type {
   SkipReason,
   SourceKind,
   Stage,
+  StopDetail,
   SuppliedField,
   VendorPriceMark,
 } from '@gmt/core';
@@ -170,3 +172,37 @@ export const NON_RETRYABLE = [
   'unknown-airport-tz',
 ] as const;
 export const MANUAL_RETRYABLE = ['auth', 'quota', 'parse'] as const;
+
+/** Spec revision 55 §8.1 "Stop causes": every detail or reason word the app stores (core's `STOP_DETAILS`). */
+export const STOP_DETAILS = exhaustive<StopDetail>()([
+  'auth',
+  'rate-limit',
+  'quota',
+  'upstream',
+  'parse',
+  'network',
+  'limiter-timeout',
+  'blocked',
+  'provider-unavailable',
+  'captcha',
+  'unusual-traffic',
+  'signed-in',
+  'consent-unhandled',
+  'sign-in',
+  'off-allowlist',
+  'unrecognised',
+  'settings-differ',
+  'grid-unverified',
+  'counts-unreadable',
+  'no-airport-names',
+  'none-for-cell',
+  'unparsed',
+  'monthly-cap',
+  'execution-cap',
+  'free-call-cap',
+  'outside-browser-window',
+  'fatal',
+  'aborted',
+] as const);
+/** Spec revision 55 §7 `flight_lists.listed` (core's `LISTED`). */
+export const LISTED = exhaustive<Listed>()(['flights', 'no-flights', 'none-for-cell'] as const);

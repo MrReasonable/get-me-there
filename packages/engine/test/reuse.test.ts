@@ -143,7 +143,7 @@ describe('reuse per cell (spec §8.1 "reuse, per cell")', () => {
     const notRun = new Set(h.outcomes(r.executionId, { status: 'not_run' }).map(cellKeyString));
     expect(notRun.size).toBe(14);
     const second = h.orch();
-    expect(await second.cancel(r.executionId)).toBe(true); // frees the definition for a new run
+    expect(await second.cancel(r.executionId, { kind: 'cancelled' })).toBe(true); // frees the definition for a new run
     h.clock.advance(HOUR);
     const two = await h.runToCompletion(second, def.id);
     for (const o of h.outcomes(two.id))

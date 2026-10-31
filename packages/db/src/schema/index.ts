@@ -8,6 +8,7 @@ export * from './appMeta.js';
 export * from './calendarPrices.js';
 export * from './cellOutcomes.js';
 export * from './fareOffers.js';
+export * from './flightLists.js';
 export * from './fxRates.js';
 export * from './itineraries.js';
 export * from './operatorNoticeKeys.js';

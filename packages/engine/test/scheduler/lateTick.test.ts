@@ -5,10 +5,12 @@
 import { asIsoDateTime, type ExecutionStatus, type SearchDefinition } from '@gmt/core';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildContext } from '../../src/context.js';
-import { SUPERSEDED } from '../../src/resume.js';
 import { CATCH_UP_GRACE_MS, catchUpAll, pastGrace } from '../../src/scheduler/catchUp.js';
 import { buildSnapshot } from '../../src/snapshot.js';
 import { createHarness, type Harness } from '../support/harness.js';
+
+/** Revision 55 §8.1: the sentence a stale run is stored with (`superseded 'stale'`). */
+const SUPERSEDED = 'Too old to carry on; a fresh run replaced it.';
 
 beforeEach(() => {
   expect.hasAssertions();
@@ -60,20 +62,23 @@ describe('the late tick keeps the tick order (R1)', () => {
     },
   );
 
-  it('a paused_error with no resume_after that is not stale: the late tick records "schedule blocked since" and starts nothing', async () => {
+  it('a paused_error with no resume_after that is not stale: the late tick hands the firing to the catch-up, whose start supersedes it (revision 55 §8.2)', async () => {
     const h = createHarness();
     const def = daily(h, '2027-02-20T00:00:00.000Z');
     const paused = leftAt(h, def, '2027-02-28T07:00:00.000Z', 'paused_error');
     h.clock.set(at('2027-03-01T12:00:00.000Z'));
     const o = h.orch();
     await o.tick(def.id);
-    expect(executions(h, def.id).map((e) => e.id)).toEqual([paused.id]);
-    expect(o.blockedSince()).toBe('2027-03-01T12:00:00.000Z');
-    expect(
-      h.logs
-        .filter((l) => l.msg === 'tick: schedule blocked by an active execution')
-        .map((l) => l.fields.late),
-    ).toEqual([true]);
+    expect(h.repos.executions.get(paused.id)).toMatchObject({
+      status: 'cancelled',
+      stopCause: { kind: 'superseded', by: 'schedule' },
+    });
+    const fresh = executions(h, def.id).find((e) => e.id !== paused.id);
+    expect(fresh).toMatchObject({ scheduledFor: '2027-03-01T06:00:00.000Z', isCatchUp: true });
+    if (fresh === undefined) throw new Error('no catch-up');
+    await h.waitForSettled(fresh.id);
+    expect(o.blockedSince()).toBeNull();
+    expect(h.logs.filter((l) => l.msg === 'tick: schedule blocked by an active execution')).toEqual([]);
   });
 
   it('the minute job alone never supersedes: a stale paused run covers the firing until a tick replaces it', async () => {

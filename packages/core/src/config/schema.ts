@@ -132,6 +132,15 @@ export function smtpPlaintextAllowed(host: string, nodeEnv: Config['nodeEnv']): 
 }
 
 /**
+ * How the app runs (spec §13; revision 55 §8.1 "Stop causes"): in the container image, under `NODE_ENV=development`, or
+ * natively through `pnpm gmt`. The one rule the Status view and the engine's stop sentences read, so a fix names a
+ * `pnpm gmt` command in native mode only.
+ */
+export function runModeOf(c: Pick<Config, 'inContainer' | 'nodeEnv'>): 'native' | 'container' | 'dev' {
+  return c.inContainer ? 'container' : c.nodeEnv === 'development' ? 'dev' : 'native';
+}
+
+/**
  * One mailbox: an address only, so a list, a display name or a control character can never reach an email header
  * (spec §8.3). The config schema checks ALERT_EMAIL_TO/FROM with it and the engine's EmailNotifier re-checks (WP11).
  */

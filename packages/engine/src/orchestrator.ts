@@ -1,10 +1,12 @@
 import { ACTIVE_STATUSES, type CellKey, type IsoDateTime } from '@gmt/core';
 import { verifyCellExecution } from './child.js';
 import type { EngineContext } from './context.js';
+import { scheduledNow } from './execute.js';
 import { createRegistry } from './registry.js';
 import { type ResumeOptions, resumeExecution } from './resume.js';
-import { stopRun } from './run.js';
+import { type CancelCause, stopRun } from './run.js';
 import { refused, startExecution } from './start.js';
+import { stopPatch } from './stopCause.js';
 import { type Blocked, tickDefinition } from './tick.js';
 import type { StartOptions, StartResult, VerifyCellOptions } from './types.js';
 
@@ -18,8 +20,12 @@ export interface Orchestrator {
   resume(executionId: string, opts: ResumeOptions): Promise<StartResult>;
   /** Spec §8.1 single-cell verification (POST /cells/verify): a child execution for one cell. */
   verifyCell(definitionId: string, cell: CellKey, opts?: VerifyCellOptions): Promise<StartResult>;
-  /** Spec §8.1 AbortedError row: cells in flight → not_run, status cancelled. False when there is nothing to cancel. */
-  cancel(executionId: string): Promise<boolean>;
+  /**
+   * Spec §8.1 AbortedError row: cells in flight → not_run, status cancelled. False when there is nothing to cancel.
+   * Revision 55 §8.1: `cause` is stored, for a live run (through `stopRun`, so finish writes it) and for a stopped one
+   * (written with the status): the operator's cancel, or a supersede (the stale run's, Remove's).
+   */
+  cancel(executionId: string, cause: CancelCause): Promise<boolean>;
   /** Spec §8.2 tick for one definition. */
   tick(definitionId: string): Promise<void>;
   /**
@@ -57,17 +63,21 @@ export function createOrchestrator(ctx: EngineContext): Orchestrator {
     resume: (id, opts) => (ctx.lifecycle.closing ? closing() : resumeExecution(ctx, reg, id, opts)),
     verifyCell: (id, cell, opts) =>
       ctx.lifecycle.closing ? closing() : verifyCellExecution(ctx, reg, id, cell, opts),
-    cancel: async (id) => {
+    cancel: async (id, cause) => {
       const live = reg.get(id);
       if (live !== undefined) {
-        stopRun(live, { kind: 'cancel' });
+        stopRun(live, { kind: 'cancel', cause });
         await reg.done(id);
         return true;
       }
       const exec = ctx.repos.executions.get(id);
       if (exec === null || !ACTIVE_STATUSES.includes(exec.status)) return false;
       ctx.hooks.cancelResume(id); // why: spec §8.1 one-shot job "cancelled on cancel"
-      ctx.repos.executions.setStatus(id, 'cancelled', { finishedAt: ctx.clock.now(), resumeAfter: null });
+      ctx.repos.executions.setStatus(id, 'cancelled', {
+        finishedAt: ctx.clock.now(),
+        resumeAfter: null,
+        ...stopPatch(cause, exec.snapshot.scheduleTz, scheduledNow(ctx, exec.definitionId)),
+      });
       return true;
     },
     tick: (id) => tickDefinition(ctx, self, id, blocked),

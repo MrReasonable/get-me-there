@@ -391,7 +391,7 @@ describe('offer normalisation (spec §5.6, §9 item 4 "fx-unavailable, currency-
     const r = await orch.start(def(h).id, { trigger: 'manual' });
     if (!r.ok) throw new Error(r.message);
     await vi.waitFor(() => expect(h.requests.some((q) => q.kind === 'itinerary')).toBe(true));
-    expect(await orch.cancel(r.executionId)).toBe(true);
+    expect(await orch.cancel(r.executionId, { kind: 'cancelled' })).toBe(true);
     const e = await h.waitForSettled(r.executionId);
     expect(e.status).toBe('cancelled');
     const v = searched(h, e.id);

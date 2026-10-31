@@ -53,6 +53,8 @@ export type {
   EngineDeps,
   EngineOptions,
   Estimate,
+  RankedDatePair,
+  RankedDatePairsReader,
   SchedulerJob,
   StartOptions,
   StartResult,

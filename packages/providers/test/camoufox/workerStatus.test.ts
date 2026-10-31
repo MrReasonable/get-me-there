@@ -144,10 +144,20 @@ describe('readWorkerStatus (decision 76): one read, four kinds, never a ledger r
 
 describe('a refusal keeps the classifier’s kind (R33)', () => {
   it.each([
-    [401, 'provider_disabled', 'the worker refused CAMOUFOX_WORKER_KEY (the app and worker.env differ)'],
-    [403, 'provider_disabled', 'the worker refused CAMOUFOX_WORKER_KEY (the app and worker.env differ)'],
-    [503, 'provider_unavailable', 'the browser worker answered HTTP 503'],
-  ] as const)('HTTP %i: %s', async (code, skip, detail) => {
+    [
+      401,
+      'provider_disabled',
+      'the worker refused CAMOUFOX_WORKER_KEY (the app and worker.env differ)',
+      'auth',
+    ],
+    [
+      403,
+      'provider_disabled',
+      'the worker refused CAMOUFOX_WORKER_KEY (the app and worker.env differ)',
+      'auth',
+    ],
+    [503, 'provider_unavailable', 'the browser worker answered HTTP 503', 'provider-unavailable'],
+  ] as const)('HTTP %i: %s', async (code, skip, detail, reason) => {
     useFakeTime();
     server.use(http.get(STATUS_URL, () => new HttpResponse(null, { status: code })));
     const { kit, log, clock } = makeKit();
@@ -161,7 +171,7 @@ describe('a refusal keeps the classifier’s kind (R33)', () => {
       sharedSettings: effectiveSharedSettings({}),
       appInstance: 'd'.repeat(36),
     });
-    expect(await preflightOf(p)).toEqual({ ok: false, skip, detail });
+    expect(await preflightOf(p)).toEqual({ ok: false, skip, detail, reason });
   });
 });
 
@@ -206,6 +216,7 @@ describe('the preflight compares the shared settings through sharedSettingDiffs 
         ok: false,
         skip: 'provider_disabled',
         detail: 'settings differ: CAMOUFOX_MONTHLY_PAGE_CAP, POINT_OF_SALE',
+        reason: 'settings-differ',
       });
       expect(budget.rows).toEqual([]);
     },
@@ -221,6 +232,7 @@ describe('the preflight compares the shared settings through sharedSettingDiffs 
         ok: false,
         skip: 'provider_disabled',
         detail: 'settings differ: CAMOUFOX_MIN_SPACING_SECONDS',
+        reason: 'settings-differ',
       });
       expect(budget.rows).toEqual([]);
     },
@@ -241,6 +253,7 @@ describe('the preflight compares the shared settings through sharedSettingDiffs 
       ok: false,
       skip: 'provider_disabled',
       detail: 'settings differ: CAMOUFOX_GRID_SCROLL_CAP',
+      reason: 'settings-differ',
     });
   });
 

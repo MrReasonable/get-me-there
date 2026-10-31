@@ -1,7 +1,7 @@
 import { asIsoDateTime } from '@gmt/core';
 import { describe, expect, it, vi } from 'vitest';
 import { buildContext } from '../../src/context.js';
-import { isStalePaused, SUPERSEDED } from '../../src/resume.js';
+import { isStalePaused } from '../../src/resume.js';
 import { type Blocked, tickDefinition } from '../../src/tick.js';
 import {
   createHarness,
@@ -14,6 +14,9 @@ import {
   LHR,
   tileRule,
 } from '../support/harness.js';
+
+/** Revision 55 §8.1: the sentence a stale run is stored with (`superseded 'stale'`). */
+const SUPERSEDED = 'Too old to carry on; a fresh run replaced it.';
 
 // why: an hourly schedule, so each tick below runs at one of its firings (a punctual live tick, spec §8.2 rev 36); a
 // tick between firings is late and goes to the catch-up instead (catchUp.test.ts)
@@ -90,7 +93,7 @@ describe('tick (spec §8.2 "A tick, in order")', () => {
       [first, true],
     ]);
     expect(o.blockedSince()).toBe(first);
-    await o.cancel(ra.executionId);
+    await o.cancel(ra.executionId, { kind: 'cancelled' });
     h.clock.set(asIsoDateTime('2026-10-15T09:00:00.000Z')); // a's next firing, punctual
     await o.tick(a.id); // starts: a's entry is cleared, b's remains
     expect(executions(h, a.id)).toHaveLength(2);
@@ -148,7 +151,7 @@ describe('tick (spec §8.2 "A tick, in order")', () => {
     expect((await h.waitForSettled(e.id)).status).toBe('completed');
   });
 
-  it('never resumes an execution-* paused_budget (no resume_after): it needs a manual /resume, so the schedule is blocked (ruling 4, cost I-1)', async () => {
+  it('never resumes an execution-* paused_budget (no resume_after): its firing supersedes it (cause superseded schedule) and starts, never "blocked since" (ruling 4; revision 55 §8.2)', async () => {
     const h = createHarness({ fixtureConcurrency: 1 });
     // why: the start needs 5 of 6 calls; 3 spent by a concurrent pass leave room for 3 of the 4 tiles
     const def = twoPairs(h, { budget: { maxCalls: 6, maxFreeCalls: 1000, maxCostMicroGbp: 1_000_000_000 } });
@@ -164,52 +167,64 @@ describe('tick (spec §8.2 "A tick, in order")', () => {
     const blocked = new Map<string, Blocked>();
     await tickDefinition(ctx, { start: orch.start, resume, cancel: orch.cancel }, def.id, blocked);
     expect(resume).not.toHaveBeenCalled();
-    expect(blocked.get(def.id)).toEqual({ since: h.clock.now(), executionId: e.id });
-    expect(h.repos.executions.get(e.id)?.status).toBe('paused_budget');
-  });
-
-  it('cancels and supersedes a paused run older than 0.9 × discoveryRefreshHours whose resume_after is not in the future', async () => {
-    const h = createHarness({ fixtureConcurrency: 1, fakeTimers: true });
-    await h.fixtureScenario([tileRule('LHR', '2026-11-02', FIXTURE_RULES.auth, 1)]);
-    const def = twoPairs(h);
-    const old = await h.runToCompletion(h.orch(), def.id);
-    expect(old.status).toBe('paused_error');
-    // why: R42 — the hourly firings either side of 0.9 × 168 h = 151.2 h after the run's start
-    h.clock.advance(151 * HOUR);
-    await h.orch().tick(def.id);
-    expect(h.repos.executions.get(old.id)?.status).toBe('paused_error');
-    h.clock.advance(HOUR);
-    await h.orch().tick(def.id);
-    expect(h.repos.executions.get(old.id)).toMatchObject({ status: 'cancelled', errorText: SUPERSEDED });
-    const fresh = executions(h, def.id).find((x) => x.id !== old.id);
-    if (fresh === undefined) throw new Error('no fresh execution');
-    expect((await h.waitForSettled(fresh.id)).status).toBe('completed');
-  });
-
-  it('supersedes a stale interrupted run at the next firing and starts the fresh one, so it never blocks the schedule for good (ssr M3)', async () => {
-    const h = createHarness({ fixtureConcurrency: 1 });
-    const def = twoPairs(h);
-    const first = h.orch();
-    h.onTileCommit((n) => {
-      if (n === 1) void first.shutdown();
-    });
-    const r = await first.start(def.id, { trigger: 'manual' });
-    if (!r.ok) throw new Error(r.message);
-    expect((await h.waitForSettled(r.executionId)).status).toBe('interrupted');
-    h.clearHooks();
-    h.clock.advance(151 * HOUR); // the hourly firing before 151.2 h: not stale yet
-    await h.orch().tick(def.id);
-    expect(h.repos.executions.get(r.executionId)?.status).toBe('interrupted');
-    h.clock.advance(HOUR); // the first firing past it
-    await h.orch().tick(def.id);
-    expect(h.repos.executions.get(r.executionId)).toMatchObject({
+    expect(blocked.has(def.id)).toBe(false);
+    expect(h.repos.executions.get(e.id)).toMatchObject({
       status: 'cancelled',
-      errorText: SUPERSEDED,
+      stopCause: { kind: 'superseded', by: 'schedule' },
+      errorText: 'Replaced by a scheduled run.',
     });
-    const fresh = executions(h, def.id).find((x) => x.id !== r.executionId);
-    if (fresh === undefined) throw new Error('no fresh execution');
-    expect((await h.waitForSettled(fresh.id)).status).toBe('completed');
+    const fresh = executions(h, def.id).find((x) => x.id !== e.id);
+    expect(fresh).toMatchObject({ trigger: 'schedule' });
   });
+
+  it.each([
+    [151, { kind: 'superseded', by: 'schedule' }, 'Replaced by a scheduled run.'],
+    [152, { kind: 'superseded', by: 'stale' }, SUPERSEDED],
+  ] as const)(
+    'a paused run with no resume_after %i h old is cancelled at the firing, with the supersede of its age (R42: either side of 0.9 × 168 h), and a fresh run starts',
+    async (hours, cause, sentence) => {
+      const h = createHarness({ fixtureConcurrency: 1, fakeTimers: true });
+      await h.fixtureScenario([tileRule('LHR', '2026-11-02', FIXTURE_RULES.auth, 1)]);
+      const def = twoPairs(h);
+      const old = await h.runToCompletion(h.orch(), def.id);
+      expect(old.status).toBe('paused_error');
+      h.clock.advance(hours * HOUR);
+      await h.orch().tick(def.id);
+      expect(h.repos.executions.get(old.id)).toMatchObject({
+        status: 'cancelled',
+        stopCause: cause,
+        errorText: sentence,
+      });
+      const fresh = executions(h, def.id).find((x) => x.id !== old.id);
+      if (fresh === undefined) throw new Error('no fresh execution');
+      expect((await h.waitForSettled(fresh.id)).status).toBe('completed');
+    },
+  );
+
+  it.each([
+    [151, { kind: 'superseded', by: 'schedule' }],
+    [152, { kind: 'superseded', by: 'stale' }],
+  ] as const)(
+    'an interrupted run %i h old never blocks the schedule: the firing cancels it and starts the fresh one (ssr M3)',
+    async (hours, cause) => {
+      const h = createHarness({ fixtureConcurrency: 1 });
+      const def = twoPairs(h);
+      const first = h.orch();
+      h.onTileCommit((n) => {
+        if (n === 1) void first.shutdown();
+      });
+      const r = await first.start(def.id, { trigger: 'manual' });
+      if (!r.ok) throw new Error(r.message);
+      expect((await h.waitForSettled(r.executionId)).status).toBe('interrupted');
+      h.clearHooks();
+      h.clock.advance(hours * HOUR);
+      await h.orch().tick(def.id);
+      expect(h.repos.executions.get(r.executionId)).toMatchObject({ status: 'cancelled', stopCause: cause });
+      const fresh = executions(h, def.id).find((x) => x.id !== r.executionId);
+      if (fresh === undefined) throw new Error('no fresh execution');
+      expect((await h.waitForSettled(fresh.id)).status).toBe('completed');
+    },
+  );
 
   it('exempts a paused_budget whose resume_after is still in the future from the supersede', async () => {
     const h = createHarness({ fixtureConcurrency: 1, fixtureMonthlyCallCap: 20 });
@@ -242,5 +257,41 @@ describe('tick (spec §8.2 "A tick, in order")', () => {
     expect(executions(h, def.id)).toHaveLength(0);
     expect(executions(h, gone.id)).toHaveLength(0);
     expect(executions(h, manual.id)).toHaveLength(0);
+  });
+});
+
+describe('a scheduled firing supersedes a stopped manual run of its own search (revision 55 §8.2)', () => {
+  it('a manual run stopped while the search had no schedule (no resume_after), the schedule added since: the firing cancels it (superseded schedule) and starts, never "blocked since"', async () => {
+    const h = createHarness({ fixtureConcurrency: 1 });
+    await h.fixtureScenario([tileRule('LHR', '2026-11-02', FIXTURE_RULES.auth, 1)]);
+    const def = twoPairs(h, { scheduleCron: null });
+    const old = await h.runToCompletion(h.orch(), def.id);
+    expect(old).toMatchObject({ status: 'paused_error', resumeAfter: null });
+    await h.fixtureScenario([]);
+    h.repos.definitions.update(def.id, { scheduleCron: '0 * * * *' });
+    h.clock.advance(HOUR);
+    const o = h.orch();
+    await o.tick(def.id);
+    expect(h.repos.executions.get(old.id)).toMatchObject({
+      status: 'cancelled',
+      stopCause: { kind: 'superseded', by: 'schedule' },
+    });
+    expect(o.blockedSince()).toBeNull();
+    const fresh = executions(h, def.id).find((x) => x.id !== old.id);
+    expect(fresh).toMatchObject({ trigger: 'schedule' });
+    if (fresh !== undefined) expect((await h.waitForSettled(fresh.id)).status).toBe('completed');
+  });
+
+  it('a paused run with a future resume_after is left to its one-shot job: the firing is blocked, the run untouched', async () => {
+    const h = createHarness({ fixtureConcurrency: 1 });
+    await h.fixtureScenario([tileRule('LHR', '2026-11-02', FIXTURE_RULES.limiterTimeout, 1)]);
+    const def = twoPairs(h);
+    const old = await h.runToCompletion(h.orch(), def.id);
+    expect(old.status).toBe('paused_error');
+    if (old.resumeAfter === null) throw new Error('expected resume_after');
+    const o = h.orch();
+    await o.tick(def.id);
+    expect(h.repos.executions.get(old.id)?.status).toBe('paused_error');
+    expect(o.blockedSince()).toBe(h.clock.now());
   });
 });

@@ -167,7 +167,6 @@ const datePairsBodySchema = z.strictObject({
   discoveryProviders: z.array(providerIdSchema),
   verificationProviderConfigured: z.boolean(),
   staleAfterHours: count,
-  calendarStaleAfterHours: z.partialRecord(providerIdSchema, count),
   /** the current resolved space's dates and stays */
   space: z.strictObject({
     departureFrom: isoDateSchema,

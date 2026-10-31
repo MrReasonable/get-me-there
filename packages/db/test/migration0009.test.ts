@@ -19,10 +19,17 @@ const indexes = (db: ReturnType<typeof openTracked>) =>
 describe('migration 0009', () => {
   it('adds calendar_prices_latest_idx over (provider, cell, fetched_at, id) and the columns the read filters on', () => {
     const db = openTracked(tmpDbPath());
-    applyMigrations(db, migrationsWithout(['0009_wp19_latest_price_idx', '0010_airport_kind']));
+    applyMigrations(
+      db,
+      migrationsWithout(['0009_wp19_latest_price_idx', '0010_airport_kind', '0011_wp20_flight_lists']),
+    );
     expect(indexes(db)).not.toContain('calendar_prices_latest_idx');
     const second = applyMigrations(db, MIGRATIONS_DIR);
-    expect(second.applied).toEqual(['0009_wp19_latest_price_idx', '0010_airport_kind']);
+    expect(second.applied).toEqual([
+      '0009_wp19_latest_price_idx',
+      '0010_airport_kind',
+      '0011_wp20_flight_lists',
+    ]);
     expect(indexes(db)).toContain('calendar_prices_latest_idx');
     const columns = db.raw
       .prepare("PRAGMA index_info('calendar_prices_latest_idx')")

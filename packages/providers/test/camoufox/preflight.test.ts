@@ -54,17 +54,18 @@ describe('camoufox preflight (spec §2; decision 69; cost-015): unledgered', () 
         skip: 'provider_disabled',
         detail: 'cooling down until 2026-10-20T05:00:00.000Z (captcha)',
         until: '2026-10-20T05:00:00.000Z',
+        reason: 'captcha',
       },
     ],
     [
       'a signed-in refusal',
       status({ ok: false, signedInRefusal: true }),
-      { ok: false, skip: 'provider_disabled', detail: 'signed-in profile refused' },
+      { ok: false, skip: 'provider_disabled', detail: 'signed-in profile refused', reason: 'signed-in' },
     ],
     [
       'an account cookie',
       status({ ok: false, accountCookie: { found: true, names: ['SID'], checkedAt: AT } }),
-      { ok: false, skip: 'provider_disabled', detail: 'signed-in profile refused' },
+      { ok: false, skip: 'provider_disabled', detail: 'signed-in profile refused', reason: 'signed-in' },
     ],
     [
       'a counts file the worker cannot read (W3)',
@@ -83,6 +84,7 @@ describe('camoufox preflight (spec §2; decision 69; cost-015): unledgered', () 
         skip: 'provider_disabled',
         detail:
           "the browser worker's monthly counts file cannot be read, so it refuses every page (pnpm gmt browser counts rewrites it)",
+        reason: 'counts-unreadable',
       },
     ],
     [
@@ -105,6 +107,7 @@ describe('camoufox preflight (spec §2; decision 69; cost-015): unledgered', () 
       {
         ok: false,
         skip: 'provider_unavailable',
+        reason: 'provider-unavailable',
         detail: "the worker's status could not be read by this build (versions differ?)",
       },
     ],
@@ -128,6 +131,7 @@ describe('camoufox preflight (spec §2; decision 69; cost-015): unledgered', () 
     expect(await p.discovery?.preflight?.(ctx)).toEqual({
       ok: false,
       skip: 'provider_unavailable',
+      reason: 'provider-unavailable',
       detail: 'browser worker not reachable',
     });
     expect(budget.rows).toEqual([]);
@@ -140,6 +144,7 @@ describe('camoufox preflight (spec §2; decision 69; cost-015): unledgered', () 
       ok: false,
       skip: 'provider_disabled',
       detail: 'the worker refused CAMOUFOX_WORKER_KEY (the app and worker.env differ)',
+      reason: 'auth',
     });
     expect(budget.rows).toEqual([]);
   });
@@ -150,6 +155,7 @@ describe('camoufox preflight (spec §2; decision 69; cost-015): unledgered', () 
     expect(await drive(p.discovery?.preflight?.(ctx) ?? Promise.reject(new Error('no preflight')))).toEqual({
       ok: false,
       skip: 'provider_unavailable',
+      reason: 'provider-unavailable',
       detail: 'the browser worker answered HTTP 503',
     });
   });

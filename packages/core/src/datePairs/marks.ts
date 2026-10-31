@@ -1,4 +1,6 @@
-import type { Buckets } from '../types/execution.js';
+import type { CellKey, ResolvedSpace } from '../types/definition.js';
+import type { Buckets, CellOutcomeStatus } from '../types/execution.js';
+import { datePairAt, datePairCount } from './space.js';
 
 /**
  * Spec revision 55 §3 and §6.6 "The main path's reading of a date pair": the five marks a date pair shows on the main
@@ -31,4 +33,37 @@ export function reducedMark(buckets: Buckets): ReducedMark {
 export function datePairSearched(buckets: Buckets): boolean {
   const mark = reducedMark(buckets);
   return mark === 'priced' || mark === 'no-price-shown';
+}
+
+/**
+ * Spec revision 55 §6.6: the six buckets of every date pair of `space` over its airport pairs, in date-pair index order.
+ * A cell's bucket is `statusOf` it (a run's discovery roll-up status), or `not_run` when that is null: a cell the run
+ * never seeded (a day a relative window rolled in, an added airport) is not searched, as `classifyCells` counts it.
+ * `reused` stays 0 (it decides no mark).
+ */
+export function datePairBuckets(
+  space: ResolvedSpace,
+  statusOf: (cell: CellKey) => CellOutcomeStatus | null,
+): Buckets[] {
+  const out: Buckets[] = [];
+  for (let i = 0, n = datePairCount(space); i < n; i++) {
+    const { departureDate, returnDate } = datePairAt(space, i);
+    const b: Buckets = { priced: 0, empty: 0, no_data: 0, error: 0, skipped: 0, not_run: 0, reused: 0 };
+    for (const origin of space.origins)
+      for (const destination of space.destinations)
+        b[statusOf({ origin, destination, departureDate, returnDate }) ?? 'not_run'] += 1;
+    out.push(b);
+  }
+  return out;
+}
+
+/**
+ * Spec revision 55 §6.6, §8.1: how many date pairs of `space` `datePairSearched` accepts, with each cell's bucket from
+ * `statusOf` as `datePairBuckets` reads it: the stop cause's `searched` and the search card's counts.
+ */
+export function searchedDatePairCount(
+  space: ResolvedSpace,
+  statusOf: (cell: CellKey) => CellOutcomeStatus | null,
+): number {
+  return datePairBuckets(space, statusOf).filter(datePairSearched).length;
 }

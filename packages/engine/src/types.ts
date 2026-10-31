@@ -1,6 +1,7 @@
 import type {
   BudgetFit,
   BudgetGuard,
+  Cabin,
   CellKey,
   Clock,
   Config,
@@ -9,15 +10,19 @@ import type {
   DefinitionInput,
   Estimate,
   FlightProvider,
+  Iata,
   IsoDate,
   IsoDateTime,
   LeftFor,
   Logger,
   Notifier,
   ProviderId,
+  ResolvedSpace,
   ResponseCache,
   SchedulerJob,
   SearchDefinition,
+  SourceKind,
+  StopCause,
 } from '@gmt/core';
 import type { Db, Repos } from '@gmt/db';
 import type { HttpKit } from '@gmt/providers';
@@ -97,9 +102,41 @@ export interface StartOptions {
   scheduledFor?: IsoDateTime;
   /** Spec §8.2: a run started for a missed firing (decision 79); its camoufox cells are reuse only. */
   isCatchUp?: boolean;
+  /**
+   * Spec revision 55 §8.1 (every main-path start): refused `confirm` whenever the runnable estimate (unblocked lines)
+   * exceeds the confirmation sent, in pence or in calls, whatever SOFT_CONFIRM_PENCE; covered figures start at once.
+   */
+  requireCovered?: boolean;
+  /**
+   * Spec revision 55 §8.1 (Ian's ruling 1; a manual start): a `paused_*` or `interrupted` latest parent is cancelled with
+   * cause `superseded 'search-again'` and the new run inserted, in one immediate transaction.
+   */
+  replaceStopped?: boolean;
 }
 /** The confirmation a single-cell verification carries, as a manual start's (cost M-1). */
-export type VerifyCellOptions = Omit<StartOptions, 'trigger'>;
+export type VerifyCellOptions = Omit<StartOptions, 'trigger' | 'requireCovered' | 'replaceStopped'>;
+
+/**
+ * Spec revision 55 §8.1 (the flight-list step's candidates) and §10 (a card's cheapest): one date pair of the board's
+ * ranking, with the airport pair and source of its figure.
+ */
+export interface RankedDatePair {
+  departureDate: IsoDate;
+  returnDate: IsoDate;
+  origin: Iata;
+  destination: Iata;
+  pricePence: number;
+  providerId: ProviderId;
+  sourceKind: SourceKind;
+}
+/** The board's ranking over a space (the api's `rankedPairsFor`), passed to the engine (Task 20.9) so it never imports the api. */
+export type RankedDatePairsReader = (q: {
+  definitionId: string;
+  space: ResolvedSpace;
+  cabin: Cabin;
+  maxJourneyMinutes: number | null;
+  now: IsoDateTime;
+}) => RankedDatePair[];
 
 /**
  * Spec §8.1 pre-start outcomes; WP8 maps them to HTTP (409, 409 needsConfirmation, 422, 404, 409). `firing-taken`
@@ -143,7 +180,11 @@ export interface Engine {
   markClosed(): void;
   start(definitionId: string, opts: StartOptions): Promise<StartResult>;
   resume(executionId: string, opts: { manual: boolean }): Promise<StartResult>;
-  cancel(executionId: string): Promise<boolean>;
+  /** Revision 55 §8.1: the cancel's cause is stored (`cancelled` from the HTTP cancel, `superseded 'remove'` from DELETE). */
+  cancel(
+    executionId: string,
+    cause: Extract<StopCause, { kind: 'cancelled' | 'superseded' }>,
+  ): Promise<boolean>;
   /** Spec §8.1 single-cell verification; above SOFT_CONFIRM it needs the confirmation a start would (cost M-1). */
   verifyCell(definitionId: string, cell: CellKey, opts?: VerifyCellOptions): Promise<StartResult>;
   /** Decision 45: the cap and headroom a child of `cell` would get now, by verifyCell's own calculation. */

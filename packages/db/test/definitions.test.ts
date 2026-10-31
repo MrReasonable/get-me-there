@@ -68,11 +68,44 @@ describe('DefinitionsRepo (spec §7 search_definitions)', () => {
     repo.softDelete(gone.id);
     expect(repo.list().map((d) => d.name)).toEqual(['kept']);
     expect(repo.list({ includeDeleted: true }).map((d) => d.name)).toEqual(['kept', 'gone']);
-    expect(repo.get(gone.id)).toMatchObject({ deletedAt: '2026-10-14T12:00:01.000Z', enabled: false });
+    // why: revision 55 §7: a soft delete leaves `enabled` as it was, so a restore brings the schedule back
+    expect(repo.get(gone.id)).toMatchObject({ deletedAt: '2026-10-14T12:00:01.000Z', enabled: true });
     expect(() => repo.update(gone.id, { name: 'x' })).toThrow(RowRejected);
     expect(() => repo.softDelete('missing')).toThrow(/missing/);
     expect(count(db, 'search_executions')).toBe(1);
     expect(repo.get(keep.id)?.deletedAt).toBeNull();
+  });
+
+  it('restore (revision 55 §10): clears deleted_at, keeps the pre-delete enabled, moves updated_at; live and tool-only change nothing', () => {
+    const db = freshDb();
+    const clock = fixedClock(T0);
+    const repo = new DefinitionsRepo(db, clock);
+    const exec = (id: string, definitionId: string, trigger: string) =>
+      db.raw
+        .prepare(
+          `INSERT INTO search_executions (id, definition_id, definition_snapshot_json, trigger, status, created_at) VALUES (?, ?, '{}', ?, 'completed', ?)`,
+        )
+        .run(id, definitionId, trigger, T0);
+    const scheduled = repo.create(exampleDefinitionInput({ name: 'scheduled', enabled: true }));
+    const off = repo.create(exampleDefinitionInput({ name: 'off', enabled: false }));
+    const tool = repo.create(exampleDefinitionInput({ name: 'tool' }));
+    exec('e1', scheduled.id, 'manual');
+    exec('e2', scheduled.id, 'tool');
+    exec('e3', tool.id, 'tool');
+    for (const d of [scheduled, off, tool]) repo.softDelete(d.id);
+    clock.advance(5_000);
+    expect(repo.restore(scheduled.id)).toBe('restored');
+    expect(repo.get(scheduled.id)).toMatchObject({
+      deletedAt: null,
+      enabled: true,
+      updatedAt: '2026-10-14T12:00:05.000Z',
+    });
+    expect(repo.restore(off.id)).toBe('restored');
+    expect(repo.get(off.id)).toMatchObject({ deletedAt: null, enabled: false });
+    expect(repo.restore(scheduled.id)).toBe('live');
+    expect(repo.restore(tool.id)).toBe('tool-only');
+    expect(repo.get(tool.id)?.deletedAt).toBe(T0);
+    expect(() => repo.restore('missing')).toThrow(/missing/);
   });
 
   it('setConfirmed stores integer pence and calls together, and update never touches them (decision 37)', () => {

@@ -8,6 +8,7 @@ import {
   type ProviderId,
   type SearchDefinition,
   type SkipCode,
+  type StopCause,
 } from '@gmt/core';
 import { RowRejected } from '@gmt/db';
 import { breachMessage, checkBudget, spendOf } from './budgetCheck.js';
@@ -26,11 +27,46 @@ import {
   plannedSnapshot,
   replacePausedCatchUp,
   seedCatchUpBrowser,
+  stoppedParent,
+  supersededByFiring,
   supersededCatchUp,
 } from './scheduler/catchUpStart.js';
 import { buildSnapshot, sellsCabin } from './snapshot.js';
 import { skipBlockedDiscovery } from './stages/reuse.js';
+import { stopPatch } from './stopCause.js';
 import type { Estimate, StartOptions, StartResult } from './types.js';
+
+/** The cause a scheduler's `skipped_*` row stores (revision 55 §8.1). */
+export type SkipCause = Extract<
+  StopCause,
+  { kind: 'skipped-confirm' | 'skipped-budget' | 'skipped-window' | 'skipped-missed' }
+>;
+
+/**
+ * Revision 55 §8.1 `requireCovered`: the refusal of a start whose runnable estimate (unblocked lines) is above the
+ * confirmation sent, in pence (× PENCE_TO_MICRO against the µGBP cost) or in calls (a camoufox line's calls are its
+ * pages); null when the confirmation covers it. A missing figure counts as 0, so it covers only a run that needs none.
+ */
+export function uncovered(
+  estimate: Estimate,
+  blocked: ReadonlySet<LineKey>,
+  confirmed: Confirmation,
+): ReturnType<typeof confirmationNeeded> {
+  const runnable = estimate.perProvider.filter((p) => !blocked.has(lineKey(p.stage, p.providerId)));
+  const cost = runnable.reduce((a, p) => a + p.costMicroGbp, 0);
+  const totalCalls = runnable.reduce((a, p) => a + p.calls, 0);
+  const pence = confirmed.pence ?? 0;
+  const callsConfirmed = confirmed.calls ?? 0;
+  if (pence * PENCE_TO_MICRO >= cost && callsConfirmed >= totalCalls) return null;
+  const calls = new Map<ProviderId, number>();
+  for (const p of runnable) calls.set(p.providerId, (calls.get(p.providerId) ?? 0) + p.calls);
+  const estimatePence = microGbpToPence(cost);
+  const reason =
+    pence * PENCE_TO_MICRO < cost
+      ? `the estimate of ${formatPence(estimatePence)} is above the confirmation sent`
+      : `this run needs ${totalCalls} calls, more than the ${callsConfirmed} confirmed`;
+  return { estimateMicroGbp: cost, estimatePence, calls: Object.fromEntries(calls), totalCalls, reason };
+}
 
 /** A refused StartResult. */
 export function refused(
@@ -90,7 +126,8 @@ export async function recordSkipped(
   estimate: Estimate | null,
   status: 'skipped_budget' | 'skipped_confirm' | 'skipped_window' | 'skipped_missed',
   detail: string,
-  firing: FiringRow | null = null,
+  firing: FiringRow | null,
+  cause: SkipCause,
 ): Promise<SkipRecord> {
   const input = {
     definitionId: def.id,
@@ -100,6 +137,8 @@ export async function recordSkipped(
     estimate,
     trigger: 'schedule' as const,
     status,
+    // why: revision 55 §8.1 — every skip stores its cause and that cause's sentence (a scheduled row: scheduled true)
+    ...stopPatch(cause, def.scheduleTz, true),
   };
   const supersedes = firing === null ? null : pausedCatchUp(ctx.repos.executions.activeParent(def.id));
   let exec: Execution | null;
@@ -246,14 +285,25 @@ export async function startExecution(
   const def = ctx.repos.definitions.get(definitionId);
   if (def === null || def.deletedAt !== null)
     return refused('not_found', `definition ${definitionId} not found`, { definitionId });
-  // why: a disabled definition is neither scheduled nor started by hand until it is enabled again
-  if (!def.enabled) return refused('disabled', 'this definition is disabled', { definitionId });
+  // why: revision 55 §8.1 (ruling A1) — `enabled` means scheduled runs happen and nothing else: only a scheduled firing
+  // of a search whose `enabled` is 0 is refused; a manual start never reads it
+  if (!def.enabled && opts.trigger === 'schedule')
+    return refused('disabled', 'this definition is disabled', { definitionId });
   const clash = () => refused('active', 'another execution of this definition is active', { definitionId });
   const active = ctx.repos.executions.activeParent(def.id);
-  // why: spec §8.2 rev 36 — a paused catch-up never blocks a later firing; that firing's start supersedes it inside
-  // its own immediate transaction below (a refusal's skipped_* row does the same in recordSkipped), so the two rows can
-  // never both be active
-  const supersedes = opts.scheduledFor === undefined ? null : pausedCatchUp(active);
+  // why: spec §8.2 rev 36 — a paused catch-up never blocks a later firing; revision 55 §8.2 — nor does a stopped parent
+  // with no resume due; that firing's start supersedes it (cause superseded 'schedule') inside its own immediate
+  // transaction below (a refusal's skipped_* row does the same for a paused catch-up in recordSkipped), so the two rows
+  // can never both be active. Revision 55 §8.1 (Ian's ruling 1): a manual start with `replaceStopped` supersedes a
+  // `paused_*` or `interrupted` latest parent the same way (cause superseded 'search-again'); a running or pending one
+  // still refuses `active`, and without the flag so does a stopped one.
+  const supersedes =
+    opts.scheduledFor !== undefined
+      ? supersededByFiring(active)
+      : opts.trigger === 'manual' && opts.replaceStopped === true
+        ? stoppedParent(active)
+        : null;
+  const by = opts.scheduledFor === undefined ? 'search-again' : 'schedule';
   if (active !== null && supersedes === null) return clash();
   const scheduled = opts.trigger === 'schedule';
   const catchUp = opts.isCatchUp === true;
@@ -271,8 +321,9 @@ export async function startExecution(
     status: Parameters<typeof recordSkipped>[4],
     estimate: Estimate | null,
     detail: string,
+    cause: SkipCause,
   ): Promise<StartResult | null> => {
-    const r = await recordSkipped(ctx, def, snapshot, estimate, status, detail, firing);
+    const r = await recordSkipped(ctx, def, snapshot, estimate, status, detail, firing, cause);
     if (r.recorded) return null;
     return r.why === 'firing-taken' ? taken() : clash();
   };
@@ -280,7 +331,9 @@ export async function startExecution(
   if (cells.length === 0) {
     const message = `the window resolves to no departure dates (${snapshot.resolved.departureFrom} to ${snapshot.resolved.departureTo})`;
     if (scheduled) {
-      const lost = await skip('skipped_window', null, `The ${message}; the schedule is disabled.`);
+      const lost = await skip('skipped_window', null, `The ${message}; the schedule is disabled.`, {
+        kind: 'skipped-window',
+      });
       if (lost !== null) return lost;
       // why: review T6 — a notice that returned after the engine handed the database back leaves it alone; the next
       // firing meets the same empty window and disables the schedule then
@@ -319,7 +372,14 @@ export async function startExecution(
   if (nothingToSearch(snapshot, planned, check.blocked, (id) => sellsCabin(ctx, id, snapshot.cabin))) {
     const starved = planned.perProvider.some((p) => !check.blocked.has(lineKey(p.stage, p.providerId)));
     const message = `budget cap: ${breachMessage(check.breaches)}${starved ? '; every discovery provider is blocked, so nothing would be searched' : ''}`;
-    const lost = scheduled ? await skip('skipped_budget', estimate, `The ${message}.`) : null;
+    const first = check.breaches[0];
+    const lost = scheduled
+      ? await skip('skipped_budget', estimate, `The ${message}.`, {
+          kind: 'skipped-budget',
+          scope: first?.scope ?? 'execution-calls',
+          providerId: first?.providerId ?? null,
+        })
+      : null;
     if (lost !== null) return lost;
     return refused('cap', message, { breaches: check.breaches });
   }
@@ -327,10 +387,21 @@ export async function startExecution(
   const confirmed: Confirmation = scheduled
     ? { pence: def.confirmedCostPence, calls: def.confirmedCalls }
     : { pence: opts.confirmCostPence ?? null, calls: opts.confirmCalls ?? null };
-  const confirm = confirmationNeeded(ctx, estimate, check.blocked, confirmed);
+  // why: revision 55 §8.1 — a main-path start confirms exactly the figures beside its button: the runnable estimate
+  // above them, in pence or in calls, refuses whatever SOFT_CONFIRM_PENCE says; covered figures start at once
+  const confirm =
+    opts.requireCovered === true
+      ? uncovered(estimate, check.blocked, confirmed)
+      : confirmationNeeded(ctx, estimate, check.blocked, confirmed);
   if (confirm !== null) {
     const message = `${confirm.reason} and has not been confirmed`;
-    const lost = scheduled ? await skip('skipped_confirm', estimate, `This run ${message}.`) : null;
+    const lost = scheduled
+      ? await skip('skipped_confirm', estimate, `This run ${message}.`, {
+          kind: 'skipped-confirm',
+          estimatePence: confirm.estimatePence,
+          confirmedPence: def.confirmedCostPence,
+        })
+      : null;
     if (lost !== null) return lost;
     return refused('confirm', message, {
       estimateMicroGbp: confirm.estimateMicroGbp,
@@ -358,7 +429,7 @@ export async function startExecution(
       };
       // why: a catch-up that a resume claimed since the read above is running again: its guarded cancel changes nothing,
       // CatchUpResumed rolls this transaction back, and the firing waits like any other blocked one
-      replacePausedCatchUp(ctx, supersedes);
+      replacePausedCatchUp(ctx, supersedes, by);
       // why: spec §7 rev 36 — a scheduled start inserts through the firing unique index inside this immediate
       // transaction; a loser seeds no cells, launches nothing, sends no notice and (thrown, so rolled back) supersedes
       // nothing

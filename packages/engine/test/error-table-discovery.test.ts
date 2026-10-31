@@ -63,7 +63,8 @@ async function run(rules: FixtureRule[], opts: HarnessOptions = {}) {
   ctx.hooks.scheduleResume = scheduleResume;
   const e = await h.runToCompletion(
     h.track(createOrchestrator(ctx)),
-    h.createDefinition({ origins: [LHR, LGW], destinations: [JFK] }).id,
+    // why: a scheduled search, so a limiter pause keeps its resume_after (revision 55 §8.1, Ian's ruling 2)
+    h.createDefinition({ origins: [LHR, LGW], destinations: [JFK], scheduleCron: '0 5 * * 1' }).id,
   );
   return { h, e, scheduleResume };
 }
@@ -248,7 +249,7 @@ describe('error table: AbortedError (cancel / SIGTERM) → not_run', () => {
     });
     if (!r.ok) throw new Error(r.message);
     await vi.waitFor(() => expect(h.requests.some(second)).toBe(true));
-    expect(await orch.cancel(r.executionId)).toBe(true);
+    expect(await orch.cancel(r.executionId, { kind: 'cancelled' })).toBe(true);
     const e = await h.waitForSettled(r.executionId);
     expect(e.status).toBe('cancelled');
     const notRun = h.outcomes(e.id, { status: 'not_run' });
@@ -274,9 +275,9 @@ describe('error table: AbortedError (cancel / SIGTERM) → not_run', () => {
     const h = createHarness();
     const orch = h.orch();
     const done = await h.runToCompletion(orch, h.createDefinition().id);
-    expect(await orch.cancel(done.id)).toBe(false);
+    expect(await orch.cancel(done.id, { kind: 'cancelled' })).toBe(false);
     h.repos.executions.setStatus(done.id, 'paused_error', { resumeAfter: null });
-    expect(await orch.cancel(done.id)).toBe(true);
+    expect(await orch.cancel(done.id, { kind: 'cancelled' })).toBe(true);
     expect(h.repos.executions.get(done.id)?.status).toBe('cancelled');
   });
 

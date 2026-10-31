@@ -195,7 +195,7 @@ describe('search by OurAirports facts', () => {
   };
   const codes = (q: string, limit = 20) =>
     repo()
-      .search(q, limit)
+      .search(q, limit, null)
       .map((a) => a.iata);
 
   it('a large scheduled airport leads its band: "heath" puts Heathrow before a small airfield whose name starts so', () => {

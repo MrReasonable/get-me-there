@@ -19,7 +19,6 @@ import {
   findMissedFiring,
   halfCadenceSkip,
 } from '../../src/scheduler/catchUp.js';
-import { SUPERSEDED_BY_FIRING } from '../../src/scheduler/catchUpStart.js';
 import { firingsBetween } from '../../src/scheduler/parseCron.js';
 import { buildSnapshot } from '../../src/snapshot.js';
 import { engineWith, stubCamoufox, stubTravelpayouts } from '../support/camoufox.js';
@@ -34,6 +33,9 @@ import {
   LHR,
   verificationOnly,
 } from '../support/harness.js';
+
+/** Revision 55 §8.1: the sentence a run its firing replaced is stored with (`superseded 'schedule'`). */
+const SUPERSEDED_BY_FIRING = 'Replaced by a scheduled run.';
 
 beforeEach(() => {
   expect.hasAssertions();
@@ -792,7 +794,12 @@ describe('a paused catch-up and the firing after it (R7, R9; decision 79)', () =
     h.clock.set(at('2027-03-02T06:00:00.000Z'));
     await h.orch().tick(def.id);
     expect(executions(h, def.id).map((e) => [e.status, e.scheduledFor, e.errorText])).toEqual([
-      ['skipped_budget', '2027-03-02T06:00:00.000Z', null],
+      // why: revision 55 §8.1 — the skip stores its cause and that cause's sentence
+      [
+        'skipped_budget',
+        '2027-03-02T06:00:00.000Z',
+        "Skipped: the estimate is above this search's limit of calls for one run.",
+      ],
       ['cancelled', '2027-03-01T06:00:00.000Z', SUPERSEDED_BY_FIRING],
     ]);
     expect(h.repos.executions.get(paused.id)?.resumeAfter).toBeNull();

@@ -127,7 +127,7 @@ export function sanityCheckAirports(
   if (missing.length > 0)
     return {
       ok: false,
-      reason: `airports referenced by enabled definitions are missing: ${missing.join(', ')}`,
+      reason: `airports referenced by live definitions are missing: ${missing.join(', ')}`,
     };
   return { ok: true };
 }

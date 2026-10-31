@@ -65,7 +65,6 @@ export interface DecodedDatePairs {
   discoveryProviders: ProviderId[];
   verificationProviderConfigured: boolean;
   staleAfterHours: number;
-  calendarStaleAfterHours: Partial<Record<ProviderId, number>>;
   space: DatePairSpace;
   scope: DatePairsResponse['scope'];
   summary: CoverageSummary;
@@ -218,7 +217,6 @@ export function encodeDatePairs(d: DecodedDatePairs): DatePairsResponse {
     discoveryProviders: d.discoveryProviders,
     verificationProviderConfigured: d.verificationProviderConfigured,
     staleAfterHours: d.staleAfterHours,
-    calendarStaleAfterHours: d.calendarStaleAfterHours,
     // why: copied field by field, so a caller passing a whole ResolvedSpace never puts its airports on the wire
     space: {
       departureFrom: space.departureFrom,

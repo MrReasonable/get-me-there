@@ -152,7 +152,7 @@ export function createEngine(deps: EngineDeps, options: EngineOptions = {}): Eng
     markClosed,
     start: (id, opts) => orch.start(id, opts),
     resume: (id, opts) => orch.resume(id, opts),
-    cancel: (id) => orch.cancel(id),
+    cancel: (id, cause) => orch.cancel(id, cause),
     verifyCell: (id, cell, opts) => orch.verifyCell(id, cell, opts),
     childCapPreview: (id, cell) => childCapPreview(ctx, id, cell),
     browserLeftFor: (def) => browserLeftFor(ctx, def),

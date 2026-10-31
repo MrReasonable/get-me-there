@@ -11,6 +11,7 @@ import {
 } from '@gmt/core';
 import type { EngineContext } from '../context.js';
 import { errorText } from '../errors.js';
+import { scheduledNow } from '../execute.js';
 import type { Orchestrator } from '../orchestrator.js';
 import { buildSnapshot, sellsCabin, snapshotProviders } from '../snapshot.js';
 import { recordSkipped } from '../start.js';
@@ -140,6 +141,7 @@ export async function catchUpDefinition(
       'skipped_missed',
       `The run scheduled for ${formatInstant(found.firing, def.scheduleTz)} was not caught up: ${SKIP_CODE_TEXT[code]}.`,
       { scheduledFor: found.firing, skipCode: code },
+      { kind: 'skipped-missed', code },
     );
     log.info({ firing: found.firing, skipCode: code, recorded: r.recorded }, 'catch-up: firing skipped');
   } else if (found.kind === 'catch-up') {
@@ -201,7 +203,8 @@ export async function autoResumeYields(
  * (spec §8.1, §8.2 rev 36; review T1): a paused catch-up first yields to a firing since it paused (`autoResumeYields`),
  * then the run resumes through the compare-and-set. A throw while deciding is logged with the run and the resume goes
  * ahead as it would have (review T5). Once the engine is closing nothing is read or started (review T12). Null when it
- * did not resume (yielded, deferred, or closing); else the resume's result.
+ * did not resume (yielded, deferred, closing, or a search that is not scheduled, revision 55 §8.1); else the resume's
+ * result.
  */
 export async function autoResume(
   ctx: EngineContext,
@@ -209,15 +212,21 @@ export async function autoResume(
   exec: Execution,
 ): Promise<StartResult | null> {
   if (ctx.lifecycle.closing) return null;
-  let decision: Awaited<ReturnType<typeof autoResumeYields>>;
+  let decision: Awaited<ReturnType<typeof autoResumeYields>> | 'unscheduled';
   try {
-    decision = await autoResumeYields(ctx, orch, exec);
+    // why: revision 55 §8.1 (Ian's ruling 2) — nothing runs unattended without the operator's say: a run of a search
+    // that is not scheduled now (`isScheduled`, read live) is never carried on by a timer or at boot
+    decision = scheduledNow(ctx, exec.definitionId) ? await autoResumeYields(ctx, orch, exec) : 'unscheduled';
   } catch (err) {
     ctx.log
       .child({ executionId: exec.id, definitionId: exec.definitionId })
       .error({ err: errorText(err) }, 'catch-up: resume check failed; resuming');
     decision = 'resume';
   }
+  if (decision === 'unscheduled')
+    ctx.log
+      .child({ executionId: exec.id, definitionId: exec.definitionId })
+      .info({}, 'auto-resume: the search is not scheduled; left for the operator');
   if (decision !== 'resume' || ctx.lifecycle.closing) return null;
   return orch.resume(exec.id, { manual: false });
 }

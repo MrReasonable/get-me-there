@@ -5,9 +5,14 @@ import {
   hoursSince,
   type IsoDateTime,
   isoDateTimeOfEpochMs,
+  isScheduled,
   microGbpToPence,
+  NO_STOP_CAUSE_TEXT,
   type ProviderId,
+  runModeOf,
   type Stage,
+  type StopText,
+  stopText,
 } from '@gmt/core';
 import type { Engine } from '@gmt/engine';
 import type { z } from 'zod';
@@ -28,6 +33,63 @@ const STATUSES_WITH_REASON = new Set([
   'interrupted',
   'cancelled',
 ]);
+
+/**
+ * Spec revision 55 §10: the statuses a run stops or is skipped in, the ones whose `stop` is non-null. A completed row
+ * (even one that was once paused) has none.
+ */
+const STOPPED = new Set<Execution['status']>([
+  'paused_budget',
+  'paused_error',
+  'interrupted',
+  'cancelled',
+  'skipped_budget',
+  'skipped_confirm',
+  'skipped_window',
+  'skipped_missed',
+]);
+
+/**
+ * Spec revision 55 §8.1, §10 `stop`: the stored cause's words (`stopText`, worded for this install's run mode, the run's
+ * zone and whether its search is scheduled now); `NO_STOP_CAUSE_TEXT` for a stopped row with no cause (written before
+ * migration 0011), whatever its `error_text` holds (Review Focus 4: that text is never sent here); null otherwise.
+ */
+export function stopOf(ports: Pick<Ports, 'config' | 'repos'>, e: Execution): StopText | null {
+  if (!STOPPED.has(e.status)) return null;
+  if (e.stopCause === null) return NO_STOP_CAUSE_TEXT;
+  const def = ports.repos.definitions.get(e.definitionId);
+  return stopText(e.stopCause, {
+    tz: e.snapshot.scheduleTz,
+    mode: runModeOf(ports.config),
+    scheduled: def !== null && isScheduled(def),
+  });
+}
+
+/**
+ * Spec revision 55 §10 `estimatedFinishAt`: now plus the run's own remaining seconds while it is pending or running (so
+ * a resumed run never reads as finished in the past), null on every other status and for a run with no estimate.
+ */
+export function estimatedFinishOf(
+  ports: Pick<Ports, 'clock'>,
+  engine: Pick<Engine, 'estimateRemaining'>,
+  e: Execution,
+): IsoDateTime | null {
+  if ((e.status !== 'pending' && e.status !== 'running') || e.estimate === null) return null;
+  const seconds = engine.estimateRemaining(e.id).seconds;
+  return isoDateTimeOfEpochMs(Date.parse(ports.clock.now()) + Math.round(seconds * 1000));
+}
+
+/**
+ * Spec revision 55 §8.1 "What the run reports", §10 `flights`: from the stored flight-list plan, or null when the run
+ * stored none (ruling A14: the page then says nothing about flights).
+ */
+export function flightsOf(e: Execution): ExecutionResponse['flights'] {
+  const f = e.flightLists;
+  if (f === null) return null;
+  // why: the plan is written by the flight-list step (Task 20.9) and the rows it counts read and failed from by
+  // FlightListsRepo.forExecution (Task 20.8); until then no run stores a plan, so this branch is not reached
+  return { planned: f.planned, read: 0, reused: f.reused, failed: 0, ended: f.ended };
+}
 
 /**
  * The api-contract `ExecutionSummary` used by every view's `executions` list (newest first). `expandTop` is the run's
@@ -77,10 +139,15 @@ export function planCallsOf(e: Execution, stage: Stage, providerId: ProviderId):
 
 /**
  * Spec §10 `GET /api/executions/:id`: status, stage, reason, resumeAfter, progress per stage × provider, budget usage
- * for every scope, estimate vs ledger, overrun and parity flags, disabled providers. A stage with no provider has no
- * progress rows (spec §3 `not_applicable`).
+ * for every scope, estimate vs ledger, overrun and parity flags, disabled providers, and (revision 55) the stop's words,
+ * the estimated finish and the flight-list counts. A stage with no provider has no progress rows (spec §3
+ * `not_applicable`).
  */
-export function executionResponse(ports: Ports, e: Execution): ExecutionResponse {
+export function executionResponse(
+  ports: Ports,
+  e: Execution,
+  engine: Pick<Engine, 'estimateRemaining'> | null = null,
+): ExecutionResponse {
   const counts = ports.repos.ledger.countsFor(e.id);
   const progress = (['discovery', 'verification'] as const).flatMap((stage) =>
     e.snapshot.providers[stage].map((providerId) => {
@@ -142,6 +209,10 @@ export function executionResponse(ports: Ports, e: Execution): ExecutionResponse
     parityBreak: ports.repos.notifications.wasSent('parity_break', e.id, e.definitionId),
     overrun,
     disabledProviders: [...disabled].sort(),
+    stop: stopOf(ports, e),
+    // why: the coverage view reads only the progress, so it passes no engine and gets no finish estimate
+    estimatedFinishAt: engine === null ? null : estimatedFinishOf(ports, engine, e),
+    flights: flightsOf(e),
   };
 }
 

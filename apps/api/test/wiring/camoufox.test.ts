@@ -217,6 +217,7 @@ describe('apps/api wiring: camoufox shared settings and app instance (WP16a, spe
       ok: false,
       skip: 'provider_disabled',
       detail: 'settings differ: CAMOUFOX_MONTHLY_PAGE_CAP',
+      reason: 'settings-differ',
     });
   });
 });
