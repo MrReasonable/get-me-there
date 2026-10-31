@@ -36,6 +36,11 @@ import {
   routeHistoryResponseSchema,
 } from './results.js';
 import {
+  createAndStartRequestSchema,
+  createAndStartResponseSchema,
+  searchCardsResponseSchema,
+} from './searches.js';
+import {
   budgetResponseSchema,
   healthResponseSchema,
   providersResponseSchema,
@@ -93,9 +98,15 @@ export const ROUTES: readonly RouteDef[] = [
   route('POST', '/definitions/coverage-check', coverageCheckResponseSchema, {
     request: coverageCheckRequestSchema,
   }),
+  // why: spec revision 55 §10 — before '/definitions/:id', so the static paths are never read as a definition id
+  route('GET', '/definitions/cards', searchCardsResponseSchema),
+  route('POST', '/definitions/create-and-start', createAndStartResponseSchema, {
+    request: createAndStartRequestSchema,
+  }),
   route('GET', '/definitions/:id', definitionResponseSchema),
   route('PUT', '/definitions/:id', definitionResponseSchema, { request: definitionUpdateRequestSchema }),
   route('DELETE', '/definitions/:id', deleted),
+  route('POST', '/definitions/:id/restore', definitionResponseSchema),
   route('POST', '/definitions/:id/estimate', estimateResponseSchema),
   route('POST', '/definitions/:id/executions', startExecutionResponseSchema, {
     request: startExecutionRequestSchema,

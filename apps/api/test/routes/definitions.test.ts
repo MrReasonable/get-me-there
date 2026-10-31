@@ -8,6 +8,7 @@ import { errorOf, expectContract } from '../helpers/contract.js';
 import { SENTINEL_TP } from '../helpers/env.js';
 import { exampleDefinitionInput, SMALL_WINDOW } from '../helpers/examples.js';
 import { createHarness, type Harness } from '../helpers/harness.js';
+import { at, seeder } from '../helpers/seed.js';
 
 let h: Harness | undefined;
 afterEach(async () => {
@@ -381,4 +382,51 @@ describe('estimates and the coverage check', () => {
     expect((await first).status).toBe(200);
     expect((await x.request('/api/definitions/coverage-check', { json: coverageBody })).status).toBe(200);
   });
+});
+
+describe('DELETE stops the search it removes (revision 55 §10)', () => {
+  it.each(['running', 'paused_error'] as const)(
+    'a %s parent: the soft delete comes first (a tick in the gap starts nothing), then the cancel stores superseded remove; alert rules stay',
+    async (status) => {
+      const x = await harness();
+      const def = x.ports.repos.definitions.create({
+        ...exampleDefinitionInput({ window: SMALL_WINDOW }),
+        scheduleCron: '0 * * * *',
+        enabled: true,
+      });
+      const rule = x.ports.repos.alerts.create({
+        definitionId: def.id,
+        type: 'absolute',
+        thresholdPence: 50_000,
+        pct: null,
+        basis: 'verified',
+        requireAllVerified: true,
+        cooldownHours: 336,
+        enabled: true,
+      });
+      const s = seeder(x.ports);
+      s.execution('A', { def, status, startedAt: at(-1) });
+      const active = s.id('A');
+      const real = x.engine.cancel.bind(x.engine);
+      let deletedFirst = false;
+      const cancel = vi.spyOn(x.engine, 'cancel').mockImplementation(async (id, cause) => {
+        deletedFirst = x.ports.repos.definitions.get(def.id)?.deletedAt !== null;
+        // why: a firing between the two steps: the search is already deleted, so it starts nothing
+        await x.engine.scheduler.tick(def.id);
+        return real(id, cause);
+      });
+      const del = await x.request(`/api/definitions/${def.id}`, { method: 'DELETE' });
+      expect(del.status).toBe(200);
+      expect(deletedFirst).toBe(true);
+      expect(cancel).toHaveBeenCalledWith(active, { kind: 'superseded', by: 'remove' });
+      expect(x.ports.repos.executions.get(active)).toMatchObject({
+        status: 'cancelled',
+        stopCause: { kind: 'superseded', by: 'remove' },
+      });
+      expect(
+        x.ports.repos.executions.listForDefinition(def.id, { limit: 10, includeChildren: true }),
+      ).toHaveLength(1);
+      expect(x.ports.repos.alerts.rules(def.id).map((r) => r.id)).toEqual([rule.id]);
+    },
+  );
 });

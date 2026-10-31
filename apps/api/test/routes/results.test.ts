@@ -460,7 +460,7 @@ describe('GET /definitions/:id/results, calendar basis (spec §6.9)', () => {
     ]);
   });
 
-  it('a calendar price is stale only past the refresh plus the provider age (spec §8.1)', async () => {
+  it('a calendar price is stale only past the refresh plus its own stored age (spec revision 55 §8.1)', async () => {
     const x = await createHarness();
     h = x;
     const def = x.ports.repos.definitions.create(exampleDefinitionInput());
@@ -469,7 +469,10 @@ describe('GET /definitions/:id/results, calendar basis (spec §6.9)', () => {
     s.cells('E3', [C1]);
     s.tile('E3', C1, { status: 'priced', pricePence: 45_000, fetchedAt: at(-1), maxAgeHours: 24 });
     x.clock.advance(150 * HOUR);
-    expect((await results(x, def.id, '?basis=calendar')).rows[0]?.stale).toBe(true); // 151 + 24 > 168 + 0 declared
+    // why: effective age 151 + 24 against the refresh 168 plus the row's own 24: within it, whatever the provider declares
+    expect((await results(x, def.id, '?basis=calendar')).rows[0]?.stale).toBe(false);
+    x.clock.advance(18 * HOUR); // fetched 169 h ago: 193 > 192
+    expect((await results(x, def.id, '?basis=calendar')).rows[0]?.stale).toBe(true);
   });
 
   it('decides from the live definition: a parent run without verification plus an on-demand child gives the verified basis (decision 67, F1)', async () => {

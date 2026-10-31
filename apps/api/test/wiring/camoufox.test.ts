@@ -71,10 +71,10 @@ describe('apps/api wiring: camoufox (brief Task 14.10)', () => {
     expect(p?.verification).toBeUndefined();
     expect(collectSecrets(c).map((s) => s.reveal())).toContain(KEY);
   });
-  it('a new definition never names camoufox, even when it is the only discovery provider configured', () => {
+  it('revision 55 §8.2: a new definition names camoufox, a configured free source, in discovery only', () => {
     const c = config(ON);
     const input = defaultDefinitionInput(c, providersFor(c, deps));
-    expect(input.providers.discovery).not.toContain('camoufox');
+    expect(input.providers.discovery).toContain('camoufox');
     expect(input.providers.verification).not.toContain('camoufox');
   });
   it('an execution’s budget rows include camoufox’s own page cap scope', () => {

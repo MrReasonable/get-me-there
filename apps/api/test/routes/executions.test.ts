@@ -360,3 +360,67 @@ describe('refusals with the real engine, the active race, and one request at a t
     expect((await x.request(`/api/definitions/${def.id}/executions`, { json: {} })).status).toBe(202);
   });
 });
+
+describe('revision 55 §8.1, §10: enabled 0 starts, Search again starts fresh, and the response states the stop', () => {
+  it('POST on a search whose enabled is 0 answers 202; GET carries stop null, flights null and estimatedFinishAt while it runs', async () => {
+    const x = await harness();
+    const def = x.ports.repos.definitions.create({ ...small(), enabled: false });
+    const res = await x.request(`/api/definitions/${def.id}/executions`, { json: {} });
+    expect(res.status).toBe(202);
+    await expectContract(res, 'POST', '/api/definitions/:id/executions', STARTED);
+    // why: a seeded running row with a stored estimate, so the finish read does not race the fixture run
+    const other = x.ports.repos.definitions.create({ ...small(), name: 'seeded' });
+    const s = seeder(x.ports);
+    s.execution('R', { def: other, status: 'running', startedAt: at(-1) });
+    const est = x.engine.estimate(other, x.clock.todayLondon());
+    x.ports.repos.executions.patch(s.id('R'), { estimate: est });
+    vi.spyOn(x.engine, 'estimateRemaining').mockReturnValue({ ...est, seconds: 90 });
+    const e = await execution(x, s.id('R'));
+    expect([e.estimatedFinishAt, e.stop, e.flights]).toEqual(['2026-10-14T09:01:30.000Z', null, null]);
+  });
+
+  it('replaceStopped and requireCovered reach the engine; over a paused_error search the old run is cancelled with "Replaced by a search you started." and the new one runs', async () => {
+    const x = await harness();
+    const def = x.ports.repos.definitions.create(small());
+    const s = seeder(x.ports);
+    s.execution('OLD', { def, status: 'paused_error', startedAt: at(-2) });
+    const old = s.id('OLD');
+    const refused = await x.request(`/api/definitions/${def.id}/executions`, { json: {} });
+    expect(refused.status).toBe(409);
+    expect(await errorOf(refused)).toMatchObject({ code: 'active' });
+    const start = vi.spyOn(x.engine, 'start');
+    const est = x.engine.estimate(def, x.clock.todayLondon());
+    const figures = {
+      confirmCostPence: Math.ceil(est.totalCostMicroGbp / 10_000),
+      confirmCalls: est.totalCalls,
+    };
+    const res = await x.request(`/api/definitions/${def.id}/executions`, {
+      json: { replaceStopped: true, requireCovered: true, ...figures },
+    });
+    expect(res.status).toBe(202);
+    expect(start).toHaveBeenCalledWith(def.id, {
+      trigger: 'manual',
+      ...figures,
+      requireCovered: true,
+      replaceStopped: true,
+    });
+    const { executionId } = await expectContract(res, 'POST', '/api/definitions/:id/executions', STARTED);
+    const before = await execution(x, old);
+    expect(before.status).toBe('cancelled');
+    expect(before.stop?.sentence).toBe('Replaced by a search you started.');
+    expect(x.ports.repos.executions.get(executionId)?.status).toMatch(/running|completed/);
+  });
+
+  it('a stopped run with no stored cause reads NO_STOP_CAUSE_TEXT, never its stored text', async () => {
+    const x = await harness();
+    const def = x.ports.repos.definitions.create(small());
+    const s = seeder(x.ports);
+    s.execution('L', { def, status: 'paused_error', startedAt: at(-2) });
+    x.ports.repos.executions.patch(s.id('L'), { errorText: 'paused: error' });
+    const e = await execution(x, s.id('L'));
+    expect(e.stop).toEqual({
+      sentence: 'No reason was recorded for this run.',
+      fix: { text: 'Search again', command: null },
+    });
+  });
+});

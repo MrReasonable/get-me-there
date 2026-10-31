@@ -2,7 +2,7 @@
   "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
   "testRunner": "command",
   "commandRunner": {
-    "command": "pnpm exec vitest run --coverage.enabled=false --bail=1 test/scheduler test/parse-cron.test.ts test/consentNotice.test.ts"
+    "command": "pnpm exec vitest run --coverage.enabled=false --bail=1 test/scheduler test/parse-cron.test.ts test/consentNotice.test.ts test/stopCause.test.ts test/stopWrites.test.ts test/execute.test.ts"
   },
   "incremental": true,
   "incrementalFile": "reports/stryker-incremental.json",
@@ -14,7 +14,8 @@
     "src/scheduler/heartbeat.ts",
     "src/tick.ts",
     "src/stages/browserGate.ts",
-    "src/consentNotice.ts"
+    "src/consentNotice.ts",
+    "src/stopCause.ts"
   ],
   "thresholds": {
     "high": 90,

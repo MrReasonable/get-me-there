@@ -70,4 +70,26 @@ describe('defaultDefinitionInput (spec §8.2 plan preset, §11 form defaults)', 
     expect(d).not.toHaveProperty('confirmedCostPence');
     expect(d).not.toHaveProperty('confirmedCalls');
   });
+
+  it('rev 55 §8.2: names every configured free source, the browser worker with its key; never one CAMOUFOX_ENABLED leaves out', () => {
+    const on = config({
+      TRAVELPAYOUTS_TOKEN: SENTINEL_TP,
+      CAMOUFOX_ENABLED: 'true',
+      CAMOUFOX_WORKER_URL: 'http://127.0.0.1:8090',
+      CAMOUFOX_WORKER_KEY: 'test-worker-key-0123456789abcdef0123456789abcdef',
+    });
+    const d = defaultDefinitionInput(on, [stub('travelpayouts'), stub('camoufox')]);
+    expect(d.providers).toEqual({
+      discovery: ['travelpayouts', 'camoufox'],
+      verification: [],
+      discoveryRefreshHours: { travelpayouts: 168, camoufox: 168 },
+    });
+    expect([d.scheduleCron, d.enabled]).toEqual([null, false]);
+    expect(d.constraints).not.toHaveProperty('arrivalWindowLocal');
+    // why: wiring registers no camoufox provider while CAMOUFOX_ENABLED is false, so the preset cannot name it
+    expect(
+      defaultDefinitionInput(config({ TRAVELPAYOUTS_TOKEN: SENTINEL_TP }), [stub('travelpayouts')]).providers
+        .discovery,
+    ).toEqual(['travelpayouts']);
+  });
 });

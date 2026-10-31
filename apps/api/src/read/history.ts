@@ -2,19 +2,22 @@
 import {
   type apiContract,
   type Cabin,
+  calendarStaleThreshold,
   DEFAULT_DISCOVERY_REFRESH_HOURS,
   type Iata,
   isStale,
   isTruncated,
   type ProviderId,
   type SearchDefinition,
+  type StaleThresholds,
+  stalenessOf,
   withAssumedBound,
 } from '@gmt/core';
 import type { z } from 'zod';
 import { ApiError } from '../errors.js';
 import { API_TEXT } from '../text.js';
 import type { Ports } from '../wiring.js';
-import { calendarThreshold, refreshHoursFor, staleness, withNights } from './rows.js';
+import { refreshHoursFor, withNights } from './rows.js';
 
 export type ItineraryHistoryResponse = z.infer<typeof apiContract.itineraryHistoryResponseSchema>;
 export type RouteHistoryResponse = z.infer<typeof apiContract.routeHistoryResponseSchema>;
@@ -36,6 +39,15 @@ function catchUpOf(ports: Ports): (executionId: string) => HistoryCatchUp {
         : null;
     seen.set(executionId, label);
     return label;
+  };
+}
+
+/** Revision 55 §8.1: the thresholds core's stale rule reads, with the refresh of the point's provider. */
+function thresholds(ports: Pick<Ports, 'config'>, refreshHours: number): StaleThresholds {
+  return {
+    refreshHours,
+    overrideHours: ports.config.calendarStaleAfterHours,
+    staleAfterHours: ports.config.staleAfterHours,
   };
 }
 
@@ -61,7 +73,12 @@ export function itineraryHistory(hash: string, ports: Ports): ItineraryHistoryRe
       cabin: s.cabin,
       points: s.points.map(({ suppliedFields, ...p }) => ({
         ...p,
-        stale: staleness(p.provenance, ports.config.staleAfterHours, now).stale,
+        // why: revision 55 §8.1 — core's one per-price rule, on the verified basis (STALE_AFTER_HOURS alone)
+        stale: stalenessOf(
+          { provenance: p.provenance, basis: 'verified' },
+          thresholds(ports, DEFAULT_DISCOVERY_REFRESH_HOURS),
+          now,
+        ).stale,
         truncated: false,
         priceConfirmed: suppliedFields.includes('price'),
         catchUp: catchUp(p.executionId),
@@ -114,12 +131,7 @@ export function routeHistory(
     origin,
     destination,
     calendarSeries: ports.repos.calendarPrices.history(origin, destination, cabin).map((s) => {
-      const threshold = calendarThreshold(
-        ports.config,
-        ports.providers,
-        s.providerId,
-        refreshFor(defs, origin, destination, s.providerId),
-      );
+      const t = thresholds(ports, refreshFor(defs, origin, destination, s.providerId));
       // why: N4 (pie-007): an assumed bound is labelled "assumed" here as on every other view.
       const info = ports.providers.find((x) => x.id === s.providerId)?.discovery?.info;
       return {
@@ -128,7 +140,8 @@ export function routeHistory(
         points: s.points.map(({ sourceLastError, ...p }) => ({
           ...p,
           provenance: withAssumedBound(p.provenance, info),
-          stale: staleness(p.provenance, threshold, now).stale,
+          // why: revision 55 §8.1 — the per-price rule over the stored provenance (its own stored age)
+          stale: stalenessOf({ provenance: p.provenance, basis: 'calendar' }, t, now).stale,
           // why: decisions 36, 47: the fetching outcome's last_error, read with the point (WP19: no outcome read per run)
           truncated: isTruncated(sourceLastError),
           catchUp: catchUp(p.executionId),
@@ -137,12 +150,9 @@ export function routeHistory(
     }),
     routeSeries: ports.providers
       .flatMap((p) => {
-        const threshold = calendarThreshold(
-          ports.config,
-          ports.providers,
-          p.id,
-          refreshFor(defs, origin, destination, p.id),
-        );
+        // why: the vendor's series states no age, so the rule's threshold is the refresh alone (or the override)
+        const t = thresholds(ports, refreshFor(defs, origin, destination, p.id));
+        const threshold = calendarStaleThreshold({ maxAgeHours: 'unknown' }, t.refreshHours, t.overrideHours);
         // why: ruling 6: one series per searched trip in the requested cabin, then the migrated rows that never
         // recorded a trip (cabin 'unknown'), which the web labels "trip unknown".
         return [cabin, 'unknown' as const].flatMap((cab) =>

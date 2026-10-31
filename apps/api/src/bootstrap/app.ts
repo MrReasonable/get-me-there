@@ -210,11 +210,9 @@ export async function bootApp(deps: BootDeps): Promise<RunningApp> {
     }, HEARTBEAT_INTERVAL_MS);
     heartbeat.unref();
     seedIfNeeded(ports, deps.assets.airportsDataDir, (line) => log.info({}, line));
-    // Spec §7: at least 5,000 airports with tz, and every airport an enabled definition references exists.
-    const referenced = ports.repos.definitions
-      .list()
-      .filter((d) => d.enabled)
-      .flatMap((d) => [...d.origins, ...d.destinations]);
+    // Spec §7 (revision 55): at least 5,000 airports with tz, and every airport a live (not soft-deleted) definition
+    // references exists, scheduled or not: a manual run of an unscheduled search reads its airports too.
+    const referenced = ports.repos.definitions.list().flatMap((d) => [...d.origins, ...d.destinations]);
     const sanity = sanityCheckAirports(ports.db, referenced);
     if (!sanity.ok) throw new BootError(`airport sanity check failed: ${sanity.reason}`, EXIT.failed);
     // why: spec §8.1, §8.3 — WP11's alert runner as the alerts step, the notifiers config asks for (engine.ts).

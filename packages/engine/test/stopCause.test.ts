@@ -246,4 +246,120 @@ describe('the readers a pass seeds itself with (revision 55 §8.1, §6.6)', () =
       until: null,
     });
   });
+
+  it.each<[string, string[], string]>([
+    ['a disabling class word among other errors', ['upstream', 'auth'], 'auth'],
+    ['quota', ['quota'], 'quota'],
+    ['a parse streak', ['parse', 'parse'], 'parse'],
+    ['a block', ['blocked'], 'blocked'],
+    ['only errors that disable nothing', ['upstream', 'network'], 'blocked'],
+  ])('disabledDetailBefore: %s names its word', (_n, errors, detail) => {
+    const { h, ctx, e, cells } = seeded(['fixture', 'travelpayouts']);
+    errors.forEach((reason, i) => {
+      const c = cells[i];
+      if (c === undefined) throw new Error('no cell');
+      h.repos.cells.setOutcome(e.id, c, 'discovery', 'fixture', { status: 'error', reason, lastError: 'x' });
+    });
+    const last = cells[3];
+    if (last === undefined) throw new Error('no cell');
+    if (detail !== 'blocked' || errors[0] !== 'blocked')
+      h.repos.cells.setOutcome(e.id, last, 'discovery', 'fixture', {
+        status: 'skipped',
+        reason: 'provider_disabled',
+      });
+    // why: the other provider's rows never decide this one's word
+    h.repos.cells.setOutcome(e.id, last, 'discovery', 'travelpayouts', {
+      status: 'error',
+      reason: 'quota',
+      lastError: 'x',
+    });
+    expect(disabledDetailBefore(ctx, e.id).get('fixture')).toEqual({
+      skip: 'provider_disabled',
+      detail,
+      until: null,
+    });
+    expect(disabledDetailBefore(ctx, e.id).has('travelpayouts')).toBe(false);
+  });
+
+  it('disabledDetailBefore: the first row that names a provider decides it; a skip for another reason names none', () => {
+    const { h, ctx, e, cells } = seeded(['fixture']);
+    const [a, b] = cells;
+    if (a === undefined || b === undefined) throw new Error('no cells');
+    h.repos.cells.setOutcome(e.id, a, 'discovery', 'fixture', { status: 'skipped', reason: 'budget' });
+    expect(disabledDetailBefore(ctx, e.id)).toEqual(new Map());
+    h.repos.cells.setOutcome(e.id, b, 'discovery', 'fixture', {
+      status: 'error',
+      reason: 'blocked',
+      lastError: 'x',
+    });
+    expect(disabledDetailBefore(ctx, e.id).get('fixture')).toEqual({
+      skip: 'provider_disabled',
+      detail: 'blocked',
+      until: null,
+    });
+  });
+
+  it('searchedDatePairsOf reads a cell the run never seeded as not run', () => {
+    const h = createHarness();
+    const def = h.createDefinition({
+      origins: [LHR],
+      destinations: [JFK],
+      window: { kind: 'absolute', from: asIsoDate('2026-11-02'), to: asIsoDate('2026-11-02') },
+      minNights: 7,
+      maxNights: 7,
+    });
+    const ctx = buildContext(h.deps, h.options);
+    const b = buildSnapshot(ctx, def, 'manual');
+    const e = h.repos.executions.create({
+      definitionId: def.id,
+      isChild: false,
+      cell: null,
+      snapshot: b.snapshot,
+      estimate: null,
+      trigger: 'manual',
+      status: 'running',
+    });
+    expect(searchedDatePairsOf(ctx, e)).toBe(0);
+  });
+});
+
+describe('stopCauseOf edges (mutation pins)', () => {
+  it("isBrowserPageLimit: the browser worker's run and month caps only", () => {
+    expect(isBrowserPageLimit({ scope: 'provider-execution', providerId: 'camoufox' })).toBe(true);
+    expect(isBrowserPageLimit({ scope: 'provider-month', providerId: 'camoufox' })).toBe(true);
+    expect(isBrowserPageLimit({ scope: 'execution-calls', providerId: 'camoufox' })).toBe(false);
+    expect(isBrowserPageLimit({ scope: 'provider-execution', providerId: 'searchapi' })).toBe(false);
+  });
+
+  it("flights never ride on another provider's per-run cap", () => {
+    const run = causeRun({ flightLists: { read: 1, planned: 2 } });
+    expect(stopCauseOf(budget('provider-execution', 'searchapi'), run, true)).toMatchObject({
+      flights: null,
+    });
+  });
+
+  it('all-disabled names the disabled sources of its own stage, every stored detail, and words a disabled source with no detail', () => {
+    const run = causeRun({
+      disabledDetail: new Map([['camoufox', { skip: 'provider_disabled', detail: 'captcha', until: null }]]),
+      disabled: new Set<ProviderId>(['travelpayouts', 'searchapi']),
+      disabledReason: new Map(),
+      snapshot: {
+        providers: {
+          discovery: ['fixture'],
+          verification: ['travelpayouts', 'fixture'],
+          discoveryRefreshHours: {},
+        },
+      },
+    });
+    const c = stopCauseOf({ kind: 'all-disabled', stage: 'verification' }, run, true);
+    expect(c).toEqual({
+      kind: 'sources-unavailable',
+      stage: 'verification',
+      searched: 0,
+      sources: [
+        { providerId: 'camoufox', skip: 'provider_disabled', detail: 'captcha', until: null },
+        { providerId: 'travelpayouts', skip: 'provider_disabled', detail: 'blocked', until: null },
+      ],
+    });
+  });
 });

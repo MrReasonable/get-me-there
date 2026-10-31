@@ -42,7 +42,7 @@ export type DatePairsResponse = z.output<typeof apiContract.datePairsResponseSch
  * carries, its airport pair, decision 54's marks, the first departure and last arrival of each direction as the source
  * states them, and `fromEarlierSearch` (revision 50: fetched by an execution created before the latest parent run, by
  * the executions' newest-first order, so two runs created in the same second still compare). "Cached from £X" keeps the
- * calendar row's own staleness, which `thresholdFor('calendar', …)` gave it, the figure's own rule (decision 38).
+ * calendar row's own staleness, which core's per-price `stalenessOf` gave it (revision 55 §8.1), the figure's own rule (decision 38).
  * `assembleDatePairs` uses every figure; `assembleResults` takes the one of its date pair.
  */
 export function datePairFigures(

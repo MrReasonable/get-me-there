@@ -380,7 +380,8 @@ export function withBlocked(e: Estimate, blockedBy: ReadonlyMap<LineKey, string>
  * What a definition's stored confirmation (`DefinitionsRepo.setConfirmed`) records for an estimate: the worst case over
  * every line, blocked ones included (ruling 9, cost M-2). The shown totals leave out the lines a cap blocks today, and
  * a confirmation of those alone would no longer cover next month's scheduled run with the provider back, which would
- * then be skipped_confirm for no reason. WP8 stores this, never the shown totals.
+ * then be skipped_confirm for no reason. WP8's PUT path keeps storing this worst case; Search now's create-and-start
+ * and Repeat weekly's Save store the shown runnable totals instead (the api's `runnableTotalsOf`, spec revision 55 §7).
  */
 export function confirmationOf(e: Pick<Estimate, 'perProvider'>): { pence: number; calls: number } {
   const all = totalsOf(e.perProvider);

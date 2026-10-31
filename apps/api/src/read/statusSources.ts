@@ -15,7 +15,7 @@ import {
   effectiveAge,
   type IsoDateTime,
   isLoopbackHost,
-  isStale,
+  isScheduled,
   type ProviderId,
   runModeOf,
   type SearchDefinition,
@@ -33,7 +33,7 @@ import { backupsDirFor } from '../bootstrap/preflight.js';
 import { dbOk, dbSizeBytes } from '../routes/system.js';
 import type { RouteContext } from '../routes/types.js';
 import type { Ports } from '../wiring.js';
-import { calendarStaleAfterHours, type RowContext } from './rows.js';
+import { staleness } from './rows.js';
 import { type ConsentCause, consentOutcome } from './status.js';
 import type {
   AgeFacts,
@@ -179,7 +179,6 @@ function agesOf(
   now: IsoDateTime,
 ): AgeFacts | null {
   const { ports } = ctx;
-  const rc: RowContext = { def: d, now, config: ports.config, providers: ports.providers };
   const rows = ports.repos.calendarPrices
     .heldBy(executionId)
     .filter((r) => r.provenance.sourceKind !== 'synthetic' && r.provenance.providerId !== 'fixture');
@@ -189,7 +188,8 @@ function agesOf(
     const p = withAssumedBound(r.provenance, info);
     return {
       age: effectiveAge(p, now),
-      stale: isStale(p, now, calendarStaleAfterHours(rc, p.providerId)),
+      // why: revision 55 §8.1 — core's per-price rule over the stored provenance, never the declared age
+      stale: staleness(r.provenance, 'calendar', { def: d, config: ports.config, now }).stale,
     };
   });
   const sorted = aged.map((a) => a.age).sort(compareAges);
@@ -225,7 +225,7 @@ function dataFacts(ctx: RouteContext, d: SearchDefinition, now: IsoDateTime): Da
   const { ports } = ctx;
   const runs = executionsOf(ports, d);
   const { active, latest, lastRun } = pickRuns(runs);
-  const cron = d.enabled ? d.scheduleCron : null;
+  const cron = isScheduled(d) ? d.scheduleCron : null;
   let previousFiringMs: number | null = null;
   if (cron !== null && active === null) {
     const parsed = parseCron(cron, d.scheduleTz);
@@ -235,7 +235,7 @@ function dataFacts(ctx: RouteContext, d: SearchDefinition, now: IsoDateTime): Da
   return {
     definitionId: d.id,
     name: d.name,
-    enabled: d.enabled,
+    scheduled: isScheduled(d),
     latest: latest === null ? null : runFacts(latest),
     lastRun: lastRun === null ? null : runFacts(lastRun),
     coverage: lastRun === null ? null : coverageOf(ports, lastRun.id),

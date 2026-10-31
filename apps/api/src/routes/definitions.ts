@@ -219,10 +219,15 @@ export const definitionHandlers: HandlerTable = {
     },
   ),
 
-  'DELETE /api/definitions/:id': plain((c, input, ctx) => {
+  'DELETE /api/definitions/:id': plain(async (c, input, ctx) => {
     const existing = getLiveDefinition(ctx, param(input, 'id'));
+    // why: spec revision 55 §10 (search-r2-008) — the soft delete comes first, so no firing can start a run of the
+    // search in between; then its pending, running or paused parent is cancelled with the remove's own cause. Its alert
+    // rules are left as they are (a restore brings the search back whole).
     ctx.ports.repos.definitions.softDelete(existing.id);
     ctx.engine.scheduler.unregister(existing.id);
+    const active = ctx.ports.repos.executions.activeParent(existing.id);
+    if (active !== null) await ctx.engine.cancel(active.id, { kind: 'superseded', by: 'remove' });
     return c.json(deletedResponse(existing, ctx));
   }),
 

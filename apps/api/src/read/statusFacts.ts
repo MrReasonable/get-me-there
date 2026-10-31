@@ -71,8 +71,11 @@ export interface DataFacts {
   definitionId: string;
   /** The definition's name: the card's label, never part of its summary. */
   name: string;
-  /** A disabled definition is shown as off, so a parked search never nags the bar. */
-  enabled: boolean;
+  /**
+   * Revision 55 §7 (data-004): whether the search is scheduled (`isScheduled`). An unscheduled search's card is judged by
+   * its latest run like any other and notes "not scheduled"; a card is off only for a deleted search, which has none.
+   */
+  scheduled: boolean;
   /** The newest parent row that is not pending or running, whatever its status (a skipped firing included), or null. */
   latest: RunFacts | null;
   /** The newest such row that actually ran (not a skipped firing): the coverage and ages below are its. */

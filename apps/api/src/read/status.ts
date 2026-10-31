@@ -36,6 +36,8 @@ export type StatusResponse = apiContract.StatusResponse;
 /** The fixed words of the report; one table so the banned-word test reads them all. */
 export const STATUS_TEXT = {
   docs: 'docs/setup.md section 11',
+  /** Revision 55 §7 (data-004): the note of a search that runs only when pressed. */
+  notScheduled: 'not scheduled',
   browserWindow: {
     scheduled: "browser pages: only inside a run's window",
     any: 'browser pages: also when a run resumes',
@@ -295,16 +297,12 @@ function dataCheck(f: StatusFacts, d: DataFacts): StatusCheck {
   const running = d.runningSince === null ? null : `running since ${at(f, d.runningSince)}`;
   const l = d.latest;
   const run = d.lastRun;
-  if (!d.enabled)
-    return check({
-      ...base,
-      state: 'off',
-      offReason: 'disabled',
-      summary: `disabled${run === null ? '; it never finished a run' : `; its last run was ${at(f, run.at)}`}`,
-    });
-  const left = d.leftNotes
-    .map((n) => `${n.text} (${n.cells} ${n.cells === 1 ? 'cell' : 'cells'})`)
-    .join('; ');
+  // why: revision 55 §7 (data-004) — `enabled` means only that scheduled runs happen, so an unscheduled search is judged
+  // by its latest run like any other and says it is not scheduled; a deleted one has no card at all
+  const left = [
+    ...d.leftNotes.map((n) => `${n.text} (${n.cells} ${n.cells === 1 ? 'cell' : 'cells'})`),
+    ...(d.scheduled ? [] : [STATUS_TEXT.notScheduled]),
+  ].join('; ');
   const note = left === '' ? null : left;
   const parts: string[] = [];
   if (running !== null) parts.push(running);

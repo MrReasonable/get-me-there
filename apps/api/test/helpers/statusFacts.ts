@@ -24,7 +24,7 @@ export function healthyData(over: Partial<DataFacts> = {}): DataFacts {
   return {
     definitionId: 'def-1',
     name: 'London to New York',
-    enabled: true,
+    scheduled: true,
     latest: { status: 'completed', at: ago(2 * HOUR), isCatchUp: false, skipCode: null },
     lastRun: { status: 'completed', at: ago(2 * HOUR), isCatchUp: false, skipCode: null },
     coverage: {
