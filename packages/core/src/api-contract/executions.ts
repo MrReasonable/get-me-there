@@ -54,12 +54,10 @@ export const executionResponseSchema = z.object({
   cell: cellKeySchema.nullable(),
   status: executionStatusSchema,
   stage: stageSchema.nullable(),
-  reason: z.string().nullable(),
   resumeAfter: isoDateTimeSchema.nullable(),
   trigger: triggerSchema,
   startedAt: isoDateTimeSchema.nullable(),
   finishedAt: isoDateTimeSchema.nullable(),
-  errorText: z.string().nullable(),
   /** Review S8: the firing the row stands for and, on a missed firing, why it was not caught up, as History names them. */
   scheduledFor: isoDateTimeSchema.nullable(),
   isCatchUp: z.boolean(),

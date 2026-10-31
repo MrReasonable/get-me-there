@@ -128,7 +128,12 @@ export function DefinitionForm({
   const travelpayouts = providers.providers.some((p) => p.providerId === 'travelpayouts' && p.enabled);
   const current = JSON.stringify(draft);
 
-  const refresh = () => qc.invalidateQueries({ queryKey: ['definitions'] });
+  // why: the first screen's cards (WP20 Task 20.3) read the same searches, so a save refreshes them too
+  const refresh = () =>
+    Promise.all([
+      qc.invalidateQueries({ queryKey: ['definitions'] }),
+      qc.invalidateQueries({ queryKey: ['cards'] }),
+    ]);
   const onError = (e: Error) => {
     setFieldErrors(e instanceof ApiError ? e.fieldErrors() : []);
     setNotice(COPY.actionFailed(e.message));

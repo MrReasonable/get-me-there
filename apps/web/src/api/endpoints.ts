@@ -22,6 +22,12 @@ export const api = {
   status: () => call(c.statusResponseSchema, 'GET', '/api/status'),
   testEmail: () => call(c.testEmailResponseSchema, 'POST', '/api/alerts/test-email'),
   definitions: () => call(c.definitionResponseSchema.array(), 'GET', '/api/definitions'),
+  // WP20 (spec §10): the first screen's cards in the order the api owns; remove (soft delete, then cancel) and undo
+  cards: () => call(c.searchCardsResponseSchema, 'GET', '/api/definitions/cards'),
+  removeDefinition: (id: string) =>
+    call(c.definitionDeletedResponseSchema, 'DELETE', '/api/definitions/:id', { params: { id } }),
+  restoreDefinition: (id: string) =>
+    call(c.definitionResponseSchema, 'POST', '/api/definitions/:id/restore', { params: { id } }),
   estimateDraft: (body: DefinitionBody) =>
     call(c.estimateResponseSchema, 'POST', '/api/definitions/estimate', { body }),
   createDefinition: (body: DefinitionBody) =>

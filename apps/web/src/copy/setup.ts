@@ -8,7 +8,7 @@
 const noun = (n: number, one: string, many: string): string => (n === 1 ? one : many);
 
 /** Monday first, as a UK week reads; index = cron day-of-week (0 = Sunday). */
-const DAY_PLURAL = [
+export const DAY_PLURAL = [
   'Sundays',
   'Mondays',
   'Tuesdays',
@@ -20,7 +20,7 @@ const DAY_PLURAL = [
 const DAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
 
 /** "A", "A and B", "A, B and C". */
-function listText(items: readonly string[]): string {
+export function listText(items: readonly string[]): string {
   if (items.length <= 1) return items.join('');
   return `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`;
 }

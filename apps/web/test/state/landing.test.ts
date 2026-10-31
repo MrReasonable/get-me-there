@@ -4,8 +4,9 @@ import { type Landing, land } from '../../src/state/landing.js';
 import { parseSelectedRow } from '../../src/state/resultsState.js';
 import { NAV_TIERS, navPatch, parseView, VIEWS, type ViewId } from '../../src/state/view.js';
 
-// Spec §11 URLs (WP19 Task 19.7): `?view=` names the view; the retired values and a Results URL without a date pair land
-// on Dates. `land` judges the format only, with no clock: whether a date pair is inside the current resolved space is
+// Spec rev 55 §11 URLs (WP20 Task 20.3): `?view=` names the view; an absent or unknown value, a search's page without
+// `def=` and the Edit page without `edit=` land on Searches; the retired values and a Results URL without a date pair
+// land on a search's page (WP19 Task 19.7). `land` judges the format only, with no clock: whether a date pair is inside the current resolved space is
 // the server's answer (the detail's 422 `date_pair_outside_space`, tested with the App).
 
 const DEF = { destinations: [asIata('JFK'), asIata('EWR')] };
@@ -20,12 +21,17 @@ const view = (v: ViewId, patch: Record<string, string | null> = {}): Landing => 
 /** The detail's own parameters, removed when a Results URL lands on Dates (spec §11 "Back to dates"). */
 const DETAIL_GONE = { view: 'dates', depart: null, return: null, basis: null, row: null };
 
-describe('old ?view= URLs land on Dates (spec §11 URLs)', () => {
+const TO_SEARCHES = view('searches', { view: 'searches' });
+
+describe("?view= URLs land on Searches, a search's page or the view named (spec §11 URLs)", () => {
   it.each<[string, string, Landing]>([
-    ['absent', 'def=def-1', view('dates', { view: 'dates' })],
-    ['empty', 'view=&def=def-1', view('dates', { view: 'dates' })],
-    ['unknown', 'view=nope&def=def-1', view('dates', { view: 'dates' })],
-    ['dates itself', 'view=dates&def=def-1&d.to=JFK', view('dates')],
+    ['nothing at all', '', TO_SEARCHES],
+    ['absent', 'def=def-1', TO_SEARCHES],
+    ['empty', 'view=&def=def-1', TO_SEARCHES],
+    ['unknown', 'view=nope&def=def-1', TO_SEARCHES],
+    ['searches itself', 'view=searches', view('searches')],
+    ["dates with def= (a search's page)", 'view=dates&def=def-1&d.to=JFK', view('dates')],
+    ['dates without def=, whatever the number of searches', 'view=dates&d.to=JFK', TO_SEARCHES],
     ['calendar, keeping def=', 'view=calendar&def=def-1', view('dates', { view: 'dates' })],
     ['duration, keeping def=', 'view=duration&def=def-1', view('dates', { view: 'dates' })],
     [
@@ -34,7 +40,10 @@ describe('old ?view= URLs land on Dates (spec §11 URLs)', () => {
       view('dates', { view: 'dates', 'd.coverage': 'open' }),
     ],
     ['history', 'view=history&def=def-1', view('history')],
-    ['definitions', 'view=definitions', view('definitions')],
+    ['definitions with edit= (the Edit page)', 'view=definitions&edit=d1', view('definitions')],
+    ['definitions without edit=', 'view=definitions', TO_SEARCHES],
+    ['definitions with an empty edit=', 'view=definitions&edit=', TO_SEARCHES],
+    ['dates with an empty def=', 'view=dates&def=', TO_SEARCHES],
     ['providers', 'view=providers', view('providers')],
     ['alerts', 'view=alerts&def=def-1', view('alerts')],
     ['status', 'view=status', view('status')],
@@ -140,17 +149,26 @@ describe('the email link (spec §8.3; Task 19.1’s detailLink literal, so the e
 });
 
 describe('the view list and the two-tier nav (spec §11 layout)', () => {
-  it('seven views; anything unknown or absent is Dates', () => {
-    expect(VIEWS).toEqual(['dates', 'results', 'history', 'definitions', 'providers', 'alerts', 'status']);
-    expect(parseView(null)).toBe('dates');
-    expect(parseView('calendar')).toBe('dates');
+  it('eight views; anything unknown or absent is Searches', () => {
+    expect(VIEWS).toEqual([
+      'searches',
+      'dates',
+      'results',
+      'history',
+      'definitions',
+      'providers',
+      'alerts',
+      'status',
+    ]);
+    expect(parseView(null)).toBe('searches');
+    expect(parseView('calendar')).toBe('searches');
     expect(parseView('history')).toBe('history');
   });
 
-  it('Decide holds Dates and History, Set up the rest; Results is in neither', () => {
+  it('Decide holds Searches, the search last opened and History, Set up Providers, Alerts and Status; Results and Edit are in neither', () => {
     expect(NAV_TIERS).toEqual([
-      { id: 'decide', views: ['dates', 'history'] },
-      { id: 'setup', views: ['definitions', 'providers', 'alerts', 'status'] },
+      { id: 'decide', views: ['searches', 'dates', 'history'] },
+      { id: 'setup', views: ['providers', 'alerts', 'status'] },
     ]);
   });
 

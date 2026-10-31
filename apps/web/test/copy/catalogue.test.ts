@@ -84,6 +84,7 @@ const SAMPLES: Record<string, unknown[]> = {
       total: 126,
     },
   ],
+  progressBuckets: [{ priced: 9, empty: 0, no_data: 99, error: 0, skipped: 0, not_run: 0 }],
   progressLabel: ['discovery', 'Travelpayouts'],
   spendRunCalls: [42, '2000'],
   spendRunFreeCalls: [14, '2000'],
@@ -99,11 +100,9 @@ const SAMPLES: Record<string, unknown[]> = {
   scheduledOnlyHeading: ['left for the next scheduled run'],
   firingNotStarted: ['19 Oct 2026 05:00', 'skipped: missed and not caught up'],
   skippedWhy: ['skipped: missed and not caught up', 'the next scheduled run was less than half the gap away'],
-  paused: ['budget'],
   resumesAt: ['1 Nov 2026 00:00 Europe/London'],
   scheduleBlocked: ['14 Oct 2026'],
   childRun: ['running'],
-  runNow: [154, 2000, '£0'],
   filtersSummary: [2],
   carriersIgnored: ['BRITISH'],
   segment: ['ZZ', 117, 'LHR', '14 Mar 10:25', 'JFK', '14 Mar 13:20'],
@@ -157,6 +156,29 @@ const SAMPLES: Record<string, unknown[]> = {
   // WP19 (Task 19.4): the Dates view
   'datesView.runFinished': ['2h ago'],
   'datesView.runInProgress': ['40 min ago'],
+  // WP20 (Task 20.3): the Searches view's cards
+  'searchesView.codes': ['BHX', 'FRA'],
+  'searchesView.windowSpan': ['10 Jan', '31 Mar'],
+  'searchesView.windowRolling': [182, 7],
+  'searchesView.repeats': [[1, 4], '05:00'],
+  'searchesView.repeatsDaily': ['05:00'],
+  'searchesView.searching': [120, 405, 'about 1h 40m left'],
+  'searchesView.readingFlights': [3, 10],
+  'searchesView.left': ['1h 40m'],
+  'searchesView.searchedAgo': ['2h ago'],
+  'searchesView.datesChanged': [24],
+  'searchesView.neverSearched': [85, 405],
+  'searchesView.trip': ['12', '23 Jan'],
+  'searchesView.seeDatesOf': ['Birmingham → Frankfurt'],
+  'searchesView.searchAgainOf': ['Birmingham → Frankfurt'],
+  'searchesView.editOf': ['Birmingham → Frankfurt'],
+  'searchesView.removeOf': ['Birmingham → Frankfurt'],
+  'searchesView.removeAsk': ['Birmingham → Frankfurt'],
+  'searchesView.cancelAndRemoveAsk': ['Birmingham → Frankfurt'],
+  'searchesView.removed': ['Birmingham → Frankfurt'],
+  'searchesView.undoOf': ['Birmingham → Frankfurt'],
+  'searchesView.removeFailedLine': ['HTTP 500'],
+  'searchesView.restoreFailedLine': ['HTTP 500'],
   'datesView.runPaused': ['3h ago', 'searchapi provider-month cap reached'],
   'datesView.runEnded': ['cancelled', '2h ago'],
   'datesView.runNotStarted': ['pending'],
@@ -347,7 +369,11 @@ describe('COPY catalogue (spec §11 banned words)', () => {
         total: 108,
       }),
     ).toBe(
-      'discovery · Travelpayouts: 9 priced · 0 no fares · 99 no cached data · 0 error · 0 skipped · 0 not searched of 108 cells',
+      "discovery · Travelpayouts: 9 priced · 99 no price shown · 0 couldn't be read · 0 not reached · 0 not searched of 108 date and airport pairs",
+    );
+    // why: spec rev 55 §11 — the six buckets under the count, in the coverage section's own terms
+    expect(COPY.progressBuckets({ priced: 9, empty: 0, no_data: 99, error: 0, skipped: 0, not_run: 0 })).toBe(
+      '9 priced · 0 no fares · 99 no cached data · 0 error · 0 skipped · 0 not searched',
     );
   });
 
@@ -356,14 +382,30 @@ describe('COPY catalogue (spec §11 banned words)', () => {
       'Create and confirm about 154 calls (hard stop 2000), £0 per run',
     );
     expect(COPY.confirmNew(154, 2000, '£2')).toBe('Confirm about 154 calls (hard stop 2000), £2 per run');
-    expect(COPY.runNow(154, 2000, '£0')).toBe('Run now: about 154 calls, hard stop 2000 · £0');
     const copy = [
       COPY.createConfirm(1, 2, '£0'),
       COPY.confirmNew(1, 2, '£0'),
-      COPY.runNow(1, 2, '£0'),
       COPY.estimateTotal(1, 2, '£0', '1m'),
     ];
     expect(copy.filter((c) => /\bup to\b/.test(c))).toEqual([]);
+  });
+
+  it('the first screen speaks in main-path words: no set-up term (spec rev 55 §11)', () => {
+    const SET_UP =
+      /\b(definitions?|cells?|discovery|hard stop|verdict|tile|retry factor|STALE|calendar basis)\b/i;
+    const hits = strings
+      .filter(({ path }) => path.startsWith('searchesView.') || path.startsWith('searchAgain.'))
+      .filter(({ text }) => SET_UP.test(text))
+      .map(({ path, text }) => `${path}: ${text}`);
+    expect(hits).toEqual([]);
+  });
+
+  it('the status bar names a stage and a stopped run in main-path words, never "paused: error"', () => {
+    expect(COPY.barStageName).toEqual({
+      discovery: 'the first pass across your dates',
+      verification: 'checking fares',
+    });
+    expect(Object.values(COPY.barStatusName).filter((w) => /^paused/.test(w))).toEqual([]);
   });
 
   it('the guard itself works: a planted banned word is found', () => {

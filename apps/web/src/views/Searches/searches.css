@@ -1,0 +1,72 @@
+/* The Searches view (spec rev 55 §11, layout B): the list as the main column and the new-search form beside it on the
+   right; narrower than 900 px the view puts the form above the list (the DOM order), so the grid is one column there. */
+@layer components {
+  .searches-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(320px, 440px);
+    gap: 24px 32px;
+    align-items: start;
+    max-width: 1280px;
+  }
+  @media (max-width: 899px) {
+    .searches-layout {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+  .searches-side {
+    min-width: 0;
+  }
+  /* The existing form is a two-column plate; in the narrow side column it stacks */
+  .searches-side .def-form {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .searches-side .def-side {
+    position: static;
+  }
+  .searches-main {
+    min-width: 0;
+  }
+  .searches-list {
+    display: grid;
+    gap: 16px;
+  }
+  .search-card {
+    display: grid;
+    gap: 6px;
+  }
+  .search-card-name {
+    font: 700 20px / 1.2 var(--font-ui);
+  }
+  .search-card-name:focus-visible {
+    outline: 3px solid currentColor;
+    outline-offset: 2px;
+  }
+  .search-card-route {
+    font-weight: 600;
+  }
+  .search-card-cheapest {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 12px;
+  }
+  /* Search again beside the other two; Remove at the far end, with a rule between, so it is never next to Search again */
+  .search-card-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px 24px;
+    margin-top: 8px;
+    padding-top: 10px;
+    border-top: 1px solid var(--line);
+  }
+  .search-card-main-actions,
+  .search-remove,
+  .search-remove-ask {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+  }
+}

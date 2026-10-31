@@ -1,4 +1,11 @@
-import { ACTIVE_STATUSES, apiContract, budgetScopeLabel, capWarn, RESUMABLE_STATUSES } from '@gmt/core';
+import {
+  ACTIVE_STATUSES,
+  apiContract,
+  budgetScopeLabel,
+  capWarn,
+  mainPathSource,
+  RESUMABLE_STATUSES,
+} from '@gmt/core';
 import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import { useCoverage, useExecution, useExecutionActions, useResults } from '../api/queries.js';
@@ -10,8 +17,21 @@ import { useCheckedWords } from '../hooks/useCheckedWords.js';
 import { BASIS_PARAM, DATES_COVERAGE, parseBasis } from '../state/resultsState.js';
 import { hrefWith, navigateTo, useSearchParams } from '../state/urlState.js';
 import { LoadError } from './LoadState.js';
+import { fixNamesResume, StopSentence, stopOrNone } from './StopWords.js';
 
 const ACTIVE: ReadonlySet<string> = new Set(ACTIVE_STATUSES);
+/** A run that has stopped or been skipped: the statuses whose `stop` the api fills (spec rev 55 §10). */
+const STOPPED: ReadonlySet<string> = new Set([
+  'paused_budget',
+  'paused_error',
+  'interrupted',
+  'cancelled',
+  'skipped_budget',
+  'skipped_confirm',
+  'skipped_window',
+  'skipped_missed',
+]);
+const isStopped = (status: string): boolean => STOPPED.has(status);
 /** Active runs the API will resume: the paused two and an interrupted one (spec §7; derived, never hand-listed). */
 const RESUMABLE_ACTIVE: ReadonlySet<string> = new Set(
   ACTIVE_STATUSES.filter((s) => RESUMABLE_STATUSES.includes(s)),
@@ -27,8 +47,9 @@ const RESUMABLE_ACTIVE: ReadonlySet<string> = new Set(
 function progressLines(e: ExecutionResponse, selected: number | null) {
   return e.progress.map((p) => {
     const l = {
-      stage: COPY.stageName[p.stage],
-      provider: COPY.provider[p.providerId],
+      stage: COPY.barStageName[p.stage],
+      // why: spec rev 55 §3 — the bar names a source by its main-path name, from core's one table
+      provider: mainPathSource(p.providerId),
       buckets: p.buckets,
       total: p.total,
     };
@@ -36,6 +57,7 @@ function progressLines(e: ExecutionResponse, selected: number | null) {
     return {
       ...l,
       key: `${p.stage}-${p.providerId}`,
+      detail: COPY.progressBuckets(p.buckets),
       done: p.buckets.priced + p.buckets.empty + p.buckets.no_data + p.buckets.error,
       max: bySelection ? selected : p.total,
       text: bySelection ? COPY.progressSelected({ ...l, selected }) : COPY.progress(l),
@@ -144,60 +166,14 @@ export function StatusLink() {
   );
 }
 
-/**
- * "Run now" with the estimate it will spend (spec §11: the status bar on Results and Definitions, and the Dates view's
- * never-run state), confirmed by the definition's stored calls and pence (decision 43); blocked, with the reason, while
- * the estimate is above what was confirmed. The caller owns the mutation, so its error shows where it was pressed.
- */
-export function RunNowButton({
-  definition,
-  start,
-}: {
-  definition: DefinitionResponse;
-  start: ReturnType<typeof useExecutionActions>['start'];
-}) {
-  const est = definition.estimate;
-  return (
-    <>
-      <button
-        type="button"
-        data-cost=""
-        className="btn btn-primary btn-sm min-h-11"
-        disabled={definition.needsConfirmation !== null || start.isPending}
-        aria-busy={start.isPending ? true : undefined}
-        onClick={() =>
-          start.mutate({
-            id: definition.id,
-            confirmCostPence: definition.confirmedCostPence,
-            confirmCalls: definition.confirmedCalls,
-          })
-        }
-      >
-        {start.isPending
-          ? COPY.working
-          : est === null
-            ? COPY.runNowUnestimated
-            : COPY.runNow(est.totalCalls, definition.budget.maxCalls, formatMicroGbp(est.totalCostMicroGbp))}
-      </button>
-      {definition.needsConfirmation !== null ? <span>{COPY.runNowBlocked}</span> : null}
-    </>
-  );
-}
-
 export interface StatusBarProps {
   definition: DefinitionResponse | null;
-  /** "Run now" appears only on Dates and Definitions (review UI-10; WP19 Task 19.7: Dates replaced Results). */
-  showRunNow: boolean;
-  /**
-   * The view shows its own Run now while the search has never run (the Dates view's never-run state), so the bar leaves
-   * it out until a run exists: the action is offered once, as that state's primary action.
-   */
-  viewOwnsFirstRun?: boolean;
 }
 
 /**
- * Spec §11 status bar, on every view: the link to the Status view, then the run's stage, progress, spend, paused reason
- * + Resume, blocked schedule and Cancel. The link needs no definition; the run's part does.
+ * Spec §11 status bar, on every view: the link to the Status view, then the run's pass, progress, spend, a stopped run's
+ * sentence + fix (+ Resume when the fix names it), blocked schedule and Cancel. There is no Run now: every run action
+ * lives on the search it acts on, its card or its page (spec rev 55 §11). The link needs no definition; the run's part does.
  */
 export function StatusBar(props: StatusBarProps) {
   return (
@@ -209,7 +185,7 @@ export function StatusBar(props: StatusBarProps) {
 }
 
 /** The run's part of the bar: stage, progress, spend, paused reason + Resume, blocked schedule, Cancel. */
-function RunStatus({ definition, showRunNow, viewOwnsFirstRun = false }: StatusBarProps) {
+function RunStatus({ definition }: StatusBarProps) {
   const params = useSearchParams();
   const results = useResults(definition?.id ?? null, parseBasis(params.get(BASIS_PARAM)));
   const executions = results.data?.executions ?? [];
@@ -259,7 +235,8 @@ function RunStatus({ definition, showRunNow, viewOwnsFirstRun = false }: StatusB
     if (execution.error) void execution.refetch();
   };
   const confirmingCancel = e !== undefined && confirmingCancelId === e.id;
-  const canResume = e !== undefined && RESUMABLE_ACTIVE.has(e.status);
+  // why: Resume belongs with a sentence only when its fix names it (a browser page limit offers a fresh search instead)
+  const canResume = e !== undefined && RESUMABLE_ACTIVE.has(e.status) && fixNamesResume(stopOrNone(e.stop));
   const busy = (m: { isPending: boolean }) => (m.isPending ? true : undefined);
 
   return (
@@ -274,12 +251,14 @@ function RunStatus({ definition, showRunNow, viewOwnsFirstRun = false }: StatusB
           ) : (
             <>
               <span className="status-word" data-status={e.status}>
-                {COPY.statusName[e.status]}
+                {COPY.barStatusName[e.status]}
               </span>
-              {e.stage !== null ? <span>{COPY.stageName[e.stage]}</span> : null}
-              {e.status === 'paused_budget' || e.status === 'paused_error' ? (
+              {e.stage !== null ? <span>{COPY.barStageName[e.stage]}</span> : null}
+              {/* why: spec rev 55 §8.1, §11 — a stopped run's sentence as-is with its fix, `NO_STOP_CAUSE_TEXT` for a row
+              with no stored cause; never a stored status word and never a prefix of ours */}
+              {isStopped(e.status) ? (
                 <span className="warn-text">
-                  {COPY.paused(e.reason ?? COPY.statusName[e.status])}
+                  <StopSentence stop={stopOrNone(e.stop)} />
                   {e.resumeAfter !== null ? ` · ${COPY.resumesAt(formatRunInstant(e.resumeAfter))}` : null}
                 </span>
               ) : null}
@@ -326,12 +305,6 @@ function RunStatus({ definition, showRunNow, viewOwnsFirstRun = false }: StatusB
             </button>
           </>
         ) : null}
-        {showRunNow &&
-        !active &&
-        results.data !== undefined &&
-        !(viewOwnsFirstRun && executions.length === 0) ? (
-          <RunNowButton definition={definition} start={actions.start} />
-        ) : null}
       </div>
       {e !== undefined ? (
         // why: on a phone a finished run's numbers fold into one line (spec §11 375px); Cancel, Resume and the status stay
@@ -351,6 +324,8 @@ function RunStatus({ definition, showRunNow, viewOwnsFirstRun = false }: StatusB
                 aria-valuetext={l.text}
               >
                 {l.text}
+                {/* why: spec rev 55 §11 — the six buckets under the count */}
+                <span className="block text-xs">{l.detail}</span>
               </span>
             ))}
             {/* why: spec §11: the progress breakdown links to the Dates view's coverage section (WP19 Task 19.7) */}

@@ -58,6 +58,8 @@ export interface ProvenanceProps {
   showProvider?: boolean;
   /** Headers show the full age form visibly (spec §3, §11); rows show the compact form with the full one as title. */
   fullAge?: boolean;
+  /** Replaces the source's words (`sourceLabel(p)`), e.g. a flight list's own source name; the provenance is still validated. */
+  sourceLabel?: string;
 }
 
 /** Spec §11 provenance block, visible without hover. */
@@ -68,6 +70,7 @@ export function Provenance({
   destinationNote,
   showProvider = true,
   fullAge = false,
+  sourceLabel: sourceWords,
 }: ProvenanceProps) {
   const now = useNow();
   const p = assertProvenance(provenance);
@@ -79,7 +82,7 @@ export function Provenance({
       className={`inline-flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-fg-2 ${isCalendar ? 'rounded border border-dashed border-line-strong px-1' : ''}`}
     >
       {showProvider ? <span className="chip">{COPY.provider[p.providerId]}</span> : null}
-      <span>{sourceLabel(p)}</span>
+      <span>{sourceWords ?? sourceLabel(p)}</span>
       <span data-testid="point-of-sale">{pointOfSaleLabel(p)}</span>
       {fullAge ? (
         <span>{formatAgeFull(age)}</span>

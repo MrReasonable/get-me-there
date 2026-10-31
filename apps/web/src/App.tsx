@@ -1,15 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useDefinitions, useProviders } from './api/queries.js';
 import { AppBoundary } from './components/AppBoundary.js';
-import { DefinitionSelector } from './components/DefinitionSelector.js';
 import { LoadError, Loading } from './components/LoadState.js';
 import { Nav } from './components/Nav.js';
 import { StatusBar } from './components/StatusBar.js';
 import { SyntheticBanner } from './components/SyntheticBanner.js';
 import { COPY } from './copy.js';
 import { Flaps } from './flaps/Flaps.js';
-import { PHONE_QUERY, useMediaQuery } from './hooks/useMediaQuery.js';
-import { land } from './state/landing.js';
+import { type Landing, land } from './state/landing.js';
+import { useLastSearch } from './state/lastSearch.js';
 import { parseDetailPair } from './state/resultsState.js';
 import { updateSearchParams, useSearchParams } from './state/urlState.js';
 import type { ViewId } from './state/view.js';
@@ -20,14 +19,18 @@ import { HistoryView } from './views/History/HistoryView.js';
 import { ProvidersView } from './views/Providers/ProvidersView.js';
 import { ResultsView } from './views/Results/ResultsView.js';
 import { RowLanding } from './views/Results/RowLanding.js';
+import { SearchesView } from './views/Searches/SearchesView.js';
 import { StatusView } from './views/Status.js';
 
 /** The views that need no definition (spec §11: the Set up views other than Alerts). */
-const NO_DEFINITION: ReadonlySet<ViewId> = new Set(['definitions', 'providers', 'status']);
+const NO_DEFINITION: ReadonlySet<ViewId> = new Set(['searches', 'definitions', 'providers', 'status']);
+
+/** Searches, with `view=searches` written into the URL (spec rev 55 §11 URLs). */
+const SEARCHES_LANDING: Landing = { kind: 'view', view: 'searches', patch: { view: 'searches' } };
 
 /**
- * Spec §11 layout: synthetic banner, header with nav and definition selector, status bar on every
- * view. When /providers fails, the page says provider status is unknown instead of silently showing
+ * Spec rev 55 §11 layout: synthetic banner, header with the nav (no search selector: every action lives on the search it
+ * acts on), status bar on every view. When /providers fails, the page says provider status is unknown instead of silently showing
  * no banner (decision 36); the shell and the views each sit inside a boundary, so a render error never blanks the page.
  */
 export function App() {
@@ -39,23 +42,30 @@ export function App() {
     [definitions.data],
   );
   const requested = params.get('def');
-  const selectedId = requested ?? list[0]?.id ?? null;
+  const lastId = useLastSearch();
+  // why: `def=` names the page's search; with none, a view that needs one (History, Alerts) takes the search last
+  // opened, else the first, and a search's page without `def=` lands on Searches (below)
+  const selectedId = requested ?? (list.some((d) => d.id === lastId) ? lastId : null) ?? list[0]?.id ?? null;
   const selected = list.find((d) => d.id === selectedId) ?? null;
-  // why: spec §11 URLs (WP19 Task 19.7): the retired views and a Results URL without a date pair land on Dates, an old
-  // alert link's row= is looked up; the view drawn follows the landing at once, and the URL is rewritten to it
-  const landing = useMemo(() => land(params, selected), [params, selected]);
+  // why: the nav names the search last opened (spec rev 55 §11); it is absent until one has been, or once it is gone
+  const lastOpened = list.find((d) => d.id === lastId) ?? null;
+  // why: spec §11 URLs (WP20 Task 20.3): an absent or unknown view, a search's page without def= and an Edit page without
+  // edit= land on Searches; the retired views and a Results URL without a date pair land on a search's page, which with
+  // no def= is Searches too. The view drawn follows the landing at once, and the URL is rewritten to it
+  const landed0 = useMemo(() => land(params, selected), [params, selected]);
+  const landing: Landing =
+    landed0.kind === 'view' && landed0.view === 'dates' && requested === null ? SEARCHES_LANDING : landed0;
   const view: ViewId = landing.kind === 'view' ? landing.view : 'results';
-  const phone = useMediaQuery(PHONE_QUERY);
-  const selector =
-    definitions.data !== undefined ? <DefinitionSelector definitions={list} selectedId={selectedId} /> : null;
   // why: Results is the date pair detail (spec §11, WP19 Task 19.6): it renders only for a well-formed date pair
   const datePair = parseDetailPair(params);
   // why: the rewrite waits for the definitions, so a Calendar link's cal.dest is judged against the selected one
   const definitionsKnown = definitions.data !== undefined || definitions.error !== null;
+  // why: a landing on Searches needs no definition to be judged, so it is written at once
+  const rewriteReady = definitionsKnown || (landing.kind === 'view' && landing.view === 'searches');
   useEffect(() => {
-    if (definitionsKnown && landing.kind === 'view' && Object.keys(landing.patch).length > 0)
+    if (rewriteReady && landing.kind === 'view' && Object.keys(landing.patch).length > 0)
       updateSearchParams(landing.patch, 'replace');
-  }, [definitionsKnown, landing]);
+  }, [rewriteReady, landing]);
   // why: a row lookup that found nothing lands on Dates with a line saying why; it stays while the URL is the one the
   // lookup wrote, and goes with the operator's next change
   const [notice, setNotice] = useState<{ search: string; text: string } | null>(null);
@@ -75,8 +85,7 @@ export function App() {
   const needsDefinition = !NO_DEFINITION.has(view);
   // why: spec §11 Dates "No search yet": with no definition at all the Dates view says so itself, linking to Definitions
   const datesWithoutSearch = show('dates') && definitions.data !== undefined && list.length === 0;
-  // why: two boundaries. The outer one wraps the whole shell, so a render error in the banners, the header (Nav, the
-  // definition selector) or the status bar shows a message instead of a blank page (CodeRabbit batch 3); the inner one
+  // why: two boundaries. The outer one wraps the whole shell, so a render error in the banners, the header (Nav) or the status bar shows a message instead of a blank page (CodeRabbit batch 3); the inner one
   // keeps a failing view from taking the nav and status bar with it.
   return (
     <AppBoundary>
@@ -98,17 +107,15 @@ export function App() {
               <span className="brand-words">{COPY.appTitle}</span>
               <Flaps text={COPY.appTitle} className="brand-flaps" />
             </h1>
-            <Nav current={view} menu={phone ? selector : null} />
-            {/* why: only a successful load can say there are no definitions; while loading or after a failure (shown
-            with a retry in the main region) the selector waits (CodeRabbit batch 3) */}
-            {phone ? null : <span className="ml-auto flex min-w-0">{selector}</span>}
+            <Nav
+              current={view}
+              search={lastOpened === null ? null : { id: lastOpened.id, name: lastOpened.name }}
+            />
           </header>
           <div className="statusbar-row">
-            <StatusBar
-              definition={selected}
-              showRunNow={view === 'dates' || view === 'definitions'}
-              viewOwnsFirstRun={view === 'dates'}
-            />
+            {/* why: the first screen names no search, so the bar's run part follows only a search the URL names (`def=`);
+            every run action lives on the search it acts on (spec rev 55 §11) */}
+            <StatusBar definition={view === 'searches' && requested === null ? null : selected} />
           </div>
         </div>
         <main id="main" tabIndex={-1} className="view-main pt-5">
@@ -125,8 +132,12 @@ export function App() {
                 {requested !== null ? COPY.definitionNotFound : COPY.noDefinitions}
               </p>
             ) : null}
-            {needsDefinition && selected !== null && !providerStatusKnown ? <Loading /> : null}
+            {(needsDefinition && selected !== null && !providerStatusKnown) ||
+            (show('searches') && !providerStatusKnown) ? (
+              <Loading />
+            ) : null}
             {!landed && definitionsKnown ? <Loading /> : null}
+            {show('searches') && providerStatusKnown ? <SearchesView /> : null}
             {datesWithoutSearch ? <DatesView definition={null} /> : null}
             {show('dates') && notice !== null && notice.search === params.toString() ? (
               <p role="status" className="plate notice mb-4">

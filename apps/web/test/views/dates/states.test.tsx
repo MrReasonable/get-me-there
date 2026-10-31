@@ -29,13 +29,16 @@ describe('the Dates view’s states (spec §11)', () => {
     renderDates({ def: null });
     expect(screen.getByText(/^No search yet\./)).toBeInTheDocument();
     const link = screen.getByRole('link', { name: 'Plan one under Searches' });
-    expect(link.getAttribute('href')).toContain('view=definitions');
+    expect(link.getAttribute('href')).toContain('view=searches');
   });
 
-  it('never run: "Not run yet: nothing has been searched", the estimate and Run now; no board', async () => {
+  it('never run: "Not run yet: nothing has been searched" and Search now (no Run now); no board', async () => {
     renderDates({ body: { executions: [], executionId: null } });
     expect(await screen.findByText('Not run yet: nothing has been searched.')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: COPY.runNow(154, 2000, '£0') })).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: COPY.searchAgain.searchNow })).toBeEnabled(),
+    );
+    expect(screen.queryByRole('button', { name: /Run now/ })).toBeNull();
     expect(screen.queryByRole('table', { name: /^Best dates/ })).toBeNull();
     expect(screen.getByTestId('dates-run')).toHaveTextContent('no run yet');
   });
@@ -73,19 +76,31 @@ describe('the Dates view’s states (spec §11)', () => {
     expect(table).toHaveTextContent('3 of 4 airport pairs not searched');
   });
 
-  it('paused or budget-stopped: the reason and Resume, "the board shows prices found before the pause", the not searched count', async () => {
-    serveRun({ status: 'paused_budget', reason: 'searchapi provider-month cap reached' });
+  it('paused or budget-stopped: the stop’s sentence and fix and Resume (the fix names it), "the board shows prices found before the pause", the not searched count', async () => {
+    serveRun({
+      status: 'paused_budget',
+      stop: {
+        sentence: "Stopped at 1 Nov 00:00: SearchApi's monthly limit was reached.",
+        fix: { text: 'Raise the limit in Edit, then Resume', command: null },
+      },
+    });
     const { user } = renderDates({
       body: {
         executions: [runSummary({ status: 'paused_budget', finishedAt: null })],
         pairs: { [at('2027-03-14', 10)]: pricedPair(priced(30_000)) },
       },
     });
-    expect(await screen.findByText('Paused: searchapi provider-month cap reached')).toBeInTheDocument();
+    expect(
+      await screen.findByText("Stopped at 1 Nov 00:00: SearchApi's monthly limit was reached.", {
+        selector: '[data-testid="stop-sentence"]',
+      }),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Raise the limit in Edit, then Resume')).toBeInTheDocument();
+    expect(screen.queryByText(/^Paused:/)).toBeNull();
     expect(screen.getByText('The board shows prices found before the pause.')).toBeInTheDocument();
     expect(screen.getByText('368 cells not searched')).toBeInTheDocument();
     expect(screen.getByTestId('dates-run')).toHaveTextContent(
-      'run paused 3h ago: searchapi provider-month cap reached',
+      "run paused 3h ago: Stopped at 1 Nov 00:00: SearchApi's monthly limit was reached.",
     );
     let resumed = '';
     server.use(

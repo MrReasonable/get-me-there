@@ -48,6 +48,11 @@ export interface PriceCellProps {
    */
   flaps?: boolean;
   flapSlot?: string | undefined;
+  /**
+   * Replaces the source's words on every face (the title, the compact detail and the provenance line), for a price
+   * whose source has a name of its own (a flight list's, WP20 Task 20.10). The provenance is validated all the same.
+   */
+  sourceLabel?: string;
 }
 
 // why: a badge is a state tag, a black flap chip carrying its own ink (white, amber or red), so it reads the same on
@@ -71,7 +76,7 @@ export function PriceCell(props: PriceCellProps) {
   const calendar = isCalendarPrice(p, props.calendar);
   const detail = [
     COPY.provider[p.providerId],
-    sourceLabel(p),
+    props.sourceLabel ?? sourceLabel(p),
     formatAgeFull(age),
     ...(calendar ? [COPY.constraintsNotChecked] : []),
   ];
@@ -191,6 +196,7 @@ export function PriceCell(props: PriceCellProps) {
           destinationNote={props.destinationNote}
           showProvider={props.besideColumns !== true}
           fullAge={props.fullAge === true}
+          {...(props.sourceLabel === undefined ? {} : { sourceLabel: props.sourceLabel })}
         />
       )}
       {props.superseded === true ? <span className="text-xs font-medium">{COPY.superseded}</span> : null}

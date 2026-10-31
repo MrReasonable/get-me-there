@@ -377,8 +377,10 @@ describe('the App (spec §11 layout)', () => {
     expect(await screen.findByRole('heading', { name: 'Providers' })).toBeInTheDocument();
     expect(screen.getByRole('region', { name: 'Run status' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Run now/ })).toBeNull();
-    // why: WP19 Task 19.7: the detail is not in the nav; Dates is, and a board row opens the detail again
-    await user.click(within(nav).getByRole('link', { name: 'Dates' }));
+    // why: WP19 Task 19.7: the detail is not in the nav; a card's See dates opens the search's page (WP20 Task 20.3), and a
+    // board row opens the detail again
+    await user.click(within(nav).getByRole('link', { name: 'Searches' }));
+    await user.click(await screen.findByRole('link', { name: /^See dates for / }));
     const board = await screen.findByRole('table', { name: /^Best dates/ });
     const [first] = within(board).getAllByRole('row').slice(1);
     if (first === undefined) throw new Error('the board has a row');

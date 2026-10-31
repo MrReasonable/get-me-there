@@ -24,16 +24,6 @@ export type ExecutionResponse = z.infer<typeof apiContract.executionResponseSche
 export type ExecutionSummary = z.infer<typeof apiContract.executionSummarySchema>;
 /** Spec §8.1: an overrun is more than 10% above the pre-factor plan. */
 export const OVERRUN_TOLERANCE = 1.1;
-const STATUSES_WITH_REASON = new Set([
-  'paused_budget',
-  'paused_error',
-  'skipped_budget',
-  'skipped_confirm',
-  'skipped_window',
-  'skipped_missed',
-  'interrupted',
-  'cancelled',
-]);
 
 /**
  * Spec revision 55 §10: the statuses a run stops or is skipped in, the ones whose `stop` is non-null. A completed row
@@ -67,16 +57,6 @@ export function stopOf(
     mode: runModeOf(ports.config),
     scheduled: def !== null && isScheduled(def),
   });
-}
-
-/** A stored cause's sentence on a row whose status shows no stop (a completed row keeps none, so this is a guard). */
-function causeText(ports: Pick<Ports, 'config'>, e: Execution, def: SearchDefinition | null): string | null {
-  if (e.stopCause === null) return null;
-  return stopText(e.stopCause, {
-    tz: e.snapshot.scheduleTz,
-    mode: runModeOf(ports.config),
-    scheduled: def !== null && isScheduled(def),
-  }).sentence;
 }
 
 /**
@@ -182,7 +162,6 @@ export function executionResponse(
   );
   const def = ports.repos.definitions.get(e.definitionId);
   const stop = stopOf(ports, e, def);
-  const causeSentence = e.stopCause === null ? null : (stop?.sentence ?? causeText(ports, e, def));
   const overrun = progress.some((p) =>
     overrunOf(
       p.stage,
@@ -197,14 +176,10 @@ export function executionResponse(
     cell: e.cell,
     status: e.status,
     stage: e.stage,
-    // why: R1 (revision 55 §8.1) — the api never sends stored error text: with no stored cause (a row written before
-    // migration 0011) both fields are null; with one, they carry that cause's sentence
-    reason: STATUSES_WITH_REASON.has(e.status) ? causeSentence : null,
     resumeAfter: e.resumeAfter,
     trigger: e.trigger,
     startedAt: e.startedAt,
     finishedAt: e.finishedAt,
-    errorText: causeSentence,
     scheduledFor: e.scheduledFor,
     isCatchUp: e.isCatchUp,
     skipCode: e.skipCode,

@@ -4,11 +4,13 @@ import { ApiError } from '../../api/client.js';
 import { DATES_DRAWN_MARK, useDatePairs, useExecutionWatch, useProvidersWatch } from '../../api/queries.js';
 import type { DefinitionResponse, ExecutionResponse } from '../../api/types.js';
 import { LoadError } from '../../components/LoadState.js';
+import { fixNamesResume, stopOrNone } from '../../components/StopWords.js';
 import { SyntheticBanner } from '../../components/SyntheticBanner.js';
 import { COPY } from '../../copy.js';
 import { coverageLineText } from '../../lib/coverageLine.js';
 import { useNow } from '../../now.js';
 import { type DatesUiState, filtersActive, parseDatesState, scopeQuery } from '../../state/datesState.js';
+import { writeLastSearch } from '../../state/lastSearch.js';
 import { useSearchParams } from '../../state/urlState.js';
 import { BoardTable } from './BoardTable.js';
 import { type BoardModel, boardModel, isSyntheticRead, PAGE_SIZE } from './board.js';
@@ -84,6 +86,8 @@ function DatesOf({
   clock: RereadClock;
 }) {
   const params = useSearchParams();
+  // why: spec rev 55 §11 — opening a search's page remembers it as the search last opened (the nav names it)
+  useEffect(() => writeLastSearch(definition.id), [definition.id]);
   const state = useMemo(() => parseDatesState(params, definition), [params, definition]);
   const scope = scopeQuery(state);
   const scopeKey = JSON.stringify(scope);
@@ -279,9 +283,9 @@ function Body({
       {latest !== undefined && status !== undefined && PAUSED.has(status) ? (
         <Paused
           executionId={latest.id}
-          reason={run?.reason ?? COPY.statusName[status]}
+          stop={stopOrNone(run?.stop)}
           notSearched={counts.buckets.not_run}
-          canResume={RESUMABLE.has(status)}
+          canResume={RESUMABLE.has(status) && fixNamesResume(stopOrNone(run?.stop))}
         />
       ) : null}
       {model.ranked.length > 0 ? (

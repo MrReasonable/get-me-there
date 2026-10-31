@@ -430,11 +430,13 @@ describe('revision 55 §8.1, §10: enabled 0 starts, Search again starts fresh, 
         sentence: 'No reason was recorded for this run.',
         fix: { text: 'Search again', command: null },
       });
-      expect([e.reason, e.errorText]).toEqual([null, null]);
+      // why: R1 — the response has no stored-text field at all, so nothing but `stop` can carry the words
+      expect(text).not.toContain('"reason"');
+      expect(text).not.toContain('"errorText"');
     },
   );
 
-  it("a stopped run with a stored cause sends that cause's sentence as reason and errorText, never its stored text (R1)", async () => {
+  it("a stopped run with a stored cause sends that cause's sentence as stop, never its stored text (R1)", async () => {
     const x = await harness();
     const def = x.ports.repos.definitions.create(small());
     const s = seeder(x.ports);
@@ -444,10 +446,7 @@ describe('revision 55 §8.1, §10: enabled 0 starts, Search again starts fresh, 
       errorText: 'an engine note that must not be sent',
     });
     const e = await execution(x, s.id('C'));
-    expect([e.reason, e.errorText, e.stop?.sentence]).toEqual([
-      'Stopped by you.',
-      'Stopped by you.',
-      'Stopped by you.',
-    ]);
+    expect(e.stop?.sentence).toBe('Stopped by you.');
+    expect(JSON.stringify(e)).not.toContain('an engine note that must not be sent');
   });
 });

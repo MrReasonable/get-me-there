@@ -19,7 +19,6 @@ const cases: ReadonlyArray<[string, string, string]> = [
     COPY.spendProviderLifetime('P', 0, '1'),
     COPY.spendProviderLifetime('P', 0, '10'),
   ],
-  ['runNow', COPY.runNow(1, 5, '£1'), COPY.runNow(2, 5, '£1')],
   ['requestRow', COPY.requestRow(1, '1', 1, '£1'), COPY.requestRow(2, '2', 2, '£1')],
   ['requestRowTiles', COPY.requestRowTiles(1, '1', 1, 1, '£1'), COPY.requestRowTiles(2, '2', 2, 2, '£1')],
   ['usageWindow', COPY.usageWindow(0, '1', 'a', 'b'), COPY.usageWindow(0, '5', 'a', 'b')],

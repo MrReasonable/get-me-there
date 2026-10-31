@@ -86,7 +86,9 @@ const route = (
   auth: 'required',
   ...extra,
 });
-const deleted = definitionResponseSchema.pick({ id: true, deletedAt: true });
+/** `DELETE /definitions/:id`'s answer (the id and the deletion instant); exported so the web client passes the route's own schema. */
+export const definitionDeletedResponseSchema = definitionResponseSchema.pick({ id: true, deletedAt: true });
+const deleted = definitionDeletedResponseSchema;
 /** One entry per spec §10 row; api mounts these, web derives its client from them. */
 export const ROUTES: readonly RouteDef[] = [
   route('GET', '/health', healthResponseSchema, { auth: 'public' }),

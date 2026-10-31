@@ -129,11 +129,11 @@ describe('results UI state in the URL (spec §11: filter and sort persist across
     expect(parseBasis('calendar')).toBe('calendar');
     expect(parseBasis('verified')).toBe('verified');
     expect(parseBasis('live')).toBeNull();
-    // why: WP19 Task 19.7: Dates is the default view; the retired values are not views (landing.ts sends them there)
+    // why: WP20 Task 20.3: Searches is the default view; the retired values are not views (landing.ts sends them on)
     expect(parseView('history')).toBe('history');
-    expect(parseView('coverage')).toBe('dates');
-    expect(parseView(null)).toBe('dates');
-    expect(parseView('nope')).toBe('dates');
+    expect(parseView('coverage')).toBe('searches');
+    expect(parseView(null)).toBe('searches');
+    expect(parseView('nope')).toBe('searches');
   });
 
   it('row= selects a results row by resultRowKey (email links)', () => {

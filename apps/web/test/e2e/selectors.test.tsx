@@ -85,12 +85,14 @@ describe('the Playwright smoke’s Dates selectors match the rendered view', () 
 
 describe('the Playwright smoke’s nav and detail selectors match the rendered markup', () => {
   it('the nav: two tiers labelled by their names, the current entry with its non-colour cue, 44 px links', () => {
-    renderWithProviders(<Nav current="dates" />, { search: '?view=dates&def=def-0001' });
+    renderWithProviders(<Nav current="dates" search={{ id: 'def-0001', name: 'Worked example' }} />, {
+      search: '?view=dates&def=def-0001',
+    });
     const nav = screen.getByRole('navigation', { name: SMOKE.nav });
     const lists = SMOKE.navTiers.map((name) => within(nav).getByRole('list', { name }));
     expect(lists).toHaveLength(2);
     const current = one(SMOKE.navCurrent);
-    expect(current).toHaveTextContent(COPY.nav.dates);
+    expect(current).toHaveTextContent('Worked example');
     expect(current.className).toContain('border-b-4');
     for (const link of within(nav).getAllByRole('link')) expect(link.className).toContain('min-h-11');
   });

@@ -3,7 +3,6 @@
 import { screen, within } from '@testing-library/react';
 import { HttpResponse, http } from 'msw';
 import { describe, expect, it } from 'vitest';
-import { DefinitionSelector } from '../../src/components/DefinitionSelector.js';
 import { SETUP_COPY } from '../../src/copy/setup.js';
 import { COPY } from '../../src/copy.js';
 import { AlertsView } from '../../src/views/Alerts/index.js';
@@ -175,19 +174,5 @@ describe('History', () => {
     renderWithProviders(<HistoryView definition={definition()} />);
     expect(await screen.findByLabelText(COPY.historyView.routePicker)).toHaveClass('max-w-full');
     expect(screen.getByLabelText(COPY.historyView.routePicker).closest('label')).toHaveClass('max-w-xs');
-  });
-});
-
-describe('the definition selector at 375 px', () => {
-  it('can shrink inside the header, so a long search name never widens the page', () => {
-    renderWithProviders(
-      <DefinitionSelector
-        definitions={[definition({ name: 'London to New York, ten to twenty-one nights, economy, weekly' })]}
-        selectedId="def-0001"
-      />,
-    );
-    const select = screen.getByLabelText(COPY.definitionSelectorLabel);
-    expect(select).toHaveClass('min-w-0', 'max-w-full');
-    expect(select.parentElement).toHaveClass('min-w-0', 'max-w-full');
   });
 });

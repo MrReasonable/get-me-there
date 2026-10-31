@@ -39,17 +39,24 @@ describe('the header line (spec §11)', () => {
     expect(screen.getByTestId('dates-run')).toHaveTextContent('run finished 2h ago');
   });
 
-  it('a paused run names its reason from the run itself', async () => {
+  it('a paused run names its stop from the run itself, never a stored status word', async () => {
     server.use(
       http.get(`${API}/executions/:id`, () =>
-        HttpResponse.json(execution({ status: 'paused_error', reason: 'rate limited' })),
+        HttpResponse.json(
+          execution({
+            status: 'paused_error',
+            stop: { sentence: 'The source asked the app to slow down.', fix: null },
+          }),
+        ),
       ),
     );
     renderDates({
       body: { ...workedDates(), executions: [runSummary({ status: 'paused_error', finishedAt: null })] },
     });
     await findBoard();
-    expect(await screen.findByText('run paused 3h ago: rate limited')).toBeInTheDocument();
+    expect(
+      await screen.findByText('run paused 3h ago: The source asked the app to slow down.'),
+    ).toBeInTheDocument();
   });
 
   it('a run that ended otherwise names its status', async () => {

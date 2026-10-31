@@ -16,6 +16,7 @@ export type CalendarGapResponse = z.output<typeof apiContract.calendarGapRespons
 export type AirportsResponse = z.output<typeof apiContract.airportsResponseSchema>;
 export type PriceCellData = z.output<typeof apiContract.priceCellSchema>;
 export type UsageRow = z.output<typeof apiContract.usageSchema>;
+export type SearchCard = z.output<typeof apiContract.searchCardSchema>;
 export type Basis = ResultBasis;
 
 /**

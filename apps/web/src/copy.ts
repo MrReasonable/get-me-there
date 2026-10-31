@@ -21,6 +21,7 @@ import {
   type VerdictClass,
 } from '@gmt/core';
 import type { z } from 'zod';
+import { DAY_PLURAL, listText } from './copy/setup.js';
 import { EXAMPLE_PAIR_CELLS } from './example.js';
 
 /** The singular noun for a count of exactly one (a number, or a cap already formatted as text), else the plural. */
@@ -72,19 +73,19 @@ export const COPY = {
   /** The phone's one nav row opens the full nav and the search selector (departure board, Ian 2026-10-27). */
   navMenu: 'All views',
   nav: {
+    searches: 'Searches',
+    // why: the nav names this entry by the search last opened (spec rev 55 §11); this word is only the Record's key
     dates: 'Dates',
-    // why: the date pair detail is not in the nav (spec §11); the word names the view in the Record every ViewId keys
+    // why: the date pair detail and the Edit page are not in the nav (spec §11); the words name the views in the Record every ViewId keys
     results: 'Results',
     history: 'History',
-    // why: the view's key stays `definitions` (its ?view= value); the operator reads it as Searches (plan a search)
-    definitions: 'Searches',
+    definitions: 'Edit',
     alerts: 'Alerts',
     providers: 'Providers',
     status: 'Status',
   },
-  definitionSelectorLabel: 'Search definition',
   noDefinitions: 'No searches yet. Plan one under Searches.',
-  definitionNotFound: 'The definition in this link no longer exists. Pick another one above.',
+  definitionNotFound: 'The search in this link no longer exists. Pick one under Searches.',
   loading: 'Loading…',
   loadFailed: (message: string) => `Could not load: ${message}`,
   retryLoad: 'Try again',
@@ -258,7 +259,22 @@ export const COPY = {
   spanExecutions: (runs: number, onDemand: number) =>
     `across ${runs} ${runs === 1 ? 'run' : 'runs'}${onDemand === 0 ? '' : ` and ${onDemand} on-demand ${onDemand === 1 ? 'search' : 'searches'}`}; no single run status applies`,
   notCompletedBanner: (status: string) => `The latest run is ${status}; these results may be partial.`,
-  noExecution: 'No run yet for this definition.',
+  noExecution: 'No run yet for this search.',
+  // why: the bar's status word (spec rev 55 §3, §11): a stopped run is "stopped", never "paused: error"; its sentence
+  // follows. Every other status keeps its set-up word.
+  barStatusName: {
+    pending: 'pending',
+    running: 'running',
+    paused_budget: 'stopped',
+    paused_error: 'stopped',
+    interrupted: 'interrupted',
+    cancelled: 'cancelled',
+    completed: 'completed',
+    skipped_budget: 'skipped: over budget',
+    skipped_confirm: 'skipped: cost not confirmed',
+    skipped_window: 'skipped: window has no dates',
+    skipped_missed: 'skipped: missed and not caught up',
+  } satisfies Record<ExecutionStatus, string>,
   statusName: {
     pending: 'pending',
     running: 'running',
@@ -273,14 +289,24 @@ export const COPY = {
     skipped_missed: 'skipped: missed and not caught up',
   } satisfies Record<ExecutionStatus, string>,
   stageName: { discovery: 'discovery', verification: 'itinerary search' } satisfies Record<Stage, string>,
+  // why: spec rev 55 §3 — the status bar speaks in main-path words; the coverage section keeps the set-up terms above
+  barStageName: {
+    discovery: 'the first pass across your dates',
+    verification: 'checking fares',
+  } satisfies Record<Stage, string>,
 
   // status bar (spec §11)
   statusBarLabel: 'Run status',
   // why: ruling 4 (decision 67): the bar names every bucket; an umbrella ("searched", "attempted") is View D's alone.
+  // why: spec rev 55 §3, §11 — the bar shows a source's cells as the five marks (no fares and no cached data are both
+  // "no price shown"), the stage and source in main-path words, and the six buckets under the count (`progressBuckets`).
   progress: (p: { stage: string; provider: string; buckets: ProgressBuckets; total: number }) =>
-    `${p.stage} · ${p.provider}: ${p.buckets.priced} priced · ${p.buckets.empty} no fares · ${p.buckets.no_data} no cached data · ${p.buckets.error} error · ${p.buckets.skipped} skipped · ${p.buckets.not_run} not searched of ${p.total} ${noun(p.total, 'cell', 'cells')}`,
+    `${p.stage} · ${p.provider}: ${p.buckets.priced} priced · ${p.buckets.empty + p.buckets.no_data} no price shown · ${p.buckets.error} couldn't be read · ${p.buckets.skipped} not reached · ${p.buckets.not_run} not searched of ${p.total} date and airport ${noun(p.total, 'pair', 'pairs')}`,
   progressSelected: (p: { provider: string; buckets: ProgressBuckets; selected: number }) =>
-    `itinerary search · ${p.provider}: ${p.buckets.priced} priced · ${p.buckets.empty} no fares · ${p.buckets.no_data} no cached data · ${p.buckets.error} error of ${p.selected} selected · ${p.buckets.skipped} skipped · ${p.buckets.not_run} not searched`,
+    `checking fares · ${p.provider}: ${p.buckets.priced} priced · ${p.buckets.empty + p.buckets.no_data} no price shown · ${p.buckets.error} couldn't be read of ${p.selected} chosen · ${p.buckets.skipped} not reached · ${p.buckets.not_run} not searched`,
+  /** The six buckets under a progress count (spec §11: "the six buckets under the count"), the coverage section's terms. */
+  progressBuckets: (b: ProgressBuckets) =>
+    `${b.priced} priced · ${b.empty} no fares · ${b.no_data} no cached data · ${b.error} error · ${b.skipped} skipped · ${b.not_run} not searched`,
   progressLabel: (stage: string, provider: string) => `${stage} progress, ${provider}`,
   spendRunCalls: (calls: number, cap: string) =>
     `this run: ${calls} of ${cap} billed ${noun(cap, 'call', 'calls')}`,
@@ -294,7 +320,6 @@ export const COPY = {
     `${provider} ${calls} of ${cap} ${noun(cap, 'call', 'calls')} over the plan's lifetime`,
   nearCap: 'near cap',
   noCap: 'no cap',
-  paused: (reason: string) => `Paused: ${reason}`,
   resumesAt: (when: string) => `resumes ${when}`,
   scheduleBlocked: (date: string) => `schedule blocked since ${date}`,
   childRun: (status: string) => `itinerary search for one cell: ${status}`,
@@ -302,14 +327,10 @@ export const COPY = {
   cancel: 'Cancel',
   confirmCancel: 'Confirm: cancel this run',
   keepRunning: 'Keep running',
-  runNow: (calls: number, cap: number, cost: string) =>
-    `Run now: about ${calls} ${noun(calls, 'call', 'calls')}, hard stop ${cap} · ${cost}`,
-  runNowUnestimated: 'Run now',
   working: 'Working…',
   runDetails: 'Progress and spend',
   // WP19 Task 19.7 (spec §11): the status bar's progress breakdown links to the Dates view's coverage section
   progressCoverageLink: 'Coverage in the Dates view',
-  runNowBlocked: 'The estimate is above what you confirmed; confirm it under Searches before running.',
 
   // filters (spec §6.5)
   filtersHeading: 'Filter',
@@ -592,6 +613,73 @@ export const COPY = {
   confirmNew: (calls: number, cap: number, amount: string) =>
     `Confirm about ${calls} ${noun(calls, 'call', 'calls')} (hard stop ${cap}), ${amount} per run`,
   none: 'none',
+  // --- WP20: the Searches view, the first screen (spec rev 55 §11); main-path words only ---
+  searchesView: {
+    heading: 'Searches',
+    listLabel: 'Your searches',
+    sideHeading: 'New search',
+    /** Until the form is mounted beside the list (Task 20.5), the column links to the form on the Edit page. */
+    noSearches: 'No searches yet',
+    codes: (origins: string, destinations: string) => `${origins} → ${destinations}`,
+    windowSpan: (from: string, to: string) => `${from} – ${to}`,
+    windowRolling: (lengthDays: number, startOffsetDays: number) =>
+      `rolling: ${lengthDays} ${noun(lengthDays, 'day', 'days')} from ${startOffsetDays} ${noun(startOffsetDays, 'day', 'days')} ahead`,
+    repeats: (days: readonly number[], time: string) =>
+      days.length === 7
+        ? `repeats every day ${time}`
+        : `repeats ${listText(days.map((d) => DAY_PLURAL[d] ?? String(d)))} ${time}`,
+    repeatsDaily: (time: string) => `repeats every day ${time}`,
+    repeatsOther: 'repeats on a set schedule',
+    // the state line
+    searching: (done: number, total: number, left: string | null) =>
+      `Searching · ${done} of ${total} date ${noun(total, 'pair', 'pairs')}${left === null ? '' : ` · ${left}`}`,
+    readingFlights: (read: number, planned: number) => `Reading flights · ${read} of ${planned}`,
+    left: (span: string) => `about ${span} left`,
+    searchedAgo: (ago: string) => `Searched ${ago}`,
+    datesChanged: (notSearched: number) =>
+      notSearched > 0
+        ? `Dates changed: ${notSearched} date ${noun(notSearched, 'pair', 'pairs')} not searched yet`
+        : 'Dates changed since this was last searched',
+    notSearchedYet: 'Not searched yet',
+    neverSearched: (never: number, total: number) =>
+      `${never} of ${total} date ${noun(total, 'pair', 'pairs')} never searched`,
+    cheapestSoFar: 'cheapest so far',
+    trip: (departure: string, back: string) => `${departure} → ${back}`,
+    // actions
+    seeDates: 'See dates',
+    seeDatesOf: (name: string) => `See dates for ${name}`,
+    searchAgainOf: (name: string) => `Search again: ${name}`,
+    edit: 'Edit',
+    editOf: (name: string) => `Edit ${name}`,
+    remove: 'Remove',
+    removeOf: (name: string) => `Remove ${name}`,
+    // remove, inline and undoable
+    removeAsk: (name: string) => `Remove ${name}?`,
+    cancelAndRemoveAsk: (name: string) => `Cancel and remove ${name}?`,
+    removeConfirm: 'Remove',
+    keep: 'Keep',
+    removed: (name: string) => `Removed ${name}.`,
+    undo: 'Undo',
+    undoOf: (name: string) => `Undo removing ${name}`,
+    removeFailedLine: (message: string) => `Could not remove: ${message}`,
+    restoreFailedLine: (message: string) => `Could not undo: ${message}`,
+  },
+  // --- WP20: Search again and Search now, one button (spec rev 55 §8.1, §11) ---
+  searchAgain: {
+    label: 'Search again',
+    searchNow: 'Search now',
+    working: 'Searching…',
+    // why: a refusal is said in plain words beside the button (spec §11); `already` is the 409 of a search that is running
+    refused: {
+      active: 'Already searching',
+      cap: 'A spending limit stops this search from starting. Raise the limit in Edit, or search again when it resets.',
+      confirm: "Today's estimate is above what was confirmed for this search. Check Edit, then search again.",
+      disabled: 'No price source is set up, so nothing was searched. Set up a price source (Providers).',
+      window: 'None of the dates in this search are still ahead. Change the dates in Edit.',
+      'shutting-down': 'The app is shutting down, so nothing was started.',
+      not_found: 'This search no longer exists.',
+    } satisfies Record<string, string>,
+  },
   // --- WP19: the Dates view (spec §11 Dates; revision 50) ---
   datesView: {
     title: 'Dates',

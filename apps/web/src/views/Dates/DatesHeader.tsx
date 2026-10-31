@@ -1,4 +1,10 @@
-import { cellKeyString, type DecodedDatePairs, formatAgo, type IsoDateTime } from '@gmt/core';
+import {
+  cellKeyString,
+  type DecodedDatePairs,
+  formatAgo,
+  type IsoDateTime,
+  NO_STOP_CAUSE_TEXT,
+} from '@gmt/core';
 import { useCalendarGap } from '../../api/queries.js';
 import type { DefinitionResponse, ExecutionResponse } from '../../api/types.js';
 import { LoadError } from '../../components/LoadState.js';
@@ -42,9 +48,11 @@ export function runLine(
   if (latest.startedAt === null || at === null) return D.runNotStarted(COPY.statusName[status]);
   if (RUNNING.has(status)) return D.runInProgress(runAgo(latest.startedAt, now));
   if (PAUSED.has(status))
+    // why: R1 (spec rev 55 §8.1) — a stopped run is worded by its stored cause's sentence; a run whose read has not
+    // answered, or a row with no cause, says "No reason was recorded", never a stored status word such as "paused: error"
     return D.runPaused(
       runAgo(at, now),
-      (run?.id === latest.id ? run.reason : null) ?? COPY.statusName[status],
+      (run?.id === latest.id ? run.stop?.sentence : undefined) ?? NO_STOP_CAUSE_TEXT.sentence,
     );
   if (status === 'completed') return D.runFinished(runAgo(at, now));
   return D.runEnded(COPY.statusName[status], runAgo(at, now));

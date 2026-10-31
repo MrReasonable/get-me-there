@@ -26,6 +26,7 @@ import { drawn, renderWithProviders } from '../render.js';
  * showed nothing but an error or a skeleton (neither carries a banned word or a "£").
  */
 const CONTENT: Record<(typeof VIEWS)[number], () => Promise<HTMLElement>> = {
+  searches: () => screen.findByRole('list', { name: COPY.searchesView.listLabel }),
   dates: () => screen.findByRole('table', { name: /^Best dates/ }),
   results: () => screen.findByRole('table', { name: 'Round trips found' }),
   // why: the chart draws its axes after the figure renders; the sweep reads them, so it waits for the drawn surface
@@ -47,7 +48,13 @@ describe('rendered views contain no banned word, and no "£" outside a price or 
         http.get(`${API}/providers`, () => HttpResponse.json(providersResponse({ synthetic: true }))),
         http.get(`${API}/executions/:id`, () =>
           HttpResponse.json(
-            execution({ status: 'paused_budget', reason: 'searchapi provider-month cap reached' }),
+            execution({
+              status: 'paused_budget',
+              stop: {
+                sentence: 'Stopped at its monthly limit.',
+                fix: { text: 'Search again', command: null },
+              },
+            }),
           ),
         ),
         http.get(`${API}/definitions/:id/results`, () =>
@@ -65,8 +72,10 @@ describe('rendered views contain no banned word, and no "£" outside a price or 
       const classes = 'f.class=verified,partially-verified,failed,unchecked';
       // why: Results is the date pair detail (WP19 Task 19.6): its URL names the date pair
       const pair = view === 'results' ? '&depart=2027-03-14&return=2027-03-28' : '';
+      // why: the Edit page needs `edit=` (spec rev 55 §11 URLs); `new` is the form the first screen also shows
+      const edit = view === 'definitions' ? '&edit=new' : '';
       const { user } = renderWithProviders(<App />, {
-        search: `?view=${view}&def=def-0001&${classes}${pair}`,
+        search: `?view=${view}&def=def-0001&${classes}${pair}${edit}`,
       });
       await screen.findByRole('navigation', { name: 'Views' });
       await waitFor(() => expect(screen.queryByText('Loading…')).toBeNull());

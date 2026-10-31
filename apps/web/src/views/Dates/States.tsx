@@ -1,9 +1,10 @@
 import { useExecutionActions } from '../../api/queries.js';
 import type { DefinitionResponse } from '../../api/types.js';
-import { RunNowButton } from '../../components/StatusBar.js';
+import { StopSentence, type StopWords } from '../../components/StopWords.js';
 import { COPY } from '../../copy.js';
 import { CLEARED_FILTERS, datesPatch } from '../../state/datesState.js';
 import { hrefWith, navigateTo, updateSearchParams } from '../../state/urlState.js';
+import { SearchAgainButton } from './SearchAgainButton.js';
 
 // Spec §11 Dates "States", each in words, never colour alone. The view composes them; the board, the overview and
 // the coverage line carry the rest of each state.
@@ -16,8 +17,8 @@ export function NoSearch() {
     <p className="plate notice text-[17px]">
       {D.noSearch}{' '}
       <a
-        href={hrefWith({ view: 'definitions' })}
-        onClick={navigateTo({ view: 'definitions' })}
+        href={hrefWith({ view: 'searches' })}
+        onClick={navigateTo({ view: 'searches' })}
         className="font-bold underline"
       >
         {D.noSearchLink}
@@ -26,31 +27,31 @@ export function NoSearch() {
   );
 }
 
-/** Never run: "Not run yet: nothing has been searched", the estimate and Run now (the button states the estimate). */
+/**
+ * Never run: "Not run yet: nothing has been searched" and Search now, the one start button (spec rev 55 §11; WP20 Task
+ * 20.3). Its refusals are said beside it by the button itself.
+ */
 export function NeverRun({ definition }: { definition: DefinitionResponse }) {
-  const { start } = useExecutionActions();
   return (
     <div className="plate notice flex flex-wrap items-center gap-3">
       <p className="font-bold">{D.neverRun}</p>
-      <RunNowButton definition={definition} start={start} />
-      {start.error ? (
-        <p role="alert" className="bad-text">
-          {COPY.actionFailed(start.error.message)}
-        </p>
-      ) : null}
+      <SearchAgainButton definitionId={definition.id} label={COPY.searchAgain.searchNow} />
     </div>
   );
 }
 
-/** Paused or budget-stopped: the reason and Resume as the status bar gives them, and what the board then shows. */
+/**
+ * A stopped run: the stop's sentence as-is with its fix, and Resume when the fix names it, as the status bar gives
+ * them, and what the board then shows.
+ */
 export function Paused({
   executionId,
-  reason,
+  stop,
   notSearched,
   canResume,
 }: {
   executionId: string;
-  reason: string;
+  stop: StopWords;
   notSearched: number;
   canResume: boolean;
 }) {
@@ -60,7 +61,7 @@ export function Paused({
       <span aria-hidden="true" className="tag tag-warn">
         ▲
       </span>
-      <span className="font-bold">{COPY.paused(reason)}</span>
+      <StopSentence stop={stop} className="font-bold" />
       <span>{D.pausedNote}</span>
       <span>{D.notSearchedCount(notSearched)}</span>
       {canResume ? (

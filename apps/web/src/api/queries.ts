@@ -7,6 +7,7 @@ import type { Basis, DatePairsScope, ResultsScope, VerifyCellBody } from './type
 export const qk = {
   providers: ['providers'] as const,
   definitions: ['definitions'] as const,
+  cards: ['cards'] as const,
   // why: a scoped read (WP19 Task 19.6) holds every scope value in its key; the 'results' prefix still invalidates both
   results: (id: string, basis: Basis | null, scope?: ResultsScope) =>
     scope === undefined
@@ -55,6 +56,44 @@ export function useProvidersWatch() {
 
 export function useDefinitions() {
   return useQuery({ queryKey: qk.definitions, queryFn: () => api.definitions() });
+}
+
+const ACTIVE_RUN: ReadonlySet<string> = new Set(['pending', 'running']);
+
+/**
+ * The first screen's read (spec rev 55 §10, §11): the cards in the served order. It re-reads at the status bar's poll
+ * interval only while a card's latest run is pending or running, and idles otherwise.
+ */
+export function useCards() {
+  return useQuery({
+    queryKey: qk.cards,
+    queryFn: () => api.cards(),
+    refetchInterval: (query) =>
+      query.state.data?.cards.some((c) => c.latestRun !== null && ACTIVE_RUN.has(c.latestRun.status))
+        ? POLL_MS
+        : false,
+  });
+}
+
+/**
+ * Remove and Undo (spec rev 55 §10, §11). Neither refreshes anything by itself: the Searches view keeps its served order
+ * while one of them is pending and puts the "Removed" line in place before it asks for a re-read, so it calls `refresh`
+ * itself once the line is up (a removed card then never vanishes for a frame before its line appears).
+ */
+export function useSearchRemoval() {
+  const qc = useQueryClient();
+  const refresh = async () => {
+    await Promise.all(
+      [['cards'], ['definitions'], ['execution'], ['results'], ['coverage'], ['date-pairs']].map((queryKey) =>
+        qc.invalidateQueries({ queryKey }),
+      ),
+    );
+  };
+  return {
+    remove: useMutation({ mutationFn: (id: string) => api.removeDefinition(id) }),
+    restore: useMutation({ mutationFn: (id: string) => api.restoreDefinition(id) }),
+    refresh,
+  };
 }
 
 /**
@@ -145,9 +184,16 @@ export function useExecutionActions() {
   const qc = useQueryClient();
   const refresh = async () => {
     await Promise.all(
-      [['results'], ['execution'], ['coverage'], ['date-pairs'], ['calendar-gap'], ['cell'], ['history']].map(
-        (queryKey) => qc.invalidateQueries({ queryKey }),
-      ),
+      [
+        ['results'],
+        ['execution'],
+        ['coverage'],
+        ['date-pairs'],
+        ['calendar-gap'],
+        ['cell'],
+        ['history'],
+        ['cards'],
+      ].map((queryKey) => qc.invalidateQueries({ queryKey })),
     );
   };
   return {
@@ -155,10 +201,20 @@ export function useExecutionActions() {
     resume: useMutation({ mutationFn: (id: string) => api.resume(id), onSuccess: refresh }),
     start: useMutation({
       // why: decision 43: a confirmation covers a run only with both its pence and its calls, so both are sent when stored.
-      mutationFn: (v: { id: string; confirmCostPence: number | null; confirmCalls: number | null }) =>
+      // Search again adds `requireCovered` (refuse a start the sent figures do not cover) and `replaceStopped` (a fresh
+      // start over a stopped run), spec rev 55 §8.1.
+      mutationFn: (v: {
+        id: string;
+        confirmCostPence: number | null;
+        confirmCalls: number | null;
+        requireCovered?: boolean;
+        replaceStopped?: boolean;
+      }) =>
         api.startExecution(v.id, {
           ...(v.confirmCostPence === null ? {} : { confirmCostPence: v.confirmCostPence }),
           ...(v.confirmCalls === null ? {} : { confirmCalls: v.confirmCalls }),
+          ...(v.requireCovered === undefined ? {} : { requireCovered: v.requireCovered }),
+          ...(v.replaceStopped === undefined ? {} : { replaceStopped: v.replaceStopped }),
         }),
       onSuccess: refresh,
     }),
