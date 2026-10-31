@@ -10,6 +10,7 @@ import {
   type SourceKind,
   type Stage,
 } from '@gmt/core';
+import { callsLeftIn, providerWindow } from './budgetCheck.js';
 import type { EngineContext } from './context.js';
 import { type LineKey, lineKey } from './lines.js';
 import { disabledFor, resumableCells } from './run.js';
@@ -131,7 +132,11 @@ function planDiscovery(
   cap: DiscoveryCapability,
   cells: readonly CellKey[],
   definitionId: string | null,
-): { reused: CellKey[]; fresh: CellKey[]; planned: PlannedTile[] } {
+  /** The tiles already planned over every cell (no reuse): used as they are when no cell here is reusable. */
+  known?: readonly PlannedTile[],
+  /** Where a plan over every cell (no reuse) is left for a later reader (`PlanMemo`). */
+  keep?: Map<ProviderId, readonly PlannedTile[]>,
+): { reused: CellKey[]; fresh: CellKey[]; planned: readonly PlannedTile[] } {
   const reusedCopies =
     definitionId === null
       ? []
@@ -145,11 +150,26 @@ function planDiscovery(
         );
   const reusedKeys = new Set(reusedCopies.map((r) => cellKeyString(r.cell)));
   const fresh = cells.filter((c) => !reusedKeys.has(cellKeyString(c)));
-  return {
-    reused: reusedCopies.map((r) => r.cell),
-    fresh,
-    planned: fresh.length === 0 ? [] : planTiles(providerId, cap, snapshot, fresh),
-  };
+  // why: a plan over every cell is the same plan whoever asks (the estimate or the date pairs it asks about), so it is
+  // made once; a provider with reusable cells plans the rest again, since a tile may hold cells that are no longer asked
+  const planned =
+    fresh.length === 0
+      ? []
+      : known !== undefined && reusedCopies.length === 0
+        ? known
+        : planTiles(providerId, cap, snapshot, fresh);
+  if (reusedCopies.length === 0) keep?.set(providerId, planned);
+  return { reused: reusedCopies.map((r) => r.cell), fresh, planned };
+}
+
+/**
+ * The tiles an estimate planned over every cell, provider by provider, kept so the date pairs it asks about are read
+ * from the same plan (one snapshot, one plan; Task 20.4 fix round 1).
+ */
+export interface PlanMemo {
+  snapshot: DefinitionSnapshot;
+  cells: readonly CellKey[];
+  plans: ReadonlyMap<ProviderId, readonly PlannedTile[]>;
 }
 
 function discoveryLine(
@@ -161,6 +181,8 @@ function discoveryLine(
   notes: string[],
   /** The execution a resume continues (its pages already loaded count against the cap); null for a start. */
   executionId: string | null = null,
+  /** Where this line leaves its plan over every cell, for `askedPairs` (a start's save-time estimate only). */
+  keep?: Map<ProviderId, readonly PlannedTile[]>,
 ): Line | null {
   const provider = ctx.providers.get(providerId);
   const cap = provider?.discovery;
@@ -169,7 +191,16 @@ function discoveryLine(
     notes.push(`${providerId}: does not offer ${snapshot.cabin}; no calls (cabin-not-offered)`);
     return { providerId, stage: 'discovery', rawCalls: 0, rawCostMicroGbp: 0, rawSeconds: 0 };
   }
-  const { reused, fresh, planned } = planDiscovery(ctx, snapshot, providerId, cap, cells, definitionId);
+  const { reused, fresh, planned } = planDiscovery(
+    ctx,
+    snapshot,
+    providerId,
+    cap,
+    cells,
+    definitionId,
+    undefined,
+    keep,
+  );
   if (reused.length > 0)
     notes.push(`${providerId}: ${reused.length} cells reuse earlier prices and are not planned`);
   const tiles = planned.length;
@@ -286,11 +317,13 @@ export function estimateStart(
   snapshot: DefinitionSnapshot,
   cells: readonly Cell[],
   definitionId: string | null,
+  /** Receives each discovery provider's plan over every cell, when the estimate assumes no reuse (`definitionId` null). */
+  keep?: Map<ProviderId, readonly PlannedTile[]>,
 ): Estimate {
   const notes: string[] = [];
   const lines: Line[] = [];
   for (const id of snapshot.providers.discovery) {
-    const l = discoveryLine(ctx, snapshot, id, cells, definitionId, notes);
+    const l = discoveryLine(ctx, snapshot, id, cells, definitionId, notes, null, keep);
     if (l !== null) lines.push(l);
   }
   const verifyCount = Math.min(snapshot.verification.maxCells, cells.length);
@@ -414,6 +447,10 @@ export function confirmationOf(e: Pick<Estimate, 'perProvider'>): { pence: numbe
  * (departure, return) pairs of the search space. A date pair is **covered** when every one of its airport pairs is
  * planned, **partly** covered when some but not all are, and **reused** when none is planned and every airport pair is
  * reused from an earlier run. Coverage counts planned cells only; a reused cell is never counted as asked.
+ *
+ * The three need not add up to `datePairs`: a date pair with no planned airport pair and only some of them reused (a
+ * search widened to a new airport, or a line a cap blocks) is in none of them. The web words the remainder as the date
+ * pairs not asked this run, never as reused.
  */
 export interface AskedPairs {
   datePairs: number;
@@ -422,17 +459,14 @@ export interface AskedPairs {
   datePairsReused: number;
 }
 
-/** The calls a provider's month (or lifetime) still allows; null without a cap. */
-function windowLeft(ctx: EngineContext, providerId: ProviderId): number | null {
-  const { cap, calls } = ctx.budget.usage({ kind: ctx.limitsOf(providerId).capKind, providerId });
-  return cap === null ? null : Math.max(0, cap - calls);
-}
-
 /**
  * The cells the runnable discovery lines would plan, and the cells they would reuse (spec §8.1 rev 55). Each
  * provider's plan is cut at the lesser of its per-run page cap (a provider with page spacing, camoufox) and what its
  * monthly or lifetime window has left; a blocked line (`blocked` set by a budget check) plans nothing, but its reused
  * cells still stand, since reuse makes no call. Two providers planning the same cell count it once.
+ *
+ * `known` is the plan the estimate made over every cell (see `PlanMemo`); it is used as it stands for a provider with
+ * nothing reusable, so the estimate and its date pairs are read from one plan.
  */
 export function askedPairs(
   ctx: EngineContext,
@@ -440,6 +474,7 @@ export function askedPairs(
   cells: readonly CellKey[],
   definitionId: string | null,
   blocked: ReadonlySet<LineKey>,
+  known: ReadonlyMap<ProviderId, readonly PlannedTile[]> = new Map(),
 ): AskedPairs {
   const planned = new Set<string>();
   const reused = new Set<string>();
@@ -447,12 +482,18 @@ export function askedPairs(
     const provider = ctx.providers.get(id);
     const cap = provider?.discovery;
     if (provider === undefined || cap === undefined || !provider.cabins.includes(snapshot.cabin)) continue;
-    const plan = planDiscovery(ctx, snapshot, id, cap, cells, definitionId);
+    const plan = planDiscovery(ctx, snapshot, id, cap, cells, definitionId, known.get(id));
     for (const c of plan.reused) reused.add(cellKeyString(c));
     if (blocked.has(lineKey('discovery', id))) continue;
     const pageCap = snapshot.budget.providerMaxCalls?.[id];
     const perRun = pageCap !== undefined && ctx.limitsOf(id).minSpacingSeconds !== null ? pageCap : Infinity;
-    const allowed = Math.min(plan.planned.length, perRun, windowLeft(ctx, id) ?? Infinity);
+    // why: belt and braces. A line the budget guard would stop is already `blocked`, and a run of a line that fits its
+    // window plans no more than the window leaves; the real flow reaches this cut only when `checkBudget` has not
+    // blocked the line (a run it lets start and the guard then stops part way). It uses `callsLeftIn`, the same
+    // reading `checkBudget` takes, other schedules' reservations included.
+    // Known limit: a tile that pages spends one call a page, but is cut here by tile count, not calls, so a paging
+    // provider's coverage may be overstated when its window is nearly spent.
+    const allowed = Math.min(plan.planned.length, perRun, callsLeftIn(ctx, id, definitionId) ?? Infinity);
     for (const tile of plan.planned.slice(0, allowed))
       for (const c of tile.plan.coveredCells) planned.add(cellKeyString(c));
   }
@@ -500,7 +541,11 @@ export interface MonthlyPages {
  * The runnable (unblocked) lines of billable-plan providers, one entry a provider with its calls summed over stages
  * and the calls its window has left (cost-003): what the form words as "uses about 120 of the 9,880 searches left".
  */
-export function billedCallsOf(ctx: EngineContext, estimate: Pick<Estimate, 'perProvider'>): BilledCalls[] {
+export function billedCallsOf(
+  ctx: EngineContext,
+  estimate: Pick<Estimate, 'perProvider'>,
+  definitionId: string | null,
+): BilledCalls[] {
   const byProvider = new Map<ProviderId, number>();
   for (const p of estimate.perProvider) {
     if (p.blocked !== null || !ctx.limitsOf(p.providerId).billed) continue;
@@ -509,7 +554,7 @@ export function billedCallsOf(ctx: EngineContext, estimate: Pick<Estimate, 'perP
   return [...byProvider].map(([providerId, calls]) => ({
     providerId,
     calls,
-    left: windowLeft(ctx, providerId),
+    left: callsLeftIn(ctx, providerId, definitionId),
     window: ctx.limitsOf(providerId).capKind === 'provider-lifetime' ? 'lifetime' : 'month',
   }));
 }
@@ -521,13 +566,16 @@ export function billedCallsOf(ctx: EngineContext, estimate: Pick<Estimate, 'perP
 export function monthlyPagesOf(
   ctx: EngineContext,
   estimate: Pick<Estimate, 'perProvider'>,
+  definitionId: string | null,
 ): MonthlyPages | null {
   const lines = estimate.perProvider.filter((p) => p.providerId === 'camoufox' && p.blocked === null);
   if (lines.length === 0) return null;
-  const limits = ctx.limitsOf('camoufox');
-  const { cap, calls } = ctx.budget.usage({ kind: limits.capKind, providerId: 'camoufox' });
+  // why: the month's pages less what other schedules reserve, exactly as checkBudget reads it (providerWindow); a guard
+  // without a cap falls back to the configured monthly page cap
+  const { usage, reserved } = providerWindow(ctx, 'camoufox', definitionId);
+  const cap = usage.cap ?? ctx.limitsOf('camoufox').monthlyCallCap;
   return {
     planned: lines.reduce((a, p) => a + p.calls, 0),
-    left: Math.max(0, (cap ?? limits.monthlyCallCap) - calls),
+    left: Math.max(0, cap - usage.calls - reserved),
   };
 }

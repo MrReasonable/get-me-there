@@ -398,6 +398,16 @@ describe('estimates and the coverage check', () => {
       expect((await bothRoutes(x)).unsaved.billedCalls).toEqual([]);
     });
 
+    it('both routes hand estimateAsk the very estimate they answer with, so the date pairs come from the same plan', async () => {
+      const x = await harness();
+      const estimate = vi.spyOn(x.engine, 'estimate');
+      const ask = vi.spyOn(x.engine, 'estimateAsk');
+      await bothRoutes(x);
+      const made = estimate.mock.results.map((r) => r.value);
+      // why: the create's own estimate is among the calls; the two estimate routes are the last two
+      expect(ask.mock.calls.slice(-2).map((c) => c[2])).toEqual(made.slice(-2));
+    });
+
     it('monthlyPages is null when camoufox is not a runnable line', async () => {
       const x = await harness();
       expect((await bothRoutes(x)).unsaved.monthlyPages).toBeNull();

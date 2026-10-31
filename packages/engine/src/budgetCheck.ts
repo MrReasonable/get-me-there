@@ -1,4 +1,4 @@
-import type { BudgetScopeKind, ExecutionBudget, ProviderId, Stage } from '@gmt/core';
+import type { BudgetScopeKind, ExecutionBudget, ProviderId, Stage, Usage } from '@gmt/core';
 import { monthlyLoad, otherSchedules, scheduleLoad } from './budgetFit.js';
 import type { EngineContext } from './context.js';
 import { type LineKey, lineKey } from './lines.js';
@@ -39,6 +39,33 @@ export function spendOf(e: Pick<Estimate, 'perProvider'>): PlannedSpend[] {
     calls: p.calls,
     costMicroGbp: p.costMicroGbp,
   }));
+}
+
+/**
+ * A provider's cap window as `checkBudget` reads it: its scope kind, the guard's usage and, on a monthly window, the
+ * calls other scheduled searches have reserved (ruling 5). The one reading shared by the pre-start check and the
+ * estimate's "calls left", so the two can never disagree about what a month has left.
+ */
+export function providerWindow(
+  ctx: EngineContext,
+  providerId: ProviderId,
+  definitionId: string | null,
+): { kind: 'provider-month' | 'provider-lifetime'; usage: Usage; reserved: number } {
+  const kind = ctx.limitsOf(providerId).capKind;
+  const usage = ctx.budget.usage({ kind, providerId });
+  const reserved =
+    kind === 'provider-month' ? reservedForSchedules(ctx, providerId, definitionId, usage.windowEnd) : 0;
+  return { kind, usage, reserved };
+}
+
+/** The calls a provider's window still allows once other schedules' reservations are set aside; null without a cap. */
+export function callsLeftIn(
+  ctx: EngineContext,
+  providerId: ProviderId,
+  definitionId: string | null,
+): number | null {
+  const { usage, reserved } = providerWindow(ctx, providerId, definitionId);
+  return usage.cap === null ? null : Math.max(0, usage.cap - usage.calls - reserved);
 }
 
 /**
@@ -164,9 +191,7 @@ export function checkBudget(
     );
   }
   for (const id of ids(spend)) {
-    const kind = ctx.limitsOf(id).capKind;
-    const u = ctx.budget.usage({ kind, providerId: id });
-    const reserved = kind === 'provider-month' ? reservedForSchedules(ctx, id, definitionId, u.windowEnd) : 0;
+    const { kind, usage: u, reserved } = providerWindow(ctx, id, definitionId);
     const lines = spend.filter((s) => s.providerId === id);
     check(
       kind,

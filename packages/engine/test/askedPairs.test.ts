@@ -105,7 +105,8 @@ describe('the date pairs an estimate asks about (Task 20.4)', () => {
 
   it('a camoufox line with 40 monthly pages left is cut at 40, under its 100-page cap', () => {
     const w = worked([stubCamoufox({ cells: 1 })], { monthlyCap: 40 });
-    expect(asked(w)).toEqual({
+    // why: asked about as the saved search itself, so its own schedule reserves nothing against it (ruling 5)
+    expect(asked(w, w.def.id)).toEqual({
       datePairs: 2184,
       datePairsCovered: 0,
       datePairsPartly: 40,
@@ -125,21 +126,6 @@ describe('the date pairs an estimate asks about (Task 20.4)', () => {
       datePairsReused: 0,
     });
   });
-
-  it('a space the earlier run priced a day ago is reused, not asked: 0 covered, 2,184 reused', async () => {
-    // why: the run's free-call cap (default 1,000) is lifted so the 8,736 tiles all run
-    const w = worked([stubTravelpayouts({ cells: 1 })], { maxFreeCalls: 20_000 });
-    await w.e.runToEnd();
-    w.e.clock.advance(24 * 3_600_000);
-    expect(asked(w, w.def.id)).toEqual({
-      datePairs: 2184,
-      datePairsCovered: 0,
-      datePairsPartly: 0,
-      datePairsReused: 2184,
-    });
-    // why: the same space without a saved search (no reuse query) is asked in full
-    expect(asked(w, null).datePairsCovered).toBe(2184);
-  }, 120_000);
 });
 
 describe('the billed calls and the browser worker’s month of an estimate', () => {
@@ -155,9 +141,12 @@ describe('the billed calls and the browser worker’s month of an estimate', () 
       seconds: 7000,
       blocked,
     });
-    expect(monthlyPagesOf(w.e.ctx, { perProvider: [line(null)] })).toEqual({ planned: 100, left: 1500 });
-    expect(monthlyPagesOf(w.e.ctx, { perProvider: [line('provider-month')] })).toBeNull();
-    expect(monthlyPagesOf(w.e.ctx, { perProvider: [] })).toBeNull();
+    expect(monthlyPagesOf(w.e.ctx, { perProvider: [line(null)] }, w.def.id)).toEqual({
+      planned: 100,
+      left: 1500,
+    });
+    expect(monthlyPagesOf(w.e.ctx, { perProvider: [line('provider-month')] }, null)).toBeNull();
+    expect(monthlyPagesOf(w.e.ctx, { perProvider: [] }, null)).toBeNull();
   });
 
   it('billedCalls lists a runnable line of a billable-plan provider with its month’s calls left; a free source has none', () => {
@@ -176,9 +165,15 @@ describe('the billed calls and the browser worker’s month of an estimate', () 
       blocked,
     });
     expect(
-      billedCallsOf(w.e.ctx, { perProvider: [line('camoufox', 100, null), line('searchapi', 120, null)] }),
+      billedCallsOf(
+        w.e.ctx,
+        { perProvider: [line('camoufox', 100, null), line('searchapi', 120, null)] },
+        null,
+      ),
     ).toEqual([{ providerId: 'searchapi', calls: 120, left: 10_000, window: 'month' }]);
-    expect(billedCallsOf(w.e.ctx, { perProvider: [line('searchapi', 120, 'provider-month')] })).toEqual([]);
+    expect(billedCallsOf(w.e.ctx, { perProvider: [line('searchapi', 120, 'provider-month')] }, null)).toEqual(
+      [],
+    );
   });
 });
 

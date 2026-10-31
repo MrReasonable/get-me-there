@@ -1,4 +1,10 @@
-import { type DefinitionInput, isScheduled, type SearchDefinition } from '@gmt/core';
+import {
+  type DefinitionInput,
+  type Estimate,
+  isScheduled,
+  type ProviderId,
+  type SearchDefinition,
+} from '@gmt/core';
 import { bootEngine } from './boot.js';
 import { checkBudget, spendOf } from './budgetCheck.js';
 import { budgetFitFor } from './budgetFit.js';
@@ -12,6 +18,7 @@ import {
   estimateRemainingFor,
   estimateStart,
   monthlyPagesOf,
+  type PlanMemo,
   withBlocked,
 } from './estimate.js';
 import { lineKey } from './lines.js';
@@ -24,6 +31,7 @@ import { parseCron } from './scheduler/parseCron.js';
 import { createScheduler, type Scheduler } from './scheduler/scheduler.js';
 import { buildSnapshot } from './snapshot.js';
 import { browserLeftFor } from './stages/browserGate.js';
+import type { PlannedTile } from './stages/discovery.js';
 import type { Engine, EngineDeps, EngineOptions } from './types.js';
 import { HOUR_MS } from './units.js';
 
@@ -97,6 +105,8 @@ function asDefinition(
 /** The plan's "Engine" contract over the modules of this package. Spec §8. */
 export function createEngine(deps: EngineDeps, options: EngineOptions = {}): Engine {
   const ctx = buildContext(deps, options);
+  // why: the plan each estimate made, by the estimate object itself, for estimateAsk (collected with the estimate)
+  const memo = new WeakMap<Estimate, PlanMemo>();
   const orch = createOrchestrator(ctx);
   const sched = createScheduler(
     {
@@ -163,23 +173,28 @@ export function createEngine(deps: EngineDeps, options: EngineOptions = {}): Eng
       // included, is what setConfirmed records (cost M-2)
       const { def } = asDefinition(ctx, input);
       const b = buildSnapshot(ctx, def, 'manual', today);
-      const est = estimateStart(ctx, b.snapshot, b.cells, null);
+      const plans = new Map<ProviderId, readonly PlannedTile[]>();
+      const est = estimateStart(ctx, b.snapshot, b.cells, null, plans);
       // why: cost-r1-014 — the form shows beforehand which provider the caps would leave out
       const check = checkBudget(ctx, spendOf(est), b.snapshot.budget, null, 'id' in input ? input.id : null);
-      return withBlocked(est, check.blockedBy);
+      const out = withBlocked(est, check.blockedBy);
+      // why: estimateAsk reads the date pairs from this snapshot and these tiles, so the route plans once
+      memo.set(out, { snapshot: b.snapshot, cells: b.cells, plans });
+      return out;
     },
     estimateAsk: (input, today, est) => {
       // why: a saved definition's reusable prices are not asked again (spec §8.1 rev 55); the estimate itself stays the
       // worst case without reuse (ruling 9), so this is the only place reuse shows
       const { def, definitionId } = asDefinition(ctx, input);
-      const b = buildSnapshot(ctx, def, 'manual', today);
+      // an estimate this engine did not make (a test double) has no memo: snapshot and plan are made here
+      const m = memo.get(est) ?? { ...buildSnapshot(ctx, def, 'manual', today), plans: new Map() };
       const blocked = new Set(
         est.perProvider.filter((p) => p.blocked !== null).map((p) => lineKey(p.stage, p.providerId)),
       );
       return {
-        ...askedPairs(ctx, b.snapshot, b.cells, definitionId, blocked),
-        billedCalls: billedCallsOf(ctx, est),
-        monthlyPages: monthlyPagesOf(ctx, est),
+        ...askedPairs(ctx, m.snapshot, m.cells, definitionId, blocked, m.plans),
+        billedCalls: billedCallsOf(ctx, est, definitionId),
+        monthlyPages: monthlyPagesOf(ctx, est, definitionId),
       };
     },
     estimateRemaining: (id) => {
