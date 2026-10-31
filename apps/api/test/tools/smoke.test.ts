@@ -93,6 +93,19 @@ const billed = (ports: Ports, r: SmokeResult): number =>
 // why: ruling 11: each case seeds 7,917 airports into a fresh database and runs the smoke through the real http-kit
 // (up to about 1.5 s unloaded); 30 s keeps a loaded runner a slow pass.
 describe('runSmoke (spec §9 item 7)', { timeout: 30_000 }, () => {
+  it('R3: a smoke stopped by its signal stores the tool cause on its cancelled row', async () => {
+    const ports = smokePorts();
+    stubSmokeVendors({});
+    const { root } = tempRecordedRoot();
+    const ac = new AbortController();
+    ac.abort();
+    await runSmoke(ports, cli(), { signal: ac.signal, fixtures: { root, recordedBy: TEST_SMOKE_BY } }).catch(
+      () => undefined,
+    );
+    const rows = ports.repos.executions.listByStatus(['cancelled']);
+    expect(rows.map((e) => [e.trigger, e.stopCause?.kind])).toEqual([['tool', 'tool']]);
+  });
+
   it('exits 0 with provenance: one tile per provider, one chain, the confirmed price as headline, every check passed, dated fixtures outside the recorded tree', async () => {
     const ports = smokePorts();
     const { r, root, urls } = await smoke(ports);

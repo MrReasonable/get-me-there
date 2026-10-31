@@ -452,6 +452,14 @@ const ROWS: Row[] = [
   ],
   ['child cap', { kind: 'child-cap' }, {}, "Stopped at the on-demand search's limit.", null],
   [
+    'a tool run that failed',
+    { kind: 'tool', ended: 'failed' },
+    {},
+    'The tool run failed before it finished.',
+    null,
+  ],
+  ['a tool run stopped', { kind: 'tool', ended: 'aborted' }, {}, 'The tool run was stopped.', null],
+  [
     'skipped for its confirmation, 120 p against 100 p',
     { kind: 'skipped-confirm', estimatePence: 120, confirmedPence: 100 },
     { scheduled: true },

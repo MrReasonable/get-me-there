@@ -1,4 +1,4 @@
-import { ACTIVE_STATUSES, type CellKey, type IsoDateTime } from '@gmt/core';
+import { ACTIVE_STATUSES, type CellKey, type IsoDateTime, PAUSED_STATUSES } from '@gmt/core';
 import { verifyCellExecution } from './child.js';
 import type { EngineContext } from './context.js';
 import { scheduledNow } from './execute.js';
@@ -68,6 +68,14 @@ export function createOrchestrator(ctx: EngineContext): Orchestrator {
       if (live !== undefined) {
         stopRun(live, { kind: 'cancel', cause });
         await reg.done(id);
+        // why: R5 — a run already stopping on an earlier stop keeps that stop (stopRun keeps the first), so its finish
+        // writes a pause; the cancel is then applied to the row, in the guarded transaction a superseded catch-up uses,
+        // with the cancel's own cause, so the end state is the operator's cancel
+        const after = ctx.repos.executions.get(id);
+        if (after !== null && PAUSED_STATUSES.includes(after.status)) {
+          ctx.db.immediateTransaction(() => ctx.repos.executions.cancelPaused(id, cause));
+          ctx.hooks.cancelResume(id);
+        }
         return true;
       }
       const exec = ctx.repos.executions.get(id);

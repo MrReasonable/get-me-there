@@ -2,7 +2,7 @@
 // error_text). One case per writer: finish (every StopReason kind), the cancel of a live and of a stopped run, the
 // resume's stale supersede and never-started cancel, the supersedes of a stopped parent, and the scheduler's skipped_*
 // rows. The repository's own writes (the boot sweep, the clears) are packages/db/test/stopCauseWrites.test.ts.
-import { apiContract, asIsoDate, asIsoDateTime, BudgetExceeded, type StopCause } from '@gmt/core';
+import { apiContract, asIsoDate, asIsoDateTime, BudgetExceeded, type StopCause, stopText } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
 import { buildContext } from '../src/context.js';
 import { finalStatus } from '../src/execute.js';
@@ -35,17 +35,58 @@ async function pausedRun(h: Harness) {
 }
 
 describe('every status write that stops a run stores its cause (revision 55 §8.1)', () => {
+  const EXPECTED: Record<StopReason['kind'], [StopCause, string]> = {
+    sigterm: [{ kind: 'interrupted' }, 'The app stopped during this search.'],
+    cancel: [{ kind: 'cancelled' }, 'Stopped by you.'],
+    'limiter-timeout': [
+      { kind: 'limiter-timeout', providerId: 'travelpayouts', resumeAfter: null },
+      'The Aviasales cache is limiting how fast it answers.',
+    ],
+    budget: [
+      {
+        kind: 'budget',
+        scope: 'execution-calls',
+        providerId: null,
+        unit: 'calls',
+        cap: 6,
+        resumeAfter: null,
+        resetsAt: null,
+        flights: null,
+      },
+      'This search stopped at its limit of calls for one run.',
+    ],
+    'all-disabled': [
+      {
+        kind: 'sources-unavailable',
+        stage: 'discovery',
+        searched: 0,
+        sources: [{ providerId: 'fixture', skip: 'provider_disabled', detail: 'auth', until: null }],
+      },
+      stopText(
+        {
+          kind: 'sources-unavailable',
+          stage: 'discovery',
+          searched: 0,
+          sources: [{ providerId: 'fixture', skip: 'provider_disabled', detail: 'auth', until: null }],
+        },
+        { tz: 'Europe/London', mode: 'container', scheduled: false },
+      ).sentence,
+    ],
+    'child-cap': [{ kind: 'child-cap' }, "Stopped at the on-demand search's limit."],
+    fatal: [{ kind: 'fatal' }, 'The app hit an error and stopped this search.'],
+  };
   it.each(Object.entries(EVERY_STOP))(
-    'finalStatus for a %s stop patches a valid cause and its sentence',
-    (_k, stop) => {
+    'finalStatus for a %s stop patches its exact cause and sentence',
+    (k, stop) => {
       const run = causeRun({
         disabledDetail: new Map([['fixture', { skip: 'provider_disabled', detail: 'auth', until: null }]]),
+        disabled: new Set(['fixture']),
+        snapshot: { providers: { discovery: ['fixture'], verification: [], discoveryRefreshHours: {} } },
       });
       const { patch } = finalStatus(stop, NOW, 'Europe/London', run, false);
-      const cause = apiContract.stopCauseSchema.parse(patch.stopCause);
-      expect(patch.errorText).toEqual(expect.any(String));
-      expect(patch.errorText).not.toContain('SQLITE');
-      expect(cause.kind).not.toBe('');
+      const want = EXPECTED[stop.kind];
+      expect([k, patch.stopCause, patch.errorText]).toEqual([k, ...want]);
+      expect(apiContract.stopCauseSchema.parse(patch.stopCause)).toEqual(want[0]);
     },
   );
 
@@ -162,5 +203,46 @@ describe("the scheduler's skipped rows store theirs (revision 55 §8.1)", () => 
       code: 'disabled',
     });
     expect(h.repos.executions.listForDefinition(def.id, { limit: 5, includeChildren: true })).toEqual([]);
+  });
+});
+
+describe('a cancel that lands while a run is finishing on an earlier stop (R5)', () => {
+  it('the run ends cancelled with the cancel’s cause, not paused on the earlier stop', async () => {
+    const h = createHarness({ fixtureConcurrency: 1 });
+    const def = h.createDefinition({
+      budget: { maxCalls: 1000, maxFreeCalls: 1000, maxCostMicroGbp: 100_000 },
+    });
+    // why: the execution cost cap stops the pass before its first call (paused_budget), so the alerts step runs
+    h.onStageStart('discovery', (id) =>
+      h.spendLedger({ providerId: 'fixture', rows: 1, costMicroGbpEach: 100_000 - 3_199, executionId: id }),
+    );
+    let entered: () => void = () => undefined;
+    const inAlerts = new Promise<void>((r) => {
+      entered = r;
+    });
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((r) => {
+      release = r;
+    });
+    // why: the alerts step runs after the budget stop and before finish: the cancel arrives exactly there
+    const orch = h.orch({
+      ...h.options,
+      alerts: async () => {
+        entered();
+        await held;
+        return { digests: 0, events: 0 };
+      },
+    });
+    const r = await orch.start(def.id, { trigger: 'manual' });
+    if (!r.ok) throw new Error(r.message);
+    await inAlerts;
+    const cancelled = orch.cancel(r.executionId, { kind: 'superseded', by: 'remove' });
+    release();
+    expect(await cancelled).toBe(true);
+    expect(h.repos.executions.get(r.executionId)).toMatchObject({
+      status: 'cancelled',
+      stopCause: { kind: 'superseded', by: 'remove' },
+      errorText: 'Stopped when the search was removed.',
+    });
   });
 });

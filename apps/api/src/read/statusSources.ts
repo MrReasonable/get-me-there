@@ -86,8 +86,7 @@ function newestBackup(databasePath: string): IsoDateTime | null {
 }
 
 /** The definitions an enabled schedule runs. */
-const scheduledDefinitions = (defs: readonly SearchDefinition[]) =>
-  defs.filter((d) => d.enabled && d.deletedAt === null && d.scheduleCron !== null);
+const scheduledDefinitions = (defs: readonly SearchDefinition[]) => defs.filter((d) => isScheduled(d));
 
 const registered = (ports: Ports, id: ProviderId) => ports.providers.some((p) => p.id === id);
 

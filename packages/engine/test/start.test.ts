@@ -2,6 +2,7 @@
 // scheduled runs happen and nothing else, and a main-path start confirms exactly the figures shown beside its button.
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
+import { skippedBudgetCause } from '../src/start.js';
 import { createHarness, type Harness, refusedWith } from './support/harness.js';
 
 const executions = (h: Harness, defId: string) =>
@@ -85,5 +86,17 @@ describe('requireCovered (revision 55 §8.1, ruling A4)', () => {
     });
     expect(f.ok).toBe(true);
     if (f.ok) await free.waitForSettled(f.executionId);
+  });
+});
+
+describe('skippedBudgetCause (revision 55 §8.1)', () => {
+  it("names the first breach's scope and provider, and refuses to invent one when there is none", () => {
+    expect(
+      skippedBudgetCause([
+        { scope: 'provider-month', providerId: 'searchapi' },
+        { scope: 'global-month', providerId: null },
+      ]),
+    ).toEqual({ kind: 'skipped-budget', scope: 'provider-month', providerId: 'searchapi' });
+    expect(() => skippedBudgetCause([])).toThrow('a run refused for budget has no budget breach');
   });
 });

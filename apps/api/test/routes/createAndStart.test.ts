@@ -2,7 +2,13 @@
 // start does; the sent figures are stored as its confirmation only when they cover the recomputed shown totals; a
 // refused start is answered in the body (Review Focus 1: no price source); the same requestKey creates nothing more.
 import { randomUUID } from 'node:crypto';
-import { apiContract, asIsoDate, type CreateAndStartResponse, type DefinitionInput } from '@gmt/core';
+import {
+  apiContract,
+  asIsoDate,
+  type CreateAndStartResponse,
+  type DefinitionInput,
+  type Estimate,
+} from '@gmt/core';
 import type { StartResult } from '@gmt/engine';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { runnableTotalsOf } from '../../src/routes/searches.js';
@@ -215,5 +221,76 @@ describe('POST /definitions/create-and-start (revision 55 §10)', () => {
     expect(r.status).toBe(400);
     expect(await r.json()).toMatchObject({ error: { code: 'validation' } });
     expect(definitions(h)).toEqual([]);
+  });
+
+  it('stores the hand-computed shown totals: the runnable lines only, never a blocked paid line (finding 2)', async () => {
+    h = await createHarness();
+    const x = h;
+    // why: two lines figured by hand: a paid discovery line (5 calls, 12 345 µGBP = 2 p rounded up) and a paid
+    // verification line a cap blocks (5 calls, 25 000 µGBP). Shown: 2 p, 5 calls; the worst case over every line would
+    // be 4 p and 10 calls (only the configured fixture provider, so the response's own reads find its budget)
+    const line = (
+      providerId: 'fixture',
+      stage: 'discovery' | 'verification',
+      calls: number,
+      costMicroGbp: number,
+      blocked: string | null,
+    ) => ({
+      providerId,
+      stage,
+      calls,
+      planCalls: calls,
+      costMicroGbp,
+      costPence: Math.ceil(costMicroGbp / 10_000),
+      seconds: 1,
+      blocked,
+    });
+    const est: Estimate = {
+      cells: 4,
+      perProvider: [
+        line('fixture', 'discovery', 5, 12_345, null),
+        line('fixture', 'verification', 5, 25_000, 'provider-month:fixture'),
+      ],
+      totalCalls: 5,
+      totalPlanCalls: 5,
+      totalCostMicroGbp: 12_345,
+      totalCostPence: 2,
+      seconds: 3,
+      assumptions: [],
+      windowClamped: false,
+      retryFactor: 1,
+    };
+    expect(runnableTotalsOf(est)).toEqual({ pence: 2, calls: 5 });
+    vi.spyOn(x.engine, 'estimate').mockReturnValue(est);
+    vi.spyOn(x.engine, 'start').mockResolvedValue({ ok: true, executionId: 'exec-hand' });
+    const covered = await press(x, {
+      ...input(),
+      confirmCostPence: 2,
+      confirmCalls: 5,
+      requestKey: randomUUID(),
+    });
+    expect(x.ports.repos.definitions.get(covered.body.definition.id)).toMatchObject({
+      confirmedCostPence: 2,
+      confirmedCalls: 5,
+    });
+    const short = await press(x, {
+      ...input(),
+      name: 'one call short',
+      confirmCostPence: 2,
+      confirmCalls: 4,
+      requestKey: randomUUID(),
+    });
+    expect(x.ports.repos.definitions.get(short.body.definition.id)).toMatchObject({
+      confirmedCostPence: null,
+      confirmedCalls: null,
+    });
+    const penny = await press(x, {
+      ...input(),
+      name: 'a penny short',
+      confirmCostPence: 1,
+      confirmCalls: 5,
+      requestKey: randomUUID(),
+    });
+    expect(x.ports.repos.definitions.get(penny.body.definition.id)?.confirmedCostPence).toBeNull();
   });
 });

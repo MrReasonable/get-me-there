@@ -2,10 +2,8 @@
 import {
   type apiContract,
   type Cabin,
-  calendarStaleThreshold,
   DEFAULT_DISCOVERY_REFRESH_HOURS,
   type Iata,
-  isStale,
   isTruncated,
   type ProviderId,
   type SearchDefinition,
@@ -150,9 +148,7 @@ export function routeHistory(
     }),
     routeSeries: ports.providers
       .flatMap((p) => {
-        // why: the vendor's series states no age, so the rule's threshold is the refresh alone (or the override)
         const t = thresholds(ports, refreshFor(defs, origin, destination, p.id));
-        const threshold = calendarStaleThreshold({ maxAgeHours: 'unknown' }, t.refreshHours, t.overrideHours);
         // why: ruling 6: one series per searched trip in the requested cabin, then the migrated rows that never
         // recorded a trip (cabin 'unknown'), which the web labels "trip unknown".
         return [cabin, 'unknown' as const].flatMap((cab) =>
@@ -163,8 +159,13 @@ export function routeHistory(
             points: s.points.map((pt) => ({
               ...pt,
               // why: decision 54: stale by fetch age. The vendor gives the series no age, so core's rule (decision 55)
-              // reads it as an unknown vendor age, which counts the fetch age alone. The web labels the series indicative.
-              stale: isStale({ fetchedAt: pt.fetchedAt, maxAgeHours: 'unknown' }, now, threshold),
+              // reads it as an unknown vendor age, which counts the fetch age alone (revision 55 §8.1: through the one
+              // per-price rule, stalenessOf). The web labels the series indicative.
+              stale: stalenessOf(
+                { provenance: { fetchedAt: pt.fetchedAt, maxAgeHours: 'unknown' }, basis: 'calendar' },
+                t,
+                now,
+              ).stale,
             })),
           })),
         );

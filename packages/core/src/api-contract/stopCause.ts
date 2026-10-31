@@ -138,6 +138,8 @@ export const stopCauseSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('interrupted') }),
   z.strictObject({ kind: z.literal('fatal') }),
   z.strictObject({ kind: z.literal('child-cap') }),
+  // why: R3 — a tool run (smoke, record) that ended early stores a cause too, so NULL means only "written before 0011"
+  z.strictObject({ kind: z.literal('tool'), ended: z.enum(['failed', 'aborted']) }),
   z.strictObject({
     kind: z.literal('skipped-confirm'),
     estimatePence: moneyPenceSchema,

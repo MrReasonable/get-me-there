@@ -324,6 +324,33 @@ export class CellsRepo {
     return out;
   }
 
+  /**
+   * Spec revision 55 §10 (the cards): the discovery roll-up status of every cell of every parent run (children and tool
+   * runs left out) of the live definitions, in one grouped statement: definition → execution → cell key → status. A
+   * cell with no roll-up yet reads null.
+   */
+  parentDiscoveryRollUps(): Map<string, Map<string, Map<string, CellOutcomeStatus | null>>> {
+    const out = new Map<string, Map<string, Map<string, CellOutcomeStatus | null>>>();
+    for (const r of this.db.raw
+      .prepare<[], CellDbRow & { definition_id: string; execution_id: string }>(
+        `SELECT e.definition_id, c.* FROM search_cells c
+           JOIN search_executions e ON e.id = c.execution_id
+           JOIN search_definitions d ON d.id = e.definition_id
+         WHERE e.is_child = 0 AND e.trigger <> 'tool' AND d.deleted_at IS NULL`,
+      )
+      .all()) {
+      const runs = out.get(r.definition_id) ?? new Map<string, Map<string, CellOutcomeStatus | null>>();
+      out.set(r.definition_id, runs);
+      const cells = runs.get(r.execution_id) ?? new Map<string, CellOutcomeStatus | null>();
+      runs.set(r.execution_id, cells);
+      cells.set(
+        cellKeyString(toCellKey(r)),
+        nullableOneOf('search_cells.discovery_status', OUTCOME_STATUSES, r.discovery_status),
+      );
+    }
+    return out;
+  }
+
   /** The six buckets of spec §3 plus `reused` for one stage and provider. */
   buckets(executionId: string, stage: Stage, providerId: ProviderId): Buckets {
     return toBuckets(

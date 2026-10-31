@@ -140,4 +140,62 @@ describe('the api readers go through it (one case each over the same row)', () =
     const d = await datesOf(x, def.id);
     expect(d).not.toHaveProperty('calendarStaleAfterHours');
   });
+
+  it("a verified figure's cheaperCached calendar row is judged by the same rule: not stale at 1 h, stale at 2 h", async () => {
+    h = await createHarness();
+    const x = h;
+    const def = x.ports.repos.definitions.create(
+      exampleDefinitionInput({
+        window: { kind: 'absolute', from: asIsoDate('2026-11-02'), to: asIsoDate('2026-11-02') },
+        minNights: 10,
+        maxNights: 10,
+        providers: {
+          discovery: ['fixture'],
+          verification: ['fixture'],
+          discoveryRefreshHours: { fixture: 1 },
+        },
+      }),
+    );
+    const c = cell('LHR', 'JFK', '2026-11-02', '2026-11-12');
+    const s = seeder(x.ports);
+    s.execution('E', { def, status: 'completed', startedAt: at(-2), finishedAt: at(-1) });
+    s.cells('E', [c], { selected: [{ cell: c, reason: 'top_n' }] });
+    s.tile('E', c, { status: 'priced', pricePence: 41_000, fetchedAt: at(-1), maxAgeHours: 24 });
+    s.verified('E', c, [{ hash: 'hV', pricePence: 50_000, fetchedAt: at(-1) }]);
+    const cached = async () =>
+      pairOf(await datesOf(x, def.id), '2026-11-02', '2026-11-12').figure?.cheaperCached;
+    expect(await cached()).toMatchObject({ pricePence: 41_000, stale: false });
+    x.clock.advance(HOUR);
+    expect(await cached()).toMatchObject({ pricePence: 41_000, stale: true });
+  });
+
+  it("the Status data card's ages (statusSources) are judged by the same rule over a real source's stored age", async () => {
+    h = await createHarness();
+    const x = h;
+    const def = x.ports.repos.definitions.create(
+      exampleDefinitionInput({
+        window: { kind: 'absolute', from: asIsoDate('2026-11-02'), to: asIsoDate('2026-11-02') },
+        minNights: 10,
+        maxNights: 10,
+        providers: { discovery: ['fixture'], verification: [], discoveryRefreshHours: { travelpayouts: 1 } },
+      }),
+    );
+    const c = cell('LHR', 'JFK', '2026-11-02', '2026-11-12');
+    const s = seeder(x.ports);
+    s.execution('E', { def, status: 'completed', startedAt: at(-2), finishedAt: at(-1) });
+    s.cells('E', [c], { discovery: ['travelpayouts'] });
+    s.tile('E', c, {
+      status: 'priced',
+      pricePence: 41_000,
+      fetchedAt: at(-1),
+      real: { providerId: 'travelpayouts', maxAgeHours: 24 },
+    });
+    const card = async () => {
+      const body = apiContract.statusResponseSchema.parse(await (await x.request('/api/status')).json());
+      return body.checks.find((k) => k.id === `data-${def.id}`);
+    };
+    expect((await card())?.fix?.text).not.toBe('start a run for newer prices');
+    x.clock.advance(HOUR);
+    expect((await card())?.fix?.text).toBe('start a run for newer prices');
+  });
 });

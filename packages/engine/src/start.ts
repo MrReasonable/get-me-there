@@ -11,7 +11,7 @@ import {
   type StopCause,
 } from '@gmt/core';
 import { RowRejected } from '@gmt/db';
-import { breachMessage, checkBudget, spendOf } from './budgetCheck.js';
+import { type Breach, breachMessage, checkBudget, spendOf } from './budgetCheck.js';
 import type { EngineContext } from './context.js';
 import { estimateStart, withBlocked } from './estimate.js';
 import { execute } from './execute.js';
@@ -66,6 +66,18 @@ export function uncovered(
       ? `the estimate of ${formatPence(estimatePence)} is above the confirmation sent`
       : `this run needs ${totalCalls} calls, more than the ${callsConfirmed} confirmed`;
   return { estimateMicroGbp: cost, estimatePence, calls: Object.fromEntries(calls), totalCalls, reason };
+}
+
+/**
+ * Revision 55 §8.1: a `skipped_budget` row's cause, the first breach's scope and provider. A run with nothing to search
+ * always has a breach (a line is blocked only by one, `checkBudget`); none is an internal fault, never an invented scope.
+ */
+export function skippedBudgetCause(
+  breaches: readonly Pick<Breach, 'scope' | 'providerId'>[],
+): Extract<StopCause, { kind: 'skipped-budget' }> {
+  const [first] = breaches;
+  if (first === undefined) throw new Error('a run refused for budget has no budget breach');
+  return { kind: 'skipped-budget', scope: first.scope, providerId: first.providerId };
 }
 
 /** A refused StartResult. */
@@ -372,13 +384,8 @@ export async function startExecution(
   if (nothingToSearch(snapshot, planned, check.blocked, (id) => sellsCabin(ctx, id, snapshot.cabin))) {
     const starved = planned.perProvider.some((p) => !check.blocked.has(lineKey(p.stage, p.providerId)));
     const message = `budget cap: ${breachMessage(check.breaches)}${starved ? '; every discovery provider is blocked, so nothing would be searched' : ''}`;
-    const first = check.breaches[0];
     const lost = scheduled
-      ? await skip('skipped_budget', estimate, `The ${message}.`, {
-          kind: 'skipped-budget',
-          scope: first?.scope ?? 'execution-calls',
-          providerId: first?.providerId ?? null,
-        })
+      ? await skip('skipped_budget', estimate, `The ${message}.`, skippedBudgetCause(check.breaches))
       : null;
     if (lost !== null) return lost;
     return refused('cap', message, { breaches: check.breaches });

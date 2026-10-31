@@ -1,4 +1,4 @@
-import { type IsoDateTime, isoDateTimeOfEpochMs } from '@gmt/core';
+import { type IsoDateTime, isoDateTimeOfEpochMs, isScheduled } from '@gmt/core';
 import type { EngineContext } from './context.js';
 import type { Orchestrator } from './orchestrator.js';
 import { isStalePaused, supersede } from './resume.js';
@@ -48,7 +48,7 @@ export async function tickDefinition(
   blocked: Map<string, Blocked>,
 ): Promise<void> {
   const def = ctx.repos.definitions.get(definitionId);
-  if (def === null || def.deletedAt !== null || !def.enabled || def.scheduleCron === null) {
+  if (def === null || !isScheduled(def)) {
     blocked.delete(definitionId);
     return;
   }

@@ -379,8 +379,11 @@ export async function runSmoke(
         seen,
       );
   } catch (e) {
+    // why: R3 (revision 55 §8.1) — a tool run stores its cause too; its own scrubbed note stays in error_text for the
+    // operator's terminal and is never sent by the api
     ports.repos.executions.setStatus(executionId, 'cancelled', {
       finishedAt: ports.clock.now(),
+      stopCause: { kind: 'tool', ended: 'failed' },
       errorText: `smoke:live failed: ${safeMessage(e, ports.secrets)}`,
     });
     throw e;
@@ -431,6 +434,7 @@ export async function runSmoke(
       : EXIT.ok;
   ports.repos.executions.setStatus(executionId, opts.signal.aborted ? 'cancelled' : 'completed', {
     finishedAt: now,
+    ...(opts.signal.aborted ? { stopCause: { kind: 'tool', ended: 'aborted' } as const } : {}),
     errorText: exitCode === EXIT.ok ? null : `smoke:live exit ${exitCode}`,
   });
   const root = opts.fixtures?.root;

@@ -156,6 +156,7 @@ describe('GET /definitions/cards (revision 55 §10)', () => {
       x.ports.repos.definitions.create(exampleDefinitionInput({ name, ...ONE_PAIR }));
     const paused = make('paused');
     const legacy = make('legacy');
+    const blank = make('blank');
     const done = make('done');
     const skipped = make('skipped');
     const cause: StopCause = {
@@ -173,6 +174,8 @@ describe('GET /definitions/cards (revision 55 §10)', () => {
     s.execution('L', { def: legacy, status: 'paused_error', startedAt: at(-2) });
     // why: a row written before migration 0011: no cause, the old free text in error_text
     x.ports.repos.executions.patch(s.id('L'), { errorText: 'paused: error' });
+    // why: and one with neither a cause nor any stored text
+    s.execution('B', { def: blank, status: 'interrupted', startedAt: at(-2) });
     s.execution('D', { def: done, status: 'running', startedAt: at(-3) });
     x.ports.repos.executions.setStatus(s.id('D'), 'paused_error', {
       stopCause: { kind: 'fatal' },
@@ -198,9 +201,52 @@ describe('GET /definitions/cards (revision 55 §10)', () => {
     const facts = { tz: 'Europe/London', mode: 'native' as const, scheduled: false };
     expect(cardOf(all, paused.id).latestRun?.stop).toEqual(stopText(cause, facts));
     expect(cardOf(all, legacy.id).latestRun?.stop).toEqual(NO_STOP_CAUSE_TEXT);
+    expect(cardOf(all, blank.id).latestRun?.stop).toEqual(NO_STOP_CAUSE_TEXT);
     expect(cardOf(all, done.id).latestRun?.stop).toBeNull();
     expect(cardOf(all, skipped.id).latestRun?.stop?.sentence).toBe(
       stopText(skippedCause, { ...facts, scheduled: false }).sentence,
     );
+  });
+});
+
+describe('the cards are read through grouped statements (revision 55 §10, R2)', () => {
+  /** `defs` searches with `runs` finished parent runs each, then the statements one GET prepares, by their SQL. */
+  async function statements(defs: number, runs: number): Promise<string[]> {
+    const x = await createHarness();
+    const s = seeder(x.ports);
+    for (let d = 0; d < defs; d++) {
+      const def = x.ports.repos.definitions.create(exampleDefinitionInput({ name: `s${d}`, ...FOUR }));
+      for (let r = 0; r < runs; r++) {
+        const name = `d${d}r${r}`;
+        s.execution(name, { def, status: 'completed', startedAt: at(-10 + r), finishedAt: at(-9 + r) });
+        s.cells(name, cellsOf(def));
+      }
+    }
+    const seen: string[] = [];
+    const prepare = x.ports.db.raw.prepare.bind(x.ports.db.raw);
+    vi.spyOn(x.ports.db.raw, 'prepare').mockImplementation((sql: string) => {
+      seen.push(sql);
+      return prepare(sql);
+    });
+    expect((await x.request('/api/definitions/cards')).status).toBe(200);
+    vi.restoreAllMocks();
+    await x.close();
+    return seen;
+  }
+  const rollUpReads = (sql: string[]) => sql.filter((q) => /FROM search_cells/.test(q));
+
+  it('as runs grow, the statement count stays the same; the roll-ups and the latest parents are one statement each', async () => {
+    const one = await statements(2, 1);
+    const four = await statements(2, 4);
+    expect(four.length).toBe(one.length);
+    expect(rollUpReads(four)).toHaveLength(1);
+    expect(four.filter((q) => q.includes('ROW_NUMBER() OVER (PARTITION BY definition_id'))).toHaveLength(1);
+  });
+
+  it('as searches grow, the roll-up and latest-parent reads stay one statement each, and nothing is read per run', async () => {
+    const [a, b, c] = [await statements(1, 3), await statements(2, 3), await statements(3, 3)];
+    for (const sql of [a, b, c]) expect(rollUpReads(sql)).toHaveLength(1);
+    // why: what remains per search is the board's own fixed read of its cheapest (rankedFigures), never one per run
+    expect(c.length - b.length).toBe(b.length - a.length);
   });
 });

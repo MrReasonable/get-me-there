@@ -338,14 +338,18 @@ describe('stopCauseOf edges (mutation pins)', () => {
     });
   });
 
-  it('all-disabled names the disabled sources of its own stage, every stored detail, and words a disabled source with no detail', () => {
+  it('all-disabled names only the disabled sources of its own stage (R4), and words a disabled source with no detail', () => {
     const run = causeRun({
-      disabledDetail: new Map([['camoufox', { skip: 'provider_disabled', detail: 'captcha', until: null }]]),
-      disabled: new Set<ProviderId>(['travelpayouts', 'searchapi']),
+      // why: camoufox is discovery-only here, so a verification stop must never name it
+      disabledDetail: new Map([
+        ['camoufox', { skip: 'provider_disabled', detail: 'captcha', until: null }],
+        ['fixture', { skip: 'provider_disabled', detail: 'auth', until: null }],
+      ]),
+      disabled: new Set<ProviderId>(['travelpayouts', 'searchapi', 'camoufox']),
       disabledReason: new Map(),
       snapshot: {
         providers: {
-          discovery: ['fixture'],
+          discovery: ['camoufox', 'searchapi'],
           verification: ['travelpayouts', 'fixture'],
           discoveryRefreshHours: {},
         },
@@ -357,8 +361,8 @@ describe('stopCauseOf edges (mutation pins)', () => {
       stage: 'verification',
       searched: 0,
       sources: [
-        { providerId: 'camoufox', skip: 'provider_disabled', detail: 'captcha', until: null },
         { providerId: 'travelpayouts', skip: 'provider_disabled', detail: 'blocked', until: null },
+        { providerId: 'fixture', skip: 'provider_disabled', detail: 'auth', until: null },
       ],
     });
   });

@@ -1,4 +1,4 @@
-import type { DefinitionInput, SearchDefinition } from '@gmt/core';
+import { type DefinitionInput, isScheduled, type SearchDefinition } from '@gmt/core';
 import { bootEngine } from './boot.js';
 import { checkBudget, spendOf } from './budgetCheck.js';
 import { budgetFitFor } from './budgetFit.js';
@@ -35,13 +35,7 @@ export function statusOf(
   const now = Date.parse(ctx.clock.now());
   const defs = ctx.repos.definitions
     .list()
-    .filter(
-      (d) =>
-        d.enabled &&
-        d.deletedAt === null &&
-        d.scheduleCron !== null &&
-        parseCron(d.scheduleCron, d.scheduleTz).ok,
-    );
+    .filter((d) => isScheduled(d) && parseCron(d.scheduleCron, d.scheduleTz).ok);
   const running = orch.running();
   const stuck = running.some((id) => {
     const e = ctx.repos.executions.get(id);

@@ -3,6 +3,7 @@ import {
   formatInstant,
   type IsoDateTime,
   isoDateTimeOfEpochMs,
+  isScheduled,
   PAUSED_STATUSES,
   type ProviderId,
   type SearchDefinition,
@@ -85,7 +86,7 @@ export function findMissedFiring(
   now: IsoDateTime,
   replaced: string | null = null,
 ): MissedFiring {
-  if (def.scheduleCron === null || !def.enabled || def.deletedAt !== null) return { kind: 'none' };
+  if (!isScheduled(def)) return { kind: 'none' };
   const parsed = parseCron(def.scheduleCron, def.scheduleTz);
   if (!parsed.ok) return { kind: 'none' };
   const nowMs = Date.parse(now);

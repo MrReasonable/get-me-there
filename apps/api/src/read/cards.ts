@@ -7,6 +7,7 @@
  */
 import {
   apiContract,
+  type CellOutcomeStatus,
   cellKeyString,
   datePairAt,
   datePairBuckets,
@@ -26,10 +27,12 @@ import { estimatedFinishOf, stopOf } from './executions.js';
 import { rankedFigures } from './ranked.js';
 import { currentSpace } from './space.js';
 
-/** The date pairs of `space` a run searched (by `datePairSearched` over its discovery roll-ups), as `dep|ret` keys. */
-function searchedKeys(ports: Pick<Ports, 'repos'>, run: Execution, space: ResolvedSpace): Set<string> {
-  const rollUps = ports.repos.cells.rollUps(run.id);
-  const buckets = datePairBuckets(space, (c) => rollUps.get(cellKeyString(c))?.discovery.status ?? null);
+/** One run's discovery roll-up status per cell key (`CellsRepo.parentDiscoveryRollUps`). */
+type RunRollUps = ReadonlyMap<string, CellOutcomeStatus | null>;
+
+/** The date pairs of `space` a run searched (by `datePairSearched` over its roll-ups), as `dep|ret` keys. */
+function searchedKeys(rollUps: RunRollUps, space: ResolvedSpace): Set<string> {
+  const buckets = datePairBuckets(space, (c) => rollUps.get(cellKeyString(c)) ?? null);
   const out = new Set<string>();
   buckets.forEach((b, i) => {
     if (!datePairSearched(b)) return;
@@ -42,23 +45,22 @@ function searchedKeys(ports: Pick<Ports, 'repos'>, run: Execution, space: Resolv
 /**
  * The card's latest run (spec revision 55 §10): its counts over its own snapshot space (searched by this run; never
  * searched by any parent run of the search), its flight counts, its estimated finish while it runs, and its stop's words.
+ * `runs` holds every parent run's roll-ups, read for every card in one grouped statement (R2).
  */
 function latestRunOf(
   ports: Ports,
   engine: Pick<Engine, 'estimateRemaining'>,
   def: SearchDefinition,
   run: Execution,
+  runs: ReadonlyMap<string, RunRollUps>,
 ): NonNullable<SearchCard['latestRun']> {
   const space = run.snapshot.resolved;
-  const mine = searchedKeys(ports, run, space);
-  // why: "never searched" is over every parent run of the search, each judged over its own snapshot space
+  const mine = searchedKeys(runs.get(run.id) ?? new Map(), space);
+  // why: "never searched" is over every parent run of the search; each is judged over this run's space (its airport
+  // pairs missing from an older run's roll-ups count not run there), so one grouped read serves every card
   const ever = new Set(mine);
-  for (const other of ports.repos.executions.listForDefinition(def.id, {
-    limit: 'all',
-    includeChildren: false,
-  }))
-    if (other.id !== run.id && other.trigger !== 'tool')
-      for (const k of searchedKeys(ports, other, other.snapshot.resolved)) ever.add(k);
+  for (const [id, rollUps] of runs)
+    if (id !== run.id) for (const k of searchedKeys(rollUps, space)) ever.add(k);
   const pairs = datePairCount(space);
   let never = 0;
   for (let i = 0; i < pairs; i++) {
@@ -78,7 +80,7 @@ function latestRunOf(
     // why: the read count comes from the flight-list rows (FlightListsRepo, Task 20.8); no run stores a plan before 20.9
     flights: f === null ? null : { planned: f.planned, read: 0 },
     estimatedFinishAt: estimatedFinishOf(ports, engine, run),
-    stop: stopOf(ports, run),
+    stop: stopOf(ports, run, def),
   };
 }
 
@@ -116,6 +118,7 @@ function cardOf(
   engine: Pick<Engine, 'estimateRemaining'>,
   def: SearchDefinition,
   run: Execution | null,
+  runs: ReadonlyMap<string, RunRollUps>,
   now: IsoDateTime,
 ): SearchCard {
   const space = currentSpace(def, ports.clock.todayLondon());
@@ -136,7 +139,7 @@ function cardOf(
     schedule:
       isScheduled(def) && def.scheduleCron !== null ? { cron: def.scheduleCron, tz: def.scheduleTz } : null,
     discovery: def.providers.discovery,
-    latestRun: run === null ? null : latestRunOf(ports, engine, def, run),
+    latestRun: run === null ? null : latestRunOf(ports, engine, def, run, runs),
     spaceChangedSince: spaceChanged(def, run),
     cheapest:
       best === undefined
@@ -167,6 +170,7 @@ export function assembleCards(
   now: IsoDateTime,
 ): SearchCardsResponse {
   const latest = ports.repos.executions.latestParentPerDefinition();
+  const rollUps = ports.repos.cells.parentDiscoveryRollUps();
   const rows = ports.repos.definitions.list().map((def) => ({ def, run: latest.get(def.id) ?? null }));
   const startOf = (e: Execution) => e.startedAt ?? e.createdAt;
   const live = (e: Execution | null) => e !== null && (e.status === 'pending' || e.status === 'running');
@@ -184,6 +188,6 @@ export function assembleCards(
     return ra === 0 ? older : -older;
   });
   return apiContract.searchCardsResponseSchema.parse({
-    cards: rows.map((r) => cardOf(ports, engine, r.def, r.run, now)),
+    cards: rows.map((r) => cardOf(ports, engine, r.def, r.run, rollUps.get(r.def.id) ?? new Map(), now)),
   });
 }

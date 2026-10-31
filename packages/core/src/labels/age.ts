@@ -105,7 +105,10 @@ export interface StaleThresholds {
  * verified basis); `markText` is the stale mark's words (`staleMarkText`), which a caller shows only when `stale`.
  */
 export function stalenessOf(
-  row: { provenance: Provenance; basis: StaleBasis },
+  row: {
+    provenance: Pick<Provenance, 'fetchedAt' | 'providerObservedAt' | 'maxAgeHours' | 'maxAgeAssumed'>;
+    basis: StaleBasis;
+  },
   t: StaleThresholds,
   now: IsoDateTime,
 ): { ageHours: number; stale: boolean; markText: string } {

@@ -174,6 +174,12 @@ export function stopText(c: StopCause, f: StopTextFacts): StopText {
       };
     case 'child-cap':
       return { sentence: "Stopped at the on-demand search's limit.", fix: null };
+    case 'tool':
+      return {
+        sentence:
+          c.ended === 'failed' ? 'The tool run failed before it finished.' : 'The tool run was stopped.',
+        fix: null,
+      };
     case 'skipped-confirm':
       return {
         sentence: `Skipped: ${confirmWords(c.estimatePence, c.confirmedPence)}.`,

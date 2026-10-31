@@ -38,7 +38,7 @@ export function isBrowserPageLimit(
  * The cause a stop stores (spec revision 55 §8.1). `scheduled` is `isScheduled` over the live definition, read at finish:
  * an unscheduled search's pause stores no `resumeAfter` (Ian's ruling 2), and neither does the browser worker's monthly
  * or per-run page limit on any search; a budget cause keeps its window's end as `resetsAt` either way. A cancel's cause
- * is its own; `all-disabled` names every disabled source with its class word, at least one.
+ * is its own; `all-disabled` names every disabled source of its stage with its class word, at least one.
  */
 export function stopCauseOf(
   stop: StopReason,
@@ -83,8 +83,10 @@ export function stopCauseOf(
     case 'all-disabled': {
       const stageIds =
         stop.stage === 'discovery' ? run.snapshot.providers.discovery : run.snapshot.providers.verification;
-      const ids = new Set<ProviderId>([...run.disabledDetail.keys()]);
-      for (const id of stageIds) if (run.disabled.has(id)) ids.add(id);
+      // why: R4 — the stage's own sources only, so a verification stop never names a discovery-only source
+      const ids = new Set<ProviderId>(
+        stageIds.filter((id) => run.disabled.has(id) || run.disabledDetail.has(id)),
+      );
       const sources = nonEmpty([...ids].map((providerId) => ({ providerId, ...detailOf(run, providerId) })));
       // why: an all-disabled stop always has a disabled provider of its stage; a pass that somehow had none is an
       // internal fault, worded as one rather than as a source that does not exist

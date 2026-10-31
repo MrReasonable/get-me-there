@@ -2,6 +2,7 @@ import {
   type BudgetScope,
   budgetScopeLabel,
   type DefinitionSnapshot,
+  isScheduled,
   type ProviderId,
   type SearchDefinition,
 } from '@gmt/core';
@@ -73,9 +74,7 @@ export function monthlyLoad(ctx: EngineContext, def: SearchDefinition): MonthlyL
 
 /** The other enabled, scheduled, live definitions (ruling 5: they share the provider-month and global caps). */
 export function otherSchedules(ctx: EngineContext, definitionId: string | null): SearchDefinition[] {
-  return ctx.repos.definitions
-    .list()
-    .filter((d) => d.id !== definitionId && d.enabled && d.deletedAt === null && d.scheduleCron !== null);
+  return ctx.repos.definitions.list().filter((d) => d.id !== definitionId && isScheduled(d));
 }
 
 /**

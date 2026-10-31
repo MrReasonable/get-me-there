@@ -411,16 +411,43 @@ describe('revision 55 §8.1, §10: enabled 0 starts, Search again starts fresh, 
     expect(x.ports.repos.executions.get(executionId)?.status).toMatch(/running|completed/);
   });
 
-  it('a stopped run with no stored cause reads NO_STOP_CAUSE_TEXT, never its stored text', async () => {
+  it.each([
+    ['with', 'paused: error'],
+    ['without', null],
+  ] as const)(
+    'a stopped run with no stored cause, %s stored error_text, reads NO_STOP_CAUSE_TEXT and sends no stored text (R1, Review Focus 4)',
+    async (_n, stored) => {
+      const x = await harness();
+      const def = x.ports.repos.definitions.create(small());
+      const s = seeder(x.ports);
+      s.execution('L', { def, status: 'paused_error', startedAt: at(-2) });
+      x.ports.repos.executions.patch(s.id('L'), { errorText: stored });
+      const res = await x.request(`/api/executions/${s.id('L')}`);
+      const text = await res.clone().text();
+      expect(text).not.toContain('paused: error');
+      const e = EXEC.parse(await res.json());
+      expect(e.stop).toEqual({
+        sentence: 'No reason was recorded for this run.',
+        fix: { text: 'Search again', command: null },
+      });
+      expect([e.reason, e.errorText]).toEqual([null, null]);
+    },
+  );
+
+  it("a stopped run with a stored cause sends that cause's sentence as reason and errorText, never its stored text (R1)", async () => {
     const x = await harness();
     const def = x.ports.repos.definitions.create(small());
     const s = seeder(x.ports);
-    s.execution('L', { def, status: 'paused_error', startedAt: at(-2) });
-    x.ports.repos.executions.patch(s.id('L'), { errorText: 'paused: error' });
-    const e = await execution(x, s.id('L'));
-    expect(e.stop).toEqual({
-      sentence: 'No reason was recorded for this run.',
-      fix: { text: 'Search again', command: null },
+    s.execution('C', { def, status: 'running', startedAt: at(-2) });
+    x.ports.repos.executions.setStatus(s.id('C'), 'cancelled', {
+      stopCause: { kind: 'cancelled' },
+      errorText: 'an engine note that must not be sent',
     });
+    const e = await execution(x, s.id('C'));
+    expect([e.reason, e.errorText, e.stop?.sentence]).toEqual([
+      'Stopped by you.',
+      'Stopped by you.',
+      'Stopped by you.',
+    ]);
   });
 });

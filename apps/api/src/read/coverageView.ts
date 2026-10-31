@@ -52,7 +52,7 @@ export function assembleCoverage(def: SearchDefinition, ports: Ports, engine: En
   );
   const counts = ports.repos.ledger.countsFor(parent.id);
   const parityBreak = ports.repos.notifications.wasSent('parity_break', parent.id, def.id);
-  const perStage = executionResponse(ports, parent).progress.map((p) => {
+  const perStage = executionResponse(ports, parent, null).progress.map((p) => {
     const line = counts.perProvider.find((c) => c.providerId === p.providerId && c.stage === p.stage);
     const planCalls = planCallsOf(parent, p.stage, p.providerId);
     return {
@@ -114,7 +114,7 @@ export function assembleCoverage(def: SearchDefinition, ports: Ports, engine: En
           startedAt: e.startedAt,
           cell: withNights(cell),
           // why: a child searches one cell at the itinerary stage; a stage line with no cells says nothing.
-          perStage: executionResponse(ports, e)
+          perStage: executionResponse(ports, e, null)
             .progress.filter((p) => p.total > 0)
             .map((p) => {
               const line = ledger.perProvider.find(

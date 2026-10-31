@@ -88,6 +88,8 @@ describe('stopCauseSchema', () => {
       { kind: 'interrupted' },
       { kind: 'fatal' },
       { kind: 'child-cap' },
+      { kind: 'tool', ended: 'failed' },
+      { kind: 'tool', ended: 'aborted' },
       { kind: 'skipped-confirm', estimatePence: 120, confirmedPence: 100 },
       { kind: 'skipped-confirm', estimatePence: 120, confirmedPence: null },
       { kind: 'skipped-budget', scope: 'global-month', providerId: null },

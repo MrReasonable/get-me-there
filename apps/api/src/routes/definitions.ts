@@ -4,6 +4,7 @@ import {
   budgetScopeLabel,
   countCells,
   type DefinitionInput,
+  isScheduled,
   type SearchDefinition,
   validateSearchSpace,
 } from '@gmt/core';
@@ -62,7 +63,7 @@ function estimateResponse(def: DefinitionInput | SearchDefinition, ctx: RouteCon
 
 /** Spec §8.2: register when enabled with a cron, otherwise unregister, in the same request. */
 export function syncSchedule(def: SearchDefinition, ctx: RouteContext): void {
-  if (def.enabled && def.scheduleCron !== null && def.deletedAt === null) ctx.engine.scheduler.register(def);
+  if (isScheduled(def)) ctx.engine.scheduler.register(def);
   else ctx.engine.scheduler.unregister(def.id);
 }
 

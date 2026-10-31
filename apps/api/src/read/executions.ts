@@ -10,6 +10,7 @@ import {
   NO_STOP_CAUSE_TEXT,
   type ProviderId,
   runModeOf,
+  type SearchDefinition,
   type Stage,
   type StopText,
   stopText,
@@ -54,15 +55,28 @@ const STOPPED = new Set<Execution['status']>([
  * zone and whether its search is scheduled now); `NO_STOP_CAUSE_TEXT` for a stopped row with no cause (written before
  * migration 0011), whatever its `error_text` holds (Review Focus 4: that text is never sent here); null otherwise.
  */
-export function stopOf(ports: Pick<Ports, 'config' | 'repos'>, e: Execution): StopText | null {
+export function stopOf(
+  ports: Pick<Ports, 'config'>,
+  e: Execution,
+  def: SearchDefinition | null,
+): StopText | null {
   if (!STOPPED.has(e.status)) return null;
   if (e.stopCause === null) return NO_STOP_CAUSE_TEXT;
-  const def = ports.repos.definitions.get(e.definitionId);
   return stopText(e.stopCause, {
     tz: e.snapshot.scheduleTz,
     mode: runModeOf(ports.config),
     scheduled: def !== null && isScheduled(def),
   });
+}
+
+/** A stored cause's sentence on a row whose status shows no stop (a completed row keeps none, so this is a guard). */
+function causeText(ports: Pick<Ports, 'config'>, e: Execution, def: SearchDefinition | null): string | null {
+  if (e.stopCause === null) return null;
+  return stopText(e.stopCause, {
+    tz: e.snapshot.scheduleTz,
+    mode: runModeOf(ports.config),
+    scheduled: def !== null && isScheduled(def),
+  }).sentence;
 }
 
 /**
@@ -146,7 +160,7 @@ export function planCallsOf(e: Execution, stage: Stage, providerId: ProviderId):
 export function executionResponse(
   ports: Ports,
   e: Execution,
-  engine: Pick<Engine, 'estimateRemaining'> | null = null,
+  engine: Pick<Engine, 'estimateRemaining'> | null,
 ): ExecutionResponse {
   const counts = ports.repos.ledger.countsFor(e.id);
   const progress = (['discovery', 'verification'] as const).flatMap((stage) =>
@@ -166,6 +180,9 @@ export function executionResponse(
       .filter((o) => o.status === 'skipped' && o.reason === 'provider_disabled')
       .map((o) => o.providerId),
   );
+  const def = ports.repos.definitions.get(e.definitionId);
+  const stop = stopOf(ports, e, def);
+  const causeSentence = e.stopCause === null ? null : (stop?.sentence ?? causeText(ports, e, def));
   const overrun = progress.some((p) =>
     overrunOf(
       p.stage,
@@ -180,12 +197,14 @@ export function executionResponse(
     cell: e.cell,
     status: e.status,
     stage: e.stage,
-    reason: STATUSES_WITH_REASON.has(e.status) ? e.errorText : null,
+    // why: R1 (revision 55 §8.1) — the api never sends stored error text: with no stored cause (a row written before
+    // migration 0011) both fields are null; with one, they carry that cause's sentence
+    reason: STATUSES_WITH_REASON.has(e.status) ? causeSentence : null,
     resumeAfter: e.resumeAfter,
     trigger: e.trigger,
     startedAt: e.startedAt,
     finishedAt: e.finishedAt,
-    errorText: e.errorText,
+    errorText: causeSentence,
     scheduledFor: e.scheduledFor,
     isCatchUp: e.isCatchUp,
     skipCode: e.skipCode,
@@ -209,8 +228,8 @@ export function executionResponse(
     parityBreak: ports.repos.notifications.wasSent('parity_break', e.id, e.definitionId),
     overrun,
     disabledProviders: [...disabled].sort(),
-    stop: stopOf(ports, e),
-    // why: the coverage view reads only the progress, so it passes no engine and gets no finish estimate
+    stop,
+    // why: the coverage view reads only the progress, so it passes null for the engine and gets no finish estimate
     estimatedFinishAt: engine === null ? null : estimatedFinishOf(ports, engine, e),
     flights: flightsOf(e),
   };
