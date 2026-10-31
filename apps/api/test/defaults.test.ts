@@ -57,17 +57,16 @@ describe('defaultDefinitionInput (spec §8.2 plan preset, §11 form defaults)', 
     });
     expect(d.budget).toEqual({ maxCalls: 2000, maxFreeCalls: 2000, maxCostMicroGbp: 0 });
   });
-  it('no providers: empty stages; no airports; disabled; weekly schedule in SCHEDULER_TIMEZONE; form defaults', () => {
+  it('no providers: empty stages; no airports; disabled; no schedule, its zone SCHEDULER_TIMEZONE; form defaults', () => {
     const d = defaultDefinitionInput(config({ SCHEDULER_TIMEZONE: 'Europe/London' }), []);
     expect(d.providers.discovery).toEqual([]);
     expect([d.origins, d.destinations, d.enabled]).toEqual([[], [], false]);
-    expect([d.scheduleCron, d.scheduleTz]).toEqual(['0 5 * * 1', 'Europe/London']);
+    // why: spec rev 55 §8.2: a new search has no schedule until Repeat weekly; the zone is kept for when it gets one
+    expect([d.scheduleCron, d.scheduleTz]).toEqual([null, 'Europe/London']);
     expect(d.window).toEqual({ kind: 'relative', startOffsetDays: 7, lengthDays: 182 });
     expect([d.minNights, d.maxNights, d.cabin]).toEqual([10, 21, 'economy']);
-    expect(d.constraints).toEqual({
-      maxJourneyMinutes: 1500,
-      arrivalWindowLocal: { from: '06:00', to: '23:00' },
-    });
+    // why: spec rev 55 §8.2: no default arrival window; the 25-hour journey limit stays
+    expect(d.constraints).toEqual({ maxJourneyMinutes: 1500 });
     expect(d).not.toHaveProperty('confirmedCostPence');
     expect(d).not.toHaveProperty('confirmedCalls');
   });

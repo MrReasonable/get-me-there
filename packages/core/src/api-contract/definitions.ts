@@ -78,7 +78,12 @@ export const providersConfigSchema = z.object({
   discoveryRefreshHours: z.partialRecord(providerIdSchema, z.number().int().min(1)),
 });
 
-const definitionFields = {
+/**
+ * The create body's fields, one table: the create and update requests, the stored shape and (spec revision 55 §10)
+ * create-and-start's body are all built from it, so a field added here reaches each (ruling A3: exported for
+ * `searches.ts`).
+ */
+export const definitionFields = {
   name: z.string().min(1).max(120),
   origins: z.array(iataSchema).min(1),
   destinations: z.array(iataSchema).min(1),
@@ -100,7 +105,8 @@ const definitionFields = {
   /** decision 37: the calls of that same confirmation; a confirmation covers a run only with both */
   confirmedCalls: positiveInt.optional(),
 };
-const refineDefinition = (
+/** The save-time policy refinements of a create body, shared with create-and-start's body (ruling A3). */
+export const refineDefinition = (
   d: {
     origins: string[];
     destinations: string[];

@@ -25,17 +25,23 @@ export function stripUrlsInText(text: string): string {
     .replace(BARE_URL_QUERY, '$1');
 }
 
-export type ProviderErrorKind =
-  | 'auth'
-  | 'rate-limit'
-  | 'quota'
-  | 'upstream'
-  | 'parse'
-  | 'network'
-  | 'limiter-timeout'
+/**
+ * Spec §5.1: the nine kinds of `ProviderError`, the one list (revision 55 §8.1: they are also the first nine words of
+ * `STOP_DETAILS`, so a stored stop detail can name the kind and nothing else).
+ */
+export const PROVIDER_ERROR_KINDS = [
+  'auth',
+  'rate-limit',
+  'quota',
+  'upstream',
+  'parse',
+  'network',
+  'limiter-timeout',
   // why: camoufox only (spec §5.1 rev 32): a page the worker stopped on, and a worker that refused the connection; never retried.
-  | 'blocked'
-  | 'provider-unavailable';
+  'blocked',
+  'provider-unavailable',
+] as const;
+export type ProviderErrorKind = (typeof PROVIDER_ERROR_KINDS)[number];
 
 /** A cap counter's own figures: its cap, what it has counted, and when its window ends. */
 export interface MonthlyCapFacts {
@@ -85,15 +91,21 @@ export function cooldownNoticeKey(providerId: ProviderId, until: IsoDateTime): s
   return `${providerId}-cooldown:${until}`;
 }
 
-export type BudgetScopeKind =
-  | 'execution-calls'
-  | 'execution-free-calls'
-  | 'execution-cost'
+/**
+ * Spec §5.1: the seven budget scopes, the one list (revision 55 §8.1: a stored budget stop cause and a skipped-budget row
+ * name one of these).
+ */
+export const BUDGET_SCOPE_KINDS = [
+  'execution-calls',
+  'execution-free-calls',
+  'execution-cost',
   // why: a provider's own per-execution cap (camoufox pages), read from the execution's snapshot (decision 69).
-  | 'provider-execution'
-  | 'provider-month'
-  | 'provider-lifetime'
-  | 'global-month';
+  'provider-execution',
+  'provider-month',
+  'provider-lifetime',
+  'global-month',
+] as const;
+export type BudgetScopeKind = (typeof BUDGET_SCOPE_KINDS)[number];
 
 /** Spec §5.1. Raised by BudgetGuard.reserve before any fetch; never recorded as a cell `error`. */
 export class BudgetExceeded extends Error {

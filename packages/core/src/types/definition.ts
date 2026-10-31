@@ -122,6 +122,15 @@ export interface SearchDefinition {
   deletedAt: IsoDateTime | null;
 }
 
+/**
+ * Spec revision 55 §8.1 and §8.2: a search is scheduled exactly when it is enabled, has a cron and is not deleted. The
+ * engine's one schedule predicate: the tick, the scheduler's registration, boot, `finish` (read live, for the automatic
+ * resume rule) and `autoResume` all ask this, so `enabled` means "scheduled runs happen" and nothing else.
+ */
+export function isScheduled(d: Pick<SearchDefinition, 'enabled' | 'scheduleCron' | 'deletedAt'>): boolean {
+  return d.enabled && d.scheduleCron !== null && d.deletedAt === null;
+}
+
 export type DefinitionInput = Omit<
   SearchDefinition,
   'id' | 'confirmedCostPence' | 'confirmedCalls' | 'createdAt' | 'updatedAt' | 'deletedAt'

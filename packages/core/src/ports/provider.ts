@@ -33,6 +33,16 @@ export interface CapabilityInfo {
   returnDateSource?: ReturnDateSource | undefined;
 }
 
+/**
+ * Spec §5.1 rev 32, revision 55 §8.1: the airports dataset's names for a cell's two codes, which a provider that matches
+ * airports by name (camoufox reads names, never codes) uses to tell a cell's options apart. Discovery's query carries
+ * it, and the flight-list read's query (Task 20.7) carries the same shape.
+ */
+export interface CellAirportNames {
+  origin: string[];
+  destination: string[];
+}
+
 export interface DiscoveryQuery {
   origin: Iata;
   destination: Iata;
@@ -48,7 +58,7 @@ export interface DiscoveryQuery {
    * Spec §5.1 rev 32: the airports dataset's names for the query's codes, set by the engine for every query, so a
    * provider that matches airports by name (camoufox reads names, never codes) can tell this cell's options apart.
    */
-  airportNames?: { origin: string[]; destination: string[] };
+  airportNames?: CellAirportNames;
   /**
    * Spec §2 rev 34: how many pairs the stage plans for this provider, set by the engine, so a provider whose caps are
    * per run (camoufox grid pages and scrolls) gives each pair its share. Absent: one pair.

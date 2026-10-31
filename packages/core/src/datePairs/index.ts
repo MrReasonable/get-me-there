@@ -1,5 +1,5 @@
 // The date-pair core of the Dates view (WP19): the space arithmetic, the figure precedence, the board's rank, the
-// folded stay bands, the detail link and the route's codec. Re-exported through the package barrel.
+// folded stay bands, the detail link, the route's codec and (WP20) the main path's five marks. Re-exported through the package barrel.
 export { foldNights, MAX_NIGHT_BANDS, type NightsBand } from './bands.js';
 export { decodeDatePairs } from './decode.js';
 export { DETAIL_LINK_PARAMS, detailLinkQuery } from './detailLink.js';
@@ -19,6 +19,7 @@ export {
   pickFigure,
   pickVerifiedFigure,
 } from './figure.js';
+export { datePairSearched, type ReducedMark, reducedMark } from './marks.js';
 export { bestPerWeek, rankDatePairs } from './rank.js';
 export {
   type DatePairSpace,

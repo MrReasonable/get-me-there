@@ -144,9 +144,13 @@ describe('journey time in hours and minutes', () => {
 });
 
 describe('the schedule picker', () => {
-  it('reads the default cron as a weekly schedule, in words', async () => {
+  it('starts a new search with no schedule; Weekly starts on Mondays at 05:00, in words', async () => {
     const { user } = renderForm();
     await openAdvanced(user);
+    // why: spec rev 55 §8.2: a new search has no schedule
+    expect(screen.getByLabelText(S.repeat)).toHaveValue('none');
+    expect(screen.getByText(S.none)).toBeInTheDocument();
+    await user.selectOptions(screen.getByLabelText(S.repeat), 'weekly');
     expect(screen.getByLabelText(S.repeat)).toHaveValue('weekly');
     expect(screen.getByRole('checkbox', { name: 'Mon' })).toBeChecked();
     expect(screen.getByRole('checkbox', { name: 'Thu' })).not.toBeChecked();
@@ -162,6 +166,7 @@ describe('the schedule picker', () => {
       await user.click(screen.getByRole('button', { name: COPY.showEstimate }));
       await screen.findByRole('region', { name: COPY.estimateHeading });
     };
+    await user.selectOptions(screen.getByLabelText(S.repeat), 'weekly');
     await user.click(screen.getByRole('checkbox', { name: 'Thu' }));
     expect(screen.getByText('Mondays and Thursdays at 05:00 (Europe/London)')).toBeInTheDocument();
     await estimateOnce();
@@ -189,6 +194,7 @@ describe('the schedule picker', () => {
   it('a weekly schedule with every day unticked says so and blocks estimating', async () => {
     const { user } = renderForm();
     await openAdvanced(user);
+    await user.selectOptions(screen.getByLabelText(S.repeat), 'weekly');
     await user.click(screen.getByRole('checkbox', { name: 'Mon' }));
     expect(screen.getByText(S.noDays)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: COPY.showEstimate })).toBeDisabled();

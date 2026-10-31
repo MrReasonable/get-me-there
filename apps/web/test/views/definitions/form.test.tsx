@@ -74,8 +74,9 @@ describe('Definitions form defaults (spec §11)', () => {
     const journey = PLAN_COPY.journey;
     expect(fieldValue(D.journeyPart(journey, D.journeyHours))).toBe('25');
     expect(fieldValue(D.journeyPart(journey, D.journeyMinutes))).toBe('0');
-    expect(fieldValue(`${CONSTRAINT_LABELS.arrivalWindowLocal} from`)).toBe('06:00');
-    expect(fieldValue(`${CONSTRAINT_LABELS.arrivalWindowLocal} to`)).toBe('23:00');
+    // why: spec rev 55 §8.2: a new search has no arrival window
+    expect(fieldValue(`${CONSTRAINT_LABELS.arrivalWindowLocal} from`)).toBe('');
+    expect(fieldValue(`${CONSTRAINT_LABELS.arrivalWindowLocal} to`)).toBe('');
     expect(fieldValue(D.maxCells)).toBe('10');
     expect(fieldValue(D.topN)).toBe('10');
     expect(fieldValue(D.expandTop)).toBe('2');
@@ -87,9 +88,9 @@ describe('Definitions form defaults (spec §11)', () => {
     expect(fieldValue('Max billed calls per run')).toBe('2000');
     expect(fieldValue('Max cost per run in £')).toBe('0');
     expect(fieldValue('Travelpayouts refresh interval (hours)')).toBe('168');
-    // the default cron 0 5 * * 1, read by the schedule picker
-    expect(fieldValue(SETUP_COPY.schedule.repeat)).toBe('weekly');
-    expect(screen.getByText('Mondays at 05:00 (Europe/London)')).toBeInTheDocument();
+    // spec rev 55 §8.2: a new search has no schedule until the operator gives it one
+    expect(fieldValue(SETUP_COPY.schedule.repeat)).toBe('none');
+    expect(screen.getByText(SETUP_COPY.schedule.none)).toBeInTheDocument();
     expect(fieldValue('Time zone')).toBe('Europe/London');
     expect(screen.getByRole('checkbox', { name: 'Enabled: scheduled runs happen' })).not.toBeChecked();
   });
@@ -101,11 +102,12 @@ describe('Definitions form defaults (spec §11)', () => {
       minNights: 10,
       maxNights: 21,
       cabin: 'economy',
-      constraints: { maxJourneyMinutes: 1500, arrivalWindowLocal: { from: '06:00', to: '23:00' } },
-      scheduleCron: '0 5 * * 1',
+      constraints: { maxJourneyMinutes: 1500 },
+      scheduleCron: null,
       verification: { maxCells: 10, topN: 10, expandTop: 2, bookingLinks: true, alwaysInclude: [] },
       enabled: false,
     });
+    expect(req.constraints).not.toHaveProperty('arrivalWindowLocal');
     expect(req).not.toHaveProperty('confirmedCostPence');
   });
 
@@ -503,7 +505,8 @@ describe('per-destination fields and the example (spec §11)', () => {
     const from = `${CONSTRAINT_LABELS.arrivalWindowLocal} from`;
     const to = `${CONSTRAINT_LABELS.arrivalWindowLocal} to`;
     expect(screen.queryByText('both ends needed')).toBeNull();
-    await user.clear(screen.getByLabelText(to));
+    // why: a new search has no arrival window (spec rev 55 §8.2), so one end is filled to half-fill it
+    fireEvent.change(screen.getByLabelText(from), { target: { value: '06:00' } });
     expect(screen.getByRole('alert')).toHaveTextContent('both ends needed');
     expect(screen.getByLabelText(to)).toBeInvalid();
     expect(screen.getByLabelText(from)).toBeInvalid();
@@ -515,8 +518,10 @@ describe('per-destination fields and the example (spec §11)', () => {
     const bodies = estimateBodies();
     const { user, client } = renderForm();
     await user.click(screen.getByText(PLAN_COPY.moreOptions));
+    const from = `${CONSTRAINT_LABELS.arrivalWindowLocal} from`;
     const to = `${CONSTRAINT_LABELS.arrivalWindowLocal} to`;
-    await user.clear(screen.getByLabelText(to));
+    // why: a new search has no arrival window (spec rev 55 §8.2), so one end is filled to half-fill it
+    fireEvent.change(screen.getByLabelText(from), { target: { value: '06:00' } });
     const estimate = screen.getByRole('button', { name: 'Show estimate' });
     expect(estimate).toBeDisabled();
     expect(estimate).toHaveAccessibleDescription(

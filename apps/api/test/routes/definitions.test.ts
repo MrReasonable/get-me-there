@@ -166,6 +166,8 @@ describe('PUT / DELETE /api/definitions/:id and the schedule (spec §8.2)', () =
       '/api/definitions',
       DEF,
     );
+    // why: spec rev 55 §8.2: the default search has no schedule, so enabling it below also gives it the weekly one
+    expect(d.scheduleCron).toBeNull();
     expect(
       (await x.request(`/api/definitions/${d.id}`, { method: 'PUT', json: { name: 'renamed' } })).status,
     ).toBe(200);
@@ -174,7 +176,7 @@ describe('PUT / DELETE /api/definitions/:id and the schedule (spec §8.2)', () =
     expect((await errorOf(res)).code).toBe('draft_cannot_enable');
     const ok = await x.request(`/api/definitions/${d.id}`, {
       method: 'PUT',
-      json: { origins: ['lhr'], destinations: ['JFK'], enabled: true },
+      json: { origins: ['lhr'], destinations: ['JFK'], enabled: true, scheduleCron: '0 5 * * 1' },
     });
     expect((await expectContract(ok, 'PUT', '/api/definitions/:id', DEF)).origins).toEqual(['LHR']);
     expect(jobIds(x)).toContain(d.id);

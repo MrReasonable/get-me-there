@@ -8,14 +8,23 @@ export { DEFAULT_DISCOVERY_REFRESH_HOURS, evaluateAlertRules } from './alerts/ev
 export type {
   AlertEventPayload,
   BudgetFit,
+  BudgetUnit,
   CoverageCheckRequest,
   CoverageCheckResponse,
+  CreateAndStartRequest,
+  CreateAndStartResponse,
   DatePairsResponse,
   DefinitionResponse,
   HistoryPoint,
   ResultRow,
   RouteSeriesPoint,
   SchedulerJob,
+  SearchCard,
+  SearchCardsResponse,
+  StartRefusalCode,
+  StopCause,
+  StopDetail,
+  StopText,
 } from './api-contract/index.js';
 export * as apiContract from './api-contract/index.js';
 export * from './budget/window.js';
@@ -41,7 +50,9 @@ export * from './datePairs/index.js';
 export * from './dates/epochDay.js';
 export * from './errors.js';
 export { EXIT } from './exit.js';
+export { LISTED, type Listed } from './flights/types.js';
 export * from './labels/age.js';
+export { MAIN_PATH_SOURCE, mainPathSource } from './labels/mainPath.js';
 export { pointOfSaleLabel } from './labels/pointOfSale.js';
 export { PROVIDER_NAMES } from './labels/providers.js';
 export {
@@ -55,6 +66,7 @@ export {
   scheduledOnlyText,
 } from './labels/skip.js';
 export { GRID_SOURCE_LABEL, SOURCE_LABELS, sourceLabel } from './labels/source.js';
+export { NO_STOP_CAUSE_TEXT, type StopTextFacts, stopText } from './labels/stopCause.js';
 export { isTruncated, TRUNCATED_NOTE } from './labels/truncated.js';
 export { MOVED_MARKER, movedMarkerText, parseMovedMarker } from './local/movedMarker.js';
 export { camoufoxRootDir, workerDataDir } from './local/paths.js';

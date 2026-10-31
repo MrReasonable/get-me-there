@@ -55,10 +55,18 @@ export const executionResponseSchema = z.object({
   overrun: z.boolean(),
   disabledProviders: z.array(providerIdSchema),
 });
-/** Decision 37: a manual start confirms the pence and the calls the operator saw; one without the other covers nothing. */
+/**
+ * Decision 37: a manual start confirms the pence and the calls the operator saw; one without the other covers nothing.
+ * Spec revision 55 §8.1 (Search again): `requireCovered` refuses `confirm` whenever the runnable estimate exceeds the
+ * confirmation in pence or calls (the press confirms exactly the figures beside the button, for that run only), and
+ * `replaceStopped` supersedes a stopped (`paused_*` or `interrupted`) latest run of the search with a fresh start, in
+ * one transaction. Both optional, so every existing caller is unchanged; the route passes them to `StartOptions`.
+ */
 export const startExecutionRequestSchema = z.object({
   confirmCostPence: moneyPenceSchema.optional(),
   confirmCalls: z.number().int().min(0).optional(),
+  requireCovered: z.boolean().optional(),
+  replaceStopped: z.boolean().optional(),
 });
 export const startExecutionResponseSchema = z.object({ executionId: z.string() });
 /** WP7: a single-cell verification above SOFT_CONFIRM needs the confirmation a start would, pence and calls together. */

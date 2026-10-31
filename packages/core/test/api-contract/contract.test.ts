@@ -10,6 +10,7 @@ import {
   resultRowSchema,
   resultsQuerySchema,
   resultsResponseSchema,
+  startExecutionRequestSchema,
 } from '../../src/api-contract/index.js';
 import { verifiedFigure } from '../helpers/datePairs.js';
 
@@ -352,5 +353,21 @@ describe('/results scope parameters and datePairFigure (WP19; spec §10)', () =>
     expect(
       resultsResponseSchema.safeParse({ ...base, datePairFigure: { ...figure, airportPair } }).success,
     ).toBe(false);
+  });
+});
+
+describe("startExecutionRequestSchema (spec rev 55 §8.1: Search again's start flags)", () => {
+  it('accepts and keeps requireCovered and replaceStopped beside the confirmation', () => {
+    const body = { confirmCostPence: 120, confirmCalls: 3, requireCovered: true, replaceStopped: true };
+    expect(startExecutionRequestSchema.parse(body)).toEqual(body);
+    expect(startExecutionRequestSchema.parse({ requireCovered: false, replaceStopped: false })).toEqual({
+      requireCovered: false,
+      replaceStopped: false,
+    });
+  });
+  it('leaves both out when not sent, and refuses a flag that is not a boolean', () => {
+    expect(startExecutionRequestSchema.parse({})).toEqual({});
+    expect(startExecutionRequestSchema.safeParse({ requireCovered: 'yes' }).success).toBe(false);
+    expect(startExecutionRequestSchema.safeParse({ replaceStopped: 1 }).success).toBe(false);
   });
 });

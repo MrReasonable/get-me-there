@@ -1,10 +1,12 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, expectTypeOf, it } from 'vitest';
 import {
   AbortedError,
   BudgetExceeded,
   cooldownNoticeKey,
   NormalisationError,
+  PROVIDER_ERROR_KINDS,
   ProviderError,
+  type ProviderErrorKind,
   stripUrlsInText,
 } from '../src/errors.js';
 import { asIsoDateTime } from '../src/types/ids.js';
@@ -138,5 +140,24 @@ describe('ProviderError.cooldownUntil', () => {
     expect(cooldownNoticeKey('camoufox', asIsoDateTime('2027-02-12T09:00:00.000Z'))).toBe(
       'camoufox-cooldown:2027-02-12T09:00:00.000Z',
     );
+  });
+});
+
+describe('PROVIDER_ERROR_KINDS (spec §5.1; rev 55 §8.1: the first nine words of STOP_DETAILS)', () => {
+  it('holds the nine kinds, in the spec order', () => {
+    expect(PROVIDER_ERROR_KINDS).toEqual([
+      'auth',
+      'rate-limit',
+      'quota',
+      'upstream',
+      'parse',
+      'network',
+      'limiter-timeout',
+      'blocked',
+      'provider-unavailable',
+    ]);
+  });
+  it('is the one source of ProviderErrorKind', () => {
+    expectTypeOf<ProviderErrorKind>().toEqualTypeOf<(typeof PROVIDER_ERROR_KINDS)[number]>();
   });
 });

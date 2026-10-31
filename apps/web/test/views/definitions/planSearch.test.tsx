@@ -133,10 +133,11 @@ describe('Plan a search (the short form)', () => {
       maxNights: 14,
       cabin: 'premium_economy',
       constraints: { maxJourneyMinutes: 1080 },
-      // the defaults More options would show: the plan preset's sources and budget, the default schedule, disabled
+      // the defaults More options would show: the plan preset's sources and budget, no schedule (spec rev 55
+      // §8.2), disabled
       providers: providersResponse().presets.providers,
       budget: providersResponse().presets.budget,
-      scheduleCron: '0 5 * * 1',
+      scheduleCron: null,
       enabled: false,
     };
     expect(estimates[0]).toMatchObject(expected);
