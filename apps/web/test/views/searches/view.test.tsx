@@ -356,20 +356,25 @@ describe('the actions', () => {
 });
 
 describe('the side column (ruling A18)', () => {
-  it('mounts the existing new-search form beside the list on a desk, the list first', async () => {
+  it('mounts the existing new-search form first in the DOM, as a phone shows it', async () => {
     server.use(serveCards([searchCard()]));
     renderInShell(<SearchesView />);
     const side = await screen.findByRole('region', { name: S.sideHeading });
     const main = screen.getByRole('region', { name: S.listLabel });
     expect(await within(side).findByRole('button', { name: COPY.showEstimate })).toBeInTheDocument();
-    expect(main.compareDocumentPosition(side) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // why: DOM order follows the phone's visual order (WCAG 2.4.3): the form first; CSS grid puts it on the right
+    expect(side.compareDocumentPosition(main) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     // no link out to the Edit page's form: the form is here (ruling A18)
     expect(within(side).queryByRole('link', { name: /New search/ })).toBeNull();
   });
 
-  it('below 900 px the stylesheet puts the form above the list, with one DOM order (so nothing remounts)', () => {
+  it('the stylesheet places the form in the right column from 900 px and in the single column below, with one DOM order', () => {
     const css = readFileSync(join(process.cwd(), 'src/views/Searches/searches.css'), 'utf8');
-    expect(css).toMatch(/@media \(max-width: 899px\)[\s\S]*\.searches-side\s*\{\s*order: -1;/);
+    expect(css).toMatch(/\.searches-side\s*\{\s*grid-column: 2;\s*grid-row: 1;/);
+    expect(css).toMatch(/\.searches-main\s*\{\s*grid-column: 1;\s*grid-row: 1;/);
+    expect(css).toMatch(
+      /@media \(max-width: 899px\)[\s\S]*\.searches-side,\s*\.searches-main\s*\{\s*grid-column: 1;\s*grid-row: auto;/,
+    );
   });
 
   it('crossing 900 px keeps the form’s draft: the same field node, the same typed text', async () => {

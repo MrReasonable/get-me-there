@@ -262,9 +262,10 @@ export const COPY = {
   noExecution: 'No run yet for this search.',
   // why: the bar's status word (spec rev 55 §3, §11): a stopped run is "stopped", never "paused: error"; its sentence
   // follows. Every other status keeps its set-up word.
+  // why: a run that is pending or running reads "Searching", as its card does (cardWords.stateLine words both so)
   barStatusName: {
-    pending: 'pending',
-    running: 'running',
+    pending: 'Searching',
+    running: 'Searching',
     paused_budget: 'stopped',
     paused_error: 'stopped',
     interrupted: 'interrupted',
@@ -676,6 +677,7 @@ export const COPY = {
     label: 'Search again',
     searchNow: 'Search now',
     working: 'Searching…',
+    startedUnread: (message: string) => `The search started, but its progress could not be read: ${message}`,
     // why: a refusal is said in plain words beside the button (spec §11); `already` is the 409 of a search that is running
     refused: {
       active: 'Already searching',

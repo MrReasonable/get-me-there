@@ -34,7 +34,7 @@ describe('status bar (spec §11)', () => {
   it('one honest progress line per stage × provider: the six buckets, never an "attempted" umbrella (ruling 4)', async () => {
     server.use(http.get(`${API}/executions/:id`, () => HttpResponse.json(execution())));
     renderWithProviders(bar());
-    expect(await screen.findByText('running')).toBeInTheDocument();
+    expect(await screen.findByText('Searching')).toBeInTheDocument();
     const lines = screen.getAllByRole('progressbar');
     // why: spec rev 55 §3, §11 — a stage and a source in main-path words, the five marks in the count and the six
     // buckets under it (the coverage section's own terms)
@@ -210,10 +210,21 @@ describe('status bar (spec §11)', () => {
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
   });
 
+  it.each<[string, 'running' | 'pending']>([
+    ['running', 'running'],
+    ['pending', 'pending'],
+  ])('a %s run reads "Searching", the card’s words, never the stored status word', async (_n, status) => {
+    server.use(http.get(`${API}/executions/:id`, () => HttpResponse.json(execution({ status }))));
+    renderWithProviders(bar());
+    await screen.findByText('Searching');
+    const text = screen.getByRole('region', { name: COPY.statusBarLabel }).textContent ?? '';
+    expect(text).not.toMatch(/\b(running|pending)\b/);
+  });
+
   it('a running run offers no Resume', async () => {
     server.use(http.get(`${API}/executions/:id`, () => HttpResponse.json(execution())));
     renderWithProviders(bar());
-    await screen.findByText('running');
+    await screen.findByText('Searching');
     expect(screen.queryByRole('button', { name: 'Resume' })).toBeNull();
   });
 
@@ -232,14 +243,14 @@ describe('status bar (spec §11)', () => {
     expect(screen.queryByText('Loading…')).toBeNull();
     ok = true;
     await user.click(screen.getByRole('button', { name: /Try again|Retry/ }));
-    expect(await screen.findByText('running')).toBeInTheDocument();
+    expect(await screen.findByText('Searching')).toBeInTheDocument();
   });
 
   it('at 375px the numbers of a finished run fold into one disclosure; an active run keeps them open (UI-14, UI-006)', async () => {
     setViewportWidth(375);
     server.use(http.get(`${API}/executions/:id`, () => HttpResponse.json(execution())));
     const first = renderWithProviders(bar());
-    await screen.findByText('running');
+    await screen.findByText('Searching');
     // why: ruling 15: spend against the cap is never folded away while it can still grow.
     expect(screen.getByText('Progress and spend').closest('details')).toHaveAttribute('open');
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeVisible();
@@ -458,7 +469,7 @@ describe('status bar (spec §11)', () => {
       }),
     );
     renderWithProviders(bar());
-    expect(await screen.findByText('checking fares for one date pair: running')).toBeInTheDocument();
+    expect(await screen.findByText('checking fares for one date pair: Searching')).toBeInTheDocument();
     expect(await screen.findByRole('button', { name: 'Resume' })).toBeInTheDocument();
     expect(ids).toEqual(['exec-0001']);
   });
@@ -482,7 +493,7 @@ describe('status bar (spec §11)', () => {
       }),
     );
     renderWithProviders(bar());
-    await screen.findByText('running');
+    await screen.findByText('Searching');
     expect([hits.execution, hits.results]).toEqual([1, 1]);
     await act(() => vi.advanceTimersByTimeAsync(POLL_MS));
     await expect.poll(() => hits.execution).toBe(2);

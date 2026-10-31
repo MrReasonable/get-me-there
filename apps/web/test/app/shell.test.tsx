@@ -6,7 +6,7 @@ import { App } from '../../src/App.js';
 import { AppBoundary } from '../../src/components/AppBoundary.js';
 import { COPY } from '../../src/copy.js';
 import { workedDates } from '../fixtures.dates.js';
-import { API, execution, providersResponse, resultsResponse } from '../fixtures.js';
+import { API, definition, execution, providersResponse, resultsResponse } from '../fixtures.js';
 import { latestRun, searchCard } from '../fixtures.searches.js';
 import { expectConsoleErrors } from '../guards.js';
 import { datesError, serveDates } from '../msw/datesHandlers.js';
@@ -511,7 +511,7 @@ describe('which run the bar shows (ruling R-bar; spec rev 55 §11)', () => {
       const region = await bar();
       const name = await within(region).findByRole('link', { name: 'Birmingham → Frankfurt:' });
       expect(name).toHaveAttribute('href', '/?view=dates&def=def-0001');
-      expect(await within(region).findByText('running')).toBeInTheDocument();
+      expect(await within(region).findByText('Searching')).toBeInTheDocument();
       expect(within(region).queryByRole('button', { name: 'Cancel' })).toBeNull();
       expect(within(region).queryByRole('button', { name: 'Resume' })).toBeNull();
       expect(screen.getByRole('region', { name: COPY.monthSpendLabel })).toHaveTextContent(
@@ -569,6 +569,29 @@ describe('which run the bar shows (ruling R-bar; spec rev 55 §11)', () => {
   it('on the Edit page the bar follows the edit= search, with controls, whatever def= says', async () => {
     serveRuns([running]);
     renderWithProviders(<App />, { search: '?view=definitions&edit=def-0001&def=other' });
+    expect(await screen.findByRole('button', { name: 'Cancel' })).toBeInTheDocument();
+  });
+
+  it('while the definitions load on a search’s page the bar names no other search’s run, only the month’s spend', async () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    serveRuns([running]);
+    server.use(
+      http.get(`${API}/definitions`, async () => {
+        await gate;
+        return HttpResponse.json([definition()]);
+      }),
+    );
+    const { client } = renderWithProviders(<App />, { search: '?view=dates&def=def-0001' });
+    expect(await screen.findByRole('region', { name: COPY.monthSpendLabel })).toBeInTheDocument();
+    // only the definitions are still in flight: every other read (the cards included, were they wanted) has answered
+    await waitFor(() => expect(client.isFetching()).toBe(1));
+    await screen.findByRole('navigation', { name: 'Views' });
+    expect(screen.queryByRole('region', { name: 'Run status' })).toBeNull();
+    expect(screen.queryByRole('link', { name: /:$/ })).toBeNull();
+    release();
     expect(await screen.findByRole('button', { name: 'Cancel' })).toBeInTheDocument();
   });
 });

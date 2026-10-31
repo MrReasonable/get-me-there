@@ -8,13 +8,24 @@
     align-items: start;
     max-width: 1280px;
   }
+  /* The DOM puts the form first (so keyboard order matches what a phone shows); a desk places it in the right column,
+     beside the list, in the one stable tree, so crossing the breakpoint remounts nothing */
+  .searches-side {
+    grid-column: 2;
+    grid-row: 1;
+  }
+  .searches-main {
+    grid-column: 1;
+    grid-row: 1;
+  }
   @media (max-width: 899px) {
     .searches-layout {
       grid-template-columns: minmax(0, 1fr);
     }
-    /* the form above the list; the DOM keeps one order, so crossing the breakpoint remounts nothing */
-    .searches-side {
-      order: -1;
+    .searches-side,
+    .searches-main {
+      grid-column: 1;
+      grid-row: auto;
     }
   }
   .searches-side {

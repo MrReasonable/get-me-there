@@ -71,6 +71,7 @@ export function App() {
     );
   }, []);
   const editing = params.get('edit');
+  const barNeedsSearch = view === 'dates' || view === 'results' || view === 'definitions';
   const barSearch =
     view === 'dates' || view === 'results'
       ? selected
@@ -117,7 +118,10 @@ export function App() {
           <div className="statusbar-row">
             {/* why: ruling R-bar — the bar follows the search the view shows (its page and detail by `def=`, the Edit page by
             `edit=`), with Cancel and Resume; on every other view it follows any search's run, named, with no controls */}
-            <StatusBar definition={barSearch} />
+            <StatusBar
+              definition={barSearch}
+              hold={barSearch === null && barNeedsSearch && definitions.isPending}
+            />
           </div>
         </div>
         <main id="main" tabIndex={-1} className="view-main pt-5">

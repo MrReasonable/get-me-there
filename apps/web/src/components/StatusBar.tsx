@@ -172,6 +172,11 @@ export interface StatusBarProps {
    * offers Cancel and Resume. Null on every other view, where the bar follows any search's run instead (`AnyRun`).
    */
   definition: Pick<DefinitionResponse, 'id'> | null;
+  /**
+   * The view shows a search that is not known yet (its definitions are loading): the run part waits, so another
+   * search's run is never shown in its place for a moment; only the month's spend shows.
+   */
+  hold?: boolean;
 }
 
 /**
@@ -181,11 +186,11 @@ export interface StatusBarProps {
  * active run of any search, else the latest stopped run of any search, with its search named and a link to its page and
  * no controls; with none, only the month's spend. There is no Run now: every run action lives on the search it acts on.
  */
-export function StatusBar({ definition }: StatusBarProps) {
+export function StatusBar({ definition, hold = false }: StatusBarProps) {
   return (
     <>
       <StatusLink />
-      {definition !== null ? (
+      {hold ? null : definition !== null ? (
         <RunStatus definitionId={definition.id} name={null} executionId={null} controls />
       ) : (
         <AnyRun />

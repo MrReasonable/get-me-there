@@ -170,6 +170,7 @@ const SAMPLES: Record<string, unknown[]> = {
   'searchesView.neverSearched': [85, 405],
   'searchesView.trip': ['12', '23 Jan'],
   'searchesView.seeDatesOf': ['Birmingham → Frankfurt'],
+  'searchAgain.startedUnread': ['HTTP 500'],
   'searchesView.searchAgainOf': ['Birmingham → Frankfurt'],
   'searchesView.editOf': ['Birmingham → Frankfurt'],
   'searchesView.removeOf': ['Birmingham → Frankfurt'],

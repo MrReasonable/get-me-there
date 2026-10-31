@@ -32,8 +32,12 @@ export function SearchAgainButton({
   // why: "Searching…" says the press took effect only while its run is going: it clears once that run is read as no
   // longer pending or running (the run is polled here, so the cards and the Dates page both see it end)
   const started = useExecution(start.data?.executionId ?? null);
+  // why: when that read keeps failing the button says so, with a retry, instead of a permanent "Searching…"
+  const unread = start.isSuccess && started.isError ? started.error : null;
   const searching =
-    start.isSuccess && (started.data === undefined || IN_FLIGHT_STATUSES.includes(started.data.status));
+    start.isSuccess &&
+    !started.isError &&
+    (started.data === undefined || IN_FLIGHT_STATUSES.includes(started.data.status));
   const refusal = start.error === null ? null : refusalText(start.error);
   return (
     <>
@@ -60,6 +64,14 @@ export function SearchAgainButton({
       {searching ? (
         <span role="status" className="text-sm">
           {COPY.searchAgain.working}
+        </span>
+      ) : null}
+      {unread !== null ? (
+        <span role="alert" className="bad-text text-sm">
+          {COPY.searchAgain.startedUnread(unread.message)}{' '}
+          <button type="button" className="btn btn-sm min-h-11" onClick={() => void started.refetch()}>
+            {COPY.retryLoad}
+          </button>
         </span>
       ) : null}
       {refusal !== null ? (

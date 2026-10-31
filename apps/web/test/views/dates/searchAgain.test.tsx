@@ -1,4 +1,4 @@
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import { HttpResponse, http } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { COPY } from '../../../src/copy.js';
@@ -157,5 +157,29 @@ describe('SearchAgainButton, the first press (spec rev 55 §8.1)', () => {
     await client.invalidateQueries({ queryKey: ['execution'] });
     await waitFor(() => expect(screen.queryByRole('status')).toBeNull());
     expect(screen.getByRole('button', { name: COPY.searchAgain.label })).toBeEnabled();
+  });
+
+  it('when the started run cannot be read, it says so with a retry instead of a permanent "Searching…"', async () => {
+    let fail = true;
+    const bodies = serveStart({ confirmedCostPence: 0, confirmedCalls: 154 });
+    server.use(
+      http.get(`${API}/executions/:id`, () =>
+        fail
+          ? HttpResponse.json({ error: { code: 'internal', message: 'db is down' } }, { status: 500 })
+          : HttpResponse.json(execution({ id: 'exec-2', status: 'completed' })),
+      ),
+    );
+    const { user } = renderWithProviders(<SearchAgainButton definitionId="def-0001" />);
+    const b = await button();
+    await waitFor(() => expect(b).toBeEnabled());
+    await user.click(b);
+    await waitFor(() => expect(bodies).toHaveLength(1));
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('The search started, but its progress could not be read: db is down');
+    expect(screen.queryByRole('status')).toBeNull();
+    fail = false;
+    await user.click(within(alert).getByRole('button', { name: COPY.retryLoad }));
+    await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
+    expect(screen.queryByRole('status')).toBeNull();
   });
 });
