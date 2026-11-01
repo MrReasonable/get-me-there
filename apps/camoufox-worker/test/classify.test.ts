@@ -502,6 +502,14 @@ describe('classify the return view (WP21 Task 21.0)', () => {
         'returns',
       ),
     ).toEqual({ kind: { kind: 'blocked', page: 'unrecognised' }, rule: 'no-flights-line-unrecorded' });
+    // why: the line beside a return link (no heading) is not the no-flights page either
+    expect(
+      classifyPageWithRule(
+        returnView({ text: t({ noFlights: true }), resultLinks: 2, outboundLinks: 0 }),
+        on,
+        'returns',
+      ).rule,
+    ).toBe('not-return-view');
     // why: the line beside an outbound link is not the no-flights page; it is no return view
     expect(
       classifyPageWithRule(

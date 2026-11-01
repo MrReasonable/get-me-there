@@ -271,6 +271,39 @@ describe('Pacer.reclaim (the holder’s further document load)', () => {
     await expect(p.reclaim(timers.deadline(10_000), timers)).rejects.toBeInstanceOf(DeadlineExceeded);
     expect(lastOf(dir)).toBe(T0);
   });
+  it('the boundaries: a wait of exactly the time left is refused, one ms less is waited out; a wait of 0 sleeps not at all', async () => {
+    const timers = fakeTimers(fixedClock(T0));
+    const dir = tmpDir();
+    const p = new Pacer({ dir, minSpacingSeconds: 30, clock: timers.clock });
+    p.claim();
+    await expect(p.reclaim(timers.deadline(28_000), timers)).rejects.toBeInstanceOf(DeadlineExceeded);
+    expect(timers.sleeps).toEqual([]);
+    await p.reclaim(timers.deadline(28_001), timers);
+    expect(timers.sleeps).toEqual([28_000]);
+    timers.clock.advance(28_000);
+    await p.reclaim(timers.deadline(1000), timers);
+    expect(timers.sleeps).toEqual([28_000]);
+    expect(lastOf(dir)).toBe('2026-10-18T05:00:56.000Z');
+  });
+  it('with spacing 0 a start recorded ahead of now is no wait either', async () => {
+    const timers = fakeTimers(fixedClock(T0));
+    const dir = tmpDir();
+    writeFileSync(join(dir, 'pacer.json'), JSON.stringify({ lastPageAt: '2026-10-18T05:10:00.000Z' }), {
+      mode: 0o600,
+    });
+    const p = new Pacer({ dir, minSpacingSeconds: 0, clock: timers.clock });
+    await p.reclaim(timers.deadline(1000), timers);
+    expect(timers.sleeps).toEqual([]);
+    expect(lastOf(dir)).toBe(T0);
+  });
+  it('the refusal names the spacing', async () => {
+    const timers = fakeTimers(fixedClock(T0));
+    const p = new Pacer({ dir: tmpDir(), minSpacingSeconds: 30, clock: timers.clock });
+    p.claim();
+    await expect(p.reclaim(timers.deadline(10_000), timers)).rejects.toThrow(
+      'the spacing outlasts the step budget',
+    );
+  });
   it('exposes its spacing, read-only, for the page’s budget (preflight P6)', () => {
     const p = new Pacer({ dir: tmpDir(), minSpacingSeconds: 45, clock: fixedClock(T0) });
     expect(p.spacingMs).toBe(45_000);
