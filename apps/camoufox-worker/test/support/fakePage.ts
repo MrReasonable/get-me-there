@@ -23,6 +23,8 @@ export interface FakeNode {
   selected?: boolean;
   /** A click on this node never resolves (every other read answers). */
   clickHang?: boolean;
+  /** WP21 Task 21.0: a key press on this node never resolves. */
+  pressHang?: boolean;
   /** WP21 Task 21.0: the node's box (null: not rendered); a 100 × 40 box by default. */
   box?: { x: number; y: number; width: number; height: number } | null;
   /** WP21 Task 21.0: the node is disabled (`isEnabled()` false). */
@@ -31,7 +33,16 @@ export interface FakeNode {
    * WP21 Task 21.0: what the page's hit test at this node's centre answers (the fake runs no page script, so the test
    * scripts it); the node itself, in the viewport, by default.
    */
-  hit?: { tag: string | null; role: string | null; relation: string; inViewport: boolean };
+  hit?: {
+    tag: string | null;
+    role: string | null;
+    relation: string;
+    inViewport: boolean;
+    sameRow: boolean | null;
+    coversTarget: boolean | null;
+    pointerEvents: string | null;
+    position: string | null;
+  };
   /** A `selected: true` role query that would match this node never answers (a re-rendering tab). */
   selectedQueryHang?: boolean;
   /** Any locator whose matches include this node never answers its count (a lookup that overruns). */
@@ -161,6 +172,9 @@ const never = <T>(): Promise<T> => new Promise<T>(() => undefined);
 export interface Calls {
   timeouts: number[];
   clicks: string[];
+  /** WP21 Task 21.0 (the keyboard activation): every focused node and every key pressed, as `role:name` / `key:role:name`. */
+  focuses: string[];
+  presses: string[];
   gotos: Array<{ url: string; timeout: number | undefined; waitUntil: string | undefined }>;
   closed: number;
 }
@@ -215,6 +229,19 @@ export class FakeLocator implements LocatorLike {
   }
   inputValue(o?: { timeout?: number }): Promise<string> {
     return this.read(o, (x) => x.value ?? '');
+  }
+  focus(o?: { timeout?: number }): Promise<void> {
+    return this.read(o, (x) => {
+      this.page.calls.focuses.push(`${x.role ?? ''}:${x.name ?? ''}`);
+    });
+  }
+  /** A key on the node; Enter activates it as a click would (the page's own handler: `onClick`). */
+  press(key: string, o?: { timeout?: number }): Promise<void> {
+    if (this.node()?.pressHang === true) return this.page.hangUntilClosed<void>();
+    return this.read(o, (x) => {
+      this.page.calls.presses.push(`${key}:${x.role ?? ''}:${x.name ?? ''}`);
+      if (key === 'Enter') this.page.onClick(x);
+    });
   }
   click(o?: { timeout?: number }): Promise<void> {
     if (this.node()?.clickHang === true) return this.page.hangUntilClosed<void>();
@@ -273,6 +300,10 @@ export class FakeLocator implements LocatorLike {
         role: x.role ?? null,
         relation: 'self',
         inViewport: true,
+        sameRow: true,
+        coversTarget: true,
+        pointerEvents: 'auto',
+        position: 'static',
       };
       // why: the fake has no typed bridge from the scripted value to the page function's result; a copy through JSON
       // is untyped, as a value back from the page is
@@ -341,7 +372,7 @@ export interface Navigation {
 
 /** A scripted page. `trees` are what successive `readFacts` polls see (the last repeats). */
 export class FakePage implements HeadedPageLike {
-  readonly calls: Calls = { timeouts: [], clicks: [], gotos: [], closed: 0 };
+  readonly calls: Calls = { timeouts: [], clicks: [], gotos: [], closed: 0, focuses: [], presses: [] };
   /** Whether the page was closed; read through `isClosed()` as Playwright's page is. */
   shut = false;
   isClosed(): boolean {

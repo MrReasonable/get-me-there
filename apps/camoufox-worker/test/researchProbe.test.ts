@@ -26,7 +26,16 @@ describe('probeTarget', () => {
           box: { x: 10, y: 900, width: 640, height: 0 },
           hidden: true,
           disabled: true,
-          hit: { tag: 'div', role: null, relation: 'other', inViewport: false },
+          hit: {
+            tag: 'div',
+            role: null,
+            relation: 'other',
+            inViewport: false,
+            sameRow: false,
+            coversTarget: true,
+            pointerEvents: 'auto',
+            position: 'absolute',
+          },
         }),
       ]),
     ).toEqual({
@@ -34,7 +43,16 @@ describe('probeTarget', () => {
       box: { width: 640, height: 0 },
       visible: false,
       enabled: false,
-      hit: { tag: 'div', role: null, relation: 'other', inViewport: false },
+      hit: {
+        tag: 'div',
+        role: null,
+        relation: 'other',
+        inViewport: false,
+        sameRow: false,
+        coversTarget: true,
+        pointerEvents: 'auto',
+        position: 'absolute',
+      },
       probeOverran: false,
     });
   });
@@ -56,10 +74,21 @@ describe('probeTarget', () => {
     expect(
       await run([
         n('link', NAME, [], {
-          hit: { tag: 'DIV class', role: 'link button!', relation: 'self', inViewport: true },
+          hit: {
+            tag: 'DIV class',
+            role: 'link button!',
+            relation: 'self',
+            inViewport: true,
+            sameRow: true,
+            coversTarget: false,
+            pointerEvents: 'auto none',
+            position: 'Sticky',
+          },
         }),
       ]),
-    ).toMatchObject({ hit: { tag: 'other', role: 'other', relation: 'self' } });
+    ).toMatchObject({
+      hit: { tag: 'other', role: 'other', relation: 'self', pointerEvents: 'other', position: 'other' },
+    });
   });
   it('a read that never answers is probeOverran with what was read', async () => {
     const page = new FakePage(null);
@@ -75,13 +104,24 @@ describe('probeTarget', () => {
 });
 
 describe('hitTestOf (the page script, over a synthetic document)', () => {
-  const el = (o: { tag?: string; role?: string | null; kids?: HitElement[] } = {}): HitElement => {
+  interface Opts {
+    tag?: string;
+    role?: string | null;
+    kids?: HitElement[];
+    row?: HitElement | null;
+    rect?: { left: number; top: number; width: number; height: number };
+    style?: { pointerEvents: string; position: string };
+  }
+  const styles = new Map<HitElement, { pointerEvents: string; position: string }>();
+  const el = (o: Opts = {}): HitElement => {
     const self: HitElement = {
       tagName: o.tag ?? 'DIV',
       getAttribute: (a) => (a === 'role' ? (o.role ?? null) : null),
       contains: (x) => x === self || (o.kids ?? []).includes(x),
-      getBoundingClientRect: () => ({ left: 10, top: 20, width: 100, height: 40 }),
+      closest: () => (o.row === undefined ? null : o.row),
+      getBoundingClientRect: () => o.rect ?? { left: 10, top: 20, width: 100, height: 40 },
     };
+    styles.set(self, o.style ?? { pointerEvents: 'auto', position: 'static' });
     return self;
   };
   let at: HitElement | null = null;
@@ -94,29 +134,78 @@ describe('hitTestOf (the page script, over a synthetic document)', () => {
         return at;
       },
     });
+    Reflect.set(globalThis, 'getComputedStyle', (e: HitElement) => styles.get(e));
     Reflect.set(globalThis, 'innerWidth', 1280);
     Reflect.set(globalThis, 'innerHeight', 800);
   });
   afterEach(() => {
-    Reflect.deleteProperty(globalThis, 'document');
-    Reflect.deleteProperty(globalThis, 'innerWidth');
-    Reflect.deleteProperty(globalThis, 'innerHeight');
+    for (const k of ['document', 'getComputedStyle', 'innerWidth', 'innerHeight'])
+      Reflect.deleteProperty(globalThis, k);
   });
   it('asks at the centre and names the relation: self, descendant, ancestor, other, none', () => {
-    const child = el({ tag: 'SPAN' });
-    const target = el({ tag: 'A', role: 'link', kids: [child] });
+    const row = el({ tag: 'LI' });
+    const child = el({ tag: 'SPAN', row });
+    const target = el({ tag: 'A', role: 'link', kids: [child], row });
     at = target;
-    expect(hitTestOf(target)).toEqual({ tag: 'a', role: 'link', relation: 'self', inViewport: true });
+    expect(hitTestOf(target)).toEqual({
+      tag: 'a',
+      role: 'link',
+      relation: 'self',
+      inViewport: true,
+      sameRow: true,
+      coversTarget: true,
+      pointerEvents: 'auto',
+      position: 'static',
+    });
     expect(asked).toEqual([[60, 40]]);
     at = child;
     expect(hitTestOf(target).relation).toBe('descendant');
-    const parent = el({ tag: 'LI', role: 'listitem', kids: [target] });
+    const parent = el({
+      tag: 'LI',
+      role: 'listitem',
+      kids: [target],
+      rect: { left: 0, top: 0, width: 400, height: 200 },
+    });
     at = parent;
-    expect(hitTestOf(target)).toMatchObject({ tag: 'li', relation: 'ancestor' });
+    expect(hitTestOf(target)).toMatchObject({ tag: 'li', relation: 'ancestor', coversTarget: true });
     at = el({ tag: 'DIV', role: 'dialog' });
-    expect(hitTestOf(target)).toMatchObject({ role: 'dialog', relation: 'other' });
+    expect(hitTestOf(target)).toMatchObject({ role: 'dialog', relation: 'other', sameRow: false });
     at = null;
-    expect(hitTestOf(target)).toEqual({ tag: null, role: null, relation: 'none', inViewport: true });
+    expect(hitTestOf(target)).toEqual({
+      tag: null,
+      role: null,
+      relation: 'none',
+      inViewport: true,
+      sameRow: null,
+      coversTarget: null,
+      pointerEvents: null,
+      position: null,
+    });
+  });
+  it('a covering sibling in the same row: sameRow, coversTarget within 4 px, its pointer-events and position', () => {
+    const row = el({ tag: 'LI' });
+    const target = el({ tag: 'DIV', role: 'link', row, rect: { left: 10, top: 20, width: 100, height: 40 } });
+    at = el({
+      tag: 'DIV',
+      row,
+      rect: { left: 13, top: 23, width: 94, height: 34 },
+      style: { pointerEvents: 'auto', position: 'absolute' },
+    });
+    expect(hitTestOf(target)).toMatchObject({
+      relation: 'other',
+      sameRow: true,
+      coversTarget: true,
+      pointerEvents: 'auto',
+      position: 'absolute',
+    });
+    // why: 5 px short on a side is not covering
+    at = el({ tag: 'DIV', row, rect: { left: 15, top: 20, width: 95, height: 40 } });
+    expect(hitTestOf(target).coversTarget).toBe(false);
+  });
+  it('a target in no row has sameRow null', () => {
+    const target = el({ row: null });
+    at = el({ row: el() });
+    expect(hitTestOf(target).sameRow).toBeNull();
   });
   it('a centre outside the window is not in the viewport', () => {
     Reflect.set(globalThis, 'innerHeight', 30);

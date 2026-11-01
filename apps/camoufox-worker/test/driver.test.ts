@@ -974,14 +974,30 @@ describe('clickOutbound (WP21 Task 21.0)', () => {
     });
     return { page, r, lines };
   };
-  it('clicks the one link in main of that exact name and returns what it clicked', async () => {
+  // why: the controller's ruling after recording 2 (the pointer click was intercepted by a covering element): the
+  // verified link is activated from the keyboard, focused then Enter, never a pointer click
+  it('focuses the one link in main of that exact name, presses Enter on it, and returns what it activated', async () => {
     const { page, r, lines } = run(tree([n('link', NAME), n('link', optionName(478))]));
     expect(await r).toEqual([`link:${NAME}`]);
-    expect(page.calls.clicks).toEqual([`link:${NAME}`]);
-    expect(page.calls.timeouts).toContain(CLICK_TIMEOUT_MS - CLICK_LOG_MARGIN_MS);
+    expect(page.calls.clicks).toEqual([]);
+    expect(page.calls.focuses).toEqual([`link:${NAME}`]);
+    expect(page.calls.presses).toEqual([`Enter:link:${NAME}`]);
+    expect(page.calls.timeouts.filter((x) => x === CLICK_TIMEOUT_MS - CLICK_LOG_MARGIN_MS)).toHaveLength(2);
     expect(
       lines.lines.filter((l) => l.msg === 'select-outbound step').map((l) => Reflect.get(l.o, 'step')),
-    ).toEqual(['find-outbound', 'find-outbound', 'click-outbound', 'click-outbound']);
+    ).toEqual([
+      'find-outbound',
+      'find-outbound',
+      'focus-outbound',
+      'focus-outbound',
+      'press-outbound',
+      'press-outbound',
+    ]);
+  });
+  it('the Enter goes to the element it focused, after the focus', async () => {
+    const { page, r } = run(tree([n('link', NAME)]));
+    await r;
+    expect([page.calls.focuses, page.calls.presses]).toEqual([[`link:${NAME}`], [`Enter:link:${NAME}`]]);
   });
   it('none of that name is not-found, and nothing is clicked', async () => {
     const { page, r } = run(tree([n('link', optionName(478))]));
@@ -1013,10 +1029,10 @@ describe('clickOutbound (WP21 Task 21.0)', () => {
     await expect(r).rejects.toMatchObject({ step: 'find-outbound', reason: 'not-found' });
     expect(page.calls.clicks).toEqual([]);
   });
-  it('a click that never answers times out at CLICK_TIMEOUT_MS as its own step, within the deadline', async () => {
+  it('an Enter that never answers times out at CLICK_TIMEOUT_MS as its own step, within the deadline', async () => {
     const page = new FakePage(null);
     page.setUrl(RESULTS_URL);
-    page.setTrees([tree([n('link', NAME, [], { clickHang: true })])]);
+    page.setTrees([tree([n('link', NAME, [], { pressHang: true })])]);
     const timers = fakeTimers();
     const run = createDriver(page, guard()).clickOutbound(NAME, timers.deadline(90_000), {
       timers,
@@ -1030,7 +1046,7 @@ describe('clickOutbound (WP21 Task 21.0)', () => {
       await flush();
       if (err === null) timers.runOut();
     }
-    expect(err).toMatchObject({ step: 'click-outbound', reason: 'timed-out', flow: 'select-outbound' });
+    expect(err).toMatchObject({ step: 'press-outbound', reason: 'timed-out', flow: 'select-outbound' });
     expect(timers.now() - Date.parse('2026-10-18T05:00:00.000Z')).toBe(CLICK_TIMEOUT_MS);
   });
 });
@@ -1175,7 +1191,7 @@ describe('clickOutbound’s failure word (WP21 Task 21.0, after recording 1)', (
       }),
     ).rejects.toMatchObject({
       name: 'StepFailed',
-      step: 'click-outbound',
+      step: 'press-outbound',
       reason: 'failed',
       detail: 'intercepted',
     });

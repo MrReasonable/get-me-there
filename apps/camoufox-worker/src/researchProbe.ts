@@ -15,11 +15,14 @@ export interface HitElement {
   tagName: string;
   getAttribute(name: string): string | null;
   contains(other: HitElement): boolean;
+  /** The nearest ancestor (or itself) matching a selector: the probe asks for the row. */
+  closest(selector: string): HitElement | null;
   getBoundingClientRect(): { left: number; top: number; width: number; height: number };
 }
 interface HitDocument {
   elementFromPoint(x: number, y: number): HitElement | null;
 }
+type ComputedStyleOf = (el: HitElement) => { pointerEvents: string; position: string };
 
 /** What is at the target's centre: the target itself, inside it, around it, something else, or nothing. */
 export interface HitTest {
@@ -27,6 +30,15 @@ export interface HitTest {
   role: string | null;
   relation: 'self' | 'descendant' | 'ancestor' | 'other' | 'none';
   inViewport: boolean;
+  /**
+   * After recording 2 (the controller's ruling): whether the element at the centre sits in the target's own row (its
+   * nearest list item or row; null when the target is in none), whether its box covers the target's within
+   * COVER_SLACK_PX, and its computed `pointer-events` and `position` (CSS keywords).
+   */
+  sameRow: boolean | null;
+  coversTarget: boolean | null;
+  pointerEvents: string | null;
+  position: string | null;
 }
 
 /**
@@ -34,18 +46,49 @@ export interface HitTest {
  * the page (serialised by Playwright), so it reads the page's globals through `globalThis` and closes over nothing.
  */
 export function hitTestOf(el: HitElement): HitTest {
+  // why: written out here, not shared: the function is serialised into the page and closes over nothing
+  const slack = 4;
+  const rowOf = (e: HitElement): HitElement | null => e.closest('li, [role="listitem"], [role="row"]');
   const r = el.getBoundingClientRect();
   const x = r.left + r.width / 2;
   const y = r.top + r.height / 2;
   const doc: HitDocument = Reflect.get(globalThis, 'document');
+  const styleOf: ComputedStyleOf = Reflect.get(globalThis, 'getComputedStyle');
   const width: number = Reflect.get(globalThis, 'innerWidth');
   const height: number = Reflect.get(globalThis, 'innerHeight');
   const inViewport = x >= 0 && y >= 0 && x < width && y < height;
   const at = doc.elementFromPoint(x, y);
-  if (at === null) return { tag: null, role: null, relation: 'none', inViewport };
+  if (at === null)
+    return {
+      tag: null,
+      role: null,
+      relation: 'none',
+      inViewport,
+      sameRow: null,
+      coversTarget: null,
+      pointerEvents: null,
+      position: null,
+    };
   const relation =
     at === el ? 'self' : el.contains(at) ? 'descendant' : at.contains(el) ? 'ancestor' : 'other';
-  return { tag: at.tagName.toLowerCase(), role: at.getAttribute('role'), relation, inViewport };
+  const row = rowOf(el);
+  const a = at.getBoundingClientRect();
+  const covers =
+    a.left <= r.left + slack &&
+    a.top <= r.top + slack &&
+    a.left + a.width >= r.left + r.width - slack &&
+    a.top + a.height >= r.top + r.height - slack;
+  const style = styleOf(at);
+  return {
+    tag: at.tagName.toLowerCase(),
+    role: at.getAttribute('role'),
+    relation,
+    inViewport,
+    sameRow: row === null ? null : rowOf(at) === row,
+    coversTarget: covers,
+    pointerEvents: style.pointerEvents,
+    position: style.position,
+  };
 }
 
 /** The probe as the recording stores it; null where a read was not made or did not answer. */
@@ -96,6 +139,10 @@ export async function probeTarget(page: PageLike, name: string, timers: Timers):
       role: token(hit.role, /^[a-z]{1,32}$/),
       relation: hit.relation,
       inViewport: hit.inViewport,
+      sameRow: hit.sameRow,
+      coversTarget: hit.coversTarget,
+      pointerEvents: token(hit.pointerEvents, /^[a-z-]{1,24}$/),
+      position: token(hit.position, /^[a-z-]{1,24}$/),
     };
   } catch (e) {
     // why: a probe is diagnostics only: what it could not read stays null and is marked, never the step's failure;

@@ -29,6 +29,9 @@ export interface LocatorLike {
   textContent(options?: { timeout?: number }): Promise<string | null>;
   inputValue(options?: { timeout?: number }): Promise<string>;
   click(options?: { timeout?: number }): Promise<void>;
+  /** WP21 Task 21.0 (the outbound's keyboard activation): focus the element, then press a key on it. */
+  focus(options?: { timeout?: number }): Promise<void>;
+  press(key: string, options?: { timeout?: number }): Promise<void>;
   isVisible(): Promise<boolean>;
   /** WP21 Task 21.0 (the outbound's probe, researchProbe.ts): the element's box in the page, or null when not rendered. */
   boundingBox(options?: {
@@ -181,8 +184,9 @@ export interface Driver {
   /**
    * WP21 Task 21.0: an outbound's selection. Step `find-outbound`: exactly one link in `main` with exactly that name,
    * which the outbound result pattern reads (preflight D6), else StepFailed('find-outbound', 'not-found' |
-   * 'ambiguous', 'select-outbound') with nothing clicked; step `click-outbound` under CLICK_TIMEOUT_MS. Returns what it
-   * clicked.
+   * 'ambiguous', 'select-outbound') with nothing activated; then, by the controller's ruling after recording 2, the
+   * link is activated from the keyboard: steps `focus-outbound` and `press-outbound` (Enter), each under
+   * CLICK_TIMEOUT_MS, a failure carrying Playwright's reason as a word. Returns what it activated.
    */
   clickOutbound(name: string, d: Deadline, o: StepOptions): Promise<string[]>;
 }
@@ -563,17 +567,23 @@ export function createDriver(page: PageLike, guard: GuardState, S: Selectors = S
       const found = await runStep('find-outbound', LOOKUP_TIMEOUT_MS, d, o, (st) => countOf(links, st));
       if (found === 0) throw fail('not-found');
       if (found > 1) throw fail('ambiguous');
-      await runStep('click-outbound', CLICK_TIMEOUT_MS, d, o, async (st) => {
-        // why: Playwright's own timeout answers first (CLICK_LOG_MARGIN_MS inside the step), so its call log's reason
-        // is read as a word; no force, no coordinates: the element's own click, which waits for it to be actionable
-        const timeout = Math.max(1, Math.min(CLICK_TIMEOUT_MS, st.remaining()) - CLICK_LOG_MARGIN_MS);
-        try {
-          await st.race(links.nth(0).click({ timeout }));
-        } catch (e) {
-          if (e instanceof DeadlineExceeded) throw e;
-          throw new ClickRefused(clickFailureOf(e));
-        }
-      });
+      const link = links.nth(0);
+      // why: the controller's ruling after recording 2 (the pointer click's centre was covered by another element of
+      // the row, which intercepted it): the verified link itself is focused and activated with Enter, as a keyboard
+      // user would; never force, coordinates, the covering element or a synthetic event. Each action runs
+      // CLICK_LOG_MARGIN_MS inside its step, so Playwright's own error, whose call log names why, answers first
+      const act = (step: string, action: (timeout: number) => Promise<void>) =>
+        runStep(step, CLICK_TIMEOUT_MS, d, o, async (st) => {
+          const timeout = Math.max(1, Math.min(CLICK_TIMEOUT_MS, st.remaining()) - CLICK_LOG_MARGIN_MS);
+          try {
+            await st.race(action(timeout));
+          } catch (e) {
+            if (e instanceof DeadlineExceeded) throw e;
+            throw new ClickRefused(clickFailureOf(e));
+          }
+        });
+      await act('focus-outbound', (timeout) => link.focus({ timeout }));
+      await act('press-outbound', (timeout) => link.press('Enter', { timeout }));
       return [`link:${name}`];
     },
 

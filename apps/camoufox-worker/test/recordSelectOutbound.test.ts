@@ -330,6 +330,16 @@ describe('record --select-outbound: the served sequence, two selections and a fr
       'second-selection',
     ]);
     const [first, reload, second] = f.steps;
+    // why: the controller's ruling after recording 2: each selection is the link focused, then Enter; never a click
+    expect([first.activation, reload.activation, second.activation]).toEqual([
+      'keyboard',
+      undefined,
+      'keyboard',
+    ]);
+    const calls = t.contexts[0]?.pages[0]?.calls;
+    expect(calls?.presses).toEqual([`Enter:link:${P451}`, `Enter:link:${P478}`]);
+    expect(calls?.focuses).toEqual([`link:${P451}`, `link:${P478}`]);
+    expect(calls?.clicks.filter((c) => c.startsWith('link:'))).toEqual([]);
     expect(first.after).toMatchObject({
       url: 'https://www.google.com/travel/flights/search',
       urlChanged: false,
@@ -494,6 +504,11 @@ describe('record --select-outbound: steps that do not complete end the page plai
     expect(await record(t.ctx(SELECT), cfg, t.deps)).toBe(0);
     const f = t.facts();
     expect(f.steps).toHaveLength(1);
+    // why: the controller's ruling after recording 2: an Enter that changes nothing within the step is no-activation
+    expect(f.steps[0]).toMatchObject({
+      selectFailed: 'press-outbound:no-activation',
+      activation: 'keyboard',
+    });
     expect(f.steps[0].after).toMatchObject({
       settled: false,
       changedFromPreClick: false,
@@ -701,10 +716,10 @@ describe('record --select-outbound: the served sequence’s other ends, and the 
     expect(await record(t.ctx(SELECT), cfg, t.deps)).toBe(0);
     expect(t.facts().steps.at(-1)).toEqual({ step: 'reload', waitTimedOut: true, waitMs: 0 });
   });
-  it('a link click that never answers ends the step as select-failed click-outbound:timed-out', async () => {
+  it('an Enter that never answers ends the step as select-failed press-outbound:timed-out', async () => {
     const hang = () => {
       const v = cheapestTree();
-      for (const c of descendants([v])) if (c.role === 'link' && c.name === P451) c.clickHang = true;
+      for (const c of descendants([v])) if (c.role === 'link' && c.name === P451) c.pressHang = true;
       return v;
     };
     const t = setup({ ...DEFAULT, onTab: () => [hang()] });
@@ -721,7 +736,7 @@ describe('record --select-outbound: the served sequence’s other ends, and the 
         ...log,
         debug: (o: object, msg?: string) => {
           log.debug(o, msg);
-          if (msg === 'select-outbound step' && Reflect.get(o, 'step') === 'click-outbound') clickStarted();
+          if (msg === 'select-outbound step' && Reflect.get(o, 'step') === 'press-outbound') clickStarted();
         },
       },
     };
@@ -732,7 +747,8 @@ describe('record --select-outbound: the served sequence’s other ends, and the 
     expect(t.facts().steps).toEqual([
       {
         step: 'first-selection',
-        selectFailed: 'click-outbound:timed-out',
+        selectFailed: 'press-outbound:timed-out',
+        activation: 'keyboard',
         waitMs: 24_000,
         target: expect.objectContaining({ matches: 1, visible: true }),
       },
@@ -882,7 +898,16 @@ describe('record --select-outbound: the target and the click’s failure (WP21 T
         box: { width: 100, height: 40 },
         visible: true,
         enabled: true,
-        hit: { tag: 'a', role: 'link', relation: 'self', inViewport: true },
+        hit: {
+          tag: 'a',
+          role: 'link',
+          relation: 'self',
+          inViewport: true,
+          sameRow: true,
+          coversTarget: true,
+          pointerEvents: 'auto',
+          position: 'static',
+        },
         probeOverran: false,
       });
   });
@@ -891,7 +916,16 @@ describe('record --select-outbound: the target and the click’s failure (WP21 T
       const v = cheapestTree();
       for (const c of descendants([v]))
         if (c.role === 'link' && c.name === P451)
-          c.hit = { tag: 'div', role: null, relation: 'other', inViewport: true };
+          c.hit = {
+            tag: 'div',
+            role: null,
+            relation: 'other',
+            inViewport: true,
+            sameRow: true,
+            coversTarget: true,
+            pointerEvents: 'auto',
+            position: 'absolute',
+          };
       return v;
     };
     const t = setup({ ...DEFAULT, onTab: () => [intercepted()] });
@@ -912,13 +946,14 @@ describe('record --select-outbound: the target and the click’s failure (WP21 T
     const [first] = t.facts().steps;
     expect(first).toMatchObject({
       step: 'first-selection',
-      selectFailed: 'click-outbound:failed',
+      selectFailed: 'press-outbound:failed',
+      activation: 'keyboard',
       clickFailure: 'intercepted',
       target: { matches: 1, hit: { relation: 'other' } },
     });
     expect(t.facts().steps).toHaveLength(1);
     expect(t.out.find((l) => l.startsWith('select-outbound:'))).toContain(
-      'first-selection select-failed click-outbound:failed intercepted',
+      'first-selection select-failed press-outbound:failed intercepted',
     );
   });
 });
