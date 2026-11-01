@@ -30,6 +30,17 @@ export interface LocatorLike {
   inputValue(options?: { timeout?: number }): Promise<string>;
   click(options?: { timeout?: number }): Promise<void>;
   isVisible(): Promise<boolean>;
+  /** WP21 Task 21.0 (the outbound's probe, researchProbe.ts): the element's box in the page, or null when not rendered. */
+  boundingBox(options?: {
+    timeout?: number;
+  }): Promise<{ x: number; y: number; width: number; height: number } | null>;
+  isEnabled(options?: { timeout?: number }): Promise<boolean>;
+  /** A page function run on the element (the probe's hit test only; it returns tokens and booleans, never text). */
+  evaluate<R>(
+    pageFunction: (element: never) => R,
+    arg?: undefined,
+    options?: { timeout?: number },
+  ): Promise<R>;
   /** The printed accessibility snapshot: stored by the graph exploration only, never parsed (graph.ts). */
   ariaSnapshot(options?: { timeout?: number }): Promise<string>;
   /** The rendered text (the graph exploration's chart region only; never HTML). */
@@ -262,6 +273,8 @@ export class StepFailed extends Error {
     readonly step: string,
     readonly reason: 'timed-out' | 'failed' | 'not-found' | 'not-selected' | 'ambiguous',
     readonly flow: string = 'cheapest',
+    /** WP21 Task 21.0: why a click could not land, as one word (`ClickFailure`), when the step knows it. */
+    readonly detail?: ClickFailure,
   ) {
     super(`the ${flow} flow's ${step} step ${reason}`);
     this.name = 'StepFailed';
@@ -306,7 +319,7 @@ export async function runStep<T>(
       },
       `${flow} step failed`,
     );
-    throw new StepFailed(name, 'failed', flow);
+    throw new StepFailed(name, 'failed', flow, e instanceof ClickRefused ? e.word : undefined);
   } finally {
     step.clear();
   }
@@ -314,6 +327,52 @@ export async function runStep<T>(
 
 /** Each click's own bound, always inside the page deadline (ruling of 2026-10-18). */
 export const CLICK_TIMEOUT_MS = 10_000;
+
+/**
+ * WP21 Task 21.0 (after the first live select-outbound recording, whose outbound click timed out): the outbound's click
+ * runs this far inside its step, so Playwright's own timeout, whose call log says why the action could not land,
+ * answers before the step's bound does.
+ */
+export const CLICK_LOG_MARGIN_MS = 1000;
+
+/** Why a click could not land, from Playwright's call log, as one word. */
+export type ClickFailure =
+  | 'not-visible'
+  | 'intercepted'
+  | 'not-stable'
+  | 'outside-viewport'
+  | 'detached'
+  | 'not-enabled'
+  | 'other';
+
+const CLICK_REASONS: ReadonlyArray<readonly [RegExp, ClickFailure]> = [
+  [/intercepts pointer events/, 'intercepted'],
+  [/element is not visible/, 'not-visible'],
+  [/element is not stable/, 'not-stable'],
+  [/outside of the viewport/, 'outside-viewport'],
+  [/detached from the DOM|not attached to the DOM/, 'detached'],
+  [/element is not enabled|element is disabled/, 'not-enabled'],
+];
+
+/**
+ * A click error's reason as one word: the last call-log line that names one (Playwright retries, so the last is the
+ * state the action ended on), else `other`. Only the word leaves this function, never the message, which can quote
+ * the page's markup.
+ */
+export function clickFailureOf(e: unknown): ClickFailure {
+  if (!(e instanceof Error)) return 'other';
+  for (const line of e.message.split('\n').reverse())
+    for (const [re, word] of CLICK_REASONS) if (re.test(line)) return word;
+  return 'other';
+}
+
+/** A click Playwright refused inside its step, carrying the reason's word to the step's StepFailed. */
+class ClickRefused extends Error {
+  constructor(readonly word: ClickFailure) {
+    super(`the click could not land: ${word}`);
+    this.name = 'ClickRefused';
+  }
+}
 
 /** The deadline's remaining time as a Playwright timeout; never 0, which Playwright reads as "no timeout". */
 export const timeoutOf = (d: Deadline): { timeout: number } => ({ timeout: Math.max(1, d.remaining()) });
@@ -504,9 +563,17 @@ export function createDriver(page: PageLike, guard: GuardState, S: Selectors = S
       const found = await runStep('find-outbound', LOOKUP_TIMEOUT_MS, d, o, (st) => countOf(links, st));
       if (found === 0) throw fail('not-found');
       if (found > 1) throw fail('ambiguous');
-      await runStep('click-outbound', CLICK_TIMEOUT_MS, d, o, (st) =>
-        st.race(links.nth(0).click(clickTimeoutOf(st))),
-      );
+      await runStep('click-outbound', CLICK_TIMEOUT_MS, d, o, async (st) => {
+        // why: Playwright's own timeout answers first (CLICK_LOG_MARGIN_MS inside the step), so its call log's reason
+        // is read as a word; no force, no coordinates: the element's own click, which waits for it to be actionable
+        const timeout = Math.max(1, Math.min(CLICK_TIMEOUT_MS, st.remaining()) - CLICK_LOG_MARGIN_MS);
+        try {
+          await st.race(links.nth(0).click({ timeout }));
+        } catch (e) {
+          if (e instanceof DeadlineExceeded) throw e;
+          throw new ClickRefused(clickFailureOf(e));
+        }
+      });
       return [`link:${name}`];
     },
 

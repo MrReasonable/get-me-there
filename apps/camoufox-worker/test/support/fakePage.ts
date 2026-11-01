@@ -23,6 +23,15 @@ export interface FakeNode {
   selected?: boolean;
   /** A click on this node never resolves (every other read answers). */
   clickHang?: boolean;
+  /** WP21 Task 21.0: the node's box (null: not rendered); a 100 × 40 box by default. */
+  box?: { x: number; y: number; width: number; height: number } | null;
+  /** WP21 Task 21.0: the node is disabled (`isEnabled()` false). */
+  disabled?: boolean;
+  /**
+   * WP21 Task 21.0: what the page's hit test at this node's centre answers (the fake runs no page script, so the test
+   * scripts it); the node itself, in the viewport, by default.
+   */
+  hit?: { tag: string | null; role: string | null; relation: string; inViewport: boolean };
   /** A `selected: true` role query that would match this node never answers (a re-rendering tab). */
   selectedQueryHang?: boolean;
   /** Any locator whose matches include this node never answers its count (a lookup that overruns). */
@@ -247,6 +256,28 @@ export class FakeLocator implements LocatorLike {
   }
   ariaSnapshot(o?: { timeout?: number }): Promise<string> {
     return this.read(o, (x) => printed(x, 0).join('\n'));
+  }
+  boundingBox(o?: {
+    timeout?: number;
+  }): Promise<{ x: number; y: number; width: number; height: number } | null> {
+    return this.read(o, (x) => (x.box === undefined ? { x: 0, y: 0, width: 100, height: 40 } : x.box));
+  }
+  isEnabled(o?: { timeout?: number }): Promise<boolean> {
+    return this.read(o, (x) => x.disabled !== true);
+  }
+  /** The page script is not run: the node's scripted hit test answers (the script is unit-tested on its own). */
+  evaluate<R>(_fn: (element: never) => R, _arg?: undefined, o?: { timeout?: number }): Promise<R> {
+    return this.read(o, (x) => {
+      const hit = x.hit ?? {
+        tag: x.role === 'link' ? 'a' : 'div',
+        role: x.role ?? null,
+        relation: 'self',
+        inViewport: true,
+      };
+      // why: the fake has no typed bridge from the scripted value to the page function's result; a copy through JSON
+      // is untyped, as a value back from the page is
+      return JSON.parse(JSON.stringify(hit));
+    });
   }
   isVisible(): Promise<boolean> {
     const x = this.node();

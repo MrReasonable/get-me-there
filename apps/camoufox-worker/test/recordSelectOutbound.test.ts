@@ -479,7 +479,12 @@ describe('record --select-outbound: steps that do not complete end the page plai
     expect(await record(t.ctx(SELECT), cfg, t.deps)).toBe(0);
     const f = t.facts();
     expect(f.steps).toEqual([
-      { step: 'first-selection', selectFailed: 'find-outbound:ambiguous', waitMs: 24_000 },
+      {
+        step: 'first-selection',
+        selectFailed: 'find-outbound:ambiguous',
+        waitMs: 24_000,
+        target: expect.objectContaining({ matches: 2 }),
+      },
     ]);
     expect(f.clicked).toEqual(['tab:Cheapest']);
     expect(t.cooldown()).toBeNull();
@@ -725,7 +730,12 @@ describe('record --select-outbound: the served sequence’s other ends, and the 
     t.timers.runOut();
     expect(await run).toBe(0);
     expect(t.facts().steps).toEqual([
-      { step: 'first-selection', selectFailed: 'click-outbound:timed-out', waitMs: 24_000 },
+      {
+        step: 'first-selection',
+        selectFailed: 'click-outbound:timed-out',
+        waitMs: 24_000,
+        target: expect.objectContaining({ matches: 1, visible: true }),
+      },
     ]);
   });
 });
@@ -856,5 +866,59 @@ describe('record --select-outbound: review fixes (WP21 Task 21.0)', () => {
     const [first] = t.facts().steps;
     expect(first.after).toMatchObject({ settled: false, urlChanged: null, changedFromPreClick: null });
     expect(t.facts().clicked).toEqual(['tab:Cheapest']);
+  });
+});
+
+// why: recording 1 (2026-11-01) timed out on the outbound's click; the recorder now records the target before it and
+// the click's failure word after it
+describe('record --select-outbound: the target and the click’s failure (WP21 Task 21.0, after recording 1)', () => {
+  it('records the target’s probe before each selection', async () => {
+    const t = setup();
+    expect(await record(t.ctx(SELECT), cfg, t.deps)).toBe(0);
+    const [first, , second] = t.facts().steps;
+    for (const s of [first, second])
+      expect(s.target).toEqual({
+        matches: 1,
+        box: { width: 100, height: 40 },
+        visible: true,
+        enabled: true,
+        hit: { tag: 'a', role: 'link', relation: 'self', inViewport: true },
+        probeOverran: false,
+      });
+  });
+  it('a click Playwright refuses records the call log’s reason as one word, and the page ends plainly', async () => {
+    const intercepted = () => {
+      const v = cheapestTree();
+      for (const c of descendants([v]))
+        if (c.role === 'link' && c.name === P451)
+          c.hit = { tag: 'div', role: null, relation: 'other', inViewport: true };
+      return v;
+    };
+    const t = setup({ ...DEFAULT, onTab: () => [intercepted()] });
+    const deps = withPage(t, (pg) => {
+      const click = pg.onClick;
+      pg.onClick = (x) => {
+        click(x);
+        if (x.role === 'link')
+          throw Object.assign(
+            new Error(
+              'locator.click: Timeout 9000ms exceeded.\nCall log:\n  - <div>…</div> intercepts pointer events',
+            ),
+            { name: 'TimeoutError' },
+          );
+      };
+    });
+    expect(await record(t.ctx(SELECT), cfg, deps)).toBe(0);
+    const [first] = t.facts().steps;
+    expect(first).toMatchObject({
+      step: 'first-selection',
+      selectFailed: 'click-outbound:failed',
+      clickFailure: 'intercepted',
+      target: { matches: 1, hit: { relation: 'other' } },
+    });
+    expect(t.facts().steps).toHaveLength(1);
+    expect(t.out.find((l) => l.startsWith('select-outbound:'))).toContain(
+      'first-selection select-failed click-outbound:failed intercepted',
+    );
   });
 });

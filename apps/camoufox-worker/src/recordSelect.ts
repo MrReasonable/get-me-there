@@ -38,6 +38,7 @@ import type { View } from './ready.js';
 import type { Outcome } from './recordDialogs.js';
 import { type StopFacts, stripQuery } from './recordWrite.js';
 import { buttonNames, linkNames, tabNames } from './researchNames.js';
+import { probeTarget, type TargetProbe } from './researchProbe.js';
 import type { Selectors } from './selectors.js';
 import { type Deadline, DeadlineExceeded, type Timers } from './timers.js';
 
@@ -130,6 +131,10 @@ interface StepRecord {
   waitMs?: number;
   waitTimedOut?: true;
   selectFailed?: string;
+  /** After recording 1: the outbound's link as the probe read it just before the click (selections only). */
+  target?: TargetProbe;
+  /** After recording 1: why the click could not land, as Playwright's call log named it (one word). */
+  clickFailure?: string;
   after?: After;
   /** The step's deadline passed and the one more read overran too. */
   lastReadOverran?: true;
@@ -371,6 +376,21 @@ async function unsettled(
 
 /** One selection: spaced, the pre-click view read, the outbound's link clicked, the view after it polled and read. */
 async function selection(c: SelectPage, step: StepName, pick: OutboundPick): Promise<StepResult> {
+  let target: TargetProbe | undefined;
+  const r = await selectionSteps(c, step, pick, (t) => {
+    target = t;
+  });
+  // why: the probe goes with the step's record however the step ended
+  if ('record' in r && target !== undefined) r.record.target = target;
+  return r;
+}
+
+async function selectionSteps(
+  c: SelectPage,
+  step: StepName,
+  pick: OutboundPick,
+  probed: (t: TargetProbe) => void,
+): Promise<StepResult> {
   const { timers, log, pollMs } = c.deps;
   const spaced = await spacing(c);
   const waitMs = spaced.waitMs;
@@ -383,6 +403,9 @@ async function selection(c: SelectPage, step: StepName, pick: OutboundPick): Pro
     // why: preflight P5: the pre-click signature by the return pattern, the same pattern every poll after it reads
     const pre = await c.driver.readFacts(d, undefined, 'returns');
     before = { url: pre.page.url, loads: c.guard.documentLoads, signature: pre.settle.linkSignature };
+    // why: recording 1's click timed out: the target is probed first (matches, box, visibility, the hit test at its
+    // centre), under its own bound, so the next recording says why a click cannot land
+    probed(await probeTarget(c.page, pick.name, timers));
     started = timers.now();
     const steps: StepOptions = { timers, log, startedAt: c.pageStart, flow: 'select-outbound' };
     try {
@@ -393,7 +416,11 @@ async function selection(c: SelectPage, step: StepName, pick: OutboundPick): Pro
       const blocked = await classifyAfterFailedStep(c.driver, d, steps, c.returnsS, 'returns');
       if (blocked !== null) return { stop: await c.stop(blocked.page, blocked.rule, blocked.facts) };
       const selectFailed = e instanceof StepFailed ? `${e.step}:${e.reason}` : 'click';
-      return { record: { step, waitMs, selectFailed }, end: true };
+      const clickFailure = e instanceof StepFailed ? e.detail : undefined;
+      return {
+        record: { step, waitMs, selectFailed, ...(clickFailure === undefined ? {} : { clickFailure }) },
+        end: true,
+      };
     }
     const settled = await pollUntilSettled(c.driver, d, timers, pollMs, c.returnsS, {
       view: 'returns',
@@ -468,7 +495,8 @@ async function reload(c: SelectPage, before: Before): Promise<StepResult & { sho
 /** The console line's word for a step: counts, booleans and rule words only (never a name or a URL). */
 function wordOf(r: StepRecord): string {
   if (r.waitTimedOut === true) return `${r.step} wait-timed-out`;
-  if (r.selectFailed !== undefined) return `${r.step} select-failed ${r.selectFailed}`;
+  if (r.selectFailed !== undefined)
+    return `${r.step} select-failed ${r.selectFailed}${r.clickFailure === undefined ? '' : ` ${r.clickFailure}`}`;
   if (r.after === undefined) return `${r.step} not-settled last-read-overran`;
   const a = r.after;
   return `${r.step} ${a.settled ? 'settled' : 'not-settled'} documentloads=${a.documentLoads} changed=${a.changedFromPreClick}`;

@@ -310,6 +310,8 @@ describe('worker rules: source facts through the compiler API', () => {
     expect([...new Set(callsTo('clickOutbound').map((c) => c.f))]).toEqual(['recordSelect.ts']);
     // why: the research reads (every link, button and tab name) are the recorder's alone, in their own module
     expect(moduleImporters('./researchNames.js')).toEqual(['recordSelect.ts']);
+    // why: after recording 1: the target's probe (its page function included) is the recorder's alone too
+    expect(moduleImporters('./researchProbe.js')).toEqual(['recordSelect.ts']);
   });
   it('no route.continue with a URL option', () => {
     const bad = callsTo('continue').filter((c) =>

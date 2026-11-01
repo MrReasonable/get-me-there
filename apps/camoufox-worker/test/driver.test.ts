@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
 import {
+  CLICK_LOG_MARGIN_MS,
   CLICK_TIMEOUT_MS,
   classifyAfterFailedStep,
+  clickFailureOf,
   createDriver,
   type Driver,
   LOOKUP_TIMEOUT_MS,
@@ -976,7 +978,7 @@ describe('clickOutbound (WP21 Task 21.0)', () => {
     const { page, r, lines } = run(tree([n('link', NAME), n('link', optionName(478))]));
     expect(await r).toEqual([`link:${NAME}`]);
     expect(page.calls.clicks).toEqual([`link:${NAME}`]);
-    expect(page.calls.timeouts).toContain(CLICK_TIMEOUT_MS);
+    expect(page.calls.timeouts).toContain(CLICK_TIMEOUT_MS - CLICK_LOG_MARGIN_MS);
     expect(
       lines.lines.filter((l) => l.msg === 'select-outbound step').map((l) => Reflect.get(l.o, 'step')),
     ).toEqual(['find-outbound', 'find-outbound', 'click-outbound', 'click-outbound']);
@@ -1125,5 +1127,60 @@ describe('probePage and classifyAfterFailedStep (WP21 Task 21.0)', () => {
       if (out === 'pending') timers.runOut();
     }
     expect(out).toBeNull();
+  });
+});
+
+// why: the first live select-outbound recording (2026-11-01) timed out on the outbound's click; Playwright's own error
+// names why an action could not land in its call log, so the click runs a margin inside its step and the reason is kept
+// as one word (never the message, which can quote the page)
+describe('clickOutbound’s failure word (WP21 Task 21.0, after recording 1)', () => {
+  const log = (line: string) =>
+    Object.assign(
+      new Error(
+        `locator.click: Timeout 9000ms exceeded.\nCall log:\n  - waiting for locator\n  - ${line}\n  - retrying click action`,
+      ),
+      {
+        name: 'TimeoutError',
+      },
+    );
+  it.each([
+    ['element is not visible', 'not-visible'],
+    ['<div class="x">…</div> intercepts pointer events', 'intercepted'],
+    ['element is not stable', 'not-stable'],
+    ['element is outside of the viewport', 'outside-viewport'],
+    ['element was detached from the DOM, retrying', 'detached'],
+    ['element is not enabled', 'not-enabled'],
+    ['waiting for element to be visible, enabled and stable', 'other'],
+  ])('%s → %s', (line, word) => {
+    expect(clickFailureOf(log(line))).toBe(word);
+  });
+  it('the last reason in the call log wins; a non-error is other', () => {
+    const e = log('element is not visible\n  - retrying click action\n  - <span> intercepts pointer events');
+    expect(clickFailureOf(e)).toBe('intercepted');
+    expect(clickFailureOf('x')).toBe('other');
+  });
+  it('a click that fails carries the word on StepFailed, and runs a margin inside its step', async () => {
+    const NAME = optionName(451);
+    const page = new FakePage(null);
+    page.setUrl(RESULTS_URL);
+    page.setTrees([n('document', '', [n('main', '', [n('link', NAME)])])]);
+    page.onClick = () => {
+      throw log('<div jsname="x">…</div> intercepts pointer events');
+    };
+    const timers = fakeTimers();
+    await expect(
+      createDriver(page, guard()).clickOutbound(NAME, timers.deadline(90_000), {
+        timers,
+        flow: 'select-outbound',
+      }),
+    ).rejects.toMatchObject({
+      name: 'StepFailed',
+      step: 'click-outbound',
+      reason: 'failed',
+      detail: 'intercepted',
+    });
+    expect(CLICK_LOG_MARGIN_MS).toBe(1000);
+    expect(page.calls.timeouts).toContain(CLICK_TIMEOUT_MS - CLICK_LOG_MARGIN_MS);
+    expect(page.calls.timeouts).not.toContain(CLICK_TIMEOUT_MS);
   });
 });
