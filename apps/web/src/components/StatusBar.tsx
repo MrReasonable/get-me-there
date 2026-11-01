@@ -23,6 +23,7 @@ import type { DefinitionResponse, ExecutionResponse, UsageRow } from '../api/typ
 import { COPY } from '../copy.js';
 import { formatIsoDate, formatMicroGbp, formatRunInstant } from '../format.js';
 import { useCheckedWords } from '../hooks/useCheckedWords.js';
+import { CLEARED_FILTERS, datesPatch } from '../state/datesState.js';
 import { BASIS_PARAM, DATES_COVERAGE, parseBasis } from '../state/resultsState.js';
 import { hrefWith, navigateTo, useSearchParams } from '../state/urlState.js';
 import { LoadError } from './LoadState.js';
@@ -267,6 +268,14 @@ function RunStatus({
   const child = executions.find((x) => x.isChild && ACTIVE.has(x.status)) ?? null;
   const execution = useExecution(latestId);
   const coverage = useCoverage(executionId === null ? definitionId : null);
+  // why: ruling R-bar — the bar may show another search's run than the URL's (or a run on a view with no search); its
+  // coverage link opens that run's own search, and the URL's Dates filters travel only when they are that search's
+  // own, so one search's coverage is never read as, or scoped by, another's
+  const coverageLink = {
+    ...DATES_COVERAGE,
+    ...(params.get('def') === definitionId ? {} : datesPatch(CLEARED_FILTERS)),
+    def: definitionId,
+  };
   const actions = useExecutionActions();
   const qc = useQueryClient();
   // why: the confirmation is bound to the run it was opened for; if the bar moves to another run, it must be asked again.
@@ -411,7 +420,7 @@ function RunStatus({
               </span>
             ))}
             {/* why: spec §11: the progress breakdown links to the Dates view's coverage section (WP19 Task 19.7) */}
-            <a href={hrefWith(DATES_COVERAGE)} onClick={navigateTo(DATES_COVERAGE)} className="link">
+            <a href={hrefWith(coverageLink)} onClick={navigateTo(coverageLink)} className="link">
               {COPY.progressCoverageLink}
             </a>
             {runCalls ? (

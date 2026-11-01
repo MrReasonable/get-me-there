@@ -16,6 +16,8 @@ import {
   summary,
   usage,
 } from '../fixtures.js';
+import { latestRun, searchCard } from '../fixtures.searches.js';
+import { serveCards } from '../msw/searchesHandlers.js';
 import { server } from '../msw/server.js';
 import { renderWithProviders, settled } from '../render.js';
 import { setViewportWidth } from '../viewport.js';
@@ -63,6 +65,32 @@ describe('status bar (spec §11)', () => {
     expect(link).toHaveAttribute('href', '/?view=dates&def=def-0001&d.to=JFK&d.coverage=open');
     await user.click(link);
     expect(window.location.search).toBe('?view=dates&def=def-0001&d.to=JFK&d.coverage=open');
+  });
+
+  // why: ruling R-bar — on a view that shows another search (or none), the bar follows any search's run; its coverage
+  // link must open that run's own search, never the URL's def= (coverage honesty: one search's coverage read as another's)
+  it.each([
+    ['Providers, with no search in the URL', '?view=providers'],
+    ['History, naming another search and its filter', '?view=history&def=def-0001&d.to=JFK'],
+  ])("on %s, the coverage link opens the shown run's own search, unfiltered", async (_name, search) => {
+    server.use(
+      serveCards([
+        searchCard({
+          id: 'def-0002',
+          name: 'Another search',
+          latestRun: latestRun({ id: 'exec-0001', status: 'running', finishedAt: null }),
+        }),
+      ]),
+      http.get(`${API}/executions/:id`, () => HttpResponse.json(execution())),
+    );
+    renderWithProviders(<StatusBar definition={null} />, { search });
+    const link = await screen.findByRole('link', { name: COPY.progressCoverageLink });
+    const href = new URLSearchParams(link.getAttribute('href')?.replace(/^\/\?/, '') ?? '');
+    expect(href.get('view')).toBe('dates');
+    expect(href.get('def')).toBe('def-0002');
+    expect(href.get('d.coverage')).toBe('open');
+    // another search's airport filter never scopes this one's coverage
+    expect(href.get('d.to')).toBeNull();
   });
 
   it('shows spend used / cap for the run, the month and each provider-month call cap, marking a cap that is near', async () => {
