@@ -269,6 +269,9 @@ describe('camoufox flightLists (spec rev 55 §2, §5.1)', () => {
     ],
     [504, { kind: 'not-ready', elapsedMs: 90_000 }, true, 'parse', 'page-not-ready'],
     [502, { kind: 'browser-error', stage: 'launch', detail: 'x' }, false, 'upstream', 'browser-error:launch'],
+    // why: a well-formed flights answer under a failing status is never read as a list (classifyWorkerAnswer's
+    // `flights` label)
+    [502, answer(), false, 'parse', 'unexpected-status'],
     [401, {}, false, 'auth', 'worker-key'],
     [400, { kind: 'bad-request' }, false, 'parse', 'bad-request'],
   ])(

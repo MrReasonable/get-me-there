@@ -40,7 +40,7 @@ import { parseError } from '../shared/errors.js';
 import { flightListCapability } from './flights.js';
 import { gridTileEstimate, planGridTiles } from './grid.js';
 import { gridTile } from './gridTile.js';
-import { postToWorker } from './post.js';
+import { fetchedAtWithinRequest, postToWorker } from './post.js';
 import { camoufoxPreflight } from './preflight.js';
 import { planSingleCells } from './tiles.js';
 
@@ -71,7 +71,6 @@ const WHERE = { providerId: 'camoufox' as const, endpointPath: PAGE_PATH };
 export const RETURN_DATE_LABEL = 'return date: the date asked for';
 /** The clock difference tolerated between the app and the host worker: core's one value. */
 export const CLOCK_SKEW_MS = CAMOUFOX_CLOCK_SKEW_MS;
-const shifted = (at: string, ms: number): string => new Date(Date.parse(at) + ms).toISOString();
 
 export interface CamoufoxProviderOptions {
   http: HttpKit;
@@ -217,12 +216,8 @@ export function camoufoxProvider(o: CamoufoxProviderOptions): FlightProvider {
     if (!a.success || a.data.kind !== 'cells')
       return fail(parseError('unknown-answer', 'the worker answered what this build cannot read', WHERE));
     const answer = a.data;
-    // why: prov-010: the page was read between this request's start and now; anything else is not this request's page.
-    // The app may run in a container whose clock differs a little from the host worker's: CLOCK_SKEW_MS either way.
-    if (
-      answer.fetchedAt < shifted(started, -CLOCK_SKEW_MS) ||
-      answer.fetchedAt > shifted(o.clock.now(), CLOCK_SKEW_MS)
-    )
+    // why: prov-010: the page was read between this request's start and now (post.ts's one rule, clock skew included)
+    if (!fetchedAtWithinRequest(answer.fetchedAt, started, o.clock.now()))
       return fail(
         parseError('fetched-at-out-of-range', `fetchedAt ${answer.fetchedAt} is outside this request`, WHERE),
       );
@@ -300,10 +295,7 @@ export function camoufoxProvider(o: CamoufoxProviderOptions): FlightProvider {
     const a = workerAnswerSchema.safeParse(body);
     if (!a.success || a.data.kind !== 'grid')
       return fail(parseError('unknown-answer', 'the worker answered what this build cannot read', WHERE));
-    if (
-      a.data.fetchedAt < shifted(started, -CLOCK_SKEW_MS) ||
-      a.data.fetchedAt > shifted(o.clock.now(), CLOCK_SKEW_MS)
-    )
+    if (!fetchedAtWithinRequest(a.data.fetchedAt, started, o.clock.now()))
       return fail(
         parseError('fetched-at-out-of-range', `fetchedAt ${a.data.fetchedAt} is outside this request`, WHERE),
       );

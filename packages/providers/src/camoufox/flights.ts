@@ -9,7 +9,6 @@
  * cap, which is thrown as BudgetExceeded, as `fetchTile` throws it.
  */
 import {
-  CAMOUFOX_CLOCK_SKEW_MS,
   type CapabilityInfo,
   FLIGHT_LIST_ENDPOINT_PATH,
   type FlightListCapability,
@@ -21,7 +20,7 @@ import {
   workerAnswerSchema,
 } from '@gmt/core';
 import { parseError } from '../shared/errors.js';
-import { postToWorker } from './post.js';
+import { fetchedAtWithinRequest, postToWorker } from './post.js';
 import type { CamoufoxProviderOptions } from './provider.js';
 
 /** Spec rev 55 §2 Labels, verbatim: the flight list's provenance. */
@@ -33,7 +32,6 @@ export const CAMOUFOX_FLIGHT_LIST_INFO: CapabilityInfo = {
 };
 
 const WHERE = { providerId: 'camoufox' as const, endpointPath: FLIGHT_LIST_ENDPOINT_PATH };
-const shifted = (at: string, ms: number): string => new Date(Date.parse(at) + ms).toISOString();
 
 export function flightListCapability(o: CamoufoxProviderOptions): FlightListCapability {
   const log = o.log.child({ providerId: 'camoufox' });
@@ -84,10 +82,7 @@ export function flightListCapability(o: CamoufoxProviderOptions): FlightListCapa
       return fail(parseError('unknown-answer', 'the worker answered what this build cannot read', WHERE));
     const answer = a.data;
     // why: prov-010: the page was read between this request's start and now, within the clock skew either way
-    if (
-      answer.fetchedAt < shifted(started, -CAMOUFOX_CLOCK_SKEW_MS) ||
-      answer.fetchedAt > shifted(o.clock.now(), CAMOUFOX_CLOCK_SKEW_MS)
-    )
+    if (!fetchedAtWithinRequest(answer.fetchedAt, started, o.clock.now()))
       return fail(
         parseError('fetched-at-out-of-range', `fetchedAt ${answer.fetchedAt} is outside this request`, WHERE),
       );

@@ -5,7 +5,13 @@
  * worker's contacted header). A ProviderError comes back as `{ ok: false }`, but the worker's monthly cap, which is
  * thrown as BudgetExceeded (`throwIfMonthly`); anything else is rethrown.
  */
-import { APP_INSTANCE_HEADER, type ProviderContext, ProviderError, WORKER_KEY_HEADER } from '@gmt/core';
+import {
+  APP_INSTANCE_HEADER,
+  CAMOUFOX_CLOCK_SKEW_MS,
+  type ProviderContext,
+  ProviderError,
+  WORKER_KEY_HEADER,
+} from '@gmt/core';
 import { throwIfMonthly } from './answer.js';
 import type { CamoufoxProviderOptions } from './provider.js';
 
@@ -52,4 +58,19 @@ export async function postToWorker(
     throwIfMonthly(e);
     return { ok: false, error: e };
   }
+}
+
+const shifted = (at: string, ms: number): string => new Date(Date.parse(at) + ms).toISOString();
+
+/**
+ * prov-010 (spec §2): whether a worker answer's `fetchedAt` falls inside its own request, from the request's start to
+ * now, with CAMOUFOX_CLOCK_SKEW_MS either way (the app may run in a container whose clock differs a little from the
+ * host worker's); anything else is not this request's page. The one rule a list page, a grid page and a flight list
+ * share, so no capability can accept a page another refuses.
+ */
+export function fetchedAtWithinRequest(fetchedAt: string, started: string, now: string): boolean {
+  return (
+    fetchedAt >= shifted(started, -CAMOUFOX_CLOCK_SKEW_MS) &&
+    fetchedAt <= shifted(now, CAMOUFOX_CLOCK_SKEW_MS)
+  );
 }
