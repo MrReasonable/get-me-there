@@ -287,10 +287,13 @@ many are over the limit, with "show all". When the search sets an arrival window
 the same way ("arrives 03:10, outside your window") and counted in that line, and the shown set always includes
 the shortest flight within the limits (*ruled on the brief's review*).
 
-**The date pair's price (*my call*).** A flight read never changes the date pair's price, coverage or tie: the
-headline stays the price the date grid (or cache) gave, with its source. When the cheapest flight read differs
-from it, the page says so in one line ("Google's flight list showed £92 as the cheapest, 11:44; the date grid
-showed £86, 09:30").
+**The date pair's price (*my call*, superseded).** As first designed, a flight read never changed the date pair's
+price, coverage or tie: the headline stayed the price the date grid (or cache) gave, with its source, and a
+differing cheapest flight read was said in one line. **Ian ruled on 2026-11-01 (WP21, spec revision 56)** that
+once a date pair's return flights are read, its headline figure and its board rank use the cheapest pairing total
+within the search's limits (outbound plus return, as the return list states it), with the flight list's source and
+fetch time, never "verified"; the date-grid price stays beside it ("date grid showed £564"); a date pair not read
+keeps the grid price, marked as such; coverage and the buckets are unchanged. The main spec is current.
 
 Stored per flight list: execution, origin, destination, departure and return dates, fetched at, source
 `camoufox`, and per flight: outbound departure time (local), arrival time and day offset, duration in
@@ -299,9 +302,10 @@ names the table*), not a fare offer and not an itinerary.
 
 ### 6.3 What it is not
 
-It is not verification. It has no flight numbers, no airport codes per segment and **no return leg** (the list
-shows outbound flights priced as round trips), so it cannot build a `RawOffer` or an itinerary identity
-(§2 l.449, §6.4). Therefore:
+It is not verification. It has no flight numbers, no airport codes per segment and, as first built, **no return
+leg** (the list shows outbound flights priced as round trips; spec revision 56, WP21, adds the return flights
+listed with at most two selected outbounds, each with the round-trip total the page stated for that pairing, and
+the main spec is current), so it cannot build a `RawOffer` or an itinerary identity (§2 l.449, §6.4). Therefore:
 
 - it carries no verdict class and never says "verified";
 - constraints are shown against it only where the read covers them, and say what they cover: "outbound 26h:
