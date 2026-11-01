@@ -26,7 +26,13 @@ import {
   readStopCause,
   readTime,
 } from '../internal/read.js';
-import { assertIsoDateTime, assertNullableIsoDateTime, RowRejected } from '../internal/validate.js';
+import {
+  assertIsoDateTime,
+  assertNullableIsoDateTime,
+  encodeFlightLists,
+  encodeStopCause,
+  RowRejected,
+} from '../internal/validate.js';
 import { ACTIVE_STATUS_SQL } from '../schema/checks.js';
 import type { ExecutionCreateInput, ExecutionPatch } from '../types.js';
 
@@ -172,13 +178,9 @@ function encode(key: keyof ExecutionPatch, patch: ExecutionPatch): unknown {
     case 'stage':
       return patch.stage ?? null;
     case 'stopCause':
-      return patch.stopCause === null || patch.stopCause === undefined
-        ? null
-        : JSON.stringify(patch.stopCause);
+      return encodeStopCause('stop_cause_json', patch.stopCause);
     case 'flightLists':
-      return patch.flightLists === null || patch.flightLists === undefined
-        ? null
-        : JSON.stringify(patch.flightLists);
+      return encodeFlightLists('flight_lists_json', patch.flightLists);
   }
 }
 
@@ -268,10 +270,7 @@ export class ExecutionsRepo {
           isCatchUp: input.isCatchUp === true ? 1 : 0,
           windowEnd: input.browserWindowEnd ?? null,
           skipCode: input.skipCode ?? null,
-          stopCause:
-            input.stopCause === null || input.stopCause === undefined
-              ? null
-              : JSON.stringify(input.stopCause),
+          stopCause: encodeStopCause('stop_cause_json', input.stopCause),
           errorText:
             input.errorText === null || input.errorText === undefined
               ? null
@@ -473,7 +472,7 @@ export class ExecutionsRepo {
           id,
           now: this.clock.now(),
           errorText: fixedStopSentence(cause),
-          cause: JSON.stringify(cause),
+          cause: encodeStopCause('stop_cause_json', cause),
         }).changes === 1
     );
   }

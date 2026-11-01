@@ -130,6 +130,34 @@ describe('ExecutionsRepo stop causes (spec revision 55 §7)', () => {
     );
   });
 
+  // why: the write side parses with the reader's own strict schemas, so a shape the reader would refuse (here free text
+  // riding along) is never stored, and one bad row can never make every later read of it throw RowCorrupt
+  it('a cause or flight-list plan the strict reader would refuse is refused on write, and nothing is stored', () => {
+    const { db, repo, id, definition } = setup();
+    const loose = { ...BUDGET, note: 'vendor said no' };
+    expect(() => repo.setStatus(id, 'paused_budget', { stopCause: loose, errorText: 'x' })).toThrow(
+      RowRejected,
+    );
+    expect(repo.get(id)?.status).toBe('running');
+    expect(causeOf(db, id)?.stop_cause_json).toBeNull();
+    const plan = { planned: 1, cells: [], reused: 0, ended: null, note: 'free text' };
+    expect(() => repo.patch(id, { flightLists: plan })).toThrow(RowRejected);
+    expect(repo.get(id)?.flightLists).toBeNull();
+    const skippedWith = { kind: 'skipped-window', note: 'free text' } as const;
+    expect(() =>
+      repo.create({
+        definitionId: definition.id,
+        isChild: false,
+        cell: null,
+        snapshot: snapshotOf(definition),
+        estimate: null,
+        trigger: 'schedule',
+        status: 'skipped_window',
+        stopCause: skippedWith,
+      }),
+    ).toThrow(RowRejected);
+  });
+
   it('a stored cause that is not a cause reads as corrupt, never as text', () => {
     const { db, repo, id } = setup();
     db.raw
