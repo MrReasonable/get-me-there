@@ -272,6 +272,10 @@
     padding-top: 0;
     border-top: 0;
   }
+  /* the tie line heads its run: the divider stays above the line, and the run's first row has none under it */
+  .board tbody tr.tie-row + tr > * {
+    border-top: 0;
+  }
   .flight-outcome {
     display: flex;
     flex-wrap: wrap;
@@ -335,6 +339,10 @@
   .board tbody tr.tie-row {
     display: block;
     padding: 10px 2px 0;
+  }
+  .board tbody tr.tie-row + tr {
+    border-top: 0;
+    padding-top: 6px;
   }
   .flight-outcome {
     justify-content: flex-end;

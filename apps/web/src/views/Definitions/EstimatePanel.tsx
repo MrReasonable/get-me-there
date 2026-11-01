@@ -37,12 +37,12 @@ export function scopeWords(label: string): string {
 
 /**
  * The estimate panel's one cost formatter (spec rev 55 §11): the estimate sentence beside Search now, its notes and the
- * press's label format money through this alone (`sourceGuard.test.ts`). Pounds and pence always ("about £1.20",
- * "your £1.00 check"), so an amount beside another with pence reads alike.
+ * press's label format money through this alone, and so does a search's tie line (`sourceGuard.test.ts`). By default
+ * pounds and pence always ("about £1.20", "your £1.00 check"), so an amount beside another with pence reads alike;
+ * `wholePounds` leaves the pence off a whole-pound amount ("£86", but "£86.50"), the tie line's form (ruling R-pounds,
+ * WP20 Task 20.10).
  */
 export const estimateMoney = (pence: number, o: { wholePounds?: boolean } = {}): string =>
-  // why: ruling R-pounds (WP20 Task 20.10): the tie line's price reads "£86" (pence only when it has some), through
-  // this one formatter all the same
   formatPence(pence, { showPence: o.wholePounds !== true });
 
 /**

@@ -907,7 +907,11 @@ describe('ties (spec rev 55 §11 Ties)', () => {
         () => ({ reading: landed ? null : { departureDate: '2027-03-17', returnDate: '2027-03-27' } }),
       ),
     );
-    renderDates({ body: TIES });
+    // why: the board's transition is observed through its injected animate call (WP19 §6), as runUpdates does
+    const animate = vi.fn(
+      (_el: Element, _frames: Keyframe[], _options: KeyframeAnimationOptions) => undefined,
+    );
+    renderDates({ body: TIES, props: { animate } });
     await waitFor(() => expect(document.querySelector('[data-flights-for="9"]')).not.toBeNull());
     await waitFor(() =>
       expect(within(blockOf(9)).getByRole('button', { name: /^Reading flights/ })).toBeInTheDocument(),
@@ -918,12 +922,17 @@ describe('ties (spec rev 55 §11 Ties)', () => {
     await act(() => vi.advanceTimersByTimeAsync(POLL_MS));
     await waitFor(() => expect(outcomeOf(9)).not.toBeNull());
     expect(order()).toEqual([0, 3, 6, 9, 12, 15]);
+    expect(animate).not.toHaveBeenCalled();
     // focus leaves the board: the move applies, 17 Mar first within its tie
     act(() => document.body.focus());
     act(() => {
       if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
     });
     await waitFor(() => expect(order()).toEqual([9, 0, 3, 6, 12, 15]));
+    // the released move runs the board's one transition, as any other reorder does (finding 9, FLIP half); why: the
+    // cascade starts after the next frame, whose timer is on the faked clock here, so the frame is stepped
+    await act(() => vi.advanceTimersByTimeAsync(100));
+    await waitFor(() => expect(animate).toHaveBeenCalled());
   });
 
   it('at phone width a tie line is its own full-width line, never a card (finding 11)', async () => {
@@ -937,6 +946,11 @@ describe('ties (spec rev 55 §11 Ties)', () => {
     const css = readFileSync(resolve(import.meta.dirname, '../../../src/views/Dates/dates.css'), 'utf8');
     const phone = css.slice(css.lastIndexOf('@media (max-width: 899px)'));
     expect(phone).toMatch(/\.board tbody tr\.tie-row\s*\{[^}]*display:\s*block/);
+    // the divider sits above the tie line, and the first card of its run has none, so the line heads its run
+    expect(phone).toMatch(/\.board tbody tr\.tie-row\s*\+\s*tr\s*\{[^}]*border-top:\s*0/);
+    expect(phone).not.toMatch(/\.board tbody tr\.tie-row\s*\{[^}]*border-top:\s*0/);
+    // and on the wide board, the first row of the run carries no divider under its tie line
+    expect(css).toMatch(/\.board tbody tr\.tie-row\s*\+\s*tr\s*>\s*\*\s*\{[^}]*border-top:\s*0/);
   });
 });
 

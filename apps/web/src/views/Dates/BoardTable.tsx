@@ -110,11 +110,16 @@ export function BoardTable(props: BoardProps) {
   // focus is in it (the board's own hold, revision 50) the order keeps the lists it last applied, and the move is
   // applied when they leave. The flights themselves (each block and outcome) show at once; only the order waits.
   const [held, setHeld] = useState(false);
-  const [orderBy, setOrderBy] = useState({ byKey: flights.byKey, available });
+  // why: finding 9 (FLIP half): `rev` counts each change of the applied lists, in the same state as the lists, so the
+  // render that moves rows within a tie also changes the transition's token (below) and the moves animate like any
+  // other reorder (none under reduced motion, as useFlip already rules)
+  const [orderBy, setOrderBy] = useState({ byKey: flights.byKey, available, rev: 0 });
   useEffect(() => {
     if (!held)
       setOrderBy((o) =>
-        o.byKey === flights.byKey && o.available === available ? o : { byKey: flights.byKey, available },
+        o.byKey === flights.byKey && o.available === available
+          ? o
+          : { byKey: flights.byKey, available, rev: o.rev + 1 },
       );
   }, [held, flights.byKey, available]);
   const { rows, tieAt } = useMemo(() => {
@@ -140,7 +145,8 @@ export function BoardTable(props: BoardProps) {
   }, [groups, orderBy, limits, visible]);
   const airportPairs = data.scope.airportPairs;
   const filtered = state.journey !== null;
-  useFlip(region, token, animate, reduced);
+  // why: both only count up, so their sum changes whenever a read is applied or a tie's flight lists are applied
+  useFlip(region, token + orderBy.rev, animate, reduced);
   const table = useRef<HTMLTableElement>(null);
   useExplicitRoles(table);
 
