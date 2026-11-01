@@ -1294,3 +1294,44 @@ describe('the booking view’s reads (the booking research)', () => {
     ]);
   });
 });
+
+// why: Ian's ruling of 2026-11-01 (open "more booking options"): the in-page expansion, by its own verified pattern,
+// exactly one on the page, focused then Enter; never an offer or a grouped seller control
+describe('clickMoreOptions (the booking research)', () => {
+  const OFFER = 'Continue to book with QQ Air for 451 British pounds';
+  const run = (nodes: FakeNode[]) => {
+    const page = new FakePage(null);
+    page.setUrl(RESULTS_URL);
+    page.setTrees([n('document', '', [n('main', '', nodes)])]);
+    const timers = fakeTimers();
+    const r = createDriver(page, guard()).clickMoreOptions(timers.deadline(90_000), { timers });
+    return { page, r };
+  };
+  it('focuses the one expansion control, presses Enter on it, and touches nothing else', async () => {
+    const { page, r } = run([
+      n('button', OFFER),
+      n('button', 'View QQ Air, 451 British pounds options'),
+      n('button', '3 more booking options'),
+    ]);
+    expect(await r).toEqual(['button:more-options']);
+    expect(page.calls.actions).toEqual([
+      'focus:button:3 more booking options',
+      'press:Enter:button:3 more booking options:focused',
+    ]);
+  });
+  it('none is not-found, two ambiguous, flow select-more-options, nothing activated', async () => {
+    for (const [nodes, reason] of [
+      [[n('button', OFFER)], 'not-found'],
+      [[n('button', '3 more booking options'), n('button', '1 more booking option')], 'ambiguous'],
+    ] as const) {
+      const { page, r } = run([...nodes]);
+      await expect(r).rejects.toMatchObject({
+        name: 'StepFailed',
+        step: 'find-more-options',
+        reason,
+        flow: 'select-more-options',
+      });
+      expect(page.calls.actions).toEqual([]);
+    }
+  });
+});

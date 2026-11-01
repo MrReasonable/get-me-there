@@ -55,6 +55,20 @@ describe('the dated selectors module (spec §2; brief §9)', () => {
     ])
       expect(offer.test(no), no).toBe(false);
   });
+  // why: select-return/2026-11-01/1 and 2: the expansion control is a button named by a count and the fixed phrase
+  it('the booking view’s expansion control: a count, then more booking option(s); never an offer', () => {
+    const { moreOptions, offer } = SELECTORS.booking;
+    for (const ok of ['3 more booking options', '1 more booking option', '12 more booking options'])
+      expect(moreOptions.test(ok), ok).toBe(true);
+    for (const no of [
+      'More booking options',
+      'Continue to book with QQ Air for 451 British pounds',
+      'View QQ Air, 451 British pounds options',
+      '3 more booking options for 451 British pounds',
+    ])
+      expect(moreOptions.test(no), no).toBe(false);
+    expect(offer.test('3 more booking options')).toBe(false);
+  });
   it('the return view hypothesis: a returning-flights heading, and return links in either price form', () => {
     const { heading, resultLink } = SELECTORS.returns;
     for (const h of [

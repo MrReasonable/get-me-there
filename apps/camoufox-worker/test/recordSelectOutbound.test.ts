@@ -135,6 +135,8 @@ interface Script {
   /** What a click on a link (by name) changes; return null to leave the view as it is. */
   onLink?: (name: string, ctx: FakeContext, page: FakePage) => FakeNode[] | null;
   onTab?: (n: number, page: FakePage) => FakeNode[];
+  /** What activating a button (by name) changes; return null to leave the view as it is. */
+  onButton?: (name: string) => FakeNode[] | null;
   /** Each selection loads a new document (a main-frame navigation the route lets through). */
   documentPerSelection?: boolean;
 }
@@ -247,6 +249,10 @@ function setup(script: Script = DEFAULT) {
           if (x.role === 'tab') {
             tabs += 1;
             pg.setTrees(script.onTab?.(tabs, pg) ?? [cheapestTree()]);
+          }
+          if (x.role === 'button') {
+            const next = script.onButton?.(x.name ?? '') ?? null;
+            if (next !== null) pg.setTrees(next);
           }
           if (x.role === 'link') {
             peek(`link-${x.name ?? ''}`);
@@ -1023,20 +1029,33 @@ describe('record --select-return: the return selected, the booking view recorded
   const RET_TIE = returnOptionName({ pounds: 451, carrier: 'QQ Air', priceForm: 'from' });
   const RET_DEAR = returnOptionName({ pounds: 470, priceForm: 'from' });
   const RETURNS = [RET_DEAR, RET_OTHER_DAY, RET_CHEAP, RET_TIE];
-  const OFFER_1 = 'Continue to book with QQ Air for 451 British pounds';
-  const OFFER_2 = 'Continue to book with QQ Atlantic, Economy Light for 470 British pounds';
-  const booking = (): FakeNode =>
+  const OFFER_1 = 'Continue to book with QQ Air for 470 British pounds';
+  const OFFER_2 = 'Continue to book with QQ Atlantic, Economy Light for 480 British pounds';
+  const OFFER_CHEAP = 'Continue to book with QQ Air, Economy Basic for 451 British pounds';
+  const OFFER_4 = 'Continue to book with QQ Atlantic for 495 British pounds';
+  const MORE = '2 more booking options';
+  const GROUPED = 'View QQ Air, QQ Atlantic 470 British pounds options';
+  const booking = (o: { offers?: string[]; more?: boolean } = {}): FakeNode =>
     n('document', 'Google Flights', [
       n('main', '', [
         n('heading', 'Booking options', [], { level: 2 }),
-        n('list', '', [n('listitem', '', [n('button', OFFER_1)]), n('listitem', '', [n('button', OFFER_2)])]),
+        n(
+          'list',
+          '',
+          (o.offers ?? [OFFER_1, OFFER_2]).map((x) => n('listitem', '', [n('button', x)])),
+        ),
+        n('button', GROUPED),
         n('link', 'Booking options help', [], { href: 'https://www.example-airline.test/' }),
-        n('button', 'More booking options'),
+        ...(o.more === false ? [] : [n('button', MORE)]),
       ]),
     ]);
-  const script = (o: { onReturn?: () => FakeNode[] | null } = {}): Script => ({
+  const expanded = () => booking({ offers: [OFFER_1, OFFER_2, OFFER_CHEAP, OFFER_4], more: false });
+  const script = (
+    o: { onReturn?: () => FakeNode[] | null; onMore?: () => FakeNode[] | null } = {},
+  ): Script => ({
     afterGoto: () => [bestTree()],
     onTab: () => [cheapestTree()],
+    onButton: (name) => (name === MORE ? (o.onMore ?? (() => [expanded()]))() : null),
     onLink: (name) =>
       name === P451
         ? [returnTree(RETURNS)]
@@ -1057,7 +1076,11 @@ describe('record --select-return: the return selected, the booking view recorded
       { name: P451, linkIndex: 2 },
       { name: RET_CHEAP, linkIndex: 2 },
     ]);
-    expect(f.steps.map((s: { step: string }) => s.step)).toEqual(['first-selection', 'return-selection']);
+    expect(f.steps.map((s: { step: string }) => s.step)).toEqual([
+      'first-selection',
+      'return-selection',
+      'more-options',
+    ]);
     const ret = f.steps[1];
     expect(ret).toMatchObject({
       activation: 'keyboard',
@@ -1073,15 +1096,43 @@ describe('record --select-return: the return selected, the booking view recorded
         linkNames: ['Booking options help'],
         booking: {
           headingLevels: [0, 1, 0, 0, 0, 0],
-          roleCounts: { link: 1, button: 3, listitem: 2, list: 1, heading: 1, dialog: 0 },
+          roleCounts: { link: 1, button: 4, listitem: 2, list: 1, heading: 1, dialog: 0 },
         },
       },
     });
-    expect(ret.after.buttonNames).toContain('More booking options');
+    expect(ret.after.buttonNames).toContain(MORE);
+    // why: Ian's ruling of 2026-11-01: the in-page expansion opened, then every offer read again
+    expect(f.steps[2]).toMatchObject({
+      step: 'more-options',
+      activation: 'keyboard',
+      after: {
+        settled: true,
+        changedFromPreClick: true,
+        documentLoadsBefore: 1,
+        documentLoads: 1,
+        names: [OFFER_1, OFFER_2, OFFER_CHEAP, OFFER_4],
+        expansion: { offers: 4, offerGrammar: 4, furtherMore: 0, cheapestVsFrom: 'equal', dialogs: 0 },
+      },
+    });
+    expect(f.steps[1].after.expansion).toEqual({
+      offers: 2,
+      offerGrammar: 2,
+      furtherMore: 1,
+      cheapestVsFrom: 'above',
+      dialogs: 0,
+    });
     const calls = t.contexts[0]?.pages[0]?.calls;
-    expect(calls?.presses).toEqual([`Enter:link:${P451}`, `Enter:link:${RET_CHEAP}`]);
+    // why: only the outbound, the return and the expansion are ever focused or pressed; no offer, no grouped control
+    expect(calls?.actions).toEqual([
+      `focus:link:${P451}`,
+      `press:Enter:link:${P451}:focused`,
+      `focus:link:${RET_CHEAP}`,
+      `press:Enter:link:${RET_CHEAP}:focused`,
+      `focus:button:${MORE}`,
+      `press:Enter:button:${MORE}:focused`,
+    ]);
     expect(calls?.clicks.filter((c) => !c.startsWith('tab:'))).toEqual([]);
-    expect(f.clicked).toEqual(['tab:Cheapest', `link:${P451}`, `link:${RET_CHEAP}`]);
+    expect(f.clicked).toEqual(['tab:Cheapest', `link:${P451}`, `link:${RET_CHEAP}`, 'button:more-options']);
     expect(
       JSON.parse(readFileSync(join(t.root, 'select-return/2026-10-18/1.meta.json'), 'utf8')),
     ).toMatchObject({
@@ -1089,37 +1140,38 @@ describe('record --select-return: the return selected, the booking view recorded
       documentLoads: 1,
     });
   });
-  it('claims 3 pages before the first load and settles to the documents loaded', async () => {
+  it('claims 4 pages before the first load and settles to the documents loaded', async () => {
     const t = setup(script());
     expect(await record(t.ctx(SELECT_RETURN), cfg, t.deps)).toBe(0);
-    expect(t.seen[0]).toMatchObject({ at: 'goto-1', pages: 3 });
+    expect(t.seen[0]).toMatchObject({ at: 'goto-1', pages: 4 });
     expect(t.months()).toBe(1);
     const doc = setup({ ...script(), documentPerSelection: true });
     expect(await record(doc.ctx(SELECT_RETURN), cfg, doc.deps)).toBe(0);
+    // why: the fake loads a document for each link activation (the outbound, the return); the expansion is in-page
     expect(doc.months()).toBe(3);
   });
-  it('passes a cap of 4 page timeouts and 2 spacings (420,000 ms) to the page budget', async () => {
+  it('passes a cap of 5 page timeouts and 3 spacings (540,000 ms) to the page budget', async () => {
     const t = setup(script());
     vi.mocked(budget.pageBudget).mockClear();
     expect(await record(t.ctx(SELECT_RETURN), cfg, t.deps)).toBe(0);
-    expect(vi.mocked(budget.pageBudget).mock.calls.map((c) => [c[1], c[3]])).toEqual([[90_000, 420_000]]);
-    expect(selectReturnCapMs(90_000, 30_000)).toBe(420_000);
+    expect(vi.mocked(budget.pageBudget).mock.calls.map((c) => [c[1], c[3]])).toEqual([[90_000, 540_000]]);
+    expect(selectReturnCapMs(90_000, 30_000)).toBe(540_000);
   });
-  it('with 2 pages left it is refused before anything loads', async () => {
+  it('with 3 pages left it is refused before anything loads', async () => {
     const t = setup(script());
     writeFileSync(
       join(t.dataDir, 'monthly.json'),
       JSON.stringify({
         windowStart: '2026-10-01T00:00:00.000Z',
         windowEnd: '2026-11-01T00:00:00.000Z',
-        pages: 1498,
+        pages: 1497,
         scrolls: 0,
       }),
       { mode: 0o600 },
     );
     expect(await record(t.ctx(SELECT_RETURN), cfg, t.deps)).toBe(EX_CONFIG);
     expect(t.err.join()).toContain(
-      "the worker's monthly page cap leaves fewer than the 3 pages this recording may load",
+      "the worker's monthly page cap leaves fewer than the 4 pages this recording may load",
     );
     expect(t.contexts).toEqual([]);
   });
@@ -1170,5 +1222,69 @@ describe('record --select-return: the return selected, the booking view recorded
     expect(await record(t.ctx(SELECT_RETURN), cfg, t.deps)).toBe(0);
     expect(facts(t).steps.at(-1)).toEqual({ step: 'return-selection', selectFailed: 'no-pick' });
     expect(t.contexts[0]?.pages[0]?.calls.presses).toEqual([`Enter:link:${P451}`]);
+  });
+});
+
+// why: Ian's ruling of 2026-11-01 (open "more booking options"): the expansion's own outcomes
+describe('record --select-return: the more-booking-options expansion', () => {
+  const RET_CHEAP = returnOptionName({ pounds: 451, priceForm: 'from' });
+  const MORE = '2 more booking options';
+  const offers = (xs: string[], more: boolean) =>
+    n('document', '', [
+      n('main', '', [
+        n('heading', 'Booking options', [], { level: 2 }),
+        n(
+          'list',
+          '',
+          xs.map((x) => n('listitem', '', [n('button', x)])),
+        ),
+        ...(more ? [n('button', MORE)] : []),
+      ]),
+    ]);
+  const ABOVE = ['Continue to book with QQ Air for 470 British pounds'];
+  const script = (o: { first: FakeNode; onMore?: () => FakeNode[] | null }): Script => ({
+    afterGoto: () => [bestTree()],
+    onTab: () => [cheapestTree()],
+    onLink: (name) => (name === P451 ? [returnTree([RET_CHEAP])] : name === RET_CHEAP ? [o.first] : null),
+    onButton: (name) => (name === MORE ? (o.onMore?.() ?? null) : null),
+  });
+  const facts = (t: ReturnType<typeof setup>) =>
+    JSON.parse(readFileSync(join(t.root, 'select-return/2026-10-18/1.facts.json'), 'utf8'));
+  it('an expansion that changes nothing within the step is press-more-options:no-activation', async () => {
+    const t = setup(script({ first: offers(ABOVE, true), onMore: () => null }));
+    expect(await record(t.ctx(['--select-return', ...Q]), cfg, t.deps)).toBe(0);
+    expect(facts(t).steps[2]).toMatchObject({
+      step: 'more-options',
+      activation: 'keyboard',
+      selectFailed: 'press-more-options:no-activation',
+      after: { settled: false, changedFromPreClick: false },
+    });
+  });
+  it('a booking view with no expansion control records find-more-options:not-found, nothing pressed', async () => {
+    const t = setup(script({ first: offers(ABOVE, false) }));
+    expect(await record(t.ctx(['--select-return', ...Q]), cfg, t.deps)).toBe(0);
+    expect(facts(t).steps[2]).toEqual({
+      step: 'more-options',
+      waitMs: expect.any(Number),
+      selectFailed: 'find-more-options:not-found',
+    });
+    expect(t.contexts[0]?.pages[0]?.calls.presses).toEqual([`Enter:link:${P451}`, `Enter:link:${RET_CHEAP}`]);
+  });
+  it('a further expansion control and a cheapest offer below the return’s price are recorded as such', async () => {
+    const below = [
+      'Continue to book with QQ Air for 470 British pounds',
+      'Continue to book with QQ Air for 440 British pounds',
+    ];
+    const t = setup(script({ first: offers(ABOVE, true), onMore: () => [offers(below, true)] }));
+    expect(await record(t.ctx(['--select-return', ...Q]), cfg, t.deps)).toBe(0);
+    expect(facts(t).steps[2].after.expansion).toEqual({
+      offers: 2,
+      offerGrammar: 2,
+      furtherMore: 1,
+      cheapestVsFrom: 'below',
+      dialogs: 0,
+    });
+    // why: the expansion is opened once; a further control is recorded, never pressed
+    expect(t.contexts[0]?.pages[0]?.calls.presses.filter((x) => x.includes(MORE))).toHaveLength(1);
   });
 });

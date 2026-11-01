@@ -52,11 +52,11 @@ export function selectOutboundCapMs(pageTimeoutMs: number, spacingMs: number): n
 }
 
 /**
- * `--select-return`'s cap (Ian's ruling of 2026-11-01, D7 style): four page timeouts (the first view, its Cheapest flow,
- * the outbound's selection, the return's selection) and two spacings (before each selection).
+ * `--select-return`'s cap (Ian's rulings of 2026-11-01, D7 style): five page timeouts (the first view, its Cheapest
+ * flow, the outbound's selection, the return's selection, the expansion) and three spacings (before each activation).
  */
 export function selectReturnCapMs(pageTimeoutMs: number, spacingMs: number): number {
-  return 4 * pageTimeoutMs + 2 * spacingMs;
+  return 5 * pageTimeoutMs + 3 * spacingMs;
 }
 
 /**
@@ -96,24 +96,35 @@ interface ViewRead {
 }
 
 /** The steps after the first view, in order. */
-type StepName = 'first-selection' | 'reload' | 'second-selection' | 'return-selection';
+type StepName = 'first-selection' | 'reload' | 'second-selection' | 'return-selection' | 'more-options';
 
 /** Which option a selection activates, and how its views are read (Ian's ruling of 2026-11-01 adds the return). */
 interface Selection {
-  what: 'outbound' | 'return';
+  what: 'outbound' | 'return' | 'more-options';
+  /** The target is a named link the probe can find (the expansion is a button by pattern: not probed). */
+  probe: boolean;
   /** The view the pre-click signature and every poll after the activation read (preflight P5: the same one). */
   view: View;
   activate: Driver['clickOutbound'];
 }
 const outboundSelection = (c: SelectPage): Selection => ({
   what: 'outbound',
+  probe: true,
   view: 'returns',
   activate: c.driver.clickOutbound,
 });
 const returnSelection = (c: SelectPage): Selection => ({
   what: 'return',
+  probe: true,
   view: 'booking',
   activate: c.driver.clickReturn,
+});
+/** Ian's ruling of 2026-11-01 (open "more booking options"): the booking view's in-page expansion. */
+const moreOptionsSelection = (c: SelectPage): Selection => ({
+  what: 'more-options',
+  probe: false,
+  view: 'booking',
+  activate: (_name, d, o, onActivate) => c.driver.clickMoreOptions(d, o, onActivate),
 });
 
 /** What a step showed once it settled, or (settled false) what one more read saw after its deadline. */
@@ -151,6 +162,18 @@ interface After {
    * counts of the roles inside `main`; null when the reads' bound ran out before it.
    */
   booking?: { headingLevels: number[]; roleCounts: Record<string, number> } | null;
+  /**
+   * Ian's ruling of 2026-11-01 (open "more booking options"), on a booking view: the offers counted, the buttons the offer
+   * pattern reads, further expansion controls, the cheapest offer against the return's "From" price as a word, and the
+   * dialogs in main (counts and words only).
+   */
+  expansion?: {
+    offers: number;
+    offerGrammar: number;
+    furtherMore: number;
+    cheapestVsFrom: 'equal' | 'above' | 'below' | 'unknown';
+    dialogs: number;
+  };
   /** From the click (or the goto) to the settle; the spacing wait is apart, in `waitMs`. */
   stepMs: number;
   waitMs: number;
@@ -469,7 +492,7 @@ async function selectionSteps(
     before = { url: pre.page.url, loads: c.guard.documentLoads, signature: pre.settle.linkSignature };
     // why: recording 1's click timed out: the target is probed first (matches, box, visibility, the hit test at its
     // centre), under its own bound, so the next recording says why a click cannot land
-    probed(await probeTarget(c.page, pick.name, timers));
+    if (sel.probe) probed(await probeTarget(c.page, pick.name, timers));
     started = timers.now();
     const steps: StepOptions = { timers, log, startedAt: c.pageStart, flow: `select-${sel.what}` };
     try {
@@ -568,6 +591,31 @@ async function reload(c: SelectPage, before: Before): Promise<StepResult & { sho
   }
 }
 
+/** A booking view's offers as the expansion step records them (counts and a word; never a name or a price). */
+function expansionOf(c: SelectPage, a: After, fromMinor: number | null): NonNullable<After['expansion']> {
+  const buttons = a.buttonNames ?? [];
+  const offers = buttons.filter((b) => c.deps.selectors.booking.offer.test(b));
+  const prices = offers
+    .map((b) => /for ([\d,]+) [A-Za-z ]+$/.exec(b)?.[1])
+    .filter((x): x is string => x !== undefined)
+    .map((x) => Number(x.replaceAll(',', '')) * 100);
+  const cheapest = prices.length === 0 ? null : Math.min(...prices);
+  return {
+    offers: a.page.resultLinks,
+    offerGrammar: offers.length,
+    furtherMore: buttons.filter((b) => c.deps.selectors.booking.moreOptions.test(b)).length,
+    cheapestVsFrom:
+      cheapest === null || fromMinor === null
+        ? 'unknown'
+        : cheapest === fromMinor
+          ? 'equal'
+          : cheapest > fromMinor
+            ? 'above'
+            : 'below',
+    dialogs: (a.booking?.roleCounts.dialog ?? 0) + (a.booking?.roleCounts.alertdialog ?? 0),
+  };
+}
+
 /** The console line's word for a step: counts, booleans and rule words only (never a name or a URL). */
 function wordOf(r: StepRecord): string {
   if (r.waitTimedOut === true) return `${r.step} wait-timed-out`;
@@ -657,7 +705,24 @@ export async function recordSelectOutbound(
     picks.push(ret);
     const rr = await selection(c, 'return-selection', ret, returnSelection(c));
     if ('stop' in rr) return rr.stop;
-    keep(rr);
+    const fromMinor = parseOptionName(ret.name)?.amountMinor ?? null;
+    if (rr.record.after !== undefined) rr.record.after.expansion = expansionOf(c, rr.record.after, fromMinor);
+    if (!keep(rr) || rr.record.after === undefined) return finish();
+    const b = rr.record.after;
+    // why: Ian's ruling of 2026-11-01 (open "more booking options"): only from a settled booking view with offers
+    if (!b.settled || b.classification.rule !== 'booking-view' || b.page.resultLinks === 0) {
+      steps.push({ step: 'more-options', selectFailed: 'not-booking-view' });
+      return finish();
+    }
+    const rm = await selection(
+      c,
+      'more-options',
+      { name: 'more-options', linkIndex: -1 },
+      moreOptionsSelection(c),
+    );
+    if ('stop' in rm) return rm.stop;
+    if (rm.record.after !== undefined) rm.record.after.expansion = expansionOf(c, rm.record.after, fromMinor);
+    keep(rm);
     return finish();
   }
   const r2 = await reload(c, {

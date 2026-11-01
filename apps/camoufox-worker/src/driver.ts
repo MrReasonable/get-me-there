@@ -196,6 +196,12 @@ export interface Driver {
    * return pattern (`S.returns.resultLink`): steps `find-return`, `focus-return`, `press-return`, flow `select-return`.
    */
   clickReturn(name: string, d: Deadline, o: StepOptions, onActivate?: () => void): Promise<string[]>;
+  /**
+   * Ian's ruling of 2026-11-01 (open "more booking options"): the booking view's in-page expansion, the one button on the
+   * page named by `S.booking.moreOptions`, focused then Enter: steps `find-more-options`, `focus-more-options`,
+   * `press-more-options`, flow `select-more-options`. Never an offer or any other control.
+   */
+  clickMoreOptions(d: Deadline, o: StepOptions, onActivate?: () => void): Promise<string[]>;
 }
 
 /** How a timed step runs: the timers, the debug log, and the page's start (for elapsed times). */
@@ -454,17 +460,34 @@ export function createDriver(page: PageLike, guard: GuardState, S: Selectors = S
     o: StepOptions,
     onActivate?: () => void,
   ): Promise<string[]> {
-    const steps: StepOptions = { ...o, flow };
-    const fail = (reason: 'not-found' | 'ambiguous'): StepFailed =>
-      new StepFailed(`find-${what}`, reason, flow);
     // why: preflight D6: only a result-shaped name is ever looked for, so nothing but an option's own link is activated
-    if (!pattern.test(name)) throw fail('not-found');
+    if (!pattern.test(name)) throw new StepFailed(`find-${what}`, 'not-found', flow);
     const links = page.getByRole('main').getByRole('link', { name, exact: true });
+    await activateOne(links, what, flow, d, o, onActivate);
+    return [`link:${name}`];
+  }
+
+  /**
+   * Exactly one match of `matches`, else StepFailed('find-<what>', 'not-found' | 'ambiguous', flow) with nothing
+   * activated; then the match itself focused and activated with Enter, as a keyboard user would (the controller's ruling
+   * after recording 2: the pointer click's centre was covered by another element of the row): never force, coordinates,
+   * a covering element or a synthetic event. Each action runs CLICK_LOG_MARGIN_MS inside its step, so Playwright's own
+   * error, whose call log names why, answers first. `onActivate` is told once the match is found.
+   */
+  async function activateOne(
+    matches: LocatorLike,
+    what: string,
+    flow: string,
+    d: Deadline,
+    o: StepOptions,
+    onActivate?: () => void,
+  ): Promise<void> {
+    const steps: StepOptions = { ...o, flow };
     // why: the page's own URL is never read here, so a selection reads nothing a poll would
-    const found = await runStep(`find-${what}`, LOOKUP_TIMEOUT_MS, d, steps, (st) => countOf(links, st));
-    if (found === 0) throw fail('not-found');
-    if (found > 1) throw fail('ambiguous');
-    const link = links.nth(0);
+    const found = await runStep(`find-${what}`, LOOKUP_TIMEOUT_MS, d, steps, (st) => countOf(matches, st));
+    if (found === 0) throw new StepFailed(`find-${what}`, 'not-found', flow);
+    if (found > 1) throw new StepFailed(`find-${what}`, 'ambiguous', flow);
+    const one = matches.nth(0);
     onActivate?.();
     const act = (step: string, action: (timeout: number) => Promise<void>) =>
       runStep(step, CLICK_TIMEOUT_MS, d, steps, async (st) => {
@@ -476,9 +499,8 @@ export function createDriver(page: PageLike, guard: GuardState, S: Selectors = S
           throw new ClickRefused(clickFailureOf(e));
         }
       });
-    await act(`focus-${what}`, (timeout) => link.focus({ timeout }));
-    await act(`press-${what}`, (timeout) => link.press('Enter', { timeout }));
-    return [`link:${name}`];
+    await act(`focus-${what}`, (timeout) => one.focus({ timeout }));
+    await act(`press-${what}`, (timeout) => one.press('Enter', { timeout }));
   }
 
   return {
@@ -617,6 +639,12 @@ export function createDriver(page: PageLike, guard: GuardState, S: Selectors = S
       activateLink(name, S.results.resultLink, 'outbound', 'select-outbound', d, o, onActivate),
     clickReturn: (name, d, o, onActivate) =>
       activateLink(name, S.returns.resultLink, 'return', 'select-return', d, o, onActivate),
+    async clickMoreOptions(d, o, onActivate) {
+      // why: the expansion's own pattern only (it can never name an offer: the selectors test pins that)
+      const more = page.getByRole('button', { name: S.booking.moreOptions });
+      await activateOne(more, 'more-options', 'select-more-options', d, o, onActivate);
+      return ['button:more-options'];
+    },
 
     async formFacts(d) {
       const trip = page.getByRole('combobox', { name: S.form.tripType });
@@ -685,7 +713,10 @@ async function firstText(l: LocatorLike, d: Deadline): Promise<string | null> {
  * `clickOutbound`, so a click on a consent page does not compile. Imported only by
  * record.ts (rules.test.ts pins that).
  */
-export type ProbePage = Omit<Driver, 'click' | 'clickCheapest' | 'clickOutbound' | 'clickReturn'>;
+export type ProbePage = Omit<
+  Driver,
+  'click' | 'clickCheapest' | 'clickOutbound' | 'clickReturn' | 'clickMoreOptions'
+>;
 export function probePage(d: Driver): ProbePage {
   return {
     goto: d.goto,

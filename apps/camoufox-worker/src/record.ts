@@ -120,11 +120,12 @@ const FINALLY_MS = 5000;
  */
 export const RECORD_SELECT_PAGES = 4;
 /**
- * Ian's ruling of 2026-11-01 (read the booking options): the documents a `--select-return` page may load at worst
- * (the first view, the outbound's selection, the return's selection: each selection assumed a document), reserved
+ * Ian's rulings of 2026-11-01 (read the booking options; open "more booking options"): the documents a
+ * `--select-return` page may load at worst (the first view, the outbound's selection, the return's selection, the
+ * booking view's expansion: each activation assumed a document, though the recordings show them in-app), reserved
  * whole before the first load and settled to the documents the guard counted.
  */
-export const RECORD_SELECT_RETURN_PAGES = 3;
+export const RECORD_SELECT_RETURN_PAGES = 4;
 /** The research kinds that select an option, which share the select-outbound rules (reservation, cap, open page). */
 const isSelectKind = (k: RecordingKind): k is 'select-outbound' | 'select-return' =>
   k === 'select-outbound' || k === 'select-return';

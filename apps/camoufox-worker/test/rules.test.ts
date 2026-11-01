@@ -319,6 +319,7 @@ describe('worker rules: source facts through the compiler API', () => {
     expect(referencesTo('clickOutbound')).toEqual(['driver.ts', 'recordSelect.ts']);
     // why: Ian's ruling of 2026-11-01: the return's selection (the booking research) is the recorder's alone too
     expect(referencesTo('clickReturn')).toEqual(['driver.ts', 'recordSelect.ts']);
+    expect(referencesTo('clickMoreOptions')).toEqual(['driver.ts', 'recordSelect.ts']);
     // why: the research reads (every link, button and tab name) are the recorder's alone, in their own module
     expect(moduleImporters('./researchNames.js')).toEqual(['recordSelect.ts']);
     // why: after recording 1: the target's probe (its page function included) is the recorder's alone too

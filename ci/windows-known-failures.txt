@@ -302,14 +302,17 @@ apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-outboun
 apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-outbound: the served sequence’s other ends, and the later steps’ (WP21 Task 21.0) with the Cheapest flow unverified, the Best view is read and its pick selected
 apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-outbound: the target and the click’s failure (WP21 Task 21.0, after recording 1) a click Playwright refuses records the call log’s reason as one word, and the page ends plainly
 apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-outbound: the target and the click’s failure (WP21 Task 21.0, after recording 1) records the target’s probe before each selection
+apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-return: the more-booking-options expansion a booking view with no expansion control records find-more-options:not-found, nothing pressed
+apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-return: the more-booking-options expansion a further expansion control and a cheapest offer below the return’s price are recorded as such
+apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-return: the more-booking-options expansion an expansion that changes nothing within the step is press-more-options:no-activation
 apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-return: the return selected, the booking view recorded a challenge after the return’s activation is that stop
 apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-return: the return selected, the booking view recorded a settled view that is not the return view gives the return selection nothing to pick
 apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-return: the return selected, the booking view recorded an Enter on the return that changes nothing within the step is press-return:no-activation
-apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-return: the return selected, the booking view recorded claims 3 pages before the first load and settles to the documents loaded
+apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-return: the return selected, the booking view recorded claims 4 pages before the first load and settles to the documents loaded
 apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-return: the return selected, the booking view recorded no return on the return date: the return selection has no pick, and nothing more is activated
-apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-return: the return selected, the booking view recorded passes a cap of 4 page timeouts and 2 spacings (420,000 ms) to the page budget
+apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-return: the return selected, the booking view recorded passes a cap of 5 page timeouts and 3 spacings (540,000 ms) to the page budget
 apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-return: the return selected, the booking view recorded selects the cheapest return on the return date by keyboard and records the booking view, activating nothing on it
-apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-return: the return selected, the booking view recorded with 2 pages left it is refused before anything loads
+apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-return: the return selected, the booking view recorded with 3 pages left it is refused before anything loads
 apps/camoufox-worker/test/recordings.test.ts > backupRecordings a second backup the same day adds what is new and keeps what was there
 apps/camoufox-worker/test/recordings.test.ts > backupRecordings copies every recording but .gitkeep, directories 0700 and files 0600, and never follows a link
 apps/camoufox-worker/test/recordings.test.ts > recordingsMain backs up into ~/.local/share/get-me-there/private/fixtures/camoufox-<date>/ and restores the latest backup

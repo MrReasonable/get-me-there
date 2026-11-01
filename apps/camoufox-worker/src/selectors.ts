@@ -122,7 +122,7 @@ export interface Selectors {
    * one seller's offer, a button in `main` (never activated: it leads to the seller). Observed in select-return/2026-11-01/1
    * and 2; a hypothesis for the build until BOOKING_SELECT_VERIFIED is set on an entry.
    */
-  booking: { offer: RegExp };
+  booking: { offer: RegExp; moreOptions: RegExp };
   /**
    * The search form (decision 69: round trip, one adult, the query's dates). The brief's hypothesis from round 1,
    * replaced by Task 14.2's recording; FORM_VERIFIED is false until then, and the server refuses to start.
@@ -152,8 +152,9 @@ export interface Selectors {
    */
   RETURN_SELECT_VERIFIED: boolean;
   /**
-   * Ian's ruling of 2026-11-01 (read the booking options): the cheapest return's selection and the booking view after
-   * it; false on every entry until a recording of that sequence sets it.
+   * Ian's rulings of 2026-11-01 (read the booking options; open "more booking options"): the cheapest return's selection,
+   * the booking view after it and its in-page expansion; one flag for the whole booking read, false on every entry until a
+   * recording of that sequence sets it.
    */
   BOOKING_SELECT_VERIFIED: boolean;
 }
@@ -227,7 +228,12 @@ export const SELECTORS: Selectors = {
   },
   // why: observed 2026-11-01 (select-return/2026-11-01/1 and 2): every offer a button "Continue to book with <seller>[,
   // <fare>] for <price> <currency>", the price stated, never "From"
-  booking: { offer: /^Continue to book with .+ for [\d,]+ [A-Za-z ]+$/ },
+  // why: observed 2026-11-01 (both): the in-page expansion is one button "<count> more booking options"; Ian's ruling of
+  // 2026-11-01: it is pressed (never an offer or a grouped seller control), then every offer read
+  booking: {
+    offer: /^Continue to book with .+ for [\d,]+ [A-Za-z ]+$/,
+    moreOptions: /^\d+ more booking options?$/,
+  },
   form: {
     tripType: /^Change ticket type\./,
     passengers: /passengers?, change number of passengers\.$/,
