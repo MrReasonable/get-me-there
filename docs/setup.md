@@ -1264,7 +1264,7 @@ verified on the worker").
 
 ### Choose it
 
-Add "Google Flights prices via Camoufox" to a search's discovery providers (More options). New searches never include it.
+Once the worker is set up and `CAMOUFOX_ENABLED=true`, a new search names "Google Flights prices via Camoufox" by itself. A search saved before then keeps the sources it names until it is edited: add it to that search's discovery providers (More options).
 
 ### Check it
 

@@ -4,7 +4,9 @@
 finished-search page were agreed from mockups). It is folded into the main spec
 (`2026-10-14-flight-price-optimiser-design.md`) as **revision 55** by the first task of the work, so the
 main spec stays the single source of truth; until then, where the two disagree, this design describes the
-intended change. Section references (§n, l.n) are to the main spec at revision 54. Revised 2026-10-31 after the
+intended change. Revision 55 is now written, and where it and this design differ, revision 55 holds (a few lines
+below are brought into line with it: the stop wording, the key's direction, the flight-list reuse threshold and the
+flight pages' duration). Section references (§n, l.n) are to the main spec at revision 54. Revised 2026-10-31 after the
 core roster's review of the work brief (`docs/briefs/wp20-search-now.md`): the paragraphs marked *Ian ruled
 2026-10-31* carry his three rulings, and those marked *ruled on the brief's review* the orchestrator's rulings on the
 review's open items; everything else is as agreed in the conversation, *my call* marks included.
@@ -74,8 +76,8 @@ as the default) and the nav's first item, "Searches".
 
 - the route ("Birmingham → Frankfurt"), the window ("10 Jan – 31 Mar"), the stay ("10–14 nights"), and
   "repeats Mondays" when it has a schedule;
-- its state in words: "Searching · 120 of 405 date pairs · about 1h 40m left", "Searched 2h ago", "Stopped:
-  the browser worker isn't running", "Not searched yet";
+- its state in words: "Searching · 120 of 405 date pairs · about 1h 40m left", "Searched 2h ago", the stop's
+  own sentence as revision 55 words it (no "Stopped:" prefix) with its fix, "Not searched yet";
 - the cheapest price found by its latest run and its dates ("£86 · 12 → 23 Jan"), always through the price
   component's compact face (source, age, "not checked" on a cached price, the stale mark), so its own age and source
   are visible whichever run fetched it (*ruled on the brief's review*: design anti-goal 1 wins over "age only when
@@ -220,7 +222,7 @@ How many date pairs are listed: the 10 cheapest (*my call*), with the existing f
 
 ### 5.4 Every date, by month
 
-The month overview stays below, with a key in plain words ("darker is cheaper", "striped: not searched",
+The month overview stays below, with a key in plain words ("brighter is cheaper", "striped: not searched",
 "each dot is one stay length"). Its symbol set is reduced to what a first-time reader can hold: priced (by
 shade), no price shown, couldn't be read, not reached, not searched (*ruled on the brief's review*: a failed read
 is its own mark, never "no price shown", and is counted the same way in the header, the cards and the key).
@@ -246,8 +248,8 @@ opens Google's flight list for the **10 cheapest date pairs on the search's boar
 prices reused from earlier runs; one airport pair each: the cheapest), and stores the flights it reads. On
 demand, the same read runs for one chosen date pair. It is free.
 
-**Which pairs are read again (*my call*).** A date pair whose flight list was read within the search's camoufox
-refresh interval is not read again; its stored list is shown with its age, as reused prices are. The page shows
+**Which pairs are read again (*my call*).** A date pair whose newest flight list was read and is younger than
+0.9 × the search's camoufox refresh is not read again; its stored list is shown with its age, as reused prices are. The page shows
 the newest flight list for a date pair. Reuse and display key on the airport pair, the dates, the cabin and the
 point of sale (*ruled on the brief's review*): a list is shown only when its airport pair is in the current
 space, labelled when it differs from the price's airport pair.
@@ -263,7 +265,8 @@ gate refusal ends the step with nothing recorded and is not a cancel.
 count (10), **outside** the run's grid page cap (`CAMOUFOX_EXECUTION_PAGE_CAP`), so a first pass that uses its
 whole cap still leaves the flights to read. They count against the camoufox **monthly** page cap like any
 other page, and a flight read that would pass it is not made (§6.4). No new setting. The estimate shows both
-("+ flights for 10 date pairs, about 5 minutes"), and the budget snapshot records the allowance.
+("+ flights for up to 10 date pairs, about 12 minutes": one page at a time, each `CAMOUFOX_MIN_SPACING_SECONDS`
+plus 40 seconds, 700 seconds at the defaults), and the budget snapshot records the allowance.
 
 **On demand while a run is going (*my call*).** "Read flights for this date" is refused while any run is using
 the browser worker, with the reason in words ("The browser worker is busy with a search; try again when it

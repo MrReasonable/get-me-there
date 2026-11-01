@@ -66,7 +66,7 @@ Labels: VERIFIED = read on an official page; REPORTED = third-party; UNKNOWN = n
 
 ### Camoufox provider (self-scraped, opt-in)
 
-**The flight-list read.** Besides discovery, the browser provider reads the flight list for the cheapest ten date pairs of a search (and one date pair on demand, from "Read flights for this date"): outbound flights only, economy only, each page counting against the browser's own page allowance (per run and per month).
+**The flight-list read.** Besides discovery, the browser provider reads the flight list for the cheapest ten date pairs of a search (and one date pair on demand, from "Read flights for this date"): outbound flights only, economy only. A run's flight-list pages have their own allowance of ten pages, outside the run's page cap, and count against the monthly page cap; an on-demand read is one page against the monthly page cap only, and is refused while a run that uses the browser is pending or running.
 
 **Method.** A host-side worker (`apps/camoufox-worker`, a Node process on the machine running the worker; macOS or Linux, each
 `<os>-<arch>` offered once recordings under its pinned build set its flags: all four today, `darwin-x64` in list mode only; Windows is a later
