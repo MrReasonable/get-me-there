@@ -14,7 +14,10 @@ import { renderInShell } from './support.js';
 // Spec rev 55 §11 "Searches", Remove: inline, no modal, "Cancel and remove" for a running search, the "Removed … Undo"
 // line for 30 s through any re-read, and Undo putting the card back in its place with focus on its heading.
 
-afterEach(() => vi.useRealTimers());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
 
 const S = COPY.searchesView;
 const NAME = 'Birmingham → Frankfurt';
@@ -99,11 +102,13 @@ describe('Remove asks inline (spec rev 55 §11)', () => {
 });
 
 describe('Remove, the undo line and Undo', () => {
-  const fakeClock = () =>
-    vi.useFakeTimers({
-      toFake: ['setTimeout', 'setInterval', 'clearTimeout', 'clearInterval'],
-      shouldAdvanceTime: true,
-    });
+  // why: only the explicit steps move the clock (no shouldAdvanceTime), so the real time a slow runner spends in clicks
+  // and responses can never eat the UNDO_MS margin; Testing Library steps its own waits through the global `jest`
+  // (formSupport.renderForm's pattern), and user-event steps the fake clock
+  const fakeClock = () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'setInterval', 'clearTimeout', 'clearInterval'] });
+    vi.stubGlobal('jest', { advanceTimersByTime: (ms: number) => vi.advanceTimersByTime(ms) });
+  };
 
   it('DELETEs the search, replaces the card in its place with "Removed <name>. Undo" and puts focus on Undo', async () => {
     const calls = serveThree();
@@ -129,7 +134,7 @@ describe('Remove, the undo line and Undo', () => {
   it('keeps the line for UNDO_MS through a re-read of the cards, then it is gone', async () => {
     fakeClock();
     serveThree();
-    const { user } = renderInShell(<SearchesView />);
+    const { user } = renderInShell(<SearchesView />, { fakeTimers: true });
     const card = await cardOf(NAME);
     await user.click(within(card).getByRole('button', { name: `Remove ${NAME}` }));
     await user.click(within(card).getByRole('button', { name: 'Remove' }));

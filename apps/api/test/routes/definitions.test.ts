@@ -435,6 +435,13 @@ describe('estimates and the coverage check', () => {
       json: { ...draft, minNights: 12, maxNights: 11 },
     });
     expect(bad.status).toBe(400);
+    // why: a body with no airports (a draft) never reaches the estimate: the request schema needs one of each, so the
+    // body path refuses it before any engine call, as the no-body path refuses a stored draft
+    for (const airports of [{ origins: [] }, { destinations: [] }]) {
+      const none = await x.request(`/api/definitions/${d.id}/estimate`, { json: { ...draft, ...airports } });
+      expect(none.status).toBe(400);
+      expect((await errorOf(none)).code).toBe('validation');
+    }
   });
 
   // Task 20.4 (spec §10 estimate response): what the estimate asks, beside the estimate and budgetFit

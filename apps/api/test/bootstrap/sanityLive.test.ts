@@ -12,12 +12,14 @@ import { cleanEnv, SENTINEL_AUTH } from '../helpers/env.js';
 import { exampleDefinitionInput } from '../helpers/examples.js';
 import { tempDir } from '../helpers/tmp.js';
 
+const T0 = asIsoDateTime('2026-10-14T12:00:00.000Z');
+
 /** A database holding one definition whose origin (QQA, synthetic) is in no airports table, its `enabled` 0. */
 function withUnknownAirport(deleted: boolean): string {
   const path = join(tempDir('gmt-sanity-'), 's.fixture.db');
   const db = openDatabase(path);
   applyMigrations(db, MIGRATIONS_DIR);
-  const repo = new DefinitionsRepo(db, fixedClock(asIsoDateTime('2026-10-14T12:00:00.000Z')));
+  const repo = new DefinitionsRepo(db, fixedClock(T0));
   const d = repo.create(
     exampleDefinitionInput({ origins: [asIata('QQA')], enabled: false, scheduleCron: null }),
   );
@@ -43,6 +45,10 @@ const boot = (path: string) =>
     log: createLogger({ logLevel: 'error' }),
     listen: false,
     assets: assetPaths(),
+    // why: a fixed clock and an instant sleep, so the boot (the lock wait, the backup's stamp, the engine's timers)
+    // never reads wall-clock time or waits on it
+    clock: fixedClock(T0),
+    sleep: async () => undefined,
   });
 
 describe('the boot airport check over every live search (revision 55 §7)', { timeout: 30_000 }, () => {

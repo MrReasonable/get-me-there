@@ -1117,6 +1117,26 @@ describe('PageSession in flights mode (spec rev 55 §2)', () => {
     expect(page0(t).calls.closed).toBe(1);
     expect(released(t)).toBe(true);
   });
+  // why: rule 5 on a flights page: a list the SOCS read-back or the page close could not confirm is never kept as a flights
+  // answer (CodeRabbit finding: the `flights` branch of both overrun checks had no test)
+  it('a never-resolving SOCS read-back on a flights page → browser-error read, context discarded', async () => {
+    const t = setup({ shape: (c) => (c.hangCookiesOn = 1) });
+    expect((await t.session.page(FREQ)).answer).toEqual({
+      kind: 'browser-error',
+      stage: 'read',
+      detail: 'SOCS read-back overran',
+    });
+    expect(ctx0(t).closed).toBe(1);
+  });
+  it('a page close that never resolves on a flights page → browser-error read, context discarded', async () => {
+    const t = setup({ shape: (c) => (c.onNewPage = (p) => (p.closeHangs = true)) });
+    expect((await t.session.page(FREQ)).answer).toEqual({
+      kind: 'browser-error',
+      stage: 'read',
+      detail: 'page close overran',
+    });
+    expect(ctx0(t).closed).toBe(1);
+  });
   it('runs every gate a list page runs, in order, before the load: grid gate skipped, cool-down, month, pacer, reservation', async () => {
     // the grid gate does not apply: no grid settings, and the page still loads
     const seen: unknown[] = [];

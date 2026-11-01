@@ -692,7 +692,19 @@ describe('no main-path jargon on the Edit page and its More options (spec rev 55
   });
 
   it('each refused start of Save and search again, worded beside its press', async () => {
-    for (const code of ['active', 'cap', 'confirm', 'disabled', 'window', 'shutting-down', 'not_found']) {
+    // why: the sweep must read the refusal itself, so it waits for that code's own words (the form's mapping: `confirm`
+    // asks the estimate again; every other code has its Search again copy), never for any alert already on the page
+    const R = COPY.searchAgain.refused;
+    const refusalWords: Record<string, string> = {
+      active: R.active,
+      cap: R.cap,
+      confirm: COPY.editSearch.estimateChanged,
+      disabled: R.disabled,
+      window: R.window,
+      'shutting-down': R['shutting-down'],
+      not_found: R.not_found,
+    };
+    for (const [code, words] of Object.entries(refusalWords)) {
       server.use(
         http.post(`${API}/definitions/:id/executions`, () =>
           HttpResponse.json(
@@ -703,7 +715,8 @@ describe('no main-path jargon on the Edit page and its More options (spec rev 55
       );
       const { user, unmount } = await opened();
       await user.click(screen.getByRole('button', { name: /^Save and search again/ }));
-      await waitFor(() => expect(screen.getAllByRole('alert').length).toBeGreaterThan(0));
+      const said = await screen.findByText(words);
+      expect(said.closest('[role="alert"]'), code).not.toBeNull();
       sweep(code);
       unmount();
     }
