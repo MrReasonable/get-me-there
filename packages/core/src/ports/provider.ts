@@ -1,5 +1,7 @@
 import type { StopDetail } from '../api-contract/stopCause.js';
 import type { GridMove } from '../camoufox/protocol.js';
+import type { ProviderError } from '../errors.js';
+import type { Listed, ListedFlight } from '../flights/types.js';
 import type { CellKey } from '../types/definition.js';
 import type { ErrorReason } from '../types/execution.js';
 import type { Iata, IsoDate, IsoDateTime, IsoMonth } from '../types/ids.js';
@@ -249,6 +251,47 @@ export interface VerificationCapability {
   estimate(q: ItineraryQuery): CostEstimate;
   search(q: ItineraryQuery, ctx: ProviderContext): Promise<ItinerarySearchResult>;
 }
+/**
+ * Spec revision 55 §2 "The flight-list read" and §5.1: one cell's flight list, economy only (the capability's `cabins`),
+ * read in the adapter's own point of sale. The engine fills `airportNames` as
+ * `{ origin: names(cell.origin), destination: names(cell.destination) }` from `airportNamesOf(ctx)`.
+ */
+export interface FlightListQuery {
+  cell: CellKey;
+  airportNames: CellAirportNames;
+}
+/**
+ * What the read gave (spec rev 55 §5.1): the list (`listed`, the 30 cheapest flights in page order, the page's own
+ * minimum, Cheapest-tab price, view read and option counts), or the error that stopped it. A query without airport
+ * names fails closed (`parse`, reason `no-airport-names`) before any request; a monthly cap is thrown as
+ * BudgetExceeded, as `fetchTile` throws it.
+ */
+export type FlightListResult =
+  | {
+      kind: 'list';
+      fetchedAt: IsoDateTime;
+      pointOfSale: PointOfSale;
+      listed: Listed;
+      flights: ListedFlight[];
+      minMinor: number | null;
+      tabMinor: number | null;
+      cheapestView: 'cheapest' | 'best-fallback' | null;
+      optionsUnparsed: number;
+      optionsOtherCell: number;
+      resultsStated: number | null;
+      notes: string[];
+    }
+  | { kind: 'list-error'; error: ProviderError };
+/**
+ * Spec rev 55 §5.1: the browser worker's flight lists (camoufox only; its preflight is discovery's). `cabins` are the
+ * cabins it reads (prov-int-002: economy only), so a non-economy search's flights are `not_available` with reason
+ * `cabin` before any page.
+ */
+export interface FlightListCapability {
+  info: CapabilityInfo;
+  cabins: readonly Cabin[];
+  read(q: FlightListQuery, ctx: ProviderContext): Promise<FlightListResult>;
+}
 export interface FlightProvider {
   readonly id: ProviderId;
   readonly displayName: string;
@@ -256,5 +299,7 @@ export interface FlightProvider {
   readonly cabins: readonly Cabin[];
   readonly discovery?: DiscoveryCapability;
   readonly verification?: VerificationCapability;
+  /** Spec rev 55 §5.1: camoufox only. */
+  readonly flightLists?: FlightListCapability;
   healthcheck(ctx: ProviderContext): Promise<{ ok: boolean; detail: string }>;
 }

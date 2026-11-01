@@ -1,9 +1,10 @@
 /**
- * The camoufox adapter (spec §2, §5.1, §5.2 rev 32; decisions 68, 69; brief Task 14.8). Discovery only: one list-mode
+ * The camoufox adapter (spec §2, §5.1, §5.2 rev 32; decisions 68, 69; brief Task 14.8). Discovery: one list-mode
  * page per cell through the host-side worker (POST /v1/page, the key in `x-gmt-worker-key`), parsed with core's one
  * copy of the wire contract. A price is one RawCalendarPrice with its return date labelled as the date asked for; a
  * "no flights" page leaves the cell out of prices and noFares, so the engine writes `no_data`; every other answer is a
- * tile-error (answer.ts). No airport is named here (spec §1).
+ * tile-error (answer.ts). Spec revision 55 §2: also the flight lists (`flightLists`, flights.ts; POST /v1/flights).
+ * No airport is named here (spec §1).
  */
 import {
   APP_INSTANCE_HEADER,
@@ -38,6 +39,8 @@ import {
 } from '@gmt/core';
 import type { HttpKit } from '../http/types.js';
 import { parseError } from '../shared/errors.js';
+import { throwIfMonthly } from './answer.js';
+import { flightListCapability } from './flights.js';
 import { gridTileEstimate, planGridTiles } from './grid.js';
 import { gridTile } from './gridTile.js';
 import { camoufoxPreflight } from './preflight.js';
@@ -147,21 +150,6 @@ export function camoufoxProvider(o: CamoufoxProviderOptions): FlightProvider {
   if (o.key.reveal().length < 32)
     throw new Error('camoufoxProvider: CAMOUFOX_WORKER_KEY must be at least 32 characters');
   const log = o.log.child({ providerId: 'camoufox' });
-  // why: decision 82, W3: the worker's own monthly page cap, as BudgetExceeded at provider-month (the ledger's scope)
-  // with the worker's own figures and window end, never the app's settings copied in
-  const throwIfMonthly = (e: ProviderError): void => {
-    const m = e.monthlyCap;
-    if (e.reason !== 'monthly-cap' || m === undefined) return;
-    throw new BudgetExceeded({
-      scope: 'provider-month',
-      providerId: 'camoufox',
-      cap: m.cap,
-      current: m.used,
-      requested: 1,
-      counter: 'worker',
-      windowEnd: m.windowEnd,
-    });
-  };
   /**
    * W3 (cb-b1-001, pa-b1-001): the executions whose last grid page met the worker's monthly scroll cap, each with the
    * end of the worker's window then (its billing day, a shared setting): their next grid tile stops at provider-month
@@ -435,6 +423,8 @@ export function camoufoxProvider(o: CamoufoxProviderOptions): FlightProvider {
           ctx,
         ),
     },
+    // why: spec rev 55 §2 "The flight-list read": the same worker, its own route; its preflight is discovery's
+    flightLists: flightListCapability(o),
     // why: decision 24: healthchecks probe nothing; the preflight is the engine's only call that asks the worker.
     healthcheck: async () => ({
       ok: true,

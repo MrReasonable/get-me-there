@@ -25,6 +25,50 @@ describe('parseOptionName (dated grammar)', () => {
       interstitials: [],
       durationMinutes: 760,
       operatedBy: null,
+      departsAt: '12:25',
+      arrivesAt: '20:05',
+      arrivesOn: { month: 11, day: 5 },
+    });
+  });
+  // why: spec rev 55 §2 (Task 20.7): the leg sentence's times and arrival date, as the name states them (the worked
+  // name above, a synthetic copy of the feasibility form with its times and dates changed)
+  it('reads the departure and arrival times and the arrival date, times as HH:MM', () => {
+    const overnight = ONE_STOP.replace(
+      'at 12:25 on Thursday, November 5',
+      'at 9:05 on Thursday, November 5',
+    ).replace('at 20:05 on Thursday, November 5', 'at 6:40 on Friday, November 6');
+    expect(parseOptionName(overnight)).toMatchObject({
+      departsOn: { month: 11, day: 5 },
+      departsAt: '09:05',
+      arrivesAt: '06:40',
+      arrivesOn: { month: 11, day: 6 },
+    });
+  });
+  // why: the groups are optional, so a name without the times or the arrival date still parses (list mode cannot
+  // regress: test/recorded.test.ts pins every recorded page's read)
+  it('a leg sentence without the times and the arrival date still parses, the three fields null', () => {
+    const bare = ONE_STOP.replace(' at 12:25 on Thursday, November 5', ' on Thursday, November 5').replace(
+      ' at 20:05 on Thursday, November 5.',
+      '.',
+    );
+    expect(parseOptionName(bare)).toMatchObject({
+      amountMinor: 47800,
+      departsOn: { month: 11, day: 5 },
+      from: 'Heathrow Airport',
+      to: 'John F. Kennedy International Airport',
+      departsAt: null,
+      arrivesAt: null,
+      arrivesOn: null,
+    });
+    const timeOnly = ONE_STOP.replace(' at 20:05 on Thursday, November 5.', ' at 20:05.');
+    expect(parseOptionName(timeOnly)).toMatchObject({ arrivesAt: '20:05', arrivesOn: null });
+  });
+  it('an arrival month the grammar does not know leaves the arrival date null, never the name unparsed', () => {
+    const odd = ONE_STOP.replace('at 20:05 on Thursday, November 5', 'at 20:05 on Thursday, Novembre 5');
+    expect(parseOptionName(odd)).toMatchObject({
+      arrivesAt: '20:05',
+      arrivesOn: null,
+      departsOn: { month: 11, day: 5 },
     });
   });
   it('thousands separators are exact', () => {
@@ -204,6 +248,8 @@ describe('parseOptionName (dated grammar)', () => {
   });
   it('is dated', () => {
     expect(GRAMMAR_VERSION).toMatch(/^\d{4}-\d{2}-\d{2}/);
+    // why: spec rev 55 §2: re-dated when the grammar gained the times and the arrival date
+    expect(GRAMMAR_VERSION).toBe('2026-10-31-times');
   });
 });
 

@@ -1,5 +1,6 @@
+import { pageUrl } from '../camoufox/url.js';
 import type { CellKey } from '../types/definition.js';
-import type { Cabin, ProviderId } from '../types/provenance.js';
+import type { Cabin, PointOfSale, ProviderId } from '../types/provenance.js';
 
 /** The one label every search link carries (spec §6.9). */
 export const SEARCH_LINK_LABEL = 'search link, not a fare link';
@@ -33,11 +34,17 @@ const GOOGLE_CABIN: Readonly<Record<Cabin, string>> = {
  * Fixture (synthetic) rows get null: nothing about a synthetic price is followable (review sec-003).
  * Both hosts sit inside `LINK_ALLOWLIST` (a test passes every generated link through
  * `validateVendorUrl`).
+ *
+ * Spec revision 55 §2 (prov-int-017): a camoufox row links to the page the browser worker read, in the worker's
+ * verified URL form (`camoufox/url.ts`'s `pageUrl`: `returning`, `hl=en-GB`, `gl` the point of sale, `'unknown'` read
+ * as GB, the worker's own market); it reads economy only, so another cabin has no link. `pointOfSale` defaults to
+ * `'unknown'` for the callers that have none to pass.
  */
 export function searchLinkFor(
   providerId: ProviderId,
   cell: CellKey,
   cabin: Cabin,
+  pointOfSale: PointOfSale = 'unknown',
 ): { url: string; host: string; label: string } | null {
   // why: an exhaustive switch (no default), so a new ProviderId fails to compile here instead of
   // silently getting another vendor's search link (review arch M-2).
@@ -60,9 +67,13 @@ export function searchLinkFor(
         cabin === 'premium_economy' ? `${SEARCH_LINK_LABEL}; cabin not prefilled` : SEARCH_LINK_LABEL;
       return { url: url.href, host: url.hostname, label };
     }
-    // why: camoufox reads the same Google Flights search, and its links stay on google.com (spec §5.2 rev 32).
-    case 'searchapi':
     case 'camoufox': {
+      // why: prov-int-002: the worker reads economy only; a link to its page under another cabin would misname it
+      if (cabin !== 'economy') return null;
+      const url = new URL(pageUrl({ ...cell, gl: pointOfSale === 'unknown' ? 'GB' : pointOfSale }));
+      return { url: url.href, host: url.hostname, label: SEARCH_LINK_LABEL };
+    }
+    case 'searchapi': {
       const url = new URL('https://www.google.com/travel/flights');
       url.search = new URLSearchParams({
         q: `Flights from ${cell.origin} to ${cell.destination} on ${cell.departureDate} through ${cell.returnDate} ${GOOGLE_CABIN[cabin]} 1 adult`,

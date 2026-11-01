@@ -3,6 +3,7 @@ import {
   type Booking,
   type CellKey,
   LINK_ALLOWLIST,
+  type PointOfSale,
   type ProviderId,
   SEARCH_LINK_ROW_LABEL,
   type SearchDefinition,
@@ -28,19 +29,21 @@ export function safeBooking(b: Booking, providerId: ProviderId): Booking {
 /**
  * The same rule for a search link (decision 54): kept only when it re-validates for its provider. Ruling 17
  * (pie-010): a calendar row's own stored vendor link, re-validated the same way, comes first, labelled as the vendor's
- * link for that cached row; the generic search link, with its own label, is the fallback.
+ * link for that cached row; the generic search link, with its own label, is the fallback. Spec revision 55 §2
+ * (prov-int-017): `pointOfSale` is the install's POINT_OF_SALE, the `gl` of a camoufox row's link (the worker's page).
  */
 export function safeSearchLink(
   providerId: ProviderId,
   cell: CellKey,
   def: SearchDefinition,
   vendorLink: string | null = null,
+  pointOfSale: PointOfSale = 'unknown',
 ): ResultRow['searchLink'] {
   if (vendorLink !== null && providerId !== 'fixture') {
     const own = validateVendorUrl(vendorLink, LINK_ALLOWLIST[providerId]);
     if (own.kind === 'get') return { url: own.url, host: own.host, label: SEARCH_LINK_ROW_LABEL };
   }
-  const link = searchLinkFor(providerId, cell, def.cabin);
+  const link = searchLinkFor(providerId, cell, def.cabin, pointOfSale);
   if (link === null) return null;
   return validateVendorUrl(link.url, LINK_ALLOWLIST[providerId]).kind === 'get' ? link : null;
 }

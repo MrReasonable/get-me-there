@@ -7,6 +7,7 @@
  */
 import {
   type BlockedPage,
+  BudgetExceeded,
   type IsoDateTime,
   type MonthlyCapFacts,
   ProviderError,
@@ -122,6 +123,25 @@ export function classifyWorkerAnswer(f: ResponseFacts): ProviderError {
       );
     case 'cells':
     case 'grid':
+    case 'flights':
       return error(f, 'parse', `HTTP ${f.status} with a ${answer.kind} answer`, 'unexpected-status');
   }
+}
+
+/**
+ * Decision 82, W3: the worker's own monthly page cap, thrown as BudgetExceeded at provider-month (the ledger's scope)
+ * with the worker's own figures and window end, never the app's settings copied in. Any other error returns.
+ */
+export function throwIfMonthly(e: ProviderError): void {
+  const m = e.monthlyCap;
+  if (e.reason !== 'monthly-cap' || m === undefined) return;
+  throw new BudgetExceeded({
+    scope: 'provider-month',
+    providerId: 'camoufox',
+    cap: m.cap,
+    current: m.used,
+    requested: 1,
+    counter: 'worker',
+    windowEnd: m.windowEnd,
+  });
 }

@@ -133,6 +133,8 @@ describe('worker protocol (core/src/camoufox/protocol.ts; brief §5, §6)', () =
     expect(ANSWER_STATUS).toEqual({
       cells: 200,
       grid: 200,
+      // why: spec rev 55 §2 (Task 20.7): a flights page answers as a list page does
+      flights: 200,
       blocked: 423,
       'cooling-down': 423,
       spacing: 429,

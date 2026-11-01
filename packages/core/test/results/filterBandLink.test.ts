@@ -153,8 +153,14 @@ describe('searchLinkFor (spec §6.9)', () => {
     expect(u.searchParams.get('curr')).toBe('GBP');
   });
 
-  it('camoufox rows link to the same Google Flights search (spec §5.2 rev 32)', () => {
-    expect(searchLinkFor('camoufox', cell, 'economy')).toEqual(searchLinkFor('searchapi', cell, 'economy'));
+  // why: spec rev 55 §2 (prov-int-017): a camoufox row links to the page the worker read, in its verified URL form
+  // (camoufox/url.ts, pinned in test/results/searchLink.test.ts), no longer to SearchApi's search
+  it('camoufox rows link to the worker’s own page form, not the SearchApi search', () => {
+    const u = new URL(searchLinkFor('camoufox', cell, 'economy')?.url ?? '');
+    expect(u.searchParams.get('q')).toBe('Flights from LHR to JFK on 2027-03-14 returning 2027-03-28');
+    expect(searchLinkFor('camoufox', cell, 'economy')).not.toEqual(
+      searchLinkFor('searchapi', cell, 'economy'),
+    );
   });
 
   it('fixture (synthetic) rows get no link (review sec-003)', () => {
@@ -183,6 +189,11 @@ describe('searchLinkFor (spec §6.9)', () => {
   it('every link carries the label and passes the vendor-link rule for its provider', () => {
     for (const cabin of ['economy', 'premium_economy', 'business', 'first'] as const) {
       for (const id of ['travelpayouts', 'searchapi', 'camoufox'] as const) {
+        // why: camoufox reads economy only (spec rev 55 §2, prov-int-002): its other cabins have no link
+        if (id === 'camoufox' && cabin !== 'economy') {
+          expect(searchLinkFor(id, cell, cabin)).toBeNull();
+          continue;
+        }
         const link = searchLinkFor(id, cell, cabin);
         expect(link?.label.startsWith(SEARCH_LINK_LABEL)).toBe(true);
         expect(validateVendorUrl(link?.url ?? '', LINK_ALLOWLIST[id])).toEqual({

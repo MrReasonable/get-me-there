@@ -2,7 +2,7 @@ import type { ListRequest } from '@gmt/core';
 import { airportMatches } from './airports.js';
 import { cheapestTabPriceMinor } from './classify.js';
 import type { ListFacts } from './driver.js';
-import { INTERSTITIALS, type Interstitial, parseOptionName } from './names.js';
+import { INTERSTITIALS, type Interstitial, type ParsedOption, parseOptionName } from './names.js';
 import { pointOfSaleOf } from './pointOfSale.js';
 
 /**
@@ -32,13 +32,17 @@ export function tabPriceMinor(name: string): number | null {
   return cheapestTabPriceMinor(name);
 }
 
-export function readList(
+/**
+ * The list read with the cell's own parsed options, in page order (spec rev 55 §2: the flights reader, `flights.ts`,
+ * reuses this cell filter and minimum, then keeps the 30 cheapest of `mine`).
+ */
+export function readOptions(
   f: ListFacts,
   req: Pick<ListRequest, 'departureDate' | 'airportNames'>,
   interstitials: readonly Interstitial[] = INTERSTITIALS,
-): ListRead {
+): { list: ListRead; mine: ParsedOption[] } {
   const dep = new Date(`${req.departureDate}T00:00:00.000Z`);
-  const mine: number[] = [];
+  const mine: ParsedOption[] = [];
   let unparsed = 0;
   let other = 0;
   for (const name of f.names) {
@@ -50,21 +54,32 @@ export function readList(
       airportMatches(p.from, req.airportNames.origin) &&
       airportMatches(p.to, req.airportNames.destination)
     )
-      mine.push(p.amountMinor);
+      mine.push(p);
     else other++;
   }
-  mine.sort((a, b) => a - b);
+  const prices = mine.map((p) => p.amountMinor).sort((a, b) => a - b);
   const currency =
     f.currencyName === null ? null : (/^Currency ([A-Z]{3})$/.exec(f.currencyName)?.[1] ?? null);
   return {
-    minMinor: mine[0] ?? null,
-    tabMinor: tabPriceMinor(f.cheapestTabName),
-    optionsUnparsed: unparsed,
-    optionsOtherCell: other,
-    parsedForThisCell: mine.length,
-    resultsStated: f.resultsStated,
-    resultsSeen: f.names.length,
-    currency,
-    pointOfSale: pointOfSaleOf(f.locationName),
+    list: {
+      minMinor: prices[0] ?? null,
+      tabMinor: tabPriceMinor(f.cheapestTabName),
+      optionsUnparsed: unparsed,
+      optionsOtherCell: other,
+      parsedForThisCell: mine.length,
+      resultsStated: f.resultsStated,
+      resultsSeen: f.names.length,
+      currency,
+      pointOfSale: pointOfSaleOf(f.locationName),
+    },
+    mine,
   };
+}
+
+export function readList(
+  f: ListFacts,
+  req: Pick<ListRequest, 'departureDate' | 'airportNames'>,
+  interstitials: readonly Interstitial[] = INTERSTITIALS,
+): ListRead {
+  return readOptions(f, req, interstitials).list;
 }

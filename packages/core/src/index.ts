@@ -36,6 +36,7 @@ export { CAMOUFOX_PIN } from './camoufox/pin.js';
 export * from './camoufox/protocol.js';
 export * from './camoufox/settings.js';
 export * from './camoufox/start.js';
+export * from './camoufox/url.js';
 export * from './camoufox/workerPort.js';
 export * from './config/presets.js';
 export * from './config/schema.js';
@@ -50,7 +51,7 @@ export * from './datePairs/index.js';
 export * from './dates/epochDay.js';
 export * from './errors.js';
 export { EXIT } from './exit.js';
-export { LISTED, type Listed } from './flights/types.js';
+export * from './flights/index.js';
 export * from './labels/age.js';
 export { MAIN_PATH_SOURCE, mainPathSource } from './labels/mainPath.js';
 export { pointOfSaleLabel } from './labels/pointOfSale.js';
@@ -65,7 +66,7 @@ export {
   scheduledOnlyPastText,
   scheduledOnlyText,
 } from './labels/skip.js';
-export { GRID_SOURCE_LABEL, SOURCE_LABELS, sourceLabel } from './labels/source.js';
+export { FLIGHT_LIST_SOURCE_LABEL, GRID_SOURCE_LABEL, SOURCE_LABELS, sourceLabel } from './labels/source.js';
 export { NO_STOP_CAUSE_TEXT, type StopTextFacts, stopText } from './labels/stopCause.js';
 export { isTruncated, TRUNCATED_NOTE } from './labels/truncated.js';
 export { MOVED_MARKER, movedMarkerText, parseMovedMarker } from './local/movedMarker.js';

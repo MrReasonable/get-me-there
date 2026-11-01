@@ -1,9 +1,12 @@
 /**
  * The camoufox worker's wire contract (spec §2, §5.2 rev 32; brief WP14 §5 and §6): pure zod, the one copy both the
  * host-side worker (`apps/camoufox-worker`) and the app's adapter (`@gmt/providers` camoufox) parse with (arch-011).
- * The worker serves `POST /v1/page` and `GET /v1/status`; every answer carries GOOGLE_CONTACTED_HEADER.
+ * The worker serves `POST /v1/page`, `POST /v1/flights` (spec revision 55 §2 "The flight-list read": a list page's
+ * flights, mode `flights` only) and `GET /v1/status`; every answer carries GOOGLE_CONTACTED_HEADER.
  */
 import { z } from 'zod';
+import { FLIGHT_LIST_MAX_FLIGHTS } from '../flights/limits.js';
+import { LISTED, listedFlightSchema } from '../flights/types.js';
 import { iataSchema, isoDateSchema, isoDateTimeSchema } from '../types/ids.js';
 import { vendorPriceMarkSchema } from '../types/provenance.js';
 import { OS_ARCHES } from './builds.js';
@@ -51,26 +54,44 @@ export const workerRuleSchema = z
 // why: fix round 1 (prov M2): at least one name, or no option could ever match and every page would read as unrecognised
 const airportNameList = z.array(z.string().min(1).max(120)).min(1).max(8);
 
+/**
+ * The one cell a list or flights page loads (spec revision 55 §2: one shared field shape and one shared refinement pair
+ * build both requests, so the two can never drift apart). `gl` is POINT_OF_SALE.
+ */
+const cellPageFields = {
+  origin: iataSchema,
+  destination: iataSchema,
+  departureDate: isoDateSchema,
+  returnDate: isoDateSchema,
+  gl: z.string().regex(/^[A-Z]{2}$/),
+  airportNames: z.strictObject({ origin: airportNameList, destination: airportNameList }),
+};
+type CellPage = { origin: string; destination: string; departureDate: string; returnDate: string };
+/** The two refinements every cell page request carries: one cell (the return follows the departure), two airports. */
+function oneCell<T extends z.ZodType<CellPage>>(schema: T) {
+  return schema
+    .refine((r) => r.returnDate > r.departureDate, {
+      message: 'a page request is one cell: the return date must follow the departure date',
+      path: ['returnDate'],
+    })
+    .refine((r) => r.origin !== r.destination, {
+      message: 'origin and destination must differ',
+      path: ['destination'],
+    });
+}
+
 /** One list page request: one cell, never a range. `gl` is POINT_OF_SALE. */
-export const listRequestSchema = z
-  .strictObject({
-    mode: z.literal('list'),
-    origin: iataSchema,
-    destination: iataSchema,
-    departureDate: isoDateSchema,
-    returnDate: isoDateSchema,
-    gl: z.string().regex(/^[A-Z]{2}$/),
-    airportNames: z.strictObject({ origin: airportNameList, destination: airportNameList }),
-  })
-  .refine((r) => r.returnDate > r.departureDate, {
-    message: 'a page request is one cell: the return date must follow the departure date',
-    path: ['returnDate'],
-  })
-  .refine((r) => r.origin !== r.destination, {
-    message: 'origin and destination must differ',
-    path: ['destination'],
-  });
+export const listRequestSchema = oneCell(z.strictObject({ mode: z.literal('list'), ...cellPageFields }));
 export type ListRequest = z.infer<typeof listRequestSchema>;
+
+/**
+ * Spec revision 55 §2 "The flight-list read": the same list page as a `list` request, read for its flights; served only
+ * by `POST /v1/flights`, which admits nothing else (and `POST /v1/page` refuses it: `pageRequestSchema` is unchanged).
+ */
+export const flightsRequestSchema = oneCell(
+  z.strictObject({ mode: z.literal('flights'), ...cellPageFields }),
+);
+export type FlightsRequest = z.infer<typeof flightsRequestSchema>;
 
 /** The grid's four scroll directions (spec §2 rev 34): left and right move the departures, up and down the returns. */
 export const GRID_MOVES = ['left', 'right', 'up', 'down'] as const;
@@ -221,6 +242,35 @@ export const workerAnswerSchema = z.discriminatedUnion('kind', [
     notes: z.array(z.string()),
     versions: versionsSchema,
   }),
+  /**
+   * Spec revision 55 §2 "The flight-list read": what a flights page listed for the cell: `listed` (LISTED), the 30
+   * cheapest of the cell's flights in page order, and, as the list read keeps them, the minimum over every parsed option
+   * of the cell, the Cheapest tab's price, which view was read (`cheapest`: the Cheapest view; `best-fallback`: the Best
+   * view after the Cheapest flow failed; null: no Cheapest flow ran) and the options unparsed, for another cell and
+   * stated by the page. At the schema's limits the answer stays under about 25 KB.
+   */
+  z
+    .strictObject({
+      kind: z.literal('flights'),
+      fetchedAt: isoDateTimeSchema,
+      currency: z.literal('GBP'),
+      pointOfSale: z.string().regex(/^([A-Z]{2}|unknown)$/),
+      listed: z.enum(LISTED),
+      flights: z.array(listedFlightSchema).max(FLIGHT_LIST_MAX_FLIGHTS),
+      minMinor: z.number().int().min(1).nullable(),
+      tabMinor: z.number().int().min(1).nullable(),
+      cheapestView: z.enum(['cheapest', 'best-fallback']).nullable(),
+      optionsUnparsed: count,
+      optionsOtherCell: count,
+      resultsStated: count.nullable(),
+      notes: z.array(z.string()),
+      versions: versionsSchema,
+    })
+    // why: `flights` means at least one flight was read; the other two outcomes carry none (spec rev 55 §7 LISTED)
+    .refine((a) => (a.listed === 'flights') === a.flights.length > 0, {
+      message: "listed 'flights' exactly when a flight was read",
+      path: ['flights'],
+    }),
   // why: CB-4: an answer to a grid request that reached Google carries the scroll clicks it made
   z.strictObject({
     kind: z.literal('blocked'),
@@ -258,6 +308,7 @@ export type WorkerAnswer = z.infer<typeof workerAnswerSchema>;
 export const ANSWER_STATUS: Readonly<Record<WorkerAnswer['kind'], number>> = {
   cells: 200,
   grid: 200,
+  flights: 200,
   blocked: 423,
   'cooling-down': 423,
   spacing: 429,

@@ -60,6 +60,7 @@ export * from './common.js';
 export * from './datePairs.js';
 export * from './definitions.js';
 export * from './executions.js';
+export * from './flights.js';
 export * from './results.js';
 export * from './searches.js';
 export * from './stopCause.js';

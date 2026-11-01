@@ -16,6 +16,12 @@ export const SOURCE_LABELS: Readonly<Record<SourceKind, string>> = {
 export const GRID_SOURCE_LABEL = 'Google Flights date grid via Camoufox';
 
 /**
+ * A browser flight list's source (spec revision 55 §2 "The flight-list read"), on the set-up views and in provenance;
+ * the main path names it `mainPathSource('camoufox')` + "'s flight list" ("the browser worker's flight list", §3).
+ */
+export const FLIGHT_LIST_SOURCE_LABEL = 'Google Flights flight list via Camoufox';
+
+/**
  * The source of a price in words, e.g. "Google Flights via SearchApi" (spec §11); a camoufox price whose return date
  * came from a grid cell is the grid's.
  */

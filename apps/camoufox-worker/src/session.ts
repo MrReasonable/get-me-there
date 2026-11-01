@@ -2,6 +2,7 @@ import { rmSync } from 'node:fs';
 import {
   type BlockedPage,
   type Clock,
+  type FlightsRequest,
   GRID_MOVE_BUDGET_MS,
   GRID_MOVE_RESERVE_MS,
   type IsoDateTime,
@@ -28,6 +29,7 @@ import {
   runStep,
   type Settled,
 } from './driver.js';
+import { readFlights } from './flights.js';
 import { checkForm } from './form.js';
 import { readGrid } from './gridSession.js';
 import { installGuard } from './guard.js';
@@ -145,7 +147,11 @@ export class PageSession {
     if (wipe) rmSync(this.d.profileDir, { recursive: true, force: true });
   }
 
-  async page(asked: PageRequest): Promise<PageResult> {
+  /**
+   * One page: a list or grid page (`POST /v1/page`) or a flights page (`POST /v1/flights`, spec revision 55 §2 "The
+   * flight-list read"). A flights page is a list page under every rule of one; only its reader and answer differ.
+   */
+  async page(asked: PageRequest | FlightsRequest): Promise<PageResult> {
     let req = asked;
     // why: decision 70: grid pages only once the selectors module verifies the grid and worker.env asks for it
     if (req.mode === 'grid' && (!this.S.GRID_VERIFIED || this.d.grid?.mode !== 'grid'))
@@ -335,7 +341,7 @@ export class PageSession {
       const back = await bounded(() => c.cookies(), this.finallyMs, this.d.timers);
       if (back.overran) {
         discard = true;
-        if (answer.kind === 'cells' || answer.kind === 'grid')
+        if (answer.kind === 'cells' || answer.kind === 'grid' || answer.kind === 'flights')
           answer = { kind: 'browser-error', stage: 'read', detail: 'SOCS read-back overran', ...scrolls() };
       } else if (readBack(back.value, this.d.socs) !== 'same') {
         wipe = true;
@@ -352,7 +358,7 @@ export class PageSession {
       const closed = await bounded(() => p.close(), this.finallyMs, this.d.timers);
       if (closed.overran) {
         discard = true;
-        if (answer.kind === 'cells' || answer.kind === 'grid')
+        if (answer.kind === 'cells' || answer.kind === 'grid' || answer.kind === 'flights')
           answer = { kind: 'browser-error', stage: 'read', detail: 'page close overran', ...scrolls() };
       }
     }
@@ -410,7 +416,7 @@ export class PageSession {
 
   private async read(
     driver: Driver,
-    req: ListRequest,
+    req: ListRequest | FlightsRequest,
     budget: PageBudget,
     started: number,
   ): Promise<{ answer: WorkerAnswer; stop: BlockedPage | null; rule?: string }> {
@@ -430,8 +436,28 @@ export class PageSession {
         stop: settled.kind.page,
         rule: settled.rule,
       };
+    // why: ruling B8: Google's own no-flights line is answered here, before any reader runs; on a flights page it is
+    // a flights answer, listed 'no-flights', with no flight and nothing else read
     if (settled.kind.kind === 'no-flights')
-      return { answer: this.cells({ status: 'no-flights' }, 'unknown'), stop: null };
+      return {
+        answer:
+          req.mode === 'flights'
+            ? this.flights(
+                {
+                  listed: 'no-flights',
+                  flights: [],
+                  minMinor: null,
+                  tabMinor: null,
+                  optionsUnparsed: 0,
+                  optionsOtherCell: 0,
+                  resultsStated: null,
+                  pointOfSale: 'unknown',
+                },
+                null,
+              )
+            : this.cells({ status: 'no-flights' }, 'unknown'),
+        stop: null,
+      };
     const form = checkForm(await driver.formFacts(d), req);
     if (form !== 'ok')
       return {
@@ -450,7 +476,11 @@ export class PageSession {
       const rule = settled.kind.kind === 'blocked' ? settled.rule : `${settled.kind.kind}-after-click`;
       return { answer: this.blockedPlaceholder(page), stop: page, rule };
     };
+    // why: spec rev 55 §2: a flights answer names the view it read: the Cheapest view, the Best view after the
+    // Cheapest flow failed, or (null) the Best view where no Cheapest flow ran
+    let view: 'cheapest' | 'best-fallback' | null = null;
     if (S.CHEAPEST_FLOW_VERIFIED && settled.facts.page.cheapestTabs.length === 1) {
+      view = 'cheapest';
       d = budget.next();
       const steps = { timers: this.d.timers, log: this.d.log, startedAt: started };
       const lookups = { timers: this.d.timers, lookupMs: LOOKUP_TIMEOUT_MS };
@@ -467,6 +497,7 @@ export class PageSession {
         // deadline still ends the page as not-ready
         if (e instanceof DeadlineExceeded || d.expired()) throw e;
         fellBack = true;
+        view = 'best-fallback';
         // why: a failed step may be a page that is no results page at all (a challenge after the click): it is
         // classified once, under its own step, and a blocked kind stops the page with its cool-down, as on any poll
         const cur = d;
@@ -489,7 +520,10 @@ export class PageSession {
       const stop = await after(settled.facts.settle.cheapestSelected ? 'cheapest' : 'best');
       if (stop !== null) return stop;
     }
-    const list = readList(await driver.listFacts(d), req);
+    // why: spec rev 55 §2: the one branch a flights page makes, at the reader; every check below is the list page's
+    const facts = await driver.listFacts(d);
+    const flights = req.mode === 'flights' ? readFlights(facts, req) : null;
+    const list = flights ?? readList(facts, req);
     // why: ruling of 2026-10-18: a Cheapest view that never settled and left no list to read is a page that did not
     // settle (not-ready, no cool-down), never an unrecognised page
     if (fellBack && list.minMinor === null && list.optionsOtherCell === 0)
@@ -506,6 +540,23 @@ export class PageSession {
         answer: this.blockedPlaceholder('unrecognised'),
         stop: 'unrecognised',
         rule: 'no-options-read',
+      };
+    if (flights !== null)
+      return {
+        answer: this.flights(
+          {
+            listed: flights.listed,
+            flights: flights.flights,
+            minMinor: flights.minMinor,
+            tabMinor: flights.tabMinor,
+            optionsUnparsed: flights.optionsUnparsed,
+            optionsOtherCell: flights.optionsOtherCell,
+            resultsStated: flights.resultsStated,
+            pointOfSale: flights.pointOfSale,
+          },
+          view,
+        ),
+        stop: null,
       };
     if (list.minMinor === null)
       return {
@@ -532,6 +583,32 @@ export class PageSession {
         list.pointOfSale,
       ),
       stop: null,
+    };
+  }
+
+  /** A flights answer (spec rev 55 §2) from what the page listed and the view read. */
+  private flights(
+    read: Pick<
+      Extract<WorkerAnswer, { kind: 'flights' }>,
+      | 'listed'
+      | 'flights'
+      | 'minMinor'
+      | 'tabMinor'
+      | 'optionsUnparsed'
+      | 'optionsOtherCell'
+      | 'resultsStated'
+      | 'pointOfSale'
+    >,
+    cheapestView: 'cheapest' | 'best-fallback' | null,
+  ): WorkerAnswer {
+    return {
+      kind: 'flights',
+      fetchedAt: this.d.clock.now(),
+      currency: 'GBP',
+      ...read,
+      cheapestView,
+      notes: [],
+      versions: this.d.versions,
     };
   }
 
