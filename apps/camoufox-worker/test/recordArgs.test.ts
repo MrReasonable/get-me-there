@@ -53,3 +53,25 @@ describe('parseRecordArgs --select-outbound (WP21 Task 21.0)', () => {
     ).toThrow(/return after/);
   });
 });
+
+// why: Ian's ruling of 2026-11-01 (read the booking options): a sibling kind that selects the outbound, then the
+// cheapest return, and records the booking view without activating anything on it
+describe('parseRecordArgs --select-return', () => {
+  it('parses to the select-return kind with the request, one page by default, at most 2', () => {
+    expect(parseRecordArgs(['--select-return', ...Q])).toMatchObject({
+      kind: 'select-return',
+      pages: 1,
+      moves: [],
+    });
+    expect(parseRecordArgs(['--select-return', ...Q, '--pages', '2']).pages).toBe(2);
+    expect(() => parseRecordArgs(['--select-return', ...Q, '--pages', '3'])).toThrow(
+      '--pages must be 1 to 2 for --select-return',
+    );
+  });
+  it('is a mode flag, and needs the request', () => {
+    expect(() => parseRecordArgs(['--select-return', '--select-outbound', ...Q])).toThrow(/at most one/);
+    expect(() => parseRecordArgs(['--select-return', ...Q.slice(2)])).toThrow(
+      '--origin and --destination must be IATA codes',
+    );
+  });
+});

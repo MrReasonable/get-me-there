@@ -52,7 +52,7 @@ export interface LocatorLike {
   locator(selector: '*'): LocatorLike;
   getByRole(
     role: Role,
-    options?: { name?: string | RegExp; exact?: boolean; selected?: boolean },
+    options?: { name?: string | RegExp; exact?: boolean; selected?: boolean; level?: number },
   ): LocatorLike;
   getByText(text: string | RegExp, options?: { exact?: boolean }): LocatorLike;
 }
@@ -67,7 +67,7 @@ export interface PageLike {
   on(event: 'framenavigated', listener: (frame: FrameLike) => void): unknown;
   getByRole(
     role: Role,
-    options?: { name?: string | RegExp; exact?: boolean; selected?: boolean },
+    options?: { name?: string | RegExp; exact?: boolean; selected?: boolean; level?: number },
   ): LocatorLike;
   getByText(text: string | RegExp, options?: { exact?: boolean }): LocatorLike;
   close(): Promise<void>;
@@ -191,6 +191,11 @@ export interface Driver {
    * activated.
    */
   clickOutbound(name: string, d: Deadline, o: StepOptions, onActivate?: () => void): Promise<string[]>;
+  /**
+   * Ian's ruling of 2026-11-01 (read the booking options): the return's selection, as clickOutbound's but by the
+   * return pattern (`S.returns.resultLink`): steps `find-return`, `focus-return`, `press-return`, flow `select-return`.
+   */
+  clickReturn(name: string, d: Deadline, o: StepOptions, onActivate?: () => void): Promise<string[]>;
 }
 
 /** How a timed step runs: the timers, the debug log, and the page's start (for elapsed times). */
@@ -401,10 +406,13 @@ export async function countOf(l: LocatorLike, d: Deadline): Promise<number> {
 /** The driver over one page; `guard` is that page's guard state (hops and frame URLs). */
 export function createDriver(page: PageLike, guard: GuardState, S: Selectors = SELECTORS): Driver {
   // why: WP21 Task 21.0: the return view's links are read by the return pattern; every other view's by the outbound one
+  // why: Ian's ruling of 2026-11-01: on the booking view every link in main counts (its structure is what is recorded)
   const resultLinks = (view: View = 'best'): LocatorLike =>
-    page
-      .getByRole('main')
-      .getByRole('link', { name: view === 'returns' ? S.returns.resultLink : S.results.resultLink });
+    view === 'booking'
+      ? page.getByRole('main').getByRole('link')
+      : page
+          .getByRole('main')
+          .getByRole('link', { name: view === 'returns' ? S.returns.resultLink : S.results.resultLink });
   const has = async (l: LocatorLike, d: Deadline): Promise<boolean> => (await countOf(l, d)) > 0;
   // why: ruling of 2026-10-18: a hidden label (the Cheapest tab keeps "Fetching results" in its name once loaded) is
   // never read as the page still loading; only the matches a visitor would see count
@@ -426,6 +434,50 @@ export function createDriver(page: PageLike, guard: GuardState, S: Selectors = S
       names.push(name === null || name.length > S.maxNameLength ? null : name);
     }
     return names;
+  }
+
+  /**
+   * One option's selection: exactly one link in `main` with exactly that name, which `pattern` (a selectors-module
+   * pattern) reads, else StepFailed('find-<what>', 'not-found' | 'ambiguous', flow) with nothing activated; then, by the
+   * controller's ruling after recording 2 (the pointer click's centre was covered by another element of the row,
+   * which intercepted it), the link itself is focused and activated with Enter, as a keyboard user would: never force,
+   * coordinates, the covering element or a synthetic event. Each action runs CLICK_LOG_MARGIN_MS inside its step, so
+   * Playwright's own error, whose call log names why, answers first. `onActivate` is told once the link is found.
+   */
+  async function activateLink(
+    name: string,
+    pattern: RegExp,
+    what: 'outbound' | 'return',
+    flow: string,
+    d: Deadline,
+    o: StepOptions,
+    onActivate?: () => void,
+  ): Promise<string[]> {
+    const steps: StepOptions = { ...o, flow };
+    const fail = (reason: 'not-found' | 'ambiguous'): StepFailed =>
+      new StepFailed(`find-${what}`, reason, flow);
+    // why: preflight D6: only a result-shaped name is ever looked for, so nothing but an option's own link is activated
+    if (!pattern.test(name)) throw fail('not-found');
+    const links = page.getByRole('main').getByRole('link', { name, exact: true });
+    // why: the page's own URL is never read here, so a selection reads nothing a poll would
+    const found = await runStep(`find-${what}`, LOOKUP_TIMEOUT_MS, d, steps, (st) => countOf(links, st));
+    if (found === 0) throw fail('not-found');
+    if (found > 1) throw fail('ambiguous');
+    const link = links.nth(0);
+    onActivate?.();
+    const act = (step: string, action: (timeout: number) => Promise<void>) =>
+      runStep(step, CLICK_TIMEOUT_MS, d, steps, async (st) => {
+        const timeout = Math.max(1, Math.min(CLICK_TIMEOUT_MS, st.remaining()) - CLICK_LOG_MARGIN_MS);
+        try {
+          await st.race(action(timeout));
+        } catch (e) {
+          if (e instanceof DeadlineExceeded) throw e;
+          throw new ClickRefused(clickFailureOf(e));
+        }
+      });
+    await act(`focus-${what}`, (timeout) => link.focus({ timeout }));
+    await act(`press-${what}`, (timeout) => link.press('Enter', { timeout }));
+    return [`link:${name}`];
   }
 
   return {
@@ -496,7 +548,8 @@ export function createDriver(page: PageLike, guard: GuardState, S: Selectors = S
       );
       at('result-links');
       const outboundLinks = await countOf(resultLinks(), d);
-      const links = view === 'returns' ? await countOf(resultLinks(view), d) : outboundLinks;
+      const links =
+        view === 'returns' || view === 'booking' ? await countOf(resultLinks(view), d) : outboundLinks;
       const facts: PageFacts = {
         url,
         hops: [...guard.hops],
@@ -559,36 +612,10 @@ export function createDriver(page: PageLike, guard: GuardState, S: Selectors = S
       };
     },
 
-    async clickOutbound(name, d, o, onActivate) {
-      const fail = (reason: 'not-found' | 'ambiguous'): StepFailed =>
-        new StepFailed('find-outbound', reason, 'select-outbound');
-      // why: preflight D6: only a result-shaped name is ever looked for, so nothing but an option's own link is clicked
-      if (!S.results.resultLink.test(name)) throw fail('not-found');
-      const links = page.getByRole('main').getByRole('link', { name, exact: true });
-      // why: the page's own URL is never read here, so a selection reads nothing a poll would
-      const found = await runStep('find-outbound', LOOKUP_TIMEOUT_MS, d, o, (st) => countOf(links, st));
-      if (found === 0) throw fail('not-found');
-      if (found > 1) throw fail('ambiguous');
-      const link = links.nth(0);
-      onActivate?.();
-      // why: the controller's ruling after recording 2 (the pointer click's centre was covered by another element of
-      // the row, which intercepted it): the verified link itself is focused and activated with Enter, as a keyboard
-      // user would; never force, coordinates, the covering element or a synthetic event. Each action runs
-      // CLICK_LOG_MARGIN_MS inside its step, so Playwright's own error, whose call log names why, answers first
-      const act = (step: string, action: (timeout: number) => Promise<void>) =>
-        runStep(step, CLICK_TIMEOUT_MS, d, o, async (st) => {
-          const timeout = Math.max(1, Math.min(CLICK_TIMEOUT_MS, st.remaining()) - CLICK_LOG_MARGIN_MS);
-          try {
-            await st.race(action(timeout));
-          } catch (e) {
-            if (e instanceof DeadlineExceeded) throw e;
-            throw new ClickRefused(clickFailureOf(e));
-          }
-        });
-      await act('focus-outbound', (timeout) => link.focus({ timeout }));
-      await act('press-outbound', (timeout) => link.press('Enter', { timeout }));
-      return [`link:${name}`];
-    },
+    clickOutbound: (name, d, o, onActivate) =>
+      activateLink(name, S.results.resultLink, 'outbound', 'select-outbound', d, o, onActivate),
+    clickReturn: (name, d, o, onActivate) =>
+      activateLink(name, S.returns.resultLink, 'return', 'select-return', d, o, onActivate),
 
     async formFacts(d) {
       const trip = page.getByRole('combobox', { name: S.form.tripType });
@@ -657,7 +684,7 @@ async function firstText(l: LocatorLike, d: Deadline): Promise<string | null> {
  * `clickOutbound`, so a click on a consent page does not compile. Imported only by
  * record.ts (rules.test.ts pins that).
  */
-export type ProbePage = Omit<Driver, 'click' | 'clickCheapest' | 'clickOutbound'>;
+export type ProbePage = Omit<Driver, 'click' | 'clickCheapest' | 'clickOutbound' | 'clickReturn'>;
 export function probePage(d: Driver): ProbePage {
   return {
     goto: d.goto,
@@ -774,7 +801,7 @@ export async function pollUntilSettled(
               { timers, ...(log === undefined ? {} : { log }), startedAt },
               (st) => driver.readFacts(st, { timers, lookupMs: LOOKUP_TIMEOUT_MS }),
             )
-          : view === 'returns'
+          : view === 'returns' || view === 'booking'
             ? await driver.readFacts(d, undefined, view)
             : await driver.readFacts(d);
     } catch (e) {
@@ -800,7 +827,9 @@ export async function pollUntilSettled(
     const changed =
       changedFrom !== undefined &&
       (facts.settle.linkSignature !== changedFrom.signature ||
-        facts.page.text.returnHeading ||
+        // why: a return heading is the change to the return view; the booking view is selected from a view that has
+        // one, so there it is no change (Ian's ruling of 2026-11-01)
+        (view === 'returns' && facts.page.text.returnHeading) ||
         (o.loads?.() ?? changedFrom.documentLoads) > changedFrom.documentLoads);
     const settled = isSettled(facts.page, facts.settle, view, changed);
     // why: ruling of 2026-10-18: settled means stable content: the same links across two polls at least 2 s apart

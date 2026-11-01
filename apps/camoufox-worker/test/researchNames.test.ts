@@ -1,7 +1,14 @@
 // The recorder's research reads (WP21 Task 21.0 review: moved out of the served driver into their own module): every
 // link name in `main`, every button and every tab name, each URL-stripped and at most NAMES_MAX.
 import { beforeEach, describe, expect, it } from 'vitest';
-import { buttonNames, linkNames, NAMES_MAX, tabNames } from '../src/researchNames.js';
+import {
+  buttonNames,
+  headingLevels,
+  linkNames,
+  NAMES_MAX,
+  roleCounts,
+  tabNames,
+} from '../src/researchNames.js';
 import { FakePage, n, RESULTS_URL } from './support/fakePage.js';
 import { fakeTimers } from './support/timers.js';
 
@@ -61,5 +68,38 @@ describe('the research reads', () => {
       ),
     ]);
     expect(await tabNames(page, d)).toHaveLength(200);
+  });
+});
+
+describe('the booking view’s structure reads', () => {
+  it('headingLevels counts the headings at each level 1 to 6; roleCounts counts the roles inside main', async () => {
+    const { page, d } = setup(
+      n('document', '', [
+        n('heading', 'Page', [], { level: 1 }),
+        n('main', '', [
+          n('heading', 'Section', [], { level: 2 }),
+          n('heading', 'Row', [], { level: 3 }),
+          n('heading', 'Row', [], { level: 3 }),
+          n('list', '', [
+            n('listitem', '', [n('link', 'A'), n('button', 'B')]),
+            n('listitem', '', [n('button', 'C')]),
+          ]),
+          n('dialog', 'D'),
+        ]),
+      ]),
+    );
+    expect(await headingLevels(page, d)).toEqual([1, 1, 2, 0, 0, 0]);
+    expect(await roleCounts(page, d)).toEqual({
+      link: 1,
+      button: 2,
+      listitem: 2,
+      list: 1,
+      row: 0,
+      gridcell: 0,
+      heading: 3,
+      dialog: 1,
+      alertdialog: 0,
+      region: 0,
+    });
   });
 });

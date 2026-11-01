@@ -45,6 +45,15 @@ function callsTo(name: string): Array<{ f: string; call: ts.CallExpression }> {
     });
   return out;
 }
+/** Files naming `name` as a property, a method, a call or an identifier anywhere (where a method is reached from). */
+function referencesTo(name: string): string[] {
+  const out = new Set<string>();
+  for (const { f, sf } of sources)
+    visit(sf, (x) => {
+      if ((ts.isIdentifier(x) || ts.isPrivateIdentifier(x)) && x.text === name) out.add(f);
+    });
+  return [...out].sort();
+}
 /** Files importing any of `names` from a module. */
 function importersOf(names: readonly string[]): string[] {
   const out = new Set<string>();
@@ -307,7 +316,9 @@ describe('worker rules: source facts through the compiler API', () => {
   // one new click (clickOutbound) is reached from the recorder's flow only until Task 21.3's return phase
   it('the select-outbound recorder is reached only from record.ts, and clickOutbound only from it', () => {
     expect(moduleImporters('./recordSelect.js')).toEqual(['record.ts']);
-    expect([...new Set(callsTo('clickOutbound').map((c) => c.f))]).toEqual(['recordSelect.ts']);
+    expect(referencesTo('clickOutbound')).toEqual(['driver.ts', 'recordSelect.ts']);
+    // why: Ian's ruling of 2026-11-01: the return's selection (the booking research) is the recorder's alone too
+    expect(referencesTo('clickReturn')).toEqual(['driver.ts', 'recordSelect.ts']);
     // why: the research reads (every link, button and tab name) are the recorder's alone, in their own module
     expect(moduleImporters('./researchNames.js')).toEqual(['recordSelect.ts']);
     // why: after recording 1: the target's probe (its page function included) is the recorder's alone too

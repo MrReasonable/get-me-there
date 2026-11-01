@@ -37,7 +37,7 @@ import type { Pacer } from './pacer.js';
 import type { View } from './ready.js';
 import type { Outcome } from './recordDialogs.js';
 import { type StopFacts, stripQuery } from './recordWrite.js';
-import { buttonNames, linkNames, tabNames } from './researchNames.js';
+import { buttonNames, headingLevels, linkNames, roleCounts, tabNames } from './researchNames.js';
 import { probeTarget, type TargetProbe } from './researchProbe.js';
 import type { Selectors } from './selectors.js';
 import { type Deadline, DeadlineExceeded, type Timers } from './timers.js';
@@ -49,6 +49,14 @@ import { type Deadline, DeadlineExceeded, type Timers } from './timers.js';
  */
 export function selectOutboundCapMs(pageTimeoutMs: number, spacingMs: number): number {
   return 6 * pageTimeoutMs + 3 * spacingMs;
+}
+
+/**
+ * `--select-return`'s cap (Ian's ruling of 2026-11-01, D7 style): four page timeouts (the first view, its Cheapest flow,
+ * the outbound's selection, the return's selection) and two spacings (before each selection).
+ */
+export function selectReturnCapMs(pageTimeoutMs: number, spacingMs: number): number {
+  return 4 * pageTimeoutMs + 2 * spacingMs;
 }
 
 /**
@@ -88,7 +96,25 @@ interface ViewRead {
 }
 
 /** The steps after the first view, in order. */
-type StepName = 'first-selection' | 'reload' | 'second-selection';
+type StepName = 'first-selection' | 'reload' | 'second-selection' | 'return-selection';
+
+/** Which option a selection activates, and how its views are read (Ian's ruling of 2026-11-01 adds the return). */
+interface Selection {
+  what: 'outbound' | 'return';
+  /** The view the pre-click signature and every poll after the activation read (preflight P5: the same one). */
+  view: View;
+  activate: Driver['clickOutbound'];
+}
+const outboundSelection = (c: SelectPage): Selection => ({
+  what: 'outbound',
+  view: 'returns',
+  activate: c.driver.clickOutbound,
+});
+const returnSelection = (c: SelectPage): Selection => ({
+  what: 'return',
+  view: 'booking',
+  activate: c.driver.clickReturn,
+});
 
 /** What a step showed once it settled, or (settled false) what one more read saw after its deadline. */
 interface After {
@@ -120,6 +146,11 @@ interface After {
   tabNames: string[] | null;
   /** The research reads ran past their own bound; `settled` still says how the step itself ended. */
   readsOverran: boolean;
+  /**
+   * The booking view's structure (after the return's selection only): the headings at each level 1 to 6 and the
+   * counts of the roles inside `main`; null when the reads' bound ran out before it.
+   */
+  booking?: { headingLevels: number[]; roleCounts: Record<string, number> } | null;
   /** From the click (or the goto) to the settle; the spacing wait is apart, in `waitMs`. */
   stepMs: number;
   waitMs: number;
@@ -175,11 +206,12 @@ export interface OutboundPick {
  */
 export function pickOf(
   list: Pick<ListFacts, 'names'>,
-  departureDate: IsoDate,
+  /** The day the option must leave on: the request's departure date (an outbound) or its return date (a return). */
+  on: IsoDate,
   exclude: string | null,
 ): OutboundPick | null {
-  const month = Number(departureDate.slice(5, 7));
-  const day = Number(departureDate.slice(8, 10));
+  const month = Number(on.slice(5, 7));
+  const day = Number(on.slice(8, 10));
   let best: (OutboundPick & { minor: number }) | null = null;
   for (const [linkIndex, name] of list.names.entries()) {
     if (name === null || name === exclude) continue;
@@ -252,10 +284,13 @@ async function served(c: SelectPage, d0: Deadline, cheapestDeadline: () => Deadl
 }
 
 /** R-settle's rule, as pollUntilSettled applies it; null when the view before the step was not read. */
-function changedOf(facts: StopFacts, before: Before, loads: number): boolean | null {
+function changedOf(facts: StopFacts, before: Before, loads: number, view: View): boolean | null {
   if (before.signature === null) return null;
   return (
-    facts.settle.linkSignature !== before.signature || facts.page.text.returnHeading || loads > before.loads
+    facts.settle.linkSignature !== before.signature ||
+    // why: as pollUntilSettled: the return heading is a change only into the return view
+    (view === 'returns' && facts.page.text.returnHeading) ||
+    loads > before.loads
   );
 }
 
@@ -285,6 +320,7 @@ async function afterOf(
   let headings: string[] | null = null;
   let buttons: string[] | null = null;
   let tabs: string[] | null = null;
+  let booking: After['booking'] = null;
   let readsOverran = false;
   try {
     list = await c.driver.listFacts(h, o.listView);
@@ -293,6 +329,8 @@ async function afterOf(
     headings = await c.driver.headingNames(h);
     buttons = await buttonNames(c.page, h);
     tabs = await tabNames(c.page, h);
+    if (o.listView === 'booking')
+      booking = { headingLevels: await headingLevels(c.page, h), roleCounts: await roleCounts(c.page, h) };
   } catch (e) {
     if (!(e instanceof DeadlineExceeded)) throw e;
     readsOverran = true;
@@ -304,7 +342,7 @@ async function afterOf(
     urlChanged: o.before.url === null ? null : o.facts.page.url !== o.before.url,
     documentLoadsBefore: o.before.loads,
     documentLoads,
-    changedFromPreClick: changedOf(o.facts, o.before, documentLoads),
+    changedFromPreClick: changedOf(o.facts, o.before, documentLoads, o.listView),
     classification: o.classification,
     ...(o.view === undefined ? {} : { view: o.view }),
     page: o.facts.page,
@@ -317,6 +355,7 @@ async function afterOf(
     buttonNames: buttons,
     tabNames: tabs,
     readsOverran,
+    ...(o.listView === 'booking' ? { booking } : {}),
     stepMs: o.stepMs,
     waitMs: o.waitMs,
     settled: o.settled,
@@ -355,7 +394,11 @@ async function unsettled(
   try {
     const read = await c.driver.readFacts(h, undefined, view);
     const facts = { page: read.page, settle: read.settle };
-    const k = classifyPageWithRule(read.page, view === 'returns' ? c.returnsS : c.deps.selectors, view);
+    const k = classifyPageWithRule(
+      read.page,
+      view === 'returns' || view === 'booking' ? c.returnsS : c.deps.selectors,
+      view,
+    );
     if (k.kind.kind === 'blocked' && k.kind.page !== 'unrecognised')
       return { stop: await c.stop(k.kind.page, k.rule, facts) };
     const after = await afterOf(c, {
@@ -376,10 +419,15 @@ async function unsettled(
   }
 }
 
-/** One selection: spaced, the pre-click view read, the outbound's link clicked, the view after it polled and read. */
-async function selection(c: SelectPage, step: StepName, pick: OutboundPick): Promise<StepResult> {
+/** One selection: spaced, the pre-click view read, the option's link activated, the view after it polled and read. */
+async function selection(
+  c: SelectPage,
+  step: StepName,
+  pick: OutboundPick,
+  sel: Selection = outboundSelection(c),
+): Promise<StepResult> {
   let target: TargetProbe | undefined;
-  const r = await selectionSteps(c, step, pick, (t) => {
+  const r = await selectionSteps(c, step, pick, sel, (t) => {
     target = t;
   });
   // why: the probe goes with the step's record however the step ended
@@ -393,7 +441,7 @@ async function selection(c: SelectPage, step: StepName, pick: OutboundPick): Pro
       rec.after?.settled === false &&
       rec.after.changedFromPreClick === false
     )
-      rec.selectFailed = 'press-outbound:no-activation';
+      rec.selectFailed = `press-${sel.what}:no-activation`;
   }
   return r;
 }
@@ -402,6 +450,7 @@ async function selectionSteps(
   c: SelectPage,
   step: StepName,
   pick: OutboundPick,
+  sel: Selection,
   probed: (t: TargetProbe) => void,
 ): Promise<StepResult> {
   const { timers, log, pollMs } = c.deps;
@@ -416,23 +465,23 @@ async function selectionSteps(
   let started = timers.now();
   try {
     // why: preflight P5: the pre-click signature by the return pattern, the same pattern every poll after it reads
-    const pre = await c.driver.readFacts(d, undefined, 'returns');
+    const pre = await c.driver.readFacts(d, undefined, sel.view);
     before = { url: pre.page.url, loads: c.guard.documentLoads, signature: pre.settle.linkSignature };
     // why: recording 1's click timed out: the target is probed first (matches, box, visibility, the hit test at its
     // centre), under its own bound, so the next recording says why a click cannot land
     probed(await probeTarget(c.page, pick.name, timers));
     started = timers.now();
-    const steps: StepOptions = { timers, log, startedAt: c.pageStart, flow: 'select-outbound' };
+    const steps: StepOptions = { timers, log, startedAt: c.pageStart, flow: `select-${sel.what}` };
     try {
       c.clicked.push(
-        ...(await c.driver.clickOutbound(pick.name, d, steps, () => {
+        ...(await sel.activate(pick.name, d, steps, () => {
           attempted = true;
         })),
       );
     } catch (e) {
       if (e instanceof DeadlineExceeded || d.expired()) throw e;
       // why: a failed click may have left a page that is no results page at all: classified once, a block is its stop
-      const blocked = await classifyAfterFailedStep(c.driver, d, steps, c.returnsS, 'returns');
+      const blocked = await classifyAfterFailedStep(c.driver, d, steps, c.returnsS, sel.view);
       if (blocked !== null) return { stop: await c.stop(blocked.page, blocked.rule, blocked.facts) };
       const selectFailed = e instanceof StepFailed ? `${e.step}:${e.reason}` : 'click';
       const clickFailure = e instanceof StepFailed ? e.detail : undefined;
@@ -448,7 +497,7 @@ async function selectionSteps(
       };
     }
     const settled = await pollUntilSettled(c.driver, d, timers, pollMs, c.returnsS, {
-      view: 'returns',
+      view: sel.view,
       log,
       startedAt: c.pageStart,
       changedFrom: { signature: pre.settle.linkSignature, documentLoads: before.loads },
@@ -461,7 +510,7 @@ async function selectionSteps(
       facts: settled.facts,
       before,
       classification: { kind: settled.kind.kind, rule: settled.rule },
-      listView: 'returns',
+      listView: sel.view,
       stepMs,
       waitMs,
       settled: true,
@@ -469,7 +518,7 @@ async function selectionSteps(
     return { record: { step, waitMs, activation: 'keyboard', after }, end: false };
   } catch (e) {
     if (!(e instanceof DeadlineExceeded)) throw e;
-    const r = await unsettled(c, step, 'returns', before, started, waitMs);
+    const r = await unsettled(c, step, sel.view, before, started, waitMs);
     if (attempted && 'record' in r) r.record.activation = 'keyboard';
     return r;
   }
@@ -530,7 +579,11 @@ function wordOf(r: StepRecord): string {
 }
 
 /** The kind's interaction, from the settled first view to the last step; see the module's comment. */
-export async function recordSelectOutbound(c: SelectPage): Promise<Outcome> {
+export async function recordSelectOutbound(
+  c: SelectPage,
+  /** `select-return` (Ian's ruling of 2026-11-01): after the first selection, the cheapest return and the booking view. */
+  kind: 'select-outbound' | 'select-return' = 'select-outbound',
+): Promise<Outcome> {
   const t0 = c.deps.timers.now();
   const s = await served(c, c.budget.d, () => c.budget.next());
   if (s.kind === 'stop') return s.outcome;
@@ -541,12 +594,12 @@ export async function recordSelectOutbound(c: SelectPage): Promise<Outcome> {
   let headings = s.best.headings;
   const finish = (): Outcome => {
     const summary =
-      `select-outbound: first view ${s.best.page.resultLinks} links; picks ${picks.length}` +
+      `${kind}: first view ${s.best.page.resultLinks} links; picks ${picks.length}` +
       (steps.length === 0 ? '' : `; ${steps.map(wordOf).join('; ')}`);
     return {
       kind: 'read',
       data: {
-        kind: 'select-outbound',
+        kind,
         landing: s.best.page.url,
         hops: [...c.guard.hops],
         best: s.best,
@@ -588,6 +641,20 @@ export async function recordSelectOutbound(c: SelectPage): Promise<Outcome> {
   if ('stop' in r1) return r1.stop;
   if (!keep(r1) || r1.record.after === undefined) return finish();
   const a1 = r1.record.after;
+  if (kind === 'select-return') {
+    // why: Ian's ruling of 2026-11-01: the cheapest return on the return date, picked as the outbound was, selected the
+    // same way, and the booking view after it recorded; nothing on the booking view is activated
+    const ret = a1.names === null ? null : pickOf({ names: a1.names }, c.request.returnDate, null);
+    if (ret === null) {
+      steps.push({ step: 'return-selection', selectFailed: 'no-pick' });
+      return finish();
+    }
+    picks.push(ret);
+    const rr = await selection(c, 'return-selection', ret, returnSelection(c));
+    if ('stop' in rr) return rr.stop;
+    keep(rr);
+    return finish();
+  }
   const r2 = await reload(c, {
     url: a1.page.url,
     loads: a1.documentLoads,

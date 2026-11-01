@@ -567,3 +567,21 @@ describe('classify the return view (WP21 Task 21.0)', () => {
     }
   });
 });
+
+describe('classify the booking view (the booking research)', () => {
+  it('the blocked rules first; anything else is the unrecognised booking-view, flag on or off', () => {
+    for (const S of [SELECTORS, { ...SELECTORS, BOOKING_SELECT_VERIFIED: true }]) {
+      expect(classifyPageWithRule(facts(), S, 'booking')).toEqual({
+        kind: { kind: 'blocked', page: 'unrecognised' },
+        rule: 'booking-view',
+      });
+      expect(classifyPageWithRule(facts({ text: t({ challenge: true }) }), S, 'booking')).toEqual({
+        kind: { kind: 'blocked', page: 'captcha' },
+        rule: 'challenge-text',
+      });
+      expect(
+        classifyPageWithRule(facts({ url: 'https://www.example-airline.test/' }), S, 'booking').rule,
+      ).toBe('off-allowlist');
+    }
+  });
+});

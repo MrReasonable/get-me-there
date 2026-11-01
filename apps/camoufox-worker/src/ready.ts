@@ -5,7 +5,7 @@ import type { SettleFacts } from './driver.js';
  * Which view the page shows: the first view (Best), the Cheapest view after its click, or (WP21 Task 21.0) the view
  * after an outbound's selection, read by the return patterns.
  */
-export type View = 'best' | 'cheapest' | 'returns';
+export type View = 'best' | 'cheapest' | 'returns' | 'booking';
 
 /**
  * Settled (spec §2; brief §9; prov-002, PIE-05; operator rulings of 2026-10-18): no "Fetching results" is visible
@@ -26,6 +26,9 @@ export function isSettled(
 ): boolean {
   // why: R-settle: the return view needs only a change and something read by either pattern (or Google's own line);
   // never the results line, the selected tab or the heading, which its classifier judges, not its settle
+  // why: Ian's ruling of 2026-11-01: the booking view's structure is what the research records, so nothing about its
+  // content is required: it has changed from the return view and nothing is fetching, then it holds still
+  if (view === 'booking') return changed && !settle.fetching;
   if (view === 'returns')
     return (
       changed &&

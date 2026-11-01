@@ -39,3 +39,47 @@ export const buttonNames = (page: PageLike, d: Deadline): Promise<string[]> =>
   namesOf(page.getByRole('button'), d);
 /** Every tab name on the page. */
 export const tabNames = (page: PageLike, d: Deadline): Promise<string[]> => namesOf(page.getByRole('tab'), d);
+
+/** The roles the booking research counts inside `main` (Ian's ruling of 2026-11-01: the booking view's structure). */
+const BOOKING_ROLES = [
+  'link',
+  'button',
+  'listitem',
+  'list',
+  'row',
+  'gridcell',
+  'heading',
+  'dialog',
+  'alertdialog',
+  'region',
+] as const;
+
+/** How many headings the page has at each level, 1 to 6 (index 0 is level 1). */
+export async function headingLevels(page: PageLike, d: Deadline): Promise<number[]> {
+  const out: number[] = [];
+  for (let level = 1; level <= 6; level++)
+    out.push(await d.race(page.getByRole('heading', { level }).count()));
+  return out;
+}
+
+/** How many elements of each booking role `main` holds (counts only). */
+export async function roleCounts(
+  page: PageLike,
+  d: Deadline,
+): Promise<Record<(typeof BOOKING_ROLES)[number], number>> {
+  const main = page.getByRole('main');
+  const out: Record<string, number> = {};
+  for (const role of BOOKING_ROLES) out[role] = await d.race(main.getByRole(role).count());
+  return {
+    link: out.link ?? 0,
+    button: out.button ?? 0,
+    listitem: out.listitem ?? 0,
+    list: out.list ?? 0,
+    row: out.row ?? 0,
+    gridcell: out.gridcell ?? 0,
+    heading: out.heading ?? 0,
+    dialog: out.dialog ?? 0,
+    alertdialog: out.alertdialog ?? 0,
+    region: out.region ?? 0,
+  };
+}

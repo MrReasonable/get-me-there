@@ -78,6 +78,9 @@ export const FLAG_NAMES = [
   // why: WP21 Task 21.0 (spec §2 rev 55, the return leg): the outbound's selection and the return view after it, false
   // on every entry until a recording of the served sequence sets it on that entry (Task 21.3, darwin-arm64 first)
   'RETURN_SELECT_VERIFIED',
+  // why: Ian's ruling of 2026-11-01 (read the booking options): the cheapest return's selection and the booking view
+  // after it, false on every entry until a recording of that sequence sets it
+  'BOOKING_SELECT_VERIFIED',
 ] as const;
 export type FlagName = (typeof FLAG_NAMES)[number];
 
@@ -98,6 +101,7 @@ const NONE: Readonly<Record<FlagName, boolean>> = {
   LANDING_VERIFIED: false,
   GRID_UNPRICED_VERIFIED: false,
   RETURN_SELECT_VERIFIED: false,
+  BOOKING_SELECT_VERIFIED: false,
 };
 
 /**

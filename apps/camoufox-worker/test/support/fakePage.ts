@@ -25,6 +25,8 @@ export interface FakeNode {
   clickHang?: boolean;
   /** WP21 Task 21.0: a key press on this node never resolves. */
   pressHang?: boolean;
+  /** A heading's level (Playwright's `getByRole('heading', { level })`). */
+  level?: number;
   /** WP21 Task 21.0: the node's box (null: not rendered); a 100 × 40 box by default. */
   box?: { x: number; y: number; width: number; height: number } | null;
   /** WP21 Task 21.0: the node is disabled (`isEnabled()` false). */
@@ -261,7 +263,7 @@ export class FakeLocator implements LocatorLike {
   }
   getByRole(
     role: Role,
-    o: { name?: string | RegExp; exact?: boolean; selected?: boolean } = {},
+    o: { name?: string | RegExp; exact?: boolean; selected?: boolean; level?: number } = {},
   ): FakeLocator {
     const all = () => descendants(this.find()).filter((x) => roleMatches(x, role, o));
     return new FakeLocator(
@@ -339,9 +341,10 @@ function printed(x: FakeNode, depth: number): string[] {
 function roleMatches(
   x: FakeNode,
   role: Role,
-  o: { name?: string | RegExp; exact?: boolean; selected?: boolean },
+  o: { name?: string | RegExp; exact?: boolean; selected?: boolean; level?: number },
 ): boolean {
   if (x.role !== role || !nameMatches(x.name ?? '', o.name, o.exact)) return false;
+  if (o.level !== undefined && x.level !== o.level) return false;
   return o.selected === undefined || (x.selected === true) === o.selected;
 }
 /** True when a node the query would consider is marked to make a selected-state query hang. */
@@ -493,7 +496,7 @@ export class FakePage implements HeadedPageLike {
   }
   getByRole(
     role: Role,
-    o: { name?: string | RegExp; exact?: boolean; selected?: boolean } = {},
+    o: { name?: string | RegExp; exact?: boolean; selected?: boolean; level?: number } = {},
   ): FakeLocator {
     return new FakeLocator(
       this,

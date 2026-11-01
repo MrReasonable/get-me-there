@@ -73,6 +73,7 @@ const FLAGS = {
       GRID_UNPRICED_VERIFIED: true,
       // why: WP21 Task 21.0: no recording of the return view yet (Task 21.3 records it)
       RETURN_SELECT_VERIFIED: false,
+      BOOKING_SELECT_VERIFIED: false,
     },
   },
   // why: WP17 Task 17.8's darwin-x64 session of 2026-10-26 (the operator's Mac under Rosetta, an x86_64 Node, a
@@ -96,6 +97,7 @@ const FLAGS = {
       // why: no grid recording of this entry shows an unpriced cell (its pages were all priced)
       GRID_UNPRICED_VERIFIED: false,
       RETURN_SELECT_VERIFIED: false,
+      BOOKING_SELECT_VERIFIED: false,
     },
   },
   // why: WP17 Task 17.8's linux-arm64 session of 2026-10-26 (a Linux arm64 container on the operator's Mac, headless,
@@ -115,6 +117,7 @@ const FLAGS = {
       // why: no grid recording of this entry shows an unpriced cell (its pages were all priced)
       GRID_UNPRICED_VERIFIED: false,
       RETURN_SELECT_VERIFIED: false,
+      BOOKING_SELECT_VERIFIED: false,
     },
   },
   // why: WP17 Task 17.8's linux-x64 session of 2026-10-26 (a Linux x86_64 container under emulation on the operator's
@@ -134,6 +137,7 @@ const FLAGS = {
       // why: no grid recording of this entry shows an unpriced cell (its pages were all priced)
       GRID_UNPRICED_VERIFIED: false,
       RETURN_SELECT_VERIFIED: false,
+      BOOKING_SELECT_VERIFIED: false,
     },
   },
 } as const;

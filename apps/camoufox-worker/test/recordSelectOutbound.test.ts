@@ -13,7 +13,7 @@ import { createDriver, type Driver, type FrameLike, type RequestLike } from '../
 import { buildLaunchOptions, launchOptionsForMeta } from '../src/launch.js';
 import { Pacer } from '../src/pacer.js';
 import { RECORD_SELECT_PAGES, type RecordDeps, record } from '../src/record.js';
-import { recordSelectOutbound, selectOutboundCapMs } from '../src/recordSelect.js';
+import { recordSelectOutbound, selectOutboundCapMs, selectReturnCapMs } from '../src/recordSelect.js';
 import { type EntryContext, EX_CONFIG, EX_UNAVAILABLE } from '../src/run.js';
 import { SELECTORS } from '../src/selectors.js';
 import { DeadlineExceeded } from '../src/timers.js';
@@ -1010,5 +1010,146 @@ describe('recordSelectOutbound: the activation recorded through the deadline pat
         after: expect.objectContaining({ settled: false, changedFromPreClick: false }),
       }),
     ]);
+  });
+});
+
+// why: Ian's ruling of 2026-11-01 (read the booking options): `record --select-return` selects the outbound as
+// --select-outbound does, then the cheapest return on the return date, and records the booking view after it; it
+// activates nothing on the booking view
+describe('record --select-return: the return selected, the booking view recorded', () => {
+  const SELECT_RETURN = ['--select-return', ...Q];
+  const RET_OTHER_DAY = returnOptionName({ pounds: 300, on: 'Monday, November 16', priceForm: 'from' });
+  const RET_CHEAP = returnOptionName({ pounds: 451, priceForm: 'from' });
+  const RET_TIE = returnOptionName({ pounds: 451, carrier: 'QQ Air', priceForm: 'from' });
+  const RET_DEAR = returnOptionName({ pounds: 470, priceForm: 'from' });
+  const RETURNS = [RET_DEAR, RET_OTHER_DAY, RET_CHEAP, RET_TIE];
+  const booking = (): FakeNode =>
+    n('document', 'Google Flights', [
+      n('main', '', [
+        n('heading', 'Booking options', [], { level: 2 }),
+        n('list', '', [
+          n('listitem', '', [
+            n('link', 'Book with QQ Air', [], { href: 'https://www.example-airline.test/' }),
+          ]),
+          n('listitem', '', [
+            n('link', 'Book with QQ Atlantic', [], { href: 'https://www.example-airline.test/2' }),
+          ]),
+        ]),
+        n('button', 'More booking options'),
+      ]),
+    ]);
+  const script = (o: { onReturn?: () => FakeNode[] | null } = {}): Script => ({
+    afterGoto: () => [bestTree()],
+    onTab: () => [cheapestTree()],
+    onLink: (name) =>
+      name === P451
+        ? [returnTree(RETURNS)]
+        : name === RET_CHEAP
+          ? (o.onReturn ?? (() => [booking()]))()
+          : null,
+  });
+  const facts = (t: ReturnType<typeof setup>) =>
+    JSON.parse(readFileSync(join(t.root, 'select-return/2026-10-18/1.facts.json'), 'utf8'));
+  it('selects the cheapest return on the return date by keyboard and records the booking view, activating nothing on it', async () => {
+    const t = setup(script());
+    expect(await record(t.ctx(SELECT_RETURN), cfg, t.deps)).toBe(0);
+    expect(t.err).toEqual([]);
+    const f = facts(t);
+    expect(f.kind).toBe('select-return');
+    // why: another day's cheaper return is never a pick; the tie goes to page order
+    expect(f.picks).toEqual([
+      { name: P451, linkIndex: 2 },
+      { name: RET_CHEAP, linkIndex: 2 },
+    ]);
+    expect(f.steps.map((s: { step: string }) => s.step)).toEqual(['first-selection', 'return-selection']);
+    const ret = f.steps[1];
+    expect(ret).toMatchObject({
+      activation: 'keyboard',
+      target: { matches: 1, visible: true },
+      after: {
+        settled: true,
+        changedFromPreClick: true,
+        documentLoadsBefore: 1,
+        documentLoads: 1,
+        classification: { kind: 'blocked', rule: 'booking-view' },
+        headings: ['Booking options'],
+        linkNames: ['Book with QQ Air', 'Book with QQ Atlantic'],
+        booking: {
+          headingLevels: [0, 1, 0, 0, 0, 0],
+          roleCounts: { link: 2, button: 1, listitem: 2, list: 1, heading: 1, dialog: 0 },
+        },
+      },
+    });
+    expect(ret.after.buttonNames).toContain('More booking options');
+    const calls = t.contexts[0]?.pages[0]?.calls;
+    expect(calls?.presses).toEqual([`Enter:link:${P451}`, `Enter:link:${RET_CHEAP}`]);
+    expect(calls?.clicks.filter((c) => !c.startsWith('tab:'))).toEqual([]);
+    expect(f.clicked).toEqual(['tab:Cheapest', `link:${P451}`, `link:${RET_CHEAP}`]);
+    expect(
+      JSON.parse(readFileSync(join(t.root, 'select-return/2026-10-18/1.meta.json'), 'utf8')),
+    ).toMatchObject({
+      kind: 'select-return',
+      documentLoads: 1,
+    });
+  });
+  it('claims 3 pages before the first load and settles to the documents loaded', async () => {
+    const t = setup(script());
+    expect(await record(t.ctx(SELECT_RETURN), cfg, t.deps)).toBe(0);
+    expect(t.seen[0]).toMatchObject({ at: 'goto-1', pages: 3 });
+    expect(t.months()).toBe(1);
+    const doc = setup({ ...script(), documentPerSelection: true });
+    expect(await record(doc.ctx(SELECT_RETURN), cfg, doc.deps)).toBe(0);
+    expect(doc.months()).toBe(3);
+  });
+  it('passes a cap of 4 page timeouts and 2 spacings (420,000 ms) to the page budget', async () => {
+    const t = setup(script());
+    vi.mocked(budget.pageBudget).mockClear();
+    expect(await record(t.ctx(SELECT_RETURN), cfg, t.deps)).toBe(0);
+    expect(vi.mocked(budget.pageBudget).mock.calls.map((c) => [c[1], c[3]])).toEqual([[90_000, 420_000]]);
+    expect(selectReturnCapMs(90_000, 30_000)).toBe(420_000);
+  });
+  it('with 2 pages left it is refused before anything loads', async () => {
+    const t = setup(script());
+    writeFileSync(
+      join(t.dataDir, 'monthly.json'),
+      JSON.stringify({
+        windowStart: '2026-10-01T00:00:00.000Z',
+        windowEnd: '2026-11-01T00:00:00.000Z',
+        pages: 1498,
+        scrolls: 0,
+      }),
+      { mode: 0o600 },
+    );
+    expect(await record(t.ctx(SELECT_RETURN), cfg, t.deps)).toBe(EX_CONFIG);
+    expect(t.err.join()).toContain(
+      "the worker's monthly page cap leaves fewer than the 3 pages this recording may load",
+    );
+    expect(t.contexts).toEqual([]);
+  });
+  it('an Enter on the return that changes nothing within the step is press-return:no-activation', async () => {
+    const t = setup(script({ onReturn: () => null }));
+    expect(await record(t.ctx(SELECT_RETURN), cfg, t.deps)).toBe(0);
+    expect(facts(t).steps[1]).toMatchObject({
+      step: 'return-selection',
+      activation: 'keyboard',
+      selectFailed: 'press-return:no-activation',
+      after: { settled: false, changedFromPreClick: false },
+    });
+  });
+  it('a challenge after the return’s activation is that stop', async () => {
+    const t = setup(
+      script({ onReturn: () => [n('document', '', [text('Please confirm you are not a robot')])] }),
+    );
+    expect(await record(t.ctx(SELECT_RETURN), cfg, t.deps)).toBe(EX_UNAVAILABLE);
+    expect(t.cooldown()?.cause).toBe('captcha');
+  });
+  it('no return on the return date: the return selection has no pick, and nothing more is activated', async () => {
+    const t = setup({
+      ...script(),
+      onLink: (name) => (name === P451 ? [returnTree([RET_OTHER_DAY])] : null),
+    });
+    expect(await record(t.ctx(SELECT_RETURN), cfg, t.deps)).toBe(0);
+    expect(facts(t).steps.at(-1)).toEqual({ step: 'return-selection', selectFailed: 'no-pick' });
+    expect(t.contexts[0]?.pages[0]?.calls.presses).toEqual([`Enter:link:${P451}`]);
   });
 });

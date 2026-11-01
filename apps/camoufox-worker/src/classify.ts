@@ -71,7 +71,9 @@ export type ClassifyRule =
   // why: WP21 Task 21.0: the view after an outbound's selection: a return view, not one, or Google's own line there
   | 'returns'
   | 'not-return-view'
-  | 'no-flights-line-unrecorded';
+  | 'no-flights-line-unrecorded'
+  // why: Ian's ruling of 2026-11-01: the booking view, unrecorded: never results, only its blocked kinds stop it
+  | 'booking-view';
 
 /**
  * The tab price in pence, read from the start of the Cheapest tab's name (`S.results.cheapestTabPrice`), or null when
@@ -104,6 +106,7 @@ export function classifyPageWithRule(
     rule,
   });
   if (view === 'returns') return classifyReturnView(f, S);
+  if (view === 'booking') return blocked('unrecognised', 'booking-view');
   // why: ruling of 2026-10-18: the line counts only on a page with no result links, so the flag can never misread a
   // results page (the Cheapest view carries a status line matching it beside 21 links)
   if (S.NO_FLIGHTS_VERIFIED && f.text.noFlights && f.resultLinks === 0)

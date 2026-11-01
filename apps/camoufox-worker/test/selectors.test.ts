@@ -22,6 +22,7 @@ describe('the dated selectors module (spec §2; brief §9)', () => {
       GRID_UNPRICED_VERIFIED: true,
       // why: WP21 Task 21.0: no recording of the return view yet
       RETURN_SELECT_VERIFIED: false,
+      BOOKING_SELECT_VERIFIED: false,
     });
     expect(Object.keys(flagsOf())).toEqual([...FLAG_NAMES]);
   });
@@ -31,6 +32,9 @@ describe('the dated selectors module (spec §2; brief §9)', () => {
     for (const k of OS_ARCHES) {
       expect(flagsOf(selectorsFor(k, CAMOUFOX_BUILDS[k].build)).RETURN_SELECT_VERIFIED, k).toBe(false);
       expect(PROOFS[k].RETURN_SELECT_VERIFIED, k).toBeUndefined();
+      // why: Ian's ruling of 2026-11-01: the return's selection and the booking view, false until recorded
+      expect(flagsOf(selectorsFor(k, CAMOUFOX_BUILDS[k].build)).BOOKING_SELECT_VERIFIED, k).toBe(false);
+      expect(PROOFS[k].BOOKING_SELECT_VERIFIED, k).toBeUndefined();
     }
   });
   // why: WP21 Task 21.0: the return view's patterns are a hypothesis the recording checks (Task 21.3 dates them); both

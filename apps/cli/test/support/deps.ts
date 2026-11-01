@@ -163,4 +163,5 @@ export const unsetFlags = (): Readonly<Record<FlagName, boolean>> => ({
   GRID_UNPRICED_VERIFIED: false,
   // why: WP21 Task 21.0: kept a literal (preflight T21.0: the annotation forces it complete, no cast needed)
   RETURN_SELECT_VERIFIED: false,
+  BOOKING_SELECT_VERIFIED: false,
 });

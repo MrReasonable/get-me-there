@@ -47,6 +47,8 @@ export type Role =
   | 'slider'
   | 'option'
   | 'tabpanel'
+  // why: the booking research counts rows in the booking view (researchNames.ts roleCounts)
+  | 'row'
   | 'grid'
   | 'gridcell'
   | 'img';
@@ -143,6 +145,11 @@ export interface Selectors {
    * the served sequence sets it on that entry. Only then does the worker click an outbound's link.
    */
   RETURN_SELECT_VERIFIED: boolean;
+  /**
+   * Ian's ruling of 2026-11-01 (read the booking options): the cheapest return's selection and the booking view after
+   * it; false on every entry until a recording of that sequence sets it.
+   */
+  BOOKING_SELECT_VERIFIED: boolean;
 }
 
 export const SELECTORS: Selectors = {
@@ -324,5 +331,6 @@ export function flagsOf(S: Selectors = SELECTORS): Record<FlagName, boolean> {
     LANDING_VERIFIED: S.LANDING_VERIFIED,
     GRID_UNPRICED_VERIFIED: S.GRID_UNPRICED_VERIFIED,
     RETURN_SELECT_VERIFIED: S.RETURN_SELECT_VERIFIED,
+    BOOKING_SELECT_VERIFIED: S.BOOKING_SELECT_VERIFIED,
   };
 }

@@ -274,6 +274,17 @@ describe('the document-load count (WP21 Task 21.0)', () => {
     expect(state.documentLoads).toBe(2);
     expect((await installGuard(ctx, new FakePage(ctx), log)).documentLoads).toBe(0);
   });
+  // why: Ian's ruling of 2026-11-01: the booking view's controls lead off the results page (a seller's site, or the
+  // results host's own redirect path outside /travel/flights); the recorder never activates one, and a navigation to
+  // either is refused and loads nothing
+  it('a booking control’s navigation is refused and counted as no load', async () => {
+    const ctx = new FakeContext();
+    const state = await installGuard(ctx, new FakePage(ctx), log);
+    expect(await ctx.routeRequest(req('https://www.google.com/travel/clk/f?u=x'))).toBe('aborted');
+    expect(state).toMatchObject({ refused: 'off-allowlist', documentLoads: 0 });
+    expect(await ctx.routeRequest(req('https://www.example-airline.test/booking?fare=x'))).toBe('aborted');
+    expect(state.documentLoads).toBe(0);
+  });
   it('decideRoute’s allowlist is unchanged', () => {
     expect(decideRoute('https://www.google.com/travel/flights', true)).toEqual({ action: 'continue' });
     expect(decideRoute('https://www.google.com/travel/flights/search?tfs=x', true)).toEqual({

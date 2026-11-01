@@ -138,6 +138,8 @@ const WORKER_FLAGS: Readonly<Record<FlagName, boolean>> = {
   // why: WP21 Task 21.0: the return view after an outbound's selection, false until a recording of the served
   // sequence sets it (Task 21.3)
   RETURN_SELECT_VERIFIED: false,
+  // why: Ian's ruling of 2026-11-01 (read the booking options): the return's selection and the booking view after it
+  BOOKING_SELECT_VERIFIED: false,
 };
 
 describe('FLAGS and flagsFor (spec §2 rev 36: flags per <os>-<arch>, bound to their build)', () => {
@@ -153,6 +155,7 @@ describe('FLAGS and flagsFor (spec §2 rev 36: flags per <os>-<arch>, bound to t
       'LANDING_VERIFIED',
       'GRID_UNPRICED_VERIFIED',
       'RETURN_SELECT_VERIFIED',
+      'BOOKING_SELECT_VERIFIED',
     ]);
   });
 
@@ -163,6 +166,8 @@ describe('FLAGS and flagsFor (spec §2 rev 36: flags per <os>-<arch>, bound to t
       expect(FLAGS[k].flags.RETURN_SELECT_VERIFIED, k).toBe(false);
       expect(flagsFor(k, CAMOUFOX_BUILDS[k].build).RETURN_SELECT_VERIFIED, k).toBe(false);
       expect(flagsFor(k, '152.0.4-beta.27').RETURN_SELECT_VERIFIED, k).toBe(false);
+      expect(FLAGS[k].flags.BOOKING_SELECT_VERIFIED, k).toBe(false);
+      expect(flagsFor(k, CAMOUFOX_BUILDS[k].build).BOOKING_SELECT_VERIFIED, k).toBe(false);
     }
   });
 
@@ -185,8 +190,13 @@ describe('FLAGS and flagsFor (spec §2 rev 36: flags per <os>-<arch>, bound to t
       const off = FLAG_NAMES.filter((f) => !FLAGS[k].flags[f]);
       expect(off, k).toEqual(
         k === 'darwin-arm64'
-          ? ['VIEW_MORE_ADDS_CHEAPER', 'RETURN_SELECT_VERIFIED']
-          : ['VIEW_MORE_ADDS_CHEAPER', 'GRID_UNPRICED_VERIFIED', 'RETURN_SELECT_VERIFIED'],
+          ? ['VIEW_MORE_ADDS_CHEAPER', 'RETURN_SELECT_VERIFIED', 'BOOKING_SELECT_VERIFIED']
+          : [
+              'VIEW_MORE_ADDS_CHEAPER',
+              'GRID_UNPRICED_VERIFIED',
+              'RETURN_SELECT_VERIFIED',
+              'BOOKING_SELECT_VERIFIED',
+            ],
       );
     }
   });

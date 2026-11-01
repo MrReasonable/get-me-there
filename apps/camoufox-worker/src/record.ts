@@ -58,7 +58,7 @@ import {
   RecordingRefused,
 } from './recordArgs.js';
 import { type Outcome, recordGraph, recordGrid, type Seen } from './recordDialogs.js';
-import { recordSelectOutbound, selectOutboundCapMs } from './recordSelect.js';
+import { recordSelectOutbound, selectOutboundCapMs, selectReturnCapMs } from './recordSelect.js';
 import {
   type StopFacts,
   stopRecord,
@@ -119,6 +119,15 @@ const FINALLY_MS = 5000;
  * A worker literal; Task 21.3 pins it equal to core's FLIGHT_LIST_PAGES_PER_PAIR_MAX.
  */
 export const RECORD_SELECT_PAGES = 4;
+/**
+ * Ian's ruling of 2026-11-01 (read the booking options): the documents a `--select-return` page may load at worst
+ * (the first view, the outbound's selection, the return's selection: each selection assumed a document), reserved
+ * whole before the first load and settled to the documents the guard counted.
+ */
+export const RECORD_SELECT_RETURN_PAGES = 3;
+/** The research kinds that select an option, which share the select-outbound rules (reservation, cap, open page). */
+const isSelectKind = (k: RecordingKind): k is 'select-outbound' | 'select-return' =>
+  k === 'select-outbound' || k === 'select-return';
 
 export interface RecordDeps {
   /** process.platform: on Linux the research's headed window needs a display. */
@@ -154,9 +163,9 @@ export async function record(ctx: EntryContext, cfg: WorkerConfig, deps: RecordD
   }
   // why: WP21 Task 21.0 review: the kind records the sequence the page session serves; on an entry whose session also
   // clicks View more (VIEW_MORE_ADDS_CHEAPER) that sequence is one this kind does not run, so it is refused, not recorded
-  if (args.kind === 'select-outbound' && deps.selectors.VIEW_MORE_ADDS_CHEAPER) {
+  if (isSelectKind(args.kind) && deps.selectors.VIEW_MORE_ADDS_CHEAPER) {
     ctx.err(
-      'record --select-outbound records the served sequence without View more; this entry sets VIEW_MORE_ADDS_CHEAPER, so it is refused',
+      `record --${args.kind} records the served sequence without View more; this entry sets VIEW_MORE_ADDS_CHEAPER, so it is refused`,
     );
     return EX_CONFIG;
   }
@@ -219,7 +228,7 @@ export async function record(ctx: EntryContext, cfg: WorkerConfig, deps: RecordD
     const profile = profileDir(ctx.dataDir);
     // why: WP21 Task 21.0 review: a select-outbound page launches only once its whole reservation is admitted, so a
     // refusal for the month's headroom launches nothing; every other kind launches first, as before
-    let context: ContextLike | null = args.kind === 'select-outbound' ? null : await deps.launch(profile);
+    let context: ContextLike | null = isSelectKind(args.kind) ? null : await deps.launch(profile);
     const readBacks: ReadBack[] = [];
     try {
       for (let i = 0; i < args.pages; i++) {
@@ -232,7 +241,8 @@ export async function record(ctx: EntryContext, cfg: WorkerConfig, deps: RecordD
               ? null
               : pageUrl({ ...req, gl: cfg.pointOfSale });
         if (url === null) throw new RecordingRefused('no request');
-        const select = args.kind === 'select-outbound';
+        const select = isSelectKind(args.kind);
+        const selectPages = args.kind === 'select-return' ? RECORD_SELECT_RETURN_PAGES : RECORD_SELECT_PAGES;
         // why: WP21 Task 21.0 review: a select-outbound page needs its whole worst case; claim refuses one that would
         // reserve less before the pacer or the counts are touched, and the admission it returns is the one checked here
         const admitted: Extract<Admission, { kind: 'ok' }> = await claim(
@@ -241,13 +251,13 @@ export async function record(ctx: EntryContext, cfg: WorkerConfig, deps: RecordD
           args.moves.length,
           deps,
           ctx,
-          select ? RECORD_SELECT_PAGES : 1,
+          select ? selectPages : 1,
           select,
         );
-        if (select && admitted.pagesReserved !== RECORD_SELECT_PAGES) {
+        if (select && admitted.pagesReserved !== selectPages) {
           monthly.settle(admitted.reserved, admitted.scrollAllowance, 0, admitted.pagesReserved, 0);
           pacer.release();
-          throw new RecordingRefused('the month admitted fewer pages than --select-outbound may load');
+          throw new RecordingRefused(`the month admitted fewer pages than --${args.kind} may load`);
         }
         let c: ContextLike;
         try {
@@ -267,14 +277,16 @@ export async function record(ctx: EntryContext, cfg: WorkerConfig, deps: RecordD
         const pageMs = cfg.pageTimeoutSeconds * 1000;
         // why: WP15 ruling 10: a grid page's overall cap is the first view's budget plus, per move, the spacing and the
         // move's own budget
-        // why: WP21 Task 21.0 (ruling D7): a select-outbound page's cap is six page timeouts and three spacings
-        // (recordSelect.ts)
+        // why: WP21 Task 21.0 (ruling D7): a select-outbound page's cap is six page timeouts and three spacings, a
+        // select-return page's four and two (recordSelect.ts)
         const budget = pageBudget(
           deps.timers,
           pageMs,
           pageStart,
           select
-            ? selectOutboundCapMs(pageMs, pacer.spacingMs)
+            ? args.kind === 'select-return'
+              ? selectReturnCapMs(pageMs, pacer.spacingMs)
+              : selectOutboundCapMs(pageMs, pacer.spacingMs)
             : 2 * pageMs +
                 args.moves.length *
                   (GRID_MIN_SCROLL_SPACING_SECONDS * 1000 + GRID_MOVE_BUDGET_MS + GRID_MOVE_RESERVE_MS),
@@ -596,27 +608,29 @@ async function interact(
   }
   stepMs.goto = deps.timers.now() - t0;
   if (kind === 'landing') return await readLanding(driver, page, guard, d, deps, stepMs, t0, stop);
-  if (kind === 'select-outbound') {
-    if (kindArgs.request === null)
-      throw new RecordingRefused('--select-outbound needs --depart and --return');
-    return await recordSelectOutbound({
-      driver,
-      page,
-      guard,
-      budget,
-      pageStart,
-      deps,
-      // why: the recorder reads the view after a selection with the return-view hypothesis on (as --no-flights reads
-      // with its line on), so the recording shows it before RETURN_SELECT_VERIFIED is set for this entry
-      returnsS: { ...deps.selectors, RETURN_SELECT_VERIFIED: true },
-      pacer: kindArgs.pacer,
-      pageMs: kindArgs.pageMs,
-      url,
-      request: kindArgs.request,
-      stepMs,
-      clicked,
-      stop,
-    });
+  if (isSelectKind(kind)) {
+    if (kindArgs.request === null) throw new RecordingRefused(`--${kind} needs --depart and --return`);
+    return await recordSelectOutbound(
+      {
+        driver,
+        page,
+        guard,
+        budget,
+        pageStart,
+        deps,
+        // why: the recorder reads the view after a selection with the return-view hypothesis on (as --no-flights reads
+        // with its line on), so the recording shows it before RETURN_SELECT_VERIFIED is set for this entry
+        returnsS: { ...deps.selectors, RETURN_SELECT_VERIFIED: true },
+        pacer: kindArgs.pacer,
+        pageMs: kindArgs.pageMs,
+        url,
+        request: kindArgs.request,
+        stepMs,
+        clicked,
+        stop,
+      },
+      kind,
+    );
   }
   let settled: Settled;
   try {

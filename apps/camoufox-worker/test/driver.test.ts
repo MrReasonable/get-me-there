@@ -1218,3 +1218,68 @@ describe('clickOutbound’s failure word (WP21 Task 21.0, after recording 1)', (
     expect(page.calls.timeouts).not.toContain(CLICK_TIMEOUT_MS);
   });
 });
+
+// why: Ian's ruling of 2026-11-01 (read the booking options): the cheapest return is selected the way the outbound is:
+// its own verified name pattern, exactly one link in main, focused then Enter
+describe('clickReturn (the booking research)', () => {
+  const RET = returnOptionName({ pounds: 451, priceForm: 'from' });
+  const run = (links: FakeNode[], name = RET) => {
+    const page = new FakePage(null);
+    page.setUrl(RESULTS_URL);
+    page.setTrees([n('document', '', [n('main', '', [n('list', '', links)])])]);
+    const timers = fakeTimers();
+    const lines = memoryLog();
+    const found: string[] = [];
+    const r = createDriver(page, guard()).clickReturn(
+      name,
+      timers.deadline(90_000),
+      { timers, log: lines, flow: 'select-return' },
+      () => found.push('found'),
+    );
+    return { page, r, lines, found };
+  };
+  it('focuses the one return link of that exact name and presses Enter on it', async () => {
+    const { page, r, lines, found } = run([n('link', RET), n('link', returnOptionName({ pounds: 470 }))]);
+    expect(await r).toEqual([`link:${RET}`]);
+    expect(page.calls.actions).toEqual([`focus:link:${RET}`, `press:Enter:link:${RET}:focused`]);
+    expect(page.calls.clicks).toEqual([]);
+    expect(found).toEqual(['found']);
+    expect(
+      lines.lines
+        .filter((l) => l.msg === 'select-return step' && Reflect.get(l.o, 'phase') === 'end')
+        .map((l) => Reflect.get(l.o, 'step')),
+    ).toEqual(['find-return', 'focus-return', 'press-return']);
+  });
+  it('none is not-found, two ambiguous, and a name the return pattern does not read is refused, nothing activated', async () => {
+    for (const [links, name, reason] of [
+      [[n('link', returnOptionName({ pounds: 470 }))], RET, 'not-found'],
+      [[n('link', RET), n('link', RET)], RET, 'ambiguous'],
+      [[n('link', 'Sign in')], 'Sign in', 'not-found'],
+    ] as const) {
+      const { page, r, found } = run([...links], name);
+      await expect(r).rejects.toMatchObject({
+        name: 'StepFailed',
+        step: 'find-return',
+        reason,
+        flow: 'select-return',
+      });
+      expect([page.calls.actions, found]).toEqual([[], []]);
+    }
+  });
+});
+
+describe('the booking view’s reads (the booking research)', () => {
+  it('readFacts(d, o, "booking") counts and hashes every link in main, whatever its name', async () => {
+    const tree = n('document', '', [
+      n('link', 'Outside'),
+      n('main', '', [n('heading', 'Booking options'), n('link', 'Book with QQ Air'), n('link', 'Continue')]),
+    ]);
+    const { driver, d } = setup([tree]);
+    const r = await driver.readFacts(d, undefined, 'booking');
+    expect([r.page.resultLinks, r.page.outboundLinks, r.names]).toEqual([
+      2,
+      0,
+      ['Book with QQ Air', 'Continue'],
+    ]);
+  });
+});

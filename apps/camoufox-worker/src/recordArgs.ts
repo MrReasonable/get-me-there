@@ -20,11 +20,14 @@ export const KINDS = [
   // why: WP21 Task 21.0: the served sequence, an outbound's selection and what Google shows next, a fresh load of the
   // list page and a second selection (the return leg's research)
   'select-outbound',
+  // why: Ian's ruling of 2026-11-01 (read the booking options): the outbound selected, then the cheapest return, and
+  // the booking view recorded without anything on it activated
+  'select-return',
 ] as const;
 export type RecordingKind = (typeof KINDS)[number];
 export const RECORDED_BY = 'camoufox-worker record';
 export const MAX_PAGES = 3;
-/** WP21 Task 21.0: the select-outbound kind's own page bound (each page may load up to four documents). */
+/** WP21 Task 21.0: the select-outbound and select-return kinds' own page bound (each page may load several documents). */
 export const SELECT_MAX_PAGES = 2;
 /** The stability check's spacing between its three pages (rule 2). */
 export const STABILITY_PAGES = 3;
@@ -76,6 +79,7 @@ export function parseRecordArgs(args: readonly string[]): RecordArgs {
         '--grid',
         '--landing',
         '--select-outbound',
+        '--select-return',
       ].includes(a)
     )
       flags.add(a);
@@ -83,7 +87,7 @@ export function parseRecordArgs(args: readonly string[]): RecordArgs {
   }
   if (flags.size > 1)
     throw new RecordingRefused(
-      'pass at most one of --cheapest, --view-more, --stability, --consent-probe, --consent-research, --no-flights, --graph-explore, --grid, --landing, --select-outbound',
+      'pass at most one of --cheapest, --view-more, --stability, --consent-probe, --consent-research, --no-flights, --graph-explore, --grid, --landing, --select-outbound, --select-return',
     );
   const movesRaw = values.get('--moves');
   if (movesRaw !== undefined && !flags.has('--grid')) throw new RecordingRefused('--moves needs --grid');
@@ -111,13 +115,15 @@ export function parseRecordArgs(args: readonly string[]): RecordArgs {
                     ? 'landing'
                     : flags.has('--select-outbound')
                       ? 'select-outbound'
-                      : 'results';
+                      : flags.has('--select-return')
+                        ? 'select-return'
+                        : 'results';
   const pagesRaw = values.get('--pages') ?? (kind === 'socs-stability' ? String(STABILITY_PAGES) : '1');
   const pages = Number(pagesRaw);
   if (!/^\d+$/.test(pagesRaw) || pages < 1 || pages > MAX_PAGES)
     throw new RecordingRefused(`--pages must be 1 to ${MAX_PAGES}`);
-  if (kind === 'select-outbound' && pages > SELECT_MAX_PAGES)
-    throw new RecordingRefused(`--pages must be 1 to ${SELECT_MAX_PAGES} for --select-outbound`);
+  if ((kind === 'select-outbound' || kind === 'select-return') && pages > SELECT_MAX_PAGES)
+    throw new RecordingRefused(`--pages must be 1 to ${SELECT_MAX_PAGES} for --${kind}`);
   if (kind === 'consent-probe' || kind === 'consent-research' || kind === 'landing')
     return { kind, request: null, pages: 1, moves: [] };
   const origin = iataSchema.safeParse(values.get('--origin') ?? '');

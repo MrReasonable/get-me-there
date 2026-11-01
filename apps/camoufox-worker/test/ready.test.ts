@@ -152,3 +152,14 @@ describe('pollUntilSettled with changedFrom (the return view)', () => {
     });
   });
 });
+
+// why: Ian's ruling of 2026-11-01: the booking view settles once it has changed from the return view the return was
+// selected on and holds still; nothing about its content is required (its structure is what the research records)
+describe('isSettled on the booking view', () => {
+  const s = { resultsReturned: false, fetching: false, cheapestPriced: false, cheapestSelected: false };
+  it('needs only the change and no fetching', () => {
+    expect(isSettled({ resultLinks: 0 }, s, 'booking', true)).toBe(true);
+    expect(isSettled({ resultLinks: 3 }, s, 'booking', false)).toBe(false);
+    expect(isSettled({ resultLinks: 3 }, { ...s, fetching: true }, 'booking', true)).toBe(false);
+  });
+});
