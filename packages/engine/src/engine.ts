@@ -7,7 +7,7 @@ import {
 } from '@gmt/core';
 import { bootEngine } from './boot.js';
 import { checkBudget, spendOf } from './budgetCheck.js';
-import { budgetFitFor } from './budgetFit.js';
+import { budgetFitFor, type ScheduleLoads, withScheduleLoads } from './budgetFit.js';
 import { childCapPreview } from './child.js';
 import { runConsentNoticeSafely } from './consentNotice.js';
 import { buildContext, type EngineContext } from './context.js';
@@ -108,6 +108,9 @@ export function createEngine(deps: EngineDeps, options: EngineOptions = {}): Eng
   const ctx = buildContext(deps, options);
   // why: the plan each estimate made, by the estimate object itself, for estimateAsk (collected with the estimate)
   const memo = new WeakMap<Estimate, PlanMemo>();
+  // why: the other schedules' monthly loads an estimate read for its reservations, so its estimateAsk (the same route,
+  // the same moment) sets the same reservations aside without planning every other schedule again
+  const loadsOf = new WeakMap<Estimate, ScheduleLoads>();
   const orch = createOrchestrator(ctx);
   // why: revision 55 §8.1 — one on-demand flight read at a time, through the context's one browser lease
   const flights = createFlightReader(ctx);
@@ -177,15 +180,25 @@ export function createEngine(deps: EngineDeps, options: EngineOptions = {}): Eng
       // why: ruling 9 — the save-time estimate is the worst case without reuse; confirmationOf(it), every line
       // included, is what setConfirmed records (cost M-2)
       const { def } = asDefinition(ctx, input);
-      const b = buildSnapshot(ctx, def, 'manual', today);
-      const plans = new Map<ProviderId, readonly PlannedTile[]>();
-      const est = estimateStart(ctx, b.snapshot, b.cells, null, plans);
-      // why: cost-r1-014 — the form shows beforehand which provider the caps would leave out
-      const check = checkBudget(ctx, spendOf(est), b.snapshot.budget, null, 'id' in input ? input.id : null);
-      const out = withBlocked(est, check.blockedBy);
-      // why: estimateAsk reads the date pairs from this snapshot and these tiles, so the route plans once
-      memo.set(out, { snapshot: b.snapshot, cells: b.cells, plans });
-      return out;
+      const loads: ScheduleLoads = new Map();
+      return withScheduleLoads(ctx, loads, () => {
+        const b = buildSnapshot(ctx, def, 'manual', today);
+        const plans = new Map<ProviderId, readonly PlannedTile[]>();
+        const est = estimateStart(ctx, b.snapshot, b.cells, null, plans);
+        // why: cost-r1-014 — the form shows beforehand which provider the caps would leave out
+        const check = checkBudget(
+          ctx,
+          spendOf(est),
+          b.snapshot.budget,
+          null,
+          'id' in input ? input.id : null,
+        );
+        const out = withBlocked(est, check.blockedBy);
+        // why: estimateAsk reads the date pairs from this snapshot and these tiles, so the route plans once
+        memo.set(out, { snapshot: b.snapshot, cells: b.cells, plans });
+        loadsOf.set(out, loads);
+        return out;
+      });
     },
     estimateAsk: (input, today, est) => {
       // why: a saved definition's reusable prices are not asked again (spec §8.1 rev 55); the estimate itself stays the
@@ -196,11 +209,11 @@ export function createEngine(deps: EngineDeps, options: EngineOptions = {}): Eng
       const blocked = new Set(
         est.perProvider.filter((p) => p.blocked !== null).map((p) => lineKey(p.stage, p.providerId)),
       );
-      return {
+      return withScheduleLoads(ctx, loadsOf.get(est) ?? new Map(), () => ({
         ...askedPairs(ctx, m.snapshot, m.cells, definitionId, blocked, m.plans),
         billedCalls: billedCallsOf(ctx, est, definitionId),
         monthlyPages: monthlyPagesOf(ctx, est, definitionId),
-      };
+      }));
     },
     readFlightList: (id, pair) => flights.read(id, pair),
     flightReadInFlight: () => flights.inFlight(),
@@ -211,7 +224,7 @@ export function createEngine(deps: EngineDeps, options: EngineOptions = {}): Eng
     },
     budgetFit: (input) => {
       const { def, definitionId } = asDefinition(ctx, input);
-      return budgetFitFor(ctx, def, definitionId);
+      return withScheduleLoads(ctx, new Map(), () => budgetFitFor(ctx, def, definitionId));
     },
     coverageCheck: (req) => coverageCheckFor(ctx, req),
     scheduler: {

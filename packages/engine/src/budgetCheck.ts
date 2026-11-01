@@ -1,5 +1,5 @@
 import type { BudgetScopeKind, ExecutionBudget, ProviderId, Stage, Usage } from '@gmt/core';
-import { monthlyLoad, otherSchedules, scheduleLoad } from './budgetFit.js';
+import { otherSchedules, scheduleLoad, storedScheduleLoad, withScheduleLoads } from './budgetFit.js';
 import type { EngineContext } from './context.js';
 import { type LineKey, lineKey } from './lines.js';
 import { countFirings } from './scheduler/parseCron.js';
@@ -93,7 +93,7 @@ export function reservedForSchedules(
       new Date(Date.parse(windowEnd) - 1),
     );
     if (firings === 0) continue;
-    const m = monthlyLoad(ctx, d);
+    const m = storedScheduleLoad(ctx, d);
     reserved += scheduleLoad(ctx, m.perRun, m.snapshot, firings, hours).get(providerId)?.calls ?? 0;
   }
   return Math.ceil(reserved);
@@ -190,19 +190,22 @@ export function checkBudget(
       lines,
     );
   }
-  for (const id of ids(spend)) {
-    const { kind, usage: u, reserved } = providerWindow(ctx, id, definitionId);
-    const lines = spend.filter((s) => s.providerId === id);
-    check(
-      kind,
-      id,
-      u.cap,
-      u.calls,
-      reserved,
-      total(lines, (s) => s.calls),
-      lines,
-    );
-  }
+  // why: one read of each other schedule's load for every provider window of this check (storedScheduleLoad's memo)
+  withScheduleLoads(ctx, new Map(), () => {
+    for (const id of ids(spend)) {
+      const { kind, usage: u, reserved } = providerWindow(ctx, id, definitionId);
+      const lines = spend.filter((s) => s.providerId === id);
+      check(
+        kind,
+        id,
+        u.cap,
+        u.calls,
+        reserved,
+        total(lines, (s) => s.calls),
+        lines,
+      );
+    }
+  });
   const g = ctx.budget.usage({ kind: 'global-month' });
   check(
     'global-month',

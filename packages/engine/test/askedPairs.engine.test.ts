@@ -1,7 +1,7 @@
 // Task 20.4 fix round 1: `estimateAsk` through a real engine (createEngine over the harness deps), the cap the guard
 // reserves for other schedules, a date pair that lands in no bucket, and one plan for the estimate and its date pairs.
 import { asIsoDate } from '@gmt/core';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createEngine } from '../src/engine.js';
 import { askedPairs, billedCallsOf, monthlyPagesOf } from '../src/estimate.js';
 import { lineKey } from '../src/lines.js';
@@ -85,6 +85,40 @@ describe('the pages a month has left, less what other schedules reserve (ruling 
       planned: 100,
       left: 1500 - 200,
     });
+  });
+});
+
+describe('one read of each other schedule per engine call (ruling 5 reservations, memoised)', () => {
+  it('an estimate and its date-pair ask plan the other weekly search once, however many cap windows ask', () => {
+    const camoufox = stubCamoufox({ cells: 1 });
+    const e = engineWith([camoufox], { monthlyCap: 1500, scheduleCron: '0 5 * * 1' });
+    const def = widen(e);
+    // why: the other search's own window, so its plans are told apart from this search's by their first departure day
+    const OTHER_FROM = asIsoDate('2026-12-07');
+    e.ctx.repos.definitions.create({
+      ...baseDefinition(),
+      providers: { discovery: ['camoufox'], verification: [], discoveryRefreshHours: { camoufox: 168 } },
+      window: { kind: 'absolute', from: OTHER_FROM, to: asIsoDate('2026-12-20') },
+      minNights: 10,
+      maxNights: 12,
+      scheduleCron: '0 5 * * 1',
+      enabled: true,
+    });
+    const discovery = camoufox.discovery;
+    if (discovery === undefined) throw new Error('the camoufox stub has no discovery');
+    const plan = vi.spyOn(discovery, 'plan');
+    const otherPlans = () => plan.mock.calls.filter(([q]) => q.departureFrom === OTHER_FROM).length;
+    const engine = createEngine(e.deps);
+    const est = engine.estimate(def, TODAY);
+    // why: the other search names one airport pair (LHR → JFK), so one load of it is one plan call
+    expect(otherPlans()).toBe(1);
+    const ask = engine.estimateAsk(def, TODAY, est);
+    // its pages-left figure set the reservation aside (1,500 less the other's weekly pages) from the same one load
+    expect(ask.monthlyPages?.left).toBeLessThan(1500);
+    expect(otherPlans()).toBe(1);
+    // a later estimate is another engine call: the load is read afresh, never carried over
+    engine.estimate(def, TODAY);
+    expect(otherPlans()).toBe(2);
   });
 });
 
@@ -200,8 +234,9 @@ describe('the small space, read back through a real engine', () => {
     const ask = engine.estimateAsk(def, TODAY, est);
     expect(ask.datePairs).toBe(5);
     // why: the plan is made over the cells not reused; the estimate's own plan (every cell) must not stand in for it
-    expect(ask.datePairsCovered + ask.datePairsPartly + ask.datePairsReused).toBe(5);
-    expect(ask.datePairsCovered).toBe(0);
+    // why: each date pair is partly asked: its LGW cells are new, its LHR cells reused; an all-reused answer would show
+    // unsearched cells as already searched
+    expect(ask).toMatchObject({ datePairsCovered: 0, datePairsPartly: 5, datePairsReused: 0 });
   });
 
   it('the cells’ order does not matter: list mode plans the same 100 cells whatever order they are given', () => {

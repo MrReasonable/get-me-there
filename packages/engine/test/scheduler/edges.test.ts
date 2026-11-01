@@ -7,6 +7,7 @@ import {
   type ExecutionStatus,
   ProviderError,
   type SearchDefinition,
+  stopText,
 } from '@gmt/core';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildContext } from '../../src/context.js';
@@ -66,7 +67,15 @@ function world() {
 
 describe('the start side of the catch-up (catchUpStart.ts)', () => {
   it("a catch-up its firing replaces reads the firing's supersede, worded once by core", () => {
-    expect(SUPERSEDED_BY_FIRING).toBe('Replaced by a scheduled run.');
+    // why: read from core's own wording, so the test fails if core's sentence changes (it compared a constant with itself)
+    for (const facts of [
+      { tz: 'Europe/London', mode: 'container', scheduled: true },
+      { tz: 'Europe/London', mode: 'native', scheduled: false },
+    ] as const)
+      expect(stopText({ kind: 'superseded', by: 'schedule' }, facts)).toEqual({
+        sentence: SUPERSEDED_BY_FIRING,
+        fix: null,
+      });
   });
 
   it('a catch-up plans without its browser provider; any other start plans its snapshot as it is', () => {

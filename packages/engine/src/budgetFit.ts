@@ -89,6 +89,44 @@ export function monthlyLoad(ctx: EngineContext, def: SearchDefinition): MonthlyL
   };
 }
 
+/** Stored schedules' monthly loads by definition id and `updatedAt`, read once within one engine call (below). */
+export type ScheduleLoads = Map<string, MonthlyLoad>;
+
+// why: one engine call (an estimate with its date-pair ask, a budget fit, a pre-start check) reads every other schedule's
+// load once, not once per provider window that asks (CodeRabbit finding: each read re-planned every cell of each other
+// schedule). Scoped to the synchronous call that sets it, so no load outlives the call that read it.
+const activeLoads = new WeakMap<EngineContext, ScheduleLoads>();
+
+/**
+ * Runs `fn` with `loads` as the memo of stored schedules' monthly loads (`storedScheduleLoad`); inside a call that has
+ * one already, the outer memo stands. `fn` is synchronous: an awaited continuation runs after the memo is cleared and
+ * simply reads each load again.
+ */
+export function withScheduleLoads<T>(ctx: EngineContext, loads: ScheduleLoads, fn: () => T): T {
+  if (activeLoads.has(ctx)) return fn();
+  activeLoads.set(ctx, loads);
+  try {
+    return fn();
+  } finally {
+    activeLoads.delete(ctx);
+  }
+}
+
+/**
+ * A stored schedule's monthly load (`monthlyLoad`), from the active memo when this engine call already read it. Keyed
+ * by id and `updatedAt`, so a draft over a saved id (an edited search's estimate) is never served the stored one's load;
+ * only definitions read from the repository come here.
+ */
+export function storedScheduleLoad(ctx: EngineContext, def: SearchDefinition): MonthlyLoad {
+  const memo = activeLoads.get(ctx);
+  const key = `${def.id}|${def.updatedAt}`;
+  const hit = memo?.get(key);
+  if (hit !== undefined) return hit;
+  const load = monthlyLoad(ctx, def);
+  memo?.set(key, load);
+  return load;
+}
+
 /** The other enabled, scheduled, live definitions (ruling 5: they share the provider-month and global caps). */
 export function otherSchedules(ctx: EngineContext, definitionId: string | null): SearchDefinition[] {
   return ctx.repos.definitions.list().filter((d) => d.id !== definitionId && isScheduled(d));
@@ -107,7 +145,7 @@ export function budgetFitFor(
   definitionId: string | null,
 ): BudgetFit {
   const own = monthlyLoad(ctx, def);
-  const others = otherSchedules(ctx, definitionId).map((d) => monthlyLoad(ctx, d));
+  const others = otherSchedules(ctx, definitionId).map((d) => storedScheduleLoad(ctx, d));
   const billed = own.perRun.perProvider.filter((p) => ctx.limitsOf(p.providerId).billed);
   const free = own.perRun.perProvider.filter((p) => !ctx.limitsOf(p.providerId).billed);
   const sum = (xs: Estimate['perProvider'], f: (p: Estimate['perProvider'][number]) => number) =>
