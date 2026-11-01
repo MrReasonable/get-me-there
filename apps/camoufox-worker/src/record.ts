@@ -152,6 +152,14 @@ export async function record(ctx: EntryContext, cfg: WorkerConfig, deps: RecordD
     ctx.err(e instanceof Error ? e.message : String(e));
     return EX_CONFIG;
   }
+  // why: WP21 Task 21.0 review: the kind records the sequence the page session serves; on an entry whose session also
+  // clicks View more (VIEW_MORE_ADDS_CHEAPER) that sequence is one this kind does not run, so it is refused, not recorded
+  if (args.kind === 'select-outbound' && deps.selectors.VIEW_MORE_ADDS_CHEAPER) {
+    ctx.err(
+      'record --select-outbound records the served sequence without View more; this entry sets VIEW_MORE_ADDS_CHEAPER, so it is refused',
+    );
+    return EX_CONFIG;
+  }
   let lock: { release(): void };
   try {
     lock = acquireLock(ctx.dataDir, {
@@ -209,7 +217,9 @@ export async function record(ctx: EntryContext, cfg: WorkerConfig, deps: RecordD
     }
     const secrets = [cfg.key.reveal(), capture.value];
     const profile = profileDir(ctx.dataDir);
-    let context: ContextLike | null = await deps.launch(profile);
+    // why: WP21 Task 21.0 review: a select-outbound page launches only once its whole reservation is admitted, so a
+    // refusal for the month's headroom launches nothing; every other kind launches first, as before
+    let context: ContextLike | null = args.kind === 'select-outbound' ? null : await deps.launch(profile);
     const readBacks: ReadBack[] = [];
     try {
       for (let i = 0; i < args.pages; i++) {
@@ -223,15 +233,8 @@ export async function record(ctx: EntryContext, cfg: WorkerConfig, deps: RecordD
               : pageUrl({ ...req, gl: cfg.pointOfSale });
         if (url === null) throw new RecordingRefused('no request');
         const select = args.kind === 'select-outbound';
-        // why: WP21 Task 21.0: a select-outbound page needs its whole worst case; with fewer pages left it is refused
-        // before anything loads (the admission would reserve one, and the research would be cut short)
-        if (select) {
-          const fits = monthly.check(0, RECORD_SELECT_PAGES);
-          if (fits.kind === 'ok' && fits.pagesReserved < RECORD_SELECT_PAGES)
-            throw new RecordingRefused(
-              `the worker's monthly page cap leaves fewer than the ${RECORD_SELECT_PAGES} pages --select-outbound may load`,
-            );
-        }
+        // why: WP21 Task 21.0 review: a select-outbound page needs its whole worst case; claim refuses one that would
+        // reserve less before the pacer or the counts are touched, and the admission it returns is the one checked here
         const admitted: Extract<Admission, { kind: 'ok' }> = await claim(
           pacer,
           monthly,
@@ -239,8 +242,24 @@ export async function record(ctx: EntryContext, cfg: WorkerConfig, deps: RecordD
           deps,
           ctx,
           select ? RECORD_SELECT_PAGES : 1,
+          select,
         );
-        const c: ContextLike = context ?? (await deps.launch(profile));
+        if (select && admitted.pagesReserved !== RECORD_SELECT_PAGES) {
+          monthly.settle(admitted.reserved, admitted.scrollAllowance, 0, admitted.pagesReserved, 0);
+          pacer.release();
+          throw new RecordingRefused('the month admitted fewer pages than --select-outbound may load');
+        }
+        let c: ContextLike;
+        try {
+          c = context ?? (await deps.launch(profile));
+        } catch (e) {
+          // why: nothing loaded: the select-outbound reservation is given back whole and the pacer released
+          if (select) {
+            monthly.settle(admitted.reserved, admitted.scrollAllowance, 0, admitted.pagesReserved, 0);
+            pacer.release();
+          }
+          throw e;
+        }
         context = c;
         // why: ruling of 2026-10-18: the first view has the page timeout; the Cheapest flow the same again from its click,
         // within twice that from the start (budget.next in interact); `budget.d` is the current deadline
@@ -248,7 +267,8 @@ export async function record(ctx: EntryContext, cfg: WorkerConfig, deps: RecordD
         const pageMs = cfg.pageTimeoutSeconds * 1000;
         // why: WP15 ruling 10: a grid page's overall cap is the first view's budget plus, per move, the spacing and the
         // move's own budget
-        // why: WP21 Task 21.0: a select-outbound page's cap is five page timeouts and three spacings (recordSelect.ts)
+        // why: WP21 Task 21.0 (ruling D7): a select-outbound page's cap is six page timeouts and three spacings
+        // (recordSelect.ts)
         const budget = pageBudget(
           deps.timers,
           pageMs,
@@ -526,16 +546,15 @@ async function interact(
   deps: RecordDeps,
   kind: RecordingKind,
   url: string,
-  /**
-   * A `--grid` page's moves, and its query's departure (each line date's year; null for a kind with no request); the
-   * request and the pacer for `--select-outbound` (WP21 Task 21.0).
-   */
-  grid: {
+  /** What the kinds beyond one page read need (named for what it carries after the WP21 Task 21.0 review). */
+  kindArgs: {
+    /** A `--grid` page's moves. */
     moves: readonly GridDirection[];
+    /** The query's departure (each grid line date's year; null for a kind with no request). */
     anchor: IsoDate | null;
+    /** WP21 Task 21.0: `--select-outbound`'s request, the shared pacer, and each step's own page timeout in ms. */
     request: RecordArgs['request'];
     pacer: Pacer;
-    /** CAMOUFOX_PAGE_TIMEOUT_SECONDS in ms: each select-outbound step's own page timeout. */
     pageMs: number;
   },
 ): Promise<Outcome> {
@@ -578,7 +597,8 @@ async function interact(
   stepMs.goto = deps.timers.now() - t0;
   if (kind === 'landing') return await readLanding(driver, page, guard, d, deps, stepMs, t0, stop);
   if (kind === 'select-outbound') {
-    if (grid.request === null) throw new RecordingRefused('--select-outbound needs --depart and --return');
+    if (kindArgs.request === null)
+      throw new RecordingRefused('--select-outbound needs --depart and --return');
     return await recordSelectOutbound({
       driver,
       page,
@@ -589,10 +609,10 @@ async function interact(
       // why: the recorder reads the view after a selection with the return-view hypothesis on (as --no-flights reads
       // with its line on), so the recording shows it before RETURN_SELECT_VERIFIED is set for this entry
       returnsS: { ...deps.selectors, RETURN_SELECT_VERIFIED: true },
-      pacer: grid.pacer,
-      pageMs: grid.pageMs,
+      pacer: kindArgs.pacer,
+      pageMs: kindArgs.pageMs,
       url,
-      request: grid.request,
+      request: kindArgs.request,
       stepMs,
       clicked,
       stop,
@@ -652,7 +672,7 @@ async function interact(
       classifyAfterFailedStep: afterFailedStep,
       settled,
     };
-    return kind === 'grid' ? await recordGrid(c, shown, grid) : await recordGraph(c, shown);
+    return kind === 'grid' ? await recordGrid(c, shown, kindArgs) : await recordGraph(c, shown);
   }
   // why: rule 5: only --cheapest and --view-more click these controls before their flags are set.
   if (kind === 'cheapest' || kind === 'view-more') {

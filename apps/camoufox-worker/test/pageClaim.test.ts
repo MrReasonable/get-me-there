@@ -1,6 +1,6 @@
 // The recorder's page claim (pageClaim.ts) with a page count (WP21 Task 21.0): the caps, the shared pacer, then the
 // reservation of every page the recording may load, returned so the recorder can settle to what it loaded.
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { asIsoDateTime, fixedClock } from '@gmt/core';
 import { beforeEach, describe, expect, it } from 'vitest';
@@ -49,5 +49,27 @@ describe('claim(…, pages) (WP21 Task 21.0)', () => {
     });
     const pacer = new Pacer({ dir, minSpacingSeconds: 30, clock: timers.clock });
     expect(await claim(pacer, monthly, 0, { timers }, ctx(dir))).toMatchObject({ pagesReserved: 1 });
+  });
+});
+
+describe('claim(…, pages, whole) (WP21 Task 21.0 review)', () => {
+  it('refuses before the pacer or the counts are touched when the whole worst case does not fit', async () => {
+    const dir = tmpDir();
+    const timers = fakeTimers(fixedClock(T0));
+    // why: a cap of 3 on a new install leaves 3 pages: no counts file is read, so no mode is involved
+    const monthly = new MonthlyCounter({
+      dir,
+      caps: { pages: 3, scrolls: 6000, billingDay: 1 },
+      clock: timers.clock,
+    });
+    const pacer = new Pacer({ dir, minSpacingSeconds: 30, clock: timers.clock });
+    await expect(claim(pacer, monthly, 0, { timers }, ctx(dir), 4, true)).rejects.toThrow(
+      "the worker's monthly page cap leaves fewer than the 4 pages this recording may load",
+    );
+    expect(pacer.isBusy()).toBe(false);
+    expect(existsSync(join(dir, MONTHLY_FILE))).toBe(false);
+    expect(existsSync(join(dir, 'pacer.json'))).toBe(false);
+    // why: without `whole` the same admission reserves the one page, as the session's headroom rule does
+    expect(await claim(pacer, monthly, 0, { timers }, ctx(dir), 4)).toMatchObject({ pagesReserved: 1 });
   });
 });

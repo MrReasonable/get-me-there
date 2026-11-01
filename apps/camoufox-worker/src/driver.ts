@@ -174,20 +174,6 @@ export interface Driver {
    * clicked.
    */
   clickOutbound(name: string, d: Deadline, o: StepOptions): Promise<string[]>;
-  /**
-   * WP21 Task 21.0, the recorder's research reads: every link name in `main`, every button and every tab name on the
-   * page, each with its `https://…` runs replaced by `<url>`, at most NAMES_MAX of each.
-   */
-  linkNames(d: Deadline): Promise<string[]>;
-  buttonNames(d: Deadline): Promise<string[]>;
-  tabNames(d: Deadline): Promise<string[]>;
-}
-
-/** The most names `linkNames`, `buttonNames` and `tabNames` return (WP21 Task 21.0). */
-export const NAMES_MAX = 200;
-/** A name as the research reads it: every `https://…` run replaced by `<url>` (no page URL is ever stored). */
-function urlStripped(name: string): string {
-  return name.replace(/https?:\/\/\S+/g, '<url>');
 }
 
 /** How a timed step runs: the timers, the debug log, and the page's start (for elapsed times). */
@@ -377,14 +363,6 @@ export function createDriver(page: PageLike, guard: GuardState, S: Selectors = S
     return names;
   }
 
-  /** Up to NAMES_MAX names of the locator's matches, URL-stripped; an unreadable name is empty. */
-  async function namesOf(l: LocatorLike, d: Deadline): Promise<string[]> {
-    const out: string[] = [];
-    for (let i = 0, n = Math.min(NAMES_MAX, await countOf(l, d)); i < n; i++)
-      out.push(urlStripped((await nameOf(l.nth(i), d)) ?? ''));
-    return out;
-  }
-
   return {
     async headingNames(d) {
       const h = page.getByRole('heading');
@@ -516,10 +494,6 @@ export function createDriver(page: PageLike, guard: GuardState, S: Selectors = S
       };
     },
 
-    linkNames: (d) => namesOf(page.getByRole('main').getByRole('link'), d),
-    buttonNames: (d) => namesOf(page.getByRole('button'), d),
-    tabNames: (d) => namesOf(page.getByRole('tab'), d),
-
     async clickOutbound(name, d, o) {
       const fail = (reason: 'not-found' | 'ambiguous'): StepFailed =>
         new StepFailed('find-outbound', reason, 'select-outbound');
@@ -600,7 +574,7 @@ async function firstText(l: LocatorLike, d: Deadline): Promise<string | null> {
 
 /**
  * The consent probe's page (Task 14.2; SEC-R2-003): the driver without `click`, `clickCheapest` or (WP21 Task 21.0)
- * `clickOutbound`, so a click on a consent page does not compile; it has the read methods only. Imported only by
+ * `clickOutbound`, so a click on a consent page does not compile. Imported only by
  * record.ts (rules.test.ts pins that).
  */
 export type ProbePage = Omit<Driver, 'click' | 'clickCheapest' | 'clickOutbound'>;
@@ -612,9 +586,6 @@ export function probePage(d: Driver): ProbePage {
     resultNames: d.resultNames,
     listFacts: d.listFacts,
     formFacts: d.formFacts,
-    linkNames: d.linkNames,
-    buttonNames: d.buttonNames,
-    tabNames: d.tabNames,
   };
 }
 

@@ -20,6 +20,11 @@ export async function claim(
   ctx: EntryContext,
   /** WP21 Task 21.0: the documents the recording may load, reserved together (one for every other kind). */
   pages = 1,
+  /**
+   * WP21 Task 21.0 review: only the whole of `pages` will do; an admission that would reserve fewer is refused before
+   * the pacer or the counts are touched, so the admission returned always holds all of them.
+   */
+  whole = false,
 ): Promise<Extract<Admission, { kind: 'ok' }>> {
   const admissible = (): Extract<Admission, { kind: 'ok' }> => {
     const a = monthly.check(scrolls, pages);
@@ -29,6 +34,10 @@ export async function claim(
       );
     if (a.kind === 'monthly-cap')
       throw new RecordingRefused(`the worker's monthly page cap (${a.cap}) is reached until ${a.windowEnd}`);
+    if (whole && a.pagesReserved < pages)
+      throw new RecordingRefused(
+        `the worker's monthly page cap leaves fewer than the ${pages} pages this recording may load`,
+      );
     if (a.scrollAllowance < scrolls)
       throw new RecordingRefused(
         `the worker's monthly scroll cap leaves ${a.scrollAllowance} of the ${scrolls} moves`,

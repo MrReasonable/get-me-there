@@ -308,6 +308,8 @@ describe('worker rules: source facts through the compiler API', () => {
   it('the select-outbound recorder is reached only from record.ts, and clickOutbound only from it', () => {
     expect(moduleImporters('./recordSelect.js')).toEqual(['record.ts']);
     expect([...new Set(callsTo('clickOutbound').map((c) => c.f))]).toEqual(['recordSelect.ts']);
+    // why: the research reads (every link, button and tab name) are the recorder's alone, in their own module
+    expect(moduleImporters('./researchNames.js')).toEqual(['recordSelect.ts']);
   });
   it('no route.continue with a URL option', () => {
     const bad = callsTo('continue').filter((c) =>

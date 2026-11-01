@@ -2,10 +2,11 @@
 // form checked, the Cheapest flow), the first pick's selection, the list page loaded again, the served sequence again
 // and a second pick's selection, each document-loading step spaced by the pacer's re-claim, the month reserved for the
 // worst case and settled to the documents loaded. Synthetic trees only; no value here comes from a recording.
-import { readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { type BlockedPage, CAMOUFOX_BUILDS } from '@gmt/core';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import * as budget from '../src/budget.js';
 import { loadWorkerConfig } from '../src/config.js';
 import { CooldownStore } from '../src/cooldown.js';
 import type { FrameLike, RequestLike } from '../src/driver.js';
@@ -30,6 +31,13 @@ import {
 import { memoryLog } from './support/log.js';
 import { SYNTHETIC_REJECT } from './support/socsValues.js';
 import { fakeTimers } from './support/timers.js';
+
+// why: the cap's wiring through record() into pageBudget is observed on the real function (a pass-through spy)
+vi.mock('../src/budget.js', async (importOriginal) => {
+  const real = await importOriginal<typeof import('../src/budget.js')>();
+  return { ...real, pageBudget: vi.fn(real.pageBudget) };
+});
+
 import { tmpDir } from './support/tmp.js';
 
 const KEY = 'synthetic-worker-key-0123456789abcdef';
@@ -149,6 +157,24 @@ const DEFAULT: Script = {
         ? [returnTree(RET2)]
         : null,
 };
+
+/** The deps with each new page shaped further, after the script's own shaping. */
+function withPage(t: ReturnType<typeof setup>, shape: (pg: FakePage) => void): RecordDeps {
+  return {
+    ...t.deps,
+    launch: async (p) => {
+      const c = await t.deps.launch(p);
+      if (c instanceof FakeContext) {
+        const first = c.onNewPage;
+        c.onNewPage = (pg) => {
+          first(pg);
+          shape(pg);
+        };
+      }
+      return c;
+    },
+  };
+}
 
 function setup(script: Script = DEFAULT) {
   const dataDir = tmpDir();
@@ -347,9 +373,11 @@ describe('record --select-outbound: the served sequence, two selections and a fr
     });
     expect(f.socsReadBack).toBe('same');
   });
-  it('the page budget is 5 page timeouts and 3 spacings: 540,000 ms at the defaults', () => {
-    expect(selectOutboundCapMs(90_000, 30_000)).toBe(540_000);
-    expect(selectOutboundCapMs(180_000, 0)).toBe(900_000);
+  // why: ruling D7: six page periods (the first view, its Cheapest flow, a selection, the reload's view, its Cheapest
+  // flow, a selection) and three spacings
+  it('the page budget is 6 page timeouts and 3 spacings: 630,000 ms at the defaults', () => {
+    expect(selectOutboundCapMs(90_000, 30_000)).toBe(630_000);
+    expect(selectOutboundCapMs(180_000, 0)).toBe(1_080_000);
     expect(cfg.pageTimeoutSeconds * 1000).toBe(90_000);
     expect(cfg.minSpacingSeconds * 1000).toBe(30_000);
   });
@@ -472,7 +500,7 @@ describe('record --select-outbound: steps that do not complete end the page plai
     expect(t.contexts[0]?.pages[0]?.calls.gotos).toHaveLength(1);
     expect(t.cooldown()).toBeNull();
     // why: the page stays within its budget (the step's own deadline, then the bounded last read)
-    expect(t.timers.now() - Date.parse('2026-10-18T05:00:00.000Z')).toBeLessThanOrEqual(540_000 + 10_000);
+    expect(t.timers.now() - Date.parse('2026-10-18T05:00:00.000Z')).toBeLessThanOrEqual(630_000 + 10_000);
   });
   it('a re-claim that runs out of its own budget records waitTimedOut and ends plainly (never not-ready)', async () => {
     const t = setup({
@@ -699,5 +727,134 @@ describe('record --select-outbound: the served sequence’s other ends, and the 
     expect(t.facts().steps).toEqual([
       { step: 'first-selection', selectFailed: 'click-outbound:timed-out', waitMs: 24_000 },
     ]);
+  });
+});
+
+describe('record --select-outbound: review fixes (WP21 Task 21.0)', () => {
+  it('passes the cap of 6 page timeouts and 3 spacings to the page budget (630,000 ms at the defaults)', async () => {
+    const t = setup();
+    vi.mocked(budget.pageBudget).mockClear();
+    expect(await record(t.ctx(SELECT), cfg, t.deps)).toBe(0);
+    expect(vi.mocked(budget.pageBudget).mock.calls.map((c) => [c[1], c[3]])).toEqual([[90_000, 630_000]]);
+    // why: every other kind keeps its own cap (twice the page timeout for a results page)
+    vi.mocked(budget.pageBudget).mockClear();
+    const r = setup({});
+    expect(await record(r.ctx(Q), cfg, r.deps)).toBe(0);
+    expect(vi.mocked(budget.pageBudget).mock.calls.map((c) => [c[1], c[3]])).toEqual([[90_000, 180_000]]);
+  });
+  it('with 3 pages left it is refused before anything: no launch, no load, no pacer start, the counts unchanged', async () => {
+    const t = setup();
+    const counts = JSON.stringify({
+      windowStart: '2026-10-01T00:00:00.000Z',
+      windowEnd: '2026-11-01T00:00:00.000Z',
+      pages: 1497,
+      scrolls: 0,
+    });
+    writeFileSync(join(t.dataDir, 'monthly.json'), counts, { mode: 0o600 });
+    expect(await record(t.ctx(SELECT), cfg, t.deps)).toBe(EX_CONFIG);
+    expect(t.err.join()).toContain(
+      "the worker's monthly page cap leaves fewer than the 4 pages this recording may load",
+    );
+    expect(t.contexts).toEqual([]);
+    expect(t.seen).toEqual([]);
+    expect(existsSync(join(t.dataDir, 'pacer.json'))).toBe(false);
+    expect(readFileSync(join(t.dataDir, 'monthly.json'), 'utf8')).toBe(counts);
+  });
+  it('is refused on an entry whose View more click the session makes, before anything loads', async () => {
+    const t = setup();
+    const deps = { ...t.deps, selectors: { ...SELECTORS, VIEW_MORE_ADDS_CHEAPER: true } };
+    expect(await record(t.ctx(SELECT), cfg, deps)).toBe(EX_CONFIG);
+    expect(t.err.join()).toContain('VIEW_MORE_ADDS_CHEAPER');
+    expect(t.contexts).toEqual([]);
+    expect(existsSync(join(t.dataDir, 'monthly.json'))).toBe(false);
+  });
+  it('a research read that overruns its own bound keeps a settled view settled', async () => {
+    // why: the return view's Best tab never answers a name read: only tabNames reads it, after the settle
+    const slowTab = () => {
+      const v = returnTree(RET1);
+      for (const c of descendants([v])) if (c.role === 'tab' && c.name === 'Best') c.hang = true;
+      return v;
+    };
+    const t = setup({
+      ...DEFAULT,
+      onLink: (name) => (name === P451 ? [slowTab()] : name === P478 ? [returnTree(RET2)] : null),
+    });
+    let tabsRead: () => void = () => undefined;
+    const reading = new Promise<void>((r) => {
+      tabsRead = r;
+    });
+    const deps = withPage(t, (pg) => {
+      const byRole = pg.getByRole.bind(pg);
+      pg.getByRole = (role, o) => {
+        const l = byRole(role, o);
+        // why: the research's tab-name read is the one unnamed tab query that reads each tab (readFacts only counts)
+        if (role === 'tab' && o === undefined) {
+          const nth = l.nth.bind(l);
+          l.nth = (i) => {
+            tabsRead();
+            return nth(i);
+          };
+        }
+        return l;
+      };
+    });
+    const run = record(t.ctx(SELECT), cfg, deps);
+    await reading;
+    t.timers.runOut();
+    expect(await run).toBe(0);
+    const first = t.facts().steps[0];
+    expect(first.after).toMatchObject({ settled: true, readsOverran: true, tabNames: null, names: RET1 });
+    expect(t.facts().steps.map((s: { step: string }) => s.step)).toEqual([
+      'first-selection',
+      'reload',
+      'second-selection',
+    ]);
+  });
+  it('a pre-click read that never answers leaves urlChanged and changedFromPreClick unknown, never true', async () => {
+    // why: a total-form link only the return pattern reads: its count hangs on the pre-click read alone
+    const TOTAL = returnOptionName({ pounds: 999 });
+    const hanging: FakeNode[] = [];
+    const withTotal = () => {
+      const v = cheapestTree();
+      const link = n('link', TOTAL, [], { countHang: true });
+      hanging.push(link);
+      for (const c of descendants([v]))
+        if (c.role === 'list') {
+          c.children = [...(c.children ?? []), n('listitem', '', [link])];
+          break;
+        }
+      return v;
+    };
+    const t = setup({ ...DEFAULT, onTab: () => [withTotal()] });
+    let preRead: () => void = () => undefined;
+    const reading = new Promise<void>((r) => {
+      preRead = r;
+    });
+    let reads = 0;
+    const deps = withPage(t, (pg) => {
+      const byRole = pg.getByRole.bind(pg);
+      pg.getByRole = (role, o) => {
+        const l = byRole(role, o);
+        if (role !== 'main') return l;
+        const inner = l.getByRole.bind(l);
+        l.getByRole = (r, oo) => {
+          if (oo?.name === SELECTORS.returns.resultLink) {
+            reads += 1;
+            if (reads === 1) preRead();
+            // why: the last read after the step's deadline answers
+            else for (const c of hanging) c.countHang = false;
+          }
+          return inner(r, oo);
+        };
+        return l;
+      };
+    });
+    const run = record(t.ctx(SELECT), cfg, deps);
+    await reading;
+    t.timers.runOut();
+    expect(await run).toBe(0);
+    const [first] = t.facts().steps;
+    expect(first.after).toMatchObject({ settled: false, urlChanged: null, changedFromPreClick: null });
+    expect(t.facts().clicked).toEqual(['tab:Cheapest']);
   });
 });

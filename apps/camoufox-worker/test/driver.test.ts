@@ -952,39 +952,6 @@ describe('the return view’s facts (WP21 Task 21.0)', () => {
     page.setTrees([resultsTree()]);
     expect((await driver.listFacts(d)).viewMore).toBe(true);
   });
-  it('linkNames lists every link name in main with each https://… run replaced by <url>, at most 200', async () => {
-    const many = Array.from({ length: 205 }, (_, i) => n('link', `Link ${i}`));
-    const { driver, d, page } = setup([
-      n('document', '', [
-        n('link', 'Outside main'),
-        n('main', '', [n('link', 'See https://www.example.test/a?b=c for more'), n('link', 'Plain')]),
-      ]),
-    ]);
-    expect(await driver.linkNames(d)).toEqual(['See <url> for more', 'Plain']);
-    page.setTrees([n('document', '', [n('main', '', many)])]);
-    const names = await driver.linkNames(d);
-    expect(names).toHaveLength(200);
-    expect(names[199]).toBe('Link 199');
-  });
-  it('buttonNames and tabNames have the same shape, over the whole page', async () => {
-    const { driver, d, page } = setup([
-      n('document', '', [
-        n('button', 'Close https://www.example.test/x'),
-        n('main', '', [n('button', 'Select')]),
-        n('tablist', '', [n('tab', 'Best'), n('tab', 'Cheapest from £1')]),
-      ]),
-    ]);
-    expect(await driver.buttonNames(d)).toEqual(['Close <url>', 'Select']);
-    expect(await driver.tabNames(d)).toEqual(['Best', 'Cheapest from £1']);
-    page.setTrees([
-      n(
-        'document',
-        '',
-        Array.from({ length: 201 }, (_, i) => n('tab', `T${i}`)),
-      ),
-    ]);
-    expect(await driver.tabNames(d)).toHaveLength(200);
-  });
 });
 
 describe('clickOutbound (WP21 Task 21.0)', () => {
@@ -1100,24 +1067,16 @@ describe('probePage and classifyAfterFailedStep (WP21 Task 21.0)', () => {
     expectTypeOf<ProbePage>().not.toHaveProperty('click');
     expectTypeOf<ProbePage>().not.toHaveProperty('clickCheapest');
     expectTypeOf<ProbePage>().not.toHaveProperty('clickOutbound');
-    expectTypeOf<ProbePage>().toHaveProperty('linkNames');
+    expectTypeOf<ProbePage>().toHaveProperty('listFacts');
+    // why: the research reads live in their own module (researchNames.ts), never on the served driver
+    expectTypeOf<Driver>().not.toHaveProperty('linkNames');
     const page = new FakePage(null);
     const p = probePage(createDriver(page, guard()));
     expect('clickOutbound' in p).toBe(false);
     expect('click' in p).toBe(false);
     expect('clickCheapest' in p).toBe(false);
     expect(Object.keys(p).sort()).toEqual(
-      [
-        'buttonNames',
-        'formFacts',
-        'goto',
-        'headingNames',
-        'linkNames',
-        'listFacts',
-        'readFacts',
-        'resultNames',
-        'tabNames',
-      ].sort(),
+      ['formFacts', 'goto', 'headingNames', 'listFacts', 'readFacts', 'resultNames'].sort(),
     );
   });
   const classifyOn = async (t: FakeNode, d?: (timers: ReturnType<typeof fakeTimers>) => void) => {

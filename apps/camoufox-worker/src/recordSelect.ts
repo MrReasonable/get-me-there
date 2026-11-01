@@ -37,20 +37,23 @@ import type { Pacer } from './pacer.js';
 import type { View } from './ready.js';
 import type { Outcome } from './recordDialogs.js';
 import { type StopFacts, stripQuery } from './recordWrite.js';
+import { buttonNames, linkNames, tabNames } from './researchNames.js';
 import type { Selectors } from './selectors.js';
 import { type Deadline, DeadlineExceeded, type Timers } from './timers.js';
 
 /**
- * The page's overall cap (the brief's §5 record.ts): five page timeouts (the first view, the Cheapest flow, a
- * selection, the reload's view, a selection) and three spacings (before each selection and the reload).
- * why: preflight D7: the reload's Cheapest flow is a sixth page timeout, so a slow page may reach the cap during the
- * second selection; that step then ends unsettled (recorded as such), which is a finding, never a failure.
+ * The page's overall cap (ruling D7): six page timeouts (the first view, its Cheapest flow, a selection, the reload's
+ * view, its Cheapest flow, a selection) and three spacings (before each selection and the reload), so every step can
+ * spend its own page timeout.
  */
 export function selectOutboundCapMs(pageTimeoutMs: number, spacingMs: number): number {
-  return 5 * pageTimeoutMs + 3 * spacingMs;
+  return 6 * pageTimeoutMs + 3 * spacingMs;
 }
 
-/** The bound on the one more read after a step's deadline (twice the recorder's finally bound, the --no-flights pattern). */
+/**
+ * The bound on the one more read after a step's deadline, and on a step's research reads after its settle (twice the
+ * recorder's finally bound, the --no-flights pattern).
+ */
 const LAST_READ_MS = 10_000;
 
 /** What the recorder needs of the page and its own stop handling. */
@@ -88,25 +91,34 @@ type StepName = 'first-selection' | 'reload' | 'second-selection';
 
 /** What a step showed once it settled, or (settled false) what one more read saw after its deadline. */
 interface After {
-  /** The view's URL without its query, and whether the full URL differs from the one before the step. */
+  /**
+   * The view's URL without its query, and whether the full URL differs from the one before the step (null when the
+   * view before the step could not be read: unknown, never a change).
+   */
   url: string;
-  urlChanged: boolean;
+  urlChanged: boolean | null;
   documentLoadsBefore: number;
   documentLoads: number;
-  /** R-settle's rule against the view before the step: another link signature, a return heading, or a further load. */
-  changedFromPreClick: boolean;
+  /**
+   * R-settle's rule against the view before the step: another link signature, a return heading, or a further load;
+   * null when the view before the step could not be read.
+   */
+  changedFromPreClick: boolean | null;
   classification: { kind: PageKind['kind']; rule: ClassifyRule };
   /** The reload's view: which view the served sequence read (absent after a selection). */
   view?: 'cheapest' | 'best-fallback' | 'best';
   page: PageFacts;
   settle: SettleFacts;
-  names: Array<string | null>;
-  list: ListFacts;
+  /** The research reads, each null when their bound ran out before it (`readsOverran`). */
+  names: Array<string | null> | null;
+  list: ListFacts | null;
   form: FormFacts;
-  linkNames: string[];
-  headings: string[];
-  buttonNames: string[];
-  tabNames: string[];
+  linkNames: string[] | null;
+  headings: string[] | null;
+  buttonNames: string[] | null;
+  tabNames: string[] | null;
+  /** The research reads ran past their own bound; `settled` still says how the step itself ended. */
+  readsOverran: boolean;
   /** From the click (or the goto) to the settle; the spacing wait is apart, in `waitMs`. */
   stepMs: number;
   waitMs: number;
@@ -125,11 +137,11 @@ interface StepRecord {
 
 type StepResult = { record: StepRecord; end: boolean } | { stop: Outcome };
 
-/** The view before a step, for R-settle's rule and the URL comparison. */
+/** The view before a step, for R-settle's rule and the URL comparison; url and signature null when it was not read. */
 interface Before {
-  url: string;
+  url: string | null;
   loads: number;
-  signature: string;
+  signature: string | null;
 }
 
 /** The served sequence's end: a stop, Google's no-flights line, or the view the session would read. */
@@ -232,17 +244,20 @@ async function served(c: SelectPage, d0: Deadline, cheapestDeadline: () => Deadl
   }
 }
 
-/** R-settle's rule, as pollUntilSettled applies it. */
-function changedOf(facts: StopFacts, before: Before, loads: number): boolean {
+/** R-settle's rule, as pollUntilSettled applies it; null when the view before the step was not read. */
+function changedOf(facts: StopFacts, before: Before, loads: number): boolean | null {
+  if (before.signature === null) return null;
   return (
     facts.settle.linkSignature !== before.signature || facts.page.text.returnHeading || loads > before.loads
   );
 }
 
-/** The step's after: the settled (or last read) facts, then every research read under `d`. */
+/**
+ * The step's after: the settled (or last read) facts, then every research read under a bound of its own, so a read
+ * that overruns never turns a settled step into an unsettled one (it is recorded as `readsOverran`).
+ */
 async function afterOf(
   c: SelectPage,
-  d: Deadline,
   o: {
     facts: StopFacts;
     before: Before;
@@ -254,24 +269,47 @@ async function afterOf(
     view?: After['view'];
   },
 ): Promise<After> {
-  const list = await c.driver.listFacts(d, o.listView);
+  // why: the step's facts are fixed before any research read, under a bound of the reads' own
+  const documentLoads = c.guard.documentLoads;
+  const h = c.deps.timers.deadline(LAST_READ_MS);
+  let list: ListFacts | null = null;
+  let form: FormFacts = null;
+  let links: string[] | null = null;
+  let headings: string[] | null = null;
+  let buttons: string[] | null = null;
+  let tabs: string[] | null = null;
+  let readsOverran = false;
+  try {
+    list = await c.driver.listFacts(h, o.listView);
+    form = await c.driver.formFacts(h);
+    links = await linkNames(c.page, h);
+    headings = await c.driver.headingNames(h);
+    buttons = await buttonNames(c.page, h);
+    tabs = await tabNames(c.page, h);
+  } catch (e) {
+    if (!(e instanceof DeadlineExceeded)) throw e;
+    readsOverran = true;
+  } finally {
+    h.clear();
+  }
   return {
     url: stripQuery(o.facts.page.url),
-    urlChanged: o.facts.page.url !== o.before.url,
+    urlChanged: o.before.url === null ? null : o.facts.page.url !== o.before.url,
     documentLoadsBefore: o.before.loads,
-    documentLoads: c.guard.documentLoads,
-    changedFromPreClick: changedOf(o.facts, o.before, c.guard.documentLoads),
+    documentLoads,
+    changedFromPreClick: changedOf(o.facts, o.before, documentLoads),
     classification: o.classification,
     ...(o.view === undefined ? {} : { view: o.view }),
     page: o.facts.page,
     settle: o.facts.settle,
-    names: list.names,
+    names: list?.names ?? null,
     list,
-    form: await c.driver.formFacts(d),
-    linkNames: await c.driver.linkNames(d),
-    headings: await c.driver.headingNames(d),
-    buttonNames: await c.driver.buttonNames(d),
-    tabNames: await c.driver.tabNames(d),
+    form,
+    linkNames: links,
+    headings,
+    buttonNames: buttons,
+    tabNames: tabs,
+    readsOverran,
     stepMs: o.stepMs,
     waitMs: o.waitMs,
     settled: o.settled,
@@ -313,7 +351,7 @@ async function unsettled(
     const k = classifyPageWithRule(read.page, view === 'returns' ? c.returnsS : c.deps.selectors, view);
     if (k.kind.kind === 'blocked' && k.kind.page !== 'unrecognised')
       return { stop: await c.stop(k.kind.page, k.rule, facts) };
-    const after = await afterOf(c, h, {
+    const after = await afterOf(c, {
       facts,
       before,
       classification: { kind: k.kind.kind, rule: k.rule },
@@ -338,7 +376,8 @@ async function selection(c: SelectPage, step: StepName, pick: OutboundPick): Pro
   const waitMs = spaced.waitMs;
   if (spaced.timedOut) return { record: { step, waitTimedOut: true, waitMs }, end: true };
   const d = c.budget.nextFor(c.pageMs);
-  let before: Before = { url: '', loads: c.guard.documentLoads, signature: '' };
+  // why: until the pre-click read answers, the view before the step is unknown (never a change by default)
+  let before: Before = { url: null, loads: c.guard.documentLoads, signature: null };
   let started = timers.now();
   try {
     // why: preflight P5: the pre-click signature by the return pattern, the same pattern every poll after it reads
@@ -360,13 +399,13 @@ async function selection(c: SelectPage, step: StepName, pick: OutboundPick): Pro
       view: 'returns',
       log,
       startedAt: c.pageStart,
-      changedFrom: { signature: before.signature, documentLoads: before.loads },
+      changedFrom: { signature: pre.settle.linkSignature, documentLoads: before.loads },
       loads: () => c.guard.documentLoads,
     });
     if (settled.kind.kind === 'blocked' && settled.kind.page !== 'unrecognised')
       return { stop: await c.stop(settled.kind.page, settled.rule, settled.facts) };
     const stepMs = timers.now() - started;
-    const after = await afterOf(c, d, {
+    const after = await afterOf(c, {
       facts: settled.facts,
       before,
       classification: { kind: settled.kind.kind, rule: settled.rule },
@@ -406,7 +445,7 @@ async function reload(c: SelectPage, before: Before): Promise<StepResult & { sho
     if (s.kind === 'stop') return { stop: s.outcome };
     const shown = s.kind === 'read' ? s.shown : s.best;
     const stepMs = timers.now() - started;
-    const after = await afterOf(c, c.budget.d, {
+    const after = await afterOf(c, {
       facts: { page: shown.page, settle: shown.settle },
       before: b,
       classification:
@@ -475,7 +514,7 @@ export async function recordSelectOutbound(c: SelectPage): Promise<Outcome> {
     steps.push(r.record);
     if (r.record.after !== undefined) {
       last = { page: r.record.after.page, settle: r.record.after.settle };
-      headings = r.record.after.headings;
+      headings = r.record.after.headings ?? headings;
       c.stepMs[r.record.step] = r.record.after.stepMs;
     }
     return !r.end;
