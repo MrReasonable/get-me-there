@@ -10,6 +10,7 @@ import {
   type IsoDateTime,
   type NoDataReason,
   type ProviderId,
+  type ResolvedSpace,
   type RollUp,
   type SelectionReason,
   type SkipDetail,
@@ -140,6 +141,14 @@ WHERE execution_id = @executionId AND stage = @stage AND provider_id = @provider
   OR (@manual = 1 AND ((status = 'skipped' AND reason = 'provider_disabled') OR (status = 'error' AND reason IN (${sqlList(MANUAL_RETRYABLE)}))))
 )
 ORDER BY origin, destination, departure_date, return_date`;
+
+/**
+ * Spec revision 55 §6.6: `datePairSearched` (core's `reducedMark` is priced or no price shown) over one run's counts of
+ * a date pair's airport pairs: `priced`, `shown` (empty or no data), `failed` (error) and `not_run` (not run, no roll-up
+ * yet, or never seeded); skipped needs no count, as it decides only "not reached". A test runs it against core's
+ * predicate for every mix of the six buckets, so the two can never disagree.
+ */
+export const SEARCHED_DATE_PAIR_SQL = 'priced > 0 OR (not_run = 0 AND failed = 0 AND shown > 0)';
 
 /**
  * Spec §7 `search_cells` + `cell_outcomes` and the stored roll-ups. Every method that changes an outcome stores the
@@ -325,28 +334,72 @@ export class CellsRepo {
   }
 
   /**
-   * Spec revision 55 §10 (the cards): the discovery roll-up status of every cell of every parent run (children and tool
-   * runs left out) of the live definitions, in one grouped statement: definition → execution → cell key → status. A
-   * cell with no roll-up yet reads null.
+   * Spec revision 55 §10, §6.6 (the cards, ruling R2): for each card's latest parent run, the date pairs of that run's
+   * space that any parent run of the search searched (`ever`), and those the latest run itself searched (`mine`), by
+   * `datePairSearched` over the space's airport pairs, in one statement for every card. Each run is judged on its own
+   * (a date pair two runs each half searched is not searched), a cell a run never seeded counting not run, as
+   * `datePairBuckets` counts it. The predicate runs in SQL on each run's per-date-pair counts
+   * (`SEARCHED_DATE_PAIR_SQL`, pinned to core's `datePairSearched` over every bucket mix), so the read returns at most
+   * one row per searched date pair of each space and never the run history's cells (CodeRabbit finding: the cards read
+   * had no upper bound). Children and tool runs are left out.
    */
-  parentDiscoveryRollUps(): Map<string, Map<string, Map<string, CellOutcomeStatus | null>>> {
-    const out = new Map<string, Map<string, Map<string, CellOutcomeStatus | null>>>();
-    for (const r of this.db.raw
-      .prepare<[], CellDbRow & { definition_id: string; execution_id: string }>(
-        `SELECT e.definition_id, c.* FROM search_cells c
-           JOIN search_executions e ON e.id = c.execution_id
-           JOIN search_definitions d ON d.id = e.definition_id
-         WHERE e.is_child = 0 AND e.trigger <> 'tool' AND d.deleted_at IS NULL`,
+  searchedDatePairs(
+    cards: ReadonlyArray<{ definitionId: string; latestRunId: string; space: ResolvedSpace }>,
+  ): Map<string, { ever: Set<string>; mine: Set<string> }> {
+    const out = new Map<string, { ever: Set<string>; mine: Set<string> }>();
+    for (const c of cards) out.set(c.definitionId, { ever: new Set(), mine: new Set() });
+    if (cards.length === 0) return out;
+    const param = JSON.stringify(
+      cards.map((c) => ({
+        d: c.definitionId,
+        e: c.latestRunId,
+        o: c.space.origins,
+        t: c.space.destinations,
+        n: c.space.origins.length * c.space.destinations.length,
+        from: c.space.departureFrom,
+        to: c.space.departureTo,
+        min: c.space.minNights,
+        max: c.space.maxNights,
+      })),
+    );
+    const rows = this.db.raw
+      .prepare<{ cards: string }, { definition_id: string; dep: string; ret: string; mine: number }>(
+        `WITH card AS (
+           SELECT json_extract(j.value, '$.d') AS def, json_extract(j.value, '$.e') AS latest,
+                  json_extract(j.value, '$.n') AS pairs, json_extract(j.value, '$.from') AS dep_from,
+                  json_extract(j.value, '$.to') AS dep_to, json_extract(j.value, '$.min') AS min_n,
+                  json_extract(j.value, '$.max') AS max_n, j.value AS v
+           FROM json_each(@cards) j
+         ),
+         orig AS (SELECT card.def, o.value AS iata FROM card, json_each(card.v, '$.o') o),
+         dest AS (SELECT card.def, t.value AS iata FROM card, json_each(card.v, '$.t') t),
+         per_run AS (
+           SELECT card.def, c.execution_id AS run, c.departure_date AS dep, c.return_date AS ret, card.latest,
+             card.pairs - COUNT(*) + SUM(CASE WHEN c.discovery_status IS NULL OR c.discovery_status = 'not_run'
+                                           THEN 1 ELSE 0 END) AS not_run,
+             SUM(CASE WHEN c.discovery_status = 'priced' THEN 1 ELSE 0 END) AS priced,
+             SUM(CASE WHEN c.discovery_status IN ('empty', 'no_data') THEN 1 ELSE 0 END) AS shown,
+             SUM(CASE WHEN c.discovery_status = 'error' THEN 1 ELSE 0 END) AS failed
+           FROM search_cells c
+           JOIN search_executions e ON e.id = c.execution_id AND e.is_child = 0 AND e.trigger <> 'tool'
+           JOIN card ON card.def = e.definition_id
+           JOIN orig ON orig.def = card.def AND orig.iata = c.origin
+           JOIN dest ON dest.def = card.def AND dest.iata = c.destination
+           WHERE c.departure_date BETWEEN card.dep_from AND card.dep_to
+             AND CAST(julianday(c.return_date) - julianday(c.departure_date) AS INTEGER) BETWEEN card.min_n AND card.max_n
+           GROUP BY card.def, c.execution_id, c.departure_date, c.return_date
+         )
+         SELECT def AS definition_id, dep, ret, MAX(run = latest) AS mine FROM per_run
+         WHERE ${SEARCHED_DATE_PAIR_SQL}
+         GROUP BY def, dep, ret`,
       )
-      .all()) {
-      const runs = out.get(r.definition_id) ?? new Map<string, Map<string, CellOutcomeStatus | null>>();
-      out.set(r.definition_id, runs);
-      const cells = runs.get(r.execution_id) ?? new Map<string, CellOutcomeStatus | null>();
-      runs.set(r.execution_id, cells);
-      cells.set(
-        cellKeyString(toCellKey(r)),
-        nullableOneOf('search_cells.discovery_status', OUTCOME_STATUSES, r.discovery_status),
-      );
+      .all({ cards: param });
+    for (const r of rows) {
+      const card = out.get(r.definition_id);
+      if (card === undefined) continue;
+      const key = `${r.dep}|${r.ret}`;
+      card.ever.add(key);
+      if (r.mine === 1) card.mine.add(key);
     }
     return out;
   }
