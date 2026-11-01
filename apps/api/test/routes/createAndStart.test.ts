@@ -159,6 +159,66 @@ describe('POST /definitions/create-and-start (revision 55 §10)', () => {
     expect(JSON.stringify(thrown.body)).not.toContain('SQLITE_FULL');
   });
 
+  it('a body that turns a schedule on with figures short of the shown totals is 409 confirm with no figures and writes nothing; covering figures save it (final review ruling)', async () => {
+    h = await createHarness();
+    const x = h;
+    const key = randomUUID();
+    const def = input({ scheduleCron: '0 5 * * 1', enabled: true });
+    const shown = shownFor(x, def);
+    expect(shown.calls).toBeGreaterThan(0);
+    const start = vi.spyOn(x.engine, 'start');
+    const short = await x.request(PATH, {
+      json: { ...def, confirmCostPence: shown.pence, confirmCalls: shown.calls - 1, requestKey: key },
+    });
+    expect(short.status).toBe(409);
+    const refused = await short.json();
+    expect(refused).toMatchObject({ error: { code: 'confirm' } });
+    // why: as the PUT's refusal (Repeat weekly's Save): the web asks the estimate again, so no figure travels
+    expect(JSON.stringify(refused)).not.toMatch(new RegExp(`\\b(${shown.pence}|${shown.calls})\\b`));
+    expect(definitions(x)).toEqual([]);
+    expect(x.engine.scheduler.jobs()).toEqual([]);
+    expect(start).not.toHaveBeenCalled();
+    // why: the refused key is evicted, so the corrected press with the same key is a new request
+    const good = await press(x, {
+      ...def,
+      confirmCostPence: shown.pence,
+      confirmCalls: shown.calls,
+      requestKey: key,
+    });
+    expect(good.status).toBe(201);
+    expect(x.ports.repos.definitions.get(good.body.definition.id)).toMatchObject({
+      enabled: true,
+      scheduleCron: '0 5 * * 1',
+      confirmedCostPence: shown.pence,
+      confirmedCalls: shown.calls,
+    });
+    expect(x.engine.scheduler.jobs().filter((j) => j.definitionId === good.body.definition.id)).toHaveLength(
+      1,
+    );
+    if (good.body.executionId !== null) await x.engine.cancel(good.body.executionId, { kind: 'cancelled' });
+  });
+
+  it('a schedule off (enabled false, or no cron) with short figures still saves the search and answers the refusal in the body', async () => {
+    h = await createHarness();
+    const x = h;
+    for (const over of [
+      { scheduleCron: '0 5 * * 1', enabled: false },
+      { scheduleCron: null, enabled: false },
+    ]) {
+      const def = input({ ...over, name: `off ${String(over.scheduleCron)}` });
+      const shown = shownFor(x, def);
+      const r = await press(x, {
+        ...def,
+        confirmCostPence: shown.pence,
+        confirmCalls: shown.calls - 1,
+        requestKey: randomUUID(),
+      });
+      expect(r.status).toBe(201);
+      expect(r.body.refusal).toMatchObject({ code: 'confirm' });
+    }
+    expect(definitions(x)).toHaveLength(2);
+  });
+
   it('a zero-cell window is 422 and creates nothing; the rejected key is evicted, so the corrected press creates the search', async () => {
     h = await createHarness();
     const x = h;

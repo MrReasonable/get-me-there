@@ -379,6 +379,39 @@ describe('revision 55 §8.1, §10: enabled 0 starts, Search again starts fresh, 
     expect([e.estimatedFinishAt, e.stop, e.flights]).toEqual(['2026-10-14T09:01:30.000Z', null, null]);
   });
 
+  it('estimatedFinishAt is kept per run and ledger row count: two polls with no new row estimate once; a new row or 30 s re-estimates (final review ruling)', async () => {
+    const x = await harness();
+    const def = x.ports.repos.definitions.create({ ...small(), name: 'kept' });
+    const s = seeder(x.ports);
+    s.execution('R', { def, status: 'running', startedAt: at(-1) });
+    const id = s.id('R');
+    const est = x.engine.estimate(def, x.clock.todayLondon());
+    x.ports.repos.executions.patch(id, { estimate: est });
+    const remaining = vi.spyOn(x.engine, 'estimateRemaining').mockReturnValue({ ...est, seconds: 90 });
+    const finish = async () => (await execution(x, id)).estimatedFinishAt;
+    expect(await finish()).toBe('2026-10-14T09:01:30.000Z');
+    expect(await finish()).toBe('2026-10-14T09:01:30.000Z');
+    expect(remaining).toHaveBeenCalledTimes(1);
+    // why: a call of the run (any ledger row) is new progress, so the next poll estimates again
+    x.ports.db.raw
+      .prepare(
+        `INSERT INTO provider_requests (provider_id, execution_id, endpoint_path, tile_index, started_at, finished_at,
+           duration_ms, http_status, outcome, billable, cost_micro_gbp, http_attempt)
+         VALUES ('fixture', ?, '/p', 0, ?, ?, 1, 200, 'ok', 0, 0, 1)`,
+      )
+      .run(id, x.clock.now(), x.clock.now());
+    remaining.mockReturnValue({ ...est, seconds: 60 });
+    expect(await finish()).toBe('2026-10-14T09:01:00.000Z');
+    expect(await finish()).toBe('2026-10-14T09:01:00.000Z');
+    expect(remaining).toHaveBeenCalledTimes(2);
+    // why: short-lived — a run waiting on one call still re-estimates every 30 s (other progress writes no row)
+    x.clock.advance(30_001);
+    remaining.mockReturnValue({ ...est, seconds: 30 });
+    expect(await finish()).toBe('2026-10-14T09:01:00.001Z');
+    expect(await finish()).toBe('2026-10-14T09:01:00.001Z');
+    expect(remaining).toHaveBeenCalledTimes(3);
+  });
+
   it('replaceStopped and requireCovered reach the engine; over a paused_error search the old run is cancelled with "Replaced by a search you started." and the new one runs', async () => {
     const x = await harness();
     const def = x.ports.repos.definitions.create(small());

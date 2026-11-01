@@ -20,6 +20,21 @@ export class LedgerRepo {
   constructor(private readonly db: Db) {}
 
   /**
+   * How many ledger rows one execution has, of any outcome (pending, finalised, cache hits): one indexed count, which
+   * moves with every call the run makes. The api keys its kept finish estimate of a running execution by it (WP20 final
+   * review), so a poll with no new row does not re-estimate the run's remaining work.
+   */
+  rowCount(executionId: string): number {
+    return (
+      this.db.raw
+        .prepare<[string], { n: number }>(
+          'SELECT COUNT(*) AS n FROM provider_requests WHERE execution_id = ?',
+        )
+        .get(executionId)?.n ?? 0
+    );
+  }
+
+  /**
    * Actuals for one execution, total and per (provider, stage). `calls` are upstream attempts, not cap usage
    * (cap usage comes from `BudgetGuard.usage`); spec §8.1 parity is `tiles + cacheHits`.
    */

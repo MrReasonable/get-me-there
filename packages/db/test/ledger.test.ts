@@ -225,6 +225,33 @@ describe('LedgerRepo (spec §5.3, §7, §8.1 parity)', () => {
   });
 });
 
+describe('LedgerRepo.rowCount (WP20 final review: the api keeps a run finish estimate until a new row)', () => {
+  it("counts every row of the execution, pending, finalised and cache hits alike, and no other execution's", () => {
+    const db = freshDb();
+    const { executionId } = rawExecution(db, { maxCalls: 100, maxFreeCalls: 100, maxCostMicroGbp: 100_000 });
+    const guard = new SqliteBudgetGuard(db, cfg, fixedClock(T0));
+    const ledger = new LedgerRepo(db);
+    expect(ledger.rowCount(executionId)).toBe(0);
+    const reserve = (exec: string | null) =>
+      guard.reserve({
+        providerId: 'travelpayouts',
+        executionId: exec,
+        tileIndex: 0,
+        costMicroGbp: 0,
+        httpAttempt: 1,
+        endpointPath: '/p',
+      });
+    const pending = reserve(executionId);
+    expect(ledger.rowCount(executionId)).toBe(1);
+    pending.finalise(ok);
+    expect(ledger.rowCount(executionId)).toBe(1);
+    guard.recordCacheHit({ providerId: 'travelpayouts', executionId, tileIndex: 1, endpointPath: '/p' });
+    reserve(null).finalise(ok);
+    expect(ledger.rowCount(executionId)).toBe(2);
+    expect(ledger.rowCount('no-such-execution')).toBe(0);
+  });
+});
+
 describe('LedgerRepo.lastCompleted (spec §10 /status)', () => {
   it('is the newest completed call of the provider, success or failure; cache hits and pending rows are not calls', () => {
     const db = freshDb();

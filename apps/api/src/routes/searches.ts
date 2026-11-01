@@ -75,8 +75,11 @@ function refusalOf(
 /**
  * Search now's one press (spec revision 55 §10): validate as a create does (a zero-cell window is 422 and creates
  * nothing), recompute the estimate, create the search, store the sent figures as its confirmation only when they cover
- * the recomputed shown totals (`runnableTotalsOf`), then start a manual run with them and `requireCovered`. A refused
- * start keeps the saved search and is answered in the body; a start that throws answers `failed`.
+ * the recomputed shown totals (`runnableTotalsOf`), then start a manual run with them and `requireCovered`. A body that
+ * turns a schedule on (`enabled` with a cron) whose figures do not cover those totals is refused 409 `confirm` with no
+ * figures before anything is written, as the PUT refuses Repeat weekly's Save (the final review's ruling): a schedule is
+ * never saved without the confirmation its scheduled runs need. A refused start keeps the saved search and is answered
+ * in the body; a start that throws answers `failed`.
  */
 async function createAndStart(
   ctx: RouteContext,
@@ -88,6 +91,9 @@ async function createAndStart(
     { pence: confirmCostPence, calls: confirmCalls },
     ctx.engine.estimate(input, ctx.ports.clock.todayLondon()),
   );
+  // why: all-or-nothing, as the PUT's Repeat weekly path (routes/definitions.ts): the web asks the estimate again
+  if (!covers && input.enabled && input.scheduleCron !== null)
+    throw new ApiError(409, 'confirm', API_TEXT.repeatNotConfirmed);
   const created = ctx.ports.repos.definitions.create(
     covers ? { ...input, confirmedCostPence: confirmCostPence, confirmedCalls: confirmCalls } : input,
   );
@@ -148,9 +154,13 @@ export const searchHandlers: HandlerTable = {
     const id = param(input, 'id');
     const done =
       ctx.ports.repos.definitions.get(id) === null ? 'missing' : ctx.ports.repos.definitions.restore(id);
-    if (done !== 'restored') throw new ApiError(404, 'definition_not_found', API_TEXT.definitionNotFound);
+    if (done === 'missing' || done === 'tool-only')
+      throw new ApiError(404, 'definition_not_found', API_TEXT.definitionNotFound);
     const def = ctx.ports.repos.definitions.get(id);
     if (def === null) throw new ApiError(404, 'definition_not_found', API_TEXT.definitionNotFound);
+    // why: the final review's ruling — an Undo sent twice, or after another tab's Undo, finds the search live: the
+    // restore is idempotent, answering the definition as it is and changing nothing (its job is already as it should be)
+    if (done === 'live') return c.json(definitionResponse(def, ctx));
     // why: revision 55 §8.2 — a restore re-registers the job of a search that is scheduled, in the same request
     syncSchedule(def, ctx);
     return c.json(definitionResponse(def, ctx));

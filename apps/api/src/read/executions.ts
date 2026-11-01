@@ -47,18 +47,49 @@ export function stopOf(
   });
 }
 
+/** How many runs' remaining estimates are kept (a page polls one run; a few tabs, a few runs). */
+const FINISH_KEPT = 32;
+/** How long a kept estimate stands with no new ledger row: progress that writes no row still shows within this. */
+export const FINISH_KEPT_MS = 30_000;
+
+/**
+ * One app's kept remaining seconds per running execution (the final review's ruling): `estimateRemaining` walks the
+ * run's plan, too much to redo on every 2 s poll of a page and a card. A figure is kept per execution id and the run's
+ * ledger row count (a new call is new progress, so it re-estimates), for at most FINISH_KEPT_MS, the last FINISH_KEPT of
+ * them, the oldest dropped first. Keyed weakly by the engine, so each app (and each test harness) has its own.
+ */
+const finishCaches = new WeakMap<object, Map<string, { seconds: number; atMs: number }>>();
+
 /**
  * Spec revision 55 §10 `estimatedFinishAt`: now plus the run's own remaining seconds while it is pending or running (so
- * a resumed run never reads as finished in the past), null on every other status and for a run with no estimate.
+ * a resumed run never reads as finished in the past), null on every other status and for a run with no estimate. The
+ * remaining seconds are kept until the run's ledger gains a row or FINISH_KEPT_MS pass (ruling: the time lags by at
+ * most one ledger row).
  */
 export function estimatedFinishOf(
-  ports: Pick<Ports, 'clock'>,
+  ports: Pick<Ports, 'clock' | 'repos'>,
   engine: Pick<Engine, 'estimateRemaining'>,
   e: Execution,
 ): IsoDateTime | null {
   if ((e.status !== 'pending' && e.status !== 'running') || e.estimate === null) return null;
-  const seconds = engine.estimateRemaining(e.id).seconds;
-  return isoDateTimeOfEpochMs(Date.parse(ports.clock.now()) + Math.round(seconds * 1000));
+  const nowMs = Date.parse(ports.clock.now());
+  const cache = finishCaches.get(engine) ?? new Map<string, { seconds: number; atMs: number }>();
+  finishCaches.set(engine, cache);
+  const key = `${e.id}|${ports.repos.ledger.rowCount(e.id)}`;
+  const kept = cache.get(key);
+  // why: a hit is taken out and put back, so the map drops the run read longest ago first
+  cache.delete(key);
+  const entry =
+    kept !== undefined && nowMs - kept.atMs <= FINISH_KEPT_MS
+      ? kept
+      : { seconds: engine.estimateRemaining(e.id).seconds, atMs: nowMs };
+  cache.set(key, entry);
+  const { seconds } = entry;
+  for (const oldest of cache.keys()) {
+    if (cache.size <= FINISH_KEPT) break;
+    cache.delete(oldest);
+  }
+  return isoDateTimeOfEpochMs(nowMs + Math.round(seconds * 1000));
 }
 
 /**
