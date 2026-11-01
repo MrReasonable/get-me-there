@@ -100,6 +100,14 @@ const DETAIL_REASON: Readonly<Record<StopDetail, (id: ProviderId) => string>> = 
 };
 
 /**
+ * Spec rev 55 §11: a stop detail as the end of a "because …" clause, the words the stop sentences use ("its monthly
+ * limit is used up"); a failed flight list reads "Flights not read: <this clause>" (WP20 Task 20.10).
+ */
+export function stopDetailClause(d: StopDetail, id: ProviderId): string {
+  return DETAIL_REASON[d](id);
+}
+
+/**
  * The details that are the browser worker's own refusal to load pages (its blocked pages, its settings and grid checks,
  * its monthly count and hours); every other detail, and every other source, reads "couldn't be used because …".
  */

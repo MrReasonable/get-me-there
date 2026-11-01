@@ -61,3 +61,7 @@ export interface ResultsScope extends DatePairsScope {
 
 /** An alert rule as the form sends it: the schema's input shape (cooldownHours may be left to its default of 336). */
 export type AlertRuleBody = z.input<typeof apiContract.alertRuleInputSchema>;
+
+/** WP20 Task 20.10 (spec rev 55 §10): a search's page's flight lists, and one stored list. */
+export type FlightListsResponse = z.output<typeof apiContract.flightListsResponseSchema>;
+export type FlightList = z.output<typeof apiContract.flightListSchema>;

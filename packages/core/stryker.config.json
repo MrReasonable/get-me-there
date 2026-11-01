@@ -41,6 +41,8 @@
     "src/datePairs/decode.ts",
     "src/datePairs/detailLink.ts",
     "src/datePairs/marks.ts",
+    "src/flights/choose.ts",
+    "src/flights/ties.ts",
     "src/api-contract/datePairs.ts"
   ],
   "thresholds": {

@@ -3,6 +3,7 @@ import { SHARED_WORKER_DEFAULTS } from '../../src/camoufox/settings.js';
 import {
   CAMOUFOX_WORKER_HOSTS,
   camoufoxWorkerUrlOk,
+  DEFAULT_CAMOUFOX_EXECUTION_PAGE_CAP,
   NO_RATE_LIMIT,
   parseConfig,
 } from '../../src/config/schema.js';
@@ -79,6 +80,10 @@ describe('the app’s effective shared settings (spec §12, WP16a)', () => {
 });
 
 describe('CAMOUFOX_* (spec §12 rev 32)', () => {
+  it('the default page cap for one run is the one the web reads for the pages-left clause (spec rev 55 §11)', () => {
+    expect(DEFAULT_CAMOUFOX_EXECUTION_PAGE_CAP).toBe(100);
+    expect(ok(ON).providers.camoufox?.executionPageCap).toBe(DEFAULT_CAMOUFOX_EXECUTION_PAGE_CAP);
+  });
   it('off by default: no camoufox provider', () => {
     expect(ok(minimal).providers.camoufox).toBeNull();
   });

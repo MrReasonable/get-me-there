@@ -67,7 +67,7 @@ export {
   scheduledOnlyText,
 } from './labels/skip.js';
 export { FLIGHT_LIST_SOURCE_LABEL, GRID_SOURCE_LABEL, SOURCE_LABELS, sourceLabel } from './labels/source.js';
-export { NO_STOP_CAUSE_TEXT, type StopTextFacts, stopText } from './labels/stopCause.js';
+export { NO_STOP_CAUSE_TEXT, type StopTextFacts, stopDetailClause, stopText } from './labels/stopCause.js';
 export { isTruncated, TRUNCATED_NOTE } from './labels/truncated.js';
 export { MOVED_MARKER, movedMarkerText, parseMovedMarker } from './local/movedMarker.js';
 export { camoufoxRootDir, workerDataDir } from './local/paths.js';

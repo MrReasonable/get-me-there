@@ -14,8 +14,11 @@ const HHMM_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 const verdict = (ok: boolean): Verdict => (ok ? 'pass' : 'fail');
 
-/** `HH:mm` inside [from, to]; a window whose `from` is later than `to` wraps midnight. */
-function inWindow(time: string, w: { from: string; to: string }): boolean {
+/**
+ * `HH:mm` inside [from, to]; a window whose `from` is later than `to` wraps midnight. Spec §6.2; also the flights a
+ * search's page shows (spec rev 55 §11 Which flights, `flights/choose.ts`), so a window means one thing everywhere.
+ */
+export function inWindow(time: string, w: { from: string; to: string }): boolean {
   if (!HHMM_RE.test(w.from) || !HHMM_RE.test(w.to))
     throw new RangeError(`window must be HH:mm: ${w.from}–${w.to}`);
   return w.from <= w.to ? time >= w.from && time <= w.to : time >= w.from || time <= w.to;

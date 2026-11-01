@@ -7,7 +7,12 @@ import {
   stopTextSchema,
 } from '../../src/api-contract/stopCause.js';
 import { BUDGET_SCOPE_KINDS } from '../../src/errors.js';
-import { NO_STOP_CAUSE_TEXT, type StopTextFacts, stopText } from '../../src/labels/stopCause.js';
+import {
+  NO_STOP_CAUSE_TEXT,
+  type StopTextFacts,
+  stopDetailClause,
+  stopText,
+} from '../../src/labels/stopCause.js';
 import { findBannedWords } from '../../src/text/bannedWords.js';
 import { SKIP_CODES } from '../../src/types/execution.js';
 import { asIsoDateTime } from '../../src/types/ids.js';
@@ -789,5 +794,20 @@ describe('the structured resume flag on a fix (review finding 10)', () => {
     expect(stopText({ kind: 'interrupted' }, facts).fix?.resume).toBe(true);
     expect(stopText({ kind: 'cancelled' }, facts).fix?.resume).toBeUndefined();
     expect(NO_STOP_CAUSE_TEXT.fix?.resume).toBeUndefined();
+  });
+});
+
+describe('stopDetailClause (spec rev 55 §11: a failed flight list reads "Flights not read: <its reason in words>")', () => {
+  it('words every STOP_DETAILS word as a clause, never the class word itself', () => {
+    for (const d of STOP_DETAILS) {
+      const clause = stopDetailClause(d, 'camoufox');
+      expect(clause.length).toBeGreaterThan(0);
+      expect(clause).not.toBe(d);
+      expect(findBannedWords(clause)).toEqual([]);
+    }
+  });
+  it('is the clause the stop sentences use', () => {
+    expect(stopDetailClause('monthly-cap', 'camoufox')).toBe('its monthly limit is used up');
+    expect(stopDetailClause('auth', 'travelpayouts')).toBe('its token was refused');
   });
 });

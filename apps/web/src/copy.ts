@@ -9,6 +9,7 @@ import {
   type ExecutionStatus,
   formatAgo,
   type MIXED_ERROR_REASON,
+  mainPathSource,
   type NoDataReason,
   type PARTIAL_EXPANSION,
   type PRICE_UNCONFIRMED,
@@ -769,6 +770,80 @@ export const COPY = {
     gapList: 'Date pairs to check',
     gapLead: (n: number) =>
       `${n} ${n === 1 ? 'date pair on one airport pair has a calendar price' : 'date pairs on their airport pairs have calendar prices'} (constraints not checked) below your reference verified price (latest seen, then fresh, then cheapest)`,
+  },
+  // --- WP20 Task 20.10: the flights on a search's page (spec rev 55 §11 Flights and Ties, §6.9, §2) ---
+  // why: the flight list is Google's page as the browser worker read it, so its words name Google's list; "verified"
+  // never appears here (a flight read is never checked with the airline). Amounts are PriceCells placed between these
+  // pieces (ruling C3), so a sentence with a price is split around it.
+  flights: {
+    // the outcome beside the figure, from the figure's own airport pair's list only (persona-003, prov-r2-004)
+    outcomeFrom: "Google's list: from",
+    outcomeAt: (when: string) => `, ${when}`,
+    notInList: "not in Google's list",
+    showedNone: "Google's list showed no flights",
+    // the block's provenance note (spec rev 55 §2): the age, and the date and time when not read today
+    head: (ago: string, when: string | null) =>
+      `Outbound flights only · each price is the lowest round trip listed with it · read ${ago}${when === null ? '' : `, ${when}`} · prices from Google Flights, not checked with the airline`,
+    otherPair: (origin: string, destination: string) =>
+      `Flights read for ${origin} → ${destination}, not the priced airports`,
+    // one flight: "depart 07:15, arrive 18:05 +1 · 10h 50m · 1 change · Virgin Atlantic · from £478 round trip"
+    times: (departs: string, arrives: string, dayOffset: number) =>
+      `depart ${departs}, arrive ${arrives}${dayOffset > 0 ? ` +${dayOffset}` : ''}`,
+    changes: (n: number) => (n === 0 ? 'direct' : `${n} ${noun(n, 'change', 'changes')}`),
+    operatedBy: (carriers: string, operator: string) => `${carriers}, operated by ${operator}`,
+    separator: ' · ',
+    from: 'from',
+    roundTrip: 'round trip',
+    // why: every flight amount's source name on the main path (spec rev 55 §3): the browser worker's flight list
+    sourceLabel: `${mainPathSource('camoufox')}'s flight list`,
+    // each flight against the search's limits (spec rev 55 §11; persona-010)
+    within: (duration: string, limit: string) =>
+      `outbound ${duration}, within your ${limit} limit; return not read`,
+    overLimit: (duration: string, limit: string) => `outbound ${duration}: over your ${limit} limit`,
+    arrivesOutside: (time: string) => `arrives ${time}, outside your window`,
+    departsOutside: (time: string) => `departs ${time}, outside your window`,
+    markJoin: '; ',
+    more: (n: number, outside: number) =>
+      `${n} more read${outside > 0 ? `, ${outside} outside your limits` : ''}`,
+    showAll: 'show all',
+    showFewer: 'show fewer',
+    limits: 'return leg not read; stops and airline settings not applied to flights read',
+    // a list that is not a list of flights
+    notRead: (clause: string) => `Flights not read: ${clause}`,
+    noFlightsWhen: (when: string) => `Google's list showed no flights for these dates when read ${when}`,
+    noneForCell: (other: number, unread: number) => {
+      const parts = [
+        ...(other > 0 ? [`${other} for other airports or days`] : []),
+        ...(unread > 0 ? [`${unread} unread`] : []),
+      ];
+      return `Google listed flights, none this app could read for these airports and dates${parts.length > 0 ? ` (${parts.join(', ')})` : ''}`;
+    },
+    // no list yet, and the read on demand (spec rev 55 §8.1, §11)
+    notReadYet: 'Flights not read yet',
+    readButton: (pagesLeft: string | null) =>
+      `Read flights for this date (free, 1 page${pagesLeft === null ? '' : `; ${pagesLeft} ${noun(pagesLeft, 'page', 'pages')} left this month`})`,
+    reading: 'Reading flights…',
+    busy: 'The browser worker is busy with a search; try again when it finishes',
+    fresh: "Read within this search's refresh",
+    readFailed: "The flights couldn't be read just now; try again later",
+    // one line under the list when flight lists cannot be read here
+    unavailable: 'Flight times need the browser worker; set it up in Providers',
+    unavailableCabin: 'Flight times are read for economy searches only',
+    // the difference line (spec rev 55 §6.9; po-012): the cheapest read against the figure, from its own source
+    differenceRead: "Google's flight list showed",
+    differenceCheapest: (when: string) => `as the cheapest read, ${when};`,
+    differenceSource: (source: string) => `${source} showed`,
+    differenceAt: (when: string) => `, ${when}`,
+    dateGrid: 'the date grid',
+    lowerFare: 'Google shows a lower fare it could not read (',
+    lowerFareEnd: ')',
+    // the search link (spec rev 55 §6.9, §11; prov-int-017): the page the worker reads, with its label beside it
+    openLink: 'Open in Google Flights ↗',
+    openLinkName: (dates: string) => `Open in Google Flights for ${dates}, opens in a new tab`,
+    datesShort: (departure: string, back: string) => `${departure} → ${back}`,
+    // a tie (spec rev 55 §11 Ties); the price is the estimate panel's cost formatter's
+    tie: (n: number, price: string, byFlights: boolean) =>
+      `${n} date pairs tie at ${price}, ${byFlights ? 'listed by shortest flight time' : 'in date order'}`,
   },
   // --- WP19: the Dates view (spec §11 Dates; revision 50) ---
   datesView: {

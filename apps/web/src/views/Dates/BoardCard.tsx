@@ -1,4 +1,5 @@
 import type { DatePair, DatePairFigure } from '@gmt/core';
+import type { ReactNode } from 'react';
 import type { DefinitionResponse } from '../../api/types.js';
 import { PriceBoundary } from '../../components/PriceBoundary.js';
 import { PriceCell } from '../../components/PriceCell.js';
@@ -191,7 +192,8 @@ function StateGlyph({ state }: { state: RowState }) {
  * and the price lead (PriceCell's phone face: provider mark, destination, short age, "not checked" on a calendar
  * price, "≈" on a converted one), then how far checked ("cheapest of the rows read" on a truncated figure), then
  * journey time and arrivals, then airports. Its dates are the link to the detail; a tap anywhere on the card follows
- * it. Point of sale is not on the card (it is not a face item).
+ * it. Point of sale is not on the card (it is not a face item). WP20 Task 20.10: the flight read's outcome sits beside
+ * the price (`outcome`) and the date pair's flights block is the card's last part (`flights`), spec rev 55 §11.
  */
 export function BoardCard({
   pair,
@@ -202,6 +204,8 @@ export function BoardCard({
   journeyFiltered,
   lit,
   onLight,
+  outcome = null,
+  flights = null,
 }: {
   pair: DatePair & { figure: DatePairFigure };
   rank: number;
@@ -211,6 +215,10 @@ export function BoardCard({
   journeyFiltered: boolean;
   lit: boolean;
   onLight: (index: number | null) => void;
+  /** The flight read's outcome beside the price (spec rev 55 §6.9), or null. */
+  outcome?: ReactNode;
+  /** The date pair's flights block (spec rev 55 §11), or null when there is none. */
+  flights?: ReactNode;
 }) {
   const f = pair.figure;
   const state = rowState(f);
@@ -248,6 +256,7 @@ export function BoardCard({
       </th>
       <td className="card-price">
         <FigurePrice figure={f} notes={notes} face />
+        {outcome}
       </td>
       <td className="card-rest">
         <StateFlap state={state} />
@@ -260,6 +269,11 @@ export function BoardCard({
         </span>
         <span className="mt-1 block">{D.airports(f.origin, f.destination)}</span>
       </td>
+      {flights !== null ? (
+        <td className="card-flights" data-flights-for={pair.index}>
+          {flights}
+        </td>
+      ) : null}
     </tr>
   );
 }
