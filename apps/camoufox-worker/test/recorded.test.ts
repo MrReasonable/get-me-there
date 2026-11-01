@@ -4,7 +4,7 @@
 // own hash; none may hold an account trace.
 import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { GRID_STEP_DAYS, OS_ARCHES } from '@gmt/core';
 import { recordingsPresentForKind, skipTitle } from '@gmt/providers/testing';
@@ -21,6 +21,7 @@ import {
 } from '../src/gridNames.js';
 import { interpretView } from '../src/gridView.js';
 import { onAllowlist } from '../src/guard.js';
+import { readList } from '../src/list.js';
 import { parseOptionName } from '../src/names.js';
 import { KINDS, RECORDED_BY, type RecordingKind } from '../src/record.js';
 import { FLAG_NAMES, flagsOf, PROOFS, SELECTORS, selectorsFor } from '../src/selectors.js';
@@ -31,6 +32,7 @@ import {
   superseded,
   underDrawnSettle,
 } from './support/recordedGrid.js';
+import { pinOf, recordedLists } from './support/recordedList.js';
 
 const ROOT = fileURLToPath(new URL('../fixtures/recorded/', import.meta.url));
 
@@ -529,6 +531,141 @@ describe('verification flags (TS-13; runs on every checkout)', () => {
           for (const n of names) expect(parseCellName(n), n).not.toBeNull();
         }
       });
+    },
+  );
+}
+
+// WP20 Task 20.7 (test-r2-005; decision 61: local-only, skipped visibly when absent): list mode must read every recorded
+// page exactly as it did before the grammar gained the times and the arrival date (GRAMMAR_VERSION 2026-10-31-times).
+// Each pin below was captured by running this branch's code at 22f2e14d, before src/names.ts changed: the list read
+// of each results page under its own request (rebuilt at run time, test/support/recordedList.ts), and, for every list
+// kind, how many names each recording holds, how many the grammar leaves unparsed, and a short SHA-256 of the fields the
+// earlier grammar read from each name (price, stops, carriers, departure day, airports, interstitials, operator,
+// duration), so a change to any of them shows here. The hash and the counts name nothing of a page.
+// why: 20.7 review ruling R-literals (decision 61): no value read from a page is committed; the minimum and the tab
+// price are pinned as one short SHA-256 salted with the recording's own content hash (support/recordedList.ts
+// `pinOf`), so the pin cannot be reversed without the local recording; the counts are structure and stay literal
+const LIST_PARITY: Readonly<
+  Record<
+    string,
+    {
+      optionsUnparsed: number;
+      optionsOtherCell: number;
+      parsedForThisCell: number;
+      prices: string;
+      resultsSeen: number;
+      resultsStated: number | null;
+    }
+  >
+> = {
+  'results/2026-10-26/1': {
+    optionsUnparsed: 0,
+    optionsOtherCell: 0,
+    parsedForThisCell: 23,
+    prices: 'fb12c9e7d36000d1',
+    resultsSeen: 23,
+    resultsStated: 23,
+  },
+  'results/2026-10-26/2': {
+    optionsUnparsed: 0,
+    optionsOtherCell: 0,
+    parsedForThisCell: 23,
+    prices: '3a5a22da621f6b2e',
+    resultsSeen: 23,
+    resultsStated: 23,
+  },
+  'results/2026-10-26/3': {
+    optionsUnparsed: 0,
+    optionsOtherCell: 0,
+    parsedForThisCell: 23,
+    prices: 'cb98e83c66beeb6b',
+    resultsSeen: 23,
+    resultsStated: 23,
+  },
+  'results/2026-10-27/1': {
+    optionsUnparsed: 0,
+    optionsOtherCell: 8,
+    parsedForThisCell: 0,
+    prices: 'f828d46a9d9cc697',
+    resultsSeen: 8,
+    resultsStated: 9,
+  },
+};
+const NAME_PARITY: Readonly<Record<string, { names: number; unparsed: number; sha: string }>> = {
+  'results/2026-10-26/1': { names: 23, unparsed: 0, sha: '2cf7ee6e8eb0d20f' },
+  'results/2026-10-26/2': { names: 23, unparsed: 0, sha: '811a2778b914537d' },
+  'results/2026-10-26/3': { names: 23, unparsed: 0, sha: '811a2778b914537d' },
+  'results/2026-10-27/1': { names: 8, unparsed: 0, sha: 'e00b9bf96b5f1824' },
+  'cheapest/2026-10-26/1': { names: 22, unparsed: 0, sha: 'a12b2bf77ff43b16' },
+  'cheapest/2026-10-26/2': { names: 22, unparsed: 0, sha: '88bc402abed8b77e' },
+  'cheapest/2026-10-26/3': { names: 23, unparsed: 0, sha: '5551f791f8b90816' },
+  'view-more/2026-10-26/1': { names: 78, unparsed: 0, sha: '2b502e8bfc753950' },
+  'view-more/2026-10-26/2': { names: 71, unparsed: 1, sha: '5b19f69dd16208d5' },
+  'view-more/2026-10-26/3': { names: 71, unparsed: 0, sha: '65cac32917a741a9' },
+};
+for (const kind of ['results', 'cheapest', 'view-more'] as const) {
+  const present = recordingsPresentForKind(ROOT, kind);
+  describe.skipIf(!present)(
+    skipTitle(`recorded ${kind} pages read as before (Task 20.7 parity)`, present),
+    () => {
+      it('each recording keeps its names, unparsed count and the earlier fields read from each name', () => {
+        const seen = Object.keys(NAME_PARITY).filter((k) => k.startsWith(`${kind}/`));
+        const keys: string[] = [];
+        for (const r of common(kind)) {
+          const key = relative(ROOT, r.file)
+            .split(sep)
+            .join('/')
+            .replace(/\.facts\.json$/, '');
+          keys.push(key);
+          const want = NAME_PARITY[key];
+          // why: a recording added after the capture has no literal; it must be captured on the old grammar, never here
+          expect(want, `${key} has no parity literal`).toBeDefined();
+          const parsed = r.facts.names.map((n) => (n === null || n === '' ? null : parseOptionName(n)));
+          const earlier = parsed.map((p) =>
+            p === null
+              ? null
+              : {
+                  a: p.amountMinor,
+                  s: p.stops,
+                  c: p.carriers,
+                  d: p.departsOn,
+                  f: p.from,
+                  t: p.to,
+                  i: p.interstitials,
+                  o: p.operatedBy,
+                  m: p.durationMinutes,
+                },
+          );
+          expect(
+            {
+              names: r.facts.names.length,
+              unparsed: parsed.filter((p) => p === null).length,
+              sha: createHash('sha256').update(JSON.stringify(earlier)).digest('hex').slice(0, 16),
+            },
+            key,
+          ).toEqual(want);
+        }
+        expect(keys.sort()).toEqual(seen.sort());
+      });
+      if (kind === 'results')
+        it('list mode gives each results page the same counts and minimum as before', () => {
+          const lists = recordedLists('results');
+          expect(lists.map((l) => l.key).sort()).toEqual(Object.keys(LIST_PARITY).sort());
+          for (const l of lists) {
+            const read = readList(l.facts, l.req);
+            expect(
+              {
+                optionsUnparsed: read.optionsUnparsed,
+                optionsOtherCell: read.optionsOtherCell,
+                parsedForThisCell: read.parsedForThisCell,
+                prices: pinOf(l.contentSha256, { minMinor: read.minMinor, tabMinor: read.tabMinor }),
+                resultsSeen: read.resultsSeen,
+                resultsStated: read.resultsStated,
+              },
+              l.key,
+            ).toEqual(LIST_PARITY[l.key]);
+          }
+        });
     },
   );
 }
