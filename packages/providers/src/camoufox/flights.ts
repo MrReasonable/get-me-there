@@ -9,7 +9,6 @@
  * cap, which is thrown as BudgetExceeded, as `fetchTile` throws it.
  */
 import {
-  APP_INSTANCE_HEADER,
   CAMOUFOX_CLOCK_SKEW_MS,
   type CapabilityInfo,
   FLIGHT_LIST_ENDPOINT_PATH,
@@ -19,11 +18,10 @@ import {
   flightsRequestSchema,
   type ProviderContext,
   ProviderError,
-  WORKER_KEY_HEADER,
   workerAnswerSchema,
 } from '@gmt/core';
 import { parseError } from '../shared/errors.js';
-import { throwIfMonthly } from './answer.js';
+import { postToWorker } from './post.js';
 import type { CamoufoxProviderOptions } from './provider.js';
 
 /** Spec rev 55 §2 Labels, verbatim: the flight list's provenance. */
@@ -39,13 +37,24 @@ const shifted = (at: string, ms: number): string => new Date(Date.parse(at) + ms
 
 export function flightListCapability(o: CamoufoxProviderOptions): FlightListCapability {
   const log = o.log.child({ providerId: 'camoufox' });
-  const instanceHeader = o.appInstance === undefined ? {} : { [APP_INSTANCE_HEADER]: o.appInstance };
   const fail = (error: ProviderError): FlightListResult => {
     log.warn({ kind: error.kind, message: error.message }, 'camoufox flight list failed');
     return { kind: 'list-error', error };
   };
 
   async function read(q: FlightListQuery, ctx: ProviderContext): Promise<FlightListResult> {
+    // why: ruling A29: fail closed before any request: without the dataset's names the worker cannot tell this cell's
+    // options apart, and the stored reason is the one word `no-airport-names`, never the parse kind's text
+    if (q.airportNames.origin.length === 0 || q.airportNames.destination.length === 0)
+      return fail(
+        new ProviderError({
+          kind: 'parse',
+          retryable: false,
+          reason: 'no-airport-names',
+          providerId: 'camoufox',
+          message: `camoufox ${FLIGHT_LIST_ENDPOINT_PATH}: the query carries no airport names [no-airport-names]`,
+        }),
+      );
     const request = flightsRequestSchema.safeParse({
       mode: 'flights',
       origin: q.cell.origin,
@@ -55,48 +64,21 @@ export function flightListCapability(o: CamoufoxProviderOptions): FlightListCapa
       gl: o.pointOfSale,
       airportNames: q.airportNames,
     });
-    // why: ruling A29: fail closed before any request: without the dataset's names the worker cannot tell this cell's
-    // options apart, and the stored reason is the one word `no-airport-names`, never the parse kind's text
+    // why: 20.7 review finding 5: any other request the contract refuses (a gl that is not a market, too many names,
+    // not one cell) is its own parse failure, still before any request
     if (!request.success)
       return fail(
-        new ProviderError({
-          kind: 'parse',
-          retryable: false,
-          reason: 'no-airport-names',
-          providerId: 'camoufox',
-          message: `camoufox ${FLIGHT_LIST_ENDPOINT_PATH}: the query carries no valid airport names [no-airport-names]`,
-        }),
+        parseError('invalid-request', 'the flight-list request is not one the worker accepts', WHERE),
       );
     const started = o.clock.now();
-    let body: unknown;
-    try {
-      const res = await o.http.request({
-        providerId: 'camoufox',
-        executionId: ctx.executionId,
-        tileIndex: null,
-        endpointPath: FLIGHT_LIST_ENDPOINT_PATH,
-        method: 'POST',
-        url: new URL(FLIGHT_LIST_ENDPOINT_PATH, o.workerUrl),
-        headers: {
-          [WORKER_KEY_HEADER]: o.key.reveal(),
-          'content-type': 'application/json',
-          accept: 'application/json',
-          ...instanceHeader,
-        },
-        body: JSON.stringify(request.data),
-        cache: 'never',
-        signal: ctx.signal,
-        recordFixtures: ctx.recordFixtures,
-        ...(ctx.beforeSend === undefined ? {} : { beforeSend: ctx.beforeSend }),
-      });
-      body = res.body;
-    } catch (e) {
-      if (e instanceof ProviderError) {
-        throwIfMonthly(e);
-        return fail(e);
-      }
-      throw e;
-    }
+    const sent = await postToWorker(o, {
+      path: FLIGHT_LIST_ENDPOINT_PATH,
+      body: request.data,
+      tileIndex: null,
+      ctx,
+    });
+    if (!sent.ok) return fail(sent.error);
+    const body = sent.body;
     const a = workerAnswerSchema.safeParse(body);
     if (!a.success || a.data.kind !== 'flights')
       return fail(parseError('unknown-answer', 'the worker answered what this build cannot read', WHERE));

@@ -71,6 +71,23 @@ describe('parseOptionName (dated grammar)', () => {
       departsOn: { month: 11, day: 5 },
     });
   });
+  // why: 20.7 review finding 1: the optional groups must never let an airport field swallow a time or date the grammar
+  // does not read; such a name is unparsed (counted), never an option for another cell
+  it.each([
+    ['a 12-hour departure time', ONE_STOP.replace('at 12:25 on', 'at 12:25 PM on')],
+    ['a 12-hour arrival time', ONE_STOP.replace('at 20:05 on', 'at 8:05 PM on')],
+    [
+      'a day-first departure date',
+      ONE_STOP.replace('on Thursday, November 5 and', 'on Thursday, 5 November and'),
+    ],
+    [
+      'a day-first arrival date',
+      ONE_STOP.replace('on Thursday, November 5. Total', 'on Thursday, 5 November. Total'),
+    ],
+  ])('a name with %s is unparsed, the airports never absorbing it', (_l, name) => {
+    expect(name).not.toBe(ONE_STOP);
+    expect(parseOptionName(name)).toBeNull();
+  });
   it('thousands separators are exact', () => {
     expect(parseOptionName(ONE_STOP.replace('From 478', 'From 1,204'))?.amountMinor).toBe(120400);
   });

@@ -64,6 +64,8 @@ const MONTH_NAMES: readonly string[] = MONTHS;
 const esc = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 /** A leg sentence's clock time, "12:25" or "9:05". */
 const TIME = '[0-9]{1,2}:[0-9]{2}';
+/** A leg sentence's airport name: the shortest run that holds neither a time clause nor a date clause. */
+const AIRPORT = '(?:(?! at [0-9]| on [A-Z][a-z]+, ).)+?';
 const DURATION = '[0-9]+ hrs?(?: [0-9]+ min)?|[0-9]+ min';
 /**
  * The tail after the duration (fix round 1, prov-int M3): only the stopover sentences, repeated. The feasibility load's
@@ -93,8 +95,11 @@ function grammarFor(interstitials: readonly Interstitial[]): RegExp {
       '(?:Operated by (?<operator>[^.]+)\\. )?' +
       // why: spec rev 55 §2: the times and the arrival date are optional groups, so a name that leaves them out still
       // parses (its three fields null) and every name the earlier grammar read is read the same
-      `Leaves (?<from>.+?)(?: at (?<departsAt>${TIME}))? on [A-Z][a-z]+, (?<month>[A-Z][a-z]+) (?<day>[0-9]{1,2}) ` +
-      `and arrives at (?<to>.+?)(?: at (?<arrivesAt>${TIME}))?` +
+      // why: 20.7 review finding 1: an airport field stops before " at <digit>" and " on <Day>, ", so an optional group
+      // can never let it swallow a time or date the grammar does not read ("at 9:05 PM", "on Friday, 5 November"):
+      // such a name is unparsed (counted), never another cell's option
+      `Leaves (?<from>${AIRPORT})(?: at (?<departsAt>${TIME}))? on [A-Z][a-z]+, (?<month>[A-Z][a-z]+) (?<day>[0-9]{1,2}) ` +
+      `and arrives at (?<to>${AIRPORT})(?: at (?<arrivesAt>${TIME}))?` +
       '(?: on [A-Z][a-z]+, (?<arrivesMonth>[A-Z][a-z]+) (?<arrivesDay>[0-9]{1,2}))?\\. ' +
       // why: observed 2026-10-18: a name with no stopover sentence carries a run of spaces before "Select flight"; only
       // spaces may sit between the sentences, never other text

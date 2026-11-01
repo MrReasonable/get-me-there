@@ -81,12 +81,21 @@ export const flightListSchema = z
   });
 export type FlightList = z.infer<typeof flightListSchema>;
 
-/** A date pair's search link (spec §6.9): https, on Google's host only (the camoufox link is the worker's page). */
-const flightListLinkSchema = z.strictObject({
-  url: z.string().url().startsWith('https://'),
-  host: z.enum(['www.google.com']),
-  label: z.string(),
-});
+/**
+ * A date pair's search link (spec §6.9): https, on Google's host only (the camoufox link is the worker's page), and
+ * the url's own host is the one it states (20.7 review finding 3), so a stated host can never mask another.
+ */
+const flightListLinkSchema = z
+  .strictObject({
+    url: z.url({ protocol: /^https$/ }),
+    host: z.enum(['www.google.com']),
+    label: z.string(),
+  })
+  // why: zod runs an object's refinement even when a field failed, so an unparseable url is refused here, not thrown
+  .refine((l) => URL.canParse(l.url) && new URL(l.url).hostname === l.host, {
+    message: "the url's host is the stated host",
+    path: ['url'],
+  });
 
 /**
  * `GET /definitions/:id/flight-lists`'s answer (spec rev 55 §10): whether flight lists can be read here (and why not),

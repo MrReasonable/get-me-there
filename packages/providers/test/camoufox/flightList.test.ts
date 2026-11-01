@@ -194,6 +194,43 @@ describe('camoufox flightLists (spec rev 55 §2, §5.1)', () => {
     expect(bodies).toEqual([]);
     expect(reserves(events)).toEqual([]);
   });
+  // why: 20.7 review finding 5: only missing names are `no-airport-names`; any other request the contract refuses is
+  // its own parse failure, still before any request
+  it('a request the contract refuses for another reason is a parse list-error, not no-airport-names', async () => {
+    const { lists, events } = setup();
+    server.use(capture(() => HttpResponse.json(answer(), contacted(true))));
+    for (const q of [
+      {
+        cell: CELL,
+        airportNames: {
+          origin: Array.from({ length: 9 }, () => 'QQ Airport'),
+          destination: NAMES.destination,
+        },
+      },
+      { cell: { ...CELL, returnDate: CELL.departureDate }, airportNames: NAMES },
+    ]) {
+      const r = await lists.read(q, ctx);
+      expect(r).toMatchObject({
+        kind: 'list-error',
+        error: { kind: 'parse', reason: 'parse', retryable: false },
+      });
+      if (r.kind === 'list-error') expect(r.error.message).toContain('[invalid-request]');
+    }
+    const bad = camoufoxProvider({
+      http: makeKit({ limits: testLimits({ camoufox: { workerPort: 8090 } }) }).kit,
+      log: setup().log,
+      clock: makeKit().clock,
+      key: SENTINELS.camoufox,
+      workerUrl: 'http://127.0.0.1:8090',
+      pointOfSale: 'gb',
+    });
+    expect(await bad.flightLists?.read(Q, ctx)).toMatchObject({
+      kind: 'list-error',
+      error: { reason: 'parse' },
+    });
+    expect(bodies).toEqual([]);
+    expect(reserves(events)).toEqual([]);
+  });
   it('a monthly-cap answer throws BudgetExceeded at provider-month with the worker’s own figures', async () => {
     const { lists } = setup();
     server.use(

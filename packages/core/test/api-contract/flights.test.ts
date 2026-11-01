@@ -151,6 +151,19 @@ describe('flightListsResponseSchema links (spec rev 55 §6.9)', () => {
   });
 });
 
+describe('flightListsResponseSchema link host (20.7 review finding 3)', () => {
+  it('refuses a link whose url names another host than the one it states', () => {
+    expect(
+      flightListsResponseSchema.safeParse(
+        response([pair({ ...LINK, url: 'https://flights.example.com/travel/flights?q=x' })]),
+      ).success,
+    ).toBe(false);
+    expect(flightListsResponseSchema.safeParse(response([pair({ ...LINK, url: 'https://' })])).success).toBe(
+      false,
+    );
+  });
+});
+
 describe('flightListsQuerySchema and the on-demand read (spec rev 55 §10)', () => {
   it(`accepts ${MAX_FLIGHT_LIST_PAIRS} pairs and refuses a pairs string of 51`, () => {
     expect(flightListsQuerySchema.safeParse({ pairs: pairsText(MAX_FLIGHT_LIST_PAIRS) }).success).toBe(true);

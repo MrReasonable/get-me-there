@@ -225,6 +225,12 @@ describe('readFlights (spec rev 55 §2: the 30 cheapest of the cell’s options,
       Array.from({ length: 30 }, (_, i) => `${10 + (i % 10)}:${String(i).padStart(2, '0')}`),
     );
   });
+  // why: 20.7 review finding 8: a byte-order mark is a format character, removed, never read as a space
+  it('removes a U+FEFF inside a name rather than reading it as a space', () => {
+    const r = readFlights(facts([name({ carriers: 'QQ\ufeffAir', operator: 'QQ \ufeff Regional' })]), REQ);
+    expect(r.flights[0]?.carriers).toEqual(['QQAir']);
+    expect(r.flights[0]?.operatedBy).toBe('QQ Regional');
+  });
   it('collapses the spaces a stripped character leaves', () => {
     const r = readFlights(facts([name({ carriers: 'QQ \u202e Air' })]), REQ);
     expect(r.flights[0]?.carriers).toEqual(['QQ Air']);

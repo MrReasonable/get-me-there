@@ -441,21 +441,7 @@ export class PageSession {
     if (settled.kind.kind === 'no-flights')
       return {
         answer:
-          req.mode === 'flights'
-            ? this.flights(
-                {
-                  listed: 'no-flights',
-                  flights: [],
-                  minMinor: null,
-                  tabMinor: null,
-                  optionsUnparsed: 0,
-                  optionsOtherCell: 0,
-                  resultsStated: null,
-                  pointOfSale: 'unknown',
-                },
-                null,
-              )
-            : this.cells({ status: 'no-flights' }, 'unknown'),
+          req.mode === 'flights' ? this.noFlightsAnswer() : this.cells({ status: 'no-flights' }, 'unknown'),
         stop: null,
       };
     const form = checkForm(await driver.formFacts(d), req);
@@ -584,6 +570,26 @@ export class PageSession {
       ),
       stop: null,
     };
+  }
+
+  /**
+   * Ruling B8: a flights page that showed Google's own no-flights line: listed 'no-flights', no flight, nothing else
+   * read (no minimum, tab price, counts or view), the point of sale unknown as the list page's no-flights answer says.
+   */
+  private noFlightsAnswer(): WorkerAnswer {
+    return this.flights(
+      {
+        listed: 'no-flights',
+        flights: [],
+        minMinor: null,
+        tabMinor: null,
+        optionsUnparsed: 0,
+        optionsOtherCell: 0,
+        resultsStated: null,
+        pointOfSale: 'unknown',
+      },
+      null,
+    );
   }
 
   /** A flights answer (spec rev 55 §2) from what the page listed and the view read. */

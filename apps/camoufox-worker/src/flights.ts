@@ -58,14 +58,16 @@ export function dayOffset(
 }
 
 /**
- * One name as a flight list stores it (spec rev 55 §2; sec-004): every whitespace run (tabs and line breaks included)
- * a single space, every other control or format character (bidi overrides, zero-width marks) removed, then trimmed.
- * The length cap and the character rule are the schema's, which refuses rather than truncates.
+ * One name as a flight list stores it (spec rev 55 §2; sec-004): every format character (bidi overrides, zero-width
+ * marks, U+FEFF) removed first, so none is ever read as a space; then every whitespace run (tabs and line breaks
+ * included) a single space, any remaining control character removed, spaces collapsed again and the name trimmed. The
+ * length cap and the character rule are the schema's, which refuses rather than truncates.
  */
 function clean(s: string): string {
   return s
+    .replace(/\p{Cf}/gu, '')
     .replace(/\s+/gu, ' ')
-    .replace(/[\p{Cc}\p{Cf}]/gu, '')
+    .replace(/\p{Cc}/gu, '')
     .replace(/ {2,}/g, ' ')
     .trim();
 }

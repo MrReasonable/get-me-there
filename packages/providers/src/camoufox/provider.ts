@@ -7,7 +7,6 @@
  * No airport is named here (spec §1).
  */
 import {
-  APP_INSTANCE_HEADER,
   BudgetExceeded,
   billingMonthWindow,
   CAMOUFOX_CLOCK_SKEW_MS,
@@ -26,7 +25,7 @@ import {
   type Logger,
   type PageRequest,
   type ProviderContext,
-  ProviderError,
+  type ProviderError,
   pageRequestSchema,
   type Secret,
   SHARED_WORKER_DEFAULTS,
@@ -34,15 +33,14 @@ import {
   type SuppliedField,
   sharedInt,
   type TilePlan,
-  WORKER_KEY_HEADER,
   workerAnswerSchema,
 } from '@gmt/core';
 import type { HttpKit } from '../http/types.js';
 import { parseError } from '../shared/errors.js';
-import { throwIfMonthly } from './answer.js';
 import { flightListCapability } from './flights.js';
 import { gridTileEstimate, planGridTiles } from './grid.js';
 import { gridTile } from './gridTile.js';
+import { postToWorker } from './post.js';
 import { camoufoxPreflight } from './preflight.js';
 import { planSingleCells } from './tiles.js';
 
@@ -182,7 +180,6 @@ export function camoufoxProvider(o: CamoufoxProviderOptions): FlightProvider {
       windowEnd: until,
     });
   };
-  const instanceHeader = o.appInstance === undefined ? {} : { [APP_INSTANCE_HEADER]: o.appInstance };
 
   async function fetchTile(
     plan: TilePlan,
@@ -213,35 +210,9 @@ export function camoufoxProvider(o: CamoufoxProviderOptions): FlightProvider {
     if (request === null)
       return fail(parseError('no-airport-names', 'the query carries no valid airport names', WHERE));
     const started = o.clock.now();
-    let body: unknown;
-    try {
-      const res = await o.http.request({
-        providerId: 'camoufox',
-        executionId: ctx.executionId,
-        tileIndex: plan.index,
-        endpointPath: PAGE_PATH,
-        method: 'POST',
-        url: new URL(PAGE_PATH, o.workerUrl),
-        headers: {
-          [WORKER_KEY_HEADER]: o.key.reveal(),
-          'content-type': 'application/json',
-          accept: 'application/json',
-          ...instanceHeader,
-        },
-        body: JSON.stringify(request),
-        cache: 'never',
-        signal: ctx.signal,
-        recordFixtures: ctx.recordFixtures,
-        ...(ctx.beforeSend === undefined ? {} : { beforeSend: ctx.beforeSend }),
-      });
-      body = res.body;
-    } catch (e) {
-      if (e instanceof ProviderError) {
-        throwIfMonthly(e);
-        return fail(e);
-      }
-      throw e;
-    }
+    const sent = await postToWorker(o, { path: PAGE_PATH, body: request, tileIndex: plan.index, ctx });
+    if (!sent.ok) return fail(sent.error);
+    const body = sent.body;
     const a = workerAnswerSchema.safeParse(body);
     if (!a.success || a.data.kind !== 'cells')
       return fail(parseError('unknown-answer', 'the worker answered what this build cannot read', WHERE));
@@ -316,37 +287,16 @@ export function camoufoxProvider(o: CamoufoxProviderOptions): FlightProvider {
     if (!request.success)
       return fail(parseError('bad-grid-path', 'the grid path is not a valid request', WHERE));
     const started = o.clock.now();
-    let body: unknown;
-    try {
-      const res = await o.http.request({
-        providerId: 'camoufox',
-        executionId: ctx.executionId,
-        tileIndex: plan.index,
-        endpointPath: PAGE_PATH,
-        method: 'POST',
-        url: new URL(PAGE_PATH, o.workerUrl),
-        headers: {
-          [WORKER_KEY_HEADER]: o.key.reveal(),
-          'content-type': 'application/json',
-          accept: 'application/json',
-          ...instanceHeader,
-        },
-        body: JSON.stringify(request.data),
-        cache: 'never',
-        signal: ctx.signal,
-        recordFixtures: ctx.recordFixtures,
-        // why: ruling 12: the reservation checks the page's allowed scrolls against the run's and the month's caps
-        scrolls: allowance,
-        ...(ctx.beforeSend === undefined ? {} : { beforeSend: ctx.beforeSend }),
-      });
-      body = res.body;
-    } catch (e) {
-      if (e instanceof ProviderError) {
-        throwIfMonthly(e);
-        return fail(e);
-      }
-      throw e;
-    }
+    // why: ruling 12: the reservation checks the page's allowed scrolls against the run's and the month's caps
+    const sent = await postToWorker(o, {
+      path: PAGE_PATH,
+      body: request.data,
+      tileIndex: plan.index,
+      ctx,
+      scrolls: allowance,
+    });
+    if (!sent.ok) return fail(sent.error);
+    const body = sent.body;
     const a = workerAnswerSchema.safeParse(body);
     if (!a.success || a.data.kind !== 'grid')
       return fail(parseError('unknown-answer', 'the worker answered what this build cannot read', WHERE));

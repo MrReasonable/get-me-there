@@ -328,7 +328,6 @@ describe('POST /v1/flights (spec rev 55 §2)', () => {
   it.each([
     ['a list body', { raw: JSON.stringify(BODY) }],
     ['a grid body', { raw: JSON.stringify({ ...BODY, mode: 'grid' }) }],
-    ['an oversize body', { raw: JSON.stringify({ ...FLIGHTS, pad: 'x'.repeat(MAX_BODY_BYTES) }) }],
     ['a wrong content type', { type: 'text/plain' }],
     ['not JSON', { raw: '{not json' }],
   ])('400 for %s, nothing paged', async (_n, o) => {
@@ -338,6 +337,20 @@ describe('POST /v1/flights (spec rev 55 §2)', () => {
     expect(await r.json()).toEqual({ kind: 'bad-request' });
     expect(r.headers.get('x-gmt-google-contacted')).toBe('0');
     expect(t.seen).toEqual([]);
+  });
+  // why: 20.7 review finding 6: a body the schema accepts, padded with JSON whitespace, isolates the byte cap: one byte
+  // over is refused before parsing, and the same body at the cap is read
+  it('refuses a valid body one byte over the 4,096-byte cap, and reads it at the cap', async () => {
+    const text = JSON.stringify(FLIGHTS);
+    const padded = (size: number) => `{${' '.repeat(size - text.length)}${text.slice(1)}`;
+    expect(JSON.parse(padded(MAX_BODY_BYTES + 1))).toEqual(FLIGHTS);
+    const t = await start({ answer: flights, googleContacted: true });
+    const over = await t.post(FLIGHTS, { path: '/v1/flights', raw: padded(MAX_BODY_BYTES + 1) });
+    expect([over.status, over.headers.get('x-gmt-google-contacted')]).toEqual([400, '0']);
+    expect(t.seen).toEqual([]);
+    const at = await t.post(FLIGHTS, { path: '/v1/flights', raw: padded(MAX_BODY_BYTES) });
+    expect(at.status).toBe(200);
+    expect(t.seen).toEqual([FLIGHTS]);
   });
   it('/v1/page refuses a flights body, 400, nothing paged', async () => {
     const t = await start({ answer: flights, googleContacted: true });
