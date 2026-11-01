@@ -46,9 +46,10 @@ export interface HitTest {
  * the page (serialised by Playwright), so it reads the page's globals through `globalThis` and closes over nothing.
  */
 export function hitTestOf(el: HitElement): HitTest {
-  // why: written out here, not shared: the function is serialised into the page and closes over nothing
+  // why: written out here, not shared: this body is serialised into the page and closes over nothing, and it defines
+  // no inner callable (the runtime's transform wraps each in a helper the page lacks: recordings 3 and 4)
   const slack = 4;
-  const rowOf = (e: HitElement): HitElement | null => e.closest('li, [role="listitem"], [role="row"]');
+  const rows = 'li, [role="listitem"], [role="row"]';
   const r = el.getBoundingClientRect();
   const x = r.left + r.width / 2;
   const y = r.top + r.height / 2;
@@ -71,7 +72,7 @@ export function hitTestOf(el: HitElement): HitTest {
     };
   const relation =
     at === el ? 'self' : el.contains(at) ? 'descendant' : at.contains(el) ? 'ancestor' : 'other';
-  const row = rowOf(el);
+  const row = el.closest(rows);
   const a = at.getBoundingClientRect();
   const covers =
     a.left <= r.left + slack &&
@@ -84,7 +85,7 @@ export function hitTestOf(el: HitElement): HitTest {
     role: at.getAttribute('role'),
     relation,
     inViewport,
-    sameRow: row === null ? null : rowOf(at) === row,
+    sameRow: row === null ? null : at.closest(rows) === row,
     coversTarget: covers,
     pointerEvents: style.pointerEvents,
     position: style.position,

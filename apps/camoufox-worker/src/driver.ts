@@ -186,9 +186,11 @@ export interface Driver {
    * which the outbound result pattern reads (preflight D6), else StepFailed('find-outbound', 'not-found' |
    * 'ambiguous', 'select-outbound') with nothing activated; then, by the controller's ruling after recording 2, the
    * link is activated from the keyboard: steps `focus-outbound` and `press-outbound` (Enter), each under
-   * CLICK_TIMEOUT_MS, a failure carrying Playwright's reason as a word. Returns what it activated.
+   * CLICK_TIMEOUT_MS, a failure carrying Playwright's reason as a word. `onActivate` is told once the link is found,
+   * before the activation starts (so a caller records the activation however the steps after it end). Returns what it
+   * activated.
    */
-  clickOutbound(name: string, d: Deadline, o: StepOptions): Promise<string[]>;
+  clickOutbound(name: string, d: Deadline, o: StepOptions, onActivate?: () => void): Promise<string[]>;
 }
 
 /** How a timed step runs: the timers, the debug log, and the page's start (for elapsed times). */
@@ -557,7 +559,7 @@ export function createDriver(page: PageLike, guard: GuardState, S: Selectors = S
       };
     },
 
-    async clickOutbound(name, d, o) {
+    async clickOutbound(name, d, o, onActivate) {
       const fail = (reason: 'not-found' | 'ambiguous'): StepFailed =>
         new StepFailed('find-outbound', reason, 'select-outbound');
       // why: preflight D6: only a result-shaped name is ever looked for, so nothing but an option's own link is clicked
@@ -568,6 +570,7 @@ export function createDriver(page: PageLike, guard: GuardState, S: Selectors = S
       if (found === 0) throw fail('not-found');
       if (found > 1) throw fail('ambiguous');
       const link = links.nth(0);
+      onActivate?.();
       // why: the controller's ruling after recording 2 (the pointer click's centre was covered by another element of
       // the row, which intercepted it): the verified link itself is focused and activated with Enter, as a keyboard
       // user would; never force, coordinates, the covering element or a synthetic event. Each action runs

@@ -1,6 +1,7 @@
 // The recorder's probe of the outbound's link before its click (WP21 Task 21.0, after recording 1): how many links
 // match, the box's size, whether Playwright sees it visible and enabled, and what the page's hit test finds at its
 // centre (a tag, a role token and the relation to the target; never text).
+import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { type HitElement, hitTestOf, probeTarget } from '../src/researchProbe.js';
 import { FakePage, n, optionName, RESULTS_URL } from './support/fakePage.js';
@@ -211,5 +212,21 @@ describe('hitTestOf (the page script, over a synthetic document)', () => {
     Reflect.set(globalThis, 'innerHeight', 30);
     at = null;
     expect(hitTestOf(el()).inViewport).toBe(false);
+  });
+});
+
+// why: recordings 3 and 4 (2026-11-01) read `probeFailed: 'Error'` for every target: the page function then held an
+// arrow function of its own, which the runtime's transform wraps in a helper that does not exist in the page. The
+// function Playwright serialises must define no function inside it
+describe('hitTestOf is self-contained', () => {
+  it('its source defines no function and calls no helper of this module', () => {
+    const src = readFileSync(new URL('../src/researchProbe.ts', import.meta.url), 'utf8');
+    const start = src.indexOf('export function hitTestOf(');
+    const body = src.slice(src.indexOf('{', start), src.indexOf('\n}\n', start));
+    expect(start).toBeGreaterThan(0);
+    expect(body).not.toMatch(/=>|\bfunction\b/);
+    expect(body).not.toMatch(/\btoken\(|\bprobeTarget\(/);
+    // why: and its runtime source holds no transform helper either
+    expect(hitTestOf.toString()).not.toMatch(/__name|=>/);
   });
 });

@@ -175,6 +175,8 @@ export interface Calls {
   /** WP21 Task 21.0 (the keyboard activation): every focused node and every key pressed, as `role:name` / `key:role:name`. */
   focuses: string[];
   presses: string[];
+  /** Focus and key actions in order, each press marked `focused` when it went to the node last focused. */
+  actions: string[];
   gotos: Array<{ url: string; timeout: number | undefined; waitUntil: string | undefined }>;
   closed: number;
 }
@@ -233,6 +235,8 @@ export class FakeLocator implements LocatorLike {
   focus(o?: { timeout?: number }): Promise<void> {
     return this.read(o, (x) => {
       this.page.calls.focuses.push(`${x.role ?? ''}:${x.name ?? ''}`);
+      this.page.calls.actions.push(`focus:${x.role ?? ''}:${x.name ?? ''}`);
+      this.page.focused = x;
     });
   }
   /** A key on the node; Enter activates it as a click would (the page's own handler: `onClick`). */
@@ -240,6 +244,9 @@ export class FakeLocator implements LocatorLike {
     if (this.node()?.pressHang === true) return this.page.hangUntilClosed<void>();
     return this.read(o, (x) => {
       this.page.calls.presses.push(`${key}:${x.role ?? ''}:${x.name ?? ''}`);
+      this.page.calls.actions.push(
+        `press:${key}:${x.role ?? ''}:${x.name ?? ''}:${this.page.focused === x ? 'focused' : 'unfocused'}`,
+      );
       if (key === 'Enter') this.page.onClick(x);
     });
   }
@@ -372,7 +379,17 @@ export interface Navigation {
 
 /** A scripted page. `trees` are what successive `readFacts` polls see (the last repeats). */
 export class FakePage implements HeadedPageLike {
-  readonly calls: Calls = { timeouts: [], clicks: [], gotos: [], closed: 0, focuses: [], presses: [] };
+  readonly calls: Calls = {
+    timeouts: [],
+    clicks: [],
+    gotos: [],
+    closed: 0,
+    focuses: [],
+    presses: [],
+    actions: [],
+  };
+  /** The node the last `focus()` focused (a key press goes to whatever is focused in a browser). */
+  focused: FakeNode | null = null;
   /** Whether the page was closed; read through `isClosed()` as Playwright's page is. */
   shut = false;
   isClosed(): boolean {

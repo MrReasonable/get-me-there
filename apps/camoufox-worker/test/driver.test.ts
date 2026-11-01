@@ -995,9 +995,27 @@ describe('clickOutbound (WP21 Task 21.0)', () => {
     ]);
   });
   it('the Enter goes to the element it focused, after the focus', async () => {
-    const { page, r } = run(tree([n('link', NAME)]));
+    const { page, r } = run(tree([n('link', optionName(478)), n('link', NAME)]));
     await r;
-    expect([page.calls.focuses, page.calls.presses]).toEqual([[`link:${NAME}`], [`Enter:link:${NAME}`]]);
+    // why: the press is marked focused only when it lands on the node focused last; pressing first, or another
+    // element, would read otherwise
+    expect(page.calls.actions).toEqual([`focus:link:${NAME}`, `press:Enter:link:${NAME}:focused`]);
+  });
+  it('tells its caller once the link is found, before the activation', async () => {
+    const page = new FakePage(null);
+    page.setUrl(RESULTS_URL);
+    page.setTrees([tree([n('link', NAME)])]);
+    const timers = fakeTimers();
+    const seen: string[] = [];
+    await createDriver(page, guard()).clickOutbound(
+      NAME,
+      timers.deadline(90_000),
+      { timers, flow: 'select-outbound' },
+      () => seen.push(`activating after ${page.calls.actions.length} actions`),
+    );
+    expect(seen).toEqual(['activating after 0 actions']);
+    const none = run(tree([n('link', optionName(478))]));
+    await expect(none.r).rejects.toMatchObject({ reason: 'not-found' });
   });
   it('none of that name is not-found, and nothing is clicked', async () => {
     const { page, r } = run(tree([n('link', optionName(478))]));

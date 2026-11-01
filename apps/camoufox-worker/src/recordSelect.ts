@@ -1,20 +1,20 @@
 /**
- * `record --select-outbound` (WP21 Task 21.0; spec §2 rev 55 "Recordings first"; the brief's §5 record.ts): the return
- * leg's research, on one results page under every rule the recorder applies. It runs the SERVED sequence exactly as
- * the page session does (the Best view settled and classified, the search form checked, the Cheapest flow where the
- * entry's CHEAPEST_FLOW_VERIFIED is set, falling back to the Best view as the session does), picks the cheapest option
- * on the departure day (the recorder has no airport names, so the day is its only cell check; ties by page order),
- * activates its link (focused, then Enter: the controller's ruling after recording 2) and records what Google shows
- * next. It then loads the list page afresh (the worker's own URL), runs the served sequence again and selects the next-cheapest. Before each selection and the reload the pacer is
- * re-claimed (the spacing waited out under its own budget), and each step has its own page timeout, inside the page's
- * cap of 5 page timeouts and 3 spacings.
+ * `record --select-outbound` (WP21 Task 21.0; spec §2 rev 55 "Recordings first"; the brief's §5 record.ts): the
+ * return leg's research, on one results page under every rule the recorder applies. It runs the SERVED sequence
+ * exactly as the page session does (the Best view settled and classified, the search form checked, the Cheapest flow
+ * where the entry's CHEAPEST_FLOW_VERIFIED is set, falling back to the Best view as the session does), picks the
+ * cheapest option on the departure day (the recorder has no airport names, so the day is its only cell check; ties by
+ * page order), activates its link (focused, then Enter: the controller's ruling after recording 2) and records what
+ * Google shows next. It then loads the list page afresh (the worker's own URL), runs the served sequence again and
+ * selects the next-cheapest. Before each selection and the reload the pacer is re-claimed (the spacing waited out under
+ * its own budget), and each step has its own page timeout, inside the page's cap of 6 page timeouts and 3 spacings.
  *
  * What it records is facts only: counts, booleans, the names the locators read (local-only recordings, decision 61),
  * the document loads the guard counted, and timings. A step that does not complete (a selection that finds no single
  * link, a view that never changes, a spacing wait past its budget, a step's own deadline) is recorded as such and ends
- * the page plainly, never as a stop and never as a page that did not settle; a blocked kind on any poll after a click
- * or the reload is the stop it always is, with its cool-down. Nothing is clicked but the Cheapest flow's names, and
- * nothing activated but an option's own link. Only record.ts imports this module (rules.test.ts pins that).
+ * the page plainly, never as a stop and never as a page that did not settle; a blocked kind on any poll after an
+ * activation or the reload is the stop it always is, with its cool-down. Nothing is clicked but the Cheapest flow's
+ * names, and nothing activated but an option's own link. Only record.ts imports this module (rules.test.ts pins that).
  */
 import type { BlockedPage, IsoDate, Logger } from '@gmt/core';
 import type { PageBudget } from './budget.js';
@@ -411,8 +411,8 @@ async function selectionSteps(
   const d = c.budget.nextFor(c.pageMs);
   // why: until the pre-click read answers, the view before the step is unknown (never a change by default)
   let before: Before = { url: null, loads: c.guard.documentLoads, signature: null };
-  /** The keyboard activation ran to its end (the link focused and Enter pressed). */
-  let activated = false;
+  /** The keyboard activation was attempted (the link found, its focus and Enter begun), however its steps ended. */
+  let attempted = false;
   let started = timers.now();
   try {
     // why: preflight P5: the pre-click signature by the return pattern, the same pattern every poll after it reads
@@ -424,8 +424,11 @@ async function selectionSteps(
     started = timers.now();
     const steps: StepOptions = { timers, log, startedAt: c.pageStart, flow: 'select-outbound' };
     try {
-      c.clicked.push(...(await c.driver.clickOutbound(pick.name, d, steps)));
-      activated = true;
+      c.clicked.push(
+        ...(await c.driver.clickOutbound(pick.name, d, steps, () => {
+          attempted = true;
+        })),
+      );
     } catch (e) {
       if (e instanceof DeadlineExceeded || d.expired()) throw e;
       // why: a failed click may have left a page that is no results page at all: classified once, a block is its stop
@@ -433,15 +436,13 @@ async function selectionSteps(
       if (blocked !== null) return { stop: await c.stop(blocked.page, blocked.rule, blocked.facts) };
       const selectFailed = e instanceof StepFailed ? `${e.step}:${e.reason}` : 'click';
       const clickFailure = e instanceof StepFailed ? e.detail : undefined;
-      // why: past the find step, the keyboard activation was attempted
-      const activated = !(e instanceof StepFailed && e.step === 'find-outbound');
       return {
         record: {
           step,
           waitMs,
           selectFailed,
           ...(clickFailure === undefined ? {} : { clickFailure }),
-          ...(activated ? { activation: 'keyboard' as const } : {}),
+          ...(attempted ? { activation: 'keyboard' as const } : {}),
         },
         end: true,
       };
@@ -469,7 +470,7 @@ async function selectionSteps(
   } catch (e) {
     if (!(e instanceof DeadlineExceeded)) throw e;
     const r = await unsettled(c, step, 'returns', before, started, waitMs);
-    if (activated && 'record' in r) r.record.activation = 'keyboard';
+    if (attempted && 'record' in r) r.record.activation = 'keyboard';
     return r;
   }
 }

@@ -4,22 +4,24 @@
 // worst case and settled to the documents loaded. Synthetic trees only; no value here comes from a recording.
 import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { type BlockedPage, CAMOUFOX_BUILDS } from '@gmt/core';
+import { asIsoDate, type BlockedPage, CAMOUFOX_BUILDS } from '@gmt/core';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as budget from '../src/budget.js';
 import { loadWorkerConfig } from '../src/config.js';
 import { CooldownStore } from '../src/cooldown.js';
-import type { FrameLike, RequestLike } from '../src/driver.js';
+import { createDriver, type Driver, type FrameLike, type RequestLike } from '../src/driver.js';
 import { buildLaunchOptions, launchOptionsForMeta } from '../src/launch.js';
+import { Pacer } from '../src/pacer.js';
 import { RECORD_SELECT_PAGES, type RecordDeps, record } from '../src/record.js';
-import { selectOutboundCapMs } from '../src/recordSelect.js';
+import { recordSelectOutbound, selectOutboundCapMs } from '../src/recordSelect.js';
 import { type EntryContext, EX_CONFIG, EX_UNAVAILABLE } from '../src/run.js';
 import { SELECTORS } from '../src/selectors.js';
+import { DeadlineExceeded } from '../src/timers.js';
 import { FakeContext } from './support/fakeContext.js';
 import {
   descendants,
   type FakeNode,
-  type FakePage,
+  FakePage,
   formNodes,
   n,
   optionName,
@@ -955,5 +957,58 @@ describe('record --select-outbound: the target and the click’s failure (WP21 T
     expect(t.out.find((l) => l.startsWith('select-outbound:'))).toContain(
       'first-selection select-failed press-outbound:failed intercepted',
     );
+  });
+});
+
+// why: review of the keyboard activation (Low): an activation that the step's deadline cuts short still records which
+// activation ran, through the unsettled path; driven on recordSelectOutbound directly, with the driver's activation
+// replaced by one that reports the link found, then meets the deadline
+describe('recordSelectOutbound: the activation recorded through the deadline path', () => {
+  it('a press the step deadline ends records activation keyboard and no-activation', async () => {
+    const timers = fakeTimers();
+    const dir = tmpDir();
+    const page = new FakePage(null);
+    page.setUrl(LANDED);
+    page.setTrees([bestTree()]);
+    page.onClick = (x) => {
+      if (x.role === 'tab') page.setTrees([cheapestTree()]);
+    };
+    const guard = { hops: [], frameUrls: [], refused: null, documentLoads: 1 };
+    const real = createDriver(page, guard, SELECTORS);
+    const driver: Driver = {
+      ...real,
+      clickOutbound: async (_name, _d, _o, onActivate) => {
+        onActivate?.();
+        throw new DeadlineExceeded();
+      },
+    };
+    const pacer = new Pacer({ dir, minSpacingSeconds: 30, clock: timers.clock });
+    pacer.claim();
+    const out = await recordSelectOutbound({
+      driver,
+      page,
+      guard,
+      budget: budget.pageBudget(timers, 90_000, timers.now(), 630_000),
+      pageStart: timers.now(),
+      deps: { timers, log: memoryLog(), pollMs: 2000, selectors: SELECTORS },
+      returnsS: { ...SELECTORS, RETURN_SELECT_VERIFIED: true },
+      pacer,
+      pageMs: 90_000,
+      url: URL0,
+      request: { departureDate: asIsoDate('2026-11-05'), returnDate: asIsoDate('2026-11-15') },
+      stepMs: {},
+      clicked: [],
+      stop: () => Promise.reject(new Error('no stop expected')),
+    });
+    expect(out.kind).toBe('read');
+    const steps = out.kind === 'read' ? out.data.steps : null;
+    expect(steps).toEqual([
+      expect.objectContaining({
+        step: 'first-selection',
+        activation: 'keyboard',
+        selectFailed: 'press-outbound:no-activation',
+        after: expect.objectContaining({ settled: false, changedFromPreClick: false }),
+      }),
+    ]);
   });
 });
