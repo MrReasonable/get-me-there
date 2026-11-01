@@ -291,14 +291,24 @@ describe('dates typed the old way (Review Focus 5)', () => {
     expect(field(PLAN_COPY.earliest).value).toBe(text);
   });
 
-  it('a date refused beside its field is said politely, not as an alert', async () => {
+  it('a date refused beside its field is said in a polite region that is there, empty, before it is judged', async () => {
     holdEstimates();
     const { user } = renderForm();
+    // why: follow-up 2 — a live region is announced only when its content changes after it is mounted
+    const region = (end: string) => document.getElementById(`w-${end}-note`);
+    for (const end of ['from', 'to']) {
+      expect(region(end)).toHaveAttribute('aria-live', 'polite');
+      expect(region(end)).toHaveTextContent('');
+    }
+    const before = region('from');
     await user.type(field(PLAN_COPY.earliest), '10/01/2027');
+    expect(region('from')).toHaveTextContent('');
     await user.tab();
-    const note = screen.getByText(N.dateFormat);
-    expect(note).toHaveAttribute('aria-live', 'polite');
-    expect(note.closest('[role="alert"]')).toBeNull();
+    // the same node, now holding the words, never an alert
+    expect(region('from')).toBe(before);
+    expect(region('from')).toHaveTextContent(N.dateFormat);
+    expect(region('from')?.closest('[role="alert"]')).toBeNull();
+    expect(field(PLAN_COPY.earliest)).toHaveAccessibleDescription(N.dateFormat);
   });
 
   it('pressing Search now with a date still unread shows the refusal beside the field (on submit)', async () => {

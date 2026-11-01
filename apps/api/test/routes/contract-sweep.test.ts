@@ -177,6 +177,7 @@ function apiTexts(): string[] {
     API_TEXT.draftNotice,
     API_TEXT.draftCannotEnable,
     API_TEXT.draftNoEstimate,
+    API_TEXT.repeatNotConfirmed,
     API_TEXT.deletedNotice,
     API_TEXT.invalidDefinition,
     API_TEXT.zeroCells,

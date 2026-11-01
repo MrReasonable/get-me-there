@@ -58,6 +58,7 @@ function DateBox({ form, end, label }: { form: SearchForm; end: DateEnd; label: 
   const apiErrors = form.errorsFor(`window.${end}`);
   const messages = [...(error === null ? [] : [error]), ...apiErrors];
   const noteId = `${id}-note`;
+  const echoId = `${id}-echo`;
   return (
     <span className="flex flex-col gap-1">
       <label htmlFor={id} className="field-label">
@@ -72,17 +73,17 @@ function DateBox({ form, end, label }: { form: SearchForm; end: DateEnd; label: 
         placeholder={PLAN_COPY.datePlaceholder}
         value={form.dateText[end]}
         aria-invalid={messages.length > 0}
-        aria-describedby={messages.length > 0 || echo !== null ? noteId : undefined}
+        aria-describedby={messages.length > 0 ? noteId : echo !== null ? echoId : undefined}
         onChange={(e) => form.setDateText(end, e.target.value)}
         onBlur={() => form.leaveDate(end)}
       />
-      {/* why: fix round 1, finding 9 — the note is polite: it is said once the field is left, never as an alert */}
-      {messages.length > 0 ? (
-        <span id={noteId} aria-live="polite" className="bad-text text-sm">
-          {messages.join(' ')}
-        </span>
-      ) : echo !== null ? (
-        <span id={noteId} className="hint">
+      {/* why: fix round 1 finding 9 and follow-up 2 — the note is a polite region kept mounted, empty until the field is
+      judged, so its words are announced when they appear and never as an alert */}
+      <span id={noteId} aria-live="polite" className="bad-text text-sm">
+        {messages.join(' ')}
+      </span>
+      {messages.length === 0 && echo !== null ? (
+        <span id={echoId} className="hint">
           {echo}
         </span>
       ) : null}

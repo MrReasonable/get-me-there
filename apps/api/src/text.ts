@@ -41,6 +41,8 @@ export const API_TEXT = {
   draftNotice: 'Set at least one origin and one destination before running or scheduling this search.',
   draftCannotEnable: 'a definition without origins and destinations cannot be enabled',
   draftNoEstimate: 'set origins and destinations before asking for an estimate',
+  repeatNotConfirmed:
+    'the figures sent do not cover the estimate as it stands now; nothing was changed, ask the estimate again',
   deletedNotice: 'definition deleted; its schedule is removed',
   invalidDefinition: 'the definition is not valid',
   zeroCells: 'the window and nights range resolve to zero cells; widen the window or the nights range',

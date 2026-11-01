@@ -124,16 +124,25 @@ export function useEstimateDraft(
 /**
  * A saved search's estimate as it stands (`POST /definitions/:id/estimate` with its own fields as the body, ruling
  * R2), asked while `body` is known and `enabled`: Search again's second look and a refused Search now's page (spec rev
- * 55 §11). Re-asked on every mount, never retried.
+ * 55 §11). Re-asked on every mount, never retried; `data` is undefined while a read is in flight, so a cached older
+ * answer never shows.
  */
 export function useDefinitionEstimate(id: string, body: DefinitionBody | null, enabled: boolean) {
-  return useQuery({
+  const q = useQuery({
     queryKey: qk.estimateDraft(id, body === null ? '' : JSON.stringify(body)),
     queryFn: body === null ? skipToken : () => api.estimateDefinition(id, body),
     enabled: enabled && body !== null,
     retry: false,
     staleTime: 0,
   });
+  // why: follow-up 3 — the rule `useEstimateDraft` keeps: a cached answer is not current while it is read again (a
+  // remount, a refetch after a refusal), so no older figure is shown beside the press
+  return {
+    data: q.isFetching ? undefined : q.data,
+    error: q.isFetching ? null : q.error,
+    isFetching: q.isFetching,
+    refetch: q.refetch,
+  };
 }
 
 /**

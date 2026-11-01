@@ -31,7 +31,8 @@ export function repeatsText(cron: string | null): string {
  * Save. Save checks the month's fit (a 422 is said in words beside the fields), registers the schedule and stores the
  * sentence's shown runnable totals as the schedule's confirmation, which scheduled runs then use: one `PUT` of
  * `{ scheduleCron, enabled: true, confirmedCostPence, confirmedCalls, confirmShown: true }` (the cron left out when it
- * is the one stored). A scheduled search reads "Repeats Mondays 05:00 · Change", and "Stop repeating" sets `enabled`
+ * is the one stored). The Save is all-or-nothing: when the figures no longer cover the estimate the api changes nothing
+ * and refuses `confirm`, and the fields say "The estimate changed; check it and save again" with the estimate re-asked. A scheduled search reads "Repeats Mondays 05:00 · Change", and "Stop repeating" sets `enabled`
  * 0. A search whose latest run is stopped needs no warning here: its first firing supersedes that run (Task 20.2).
  */
 export function RepeatWeekly({ definition }: { definition: DefinitionResponse }) {
@@ -139,6 +140,14 @@ function ScheduleEditor({
       }
       onDone(true);
     },
+    onError: (e: Error) => {
+      // why: follow-up 1 ruling — the Save is all-or-nothing: a 409 `confirm` means the figures shown no longer cover
+      // the estimate and nothing was changed, so the schedule is still off; the estimate is asked again
+      if (e instanceof ApiError && e.code === 'confirm') {
+        setMoved(true);
+        estimate.refetch();
+      }
+    },
   });
   const wait =
     cron === null
@@ -151,7 +160,7 @@ function ScheduleEditor({
             ? COPY.newSearch.working
             : null;
   const refused =
-    save.error === null
+    save.error === null || (save.error instanceof ApiError && save.error.code === 'confirm')
       ? null
       : save.error instanceof ApiError && save.error.code === 'schedule_over_budget'
         ? W.overBudget

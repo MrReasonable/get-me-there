@@ -213,19 +213,26 @@ describe('Repeat weekly… (spec rev 55 §8.2, §11)', () => {
     expect(editor.textContent ?? '').not.toMatch(/stopped|paused|spending limit/i);
   });
 
-  it('a Save whose confirmation was not stored (the estimate moved) says so beside the button and asks it again', async () => {
-    // the PUT answers with the schedule on but without the sent figures: the server's recomputation was higher
+  it('a Save the api refuses as not covered (409 confirm: nothing changed) says so, keeps the schedule off and asks again', async () => {
+    // why: follow-up 1 ruling — the PUT is all-or-nothing: figures short of the recomputed shown totals turn nothing on
     const seen = serve(() =>
-      HttpResponse.json(definition({ confirmedCostPence: null, confirmedCalls: null })),
+      HttpResponse.json(
+        { error: { code: 'confirm', message: 'server text that must not show' } },
+        { status: 409 },
+      ),
     );
     const { user } = renderWithProviders(<RepeatWeekly definition={unscheduled()} />);
     await user.click(screen.getByRole('button', { name: W.open }));
     await user.click(await screen.findByRole('button', { name: `${W.save} · about £1.20` }));
     expect(await screen.findByText(W.estimateChanged)).toBeInTheDocument();
     expect(screen.queryByText(W.saved)).toBeNull();
-    // the fields stay open, and the estimate is asked again
+    expect(screen.queryByText(/server text that must not show/)).toBeNull();
+    // the fields stay open on a search still not repeating, and the estimate is asked again
     expect(screen.getByRole('group', { name: W.fieldsLabel })).toBeInTheDocument();
     await waitFor(() => expect(seen.estimates.length).toBeGreaterThan(1));
+    // pressing again sends the new figures
+    await user.click(await screen.findByRole('button', { name: `${W.save} · about £1.20` }));
+    await waitFor(() => expect(seen.puts).toHaveLength(2));
   });
 
   it('a search’s page carries it in its header', async () => {

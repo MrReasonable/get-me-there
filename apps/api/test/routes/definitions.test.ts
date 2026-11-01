@@ -297,6 +297,55 @@ describe('PUT / DELETE /api/definitions/:id and the schedule (spec §8.2)', () =
     expect(jobIds(x)).toContain(created.id);
   });
 
+  it("Repeat weekly's Save is all-or-nothing: figures short of the shown totals turn no schedule on (409 confirm)", async () => {
+    const x = await harness();
+    vi.spyOn(x.engine, 'estimate').mockReturnValue({
+      ...estimateOf(3_000_000, 30, [line(2_000_000, 10, 'provider-month')]),
+    });
+    const created = await create(x, exampleDefinitionInput({ scheduleCron: null, enabled: false }));
+    const before = x.ports.repos.definitions.get(created.id);
+    for (const json of [
+      {
+        scheduleCron: '0 5 * * 1',
+        enabled: true,
+        confirmedCostPence: 299,
+        confirmedCalls: 30,
+        confirmShown: true,
+      },
+      {
+        scheduleCron: '0 5 * * 1',
+        enabled: true,
+        confirmedCostPence: 300,
+        confirmedCalls: 29,
+        confirmShown: true,
+      },
+      // a schedule turned on with no figures at all is no confirmation either
+      { scheduleCron: '0 5 * * 1', enabled: true, confirmShown: true },
+    ]) {
+      const res = await x.request(`/api/definitions/${created.id}`, { method: 'PUT', json });
+      expect(res.status).toBe(409);
+      const err = await errorOf(res);
+      expect(err.code).toBe('confirm');
+      // no figures travel with the refusal: the web asks the estimate again
+      expect(err.details).toBeUndefined();
+      // nothing was written: no schedule, no enabled flag, no confirmation, no job
+      const after = x.ports.repos.definitions.get(created.id);
+      expect([after?.scheduleCron, after?.enabled, after?.confirmedCostPence, after?.confirmedCalls]).toEqual(
+        [null, false, null, null],
+      );
+      expect(after?.updatedAt).toBe(before?.updatedAt);
+      expect(jobIds(x)).not.toContain(created.id);
+    }
+    // enabling alone (the stored cron kept) is held to the same rule
+    await x.request(`/api/definitions/${created.id}`, { method: 'PUT', json: { scheduleCron: '0 5 * * 1' } });
+    const enableOnly = await x.request(`/api/definitions/${created.id}`, {
+      method: 'PUT',
+      json: { enabled: true, confirmedCostPence: 1, confirmedCalls: 1, confirmShown: true },
+    });
+    expect(enableOnly.status).toBe(409);
+    expect(x.ports.repos.definitions.get(created.id)?.enabled).toBe(false);
+  });
+
   it('with the real engine: an over-threshold run needs a confirmation, and a confirmation of its figures clears it', async () => {
     // why: review TS-1: the rule runs against a real estimate, not a mocked one (the fixture billed at 10p a call)
     const x = await harness({ FIXTURE_COST_MICRO_GBP: '100000' });

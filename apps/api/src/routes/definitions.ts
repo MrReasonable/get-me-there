@@ -224,6 +224,20 @@ export const definitionHandlers: HandlerTable = {
       const existing = getLiveDefinition(ctx, param(input, 'id'));
       const { confirmedCostPence, confirmedCalls, confirmShown, ...patch } = input.body;
       const merged = validateForSave(mergeDefinition(inputOf(existing), patch), ctx, existing);
+      // why: spec rev 55 §8.2, §10 (Task 20.5 follow-up 1) — Repeat weekly's Save is all-or-nothing: a schedule turned on
+      // with the sentence's figures (`confirmShown`) is written only when those figures cover the recomputed shown
+      // totals, so a schedule is never left on without the confirmation its scheduled runs need; else nothing changes
+      // and the web asks the estimate again (no figures travel with the refusal)
+      const turnsOn = patch.enabled === true || patch.scheduleCron !== undefined;
+      if (confirmShown === true && turnsOn && merged.enabled && merged.scheduleCron !== null) {
+        const shown = ctx.engine.estimate({ ...existing, ...merged }, ctx.ports.clock.todayLondon());
+        if (
+          confirmedCostPence === undefined ||
+          confirmedCalls === undefined ||
+          !sentCoversShown({ pence: confirmedCostPence, calls: confirmedCalls }, shown)
+        )
+          throw new ApiError(409, 'confirm', API_TEXT.repeatNotConfirmed);
+      }
       const updated = applyConfirmation(
         ctx.ports.repos.definitions.update(existing.id, merged),
         { confirmedCostPence, confirmedCalls },
