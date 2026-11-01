@@ -1,12 +1,13 @@
 import type { ProviderId, Stage } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
 import type { EstimateResponse } from '../../../../src/api/types.js';
+import { ESTIMATE_COPY } from '../../../../src/copy/estimate.js';
 import { COPY } from '../../../../src/copy.js';
 import { aboutDuration, estimateSentence } from '../../../../src/views/Searches/estimateLine.js';
 import { estimate, estimateResponse } from '../../../fixtures.js';
 
 // Spec rev 55 §11 "The estimate sentence" (WP20 Task 20.5): one sentence beside Search now, built from the estimate
-// response's figures and codes (rulings A22, A31; po-011; prov-int-014; 20.4 minor 7). Pure: COPY is passed in, and the
+// response's figures and codes (rulings A22, A31; po-011; prov-int-014; 20.4 minor 7). Pure: ESTIMATE_COPY is passed in, and the
 // money formatter is stubbed so the test sees exactly the amounts the sentence asks it for.
 
 const money = (p: number) => `£${(p / 100).toFixed(2)}`;
@@ -63,7 +64,7 @@ function resp(o: {
 }
 
 const sentence = (e: EstimateResponse, cron: string | null = null) =>
-  estimateSentence(e, cron === null ? null : { cron, tz: 'Europe/London' }, COPY, money);
+  estimateSentence(e, cron === null ? null : { cron, tz: 'Europe/London' }, ESTIMATE_COPY, money);
 
 const paid = { providerId: 'searchapi', costMicroGbp: 1_200_000, calls: 300 } satisfies Line;
 
@@ -114,6 +115,42 @@ describe('estimateSentence: the line', () => {
     expect(sentence(resp({ covered: 0, reused: 405 })).line).toBe(
       'Nothing new to ask: 405 date pairs reused from earlier runs',
     );
+  });
+
+  it('nothing new to ask while the run still spends keeps the duration, the cost and the calls (fix round 1, finding 7)', () => {
+    const s = sentence(
+      resp({
+        covered: 0,
+        reused: 405,
+        lines: [{ providerId: 'searchapi', stage: 'verification', calls: 100, costMicroGbp: 1_200_000 }],
+        billed: [{ providerId: 'searchapi', calls: 100, left: 9880, window: 'month' }],
+      }),
+    );
+    expect(s.line).toBe(
+      'Nothing new to ask: 405 date pairs reused from earlier runs · about 2½ hours · about £1.20 · uses about 100 of the 9,880 SearchApi searches left this month',
+    );
+    expect(s.button).toBe('Search now · about £1.20');
+    const calls = sentence(
+      resp({
+        covered: 0,
+        reused: 405,
+        lines: [{ providerId: 'searchapi', stage: 'verification', calls: 100 }],
+        billed: [{ providerId: 'searchapi', calls: 100, left: null, window: 'month' }],
+      }),
+    );
+    expect(calls.line).toBe(
+      'Nothing new to ask: 405 date pairs reused from earlier runs · about 2½ hours · uses about 100 SearchApi searches',
+    );
+    // a cost alone, with no billed-plan calls named, is spending too
+    expect(
+      sentence(
+        resp({
+          covered: 0,
+          reused: 405,
+          lines: [{ providerId: 'searchapi', stage: 'verification', calls: 100, costMicroGbp: 1_200_000 }],
+        }),
+      ).line,
+    ).toBe('Nothing new to ask: 405 date pairs reused from earlier runs · about 2½ hours · about £1.20');
   });
 
   it('nothing asked and nothing reused says nothing can be asked this run', () => {
@@ -204,7 +241,7 @@ describe('estimateSentence: the line', () => {
         softConfirm: { reason: 'cost', estimatePence: 120, thresholdPence: 100 },
       }),
       null,
-      COPY,
+      ESTIMATE_COPY,
       money,
       COPY.searchAgain.label,
     );
@@ -218,7 +255,8 @@ describe('estimateSentence: the line', () => {
 describe('estimateSentence: the edges of each clause', () => {
   it('a schedule with no cron is no schedule: the rest when you search again', () => {
     expect(
-      estimateSentence(resp({ covered: 300 }), { cron: null, tz: 'Europe/London' }, COPY, money).line,
+      estimateSentence(resp({ covered: 300 }), { cron: null, tz: 'Europe/London' }, ESTIMATE_COPY, money)
+        .line,
     ).toMatch(/, the rest when you search again$/);
   });
 

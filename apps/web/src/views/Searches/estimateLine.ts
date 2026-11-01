@@ -6,10 +6,11 @@ import {
   type ProviderId,
 } from '@gmt/core';
 import type { EstimateResponse } from '../../api/types.js';
+import { ESTIMATE_COPY } from '../../copy/estimate.js';
 import { COPY } from '../../copy.js';
 import { parseSchedule } from '../Definitions/schedule.js';
 
-type Copy = typeof COPY;
+type Copy = typeof ESTIMATE_COPY;
 type Line = EstimateResponse['estimate']['perProvider'][number];
 
 /** The schedule the "the rest …" clause follows (po-011): the search's cron and zone when it repeats, else null. */
@@ -45,8 +46,8 @@ const SECONDS_PER_HALF_HOUR = 1800;
  * sentence capitalises its first letter. Under a minute is said as such; under an hour, whole minutes (rounded); from
  * an hour, the nearest half hour, so a run of 2 h 59 m reads "about 3 hours".
  */
-export function aboutDuration(seconds: number, c: Copy = COPY): string {
-  const L = c.estimateLine;
+export function aboutDuration(seconds: number, c: Copy = ESTIMATE_COPY): string {
+  const L = c;
   if (seconds < SECONDS_PER_MINUTE) return L.underAMinute;
   const minutes = Math.round(seconds / SECONDS_PER_MINUTE);
   if (minutes < 60) return L.aboutMinutes(minutes);
@@ -59,7 +60,7 @@ const capitalised = (s: string): string => s.charAt(0).toUpperCase() + s.slice(1
 
 /** The words for a blocked line's scope (engine `checkBudget` names it); a browser page cap is counted in pages. */
 function blockedWhy(scope: string, providerId: ProviderId, c: Copy): string {
-  const W = c.estimateLine.blockedWhy;
+  const W = c.blockedWhy;
   const kind = BUDGET_SCOPE_KINDS.find((k) => k === scope);
   if (kind === undefined) return W.unknown;
   if (kind === 'provider-month' && providerId === 'camoufox') return W['provider-month-pages'];
@@ -68,7 +69,7 @@ function blockedWhy(scope: string, providerId: ProviderId, c: Copy): string {
 
 /** "the rest when you search again" unscheduled; "the rest next Monday" on one weekly day; else the next scheduled run. */
 function restClause(schedule: SentenceSchedule | null, c: Copy): string {
-  const L = c.estimateLine;
+  const L = c;
   if (schedule === null || schedule.cron === null) return L.restAgain;
   const s = parseSchedule(schedule.cron);
   const day = s.kind === 'weekly' && s.days.length === 1 ? L.dayName[s.days[0] ?? -1] : undefined;
@@ -77,7 +78,7 @@ function restClause(schedule: SentenceSchedule | null, c: Copy): string {
 
 /** "asks about all 405 date pairs", "asks about 300 of 405 date pairs this run (…), the rest …", or the nothing-asked line. */
 function askedClause(e: EstimateResponse, schedule: SentenceSchedule | null, c: Copy): string {
-  const L = c.estimateLine;
+  const L = c;
   const asked = e.datePairsCovered + e.datePairsPartly;
   if (asked === 0)
     return e.datePairsReused > 0 ? L.nothingNew(groupThousands(e.datePairsReused)) : L.nothingToAsk;
@@ -103,7 +104,8 @@ function askedClause(e: EstimateResponse, schedule: SentenceSchedule | null, c: 
  * - what is asked of the date pairs, never as prices found: "asks about all 405 date pairs", or "asks about 300 of 405
  *   date pairs this run, the rest when you search again" ("the rest next Monday" on a search repeating on Mondays,
  *   po-011), with "(20 on some airports only)" and "(105 reused from earlier runs)" beside the count (20.4 minor 7);
- *   "Nothing new to ask: 405 date pairs reused from earlier runs" when nothing is asked;
+ *   "Nothing new to ask: 405 date pairs reused from earlier runs" when nothing is asked (followed by the duration, the
+ *   cost and the calls when the run still spends);
  * - "cached prices only where travellers searched recently" when the Aviasales cache is the only source reaching the
  *   date pairs (prov-int-014);
  * - each billable-plan source's calls against what its window has left ("uses about 120 of the 9,880 SearchApi
@@ -122,9 +124,9 @@ export function estimateSentence(
   schedule: SentenceSchedule | null,
   c: Copy,
   money: (pence: number) => string,
-  press: string = c.searchAgain.searchNow,
+  press: string = COPY.searchAgain.searchNow,
 ): EstimateSentence {
-  const L = c.estimateLine;
+  const L = c;
   const lines = e.estimate.perProvider;
   const runnable = lines.filter((p) => p.blocked === null);
   const covers = {
@@ -137,18 +139,27 @@ export function estimateSentence(
   const cost = covers.pence > 0 ? L.about(money(covers.pence)) : billed.length === 0 ? L.free : null;
   const sources = new Set(runnable.filter((p) => p.stage === 'discovery').map((p) => p.providerId));
   const cachedOnly = sources.size === 1 && sources.has('travelpayouts');
+  const billedClauses = billed.map((b) =>
+    b.left === null
+      ? L.billedNoCap(groupThousands(b.calls), L.searchesOf[b.providerId])
+      : L.billed(groupThousands(b.calls), groupThousands(b.left), L.searchesOf[b.providerId], b.window),
+  );
+  const spends = covers.pence > 0 || billed.length > 0;
+  // why: fix round 1, finding 7 — with nothing new to ask a run may still spend (checking fares on reused prices); the
+  // sentence then keeps how long it takes, what it costs and the calls it uses, as the button carries them
   const clauses = nothingAsked
-    ? [asked]
+    ? [
+        asked,
+        ...(spends
+          ? [aboutDuration(e.estimate.seconds, c), ...(cost === null ? [] : [cost]), ...billedClauses]
+          : []),
+      ]
     : [
         aboutDuration(e.estimate.seconds, c),
         ...(cost === null ? [] : [cost]),
         asked,
         ...(cachedOnly ? [L.cachedOnly] : []),
-        ...billed.map((b) =>
-          b.left === null
-            ? L.billedNoCap(groupThousands(b.calls), L.searchesOf[b.providerId])
-            : L.billed(groupThousands(b.calls), groupThousands(b.left), L.searchesOf[b.providerId], b.window),
-        ),
+        ...billedClauses,
       ];
   const tag =
     covers.pence > 0
@@ -195,7 +206,7 @@ function notUsedNotes(lines: readonly Line[], c: Copy, money: (pence: number) =>
   }
   return [...blocked].map(([id, b]) => {
     const pence = microGbpToPence(b.micro);
-    return c.estimateLine.notUsed(
+    return c.notUsed(
       capitalised(mainPathSource(id)),
       blockedWhy(b.scope, id, c),
       pence > 0 ? money(pence) : null,

@@ -2,6 +2,7 @@ import { londonDateOf, type StartRefusalCode } from '@gmt/core';
 import { useExecutionActions, useRefusal } from '../../api/queries.js';
 import type { DefinitionResponse } from '../../api/types.js';
 import { StopSentence, type StopWords } from '../../components/StopWords.js';
+import { REFUSED_COPY } from '../../copy/refused.js';
 import { COPY } from '../../copy.js';
 import { formatIsoDate } from '../../format.js';
 import { CLEARED_FILTERS, datesPatch } from '../../state/datesState.js';
@@ -122,7 +123,7 @@ export function TooManyCells({ cells, bound }: { cells: number; bound: number })
  * `failed` with Search again.
  */
 export function Refused({ definitionId, code }: { definitionId: string; code: StartRefusalCode }) {
-  const R = COPY.refusedPage;
+  const R = REFUSED_COPY;
   const answered = useRefusal(definitionId).data;
   const edit = { view: 'definitions', edit: definitionId, def: null, refused: null };
   if (code === 'confirm')

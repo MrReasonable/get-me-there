@@ -18,6 +18,7 @@ import {
   step,
   type User,
 } from './formSupport.js';
+import { airportRows } from './support.js';
 
 // Spec rev 55 §11 "The new-search form and Search now" (WP20 Task 20.5), design §4.1–§4.3: From, To, Leave between,
 // Stay and Search now, everything else filled in under More options; the estimate asked for 400 ms after the last
@@ -257,20 +258,59 @@ describe('an incomplete form says why, as the button’s accessible description 
 });
 
 describe('dates typed the old way (Review Focus 5)', () => {
-  it('"10/01/2027" is refused beside the field, no estimate is asked past the debounce, and the button names Leave between', async () => {
+  it('"10/01/2027" is refused beside the field once it is left, no estimate is asked past the debounce, and the button names Leave between', async () => {
     const held = holdEstimates();
     const { user } = renderForm();
     await fill(user);
     await user.clear(field(PLAN_COPY.earliest));
     await user.type(field(PLAN_COPY.earliest), '10/01/2027');
+    // the press waits at once, and says why, while the field is still being typed in
+    expect(searchNow()).toHaveAttribute('aria-disabled', 'true');
+    expect(searchNow()).toHaveAccessibleDescription(N.reasons.dateText);
+    expect(N.reasons.dateText).toContain(PLAN_COPY.leaveBetween);
+    await user.tab();
     const box = field(PLAN_COPY.earliest);
     expect(box).toHaveAttribute('aria-invalid', 'true');
     expect(box).toHaveAccessibleDescription(N.dateFormat);
     await step(ESTIMATE_DEBOUNCE_MS * 3);
     expect(held.bodies).toHaveLength(0);
-    expect(searchNow()).toHaveAttribute('aria-disabled', 'true');
-    expect(searchNow()).toHaveAccessibleDescription(N.reasons.dateText);
-    expect(N.reasons.dateText).toContain(PLAN_COPY.leaveBetween);
+  });
+
+  it('typing a valid date says nothing against it at any keystroke (fix round 1, finding 9)', async () => {
+    holdEstimates();
+    const { user } = renderForm();
+    const text = '10 Jan 2027';
+    for (const ch of text) {
+      await user.type(field(PLAN_COPY.earliest), ch);
+      expect(screen.queryByText(N.dateFormat)).toBeNull();
+      expect(field(PLAN_COPY.earliest)).not.toHaveAttribute('aria-invalid', 'true');
+      expect(
+        within(screen.getByRole('group', { name: PLAN_COPY.leaveBetween })).queryByRole('alert'),
+      ).toBeNull();
+    }
+    expect(field(PLAN_COPY.earliest).value).toBe(text);
+  });
+
+  it('a date refused beside its field is said politely, not as an alert', async () => {
+    holdEstimates();
+    const { user } = renderForm();
+    await user.type(field(PLAN_COPY.earliest), '10/01/2027');
+    await user.tab();
+    const note = screen.getByText(N.dateFormat);
+    expect(note).toHaveAttribute('aria-live', 'polite');
+    expect(note.closest('[role="alert"]')).toBeNull();
+  });
+
+  it('pressing Search now with a date still unread shows the refusal beside the field (on submit)', async () => {
+    holdEstimates();
+    const { user } = renderForm();
+    await fill(user);
+    await user.clear(field(PLAN_COPY.latest));
+    await user.type(field(PLAN_COPY.latest), '31/03/2027');
+    expect(screen.queryByText(N.dateFormat)).toBeNull();
+    // why: fireEvent-free: the press is a real click, the field keeps its focus until then
+    await user.click(searchNow());
+    expect(field(PLAN_COPY.latest)).toHaveAccessibleDescription(N.dateFormat);
   });
 
   it('"10 Jan" with no year is echoed beside the field as its next occurrence, "10 Jan 2027"', async () => {
@@ -280,5 +320,77 @@ describe('dates typed the old way (Review Focus 5)', () => {
     const box = field(PLAN_COPY.earliest);
     expect(box).not.toHaveAttribute('aria-invalid', 'true');
     expect(box).toHaveAccessibleDescription('10 Jan 2027');
+  });
+});
+
+/**
+ * Answers each estimate request in turn when the test says, with a body chosen from the request (its longest stay),
+ * so a test sees which answer is shown while another is still out.
+ */
+function queueEstimates() {
+  const waiting: Array<{ maxNights: unknown; answer: () => void }> = [];
+  server.use(
+    airportRows(),
+    http.post(`${API}/definitions/estimate`, async ({ request }) => {
+      const body: unknown = await request.json();
+      const maxNights =
+        typeof body === 'object' && body !== null && 'maxNights' in body ? body.maxNights : null;
+      await new Promise<void>((resolve) => waiting.push({ maxNights, answer: resolve }));
+      // why: each body's answer differs in the date pairs it asks, so the sentence shows whose answer it is
+      return HttpResponse.json(
+        estimateResponse({ datePairs: Number(maxNights) * 10, datePairsCovered: Number(maxNights) * 10 }),
+      );
+    }),
+  );
+  return waiting;
+}
+
+describe('the sentence is only ever the current form’s (fix round 1, findings 8 and 11)', () => {
+  const longest = async (user: User, n: string) => {
+    await user.clear(field(PLAN_COPY.longest));
+    await user.type(field(PLAN_COPY.longest), n);
+  };
+  const region = () => screen.getByRole('status', { name: N.estimateRegion });
+
+  it('an older form’s estimate landing after a change is never shown; the current one’s is', async () => {
+    const waiting = queueEstimates();
+    const { user } = renderForm();
+    await fill(user);
+    await step(ESTIMATE_DEBOUNCE_MS);
+    await vi.waitFor(() => expect(waiting).toHaveLength(1));
+    await longest(user, '14');
+    // the 21-night answer lands now, for a form that is no longer on screen
+    waiting[0]?.answer();
+    await step(0);
+    expect(region()).not.toHaveTextContent('asks about');
+    expect(searchNow()).toHaveAttribute('aria-disabled', 'true');
+    await step(ESTIMATE_DEBOUNCE_MS);
+    await vi.waitFor(() => expect(waiting).toHaveLength(2));
+    expect(waiting[1]?.maxNights).toBe(14);
+    waiting[1]?.answer();
+    await vi.waitFor(() => expect(region()).toHaveTextContent('asks about all 140 date pairs'));
+  });
+
+  it('going back to a form asked before shows nothing until its answer is read again (A → B → A)', async () => {
+    const waiting = queueEstimates();
+    const { user } = renderForm();
+    await fill(user);
+    await step(ESTIMATE_DEBOUNCE_MS);
+    await vi.waitFor(() => expect(waiting).toHaveLength(1));
+    waiting[0]?.answer();
+    await vi.waitFor(() => expect(region()).toHaveTextContent('asks about all 210 date pairs'));
+    await longest(user, '14');
+    await step(ESTIMATE_DEBOUNCE_MS);
+    await vi.waitFor(() => expect(waiting).toHaveLength(2));
+    waiting[1]?.answer();
+    await vi.waitFor(() => expect(region()).toHaveTextContent('asks about all 140 date pairs'));
+    await longest(user, '21');
+    await step(ESTIMATE_DEBOUNCE_MS);
+    await vi.waitFor(() => expect(waiting).toHaveLength(3));
+    // the 21-night answer is cached, but it is being read again: the press waits for the new one
+    expect(region()).not.toHaveTextContent('asks about');
+    expect(searchNow()).toHaveAccessibleDescription(N.working);
+    waiting[2]?.answer();
+    await vi.waitFor(() => expect(region()).toHaveTextContent('asks about all 210 date pairs'));
   });
 });

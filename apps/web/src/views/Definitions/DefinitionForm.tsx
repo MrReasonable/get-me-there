@@ -1,6 +1,5 @@
-import { apiContract } from '@gmt/core';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { ApiError } from '../../api/client.js';
 import { api } from '../../api/endpoints.js';
 import type { DefinitionResponse, ProvidersResponse } from '../../api/types.js';
@@ -18,8 +17,6 @@ import { useSearchForm } from './useSearchForm.js';
 
 const IDS = sentenceIds('edit-search');
 const E = COPY.editSearch;
-/** The start refusals a search's page words from `refused=<code>` (spec rev 55 §11). */
-const PAGE_REFUSALS: ReadonlySet<string> = new Set(apiContract.startRefusalCodes);
 
 /** True when a save changes what the search asks: its airports, dates, stay or cabin (spec rev 55 §11 Edit's Save). */
 function spaceChanged(before: Pick<Draft, SpaceKey>, after: Pick<Draft, SpaceKey>): boolean {
@@ -36,9 +33,9 @@ const SPACE_KEYS: readonly SpaceKey[] = [
 ];
 
 /** Opens the search's page, as a navigation (the page writes it as the search last opened too). */
-function openPage(id: string, refused: string | null): void {
+function openPage(id: string): void {
   writeLastSearch(id);
-  updateSearchParams({ view: 'dates', def: id, edit: null, refused }, 'push');
+  updateSearchParams({ view: 'dates', def: id, edit: null, refused: null }, 'push');
 }
 
 /**
@@ -49,8 +46,8 @@ function openPage(id: string, refused: string | null): void {
  *
  * - **Save and search again**, carrying the cost as Search now does ("Save and search again · about £1.20"): it saves
  *   (a `PUT` storing no confirmation: a confirmation covers that run only, Ian's ruling 3), then starts **that** search
- *   with the sentence's figures, `requireCovered` and `replaceStopped`, and opens its page (a refused start opens it
- *   with `refused=<code>`, worded there).
+ *   with the sentence's figures, `requireCovered` and `replaceStopped`, and opens its page. A refused start is said
+ *   beside the press, as Search again says it, and opens nothing (ruling R1).
  * - **Save**: it saves; when the change altered the search's space (airports, dates, stay, cabin) it opens the page,
  *   which then reads that the dates changed and offers Search again; otherwise it says "Saved." here.
  *
@@ -69,7 +66,7 @@ export function DefinitionForm({
 }) {
   const qc = useQueryClient();
   const [initial] = useState(() => definitionToDraft(existing));
-  const form = useSearchForm(initial, { nameTouched: true, debounceMs });
+  const form = useSearchForm(initial, { nameTouched: true, debounceMs, definitionId: existing.id });
   const { draft } = form;
   const [saved, setSaved] = useState<DefinitionResponse>(existing);
   const [notice, setNotice] = useState<string | null>(null);
@@ -107,11 +104,13 @@ export function DefinitionForm({
       // why: a changed space is read on the search's page ("Dates changed … · Search again"); a confirmation asked
       // for keeps the operator here, beside it
       if (spaceChanged(definitionToDraft(saved), definitionToDraft(d)) && d.needsConfirmation === null)
-        openPage(d.id, null);
+        openPage(d.id);
       else setNotice(E.saved);
     },
     onError: failed,
   });
+  // why: fix round 1, finding 5 — a second press in the same tick lands before the re-render that disables the button
+  const sending = useRef(false);
   const saveAndSearch = useMutation({
     mutationFn: async (v: { body: Draft; covers: EstimateSentence['covers'] }) => {
       const d = await api.updateDefinition(saved.id, v.body);
@@ -123,16 +122,24 @@ export function DefinitionForm({
           requireCovered: true,
           replaceStopped: true,
         });
-        return { id: d.id, refused: null };
+        return d.id;
       } catch (e) {
-        // why: a refusal the page words (spec rev 55 §11) opens the page with it; a run already going opens it as it is
-        if (e instanceof ApiError && (PAGE_REFUSALS.has(e.code) || e.code === 'active'))
-          return { id: d.id, refused: e.code === 'active' ? null : e.code };
-        throw new StartFailed(e instanceof Error ? e.message : String(e));
+        throw new StartRefused(e instanceof Error ? e : new Error(String(e)));
       }
     },
-    onSuccess: (r) => openPage(r.id, r.refused),
-    onError: (e: Error) => (e instanceof StartFailed ? setFailure(E.startFailed(e.message)) : failed(e)),
+    onSettled: () => {
+      sending.current = false;
+    },
+    onSuccess: (id) => openPage(id),
+    onError: (e: Error) => {
+      if (!(e instanceof StartRefused)) return failed(e);
+      // why: ruling R1 — a refused start is worded where it happened, beside this press, and opens nothing; a
+      // `confirm` means the estimate rose since it was shown, so it is asked again and the press shows the new figures
+      if (e.cause instanceof ApiError && e.cause.code === 'confirm') {
+        form.estimate.refetch();
+        setFailure(E.estimateChanged);
+      } else setFailure(startRefusalText(e.cause));
+    },
   });
   const confirm = useMutation({
     mutationFn: (v: { pence: number; calls: number }) =>
@@ -183,8 +190,10 @@ export function DefinitionForm({
           wait={form.wait}
           pending={saveAndSearch.isPending}
           ids={IDS}
+          onBlocked={form.judgeDates}
           onPress={(covers) => {
-            if (form.body === null || pending) return;
+            if (form.body === null || pending || sending.current) return;
+            sending.current = true;
             setNotice(null);
             saveAndSearch.mutate({ body: form.body, covers });
           }}
@@ -197,6 +206,7 @@ export function DefinitionForm({
           aria-disabled={form.reason === null ? undefined : true}
           aria-describedby={form.reason === null ? undefined : IDS.reason}
           onClick={() => {
+            if (form.body === null) form.judgeDates();
             if (form.body === null || pending) return;
             setNotice(null);
             save.mutate(form.body);
@@ -220,5 +230,18 @@ export function DefinitionForm({
   );
 }
 
-/** A save that worked followed by a start that failed for a reason the page does not word. */
-class StartFailed extends Error {}
+/** A save that worked followed by a start that was refused or failed: the start's own error is its cause. */
+class StartRefused extends Error {
+  override readonly cause: Error;
+  constructor(cause: Error) {
+    super(cause.message);
+    this.cause = cause;
+  }
+}
+
+/** A refused start in plain words, as Search again says it (spec rev 55 §11), else that it did not start and why. */
+function startRefusalText(e: Error): string {
+  const refused: Readonly<Record<string, string | undefined>> = COPY.searchAgain.refused;
+  const words = e instanceof ApiError ? refused[e.code] : undefined;
+  return words ?? E.startFailed(e.message);
+}

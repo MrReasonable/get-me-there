@@ -46,7 +46,11 @@ export interface SearchForm {
   /** The text typed into each end of Leave between, as typed. */
   dateText: Record<DateEnd, string>;
   setDateText: (end: DateEnd, text: string) => void;
-  /** Per end: "Enter the date as 10 Jan 2027" when its text reads as no date, else null. */
+  /** The field of this end was left: its date is judged now. */
+  leaveDate: (end: DateEnd) => void;
+  /** The press was tried while the form was not ready: both dates are judged now (on submit). */
+  judgeDates: () => void;
+  /** Per end: "Enter the date as 10 Jan 2027" once its text, read as no date, has been judged (left or pressed). */
   dateError: Record<DateEnd, string | null>;
   /** Per end: the date its text was read as, shown beside it when the text is not already that form ("10 Jan"). */
   dateEcho: Record<DateEnd, string | null>;
@@ -63,7 +67,7 @@ export interface SearchForm {
   /** The body to estimate and save: the draft as sent, or null while `reason` is set. */
   body: Draft | null;
   /** The estimate of exactly the current body, asked `debounceMs` after it last changed (spec rev 55 §11). */
-  estimate: DraftEstimate;
+  estimate: DraftEstimate & { refetch: () => void };
   /** Why the press is not ready, in words: `reason`, or the estimate failing, or still being worked out; else null. */
   wait: string | null;
   advancedOpen: boolean;
@@ -81,7 +85,7 @@ export interface SearchForm {
  */
 export function useSearchForm(
   initial: Draft,
-  opts: { nameTouched: boolean; debounceMs?: number | undefined },
+  opts: { nameTouched: boolean; debounceMs?: number | undefined; definitionId?: string | null },
 ): SearchForm {
   const today = londonDateOf(useNow());
   const [stored, setDraft] = useState<Draft>(initial);
@@ -118,8 +122,12 @@ export function useSearchForm(
       return next.from === t.from && next.to === t.to ? t : next;
     });
   }, [absFrom, absTo, today]);
+  // why: fix round 1, finding 9 — a date is judged when its field is left (or the press is tried), never at every
+  // keystroke; a change hides the judgement again until the next blur, so typing a date never alerts
+  const [judged, setJudged] = useState<Record<DateEnd, boolean>>({ from: false, to: false });
   const setDateText = (end: DateEnd, text: string) => {
     setText((t) => ({ ...t, [end]: text }));
+    setJudged((j) => (j[end] ? { ...j, [end]: false } : j));
     const base = draft.window.kind === 'absolute' ? draft.window : EMPTY_ABSOLUTE;
     setDraft({ ...draft, window: { ...base, [end]: parseDateText(text, today) ?? '' } });
   };
@@ -128,9 +136,13 @@ export function useSearchForm(
     to: parseDateText(dateText.to, today),
   };
   const relative = w.kind === 'relative';
+  const unread = {
+    from: !relative && dateText.from.trim() !== '' && parsed.from === null,
+    to: !relative && dateText.to.trim() !== '' && parsed.to === null,
+  };
   const dateError = {
-    from: !relative && dateText.from.trim() !== '' && parsed.from === null ? COPY.newSearch.dateFormat : null,
-    to: !relative && dateText.to.trim() !== '' && parsed.to === null ? COPY.newSearch.dateFormat : null,
+    from: unread.from && judged.from ? COPY.newSearch.dateFormat : null,
+    to: unread.to && judged.to ? COPY.newSearch.dateFormat : null,
   };
   const echo = (end: DateEnd) => {
     const d = parsed[end];
@@ -155,7 +167,7 @@ export function useSearchForm(
   const R = COPY.newSearch.reasons;
   const reasons = [
     ...(draft.origins.length === 0 || draft.destinations.length === 0 ? [R.airports] : []),
-    ...(dateError.from !== null || dateError.to !== null ? [R.dateText] : []),
+    ...(unread.from || unread.to ? [R.dateText] : []),
     ...(w.kind === 'absolute' && (w.from === '' || w.to === '') ? [R.dates] : []),
     ...(w.kind === 'absolute' && w.from !== '' && w.to !== '' && w.to < w.from ? [R.dateOrder] : []),
     ...(blank.some((id) => STAY_BOXES.includes(id)) ? [R.stay] : []),
@@ -166,10 +178,11 @@ export function useSearchForm(
   ];
   const reason = reasons[0] ?? null;
   const body = reason === null ? draftToRequest(draft) : null;
-  const estimate = useEstimateDraft(
-    body,
-    opts.debounceMs === undefined ? {} : { debounceMs: opts.debounceMs },
-  );
+  // why: ruling R2 — a saved search's draft is estimated as that search, by its id
+  const estimate = useEstimateDraft(body, {
+    ...(opts.debounceMs === undefined ? {} : { debounceMs: opts.debounceMs }),
+    definitionId: opts.definitionId ?? null,
+  });
   const failed = estimate.error;
   const refusedFields = failed instanceof ApiError && failed.status === 422;
   const wait =
@@ -205,6 +218,8 @@ export function useSearchForm(
     setNameTouched,
     dateText,
     setDateText,
+    leaveDate: (end) => setJudged((j) => (j[end] ? j : { ...j, [end]: true })),
+    judgeDates: () => setJudged({ from: true, to: true }),
     dateError,
     dateEcho,
     today,

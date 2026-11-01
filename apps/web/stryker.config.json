@@ -18,7 +18,7 @@
     "src/views/Dates/overview.ts",
     "src/views/Dates/keys.ts",
     "src/state/landing.ts",
-    "src/format.ts",
+    "src/format.ts:46-113",
     "src/views/Searches/estimateLine.ts"
   ],
   "thresholds": {

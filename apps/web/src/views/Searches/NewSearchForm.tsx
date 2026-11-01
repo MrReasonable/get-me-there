@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { ApiError } from '../../api/client.js';
 import { api } from '../../api/endpoints.js';
 import { qk } from '../../api/queries.js';
@@ -49,6 +49,9 @@ export function NewSearchForm({
   const sentence = sentenceOf(est.estimate, null, COPY.searchAgain.searchNow);
 
   const [failure, setFailure] = useState<string | null>(null);
+  // why: fix round 1, finding 5 — a second press in the same tick lands before the re-render that disables the button,
+  // so the request in flight is held here, synchronously, and released when it settles
+  const sending = useRef(false);
   const create = useMutation({
     mutationFn: (b: CreateAndStartBody) => api.createAndStart(b),
     onSuccess: (r: CreateAndStartResponse) => {
@@ -63,6 +66,9 @@ export function NewSearchForm({
         { view: 'dates', def: id, refused: r.refusal === null ? null : r.refusal.code, edit: null },
         'push',
       );
+    },
+    onSettled: () => {
+      sending.current = false;
     },
     onError: (e: Error) => {
       if (e instanceof ApiError && e.status === 422) {
@@ -91,8 +97,10 @@ export function NewSearchForm({
           wait={wait}
           pending={create.isPending}
           ids={IDS}
+          onBlocked={form.judgeDates}
           onPress={(covers) => {
-            if (form.body === null) return;
+            if (form.body === null || sending.current) return;
+            sending.current = true;
             setFailure(null);
             create.mutate({
               ...form.body,

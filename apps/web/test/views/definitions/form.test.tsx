@@ -55,16 +55,27 @@ const chipCodes = (name: string) =>
     .queryAllByRole('listitem')
     .map((li) => li.firstChild?.textContent);
 
-/** Records every estimate body; each answers `answer()`. */
+/**
+ * Records every estimate body, an unsaved form's (`POST /definitions/estimate`) and a saved search's draft
+ * (`POST /definitions/:id/estimate`, Task 20.5 R2) alike; each answers `answer()`. `ids` holds the saved search's id
+ * for each request, null for an unsaved form's.
+ */
 function estimateBodies(answer = () => HttpResponse.json(estimateResponse())) {
   const bodies: unknown[] = [];
+  const ids: Array<string | null> = [];
   server.use(
     http.post(`${API}/definitions/estimate`, async ({ request }) => {
       bodies.push(await request.json());
+      ids.push(null);
+      return answer();
+    }),
+    http.post(`${API}/definitions/:id/estimate`, async ({ request, params }) => {
+      bodies.push(await request.json());
+      ids.push(String(params.id));
       return answer();
     }),
   );
-  return bodies;
+  return Object.assign(bodies, { ids });
 }
 
 /** Fills the new-search form with the worked example's first pair and dates, so it asks for an estimate. */
@@ -458,9 +469,12 @@ describe('blocking and required fields (fix round 1, UI-10)', () => {
 describe('Edit (spec rev 55 §11 Edit)', () => {
   /** Serves the estimate, every PUT and every start, recording each in order. */
   function serveEdit(over: { start?: () => Response; put?: (body: unknown) => Response } = {}) {
-    const calls: Array<{ kind: 'put' | 'start'; id: string; body: unknown }> = [];
+    const calls: Array<{ kind: 'put' | 'start' | 'estimate'; id: string; body: unknown }> = [];
     server.use(
-      http.post(`${API}/definitions/estimate`, () => HttpResponse.json(paid())),
+      http.post(`${API}/definitions/:id/estimate`, async ({ request, params }) => {
+        calls.push({ kind: 'estimate', id: String(params.id), body: await request.json() });
+        return HttpResponse.json(paid());
+      }),
       http.put(`${API}/definitions/:id`, async ({ request, params }) => {
         const body = await request.json();
         calls.push({ kind: 'put', id: String(params.id), body });
@@ -473,6 +487,8 @@ describe('Edit (spec rev 55 §11 Edit)', () => {
     );
     return calls;
   }
+  /** The PUTs and starts, in order, without the estimates asked meanwhile. */
+  const sent = (calls: ReturnType<typeof serveEdit>) => calls.filter((c) => c.kind !== 'estimate');
 
   it('shows the same estimate sentence, and ends with "Save and search again · about £1.20" and "Save"', async () => {
     serveEdit();
@@ -501,10 +517,10 @@ describe('Edit (spec rev 55 §11 Edit)', () => {
       '?view=definitions&edit=def-0007&def=def-0001',
     );
     await user.click(await screen.findByRole('button', { name: `${E.saveAndSearch} · about £1.20` }));
-    await waitFor(() => expect(calls.map((c) => c.kind)).toEqual(['put', 'start']));
-    expect(calls[0]).toMatchObject({ kind: 'put', id: 'def-0007' });
-    expect(calls[0]?.body).not.toHaveProperty('confirmedCostPence');
-    expect(calls[1]).toEqual({
+    await waitFor(() => expect(sent(calls).map((c) => c.kind)).toEqual(['put', 'start']));
+    expect(sent(calls)[0]).toMatchObject({ kind: 'put', id: 'def-0007' });
+    expect(sent(calls)[0]?.body).not.toHaveProperty('confirmedCostPence');
+    expect(sent(calls)[1]).toEqual({
       kind: 'start',
       id: 'def-0007',
       body: { confirmCostPence: 120, confirmCalls: 300, requireCovered: true, replaceStopped: true },
@@ -516,13 +532,73 @@ describe('Edit (spec rev 55 §11 Edit)', () => {
     expect(readLastSearch()).toBe('def-0007');
   });
 
-  it('a start the page words (a 409 cap) opens the page with refused=<code>', async () => {
-    serveEdit({
-      start: () => HttpResponse.json({ error: { code: 'cap', message: 'engine text' } }, { status: 409 }),
+  it('two presses of Save and search again in the same tick save and start once', async () => {
+    const calls = serveEdit();
+    renderEdit(definition({ scheduleCron: null, enabled: false }));
+    const press = await screen.findByRole('button', { name: `${E.saveAndSearch} · about £1.20` });
+    act(() => {
+      press.click();
+      press.click();
+    });
+    await waitFor(() => expect(new URLSearchParams(window.location.search).get('view')).toBe('dates'));
+    expect(sent(calls).map((c) => c.kind)).toEqual(['put', 'start']);
+  });
+
+  it('estimates the edited draft as this search, by its id (R2: its own reservation and reuse are its own)', async () => {
+    const calls = serveEdit();
+    const { user } = renderEdit(definition({ id: 'def-0007', scheduleCron: null, enabled: false }));
+    await screen.findByRole('button', { name: `${E.saveAndSearch} · about £1.20` });
+    await user.clear(screen.getByLabelText('Longest stay'));
+    await user.type(screen.getByLabelText('Longest stay'), '14');
+    await waitFor(() =>
+      expect(calls.filter((c) => c.kind === 'estimate').at(-1)).toMatchObject({
+        id: 'def-0007',
+        body: { maxNights: 14, origins: ['LHR', 'LGW'] },
+      }),
+    );
+  });
+
+  // R1: a refused start is worded where it happens, beside the press on the Edit page, and opens nothing
+  it.each<[string, number, string]>([
+    ['active', 409, COPY.searchAgain.refused.active],
+    ['cap', 409, COPY.searchAgain.refused.cap],
+    ['disabled', 409, COPY.searchAgain.refused.disabled],
+    ['window', 422, COPY.searchAgain.refused.window],
+    ['shutting-down', 503, COPY.searchAgain.refused['shutting-down']],
+    ['confirm', 409, E.estimateChanged],
+    ['internal', 500, E.startFailed('db is down')],
+  ])(
+    'a start refused %s is said beside Save and search again, and the page does not open',
+    async (code, status, words) => {
+      serveEdit({
+        start: () =>
+          HttpResponse.json(
+            {
+              error: { code, message: code === 'internal' ? 'db is down' : 'engine text that must not show' },
+            },
+            { status },
+          ),
+      });
+      const { user } = renderEdit(definition({ scheduleCron: null, enabled: false }));
+      await user.click(await screen.findByRole('button', { name: `${E.saveAndSearch} · about £1.20` }));
+      const said = await screen.findByText(words);
+      expect(said.closest('[role="alert"]')).not.toBeNull();
+      expect(screen.queryByText(/engine text that must not show/)).toBeNull();
+      expect(new URLSearchParams(window.location.search).get('view')).toBe('definitions');
+      expect(new URLSearchParams(window.location.search).get('refused')).toBeNull();
+    },
+  );
+
+  it('a confirm refusal asks the estimate again, so the press shows the new figures', async () => {
+    const calls = serveEdit({
+      start: () => HttpResponse.json({ error: { code: 'confirm', message: 'x' } }, { status: 409 }),
     });
     const { user } = renderEdit(definition({ scheduleCron: null, enabled: false }));
-    await user.click(await screen.findByRole('button', { name: `${E.saveAndSearch} · about £1.20` }));
-    await waitFor(() => expect(new URLSearchParams(window.location.search).get('refused')).toBe('cap'));
+    const press = await screen.findByRole('button', { name: `${E.saveAndSearch} · about £1.20` });
+    const before = calls.filter((c) => c.kind === 'estimate').length;
+    await user.click(press);
+    await screen.findByText(E.estimateChanged);
+    await waitFor(() => expect(calls.filter((c) => c.kind === 'estimate').length).toBeGreaterThan(before));
   });
 
   it('a plain Save that changes the space opens the search’s page; one that does not says Saved here', async () => {
@@ -546,7 +622,7 @@ describe('Edit (spec rev 55 §11 Edit)', () => {
     await user.click(screen.getByRole('button', { name: E.save }));
     await waitFor(() => expect(new URLSearchParams(window.location.search).get('view')).toBe('dates'));
     expect(new URLSearchParams(window.location.search).get('def')).toBe('def-0001');
-    expect(calls.filter((c) => c.kind === 'start')).toEqual([]);
+    expect(sent(calls).filter((c) => c.kind === 'start')).toEqual([]);
   });
 
   it('editing a disabled search keeps it disabled (review po-011)', async () => {
@@ -554,8 +630,8 @@ describe('Edit (spec rev 55 §11 Edit)', () => {
     expect(definitionToDraft(definition({ enabled: false })).enabled).toBe(false);
     const { user } = renderEdit(definition({ enabled: false }));
     await user.click(screen.getByRole('button', { name: E.save }));
-    await waitFor(() => expect(calls).toHaveLength(1));
-    expect(calls[0]?.body).toMatchObject({ enabled: false });
+    await waitFor(() => expect(sent(calls)).toHaveLength(1));
+    expect(sent(calls)[0]?.body).toMatchObject({ enabled: false });
   });
 
   it('a half-filled time window holds Save too, with the reason', async () => {
@@ -572,7 +648,7 @@ describe('Edit (spec rev 55 §11 Edit)', () => {
     expect(save).toHaveAccessibleDescription(COPY.blockedByTimeWindow);
     await user.click(save);
     await settled(client);
-    expect(calls).toEqual([]);
+    expect(sent(calls)).toEqual([]);
   });
 
   it('a save that raises the estimate above a scheduled search’s confirmation asks again; Confirm PUTs its figures', async () => {
@@ -595,7 +671,9 @@ describe('Edit (spec rev 55 §11 Edit)', () => {
       name: 'Confirm about 300 calls (hard stop 2000), £2.50 per run',
     });
     await user.click(confirm);
-    await waitFor(() => expect(calls.at(-1)?.body).toEqual({ confirmedCostPence: 250, confirmedCalls: 300 }));
+    await waitFor(() =>
+      expect(sent(calls).at(-1)?.body).toEqual({ confirmedCostPence: 250, confirmedCalls: 300 }),
+    );
   });
 
   it('note and onward cost per destination reach the estimate, the cost in pence', async () => {

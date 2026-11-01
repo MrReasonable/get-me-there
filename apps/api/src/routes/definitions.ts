@@ -247,11 +247,22 @@ export const definitionHandlers: HandlerTable = {
     return c.json(deletedResponse(existing, ctx));
   }),
 
-  'POST /api/definitions/:id/estimate': plain((c, input, ctx) => {
-    const def = getLiveDefinition(ctx, param(input, 'id'));
-    if (isDraft(def)) throw new ApiError(422, 'draft_definition', API_TEXT.draftNoEstimate);
-    return c.json(estimateResponse(def, ctx));
-  }),
+  'POST /api/definitions/:id/estimate': route(
+    { request: apiContract.definitionCreateOptionalSchema, query: NO_INPUT },
+    (c, input, ctx) => {
+      const def = getLiveDefinition(ctx, param(input, 'id'));
+      if (input.body === undefined) {
+        if (isDraft(def)) throw new ApiError(422, 'draft_definition', API_TEXT.draftNoEstimate);
+        return c.json(estimateResponse(def, ctx));
+      }
+      // why: spec rev 55 §10 (Task 20.5 R2) — an edited search, or one about to repeat, is estimated as itself: the
+      // draft's fields over the saved search's id, so its own schedule reservation is not counted against it and its
+      // own earlier prices are reused. Nothing is saved. The draft is validated as the unsaved estimate route does.
+      const { confirmedCostPence: _p, confirmedCalls: _c, ...fields } = input.body;
+      validateForSave({ ...fields, enabled: false }, ctx, null);
+      return c.json(estimateResponse({ ...def, ...fields }, ctx));
+    },
+  ),
 
   'POST /api/definitions/coverage-check': route(
     { request: apiContract.coverageCheckRequestSchema, query: NO_INPUT },

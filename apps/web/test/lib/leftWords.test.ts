@@ -26,8 +26,18 @@ describe('leftWords', () => {
     expect(leftWords(after(minutes, seconds), NOW)).toBe(words);
   });
 
-  it('a finish at or before now still reads as 1 minute left while the run is going', () => {
-    expect(leftWords(NOW, NOW)).toBe('about 1m left');
-    expect(leftWords(after(-30), NOW)).toBe('about 1m left');
+  // why: ruling 20.5 concern 1 — under a minute is said as such, and never as nothing left while the run is going
+  it('under a minute, or a finish at or before now while the run is going, reads "less than a minute left"', () => {
+    expect(leftWords(after(0, 30), NOW)).toBe('less than a minute left');
+    expect(leftWords(after(0, 59), NOW)).toBe('less than a minute left');
+    expect(leftWords(NOW, NOW)).toBe('less than a minute left');
+    expect(leftWords(after(-30), NOW)).toBe('less than a minute left');
+  });
+
+  it('a minute or more rounds up to whole minutes (720 s is about 12m; 6,000 s is about 1h 40m)', () => {
+    expect(leftWords(after(0, 60), NOW)).toBe('about 1m left');
+    expect(leftWords(after(0, 61), NOW)).toBe('about 2m left');
+    expect(leftWords(after(12), NOW)).toBe('about 12m left');
+    expect(leftWords(after(100), NOW)).toBe('about 1h 40m left');
   });
 });

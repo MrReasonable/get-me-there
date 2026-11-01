@@ -29,7 +29,8 @@ const renderForm = (existing: DefinitionResponse = definition()) =>
 function estimateBodies() {
   const bodies: unknown[] = [];
   server.use(
-    http.post(`${API}/definitions/estimate`, async ({ request }) => {
+    // why: the Edit page estimates its draft as the saved search (Task 20.5 R2)
+    http.post(`${API}/definitions/:id/estimate`, async ({ request }) => {
       bodies.push(await request.json());
       return HttpResponse.json(estimateResponse());
     }),

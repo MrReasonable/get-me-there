@@ -1,8 +1,9 @@
-import { screen, waitFor, within } from '@testing-library/react';
+import { act, screen, waitFor, within } from '@testing-library/react';
 import { HttpResponse, http } from 'msw';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ESTIMATE_DEBOUNCE_MS, qk } from '../../../src/api/queries.js';
 import { PLAN_COPY } from '../../../src/copy/plan.js';
+import { REFUSED_COPY } from '../../../src/copy/refused.js';
 import { COPY } from '../../../src/copy.js';
 import { readLastSearch } from '../../../src/state/lastSearch.js';
 import { DatesView } from '../../../src/views/Dates/DatesView.js';
@@ -16,7 +17,7 @@ import { fill, holdEstimates, renderForm, searchNow, step } from './formSupport.
 // now saves the search and starts its run with exactly the figures beside the button, then opens that search's page;
 // a refused start keeps the saved search and opens its page with the refusal in words (ruling A24: this task words them).
 
-const R = COPY.refusedPage;
+const R = REFUSED_COPY;
 
 beforeEach(() => window.localStorage.clear());
 afterEach(() => {
@@ -142,6 +143,28 @@ describe('Search now: the press (spec rev 55 §11)', () => {
     await waitFor(() => expect(bodies).toHaveLength(2));
     const keys = bodies.map(keyOf);
     expect(keys[0]).not.toBe(keys[1]);
+  });
+
+  it('two presses in the same tick, before the page re-renders, send one request (fix round 1, finding 5)', async () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const bodies = serveCreate(async () => {
+      await gate;
+      return HttpResponse.json({ error: { code: 'internal', message: 'db is down' } }, { status: 500 });
+    });
+    await ready();
+    const press = screen.getByRole('button', { name: /^Search now/ });
+    // why: both clicks are dispatched inside one act, so React has not re-rendered (nor disabled the button) between them
+    act(() => {
+      press.click();
+      press.click();
+    });
+    await vi.waitFor(() => expect(bodies).toHaveLength(1));
+    release();
+    expect(await screen.findByText(/Couldn't save the search/)).toBeInTheDocument();
+    expect(bodies).toHaveLength(1);
   });
 
   it.each(['disabled', 'confirm', 'cap', 'window', 'shutting-down', 'failed'])(

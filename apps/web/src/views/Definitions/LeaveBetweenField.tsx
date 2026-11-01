@@ -14,8 +14,8 @@ const ENDS: ReadonlyArray<{ end: DateEnd; label: string }> = [
  * Spec rev 55 §11 "Leave between" (WP20 Task 20.5; design §4.1): two text fields taking a date as "10 Jan 2027" (also
  * "10 january 2027", "10 Sept 2027", `2027-01-10`; a day and month alone is their next occurrence, echoed beside the
  * field as "10 Jan 2027"). A date typed another way ("10/01/2027") is refused beside its field ("Enter the date as 10
- * Jan 2027": `aria-invalid`, described by the message) and no estimate is asked for it. While the window rolls (More
- * options) the fields give way to the dates it covers today.
+ * Jan 2027": `aria-invalid`, described by a polite note) once the field is left or the press is tried, and no estimate
+ * is asked for it meanwhile. While the window rolls (More options) the fields give way to the dates it covers today.
  */
 export function LeaveBetweenField({ form }: { form: SearchForm }) {
   const w = form.draft.window;
@@ -74,9 +74,11 @@ function DateBox({ form, end, label }: { form: SearchForm; end: DateEnd; label: 
         aria-invalid={messages.length > 0}
         aria-describedby={messages.length > 0 || echo !== null ? noteId : undefined}
         onChange={(e) => form.setDateText(end, e.target.value)}
+        onBlur={() => form.leaveDate(end)}
       />
+      {/* why: fix round 1, finding 9 — the note is polite: it is said once the field is left, never as an alert */}
       {messages.length > 0 ? (
-        <span id={noteId} role="alert" className="bad-text text-sm">
+        <span id={noteId} aria-live="polite" className="bad-text text-sm">
           {messages.join(' ')}
         </span>
       ) : echo !== null ? (

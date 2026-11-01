@@ -109,7 +109,10 @@ export const ROUTES: readonly RouteDef[] = [
   route('PUT', '/definitions/:id', definitionResponseSchema, { request: definitionUpdateRequestSchema }),
   route('DELETE', '/definitions/:id', deleted),
   route('POST', '/definitions/:id/restore', definitionResponseSchema),
-  route('POST', '/definitions/:id/estimate', estimateResponseSchema),
+  // why: spec rev 55 §10 (WP20 Task 20.5 R2) — with a draft body, that draft is estimated as this search, by its id
+  route('POST', '/definitions/:id/estimate', estimateResponseSchema, {
+    request: definitionCreateOptionalSchema,
+  }),
   route('POST', '/definitions/:id/executions', startExecutionResponseSchema, {
     request: startExecutionRequestSchema,
   }),

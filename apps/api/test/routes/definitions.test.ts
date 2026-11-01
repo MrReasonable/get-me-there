@@ -345,7 +345,7 @@ describe('estimates and the coverage check', () => {
   it('POST /api/definitions/:id/estimate estimates a saved definition; refuses a draft', async () => {
     const x = await harness();
     const d = await create(x, exampleDefinitionInput());
-    const res = await x.request(`/api/definitions/${d.id}/estimate`, { method: 'POST', json: {} });
+    const res = await x.request(`/api/definitions/${d.id}/estimate`, { method: 'POST' });
     await expectContract(res, 'POST', '/api/definitions/:id/estimate', apiContract.estimateResponseSchema);
     const draft = await expectContract(
       await x.request('/api/definitions', { method: 'POST' }),
@@ -353,9 +353,39 @@ describe('estimates and the coverage check', () => {
       '/api/definitions',
       DEF,
     );
-    const refused = await x.request(`/api/definitions/${draft.id}/estimate`, { method: 'POST', json: {} });
+    const refused = await x.request(`/api/definitions/${draft.id}/estimate`, { method: 'POST' });
     expect(refused.status).toBe(422);
     expect((await errorOf(refused)).code).toBe('draft_definition');
+  });
+
+  it('POST /api/definitions/:id/estimate with a draft body estimates that draft as this search, by its id (Task 20.5 R2)', async () => {
+    const x = await harness();
+    const d = await create(x, exampleDefinitionInput({ window: SMALL_WINDOW, minNights: 10, maxNights: 10 }));
+    const ask = vi.spyOn(x.engine, 'estimateAsk');
+    const stored = await expectContract(
+      await x.request(`/api/definitions/${d.id}/estimate`, { method: 'POST' }),
+      'POST',
+      '/api/definitions/:id/estimate',
+      apiContract.estimateResponseSchema,
+    );
+    const draft = exampleDefinitionInput({ window: SMALL_WINDOW, minNights: 10, maxNights: 11 });
+    const edited = await expectContract(
+      await x.request(`/api/definitions/${d.id}/estimate`, { json: draft }),
+      'POST',
+      '/api/definitions/:id/estimate',
+      apiContract.estimateResponseSchema,
+    );
+    // the draft's space, not the stored one's: one more stay length is more date pairs
+    expect(edited.datePairs).toBeGreaterThan(stored.datePairs);
+    // why: it is estimated as the saved search, so its own reservation and its reuse are its own (the engine keys both
+    // off the id), never as an unsaved stranger's
+    expect(ask.mock.calls.at(-1)?.[0]).toMatchObject({ id: d.id, maxNights: 11 });
+    // nothing is saved by an estimate
+    expect(x.ports.repos.definitions.get(d.id)?.maxNights).toBe(10);
+    const bad = await x.request(`/api/definitions/${d.id}/estimate`, {
+      json: { ...draft, minNights: 12, maxNights: 11 },
+    });
+    expect(bad.status).toBe(400);
   });
 
   // Task 20.4 (spec §10 estimate response): what the estimate asks, beside the estimate and budgetFit
@@ -369,7 +399,7 @@ describe('estimates and the coverage check', () => {
         apiContract.estimateResponseSchema,
       );
       const saved = await expectContract(
-        await x.request(`/api/definitions/${d.id}/estimate`, { method: 'POST', json: {} }),
+        await x.request(`/api/definitions/${d.id}/estimate`, { method: 'POST' }),
         'POST',
         '/api/definitions/:id/estimate',
         apiContract.estimateResponseSchema,

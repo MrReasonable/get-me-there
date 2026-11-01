@@ -1,4 +1,5 @@
 import type { EstimateResponse } from '../../api/types.js';
+import { ESTIMATE_COPY } from '../../copy/estimate.js';
 import { COPY } from '../../copy.js';
 import { estimateMoney } from '../Definitions/EstimatePanel.js';
 import { type EstimateSentence, estimateSentence, type SentenceSchedule } from './estimateLine.js';
@@ -13,7 +14,7 @@ export function sentenceOf(
   schedule: SentenceSchedule | null,
   press: string,
 ): EstimateSentence | null {
-  return e === null ? null : estimateSentence(e, schedule, COPY, estimateMoney, press);
+  return e === null ? null : estimateSentence(e, schedule, ESTIMATE_COPY, estimateMoney, press);
 }
 
 /** The ids a press and its region share: the reason it waits and the sentence it confirms. */
@@ -86,6 +87,7 @@ export function SentenceButton({
   ids,
   onPress,
   primary = true,
+  onBlocked,
 }: {
   verb: string;
   sentence: EstimateSentence | null;
@@ -93,11 +95,12 @@ export function SentenceButton({
   pending: boolean;
   ids: SentenceIds;
   onPress: (covers: EstimateSentence['covers']) => void;
+  /** Told when the press is tried while it waits (the form judges what it has not yet, fix round 1 finding 9). */
+  onBlocked?: () => void;
   primary?: boolean;
 }) {
   const ready = wait === null && sentence !== null;
-  const label =
-    sentence !== null && sentence.tag !== null ? COPY.estimateLine.withTag(verb, sentence.tag) : verb;
+  const label = sentence !== null && sentence.tag !== null ? ESTIMATE_COPY.withTag(verb, sentence.tag) : verb;
   return (
     <button
       type="button"
@@ -109,6 +112,7 @@ export function SentenceButton({
       aria-describedby={pending ? undefined : ready ? ids.line : wait === null ? undefined : ids.reason}
       onClick={() => {
         if (ready && sentence !== null) onPress(sentence.covers);
+        else if (!pending) onBlocked?.();
       }}
     >
       {pending ? COPY.working : label}

@@ -8,6 +8,7 @@ import {
   useExecutionActions,
 } from '../../api/queries.js';
 import { COPY } from '../../copy.js';
+import { definitionToDraft, draftToRequest } from '../Definitions/draft.js';
 import { SentenceButton, SentenceRegion, sentenceOf } from '../Searches/EstimateSentence.js';
 
 /**
@@ -47,7 +48,12 @@ export function SearchAgainButton({
   const { start } = useExecutionActions();
   const definition = definitions.data?.find((d) => d.id === definitionId);
   const [confirming, setConfirming] = useState(confirmFirst);
-  const estimate = useDefinitionEstimate(definitionId, confirming);
+  // why: ruling R2 — the search is estimated as itself, its own fields as the body
+  const estimate = useDefinitionEstimate(
+    definitionId,
+    definition === undefined ? null : draftToRequest(definitionToDraft(definition)),
+    confirming,
+  );
   const prefix = useId();
   const ids = { reason: `${prefix}-reason`, line: `${prefix}-line` };
   // why: "Searching…" says the press took effect only while its run is going: it clears once that run is read as no

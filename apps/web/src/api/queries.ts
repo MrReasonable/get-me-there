@@ -47,8 +47,8 @@ export const qk = {
   airports: (q: string) => ['airports', q] as const,
   // WP20 Task 20.5: an unsaved form's estimate, keyed by the very body it was asked for; a saved search's estimate; and
   // a refused Search now's answer, handed from the form to the page it opens (never fetched: see useRefusal)
-  estimateDraft: (bodyKey: string) => ['estimate', 'draft', bodyKey] as const,
-  estimateOf: (id: string) => ['estimate', 'definition', id] as const,
+  estimateDraft: (definitionId: string | null, bodyKey: string) =>
+    ['estimate', 'draft', definitionId ?? '', bodyKey] as const,
   refusal: (id: string) => ['refusal', id] as const,
   // WP10
   cell: (id: string, key: string | null) => ['cell', id, key] as const,
@@ -69,17 +69,21 @@ export interface DraftEstimate {
 }
 
 /**
- * Spec rev 55 §11 (WP20 Task 20.5): the estimate of an unsaved body, asked for `debounceMs` after the body last changed
+ * Spec rev 55 §11 (WP20 Task 20.5): the estimate of a form's body, asked for `debounceMs` after the body last changed
  * and never before, and keyed by the body it was fetched for, so an estimate is shown only beside the form it
- * describes: from the first change until the new body's answer arrives, `estimate` is null. A null body (the form is
- * incomplete) asks nothing. `immediate` asks for the first body at once (Repeat weekly opens on a whole search).
- * The debounce is a `setTimeout` cleared on change; tests step it on Vitest's fake clock.
+ * describes: from the first change until the current body's answer arrives, `estimate` is null. That includes coming
+ * back to a body asked before: its cached answer is re-read and shown only once the re-read lands (fix round 1,
+ * finding 8), so no older figure ever sits beside the press. A null body (the form is incomplete) asks nothing.
+ * `immediate` asks for the first body at once (Repeat weekly opens on a whole search). With `definitionId` the body is
+ * a saved search's draft and is estimated as that search (`POST /definitions/:id/estimate`, ruling R2), else as an
+ * unsaved form (`POST /definitions/estimate`). The debounce is a `setTimeout` cleared on change; tests step it on
+ * Vitest's fake clock.
  */
 export function useEstimateDraft(
   body: DefinitionBody | null,
-  opts: { debounceMs?: number; immediate?: boolean } = {},
-): DraftEstimate {
-  const { debounceMs = ESTIMATE_DEBOUNCE_MS, immediate = false } = opts;
+  opts: { debounceMs?: number; immediate?: boolean; definitionId?: string | null } = {},
+): DraftEstimate & { refetch: () => void } {
+  const { debounceMs = ESTIMATE_DEBOUNCE_MS, immediate = false, definitionId = null } = opts;
   const key = body === null ? null : JSON.stringify(body);
   const [asked, setAsked] = useState<{ key: string; body: DefinitionBody } | null>(() =>
     immediate && body !== null && key !== null ? { key, body } : null,
@@ -96,26 +100,37 @@ export function useEstimateDraft(
     return () => clearTimeout(t);
   }, [key, debounceMs]);
   const q = useQuery({
-    queryKey: qk.estimateDraft(asked?.key ?? ''),
-    queryFn: asked === null ? skipToken : () => api.estimateDraft(asked.body),
-    // why: a refused body (422) is the form's to fix, never retried; the estimate depends on this month's usage, so it
-    // is never served from an older answer for the same body without a re-read
+    queryKey: qk.estimateDraft(definitionId, asked?.key ?? ''),
+    queryFn:
+      asked === null
+        ? skipToken
+        : () =>
+            definitionId === null
+              ? api.estimateDraft(asked.body)
+              : api.estimateDefinition(definitionId, asked.body),
+    // why: a refused body (422) is the form's to fix, never retried; the estimate depends on this month's usage, so a
+    // cached answer for the same body is always re-read before it is shown again
     retry: false,
     staleTime: 0,
   });
-  const current = key !== null && asked?.key === key;
-  return { estimate: current ? (q.data ?? null) : null, error: current ? q.error : null };
+  const current = key !== null && asked?.key === key && !q.isFetching;
+  return {
+    estimate: current ? (q.data ?? null) : null,
+    error: current ? q.error : null,
+    refetch: () => void q.refetch(),
+  };
 }
 
 /**
- * A saved search's estimate (`POST /definitions/:id/estimate`), asked while `enabled`: Search again's second look and a
- * refused Search now's page (spec rev 55 §11). Re-asked on every mount, never retried.
+ * A saved search's estimate as it stands (`POST /definitions/:id/estimate` with its own fields as the body, ruling
+ * R2), asked while `body` is known and `enabled`: Search again's second look and a refused Search now's page (spec rev
+ * 55 §11). Re-asked on every mount, never retried.
  */
-export function useDefinitionEstimate(id: string, enabled: boolean) {
+export function useDefinitionEstimate(id: string, body: DefinitionBody | null, enabled: boolean) {
   return useQuery({
-    queryKey: qk.estimateOf(id),
-    queryFn: () => api.estimateDefinition(id),
-    enabled,
+    queryKey: qk.estimateDraft(id, body === null ? '' : JSON.stringify(body)),
+    queryFn: body === null ? skipToken : () => api.estimateDefinition(id, body),
+    enabled: enabled && body !== null,
     retry: false,
     staleTime: 0,
   });

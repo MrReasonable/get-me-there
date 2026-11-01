@@ -219,6 +219,7 @@ function serveSecondPress(
 ) {
   const starts: unknown[] = [];
   const estimates: string[] = [];
+  const estimateBodies: unknown[] = [];
   const puts: unknown[] = [];
   server.use(
     http.get(`${API}/executions/:id`, () =>
@@ -227,8 +228,9 @@ function serveSecondPress(
     http.get(`${API}/definitions`, () =>
       HttpResponse.json([definition({ ...stored, scheduleCron: cron, enabled: cron !== null })]),
     ),
-    http.post(`${API}/definitions/:id/estimate`, ({ params }) => {
+    http.post(`${API}/definitions/:id/estimate`, async ({ params, request }) => {
       estimates.push(String(params.id));
+      estimateBodies.push(await request.json());
       return HttpResponse.json(paid());
     }),
     http.put(`${API}/definitions/:id`, async ({ request }) => {
@@ -251,7 +253,7 @@ function serveSecondPress(
         : HttpResponse.json({ executionId: 'exec-2' }, { status: 202 });
     }),
   );
-  return { starts, estimates, puts };
+  return { starts, estimates, estimateBodies, puts };
 }
 
 describe('SearchAgainButton, the second press (spec rev 55 §11; ruling A10; Ian’s ruling 3)', () => {
@@ -263,6 +265,9 @@ describe('SearchAgainButton, the second press (spec rev 55 §11; ruling A10; Ian
     await user.click(first);
     const second = await button('Search again · about £1.20');
     expect(seen.estimates).toEqual(['def-0001']);
+    // why: ruling R2 — the search is estimated as itself, with its own fields as the body
+    expect(seen.estimateBodies[0]).toMatchObject({ origins: ['LHR', 'LGW'], destinations: ['JFK', 'EWR'] });
+    expect(seen.estimateBodies[0]).not.toHaveProperty('confirmedCostPence');
     expect(
       screen.getByText(
         'About 3 hours · about £1.20 · asks about 300 of 405 date pairs this run, the rest when you search again',

@@ -6,7 +6,9 @@ import { SETUP_COPY } from '../../../src/copy/setup.js';
 import { COPY } from '../../../src/copy.js';
 import { DatesView } from '../../../src/views/Dates/DatesView.js';
 import { RepeatWeekly } from '../../../src/views/Dates/RepeatWeekly.js';
+import { runSummary } from '../../fixtures.dates.js';
 import { API, definition, estimate, estimateResponse, execution } from '../../fixtures.js';
+import { serveDates } from '../../msw/datesHandlers.js';
 import { server } from '../../msw/server.js';
 import { renderWithProviders, settled } from '../../render.js';
 
@@ -58,12 +60,19 @@ const blocked = () =>
   });
 
 /** Records every estimate body and PUT body; `put` answers each PUT. */
-function serve(put: (body: unknown) => Response = () => HttpResponse.json(definition())) {
+function serve(
+  put: (body: unknown) => Response = () =>
+    HttpResponse.json(definition({ confirmedCostPence: 120, confirmedCalls: 300 })),
+) {
   const estimates: unknown[] = [];
+  const estimateIds: string[] = [];
   const puts: unknown[] = [];
   server.use(
-    http.post(`${API}/definitions/estimate`, async ({ request }) => {
+    // why: the search is estimated as itself with its draft schedule (Task 20.5 R2), so its own reservation is not
+    // counted against it
+    http.post(`${API}/definitions/:id/estimate`, async ({ request, params }) => {
       estimates.push(await request.json());
+      estimateIds.push(String(params.id));
       return HttpResponse.json(blocked());
     }),
     http.put(`${API}/definitions/:id`, async ({ request }) => {
@@ -72,7 +81,7 @@ function serve(put: (body: unknown) => Response = () => HttpResponse.json(defini
       return put(body);
     }),
   );
-  return { estimates, puts };
+  return { estimates, estimateIds, puts };
 }
 
 const unscheduled = () => definition({ scheduleCron: null, enabled: false });
@@ -93,7 +102,8 @@ describe('Repeat weekly… (spec rev 55 §8.2, §11)', () => {
     ).toBeInTheDocument();
     // the monthly figure: the budget fit at the schedule's runs a month (flight pages join it in Task 20.9)
     expect(screen.getByText('provider-month:camoufox: 476 estimated a month, cap 1500')).toBeInTheDocument();
-    expect(seen.estimates[0]).toMatchObject({ scheduleCron: DEFAULT_CRON });
+    expect(seen.estimates[0]).toMatchObject({ scheduleCron: DEFAULT_CRON, enabled: true });
+    expect(seen.estimateIds).toEqual(['def-0001']);
     await settled(client);
     expect(seen.puts).toEqual([]);
   });
@@ -110,7 +120,7 @@ describe('Repeat weekly… (spec rev 55 §8.2, §11)', () => {
   });
 
   it('Save PUTs the schedule, enabled and the sentence’s shown runnable totals with confirmShown (ruling A13)', async () => {
-    const seen = serve(() => HttpResponse.json(definition({ confirmedCostPence: 120, confirmedCalls: 300 })));
+    const seen = serve();
     const { user } = renderWithProviders(<RepeatWeekly definition={unscheduled()} />);
     await user.click(screen.getByRole('button', { name: W.open }));
     const save = await screen.findByRole('button', { name: `${W.save} · about £1.20` });
@@ -175,16 +185,47 @@ describe('Repeat weekly… (spec rev 55 §8.2, §11)', () => {
     await waitFor(() => expect(seen.puts).toEqual([{ enabled: false }]));
   });
 
-  it('a search whose latest run is stopped shows no warning here: its first firing supersedes it (Task 20.2)', async () => {
+  it('a search whose latest run is stopped opens it with no warning: its first firing supersedes that run (Task 20.2)', async () => {
     serve();
     server.use(
-      http.get(`${API}/executions/:id`, () => HttpResponse.json(execution({ status: 'paused_budget' }))),
+      serveDates({ executions: [runSummary({ status: 'paused_budget' })] }),
+      http.get(`${API}/executions/:id`, () =>
+        HttpResponse.json(
+          execution({
+            status: 'paused_budget',
+            stop: { sentence: 'This search stopped at £5, its spending limit.', fix: null },
+          }),
+        ),
+      ),
+    );
+    const { user } = renderWithProviders(<DatesView definition={unscheduled()} />, {
+      search: '?view=dates&def=def-0001',
+    });
+    // the page itself says the run stopped
+    expect(await screen.findByText('This search stopped at £5, its spending limit.')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: W.open }));
+    const fields = screen.getByRole('group', { name: W.fieldsLabel });
+    const editor = fields.parentElement;
+    if (editor === null) throw new Error('the schedule fields sit in the editor');
+    await within(editor).findByRole('button', { name: `${W.save} · about £1.20` });
+    // the editor adds nothing about the stopped run: no alert, and no word of it
+    expect(within(editor).queryByRole('alert')).toBeNull();
+    expect(editor.textContent ?? '').not.toMatch(/stopped|paused|spending limit/i);
+  });
+
+  it('a Save whose confirmation was not stored (the estimate moved) says so beside the button and asks it again', async () => {
+    // the PUT answers with the schedule on but without the sent figures: the server's recomputation was higher
+    const seen = serve(() =>
+      HttpResponse.json(definition({ confirmedCostPence: null, confirmedCalls: null })),
     );
     const { user } = renderWithProviders(<RepeatWeekly definition={unscheduled()} />);
     await user.click(screen.getByRole('button', { name: W.open }));
-    await screen.findByRole('button', { name: `${W.save} · about £1.20` });
-    expect(screen.queryByRole('alert')).toBeNull();
-    expect(screen.queryByText(/stopped|paused/i)).toBeNull();
+    await user.click(await screen.findByRole('button', { name: `${W.save} · about £1.20` }));
+    expect(await screen.findByText(W.estimateChanged)).toBeInTheDocument();
+    expect(screen.queryByText(W.saved)).toBeNull();
+    // the fields stay open, and the estimate is asked again
+    expect(screen.getByRole('group', { name: W.fieldsLabel })).toBeInTheDocument();
+    await waitFor(() => expect(seen.estimates.length).toBeGreaterThan(1));
   });
 
   it('a search’s page carries it in its header', async () => {

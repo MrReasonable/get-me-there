@@ -35,8 +35,10 @@ export const api = {
     call(c.estimateResponseSchema, 'POST', '/api/definitions/estimate', { body }),
   // WP20 Task 20.5 (spec rev 55 §10): a saved search's estimate, for Search again's second look and its page after a
   // refused Search now (ruling A24: the page asks it again rather than carrying figures in the URL)
-  estimateDefinition: (id: string) =>
-    call(c.estimateResponseSchema, 'POST', '/api/definitions/:id/estimate', { params: { id } }),
+  // Task 20.5 R2: with the draft body, so an edited search or one about to repeat is estimated as itself (its own
+  // schedule reservation and earlier prices are its own)
+  estimateDefinition: (id: string, body: DefinitionBody) =>
+    call(c.estimateResponseSchema, 'POST', '/api/definitions/:id/estimate', { params: { id }, body }),
   // Search now's one press: save the search, start its run with the shown figures; a refusal is in the body
   createAndStart: (body: CreateAndStartBody) =>
     call(c.createAndStartResponseSchema, 'POST', '/api/definitions/create-and-start', { body }),

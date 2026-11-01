@@ -28,6 +28,8 @@ const MUTATIONS: ReadonlyArray<{ method: 'POST' | 'PUT'; path: string; body: Jso
     path: '/api/definitions/estimate',
     body: estimateResponse(),
   },
+  // WP20 Task 20.5 R2: a saved search's estimate, of its draft or as stored
+  { method: 'POST', path: '/api/definitions/:id/estimate', body: estimateResponse() },
   { method: 'POST', path: '/api/definitions/coverage-check', body: coverageCheck() },
   { method: 'POST', path: '/api/definitions', body: definition({ id: 'def-0002' }) },
   { method: 'PUT', path: '/api/definitions/:id', body: definition() },

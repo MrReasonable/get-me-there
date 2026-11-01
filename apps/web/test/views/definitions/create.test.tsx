@@ -144,7 +144,7 @@ describe('coverage check before saving (spec §1, §10, §11)', () => {
 describe('the budget fit under More options (spec rev 55 §11)', () => {
   it('a budgetFit miss is shown as an alert beside the monthly figures', async () => {
     server.use(
-      http.post(`${API}/definitions/estimate`, () =>
+      http.post(`${API}/definitions/:id/estimate`, () =>
         HttpResponse.json(
           estimateResponse({
             budgetFit: {

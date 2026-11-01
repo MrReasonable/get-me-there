@@ -109,23 +109,34 @@ function ScheduleEditor({
     cron === null || incomplete
       ? null
       : draftToRequest({ ...definitionToDraft(definition), scheduleCron: cron, enabled: true });
-  const estimate = useEstimateDraft(body, { immediate: true });
+  // why: ruling R2 — estimated as this search, so its own schedule's reservation is not counted against it
+  const estimate = useEstimateDraft(body, { immediate: true, definitionId: definition.id });
+  const [moved, setMoved] = useState(false);
   const sentence = sentenceOf(
     estimate.estimate,
     cron === null ? null : { cron, tz: definition.scheduleTz },
     W.save,
   );
   const save = useMutation({
-    mutationFn: (covers: { pence: number; calls: number }) =>
-      api.updateDefinition(definition.id, {
+    mutationFn: async (covers: { pence: number; calls: number }) => {
+      const d = await api.updateDefinition(definition.id, {
         ...(cron === definition.scheduleCron ? {} : { scheduleCron: cron }),
         enabled: true,
         confirmedCostPence: covers.pence,
         confirmedCalls: covers.calls,
         confirmShown: true,
-      }),
-    onSuccess: () => {
+      });
+      return { d, covers };
+    },
+    onSuccess: ({ d, covers }) => {
       void Promise.all([['definitions'], ['cards']].map((queryKey) => qc.invalidateQueries({ queryKey })));
+      // why: fix round 1, finding 2 — the server stores the figures only when they cover its own recomputation; when
+      // they were not stored the estimate moved since it was shown, so it is asked again and the fields stay open
+      if (d.confirmedCostPence !== covers.pence || d.confirmedCalls !== covers.calls) {
+        setMoved(true);
+        estimate.refetch();
+        return;
+      }
       onDone(true);
     },
   });
@@ -171,18 +182,26 @@ function ScheduleEditor({
           <BudgetFitPanel fit={estimate.estimate.budgetFit} />
         </div>
       ) : null}
-      <span className="flex flex-wrap gap-2">
+      <span className="flex flex-wrap items-center gap-2">
         <SentenceButton
           verb={W.save}
           sentence={sentence}
           wait={wait}
           pending={save.isPending}
           ids={ids}
-          onPress={(covers) => save.mutate(covers)}
+          onPress={(covers) => {
+            setMoved(false);
+            save.mutate(covers);
+          }}
         />
         <button type="button" className="btn min-h-11" onClick={() => onDone(false)}>
           {W.cancel}
         </button>
+        {moved ? (
+          <span role="alert" className="bad-text text-sm">
+            {W.estimateChanged}
+          </span>
+        ) : null}
       </span>
     </div>
   );
