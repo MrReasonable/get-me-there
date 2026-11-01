@@ -117,6 +117,49 @@ function monthlyPagesLeft(ports: Ports): number | null {
   return u.cap === null ? null : Math.max(0, u.cap - u.calls);
 }
 
+/** The searches whose one-run pages are kept (a page polls one search; a few tabs, a few searches). */
+const RUN_PAGES_KEPT = 32;
+
+/**
+ * One app's one-run pages per search (ruling R-pages, fix round 2): the engine's estimate of a grid search plans
+ * thousands of cells, too much to redo on every flight-lists read (every 2 s while a read goes). A figure is kept per
+ * definition id, its `updatedAt` (an edit recomputes) and the browser worker's billing month (a new month recomputes),
+ * the last RUN_PAGES_KEPT of them, the oldest dropped first. Keyed weakly by the engine, so each app (and each test
+ * harness) has its own and none outlives it.
+ */
+const runPagesCaches = new WeakMap<object, Map<string, number | null>>();
+
+function runPagesOf(
+  def: SearchDefinition,
+  ports: Ports,
+  engine: Pick<Engine, 'estimate'>,
+  windowStart: string | null,
+): number | null {
+  const cache = runPagesCaches.get(engine) ?? new Map<string, number | null>();
+  runPagesCaches.set(engine, cache);
+  const key = `${def.id}|${def.updatedAt}|${windowStart ?? 'no-window'}`;
+  if (cache.has(key)) {
+    const kept = cache.get(key) ?? null;
+    // why: a hit moves to the newest end, so the map drops the search read longest ago
+    cache.delete(key);
+    cache.set(key, kept);
+    return kept;
+  }
+  const pages = browserPagesPlanned(engine.estimate(def, ports.clock.todayLondon()));
+  cache.set(key, pages);
+  for (const oldest of cache.keys()) {
+    if (cache.size <= RUN_PAGES_KEPT) break;
+    cache.delete(oldest);
+  }
+  return pages;
+}
+
+/** The browser worker's current billing month's start (its provider-month window), or null when it has none. */
+function browserWindowStart(ports: Ports): string | null {
+  if (!ports.providers.some((p) => p.id === FLIGHT_LIST_PROVIDER)) return null;
+  return ports.budget.usage({ kind: 'provider-month', providerId: FLIGHT_LIST_PROVIDER }).windowStart;
+}
+
 /** Spec revision 55 §10: the GET's answer over `def` for the asked `pairs`, in the order asked. */
 export function assembleFlightLists(
   def: SearchDefinition,
@@ -177,8 +220,7 @@ export function assembleFlightLists(
     monthlyPagesLeft: monthlyPagesLeft(ports),
     // why: ruling R-pages: one run's browser pages from the search's own estimate (its camoufox lines and flight pages),
     // asked only when flight lists can be read here, so a search without the worker estimates nothing more
-    runPages:
-      unavailable === null ? browserPagesPlanned(engine.estimate(def, ports.clock.todayLondon())) : null,
+    runPages: unavailable === null ? runPagesOf(def, ports, engine, browserWindowStart(ports)) : null,
     reading:
       mark === null || mark.definitionId !== def.id
         ? null

@@ -163,6 +163,49 @@ describe('GET /definitions/:id/flight-lists (revision 55 §10)', () => {
     expect(body.runPages).toBe(grid + (est.flightLists?.pages ?? 0));
   });
 
+  it("estimates the search once for its runPages until it is edited or the browser worker's month turns (ruling)", async () => {
+    const { x, def } = await setup();
+    const estimate = vi.spyOn(x.engine, 'estimate');
+    const runPages = async () =>
+      apiContract.flightListsResponseSchema.parse(await (await get(x, def.id, PAIRS)).json()).runPages;
+    const first = await runPages();
+    expect(await runPages()).toBe(first);
+    expect(estimate).toHaveBeenCalledTimes(1);
+    // an edit gives the search a new updatedAt: estimated again
+    x.clock.advance(60_000);
+    x.ports.repos.definitions.update(def.id, { maxNights: 10 });
+    expect(await runPages()).toBe(first);
+    expect(estimate).toHaveBeenCalledTimes(2);
+    expect(await runPages()).toBe(first);
+    expect(estimate).toHaveBeenCalledTimes(2);
+    // a new billing month of the browser worker: estimated again
+    x.clock.advance(32 * 24 * 3_600_000);
+    await runPages();
+    expect(estimate).toHaveBeenCalledTimes(3);
+  });
+
+  it('keeps the last 32 searches: the search read longest ago is estimated again', async () => {
+    const { x, def } = await setup();
+    const others = Array.from({ length: 32 }, () =>
+      x.ports.repos.definitions.create(
+        exampleDefinitionInput({
+          ...SPACE,
+          providers: { discovery: ['camoufox'], verification: [], discoveryRefreshHours: { camoufox: 168 } },
+        }),
+      ),
+    );
+    const estimate = vi.spyOn(x.engine, 'estimate');
+    await get(x, def.id, PAIRS);
+    for (const o of others.slice(0, 31)) await get(x, o.id, PAIRS);
+    await get(x, def.id, PAIRS); // a hit: def becomes the newest kept
+    expect(estimate).toHaveBeenCalledTimes(32);
+    await get(x, others[31]?.id ?? '', PAIRS); // the 33rd search drops the oldest kept (others[0]), not def
+    await get(x, def.id, PAIRS);
+    expect(estimate).toHaveBeenCalledTimes(33);
+    await get(x, others[0]?.id ?? '', PAIRS);
+    expect(estimate).toHaveBeenCalledTimes(34);
+  });
+
   it('links a real figure through the allowlist with the install point of sale', async () => {
     const { x, def, s } = await setup();
     s.tile('E', A, {
