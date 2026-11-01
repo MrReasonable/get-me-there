@@ -11,7 +11,7 @@ export const NO_SCHEDULE_TEXT =
 
 /** The line naming where to go next (U3: always printed, with or without a price source). */
 export const nextStep = (port: number): string =>
-  `Next: open http://127.0.0.1:${port} and use the new-search form on Searches: enter From, To and the dates, then press Search now; it shows what the search will use before you press.`;
+  `Next: open http://127.0.0.1:${port} and use the new-search form on Searches: enter From, To and the dates, review what the search will use, then press Search now.`;
 
 /**
  * The closing screen (brief §6; U3, U6): never the password itself, only where it lives and how to show or replace it;

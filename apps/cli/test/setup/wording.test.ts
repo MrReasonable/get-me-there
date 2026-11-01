@@ -40,7 +40,7 @@ describe('the closing screen (U3, U6)', () => {
     for (const a of [base, paid]) {
       const text = closing(a);
       expect(text).toContain(
-        'Next: open http://127.0.0.1:3000 and use the new-search form on Searches: enter From, To and the dates, then press Search now',
+        'Next: open http://127.0.0.1:3000 and use the new-search form on Searches: enter From, To and the dates, review what the search will use, then press Search now.',
       );
       expect(text).toContain('Nothing runs on a schedule until you give a search one');
     }
