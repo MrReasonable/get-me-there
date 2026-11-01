@@ -644,6 +644,11 @@ export async function recordSelectOutbound(
   if (kind === 'select-return') {
     // why: Ian's ruling of 2026-11-01: the cheapest return on the return date, picked as the outbound was, selected the
     // same way, and the booking view after it recorded; nothing on the booking view is activated
+    // why: the review: a return is picked only from a view the classifier read as the return view
+    if (a1.classification.kind !== 'results' || a1.classification.rule !== 'returns') {
+      steps.push({ step: 'return-selection', selectFailed: 'not-return-view' });
+      return finish();
+    }
     const ret = a1.names === null ? null : pickOf({ names: a1.names }, c.request.returnDate, null);
     if (ret === null) {
       steps.push({ step: 'return-selection', selectFailed: 'no-pick' });

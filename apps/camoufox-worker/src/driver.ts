@@ -406,10 +406,11 @@ export async function countOf(l: LocatorLike, d: Deadline): Promise<number> {
 /** The driver over one page; `guard` is that page's guard state (hops and frame URLs). */
 export function createDriver(page: PageLike, guard: GuardState, S: Selectors = SELECTORS): Driver {
   // why: WP21 Task 21.0: the return view's links are read by the return pattern; every other view's by the outbound one
-  // why: Ian's ruling of 2026-11-01: on the booking view every link in main counts (its structure is what is recorded)
+  // why: Ian's ruling of 2026-11-01: on the booking view the offers count: buttons in main by the offer pattern
+  // (select-return/2026-11-01/1 and 2 showed every offer so; the view's links are not offers)
   const resultLinks = (view: View = 'best'): LocatorLike =>
     view === 'booking'
-      ? page.getByRole('main').getByRole('link')
+      ? page.getByRole('main').getByRole('button', { name: S.booking.offer })
       : page
           .getByRole('main')
           .getByRole('link', { name: view === 'returns' ? S.returns.resultLink : S.results.resultLink });

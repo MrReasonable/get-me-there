@@ -151,6 +151,10 @@ export function installWith(
       // why: a frameless request counts as the main frame's, failing closed (ruling of 2026-10-18)
       const frame = frameOf(req);
       const main = frame === null || isMainFrame(frame);
+      // why: the route sees only a redirect's first URL (Playwright): an allowlisted URL that redirects off the
+      // allowlist (a seller's booking link through the results host, say) is let through and counted here. The request
+      // listener above records the whole chain as hops, and the classifier reads such a hop as off-allowlist on the
+      // next poll, so the page stops then (guard.test.ts pins the post-hoc catch)
       const navigation = req.isNavigationRequest();
       const d = decide(req.url(), navigation, req.method(), main);
       if (d.action === 'continue') {

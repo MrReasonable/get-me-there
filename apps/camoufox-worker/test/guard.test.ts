@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
+import { classifyPageWithRule, type PageFacts } from '../src/classify.js';
 import type { FrameLike, RequestLike } from '../src/driver.js';
 import {
   decideProbeRoute,
@@ -8,6 +9,7 @@ import {
   onAllowlist,
   refusalKind,
 } from '../src/guard.js';
+import { SELECTORS } from '../src/selectors.js';
 import { FakeContext } from './support/fakeContext.js';
 import { FakePage } from './support/fakePage.js';
 import { memoryLog } from './support/log.js';
@@ -284,6 +286,42 @@ describe('the document-load count (WP21 Task 21.0)', () => {
     expect(state).toMatchObject({ refused: 'off-allowlist', documentLoads: 0 });
     expect(await ctx.routeRequest(req('https://www.example-airline.test/booking?fare=x'))).toBe('aborted');
     expect(state.documentLoads).toBe(0);
+  });
+  // why: the review: the route sees a redirect's first URL only (Playwright), so an allowlisted URL that redirects off
+  // the allowlist is let through and counted; the request listener records the whole chain as hops, and the classifier
+  // reads that hop as off-allowlist on the next poll: the post-hoc catch every page relies on
+  it('a redirect from an allowlisted URL to a seller is caught after the fact, from the hops', async () => {
+    const ctx = new FakeContext();
+    const page = new FakePage(ctx, {
+      hops: ['https://www.google.com/travel/flights/booking?x', 'https://www.example-airline.test/book'],
+    });
+    const state = await installGuard(ctx, page, log);
+    await page.goto('https://www.google.com/travel/flights/booking?x');
+    expect(state).toMatchObject({ refused: null, documentLoads: 1 });
+    expect(state.hops).toContain('https://www.example-airline.test/book');
+    const facts: PageFacts = {
+      url: 'https://www.example-airline.test/book',
+      hops: [...state.hops],
+      frameUrls: [],
+      text: {
+        unusualTraffic: false,
+        consentHeading: false,
+        signInHeading: false,
+        challenge: false,
+        noFlights: false,
+        landingHeading: false,
+        returnHeading: false,
+      },
+      accountControl: false,
+      cheapestTabs: [],
+      dateGridButtons: 0,
+      resultLinks: 0,
+      outboundLinks: 0,
+    };
+    expect(classifyPageWithRule(facts, SELECTORS, 'booking')).toEqual({
+      kind: { kind: 'blocked', page: 'off-allowlist' },
+      rule: 'off-allowlist',
+    });
   });
   it('decideRoute’s allowlist is unchanged', () => {
     expect(decideRoute('https://www.google.com/travel/flights', true)).toEqual({ action: 'continue' });

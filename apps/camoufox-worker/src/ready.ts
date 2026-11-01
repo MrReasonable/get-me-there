@@ -26,9 +26,9 @@ export function isSettled(
 ): boolean {
   // why: R-settle: the return view needs only a change and something read by either pattern (or Google's own line);
   // never the results line, the selected tab or the heading, which its classifier judges, not its settle
-  // why: Ian's ruling of 2026-11-01: the booking view's structure is what the research records, so nothing about its
-  // content is required: it has changed from the return view and nothing is fetching, then it holds still
-  if (view === 'booking') return changed && !settle.fetching;
+  // why: Ian's ruling of 2026-11-01, tightened from select-return/2026-11-01/1 and 2: the booking view has changed from
+  // the return view, nothing is fetching, and at least one offer (by the offer pattern) shows; then it holds still
+  if (view === 'booking') return changed && !settle.fetching && page.resultLinks > 0;
   if (view === 'returns')
     return (
       changed &&

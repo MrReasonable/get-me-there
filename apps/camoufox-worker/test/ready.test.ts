@@ -157,8 +157,10 @@ describe('pollUntilSettled with changedFrom (the return view)', () => {
 // selected on and holds still; nothing about its content is required (its structure is what the research records)
 describe('isSettled on the booking view', () => {
   const s = { resultsReturned: false, fetching: false, cheapestPriced: false, cheapestSelected: false };
-  it('needs only the change and no fetching', () => {
-    expect(isSettled({ resultLinks: 0 }, s, 'booking', true)).toBe(true);
+  // why: tightened from select-return/2026-11-01/1 and 2: every booking view showed offers, so one is required
+  it('needs the change, no fetching and at least one offer', () => {
+    expect(isSettled({ resultLinks: 1 }, s, 'booking', true)).toBe(true);
+    expect(isSettled({ resultLinks: 0 }, s, 'booking', true)).toBe(false);
     expect(isSettled({ resultLinks: 3 }, s, 'booking', false)).toBe(false);
     expect(isSettled({ resultLinks: 3 }, { ...s, fetching: true }, 'booking', true)).toBe(false);
   });

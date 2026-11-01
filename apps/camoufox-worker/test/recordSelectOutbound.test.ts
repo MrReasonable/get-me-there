@@ -1023,18 +1023,14 @@ describe('record --select-return: the return selected, the booking view recorded
   const RET_TIE = returnOptionName({ pounds: 451, carrier: 'QQ Air', priceForm: 'from' });
   const RET_DEAR = returnOptionName({ pounds: 470, priceForm: 'from' });
   const RETURNS = [RET_DEAR, RET_OTHER_DAY, RET_CHEAP, RET_TIE];
+  const OFFER_1 = 'Continue to book with QQ Air for 451 British pounds';
+  const OFFER_2 = 'Continue to book with QQ Atlantic, Economy Light for 470 British pounds';
   const booking = (): FakeNode =>
     n('document', 'Google Flights', [
       n('main', '', [
         n('heading', 'Booking options', [], { level: 2 }),
-        n('list', '', [
-          n('listitem', '', [
-            n('link', 'Book with QQ Air', [], { href: 'https://www.example-airline.test/' }),
-          ]),
-          n('listitem', '', [
-            n('link', 'Book with QQ Atlantic', [], { href: 'https://www.example-airline.test/2' }),
-          ]),
-        ]),
+        n('list', '', [n('listitem', '', [n('button', OFFER_1)]), n('listitem', '', [n('button', OFFER_2)])]),
+        n('link', 'Booking options help', [], { href: 'https://www.example-airline.test/' }),
         n('button', 'More booking options'),
       ]),
     ]);
@@ -1073,10 +1069,11 @@ describe('record --select-return: the return selected, the booking view recorded
         documentLoads: 1,
         classification: { kind: 'blocked', rule: 'booking-view' },
         headings: ['Booking options'],
-        linkNames: ['Book with QQ Air', 'Book with QQ Atlantic'],
+        names: [OFFER_1, OFFER_2],
+        linkNames: ['Booking options help'],
         booking: {
           headingLevels: [0, 1, 0, 0, 0, 0],
-          roleCounts: { link: 2, button: 1, listitem: 2, list: 1, heading: 1, dialog: 0 },
+          roleCounts: { link: 1, button: 3, listitem: 2, list: 1, heading: 1, dialog: 0 },
         },
       },
     });
@@ -1134,7 +1131,29 @@ describe('record --select-return: the return selected, the booking view recorded
       activation: 'keyboard',
       selectFailed: 'press-return:no-activation',
       after: { settled: false, changedFromPreClick: false },
-    });
+    }); // why: the review: the whole activation, focus included, for both selections, and nothing else
+    expect(t.contexts[0]?.pages[0]?.calls.actions).toEqual([
+      `focus:link:${P451}`,
+      `press:Enter:link:${P451}:focused`,
+      `focus:link:${RET_CHEAP}`,
+      `press:Enter:link:${RET_CHEAP}:focused`,
+    ]);
+  });
+  // why: the review: a return is picked only from a view the classifier read as the return view
+  it('a settled view that is not the return view gives the return selection nothing to pick', async () => {
+    const noHeading = (): FakeNode =>
+      n('document', 'Google Flights', [
+        n('main', '', [n('heading', 'Other flights'), n('list', '', items(RETURNS))]),
+      ]);
+    const t = setup({ ...script(), onLink: (name) => (name === P451 ? [noHeading()] : null) });
+    expect(await record(t.ctx(SELECT_RETURN), cfg, t.deps)).toBe(0);
+    expect(
+      facts(t).steps.map((s: { step: string; selectFailed?: string }) => [s.step, s.selectFailed]),
+    ).toEqual([
+      ['first-selection', undefined],
+      ['return-selection', 'not-return-view'],
+    ]);
+    expect(t.contexts[0]?.pages[0]?.calls.presses).toEqual([`Enter:link:${P451}`]);
   });
   it('a challenge after the return’s activation is that stop', async () => {
     const t = setup(

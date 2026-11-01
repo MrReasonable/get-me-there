@@ -1269,17 +1269,28 @@ describe('clickReturn (the booking research)', () => {
 });
 
 describe('the booking view’s reads (the booking research)', () => {
-  it('readFacts(d, o, "booking") counts and hashes every link in main, whatever its name', async () => {
+  // why: select-return/2026-11-01/1 and 2: the booking view exposes each seller's offer as a button in main, named by
+  // the offer pattern (a hypothesis until recorded under BOOKING_SELECT_VERIFIED); its links are not offers
+  it('readFacts(d, o, "booking") counts and hashes the offer buttons in main by the offer pattern, never its links', async () => {
     const tree = n('document', '', [
-      n('link', 'Outside'),
-      n('main', '', [n('heading', 'Booking options'), n('link', 'Book with QQ Air'), n('link', 'Continue')]),
+      n('button', 'Continue to book with QQ Air for 9 British pounds'),
+      n('main', '', [
+        n('heading', 'Booking options'),
+        n('link', 'Booking options help'),
+        n('button', 'Continue to book with QQ Air for 451 British pounds'),
+        n('button', 'Continue to book with QQ Atlantic, Economy Light for 470 British pounds'),
+        n('button', 'More booking options'),
+      ]),
     ]);
     const { driver, d } = setup([tree]);
     const r = await driver.readFacts(d, undefined, 'booking');
     expect([r.page.resultLinks, r.page.outboundLinks, r.names]).toEqual([
       2,
       0,
-      ['Book with QQ Air', 'Continue'],
+      [
+        'Continue to book with QQ Air for 451 British pounds',
+        'Continue to book with QQ Atlantic, Economy Light for 470 British pounds',
+      ],
     ]);
   });
 });

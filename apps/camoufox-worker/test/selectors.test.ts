@@ -39,6 +39,22 @@ describe('the dated selectors module (spec §2; brief §9)', () => {
   });
   // why: WP21 Task 21.0: the return view's patterns are a hypothesis the recording checks (Task 21.3 dates them); both
   // price forms are admitted so the research can see whichever the page uses
+  // why: select-return/2026-11-01/1 and 2 (the booking research): each offer is a button named by this pattern; a
+  // hypothesis for the build until BOOKING_SELECT_VERIFIED is set on an entry
+  it('the booking view hypothesis: an offer button names the seller, an optional fare and the stated price', () => {
+    const { offer } = SELECTORS.booking;
+    for (const ok of [
+      'Continue to book with QQ Air for 451 British pounds',
+      'Continue to book with QQ Air, Economy Light for 1,204 British pounds',
+    ])
+      expect(offer.test(ok), ok).toBe(true);
+    for (const no of [
+      'Continue to book with QQ Air for From 451 British pounds',
+      'More booking options',
+      'View QQ Air, 451 British pounds',
+    ])
+      expect(offer.test(no), no).toBe(false);
+  });
   it('the return view hypothesis: a returning-flights heading, and return links in either price form', () => {
     const { heading, resultLink } = SELECTORS.returns;
     for (const h of [

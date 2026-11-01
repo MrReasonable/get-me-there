@@ -303,6 +303,7 @@ apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-outboun
 apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-outbound: the target and the click’s failure (WP21 Task 21.0, after recording 1) a click Playwright refuses records the call log’s reason as one word, and the page ends plainly
 apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-outbound: the target and the click’s failure (WP21 Task 21.0, after recording 1) records the target’s probe before each selection
 apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-return: the return selected, the booking view recorded a challenge after the return’s activation is that stop
+apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-return: the return selected, the booking view recorded a settled view that is not the return view gives the return selection nothing to pick
 apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-return: the return selected, the booking view recorded an Enter on the return that changes nothing within the step is press-return:no-activation
 apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-return: the return selected, the booking view recorded claims 3 pages before the first load and settles to the documents loaded
 apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-return: the return selected, the booking view recorded no return on the return date: the return selection has no pick, and nothing more is activated
