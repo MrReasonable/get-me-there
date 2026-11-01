@@ -52,6 +52,12 @@ function totalsOf(
   };
 }
 
+/** The flight line's assumption, "+ flights for up to N date pairs, about M minutes" (spec rev 55 §8.1). */
+const FLIGHT_NOTE = '+ flights for up to';
+/** Whether an assumption is one of the flight line's: its clause, or the cap that cut it ("flights for N date pairs: …"). */
+const isFlightNote = (a: string): boolean =>
+  a.startsWith(FLIGHT_NOTE) || /^flights for \d+ date pairs: /.test(a);
+
 /**
  * Spec revision 55 §8.1: whether a pass over `snapshot` runs the flight-list step at all, as far as an estimate can
  * tell before the run: camoufox in discovery (a catch-up's planned snapshot has left it out), its flight-list capability
@@ -145,8 +151,10 @@ function withFlights(
   const freeLeft = Math.max(0, snapshot.budget.maxFreeCalls - freeUsed - freeLines);
   const pages = Math.max(0, Math.min(wanted, monthLeft, freeLeft));
   const seconds = pages * ((ctx.limitsOf(FLIGHT_LIST_PROVIDER).minSpacingSeconds ?? 0) + 40);
-  const notes = [`+ flights for up to ${pages} date pairs, about ${Math.round(seconds / 60)} minutes`];
-  // why: the cap that cut the pairs is named, the monthly page cap first when both would (it is the browser worker's)
+  // why: no "+ flights" clause when no date pair is read (20.9 review finding 6); a cap that cut the pairs, to none or
+  // to some, is still named, the monthly page cap first when both would (it is the browser worker's)
+  const notes =
+    pages === 0 ? [] : [`${FLIGHT_NOTE} ${pages} date pairs, about ${Math.round(seconds / 60)} minutes`];
   if (pages < wanted)
     notes.push(
       monthLeft <= freeLeft
@@ -562,12 +570,10 @@ export function withBlocked(e: Estimate, blockedBy: ReadonlyMap<LineKey, string>
   }));
   const runs = perProvider.filter((p) => p.blocked === null);
   // why: spec rev 55 §8.1 — a pass whose browser discovery line is blocked runs no flight-list step (its entry rule)
-  const flights =
-    e.flightLists === undefined
-      ? undefined
-      : blockedBy.has(lineKey('discovery', FLIGHT_LIST_PROVIDER))
-        ? { pages: 0, seconds: 0 }
-        : e.flightLists;
+  const noFlights = e.flightLists !== undefined && blockedBy.has(lineKey('discovery', FLIGHT_LIST_PROVIDER));
+  const flights = noFlights ? { pages: 0, seconds: 0 } : e.flightLists;
+  // why: 20.9 review finding 6 — a zeroed flight line keeps none of its words ("+ flights for up to 10 …" would be untrue)
+  const kept = noFlights ? e.assumptions.filter((a) => !isFlightNote(a)) : e.assumptions;
   return {
     ...e,
     perProvider,
@@ -575,8 +581,8 @@ export function withBlocked(e: Estimate, blockedBy: ReadonlyMap<LineKey, string>
     ...(flights === undefined ? {} : { flightLists: flights }),
     assumptions:
       runs.length === perProvider.length
-        ? e.assumptions
-        : [...e.assumptions, 'totals leave out the provider lines a budget cap blocks'],
+        ? kept
+        : [...kept, 'totals leave out the provider lines a budget cap blocks'],
   };
 }
 

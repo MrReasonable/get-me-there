@@ -11,17 +11,13 @@ import { windowSetting } from '../browserGate.js';
 
 /**
  * The gate the step passes as `beforeSend` (run by the provider once its limiter admits the page and immediately before
- * it is sent). It asks the heartbeat for a suspension first (which marks every run in flight as due a window check),
- * then reads the run's browser window from its stored row on the step's first page (check a, the step being a phase of
- * its own after discovery) and after a detected suspension (check c). Outside the window it throws AbortedError.
+ * it is sent). It asks the heartbeat for a suspension (which marks every run in flight as due a window check, check c),
+ * then re-reads the run's browser window from its stored row before every page (ruling R-gate of the 20.9 review: a
+ * window that ends part way through the step stops it). Outside the window it throws AbortedError.
  */
 export function flightPageGate(ctx: EngineContext, run: RunState): () => void {
-  let first = true;
   return () => {
     ctx.heartbeat.checkBeforePage();
-    if (!first && !run.windowCheckDue) return;
-    first = false;
-    run.windowCheckDue = false;
     const exec = ctx.repos.executions.get(run.executionId);
     // why: fail closed, as discovery's gate does: a row that cannot be read gives no window to load a page in
     const w = exec === null ? { open: false } : browserWindow(exec, windowSetting(ctx), ctx.clock.now());

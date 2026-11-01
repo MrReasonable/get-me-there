@@ -134,6 +134,8 @@ export interface FlightStubOptions {
   holdCall?: { call: number; until: Promise<void> };
   /** Called as the n-th read starts (before its gate), so a test can act while a page is in flight. */
   onStart?: (n: number) => void;
+  /** Called as the n-th read's page settles (its answer about to be returned), so a test can record the order. */
+  onEnd?: (n: number) => void;
   /** The cabins the capability reads (default economy). */
   cabins?: Cabin[];
 }
@@ -196,6 +198,8 @@ function stub(
     grid?: { pageAllowance: number; scrollAllowance: number; scrollSeconds?: number };
     /** Spec rev 55 §5.1 (Task 20.9): a flight-list capability (camoufox only); absent: the provider has none. */
     flights?: FlightStubOptions;
+    /** Task 20.9: called as the n-th grid or list page starts (before the engine's gate), to record the order of pages. */
+    onTile?: (n: number) => void;
   },
 ): Stub {
   let ctxOf: () => EngineContext = () => {
@@ -208,6 +212,7 @@ function stub(
     q: DiscoveryQuery,
     pctx: { executionId: string | null; beforeSend?: () => void },
   ): Promise<DiscoveryTileResult> => {
+    o.onTile?.(calls.length + 1);
     // why: as http-kit does, the engine's last check (ProviderContext.beforeSend) runs once the limiter admits the page
     // and before it is sent; an AbortedError from it means the worker is never asked
     if (o.limiter !== undefined) {
@@ -310,6 +315,7 @@ function stub(
       });
     }
     const answer = f.answer?.(q, n) ?? listAnswer(ctxOf().clock.now());
+    f.onEnd?.(n);
     r.finalise({
       outcome: answer.kind === 'list' ? 'ok' : 'error',
       httpStatus: 200,

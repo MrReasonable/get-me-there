@@ -266,6 +266,9 @@ describe('GET /executions/:id flights (revision 55 §8.1 "What the run reports")
     expect(e.flights).toEqual({ planned: 10, read: 8, reused: 1, failed: 1, ended: null });
     // why: the 20.8 ruling — the browser worker's run scope states its flight pages beside the page cap (calls are the
     // `/v1/flights` page rows: none were ledgered here; the seeded snapshot froze no allowance, read as 0)
-    expect(e.budget.find((u) => u.scope.startsWith('provider-execution'))?.flightLists).toEqual({ calls: 0, cap: 0 });
+    expect(e.budget.find((u) => u.scope.startsWith('provider-execution'))?.flightLists).toEqual({
+      calls: 0,
+      cap: 0,
+    });
   });
 });

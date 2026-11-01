@@ -56,11 +56,24 @@ export function scheduleLoad(
     });
   }
   // why: spec rev 55 §8.1 — the flight-list pages are browser pages of the month too, reused within the same refresh
-  const flightPages = perRun.flightLists?.pages ?? 0;
+  // why: ruling R-load (20.9 review) — a schedule needs its full allowance on every run it makes; the pages the
+  // current month happens to have left cap one run's estimate, never the load of the runs to come
+  const flightPages = flightAllowanceOf(perRun, snapshot);
   const browser = load.get('camoufox');
   if (flightPages > 0 && browser !== undefined)
     load.set('camoufox', { ...browser, calls: browser.calls + flightPages * discoveryRuns('camoufox') });
   return load;
+}
+
+/**
+ * Spec rev 55 §8.1 (ruling R-load): the flight-list pages a scheduled run of `snapshot` needs, its full allowance
+ * (`flightListPages`, 10) whenever its estimate carries a flight line, whatever the current month has left.
+ */
+export function flightAllowanceOf(
+  perRun: Pick<Estimate, 'flightLists'>,
+  snapshot: Pick<DefinitionSnapshot, 'budget'>,
+): number {
+  return perRun.flightLists === undefined ? 0 : (snapshot.budget.flightListPages ?? 0);
 }
 
 /** Spec §8.2 monthly load of a schedule: scheduleLoad over runsPerMonth firings in an average month (730 h). */
@@ -114,7 +127,12 @@ export function budgetFitFor(
   scope(
     { kind: 'execution-free-calls', executionId: NO_EXECUTION },
     // why: spec rev 55 §8.1 — the flight-list pages count toward the run's free calls
-    sum(free, (p) => p.calls) + (own.perRun.flightLists?.pages ?? 0),
+    // why: the step stops at the run's free-call limit itself, so its allowance counts up to what the lines leave
+    sum(free, (p) => p.calls) +
+      Math.min(
+        flightAllowanceOf(own.perRun, own.snapshot),
+        Math.max(0, def.budget.maxFreeCalls - sum(free, (p) => p.calls)),
+      ),
     def.budget.maxFreeCalls,
   );
   scope(

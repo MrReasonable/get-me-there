@@ -161,6 +161,8 @@ export function estimateSentence(
         ...(spends
           ? [aboutDuration(e.estimate.seconds, c), ...(cost === null ? [] : [cost]), ...billedClauses]
           : []),
+        // why: 20.9 review finding 7 — with every date pair reused the browser worker still reads their flights
+        ...flights,
       ]
     : [
         aboutDuration(e.estimate.seconds, c),

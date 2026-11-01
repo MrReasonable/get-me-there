@@ -29,7 +29,7 @@ import {
 import type { EngineContext } from '../context.js';
 import { errorText } from '../errors.js';
 import { lineKey } from '../lines.js';
-import { disableProvider, type RunState } from '../run.js';
+import { disableProvider, type RunState, stopRun } from '../run.js';
 import { toStopDetail } from '../stopCause.js';
 import { airportNamesOf } from './discovery.js';
 import { flightPageGate } from './flightLists/gate.js';
@@ -62,6 +62,9 @@ function capabilityOf(ctx: EngineContext): FlightListCapability | undefined {
  */
 export function flightStepEntry(ctx: EngineContext, run: RunState): boolean {
   if (run.isChild || run.isCatchUp) return false;
+  // why: the 20.9 review's ruling — a cancel or SIGTERM that arrived after the budget stop, before the step, ends the
+  // run as that (`flightStop`), so the step writes no plan
+  if (run.flightStop !== null || run.controller.signal.aborted) return false;
   if (!run.snapshot.providers.discovery.includes(FLIGHT_LIST_PROVIDER)) return false;
   const cap = capabilityOf(ctx);
   if (cap === undefined || ctx.rankedDatePairs === undefined) return false;
@@ -123,15 +126,18 @@ function errorOutcome(run: RunState, e: ProviderError): PageOutcome {
   const reason = toStopDetail(e.reason ?? null, e.kind);
   if (e.kind === 'blocked') {
     const until = e.cooldownUntil ?? null;
+    // why: the step skips no cell, so the notice says what stopped and what is left unread in its own words; a block
+    // with a cool-down is sent once per cool-down (keyed by its end), as discovery's is
+    const words = `${FLIGHT_LIST_PROVIDER} stopped on a flight-list page: ${errorText(e)}. The rest of this run's flight lists are not read`;
     disableProvider(
       run,
       FLIGHT_LIST_PROVIDER,
       'a blocked flight-list page',
       'provider_disabled',
       until === null
-        ? undefined
+        ? { detail: `${words}.` }
         : {
-            detail: `${FLIGHT_LIST_PROVIDER} stopped on a flight-list page: ${errorText(e)}. It is not called again until the cool-down ends.`,
+            detail: `${words}, and it is not called again until the cool-down ends.`,
             key: cooldownNoticeKey(FLIGHT_LIST_PROVIDER, until),
           },
       { detail: 'blocked', until },
@@ -187,10 +193,8 @@ async function readPage(
     if (err instanceof AbortedError) return { kind: 'window' };
     if (err instanceof BudgetExceeded) return budgetOutcome(err.scope);
     if (err instanceof ProviderError) return errorOutcome(run, err);
-    run.log
-      .child({ providerId: FLIGHT_LIST_PROVIDER })
-      .error({ err: errorText(err) }, 'flight list: page threw');
-    return { kind: 'failed', reason: 'fatal', end: true, ended: 'stopped' };
+    // why: ruling R-dberror — anything else (the database itself failing) is fatal, as everywhere else in a pass
+    throw err;
   }
 }
 
@@ -328,7 +332,7 @@ function markLeftByWindow(ctx: EngineContext, run: RunState): void {
 /**
  * Spec revision 55 §8.1 "The flight-list step": selects (or resumes) the plan, reads its date pairs one at a time
  * (concurrency 1) under the error table, and records its counts on the run (`run.flightLists`, which the budget cause
- * it runs after carries). A failure of the step's own bookkeeping is logged and ends the step; it never stops the run.
+ * it runs after carries). A failure outside the error table (the database itself) stops the run fatal (R-dberror).
  */
 export async function runFlightLists(ctx: EngineContext, run: RunState): Promise<void> {
   if (!flightStepEntry(ctx, run)) {
@@ -377,7 +381,10 @@ export async function runFlightLists(ctx: EngineContext, run: RunState): Promise
     run.flightLists = { read: counts.read + plan.reused, planned: plan.planned };
     log.info({ ...counts, reused: plan.reused, ended }, 'flight lists: step done');
   } catch (err) {
-    log.error({ err: errorText(err) }, 'flight lists: step failed');
+    // why: ruling R-dberror (20.9 review) — a failure of the step's own writes is the run's fatal stop, with its cause,
+    // as a failure anywhere else in the pass is; it is never logged and completed
+    log.error({ err: errorText(err) }, 'flight lists: step failed; the run stops');
+    stopRun(run, { kind: 'fatal', message: errorText(err) });
   } finally {
     run.flightStepActive = false;
   }

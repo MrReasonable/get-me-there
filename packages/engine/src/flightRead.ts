@@ -168,19 +168,24 @@ export function createFlightReader(ctx: EngineContext): FlightReader {
     } catch (err) {
       // why: shutdown aborts the read; an aborted read writes nothing, as an aborted tile writes no outcome
       if (signal.aborted || err instanceof AbortedError) return;
-      if (err instanceof BudgetExceeded) {
-        write(failedRow(ctx, def, cell, 'monthly-cap'));
-        return;
-      }
-      if (err instanceof ProviderError) {
-        write(failedRow(ctx, def, cell, toStopDetail(err.reason ?? null, err.kind)));
-        return;
-      }
-      log.error({ err: errorText(err) }, 'flight read: failed');
+      const word: StopDetail =
+        err instanceof BudgetExceeded
+          ? 'monthly-cap'
+          : err instanceof ProviderError
+            ? toStopDetail(err.reason ?? null, err.kind)
+            : 'fatal';
+      if (word === 'fatal') log.error({ err: errorText(err) }, 'flight read: failed');
+      // why: every write here is guarded (20.9 review finding 4), so `done` never rejects: a failure row that cannot be
+      // written is logged and recorded as `fatal` instead, and when even that fails it is logged only
       try {
-        write(failedRow(ctx, def, cell, 'fatal'));
-      } catch (inner) {
-        log.error({ err: errorText(inner) }, 'flight read: its failure could not be recorded');
+        write(failedRow(ctx, def, cell, word));
+      } catch (first) {
+        log.error({ err: errorText(first), reason: word }, 'flight read: its failure could not be recorded');
+        try {
+          if (word !== 'fatal') write(failedRow(ctx, def, cell, 'fatal'));
+        } catch (second) {
+          log.error({ err: errorText(second) }, 'flight read: no failure row could be written');
+        }
       }
     }
   }

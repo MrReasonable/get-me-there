@@ -13,6 +13,7 @@ import {
 } from '@gmt/core';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { laneFor, newRun, type RunState } from '../../src/run.js';
+import { snapshotBudget } from '../../src/snapshot.js';
 import { flightStepEntry } from '../../src/stages/flightLists.js';
 import type { RankedDatePairsReader } from '../../src/types.js';
 import {
@@ -426,6 +427,97 @@ describe("the step's error table", () => {
     expect(done.status).toBe('completed');
     expect(done.stopCause).toBeNull();
     expect(e.notifications.filter((n) => n.kind === 'browser_window')).toHaveLength(0);
+  });
+});
+
+describe('the step after the review (Task 20.9 fix round 1)', () => {
+  it("R-gate: the clock passes the window end after page 2: no page 3, no row for it or later, ended 'window'", async () => {
+    let id = '';
+    const cam = stubCamoufox({
+      cells: 15,
+      flights: {
+        // why: the gate re-reads the stored browser window before every page, so a window that ends mid-step stops it
+        onStart: (n) => {
+          if (n !== 3) return;
+          const end = e.ctx.repos.executions.get(id)?.browserWindowEnd ?? null;
+          if (end !== null) e.clock.set(asIsoDateTime(new Date(Date.parse(end) + 1_000).toISOString()));
+        },
+      },
+    });
+    const e = engineWith([cam], { rankedDatePairs: rankedPairs(15) });
+    id = await start(e);
+    const done = await e.settled(id);
+    expect(cam.flightRequests()).toBe(2);
+    expect(flightRows(e, id)).toHaveLength(2);
+    expect(done.flightLists?.ended).toBe('window');
+    expect(done.status).toBe('completed');
+  });
+
+  it('R-dberror: a database error inside the step stops the run fatal, with its cause', async () => {
+    const { e } = camoufoxOnly();
+    const insert = e.ctx.repos.flightLists.insert.bind(e.ctx.repos.flightLists);
+    let n = 0;
+    e.ctx.repos.flightLists.insert = (row) => {
+      n += 1;
+      if (n === 3) throw new Error('SQLITE_IOERR: disk I/O error (synthetic)');
+      return insert(row);
+    };
+    const done = await e.settled(await start(e));
+    expect(done.status).toBe('paused_error');
+    expect(done.stopCause).toEqual({ kind: 'fatal' });
+    expect(flightRows(e, done.id)).toHaveLength(2);
+  });
+
+  it('a blocked flight page with no cool-down is notified in its own words, not as skipped cells', async () => {
+    const { e, cam } = camoufoxOnly({
+      flights: { answer: (_q, n) => (n === 2 ? listError('blocked') : undefined) },
+    });
+    const done = await e.settled(await start(e));
+    expect(cam.flightCalls).toHaveLength(2);
+    const notices = e.notifications.filter((x) => x.kind === 'provider_disabled');
+    expect(notices).toHaveLength(1);
+    expect(notices[0]?.body).toContain('flight-list page');
+    expect(notices[0]?.body).not.toContain('remaining cells are skipped');
+    expect(done.status).toBe('completed');
+  });
+
+  it.each([
+    ['a SIGTERM', 'interrupted', { kind: 'interrupted' }],
+    ['a Cancel', 'cancelled', { kind: 'cancelled' }],
+  ] as const)(
+    '%s after the grid-cap stop and before the step starts ends the run %s and the step writes no plan',
+    async (_name, status, cause) => {
+      const { e, cam } = camoufoxOnly({ cells: 120 });
+      const write = e.ctx.repos.cells.setOutcomesForProvider.bind(e.ctx.repos.cells);
+      let fired = false;
+      // why: the lane's settle marks its remaining cells skipped:budget once its pool drains, after the budget stop and
+      // before the flight-list step: the stop arrives there
+      e.ctx.repos.cells.setOutcomesForProvider = (executionId, stage, providerId, from, to) => {
+        const n = write(executionId, stage, providerId, from, to);
+        if (!fired && providerId === 'camoufox' && to.status === 'skipped' && to.reason === 'budget') {
+          fired = true;
+          if (status === 'interrupted') void e.orch.shutdown();
+          else void e.orch.cancel(executionId, { kind: 'cancelled' });
+        }
+        return n;
+      };
+      const id = await start(e);
+      const done = await e.settled(id);
+      expect(fired).toBe(true);
+      expect(done.status).toBe(status);
+      expect(done.stopCause).toEqual(cause);
+      expect(done.flightLists).toBeNull();
+      expect(cam.flightCalls).toHaveLength(0);
+    },
+  );
+});
+
+describe('snapshotBudget and the flight allowance (spec rev 55 §8.1, the 20.8 note)', () => {
+  it('strips a definition-supplied flightListPages and sets 10 with camoufox in discovery; none without', () => {
+    const e = engineWith([stubCamoufox({ cells: 3, flights: {} }), stubTravelpayouts({ cells: 3 })]);
+    const own = { ...e.definition.budget, flightListPages: 500 };
+    expect(snapshotBudget(e.ctx, own, ['camoufox', 'travelpayouts']).flightListPages).toBe(10);
+    expect('flightListPages' in snapshotBudget(e.ctx, own, ['travelpayouts'])).toBe(false);
   });
 });
 

@@ -74,7 +74,8 @@ describe('a resumed flight-list step', () => {
     const rows = flightRows(e, id);
     expect(rows).toHaveLength(10);
     expect(new Set(rows.map((r2) => r2.departureDate)).size).toBe(10);
-    expect(flightLedger(e, id)).toBeLessThanOrEqual(10);
+    // why: 4 pages before the SIGTERM and 6 after; the held page was aborted before it was answered (a no-page row)
+    expect(flightLedger(e, id)).toBe(10);
     const counts = p.ctx.repos.flightLists.forExecution(id, done.flightLists?.cells ?? []);
     expect(counts.read + counts.failed + (done.flightLists?.reused ?? 0)).toBeLessThanOrEqual(10);
     expect(apiContract.flightListsStateSchema.parse(done.flightLists)).toBeTruthy();
@@ -92,6 +93,8 @@ describe('a resumed flight-list step', () => {
     expect(cam2.flightCalls.map((c) => c.query.cell)).toEqual(plan?.cells.slice(5));
     const rows = flightRows(e, id);
     expect(rows).toHaveLength(9);
+    // why: 4 pages before the SIGTERM, 5 after it (the departed fifth cell sends none)
+    expect(flightLedger(e, id)).toBe(9);
     expect(rows.some((r) => r.departureDate === plan?.cells[4]?.departureDate)).toBe(false);
     const counts = p.ctx.repos.flightLists.forExecution(id, done.flightLists?.cells ?? []);
     expect(counts.read + counts.failed + (done.flightLists?.reused ?? 0)).toBeLessThanOrEqual(

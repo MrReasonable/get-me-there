@@ -3,7 +3,14 @@
 // discovery preflight first, ignores the browser window, writes one row with no execution; a run that goes pending
 // while a read is in flight waits for the lease before its first browser page; shutdown aborts a read and awaits it.
 // Event-driven throughout: deferred promises, never timers.
-import { asIsoDate, asIsoDateTime, type IsoDate } from '@gmt/core';
+import {
+  asIsoDate,
+  asIsoDateTime,
+  BudgetExceeded,
+  type FlightListResult,
+  type IsoDate,
+  ProviderError,
+} from '@gmt/core';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { buildContext } from '../src/context.js';
 import { createEngine } from '../src/engine.js';
@@ -58,6 +65,11 @@ function parentRow(e: CamoufoxEngine, definitionId: string, status: 'pending' | 
     status,
   }).id;
 }
+
+const listErrorOf = (kind: 'upstream'): FlightListResult => ({
+  kind: 'list-error',
+  error: new ProviderError({ kind, retryable: false, providerId: 'camoufox', message: 'synthetic' }),
+});
 
 const ledgerTotal = (e: CamoufoxEngine): number =>
   e.ctx.db.raw.prepare<[], { n: number }>('SELECT count(*) AS n FROM provider_requests').get()?.n ?? 0;
@@ -217,9 +229,55 @@ describe('readFlightList reads', () => {
     expect(reader.inFlight()).toBeNull();
   });
 
+  it('a failing insert in a failure branch never rejects done: the failure is logged and recorded as fatal', async () => {
+    const { e, reader } = setup({
+      answer: () => {
+        throw new BudgetExceeded({
+          scope: 'provider-month',
+          providerId: 'camoufox',
+          cap: 10,
+          current: 10,
+          requested: 1,
+        });
+      },
+    });
+    const insert = e.ctx.repos.flightLists.insert.bind(e.ctx.repos.flightLists);
+    let n = 0;
+    e.ctx.repos.flightLists.insert = (row) => {
+      n += 1;
+      if (n === 1) throw new Error('SQLITE_BUSY: database is locked (synthetic)');
+      return insert(row);
+    };
+    const r = await reader.read(e.definition.id, PAIR);
+    if (!r.ok) throw new Error('started');
+    await expect(r.done).resolves.toBeUndefined();
+    expect(flightRows(e, null).map((x) => [x.status, x.reason])).toEqual([['failed', 'fatal']]);
+    expect(e.logs.some((l) => l.level === 'error' && String(l.msg).includes('could not be recorded'))).toBe(
+      true,
+    );
+    expect(reader.inFlight()).toBeNull();
+  });
+
+  it('an insert that always fails still never rejects done, and frees the lease', async () => {
+    const { e, reader } = setup({ answer: () => listErrorOf('upstream') });
+    e.ctx.repos.flightLists.insert = () => {
+      throw new Error('SQLITE_IOERR: disk I/O error (synthetic)');
+    };
+    const r = await reader.read(e.definition.id, PAIR);
+    if (!r.ok) throw new Error('started');
+    await expect(r.done).resolves.toBeUndefined();
+    expect(flightRows(e, null)).toEqual([]);
+    expect(e.ctx.lease.inFlight()).toBe(false);
+  });
+
   it('a run that goes pending while a read is in flight waits for the lease before its first browser page', async () => {
     const release = deferred();
-    const { e, cam, reader } = setup({ holdCall: { call: 1, until: release.promise } });
+    const events: string[] = [];
+    const { e, cam, reader } = setup(
+      { holdCall: { call: 1, until: release.promise }, onEnd: (n) => events.push(`read-end:${n}`) },
+      {},
+      { onTile: (n: number) => events.push(`grid:${n}`) },
+    );
     const r = await reader.read(e.definition.id, PAIR);
     if (!r.ok) throw new Error('started');
     const waiting = deferred();
@@ -241,6 +299,8 @@ describe('readFlightList reads', () => {
     const done = await e.settled(started.executionId);
     expect(done.status).toBe('completed');
     expect(cam.calls).toHaveLength(15);
+    // why: the read's page settled before the run's first browser page started (the order, not only a count)
+    expect(events.slice(0, 2)).toEqual(['read-end:1', 'grid:1']);
   });
 
   it('a Resume whose grid has no cells left waits the same way before the flight step first page', async () => {
@@ -263,7 +323,15 @@ describe('readFlightList reads', () => {
     // why: a cancel ends the run with its grid done and 2 flight lists read; a manual Resume then has only flights left
     await e.orch.cancel(started.executionId, { kind: 'cancelled' });
     const release = deferred();
-    const cam2 = stubCamoufox({ cells: 15, flights: { holdCall: { call: 1, until: release.promise } } });
+    const events: string[] = [];
+    const cam2 = stubCamoufox({
+      cells: 15,
+      flights: {
+        holdCall: { call: 1, until: release.promise },
+        onStart: (n) => events.push(`start:${n}`),
+        onEnd: (n) => events.push(`end:${n}`),
+      },
+    });
     const ctx = buildContext({ ...e.deps, providers: [cam2] }, { rankedDatePairs: rankedPairs(10) });
     cam2.bind(() => ctx);
     const reader = createFlightReader(ctx);
@@ -285,6 +353,8 @@ describe('readFlightList reads', () => {
     const done = await e.settled(started.executionId);
     expect(done.status).toBe('completed');
     expect(cam2.flightCalls.filter((c) => c.executionId === started.executionId)).toHaveLength(8);
+    // why: the on-demand read's page (1) settled before the resumed step's first page (2) started
+    expect(events.slice(0, 3)).toEqual(['start:1', 'end:1', 'start:2']);
     await orch.shutdown();
   });
 

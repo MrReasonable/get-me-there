@@ -423,6 +423,45 @@ describe('the estimate flight line (spec rev 55 §8.1)', () => {
     expect(estimateRemainingFor(e.ctx, done, true).flightLists?.pages).toBe(6);
   });
 
+  /** `n` browser pages already spent this month (outside any run), as the guard counts them. */
+  function spendPages(e: ReturnType<typeof engineWith>, n: number): void {
+    const at = e.clock.now();
+    const insert = e.ctx.db.raw.prepare(
+      `INSERT INTO provider_requests (provider_id, execution_id, endpoint_path, tile_index, started_at, finished_at,
+         duration_ms, http_status, outcome, billable, cost_micro_gbp, http_attempt, page_class)
+       VALUES ('camoufox', NULL, '/v1/page', NULL, ?, ?, 1, 200, 'ok', 0, 0, 1, 'page')`,
+    );
+    for (let i = 0; i < n; i++) insert.run(at, at);
+  }
+
+  it("R-load: a schedule's load counts its full flight allowance a run, even with the month spent", () => {
+    // why: 15 of a 30-page month are spent, so this run's grid (15) leaves none for flights; a schedule still needs
+    // 10 flight pages on every run it makes
+    const { e, b } = flightEstimate(15, { monthlyCap: 30, scheduleCron: '0 5 * * 1' });
+    spendPages(e, 15);
+    expect(estimateStart(e.ctx, b.snapshot, b.cells, null).flightLists?.pages).toBe(0);
+    const fit = budgetFitFor(e.ctx, e.definition, e.definition.id);
+    const runs = runsPerMonth('0 5 * * 1', 'Europe/London', new Date(T0));
+    expect(fit.perScope.find((x) => x.scope === 'provider-month:camoufox')?.estimated).toBe(
+      Math.ceil(runs * 25),
+    );
+    expect(fit.perScope.find((x) => x.scope.startsWith('execution-free-calls'))?.estimated).toBe(25);
+  });
+
+  it('never says "+ flights for up to 0 date pairs"; a cap that leaves none is still named', () => {
+    const { est } = flightEstimate(15, { monthlyCap: 15 });
+    expect(est.flightLists).toEqual({ pages: 0, seconds: 0 });
+    expect(est.assumptions.some((a) => a.startsWith('+ flights'))).toBe(false);
+    expect(est.assumptions).toContain("flights for 0 date pairs: the browser worker's monthly page cap");
+  });
+
+  it('withBlocked drops the flight notes when it zeroes the flight pages', () => {
+    const { est } = flightEstimate(120, { monthlyCap: 104 });
+    expect(est.assumptions.filter((a) => a.includes('flights for'))).toHaveLength(2);
+    const blocked = withBlocked(est, new Map([[lineKey('discovery', 'camoufox'), 'provider-month']]));
+    expect(blocked.assumptions.filter((a) => a.includes('flights for'))).toEqual([]);
+  });
+
   it('without camoufox the estimate has no flightLists key', () => {
     const e = engineWith([stubTravelpayouts({ cells: 15 })], { rankedDatePairs: rankedPairs(15) });
     const b = buildSnapshot(e.ctx, e.definition);

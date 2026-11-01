@@ -299,6 +299,13 @@ describe('estimateSentence: the notes under it', () => {
     );
   });
 
+  it('nothing new to ask keeps the flights clause: the browser worker still reads them (20.9 review finding 7)', () => {
+    const e = resp({ covered: 0, reused: 405, flightLists: { pages: 10, seconds: 700 } });
+    expect(sentence(e).line).toBe(
+      'Nothing new to ask: 405 date pairs reused from earlier runs · + flights for up to 10 date pairs, about 12 minutes',
+    );
+  });
+
   it('no flight clause without flight pages', () => {
     expect(sentence(resp({ flightLists: { pages: 0, seconds: 0 } })).line).not.toContain('flights');
     expect(sentence(resp({})).line).not.toContain('flights');

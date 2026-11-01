@@ -218,16 +218,34 @@ export function newRun(
 
 /**
  * Records the first stop reason; stops new work, and aborts calls in flight only for cancel, SIGTERM and fatal.
- * Revision 55 §8.1 (ruling A16): a cancel, SIGTERM or fatal stop that arrives while the flight-list step runs after an
- * earlier stop (the browser worker's per-run page cap, the one stop the step runs after) is the step's to record: it
- * becomes `flightStop`, which `finish` prefers, so the run ends `cancelled` or `interrupted` rather than paused.
+ * Revision 55 §8.1 (ruling A16, and the 20.9 review's ruling): a cancel, SIGTERM or fatal stop that arrives while the
+ * flight-list step runs after an earlier stop, or once the browser worker's per-run page cap (the one stop the step
+ * runs after) stands, becomes `flightStop`, which `finish` prefers, so the run ends `cancelled`, `interrupted` or fatal
+ * rather than paused.
  */
 export function stopRun(run: RunState, reason: StopReason): void {
   if (run.stop === null) run.stop = reason;
-  else if (run.flightStepActive && run.flightStop === null && ABORTING.has(reason.kind))
+  else if (
+    run.flightStop === null &&
+    ABORTING.has(reason.kind) &&
+    (run.flightStepActive || flightStepFollows(run.stop))
+  )
     run.flightStop = reason;
   run.intake.abort();
   if (ABORTING.has(reason.kind)) run.controller.abort();
+}
+
+/**
+ * The one stop the flight-list step runs after (spec rev 55 §8.1): the browser worker's own per-run page cap. A cancel or
+ * SIGTERM that arrives once it stands, before the step starts as well as during it (the 20.9 review's ruling), is
+ * recorded as `flightStop`, so the run ends cancelled or interrupted rather than paused.
+ */
+function flightStepFollows(stop: StopReason): boolean {
+  return (
+    stop.kind === 'budget' &&
+    stop.error.scope === 'provider-execution' &&
+    stop.error.providerId === 'camoufox'
+  );
 }
 
 /** The lane for (stage, provider), created on first use. */
@@ -510,7 +528,8 @@ export function disableProvider(
   providerId: ProviderId,
   why: string,
   reason: SkipReason = 'provider_disabled',
-  notice?: { detail: string; key: string },
+  /** The notice in the caller's own words; `key` makes it once-only across runs (a cool-down's). */
+  notice?: { detail: string; key?: string },
   cause: { detail: StopDetail; until: IsoDateTime | null } = {
     detail: reason === 'provider_unavailable' ? 'provider-unavailable' : 'blocked',
     until: null,
