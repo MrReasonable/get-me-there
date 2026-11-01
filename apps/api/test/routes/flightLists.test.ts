@@ -132,7 +132,7 @@ describe('GET /definitions/:id/flight-lists (revision 55 §10)', () => {
       origin: LHR,
       destination: JFK,
       ageHours: 200,
-      stale: true,
+      stale: 'refresh',
       status: 'read',
       listed: 'flights',
       provenance: {

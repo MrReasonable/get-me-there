@@ -167,7 +167,7 @@ function workedEntry(dep: string, ret: string) {
           returnDate: ret,
           fetchedAt: '2026-10-10T10:44:00.000Z',
           ageHours: 100,
-          stale: true,
+          stale: 'refresh',
           minMinor: 11_000,
           flights: [listedFlight({ amountMinor: 11_000 })],
         }),

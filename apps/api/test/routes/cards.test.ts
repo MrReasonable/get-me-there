@@ -115,6 +115,29 @@ describe('GET /definitions/cards (revision 55 §10)', () => {
     });
   });
 
+  // why: decision 36 — the board's figure from a truncated tile is a partial minimum; the card says so as the board does
+  it("a cheapest read from a truncated tile carries the board figure's truncated mark", async () => {
+    h = await createHarness();
+    const x = h;
+    const s = seeder(x.ports);
+    const def = x.ports.repos.definitions.create(exampleDefinitionInput({ ...FOUR }));
+    const [a] = cellsOf(def);
+    if (a === undefined) throw new Error('no cells');
+    s.execution('E1', { def, status: 'completed', startedAt: at(-2), finishedAt: at(-1) });
+    s.cells('E1', cellsOf(def));
+    s.tile('E1', a, {
+      status: 'priced',
+      pricePence: 40_000,
+      fetchedAt: at(-1),
+      lastError: 'cheapest of the rows read',
+    });
+    expect(cardOf(await cards(x), def.id).cheapest).toMatchObject({
+      pricePence: 40_000,
+      basis: 'calendar',
+      truncated: true,
+    });
+  });
+
   it("cheapest is the board's first-ranked figure with its provenance and per-price staleness; fromLatestRun is false when an earlier run fetched it", async () => {
     h = await createHarness();
     const x = h;
@@ -137,6 +160,7 @@ describe('GET /definitions/cards (revision 55 §10)', () => {
       origin: a.origin,
       destination: a.destination,
       stale: false,
+      truncated: false,
       fromLatestRun: false,
       provenance: { providerId: 'fixture', fetchedAt: at(-5) },
     });

@@ -12,7 +12,7 @@ import {
   staleMarkSchema,
   triggerSchema,
 } from './common.js';
-import { definitionFields, definitionResponseSchema, refineDefinition } from './definitions.js';
+import { definitionRequestFields, definitionResponseSchema, refineDefinition } from './definitions.js';
 import { executionFlightsSchema } from './executions.js';
 import { stopTextSchema } from './stopCause.js';
 
@@ -82,21 +82,28 @@ const latestRunSchema = z
 
 /**
  * The card's cheapest figure: the board's first-ranked figure through the same ranking, with its full provenance, its
- * staleness by the per-price rule (`stalenessOf`), its age, basis, dates and airport pair, and whether the latest run
- * found it.
+ * staleness by the per-price rule (`stalenessOf`), its age, its truncated mark (decision 36: the cheapest of the rows a
+ * truncated tile read, so a partial minimum never looks complete; calendar basis only, as the board's figure holds it),
+ * basis, dates and airport pair, and whether the latest run found it.
  */
-const cardCheapestSchema = z.strictObject({
-  pricePence: moneyPenceSchema,
-  provenance: provenanceSchema,
-  stale: staleMarkSchema,
-  ageHours: ageHoursSchema,
-  basis: z.enum(['verified', 'calendar']),
-  departureDate: isoDateSchema,
-  returnDate: isoDateSchema,
-  origin: iataSchema,
-  destination: iataSchema,
-  fromLatestRun: z.boolean(),
-});
+const cardCheapestSchema = z
+  .strictObject({
+    pricePence: moneyPenceSchema,
+    provenance: provenanceSchema,
+    stale: staleMarkSchema,
+    ageHours: ageHoursSchema,
+    truncated: z.boolean(),
+    basis: z.enum(['verified', 'calendar']),
+    departureDate: isoDateSchema,
+    returnDate: isoDateSchema,
+    origin: iataSchema,
+    destination: iataSchema,
+    fromLatestRun: z.boolean(),
+  })
+  .refine((c) => !c.truncated || c.basis === 'calendar', {
+    message: 'truncated is for calendar figures',
+    path: ['truncated'],
+  });
 
 /**
  * Spec revision 55 §10 `GET /definitions/cards`: one card of the first screen. `schedule` is non-null only when the
@@ -131,7 +138,7 @@ export type SearchCardsResponse = z.infer<typeof searchCardsResponseSchema>;
  * rather than silently dropped. `confirmCalls: 0` is a valid shape (a free search with no capped calls).
  */
 export const createAndStartRequestSchema = z
-  .strictObject(definitionFields)
+  .strictObject(definitionRequestFields)
   .omit({ confirmedCostPence: true, confirmedCalls: true })
   .extend({ confirmCostPence: moneyPenceSchema, confirmCalls: count, requestKey: z.uuid() })
   .superRefine(refineDefinition);

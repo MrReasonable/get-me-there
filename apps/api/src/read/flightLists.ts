@@ -58,9 +58,9 @@ export function parsePairs(raw: string): DatePairAsk[] {
 }
 
 /**
- * One stored list on the wire (spec §10 `flightListSchema`): its age in whole hours, `stale` once older than the
- * search's camoufox refresh, and the provenance the database holds it to (the browser worker's own page, economy, GBP,
- * `maxAgeHours` 0, the point of sale the page stated).
+ * One stored list on the wire (spec §10 `flightListSchema`): its age in whole hours, `stale` `'refresh'` once older
+ * than the search's camoufox refresh, and the provenance the database holds it to (the browser worker's own page,
+ * economy, GBP, `maxAgeHours` 0, the point of sale the page stated).
  */
 export function toFlightList(l: StoredFlightList, now: IsoDateTime, refreshHours: number): FlightList {
   const ageHours = hoursSince(l.fetchedAt, now);
@@ -73,7 +73,8 @@ export function toFlightList(l: StoredFlightList, now: IsoDateTime, refreshHours
     returnDate: l.returnDate,
     fetchedAt: l.fetchedAt,
     ageHours,
-    stale: ageHours > refreshHours,
+    // why: spec rev 55 §10 — the stale mark, never a bare true; a list is judged against the camoufox refresh only
+    stale: ageHours > refreshHours ? 'refresh' : false,
     provenance: {
       providerId: 'camoufox',
       sourceKind: 'scraped-self',

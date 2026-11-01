@@ -148,6 +148,8 @@ function cardOf(
             provenance: best.figure.price.provenance,
             stale: best.figure.price.stale,
             ageHours: best.figure.price.ageHours,
+            // why: decision 36 — a partial minimum from a truncated tile is marked on the card as on the board
+            truncated: best.figure.price.truncated,
             basis: best.figure.basis,
             departureDate: best.departureDate,
             returnDate: best.returnDate,

@@ -33,8 +33,8 @@ export type FlightPair = FlightListsResponse['pairs'][number];
 /** A date pair on the board: it always has a figure (rankDatePairs keeps no other). */
 type Row = DatePair & { figure: DatePairFigure };
 
-/** A list's stale mark for PriceCell (spec rev 55 §10: `stale` is older than this search's camoufox refresh). */
-export const listStale = (list: FlightList): StaleMark => (list.stale ? 'refresh' : false);
+/** A list's stale mark for PriceCell (spec rev 55 §10: the wire's own mark, `'refresh'` once older than the refresh). */
+export const listStale = (list: FlightList): StaleMark => list.stale;
 
 /** The key a date pair is asked and found by: the wire's `departure_return` form (spec rev 55 §10 `?pairs=`). */
 export const pairKey = (p: { departureDate: string; returnDate: string }): string =>

@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  definitionCreateRequestSchema,
+  definitionUpdateRequestSchema,
+} from '../../src/api-contract/definitions.js';
+import {
   createAndStartRequestSchema,
   createAndStartResponseSchema,
   searchCardSchema,
@@ -91,6 +95,18 @@ describe('searchCardsResponseSchema (spec rev 55 §10 GET /definitions/cards)', 
     expect(searchCardSchema.safeParse(searchCard({ cheapest: rest })).success).toBe(false);
   });
 
+  // why: decision 36 — a calendar cheapest read from a truncated tile is a partial minimum and says so; a verified
+  // figure is never truncated (the date-pairs figure's own rule)
+  it("carries the cheapest price's truncated mark: required, and only on the calendar basis", () => {
+    const { truncated: _t, ...without } = cardCheapest();
+    expect(searchCardSchema.safeParse(searchCard({ cheapest: without })).success).toBe(false);
+    const ok = (o: Record<string, unknown>) =>
+      searchCardSchema.safeParse(searchCard({ cheapest: cardCheapest(o) })).success;
+    expect(ok({ truncated: true })).toBe(true);
+    expect(ok({ basis: 'verified', truncated: false })).toBe(true);
+    expect(ok({ basis: 'verified', truncated: true })).toBe(false);
+  });
+
   it('refuses an unknown key on the card, its run and its cheapest price (no error_text ever travels)', () => {
     expect(searchCardSchema.safeParse(searchCard({ errorText: 'paused: error' })).success).toBe(false);
     const run = searchCard({ latestRun: latestRun({ errorText: 'x' }) });
@@ -106,6 +122,22 @@ describe('createAndStartRequestSchema (spec rev 55 §10 POST /definitions/create
     const r = createAndStartRequestSchema.safeParse(createAndStartBody());
     expect(r.success).toBe(true);
     expect(r.data).toMatchObject({ confirmCostPence: 0, confirmCalls: 0 });
+  });
+
+  // why: spec rev 55 §8.1 (ruling A5) — the run's page cap and flight-list allowance are the engine's, set at creation;
+  // a request's budget never carries them, so a definition never stores them (dropped, as any unknown budget key is)
+  it('a request budget drops the engine-owned allowances (providerMaxCalls, flightListPages), on every request shape', () => {
+    const own = { maxCalls: 2000, maxFreeCalls: 2000, maxCostMicroGbp: 0 };
+    const budget = { ...own, providerMaxCalls: { camoufox: 5 }, flightListPages: 10 };
+    const {
+      requestKey: _k,
+      confirmCostPence: _p,
+      confirmCalls: _c,
+      ...create
+    } = createAndStartBody({ budget });
+    expect(createAndStartRequestSchema.parse(createAndStartBody({ budget })).budget).toEqual(own);
+    expect(definitionCreateRequestSchema.parse(create).budget).toEqual(own);
+    expect(definitionUpdateRequestSchema.parse({ budget }).budget).toEqual(own);
   });
 
   it("refuses the stored confirmation's old pair, so a press can never set a standing confirmation by name", () => {

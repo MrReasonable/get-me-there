@@ -8,7 +8,7 @@ import { FLIGHT_LIST_MAX_FLIGHTS } from '../flights/limits.js';
 import { LISTED, listedFlightSchema } from '../flights/types.js';
 import { iataSchema, isoDateSchema, isoDateTimeSchema } from '../types/ids.js';
 import { pointOfSaleSchema } from '../types/provenance.js';
-import { ageHoursSchema, countSchema } from './common.js';
+import { ageHoursSchema, countSchema, moneyPenceSchema, staleMarkSchema } from './common.js';
 import { STOP_DETAILS } from './stopCause.js';
 
 /**
@@ -35,9 +35,11 @@ export const flightListProvenanceSchema = z.strictObject({
 
 /**
  * One stored flight list (spec rev 55 §10): `read` lists carry what the page listed (`listed`, never null) and no
- * reason; `failed` lists carry one STOP_DETAILS word (`reason`, never null) and no outcome. `stale`: older than the
- * search's camoufox refresh. `flights` are the 30 cheapest of the pair's options in page order; `minMinor`, `tabMinor`
- * and `cheapestView` are the page's as the list read keeps them.
+ * reason; `failed` lists carry one STOP_DETAILS word (`reason`, never null) and no outcome. `stale`: the list's stale
+ * mark, `'refresh'` once older than the search's camoufox refresh, else false (§10: every price-bearing shape carries the
+ * mark, never a bare true). `flights` are the 30 cheapest of the pair's options in page order; `minMinor`, `tabMinor`
+ * and `cheapestView` are the page's as the list read keeps them, a price never 0 (ruling A28, as the worker protocol and
+ * the database hold it).
  */
 export const flightListSchema = z
   .strictObject({
@@ -49,13 +51,13 @@ export const flightListSchema = z
     returnDate: isoDateSchema,
     fetchedAt: isoDateTimeSchema,
     ageHours: ageHoursSchema,
-    stale: z.boolean(),
+    stale: staleMarkSchema,
     provenance: flightListProvenanceSchema,
     status: z.enum(['read', 'failed']),
     reason: z.enum(STOP_DETAILS).nullable(),
     listed: z.enum(LISTED).nullable(),
-    minMinor: countSchema.nullable(),
-    tabMinor: countSchema.nullable(),
+    minMinor: moneyPenceSchema.min(1).nullable(),
+    tabMinor: moneyPenceSchema.min(1).nullable(),
     cheapestView: z.enum(['cheapest', 'best-fallback']).nullable(),
     flights: z.array(listedFlightSchema).max(FLIGHT_LIST_MAX_FLIGHTS),
     optionsUnparsed: countSchema,

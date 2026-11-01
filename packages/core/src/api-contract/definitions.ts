@@ -107,6 +107,16 @@ export const definitionFields = {
   /** decision 37: the calls of that same confirmation; a confirmation covers a run only with both */
   confirmedCalls: positiveInt.optional(),
 };
+/**
+ * The fields of every request body (create, update, estimate, create-and-start): `definitionFields` with a budget that
+ * drops the engine-owned allowances (`providerMaxCalls`, `flightListPages`: set on the run's snapshot at creation, spec
+ * rev 55 §8.1, ruling A5), so a definition never stores them; dropped as any unknown budget key is, never refused, so a
+ * client echoing a stored budget still saves.
+ */
+export const definitionRequestFields = {
+  ...definitionFields,
+  budget: executionBudgetSchema.omit({ providerMaxCalls: true, flightListPages: true }),
+};
 /** The save-time policy refinements of a create body, shared with create-and-start's body (ruling A3). */
 export const refineDefinition = (
   d: {
@@ -151,7 +161,7 @@ const storedFields = {
 export const definitionShapeSchema = z
   .object(storedFields)
   .omit({ confirmedCostPence: true, confirmedCalls: true });
-export const definitionCreateRequestSchema = z.object(definitionFields).superRefine(refineDefinition);
+export const definitionCreateRequestSchema = z.object(definitionRequestFields).superRefine(refineDefinition);
 /** `POST /definitions` takes no body (the plan default, a draft) or a create body; one object, so handlers can name it. */
 export const definitionCreateOptionalSchema = definitionCreateRequestSchema.optional();
 /**
@@ -160,7 +170,7 @@ export const definitionCreateOptionalSchema = definitionCreateRequestSchema.opti
  * its own recomputation of them; without it a sent confirmation must cover the worst case over every line (WP8).
  */
 export const definitionUpdateRequestSchema = z
-  .object(definitionFields)
+  .object(definitionRequestFields)
   .partial()
   .extend({ confirmShown: z.boolean().optional() });
 

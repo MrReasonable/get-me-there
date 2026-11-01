@@ -136,6 +136,19 @@ describe('flightListSchema (spec rev 55 §10)', () => {
   });
 });
 
+describe('flightListSchema prices and stale mark (ruling A28; spec rev 55 §10 "every price-bearing shape")', () => {
+  it('refuses a minimum or tab price of 0, as the worker protocol and the database do', () => {
+    expect(ok(list({ minMinor: 0 }))).toBe(false);
+    expect(ok(list({ tabMinor: 0 }))).toBe(false);
+    expect(ok(list({ minMinor: 1, tabMinor: 1 }))).toBe(true);
+  });
+  it("carries the stale mark ('refresh' once older than the camoufox refresh), never a bare true", () => {
+    expect(ok(list({ stale: 'refresh' }))).toBe(true);
+    expect(ok(list({ stale: false }))).toBe(true);
+    expect(ok(list({ stale: true }))).toBe(false);
+  });
+});
+
 describe('flightListsResponseSchema links (spec rev 55 §6.9)', () => {
   it('accepts a Google https link and a null one', () => {
     expect(flightListsResponseSchema.safeParse(response([pair(LINK), pair(null, null)])).success).toBe(true);

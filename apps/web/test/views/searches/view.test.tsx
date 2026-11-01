@@ -287,6 +287,19 @@ describe('the cheapest, always through PriceCell’s compact face', () => {
     expect(within(await cardOf('Old')).getByText('older than your stale setting')).toBeInTheDocument();
   });
 
+  // why: decision 36 — a cheapest read from a truncated tile is a partial minimum, and the card says so as the board does
+  it('a calendar cheapest from a truncated tile carries the truncated note; a complete one does not', async () => {
+    server.use(
+      serveCards([
+        searchCard({ id: 'a', name: 'Cut short', cheapest: calendarCheapest({ truncated: true }) }),
+        searchCard({ id: 'b', name: 'Whole', cheapest: calendarCheapest() }),
+      ]),
+    );
+    renderInShell(<SearchesView />);
+    expect(within(await cardOf('Cut short')).getByTestId('price-cell')).toHaveTextContent(COPY.truncatedNote);
+    expect(within(await cardOf('Whole')).getByTestId('price-cell')).not.toHaveTextContent(COPY.truncatedNote);
+  });
+
   it('says "cheapest so far" while the search is running', async () => {
     server.use(
       serveCards([

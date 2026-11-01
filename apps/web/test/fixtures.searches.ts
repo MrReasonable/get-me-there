@@ -39,6 +39,7 @@ export function cheapest(
     provenance,
     stale: false,
     ageHours: 2,
+    truncated: false,
     basis: 'verified',
     departureDate: '2027-01-12',
     returnDate: '2027-01-23',

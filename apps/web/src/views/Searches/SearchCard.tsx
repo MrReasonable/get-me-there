@@ -101,6 +101,7 @@ export function SearchCard({
               provenance={cheapest.provenance}
               calendar={cheapest.basis === 'calendar'}
               stale={cheapest.stale}
+              truncated={cheapest.truncated}
               destination={cheapest.destination}
               compact
             />
