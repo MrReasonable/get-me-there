@@ -149,7 +149,17 @@ describe('docs/setup.md operations rules (plan decision 63; round-1 review)', ()
     const limits = read('docs/api-limits.md').replace(/\s+/g, ' ');
     expect(limits).not.toContain('that call cap is the only stop');
     expect(limits).toContain(
-      "that call cap and each definition's call cap (Max billed calls per run) are the stops",
+      "that call cap and each search's call cap (Max billed calls per run) are the stops",
+    );
+  });
+
+  it('api-limits says search, not definition, in its operator prose, and that a new search names camoufox by default (WP20 final review)', () => {
+    const limits = read('docs/api-limits.md').replace(/\s+/g, ' ');
+    expect(limits).not.toMatch(/\bdefinitions?\b/i);
+    expect(limits).toContain('once it is enabled a new search names it by default');
+    expect(limits).not.toContain('pauses the run for a manual resume');
+    expect(limits).toContain(
+      'that stop is never resumed: Search again starts a fresh run that reuses the prices already found',
     );
   });
 

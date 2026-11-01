@@ -191,8 +191,9 @@ export function useCards(opts: { poll?: boolean } = {}) {
   return useQuery({
     queryKey: qk.cards,
     queryFn: () => api.cards(),
-    // why: WP20 Task 20.6 — a search's page reads its card once (and again when an action refreshes the cards) for the
-    // api's `spaceChangedSince`; it never polls the cards, which the first screen and the bar do for themselves
+    // why: WP20 Task 20.6 and the final review — a search's page reads its card for the api's `spaceChangedSince` and
+    // the whole search's counts: once while its run is idle (and again when an action refreshes the cards), and at the
+    // poll interval while its own run is pending or running (`poll: runActive`), as the first screen and the bar do
     refetchInterval: (query) =>
       poll && query.state.data?.cards.some((c) => c.latestRun !== null && POLLING.has(c.latestRun.status))
         ? POLL_MS
