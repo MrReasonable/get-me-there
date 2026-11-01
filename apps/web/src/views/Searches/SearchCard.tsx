@@ -109,7 +109,7 @@ export function SearchCard({
           {active ? <span className="text-fg-2">{S.cheapestSoFar}</span> : null}
         </div>
       )}
-      <div className="search-card-actions">
+      <div data-testid="card-actions" className="search-card-actions">
         <span className="search-card-main-actions">
           <a
             href={hrefWith(seeDatesPatch(card.id))}

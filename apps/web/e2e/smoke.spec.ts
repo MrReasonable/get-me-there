@@ -23,7 +23,9 @@ async function addAirport(page: Page, label: string, code: string) {
   await picker.fill(code);
   await expect(page.getByRole('option').first()).toBeVisible();
   await picker.press('Enter');
-  await expect(page.getByText(code).first()).toBeVisible();
+  // the airport became a chip (its remove button names it) and the option list closed
+  await expect(page.getByRole('button', { name: `Remove ${code}` })).toBeVisible();
+  await expect(picker).toHaveAttribute('aria-expanded', 'false');
 }
 
 /**
@@ -54,6 +56,9 @@ test('fixture mode: a new search, Search now, then Dates, the date pair detail a
   await page.locator('#n-max').fill('11');
   // why: the provider checkboxes sit behind More options, below the short form.
   await page.getByText(PLAN_COPY.moreOptions, { exact: true }).click();
+  // the name is suggested from the airports picked (the airports table's cities for LHR and JFK)
+  const searchName = 'London → New York';
+  await expect(page.getByRole('textbox', { name: PLAN_COPY.name })).toHaveValue(searchName);
   // why: the presets name the real providers, which fixture mode does not configure; switch both stages to the fixture provider.
   for (const prefix of ['p-d-', 'p-v-']) {
     for (const box of await page.locator(`input[type="checkbox"][id^="${prefix}"]`).all())
@@ -80,8 +85,8 @@ test('fixture mode: a new search, Search now, then Dates, the date pair detail a
   await expect(page.locator(SMOKE.flightsBlock)).toHaveCount(0);
   await expect(page.getByRole('link', { name: OPEN_LINK })).toHaveCount(0);
   await expect(page.getByRole('button', { name: /^Read flights for this date/ })).toHaveCount(0);
-  const searchName = (await page.getByRole('heading', { level: 2 }).first().textContent()) ?? '';
-  expect(searchName).not.toBe('');
+  // the name the form suggested from the two airports picked, now the page's heading
+  await expect(page.getByRole('heading', { level: 2 })).toHaveText(searchName);
 
   // (2) Dates: the header line, the banner, the first row's provenance, the legend, the overview's keyboard and rings
   await page.goto(`/?view=dates&def=${defId}&d.nights=${NIGHTS}`);
@@ -178,25 +183,7 @@ test('forced colours: every mark keeps its glyph, and the current nav entry its 
     // why: the five marks (spec rev 55 §11): "priced" is its shade ("brighter is cheaper"), every other mark has a glyph
     if ((await m.getAttribute('data-mark')) !== 'priced') await expect(glyph).not.toHaveText('');
   }
-  // every overview cell that carries a mark still shows its glyphs; the striped mark keeps its pattern too
-  // why: the five marks (spec rev 55 §11): a priced cell is its shade and carries no glyph; the fixture run prices every
-  // date pair it searched, so the cells that carry a glyph (the other four marks) are checked when there are any, and
-  // marks.spec.ts holds a case that has them
-  await expect(page.locator(`${SMOKE.overviewCell}:not([data-shade="none"])`).first()).toBeVisible();
-  const marked = page.locator(`${SMOKE.overviewCell}:not([data-marks=""])`);
-  const unseen = await marked.evaluateAll((cells) =>
-    cells
-      .filter((c) => {
-        const g = c.querySelector<HTMLElement>('[data-testid="cell-glyphs"]');
-        const box = g?.getBoundingClientRect();
-        return g === null || g === undefined || box === undefined || box.width === 0 || g.textContent === '';
-      })
-      .map((c) => c.getAttribute('data-cell')),
-  );
-  expect(unseen).toEqual([]);
-  const striped = page.locator(`${SMOKE.overviewCell}[data-marks~="partly"]`).first();
-  if ((await striped.count()) > 0)
-    await expect(striped).toHaveCSS('background-image', /repeating-linear-gradient/);
+  // why: the overview's marked cells need a seed that has some; marks.spec.ts holds that forced-colours case
   const current = page.getByRole('navigation', { name: SMOKE.nav }).locator(SMOKE.navCurrent);
   await expect(current).toHaveCSS('border-bottom-style', 'solid');
   await expect(current).toHaveCSS('border-bottom-width', '4px');

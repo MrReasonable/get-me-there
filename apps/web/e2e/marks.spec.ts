@@ -46,3 +46,27 @@ test('a partly-not-searched cell keeps its stripes, and its glyphs sit on its ow
     expect(b.glyph, `${b.cell}`).toBe(b.fill);
   }
 });
+
+test('forced colours: every marked overview cell still shows its glyphs', async ({ page }) => {
+  // why: spec §11 (nothing by colour alone): the smoke's fixture run prices every date pair, so no cell there carries
+  // a glyph; this seed has partly-not-searched cells, so the check is never vacuous
+  await page.emulateMedia({ forcedColors: 'active' });
+  await servePerfCase(page, PARTLY_CASE);
+  await page.goto(`/?view=dates&def=${PERF_DEFINITION_ID}`);
+  await expect(page.getByRole('table', { name: SMOKE.boardTable })).toBeVisible();
+  const marked = page.locator(`${SMOKE.overviewCell}:not([data-marks=""])`);
+  await expect(marked.first()).toBeVisible();
+  expect(await marked.count()).toBeGreaterThan(0);
+  const unseen = await marked.evaluateAll(
+    (cells, glyphs) =>
+      cells
+        .filter((c) => {
+          const g = c.querySelector<HTMLElement>(glyphs);
+          const box = g?.getBoundingClientRect();
+          return g === null || box === undefined || box.width === 0 || g.textContent === '';
+        })
+        .map((c) => c.getAttribute('data-cell')),
+    SMOKE.cellGlyphs,
+  );
+  expect(unseen).toEqual([]);
+});

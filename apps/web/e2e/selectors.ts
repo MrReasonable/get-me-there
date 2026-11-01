@@ -55,7 +55,7 @@ export const SMOKE = {
   /** One search's card on the Searches view. */
   searchCard: '[data-card]',
   /** A card's actions: its links and buttons. */
-  cardAction: '[data-card] .search-card-actions :is(a, button)',
+  cardAction: '[data-card] [data-testid="card-actions"] :is(a, button)',
   /** The flights block of a date pair on a search's page (absent where flight lists cannot be read). */
   flightsBlock: '[data-testid="flights-block"]',
   /** The one line under the board when flight lists cannot be read here. */

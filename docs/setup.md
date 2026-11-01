@@ -339,7 +339,7 @@ SEARCHAPI_BILLING_DAY=1      # the day of the month your subscription renews (1�
 ```
 
 then `docker compose up -d`. Without `SEARCHAPI_PLAN=40usd` the key runs on the one-off
-`trial` allowance and scheduled runs leave SearchApi out. On the trial plan new definitions
+`trial` allowance and scheduled runs leave SearchApi out. On the trial plan new searches
 allow 0 billed calls per run, so a date pair's "Search <cell> for itineraries" (in its detail, opened from the
 Dates view) is unavailable until you raise the
 search's call cap in its Edit page → More options → Run budget (Max billed calls per run); 6 covers one
@@ -350,7 +350,7 @@ on `40usd` the app refuses to start with it (exit 78).
 `.env.*` file except `.env.example` out of git, `.dockerignore` keeps them out of the image,
 and compose passes the container only the variables it lists (never the whole file), so a key
 reaches the app and nothing else. Never put a key in `docker-compose.yml`, in a command line or
-in a definition. The database holds no key or password; back up `.env` separately and keep it
+in a search. The database holds no key or password; back up `.env` separately and keep it
 private.
 
 Never put `NODE_ENV`, `IN_CONTAINER` or `ALLOW_FIXTURE_PROVIDER` in `.env` for the container:
@@ -469,7 +469,7 @@ Set `APP_BASE_URL` to the `https://` address you type (for example
 `APP_BASE_URL=https://flights.example.com` or your `https://…ts.net` name) so alert emails
 link straight to the results row; left empty, emails carry relative links.
 
-## 5. Import the example definition
+## 5. Import the example search
 
 *Applies to both paths.*
 
@@ -522,7 +522,7 @@ On the £0 configuration, replace the `providers` block before importing:
 "providers": { "discovery": ["travelpayouts"], "verification": [], "discoveryRefreshHours": { "travelpayouts": 168 } }
 ```
 
-The form shows the estimate before you create the definition; creating it is your
+The form shows the estimate before you press Search now; pressing it is your
 confirmation of that cost.
 
 ## 6. The data directory and backups
@@ -634,7 +634,7 @@ trust.
 
 Growth scales with cells (origins × destinations × window days × nights) and with runs per
 month. Expired cache rows and old cache-hit ledger rows are pruned daily; run history is
-kept, so a year of the $40 example is roughly 600 MB. Deleting a definition or an alert rule
+kept, so a year of the $40 example is roughly 600 MB. Removing a search or an alert rule
 only marks it deleted: its runs, prices and alert events stay in the database and in History.
 
 ## 8. Fixture recording
@@ -847,7 +847,7 @@ seller confirmed (or, without one, the cheapest calendar price, labelled as such
 age), then a checklist. Run it after setup, after changing a key, and whenever prices look
 wrong.
 
-The smoke test applies none of a definition's constraints (stops, journey time, baggage): it
+The smoke test applies none of a search's constraints (stops, journey time, baggage): it
 shows the cheapest offer whatever its route, and says for each itinerary price how long each
 way takes and how many stops it makes (`out 19h 05m 2 stops, back 9h 30m nonstop`), so a long
 connection is visible before you compare it with Google Flights.
@@ -1264,7 +1264,7 @@ verified on the worker").
 
 ### Choose it
 
-Add "Google Flights prices via Camoufox" to a definition's discovery providers. New definitions never include it.
+Add "Google Flights prices via Camoufox" to a search's discovery providers (More options). New searches never include it.
 
 ### Check it
 
