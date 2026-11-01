@@ -21,8 +21,8 @@ export function StoppedLine({
   executionId: string;
   stop: StopWords;
   noneSearched: string | null;
-  /** The six buckets under the count (spec rev 55 §3). */
-  buckets: string;
+  /** The whole search's six buckets under the count (spec rev 55 §3), or null when the read covers some airport pairs. */
+  buckets: string | null;
   /** The run's status is one the api resumes (paused or interrupted). */
   resumable: boolean;
 }) {
@@ -34,7 +34,7 @@ export function StoppedLine({
       </span>
       <StopSentence stop={stop} className="font-bold" />
       {noneSearched !== null ? <span>{noneSearched}</span> : <span>{P.stoppedBoard}</span>}
-      <span className="basis-full text-sm text-fg-2">{buckets}</span>
+      {buckets !== null ? <span className="basis-full text-sm text-fg-2">{buckets}</span> : null}
       {resumable && fixNamesResume(stop) ? (
         <button
           type="button"

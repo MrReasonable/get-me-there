@@ -53,7 +53,7 @@ function pairOf(s: Spec): DatePair {
   const price = {
     pricePence: s.pence,
     provenance,
-    stale: false,
+    stale: false as const,
     ageHours: s.age ?? 2,
     truncated: s.truncated === true,
   };

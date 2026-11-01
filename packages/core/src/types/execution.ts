@@ -52,6 +52,14 @@ export const RESUMABLE_STATUSES: readonly ExecutionStatus[] = [
   'cancelled',
   'completed',
 ];
+/**
+ * The stopped statuses a run can be resumed from (WP20 Task 20.6 review, minor 11): the active ones `/resume` accepts,
+ * a paused or interrupted run. The status bar and a search's page offer Resume only on one of these, and only when the
+ * stop's fix names Resume.
+ */
+export const RESUMABLE_ACTIVE_STATUSES: readonly ExecutionStatus[] = ACTIVE_STATUSES.filter((s) =>
+  RESUMABLE_STATUSES.includes(s),
+);
 export type Stage = 'discovery' | 'verification';
 /** Spec §3 cell outcome statuses. */
 export type CellOutcomeStatus = 'not_run' | 'priced' | 'empty' | 'no_data' | 'error' | 'skipped';

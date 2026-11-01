@@ -223,7 +223,7 @@ describe('history lines (spec §11 History; plan decisions 38, 52)', () => {
           {
             providerId: 'travelpayouts',
             cabin: 'economy',
-            points: [fetchPoint(2, 1, undefined, { stale: true })],
+            points: [fetchPoint(2, 1, undefined, { stale: 'refresh' })],
           },
         ],
       }),
@@ -389,12 +389,19 @@ describe('History view (spec §11 History, §10 history routes; plan decision 38
     if (series === undefined) throw new Error('fixture has a route series');
     const [p0, ...rest] = series.points;
     if (p0 === undefined) throw new Error('fixture has a route point');
-    const stale = { ...r, routeSeries: [{ ...series, points: [{ ...p0, stale: true }, ...rest] }] };
+    const stale = {
+      ...r,
+      routeSeries: [{ ...series, points: [{ ...p0, stale: 'refresh' as const }, ...rest] }],
+    };
     server.use(http.get(routeRoute, () => HttpResponse.json(stale)));
     const { findByRole } = renderWithProviders(<HistoryView definition={definition()} />);
     const table = await findByRole('table', { name: /^Google's price history for 10–20 Mar/ });
     const rows = within(table).getAllByRole('row').slice(1);
-    expect(rows.map((row) => row.textContent?.includes('stale'))).toEqual([true, false, false]);
+    expect(rows.map((row) => row.textContent?.includes("older than this search's refresh"))).toEqual([
+      true,
+      false,
+      false,
+    ]);
     expect(rows[0]).toHaveAttribute('data-indicative');
     // why: prov-004: every stored point is vendor-stated GBP (the repository refuses any other), so no "≈"; it says so.
     expect(rows[0]).not.toHaveTextContent('≈');
@@ -437,7 +444,10 @@ describe('History view (spec §11 History, §10 history routes; plan decision 38
         {
           providerId: 'travelpayouts',
           cabin: 'economy',
-          points: [fetchPoint(2, 39900, cellAt('2027-03-14', 14), { stale: true }), fetchPoint(170, 42000)],
+          points: [
+            fetchPoint(2, 39900, cellAt('2027-03-14', 14), { stale: 'refresh' }),
+            fetchPoint(170, 42000),
+          ],
         },
       ],
     });
@@ -510,7 +520,7 @@ describe('History view (spec §11 History, §10 history routes; plan decision 38
           cabin: 'economy',
           points: [
             fetchPoint(2, 39900, cellAt('2027-03-21', 14), { truncated: true }),
-            fetchPoint(170, 42000, undefined, { stale: true }),
+            fetchPoint(170, 42000, undefined, { stale: 'refresh' }),
           ],
         },
       ],

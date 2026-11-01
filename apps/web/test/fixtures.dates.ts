@@ -320,7 +320,7 @@ export function workedDates(o: Omit<DatesOptions, 'pairs' | 'rest'> = {}): Dates
       a,
     ),
     [at('2027-03-25', 10)]: pricedPair(
-      priced(34_000, { price: { ...calendarFig().price, stale: true } }),
+      priced(34_000, { price: { ...calendarFig().price, stale: 'refresh' } }),
       {},
       a,
     ),

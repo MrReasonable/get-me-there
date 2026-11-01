@@ -1,6 +1,7 @@
 import type { z } from 'zod';
 import type { CoverageSummary, ExecutionSummary, priceCellSchema } from '../api-contract/common.js';
 import type { DatePairsResponse } from '../api-contract/datePairs.js';
+import type { StaleMark } from '../labels/age.js';
 import type { Buckets } from '../types/execution.js';
 import type { Iata, IsoDate } from '../types/ids.js';
 import type { Provenance, ProviderId } from '../types/provenance.js';
@@ -33,7 +34,7 @@ export interface DatePairFigure {
   cheaperCached: {
     pricePence: number;
     provenance: Provenance;
-    stale: boolean;
+    stale: StaleMark;
     truncated: boolean;
     origin: Iata;
     destination: Iata;

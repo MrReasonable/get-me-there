@@ -239,7 +239,7 @@ const FIGURES: DatePairFigure[] = [
     price: {
       pricePence: 28_000,
       provenance: calendarProvenance({ maxAgeHours: 'unknown' }),
-      stale: true,
+      stale: 'refresh',
       ageHours: 'unknown',
       truncated: true,
     },

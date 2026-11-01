@@ -3,9 +3,9 @@ import {
   type DecodedDatePairs,
   IN_FLIGHT_STATUSES,
   type IsoDateTime,
-  PAUSED_STATUSES,
+  RESUMABLE_ACTIVE_STATUSES,
   type StartRefusalCode,
-  staleMarkText,
+  staleWords,
 } from '@gmt/core';
 import { useCalendarGap } from '../../api/queries.js';
 import type { DefinitionResponse, ExecutionResponse } from '../../api/types.js';
@@ -20,11 +20,10 @@ import { type DatesUiState, detailPatchOf } from '../../state/datesState.js';
 import { hrefWith, navigateTo } from '../../state/urlState.js';
 import { suggestedName, useAirportDetails } from '../Definitions/airports.js';
 import type { BoardModel } from './board.js';
+import { PageState } from './PageState.js';
 import { RepeatWeekly } from './RepeatWeekly.js';
 import { SearchAgainButton } from './SearchAgainButton.js';
 import { SearchedLine } from './SearchedLine.js';
-import { NeverRun, Refused, RunningLine } from './States.js';
-import { StoppedLine } from './StoppedLine.js';
 import {
   bucketsUnder,
   reusedDatePairs,
@@ -32,14 +31,16 @@ import {
   type StateLine,
   searchedLine,
   stateLine,
+  type WholeCount,
+  wholeOf,
 } from './stateLines.js';
 import { countsOf, isFullStay, stayRange } from './stayScope.js';
 
 const D = COPY.datesView;
 const P = COPY.searchPage;
 const IN_FLIGHT: ReadonlySet<string> = new Set(IN_FLIGHT_STATUSES);
-/** The stopped statuses the api resumes (spec §7): Resume shows only on one of these, and only when its fix names it. */
-const RESUMABLE: ReadonlySet<string> = new Set(PAUSED_STATUSES);
+/** The stopped statuses the api resumes: core's one set, the status bar's too (Resume also needs the fix to name it). */
+const RESUMABLE: ReadonlySet<string> = new Set(RESUMABLE_ACTIVE_STATUSES);
 
 /** The latest parent run as the date-pairs read summarises it. */
 type RunSummary = DecodedDatePairs['executions'][number];
@@ -71,6 +72,8 @@ export interface DatesHeaderProps {
   refused: StartRefusalCode | null;
   /** The api's own judgement that the search's space changed after its latest run started (its card). */
   spaceChanged: boolean;
+  /** The whole search's counts from its card, when the card describes the latest run as it stands; else null. */
+  cardWhole: WholeCount | null;
 }
 
 /**
@@ -90,6 +93,7 @@ export function DatesHeader({
   now,
   refused,
   spaceChanged,
+  cardWhole,
 }: DatesHeaderProps) {
   const details = useAirportDetails([...definition.origins, ...definition.destinations]);
   const allPairs = definition.origins.length * definition.destinations.length;
@@ -97,7 +101,8 @@ export function DatesHeader({
   const latest: RunSummary | undefined = data?.executions.find((e) => !e.isChild);
   const own = run !== undefined && latest !== undefined && run.id === latest.id ? run : undefined;
   const figures = model?.ranked ?? [];
-  const stale = figures.length > 0 && figures.every((p) => p.figure?.price.stale === true);
+  const marks = figures.map((p) => p.figure?.price.stale ?? false);
+  const stale = marks.length > 0 && marks.every((m) => m !== false);
   const range = data === null ? null : stayRange(data.space, state.nights);
   const scope = [
     ...(data !== null && data.scope.airportPairs < allPairs
@@ -111,6 +116,11 @@ export function DatesHeader({
   const providers = runSources(own);
   const reused = reusedDatePairs(pairs);
   const buckets = bucketsUnder(pairs, COPY);
+  // why: ruling R-scope — the running, reading and stopped lines count the whole search: the card's counts, else every
+  // stay of the read (the stay filter is the page's own); their buckets only when the read covers every airport pair
+  const whole = cardWhole ?? wholeOf(data?.pairs ?? []);
+  const wholeBuckets =
+    data !== null && data.scope.airportPairs === allPairs ? bucketsUnder(data.pairs, COPY) : null;
   // why: the line is known once the read and (for a run) the run's own read are in: until then nothing is guessed
   const line: StateLine | null =
     data === null || model === null
@@ -119,6 +129,7 @@ export function DatesHeader({
         ? stateLine({
             latest: null,
             pairs,
+            whole,
             providers,
             reused,
             spaceChanged: false,
@@ -129,7 +140,17 @@ export function DatesHeader({
           })
         : own === undefined
           ? null
-          : stateLine({ latest: own, pairs, providers, reused, spaceChanged, noSource: false, now, c: COPY });
+          : stateLine({
+              latest: own,
+              pairs,
+              whole,
+              providers,
+              reused,
+              spaceChanged,
+              noSource: false,
+              now,
+              c: COPY,
+            });
   // why: the header line has one place (so a link in it is never swapped for another under the pointer): for a searched
   // run it is the state line's own words, flights clause included; for a stopped one the state line below says why
   const status = own?.status ?? latest?.status;
@@ -139,15 +160,13 @@ export function DatesHeader({
       : latest !== undefined && latest.startedAt !== null && status !== undefined && !IN_FLIGHT.has(status)
         ? searchedLine({ run: latest, pairs, providers, reused, now, c: COPY })
         : null;
-  const stateMarks = [
-    ...new Set(
-      figures.map((p) =>
-        staleMarkText({ basis: p.figure?.basis === 'verified' ? 'verified' : 'calendar', override: false }),
-      ),
-    ),
-  ];
+  // why: the stale mark's words by the kind the api gives each figure (ruling 20.6-2), each kind said once
+  const stateMarks = [...new Set(marks.flatMap((m) => (m === false ? [] : [staleWords(m)])))];
   const cities = suggestedName(definition.origins, definition.destinations, details.rows);
   const codes = COPY.searchesView.codes(definition.origins.join(', '), definition.destinations.join(', '));
+  // why: minor 6 — until the airports' names are in (or when that read failed) the cities are only the codes again, so
+  // the route says the codes once
+  const route = cities === codes || cities === '' ? codes : P.route(cities, codes);
   const edit = { view: 'definitions', edit: definition.id, def: null };
   return (
     <div className="dates-head space-y-2" data-testid="dates-head">
@@ -160,7 +179,9 @@ export function DatesHeader({
           ))}
         </span>
       </h2>
-      <p className="search-route">{P.route(cities, codes)}</p>
+      <p className="search-route" data-testid="dates-route">
+        {route}
+      </p>
       <p className="search-facts text-fg-2">
         {[windowWords(definition, data), D.scopeNights(definition.minNights, definition.maxNights)].join(
           ' · ',
@@ -189,7 +210,7 @@ export function DatesHeader({
         refused={latest === undefined ? refused : null}
         executionId={latest?.id ?? null}
         resumable={own !== undefined && RESUMABLE.has(own.status)}
-        buckets={buckets}
+        buckets={wholeBuckets}
       />
       {counts !== null && isThinCoverage(counts.buckets.no_data, counts.total) ? (
         <p className="text-sm">
@@ -203,71 +224,6 @@ export function DatesHeader({
         <DatesGap definition={definition} data={data} nights={range} />
       ) : null}
     </div>
-  );
-}
-
-/**
- * Spec rev 55 §11 "State line", in its polite status region: the visible line (with Cancel, the stop's fix and Resume,
- * Search now, or a refused Search now's words) is not live, since its counts move on every poll; a hidden status says
- * only the kind of state, or the stop's sentence, so a poll that moves a count announces nothing new. A searched run's
- * line is the header line above, in its one place; the status still says "Searched".
- */
-function PageState({
-  definition,
-  line,
-  refused,
-  executionId,
-  resumable,
-  buckets,
-}: {
-  definition: DefinitionResponse;
-  line: StateLine | null;
-  refused: StartRefusalCode | null;
-  executionId: string | null;
-  resumable: boolean;
-  buckets: string;
-}) {
-  const said =
-    refused !== null
-      ? null
-      : line === null
-        ? ''
-        : line.kind === 'stopped' || line.kind === 'never'
-          ? line.text
-          : P.stateKind[line.kind];
-  return (
-    <>
-      <div data-testid="state-line" className="state-line">
-        {refused !== null ? (
-          <Refused definitionId={definition.id} code={refused} />
-        ) : line === null ? null : line.kind === 'never' ? (
-          <NeverRun definition={definition} line={line} />
-        ) : line.kind === 'stopped' ? (
-          executionId === null ? null : (
-            <StoppedLine
-              executionId={executionId}
-              stop={line.stop}
-              noneSearched={line.noneSearched}
-              resumable={resumable}
-              buckets={buckets}
-            />
-          )
-        ) : line.kind === 'searched' ? null : line.kind === 'changed' ? (
-          <p className="plate notice font-bold">{line.text}</p>
-        ) : executionId === null ? null : (
-          <RunningLine
-            text={line.text}
-            executionId={executionId}
-            buckets={line.kind === 'searching' ? buckets : null}
-          />
-        )}
-      </div>
-      {said === null ? null : (
-        <p role="status" aria-label={P.stateLabel} className="sr-only">
-          {said}
-        </p>
-      )}
-    </>
   );
 }
 

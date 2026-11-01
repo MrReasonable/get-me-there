@@ -124,7 +124,7 @@ describe('the Dates view’s states (spec §11)', () => {
   });
 
   it('stale: the header’s stale label only when every figure is stale, and each stale figure labelled', async () => {
-    const stale = calendarFig({ price: { ...calendarFig().price, stale: true } });
+    const stale = calendarFig({ price: { ...calendarFig().price, stale: 'refresh' } });
     renderDates({
       body: {
         pairs: { [at('2027-03-14', 10)]: pricedPair(stale), [at('2027-03-15', 10)]: pricedPair(stale) },
@@ -136,7 +136,7 @@ describe('the Dates view’s states (spec §11)', () => {
   });
 
   it('not every figure stale: no header label, the stale figure still labelled', async () => {
-    const stale = calendarFig({ price: { ...calendarFig().price, stale: true } });
+    const stale = calendarFig({ price: { ...calendarFig().price, stale: 'refresh' } });
     renderDates({
       body: {
         pairs: {

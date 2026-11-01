@@ -9,9 +9,11 @@ import {
   executionStatusSchema,
   moneyPenceSchema,
   providerIdSchema,
+  staleMarkSchema,
   triggerSchema,
 } from './common.js';
 import { definitionFields, definitionResponseSchema, refineDefinition } from './definitions.js';
+import { executionFlightsSchema } from './executions.js';
 import { stopTextSchema } from './stopCause.js';
 
 // Spec revision 55 §10: the first screen's cards (`GET /definitions/cards`) and Search now's one press
@@ -67,13 +69,9 @@ const latestRunSchema = z
     datePairs: count,
     datePairsSearched: count,
     datePairsNeverSearched: count,
-    flights: z
-      .strictObject({ planned: count, read: count })
-      .refine((f) => f.read <= f.planned, {
-        message: 'flights read must not exceed flights planned',
-        path: ['read'],
-      })
-      .nullable(),
+    // why: ruling R-reading — the run's flight counts as `GET /executions/:id` gives them, so the card and the page
+    // word "Reading flights" by one rule
+    flights: executionFlightsSchema.nullable(),
     estimatedFinishAt: isoDateTimeSchema.nullable(),
     stop: stopTextSchema.nullable(),
   })
@@ -90,7 +88,7 @@ const latestRunSchema = z
 const cardCheapestSchema = z.strictObject({
   pricePence: moneyPenceSchema,
   provenance: provenanceSchema,
-  stale: z.boolean(),
+  stale: staleMarkSchema,
   ageHours: ageHoursSchema,
   basis: z.enum(['verified', 'calendar']),
   departureDate: isoDateSchema,

@@ -34,7 +34,7 @@ const f = row({
   stopsOut: 2,
   stopsIn: 2,
   pricePence: 30_000,
-  stale: true,
+  stale: 'refresh',
 });
 const c = calendarRow({ pricePence: 29_000, cell: { nights: 21 } });
 const ALL = [v, p, f, c];

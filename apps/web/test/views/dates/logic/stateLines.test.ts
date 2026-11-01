@@ -17,6 +17,7 @@ import {
   runSources,
   searchedLine,
   stateLine,
+  wholeOf,
 } from '../../../../src/views/Dates/stateLines.js';
 import { bucketsOf, datePairOf } from '../../../fixtures.dates.js';
 import { execution } from '../../../fixtures.js';
@@ -203,6 +204,7 @@ const state = (over: Partial<Parameters<typeof stateLine>[0]> = {}) =>
   stateLine({
     latest: run({ status: 'completed', ...RUN, stage: null }),
     pairs: WORKED,
+    whole: wholeOf(WORKED),
     providers: ['camoufox'],
     reused: 120,
     spaceChanged: false,
@@ -227,17 +229,40 @@ describe('stateLine (spec rev 55 §11 "State line")', () => {
     expect(
       state({
         latest: run({ status: 'running', estimatedFinishAt: t('2026-10-14T16:40:00.000Z') }),
-        pairs: searched,
+        whole: wholeOf(searched),
       }),
     ).toEqual({ kind: 'searching', text: 'Searching · 120 of 405 date pairs · about 1h 40m left' });
   });
 
+  it('the running and stopped lines count the whole search, never the filtered pairs (ruling R-scope)', () => {
+    const scoped = pairs(2, { priced: 4 });
+    expect(
+      state({ latest: run({ status: 'running' }), pairs: scoped, whole: { searched: 120, total: 405 } }).text,
+    ).toBe('Searching · 120 of 405 date pairs');
+    expect(
+      state({
+        latest: run({ status: 'paused_error', stop: null }),
+        pairs: scoped,
+        whole: { searched: 0, total: 405 },
+      }),
+    ).toMatchObject({ noneSearched: '0 of 405 searched' });
+  });
+
+  it('wholeOf: core’s datePairSearched count over the pairs given, of their number', () => {
+    expect(
+      wholeOf([...pairs(3, { priced: 4 }), ...pairs(2, { empty: 1 }), ...pairs(1, { no_data: 4 })]),
+    ).toEqual({
+      searched: 4,
+      total: 6,
+    });
+  });
+
   it('pending, or running with no estimate: no "left" clause; a date pair half searched is not counted', () => {
-    expect(state({ latest: run({ status: 'pending' }), pairs: pairs(4, { empty: 1 }) })).toEqual({
+    expect(state({ latest: run({ status: 'pending' }), whole: wholeOf(pairs(4, { empty: 1 })) })).toEqual({
       kind: 'searching',
       text: 'Searching · 0 of 4 date pairs',
     });
-    expect(state({ latest: run({ status: 'running' }), pairs: pairs(4, { no_data: 4 }) }).text).toBe(
+    expect(state({ latest: run({ status: 'running' }), whole: wholeOf(pairs(4, { no_data: 4 })) }).text).toBe(
       'Searching · 4 of 4 date pairs',
     );
   });
@@ -285,6 +310,20 @@ describe('stateLine (spec rev 55 §11 "State line")', () => {
       expect(state({ latest: run({ status: 'pending', ...over }) }).kind, JSON.stringify(over)).toBe(
         'searching',
       );
+  });
+
+  it('a flight step that ended (outside the browser window, at the monthly limit) is no longer reading (minor 1)', () => {
+    for (const ended of ['window', 'monthly-cap'] as const)
+      expect(
+        state({
+          latest: run({
+            status: 'running',
+            stage: 'discovery',
+            flights: { planned: 10, read: 3, reused: 0, failed: 0, ended },
+          }),
+        }).kind,
+        ended,
+      ).toBe('searching');
   });
 
   it('running in its itinerary step: "Checking fares for the cheapest date pairs"', () => {
@@ -348,6 +387,13 @@ describe('stateLine (spec rev 55 §11 "State line")', () => {
     expect(ended(null, { read: 4, reused: 0, failed: 6 })).toBe(
       `${line()} · flights read for 4 of 10 date pairs; the rest couldn't be read`,
     );
+    // minor 10: with none failed and no stored end, nothing says why the rest are missing: the count alone
+    expect(ended(null, { read: 4, reused: 0, failed: 0 })).toBe(
+      `${line()} · flights read for 4 of 10 date pairs`,
+    );
+    expect(ended(null, { read: 4, reused: 0, failed: 2 })).toBe(
+      `${line()} · flights read for 4 of 10 date pairs; 2 couldn't be read`,
+    );
     // a plan of nothing that did not end says nothing about flights (ruling A14)
     expect(ended(null, { read: 0, reused: 0, planned: 0 })).toBe(line());
   });
@@ -372,7 +418,7 @@ describe('stateLine (spec rev 55 §11 "State line")', () => {
   it('stopped with nothing searched: "0 of 405 searched" beside it (datePairSearched, as the card and the key count)', () => {
     const stopped = state({
       latest: run({ status: 'paused_error', stop: null }),
-      pairs: [...pairs(400, {}), ...pairs(5, { error: 4 })],
+      whole: wholeOf([...pairs(400, {}), ...pairs(5, { error: 4 })]),
     });
     expect(stopped).toEqual({
       kind: 'stopped',

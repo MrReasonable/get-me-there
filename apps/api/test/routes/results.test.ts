@@ -113,9 +113,9 @@ describe('GET /definitions/:id/results, verified basis', () => {
     const rows = (await results(x, def.id)).rows;
     expect(rows.find((r) => r.itineraryHash === 'hU')).toMatchObject({ stale: false, ageHours: 151 });
     expect(rows.find((r) => r.itineraryHash === 'hU')?.provenance.maxAgeHours).toBe('unknown'); // the label's source
-    expect(rows.find((r) => r.itineraryHash === 'hK')).toMatchObject({ stale: true, ageHours: 199 });
+    expect(rows.find((r) => r.itineraryHash === 'hK')).toMatchObject({ stale: 'setting', ageHours: 199 });
     x.clock.advance(50 * HOUR); // fetch age 201 h: stale by fetch age, whatever the vendor's age
-    expect((await results(x, def.id)).rows.find((r) => r.itineraryHash === 'hU')?.stale).toBe(true);
+    expect((await results(x, def.id)).rows.find((r) => r.itineraryHash === 'hU')?.stale).toBe('setting');
   });
 
   it('dedups per itinerary: the best offer (same class, cheaper) is the row, the others are in otherOffers with their class', async () => {
@@ -472,7 +472,7 @@ describe('GET /definitions/:id/results, calendar basis (spec §6.9)', () => {
     // why: effective age 151 + 24 against the refresh 168 plus the row's own 24: within it, whatever the provider declares
     expect((await results(x, def.id, '?basis=calendar')).rows[0]?.stale).toBe(false);
     x.clock.advance(18 * HOUR); // fetched 169 h ago: 193 > 192
-    expect((await results(x, def.id, '?basis=calendar')).rows[0]?.stale).toBe(true);
+    expect((await results(x, def.id, '?basis=calendar')).rows[0]?.stale).toBe('refresh');
   });
 
   it('decides from the live definition: a parent run without verification plus an on-demand child gives the verified basis (decision 67, F1)', async () => {

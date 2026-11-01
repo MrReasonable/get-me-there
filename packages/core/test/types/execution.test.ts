@@ -3,6 +3,7 @@ import {
   ACTIVE_STATUSES,
   IN_FLIGHT_STATUSES,
   PAUSED_STATUSES,
+  RESUMABLE_ACTIVE_STATUSES,
   RESUMABLE_STATUSES,
   STOPPED_STATUSES,
 } from '../../src/types/execution.js';
@@ -23,6 +24,13 @@ describe('execution status sets (spec §7)', () => {
       'cancelled',
       'completed',
     ]);
+  });
+});
+
+describe('the one resumable-stopped set (WP20 Task 20.6 review, minor 11)', () => {
+  it('is the active statuses /resume accepts: the ones the bar and a search’s page offer Resume on', () => {
+    expect(RESUMABLE_ACTIVE_STATUSES).toEqual(ACTIVE_STATUSES.filter((s) => RESUMABLE_STATUSES.includes(s)));
+    expect(RESUMABLE_ACTIVE_STATUSES).toEqual(['paused_budget', 'paused_error', 'interrupted']);
   });
 });
 

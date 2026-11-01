@@ -155,9 +155,10 @@ describe('a refused Search now and a search naming no source (Review Focus 1)', 
 });
 
 describe('a run going: its line with Cancel, and the board filling (persona-001)', () => {
-  const running = (over: Parameters<typeof execution>[0] = {}) => {
+  const running = (over: Parameters<typeof execution>[0] = {}, search?: string) => {
     serveRun({ status: 'running', estimatedFinishAt: '2026-10-14T16:40:00.000Z', ...over });
     return renderDates({
+      ...(search === undefined ? {} : { search }),
       body: {
         executions: [
           runSummary({
@@ -195,6 +196,32 @@ describe('a run going: its line with Cancel, and the board filling (persona-001)
     await waitFor(() => expect(cancelled).toBe('exec-0001'));
   });
 
+  it('the line counts the whole search, never the filtered stays, and carries no scope (ruling R-scope)', async () => {
+    running({}, '?view=dates&def=def-0001&d.nights=10-10');
+    const line = await stateLine();
+    await waitFor(() => expect(line).toHaveTextContent('Searching · 1 of 93 date pairs'));
+    expect(line).not.toHaveTextContent(/nights|airport pairs ·/);
+  });
+
+  it('with the card’s latest run this very run, the line says the card’s counts (the same as the first screen)', async () => {
+    server.use(
+      serveCards([
+        searchCard({
+          id: 'def-0001',
+          latestRun: latestRun({
+            status: 'running',
+            finishedAt: null,
+            datePairs: 405,
+            datePairsSearched: 120,
+          }),
+        }),
+      ]),
+    );
+    running({}, '?view=dates&def=def-0001&d.to=JFK');
+    const line = await stateLine();
+    await waitFor(() => expect(line).toHaveTextContent('Searching · 120 of 405 date pairs'));
+  });
+
   it('reading flights: the line with Cancel beside it', async () => {
     running({
       flights: { planned: 10, read: 3, reused: 0, failed: 0, ended: null },
@@ -229,15 +256,17 @@ describe('dates changed since the latest run (spec rev 55 §11; ruling 20.3 R-ch
     await waitFor(() => expect(status).toHaveTextContent(/^Searched$/));
     expect(screen.getByTestId('dates-run')).toHaveTextContent(/^Searched today 13:00–14:00 · /);
     expect(screen.getAllByText(/^Searched today/)).toHaveLength(1);
-    expect(await stateLine()).toHaveTextContent('');
+    expect(await stateLine()).toBeEmptyDOMElement();
   });
 });
 
-describe('the page reads its card once (WP20 Task 20.6)', () => {
+describe('the page’s card read (WP20 Task 20.6; ruling R-scope)', () => {
   afterEach(() => vi.useRealTimers());
-  it('a run going never sets the page polling the cards: only its own run is polled', async () => {
-    // why: only the interval is faked and the clock never moves by itself, so each step is exact
+  // why: only the interval is faked and the clock never moves by itself, so each step is exact
+  const fakeClock = () =>
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'], shouldAdvanceTime: false });
+  it('re-reads the cards while its run is going, for the whole search’s counts', async () => {
+    fakeClock();
     const cards: CardRequests = [];
     server.use(
       serveCards(
@@ -250,7 +279,16 @@ describe('the page reads its card once (WP20 Task 20.6)', () => {
       body: { ...workedDates(), executions: [runSummary({ status: 'running', finishedAt: null })] },
     });
     await waitFor(() => expect(screen.getByTestId('state-line')).toHaveTextContent(/^Searching · /));
-    expect(cards).toHaveLength(1);
+    const before = cards.length;
+    await act(() => vi.advanceTimersByTimeAsync(POLL_MS));
+    await waitFor(() => expect(cards.length).toBeGreaterThan(before));
+  });
+  it('reads them once for a run that is not going', async () => {
+    fakeClock();
+    const cards: CardRequests = [];
+    server.use(serveCards([searchCard({ id: 'def-0001' })], cards));
+    renderDates({ body: workedDates() });
+    await screen.findByTestId('dates-run');
     await act(() => vi.advanceTimersByTimeAsync(POLL_MS * 3));
     expect(cards).toHaveLength(1);
   });

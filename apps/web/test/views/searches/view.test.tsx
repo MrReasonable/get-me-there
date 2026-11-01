@@ -178,7 +178,7 @@ describe('what a card shows', () => {
         latestRun: latestRun({
           status: 'running',
           finishedAt: null,
-          flights: { planned: 10, read: 3 },
+          flights: { planned: 10, read: 3, reused: 0, failed: 0, ended: null },
           estimatedFinishAt: '2026-10-14T15:08:00.000Z',
         }),
       },
@@ -276,7 +276,7 @@ describe('the cheapest, always through PriceCell’s compact face', () => {
     server.use(
       serveCards([
         searchCard({ id: 'a', name: 'Calendar', cheapest: calendarCheapest() }),
-        searchCard({ id: 'b', name: 'Old', cheapest: cheapest({ stale: true }) }),
+        searchCard({ id: 'b', name: 'Old', cheapest: cheapest({ stale: 'setting' }) }),
       ]),
     );
     renderInShell(<SearchesView />);

@@ -70,7 +70,7 @@ export function latestRun(over: Record<string, unknown> = {}): Record<string, un
     datePairs: 405,
     datePairsSearched: 384,
     datePairsNeverSearched: 21,
-    flights: { planned: 10, read: 10 },
+    flights: { planned: 10, read: 10, reused: 0, failed: 0, ended: null },
     estimatedFinishAt: null,
     stop: null,
     ...over,

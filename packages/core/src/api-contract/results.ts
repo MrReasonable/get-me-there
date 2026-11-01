@@ -21,6 +21,7 @@ import {
   resultBasisSchema,
   segmentSchema,
   stageSchema,
+  staleMarkSchema,
   vendorLinkSchema,
   verdictClassSchema,
   verdictsSchema,
@@ -37,7 +38,7 @@ export const resultRowSchema = z.object({
   verdictClass: z.union([verdictClassSchema, z.literal('unchecked')]),
   pricePence: moneyPenceSchema,
   provenance: provenanceSchema,
-  stale: z.boolean(),
+  stale: staleMarkSchema,
   ageHours: ageHoursSchema,
   /** Calendar basis: the price is the cheapest of the rows a truncated tile read (decision 36); false for itinerary rows. */
   truncated: z.boolean(),
@@ -78,7 +79,7 @@ export const resultRowSchema = z.object({
       pricePence: moneyPenceSchema,
       provenance: provenanceSchema,
       booking: bookingSchema,
-      stale: z.boolean(),
+      stale: staleMarkSchema,
       ageHours: ageHoursSchema,
       verdictClass: verdictClassSchema,
       unverified: z.array(constraintNameSchema),
@@ -276,7 +277,7 @@ export const historyPointSchema = z.object({
  * any known vendor age) and `truncated` (decisions 30, 36: "cheapest of the rows read"). The db keeps historyPointSchema.
  */
 export const historyPointResponseSchema = historyPointSchema.extend({
-  stale: z.boolean(),
+  stale: staleMarkSchema,
   truncated: z.boolean(),
 });
 /**
@@ -357,7 +358,7 @@ export const routeHistoryResponseSchema = z.object({
       trip: z.object({ departureDate: isoDateSchema, returnDate: isoDateSchema }).nullable(),
       cabin: z.union([cabinSchema, z.literal('unknown')]),
       /** `stale` by fetch age (decision 54); the stored point type is unchanged */
-      points: z.array(routeSeriesPointSchema.extend({ stale: z.boolean() })),
+      points: z.array(routeSeriesPointSchema.extend({ stale: staleMarkSchema })),
     }),
   ),
 });

@@ -95,14 +95,17 @@ const arbDecoded: fc.Arbitrary<DecodedDatePairs> = fc
                 pence: fc.integer({ min: 1, max: 200_000 }),
                 provenance: fc.integer({ min: 0, max: VARIANTS.length - 1 }),
                 cheaperProvenance: fc.integer({ min: 0, max: VARIANTS.length - 1 }),
-                stale: fc.boolean(),
+                stale: fc.constantFrom<false | 'refresh' | 'setting'>(false, 'refresh', 'setting'),
                 age: fc.option(fc.nat(500), { nil: 'unknown' as const }),
                 truncated: fc.boolean(),
                 superseded: fc.boolean(),
                 notSeen: fc.option(fc.option(fc.nat(500), { nil: 'unknown' as const }), { nil: null }),
                 minutes: fc.option(fc.nat(6000), { nil: null }),
                 cheaper: fc.option(fc.integer({ min: 0, max: 199_999 }), { nil: null }),
-                cheaperFlags: fc.tuple(fc.boolean(), fc.boolean()),
+                cheaperFlags: fc.tuple(
+                  fc.constantFrom<false | 'refresh' | 'setting'>(false, 'refresh', 'setting'),
+                  fc.boolean(),
+                ),
                 earlier: fc.boolean(),
               })
               .map((f): DatePairFigure => {

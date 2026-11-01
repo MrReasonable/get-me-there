@@ -9,7 +9,6 @@ import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { ApiError } from '../../api/client.js';
 import {
   DATES_DRAWN_MARK,
-  useBarRunId,
   useCards,
   useDatePairs,
   useLatestRun,
@@ -125,17 +124,24 @@ function DatesOf({
   );
 
   const executionId = (track.shown ?? track.pending)?.data.executionId ?? null;
-  // why: spec rev 55 §11 — the latest run through the status bar's query when the bar polls it, else its own poll
-  const watch = useLatestRun(executionId, useBarRunId());
+  // why: spec rev 55 §11 — the latest run, polled while it is going (the bar's poll of the same run is the same query)
+  const watch = useLatestRun(executionId);
   const run: ExecutionResponse | undefined = watch.data?.id === executionId ? watch.data : undefined;
-  // why: whether the space changed since that run started is the api's own judgement (its card's spaceChangedSince,
-  // the same line the card says), never inferred from the search's updatedAt, which a Repeat weekly save also moves
-  const card = useCards({ poll: false }).data?.cards.find((c) => c.id === definition.id);
-  const spaceChanged =
-    card?.spaceChangedSince === true && card.latestRun !== null && card.latestRun.id === executionId;
   const latest = track.shown?.data.executions.find((e) => !e.isChild);
   const status = run?.status ?? latest?.status;
   const runActive = status !== undefined && RUNNING.has(status);
+  // why: the card answers two things the page's scoped read cannot: whether the space changed since that run started
+  // (the api's own `spaceChangedSince`, never the search's updatedAt, which a Repeat weekly save also moves), and the
+  // whole search's counts while the run goes (ruling R-scope), so the cards are re-read only while it is going
+  const card = useCards({ poll: runActive }).data?.cards.find((c) => c.id === definition.id);
+  const cardRun = card?.latestRun ?? null;
+  const sameRun = cardRun !== null && cardRun.id === executionId;
+  const spaceChanged = sameRun && card?.spaceChangedSince === true;
+  // why: the card's counts only while it describes this run as it now stands (a card read before the run moved is not)
+  const cardWhole =
+    cardRun !== null && sameRun && cardRun.status === status
+      ? { searched: cardRun.datePairsSearched, total: cardRun.datePairs }
+      : null;
 
   // why: a new read is placed while rendering (React's "adjust state when a prop changes"), so a filtered read is
   // never drawn for one frame under the previous scope, and a held read never touches the board
@@ -211,6 +217,7 @@ function DatesOf({
         now={now}
         refused={refused}
         spaceChanged={spaceChanged}
+        cardWhole={cardWhole}
       />
       <Filters definition={definition} state={state} />
       <p role="status" className="sr-only">

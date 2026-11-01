@@ -3,8 +3,9 @@ import {
   formatAgeFull,
   formatAgeShort,
   formatFetchedAgo,
+  type StaleMark,
   sourceLabel,
-  staleMarkText,
+  staleWords,
 } from '@gmt/core';
 import { COPY } from '../copy.js';
 import { Flaps } from '../flaps/Flaps.js';
@@ -17,7 +18,11 @@ export interface PriceCellProps {
   /** Validated before anything renders; typed unknown because validation is this component's job. */
   provenance: unknown;
   calendar: boolean;
-  stale: boolean;
+  /**
+   * The api's stale mark (ruling 20.6-2): `false`, or the kind of threshold the price is older than, which picks its
+   * words. `true` is a stale flag of no known kind (an alert event's stored threshold), shown as the plain label.
+   */
+  stale: StaleMark | true;
   /** The price is the cheapest of the rows a truncated tile read (decision 36). */
   truncated?: boolean;
   /** A newer parent search found this cell empty or without data (decision 57): marked, never hidden. */
@@ -82,9 +87,9 @@ export function PriceCell(props: PriceCellProps) {
   const notSeen = props.notSeenInLatestHours ?? null;
   const compact = props.compact === true;
   const calendar = isCalendarPrice(p, props.calendar);
-  // why: the wire carries `stale` alone, not whether CALENDAR_STALE_AFTER_HOURS judged it (spec rev 55 §10 dropped
-  // that field), so a calendar price reads the per-price rule's words; see the WP20 Task 20.6 report's concerns
-  const staleWords = staleMarkText({ basis: calendar ? 'calendar' : 'verified', override: false });
+  // why: spec rev 55 §3 — the stale mark's words, only when true, from the kind of threshold the api judged it by
+  const staleText =
+    props.stale === false ? null : props.stale === true ? COPY.stale : staleWords(props.stale);
   const detail = [
     COPY.provider[p.providerId],
     props.sourceLabel ?? sourceLabel(p),
@@ -95,7 +100,7 @@ export function PriceCell(props: PriceCellProps) {
     const G = COPY.priceMarkGlyph;
     const marks = [
       ...(props.unconfirmed === true ? [{ glyph: G.unconfirmed, words: COPY.priceNotConfirmed }] : []),
-      ...(props.stale ? [{ glyph: G.stale, words: staleWords }] : []),
+      ...(staleText !== null ? [{ glyph: G.stale, words: staleText }] : []),
       ...(props.truncated === true ? [{ glyph: G.truncated, words: COPY.truncatedNote }] : []),
       ...(props.superseded === true ? [{ glyph: G.superseded, words: COPY.superseded }] : []),
       ...(notSeen !== null ? [{ glyph: G.notSeen, words: COPY.notSeenInLatest(COPY.agoOf(notSeen)) }] : []),
@@ -138,7 +143,10 @@ export function PriceCell(props: PriceCellProps) {
             {COPY.notChecked}
           </span>
         ) : null}
-        <span className="sr-only">{spoken}</span>
+        {/* why: the provenance note in words, read out with the face; the main-path sweep leaves it to provenance */}
+        <span className="sr-only" data-provenance-note="">
+          {spoken}
+        </span>
       </span>
     );
   }
@@ -181,7 +189,7 @@ export function PriceCell(props: PriceCellProps) {
         {props.unconfirmed === true ? (
           <span className={`${badge} tag-bad`}>{COPY.priceNotConfirmed}</span>
         ) : null}
-        {props.stale ? <span className={`${badge} tag-warn`}>{staleWords}</span> : null}
+        {staleText !== null ? <span className={`${badge} tag-warn`}>{staleText}</span> : null}
         {age.kind === 'unknown' ? <span className={`${badge} tag-dim`}>{COPY.vendorAgeUnknown}</span> : null}
       </span>
       {compact ? (

@@ -1,4 +1,4 @@
-import { effectiveAge, formatAgeFull, type IsoDateTime, sourceLabel } from '@gmt/core';
+import { effectiveAge, formatAgeFull, type IsoDateTime, sourceLabel, staleWords } from '@gmt/core';
 import { COPY } from '../../copy.js';
 import { formatIsoDateLong, formatPence } from '../../format.js';
 import type { RouteLine } from './lines.js';
@@ -38,7 +38,9 @@ export function RouteTable({ line, now }: { line: RouteLine; now: IsoDateTime })
                 </span>
                 <span className="sr-only">{H.routeGbp}</span>
                 {/* why: decision 54 — stale by fetch age, labelled like every other price */}
-                {p.route.stale ? <span className="tag tag-warn ml-1">{COPY.stale}</span> : null}
+                {p.route.stale === false ? null : (
+                  <span className="tag tag-warn ml-1">{staleWords(p.route.stale)}</span>
+                )}
               </td>
               <td>
                 {H.routeProvenance(

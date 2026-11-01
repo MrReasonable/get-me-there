@@ -99,10 +99,31 @@ export interface StaleThresholds {
 }
 
 /**
+ * Spec revision 55 §3, §10 (ruling 20.6-2): the kind of threshold that judges a price: `refresh` for a calendar price
+ * under the per-price rule (the search's refresh plus the price's own age bound), `setting` for one under
+ * `CALENDAR_STALE_AFTER_HOURS` or on the verified basis (`STALE_AFTER_HOURS`).
+ */
+export const STALE_KINDS = ['refresh', 'setting'] as const;
+export type StaleKind = (typeof STALE_KINDS)[number];
+/** The stale mark as it travels: `false` when the price is not stale, else the kind of threshold it is older than. */
+export type StaleMark = false | StaleKind;
+
+/** The kind of threshold that judges a price on `basis` (spec rev 55 §3). */
+export function staleKindOf(t: { basis: StaleBasis; override: boolean }): StaleKind {
+  return t.basis === 'calendar' && !t.override ? 'refresh' : 'setting';
+}
+
+/** Spec rev 55 §3: the stale mark's words for its kind, shown only when the price is stale. */
+export function staleWords(kind: StaleKind): string {
+  return kind === 'refresh' ? "older than this search's refresh" : 'older than your stale setting';
+}
+
+/**
  * Spec revision 55 §8.1: the one per-price staleness rule, read by the board, the date pair detail, the search cards,
  * History, Status, the engine's alert marks and the alert email. `ageHours` is the effective age (`worstCaseAgeHours`);
  * `stale` is `isStale` against the basis's threshold (the calendar threshold above, or `staleAfterHours` alone on the
- * verified basis); `markText` is the stale mark's words (`staleMarkText`), which a caller shows only when `stale`.
+ * verified basis); `kind` is that threshold's kind and `mark` the stale mark the wire carries (`false`, or the kind);
+ * `markText` is the stale mark's words (`staleMarkText`), which a caller shows only when `stale`.
  */
 export function stalenessOf(
   row: {
@@ -111,14 +132,18 @@ export function stalenessOf(
   },
   t: StaleThresholds,
   now: IsoDateTime,
-): { ageHours: number; stale: boolean; markText: string } {
+): { ageHours: number; stale: boolean; kind: StaleKind; mark: StaleMark; markText: string } {
   const p = row.provenance;
   const calendar = row.basis === 'calendar';
   const threshold = calendar ? calendarStaleThreshold(p, t.refreshHours, t.overrideHours) : t.staleAfterHours;
+  const stale = isStale(p, now, threshold);
+  const kind = staleKindOf({ basis: row.basis, override: calendar && t.overrideHours !== null });
   return {
     ageHours: worstCaseAgeHours(effectiveAge(p, now)),
-    stale: isStale(p, now, threshold),
-    markText: staleMarkText({ basis: row.basis, override: calendar && t.overrideHours !== null }),
+    stale,
+    kind,
+    mark: stale ? kind : false,
+    markText: staleWords(kind),
   };
 }
 
@@ -128,9 +153,7 @@ export function stalenessOf(
  * setting".
  */
 export function staleMarkText(t: { basis: StaleBasis; override: boolean }): string {
-  return t.basis === 'calendar' && !t.override
-    ? "older than this search's refresh"
-    : 'older than your stale setting';
+  return staleWords(staleKindOf(t));
 }
 
 /** "just now" under an hour; hours to 47h; days to 13d; weeks after. */

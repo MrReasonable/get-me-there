@@ -10,6 +10,7 @@ import type { SearchCard } from '../../api/types.js';
 import type { StopWords } from '../../components/StopWords.js';
 import { COPY } from '../../copy.js';
 import { formatIsoDate, formatIsoDateShort } from '../../format.js';
+import { readingCount } from '../../lib/flightsReading.js';
 import { leftWords } from '../../lib/leftWords.js';
 import { parseSchedule } from '../Definitions/schedule.js';
 
@@ -80,9 +81,10 @@ export function stateLine(card: SearchCard, now: IsoDateTime): StateLine {
   const run = card.latestRun;
   if (run === null) return { kind: 'never', words: S.notSearchedYet };
   if (ACTIVE.has(run.status)) {
-    const f = run.flights;
-    if (run.status === 'running' && f !== null && f.read < f.planned)
-      return { kind: 'flights', words: S.readingFlights(f.read, f.planned) };
+    // why: ruling R-reading — the page's rule (`readingCount`): lists in hand, read now or reused
+    const reading = readingCount(run.flights);
+    if (run.status === 'running' && run.flights !== null && reading !== null)
+      return { kind: 'flights', words: S.readingFlights(reading, run.flights.planned) };
     return {
       kind: 'searching',
       words: S.searching(run.datePairsSearched, run.datePairs, leftWords(run.estimatedFinishAt, now)),

@@ -85,12 +85,12 @@ describe('dedupByItinerary (spec §6.5; ruling 3)', () => {
     const out = dedupByItinerary(
       [
         row({ seller: 'Fresh', pricePence: 45_000 }),
-        row({ seller: 'Stale', pricePence: 41_000, stale: true, ageHours: 300 }),
+        row({ seller: 'Stale', pricePence: 41_000, stale: 'refresh', ageHours: 300 }),
       ],
       NOW,
     );
     expect(out[0]?.seller).toBe('Stale');
-    expect(out[0]?.stale).toBe(true);
+    expect(out[0]?.stale).toBe('refresh');
   });
 
   it('an itinerary whose every offer failed keeps its best failed offer', () => {
@@ -220,7 +220,7 @@ describe('rankRows (spec §6.5, §8.1; ruling 3)', () => {
     const ranked = rankRows(
       [
         row({ itineraryHash: 'fresh', pricePence: 41_200 }),
-        row({ itineraryHash: 'stale', pricePence: 30_000, stale: true }),
+        row({ itineraryHash: 'stale', pricePence: 30_000, stale: 'refresh' }),
       ],
       NOW,
     );

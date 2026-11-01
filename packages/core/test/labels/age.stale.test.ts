@@ -1,6 +1,13 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
-import { calendarStaleThreshold, staleMarkText, stalenessOf } from '../../src/labels/age.js';
+import {
+  calendarStaleThreshold,
+  STALE_KINDS,
+  staleKindOf,
+  staleMarkText,
+  stalenessOf,
+  staleWords,
+} from '../../src/labels/age.js';
 import { asIsoDateTime, type IsoDateTime, isoDateTimeOfEpochMs } from '../../src/types/ids.js';
 import type { Provenance } from '../../src/types/provenance.js';
 
@@ -37,13 +44,20 @@ describe('stalenessOf on the calendar basis', () => {
       T,
       NOW,
     );
-    expect(at168).toEqual({ ageHours: 192, stale: false, markText: "older than this search's refresh" });
+    expect(at168).toEqual({
+      ageHours: 192,
+      stale: false,
+      kind: 'refresh',
+      mark: false,
+      markText: "older than this search's refresh",
+    });
     const at169 = stalenessOf(
       { provenance: prov({ fetchedAt: hoursBefore(169) }), basis: 'calendar' },
       T,
       NOW,
     );
     expect(at169.stale).toBe(true);
+    expect(at169.mark).toBe('refresh');
     expect(at169.ageHours).toBe(193);
   });
 
@@ -88,6 +102,8 @@ describe('stalenessOf on the calendar basis', () => {
     expect(stalenessOf({ provenance: p, basis: 'calendar' }, { ...T, overrideHours: 2 }, NOW)).toEqual({
       ageHours: 27,
       stale: true,
+      kind: 'setting',
+      mark: 'setting',
       markText: 'older than your stale setting',
     });
   });
@@ -100,10 +116,15 @@ describe('stalenessOf on the verified basis', () => {
     expect(stalenessOf({ provenance: fresh, basis: 'verified' }, t, NOW)).toEqual({
       ageHours: 192,
       stale: false,
+      kind: 'setting',
+      mark: false,
       markText: 'older than your stale setting',
     });
     const old = prov({ maxAgeHours: 0, fetchedAt: hoursBefore(193) });
-    expect(stalenessOf({ provenance: old, basis: 'verified' }, t, NOW).stale).toBe(true);
+    expect(stalenessOf({ provenance: old, basis: 'verified' }, t, NOW)).toMatchObject({
+      stale: true,
+      mark: 'setting',
+    });
   });
 });
 
@@ -113,5 +134,22 @@ describe("staleMarkText (spec rev 55 §3: the stale mark's words, shown only whe
     expect(staleMarkText({ basis: 'calendar', override: true })).toBe('older than your stale setting');
     expect(staleMarkText({ basis: 'verified', override: false })).toBe('older than your stale setting');
     expect(staleMarkText({ basis: 'verified', override: true })).toBe('older than your stale setting');
+  });
+});
+
+describe('the stale mark’s kind (spec rev 55 §3, §10; ruling 20.6-2)', () => {
+  it('is the kind of threshold that judged the price: the refresh, or the stale setting', () => {
+    expect(STALE_KINDS).toEqual(['refresh', 'setting']);
+    expect(staleKindOf({ basis: 'calendar', override: false })).toBe('refresh');
+    expect(staleKindOf({ basis: 'calendar', override: true })).toBe('setting');
+    expect(staleKindOf({ basis: 'verified', override: false })).toBe('setting');
+    expect(staleKindOf({ basis: 'verified', override: true })).toBe('setting');
+  });
+  it('words each kind; the mark text is the words of the kind', () => {
+    expect(staleWords('refresh')).toBe("older than this search's refresh");
+    expect(staleWords('setting')).toBe('older than your stale setting');
+    for (const basis of ['calendar', 'verified'] as const)
+      for (const override of [false, true])
+        expect(staleMarkText({ basis, override })).toBe(staleWords(staleKindOf({ basis, override })));
   });
 });

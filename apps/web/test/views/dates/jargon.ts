@@ -1,7 +1,7 @@
 // Spec rev 55 §3, §11: the main path (the first screen, a search's page, the new-search form, the Edit page with its
 // More options, the status bar) never says a set-up or code term. The sweep reads every visible string and every
-// attribute a screen reader or tooltip gives (as `renderedCopy` does), leaving out the provenance notes, which keep
-// §2's source names ("Google Flights prices via Camoufox"): every price is a PriceCell with its provenance inside it.
+// attribute a screen reader or tooltip gives (as `renderedCopy` does), leaving out only a price cell's provenance note,
+// which keeps §2's source names ("Google Flights prices via Camoufox").
 
 /** The terms of spec rev 55 §11's main-path rule, each with the pattern that finds it in words. */
 export const JARGON: ReadonlyArray<readonly [string, RegExp]> = [
@@ -21,14 +21,19 @@ export const JARGON: ReadonlyArray<readonly [string, RegExp]> = [
   ['variable name', /\b[a-z]+(-[a-z]+)+:[a-z]+\b/],
 ];
 
-/** Elements whose words are provenance notes, kept out of the sweep (spec rev 55 §11: "outside provenance notes"). */
-const PROVENANCE = '[data-testid="price-cell"]';
+/**
+ * A price cell's provenance note, kept out of the sweep (spec rev 55 §11: "outside provenance notes"): the row form's
+ * provenance line and a face's spoken note (`data-provenance-note`); a cell's title is its provenance too and is
+ * dropped from the cell alone. The amount and the marks beside it stay in the sweep.
+ */
+const PROVENANCE = '[data-testid="provenance"], [data-provenance-note]';
 
 /** The words of `root` a reader meets: its text and the attributes a screen reader or tooltip shows. */
 export function mainPathWords(root: Element = document.body): string {
   const copy = root.cloneNode(true);
   if (!(copy instanceof Element)) return '';
   for (const el of copy.querySelectorAll(PROVENANCE)) el.remove();
+  for (const el of copy.querySelectorAll('[data-testid="price-cell"][title]')) el.removeAttribute('title');
   // why: each text node apart, so the words of two elements never run together into one ("ProvidersDiscovery" would
   // hide "Discovery" from a word-boundary match)
   const texts: string[] = [];

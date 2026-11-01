@@ -13,6 +13,7 @@ import {
   priceCellSchema,
   providerIdSchema,
   resultBasisSchema,
+  staleMarkSchema,
 } from './common.js';
 
 // why: the one home of the space's limits is space/limits.ts; the contract re-exports the two its bounds use.
@@ -80,7 +81,7 @@ const figuresSchema = z.strictObject({
   pair: counts,
   pricePence: z.array(moneyPenceSchema),
   provenance: counts,
-  stale: z.array(z.boolean()),
+  stale: z.array(staleMarkSchema),
   ageHours: z.array(ageHoursSchema),
   /** "cheapest of the rows read" (decisions 30, 36); calendar figures only */
   truncated: z.array(z.boolean()),
@@ -126,7 +127,7 @@ const cheaperCachedSchema = z.strictObject({
   destination: counts,
   truncated: z.array(z.boolean()),
   /** the figure's own staleness rule */
-  stale: z.array(z.boolean()),
+  stale: z.array(staleMarkSchema),
 });
 const CHEAPER_COLUMNS = [
   'figure',
@@ -424,7 +425,7 @@ export type DatePairsResponse = z.output<typeof datePairsResponseSchema>;
 const cheaperCachedPriceSchema = z.strictObject({
   pricePence: moneyPenceSchema,
   provenance: provenanceSchema,
-  stale: z.boolean(),
+  stale: staleMarkSchema,
   truncated: z.boolean(),
   origin: iataSchema,
   destination: iataSchema,

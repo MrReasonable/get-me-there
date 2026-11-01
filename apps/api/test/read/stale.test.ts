@@ -105,18 +105,23 @@ describe('the api readers go through it (one case each over the same row)', () =
   }
   const figureOf = (pairs: DatePair) => pairs.figure?.price.stale;
 
-  it('rows.ts, the date-pairs figure, /results and route history: not stale at 1 h, stale at 2 h', async () => {
+  it('rows.ts, the date-pairs figure, /results, the card’s cheapest and route history: not stale at 1 h, stale at 2 h, the mark naming the refresh (ruling 20.6-2)', async () => {
     const { x, def } = await world();
     const route = async () =>
       apiContract.routeHistoryResponseSchema
         .parse(await (await x.request('/api/routes/LHR/JFK/history')).json())
         .calendarSeries.flatMap((s) => s.points.map((p) => p.stale));
+    const card = async () =>
+      apiContract.searchCardsResponseSchema
+        .parse(await (await x.request('/api/definitions/cards')).json())
+        .cards.find((c) => c.id === def.id)?.cheapest?.stale;
     const read = async () => [
       figureOf(pairOf(await datesOf(x, def.id), '2026-11-02', '2026-11-12')),
       (await resultsOf(x, def.id, '?basis=calendar')).rows[0]?.stale,
+      await card(),
       ...(await route()),
     ];
-    expect(await read()).toEqual([false, false, false]);
+    expect(await read()).toEqual([false, false, false, false]);
     const row = x.ports.repos.calendarPrices.heldBy(
       x.ports.repos.executions.listForDefinition(def.id, { limit: 1, includeChildren: false })[0]?.id ?? '',
     )[0];
@@ -124,20 +129,25 @@ describe('the api readers go through it (one case each over the same row)', () =
     expect(
       staleness(row.provenance, 'calendar', { def, config: x.ports.config, now: x.clock.now() }).stale,
     ).toBe(false);
+    expect(
+      staleness(row.provenance, 'calendar', { def, config: x.ports.config, now: x.clock.now() }).mark,
+    ).toBe(false);
     expect(staleThresholds({ def, config: x.ports.config }, 'fixture')).toEqual({
       refreshHours: 1,
       overrideHours: null,
       staleAfterHours: x.ports.config.staleAfterHours,
     });
     x.clock.advance(HOUR);
-    expect(await read()).toEqual([true, true, true]);
+    expect(await read()).toEqual(['refresh', 'refresh', 'refresh', 'refresh']);
   });
 
   it('CALENDAR_STALE_AFTER_HOURS wins outright: the same row is stale at 3 h under an override of 2', async () => {
     const { x, def } = await world({ CALENDAR_STALE_AFTER_HOURS: '2' });
     x.clock.advance(2 * HOUR);
-    expect((await resultsOf(x, def.id, '?basis=calendar')).rows[0]?.stale).toBe(true);
+    // the mark names the threshold that judged it: the operator's stale setting (ruling 20.6-2)
+    expect((await resultsOf(x, def.id, '?basis=calendar')).rows[0]?.stale).toBe('setting');
     const d = await datesOf(x, def.id);
+    expect(figureOf(pairOf(d, '2026-11-02', '2026-11-12'))).toBe('setting');
     expect(d).not.toHaveProperty('calendarStaleAfterHours');
   });
 
@@ -166,7 +176,7 @@ describe('the api readers go through it (one case each over the same row)', () =
       pairOf(await datesOf(x, def.id), '2026-11-02', '2026-11-12').figure?.cheaperCached;
     expect(await cached()).toMatchObject({ pricePence: 41_000, stale: false });
     x.clock.advance(HOUR);
-    expect(await cached()).toMatchObject({ pricePence: 41_000, stale: true });
+    expect(await cached()).toMatchObject({ pricePence: 41_000, stale: 'refresh' });
   });
 
   it("the Status data card's ages (statusSources) are judged by the same rule over a real source's stored age", async () => {

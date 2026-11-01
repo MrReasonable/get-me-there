@@ -3111,7 +3111,16 @@ each ban has a fixture that fails.
 Schemas in `core/api-contract`; every route is mounted under `/api` (the SPA
 owns `/`; the table omits the prefix); errors `{ error: { code, message,
 details? } }` where a 422 carries `details.fields[]`; every price-bearing
-shape carries `provenance` and `stale`.
+shape carries `provenance` and `stale`. `stale` is the price's stale mark
+from `core`'s `stalenessOf` (§8.1): `false` when the price is not stale,
+else the kind of threshold it is older than, `'refresh'` (a calendar price
+under the per-price rule: the search's refresh plus the price's own age
+bound) or `'setting'` (a calendar price under `CALENDAR_STALE_AFTER_HOURS`,
+or any price on the verified basis, `STALE_AFTER_HOURS`), so the web words
+the mark (§3) without knowing the install's settings. This holds for the
+rows and offers of `/results`, the date-pairs figures and their cheaper
+calendar prices, the cards' cheapest, the calendar gap and the history
+points alike; a bare `true` is refused.
 
 | Route | Purpose |
 |---|---|
@@ -3169,7 +3178,7 @@ datePairsResponseSchema = {
   executions: ExecutionSummary[];   // the runs read, newest first, children included (as /results)
   discoveryProviders: ProviderId[]; // the definition's; [] means no discovery stage
   verificationProviderConfigured: boolean;
-  staleAfterHours: number;     // the verified basis's threshold; a calendar figure's `stale` is the per-price rule's (§8.1)
+  staleAfterHours: number;     // the verified basis's threshold; each figure's `stale` is its stale mark (false | 'refresh' | 'setting')
   space: { departureFrom: IsoDate; departureTo: IsoDate; minNights: number; maxNights: number }; // current resolved space
   scope: {                      // what the server applied
     origins: Iata[]; destinations: Iata[];   // sorted and unique
@@ -3419,7 +3428,7 @@ merged into price.
   only when scheduled; its state line in a polite status region:
   "Searching · 120 of 405 date pairs · about 1h 40m left" (no "left" clause
   without `estimatedFinishAt`), "Reading flights · 3 of 10", "Searched 2h ago",
-  "Dates changed: 24 date pairs not searched yet" (`spaceChangedSince`), the
+  "Dates changed since this was last searched" (`spaceChangedSince`), the
   stop's sentence as-is with its fix as a line or button, or "Not searched
   yet"; "85 of 405 date pairs never searched" whenever that count is not zero;
   the cheapest found by its latest run's board and its dates ("£86 · 12 → 23
@@ -3528,7 +3537,7 @@ merged into price.
   and then starts **that** search, never another, with the sentence's figures,
   `requireCovered` and `replaceStopped`, and opens its page; and **Save**,
   which, when the change altered the search's space, opens the page reading
-  "Dates changed: N date pairs not searched yet · Search again". The £0 path
+  "Dates changed since this was last searched" beside Search again. The £0 path
   needs a three-line `.env` (`TRAVELPAYOUTS_TOKEN`, auth user, auth pass).
 - **A search's page** (`?view=dates&def=<id>`; its code lives under
   `views/Dates`; opened from its card, from the nav's entry for the search last opened and
@@ -3574,9 +3583,9 @@ merged into price.
     names both, a `pnpm gmt …` command in a code element in native mode; "0
     of 405 searched" beside it when nothing was searched, never "0 error"; a
     run with no stored cause reads `NO_STOP_CAUSE_TEXT`; the board shows the
-    prices found before the stop); *changed* ("Dates changed: N date pairs not
-    searched yet · Search again", when the search's space changed after its
-    latest run started); *never* ("Not searched yet" with Search now; a search
+    prices found before the stop); *changed* ("Dates changed since this was
+    last searched", beside Search again, when the search's space changed after
+    its latest run started, by the api's own `spaceChangedSince`); *never* ("Not searched yet" with Search now; a search
     naming no source reads "No price source is set up, so nothing was
     searched" with "Set up a price source (Providers)", from its own data); and
     a `refused=<code>` from Search now, worded as above. A run in its flight
@@ -3754,8 +3763,9 @@ merged into price.
     mark reads "no flights". The legend, the key in plain words, is numeric
     and always open: the five marks with their counts in view (the same counts
     as the header and the card, by `datePairSearched`), "no price shown" with
-    its parts beneath ("12 no fares, 3 no cached data"), "darker is cheaper"
-    with the shading's price bands as scale values, "striped: partly not
+    its parts beneath ("12 no fares, 3 no cached data", a part at zero left
+    out), "brighter is cheaper" (the board's lamps burn brightest for the
+    cheapest band) with the shading's price bands as scale values, "striped: partly not
     searched", "each dot is one stay length", and what "not checked" means. The shading's
     colours are the later "colorize" step's, within the existing palette.
     **Readout**: the cell under the pointer or the focus shows its date pair
@@ -4622,7 +4632,10 @@ Create-and-start stores the shown runnable totals, not the worst case, as the ne
 Undo of a remove restores the search with its schedule (§7, §10). The flight read's outcome is stated on the date
 pair's main line beside its price, which it never changes (§6.9, §11). A flight outside the search's arrival or
 departure window is marked as an over-limit one is, and the shortest flight within the limits is always shown (§11).
-The month key has five marks: priced, no price shown, couldn't be read, not reached and not searched (§3, §6.6, §11).
+The month key has five marks: priced, no price shown, couldn't be read, not reached and not searched (§3, §6.6, §11),
+and says "brighter is cheaper", as the board's lamps are drawn. A price's stale mark on the wire names the kind of
+threshold it is older than, the search's refresh or the operator's stale setting, so the page words it (§3, §10). The
+"Dates changed" line has no count: "Dates changed since this was last searched" (§11).
 The app always lands on Searches, the header's search selector is removed, and the nav's page entry is the search
 last opened (§11). The estimate's coverage clause ends "the rest when you search again", or "the rest next Monday" on
 a scheduled search (§11). A card's cheapest always renders through `PriceCell`'s compact face, its own source and age

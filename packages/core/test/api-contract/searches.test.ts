@@ -62,9 +62,19 @@ describe('searchCardsResponseSchema (spec rev 55 §10 GET /definitions/cards)', 
     ).toBe(true);
   });
 
-  it('refuses flights read above the flights planned', () => {
-    const c = searchCard({ latestRun: latestRun({ flights: { planned: 10, read: 11 } }) });
-    expect(searchCardSchema.safeParse(c).success).toBe(false);
+  it('carries the run’s flight counts as the execution read does, and refuses more in hand than planned (R-reading)', () => {
+    const f = (x: Record<string, unknown>) =>
+      searchCard({
+        latestRun: latestRun({ flights: { planned: 10, read: 3, reused: 2, failed: 1, ended: null, ...x } }),
+      });
+    expect(searchCardSchema.safeParse(f({})).success).toBe(true);
+    expect(searchCardSchema.safeParse(f({ ended: 'window' })).success).toBe(true);
+    expect(searchCardSchema.safeParse(f({ read: 8 })).success).toBe(false);
+    // the old two-count shape says nothing of reused lists or why the step ended
+    expect(
+      searchCardSchema.safeParse(searchCard({ latestRun: latestRun({ flights: { planned: 10, read: 3 } }) }))
+        .success,
+    ).toBe(false);
   });
 
   it('refuses a window whose offsets do not match its kind, or that ends before it starts', () => {

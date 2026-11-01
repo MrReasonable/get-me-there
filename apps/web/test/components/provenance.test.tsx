@@ -142,7 +142,7 @@ describe('Provenance shows source and age without hover (spec §11)', () => {
         pricePence={39950}
         provenance={calendarProvenance}
         calendar
-        stale
+        stale="refresh"
         destination="EWR"
         destinationNote="onward leg not included"
       />,
@@ -248,14 +248,35 @@ describe('Provenance shows source and age without hover (spec §11)', () => {
   });
 
   it('a stale price with a known age carries the stale mark’s words and no unknown-age label', () => {
-    renderWithProviders(<PriceCell pricePence={39950} provenance={calendarProvenance} calendar stale />);
+    renderWithProviders(
+      <PriceCell pricePence={39950} provenance={calendarProvenance} calendar stale="refresh" />,
+    );
     expect(screen.getByText("older than this search's refresh")).toBeInTheDocument();
     expect(screen.queryByText("vendor's cache age unknown")).toBeNull();
   });
 
+  it('the stale mark words the kind of threshold the api says judged it, on any basis (ruling 20.6-2)', () => {
+    const { unmount } = renderWithProviders(
+      <PriceCell pricePence={39950} provenance={calendarProvenance} calendar stale="setting" />,
+    );
+    // a calendar price under CALENDAR_STALE_AFTER_HOURS
+    expect(screen.getByText('older than your stale setting')).toBeInTheDocument();
+    unmount();
+    renderWithProviders(
+      <PriceCell pricePence={41200} provenance={searchProvenance} calendar={false} stale="refresh" />,
+    );
+    expect(screen.getByText("older than this search's refresh")).toBeInTheDocument();
+  });
+
   it('an unconfirmed price says so first, beside the amount, before any other mark (decision 44)', () => {
     renderWithProviders(
-      <PriceCell pricePence={41200} provenance={searchProvenance} calendar={false} stale unconfirmed />,
+      <PriceCell
+        pricePence={41200}
+        provenance={searchProvenance}
+        calendar={false}
+        stale="setting"
+        unconfirmed
+      />,
     );
     const amount = screen.getByTestId('price-cell').firstElementChild;
     const marks = [...(amount?.querySelectorAll('span') ?? [])].map((m) => m.textContent);
@@ -271,7 +292,7 @@ describe('Provenance shows source and age without hover (spec §11)', () => {
         pricePence={39950}
         provenance={calendarProvenance}
         calendar
-        stale
+        stale="refresh"
         truncated
         unconfirmed
         destination="EWR"

@@ -49,7 +49,7 @@ describe('a figure is the cheapest across the airport pairs in scope (decision 5
 const OLD = '2027-02-20T12:00:00.000Z'; // 216 h before NOW
 const fresh = (pricePence: number, over: Parameters<typeof row>[0] = {}) => row({ pricePence, ...over });
 const stale = (pricePence: number, over: Parameters<typeof row>[0] = {}) =>
-  row({ pricePence, stale: true, ...over });
+  row({ pricePence, stale: 'refresh', ...over });
 const cal = (pricePence: number, over: Parameters<typeof calendarRow>[0] = {}) =>
   calendarRow({ pricePence, ...over });
 
@@ -196,6 +196,12 @@ describe('pickVerifiedFigure: seen, then fresh, then cheaper (decisions 54, 58)'
     expect(pickVerifiedFigure([s, f])).toBe(f);
     expect(pickVerifiedFigure([f, s])).toBe(f);
   });
+  it('two stale prices of different kinds are equally stale: the cheaper wins (ruling 20.6-2)', () => {
+    const a = stale(40_000);
+    const b = stale(30_000, { stale: 'setting' });
+    expect(pickVerifiedFigure([a, b])).toBe(b);
+    expect(pickVerifiedFigure([b, a])).toBe(b);
+  });
   it('then the cheaper', () => {
     const a = fresh(30_000);
     const b = fresh(30_001);
@@ -295,7 +301,7 @@ describe('the pick is the same for every permutation of its input (property)', (
     day: fc.integer({ min: 14, max: 15 }),
     nights: fc.integer({ min: 10, max: 11 }),
     price: fc.constantFrom(30_000, 31_000),
-    stale: fc.boolean(),
+    stale: fc.constantFrom<false | 'refresh' | 'setting'>(false, 'refresh', 'setting'),
     notSeen: fc.boolean(),
     superseded: fc.boolean(),
   });

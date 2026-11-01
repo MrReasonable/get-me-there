@@ -99,6 +99,18 @@ describe('a search’s header (spec rev 55 §11)', () => {
     expect(head).not.toHaveTextContent(/run finished|paused: /);
   });
 
+  it('with the airports’ names not in (failed or still loading), the route says its codes once (minor 6)', async () => {
+    server.use(
+      http.get(`${API}/airports`, () =>
+        HttpResponse.json({ error: { code: 'internal', message: 'airports read failed' } }, { status: 500 }),
+      ),
+    );
+    renderDates({ body: workedDates() });
+    await findBoard();
+    const route = screen.getByTestId('dates-route');
+    await waitFor(() => expect(route).toHaveTextContent(/^LHR, LGW → JFK, EWR$/));
+  });
+
   it('a fixed window states its dates; an unscheduled search offers Repeat weekly…', async () => {
     renderDates({
       body: workedDates(),
@@ -145,7 +157,7 @@ describe('a search’s header (spec rev 55 §11)', () => {
   });
 
   it('the stale mark’s words: the header says every price is older than this search’s refresh, each calendar price says so', async () => {
-    const stale = calendarFig({ price: { ...calendarFig().price, stale: true } });
+    const stale = calendarFig({ price: { ...calendarFig().price, stale: 'refresh' } });
     renderDates({
       body: {
         pairs: { [at('2027-03-14', 10)]: pricedPair(stale), [at('2027-03-15', 10)]: pricedPair(stale) },
@@ -157,8 +169,16 @@ describe('a search’s header (spec rev 55 §11)', () => {
     expect(within(board).queryByText('stale')).toBeNull();
   });
 
+  it('under the stale setting a calendar figure reads "older than your stale setting", as the api marks it', async () => {
+    const stale = calendarFig({ price: { ...calendarFig().price, stale: 'setting' } });
+    renderDates({ body: { pairs: { [at('2027-03-14', 10)]: pricedPair(stale) } } });
+    const board = await findBoard();
+    expect(within(board).getAllByText('older than your stale setting')).toHaveLength(1);
+    expect(screen.getByText('Every price shown is older than your stale setting.')).toBeInTheDocument();
+  });
+
   it('a stale verified figure reads "older than your stale setting"', async () => {
-    const fig = verifiedFig({ price: { ...verifiedFig().price, stale: true } });
+    const fig = verifiedFig({ price: { ...verifiedFig().price, stale: 'setting' } });
     renderDates({ body: { pairs: { [at('2027-03-14', 10)]: pricedPair(fig) } } });
     const board = await findBoard();
     expect(within(board).getAllByText('older than your stale setting')).toHaveLength(1);
@@ -533,10 +553,10 @@ describe('the red synthetic banner, judged on the decoded read (revision 50)', (
   });
 });
 
-describe('the latest run’s poll beside the status bar’s (ruling B7, arch-r2-014)', () => {
+describe('the latest run’s own poll beside the status bar’s (ruling B7, R-coupling)', () => {
   // why: only the interval is faked and the clock never advances by itself, so each POLL_MS step is exact; Testing
-  // Library's waits run on the DOM's mutation events. The page mounts POLL_MS / 2 after the bar, so two polls of one run
-  // would fall at different instants and could not be merged into one request.
+  // Library's waits run on the DOM's mutation events. The tests check what the page says as reads arrive, never how the
+  // query library schedules them.
   afterEach(() => vi.useRealTimers());
   const fakeClock = () =>
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'], shouldAdvanceTime: false });
@@ -574,7 +594,7 @@ describe('the latest run’s poll beside the status bar’s (ruling B7, arch-r2-
     executions: [runSummary({ status: 'running', finishedAt: null })],
   };
 
-  it('a search whose run is not the bar’s (another search’s older run is in flight) polls its own, and its line moves', async () => {
+  it('two runs in flight: the bar shows another search’s older run, and the page’s line follows its own newer one', async () => {
     fakeClock();
     const reads: string[] = [];
     serveRuns(reads);
@@ -608,38 +628,21 @@ describe('the latest run’s poll beside the status bar’s (ruling B7, arch-r2-
     await waitFor(() => expect(line).toHaveTextContent('about 1h 20m left'));
   });
 
-  it('when the bar polls the same run, the page shares its query and asks for nothing of its own', async () => {
+  it('when the bar polls the same run, the page’s line still moves with each read', async () => {
     fakeClock();
     const reads: string[] = [];
     serveRuns(reads);
     server.use(serveDatesFor(runningDates));
-    const { client } = renderWithProviders(<Shell bar={<StatusBar definition={definition()} />} />, {
+    renderWithProviders(<Shell bar={<StatusBar definition={definition()} />} />, {
       search: '?view=dates&def=def-0001',
     });
     await waitFor(() => expect(reads).toContain('exec-0001'));
-    await act(() => vi.advanceTimersByTimeAsync(POLL_MS / 2));
     fireEvent.click(screen.getByRole('button', { name: 'show page' }));
     const line = await screen.findByTestId('state-line');
-    await waitFor(() => expect(line).toHaveTextContent(/^Searching · /));
-    // why: TanStack Query restarts every observer's interval on each update of the query, so two polls of one run move
-    // in step and their requests merge: the request count cannot tell them apart. What can is who polls: the run's query
-    // has two observers (the bar's and the page's) and exactly one of them, the bar's, has an interval
-    const query = client.getQueryCache().find({ queryKey: qk.execution('exec-0001') });
-    if (query === undefined) throw new Error('no run query');
-    const intervals = query.observers.map((o) => {
-      const r = o.options.refetchInterval;
-      return typeof r === 'function' ? r(query) : r;
-    });
-    expect(intervals).toHaveLength(2);
-    expect(intervals.filter((r) => r === POLL_MS)).toHaveLength(1);
-    // and one read an interval, as the bar alone asks
-    await waitFor(() => expect(client.isFetching()).toBe(0));
-    const before = reads.length;
+    await waitFor(() => expect(line).toHaveTextContent(/about 1h \d+m left/));
+    const first = line.textContent;
     await act(() => vi.advanceTimersByTimeAsync(POLL_MS));
-    await waitFor(() => expect(reads.length).toBe(before + 1));
-    await waitFor(() => expect(client.isFetching()).toBe(0));
-    await act(() => vi.advanceTimersByTimeAsync(POLL_MS));
-    await waitFor(() => expect(reads.length).toBe(before + 2));
+    await waitFor(() => expect(line.textContent).not.toBe(first));
   });
 });
 

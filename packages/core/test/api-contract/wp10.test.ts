@@ -37,7 +37,7 @@ describe('WP10 contract additions (plan decision 38)', () => {
     const withFlags = [
       {
         ...series[0],
-        points: [{ ...point, stale: true, truncated: true, cell, executionId: 'e1', catchUp: null }],
+        points: [{ ...point, stale: 'refresh', truncated: true, cell, executionId: 'e1', catchUp: null }],
       },
     ];
     expect(routeHistoryResponseSchema.safeParse({ ...route, calendarSeries: withFlags }).success).toBe(true);
@@ -159,16 +159,23 @@ describe('WP10 contract additions (plan decision 38)', () => {
       routeSeries: [{ providerId: 'searchapi', trip: t, cabin: 'economy', points }],
     });
     expect(routeHistoryResponseSchema.safeParse(route([routePoint])).success).toBe(false);
-    expect(routeHistoryResponseSchema.safeParse(route([{ ...routePoint, stale: true }])).success).toBe(true);
-    // why: ruling 6: a series names its trip, or null for a migrated "trip unknown" series; never omits it.
-    expect(routeHistoryResponseSchema.safeParse(route([{ ...routePoint, stale: true }], null)).success).toBe(
+    expect(routeHistoryResponseSchema.safeParse(route([{ ...routePoint, stale: 'refresh' }])).success).toBe(
       true,
     );
-    const series = { providerId: 'searchapi', cabin: 'economy', points: [{ ...routePoint, stale: true }] };
+    // why: ruling 6: a series names its trip, or null for a migrated "trip unknown" series; never omits it.
+    expect(
+      routeHistoryResponseSchema.safeParse(route([{ ...routePoint, stale: 'refresh' }], null)).success,
+    ).toBe(true);
+    const series = {
+      providerId: 'searchapi',
+      cabin: 'economy',
+      points: [{ ...routePoint, stale: 'refresh' }],
+    };
     expect(routeHistoryResponseSchema.safeParse({ ...route([]), routeSeries: [series] }).success).toBe(false);
     // why: prov-004: a point is vendor-stated GBP, by literal.
     expect(
-      routeHistoryResponseSchema.safeParse(route([{ ...routePoint, stale: true, currency: 'USD' }])).success,
+      routeHistoryResponseSchema.safeParse(route([{ ...routePoint, stale: 'refresh', currency: 'USD' }]))
+        .success,
     ).toBe(false);
     // why: CodeRabbit batch 3 — a point carries its point of sale and an FX status (spec §3), which is never converted
     const { pointOfSale: _pos, ...noPos } = routePoint;
@@ -180,12 +187,13 @@ describe('WP10 contract additions (plan decision 38)', () => {
       { ...routePoint, fx: { converted: true } },
     ])
       expect(
-        routeHistoryResponseSchema.safeParse(route([{ ...p, stale: true }])).success,
+        routeHistoryResponseSchema.safeParse(route([{ ...p, stale: 'refresh' }])).success,
         JSON.stringify(p),
       ).toBe(false);
     expect(
-      routeHistoryResponseSchema.safeParse(route([{ ...routePoint, pointOfSale: 'unknown', stale: true }]))
-        .success,
+      routeHistoryResponseSchema.safeParse(
+        route([{ ...routePoint, pointOfSale: 'unknown', stale: 'refresh' }]),
+      ).success,
     ).toBe(true);
   });
 });

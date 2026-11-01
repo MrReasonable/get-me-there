@@ -20,6 +20,7 @@ import {
   type Provenance,
   type ProviderId,
   type SearchDefinition,
+  type StaleMark,
   type StaleThresholds,
   stalenessOf,
   unverifiedNames,
@@ -64,15 +65,16 @@ export function staleThresholds(
 
 /**
  * Spec revision 55 §3, §8.1: a price's effective age and staleness by core's one per-price rule (`stalenessOf`) over its
- * stored provenance, on its basis (decisions 44, 55: an unknown vendor age is aged by its fetch age alone).
+ * stored provenance, on its basis (decisions 44, 55: an unknown vendor age is aged by its fetch age alone). `mark` is
+ * the stale mark the wire carries (`false`, or the kind of threshold the price is older than: ruling 20.6-2).
  */
 export function staleness(
   p: Provenance,
   basis: Basis,
   rc: Pick<RowContext, 'def' | 'config' | 'now'>,
-): { ageHours: number; stale: boolean } {
+): { ageHours: number; stale: boolean; mark: StaleMark } {
   const s = stalenessOf({ provenance: p, basis }, staleThresholds(rc, p.providerId), rc.now);
-  return { ageHours: s.ageHours, stale: s.stale };
+  return { ageHours: s.ageHours, stale: s.stale, mark: s.mark };
 }
 
 /** A price on the wire: amount, provenance, staleness, age, truncation (decisions 36, 44). */
@@ -92,7 +94,7 @@ export function priceCell(
           rc.providers.find((x) => x.id === provenance.providerId)?.discovery?.info,
         )
       : provenance;
-  return { pricePence, provenance: p, stale: s.stale, ageHours: s.ageHours, truncated };
+  return { pricePence, provenance: p, stale: s.mark, ageHours: s.ageHours, truncated };
 }
 
 /** The price part of a row, for the views that show a row's price as a PriceCell. */

@@ -96,7 +96,11 @@ describe('api-contract (spec §10)', () => {
     expect(priceCellSchema.safeParse(bare).success).toBe(false);
     expect(priceCellSchema.safeParse(cell).success).toBe(true);
     expect(priceCellSchema.safeParse({ ...cell, pricePence: 412.5 }).success).toBe(false);
-    expect(priceCellSchema.safeParse({ ...cell, stale: true, ageHours: 'unknown' }).success).toBe(true);
+    // ruling 20.6-2: the stale mark carries its threshold's kind; a bare `true` says nothing of which, and is refused
+    expect(priceCellSchema.safeParse({ ...cell, stale: 'refresh', ageHours: 'unknown' }).success).toBe(true);
+    expect(priceCellSchema.safeParse({ ...cell, stale: 'setting' }).success).toBe(true);
+    expect(priceCellSchema.safeParse({ ...cell, stale: true }).success).toBe(false);
+    expect(priceCellSchema.safeParse({ ...cell, stale: 'stale' }).success).toBe(false);
   });
   it('a result row without provenance is rejected', () => {
     const row = {

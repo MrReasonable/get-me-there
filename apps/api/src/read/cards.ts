@@ -23,7 +23,7 @@ import {
 } from '@gmt/core';
 import type { Engine } from '@gmt/engine';
 import type { Ports } from '../wiring.js';
-import { estimatedFinishOf, stopOf } from './executions.js';
+import { estimatedFinishOf, flightsOf, stopOf } from './executions.js';
 import { rankedFigures } from './ranked.js';
 import { currentSpace } from './space.js';
 
@@ -67,7 +67,6 @@ function latestRunOf(
     const at = datePairAt(space, i);
     if (!ever.has(`${at.departureDate}|${at.returnDate}`)) never += 1;
   }
-  const f = run.flightLists;
   return {
     id: run.id,
     status: run.status,
@@ -77,8 +76,8 @@ function latestRunOf(
     datePairs: pairs,
     datePairsSearched: mine.size,
     datePairsNeverSearched: never,
-    // why: the read count comes from the flight-list rows (FlightListsRepo, Task 20.8); no run stores a plan before 20.9
-    flights: f === null ? null : { planned: f.planned, read: 0 },
+    // why: ruling R-reading — the same counts as the run's own read (`flightsOf`), so the card and the page agree
+    flights: flightsOf(run),
     estimatedFinishAt: estimatedFinishOf(ports, engine, run),
     stop: stopOf(ports, run, def),
   };

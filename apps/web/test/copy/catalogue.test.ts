@@ -1,3 +1,5 @@
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { BANNED_WORD_ALLOWLIST, findBannedWords, SOURCE_LABELS } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
 import { COPY } from '../../src/copy.js';
@@ -76,16 +78,17 @@ const SAMPLES: Record<string, unknown[]> = {
   childExecutionItem: ['14 Oct 2026 13:00 Europe/London', 'running', 'just now'],
   spanExecutions: [3, 1],
   notCompletedBanner: ['running'],
+  // why: the bar passes its main-path stage words (COPY.barStageName) and source name (mainPathSource)
   progress: [
     {
-      stage: 'discovery',
-      provider: 'Travelpayouts',
+      stage: 'the first pass across your dates',
+      provider: 'the Aviasales cache',
       buckets: { priced: 60, empty: 10, no_data: 40, error: 6, skipped: 0, not_run: 10 },
       total: 126,
     },
   ],
   progressBuckets: [{ priced: 9, empty: 0, no_data: 99, error: 0, skipped: 0, not_run: 0 }],
-  progressLabel: ['discovery', 'Travelpayouts'],
+  progressLabel: ['the first pass across your dates', 'the Aviasales cache'],
   spendRunCalls: [42, '2000'],
   spendRunFreeCalls: [14, '2000'],
   spendRunCost: ['£0', '£0'],
@@ -221,6 +224,7 @@ const SAMPLES: Record<string, unknown[]> = {
   'searchPage.reused': [120],
   'searchPage.readingFlights': [3, 10, 'about 8m left'],
   'searchPage.flightsReadFor': [4, 10],
+  'searchPage.flightsFailed': [2],
   'searchPage.noneSearched': [405],
   'searchPage.staleAll': ["older than this search's refresh"],
   'searchPage.gapLead': [3],
@@ -400,21 +404,28 @@ describe('COPY catalogue (spec §11 banned words)', () => {
     expect([COPY.confirmNew(1, 2, '£0')].filter((c) => /\bup to\b/.test(c))).toEqual([]);
   });
 
-  it('the first screen and a search’s page speak in main-path words: no set-up term (spec rev 55 §11)', () => {
+  it('every COPY key the main path’s files reach speaks in main-path words: no set-up term (spec rev 55 §11; minor 8)', () => {
     const SET_UP =
-      /\b(definitions?|cells?|discovery|hard stop|verdict|tiles?|retry factor|STALE|calendar basis|itinerar(y|ies)|camoufox)\b/i;
-    const MAIN_PATH = [
-      'searchesView.',
-      'searchAgain.',
-      'searchPage.',
-      'datesView.marks.',
-      'datesView.legend.',
-      'datesView.howFar.',
-      'datesView.overview.',
-    ];
+      /\b(definitions?|cells?|discovery|hard stop|verdict|tiles?|retry factor|calendar basis|itinerar(y|ies)|camoufox)\b/i;
+    const reached = mainPathKeys();
+    // the walk must find the main path's own blocks, so it cannot pass by reaching nothing
+    for (const p of [
+      'searchPage',
+      'searchesView.searching',
+      'datesView.marks',
+      'datesView.howFar',
+      'repeatWeekly',
+    ])
+      expect(
+        [...reached].some((r) => r === p || r.startsWith(`${p}.`) || p.startsWith(`${r}.`)),
+        p,
+      ).toBe(true);
+    const under = (path: string) => [...reached].some((r) => path === r || path.startsWith(`${r}.`));
     const hits = strings
-      .filter(({ path }) => MAIN_PATH.some((p) => path.startsWith(p)))
-      .filter(({ text }) => SET_UP.test(text))
+      .filter(
+        ({ path }) => under(path) && !PROVENANCE_KEYS.some((k) => path === k || path.startsWith(`${k}.`)),
+      )
+      .filter(({ text }) => SET_UP.test(text) || /\bSTALE\b/.test(text))
       .map(({ path, text }) => `${path}: ${text}`);
     expect(hits).toEqual([]);
   });
@@ -475,6 +486,9 @@ describe('a search’s page in words (WP20 Task 20.6, spec rev 55 §3, §11)', (
     ]);
     expect(Object.values(W).filter((w) => /no flights/i.test(w))).toEqual([]);
     expect(COPY.datesView.legend.noPriceParts(12, 3)).toBe('12 no fares, 3 no cached data');
+    // a part at zero is left out (minor 7)
+    expect(COPY.datesView.legend.noPriceParts(0, 3)).toBe('3 no cached data');
+    expect(COPY.datesView.legend.noPriceParts(12, 0)).toBe('12 no fares');
     expect(COPY.datesView.legend.striped(4)).toBe('striped: partly not searched (4)');
     expect(COPY.datesView.legend.dot).toBe('each dot is one stay length');
   });
@@ -487,3 +501,66 @@ describe('a search’s page in words (WP20 Task 20.6, spec rev 55 §3, §11)', (
     expect(P.noneSearched(405)).toBe('0 of 405 searched');
   });
 });
+
+// --- the main path's reach (minor 8): every COPY path its source files name, directly or through an alias ---
+
+const SRC = join(import.meta.dirname, '..', '..', 'src');
+/** The main path's files (spec rev 55 §11): the first screen, a search's page, the Edit page and More options, the bar. */
+const MAIN_PATH_DIRS = ['views/Searches', 'views/Dates', 'views/Definitions'];
+const MAIN_PATH_FILES = [
+  'components/StatusBar.tsx',
+  'components/StopWords.tsx',
+  'components/Nav.tsx',
+  'lib/leftWords.ts',
+];
+/** The coverage section keeps the set-up terms by spec (§11), each with its line; it is not on the main path. */
+const SET_UP_FILES = new Set(['views/Dates/CoverageSection.tsx']);
+/** Provenance notes keep §2's source names on every view (spec rev 55 §11: "no Camoufox outside provenance notes"). */
+const PROVENANCE_KEYS = ['provider', 'providerShort', 'providerMark', 'datesView.phoneKey.providers'];
+
+function mainPathFiles(): string[] {
+  const out = MAIN_PATH_FILES.map((f) => join(SRC, f));
+  for (const d of MAIN_PATH_DIRS)
+    for (const f of readdirSync(join(SRC, d)))
+      if (/\.tsx?$/.test(f) && !SET_UP_FILES.has(`${d}/${f}`)) out.push(join(SRC, d, f));
+  return out;
+}
+
+/** The deepest prefix of `segments` that names an entry of COPY, as a dotted path ('' when the first does not). */
+function resolve(segments: readonly string[]): string {
+  let node: unknown = COPY;
+  const kept: string[] = [];
+  for (const seg of segments) {
+    if (node === null || typeof node !== 'object' || !Object.hasOwn(node, seg)) break;
+    node = Reflect.get(node, seg);
+    kept.push(seg);
+  }
+  return kept.join('.');
+}
+
+/** Every COPY path the main path's files name: `COPY.a.b`, and `X.c` where `const X = COPY.a` (or the page's `c`). */
+function mainPathKeys(): Set<string> {
+  const out = new Set<string>();
+  for (const file of mainPathFiles()) {
+    const src = readFileSync(file, 'utf8');
+    const aliases = new Map<string, string[]>([['COPY', []]]);
+    // why: stateLines.ts takes the catalogue as `c` (PageCopy, which is COPY), as `d.c` inside its line builders
+    if (/\bPageCopy\b/.test(src)) {
+      aliases.set('c', []);
+      aliases.set('d.c', []);
+    }
+    for (const m of src.matchAll(/const (\w+)(?::[^=]+)? = ((?:d\.)?c|COPY)((?:\.\w+)*);/g)) {
+      const root = aliases.get(m[2] ?? '');
+      if (root !== undefined) aliases.set(m[1] ?? '', [...root, ...(m[3] ?? '').split('.').filter(Boolean)]);
+    }
+    for (const [alias, base] of aliases) {
+      const re = new RegExp(`(?<![\\w.])${alias.replace('.', '\\.')}((?:\\.\\w+)+)`, 'g');
+      for (const m of src.matchAll(re)) {
+        const path = resolve([...base, ...(m[1] ?? '').split('.').filter(Boolean)]);
+        if (path !== '') out.add(path);
+      }
+      // a bare alias passed whole (`c: COPY`) reaches nothing by itself; its uses are found where it is read
+    }
+  }
+  return out;
+}

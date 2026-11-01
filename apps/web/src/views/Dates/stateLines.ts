@@ -16,6 +16,7 @@ import type { StopWords } from '../../components/StopWords.js';
 import { listText } from '../../copy/setup.js';
 import type { COPY } from '../../copy.js';
 import { formatIsoDateShort, londonParts } from '../../format.js';
+import { readingCount } from '../../lib/flightsReading.js';
 import { leftWords } from '../../lib/leftWords.js';
 import { instantMs } from '../../lib/time.js';
 
@@ -98,6 +99,17 @@ export function searchedCount(pairs: readonly DatePair[]): number {
   let n = 0;
   for (const p of pairs) if (datePairSearched(p.buckets)) n += 1;
   return n;
+}
+
+/** A whole search's date pairs and how many of them were searched (the card's counts, or a read's every pair). */
+export interface WholeCount {
+  searched: number;
+  total: number;
+}
+
+/** The whole-search count of `pairs`: core's `datePairSearched` over them, of their number. */
+export function wholeOf(pairs: readonly DatePair[]): WholeCount {
+  return { searched: searchedCount(pairs), total: pairs.length };
 }
 
 /**
@@ -210,7 +222,8 @@ type Flights = ExecutionResponse['flights'];
  * What the searched line adds about flights (spec rev 55 §11): nothing without a stored plan (ruling A14) or when every
  * planned list is in hand (read now or reused from an earlier run); otherwise how far it got and why the rest were not
  * read, from the stored `ended` ("…; the rest were left: outside this run's browser window"), so a short step never
- * reads as a bare "Searched". A step the run's browser worker was paused for, with nothing planned, says so alone.
+ * reads as a bare "Searched"; with no stored end, the lists that failed ("the rest couldn't be read", "2 couldn't be
+ * read"), or the count alone when none did. A step the run's browser worker was paused for, with nothing planned, says so alone.
  */
 function flightsClause(f: Flights, c: PageCopy): string | null {
   if (f === null) return null;
@@ -218,8 +231,11 @@ function flightsClause(f: Flights, c: PageCopy): string | null {
   if (f.planned === 0) return f.ended === 'disabled' ? P.flightsNotRead : null;
   const done = f.read + f.reused;
   if (done >= f.planned) return null;
-  const rest = P.flightsRest[f.ended ?? 'failed'];
-  return `${P.flightsReadFor(done, f.planned)}; ${rest}`;
+  const head = P.flightsReadFor(done, f.planned);
+  if (f.ended !== null) return `${head}; ${P.flightsRest[f.ended]}`;
+  // why: minor 10 — with no stored end only the failed lists are accounted for: all the rest, some of them, or none
+  if (f.failed === f.planned - done) return `${head}; ${P.flightsRest.failed}`;
+  return f.failed > 0 ? `${head}; ${P.flightsFailed(f.failed)}` : head;
 }
 
 /** The state a search's page is in (spec rev 55 §11 "State line"), with its words. */
@@ -240,10 +256,11 @@ export type StateLine =
  *
  * - *never*: no run ("Not searched yet"), or a search naming no source ("No price source is set up, so nothing was
  *   searched" with its fix), from its own data (Review Focus 1).
- * - *searching*: pending or running, "Searching · 120 of 405 date pairs · about 1h 40m left" (the count is core's
- *   `datePairSearched` over the page's date pairs; no "left" clause without `estimatedFinishAt`).
- * - *reading*: running in its flight step (a stored plan with lists still to get, before itinerary search), "Reading
- *   flights · 3 of 10 date pairs · about 8m left"; lists reused from earlier runs count as in hand.
+ * - *searching*: pending or running, "Searching · 120 of 405 date pairs · about 1h 40m left" over the whole search
+ *   (`whole`, ruling R-scope: never the filters' scope; no "left" clause without `estimatedFinishAt`).
+ * - *reading*: running in its flight step (`readingCount`, the card's rule too: a plan that has not ended with lists
+ *   still to get), "Reading flights · 3 of 10 date pairs · about 8m left"; lists reused from earlier runs count as in
+ *   hand.
  * - *checking*: running in itinerary search, "Checking fares for the cheapest date pairs".
  * - *stopped*: a stopped or skipped status, the stop's sentence as-is (`NO_STOP_CAUSE_TEXT` when the read carries none,
  *   Review Focus 4) and "0 of 405 searched" when nothing was searched (never "0 error").
@@ -254,7 +271,10 @@ export type StateLine =
  */
 export function stateLine(d: {
   latest: ExecutionResponse | null;
+  /** The date pairs in scope (the filters'): the searched line counts these and says the scope. */
   pairs: readonly DatePair[];
+  /** The whole search (ruling R-scope): the running, reading and stopped lines count it, as the card does. */
+  whole: WholeCount;
   providers: readonly ProviderId[];
   reused: number;
   spaceChanged: boolean;
@@ -274,12 +294,12 @@ export function stateLine(d: {
     const left = leftWords(run.estimatedFinishAt, d.now);
     if (run.status === 'running' && run.stage === 'verification')
       return { kind: 'checking', text: P.checkingFares };
-    const f = run.flights;
-    if (run.status === 'running' && f !== null && f.read + f.reused + f.failed < f.planned)
-      return { kind: 'reading', text: P.readingFlights(f.read + f.reused, f.planned, left) };
+    const reading = readingCount(run.flights);
+    if (run.status === 'running' && run.flights !== null && reading !== null)
+      return { kind: 'reading', text: P.readingFlights(reading, run.flights.planned, left) };
     return {
       kind: 'searching',
-      text: d.c.searchesView.searching(searchedCount(d.pairs), d.pairs.length, left),
+      text: d.c.searchesView.searching(d.whole.searched, d.whole.total, left),
     };
   }
   if (STOPPED.has(run.status)) {
@@ -288,7 +308,7 @@ export function stateLine(d: {
       kind: 'stopped',
       text: stop.sentence,
       stop,
-      noneSearched: searchedCount(d.pairs) === 0 ? P.noneSearched(d.pairs.length) : null,
+      noneSearched: d.whole.searched === 0 ? P.noneSearched(d.whole.total) : null,
     };
   }
   if (run.startedAt === null) return { kind: 'never', text: P.notSearchedYet };

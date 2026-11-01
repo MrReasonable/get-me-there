@@ -62,8 +62,9 @@ export function pickVerifiedFigure<T extends FigureCandidate>(rows: readonly T[]
   const better = (a: T, b: T) =>
     (a.notSeenInLatest === null) !== (b.notSeenInLatest === null)
       ? a.notSeenInLatest === null
-      : a.stale !== b.stale
-        ? !a.stale
+      : // why: the stale mark carries its kind (ruling 20.6-2); two stale prices of different kinds are equally stale
+        (a.stale !== false) !== (b.stale !== false)
+        ? a.stale === false
         : a.pricePence !== b.pricePence
           ? a.pricePence < b.pricePence
           : tieOrder(a, b) < 0;

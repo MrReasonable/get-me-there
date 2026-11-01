@@ -5,7 +5,7 @@ import {
   capWarn,
   IN_FLIGHT_STATUSES,
   mainPathSource,
-  RESUMABLE_STATUSES,
+  RESUMABLE_ACTIVE_STATUSES,
   STOPPED_STATUSES,
 } from '@gmt/core';
 import { useQueryClient } from '@tanstack/react-query';
@@ -16,7 +16,6 @@ import {
   useCoverage,
   useExecution,
   useExecutionActions,
-  usePublishBarRun,
   useResults,
 } from '../api/queries.js';
 import { failureOf, useStatus } from '../api/statusQuery.js';
@@ -33,10 +32,8 @@ const ACTIVE: ReadonlySet<string> = new Set(ACTIVE_STATUSES);
 /** A run that has stopped or been skipped: the statuses whose `stop` the api fills (spec rev 55 §10). */
 const STOPPED: ReadonlySet<string> = new Set(STOPPED_STATUSES);
 const isStopped = (status: string): boolean => STOPPED.has(status);
-/** Active runs the API will resume: the paused two and an interrupted one (spec §7; derived, never hand-listed). */
-const RESUMABLE_ACTIVE: ReadonlySet<string> = new Set(
-  ACTIVE_STATUSES.filter((s) => RESUMABLE_STATUSES.includes(s)),
-);
+/** Active runs the API will resume: the paused two and an interrupted one (core's one set, shared with a search's page). */
+const RESUMABLE_ACTIVE: ReadonlySet<string> = new Set(RESUMABLE_ACTIVE_STATUSES);
 
 /**
  * Spec §11 progress, one line per stage × provider (never summed across providers). Ruling 4 (decision 67): the line
@@ -269,8 +266,6 @@ function RunStatus({
   const latestId = executionId ?? executions.find((x) => !x.isChild)?.id ?? null;
   const child = executions.find((x) => x.isChild && ACTIVE.has(x.status)) ?? null;
   const execution = useExecution(latestId);
-  // why: WP20 Task 20.6 — a search's page shares this poll when it shows the same run, and polls its own run otherwise
-  usePublishBarRun(latestId);
   const coverage = useCoverage(executionId === null ? definitionId : null);
   const actions = useExecutionActions();
   const qc = useQueryClient();

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { STALE_KINDS } from '../labels/age.js';
 import { LINK_ALLOWLIST, validateVendorUrl } from '../normalise/vendorUrl.js';
 import type { Buckets } from '../types/execution.js';
 import { SKIP_CODES } from '../types/execution.js';
@@ -18,6 +19,12 @@ export const moneyPenceSchema = z.number().int().min(0);
 export const microGbpSchema = z.number().int().min(0);
 export const ageHoursSchema = z.union([z.number().int().min(0), z.literal('unknown')]);
 /**
+ * Spec rev 55 §3, §10 (ruling 20.6-2): a price's stale mark: `false` when it is not stale, else the kind of threshold
+ * it is older than (`'refresh'`: this search's refresh; `'setting'`: the operator's stale setting), from core's
+ * `stalenessOf`, so the web words the mark without knowing the install's settings. A bare `true` is refused.
+ */
+export const staleMarkSchema = z.union([z.literal(false), z.enum(STALE_KINDS)]);
+/**
  * Every price on the wire: amount, provenance, staleness, effective age, and `truncated`: true when
  * the price came from a discovery tile the pagination cap stopped early, so it is only the
  * cheapest of the rows read (decisions 30 and 36; WP8 derives it from the outcome's `last_error`
@@ -26,7 +33,7 @@ export const ageHoursSchema = z.union([z.number().int().min(0), z.literal('unkno
 export const priceCellSchema = z.object({
   pricePence: moneyPenceSchema,
   provenance: provenanceSchema,
-  stale: z.boolean(),
+  stale: staleMarkSchema,
   ageHours: ageHoursSchema,
   truncated: z.boolean(),
 });

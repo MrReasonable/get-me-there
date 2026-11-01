@@ -76,7 +76,7 @@ export function itineraryHistory(hash: string, ports: Ports): ItineraryHistoryRe
           { provenance: p.provenance, basis: 'verified' },
           thresholds(ports, DEFAULT_DISCOVERY_REFRESH_HOURS),
           now,
-        ).stale,
+        ).mark,
         truncated: false,
         priceConfirmed: suppliedFields.includes('price'),
         catchUp: catchUp(p.executionId),
@@ -139,7 +139,7 @@ export function routeHistory(
           ...p,
           provenance: withAssumedBound(p.provenance, info),
           // why: revision 55 §8.1 — the per-price rule over the stored provenance (its own stored age)
-          stale: stalenessOf({ provenance: p.provenance, basis: 'calendar' }, t, now).stale,
+          stale: stalenessOf({ provenance: p.provenance, basis: 'calendar' }, t, now).mark,
           // why: decisions 36, 47: the fetching outcome's last_error, read with the point (WP19: no outcome read per run)
           truncated: isTruncated(sourceLastError),
           catchUp: catchUp(p.executionId),
@@ -165,7 +165,7 @@ export function routeHistory(
                 { provenance: { fetchedAt: pt.fetchedAt, maxAgeHours: 'unknown' }, basis: 'calendar' },
                 t,
                 now,
-              ).stale,
+              ).mark,
             })),
           })),
         );

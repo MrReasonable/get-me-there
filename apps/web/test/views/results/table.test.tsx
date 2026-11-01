@@ -92,7 +92,7 @@ const five: ResultRow[] = [
     stopsOut: 2,
     stopsIn: 1,
     cell: cell('LGW', 'JFK', '2027-03-10', '2027-03-21', 11),
-    stale: true,
+    stale: 'setting',
   }),
   calendarRow({ pricePence: 30000 }),
 ];
@@ -232,7 +232,7 @@ describe('View A header (spec §11 two lines)', () => {
 
   it('a converted, stale, truncated calendar headline carries "≈", the stale mark and "cheapest of the rows read" (the Critical)', async () => {
     const row = calendarRow({
-      stale: true,
+      stale: 'refresh',
       truncated: true,
       provenance: { ...provCalendar, fx: fxConverted },
     });
@@ -480,7 +480,7 @@ describe('client-side sort and filter (spec §6.5)', () => {
 
   it('the hidden-stale count counts only rows hide-stale removed, never stale rows another filter already hid (CodeRabbit batch 3)', async () => {
     // h4 is stale at £450; a second stale row at £900 is above the max price, so the price filter hides it anyway
-    const dear = verifiedRow({ itineraryHash: 'h6', pricePence: 90000, stale: true });
+    const dear = verifiedRow({ itineraryHash: 'h6', pricePence: 90000, stale: 'setting' });
     countResults(resultsResponse({ rows: [...five, dear] }));
     view(`${DETAIL_SEARCH}&f.stale=hide&f.maxPrice=48000`);
     await table();
