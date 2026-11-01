@@ -10,7 +10,10 @@ import type {
   FxInfo,
   HistoryPoint,
   Iata,
+  IsoDate,
   IsoDateTime,
+  Listed,
+  ListedFlight,
   NormalisedItinerary,
   Observation,
   ObservationFields,
@@ -22,6 +25,7 @@ import type {
   SkipCode,
   SourceKind,
   StopCause,
+  StopDetail,
   SuppliedField,
   VendorPriceMark,
 } from '@gmt/core';
@@ -198,4 +202,40 @@ export interface ObservationRow extends Observation {
 export interface OfferHistoryPoint extends HistoryPoint {
   suppliedFields: SuppliedField[];
   executionId: string;
+}
+
+/**
+ * Spec revision 55 §7 `flight_lists`: one flight-list page to store. `providerId` and `sourceKind` are carried so the
+ * repository can refuse a fixture or synthetic list by name (data-002); only `camoufox` / `scraped-self` is written. A
+ * `read` list has a `listed` word and no reason; a `failed` one has a `reason` and neither a `listed` word nor flights.
+ */
+export interface FlightListInsert {
+  definitionId: string;
+  /** NULL for an on-demand read (spec §8.1). */
+  executionId: string | null;
+  providerId: ProviderId;
+  sourceKind: SourceKind;
+  cabin: Cabin;
+  origin: Iata;
+  destination: Iata;
+  departureDate: IsoDate;
+  returnDate: IsoDate;
+  fetchedAt: IsoDateTime;
+  pointOfSale: PointOfSale;
+  status: 'read' | 'failed';
+  reason: StopDetail | null;
+  listed: Listed | null;
+  minMinor: number | null;
+  tabMinor: number | null;
+  cheapestView: 'cheapest' | 'best-fallback' | null;
+  optionsUnparsed: number;
+  optionsOtherCell: number;
+  resultsStated: number | null;
+  /** In page order; at most `FLIGHT_LIST_MAX_FLIGHTS`. */
+  flights: ListedFlight[];
+}
+
+/** A stored flight list with its flights in page order (spec rev 55 §7); the API adds the age, stale mark and provenance. */
+export interface StoredFlightList extends FlightListInsert {
+  id: number;
 }

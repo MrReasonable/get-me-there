@@ -24,6 +24,7 @@ export { CalendarPricesRepo } from './repositories/calendarPrices.js';
 export { CellsRepo, retriedOnResume } from './repositories/cells.js';
 export { DefinitionsRepo } from './repositories/definitions.js';
 export { ExecutionsRepo } from './repositories/executions.js';
+export { FlightListsRepo } from './repositories/flightLists.js';
 export { FxRepo } from './repositories/fx.js';
 export { ItinerariesRepo } from './repositories/itineraries.js';
 export { LedgerRepo } from './repositories/ledger.js';
@@ -50,11 +51,13 @@ export type {
   CalendarPriceRow,
   ExecutionCreateInput,
   ExecutionPatch,
+  FlightListInsert,
   ObservationRow,
   OfferHistoryPoint,
   RepoOptions,
   ReuseCriteria,
   ReusedCopy,
+  StoredFlightList,
   TileWrite,
   VerifiedCellWrite,
 } from './types.js';

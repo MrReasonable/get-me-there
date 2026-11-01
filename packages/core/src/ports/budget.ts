@@ -31,6 +31,12 @@ export interface Usage {
   windowUsed: boolean;
   windowStart: IsoDateTime | null;
   windowEnd: IsoDateTime | null;
+  /**
+   * Spec rev 55 §8.1 (ruling A32): on a `provider-execution` scope, the flight-list pages spent against the run's own
+   * flight allowance (`ExecutionBudget.flightListPages`; `cap` 0 when the snapshot sets none). `calls` and `cap` above
+   * count the grid or list pages only. Absent on every other scope.
+   */
+  flightLists?: { calls: number; cap: number };
 }
 
 /**

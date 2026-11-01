@@ -1,4 +1,4 @@
-import type { IsoDateTime, ProviderId, Stage } from '@gmt/core';
+import { FLIGHT_LIST_ENDPOINT_PATH, type IsoDateTime, type ProviderId, type Stage } from '@gmt/core';
 import type { Db } from '../client.js';
 import { PROVIDER_IDS, STAGES } from '../internal/enums.js';
 import { oneOf, readTime } from '../internal/read.js';
@@ -38,16 +38,27 @@ export class LedgerRepo {
       /** camoufox grid pages' scroll clicks (spec §7 rev 34); 0 for every other provider. */
       scrolls: number;
     }>;
+    /**
+     * Spec rev 55 §8.1 (ruling A32): the flight-list pages (`/v1/flights` rows), one line per provider. They are in
+     * `calls` and the totals, but in no `perProvider` line, whose stage would mislabel them as verification.
+     */
+    flightLists: Array<{ providerId: ProviderId; calls: number; costMicroGbp: number; cacheHits: number }>;
   } {
     const total = this.db.raw
       .prepare<[string], CountsRow>(`SELECT ${COUNTS} FROM provider_requests WHERE execution_id = ?`)
       .get(executionId);
     const rows = this.db.raw
-      .prepare<[string], CountsRow & { providerId: string; stage: string }>(
+      .prepare<[string, string], CountsRow & { providerId: string; stage: string }>(
         `SELECT provider_id AS providerId, CASE WHEN tile_index IS NULL THEN 'verification' ELSE 'discovery' END AS stage, ${COUNTS}
-         FROM provider_requests WHERE execution_id = ? GROUP BY providerId, stage ORDER BY providerId, stage`,
+         FROM provider_requests WHERE execution_id = ? AND endpoint_path <> ? GROUP BY providerId, stage ORDER BY providerId, stage`,
       )
-      .all(executionId);
+      .all(executionId, FLIGHT_LIST_ENDPOINT_PATH);
+    const flights = this.db.raw
+      .prepare<[string, string], { providerId: string; calls: number; cost: number; cacheHits: number }>(
+        `SELECT provider_id AS providerId, COALESCE(SUM(outcome <> 'cache_hit'), 0) AS calls, COALESCE(SUM(cost_micro_gbp), 0) AS cost, COALESCE(SUM(outcome = 'cache_hit'), 0) AS cacheHits
+         FROM provider_requests WHERE execution_id = ? AND endpoint_path = ? GROUP BY providerId ORDER BY providerId`,
+      )
+      .all(executionId, FLIGHT_LIST_ENDPOINT_PATH);
     return {
       calls: total?.calls ?? 0,
       costMicroGbp: total?.cost ?? 0,
@@ -61,6 +72,12 @@ export class LedgerRepo {
         tiles: r.tiles,
         cacheHits: r.cacheHits,
         scrolls: r.scrolls,
+      })),
+      flightLists: flights.map((r) => ({
+        providerId: oneOf('provider_id', PROVIDER_IDS, r.providerId),
+        calls: r.calls,
+        costMicroGbp: r.cost,
+        cacheHits: r.cacheHits,
       })),
     };
   }

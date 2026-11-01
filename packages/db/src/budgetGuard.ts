@@ -4,6 +4,7 @@ import {
   type BudgetScope,
   type Clock,
   type ExecutionBudget,
+  FLIGHT_LIST_ENDPOINT_PATH,
   type IsoDateTime,
   type ProviderId,
   type Reservation,
@@ -73,12 +74,15 @@ WHERE execution_id = @executionId AND provider_id IN (SELECT value FROM json_eac
 /**
  * Spec §2, §5.3 rev 32 `provider-execution`: one provider's page rows in one execution (never cache hits or `no-page`
  * rows), and its cap read from the execution's snapshot (`$.budget.providerMaxCalls.<provider>`), never from config.
+ * Spec rev 55 §8.1 (ruling A32): the rows are split by endpoint path into two allowances, `@flights = 0` the grid or list
+ * pages (this cap) and `@flights = 1` the flight-list pages (`$.budget.flightListPages`); each keeps the `no-page` filter.
  */
 export const PROVIDER_EXECUTION_USAGE_SQL = `
 SELECT COUNT(*) AS calls, COALESCE(SUM(cost_micro_gbp), 0) AS cost
 FROM provider_requests
 WHERE execution_id = @executionId AND provider_id = @providerId AND outcome <> 'cache_hit'
-  AND (@pagesOnly = 0 OR page_class IS NOT 'no-page')`;
+  AND (@pagesOnly = 0 OR page_class IS NOT 'no-page')
+  AND ((endpoint_path = @flightPath) = @flights)`;
 /** Spec §2 rev 34: a provider's scroll clicks in one execution, and in a window (pending rows count their plan). */
 const SCROLLS_EXECUTION_SQL = `
 SELECT COALESCE(SUM(scroll_count), 0) AS n FROM provider_requests WHERE provider_id = @providerId AND execution_id = @executionId`;
@@ -88,6 +92,10 @@ WHERE provider_id = @providerId AND started_at >= @windowStart AND started_at < 
 const PROVIDER_EXECUTION_CAP_SQL = `
 SELECT json_extract(definition_snapshot_json, '$.budget.providerMaxCalls.' || @providerId) AS cap
 FROM search_executions WHERE id = @executionId`;
+/** Spec rev 55 §8.1: the execution's flight-list page allowance, from its snapshot like every per-execution cap. */
+const FLIGHT_LIST_CAP_SQL = `
+SELECT json_extract(definition_snapshot_json, '$.budget.flightListPages') AS cap
+FROM search_executions WHERE id = ?`;
 
 /** Plan Budget port: per-execution caps come from the snapshot budget, never from config at reserve time. */
 const EXECUTION_CAPS_SQL = `
@@ -116,6 +124,7 @@ interface GuardStatements {
   >;
   providerExecutionUsage: Database.Statement<Record<string, unknown>, CallsAndCost>;
   providerExecutionCap: Database.Statement<Record<string, unknown>, { cap: unknown }>;
+  flightListCap: Database.Statement<[string], { cap: unknown }>;
   scrollsExecution: Database.Statement<Record<string, unknown>, { n: number }>;
   scrollsWindow: Database.Statement<Record<string, unknown>, { n: number }>;
 }
@@ -139,6 +148,7 @@ function prepareStatements(db: Db): GuardStatements {
     providerExecutionCap: db.raw.prepare<Record<string, unknown>, { cap: unknown }>(
       PROVIDER_EXECUTION_CAP_SQL,
     ),
+    flightListCap: db.raw.prepare<[string], { cap: unknown }>(FLIGHT_LIST_CAP_SQL),
     scrollsExecution: db.raw.prepare<Record<string, unknown>, { n: number }>(SCROLLS_EXECUTION_SQL),
     scrollsWindow: db.raw.prepare<Record<string, unknown>, { n: number }>(SCROLLS_WINDOW_SQL),
   };
@@ -227,6 +237,11 @@ export class SqliteBudgetGuard implements BudgetGuard {
         windowUsed: true,
         windowStart: null,
         windowEnd: null,
+        // why: spec rev 55 §8.1 (ruling A32): the flight pages are a second entry, counted against their own allowance
+        flightLists: {
+          calls: this.providerExecutionRows(scope.executionId, scope.providerId, budget, true).calls,
+          cap: this.flightListCap(scope.executionId),
+        },
       };
     }
     // why: structural narrowing (arch-r3-002); a union-typed `kind` member is not removed by `kind ===` checks.
@@ -273,9 +288,14 @@ export class SqliteBudgetGuard implements BudgetGuard {
         p.providerId,
       );
     if (p.executionId !== null) {
-      const cap = this.providerExecutionCap(p.executionId, p.providerId);
+      // why: spec rev 55 §8.1 (ruling A32): a flight-list page is checked against the run's flight allowance and a grid
+      // or list page against the page cap, each counting only its own endpoint's rows; both are `provider-execution`
+      const flights = p.endpointPath === FLIGHT_LIST_ENDPOINT_PATH;
+      const cap = flights
+        ? this.flightListCap(p.executionId)
+        : this.providerExecutionCap(p.executionId, p.providerId);
       if (cap !== null) {
-        const u = this.providerExecutionRows(p.executionId, p.providerId, budget);
+        const u = this.providerExecutionRows(p.executionId, p.providerId, budget, flights);
         if (u.calls + 1 > cap) throw this.exceeded('provider-execution', cap, u.calls, 1, p.providerId);
       }
     }
@@ -401,11 +421,14 @@ export class SqliteBudgetGuard implements BudgetGuard {
     executionId: string,
     providerId: ProviderId,
     budget: ProviderBudget,
+    flights = false,
   ): CallsAndCost {
     const row = this.sql.providerExecutionUsage.get({
       executionId,
       providerId,
       pagesOnly: budget.pagesOnly === true ? 1 : 0,
+      flightPath: FLIGHT_LIST_ENDPOINT_PATH,
+      flights: flights ? 1 : 0,
     });
     return { calls: row?.calls ?? 0, cost: row?.cost ?? 0 };
   }
@@ -415,6 +438,16 @@ export class SqliteBudgetGuard implements BudgetGuard {
     const row = this.sql.providerExecutionCap.get({ executionId, providerId });
     if (row === undefined) throw new Error(`execution ${executionId} does not exist; refusing to reserve`);
     return typeof row.cap === 'number' && Number.isInteger(row.cap) && row.cap >= 0 ? row.cap : null;
+  }
+
+  /**
+   * Spec rev 55 §8.1: the run's flight-list page allowance from its snapshot. A snapshot without one allows none (0,
+   * fail closed): a run created before WP20, or by a caller that forgot it, can never read a flight list unmetered.
+   */
+  private flightListCap(executionId: string): number {
+    const row = this.sql.flightListCap.get(executionId);
+    if (row === undefined) throw new Error(`execution ${executionId} does not exist; refusing to reserve`);
+    return typeof row.cap === 'number' && Number.isInteger(row.cap) && row.cap >= 0 ? row.cap : 0;
   }
 
   private executionCaps(executionId: string): ExecutionBudget {

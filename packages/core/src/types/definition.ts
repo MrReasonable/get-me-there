@@ -87,6 +87,13 @@ export interface ExecutionBudget {
    * created and read by the budget guard from the snapshot, never from config at reserve time. Absent: no such cap.
    */
   providerMaxCalls?: Partial<Record<ProviderId, number>>;
+  /**
+   * Spec revision 55 §8.1 (ruling A5): the browser pages one run may spend on flight lists, outside
+   * `providerMaxCalls` (CAMOUFOX_EXECUTION_PAGE_CAP) and inside the provider's monthly cap. Set by the engine when the
+   * execution is created (Task 20.9); optional so a run stored before WP20 still parses, and a snapshot without it
+   * allows no flight page (the guard fails closed).
+   */
+  flightListPages?: number;
 }
 
 export interface ProvidersConfig {

@@ -136,7 +136,61 @@ describe('LedgerRepo (spec §5.3, §7, §8.1 parity)', () => {
       tiles: 0,
       cacheHits: 0,
       perProvider: [],
+      flightLists: [],
     });
+  });
+
+  // Spec rev 55 §8.1 (ruling A32): no new stage value; a flight-list page is told apart by its endpoint path and counted
+  // on its own line, so it is never read as a verification call (it has no tile, like one).
+  it('countsFor: /v1/flights rows are their own flight-list line, never verification, and still count in the totals', () => {
+    const db = freshDb();
+    const { executionId } = rawExecution(db, {
+      maxCalls: 100,
+      maxFreeCalls: 100,
+      maxCostMicroGbp: 100_000,
+      flightListPages: 10,
+    });
+    const guard = new SqliteBudgetGuard(
+      db,
+      budgetConfig({ camoufox: limits({ billable: false, monthlyCallCap: 1500, pagesOnly: true }) }),
+      fixedClock(T0),
+    );
+    const reserve = (endpointPath: string, tileIndex: number | null) =>
+      guard
+        .reserve({
+          providerId: 'camoufox',
+          executionId,
+          tileIndex,
+          costMicroGbp: 0,
+          httpAttempt: 1,
+          endpointPath,
+        })
+        .finalise({ ...ok, pageClass: 'page' });
+    reserve('/v1/page', 0);
+    reserve('/v1/page', 1);
+    reserve('/v1/flights', null);
+    reserve('/v1/flights', null);
+    reserve('/v1/flights', null);
+    guard.recordCacheHit({
+      providerId: 'camoufox',
+      executionId,
+      tileIndex: null,
+      endpointPath: '/v1/flights',
+    });
+    const c = new LedgerRepo(db).countsFor(executionId);
+    expect([c.calls, c.tiles]).toEqual([5, 2]);
+    expect(c.perProvider).toEqual([
+      {
+        providerId: 'camoufox',
+        stage: 'discovery',
+        calls: 2,
+        costMicroGbp: 0,
+        tiles: 2,
+        cacheHits: 0,
+        scrolls: 0,
+      },
+    ]);
+    expect(c.flightLists).toEqual([{ providerId: 'camoufox', calls: 3, costMicroGbp: 0, cacheHits: 1 }]);
   });
 
   it('pruneCacheHits removes only cache_hit rows older than the cutoff for the named providers', () => {

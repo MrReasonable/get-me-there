@@ -45,6 +45,8 @@ function build(o: {
   executionScrollCap?: number;
   monthlyScrollCap?: number;
   snapshotCaps: Record<string, Partial<Record<'camoufox', number>>>;
+  /** Spec rev 55 §8.1: per execution, the snapshot's `budget.flightListPages`; an execution not named has none. */
+  snapshotFlightPages?: Record<string, number>;
 }) {
   const config = configFrom(camoufoxEnv(o));
   const db = freshDb();
@@ -62,6 +64,7 @@ function build(o: {
       maxFreeCalls: config.spend.executionMaxFreeCalls,
       maxCostMicroGbp: 0,
       providerMaxCalls: caps,
+      ...(o.snapshotFlightPages?.[id] === undefined ? {} : { flightListPages: o.snapshotFlightPages[id] }),
     };
     db.raw
       .prepare(
