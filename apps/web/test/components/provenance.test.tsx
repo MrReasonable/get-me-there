@@ -156,7 +156,8 @@ describe('Provenance shows source and age without hover (spec §11)', () => {
     expect(
       screen.getByText('approximately (converted to GBP at the 2026-10-13 rate (frankfurter))'),
     ).toHaveClass('sr-only');
-    expect(screen.getByText('stale')).toBeInTheDocument();
+    // the stale mark's words (spec rev 55 §3): a calendar price under the per-price rule
+    expect(screen.getByText("older than this search's refresh")).toBeInTheDocument();
     expect(screen.getByTestId('provenance').className).toContain('border-dashed');
     expect(screen.getByText('constraints not checked')).toBeInTheDocument();
     expect(screen.getByText('Aviasales cache')).toBeInTheDocument();
@@ -243,12 +244,12 @@ describe('Provenance shows source and age without hover (spec §11)', () => {
       <PriceCell pricePence={41200} provenance={searchProvenance} calendar={false} stale={false} />,
     );
     expect(screen.getByText("vendor's cache age unknown")).toBeInTheDocument();
-    expect(screen.queryByText('stale')).toBeNull();
+    expect(screen.queryByText(/stale|older than/)).toBeNull();
   });
 
-  it('a stale price with a known age says "stale" and carries no unknown-age label', () => {
+  it('a stale price with a known age carries the stale mark’s words and no unknown-age label', () => {
     renderWithProviders(<PriceCell pricePence={39950} provenance={calendarProvenance} calendar stale />);
-    expect(screen.getByText('stale')).toBeInTheDocument();
+    expect(screen.getByText("older than this search's refresh")).toBeInTheDocument();
     expect(screen.queryByText("vendor's cache age unknown")).toBeNull();
   });
 
@@ -258,7 +259,10 @@ describe('Provenance shows source and age without hover (spec §11)', () => {
     );
     const amount = screen.getByTestId('price-cell').firstElementChild;
     const marks = [...(amount?.querySelectorAll('span') ?? [])].map((m) => m.textContent);
-    expect(marks.slice(0, 2)).toEqual(['price not confirmed by the final step', 'stale']);
+    expect(marks.slice(0, 2)).toEqual([
+      'price not confirmed by the final step',
+      'older than your stale setting',
+    ]);
   });
 
   it('compact (ruling 3): amount with "≈", provider badge, destination, marks and a visible age line; the long form in the title', () => {
@@ -279,7 +283,7 @@ describe('Provenance shows source and age without hover (spec §11)', () => {
     expect(cell).toHaveTextContent('≈');
     expect(within(cell).getByText('TP')).toBeInTheDocument();
     expect(within(cell).getByText('EWR')).toBeInTheDocument();
-    expect(within(cell).getByText('stale')).toBeInTheDocument();
+    expect(within(cell).getByText("older than this search's refresh")).toBeInTheDocument();
     expect(within(cell).getByText('cheapest of the rows read')).toBeInTheDocument();
     expect(within(cell).getByText('price not confirmed by the final step')).toBeInTheDocument();
     expect(within(cell).queryByText('Aviasales cache')).toBeNull();

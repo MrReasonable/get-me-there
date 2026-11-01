@@ -50,6 +50,8 @@ export const qk = {
   estimateDraft: (definitionId: string | null, bodyKey: string) =>
     ['estimate', 'draft', definitionId ?? '', bodyKey] as const,
   refusal: (id: string) => ['refusal', id] as const,
+  // WP20 Task 20.6: the run the status bar polls (written by the bar, observed by a search's page; never fetched)
+  barRun: ['bar-run'] as const,
   // WP10
   cell: (id: string, key: string | null) => ['cell', id, key] as const,
   itineraryHistory: (hash: string | null) => ['history', 'itinerary', hash] as const,
@@ -183,14 +185,18 @@ export function useDefinitions() {
 
 /**
  * The first screen's read (spec rev 55 §10, §11): the cards in the served order. It re-reads at the status bar's poll
- * interval only while a card's latest run is pending or running, and idles otherwise.
+ * interval only while a card's latest run is pending or running, and idles otherwise; `poll: false` never re-reads by
+ * itself.
  */
-export function useCards() {
+export function useCards(opts: { poll?: boolean } = {}) {
+  const { poll = true } = opts;
   return useQuery({
     queryKey: qk.cards,
     queryFn: () => api.cards(),
+    // why: WP20 Task 20.6 — a search's page reads its card once (and again when an action refreshes the cards) for the
+    // api's `spaceChangedSince`; it never polls the cards, which the first screen and the bar do for themselves
     refetchInterval: (query) =>
-      query.state.data?.cards.some((c) => c.latestRun !== null && POLLING.has(c.latestRun.status))
+      poll && query.state.data?.cards.some((c) => c.latestRun !== null && POLLING.has(c.latestRun.status))
         ? POLL_MS
         : false,
   });
@@ -263,14 +269,39 @@ export const DATES_RESPONSE_MARK = 'gmt:dates-response';
 export const DATES_DRAWN_MARK = 'gmt:dates-drawn';
 
 /**
- * The status bar's execution query as an observer only (WP19 Task 19.4: "same key, no second poll"): the Dates view
- * reads the run's status and progress from it to time its re-reads, and leaves the polling to the status bar.
+ * Spec rev 55 §11 (WP20 Task 20.6; ruling B7, arch-r2-014): a search's page observes its latest parent run through the
+ * status bar's shared query when that run is the one the bar polls (`activeId`: same key, no second poll), else through
+ * a poll of its own every POLL_MS while the run is pending or running, so a search whose run the bar is not showing still
+ * sees its searching line and `estimatedFinishAt` move. One query either way, keyed by the run.
  */
-export function useExecutionWatch(id: string | null) {
+export function useLatestRun(id: string | null, activeId: string | null) {
+  const shared = id !== null && id === activeId;
   return useQuery({
     queryKey: qk.execution(id ?? ''),
     queryFn: id === null ? skipToken : () => api.execution(id),
+    refetchInterval: (query) =>
+      !shared && query.state.data !== undefined && POLLING.has(query.state.data.status) ? POLL_MS : false,
   });
+}
+
+/**
+ * The run the status bar polls, as the bar last said (null when it polls none). An observer only: it never fetches.
+ * why: the bar and a view are siblings in the shell, so the bar's choice travels through the query cache, which both
+ * already share, rather than a context the views would need wrapped around them in every test.
+ */
+export function useBarRunId(): string | null {
+  return useQuery<string | null>({ queryKey: qk.barRun, queryFn: skipToken, enabled: false }).data ?? null;
+}
+
+/** The status bar says which run it polls (`id`), and that it polls none once it unmounts or moves on. */
+export function usePublishBarRun(id: string | null): void {
+  const qc = useQueryClient();
+  useEffect(() => {
+    qc.setQueryData<string | null>(qk.barRun, id);
+    return () => {
+      if (qc.getQueryData<string | null>(qk.barRun) === id) qc.setQueryData<string | null>(qk.barRun, null);
+    };
+  }, [qc, id]);
 }
 
 /** View D and the status bar's "schedule blocked since" (coverage.scheduleBlockedSince). */

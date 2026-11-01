@@ -2,8 +2,9 @@ import type { DatePair } from '@gmt/core';
 import { COPY } from '../../copy.js';
 import { formatMinutes } from '../../format.js';
 
-// Spec §11 "How far checked", from the date pair's own counts: whether its figure is class verified or a calendar
-// price; whether its cells were itinerary-searched, selected but not reached, or not selected; its partially-verified
+// Spec §11 "How far checked", from the date pair's own counts, in spec rev 55 §3's main-path words: whether its figure
+// is class verified (checked fares) or a calendar price (and from which source); whether its airport pairs had their
+// fares checked, were selected but not reached, or not selected; its partially-verified
 // and unconfirmed prices; its airport pairs without a price, by bucket; "price from an earlier search" exactly when
 // the figure says so (revision 50); a truncated read. Never the "searched" umbrella and never a word claiming
 // completeness; "verified" only beside a class-verified figure. Pure: words from the catalogue, no DOM.
@@ -21,7 +22,8 @@ export function howFarChecked(pair: DatePair, airportPairs: number, journeyLimit
   const out: string[] = [];
   const f = pair.figure;
   if (f !== null) {
-    out.push(f.basis === 'verified' ? H.verified : H.calendar);
+    // why: spec rev 55 §3 — no "calendar basis" on the main path: a calendar price names the source it came from
+    out.push(f.basis === 'verified' ? H.verified : H.calendar(H.calendarFrom[f.price.provenance.providerId]));
     if (f.price.truncated) out.push(H.cutShort);
     if (f.fromEarlierSearch) out.push(H.earlierSearch);
   } else if (pair.journeyLeftOut > 0 && journeyLimit !== null) {

@@ -525,7 +525,7 @@ describe('History view (spec §11 History, §10 history routes; plan decision 38
     expect(rows[0]).toHaveTextContent('cheapest of the rows read');
     expect(rows[0]).toHaveTextContent('cheapest searched cell LHR→JFK Sun 21 Mar–Sun 4 Apr');
     expect(rows[0]).toHaveTextContent('a different cell from the previous point');
-    expect(rows[1]).toHaveTextContent('stale');
+    expect(rows[1]).toHaveTextContent("older than this search's refresh");
     const routeTable = getByRole('table', { name: /^Google's price history for 10–20 Mar/ });
     expect(
       within(routeTable).getAllByText(

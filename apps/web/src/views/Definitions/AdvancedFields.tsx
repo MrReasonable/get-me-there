@@ -1,4 +1,4 @@
-import { microGbpToPence, PENCE_TO_MICRO, type ProviderId } from '@gmt/core';
+import { mainPathSource, microGbpToPence, PENCE_TO_MICRO, type ProviderId } from '@gmt/core';
 import { PLAN_COPY } from '../../copy/plan.js';
 import { SETUP_COPY } from '../../copy/setup.js';
 import { COPY } from '../../copy.js';
@@ -62,6 +62,7 @@ export function AdvancedFields({
     <div className="space-y-5">
       <fieldset className="def-fold-group flex flex-wrap items-start gap-4">
         <legend className="def-fold-legend">{COPY.constraintsHeading}</legend>
+        <p className="hint w-full">{D.constraintsHint}</p>
         <NumberField
           id="c-maxStops"
           label={COPY.constraint.maxStops}
@@ -152,7 +153,7 @@ export function AdvancedFields({
         />
       </fieldset>
       <fieldset className="def-fold-group flex flex-wrap items-start gap-4">
-        <legend className="def-fold-legend">{COPY.providersSection}</legend>
+        <legend className="def-fold-legend">{D.providersHeading}</legend>
         <span className="flex flex-col">
           <span className="field-label">{D.discoveryProviders}</span>
           {capabilities
@@ -161,7 +162,8 @@ export function AdvancedFields({
               <Check
                 key={p.id}
                 id={`p-d-${p.id}`}
-                label={p.displayName}
+                // why: spec rev 55 §3 — the main path names a source by core's one table, never its product name
+                label={D.sourceLabel(mainPathSource(p.id))}
                 checked={draft.providers.discovery.includes(p.id)}
                 onChange={(b) => toggleProvider('discovery', p.id, b)}
               />
@@ -175,7 +177,7 @@ export function AdvancedFields({
               <Check
                 key={p.id}
                 id={`p-v-${p.id}`}
-                label={p.displayName}
+                label={D.sourceLabel(mainPathSource(p.id))}
                 checked={draft.providers.verification.includes(p.id)}
                 onChange={(b) => toggleProvider('verification', p.id, b)}
               />
@@ -185,7 +187,8 @@ export function AdvancedFields({
           <NumberField
             key={id}
             id={`p-refresh-${id}`}
-            label={COPY.refreshHours(COPY.provider[id])}
+            label={D.refreshLabel(mainPathSource(id))}
+            description={D.refreshHint}
             value={draft.providers.discoveryRefreshHours[id]}
             onChange={(n) =>
               setDraft({
@@ -264,12 +267,14 @@ export function AdvancedFields({
         <NumberField
           id="b-free"
           label={COPY.maxFreeCalls}
+          description={D.maxFreeCallsHint}
           value={draft.budget.maxFreeCalls}
           onChange={(n) => setDraft({ ...draft, budget: { ...draft.budget, maxFreeCalls: n ?? 0 } })}
         />
         <PoundsField
           id="b-cost"
           label={COPY.maxCost}
+          description={D.maxCostHint}
           pence={microGbpToPence(draft.budget.maxCostMicroGbp)}
           onChange={(p) =>
             setDraft({ ...draft, budget: { ...draft.budget, maxCostMicroGbp: (p ?? 0) * PENCE_TO_MICRO } })

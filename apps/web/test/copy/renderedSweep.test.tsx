@@ -20,6 +20,7 @@ import {
 import { poundsOutsidePrices, renderedCopy } from '../guards.js';
 import { server } from '../msw/server.js';
 import { drawn, renderWithProviders } from '../render.js';
+import { jargonIn, mainPathWords } from '../views/dates/jargon.js';
 
 /**
  * One landmark per view that exists only once the view's data has rendered, so the sweep cannot pass over a view that
@@ -91,6 +92,28 @@ describe('rendered views contain no banned word, and no "£" outside a price or 
       const hits = findBannedWords(renderedCopy(), BANNED_WORD_ALLOWLIST);
       expect(hits.map((h) => h.word)).toEqual([]);
       expect(poundsOutsidePrices()).toEqual([]);
+    });
+  }
+});
+
+describe('the main path in the shell says no set-up term (spec rev 55 §3, §11; WP20 Task 20.6)', () => {
+  // why: the first screen, a search's page and the Edit page with its More options, each with the status bar and the
+  // nav around it, as the shell draws them; provenance notes (inside a PriceCell) keep their source names
+  const MAIN = [
+    ['searches', ''],
+    ['dates', ''],
+    ['definitions', '&edit=def-0001'],
+  ] as const;
+  for (const [view, extra] of MAIN) {
+    it(`view=${view}`, async () => {
+      const { user } = renderWithProviders(<App />, { search: `?view=${view}&def=def-0001${extra}` });
+      await screen.findByRole('navigation', { name: 'Views' });
+      await waitFor(() => expect(screen.queryByText('Loading…')).toBeNull());
+      await CONTENT[view]();
+      if (view === 'definitions') await user.click(await screen.findByText(PLAN_COPY.moreOptions));
+      // the status bar's run is in on a search's view (on Searches it shows a run only when one is going or stopped)
+      if (view !== 'searches') await screen.findByRole('region', { name: COPY.statusBarLabel });
+      expect(jargonIn(mainPathWords())).toEqual([]);
     });
   }
 });

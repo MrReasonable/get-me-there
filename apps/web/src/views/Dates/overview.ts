@@ -9,13 +9,16 @@ import {
   type IsoMonth,
   monthOf,
   type NightsBand,
+  type ReducedMark,
+  reducedMark,
 } from '@gmt/core';
 import { monthDays, weekdayIndex } from '../../format.js';
 import { type Band, isCurrent, type QuintileScale } from './shade.js';
 
-// The overview's model (spec §11 Dates "Overview"): the window's months, each day's strip of stay-length (or folded
-// band) cells, and what each cell shows: its shade (one scale, current figures only), or the mark of its bucket by
-// §6.6's precedence, with the striped "partly not searched" mark and the figure marks. Pure: no clock, no DOM.
+// The overview's model (spec §11 Dates "Overview"; spec rev 55 §3, §6.6, WP20 Task 20.6): the window's months, each
+// day's strip of stay-length (or folded band) cells, and what each cell shows: its shade (one scale, current figures
+// only), or one of the five marks of core's `reducedMark` (imported, never re-implemented: ruling A8), with the striped
+// "partly not searched" mark and the figure marks. Pure: no clock, no DOM.
 
 /** Monday-first weeks of one month, null for padding (moved from the Calendar view's grid, WP19 §4). */
 export function weeksOf(month: IsoMonth): Array<Array<IsoDate | null>> {
@@ -45,15 +48,20 @@ export function monthsOf(space: Pick<DatePairSpace, 'departureFrom' | 'departure
   }
 }
 
-/** The six buckets of spec §3, and the order the legend lists the unpriced ones (moved from the Calendar's display). */
+/** The six buckets of spec §3 (the coverage section's; the main path shows the five marks below them). */
 export type BucketName = 'priced' | 'empty' | 'no_data' | 'error' | 'skipped' | 'not_run';
-export const GLYPH_ORDER = [
-  'empty',
-  'no_data',
-  'error',
-  'skipped',
-  'not_run',
-] as const satisfies readonly BucketName[];
+
+/**
+ * Spec rev 55 §3, §6.6, §11: the five marks of the month key, in the order the key lists them: priced (shaded), no
+ * price shown (no fares and no cached data), couldn't be read (error), not reached (skipped), not searched (not run).
+ */
+export const KEY_MARKS = [
+  'priced',
+  'no-price-shown',
+  'couldnt-read',
+  'not-reached',
+  'not-searched',
+] as const satisfies readonly ReducedMark[];
 
 /**
  * §6.6's roll-up precedence over a date pair's airport pairs (their buckets as counts): any priced, then any not
@@ -71,13 +79,14 @@ export function bucketOf(b: Buckets): BucketName | null {
 }
 
 /**
- * Every non-colour mark a cell can carry (spec §11 Overview): one per unpriced bucket ("not searched" only when every
- * airport pair is), the striped "partly not searched", the figure's "not checked" (a calendar price), "superseded" and
- * "not seen", "none within <limit>" (every price left out for a known journey time), and "unshown" (a price was found
- * but none can be the figure: partially verified, unconfirmed or failed).
+ * Every mark the key names (spec rev 55 §11 Overview): the five marks of `reducedMark` (a priced cell is shown by its
+ * shade; every other one by its glyph), the striped "partly not searched" (some airport pairs in scope not searched,
+ * whatever the mark), the figure's "not checked" (a calendar price), "superseded" and "not seen", "none within <limit>"
+ * (every price left out for a known journey time), and "unshown" (a price was found but none can be the figure:
+ * partially verified, unconfirmed or failed).
  */
 export type Mark =
-  | (typeof GLYPH_ORDER)[number]
+  | (typeof KEY_MARKS)[number]
   | 'partly'
   | 'notChecked'
   | 'superseded'
@@ -85,7 +94,7 @@ export type Mark =
   | 'noneWithin'
   | 'unshown';
 export const MARK_ORDER: readonly Mark[] = [
-  ...GLYPH_ORDER,
+  ...KEY_MARKS,
   'partly',
   'notChecked',
   'superseded',
@@ -93,6 +102,9 @@ export const MARK_ORDER: readonly Mark[] = [
   'noneWithin',
   'unshown',
 ];
+/** The marks a cell draws as a glyph or pattern: every mark but priced, which is its shade. */
+export type CellMark = Exclude<Mark, 'priced'>;
+export const CELL_MARKS: readonly CellMark[] = MARK_ORDER.filter((m): m is CellMark => m !== 'priced');
 
 /** One cell of a day's strip: a single stay length, or a folded band of them. */
 export interface Column {
@@ -125,7 +137,9 @@ export interface CellModel {
   lead: DatePair | null;
   /** The shade: a band, the flat shade, or null (unshaded: no figure, or one off the scale). */
   shade: Band | 'flat' | null;
-  marks: Mark[];
+  /** The cell's one of the five marks, core's `reducedMark` over its summed buckets; null with no airport pair in scope. */
+  mark: ReducedMark | null;
+  marks: CellMark[];
   /** The six buckets summed over the cell's date pairs. */
   buckets: Buckets;
 }
@@ -146,11 +160,12 @@ function sum(pairs: readonly DatePair[]): Buckets {
 }
 
 /**
- * A cell's model (spec §11 Overview, revision 50): a cell with a current figure is shaded on the one scale (a band
- * cell by its cheapest current figure), and a calendar figure also carries "not checked"; a superseded or not-seen
- * figure is drawn with its mark on a neutral fill, never on the scale; a cell without a figure carries its bucket's
- * mark by §6.6's precedence, never a shade; "not searched" only when every airport pair of it is not searched, and the
- * striped "partly not searched" whenever some (but not all) are, priced or not.
+ * A cell's model (spec §11 Overview, revision 50; spec rev 55 §6.6): a cell with a current figure is shaded on the one
+ * scale (a band cell by its cheapest current figure), and a calendar figure also carries "not checked"; a superseded or
+ * not-seen figure is drawn with its mark on a neutral fill, never on the scale; a cell without a figure carries its one
+ * of the five marks (core's `reducedMark` over its airport pairs), never a shade, so one empty airport pair and three
+ * not searched is "not searched", never "no price shown"; and the striped "partly not searched" whenever some (but not
+ * all) of its airport pairs are not searched, priced or not.
  */
 export function cellModel(
   pairs: readonly DatePair[],
@@ -165,7 +180,9 @@ export function cellModel(
   const total =
     buckets.priced + buckets.empty + buckets.no_data + buckets.error + buckets.skipped + buckets.not_run;
   const partly = buckets.not_run > 0 && buckets.not_run < total;
-  const marks: Mark[] = [];
+  // why: a cell with no airport pair in scope has no mark at all (core reads an empty bucket set as not searched)
+  const mark = total === 0 ? null : reducedMark(buckets);
+  const marks: CellMark[] = [];
   let shade: CellModel['shade'] = null;
   const f = lead?.figure ?? null;
   if (f !== null) {
@@ -174,19 +191,16 @@ export function cellModel(
     else marks.push(f.superseded ? 'superseded' : 'notSeen');
     if (f.basis === 'calendar') marks.push('notChecked');
     if (partly) marks.push('partly');
-    return { pairs: [...pairs], lead, shade, marks, buckets };
+    return { pairs: [...pairs], lead, shade, mark, marks, buckets };
   }
   if (pairs.some((p) => p.journeyLeftOut > 0)) marks.push('noneWithin');
-  const b = bucketOf(buckets);
-  if (b === 'priced') {
+  if (mark === 'priced') {
     if (!marks.includes('noneWithin')) marks.push('unshown');
-  } else if (b === 'not_run') {
-    marks.push(partly ? 'partly' : 'not_run');
-  } else if (b !== null) {
-    marks.push(b);
+  } else if (mark !== null) {
+    marks.push(mark);
   }
-  if (partly && b !== 'not_run') marks.push('partly');
-  return { pairs: [...pairs], lead, shade, marks, buckets };
+  if (partly) marks.push('partly');
+  return { pairs: [...pairs], lead, shade, mark, marks, buckets };
 }
 
 /** The date pairs of a cell on `date` for `column`, from the decoded pairs in index order (none outside the space). */
@@ -208,18 +222,47 @@ export function pairsAt(
   return out;
 }
 
-/** Each mark's count over the date pairs in view, one date pair at a time (the legend's numbers). */
+/**
+ * The key's five counts (spec rev 55 §11 Overview legend): each date pair in view once, by core's `reducedMark`, so
+ * they are the same counts as the header line and the card (`datePairSearched` is priced or no price shown).
+ */
+export function keyCounts(pairs: readonly DatePair[]): Record<ReducedMark, number> {
+  const counts: Record<ReducedMark, number> = {
+    priced: 0,
+    'no-price-shown': 0,
+    'couldnt-read': 0,
+    'not-reached': 0,
+    'not-searched': 0,
+  };
+  for (const p of pairs) counts[reducedMark(p.buckets)] += 1;
+  return counts;
+}
+
+/**
+ * "No price shown" named by its parts ("12 no fares, 3 no cached data"): each date pair the key counts as no price
+ * shown, by its §6.6 precedence bucket (no fares before no cached data), so the parts sum to that mark's count.
+ */
+export function noPriceParts(pairs: readonly DatePair[]): { empty: number; no_data: number } {
+  const parts = { empty: 0, no_data: 0 };
+  for (const p of pairs) {
+    if (reducedMark(p.buckets) !== 'no-price-shown') continue;
+    if (bucketOf(p.buckets) === 'empty') parts.empty += 1;
+    else parts.no_data += 1;
+  }
+  return parts;
+}
+
+/** Each cell mark's count over the date pairs in view, one date pair at a time (the key's other numbers). */
 export function markCounts(
   pairs: readonly DatePair[],
   rankOf: ReadonlyMap<number, number>,
   scale: QuintileScale,
-): Record<Mark, number> {
-  const counts: Record<Mark, number> = {
-    empty: 0,
-    no_data: 0,
-    error: 0,
-    skipped: 0,
-    not_run: 0,
+): Record<CellMark, number> {
+  const counts: Record<CellMark, number> = {
+    'no-price-shown': 0,
+    'couldnt-read': 0,
+    'not-reached': 0,
+    'not-searched': 0,
     partly: 0,
     notChecked: 0,
     superseded: 0,

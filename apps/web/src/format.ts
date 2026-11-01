@@ -262,7 +262,11 @@ const LONDON_PARTS = new Intl.DateTimeFormat('en-GB', {
   hourCycle: 'h23',
 });
 
-function londonParts(ms: number): { date: string; time: string } {
+/**
+ * Epoch ms → its London calendar date (`YYYY-MM-DD`) and its 24-hour time (`HH:MM`): the one split a search's page
+ * words an instant by ("Searched today 09:12–11:41", a flight read's "yesterday 11:44"; WP20 Task 20.6).
+ */
+export function londonParts(ms: number): { date: string; time: string } {
   // why: one formatToParts per instant (tables format a row per point), not one per field (review arch M6)
   const byType = new Map(LONDON_PARTS.formatToParts(ms).map((p) => [p.type, p.value]));
   const part = (type: Intl.DateTimeFormatPartTypes) => byType.get(type) ?? '';

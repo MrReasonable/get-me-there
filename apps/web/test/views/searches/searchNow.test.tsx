@@ -310,7 +310,9 @@ describe('the page’s words for a refused Search now (spec rev 55 §11; Review 
 
   it('an unknown refused= value is ignored, never an error (spec §11 URLs)', async () => {
     renderRefused('nonsense');
-    expect(await screen.findByText(COPY.datesView.neverRun)).toBeInTheDocument();
+    expect(
+      await screen.findByText(COPY.searchPage.notSearchedYet, { selector: 'p.font-bold' }),
+    ).toBeInTheDocument();
     for (const words of [R.disabled, R.cap, R.window, R['shutting-down'], R.failed, R.confirm])
       expect(screen.queryByText(words)).toBeNull();
   });

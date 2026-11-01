@@ -1,4 +1,11 @@
-import { effectiveAge, formatAgeFull, formatAgeShort, formatFetchedAgo, sourceLabel } from '@gmt/core';
+import {
+  effectiveAge,
+  formatAgeFull,
+  formatAgeShort,
+  formatFetchedAgo,
+  sourceLabel,
+  staleMarkText,
+} from '@gmt/core';
 import { COPY } from '../copy.js';
 import { Flaps } from '../flaps/Flaps.js';
 import { formatPence } from '../format.js';
@@ -62,8 +69,9 @@ const badge = 'tag ml-1';
 /**
  * The only component that prints a price (spec §11, §9 item 6); wrap it in PriceBoundary. The "≈"
  * sits on the amount, so a converted price can never be read as exact. An unconfirmed price says so
- * first; a stale one says "stale"; a price whose vendor age is unknown is labelled, not called stale
- * (decision 44: staleness is by fetch age).
+ * first; a stale one carries the stale mark's words, only when it is stale (spec rev 55 §3: core's `staleMarkText`,
+ * "older than this search's refresh" on a calendar price, "older than your stale setting" on the verified basis); a
+ * price whose vendor age is unknown is labelled, not called stale (decision 44: staleness is by fetch age).
  */
 export function PriceCell(props: PriceCellProps) {
   const now = useNow();
@@ -74,6 +82,9 @@ export function PriceCell(props: PriceCellProps) {
   const notSeen = props.notSeenInLatestHours ?? null;
   const compact = props.compact === true;
   const calendar = isCalendarPrice(p, props.calendar);
+  // why: the wire carries `stale` alone, not whether CALENDAR_STALE_AFTER_HOURS judged it (spec rev 55 §10 dropped
+  // that field), so a calendar price reads the per-price rule's words; see the WP20 Task 20.6 report's concerns
+  const staleWords = staleMarkText({ basis: calendar ? 'calendar' : 'verified', override: false });
   const detail = [
     COPY.provider[p.providerId],
     props.sourceLabel ?? sourceLabel(p),
@@ -84,7 +95,7 @@ export function PriceCell(props: PriceCellProps) {
     const G = COPY.priceMarkGlyph;
     const marks = [
       ...(props.unconfirmed === true ? [{ glyph: G.unconfirmed, words: COPY.priceNotConfirmed }] : []),
-      ...(props.stale ? [{ glyph: G.stale, words: COPY.stale }] : []),
+      ...(props.stale ? [{ glyph: G.stale, words: staleWords }] : []),
       ...(props.truncated === true ? [{ glyph: G.truncated, words: COPY.truncatedNote }] : []),
       ...(props.superseded === true ? [{ glyph: G.superseded, words: COPY.superseded }] : []),
       ...(notSeen !== null ? [{ glyph: G.notSeen, words: COPY.notSeenInLatest(COPY.agoOf(notSeen)) }] : []),
@@ -170,7 +181,7 @@ export function PriceCell(props: PriceCellProps) {
         {props.unconfirmed === true ? (
           <span className={`${badge} tag-bad`}>{COPY.priceNotConfirmed}</span>
         ) : null}
-        {props.stale ? <span className={`${badge} tag-warn`}>{COPY.stale}</span> : null}
+        {props.stale ? <span className={`${badge} tag-warn`}>{staleWords}</span> : null}
         {age.kind === 'unknown' ? <span className={`${badge} tag-dim`}>{COPY.vendorAgeUnknown}</span> : null}
       </span>
       {compact ? (

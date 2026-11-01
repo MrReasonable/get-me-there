@@ -16,6 +16,7 @@ import {
   useCoverage,
   useExecution,
   useExecutionActions,
+  usePublishBarRun,
   useResults,
 } from '../api/queries.js';
 import { failureOf, useStatus } from '../api/statusQuery.js';
@@ -268,6 +269,8 @@ function RunStatus({
   const latestId = executionId ?? executions.find((x) => !x.isChild)?.id ?? null;
   const child = executions.find((x) => x.isChild && ACTIVE.has(x.status)) ?? null;
   const execution = useExecution(latestId);
+  // why: WP20 Task 20.6 — a search's page shares this poll when it shows the same run, and polls its own run otherwise
+  usePublishBarRun(latestId);
   const coverage = useCoverage(executionId === null ? definitionId : null);
   const actions = useExecutionActions();
   const qc = useQueryClient();

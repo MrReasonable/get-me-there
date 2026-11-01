@@ -7,13 +7,18 @@ import {
 } from '@gmt/core';
 import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { ApiError } from '../../api/client.js';
-import { DATES_DRAWN_MARK, useDatePairs, useExecutionWatch, useProvidersWatch } from '../../api/queries.js';
+import {
+  DATES_DRAWN_MARK,
+  useBarRunId,
+  useCards,
+  useDatePairs,
+  useLatestRun,
+  useProvidersWatch,
+} from '../../api/queries.js';
 import type { DefinitionResponse, ExecutionResponse } from '../../api/types.js';
 import { LoadError } from '../../components/LoadState.js';
-import { fixNamesResume, stopOrNone } from '../../components/StopWords.js';
 import { SyntheticBanner } from '../../components/SyntheticBanner.js';
 import { COPY } from '../../copy.js';
-import { coverageLineText } from '../../lib/coverageLine.js';
 import { useNow } from '../../now.js';
 import { type DatesUiState, filtersActive, parseDatesState, scopeQuery } from '../../state/datesState.js';
 import { writeLastSearch } from '../../state/lastSearch.js';
@@ -26,14 +31,12 @@ import { Filters } from './Filters.js';
 import { type Animate, browserAnimate } from './flip.js';
 import { Overview } from './OverviewGrid.js';
 import { changeCount, IDLE, onProgress, onTerminal, onTimer, type Reread, readDecision } from './refresh.js';
-import { NeverRun, NoPriceInFilters, NoSearch, Paused, Refused, TooManyCells } from './States.js';
-import { countsOf } from './stayScope.js';
+import { NoPriceInFilters, NoSearch, TooManyCells } from './States.js';
+import { bucketsUnder, countsClauses } from './stateLines.js';
 import { UpdateBoard } from './UpdateBoard.js';
 
 const D = COPY.datesView;
 const RUNNING: ReadonlySet<string> = new Set(IN_FLIGHT_STATUSES);
-const PAUSED: ReadonlySet<string> = new Set(['paused_budget', 'paused_error']);
-const RESUMABLE: ReadonlySet<string> = new Set(['paused_budget', 'paused_error', 'interrupted']);
 
 /** A clock and a timer the run re-reads go through; tests inject both (WP19 §0: no fixed waits, injected clocks). */
 export interface RereadClock {
@@ -122,8 +125,14 @@ function DatesOf({
   );
 
   const executionId = (track.shown ?? track.pending)?.data.executionId ?? null;
-  const watch = useExecutionWatch(executionId);
+  // why: spec rev 55 §11 — the latest run through the status bar's query when the bar polls it, else its own poll
+  const watch = useLatestRun(executionId, useBarRunId());
   const run: ExecutionResponse | undefined = watch.data?.id === executionId ? watch.data : undefined;
+  // why: whether the space changed since that run started is the api's own judgement (its card's spaceChangedSince,
+  // the same line the card says), never inferred from the search's updatedAt, which a Repeat weekly save also moves
+  const card = useCards({ poll: false }).data?.cards.find((c) => c.id === definition.id);
+  const spaceChanged =
+    card?.spaceChangedSince === true && card.latestRun !== null && card.latestRun.id === executionId;
   const latest = track.shown?.data.executions.find((e) => !e.isChild);
   const status = run?.status ?? latest?.status;
   const runActive = status !== undefined && RUNNING.has(status);
@@ -192,23 +201,26 @@ function DatesOf({
       {data !== null && providers.data?.synthetic !== true && isSyntheticRead(data, run) ? (
         <SyntheticBanner />
       ) : null}
-      <DatesHeader definition={definition} data={data} model={model} state={state} run={run} now={now} />
-      <Filters definition={definition} state={state} />
-      <p role="status" className="sr-only">
-        {track.message}
-      </p>
       {/* why: the refusal speaks only while the search has no run: once a press starts one, the page shows that run */}
-      {refused !== null && data !== null && data.executions.length === 0 ? (
-        <Refused definitionId={definition.id} code={refused} />
-      ) : null}
-      <Body
+      <DatesHeader
         definition={definition}
-        refused={refused !== null}
-        query={query}
         data={data}
         model={model}
         state={state}
         run={run}
+        now={now}
+        refused={refused}
+        spaceChanged={spaceChanged}
+      />
+      <Filters definition={definition} state={state} />
+      <p role="status" className="sr-only">
+        {track.message}
+      </p>
+      <Body
+        query={query}
+        data={data}
+        model={model}
+        state={state}
         runActive={runActive}
         board={(m, d) => (
           <BoardTable
@@ -254,26 +266,23 @@ function refusalOf(v: string | null): StartRefusalCode | null {
   return apiContract.startRefusalCodes.find((c) => c === v) ?? null;
 }
 
-/** The board's place: the state the read is in (spec §11 States), or the board itself. */
+/**
+ * The board's place: the state the read is in (spec §11 States), or the board itself. A never-searched search shows no
+ * board (its state line says so, with Search now, and the overview marks every date pair not searched); a stopped run's
+ * board shows the prices found before the stop (its state line says why).
+ */
 function Body({
-  definition,
-  refused,
   query,
   data,
   model,
   state,
-  run,
   runActive,
   board,
 }: {
-  definition: DefinitionResponse;
-  /** A refused Search now is being worded above: its own press replaces the never-run state's. */
-  refused: boolean;
   query: ReturnType<typeof useDatePairs>;
   data: DecodedDatePairs | null;
   model: BoardModel | null;
   state: DatesUiState;
-  run: ExecutionResponse | undefined;
   runActive: boolean;
   board: (m: BoardModel, d: DecodedDatePairs) => ReactNode;
 }) {
@@ -291,10 +300,7 @@ function Body({
       </p>
     );
   }
-  if (data.executions.length === 0) return refused ? null : <NeverRun definition={definition} />;
-  const latest = data.executions.find((e) => !e.isChild);
-  const status = run?.status ?? latest?.status;
-  const counts = countsOf(model.inView);
+  if (data.executions.length === 0) return null;
   const onDemand = data.executions.filter((e) => e.isChild).length;
   return (
     <>
@@ -302,19 +308,12 @@ function Body({
       {data.executionId === null ? (
         <p className="plate notice font-semibold">{D.onDemandOnly(onDemand)}</p>
       ) : null}
-      {latest !== undefined && status !== undefined && PAUSED.has(status) ? (
-        <Paused
-          executionId={latest.id}
-          stop={stopOrNone(run?.stop)}
-          notSearched={counts.buckets.not_run}
-          canResume={RESUMABLE.has(status) && fixNamesResume(stopOrNone(run?.stop))}
-        />
-      ) : null}
       {model.ranked.length > 0 ? (
         board(model, data)
       ) : filtersActive(state) ? (
         <NoPriceInFilters
-          coverageLine={coverageLineText(counts, data.verificationProviderConfigured, latest)}
+          counts={countsClauses(model.inView, COPY)}
+          buckets={bucketsUnder(model.inView, COPY)}
         />
       ) : (
         <p className="plate notice font-semibold">{runActive ? D.partial : D.noPricesInRun}</p>

@@ -389,7 +389,6 @@ export const COPY = {
   // basis and calendar gap (spec §6.9, §11)
   calendarGapLead: (n: number) =>
     `${n} ${n === 1 ? 'cell has a calendar price' : 'cells have calendar prices'} (constraints not checked) below your reference verified price (latest seen, then fresh, then cheapest)`,
-  calendarGapList: 'Cells to search',
 
   // coverage view (spec §11 View D)
   coverageHeading: 'Coverage',
@@ -566,10 +565,8 @@ export const COPY = {
   expandTop: 'Outbounds expanded per cell',
   bookingLinks: 'Fetch booking options',
   bookingLinksForced: 'Always on for SearchApi: its sellers can undercut the airline fare.',
-  providersSection: 'Providers',
   discoveryProviders: 'Discovery',
   verificationProviders: 'Itinerary search',
-  refreshHours: (provider: string) => `${provider} refresh interval (hours)`,
   budgetHeading: 'Run budget',
   maxCalls: 'Max billed calls per run',
   maxFreeCalls: 'Max free calls per run',
@@ -579,27 +576,26 @@ export const COPY = {
   scheduleTz: 'Time zone',
   coverageCheck: 'Check free coverage',
   coverageCheckIntro:
-    'Free check of the Aviasales cache for these pairs: cells with a cached price, of the cells in your nights range, per departure month. A count of 0 means the cache has nothing for that pair and month, not that there are no flights; "not checked" means the check could not read that month.',
+    'Free check of the Aviasales cache for these airport pairs: date pairs with a cached price, of the date pairs in your nights range, per departure month. A count of 0 means the cache has nothing for that airport pair and month, not that there are no flights; "not checked" means the check could not read that month.',
   coverageCheckNeedsTravelpayouts: 'The free coverage check needs TRAVELPAYOUTS_TOKEN.',
   coverageCheckPair: (o: string, d: string) => `${o} → ${d}`,
-  coverageCheckCalls: (n: number) => `${n} free tile ${noun(n, 'request', 'requests')} used`,
+  coverageCheckCalls: (n: number) => `${n} free ${noun(n, 'request', 'requests')} used`,
   coverageCheckMonth: 'Month',
   coverageCheckStale: 'The airports, window or nights changed since this check; run it again.',
   cachedOf: (rows: number, cells: number) => `${rows} of ${cells}`,
   importExample: (label: string) => `Import example (${label})`,
   fieldErrorsHeading: 'Fix these before saving:',
   fieldError: (field: string, message: string) => `${field}: ${message}`,
-  definitionNotices: 'Notices for this definition',
+  definitionNotices: 'Notices for this search',
   budgetFitOk: (runs: number) => `Fits every cap at ${runs} ${noun(runs, 'run', 'runs')} a month:`,
   budgetFitWarn: (runs: number) => `Does not fit every cap at ${runs} ${noun(runs, 'run', 'runs')} a month:`,
-  budgetScope: (scope: string, estimated: number, cap: string) =>
-    `${scope}: ${estimated} estimated a month, cap ${cap}`,
   overCap: 'over the cap',
+  // why: spec rev 55 §3 word table — "hard stop 6" reads "stops at 6" on the main path (ruling 20.5 concern 8)
   needsConfirmation: (p: { calls: number; cap: number; estimate: string; confirmed: string }) =>
-    `The new estimate, about ${p.calls} ${noun(p.calls, 'call', 'calls')} (hard stop ${p.cap}) and ${p.estimate} per run, is above what you confirmed (${p.confirmed}). Scheduled runs are skipped until you confirm.`,
+    `The new estimate, about ${p.calls} ${noun(p.calls, 'call', 'calls')} (stops at ${p.cap}) and ${p.estimate} per run, is above what you confirmed (${p.confirmed}). Scheduled runs are skipped until you confirm.`,
   confirmedWas: (calls: string, amount: string) => `${calls} ${noun(calls, 'call', 'calls')}, ${amount}`,
   confirmNew: (calls: number, cap: number, amount: string) =>
-    `Confirm about ${calls} ${noun(calls, 'call', 'calls')} (hard stop ${cap}), ${amount} per run`,
+    `Confirm about ${calls} ${noun(calls, 'call', 'calls')} (stops at ${cap}), ${amount} per run`,
   none: 'none',
   // --- WP20: the Searches view, the first screen (spec rev 55 §11); main-path words only ---
   searchesView: {
@@ -719,18 +715,72 @@ export const COPY = {
     pickSchedule: 'Choose when it repeats',
     estimateChanged: 'The estimate changed; check it and save again.',
   },
+  // --- WP20 Task 20.6: a search's page, its header and state lines (spec rev 55 §3, §6.6, §11); main-path words only ---
+  searchPage: {
+    // the header
+    route: (cities: string, codes: string) => `${cities} (${codes})`,
+    windowSpan: (from: string, to: string) => `${from} – ${to}`,
+    windowRolling: (lengthDays: number, startOffsetDays: number, span: string) =>
+      `rolling: ${lengthDays} ${noun(lengthDays, 'day', 'days')} from ${startOffsetDays} ${noun(startOffsetDays, 'day', 'days')} ahead, now ${span}`,
+    actionsLabel: 'Actions for this search',
+    // the header line: when, then the five marks' counts, the reused count and the sources (never "all" or "every")
+    searched: (when: string) => `Searched ${when}`,
+    today: 'today',
+    yesterday: 'yesterday',
+    dayTime: (day: string, time: string) => `${day} ${time}`,
+    span: (from: string, to: string) => `${from}–${to}`,
+    fromOnly: (time: string) => `from ${time}`,
+    pricedOf: (priced: number, total: number) =>
+      `${priced} of ${total} date ${noun(total, 'pair', 'pairs')} priced`,
+    noPriceShown: (n: number) => `${n} showed no price`,
+    notSearched: (n: number) => `${n} not searched`,
+    notReached: (n: number) => `${n} not reached`,
+    couldntRead: (n: number) => `${n} couldn't be read`,
+    reused: (n: number) => `(${n} reused from earlier runs)`,
+    // the state line
+    stateLabel: 'Search state',
+    readingFlights: (done: number, planned: number, left: string | null) =>
+      `Reading flights · ${done} of ${planned} date ${noun(planned, 'pair', 'pairs')}${left === null ? '' : ` · ${left}`}`,
+    checkingFares: 'Checking fares for the cheapest date pairs',
+    flightsReadFor: (done: number, planned: number) =>
+      `flights read for ${done} of ${planned} date ${noun(planned, 'pair', 'pairs')}`,
+    flightsRest: {
+      window: "the rest were left: outside this run's browser window",
+      'monthly-cap': "the rest were not read: the browser worker's monthly page limit",
+      stopped: 'the rest were not read: a limit for this run',
+      disabled: 'the rest were not read: the browser worker was paused for this run',
+      failed: "the rest couldn't be read",
+    },
+    flightsNotRead: 'flights not read: the browser worker was paused for this run',
+    noneSearched: (total: number) => `0 of ${total} searched`,
+    stoppedBoard: 'The board shows the prices found before the stop.',
+    notSearchedYet: 'Not searched yet',
+    noSource: 'No price source is set up, so nothing was searched',
+    noSourceFix: 'Set up a price source (Providers)',
+    cancel: 'Cancel',
+    resume: 'Resume',
+    // why: the hidden live line says only the kind of state, so a poll that moves a count announces nothing new
+    stateKind: {
+      searching: 'Searching',
+      reading: 'Reading flights',
+      checking: 'Checking fares',
+      searched: 'Searched',
+      changed: 'Dates changed',
+    },
+    // the stale mark's header label (spec rev 55 §3: the stale mark's words, only when true)
+    staleAll: (mark: string) => `Every price shown is ${mark}.`,
+    or: ' or ',
+    // the next move on thin coverage (spec §11), in main-path words
+    thinCoverage:
+      'Most date pairs came back "no cached data", which is not evidence that no flights exist. Next: add Google Flights via SearchApi to the first pass across your dates, widen the airports, or run the coverage check on the Edit page.',
+    // the calendar-gap banner (spec §6.9, §11), in main-path words: each entry is a date pair on one airport pair
+    gapList: 'Date pairs to check',
+    gapLead: (n: number) =>
+      `${n} ${n === 1 ? 'date pair on one airport pair has a calendar price' : 'date pairs on their airport pairs have calendar prices'} (constraints not checked) below your reference verified price (latest seen, then fresh, then cheapest)`,
+  },
   // --- WP19: the Dates view (spec §11 Dates; revision 50) ---
   datesView: {
     title: 'Dates',
-    // header line
-    runFinished: (ago: string) => `run finished ${ago}`,
-    runInProgress: (ago: string) => `run in progress, started ${ago}`,
-    runPaused: (ago: string, reason: string) => `run paused ${ago}: ${reason}`,
-    runEnded: (status: string, ago: string) => `run ${status} ${ago}`,
-    runNotStarted: (status: string) => `run not started yet (${status})`,
-    minutesAgo: (minutes: number) => `${minutes} min ago`,
-    noRunYet: 'no run yet',
-    staleAll: 'Every price shown is older than one refresh cycle.',
     scopeAirports: (inScope: number, total: number) =>
       `${inScope} of ${total} airport ${noun(total, 'pair', 'pairs')}`,
     scopeNights: (min: number, max: number) =>
@@ -755,7 +805,7 @@ export const COPY = {
     // board
     boardCaption: 'Best dates',
     boardOrderNote: 'Prices a later search no longer found rank after current ones.',
-    partial: 'partial: run in progress',
+    partial: 'partial: still searching',
     columns: {
       rank: 'Rank',
       depart: 'Depart',
@@ -790,14 +840,21 @@ export const COPY = {
     airports: (origin: string, destination: string) => `${origin} → ${destination}`,
     cachedFrom: 'cached from',
     cachedFromPair: (origin: string, destination: string) => `(${origin} → ${destination})`,
+    // spec rev 55 §3 word table: a verified basis reads "checked fares", a calendar one says where it came from
     howFar: {
-      verified: 'verified',
-      calendar: 'calendar price, constraints not checked',
+      verified: 'checked fares, verified',
+      calendar: (from: string) => `${from}, constraints not checked`,
+      calendarFrom: {
+        searchapi: "from Google's date grid",
+        camoufox: "from Google's date grid",
+        travelpayouts: 'from the Aviasales cache',
+        fixture: 'from the test source',
+      } satisfies Record<ProviderId, string>,
       itinerarySearched: (k: number, of: number) =>
-        `itinerary-searched ${k} of ${of} airport ${noun(of, 'pair', 'pairs')}`,
+        `fares checked for ${k} of ${of} airport ${noun(of, 'pair', 'pairs')}`,
       notReached: (n: number) => `${n} selected but not reached`,
-      selectedOther: (n: number) => `${n} selected, itinerary search error or skipped`,
-      notSelected: 'not selected for itinerary search',
+      selectedOther: (n: number) => `${n} selected, fares not checked (an error, or skipped)`,
+      notSelected: 'not selected for checking fares',
       onDemand: (n: number) => `+${n} on demand`,
       partiallyVerified: (n: number) => `${n} partially verified`,
       unconfirmed: (n: number) => `${n} ${noun(n, 'price', 'prices')} not confirmed`,
@@ -816,14 +873,11 @@ export const COPY = {
     // states
     noSearch: 'No search yet.',
     noSearchLink: 'Plan one under Searches',
-    neverRun: 'Not run yet: nothing has been searched.',
     onDemandOnly: (n: number) =>
-      `Not run yet: ${n} on-demand itinerary ${noun(n, 'search', 'searches')} so far, and the prices ${noun(n, 'it', 'they')} found are below.`,
-    pausedNote: 'The board shows prices found before the pause.',
-    notSearchedCount: (n: number) => `${n} ${noun(n, 'cell', 'cells')} not searched`,
+      `Not searched yet: fares were checked for ${n} date ${noun(n, 'pair', 'pairs')} on their own so far, and the prices found are below.`,
     noPricesInRun: 'No prices in this run.',
     tooManyCells: (cells: number, bound: number) =>
-      `This search has ${cells} cells in scope, more than the ${bound} the Dates view reads at once. Narrow the origins or destinations in the filters above to bring it under ${bound}.`,
+      `This search asks about ${cells} date pairs on its airport pairs in scope, more than the ${bound} this page reads at once. Narrow the origins or destinations in the filters above to bring it under ${bound}.`,
     noPriceInFilters: 'No date pair in these filters has a price found so far.',
     // the overview (Task 19.5; spec §11 Overview)
     overview: {
@@ -840,17 +894,18 @@ export const COPY = {
       openBand: 'opens its stay lengths',
       noMark: 'no airport pair in scope',
       readoutLabel: 'Date pair readout',
-      readoutEmpty: 'Point at or focus a cell to read its date pair here.',
+      readoutEmpty: 'Point at or focus a dot to read its date pair here.',
       openThese: 'Open these dates',
       buckets: (breakdown: string) => `by airport pair: ${breakdown}`,
     },
+    // spec rev 55 §3, §6.6, §11: the five marks of the month key (priced is a cell's shade), then the cell marks besides
     marks: {
       words: {
-        empty: 'no fares',
-        no_data: 'no cached data',
-        error: 'error',
-        skipped: 'skipped',
-        not_run: 'not searched',
+        priced: 'priced',
+        'no-price-shown': 'no price shown',
+        'couldnt-read': "couldn't be read",
+        'not-reached': 'not reached',
+        'not-searched': 'not searched',
         partly: 'partly not searched',
         notChecked: 'not checked',
         superseded: 'superseded by a later search',
@@ -859,11 +914,10 @@ export const COPY = {
         unshown: 'priced, but no price can be shown here',
       },
       glyph: {
-        empty: '∅',
-        no_data: '◇',
-        error: '✕',
-        skipped: '–',
-        not_run: '○',
+        'no-price-shown': '∅',
+        'couldnt-read': '✕',
+        'not-reached': '–',
+        'not-searched': '○',
         partly: '▨',
         notChecked: '◫',
         superseded: '↺',
@@ -875,7 +929,7 @@ export const COPY = {
     legend: {
       title: 'Legend',
       scaleQuintile: (n: number) =>
-        `Shade: ${n} current ${noun(n, 'price', 'prices')} in view, in five bands by rank, brightest cheapest`,
+        `Shade: ${n} current ${noun(n, 'price', 'prices')} in view, in five bands by rank; brighter is cheaper`,
       scaleFlatFew: (n: number, min: number) =>
         `One shade for ${n} current ${noun(n, 'price', 'prices')}: fewer than ${min} are too few for price bands`,
       scaleFlatNarrow: (n: number, min: string, max: string) =>
@@ -887,9 +941,14 @@ export const COPY = {
       offScale:
         'Prices a later search no longer found (superseded, not seen) are on a plain fill with their mark, never on the scale.',
       markCount: (words: string, n: number) => `${words}: ${n}`,
+      // why: the parts of "no price shown", by date pair (spec rev 55 §11: "12 no fares, 3 no cached data")
+      noPriceParts: (empty: number, noData: number) => `${empty} no fares, ${noData} no cached data`,
+      marksLabel: 'Marks',
+      dot: 'each dot is one stay length',
+      striped: (n: number) => `striped: partly not searched (${n})`,
       notChecked:
         'not checked: a calendar price; its constraints (stops, journey time, arrival times) were not checked.',
-      noAmount: 'Cells print no amount: point at or focus one to read its price beside the legend.',
+      noAmount: 'The dots print no amount: point at or focus one to read its price beside the legend.',
       ring: 'outlined: on the board above',
     },
     // the coverage section (Task 19.5; what the Coverage view held)

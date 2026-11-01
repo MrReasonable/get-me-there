@@ -136,7 +136,7 @@ describe('the form’s defaults (spec rev 55 §8.2, §11)', () => {
     expect(screen.getByRole('checkbox', { name: 'Fetch booking options' })).toBeDisabled();
     expect(fieldValue('Max billed calls per run')).toBe('2000');
     expect(fieldValue('Max cost per run in £')).toBe('0');
-    expect(fieldValue('Travelpayouts refresh interval (hours)')).toBe('168');
+    expect(fieldValue('How often to ask the Aviasales cache again (hours)')).toBe('168');
     // spec rev 55 §8.2: a new search has no schedule; repeating is added from its page
     expect(screen.queryByLabelText(SETUP_COPY.schedule.repeat)).toBeNull();
     expect(screen.queryByRole('checkbox', { name: 'Enabled: scheduled runs happen' })).toBeNull();
@@ -668,7 +668,7 @@ describe('Edit (spec rev 55 §11 Edit)', () => {
     const { user } = renderEdit();
     await user.click(screen.getByRole('button', { name: E.save }));
     const confirm = await screen.findByRole('button', {
-      name: 'Confirm about 300 calls (hard stop 2000), £2.50 per run',
+      name: 'Confirm about 300 calls (stops at 2000), £2.50 per run',
     });
     await user.click(confirm);
     await waitFor(() =>

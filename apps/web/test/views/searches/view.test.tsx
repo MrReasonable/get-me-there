@@ -283,7 +283,8 @@ describe('the cheapest, always through PriceCell’s compact face', () => {
     expect(
       within(within(await cardOf('Calendar')).getByTestId('price-cell')).getByTestId('face-age'),
     ).toHaveTextContent(COPY.notChecked);
-    expect(within(await cardOf('Old')).getByText(COPY.stale)).toBeInTheDocument();
+    // the stale mark's words (spec rev 55 §3): a price on the verified basis
+    expect(within(await cardOf('Old')).getByText('older than your stale setting')).toBeInTheDocument();
   });
 
   it('says "cheapest so far" while the search is running', async () => {

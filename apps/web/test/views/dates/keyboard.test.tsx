@@ -125,9 +125,10 @@ describe('the overview’s keyboard (spec §11)', () => {
 });
 
 describe('Tab order across the view (spec §11 Accessibility)', () => {
-  it('filters, the board’s sort buttons, each row’s link, Show 10 more, the overview’s one stop, then the coverage toggle', async () => {
+  it('the header’s line and its actions, the filters, the board’s sort buttons, each row’s link, Show 10 more, the overview’s one stop, then the coverage toggle', async () => {
     const { user } = renderDates({ body: workedDates() });
     await findBoard();
+    await screen.findByTestId('dates-run');
     const seen: string[] = [];
     document.body.focus();
     for (let i = 0; i < 40; i += 1) {
@@ -144,7 +145,9 @@ describe('Tab order across the view (spec §11 Accessibility)', () => {
     const index = (label: string | RegExp) =>
       seen.findIndex((s) => (typeof label === 'string' ? s === label : label.test(s)));
     const order = [
-      index(/^discovery: /),
+      index(/^Searched today /),
+      index('Search again'),
+      index('Edit'),
       index('Clear filters'),
       index('Depart'),
       index('Journey time'),

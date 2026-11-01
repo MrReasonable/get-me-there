@@ -1,6 +1,39 @@
+import { mainPathSource, providerIdSchema } from '@gmt/core';
 import type { BudgetFit } from '../../api/types.js';
+import { SETUP_COPY } from '../../copy/setup.js';
 import { COPY } from '../../copy.js';
-import { formatPence } from '../../format.js';
+import { formatMicroGbp, formatPence } from '../../format.js';
+
+const F = SETUP_COPY.definitions;
+const FIT_SCOPE: Readonly<Record<string, string | undefined>> = F.fitScope;
+/** The scopes counted in micro-GBP, worded as money; every other scope counts calls, pages or scrolls. */
+const MONEY_SCOPES: ReadonlySet<string> = new Set(['execution-cost', 'global-month']);
+
+/**
+ * A budget-fit scope's wire label in words (spec rev 55 §11: no variable names on the main path, where Repeat weekly
+ * and More options show the fit): "the Aviasales cache this month", "billed calls a run", "this month's spending". A
+ * label this list does not know is shown as it came, so a new scope is never hidden.
+ */
+export function scopeWords(label: string): string {
+  const fixed = FIT_SCOPE[label];
+  if (fixed !== undefined) return fixed;
+  const [kind = '', id = ''] = label.split(':');
+  const provider = providerIdSchema.safeParse(id);
+  if (!provider.success) return label;
+  const source = mainPathSource(provider.data);
+  switch (kind) {
+    case 'provider-month':
+      return F.fitProviderMonth(source);
+    case 'provider-lifetime':
+      return F.fitProviderLifetime(source);
+    case 'scrolls-per-month':
+      return F.fitScrolls(source);
+    case 'cells-per-refresh':
+      return F.fitCellsPerRefresh(source);
+    default:
+      return label;
+  }
+}
 
 /**
  * The estimate panel's one cost formatter (spec rev 55 §11): the estimate sentence beside Search now, its notes and the
@@ -25,7 +58,20 @@ export function BudgetFitPanel({ fit }: { fit: BudgetFit }) {
       <ul>
         {fit.perScope.map((s) => (
           <li key={s.scope}>
-            {COPY.budgetScope(s.scope, s.estimated, s.cap === null ? COPY.noCap : String(s.cap))}
+            {/* why: data-cost marks a cost or cap figure, never a fare (the rendered sweep's rule for "£") */}
+            <span data-cost="">
+              {MONEY_SCOPES.has(s.scope)
+                ? F.fitLine(
+                    scopeWords(s.scope),
+                    formatMicroGbp(s.estimated),
+                    s.cap === null ? COPY.noCap : formatMicroGbp(s.cap),
+                  )
+                : F.fitLine(
+                    scopeWords(s.scope),
+                    String(s.estimated),
+                    s.cap === null ? COPY.noCap : String(s.cap),
+                  )}
+            </span>
             {s.fits ? null : <span className="tag tag-bad ml-1">{COPY.overCap}</span>}
           </li>
         ))}

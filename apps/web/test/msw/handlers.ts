@@ -62,7 +62,13 @@ export const handlers = [
   http.get(url('/api/definitions/:id/results'), () => HttpResponse.json(resultsResponse())),
   http.get(url('/api/executions/:id'), () =>
     HttpResponse.json(
-      execution({ status: 'completed', stage: 'verification', finishedAt: '2026-10-14T13:00:00.000Z' }),
+      // why: the run the date-pairs fixtures summarise (runSummary): started 12:00, finished 13:00 (UTC)
+      execution({
+        status: 'completed',
+        stage: 'verification',
+        startedAt: '2026-10-14T12:00:00.000Z',
+        finishedAt: '2026-10-14T13:00:00.000Z',
+      }),
     ),
   ),
   http.get(url('/api/definitions/:id/coverage'), () => HttpResponse.json(coverageResponse())),

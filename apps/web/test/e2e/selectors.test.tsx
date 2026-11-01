@@ -43,14 +43,20 @@ describe('the Playwright smoke’s Dates selectors match the rendered view', () 
     expect(one(SMOKE.litCell)).toHaveAttribute('data-ringed');
     expect(one(SMOKE.litCell).dataset.cell).toBe('2027-03-14|10');
     // an unpriced cell carries its glyphs
-    expect(one(`${SMOKE.overviewCell}[data-marks~="empty"] ${SMOKE.cellGlyphs}`)).toHaveTextContent(
-      COPY.datesView.marks.glyph.empty,
+    expect(one(`${SMOKE.overviewCell}[data-marks~="no-price-shown"] ${SMOKE.cellGlyphs}`)).toHaveTextContent(
+      COPY.datesView.marks.glyph['no-price-shown'],
     );
 
     expect(one(SMOKE.legend)).toBeVisible();
     const marks = document.querySelectorAll(SMOKE.legendMark);
     expect([...marks].map((m) => m.getAttribute('data-mark'))).toEqual([...MARK_ORDER]);
-    for (const m of marks) expect(m.querySelector(SMOKE.legendGlyph)?.textContent).not.toBe('');
+    // the five marks first (spec rev 55 §11): priced is its shade, every other mark has its glyph
+    for (const m of marks)
+      if (m.getAttribute('data-mark') !== 'priced')
+        expect(m.querySelector(SMOKE.legendGlyph)?.textContent, m.getAttribute('data-mark') ?? '').not.toBe(
+          '',
+        );
+    expect(marks[0]?.querySelector(SMOKE.legendGlyph)?.className).toContain('lamp-lit');
 
     fireEvent.pointerOver(one(SMOKE.overviewTabStop));
     expect(one(SMOKE.readout)).toHaveTextContent('14 Mar 2027');

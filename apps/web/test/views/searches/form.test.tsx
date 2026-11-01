@@ -69,8 +69,9 @@ describe('the new-search form: what it shows (spec rev 55 §11)', () => {
     expect(field(COPY.lengthDays).value).toBe('182');
     expect(screen.getByText(PLAN_COPY.rollingLine(7, 182), { exact: false })).toBeInTheDocument();
     // every free source the install has configured and enabled, ticked from the presets, the browser worker included
-    expect(screen.getByRole('checkbox', { name: 'Travelpayouts' })).toBeChecked();
-    expect(screen.getByRole('checkbox', { name: 'Camoufox' })).toBeChecked();
+    // spec rev 55 §3: the sources by their main-path names
+    expect(screen.getByRole('checkbox', { name: 'The Aviasales cache' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'The browser worker' })).toBeChecked();
     expect(field(COPY.maxCalls).value).toBe('2000');
     // each set-up term with its one-line explanation (ui-011)
     expect(screen.getByLabelText(COPY.maxCalls)).toHaveAccessibleDescription(/^Calls to paid sources/);
@@ -204,7 +205,7 @@ describe('the estimate: asked for automatically, 400 ms after the last change (s
     // the budget-fit table moves under More options
     await user.click(screen.getByText(PLAN_COPY.moreOptions));
     expect(
-      screen.getByText('provider-month:searchapi: 616 estimated a month, cap 10000'),
+      screen.getByText('Google Flights via SearchApi this month: about 616, limit 10000'),
     ).toBeInTheDocument();
   });
 });

@@ -230,7 +230,7 @@ describe('View A header (spec §11 two lines)', () => {
     expect(line2).toHaveAttribute('href', '/?view=dates&def=def-0001&d.coverage=open');
   });
 
-  it('a converted, stale, truncated calendar headline carries "≈", "stale" and "cheapest of the rows read" (the Critical)', async () => {
+  it('a converted, stale, truncated calendar headline carries "≈", the stale mark and "cheapest of the rows read" (the Critical)', async () => {
     const row = calendarRow({
       stale: true,
       truncated: true,
@@ -242,7 +242,7 @@ describe('View A header (spec §11 two lines)', () => {
     const headline = screen.getByText('cheapest found').parentElement;
     if (headline === null) throw new Error('no headline');
     expect(headline).toHaveTextContent(/≈.*£399/);
-    expect(within(headline).getByText('stale')).toBeInTheDocument();
+    expect(within(headline).getByText("older than this search's refresh")).toBeInTheDocument();
     expect(within(headline).getByText('cheapest of the rows read')).toBeInTheDocument();
     expect(within(headline).getByText(formatAgeFull(effectiveAge(row.provenance, NOW)))).toBeInTheDocument();
   });
@@ -312,7 +312,9 @@ describe('client-side sort and filter (spec §6.5)', () => {
     expect(screen.getByText('Order: server ranking (class, then price)')).toBeInTheDocument();
     expect(rowNames()).toEqual(filterRows(five, {}).map(nameOf));
     const staleRow = dataRows()[3];
-    expect(staleRow && within(staleRow).getByText('stale')).toBeInTheDocument();
+    expect(
+      staleRow && within(staleRow).getByText(/^older than (this search's refresh|your stale setting)$/),
+    ).toBeInTheDocument();
   });
 
   it('a superseded calendar row is marked in words and keeps the position the server gave it, after current rows (decision 57; controller-directed)', async () => {

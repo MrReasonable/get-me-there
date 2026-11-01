@@ -67,7 +67,7 @@ describe('the overview (spec §11 Overview)', () => {
     expect(cell('2027-03-25', 10)).toHaveAttribute('data-shade', '4');
     const legend = screen.getByTestId('dates-legend');
     expect(legend).toHaveTextContent(
-      'Shade: 12 current prices in view, in five bands by rank, brightest cheapest',
+      'Shade: 12 current prices in view, in five bands by rank; brighter is cheaper',
     );
     expect(legend).toHaveTextContent('band 1: £300–£320 (3 date pairs)');
     expect(legend).toHaveTextContent('band 5: £400–£410 (2 date pairs)');
@@ -110,7 +110,7 @@ describe('the readout and the cell’s names (spec §11 Overview)', () => {
   it('pointing at a cell shows its date pair beside the legend: dates, nights, the figure through PriceCell with point of sale, how far checked, airports', async () => {
     renderDates({ body: workedDates() });
     await findBoard();
-    expect(readout()).toHaveTextContent('Point at or focus a cell to read its date pair here.');
+    expect(readout()).toHaveTextContent('Point at or focus a dot to read its date pair here.');
     fireEvent.pointerOver(cell('2027-03-22', 11));
     const r = readout();
     expect(r).toHaveTextContent('22 Mar 2027–2 Apr 2027 (11n)');
@@ -134,7 +134,7 @@ describe('the readout and the cell’s names (spec §11 Overview)', () => {
     renderDates({ body: workedDates() });
     await findBoard();
     expect(cell('2027-03-14', 10)).toHaveAccessibleName('14 Mar 2027–24 Mar 2027, 10 nights: rank 1');
-    expect(cell('2027-03-17', 10)).toHaveAccessibleName('17 Mar 2027–27 Mar 2027, 10 nights: no fares');
+    expect(cell('2027-03-17', 10)).toHaveAccessibleName('17 Mar 2027–27 Mar 2027, 10 nights: no price shown');
     const described = cell('2027-03-14', 10).getAttribute('aria-describedby');
     expect(described).toBe(readout().id);
     fireEvent.focus(cell('2027-03-14', 10));
@@ -178,7 +178,8 @@ describe('folded bands (spec §11 Folded bands)', () => {
     expect(cell('2027-03-14', 12).parentElement?.children).toHaveLength(7);
     expect(cell('2027-03-14', 12)).toHaveAttribute('data-band', '12-13');
     expect(cell('2027-03-14', 12)).toHaveAttribute('data-shade', 'flat');
-    expect(cell('2027-03-15', 20).getAttribute('data-marks')).toBe('partly');
+    // spec rev 55 §6.6: a band with a date pair partly not searched and no figure reads not searched, with the stripes
+    expect(cell('2027-03-15', 20).getAttribute('data-marks')).toBe('not-searched partly');
     expect(cell('2027-03-14', 12)).toHaveAccessibleName(
       'departing 14 Mar 2027, 12–13 nights: rank 1, opens its stay lengths',
     );

@@ -427,10 +427,11 @@ describe('the status bar has no Run now (spec rev 55 §11; WP20 Task 20.3)', () 
       ),
     );
     renderWithProviders(<App />, { search: '?view=dates&def=def-0001' });
-    await screen.findByText('Not run yet: nothing has been searched.');
+    await screen.findByText('Not searched yet', { selector: 'p.font-bold' });
     const bar = await screen.findByRole('region', { name: 'Run status' });
     await within(bar).findByText('No run yet for this search.');
-    expect(screen.getAllByRole('button', { name: 'Search now' })).toHaveLength(1);
+    // why: the page's Search now carries its estimate sentence (spec rev 55 §11 never-run state) once it is in
+    expect(await screen.findAllByRole('button', { name: /^Search now/ })).toHaveLength(1);
     expect(within(bar).queryByRole('button', { name: /Search now|Run now/ })).toBeNull();
     expect(screen.queryByRole('button', { name: /Run now/ })).toBeNull();
   });
@@ -546,7 +547,11 @@ describe('which run the bar shows (ruling R-bar; spec rev 55 §11)', () => {
     serveRuns([running]);
     const first = renderWithProviders(<App />, { search: '?view=dates&def=def-0001' });
     // why: the region is re-read after the definitions arrive (the bar swaps from "any run" to the page's search)
-    expect(await screen.findByRole('button', { name: 'Cancel' })).toBeInTheDocument();
+    expect(
+      await within(await screen.findByRole('region', { name: 'Run status' })).findByRole('button', {
+        name: 'Cancel',
+      }),
+    ).toBeInTheDocument();
     expect(within(await bar()).queryByRole('link', { name: /:$/ })).toBeNull();
     first.unmount();
     server.use(
@@ -555,7 +560,11 @@ describe('which run the bar shows (ruling R-bar; spec rev 55 §11)', () => {
       ),
     );
     renderWithProviders(<App />, { search: '?view=dates&def=def-0001' });
-    expect(await screen.findByRole('button', { name: 'Resume' })).toBeInTheDocument();
+    expect(
+      await within(await screen.findByRole('region', { name: 'Run status' })).findByRole('button', {
+        name: 'Resume',
+      }),
+    ).toBeInTheDocument();
   });
 
   it('on the date pair detail the bar follows the search by def=, with controls', async () => {
@@ -592,6 +601,10 @@ describe('which run the bar shows (ruling R-bar; spec rev 55 §11)', () => {
     expect(screen.queryByRole('region', { name: 'Run status' })).toBeNull();
     expect(screen.queryByRole('link', { name: /:$/ })).toBeNull();
     release();
-    expect(await screen.findByRole('button', { name: 'Cancel' })).toBeInTheDocument();
+    expect(
+      await within(await screen.findByRole('region', { name: 'Run status' })).findByRole('button', {
+        name: 'Cancel',
+      }),
+    ).toBeInTheDocument();
   });
 });

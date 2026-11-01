@@ -101,7 +101,7 @@ describe('Repeat weekly… (spec rev 55 §8.2, §11)', () => {
       ),
     ).toBeInTheDocument();
     // the monthly figure: the budget fit at the schedule's runs a month (flight pages join it in Task 20.9)
-    expect(screen.getByText('provider-month:camoufox: 476 estimated a month, cap 1500')).toBeInTheDocument();
+    expect(screen.getByText('the browser worker this month: about 476, limit 1500')).toBeInTheDocument();
     expect(seen.estimates[0]).toMatchObject({ scheduleCron: DEFAULT_CRON, enabled: true });
     expect(seen.estimateIds).toEqual(['def-0001']);
     await settled(client);
@@ -202,7 +202,11 @@ describe('Repeat weekly… (spec rev 55 §8.2, §11)', () => {
       search: '?view=dates&def=def-0001',
     });
     // the page itself says the run stopped
-    expect(await screen.findByText('This search stopped at £5, its spending limit.')).toBeInTheDocument();
+    expect(
+      await screen.findByText('This search stopped at £5, its spending limit.', {
+        selector: '[data-testid="stop-sentence"]',
+      }),
+    ).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: W.open }));
     const fields = screen.getByRole('group', { name: W.fieldsLabel });
     const editor = fields.parentElement;

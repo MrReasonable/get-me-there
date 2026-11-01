@@ -63,9 +63,9 @@ describe('user-facing counts agree with their noun', () => {
     [
       'coverageCheckCalls',
       COPY.coverageCheckCalls(1),
-      '1 free tile request used',
+      '1 free request used',
       COPY.coverageCheckCalls(14),
-      '14 free tile requests used',
+      '14 free requests used',
     ],
     [
       'requestRow',

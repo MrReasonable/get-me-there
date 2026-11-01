@@ -137,7 +137,6 @@ const SAMPLES: Record<string, unknown[]> = {
   resolvedWindow: ['21 Oct 2026', '20 Apr 2027'],
   inPounds: ['maximum price'],
   minutesAsHours: ['25h 00m'],
-  refreshHours: ['Travelpayouts'],
   coverageCheckPair: ['LHR', 'JFK'],
   coverageCheckCalls: [14],
   cachedOf: [5, 372],
@@ -145,12 +144,9 @@ const SAMPLES: Record<string, unknown[]> = {
   fieldError: ['origins.0', 'LON is a city code'],
   budgetFitOk: [4],
   budgetFitWarn: [4],
-  budgetScope: ['provider-month:searchapi', 616, '10000'],
   needsConfirmation: [{ calls: 154, cap: 2000, estimate: '£2', confirmed: '120 calls, £1' }],
   confirmNew: [154, 2000, '£2'],
   // WP19 (Task 19.4): the Dates view
-  'datesView.runFinished': ['2h ago'],
-  'datesView.runInProgress': ['40 min ago'],
   // WP20 (Task 20.3): the Searches view's cards
   // WP20 Task 20.5: the new-search form, the estimate sentence, a refused Search now, Edit and Repeat weekly
   'newSearch.estimateFailed': ['database is locked'],
@@ -182,10 +178,6 @@ const SAMPLES: Record<string, unknown[]> = {
   'searchesView.undoOf': ['Birmingham → Frankfurt'],
   'searchesView.removeFailedLine': ['HTTP 500'],
   'searchesView.restoreFailedLine': ['HTTP 500'],
-  'datesView.runPaused': ['3h ago', 'searchapi provider-month cap reached'],
-  'datesView.runEnded': ['cancelled', '2h ago'],
-  'datesView.runNotStarted': ['pending'],
-  'datesView.minutesAgo': [40],
   'datesView.scopeAirports': [2, 4],
   'datesView.scopeNights': [10, 14],
   'datesView.journeyBounds': [60, 6000],
@@ -209,8 +201,29 @@ const SAMPLES: Record<string, unknown[]> = {
   'datesView.updateBoard': [3],
   'datesView.pendingChanges': [3],
   'datesView.onDemandOnly': [2],
-  'datesView.notSearchedCount': [368],
   'datesView.tooManyCells': [100000, 50000],
+  'datesView.howFar.calendar': ["from Google's date grid"],
+  'datesView.legend.noPriceParts': [12, 3],
+  'datesView.legend.striped': [4],
+  // WP20 Task 20.6: a search's page (spec rev 55 §11)
+  'searchPage.route': ['London → New York', 'LHR, LGW → JFK, EWR'],
+  'searchPage.windowSpan': ['10 Jan 2027', '31 Mar 2027'],
+  'searchPage.windowRolling': [182, 7, '21 Oct 2026 – 20 Apr 2027'],
+  'searchPage.searched': ['today 09:12–11:41'],
+  'searchPage.dayTime': ['yesterday', '11:44'],
+  'searchPage.span': ['09:12', '11:41'],
+  'searchPage.fromOnly': ['09:12'],
+  'searchPage.pricedOf': [300, 405],
+  'searchPage.noPriceShown': [20],
+  'searchPage.notSearched': [60],
+  'searchPage.notReached': [20],
+  'searchPage.couldntRead': [5],
+  'searchPage.reused': [120],
+  'searchPage.readingFlights': [3, 10, 'about 8m left'],
+  'searchPage.flightsReadFor': [4, 10],
+  'searchPage.noneSearched': [405],
+  'searchPage.staleAll': ["older than this search's refresh"],
+  'searchPage.gapLead': [3],
   // WP19 (Task 19.5): the overview, its legend and readout
   'datesView.overview.stay': [10, 13],
   'datesView.overview.closeBand': ['10–13 nights', 'Mar 2027'],
@@ -319,6 +332,8 @@ describe('COPY catalogue (spec §11 banned words)', () => {
       'classLabel.verified',
       'classLabel.partially-verified',
       'calendarGapLead',
+      // WP20 Task 20.6: the same banner on a search's page, its reference a class-verified price
+      'searchPage.gapLead',
       'headlineRest',
       // WP19: "verified" beside a class-verified figure; the class label "partially verified" with its count
       'datesView.howFar.verified',
@@ -380,16 +395,25 @@ describe('COPY catalogue (spec §11 banned words)', () => {
     );
   });
 
-  it('a reconfirmation states the estimated calls with the hard stop, and pounds (decisions 36, 44)', () => {
-    expect(COPY.confirmNew(154, 2000, '£2')).toBe('Confirm about 154 calls (hard stop 2000), £2 per run');
+  it('a reconfirmation states the estimated calls with the limit they stop at, and pounds (decisions 36, 44; spec rev 55 §3)', () => {
+    expect(COPY.confirmNew(154, 2000, '£2')).toBe('Confirm about 154 calls (stops at 2000), £2 per run');
     expect([COPY.confirmNew(1, 2, '£0')].filter((c) => /\bup to\b/.test(c))).toEqual([]);
   });
 
-  it('the first screen speaks in main-path words: no set-up term (spec rev 55 §11)', () => {
+  it('the first screen and a search’s page speak in main-path words: no set-up term (spec rev 55 §11)', () => {
     const SET_UP =
-      /\b(definitions?|cells?|discovery|hard stop|verdict|tile|retry factor|STALE|calendar basis)\b/i;
+      /\b(definitions?|cells?|discovery|hard stop|verdict|tiles?|retry factor|STALE|calendar basis|itinerar(y|ies)|camoufox)\b/i;
+    const MAIN_PATH = [
+      'searchesView.',
+      'searchAgain.',
+      'searchPage.',
+      'datesView.marks.',
+      'datesView.legend.',
+      'datesView.howFar.',
+      'datesView.overview.',
+    ];
     const hits = strings
-      .filter(({ path }) => path.startsWith('searchesView.') || path.startsWith('searchAgain.'))
+      .filter(({ path }) => MAIN_PATH.some((p) => path.startsWith(p)))
       .filter(({ text }) => SET_UP.test(text))
       .map(({ path, text }) => `${path}: ${text}`);
     expect(hits).toEqual([]);
@@ -436,5 +460,30 @@ describe('glyph set (review ui I2)', () => {
   });
   it('the Dates phone key names every price-mark glyph a face can show', () => {
     for (const g of Object.values(COPY.priceMarkGlyph)) expect(COPY.datesView.phoneKey.glyphs).toContain(g);
+  });
+});
+
+describe('a search’s page in words (WP20 Task 20.6, spec rev 55 §3, §11)', () => {
+  it('the five marks and the key read as the spec words them; no mark reads "no flights"', () => {
+    const W = COPY.datesView.marks.words;
+    expect([W.priced, W['no-price-shown'], W['couldnt-read'], W['not-reached'], W['not-searched']]).toEqual([
+      'priced',
+      'no price shown',
+      "couldn't be read",
+      'not reached',
+      'not searched',
+    ]);
+    expect(Object.values(W).filter((w) => /no flights/i.test(w))).toEqual([]);
+    expect(COPY.datesView.legend.noPriceParts(12, 3)).toBe('12 no fares, 3 no cached data');
+    expect(COPY.datesView.legend.striped(4)).toBe('striped: partly not searched (4)');
+    expect(COPY.datesView.legend.dot).toBe('each dot is one stay length');
+  });
+  it('the header line’s clauses and the flights clauses', () => {
+    const P = COPY.searchPage;
+    expect(P.pricedOf(1, 1)).toBe('1 of 1 date pair priced');
+    expect(P.reused(120)).toBe('(120 reused from earlier runs)');
+    expect(P.readingFlights(3, 10, null)).toBe('Reading flights · 3 of 10 date pairs');
+    expect(P.flightsReadFor(4, 10)).toBe('flights read for 4 of 10 date pairs');
+    expect(P.noneSearched(405)).toBe('0 of 405 searched');
   });
 });

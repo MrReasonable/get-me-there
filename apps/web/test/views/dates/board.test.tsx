@@ -223,7 +223,7 @@ describe('the phone board (spec §11 Phone: below 900 px)', () => {
     expect(within(face).getByTestId('face-provider')).toHaveTextContent('syn JFK');
     expect(within(face).getByTestId('face-unchecked')).toHaveTextContent('not checked');
     expect(first.textContent?.indexOf('14 Mar 2027')).toBeLessThan(
-      first.textContent?.indexOf('calendar price') ?? 0,
+      first.textContent?.indexOf('constraints not checked') ?? 0,
     );
     expect(first).toHaveTextContent('LHR → JFK');
     expect(first).not.toHaveTextContent('market');
@@ -288,6 +288,6 @@ describe('a verified figure without a cheaper calendar price shows none', () => 
     renderDates({ body: { pairs: { [at('2027-03-14', 10)]: pricedPair(verifiedFig()) } } });
     const table = await findBoard();
     expect(within(table).queryByTestId('cheaper-cached')).toBeNull();
-    expect(cellsOf(boardRows(table)[0] ?? table)[5]).toMatch(/^verified/);
+    expect(cellsOf(boardRows(table)[0] ?? table)[5]).toMatch(/^checked fares, verified/);
   });
 });

@@ -35,7 +35,7 @@ describe('coverage check before saving (spec §1, §10, §11)', () => {
     expect(
       [...(within(table).getAllByRole('row')[1]?.querySelectorAll('th, td') ?? [])].map((c) => c.textContent),
     ).toEqual(['LHR → JFK', '5 of 372', '0 of 360']);
-    expect(screen.getByText('14 free tile requests used')).toBeInTheDocument();
+    expect(screen.getByText('14 free requests used')).toBeInTheDocument();
     expect(bodies).toEqual([
       {
         origins: ['LHR', 'LGW'],
@@ -161,7 +161,7 @@ describe('the budget fit under More options (spec rev 55 §11)', () => {
     const alert = await screen.findByText('Does not fit every cap at 4 runs a month:');
     expect(alert.parentElement).toHaveAttribute('role', 'alert');
     expect(alert.parentElement).toHaveTextContent(
-      'provider-month:searchapi: 12000 estimated a month, cap 10000over the cap',
+      'Google Flights via SearchApi this month: about 12000, limit 10000over the cap',
     );
   });
 });
@@ -174,7 +174,7 @@ describe('saved definitions (spec §8.1)', () => {
       ),
     );
     renderWithProviders(<DefinitionsView />, { search: '?view=definitions&edit=def-0001' });
-    const list = await screen.findByRole('list', { name: 'Notices for this definition' });
+    const list = await screen.findByRole('list', { name: 'Notices for this search' });
     expect(within(list).getByText('alerts running on calendar basis only')).toBeInTheDocument();
   });
 

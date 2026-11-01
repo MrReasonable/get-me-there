@@ -5,8 +5,8 @@ owner: opus
 depends_on: [19]
 spec_sections: ["§2 camoufox", "§3", "§6.6", "§6.9", "§7", "§8.1", "§8.2", "§10", "§11", "§12", "§16", "§17 revision 55"]
 reviewers: [product-owner, provenance-auditor, search-strategy-reviewer, cost-and-budget-reviewer, ui-reviewer, code-architect, test-strategy-reviewer, provider-integration-expert, data-model-reviewer, security-reviewer]
-mutate: {"@gmt/core": ["src/labels/age.ts", "src/types/definitionDefaults.ts", "src/labels/stopCause.ts", "src/labels/mainPath.ts", "src/datePairs/marks.ts"], "@gmt/web": ["src/state/landing.ts", "src/views/Dates/overview.ts", "src/format.ts", "src/views/Searches/estimateLine.ts"], "@gmt/camoufox-worker": ["src/names.ts"], "@gmt/engine": ["src/stopCause.ts", "src/estimate.ts", "src/budgetCheck.ts"]}
-pending: {"@gmt/core": ["src/flights/choose.ts", "src/flights/ties.ts"], "@gmt/web": ["src/views/Dates/stateLines.ts"], "@gmt/engine": ["src/stages/flightLists/select.ts"], "@gmt/camoufox-worker": ["src/flights.ts"]}
+mutate: {"@gmt/core": ["src/labels/age.ts", "src/types/definitionDefaults.ts", "src/labels/stopCause.ts", "src/labels/mainPath.ts", "src/datePairs/marks.ts"], "@gmt/web": ["src/state/landing.ts", "src/views/Dates/overview.ts", "src/format.ts", "src/views/Searches/estimateLine.ts", "src/views/Dates/stateLines.ts"], "@gmt/camoufox-worker": ["src/names.ts"], "@gmt/engine": ["src/stopCause.ts", "src/estimate.ts", "src/budgetCheck.ts"]}
+pending: {"@gmt/core": ["src/flights/choose.ts", "src/flights/ties.ts"], "@gmt/engine": ["src/stages/flightLists/select.ts"], "@gmt/camoufox-worker": ["src/flights.ts"]}
 status: reviewed
 ---
 
@@ -539,8 +539,10 @@ export function readAt(fetchedAt: IsoDateTime, now: IsoDateTime, c): string;   /
   refuses an entry without a handler, so a new route is an entry in `ROUTES` (placed before `GET /definitions/:id`
   where its path would otherwise match it) plus a `HANDLERS` entry whose schemas are the entry's own objects.
   `c.json(body, 202)` for the accepted read.
-- **@tanstack/react-query 5.104.2**: a search's page observes its latest run through `useExecutionWatch(latestRun.id)`
-  (the status bar's key; no second poll); the flight-lists query uses `refetchInterval: POLL_MS` only while
+- **@tanstack/react-query 5.104.2**: a search's page observes its latest run through `useLatestRun(latestRun.id, activeId)`
+  (the status bar's key with no interval of its own when the bar polls that run, else its own `refetchInterval: POLL_MS`
+  while pending or running: ruling B7, arch-r2-014; every observer's interval restarts on each update of the query, so
+  two polls of one key move in step and merge, which is why the test asserts who polls rather than counting requests); the flight-lists query uses `refetchInterval: POLL_MS` only while
   `reading !== null`; the cards query `refetchInterval: POLL_MS` only while a card is pending or running;
   `useMutation` with `onSuccess` invalidating `['cards']`, `['definitions']` and `['date-pairs', id]`. Verified with
   context7 `/tanstack/query`.
