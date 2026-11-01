@@ -4,6 +4,7 @@ import {
   type IsoDateTime,
   isScheduled,
   type OperatorMessageKind,
+  type StopCause,
 } from '@gmt/core';
 import type { ExecutionPatch } from '@gmt/db';
 import type { EngineContext } from './context.js';
@@ -13,7 +14,7 @@ import { type RunState, type StopReason, stopRun } from './run.js';
 import { runDiscovery } from './stages/discovery.js';
 import { runFlightLists } from './stages/flightLists.js';
 import { runVerification } from './stages/verification.js';
-import { stopCauseOf, stopPatch } from './stopCause.js';
+import { isBrowserPageLimit, stopCauseOf, stopPatch } from './stopCause.js';
 import { budgetText } from './text.js';
 
 /**
@@ -134,21 +135,15 @@ export function finalStatus(
               : `A provider rate window is full; the run resumes automatically on ${formatInstant(resumeAfter, tz)}.`,
         },
       };
-    case 'budget': {
-      const e = stop.error;
-      const when =
-        resumeAfter === null
-          ? 'It needs a cap change, or a manual resume after editing the definition.'
-          : `It resumes automatically on ${formatInstant(resumeAfter, tz)}, when the cap window reopens; if by then it is older than its discovery refresh allows, it is cancelled instead and the next run starts with fresh prices.`;
+    case 'budget':
       return {
         status: 'paused_budget',
         patch: { resumeAfter, ...stored },
         notice: {
           kind: 'paused_budget',
-          detail: `The cap was reached: ${budgetText(e, 'the next call needed')}. ${when}`,
+          detail: `The cap was reached: ${budgetText(stop.error, 'the next call needed')}. ${budgetNext(cause, tz, scheduled)}`,
         },
       };
-    }
     case 'child-cap':
       // why: ruling 7 — a child never pauses on a cap; it ends, with the scope in the log and its cause on the row
       return {
@@ -162,7 +157,8 @@ export function finalStatus(
         patch: { resumeAfter: null, ...stored },
         notice: {
           kind: 'paused_error',
-          detail: `Every ${stop.stage} provider was disabled after errors; resume manually once the cause is fixed.`,
+          // why: the page's fix for these sources is Search again (§8.1 "Stop causes"), so the notice never offers Resume
+          detail: `Every ${stop.stage} provider was disabled after errors; once the cause is fixed, Search again.`,
         },
       };
     case 'fatal':
@@ -173,6 +169,46 @@ export function finalStatus(
       };
   }
 }
+
+/**
+ * What a paused_budget notice (email, Status) tells the operator to do next (spec revision 55 §8.1 "Stop causes", WP20
+ * final review): the same offer, in the same order of cases, as the stop's fix on the search's page (`stopText`'s
+ * budget head), so the notice never offers a Resume the page refuses or leaves out one it offers. A run's own cap is a
+ * cap change in Edit, then Resume (no schedule resumes it); a browser page limit, per run or monthly, and any other
+ * provider's own per-run cap, is never resumed: Search again carries on; a plan with no calls left is Check Providers;
+ * a scheduled run that stored a resume says when; anything else is Search again or Resume, and an unscheduled search is
+ * told it has no schedule to carry it on.
+ */
+function budgetNext(cause: StopCause, tz: string, scheduled: boolean): string {
+  // why: finish builds a budget stop's cause from that stop, so any other kind here is an internal slip; it gets the
+  // plainest offer the page always makes
+  if (cause.kind !== 'budget') return 'Search again when you are ready.';
+  switch (cause.scope) {
+    case 'execution-calls':
+    case 'execution-free-calls':
+    case 'execution-cost':
+      return 'Raise the limit in Edit, then Resume.';
+    case 'provider-execution':
+      return CARRY_ON;
+    case 'provider-lifetime':
+      return 'Check Providers.';
+    case 'provider-month':
+    case 'global-month':
+      break;
+  }
+  if (isBrowserPageLimit(cause))
+    return cause.resetsAt === null
+      ? CARRY_ON
+      : `Search again after ${formatInstant(cause.resetsAt, tz)} carries on with the prices already found.`;
+  if (cause.resumeAfter !== null)
+    return `It resumes automatically on ${formatInstant(cause.resumeAfter, tz)}, when the cap window reopens; if by then it is older than its discovery refresh allows, it is cancelled instead and the next run starts with fresh prices.`;
+  return scheduled
+    ? 'Search again, or Resume when you are ready.'
+    : 'This search has no schedule; Search again, or Resume when you are ready.';
+}
+
+/** A never-resumed budget stop's next step (revision 55 §8.1): a fresh run, which reuses what this one found. */
+const CARRY_ON = 'Search again carries on with the prices already found.';
 
 /**
  * Writes the pass's final status after sending its notices. The status write is the last act, so anyone who observes a

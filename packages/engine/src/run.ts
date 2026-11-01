@@ -109,13 +109,14 @@ export interface RunState {
    */
   flightLists: { read: number; planned: number } | null;
   /**
-   * Revision 55 §8.1: a cancel or SIGTERM that arrives during the flight-list step after a budget stop; finish prefers
-   * it to `stop` (Task 20.9 records it).
+   * Revision 55 §8.1: a cancel, SIGTERM or fatal stop that arrives during the flight-list step after an earlier stop, or
+   * a cancel or SIGTERM once the browser worker's per-run page cap stands and before the step starts (`stopRun`); finish
+   * prefers it to `stop`.
    */
   flightStop: StopReason | null;
   /**
    * Revision 55 §8.1: true while the flight-list step runs (stages/flightLists.ts sets and clears it), so `stopRun` can
-   * record a cancel or SIGTERM that arrives then, after a budget stop, as `flightStop`.
+   * record a cancel, SIGTERM or fatal stop that arrives then, after an earlier stop, as `flightStop`.
    */
   flightStepActive: boolean;
   readonly parseStreak: Map<ProviderId, number>;
@@ -218,30 +219,39 @@ export function newRun(
 
 /**
  * Records the first stop reason; stops new work, and aborts calls in flight only for cancel, SIGTERM and fatal.
- * Revision 55 §8.1 (ruling A16, and the 20.9 review's ruling): a cancel, SIGTERM or fatal stop that arrives while the
- * flight-list step runs after an earlier stop, or once the browser worker's per-run page cap (the one stop the step
- * runs after) stands, becomes `flightStop`, which `finish` prefers, so the run ends `cancelled`, `interrupted` or fatal
- * rather than paused.
+ * Revision 55 §8.1 (ruling A16, the 20.9 review's ruling and the final review's): a later stop becomes `flightStop`,
+ * which `finish` prefers, in two cases only. While the flight-list step runs after an earlier stop, a cancel, SIGTERM or
+ * fatal stop (the step's own database failure, R-dberror) ends the run `cancelled`, `interrupted` or fatal. Once the
+ * browser worker's per-run page cap stands and before the step starts, only a cancel or SIGTERM does
+ * (`cancelOrSigtermBeforeFlightStep`); a fatal stop there is logged and the run keeps the budget stop's outcome.
  */
 export function stopRun(run: RunState, reason: StopReason): void {
   if (run.stop === null) run.stop = reason;
   else if (
     run.flightStop === null &&
     ABORTING.has(reason.kind) &&
-    (run.flightStepActive || flightStepFollows(run.stop))
+    (run.flightStepActive || cancelOrSigtermBeforeFlightStep(run.stop, reason))
   )
     run.flightStop = reason;
+  else if (reason.kind === 'fatal')
+    // why: a fatal stop that is not recorded must still be seen: its message is in the log, never lost silently
+    run.log.error(
+      { err: reason.message, kept: run.stop.kind },
+      'execution: a later fatal stop was not recorded',
+    );
   run.intake.abort();
   if (ABORTING.has(reason.kind)) run.controller.abort();
 }
 
 /**
- * The one stop the flight-list step runs after (spec rev 55 §8.1): the browser worker's own per-run page cap. A cancel or
- * SIGTERM that arrives once it stands, before the step starts as well as during it (the 20.9 review's ruling), is
- * recorded as `flightStop`, so the run ends cancelled or interrupted rather than paused.
+ * Whether `reason` is a cancel or SIGTERM arriving after the one stop the flight-list step runs after (spec rev 55
+ * §8.1: the browser worker's own per-run page cap) and before the step starts (the 20.9 review's ruling). Only those
+ * two are recorded as `flightStop` there, so the run ends cancelled or interrupted rather than paused; a fatal stop
+ * never is (the final review's ruling), so it cannot replace the page cap's paused_budget before the step has run.
  */
-function flightStepFollows(stop: StopReason): boolean {
+function cancelOrSigtermBeforeFlightStep(stop: StopReason, reason: StopReason): boolean {
   return (
+    (reason.kind === 'cancel' || reason.kind === 'sigterm') &&
     stop.kind === 'budget' &&
     stop.error.scope === 'provider-execution' &&
     stop.error.providerId === 'camoufox'

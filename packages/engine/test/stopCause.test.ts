@@ -57,6 +57,24 @@ describe('stopCauseOf (revision 55 §8.1)', () => {
     expect(stopCauseOf({ kind: 'child-cap', error: err }, causeRun(), true)).toEqual({ kind: 'child-cap' });
   });
 
+  it('a SIGTERM after a browser lane left its window marks the interrupted cause (final review ruling); a catch-up lane does not', () => {
+    const left = (windowOut: 'outside-browser-window' | 'catch-up-no-browser' | null) =>
+      causeRun({ lanes: new Map([['discovery|camoufox', { windowOut }]]) });
+    expect(stopCauseOf({ kind: 'sigterm' }, left('outside-browser-window'), true)).toEqual({
+      kind: 'interrupted',
+      browserWindowLeft: true,
+    });
+    expect(stopCauseOf({ kind: 'sigterm' }, left('outside-browser-window'), false)).toEqual({
+      kind: 'interrupted',
+      browserWindowLeft: true,
+    });
+    // why: a catch-up leaves its browser cells by design (decision 79), not because a window closed
+    expect(stopCauseOf({ kind: 'sigterm' }, left('catch-up-no-browser'), true)).toEqual({
+      kind: 'interrupted',
+    });
+    expect(stopCauseOf({ kind: 'sigterm' }, left(null), true)).toEqual({ kind: 'interrupted' });
+  });
+
   it('a limiter timeout carries its provider, and its resume only on a scheduled search (Ian ruling 2)', () => {
     const stop: StopReason = { kind: 'limiter-timeout', providerId: 'travelpayouts', resumeAfter: RESUME };
     expect(stopCauseOf(stop, causeRun(), true)).toEqual({

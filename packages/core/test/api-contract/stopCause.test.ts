@@ -86,6 +86,7 @@ describe('stopCauseSchema', () => {
       { kind: 'superseded', by: 'remove' },
       { kind: 'never-started' },
       { kind: 'interrupted' },
+      { kind: 'interrupted', browserWindowLeft: true },
       { kind: 'fatal' },
       { kind: 'child-cap' },
       { kind: 'tool', ended: 'failed' },
@@ -116,6 +117,8 @@ describe('stopCauseSchema', () => {
   it('refuses an unknown kind, an unknown key and a negative count', () => {
     expect(stopCauseSchema.safeParse({ kind: 'paused' }).success).toBe(false);
     expect(stopCauseSchema.safeParse({ kind: 'cancelled', message: 'error' }).success).toBe(false);
+    // why: the interrupted cause's one flag is only ever true (absent otherwise), so a stored false is refused
+    expect(stopCauseSchema.safeParse({ kind: 'interrupted', browserWindowLeft: false }).success).toBe(false);
     expect(stopCauseSchema.safeParse(sources({ searched: -1 })).success).toBe(false);
     expect(stopCauseSchema.safeParse(budget({ cap: -1 })).success).toBe(false);
   });

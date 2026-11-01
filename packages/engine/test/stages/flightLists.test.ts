@@ -510,6 +510,31 @@ describe('the step after the review (Task 20.9 fix round 1)', () => {
       expect(cam.flightCalls).toHaveLength(0);
     },
   );
+  it('a fatal after the grid-cap stop and before the step starts is not taken as the flight stop: the run keeps the budget stop (final review ruling)', async () => {
+    const { e, cam } = camoufoxOnly({ cells: 120 });
+    const write = e.ctx.repos.cells.setOutcomesForProvider.bind(e.ctx.repos.cells);
+    let fired = false;
+    // why: the same point as above (the lane's settle, after the budget stop and before the step), where the database
+    // now fails: the error escapes discovery and execute stops the pass fatal
+    e.ctx.repos.cells.setOutcomesForProvider = (executionId, stage, providerId, from, to) => {
+      const n = write(executionId, stage, providerId, from, to);
+      if (!fired && providerId === 'camoufox' && to.status === 'skipped' && to.reason === 'budget') {
+        fired = true;
+        throw new Error('SQLITE_IOERR: disk I/O error (synthetic)');
+      }
+      return n;
+    };
+    const done = await e.settled(await start(e));
+    expect(fired).toBe(true);
+    expect(done.status).toBe('paused_budget');
+    expect(done.stopCause).toMatchObject({
+      kind: 'budget',
+      scope: 'provider-execution',
+      providerId: 'camoufox',
+    });
+    expect(done.flightLists).toBeNull();
+    expect(cam.flightCalls).toHaveLength(0);
+  });
 });
 
 describe('snapshotBudget and the flight allowance (spec rev 55 §8.1, the 20.8 note)', () => {

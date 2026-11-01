@@ -186,7 +186,14 @@ export function stopText(c: StopCause, f: StopTextFacts): StopText {
     case 'never-started':
       return { sentence: 'This run never started.', fix: SEARCH_AGAIN };
     case 'interrupted':
-      return { sentence: 'The app stopped during this search.', fix: fix('Resume, or Search again') };
+      // why: the final review's ruling — a resume past the run's browser window reads no browser pages, so a run whose
+      // browser lane had already left its window offers a fresh run only
+      return c.browserWindowLeft === true
+        ? {
+            sentence: `The app stopped during this search, after ${possessive(mainPathSource('camoufox'))} set hours had ended.`,
+            fix: SEARCH_AGAIN,
+          }
+        : { sentence: 'The app stopped during this search.', fix: fix('Resume, or Search again') };
     case 'fatal':
       return {
         sentence: 'The app hit an error and stopped this search.',

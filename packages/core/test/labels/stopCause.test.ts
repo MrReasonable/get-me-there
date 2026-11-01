@@ -449,6 +449,15 @@ const ROWS: Row[] = [
     { text: 'Resume, or Search again', command: null, resume: true },
   ],
   [
+    // why: the final review's ruling — a resume past the run's browser window reads no browser pages, so a run whose
+    // browser lane had left its window before the app stopped offers a fresh run only
+    'interrupted after the browser lane left its window',
+    { kind: 'interrupted', browserWindowLeft: true },
+    {},
+    "The app stopped during this search, after the browser worker's set hours had ended.",
+    SEARCH_AGAIN,
+  ],
+  [
     'fatal',
     { kind: 'fatal' },
     {},
@@ -792,6 +801,7 @@ describe('the structured resume flag on a fix (review finding 10)', () => {
   it('is set exactly when the fix offers Resume, and absent on a fresh-search fix and on NO_STOP_CAUSE_TEXT', () => {
     const facts = { tz: 'Europe/London', mode: 'native', scheduled: true } as const;
     expect(stopText({ kind: 'interrupted' }, facts).fix?.resume).toBe(true);
+    expect(stopText({ kind: 'interrupted', browserWindowLeft: true }, facts).fix?.resume).toBeUndefined();
     expect(stopText({ kind: 'cancelled' }, facts).fix?.resume).toBeUndefined();
     expect(NO_STOP_CAUSE_TEXT.fix?.resume).toBeUndefined();
   });

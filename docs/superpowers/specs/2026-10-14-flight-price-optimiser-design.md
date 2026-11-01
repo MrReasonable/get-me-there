@@ -2238,7 +2238,9 @@ finish: completed, or the stop's status with its stored cause ("Stop causes" bel
   and, when the flight-list step ran after the stop, the flights read of
   planned), `limiter-timeout` (its provider and `resumeAfter`), `cancelled`,
   `superseded` (by `schedule`, `search-again`, `stale` or `remove`),
-  `never-started`, `interrupted`, `fatal`, `child-cap`, `skipped-confirm`,
+  `never-started`, `interrupted` (marked `browserWindowLeft` when a browser
+  lane of the pass had left its window, `outside-browser-window`, before the
+  app stopped; a crash-marked row is never marked), `fatal`, `child-cap`, `skipped-confirm`,
   `skipped-budget` (scope and provider), `skipped-window` and
   `skipped-missed` (its code). Every detail or reason the app stores is one
   word of `STOP_DETAILS` (the nine `ProviderError` kinds of §5.1, `auth`,
@@ -2275,7 +2277,9 @@ finish: completed, or the stop's status with its stored cause ("Stop causes" bel
   "Replaced by a search you started."; "Replaced by a scheduled run."; "Too old
   to carry on; a fresh run replaced it."; "Stopped when the search was
   removed."; "The app stopped during this search." with "Resume, or Search
-  again"; "Skipped: today's estimate (about £1.20) is above the confirmation
+  again", and, when its browser lane had left its window (a resume would read
+  no browser pages), "The app stopped during this search, after the browser
+  worker's set hours had ended." with "Search again"; "Skipped: today's estimate (about £1.20) is above the confirmation
   you gave when you set the schedule (£1.00)." with "Change the schedule's
   confirmation in Edit". A stopped row with no stored cause (written before
   migration 0011) reads `NO_STOP_CAUSE_TEXT`, "No reason was recorded for this
@@ -2291,7 +2295,15 @@ finish: completed, or the stop's status with its stored cause ("Stop causes" bel
   which reads `isScheduled` live and skips such a run); its stop sentence says
   when the limit resets and its fix offers Search again or Resume, as the
   cause allows (a limiter pause or an execution cap offers Resume, a page
-  limit Search again, §8.1 "Stop causes"). Scheduled
+  limit Search again, §8.1 "Stop causes"). The operator notice of a
+  `paused_budget` stop (email and Status) offers what that fix offers, case for
+  case, and never a Resume the page refuses: a run's own cap "Raise the limit in
+  Edit, then Resume."; a browser page limit, per run or monthly, and another
+  provider's own per-run cap "Search again carries on with the prices already
+  found." (after the monthly limit's reset when it has one); a plan with no
+  calls left "Check Providers."; a scheduled run that stored a resume when it
+  resumes; any other "Search again, or Resume when you are ready.", led on an
+  unscheduled search by "This search has no schedule;". Scheduled
   searches keep the automatic resume. Two stops follow for every search,
   scheduled or not: a stop at the browser provider's **monthly** page limit
   stores `resume_after` NULL and never offers Resume (a resume past the run's
@@ -2336,8 +2348,11 @@ finish: completed, or the stop's status with its stored cause ("Stop causes" bel
   the step with no row, no discovery cell marked and no notice (`ended
   'window'`) and is not a cancel; the run's status is unchanged. A cancel or
   SIGTERM during the step after a budget stop ends the run `cancelled` or
-  `interrupted` (the step records it, and finish prefers it to the budget
-  stop). Each page writes one flight-list row, `read` with every field or
+  `interrupted`, and a fatal error during the step (the step's own database
+  failing) ends it fatal (the step records it, and finish prefers it to the
+  budget stop); between the per-run page cap's stop and the step's start only a
+  cancel or SIGTERM is recorded so, and a fatal error there is logged while the
+  run keeps the page cap's `paused_budget`. Each page writes one flight-list row, `read` with every field or
   `failed` with its reason word; **its error table**, under which no flight
   page ever calls discovery's failure path, changes a cell outcome, the
   run's status, its stop or a notice, except the once-per-cool-down notice a

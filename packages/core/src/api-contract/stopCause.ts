@@ -135,7 +135,10 @@ export const stopCauseSchema = z.discriminatedUnion('kind', [
     by: z.enum(['schedule', 'search-again', 'stale', 'remove']),
   }),
   z.strictObject({ kind: z.literal('never-started') }),
-  z.strictObject({ kind: z.literal('interrupted') }),
+  // why: the final review's ruling — `browserWindowLeft` (present only as true) marks a run whose browser lane had left
+  // its window (`outside-browser-window`) before the app stopped: a resume would read no browser pages, so its stop
+  // offers Search again; absent, the run offers Resume as well (a crash-marked row never knows, so it is absent there)
+  z.strictObject({ kind: z.literal('interrupted'), browserWindowLeft: z.literal(true).optional() }),
   z.strictObject({ kind: z.literal('fatal') }),
   z.strictObject({ kind: z.literal('child-cap') }),
   // why: R3 — a tool run (smoke, record) that ended early stores a cause too, so NULL means only "written before 0011"

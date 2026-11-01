@@ -9,6 +9,7 @@ export function causeRun(over: Partial<CauseRun> = {}): CauseRun {
     disabledReason: new Map(),
     searchedDatePairs: () => 0,
     flightLists: null,
+    lanes: new Map(),
     snapshot: { providers: { discovery: [], verification: [], discoveryRefreshHours: {} } },
     ...over,
   };

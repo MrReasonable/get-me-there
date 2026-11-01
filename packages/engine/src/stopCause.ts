@@ -16,7 +16,7 @@ import {
   stopText,
 } from '@gmt/core';
 import type { EngineContext } from './context.js';
-import type { DisabledDetail, RunState, StopReason } from './run.js';
+import type { DisabledDetail, Lane, RunState, StopReason } from './run.js';
 
 /** A stored word as a `STOP_DETAILS` word, or `fallback` when it is not one (never free text, §8.1). */
 export function toStopDetail(word: string | null, fallback: StopDetail): StopDetail {
@@ -38,7 +38,8 @@ export function isBrowserPageLimit(
  * The cause a stop stores (spec revision 55 §8.1). `scheduled` is `isScheduled` over the live definition, read at finish:
  * an unscheduled search's pause stores no `resumeAfter` (Ian's ruling 2), and neither does the browser worker's monthly
  * or per-run page limit on any search; a budget cause keeps its window's end as `resetsAt` either way. A cancel's cause
- * is its own; `all-disabled` names every disabled source of its stage with its class word, at least one.
+ * is its own; `all-disabled` names every disabled source of its stage with its class word, at least one; a SIGTERM
+ * marks `browserWindowLeft` when a lane of the pass had left its browser window.
  */
 export function stopCauseOf(
   stop: StopReason,
@@ -47,12 +48,17 @@ export function stopCauseOf(
     'disabledDetail' | 'disabled' | 'disabledReason' | 'searchedDatePairs' | 'flightLists'
   > & {
     snapshot: Pick<RunState['snapshot'], 'providers'>;
+    lanes: ReadonlyMap<string, Pick<Lane, 'windowOut'>>;
   },
   scheduled: boolean,
 ): StopCause {
   switch (stop.kind) {
     case 'sigterm':
-      return { kind: 'interrupted' };
+      // why: the final review's ruling — a lane that left its window (the pass's gate, or a resume's check b) means a
+      // resume would read no browser pages, so the cause says so and its stop offers Search again, not Resume
+      return [...run.lanes.values()].some((l) => l.windowOut === 'outside-browser-window')
+        ? { kind: 'interrupted', browserWindowLeft: true }
+        : { kind: 'interrupted' };
     case 'cancel':
       return stop.cause;
     case 'limiter-timeout':
