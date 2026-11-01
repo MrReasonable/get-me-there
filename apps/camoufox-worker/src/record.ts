@@ -21,19 +21,17 @@ import { loadWorkerConfig, type WorkerConfig } from './config.js';
 import { type ConsentDriver, createConsentDriver, type DisplayEnv } from './consentDriver.js';
 import { CooldownStore } from './cooldown.js';
 import {
-  CheapestStepFailed,
   type ContextLike,
+  classifyAfterFailedStep,
   createDriver,
   type Driver,
-  LOOKUP_TIMEOUT_MS,
   type PageLike,
-  POLL_TIMEOUT_MS,
   type ProbePage,
   pollUntilSettled,
   probePage,
   type RequestLike,
-  runStep,
   type Settled,
+  StepFailed,
   type StepOptions,
 } from './driver.js';
 import { type GuardState, installGuard, installProbeGuard, onAllowlist } from './guard.js';
@@ -46,7 +44,7 @@ import {
 } from './launch.js';
 import { acquireLock, LockHeld, sweepProbeProfiles } from './lock.js';
 import { debugLogging, stderrLog } from './log.js';
-import { MonthlyCounter } from './monthly.js';
+import { type Admission, MonthlyCounter } from './monthly.js';
 import { Pacer } from './pacer.js';
 import { claim } from './pageClaim.js';
 import { profileDir } from './paths.js';
@@ -60,6 +58,7 @@ import {
   RecordingRefused,
 } from './recordArgs.js';
 import { type Outcome, recordGraph, recordGrid, type Seen } from './recordDialogs.js';
+import { recordSelectOutbound, selectOutboundCapMs } from './recordSelect.js';
 import {
   type StopFacts,
   stopRecord,
@@ -114,6 +113,12 @@ export { assertClean, writeRecording } from './recordWrite.js';
 export const DEFAULT_ROOT = fileURLToPath(new URL('../fixtures/recorded/', import.meta.url));
 /** The bound on the read-back and the page close after a page (the session's own, brief §7 "Deadlines"). */
 const FINALLY_MS = 5000;
+/**
+ * WP21 Task 21.0: the documents a `--select-outbound` page may load (the first view, a selection, the list page
+ * again, a selection), reserved in the month before the first load and settled to the documents the guard counted.
+ * A worker literal; Task 21.3 pins it equal to core's FLIGHT_LIST_PAGES_PER_PAIR_MAX.
+ */
+export const RECORD_SELECT_PAGES = 4;
 
 export interface RecordDeps {
   /** process.platform: on Linux the research's headed window needs a display. */
@@ -217,7 +222,24 @@ export async function record(ctx: EntryContext, cfg: WorkerConfig, deps: RecordD
               ? null
               : pageUrl({ ...req, gl: cfg.pointOfSale });
         if (url === null) throw new RecordingRefused('no request');
-        await claim(pacer, monthly, args.moves.length, deps, ctx);
+        const select = args.kind === 'select-outbound';
+        // why: WP21 Task 21.0: a select-outbound page needs its whole worst case; with fewer pages left it is refused
+        // before anything loads (the admission would reserve one, and the research would be cut short)
+        if (select) {
+          const fits = monthly.check(0, RECORD_SELECT_PAGES);
+          if (fits.kind === 'ok' && fits.pagesReserved < RECORD_SELECT_PAGES)
+            throw new RecordingRefused(
+              `the worker's monthly page cap leaves fewer than the ${RECORD_SELECT_PAGES} pages --select-outbound may load`,
+            );
+        }
+        const admitted: Extract<Admission, { kind: 'ok' }> = await claim(
+          pacer,
+          monthly,
+          args.moves.length,
+          deps,
+          ctx,
+          select ? RECORD_SELECT_PAGES : 1,
+        );
         const c: ContextLike = context ?? (await deps.launch(profile));
         context = c;
         // why: ruling of 2026-10-18: the first view has the page timeout; the Cheapest flow the same again from its click,
@@ -226,13 +248,16 @@ export async function record(ctx: EntryContext, cfg: WorkerConfig, deps: RecordD
         const pageMs = cfg.pageTimeoutSeconds * 1000;
         // why: WP15 ruling 10: a grid page's overall cap is the first view's budget plus, per move, the spacing and the
         // move's own budget
+        // why: WP21 Task 21.0: a select-outbound page's cap is five page timeouts and three spacings (recordSelect.ts)
         const budget = pageBudget(
           deps.timers,
           pageMs,
           pageStart,
-          2 * pageMs +
-            args.moves.length *
-              (GRID_MIN_SCROLL_SPACING_SECONDS * 1000 + GRID_MOVE_BUDGET_MS + GRID_MOVE_RESERVE_MS),
+          select
+            ? selectOutboundCapMs(pageMs, pacer.spacingMs)
+            : 2 * pageMs +
+                args.moves.length *
+                  (GRID_MIN_SCROLL_SPACING_SECONDS * 1000 + GRID_MOVE_BUDGET_MS + GRID_MOVE_RESERVE_MS),
         );
         const d = budget.d;
         let outcome: Outcome | null = null;
@@ -259,14 +284,18 @@ export async function record(ctx: EntryContext, cfg: WorkerConfig, deps: RecordD
           } else {
             const p = await d.race(c.newPage());
             page = p;
-            // why: --no-flights and --landing read what appeared once the deadline passes, so their page stays open
-            if (args.kind !== 'no-flights' && args.kind !== 'landing')
+            // why: --no-flights and --landing read what appeared once the deadline passes, so their page stays open; so
+            // does --select-outbound, whose steps each read once more after their own deadline (WP21 Task 21.0)
+            if (args.kind !== 'no-flights' && args.kind !== 'landing' && !select)
               budget.onExpire(() => void p.close().catch(() => undefined));
             guard = await d.race(installGuard(c, p, deps.log, deps.selectors));
             const driver = createDriver(p, guard, deps.selectors);
             outcome = await interact(driver, p, guard, budget, pageStart, deps, args.kind, url, {
               moves: args.moves,
               anchor: req?.departureDate ?? null,
+              request: req,
+              pacer,
+              pageMs,
             });
           }
         } catch (e) {
@@ -285,6 +314,18 @@ export async function record(ctx: EntryContext, cfg: WorkerConfig, deps: RecordD
           await bounded(() => p.close(), FINALLY_MS, deps.timers);
         }
         pacer.release();
+        // why: WP21 Task 21.0: the select-outbound kind settles its reservation to the documents the guard counted (0
+        // when nothing loaded), never above it; every other kind's one page stays reserved
+        if (select)
+          monthly.settle(
+            admitted.reserved,
+            admitted.scrollAllowance,
+            0,
+            admitted.pagesReserved,
+            guard?.documentLoads ?? 0,
+          );
+        /** Every recording's meta states the documents its page loaded (WP21 Task 21.0). */
+        const documentLoads = guard?.documentLoads ?? 0;
         if (back !== 'overran') readBacks.push(back);
         if (failure !== null && !(outcome?.kind === 'stop')) {
           if (failure instanceof DeadlineExceeded)
@@ -387,7 +428,7 @@ export async function record(ctx: EntryContext, cfg: WorkerConfig, deps: RecordD
                   hops: (outcome.kind === 'stop' ? outcome.hops : late).map(stripQuery),
                   socsReadBack: back,
                 },
-                meta: meta(deps, args.kind, back, outcome.stepMs, { failure: stopKind }),
+                meta: meta(deps, args.kind, back, outcome.stepMs, { failure: stopKind, documentLoads }),
               },
               secrets,
             );
@@ -410,6 +451,7 @@ export async function record(ctx: EntryContext, cfg: WorkerConfig, deps: RecordD
               // why: ruling 7: the fixed window the grid's layout was read at
               window: deps.launchOptions.window,
               socsReadBack: back,
+              documentLoads,
               versions: {
                 selectors: SELECTORS_VERSION,
                 camoufoxJs: CAMOUFOX_JS_VERSION,
@@ -442,10 +484,11 @@ export async function record(ctx: EntryContext, cfg: WorkerConfig, deps: RecordD
           day,
           {
             facts: { ...outcome.data, socsReadBack: back },
-            meta: meta(deps, args.kind, back, outcome.stepMs, {}),
+            meta: meta(deps, args.kind, back, outcome.stepMs, { documentLoads }),
           },
           secrets,
         );
+        if (outcome.summary !== undefined) ctx.out(outcome.summary);
         ctx.out(`recorded ${path}`);
       }
     } finally {
@@ -483,8 +526,18 @@ async function interact(
   deps: RecordDeps,
   kind: RecordingKind,
   url: string,
-  /** A `--grid` page's moves, and its query's departure (each line date's year; null for a kind with no request). */
-  grid: { moves: readonly GridDirection[]; anchor: IsoDate | null },
+  /**
+   * A `--grid` page's moves, and its query's departure (each line date's year; null for a kind with no request); the
+   * request and the pacer for `--select-outbound` (WP21 Task 21.0).
+   */
+  grid: {
+    moves: readonly GridDirection[];
+    anchor: IsoDate | null;
+    request: RecordArgs['request'];
+    pacer: Pacer;
+    /** CAMOUFOX_PAGE_TIMEOUT_SECONDS in ms: each select-outbound step's own page timeout. */
+    pageMs: number;
+  },
 ): Promise<Outcome> {
   let d = budget.d;
   const poll = (S: Selectors, view: View) =>
@@ -524,6 +577,27 @@ async function interact(
   }
   stepMs.goto = deps.timers.now() - t0;
   if (kind === 'landing') return await readLanding(driver, page, guard, d, deps, stepMs, t0, stop);
+  if (kind === 'select-outbound') {
+    if (grid.request === null) throw new RecordingRefused('--select-outbound needs --depart and --return');
+    return await recordSelectOutbound({
+      driver,
+      page,
+      guard,
+      budget,
+      pageStart,
+      deps,
+      // why: the recorder reads the view after a selection with the return-view hypothesis on (as --no-flights reads
+      // with its line on), so the recording shows it before RETURN_SELECT_VERIFIED is set for this entry
+      returnsS: { ...deps.selectors, RETURN_SELECT_VERIFIED: true },
+      pacer: grid.pacer,
+      pageMs: grid.pageMs,
+      url,
+      request: grid.request,
+      stepMs,
+      clicked,
+      stop,
+    });
+  }
   let settled: Settled;
   try {
     settled = await poll(reading(deps.selectors), 'best');
@@ -554,24 +628,11 @@ async function interact(
   if (settled.kind.kind === 'blocked') return await stop(settled.kind.page, settled.rule, settled.facts);
   stepMs.settle = deps.timers.now() - t0;
   // why: a failed step may be a page that is no results page at all (a challenge after the click): it is classified
-  // once, under its own step, and a blocked kind is that stop, with its cool-down; otherwise null (end plainly)
-  const classifyAfterFailedStep = async (
-    cur: Deadline,
-    steps: StepOptions,
-    view: View,
-  ): Promise<Outcome | null> => {
-    const lookups = { timers: deps.timers, lookupMs: LOOKUP_TIMEOUT_MS };
-    const seen = await runStep('classify-after-failed-step', POLL_TIMEOUT_MS, cur, steps, (st) =>
-      driver.readFacts(st, lookups),
-    ).catch((err: unknown) => {
-      if (err instanceof DeadlineExceeded || cur.expired()) throw err;
-      return null;
-    });
-    if (seen === null) return null;
-    const k = classifyPageWithRule(seen.page, deps.selectors, view);
-    if (k.kind.kind === 'blocked' && k.kind.page !== 'unrecognised')
-      return await stop(k.kind.page, k.rule, { page: seen.page, settle: seen.settle });
-    return null;
+  // once, under its own step (driver.ts's classifyAfterFailedStep), and a blocked kind is that stop, with its
+  // cool-down; otherwise null (end plainly)
+  const afterFailedStep = async (cur: Deadline, steps: StepOptions, view: View): Promise<Outcome | null> => {
+    const blocked = await classifyAfterFailedStep(driver, cur, steps, deps.selectors, view);
+    return blocked === null ? null : await stop(blocked.page, blocked.rule, blocked.facts);
   };
   if (kind === 'grid' || kind === 'graph-explore') {
     // why: no-flights and results are the only kinds left after the blocked stop above
@@ -588,7 +649,7 @@ async function interact(
       stepMs,
       clicked,
       stop,
-      classifyAfterFailedStep,
+      classifyAfterFailedStep: afterFailedStep,
       settled,
     };
     return kind === 'grid' ? await recordGrid(c, shown, grid) : await recordGraph(c, shown);
@@ -605,13 +666,13 @@ async function interact(
         settled = await poll(deps.selectors, 'cheapest');
       } catch (e) {
         if (e instanceof DeadlineExceeded) throw e;
-        const blocked = await classifyAfterFailedStep(d, steps, 'cheapest');
+        const blocked = await afterFailedStep(d, steps, 'cheapest');
         if (blocked !== null) return blocked;
         // why: otherwise the step ends the recording plainly, naming it; no cool-down (nothing stopped the page)
-        const step = e instanceof CheapestStepFailed ? `${e.step} (${e.reason})` : 'click';
+        const step = e instanceof StepFailed ? `${e.step} (${e.reason})` : 'click';
         // why: the budget's end is the view not settling, said as such; any other step is the click flow
         throw new RecordingRefused(
-          e instanceof CheapestStepFailed && e.step === 'cheapest-poll'
+          e instanceof StepFailed && e.step === 'cheapest-poll'
             ? `the Cheapest view did not settle within its budget (${step}); the debug log has the poll lines`
             : `the Cheapest tab could not be clicked: the ${step} step; the debug log has the step lines`,
         );
@@ -814,7 +875,7 @@ async function consentProbe(
             'consent-probe',
             'missing',
             { settle: deps.timers.now() - t0 },
-            { profile: 'throwaway' },
+            { profile: 'throwaway', documentLoads: guard.documentLoads },
           ),
         },
         [cfg.key.reveal()],

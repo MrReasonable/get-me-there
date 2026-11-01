@@ -182,7 +182,7 @@ describe('installGuard (ruling 3: route, framenavigated and request guards)', ()
     await ctx.routeRequest(req('not a url'));
     expect(state.refused).toBe('consent-unhandled');
     const next = await installGuard(ctx, new FakePage(ctx), log);
-    expect(next).toEqual({ hops: [], frameUrls: [], refused: null });
+    expect(next).toEqual({ hops: [], frameUrls: [], refused: null, documentLoads: 0 });
   });
   // why: fix round 1 (prov-int M6): a refused sub-frame never names the page; only a main-frame refusal does
   it('a refused sub-frame navigation is aborted but leaves refused null; a main-frame one sets it', async () => {
@@ -214,6 +214,81 @@ describe('installGuard (ruling 3: route, framenavigated and request guards)', ()
     await page.goto('https://consent.google.com/ml?continue=x');
     expect(state.refused).toBeNull();
     expect(state.hops).toEqual(['https://consent.google.com/ml?continue=x']);
+  });
+});
+
+// why: WP21 Task 21.0 (spec §2 "a page is one document load"): the guard counts the main frame's document loads, so a
+// selection that loads a new document is told apart from an in-app change (a History API change fires
+// framenavigated with no request, and so adds a hop but no load)
+describe('the document-load count (WP21 Task 21.0)', () => {
+  it('a main-frame navigation request the route lets through counts once', async () => {
+    const ctx = new FakeContext();
+    const state = await installGuard(ctx, new FakePage(ctx), log);
+    expect(state.documentLoads).toBe(0);
+    expect(await ctx.routeRequest(req('https://www.google.com/travel/flights?q=x'))).toBe('continued');
+    expect(state.documentLoads).toBe(1);
+    // why: a subresource is never a document
+    expect(await ctx.routeRequest(req('https://www.google.com/x.js', { nav: false }))).toBe('continued');
+    expect(state.documentLoads).toBe(1);
+  });
+  it('a goto through the fake page counts its one navigation, however many redirect hops it has', async () => {
+    const ctx = new FakeContext();
+    const page = new FakePage(ctx, {
+      hops: ['https://www.google.com/travel/flights?q=x', 'https://www.google.com/travel/flights/search'],
+    });
+    const state = await installGuard(ctx, page, log);
+    await page.goto('https://www.google.com/travel/flights?q=x');
+    expect(state.documentLoads).toBe(1);
+    expect(state.hops).toHaveLength(2);
+  });
+  it('a framenavigated with a new URL and no request adds a hop and no load', async () => {
+    const ctx = new FakeContext();
+    const page = new FakePage(ctx);
+    const state = await installGuard(ctx, page, log);
+    page.emitFrameNavigated({
+      url: () => 'https://www.google.com/travel/flights/search?tfs=y',
+      parentFrame: () => null,
+    });
+    expect(state.hops).toEqual(['https://www.google.com/travel/flights/search?tfs=y']);
+    expect(state.documentLoads).toBe(0);
+  });
+  it('a sub-frame navigation changes neither the hops nor the count', async () => {
+    const ctx = new FakeContext();
+    const state = await installGuard(ctx, new FakePage(ctx), log);
+    expect(
+      await ctx.routeRequest(req('https://www.google.com/_/FlightsFrontendUi/bscframe', { frame: sub })),
+    ).toBe('continued');
+    expect(state).toMatchObject({ hops: [], documentLoads: 0 });
+  });
+  it('a refused main-frame navigation counts nothing and sets refused', async () => {
+    const ctx = new FakeContext();
+    const state = await installGuard(ctx, new FakePage(ctx), log);
+    expect(await ctx.routeRequest(req('https://www.example.test/'))).toBe('aborted');
+    expect(state).toMatchObject({ refused: 'off-allowlist', documentLoads: 0 });
+  });
+  it('the next page’s install resets the count to 0', async () => {
+    const ctx = new FakeContext();
+    const state = await installGuard(ctx, new FakePage(ctx), log);
+    await ctx.routeRequest(req('https://www.google.com/travel/flights?q=x'));
+    await ctx.routeRequest(req('https://www.google.com/travel/flights?q=y'));
+    expect(state.documentLoads).toBe(2);
+    expect((await installGuard(ctx, new FakePage(ctx), log)).documentLoads).toBe(0);
+  });
+  it('decideRoute’s allowlist is unchanged', () => {
+    expect(decideRoute('https://www.google.com/travel/flights', true)).toEqual({ action: 'continue' });
+    expect(decideRoute('https://www.google.com/travel/flights/search?tfs=x', true)).toEqual({
+      action: 'continue',
+    });
+    expect(decideRoute('https://www.google.com/travel/flightsevil', true)).toEqual({
+      action: 'abort',
+      kind: 'off-allowlist',
+    });
+    expect(decideRoute('https://consent.google.com/ml', true)).toEqual({
+      action: 'abort',
+      kind: 'consent-unhandled',
+    });
+    expect(decideRoute('https://accounts.google.com/', true)).toEqual({ action: 'abort', kind: 'sign-in' });
+    expect(decideRoute('https://www.example.test/x.js', false)).toEqual({ action: 'continue' });
   });
 });
 

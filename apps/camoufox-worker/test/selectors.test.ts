@@ -20,8 +20,37 @@ describe('the dated selectors module (spec §2; brief §9)', () => {
       LANDING_VERIFIED: true,
       // why: grid/2026-10-26/7 and 8 showed the date grid's unpriced cells on the operator's Mac
       GRID_UNPRICED_VERIFIED: true,
+      // why: WP21 Task 21.0: no recording of the return view yet
+      RETURN_SELECT_VERIFIED: false,
     });
     expect(Object.keys(flagsOf())).toEqual([...FLAG_NAMES]);
+  });
+  // why: WP21 Task 21.0: the outbound selection is clicked only on an entry a recording of the served sequence set it
+  // on; none has yet, so every entry reports it false, and PROOFS names no recording for it
+  it('RETURN_SELECT_VERIFIED is false on every entry for its pinned build, with no proof named', () => {
+    for (const k of OS_ARCHES) {
+      expect(flagsOf(selectorsFor(k, CAMOUFOX_BUILDS[k].build)).RETURN_SELECT_VERIFIED, k).toBe(false);
+      expect(PROOFS[k].RETURN_SELECT_VERIFIED, k).toBeUndefined();
+    }
+  });
+  // why: WP21 Task 21.0: the return view's patterns are a hypothesis the recording checks (Task 21.3 dates them); both
+  // price forms are admitted so the research can see whichever the page uses
+  it('the return view hypothesis: a returning-flights heading, and return links in either price form', () => {
+    const { heading, resultLink } = SELECTORS.returns;
+    for (const h of [
+      'Returning flights',
+      'returning flights',
+      'Top returning flights',
+      'Other returning flights',
+    ])
+      expect(heading.test(h), h).toBe(true);
+    for (const h of ['Top departing flights', 'Returning flights soon', 'Best returning flights'])
+      expect(heading.test(h), h).toBe(false);
+    expect(resultLink.test('1,204 British pounds round trip total. Nonstop flight with QQ Air.')).toBe(true);
+    expect(resultLink.test('From 478 British pounds round trip total. Nonstop flight with QQ Air.')).toBe(
+      true,
+    );
+    expect(resultLink.test('Select flight')).toBe(false);
   });
   it('each true flag of every entry names its proving recording’s date, and no false flag names one (TS-13)', () => {
     for (const k of OS_ARCHES) {

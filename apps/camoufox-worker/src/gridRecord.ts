@@ -19,7 +19,6 @@ import {
 import { type ClassifyRule, classifyPageWithRule, type PageFacts } from './classify.js';
 import { type Blocked, type Facts, panelOf, type Skipped, settle, snapshotOf, soft } from './dialogSettle.js';
 import {
-  CheapestStepFailed,
   CLICK_TIMEOUT_MS,
   clickTimeoutOf,
   countOf,
@@ -30,6 +29,7 @@ import {
   type PageLike,
   POLL_TIMEOUT_MS,
   runStep,
+  StepFailed,
   type StepOptions,
   timeoutOf,
 } from './driver.js';
@@ -230,7 +230,7 @@ export async function exploreGrid(
   );
   const button = page.getByRole('button', { name: S.results.priceGraphButton, exact: true });
   const found = await runStep('find-graph-button', LOOKUP_TIMEOUT_MS, d, steps, (st) => countOf(button, st));
-  if (found !== 1) throw new CheapestStepFailed('find-graph-button', 'not-found');
+  if (found !== 1) throw new StepFailed('find-graph-button', 'not-found', steps.flow);
   // why: as the Cheapest flow: the dialog has its own budget from the first click, within twice the page timeout
   const dd = o.next();
   const click = (name: string, l: LocatorLike, target: string, st0: Deadline) =>
@@ -249,7 +249,7 @@ export async function exploreGrid(
   if (opened.kind === 'blocked') return opened;
   const tab = dialog.getByRole('tab', { name: G.datesTab, exact: true });
   const tabs = await runStep('find-dates-tab', LOOKUP_TIMEOUT_MS, dd, steps, (st) => countOf(tab, st));
-  if (tabs !== 1) throw new CheapestStepFailed('find-dates-tab', 'not-found');
+  if (tabs !== 1) throw new StepFailed('find-dates-tab', 'not-found', steps.flow);
   await click('click-dates-tab', tab.nth(0), `tab:${G.datesTab}`, dd);
 
   /** One view after a click: settled (after a scroll, only once changed), then read. */

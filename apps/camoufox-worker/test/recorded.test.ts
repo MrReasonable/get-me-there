@@ -49,26 +49,32 @@ const metaSchema = z.object({
   // why: pie-b1-006 added the entry; the recordings made before it are the operator's Mac (darwin-arm64)
   osArch: z.enum(OS_ARCHES).default('darwin-arm64'),
 });
-const pageFactsSchema = z.object({
-  url: z.string(),
-  hops: z.array(z.string()),
-  frameUrls: z.array(z.string()),
-  text: z.object({
-    unusualTraffic: z.boolean(),
-    consentHeading: z.boolean(),
-    signInHeading: z.boolean(),
-    challenge: z.boolean(),
-    noFlights: z.boolean(),
-    // why: WP17 Task 17.4 added it; recordings made before then lack it
-    landingHeading: z.boolean().default(false),
-  }),
-  accountControl: z.boolean(),
-  cheapestTabs: z.array(
-    z.object({ name: z.string(), inTablist: z.boolean(), selected: z.boolean().exactOptional() }),
-  ),
-  dateGridButtons: z.number(),
-  resultLinks: z.number(),
-});
+const pageFactsSchema = z
+  .object({
+    url: z.string(),
+    hops: z.array(z.string()),
+    frameUrls: z.array(z.string()),
+    text: z.object({
+      unusualTraffic: z.boolean(),
+      consentHeading: z.boolean(),
+      signInHeading: z.boolean(),
+      challenge: z.boolean(),
+      noFlights: z.boolean(),
+      // why: WP17 Task 17.4 added it; recordings made before then lack it
+      landingHeading: z.boolean().default(false),
+      // why: WP21 Task 21.0 added it; recordings made before then lack it (no return heading was read)
+      returnHeading: z.boolean().default(false),
+    }),
+    accountControl: z.boolean(),
+    cheapestTabs: z.array(
+      z.object({ name: z.string(), inTablist: z.boolean(), selected: z.boolean().exactOptional() }),
+    ),
+    dateGridButtons: z.number(),
+    resultLinks: z.number(),
+    // why: WP21 Task 21.0 added it; off the return view it equals resultLinks, which recordings made before then state
+    outboundLinks: z.number().exactOptional(),
+  })
+  .transform((p) => ({ ...p, outboundLinks: p.outboundLinks ?? p.resultLinks }));
 const factsSchema = z.object({
   kind: z.enum(KINDS),
   landing: z.string(),

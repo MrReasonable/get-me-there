@@ -75,6 +75,9 @@ export const FLAG_NAMES = [
   // why: spec §2 "Cells by name": the date grid's unpriced cells ("no flights, …", "price unknown, …"), read only where
   // a grid recording showed them (grid/2026-10-26/7 and 8 on darwin-arm64); elsewhere they stay unparsed
   'GRID_UNPRICED_VERIFIED',
+  // why: WP21 Task 21.0 (spec §2 rev 55, the return leg): the outbound's selection and the return view after it, false
+  // on every entry until a recording of the served sequence sets it on that entry (Task 21.3, darwin-arm64 first)
+  'RETURN_SELECT_VERIFIED',
 ] as const;
 export type FlagName = (typeof FLAG_NAMES)[number];
 
@@ -94,6 +97,7 @@ const NONE: Readonly<Record<FlagName, boolean>> = {
   GRID_VERIFIED: false,
   LANDING_VERIFIED: false,
   GRID_UNPRICED_VERIFIED: false,
+  RETURN_SELECT_VERIFIED: false,
 };
 
 /**

@@ -1,19 +1,43 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
 import {
   CLICK_TIMEOUT_MS,
+  classifyAfterFailedStep,
   createDriver,
+  type Driver,
   LOOKUP_TIMEOUT_MS,
   POLL_TIMEOUT_MS,
+  type ProbePage,
   pollUntilSettled,
+  probePage,
+  runStep,
+  StepFailed,
 } from '../src/driver.js';
 import type { GuardState } from '../src/guard.js';
 import { SELECTORS } from '../src/selectors.js';
 import { bounded, DeadlineExceeded } from '../src/timers.js';
-import { descendants, FakePage, n, option, RESULTS_URL, resultsTree, text } from './support/fakePage.js';
+import {
+  descendants,
+  type FakeNode,
+  FakePage,
+  n,
+  option,
+  optionName,
+  RESULTS_URL,
+  resultsTree,
+  returnOptionName,
+  text,
+  viewMore,
+} from './support/fakePage.js';
 import { memoryLog } from './support/log.js';
 import { fakeTimers, flush } from './support/timers.js';
 
-const guard = (o: Partial<GuardState> = {}): GuardState => ({ hops: [], frameUrls: [], refused: null, ...o });
+const guard = (o: Partial<GuardState> = {}): GuardState => ({
+  hops: [],
+  frameUrls: [],
+  refused: null,
+  documentLoads: 0,
+  ...o,
+});
 function setup(trees = [resultsTree()]) {
   const page = new FakePage(null);
   page.setUrl(RESULTS_URL);
@@ -47,17 +71,20 @@ describe('createDriver.readFacts (ruling 5: locators, never printed ARIA)', () =
           challenge: false,
           noFlights: false,
           landingHeading: false,
+          returnHeading: false,
         },
         accountControl: false,
         cheapestTabs: [{ name: 'Cheapest from 451 British pounds', inTablist: true, selected: false }],
         dateGridButtons: 1,
         resultLinks: 2,
+        outboundLinks: 2,
       },
       settle: {
         resultsReturned: true,
         fetching: false,
         cheapestPriced: true,
         cheapestSelected: false,
+        returnHeading: false,
         linkSignature: expect.stringMatching(/^[0-9a-f]{16}$/),
       },
       names: [expect.stringMatching(/^From 478/), expect.stringMatching(/^From 451/)],
@@ -83,6 +110,7 @@ describe('createDriver.readFacts (ruling 5: locators, never printed ARIA)', () =
       challenge: true,
       noFlights: true,
       landingHeading: true,
+      returnHeading: false,
     });
     expect(page.accountControl).toBe(true);
     expect(page.cheapestTabs).toEqual([]);
@@ -105,6 +133,7 @@ describe('createDriver.readFacts (ruling 5: locators, never printed ARIA)', () =
       fetching: false,
       cheapestPriced: false,
       cheapestSelected: false,
+      returnHeading: false,
       linkSignature: expect.stringMatching(/^[0-9a-f]{16}$/),
     });
   });
@@ -186,6 +215,7 @@ describe('createDriver list, form and click', () => {
       resultsStated: null,
       currencyName: null,
       locationName: null,
+      viewMore: false,
     });
   });
   it('formFacts reads the four controls, or null when any is missing', async () => {
@@ -460,7 +490,7 @@ describe('clickCheapest (ruling of 2026-10-18)', () => {
         log: lines,
         startedAt: timers.now(),
       }),
-    ).rejects.toMatchObject({ name: 'CheapestStepFailed', step: 'click-tab', reason: 'failed' });
+    ).rejects.toMatchObject({ name: 'StepFailed', step: 'click-tab', reason: 'failed' });
     expect(lines.lines.filter((l) => l.msg === 'cheapest step failed').map((l) => l.o)).toEqual([
       { step: 'click-tab', error: 'TimeoutError', elapsedMs: 0 },
     ]);
@@ -578,7 +608,7 @@ describe('the Cheapest flow in timed steps (ruling of 2026-10-18)', () => {
     });
     for (let i = 0; i < 5; i++) await flush();
     timers.runOut();
-    await expect(run).rejects.toMatchObject({ name: 'CheapestStepFailed', step: 'find-popup' });
+    await expect(run).rejects.toMatchObject({ name: 'StepFailed', step: 'find-popup' });
     expect(lines.lines.filter((l) => l.msg === 'cheapest step timed out').map((l) => l.o)).toEqual([
       { step: 'find-popup', elapsedMs: 5000, timeoutMs: 5000 },
     ]);
@@ -596,7 +626,7 @@ describe('the Cheapest flow in timed steps (ruling of 2026-10-18)', () => {
     });
     for (let i = 0; i < 5; i++) await flush();
     timers.runOut();
-    await expect(run).rejects.toMatchObject({ name: 'CheapestStepFailed', step: 'click-tab' });
+    await expect(run).rejects.toMatchObject({ name: 'StepFailed', step: 'click-tab' });
     expect(
       lines.lines
         .filter((l) => l.msg === 'cheapest step timed out')
@@ -617,7 +647,7 @@ describe('the Cheapest flow in timed steps (ruling of 2026-10-18)', () => {
         log: memoryLog(),
         startedAt: timers.now(),
       }),
-    ).rejects.toMatchObject({ name: 'CheapestStepFailed', step: 'confirm-selected' });
+    ).rejects.toMatchObject({ name: 'StepFailed', step: 'confirm-selected' });
   });
 });
 
@@ -671,7 +701,7 @@ describe('Cheapest poll and lookup bounds', () => {
         log: lines,
         startedAt: timers.now(),
       }),
-    ).rejects.toMatchObject({ name: 'CheapestStepFailed', step: 'cheapest-poll', reason: 'timed-out' });
+    ).rejects.toMatchObject({ name: 'StepFailed', step: 'cheapest-poll', reason: 'timed-out' });
     // why: the fake sleep advances the clock in one jump, so the 20 s bound is seen at the 25 s mark here
     // why: ruling of 2026-10-18: an overrun poll is unsettled, polled again until only the fallback's reserve is left
     const timedOut = lines.lines.filter((l) => l.msg === 'cheapest step timed out').map((l) => l.o);
@@ -795,7 +825,7 @@ describe('the Cheapest poll that overruns (ruling of 2026-10-18)', () => {
       if (settledWith === null) timers.runOut();
     }
     expect(settledWith).toMatchObject({
-      name: 'CheapestStepFailed',
+      name: 'StepFailed',
       step: 'cheapest-poll',
       reason: 'timed-out',
     });
@@ -803,5 +833,338 @@ describe('the Cheapest poll that overruns (ruling of 2026-10-18)', () => {
     expect(timers.now() - Date.parse('2026-10-18T05:00:00.000Z')).toBeGreaterThanOrEqual(
       90_000 - 20_000 - 7000,
     );
+  });
+});
+
+// why: WP21 Task 21.0: the literal below was captured from the driver before the return view's lookups were added,
+// over the same tree, so the served path's facts are shown unchanged field by field; only outboundLinks and the
+// return heading are new
+describe('readFacts on the served path is unchanged (WP21 Task 21.0)', () => {
+  it('every existing field equals the literal captured from the unmodified code, plus the two new facts', async () => {
+    const { driver, d } = setup();
+    const r = await driver.readFacts(d);
+    expect(r).toEqual({
+      page: {
+        url: 'https://www.google.com/travel/flights/search?tfs=x',
+        hops: ['https://www.google.com/travel/flights?q=x'],
+        frameUrls: ['https://www.google.com/travel/flights/search?tfs=x'],
+        text: {
+          unusualTraffic: false,
+          consentHeading: false,
+          signInHeading: false,
+          challenge: false,
+          noFlights: false,
+          landingHeading: false,
+          returnHeading: false,
+        },
+        accountControl: false,
+        cheapestTabs: [{ name: 'Cheapest from 451 British pounds', inTablist: true, selected: false }],
+        dateGridButtons: 1,
+        resultLinks: 2,
+        outboundLinks: 2,
+      },
+      settle: {
+        resultsReturned: true,
+        fetching: false,
+        cheapestPriced: true,
+        cheapestSelected: false,
+        returnHeading: false,
+        linkSignature: 'c5ca95a9719e7c24',
+      },
+      names: [optionName(478), optionName(451)],
+    });
+    expect(await driver.listFacts(d)).toEqual({
+      names: [optionName(478), optionName(451)],
+      cheapestTabName: 'Cheapest from 451 British pounds',
+      resultsStated: 2,
+      currencyName: 'Currency GBP',
+      locationName: 'Location·United Kingdom',
+      viewMore: true,
+    });
+  });
+});
+
+/** A return view in the hypothesis form: a returning-flights heading, return links, the outbound list gone. */
+const returnTree = (o: { heading?: string; links?: FakeNode[]; extra?: FakeNode[]; more?: boolean } = {}) =>
+  n('document', 'Google Flights', [
+    n('tablist', '', [n('tab', 'Best'), n('tab', 'Cheapest from 451 British pounds')]),
+    n('main', '', [
+      n('heading', o.heading ?? 'Returning flights'),
+      n(
+        'list',
+        '',
+        o.links ?? [
+          n('listitem', '', [n('link', returnOptionName({ pounds: 451 }))]),
+          n('listitem', '', [n('link', returnOptionName({ pounds: 470, carrier: 'QQ Air' }))]),
+          n('listitem', '', [n('link', returnOptionName({ pounds: 512, priceForm: 'from' }))]),
+        ],
+      ),
+      ...(o.extra ?? []),
+    ]),
+    ...(o.more === false ? [] : [viewMore()]),
+    n('button', 'Currency GBP'),
+  ]);
+
+describe('the return view’s facts (WP21 Task 21.0)', () => {
+  it('readFacts(d, o, "returns") counts the links, names and signature by the return pattern; outboundLinks by the outbound one', async () => {
+    const selected = n('listitem', '', [n('link', optionName(451))]);
+    const { driver, d, timers } = setup([returnTree({ extra: [selected] })]);
+    const r = await driver.readFacts(d, { timers, lookupMs: LOOKUP_TIMEOUT_MS }, 'returns');
+    // why: the hypothesis reads both price forms, so the one outbound link left on the page matches it too
+    expect(r.page.resultLinks).toBe(4);
+    expect(r.page.outboundLinks).toBe(2);
+    expect(r.names).toHaveLength(4);
+    expect(r.names[0]).toBe(returnOptionName({ pounds: 451 }));
+    const best = await driver.readFacts(d);
+    expect(best.page.resultLinks).toBe(2);
+    expect(best.page.outboundLinks).toBe(2);
+    expect(best.settle.linkSignature).not.toBe(r.settle.linkSignature);
+  });
+  it('the return heading is true exactly when a heading matches the hypothesis', async () => {
+    for (const [heading, want] of [
+      ['Returning flights', true],
+      ['Top returning flights', true],
+      ['Other returning flights', true],
+      ['Top departing flights', false],
+      ['Returning flights later', false],
+    ] as const) {
+      const { driver, d } = setup([returnTree({ heading })]);
+      const r = await driver.readFacts(d, undefined, 'returns');
+      expect(r.page.text.returnHeading, heading).toBe(want);
+      expect(r.settle.returnHeading, heading).toBe(want);
+    }
+  });
+  it('listFacts(d, "returns") reads the return view’s links; viewMore is true exactly when the button exists', async () => {
+    const { driver, d, page } = setup([returnTree()]);
+    const l = await driver.listFacts(d, 'returns');
+    expect(l.names).toEqual([
+      returnOptionName({ pounds: 451 }),
+      returnOptionName({ pounds: 470, carrier: 'QQ Air' }),
+      returnOptionName({ pounds: 512, priceForm: 'from' }),
+    ]);
+    expect(l.viewMore).toBe(true);
+    // why: the outbound pattern reads only the "From" form
+    expect((await driver.listFacts(d)).names).toEqual([returnOptionName({ pounds: 512, priceForm: 'from' })]);
+    page.setTrees([returnTree({ more: false })]);
+    expect((await driver.listFacts(d, 'returns')).viewMore).toBe(false);
+    page.setTrees([resultsTree({ viewMore: false })]);
+    expect((await driver.listFacts(d)).viewMore).toBe(false);
+    page.setTrees([resultsTree()]);
+    expect((await driver.listFacts(d)).viewMore).toBe(true);
+  });
+  it('linkNames lists every link name in main with each https://… run replaced by <url>, at most 200', async () => {
+    const many = Array.from({ length: 205 }, (_, i) => n('link', `Link ${i}`));
+    const { driver, d, page } = setup([
+      n('document', '', [
+        n('link', 'Outside main'),
+        n('main', '', [n('link', 'See https://www.example.test/a?b=c for more'), n('link', 'Plain')]),
+      ]),
+    ]);
+    expect(await driver.linkNames(d)).toEqual(['See <url> for more', 'Plain']);
+    page.setTrees([n('document', '', [n('main', '', many)])]);
+    const names = await driver.linkNames(d);
+    expect(names).toHaveLength(200);
+    expect(names[199]).toBe('Link 199');
+  });
+  it('buttonNames and tabNames have the same shape, over the whole page', async () => {
+    const { driver, d, page } = setup([
+      n('document', '', [
+        n('button', 'Close https://www.example.test/x'),
+        n('main', '', [n('button', 'Select')]),
+        n('tablist', '', [n('tab', 'Best'), n('tab', 'Cheapest from £1')]),
+      ]),
+    ]);
+    expect(await driver.buttonNames(d)).toEqual(['Close <url>', 'Select']);
+    expect(await driver.tabNames(d)).toEqual(['Best', 'Cheapest from £1']);
+    page.setTrees([
+      n(
+        'document',
+        '',
+        Array.from({ length: 201 }, (_, i) => n('tab', `T${i}`)),
+      ),
+    ]);
+    expect(await driver.tabNames(d)).toHaveLength(200);
+  });
+});
+
+describe('clickOutbound (WP21 Task 21.0)', () => {
+  const NAME = optionName(451);
+  const tree = (links: FakeNode[], outside: FakeNode[] = []) =>
+    n('document', '', [...outside, n('main', '', [n('list', '', links)])]);
+  const run = (t: FakeNode, name = NAME) => {
+    const page = new FakePage(null);
+    page.setUrl(RESULTS_URL);
+    page.setTrees([t]);
+    const timers = fakeTimers();
+    const lines = memoryLog();
+    const d = timers.deadline(90_000);
+    const r = createDriver(page, guard()).clickOutbound(name, d, {
+      timers,
+      log: lines,
+      flow: 'select-outbound',
+    });
+    return { page, r, lines };
+  };
+  it('clicks the one link in main of that exact name and returns what it clicked', async () => {
+    const { page, r, lines } = run(tree([n('link', NAME), n('link', optionName(478))]));
+    expect(await r).toEqual([`link:${NAME}`]);
+    expect(page.calls.clicks).toEqual([`link:${NAME}`]);
+    expect(page.calls.timeouts).toContain(CLICK_TIMEOUT_MS);
+    expect(
+      lines.lines.filter((l) => l.msg === 'select-outbound step').map((l) => Reflect.get(l.o, 'step')),
+    ).toEqual(['find-outbound', 'find-outbound', 'click-outbound', 'click-outbound']);
+  });
+  it('none of that name is not-found, and nothing is clicked', async () => {
+    const { page, r } = run(tree([n('link', optionName(478))]));
+    await expect(r).rejects.toMatchObject({
+      name: 'StepFailed',
+      step: 'find-outbound',
+      reason: 'not-found',
+      flow: 'select-outbound',
+    });
+    expect(page.calls.clicks).toEqual([]);
+  });
+  it('two of that name are ambiguous, and nothing is clicked', async () => {
+    const { page, r } = run(tree([n('link', NAME), n('link', NAME)]));
+    await expect(r).rejects.toMatchObject({
+      step: 'find-outbound',
+      reason: 'ambiguous',
+      flow: 'select-outbound',
+    });
+    expect(page.calls.clicks).toEqual([]);
+  });
+  it('a link of that name outside main is not found', async () => {
+    const { page, r } = run(tree([], [n('link', NAME)]));
+    await expect(r).rejects.toMatchObject({ step: 'find-outbound', reason: 'not-found' });
+    expect(page.calls.clicks).toEqual([]);
+  });
+  // why: preflight D6: defence in depth, only a result-shaped name is ever clicked (the selectors module's pattern)
+  it('a name the result-link pattern does not match is refused as not-found before any lookup', async () => {
+    const { page, r } = run(tree([n('link', 'Sign in')]), 'Sign in');
+    await expect(r).rejects.toMatchObject({ step: 'find-outbound', reason: 'not-found' });
+    expect(page.calls.clicks).toEqual([]);
+  });
+  it('a click that never answers times out at CLICK_TIMEOUT_MS as its own step, within the deadline', async () => {
+    const page = new FakePage(null);
+    page.setUrl(RESULTS_URL);
+    page.setTrees([tree([n('link', NAME, [], { clickHang: true })])]);
+    const timers = fakeTimers();
+    const run = createDriver(page, guard()).clickOutbound(NAME, timers.deadline(90_000), {
+      timers,
+      flow: 'select-outbound',
+    });
+    let err: unknown = null;
+    void run.catch((e: unknown) => {
+      err = e;
+    });
+    for (let i = 0; i < 5 && err === null; i++) {
+      await flush();
+      if (err === null) timers.runOut();
+    }
+    expect(err).toMatchObject({ step: 'click-outbound', reason: 'timed-out', flow: 'select-outbound' });
+    expect(timers.now() - Date.parse('2026-10-18T05:00:00.000Z')).toBe(CLICK_TIMEOUT_MS);
+  });
+});
+
+describe('StepFailed and runStep (WP21 Task 21.0: one step error for every flow)', () => {
+  it('an overrun names its flow: the options’ flow, the Cheapest flow’s by default', async () => {
+    const timers = fakeTimers();
+    const d = timers.deadline(90_000);
+    const never = () => new Promise<never>(() => undefined);
+    const a = runStep('x', 1000, d, { timers, flow: 'grid' }, never);
+    const b = runStep('y', 1000, d, { timers }, never);
+    let ea: unknown = null;
+    let eb: unknown = null;
+    void a.catch((e: unknown) => {
+      ea = e;
+    });
+    void b.catch((e: unknown) => {
+      eb = e;
+    });
+    for (let i = 0; i < 5 && (ea === null || eb === null); i++) {
+      await flush();
+      timers.runOut();
+    }
+    expect(ea).toBeInstanceOf(StepFailed);
+    expect(ea).toMatchObject({ step: 'x', reason: 'timed-out', flow: 'grid' });
+    expect(eb).toMatchObject({ step: 'y', reason: 'timed-out', flow: 'cheapest' });
+    expect(new StepFailed('find-tab', 'not-found').flow).toBe('cheapest');
+    expect(new StepFailed('find-tab', 'not-found').message).toBe(
+      "the cheapest flow's find-tab step not-found",
+    );
+  });
+});
+
+describe('probePage and classifyAfterFailedStep (WP21 Task 21.0)', () => {
+  it('the probe page has the read methods and no click of any kind', () => {
+    expectTypeOf<ProbePage>().not.toHaveProperty('click');
+    expectTypeOf<ProbePage>().not.toHaveProperty('clickCheapest');
+    expectTypeOf<ProbePage>().not.toHaveProperty('clickOutbound');
+    expectTypeOf<ProbePage>().toHaveProperty('linkNames');
+    const page = new FakePage(null);
+    const p = probePage(createDriver(page, guard()));
+    expect('clickOutbound' in p).toBe(false);
+    expect('click' in p).toBe(false);
+    expect('clickCheapest' in p).toBe(false);
+    expect(Object.keys(p).sort()).toEqual(
+      [
+        'buttonNames',
+        'formFacts',
+        'goto',
+        'headingNames',
+        'linkNames',
+        'listFacts',
+        'readFacts',
+        'resultNames',
+        'tabNames',
+      ].sort(),
+    );
+  });
+  const classifyOn = async (t: FakeNode, d?: (timers: ReturnType<typeof fakeTimers>) => void) => {
+    const page = new FakePage(null);
+    page.setUrl(RESULTS_URL);
+    page.setTrees([t]);
+    const timers = fakeTimers();
+    const driver: Driver = createDriver(page, guard());
+    const cur = timers.deadline(90_000);
+    const run = classifyAfterFailedStep(driver, cur, { timers }, SELECTORS, 'cheapest');
+    d?.(timers);
+    return run;
+  };
+  it('a challenge page is its blocked kind, with the rule and the facts', async () => {
+    const r = await classifyOn(n('document', '', [text('Please confirm you are not a robot')]));
+    expect(r).toMatchObject({
+      page: 'captcha',
+      rule: 'challenge-text',
+      facts: { page: { text: { challenge: true } } },
+    });
+  });
+  it('a results page, or an unrecognised one, is null', async () => {
+    expect(await classifyOn(resultsTree())).toBeNull();
+    expect(await classifyOn(n('document', ''))).toBeNull();
+  });
+  it('a lookup that overruns its bound is null (the step ends plainly)', async () => {
+    const t = resultsTree();
+    for (const c of descendants([t])) if (c.role === 'link') c.countHang = true;
+    const page = new FakePage(null);
+    page.setUrl(RESULTS_URL);
+    page.setTrees([t]);
+    const timers = fakeTimers();
+    const run = classifyAfterFailedStep(
+      createDriver(page, guard()),
+      timers.deadline(90_000),
+      { timers },
+      SELECTORS,
+      'cheapest',
+    );
+    let out: unknown = 'pending';
+    void run.then((v) => {
+      out = v;
+    });
+    for (let i = 0; i < 10 && out === 'pending'; i++) {
+      await flush();
+      if (out === 'pending') timers.runOut();
+    }
+    expect(out).toBeNull();
   });
 });

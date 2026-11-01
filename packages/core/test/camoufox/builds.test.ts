@@ -135,6 +135,9 @@ const WORKER_FLAGS: Readonly<Record<FlagName, boolean>> = {
   LANDING_VERIFIED: true,
   // why: grid/2026-10-26/7 and 8: the date grid's unpriced cells ("no flights", "price unknown") on the operator's Mac
   GRID_UNPRICED_VERIFIED: true,
+  // why: WP21 Task 21.0: the return view after an outbound's selection, false until a recording of the served
+  // sequence sets it (Task 21.3)
+  RETURN_SELECT_VERIFIED: false,
 };
 
 describe('FLAGS and flagsFor (spec §2 rev 36: flags per <os>-<arch>, bound to their build)', () => {
@@ -149,7 +152,18 @@ describe('FLAGS and flagsFor (spec §2 rev 36: flags per <os>-<arch>, bound to t
       'GRID_VERIFIED',
       'LANDING_VERIFIED',
       'GRID_UNPRICED_VERIFIED',
+      'RETURN_SELECT_VERIFIED',
     ]);
+  });
+
+  // why: WP21 Task 21.0: the outbound selection is clicked only where a recording of the served sequence set the flag;
+  // none has yet, so every entry, and the all-false set, carry it false
+  it('RETURN_SELECT_VERIFIED is false on every entry and on any other build', () => {
+    for (const k of OS_ARCHES) {
+      expect(FLAGS[k].flags.RETURN_SELECT_VERIFIED, k).toBe(false);
+      expect(flagsFor(k, CAMOUFOX_BUILDS[k].build).RETURN_SELECT_VERIFIED, k).toBe(false);
+      expect(flagsFor(k, '152.0.4-beta.27').RETURN_SELECT_VERIFIED, k).toBe(false);
+    }
   });
 
   it('darwin-arm64 holds the worker’s current values, flag by flag, for the pinned build', () => {
@@ -171,8 +185,8 @@ describe('FLAGS and flagsFor (spec §2 rev 36: flags per <os>-<arch>, bound to t
       const off = FLAG_NAMES.filter((f) => !FLAGS[k].flags[f]);
       expect(off, k).toEqual(
         k === 'darwin-arm64'
-          ? ['VIEW_MORE_ADDS_CHEAPER']
-          : ['VIEW_MORE_ADDS_CHEAPER', 'GRID_UNPRICED_VERIFIED'],
+          ? ['VIEW_MORE_ADDS_CHEAPER', 'RETURN_SELECT_VERIFIED']
+          : ['VIEW_MORE_ADDS_CHEAPER', 'GRID_UNPRICED_VERIFIED', 'RETURN_SELECT_VERIFIED'],
       );
     }
   });

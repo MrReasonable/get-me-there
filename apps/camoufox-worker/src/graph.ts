@@ -22,7 +22,6 @@ import {
   soft,
 } from './dialogSettle.js';
 import {
-  CheapestStepFailed,
   CLICK_TIMEOUT_MS,
   clickTimeoutOf,
   countOf,
@@ -33,6 +32,7 @@ import {
   type PageLike,
   POLL_TIMEOUT_MS,
   runStep,
+  StepFailed,
   type StepOptions,
   timeoutOf,
 } from './driver.js';
@@ -227,7 +227,7 @@ async function readChart(region: LocatorLike, d: Deadline, steps: StepOptions): 
 }
 
 /**
- * The exploration under the deadline `d`. A step that overruns or fails throws CheapestStepFailed naming it; the
+ * The exploration under the deadline `d`. A step that overruns or fails throws StepFailed naming it; the
  * deadline's own expiry surfaces as DeadlineExceeded. A poll the classifier reads as a blocked kind (other than
  * unrecognised, which a graph over the results may well read as) returns that stop at once.
  */
@@ -243,7 +243,7 @@ export async function exploreGraph(
   const button = page.getByRole('button', { name: S.results.priceGraphButton, exact: true });
   // why: page locators reach the main frame only; exactly one button by its exact name, or nothing is clicked
   const found = await runStep('find-graph-button', LOOKUP_TIMEOUT_MS, d, steps, (st) => countOf(button, st));
-  if (found !== 1) throw new CheapestStepFailed('find-graph-button', 'not-found');
+  if (found !== 1) throw new StepFailed('find-graph-button', 'not-found', steps.flow);
   const before = await runStep('list-regions', LOOKUP_TIMEOUT_MS, d, steps, (st) => listRegions(page, st));
   const clickAt = timers.now();
   await runStep('click-graph', CLICK_TIMEOUT_MS, d, steps, async (st) => {

@@ -1,8 +1,10 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { asIsoDateTime, fixedClock } from '@gmt/core';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { carryLastPageAt, Pacer } from '../src/pacer.js';
+import { DeadlineExceeded } from '../src/timers.js';
+import { fakeTimers } from './support/timers.js';
 import { tmpDir } from './support/tmp.js';
 
 const T0 = asIsoDateTime('2026-10-18T05:00:00.000Z');
@@ -219,5 +221,58 @@ describe('carryLastPageAt (Task 17.8)', () => {
     const clock = fixedClock(T0);
     expect(carryLastPageAt(dir, asIsoDateTime('2026-10-18T04:00:00.000Z'), clock)).toBe(T0);
     expect(new Pacer({ dir, minSpacingSeconds: 30, clock }).lastPageAt()).toBe(T0);
+  });
+});
+
+// why: WP21 Task 21.0 (spec §2 "at least CAMOUFOX_MIN_SPACING_SECONDS from the start of one page load to the start of
+// the next"): a page that loads a further document (the list page loaded again, or a selection that loads one) waits
+// out the spacing for it as the holder, under its own deadline, and records that load's start
+describe('Pacer.reclaim (the holder’s further document load)', () => {
+  const lastOf = (dir: string): unknown =>
+    JSON.parse(readFileSync(join(dir, 'pacer.json'), 'utf8')).lastPageAt;
+  it('waits spacing − 2 s from the last start under fake timers, then records the new start', async () => {
+    const timers = fakeTimers(fixedClock(T0));
+    const dir = tmpDir();
+    const p = new Pacer({ dir, minSpacingSeconds: 30, clock: timers.clock });
+    expect(p.claim()).toEqual({ ok: true });
+    timers.clock.advance(5000);
+    const d = timers.deadline(60_000);
+    await p.reclaim(d, timers);
+    expect(timers.sleeps).toEqual([23_000]);
+    expect(lastOf(dir)).toBe('2026-10-18T05:00:28.000Z');
+    expect(p.isBusy()).toBe(true);
+    d.clear();
+  });
+  it('does not wait once the spacing has passed, and records the start', async () => {
+    const timers = fakeTimers(fixedClock(T0));
+    const dir = tmpDir();
+    const p = new Pacer({ dir, minSpacingSeconds: 30, clock: timers.clock });
+    p.claim();
+    timers.clock.advance(40_000);
+    await p.reclaim(timers.deadline(1000), timers);
+    expect(timers.sleeps).toEqual([]);
+    expect(lastOf(dir)).toBe('2026-10-18T05:00:40.000Z');
+  });
+  it('returns at once with spacing 0, still recording the start', async () => {
+    const timers = fakeTimers(fixedClock(T0));
+    const dir = tmpDir();
+    const p = new Pacer({ dir, minSpacingSeconds: 0, clock: timers.clock });
+    p.claim();
+    timers.clock.advance(1);
+    await p.reclaim(timers.deadline(1000), timers);
+    expect(timers.sleeps).toEqual([]);
+    expect(lastOf(dir)).toBe('2026-10-18T05:00:00.001Z');
+  });
+  it('throws DeadlineExceeded when the wait outlasts its deadline, recording no start', async () => {
+    const timers = fakeTimers(fixedClock(T0));
+    const dir = tmpDir();
+    const p = new Pacer({ dir, minSpacingSeconds: 30, clock: timers.clock });
+    p.claim();
+    await expect(p.reclaim(timers.deadline(10_000), timers)).rejects.toBeInstanceOf(DeadlineExceeded);
+    expect(lastOf(dir)).toBe(T0);
+  });
+  it('exposes its spacing, read-only, for the page’s budget (preflight P6)', () => {
+    const p = new Pacer({ dir: tmpDir(), minSpacingSeconds: 45, clock: fixedClock(T0) });
+    expect(p.spacingMs).toBe(45_000);
   });
 });

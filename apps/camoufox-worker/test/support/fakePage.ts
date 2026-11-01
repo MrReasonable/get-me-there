@@ -52,13 +52,38 @@ export const RESULTS_URL = 'https://www.google.com/travel/flights/search?tfs=x';
 /** One result option's accessible name in the feasibility grammar (synthetic airline). */
 export function optionName(
   pounds: number | string,
-  o: { on?: string; from?: string; to?: string } = {},
+  o: { on?: string; from?: string; to?: string; duration?: string; carrier?: string } = {},
 ): string {
   const on = o.on ?? 'Thursday, November 5';
-  return `From ${pounds} British pounds round trip total. 1 stop flight with Example Air. Leaves ${o.from ?? 'Heathrow Airport'} at 12:25 on ${on} and arrives at ${o.to ?? 'John F. Kennedy International Airport'} at 20:05 on ${on}. Total duration 12 hrs 40 min. Select flight`;
+  return `From ${pounds} British pounds round trip total. 1 stop flight with ${o.carrier ?? 'Example Air'}. Leaves ${o.from ?? 'Heathrow Airport'} at 12:25 on ${on} and arrives at ${o.to ?? 'John F. Kennedy International Airport'} at 20:05 on ${on}. Total duration ${o.duration ?? '12 hrs 40 min'}. Select flight`;
 }
-export const option = (pounds: number, o: { on?: string; from?: string; to?: string } = {}): FakeNode =>
-  n('listitem', '', [n('link', optionName(pounds, o))]);
+export const option = (
+  pounds: number,
+  o: { on?: string; from?: string; to?: string; duration?: string; carrier?: string } = {},
+): FakeNode => n('listitem', '', [n('link', optionName(pounds, o))]);
+
+/**
+ * WP21 Task 21.0: one return option's accessible name in the hypothesis form (synthetic airline): the leg leaves the
+ * destination and arrives at the origin on the return day; `priceForm` 'total' states the round-trip total alone,
+ * 'from' the outbound list's "From" form, so the recorder's research can be tested against either.
+ */
+export function returnOptionName(
+  o: {
+    pounds?: number | string;
+    from?: string;
+    to?: string;
+    on?: string;
+    duration?: string;
+    carrier?: string;
+    priceForm?: 'total' | 'from';
+  } = {},
+): string {
+  const on = o.on ?? 'Sunday, November 15';
+  const price = `${o.pounds ?? 478} British pounds round trip total.`;
+  return `${o.priceForm === 'from' ? `From ${price}` : price} Nonstop flight with ${o.carrier ?? 'Example Air'}. Leaves ${o.from ?? 'John F. Kennedy International Airport'} at 18:30 on ${on} and arrives at ${o.to ?? 'Heathrow Airport'} at 06:45 on ${on}. Total duration ${o.duration ?? '7 hrs 15 min'}. Select flight`;
+}
+/** The View more button (resultsTree carries one unless told not to; a return view takes it as an extra). */
+export const viewMore = (): FakeNode => n('button', 'View more flights');
 
 /** The search form's controls (the brief's round-1 hypothesis; Task 14.2's recording replaces the names). */
 export function formNodes(
@@ -81,6 +106,8 @@ export function resultsTree(
     extra?: FakeNode[];
     count?: number;
     form?: FakeNode[];
+    /** WP21 Task 21.0: false leaves the View more button out (listFacts reports its presence). */
+    viewMore?: boolean;
   } = {},
 ): FakeNode {
   const top = o.top ?? [option(478)];
@@ -96,7 +123,7 @@ export function resultsTree(
       n('heading', 'Other departing flights'),
       n('list', '', other),
     ]),
-    n('button', 'View more flights'),
+    ...(o.viewMore === false ? [] : [viewMore()]),
     n('button', 'Date grid'),
     n('button', 'Currency GBP'),
     n('button', 'Location·United Kingdom'),

@@ -9,7 +9,7 @@
  * them, and the tests' fakes implement them.
  */
 import { createHash } from 'node:crypto';
-import type { Logger } from '@gmt/core';
+import type { BlockedPage, Logger } from '@gmt/core';
 import {
   type ClassifyRule,
   cheapestTabPriceMinor,
@@ -20,7 +20,7 @@ import {
 import { type GuardState, onAllowlist } from './guard.js';
 import { isSettled, type Previous, stableAcross, type View } from './ready.js';
 import { type Role, SELECTORS, type Selectors } from './selectors.js';
-import type { Deadline, Timers } from './timers.js';
+import { type Deadline, DeadlineExceeded, type Timers } from './timers.js';
 
 export interface LocatorLike {
   count(): Promise<number>;
@@ -122,6 +122,8 @@ export interface SettleFacts {
   cheapestPriced: boolean;
   /** The Cheapest tab is the selected one (`aria-selected`), which settles the Cheapest view (ruling of 2026-10-18). */
   cheapestSelected: boolean;
+  /** WP21 Task 21.0: a heading matches the return view's (`S.returns.heading`), as `PageFacts.text.returnHeading`. */
+  returnHeading: boolean;
   /** A short hash of the result links' names, compared across polls (stable content). */
   linkSignature: string;
 }
@@ -132,6 +134,11 @@ export interface ListFacts {
   resultsStated: number | null;
   currencyName: string | null;
   locationName: string | null;
+  /**
+   * WP21 Task 21.0: the View more button is on the page (`S.results.viewMoreButton`, exact). Always set by `listFacts`;
+   * optional on the type so a reader's own literal need not state it (preflight P7).
+   */
+  viewMore?: boolean;
 }
 /** The search form's fields as the page shows them (brief Task 14.3), or null when the controls are absent. */
 export type FormFacts = { tripType: string; passengers: string; departure: string; return: string } | null;
@@ -140,13 +147,19 @@ export interface Driver {
   goto(url: string, d: Deadline): Promise<void>;
   /** The page's heading names (what a recording stores of a page it could not classify). */
   headingNames(d: Deadline): Promise<string[]>;
-  /** One poll: the page facts, the settle facts and the result names the signature hashes (never recorded twice). */
+  /**
+   * One poll: the page facts, the settle facts and the result names the signature hashes (never recorded twice).
+   * `view` (WP21 Task 21.0): on the return view the links, names and signature are read by the return pattern; every
+   * view also reports the outbound pattern's count (`outboundLinks`) and the return heading.
+   */
   readFacts(
     d: Deadline,
     o?: LookupBound,
+    view?: View,
   ): Promise<{ page: PageFacts; settle: SettleFacts; names: Array<string | null> }>;
   resultNames(d: Deadline): Promise<Array<string | null>>;
-  listFacts(d: Deadline): Promise<ListFacts>;
+  /** The list reader's input; `view` 'returns' (WP21 Task 21.0) reads the return view's links. */
+  listFacts(d: Deadline, view?: View): Promise<ListFacts>;
   formFacts(d: Deadline): Promise<FormFacts>;
   click(role: Role, name: string, d: Deadline): Promise<void>;
   /**
@@ -154,6 +167,27 @@ export interface Driver {
    * close button when there is one, on the results page, then the tab. Returns what was clicked, in order.
    */
   clickCheapest(d: Deadline, o: StepOptions): Promise<string[]>;
+  /**
+   * WP21 Task 21.0: an outbound's selection. Step `find-outbound`: exactly one link in `main` with exactly that name,
+   * which the outbound result pattern reads (preflight D6), else StepFailed('find-outbound', 'not-found' |
+   * 'ambiguous', 'select-outbound') with nothing clicked; step `click-outbound` under CLICK_TIMEOUT_MS. Returns what it
+   * clicked.
+   */
+  clickOutbound(name: string, d: Deadline, o: StepOptions): Promise<string[]>;
+  /**
+   * WP21 Task 21.0, the recorder's research reads: every link name in `main`, every button and every tab name on the
+   * page, each with its `https://…` runs replaced by `<url>`, at most NAMES_MAX of each.
+   */
+  linkNames(d: Deadline): Promise<string[]>;
+  buttonNames(d: Deadline): Promise<string[]>;
+  tabNames(d: Deadline): Promise<string[]>;
+}
+
+/** The most names `linkNames`, `buttonNames` and `tabNames` return (WP21 Task 21.0). */
+export const NAMES_MAX = 200;
+/** A name as the research reads it: every `https://…` run replaced by `<url>` (no page URL is ever stored). */
+function urlStripped(name: string): string {
+  return name.replace(/https?:\/\/\S+/g, '<url>');
 }
 
 /** How a timed step runs: the timers, the debug log, and the page's start (for elapsed times). */
@@ -232,21 +266,26 @@ function perLookup(d: Deadline, timers: Timers, ms: number): Lookups {
   };
 }
 
-/** A Cheapest-flow step that failed or timed out; the caller falls back (never a hang to the page deadline). */
-export class CheapestStepFailed extends Error {
+/**
+ * A timed step that failed or timed out, in any flow (the Cheapest flow's by default; the grid's, the graph's and the
+ * outbound selection's name theirs); the caller falls back or ends plainly (never a hang to the page deadline). WP21
+ * Task 21.0 renamed it from the Cheapest flow's own error in one go.
+ */
+export class StepFailed extends Error {
   constructor(
     readonly step: string,
-    readonly reason: 'timed-out' | 'failed' | 'not-found' | 'not-selected',
+    readonly reason: 'timed-out' | 'failed' | 'not-found' | 'not-selected' | 'ambiguous',
+    readonly flow: string = 'cheapest',
   ) {
-    super(`the Cheapest flow's ${step} step ${reason}`);
-    this.name = 'CheapestStepFailed';
+    super(`the ${flow} flow's ${step} step ${reason}`);
+    this.name = 'StepFailed';
   }
 }
 
 /**
  * Runs one step under its own bound (`ms`, never past the page deadline `d`), logging its start and end at debug with
  * the elapsed ms since the page started (ruling of 2026-10-18). A step that overruns logs its name and throws
- * CheapestStepFailed; the page deadline's own expiry still surfaces as DeadlineExceeded.
+ * StepFailed naming the options' flow; the page deadline's own expiry still surfaces as DeadlineExceeded.
  */
 export async function runStep<T>(
   name: string,
@@ -269,7 +308,7 @@ export async function runStep<T>(
     if (d.expired()) throw e;
     if (step.expired()) {
       o.log?.debug({ step: name, elapsedMs: elapsed(), timeoutMs }, `${flow} step timed out`);
-      throw new CheapestStepFailed(name, 'timed-out');
+      throw new StepFailed(name, 'timed-out', flow);
     }
     // why: a failed step logs only the error class and the step, never a URL or a message holding one
     o.log?.debug(
@@ -281,7 +320,7 @@ export async function runStep<T>(
       },
       `${flow} step failed`,
     );
-    throw new CheapestStepFailed(name, 'failed');
+    throw new StepFailed(name, 'failed', flow);
   } finally {
     step.clear();
   }
@@ -310,8 +349,11 @@ export async function countOf(l: LocatorLike, d: Deadline): Promise<number> {
 
 /** The driver over one page; `guard` is that page's guard state (hops and frame URLs). */
 export function createDriver(page: PageLike, guard: GuardState, S: Selectors = SELECTORS): Driver {
-  const resultLinks = (): LocatorLike =>
-    page.getByRole('main').getByRole('link', { name: S.results.resultLink });
+  // why: WP21 Task 21.0: the return view's links are read by the return pattern; every other view's by the outbound one
+  const resultLinks = (view: View = 'best'): LocatorLike =>
+    page
+      .getByRole('main')
+      .getByRole('link', { name: view === 'returns' ? S.returns.resultLink : S.results.resultLink });
   const has = async (l: LocatorLike, d: Deadline): Promise<boolean> => (await countOf(l, d)) > 0;
   // why: ruling of 2026-10-18: a hidden label (the Cheapest tab keeps "Fetching results" in its name once loaded) is
   // never read as the page still loading; only the matches a visitor would see count
@@ -323,8 +365,8 @@ export function createDriver(page: PageLike, guard: GuardState, S: Selectors = S
   const firstName = async (l: LocatorLike, d: Deadline): Promise<string | null> =>
     (await countOf(l, d)) === 0 ? null : nameOf(l.nth(0), d);
 
-  async function resultNames(d: Deadline): Promise<Array<string | null>> {
-    const links = resultLinks();
+  async function resultNames(d: Deadline, view: View = 'best'): Promise<Array<string | null>> {
+    const links = resultLinks(view);
     const n = await countOf(links, d);
     const names: Array<string | null> = [];
     for (let i = 0; i < n; i++) {
@@ -333,6 +375,14 @@ export function createDriver(page: PageLike, guard: GuardState, S: Selectors = S
       names.push(name === null || name.length > S.maxNameLength ? null : name);
     }
     return names;
+  }
+
+  /** Up to NAMES_MAX names of the locator's matches, URL-stripped; an unreadable name is empty. */
+  async function namesOf(l: LocatorLike, d: Deadline): Promise<string[]> {
+    const out: string[] = [];
+    for (let i = 0, n = Math.min(NAMES_MAX, await countOf(l, d)); i < n; i++)
+      out.push(urlStripped((await nameOf(l.nth(i), d)) ?? ''));
+    return out;
   }
 
   return {
@@ -347,7 +397,7 @@ export function createDriver(page: PageLike, guard: GuardState, S: Selectors = S
       await d.race(page.goto(url, { ...timeoutOf(d), waitUntil: 'domcontentloaded' }));
     },
 
-    async readFacts(outer, o) {
+    async readFacts(outer, o, view = 'best') {
       // why: inside a bounded poll every single lookup keeps its own 5 s bound and is named, so an overrun says which
       // (rulings of 2026-10-18); outside one, `at` names nothing
       const bound = o === undefined ? null : perLookup(outer, o.timers, o.lookupMs);
@@ -393,29 +443,42 @@ export function createDriver(page: PageLike, guard: GuardState, S: Selectors = S
       // why: WP17 Task 17.4: the consent command's landing view (a hypothesis until LANDING_VERIFIED)
       at('landing-heading');
       const landingHeading = await has(page.getByRole('heading', { name: S.landing.heading }), d);
+      // why: WP21 Task 21.0: the return view's heading (a hypothesis until recorded), read on every view
+      at('return-heading');
+      const returnHeading = await has(page.getByRole('heading', { name: S.returns.heading }), d);
       at('date-grid-buttons');
       const dateGridButtons = await countOf(
         page.getByRole('button', { name: S.results.dateGridButton, exact: true }),
         d,
       );
       at('result-links');
-      const links = await countOf(resultLinks(), d);
+      const outboundLinks = await countOf(resultLinks(), d);
+      const links = view === 'returns' ? await countOf(resultLinks(view), d) : outboundLinks;
       const facts: PageFacts = {
         url,
         hops: [...guard.hops],
         frameUrls: [...new Set([...page.frames().map((f) => f.url()), ...guard.frameUrls])],
-        text: { unusualTraffic, consentHeading, signInHeading, challenge, noFlights, landingHeading },
+        text: {
+          unusualTraffic,
+          consentHeading,
+          signInHeading,
+          challenge,
+          noFlights,
+          landingHeading,
+          returnHeading,
+        },
         accountControl: accountButtons + accountLinks > 0,
         cheapestTabs,
         dateGridButtons,
         resultLinks: links,
+        outboundLinks,
       };
       // why: ruling of 2026-10-18: the loading text counts only when visible and outside the tab (never the tab's name)
       at('fetching-text');
       const visibleFetching = await visibleCount(page.getByText(S.results.fetching), d);
       const visibleInTabs = await visibleCount(page.getByRole('tab').getByText(S.results.fetching), d);
       at('result-names');
-      const names = await resultNames(d);
+      const names = await resultNames(d, view);
       at('results-returned');
       const resultsReturned = await has(page.getByText(S.results.resultsReturned), d);
       const settle: SettleFacts = {
@@ -424,6 +487,7 @@ export function createDriver(page: PageLike, guard: GuardState, S: Selectors = S
         cheapestPriced:
           cheapestTabs.length === 1 && cheapestTabs.every((t) => cheapestTabPriceMinor(t.name, S) !== null),
         cheapestSelected: oneSelected,
+        returnHeading,
         linkSignature: createHash('sha256').update(JSON.stringify(names)).digest('hex').slice(0, 16),
       };
       return { page: facts, settle, names };
@@ -431,8 +495,8 @@ export function createDriver(page: PageLike, guard: GuardState, S: Selectors = S
 
     resultNames,
 
-    async listFacts(d) {
-      const names = await resultNames(d);
+    async listFacts(d, view = 'best') {
+      const names = await resultNames(d, view);
       const tab = await firstName(
         page.getByRole('tablist').getByRole('tab', { name: S.results.cheapestTab }),
         d,
@@ -447,7 +511,29 @@ export function createDriver(page: PageLike, guard: GuardState, S: Selectors = S
         resultsStated: Number.isNaN(stated) ? null : stated,
         currencyName: await firstName(page.getByRole('button', { name: S.results.currencyButton }), d),
         locationName: await firstName(page.getByRole('button', { name: S.results.locationButton }), d),
+        // why: WP21 Task 21.0 (R-viewmore): its presence is read on every view, never clicked here
+        viewMore: await has(page.getByRole('button', { name: S.results.viewMoreButton, exact: true }), d),
       };
+    },
+
+    linkNames: (d) => namesOf(page.getByRole('main').getByRole('link'), d),
+    buttonNames: (d) => namesOf(page.getByRole('button'), d),
+    tabNames: (d) => namesOf(page.getByRole('tab'), d),
+
+    async clickOutbound(name, d, o) {
+      const fail = (reason: 'not-found' | 'ambiguous'): StepFailed =>
+        new StepFailed('find-outbound', reason, 'select-outbound');
+      // why: preflight D6: only a result-shaped name is ever looked for, so nothing but an option's own link is clicked
+      if (!S.results.resultLink.test(name)) throw fail('not-found');
+      const links = page.getByRole('main').getByRole('link', { name, exact: true });
+      // why: the page's own URL is never read here, so a selection reads nothing a poll would
+      const found = await runStep('find-outbound', LOOKUP_TIMEOUT_MS, d, o, (st) => countOf(links, st));
+      if (found === 0) throw fail('not-found');
+      if (found > 1) throw fail('ambiguous');
+      await runStep('click-outbound', CLICK_TIMEOUT_MS, d, o, (st) =>
+        st.race(links.nth(0).click(clickTimeoutOf(st))),
+      );
+      return [`link:${name}`];
     },
 
     async formFacts(d) {
@@ -492,7 +578,7 @@ export function createDriver(page: PageLike, guard: GuardState, S: Selectors = S
         if (found === 1) await click('close-popup', close.nth(0), `button:${S.results.cheapestPopupClose}`);
       }
       const tabCount = await runStep('find-tab', LOOKUP_TIMEOUT_MS, d, o, (st) => countOf(tabs, st));
-      if (tabCount !== 1) throw new CheapestStepFailed('find-tab', 'not-found');
+      if (tabCount !== 1) throw new StepFailed('find-tab', 'not-found');
       await click('click-tab', tab, 'tab:Cheapest');
       // why: ruling of 2026-10-18: through the role query, never getAttribute on a node the page may replace
       const selected = await runStep('confirm-selected', LOOKUP_TIMEOUT_MS, d, o, (st) =>
@@ -501,7 +587,7 @@ export function createDriver(page: PageLike, guard: GuardState, S: Selectors = S
           st,
         ),
       );
-      if (selected !== 1) throw new CheapestStepFailed('confirm-selected', 'not-selected');
+      if (selected !== 1) throw new StepFailed('confirm-selected', 'not-selected');
       return clicked;
     },
   };
@@ -513,10 +599,11 @@ async function firstText(l: LocatorLike, d: Deadline): Promise<string | null> {
 }
 
 /**
- * The consent probe's page (Task 14.2; SEC-R2-003): the driver without `click` or `clickCheapest`, so a click on a consent page does not
- * compile. Imported only by record.ts (rules.test.ts pins that).
+ * The consent probe's page (Task 14.2; SEC-R2-003): the driver without `click`, `clickCheapest` or (WP21 Task 21.0)
+ * `clickOutbound`, so a click on a consent page does not compile; it has the read methods only. Imported only by
+ * record.ts (rules.test.ts pins that).
  */
-export type ProbePage = Omit<Driver, 'click' | 'clickCheapest'>;
+export type ProbePage = Omit<Driver, 'click' | 'clickCheapest' | 'clickOutbound'>;
 export function probePage(d: Driver): ProbePage {
   return {
     goto: d.goto,
@@ -525,7 +612,45 @@ export function probePage(d: Driver): ProbePage {
     resultNames: d.resultNames,
     listFacts: d.listFacts,
     formFacts: d.formFacts,
+    linkNames: d.linkNames,
+    buttonNames: d.buttonNames,
+    tabNames: d.tabNames,
   };
+}
+
+/** A blocked kind a failed step's page showed: what the stop records (the kind, the rule, the facts). */
+export interface FailedStepBlock {
+  page: BlockedPage;
+  rule: ClassifyRule;
+  facts: { page: PageFacts; settle: SettleFacts };
+}
+
+/**
+ * A failed step's page classified once, under its own bounded step (WP21 Task 21.0: the recorder's closure made a
+ * driver function; the session switches to it in Task 21.3). A failed step may be no results page at all (a challenge
+ * after the click): a blocked kind other than `unrecognised` is returned for the caller's stop, with its cool-down;
+ * anything else, or a read that fails or overruns, is null (the caller ends the step plainly). The deadline's own
+ * expiry is rethrown.
+ */
+export async function classifyAfterFailedStep(
+  driver: Pick<Driver, 'readFacts'>,
+  cur: Deadline,
+  steps: StepOptions,
+  S: Selectors,
+  view: View,
+): Promise<FailedStepBlock | null> {
+  const lookups = { timers: steps.timers, lookupMs: LOOKUP_TIMEOUT_MS };
+  const seen = await runStep('classify-after-failed-step', POLL_TIMEOUT_MS, cur, steps, (st) =>
+    driver.readFacts(st, lookups, view),
+  ).catch((err: unknown) => {
+    if (err instanceof DeadlineExceeded || cur.expired()) throw err;
+    return null;
+  });
+  if (seen === null) return null;
+  const k = classifyPageWithRule(seen.page, S, view);
+  if (k.kind.kind === 'blocked' && k.kind.page !== 'unrecognised')
+    return { page: k.kind.page, rule: k.rule, facts: { page: seen.page, settle: seen.settle } };
+  return null;
 }
 
 /** Why `pollUntilSettled` stopped: a blocked kind, a no-flights page, or a settled page and how it classified. */
@@ -543,6 +668,14 @@ export interface PollOptions {
   log?: Logger;
   /** timers.now() when the page started; debug lines carry elapsed ms from it. */
   startedAt?: number;
+  /**
+   * WP21 Task 21.0 (R-settle), the return view: the view the selection was made on (its link signature, read by the
+   * return pattern, and the guard's document loads then). A poll counts as changed when its signature differs, a return
+   * heading shows, or `loads()` has grown; an unchanged view never settles, so it runs to the deadline.
+   */
+  changedFrom?: { signature: string; documentLoads: number };
+  /** The guard's document loads now (`guard.documentLoads`); with `changedFrom`. */
+  loads?: () => number;
 }
 
 /** The first 60 characters of each name present in one poll's links and absent from the other's. */
@@ -575,7 +708,7 @@ export async function pollUntilSettled(
     // why: ruling of 2026-10-18 (the rerun on 51c2992): Cheapest polling goes on until only the reserve the fallback
     // needs is left; then the flow fails as a step and the caller falls back
     if (view === 'cheapest' && d.remaining() < FALLBACK_RESERVE_MS)
-      throw new CheapestStepFailed('cheapest-poll', 'timed-out');
+      throw new StepFailed('cheapest-poll', 'timed-out');
     const pollStart = timers.now();
     // why: ruling of 2026-10-18: each Cheapest-view poll is its own 20 s step with 5 s lookups inside it; one that
     // overruns (a lookup or the poll) is "not settled yet", polled again at the normal interval
@@ -590,9 +723,11 @@ export async function pollUntilSettled(
               { timers, ...(log === undefined ? {} : { log }), startedAt },
               (st) => driver.readFacts(st, { timers, lookupMs: LOOKUP_TIMEOUT_MS }),
             )
-          : await driver.readFacts(d);
+          : view === 'returns'
+            ? await driver.readFacts(d, undefined, view)
+            : await driver.readFacts(d);
     } catch (e) {
-      if (!(e instanceof CheapestStepFailed) || view !== 'cheapest') throw e;
+      if (!(e instanceof StepFailed) || view !== 'cheapest') throw e;
       // an unsettled poll: the links must hold still across two good polls from here
       previous = null;
       previousNames = null;
@@ -609,7 +744,14 @@ export async function pollUntilSettled(
       links: facts.page.resultLinks,
       at: timers.now(),
     };
-    const settled = isSettled(facts.page, facts.settle, view);
+    // why: R-settle: a return view must first differ from the view the click was made on, then hold still
+    const changedFrom = o.changedFrom;
+    const changed =
+      changedFrom !== undefined &&
+      (facts.settle.linkSignature !== changedFrom.signature ||
+        facts.page.text.returnHeading ||
+        (o.loads?.() ?? changedFrom.documentLoads) > changedFrom.documentLoads);
+    const settled = isSettled(facts.page, facts.settle, view, changed);
     // why: ruling of 2026-10-18: settled means stable content: the same links across two polls at least 2 s apart
     const stable = settled && stableAcross(previous, current);
     const elapsedMs = timers.now() - startedAt;
@@ -626,6 +768,7 @@ export async function pollUntilSettled(
         cheapestSelected: facts.settle.cheapestSelected,
         stable,
         resultLinks: facts.page.resultLinks,
+        ...(view === 'returns' ? { changed, outboundLinks: facts.page.outboundLinks } : {}),
       },
       'settle poll',
     );

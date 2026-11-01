@@ -110,6 +110,12 @@ export interface Selectors {
     noFlights: RegExp;
   };
   /**
+   * WP21 Task 21.0 (spec §2 rev 55, the return leg): the view after an outbound's "Select flight", a hypothesis until
+   * a recording of the served sequence shows it (Task 21.3 dates it and sets RETURN_SELECT_VERIFIED on that entry).
+   * `heading` names the return list's heading; `resultLink` a return option's link by its own name.
+   */
+  returns: { heading: RegExp; resultLink: RegExp };
+  /**
    * The search form (decision 69: round trip, one adult, the query's dates). The brief's hypothesis from round 1,
    * replaced by Task 14.2's recording; FORM_VERIFIED is false until then, and the server refuses to start.
    */
@@ -132,6 +138,11 @@ export interface Selectors {
   LANDING_VERIFIED: boolean;
   /** The date grid's unpriced cells, "no flights, …" and "price unknown, …" (spec §2 "Cells by name"). */
   GRID_UNPRICED_VERIFIED: boolean;
+  /**
+   * WP21 Task 21.0: the outbound's selection and the return view after it; false on every entry until a recording of
+   * the served sequence sets it on that entry. Only then does the worker click an outbound's link.
+   */
+  RETURN_SELECT_VERIFIED: boolean;
 }
 
 export const SELECTORS: Selectors = {
@@ -193,6 +204,13 @@ export const SELECTORS: Selectors = {
       reset: 'Reset back to centre',
     },
     noFlights: /^No (?:results|flights) (?:returned|found)/,
+  },
+  // why: a hypothesis until select-outbound/<date> records the view (Task 21.3 dates it). The heading as the outbound
+  // list's ("Top departing flights") would read on the return list; the link in both price forms, the total alone or
+  // the outbound list's "From" form, so the research sees whichever the page uses
+  returns: {
+    heading: /^(?:Top |Other )?[Rr]eturning flights$/,
+    resultLink: /^[\d,]+ [A-Za-z ]+ round trip total\. |^From [\d,]+ [A-Za-z ]+ round trip total\. /,
   },
   form: {
     tripType: /^Change ticket type\./,
@@ -305,5 +323,6 @@ export function flagsOf(S: Selectors = SELECTORS): Record<FlagName, boolean> {
     GRID_VERIFIED: S.GRID_VERIFIED,
     LANDING_VERIFIED: S.LANDING_VERIFIED,
     GRID_UNPRICED_VERIFIED: S.GRID_UNPRICED_VERIFIED,
+    RETURN_SELECT_VERIFIED: S.RETURN_SELECT_VERIFIED,
   };
 }

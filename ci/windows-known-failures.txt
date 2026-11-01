@@ -19,6 +19,8 @@
 # setup (https://github.com/MrReasonable/get-me-there/actions/runs/40436004392).
 # The grid's reset control (spec rev 54) adds two grid-page tests that share that file's POSIX-mode setup
 # (https://github.com/MrReasonable/get-me-there/actions/runs/41145793523).
+# WP21 Task 21.0's select-outbound recorder and its two counts-file tests share those files' POSIX-mode setup (socs.json
+# and monthly.json read wider than 0600 there); listed from the tests' own names, for the PR's Windows run to confirm.
 apps/api/test/bootstrap/app.backup.test.ts > backup preflight (spec §7 Migrations, §13 Backup) backs up into <db dir>/backups before applying pending migrations; the backup has the old schema
 apps/api/test/bootstrap/app.matrix.test.ts > injected-config boot matrix (spec §5.5) an unwritable data directory fails boot with exit code 73
 apps/api/test/bootstrap/app.spawn.test.ts > production boot lacks fixture (spec §5.5, §9 item 5) the real bootstrap under NODE_ENV=production never offers or accepts synthetic data
@@ -148,7 +150,9 @@ apps/camoufox-worker/test/monthly.test.ts > the counts file (fail closed) a refu
 apps/camoufox-worker/test/monthly.test.ts > the counts file (fail closed) a restart reads the same counts back
 apps/camoufox-worker/test/monthly.test.ts > the counts file (fail closed) a rewrite replaces the file with this window’s figures, 0600, whatever it held
 apps/camoufox-worker/test/monthly.test.ts > the counts file (fail closed) a stale temporary file at 0644 beside the counts never widens them
+apps/camoufox-worker/test/monthly.test.ts > the counts file (fail closed) check(0, 4) reserves 4 with 4 left, 1 with 2 or 1 left, and refuses with none (WP21 Task 21.0)
 apps/camoufox-worker/test/monthly.test.ts > the counts file (fail closed) counts of an earlier window report zero for this one, and the next page starts it afresh
+apps/camoufox-worker/test/monthly.test.ts > the counts file (fail closed) settles the pages loaded, only over its own window (WP21 Task 21.0)
 apps/camoufox-worker/test/monthly.test.ts > the counts file (fail closed) settles to the scrolls made, only over its own window
 apps/camoufox-worker/test/monthly.test.ts > the counts file (fail closed) the status reports carried counts with their window, and a new install’s zero counts as readable
 apps/camoufox-worker/test/monthly.test.ts > the counts file (fail closed) two callers at once with one page left: exactly one admitted
@@ -253,6 +257,45 @@ apps/camoufox-worker/test/record.test.ts > the recorder under the server’s sto
 apps/camoufox-worker/test/record.test.ts > the recorder under the server’s stop rules (fix round 1) existing recording directories become 0700 and their files 0600 when the recorder starts
 apps/camoufox-worker/test/record.test.ts > the recorder under the server’s stop rules (fix round 1) one deadline covers the load and the clicks: a click past it is the deadline refusal, not a crash
 apps/camoufox-worker/test/record.test.ts > the recorder under the server’s stop rules (fix round 1) recordings are written 0600 in 0700 directories
+apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-outbound: a blocked kind after any click or the reload is a stop account after the first-selection: its cool-down and rule
+apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-outbound: a blocked kind after any click or the reload is a stop account after the reload: its cool-down and rule
+apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-outbound: a blocked kind after any click or the reload is a stop account after the second-selection: its cool-down and rule
+apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-outbound: a blocked kind after any click or the reload is a stop captcha after the first-selection: its cool-down and rule
+apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-outbound: a blocked kind after any click or the reload is a stop captcha after the reload: its cool-down and rule
+apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-outbound: a blocked kind after any click or the reload is a stop captcha after the second-selection: its cool-down and rule
+apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-outbound: a blocked kind after any click or the reload is a stop consent after the first-selection: its cool-down and rule
+apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-outbound: a blocked kind after any click or the reload is a stop consent after the reload: its cool-down and rule
+apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-outbound: a blocked kind after any click or the reload is a stop consent after the second-selection: its cool-down and rule
+apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-outbound: a blocked kind after any click or the reload is a stop sign-in after the first-selection: its cool-down and rule
+apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-outbound: a blocked kind after any click or the reload is a stop sign-in after the reload: its cool-down and rule
+apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-outbound: a blocked kind after any click or the reload is a stop sign-in after the second-selection: its cool-down and rule
+apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-outbound: a blocked kind after any click or the reload is a stop unusual-traffic after the first-selection: its cool-down and rule
+apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-outbound: a blocked kind after any click or the reload is a stop unusual-traffic after the reload: its cool-down and rule
+apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-outbound: a blocked kind after any click or the reload is a stop unusual-traffic after the second-selection: its cool-down and rule
+apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-outbound: steps that do not complete end the page plainly a re-claim that runs out of its own budget records waitTimedOut and ends plainly (never not-ready)
+apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-outbound: steps that do not complete end the page plainly a view that never changes from the Cheapest view: settled false, changed false, the last read, then the end
+apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-outbound: steps that do not complete end the page plainly two links of the pick’s name: selectFailed find-outbound:ambiguous, no after, nothing more
+apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-outbound: the served sequence, two selections and a fresh load (WP21 Task 21.0) a --results and a --cheapest recording’s meta carry documentLoads too
+apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-outbound: the served sequence, two selections and a fresh load (WP21 Task 21.0) claims RECORD_SELECT_PAGES before the first load and settles to the documents loaded
+apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-outbound: the served sequence, two selections and a fresh load (WP21 Task 21.0) nothing is written when a page holds the worker key (the fail-closed scan)
+apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-outbound: the served sequence, two selections and a fresh load (WP21 Task 21.0) re-claims the pacer before each selection and the reload: its last start moves each time
+apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-outbound: the served sequence, two selections and a fresh load (WP21 Task 21.0) records the Best and Cheapest views, both picks, and what each step showed
+apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-outbound: the served sequence, two selections and a fresh load (WP21 Task 21.0) the SOCS read-back and the page close run after the whole interaction
+apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-outbound: the served sequence, two selections and a fresh load (WP21 Task 21.0) the console output names counts, booleans and rule words only
+apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-outbound: the served sequence, two selections and a fresh load (WP21 Task 21.0) the meta names the kind, the entry, the bundle and the documents loaded; the file is 0600
+apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-outbound: the served sequence’s other ends, and the later steps’ (WP21 Task 21.0) Google’s no-flights line after the reload: recorded, no second selection
+apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-outbound: the served sequence’s other ends, and the later steps’ (WP21 Task 21.0) Google’s no-flights line on the first view: recorded, nothing selected
+apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-outbound: the served sequence’s other ends, and the later steps’ (WP21 Task 21.0) a Cheapest flow whose tab click fails falls back to the Best view, as the session does
+apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-outbound: the served sequence’s other ends, and the later steps’ (WP21 Task 21.0) a blocked first view is the stop it always is
+apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-outbound: the served sequence’s other ends, and the later steps’ (WP21 Task 21.0) a challenge after the Cheapest tab’s click is that stop
+apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-outbound: the served sequence’s other ends, and the later steps’ (WP21 Task 21.0) a link click that never answers ends the step as select-failed click-outbound:timed-out
+apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-outbound: the served sequence’s other ends, and the later steps’ (WP21 Task 21.0) a reload that never settles: settled false with the last read, then the end
+apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-outbound: the served sequence’s other ends, and the later steps’ (WP21 Task 21.0) a reload the guard refuses is that stop
+apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-outbound: the served sequence’s other ends, and the later steps’ (WP21 Task 21.0) a reloaded view with no other option on the day: the second selection has no pick
+apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-outbound: the served sequence’s other ends, and the later steps’ (WP21 Task 21.0) a search form that is not the request’s is unrecognised, as the session’s
+apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-outbound: the served sequence’s other ends, and the later steps’ (WP21 Task 21.0) a spacing wait past its budget before the reload records waitTimedOut there
+apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-outbound: the served sequence’s other ends, and the later steps’ (WP21 Task 21.0) no option on the departure day: nothing selected
+apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-outbound: the served sequence’s other ends, and the later steps’ (WP21 Task 21.0) with the Cheapest flow unverified, the Best view is read and its pick selected
 apps/camoufox-worker/test/recordings.test.ts > backupRecordings a second backup the same day adds what is new and keeps what was there
 apps/camoufox-worker/test/recordings.test.ts > backupRecordings copies every recording but .gitkeep, directories 0700 and files 0600, and never follows a link
 apps/camoufox-worker/test/recordings.test.ts > recordingsMain backs up into ~/.local/share/get-me-there/private/fixtures/camoufox-<date>/ and restores the latest backup

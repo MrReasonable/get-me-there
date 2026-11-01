@@ -19,12 +19,17 @@ export interface PageFacts {
     noFlights: boolean;
     /** The landing view's heading (WP17 Task 17.4; a hypothesis until LANDING_VERIFIED). */
     landingHeading: boolean;
+    /** WP21 Task 21.0: a heading matching the return view's (`S.returns.heading`; a hypothesis until recorded). */
+    returnHeading: boolean;
   };
   accountControl: boolean;
   /** `selected`: the tab is the selected one (aria-selected), read for the tabs in the tablist. */
   cheapestTabs: Array<{ name: string; inTablist: boolean; selected?: boolean }>;
   dateGridButtons: number;
+  /** The links in `main` the view's pattern reads (the return pattern on the return view, else the outbound one). */
   resultLinks: number;
+  /** WP21 Task 21.0: the links in `main` the outbound pattern reads, on every view (equal to resultLinks off the return view). */
+  outboundLinks: number;
 }
 export type PageKind = { kind: 'results' } | { kind: 'no-flights' } | { kind: 'blocked'; page: BlockedPage };
 
@@ -62,7 +67,11 @@ export type ClassifyRule =
   | 'cheapest-tab-unpriced'
   | 'no-result-links'
   | 'landing'
-  | 'not-landing';
+  | 'not-landing'
+  // why: WP21 Task 21.0: the view after an outbound's selection: a return view, not one, or Google's own line there
+  | 'returns'
+  | 'not-return-view'
+  | 'no-flights-line-unrecorded';
 
 /**
  * The tab price in pence, read from the start of the Cheapest tab's name (`S.results.cheapestTabPrice`), or null when
@@ -94,6 +103,7 @@ export function classifyPageWithRule(
     kind: { kind: 'blocked' as const, page },
     rule,
   });
+  if (view === 'returns') return classifyReturnView(f, S);
   // why: ruling of 2026-10-18: the line counts only on a page with no result links, so the flag can never misread a
   // results page (the Cheapest view carries a status line matching it beside 21 links)
   if (S.NO_FLIGHTS_VERIFIED && f.text.noFlights && f.resultLinks === 0)
@@ -108,6 +118,25 @@ export function classifyPageWithRule(
     return blocked('unrecognised', 'cheapest-tab-unpriced');
   if (f.resultLinks <= 0) return blocked('unrecognised', 'no-result-links');
   return { kind: { kind: 'results' }, rule: 'results' };
+}
+
+/**
+ * WP21 Task 21.0: the view after an outbound's selection, once the blocked kinds are ruled out. Nothing reads as a
+ * return view on an entry whose RETURN_SELECT_VERIFIED is false. With it set, the view is results when its heading and
+ * return links show (Task 21.3 adds the recorded structure); Google's no-flights line with no link of either pattern is
+ * its own unrecorded rule; anything else is no return view. Every miss is `unrecognised`: the caller ends the return
+ * phase on it, never with a cool-down.
+ */
+function classifyReturnView(f: PageFacts, S: Selectors): { kind: PageKind; rule: ClassifyRule } {
+  const unrecognised = (rule: ClassifyRule) => ({
+    kind: { kind: 'blocked' as const, page: 'unrecognised' as const },
+    rule,
+  });
+  if (!S.RETURN_SELECT_VERIFIED) return unrecognised('not-return-view');
+  if (f.text.returnHeading && f.resultLinks > 0) return { kind: { kind: 'results' }, rule: 'returns' };
+  if (f.text.noFlights && f.resultLinks === 0 && f.outboundLinks === 0)
+    return unrecognised('no-flights-line-unrecorded');
+  return unrecognised('not-return-view');
 }
 
 /** The blocked kinds, in the table's order, the first match winning; null when none applies (total over any input). */

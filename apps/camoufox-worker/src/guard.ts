@@ -17,6 +17,12 @@ export interface GuardState {
   hops: string[];
   frameUrls: string[];
   refused: BlockedPage | null;
+  /**
+   * WP21 Task 21.0 (spec §2: a page is one Google document load): the main frame's document navigations the route let
+   * through on this page. Counted in the route, never on `framenavigated`, so an in-app change of the view (a History
+   * API change: a hop and no request) is told apart from a new document; reset with the hops for each page.
+   */
+  documentLoads: number;
 }
 
 export function urlOf(s: string): URL | null {
@@ -130,7 +136,7 @@ export function installWith(
 ): Promise<GuardState> {
   let entry = installed.get(context);
   if (entry === undefined) {
-    const state: GuardState = { hops: [], frameUrls: [], refused: null };
+    const state: GuardState = { hops: [], frameUrls: [], refused: null, documentLoads: 0 };
     context.on('request', (r: RequestLike) => {
       if (!r.isNavigationRequest()) return;
       const chain: string[] = [];
@@ -145,8 +151,14 @@ export function installWith(
       // why: a frameless request counts as the main frame's, failing closed (ruling of 2026-10-18)
       const frame = frameOf(req);
       const main = frame === null || isMainFrame(frame);
-      const d = decide(req.url(), req.isNavigationRequest(), req.method(), main);
-      if (d.action === 'continue') return route.fallback();
+      const navigation = req.isNavigationRequest();
+      const d = decide(req.url(), navigation, req.method(), main);
+      if (d.action === 'continue') {
+        // why: WP21 Task 21.0: a main-frame document the route lets through is one document load (a redirect's later
+        // hops never reach the route, so a redirected load counts once); a refused one never loaded and counts nothing
+        if (navigation && main) state.documentLoads += 1;
+        return route.fallback();
+      }
       // why: the first main-frame refusal names the page kind the session answers with (a refused sub-frame is aborted
       // but never names the page, fix round 1 prov-int M6); the host at warn, never the URL (spec §14), and the path
       // without its query at debug only, so a refusal is diagnosable without a code change
@@ -163,6 +175,7 @@ export function installWith(
   state.hops = [];
   state.frameUrls = [];
   state.refused = null;
+  state.documentLoads = 0;
   page.on('framenavigated', (frame: FrameLike) => {
     if (!isMainFrame(frame)) state.frameUrls.push(frame.url());
     else if (!state.hops.includes(frame.url())) state.hops.push(frame.url());

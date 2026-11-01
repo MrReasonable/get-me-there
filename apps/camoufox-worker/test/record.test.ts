@@ -477,7 +477,7 @@ describe('the recorder (brief Task 14.2 rules)', () => {
   });
   it('rule 3: the probe page has no click method, and another blocked kind cools down as usual', async () => {
     const page = new FakePage(null);
-    const probe = probePage(createDriver(page, { hops: [], frameUrls: [], refused: null }));
+    const probe = probePage(createDriver(page, { hops: [], frameUrls: [], refused: null, documentLoads: 0 }));
     expect('click' in probe).toBe(false);
     expect('clickCheapest' in probe).toBe(false);
     const t = setup({

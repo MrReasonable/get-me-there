@@ -8,7 +8,8 @@ import type { Timers } from './timers.js';
  * The month's caps, then the shared pacer: a page past the monthly page cap (or with fewer scrolls left than its
  * moves, or a counts file that cannot be read) is refused before anything loads; the spacing is waited out once (fake
  * timers in tests); then the caps are checked again (cb-b1-005: a wait that crossed a window's end counts the page in
- * the window it loads in) and the page and its scrolls are reserved, never settled down (an over-count).
+ * the window it loads in) and the page and its scrolls are reserved, never settled down (an over-count), except by a
+ * caller that settles to what it loaded (WP21 Task 21.0: the select-outbound kind, with the admission returned).
  */
 export async function claim(
   pacer: Pacer,
@@ -17,9 +18,11 @@ export async function claim(
   /** `interrupted` (the consent command's SIGINT or SIGTERM) ends the spacing wait at once, so nothing is claimed. */
   deps: { timers: Timers; interrupted?: AbortSignal },
   ctx: EntryContext,
-): Promise<void> {
+  /** WP21 Task 21.0: the documents the recording may load, reserved together (one for every other kind). */
+  pages = 1,
+): Promise<Extract<Admission, { kind: 'ok' }>> {
   const admissible = (): Extract<Admission, { kind: 'ok' }> => {
-    const a = monthly.check(scrolls);
+    const a = monthly.check(scrolls, pages);
     if (a.kind === 'counts-unreadable')
       throw new RecordingRefused(
         `the worker's monthly counts file is ${a.problem}; rewrite it with pnpm gmt browser counts`,
@@ -41,5 +44,9 @@ export async function claim(
     if (!second.ok) throw new RecordingRefused(`the spacing still refuses (${second.retryAfterSeconds} s)`);
   }
   // why: no await between this check and the write, and the worker's lock keeps every other caller out
-  monthly.write(admissible().reserved);
+  const admitted = admissible();
+  monthly.write(admitted.reserved);
+  // why: WP21 Task 21.0: returned so the select-outbound kind settles to the documents it loaded; every other kind's
+  // page stays reserved, never settled down (an over-count)
+  return admitted;
 }

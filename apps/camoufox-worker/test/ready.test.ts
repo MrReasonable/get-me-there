@@ -1,5 +1,19 @@
 import { describe, expect, it } from 'vitest';
+import { createDriver, pollUntilSettled } from '../src/driver.js';
+import type { GuardState } from '../src/guard.js';
 import { isSettled, STABLE_MS, stableAcross } from '../src/ready.js';
+import { SELECTORS } from '../src/selectors.js';
+import { DeadlineExceeded } from '../src/timers.js';
+import {
+  type FakeNode,
+  FakePage,
+  n,
+  option,
+  RESULTS_URL,
+  resultsTree,
+  returnOptionName,
+} from './support/fakePage.js';
+import { fakeTimers } from './support/timers.js';
 
 const settled = { resultsReturned: true, fetching: false, cheapestPriced: true, cheapestSelected: false };
 describe('isSettled (spec §2; brief §9)', () => {
@@ -50,5 +64,91 @@ describe('isSettled by view', () => {
     expect(isSettled({ resultLinks: 21 }, base, 'best')).toBe(false);
     expect(isSettled({ resultLinks: 21 }, { ...base, resultsReturned: true }, 'best')).toBe(true);
     expect(isSettled({ resultLinks: 21 }, { ...base, resultsReturned: true })).toBe(true);
+  });
+});
+
+// why: WP21 Task 21.0 (R-settle): the view after an outbound's selection settles only once it has changed from the
+// view the click was made on, then holds still; it never needs the results line, the selected tab or the heading
+describe('isSettled on the return view', () => {
+  const s = { resultsReturned: false, fetching: false, cheapestPriced: false, cheapestSelected: false };
+  const facts = (o: { links?: number; outbound?: number; noFlights?: boolean } = {}) => ({
+    resultLinks: o.links ?? 0,
+    outboundLinks: o.outbound ?? 0,
+    text: { noFlights: o.noFlights ?? false },
+  });
+  it('is false while the view has not changed, whatever the facts', () => {
+    for (const f of [facts({ links: 3 }), facts({ outbound: 2 }), facts({ noFlights: true })])
+      expect(isSettled(f, { ...s, resultsReturned: true, cheapestSelected: true }, 'returns', false)).toBe(
+        false,
+      );
+  });
+  it('once changed, needs no fetching and a link by either pattern or the no-flights line', () => {
+    expect(isSettled(facts({ links: 3 }), s, 'returns', true)).toBe(true);
+    expect(isSettled(facts({ outbound: 1 }), s, 'returns', true)).toBe(true);
+    expect(isSettled(facts({ noFlights: true }), s, 'returns', true)).toBe(true);
+    expect(isSettled(facts(), s, 'returns', true)).toBe(false);
+    expect(isSettled(facts({ links: 3 }), { ...s, fetching: true }, 'returns', true)).toBe(false);
+  });
+  it('facts without the outbound count or the text read as none of either', () => {
+    expect(isSettled({ resultLinks: 0 }, s, 'returns', true)).toBe(false);
+    expect(isSettled({ resultLinks: 2 }, s, 'returns', true)).toBe(true);
+  });
+  it('the Best and Cheapest views ignore the changed flag', () => {
+    const best = { resultsReturned: true, fetching: false, cheapestPriced: true, cheapestSelected: false };
+    expect(isSettled({ resultLinks: 3 }, best, 'best', false)).toBe(true);
+    expect(isSettled({ resultLinks: 3 }, { ...best, cheapestSelected: true }, 'cheapest', false)).toBe(true);
+  });
+});
+
+describe('pollUntilSettled with changedFrom (the return view)', () => {
+  const outbound = () => resultsTree({ top: [option(451), option(478)], other: [] });
+  const ret = () =>
+    n('document', '', [
+      n('main', '', [
+        n('heading', 'Returning flights'),
+        n('list', '', [
+          n('listitem', '', [n('link', returnOptionName({ pounds: 451 }))]),
+          n('listitem', '', [n('link', returnOptionName({ pounds: 470 }))]),
+        ]),
+      ]),
+    ]);
+  const S = { ...SELECTORS, RETURN_SELECT_VERIFIED: true };
+  const start = async (trees: FakeNode[], loads: () => number = () => 1) => {
+    const page = new FakePage(null);
+    page.setUrl(RESULTS_URL);
+    page.setTrees([outbound()]);
+    const g: GuardState = { hops: [], frameUrls: [], refused: null, documentLoads: 1 };
+    const driver = createDriver(page, g, S);
+    const timers = fakeTimers();
+    const d = timers.deadline(90_000);
+    const pre = await driver.readFacts(d, undefined, 'returns');
+    page.setTrees(trees);
+    const run = pollUntilSettled(driver, d, timers, 2000, S, {
+      view: 'returns',
+      changedFrom: { signature: pre.settle.linkSignature, documentLoads: 1 },
+      loads,
+    });
+    return { run, timers, d };
+  };
+  it('stays unsettled while the outbound view holds, then settles once the return view holds still', async () => {
+    const { run } = await start([outbound(), outbound(), outbound(), ret()]);
+    const r = await run;
+    expect(r).toMatchObject({ kind: { kind: 'results' }, rule: 'returns' });
+    // why: three unchanged polls, the swap on the fourth, and the fifth confirms it held still
+    expect(r.polls).toBe(5);
+  });
+  it('a view that never changes ends at the deadline (DeadlineExceeded), never settled', async () => {
+    const { run } = await start([outbound()]);
+    await expect(run).rejects.toBeInstanceOf(DeadlineExceeded);
+  });
+  it('a document load counts as changed, even with the same names', async () => {
+    let loads = 1;
+    const { run } = await start([outbound()], () => loads);
+    loads = 2;
+    // why: with the flag on, an outbound view after a load is changed and settled, and classified as no return view
+    expect(await run).toMatchObject({
+      kind: { kind: 'blocked', page: 'unrecognised' },
+      rule: 'not-return-view',
+    });
   });
 });

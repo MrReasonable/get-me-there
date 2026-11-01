@@ -300,6 +300,8 @@ describe('the worker’s start checks and shutdown (brief Task 14.5)', () => {
       flags: flagsFor('darwin-arm64', '152.0.4-beta.28'),
       consent: { kind: 'socs', expiresAt: '2027-01-15T08:00:00.000Z', boundedBy: 'cookie' },
     });
+    // why: WP21 Task 21.0: /v1/status reports the return-select flag, false on this entry
+    expect(body).toMatchObject({ flags: { RETURN_SELECT_VERIFIED: false } });
     expect(workerStatusSchema.safeParse(body).success).toBe(true);
     t.shutdown();
     expect(await w.done).toBe(0);

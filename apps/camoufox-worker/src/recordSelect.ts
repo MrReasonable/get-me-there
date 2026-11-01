@@ -1,0 +1,514 @@
+/**
+ * `record --select-outbound` (WP21 Task 21.0; spec §2 rev 55 "Recordings first"; the brief's §5 record.ts): the return
+ * leg's research, on one results page under every rule the recorder applies. It runs the SERVED sequence exactly as
+ * the page session does (the Best view settled and classified, the search form checked, the Cheapest flow where the
+ * entry's CHEAPEST_FLOW_VERIFIED is set, falling back to the Best view as the session does), picks the cheapest option
+ * on the departure day (the recorder has no airport names, so the day is its only cell check; ties by page order),
+ * selects it by its link and records what Google shows next. It then loads the list page afresh (the worker's own URL),
+ * runs the served sequence again and selects the next-cheapest. Before each selection and the reload the pacer is
+ * re-claimed (the spacing waited out under its own budget), and each step has its own page timeout, inside the page's
+ * cap of 5 page timeouts and 3 spacings.
+ *
+ * What it records is facts only: counts, booleans, the names the locators read (local-only recordings, decision 61),
+ * the document loads the guard counted, and timings. A step that does not complete (a selection that finds no single
+ * link, a view that never changes, a spacing wait past its budget, a step's own deadline) is recorded as such and ends
+ * the page plainly, never as a stop and never as a page that did not settle; a blocked kind on any poll after a click
+ * or the reload is the stop it always is, with its cool-down. Nothing is clicked but the Cheapest flow's names and an
+ * option's own link. Only record.ts imports this module (rules.test.ts pins that).
+ */
+import type { BlockedPage, IsoDate, Logger } from '@gmt/core';
+import type { PageBudget } from './budget.js';
+import { type ClassifyRule, classifyPageWithRule, type PageFacts, type PageKind } from './classify.js';
+import {
+  classifyAfterFailedStep,
+  type Driver,
+  type FormFacts,
+  type ListFacts,
+  type PageLike,
+  pollUntilSettled,
+  type SettleFacts,
+  StepFailed,
+  type StepOptions,
+} from './driver.js';
+import { checkForm } from './form.js';
+import type { GuardState } from './guard.js';
+import { parseOptionName } from './names.js';
+import type { Pacer } from './pacer.js';
+import type { View } from './ready.js';
+import type { Outcome } from './recordDialogs.js';
+import { type StopFacts, stripQuery } from './recordWrite.js';
+import type { Selectors } from './selectors.js';
+import { type Deadline, DeadlineExceeded, type Timers } from './timers.js';
+
+/**
+ * The page's overall cap (the brief's §5 record.ts): five page timeouts (the first view, the Cheapest flow, a
+ * selection, the reload's view, a selection) and three spacings (before each selection and the reload).
+ * why: preflight D7: the reload's Cheapest flow is a sixth page timeout, so a slow page may reach the cap during the
+ * second selection; that step then ends unsettled (recorded as such), which is a finding, never a failure.
+ */
+export function selectOutboundCapMs(pageTimeoutMs: number, spacingMs: number): number {
+  return 5 * pageTimeoutMs + 3 * spacingMs;
+}
+
+/** The bound on the one more read after a step's deadline (twice the recorder's finally bound, the --no-flights pattern). */
+const LAST_READ_MS = 10_000;
+
+/** What the recorder needs of the page and its own stop handling. */
+export interface SelectPage {
+  driver: Driver;
+  page: PageLike;
+  guard: GuardState;
+  budget: PageBudget;
+  pageStart: number;
+  deps: { timers: Timers; log: Logger; pollMs: number; selectors: Selectors };
+  /** The selectors the polls after a selection run under: the recorder's reading of the return view (flag on). */
+  returnsS: Selectors;
+  pacer: Pick<Pacer, 'reclaim' | 'spacingMs'>;
+  pageMs: number;
+  /** The worker's own list URL for the request (loaded again for the second selection). */
+  url: string;
+  request: { departureDate: IsoDate; returnDate: IsoDate };
+  stepMs: Record<string, number>;
+  clicked: string[];
+  stop(p: BlockedPage, rule: string, facts?: StopFacts | null): Promise<Outcome>;
+}
+
+/** One view's facts as the results kinds record them. */
+interface ViewRead {
+  page: PageFacts;
+  settle: SettleFacts;
+  names: Array<string | null>;
+  list: ListFacts;
+  form: FormFacts;
+  headings: string[];
+}
+
+/** The steps after the first view, in order. */
+type StepName = 'first-selection' | 'reload' | 'second-selection';
+
+/** What a step showed once it settled, or (settled false) what one more read saw after its deadline. */
+interface After {
+  /** The view's URL without its query, and whether the full URL differs from the one before the step. */
+  url: string;
+  urlChanged: boolean;
+  documentLoadsBefore: number;
+  documentLoads: number;
+  /** R-settle's rule against the view before the step: another link signature, a return heading, or a further load. */
+  changedFromPreClick: boolean;
+  classification: { kind: PageKind['kind']; rule: ClassifyRule };
+  /** The reload's view: which view the served sequence read (absent after a selection). */
+  view?: 'cheapest' | 'best-fallback' | 'best';
+  page: PageFacts;
+  settle: SettleFacts;
+  names: Array<string | null>;
+  list: ListFacts;
+  form: FormFacts;
+  linkNames: string[];
+  headings: string[];
+  buttonNames: string[];
+  tabNames: string[];
+  /** From the click (or the goto) to the settle; the spacing wait is apart, in `waitMs`. */
+  stepMs: number;
+  waitMs: number;
+  settled: boolean;
+}
+
+interface StepRecord {
+  step: StepName;
+  waitMs?: number;
+  waitTimedOut?: true;
+  selectFailed?: string;
+  after?: After;
+  /** The step's deadline passed and the one more read overran too. */
+  lastReadOverran?: true;
+}
+
+type StepResult = { record: StepRecord; end: boolean } | { stop: Outcome };
+
+/** The view before a step, for R-settle's rule and the URL comparison. */
+interface Before {
+  url: string;
+  loads: number;
+  signature: string;
+}
+
+/** The served sequence's end: a stop, Google's no-flights line, or the view the session would read. */
+type Served =
+  | { kind: 'stop'; outcome: Outcome }
+  | { kind: 'no-flights'; best: ViewRead }
+  | {
+      kind: 'read';
+      best: ViewRead;
+      cheapest: ViewRead | null;
+      view: 'cheapest' | 'best-fallback' | null;
+      shown: ViewRead;
+    };
+
+/** A pick: an option's whole link name and its index among the view's result links. */
+export interface OutboundPick {
+  name: string;
+  linkIndex: number;
+}
+
+/**
+ * The cheapest option the grammar reads whose departure day is the request's, ties by page order, never `exclude`
+ * (the first pick, for the second selection); null when there is none.
+ */
+export function pickOf(
+  list: Pick<ListFacts, 'names'>,
+  departureDate: IsoDate,
+  exclude: string | null,
+): OutboundPick | null {
+  const month = Number(departureDate.slice(5, 7));
+  const day = Number(departureDate.slice(8, 10));
+  let best: (OutboundPick & { minor: number }) | null = null;
+  for (const [linkIndex, name] of list.names.entries()) {
+    if (name === null || name === exclude) continue;
+    const o = parseOptionName(name);
+    if (o === null || o.departsOn.month !== month || o.departsOn.day !== day) continue;
+    // why: strictly cheaper only, so the first in page order wins a tie
+    if (best === null || o.amountMinor < best.minor) best = { name, linkIndex, minor: o.amountMinor };
+  }
+  return best === null ? null : { name: best.name, linkIndex: best.linkIndex };
+}
+
+async function readView(c: SelectPage, facts: StopFacts, d: Deadline): Promise<ViewRead> {
+  return {
+    page: facts.page,
+    settle: facts.settle,
+    names: await c.driver.resultNames(d),
+    list: await c.driver.listFacts(d),
+    form: await c.driver.formFacts(d),
+    headings: await c.driver.headingNames(d),
+  };
+}
+
+/**
+ * The served sequence, as PageSession.read runs it (spec §2 rev 55): the Best view polled until settled (a blocked
+ * kind is the stop; Google's no-flights line ends it), the search form checked (a mismatch is `unrecognised`, as the
+ * session's), then the Cheapest flow where the entry verified it: its clicks and its poll, a failed step classified
+ * once (a blocked kind is the stop), otherwise the Best view as it stands. `cheapestDeadline` starts the flow's own
+ * page timeout. The view-more click the session makes only under VIEW_MORE_ADDS_CHEAPER is false on every entry and
+ * is not made.
+ */
+async function served(c: SelectPage, d0: Deadline, cheapestDeadline: () => Deadline): Promise<Served> {
+  const { timers, log, pollMs } = c.deps;
+  const S = c.deps.selectors;
+  let d = d0;
+  const poll = (view: 'best' | 'cheapest') =>
+    pollUntilSettled(c.driver, d, timers, pollMs, S, { view, log, startedAt: c.pageStart });
+  const stop = async (page: BlockedPage, rule: string, facts: StopFacts): Promise<Served> => ({
+    kind: 'stop',
+    outcome: await c.stop(page, rule, facts),
+  });
+  const first = await poll('best');
+  if (first.kind.kind === 'blocked') return stop(first.kind.page, first.rule, first.facts);
+  const best = await readView(c, first.facts, d);
+  if (first.kind.kind === 'no-flights') return { kind: 'no-flights', best };
+  const form = checkForm(best.form, c.request);
+  if (form !== 'ok') return stop('unrecognised', `search-form:${form}`, first.facts);
+  if (!S.CHEAPEST_FLOW_VERIFIED || first.facts.page.cheapestTabs.length !== 1)
+    return { kind: 'read', best, cheapest: null, view: null, shown: best };
+  d = cheapestDeadline();
+  const steps: StepOptions = { timers, log, startedAt: c.pageStart };
+  try {
+    c.clicked.push(...(await c.driver.clickCheapest(d, steps)));
+    const after = await poll('cheapest');
+    if (after.kind.kind !== 'results')
+      return stop(
+        after.kind.kind === 'blocked' ? after.kind.page : 'unrecognised',
+        after.kind.kind === 'blocked' ? after.rule : `${after.kind.kind}-after-click`,
+        after.facts,
+      );
+    const cheapest = await readView(c, after.facts, d);
+    return { kind: 'read', best, cheapest, view: 'cheapest', shown: cheapest };
+  } catch (e) {
+    if (e instanceof DeadlineExceeded || d.expired()) throw e;
+    const blocked = await classifyAfterFailedStep(c.driver, d, steps, S, 'cheapest');
+    if (blocked !== null) return stop(blocked.page, blocked.rule, blocked.facts);
+    // why: the session's honesty rule: a failed Cheapest flow reads the Best view as it stands
+    const shown = { ...best, names: await c.driver.resultNames(d), list: await c.driver.listFacts(d) };
+    return { kind: 'read', best, cheapest: null, view: 'best-fallback', shown };
+  }
+}
+
+/** R-settle's rule, as pollUntilSettled applies it. */
+function changedOf(facts: StopFacts, before: Before, loads: number): boolean {
+  return (
+    facts.settle.linkSignature !== before.signature || facts.page.text.returnHeading || loads > before.loads
+  );
+}
+
+/** The step's after: the settled (or last read) facts, then every research read under `d`. */
+async function afterOf(
+  c: SelectPage,
+  d: Deadline,
+  o: {
+    facts: StopFacts;
+    before: Before;
+    classification: { kind: PageKind['kind']; rule: ClassifyRule };
+    listView: View;
+    stepMs: number;
+    waitMs: number;
+    settled: boolean;
+    view?: After['view'];
+  },
+): Promise<After> {
+  const list = await c.driver.listFacts(d, o.listView);
+  return {
+    url: stripQuery(o.facts.page.url),
+    urlChanged: o.facts.page.url !== o.before.url,
+    documentLoadsBefore: o.before.loads,
+    documentLoads: c.guard.documentLoads,
+    changedFromPreClick: changedOf(o.facts, o.before, c.guard.documentLoads),
+    classification: o.classification,
+    ...(o.view === undefined ? {} : { view: o.view }),
+    page: o.facts.page,
+    settle: o.facts.settle,
+    names: list.names,
+    list,
+    form: await c.driver.formFacts(d),
+    linkNames: await c.driver.linkNames(d),
+    headings: await c.driver.headingNames(d),
+    buttonNames: await c.driver.buttonNames(d),
+    tabNames: await c.driver.tabNames(d),
+    stepMs: o.stepMs,
+    waitMs: o.waitMs,
+    settled: o.settled,
+  };
+}
+
+/** The pacer re-claimed under its own budget (`budget.nextFor(spacingMs)`); a wait past it is the step's end. */
+async function spacing(c: SelectPage): Promise<{ waitMs: number; timedOut: boolean }> {
+  const { timers } = c.deps;
+  const d = c.budget.nextFor(c.pacer.spacingMs);
+  const t = timers.now();
+  try {
+    await c.pacer.reclaim(d, timers);
+    return { waitMs: timers.now() - t, timedOut: false };
+  } catch (e) {
+    if (!(e instanceof DeadlineExceeded)) throw e;
+    return { waitMs: timers.now() - t, timedOut: true };
+  }
+}
+
+/**
+ * A step whose own deadline passed: one more read under its own bound (the --no-flights pattern), classified (a
+ * blocked kind is the stop), recorded `settled: false`, and the page ends plainly.
+ */
+async function unsettled(
+  c: SelectPage,
+  step: StepName,
+  view: View,
+  before: Before,
+  started: number,
+  waitMs: number,
+): Promise<StepResult> {
+  const { timers } = c.deps;
+  const stepMs = timers.now() - started;
+  const h = timers.deadline(LAST_READ_MS);
+  try {
+    const read = await c.driver.readFacts(h, undefined, view);
+    const facts = { page: read.page, settle: read.settle };
+    const k = classifyPageWithRule(read.page, view === 'returns' ? c.returnsS : c.deps.selectors, view);
+    if (k.kind.kind === 'blocked' && k.kind.page !== 'unrecognised')
+      return { stop: await c.stop(k.kind.page, k.rule, facts) };
+    const after = await afterOf(c, h, {
+      facts,
+      before,
+      classification: { kind: k.kind.kind, rule: k.rule },
+      listView: view,
+      stepMs,
+      waitMs,
+      settled: false,
+    });
+    return { record: { step, waitMs, after }, end: true };
+  } catch (e) {
+    if (!(e instanceof DeadlineExceeded)) throw e;
+    return { record: { step, waitMs, lastReadOverran: true }, end: true };
+  } finally {
+    h.clear();
+  }
+}
+
+/** One selection: spaced, the pre-click view read, the outbound's link clicked, the view after it polled and read. */
+async function selection(c: SelectPage, step: StepName, pick: OutboundPick): Promise<StepResult> {
+  const { timers, log, pollMs } = c.deps;
+  const spaced = await spacing(c);
+  const waitMs = spaced.waitMs;
+  if (spaced.timedOut) return { record: { step, waitTimedOut: true, waitMs }, end: true };
+  const d = c.budget.nextFor(c.pageMs);
+  let before: Before = { url: '', loads: c.guard.documentLoads, signature: '' };
+  let started = timers.now();
+  try {
+    // why: preflight P5: the pre-click signature by the return pattern, the same pattern every poll after it reads
+    const pre = await c.driver.readFacts(d, undefined, 'returns');
+    before = { url: pre.page.url, loads: c.guard.documentLoads, signature: pre.settle.linkSignature };
+    started = timers.now();
+    const steps: StepOptions = { timers, log, startedAt: c.pageStart, flow: 'select-outbound' };
+    try {
+      c.clicked.push(...(await c.driver.clickOutbound(pick.name, d, steps)));
+    } catch (e) {
+      if (e instanceof DeadlineExceeded || d.expired()) throw e;
+      // why: a failed click may have left a page that is no results page at all: classified once, a block is its stop
+      const blocked = await classifyAfterFailedStep(c.driver, d, steps, c.returnsS, 'returns');
+      if (blocked !== null) return { stop: await c.stop(blocked.page, blocked.rule, blocked.facts) };
+      const selectFailed = e instanceof StepFailed ? `${e.step}:${e.reason}` : 'click';
+      return { record: { step, waitMs, selectFailed }, end: true };
+    }
+    const settled = await pollUntilSettled(c.driver, d, timers, pollMs, c.returnsS, {
+      view: 'returns',
+      log,
+      startedAt: c.pageStart,
+      changedFrom: { signature: before.signature, documentLoads: before.loads },
+      loads: () => c.guard.documentLoads,
+    });
+    if (settled.kind.kind === 'blocked' && settled.kind.page !== 'unrecognised')
+      return { stop: await c.stop(settled.kind.page, settled.rule, settled.facts) };
+    const stepMs = timers.now() - started;
+    const after = await afterOf(c, d, {
+      facts: settled.facts,
+      before,
+      classification: { kind: settled.kind.kind, rule: settled.rule },
+      listView: 'returns',
+      stepMs,
+      waitMs,
+      settled: true,
+    });
+    return { record: { step, waitMs, after }, end: false };
+  } catch (e) {
+    if (!(e instanceof DeadlineExceeded)) throw e;
+    return unsettled(c, step, 'returns', before, started, waitMs);
+  }
+}
+
+/** The list page loaded afresh (the worker's own URL), spaced, and the served sequence run on it again. */
+async function reload(c: SelectPage, before: Before): Promise<StepResult & { shown?: ViewRead }> {
+  const { timers } = c.deps;
+  const step: StepName = 'reload';
+  const spaced = await spacing(c);
+  const waitMs = spaced.waitMs;
+  if (spaced.timedOut) return { record: { step, waitTimedOut: true, waitMs }, end: true };
+  const d = c.budget.nextFor(c.pageMs);
+  const b: Before = { ...before, loads: c.guard.documentLoads };
+  const started = timers.now();
+  try {
+    try {
+      await c.driver.goto(c.url, d);
+    } catch (e) {
+      if (c.guard.refused === null) throw e;
+      return { stop: await c.stop(c.guard.refused, `guard-refused:${c.guard.refused}`) };
+    }
+    c.clicked.push('goto');
+    // why: the reload's Cheapest flow has a page timeout of its own, inside the page's cap (budget.next() caps at
+    // twice one page timeout from the page's start, which the reload is past)
+    const s = await served(c, d, () => c.budget.nextFor(c.pageMs));
+    if (s.kind === 'stop') return { stop: s.outcome };
+    const shown = s.kind === 'read' ? s.shown : s.best;
+    const stepMs = timers.now() - started;
+    const after = await afterOf(c, c.budget.d, {
+      facts: { page: shown.page, settle: shown.settle },
+      before: b,
+      classification:
+        s.kind === 'read'
+          ? { kind: 'results', rule: 'results' }
+          : { kind: 'no-flights', rule: 'no-flights-line' },
+      listView: 'best',
+      stepMs,
+      waitMs,
+      settled: true,
+      view: s.kind === 'read' ? (s.view ?? 'best') : 'best',
+    });
+    return { record: { step, waitMs, after }, end: s.kind !== 'read', shown };
+  } catch (e) {
+    if (!(e instanceof DeadlineExceeded)) throw e;
+    return unsettled(c, step, 'best', b, started, waitMs);
+  }
+}
+
+/** The console line's word for a step: counts, booleans and rule words only (never a name or a URL). */
+function wordOf(r: StepRecord): string {
+  if (r.waitTimedOut === true) return `${r.step} wait-timed-out`;
+  if (r.selectFailed !== undefined) return `${r.step} select-failed ${r.selectFailed}`;
+  if (r.after === undefined) return `${r.step} not-settled last-read-overran`;
+  const a = r.after;
+  return `${r.step} ${a.settled ? 'settled' : 'not-settled'} documentloads=${a.documentLoads} changed=${a.changedFromPreClick}`;
+}
+
+/** The kind's interaction, from the settled first view to the last step; see the module's comment. */
+export async function recordSelectOutbound(c: SelectPage): Promise<Outcome> {
+  const t0 = c.deps.timers.now();
+  const s = await served(c, c.budget.d, () => c.budget.next());
+  if (s.kind === 'stop') return s.outcome;
+  c.stepMs.served = c.deps.timers.now() - t0;
+  const steps: StepRecord[] = [];
+  const picks: OutboundPick[] = [];
+  let last: StopFacts = { page: s.best.page, settle: s.best.settle };
+  let headings = s.best.headings;
+  const finish = (): Outcome => {
+    const summary =
+      `select-outbound: first view ${s.best.page.resultLinks} links; picks ${picks.length}` +
+      (steps.length === 0 ? '' : `; ${steps.map(wordOf).join('; ')}`);
+    return {
+      kind: 'read',
+      data: {
+        kind: 'select-outbound',
+        landing: s.best.page.url,
+        hops: [...c.guard.hops],
+        best: s.best,
+        cheapest: s.kind === 'read' ? s.cheapest : null,
+        cheapestView: s.kind === 'read' ? s.view : null,
+        clicked: c.clicked,
+        picks,
+        steps,
+      },
+      noFlights: s.kind === 'no-flights',
+      stepMs: c.stepMs,
+      facts: last,
+      clicked: c.clicked,
+      headings,
+      summary,
+    };
+  };
+  /** Records a step's result; true when the page goes on. */
+  const keep = (r: { record: StepRecord; end: boolean }): boolean => {
+    steps.push(r.record);
+    if (r.record.after !== undefined) {
+      last = { page: r.record.after.page, settle: r.record.after.settle };
+      headings = r.record.after.headings;
+      c.stepMs[r.record.step] = r.record.after.stepMs;
+    }
+    return !r.end;
+  };
+  if (s.kind === 'no-flights') {
+    steps.push({ step: 'first-selection', selectFailed: 'no-flights' });
+    return finish();
+  }
+  const first = pickOf(s.shown.list, c.request.departureDate, null);
+  if (first === null) {
+    steps.push({ step: 'first-selection', selectFailed: 'no-pick' });
+    return finish();
+  }
+  picks.push(first);
+  const r1 = await selection(c, 'first-selection', first);
+  if ('stop' in r1) return r1.stop;
+  if (!keep(r1) || r1.record.after === undefined) return finish();
+  const a1 = r1.record.after;
+  const r2 = await reload(c, {
+    url: a1.page.url,
+    loads: a1.documentLoads,
+    signature: a1.settle.linkSignature,
+  });
+  if ('stop' in r2) return r2.stop;
+  if (!keep(r2) || r2.shown === undefined) return finish();
+  const second = pickOf(r2.shown.list, c.request.departureDate, first.name);
+  if (second === null) {
+    steps.push({ step: 'second-selection', selectFailed: 'no-pick' });
+    return finish();
+  }
+  picks.push(second);
+  const r3 = await selection(c, 'second-selection', second);
+  if ('stop' in r3) return r3.stop;
+  keep(r3);
+  return finish();
+}

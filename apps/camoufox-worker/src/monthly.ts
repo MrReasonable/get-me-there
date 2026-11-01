@@ -37,7 +37,8 @@ export interface MonthlyCaps {
 /** Why the counts file refused: missing beside an earlier worker's pacer file, or there but unreadable. */
 export type CountsProblem = 'missing' | 'unreadable';
 export type Admission =
-  | { kind: 'ok'; scrollAllowance: number; reserved: MonthlyCounts }
+  /** `pagesReserved` (WP21 Task 21.0): the pages this admission added to the window's count (1 for every list page). */
+  | { kind: 'ok'; scrollAllowance: number; pagesReserved: number; reserved: MonthlyCounts }
   | { kind: 'monthly-cap'; cap: number; used: number; windowEnd: IsoDateTime }
   | { kind: 'counts-unreadable'; problem: CountsProblem };
 
@@ -54,28 +55,52 @@ export function current(c: MonthlyCounts, now: IsoDateTime, billingDay: number):
   return { windowStart: w.windowStart, windowEnd: end, pages: c.pages, scrolls: c.scrolls };
 }
 
-/** Pure: a page is refused only on the page cap; its scroll allowance is what the scroll cap leaves, at most the request. */
+/**
+ * Pure: a page is refused only on the page cap; its scroll allowance is what the scroll cap leaves, at most the
+ * request. `pages` (WP21 Task 21.0, R-reserve and the preflight ruling P3): the documents the request may load, all
+ * reserved when the cap leaves them, otherwise one (the first view still loads; the further loads are the caller's to
+ * skip), and `pagesReserved` says which.
+ */
 export function admit(
   c: MonthlyCounts,
   caps: MonthlyCaps,
   now: IsoDateTime,
   scrollRequest: number,
+  pages = 1,
 ): Admission {
   const cur = current(c, now, caps.billingDay);
   if (cur.pages >= caps.pages)
     return { kind: 'monthly-cap', cap: caps.pages, used: cur.pages, windowEnd: cur.windowEnd };
   const scrollAllowance = Math.max(0, Math.min(scrollRequest, caps.scrolls - cur.scrolls));
+  // why: ruling P3: the whole worst case or one page, never a part of it (a part would admit a phase it cannot finish)
+  const pagesReserved = pages <= caps.pages - cur.pages ? Math.max(1, pages) : 1;
   return {
     kind: 'ok',
     scrollAllowance,
-    reserved: { ...cur, pages: cur.pages + 1, scrolls: cur.scrolls + scrollAllowance },
+    pagesReserved,
+    reserved: { ...cur, pages: cur.pages + pagesReserved, scrolls: cur.scrolls + scrollAllowance },
   };
 }
 
-/** Pure: the reservation less the allowance the page did not use (`scrollsMade` read within 0 and the allowance). */
-export function settle(reserved: MonthlyCounts, allowance: number, scrollsMade: number): MonthlyCounts {
+/**
+ * Pure: the reservation less the allowance the page did not use (`scrollsMade` read within 0 and the allowance), and
+ * less the reserved pages it did not load (WP21 Task 21.0, preflight P4: `pagesLoaded` read within 0 and
+ * `pagesReserved`, so the count never rises above the reservation). The defaults are one page reserved and loaded.
+ */
+export function settle(
+  reserved: MonthlyCounts,
+  allowance: number,
+  scrollsMade: number,
+  pagesReserved = 1,
+  pagesLoaded = pagesReserved,
+): MonthlyCounts {
   const made = Math.max(0, Math.min(allowance, scrollsMade));
-  return { ...reserved, scrolls: reserved.scrolls - (allowance - made) };
+  const loaded = Math.max(0, Math.min(pagesReserved, pagesLoaded));
+  return {
+    ...reserved,
+    pages: reserved.pages - (pagesReserved - loaded),
+    scrolls: reserved.scrolls - (allowance - made),
+  };
 }
 
 /** The counts file's contents, or what refuses it; never throws. */
@@ -141,15 +166,18 @@ export class MonthlyCounter {
     return this.fresh && typeof r === 'object' && 'refused' in r && r.refused === 'missing' ? 'absent' : r;
   }
 
-  /** Admits a page asking for `scrollRequest` scrolls, or says why not (the counts file left unchanged). */
-  check(scrollRequest: number): Admission {
+  /**
+   * Admits a page asking for `scrollRequest` scrolls and `pages` documents (WP21 Task 21.0; one by default), or says
+   * why not (the counts file left unchanged).
+   */
+  check(scrollRequest: number, pages = 1): Admission {
     const read = this.read();
     if (typeof read === 'object' && 'refused' in read)
       return { kind: 'counts-unreadable', problem: read.refused };
     const now = this.o.clock.now();
     const counts =
       read === 'absent' ? { ...billingMonthWindow(now, this.o.caps.billingDay), pages: 0, scrolls: 0 } : read;
-    return admit(counts, this.o.caps, now, scrollRequest);
+    return admit(counts, this.o.caps, now, scrollRequest, pages);
   }
 
   /** Writes counts through the worker's one private-file write. */
@@ -158,17 +186,26 @@ export class MonthlyCounter {
   }
 
   /** `check` then, when admitted, the reservation written before anything loads. */
-  async admit(scrollRequest: number): Promise<Admission> {
-    const a = this.check(scrollRequest);
+  async admit(scrollRequest: number, pages = 1): Promise<Admission> {
+    const a = this.check(scrollRequest, pages);
     if (a.kind === 'ok') this.write(a.reserved);
     return a;
   }
 
-  /** After the page: the counts settle to the scrolls it made (only while the reservation is still the file's window). */
-  settle(reserved: MonthlyCounts, allowance: number, scrollsMade: number): void {
+  /**
+   * After the page: the counts settle to the scrolls it made and the documents it loaded (WP21 Task 21.0; one reserved
+   * and loaded by default), only while the reservation is still the file's window.
+   */
+  settle(
+    reserved: MonthlyCounts,
+    allowance: number,
+    scrollsMade: number,
+    pagesReserved = 1,
+    pagesLoaded = pagesReserved,
+  ): void {
     const read = this.read();
     if (read === 'absent' || 'refused' in read || read.windowStart !== reserved.windowStart) return;
-    this.write(settle(read, allowance, scrollsMade));
+    this.write(settle(read, allowance, scrollsMade, pagesReserved, pagesLoaded));
   }
 
   /** `gmt browser counts`: this window's figures from the ledger replace the file (the caller holds the lock). */

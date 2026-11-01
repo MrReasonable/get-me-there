@@ -300,7 +300,14 @@ describe('worker rules: source facts through the compiler API', () => {
     expect(importersOf(['exploreGrid'])).toEqual(['recordDialogs.ts']);
     // why: CA 6: the server process never loads the recorder's modules; the move budgets live in core
     expect(moduleImporters('./gridRecord.js')).toEqual(['recordDialogs.ts']);
-    expect(moduleImporters('./recordDialogs.js')).toEqual(['record.ts']);
+    // why: WP21 Task 21.0: recordSelect.ts takes the Outcome type from it, and is itself reached only from record.ts
+    expect(moduleImporters('./recordDialogs.js')).toEqual(['record.ts', 'recordSelect.ts']);
+  });
+  // why: WP21 Task 21.0: the outbound selection's research is the recorder's alone; the server never loads it, and the
+  // one new click (clickOutbound) is reached from the recorder's flow only until Task 21.3's return phase
+  it('the select-outbound recorder is reached only from record.ts, and clickOutbound only from it', () => {
+    expect(moduleImporters('./recordSelect.js')).toEqual(['record.ts']);
+    expect([...new Set(callsTo('clickOutbound').map((c) => c.f))]).toEqual(['recordSelect.ts']);
   });
   it('no route.continue with a URL option', () => {
     const bad = callsTo('continue').filter((c) =>
