@@ -1319,6 +1319,18 @@ describe('clickMoreOptions (the booking research)', () => {
       'press:Enter:button:3 more booking options:focused',
     ]);
   });
+  // why: the review: the lookup is scoped to main, where the recordings' control sits (main's button count changes with
+  // it, the rest of the page's does not)
+  it('an expansion control outside main is not found', async () => {
+    const page = new FakePage(null);
+    page.setUrl(RESULTS_URL);
+    page.setTrees([n('document', '', [n('button', '3 more booking options'), n('main', '', [])])]);
+    const timers = fakeTimers();
+    await expect(
+      createDriver(page, guard()).clickMoreOptions(timers.deadline(90_000), { timers }),
+    ).rejects.toMatchObject({ step: 'find-more-options', reason: 'not-found' });
+    expect(page.calls.actions).toEqual([]);
+  });
   it('none is not-found, two ambiguous, flow select-more-options, nothing activated', async () => {
     for (const [nodes, reason] of [
       [[n('button', OFFER)], 'not-found'],

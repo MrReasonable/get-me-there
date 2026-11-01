@@ -4,6 +4,7 @@
 // text, price, seller, time or name appears here; each request's dates are read back at run time from its query URL.
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import { MINOR_EXPONENT } from '@gmt/core';
 import { recordingsPresentForKind, skipTitle } from '@gmt/providers/testing';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
@@ -119,6 +120,8 @@ const PINS: Readonly<
       headingLevels: number[];
       cheapestOfferAtFrom: boolean;
       picks: string;
+      /** The expansion (Ian's ruling of 2026-11-01), on the recordings that ran it: offers after, further controls. */
+      expanded?: { offers: number; furtherMore: number; cheapestVsFrom: string };
     }
   >
 > = {
@@ -138,10 +141,29 @@ const PINS: Readonly<
     cheapestOfferAtFrom: true,
     picks: 'b9b4dc417f989ee2',
   },
+  'select-return/2026-11-01/3': {
+    best: 25,
+    returns: 6,
+    offers: 6,
+    headingLevels: [1, 3, 4, 1, 0, 0],
+    cheapestOfferAtFrom: false,
+    picks: 'cfbcd5fd020d2f2b',
+    expanded: { offers: 23, furtherMore: 0, cheapestVsFrom: 'equal' },
+  },
+  'select-return/2026-11-01/4': {
+    best: 12,
+    returns: 5,
+    offers: 5,
+    headingLevels: [1, 3, 1, 1, 0, 0],
+    cheapestOfferAtFrom: true,
+    picks: 'a5db91894d52f047',
+    expanded: { offers: 19, furtherMore: 0, cheapestVsFrom: 'equal' },
+  },
 };
 
 const OFFER_PRICE = /for ([\d,]+) [A-Za-z ]+$/;
-const pence = (s: string): number => Number(s.replaceAll(',', '')) * 100;
+// why: the review: minor units by the currency's ISO 4217 exponent (every recorded offer states British pounds)
+const pence = (s: string): number => Number(s.replaceAll(',', '')) * 10 ** (MINOR_EXPONENT.GBP ?? 2);
 const offersOf = (names: readonly string[]): string[] => names.filter((b) => SELECTORS.booking.offer.test(b));
 
 beforeEach(() => {
@@ -173,12 +195,58 @@ describe.skipIf(!present)(skipTitle('recorded select-return pages (the booking r
         ),
         key,
       ).toBe(pin.picks);
+      const more = r.facts.steps[2]?.after;
+      expect(
+        more === undefined
+          ? undefined
+          : {
+              offers: offersOf(more.buttonNames ?? []).length,
+              furtherMore: (more.buttonNames ?? []).filter((b) => SELECTORS.booking.moreOptions.test(b))
+                .length,
+              cheapestVsFrom: Reflect.get(Reflect.get(more, 'expansion') ?? {}, 'cheapestVsFrom'),
+            },
+        key,
+      ).toEqual(pin.expanded);
+    }
+  });
+  // why: Ian's ruling of 2026-11-01 (open "more booking options"): the expansion in-app on the booking path, more offers
+  // after it than before, none of them "From", no further control, the cheapest at the return's price, no dialog
+  it('the expansion, where it ran: in-app, more offers, the cheapest at the return’s price, nothing further', () => {
+    for (const r of all) {
+      const step = r.facts.steps[2];
+      if (step === undefined) continue;
+      const before = r.facts.steps[1]?.after;
+      const after = step.after;
+      if (before === undefined || after === undefined) throw new Error(`${r.key}: no expansion view`);
+      const from = parseOptionName(r.facts.picks[1]?.name ?? '')?.amountMinor;
+      const offers = offersOf(after.buttonNames ?? []);
+      expect([step.step, step.activation], r.key).toEqual(['more-options', 'keyboard']);
+      expect([after.documentLoadsBefore, after.documentLoads, after.urlChanged], r.key).toEqual([
+        1,
+        1,
+        false,
+      ]);
+      expect([after.settled, after.changedFromPreClick], r.key).toEqual([true, true]);
+      expect(new URL(after.url).pathname, r.key).toBe(SELECTORS.booking.path);
+      expect(offers.length, r.key).toBeGreaterThan(offersOf(before.buttonNames ?? []).length);
+      expect(
+        offers.every((b) => !/\bFrom\b/.test(b)),
+        r.key,
+      ).toBe(true);
+      expect(Math.min(...offers.map((b) => pence(OFFER_PRICE.exec(b)?.[1] ?? '0'))), r.key).toBe(from);
+      expect(
+        (after.buttonNames ?? []).some((b) => SELECTORS.booking.moreOptions.test(b)),
+        r.key,
+      ).toBe(false);
+      expect([after.booking?.roleCounts.dialog, after.booking?.roleCounts.alertdialog], r.key).toEqual([
+        0, 0,
+      ]);
     }
   });
   it('both selections in-app by keyboard; the booking view on its own path, classified as such, SOCS the same', () => {
     for (const r of all) {
       expect(
-        r.facts.steps.map((s) => [s.step, s.activation]),
+        r.facts.steps.slice(0, 2).map((s) => [s.step, s.activation]),
         r.key,
       ).toEqual([
         ['first-selection', 'keyboard'],

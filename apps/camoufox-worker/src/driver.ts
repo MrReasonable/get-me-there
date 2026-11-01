@@ -197,8 +197,8 @@ export interface Driver {
    */
   clickReturn(name: string, d: Deadline, o: StepOptions, onActivate?: () => void): Promise<string[]>;
   /**
-   * Ian's ruling of 2026-11-01 (open "more booking options"): the booking view's in-page expansion, the one button on the
-   * page named by `S.booking.moreOptions`, focused then Enter: steps `find-more-options`, `focus-more-options`,
+   * Ian's ruling of 2026-11-01 (open "more booking options"): the booking view's in-page expansion, the one button in
+   * `main` named by `S.booking.moreOptions`, focused then Enter: steps `find-more-options`, `focus-more-options`,
    * `press-more-options`, flow `select-more-options`. Never an offer or any other control.
    */
   clickMoreOptions(d: Deadline, o: StepOptions, onActivate?: () => void): Promise<string[]>;
@@ -640,8 +640,9 @@ export function createDriver(page: PageLike, guard: GuardState, S: Selectors = S
     clickReturn: (name, d, o, onActivate) =>
       activateLink(name, S.returns.resultLink, 'return', 'select-return', d, o, onActivate),
     async clickMoreOptions(d, o, onActivate) {
-      // why: the expansion's own pattern only (it can never name an offer: the selectors test pins that)
-      const more = page.getByRole('button', { name: S.booking.moreOptions });
+      // why: the expansion's own pattern only (it can never name an offer: the selectors test pins that), inside main,
+      // where select-return/2026-11-01/3 and 4 show it (main's button count moves with it, the rest of the page's does not)
+      const more = page.getByRole('main').getByRole('button', { name: S.booking.moreOptions });
       await activateOne(more, 'more-options', 'select-more-options', d, o, onActivate);
       return ['button:more-options'];
     },

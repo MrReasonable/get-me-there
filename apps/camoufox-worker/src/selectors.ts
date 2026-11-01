@@ -122,7 +122,7 @@ export interface Selectors {
    * one seller's offer, a button in `main` (never activated: it leads to the seller). Observed in select-return/2026-11-01/1
    * and 2; a hypothesis for the build until BOOKING_SELECT_VERIFIED is set on an entry.
    */
-  booking: { offer: RegExp; moreOptions: RegExp };
+  booking: { offer: RegExp; moreOptions: RegExp; path: string };
   /**
    * The search form (decision 69: round trip, one adult, the query's dates). The brief's hypothesis from round 1,
    * replaced by Task 14.2's recording; FORM_VERIFIED is false until then, and the server refuses to start.
@@ -233,6 +233,8 @@ export const SELECTORS: Selectors = {
   booking: {
     offer: /^Continue to book with .+ for [\d,]+ [A-Za-z ]+$/,
     moreOptions: /^\d+ more booking options?$/,
+    // why: observed 2026-11-01 (select-return 1–4): the booking view is an in-app change to this path
+    path: '/travel/flights/booking',
   },
   form: {
     tripType: /^Change ticket type\./,

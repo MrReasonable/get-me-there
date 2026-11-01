@@ -57,6 +57,8 @@ const SELECT = ['--select-outbound', ...Q];
 const URL0 =
   'https://www.google.com/travel/flights?q=Flights+from+LHR+to+JFK+on+2026-11-05+returning+2026-11-15&curr=GBP&hl=en-GB&gl=GB';
 const LANDED = 'https://www.google.com/travel/flights/search?tfs=x';
+/** The booking view's path (select-return/2026-11-01/1–4), with a synthetic query. */
+const BOOKING_URL = 'https://www.google.com/travel/flights/booking?tfs=x';
 const cfg = loadWorkerConfig({ CAMOUFOX_WORKER_KEY: KEY, HOME: '/Users/op' });
 
 // The Best view's options, in page order: another day's cheaper option, a name the grammar cannot read, the cheapest on
@@ -1051,17 +1053,18 @@ describe('record --select-return: the return selected, the booking view recorded
     ]);
   const expanded = () => booking({ offers: [OFFER_1, OFFER_2, OFFER_CHEAP, OFFER_4], more: false });
   const script = (
-    o: { onReturn?: () => FakeNode[] | null; onMore?: () => FakeNode[] | null } = {},
+    o: { onReturn?: () => FakeNode[] | null; onMore?: () => FakeNode[] | null; booking?: boolean } = {},
   ): Script => ({
     afterGoto: () => [bestTree()],
     onTab: () => [cheapestTree()],
     onButton: (name) => (name === MORE ? (o.onMore ?? (() => [expanded()]))() : null),
-    onLink: (name) =>
-      name === P451
-        ? [returnTree(RETURNS)]
-        : name === RET_CHEAP
-          ? (o.onReturn ?? (() => [booking()]))()
-          : null,
+    onLink: (name, _c, pg) => {
+      if (name === P451) return [returnTree(RETURNS)];
+      if (name !== RET_CHEAP) return null;
+      // why: as recorded, the booking view is an in-app change to the booking path
+      if (o.booking !== false) pg.setUrl(BOOKING_URL);
+      return (o.onReturn ?? (() => [booking()]))();
+    },
   });
   const facts = (t: ReturnType<typeof setup>) =>
     JSON.parse(readFileSync(join(t.root, 'select-return/2026-10-18/1.facts.json'), 'utf8'));
@@ -1245,7 +1248,12 @@ describe('record --select-return: the more-booking-options expansion', () => {
   const script = (o: { first: FakeNode; onMore?: () => FakeNode[] | null }): Script => ({
     afterGoto: () => [bestTree()],
     onTab: () => [cheapestTree()],
-    onLink: (name) => (name === P451 ? [returnTree([RET_CHEAP])] : name === RET_CHEAP ? [o.first] : null),
+    onLink: (name, _c, pg) => {
+      if (name === P451) return [returnTree([RET_CHEAP])];
+      if (name !== RET_CHEAP) return null;
+      pg.setUrl(BOOKING_URL);
+      return [o.first];
+    },
     onButton: (name) => (name === MORE ? (o.onMore?.() ?? null) : null),
   });
   const facts = (t: ReturnType<typeof setup>) =>
@@ -1269,6 +1277,53 @@ describe('record --select-return: the more-booking-options expansion', () => {
       selectFailed: 'find-more-options:not-found',
     });
     expect(t.contexts[0]?.pages[0]?.calls.presses).toEqual([`Enter:link:${P451}`, `Enter:link:${RET_CHEAP}`]);
+  });
+  // why: the review (Medium): a block after the expansion's press is the stop it always is, with its cool-down
+  it.each(BLOCKED.map(([name, page, rule, tree]) => ({ name, page, rule, tree })))(
+    '$name after the expansion: its cool-down and rule',
+    async ({ page, rule, tree }) => {
+      const t = setup(script({ first: offers(ABOVE, true), onMore: () => [tree()] }));
+      expect(await record(t.ctx(['--select-return', ...Q]), cfg, t.deps)).toBe(EX_UNAVAILABLE);
+      expect(t.cooldown()?.cause).toBe(page);
+      expect(t.log.lines.find((l) => l.msg === 'classifier decision')?.o).toMatchObject({
+        cause: page,
+        rule,
+      });
+    },
+  );
+  it.each(BLOCKED.map(([name, page, rule, tree]) => ({ name, page, rule, tree })))(
+    '$name after the return’s activation: its cool-down and rule',
+    async ({ page, rule, tree }) => {
+      const t = setup(script({ first: tree() }));
+      expect(await record(t.ctx(['--select-return', ...Q]), cfg, t.deps)).toBe(EX_UNAVAILABLE);
+      expect(t.cooldown()?.cause).toBe(page);
+      expect(t.log.lines.find((l) => l.msg === 'classifier decision')?.o).toMatchObject({
+        cause: page,
+        rule,
+      });
+    },
+  );
+  // why: the review: the expansion runs only from a settled view on the booking path
+  it('a settled offers view off the booking path is not-booking-view: nothing more is pressed', async () => {
+    const t = setup({
+      ...script({ first: offers(ABOVE, true) }),
+      onLink: (name) =>
+        name === P451 ? [returnTree([RET_CHEAP])] : name === RET_CHEAP ? [offers(ABOVE, true)] : null,
+    });
+    expect(await record(t.ctx(['--select-return', ...Q]), cfg, t.deps)).toBe(0);
+    expect(facts(t).steps.at(-1)).toEqual({ step: 'more-options', selectFailed: 'not-booking-view' });
+    expect(t.contexts[0]?.pages[0]?.calls.presses).toEqual([`Enter:link:${P451}`, `Enter:link:${RET_CHEAP}`]);
+  });
+  // why: the review: prices compare in the currency's minor units; a currency this app does not know is unknown
+  it('offers in a currency other than the return’s are compared as unknown', async () => {
+    const t = setup(
+      script({
+        first: offers(ABOVE, true),
+        onMore: () => [offers(['Continue to book with QQ Air for 451 US dollars'], false)],
+      }),
+    );
+    expect(await record(t.ctx(['--select-return', ...Q]), cfg, t.deps)).toBe(0);
+    expect(facts(t).steps[2].after.expansion.cheapestVsFrom).toBe('unknown');
   });
   it('a further expansion control and a cheapest offer below the return’s price are recorded as such', async () => {
     const below = [

@@ -16,7 +16,7 @@
  * activation or the reload is the stop it always is, with its cool-down. Nothing is clicked but the Cheapest flow's
  * names, and nothing activated but an option's own link. Only record.ts imports this module (rules.test.ts pins that).
  */
-import type { BlockedPage, IsoDate, Logger } from '@gmt/core';
+import { type BlockedPage, type IsoDate, type Logger, MINOR_EXPONENT } from '@gmt/core';
 import type { PageBudget } from './budget.js';
 import { type ClassifyRule, classifyPageWithRule, type PageFacts, type PageKind } from './classify.js';
 import {
@@ -595,10 +595,12 @@ async function reload(c: SelectPage, before: Before): Promise<StepResult & { sho
 function expansionOf(c: SelectPage, a: After, fromMinor: number | null): NonNullable<After['expansion']> {
   const buttons = a.buttonNames ?? [];
   const offers = buttons.filter((b) => c.deps.selectors.booking.offer.test(b));
-  const prices = offers
-    .map((b) => /for ([\d,]+) [A-Za-z ]+$/.exec(b)?.[1])
-    .filter((x): x is string => x !== undefined)
-    .map((x) => Number(x.replaceAll(',', '')) * 100);
+  // why: the review: prices compare in the currency's own minor units (ISO 4217 exponent, core's table), and only in
+  // the currency the return's price is stated in; an offer in any other currency makes the comparison unknown
+  const exponent = MINOR_EXPONENT.GBP ?? 2;
+  const parsed = offers.map((b) => /for ([\d,]+) ([A-Za-z ]+)$/.exec(b));
+  const known = parsed.every((m) => m !== null && m[2] === 'British pounds');
+  const prices = known ? parsed.map((m) => Number((m?.[1] ?? '').replaceAll(',', '')) * 10 ** exponent) : [];
   const cheapest = prices.length === 0 ? null : Math.min(...prices);
   return {
     offers: a.page.resultLinks,
@@ -710,7 +712,19 @@ export async function recordSelectOutbound(
     if (!keep(rr) || rr.record.after === undefined) return finish();
     const b = rr.record.after;
     // why: Ian's ruling of 2026-11-01 (open "more booking options"): only from a settled booking view with offers
-    if (!b.settled || b.classification.rule !== 'booking-view' || b.page.resultLinks === 0) {
+    const onBookingPath = ((): boolean => {
+      try {
+        return new URL(b.page.url).pathname === c.deps.selectors.booking.path;
+      } catch {
+        return false;
+      }
+    })();
+    if (
+      !b.settled ||
+      b.classification.rule !== 'booking-view' ||
+      b.page.resultLinks === 0 ||
+      !onBookingPath
+    ) {
       steps.push({ step: 'more-options', selectFailed: 'not-booking-view' });
       return finish();
     }

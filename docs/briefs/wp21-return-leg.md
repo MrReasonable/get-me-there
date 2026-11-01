@@ -697,7 +697,7 @@ The implementer builds the kind and its tests over fakes; the controller runs th
 served path: `readFacts` gains one heading lookup (`return-heading`) and reports `outboundLinks` on every poll,
 `listFacts` reads the View more button's presence, and the Best and Cheapest classifications are unchanged (pinned).
 
-- [ ] **Write the failing tests** (expected to fail as: unknown argument; `documentLoads`, `clickOutbound`, `linkNames`,
+- [x] **Write the failing tests** (expected to fail as: unknown argument; `documentLoads`, `clickOutbound`, `linkNames`,
   `reclaim`, `check(0, n)`'s second parameter not there; `StepFailed` not exported; `View` refusing `'returns'` and
   `unsetFlags` missing a key under typecheck; the flag absent).
   - `recordArgs.test.ts` (extend): `--select-outbound --origin LHR --destination JFK --depart 2027-03-14 --return
@@ -772,10 +772,10 @@ served path: `readFacts` gains one heading lookup (`return-heading`) and reports
   - `selectors.test.ts`, `status.test.ts` and core's `builds.test.ts` (extend): `flagsOf(selectorsFor(<each entry>,
     <its build>)).RETURN_SELECT_VERIFIED === false`; `/v1/status` reports it; `FLAG_NAMES` holds it; the CLI's
     `unsetFlags()` is `Object.fromEntries(FLAG_NAMES.map((f) => [f, false]))` checked with `satisfies`.
-- [ ] **Run to verify they fail**: `pnpm --filter @gmt/camoufox-worker exec vitest run test/recordArgs.test.ts test/guard.test.ts test/driver.test.ts
+- [x] **Run to verify they fail**: `pnpm --filter @gmt/camoufox-worker exec vitest run test/recordArgs.test.ts test/guard.test.ts test/driver.test.ts
   test/ready.test.ts test/classify.test.ts test/pacer.test.ts test/monthly.test.ts test/recordSelectOutbound.test.ts test/selectors.test.ts test/status.test.ts`,
   `pnpm --filter @gmt/core exec vitest run test/camoufox/builds.test.ts`, then `pnpm --filter @gmt/camoufox-worker typecheck` and `pnpm --filter @gmt/cli typecheck`.
-- [ ] **Implement.** `KINDS` and `parseRecordArgs` (`MAX_PAGES` stays 3; the kind's own bound is 2). `guard.ts`'s
+- [x] **Implement.** `KINDS` and `parseRecordArgs` (`MAX_PAGES` stays 3; the kind's own bound is 2). `guard.ts`'s
   counter. `driver.ts` as §5 (`StepFailed(step, reason, flow = 'cheapest')`, every importer renamed in this task;
   `runStep` passes `o.flow`). `S.returns` as a **hypothesis** with a `// why: a hypothesis until select-outbound/<date>
   records the view (Task 21.3 dates it)` line: `{ heading: /^(?:Top |Other )?[Rr]eturning flights$/, resultLink:
@@ -798,9 +798,9 @@ served path: `readFacts` gains one heading lookup (`return-heading`) and reports
   `duration` and `carrier`, plus `returnOptionName({ pounds, from, to, on, duration, carrier, priceForm: 'total' |
   'from' })` and a `viewMore` node. Core: `FLAG_NAMES`, `NONE`, `pin.ts` false on every entry; the worker's
   `Selectors`, `flagsOf`, `PROOFS` (no entry yet); the CLI's `unsetFlags`.
-- [ ] **Run to verify they pass**; `pnpm --filter @gmt/camoufox-worker test`, `pnpm --filter @gmt/core test` and `pnpm --filter @gmt/cli test` at their thresholds; `pnpm -r typecheck`.
-- [ ] **Commit**: `wp21: the recorder's select-outbound kind, the document-load count, the outbound selection step, the page reservation and spacing re-claim, and the return-select flag (false everywhere)`.
-- [ ] **The live recording (controller only).** Stop the worker: `pnpm gmt stop --only worker` (docs/setup.md:1065).
+- [x] **Run to verify they pass**; `pnpm --filter @gmt/camoufox-worker test`, `pnpm --filter @gmt/core test` and `pnpm --filter @gmt/cli test` at their thresholds; `pnpm -r typecheck`.
+- [x] **Commit**: `wp21: the recorder's select-outbound kind, the document-load count, the outbound selection step, the page reservation and spacing re-claim, and the return-select flag (false everywhere)`.
+- [x] **The live recording (controller only).** Stop the worker: `pnpm gmt stop --only worker` (docs/setup.md:1065).
   From `apps/camoufox-worker`, two date pairs on the example route, one run each (the recorder's pacer spaces them):
   ```
   env -i HOME="$HOME" PATH="$PATH" USER="$USER" TMPDIR="$TMPDIR" pnpm -s record --select-outbound --origin LHR --destination JFK --depart 2027-03-14 --return 2027-03-24
@@ -810,7 +810,7 @@ served path: `readFacts` gains one heading lookup (`return-heading`) and reports
   recording does; a `selectFailed`, `settled: false` or `waitTimedOut` outcome is itself a finding, and the controller
   reads the stored `after` facts before deciding whether a second attempt with a revised hypothesis is warranted (at
   most two further runs in total; each claims 4 pages, settled to what it loaded).
-- [ ] **The findings note** `.superpowers/sdd/wp20-search-now/return-page-findings.md` (local, never committed; no
+- [x] **The findings note** `.superpowers/sdd/wp20-search-now/return-page-findings.md` (local, never committed; no
   page text, option, button or tab name, or URL with a query; counts, booleans, token classes, pattern descriptions
   and rule words only; the pinned expectations in the tests are `pinOf` hashes and booleans) answers, per recording
   (`select-outbound/<date>/<n>`) and per step (the first selection, the reload, the second selection):
