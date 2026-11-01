@@ -234,7 +234,7 @@ describe('source guards (spec §11 copy, spec §9 item 6 prices)', () => {
     const tie = src.find((s) => s.file === 'src/views/Dates/TieLine.tsx');
     expect(tie).toBeDefined();
     expect(moneyOffenders('src/views/Elsewhere.tsx', tie?.text ?? '')).toEqual([]);
-    expect(tie?.text).toMatch(/estimateMoney\(pricePence\)/);
+    expect(tie?.text).toMatch(/estimateMoney\(pricePence, \{ wholePounds: true \}\)/);
     for (const f of ['Flights.tsx', 'FlightRow.tsx', 'flightLines.ts']) {
       const file = src.find((s) => s.file === `src/views/Dates/${f}`);
       expect(file, f).toBeDefined();

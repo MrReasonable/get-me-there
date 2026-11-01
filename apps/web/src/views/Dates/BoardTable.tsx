@@ -9,6 +9,7 @@ import {
   useLayoutEffect,
   useMemo,
   useRef,
+  useState,
 } from 'react';
 import type { DefinitionResponse } from '../../api/types.js';
 import { COPY } from '../../copy.js';
@@ -105,21 +106,38 @@ export function BoardTable(props: BoardProps) {
   const flights = useBoardFlights(definition.id, pages);
   const limits = useMemo(() => limitsOf(definition), [definition]);
   const available = flights.meta?.available === true;
-  const shownFor = (p: DatePair) => shownOf(flights.byKey.get(pairKey(p))?.list ?? null, limits, available);
-  const ordered = orderedGroups(groups, shownFor);
-  const rows = ordered.flat().slice(0, visible);
-  // why: each tie's line stands above its first shown row (spec rev 55 §11 Ties), counting the whole tie
-  const onPage = new Set(rows.map((p) => p.index));
-  const tieAt = new Map<number, { count: number; pricePence: number; byFlights: boolean }>();
-  for (const g of ordered) {
-    const first = g[0];
-    if (g.length > 1 && first !== undefined && onPage.has(first.index))
-      tieAt.set(first.index, {
-        count: g.length,
-        pricePence: first.figure.price.pricePence,
-        byFlights: g.some((p) => (shownFor(p)?.shown.length ?? 0) > 0),
-      });
-  }
+  // why: finding 9: a list that lands moves rows within a tie only while the board is not in use; while the pointer or
+  // focus is in it (the board's own hold, revision 50) the order keeps the lists it last applied, and the move is
+  // applied when they leave. The flights themselves (each block and outcome) show at once; only the order waits.
+  const [held, setHeld] = useState(false);
+  const [orderBy, setOrderBy] = useState({ byKey: flights.byKey, available });
+  useEffect(() => {
+    if (!held)
+      setOrderBy((o) =>
+        o.byKey === flights.byKey && o.available === available ? o : { byKey: flights.byKey, available },
+      );
+  }, [held, flights.byKey, available]);
+  const { rows, tieAt } = useMemo(() => {
+    const shownFor = (p: DatePair) =>
+      shownOf(orderBy.byKey.get(pairKey(p))?.list ?? null, limits, orderBy.available);
+    const ordered = orderedGroups(groups, shownFor);
+    const rows = ordered.flat().slice(0, visible);
+    // why: each tie's line stands above its first shown row (spec rev 55 §11 Ties), counting the whole tie and, when
+    // it runs past the shown rows, how many of it are shown (ruling R-tie-count)
+    const onPage = new Set(rows.map((p) => p.index));
+    const tieAt = new Map<number, { count: number; shown: number; pricePence: number; byFlights: boolean }>();
+    for (const g of ordered) {
+      const first = g[0];
+      if (g.length > 1 && first !== undefined && onPage.has(first.index))
+        tieAt.set(first.index, {
+          count: g.length,
+          shown: g.filter((p) => onPage.has(p.index)).length,
+          pricePence: first.figure.price.pricePence,
+          byFlights: g.some((p) => (shownFor(p)?.shown.length ?? 0) > 0),
+        });
+    }
+    return { rows, tieAt };
+  }, [groups, orderBy, limits, visible]);
   const airportPairs = data.scope.airportPairs;
   const filtered = state.journey !== null;
   useFlip(region, token, animate, reduced);
@@ -145,7 +163,9 @@ export function BoardTable(props: BoardProps) {
     if (root === null) return;
     const set = (patch: Partial<{ pointer: boolean; focus: boolean }>) => {
       inside.current = { ...inside.current, ...patch };
-      onHold.current(inside.current.pointer || inside.current.focus);
+      const h = inside.current.pointer || inside.current.focus;
+      onHold.current(h);
+      setHeld(h);
     };
     const enter = () => set({ pointer: true });
     const leave = () => set({ pointer: false });

@@ -823,8 +823,14 @@ export const COPY = {
     readButton: (pagesLeft: string | null) =>
       `Read flights for this date (free, 1 page${pagesLeft === null ? '' : `; ${pagesLeft} ${noun(pagesLeft, 'page', 'pages')} left this month`})`,
     reading: 'Reading flights…',
+    // what the block's live region says when a read here ends (finding 3)
+    readDone: (dates: string) => `Flights read for ${dates}`,
+    readNotDone: (dates: string) => `Flights not read for ${dates}`,
+    // a refused read, worded from the api's code (and, for not_available, its reason; ruling A33), never its text
     busy: 'The browser worker is busy with a search; try again when it finishes',
     fresh: "Read within this search's refresh",
+    outsideSpace: "These dates are no longer in this search's dates",
+    noPrice: 'This date pair has no price, so there are no airports to read flights for',
     readFailed: "The flights couldn't be read just now; try again later",
     // one line under the list when flight lists cannot be read here
     unavailable: 'Flight times need the browser worker; set it up in Providers',
@@ -841,9 +847,10 @@ export const COPY = {
     openLink: 'Open in Google Flights ↗',
     openLinkName: (dates: string) => `Open in Google Flights for ${dates}, opens in a new tab`,
     datesShort: (departure: string, back: string) => `${departure} → ${back}`,
-    // a tie (spec rev 55 §11 Ties); the price is the estimate panel's cost formatter's
-    tie: (n: number, price: string, byFlights: boolean) =>
-      `${n} date pairs tie at ${price}, ${byFlights ? 'listed by shortest flight time' : 'in date order'}`,
+    // a tie (spec rev 55 §11 Ties); the price is the estimate panel's cost formatter's, in whole pounds when it has no
+    // pence (ruling R-pounds); a tie that runs past the shown rows also says how many of it are shown (R-tie-count)
+    tie: (n: number, price: string, byFlights: boolean, shownHere: number | null) =>
+      `${n} date pairs tie at ${price}, ${byFlights ? 'listed by shortest flight time' : 'in date order'}${shownHere === null ? '' : `; ${shownHere} shown here`}`,
   },
   // --- WP19: the Dates view (spec §11 Dates; revision 50) ---
   datesView: {

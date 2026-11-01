@@ -97,5 +97,6 @@ export const searchesHandlers = [
     available: false,
     unavailableReason: 'not-named',
     monthlyPagesLeft: null,
+    runPages: null,
   }),
 ];

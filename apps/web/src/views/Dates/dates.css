@@ -328,9 +328,13 @@
 }
 
 @media (max-width: 899px) {
-  .board .card-flights,
-  .board tbody tr.tie-row > td {
+  .board .card-flights {
     grid-column: 1 / -1;
+  }
+  /* finding 11: a tie's line is one full-width line between the cards, never a card of its own */
+  .board tbody tr.tie-row {
+    display: block;
+    padding: 10px 2px 0;
   }
   .flight-outcome {
     justify-content: flex-end;

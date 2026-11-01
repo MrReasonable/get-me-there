@@ -234,13 +234,6 @@ function appBaseUrlOk(raw: string): boolean {
 }
 
 /** Hosts the camoufox worker URL may name (spec §12 rev 32): the Mac's loopback, or Docker Desktop's name for it. */
-/**
- * `CAMOUFOX_EXECUTION_PAGE_CAP`'s default (spec §12): the browser pages one run may load. The web reads it for the
- * flight read's "N pages left this month" clause (spec rev 55 §11), which it shows only when fewer pages are left than
- * one run at this default plus its flight pages would use (the configured cap is not on the wire).
- */
-export const DEFAULT_CAMOUFOX_EXECUTION_PAGE_CAP = 100;
-
 export const CAMOUFOX_WORKER_HOSTS: readonly string[] = [
   '127.0.0.1',
   'localhost',
@@ -297,8 +290,7 @@ function camoufoxConfig(r: Reader, shared: SharedSettings): Config['providers'][
   const executionScrollCap = r.int('CAMOUFOX_EXECUTION_SCROLL_CAP', 0, 6000) ?? 600;
   const monthlyScrollCap = sharedInt(shared, 'CAMOUFOX_MONTHLY_SCROLL_CAP');
   const minSpacingSeconds = sharedInt(shared, 'CAMOUFOX_MIN_SPACING_SECONDS');
-  const executionPageCap =
-    r.int('CAMOUFOX_EXECUTION_PAGE_CAP', 1, 400) ?? DEFAULT_CAMOUFOX_EXECUTION_PAGE_CAP;
+  const executionPageCap = r.int('CAMOUFOX_EXECUTION_PAGE_CAP', 1, 400) ?? 100;
   const monthlyCallCap = sharedInt(shared, 'CAMOUFOX_MONTHLY_PAGE_CAP');
   const billingDay = sharedInt(shared, 'CAMOUFOX_BILLING_DAY');
   const cooldownHours = sharedInt(shared, 'CAMOUFOX_COOLDOWN_HOURS');

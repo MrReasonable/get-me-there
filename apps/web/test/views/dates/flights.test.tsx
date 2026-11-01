@@ -5,7 +5,6 @@ import { act, screen, waitFor, within } from '@testing-library/react';
 import { HttpResponse, http } from 'msw';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { POLL_MS } from '../../../src/api/queries.js';
-import { COPY } from '../../../src/copy.js';
 import { googleFlightsHref } from '../../../src/views/Dates/flightLines.js';
 import {
   at,
@@ -41,7 +40,6 @@ import { findBoard, renderDates } from './render.js';
 // list read at 10:44Z reads "11:44" today. The search's limits are the fixture definition's: 25 h longest journey and
 // arrivals 06:00–23:00.
 
-const F = COPY.flights;
 /** A real cached source, so the difference line names it ("the Aviasales cache"); fetched 12 Oct 09:30 London. */
 const CACHED = provCached({ fetchedAt: asIsoDateTime('2026-10-12T08:30:00.000Z') });
 
@@ -410,12 +408,74 @@ describe('the flights block (spec rev 55 §11 Flights)', () => {
 
   it('words a failed list, Google’s own no-flights line and a list with nothing this app could read', async () => {
     await renderWorked();
-    expect(blockOf(9)).toHaveTextContent('Flights not read: its monthly limit is used up');
+    expect(blockOf(9)).toHaveTextContent("Flights not read: the browser worker's monthly limit is used up");
+    // ruling R-failed-read: a list stopped by a monthly or per-run limit offers no read; the note says the limit
+    expect(within(blockOf(9)).queryByRole('button', { name: /^Read flights/ })).toBeNull();
     expect(blockOf(6)).toHaveTextContent("Google's list showed no flights for these dates when read 11:44");
     expect(blockOf(3)).toHaveTextContent(
       'Google listed flights, none this app could read for these airports and dates (2 for other airports or days, 1 unread)',
     );
     for (const i of [3, 9]) expect(blockOf(i)).not.toHaveTextContent(/no flights/);
+  });
+
+  it('a failed list offers the read again unless a monthly or per-run limit stopped it (ruling R-failed-read)', async () => {
+    const reasons: Record<string, Parameters<typeof failedList>[0]> = {
+      '2027-03-14': 'network',
+      '2027-03-15': 'execution-cap',
+      '2027-03-16': 'monthly-cap',
+    };
+    server.use(
+      serveFlightLists((d, r) => {
+        const reason = reasons[d];
+        return flightPair(
+          d,
+          r,
+          reason === undefined ? {} : { list: failedList(reason, { departureDate: d, returnDate: r }) },
+        );
+      }),
+    );
+    renderDates({ body: BOARD });
+    await waitFor(() => expect(document.querySelector('[data-flights-for="6"]')).not.toBeNull());
+    expect(blockOf(0)).toHaveTextContent('Flights not read: the connection to it failed');
+    expect(within(blockOf(0)).getByRole('button', { name: /^Read flights for this date/ })).toBeEnabled();
+    expect(blockOf(3)).toHaveTextContent("Flights not read: this search's limit for one run is used up");
+    expect(within(blockOf(3)).queryByRole('button', { name: /^Read flights/ })).toBeNull();
+    expect(within(blockOf(6)).queryByRole('button', { name: /^Read flights/ })).toBeNull();
+  });
+
+  it('"show all" expands to every flight and "show fewer" folds back to three', async () => {
+    const { user } = await renderWorked();
+    const block = blockOf(0);
+    await user.click(within(block).getByRole('button', { name: 'show all' }));
+    expect(within(block).getAllByTestId('flight')).toHaveLength(6);
+    await user.click(within(block).getByRole('button', { name: 'show fewer' }));
+    expect(within(block).getAllByTestId('flight')).toHaveLength(3);
+    expect(within(block).getByTestId('flights-more')).toHaveTextContent(
+      '3 more read, 1 outside your limits · show all',
+    );
+  });
+
+  it('the block head states when the list was read: today, yesterday, or its date (finding 7)', async () => {
+    const at = (fetchedAt: string, ageHours: number) => flightList({ fetchedAt, ageHours });
+    const lists: Record<string, ReturnType<typeof flightList>> = {
+      '2027-03-14': at('2026-10-14T10:44:00.000Z', 4),
+      '2027-03-15': at('2026-10-13T10:44:00.000Z', 28),
+      '2027-03-16': at('2026-10-11T10:44:00.000Z', 76),
+    };
+    server.use(
+      serveFlightLists((d, r) => {
+        const l = lists[d];
+        return flightPair(d, r, l === undefined ? {} : { list: { ...l, departureDate: d, returnDate: r } });
+      }),
+    );
+    renderDates({ body: BOARD });
+    await waitFor(() =>
+      expect(document.querySelector('[data-flights-for="6"] [data-testid="flights-head"]')).not.toBeNull(),
+    );
+    const head = (i: number) => within(blockOf(i)).getByTestId('flights-head').textContent;
+    expect(head(0)).toContain('· read 4h ago ·');
+    expect(head(3)).toContain('· read 28h ago, yesterday 11:44 ·');
+    expect(head(6)).toContain('· read 3d ago, 11 Oct 11:44 ·');
   });
 
   it('a list where every option was unread reads "(3 unread)", never "no flights"', async () => {
@@ -555,12 +615,25 @@ describe('reading one date pair’s flights (spec rev 55 §11; ruling ui-009)', 
     ).toBeEnabled();
   });
 
-  it('adds the pages left when fewer than one run would use', async () => {
-    await renderWorked({ over: { monthlyPagesLeft: 100 + FLIGHT_LIST_COUNT - 1 } });
+  it('adds the pages left only when fewer are left than one run of this search uses (ruling R-pages)', async () => {
+    // why: the answer's own `runPages` (this search's grid pages and its flight pages) is the threshold
+    const runPages = 100 + FLIGHT_LIST_COUNT;
+    await renderWorked({ over: { monthlyPagesLeft: runPages - 1, runPages } });
     expect(
       within(blockOf(15)).getByRole('button', {
         name: 'Read flights for this date (free, 1 page; 109 pages left this month)',
       }),
+    ).toBeEnabled();
+  });
+
+  it.each([
+    ['as many left as one run uses', { monthlyPagesLeft: 110, runPages: 110 }],
+    ['no run figure', { monthlyPagesLeft: 5, runPages: null }],
+    ['no monthly figure', { monthlyPagesLeft: null, runPages: 110 }],
+  ])('no pages-left clause with %s', async (_name, over) => {
+    await renderWorked({ over });
+    expect(
+      within(blockOf(15)).getByRole('button', { name: 'Read flights for this date (free, 1 page)' }),
     ).toBeEnabled();
   });
 
@@ -591,29 +664,78 @@ describe('reading one date pair’s flights (spec rev 55 §11; ruling ui-009)', 
     // why: the first read answers before the press with nothing reading; only reads after it say the pair is reading
     await waitFor(() => expect(document.querySelector('[data-flights-for="15"]')).not.toBeNull());
     const before = requests.length;
+    // why: the block's one live region is there, empty, before anything is said in it (finding 3)
+    const status = within(blockOf(15)).getByTestId('flights-status');
+    expect(status).toHaveAttribute('role', 'status');
+    expect(status).toHaveTextContent('');
     const button = within(blockOf(15)).getByRole('button', { name: /^Read flights for this date/ });
+    button.focus();
     await act(async () => button.click());
     await waitFor(() => expect(bodies).toEqual([{ departureDate: '2027-03-19', returnDate: '2027-03-29' }]));
-    await waitFor(() => expect(blockOf(15)).toHaveTextContent('Reading flights…'));
+    // the pressed button stays mounted and focused, saying it is reading; the other reads are disabled
+    await waitFor(() => expect(button).toHaveTextContent('Reading flights…'));
+    expect(button).toHaveAttribute('aria-disabled', 'true');
+    expect(document.activeElement).toBe(button);
     expect(within(blockOf(12)).getByRole('button', { name: /^Read flights for this date/ })).toBeDisabled();
     landed = true;
     await act(() => vi.advanceTimersByTimeAsync(POLL_MS));
     await waitFor(() => expect(requests.length).toBeGreaterThan(before + 1));
-    await waitFor(() => expect(blockOf(15)).not.toHaveTextContent('Reading flights…'));
+    await waitFor(() => expect(status).toHaveTextContent('Flights read for 19 → 29 Mar'));
+    expect(within(blockOf(15)).getByTestId('flights-status')).toBe(status);
     expect(outcomeOf(15)).toHaveTextContent(/^Google's list: from/);
+    // the read button has gone with the list read; focus stays in its block
+    expect(within(blockOf(15)).queryByRole('button', { name: /^Read flights/ })).toBeNull();
+    expect(blockOf(15).contains(document.activeElement)).toBe(true);
     expect(within(blockOf(12)).getByRole('button', { name: /^Read flights for this date/ })).toBeEnabled();
   });
 
-  it('words the refusals: the browser worker busy, and a read within the refresh', async () => {
-    server.use(serveFlightRead({ status: 409, code: 'browser_busy' }), serveFlightLists(workedEntry));
+  it('a read the api reports, with no press here, shows as reading and disables every other read', async () => {
+    await renderWorked({ over: { reading: { departureDate: '2027-03-19', returnDate: '2027-03-29' } } });
+    const reading = within(blockOf(15)).getByRole('button', { name: 'Reading flights…' });
+    expect(reading).toHaveAttribute('aria-disabled', 'true');
+    expect(within(blockOf(12)).getByRole('button', { name: /^Read flights for this date/ })).toBeDisabled();
+  });
+
+  it.each([
+    [
+      'the browser worker busy',
+      { status: 409, code: 'browser_busy' },
+      'The browser worker is busy with a search; try again when it finishes',
+    ],
+    ['a read within the refresh', { status: 409, code: 'fresh' }, "Read within this search's refresh"],
+    [
+      'another cabin',
+      { status: 409, code: 'not_available', details: { reason: 'cabin' } },
+      'Flight times are read for economy searches only',
+    ],
+    [
+      'the worker not set up',
+      { status: 409, code: 'not_available', details: { reason: 'not-configured' } },
+      'Flight times need the browser worker; set it up in Providers',
+    ],
+    [
+      'dates outside the search',
+      { status: 422, code: 'outside_space' },
+      "These dates are no longer in this search's dates",
+    ],
+    [
+      'no price',
+      { status: 422, code: 'no_price' },
+      'This date pair has no price, so there are no airports to read flights for',
+    ],
+    [
+      'anything else',
+      { status: 500, code: 'internal' },
+      "The flights couldn't be read just now; try again later",
+    ],
+  ])('words a refused read in the block’s live region: %s', async (_name, answer, words) => {
+    server.use(serveFlightRead(answer), serveFlightLists(workedEntry));
     const { user } = renderDates({ body: BOARD });
     await waitFor(() => expect(document.querySelector('[data-flights-for="15"]')).not.toBeNull());
+    const status = within(blockOf(15)).getByTestId('flights-status');
     await user.click(within(blockOf(15)).getByRole('button', { name: /^Read flights for this date/ }));
-    expect(await within(blockOf(15)).findByText(F.busy)).toBeInTheDocument();
-    expect(F.busy).toBe('The browser worker is busy with a search; try again when it finishes');
-    server.use(serveFlightRead({ status: 409, code: 'fresh' }));
-    await user.click(within(blockOf(12)).getByRole('button', { name: /^Read flights for this date/ }));
-    expect(await within(blockOf(12)).findByText("Read within this search's refresh")).toBeInTheDocument();
+    await waitFor(() => expect(status).toHaveTextContent(words));
+    expect(within(blockOf(15)).getByRole('button', { name: /^Read flights for this date/ })).toBeEnabled();
   });
 
   it('when flight lists are not available: no line on any row, one line under the list, the links kept', async () => {
@@ -629,6 +751,13 @@ describe('reading one date pair’s flights (spec rev 55 §11; ruling ui-009)', 
     expect(screen.getAllByTestId('flights-unavailable')).toHaveLength(1);
     expect(screen.getByTestId('flights-unavailable')).toHaveTextContent(
       'Flight times need the browser worker; set it up in Providers',
+    );
+  });
+
+  it('a search in another cabin says flight times are read for economy only (ruling R-cabin)', async () => {
+    await renderWorked({ over: { available: false, unavailableReason: 'cabin' } });
+    expect(screen.getByTestId('flights-unavailable')).toHaveTextContent(
+      'Flight times are read for economy searches only',
     );
   });
 
@@ -737,8 +866,8 @@ describe('ties (spec rev 55 §11 Ties)', () => {
     await waitFor(() => expect(order()).toEqual([9, 3, 0, 6, 12, 15]));
     const lines = screen.getAllByTestId('tie-line').map((l) => l.textContent);
     expect(lines).toEqual([
-      '4 date pairs tie at £86.00, listed by shortest flight time',
-      '2 date pairs tie at £90.00, in date order',
+      '4 date pairs tie at £86, listed by shortest flight time',
+      '2 date pairs tie at £90, in date order',
     ]);
     // the rank column is the price rank: 17 Mar was fourth by the rank and keeps its 4
     const rank = (i: number) => rowOf(i).querySelector('.row-head .sr-only')?.textContent;
@@ -750,10 +879,64 @@ describe('ties (spec rev 55 §11 Ties)', () => {
     server.use(serveFlightLists((d, r) => flightPair(d, r)));
     renderDates({ body: TIES });
     await waitFor(() => expect(screen.getAllByTestId('tie-line')).toHaveLength(2));
-    expect(screen.getAllByTestId('tie-line')[0]).toHaveTextContent(
-      '4 date pairs tie at £86.00, in date order',
-    );
+    expect(screen.getAllByTestId('tie-line')[0]).toHaveTextContent('4 date pairs tie at £86, in date order');
     expect(order()).toEqual([0, 3, 6, 9, 12, 15]);
+  });
+
+  it('a tie with pence reads them; one that runs past the shown rows counts the whole tie and those shown (R-tie-count)', async () => {
+    const pairs: Record<string, PairOver> = {};
+    for (let d = 0; d < 12; d += 1) pairs[at(addDays(asIsoDate('2027-03-14'), d), 10)] = pair(8_650);
+    server.use(serveFlightLists((d, r) => flightPair(d, r)));
+    renderDates({ body: { pairs } });
+    await waitFor(() => expect(screen.getAllByTestId('tie-line')).toHaveLength(1));
+    expect(screen.getByTestId('tie-line')).toHaveTextContent(
+      '12 date pairs tie at £86.50, in date order; 10 shown here',
+    );
+  });
+
+  it('a read that lands holds its move within the tie while the board is in use, then applies it (finding 9)', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'], shouldAdvanceTime: false });
+    let landed = false;
+    server.use(
+      http.post(FLIGHT_LISTS_URL, () => HttpResponse.json({ accepted: true }, { status: 202 })),
+      serveFlightLists(
+        (d, r) =>
+          d === '2027-03-17' && landed
+            ? flightPair(d, r, { list: flightList({ departureDate: d, returnDate: r }) })
+            : flightPair(d, r),
+        () => ({ reading: landed ? null : { departureDate: '2027-03-17', returnDate: '2027-03-27' } }),
+      ),
+    );
+    renderDates({ body: TIES });
+    await waitFor(() => expect(document.querySelector('[data-flights-for="9"]')).not.toBeNull());
+    await waitFor(() =>
+      expect(within(blockOf(9)).getByRole('button', { name: /^Reading flights/ })).toBeInTheDocument(),
+    );
+    // focus inside the board holds a move: the row stays where it was when its list lands
+    within(blockOf(0)).getByRole('link').focus();
+    landed = true;
+    await act(() => vi.advanceTimersByTimeAsync(POLL_MS));
+    await waitFor(() => expect(outcomeOf(9)).not.toBeNull());
+    expect(order()).toEqual([0, 3, 6, 9, 12, 15]);
+    // focus leaves the board: the move applies, 17 Mar first within its tie
+    act(() => document.body.focus());
+    act(() => {
+      if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+    });
+    await waitFor(() => expect(order()).toEqual([9, 0, 3, 6, 12, 15]));
+  });
+
+  it('at phone width a tie line is its own full-width line, never a card (finding 11)', async () => {
+    setViewportWidth(375);
+    server.use(serveFlightLists(tieLists));
+    renderDates({ body: TIES });
+    const line = await screen.findAllByTestId('tie-line');
+    const row = line[0]?.closest('tr');
+    expect(row).toHaveClass('tie-row');
+    expect(row).not.toHaveAttribute('data-testid', 'board-card');
+    const css = readFileSync(resolve(import.meta.dirname, '../../../src/views/Dates/dates.css'), 'utf8');
+    const phone = css.slice(css.lastIndexOf('@media (max-width: 899px)'));
+    expect(phone).toMatch(/\.board tbody tr\.tie-row\s*\{[^}]*display:\s*block/);
   });
 });
 

@@ -724,14 +724,22 @@ export function monthlyPagesOf(
   estimate: Pick<Estimate, 'perProvider' | 'flightLists'>,
   definitionId: string | null,
 ): MonthlyPages | null {
-  const lines = estimate.perProvider.filter((p) => p.providerId === 'camoufox' && p.blocked === null);
-  if (lines.length === 0) return null;
+  const planned = browserPagesPlanned(estimate);
+  if (planned === null) return null;
   // why: the month's pages less what other schedules reserve, exactly as checkBudget reads it (providerWindow); a guard
   // without a cap falls back to the configured monthly page cap
   const { usage, reserved } = providerWindow(ctx, 'camoufox', definitionId);
   const cap = usage.cap ?? ctx.limitsOf('camoufox').monthlyCallCap;
-  return {
-    planned: lines.reduce((a, p) => a + p.calls, 0) + (estimate.flightLists?.pages ?? 0),
-    left: Math.max(0, cap - usage.calls - reserved),
-  };
+  return { planned, left: Math.max(0, cap - usage.calls - reserved) };
+}
+
+/**
+ * The browser worker's pages one run of this estimate asks for: its runnable camoufox lines' pages plus its flight pages
+ * (ruling A23); null when no camoufox line is runnable. The one figure behind `monthlyPagesOf` and the flight-lists
+ * answer's `runPages` (spec rev 55 §10; ruling R-pages), so the read button's pages-left clause and the estimate's agree.
+ */
+export function browserPagesPlanned(estimate: Pick<Estimate, 'perProvider' | 'flightLists'>): number | null {
+  const lines = estimate.perProvider.filter((p) => p.providerId === 'camoufox' && p.blocked === null);
+  if (lines.length === 0) return null;
+  return lines.reduce((a, p) => a + p.calls, 0) + (estimate.flightLists?.pages ?? 0);
 }

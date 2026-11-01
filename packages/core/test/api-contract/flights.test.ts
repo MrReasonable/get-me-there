@@ -79,6 +79,7 @@ const response = (pairs: unknown[]) => ({
   unavailableReason: null,
   refreshHours: 168,
   monthlyPagesLeft: 1390,
+  runPages: 110,
   reading: null,
   pairs,
 });
@@ -148,6 +149,15 @@ describe('flightListsResponseSchema links (spec rev 55 §6.9)', () => {
     expect(
       flightListsResponseSchema.safeParse(response([pair({ ...LINK, host: 'flights.example.com' })])).success,
     ).toBe(false);
+  });
+});
+
+describe('flightListsResponseSchema runPages (ruling R-pages)', () => {
+  it("carries one run's browser pages, or null; never absent or negative", () => {
+    expect(flightListsResponseSchema.safeParse({ ...response([]), runPages: null }).success).toBe(true);
+    expect(flightListsResponseSchema.safeParse({ ...response([]), runPages: -1 }).success).toBe(false);
+    const { runPages: _r, ...without } = response([]);
+    expect(flightListsResponseSchema.safeParse(without).success).toBe(false);
   });
 });
 

@@ -162,6 +162,11 @@ function when(at: IsoDateTime, now: IsoDateTime): { date: string; time: string; 
   return { ...a, daysAgo: toEpochDay(asIsoDate(n.date)) - toEpochDay(asIsoDate(a.date)) };
 }
 
+/** How many London days `at` is before `now`: 0 today, 1 yesterday (the day word `readAt` picks by). */
+export function londonDaysAgo(at: IsoDateTime, now: IsoDateTime): number {
+  return when(at, now).daysAgo;
+}
+
 /** "today", "yesterday", else the day and month ("12 Mar"). */
 function dayWord(daysAgo: number, date: string, c: PageCopy): string {
   if (daysAgo === 0) return c.searchPage.today;

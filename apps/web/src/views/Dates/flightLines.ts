@@ -3,8 +3,6 @@ import {
   compareFlights,
   type DatePair,
   type DatePairFigure,
-  DEFAULT_CAMOUFOX_EXECUTION_PAGE_CAP,
-  FLIGHT_LIST_COUNT,
   type FlightLimits,
   groupThousands,
   type IsoDateTime,
@@ -21,7 +19,7 @@ import {
 import type { DefinitionResponse, FlightList, FlightListsResponse } from '../../api/types.js';
 import type { COPY } from '../../copy.js';
 import { formatIsoDateShort, formatMinutes } from '../../format.js';
-import { readAt } from './stateLines.js';
+import { londonDaysAgo, readAt } from './stateLines.js';
 
 // Spec rev 55 §11 "Flights" and "Ties", §6.9 and §2 (WP20 Task 20.10): the pure side of a search's flights block. Which
 // date pairs the board asks flight lists for, the order inside a tie, and every line the block says, composed from
@@ -188,12 +186,13 @@ export function outcomeOf(list: FlightList | null, now: IsoDateTime, c: typeof C
 
 /**
  * The block's provenance note (spec rev 55 §11, §2): "Outbound flights only · … · read 3d ago, 12 Mar 11:44 · prices
- * from Google Flights, not checked with the airline"; the date and time are added when the list was not read today.
+ * from Google Flights, not checked with the airline". A list read today says only its age ("read 4h ago"); one read
+ * yesterday adds "yesterday 11:44", an older one its date and time ("12 Mar 11:44"), in readAt's one form; the day is
+ * London's (finding 7: the day keys are compared, never the words).
  */
 export function headLine(list: FlightList, now: IsoDateTime, c: typeof COPY): string {
-  const at = readAt(list.fetchedAt, now, c);
-  // why: readAt's one form is the time alone ("11:44") exactly when the list was read today, a day word before it else
-  return c.flights.head(c.agoOf(list.ageHours), at.includes(' ') ? at : null);
+  const today = londonDaysAgo(list.fetchedAt, now) === 0;
+  return c.flights.head(c.agoOf(list.ageHours), today ? null : readAt(list.fetchedAt, now, c));
 }
 
 /**
@@ -224,13 +223,12 @@ export function figureSource(p: Provenance, c: FlightCopy): string {
 }
 
 /**
- * The "; N pages left this month" clause's count (spec rev 55 §11; ruling A31), grouped ("1,390"), or null: shown only
- * when fewer pages are left than one run of the search would use with its flight pages (the default per-run cap; the
- * configured one is not on the wire).
+ * The "; N pages left this month" clause's count (spec rev 55 §11; rulings A31, R-pages), grouped ("1,390"), or null:
+ * shown only when the browser worker's month has fewer pages left than one run of this search uses, flight pages
+ * included (`runPages`, from the search's own estimate); never without both figures.
  */
-export function pagesLeftClause(monthlyPagesLeft: number | null): string | null {
-  return monthlyPagesLeft !== null &&
-    monthlyPagesLeft < DEFAULT_CAMOUFOX_EXECUTION_PAGE_CAP + FLIGHT_LIST_COUNT
+export function pagesLeftClause(monthlyPagesLeft: number | null, runPages: number | null): string | null {
+  return monthlyPagesLeft !== null && runPages !== null && monthlyPagesLeft < runPages
     ? groupThousands(monthlyPagesLeft)
     : null;
 }
@@ -240,6 +238,17 @@ export function datesShort(departure: string, back: string, c: FlightCopy): stri
   const [from, to] = [formatIsoDateShort(departure), formatIsoDateShort(back)];
   const [day, month] = from.split(' ');
   return c.datesShort(month !== undefined && to.endsWith(` ${month}`) ? (day ?? from) : from, to);
+}
+
+/** The failed-list reasons that offer no read again (ruling R-failed-read): a monthly or per-run limit stopped it. */
+const NO_READ_AGAIN: ReadonlySet<string> = new Set(['monthly-cap', 'execution-cap']);
+
+/**
+ * Whether the block offers "Read flights for this date" (spec rev 55 §11; ruling R-failed-read): for a date pair with
+ * no list of its own, and for a failed list, unless a monthly or per-run limit stopped it (its note says the limit).
+ */
+export function offersRead(list: FlightList | null): boolean {
+  return list === null || (list.status === 'failed' && !NO_READ_AGAIN.has(list.reason ?? ''));
 }
 
 /**

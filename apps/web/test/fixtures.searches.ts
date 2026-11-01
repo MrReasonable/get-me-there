@@ -123,7 +123,7 @@ export const flightListProvenance = (fetchedAt: string) => ({
  * A read list for LHR → JFK, 14 → 24 Mar 2027, read today at 11:44 London (10:44Z, 4 h before NOW), with one flight
  * at £92. Pass `fetchedAt` and `ageHours` together.
  */
-export function flightList(over: Partial<FlightListIn> = {}): FlightListIn {
+export function flightList(over: Partial<FlightListIn> = {}): z.output<typeof apiContract.flightListSchema> {
   const fetchedAt = over.fetchedAt ?? '2026-10-14T10:44:00.000Z';
   return apiContract.flightListSchema.parse({
     id: 1,
@@ -176,7 +176,10 @@ export function flightPair(
   };
 }
 
-/** The answer for `pairs`, parsed by the contract: the worker set up, 1,390 pages left this month, nothing reading. */
+/**
+ * The answer for `pairs`, parsed by the contract: the worker set up, 1,390 pages left this month, one run of the search
+ * using 110 browser pages (100 grid pages and 10 flight pages), nothing reading.
+ */
 export function flightListsResponse(
   pairs: readonly FlightPairIn[],
   over: Partial<Omit<FlightListsIn, 'pairs'>> = {},
@@ -186,6 +189,7 @@ export function flightListsResponse(
     unavailableReason: null,
     refreshHours: 24,
     monthlyPagesLeft: 1390,
+    runPages: 110,
     reading: null,
     pairs,
     ...over,

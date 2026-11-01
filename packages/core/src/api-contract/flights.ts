@@ -99,7 +99,7 @@ const flightListLinkSchema = z
 
 /**
  * `GET /definitions/:id/flight-lists`'s answer (spec rev 55 §10): whether flight lists can be read here (and why not),
- * the search's camoufox refresh, the browser worker's month's pages left, the pair being read now, and per asked pair
+ * the search's camoufox refresh, the browser worker's month's pages left and one run's pages, the pair being read now, and per asked pair
  * its airports, its link, the newest list for the figure's airport pair (`list`, the only one that feeds the outcome
  * beside the price, the difference line and orderWithinTie) and else the newest list for another airport pair of the
  * current space (`listOtherPair`, shown only inside the flights block under its airport-pair label).
@@ -109,6 +109,10 @@ export const flightListsResponseSchema = z.strictObject({
   unavailableReason: z.enum(['not-named', 'not-configured', 'cabin']).nullable(),
   refreshHours: countSchema,
   monthlyPagesLeft: countSchema.nullable(),
+  // why: ruling R-pages (WP20 Task 20.10): this search's browser pages for one run, flight pages included, from its own
+  // estimate; the read button adds "N pages left this month" only when `monthlyPagesLeft` is below it. Null when no
+  // camoufox line of the search can run (or flight lists are not available here).
+  runPages: countSchema.nullable(),
   reading: z.strictObject({ departureDate: isoDateSchema, returnDate: isoDateSchema }).nullable(),
   pairs: z.array(
     z.strictObject({

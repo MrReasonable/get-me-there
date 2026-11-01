@@ -806,6 +806,19 @@ describe('stopDetailClause (spec rev 55 §11: a failed flight list reads "Flight
       expect(findBannedWords(clause)).toEqual([]);
     }
   });
+  it('named for a flight list: the clause names the browser worker where the stop sentence says it (finding 6)', () => {
+    expect(stopDetailClause('monthly-cap', 'camoufox', true)).toBe(
+      "the browser worker's monthly limit is used up",
+    );
+    expect(stopDetailClause('provider-unavailable', 'camoufox', true)).toBe(
+      "the browser worker isn't answering",
+    );
+    expect(stopDetailClause('sign-in', 'camoufox', true)).toBe('a page asked it to sign in');
+    expect(stopDetailClause('execution-cap', 'camoufox', true)).toBe(
+      "this search's limit for one run is used up",
+    );
+    for (const d of STOP_DETAILS) expect(stopDetailClause(d, 'camoufox', true)).not.toMatch(/^its? /);
+  });
   it('is the clause the stop sentences use', () => {
     expect(stopDetailClause('monthly-cap', 'camoufox')).toBe('its monthly limit is used up');
     expect(stopDetailClause('auth', 'travelpayouts')).toBe('its token was refused');

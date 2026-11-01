@@ -12,7 +12,7 @@ export {
 export { noAlerts } from './alertsStep.js';
 export { capKindOf } from './context.js';
 export { createEngine } from './engine.js';
-export { confirmationOf } from './estimate.js';
+export { browserPagesPlanned, confirmationOf } from './estimate.js';
 export {
   type DatePairAsk,
   type FlightReadMark,

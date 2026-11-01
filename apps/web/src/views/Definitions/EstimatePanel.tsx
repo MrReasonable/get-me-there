@@ -40,7 +40,10 @@ export function scopeWords(label: string): string {
  * press's label format money through this alone (`sourceGuard.test.ts`). Pounds and pence always ("about £1.20",
  * "your £1.00 check"), so an amount beside another with pence reads alike.
  */
-export const estimateMoney = (pence: number): string => formatPence(pence, { showPence: true });
+export const estimateMoney = (pence: number, o: { wholePounds?: boolean } = {}): string =>
+  // why: ruling R-pounds (WP20 Task 20.10): the tie line's price reads "£86" (pence only when it has some), through
+  // this one formatter all the same
+  formatPence(pence, { showPence: o.wholePounds !== true });
 
 /**
  * Spec §8.2 budgetFit: runs per month × estimate against every cap, every scope listed whether it

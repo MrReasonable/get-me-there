@@ -249,7 +249,9 @@ const SAMPLES: Record<string, unknown[]> = {
   'flights.differenceAt': ['10 Mar 09:30'],
   'flights.openLinkName': ['14 → 24 Mar'],
   'flights.datesShort': ['14', '24 Mar'],
-  'flights.tie': [4, '£86.00', true],
+  'flights.tie': [6, '£86', true, 4],
+  'flights.readDone': ['14 → 24 Mar'],
+  'flights.readNotDone': ['14 → 24 Mar'],
   // WP19 (Task 19.5): the overview, its legend and readout
   'datesView.overview.stay': [10, 13],
   'datesView.overview.closeBand': ['10–13 nights', 'Mar 2027'],

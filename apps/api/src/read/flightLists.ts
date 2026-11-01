@@ -18,7 +18,13 @@ import {
   type SearchDefinition,
 } from '@gmt/core';
 import type { StoredFlightList } from '@gmt/db';
-import { type Engine, FLIGHT_LIST_PROVIDER, flightReadUnavailable, refreshHoursOf } from '@gmt/engine';
+import {
+  browserPagesPlanned,
+  type Engine,
+  FLIGHT_LIST_PROVIDER,
+  flightReadUnavailable,
+  refreshHoursOf,
+} from '@gmt/engine';
 import type { z } from 'zod';
 import { ApiError } from '../errors.js';
 import { API_TEXT } from '../text.js';
@@ -116,7 +122,7 @@ export function assembleFlightLists(
   def: SearchDefinition,
   pairs: readonly DatePairAsk[],
   ports: Ports,
-  engine: Pick<Engine, 'flightReadInFlight'>,
+  engine: Pick<Engine, 'flightReadInFlight' | 'estimate'>,
 ): FlightListsResponse {
   const now = ports.clock.now();
   const space = currentSpace(def, ports.clock.todayLondon());
@@ -169,6 +175,10 @@ export function assembleFlightLists(
     unavailableReason: unavailable,
     refreshHours,
     monthlyPagesLeft: monthlyPagesLeft(ports),
+    // why: ruling R-pages: one run's browser pages from the search's own estimate (its camoufox lines and flight pages),
+    // asked only when flight lists can be read here, so a search without the worker estimates nothing more
+    runPages:
+      unavailable === null ? browserPagesPlanned(engine.estimate(def, ports.clock.todayLondon())) : null,
     reading:
       mark === null || mark.definitionId !== def.id
         ? null

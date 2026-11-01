@@ -4,6 +4,7 @@ import { budgetFitFor, scheduleLoad } from '../src/budgetFit.js';
 import { buildContext } from '../src/context.js';
 import {
   addPass,
+  browserPagesPlanned,
   estimateRemainingFor,
   estimateStart,
   monthlyPagesOf,
@@ -388,6 +389,20 @@ describe('the estimate flight line (spec rev 55 §8.1)', () => {
     });
     const { flightLists: _none, ...gridOnly } = est;
     expect(confirmationNeeded(e.ctx, gridOnly, new Set(), { pence: null, calls: null })).toBeNull();
+  });
+
+  it("one run's browser pages are the runnable camoufox lines' pages plus the flight pages (ruling R-pages)", () => {
+    const { est } = flightEstimate(15);
+    expect(browserPagesPlanned(est)).toBe(25);
+    const { flightLists: _none, ...gridOnly } = est;
+    expect(browserPagesPlanned(gridOnly)).toBe(15);
+    // a blocked camoufox line, or none at all, plans no browser pages for the run
+    const blocked = {
+      ...est,
+      perProvider: est.perProvider.map((p) => ({ ...p, blocked: 'monthly-cap' as const })),
+    };
+    expect(browserPagesPlanned(blocked)).toBeNull();
+    expect(browserPagesPlanned({ perProvider: [] })).toBeNull();
   });
 
   it("counts them in the browser worker's monthly pages and in budgetFit's month", () => {

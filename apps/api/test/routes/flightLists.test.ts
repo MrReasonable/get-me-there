@@ -151,6 +151,18 @@ describe('GET /definitions/:id/flight-lists (revision 55 §10)', () => {
     expect(a?.link).toBeNull();
   });
 
+  it("carries this search's browser pages for one run, flight pages included, from its own estimate (ruling R-pages)", async () => {
+    const { x, def } = await setup();
+    const body = apiContract.flightListsResponseSchema.parse(await (await get(x, def.id, PAIRS)).json());
+    const est = x.engine.estimate(def, x.ports.clock.todayLondon());
+    const grid = est.perProvider
+      .filter((p) => p.providerId === 'camoufox' && p.blocked === null)
+      .reduce((a, p) => a + p.calls, 0);
+    expect(grid).toBeGreaterThan(0);
+    expect(est.flightLists?.pages ?? 0).toBeGreaterThan(0);
+    expect(body.runPages).toBe(grid + (est.flightLists?.pages ?? 0));
+  });
+
   it('links a real figure through the allowlist with the install point of sale', async () => {
     const { x, def, s } = await setup();
     s.tile('E', A, {
@@ -179,6 +191,7 @@ describe('GET /definitions/:id/flight-lists (revision 55 §10)', () => {
     expect(body.available).toBe(false);
     expect(body.unavailableReason).toBe('not-configured');
     expect(body.monthlyPagesLeft).toBeNull();
+    expect(body.runPages).toBeNull();
   });
 
   it.each([

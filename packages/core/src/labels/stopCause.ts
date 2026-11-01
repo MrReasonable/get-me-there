@@ -101,10 +101,16 @@ const DETAIL_REASON: Readonly<Record<StopDetail, (id: ProviderId) => string>> = 
 
 /**
  * Spec rev 55 §11: a stop detail as the end of a "because …" clause, the words the stop sentences use ("its monthly
- * limit is used up"); a failed flight list reads "Flights not read: <this clause>" (WP20 Task 20.10).
+ * limit is used up"). `named` puts the source's main-path name where the clause opens with "it" or "its" ("the browser
+ * worker's monthly limit is used up"), for a line with no source before it: a failed flight list reads "Flights not
+ * read: <this clause>" (WP20 Task 20.10, finding 6).
  */
-export function stopDetailClause(d: StopDetail, id: ProviderId): string {
-  return DETAIL_REASON[d](id);
+export function stopDetailClause(d: StopDetail, id: ProviderId, named = false): string {
+  const clause = DETAIL_REASON[d](id);
+  if (!named) return clause;
+  const name = mainPathSource(id);
+  if (clause.startsWith('its ')) return `${possessive(name)} ${clause.slice('its '.length)}`;
+  return clause.startsWith('it ') ? `${name} ${clause.slice('it '.length)}` : clause;
 }
 
 /**

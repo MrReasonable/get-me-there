@@ -1,5 +1,5 @@
 import { type DatePairFigure, type FlightLimits, stopDetailClause } from '@gmt/core';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ApiError } from '../../api/client.js';
 import { useFlightLists, useFlightRead } from '../../api/flights.js';
 import type { FlightList, FlightListsResponse } from '../../api/types.js';
@@ -18,6 +18,7 @@ import {
   hasFlightsBlock,
   headLine,
   listNote,
+  offersRead,
   outcomeOf,
   pagesLeftClause,
   pairKey,
@@ -35,6 +36,7 @@ const F = COPY.flights;
 /** A date pair being read on demand: the press's, or the one the api says it is reading. */
 interface Reading {
   key: string;
+  pair: { departureDate: string; returnDate: string };
   /** The figure's list id when pressed (null: none), so the newer list is seen when it lands. */
   listId: number | null;
   /** When the press was accepted (ms), or null while the POST is in flight; null too for the api's own reading. */
@@ -48,18 +50,39 @@ export interface BoardFlights {
   meta: Omit<FlightListsResponse, 'pairs'> | null;
   /** The date pair being read now (the press's or the api's), by key, or null. */
   readingKey: string | null;
-  /** A refused press's words, by the key it was pressed for. */
-  refusal: { key: string; words: string } | null;
+  /**
+   * What a block's live region says, by the key it is for (finding 3): a refused press's words, or that the pressed read
+   * ended ("Flights read for 14 → 24 Mar").
+   */
+  said: { key: string; words: string } | null;
   read: (pair: { departureDate: string; returnDate: string }) => void;
 }
 
-/** A refused read's words (spec rev 55 §11): the api's codes, never its message text. */
-function refusalWords(e: unknown): string {
-  const code = e instanceof ApiError ? e.code : null;
-  if (code === 'browser_busy') return F.busy;
-  if (code === 'fresh') return F.fresh;
-  if (code === 'not_available') return F.unavailable;
-  return F.readFailed;
+/**
+ * Why flight lists cannot be read here, in words (spec rev 55 §11; rulings A33, R-cabin): the economy-only line for a
+ * search in another cabin, else the worker's line.
+ */
+function unavailableWords(reason: unknown): string {
+  return reason === 'cabin' ? F.unavailableCabin : F.unavailable;
+}
+
+/** A refused read's words (spec rev 55 §11; finding 5): the api's code and its reason, never its message text. */
+export function refusalWords(e: unknown): string {
+  if (!(e instanceof ApiError)) return F.readFailed;
+  switch (e.code) {
+    case 'browser_busy':
+      return F.busy;
+    case 'fresh':
+      return F.fresh;
+    case 'not_available':
+      return unavailableWords(e.details?.reason);
+    case 'outside_space':
+      return F.outsideSpace;
+    case 'no_price':
+      return F.noPrice;
+    default:
+      return F.readFailed;
+  }
 }
 
 /**
@@ -69,7 +92,7 @@ function refusalWords(e: unknown): string {
  */
 export function useBoardFlights(definitionId: string, pages: readonly (readonly string[])[]): BoardFlights {
   const [pressed, setPressed] = useState<Reading | null>(null);
-  const [refusal, setRefusal] = useState<{ key: string; words: string } | null>(null);
+  const [said, setSaid] = useState<{ key: string; words: string } | null>(null);
   const [polling, setPolling] = useState(false);
   const lists = useFlightLists(definitionId, pages, polling);
   const mutation = useFlightRead(definitionId);
@@ -81,13 +104,19 @@ export function useBoardFlights(definitionId: string, pages: readonly (readonly 
   const newest = lists.answers.at(-1) ?? null;
   const apiReading = lists.answers.find((a) => a.reading !== null)?.reading ?? null;
   const readingKey = pressed?.key ?? (apiReading === null ? null : pairKey(apiReading));
-  const pressedList = pressed === null ? null : (byKey.get(pressed.key)?.list?.id ?? null);
+  const pressedList = pressed === null ? null : (byKey.get(pressed.key)?.list ?? null);
   useEffect(() => setPolling(readingKey !== null), [readingKey]);
   useEffect(() => {
     if (pressed === null || pressed.acceptedAt === null) return;
     // why: the newer list has landed, or an answer read after the press says no read is going (it ended with none)
-    if (pressedList !== pressed.listId || (lists.fetchedAt > pressed.acceptedAt && apiReading === null))
-      setPressed(null);
+    const landed = (pressedList?.id ?? null) !== pressed.listId;
+    if (!landed && !(lists.fetchedAt > pressed.acceptedAt && apiReading === null)) return;
+    const dates = datesShort(pressed.pair.departureDate, pressed.pair.returnDate, F);
+    setSaid({
+      key: pressed.key,
+      words: landed && pressedList?.status === 'read' ? F.readDone(dates) : F.readNotDone(dates),
+    });
+    setPressed(null);
   }, [pressed, pressedList, lists.fetchedAt, apiReading]);
   const meta =
     newest === null
@@ -97,6 +126,7 @@ export function useBoardFlights(definitionId: string, pages: readonly (readonly 
           unavailableReason: newest.unavailableReason,
           refreshHours: newest.refreshHours,
           monthlyPagesLeft: newest.monthlyPagesLeft,
+          runPages: newest.runPages,
           reading: apiReading,
         };
   const read = (of: { departureDate: string; returnDate: string }) => {
@@ -104,17 +134,17 @@ export function useBoardFlights(definitionId: string, pages: readonly (readonly 
     const pair = { departureDate: of.departureDate, returnDate: of.returnDate };
     const key = pairKey(pair);
     const listId = byKey.get(key)?.list?.id ?? null;
-    setRefusal(null);
-    setPressed({ key, listId, acceptedAt: null });
+    setSaid(null);
+    setPressed({ key, pair, listId, acceptedAt: null });
     mutation.mutate(pair, {
-      onSuccess: () => setPressed({ key, listId, acceptedAt: Date.now() }),
+      onSuccess: () => setPressed({ key, pair, listId, acceptedAt: Date.now() }),
       onError: (e) => {
         setPressed(null);
-        setRefusal({ key, words: refusalWords(e) });
+        setSaid({ key, words: refusalWords(e) });
       },
     });
   };
-  return { byKey, meta, readingKey, refusal, read };
+  return { byKey, meta, readingKey, said, read };
 }
 
 /**
@@ -198,7 +228,9 @@ function ListSection({
 }) {
   const now = useNow();
   const [all, setAll] = useState(false);
-  const note = listNote(list, now, COPY, (d) => stopDetailClause(d, 'camoufox'));
+  // why: finding 6: the note has no source before it, so the clause names the browser worker ("the browser worker's
+  // monthly limit is used up")
+  const note = listNote(list, now, COPY, (d) => stopDetailClause(d, 'camoufox', true));
   const shown = shownOf(list, limits, true);
   if (note !== null || shown === null) return note === null ? null : <p className="flights-line">{note}</p>;
   const flights = all ? allInOrder(list.flights, limits) : shown.shown;
@@ -230,33 +262,36 @@ function ListSection({
   );
 }
 
-/** "Read flights for this date (free, 1 page)", "Reading flights…", or a refusal's words (spec rev 55 §11; ui-009). */
-function ReadControl({
+/**
+ * "Read flights for this date (free, 1 page)" (spec rev 55 §11; ui-009). While this date pair is read the same button
+ * stays mounted, saying "Reading flights…" with `aria-disabled`, so a press never loses its focus (finding 3); every
+ * other read button is disabled meanwhile.
+ */
+function ReadButton({
   pairOf,
   flights,
 }: {
   pairOf: { departureDate: string; returnDate: string };
   flights: BoardFlights;
 }) {
-  const key = pairKey(pairOf);
-  if (flights.readingKey === key)
-    return (
-      <p role="status" className="flights-line">
-        {F.reading}
-      </p>
-    );
-  const refused = flights.refusal?.key === key ? flights.refusal.words : null;
+  const reading = flights.readingKey === pairKey(pairOf);
   return (
-    <p className="flights-line flex flex-wrap items-center gap-x-3 gap-y-1">
+    <p className="flights-line">
       <button
         type="button"
         className="btn btn-quiet min-h-11"
-        disabled={flights.readingKey !== null}
-        onClick={() => flights.read(pairOf)}
+        disabled={flights.readingKey !== null && !reading}
+        aria-disabled={reading ? true : undefined}
+        onClick={() => {
+          if (!reading) flights.read(pairOf);
+        }}
       >
-        {F.readButton(pagesLeftClause(flights.meta?.monthlyPagesLeft ?? null))}
+        {reading
+          ? F.reading
+          : F.readButton(
+              pagesLeftClause(flights.meta?.monthlyPagesLeft ?? null, flights.meta?.runPages ?? null),
+            )}
       </button>
-      {refused !== null ? <span role="status">{refused}</span> : null}
     </p>
   );
 }
@@ -282,16 +317,31 @@ export function FlightsBlock({
   limits: FlightLimits;
 }) {
   const available = flights.meta?.available === true;
+  const block = useRef<HTMLDivElement>(null);
+  // why: finding 3: a read that lands takes its button away; when focus was inside the block it stays there, on the
+  // block itself, never dropped to the page. Whether it was inside is read before the commit, while the button holds it
+  const hadFocus = useRef(false);
+  hadFocus.current = block.current?.contains(document.activeElement) ?? false;
+  useLayoutEffect(() => {
+    const el = block.current;
+    if (el !== null && hadFocus.current && !el.contains(document.activeElement)) el.focus();
+  });
   if (!hasFlightsBlock(entry, available)) return null;
   const href = googleFlightsHref(entry.link);
   const list = entry.list;
-  const readable = list === null || list.status === 'failed';
   const dates = datesShort(pairOf.departureDate, pairOf.returnDate, F);
+  const key = pairKey(pairOf);
   return (
-    <div data-testid="flights-block" className="flights-block">
+    <div ref={block} tabIndex={-1} data-testid="flights-block" className="flights-block">
+      {/* why: finding 3: one live region per block, there before anything is said in it */}
+      {available ? (
+        <p role="status" data-testid="flights-status" className="flights-line">
+          {flights.said?.key === key ? flights.said.words : null}
+        </p>
+      ) : null}
       {available && list !== null ? <ListSection list={list} limits={limits} figure={figure} /> : null}
       {available && list === null ? <p className="flights-line">{F.notReadYet}</p> : null}
-      {available && readable ? <ReadControl pairOf={pairOf} flights={flights} /> : null}
+      {available && offersRead(list) ? <ReadButton pairOf={pairOf} flights={flights} /> : null}
       {available && list === null && entry.listOtherPair !== null ? (
         <div className="flights-other">
           <p className="flights-head">
@@ -320,7 +370,7 @@ export function FlightsUnavailable({ meta }: { meta: BoardFlights['meta'] }) {
   if (meta === null || meta.available) return null;
   return (
     <p data-testid="flights-unavailable" className="text-sm text-fg-2">
-      {meta.unavailableReason === 'cabin' ? F.unavailableCabin : F.unavailable}
+      {unavailableWords(meta.unavailableReason)}
     </p>
   );
 }
