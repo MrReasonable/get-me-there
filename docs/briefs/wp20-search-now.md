@@ -7,7 +7,7 @@ spec_sections: ["§2 camoufox", "§3", "§6.6", "§6.9", "§7", "§8.1", "§8.2"
 reviewers: [product-owner, provenance-auditor, search-strategy-reviewer, cost-and-budget-reviewer, ui-reviewer, code-architect, test-strategy-reviewer, provider-integration-expert, data-model-reviewer, security-reviewer]
 mutate: {"@gmt/core": ["src/labels/age.ts", "src/types/definitionDefaults.ts", "src/labels/stopCause.ts", "src/labels/mainPath.ts", "src/datePairs/marks.ts", "src/flights/choose.ts", "src/flights/ties.ts"], "@gmt/web": ["src/state/landing.ts", "src/views/Dates/overview.ts", "src/format.ts", "src/views/Searches/estimateLine.ts", "src/views/Dates/stateLines.ts"], "@gmt/camoufox-worker": ["src/names.ts", "src/flights.ts"], "@gmt/engine": ["src/stopCause.ts", "src/estimate.ts", "src/budgetCheck.ts", "src/stages/flightLists/select.ts"]}
 pending: {}
-status: reviewed
+status: dispatched
 ---
 
 # WP20: Search now

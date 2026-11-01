@@ -9,7 +9,7 @@ There are two ways to run get-me-there, and each section below says which it app
   `Start.command` are the Docker Desktop shortcut on a Mac.
 
 Everything below uses the worked example London → New York; put your own airports in the
-Definitions form, never in a file of this repository.
+new-search form, never in a file of this repository.
 
 ## 0. Quick start (macOS and Linux)
 
@@ -101,15 +101,33 @@ With no price source, the closing screen says so first:
 Then it gives the address (`http://127.0.0.1:3000`), the user name (`operator`), and where the
 password is: in `~/.config/get-me-there/app.env`. Show it with `pnpm gmt password`, which
 prints it to the terminal only. If scrollback or a shared screen may have kept it,
-`pnpm gmt setup --reconfigure password` replaces it. It names the next step: open the app,
-choose Definitions and add a search with your airports and dates (its Coverage check shows what
-the price sources hold before you save it). Nothing runs on a schedule until you give a search
-one. Setup offers to open the browser.
+`pnpm gmt setup --reconfigure password` replaces it. It names the next step: open the app and
+use the new-search form on Searches (From, To, the dates), then press **Search now**; the
+sentence beside the button says what the search will use before you press. A new search runs
+once, when you press the button; nothing runs on a schedule until you add one from the search's
+page (**Repeat weekly…**, which registers the schedule when you press Save). Setup offers to open the browser.
 
 Scheduled searches run while the machine is awake; a missed one is caught up once, without the
 browser provider. The native service speaks plain HTTP on `127.0.0.1`: only if you want to reach
 it from another device, use an `ssh` tunnel (`ssh -L 3000:127.0.0.1:3000 <this machine>`), or
 section 3 for Tailscale and TLS.
+
+### Your first search, and a search's page
+
+Searches is the first screen: your searches as cards (the route, the dates, the stay, its state
+and the cheapest price found, with its source and age), and the new-search form beside them
+(above them on a phone). **Search now** saves the search and runs it once; the press is the
+confirmation of the figures beside the button, for that run only. A card's **Search again**
+runs a saved search again, **Edit** changes it and **Remove** takes it away (with an Undo for 30
+seconds).
+
+A search's page (the card's **See dates**) shows the state of the latest run in one line
+(Searching, Reading flights, Searched, or why it stopped, with Resume or Cancel where they
+apply), the board of the cheapest date pairs, the months overview (its key says "brighter is
+cheaper") and, under the board, the flights read for the cheapest date pairs with a link to open
+the same search in Google Flights. **Repeat weekly…** adds a schedule: it registers when you
+press Save, and the page shows when it next runs. Where the browser worker is not set up, the
+page says "Flight times need the browser worker; set it up in Providers".
 
 ### The commands
 
@@ -309,8 +327,8 @@ you rely on the app.
 
 What £0 gives: calendar prices from the Aviasales cache only, every row labelled "constraints
 not checked", and coverage that depends on what Aviasales users searched recently. Before you
-save a definition, press **Coverage check** on the form: it shows cached rows per airport pair
-and month, at no cost.
+search, open More options on a saved search's Edit page and press **Coverage check**: it shows
+cached rows per airport pair and month, at no cost.
 
 To add SearchApi later (the $40 plan, scraping-derived; see `docs/api-limits.md`):
 
@@ -324,7 +342,7 @@ then `docker compose up -d`. Without `SEARCHAPI_PLAN=40usd` the key runs on the 
 `trial` allowance and scheduled runs leave SearchApi out. On the trial plan new definitions
 allow 0 billed calls per run, so a date pair's "Search <cell> for itineraries" (in its detail, opened from the
 Dates view) is unavailable until you raise the
-definition's call cap in Definitions → Run budget (Max billed calls per run); 6 covers one
+search's call cap in its Edit page → More options → Run budget (Max billed calls per run); 6 covers one
 cell. If `.env` has a `SEARCHAPI_TRIAL_USED` line from the trial, delete it (or set it to 0):
 on `40usd` the app refuses to start with it (exit 78).
 
@@ -455,7 +473,7 @@ link straight to the results row; left empty, emails carry relative links.
 
 *Applies to both paths.*
 
-On the Definitions page choose **Import example**, or paste this JSON into the import box:
+On a search's Edit page choose **Import example**, or paste this JSON into the import box:
 
 <!-- example-definition:start -->
 ```json

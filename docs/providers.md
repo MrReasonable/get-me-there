@@ -21,7 +21,7 @@ Labels: VERIFIED = read on an official page; REPORTED = third-party; UNKNOWN = n
 | Trip.com, Travelfusion, Mystifly, Travelport, Sabre, airline NDC | Enterprise/IATA only | — | — | — | — | — | — | — | CLOSED |
 | Google official API | None (QPX Express shut 2018-04-10) | — | — | — | — | — | — | — | NONE |
 | fast-flights / google-flights-ts | Reverse-engineered `tfs` protobuf, direct to Google | free | — | — | — | — | — | **Unauthorised, fragile** | REJECT |
-| `camoufox`: Google Flights read by Camoufox (the pinned build `gmt setup` or `gmt browser install` installs) that a host-side worker launches itself through `camoufox-js` | Self-scraped by this app from the address of the machine running the browser worker, in the worker's own signed-out profile; no vendor account | £0 in money; the operator's IP and selector upkeep; the operator is responsible for how it is used | `list` mode: the page as Google showed it when it was read (`maxAgeHours` 0); `grid` mode: Google's date grid, age not stated (assumed ≤24h) | `list` mode, one day pair a page; `grid` mode (opt-in, `CAMOUFOX_MODE=grid`), up to 49 day pairs a view | Yes | Yes (`curr=GBP`) | Google search link | Read the provider's terms before enabling it; the operator is responsible for how it is used | Discovery only, opt-in, off by default (continuity fallback); `list` built in WP14, `grid` in WP15 |
+| `camoufox`: Google Flights read by Camoufox (the pinned build `gmt setup` or `gmt browser install` installs) that a host-side worker launches itself through `camoufox-js` | Self-scraped by this app from the address of the machine running the browser worker, in the worker's own signed-out profile; no vendor account | £0 in money; the operator's IP and selector upkeep; the operator is responsible for how it is used | `list` mode: the page as Google showed it when it was read (`maxAgeHours` 0); `grid` mode: Google's date grid, age not stated (assumed ≤24h) | `list` mode, one day pair a page; `grid` mode (opt-in, `CAMOUFOX_MODE=grid`), up to 49 day pairs a view | Yes | Yes (`curr=GBP`) | Google search link | Read the provider's terms before enabling it; the operator is responsible for how it is used | Discovery, plus the flight-list read; opt-in, off by default (continuity fallback); `list` built in WP14, `grid` in WP15 |
 
 ## Key facts with sources
 
@@ -65,6 +65,8 @@ Labels: VERIFIED = read on an official page; REPORTED = third-party; UNKNOWN = n
 - RISK: coverage of thin long-haul routes in `uk` market unknown; expect sparse. Needs a token + probe before committing.
 
 ### Camoufox provider (self-scraped, opt-in)
+
+**The flight-list read.** Besides discovery, the browser provider reads the flight list for the cheapest ten date pairs of a search (and one date pair on demand, from "Read flights for this date"): outbound flights only, economy only, each page counting against the browser's own page allowance (per run and per month).
 
 **Method.** A host-side worker (`apps/camoufox-worker`, a Node process on the machine running the worker; macOS or Linux, each
 `<os>-<arch>` offered once recordings under its pinned build set its flags: all four today, `darwin-x64` in list mode only; Windows is a later

@@ -1,5 +1,6 @@
 import { SOURCE_LABELS } from '@gmt/core';
 import { expect, type Locator, type Page, test } from '@playwright/test';
+import { z } from 'zod';
 import { PLAN_COPY } from '../src/copy/plan.js';
 import { COPY } from '../src/copy.js';
 import { SMOKE } from './selectors.js';
@@ -8,44 +9,85 @@ import { SMOKE } from './selectors.js';
 // Dates view). Every price here is synthetic, and every view must say so beside the red banner (spec §5.5).
 
 const EXAMPLE = COPY.datesView;
-/** The example's stay range is 10–21 nights; the smoke narrows it so "Back to dates" has a filter to keep. */
-const NIGHTS = '10-14';
+/** The Google Flights link's accessible name is its aria-label ("Open in Google Flights for <dates>, opens in a new tab"). */
+const OPEN_LINK = /^Open in Google Flights/;
+/** The smoke's stay range is 10–11 nights; it narrows it to 10 so "Back to dates" has a filter to keep. */
+const NIGHTS = '10-10';
+
+/**
+ * Adds one airport to a From/To picker the way an operator does: types its code, waits for the list to answer, and picks
+ * the highlighted option with Enter; the chip it becomes names the code.
+ */
+async function addAirport(page: Page, label: string, code: string) {
+  const picker = page.getByRole('combobox', { name: label });
+  await picker.fill(code);
+  await expect(page.getByRole('option').first()).toBeVisible();
+  await picker.press('Enter');
+  await expect(page.getByText(code).first()).toBeVisible();
+}
+
+/**
+ * The id of the search the first test made. The api is read directly so each test stands on its own run of the file
+ * (the phone project runs only its @phone tests, on the database the desktop project left).
+ */
+async function searchId(page: Page): Promise<string> {
+  const res = await page.request.get('/api/definitions');
+  const [first] = z.array(z.object({ id: z.string() })).parse(await res.json());
+  if (first === undefined) throw new Error('the smoke search was not created');
+  return first.id;
+}
 
 const board = (page: Page) => page.getByRole('table', { name: SMOKE.boardTable });
 const banner = (page: Page) => page.getByRole('alert').filter({ hasText: COPY.syntheticBanner });
 
-test('fixture mode: import, run, then Dates, the date pair detail and History show synthetic prices with provenance', async ({
+test('fixture mode: a new search, Search now, then Dates, the date pair detail and History show synthetic prices with provenance', async ({
   page,
 }) => {
-  // (1) import the example, switch both stages to the fixture provider, enable, estimate, create, run now
-  await page.goto('/?view=definitions');
-  await page.getByRole('button', { name: /^Import example/ }).click();
-  // why: the provider checkboxes sit behind More options, below the Plan a search form.
+  // (1) the first screen is Searches: fill the new-search form, point both stages at the fixture provider, press Search now
+  await page.goto('/');
+  await expect(page.getByRole('heading', { level: 2, name: COPY.searchesView.heading })).toBeVisible();
+  await addAirport(page, PLAN_COPY.from, 'LHR');
+  await addAirport(page, PLAN_COPY.to, 'JFK');
+  await page.locator('#w-from').fill('14 Mar 2027');
+  await page.locator('#w-to').fill('15 Mar 2027');
+  await page.locator('#n-min').fill('10');
+  await page.locator('#n-max').fill('11');
+  // why: the provider checkboxes sit behind More options, below the short form.
   await page.getByText(PLAN_COPY.moreOptions, { exact: true }).click();
-  // why: the example JSON names the real providers, which fixture mode does not configure; switch both stages to the fixture provider.
+  // why: the presets name the real providers, which fixture mode does not configure; switch both stages to the fixture provider.
   for (const prefix of ['p-d-', 'p-v-']) {
     for (const box of await page.locator(`input[type="checkbox"][id^="${prefix}"]`).all())
       await box.uncheck();
     await page.locator(`#${prefix}fixture`).check();
   }
-  // why: a new definition is created disabled (spec rev 27), and the api refuses "Run now" for a disabled one (409).
-  // The budget is not touched: Import example leaves the plan preset's budget, which the api's EXECUTION_MAX_CALLS sets.
-  await page.getByLabel(COPY.enabled).check();
-  // why: Task 20.5 removed Show estimate (the estimate is asked for automatically); Task 20.11 rewrites this smoke
-  // for the first screen and Search now (ruling 20.3 concern), so this step only names the press that replaced it.
-  await page.getByRole('button', { name: /^Search now/ }).click();
-  await page.getByRole('button', { name: /^Create and confirm about/ }).click();
-  await page.getByRole('button', { name: /^Run now/ }).click();
-  // why: the status bar polls the run (spec §11); its status words say "completed" once the run has finished. The
-  // timeout is a backstop for the fixture run, never a wait in itself.
-  const status = page.getByRole('region', { name: COPY.statusBarLabel });
-  await expect(status).toContainText(COPY.statusName.completed, { timeout: 90_000 });
+  // why: the press is the confirmation (spec rev 55 §11): there is no separate estimate or enable step. The button
+  // waits for the estimate of the form as it now is, so a click on it is a click on a ready button.
+  const press = page.locator(SMOKE.newSearchForm).getByRole('button', { name: SMOKE.searchNow });
+  await expect(press).not.toHaveAttribute('aria-disabled', 'true');
+  await press.click();
+  // the new search's page opens, and its state line reads "Searched" once the run has finished. The timeout is a
+  // backstop for the fixture run, never a wait in itself.
+  await expect(page).toHaveURL(/view=dates&def=/);
+  const defId = new URL(page.url()).searchParams.get('def') ?? '';
+  expect(defId).not.toBe('');
+  await expect(page.getByRole('status', { name: SMOKE.stateLine })).toHaveText(
+    COPY.searchPage.stateKind.searched,
+    { timeout: 90_000 },
+  );
+  // test-013: the fixture provider has no flight lists, so the page says so and offers neither a read nor a Google
+  // Flights link beside synthetic prices
+  await expect(page.locator(SMOKE.flightsUnavailable)).toHaveText(COPY.flights.unavailable);
+  await expect(page.locator(SMOKE.flightsBlock)).toHaveCount(0);
+  await expect(page.getByRole('link', { name: OPEN_LINK })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /^Read flights for this date/ })).toHaveCount(0);
+  const searchName = (await page.getByRole('heading', { level: 2 }).first().textContent()) ?? '';
+  expect(searchName).not.toBe('');
 
   // (2) Dates: the header line, the banner, the first row's provenance, the legend, the overview's keyboard and rings
-  await page.goto(`/?view=dates&d.nights=${NIGHTS}`);
+  await page.goto(`/?view=dates&def=${defId}&d.nights=${NIGHTS}`);
   await expect(board(page)).toBeVisible();
-  await expect(page.getByRole('heading', { level: 2 })).toHaveText('London → New York (example)');
-  await expect(page.getByTestId('dates-run')).toHaveText(/^run finished (just now|.+ ago)$/);
+  await expect(page.getByRole('heading', { level: 2 })).toHaveText(searchName);
+  await expect(page.getByTestId('dates-run')).toHaveText(/^Searched .+ · \d+ of \d+ date pairs priced/);
   await expect(banner(page)).toBeVisible();
   // the alarm plate: the red of spec §5.5, with white words (styles/world.css --alarm)
   await expect(banner(page)).toHaveCSS('background-color', 'rgb(163, 35, 26)');
@@ -92,11 +134,21 @@ test('fixture mode: import, run, then Dates, the date pair detail and History sh
   expect(back.get('d.nights')).toBe(NIGHTS);
   expect(back.get('depart')).toBeNull();
 
-  // (4) the retired views' URLs land on Dates; ?view=coverage opens the coverage section
-  await page.goto('/?view=calendar');
+  // (4) a search's page by its id, ?view=definitions landing on Searches (the old Definitions URL), the nav naming the
+  // search last opened; the retired views' URLs land on Dates; ?view=coverage opens the coverage section
+  await page.goto(`/?view=dates&def=${defId}`);
+  await expect(board(page)).toBeVisible();
+  await page.goto('/?view=definitions');
+  await expect(page.getByRole('heading', { level: 2, name: COPY.searchesView.heading })).toBeVisible();
+  expect(new URL(page.url()).searchParams.get('view')).toBe('searches');
+  await expect(page.locator(SMOKE.searchCard)).toHaveCount(1);
+  await expect(
+    page.getByRole('navigation', { name: SMOKE.nav }).getByRole('link', { name: searchName }),
+  ).toBeVisible();
+  await page.goto(`/?view=calendar&def=${defId}`);
   await expect(board(page)).toBeVisible();
   expect(new URL(page.url()).searchParams.get('view')).toBe('dates');
-  await page.goto('/?view=coverage');
+  await page.goto(`/?view=coverage&def=${defId}`);
   await expect(board(page)).toBeVisible();
   expect(new URL(page.url()).searchParams.get('d.coverage')).toBe('open');
   await expect(page.getByRole('button', { name: SMOKE.coverageToggle })).toHaveAttribute(
@@ -116,19 +168,22 @@ test('fixture mode: import, run, then Dates, the date pair detail and History sh
 test('forced colours: every mark keeps its glyph, and the current nav entry its bar', async ({ page }) => {
   // (7) spec §11: nothing by colour alone; jsdom cannot apply forced colours, so the browser checks it here
   await page.emulateMedia({ forcedColors: 'active' });
-  await page.goto('/?view=dates');
+  await page.goto(`/?view=dates&def=${await searchId(page)}`);
   await expect(board(page)).toBeVisible();
   const marks = page.locator(SMOKE.legendMark);
   expect(await marks.count()).toBeGreaterThan(0);
   for (const m of await marks.all()) {
     const glyph = m.locator(SMOKE.legendGlyph);
     await expect(glyph).toBeVisible();
-    await expect(glyph).not.toHaveText('');
+    // why: the five marks (spec rev 55 §11): "priced" is its shade ("brighter is cheaper"), every other mark has a glyph
+    if ((await m.getAttribute('data-mark')) !== 'priced') await expect(glyph).not.toHaveText('');
   }
   // every overview cell that carries a mark still shows its glyphs; the striped mark keeps its pattern too
+  // why: the five marks (spec rev 55 §11): a priced cell is its shade and carries no glyph; the fixture run prices every
+  // date pair it searched, so the cells that carry a glyph (the other four marks) are checked when there are any, and
+  // marks.spec.ts holds a case that has them
+  await expect(page.locator(`${SMOKE.overviewCell}:not([data-shade="none"])`).first()).toBeVisible();
   const marked = page.locator(`${SMOKE.overviewCell}:not([data-marks=""])`);
-  const count = await marked.count();
-  expect(count).toBeGreaterThan(0);
   const unseen = await marked.evaluateAll((cells) =>
     cells
       .filter((c) => {
@@ -150,7 +205,7 @@ test('forced colours: every mark keeps its glyph, and the current nav entry its 
 test('at 375px Dates shows stacked cards and one month of 24px cells, a tap shows the readout, and the filters fit @phone', async ({
   page,
 }) => {
-  await page.goto('/?view=dates');
+  await page.goto(`/?view=dates&def=${await searchId(page)}`);
   await expect(page.locator(SMOKE.phoneCard).first()).toBeVisible();
   // the cards are the board table's own rows: one semantic table at every width, its roles written out
   await expect(board(page).locator(SMOKE.phoneCard).first()).toBeVisible();
@@ -198,7 +253,8 @@ const LOADED: Record<string, (page: Page) => Locator> = {
   // why: the detail is reached from the first card's link (its URL carries the date pair)
   results: (p) => p.getByRole('table', { name: SMOKE.detailTable }),
   history: (p) => p.getByRole('figure', { name: COPY.historyView.fetchChartTitle }),
-  definitions: (p) => p.getByRole('button', { name: /^Search now/ }),
+  searches: (p) => p.locator(SMOKE.searchCard),
+  definitions: (p) => p.locator(SMOKE.searchCard),
   // why: the fixture run fires no alert, so the loaded Alerts view is the one that says there are no rules yet
   alerts: (p) => p.getByText(COPY.alertsView.noRules),
   providers: (p) => p.getByRole('region', { name: COPY.provider.fixture }),
@@ -209,11 +265,12 @@ const LOADED: Record<string, (page: Page) => Locator> = {
 test('at 375px the nav is one row whose menu opens both tiers of 44px links, and no loaded view scrolls the page sideways (UI-005, UI-009, UI-011) @phone', async ({
   page,
 }) => {
+  const id = await searchId(page);
   for (const [view, loaded] of Object.entries(LOADED)) {
     if (view === 'results') {
-      await page.goto('/?view=dates');
+      await page.goto(`/?view=dates&def=${id}`);
       await page.locator(SMOKE.phoneCard).first().getByRole('link').click();
-    } else await page.goto(`/?view=${view}`);
+    } else await page.goto(view === 'dates' ? `/?view=dates&def=${id}` : `/?view=${view}`);
     const nav = page.getByRole('navigation', { name: SMOKE.nav });
     await expect(nav).toBeVisible();
     // why: the departure board (Ian, 2026-10-27): one row (the current tier and view, and the menu), so the view
@@ -241,10 +298,113 @@ test('at 375px the nav is one row whose menu opens both tiers of 44px links, and
 });
 
 test('at 375 x 812 the board starts in the first screen (Ian, 2026-10-27) @phone', async ({ page }) => {
-  await page.goto('/?view=dates');
+  await page.goto(`/?view=dates&def=${await searchId(page)}`);
   const table = board(page);
   await expect(table).toBeVisible();
   const box = await table.boundingBox();
   // the board's caption is in the first screen, so the operator sees the board without scrolling
   expect(box?.y ?? Number.POSITIVE_INFINITY).toBeLessThan(812);
+});
+
+test('at 375px the new-search form sits above the list, and the cards list fits with 44px actions @phone', async ({
+  page,
+}) => {
+  await page.goto('/');
+  const card = page.locator(SMOKE.searchCard).first();
+  await expect(card).toBeVisible();
+  // spec rev 55 §11: narrower than 900 px the form is first in the DOM, so it is above the list
+  const form = await page.locator(SMOKE.newSearchForm).boundingBox();
+  const first = await card.boundingBox();
+  expect((form?.y ?? Number.POSITIVE_INFINITY) + (form?.height ?? 0)).toBeLessThanOrEqual(first?.y ?? 0);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+  const actions = await page.locator(SMOKE.cardAction).all();
+  expect(actions.length).toBeGreaterThan(0);
+  for (const action of actions) {
+    const box = await action.boundingBox();
+    expect(box?.height ?? 0, (await action.textContent()) ?? '').toBeGreaterThanOrEqual(44);
+  }
+});
+
+test('at 375px a search’s page with a flights block does not scroll sideways @phone', async ({ page }) => {
+  const id = await searchId(page);
+  // why: the fixture provider has no flight lists, so the answer is served here, in the api's shape, for the date pairs
+  // the board asks about: one read list of flights beside a Google Flights link
+  await page.route(`**/api/definitions/${id}/flight-lists*`, async (route) => {
+    if (route.request().method() !== 'GET') return route.continue();
+    const asked = (new URL(route.request().url()).searchParams.get('pairs') ?? '').split(',').filter(Boolean);
+    const fetchedAt = '2026-10-14T10:44:00.000Z';
+    const pairs = asked.map((key) => {
+      const [departureDate = '', returnDate = ''] = key.split('_');
+      return {
+        departureDate,
+        returnDate,
+        origin: 'LHR',
+        destination: 'JFK',
+        link: {
+          url: `https://www.google.com/travel/flights?q=Flights+from+LHR+to+JFK+on+${departureDate}+through+${returnDate}&hl=en-GB&gl=GB`,
+          host: 'www.google.com',
+          label: 'search link, not a fare link',
+        },
+        list: {
+          id: 1,
+          executionId: 'exec-0001',
+          origin: 'LHR',
+          destination: 'JFK',
+          departureDate,
+          returnDate,
+          fetchedAt,
+          ageHours: 0,
+          stale: false,
+          provenance: {
+            providerId: 'camoufox',
+            sourceKind: 'scraped-self',
+            fetchedAt,
+            maxAgeHours: 0,
+            fx: { converted: false },
+            pointOfSale: 'GB',
+            cabin: 'economy',
+          },
+          status: 'read',
+          reason: null,
+          listed: 'flights',
+          minMinor: 9200,
+          tabMinor: null,
+          cheapestView: 'cheapest',
+          flights: [
+            {
+              departsLocal: '07:15',
+              arrivesLocal: '18:05',
+              arrivesDayOffset: 1,
+              durationMinutes: 650,
+              stops: 1,
+              carriers: ['Virgin Atlantic'],
+              operatedBy: null,
+              amountMinor: 9200,
+            },
+          ],
+          optionsUnparsed: 0,
+          optionsOtherCell: 0,
+          resultsStated: null,
+        },
+        listOtherPair: null,
+      };
+    });
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        available: true,
+        unavailableReason: null,
+        refreshHours: 24,
+        monthlyPagesLeft: 1390,
+        runPages: 110,
+        reading: null,
+        pairs,
+      }),
+    });
+  });
+  await page.goto(`/?view=dates&def=${id}`);
+  await expect(page.locator(SMOKE.flightsBlock).first()).toBeVisible();
+  await expect(page.getByRole('link', { name: OPEN_LINK }).first()).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
 });

@@ -46,4 +46,18 @@ export const SMOKE = {
   detailHeadline: '[data-testid="detail-headline"]',
   backToDates: '[data-testid="back-to-dates"]',
   airportPairPanel: '[data-testid="airport-pair-panel"]',
+  /** The new-search form (WP20): the form that holds the From picker; at 900 px and narrower it is first in the DOM. */
+  newSearchForm: 'form:has(#origins-input)',
+  /** The press that starts a search: the new-search form's, a card's and the page's (Search again) share the verb. */
+  searchNow: /^Search now/,
+  /** The search page's state line, read by a screen reader as a status named "Search state". */
+  stateLine: COPY.searchPage.stateLabel,
+  /** One search's card on the Searches view. */
+  searchCard: '[data-card]',
+  /** A card's actions: its links and buttons. */
+  cardAction: '[data-card] .search-card-actions :is(a, button)',
+  /** The flights block of a date pair on a search's page (absent where flight lists cannot be read). */
+  flightsBlock: '[data-testid="flights-block"]',
+  /** The one line under the board when flight lists cannot be read here. */
+  flightsUnavailable: '[data-testid="flights-unavailable"]',
 } as const;
