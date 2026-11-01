@@ -6,6 +6,7 @@ import {
   cronSchema,
   definitionCreateRequestSchema,
   estimateResponseSchema,
+  executionBudgetSchema,
   executionFlightsSchema,
   executionResponseSchema,
   flightListsStateSchema,
@@ -449,5 +450,17 @@ describe('estimateResponseSchema (spec rev 55 §10: what the estimate asks)', ()
     expect(billedCallsSchema.parse(entry)).toEqual(entry);
     expect(billedCallsSchema.parse({ ...entry, left: null }).left).toBeNull();
     expect(billedCallsSchema.safeParse({ ...entry, left: -1 }).success).toBe(false);
+  });
+});
+
+describe('executionBudgetSchema.flightListPages (spec rev 55 §8.1, ruling A5)', () => {
+  const base = { maxCalls: 2000, maxFreeCalls: 2000, maxCostMicroGbp: 0 };
+  it('accepts a flight allowance of 10 and a budget without one (older runs parse)', () => {
+    expect(executionBudgetSchema.parse({ ...base, flightListPages: 10 }).flightListPages).toBe(10);
+    expect(executionBudgetSchema.safeParse(base).success).toBe(true);
+  });
+  it('refuses 0, and the key present as undefined', () => {
+    expect(executionBudgetSchema.safeParse({ ...base, flightListPages: 0 }).success).toBe(false);
+    expect(executionBudgetSchema.safeParse({ ...base, flightListPages: undefined }).success).toBe(false);
   });
 });

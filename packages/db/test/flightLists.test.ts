@@ -135,7 +135,9 @@ describe('FlightListsRepo.insert (spec rev 55 §7)', () => {
   it('a refused flight rolls the list back: neither table keeps a row', () => {
     const { db, repo, list } = setup();
     // durationMinutes 0 passes the repository's own checks and is refused by the table's CHECK, after the list row is written
-    expect(() => repo.insert(list({ flights: [flight(), flight({ durationMinutes: 0 })] }))).toThrow();
+    expect(() => repo.insert(list({ flights: [flight(), flight({ durationMinutes: 0 })] }))).toThrow(
+      /flight_list_flights_duration_ck/,
+    );
     expect(count(db, 'flight_lists')).toBe(0);
     expect(count(db, 'flight_list_flights')).toBe(0);
   });
@@ -155,30 +157,60 @@ describe('FlightListsRepo.insert (spec rev 55 §7)', () => {
     expect(count(db, 'flight_lists')).toBe(0);
   });
 
-  it('the table CHECK refuses a forced fixture row and a zero price', () => {
+  it('the table CHECKs refuse a forced fixture row, a synthetic kind and a zero price, and accept the genuine row', () => {
     const { db, definitionId } = setup();
-    const raw = (provider: string, kind: string) =>
-      db.raw
-        .prepare(
-          `INSERT INTO flight_lists (definition_id, provider_id, source_kind, cabin, origin, destination, departure_date, return_date, fetched_at, point_of_sale, currency_native, status, listed, options_unparsed, options_other_cell)
-           VALUES (?, ?, ?, 'economy', 'LHR', 'JFK', '2027-03-14', '2027-03-24', '2026-10-14T12:00:00.000Z', 'GB', 'GBP', 'read', 'no-flights', 0, 0)`,
-        )
-        .run(definitionId, provider, kind);
-    expect(() => raw('fixture', 'synthetic')).toThrow(/CHECK/);
-    expect(() => raw('camoufox', 'synthetic')).toThrow(/CHECK/);
+    const raw = (provider: string, kind: string, price?: number) => {
+      const id = Number(
+        db.raw
+          .prepare(
+            `INSERT INTO flight_lists (definition_id, provider_id, source_kind, cabin, origin, destination, departure_date, return_date, fetched_at, point_of_sale, currency_native, status, listed, options_unparsed, options_other_cell)
+           VALUES (?, ?, ?, 'economy', 'LHR', 'JFK', '2027-03-14', '2027-03-24', '2026-10-14T12:00:00.000Z', 'GB', 'GBP', 'read', ?, 0, 0)`,
+          )
+          .run(definitionId, provider, kind, price === undefined ? 'no-flights' : 'flights').lastInsertRowid,
+      );
+      if (price !== undefined)
+        db.raw
+          .prepare(
+            `INSERT INTO flight_list_flights (list_id, position, departs_local, arrives_local, arrives_day_offset, duration_minutes, stops, carriers_json, price_pence)
+             VALUES (?, 0, '09:15', '12:05', 0, 470, 0, '["Virgin Atlantic"]', ?)`,
+          )
+          .run(id, price);
+    };
+    expect(() => raw('fixture', 'synthetic')).toThrow(/flight_lists_provider_ck|flight_lists_kind_ck/);
+    expect(() => raw('camoufox', 'synthetic')).toThrow(/flight_lists_kind_ck/);
+    expect(() => raw('camoufox', 'scraped-self', 0)).toThrow(/flight_list_flights_price_ck/);
+    // the controls: the same inserts with the genuine provider, kind and a positive price succeed, so the throws above are the named CHECKs
+    expect(() => raw('camoufox', 'scraped-self')).not.toThrow();
+    expect(() => raw('camoufox', 'scraped-self', 41_200)).not.toThrow();
   });
 
   it('refuses a price of 0 and a list of more than 30 flights', () => {
     const { repo, list, db } = setup();
     expect(() => repo.insert(list({ flights: [flight({ amountMinor: 0 })] }))).toThrow(/integer/);
-    expect(() => repo.insert(list({ flights: Array.from({ length: 31 }, () => flight()) }))).toThrow();
+    expect(() => repo.insert(list({ flights: Array.from({ length: 31 }, () => flight()) }))).toThrow(
+      /at most 30 flights/,
+    );
     expect(count(db, 'flight_lists')).toBe(0);
   });
 
   it('refuses a reason on a read list and a missing one on a failed list, as the CHECKs do', () => {
     const { repo, list, db } = setup();
-    expect(() => repo.insert(list({ reason: 'parse' }))).toThrow();
-    expect(() => repo.insert(list({ status: 'failed', reason: null, listed: null, flights: [] }))).toThrow();
+    expect(() => repo.insert(list({ reason: 'parse' }))).toThrow(/a reason exactly when/);
+    expect(() => repo.insert(list({ ...failed, reason: null }))).toThrow(/a reason exactly when/);
+    expect(count(db, 'flight_lists')).toBe(0);
+  });
+
+  it('refuses a failed list that carries flights, a listed word, a minimum, a tab price or a view', () => {
+    const { repo, list, db } = setup();
+    const f = { ...failed };
+    for (const extra of [
+      { flights: [flight()] },
+      { listed: 'flights' },
+      { minMinor: 41_200 },
+      { tabMinor: 41_200 },
+      { cheapestView: 'cheapest' },
+    ] satisfies Partial<FlightListInsert>[])
+      expect(() => repo.insert(list({ ...f, ...extra }))).toThrow(/a failed list lists nothing/);
     expect(count(db, 'flight_lists')).toBe(0);
   });
 });
@@ -264,7 +296,7 @@ describe('FlightListsRepo.newestPerDatePair', () => {
 
 describe('FlightListsRepo.forExecution', () => {
   it('counts the newest row per planned cell of that execution: a pair read twice counts once', () => {
-    const { repo, list, definitionId, executionId, db } = setup();
+    const { repo, list, executionId, db } = setup();
     repo.insert(list({ ...failed, fetchedAt: hoursAt(9) })); // D1 failed, then read: counts as read
     repo.insert(list({ fetchedAt: hoursAt(10) }));
     repo.insert(list({ ...D2, ...failed, fetchedAt: hoursAt(9) })); // D2 failed only
@@ -274,7 +306,6 @@ describe('FlightListsRepo.forExecution', () => {
     repo.insert(list({ executionId: other.executionId, origin: LGW, ...D2 })); // another execution's
     const planned = [c(), c(LHR, JFK, D2), c(LGW, EWR), c(LGW, JFK, D2)];
     expect(repo.forExecution(executionId, planned)).toEqual({ read: 2, failed: 1 });
-    expect(definitionId).toBeTruthy();
   });
 
   it('is zero for no planned cell and for an execution that read nothing', () => {

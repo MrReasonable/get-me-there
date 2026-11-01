@@ -47,6 +47,8 @@ JOIN flight_lists l ON l.id = (
 LEFT JOIN flight_list_flights f ON f.list_id = l.id
 ORDER BY a.ord, f.position`;
 
+// why: the origin/destination IN-lists probe the cell index once per airport pair and the newest is picked by sort;
+// that is fine at the spaces this app plans (a handful of airports each side, at most 50 date pairs a read)
 const PER_DATE_PAIR_SQL = `
 WITH asked AS (
   SELECT CAST(j.key AS INTEGER) AS ord, json_extract(j.value, '$.departureDate') AS departureDate, json_extract(j.value, '$.returnDate') AS returnDate
@@ -211,6 +213,19 @@ export class FlightListsRepo {
     assertIsoDateTime('fetchedAt', l.fetchedAt);
     assertIsoDate('departureDate', l.departureDate);
     assertIsoDate('returnDate', l.returnDate);
+    // why: a failed page lists nothing (types.ts `FlightListInsert`): no flight, outcome word, figure or view read
+    if (
+      l.status === 'failed' &&
+      (l.flights.length > 0 ||
+        l.listed !== null ||
+        l.minMinor !== null ||
+        l.tabMinor !== null ||
+        l.cheapestView !== null)
+    )
+      throw new RowRejected(
+        'flight-list',
+        'a failed list lists nothing: no flights, outcome, figure or view',
+      );
     if ((l.status === 'failed') !== (l.reason !== null))
       throw new RowRejected('flight-list', 'a reason exactly when the list failed');
     if ((l.status === 'read') !== (l.listed !== null))
