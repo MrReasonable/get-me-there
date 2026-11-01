@@ -13,7 +13,7 @@ import { execute } from './execute.js';
 import { lineKey } from './lines.js';
 import type { Orchestrator } from './orchestrator.js';
 import type { RunRegistry } from './registry.js';
-import { disabledFor, markRemaining, newRun, resumableCells } from './run.js';
+import { disabledFor, laneFor, markRemaining, newRun, resumableCells } from './run.js';
 import { browserWindowEndFrom, windowAnchor } from './scheduler/browserWindow.js';
 import { sellsCabin, snapshotBudget, withoutDiscovery } from './snapshot.js';
 import { browserLeftAtResume, browserWindowNotice, leaveAtResume } from './stages/browserGate.js';
@@ -245,6 +245,9 @@ export async function resumeExecution(
     { ...launched, status: 'running' },
     { manual: opts.manual, fresh: false, blocked: check.blocked },
   );
+  // why: revision 55 §8.1 — the browser lane of a provider this resume left past its window loads no page in this
+  // pass (its cells are scheduled_only already), and the flight-list step reads that as its entry's window rule
+  for (const id of left.providers) laneFor(run, 'discovery', id).windowOut = left.detail;
   // why: a catch-up leaves its browser cells by design (decision 79); only a closed window is news to the operator
   if (left.providers.length > 0 && left.detail === 'outside-browser-window')
     run.notices.push(browserWindowNotice(ctx, run));

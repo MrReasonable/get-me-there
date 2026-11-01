@@ -199,6 +199,8 @@ export const estimateSchema: z.ZodType<Estimate> = z.object({
   assumptions: z.array(z.string()),
   windowClamped: z.boolean(),
   retryFactor: z.number().min(1),
+  /** Spec rev 55 §8.1 (ruling A5): the flight-list step's pages and seconds; no key without camoufox. */
+  flightLists: z.strictObject({ pages: positiveInt, seconds: positiveInt }).exactOptional(),
 });
 /**
  * Why pressing Search now confirms a run (spec §10, ruling A22): a code with its figures, never engine English; the web
@@ -230,7 +232,7 @@ export const billedCallsSchema = z.strictObject({
  * Both estimate routes return the estimate with its budget fit, so the form shows both before the create click, and
  * what the estimate asks (spec §10, §8.1 rev 55): the date pairs, how many the plan covers fully or partly (planned
  * cells only) and how many are reused apart, whether the press confirms the run, the billed calls and the browser
- * worker's month. `flightLists` joins the estimate in Task 20.9.
+ * worker's month (flight pages included). The estimate carries `flightLists` when camoufox is named (Task 20.9).
  */
 export const estimateResponseSchema = z.object({
   estimate: estimateSchema,

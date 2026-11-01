@@ -4,6 +4,7 @@ import {
   type CellKey,
   cellKeyString,
   type DefinitionSnapshot,
+  FLIGHT_LIST_COUNT,
   generateCells,
   type IsoDate,
   type ProviderId,
@@ -12,6 +13,7 @@ import {
   type Stage,
 } from '@gmt/core';
 import type { EngineContext } from './context.js';
+import { loadsBrowserPages } from './scheduler/browserWindow.js';
 import type { StartOptions } from './types.js';
 
 /** A provider the definition names that the snapshot leaves out of a stage, and why (code-architect review 9). */
@@ -49,8 +51,10 @@ export function withoutDiscovery(s: DefinitionSnapshot, out: readonly ProviderId
 
 /**
  * The execution's budget: the definition's, plus each discovery provider's own per-execution cap from config
- * (`providerMaxCalls`, camoufox's page cap; decision 69, arch-007). Frozen at creation, and refreshed only where a
- * manual resume refreshes the rest of the budget; the guard reads it from the snapshot, never from config.
+ * (`providerMaxCalls`, camoufox's page cap; decision 69, arch-007) and, with camoufox in discovery, the flight-list
+ * step's own allowance (`flightListPages` = FLIGHT_LIST_COUNT, spec revision 55 §2, §8.1). Frozen at creation, and
+ * refreshed only where a manual resume refreshes the rest of the budget; the guard reads both from the snapshot, never
+ * from config, so a value the definition itself carries is stripped (the 20.8 note: the guard trusts the snapshot).
  */
 export function snapshotBudget(
   ctx: EngineContext,
@@ -62,8 +66,9 @@ export function snapshotBudget(
     const cap = ctx.limitsOf(id).executionCallCap;
     if (cap !== null) caps[id] = cap;
   }
-  const { providerMaxCalls: _ignored, ...rest } = budget;
-  return Object.keys(caps).length === 0 ? rest : { ...rest, providerMaxCalls: caps };
+  const { providerMaxCalls: _ignored, flightListPages: _own, ...rest } = budget;
+  const withCaps = Object.keys(caps).length === 0 ? rest : { ...rest, providerMaxCalls: caps };
+  return discovery.some(loadsBrowserPages) ? { ...withCaps, flightListPages: FLIGHT_LIST_COUNT } : withCaps;
 }
 
 /** Who started the run; the same union as `StartOptions['trigger']`, never restated (code-architect review 17). */

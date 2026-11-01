@@ -113,6 +113,11 @@ export interface RunState {
    * it to `stop` (Task 20.9 records it).
    */
   flightStop: StopReason | null;
+  /**
+   * Revision 55 §8.1: true while the flight-list step runs (stages/flightLists.ts sets and clears it), so `stopRun` can
+   * record a cancel or SIGTERM that arrives then, after a budget stop, as `flightStop`.
+   */
+  flightStepActive: boolean;
   readonly parseStreak: Map<ProviderId, number>;
   /** How many of the parse streak's latest errors in a row are camoufox pages that did not settle (rev 49). */
   readonly notReadyStreak: Map<ProviderId, number>;
@@ -200,6 +205,7 @@ export function newRun(
     searchedDatePairs: () => searchedDatePairsOf(ctx, exec),
     flightLists: null,
     flightStop: null,
+    flightStepActive: false,
     parseStreak: new Map(),
     notReadyStreak: new Map(),
     lanes: new Map(),
@@ -210,9 +216,16 @@ export function newRun(
   };
 }
 
-/** Records the first stop reason; stops new work, and aborts calls in flight only for cancel, SIGTERM and fatal. */
+/**
+ * Records the first stop reason; stops new work, and aborts calls in flight only for cancel, SIGTERM and fatal.
+ * Revision 55 §8.1 (ruling A16): a cancel, SIGTERM or fatal stop that arrives while the flight-list step runs after an
+ * earlier stop (the browser worker's per-run page cap, the one stop the step runs after) is the step's to record: it
+ * becomes `flightStop`, which `finish` prefers, so the run ends `cancelled` or `interrupted` rather than paused.
+ */
 export function stopRun(run: RunState, reason: StopReason): void {
   if (run.stop === null) run.stop = reason;
+  else if (run.flightStepActive && run.flightStop === null && ABORTING.has(reason.kind))
+    run.flightStop = reason;
   run.intake.abort();
   if (ABORTING.has(reason.kind)) run.controller.abort();
 }

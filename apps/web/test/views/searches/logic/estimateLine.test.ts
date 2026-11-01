@@ -31,6 +31,7 @@ function resp(o: {
   billed?: EstimateResponse['billedCalls'];
   monthlyPages?: EstimateResponse['monthlyPages'];
   softConfirm?: EstimateResponse['softConfirm'];
+  flightLists?: { pages: number; seconds: number };
 }): EstimateResponse {
   const lines = (o.lines ?? [{ providerId: 'camoufox' }]).map((l) => ({
     providerId: l.providerId,
@@ -52,6 +53,7 @@ function resp(o: {
       totalCostMicroGbp: micro,
       totalCostPence: Math.ceil(micro / 10_000),
       seconds: o.seconds ?? 9000,
+      ...(o.flightLists === undefined ? {} : { flightLists: o.flightLists }),
     }),
     datePairs: o.datePairs ?? 405,
     datePairsCovered: o.covered ?? 405,
@@ -286,6 +288,22 @@ describe('estimateSentence: the edges of each clause', () => {
 });
 
 describe('estimateSentence: the notes under it', () => {
+  // why: ruling 20.5 concern 2 (Task 20.9): the flight-list step's pages, worded from Estimate.flightLists
+  it('the browser worker reading flights adds "+ flights for up to 10 date pairs, about 12 minutes"', () => {
+    const line = sentence(resp({ flightLists: { pages: 10, seconds: 700 } })).line;
+    expect(line).toBe(
+      'About 2½ hours · free · asks about all 405 date pairs · + flights for up to 10 date pairs, about 12 minutes',
+    );
+    expect(sentence(resp({ flightLists: { pages: 1, seconds: 30 } })).line).toContain(
+      '+ flights for up to 1 date pair, under a minute',
+    );
+  });
+
+  it('no flight clause without flight pages', () => {
+    expect(sentence(resp({ flightLists: { pages: 0, seconds: 0 } })).line).not.toContain('flights');
+    expect(sentence(resp({})).line).not.toContain('flights');
+  });
+
   it('the browser worker’s month, flight pages included (cost-018, persona-005)', () => {
     expect(sentence(resp({ monthlyPages: { planned: 110, left: 1400 } })).notes).toEqual([
       'uses about 110 of your 1,400 browser pages left this month',

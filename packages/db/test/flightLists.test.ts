@@ -314,3 +314,19 @@ describe('FlightListsRepo.forExecution', () => {
     expect(repo.forExecution(executionId, [c()])).toEqual({ read: 0, failed: 0 });
   });
 });
+
+// Spec rev 55 §8.1 (Task 20.9): a resumed flight-list step reads only planned cells with no row of this execution, so
+// it never writes a pair twice; this is the read it asks.
+describe('FlightListsRepo.cellsOfExecution', () => {
+  it('lists each cell this execution has a row for once, read or failed, and none of another run or on demand', () => {
+    const { repo, list, executionId, db } = setup();
+    repo.insert(list({ ...failed, fetchedAt: hoursAt(9) }));
+    repo.insert(list({ fetchedAt: hoursAt(10) })); // D1 twice: listed once
+    repo.insert(list({ ...D2, ...failed })); // D2 failed only
+    repo.insert(list({ origin: LGW, destination: EWR, executionId: null })); // on demand: nobody's
+    const other = rawExecution(db, budget);
+    repo.insert(list({ executionId: other.executionId, origin: LGW })); // another execution's
+    expect(repo.cellsOfExecution(executionId)).toEqual([c(), c(LHR, JFK, D2)]);
+    expect(repo.cellsOfExecution('no-such-execution')).toEqual([]);
+  });
+});

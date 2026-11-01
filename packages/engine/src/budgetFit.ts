@@ -42,13 +42,12 @@ export function scheduleLoad(
   hours: number,
 ): Map<ProviderId, { calls: number; costMicroGbp: number; scrolls: number }> {
   const load = new Map<ProviderId, { calls: number; costMicroGbp: number; scrolls: number }>();
+  // why: a firing re-fetches discovery in full once the last fetch is older than 0.9 × refresh, so the load counts
+  // whole discovery runs, never a fraction of one (cost M-3)
+  const discoveryRuns = (id: ProviderId): number =>
+    Math.min(firings, Math.ceil(hours / (REUSE_TOLERANCE * refreshHoursOf(snapshot, id))));
   for (const p of perRun.perProvider) {
-    const factor =
-      p.stage === 'discovery'
-        ? // why: a firing re-fetches discovery in full once the last fetch is older than 0.9 × refresh, so the load
-          // counts whole discovery runs, never a fraction of one (cost M-3)
-          Math.min(firings, Math.ceil(hours / (REUSE_TOLERANCE * refreshHoursOf(snapshot, p.providerId))))
-        : firings;
+    const factor = p.stage === 'discovery' ? discoveryRuns(p.providerId) : firings;
     const acc = load.get(p.providerId) ?? { calls: 0, costMicroGbp: 0, scrolls: 0 };
     load.set(p.providerId, {
       calls: acc.calls + p.calls * factor,
@@ -56,6 +55,11 @@ export function scheduleLoad(
       scrolls: acc.scrolls + (p.scrolls ?? 0) * factor,
     });
   }
+  // why: spec rev 55 §8.1 — the flight-list pages are browser pages of the month too, reused within the same refresh
+  const flightPages = perRun.flightLists?.pages ?? 0;
+  const browser = load.get('camoufox');
+  if (flightPages > 0 && browser !== undefined)
+    load.set('camoufox', { ...browser, calls: browser.calls + flightPages * discoveryRuns('camoufox') });
   return load;
 }
 
@@ -109,7 +113,8 @@ export function budgetFitFor(
   );
   scope(
     { kind: 'execution-free-calls', executionId: NO_EXECUTION },
-    sum(free, (p) => p.calls),
+    // why: spec rev 55 §8.1 — the flight-list pages count toward the run's free calls
+    sum(free, (p) => p.calls) + (own.perRun.flightLists?.pages ?? 0),
     def.budget.maxFreeCalls,
   );
   scope(

@@ -77,7 +77,7 @@ function latestRunOf(
     datePairsSearched: mine.size,
     datePairsNeverSearched: never,
     // why: ruling R-reading — the same counts as the run's own read (`flightsOf`), so the card and the page agree
-    flights: flightsOf(run),
+    flights: flightsOf(ports, run),
     estimatedFinishAt: estimatedFinishOf(ports, engine, run),
     stop: stopOf(ports, run, def),
   };

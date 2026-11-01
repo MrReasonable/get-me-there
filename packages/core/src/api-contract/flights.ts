@@ -13,10 +13,10 @@ import { STOP_DETAILS } from './stopCause.js';
 
 /**
  * `?pairs=2027-03-14_2027-03-24,…`: the date pairs a page asks for, 1 to MAX_FLIGHT_LIST_PAIRS (50) of them, each
- * `departure_return`; the handler refuses any other count or form with 422 `invalid_pairs`. 50 pairs are 1,099
- * characters, so a string of 51 is refused here by its length.
+ * `departure_return`; the handler refuses any other count or form with 422 `invalid_pairs` (spec §10), 51 pairs
+ * included. Only a string far past any valid one (50 pairs are 1,099 characters) is refused here, as a 400.
  */
-export const flightListsQuerySchema = z.strictObject({ pairs: z.string().max(1100) });
+export const flightListsQuerySchema = z.strictObject({ pairs: z.string().max(4096) });
 
 /**
  * A flight list's provenance (spec rev 55 §2; §7's CHECKs): the browser worker's own page, `scraped-self`, read in GBP

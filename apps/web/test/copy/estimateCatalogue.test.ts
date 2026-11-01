@@ -20,6 +20,10 @@ const SAMPLES: Record<string, unknown[][]> = {
   'estimate.reused': [['105']],
   'estimate.restNext': [['Monday']],
   'estimate.nothingNew': [['1'], ['405']],
+  'estimate.flights': [
+    ['1', 'under a minute'],
+    ['10', 'about 12 minutes'],
+  ],
   'estimate.billed': [
     ['120', '9,880', 'SearchApi', 'month'],
     ['12', '91', 'SearchApi', 'lifetime'],

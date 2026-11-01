@@ -248,6 +248,9 @@ async function fetchTiles(
     const keys = tile.plan.coveredCells.map(cellKeyString);
     for (const k of keys) lane.inFlight.add(k);
     try {
+      // why: revision 55 §8.1 — an on-demand flight read holds the browser lease; a browser page of this pass (a run
+      // that went pending while the read was in flight) waits for it; a cancel or SIGTERM ends the wait (abort)
+      if (loadsBrowserPages(providerId) && !run.isChild) await ctx.lease.whenFree(run.controller.signal);
       const result = await cap.fetchTile(tile.plan, tile.query, {
         executionId: run.executionId,
         signal: run.controller.signal,

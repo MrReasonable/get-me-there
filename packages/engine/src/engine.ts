@@ -21,6 +21,7 @@ import {
   type PlanMemo,
   withBlocked,
 } from './estimate.js';
+import { createFlightReader } from './flightRead.js';
 import { lineKey } from './lines.js';
 import { runSystemJob } from './maintenance.js';
 import { SMTP_TIMEOUTS } from './notifiers/email.js';
@@ -108,6 +109,8 @@ export function createEngine(deps: EngineDeps, options: EngineOptions = {}): Eng
   // why: the plan each estimate made, by the estimate object itself, for estimateAsk (collected with the estimate)
   const memo = new WeakMap<Estimate, PlanMemo>();
   const orch = createOrchestrator(ctx);
+  // why: revision 55 §8.1 — one on-demand flight read at a time, through the context's one browser lease
+  const flights = createFlightReader(ctx);
   const sched = createScheduler(
     {
       onTick: (id) => orch.tick(id),
@@ -157,7 +160,9 @@ export function createEngine(deps: EngineDeps, options: EngineOptions = {}): Eng
       sched.stopAll();
       ctx.heartbeat.stop();
       const settled = orch.shutdown();
-      await Promise.all([sched.drain(SHUTDOWN_DRAIN_MS), settled]);
+      // why: revision 55 §8.1 — a flight read in flight is aborted and waited for within the drain, and writes nothing
+      // once the engine is closed
+      await Promise.all([sched.drain(SHUTDOWN_DRAIN_MS), settled, flights.stop()]);
       markClosed();
       ctx.log.info({}, 'engine: shut down');
     },
@@ -197,6 +202,8 @@ export function createEngine(deps: EngineDeps, options: EngineOptions = {}): Eng
         monthlyPages: monthlyPagesOf(ctx, est, definitionId),
       };
     },
+    readFlightList: (id, pair) => flights.read(id, pair),
+    flightReadInFlight: () => flights.inFlight(),
     estimateRemaining: (id) => {
       const e = ctx.repos.executions.get(id);
       if (e === null) throw new Error(`execution ${id} not found`);

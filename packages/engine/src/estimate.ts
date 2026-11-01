@@ -4,7 +4,9 @@ import {
   cellKeyString,
   type DefinitionSnapshot,
   type DiscoveryCapability,
+  datePairCount,
   type Execution,
+  FLIGHT_LIST_COUNT,
   microGbpToPence,
   type ProviderId,
   type SourceKind,
@@ -15,7 +17,9 @@ import type { EngineContext } from './context.js';
 import { type LineKey, lineKey } from './lines.js';
 import { disabledFor, resumableCells } from './run.js';
 import { type PlannedTile, planTiles } from './stages/discovery.js';
-import { reusableFor, reuseCriteriaFor } from './stages/reuse.js';
+import { selectFlightPairs } from './stages/flightLists/select.js';
+import { FLIGHT_LIST_PROVIDER } from './stages/flightLists.js';
+import { refreshHoursOf, reusableFor, reuseCriteriaFor } from './stages/reuse.js';
 import { itineraryQuery } from './stages/verification.js';
 import type { Estimate } from './types.js';
 
@@ -29,9 +33,14 @@ export const SECONDS_PER_CALL: Readonly<Record<SourceKind, number>> = {
   synthetic: 0,
 };
 
-/** The totals of an estimate over the lines given (one sum, shared by assemble, addPass and withBlocked). */
+/**
+ * The totals of an estimate over the lines given (one sum, shared by assemble, addPass and withBlocked). Spec rev 55
+ * §8.1: the flight-list step's seconds count in `seconds` (and so in the browser window's end); its pages never in
+ * `totalCalls`.
+ */
 function totalsOf(
   lines: Estimate['perProvider'],
+  flights?: Estimate['flightLists'],
 ): Pick<Estimate, 'totalCalls' | 'totalPlanCalls' | 'totalCostMicroGbp' | 'totalCostPence' | 'seconds'> {
   const totalCostMicroGbp = lines.reduce((a, p) => a + p.costMicroGbp, 0);
   return {
@@ -39,7 +48,117 @@ function totalsOf(
     totalPlanCalls: lines.reduce((a, p) => a + p.planCalls, 0),
     totalCostMicroGbp,
     totalCostPence: microGbpToPence(totalCostMicroGbp),
-    seconds: lines.reduce((a, p) => a + p.seconds, 0),
+    seconds: lines.reduce((a, p) => a + p.seconds, 0) + (flights?.seconds ?? 0),
+  };
+}
+
+/**
+ * Spec revision 55 §8.1: whether a pass over `snapshot` runs the flight-list step at all, as far as an estimate can
+ * tell before the run: camoufox in discovery (a catch-up's planned snapshot has left it out), its flight-list capability
+ * reading the snapshot's cabin, and the snapshot's own allowance.
+ */
+function flightsApply(ctx: EngineContext, snapshot: DefinitionSnapshot): boolean {
+  if (!snapshot.providers.discovery.includes(FLIGHT_LIST_PROVIDER)) return false;
+  const cap = ctx.providers.get(FLIGHT_LIST_PROVIDER)?.flightLists;
+  return cap?.cabins.includes(snapshot.cabin) === true && (snapshot.budget.flightListPages ?? 0) > 0;
+}
+
+/**
+ * The date pairs a fresh step would read for a saved search: the first 10 of the space less those whose newest list is
+ * reusable (the step's own selection over the board's ranking); an unsaved search, or an engine without the ranking,
+ * reuses none.
+ */
+function flightPairsWanted(
+  ctx: EngineContext,
+  snapshot: DefinitionSnapshot,
+  definitionId: string | null,
+): number {
+  const most = Math.min(FLIGHT_LIST_COUNT, datePairCount(snapshot.resolved));
+  const reader = ctx.rankedDatePairs;
+  if (definitionId === null || reader === undefined) return most;
+  const now = ctx.clock.now();
+  const today = ctx.clock.todayLondon();
+  const ranked = reader({
+    definitionId,
+    space: snapshot.resolved,
+    cabin: snapshot.cabin,
+    maxJourneyMinutes: snapshot.constraints.maxJourneyMinutes ?? null,
+    now,
+  })
+    .filter((p) => p.departureDate > today)
+    .slice(0, FLIGHT_LIST_COUNT);
+  const newest = new Map(
+    ctx.repos.flightLists
+      .newestPerCell(definitionId, ranked, snapshot.cabin, ctx.pointOfSaleOf(FLIGHT_LIST_PROVIDER))
+      .map((l) => [cellKeyString(l), { fetchedAt: l.fetchedAt, status: l.status, listed: l.listed }]),
+  );
+  const reused = selectFlightPairs(
+    ranked,
+    newest,
+    now,
+    refreshHoursOf(snapshot, FLIGHT_LIST_PROVIDER),
+    today,
+  ).reused;
+  return Math.max(0, most - reused.length);
+}
+
+/**
+ * Spec revision 55 §8.1 "Estimate": adds the flight-list step's line to an assembled estimate. `wanted` is the date
+ * pairs the step would read; `pages` is the least of it, the monthly pages left after the grid plan (other schedules'
+ * reservations set aside, as the pre-start check reads it) and the run's free calls left after every free line (less
+ * what the execution has already spent, on a resume); `seconds` is pages × (CAMOUFOX_MIN_SPACING_SECONDS + 40). The
+ * assumptions say so, and name a cap that binds.
+ */
+function withFlights(
+  ctx: EngineContext,
+  est: Estimate,
+  snapshot: DefinitionSnapshot,
+  definitionId: string | null,
+  wanted: number,
+  executionId: string | null,
+): Estimate {
+  const grid = est.perProvider
+    .filter((p) => p.providerId === FLIGHT_LIST_PROVIDER)
+    .reduce((a, p) => a + p.calls, 0);
+  // why: a run's own estimate (a saved search) sets aside what other schedules reserve, as the pre-start check does; the
+  // worst case without a search (the save-time estimate, and each schedule's own monthly load, which the reservation is
+  // built from, so reading reservations there would recurse) reads the month's window as it stands
+  const window =
+    definitionId === null
+      ? ctx.budget.usage({
+          kind: ctx.limitsOf(FLIGHT_LIST_PROVIDER).capKind,
+          providerId: FLIGHT_LIST_PROVIDER,
+        })
+      : null;
+  const left =
+    window === null
+      ? callsLeftIn(ctx, FLIGHT_LIST_PROVIDER, definitionId)
+      : window.cap === null
+        ? null
+        : Math.max(0, window.cap - window.calls);
+  const monthLeft = Math.max(0, (left ?? Infinity) - grid);
+  const freeUsed =
+    executionId === null ? 0 : ctx.budget.usage({ kind: 'execution-free-calls', executionId }).calls;
+  const freeLines = est.perProvider
+    .filter((p) => !ctx.limitsOf(p.providerId).billed)
+    .reduce((a, p) => a + p.calls, 0);
+  const freeLeft = Math.max(0, snapshot.budget.maxFreeCalls - freeUsed - freeLines);
+  const pages = Math.max(0, Math.min(wanted, monthLeft, freeLeft));
+  const seconds = pages * ((ctx.limitsOf(FLIGHT_LIST_PROVIDER).minSpacingSeconds ?? 0) + 40);
+  const notes = [`+ flights for up to ${pages} date pairs, about ${Math.round(seconds / 60)} minutes`];
+  // why: the cap that cut the pairs is named, the monthly page cap first when both would (it is the browser worker's)
+  if (pages < wanted)
+    notes.push(
+      monthLeft <= freeLeft
+        ? `flights for ${pages} date pairs: the browser worker's monthly page cap`
+        : `flights for ${pages} date pairs: the run's free-call limit`,
+    );
+  const flightLists = { pages, seconds };
+  return {
+    ...est,
+    seconds: est.seconds + seconds,
+    flightLists,
+    assumptions: [...est.assumptions, ...notes],
   };
 }
 
@@ -333,7 +452,10 @@ export function estimateStart(
   }
   if (definitionId === null) notes.push('every cell is planned: no reuse of earlier prices is assumed');
   if (snapshot.windowClamped) notes.push('window clamped to start tomorrow');
-  return assemble(ctx, lines, cells.length, snapshot.windowClamped, notes);
+  const est = assemble(ctx, lines, cells.length, snapshot.windowClamped, notes);
+  return flightsApply(ctx, snapshot)
+    ? withFlights(ctx, est, snapshot, definitionId, flightPairsWanted(ctx, snapshot, definitionId), null)
+    : est;
 }
 
 function firstCellOf(ctx: EngineContext, executionId: string): CellKey | undefined {
@@ -380,7 +502,18 @@ export function estimateRemainingFor(ctx: EngineContext, exec: Execution, manual
     const l = verificationLine(ctx, snapshot, id, count, sample, notes);
     if (l !== null) lines.push(l);
   }
-  return assemble(ctx, lines, total, snapshot.windowClamped, notes);
+  const est = assemble(ctx, lines, total, snapshot.windowClamped, notes);
+  if (exec.isChild || exec.isCatchUp || !flightsApply(ctx, snapshot)) return est;
+  // why: spec rev 55 §8.1 — a stored plan is kept by a resumed pass, which reads only its planned cells with no row of
+  // this execution that have not departed; with none stored, the pass would select afresh
+  const plan = exec.flightLists;
+  const today = ctx.clock.todayLondon();
+  const done = new Set(ctx.repos.flightLists.cellsOfExecution(exec.id).map(cellKeyString));
+  const wanted =
+    plan === null
+      ? flightPairsWanted(ctx, snapshot, exec.definitionId)
+      : plan.cells.filter((c) => !done.has(cellKeyString(c)) && c.departureDate > today).length;
+  return withFlights(ctx, est, snapshot, exec.definitionId, wanted, exec.id);
 }
 
 /**
@@ -401,10 +534,19 @@ export function addPass(stored: Estimate | null, pass: Estimate): Estimate {
       l.seconds += p.seconds;
     }
   }
+  // why: spec rev 55 §8.1 — the flight pages of every pass, as the lines are summed
+  const flights =
+    stored.flightLists === undefined && pass.flightLists === undefined
+      ? undefined
+      : {
+          pages: (stored.flightLists?.pages ?? 0) + (pass.flightLists?.pages ?? 0),
+          seconds: (stored.flightLists?.seconds ?? 0) + (pass.flightLists?.seconds ?? 0),
+        };
   return {
     ...stored,
     perProvider: lines,
-    ...totalsOf(lines),
+    ...totalsOf(lines, flights),
+    ...(flights === undefined ? {} : { flightLists: flights }),
     assumptions: [...stored.assumptions, `a resumed pass planned ${pass.totalPlanCalls} more calls`],
   };
 }
@@ -419,10 +561,18 @@ export function withBlocked(e: Estimate, blockedBy: ReadonlyMap<LineKey, string>
     blocked: blockedBy.get(lineKey(p.stage, p.providerId)) ?? null,
   }));
   const runs = perProvider.filter((p) => p.blocked === null);
+  // why: spec rev 55 §8.1 — a pass whose browser discovery line is blocked runs no flight-list step (its entry rule)
+  const flights =
+    e.flightLists === undefined
+      ? undefined
+      : blockedBy.has(lineKey('discovery', FLIGHT_LIST_PROVIDER))
+        ? { pages: 0, seconds: 0 }
+        : e.flightLists;
   return {
     ...e,
     perProvider,
-    ...totalsOf(runs),
+    ...totalsOf(runs, flights),
+    ...(flights === undefined ? {} : { flightLists: flights }),
     assumptions:
       runs.length === perProvider.length
         ? e.assumptions
@@ -561,11 +711,11 @@ export function billedCallsOf(
 
 /**
  * The browser worker's pages this run asks for and the pages its month has left, when camoufox is a runnable line;
- * else null (cost-018, persona-005, ruling A31). Flight-list pages join `planned` in Task 20.9 (ruling A23).
+ * else null (cost-018, persona-005, ruling A31). The flight-list pages count in `planned` (ruling A23).
  */
 export function monthlyPagesOf(
   ctx: EngineContext,
-  estimate: Pick<Estimate, 'perProvider'>,
+  estimate: Pick<Estimate, 'perProvider' | 'flightLists'>,
   definitionId: string | null,
 ): MonthlyPages | null {
   const lines = estimate.perProvider.filter((p) => p.providerId === 'camoufox' && p.blocked === null);
@@ -575,7 +725,7 @@ export function monthlyPagesOf(
   const { usage, reserved } = providerWindow(ctx, 'camoufox', definitionId);
   const cap = usage.cap ?? ctx.limitsOf('camoufox').monthlyCallCap;
   return {
-    planned: lines.reduce((a, p) => a + p.calls, 0),
+    planned: lines.reduce((a, p) => a + p.calls, 0) + (estimate.flightLists?.pages ?? 0),
     left: Math.max(0, cap - usage.calls - reserved),
   };
 }

@@ -13,8 +13,15 @@ import {
 import { budgetConfigFromConfig, type Db, type Repos } from '@gmt/db';
 import type { HttpKit } from '@gmt/providers';
 import { noAlerts } from './alertsStep.js';
+import { type BrowserLease, createBrowserLease } from './browserLease.js';
 import { createHeartbeat, type Heartbeat } from './scheduler/heartbeat.js';
-import type { AlertsStepHook, ConsentCheck, EngineDeps, EngineOptions } from './types.js';
+import type {
+  AlertsStepHook,
+  ConsentCheck,
+  EngineDeps,
+  EngineOptions,
+  RankedDatePairsReader,
+} from './types.js';
 
 /** Callbacks the scheduler installs once it exists (createEngine); no-ops until then. Spec §8.1 one-shot jobs. */
 export interface EngineHooks {
@@ -93,6 +100,13 @@ export interface EngineContext {
    * (aborted at the same moment) ends a system job's network call.
    */
   readonly lifecycle: { closing: boolean; closed: boolean; readonly abort: AbortController };
+  /**
+   * Spec revision 55 §8.1: the browser worker's one in-flight slot, held by the on-demand flight read; every browser
+   * page of a pass awaits it. Shared by every copy of the context (one per engine).
+   */
+  readonly lease: BrowserLease;
+  /** Spec revision 55 §8.1: the board's ranking (EngineOptions.rankedDatePairs), or undefined when the app passes none. */
+  readonly rankedDatePairs: RankedDatePairsReader | undefined;
 }
 
 /**
@@ -159,5 +173,7 @@ export function buildContext(deps: EngineDeps, options: EngineOptions = {}): Eng
     // why: the heartbeat reads the Clock port, as the window check it feeds does, so one decision never mixes clocks
     heartbeat: createHeartbeat(deps.log, () => Date.parse(deps.clock.now())),
     lifecycle: { closing: false, closed: false, abort: new AbortController() },
+    lease: createBrowserLease(),
+    rankedDatePairs: options.rankedDatePairs,
   };
 }

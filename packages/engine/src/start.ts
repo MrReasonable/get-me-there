@@ -247,6 +247,11 @@ export function confirmationNeeded(
   const totalCalls = runnable.reduce((a, p) => a + p.calls, 0);
   const calls = new Map<ProviderId, number>();
   for (const p of runnable) calls.set(p.providerId, (calls.get(p.providerId) ?? 0) + p.calls);
+  // why: spec rev 55 §8.1 — the flight-list pages count in camoufox's calls for the soft confirmation (never in
+  // totalCalls, which is what a confirmation covers)
+  const flightPages = estimate.flightLists?.pages ?? 0;
+  const browser = calls.get('camoufox');
+  if (flightPages > 0 && browser !== undefined) calls.set('camoufox', browser + flightPages);
   const heavy = [...calls].flatMap(([id, n]) => {
     const kind = ctx.limitsOf(id).capKind;
     const cap = ctx.budget.usage({ kind, providerId: id }).cap;

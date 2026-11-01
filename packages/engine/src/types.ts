@@ -29,6 +29,7 @@ import type { HttpKit } from '@gmt/providers';
 
 // why: core already exports these five as types (plan decisions 16 and 17); the engine re-exports core's, never its own copies
 import type { AskedPairs, BilledCalls, MonthlyPages } from './estimate.js';
+import type { DatePairAsk, FlightReadMark, FlightReadStart } from './flightRead.js';
 
 /** What the estimate response states beside the estimate (spec §10). */
 export interface EstimateAsk extends AskedPairs {
@@ -93,6 +94,11 @@ export interface EngineOptions {
    */
   consentCheck?: ConsentCheck;
   providerConcurrency?: Partial<Record<ProviderId, number>>;
+  /**
+   * Spec revision 55 §8.1 "The flight-list step" (Task 20.9): the board's ranking (the api's `rankedPairsFor`), passed in
+   * so the engine never imports the api. Absent: the step reads nothing and an on-demand read finds no figure.
+   */
+  rankedDatePairs?: RankedDatePairsReader;
 }
 
 /**
@@ -210,6 +216,13 @@ export interface Engine {
     estimate: Estimate,
   ): EstimateAsk;
   estimateRemaining(executionId: string): Estimate;
+  /**
+   * Spec revision 55 §8.1 "Reading one date pair's flights": starts one date pair's flight-list read, or refuses it
+   * before any worker call or ledger row (the busy query and the browser lease in one synchronous turn).
+   */
+  readFlightList(definitionId: string, pair: DatePairAsk): Promise<FlightReadStart>;
+  /** The date pair a read in flight is reading (spec §10 `reading`), or null. */
+  flightReadInFlight(): FlightReadMark | null;
   budgetFit(definition: DefinitionInput | SearchDefinition): BudgetFit;
   coverageCheck(req: CoverageCheckRequest): Promise<CoverageCheckResponse>;
   scheduler: {

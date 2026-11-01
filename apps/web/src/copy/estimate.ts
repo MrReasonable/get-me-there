@@ -33,6 +33,9 @@ export const ESTIMATE_COPY = {
     `Nothing new to ask: ${n} date ${noun(n, 'pair', 'pairs')} reused from earlier runs`,
   nothingToAsk: 'Nothing can be asked this run',
   cachedOnly: 'cached prices only where travellers searched recently',
+  // why: ruling 20.5 concern 2 (spec rev 55 §11): the browser worker's flight lists after the first pass
+  flights: (pairs: string, duration: string) =>
+    `+ flights for up to ${pairs} date ${noun(pairs, 'pair', 'pairs')}, ${duration}`,
   billed: (calls: string, left: string, name: string, window: 'month' | 'lifetime') =>
     window === 'month'
       ? `uses about ${calls} of the ${left} ${name} searches left this month`

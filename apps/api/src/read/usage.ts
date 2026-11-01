@@ -94,5 +94,9 @@ export function usageOf(ports: Ports, scope: BudgetScope): ApiUsage {
     windowStart: u.windowStart,
     windowEnd: u.windowEnd,
     ...(scrolls === null ? {} : { scrolls }),
+    // why: spec rev 55 §8.1 (the 20.8 ruling): a provider-execution scope states the flight pages beside the page cap
+    ...(u.flightLists === undefined
+      ? {}
+      : { flightLists: { calls: u.flightLists.calls, cap: u.flightLists.cap } }),
   };
 }

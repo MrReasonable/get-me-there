@@ -147,6 +147,13 @@ export interface Estimate {
   assumptions: string[];
   windowClamped: boolean;
   retryFactor: number;
+  /**
+   * Spec revision 55 §8.1 "Estimate" (ruling A5): with camoufox in discovery, the flight-list step's pages and seconds
+   * (`pages` the least of 10 less the reusable date pairs, the monthly pages left after the grid plan and the run's
+   * free calls left; `seconds` pages × (spacing + 40)). Its seconds count in `seconds`; its pages never in `totalCalls`.
+   * Absent (no key) without camoufox.
+   */
+  flightLists?: { pages: number; seconds: number };
 }
 
 /**

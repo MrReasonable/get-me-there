@@ -11,17 +11,21 @@ import { errorText } from './errors.js';
 import { notifyOperator } from './notify.js';
 import { type RunState, type StopReason, stopRun } from './run.js';
 import { runDiscovery } from './stages/discovery.js';
+import { runFlightLists } from './stages/flightLists.js';
 import { runVerification } from './stages/verification.js';
 import { stopCauseOf, stopPatch } from './stopCause.js';
 import { budgetText } from './text.js';
 
 /**
- * Runs one pass: discovery, verification (spec §8.1 order), the alerts step, then finish. A stage error that escapes
- * stops the pass as fatal.
+ * Runs one pass: discovery, the flight-list step, verification (spec §8.1 order, revision 55), the alerts step, then
+ * finish. A stage error that escapes stops the pass as fatal.
  */
 export async function execute(ctx: EngineContext, run: RunState): Promise<void> {
   try {
     await runDiscovery(ctx, run);
+    // why: revision 55 §8.1 (ruling 20.0 concern 1) — the flight-list step runs after discovery and before
+    // verification, and before finish, so a budget stop's cause carries its counts
+    await runFlightLists(ctx, run);
     if (run.stop === null) await runVerification(ctx, run);
   } catch (err) {
     stopRun(run, { kind: 'fatal', message: errorText(err) });
@@ -37,6 +41,8 @@ export async function execute(ctx: EngineContext, run: RunState): Promise<void> 
  * never repeats one. A failing hook is logged and never pauses a finished search. Returns whether the step ran.
  */
 export async function alertsStep(ctx: EngineContext, run: RunState): Promise<boolean> {
+  // why: revision 55 §8.1 — a cancel or SIGTERM during the flight-list step after a budget stop ends the run as that
+  if (run.flightStop !== null) return false;
   if (run.stop !== null && run.stop.kind !== 'budget') return false;
   try {
     const r = await ctx.alertsStep(ctx.deps, run.executionId, {

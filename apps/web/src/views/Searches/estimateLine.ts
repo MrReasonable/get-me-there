@@ -109,7 +109,8 @@ function askedClause(e: EstimateResponse, schedule: SentenceSchedule | null, c: 
  * - "cached prices only where travellers searched recently" when the Aviasales cache is the only source reaching the
  *   date pairs (prov-int-014);
  * - each billable-plan source's calls against what its window has left ("uses about 120 of the 9,880 SearchApi
- *   searches left this month", "…left on your trial" for a lifetime window).
+ *   searches left this month", "…left on your trial" for a lifetime window);
+ * - "+ flights for up to 10 date pairs, about 12 minutes" when the browser worker reads flights (ruling 20.5 concern 2).
  *
  * The notes: the browser worker's month ("uses about 110 of your 1,400 browser pages left this month"), each source a
  * budget cap blocks with why and its cost as not included, and the soft confirmation the press gives ("This costs about
@@ -145,6 +146,13 @@ export function estimateSentence(
       : L.billed(groupThousands(b.calls), groupThousands(b.left), L.searchesOf[b.providerId], b.window),
   );
   const spends = covers.pence > 0 || billed.length > 0;
+  // why: ruling 20.5 concern 2 — the flight-list step's own pages and time (spec rev 55 §8.1 Estimate.flightLists), said
+  // only when it reads at least one date pair; its time is already in the duration above
+  const pages = e.estimate.flightLists?.pages ?? 0;
+  const flights =
+    pages > 0
+      ? [L.flights(groupThousands(pages), aboutDuration(e.estimate.flightLists?.seconds ?? 0, c))]
+      : [];
   // why: fix round 1, finding 7 — with nothing new to ask a run may still spend (checking fares on reused prices); the
   // sentence then keeps how long it takes, what it costs and the calls it uses, as the button carries them
   const clauses = nothingAsked
@@ -160,6 +168,7 @@ export function estimateSentence(
         asked,
         ...(cachedOnly ? [L.cachedOnly] : []),
         ...billedClauses,
+        ...flights,
       ];
   const tag =
     covers.pence > 0

@@ -165,9 +165,12 @@ describe('flightListsResponseSchema link host (20.7 review finding 3)', () => {
 });
 
 describe('flightListsQuerySchema and the on-demand read (spec rev 55 §10)', () => {
-  it(`accepts ${MAX_FLIGHT_LIST_PAIRS} pairs and refuses a pairs string of 51`, () => {
+  // why: spec §10 — 0 or 51 pairs are the handler's 422 `invalid_pairs` (Task 20.9), so the schema lets them through and
+  // refuses only a string far past any valid one
+  it(`accepts ${MAX_FLIGHT_LIST_PAIRS} and 51 pairs for the handler to judge, and refuses a string past 4,096 characters`, () => {
     expect(flightListsQuerySchema.safeParse({ pairs: pairsText(MAX_FLIGHT_LIST_PAIRS) }).success).toBe(true);
-    expect(flightListsQuerySchema.safeParse({ pairs: pairsText(51) }).success).toBe(false);
+    expect(flightListsQuerySchema.safeParse({ pairs: pairsText(51) }).success).toBe(true);
+    expect(flightListsQuerySchema.safeParse({ pairs: 'x'.repeat(4097) }).success).toBe(false);
   });
   it('reads one date pair and accepts it', () => {
     expect(

@@ -77,6 +77,10 @@ newest AS (
   FROM asked a)
 SELECT COALESCE(SUM(status = 'read'), 0) AS read, COALESCE(SUM(status = 'failed'), 0) AS failed FROM newest`;
 
+const CELLS_OF_EXECUTION_SQL = `
+SELECT DISTINCT origin, destination, departure_date AS departureDate, return_date AS returnDate
+FROM flight_lists WHERE execution_id = ? ORDER BY departure_date, return_date, origin, destination`;
+
 /** A list row joined to one of its flights (`position` NULL when the list has none). */
 interface JoinedRow {
   ord: number;
@@ -320,6 +324,24 @@ export class FlightListsRepo {
       pointOfSale,
     });
     return foldLists(rows);
+  }
+
+  /**
+   * The cells an execution's flight-list step has a row for, read or failed (spec rev 55 §8.1: a resumed pass reads
+   * only planned cells with no row of this execution, so it never writes a pair twice).
+   */
+  cellsOfExecution(executionId: string): CellKey[] {
+    return this.db.raw
+      .prepare<[string], { origin: string; destination: string; departureDate: string; returnDate: string }>(
+        CELLS_OF_EXECUTION_SQL,
+      )
+      .all(executionId)
+      .map((r) => ({
+        origin: readIata('flight_lists.origin', r.origin),
+        destination: readIata('flight_lists.destination', r.destination),
+        departureDate: readDate('flight_lists.departure_date', r.departureDate),
+        returnDate: readDate('flight_lists.return_date', r.returnDate),
+      }));
   }
 
   /**

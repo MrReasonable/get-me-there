@@ -98,7 +98,9 @@ function fill(path: string, ids: { def: string; exec: string; alert: string }): 
     .replace(':destination', 'JFK')
     .replace(':departureDate', '2026-11-02')
     .replace(':returnDate', '2026-11-12');
-  return p === '/api/airports' ? `${p}?q=LHR` : p;
+  if (p === '/api/airports') return `${p}?q=LHR`;
+  // why: spec revision 55 §10 — the flight lists answer for the date pairs asked (the POST refuses the query anyway)
+  return p.endsWith('/flight-lists') ? `${p}?pairs=2026-11-02_2026-11-12` : p;
 }
 const missing = { def: 'zz-missing', exec: 'zz-missing', alert: 'zz-missing' };
 
@@ -173,6 +175,12 @@ function apiTexts(): string[] {
     API_TEXT.datePairIncomplete,
     API_TEXT.invalidDatePair,
     API_TEXT.datePairOutsideSpace,
+    API_TEXT.invalidPairs(50),
+    API_TEXT.browserBusy,
+    API_TEXT.flightsFresh,
+    API_TEXT.flightsNotAvailable,
+    API_TEXT.flightsNoPrice,
+    API_TEXT.shuttingDown,
     API_TEXT.itineraryNotFound,
     API_TEXT.draftNotice,
     API_TEXT.draftCannotEnable,

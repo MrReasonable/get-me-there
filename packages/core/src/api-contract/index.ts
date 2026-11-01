@@ -26,6 +26,12 @@ import {
   verifyCellRequestSchema,
 } from './executions.js';
 import {
+  flightListsQuerySchema,
+  flightListsResponseSchema,
+  readFlightListRequestSchema,
+  readFlightListResponseSchema,
+} from './flights.js';
+import {
   calendarGapResponseSchema,
   cellDetailResponseSchema,
   coverageResponseSchema,
@@ -126,6 +132,11 @@ export const ROUTES: readonly RouteDef[] = [
   route('GET', '/definitions/:id/results', resultsResponseSchema, { query: resultsQuerySchema }),
   // why: spec §10 (WP19): the Dates view's source; its query is the wire form the api parses and answers 422 for itself
   route('GET', '/definitions/:id/date-pairs', datePairsResponseSchema, { query: datePairsQuerySchema }),
+  // why: spec revision 55 §10 — the flights on a search's page, and one date pair's read on demand
+  route('GET', '/definitions/:id/flight-lists', flightListsResponseSchema, { query: flightListsQuerySchema }),
+  route('POST', '/definitions/:id/flight-lists', readFlightListResponseSchema, {
+    request: readFlightListRequestSchema,
+  }),
   route('GET', '/definitions/:id/coverage', coverageResponseSchema),
   route('GET', '/definitions/:id/calendar-gap', calendarGapResponseSchema),
   route(

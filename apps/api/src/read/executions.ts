@@ -65,12 +65,13 @@ export function estimatedFinishOf(
  * Spec revision 55 §8.1 "What the run reports", §10 `flights`: from the stored flight-list plan, or null when the run
  * stored none (ruling A14: the page then says nothing about flights).
  */
-export function flightsOf(e: Execution): ExecutionResponse['flights'] {
+export function flightsOf(ports: Pick<Ports, 'repos'>, e: Execution): ExecutionResponse['flights'] {
   const f = e.flightLists;
   if (f === null) return null;
-  // why: the plan is written by the flight-list step (Task 20.9) and the rows it counts read and failed from by
-  // FlightListsRepo.forExecution (Task 20.8); until then no run stores a plan, so this branch is not reached
-  return { planned: f.planned, read: 0, reused: f.reused, failed: 0, ended: f.ended };
+  // why: `read` and `failed` from the newest row per planned cell of this execution (a resumed pass never writes a
+  // pair twice, and a cell read twice counts once), so read + reused + failed never exceeds planned
+  const { read, failed } = ports.repos.flightLists.forExecution(e.id, f.cells);
+  return { planned: f.planned, read, reused: f.reused, failed, ended: f.ended };
 }
 
 /**
@@ -194,7 +195,7 @@ export function executionResponse(
     stop,
     // why: the coverage view reads only the progress, so it passes null for the engine and gets no finish estimate
     estimatedFinishAt: engine === null ? null : estimatedFinishOf(ports, engine, e),
-    flights: flightsOf(e),
+    flights: flightsOf(ports, e),
   };
 }
 
