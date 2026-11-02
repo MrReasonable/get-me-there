@@ -273,6 +273,10 @@ describe('holdUntil: the next start waits for the worker’s nextLoadNotBefore (
     await drive(waiting);
     expect(fetchTimes(events, t0)[0] ?? 0).toBeGreaterThanOrEqual(70_000);
   });
+  it('a hold for an id without limits (no limiter) does nothing', () => {
+    const { kit } = makeKit({ limits: { searchapi: testLimits().searchapi } });
+    expect(() => kit.holdUntil('camoufox', inMs(50_000))).not.toThrow();
+  });
   it('createLimiter: run waits for the hold before the job joins the queue', async () => {
     const limiter = createLimiter(testLimits().searchapi, { usedThisHour: 0 });
     const t0 = Date.now();

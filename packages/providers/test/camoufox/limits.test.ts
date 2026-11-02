@@ -125,6 +125,8 @@ describe('pageCountOf (spec rev 56 §5.3: the answer’s pagesLoaded for the led
     ['an empty body', ''],
     ['a JSON null', 'null'],
     ['a JSON array', '[2]'],
+    ['a JSON number', '2'],
+    ['a JSON string', '"pagesLoaded"'],
     ['a negative count', '{"pagesLoaded":-1}'],
     ['a fraction', '{"pagesLoaded":1.5}'],
     ['a string', '{"pagesLoaded":"2"}'],

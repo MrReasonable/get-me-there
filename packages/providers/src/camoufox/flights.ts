@@ -63,7 +63,8 @@ export function flightListCapability(o: CamoufoxProviderOptions): FlightListCapa
     // why: spec rev 56 §2 "The return phase": the limits ask for the return phase (absent or null: none), and the
     // booking read is asked only with them; absent `booking` is read as false and stated so
     const limits = q.returnLimits ?? null;
-    const booking = limits !== null && q.booking === true;
+    // why: read only where the limits are sent (the body and the timeout both branch on them first)
+    const booking = q.booking === true;
     const request = flightsRequestSchema.safeParse({
       mode: 'flights',
       origin: q.cell.origin,

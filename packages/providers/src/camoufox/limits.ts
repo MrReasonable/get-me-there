@@ -23,14 +23,16 @@ function workerOrigin(c: CamoufoxConfig): { host: string; port: number; scheme: 
 
 /** A count a worker answer states under `key` (a whole number, 0 admitted); undefined when absent or not a count. */
 function statedCount(bodyText: string, key: 'scrolls' | 'pagesLoaded'): number | undefined {
+  let body: unknown;
   try {
-    const body: unknown = JSON.parse(bodyText);
-    if (typeof body !== 'object' || body === null || !(key in body)) return undefined;
-    const n: unknown = Reflect.get(body, key);
-    return typeof n === 'number' && Number.isInteger(n) && n >= 0 ? n : undefined;
+    body = JSON.parse(bodyText);
   } catch {
     return undefined;
   }
+  // why: only an object states a count; an absent key reads as undefined, which is no count
+  if (typeof body !== 'object' || body === null) return undefined;
+  const n: unknown = Reflect.get(body, key);
+  return typeof n === 'number' && Number.isInteger(n) && n >= 0 ? n : undefined;
 }
 
 /** The scroll clicks a worker answer states (spec §7 rev 34, CB-4); undefined for an answer that states none. */
