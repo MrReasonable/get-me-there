@@ -8,7 +8,7 @@ import {
   pageRequestSchema,
   workerAnswerSchema,
 } from '../../src/camoufox/protocol.js';
-import { FLIGHT_LIST_MAX_FLIGHTS } from '../../src/flights/limits.js';
+import { FLIGHT_LIST_ENDPOINT_PATH, FLIGHT_LIST_MAX_FLIGHTS } from '../../src/flights/limits.js';
 
 const fields = {
   origin: 'LHR',
@@ -133,5 +133,21 @@ describe("workerAnswerSchema's flights answer (spec rev 55 §2)", () => {
   });
   it('answers 200, as cells and grid do', () => {
     expect(ANSWER_STATUS.flights).toBe(200);
+  });
+  // why: the worker serves the flight-list read at this path and the app posts to it; the two must name the same one
+  it('is served at POST /v1/flights', () => {
+    expect(FLIGHT_LIST_ENDPOINT_PATH).toBe('/v1/flights');
+  });
+  it("names the flights field and says why when listed 'flights' holds none", () => {
+    expect(workerAnswerSchema.safeParse(answer({ flights: [] })).error?.issues).toEqual([
+      { code: 'custom', path: ['flights'], message: "listed 'flights' exactly when a flight was read" },
+    ]);
+  });
+  it.each(['xGB', 'GBx', 'GB unknown', 'unknownGB'])('refuses a stated pointOfSale of %s', (pointOfSale) => {
+    expect(ok(answer({ pointOfSale }))).toBe(false);
+  });
+  it('accepts pointOfSale unknown and either cheapest view the read may have taken', () => {
+    expect(ok(answer({ pointOfSale: 'unknown' }))).toBe(true);
+    expect(ok(answer({ cheapestView: 'best-fallback' }))).toBe(true);
   });
 });

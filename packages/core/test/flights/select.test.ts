@@ -95,7 +95,9 @@ describe('selectOutbound (spec rev 56 §6.2: the first fitting flight in compare
   });
 
   it('an empty array throws RangeError (the caller answers no-outbound first); so does skipping every flight', () => {
-    expect(() => selectOutbound([], LIMITS)).toThrow(RangeError);
+    expect(() => selectOutbound([], LIMITS)).toThrow(
+      new RangeError('selectOutbound: no flight left to select'),
+    );
     expect(() => selectOutbound([flight(600, 90)], LIMITS, new Set([0]))).toThrow(RangeError);
   });
 

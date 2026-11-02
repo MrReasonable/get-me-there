@@ -113,6 +113,21 @@ const pathsOf = (schema: z.ZodType, v: unknown): string[] => {
 };
 const issues = (v: unknown) => pathsOf(returnReadSchema, v);
 
+// why: a refinement's own refusal is a custom issue, as every other refinement's, so a caller can tell it from a
+// column's own type or bound
+describe('the return and booking reads refuse with custom issues', () => {
+  it('returnReadSchema', () => {
+    expect(returnReadSchema.safeParse(read({ attempts: [] })).error?.issues).toEqual([
+      { code: 'custom', path: ['attempts'], message: 'attempts exactly when the return read is read' },
+    ]);
+  });
+  it('bookingReadSchema', () => {
+    expect(bookingReadSchema.safeParse(booking({ offers: [] })).error?.issues).toEqual([
+      { code: 'custom', path: ['offers'], message: 'a read booking has at least one offer' },
+    ]);
+  });
+});
+
 describe('listedReturnSchema (spec rev 56 §5.1: the leg fields, a day offset from the return date, the "from" price)', () => {
   it('accepts a day offset of −1 (a date-line return); refuses −2 and 4', () => {
     expect(listedReturnSchema.safeParse(ret(1180, { arrivesDayOffset: -1 })).success).toBe(true);

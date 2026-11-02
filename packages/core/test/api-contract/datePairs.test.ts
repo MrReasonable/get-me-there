@@ -1028,3 +1028,319 @@ describe("datePairFigureSchema: basis 'pairing', gridPrice, pairing and pairingR
     ).toEqual(['pairing']);
   });
 });
+
+/** Each issue's path, message and code, in the order reported. */
+const issuesOf = (r: {
+  error?: { issues: ReadonlyArray<{ path: PropertyKey[]; message: string; code: string }> };
+}) => (r.error?.issues ?? []).map((i) => ({ path: i.path.join('.'), message: i.message, code: i.code }));
+
+// why: the refinement reports each rule once (a `reported` set keyed by rule); a rule built per column, per group or
+// per summary field is one rule each, so two of them broken are two issues, never folded into one
+describe('datePairsResponseSchema: rules of one kind are reported each on its own', () => {
+  it('two pairs columns of the wrong length are two issues', () => {
+    const r = body();
+    r.pairs.selected.pop();
+    r.pairs.onDemand.pop();
+    expect(issuePaths(r)).toEqual(['pairs.selected', 'pairs.onDemand']);
+  });
+  it('two counts above airportPairs, in two columns of one date pair, are two issues', () => {
+    const r = body();
+    r.pairs.priced[5] = 5;
+    r.pairs.selected[5] = 5;
+    expect(issuePaths(resum(r))).toEqual(expect.arrayContaining(['pairs.priced.5', 'pairs.selected.5']));
+  });
+  it('two summary fields off their column sums are two issues, each naming its field and the sum', () => {
+    const r = body();
+    const sum = (xs: readonly number[]) => xs.reduce((a, b) => a + b, 0);
+    r.summary.buckets.priced += 1;
+    r.summary.onDemand += 1;
+    expect(issuesOf(datePairsResponseSchema.safeParse(r))).toEqual([
+      {
+        path: 'summary.buckets.priced',
+        message: `summary.buckets.priced must be the column sum (${sum(r.pairs.priced)})`,
+        code: 'custom',
+      },
+      {
+        path: 'summary.onDemand',
+        message: `summary.onDemand must be the column sum (${sum(r.pairs.onDemand)})`,
+        code: 'custom',
+      },
+    ]);
+  });
+  it('two figures columns of the wrong length are two issues', () => {
+    const r = body();
+    r.figures.origin.pop();
+    r.figures.journeyMinutes.push(null);
+    expect(issuePaths(r)).toEqual(['figures.origin', 'figures.journeyMinutes']);
+  });
+  it.each([
+    [
+      'not strictly ascending',
+      (r: DatePairsResponse) => {
+        r.cheaperCached.figure[1] = columnOf(r.cheaperCached.figure, 0);
+        r.times.figure[1] = columnOf(r.times.figure, 0);
+      },
+      ['cheaperCached.figure.1', 'times.figure.1'],
+    ],
+    [
+      'naming no figure',
+      (r: DatePairsResponse) => {
+        r.cheaperCached.figure[1] = r.figures.pair.length;
+        r.times.figure[2] = r.figures.pair.length;
+      },
+      ['cheaperCached.figure.1', 'times.figure.2'],
+    ],
+    [
+      'on a calendar figure',
+      (r: DatePairsResponse) => {
+        r.cheaperCached.figure[0] = 1;
+        r.times.figure[1] = 1;
+      },
+      ['cheaperCached.figure.0', 'times.figure.1'],
+    ],
+  ] as const)('a cheaperCached and a times entry each %s are two issues', (_name, breakIt, paths) => {
+    const r = body();
+    breakIt(r);
+    expect(issuePaths(r)).toEqual(paths);
+  });
+  it('a pairingRead and a pairing entry each naming no figure are two issues', () => {
+    const r = withPairing();
+    groupOf(r, 'pairingRead').figure[1] = 3;
+    groupOf(r, 'pairing').figure[1] = 3;
+    expect(issuePaths(r)).toEqual(expect.arrayContaining(['pairingRead.figure.1', 'pairing.figure.1']));
+  });
+  it('a pairingRead and a pairing entry each repeating the figure before it are two issues', () => {
+    const r = withPairing();
+    groupOf(r, 'pairingRead').figure[1] = 0;
+    groupOf(r, 'pairing').figure[1] = 0;
+    expect(issuePaths(r)).toEqual(expect.arrayContaining(['pairingRead.figure.1', 'pairing.figure.1']));
+  });
+  // why: one rule, `pairingSource`, whether the entry leads or sits beneath, so it is reported once, at its first entry
+  it("a pairing's source off its flight list is one rule, reported at its first entry", () => {
+    const r = withPairing();
+    const calendarProvenance = columnOf(r.figures.provenance, 1);
+    groupOf(r, 'pairing').provenance[0] = calendarProvenance;
+    groupOf(r, 'pairing').provenance[1] = calendarProvenance;
+    expect(issuesOf(datePairsResponseSchema.safeParse(r))).toEqual([
+      {
+        path: 'pairing.provenance.0',
+        message: "a pairing figure's provenance is its flight list's",
+        code: 'custom',
+      },
+    ]);
+  });
+});
+
+describe('datePairsResponseSchema: the sparse groups at their edges', () => {
+  it('a pairing group entry repeating the figure before it is refused (strictly ascending)', () => {
+    const r = withPairing();
+    groupOf(r, 'pairingRead').figure = [0, 0];
+    groupOf(r, 'pairingRead').code = [6, 6];
+    expect(issuePaths(r)).toEqual(['pairingRead.figure.1', 'pairing.figure.1']);
+  });
+  it('a gridPrice provenance index equal to the table length is refused', () => {
+    const r = withPairing();
+    groupOf(r, 'gridPrice').provenance[0] = r.provenances.length;
+    expect(issuePaths(r)).toEqual(['gridPrice.provenance.0']);
+  });
+  // why: an entry naming no figure leaves the group out of order, so a pairing figure's missing read is not inferred
+  // from it (the entry may have meant that figure)
+  it('a pairingRead entry naming no figure is refused alone, never also as a missing read', () => {
+    const r = withPairing();
+    groupOf(r, 'pairingRead').figure[0] = 3;
+    expect(issuePaths(r)).not.toContain('pairingRead.figure');
+    expect(issuePaths(r)).toContain('pairingRead.figure.0');
+  });
+  it('a pairing entry naming no figure is refused alone, never also as a missing entry', () => {
+    const r = withPairing();
+    groupOf(r, 'pairing').figure[0] = 3;
+    const paths = issuePaths(r);
+    expect(paths).toContain('pairing.figure.0');
+    expect(paths).not.toContain('pairing.figure');
+    expect(paths).not.toContain('pairingRead.code.1');
+  });
+  // why: reads of different lengths cannot be read across, so a pairing beneath is not judged by them either
+  it('a pairing beneath is not judged by reads whose columns differ in length', () => {
+    const r = withPairing();
+    groupOf(r, 'pairingRead').code.pop();
+    groupOf(r, 'pairing').which[1] = 'over-limit';
+    expect(issuePaths(r)).toEqual(['pairingRead.code']);
+  });
+  it('a leading "from" price is refused as one, never also by the beneath rule\'s source check', () => {
+    const r = withPairing();
+    const q = groupOf(r, 'pairing');
+    q.isFrom[0] = true;
+    q.seller[0] = null;
+    q.offersRead[0] = 0;
+    q.complete[0] = false;
+    q.provenance[0] = columnOf(r.figures.provenance, 1);
+    expect(issuePaths(r)).toEqual(['pairing.isFrom.0']);
+  });
+  // why: zod still runs the refinement after a column's own (continuable) minimum refusal, so a negative index names
+  // no provenance and is refused as no flight list's, never read through
+  it('a negative pairing provenance index is refused, not read through', () => {
+    const r = withPairing();
+    groupOf(r, 'pairing').provenance[1] = -1;
+    expect(issuePaths(r)).toEqual(['pairing.provenance.1', 'pairing.provenance.1']);
+  });
+});
+
+describe('datePairFigureSchema: each rule says what is wrong', () => {
+  const { airportPair: _p, ...pairing } = pairingFigure();
+  const { airportPair: _c, ...calendar } = calendarFigure();
+  const from = { isFrom: true, seller: null, offersRead: 0, complete: false } as const;
+  const under = (read: string, over: Partial<DatePairPairing>) => ({
+    ...calendar,
+    pairingRead: read,
+    pairing: figurePairing(over),
+  });
+  const other = { ...pairing.price.provenance, fetchedAt: asIsoDateTime('2027-03-01T09:31:00.000Z') };
+  it.each([
+    [
+      'no grid price on a pairing figure',
+      { ...pairing, gridPrice: null },
+      'gridPrice',
+      'a grid price exactly on a pairing figure',
+    ],
+    [
+      'a pairing figure not read within',
+      { ...pairing, pairingRead: 'within-older' },
+      'pairingRead',
+      'pairingRead is within exactly on a pairing figure',
+    ],
+    [
+      'a list-failed read without its reason',
+      { ...calendar, pairingRead: 'list-failed', listReason: null },
+      'listReason',
+      'a reason exactly on a list-failed read',
+    ],
+    [
+      'a pairing on a calendar figure read not-read',
+      { ...calendar, pairing: figurePairing() },
+      'pairing',
+      'a pairing for a pairing figure, or shown beneath a calendar or stale verified figure',
+    ],
+    [
+      'a beneath read without its pairing',
+      { ...calendar, pairingRead: 'over-limit', pairing: null },
+      'pairing',
+      'a pairing read beneath its figure needs its pairing',
+    ],
+    [
+      'a leading "from" price',
+      { ...pairing, pairing: figurePairing(from) },
+      'pairing.isFrom',
+      "a pairing figure's price is an offer's, never a from price",
+    ],
+    [
+      'a leading pairing not complete',
+      { ...pairing, pairing: figurePairing({ complete: false }) },
+      'pairing.complete',
+      "a pairing figure's offers are complete",
+    ],
+    [
+      'a leading pairing that read no offer',
+      { ...pairing, pairing: figurePairing({ offersRead: 0 }) },
+      'pairing.offersRead',
+      'a pairing figure read at least one offer',
+    ],
+    [
+      'a leading pairing over the limits',
+      { ...pairing, pairing: figurePairing({ which: 'over-limit' }) },
+      'pairing.which',
+      'a pairing figure is within the limits',
+    ],
+    [
+      'a leading pairing stale',
+      { ...pairing, pairing: figurePairing({ stale: 'refresh' }) },
+      'pairing.stale',
+      'a pairing figure is fresh',
+    ],
+    [
+      "a leading pairing priced off its figure's price",
+      { ...pairing, pairing: figurePairing({ pricePence: 117_999, mismatch: true }) },
+      'pairing.pricePence',
+      "a pairing figure's price is its offer's",
+    ],
+    [
+      "a leading pairing of another list's provenance",
+      { ...pairing, pairing: figurePairing({ provenance: other }) },
+      'pairing.provenance',
+      "a pairing figure's provenance is its flight list's",
+    ],
+    [
+      'a pairing beneath of no flight list',
+      under('offers-incomplete', { complete: false, provenance: calendar.price.provenance }),
+      'pairing.provenance',
+      "a pairing's provenance is a flight list's",
+    ],
+    [
+      'a pairing beneath within the limits read over-limit',
+      under('over-limit', {}),
+      'pairing.which',
+      'a pairing beneath is over the limits exactly when it reads so',
+    ],
+    [
+      'a stale pairing beneath read sellers-not-read',
+      under('sellers-not-read', { ...from, stale: 'refresh' }),
+      'pairing.stale',
+      'a pairing within the refresh is fresh',
+    ],
+    [
+      'a stale pairing beneath read offers-incomplete',
+      under('offers-incomplete', { complete: false, stale: 'refresh' }),
+      'pairing.stale',
+      'a pairing within the refresh is fresh',
+    ],
+    [
+      'an offer beneath read sellers-not-read',
+      under('sellers-not-read', { complete: false }),
+      'pairing.isFrom',
+      'a pairing whose sellers were not read shows its from price',
+    ],
+    [
+      'a complete offer beneath read offers-incomplete',
+      under('offers-incomplete', {}),
+      'pairing.complete',
+      'a pairing whose offers may be incomplete shows an offer not complete',
+    ],
+    [
+      'a "from" price that read offers',
+      under('sellers-not-read', { ...from, offersRead: 2 }),
+      'pairing.offersRead',
+      'a from price reads no offer',
+    ],
+    [
+      'a complete "from" price',
+      under('sellers-not-read', { ...from, complete: true }),
+      'pairing.complete',
+      'a from price is never complete',
+    ],
+    [
+      'an offer without its seller',
+      under('offers-incomplete', { seller: null, complete: false }),
+      'pairing.seller',
+      "a seller exactly when the price is an offer's",
+    ],
+    [
+      'a fare on a "from" price',
+      under('sellers-not-read', { ...from, fare: 'Economy Basic' }),
+      'pairing.fare',
+      'no fare on a from price',
+    ],
+    [
+      'a "from" price off the return\'s own',
+      under('sellers-not-read', { ...from, fromPence: 1 }),
+      'pairing.fromPence',
+      "a from price is the return's own from price",
+    ],
+    [
+      'a mismatch on an offer equal to its "from" price',
+      under('offers-incomplete', { complete: false, mismatch: true }),
+      'pairing.mismatch',
+      'a mismatch exactly when an offer differs from the from price',
+    ],
+  ] as const)('refuses %s, saying why', (_name, value, path, message) => {
+    expect(issuesOf(datePairFigureSchema.safeParse(value))).toEqual([{ path, message, code: 'custom' }]);
+  });
+});

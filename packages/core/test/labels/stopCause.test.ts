@@ -621,6 +621,23 @@ describe('stopText (spec rev 55 §8.1 "Stop causes")', () => {
     expect(stopText(cause, F)).toEqual({ sentence, fix: null });
   });
 
+  // why: the limit is the longest sentence stopTextSchema takes, so a sentence of exactly that length keeps its reasons
+  it('keeps every reason in a sources sentence of exactly 400 characters, the stop-text limit', () => {
+    const { sentence } = stopText(
+      sources([
+        disabled('camoufox', 'rate-limit'),
+        disabled('travelpayouts', 'captcha'),
+        disabled('searchapi', 'grid-unverified'),
+        disabled('fixture', 'none-for-cell'),
+      ]),
+      F,
+    );
+    expect(sentence).toBe(
+      "The browser worker couldn't be used because it asked the app to slow down, the Aviasales cache couldn't be used because a page asked for a check it does not answer, Google Flights via SearchApi couldn't be used because its date-grid reading hasn't been checked on this install and the test source couldn't be used because its page listed nothing for these dates and airports, so nothing was searched.",
+    );
+    expect(sentence).toHaveLength(400);
+  });
+
   it('reads a row stopped before causes were stored as NO_STOP_CAUSE_TEXT', () => {
     expect(NO_STOP_CAUSE_TEXT).toEqual({
       sentence: 'No reason was recorded for this run.',

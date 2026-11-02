@@ -143,6 +143,10 @@ describe('flightsRequestSchema: returnLimits and booking (spec rev 56 §2, §5.1
     expect(req({ returnLimits: undefined })).toBe(false);
     expect(req({ booking: true })).toBe(false);
     expect(req({ booking: false })).toBe(false);
+    // why: the refusal names the field and says why, so the worker's 400 is actionable
+    expect(
+      flightsRequestSchema.safeParse({ mode: 'flights', ...fields, booking: true }).error?.issues,
+    ).toEqual([{ code: 'custom', path: ['booking'], message: 'booking is asked only with returnLimits' }]);
     expect(req({ returnLimits: { ...LIMITS, maxStops: -1 } })).toBe(false);
     // why: maxStops is required since Task 21.7 (R-order); the app always sends flightLimitsOf's null for "not set"
     const { maxStops: _m, ...noStops } = LIMITS;
@@ -195,6 +199,16 @@ describe("the flights answer's returns (spec rev 56 §5.1)", () => {
   it("refuses an attempt's outboundIndex at or past flights.length", () => {
     const r = returnsOf('read');
     expect(ok(answer({ returns: { ...r, attempts: [attempt(1, [ret(1)])] } }))).toBe(false);
+    expect(
+      workerAnswerSchema.safeParse(answer({ returns: { ...r, attempts: [attempt(1, [ret(1)])] } })).error
+        ?.issues,
+    ).toEqual([
+      {
+        code: 'custom',
+        path: ['returns', 'attempts', 0, 'outboundIndex'],
+        message: "an attempt's outbound is one of the answer's flights",
+      },
+    ]);
     expect(
       ok(answer({ flights: [flight(), flight()], returns: { ...r, attempts: [attempt(1, [ret(1)])] } })),
     ).toBe(true);
