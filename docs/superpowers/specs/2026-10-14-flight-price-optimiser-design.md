@@ -1113,7 +1113,11 @@ it splits the rows by `endpoint_path` with one predicate (keeping the
 `no-page` filter on both halves), counting `/v1/page` pages against
 `CAMOUFOX_EXECUTION_PAGE_CAP` and `/v1/flights` pages against the
 snapshot's `flightListPages` (a snapshot without it allows no flight page,
-so the check fails closed), and `usage` reports the two as separate entries.
+so the check fails closed; a `/v1/flights` row cut off before any answer, a
+cancel or SIGTERM, ledgered `unknown` with no status and no error class, is
+left out of that allowance only, since its pair is read again, §8.1, while
+`provider-month` counts it at its planned pages), and `usage` reports the two
+as separate entries.
 An on-demand flight read (`execution_id` NULL) is checked at
 `provider-month` only. The ledger's per-execution counts report flight pages
 as a count of their own beside the per-stage lines (the same page sum),
@@ -2210,8 +2214,10 @@ the web share):
 
 - **Which pairing.** For the calendar figure's own cell (its airport pair,
   cabin and point of sale) the api takes the newest flight list
-  (`newestWithReturns`, §7: the newest list, attached only when its return
-  read finished, under the read's execution scope) and, judged under
+  (`newestOfCells`, §7: the newest list of each cell a figure may take a
+  pairing in, whatever its status, under the read's execution scope, so a
+  newer list outside the scope never hides the scoped run's own; only those
+  cells are read, never every list the search has had) and, judged under
   `flightLimitsOf` of the search's current constraints (§6.2),
   `cheapestPairing`: over every attempt's returns, the cheapest by
   `fromMinor`, then `compareReturns` (duration, stops, departure), then
@@ -2227,7 +2233,9 @@ the web share):
   `next-cheapest` (the second attempt) or `over-limit`.
 - **When it leads** (basis `pairing`). A pairing leads exactly when its
   outbound and return both fit the current limits, the list is not stale by
-  the per-price rule (its age within the search's camoufox refresh), its
+  the per-price rule (its age within the search's camoufox refresh, judged
+  on the elapsed time and never on whole hours, so a list one minute past
+  the refresh no longer leads; its age in whole hours is for display only), its
   stored limits equal today's `flightLimitsOf` (deep equality), and the
   booking read of that pairing kept offers that are complete: `read` with its
   cheapest offer equal to the return's "from" price, or with no further
@@ -2252,7 +2260,11 @@ the web share):
   calendar candidate's it replaced, and its `fromEarlierSearch` is true
   exactly when the list's `fetchedAt` is before the latest parent run's
   `startedAt` (an on-demand list read after that start counts as from the
-  latest search).
+  latest search). Both wire contracts (§10) refuse a pairing figure whose
+  pairing is not that: a "from" price, offers not complete, no offer read,
+  over the limits, stale (or on a stale figure), a price other than the
+  figure's, or a provenance other than the figure's own flight list's; and
+  they refuse a "from" price that counts an offer read or is complete.
 - **The grid price beside it.** The calendar price a pairing figure replaced
   is carried as its `gridPrice` and shown beneath it through `PriceCell` with
   its own source, age, "not checked" and stale mark ("date grid showed
@@ -2260,9 +2272,13 @@ the web share):
   difference line.
 - **When it does not lead**, the calendar figure stays (its grid price
   leading, its own marks) and carries `pairingRead`, the first of these that
-  holds (nine values, each with its words on the board, §11):
+  holds (ten values, each with its words on the board, §11):
   `not-read` (no flight list for the figure's cell: "flights not read",
-  never shown when a list exists); `outbound-only` (a list whose return
+  never shown when a list exists); `list-failed` (the newest list
+  `failed`, so nothing was read for the cell, its outbound included:
+  "flights couldn't be read: <its reason in words>", the list's reason
+  carried beside it as `listReason`, §10; never "return leg not read", which
+  is for an outbound-only list alone); `outbound-only` (a list whose return
   phase read no return view: none planned, `not-verified`, skipped or ended
   before its first return view: "return leg not read"); `no-pairing-read`
   (a finished return phase with no return listed or read, `no-outbound` or
@@ -2502,16 +2518,18 @@ are `toISOString()` text; booleans are integers 0/1.
   statements inside one read transaction (the lists, then the attempts and
   returns ordered by list, attempt and position, then the offers), with each
   cell's `transientStreak` (0, 1 or 2: how many of its two newest lists ended
-  with a transient return or booking status, newest first, stopping at the
-  first finished one), and an execution's read and failed counts over its
-  planned cells in one statement. `newestWithReturns(definitionId, cabin,
-  pointOfSale, scope)` returns the same newest list per cell as the newest
-  read does, only when it is `read` with a return status of `read` or
-  `no-outbound` (never an older finished list under a newer transient one),
-  with its returns and offers; under an `executionIds` scope the list is the
-  newest among those executions' lists for the cell (a newer list outside
-  the scope never hides it, and the rule holds within the scope), and it
-  carries no streak; three statements, one transaction. The page shows the
+  with a transient return or booking status, a booking `skipped` counted as
+  one (`BOOKING_REREAD`), newest first, stopping at the first finished one), and an execution's read and failed counts over its
+  planned cells in one statement. `newestOfCells(definitionId, cells,
+  cabin, pointOfSale, scope)` returns the newest list of each requested cell,
+  whatever its status, with its returns and offers, for the api to tell a
+  failed list, an outbound-only one and a finished return phase apart (an
+  older finished list under a newer transient one is never returned); under
+  an `executionIds` scope the list is the newest among those executions'
+  lists for the cell (a newer list outside the scope never hides it), and it
+  carries no streak; three statements, one transaction, none with no cell
+  asked, so the pairings map reads only the cells it asks, however many lists
+  the search has. The page shows the
   newest list, `read` or `failed`; a list stored before 0012 has no return
   read and reads as today.
 - `flight_list_flights` (migration 0011): list_id NOT NULL FK
@@ -2915,13 +2933,19 @@ finish: completed, or the stop's status with its stored cause ("Stop causes" bel
   one read under other limits are read again, whatever their age, once: a
   pair whose two newest lists both ended transient (`transientStreak` 2,
   §7) is reused as finished until its refresh, shown with its status; a
+  booking read that ended `skipped`, whatever its rule, counts toward that
+  streak as a transient end does (read again once, then reused until its
+  refresh: at most one extra read a pair a refresh), and never stops the
+  pass's booking reads (it is not in `BOOKING_TRANSIENT`); a
   `failed` newest list of any age is read again. The plan is written once
   per execution, before its first page, only when at least one date pair was
   selected to read or reuse. **Each request**: `returnLimits` is
   `flightLimitsOf(snapshot constraints)` and `booking` the plan's `booking`,
   sent only while the plan reads returns and `returnsStopped` is null
-  (`booking` false once `bookingStopped` is set); before each request the
-  step sends an outbound-only one instead (no `returnLimits`, 1 page
+  (`booking` false once `bookingStopped` is set); before each request,
+  once the browser lease is free (the window and the month's pages are read
+  then, so a read held behind an on-demand one is shaped by what is left
+  after it), the step sends an outbound-only one instead (no `returnLimits`, 1 page
   reserved, `returnsStopped` left null) when the month's page headroom (the
   monthly cap less the pages used, from the guard) is below
   `FLIGHT_LIST_PAGES_PER_PAIR_MAX`, or when the run's window no longer holds
@@ -2929,7 +2953,8 @@ finish: completed, or the stop's status with its stored cause ("Stop causes" bel
   allowance check is `used + (returnLimits ? FLIGHT_LIST_PAGES_PER_PAIR_MAX :
   1) > flightListPages`, which refuses before any call. After a `list`
   result whose return status is `select-failed`, `not-settled` or
-  `unrecognised`, or `read` with a rule other than `spacing`, the step sets `returnsStopped` to its rule, and after
+  `unrecognised`, or `read` with a rule other than `spacing` or `monthly-headroom`, the step
+  sets `returnsStopped` to its rule, and after
   one whose booking status is transient it sets `bookingStopped`, so the
   pass sends no further return phase (or booking read); `skipped`,
   `no-outbound` and a clean `read` stop nothing. The step reads its date
@@ -2939,7 +2964,10 @@ finish: completed, or the stop's status with its stored cause ("Stop causes" bel
   has already aborted; and before every page it passes a gate of its own that
   re-reads the browser window and the heartbeat's suspension mark (checks (a)
   and (c) of §8.2) against the request's own seconds (`flightRequestSeconds`
-  with a return phase, the list page's request timeout without), inside
+  with a return phase, the list page's request timeout without: the page
+  timeout plus 15 s, `listRequestSeconds`, 105 s at the defaults, which the
+  provider also sends as an outbound-only request's own timeout, so the gate
+  and the request hold one value), inside
   http-kit's `beforeSend`, after the browser lease (below) and the limiter's
   wait and immediately before the load, so no page starts past the window's
   end. A gate refusal ends
@@ -2970,8 +2998,15 @@ finish: completed, or the stop's status with its stored cause ("Stop causes" bel
   transient or not, is inside a `read` row and never a row of the table. A
   request the allowance cannot hold (`used + its pages > flightListPages`, the
   pages summed from `page_count`) is refused at `provider-execution` before
-  any call, so a run sends at most 10 `/v1/flights` requests and loads at most
-  20 flight pages, each request counting once toward `execution-free-calls`.
+  any call, so an uninterrupted run sends at most 10 `/v1/flights` requests and loads
+  at most 20 flight pages, each request counting once toward
+  `execution-free-calls`. A request cut off before any answer (a cancel or
+  SIGTERM: ledgered `unknown`, with no status and no error class) is left out
+  of the run's flight-list allowance, since its pair has no row and the
+  resumed pass reads it again; the monthly cap still counts it at its planned
+  pages, and a timed-out request counts in both. So a resumed pass in the
+  worst case (four pairs at 2 pages, the fifth cut off) still reads its tenth
+  pair.
   A **resumed pass** keeps `planned`, `cells`, `returns` and `booking`,
   reads only planned cells with no row of this execution, skips (no row) a
   planned cell that has since departed, and never writes a pair twice (a
@@ -2993,8 +3028,10 @@ finish: completed, or the stop's status with its stored cause ("Stop causes" bel
   read is in flight; `not_available` with its reason when the search does not
   name camoufox (`not-named`), the install has not configured it
   (`not-configured`) or the cabin is not economy (`cabin`); `fresh` when the
-  newest list for that cell is `read`, younger than 0.9 × the refresh, and
-  either no return phase is planned for this worker, or its return status is
+  newest list for that cell is `read`, younger than 0.9 × the refresh, and,
+  under the phase the read would send (none with fewer than
+  `FLIGHT_LIST_PAGES_PER_PAIR_MAX` pages of month headroom), either no return
+  phase is planned for this worker, or its return status is
   finished under limits equal to the current ones and, when a booking read is
   planned, its return status is `no-outbound` or its booking status is
   finished, or its `transientStreak` is 2 (the reuse rule of the flight-list
@@ -3042,7 +3079,14 @@ finish: completed, or the stop's status with its stored cause ("Stop causes" bel
   through `flightPagesPerPair`, the one rule the plan, the allowance check,
   the read button's page count and this bound share), and the booking read
   is counted when the worker also reported `BOOKING_SELECT_VERIFIED`.
-  `pairs` is the least of 10 less the reusable date pairs and `maxFreeCalls`
+  The return phase is judged over the same candidates as the plan (the
+  first 10 not departed of the ranking, reused ones included), so an older
+  10-page snapshot is outbound-only in both. There is no boot read, so the
+  first run after a boot, estimated before its discovery preflight reports
+  the flags, is estimated, windowed and confirmed outbound-only even when its
+  plan then reads returns; each request then falls back to outbound-only
+  when the window cannot hold a return phase, so a short first run is not a
+  fault. `pairs` is the least of 10 less the reusable date pairs and `maxFreeCalls`
   less the plan's free calls and the other free providers' calls (free calls
   count requests, one a pair), cut by the monthly pages left after the grid
   or list plan, M: with returns, `min(pairs, floor(M / 2))` pairs are planned
@@ -3076,7 +3120,8 @@ finish: completed, or the stop's status with its stored cause ("Stop causes" bel
   cap that binds, compared in pairs ("flights for 4 date pairs: the browser
   worker's monthly page cap", "flights for 1 date pair out and back: the
   browser worker's monthly page cap", "flights for 5 date pairs: the run's
-  free-call limit"). A schedule's monthly load counts the bound: a daily
+  free-call limit"; without returns a tie between the two names the monthly
+  page cap). A schedule's monthly load counts the bound: a daily
   schedule whose refresh is 168 h makes about 5 discovery runs a month, at
   most 5 × (100 grid + 10 × 2) = 600 of the 1,500 pages and typically 5 ×
   (100 + 15) = 575, the worker's settle giving back the pages not loaded,
@@ -3305,7 +3350,8 @@ firing never finds a small run's window already closed; a manual run the
 operator starts is its own anchor, from its `started_at`) plus 1.5 × the
 start estimate's total seconds (the flight step's typical seconds among them,
 §8.1), plus, when the plan reads returns, one flights request's
-`flightRequestSeconds` as margin, so the last date pairs of a typical run are
+`flightRequestSeconds` as margin (its booking read the line's own: a resumed
+run's stored plan, less a booking stop, else the worker's flags), so the last date pairs of a typical run are
 not refused at the gate; the estimate's "at most" figure is stated beside it
 as the bound. Nothing moves the end except a resume
 performed by the definition's own punctual live tick: it re-anchors before
@@ -3820,7 +3866,7 @@ points alike; a bare `true` is refused.
 | `GET /definitions/cards` | the first screen's cards (`searchCardsResponseSchema`), in the order the api owns: pending or running first (oldest start first), then by the latest run's start, newest first, then never-run searches in creation order; tool-run and deleted definitions are absent. Each card: id, name, origins, destinations, the window (absolute or relative, with its resolved dates), the stay, cabin, `schedule` (`{ cron, tz }` only when scheduled), the sources it names, `latestRun` (`{ id, status, trigger, startedAt, finishedAt, datePairs, datePairsSearched, datePairsNeverSearched, flights { planned, read } \| null, estimatedFinishAt, stop }` or null; the counts over the run's snapshot space by `datePairSearched`, §6.6, never-searched being the date pairs no run searched; `estimatedFinishAt` now plus that run's own remaining seconds while pending or running, for each such run; `stop` the stored cause's text, `NO_STOP_CAUSE_TEXT` for a stopped row without one, null on every other status), `spaceChangedSince` (the search's space changed after its latest run started), and `cheapest` (the board's first-ranked figure through the same ranking, with its full provenance, `stale` by the per-price rule, age, `truncated` as the board's figure carries it (decision 36; calendar basis only), basis, dates and airport pair, and `fromLatestRun`) or null; no field carries `error_text`, a key, a password or a path; read once per definition through grouped statements |
 | `POST /definitions/create-and-start` | Search now: body = the definition's fields without the stored confirmation pair, plus `confirmCostPence`, `confirmCalls` and a `requestKey` (a UUID). The route recomputes the estimate, creates the search, stores the sent figures as its confirmation only when they cover the recomputed shown runnable totals (the unblocked lines, `runnableTotalsOf`), then starts a manual run with them and `requireCovered`; a body that turns a schedule on (`enabled` with a cron) whose sent figures do not cover those shown totals is refused 409 `confirm` with no figures and nothing written, as Repeat weekly's `PUT` is, so a schedule is never saved without the confirmation its scheduled runs need; answers 201 `{ definition, executionId, refusal }`, where a refused start keeps the saved search and answers `refusal { code, estimatePence, totalCalls, resetsAt }` in the body (codes `cap`, `confirm`, `window`, `disabled`, `shutting-down`, `failed`, worded by the web; no message), never a thrown error, and a start that throws answers `failed`; a zero-cell window is 422 and creates nothing; the same `requestKey` again, while the first is pending or after it settled, creates nothing more and answers the first request's result (200), from a bounded map of the last 100 keys that evicts a rejected request's key |
 | `POST /definitions/:id/restore` | the undo of a remove: clears `deleted_at`, keeps the pre-delete `enabled` and schedule and re-registers the job when the search is scheduled, answers 200 with the live definition; a search that is already live answers 200 with its definition as it is and changes nothing (the restore is idempotent, so an Undo sent twice is not an error); 404 `definition_not_found` for an unknown or tool-only definition |
-| `GET /definitions/:id/flight-lists?pairs=` | the flights on a search's page (`flightListsResponseSchema`): `pairs` is 1 to 50 date pairs (`MAX_FLIGHT_LIST_PAIRS`) as `<departure>_<return>`, comma separated, else 422 `invalid_pairs`. Answers `available` with `unavailableReason` (`not-named`, `not-configured` or `cabin`), the camoufox `refreshHours`, `monthlyPagesLeft`, `runPages` (this search's browser pages for one run, flight pages included, from its own estimate; null when no camoufox line can run or flight lists are not available), `pagesPlanned` (the pages one on-demand read plans, `flightPagesPerPair` of the worker's last reported flags: 2 with a return phase, else 1, which the read button and its words use), `reading` (the date pair a read in flight is reading, or null), and per pair, in order: the figure's airport pair, its search `link` (`searchLinkFor('camoufox', cell, cabin, POINT_OF_SALE)` through the allowlist, null for a synthetic figure), `list` (the newest list for the figure's cell, cabin and point of sale, with full provenance, `ageHours` and `stale`, the stale mark against the camoufox refresh (`'refresh'` once older, else `false`), and its `returns` (the return read with its attempts, returns and booking read with its offers, `flightListSchema.returns`, null for a list read without a return phase or stored before migration 0012; the contract refuses an attempt's outbound index past the flights and a booking index past its attempt's returns); the only list that feeds the outcome beside the price, the pairing figure and the tie order) and `listOtherPair` (else the newest list for another airport pair of the current space, shown only inside the flights block) |
+| `GET /definitions/:id/flight-lists?pairs=` | the flights on a search's page (`flightListsResponseSchema`): `pairs` is 1 to 50 date pairs (`MAX_FLIGHT_LIST_PAIRS`) as `<departure>_<return>`, comma separated, else 422 `invalid_pairs`. Answers `available` with `unavailableReason` (`not-named`, `not-configured` or `cabin`), the camoufox `refreshHours`, `monthlyPagesLeft`, `runPages` (this search's browser pages for one run, flight pages included, from its own estimate; null when no camoufox line can run or flight lists are not available), `pagesPlanned` (the pages one on-demand read plans, `flightPagesPerPair` of the worker's last reported flags: 2 with a return phase, else 1; 2 while no flags have been read since boot, since the read's own preflight may report them and load 2; the read button and its words use it), `reading` (the date pair a read in flight is reading, or null), and per pair, in order: the figure's airport pair, its search `link` (`searchLinkFor('camoufox', cell, cabin, POINT_OF_SALE)` through the allowlist, null for a synthetic figure), `list` (the newest list for the figure's cell, cabin and point of sale, with full provenance, `ageHours` and `stale`, the stale mark against the camoufox refresh (`'refresh'` once older, else `false`), and its `returns` (the return read with its attempts, returns and booking read with its offers, `flightListSchema.returns`, null for a list read without a return phase or stored before migration 0012; the contract refuses an attempt's outbound index past the flights and a booking index past its attempt's returns); the only list that feeds the outcome beside the price, the pairing figure and the tie order) and `listOtherPair` (else the newest list for another airport pair of the current space, shown only inside the flights block) |
 | `POST /definitions/:id/flight-lists` | body `{ departureDate, returnDate }` (a body carrying `returnLimits` is refused: the read takes the definition's own limits): reads that date pair's flight list on demand (§8.1), with its return phase when the worker's flags allow; 202 `{ accepted: true }`, after which `GET` reports `reading`; 409 `browser_busy`, 409 `fresh`, 409 `not_available` with its reason, 422 `outside_space` and `no_price`, 404 `definition_not_found` |
 | `POST /definitions/estimate`, `POST /definitions/:id/estimate` | for an unsaved body or a saved definition: cells, per-provider calls (pre-factor and factored), cost (micro-GBP and pence), seconds, assumptions, `flightLists` when camoufox is named (`{ pairs, pages, seconds, pagesMax, secondsMax, returns }`, §8.1: the typical figures and the bound); beside `budgetFit`, what it asks: `datePairs`, `datePairsCovered`, `datePairsPartly` and `datePairsReused` (§8.1: planned cells only, reused apart), `softConfirm` (null, or the reason the press confirms as a code with its figures: `cost`, the estimate above `SOFT_CONFIRM_PENCE`, or `call-share`, a provider's calls above a fifth of its call cap, with that provider, its calls, the cap and the `window` it belongs to, `month` or `lifetime` (the SearchApi trial's one-off balance); never engine text), `billedCalls` (each runnable line of a billable-plan provider with its calls, the calls left in its `window` (`month`, or `lifetime` on the trial; less what other scheduled searches reserve, as the pre-start check reads it) and that `window`; `left` is null without a cap) and `monthlyPages` (`{ planned, left }` for the browser worker's month, flight pages included, when camoufox is a runnable line; else null) |
 | `POST /definitions/coverage-check` | body: origins, destinations, window, nights; runs Travelpayouts month tiles (free, ledgered, subject to the free-call caps) and returns cached rows per pair per month; never calls a billed provider |
@@ -3906,7 +3952,12 @@ datePairsResponseSchema = {
     figure: number[];           // index into the figures columns, strictly ascending
     code: number[];             // the index in PAIRING_READ, pinned in this order: 0 'not-read' (never sent), 1 'outbound-only',
                                 // 2 'no-pairing-read', 3 'over-limit', 4 'sellers-not-read', 5 'offers-incomplete', 6 'within',
-                                // 7 'within-older', 8 'within-other-limits' (§6.9); 'within' exactly on a pairing figure
+                                // 7 'within-older', 8 'within-other-limits', 9 'list-failed' (§6.9; appended, so no earlier
+                                // code moved); 'within' exactly on a pairing figure
+  };
+  listReason: {                 // sparse: one entry per figure whose read is 'list-failed', exactly those
+    figure: number[];           // index into the figures columns, strictly ascending
+    reason: string[];           // the failed list's reason, one STOP_DETAILS word, worded "flights couldn't be read: <reason>"
   };
   gridPrice: {                  // sparse: one entry per pairing figure, the calendar price it replaced
     figure: number[];           // index into the figures columns, strictly ascending
@@ -3921,8 +3972,11 @@ datePairsResponseSchema = {
     offersRead: number[]; complete: boolean[];
     which: ('cheapest' | 'next-cheapest' | 'over-limit')[];   // which outbound the pairing used
     departOut: string[]; arriveOut: string[]; departBack: string[]; arriveBack: string[];   // HH:MM, local, the two legs'
-    mismatch: boolean[];        // the cheapest offer differs from the return's "from" price
+        mismatch: boolean[];        // the cheapest offer differs from the return's "from" price
     provenance: number[]; stale: (false | 'refresh' | 'setting')[]; ageHours: (number | 'unknown')[];
+                                // on a pairing figure: not isFrom, complete, offersRead >= 1, which not 'over-limit',
+                                // stale false (the figure's too), pricePence the figure's, provenance the figure's own
+                                // flight list's index; on any entry, isFrom only with offersRead 0 and complete false
   };
   cheaperCached: {              // sparse: one entry per verified figure hiding a cheaper current calendar price
     figure: number[];           // index into the figures columns, strictly ascending
@@ -3968,12 +4022,14 @@ the sparse groups are an encoding only: `core`'s `decodeDatePairs` turns the res
 record per date pair (departure and return dates, nights, buckets,
 verification counts, and the figure as a full price cell with its complete
 provenance and its airport pair, its grid price and its pairing each as a full
-price cell of their own, and its `pairingRead`; a response without the new
-groups decodes with no grid price, no pairing and `not-read`),
+price cell of their own, its `pairingRead` and its `listReason`; a response
+without the new groups decodes with no grid price, no pairing, `not-read`
+and no reason),
 and the web reads only the decoder's output, so no amount reaches
 `PriceCell` without its provenance (§11). The scoped `/results` read's
-`datePairFigure` carries the same basis, grid price and `pairingRead` from
-the same pairings map, so the detail and the board agree; a card's
+`datePairFigure` carries the same basis, grid price, `pairingRead` and
+`listReason` (non-null exactly on a `list-failed` read) from the same
+pairings map, under the same pairing rules, so the detail and the board agree; a card's
 `cheapest.basis` takes the same three values; `GET /executions/:id` and the
 usage read are unchanged in shape (`calls` on the camoufox page scopes being
 the page sum, §2).
@@ -4116,7 +4172,10 @@ line from `core` ("5d old", "≤2d old", "age unknown", or the "vendor's
 cache age unknown" badge) and, on a calendar price, "not checked"; the
 title attribute may carry the long form, never the only form, and these
 faces keep their tested contrast and their fit at 375px. Every amount the
-first screen (each card's cheapest, through the compact face) and a search's
+first screen (each card's cheapest, through the compact face; a card
+whose cheapest has basis `pairing` words it "lowest seller price read, not
+checked with the airline", since the card carries no seller, offer count or
+grid price) and a search's
 page (board, overview readout, phone cards, the flights block with every
 outbound, return, offer and pairing price, the flight read's outcome line,
 the grid-price line beneath a pairing figure and the mismatch line) and the
@@ -4385,9 +4444,10 @@ merged into price.
     through `PriceCell`'s compact face with its own source, time, "not
     checked" and stale mark ("date grid showed £564 · the date grid, 10 Mar
     09:30"). A calendar figure carries its `pairingRead` words where a flight
-    list exists ("return leg not read", "no return flight read", "no pairing
-    within your limits read", …; "flights not read" only when no list
-    exists), and a pairing that does not lead is shown beneath its grid price
+    list exists ("return leg not read" for an outbound-only list only, "no return flight
+    read", "no pairing within your limits read", …; a failed newest list
+    "flights couldn't be read: <its reason in words>", never "return leg not
+    read"; "flights not read" only when no list exists), and a pairing that does not lead is shown beneath its grid price
     through `PriceCell` with its own age: "return flights read 9d ago, older
     than this search's refresh:", "return flights read under earlier
     limits:", the over-limit pairing as its "from" price, "from £1,180 ·
@@ -5543,7 +5603,7 @@ its cheapest offer equals the return's "from" price (§6.9); the offers before t
 return phases too, and a failed second selection skips the booking read with its rule (§2, §8.1); migration 0012's
 coupling CHECK compares each pair on its own (§7); the browser window carries one request's worst case as margin
 (§8.2); the monthly bound plans what the pages allow (§8.1); the guard's reservation stop applies to return-phase
-requests only (§2); `pairingRead` has nine values (§6.9, §10); and the Capabilities row reads the sellers' offers
+requests only (§2); `pairingRead` has ten values (§6.9, §10); and the Capabilities row reads the sellers' offers
 (§2). Plan decision 69's "until a recording confirms the flow the worker clicks nothing" is superseded beyond the
 Cheapest flow by the verified activations of §2. On Task 21.2's review: `pairingRead` is a sparse group keyed by
 figure, its codes pinned in `PAIRING_READ`'s order (R-sparse, §10); an offer the grammar refused or priced in another

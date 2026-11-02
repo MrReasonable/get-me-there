@@ -779,7 +779,7 @@ export const PAIRING_READ = ['not-read', 'outbound-only', 'no-pairing-read', 'ov
 //   (R-low-pages: never a refusal); copy/estimate.ts flights(pairs, duration) and flightsOutAndBack(pairs, pages, duration)
 // datesView copy: gridShowed(source, when) 'date grid showed' + the source and time as differenceSource/differenceAt do; pairingBeneath(ago) 'return flights read
 //   <ago>, older than this search's refresh:' / pairingOtherLimits 'return flights read under earlier limits:'; pairingRead: Record<PairingRead, string>
-//   ('flights not read', 'return leg not read', 'no return flight read', 'no pairing within your limits read', 'sellers not read', 'a cheaper seller may not
+//   ('flights not read', 'flights couldn't be read: <reason>', 'return leg not read', 'no return flight read', 'no pairing within your limits read', 'sellers not read', 'a cheaper seller may not
 //   have been read', …); pairingLabel(which) 'cheapest of N offers read, cheapest outbound read within your limits' / '… next-cheapest outbound read within
 //   your limits (the cheapest one's returns were all over your limits)' / '… cheapest outbound read, over your limits'; pairingTimes(out, back) 'Out <HH:MM>
 //   · Back <HH:MM>'; mismatchMark 'Google listed from <price>'; fromPrice 'from'
@@ -1510,7 +1510,8 @@ the copy tests. **Consumes**: Task 21.6. Makes required: `flightListSchema.retur
     `flightLimitsOf` result for a fixture with every constraint set; `isSyntheticRead` is true for a pairing figure with real list provenance and a fixture-provider `gridPrice`, and for a calendar figure with a
     fixture-provider pairing group (R-synthetic, prov-r3-008); `overview.ts` marks a pairing figure
     `notChecked`; `howFar.ts` words a pairing figure as the browser worker's flight list; `datesState.ts`'s detail patch opens a pairing figure on the calendar basis (through `resultBasisOf`); a card and a results header with a pairing
-    figure render calendar-styled with "not checked" and `COPY.basisName.pairing` (arch-r3-003).
+    figure render calendar-styled with "not checked" and `COPY.basisName.pairing` (a card words it "lowest seller price read, not checked with the airline", since it carries no seller, offer count or
+    grid price: prov-006) (arch-r3-003).
   - `returns.test.tsx` (fake timers; the msw handler serving `PAIRING_FIXTURE` as the list, `maxStops 1`): the block's
     head reads "Outbound flights, and the return flights for the next-cheapest outbound read within your limits · each
     Back price is the full round-trip total for that outbound and that return · read 3d ago, 12 Mar 11:44 · prices from
@@ -1557,7 +1558,8 @@ the copy tests. **Consumes**: Task 21.6. Makes required: `flightListSchema.retur
     and the pairing beneath through `PriceCell` with its age, `'within-other-limits'` "return flights read under
     earlier limits:", `'over-limit'` "no pairing within your limits read" with the pairing beneath, `'sellers-not-read'` "from £1,180 · sellers not read" beneath the grid price, `'offers-incomplete'` the offer beneath with "a cheaper seller may not
     have been read", `'no-pairing-read'`
-    "no return flight read", `'outbound-only'` "return leg not read", `'not-read'` "flights not read" (never when a
+    "no return flight read", `'outbound-only'` "return leg not read" (an outbound-only list only), `'list-failed'` "flights couldn't be read: <the
+    `listReason` in words>" (a failed newest list; never "return leg not read"; the 21.6 ruling), `'not-read'` "flights not read" (never when a
     list exists); the rank column follows the response's order; the phone card the same; the overview carries "not
     checked" on a pairing figure; the tie line and `orderWithinTie` unchanged.
   - `estimateLine.test.ts` (extend): `flightLists { pairs: 10, pages: 15, seconds: 2450, pagesMax: 20, secondsMax: 3000, returns: true }` reads "+ flights,
