@@ -1,10 +1,11 @@
 import { type FlightLimits, stopDetailClause } from '@gmt/core';
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ApiError } from '../../api/client.js';
 import { useFlightLists, useFlightRead } from '../../api/flights.js';
 import type { FlightList, FlightListsResponse } from '../../api/types.js';
 import { COPY } from '../../copy.js';
 import { useNow } from '../../now.js';
+import type { ListsState } from './board.js';
 import { FlightPrice, FlightRow } from './FlightRow.js';
 import {
   allInOrder,
@@ -48,6 +49,8 @@ export interface BoardFlights {
   byKey: ReadonlyMap<string, FlightPair>;
   /** The newest answer's facts (spec rev 55 §10), or null before any answer. */
   meta: Omit<FlightListsResponse, 'pairs'> | null;
+  /** What the board knows of the flight-lists request (21.7 prov-004): pending, failed, or what it answered. */
+  lists: ListsState;
   /** The date pair being read now (the press's or the api's), by key, or null. */
   readingKey: string | null;
   /**
@@ -90,7 +93,11 @@ export function refusalWords(e: unknown): string {
  * going (pressed here, or the api's `reading`) every page is re-read each POLL_MS; the press clears when the pair's
  * newer list lands, or when an answer after the press says nothing is being read (the read ended with no list).
  */
-export function useBoardFlights(definitionId: string, pages: readonly (readonly string[])[]): BoardFlights {
+export function useBoardFlights(
+  definitionId: string,
+  pages: readonly (readonly string[])[],
+  limits: FlightLimits,
+): BoardFlights {
   const [pressed, setPressed] = useState<Reading | null>(null);
   const [said, setSaid] = useState<{ key: string; words: string } | null>(null);
   const [polling, setPolling] = useState(false);
@@ -115,10 +122,13 @@ export function useBoardFlights(definitionId: string, pages: readonly (readonly 
     setSaid({
       key: pressed.key,
       // why: spec rev 56 §11: the read's returns in the live region ("…, 2 return flights"), or its status note's words
-      words: landed && pressedList !== null ? readDoneWords(pressedList, dates, COPY) : F.readNotDone(dates),
+      words:
+        landed && pressedList !== null
+          ? readDoneWords(pressedList, dates, COPY, limits)
+          : F.readNotDone(dates),
     });
     setPressed(null);
-  }, [pressed, pressedList, lists.fetchedAt, apiReading]);
+  }, [pressed, pressedList, lists.fetchedAt, apiReading, limits]);
   const meta =
     newest === null
       ? null
@@ -131,6 +141,16 @@ export function useBoardFlights(definitionId: string, pages: readonly (readonly 
           pagesPlanned: newest.pagesPlanned,
           reading: apiReading,
         };
+  // why: 21.7 prov-004: the "flights not read" mark is off only when the request succeeded and said flight lists are
+  // not read here; pending and failed are their own states
+  const listsState: ListsState =
+    lists.status === 'loading'
+      ? 'loading'
+      : lists.status === 'failed'
+        ? 'failed'
+        : meta?.available === true
+          ? 'available'
+          : 'unavailable';
   const read = (of: { departureDate: string; returnDate: string }) => {
     // why: the request body is exactly the contract's two dates (a strict object), never the board's whole row
     const pair = { departureDate: of.departureDate, returnDate: of.returnDate };
@@ -146,7 +166,7 @@ export function useBoardFlights(definitionId: string, pages: readonly (readonly 
       },
     });
   };
-  return { byKey, meta, readingKey, said, read };
+  return { byKey, meta, lists: listsState, readingKey, said, read };
 }
 
 /**
@@ -194,15 +214,20 @@ function LowerFareLine({ list }: { list: FlightList }) {
 }
 
 /**
- * The block's head (spec rev 56 §11): for a list with a pairing, the outbound it used and that a Back price is the
- * lowest round-trip price Google listed ("from"), the shown one a seller's stated price; else WP20's "Outbound flights
- * only · …", which never mentions return flights.
+ * The block's head, one sentence (spec rev 56 §11; 21.7 ui-003/004): for a list with a pairing, the outbound it used,
+ * and that the first Back price is a seller's stated price only when one is shown (prov-001); after a limit edit the
+ * outbound "selected under your limits when read" (or "which was over your limits when read"), as the section head
+ * says it, never "within your limits" (code I2, M13); else WP20's "Outbound flights only · …", which never mentions
+ * return flights.
  */
 function headOf(list: FlightList, p: PairingView | null, now: ReturnType<typeof useNow>): string {
   if (p === null) return headLine(list, now, COPY);
   const ago = COPY.agoOf(list.ageHours);
   const when = londonDaysAgo(list.fetchedAt, now) === 0 ? null : readAt(list.fetchedAt, now, COPY);
-  return p.outboundFits ? F.headPairing(p.which, ago, when) : F.headPairingOver(ago, when);
+  const seller = p.offer !== null;
+  if (!p.selectedNow || !p.underCurrentLimits)
+    return F.headPairingWhenRead(p.outboundFits ? p.which : 'over', seller, ago, when);
+  return p.outboundFits ? F.headPairing(p.which, seller, ago, when) : F.headPairingOver(seller, ago, when);
 }
 
 /**
@@ -222,6 +247,7 @@ function ListSection({
 }) {
   const now = useNow();
   const [all, setAll] = useState(false);
+  const outboundId = useId();
   // why: finding 6: the note has no source before it, so the clause names the browser worker ("the browser worker's
   // monthly limit is used up")
   const note = listNote(list, now, COPY, (d) => stopDetailClause(d, 'camoufox', true));
@@ -246,6 +272,12 @@ function ListSection({
       <p data-testid="flights-head" className="flights-head">
         {headOf(list, p, now)}
       </p>
+      {/* why: 21.7 ui-006: a return read that did not finish says so directly under the head it explains */}
+      {status !== null ? (
+        <p data-testid="flights-return-note" className="flights-line">
+          {status}
+        </p>
+      ) : null}
       {read && p === null ? (
         <p data-testid="flights-returns-none" className="flights-line">
           {F.returnsNone}
@@ -253,7 +285,7 @@ function ListSection({
       ) : null}
       {own ? <LowerFareLine list={list} /> : null}
       {p !== null ? <PairingSection list={list} p={p} limits={limits} /> : null}
-      <ul className="flights-list">
+      <ul id={outboundId} className="flights-list">
         {flights.map((f, i) => (
           // why: a list's flights have no id; their place in the shown order is stable for one list
           <FlightRow
@@ -270,15 +302,17 @@ function ListSection({
         <p data-testid="flights-more" className="flights-line">
           {all ? null : F.more(shown.moreRead, shown.moreOutside)}
           {all ? null : F.separator}
-          <button type="button" className="btn-text" aria-expanded={all} onClick={() => setAll((a) => !a)}>
-            {/* why: spec rev 56 §11: beside "show all return flights" the outbound toggle names its own flights */}
-            {p === null ? (all ? F.showFewer : F.showAll) : all ? F.showFewerOutbound : F.showAllOutbound}
+          <button
+            type="button"
+            className="btn-text"
+            aria-expanded={all}
+            aria-controls={outboundId}
+            onClick={() => setAll((a) => !a)}
+          >
+            {/* why: spec rev 56 §11: beside "show all return flights" the outbound toggle names its own flights;
+            21.7 code M2: one fixed name, aria-expanded alone carries the state */}
+            {p === null ? F.showAll : F.showAllOutbound}
           </button>
-        </p>
-      ) : null}
-      {status !== null ? (
-        <p data-testid="flights-return-note" className="flights-line">
-          {status}
         </p>
       ) : null}
       <p data-testid="flights-limits" className="flights-line">
@@ -299,9 +333,12 @@ function ListSection({
 function ReadButton({
   pairOf,
   flights,
+  meta,
 }: {
   pairOf: { departureDate: string; returnDate: string };
   flights: BoardFlights;
+  /** The answer that says flight lists are read here (the button shows only then), its planned pages with it. */
+  meta: NonNullable<BoardFlights['meta']>;
 }) {
   const reading = flights.readingKey === pairKey(pairOf);
   return (
@@ -318,10 +355,11 @@ function ReadButton({
         {reading
           ? F.reading
           : readButtonWords(
-              // why: ruling D3, prov-008: the pages the response plans, never a hard number (1 before any answer)
-              flights.meta?.pagesPlanned ?? 1,
-              flights.meta?.monthlyPagesLeft ?? null,
-              flights.meta?.runPages ?? null,
+              // why: ruling D3, prov-008: the pages the response plans, never a hard number (21.7 code M8: the button
+              // exists only beside an answer, so there is no fallback that could understate them)
+              meta.pagesPlanned,
+              meta.monthlyPagesLeft,
+              meta.runPages,
               F,
             )}
       </button>
@@ -347,7 +385,8 @@ export function FlightsBlock({
   flights: BoardFlights;
   limits: FlightLimits;
 }) {
-  const available = flights.meta?.available === true;
+  const meta = flights.meta;
+  const available = meta?.available === true;
   const block = useRef<HTMLDivElement>(null);
   // why: finding 3: a read that lands takes its button away; when focus was inside the block it stays there, on the
   // block itself, never dropped to the page. Whether it was inside is read before the commit, while the button holds it
@@ -372,7 +411,9 @@ export function FlightsBlock({
       ) : null}
       {available && list !== null ? <ListSection list={list} limits={limits} own /> : null}
       {available && list === null ? <p className="flights-line">{F.notReadYet}</p> : null}
-      {available && offersRead(list) ? <ReadButton pairOf={pairOf} flights={flights} /> : null}
+      {meta?.available && offersRead(list) ? (
+        <ReadButton pairOf={pairOf} flights={flights} meta={meta} />
+      ) : null}
       {available && list === null && entry.listOtherPair !== null ? (
         <div className="flights-other">
           <p className="flights-head">
@@ -390,6 +431,19 @@ export function FlightsBlock({
         </p>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * The one line above the board when its flight-lists request failed (21.7 prov-004): "flights couldn't be loaded;
+ * prices shown without flights", so a row with no flight line is not read as one with nothing to say.
+ */
+export function FlightsLoadFailed({ lists }: { lists: ListsState }) {
+  if (lists !== 'failed') return null;
+  return (
+    <p data-testid="flights-load-failed" role="status" className="text-sm text-fg-2">
+      {COPY.datesView.flightsLoadFailed}
+    </p>
   );
 }
 

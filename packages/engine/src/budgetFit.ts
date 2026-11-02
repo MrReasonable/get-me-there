@@ -70,14 +70,17 @@ export function scheduleLoad(
 /**
  * Spec rev 56 §8.1 (ruling R-load; R-estimate): the flight-list pages a scheduled run of `snapshot` needs, the bound of
  * its full allowance whenever its estimate carries a flight line, whatever the current month has left: 2 pages a pair
- * with the return leg (20), 1 without (10), never above the snapshot's `flightListPages`.
+ * with the return leg (20), 1 without (10), never above the snapshot's `flightListPages`. The return leg is planned when
+ * the line carries a bound (`pagesMax`), even when this month's pages send no pair out and back (`returns` false:
+ * 21.7 code I1), so a nearly spent month never halves the load of the runs to come.
  */
 export function flightAllowanceOf(
   perRun: Pick<Estimate, 'flightLists'>,
   snapshot: Pick<DefinitionSnapshot, 'budget'>,
 ): number {
   if (perRun.flightLists === undefined) return 0;
-  const perPair = perRun.flightLists.returns === true ? FLIGHT_LIST_PAGES_PER_PAIR_MAX : 1;
+  const f = perRun.flightLists;
+  const perPair = f.returns === true || f.pagesMax !== undefined ? FLIGHT_LIST_PAGES_PER_PAIR_MAX : 1;
   return Math.min(FLIGHT_LIST_COUNT * perPair, snapshot.budget.flightListPages ?? 0);
 }
 

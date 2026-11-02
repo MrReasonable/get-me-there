@@ -8,7 +8,7 @@ import { server } from '../../msw/server.js';
 import { renderInShell } from './support.js';
 
 // Spec rev 56 §11 "Searches", §6.9 (prov-006; arch-r3-003): a card whose cheapest is a pairing figure. The card carries
-// no seller, offer count or grid price, so it words the figure "lowest seller price read, not checked with the
+// no seller, offer count or grid price, so it words the figure "cheapest of the sellers read, not checked with the
 // airline", calendar-styled (the dashed outline, "not checked" on its face), never "verified".
 
 describe('a card whose cheapest is a pairing figure (spec rev 56 §11; prov-006)', () => {
@@ -43,8 +43,8 @@ describe('a card whose cheapest is a pairing figure (spec rev 56 §11; prov-006)
     expect(within(cell).getByTestId('face-age')).toHaveTextContent(COPY.notChecked);
     expect(cell.className).toMatch(/border-dashed/);
     const cheapestLine = card.querySelector('.search-card-cheapest');
-    expect(cheapestLine).toHaveTextContent('lowest seller price read, not checked with the airline');
-    expect(COPY.basisName.pairing).toBe('lowest seller price read, not checked with the airline');
+    expect(cheapestLine).toHaveTextContent('cheapest of the sellers read, not checked with the airline');
+    expect(COPY.basisName.pairing).toBe('cheapest of the sellers read, not checked with the airline');
     expect(card).not.toHaveTextContent(/verified/i);
   });
 

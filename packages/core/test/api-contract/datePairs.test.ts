@@ -660,6 +660,24 @@ describe('datePairsResponseSchema: the pairing figure (spec rev 56 §10)', () =>
     groupOf(from, 'pairing').complete[1] = false;
     groupOf(from, 'pairing').fromPence[1] = 117_500;
     expect(issuePaths(from)).toEqual(['pairing.fromPence.1']);
+    // why: 21.7 code M11: the column refinement pinned both ways: a mismatch on an offer equal to its "from" price, and
+    // a mismatch on a "from" price, are each refused
+    const same = withPairing();
+    groupOf(same, 'pairing').mismatch[1] = true;
+    expect(issuePaths(same)).toEqual(['pairing.mismatch.1']);
+    const fromMismatch = withPairing();
+    groupOf(fromMismatch, 'pairing').isFrom[1] = true;
+    groupOf(fromMismatch, 'pairing').seller[1] = null;
+    groupOf(fromMismatch, 'pairing').offersRead[1] = 0;
+    groupOf(fromMismatch, 'pairing').complete[1] = false;
+    groupOf(fromMismatch, 'pairing').mismatch[1] = true;
+    expect(issuePaths(fromMismatch)).toEqual(['pairing.mismatch.1']);
+  });
+  it("21.7 prov-012: every pairing entry, beneath a figure too, carries a flight list's provenance", () => {
+    const beneath = withPairing();
+    // why: entry 1 is shown beneath a calendar figure; that figure's own (date-grid) provenance is no flight list's
+    groupOf(beneath, 'pairing').provenance[1] = columnOf(beneath.figures.provenance, 1);
+    expect(issuePaths(beneath)).toEqual(['pairing.provenance.1']);
   });
   it('the 21.6 ruling: a failed list reads list-failed with its cause, an entry exactly for each such figure', () => {
     const failed = (): DatePairsResponse =>
@@ -878,6 +896,12 @@ describe("datePairFigureSchema: basis 'pairing', gridPrice, pairing and pairingR
     expect(paths({ ...beneath, pairing: figurePairing({ ...from, offersRead: 0, complete: true }) })).toEqual(
       ['pairing.complete'],
     );
+  });
+  it("21.7 prov-012: a pairing shown beneath a figure carries a flight list's provenance", () => {
+    const beneath = { ...calendar, pairingRead: 'offers-incomplete' as const };
+    expect(paths({ ...beneath, pairing: figurePairing({ provenance: calendar.price.provenance }) })).toEqual([
+      'pairing.provenance',
+    ]);
   });
   it('Task 21.7: fromPence is the return\'s "from" price, the figure\'s own when isFrom, unlike it exactly on a mismatch', () => {
     const beneath = { ...calendar, pairingRead: 'offers-incomplete' as const };

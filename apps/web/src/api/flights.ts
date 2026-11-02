@@ -35,7 +35,7 @@ export function useFlightLists(
   id: string,
   pages: readonly (readonly string[])[],
   polling: boolean,
-): { answers: FlightListsResponse[]; fetchedAt: number } {
+): { answers: FlightListsResponse[]; fetchedAt: number; status: 'idle' | 'loading' | 'failed' | 'ready' } {
   return useQueries({
     queries: pages
       .filter((p) => p.length > 0)
@@ -48,6 +48,15 @@ export function useFlightLists(
       answers: results.flatMap((r) => (r.data === undefined ? [] : [r.data])),
       // why: the newest answer's time, so a read on demand knows when an answer came after its press
       fetchedAt: Math.max(0, ...results.map((r) => r.dataUpdatedAt)),
+      // why: 21.7 prov-004: the board says the request is pending, or that it failed, rather than drop it silently
+      status:
+        results.length === 0
+          ? ('idle' as const)
+          : results.some((r) => r.isError)
+            ? ('failed' as const)
+            : results.some((r) => r.isPending)
+              ? ('loading' as const)
+              : ('ready' as const),
     }),
   });
 }

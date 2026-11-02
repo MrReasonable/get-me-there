@@ -184,14 +184,18 @@ export function mismatchOf(p: PairingView | null): { offerMinor: number; fromMin
 /** A skipped step's rule in words: the worker's known rule tokens, `reload:<end>` by its first word, else general. */
 function skippedWords(rule: string | null, c: FlightCopy): string {
   const head = (rule ?? '').split(':')[0] ?? '';
-  return Object.hasOwn(c.skippedRule, head) ? Reflect.get(c.skippedRule, head) : c.skippedOther;
+  // why: 21.7 code M10: a typed lookup over the rule table (an unknown token is worded generally), never `any`
+  const words: Readonly<Partial<Record<string, string>>> = c.skippedRule;
+  return (Object.hasOwn(words, head) ? words[head] : undefined) ?? c.skippedOther;
 }
 
-/** The read clauses of a return read (spec rev 56 §11): the counts clause and the more-listed clause, of its last attempt. */
-function readClauses(r: ReturnRead, c: FlightCopy): string[] {
-  // why: the last attempt is the view the phase stands on (the booking read's and, but for an over-limit pick, the
-  // shown pairing's)
-  const a = r.attempts.at(-1);
+/**
+ * The read clauses of a return read (spec rev 56 §11): the counts clause and the more-listed clause of attempt `at`,
+ * the shown pairing's (21.7 code M1, prov-010: the view the returns shown come from), or the last attempt when none is
+ * named (the view the phase stands on).
+ */
+function readClauses(r: ReturnRead, c: FlightCopy, at?: number): string[] {
+  const a = at === undefined ? r.attempts.at(-1) : r.attempts[at];
   if (a === undefined) return [];
   const out: string[] = [];
   if (a.optionsUnparsed > 0 || a.optionsOtherCell > 0)
@@ -205,17 +209,19 @@ function readClauses(r: ReturnRead, c: FlightCopy): string[] {
 
 /**
  * Spec rev 56 §11 "Status notes": what a list's return read says beyond its lines, with what happens next. A list read
- * without a return phase (or stored before them) says so (`returnsOld`); a transient end says it is tried again; a
- * skipped one its rule in words; `not-verified` where the recording session is; `no-outbound` nothing beyond the
- * outbound's own line; a `read` its counts and more-listed clauses, or null when clean.
+ * without a return phase (or stored before them) says nothing: it shows as the outbound list, its limits line saying
+ * "return leg not read" (21.7 code M6); a transient end says it is tried again; a skipped one its rule in words;
+ * `not-verified` where the recording session is; `no-outbound` nothing beyond the outbound's own line; a `read` the
+ * counts and more-listed clauses of attempt `at` (the shown pairing's; the last attempt when not named), or null when
+ * clean.
  */
-export function returnNote(list: FlightList, c: typeof COPY): string | null {
+export function returnNote(list: FlightList, c: typeof COPY, at?: number): string | null {
   const F = c.flights;
   const r = list.returns;
-  if (r === null) return F.returnsOld;
+  if (r === null) return null;
   switch (r.status) {
     case 'read': {
-      const clauses = readClauses(r, F);
+      const clauses = readClauses(r, F, at);
       return clauses.length === 0 ? null : clauses.join(F.separator);
     }
     case 'no-outbound':
@@ -247,7 +253,9 @@ export function bookingNote(list: FlightList, c: typeof COPY): string | null {
     case 'read':
       return null;
     case 'expand-failed':
-      return F.bookingExpandFailed;
+      // why: 21.7 prov-014: an expansion that failed before any offer read none, so it says only that the sellers were
+      // not read and are tried again (it is a transient end), never "sellers read before …"
+      return b.offers.length === 0 ? F.bookingTransient : F.bookingExpandFailed;
     case 'skipped':
       return F.bookingSkipped(skippedWords(b.rule, F));
     case 'not-verified':
@@ -275,15 +283,19 @@ export function returnsWereRead(list: FlightList): boolean {
 
 /**
  * What a block's live region says when a pressed read lands (spec rev 56 §11): "Flights read for 14 → 24 Mar, 2 return
- * flights" when its returns were read (the last attempt's, the view the phase stands on), the status note's words for a
- * return read that did not finish, WP20's "Flights read for …" for a list with no return read (or no outbound), and
- * "Flights not read for …" for a failed list.
+ * flights" when its returns were read (the shown pairing's attempt's under `limits`, 21.7 code M1, else the last
+ * attempt's), the status note's words for a return read that did not finish, WP20's "Flights read for …" for a list
+ * with no return read (or no outbound), and "Flights not read for …" for a failed list.
  */
-export function readDoneWords(list: FlightList, dates: string, c: typeof COPY): string {
+export function readDoneWords(list: FlightList, dates: string, c: typeof COPY, limits: FlightLimits): string {
   const F = c.flights;
   if (list.status !== 'read') return F.readNotDone(dates);
   const r = list.returns;
   if (r === null) return F.readDone(dates);
-  if (r.status === 'read') return F.readDoneReturns(dates, r.attempts.at(-1)?.returns.length ?? 0);
+  if (r.status === 'read') {
+    const p = pairingOf(list, limits);
+    const a = p === null ? r.attempts.at(-1) : r.attempts[p.attempt];
+    return F.readDoneReturns(dates, a?.returns.length ?? 0);
+  }
   return returnNote(list, c) ?? F.readDone(dates);
 }

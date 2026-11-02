@@ -8,7 +8,7 @@ import { renderWithProviders } from '../../render.js';
 
 // Spec rev 56 §6.9, §11 "Date pair detail" (arch-r3-003): the detail's header names the board's figure when it is not
 // the cheapest row; a pairing figure there is calendar-styled ("constraints not checked") and named by its basis words,
-// "lowest seller price read, not checked with the airline", never "verified".
+// "cheapest of the sellers read, not checked with the airline", never "verified".
 
 /** The board's pairing figure as the scoped `/results` read sends it (the contract's per-figure rules hold). */
 const pairingFigure = () => {
@@ -56,5 +56,10 @@ describe("the detail's header with a pairing board figure (spec rev 56 §6.9; ar
     expect(board.className).toMatch(/border-dashed/);
     expect(board).toHaveTextContent(`LHR → JFK · ${COPY.basisName.pairing}`);
     expect(board).not.toHaveTextContent(/verified/i);
+    // why: 21.7 prov-002: a pairing figure differs because it is a seller's offer from a flight list, never by recency
+    expect(board).toHaveTextContent(
+      "It is a seller's offer read from the browser worker's flight list for one outbound and one return, not one of the prices listed here.",
+    );
+    expect(board).not.toHaveTextContent('the board prefers a price the latest search returned');
   });
 });

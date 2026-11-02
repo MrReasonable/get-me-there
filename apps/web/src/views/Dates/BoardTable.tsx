@@ -35,8 +35,20 @@ import {
   rowState,
   StateFlap,
 } from './BoardCard.js';
-import { type BoardModel, PAGE_SIZE, setsAirlineOrLayover } from './board.js';
-import { FlightOutcome, FlightsBlock, FlightsUnavailable, useBoardFlights } from './Flights.js';
+import {
+  type BoardModel,
+  type ListsState,
+  PAGE_SIZE,
+  sellerCoverage,
+  setsAirlineOrLayover,
+} from './board.js';
+import {
+  FlightOutcome,
+  FlightsBlock,
+  FlightsLoadFailed,
+  FlightsUnavailable,
+  useBoardFlights,
+} from './Flights.js';
 import {
   boardGroups,
   hasFlightsBlock,
@@ -105,8 +117,8 @@ export function BoardTable(props: BoardProps) {
   const byPrice = state.sort.key === 'price';
   const groups = useMemo(() => boardGroups(model.rows.map(withFigure), byPrice), [model.rows, byPrice]);
   const pages = useMemo(() => requestPages(groups, visible, PAGE_SIZE), [groups, visible]);
-  const flights = useBoardFlights(definition.id, pages);
   const limits = useMemo(() => limitsOf(definition), [definition]);
+  const flights = useBoardFlights(definition.id, pages, limits);
   const available = flights.meta?.available === true;
   const settings = setsAirlineOrLayover(definition.constraints);
   // why: finding 9: a list that lands moves rows within a tie only while the board is not in use; while the pointer or
@@ -213,6 +225,8 @@ export function BoardTable(props: BoardProps) {
   // why: the rank's cells: two, or as many as the largest shown rank needs
   const digits = Math.max(2, ...rows.map((p) => String(model.rankOf.get(p.index) ?? 0).length));
 
+  // why: 21.7 persona coverage: the board says for how many of the rows shown a seller's price was read
+  const coverage = sellerCoverage(rows);
   const caption = (
     <>
       <span ref={captionRef} tabIndex={-1} className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
@@ -221,6 +235,11 @@ export function BoardTable(props: BoardProps) {
       </span>
       <span className="block">{D.boardOrderNote}</span>
       <span className="block">{D.showing(rows.length, model.rows.length)}</span>
+      {coverage !== null ? (
+        <span data-testid="seller-coverage" className="block">
+          {D.sellerCoverage(coverage.read, coverage.shown)}
+        </span>
+      ) : null}
       {model.weeks !== null ? <span className="block">{D.bestPerWeek(model.weeks)}</span> : null}
     </>
   );
@@ -231,6 +250,7 @@ export function BoardTable(props: BoardProps) {
       <span id={noteId} className="sr-only">
         {D.priceSortNote}
       </span>
+      <FlightsLoadFailed lists={flights.lists} />
       {phone ? (
         <div className="flex flex-wrap gap-x-4 text-sm">
           {SORTS.map((s) => (
@@ -283,7 +303,7 @@ export function BoardTable(props: BoardProps) {
               lit: lit === p.index,
               onLight,
               outcome,
-              available,
+              lists: flights.lists,
               settings,
             };
             return (
@@ -366,7 +386,7 @@ function BoardRow({
   lit,
   onLight,
   outcome,
-  available,
+  lists,
   settings,
 }: {
   pair: DatePair & { figure: DatePairFigure };
@@ -379,8 +399,8 @@ function BoardRow({
   onLight: (index: number | null) => void;
   /** The flight read's outcome beside the figure (spec rev 55 §6.9; persona-003). */
   outcome: ReactNode;
-  /** Flight lists are read for this search (spec rev 56 §11: "flights not read" is said only then). */
-  available: boolean;
+  /** What the board knows of its flight-lists request (21.7 prov-004: "flights not read" by it). */
+  lists: ListsState;
   /** The search sets an airline or layover setting (a pairing figure says they are not applied). */
   settings: boolean;
 }) {
@@ -430,7 +450,7 @@ function BoardRow({
         <FigurePrice figure={f} notes={notes} flapSlot="price" />
         <CheaperCached figure={f} notes={notes} />
         <PairingFigureLines figure={f} settings={settings} />
-        <FlightRead figure={f} available={available} />
+        <FlightRead figure={f} lists={lists} />
         {outcome}
       </td>
       <td className="board-howfar">

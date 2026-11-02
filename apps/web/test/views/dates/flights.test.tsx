@@ -274,13 +274,17 @@ describe('the outcome beside the figure (spec rev 55 §6.9; ruling persona-003)'
     renderDates({ body: BOARD });
     await findBoard();
     const cells = () => [...rowOf(0).querySelectorAll('td')].map((c) => c.textContent ?? '');
+    const figure = () => within(rowOf(0)).getAllByTestId('price-cell')[0]?.textContent;
     const before = cells();
+    const figureBefore = figure();
     release();
     await waitFor(() => expect(outcomeOf(0)).not.toBeNull());
     const after = cells();
     expect(after[0]).toBe(before[0]);
     expect(after[5]).toBe(before[5]);
-    expect(after[4]?.startsWith(before[4] ?? '')).toBe(true);
+    // why: 21.7 prov-004: the price cell's flight line reads "loading flights" until the answer lands; the figure's own
+    // PriceCell is unchanged
+    expect(figure()).toBe(figureBefore);
     expect(within(rowOf(0)).getAllByTestId('price-cell')[0]).toHaveTextContent('£86');
   });
 });
@@ -410,7 +414,9 @@ describe('the flights block (spec rev 55 §11 Flights)', () => {
 
   it('words a failed list, Google’s own no-flights line and a list with nothing this app could read', async () => {
     await renderWorked();
-    expect(blockOf(9)).toHaveTextContent("Flights not read: the browser worker's monthly limit is used up");
+    expect(blockOf(9)).toHaveTextContent(
+      "Flights couldn't be read: the browser worker's monthly limit is used up",
+    );
     // ruling R-failed-read: a list stopped by a monthly or per-run limit offers no read; the note says the limit
     expect(within(blockOf(9)).queryByRole('button', { name: /^Read flights/ })).toBeNull();
     expect(blockOf(6)).toHaveTextContent("Google's list showed no flights for these dates when read 11:44");
@@ -438,19 +444,25 @@ describe('the flights block (spec rev 55 §11 Flights)', () => {
     );
     renderDates({ body: BOARD });
     await waitFor(() => expect(document.querySelector('[data-flights-for="6"]')).not.toBeNull());
-    expect(blockOf(0)).toHaveTextContent('Flights not read: the connection to it failed');
+    expect(blockOf(0)).toHaveTextContent("Flights couldn't be read: the connection to it failed");
     expect(within(blockOf(0)).getByRole('button', { name: /^Read flights for this date/ })).toBeEnabled();
-    expect(blockOf(3)).toHaveTextContent("Flights not read: this search's limit for one run is used up");
+    expect(blockOf(3)).toHaveTextContent(
+      "Flights couldn't be read: this search's limit for one run is used up",
+    );
     expect(within(blockOf(3)).queryByRole('button', { name: /^Read flights/ })).toBeNull();
     expect(within(blockOf(6)).queryByRole('button', { name: /^Read flights/ })).toBeNull();
   });
 
-  it('"show all" expands to every flight and "show fewer" folds back to three', async () => {
+  it('"show all" expands to every flight and, pressed again, folds back to three (one name; aria-expanded the state)', async () => {
     const { user } = await renderWorked();
     const block = blockOf(0);
-    await user.click(within(block).getByRole('button', { name: 'show all' }));
+    const toggle = within(block).getByRole('button', { name: 'show all' });
+    await user.click(toggle);
     expect(within(block).getAllByTestId('flight')).toHaveLength(6);
-    await user.click(within(block).getByRole('button', { name: 'show fewer' }));
+    // why: 21.7 code M2: the toggle keeps its name; aria-expanded alone says it is open
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    expect(toggle).toHaveAccessibleName('show all');
+    await user.click(toggle);
     expect(within(block).getAllByTestId('flight')).toHaveLength(3);
     expect(within(block).getByTestId('flights-more')).toHaveTextContent(
       '3 more read, 1 outside your limits · show all',

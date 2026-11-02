@@ -190,8 +190,9 @@ function leadOf(
       return D.pairingRead[read];
     case 'list-failed':
       // why: the 21.6 ruling: a failed newest list read nothing, its outbound included, so it says why and is never
-      // worded "return leg not read" (which is an outbound-only list's alone)
-      return D.listFailed(f.listReason === null ? '' : reason(f.listReason));
+      // worded "return leg not read" (which is an outbound-only list's alone); 21.7 ui-008: with no reason (the
+      // contract always sends one) the words end without a colon, never in an empty cause
+      return D.listFailed(f.listReason === null ? null : reason(f.listReason));
     case 'within-older':
       return D.pairingBeneath(c.agoOf(f.pairing?.ageHours ?? 'unknown'));
     case 'within-other-limits':
@@ -209,15 +210,24 @@ function leadOf(
 }
 
 /**
+ * What the board knows of its flight-lists request (21.7 prov-004): `loading` while it is pending, `failed` when it
+ * failed, `available` when it answered that flight lists are read for this search, `unavailable` when it answered they
+ * are not (or nothing was asked).
+ */
+export type ListsState = 'loading' | 'failed' | 'available' | 'unavailable';
+
+/**
  * Spec rev 56 §6.9, §11 Board (R-heads): a calendar figure's flight read in words, with the pairing that does not lead
  * shown beneath it; a stale verified figure's likewise (ruling 21.2); nothing for a pairing figure (its seller, times
- * and grid price are its own lines) or a fresh verified one. "flights not read" is said only where no flight list
- * exists and flight lists are read for this search (`available`), so a search without the browser worker is not told
- * on every row what it never asked for. `reason` words a failed list's cause (the 21.6 ruling).
+ * and grid price are its own lines) or a fresh verified one. Where no flight list exists the row says "flights not
+ * read" when flight lists are read for this search, and keeps it when the flight-lists request failed (21.7 prov-004:
+ * the mark is off only when that request succeeded and said they are not read here, so a search without the browser
+ * worker is not told on every row what it never asked for); "loading flights" while that request is pending. `reason`
+ * words a failed list's cause (the 21.6 ruling).
  */
 export function flightReadLine(
   f: DatePairFigure,
-  available: boolean,
+  lists: ListsState,
   c: typeof COPY,
   reason: (d: StopDetail) => string,
 ): FlightReadLine | null {
@@ -235,8 +245,35 @@ export function flightReadLine(
     }
   }
   const read = f.pairingRead;
-  if (read === 'within' || (read === 'not-read' && !available)) return null;
+  if (read === 'within' || (read === 'not-read' && lists === 'unavailable')) return null;
+  if (read === 'not-read' && lists === 'loading') return { lead: c.datesView.loadingFlights, pairing: null };
   return { lead: leadOf(read, f, c, reason), pairing: f.pairing };
+}
+
+/**
+ * The seller of a pairing's offer (spec rev 56 §10: a seller exactly when the price is an offer's). A pairing whose
+ * price is an offer's with no seller breaks the contract, so it throws a RangeError naming the rule rather than print
+ * a seller line with no seller (21.7 code M9).
+ */
+export function sellerOf(q: Pick<DatePairPairing, 'seller'>): string {
+  if (q.seller === null) throw new RangeError('sellerOf: an offer names its seller (spec rev 56 §10)');
+  return q.seller;
+}
+
+/**
+ * The board head's seller-price count (21.7 persona coverage): of the date pairs shown, how many carry a seller's price
+ * (a pairing figure, or a pairing beneath whose price is an offer's); null when no pairing figure is shown, so a search
+ * with no seller price read says nothing.
+ */
+export function sellerCoverage(
+  rows: ReadonlyArray<{ figure: DatePairFigure | null }>,
+): { read: number; shown: number } | null {
+  if (!rows.some((p) => p.figure?.basis === 'pairing')) return null;
+  const read = rows.filter((p) => {
+    const q = p.figure?.pairing ?? null;
+    return q !== null && !q.isFrom;
+  }).length;
+  return { read, shown: rows.length };
 }
 
 /**

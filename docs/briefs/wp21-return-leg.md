@@ -95,7 +95,7 @@ conversation; its §6.2 price rule and §6.3 "no return leg" carry Ian's 2026-11
   every non-obvious choice carries a `// why:` line.
 - **Words come from one place**: web view logic composes sentences from `COPY` keys (templates with parameters), never
   inline literals, so the catalogue and rendered-sweep tests cover them; the main-path name of a source comes from
-  core's one table (`labels/mainPath.ts`). One spelling: "round-trip total" everywhere (COPY, the provenance note, the spec).
+  core's one table (`labels/mainPath.ts`). One spelling: "round trip" on every Out, Back and outbound price ("from £478 round trip", "Back: £1,180 round trip"; 21.7 ui-004), "round-trip total" in the provenance note; never "round trip total".
 - **Package-scoped tests while iterating** (`pnpm --filter @gmt/<pkg> exec vitest run <path>`); the whole `pnpm test`
   only before a push (the machine is shared). **Stryker scoped** while iterating
   (`pnpm --filter @gmt/<pkg> exec stryker run --mutate <file> --concurrency 2`; each task names its run). After every
@@ -149,22 +149,23 @@ conversation; its §6.2 price rule and §6.3 "no return leg" carry Ian's 2026-11
   and no grouped seller control remained after the expansion), is not stale by the per-price rule (its age within the search's camoufox
   refresh) and was read under the current limits (its stored limits equal `flightLimitsOf` of today's constraints)
   takes the cheapest offer's stated price for that pairing as its headline figure and its board rank, through `PriceCell` with the
-  flight list's provenance (source "the browser worker's flight list", fetch time, "the lowest seller price read for these two
-  flights", "not checked with the airline", never "verified"), the row naming which outbound the pairing used, its outbound and
+  flight list's provenance (source "the browser worker's flight list", fetch time, "the cheapest of the sellers read for these two
+  flights" (never "the lowest seller price": 21.7 persona H1), "not checked with the airline", never "verified"), the row naming which outbound the pairing used, its outbound and
   return departure times beside the price, and the mismatch mark where it applies (R-board); the date-grid price it replaced
   is shown beneath it through `PriceCell` with its own source, age, "not checked" and stale mark (R-grid). When the
   list is older than the refresh or was read under other limits, the grid price leads and the pairing is shown beneath
   with its age. A date pair whose outbound flights were read but has no pairing within the limits keeps the grid price
   with its own mark; a pairing whose booking read did not finish, or whose offers may be incomplete, shows beneath the grid price
   as "from £X, sellers not read" or with "a cheaper seller may not have been read"; "flights not read" is shown only when no
-  flight list exists (R-heads). The words are always "offers read", never "each seller" or "every seller". The rank's "current" keys
+  flight list exists and only on a search whose flight lists are read, "loading flights" while the flight-lists request is
+  pending and the mark kept, with one line above the board, when it failed (R-heads; 21.7 prov-004). The words are always "offers read", never "each seller" or "every seller". The rank's "current" keys
   of a pairing figure (`superseded`, `notSeenInLatest`) are the calendar candidate's it replaced; its `fromEarlierSearch`
   is true exactly when the list's `fetchedAt` is before the latest parent run's `startedAt` (an on-demand list read
   after that start counts as from the latest search). Coverage, the buckets and the month key are unchanged by any
   flight read; the synthetic banner judges every price group in the read, the grid price included (R-synthetic).
 - **What a price is** (the 21.0 finding and Ian's ruling). The return list words every return "From <price> … round
   trip total": the cheapest seller's price for that outbound and that return, a lower bound. The page words a return's
-  price "from £X round-trip total", never as the total, exactly as it words the outbound's. A seller's offer on the
+  price "from £X round trip", never as the total, exactly as it words the outbound's. A seller's offer on the
   booking view is a stated price ("for <price> British pounds"), in GBP pence, as read; the shown pairing's headline is the cheapest
   offer's, named with its seller and fare as "cheapest of N offers read"; it is never computed and never shown without naming
   that it is for one outbound and one return read (the board row carries their departure times; the search page the flights). When the cheapest offer differs from the return's "from" price (equal on
@@ -245,7 +246,8 @@ Five conditions the plan implies and no section states outright; each is pinned 
    own timeout covering the phase's worst case, and discovery keeps its own (Tasks 21.0, 21.2–21.6).
 5. **Prices lead honestly.** A return's price is always worded "from" (as Google words it) and an offer's never; the figure's
    `PriceCell` for a read pair is the cheapest offer's stated price, carries the flight list's provenance, "cheapest of N offers
-   read", which outbound the pairing used and never "verified"; the grid price beneath it carries its own; a pairing older than
+   read", which outbound the pairing used and never "verified"; the grid price beneath it carries its own provenance, its own
+   source named first and no "from" (21.7 prov-009: it is the grid's price for the date pair, not a return's lower bound); a pairing older than
    the refresh, read under other limits, without a finished booking read or with offers that may be incomplete does not lead; a pair with no pairing within the limits keeps
    the grid price with its mark; the contract refuses a return or an offer without a price and an offer that is not a
    seller's stated one (Tasks 21.2, 21.6, 21.7).
@@ -662,7 +664,7 @@ export const PAIRING_READ = ['not-read', 'outbound-only', 'no-pairing-read', 'ov
 //   cheapest it read; or, when none of that outbound's returns was within them, the next-cheapest within them, from a fresh load of the same page), the
 //   return flights Google listed with that outbound, each with the lowest round-trip total Google listed for that outbound and that return (its "From"
 //   price), and, for the one return this app then selected, the booking options Google listed after its "more booking options" were opened: the sellers'
-//   stated prices for those two flights that this app read, of which the lowest is the pairing's price shown, the lowest seller price read for these two
+//   stated prices for those two flights that this app read, of which the lowest is the pairing's price shown, the cheapest of the sellers read for these two
 //   flights; where no
 //   outbound was selected the return flight is neither chosen nor read; when this app's own Camoufox browser read the page on the machine running this
 //   app's browser worker, from that machine's address, in the currency the page states. Times are the page's local times. Flight numbers, fare conditions
@@ -758,33 +760,41 @@ export const PAIRING_READ = ['not-read', 'outbound-only', 'no-pairing-read', 'ov
 //   latest parent's startedAt (R-lead)
 // // read/flightLists.ts: toFlightList maps returns; read/statusSources.ts: its status read sets ctx.workerFlags (through an engine method)
 // ---------- web (Task 21.7) ----------
-// copy.ts COPY.flights gains: out 'Out:'; back 'Back:'; total 'round-trip total'; pairingHead(which: 'cheapest' | 'next-cheapest') 'With the cheapest outbound read
+// copy.ts COPY.flights gains: out 'Out:'; back 'Back:' (every Back price followed by roundTrip 'round trip', 21.7 ui-004); pairingHead(which: 'cheapest' | 'next-cheapest') 'With the cheapest outbound read
 //   within your limits:' / 'With the next-cheapest outbound read within your limits (the cheapest one's returns were all over your limits):'; pairingHeadOver
 //   'With the cheapest outbound read (over your limits):'; pairingHeadWhenRead(which, ago) 'With the <which> outbound read, selected under your limits when
-//   read, <ago>:'; limitsChanged 'your limits have changed since; the returns are read again at the next search'; selectedMark(which) 'selected for the returns
+//   read, <ago>:'; pairingHeadOverWhenRead(ago) 'With the cheapest outbound read, over your limits when read, <ago>:' (21.7 code M13);
+//   pairingHeadNoReturnFits 'No return flight within your limits for this outbound; the cheapest pairing read is shown, over your limits:' (21.7 code
+//   I3); limitsChanged 'your limits have changed since; the returns are read again at the next search'; selectedMark(which) 'selected for the returns
 //   above' / 'tried first: its returns were all over your limits'; legs { outbound, return }; withinLeg(leg, duration, limit); overLimitLeg(leg, duration,
 //   limit); stopsOver(leg, n, max); windowsOutboundOnly 'windows apply to the outbound'; returnMore(n, outside); showAllReturns 'show all return flights';
-//   showFewerReturns; showAllOutbound 'show all outbound flights'; showFewerOutbound; returnsNotRead(clause); returnStatus: Record<Exclude<ReturnStatus,
-//   'read'>, string> (six texts, §8 Task 21.7); returnsOld; returnsRead(n); returnsNone 'Google listed return flights, none this app could read for these
+//   showAllOutbound 'show all outbound flights' (one name each, aria-expanded the state: 21.7 code M2); returnsListName 'return flights for the
+//   selected outbound'; returnsShown(n, all) 'all 5 return flights shown' (21.7 ui-007); triedSomeWhenRead(tried, within) '… within your limits when
+//   read were tried …' (21.7 prov-011); returnsNotRead(clause); returnStatus: Record<Exclude<ReturnStatus,
+//   'read'>, string> (six texts, §8 Task 21.7); returnsRead(n); returnsNone 'Google listed return flights, none this app could read for these
 //   airports and dates'; noOutboundFits(n) 'none of the N outbound flights read is within your limits; the cheapest one's returns are shown'; returnCounts
 //   (unread, other); moreListed(stated, read) 'Google listed N return flights; this app read the first M'; triedAll(n, tried); mismatch(returnTotal,
 //   fromPrice) (the cheapest offer against the return's "from" price); priceAppliesTo "this price is for the Out: and Back: flights shown";
 //   sellerLine(seller, fare, n) '<seller>[, <fare>] · cheapest of N offers read'; sellersNotRead 'sellers not read'; offersIncomplete 'a cheaper seller may
 //   not have been read'; bookingStatus: Record<Exclude<BookingStatus, 'read'>, string> (seven texts, §8 Task 21.7); bookOnGoogle 'to book, search these
-//   dates on Google Flights (the link below); this app opens no seller'; never "each seller" or "every seller" in any key; settingsNotApplied 'airline settings not applied to flights read'; returnNotRead
-//   'return leg not read'; headPairing(which, ago, when) 'Outbound flights, and the return flights for the <which> outbound read within your limits
-//   · each Back price is the lowest round-trip price Google listed for that outbound and that return (from); the shown one is a seller's stated price ·
-//   read …'; headPairingOver(ago, when) '… for the cheapest outbound read, which is over your limits …'; readButton(pages, pagesLeft) with pages from the
+//   dates on Google Flights (the link below); this app opens no seller; Google may show different flights or prices when you search'; never "each seller" or "every seller" in any key; settingsNotApplied 'airline settings not applied to flights read'; returnNotRead
+//   'return leg not read'; headPairing(which, seller, ago, when) 'Outbound flights, and the return flights for the <which> outbound read within your
+//   limits[; the first Back price is a seller's stated price] · read …' (one sentence; the seller clause only when one is shown: 21.7 ui-003, prov-001);
+//   headPairingOver(seller, ago, when) '… for the cheapest outbound read, which is over your limits …'; headPairingWhenRead(which | 'over', seller, ago,
+//   when) '… for the <which> outbound read, selected under your limits when read, <ago>, <when> …' / '… which was over your limits when read …' (21.7
+//   code I2, M13); readButton(pages, pagesLeft) with pages from the
 //   response's pagesPlanned ("free, up to 2 pages" / "free, 1 page"); readOutboundOnly(n) 'free, 1 page; return leg not read: fewer than N pages left'
 //   (R-low-pages: never a refusal); copy/estimate.ts flights(pairs, duration) and flightsOutAndBack(pairs, pages, duration)
-// datesView copy: gridShowed(source, when) 'date grid showed' + the source and time as differenceSource/differenceAt do; pairingBeneath(ago) 'return flights read
+// datesView copy: gridShowed(source) '<source> showed' and gridShowedAt(when) '· <when>' ("the date grid showed £564 · 10 Mar 09:30", "the Aviasales
+//   cache showed …": 21.7 prov-003); pairingBeneath(ago) 'return flights read
 //   <ago>, older than this search's refresh:' / pairingOtherLimits 'return flights read under earlier limits:'; pairingRead: Record<PairingRead, string>
 //   ('flights not read', 'flights couldn't be read: <reason>', 'return leg not read', 'no return flight read', 'no pairing within your limits read', 'sellers not read', 'a cheaper seller may not
-//   have been read', …); pairingLabel(which) 'cheapest of N offers read, cheapest outbound read within your limits' / '… next-cheapest outbound read within
-//   your limits (the cheapest one's returns were all over your limits)' / '… cheapest outbound read, over your limits'; pairingTimes(out, back) 'Out <HH:MM>
-//   · Back <HH:MM>'; mismatchMark 'Google listed from <price>'; fromPrice 'from'
-// flightLines.ts: limitsOf(d) = flightLimitsOf(d.constraints); legMarks(leg, f, limits, c); returnNote(list, c) (per status; returnsOld for null; the counts and
-//   moreListed clauses for a read; null for a clean read); pairingOf(list, limits, now): { attempt; which: 'cheapest' | 'next-cheapest'; outbound; outboundIndex;
+//   have been read', …); listFailed(reason | null) (no colon without a reason); loadingFlights 'loading flights'; flightsLoadFailed "flights couldn't be
+//   loaded; prices shown without flights"; sellerCoverage(n, m) 'seller prices read for N of the M date pairs shown'; secondOutboundTried '2nd outbound
+//   tried' (the row's short line; pairingWhich's long words are the group's accessible description: 21.7 persona H2, code M3); pairingTimes(out, back)
+//   'Out: <HH:MM> · Back: <HH:MM>' (21.7 ui-008); mismatchMark 'Google listed from <price>'; fromPrice 'from'
+// flightLines.ts: limitsOf(d) = flightLimitsOf(d.constraints); legMarks(leg, f, limits, c); returnNote(list, c, attempt?) (per status; null for null returns: the
+//   list shows as the outbound list; the counts and moreListed clauses of the shown pairing's attempt for a read; null for a clean read); pairingOf(list, limits, now): { attempt; which: 'cheapest' | 'next-cheapest'; outbound; outboundIndex;
 //   returns: ShownFlights<ListedReturn>; fits: boolean; selectedNow: boolean (selectOutbound(list.flights, limits).index === outboundIndex for attempt 0, or
 //   the second pick for attempt 1); underCurrentLimits: boolean; offer: { seller; fare; priceMinor; offersRead; complete } | null (cheapestOffer when the booking is bookingReturnOf's
 //   pairing) } | null; mismatchOf(list) (the cheapest offer against the shown return's "from" price); bookingNote(list, c): string | null (per booking
@@ -967,7 +977,7 @@ value below is the recorded literal; nothing is left to a decision rule.
     the outbound only; airlines and layovers not applied (said on the board row when set); the outbound chooser
     applies the stops limit too.
   - **§6.5 and §6.9**: the figure rule as §1 states it (Ian's ruling 1 with R-lead): basis `pairing` between verified
-    and calendar in the rank, the figure the cheapest offer's stated price ("the lowest seller price read for these two
+    and calendar in the rank, the figure the cheapest offer's stated price ("the cheapest of the sellers read for these two
     flights", "cheapest of N offers read"), only while the list is fresh, read under the current limits, with a finished booking read whose offers are
     complete (R-sellers), else the grid price leads and the pairing shows beneath with its age, as "from £X, sellers not read" or with "a cheaper seller
     may not have been read"; the board row names which outbound the pairing used, carries the two departure times and the mismatch mark (R-board); the
@@ -1004,9 +1014,11 @@ value below is the recorded literal; nothing is left to a decision rule.
     `pairingRead` column (nine values); the scoped `/results` figure the same; the card's `cheapest.basis`;
     `GET /executions/:id` unchanged; `usage` unchanged in shape, `calls` on the camoufox page scopes being the page sum.
   - **§11 Flights**: the board row's figure for a read pair (the cheapest offer's price through `PriceCell` with the list's provenance, the seller line
-    "<seller>[, <fare>] · cheapest of N offers read" and "Out 07:15 · Back 14:20" beneath it, the mismatch mark where the cheapest offer differs from
-    the return's "from" price, the grid price beneath through
-    `PriceCell` with its own source, time and stale mark, the figure labelled once by which outbound the pairing used, "airline settings not applied" when the search sets any, the
+    "<seller>[, <fare>] · cheapest of N offers read", "2nd outbound tried" on a second attempt and "Out: 07:15 · Back: 14:20" beneath it (the row stays
+    short; the long words of which outbound the pairing used are the group's accessible description and the search's page block: 21.7 persona H2), the
+    mismatch mark where the cheapest offer differs from the return's "from" price (beneath a calendar figure too: 21.7 code M12), the grid price beneath
+    through `PriceCell` with its own source named first ("the date grid showed £564 · 10 Mar 09:30"), time and stale mark, the group named once by its
+    visible lines, "airline settings not applied" when the search sets any, the
     `pairingRead` words; a pairing older than the refresh, read under other limits or without a finished booking read
     shown beneath a leading grid price with its age or as "from £X, sellers not read"); the block's head per state
     naming the outbound used ("the cheapest outbound read" / "the next-cheapest outbound read", "within your limits"
@@ -1014,7 +1026,7 @@ value below is the recorded literal; nothing is left to a decision rule.
     marks, the shown "Back:" line with the seller line and "this price is for the Out: and Back: flights shown", the
     other "Back:" lines with their "from" prices first, each leg's marks, "windows apply to the outbound", "N more
     returns read, M outside your limits · show all return flights", "book through Google Flights (the link below);
-    this app opens no seller"); the mismatch line; the more-listed line; the status notes (return and booking) with
+    this app opens no seller; Google may show different flights or prices when you search"); the mismatch line; the more-listed line; the status notes (return and booking) with
     what happens next; "none of the N outbound flights read is within your limits; the cheapest one's returns are shown";
     "2 of the N outbounds within your limits were tried" / "other outbounds not tried"; the counts clause; the limits
     line; a list stored before 0012 shows as today; the tie order unchanged; the read button's "up to N pages" and its
@@ -1493,82 +1505,103 @@ the copy tests. **Consumes**: Task 21.6. Makes required: `flightListSchema.retur
   - `logic/flightLines.test.ts` and `logic/pairing.test.ts` (over `PAIRING_FIXTURE`): `legMarks('return', …)` words
     "return 26h: over your 25h limit", "return 2 changes: over your 1-change limit", "return 12h 05m, within your 25h
     limit" (no window mark on a return; no "; return not read" suffix on either leg); `legMarks('outbound', …)` is
-    today's `flightMarks` plus the stops mark; `returnNote` gives each of the six non-read statuses' words (the
+    WP20's outbound marks plus the stops mark; `returnNote` gives each of the six non-read statuses' words (the
     transient ones "tried again at the next search, or press Read flights for this date now"; `not-verified` "return
     flights are not yet read on this kind of machine; see the recording session in docs/setup.md"; `skipped` the
-    rule's words; `no-outbound` nothing more than the outbound's own line), `returnsOld` for null, the counts clause
+    rule's words; `no-outbound` nothing more than the outbound's own line), null for null returns (the list shows as the
+    outbound list; 21.7 code M6), the counts clause
     "2 return options unread, 1 for other airports or days" and the more-listed clause "Google listed 12 return
-    flights; this app read the first 10" for a read with such counts, null for a clean read; `pairingOf` gives `{ attempt: 1, which: 'next-cheapest', outboundIndex: 3, returns.shown[0].fromMinor: 118000, fits: true, selectedNow: true,
+    flights; this app read the first 10" for a read with such counts (of the shown pairing's attempt: 21.7 code M1), null
+    for a clean read; `pairingOf` gives `{ attempt: 1, which: 'next-cheapest', outboundIndex: 3, returns.shown[0].fromMinor: 118000, fits: true, selectedNow: true,
     underCurrentLimits: true, offer: { seller: 'QQ Travel', fare: null, priceMinor: 118000, offersRead: 3, complete: true } }` for the fixture (the same
     literals as the api test), `offer null` when the booking is not `read` or is of another attempt or return than `bookingReturnOf`'s; `bookingNote` gives each of
     the seven non-read booking statuses' words (`not-verified` "sellers are not yet read on this kind of machine", `expand-failed` "sellers
-    read before the list could be expanded; the cheapest may be missing", the transient ones "tried again at the next search, or press Read
+    read before the list could be expanded; the cheapest may be missing" (the transient words when it kept no offer: 21.7 prov-014), the transient ones "tried again at the next search, or press Read
     flights for this date now", `skipped` the rule's words, `no-pairing` "no return flight to read sellers for"), null for read; `which
     'cheapest'` for a one-attempt read, `selectedNow false` when `selectOutbound(list.flights, limitsOf(d))` differs
     from the stored index after a limit edit, `underCurrentLimits false` when the stored limits differ, and null for
     every status but read and for a read whose attempts listed no return; `mismatchOf` is non-null exactly when the cheapest offer's price differs from the shown return's "from" price; `limitsOf(d)` equals the literal
-    `flightLimitsOf` result for a fixture with every constraint set; `isSyntheticRead` is true for a pairing figure with real list provenance and a fixture-provider `gridPrice`, and for a calendar figure with a
+    `flightLimitsOf` result for a fixture with every constraint set (in `flightLines.test.ts`); `isSyntheticRead` is true for a pairing figure with real list provenance and a fixture-provider `gridPrice`, and for a calendar figure with a
     fixture-provider pairing group (R-synthetic, prov-r3-008); `overview.ts` marks a pairing figure
     `notChecked`; `howFar.ts` words a pairing figure as the browser worker's flight list; `datesState.ts`'s detail patch opens a pairing figure on the calendar basis (through `resultBasisOf`); a card and a results header with a pairing
-    figure render calendar-styled with "not checked" and `COPY.basisName.pairing` (a card words it "lowest seller price read, not checked with the airline", since it carries no seller, offer count or
-    grid price: prov-006) (arch-r3-003).
+    figure render calendar-styled with "not checked" and `COPY.basisName.pairing` (a card words it "cheapest of the sellers read, not checked with the airline", since it carries no seller, offer count or
+    grid price: prov-006, 21.7 persona H1) (arch-r3-003); the results header explains a pairing figure as "It is a seller's offer
+    read from the browser worker's flight list for one outbound and one return, not one of the prices listed here." (21.7
+    prov-002).
   - `returns.test.tsx` (fake timers; the msw handler serving `PAIRING_FIXTURE` as the list, `maxStops 1`): the block's
-    head reads "Outbound flights, and the return flights for the next-cheapest outbound read within your limits · each
-    Back price is the full round-trip total for that outbound and that return · read 3d ago, 12 Mar 11:44 · prices from
-    Google Flights, not checked with the airline"; the pairing section headed "With the next-cheapest outbound read within your limits (the cheapest one's returns were all over your
+    head reads, in one sentence, "Outbound flights, and the return flights for the next-cheapest outbound read within your
+    limits; the first Back price is a seller's stated price · read 3d ago, 12 Mar 11:44 · prices from Google Flights, not
+    checked with the airline" (the seller clause only when the first Back line shows a seller's price; 21.7 ui-003/004,
+    prov-001); the pairing section headed "With the next-cheapest outbound read within your limits (the cheapest one's returns were all over your
     limits):" with the line "Out: depart 07:15, arrive 18:05 +1 · 10h 50m · 1 change · QQ Air" for `flights[3]` (its mark; no price on this
-    line); the shown "Back:" line with the offer's price FIRST ("Back: £1,180 · QQ Travel · cheapest of 3 offers read · depart 14:20, arrive 06:25 +1 · 12h 05m ·
-    1 change · QQ Air") through `PriceCell` compact with the list's provenance, the calendar style, the stale mark and the age, the line "this price is for the Out: and Back: flights shown" and "to book, search these dates on Google Flights (the link below); this app opens no
-    seller"; an incomplete booking (`moreControl true` with the cheapest offer above the "from") adds "a cheaper seller may not have been read" and the
-    row does not lead;
-    the other "Back:" lines with "from £1,250" first (the return's "from" price through `PriceCell`), in `chooseReturnsToShow` order, each
+    line); the shown "Back:" line with the offer's price FIRST ("Back: £1,180 round trip · QQ Travel · cheapest of 3 offers read · depart 14:20, arrive 06:25 +1 · 12h 05m ·
+    1 change · QQ Air") through `PriceCell` compact with the list's provenance, the calendar style, the stale mark and the age, the block's one emphasised price
+    (the class `flight-price-lead` on its `.flight-price`; every return price inside the inline `.flight-price`: 21.7 ui-001/002), then directly under it (before
+    the other returns: 21.7 code M4) the line "this price is for the Out: and Back: flights shown" and "to book, search these dates on Google Flights (the link below); this app opens no
+    seller; Google may show different flights or prices when you search"; an incomplete booking (`moreControl true` with the cheapest offer above the "from") adds "· a cheaper seller may not have been read" on the
+    shown line itself (21.7 prov-006) and the row does not lead;
+    the other "Back:" lines with "from £1,250 round trip" first (the return's "from" price through `PriceCell`), in `chooseReturnsToShow` order, each
     with its marks on the line below and a "−1" arrival rendered with its full date for assistive technology; "from £" on every outbound
     line and on every return line but the shown one, never before an offer's price (Review Focus 5); a fare-named offer reads "QQ Fares,
     Economy Basic"; no anchor to any seller (`apps/web/src` holds no seller URL and the block's only anchor is the date pair's Google Flights
     link); a seller name of `<img src=x onerror=1>` renders as text; the outbound list marks `flights[3]` "selected for the returns above" and
     `flights[2]` "tried first: its returns were all over your limits"; the two toggles are named "show all return
-    flights" and "show all outbound flights", each with `aria-expanded`, focus staying on the pressed toggle, keyboard
+    flights" and "show all outbound flights", each keeping its name with `aria-expanded` the state and `aria-controls` its list
+    (the returns list named "return flights for the selected outbound", the toggle directly under it, a live region saying
+    "all 5 return flights shown": 21.7 code M2, ui-007), focus staying on the pressed toggle, keyboard
     operable, the expanded return order `allReturnsInOrder`; the limits line reads "airline settings not applied to
     flights read · windows apply to the outbound" without "return leg not read; " when returns were read, and with it
     for `returns: null` and every non-read status; the mismatch line "the cheapest offer read is £1,195; Google's list showed from £1,180" (both figures through `PriceCell`) when `mismatchOf` is
     non-null and not otherwise; a `sellers-not-read` pairing (the booking `expand-failed`) shows the shown "Back:" line as
-    "from £1,180 · sellers not read" with the booking note; the more-listed line when `moreListed`; a one-attempt read with
-    `triedAll false` shows "1 of the 5 outbounds within your limits were tried; other outbounds not tried"; a read with
+    "from £1,180 round trip · sellers not read" with the transient booking note (21.7 prov-014); the more-listed line when `moreListed`; a one-attempt read with
+    `triedAll false` shows "1 of the 5 outbounds within your limits were tried; other outbounds not tried" (every count under the
+    read's limits; "… within your limits when read were tried …" after a limit edit: 21.7 prov-011); a read whose selected
+    outbound fits and none of its returns does heads the section "No return flight within your limits for this outbound; the
+    cheapest pairing read is shown, over your limits:" and keeps the seller's price on its Back line with the over-limit
+    mark (21.7 code I3); a read with
     `outboundFits false` heads the block "… for the cheapest outbound read, which is over your limits …", the section
     "With the cheapest outbound read (over your limits):", and the line "none of the 4 outbound flights read is within
     your limits; the cheapest one's returns are shown"; a read whose attempts listed none heads WP20's "Outbound
     flights only · …" plus "Google listed return flights, none this app could read for these airports and dates"; a
     read after a limit edit (`selectedNow false` or `underCurrentLimits false`) heads the section "With the cheapest
-    outbound read, selected under your limits when read, 3d ago:" and adds "your limits have changed since; the
-    returns are read again at the next search"; every non-read status shows WP20's head and its status note (one
+    outbound read, selected under your limits when read, 3d ago:" (or "With the cheapest outbound read, over your limits
+    when read, 3d ago:" when no outbound fitted: 21.7 code M13), the block "… for the next-cheapest outbound read, selected
+    under your limits when read, 3d ago, 12 Mar 11:44 …", never "within your limits" (21.7 code I2), and adds "your limits
+    have changed since; the returns are read again at the next search"; every non-read status shows WP20's head and its
+    status note directly under it (21.7 ui-006) (one
     assertion per status that the head does not mention return flights); `returns: null` renders the block with the
     same explicit assertions as WP20's `flights.test.tsx` (no snapshot); the live region says "Flights read for 14 →
-    24 Mar, 2 return flights" when a pressed read lands with returns, the status note's words for a non-read status,
+    24 Mar, 2 return flights" when a pressed read lands with returns (the shown pairing's attempt's count), the status note's words for a non-read status,
     and focus stays on the block when the pairing section appears; the read button reads "Read flights for this date (free, up to 2 pages)" (the count from the flight-lists response's `pagesPlanned` meta; "1 page" on
     an unverified worker) and, with 1 page left in the month, "Read flights for this date (free, 1 page; return leg not read: fewer than 2 pages left)"
     (never a refusal: R-low-pages); a
     return carrier of `<img src=x onerror=1>` renders as text; "verified" nowhere; a stale list's pairing shows the
     stale mark; a return outside every limit set is marked.
-  - `board.test.tsx` and `logic/board.test.ts` (extend): a row with basis `'pairing'` renders its figure through `PriceCell` with the flight-list source label, the age and "not checked", the seller line "QQ Travel · cheapest of 3 offers read" and "Out 07:15 · Back 14:20" beneath,
-    labelled "cheapest of 3 offers read, next-cheapest outbound read within your limits (the cheapest one's returns were all over your limits)" for the
-    fixture and the one-attempt wording for a one-attempt read, "Google listed from £1,180" when the group's `mismatch` is true, with the grid price beneath through `PriceCell` compact carrying its own
-    source ("date grid showed £564 · the date grid, 10 Mar 09:30"), age and stale mark, and "airline settings not
+  - `board.test.tsx` and `logic/board.test.ts` (extend): a row with basis `'pairing'` renders its figure through `PriceCell` with the flight-list source label, the age and "not checked", the seller line "QQ Travel · cheapest of 3 offers read", "2nd outbound tried" and "Out: 07:15 · Back: 14:20" beneath,
+    the group named by those visible lines and described by "next-cheapest outbound read within your limits (the cheapest one's returns were all over your
+    limits)" for the fixture, the one-attempt read with no "2nd outbound tried" (21.7 persona H2, code M3, ui-008), "Google listed from £1,180" when the group's `mismatch` is true, with the grid price beneath through `PriceCell` compact carrying its own
+    source first ("the date grid showed £564 · 10 Mar 09:30"; "the Aviasales cache showed …" for a cached price: 21.7 prov-003), age and stale mark, and "airline settings not
     applied to flights read" when the search sets airlines or layovers and nothing when it sets none; a calendar
     figure with `pairingRead 'within-older'` shows "return flights read 9d ago, older than this search's refresh:"
     and the pairing beneath through `PriceCell` with its age, `'within-other-limits'` "return flights read under
-    earlier limits:", `'over-limit'` "no pairing within your limits read" with the pairing beneath, `'sellers-not-read'` "from £1,180 · sellers not read" beneath the grid price, `'offers-incomplete'` the offer beneath with "a cheaper seller may not
+    earlier limits:", `'over-limit'` "no pairing within your limits read" with the pairing beneath (its offer when one was read, as the block shows it:
+    21.7 code I3), an offer beneath that differs from its "from" price also "Google listed from £1,180" (21.7 code M12), `'sellers-not-read'` "from £1,180 · sellers not read" beneath the grid price, `'offers-incomplete'` the offer beneath with "a cheaper seller may not
     have been read", `'no-pairing-read'`
     "no return flight read", `'outbound-only'` "return leg not read" (an outbound-only list only), `'list-failed'` "flights couldn't be read: <the
     `listReason` in words>" (a failed newest list; never "return leg not read"; the 21.6 ruling), `'not-read'` "flights not read" (never when a
-    list exists); the rank column follows the response's order; the phone card the same; the overview carries "not
+    list exists; "loading flights" while the flight-lists request is pending, the mark kept and "flights couldn't be loaded; prices shown without
+    flights" above the board when it failed: 21.7 prov-004); "seller prices read for 1 of the 2 date pairs shown" in the board's head when a
+    pairing figure is shown (21.7 persona coverage); the rank column follows the response's order; the phone card the same; the overview carries "not
     checked" on a pairing figure; the tie line and `orderWithinTie` unchanged.
   - `estimateLine.test.ts` (extend): `flightLists { pairs: 10, pages: 15, seconds: 2450, pagesMax: 20, secondsMax: 3000, returns: true }` reads "+ flights,
     out and back, for up to 10 date pairs: usually about 15 pages and 41 minutes, at most 20 pages and 50 minutes"; `returns: false` "+ flights for up to 10 date
-    pairs, about 12 minutes".
+    pairs, about 12 minutes"; a one-pair plan out and back reads "for up to 1 date pair: usually about 2 pages …", and the engine's line with no
+    pair out and back (`returns: false`, its bound kept) reads the outbound-only words (21.7 code I1: the engine states `returns: outAndBack > 0`).
   - `flights.test.tsx`: every existing case green with the fixtures extended (`flightListsResponse` entries gain
     `returns: null` by default; the difference line's cases become the grid-price line's).
   - The copy catalogue and rendered-sweep tests cover every new key (no banned word; "from" before every return-price template and never before an
-    offer's; never "each seller" or "every seller"; "round-trip total" spelt one way).
+    offer's; never "each seller", "every seller" or "lowest seller price", in any string or any template's sample output; "round trip" spelt one way:
+    21.7 code M5).
 - [ ] **Run to verify they fail**: `pnpm --filter @gmt/web exec vitest run test/views/dates test/state test/views/searches/logic/estimateLine.test.ts test/copy`; `pnpm --filter @gmt/web typecheck`.
 - [ ] **Implement** as §5: `PairingSection` inside `ListSection` after the head; `ReturnRow` as `FlightRow` with the
   price first and `legMarks('return', …)`; the board's figure cell by an exhaustive basis switch; `estimateLine.ts`

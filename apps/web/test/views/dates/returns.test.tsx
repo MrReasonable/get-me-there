@@ -104,10 +104,12 @@ const lines = (testid: string) => within(block()).getAllByTestId(testid).map(pla
 afterEach(() => vi.useRealTimers());
 
 describe('the block with a pairing (spec rev 56 §11; Review Focus 1 and 5)', () => {
-  it('heads the block with the outbound the pairing used and what a Back price is', async () => {
+  it("heads the block in one sentence with the outbound the pairing used and that the first Back price is a seller's", async () => {
     await renderList(FIXTURE);
+    // why: 21.7 ui-003/004, prov-001: one sentence; each "from" price says itself what it is, so the head names only
+    // the seller's price, and only when one is shown
     expect(within(block()).getByTestId('flights-head')).toHaveTextContent(
-      "Outbound flights, and the return flights for the next-cheapest outbound read within your limits · each Back price is the lowest round-trip price Google listed for that outbound and that return (from); the shown one is a seller's stated price · read 3d ago, 11 Oct 11:44 · prices from Google Flights, not checked with the airline",
+      "Outbound flights, and the return flights for the next-cheapest outbound read within your limits; the first Back price is a seller's stated price · read 3d ago, 11 Oct 11:44 · prices from Google Flights, not checked with the airline",
     );
     const section = within(block()).getByTestId('flights-pairing');
     expect(within(section).getByTestId('pairing-head')).toHaveTextContent(
@@ -133,7 +135,7 @@ describe('the block with a pairing (spec rev 56 §11; Review Focus 1 and 5)', ()
     const shown = backs[0];
     if (shown === undefined) throw new Error('no return');
     expect(plain(within(shown).getByTestId('return-line'))).toBe(
-      'Back: £1,180 · QQ Travel · cheapest of 3 offers read · depart 14:20, arrive 06:25 +1 · 12h 05m · 1 change · QQ Atlantic',
+      'Back: £1,180 round trip · QQ Travel · cheapest of 3 offers read · depart 14:20, arrive 06:25 +1 · 12h 05m · 1 change · QQ Atlantic',
     );
     const cell = within(shown).getByTestId('price-cell');
     // the list's provenance through PriceCell's compact face: calendar-styled, "not checked", its age
@@ -146,15 +148,39 @@ describe('the block with a pairing (spec rev 56 §11; Review Focus 1 and 5)', ()
       'this price is for the Out: and Back: flights shown',
     );
     expect(within(block()).getByTestId('pairing-book')).toHaveTextContent(
-      'to book, search these dates on Google Flights (the link below); this app opens no seller',
+      'to book, search these dates on Google Flights (the link below); this app opens no seller; Google may show different flights or prices when you search',
     );
+  });
+
+  it('21.7 code M4: the price-applies and book lines follow the shown Back line, before the other returns', async () => {
+    await renderList(FIXTURE);
+    const [shown, other] = within(block()).getAllByTestId('return');
+    if (shown === undefined || other === undefined) throw new Error('two returns');
+    for (const id of ['pairing-applies', 'pairing-book']) {
+      const line = within(block()).getByTestId(id);
+      expect(shown.compareDocumentPosition(line) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(line.compareDocumentPosition(other) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    }
+  });
+
+  it('21.7 ui-001/002: the leading price is emphasised by its class alone; every return price sits in the inline .flight-price', async () => {
+    await renderList(
+      withBooking({ offers: [{ seller: 'QQ Fares', fare: 'Economy Basic', priceMinor: 119_500 }] }),
+    );
+    const cells = [...block().querySelectorAll('[data-testid="return-line"] [data-testid="price-cell"]')];
+    expect(cells).toHaveLength(2);
+    for (const c of cells) expect(c.parentElement?.closest('.flight-price')).not.toBeNull();
+    expect(cells.map((c) => c.closest('.flight-price-lead') !== null)).toEqual([true, false]);
+    expect(block().querySelectorAll('.flight-price-lead')).toHaveLength(1);
+    for (const c of within(within(block()).getByTestId('pairing-mismatch')).getAllByTestId('price-cell'))
+      expect(c.closest('.flight-price')).not.toBeNull();
   });
 
   it('the other returns: "from" first through PriceCell, in the chooser order, each with its marks below', async () => {
     await renderList(FIXTURE);
     expect(lines('return-line')).toEqual([
-      'Back: £1,180 · QQ Travel · cheapest of 3 offers read · depart 14:20, arrive 06:25 +1 · 12h 05m · 1 change · QQ Atlantic',
-      'Back: from £1,250 · depart 19:10, arrive 07:15 +1 · 8h 05m · direct · QQ Atlantic',
+      'Back: £1,180 round trip · QQ Travel · cheapest of 3 offers read · depart 14:20, arrive 06:25 +1 · 12h 05m · 1 change · QQ Atlantic',
+      'Back: from £1,250 round trip · depart 19:10, arrive 07:15 +1 · 8h 05m · direct · QQ Atlantic',
     ]);
     expect(lines('return-mark')).toEqual([
       'return 12h 05m, within your 25h limit',
@@ -271,16 +297,18 @@ describe("the pairing section's notes (spec rev 56 §11)", () => {
     expect(within(block()).queryByTestId('pairing-mismatch')).toBeNull();
   });
 
-  it('an incomplete booking: "a cheaper seller may not have been read"', async () => {
+  it('an incomplete booking: "a cheaper seller may not have been read" on the line of the price it qualifies', async () => {
     await renderList(
       withBooking({
         moreControl: true,
         offers: [{ seller: 'QQ Fares', fare: 'Economy Basic', priceMinor: 119_500 }],
       }),
     );
-    expect(within(block()).getByTestId('pairing-incomplete')).toHaveTextContent(
-      'a cheaper seller may not have been read',
+    // why: 21.7 prov-006 (L): beside the price, as the board puts it
+    expect(lines('return-line')[0]).toBe(
+      'Back: £1,195 round trip · QQ Fares, Economy Basic · cheapest of 1 offer read · a cheaper seller may not have been read · depart 14:20, arrive 06:25 +1 · 12h 05m · 1 change · QQ Atlantic',
     );
+    expect(within(block()).queryByTestId('pairing-incomplete')).toBeNull();
   });
 
   it('sellers not read (an expansion that failed before any offer): "Back: from £1,180 · sellers not read" with its note', async () => {
@@ -288,12 +316,23 @@ describe("the pairing section's notes (spec rev 56 §11)", () => {
       withBooking({ status: 'expand-failed', rule: 'more-options', expanded: false, offers: [] }),
     );
     expect(lines('return-line')[0]).toBe(
-      'Back: from £1,180 · sellers not read · depart 14:20, arrive 06:25 +1 · 12h 05m · 1 change · QQ Atlantic',
+      'Back: from £1,180 round trip · sellers not read · depart 14:20, arrive 06:25 +1 · 12h 05m · 1 change · QQ Atlantic',
     );
+    // why: 21.7 prov-014: one note, a sellers read that failed before any offer: never "sellers read before …"
+    expect(within(block()).getByTestId('pairing-booking-note')).toHaveTextContent(
+      'sellers not read: tried again at the next search, or press Read flights for this date now',
+    );
+    expect(within(block()).queryByTestId('pairing-applies')).toBeNull();
+    // why: 21.7 prov-001: no seller's price is shown, so the head names none
+    expect(within(block()).getByTestId('flights-head')).not.toHaveTextContent(/seller/);
+  });
+
+  it('an expansion that failed after some offers keeps its note and its offer', async () => {
+    await renderList(withBooking({ status: 'expand-failed', rule: 'more-options', expanded: false }));
     expect(within(block()).getByTestId('pairing-booking-note')).toHaveTextContent(
       'sellers read before the list could be expanded; the cheapest may be missing',
     );
-    expect(within(block()).queryByTestId('pairing-applies')).toBeNull();
+    expect(lines('return-line')[0]).toMatch(/^Back: £1,180 round trip · QQ Travel/);
   });
 
   it('the more-listed line with a count; the counts clause', async () => {
@@ -345,8 +384,10 @@ describe("the pairing section's notes (spec rev 56 §11)", () => {
     });
     await renderList(list, { def: definition({ constraints: { maxJourneyMinutes: 400, maxStops: 1 } }) });
     expect(within(block()).getByTestId('flights-head')).toHaveTextContent(
-      'Outbound flights, and the return flights for the cheapest outbound read, which is over your limits · each Back price',
+      'Outbound flights, and the return flights for the cheapest outbound read, which is over your limits · read 4h ago',
     );
+    // why: 21.7 prov-001: no booking read here, so no seller's price is shown and the head names none
+    expect(within(block()).getByTestId('flights-head')).not.toHaveTextContent('seller');
     expect(within(block()).getByTestId('pairing-head')).toHaveTextContent(
       'With the cheapest outbound read (over your limits):',
     );
@@ -376,6 +417,90 @@ describe("the pairing section's notes (spec rev 56 §11)", () => {
     );
     expect(within(block()).getByTestId('pairing-limits-changed')).toHaveTextContent(
       'your limits have changed since; the returns are read again at the next search',
+    );
+    // why: 21.7 code I2 / prov-005: the block head follows the section head, never claiming today's limits
+    const head = within(block()).getByTestId('flights-head');
+    expect(head).toHaveTextContent(
+      "Outbound flights, and the return flights for the next-cheapest outbound read, selected under your limits when read, 3d ago, 11 Oct 11:44; the first Back price is a seller's stated price · prices from Google Flights, not checked with the airline",
+    );
+    expect(head).not.toHaveTextContent('within your limits');
+  });
+
+  it('21.7 code M13: after a limit edit of a read where no outbound fitted, the heads say it was over the limits when read', async () => {
+    const limits = { ...PAIRING_LIMITS, maxJourneyMinutes: 400 };
+    const list = pairingList({
+      returns: returnRead({
+        limits,
+        attempts: [returnAttempt({ outboundIndex: 1, outboundFits: false })],
+      }),
+    });
+    await renderList(list, { def: definition({ constraints: { maxJourneyMinutes: 450, maxStops: 1 } }) });
+    expect(within(block()).getByTestId('pairing-head')).toHaveTextContent(
+      'With the cheapest outbound read, over your limits when read, 3d ago:',
+    );
+    expect(within(block()).getByTestId('flights-head')).toHaveTextContent(
+      'Outbound flights, and the return flights for the cheapest outbound read, which was over your limits when read, 3d ago',
+    );
+    // why: prov-005: "none … is within your limits" is today's claim; the when-read head says it instead
+    expect(within(block()).queryByTestId('pairing-no-outbound-fits')).toBeNull();
+  });
+
+  it("21.7 code I3: no return of the selected outbound fits: the section says so, the seller's price kept with its over-limit mark", async () => {
+    const first = PAIRING_FIXTURE.returns.attempts[0];
+    if (first === undefined) throw new Error('fixture');
+    await renderList(
+      withReturns({
+        attempts: [first],
+        triedAll: true,
+        booking: {
+          ...BOOKING,
+          attempt: 0,
+          returnIndex: 0,
+          offers: [{ seller: 'QQ Travel', fare: null, priceMinor: 121_000 }],
+        },
+      }),
+    );
+    expect(within(block()).getByTestId('pairing-head')).toHaveTextContent(
+      'No return flight within your limits for this outbound; the cheapest pairing read is shown, over your limits:',
+    );
+    expect(lines('return-line')[0]).toMatch(
+      /^Back: £1,210 round trip · QQ Travel · cheapest of 1 offer read · depart 17:30/,
+    );
+    expect(lines('return-mark')[0]).toBe('return 2 changes: over your 1-change limit');
+  });
+
+  it("21.7 code M1 / prov-010: the read clauses are the shown pairing's attempt's, not the last attempt's", async () => {
+    // why: both attempts over the stops limit; the cheapest of all is attempt 0's, whose view stated 12 returns
+    const over = (fromMinor: number) => listedReturn({ stops: 2, fromMinor });
+    await renderList(
+      flightList({
+        flights: PAIRING_FIXTURE.flights,
+        returns: returnRead({
+          attempts: [
+            returnAttempt({ outboundIndex: 2, resultsStated: 12, returns: [over(100_000), over(101_000)] }),
+            returnAttempt({ outboundIndex: 3, returns: [over(140_000)] }),
+          ],
+        }),
+      }),
+    );
+    expect(within(block()).getByTestId('pairing-read-note')).toHaveTextContent(
+      'Google listed 12 return flights; this app read the first 2',
+    );
+    expect(lines('return-line')[0]).toMatch(/^Back: from £1,000 round trip/);
+  });
+
+  it('21.7 prov-011: after a limit edit the tried line names the limits of the read only', async () => {
+    // why: read under at most 1 change, when 3 of the 5 outbounds fitted; today's 2 changes would admit all 5
+    const five = [0, 1, 2, 3, 4].map((i) =>
+      listedFlight({ departsLocal: `0${i + 5}:00`, amountMinor: 50_000 + i * 1_000, stops: i < 2 ? 2 : 1 }),
+    );
+    const list = flightList({
+      flights: five,
+      returns: returnRead({ attempts: [returnAttempt({ outboundIndex: 2 })], triedAll: false }),
+    });
+    await renderList(list, { def: definition({ constraints: { maxJourneyMinutes: 1_500, maxStops: 2 } }) });
+    expect(within(block()).getByTestId('pairing-tried')).toHaveTextContent(
+      '1 of the 3 outbounds within your limits when read were tried; other outbounds not tried',
     );
   });
 
@@ -443,10 +568,18 @@ describe('the toggles (spec rev 56 §11: buttons with aria-expanded, focus kept 
     );
     const toggle = within(block()).getByRole('button', { name: 'show all return flights' });
     expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    // why: 21.7 ui-007: the toggle sits directly under the returns list it controls, which is named
+    const list = within(block()).getByRole('list', { name: 'return flights for the selected outbound' });
+    expect(toggle).toHaveAttribute('aria-controls', list.id);
+    expect(list.nextElementSibling).toBe(within(block()).getByTestId('pairing-more'));
     toggle.focus();
     await user.keyboard('{Enter}');
     expect(toggle).toHaveAttribute('aria-expanded', 'true');
-    expect(toggle).toHaveTextContent('show fewer return flights');
+    // why: 21.7 code M2 / ui-007: one fixed name; aria-expanded alone carries the state, and the count is announced
+    expect(toggle).toHaveAccessibleName('show all return flights');
+    expect(within(block()).getByTestId('pairing-returns-status')).toHaveTextContent(
+      'all 5 return flights shown',
+    );
     expect(document.activeElement).toBe(toggle);
     expect(lines('return-line').map((l) => l.match(/£[\d,]+/)?.[0])).toEqual([
       '£1,180',
@@ -465,9 +598,11 @@ describe('the toggles (spec rev 56 §11: buttons with aria-expanded, focus kept 
     const { user } = await renderList(FIXTURE);
     const toggle = within(block()).getByRole('button', { name: 'show all outbound flights' });
     expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    const outbound = document.getElementById(toggle.getAttribute('aria-controls') ?? '');
+    expect(outbound).toBe(within(block()).getAllByTestId('flight')[0]?.parentElement);
     await user.click(toggle);
     expect(toggle).toHaveAttribute('aria-expanded', 'true');
-    expect(toggle).toHaveTextContent('show fewer outbound flights');
+    expect(toggle).toHaveAccessibleName('show all outbound flights');
     expect(document.activeElement).toBe(toggle);
     expect(within(block()).getAllByTestId('flight')).toHaveLength(4);
   });
@@ -502,7 +637,11 @@ describe('a list with no return read, or one that did not finish (spec rev 56 §
       expect(head).not.toHaveTextContent(/return/i);
       const note = NOTES[status];
       if (note === null) expect(within(block()).queryByTestId('flights-return-note')).toBeNull();
-      else expect(within(block()).getByTestId('flights-return-note')).toHaveTextContent(note);
+      else {
+        expect(within(block()).getByTestId('flights-return-note')).toHaveTextContent(note);
+        // why: 21.7 ui-006: the note sits directly under the head it explains
+        expect(head.nextElementSibling).toBe(within(block()).getByTestId('flights-return-note'));
+      }
       expect(within(block()).getByTestId('flights-limits')).toHaveTextContent(
         'return leg not read; airline settings not applied to flights read',
       );
@@ -522,6 +661,8 @@ describe('a list with no return read, or one that did not finish (spec rev 56 §
     );
     expect(within(block()).getByRole('button', { name: 'show all' })).toBeInTheDocument();
     expect(within(block()).queryByRole('button', { name: /^Read flights/ })).toBeNull();
+    // why: 21.7 code M6: a list read without a return phase shows as the outbound list, with no note of its own
+    expect(block()).not.toHaveTextContent('return flights not read with this list');
   });
 });
 

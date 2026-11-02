@@ -1,6 +1,6 @@
 import { AbortedError, apiContract, type Estimate, ProviderError } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
-import { budgetFitFor, scheduleLoad } from '../src/budgetFit.js';
+import { budgetFitFor, flightAllowanceOf, scheduleLoad } from '../src/budgetFit.js';
 import { buildContext } from '../src/context.js';
 import {
   addPass,
@@ -610,13 +610,15 @@ describe('the estimate flight line with the return leg (spec rev 56 §8.1)', () 
   it('D6: the month bounds the pairs out and back; at 1, 2 and 3 pages left 0 + 1, 1 + 0 and 1 + 1 pairs', () => {
     // why: 15 grid pages of a 16-, 17- and 18-page month leave 1, 2 and 3 pages for flights
     const one = returnsEstimate(15, BOTH, { monthlyCap: 16 }).est;
+    // why: 21.7 code I1: with no pair out and back the line states no return leg (`returns: outAndBack > 0`); the bound
+    // stays, since the plan still reads the return leg wherever the pages allow (R-load reads it)
     expect(one.flightLists).toEqual({
       pairs: 1,
       pages: 1,
       seconds: 70,
       pagesMax: 1,
       secondsMax: 70,
-      returns: true,
+      returns: false,
     });
     expect(one.assumptions).toContain('+ flights for up to 1 date pair, about 1 minute');
     expect(one.assumptions).toContain("flights for 1 date pair: the browser worker's monthly page cap");
@@ -664,13 +666,36 @@ describe('the estimate flight line with the return leg (spec rev 56 §8.1)', () 
     expect(est.assumptions.filter((a) => a.includes('flights'))).toHaveLength(2);
     const blocked = withBlocked(est, new Map([[lineKey('discovery', 'camoufox'), 'provider-month']]));
     expect(blocked.assumptions.filter((a) => a.includes('flights'))).toEqual([]);
+    // why: 21.7 code I1: a blocked line reads no pair, so none goes out and back; its bound is kept (the plan's)
     expect(blocked.flightLists).toEqual({
       pairs: 0,
       pages: 0,
       seconds: 0,
       pagesMax: 0,
       secondsMax: 0,
-      returns: true,
+      returns: false,
+    });
+  });
+
+  it('21.7 code I1: a schedule whose month leaves no pair out and back still loads 2 pages a pair (R-load)', () => {
+    const { b, est } = returnsEstimate(15, BOTH, { monthlyCap: 16 });
+    expect(est.flightLists?.returns).toBe(false);
+    // why: the load is the schedule's full allowance, whatever this month has left: 2 pages a pair with the return leg
+    expect(flightAllowanceOf(est, b.snapshot)).toBe(Math.min(20, b.snapshot.budget.flightListPages ?? 0));
+    expect(flightAllowanceOf(returnsEstimate(15, null).est, b.snapshot)).toBe(
+      Math.min(10, b.snapshot.budget.flightListPages ?? 0),
+    );
+  });
+
+  it('21.7 code I1: summing a pass with no pair out and back keeps its bound and states no return leg', () => {
+    const one = returnsEstimate(15, BOTH, { monthlyCap: 16 }).est;
+    expect(addPass(one, one).flightLists).toEqual({
+      pairs: 2,
+      pages: 2,
+      seconds: 140,
+      pagesMax: 2,
+      secondsMax: 140,
+      returns: false,
     });
   });
 

@@ -159,11 +159,6 @@ export function legMarks(
   ];
 }
 
-/** An outbound's marks for a list with no return read (spec rev 55 §11): `legMarks('outbound', …)`. */
-export function flightMarks(f: ListedFlight, limits: FlightLimits, c: FlightCopy): string[] {
-  return legMarks('outbound', f, limits, c);
-}
-
 /** A flight's carriers in words: "Virgin Atlantic", or "…, operated by …" when the page names the operator. */
 export function carriersText(f: Pick<ListedFlight, 'carriers' | 'operatedBy'>, c: FlightCopy): string {
   const carriers = f.carriers.join(', ');

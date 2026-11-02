@@ -726,8 +726,13 @@ function refinePairingGroups(v: DatePairsBody, fail: Fail): void {
         ['pairing', 'mismatch', k],
         'a mismatch exactly when an offer differs from the from price',
       );
-    if (columnAt(q.provenance, k) >= v.provenances.length)
+    const provenance = columnAt(q.provenance, k);
+    if (provenance >= v.provenances.length)
       fail('pairingProvenance', ['pairing', 'provenance', k], 'no such provenance');
+    // why: 21.7 prov-012: every pairing, beneath a figure too, is a flight list's, so the board's fixed source words
+    // ("the browser worker's flight list") never name another source's price; a leading one is refused by refineLeading
+    else if (basis !== 'pairing' && !isFlightList(v.provenances[provenance]))
+      fail('pairingSource', ['pairing', 'provenance', k], "a pairing's provenance is a flight list's");
   }
   if (inOrder && pairingFigures.some((j) => !named.has(j)))
     fail('pairingMissing', ['pairing', 'figure'], 'a pairing figure needs its pairing entry');
@@ -888,6 +893,9 @@ export const datePairFigureSchema = z
       if (provenanceKey(p.provenance) !== provenanceKey(f.price.provenance) || !isFlightList(p.provenance))
         fail(['pairing', 'provenance'], "a pairing figure's provenance is its flight list's");
     }
+    // why: 21.7 prov-012: a pairing beneath a figure is a flight list's too, as the board's group requires
+    else if (!isFlightList(p.provenance))
+      fail(['pairing', 'provenance'], "a pairing's provenance is a flight list's");
     if (p.isFrom && p.offersRead !== 0) fail(['pairing', 'offersRead'], 'a from price reads no offer');
     if (p.isFrom && p.complete) fail(['pairing', 'complete'], 'a from price is never complete');
     if (p.isFrom === (p.seller !== null))

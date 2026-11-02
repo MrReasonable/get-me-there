@@ -4,7 +4,6 @@ import type { FlightList } from '../../../../src/api/types.js';
 import { COPY } from '../../../../src/copy.js';
 import {
   datesShort,
-  flightMarks,
   headLine,
   hoursText,
   legMarks,
@@ -77,14 +76,15 @@ describe('the limit words', () => {
     expect(hoursText(1600)).toBe('26h 40m');
   });
   it('within, over, and nothing when no limit is set', () => {
-    expect(flightMarks(listedFlight(), limits, F)).toEqual([
+    expect(legMarks('outbound', listedFlight(), limits, F)).toEqual([
       'outbound 10h 50m, within your 25h limit; return not read',
     ]);
-    expect(flightMarks(listedFlight({ durationMinutes: 1560 }), limits, F)).toEqual([
+    expect(legMarks('outbound', listedFlight({ durationMinutes: 1560 }), limits, F)).toEqual([
       'outbound 26h: over your 25h limit',
     ]);
     expect(
-      flightMarks(
+      legMarks(
+        'outbound',
         listedFlight(),
         { maxJourneyMinutes: null, maxStops: null, arrivalWindowLocal: null, departureWindowLocal: null },
         F,
@@ -98,10 +98,9 @@ describe('the limit words', () => {
       arrivalWindowLocal: { from: '06:00', to: '23:00' },
       departureWindowLocal: { from: '08:00', to: '20:00' },
     };
-    expect(flightMarks(listedFlight({ departsLocal: '06:10', arrivesLocal: '03:10' }), w, F)).toEqual([
-      'arrives 03:10, outside your window',
-      'departs 06:10, outside your window',
-    ]);
+    expect(
+      legMarks('outbound', listedFlight({ departsLocal: '06:10', arrivesLocal: '03:10' }), w, F),
+    ).toEqual(['arrives 03:10, outside your window', 'departs 06:10, outside your window']);
   });
 });
 
@@ -134,9 +133,8 @@ describe('legMarks: both legs against the limits (spec rev 56 §6.2, §11)', () 
       'return 12h 05m, within your 25h limit',
     ]);
   });
-  it('an outbound: today\'s flightMarks plus the stops mark; "; return not read" only when no return was read', () => {
+  it('an outbound: WP20\'s marks plus the stops mark; "; return not read" only when no return was read', () => {
     const f = listedFlight({ departsLocal: '09:00' });
-    expect(legMarks('outbound', f, limits, F)).toEqual(flightMarks(f, limits, F));
     expect(legMarks('outbound', f, limits, F)).toEqual([
       'outbound 10h 50m, within your 25h limit; return not read',
     ]);

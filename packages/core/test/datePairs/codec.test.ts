@@ -28,6 +28,18 @@ import {
   workedExample,
 } from '../helpers/datePairs.js';
 
+/**
+ * A flight list's provenance carrying variant `i`'s FX and observed time (21.7 prov-012: a pairing beneath a figure is a
+ * flight list's), so the table still keys entries one field apart.
+ */
+function listVariant(i: number): Provenance {
+  const v = VARIANTS[i]?.[1] ?? calendarProvenance();
+  return flightListProvenance({
+    fx: v.fx,
+    ...(v.providerObservedAt === undefined ? {} : { providerObservedAt: v.providerObservedAt }),
+  });
+}
+
 /** Provenances that differ from the first in exactly one field each (spec §3: every field is provenance). */
 const VARIANTS: Array<[string, Provenance]> = [
   ['base', calendarProvenance()],
@@ -166,7 +178,9 @@ const arbDecoded: fc.Arbitrary<DecodedDatePairs> = fc
                     fare: isFrom ? null : f.fare,
                     ...(isFrom ? { offersRead: 0, complete: false } : {}),
                     which: f.which,
-                    provenance: VARIANTS[f.cheaperProvenance]?.[1] ?? calendarProvenance(),
+                    // why: 21.7 prov-012: a pairing beneath is a flight list's; the variant's fields over it keep the
+                    // table's one-field-apart entries apart
+                    provenance: listVariant(f.cheaperProvenance),
                     stale: f.cheaperFlags[0],
                     ageHours: f.age,
                     mismatch: mismatch(isFrom),

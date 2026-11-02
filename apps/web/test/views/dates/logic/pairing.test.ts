@@ -1,4 +1,4 @@
-import { type BookingRead, type FlightLimits, flightLimitsOf, type ReturnRead } from '@gmt/core';
+import type { BookingRead, FlightLimits, ReturnRead } from '@gmt/core';
 import { PAIRING_FIXTURE, PAIRING_LIMITS } from '@gmt/core/testing';
 import { describe, expect, it } from 'vitest';
 import type { FlightList } from '../../../../src/api/types.js';
@@ -290,22 +290,6 @@ describe('pairingOf (spec rev 56 §6.9 "Which pairing"; the same literals as cor
     expect(p).toMatchObject({ fits: false, fromMinor: 120_400 });
     expect(p?.returns).toMatchObject({ overLimit: true, moreRead: 0 });
   });
-
-  it("limitsOf's literal: flightLimitsOf of the search's constraints (every one set)", () => {
-    expect(
-      flightLimitsOf({
-        maxJourneyMinutes: 1500,
-        maxStops: 1,
-        departureWindowLocal: { from: '06:00', to: '22:00' },
-        arrivalWindowLocal: { from: '07:00', to: '23:00' },
-      }),
-    ).toEqual({
-      maxJourneyMinutes: 1500,
-      maxStops: 1,
-      departureWindowLocal: { from: '06:00', to: '22:00' },
-      arrivalWindowLocal: { from: '07:00', to: '23:00' },
-    });
-  });
 });
 
 describe('mismatchOf (spec rev 56 §6.9: both figures named, nothing reconciled)', () => {
@@ -365,9 +349,25 @@ describe('returnNote (spec rev 56 §11 "Status notes", with what happens next)',
       returnsWereRead(withReturns({ status: 'not-verified', rule: null, attempts: [], booking: null })),
     ).toBe(false);
   });
-  it('returnsOld for a list read without a return phase (or stored before them)', () => {
-    expect(returnNote(flightList(), COPY)).toBe(F.returnsOld);
-    expect(F.returnsOld).toBe('return flights not read with this list');
+  it('21.7 code M6: nothing for a list read without a return phase (or stored before them): it shows as the outbound list', () => {
+    expect(returnNote(flightList(), COPY)).toBeNull();
+  });
+  it("21.7 code M1 / prov-010: the read clauses of the attempt asked for (the shown pairing's), the last one by default", () => {
+    const two = flightList({
+      flights: PAIRING_FIXTURE.flights,
+      returns: returnRead({
+        attempts: [
+          returnAttempt({
+            outboundIndex: 2,
+            resultsStated: 12,
+            returns: [listedReturn({ stops: 2 }), listedReturn({ stops: 2 })],
+          }),
+          returnAttempt({ outboundIndex: 3, optionsUnparsed: 1 }),
+        ],
+      }),
+    });
+    expect(returnNote(two, COPY, 0)).toBe('Google listed 12 return flights; this app read the first 2');
+    expect(returnNote(two, COPY)).toBe('1 return option unread');
   });
   it('a read: the counts clause and the more-listed clause, each only when it applies; null for a clean read', () => {
     const counts = returnRead({
@@ -405,6 +405,8 @@ describe('bookingNote (spec rev 56 §11: a booking read that did not finish, wit
     expect(note({ status: 'expand-failed', rule: 'more-options' })).toBe(
       'sellers read before the list could be expanded; the cheapest may be missing',
     );
+    // why: 21.7 prov-014: an expansion that failed before any offer read none: one note, the transient one
+    expect(note({ status: 'expand-failed', rule: 'more-options', offers: [] })).toBe(next);
     expect(note({ status: 'skipped', rule: 'monthly-headroom', ...SKIPPED })).toBe(
       'sellers not read: fewer than 2 browser pages left this month',
     );
@@ -432,8 +434,10 @@ describe('bookingNote (spec rev 56 §11: a booking read that did not finish, wit
 describe('readDoneWords: what the live region says when a pressed read lands (spec rev 56 §11)', () => {
   const dates = '14 → 24 Mar';
   it('"Flights read for 14 → 24 Mar, 2 return flights" with returns; the status note for a non-read status', () => {
-    expect(readDoneWords(FIXTURE, dates, COPY)).toBe('Flights read for 14 → 24 Mar, 2 return flights');
-    expect(readDoneWords(flightList({ returns: returnRead() }), dates, COPY)).toBe(
+    expect(readDoneWords(FIXTURE, dates, COPY, PAIRING_LIMITS)).toBe(
+      'Flights read for 14 → 24 Mar, 2 return flights',
+    );
+    expect(readDoneWords(flightList({ returns: returnRead() }), dates, COPY, PAIRING_LIMITS)).toBe(
       'Flights read for 14 → 24 Mar, 1 return flight',
     );
     expect(
@@ -441,6 +445,7 @@ describe('readDoneWords: what the live region says when a pressed read lands (sp
         withReturns({ status: 'not-verified', rule: null, attempts: [], booking: null }),
         dates,
         COPY,
+        PAIRING_LIMITS,
       ),
     ).toBe(F.returnNotVerified);
     expect(
@@ -448,16 +453,34 @@ describe('readDoneWords: what the live region says when a pressed read lands (sp
         withReturns({ status: 'not-settled', rule: 'returns:not-settled', attempts: [], booking: null }),
         dates,
         COPY,
+        PAIRING_LIMITS,
       ),
     ).toBe(F.returnTransient);
   });
+  it("21.7 code M1: the count is the shown pairing's attempt's returns, not the last attempt's", () => {
+    // why: both attempts over the stops limit; the cheapest of all is attempt 0's, which listed 3 returns
+    const over = (fromMinor: number) => listedReturn({ stops: 2, fromMinor });
+    const list = flightList({
+      flights: PAIRING_FIXTURE.flights,
+      returns: returnRead({
+        attempts: [
+          returnAttempt({ outboundIndex: 2, returns: [over(100_000), over(101_000), over(102_000)] }),
+          returnAttempt({ outboundIndex: 3, returns: [over(140_000)] }),
+        ],
+      }),
+    });
+    expect(readDoneWords(list, dates, COPY, PAIRING_LIMITS)).toBe(
+      'Flights read for 14 → 24 Mar, 3 return flights',
+    );
+  });
   it("WP20's words for a list with no return read, a no-outbound read and a failed list", () => {
-    expect(readDoneWords(flightList(), dates, COPY)).toBe('Flights read for 14 → 24 Mar');
+    expect(readDoneWords(flightList(), dates, COPY, PAIRING_LIMITS)).toBe('Flights read for 14 → 24 Mar');
     expect(
       readDoneWords(
         withReturns({ status: 'no-outbound', rule: null, attempts: [], booking: null }),
         dates,
         COPY,
+        PAIRING_LIMITS,
       ),
     ).toBe('Flights read for 14 → 24 Mar');
     expect(
@@ -465,6 +488,7 @@ describe('readDoneWords: what the live region says when a pressed read lands (sp
         flightList({ status: 'failed', reason: 'network', listed: null, minMinor: null, flights: [] }),
         dates,
         COPY,
+        PAIRING_LIMITS,
       ),
     ).toBe('Flights not read for 14 → 24 Mar');
   });

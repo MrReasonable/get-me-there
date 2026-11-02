@@ -1,5 +1,5 @@
 import { addDays, type FlightLimits, fitsLimits } from '@gmt/core';
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import type { FlightList } from '../../api/types.js';
 import { COPY } from '../../copy.js';
 import { formatIsoDateWords, formatMinutes } from '../../format.js';
@@ -10,23 +10,28 @@ import { ReturnRow } from './ReturnRow.js';
 
 // Spec rev 56 §11 "The pairing section" (WP21 Task 21.7): inside a flights block, after its head, for a list whose
 // return read is `read` with returns. It names the outbound the pairing used, shows that outbound ("Out:") with its
-// marks and no price, the pairing's return ("Back:") with the cheapest offer's price first, then the other returns with
-// their "from" prices, and the notes that apply. Every amount through PriceCell with the list's provenance (FlightPrice);
-// no seller is linked anywhere (booking stays on Google, through the date pair's link below the block).
+// marks and no price, the pairing's return ("Back:") with the cheapest offer's price first and what that price is for,
+// then the other returns with their "from" prices, the toggle that shows them all, and the notes that apply. Every
+// amount through PriceCell with the list's provenance (FlightPrice); no seller is linked anywhere (booking stays on
+// Google, through the date pair's link below the block).
 
 const F = COPY.flights;
 const D = COPY.datesView;
 
 /**
  * The section's head (spec rev 56 §11): after a limit edit (the stored limits differ, or today's limits select other
- * outbounds) "With the <which> outbound read, selected under your limits when read, 3d ago:"; with no outbound within the
- * limits "With the cheapest outbound read (over your limits):"; else "With the cheapest outbound read within your
- * limits:" or the next-cheapest's.
+ * outbounds) "With the <which> outbound read, selected under your limits when read, 3d ago:", or "With the cheapest
+ * outbound read, over your limits when read, 3d ago:" when no outbound fitted then (21.7 code M13); with no outbound
+ * within the limits "With the cheapest outbound read (over your limits):"; with the outbound within them but none of its
+ * returns (21.7 code I3, Ian's ruling 2 for returns) "No return flight within your limits for this outbound; the
+ * cheapest pairing read is shown, over your limits:"; else "With the cheapest outbound read within your limits:" or the
+ * next-cheapest's.
  */
-function sectionHead(p: PairingView, list: FlightList): string {
-  if (!p.selectedNow || !p.underCurrentLimits)
-    return F.pairingHeadWhenRead(p.which, COPY.agoOf(list.ageHours));
-  return p.outboundFits ? F.pairingHead(p.which) : F.pairingHeadOver;
+function sectionHead(p: PairingView, list: FlightList, changed: boolean): string {
+  const ago = COPY.agoOf(list.ageHours);
+  if (changed) return p.outboundFits ? F.pairingHeadWhenRead(p.which, ago) : F.pairingHeadOverWhenRead(ago);
+  if (!p.outboundFits) return F.pairingHeadOver;
+  return p.fits ? F.pairingHead(p.which) : F.pairingHeadNoReturnFits;
 }
 
 /** The pairing's outbound: "Out: depart 07:15, arrive 18:05 · 14h 50m · 1 change · QQ Air", its marks below, no price. */
@@ -59,9 +64,26 @@ function OutLine({ p, list, limits }: { p: PairingView; list: FlightList; limits
 }
 
 /**
+ * "1 of the 5 outbounds within your limits were tried; other outbounds not tried", or null (spec rev 56 §11). Every
+ * count is judged under the limits the read was made with (21.7 prov-011: the attempts' fits and `triedAll` are the
+ * read's), and after a limit edit the line says so ("within your limits when read").
+ */
+function triedLine(list: FlightList, changed: boolean): string | null {
+  const r = list.returns;
+  if (r === null || r.triedAll) return null;
+  const tried = r.attempts.filter((a) => a.outboundFits).length;
+  const within = list.flights.filter((f) => fitsLimits(f, r.limits, 'outbound')).length;
+  if (within <= tried) return null;
+  return changed ? F.triedSomeWhenRead(tried, within) : F.triedSome(tried, within);
+}
+
+/**
  * Spec rev 56 §11: the pairing section of one list (`data-testid="flights-pairing"`, the smoke's selector: preflight
- * A22). `p` is `pairingOf(list, limits)`; the toggle "show all return flights" (a button with `aria-expanded`) lists
- * every return of the pairing's attempt, the pairing's first, in the chooser's order; focus stays on it.
+ * A22). `p` is `pairingOf(list, limits)`. The shown "Back:" line comes first, then "this price is for the Out: and Back:
+ * flights shown" and the book line (21.7 code M4), then the other returns, in one list named "return flights for the
+ * selected outbound"; directly under it "N more returns read, M outside your limits · show all return flights", a
+ * button with `aria-expanded` and `aria-controls` whose name never changes (21.7 code M2, ui-007), focus staying on it,
+ * and a live region that says how many returns are shown when it is pressed.
  */
 export function PairingSection({
   list,
@@ -73,25 +95,39 @@ export function PairingSection({
   limits: FlightLimits;
 }) {
   const [all, setAll] = useState(false);
+  // why: 21.7 ui-007: the live region says nothing until the toggle is pressed, then how many returns are shown
+  const [pressed, setPressed] = useState(false);
+  const listId = useId();
   const attempt = list.returns?.attempts[p.attempt];
   const returns =
     all && attempt !== undefined ? allReturnsInOrder(attempt.returns, p, limits) : p.returns.shown;
   const mismatch = mismatchOf(p);
   const note = bookingNote(list, COPY);
-  const readNote = returnNote(list, COPY);
-  const r = list.returns;
-  const tried = r?.attempts.filter((a) => a.outboundFits).length ?? 0;
-  const within = list.flights.filter((f) => fitsLimits(f, limits, 'outbound')).length;
+  // why: 21.7 code M1, prov-010: the counts and more-listed clauses of the view the shown returns come from
+  const readNote = returnNote(list, COPY, p.attempt);
   const changed = !p.selectedNow || !p.underCurrentLimits;
+  const tried = triedLine(list, changed);
+  // why: the price-applies and book lines say what the shown seller's price is for, so they follow its line
+  const applies =
+    p.offer !== null ? (
+      <div className="flight-after">
+        <p data-testid="pairing-applies" className="flights-line">
+          {F.priceAppliesTo}
+        </p>
+        <p data-testid="pairing-book" className="flights-line">
+          {F.bookOnGoogle}
+        </p>
+      </div>
+    ) : null;
   return (
     <div data-testid="flights-pairing" className="flights-pairing">
-      {p.outboundFits ? null : (
+      {p.outboundFits || changed ? null : (
         <p data-testid="pairing-no-outbound-fits" className="flights-line">
           {F.noOutboundFits(list.flights.length)}
         </p>
       )}
       <p data-testid="pairing-head" className="flights-head">
-        {sectionHead(p, list)}
+        {sectionHead(p, list, changed)}
       </p>
       {changed ? (
         <p data-testid="pairing-limits-changed" className="flights-line">
@@ -99,7 +135,7 @@ export function PairingSection({
         </p>
       ) : null}
       <OutLine p={p} list={list} limits={limits} />
-      <ul className="flights-list">
+      <ul id={listId} className="flights-list" aria-label={F.returnsListName}>
         {returns.map((ret, i) => (
           <ReturnRow
             // why: an attempt's returns have no id; their place in the shown order is stable for one list
@@ -107,27 +143,35 @@ export function PairingSection({
             ret={ret}
             list={list}
             limits={limits}
+            lead={ret === p.ret}
             price={
               ret === p.ret && p.offer !== null
                 ? { kind: 'offer', offer: p.offer }
                 : { kind: 'from', sellersNotRead: ret === p.ret }
             }
+            after={ret === p.ret ? applies : null}
           />
         ))}
       </ul>
-      {p.offer !== null ? (
-        <>
-          <p data-testid="pairing-applies" className="flights-line">
-            {F.priceAppliesTo}
-          </p>
-          <p data-testid="pairing-book" className="flights-line">
-            {F.bookOnGoogle}
-          </p>
-        </>
-      ) : null}
-      {p.offer !== null && !p.offer.complete ? (
-        <p data-testid="pairing-incomplete" className="flights-line">
-          {F.offersIncomplete}
+      {p.returns.moreRead > 0 ? (
+        <p data-testid="pairing-more" className="flights-line">
+          {all ? null : F.returnMore(p.returns.moreRead, p.returns.moreOutside)}
+          {all ? null : F.separator}
+          <button
+            type="button"
+            className="btn-text"
+            aria-expanded={all}
+            aria-controls={listId}
+            onClick={() => {
+              setPressed(true);
+              setAll((a) => !a);
+            }}
+          >
+            {F.showAllReturns}
+          </button>
+          <span data-testid="pairing-returns-status" role="status" className="sr-only">
+            {pressed ? F.returnsShown(returns.length, all) : null}
+          </span>
         </p>
       ) : null}
       {note !== null ? (
@@ -137,17 +181,14 @@ export function PairingSection({
       ) : null}
       {mismatch !== null ? (
         <p data-testid="pairing-mismatch" className="flights-line">
-          {F.mismatchOffer} <FlightPrice list={list} pence={mismatch.offerMinor} />
-          {F.mismatchFrom} {F.from} <FlightPrice list={list} pence={mismatch.fromMinor} />
-        </p>
-      ) : null}
-      {p.returns.moreRead > 0 ? (
-        <p data-testid="pairing-more" className="flights-line">
-          {all ? null : F.returnMore(p.returns.moreRead, p.returns.moreOutside)}
-          {all ? null : F.separator}
-          <button type="button" className="btn-text" aria-expanded={all} onClick={() => setAll((a) => !a)}>
-            {all ? F.showFewerReturns : F.showAllReturns}
-          </button>
+          {F.mismatchOffer}{' '}
+          <span className="flight-price">
+            <FlightPrice list={list} pence={mismatch.offerMinor} />
+          </span>
+          {F.mismatchFrom}{' '}
+          <span className="flight-price">
+            {F.from} <FlightPrice list={list} pence={mismatch.fromMinor} />
+          </span>
         </p>
       ) : null}
       {readNote !== null ? (
@@ -155,9 +196,9 @@ export function PairingSection({
           {readNote}
         </p>
       ) : null}
-      {r !== null && r !== undefined && !r.triedAll && within > tried ? (
+      {tried !== null ? (
         <p data-testid="pairing-tried" className="flights-line">
-          {F.triedSome(tried, within)}
+          {tried}
         </p>
       ) : null}
     </div>

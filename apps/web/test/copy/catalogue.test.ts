@@ -245,8 +245,12 @@ const SAMPLES: Record<string, unknown[]> = {
   'flights.noneForCell': [2, 1],
   'flights.readButton': [2, '90'],
   // WP21 Task 21.7: the return leg on a search's page (spec rev 56 §11)
-  'flights.headPairing': ['next-cheapest', '3d ago', '12 Mar 11:44'],
-  'flights.headPairingOver': ['3d ago', null],
+  'flights.headPairing': ['next-cheapest', true, '3d ago', '12 Mar 11:44'],
+  'flights.headPairingOver': [true, '3d ago', null],
+  'flights.headPairingWhenRead': ['next-cheapest', true, '3d ago', '12 Mar 11:44'],
+  'flights.pairingHeadOverWhenRead': ['3d ago'],
+  'flights.triedSomeWhenRead': [1, 3],
+  'flights.returnsShown': [5, true],
   'flights.withinLeg': ['return', '12h 05m', '25h'],
   'flights.overLimitLeg': ['return', '26h', '25h'],
   'flights.stopsOver': ['return', 2, 1],
@@ -268,14 +272,12 @@ const SAMPLES: Record<string, unknown[]> = {
   'flights.bookingSkipped': ['the list was not on its Cheapest view'],
   'flights.readOutboundOnly': [2],
   'flights.readDoneReturns': ['14 → 24 Mar', 2],
-  'datesView.pairingLabel': [3, 'cheapest outbound read within your limits'],
   'datesView.pairingTimes': ['07:15', '14:20'],
-  'datesView.gridShowedAt': ['the date grid', '10 Mar 09:30'],
+  'datesView.gridShowed': ['the date grid'],
+  'datesView.gridShowedAt': ['10 Mar 09:30'],
+  'datesView.sellerCoverage': [1, 2],
   'datesView.pairingBeneath': ['9d ago'],
   'datesView.listFailed': ["the browser worker's monthly limit is used up"],
-  'flights.differenceCheapest': ['12 Mar 11:44'],
-  'flights.differenceSource': ['the Aviasales cache'],
-  'flights.differenceAt': ['10 Mar 09:30'],
   'flights.openLinkName': ['14 → 24 Mar'],
   'flights.datesShort': ['14', '24 Mar'],
   'flights.tie': [6, '£86', true, 4],
@@ -621,12 +623,20 @@ function mainPathKeys(): Set<string> {
 describe('the return leg in words (spec rev 56 §11, §1 "What a price is"; WP21 Task 21.7)', () => {
   const F = COPY.flights;
   const D = COPY.datesView;
-  it('every return-price template words a return\'s price "from" (the lowest Google listed), an offer\'s never', () => {
-    // the head names a Back price a "from" price, the shown one a seller's stated price
-    expect(F.headPairing('cheapest', '3d ago', null)).toContain(
-      'each Back price is the lowest round-trip price Google listed for that outbound and that return (from)',
+  // why: 21.7 code M5: the "never" checks read every string the catalogue can produce, each template's sample output
+  // included (JSON.stringify drops functions, so it never saw a template)
+  const collected: Collected = { strings: [], fns: [], problems: [] };
+  collect(COPY, '', collected);
+  const texts = collected.strings.map((x) => x.text);
+  it('the head names a seller\'s stated price only when one is shown (21.7 prov-001); an offer is never "from"', () => {
+    const seller = "; the first Back price is a seller's stated price";
+    expect(F.headPairing('cheapest', true, '3d ago', null)).toContain(seller);
+    expect(F.headPairing('cheapest', false, '3d ago', null)).not.toContain('seller');
+    expect(F.headPairingOver(true, '3d ago', null)).toContain(seller);
+    expect(F.headPairingOver(false, '3d ago', null)).not.toContain('seller');
+    expect(F.headPairingWhenRead('over', false, '3d ago', null)).toContain(
+      'for the cheapest outbound read, which was over your limits when read, 3d ago',
     );
-    expect(F.headPairingOver('3d ago', null)).toContain("the shown one is a seller's stated price");
     // the mismatch line: "from" before the return's price only
     expect(`${F.mismatchOffer} £1,195${F.mismatchFrom} ${F.from} £1,180`).toBe(
       "the cheapest offer read is £1,195; Google's list showed from £1,180",
@@ -641,16 +651,13 @@ describe('the return leg in words (spec rev 56 §11, §1 "What a price is"; WP21
     );
     expect(F.sellerLine('QQ Travel', null, 3)).not.toMatch(/\bfrom\b/);
   });
-  it('never "each seller" or "every seller"; "offers read" always', () => {
-    const all = JSON.stringify(COPY);
-    expect(all).not.toMatch(/each seller|every seller/i);
-    expect(D.pairingLabel(3, D.pairingWhich.cheapest)).toBe(
-      'cheapest of 3 offers read, cheapest outbound read within your limits',
-    );
+  it('never "each seller" or "every seller", nor "lowest seller price" (21.7 persona H1), in any string or template', () => {
+    expect(texts.filter((t) => /each seller|every seller|lowest seller price/i.test(t))).toEqual([]);
+    expect(COPY.basisName.pairing).toBe('cheapest of the sellers read, not checked with the airline');
   });
-  it('"round-trip total" is spelt one way: the key, and never "round trip total" anywhere', () => {
-    expect(F.total).toBe('round-trip total');
-    expect(JSON.stringify(COPY)).not.toMatch(/round trip total|roundtrip total/i);
+  it('"round trip" is spelt one way on Out, Back and the board: never "round-trip total" or "roundtrip"', () => {
+    expect(F.roundTrip).toBe('round trip');
+    expect(texts.filter((t) => /round[- ]trip total|roundtrip/i.test(t))).toEqual([]);
   });
   it("the read button's pages from the response, the outbound-only read, the limits lines", () => {
     expect(F.readButton(2, null)).toBe('Read flights for this date (free, up to 2 pages)');

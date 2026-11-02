@@ -319,13 +319,21 @@ describe('estimateSentence: the notes under it', () => {
     expect(sentence(e).line).toBe(
       'About 2½ hours · free · asks about all 405 date pairs · + flights, out and back, for up to 10 date pairs: usually about 15 pages and 41 minutes, at most 20 pages and 50 minutes',
     );
-    // one date pair, one page at most: the singulars
+    // one date pair out and back (21.7 code I1: a real one-pair plan, 2 pages at most): the singulars
     const one = resp({
-      flightLists: { pairs: 1, pages: 1, seconds: 70, pagesMax: 1, secondsMax: 110, returns: true },
+      flightLists: { pairs: 1, pages: 2, seconds: 245, pagesMax: 2, secondsMax: 300, returns: true },
     });
     expect(sentence(one).line).toContain(
-      '+ flights, out and back, for up to 1 date pair: usually about 1 page and 1 minute, at most 1 page and 2 minutes',
+      '+ flights, out and back, for up to 1 date pair: usually about 2 pages and 4 minutes, at most 2 pages and 5 minutes',
     );
+  });
+  it('21.7 code I1: a plan the month cut to outbound-only (returns false, its bound kept) words no return leg', () => {
+    // why: the engine's line with 1 page left: the plan reads returns where pages allow, none goes out and back
+    const cut = resp({
+      flightLists: { pairs: 1, pages: 1, seconds: 70, pagesMax: 1, secondsMax: 70, returns: false },
+    });
+    expect(sentence(cut).line).toContain('+ flights for up to 1 date pair, about 1 minute');
+    expect(sentence(cut).line).not.toContain('out and back');
   });
   it('outbound only: "+ flights for up to 10 date pairs, about 12 minutes", the pairs from pairs, never the pages', () => {
     const e = resp({ flightLists: { pairs: 10, pages: 10, seconds: 700, returns: false } });

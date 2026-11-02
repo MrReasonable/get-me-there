@@ -378,6 +378,8 @@ describe('filters kept across views (spec §11: the filters live in the URL and 
     const { user } = renderWithProviders(<App />, { search: `?view=dates&def=def-0001&${filters}` });
     const nav = await screen.findByRole('navigation', { name: 'Views' });
     const firstBoard = await screen.findByRole('table', { name: /^Best dates/ });
+    // why: 21.7 prov-004: a row says "loading flights" until the flight-lists answer lands; compare the settled board
+    await screen.findByTestId('flights-unavailable');
     const rowsBefore = within(firstBoard)
       .getAllByRole('row')
       .map((r) => r.textContent);

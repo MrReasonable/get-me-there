@@ -242,8 +242,11 @@ function withFlights(
           : `${datePairs(outAndBack)} out and back, ${outbound} outbound only`;
     notes.push(`flights for ${which}: the browser worker's monthly page cap`);
   } else if (pairs < wanted) notes.push(`flights for ${datePairs(pairs)}: the run's free-call limit`);
+  // why: 21.7 code I1: `returns` says a pair goes out and back (at least one candidate gets a return phase), so the
+  // page never words "out and back" for a plan the month cut to outbound-only; the bound stays whenever the plan reads
+  // the return leg where the pages allow, since a schedule's load is its full allowance (R-load, `flightAllowanceOf`)
   const flightLists = phase.returns
-    ? { pairs: planned, pages, seconds, pagesMax, secondsMax, returns: true }
+    ? { pairs: planned, pages, seconds, pagesMax, secondsMax, returns: outAndBack > 0 }
     : { pairs: planned, pages, seconds, returns: false };
   return {
     ...est,
@@ -647,16 +650,20 @@ export function estimateRemainingFor(ctx: EngineContext, exec: Execution, manual
 
 type FlightLine = NonNullable<Estimate['flightLists']>;
 
-/** Two flight lines summed (spec rev 56 §8.1): the bound kept when either carries one, `returns` when either plans it. */
+/**
+ * Two flight lines summed (spec rev 56 §8.1): the bound kept when either carries one (or plans a pair out and back),
+ * `returns` when either sends a pair out and back.
+ */
 function sumFlights(a: FlightLine | undefined, b: FlightLine | undefined): FlightLine {
   const sum = (f: (x: FlightLine) => number) => (a === undefined ? 0 : f(a)) + (b === undefined ? 0 : f(b));
   const returns = a?.returns === true || b?.returns === true;
+  const bound = returns || a?.pagesMax !== undefined || b?.pagesMax !== undefined;
   const base = {
     pairs: sum((x) => x.pairs ?? x.pages),
     pages: sum((x) => x.pages),
     seconds: sum((x) => x.seconds),
   };
-  return returns
+  return bound
     ? {
         ...base,
         pagesMax: sum((x) => x.pagesMax ?? x.pages),
@@ -666,10 +673,13 @@ function sumFlights(a: FlightLine | undefined, b: FlightLine | undefined): Fligh
     : { ...base, returns };
 }
 
-/** A flight line with every figure zeroed (a blocked browser line runs no flight step), its plan kept. */
+/**
+ * A flight line with every figure zeroed (a blocked browser line runs no flight step): its bound kept when it had one
+ * (the plan's), and no pair out and back (21.7 code I1: `returns` only when a pair gets a return phase).
+ */
 function zeroFlights(f: FlightLine): FlightLine {
-  return f.returns === true
-    ? { pairs: 0, pages: 0, seconds: 0, pagesMax: 0, secondsMax: 0, returns: true }
+  return f.returns === true || f.pagesMax !== undefined
+    ? { pairs: 0, pages: 0, seconds: 0, pagesMax: 0, secondsMax: 0, returns: false }
     : { pairs: 0, pages: 0, seconds: 0, returns: false };
 }
 

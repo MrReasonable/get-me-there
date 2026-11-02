@@ -7,7 +7,10 @@ import {
   calendarStyled,
   flightReadLine,
   isSyntheticRead,
+  type ListsState,
   PAGE_SIZE,
+  sellerCoverage,
+  sellerOf,
   setsAirlineOrLayover,
   sortBoard,
 } from '../../../../src/views/Dates/board.js';
@@ -377,18 +380,36 @@ describe('calendarStyled: every basis but verified is calendar-styled (spec rev 
 describe('flightReadLine: what a figure says of its flight read (spec rev 56 §6.9, §11 Board)', () => {
   const D = COPY.datesView;
   const reason = (d: string) => `the words for ${d}`;
-  const line = (f: ReturnType<typeof calendarFig>, available = true) =>
-    flightReadLine(f, available, COPY, reason);
+  const line = (f: ReturnType<typeof calendarFig>, lists: ListsState = 'available') =>
+    flightReadLine(f, lists, COPY, reason);
   it("within says nothing beneath (it is a pairing figure's own read), whatever the basis", () => {
     expect(line(calendarFig({ pairingRead: 'within' }))).toBeNull();
-    expect(line(calendarFig({ pairingRead: 'within' }), false)).toBeNull();
+    expect(line(calendarFig({ pairingRead: 'within' }), 'unavailable')).toBeNull();
   });
   it('a pairing figure says nothing here (its own lines are beneath its price)', () => {
     expect(line(pairingFig())).toBeNull();
   });
   it('not-read: "flights not read" where flight lists are read, nothing where they are not', () => {
     expect(line(calendarFig())).toEqual({ lead: 'flights not read', pairing: null });
-    expect(line(calendarFig(), false)).toBeNull();
+    expect(line(calendarFig(), 'unavailable')).toBeNull();
+  });
+  it('21.7 prov-004: "loading flights" while the flight-lists request is pending; the mark kept when it failed', () => {
+    expect(line(calendarFig(), 'loading')).toEqual({ lead: 'loading flights', pairing: null });
+    expect(line(calendarFig(), 'failed')).toEqual({ lead: 'flights not read', pairing: null });
+    // why: a read the date-pairs answer carries says its own words whatever the flight-lists request did
+    expect(line(calendarFig({ pairingRead: 'outbound-only' }), 'loading')).toEqual({
+      lead: 'return leg not read',
+      pairing: null,
+    });
+  });
+  it('21.7 ui-008 / code M9: a failed list with no reason (outside the contract) has no trailing colon', () => {
+    // why: spread past the contract on purpose: the words never end in an empty cause
+    expect(
+      line({ ...calendarFig({ pairingRead: 'list-failed', listReason: 'network' }), listReason: null }),
+    ).toEqual({
+      lead: "flights couldn't be read",
+      pairing: null,
+    });
   });
   it('the 21.6 ruling: a failed newest list is "flights couldn\'t be read: <its reason>", never "return leg not read"', () => {
     expect(line(calendarFig({ pairingRead: 'list-failed', listReason: 'network' }))).toEqual({
@@ -447,6 +468,41 @@ describe('flightReadLine: what a figure says of its flight read (spec rev 56 §6
       pairingRead: 'outbound-only',
     });
     expect(line(stale)).toEqual({ lead: D.pairingRead['outbound-only'], pairing: null });
+  });
+});
+
+describe('sellerCoverage (21.7 persona coverage: seller prices read for N of the M date pairs shown)', () => {
+  const from = figurePairing({ isFrom: true, seller: null, offersRead: 0, complete: false });
+  it('null without a pairing figure; else the rows with an offer (leading or beneath) of the rows shown', () => {
+    expect(sellerCoverage([])).toBeNull();
+    expect(
+      sellerCoverage([
+        { figure: null },
+        { figure: calendarFig({ pairingRead: 'within-older', pairing: figurePairing() }) },
+      ]),
+    ).toBeNull();
+    expect(
+      sellerCoverage([
+        { figure: pairingFig() },
+        {
+          figure: calendarFig({
+            pairingRead: 'offers-incomplete',
+            pairing: figurePairing({ complete: false }),
+          }),
+        },
+        { figure: calendarFig({ pairingRead: 'sellers-not-read', pairing: from }) },
+        { figure: calendarFig() },
+        { figure: null },
+      ]),
+    ).toEqual({ read: 2, shown: 5 });
+  });
+});
+
+describe('sellerOf (21.7 code M9: an offer always names its seller; the contract says so)', () => {
+  it("the offer's seller; a RangeError naming the broken rule when an offer has none", () => {
+    expect(sellerOf(figurePairing())).toBe('QQ Travel');
+    expect(() => sellerOf(figurePairing({ seller: null }))).toThrow(RangeError);
+    expect(() => sellerOf(figurePairing({ seller: null }))).toThrow(/an offer names its seller/);
   });
 });
 

@@ -307,6 +307,43 @@ describe('the pairing figure on the board (spec rev 56 §6.9)', () => {
     });
   });
 
+  it('21.7 code I3: an over-limit pairing whose booking read kept offers is shown beneath with the offer, never leading', async () => {
+    const { x, def } = await setup();
+    const first = PAIRING_FIXTURE.returns.attempts[0];
+    if (first === undefined) throw new Error('fixture');
+    // why: no return of attempt 0 fits, so the worker booked the cheapest of all (return 0, from £1,204) and read it
+    store(
+      x,
+      def,
+      A,
+      fixture(
+        {
+          attempt: 0,
+          returnIndex: 0,
+          offers: [
+            { seller: 'QQ Travel', fare: null, priceMinor: 121_000 },
+            { seller: 'QQ Fares', fare: null, priceMinor: 122_000 },
+          ],
+        },
+        { attempts: [first] },
+      ),
+    );
+    // why: Ian's ruling 2 for returns: the block and the board both show the seller's price, marked over the limits
+    expect(await figureA(x, def)).toMatchObject({
+      basis: 'calendar',
+      pairingRead: 'over-limit',
+      pairing: {
+        pricePence: 121_000,
+        fromPence: 120_400,
+        isFrom: false,
+        seller: 'QQ Travel',
+        offersRead: 2,
+        mismatch: true,
+        which: 'over-limit',
+      },
+    });
+  });
+
   it('no-outbound is no-pairing-read; not-verified or no return read is outbound-only; no list is not-read', async () => {
     const reads: Array<[ReturnRead | null, string]> = [
       [

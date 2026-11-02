@@ -152,8 +152,10 @@ export interface Estimate {
    * (`pages` the least of 10 less the reusable date pairs, the monthly pages left after the grid plan and the run's
    * free calls left; `seconds` pages × (spacing + 40)). Its seconds count in `seconds`; its pages never in `totalCalls`.
    * Absent (no key) without camoufox. Revision 56 (R-estimate): `pages` and `seconds` are the typical figures; `pairs`
-   * the date pairs read and `returns` whether a return phase is planned (both required on the engine's producer type
-   * since Task 21.7), and `pagesMax`/`secondsMax` the bound (absent on an outbound-only plan); `estimateSchema` keeps
+   * the date pairs read and `returns` whether at least one of them goes out and back (21.7 code I1: false when the
+   * month's pages leave none a return phase; both required on the engine's producer type since Task 21.7), and
+   * `pagesMax`/`secondsMax` the bound, present whenever the plan reads the return leg where the pages allow (absent on
+   * an outbound-only plan); `estimateSchema` keeps
    * every one of them optional for good, so an estimate stored before WP21 still parses (ruling A3).
    */
   flightLists?: {

@@ -316,9 +316,20 @@
     align-items: baseline;
     gap: 4px;
   }
+  /* 21.7 ui-001: the shown pairing's price is the block's answer, so it alone is heavier, larger and in the board's
+     first ink; every other price keeps the block's weight (the class sits on that one price's .flight-price only) */
+  .flight-price-lead {
+    font-weight: 700;
+    font-size: 1.15em;
+    color: var(--flap-ink);
+  }
   .flight-mark {
     flex-basis: 100%;
     font-size: 12.5px;
+  }
+  /* 21.7 code M4: what the shown Back price is for, on its own lines under that return's line and marks */
+  .flight-after {
+    flex-basis: 100%;
   }
   .flights-other {
     display: grid;

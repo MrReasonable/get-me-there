@@ -1,5 +1,5 @@
 import { type DatePair, type DatePairFigure, type DatePairPairing, stopDetailClause } from '@gmt/core';
-import type { ReactNode } from 'react';
+import { type ReactNode, useId } from 'react';
 import type { DefinitionResponse } from '../../api/types.js';
 import { PriceBoundary } from '../../components/PriceBoundary.js';
 import { PriceCell } from '../../components/PriceCell.js';
@@ -9,7 +9,7 @@ import { formatFlapDate, formatIsoDate, formatIsoDateWords, formatMinutes } from
 import { useNow } from '../../now.js';
 import { detailHref, detailPatch } from '../../state/datesState.js';
 import { navigateTo } from '../../state/urlState.js';
-import { arrival, calendarStyled, flightReadLine } from './board.js';
+import { arrival, calendarStyled, flightReadLine, type ListsState, sellerOf } from './board.js';
 import { figureSource } from './flightLines.js';
 import { readAt } from './stateLines.js';
 
@@ -41,8 +41,8 @@ export function FigurePrice({
         pricePence={p.pricePence}
         provenance={p.provenance}
         calendar={calendarStyled(figure.basis)}
-        // why: spec rev 56 §6.9: a pairing figure's source is the browser worker's flight list, the lowest seller price
-        // read for these two flights
+        // why: spec rev 56 §6.9: a pairing figure's source is the browser worker's flight list, the cheapest of the
+        // sellers read for these two flights
         {...(figure.basis === 'pairing' ? { sourceLabel: D.pairingSource } : {})}
         stale={p.stale}
         truncated={p.truncated}
@@ -111,32 +111,43 @@ function PairingPrice({ pairing, pence }: { pairing: DatePairPairing; pence: num
 }
 
 /**
- * Spec rev 56 §6.9, §11 Board (R-board, R-grid): a pairing figure's own lines beneath its price, labelled once by which
- * outbound it used ("cheapest of 3 offers read, next-cheapest outbound read within your limits (…)"): the seller line
- * "QQ Travel · cheapest of 3 offers read", the two departure times "Out 07:15 · Back 14:20", "Google listed from £1,180"
- * where the cheapest offer differs from the return's "from" price, the date-grid price it replaced through PriceCell
- * with its own source, age and stale mark ("date grid showed £564 · the date grid, 10 Mar 09:30"), and "airline settings
- * not applied to flights read" when the search sets any airline or layover setting (`settings`). Null on another basis.
+ * Spec rev 56 §6.9, §11 Board (R-board, R-grid; 21.7 persona H2, ui-005): a pairing figure's own short lines beneath its
+ * price: the seller line "QQ Travel · cheapest of 3 offers read", "2nd outbound tried" when the pairing used the second
+ * outbound, the two departure times "Out: 07:15 · Back: 14:20", "Google listed from £1,180" where the cheapest offer
+ * differs from the return's "from" price, the calendar price it replaced through PriceCell with its own source named
+ * first, age and stale mark ("the date grid showed £564 · 10 Mar 09:30", "the Aviasales cache showed …": 21.7
+ * prov-003), and "airline settings not applied to flights read" when the search sets any airline or layover setting
+ * (`settings`). The group is named by its visible seller and outbound lines, said once (21.7 code M3), and described by
+ * the long words of which outbound it used, which the search's page block says in full. Null on another basis.
  */
 export function PairingFigureLines({ figure, settings }: { figure: DatePairFigure; settings: boolean }) {
   const now = useNow();
+  const id = useId();
   const q = figure.pairing;
   if (figure.basis !== 'pairing' || q === null) return null;
-  const which = D.pairingWhich[q.which];
+  const second = q.which === 'next-cheapest';
   const g = figure.gridPrice;
   return (
-    // why: a group of the pairing's own lines, named once by which outbound it used (R-board); a fieldset is the
-    // semantic group element, its form-control styling reset
+    // why: a group of the pairing's own lines (R-board); a fieldset is the semantic group element (lint), its
+    // form-control styling reset; its name is its own visible lines, so it is said once and seen
     <fieldset
-      aria-label={D.pairingLabel(q.offersRead, which)}
+      aria-labelledby={second ? `${id}-seller ${id}-which` : `${id}-seller`}
+      aria-describedby={`${id}-long`}
       data-testid="pairing-figure"
       className="m-0 mt-1.5 block min-w-0 space-y-0.5 border-0 p-0 text-xs text-fg-2"
     >
-      <span data-testid="pairing-seller" className="block">
+      <span id={`${id}-seller`} data-testid="pairing-seller" className="block">
         {/* why: seller and fare are page text, rendered as text only; the figure is never a seller link */}
-        {F.sellerLine(q.seller ?? '', q.fare, q.offersRead)}
+        {F.sellerLine(sellerOf(q), q.fare, q.offersRead)}
       </span>
-      <span className="block">{which}</span>
+      {second ? (
+        <span id={`${id}-which`} data-testid="pairing-which" className="block">
+          {D.secondOutboundTried}
+        </span>
+      ) : null}
+      <span hidden id={`${id}-long`}>
+        {D.pairingWhich[q.which]}
+      </span>
       <span data-testid="pairing-times" className="block">
         {D.pairingTimes(q.departOut, q.departBack)}
       </span>
@@ -148,7 +159,7 @@ export function PairingFigureLines({ figure, settings }: { figure: DatePairFigur
       ) : null}
       {g !== null ? (
         <span data-testid="pairing-grid" className="flex flex-wrap items-baseline gap-1">
-          <span>{D.gridShowed}</span>
+          <span>{D.gridShowed(figureSource(g.provenance, F))}</span>
           <PriceBoundary>
             <PriceCell
               pricePence={g.pricePence}
@@ -159,9 +170,7 @@ export function PairingFigureLines({ figure, settings }: { figure: DatePairFigur
               compact
             />
           </PriceBoundary>
-          <span>
-            {D.gridShowedAt(figureSource(g.provenance, F), readAt(g.provenance.fetchedAt, now, COPY))}
-          </span>
+          <span>{D.gridShowedAt(readAt(g.provenance.fetchedAt, now, COPY))}</span>
         </span>
       ) : null}
       {settings ? (
@@ -178,12 +187,14 @@ export function PairingFigureLines({ figure, settings }: { figure: DatePairFigur
  * pair's flight read, beneath its price: its words ("return leg not read", "no return flight read", "flights couldn't be
  * read: …", "return flights read 9d ago, older than this search's refresh:", …) and the pairing that does not lead,
  * through PriceCell with its own age: an offer with its seller ("a cheaper seller may not have been read" when its offers
- * may be incomplete), or a "from" price ("from £1,180 · sellers not read" when no seller was read for it). Nothing for a
- * pairing figure or a fresh verified one; "flights not read" only where flight lists are read for this search.
+ * may be incomplete; an over-limit pairing's offer too, as the search's page block shows it: 21.7 code I3), or a "from"
+ * price ("from £1,180 · sellers not read" when no seller was read for it); "Google listed from £1,180" beneath an offer
+ * that differs from its return's "from" price (21.7 code M12, prov-008). Nothing for a pairing figure or a fresh
+ * verified one; "flights not read" by `lists` (21.7 prov-004), "loading flights" while the request is pending.
  */
-export function FlightRead({ figure, available }: { figure: DatePairFigure; available: boolean }) {
+export function FlightRead({ figure, lists }: { figure: DatePairFigure; lists: ListsState }) {
   // why: the 21.6 ruling: a failed list's cause in words, the browser worker named (as the flights block's note does)
-  const line = flightReadLine(figure, available, COPY, (d) => stopDetailClause(d, 'camoufox', true));
+  const line = flightReadLine(figure, lists, COPY, (d) => stopDetailClause(d, 'camoufox', true));
   if (line === null) return null;
   const q = line.pairing;
   return (
@@ -207,12 +218,18 @@ export function FlightRead({ figure, available }: { figure: DatePairFigure; avai
               <PairingPrice pairing={q} pence={q.pricePence} />
               <span>
                 {F.separator}
-                {F.sellerLine(q.seller ?? '', q.fare, q.offersRead)}
+                {F.sellerLine(sellerOf(q), q.fare, q.offersRead)}
                 {q.complete ? null : `${F.separator}${F.offersIncomplete}`}
               </span>
             </>
           )}
           <span className="block w-full">{D.pairingTimes(q.departOut, q.departBack)}</span>
+        </span>
+      ) : null}
+      {q?.mismatch ? (
+        <span data-testid="flight-read-mismatch" className="flex flex-wrap items-baseline gap-1">
+          <span>{D.mismatchMark}</span>
+          <PairingPrice pairing={q} pence={q.fromPence} />
         </span>
       ) : null}
     </span>
@@ -341,7 +358,7 @@ export function BoardCard({
   onLight,
   outcome = null,
   flights = null,
-  available = false,
+  lists = 'unavailable',
   settings = false,
 }: {
   pair: DatePair & { figure: DatePairFigure };
@@ -356,8 +373,8 @@ export function BoardCard({
   outcome?: ReactNode;
   /** The date pair's flights block (spec rev 55 §11), or null when there is none. */
   flights?: ReactNode;
-  /** Flight lists are read for this search (spec rev 56 §11: "flights not read" is said only then). */
-  available?: boolean;
+  /** What the board knows of its flight-lists request (21.7 prov-004: "flights not read" by it). */
+  lists?: ListsState;
   /** The search sets an airline or layover setting (a pairing figure says they are not applied). */
   settings?: boolean;
 }) {
@@ -398,7 +415,7 @@ export function BoardCard({
       <td className="card-price">
         <FigurePrice figure={f} notes={notes} face />
         <PairingFigureLines figure={f} settings={settings} />
-        <FlightRead figure={f} available={available} />
+        <FlightRead figure={f} lists={lists} />
         {outcome}
       </td>
       <td className="card-rest">
