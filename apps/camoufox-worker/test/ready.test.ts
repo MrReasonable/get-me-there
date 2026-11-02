@@ -208,4 +208,8 @@ describe('isSettled on the booking view', () => {
     expect(isSettled({ resultLinks: 3 }, s, 'booking', false)).toBe(false);
     expect(isSettled({ resultLinks: 3 }, { ...s, fetching: true }, 'booking', true)).toBe(false);
   });
+  it('a caller that does not say the view changed has no change: neither the booking nor the return view settles', () => {
+    expect(isSettled({ resultLinks: 3 }, s, 'booking')).toBe(false);
+    expect(isSettled({ resultLinks: 3 }, s, 'returns')).toBe(false);
+  });
 });

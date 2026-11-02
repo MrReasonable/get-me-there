@@ -78,6 +78,8 @@ describe('Pacer (spec §2: start to start, 2 s tolerance, persisted, never rando
     ['no lastPageAt', '{}'],
     ['a malformed instant', JSON.stringify({ lastPageAt: '2026-10-18 05:00' })],
     ['not an object', 'null'],
+    ['a number', '7'],
+    ['a string', '"2026-10-18T04:00:00.000Z"'],
   ])('a corrupt record (%s) treats the last page as now', (_n, content) => {
     const dir = tmpDir();
     writeFileSync(join(dir, 'pacer.json'), content);
@@ -207,13 +209,16 @@ describe('carryLastPageAt (Task 17.8)', () => {
     );
     expect(new Pacer({ dir, minSpacingSeconds: 30, clock }).lastPageAt()).toBe('2026-10-18T04:30:00.000Z');
   });
-  it('an equal time is kept as it is', () => {
+  it('an equal time is kept as it is: the record is left untouched', () => {
     const dir = tmpDir();
     const clock = fixedClock(T0);
-    carryLastPageAt(dir, asIsoDateTime('2026-10-18T04:00:00.000Z'), clock);
+    // why: a record in another layout than the pacer writes, so a rewrite of it would show
+    const recorded = '{ "lastPageAt": "2026-10-18T04:00:00.000Z" }\n';
+    writeFileSync(join(dir, 'pacer.json'), recorded, { mode: 0o600 });
     expect(carryLastPageAt(dir, asIsoDateTime('2026-10-18T04:00:00.000Z'), clock)).toBe(
       '2026-10-18T04:00:00.000Z',
     );
+    expect(readFileSync(join(dir, 'pacer.json'), 'utf8')).toBe(recorded);
   });
   it('an unreadable record reads as now (fail closed), so a carried earlier time leaves now', () => {
     const dir = tmpDir();

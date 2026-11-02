@@ -174,6 +174,17 @@ describe('resolveDay and weekdayMatches (the year nearest the query)', () => {
     expect(resolveDay({ day: 29, month: 2 }, asIsoDate('2027-03-14'))).toBeNull();
     expect(resolveDay({ day: 29, month: 2 }, asIsoDate('2028-03-14'))).toBe('2028-02-29');
   });
+  it('takes the year whose date is nearest the anchor, by the day itself; a tie keeps the anchor’s year', () => {
+    // why: 1 January 2027 is 190 days before 10 July 2027 and 1 January 2028 is 175 days after it
+    expect(resolveDay({ day: 1, month: 1 }, asIsoDate('2027-07-10'))).toBe('2028-01-01');
+    // why: 2 July 2028 is 183 days from both 1 January 2028 and 1 January 2029 (2028 is a leap year)
+    expect(resolveDay({ day: 1, month: 1 }, asIsoDate('2028-07-02'))).toBe('2028-01-01');
+    // why: so in any four-digit year: the same tie in 9996, where the distances in milliseconds would round
+    expect(resolveDay({ day: 1, month: 1 }, asIsoDate('9996-07-02'))).toBe('9996-01-01');
+  });
+  it('writes a year before 1000 with four digits', () => {
+    expect(resolveDay({ day: 31, month: 12 }, asIsoDate('1000-01-02'))).toBe('0999-12-31');
+  });
   it('checks the weekday', () => {
     expect(weekdayMatches(4, asIsoDate('2027-03-11'))).toBe(true);
     expect(weekdayMatches(5, asIsoDate('2027-03-11'))).toBe(false);

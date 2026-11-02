@@ -4,10 +4,18 @@ import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { MAX_CONTROLS_PER_ROLE, readCells } from '../src/dialogSettle.js';
-import { appeared, type RegionRef, stripSnapshotQueries } from '../src/graph.js';
+import { createDriver } from '../src/driver.js';
+import { appeared, exploreGraph, type RegionRef, stripSnapshotQueries } from '../src/graph.js';
 import { writeGraphExplore } from '../src/recordWrite.js';
 import { SELECTORS } from '../src/selectors.js';
-import { FakePage, n, shrinkAfterCount } from './support/fakePage.js';
+import {
+  type FakeNode,
+  FakePage,
+  n,
+  RESULTS_URL,
+  resultsTree,
+  shrinkAfterCount,
+} from './support/fakePage.js';
 import { fakeTimers } from './support/timers.js';
 import { tmpDir } from './support/tmp.js';
 
@@ -26,6 +34,61 @@ describe('appeared', () => {
     );
     expect(appeared([r('region', 'A')], [r('dialog', 'A')])).toEqual(r('dialog', 'A'));
     expect(appeared([r('region', 'A'), r('region', 'B', 1)], [r('region', 'B')])).toBeNull();
+  });
+});
+
+// why: the exploration lists the controls inside the region that appeared, at most MAX_CONTROLS_PER_ROLE of a role by
+// name and the rest counted (synthetic trees only)
+describe('exploreGraph over a synthetic page', () => {
+  async function explore(dialog: FakeNode) {
+    const page = new FakePage(null);
+    page.setUrl(RESULTS_URL);
+    const button = n('button', 'Price graph');
+    page.setTrees([resultsTree({ extra: [button] })]);
+    page.onClick = (x) => {
+      if (x === button) page.setTrees([resultsTree({ extra: [button, dialog] })]);
+    };
+    const timers = fakeTimers();
+    const driver = createDriver(page, {
+      hops: [],
+      frameUrls: [],
+      refused: null,
+      documentLoads: 0,
+      documentStarts: 0,
+      activationGate: false,
+      gateRefusals: 0,
+      reservation: null,
+      held: null,
+    });
+    const out = await exploreGraph(driver, page, timers.deadline(180_000), {
+      timers,
+      pollMs: 2000,
+      S: SELECTORS,
+      steps: { timers },
+      clicked: [],
+    });
+    if (out.kind !== 'explored') throw new Error(out.kind);
+    return out;
+  }
+  const many = (role: string, k: number): FakeNode[] =>
+    Array.from({ length: k }, (_, i) => n(role, `${role} ${i}`));
+  it('names at most MAX_CONTROLS_PER_ROLE controls of a role and counts the rest, for that role only', async () => {
+    const out = await explore(
+      n('dialog', 'Price graph', [
+        ...many('button', MAX_CONTROLS_PER_ROLE + 2),
+        ...many('tab', MAX_CONTROLS_PER_ROLE),
+        n('slider', 'Trip length'),
+      ]),
+    );
+    expect(out.unnamed).toEqual({ button: 2 });
+    const controls = Array.isArray(out.controls) ? out.controls : [];
+    expect(controls.filter((c) => c.role === 'button')).toHaveLength(MAX_CONTROLS_PER_ROLE);
+    expect(controls.filter((c) => c.role === 'tab')).toHaveLength(MAX_CONTROLS_PER_ROLE);
+    expect(controls.at(-1)).toEqual({ role: 'slider', name: 'Trip length' });
+  });
+  it('a region that appeared with no name is recorded with an empty name', async () => {
+    const out = await explore(n('dialog', '', [n('slider', 'Trip length')], { ariaLabel: null, text: null }));
+    expect(out.region).toEqual({ role: 'dialog', name: '', appeared: true });
   });
 });
 

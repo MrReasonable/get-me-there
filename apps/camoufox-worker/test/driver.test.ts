@@ -10,6 +10,8 @@ import {
   LOOKUP_TIMEOUT_MS,
   POLL_TIMEOUT_MS,
   type ProbePage,
+  pathField,
+  pathMoved,
   pathOf,
   pollUntilSettled,
   probePage,
@@ -1558,5 +1560,131 @@ describe('clickMoreOptions (the booking research)', () => {
       });
       expect(page.calls.actions).toEqual([]);
     }
+  });
+});
+
+// why: rulings of 2026-10-18: inside a bounded poll each lookup keeps its own bound and an overrun names it
+describe('readFacts names the lookup that overran', () => {
+  /** The error a bounded readFacts over `tree` ends with, its hanging lookup run out on fake time. */
+  async function overrun(tree: FakeNode): Promise<unknown> {
+    const { driver, timers } = setup([tree]);
+    const read = driver.readFacts(timers.deadline(90_000), { timers, lookupMs: LOOKUP_TIMEOUT_MS });
+    let out: unknown = null;
+    read.then(
+      () => {
+        out = 'answered';
+      },
+      (e: unknown) => {
+        out = e;
+      },
+    );
+    for (let i = 0; i < 10 && out === null; i++) {
+      await flush();
+      if (out === null) timers.runOut();
+    }
+    return out;
+  }
+  /** The results tree with `mark` applied to the first node `pick` finds (or `extra` appended). */
+  function marked(pick: (x: FakeNode) => boolean, mark: Partial<FakeNode>, extra: FakeNode[] = []): FakeNode {
+    const t = resultsTree({ extra });
+    const x = descendants([t]).find(pick);
+    if (x === undefined) throw new Error('no node to mark');
+    Object.assign(x, mark);
+    return t;
+  }
+  const RESULT = optionName(478);
+  it.each([
+    [
+      'return-heading',
+      marked((x) => x.name === 'Returning flights', { countHang: true }, [n('heading', 'Returning flights')]),
+    ],
+    ['date-grid-buttons', marked((x) => x.role === 'button' && x.name === 'Date grid', { countHang: true })],
+    ['result-links', marked((x) => x.role === 'link' && x.name === RESULT, { countHang: true })],
+    [
+      'fetching-text',
+      marked((x) => x.name === 'Fetching results', { countHang: true }, [text('Fetching results')]),
+    ],
+    ['result-names', marked((x) => x.role === 'link' && x.name === RESULT, { hang: true })],
+  ])('%s', async (lookup, tree) => {
+    expect(await overrun(tree)).toMatchObject({
+      name: 'LookupTimedOut',
+      lookup,
+      lookupMs: LOOKUP_TIMEOUT_MS,
+    });
+  });
+});
+
+describe('readFacts’ counts', () => {
+  it('counts the date grid button by its exact name only', async () => {
+    const { driver, d } = setup([resultsTree({ extra: [n('button', 'Date grid help')] })]);
+    expect((await driver.readFacts(d)).page.dateGridButtons).toBe(1);
+  });
+  it('the loading text inside a tab never counts as loading; outside one it does', async () => {
+    const inTab = resultsTree({ extra: [n('tablist', '', [n('tab', 'Later', [text('Fetching results')])])] });
+    const a = setup([inTab]);
+    expect((await a.driver.readFacts(a.d)).settle.fetching).toBe(false);
+    const b = setup([resultsTree({ extra: [text('Fetching results')] })]);
+    expect((await b.driver.readFacts(b.d)).settle.fetching).toBe(true);
+  });
+  it('the return view counts its links by the return pattern, the outbound links by theirs', async () => {
+    const S = { ...SELECTORS, returns: { ...SELECTORS.returns, resultLink: /^Return choice / } };
+    const page = new FakePage(null);
+    page.setUrl(RESULTS_URL);
+    page.setTrees([
+      resultsTree({
+        top: [option(478), n('link', 'Return choice 1'), n('link', 'Return choice 2')],
+        other: [n('link', 'Return choice 3')],
+      }),
+    ]);
+    const timers = fakeTimers();
+    const f = await createDriver(page, guard(), S).readFacts(timers.deadline(90_000), undefined, 'returns');
+    expect([f.page.resultLinks, f.page.outboundLinks]).toEqual([3, 1]);
+  });
+});
+
+describe('pathMoved and pathField (review M1)', () => {
+  it('a move needs both paths known and different', () => {
+    const url = 'https://www.google.com/travel/flights/booking?tfs=b';
+    expect(pathMoved(url, '/travel/flights/search')).toBe(true);
+    expect(pathMoved(url, '/travel/flights/booking')).toBe(false);
+    expect(pathMoved(url, null)).toBe(false);
+    expect(pathMoved(url, undefined)).toBe(false);
+    expect(pathMoved('not a url', '/travel/flights/search')).toBe(false);
+  });
+  it('the field holds the path, or nothing when the URL cannot be parsed', () => {
+    expect(pathField('https://www.google.com/travel/flights/booking?tfs=b')).toEqual({
+      path: '/travel/flights/booking',
+    });
+    expect(pathField('not a url')).toStrictEqual({});
+  });
+});
+
+// why: R-settle: a return view must first differ from the view the click was made on
+describe('pollUntilSettled’s change from the view clicked on', () => {
+  const RETURNS_ON = { ...SELECTORS, RETURN_SELECT_VERIFIED: true };
+  it('a return heading is the change to the return view, the links unchanged', async () => {
+    const tree = resultsTree({ extra: [n('heading', 'Returning flights')] });
+    const { driver, timers } = setup([tree]);
+    const pre = await driver.readFacts(timers.deadline(90_000), undefined, 'returns');
+    const track = { changed: false };
+    await pollUntilSettled(driver, timers.deadline(10_000), timers, 2000, RETURNS_ON, {
+      view: 'returns',
+      changedFrom: { signature: pre.settle.linkSignature, documentLoads: 0 },
+      loads: () => 0,
+      track,
+    }).catch(() => undefined);
+    expect(track.changed).toBe(true);
+  });
+  it('without a load count, an unchanged view is no change and polls on to its deadline', async () => {
+    const { driver, timers } = setup([resultsTree()]);
+    const pre = await driver.readFacts(timers.deadline(90_000), undefined, 'returns');
+    const track = { changed: false };
+    const ended = await pollUntilSettled(driver, timers.deadline(10_000), timers, 2000, RETURNS_ON, {
+      view: 'returns',
+      changedFrom: { signature: pre.settle.linkSignature, documentLoads: 0 },
+      track,
+    }).catch((e: unknown) => e);
+    expect(ended).toBeInstanceOf(DeadlineExceeded);
+    expect(track.changed).toBe(false);
   });
 });

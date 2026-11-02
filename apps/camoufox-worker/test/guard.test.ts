@@ -60,6 +60,7 @@ describe('decideRoute (brief §6 allowlist)', () => {
     ['https://www.google.com:8443/travel/flights', 'off-allowlist'],
     ['https://user@www.google.com/travel/flights', 'off-allowlist'],
     ['https://u:p@www.google.com/travel/flights', 'off-allowlist'],
+    ['https://:p@www.google.com/travel/flights', 'off-allowlist'],
   ])('%s is aborted as %s', (u, kind) => {
     expect(decideRoute(u, true)).toEqual({ action: 'abort', kind });
   });
@@ -383,6 +384,23 @@ describe('the Flights front-end sub-frame (ruling of 2026-10-18)', () => {
     ctx.emitRequest(captcha);
     expect(await ctx.routeRequest(captcha)).toBe('aborted');
     expect(state.frameUrls).toContain('https://www.google.com/recaptcha/api2/anchor?k=x');
+  });
+  it('an unparsable sub-frame URL is refused, never read as the front-end frame', () => {
+    expect(decideRoute('not a url', true, false)).toEqual({ action: 'abort', kind: 'off-allowlist' });
+  });
+  it('the probe’s route is the main frame’s unless told otherwise: the front-end path is refused', () => {
+    expect(decideProbeRoute(BSC, true)).toEqual({ action: 'abort', kind: 'off-allowlist' });
+    expect(decideProbeRoute(BSC, true, 'GET', false)).toEqual({ action: 'continue' });
+  });
+  it('a refusal is aborted as blocked by the client, and an unparsable URL is logged as such', async () => {
+    const ctx = new FakeContext();
+    await installGuard(ctx, new FakePage(ctx), log);
+    expect(await ctx.routeRequest(req('not a url'))).toBe('aborted');
+    expect(ctx.abortCodes).toEqual(['blockedbyclient']);
+    expect(logs.map((l) => [l.level, l.o, l.msg])).toEqual([
+      ['warn', { kind: 'off-allowlist', host: 'unparsable' }, 'navigation refused'],
+      ['debug', { kind: 'off-allowlist', path: 'unparsable' }, 'navigation refused (path)'],
+    ]);
   });
   it('a frameless request with the bscframe path is treated as the main frame (refused)', async () => {
     const ctx = new FakeContext();

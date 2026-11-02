@@ -3,7 +3,7 @@
 import { asIsoDate, listedFlightSchema } from '@gmt/core';
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { ListFacts } from '../src/driver.js';
-import { dayOffset, readFlights, splitCarriers } from '../src/flights.js';
+import { cleanName, dayOffset, readFlights, splitCarriers } from '../src/flights.js';
 import { readList } from '../src/list.js';
 
 const REQ = {
@@ -69,6 +69,22 @@ describe('dayOffset (spec rev 55 §2: the arrival day from the dates the name st
     expect(dayOffset({ month: 2, day: 28 }, { month: 2, day: 30 }, asIsoDate('2027-02-28'))).toBeNull();
     expect(dayOffset({ month: 2, day: 29 }, { month: 3, day: 1 }, asIsoDate('2027-03-01'))).toBeNull();
     expect(dayOffset({ month: 2, day: 28 }, { month: 3, day: 1 }, asIsoDate('2027-02-28'))).toBe(1);
+  });
+  it('is null for a month or a day past the calendar’s end even where it rolls over to within three days', () => {
+    // why: month 13 rolls over to the next January, and day 366 of January to the next 1 January; neither is a date
+    expect(dayOffset({ month: 12, day: 31 }, { month: 13, day: 1 }, asIsoDate('2026-12-31'))).toBeNull();
+    expect(dayOffset({ month: 1, day: 366 }, { month: 1, day: 367 }, asIsoDate('2026-12-31'))).toBeNull();
+  });
+  it('is null when either date is none, whatever the year (the first days either side of 1970 included)', () => {
+    expect(dayOffset({ month: 1, day: 32 }, { month: 1, day: 2 }, asIsoDate('1970-01-01'))).toBeNull();
+    expect(dayOffset({ month: 12, day: 30 }, { month: 12, day: 32 }, asIsoDate('1969-12-31'))).toBeNull();
+  });
+});
+
+describe('cleanName (spec rev 55 §2; sec-004)', () => {
+  it('a control character between two spaces leaves one space, never two or none', () => {
+    expect(cleanName('QQ \u0007 Air')).toBe('QQ Air');
+    expect(cleanName('\u202eQQ\t\n Air\u200b ')).toBe('QQ Air');
   });
 });
 

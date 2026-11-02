@@ -10,10 +10,10 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import { asIsoDateTime, type BlockedPage, CONSENT_FIX } from '@gmt/core';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { loadWorkerConfig } from '../src/config.js';
 import { CooldownStore } from '../src/cooldown.js';
-import { createDriver, probePage } from '../src/driver.js';
+import { createDriver, type NamedElement, probePage } from '../src/driver.js';
 import { buildLaunchOptions, launchOptionsForMeta, prepareLaunch } from '../src/launch.js';
 import { acquireLock } from '../src/lock.js';
 import { debugLogging } from '../src/log.js';
@@ -41,6 +41,7 @@ import {
 import { FakeContext } from './support/fakeContext.js';
 import {
   descendants,
+  FakeLocator,
   type FakeNode,
   FakePage,
   formNodes,
@@ -1773,6 +1774,39 @@ describe('record --grid', () => {
       { total: 1, inTablist: 0 },
       { total: 1, inTablist: 0 },
     ]);
+  });
+  // why: WP21 Task 21.3 fix round 2: the lines are read in one page call, so an element replaced as it is read answers no
+  // text; it is recorded as no text
+  it('a line whose text reads as null is recorded as no text', async () => {
+    let nullTexts = true;
+    const { t, deps } = gridRun({
+      onScroll: () => {
+        nullTexts = false;
+      },
+    });
+    const elements: (
+      this: FakeLocator,
+      fn: (els: NamedElement[]) => NamedElement[],
+    ) => Promise<NamedElement[]> = FakeLocator.prototype.evaluateAll;
+    const spy = vi.spyOn(FakeLocator.prototype, 'evaluateAll').mockImplementation(async function <R>(
+      this: FakeLocator,
+      fn: (els: NamedElement[]) => R,
+    ): Promise<R> {
+      const els = await elements.call(this, (all) => all);
+      return fn(
+        nullTexts
+          ? els.map((e) => ({ getAttribute: (a: string) => e.getAttribute(a), textContent: null }))
+          : els,
+      );
+    });
+    try {
+      expect(await record(t.ctx([...G, '--moves', 'right']), cfg, deps)).toBe(0);
+    } finally {
+      spy.mockRestore();
+    }
+    const rec = recOf(t);
+    expect(rec.views[0].lines.texts).toEqual(['', '']);
+    expect(rec.views[1].lines.texts[0]).toMatch(/^0000Thu 18 Mar/);
   });
   // why: the recordings of 2026-10-18: one scroll moves one day, and the page rotates its elements after a scroll
   it('measures a one-day step from rotated lines', async () => {

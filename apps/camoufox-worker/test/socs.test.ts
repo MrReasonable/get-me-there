@@ -107,6 +107,70 @@ describe('loadSocs (spec §2: a captured, dated rejection value)', () => {
   });
 });
 
+describe('each refusal names what is wrong', () => {
+  /** The refusal's error, or null when nothing is thrown. */
+  function refusal(f: () => unknown): unknown {
+    try {
+      f();
+    } catch (e) {
+      return e;
+    }
+    return null;
+  }
+  const refused = (why: string) => ({
+    name: 'ConsentNotCaptured',
+    message: `SOCS capture refused (${why}); capture "Reject all" again with: pnpm gmt consent`,
+  });
+  it.each([
+    ['no file', null, 'no capture file'],
+    ['a file that is not JSON', '{not json', 'not JSON'],
+    ['not an object', '"x"', 'not a JSON object'],
+    ['a value that is no string', JSON.stringify({ ...OK, value: 7 }), 'an empty value'],
+    ['another domain', JSON.stringify({ ...OK, domain: '.example.test' }), 'the domain is not .google.com'],
+    ['another path', JSON.stringify({ ...OK, path: '/travel' }), 'the path is not /'],
+    ['an expiry that is no number', JSON.stringify({ ...OK, expires: 'soon' }), 'no expiry'],
+    ['an expiry past a date’s range', JSON.stringify({ ...OK, expires: -1e306 }), 'an expiry out of range'],
+    ['no capture time', JSON.stringify({ ...OK, capturedAt: 'yesterday' }), 'no capture time'],
+  ])('loadSocs: %s', (_l, content, why) => {
+    const d = dirWith(content);
+    const e = refusal(() => loadSocs(d, clock));
+    expect(e).toBeInstanceOf(ConsentNotCaptured);
+    expect(e).toMatchObject(refused(why));
+  });
+  it('loadSocs: a file readable by others names chmod 600', () => {
+    const d = dirWith(JSON.stringify(OK), 0o640);
+    expect(refusal(() => loadSocs(d, clock))).toMatchObject(
+      refused('the file is readable by others; chmod 600'),
+    );
+  });
+  it.each([
+    ['a non-finite expiry', { ...OK, expires: Number.NaN }, 'no expiry'],
+    ['an infinite expiry', { ...OK, expires: Number.POSITIVE_INFINITY }, 'no expiry'],
+    // why: a field the object only inherits is not the capture's own
+    ['fields it only inherits', Object.create(OK), 'an empty value'],
+  ])('parseCapture: %s', (_l, raw, why) => {
+    expect(refusal(() => parseCapture(raw, clock))).toMatchObject(refused(why));
+  });
+  it('an expiry at the furthest instant a date holds is in range', () => {
+    expect(parseCapture({ ...OK, expires: 8.64e12 }, clock).expires).toBe(8.64e12);
+    expect(refusal(() => parseCapture({ ...OK, expires: 8.64e12 + 0.001 }, clock))).toMatchObject(
+      refused('an expiry out of range'),
+    );
+  });
+});
+
+describe('writeCapture creates the directory', () => {
+  it('makes every missing directory on the way to it', () => {
+    const dir = join(tmpDir(), 'state', 'get-me-there', 'camoufox');
+    const c = writeCapture(
+      dir,
+      { value: SYNTHETIC_REJECT, expires: 1_800_000_000, secure: true, sameSite: 'Lax' },
+      clock,
+    );
+    expect(JSON.parse(readFileSync(join(dir, 'socs.json'), 'utf8'))).toEqual(c);
+  });
+});
+
 describe('readBack (ruling 9: compared by value everywhere)', () => {
   // why: WP16b (U10): loaded inside each test, so on a host without POSIX modes (Windows) the mode refusal fails these
   // tests by title instead of failing the whole file at collection

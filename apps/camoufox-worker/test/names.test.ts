@@ -258,6 +258,29 @@ describe('parseOptionName (dated grammar)', () => {
     expect(parseOptionName(name, table)).toMatchObject({ amountMinor: 47800, interstitials: [sentence] });
     expect(parseOptionName(ONE_STOP, table)?.interstitials).toEqual([]);
   });
+  it('of two listed interstitials, only the one the name holds is reported', () => {
+    const table = [
+      { sentence: 'This price does not include overhead bin access.', recorded: '2026-10-20' },
+      { sentence: 'Prices include required taxes and fees.', recorded: '2026-10-21' },
+    ];
+    for (const { sentence } of table) {
+      const name = ONE_STOP.replace('total. 1 stop', `total. ${sentence} 1 stop`);
+      expect(parseOptionName(name, table)).toMatchObject({ amountMinor: 47800, interstitials: [sentence] });
+    }
+  });
+  it('with no interstitial listed, a second space after the price clause is refused', () => {
+    expect(parseOptionName(ONE_STOP.replace('total. 1 stop', 'total.  1 stop'), [])).toBeNull();
+  });
+  it('a listed sentence of no words is never reported for a name holding none', () => {
+    expect(parseOptionName(ONE_STOP, [{ sentence: '', recorded: '2026-10-20' }])?.interstitials).toEqual([]);
+  });
+  it('a one-hour duration reads as sixty minutes', () => {
+    const name = ONE_STOP.replace('Total duration 12 hrs 40 min.', 'Total duration 1 hr 5 min.');
+    expect(parseOptionName(name)?.durationMinutes).toBe(65);
+    expect(
+      parseOptionName(name.replace('Total duration 1 hr 5 min.', 'Total duration 1 hr.'))?.durationMinutes,
+    ).toBe(60);
+  });
   it('a group missing on a match is a grammar bug, thrown, never a fallback (TS2-04)', () => {
     const m = /x/.exec('x');
     if (m === null) throw new Error('no match');

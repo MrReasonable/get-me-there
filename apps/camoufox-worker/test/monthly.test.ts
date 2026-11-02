@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { asIsoDate, asIsoDateTime, billingMonthWindow, fixedClock, type IsoDateTime } from '@gmt/core';
 import { beforeEach, describe, expect, it } from 'vitest';
@@ -107,6 +107,15 @@ describe('admit and settle (pure)', () => {
     // why: a window that ended no later than now's start is over: zero
     expect(admit(october, caps15, at('2027-11-15T00:00:00.000Z'), 0)).toMatchObject({
       reserved: { windowStart: '2027-11-15T00:00:00.000Z', pages: 1 },
+    });
+  });
+  it('stored counts with this window’s start but an earlier end carry on to this window’s end', () => {
+    const short = counts(MARCH, 5, 7, '2027-03-15T00:00:00.000Z');
+    expect(admit(short, CAPS, NOW, 0)).toEqual({
+      kind: 'ok',
+      scrollAllowance: 0,
+      pagesReserved: 1,
+      reserved: counts(MARCH, 6, 7),
     });
   });
   it('a clock stepped back across a boundary keeps the later window’s counts and its end', () => {
@@ -338,6 +347,10 @@ describe('the counts file (fail closed)', () => {
       readable: true,
     });
   });
+  it('the counter reports the caps it admits by', () => {
+    const caps = { pages: 40, scrolls: 300, billingDay: 15 };
+    expect(counter(tmpDir(), caps).caps).toEqual(caps);
+  });
   it('a rewrite replaces the file with this window’s figures, 0600, whatever it held', () => {
     const d = tmpDir();
     writeFileSync(join(d, 'pacer.json'), '{}', { mode: 0o600 });
@@ -395,7 +408,10 @@ describe('the counts and instances files’ shapes (fail closed)', () => {
     const d = tmpDir();
     writeFileSync(join(d, MONTHLY_FILE), text, { mode: 0o600 });
     expect(await readCounts(d)).toEqual({ refused: 'unreadable' });
-    expect(new MonthlyCounter({ dir: d, caps: CAPS, clock }).status().readable).toBe(false);
+    expect(new MonthlyCounter({ dir: d, caps: CAPS, clock }).status()).toEqual({
+      ...counts('2027-03-01T00:00:00.000Z', 0, 0),
+      readable: false,
+    });
   });
   it('a 0400 file is read (no wider than 0600), and a new install’s first window is this one', async () => {
     const d = tmpDir();
@@ -425,6 +441,7 @@ describe('the counts and instances files’ shapes (fail closed)', () => {
       `{"windowStart":"2027-03-01T00:00:00.000Z","ids":["${'c'.repeat(64)}",7]}`,
       `{"windowStart":"2027-03-01T00:00:00.000Z","ids":["${'c'.repeat(64)}","x${'c'.repeat(64)}"]}`,
       `{"windowStart":"2027-03-01T00:00:00.000Z","ids":["${'c'.repeat(65)}"]}`,
+      `{"windowStart":"2027-03-01T00:00:00.000Z","ids":["${'c'.repeat(64)}",["${'d'.repeat(64)}"]]}`,
     ]) {
       writeFileSync(join(d, 'app-instances.json'), text);
       expect(i.status().count, text).toBe(0);
@@ -449,6 +466,10 @@ describe('a new install’s first page', () => {
     writeFileSync(join(d, 'pacer.json'), '{}', { mode: 0o600 });
     expect(c.check(0)).toMatchObject({ kind: 'ok' });
     expect(c.status().readable).toBe(true);
+    // why: a counts file that turns up unreadable is refused, whatever the counter saw before
+    writeFileSync(join(d, MONTHLY_FILE), 'zeros', { mode: 0o600 });
+    expect(c.check(0)).toEqual({ kind: 'counts-unreadable', problem: 'unreadable' });
+    rmSync(join(d, MONTHLY_FILE));
     // why: another counter (another process) that never saw the new install reads an upgrade's missing file
     expect(
       new MonthlyCounter({ dir: d, caps: CAPS, clock: fixedClock(at('2027-03-10T12:00:00.000Z')) }).check(0),

@@ -188,6 +188,7 @@ apps/camoufox-worker/test/record.test.ts > record --graph-explore when no dialog
 apps/camoufox-worker/test/record.test.ts > record --graph-explore without a chart region the chart is null, and without a Dates tab the dates are skipped and counted
 apps/camoufox-worker/test/record.test.ts > record --grid a Cheapest tab outside a tablist in a view counts in its total only
 apps/camoufox-worker/test/record.test.ts > record --grid a challenge after a scroll is that stop with its cool-down; only the stop record is written
+apps/camoufox-worker/test/record.test.ts > record --grid a line whose text reads as null is recorded as no text
 apps/camoufox-worker/test/record.test.ts > record --grid a panel holding an e-mail address is refused: nothing written
 apps/camoufox-worker/test/record.test.ts > record --grid a panel that is not the dates-grid view is recorded and no scroll is tried
 apps/camoufox-worker/test/record.test.ts > record --grid a view after a scroll counts only once its lines change, then hold for two polls (12 s polls fit the move budget)
@@ -390,6 +391,7 @@ apps/camoufox-worker/test/returnPhase.test.ts > the second attempt (Ian’s ruli
 apps/camoufox-worker/test/returnPhase.test.ts > the second attempt (Ian’s ruling 2: the next outbound, from a fresh load of the list page) a reload whose load fails with a plain error as the deadline expires: reload:not-settled, never not-ready
 apps/camoufox-worker/test/returnPhase.test.ts > the second attempt (Ian’s ruling 2: the next outbound, from a fresh load of the list page) a reloaded list in another currency: read, rule reload:currency
 apps/camoufox-worker/test/returnPhase.test.ts > the second attempt (Ian’s ruling 2: the next outbound, from a fresh load of the list page) a request with booking false makes the same second attempt and no booking read
+apps/camoufox-worker/test/returnPhase.test.ts > the second attempt (Ian’s ruling 2: the next outbound, from a fresh load of the list page) a second document the page loads by itself, with no reload, still states the next start (R-spacing)
 apps/camoufox-worker/test/returnPhase.test.ts > the second attempt (Ian’s ruling 2: the next outbound, from a fresh load of the list page) a second selection that fails: read with its rule, one attempt, the booking skipped second-selection (A13)
 apps/camoufox-worker/test/returnPhase.test.ts > the second attempt (Ian’s ruling 2: the next outbound, from a fresh load of the list page) no return of the first fits and a second outbound does: the spaced reload, the second selection, the booking on attempt 1
 apps/camoufox-worker/test/returnPhase.test.ts > the second attempt (Ian’s ruling 2: the next outbound, from a fresh load of the list page) no second attempt when no further outbound fits: one attempt, the booking of bookingReturnOf’s pick (none fitting)
@@ -563,6 +565,14 @@ apps/camoufox-worker/test/sessionLine.test.ts > run.ts session seed (Task 17.8) 
 apps/camoufox-worker/test/sessionLine.test.ts > run.ts session seed (Task 17.8) never moves this directory’s last page earlier; a line with none leaves the record as it is
 apps/camoufox-worker/test/sessionLine.test.ts > run.ts session seed (Task 17.8) sets only the last-page time, 0600, under the lock; counts and cool-down are not touched
 apps/camoufox-worker/test/sessionLine.test.ts > the session line on stdin (Task 17.8) export’s line is what seed and merge read (round trip)
+apps/camoufox-worker/test/socs.test.ts > each refusal names what is wrong loadSocs: a file that is not JSON
+apps/camoufox-worker/test/socs.test.ts > each refusal names what is wrong loadSocs: a value that is no string
+apps/camoufox-worker/test/socs.test.ts > each refusal names what is wrong loadSocs: an expiry past a date’s range
+apps/camoufox-worker/test/socs.test.ts > each refusal names what is wrong loadSocs: an expiry that is no number
+apps/camoufox-worker/test/socs.test.ts > each refusal names what is wrong loadSocs: another domain
+apps/camoufox-worker/test/socs.test.ts > each refusal names what is wrong loadSocs: another path
+apps/camoufox-worker/test/socs.test.ts > each refusal names what is wrong loadSocs: no capture time
+apps/camoufox-worker/test/socs.test.ts > each refusal names what is wrong loadSocs: not an object
 apps/camoufox-worker/test/socs.test.ts > loadSocs (spec §2: a captured, dated rejection value) accepts exactly 13 months old
 apps/camoufox-worker/test/socs.test.ts > loadSocs (spec §2: a captured, dated rejection value) loads a capture
 apps/camoufox-worker/test/socs.test.ts > loadSocs (spec §2: a captured, dated rejection value) refuses a capture whose cookie expiry has passed, naming pnpm gmt consent

@@ -571,6 +571,26 @@ describe('the second attempt (Ian’s ruling 2: the next outbound, from a fresh 
       90_000, 90_000, 90_000, 30_000, 90_000, 90_000, 90_000, 90_000, 90_000,
     ]);
   });
+  it('a second document the page loads by itself, with no reload, still states the next start (R-spacing)', async () => {
+    let lists = 0;
+    const t = setup({
+      driver: (d, c) => ({
+        ...d,
+        listFacts: async (...args: Parameters<Driver['listFacts']>) => {
+          lists++;
+          // why: the outbound list's read: the page loads another results document of its own accord
+          if (lists === 1) navigate(c, 'https://www.google.com/travel/flights/search?tfs=again');
+          return d.listFacts(...args);
+        },
+      }),
+    });
+    const a = flightsOf((await t.session.page(REQ)).answer);
+    expect(a.returns?.status).toBe('read');
+    expect(a.pagesLoaded).toBe(2);
+    // why: the pacer's one start, the first load's, plus the spacing
+    expect(t.pacer.lastPageAt()).toBe('2026-10-18T05:00:00.000Z');
+    expect(a.nextLoadNotBefore).toBe('2026-10-18T05:00:30.000Z');
+  });
   it('the reload’s Cheapest flow gets a full page period even when fake time is past 180 s at the reload', async () => {
     const fetching = n('document', '', [text('Fetching results')]);
     const loading = n('document', '', [
