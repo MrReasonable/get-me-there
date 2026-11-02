@@ -6,7 +6,13 @@ import { assertIsoDateTime } from '../internal/validate.js';
 
 /** Distinct tiles fetched upstream on a first attempt (ruling 7); cache hits are counted separately so parity = tiles + cacheHits. */
 const TILE_EXPR = `COUNT(DISTINCT CASE WHEN tile_index IS NOT NULL AND http_attempt = 1 AND outcome <> 'cache_hit' THEN provider_id || ':' || tile_index END)`;
-const COUNTS = `COALESCE(SUM(outcome <> 'cache_hit'), 0) AS calls, COALESCE(SUM(cost_micro_gbp), 0) AS cost, ${TILE_EXPR} AS tiles, COALESCE(SUM(outcome = 'cache_hit'), 0) AS cacheHits, COALESCE(SUM(scroll_count), 0) AS scrolls`;
+/**
+ * Upstream attempts, a camoufox page row counting its pages (spec rev 56 §7: the guard's page scopes sum
+ * COALESCE(page_count, 1) likewise, so a run's camoufox lines agree with its usage); every other row, `no-page` rows
+ * included (whose page_count is NULL), counts 1.
+ */
+const CALLS = `COALESCE(SUM(CASE WHEN outcome = 'cache_hit' THEN 0 ELSE COALESCE(page_count, 1) END), 0)`;
+const COUNTS = `${CALLS} AS calls, COALESCE(SUM(cost_micro_gbp), 0) AS cost, ${TILE_EXPR} AS tiles, COALESCE(SUM(outcome = 'cache_hit'), 0) AS cacheHits, COALESCE(SUM(scroll_count), 0) AS scrolls`;
 interface CountsRow {
   calls: number;
   cost: number;
@@ -56,7 +62,8 @@ export class LedgerRepo {
     /**
      * Spec rev 55 §8.1 (ruling A32): the flight-list pages (`/v1/flights` rows), one line per provider. They are in
      * `calls` and the totals, but in no `perProvider` line, whose stage would mislabel them as verification. `calls` counts
-     * every upstream attempt, `no-page` rows included, so it is attempts and not pages: a pages figure must not read it.
+     * every upstream attempt, `no-page` rows included, so it is attempts and not pages: a pages figure must not read it
+     * (spec rev 56: a page row counts its pages, up to 2 for a flights request with a return phase).
      */
     flightLists: Array<{ providerId: ProviderId; calls: number; costMicroGbp: number; cacheHits: number }>;
   } {
@@ -71,7 +78,7 @@ export class LedgerRepo {
       .all(executionId, FLIGHT_LIST_ENDPOINT_PATH);
     const flights = this.db.raw
       .prepare<[string, string], { providerId: string; calls: number; cost: number; cacheHits: number }>(
-        `SELECT provider_id AS providerId, COALESCE(SUM(outcome <> 'cache_hit'), 0) AS calls, COALESCE(SUM(cost_micro_gbp), 0) AS cost, COALESCE(SUM(outcome = 'cache_hit'), 0) AS cacheHits
+        `SELECT provider_id AS providerId, ${CALLS} AS calls, COALESCE(SUM(cost_micro_gbp), 0) AS cost, COALESCE(SUM(outcome = 'cache_hit'), 0) AS cacheHits
          FROM provider_requests WHERE execution_id = ? AND endpoint_path = ? GROUP BY providerId ORDER BY providerId`,
       )
       .all(executionId, FLIGHT_LIST_ENDPOINT_PATH);

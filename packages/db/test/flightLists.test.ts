@@ -1,4 +1,15 @@
-import { asIsoDate, asIsoDateTime, type CellKey, type IsoDateTime, type ListedFlight } from '@gmt/core';
+import {
+  asIsoDate,
+  asIsoDateTime,
+  type BookingRead,
+  type CellKey,
+  type FlightLimits,
+  type IsoDateTime,
+  type ListedFlight,
+  type ListedReturn,
+  type ReturnRead,
+  returnReadSchema,
+} from '@gmt/core';
 import { describe, expect, it } from 'vitest';
 import type { Db } from '../src/client.js';
 import { FlightListsRepo } from '../src/repositories/flightLists.js';
@@ -216,7 +227,7 @@ describe('FlightListsRepo.insert (spec rev 55 §7)', () => {
 });
 
 describe('FlightListsRepo.newestPerCell (spec rev 55 §8.1, data-001)', () => {
-  it('returns the newest list per requested cell in request order, in one statement', () => {
+  it('returns the newest list per requested cell in request order, in three statements', () => {
     const { db, repo, list, definitionId } = setup();
     repo.insert(list({ fetchedAt: hoursAt(9) }));
     const newer = repo.insert(list({ fetchedAt: hoursAt(11), minMinor: 40_000 }));
@@ -225,7 +236,8 @@ describe('FlightListsRepo.newestPerCell (spec rev 55 §8.1, data-001)', () => {
     const { result, statements } = statementsOf(db, () =>
       repo.newestPerCell(definitionId, asked, 'economy', 'GB'),
     );
-    expect(statements).toBe(1);
+    // why: spec rev 56 §7: the lists, then their attempts and returns, then their offers (three statements a lookup)
+    expect(statements).toBe(3);
     expect(result.map((l) => l.id)).toEqual([lgw, newer]);
     expect(result[1]?.flights).toHaveLength(2);
   });
@@ -271,7 +283,7 @@ describe('FlightListsRepo.newestPerCell (spec rev 55 §8.1, data-001)', () => {
 
 describe('FlightListsRepo.newestPerDatePair', () => {
   const space = { origins: [LHR, LGW], destinations: [JFK, EWR] };
-  it('returns, per date pair, the newest list of any airport pair inside the space, in one statement', () => {
+  it('returns, per date pair, the newest list of any airport pair inside the space, in three statements', () => {
     const { db, repo, list, definitionId } = setup();
     repo.insert(list({ fetchedAt: hoursAt(9) }));
     const lgw = repo.insert(list({ origin: LGW, destination: EWR, fetchedAt: hoursAt(10) }));
@@ -279,7 +291,8 @@ describe('FlightListsRepo.newestPerDatePair', () => {
     const { result, statements } = statementsOf(db, () =>
       repo.newestPerDatePair(definitionId, [D2, D1], space, 'economy', 'GB'),
     );
-    expect(statements).toBe(1);
+    // why: spec rev 56 §7: the lists, then their attempts and returns, then their offers (three statements a lookup)
+    expect(statements).toBe(3);
     expect(result.map((l) => l.id)).toEqual([d2, lgw]);
   });
 
@@ -328,5 +341,422 @@ describe('FlightListsRepo.cellsOfExecution', () => {
     repo.insert(list({ executionId: other.executionId, origin: LGW })); // another execution's
     expect(repo.cellsOfExecution(executionId)).toEqual([c(), c(LHR, JFK, D2)]);
     expect(repo.cellsOfExecution('no-such-execution')).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Spec revision 56 §7 (migration 0012): the return read and the booking read of a list, written with it in one
+// transaction and read back through core's schema. Synthetic carriers (QQ Air, QQ Atlantic) and sellers (QQ Travel,
+// QQ Fares); the limits are the test's own.
+
+/** The limits the selection used: 25 h a leg, at most one stop, an outbound departure window. */
+const LIMITS: FlightLimits = {
+  maxJourneyMinutes: 1500,
+  maxStops: 1,
+  departureWindowLocal: { from: '06:00', to: '22:00' },
+  arrivalWindowLocal: null,
+};
+function back(over: Partial<ListedReturn> = {}): ListedReturn {
+  return {
+    departsLocal: '18:05',
+    arrivesLocal: '06:20',
+    arrivesDayOffset: 1,
+    durationMinutes: 435,
+    stops: 0,
+    carriers: ['QQ Atlantic'],
+    operatedBy: null,
+    fromMinor: 82_000,
+    ...over,
+  };
+}
+/** A finished booking read of attempt 1's second return: three offers, cheapest first. */
+function booking(over: Partial<BookingRead> = {}): BookingRead {
+  return {
+    status: 'read',
+    rule: null,
+    attempt: 1,
+    returnIndex: 1,
+    expanded: true,
+    moreControl: false,
+    grouped: 1,
+    offers: [
+      { seller: 'QQ Travel', fare: null, priceMinor: 84_500 },
+      { seller: 'QQ Fares', fare: 'Economy Light', priceMinor: 85_100 },
+      { seller: 'QQ Fares', fare: 'Economy Flex', priceMinor: 91_000 },
+    ],
+    unparsed: 2,
+    nonGbp: 1,
+    offersStated: 45,
+    ...over,
+  };
+}
+/**
+ * A two-attempt return read, through the contract's schema: the first outbound's one return has two stops (over the
+ * limits), so the worker tried the second outbound, whose two returns it read and whose second it booked.
+ */
+function returnRead(over: Partial<ReturnRead> = {}): ReturnRead {
+  return returnReadSchema.parse({
+    limits: LIMITS,
+    status: 'read',
+    rule: null,
+    attempts: [
+      {
+        outboundIndex: 0,
+        outboundFits: true,
+        listed: 'returns',
+        moreListed: true,
+        returns: [back({ stops: 2, durationMinutes: 900, arrivesDayOffset: 0, fromMinor: 79_000 })],
+        optionsUnparsed: 1,
+        optionsOtherCell: 0,
+        resultsStated: 14,
+      },
+      {
+        outboundIndex: 1,
+        outboundFits: true,
+        listed: 'returns',
+        moreListed: false,
+        returns: [
+          back(),
+          back({
+            departsLocal: '21:30',
+            arrivesLocal: '09:45',
+            durationMinutes: 495,
+            stops: 1,
+            carriers: ['QQ Atlantic', 'QQ Air'],
+            operatedBy: 'QQ Air',
+            arrivesDayOffset: -1,
+            fromMinor: 84_500,
+          }),
+        ],
+        optionsUnparsed: 0,
+        optionsOtherCell: 2,
+        resultsStated: null,
+      },
+    ],
+    triedAll: true,
+    booking: booking(),
+    ...over,
+  });
+}
+/** A return phase that ended without a read (no attempt, no booking), with its rule. */
+const ended = (status: ReturnRead['status'], rule: string | null): ReturnRead =>
+  returnReadSchema.parse({ limits: LIMITS, status, rule, attempts: [], triedAll: false, booking: null });
+/** A read return phase whose booking read ended transient (the offers read before the expansion kept). */
+const bookingTransient = (): ReturnRead =>
+  returnRead({
+    booking: booking({ status: 'expand-failed', rule: 'more-options', expanded: false, offersStated: null }),
+  });
+
+describe('FlightListsRepo.insert with returns (spec rev 56 §7, migration 0012)', () => {
+  it('writes the columns, the attempts, the returns and the offers in order, and both reads give them back field for field', () => {
+    const { db, repo, list, definitionId } = setup();
+    const r = returnRead();
+    const id = repo.insert(list({ returns: r }));
+    expect(
+      db.raw
+        .prepare(
+          'SELECT return_status, return_rule, return_tried_all, booking_status, booking_attempt, booking_return_position, booking_expanded, booking_more_control, booking_grouped, booking_unparsed, booking_non_gbp, booking_offers_stated FROM flight_lists',
+        )
+        .get(),
+    ).toEqual({
+      return_status: 'read',
+      return_rule: null,
+      return_tried_all: 1,
+      booking_status: 'read',
+      booking_attempt: 1,
+      booking_return_position: 1,
+      booking_expanded: 1,
+      booking_more_control: 0,
+      booking_grouped: 1,
+      booking_unparsed: 2,
+      booking_non_gbp: 1,
+      booking_offers_stated: 45,
+    });
+    expect(
+      db.raw.prepare('SELECT attempt, outbound_position FROM flight_list_attempts ORDER BY rowid').all(),
+    ).toEqual([
+      { attempt: 0, outbound_position: 0 },
+      { attempt: 1, outbound_position: 1 },
+    ]);
+    expect(
+      db.raw.prepare('SELECT attempt, position, from_pence FROM flight_list_returns ORDER BY rowid').all(),
+    ).toEqual([
+      { attempt: 0, position: 0, from_pence: 79_000 },
+      { attempt: 1, position: 0, from_pence: 82_000 },
+      { attempt: 1, position: 1, from_pence: 84_500 },
+    ]);
+    expect(
+      db.raw
+        .prepare('SELECT position, seller, fare, price_pence FROM flight_list_offers ORDER BY rowid')
+        .all(),
+    ).toEqual([
+      { position: 0, seller: 'QQ Travel', fare: null, price_pence: 84_500 },
+      { position: 1, seller: 'QQ Fares', fare: 'Economy Light', price_pence: 85_100 },
+      { position: 2, seller: 'QQ Fares', fare: 'Economy Flex', price_pence: 91_000 },
+    ]);
+    const [cell] = repo.newestPerCell(definitionId, [c()], 'economy', 'GB');
+    expect(cell?.id).toBe(id);
+    expect(cell?.returns).toEqual(r);
+    const [pair] = repo.newestPerDatePair(
+      definitionId,
+      [D1],
+      { origins: [LHR], destinations: [JFK] },
+      'economy',
+      'GB',
+    );
+    expect(pair?.returns).toEqual(r);
+  });
+
+  it('a return phase that ended with no attempt, and one with a transient booking read, read back whole', () => {
+    const { repo, list, definitionId } = setup();
+    const skipped = ended('skipped', 'monthly-headroom');
+    repo.insert(list({ returns: skipped }));
+    const noOutbound = ended('no-outbound', null);
+    repo.insert(list({ ...D2, listed: 'no-flights', flights: [], returns: noOutbound }));
+    const transient = bookingTransient();
+    repo.insert(list({ origin: LGW, destination: EWR, returns: transient }));
+    expect(
+      repo
+        .newestPerCell(definitionId, [c(), c(LHR, JFK, D2), c(LGW, EWR)], 'economy', 'GB')
+        .map((l) => l.returns),
+    ).toEqual([skipped, noOutbound, transient]);
+  });
+
+  it('an attempt whose return view listed no return for the pair reads back with none, beside the next attempt', () => {
+    const { repo, list, definitionId } = setup();
+    const base = returnRead();
+    const [first, second] = base.attempts;
+    if (first === undefined || second === undefined) throw new Error('fixture has two attempts');
+    const r = returnReadSchema.parse({
+      ...base,
+      attempts: [{ ...first, listed: 'none-for-cell', returns: [], optionsOtherCell: 3 }, second],
+    });
+    repo.insert(list({ returns: r }));
+    const [got] = repo.newestPerCell(definitionId, [c()], 'economy', 'GB');
+    expect(got?.returns).toEqual(r);
+    expect(got?.returns?.attempts.map((a) => a.returns.length)).toEqual([0, 2]);
+  });
+
+  it('without returns stores return_status NULL and reads back returns null; so does an explicit null', () => {
+    const { db, repo, list, definitionId } = setup();
+    repo.insert(list());
+    repo.insert(list({ ...D2, returns: null }));
+    expect(db.raw.prepare('SELECT return_status, booking_status FROM flight_lists').all()).toEqual([
+      { return_status: null, booking_status: null },
+      { return_status: null, booking_status: null },
+    ]);
+    expect(
+      repo.newestPerCell(definitionId, [c(), c(LHR, JFK, D2)], 'economy', 'GB').map((l) => l.returns),
+    ).toEqual([null, null]);
+    expect(count(db, 'flight_list_attempts')).toBe(0);
+  });
+
+  it('refuses before any SQL an outbound past the flights, a failed list with returns and a return read the schema refuses', () => {
+    const { db, repo, list } = setup();
+    const past = returnRead();
+    const { statements } = statementsOf(db, () => {
+      expect(() =>
+        repo.insert(
+          list({ returns: { ...past, attempts: past.attempts.map((a) => ({ ...a, outboundIndex: 2 })) } }),
+        ),
+      ).toThrow(/^return-read: attempt 0's outbound 2 is not one of the list's 2 flights/);
+      expect(() => repo.insert(list({ ...failed, returns: ended('skipped', 'spacing') }))).toThrow(
+        /a failed list carries no return read/,
+      );
+      // a read return phase with no attempt: returnReadSchema refuses it
+      expect(() => repo.insert(list({ returns: { ...past, attempts: [], booking: null } }))).toThrow(
+        /^return-read: .*attempts exactly when/s,
+      );
+      // an offer of 0 pence
+      expect(() =>
+        repo.insert(
+          list({
+            returns: {
+              ...past,
+              booking: booking({ offers: [{ seller: 'QQ Travel', fare: null, priceMinor: 0 }] }),
+            },
+          }),
+        ),
+      ).toThrow(/^return-read: /);
+    });
+    expect(statements).toBe(0);
+    expect(count(db, 'flight_lists')).toBe(0);
+  });
+
+  it.each<[string, string, string, string]>([
+    ['a return', 'flight_list_returns', 'from_pence', 'flight_list_returns_from_ck'],
+    ['an offer', 'flight_list_offers', 'price_pence', 'flight_list_offers_price_ck'],
+  ])(
+    '%s the table refuses rolls the list, its flights, attempts and returns back',
+    (_, table, column, ck) => {
+      const { db, repo, list } = setup();
+      // why: the schema refuses 0 pence before any SQL, so the table's CHECK is reached by rewriting the row the
+      // repository has just written to 0 (a temporary trigger stands in for a stubbed statement; no cast needed)
+      db.raw.exec(
+        `CREATE TEMP TRIGGER zero_${table} AFTER INSERT ON ${table} BEGIN UPDATE ${table} SET ${column} = 0 WHERE rowid = NEW.rowid; END`,
+      );
+      expect(() => repo.insert(list({ returns: returnRead() }))).toThrow(new RegExp(ck));
+      for (const t of [
+        'flight_lists',
+        'flight_list_flights',
+        'flight_list_attempts',
+        'flight_list_returns',
+        'flight_list_offers',
+      ])
+        expect(count(db, t), t).toBe(0);
+    },
+  );
+
+  it('an on-demand list with returns has no execution', () => {
+    const { repo, list, definitionId } = setup();
+    repo.insert(list({ executionId: null, returns: returnRead() }));
+    const [got] = repo.newestPerCell(definitionId, [c()], 'economy', 'GB');
+    expect(got?.executionId).toBeNull();
+    expect(got?.returns?.booking?.offers).toHaveLength(3);
+  });
+
+  it('a corrupt row names its column: an outbound position past the flights, and stored limits the schema refuses', () => {
+    const { db, repo, list, definitionId } = setup();
+    repo.insert(list({ returns: returnRead() }));
+    db.raw.prepare('UPDATE flight_list_attempts SET outbound_position = 2 WHERE attempt = 1').run();
+    expect(() => repo.newestPerCell(definitionId, [c()], 'economy', 'GB')).toThrow(
+      /stored flight_list_attempts\.outbound_position is not valid/,
+    );
+    db.raw.prepare('UPDATE flight_list_attempts SET outbound_position = 1 WHERE attempt = 1').run();
+    db.raw.prepare(`UPDATE flight_lists SET return_limits_json = '{"maxJourneyMinutes":0}'`).run();
+    expect(() => repo.newestPerCell(definitionId, [c()], 'economy', 'GB')).toThrow(
+      /stored flight_lists\.return_\* is not valid/,
+    );
+  });
+});
+
+describe('transientStreak (spec rev 56 §7, §8.1 reuse: one retry, then refresh)', () => {
+  it('counts the cell’s two newest lists that ended transient, newest first, stopping at the first finished one', () => {
+    const { db, repo, list, definitionId } = setup();
+    // LHR-JFK on D1: two transient ends (a not-settled return, then a transient booking read) → 2
+    repo.insert(list({ fetchedAt: hoursAt(8), returns: returnRead() }));
+    repo.insert(list({ fetchedAt: hoursAt(9), returns: bookingTransient() }));
+    repo.insert(list({ fetchedAt: hoursAt(10), returns: ended('not-settled', 'not-settled') }));
+    // LHR-JFK on D2: a finished read under a transient one → 1
+    repo.insert(list({ ...D2, fetchedAt: hoursAt(9), returns: returnRead() }));
+    repo.insert(list({ ...D2, fetchedAt: hoursAt(10), returns: ended('skipped', 'spacing') }));
+    // LGW-EWR on D1: a transient end under a finished newest → 0
+    repo.insert(
+      list({
+        origin: LGW,
+        destination: EWR,
+        fetchedAt: hoursAt(9),
+        returns: ended('select-failed', 'click'),
+      }),
+    );
+    repo.insert(list({ origin: LGW, destination: EWR, fetchedAt: hoursAt(10), returns: returnRead() }));
+    // LGW-JFK on D1: a failed newest ended no return phase → 0; LHR-EWR on D1: one transient list alone → 1
+    repo.insert(
+      list({ origin: LGW, destination: JFK, fetchedAt: hoursAt(9), returns: ended('unrecognised', 'shape') }),
+    );
+    repo.insert(list({ origin: LGW, destination: JFK, fetchedAt: hoursAt(10), ...failed }));
+    repo.insert(list({ origin: LHR, destination: EWR, returns: ended('not-settled', 'not-settled') }));
+    const asked = [c(), c(LHR, JFK, D2), c(LGW, EWR), c(LGW, JFK), c(LHR, EWR)];
+    const { result, statements } = statementsOf(db, () =>
+      repo.newestPerCell(definitionId, asked, 'economy', 'GB'),
+    );
+    expect(statements).toBe(3);
+    expect(result.map((l) => l.transientStreak)).toEqual([2, 1, 0, 0, 1]);
+    // a list with no return phase (an outbound-only read) is not transient
+    repo.insert(list({ origin: LGW, destination: EWR, fetchedAt: hoursAt(11) }));
+    expect(repo.newestPerCell(definitionId, [c(LGW, EWR)], 'economy', 'GB')[0]?.transientStreak).toBe(0);
+    const space = { origins: [LHR], destinations: [JFK] };
+    expect(
+      repo.newestPerDatePair(definitionId, [D1, D2], space, 'economy', 'GB').map((l) => l.transientStreak),
+    ).toEqual([2, 1]);
+  });
+
+  it('a page of 50 cells is still three statements', () => {
+    const { db, repo, list, definitionId } = setup();
+    const cells = Array.from({ length: 50 }, (_, i) =>
+      c(LHR, JFK, {
+        departureDate: asIsoDate(`2027-0${1 + Math.floor(i / 25)}-${String(1 + (i % 25)).padStart(2, '0')}`),
+        returnDate: asIsoDate('2027-04-28'),
+      }),
+    );
+    for (const k of cells) repo.insert(list({ ...k, returns: returnRead() }));
+    const { result, statements } = statementsOf(db, () =>
+      repo.newestPerCell(definitionId, cells, 'economy', 'GB'),
+    );
+    expect(statements).toBe(3);
+    expect(result).toHaveLength(50);
+    expect(result.every((l) => l.returns?.booking?.offers.length === 3)).toBe(true);
+  });
+});
+
+describe('FlightListsRepo.newestWithReturns (spec rev 56 §6.9, §7)', () => {
+  it('returns the newest list per cell, only when it is read with a finished return phase, with its returns and offers, in three statements', () => {
+    const { db, repo, list, definitionId } = setup();
+    // LHR-JFK on D1: an older read under a newer one → the newer
+    repo.insert(list({ fetchedAt: hoursAt(9), returns: returnRead() }));
+    const newest = repo.insert(list({ fetchedAt: hoursAt(10), returns: returnRead({ triedAll: false }) }));
+    // LHR-JFK on D2: no-outbound counts as finished
+    const none = repo.insert(
+      list({ ...D2, listed: 'no-flights', flights: [], returns: ended('no-outbound', null) }),
+    );
+    // LGW-EWR on D1: a finished read under a newer not-settled one → nothing (never the older)
+    repo.insert(list({ origin: LGW, destination: EWR, fetchedAt: hoursAt(9), returns: returnRead() }));
+    repo.insert(
+      list({
+        origin: LGW,
+        destination: EWR,
+        fetchedAt: hoursAt(10),
+        returns: ended('not-settled', 'not-settled'),
+      }),
+    );
+    // LGW-JFK on D1: a newest list without a return phase, LHR-EWR on D1: a failed newest → nothing
+    repo.insert(list({ origin: LGW, destination: JFK, fetchedAt: hoursAt(9), returns: returnRead() }));
+    repo.insert(list({ origin: LGW, destination: JFK, fetchedAt: hoursAt(10) }));
+    repo.insert(list({ origin: LHR, destination: EWR, fetchedAt: hoursAt(9), returns: returnRead() }));
+    repo.insert(list({ origin: LHR, destination: EWR, fetchedAt: hoursAt(10), ...failed }));
+    // another point of sale and another definition are not read
+    repo.insert(list({ pointOfSale: 'US', fetchedAt: hoursAt(11), returns: returnRead() }));
+    const { result, statements } = statementsOf(db, () =>
+      repo.newestWithReturns(definitionId, 'economy', 'GB', null),
+    );
+    expect(statements).toBe(3);
+    expect(result.map((l) => l.id).sort()).toEqual([newest, none].sort());
+    const byId = new Map(result.map((l) => [l.id, l]));
+    // the same list newestPerCell gives, field for field
+    const [cell, cellD2] = repo.newestPerCell(definitionId, [c(), c(LHR, JFK, D2)], 'economy', 'GB');
+    expect(byId.get(newest)).toEqual(cell);
+    expect(byId.get(none)).toEqual(cellD2);
+    expect(byId.get(newest)?.returns).toEqual(returnRead({ triedAll: false }));
+    expect(repo.newestWithReturns(rawExecution(db, budget).definitionId, 'economy', 'GB', null)).toEqual([]);
+  });
+
+  it('under an executionIds scope reads only lists of those executions; an on-demand list is in no scope', () => {
+    const { db, repo, list, definitionId, executionId } = setup();
+    const other = { executionId: 'e-other' };
+    db.raw
+      .prepare(
+        `INSERT INTO search_executions (id, definition_id, definition_snapshot_json, trigger, status, created_at) VALUES ('e-other', ?, '{}', 'manual', 'completed', ?)`,
+      )
+      .run(definitionId, hoursAt(8));
+    const mine = repo.insert(list({ fetchedAt: hoursAt(9), returns: returnRead() }));
+    const theirs = repo.insert(
+      list({ executionId: other.executionId, fetchedAt: hoursAt(10), returns: returnRead() }),
+    );
+    const onDemand = repo.insert(list({ ...D2, executionId: null, returns: returnRead() }));
+    expect(
+      repo.newestWithReturns(definitionId, 'economy', 'GB', { executionIds: [executionId] }).map((l) => l.id),
+    ).toEqual([mine]);
+    expect(
+      repo
+        .newestWithReturns(definitionId, 'economy', 'GB', { executionIds: [other.executionId] })
+        .map((l) => l.id),
+    ).toEqual([theirs]);
+    expect(repo.newestWithReturns(definitionId, 'economy', 'GB', { executionIds: [] })).toEqual([]);
+    expect(
+      repo
+        .newestWithReturns(definitionId, 'economy', 'GB', null)
+        .map((l) => l.id)
+        .sort(),
+    ).toEqual([theirs, onDemand].sort());
   });
 });

@@ -52,6 +52,7 @@ export type {
   ExecutionCreateInput,
   ExecutionPatch,
   FlightListInsert,
+  NewestFlightList,
   ObservationRow,
   OfferHistoryPoint,
   RepoOptions,
@@ -59,5 +60,6 @@ export type {
   ReusedCopy,
   StoredFlightList,
   TileWrite,
+  TransientStreak,
   VerifiedCellWrite,
 } from './types.js';

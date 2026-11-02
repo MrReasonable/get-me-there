@@ -29,11 +29,19 @@ interface Window {
 }
 
 /**
+ * Spec rev 56 §5.3, §7: what a row counts toward a page scope: its `page_count` (the plan while pending, the answer's
+ * pages once finalised, 0 admitted), or 1 when it holds none. `page_count` is NULL on every row of every other provider
+ * (its CHECK), so those still count one a row.
+ */
+const PAGES = 'COALESCE(SUM(COALESCE(page_count, 1)), 0)';
+
+/**
  * Spec §5.3 cap predicate for one provider: billed vendors count pending/unknown or billable rows; free vendors every
- * non-cache row; a pages-only provider (camoufox) never counts a `no-page` row (pending rows, still NULL, count).
+ * non-cache row; a pages-only provider (camoufox) never counts a `no-page` row (pending rows, still NULL, count), and
+ * counts each other row's pages (spec rev 56 §7).
  */
 export const PROVIDER_USAGE_SQL = `
-SELECT COUNT(*) AS calls, COALESCE(SUM(cost_micro_gbp), 0) AS cost
+SELECT ${PAGES} AS calls, COALESCE(SUM(cost_micro_gbp), 0) AS cost
 FROM provider_requests
 WHERE provider_id = @providerId AND outcome <> 'cache_hit'
   AND (@billed = 0 OR outcome IN ('pending', 'unknown') OR billable = 1)
@@ -49,14 +57,18 @@ WHERE provider_id IN (SELECT value FROM json_each(@billedProviders)) AND outcome
   AND started_at >= @windowStart AND started_at < @windowEnd`;
 
 const INSERT_PENDING_SQL = `
-INSERT INTO provider_requests (provider_id, execution_id, endpoint_path, tile_index, started_at, outcome, billable, cost_micro_gbp, http_attempt, scroll_count)
-VALUES (@providerId, @executionId, @endpointPath, @tileIndex, @startedAt, 'pending', NULL, @cost, @httpAttempt, @scrolls)`;
+INSERT INTO provider_requests (provider_id, execution_id, endpoint_path, tile_index, started_at, outcome, billable, cost_micro_gbp, http_attempt, scroll_count, page_count)
+VALUES (@providerId, @executionId, @endpointPath, @tileIndex, @startedAt, 'pending', NULL, @cost, @httpAttempt, @scrolls, @pages)`;
 // why: spec §7 rev 34 (CB-4): a finalised row holds the scrolls the answer stated; an `unknown` attempt with no answer
 // (a timeout or an abort after the request left) keeps its planned scrolls, so the scroll caps never undercount
 // (CodeRabbit on PR #9); any other attempt with no answer holds NULL
+// why: spec rev 56 §7 (R-zero): likewise a finalised row holds the pages the answer stated (0 admitted), an `unknown`
+// attempt that stated none keeps its plan, and a `no-page` row, or an answer that stated none, holds NULL (counting 1
+// as a page row, nothing as a no-page one)
 const FINALISE_SQL = `
 UPDATE provider_requests SET outcome = @outcome, http_status = @httpStatus, duration_ms = @durationMs, finished_at = @finishedAt, billable = @billable, page_class = @pageClass,
   scroll_count = CASE WHEN @scrollCount IS NULL AND @outcome = 'unknown' THEN scroll_count ELSE @scrollCount END,
+  page_count = CASE WHEN @pageClass = 'no-page' THEN NULL WHEN @pageCount IS NULL AND @outcome = 'unknown' THEN page_count ELSE @pageCount END,
   cost_micro_gbp = CASE WHEN @zeroCost = 1 THEN 0 ELSE cost_micro_gbp END
 WHERE id = @id AND outcome = 'pending'`;
 const CLASSIFY_SQL = `UPDATE provider_requests SET error_kind = @kind WHERE id = @id`;
@@ -76,9 +88,10 @@ WHERE execution_id = @executionId AND provider_id IN (SELECT value FROM json_eac
  * rows), and its cap read from the execution's snapshot (`$.budget.providerMaxCalls.<provider>`), never from config.
  * Spec rev 55 §8.1 (ruling A32): the rows are split by endpoint path into two allowances, `@flights = 0` the grid or list
  * pages (this cap) and `@flights = 1` the flight-list pages (`$.budget.flightListPages`); each keeps the `no-page` filter.
+ * Spec rev 56 §7: each row counts its pages (`PAGES`), so a flights request with a return phase counts up to 2.
  */
 export const PROVIDER_EXECUTION_USAGE_SQL = `
-SELECT COUNT(*) AS calls, COALESCE(SUM(cost_micro_gbp), 0) AS cost
+SELECT ${PAGES} AS calls, COALESCE(SUM(cost_micro_gbp), 0) AS cost
 FROM provider_requests
 WHERE execution_id = @executionId AND provider_id = @providerId AND outcome <> 'cache_hit'
   AND (@pagesOnly = 0 OR page_class IS NOT 'no-page')
@@ -155,6 +168,14 @@ function prepareStatements(db: Db): GuardStatements {
 }
 
 /**
+ * Spec rev 56 §5.3, §7: the pages a reserve plans: `pages` (default 1) for a camoufox row, which every row of that
+ * provider may be (a page or a flights request); null for every other provider, whose rows hold no page count.
+ */
+function pagesOf(p: ReserveParams): number | null {
+  return p.providerId === 'camoufox' ? (p.pages ?? 1) : null;
+}
+
+/**
  * The budget guard, enforced in SQL (spec §5.3). `reserve` runs every cap predicate and inserts the `pending`
  * ledger row inside one `BEGIN IMMEDIATE` transaction (`Db.immediateTransaction`), so two writers can never
  * both pass the same headroom. The billable decision happens at `finalise`.
@@ -177,6 +198,7 @@ export class SqliteBudgetGuard implements BudgetGuard {
     assertEndpointPath(p.endpointPath);
     // why: ruling 6 (cost-002). The configured rate is the only cost the ledger can hold, so a stale or mis-wired
     // caller cannot record 0 for a per-call plan and slip past global-month and execution-cost.
+    if (p.pages !== undefined) assertInt('pages', p.pages, 1);
     if (p.costMicroGbp !== budget.costPerCallMicroGbp)
       throw new RowRejected(
         'cost',
@@ -195,10 +217,11 @@ export class SqliteBudgetGuard implements BudgetGuard {
           cost: p.costMicroGbp,
           httpAttempt: p.httpAttempt,
           scrolls: p.scrolls ?? null,
+          pages: pagesOf(p),
         }).lastInsertRowid,
       );
     });
-    return this.reservation(id, budget);
+    return this.reservation(id, budget, p.providerId);
   }
 
   recordCacheHit(p: CacheHitParams): void {
@@ -279,12 +302,15 @@ export class SqliteBudgetGuard implements BudgetGuard {
   protected checkCaps(p: ReserveParams, budget: ProviderBudget, now: IsoDateTime): void {
     const prov = this.providerUsage(p.providerId, budget, now, budget.window);
     const callCap = effectiveCallCap(budget);
-    if (prov.calls + 1 > callCap)
+    // why: spec rev 56 §5.3 (R-reserve): a camoufox request reserves its planned pages, so a return-phase request needs
+    // room for 2 in both page scopes; every other row asks for one call
+    const asked = pagesOf(p) ?? 1;
+    if (prov.calls + asked > callCap)
       throw this.exceeded(
         budget.window === 'lifetime' ? 'provider-lifetime' : 'provider-month',
         callCap,
         prov.calls,
-        1,
+        asked,
         p.providerId,
       );
     if (p.executionId !== null) {
@@ -296,7 +322,8 @@ export class SqliteBudgetGuard implements BudgetGuard {
         : this.providerExecutionCap(p.executionId, p.providerId);
       if (cap !== null) {
         const u = this.providerExecutionRows(p.executionId, p.providerId, budget, flights);
-        if (u.calls + 1 > cap) throw this.exceeded('provider-execution', cap, u.calls, 1, p.providerId);
+        if (u.calls + asked > cap)
+          throw this.exceeded('provider-execution', cap, u.calls, asked, p.providerId);
       }
     }
     if (p.scrolls !== undefined && p.scrolls > 0) this.checkScrolls(p, p.scrolls, budget, now);
@@ -513,13 +540,14 @@ export class SqliteBudgetGuard implements BudgetGuard {
     return new BudgetExceeded({ scope, cap, current, requested, providerId });
   }
 
-  private reservation(id: number, budget: ProviderBudget): Reservation {
+  private reservation(id: number, budget: ProviderBudget, providerId: ProviderId): Reservation {
     let done = false;
     return {
       id: String(id),
       finalise: (r) => {
         if (done) throw new Error(`reservation ${id} already finalised`);
         assertInt('durationMs', r.durationMs);
+        if (r.pageCount !== undefined) assertInt('pageCount', r.pageCount);
         // spec §5.3 Billable rule: billable providers iff upstream HTTP 200; free providers never.
         const billable = budget.billable && r.outcome === 'ok' && r.httpStatus === 200;
         // why: an `unknown` attempt may have been billed by the vendor, so it keeps its cost and stays counted.
@@ -534,6 +562,8 @@ export class SqliteBudgetGuard implements BudgetGuard {
           zeroCost: zeroCost ? 1 : 0,
           pageClass: r.pageClass ?? null,
           scrollCount: r.scrollCount ?? null,
+          // why: page_count is camoufox's alone (its CHECK); another provider's row keeps NULL whatever it is told
+          pageCount: providerId === 'camoufox' ? (r.pageCount ?? null) : null,
         }).changes;
         if (changes !== 1) throw new Error(`reservation ${id} is no longer pending`);
         done = true;

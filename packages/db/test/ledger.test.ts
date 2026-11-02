@@ -193,6 +193,43 @@ describe('LedgerRepo (spec §5.3, §7, §8.1 parity)', () => {
     expect(c.flightLists).toEqual([{ providerId: 'camoufox', calls: 3, costMicroGbp: 0, cacheHits: 1 }]);
   });
 
+  it("countsFor: a camoufox page row counts its pages, as the guard's usage sums them (spec rev 56 §5.3, §7)", () => {
+    const db = freshDb();
+    const { executionId } = rawExecution(db, {
+      maxCalls: 100,
+      maxFreeCalls: 100,
+      maxCostMicroGbp: 100_000,
+      flightListPages: 20,
+      providerMaxCalls: { camoufox: 100 },
+    });
+    const guard = new SqliteBudgetGuard(
+      db,
+      budgetConfig({ camoufox: limits({ billable: false, monthlyCallCap: 1500, pagesOnly: true }) }),
+      fixedClock(T0),
+    );
+    const reserve = (endpointPath: string, tileIndex: number | null, pages?: number) =>
+      guard.reserve({
+        providerId: 'camoufox',
+        executionId,
+        tileIndex,
+        costMicroGbp: 0,
+        httpAttempt: 1,
+        endpointPath,
+        ...(pages === undefined ? {} : { pages }),
+      });
+    reserve('/v1/page', 0).finalise({ ...ok, pageClass: 'page' });
+    reserve('/v1/flights', null, 2).finalise({ ...ok, pageClass: 'page', pageCount: 2 });
+    reserve('/v1/flights', null, 2).finalise({ ...ok, pageClass: 'page', pageCount: 0 });
+    reserve('/v1/flights', null, 2).finalise({ ...ok, pageClass: 'page' });
+    reserve('/v1/flights', null, 2).finalise({ outcome: 'unknown', durationMs: 1 });
+    const c = new LedgerRepo(db).countsFor(executionId);
+    const usage = guard.usage({ kind: 'provider-execution', executionId, providerId: 'camoufox' });
+    expect(c.flightLists).toEqual([{ providerId: 'camoufox', calls: 5, costMicroGbp: 0, cacheHits: 0 }]);
+    expect(c.flightLists[0]?.calls).toBe(usage.flightLists?.calls);
+    expect(c.perProvider[0]?.calls).toBe(usage.calls);
+    expect(c.calls).toBe(guard.usage({ kind: 'provider-month', providerId: 'camoufox' }).calls);
+  });
+
   it('pruneCacheHits removes only cache_hit rows older than the cutoff for the named providers', () => {
     const db = freshDb();
     const clock = fixedClock(at('2026-06-01T00:00:00.000Z'));

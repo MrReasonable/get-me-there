@@ -1,4 +1,5 @@
 import {
+  BOOKING_TRANSIENT,
   type Cabin,
   type CellKey,
   FLIGHT_LIST_MAX_FLIGHTS,
@@ -8,21 +9,48 @@ import {
   listedFlightSchema,
   type PointOfSale,
   pointOfSaleSchema,
+  RETURN_FINISHED,
+  RETURN_TRANSIENT,
+  type ReturnRead,
+  returnReadSchema,
+  returnsOutboundIssue,
 } from '@gmt/core';
 import type { Db } from '../client.js';
 import { CABINS, LISTED, STOP_DETAILS } from '../internal/enums.js';
-import { nullableOneOf, oneOf, parseWith, readDate, readIata, readJson, readTime } from '../internal/read.js';
+import {
+  nullableOneOf,
+  oneOf,
+  parseWith,
+  RowCorrupt,
+  readDate,
+  readIata,
+  readJson,
+  readTime,
+} from '../internal/read.js';
 import { assertInt, assertIsoDate, assertIsoDateTime, RowRejected } from '../internal/validate.js';
-import type { FlightListInsert, StoredFlightList } from '../types.js';
+import { sqlList } from '../schema/checks.js';
+import type { FlightListInsert, NewestFlightList, TransientStreak } from '../types.js';
 
 const INSERT_LIST_SQL = `
 INSERT INTO flight_lists (definition_id, execution_id, provider_id, source_kind, cabin, origin, destination, departure_date, return_date,
-  fetched_at, point_of_sale, currency_native, status, reason, listed, min_minor, tab_minor, cheapest_view, options_unparsed, options_other_cell, results_stated)
+  fetched_at, point_of_sale, currency_native, status, reason, listed, min_minor, tab_minor, cheapest_view, options_unparsed, options_other_cell, results_stated,
+  return_status, return_rule, return_limits_json, return_tried_all, booking_status, booking_rule, booking_attempt, booking_return_position,
+  booking_expanded, booking_more_control, booking_grouped, booking_unparsed, booking_non_gbp, booking_offers_stated)
 VALUES (@definitionId, @executionId, @providerId, @sourceKind, @cabin, @origin, @destination, @departureDate, @returnDate,
-  @fetchedAt, @pointOfSale, 'GBP', @status, @reason, @listed, @minMinor, @tabMinor, @cheapestView, @optionsUnparsed, @optionsOtherCell, @resultsStated)`;
+  @fetchedAt, @pointOfSale, 'GBP', @status, @reason, @listed, @minMinor, @tabMinor, @cheapestView, @optionsUnparsed, @optionsOtherCell, @resultsStated,
+  @returnStatus, @returnRule, @returnLimitsJson, @returnTriedAll, @bookingStatus, @bookingRule, @bookingAttempt, @bookingReturnPosition,
+  @bookingExpanded, @bookingMoreControl, @bookingGrouped, @bookingUnparsed, @bookingNonGbp, @bookingOffersStated)`;
 const INSERT_FLIGHT_SQL = `
 INSERT INTO flight_list_flights (list_id, position, departs_local, arrives_local, arrives_day_offset, duration_minutes, stops, carriers_json, operated_by, price_pence)
 VALUES (@listId, @position, @departsLocal, @arrivesLocal, @arrivesDayOffset, @durationMinutes, @stops, @carriersJson, @operatedBy, @pricePence)`;
+const INSERT_ATTEMPT_SQL = `
+INSERT INTO flight_list_attempts (list_id, attempt, outbound_position, outbound_fits, listed, more_listed, options_unparsed, options_other_cell, results_stated)
+VALUES (@listId, @attempt, @outboundPosition, @outboundFits, @listed, @moreListed, @optionsUnparsed, @optionsOtherCell, @resultsStated)`;
+const INSERT_RETURN_SQL = `
+INSERT INTO flight_list_returns (list_id, attempt, position, departs_local, arrives_local, arrives_day_offset, duration_minutes, stops, carriers_json, operated_by, from_pence)
+VALUES (@listId, @attempt, @position, @departsLocal, @arrivesLocal, @arrivesDayOffset, @durationMinutes, @stops, @carriersJson, @operatedBy, @fromPence)`;
+const INSERT_OFFER_SQL = `
+INSERT INTO flight_list_offers (list_id, position, seller, fare, price_pence) VALUES (@listId, @position, @seller, @fare, @pricePence)`;
 
 /**
  * The newest list is the greatest `fetched_at`, ties to the later row (`id`): the order `flight_lists_cell_idx` stores,
@@ -30,14 +58,35 @@ VALUES (@listId, @position, @departsLocal, @arrivesLocal, @arrivesDayOffset, @du
  */
 const NEWEST = 'ORDER BY n.fetched_at DESC, n.id DESC LIMIT 1';
 
-// why: one statement per read, the list rows joined to their flights, so a page of ten date pairs is one round trip and
-// the newest list per ask is chosen by the database (the WP19 grouped-read pattern); `ord` carries the request order
+/**
+ * Spec rev 56 §7, §8.1 (R-retry): whether list `t` ended with a transient return or booking status (core's two sets;
+ * a list with neither, an outbound-only read or a `failed` one, did not). `IN` on a NULL status is NULL, hence the
+ * COALESCEs.
+ */
+const transientOf = (t: string) =>
+  `(COALESCE(${t}.return_status IN (${sqlList([...RETURN_TRANSIENT])}), 0) OR COALESCE(${t}.booking_status IN (${sqlList([...BOOKING_TRANSIENT])}), 0))`;
+/**
+ * The chosen list `l`'s `transientStreak`: 0 when it did not end transient, else 1 plus whether the list before it in
+ * its own cell (the second newest, by the order `NEWEST` reads) did too. One more probe of the cell index per list.
+ */
+const STREAK = `CASE WHEN ${transientOf('l')} THEN 1 + COALESCE((
+    SELECT ${transientOf('p')} FROM flight_lists p
+    WHERE p.definition_id = l.definition_id AND p.origin = l.origin AND p.destination = l.destination
+      AND p.departure_date = l.departure_date AND p.return_date = l.return_date AND p.cabin = l.cabin AND p.point_of_sale = l.point_of_sale
+    ORDER BY p.fetched_at DESC, p.id DESC LIMIT 1 OFFSET 1), 0) ELSE 0 END AS transient_streak`;
+/** The flight columns every lists statement joins. */
+const FLIGHT_COLUMNS =
+  'f.position, f.departs_local, f.arrives_local, f.arrives_day_offset, f.duration_minutes, f.stops, f.carriers_json, f.operated_by, f.price_pence';
+
+// why: one lists statement per read, the list rows joined to their flights, so a page of ten date pairs is one round
+// trip and the newest list per ask is chosen by the database (the WP19 grouped-read pattern); `ord` carries the request
+// order. The attempts with their returns, and the offers, are one statement each over the lists it chose (spec rev 56 §7).
 const PER_CELL_SQL = `
 WITH asked AS (
   SELECT CAST(j.key AS INTEGER) AS ord, json_extract(j.value, '$.origin') AS origin, json_extract(j.value, '$.destination') AS destination,
     json_extract(j.value, '$.departureDate') AS departureDate, json_extract(j.value, '$.returnDate') AS returnDate
   FROM json_each(@cells) j)
-SELECT a.ord AS ord, l.*, f.position, f.departs_local, f.arrives_local, f.arrives_day_offset, f.duration_minutes, f.stops, f.carriers_json, f.operated_by, f.price_pence
+SELECT a.ord AS ord, l.*, ${STREAK}, ${FLIGHT_COLUMNS}
 FROM asked a
 JOIN flight_lists l ON l.id = (
   SELECT n.id FROM flight_lists n
@@ -53,7 +102,7 @@ const PER_DATE_PAIR_SQL = `
 WITH asked AS (
   SELECT CAST(j.key AS INTEGER) AS ord, json_extract(j.value, '$.departureDate') AS departureDate, json_extract(j.value, '$.returnDate') AS returnDate
   FROM json_each(@pairs) j)
-SELECT a.ord AS ord, l.*, f.position, f.departs_local, f.arrives_local, f.arrives_day_offset, f.duration_minutes, f.stops, f.carriers_json, f.operated_by, f.price_pence
+SELECT a.ord AS ord, l.*, ${STREAK}, ${FLIGHT_COLUMNS}
 FROM asked a
 JOIN flight_lists l ON l.id = (
   SELECT n.id FROM flight_lists n
@@ -63,6 +112,37 @@ JOIN flight_lists l ON l.id = (
   ${NEWEST})
 LEFT JOIN flight_list_flights f ON f.list_id = l.id
 ORDER BY a.ord, f.position`;
+
+// why: spec rev 56 §6.9, §7: the newest list per cell of the definition (scoped to the asked executions when given),
+// kept only when it finished its return phase: an older finished list under a newer transient one is never returned.
+// `ord` is the list's id (one per cell); the cells come in date, then airport order.
+const WITH_RETURNS_SQL = `
+WITH ranked AS (
+  SELECT n.id, ROW_NUMBER() OVER (
+    PARTITION BY n.origin, n.destination, n.departure_date, n.return_date ORDER BY n.fetched_at DESC, n.id DESC) AS rn
+  FROM flight_lists n
+  WHERE n.definition_id = @definitionId AND n.cabin = @cabin AND n.point_of_sale = @pointOfSale
+    AND (@executionIds IS NULL OR n.execution_id IN (SELECT value FROM json_each(@executionIds))))
+SELECT l.id AS ord, l.*, ${STREAK}, ${FLIGHT_COLUMNS}
+FROM ranked r
+JOIN flight_lists l ON l.id = r.id
+LEFT JOIN flight_list_flights f ON f.list_id = l.id
+WHERE r.rn = 1 AND l.status = 'read' AND l.return_status IN (${sqlList([...RETURN_FINISHED])})
+ORDER BY l.departure_date, l.return_date, l.origin, l.destination, f.position`;
+
+// why: spec rev 56 §7: one probe of each primary key for the lists a lookup chose (no new index), ordered so each list's
+// attempts, and each attempt's returns, arrive in order; an attempt with no return (listed none-for-cell) has one row
+const ATTEMPTS_SQL = `
+SELECT a.list_id, a.attempt, a.outbound_position, a.outbound_fits, a.listed, a.more_listed, a.options_unparsed, a.options_other_cell,
+  a.results_stated, r.position, r.departs_local, r.arrives_local, r.arrives_day_offset, r.duration_minutes, r.stops, r.carriers_json,
+  r.operated_by, r.from_pence
+FROM flight_list_attempts a
+LEFT JOIN flight_list_returns r ON r.list_id = a.list_id AND r.attempt = a.attempt
+WHERE a.list_id IN (SELECT value FROM json_each(?))
+ORDER BY a.list_id, a.attempt, r.position`;
+const OFFERS_SQL = `
+SELECT list_id, position, seller, fare, price_pence FROM flight_list_offers
+WHERE list_id IN (SELECT value FROM json_each(?)) ORDER BY list_id, position`;
 
 const FOR_EXECUTION_SQL = `
 WITH asked AS (
@@ -105,6 +185,21 @@ interface JoinedRow {
   options_unparsed: number;
   options_other_cell: number;
   results_stated: number | null;
+  return_status: string | null;
+  return_rule: string | null;
+  return_limits_json: string | null;
+  return_tried_all: number | null;
+  booking_status: string | null;
+  booking_rule: string | null;
+  booking_attempt: number | null;
+  booking_return_position: number | null;
+  booking_expanded: number | null;
+  booking_more_control: number | null;
+  booking_grouped: number | null;
+  booking_unparsed: number | null;
+  booking_non_gbp: number | null;
+  booking_offers_stated: number | null;
+  transient_streak: number;
   position: number | null;
   departs_local: string | null;
   arrives_local: string | null;
@@ -115,6 +210,43 @@ interface JoinedRow {
   operated_by: string | null;
   price_pence: number | null;
 }
+
+/** An attempt row joined to one of its returns (`position` NULL when the attempt listed none). */
+interface AttemptRow {
+  list_id: number;
+  attempt: number;
+  outbound_position: number;
+  outbound_fits: number;
+  listed: string;
+  more_listed: number;
+  options_unparsed: number;
+  options_other_cell: number;
+  results_stated: number | null;
+  position: number | null;
+  departs_local: string | null;
+  arrives_local: string | null;
+  arrives_day_offset: number | null;
+  duration_minutes: number | null;
+  stops: number | null;
+  carriers_json: string | null;
+  operated_by: string | null;
+  from_pence: number | null;
+}
+interface OfferRow {
+  list_id: number;
+  position: number;
+  seller: string;
+  fare: string | null;
+  price_pence: number;
+}
+/** One list's attempt as stored (its number, the row's key), with its returns, before the schema judges it. */
+interface RawAttempt {
+  attempt: number;
+  read: Record<string, unknown> & { returns: unknown[] };
+}
+
+/** A stored 0/1 as the boolean it stands for; NULL stays NULL, for the schema to refuse by name. */
+const boolOf = (v: number | null): boolean | null => (v === null ? null : v === 1);
 
 const asCells = (cells: readonly CellKey[]) =>
   JSON.stringify(
@@ -141,7 +273,116 @@ function readFlight(r: JoinedRow): ListedFlight | null {
   });
 }
 
-function readList(first: JoinedRow, flights: ListedFlight[]): StoredFlightList {
+/** Groups the attempts statement's rows by list, each attempt with its returns in order (spec rev 56 §7). */
+function attemptsByList(rows: readonly AttemptRow[]): Map<number, RawAttempt[]> {
+  const out = new Map<number, RawAttempt[]>();
+  for (const r of rows) {
+    const attempts = out.get(r.list_id) ?? [];
+    out.set(r.list_id, attempts);
+    let a = attempts.at(-1);
+    if (a === undefined || a.attempt !== r.attempt) {
+      a = {
+        attempt: r.attempt,
+        read: {
+          outboundIndex: r.outbound_position,
+          outboundFits: boolOf(r.outbound_fits),
+          listed: r.listed,
+          moreListed: boolOf(r.more_listed),
+          returns: [],
+          optionsUnparsed: r.options_unparsed,
+          optionsOtherCell: r.options_other_cell,
+          resultsStated: r.results_stated,
+        },
+      };
+      attempts.push(a);
+    }
+    if (r.position !== null)
+      a.read.returns.push({
+        departsLocal: r.departs_local,
+        arrivesLocal: r.arrives_local,
+        arrivesDayOffset: r.arrives_day_offset,
+        durationMinutes: r.duration_minutes,
+        stops: r.stops,
+        carriers: readJson(
+          `flight_list_returns[${r.list_id}:${r.attempt}:${r.position}].carriers_json`,
+          r.carriers_json ?? 'null',
+        ),
+        operatedBy: r.operated_by,
+        fromMinor: r.from_pence,
+      });
+  }
+  return out;
+}
+
+/** Groups the offers statement's rows by list, in position order (cheapest first, as written). */
+function offersByList(rows: readonly OfferRow[]): Map<number, unknown[]> {
+  const out = new Map<number, unknown[]>();
+  for (const r of rows) {
+    const offers = out.get(r.list_id) ?? [];
+    out.set(r.list_id, offers);
+    offers.push({ seller: r.seller, fare: r.fare, priceMinor: r.price_pence });
+  }
+  return out;
+}
+
+/**
+ * Spec rev 56 §7: a list's return read assembled from its columns, attempts, returns and offers, judged by core's
+ * `returnReadSchema` (every refinement) so a corrupt row names its column; null for a list read without one. An attempt
+ * whose outbound is past the list's flights is corrupt too (the contract refuses it on the way in).
+ */
+function readReturns(
+  first: JoinedRow,
+  flights: readonly ListedFlight[],
+  attempts: readonly RawAttempt[],
+  offers: readonly unknown[],
+): ReturnRead | null {
+  if (first.return_status === null) return null;
+  const booking =
+    first.booking_status === null
+      ? null
+      : {
+          status: first.booking_status,
+          rule: first.booking_rule,
+          attempt: first.booking_attempt,
+          returnIndex: first.booking_return_position,
+          expanded: boolOf(first.booking_expanded),
+          moreControl: boolOf(first.booking_more_control),
+          grouped: first.booking_grouped,
+          offers,
+          unparsed: first.booking_unparsed,
+          nonGbp: first.booking_non_gbp,
+          offersStated: first.booking_offers_stated,
+        };
+  const returns = parseWith('flight_lists.return_*', returnReadSchema, {
+    limits: readJson('flight_lists.return_limits_json', first.return_limits_json ?? 'null'),
+    status: first.return_status,
+    rule: first.return_rule,
+    // why: the attempt number is the row's key, not a field of the read: the schema's order is the stored order
+    attempts: attempts.map((a) => a.read),
+    triedAll: boolOf(first.return_tried_all),
+    booking,
+  });
+  const past = returnsOutboundIssue(returns, flights.length);
+  if (past !== null)
+    throw new RowCorrupt(
+      'flight_list_attempts.outbound_position',
+      `list ${first.id} attempt ${past} names an outbound past its ${flights.length} flights`,
+    );
+  return returns;
+}
+
+/** The streak the lists statement computed, narrowed to what it can be (a CASE of 0, 1 or 2). */
+function streakOf(v: number): TransientStreak {
+  if (v === 0 || v === 1 || v === 2) return v;
+  throw new RowCorrupt('flight_lists.transient_streak', `unexpected value ${v}`);
+}
+
+function readList(
+  first: JoinedRow,
+  flights: ListedFlight[],
+  attempts: readonly RawAttempt[],
+  offers: readonly unknown[],
+): NewestFlightList {
   const c = 'flight_lists';
   return {
     id: first.id,
@@ -171,26 +412,46 @@ function readList(first: JoinedRow, flights: ListedFlight[]): StoredFlightList {
     optionsOtherCell: first.options_other_cell,
     resultsStated: first.results_stated,
     flights,
+    returns: readReturns(first, flights, attempts, offers),
+    transientStreak: streakOf(first.transient_streak),
   };
 }
 
 /** Folds the joined rows (ordered by ask, then flight position) into one list per ask, in ask order. */
-function foldLists(rows: readonly JoinedRow[]): StoredFlightList[] {
-  const out: StoredFlightList[] = [];
+function foldLists(rows: readonly JoinedRow[]): Array<{ first: JoinedRow; flights: ListedFlight[] }> {
+  const out: Array<{ first: JoinedRow; flights: ListedFlight[] }> = [];
   let current: { ord: number; first: JoinedRow; flights: ListedFlight[] } | null = null;
-  const flush = () => {
-    if (current !== null) out.push(readList(current.first, current.flights));
-  };
   for (const r of rows) {
     if (current === null || current.ord !== r.ord) {
-      flush();
       current = { ord: r.ord, first: r, flights: [] };
+      out.push(current);
     }
     const f = readFlight(r);
     if (f !== null) current.flights.push(f);
   }
-  flush();
   return out;
+}
+
+/** A boolean as the 0/1 the tables store. */
+const bit = (v: boolean): 0 | 1 => (v ? 1 : 0);
+
+/**
+ * Spec rev 56 §7: the return read to write with a list, judged before any SQL: none for a list read without a return
+ * phase; refused on a `failed` list, when core's `returnReadSchema` refuses it (every refinement: a 0-pence offer or
+ * "from" price included) and when an attempt names an outbound past the list's flights.
+ */
+function returnsToWrite(l: FlightListInsert): ReturnRead | null {
+  if (l.returns === undefined || l.returns === null) return null;
+  if (l.status === 'failed') throw new RowRejected('return-read', 'a failed list carries no return read');
+  const parsed = returnReadSchema.safeParse(l.returns);
+  if (!parsed.success) throw new RowRejected('return-read', parsed.error.message);
+  const past = returnsOutboundIssue(parsed.data, l.flights.length);
+  if (past !== null)
+    throw new RowRejected(
+      'return-read',
+      `attempt ${past}'s outbound ${String(parsed.data.attempts[past]?.outboundIndex)} is not one of the list's ${l.flights.length} flights`,
+    );
+  return parsed.data;
 }
 
 /**
@@ -203,7 +464,8 @@ export class FlightListsRepo {
   constructor(private readonly db: Db) {}
 
   /**
-   * Stores one list and its flights, in page order, in one transaction: a flight the table refuses rolls the list back.
+   * Stores one list and its flights, in page order, and its return read (spec rev 56 §7: the columns, the attempts,
+   * their returns and the booking's offers) in one transaction: a row a table refuses rolls the list back.
    * Only the browser worker's own page is stored (data-002, prov-r2-008): a fixture or synthetic list, or any provider
    * but `camoufox` with source kind `scraped-self`, is refused before any SQL (the table's CHECKs are the backstop).
    * Returns the list's id.
@@ -241,6 +503,8 @@ export class FlightListsRepo {
       );
     // why: ruling A28: a flight's price is above 0, as the table's CHECK holds; the rest of a flight is the CHECKs' to judge
     for (const f of l.flights) assertInt('amountMinor', f.amountMinor, 1);
+    const returns = returnsToWrite(l);
+    const booking = returns?.booking ?? null;
     return this.db.transaction(() => {
       const listId = Number(
         this.db.raw.prepare(INSERT_LIST_SQL).run({
@@ -264,6 +528,20 @@ export class FlightListsRepo {
           optionsUnparsed: l.optionsUnparsed,
           optionsOtherCell: l.optionsOtherCell,
           resultsStated: l.resultsStated,
+          returnStatus: returns?.status ?? null,
+          returnRule: returns?.rule ?? null,
+          returnLimitsJson: returns === null ? null : JSON.stringify(returns.limits),
+          returnTriedAll: returns === null ? null : bit(returns.triedAll),
+          bookingStatus: booking?.status ?? null,
+          bookingRule: booking?.rule ?? null,
+          bookingAttempt: booking?.attempt ?? null,
+          bookingReturnPosition: booking?.returnIndex ?? null,
+          bookingExpanded: booking === null ? null : bit(booking.expanded),
+          bookingMoreControl: booking === null ? null : bit(booking.moreControl),
+          bookingGrouped: booking?.grouped ?? null,
+          bookingUnparsed: booking?.unparsed ?? null,
+          bookingNonGbp: booking?.nonGbp ?? null,
+          bookingOffersStated: booking?.offersStated ?? null,
         }).lastInsertRowid,
       );
       const insertFlight = this.db.raw.prepare(INSERT_FLIGHT_SQL);
@@ -281,31 +559,74 @@ export class FlightListsRepo {
           pricePence: f.amountMinor,
         });
       });
+      if (returns !== null) this.writeReturns(listId, returns);
       return listId;
     });
   }
 
   /**
+   * Spec rev 56 §7: a return read's attempts (numbered in the order made), each attempt's returns and the booking's
+   * offers, in order (`position`), inside the caller's transaction: a row a table refuses rolls the whole list back.
+   */
+  private writeReturns(listId: number, r: ReturnRead): void {
+    const insertAttempt = this.db.raw.prepare(INSERT_ATTEMPT_SQL);
+    const insertReturn = this.db.raw.prepare(INSERT_RETURN_SQL);
+    r.attempts.forEach((a, attempt) => {
+      insertAttempt.run({
+        listId,
+        attempt,
+        outboundPosition: a.outboundIndex,
+        outboundFits: bit(a.outboundFits),
+        listed: a.listed,
+        moreListed: bit(a.moreListed),
+        optionsUnparsed: a.optionsUnparsed,
+        optionsOtherCell: a.optionsOtherCell,
+        resultsStated: a.resultsStated,
+      });
+      a.returns.forEach((b, position) => {
+        insertReturn.run({
+          listId,
+          attempt,
+          position,
+          departsLocal: b.departsLocal,
+          arrivesLocal: b.arrivesLocal,
+          arrivesDayOffset: b.arrivesDayOffset,
+          durationMinutes: b.durationMinutes,
+          stops: b.stops,
+          carriersJson: JSON.stringify(b.carriers),
+          operatedBy: b.operatedBy,
+          fromPence: b.fromMinor,
+        });
+      });
+    });
+    const offers = r.booking?.offers ?? [];
+    if (offers.length === 0) return;
+    const insertOffer = this.db.raw.prepare(INSERT_OFFER_SQL);
+    offers.forEach((o, position) => {
+      insertOffer.run({ listId, position, seller: o.seller, fare: o.fare, pricePence: o.priceMinor });
+    });
+  }
+
+  /**
    * The newest list of this definition for each requested cell (airport pair and dates), for one cabin and point of
-   * sale, in request order, in one statement. A cell never read has no entry (match the rest by their own fields).
+   * sale, in request order, with its return read and its `transientStreak` (spec rev 56 §7): three statements in one
+   * read transaction. A cell never read has no entry (match the rest by their own fields).
    */
   newestPerCell(
     definitionId: string,
     cells: readonly CellKey[],
     cabin: Cabin,
     pointOfSale: PointOfSale,
-  ): StoredFlightList[] {
+  ): NewestFlightList[] {
     if (cells.length === 0) return [];
-    const rows = this.db.raw
-      .prepare<Record<string, unknown>, JoinedRow>(PER_CELL_SQL)
-      .all({ definitionId, cells: asCells(cells), cabin, pointOfSale });
-    return foldLists(rows);
+    return this.lookup(PER_CELL_SQL, { definitionId, cells: asCells(cells), cabin, pointOfSale });
   }
 
   /**
    * Per requested date pair, the newest list of any airport pair inside `space` (the search's current origins and
-   * destinations), for one cabin and point of sale, in request order, in one statement. A date pair with none has no
-   * entry. This is the list shown under another airport pair's label, never the one that feeds a figure.
+   * destinations), for one cabin and point of sale, in request order, with its return read and its `transientStreak`,
+   * in three statements. A date pair with none has no entry. This is the list shown under another airport pair's
+   * label, never the one that feeds a figure.
    */
   newestPerDatePair(
     definitionId: string,
@@ -313,9 +634,9 @@ export class FlightListsRepo {
     space: { origins: readonly Iata[]; destinations: readonly Iata[] },
     cabin: Cabin,
     pointOfSale: PointOfSale,
-  ): StoredFlightList[] {
+  ): NewestFlightList[] {
     if (pairs.length === 0) return [];
-    const rows = this.db.raw.prepare<Record<string, unknown>, JoinedRow>(PER_DATE_PAIR_SQL).all({
+    return this.lookup(PER_DATE_PAIR_SQL, {
       definitionId,
       pairs: JSON.stringify(pairs.map((p) => ({ departureDate: p.departureDate, returnDate: p.returnDate }))),
       origins: JSON.stringify(space.origins),
@@ -323,7 +644,44 @@ export class FlightListsRepo {
       cabin,
       pointOfSale,
     });
-    return foldLists(rows);
+  }
+
+  /**
+   * Spec rev 56 §6.9, §7: the newest list per cell of the definition, for one cabin and point of sale (the list
+   * `newestPerCell` gives for that cell, never an older one), returned only when it is `read` and its return phase
+   * finished (`read` or `no-outbound`), with its returns and offers. Under an `executionIds` scope only the lists of
+   * those executions are read (an on-demand list, of no execution, is in no scope). Three statements, one transaction;
+   * the cells come in date, then airport order.
+   */
+  newestWithReturns(
+    definitionId: string,
+    cabin: Cabin,
+    pointOfSale: PointOfSale,
+    scope: { executionIds: readonly string[] } | null,
+  ): NewestFlightList[] {
+    return this.lookup(WITH_RETURNS_SQL, {
+      definitionId,
+      cabin,
+      pointOfSale,
+      executionIds: scope === null ? null : JSON.stringify(scope.executionIds),
+    });
+  }
+
+  /**
+   * One lookup (spec rev 56 §7): the lists statement, then the attempts with their returns and the offers of the lists
+   * it chose, one statement each, inside one read transaction so the three see the same lists.
+   */
+  private lookup(listsSql: string, params: Record<string, unknown>): NewestFlightList[] {
+    return this.db.transaction(() => {
+      const lists = foldLists(this.db.raw.prepare<Record<string, unknown>, JoinedRow>(listsSql).all(params));
+      if (lists.length === 0) return [];
+      const ids = JSON.stringify(lists.map((l) => l.first.id));
+      const attempts = attemptsByList(this.db.raw.prepare<[string], AttemptRow>(ATTEMPTS_SQL).all(ids));
+      const offers = offersByList(this.db.raw.prepare<[string], OfferRow>(OFFERS_SQL).all(ids));
+      return lists.map((l) =>
+        readList(l.first, l.flights, attempts.get(l.first.id) ?? [], offers.get(l.first.id) ?? []),
+      );
+    });
   }
 
   /**

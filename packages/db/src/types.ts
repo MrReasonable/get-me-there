@@ -22,6 +22,7 @@ import type {
   Provenance,
   ProviderId,
   ReturnDateSource,
+  ReturnRead,
   SkipCode,
   SourceKind,
   StopCause,
@@ -233,9 +234,31 @@ export interface FlightListInsert {
   resultsStated: number | null;
   /** In page order; at most `FLIGHT_LIST_MAX_FLIGHTS`. */
   flights: ListedFlight[];
+  /**
+   * Spec revision 56 §5.1, §7: the return read the worker answered with (its attempts, returns and the booking read of
+   * the shown pairing, with its offers), parsed through core's `returnReadSchema` on insert; null (or absent) for a
+   * list read without a return phase, and always for a `failed` list. Optional until Task 21.6 (the engine's flight
+   * step and the on-demand read, its last producers), so every consumer builds alone (R-order).
+   */
+  returns?: ReturnRead | null;
 }
 
-/** A stored flight list with its flights in page order (spec rev 55 §7); the API adds the age, stale mark and provenance. */
+/**
+ * A stored flight list with its flights in page order (spec rev 55 §7) and its return read (spec rev 56 §7; null for a
+ * list read without one, and for every list stored before migration 0012); the API adds the age, stale mark and
+ * provenance.
+ */
 export interface StoredFlightList extends FlightListInsert {
   id: number;
+  returns: ReturnRead | null;
 }
+
+/**
+ * Spec revision 56 §7, §8.1 (R-retry): how many of a cell's two newest lists ended with a transient return or booking
+ * status (core's `RETURN_TRANSIENT`, `BOOKING_TRANSIENT`), newest first, stopping at the first that did not: 2 means
+ * the pair was read again once and ended transient again, so the step reuses it as finished until its refresh.
+ */
+export type TransientStreak = 0 | 1 | 2;
+
+/** The newest list of a cell as the reads return it (spec rev 56 §7; preflight A25): the list and its streak. */
+export type NewestFlightList = StoredFlightList & { transientStreak: TransientStreak };

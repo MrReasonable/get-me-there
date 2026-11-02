@@ -1,6 +1,7 @@
 import type {
   AlertEvent,
   AlertRuleType,
+  BookingStatus,
   Cabin,
   CellOutcomeStatus,
   ErrorReason,
@@ -11,6 +12,7 @@ import type {
   ProviderId,
   ResultBasis,
   ReturnDateSource,
+  ReturnStatus,
   SelectionReason,
   SkipCode,
   SkipDetail,
@@ -206,3 +208,24 @@ export const STOP_DETAILS = exhaustive<StopDetail>()([
 ] as const);
 /** Spec revision 55 §7 `flight_lists.listed` (core's `LISTED`). */
 export const LISTED = exhaustive<Listed>()(['flights', 'no-flights', 'none-for-cell'] as const);
+/** Spec revision 56 §7 `flight_lists.return_status` (core's `RETURN_STATUS`). */
+export const RETURN_STATUS = exhaustive<ReturnStatus>()([
+  'read',
+  'no-outbound',
+  'skipped',
+  'select-failed',
+  'not-settled',
+  'unrecognised',
+  'not-verified',
+] as const);
+/** Spec revision 56 §7 `flight_lists.booking_status` (core's `BOOKING_STATUS`). */
+export const BOOKING_STATUS = exhaustive<BookingStatus>()([
+  'read',
+  'no-pairing',
+  'skipped',
+  'select-failed',
+  'not-settled',
+  'unrecognised',
+  'expand-failed',
+  'not-verified',
+] as const);

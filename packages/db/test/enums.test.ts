@@ -1,5 +1,7 @@
 import {
   apiContract,
+  BOOKING_STATUS as CORE_BOOKING_STATUS,
+  RETURN_STATUS as CORE_RETURN_STATUS,
   SKIP_CODES as CORE_SKIP_CODES,
   SKIP_DETAILS as CORE_SKIP_DETAILS,
   cabinSchema,
@@ -10,6 +12,7 @@ import {
 } from '@gmt/core';
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import {
+  BOOKING_STATUS,
   CABINS,
   ERROR_REASONS,
   EXECUTION_STATUSES,
@@ -17,6 +20,7 @@ import {
   PROVIDER_IDS,
   RESULT_BASES,
   RETURN_DATE_SOURCES,
+  RETURN_STATUS,
   SKIP_CODES,
   SKIP_DETAILS,
   SOURCE_KINDS,
@@ -41,6 +45,9 @@ describe('internal/enums', () => {
     // same drizzle-kit reason and are pinned to core's here, value for value
     expect(SKIP_DETAILS).toEqual(CORE_SKIP_DETAILS);
     expect(SKIP_CODES).toEqual(CORE_SKIP_CODES);
+    // why: WP21 (spec rev 56 §7): the return and booking statuses the 0012 CHECKs hold, literal for the same reason
+    expect(RETURN_STATUS).toEqual(CORE_RETURN_STATUS);
+    expect(BOOKING_STATUS).toEqual(CORE_BOOKING_STATUS);
   });
 
   it('every other list must name every member of its union (compile-time check)', () => {

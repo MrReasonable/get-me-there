@@ -45,6 +45,7 @@ function populatedAt0006(): Db {
       '0009_wp19_latest_price_idx',
       '0010_airport_kind',
       '0011_wp20_flight_lists',
+      '0012_wp21_return_leg',
     ]),
   );
   const run = (sql: string, p: Record<string, unknown> = {}) => db.raw.prepare(sql).run(p);
@@ -346,6 +347,7 @@ describe('migration 0007 (spec §7 rev 36)', () => {
           '0009_wp19_latest_price_idx',
           '0010_airport_kind',
           '0011_wp20_flight_lists',
+          '0012_wp21_return_leg',
         ]),
       ).applied,
     ).toEqual(['0007_catch_up']);
@@ -384,6 +386,7 @@ describe('migration 0007 (spec §7 rev 36)', () => {
           '0009_wp19_latest_price_idx',
           '0010_airport_kind',
           '0011_wp20_flight_lists',
+          '0012_wp21_return_leg',
         ]),
       ).applied,
     ).toEqual([]);

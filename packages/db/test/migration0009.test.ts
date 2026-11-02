@@ -21,7 +21,12 @@ describe('migration 0009', () => {
     const db = openTracked(tmpDbPath());
     applyMigrations(
       db,
-      migrationsWithout(['0009_wp19_latest_price_idx', '0010_airport_kind', '0011_wp20_flight_lists']),
+      migrationsWithout([
+        '0009_wp19_latest_price_idx',
+        '0010_airport_kind',
+        '0011_wp20_flight_lists',
+        '0012_wp21_return_leg',
+      ]),
     );
     expect(indexes(db)).not.toContain('calendar_prices_latest_idx');
     const second = applyMigrations(db, MIGRATIONS_DIR);
@@ -29,6 +34,7 @@ describe('migration 0009', () => {
       '0009_wp19_latest_price_idx',
       '0010_airport_kind',
       '0011_wp20_flight_lists',
+      '0012_wp21_return_leg',
     ]);
     expect(indexes(db)).toContain('calendar_prices_latest_idx');
     const columns = db.raw

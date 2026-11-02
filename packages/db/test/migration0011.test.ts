@@ -15,12 +15,14 @@ beforeEach(() => {
 });
 
 const TAG = '0011_wp20_flight_lists';
+// why: 0012 (WP21) builds on 0011's tables, so a world at 0010 lacks it too and gets it after 0011
+const NEXT = '0012_wp21_return_leg';
 const SEEDED = ['search_definitions', 'search_executions', 'calendar_prices', 'provider_requests'] as const;
 
 /** A database at 0010 with a definition, a paused run holding the old free-text error, a completed run, a price, a ledger row. */
 function seedAt0010(): Db {
   const db = openTracked(tmpDbPath());
-  applyMigrations(db, migrationsWithout([TAG]));
+  applyMigrations(db, migrationsWithout([TAG, NEXT]));
   const run = (sql: string): void => {
     db.raw.prepare(sql).run({ at: T0 });
   };
@@ -129,12 +131,18 @@ describe('migration 0011 (spec revision 55 §7)', () => {
   it('keeps every row of a world seeded at 0010, with the two new execution columns NULL on every one', () => {
     const db = seedAt0010();
     const before = rowsOf(db);
-    expect(applyMigrations(db, MIGRATIONS_DIR).applied).toEqual([TAG]);
+    expect(applyMigrations(db, MIGRATIONS_DIR).applied).toEqual([TAG, NEXT]);
     const after = rowsOf(db);
     // why: every old column keeps its value (the paused run's free-text error_text included); only the two new ones appear
     for (const t of SEEDED) {
       expect(after[t]?.length, t).toBe(before[t]?.length);
-      const added = t === 'search_executions' ? { stop_cause_json: null, flight_lists_json: null } : {};
+      // why: provider_requests' page_count is 0012's, applied after this one (NEXT), NULL on the seeded row as well
+      const added =
+        t === 'search_executions'
+          ? { stop_cause_json: null, flight_lists_json: null }
+          : t === 'provider_requests'
+            ? { page_count: null }
+            : {};
       expect(after[t], t).toEqual(before[t]?.map((r) => ({ ...r, ...added })));
     }
     expect(db.raw.pragma('foreign_key_check')).toEqual([]);
@@ -143,7 +151,12 @@ describe('migration 0011 (spec revision 55 §7)', () => {
 
   it('adds the two tables with the columns of the spec, and the two indexes', () => {
     const db = freshDb();
-    expect(columnsOf(db, 'flight_lists').map((c) => [c.name, c.type, c.notnull])).toEqual([
+    // why: 0012 (WP21) appends the return and booking columns after 0011's own; its test pins them
+    const since0012 = ['return_status', 'return_rule', 'return_limits_json', 'return_tried_all'];
+    const of0011 = columnsOf(db, 'flight_lists').filter(
+      (c) => !since0012.includes(c.name) && !c.name.startsWith('booking_'),
+    );
+    expect(of0011.map((c) => [c.name, c.type, c.notnull])).toEqual([
       ['id', 'INTEGER', 1],
       ['definition_id', 'TEXT', 1],
       ['execution_id', 'TEXT', 0],
@@ -276,8 +289,31 @@ describe('migration 0011 (spec revision 55 §7)', () => {
   it('the 0011 snapshot drizzle-kit wrote names every CHECK the database carries, so a later generate has no diff', () => {
     const db = freshDb();
     const snapshot = JSON.parse(readFileSync(join(MIGRATIONS_DIR, 'meta', '0011_snapshot.json'), 'utf8'));
+    // why: 0012 (WP21) adds the return and booking CHECKs to flight_lists; its test pins them against the 0012 snapshot
+    const since0012 = [
+      ...['status', 'rule', 'limits', 'tried_all', 'coupled', 'rule_status', 'read'].map(
+        (c) => `flight_lists_return_${c}_ck`,
+      ),
+      ...[
+        'status',
+        'rule',
+        'attempt',
+        'return_position',
+        'expanded',
+        'more_control',
+        'grouped',
+        'unparsed',
+        'non_gbp',
+      ]
+        .concat(['offers_stated', 'coupled', 'return'])
+        .map((c) => `flight_lists_booking_${c}_ck`),
+    ];
     for (const t of ['search_executions', 'flight_lists', 'flight_list_flights'])
-      expect(Object.keys(snapshot.tables[t].checkConstraints).sort(), t).toEqual(checksOf(db, t).sort());
+      expect(Object.keys(snapshot.tables[t].checkConstraints).sort(), t).toEqual(
+        checksOf(db, t)
+          .filter((c) => !since0012.includes(c))
+          .sort(),
+      );
     expect(Object.keys(snapshot.tables.search_executions.columns)).toEqual(
       columnsOf(db, 'search_executions').map((c) => c.name),
     );

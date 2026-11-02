@@ -37,6 +37,12 @@ export const providerRequests = sqliteTable(
      * rows written before 0008. The Status report reads it; it never re-derives a class from the HTTP status.
      */
     errorKind: text('error_kind'),
+    /**
+     * Migration 0012 (spec revision 56 §5.3, §7; R-zero): camoufox only, the pages the row stands for: the plan while
+     * pending and on an `unknown` attempt, the answer's `pagesLoaded` once finalised (0 admitted); NULL on every earlier
+     * row, on a `no-page` row and when the answer states none, each such page row counting 1.
+     */
+    pageCount: integer('page_count'),
   },
   (t) => [
     check('provider_requests_provider_ck', isOneOf('provider_id', PROVIDER_IDS)),
@@ -50,6 +56,12 @@ export const providerRequests = sqliteTable(
       'provider_requests_scroll_ck',
       sql.raw(
         "scroll_count IS NULL OR (provider_id = 'camoufox' AND typeof(scroll_count) = 'integer' AND scroll_count >= 0)",
+      ),
+    ),
+    check(
+      'provider_requests_page_count_ck',
+      sql.raw(
+        "page_count IS NULL OR (provider_id = 'camoufox' AND typeof(page_count) = 'integer' AND page_count >= 0)",
       ),
     ),
     check('provider_requests_cost_ck', isInteger('cost_micro_gbp')),
