@@ -6,6 +6,7 @@ import { CalendarPricesRepo } from './repositories/calendarPrices.js';
 import { CellsRepo } from './repositories/cells.js';
 import { DefinitionsRepo } from './repositories/definitions.js';
 import { ExecutionsRepo } from './repositories/executions.js';
+import { FlightListsRepo } from './repositories/flightLists.js';
 import { FxRepo } from './repositories/fx.js';
 import { ItinerariesRepo } from './repositories/itineraries.js';
 import { LedgerRepo } from './repositories/ledger.js';
@@ -18,6 +19,7 @@ import type { RepoOptions } from './types.js';
 export interface Repos {
   airports: AirportsRepo;
   fx: FxRepo;
+  flightLists: FlightListsRepo;
   definitions: DefinitionsRepo;
   executions: ExecutionsRepo;
   cells: CellsRepo;
@@ -38,6 +40,7 @@ export function createRepos(db: Db, clock: Clock, opts: RepoOptions): Repos {
   return {
     airports: new AirportsRepo(db),
     fx: new FxRepo(db),
+    flightLists: new FlightListsRepo(db),
     definitions: new DefinitionsRepo(db, clock),
     executions: new ExecutionsRepo(db, clock),
     cells: new CellsRepo(db, clock, opts),

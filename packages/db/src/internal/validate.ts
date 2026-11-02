@@ -1,4 +1,5 @@
 import {
+  apiContract,
   type FxInfo,
   isoDateSchema,
   isoDateTimeSchema,
@@ -112,4 +113,26 @@ export function assertEndpointPath(path: string): void {
       'endpoint-path',
       'endpoint_path is a path only: /segment/segment, unreserved characters, ≤ 200',
     );
+}
+
+/**
+ * Spec revision 55 §7: the JSON a `stop_cause_json` or `flight_lists_json` write stores, parsed first through the very
+ * schema its reader applies (`readStopCause`, `readFlightLists`: core's strict `stopCauseSchema` and
+ * `flightListsStateSchema`), so a shape the reader would refuse (free text riding along, a value from untyped JSON) is
+ * refused here, before it can make every later read of the row throw RowCorrupt. Null stays null.
+ */
+export function encodeStopCause(column: string, v: unknown): string | null {
+  return v === null || v === undefined ? null : encodeWith(column, apiContract.stopCauseSchema, v);
+}
+export function encodeFlightLists(column: string, v: unknown): string | null {
+  return v === null || v === undefined ? null : encodeWith(column, apiContract.flightListsStateSchema, v);
+}
+function encodeWith(
+  column: string,
+  schema: { safeParse(v: unknown): { success: boolean } },
+  v: unknown,
+): string {
+  if (!schema.safeParse(v).success)
+    throw new RowRejected(column, `${column} is not a shape its reader accepts`);
+  return JSON.stringify(v);
 }

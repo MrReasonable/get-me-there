@@ -3,6 +3,7 @@
 // and set mismatches structural, drift a stop, weekdays and years checked, and the first view's selected pair.
 import { asIsoDate } from '@gmt/core';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { NamedElement } from '../src/driver.js';
 import {
   cellCandidates,
   cellsCalledFor,
@@ -14,7 +15,7 @@ import {
   viewCounts,
 } from '../src/gridView.js';
 import { SELECTORS } from '../src/selectors.js';
-import { FakeLocator, FakePage, n } from './support/fakePage.js';
+import { descendants, FakeLocator, FakePage, n, shrinkAfterCount } from './support/fakePage.js';
 import { cellName, dayLabel, gridTree, plusDays, selectedRange } from './support/gridTree.js';
 import { fakeTimers } from './support/timers.js';
 
@@ -194,6 +195,49 @@ describe('interpretView', () => {
     expect(v.kind === 'view' && [v.cells.length, v.unparsed]).toEqual([49, 0]);
     expect(changeKeyOf({ lines: r.lines.map(odd) })).toBe(changeKeyOf(r));
   });
+  it('spaces around a name and runs of spaces inside it read as one space', () => {
+    const r = raw({ depart: '2027-03-11', ret: '2027-03-21' });
+    const loose = r.candidates.map((x) => (x === null ? x : `\u2009${x.replace(/ /g, '  ')} `));
+    const v = interpretView({ ...r, candidates: loose }, Q.dep, Q);
+    expect(v.kind === 'view' && [v.cells.length, v.unparsed, v.structural]).toEqual([49, 0, 'ok']);
+    expect(viewCounts({ ...r, candidates: loose }).selected).toBe(1);
+  });
+  it('lines whose dates run together alike are still told apart', () => {
+    // why: "11 Jan, 2 Jan" and "1 Jan, 2 Nov" print the same digits in the same order; so do the two lines' sets
+    expect(changeKeyOf({ lines: ['Mon 11 JanTue 2 Jan', ''] })).not.toBe(
+      changeKeyOf({ lines: ['Mon 1 JanTue 2 Nov', ''] }),
+    );
+    expect(changeKeyOf({ lines: ['Mon 1 Jan', 'Tue 2 Nov'] })).not.toBe(
+      changeKeyOf({ lines: ['Mon 11 Jan', 'Tue 2 Jan'] }),
+    );
+  });
+  it('a priced-looking majority failing is drift even when unparsed unpriced names fill the rest of the view', () => {
+    const r = raw({ depart: '2027-03-11', ret: '2027-03-21' });
+    // why: 24 unpriced names (unread without the flag, never priced-looking) and 13 of the 25 priced ones failing
+    const names = r.candidates.map((x, i) =>
+      i < 24
+        ? (x ?? '').replace(/^£\d+/, 'no flights').replace(/, selected$/, '')
+        : i < 37
+          ? `${x ?? ''}, from`
+          : x,
+    );
+    expect(interpretView({ ...r, candidates: names }, Q.dep)).toEqual({
+      kind: 'unrecognised',
+      why: 'selector-drift',
+    });
+  });
+  it('a return whose seven names all fail leaves a line date no cell names: structural `sets`, nothing kept', () => {
+    const r = raw({ depart: '2027-03-11', ret: '2027-03-21' });
+    // why: the first row is the 21 March return; every departure is still named by the other rows
+    const names = r.candidates.map((x, i) => (i < 7 ? `—, ${11 + i} Mar to 21 Mar` : x));
+    expect(interpretView({ ...r, candidates: names }, Q.dep)).toMatchObject({
+      kind: 'view',
+      structural: 'unparsed',
+      structuralCheck: 'sets',
+      cells: [],
+      unparsed: 7,
+    });
+  });
   it('the change key is the lines’ dates: a re-render that only reorders the labels is no change', () => {
     const a = raw({ depart: '2027-03-11', ret: '2027-03-21' });
     const b = raw({ depart: '2027-03-11', ret: '2027-03-21', rotate: 3 });
@@ -229,6 +273,14 @@ describe('interpretView', () => {
       (r: RawView): RawView => ({
         ...r,
         lines: [r.lines[0]?.replace('Fri 12 Mar', 'Thu 11 Mar') ?? '', r.lines[1] ?? ''],
+      }),
+      'lines',
+    ],
+    [
+      'eight labels on a line, one day twice',
+      (r: RawView): RawView => ({
+        ...r,
+        lines: [r.lines[0]?.replace('Fri 12 Mar', 'Fri 12 MarThu 11 Mar') ?? '', r.lines[1] ?? ''],
       }),
       'lines',
     ],
@@ -272,6 +324,7 @@ describe('interpretView', () => {
       raw({ depart: '2027-03-11', ret: '2027-03-21', range: '14 – 25 Mar 2027' }),
     ],
     ['a range in another year', raw({ depart: '2027-03-11', ret: '2027-03-21', range: '14 – 24 Mar 2028' })],
+    ['a range in another month', raw({ depart: '2027-03-11', ret: '2027-03-21', range: '14 – 24 Apr 2027' })],
     [
       'a price line that is not the selected cell’s',
       { ...raw({ depart: '2027-03-11', ret: '2027-03-21' }), prices: ['£463 · Round trip'] },
@@ -386,6 +439,13 @@ describe('interpretView with the unpriced cells (GRID_UNPRICED_VERIFIED)', () =>
       kind: 'view',
     });
     expect(interpretView(unpricedQuery({ ranges: ['15 – 24 Mar 2027'] }), Q.dep, Q, ON)).toEqual({
+      kind: 'unrecognised',
+      why: 'first-view',
+      check: 'range',
+    });
+  });
+  it('a range line printed for an unpriced query pair that does not read as a range is refused', () => {
+    expect(interpretView(unpricedQuery({ ranges: ['99 – 24 Mar 2027'] }), Q.dep, Q, ON)).toEqual({
       kind: 'unrecognised',
       why: 'first-view',
       check: 'range',
@@ -511,12 +571,21 @@ describe('cellsCalledFor and stillDrawing', () => {
       cellsCalledFor(raw({ depart: '2026-12-28', ret: '2027-01-01' }).lines, asIsoDate('2026-12-30')),
     ).toBe(46);
   });
+  it('a list with no departure line before its returns line calls for no count', () => {
+    const lines: string[] = [];
+    lines[1] = whole.lines[1] ?? '';
+    expect(cellsCalledFor(lines, Q.dep)).toBeNull();
+  });
   it.each([
     ['one line', whole.lines.slice(0, 1)],
     ['three lines', [...whole.lines, whole.lines[1] ?? '']],
     ['six days on a line', [whole.lines[0]?.replace('Wed 17 Mar', '') ?? '', whole.lines[1] ?? '']],
     ['a wrong weekday', [whole.lines[0]?.replace('Thu 11 Mar', 'Fri 11 Mar') ?? '', whole.lines[1] ?? '']],
     ['six days on the returns line', [whole.lines[0] ?? '', whole.lines[1]?.replace('Sat 27 Mar', '') ?? '']],
+    [
+      'eight labels, one day twice',
+      [whole.lines[0]?.replace('Fri 12 Mar', 'Fri 12 MarThu 11 Mar') ?? '', whole.lines[1] ?? ''],
+    ],
     ['no lines', []],
   ])('lines that do not read (%s) call for no count', (_l, lines) => {
     expect(cellsCalledFor(lines, Q.dep)).toBeNull();
@@ -607,6 +676,47 @@ describe('readRawView over the synthetic dialog', () => {
     );
     expect(r.datesGrid.scrollButtons).toBe(0);
   });
+  it('the dates-grid check counts each control by its exact name: a longer name holding it is not it', async () => {
+    const page = new FakePage(null);
+    page.setTrees([
+      n('document', '', [
+        gridTree({
+          depart: '2027-03-11',
+          ret: '2027-03-21',
+          extra: [
+            n('button', 'Scroll left to earlier dates'),
+            n('tab', 'Dates and prices', [], { selected: true }),
+            n('grid', 'Date grid summary'),
+          ],
+        }),
+      ]),
+    ]);
+    page.url();
+    const dialog = page.getByRole('dialog', { name: 'Price insights', exact: true });
+    const r = await readRawView(
+      dialog,
+      dialog.getByRole('tabpanel').nth(0),
+      fakeTimers().deadline(10_000),
+      SELECTORS,
+    );
+    expect(r.datesGrid).toEqual({ dialog: 1, datesSelected: 1, grid: 1, scrollButtons: 4 });
+  });
+  it.each([
+    ['across a month', '2027-03-25', '2027-04-04', '28 Mar – 7 Apr 2027'],
+    ['across the year', '2026-12-24', '2027-01-03', '27 Dec 2026 – 6 Jan 2027'],
+  ])('reads a selected range %s whole', async (_l, depart, ret, range) => {
+    const page = new FakePage(null);
+    page.setTrees([n('document', '', [gridTree({ depart, ret })])]);
+    page.url();
+    const dialog = page.getByRole('dialog', { name: 'Price insights', exact: true }).nth(0);
+    const r = await readRawView(
+      dialog,
+      dialog.getByRole('tabpanel').nth(0),
+      fakeTimers().deadline(10_000),
+      SELECTORS,
+    );
+    expect(r.ranges).toEqual([range]);
+  });
   it('the reset control in the panel is not a candidate: a whole view names its 49 cells', async () => {
     const page = new FakePage(null);
     page.setTrees([
@@ -638,7 +748,18 @@ describe('readRawView over the synthetic dialog', () => {
     page.setTrees([n('document', '', [gridTree({ depart: '2027-03-11', ret: '2027-03-21' })])]);
     page.url();
     const dialog = page.getByRole('dialog', { name: 'Price insights', exact: true });
-    const spy = vi.spyOn(FakeLocator.prototype, 'textContent').mockResolvedValue(null);
+    // why: fix round 2: the lines are read in one page call, so the page's elements answer a null text there
+    const elements: (
+      this: FakeLocator,
+      fn: (els: NamedElement[]) => NamedElement[],
+    ) => Promise<NamedElement[]> = FakeLocator.prototype.evaluateAll;
+    const spy = vi.spyOn(FakeLocator.prototype, 'evaluateAll').mockImplementation(async function <R>(
+      this: FakeLocator,
+      fn: (els: NamedElement[]) => R,
+    ): Promise<R> {
+      const els = await elements.call(this, (all) => all);
+      return fn(els.map((e) => ({ getAttribute: (a: string) => e.getAttribute(a), textContent: null })));
+    });
     try {
       const r = await readRawView(
         dialog,
@@ -673,6 +794,35 @@ describe('readRawView over the synthetic dialog', () => {
       expect(v.kind).toBe('view');
     },
   );
+  // why: WP21 Task 21.3 fix round 2: the panel re-renders on every scroll; its button names and lines are read in one
+  // page call each, so a cell gone after the count holds no read (raced against the fake's first waiting read, an event)
+  it('reads the buttons the panel held at once: a cell gone after the count holds no read', async () => {
+    const tree = n('document', '', [gridTree({ depart: '2027-03-11', ret: '2027-03-21' })]);
+    const panelNode = descendants([tree]).find((x) => x.role === 'tabpanel');
+    const page = new FakePage(null);
+    page.setTrees([tree]);
+    page.url();
+    const buttons = descendants(panelNode === undefined ? [] : [panelNode]).filter(
+      (x) => x.role === 'button',
+    );
+    const hung =
+      panelNode === undefined
+        ? Promise.resolve<'hung'>('hung')
+        : shrinkAfterCount(page, panelNode, { whenCount: buttons.length, keep: 8 });
+    const dialog = page.getByRole('dialog', { name: 'Price insights', exact: true }).nth(0);
+    const read = readRawView(
+      dialog,
+      dialog.getByRole('tabpanel').nth(0),
+      fakeTimers().deadline(10_000),
+      SELECTORS,
+    );
+    read.catch(() => undefined);
+    const out = await Promise.race([read, hung]);
+    await page.close();
+    expect(out).not.toBe('hung');
+    if (out === 'hung') return;
+    expect(out.candidates).toHaveLength(49);
+  });
   it('reads the lines, the candidates, the selected lines and the dates-grid check through locators', async () => {
     const page = new FakePage(null);
     page.setTrees([n('document', '', [gridTree({ depart: '2027-03-11', ret: '2027-03-21', rotate: 2 })])]);

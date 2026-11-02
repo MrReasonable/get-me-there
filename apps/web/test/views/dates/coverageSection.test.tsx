@@ -459,7 +459,9 @@ describe('the coverage section in the Dates view (spec §11)', () => {
   it('the header line’s coverage link opens it', async () => {
     const { user } = renderDates({ body: workedDates() });
     await findBoard();
-    await user.click(screen.getByRole('link', { name: /^discovery: / }));
+    await user.click(
+      await within(await screen.findByTestId('dates-run')).findByRole('link', { name: /^Searched / }),
+    );
     expect(await screen.findByRole('table', { name: COPY.coverageHeading })).toBeInTheDocument();
   });
 

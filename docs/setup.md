@@ -9,7 +9,7 @@ There are two ways to run get-me-there, and each section below says which it app
   `Start.command` are the Docker Desktop shortcut on a Mac.
 
 Everything below uses the worked example London → New York; put your own airports in the
-Definitions form, never in a file of this repository.
+new-search form, never in a file of this repository.
 
 ## 0. Quick start (macOS and Linux)
 
@@ -101,15 +101,33 @@ With no price source, the closing screen says so first:
 Then it gives the address (`http://127.0.0.1:3000`), the user name (`operator`), and where the
 password is: in `~/.config/get-me-there/app.env`. Show it with `pnpm gmt password`, which
 prints it to the terminal only. If scrollback or a shared screen may have kept it,
-`pnpm gmt setup --reconfigure password` replaces it. It names the next step: open the app,
-choose Definitions and add a search with your airports and dates (its Coverage check shows what
-the price sources hold before you save it). Nothing runs on a schedule until you give a search
-one. Setup offers to open the browser.
+`pnpm gmt setup --reconfigure password` replaces it. It names the next step: open the app and
+use the new-search form on Searches (From, To, the dates), then press **Search now**; the
+sentence beside the button says what the search will use before you press. A new search runs
+once, when you press the button; nothing runs on a schedule until you add one from the search's
+page (**Repeat weekly…**, which registers the schedule when you press Save). Setup offers to open the browser.
 
 Scheduled searches run while the machine is awake; a missed one is caught up once, without the
 browser provider. The native service speaks plain HTTP on `127.0.0.1`: only if you want to reach
 it from another device, use an `ssh` tunnel (`ssh -L 3000:127.0.0.1:3000 <this machine>`), or
 section 3 for Tailscale and TLS.
+
+### Your first search, and a search's page
+
+Searches is the first screen: your searches as cards (the route, the dates, the stay, its state
+and the cheapest price found, with its source and age), and the new-search form beside them
+(above them on a phone). **Search now** saves the search and runs it once; the press is the
+confirmation of the figures beside the button, for that run only. A card's **Search again**
+runs a saved search again, **Edit** changes it and **Remove** takes it away (with an Undo for 30
+seconds).
+
+A search's page (the card's **See dates**) shows the state of the latest run in one line
+(Searching, Reading flights, Searched, or why it stopped, with Resume or Cancel where they
+apply), the board of the cheapest date pairs, the months overview (its key says "brighter is
+cheaper") and, under the board, the flights read for the cheapest date pairs with a link to open
+the same search in Google Flights. **Repeat weekly…** adds a schedule: it registers when you
+press Save, and the page shows when it next runs. Where the browser worker is not set up, the
+page says "Flight times need the browser worker; set it up in Providers".
 
 ### The commands
 
@@ -153,7 +171,8 @@ the interruption does.
 
 `pnpm gmt smoke` spends: before it sends anything it prints the route's worst case per
 provider from the app (with today's settings, up to 4 SearchApi credits and one browser page,
-with the longest that page may take)
+with the longest that page may take; the flight-list read of a date pair costs 1 page, or 2 with a
+second outbound, each spaced like any page, and is not part of this smoke)
 and the SearchApi credits tool runs have already used in this window, refuses when the SearchApi
 trial has fewer credits left, and asks you to type `yes` for the running total. In scripts `--yes`
 skips the question, and once earlier tool runs have used credits in the window it also needs
@@ -309,8 +328,8 @@ you rely on the app.
 
 What £0 gives: calendar prices from the Aviasales cache only, every row labelled "constraints
 not checked", and coverage that depends on what Aviasales users searched recently. Before you
-save a definition, press **Coverage check** on the form: it shows cached rows per airport pair
-and month, at no cost.
+search, open More options on a saved search's Edit page and press **Coverage check**: it shows
+cached rows per airport pair and month, at no cost.
 
 To add SearchApi later (the $40 plan, scraping-derived; see `docs/api-limits.md`):
 
@@ -321,10 +340,10 @@ SEARCHAPI_BILLING_DAY=1      # the day of the month your subscription renews (1�
 ```
 
 then `docker compose up -d`. Without `SEARCHAPI_PLAN=40usd` the key runs on the one-off
-`trial` allowance and scheduled runs leave SearchApi out. On the trial plan new definitions
+`trial` allowance and scheduled runs leave SearchApi out. On the trial plan new searches
 allow 0 billed calls per run, so a date pair's "Search <cell> for itineraries" (in its detail, opened from the
 Dates view) is unavailable until you raise the
-definition's call cap in Definitions → Run budget (Max billed calls per run); 6 covers one
+search's call cap in its Edit page → More options → Run budget (Max billed calls per run); 6 covers one
 cell. If `.env` has a `SEARCHAPI_TRIAL_USED` line from the trial, delete it (or set it to 0):
 on `40usd` the app refuses to start with it (exit 78).
 
@@ -332,7 +351,7 @@ on `40usd` the app refuses to start with it (exit 78).
 `.env.*` file except `.env.example` out of git, `.dockerignore` keeps them out of the image,
 and compose passes the container only the variables it lists (never the whole file), so a key
 reaches the app and nothing else. Never put a key in `docker-compose.yml`, in a command line or
-in a definition. The database holds no key or password; back up `.env` separately and keep it
+in a search. The database holds no key or password; back up `.env` separately and keep it
 private.
 
 Never put `NODE_ENV`, `IN_CONTAINER` or `ALLOW_FIXTURE_PROVIDER` in `.env` for the container:
@@ -451,11 +470,11 @@ Set `APP_BASE_URL` to the `https://` address you type (for example
 `APP_BASE_URL=https://flights.example.com` or your `https://…ts.net` name) so alert emails
 link straight to the results row; left empty, emails carry relative links.
 
-## 5. Import the example definition
+## 5. Import the example search
 
 *Applies to both paths.*
 
-On the Definitions page choose **Import example**, or paste this JSON into the import box:
+On a search's Edit page choose **Import example**, or paste this JSON into the import box:
 
 <!-- example-definition:start -->
 ```json
@@ -504,7 +523,7 @@ On the £0 configuration, replace the `providers` block before importing:
 "providers": { "discovery": ["travelpayouts"], "verification": [], "discoveryRefreshHours": { "travelpayouts": 168 } }
 ```
 
-The form shows the estimate before you create the definition; creating it is your
+The form shows the estimate before you press Search now; pressing it is your
 confirmation of that cost.
 
 ## 6. The data directory and backups
@@ -616,7 +635,7 @@ trust.
 
 Growth scales with cells (origins × destinations × window days × nights) and with runs per
 month. Expired cache rows and old cache-hit ledger rows are pruned daily; run history is
-kept, so a year of the $40 example is roughly 600 MB. Deleting a definition or an alert rule
+kept, so a year of the $40 example is roughly 600 MB. Removing a search or an alert rule
 only marks it deleted: its runs, prices and alert events stay in the database and in History.
 
 ## 8. Fixture recording
@@ -829,7 +848,7 @@ seller confirmed (or, without one, the cheapest calendar price, labelled as such
 age), then a checklist. Run it after setup, after changing a key, and whenever prices look
 wrong.
 
-The smoke test applies none of a definition's constraints (stops, journey time, baggage): it
+The smoke test applies none of a search's constraints (stops, journey time, baggage): it
 shows the cheapest offer whatever its route, and says for each itinerary price how long each
 way takes and how many stops it makes (`out 19h 05m 2 stops, back 9h 30m nonstop`), so a long
 connection is visible before you compare it with Google Flights.
@@ -981,8 +1000,9 @@ changes it later.
   `RestartPreventExitStatus=78`; on macOS a 600 s throttle, and `pnpm gmt start`, `status` and `update` boot a refused
   agent out and say "refused, not retrying: …" with the fix). `pnpm gmt start`, `restart`, `update`, `setup` and
   `browser install` run the worker's start check first and do not start it while the check reports a reason. A stop
-  waits up to 270 s (the longest page, 240 s, and 30 s to close the browser) before it ends the worker, so a page in
-  flight finishes; the app's stop waits 30 s. `pnpm gmt restart` starts the worker again only once the old process has
+  waits up to 270 s (the longest page timeout, 240 s, and 30 s to close the browser) before it ends the worker, so a
+  list page in flight finishes; a longer page (a grid page, or a flight-list read with its return flights) is ended,
+  and its pages stay counted for the month; the app's stop waits 30 s. `pnpm gmt restart` starts the worker again only once the old process has
   exited (the launchd agent gone or the systemd unit inactive) and no running process holds `worker.lock`, each wait
   at most 285 s, and then only if its start check passes. When the check refuses, the worker stays stopped and the
   restart says why with the fix and exits non-zero (78 for a refusal) instead of reporting done. Every command that
@@ -1169,7 +1189,11 @@ differing, which a re-run repairs. No key is ever printed.
 ### Recordings
 
 The search-form check is mandatory: the worker refuses to start while `FORM_VERIFIED` is false. The 2026-10-18
-recordings set it, with the results, Cheapest and no-flights flags. A page change that needs new recordings sets them
+recordings set it, with the results, Cheapest and no-flights flags. A recording session also records the
+`select-outbound` kind (`record --select-outbound`, which chooses the cheapest outbound on a results page and records what
+follows; `--select-return` goes on to the booking options), and only a machine whose session set
+`RETURN_SELECT_VERIFIED` and `BOOKING_SELECT_VERIFIED` reads return flights and sellers (the operator's Mac at present;
+the other entries keep them false). A page change that needs new recordings sets them
 back. Record with the default data directory (never a `CAMOUFOX_DATA_DIR` override): the
 lock, the spacing and the cool-down are kept there, so a recording and a running worker can never load pages at once.
 
@@ -1246,7 +1270,7 @@ verified on the worker").
 
 ### Choose it
 
-Add "Google Flights prices via Camoufox" to a definition's discovery providers. New definitions never include it.
+Once the worker is set up and `CAMOUFOX_ENABLED=true`, a new search names "Google Flights prices via Camoufox" by itself. A search saved before then keeps the sources it names until it is edited: add it to that search's discovery providers (More options).
 
 ### Check it
 
@@ -1261,8 +1285,8 @@ shows it listening on `127.0.0.1` only. To see which navigation a stopped page r
 - Stop the worker alone with `pnpm gmt stop --only worker` (the app keeps running; `pnpm gmt start --only worker`
   starts it again after its start check), or by hand with
   `launchctl bootout gui/$(id -u)/local.get-me-there.camoufox-worker` on macOS or
-  `systemctl --user stop get-me-there-camoufox-worker.service` on Linux. A page in flight finishes before the worker
-  exits (its stop waits up to 270 s). `stop --only worker` and `restart --only worker` ask a native app about a running
+  `systemctl --user stop get-me-there-camoufox-worker.service` on Linux. A list page in flight finishes before the
+  worker exits (its stop waits up to 270 s); a longer page is ended and stays counted. `stop --only worker` and `restart --only worker` ask a native app about a running
   search first, as `stop` does.
 - After a signed-in refusal: `pnpm --filter @gmt/camoufox-worker clear-signed-in` (it wipes the profile first).
 - Deleting the cool-down record ends a pause early, which defeats its purpose.

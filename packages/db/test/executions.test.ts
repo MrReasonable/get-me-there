@@ -303,7 +303,7 @@ describe('ExecutionsRepo (spec §7 search_executions, §8.1)', () => {
     clock.advance(60_000);
     const second = clock.now();
     repo.setStatus(execution.id, 'interrupted');
-    expect(repo.cancelPaused(execution.id, 'superseded')).toBe(true);
+    expect(repo.cancelPaused(execution.id, { kind: 'superseded', by: 'schedule' })).toBe(true);
     expect(repo.get(execution.id)).toMatchObject({ status: 'cancelled', pausedAt: second });
     const other = newExecution(db, clock).execution;
     repo.setStatus(other.id, 'paused_error');

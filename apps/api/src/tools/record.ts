@@ -164,8 +164,10 @@ export async function recordFixtures(
     await run.execute();
   } catch (e) {
     const message = safeMessage(e, ports.secrets);
+    // why: R3 (revision 55 §8.1) — a tool run stores its cause too; its note stays in error_text, never sent by the api
     ports.repos.executions.setStatus(executionId, 'cancelled', {
       finishedAt: ports.clock.now(),
+      stopCause: { kind: 'tool', ended: 'failed' },
       errorText: `record:fixtures failed: ${message}`,
     });
     const partial = run?.usage() ?? { calls: [], creditsUsed: 0, freeCalls: 0, session: null };
@@ -188,6 +190,7 @@ export async function recordFixtures(
   const aborted = ctx.signal.aborted;
   ports.repos.executions.setStatus(executionId, aborted ? 'cancelled' : 'completed', {
     finishedAt: ports.clock.now(),
+    ...(aborted ? { stopCause: { kind: 'tool', ended: 'aborted' } as const } : {}),
     // why: completed, not paused_budget — paused_budget is an active status, and this execution is never resumed (cost-wp4b-012)
     errorText: aborted ? 'aborted' : notes.length > 0 ? notes.join('; ') : null,
   });

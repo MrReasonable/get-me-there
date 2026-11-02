@@ -4,6 +4,7 @@ import {
   ANSWER_STATUS,
   asIata,
   asIsoDate,
+  type FlightsRequest,
   flagsFor,
   type PageRequest,
   workerAnswerSchema,
@@ -541,6 +542,17 @@ describe('PageSession (spec §2; brief Task 14.4)', () => {
     });
     expect(ctx0(t).pages).toHaveLength(1);
   });
+  // why: final review A-I1: a request that arrives while a page is in flight waits for that page's whole cap and its
+  // bounded close (two finally bounds), never only the spacing, so the app's retry does not spend its attempts early
+  it('a request while a page is in flight → spacing for the rest of that page’s cap and its close', async () => {
+    const t = setup();
+    const first = t.session.page(REQ);
+    expect(await t.session.page(REQ)).toEqual({
+      answer: { kind: 'spacing', retryAfterSeconds: 190 },
+      googleContacted: false,
+    });
+    await first;
+  });
   it('an active cool-down → cooling-down, nothing opened', async () => {
     const t = setup();
     t.cooldown.start('captcha');
@@ -1056,5 +1068,254 @@ describe('every stop names the rule that made it', () => {
     });
     const r = await t.session.page(REQ);
     expect(r.answer).toMatchObject({ kind: 'blocked', page: 'unrecognised', rule: 'no-options-read' });
+  });
+});
+
+// Spec revision 55 §2 "The flight-list read" (WP20 Task 20.7): a flights page is a list page under every rule of one
+// (the cool-down, the month's admission, the pacer, the reservation before the load, the GBP check, the Cheapest flow's
+// fall-back and no-options-read); only its reader and its answer differ. The names are the fake page's synthetic ones.
+describe('PageSession in flights mode (spec rev 55 §2)', () => {
+  const FREQ: FlightsRequest = {
+    mode: 'flights',
+    origin: asIata('LHR'),
+    destination: asIata('JFK'),
+    departureDate: asIsoDate('2026-11-05'),
+    returnDate: asIsoDate('2026-11-15'),
+    gl: 'GB',
+    airportNames: {
+      origin: ['London Heathrow Airport'],
+      destination: ['John F Kennedy International Airport'],
+    },
+  };
+  // The fake page's option (test/support/fakePage.ts): 12:25 → 20:05 the same day, one stop, 12 hrs 40 min.
+  const flight = (pounds: number) => ({
+    departsLocal: '12:25',
+    arrivesLocal: '20:05',
+    arrivesDayOffset: 0,
+    durationMinutes: 760,
+    stops: 1,
+    carriers: ['Example Air'],
+    operatedBy: null,
+    amountMinor: pounds * 100,
+  });
+
+  it('settled results → a flights answer: the cell’s flights in page order, the minimum, the tab price, no Cheapest view', async () => {
+    const t = setup();
+    const r = await t.session.page(FREQ);
+    expect(r).toEqual({
+      answer: {
+        kind: 'flights',
+        fetchedAt: '2026-10-18T05:00:02.000Z',
+        currency: 'GBP',
+        pointOfSale: 'GB',
+        listed: 'flights',
+        flights: [flight(478), flight(451)],
+        minMinor: 45_100,
+        tabMinor: 45_100,
+        cheapestView: null,
+        optionsUnparsed: 0,
+        optionsOtherCell: 0,
+        resultsStated: 2,
+        notes: [],
+        versions,
+      },
+      googleContacted: true,
+    });
+    expect(workerAnswerSchema.safeParse(r.answer).success).toBe(true);
+    expect(ANSWER_STATUS[r.answer.kind]).toBe(200);
+    // why: the same verified URL form a list page loads (core's pageUrl)
+    expect(page0(t).calls.gotos[0]?.url).toBe(URL0);
+    expect(page0(t).calls.closed).toBe(1);
+    expect(released(t)).toBe(true);
+  });
+  // why: rule 5 on a flights page: a list the SOCS read-back or the page close could not confirm is never kept as a flights
+  // answer (CodeRabbit finding: the `flights` branch of both overrun checks had no test)
+  it('a never-resolving SOCS read-back on a flights page → browser-error read, context discarded', async () => {
+    const t = setup({ shape: (c) => (c.hangCookiesOn = 1) });
+    expect((await t.session.page(FREQ)).answer).toEqual({
+      kind: 'browser-error',
+      stage: 'read',
+      detail: 'SOCS read-back overran',
+    });
+    expect(ctx0(t).closed).toBe(1);
+  });
+  it('a page close that never resolves on a flights page → browser-error read, context discarded', async () => {
+    const t = setup({ shape: (c) => (c.onNewPage = (p) => (p.closeHangs = true)) });
+    expect((await t.session.page(FREQ)).answer).toEqual({
+      kind: 'browser-error',
+      stage: 'read',
+      detail: 'page close overran',
+    });
+    expect(ctx0(t).closed).toBe(1);
+  });
+  it('runs every gate a list page runs, in order, before the load: grid gate skipped, cool-down, month, pacer, reservation', async () => {
+    // the grid gate does not apply: no grid settings, and the page still loads
+    const seen: unknown[] = [];
+    const g = setup({
+      shape: () => {
+        seen.push(JSON.parse(readFileSync(join(g.dataDir, 'monthly.json'), 'utf8')));
+      },
+    });
+    expect((await g.session.page(FREQ)).answer.kind).toBe('flights');
+    // the reservation was on disk when the browser launched
+    expect(seen).toEqual([expect.objectContaining({ pages: 1 })]);
+    // a cool-down answers before the month's cap is read
+    const a = setup({ monthly: { pages: 0, scrolls: 6000, billingDay: 1 } });
+    a.cooldown.start('captcha');
+    expect((await a.session.page(FREQ)).answer.kind).toBe('cooling-down');
+    // the month's cap answers before the pacer claims
+    const b = setup({ monthly: { pages: 0, scrolls: 6000, billingDay: 1 } });
+    expect((await b.session.page(FREQ)).answer.kind).toBe('monthly-cap');
+    expect(b.pacer.claim().ok).toBe(true);
+    for (const x of [a, b]) expect(x.contexts).toEqual([]);
+    // the pacer refuses before the reservation: a second page inside the spacing reserves nothing and opens nothing
+    const c = setup();
+    expect((await c.session.page(FREQ)).answer.kind).toBe('flights');
+    c.clock.advance(5000);
+    expect((await c.session.page(FREQ)).answer).toEqual({ kind: 'spacing', retryAfterSeconds: 21 });
+    expect(JSON.parse(readFileSync(join(c.dataDir, 'monthly.json'), 'utf8'))).toMatchObject({ pages: 1 });
+    expect(ctx0(c).pages).toHaveLength(1);
+  });
+  it('a second request during a page answers spacing, nothing more opened', async () => {
+    const t = setup();
+    const first = t.session.page(FREQ);
+    expect((await t.session.page(FREQ)).answer.kind).toBe('spacing');
+    expect((await first).answer.kind).toBe('flights');
+    expect(ctx0(t).pages).toHaveLength(1);
+  });
+  it('a page in another currency is blocked unrecognised, rule currency, with its cool-down', async () => {
+    const tree = resultsTree();
+    tree.children = (tree.children ?? []).map((c) =>
+      c.name === 'Currency GBP' ? n('button', 'Currency USD') : c,
+    );
+    const t = setup({ tree });
+    expect((await t.session.page(FREQ)).answer).toMatchObject({
+      kind: 'blocked',
+      page: 'unrecognised',
+      rule: 'currency',
+    });
+    expect(t.cooldown.active()?.cause).toBe('unrecognised');
+  });
+  it('options no grammar reads are blocked no-options-read, as in list mode', async () => {
+    const t = setup({
+      tree: resultsTree({
+        top: [n('link', 'From 478 British pounds round trip total. Gibberish')],
+        other: [],
+      }),
+    });
+    expect((await t.session.page(FREQ)).answer).toMatchObject({
+      kind: 'blocked',
+      page: 'unrecognised',
+      rule: 'no-options-read',
+    });
+  });
+  it('the Cheapest flow read is named cheapest; a failed one falls back to the Best view, named so, with the tab price', async () => {
+    const on = setup({ selectors: { ...SELECTORS, CHEAPEST_FLOW_VERIFIED: true } });
+    expect((await on.session.page(FREQ)).answer).toMatchObject({ kind: 'flights', cheapestView: 'cheapest' });
+    const fallback = setup({
+      tree: resultsTree({ tab: 'Cheapest from £443' }),
+      selectors: { ...SELECTORS, CHEAPEST_FLOW_VERIFIED: true },
+      shape: (c) => {
+        c.onNewPage = (p) => {
+          p.onClick = () => {
+            throw Object.assign(new Error('locator.click: Timeout'), { name: 'TimeoutError' });
+          };
+        };
+      },
+    });
+    expect((await fallback.session.page(FREQ)).answer).toMatchObject({
+      kind: 'flights',
+      listed: 'flights',
+      cheapestView: 'best-fallback',
+      tabMinor: 44_300,
+      minMinor: 45_100,
+    });
+    expect(fallback.cooldown.active()).toBeNull();
+  });
+  it('a Cheapest view that never settles with no list read is not-ready, as in list mode', async () => {
+    const t = setup({
+      tree: resultsTree({ tab: 'Cheapest from £443', top: [], other: [] }),
+      selectors: { ...SELECTORS, CHEAPEST_FLOW_VERIFIED: true },
+      shape: (c) => {
+        c.onNewPage = (p) => {
+          p.onClick = () => {
+            throw Object.assign(new Error('locator.click: Timeout'), { name: 'TimeoutError' });
+          };
+        };
+      },
+    });
+    expect((await t.session.page(FREQ)).answer.kind).toBe('not-ready');
+    expect(t.cooldown.active()).toBeNull();
+  });
+  // why: ruling B8: the session answers Google's no-flights line before any reader runs; on a flights page that answer
+  // is a flights answer with listed 'no-flights' (never readFlights' to give)
+  it("Google's no-flights line, once verified, is listed 'no-flights' with no flight", async () => {
+    const t = setup({
+      tree: n('document', '', [text('No results returned for this search')]),
+      selectors: { ...SELECTORS, NO_FLIGHTS_VERIFIED: true },
+    });
+    const r = await t.session.page(FREQ);
+    expect(r.answer).toEqual({
+      kind: 'flights',
+      // why: the no-flights line settles on the first poll (no second poll for stable links)
+      fetchedAt: '2026-10-18T05:00:00.000Z',
+      currency: 'GBP',
+      pointOfSale: 'unknown',
+      listed: 'no-flights',
+      flights: [],
+      minMinor: null,
+      tabMinor: null,
+      cheapestView: null,
+      optionsUnparsed: 0,
+      optionsOtherCell: 0,
+      resultsStated: null,
+      notes: [],
+      versions,
+    });
+    expect(workerAnswerSchema.safeParse(r.answer).success).toBe(true);
+  });
+  it("every option for another day is listed 'none-for-cell', no cool-down", async () => {
+    const t = setup({
+      tree: resultsTree({
+        top: [option(300, { on: 'Friday, November 6' })],
+        other: [option(310, { on: 'Friday, November 6' })],
+      }),
+    });
+    expect((await t.session.page(FREQ)).answer).toMatchObject({
+      kind: 'flights',
+      listed: 'none-for-cell',
+      flights: [],
+      minMinor: null,
+      optionsOtherCell: 2,
+    });
+    expect(t.cooldown.active()).toBeNull();
+  });
+});
+
+// why: WP21 Task 21.3 (spec rev 56 §2, R-zero, A5): `pagesLoaded` is stated only on an answer to a request carrying
+// returnLimits on a verified entry; a list, grid or plain flights page carries none, as before
+describe('page counts only on a return-phase request (WP21 Task 21.3)', () => {
+  it('a list page and a flights page without returnLimits carry no pagesLoaded, with the select flags on', async () => {
+    const S = {
+      ...SELECTORS,
+      CHEAPEST_FLOW_VERIFIED: false,
+      RETURN_SELECT_VERIFIED: true,
+      BOOKING_SELECT_VERIFIED: true,
+    };
+    const t = setup({ selectors: S });
+    const list = (await t.session.page(REQ)).answer;
+    expect(list.kind).toBe('cells');
+    expect('pagesLoaded' in list).toBe(false);
+    t.clock.advance(30_000);
+    const flights = (await t.session.page({ ...REQ, mode: 'flights' })).answer;
+    expect(flights.kind).toBe('flights');
+    expect('pagesLoaded' in flights).toBe(false);
+    expect('returns' in flights).toBe(false);
+  });
+  it('a blocked list page carries no pagesLoaded either', async () => {
+    const t = setup({ tree: n('document', '', [text('please show you are not a robot')]) });
+    const a = (await t.session.page(REQ)).answer;
+    expect(a).toMatchObject({ kind: 'blocked', page: 'captcha' });
+    expect('pagesLoaded' in a).toBe(false);
   });
 });

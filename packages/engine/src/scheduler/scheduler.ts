@@ -1,4 +1,10 @@
-import { type IsoDateTime, isoDateTimeOfEpochMs, type Logger, type SearchDefinition } from '@gmt/core';
+import {
+  type IsoDateTime,
+  isoDateTimeOfEpochMs,
+  isScheduled,
+  type Logger,
+  type SearchDefinition,
+} from '@gmt/core';
 import { Cron } from 'croner';
 import { errorText } from '../errors.js';
 import type { SchedulerJob } from '../types.js';
@@ -74,7 +80,7 @@ export function createScheduler(hooks: SchedulerHooks, log: Logger): Scheduler {
   return {
     register(def) {
       unregister(def.id);
-      if (!def.enabled || def.deletedAt !== null || def.scheduleCron === null) return;
+      if (!isScheduled(def)) return;
       const p = parseCron(def.scheduleCron, def.scheduleTz);
       if (!p.ok) {
         log.warn({ definitionId: def.id, reason: p.reason }, 'scheduler: invalid schedule not registered');

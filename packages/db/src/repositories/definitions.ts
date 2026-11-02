@@ -115,16 +115,40 @@ export class DefinitionsRepo {
       .map(readDefinition);
   }
 
-  /** Spec §7 "Soft-deleted": executions, prices and history keep their foreign keys; the definition is disabled and never scheduled or resumed. */
+  /**
+   * Spec §7 "Soft-deleted": executions, prices and history keep their foreign keys; the definition is never scheduled
+   * or resumed. Revision 55 §7: `enabled` is left as it was (every scheduling reader checks `deleted_at`, through
+   * `isScheduled`), so a restore brings the schedule back as it was.
+   */
   softDelete(id: string): void {
     const now = this.clock.now();
     const changes = this.db.raw
       .prepare(
-        'UPDATE search_definitions SET deleted_at = @now, enabled = 0, updated_at = @now WHERE id = @id AND deleted_at IS NULL',
+        'UPDATE search_definitions SET deleted_at = @now, updated_at = @now WHERE id = @id AND deleted_at IS NULL',
       )
       .run({ id, now }).changes;
     if (changes === 0 && this.get(id) === null)
       throw new RowRejected('missing', `definition ${id} does not exist`);
+  }
+
+  /**
+   * Spec revision 55 §7, §10 `POST /definitions/:id/restore` (the undo of a remove): clears `deleted_at` and sets
+   * `updated_at`, keeping the pre-delete `enabled` and schedule. `live` for a definition that is not deleted, and
+   * `tool-only` for one whose executions are all tool runs (a tool's hidden definition is never restored); both
+   * change nothing. One guarded statement, so a restore can never revive a tool's definition.
+   */
+  restore(id: string): 'restored' | 'live' | 'tool-only' {
+    const changes = this.db.raw
+      .prepare(
+        `UPDATE search_definitions SET deleted_at = NULL, updated_at = @now WHERE id = @id AND deleted_at IS NOT NULL
+           AND NOT (EXISTS (SELECT 1 FROM search_executions e WHERE e.definition_id = @id)
+                    AND NOT EXISTS (SELECT 1 FROM search_executions e WHERE e.definition_id = @id AND e.trigger <> 'tool'))`,
+      )
+      .run({ id, now: this.clock.now() }).changes;
+    if (changes === 1) return 'restored';
+    const d = this.get(id);
+    if (d === null) throw new RowRejected('missing', `definition ${id} does not exist`);
+    return d.deletedAt === null ? 'live' : 'tool-only';
   }
 
   /**

@@ -13,6 +13,7 @@
     "src/pacer.ts",
     "src/socs.ts",
     "src/names.ts",
+    "src/flights.ts",
     "src/guard.ts",
     "src/ready.ts",
     "src/accountCookies.ts",
@@ -21,7 +22,10 @@
     "src/monthly.ts",
     "src/consentLine.ts",
     "src/socsMark.ts",
-    "src/sessionLine.ts"
+    "src/sessionLine.ts",
+    "src/returns.ts",
+    "src/offers.ts",
+    "src/returnPhase.ts"
   ],
   "thresholds": {
     "high": 90,

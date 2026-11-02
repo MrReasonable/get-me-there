@@ -1,9 +1,21 @@
-import { apiContract, type Estimate, ProviderError } from '@gmt/core';
+import { AbortedError, apiContract, type Estimate, ProviderError } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
-import { budgetFitFor, scheduleLoad } from '../src/budgetFit.js';
+import { budgetFitFor, flightAllowanceOf, scheduleLoad } from '../src/budgetFit.js';
 import { buildContext } from '../src/context.js';
-import { estimateRemainingFor, estimateStart } from '../src/estimate.js';
+import {
+  addPass,
+  browserPagesPlanned,
+  estimateRemainingFor,
+  estimateStart,
+  flightWindowMarginSeconds,
+  monthlyPagesOf,
+  withBlocked,
+} from '../src/estimate.js';
+import { lineKey } from '../src/lines.js';
+import { runsPerMonth } from '../src/scheduler/parseCron.js';
 import { buildSnapshot } from '../src/snapshot.js';
+import { confirmationNeeded } from '../src/start.js';
+import { engineWith, flightRows, rankedPairs, stubCamoufox, stubTravelpayouts } from './support/camoufox.js';
 import {
   createHarness,
   EWR,
@@ -13,6 +25,7 @@ import {
   JFK,
   LGW,
   LHR,
+  T0,
   verificationOf,
   withVerification,
 } from './support/harness.js';
@@ -276,5 +289,547 @@ describe('parity and the overrun baseline (spec §8.1)', () => {
     expect(verification?.calls ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(
       e.estimate?.perProvider[1]?.planCalls ?? 0,
     );
+  });
+});
+
+// Spec revision 55 §8.1 "Estimate" (WP20 Task 20.9): with camoufox in discovery the estimate carries the flight-list
+// step's `flightLists { pages, seconds }`: pages the least of 10 less the reusable date pairs, the monthly pages left
+// after the grid plan and the run's free calls left; seconds pages × (spacing + 40). Its seconds count in the total and
+// the browser window; its pages never in totalCalls, but in camoufox's calls for the soft confirmation, the monthly
+// pages and budgetFit. Without camoufox the stored estimate has no `flightLists` key.
+describe('the estimate flight line (spec rev 55 §8.1)', () => {
+  /** A camoufox engine over `cells` one-page cells (with a flight capability) and its start-time estimate. */
+  function flightEstimate(cells: number, o: Parameters<typeof engineWith>[1] = {}, saved = false) {
+    const e = engineWith([stubCamoufox({ cells, flights: {} })], { rankedDatePairs: rankedPairs(15), ...o });
+    // why: revision 55's outbound-only line: a worker that reported no return flag (final review B-M3: while the flags
+    // are unread the estimate counts the return phase)
+    e.ctx.workerFlags.set('camoufox', { RETURN_SELECT_VERIFIED: false });
+    const b = buildSnapshot(e.ctx, e.definition);
+    return { e, b, est: estimateStart(e.ctx, b.snapshot, b.cells, saved ? e.definition.id : null) };
+  }
+
+  it('reads 10 date pairs at spacing + 40 s a page (700 s at the defaults): in seconds, never in totalCalls', () => {
+    const { est } = flightEstimate(15);
+    expect(est.flightLists).toEqual({ pairs: 10, pages: 10, seconds: 700, returns: false });
+    const grid = est.perProvider.find((p) => p.providerId === 'camoufox');
+    expect(est.totalCalls).toBe(grid?.calls);
+    expect(est.seconds).toBe((grid?.seconds ?? 0) + 700);
+    expect(est.assumptions).toContain('+ flights for up to 10 date pairs, about 12 minutes');
+    expect(apiContract.estimateSchema.parse(est).flightLists).toEqual({
+      pairs: 10,
+      pages: 10,
+      seconds: 700,
+      returns: false,
+    });
+  });
+
+  it('leaves out the reusable date pairs of a saved search', () => {
+    const { e } = flightEstimate(15);
+    const pairs = rankedPairs(3)({
+      definitionId: e.definition.id,
+      space: buildSnapshot(e.ctx, e.definition).snapshot.resolved,
+      cabin: 'economy',
+      maxJourneyMinutes: null,
+      now: T0,
+    });
+    for (const p of pairs)
+      e.ctx.repos.flightLists.insert({
+        definitionId: e.definition.id,
+        executionId: null,
+        providerId: 'camoufox',
+        sourceKind: 'scraped-self',
+        cabin: 'economy',
+        origin: p.origin,
+        destination: p.destination,
+        departureDate: p.departureDate,
+        returnDate: p.returnDate,
+        fetchedAt: T0,
+        pointOfSale: 'GB',
+        status: 'read',
+        reason: null,
+        listed: 'no-flights',
+        minMinor: null,
+        tabMinor: null,
+        cheapestView: null,
+        optionsUnparsed: 0,
+        optionsOtherCell: 0,
+        resultsStated: null,
+        flights: [],
+        returns: null,
+      });
+    const b = buildSnapshot(e.ctx, e.definition);
+    expect(estimateStart(e.ctx, b.snapshot, b.cells, e.definition.id).flightLists?.pages).toBe(7);
+    expect(estimateStart(e.ctx, b.snapshot, b.cells, null).flightLists?.pages).toBe(10);
+  });
+
+  it("names the browser worker's monthly page cap when it binds (4 pages left after a 100-page grid)", () => {
+    const { est } = flightEstimate(120, { monthlyCap: 104 });
+    expect(est.flightLists?.pages).toBe(4);
+    expect(est.assumptions).toContain("flights for 4 date pairs: the browser worker's monthly page cap");
+  });
+
+  it("names the run's free-call limit when maxFreeCalls 105 binds after 100 grid pages", () => {
+    const { est } = flightEstimate(100, { maxFreeCalls: 105 });
+    expect(est.flightLists?.pages).toBe(5);
+    expect(est.assumptions).toContain("flights for 5 date pairs: the run's free-call limit");
+  });
+
+  it('21.6 review M4: when the month and the free calls tie (5 each after 100 grid pages) the monthly page cap is named, as before', () => {
+    const { est } = flightEstimate(100, { monthlyCap: 105, maxFreeCalls: 105 });
+    expect(est.flightLists?.pages).toBe(5);
+    expect(est.assumptions).toContain("flights for 5 date pairs: the browser worker's monthly page cap");
+    expect(est.assumptions.some((a) => a.includes('free-call limit'))).toBe(false);
+  });
+
+  it('names no cap when the pairs wanted all fit, the month and the free calls tied above them', () => {
+    const { est } = flightEstimate(100, { monthlyCap: 120, maxFreeCalls: 120 });
+    expect(est.flightLists?.pairs).toBe(10);
+    expect(est.assumptions.some((a) => a.startsWith('flights for'))).toBe(false);
+  });
+
+  it('is carried through withBlocked (zero when the browser line is blocked) and addPass', () => {
+    const { est } = flightEstimate(15);
+    const blockedTp = withBlocked(est, new Map());
+    expect(blockedTp.flightLists).toEqual({ pairs: 10, pages: 10, seconds: 700, returns: false });
+    expect(blockedTp.seconds).toBe(est.seconds);
+    const blocked = withBlocked(est, new Map([[lineKey('discovery', 'camoufox'), 'provider-month']]));
+    expect(blocked.flightLists).toEqual({ pairs: 0, pages: 0, seconds: 0, returns: false });
+    expect(blocked.seconds).toBe(0);
+    const twice = addPass(est, est);
+    expect(twice.flightLists).toEqual({ pairs: 20, pages: 20, seconds: 1400, returns: false });
+    expect(twice.seconds).toBe(2 * est.seconds);
+  });
+
+  it('counts the flight pages in camoufox calls for the soft confirmation: 100 + 10 of a 500 cap trips the share', () => {
+    const { e, est } = flightEstimate(120, { monthlyCap: 500 });
+    const need = confirmationNeeded(e.ctx, est, new Set(), { pence: null, calls: null });
+    expect(need?.why).toEqual({
+      reason: 'call-share',
+      providerId: 'camoufox',
+      calls: 110,
+      cap: 500,
+      window: 'month',
+    });
+    const { flightLists: _none, ...gridOnly } = est;
+    expect(confirmationNeeded(e.ctx, gridOnly, new Set(), { pence: null, calls: null })).toBeNull();
+  });
+
+  it("one run's browser pages are the runnable camoufox lines' pages plus the flight pages (ruling R-pages)", () => {
+    const { est } = flightEstimate(15);
+    expect(browserPagesPlanned(est)).toBe(25);
+    const { flightLists: _none, ...gridOnly } = est;
+    expect(browserPagesPlanned(gridOnly)).toBe(15);
+    // a blocked camoufox line, or none at all, plans no browser pages for the run
+    const blocked = {
+      ...est,
+      perProvider: est.perProvider.map((p) => ({ ...p, blocked: 'monthly-cap' as const })),
+    };
+    expect(browserPagesPlanned(blocked)).toBeNull();
+    expect(browserPagesPlanned({ perProvider: [] })).toBeNull();
+  });
+
+  it("counts them in the browser worker's monthly pages and in budgetFit's month", () => {
+    const { e, est } = flightEstimate(15, { scheduleCron: '0 5 * * 1' });
+    expect(monthlyPagesOf(e.ctx, est, null)?.planned).toBe(25);
+    const fit = budgetFitFor(e.ctx, e.definition, e.definition.id);
+    const runs = runsPerMonth('0 5 * * 1', 'Europe/London', new Date(T0));
+    expect(fit.perScope.find((x) => x.scope === 'provider-month:camoufox')?.estimated).toBe(
+      Math.ceil(runs * 25),
+    );
+  });
+
+  it('estimateRemaining counts the planned cells with no row yet', async () => {
+    const cam = stubCamoufox({
+      cells: 15,
+      // why: from the fifth page the gate's refusal (an AbortedError, the run not cancelled) ends the step with no row
+      flights: {
+        answer: (_q, n) => {
+          if (n > 4) throw new AbortedError();
+          return undefined;
+        },
+      },
+    });
+    const e = engineWith([cam], { rankedDatePairs: rankedPairs(15) });
+    const r = await e.orch.start(e.definition.id, {
+      trigger: 'manual',
+      confirmCostPence: 1_000_000,
+      confirmCalls: 1_000_000,
+    });
+    if (!r.ok) throw new Error(r.message);
+    const done = await e.settled(r.executionId);
+    expect(flightRows(e, r.executionId)).toHaveLength(4);
+    expect(estimateRemainingFor(e.ctx, done, true).flightLists?.pages).toBe(6);
+  });
+
+  /** `n` browser pages already spent this month (outside any run), as the guard counts them. */
+  function spendPages(e: ReturnType<typeof engineWith>, n: number): void {
+    const at = e.clock.now();
+    const insert = e.ctx.db.raw.prepare(
+      `INSERT INTO provider_requests (provider_id, execution_id, endpoint_path, tile_index, started_at, finished_at,
+         duration_ms, http_status, outcome, billable, cost_micro_gbp, http_attempt, page_class)
+       VALUES ('camoufox', NULL, '/v1/page', NULL, ?, ?, 1, 200, 'ok', 0, 0, 1, 'page')`,
+    );
+    for (let i = 0; i < n; i++) insert.run(at, at);
+  }
+
+  it("R-load: a schedule's load counts its full flight allowance a run, even with the month spent", () => {
+    // why: 15 of a 30-page month are spent, so this run's grid (15) leaves none for flights; a schedule still needs
+    // 10 flight pages on every run it makes
+    const { e, b } = flightEstimate(15, { monthlyCap: 30, scheduleCron: '0 5 * * 1' });
+    spendPages(e, 15);
+    expect(estimateStart(e.ctx, b.snapshot, b.cells, null).flightLists?.pages).toBe(0);
+    const fit = budgetFitFor(e.ctx, e.definition, e.definition.id);
+    const runs = runsPerMonth('0 5 * * 1', 'Europe/London', new Date(T0));
+    expect(fit.perScope.find((x) => x.scope === 'provider-month:camoufox')?.estimated).toBe(
+      Math.ceil(runs * 25),
+    );
+    expect(fit.perScope.find((x) => x.scope.startsWith('execution-free-calls'))?.estimated).toBe(25);
+  });
+
+  it('never says "+ flights for up to 0 date pairs"; a cap that leaves none is still named', () => {
+    const { est } = flightEstimate(15, { monthlyCap: 15 });
+    expect(est.flightLists).toEqual({ pairs: 0, pages: 0, seconds: 0, returns: false });
+    expect(est.assumptions.some((a) => a.startsWith('+ flights'))).toBe(false);
+    expect(est.assumptions).toContain("flights for 0 date pairs: the browser worker's monthly page cap");
+  });
+
+  it('withBlocked drops the flight notes when it zeroes the flight pages', () => {
+    const { est } = flightEstimate(120, { monthlyCap: 104 });
+    expect(est.assumptions.filter((a) => a.includes('flights for'))).toHaveLength(2);
+    const blocked = withBlocked(est, new Map([[lineKey('discovery', 'camoufox'), 'provider-month']]));
+    expect(blocked.assumptions.filter((a) => a.includes('flights for'))).toEqual([]);
+  });
+
+  it('without camoufox the estimate has no flightLists key', () => {
+    const e = engineWith([stubTravelpayouts({ cells: 15 })], { rankedDatePairs: rankedPairs(15) });
+    const b = buildSnapshot(e.ctx, e.definition);
+    const est = estimateStart(e.ctx, b.snapshot, b.cells, null);
+    expect('flightLists' in est).toBe(false);
+    expect('flightLists' in apiContract.estimateSchema.parse(est)).toBe(false);
+  });
+});
+
+// Spec rev 56 §8.1 "Estimate" (R-estimate; ruling D6; R-low-pages): with the worker's RETURN_SELECT_VERIFIED the flight
+// line plans each pair out and back: typically 1.5 pages and 245 s (165 s without the booking read), at most 2 pages and
+// 300 s (220 s); the month's pages bound the pairs planned out and back (floor(M / 2)), the rest outbound-only up to
+// what the pages allow; free calls count requests (one a pair). Exact fits at the defaults (90 s page, 30 s spacing).
+describe('the estimate flight line with the return leg (spec rev 56 §8.1)', () => {
+  const BOTH = { RETURN_SELECT_VERIFIED: true, BOOKING_SELECT_VERIFIED: true };
+  function returnsEstimate(
+    cells: number,
+    flags: Record<string, boolean> | null,
+    o: Parameters<typeof engineWith>[1] = {},
+  ) {
+    const e = engineWith([stubCamoufox({ cells, flights: {} })], { rankedDatePairs: rankedPairs(15), ...o });
+    if (flags !== null) e.ctx.workerFlags.set('camoufox', flags);
+    const b = buildSnapshot(e.ctx, e.definition);
+    return { e, b, est: estimateStart(e.ctx, b.snapshot, b.cells, null) };
+  }
+
+  it('both flags: 10 pairs, usually 15 pages and 2,450 s, at most 20 pages and 3,000 s', () => {
+    const { est } = returnsEstimate(15, BOTH);
+    expect(est.flightLists).toEqual({
+      pairs: 10,
+      pages: 15,
+      seconds: 2450,
+      pagesMax: 20,
+      secondsMax: 3000,
+      returns: true,
+    });
+    expect(est.assumptions).toContain(
+      '+ flights, out and back, for up to 10 date pairs: usually about 15 pages and 41 minutes, at most 20 pages and 50 minutes',
+    );
+    expect(est.assumptions.some((a) => a.startsWith('+ flights for up to'))).toBe(false);
+    const grid = est.perProvider.find((p) => p.providerId === 'camoufox');
+    expect(est.seconds).toBe((grid?.seconds ?? 0) + 2450);
+    expect(apiContract.estimateSchema.parse(est).flightLists).toEqual(est.flightLists);
+  });
+
+  it('without the booking flag: 165 s a pair (1,650 s), at most 220 s (2,200 s)', () => {
+    const { est } = returnsEstimate(15, { RETURN_SELECT_VERIFIED: true, BOOKING_SELECT_VERIFIED: false });
+    expect(est.flightLists).toEqual({
+      pairs: 10,
+      pages: 15,
+      seconds: 1650,
+      pagesMax: 20,
+      secondsMax: 2200,
+      returns: true,
+    });
+    expect(est.assumptions).toContain(
+      '+ flights, out and back, for up to 10 date pairs: usually about 15 pages and 28 minutes, at most 20 pages and 37 minutes',
+    );
+  });
+
+  it('21.6 review M5: an older 10-page snapshot with 5 pairs reused plans outbound-only, as the step plans it', () => {
+    const e = engineWith([stubCamoufox({ cells: 15, flights: {} })], { rankedDatePairs: rankedPairs(15) });
+    e.ctx.workerFlags.set('camoufox', BOTH);
+    const b = buildSnapshot(e.ctx, e.definition);
+    const snapshot = { ...b.snapshot, budget: { ...b.snapshot.budget, flightListPages: 10 } };
+    const pairs = rankedPairs(5)({
+      definitionId: e.definition.id,
+      space: snapshot.resolved,
+      cabin: 'economy',
+      maxJourneyMinutes: null,
+      now: T0,
+    });
+    for (const p of pairs)
+      e.ctx.repos.flightLists.insert({
+        definitionId: e.definition.id,
+        executionId: null,
+        providerId: 'camoufox',
+        sourceKind: 'scraped-self',
+        cabin: 'economy',
+        origin: p.origin,
+        destination: p.destination,
+        departureDate: p.departureDate,
+        returnDate: p.returnDate,
+        fetchedAt: T0,
+        pointOfSale: 'GB',
+        status: 'read',
+        reason: null,
+        listed: 'no-flights',
+        minMinor: null,
+        tabMinor: null,
+        cheapestView: null,
+        optionsUnparsed: 0,
+        optionsOtherCell: 0,
+        resultsStated: null,
+        flights: [],
+        returns: null,
+      });
+    // why: the plan judges the allowance over its 10 candidates (10 < 10 × 2: outbound-only), never over the 5 it reads
+    const est = estimateStart(e.ctx, snapshot, b.cells, e.definition.id);
+    expect(est.flightLists).toEqual({ pairs: 5, pages: 5, seconds: 350, returns: false });
+  });
+
+  it('with the return flag false: outbound-only, 10 pages and 700 s', () => {
+    const { est } = returnsEstimate(15, { RETURN_SELECT_VERIFIED: false, BOOKING_SELECT_VERIFIED: true });
+    expect(est.flightLists).toEqual({ pairs: 10, pages: 10, seconds: 700, returns: false });
+    expect(est.assumptions).toContain('+ flights for up to 10 date pairs, about 12 minutes');
+  });
+
+  // why: final review B-M3 (prov-008, 21.6 N2): the run's own preflight may set the flags and plan 2 pages a pair, so
+  // while they are unread the estimate counts the whole return phase, booking read included: it never understates
+  it('with the flags unread: the return phase with the booking read assumed (the bound), as with both flags', () => {
+    const { est } = returnsEstimate(15, null);
+    expect(est.flightLists).toEqual(returnsEstimate(15, BOTH).est.flightLists);
+    expect(est.flightLists).toMatchObject({ pairs: 10, pagesMax: 20, secondsMax: 3000, returns: true });
+  });
+
+  // why: final review B-M4: the engine sends a return phase while the month leaves 2 pages, and a phase that needs no
+  // second outbound loads 1, so M pages left read up to M date pairs: all but the last out and back, the pages still at
+  // most M (D6's pairs at 2 pages each understated the pairs a run can read)
+  it('the month bounds the pages, not the pairs: at 1, 2, 3 and 5 pages left, up to 1, 2, 3 and 5 date pairs', () => {
+    // why: 15 grid pages of a 16-, 17-, 18- and 20-page month leave 1, 2, 3 and 5 pages for flights
+    const one = returnsEstimate(15, BOTH, { monthlyCap: 16 }).est;
+    // why: 21.7 code I1: with no pair out and back the line states no return leg (`returns: outAndBack > 0`); the bound
+    // stays, since the plan still reads the return leg wherever the pages allow (R-load reads it)
+    expect(one.flightLists).toEqual({
+      pairs: 1,
+      pages: 1,
+      seconds: 70,
+      pagesMax: 1,
+      secondsMax: 70,
+      returns: false,
+    });
+    expect(one.assumptions).toContain('+ flights for up to 1 date pair, about 1 minute');
+    expect(one.assumptions).toContain("flights for 1 date pair: the browser worker's monthly page cap");
+    const two = returnsEstimate(15, BOTH, { monthlyCap: 17 }).est;
+    expect(two.flightLists).toEqual({
+      pairs: 2,
+      pages: 2,
+      seconds: 315,
+      pagesMax: 2,
+      secondsMax: 370,
+      returns: true,
+    });
+    expect(two.assumptions).toContain(
+      "flights for 1 date pair out and back, 1 outbound only: the browser worker's monthly page cap",
+    );
+    const three = returnsEstimate(15, BOTH, { monthlyCap: 18 }).est;
+    expect(three.flightLists).toEqual({
+      pairs: 3,
+      pages: 3,
+      seconds: 560,
+      pagesMax: 3,
+      secondsMax: 670,
+      returns: true,
+    });
+    expect(three.assumptions).toContain(
+      "flights for 2 date pairs out and back, 1 outbound only: the browser worker's monthly page cap",
+    );
+    const five = returnsEstimate(15, BOTH, { monthlyCap: 20 }).est;
+    expect(five.flightLists).toMatchObject({ pairs: 5, pagesMax: 5, returns: true });
+    expect(five.assumptions.find((a) => a.startsWith('+ flights, out and back'))).toMatch(
+      /^\+ flights, out and back, for up to 5 date pairs: usually about 5 pages and \d+ minutes, at most 5 pages and/,
+    );
+  });
+
+  it('the free-call bound counts requests: maxFreeCalls 105 after 100 grid pages plans 5 pairs out and back', () => {
+    const { est } = returnsEstimate(100, BOTH, { maxFreeCalls: 105 });
+    expect(est.flightLists).toEqual({
+      pairs: 5,
+      pages: 8,
+      seconds: 1225,
+      pagesMax: 10,
+      secondsMax: 1500,
+      returns: true,
+    });
+    expect(est.assumptions).toContain("flights for 5 date pairs: the run's free-call limit");
+  });
+
+  it('a blocked browser line drops the out-and-back clause and the cap note', () => {
+    const { est } = returnsEstimate(15, BOTH, { monthlyCap: 18 });
+    expect(est.assumptions.filter((a) => a.includes('flights'))).toHaveLength(2);
+    const blocked = withBlocked(est, new Map([[lineKey('discovery', 'camoufox'), 'provider-month']]));
+    expect(blocked.assumptions.filter((a) => a.includes('flights'))).toEqual([]);
+    // why: 21.7 code I1: a blocked line reads no pair, so none goes out and back; its bound is kept (the plan's)
+    expect(blocked.flightLists).toEqual({
+      pairs: 0,
+      pages: 0,
+      seconds: 0,
+      pagesMax: 0,
+      secondsMax: 0,
+      returns: false,
+    });
+  });
+
+  it('21.7 code I1: a schedule whose month leaves no pair out and back still loads 2 pages a pair (R-load)', () => {
+    const { b, est } = returnsEstimate(15, BOTH, { monthlyCap: 16 });
+    expect(est.flightLists?.returns).toBe(false);
+    // why: the load is the schedule's full allowance, whatever this month has left: 2 pages a pair with the return leg
+    expect(flightAllowanceOf(est, b.snapshot)).toBe(Math.min(20, b.snapshot.budget.flightListPages ?? 0));
+    expect(flightAllowanceOf(returnsEstimate(15, { RETURN_SELECT_VERIFIED: false }).est, b.snapshot)).toBe(
+      Math.min(10, b.snapshot.budget.flightListPages ?? 0),
+    );
+  });
+
+  it('21.7 code I1: summing a pass with no pair out and back keeps its bound and states no return leg', () => {
+    const one = returnsEstimate(15, BOTH, { monthlyCap: 16 }).est;
+    expect(addPass(one, one).flightLists).toEqual({
+      pairs: 2,
+      pages: 2,
+      seconds: 140,
+      pagesMax: 2,
+      secondsMax: 140,
+      returns: false,
+    });
+  });
+
+  it('addPass sums every figure; the bound counts in the soft confirmation and the monthly pages', () => {
+    const { e, est } = returnsEstimate(15, BOTH);
+    expect(addPass(est, est).flightLists).toEqual({
+      pairs: 20,
+      pages: 30,
+      seconds: 4900,
+      pagesMax: 40,
+      secondsMax: 6000,
+      returns: true,
+    });
+    expect(browserPagesPlanned(est)).toBe(35);
+    expect(monthlyPagesOf(e.ctx, est, null)?.planned).toBe(35);
+  });
+
+  it('D5: the browser window carries one return-phase request (780 s, 600 s without the booking read) as margin', () => {
+    expect(
+      flightWindowMarginSeconds(returnsEstimate(15, BOTH).e.ctx, returnsEstimate(15, BOTH).est, null),
+    ).toBe(780);
+    const returnsOnly = returnsEstimate(15, { RETURN_SELECT_VERIFIED: true });
+    expect(flightWindowMarginSeconds(returnsOnly.e.ctx, returnsOnly.est, null)).toBe(600);
+    const outbound = returnsEstimate(15, { RETURN_SELECT_VERIFIED: false });
+    expect(flightWindowMarginSeconds(outbound.e.ctx, outbound.est, null)).toBe(0);
+    // why: final review B-M3: with the flags unread the margin is the bound's, the booking read included
+    const unread = returnsEstimate(15, null);
+    expect(flightWindowMarginSeconds(unread.e.ctx, unread.est, null)).toBe(780);
+    const none = returnsEstimate(15, BOTH, { monthlyCap: 15 });
+    expect(flightWindowMarginSeconds(none.e.ctx, none.est, null)).toBe(0);
+  });
+
+  it("21.6 review M2: a resume's margin follows the stored plan's booking read, not the flags (none read after a restart)", () => {
+    const { est } = returnsEstimate(15, BOTH);
+    // why: a new process has read no worker yet: the flags are unread, the stored plan still reads the booking options
+    const restarted = returnsEstimate(15, null).e.ctx;
+    const plan = {
+      planned: 10,
+      cells: [],
+      reused: 0,
+      ended: null,
+      returns: true,
+      booking: true,
+      returnsStopped: null,
+      bookingStopped: null,
+    };
+    expect(flightWindowMarginSeconds(restarted, est, plan)).toBe(780);
+    expect(flightWindowMarginSeconds(restarted, est, { ...plan, bookingStopped: 'expand-failed' })).toBe(600);
+    // and the other way: flags with the booking read on, a stored plan without it
+    expect(flightWindowMarginSeconds(returnsEstimate(15, BOTH).e.ctx, est, { ...plan, booking: false })).toBe(
+      600,
+    );
+    // with no stored plan the flags decide: none read yet assumes the booking read (final review B-M3: the bound)
+    expect(flightWindowMarginSeconds(restarted, est, null)).toBe(780);
+    // a provider with no flights request seconds has no margin
+    const noSeconds = {
+      ...restarted,
+      limitsOf: (id: Parameters<typeof restarted.limitsOf>[0]) => ({
+        ...restarted.limitsOf(id),
+        flightRequestSeconds: null,
+      }),
+    };
+    expect(flightWindowMarginSeconds(noSeconds, est, plan)).toBe(0);
+  });
+
+  it('estimateRemaining plans the same per planned flight cell left, from the stored plan', async () => {
+    const cam = stubCamoufox({
+      cells: 15,
+      preflight: { ok: true, flags: BOTH },
+      flights: {
+        answer: (_q, n) => {
+          if (n > 4) throw new AbortedError();
+          return undefined;
+        },
+      },
+    });
+    const e = engineWith([cam], { rankedDatePairs: rankedPairs(15) });
+    const r = await e.orch.start(e.definition.id, {
+      trigger: 'manual',
+      confirmCostPence: 1_000_000,
+      confirmCalls: 1_000_000,
+    });
+    if (!r.ok) throw new Error(r.message);
+    const done = await e.settled(r.executionId);
+    expect(done.flightLists?.returns).toBe(true);
+    expect(flightRows(e, r.executionId)).toHaveLength(4);
+    expect(estimateRemainingFor(e.ctx, done, true).flightLists).toEqual({
+      pairs: 6,
+      pages: 9,
+      seconds: 1470,
+      pagesMax: 12,
+      secondsMax: 1800,
+      returns: true,
+    });
+    // why: a resumed pass keeps the stored plan's phase less what a transient end stopped, and never counts a planned
+    // cell that departs today
+    const plan = done.flightLists;
+    if (plan === null) throw new Error('a stored plan');
+    const resumedWith = (over: Partial<typeof plan>) =>
+      estimateRemainingFor(e.ctx, { ...done, flightLists: { ...plan, ...over } }, true).flightLists;
+    expect(resumedWith({ returnsStopped: 'not-settled' })).toEqual({
+      pairs: 6,
+      pages: 6,
+      seconds: 420,
+      returns: false,
+    });
+    expect(resumedWith({ bookingStopped: 'expand-failed' })).toEqual({
+      pairs: 6,
+      pages: 9,
+      seconds: 990,
+      pagesMax: 12,
+      secondsMax: 1320,
+      returns: true,
+    });
+    const first = plan.cells[0];
+    if (first === undefined) throw new Error('a planned cell');
+    const departing = { ...first, departureDate: e.ctx.clock.todayLondon() };
+    expect(resumedWith({ cells: [...plan.cells, departing] })?.pairs).toBe(6);
   });
 });

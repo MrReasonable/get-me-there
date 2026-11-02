@@ -1,4 +1,9 @@
+import type { StopDetail } from '../api-contract/stopCause.js';
 import type { GridMove } from '../camoufox/protocol.js';
+import type { ProviderError } from '../errors.js';
+import type { FlightLimits } from '../flights/choose.js';
+import type { ReturnRead } from '../flights/returns.js';
+import type { Listed, ListedFlight } from '../flights/types.js';
 import type { CellKey } from '../types/definition.js';
 import type { ErrorReason } from '../types/execution.js';
 import type { Iata, IsoDate, IsoDateTime, IsoMonth } from '../types/ids.js';
@@ -33,6 +38,16 @@ export interface CapabilityInfo {
   returnDateSource?: ReturnDateSource | undefined;
 }
 
+/**
+ * Spec §5.1 rev 32, revision 55 §8.1: the airports dataset's names for a cell's two codes, which a provider that matches
+ * airports by name (camoufox reads names, never codes) uses to tell a cell's options apart. Discovery's query carries
+ * it, and the flight-list read's query (Task 20.7) carries the same shape.
+ */
+export interface CellAirportNames {
+  origin: string[];
+  destination: string[];
+}
+
 export interface DiscoveryQuery {
   origin: Iata;
   destination: Iata;
@@ -48,7 +63,7 @@ export interface DiscoveryQuery {
    * Spec §5.1 rev 32: the airports dataset's names for the query's codes, set by the engine for every query, so a
    * provider that matches airports by name (camoufox reads names, never codes) can tell this cell's options apart.
    */
-  airportNames?: { origin: string[]; destination: string[] };
+  airportNames?: CellAirportNames;
   /**
    * Spec §2 rev 34: how many pairs the stage plans for this provider, set by the engine, so a provider whose caps are
    * per run (camoufox grid pages and scrolls) gives each pair its share. Absent: one pair.
@@ -203,16 +218,26 @@ export interface CostEstimate {
 /**
  * Spec §5.1 rev 32: an unledgered check before a stage plans tiles (camoufox reads its worker's `/v1/status`). A refusal
  * skips every cell of the provider in the stage with `skip` as the reason and `detail` in `last_error`; `until` is the
- * end of a cool-down, which keys the once-per-cool-down notice.
+ * end of a cool-down, which keys the once-per-cool-down notice. Revision 55 §8.1 "Stop causes": `reason` is the refusal's
+ * class word, the only part of it a stop cause stores (`detail` is the provider's own sentence, kept in `last_error` and
+ * the log); a provider that states none is classed by the engine from `skip` and `until`.
  */
-export type PreflightResult =
+export type PreflightResult = (
   | { ok: true }
   | {
       ok: false;
       skip: 'provider_disabled' | 'provider_unavailable';
       detail: string;
       until?: IsoDateTime;
-    };
+      reason?: StopDetail;
+    }
+) & {
+  /**
+   * Spec rev 56 §5.1, §8.1: camoufox: the worker's reported verification flags, on every read that returned a status
+   * (ok or refused); the engine keeps them per provider and plans the return phase from them.
+   */
+  flags?: Readonly<Record<string, boolean>>;
+};
 export interface DiscoveryCapability {
   info: CapabilityInfo;
   plan(q: DiscoveryQuery): TilePlan[];
@@ -235,6 +260,62 @@ export interface VerificationCapability {
   estimate(q: ItineraryQuery): CostEstimate;
   search(q: ItineraryQuery, ctx: ProviderContext): Promise<ItinerarySearchResult>;
 }
+/**
+ * Spec revision 55 §2 "The flight-list read" and §5.1: one cell's flight list, economy only (the capability's `cabins`),
+ * read in the adapter's own point of sale. The engine fills `airportNames` as
+ * `{ origin: names(cell.origin), destination: names(cell.destination) }` from `airportNamesOf(ctx)`.
+ */
+export interface FlightListQuery {
+  cell: CellKey;
+  airportNames: CellAirportNames;
+  /**
+   * Spec rev 56 §5.1: the search's limits (`flightLimitsOf`, §6.2), sent only when the plan reads returns; absent or null:
+   * no return phase. Optional for good (ruling A4: an input, absent ≡ null).
+   */
+  returnLimits?: FlightLimits | null;
+  /** Spec rev 56 §5.1: read the shown pairing's booking options; sent only with `returnLimits`; absent read as false. */
+  booking?: boolean;
+}
+/**
+ * What the read gave (spec rev 55 §5.1): the list (`listed`, the 30 cheapest flights in page order, the page's own
+ * minimum, Cheapest-tab price, view read and option counts), or the error that stopped it. A query without airport
+ * names fails closed (`parse`, reason `no-airport-names`) before any request; a monthly cap is thrown as
+ * BudgetExceeded, as `fetchTile` throws it.
+ */
+export type FlightListResult =
+  | {
+      kind: 'list';
+      fetchedAt: IsoDateTime;
+      pointOfSale: PointOfSale;
+      listed: Listed;
+      flights: ListedFlight[];
+      minMinor: number | null;
+      tabMinor: number | null;
+      cheapestView: 'cheapest' | 'best-fallback' | null;
+      optionsUnparsed: number;
+      optionsOtherCell: number;
+      resultsStated: number | null;
+      notes: string[];
+      /**
+       * Spec rev 56 §5.1: the worker's return read, null when the request had no return phase (or an older worker
+       * answered without one). Required since Task 21.6 (R-order: the engine stores it).
+       */
+      returns: ReturnRead | null;
+      // why: final review A-M3: the answer's `nextLoadNotBefore` is not here: http-kit holds the next camoufox start
+      // from it inside the attempt (`nextStartOf`), and nothing past the provider reads it; `pagesLoaded` reaches only
+      // the ledger (arch-r3-014)
+    }
+  | { kind: 'list-error'; error: ProviderError };
+/**
+ * Spec rev 55 §5.1: the browser worker's flight lists (camoufox only; its preflight is discovery's). `cabins` are the
+ * cabins it reads (prov-int-002: economy only), so a non-economy search's flights are `not_available` with reason
+ * `cabin` before any page.
+ */
+export interface FlightListCapability {
+  info: CapabilityInfo;
+  cabins: readonly Cabin[];
+  read(q: FlightListQuery, ctx: ProviderContext): Promise<FlightListResult>;
+}
 export interface FlightProvider {
   readonly id: ProviderId;
   readonly displayName: string;
@@ -242,5 +323,7 @@ export interface FlightProvider {
   readonly cabins: readonly Cabin[];
   readonly discovery?: DiscoveryCapability;
   readonly verification?: VerificationCapability;
+  /** Spec rev 55 §5.1: camoufox only. */
+  readonly flightLists?: FlightListCapability;
   healthcheck(ctx: ProviderContext): Promise<{ ok: boolean; detail: string }>;
 }

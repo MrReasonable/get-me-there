@@ -6,6 +6,7 @@ import { lineKey } from '../src/lines.js';
 import { renderOperatorMessage } from '../src/notifiers/operatorTemplates.js';
 import { createOrchestrator, type Orchestrator } from '../src/orchestrator.js';
 import { applyBudgetBreach, newRun } from '../src/run.js';
+import { causeRun } from './support/causeRun.js';
 import {
   createHarness,
   EWR,
@@ -25,8 +26,11 @@ const spent = (h: Harness, id: string) =>
 // why: a small call cap makes the run ask for confirmation (ruling 6, Task 7.13); every start here confirms its pence and
 // calls up front (decision 37)
 const confirmed = { trigger: 'manual', confirmCostPence: 100, confirmCalls: 1000 } as const;
+// why: revision 55 §8.1 (Ian's ruling 2) — only a scheduled search's pause stores a resume_after; these searches have a
+// schedule so the window rows are pinned as the spec states them for one (execute.test.ts pins the unscheduled half)
+const WEEKLY = { scheduleCron: '0 5 * * 1' } as const;
 const twoPairs = (h: Harness, patch = {}) =>
-  h.createDefinition({ origins: [LHR, LGW], destinations: [JFK], ...patch });
+  h.createDefinition({ origins: [LHR, LGW], destinations: [JFK], ...WEEKLY, ...patch });
 const rule = (h: Harness, definitionId: string) =>
   h.repos.alerts.create({
     definitionId,
@@ -214,11 +218,15 @@ describe('BudgetExceeded provider-month (spec §8.1)', () => {
     const h = createHarness({ fixtureConcurrency: 2, fixtureMonthlyCallCap: 7 });
     const orch = h.orch();
     // why: other pairs than the first definition's, so http-kit never joins one request to the other's (in-flight dedup)
-    const [a, b] = await Promise.all([
-      orch.start(twoPairs(h).id, confirmed),
-      orch.start(twoPairs(h, { name: 'second', destinations: [EWR] }).id, confirmed),
-    ]);
-    if (!a.ok || !b.ok) throw new Error('start refused');
+    // why: unscheduled at the start, so neither pre-start check counts the other's scheduled headroom (ruling 5); the
+    // schedule is added before either pass finishes, and finish reads it live (revision 55 §8.1)
+    const defs = [
+      twoPairs(h, { scheduleCron: null }),
+      twoPairs(h, { name: 'second', destinations: [EWR], scheduleCron: null }),
+    ];
+    const [a, b] = await Promise.all(defs.map((d) => orch.start(d.id, confirmed)));
+    for (const d of defs) h.repos.definitions.update(d.id, WEEKLY);
+    if (a === undefined || b === undefined || !a.ok || !b.ok) throw new Error('start refused');
     const both = [await h.waitForSettled(a.executionId), await h.waitForSettled(b.executionId)];
     expect(both.reduce((n, e) => n + spent(h, e.id).length, 0)).toBe(7);
     expect(h.deps.budget.usage({ kind: 'provider-month', providerId: 'fixture' }).calls).toBe(7);
@@ -244,7 +252,7 @@ describe('BudgetExceeded global-month (spec §8.1 with decision 25)', () => {
         costMicroGbpEach: 1_000_000_000 - FIXTURE_COST_MICRO_GBP,
       }),
     );
-    const def = h.createDefinition({ origins: [LHR, LGW], destinations: [JFK, EWR] }); // 4 pairs × 2 tiles; the fixture pool holds 2
+    const def = h.createDefinition({ origins: [LHR, LGW], destinations: [JFK, EWR], ...WEEKLY }); // 4 pairs × 2 tiles; the fixture pool holds 2
     const e = await h.runToCompletion(h.orch(), def.id);
     expect(e.status).toBe('paused_budget');
     expect(e.resumeAfter).toBe(h.deps.budget.usage({ kind: 'global-month' }).windowEnd);
@@ -267,9 +275,12 @@ describe('BudgetExceeded global-month (spec §8.1 with decision 25)', () => {
           requested: 3200,
         }),
         resumeAfter: asIsoDateTime('2026-11-01T00:00:00.000Z'),
+        resetsAt: asIsoDateTime('2026-11-01T00:00:00.000Z'),
       },
       asIsoDateTime('2026-10-14T09:00:00.000Z'),
       'Europe/London',
+      causeRun(),
+      true,
     ).notice;
     expect(notice?.detail).toContain('the monthly spend cap is £350; £350 used; the next call needed £0.01');
     expect(notice?.detail).toContain('Sun, 1 Nov 2026, 00:00 (Europe/London)');
@@ -301,9 +312,12 @@ describe('a scroll-cap breach names the scroll cap and scrolls (fix round 1, CA 
           unit: 'scrolls',
         }),
         resumeAfter: null,
+        resetsAt: null,
       },
       asIsoDateTime('2026-10-14T09:00:00.000Z'),
       'Europe/London',
+      causeRun(),
+      true,
     ).notice;
     expect(notice?.detail).toContain(words);
     expect(notice?.detail).not.toMatch(/calls?\b|page cap|call cap/);
@@ -334,7 +348,7 @@ describe('the alerts step and "alerts running on calendar basis only" (spec §6.
   });
 
   it.each([
-    ['cancel', (o: Orchestrator, id: string) => o.cancel(id), 'cancelled'],
+    ['cancel', (o: Orchestrator, id: string) => o.cancel(id, { kind: 'cancelled' }), 'cancelled'],
     ['SIGTERM', (o: Orchestrator) => o.shutdown(), 'interrupted'],
   ] as const)(
     'never runs after a pass stopped by %s (decision 25, test-strategy-reviewer-026)',

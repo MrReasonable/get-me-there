@@ -1,63 +1,9 @@
 import { microGbpToPence } from '@gmt/core';
-import type { DefinitionResponse, EstimateResponse } from '../../api/types.js';
+import type { DefinitionResponse } from '../../api/types.js';
 import { COPY } from '../../copy.js';
 import { formatMicroGbp, formatPence } from '../../format.js';
-import { BudgetFitPanel, EstimatePanel } from './EstimatePanel.js';
 
 const button = 'btn btn-primary min-h-11';
-
-/**
- * Spec §11 / §8.1, a new definition: the estimate and every budget scope, then the create click, which is
- * the explicit confirmation of the calls and the pounds it names (decisions 42–44). An estimate made for
- * an earlier draft offers no button, only "show the estimate again" (review UI-11).
- */
-export function CreateConfirmation({
-  estimate,
-  fresh,
-  blocked,
-  pending,
-  hardStop,
-  onCreate,
-}: {
-  estimate: EstimateResponse;
-  fresh: boolean;
-  /** A field error is open: the create click is refused exactly like Show estimate and Save (ruling 6). */
-  blocked: boolean;
-  pending: boolean;
-  /** The run budget's call cap, the runtime limit beside the estimate. */
-  hardStop: number;
-  onCreate: () => void;
-}) {
-  return (
-    <>
-      <EstimatePanel estimate={estimate.estimate} hardStop={hardStop} />
-      <BudgetFitPanel fit={estimate.budgetFit} />
-      {fresh ? (
-        <button
-          type="button"
-          data-cost=""
-          className="btn btn-primary min-h-11 w-full"
-          disabled={blocked || pending}
-          aria-busy={pending ? true : undefined}
-          aria-describedby={blocked ? 'd-blocked' : undefined}
-          onClick={onCreate}
-        >
-          {pending
-            ? COPY.working
-            : COPY.createConfirm(
-                estimate.estimate.totalCalls,
-                hardStop,
-                formatPence(microGbpToPence(estimate.estimate.totalCostMicroGbp)),
-              )}
-        </button>
-      ) : (
-        <p role="status" className="def-warn font-semibold">
-          {COPY.estimateStale}
-        </p>
-      )}
-    </>
-  );
-}
 
 /**
  * A saved definition whose estimate rose above what was confirmed (`needsConfirmation`): the new calls

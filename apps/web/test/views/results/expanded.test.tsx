@@ -265,7 +265,7 @@ describe('itinerary detail (spec §11 expanded row)', () => {
 
   it('at 375px the summary repeats the moved columns, the adjusted price through PriceCell with "≈" and "stale" (review prov-009)', () => {
     render(
-      verifiedRow({ adjustedPence: 45000, stale: true, provenance: { ...provSearch, fx: fxConverted } }),
+      verifiedRow({ adjustedPence: 45000, stale: 'setting', provenance: { ...provSearch, fx: fxConverted } }),
       true,
       true,
     );

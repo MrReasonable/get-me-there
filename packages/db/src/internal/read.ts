@@ -9,10 +9,12 @@ import {
   type CellKey,
   type Estimate,
   type FareConditions,
+  type FlightListsState,
   type Iata,
   type IsoDate,
   type IsoDateTime,
   type Layover,
+  type StopCause,
   type SuppliedField,
   type VerificationPolicy,
 } from '@gmt/core';
@@ -115,6 +117,26 @@ export const readBooking = (column: string, text: string): Booking =>
   parseWith(column, apiContract.storedBookingSchema, readJson(column, text));
 export const readEstimate = (column: string, text: string): Estimate =>
   parseWith(column, apiContract.estimateSchema, readJson(column, text));
+/** Spec revision 55 §7 `stop_cause_json`: parsed through core's `stopCauseSchema`, strict, so free text never rides along. */
+export const readStopCause = (column: string, text: string): StopCause =>
+  parseWith(column, apiContract.stopCauseSchema, readJson(column, text));
+/**
+ * Spec revision 55 §7 `flight_lists_json`: the run's flight-list plan. Revision 56 §7: a plan stored before WP21 has
+ * no return or booking flags and no stops; it reads back outbound-only (false, false, null, null), so the type is total.
+ */
+export const readFlightLists = (column: string, text: string): FlightListsState => {
+  const p = parseWith(column, apiContract.flightListsStateSchema, readJson(column, text));
+  return {
+    planned: p.planned,
+    cells: p.cells,
+    reused: p.reused,
+    ended: p.ended,
+    returns: p.returns ?? false,
+    booking: p.booking ?? false,
+    returnsStopped: p.returnsStopped ?? null,
+    bookingStopped: p.bookingStopped ?? null,
+  };
+};
 
 /**
  * A stored verification policy, read field by field. // why: core's policy schema refines topN ≤ maxCells and

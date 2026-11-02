@@ -2,6 +2,9 @@ import {
   type BudgetScope,
   budgetScopeLabel,
   type DefinitionSnapshot,
+  FLIGHT_LIST_COUNT,
+  FLIGHT_LIST_PAGES_PER_PAIR_MAX,
+  isScheduled,
   type ProviderId,
   type SearchDefinition,
 } from '@gmt/core';
@@ -41,13 +44,12 @@ export function scheduleLoad(
   hours: number,
 ): Map<ProviderId, { calls: number; costMicroGbp: number; scrolls: number }> {
   const load = new Map<ProviderId, { calls: number; costMicroGbp: number; scrolls: number }>();
+  // why: a firing re-fetches discovery in full once the last fetch is older than 0.9 × refresh, so the load counts
+  // whole discovery runs, never a fraction of one (cost M-3)
+  const discoveryRuns = (id: ProviderId): number =>
+    Math.min(firings, Math.ceil(hours / (REUSE_TOLERANCE * refreshHoursOf(snapshot, id))));
   for (const p of perRun.perProvider) {
-    const factor =
-      p.stage === 'discovery'
-        ? // why: a firing re-fetches discovery in full once the last fetch is older than 0.9 × refresh, so the load
-          // counts whole discovery runs, never a fraction of one (cost M-3)
-          Math.min(firings, Math.ceil(hours / (REUSE_TOLERANCE * refreshHoursOf(snapshot, p.providerId))))
-        : firings;
+    const factor = p.stage === 'discovery' ? discoveryRuns(p.providerId) : firings;
     const acc = load.get(p.providerId) ?? { calls: 0, costMicroGbp: 0, scrolls: 0 };
     load.set(p.providerId, {
       calls: acc.calls + p.calls * factor,
@@ -55,7 +57,39 @@ export function scheduleLoad(
       scrolls: acc.scrolls + (p.scrolls ?? 0) * factor,
     });
   }
+  // why: spec rev 55 §8.1 — the flight-list pages are browser pages of the month too, reused within the same refresh
+  // why: ruling R-load (20.9 review) — a schedule needs its full allowance on every run it makes; the pages the
+  // current month happens to have left cap one run's estimate, never the load of the runs to come
+  const flightPages = flightAllowanceOf(perRun, snapshot);
+  const browser = load.get('camoufox');
+  if (flightPages > 0 && browser !== undefined)
+    load.set('camoufox', { ...browser, calls: browser.calls + flightPages * discoveryRuns('camoufox') });
   return load;
+}
+
+/**
+ * Spec rev 56 §8.1 (ruling R-load; R-estimate): the flight-list pages a scheduled run of `snapshot` needs, the bound of
+ * its full allowance whenever its estimate carries a flight line, whatever the current month has left: 2 pages a pair
+ * with the return leg (20), 1 without (10), never above the snapshot's `flightListPages`. The return leg is planned when
+ * the line carries a bound (`pagesMax`), even when this month's pages send no pair out and back (`returns` false:
+ * 21.7 code I1), so a nearly spent month never halves the load of the runs to come.
+ */
+export function flightAllowanceOf(
+  perRun: Pick<Estimate, 'flightLists'>,
+  snapshot: Pick<DefinitionSnapshot, 'budget'>,
+): number {
+  if (perRun.flightLists === undefined) return 0;
+  const f = perRun.flightLists;
+  const perPair = f.returns === true || f.pagesMax !== undefined ? FLIGHT_LIST_PAGES_PER_PAIR_MAX : 1;
+  return Math.min(FLIGHT_LIST_COUNT * perPair, snapshot.budget.flightListPages ?? 0);
+}
+
+/**
+ * Spec rev 56 §8.1: the flight-list requests a run of `perRun` makes, which count toward its free calls (one a pair,
+ * whatever pages each loads): FLIGHT_LIST_COUNT (10) whenever its estimate carries a flight line.
+ */
+export function flightRequestsOf(perRun: Pick<Estimate, 'flightLists'>): number {
+  return perRun.flightLists === undefined ? 0 : FLIGHT_LIST_COUNT;
 }
 
 /** Spec §8.2 monthly load of a schedule: scheduleLoad over runsPerMonth firings in an average month (730 h). */
@@ -71,11 +105,47 @@ export function monthlyLoad(ctx: EngineContext, def: SearchDefinition): MonthlyL
   };
 }
 
+/** Stored schedules' monthly loads by definition id and `updatedAt`, read once within one engine call (below). */
+export type ScheduleLoads = Map<string, MonthlyLoad>;
+
+// why: one engine call (an estimate with its date-pair ask, a budget fit, a pre-start check) reads every other schedule's
+// load once, not once per provider window that asks (CodeRabbit finding: each read re-planned every cell of each other
+// schedule). Scoped to the synchronous call that sets it, so no load outlives the call that read it.
+const activeLoads = new WeakMap<EngineContext, ScheduleLoads>();
+
+/**
+ * Runs `fn` with `loads` as the memo of stored schedules' monthly loads (`storedScheduleLoad`); inside a call that has
+ * one already, the outer memo stands. `fn` is synchronous: an awaited continuation runs after the memo is cleared and
+ * simply reads each load again.
+ */
+export function withScheduleLoads<T>(ctx: EngineContext, loads: ScheduleLoads, fn: () => T): T {
+  if (activeLoads.has(ctx)) return fn();
+  activeLoads.set(ctx, loads);
+  try {
+    return fn();
+  } finally {
+    activeLoads.delete(ctx);
+  }
+}
+
+/**
+ * A stored schedule's monthly load (`monthlyLoad`), from the active memo when this engine call already read it. Keyed
+ * by id and `updatedAt`, so a draft over a saved id (an edited search's estimate) is never served the stored one's load;
+ * only definitions read from the repository come here.
+ */
+export function storedScheduleLoad(ctx: EngineContext, def: SearchDefinition): MonthlyLoad {
+  const memo = activeLoads.get(ctx);
+  const key = `${def.id}|${def.updatedAt}`;
+  const hit = memo?.get(key);
+  if (hit !== undefined) return hit;
+  const load = monthlyLoad(ctx, def);
+  memo?.set(key, load);
+  return load;
+}
+
 /** The other enabled, scheduled, live definitions (ruling 5: they share the provider-month and global caps). */
 export function otherSchedules(ctx: EngineContext, definitionId: string | null): SearchDefinition[] {
-  return ctx.repos.definitions
-    .list()
-    .filter((d) => d.id !== definitionId && d.enabled && d.deletedAt === null && d.scheduleCron !== null);
+  return ctx.repos.definitions.list().filter((d) => d.id !== definitionId && isScheduled(d));
 }
 
 /**
@@ -91,7 +161,7 @@ export function budgetFitFor(
   definitionId: string | null,
 ): BudgetFit {
   const own = monthlyLoad(ctx, def);
-  const others = otherSchedules(ctx, definitionId).map((d) => monthlyLoad(ctx, d));
+  const others = otherSchedules(ctx, definitionId).map((d) => storedScheduleLoad(ctx, d));
   const billed = own.perRun.perProvider.filter((p) => ctx.limitsOf(p.providerId).billed);
   const free = own.perRun.perProvider.filter((p) => !ctx.limitsOf(p.providerId).billed);
   const sum = (xs: Estimate['perProvider'], f: (p: Estimate['perProvider'][number]) => number) =>
@@ -110,7 +180,13 @@ export function budgetFitFor(
   );
   scope(
     { kind: 'execution-free-calls', executionId: NO_EXECUTION },
-    sum(free, (p) => p.calls),
+    // why: spec rev 56 §8.1 — the flight-list requests (one a pair, never its pages) count toward the run's free calls
+    // why: the step stops at the run's free-call limit itself, so its requests count up to what the lines leave
+    sum(free, (p) => p.calls) +
+      Math.min(
+        flightRequestsOf(own.perRun),
+        Math.max(0, def.budget.maxFreeCalls - sum(free, (p) => p.calls)),
+      ),
     def.budget.maxFreeCalls,
   );
   scope(

@@ -1,19 +1,55 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
+import { classifyPageWithRule } from '../src/classify.js';
 import {
+  CLICK_LOG_MARGIN_MS,
   CLICK_TIMEOUT_MS,
+  classifyAfterFailedStep,
+  clickFailureOf,
   createDriver,
+  type Driver,
   LOOKUP_TIMEOUT_MS,
   POLL_TIMEOUT_MS,
+  type ProbePage,
+  pathField,
+  pathMoved,
+  pathOf,
   pollUntilSettled,
+  probePage,
+  runStep,
+  StepFailed,
 } from '../src/driver.js';
 import type { GuardState } from '../src/guard.js';
 import { SELECTORS } from '../src/selectors.js';
 import { bounded, DeadlineExceeded } from '../src/timers.js';
-import { descendants, FakePage, n, option, RESULTS_URL, resultsTree, text } from './support/fakePage.js';
+import {
+  descendants,
+  type FakeNode,
+  FakePage,
+  n,
+  option,
+  optionName,
+  RESULTS_URL,
+  resultsTree,
+  returnOptionName,
+  shrinkAfterCount,
+  text,
+  viewMore,
+} from './support/fakePage.js';
 import { memoryLog } from './support/log.js';
 import { fakeTimers, flush } from './support/timers.js';
 
-const guard = (o: Partial<GuardState> = {}): GuardState => ({ hops: [], frameUrls: [], refused: null, ...o });
+const guard = (o: Partial<GuardState> = {}): GuardState => ({
+  hops: [],
+  frameUrls: [],
+  refused: null,
+  documentLoads: 0,
+  documentStarts: 0,
+  activationGate: false,
+  gateRefusals: 0,
+  reservation: null,
+  held: null,
+  ...o,
+});
 function setup(trees = [resultsTree()]) {
   const page = new FakePage(null);
   page.setUrl(RESULTS_URL);
@@ -47,17 +83,20 @@ describe('createDriver.readFacts (ruling 5: locators, never printed ARIA)', () =
           challenge: false,
           noFlights: false,
           landingHeading: false,
+          returnHeading: false,
         },
         accountControl: false,
         cheapestTabs: [{ name: 'Cheapest from 451 British pounds', inTablist: true, selected: false }],
         dateGridButtons: 1,
         resultLinks: 2,
+        outboundLinks: 2,
       },
       settle: {
         resultsReturned: true,
         fetching: false,
         cheapestPriced: true,
         cheapestSelected: false,
+        returnHeading: false,
         linkSignature: expect.stringMatching(/^[0-9a-f]{16}$/),
       },
       names: [expect.stringMatching(/^From 478/), expect.stringMatching(/^From 451/)],
@@ -83,6 +122,7 @@ describe('createDriver.readFacts (ruling 5: locators, never printed ARIA)', () =
       challenge: true,
       noFlights: true,
       landingHeading: true,
+      returnHeading: false,
     });
     expect(page.accountControl).toBe(true);
     expect(page.cheapestTabs).toEqual([]);
@@ -105,6 +145,7 @@ describe('createDriver.readFacts (ruling 5: locators, never printed ARIA)', () =
       fetching: false,
       cheapestPriced: false,
       cheapestSelected: false,
+      returnHeading: false,
       linkSignature: expect.stringMatching(/^[0-9a-f]{16}$/),
     });
   });
@@ -168,6 +209,108 @@ describe('createDriver.resultNames reads aria-label before the text', () => {
   });
 });
 
+// why: WP21 Task 21.3 fix round 2 (the end-to-end recording's attempt 2): a list the page re-renders between a count
+// and the reads after it (a selection, a reload) must never hold a read on a node that is gone; each list is read in one
+// page call. Every test races the read against the fake's first waiting read (an event), never a timer.
+describe('names read in one page call: a list that shrinks after its count holds no read (fix round 2)', () => {
+  const many = (k: number) => Array.from({ length: k }, (_, i) => option(400 + i));
+  const namesOf = (k: number) => Array.from({ length: k }, (_, i) => optionName(400 + i));
+  async function raced<T>(page: FakePage, hung: Promise<'hung'>, read: Promise<T>): Promise<T | 'hung'> {
+    read.catch(() => undefined);
+    const out = await Promise.race([read, hung]);
+    // releases a read still waiting (the old code's), so nothing is left pending
+    await page.close();
+    return out;
+  }
+  it('resultNames answers the links the page held at once', async () => {
+    const list = n('list', '', many(14));
+    const { driver, d, page } = setup([n('document', '', [n('main', '', [list])])]);
+    const hung = shrinkAfterCount(page, list, { whenCount: 14, keep: 12 });
+    expect(await raced(page, hung, driver.resultNames(d))).toEqual(namesOf(14));
+  });
+  it('a settle poll over a list that shrank reads it as changed, then settles on the shorter list', async () => {
+    const list = n('list', '', many(14));
+    const tree = resultsTree({ top: [], other: [] });
+    const main = descendants([tree]).find((x) => x.role === 'main');
+    main?.children?.push(list);
+    const { driver, d, page, timers } = setup([tree]);
+    // the second count of the 14 links (the next poll's) is followed by the re-render
+    const hung = shrinkAfterCount(page, list, { whenCount: 14, keep: 12, occurrence: 2 });
+    const out = await raced(page, hung, pollUntilSettled(driver, d, timers, 2000, SELECTORS));
+    expect(out).not.toBe('hung');
+    if (out === 'hung') return;
+    // poll 1: 14 links; poll 2: counted 14, then the 12 names (changed); poll 3: 12 and 12 (a new run); poll 4: stable
+    expect(out.polls).toBe(4);
+    expect(out.facts.page.resultLinks).toBe(12);
+  });
+  it('bookingFacts answers the offers the page held at once', async () => {
+    const offer = (k: number) =>
+      n('button', `Continue to book with QQ Travel for 1,${100 + k} British pounds`);
+    const main = n('main', '', [0, 1, 2, 3, 4].map(offer));
+    const { driver, d, page } = setup([n('document', '', [main])]);
+    const hung = shrinkAfterCount(page, main, { whenCount: 5, keep: 3 });
+    const out = await raced(page, hung, driver.bookingFacts(d));
+    expect(out).not.toBe('hung');
+    if (out === 'hung') return;
+    expect(out.offerNames).toEqual([0, 1, 2, 3, 4].map((k) => offer(k).name));
+  });
+  it('headingNames answers the headings the page held at once', async () => {
+    const main = n(
+      'main',
+      '',
+      ['A', 'B', 'C', 'D', 'E', 'F'].map((h) => n('heading', h)),
+    );
+    const { driver, d, page } = setup([n('document', '', [main])]);
+    const hung = shrinkAfterCount(page, main, { whenCount: 6, keep: 4 });
+    expect(await raced(page, hung, driver.headingNames(d))).toEqual(['A', 'B', 'C', 'D', 'E', 'F']);
+  });
+  it('headingNames reads a heading with neither label nor text as empty', async () => {
+    const { driver, d } = setup([
+      n('document', '', [n('heading', 'A'), n('heading', 'B', [], { ariaLabel: null, text: null })]),
+    ]);
+    expect(await driver.headingNames(d)).toEqual(['A', '']);
+  });
+  it('readFacts reads the Cheapest tabs’ names in one call: a tab gone after the count reads as empty', async () => {
+    const list = n('tablist', '', [
+      n('tab', 'Cheapest from 451 British pounds'),
+      n('tab', 'Cheapest from 452 British pounds'),
+    ]);
+    const { driver, d, page } = setup([n('document', '', [list])]);
+    // counts: the account controls (0, 0), every Cheapest tab (2), those in the tablist (2): then the re-render
+    const hung = shrinkAfterCount(page, list, { whenCount: 2, keep: 1, occurrence: 2 });
+    const out = await raced(page, hung, driver.readFacts(d));
+    expect(out).not.toBe('hung');
+    if (out === 'hung') return;
+    expect(out.page.cheapestTabs).toEqual([
+      { name: 'Cheapest from 451 British pounds', inTablist: true, selected: false },
+      { name: '', inTablist: true, selected: false },
+    ]);
+  });
+  it('listFacts reads the Cheapest tab’s name with no count before it', async () => {
+    const tree = resultsTree();
+    const list = descendants([tree]).find((x) => x.role === 'tablist');
+    const { driver, d, page } = setup([tree]);
+    const hung =
+      list === undefined
+        ? Promise.resolve<'hung'>('hung')
+        : shrinkAfterCount(page, list, { whenCount: 1, keep: 1 });
+    const out = await raced(page, hung, driver.listFacts(d));
+    expect(out).not.toBe('hung');
+    if (out === 'hung') return;
+    expect(out.cheapestTabName).toBe('Cheapest from 451 British pounds');
+  });
+  it('listFacts reads the results line with no count before it', async () => {
+    const tree = resultsTree();
+    const { driver, d, page } = setup([tree]);
+    // the document's first five children are the form and the tablist; the results line is the sixth
+    const hung = shrinkAfterCount(page, tree, { whenCount: 1, keep: 5, occurrence: 2 });
+    const out = await raced(page, hung, driver.listFacts(d));
+    expect(out).not.toBe('hung');
+    if (out === 'hung') return;
+    expect(out.resultsStated).toBe(2);
+  });
+});
+
 describe('createDriver list, form and click', () => {
   it('listFacts reads the tab, the stated count, currency and location', async () => {
     const { driver, d } = setup();
@@ -186,6 +329,7 @@ describe('createDriver list, form and click', () => {
       resultsStated: null,
       currencyName: null,
       locationName: null,
+      viewMore: false,
     });
   });
   it('formFacts reads the four controls, or null when any is missing', async () => {
@@ -238,7 +382,9 @@ describe('deadlines (ruling 6, PIE-R2-06)', () => {
   it('every call passes timeout equal to the remaining deadline', async () => {
     const { driver, d, page, timers } = setup();
     timers.clock.advance(10_000);
-    await driver.resultNames(d);
+    // why: fix round 2: the name lists are one page call with no timeout of their own (raced against the deadline), so
+    // the form's reads stand for the calls that take one
+    await driver.formFacts(d);
     expect(page.calls.timeouts.length).toBeGreaterThan(0);
     expect(new Set(page.calls.timeouts)).toEqual(new Set([80_000]));
   });
@@ -460,7 +606,7 @@ describe('clickCheapest (ruling of 2026-10-18)', () => {
         log: lines,
         startedAt: timers.now(),
       }),
-    ).rejects.toMatchObject({ name: 'CheapestStepFailed', step: 'click-tab', reason: 'failed' });
+    ).rejects.toMatchObject({ name: 'StepFailed', step: 'click-tab', reason: 'failed' });
     expect(lines.lines.filter((l) => l.msg === 'cheapest step failed').map((l) => l.o)).toEqual([
       { step: 'click-tab', error: 'TimeoutError', elapsedMs: 0 },
     ]);
@@ -578,7 +724,7 @@ describe('the Cheapest flow in timed steps (ruling of 2026-10-18)', () => {
     });
     for (let i = 0; i < 5; i++) await flush();
     timers.runOut();
-    await expect(run).rejects.toMatchObject({ name: 'CheapestStepFailed', step: 'find-popup' });
+    await expect(run).rejects.toMatchObject({ name: 'StepFailed', step: 'find-popup' });
     expect(lines.lines.filter((l) => l.msg === 'cheapest step timed out').map((l) => l.o)).toEqual([
       { step: 'find-popup', elapsedMs: 5000, timeoutMs: 5000 },
     ]);
@@ -596,7 +742,7 @@ describe('the Cheapest flow in timed steps (ruling of 2026-10-18)', () => {
     });
     for (let i = 0; i < 5; i++) await flush();
     timers.runOut();
-    await expect(run).rejects.toMatchObject({ name: 'CheapestStepFailed', step: 'click-tab' });
+    await expect(run).rejects.toMatchObject({ name: 'StepFailed', step: 'click-tab' });
     expect(
       lines.lines
         .filter((l) => l.msg === 'cheapest step timed out')
@@ -617,7 +763,7 @@ describe('the Cheapest flow in timed steps (ruling of 2026-10-18)', () => {
         log: memoryLog(),
         startedAt: timers.now(),
       }),
-    ).rejects.toMatchObject({ name: 'CheapestStepFailed', step: 'confirm-selected' });
+    ).rejects.toMatchObject({ name: 'StepFailed', step: 'confirm-selected' });
   });
 });
 
@@ -671,7 +817,7 @@ describe('Cheapest poll and lookup bounds', () => {
         log: lines,
         startedAt: timers.now(),
       }),
-    ).rejects.toMatchObject({ name: 'CheapestStepFailed', step: 'cheapest-poll', reason: 'timed-out' });
+    ).rejects.toMatchObject({ name: 'StepFailed', step: 'cheapest-poll', reason: 'timed-out' });
     // why: the fake sleep advances the clock in one jump, so the 20 s bound is seen at the 25 s mark here
     // why: ruling of 2026-10-18: an overrun poll is unsettled, polled again until only the fallback's reserve is left
     const timedOut = lines.lines.filter((l) => l.msg === 'cheapest step timed out').map((l) => l.o);
@@ -795,7 +941,7 @@ describe('the Cheapest poll that overruns (ruling of 2026-10-18)', () => {
       if (settledWith === null) timers.runOut();
     }
     expect(settledWith).toMatchObject({
-      name: 'CheapestStepFailed',
+      name: 'StepFailed',
       step: 'cheapest-poll',
       reason: 'timed-out',
     });
@@ -803,5 +949,742 @@ describe('the Cheapest poll that overruns (ruling of 2026-10-18)', () => {
     expect(timers.now() - Date.parse('2026-10-18T05:00:00.000Z')).toBeGreaterThanOrEqual(
       90_000 - 20_000 - 7000,
     );
+  });
+});
+
+// why: WP21 Task 21.0: the literal below was captured from the driver before the return view's lookups were added,
+// over the same tree, so the served path's facts are shown unchanged field by field; only outboundLinks and the
+// return heading are new
+describe('readFacts on the served path is unchanged (WP21 Task 21.0)', () => {
+  it('every existing field equals the literal captured from the unmodified code, plus the two new facts', async () => {
+    const { driver, d } = setup();
+    const r = await driver.readFacts(d);
+    expect(r).toEqual({
+      page: {
+        url: 'https://www.google.com/travel/flights/search?tfs=x',
+        hops: ['https://www.google.com/travel/flights?q=x'],
+        frameUrls: ['https://www.google.com/travel/flights/search?tfs=x'],
+        text: {
+          unusualTraffic: false,
+          consentHeading: false,
+          signInHeading: false,
+          challenge: false,
+          noFlights: false,
+          landingHeading: false,
+          returnHeading: false,
+        },
+        accountControl: false,
+        cheapestTabs: [{ name: 'Cheapest from 451 British pounds', inTablist: true, selected: false }],
+        dateGridButtons: 1,
+        resultLinks: 2,
+        outboundLinks: 2,
+      },
+      settle: {
+        resultsReturned: true,
+        fetching: false,
+        cheapestPriced: true,
+        cheapestSelected: false,
+        returnHeading: false,
+        linkSignature: 'c5ca95a9719e7c24',
+      },
+      names: [optionName(478), optionName(451)],
+    });
+    expect(await driver.listFacts(d)).toEqual({
+      names: [optionName(478), optionName(451)],
+      cheapestTabName: 'Cheapest from 451 British pounds',
+      resultsStated: 2,
+      currencyName: 'Currency GBP',
+      locationName: 'Location·United Kingdom',
+      viewMore: true,
+    });
+  });
+});
+
+/** A return view in the hypothesis form: a returning-flights heading, return links, the outbound list gone. */
+const returnTree = (o: { heading?: string; links?: FakeNode[]; extra?: FakeNode[]; more?: boolean } = {}) =>
+  n('document', 'Google Flights', [
+    n('tablist', '', [n('tab', 'Best'), n('tab', 'Cheapest from 451 British pounds')]),
+    n('main', '', [
+      n('heading', o.heading ?? 'Returning flights'),
+      n(
+        'list',
+        '',
+        o.links ?? [
+          n('listitem', '', [n('link', returnOptionName({ pounds: 451 }))]),
+          n('listitem', '', [n('link', returnOptionName({ pounds: 470, carrier: 'QQ Air' }))]),
+          n('listitem', '', [n('link', returnOptionName({ pounds: 512, priceForm: 'from' }))]),
+        ],
+      ),
+      ...(o.extra ?? []),
+    ]),
+    ...(o.more === false ? [] : [viewMore()]),
+    n('button', 'Currency GBP'),
+  ]);
+
+describe('the return view’s facts (WP21 Task 21.0)', () => {
+  it('readFacts(d, o, "returns") counts the links, names and signature by the return pattern; outboundLinks by the outbound one', async () => {
+    const selected = n('listitem', '', [n('link', optionName(451))]);
+    const { driver, d, timers } = setup([returnTree({ extra: [selected] })]);
+    const r = await driver.readFacts(d, { timers, lookupMs: LOOKUP_TIMEOUT_MS }, 'returns');
+    // why: WP21 Task 21.3: the return pattern is the recorded "From" form only, the outbound's, so it reads the one
+    // "From"-form return link and the outbound link left on the page; the total form (never recorded) is no link
+    expect(r.page.resultLinks).toBe(2);
+    expect(r.page.outboundLinks).toBe(2);
+    expect(r.names).toEqual([returnOptionName({ pounds: 512, priceForm: 'from' }), optionName(451)]);
+    const best = await driver.readFacts(d);
+    expect(best.page.resultLinks).toBe(2);
+    expect(best.page.outboundLinks).toBe(2);
+    // why: preflight P5: the two patterns are one form now, so the view before a selection and the polls after it hash
+    // the same names alike (a change is a change of names, never of pattern)
+    expect(best.settle.linkSignature).toBe(r.settle.linkSignature);
+  });
+  it('the return heading is true exactly when a heading matches the hypothesis', async () => {
+    for (const [heading, want] of [
+      ['Returning flights', true],
+      ['Top returning flights', true],
+      ['Other returning flights', true],
+      ['Top departing flights', false],
+      ['Returning flights later', false],
+    ] as const) {
+      const { driver, d } = setup([returnTree({ heading })]);
+      const r = await driver.readFacts(d, undefined, 'returns');
+      expect(r.page.text.returnHeading, heading).toBe(want);
+      expect(r.settle.returnHeading, heading).toBe(want);
+    }
+  });
+  it('listFacts(d, "returns") reads the return view’s links; viewMore is true exactly when the button exists', async () => {
+    const { driver, d, page } = setup([returnTree()]);
+    const l = await driver.listFacts(d, 'returns');
+    expect(l.names).toEqual([returnOptionName({ pounds: 512, priceForm: 'from' })]);
+    expect(l.viewMore).toBe(true);
+    // why: the outbound pattern reads only the "From" form
+    expect((await driver.listFacts(d)).names).toEqual([returnOptionName({ pounds: 512, priceForm: 'from' })]);
+    page.setTrees([returnTree({ more: false })]);
+    expect((await driver.listFacts(d, 'returns')).viewMore).toBe(false);
+    page.setTrees([resultsTree({ viewMore: false })]);
+    expect((await driver.listFacts(d)).viewMore).toBe(false);
+    page.setTrees([resultsTree()]);
+    expect((await driver.listFacts(d)).viewMore).toBe(true);
+  });
+});
+
+describe('clickOutbound (WP21 Task 21.0)', () => {
+  const NAME = optionName(451);
+  const tree = (links: FakeNode[], outside: FakeNode[] = []) =>
+    n('document', '', [...outside, n('main', '', [n('list', '', links)])]);
+  const run = (t: FakeNode, name = NAME) => {
+    const page = new FakePage(null);
+    page.setUrl(RESULTS_URL);
+    page.setTrees([t]);
+    const timers = fakeTimers();
+    const lines = memoryLog();
+    const d = timers.deadline(90_000);
+    const r = createDriver(page, guard()).clickOutbound(name, d, {
+      timers,
+      log: lines,
+      flow: 'select-outbound',
+    });
+    return { page, r, lines };
+  };
+  // why: the controller's ruling after recording 2 (the pointer click was intercepted by a covering element): the
+  // verified link is activated from the keyboard, focused then Enter, never a pointer click
+  it('focuses the one link in main of that exact name, presses Enter on it, and returns what it activated', async () => {
+    const { page, r, lines } = run(tree([n('link', NAME), n('link', optionName(478))]));
+    expect(await r).toEqual([`link:${NAME}`]);
+    expect(page.calls.clicks).toEqual([]);
+    expect(page.calls.focuses).toEqual([`link:${NAME}`]);
+    expect(page.calls.presses).toEqual([`Enter:link:${NAME}`]);
+    expect(page.calls.timeouts.filter((x) => x === CLICK_TIMEOUT_MS - CLICK_LOG_MARGIN_MS)).toHaveLength(2);
+    expect(
+      lines.lines.filter((l) => l.msg === 'select-outbound step').map((l) => Reflect.get(l.o, 'step')),
+    ).toEqual([
+      'find-outbound',
+      'find-outbound',
+      'focus-outbound',
+      'focus-outbound',
+      'press-outbound',
+      'press-outbound',
+    ]);
+  });
+  it('the Enter goes to the element it focused, after the focus', async () => {
+    const { page, r } = run(tree([n('link', optionName(478)), n('link', NAME)]));
+    await r;
+    // why: the press is marked focused only when it lands on the node focused last; pressing first, or another
+    // element, would read otherwise
+    expect(page.calls.actions).toEqual([`focus:link:${NAME}`, `press:Enter:link:${NAME}:focused`]);
+  });
+  it('tells its caller once the link is found, before the activation', async () => {
+    const page = new FakePage(null);
+    page.setUrl(RESULTS_URL);
+    page.setTrees([tree([n('link', NAME)])]);
+    const timers = fakeTimers();
+    const seen: string[] = [];
+    await createDriver(page, guard()).clickOutbound(
+      NAME,
+      timers.deadline(90_000),
+      { timers, flow: 'select-outbound' },
+      () => seen.push(`activating after ${page.calls.actions.length} actions`),
+    );
+    expect(seen).toEqual(['activating after 0 actions']);
+    const none = run(tree([n('link', optionName(478))]));
+    await expect(none.r).rejects.toMatchObject({ reason: 'not-found' });
+  });
+  it('none of that name is not-found, and nothing is clicked', async () => {
+    const { page, r } = run(tree([n('link', optionName(478))]));
+    await expect(r).rejects.toMatchObject({
+      name: 'StepFailed',
+      step: 'find-outbound',
+      reason: 'not-found',
+      flow: 'select-outbound',
+    });
+    expect(page.calls.clicks).toEqual([]);
+  });
+  it('two of that name are ambiguous, and nothing is clicked', async () => {
+    const { page, r } = run(tree([n('link', NAME), n('link', NAME)]));
+    await expect(r).rejects.toMatchObject({
+      step: 'find-outbound',
+      reason: 'ambiguous',
+      flow: 'select-outbound',
+    });
+    expect(page.calls.clicks).toEqual([]);
+  });
+  it('a link of that name outside main is not found', async () => {
+    const { page, r } = run(tree([], [n('link', NAME)]));
+    await expect(r).rejects.toMatchObject({ step: 'find-outbound', reason: 'not-found' });
+    expect(page.calls.clicks).toEqual([]);
+  });
+  // why: preflight D6: defence in depth, only a result-shaped name is ever clicked (the selectors module's pattern)
+  it('a name the result-link pattern does not match is refused as not-found before any lookup', async () => {
+    const { page, r } = run(tree([n('link', 'Sign in')]), 'Sign in');
+    await expect(r).rejects.toMatchObject({ step: 'find-outbound', reason: 'not-found' });
+    expect(page.calls.clicks).toEqual([]);
+  });
+  it('an Enter that never answers times out at CLICK_TIMEOUT_MS as its own step, within the deadline', async () => {
+    const page = new FakePage(null);
+    page.setUrl(RESULTS_URL);
+    page.setTrees([tree([n('link', NAME, [], { pressHang: true })])]);
+    const timers = fakeTimers();
+    const run = createDriver(page, guard()).clickOutbound(NAME, timers.deadline(90_000), {
+      timers,
+      flow: 'select-outbound',
+    });
+    let err: unknown = null;
+    void run.catch((e: unknown) => {
+      err = e;
+    });
+    for (let i = 0; i < 5 && err === null; i++) {
+      await flush();
+      if (err === null) timers.runOut();
+    }
+    expect(err).toMatchObject({ step: 'press-outbound', reason: 'timed-out', flow: 'select-outbound' });
+    expect(timers.now() - Date.parse('2026-10-18T05:00:00.000Z')).toBe(CLICK_TIMEOUT_MS);
+  });
+});
+
+describe('StepFailed and runStep (WP21 Task 21.0: one step error for every flow)', () => {
+  it('an overrun names its flow: the options’ flow, the Cheapest flow’s by default', async () => {
+    const timers = fakeTimers();
+    const d = timers.deadline(90_000);
+    const never = () => new Promise<never>(() => undefined);
+    const a = runStep('x', 1000, d, { timers, flow: 'grid' }, never);
+    const b = runStep('y', 1000, d, { timers }, never);
+    let ea: unknown = null;
+    let eb: unknown = null;
+    void a.catch((e: unknown) => {
+      ea = e;
+    });
+    void b.catch((e: unknown) => {
+      eb = e;
+    });
+    for (let i = 0; i < 5 && (ea === null || eb === null); i++) {
+      await flush();
+      timers.runOut();
+    }
+    expect(ea).toBeInstanceOf(StepFailed);
+    expect(ea).toMatchObject({ step: 'x', reason: 'timed-out', flow: 'grid' });
+    expect(eb).toMatchObject({ step: 'y', reason: 'timed-out', flow: 'cheapest' });
+    expect(new StepFailed('find-tab', 'not-found').flow).toBe('cheapest');
+    expect(new StepFailed('find-tab', 'not-found').message).toBe(
+      "the cheapest flow's find-tab step not-found",
+    );
+  });
+});
+
+describe('probePage and classifyAfterFailedStep (WP21 Task 21.0)', () => {
+  it('the probe page has the read methods and no click of any kind', () => {
+    expectTypeOf<ProbePage>().not.toHaveProperty('click');
+    expectTypeOf<ProbePage>().not.toHaveProperty('clickCheapest');
+    expectTypeOf<ProbePage>().not.toHaveProperty('clickOutbound');
+    expectTypeOf<ProbePage>().toHaveProperty('listFacts');
+    // why: the research reads live in their own module (researchNames.ts), never on the served driver
+    expectTypeOf<Driver>().not.toHaveProperty('linkNames');
+    const page = new FakePage(null);
+    const p = probePage(createDriver(page, guard()));
+    expect('clickOutbound' in p).toBe(false);
+    expect('click' in p).toBe(false);
+    expect('clickCheapest' in p).toBe(false);
+    expect(Object.keys(p).sort()).toEqual(
+      ['formFacts', 'goto', 'headingNames', 'listFacts', 'readFacts', 'resultNames'].sort(),
+    );
+  });
+  const classifyOn = async (t: FakeNode, d?: (timers: ReturnType<typeof fakeTimers>) => void) => {
+    const page = new FakePage(null);
+    page.setUrl(RESULTS_URL);
+    page.setTrees([t]);
+    const timers = fakeTimers();
+    const driver: Driver = createDriver(page, guard());
+    const cur = timers.deadline(90_000);
+    const run = classifyAfterFailedStep(driver, cur, { timers }, SELECTORS, 'cheapest');
+    d?.(timers);
+    return run;
+  };
+  it('a challenge page is its blocked kind, with the rule and the facts', async () => {
+    const r = await classifyOn(n('document', '', [text('Please confirm you are not a robot')]));
+    expect(r).toMatchObject({
+      page: 'captcha',
+      rule: 'challenge-text',
+      facts: { page: { text: { challenge: true } } },
+    });
+  });
+  it('a results page, or an unrecognised one, is null', async () => {
+    expect(await classifyOn(resultsTree())).toBeNull();
+    expect(await classifyOn(n('document', ''))).toBeNull();
+  });
+  it('a lookup that overruns its bound is null (the step ends plainly)', async () => {
+    const t = resultsTree();
+    for (const c of descendants([t])) if (c.role === 'link') c.countHang = true;
+    const page = new FakePage(null);
+    page.setUrl(RESULTS_URL);
+    page.setTrees([t]);
+    const timers = fakeTimers();
+    const run = classifyAfterFailedStep(
+      createDriver(page, guard()),
+      timers.deadline(90_000),
+      { timers },
+      SELECTORS,
+      'cheapest',
+    );
+    let out: unknown = 'pending';
+    void run.then((v) => {
+      out = v;
+    });
+    for (let i = 0; i < 10 && out === 'pending'; i++) {
+      await flush();
+      if (out === 'pending') timers.runOut();
+    }
+    expect(out).toBeNull();
+  });
+});
+
+// why: the first live select-outbound recording (2026-11-01) timed out on the outbound's click; Playwright's own error
+// names why an action could not land in its call log, so the click runs a margin inside its step and the reason is kept
+// as one word (never the message, which can quote the page)
+describe('clickOutbound’s failure word (WP21 Task 21.0, after recording 1)', () => {
+  const log = (line: string) =>
+    Object.assign(
+      new Error(
+        `locator.click: Timeout 9000ms exceeded.\nCall log:\n  - waiting for locator\n  - ${line}\n  - retrying click action`,
+      ),
+      {
+        name: 'TimeoutError',
+      },
+    );
+  it.each([
+    ['element is not visible', 'not-visible'],
+    ['<div class="x">…</div> intercepts pointer events', 'intercepted'],
+    ['element is not stable', 'not-stable'],
+    ['element is outside of the viewport', 'outside-viewport'],
+    ['element was detached from the DOM, retrying', 'detached'],
+    ['element is not enabled', 'not-enabled'],
+    ['waiting for element to be visible, enabled and stable', 'other'],
+  ])('%s → %s', (line, word) => {
+    expect(clickFailureOf(log(line))).toBe(word);
+  });
+  it('the last reason in the call log wins; a non-error is other', () => {
+    const e = log('element is not visible\n  - retrying click action\n  - <span> intercepts pointer events');
+    expect(clickFailureOf(e)).toBe('intercepted');
+    expect(clickFailureOf('x')).toBe('other');
+  });
+  it('a click that fails carries the word on StepFailed, and runs a margin inside its step', async () => {
+    const NAME = optionName(451);
+    const page = new FakePage(null);
+    page.setUrl(RESULTS_URL);
+    page.setTrees([n('document', '', [n('main', '', [n('link', NAME)])])]);
+    page.onClick = () => {
+      throw log('<div jsname="x">…</div> intercepts pointer events');
+    };
+    const timers = fakeTimers();
+    await expect(
+      createDriver(page, guard()).clickOutbound(NAME, timers.deadline(90_000), {
+        timers,
+        flow: 'select-outbound',
+      }),
+    ).rejects.toMatchObject({
+      name: 'StepFailed',
+      step: 'press-outbound',
+      reason: 'failed',
+      detail: 'intercepted',
+    });
+    expect(CLICK_LOG_MARGIN_MS).toBe(1000);
+    expect(page.calls.timeouts).toContain(CLICK_TIMEOUT_MS - CLICK_LOG_MARGIN_MS);
+    expect(page.calls.timeouts).not.toContain(CLICK_TIMEOUT_MS);
+  });
+});
+
+// why: Ian's ruling of 2026-11-01 (read the booking options): the cheapest return is selected the way the outbound is:
+// its own verified name pattern, exactly one link in main, focused then Enter
+describe('clickReturn (the booking research)', () => {
+  const RET = returnOptionName({ pounds: 451, priceForm: 'from' });
+  const run = (links: FakeNode[], name = RET) => {
+    const page = new FakePage(null);
+    page.setUrl(RESULTS_URL);
+    page.setTrees([n('document', '', [n('main', '', [n('list', '', links)])])]);
+    const timers = fakeTimers();
+    const lines = memoryLog();
+    const found: string[] = [];
+    const r = createDriver(page, guard()).clickReturn(
+      name,
+      timers.deadline(90_000),
+      { timers, log: lines, flow: 'select-return' },
+      () => found.push('found'),
+    );
+    return { page, r, lines, found };
+  };
+  it('focuses the one return link of that exact name and presses Enter on it', async () => {
+    const { page, r, lines, found } = run([n('link', RET), n('link', returnOptionName({ pounds: 470 }))]);
+    expect(await r).toEqual([`link:${RET}`]);
+    expect(page.calls.actions).toEqual([`focus:link:${RET}`, `press:Enter:link:${RET}:focused`]);
+    expect(page.calls.clicks).toEqual([]);
+    expect(found).toEqual(['found']);
+    expect(
+      lines.lines
+        .filter((l) => l.msg === 'select-return step' && Reflect.get(l.o, 'phase') === 'end')
+        .map((l) => Reflect.get(l.o, 'step')),
+    ).toEqual(['find-return', 'focus-return', 'press-return']);
+  });
+  it('none is not-found, two ambiguous, and a name the return pattern does not read is refused, nothing activated', async () => {
+    for (const [links, name, reason] of [
+      [[n('link', returnOptionName({ pounds: 470 }))], RET, 'not-found'],
+      [[n('link', RET), n('link', RET)], RET, 'ambiguous'],
+      [[n('link', 'Sign in')], 'Sign in', 'not-found'],
+    ] as const) {
+      const { page, r, found } = run([...links], name);
+      await expect(r).rejects.toMatchObject({
+        name: 'StepFailed',
+        step: 'find-return',
+        reason,
+        flow: 'select-return',
+      });
+      expect([page.calls.actions, found]).toEqual([[], []]);
+    }
+  });
+});
+
+describe('the booking view’s reads (the booking research)', () => {
+  // why: select-return/2026-11-01/1 and 2: the booking view exposes each seller's offer as a button in main, named by
+  // the offer pattern (a hypothesis until recorded under BOOKING_SELECT_VERIFIED); its links are not offers
+  it('readFacts(d, o, "booking") counts and hashes the offer buttons in main by the offer pattern, never its links', async () => {
+    const tree = n('document', '', [
+      n('button', 'Continue to book with QQ Air for 9 British pounds'),
+      n('main', '', [
+        n('heading', 'Booking options'),
+        n('link', 'Booking options help'),
+        n('button', 'Continue to book with QQ Air for 451 British pounds'),
+        n('button', 'Continue to book with QQ Atlantic, Economy Light for 470 British pounds'),
+        n('button', 'More booking options'),
+      ]),
+    ]);
+    const { driver, d } = setup([tree]);
+    const r = await driver.readFacts(d, undefined, 'booking');
+    expect([r.page.resultLinks, r.page.outboundLinks, r.names]).toEqual([
+      2,
+      0,
+      [
+        'Continue to book with QQ Air for 451 British pounds',
+        'Continue to book with QQ Atlantic, Economy Light for 470 British pounds',
+      ],
+    ]);
+  });
+});
+
+// why: WP21 Task 21.3 (spec rev 56 §2): the booking read's own facts: the offer buttons' names, the expansion controls and
+// the grouped controls, each counted in main; and the facts the classifier recognises the view by
+describe('bookingFacts and the booking view’s facts (WP21 Task 21.3)', () => {
+  const BOOKING_ON = { ...SELECTORS, RETURN_SELECT_VERIFIED: true, BOOKING_SELECT_VERIFIED: true };
+  const OFFER = 'Continue to book with QQ Travel for 1,180 British pounds';
+  const tree = (o: { main?: FakeNode[]; outside?: FakeNode[] } = {}) =>
+    n('document', '', [
+      ...(o.outside ?? []),
+      n(
+        'main',
+        '',
+        o.main ?? [
+          n('heading', '£1,180 is low for Economy – £270 cheaper than usual'),
+          n('button', OFFER),
+          n('button', 'Continue to book with QQ Fares, Economy Basic for 1,195 British pounds'),
+          n('button', 'View QQ Travel, QQ Fares 1,250 British pounds options'),
+          n('button', '17 more booking options'),
+        ],
+      ),
+    ]);
+  it('reads the offer buttons’ names in page order, the expansion controls and the grouped controls in main', async () => {
+    const { driver, d } = setup([
+      tree({
+        outside: [
+          n('button', 'Continue to book with QQ Air for 9 British pounds'),
+          n('button', '2 more booking options'),
+        ],
+      }),
+    ]);
+    expect(await driver.bookingFacts(d)).toEqual({
+      offerNames: [OFFER, 'Continue to book with QQ Fares, Economy Basic for 1,195 British pounds'],
+      moreOptions: 1,
+      grouped: 1,
+    });
+  });
+  it('an offer name over the length cap reads as null (counted unparsed upstream, never parsed)', async () => {
+    const long = `Continue to book with ${'Q'.repeat(SELECTORS.maxNameLength)} for 1 British pounds`;
+    const { driver, d } = setup([tree({ main: [n('button', long), n('button', OFFER)] })]);
+    expect((await driver.bookingFacts(d)).offerNames).toEqual([null, OFFER]);
+  });
+  // why: review M1: the return's selection moves the URL to the booking path; that move is a change on the booking
+  // view only, and an unknown path (none passed, or an unparsable URL) is no change
+  it.each([
+    ['the path moved, on the booking view', 'booking', '/travel/flights/search', true],
+    ['the same path, on the booking view', 'booking', '/travel/flights/booking', false],
+    ['no path passed', 'booking', undefined, false],
+    ['the path moved, on the return view', 'returns', '/travel/flights/search', false],
+  ] as const)('pollUntilSettled: %s → changed %s', async (_what, view, path, changed) => {
+    const { driver, page, timers } = setup([tree()]);
+    page.setUrl('https://www.google.com/travel/flights/booking?tfs=b');
+    const pre = await driver.readFacts(timers.deadline(90_000), undefined, view);
+    const track = { changed: false };
+    const run = pollUntilSettled(driver, timers.deadline(10_000), timers, 2000, SELECTORS, {
+      view,
+      changedFrom: {
+        signature: pre.settle.linkSignature,
+        documentLoads: 0,
+        ...(path === undefined ? {} : { path }),
+      },
+      loads: () => 0,
+      track,
+    });
+    // why: an unchanged view never settles; the poll's own deadline ends it
+    await run.catch(() => undefined);
+    expect(track.changed).toBe(changed);
+  });
+  it('pathOf: a URL’s path, null when unparsable', () => {
+    expect(pathOf('https://www.google.com/travel/flights/booking?tfs=b')).toBe('/travel/flights/booking');
+    expect(pathOf('not a url')).toBeNull();
+  });
+  // why: the controller's ruling of 2026-11-02 (fix round 3): the heading the booking view showed is the page's
+  // price-comparison note, whose wording follows the fare ("… is low for Economy – … cheaper than usual" on 2026-11-01,
+  // "… is typical for economy" on 2026-11-02); the view is recognised without it, and it is never read
+  it.each([
+    ['the note absent', []],
+    ['the note’s low form', [n('heading', '£1,180 is low for Economy – £270 cheaper than usual')]],
+    ['the note’s typical form', [n('heading', '£1,180 is typical for economy')]],
+  ])('readFacts on the booking path, classified, with %s: the booking view', async (_what, note) => {
+    const { driver, d, page } = setup([tree({ main: [...note, n('button', OFFER)] })]);
+    page.setUrl('https://www.google.com/travel/flights/booking?tfs=b');
+    const f = (await driver.readFacts(d, undefined, 'booking')).page;
+    expect(Object.keys(f.text)).not.toContain('priceRangeHeading');
+    expect(classifyPageWithRule(f, BOOKING_ON, 'booking')).toEqual({
+      kind: { kind: 'results' },
+      rule: 'booking',
+    });
+  });
+  it('readFacts on the booking path with no offer, classified: not the booking view, the note shown or not', async () => {
+    for (const note of [[], [n('heading', '£1,180 is typical for economy')]]) {
+      const { driver, d, page } = setup([tree({ main: [...note, n('button', 'Booking options help')] })]);
+      page.setUrl('https://www.google.com/travel/flights/booking?tfs=b');
+      const f = (await driver.readFacts(d, undefined, 'booking')).page;
+      expect(classifyPageWithRule(f, BOOKING_ON, 'booking').rule).toBe('not-booking-view');
+    }
+  });
+  it('the probe page has no booking read and no activation', () => {
+    const { driver } = setup();
+    expect(Object.keys(probePage(driver)).sort()).toEqual(
+      ['formFacts', 'goto', 'headingNames', 'listFacts', 'readFacts', 'resultNames'].sort(),
+    );
+  });
+});
+
+// why: Ian's ruling of 2026-11-01 (open "more booking options"): the in-page expansion, by its own verified pattern,
+// exactly one on the page, focused then Enter; never an offer or a grouped seller control
+describe('clickMoreOptions (the booking research)', () => {
+  const OFFER = 'Continue to book with QQ Air for 451 British pounds';
+  const run = (nodes: FakeNode[]) => {
+    const page = new FakePage(null);
+    page.setUrl(RESULTS_URL);
+    page.setTrees([n('document', '', [n('main', '', nodes)])]);
+    const timers = fakeTimers();
+    const r = createDriver(page, guard()).clickMoreOptions(timers.deadline(90_000), { timers });
+    return { page, r };
+  };
+  it('focuses the one expansion control, presses Enter on it, and touches nothing else', async () => {
+    const { page, r } = run([
+      n('button', OFFER),
+      n('button', 'View QQ Air, 451 British pounds options'),
+      n('button', '3 more booking options'),
+    ]);
+    expect(await r).toEqual(['button:more-options']);
+    expect(page.calls.actions).toEqual([
+      'focus:button:3 more booking options',
+      'press:Enter:button:3 more booking options:focused',
+    ]);
+  });
+  // why: the review: the lookup is scoped to main, where the recordings' control sits (main's button count changes with
+  // it, the rest of the page's does not)
+  it('an expansion control outside main is not found', async () => {
+    const page = new FakePage(null);
+    page.setUrl(RESULTS_URL);
+    page.setTrees([n('document', '', [n('button', '3 more booking options'), n('main', '', [])])]);
+    const timers = fakeTimers();
+    await expect(
+      createDriver(page, guard()).clickMoreOptions(timers.deadline(90_000), { timers }),
+    ).rejects.toMatchObject({ step: 'find-more-options', reason: 'not-found' });
+    expect(page.calls.actions).toEqual([]);
+  });
+  it('none is not-found, two ambiguous, flow select-more-options, nothing activated', async () => {
+    for (const [nodes, reason] of [
+      [[n('button', OFFER)], 'not-found'],
+      [[n('button', '3 more booking options'), n('button', '1 more booking option')], 'ambiguous'],
+    ] as const) {
+      const { page, r } = run([...nodes]);
+      await expect(r).rejects.toMatchObject({
+        name: 'StepFailed',
+        step: 'find-more-options',
+        reason,
+        flow: 'select-more-options',
+      });
+      expect(page.calls.actions).toEqual([]);
+    }
+  });
+});
+
+// why: rulings of 2026-10-18: inside a bounded poll each lookup keeps its own bound and an overrun names it
+describe('readFacts names the lookup that overran', () => {
+  /** The error a bounded readFacts over `tree` ends with, its hanging lookup run out on fake time. */
+  async function overrun(tree: FakeNode): Promise<unknown> {
+    const { driver, timers } = setup([tree]);
+    const read = driver.readFacts(timers.deadline(90_000), { timers, lookupMs: LOOKUP_TIMEOUT_MS });
+    let out: unknown = null;
+    read.then(
+      () => {
+        out = 'answered';
+      },
+      (e: unknown) => {
+        out = e;
+      },
+    );
+    for (let i = 0; i < 10 && out === null; i++) {
+      await flush();
+      if (out === null) timers.runOut();
+    }
+    return out;
+  }
+  /** The results tree with `mark` applied to the first node `pick` finds (or `extra` appended). */
+  function marked(pick: (x: FakeNode) => boolean, mark: Partial<FakeNode>, extra: FakeNode[] = []): FakeNode {
+    const t = resultsTree({ extra });
+    const x = descendants([t]).find(pick);
+    if (x === undefined) throw new Error('no node to mark');
+    Object.assign(x, mark);
+    return t;
+  }
+  const RESULT = optionName(478);
+  it.each([
+    [
+      'return-heading',
+      marked((x) => x.name === 'Returning flights', { countHang: true }, [n('heading', 'Returning flights')]),
+    ],
+    ['date-grid-buttons', marked((x) => x.role === 'button' && x.name === 'Date grid', { countHang: true })],
+    ['result-links', marked((x) => x.role === 'link' && x.name === RESULT, { countHang: true })],
+    [
+      'fetching-text',
+      marked((x) => x.name === 'Fetching results', { countHang: true }, [text('Fetching results')]),
+    ],
+    ['result-names', marked((x) => x.role === 'link' && x.name === RESULT, { hang: true })],
+  ])('%s', async (lookup, tree) => {
+    expect(await overrun(tree)).toMatchObject({
+      name: 'LookupTimedOut',
+      lookup,
+      lookupMs: LOOKUP_TIMEOUT_MS,
+    });
+  });
+});
+
+describe('readFacts’ counts', () => {
+  it('counts the date grid button by its exact name only', async () => {
+    const { driver, d } = setup([resultsTree({ extra: [n('button', 'Date grid help')] })]);
+    expect((await driver.readFacts(d)).page.dateGridButtons).toBe(1);
+  });
+  it('the loading text inside a tab never counts as loading; outside one it does', async () => {
+    const inTab = resultsTree({ extra: [n('tablist', '', [n('tab', 'Later', [text('Fetching results')])])] });
+    const a = setup([inTab]);
+    expect((await a.driver.readFacts(a.d)).settle.fetching).toBe(false);
+    const b = setup([resultsTree({ extra: [text('Fetching results')] })]);
+    expect((await b.driver.readFacts(b.d)).settle.fetching).toBe(true);
+  });
+  it('the return view counts its links by the return pattern, the outbound links by theirs', async () => {
+    const S = { ...SELECTORS, returns: { ...SELECTORS.returns, resultLink: /^Return choice / } };
+    const page = new FakePage(null);
+    page.setUrl(RESULTS_URL);
+    page.setTrees([
+      resultsTree({
+        top: [option(478), n('link', 'Return choice 1'), n('link', 'Return choice 2')],
+        other: [n('link', 'Return choice 3')],
+      }),
+    ]);
+    const timers = fakeTimers();
+    const f = await createDriver(page, guard(), S).readFacts(timers.deadline(90_000), undefined, 'returns');
+    expect([f.page.resultLinks, f.page.outboundLinks]).toEqual([3, 1]);
+  });
+});
+
+describe('pathMoved and pathField (review M1)', () => {
+  it('a move needs both paths known and different', () => {
+    const url = 'https://www.google.com/travel/flights/booking?tfs=b';
+    expect(pathMoved(url, '/travel/flights/search')).toBe(true);
+    expect(pathMoved(url, '/travel/flights/booking')).toBe(false);
+    expect(pathMoved(url, null)).toBe(false);
+    expect(pathMoved(url, undefined)).toBe(false);
+    expect(pathMoved('not a url', '/travel/flights/search')).toBe(false);
+  });
+  it('the field holds the path, or nothing when the URL cannot be parsed', () => {
+    expect(pathField('https://www.google.com/travel/flights/booking?tfs=b')).toEqual({
+      path: '/travel/flights/booking',
+    });
+    expect(pathField('not a url')).toStrictEqual({});
+  });
+});
+
+// why: R-settle: a return view must first differ from the view the click was made on
+describe('pollUntilSettled’s change from the view clicked on', () => {
+  const RETURNS_ON = { ...SELECTORS, RETURN_SELECT_VERIFIED: true };
+  it('a return heading is the change to the return view, the links unchanged', async () => {
+    const tree = resultsTree({ extra: [n('heading', 'Returning flights')] });
+    const { driver, timers } = setup([tree]);
+    const pre = await driver.readFacts(timers.deadline(90_000), undefined, 'returns');
+    const track = { changed: false };
+    await pollUntilSettled(driver, timers.deadline(10_000), timers, 2000, RETURNS_ON, {
+      view: 'returns',
+      changedFrom: { signature: pre.settle.linkSignature, documentLoads: 0 },
+      loads: () => 0,
+      track,
+    }).catch(() => undefined);
+    expect(track.changed).toBe(true);
+  });
+  it('without a load count, an unchanged view is no change and polls on to its deadline', async () => {
+    const { driver, timers } = setup([resultsTree()]);
+    const pre = await driver.readFacts(timers.deadline(90_000), undefined, 'returns');
+    const track = { changed: false };
+    const ended = await pollUntilSettled(driver, timers.deadline(10_000), timers, 2000, RETURNS_ON, {
+      view: 'returns',
+      changedFrom: { signature: pre.settle.linkSignature, documentLoads: 0 },
+      track,
+    }).catch((e: unknown) => e);
+    expect(ended).toBeInstanceOf(DeadlineExceeded);
+    expect(track.changed).toBe(false);
   });
 });

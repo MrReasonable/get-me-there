@@ -21,6 +21,8 @@ const verifying = (h: Harness, maxCells: number) =>
   h.createDefinition({
     providers: withVerification(),
     verification: { maxCells, topN: maxCells, alwaysInclude: [], expandTop: 1, bookingLinks: true },
+    // why: a scheduled search, so a limiter pause keeps its resume_after (revision 55 §8.1, Ian's ruling 2)
+    scheduleCron: '0 5 * * 1',
   });
 const searched = (h: Harness, id: string) =>
   h.outcomes(id, { stage: 'verification' }).filter((o) => o.reason !== 'not_selected');
@@ -139,7 +141,7 @@ describe('cancel mid expansion → not_run, no itinerary (spec §9 item 4)', () 
     const r = await orch.start(verifying(h, 4).id, { trigger: 'manual' });
     if (!r.ok) throw new Error(r.message);
     await vi.waitFor(() => expect(h.requests.some((q) => q.kind === 'itinerary')).toBe(true));
-    expect(await orch.cancel(r.executionId)).toBe(true);
+    expect(await orch.cancel(r.executionId, { kind: 'cancelled' })).toBe(true);
     const e = await h.waitForSettled(r.executionId);
     expect(e.status).toBe('cancelled');
     const s = searched(h, e.id);

@@ -3,13 +3,15 @@
  * `41200` → `£412`, `123456` → `£1,234.56`, `5` → `£0.05`. en-GB grouping with a comma every three
  * digits, built without Intl so no host ICU can change it. Spec §6.3: no float ever holds money,
  * so a non-integer or negative input is a caller bug and throws RangeError.
+ * `showPence: true` writes whole pounds with their pence too (`100` → `£1.00`), for an amount shown beside one that
+ * has pence (spec rev 55 §8.1: "(about £1.20) … (£1.00)").
  */
-export function formatPence(pence: number): string {
+export function formatPence(pence: number, opts: { showPence?: boolean } = {}): string {
   if (!Number.isSafeInteger(pence) || pence < 0)
     throw new RangeError(`pence must be a non-negative integer: ${pence}`);
   const pounds = groupThousands(Math.floor(pence / 100));
   const rest = pence % 100;
-  return rest === 0 ? `£${pounds}` : `£${pounds}.${String(rest).padStart(2, '0')}`;
+  return rest === 0 && opts.showPence !== true ? `£${pounds}` : `£${pounds}.${String(rest).padStart(2, '0')}`;
 }
 
 /**

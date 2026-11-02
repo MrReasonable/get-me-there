@@ -9,10 +9,12 @@ import { buildContext } from '../../src/context.js';
 import { createEngine } from '../../src/index.js';
 import { createOrchestrator } from '../../src/orchestrator.js';
 import { autoResume, autoResumeYields } from '../../src/scheduler/catchUp.js';
-import { SUPERSEDED_BY_FIRING } from '../../src/scheduler/catchUpStart.js';
 import { buildSnapshot } from '../../src/snapshot.js';
 import { frankfurterBody, stubFrankfurter } from '../support/fx.js';
 import { createHarness, type Harness } from '../support/harness.js';
+
+/** Revision 55 §8.1: the sentence a run its firing replaced is stored with (`superseded 'schedule'`). */
+const SUPERSEDED_BY_FIRING = 'Replaced by a scheduled run.';
 
 beforeEach(() => {
   expect.hasAssertions();

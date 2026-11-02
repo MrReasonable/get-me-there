@@ -360,3 +360,126 @@ describe('refusals with the real engine, the active race, and one request at a t
     expect((await x.request(`/api/definitions/${def.id}/executions`, { json: {} })).status).toBe(202);
   });
 });
+
+describe('revision 55 §8.1, §10: enabled 0 starts, Search again starts fresh, and the response states the stop', () => {
+  it('POST on a search whose enabled is 0 answers 202; GET carries stop null, flights null and estimatedFinishAt while it runs', async () => {
+    const x = await harness();
+    const def = x.ports.repos.definitions.create({ ...small(), enabled: false });
+    const res = await x.request(`/api/definitions/${def.id}/executions`, { json: {} });
+    expect(res.status).toBe(202);
+    await expectContract(res, 'POST', '/api/definitions/:id/executions', STARTED);
+    // why: a seeded running row with a stored estimate, so the finish read does not race the fixture run
+    const other = x.ports.repos.definitions.create({ ...small(), name: 'seeded' });
+    const s = seeder(x.ports);
+    s.execution('R', { def: other, status: 'running', startedAt: at(-1) });
+    const est = x.engine.estimate(other, x.clock.todayLondon());
+    x.ports.repos.executions.patch(s.id('R'), { estimate: est });
+    vi.spyOn(x.engine, 'estimateRemaining').mockReturnValue({ ...est, seconds: 90 });
+    const e = await execution(x, s.id('R'));
+    expect([e.estimatedFinishAt, e.stop, e.flights]).toEqual(['2026-10-14T09:01:30.000Z', null, null]);
+  });
+
+  it('estimatedFinishAt is kept per run and ledger row count: two polls with no new row estimate once; a new row or 30 s re-estimates (final review ruling)', async () => {
+    const x = await harness();
+    const def = x.ports.repos.definitions.create({ ...small(), name: 'kept' });
+    const s = seeder(x.ports);
+    s.execution('R', { def, status: 'running', startedAt: at(-1) });
+    const id = s.id('R');
+    const est = x.engine.estimate(def, x.clock.todayLondon());
+    x.ports.repos.executions.patch(id, { estimate: est });
+    const remaining = vi.spyOn(x.engine, 'estimateRemaining').mockReturnValue({ ...est, seconds: 90 });
+    const finish = async () => (await execution(x, id)).estimatedFinishAt;
+    expect(await finish()).toBe('2026-10-14T09:01:30.000Z');
+    expect(await finish()).toBe('2026-10-14T09:01:30.000Z');
+    expect(remaining).toHaveBeenCalledTimes(1);
+    // why: a call of the run (any ledger row) is new progress, so the next poll estimates again
+    x.ports.db.raw
+      .prepare(
+        `INSERT INTO provider_requests (provider_id, execution_id, endpoint_path, tile_index, started_at, finished_at,
+           duration_ms, http_status, outcome, billable, cost_micro_gbp, http_attempt)
+         VALUES ('fixture', ?, '/p', 0, ?, ?, 1, 200, 'ok', 0, 0, 1)`,
+      )
+      .run(id, x.clock.now(), x.clock.now());
+    remaining.mockReturnValue({ ...est, seconds: 60 });
+    expect(await finish()).toBe('2026-10-14T09:01:00.000Z');
+    expect(await finish()).toBe('2026-10-14T09:01:00.000Z');
+    expect(remaining).toHaveBeenCalledTimes(2);
+    // why: short-lived — a run waiting on one call still re-estimates every 30 s (other progress writes no row)
+    x.clock.advance(30_001);
+    remaining.mockReturnValue({ ...est, seconds: 30 });
+    expect(await finish()).toBe('2026-10-14T09:01:00.001Z');
+    expect(await finish()).toBe('2026-10-14T09:01:00.001Z');
+    expect(remaining).toHaveBeenCalledTimes(3);
+  });
+
+  it('replaceStopped and requireCovered reach the engine; over a paused_error search the old run is cancelled with "Replaced by a search you started." and the new one runs', async () => {
+    const x = await harness();
+    const def = x.ports.repos.definitions.create(small());
+    const s = seeder(x.ports);
+    s.execution('OLD', { def, status: 'paused_error', startedAt: at(-2) });
+    const old = s.id('OLD');
+    const refused = await x.request(`/api/definitions/${def.id}/executions`, { json: {} });
+    expect(refused.status).toBe(409);
+    expect(await errorOf(refused)).toMatchObject({ code: 'active' });
+    const start = vi.spyOn(x.engine, 'start');
+    const est = x.engine.estimate(def, x.clock.todayLondon());
+    const figures = {
+      confirmCostPence: Math.ceil(est.totalCostMicroGbp / 10_000),
+      confirmCalls: est.totalCalls,
+    };
+    const res = await x.request(`/api/definitions/${def.id}/executions`, {
+      json: { replaceStopped: true, requireCovered: true, ...figures },
+    });
+    expect(res.status).toBe(202);
+    expect(start).toHaveBeenCalledWith(def.id, {
+      trigger: 'manual',
+      ...figures,
+      requireCovered: true,
+      replaceStopped: true,
+    });
+    const { executionId } = await expectContract(res, 'POST', '/api/definitions/:id/executions', STARTED);
+    const before = await execution(x, old);
+    expect(before.status).toBe('cancelled');
+    expect(before.stop?.sentence).toBe('Replaced by a search you started.');
+    expect(x.ports.repos.executions.get(executionId)?.status).toMatch(/running|completed/);
+  });
+
+  it.each([
+    ['with', 'paused: error'],
+    ['without', null],
+  ] as const)(
+    'a stopped run with no stored cause, %s stored error_text, reads NO_STOP_CAUSE_TEXT and sends no stored text (R1, Review Focus 4)',
+    async (_n, stored) => {
+      const x = await harness();
+      const def = x.ports.repos.definitions.create(small());
+      const s = seeder(x.ports);
+      s.execution('L', { def, status: 'paused_error', startedAt: at(-2) });
+      x.ports.repos.executions.patch(s.id('L'), { errorText: stored });
+      const res = await x.request(`/api/executions/${s.id('L')}`);
+      const text = await res.clone().text();
+      expect(text).not.toContain('paused: error');
+      const e = EXEC.parse(await res.json());
+      expect(e.stop).toEqual({
+        sentence: 'No reason was recorded for this run.',
+        fix: { text: 'Search again', command: null },
+      });
+      // why: R1 — the response has no stored-text field at all, so nothing but `stop` can carry the words
+      expect(text).not.toContain('"reason"');
+      expect(text).not.toContain('"errorText"');
+    },
+  );
+
+  it("a stopped run with a stored cause sends that cause's sentence as stop, never its stored text (R1)", async () => {
+    const x = await harness();
+    const def = x.ports.repos.definitions.create(small());
+    const s = seeder(x.ports);
+    s.execution('C', { def, status: 'running', startedAt: at(-2) });
+    x.ports.repos.executions.setStatus(s.id('C'), 'cancelled', {
+      stopCause: { kind: 'cancelled' },
+      errorText: 'an engine note that must not be sent',
+    });
+    const e = await execution(x, s.id('C'));
+    expect(e.stop?.sentence).toBe('Stopped by you.');
+    expect(JSON.stringify(e)).not.toContain('an engine note that must not be sent');
+  });
+});

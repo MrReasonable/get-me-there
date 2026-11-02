@@ -7,6 +7,7 @@
  */
 import {
   type BlockedPage,
+  BudgetExceeded,
   type IsoDateTime,
   type MonthlyCapFacts,
   ProviderError,
@@ -79,7 +80,17 @@ export function classifyWorkerAnswer(f: ResponseFacts): ProviderError {
         answer.cooldownUntil,
       );
     case 'spacing':
-      return error(f, 'rate-limit', 'the worker asked to wait for its spacing', 'spacing', true);
+      // why: final review A-I1: the wait the worker stated (the rest of a page in flight, or the spacing) goes on the
+      // error, so http-kit's retry waits that long even with no Retry-After header
+      return new ProviderError({
+        kind: 'rate-limit',
+        retryable: true,
+        httpStatus: f.status,
+        providerId: 'camoufox',
+        message: `camoufox ${f.endpointPath}: the worker asked to wait ${answer.retryAfterSeconds} s for its spacing [spacing]`,
+        reason: 'spacing',
+        retryAfterSeconds: answer.retryAfterSeconds,
+      });
     case 'mode-unavailable':
       return error(
         f,
@@ -122,6 +133,25 @@ export function classifyWorkerAnswer(f: ResponseFacts): ProviderError {
       );
     case 'cells':
     case 'grid':
+    case 'flights':
       return error(f, 'parse', `HTTP ${f.status} with a ${answer.kind} answer`, 'unexpected-status');
   }
+}
+
+/**
+ * Decision 82, W3: the worker's own monthly page cap, thrown as BudgetExceeded at provider-month (the ledger's scope)
+ * with the worker's own figures and window end, never the app's settings copied in. Any other error returns.
+ */
+export function throwIfMonthly(e: ProviderError): void {
+  const m = e.monthlyCap;
+  if (e.reason !== 'monthly-cap' || m === undefined) return;
+  throw new BudgetExceeded({
+    scope: 'provider-month',
+    providerId: 'camoufox',
+    cap: m.cap,
+    current: m.used,
+    requested: 1,
+    counter: 'worker',
+    windowEnd: m.windowEnd,
+  });
 }

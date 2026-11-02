@@ -1,4 +1,4 @@
-import { isoDateTimeOfEpochMs } from '@gmt/core';
+import { isoDateTimeOfEpochMs, isScheduled } from '@gmt/core';
 import type { EngineContext } from './context.js';
 import { FX_REFRESH_CRON, MAINTENANCE_CRON } from './maintenance.js';
 import { notifyOperator } from './notify.js';
@@ -103,7 +103,7 @@ export async function bootEngine(ctx: EngineContext, orch: Orchestrator, sched: 
   log.info({ oneShots, superseded: stale }, 'boot: one-shot jobs');
 
   for (const def of ctx.repos.definitions.list()) {
-    if (!def.enabled || def.deletedAt !== null || def.scheduleCron === null) continue;
+    if (!isScheduled(def)) continue;
     // why: one definition whose catch-up throws is logged and the boot carries on, so its own job is still registered
     // and the app still starts (the operator can then reach the UI to fix it)
     await catchUpIsolated(ctx, orch, def, bootAt);

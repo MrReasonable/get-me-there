@@ -1,13 +1,21 @@
 import {
   bestPerWeek,
   type DatePair,
+  type DatePairFigure,
+  type DatePairPairing,
   type DecodedDatePairs,
   daysBetween,
+  type FigureBasis,
   type IsoDate,
   type IsoDateTime,
   isoDateSchema,
+  type PairingRead,
   rankDatePairs,
+  resultBasisOf,
+  type StopDetail,
 } from '@gmt/core';
+import type { DefinitionResponse } from '../../api/types.js';
+import type { COPY } from '../../copy.js';
 import type { DatesUiState } from '../../state/datesState.js';
 import { inStay } from './stayScope.js';
 
@@ -127,7 +135,8 @@ const synthetic = (p: { providerId: string; sourceKind: string }) =>
  * Spec §11 Dates, revision 50: the red synthetic banner shows when any provenance in the read (figures and
  * cheaper-cached prices alike), the discovery providers or any execution read (the shown run's progress) names the
  * fixture provider or a synthetic source; judged on the whole decoded read, never the rows the board shows, and
- * whatever `/providers` says.
+ * whatever `/providers` says. Revision 56 (R-synthetic, prov-r3-008): every price group in the read, a pairing
+ * figure's grid price and every pairing (leading or beneath) included.
  */
 export function isSyntheticRead(
   d: Pick<DecodedDatePairs, 'pairs' | 'discoveryProviders'>,
@@ -139,7 +148,149 @@ export function isSyntheticRead(
     const f = p.figure;
     if (f === null) return false;
     return (
-      synthetic(f.price.provenance) || (f.cheaperCached !== null && synthetic(f.cheaperCached.provenance))
+      synthetic(f.price.provenance) ||
+      (f.cheaperCached !== null && synthetic(f.cheaperCached.provenance)) ||
+      (f.gridPrice !== null && synthetic(f.gridPrice.provenance)) ||
+      (f.pairing !== null && synthetic(f.pairing.provenance))
     );
   });
+}
+
+/**
+ * Whether a figure of this basis is calendar-styled (spec rev 56 §6.9, §11): a calendar price, and a pairing figure,
+ * which is never checked with the airline (the dashed outline, "not checked"); core's exhaustive `resultBasisOf`
+ * decides, so a new basis fails to compile there before it reaches a face here.
+ */
+export function calendarStyled(basis: FigureBasis): boolean {
+  return resultBasisOf(basis) === 'calendar';
+}
+
+/**
+ * What a figure says of its date pair's flight read on the board (spec rev 56 §6.9, §11 Board), or null when it says
+ * nothing: its lead words (`lead`) and the pairing shown beneath it (`pairing`, its own price, provenance and age).
+ */
+export interface FlightReadLine {
+  lead: string | null;
+  pairing: DatePairPairing | null;
+}
+
+/** The lead words of each read that is not a pairing figure's own (`within`), with its pairing's age where it has one. */
+function leadOf(
+  read: Exclude<PairingRead, 'within'>,
+  f: DatePairFigure,
+  c: typeof COPY,
+  reason: (d: StopDetail) => string,
+): string | null {
+  const D = c.datesView;
+  switch (read) {
+    case 'not-read':
+    case 'outbound-only':
+    case 'no-pairing-read':
+    case 'over-limit':
+      return D.pairingRead[read];
+    case 'list-failed':
+      // why: the 21.6 ruling: a failed newest list read nothing, its outbound included, so it says why and is never
+      // worded "return leg not read" (which is an outbound-only list's alone); 21.7 ui-008: with no reason (the
+      // contract always sends one) the words end without a colon, never in an empty cause
+      return D.listFailed(f.listReason === null ? null : reason(f.listReason));
+    case 'within-older':
+      return D.pairingBeneath(c.agoOf(f.pairing?.ageHours ?? 'unknown'));
+    case 'within-other-limits':
+      return D.pairingOtherLimits;
+    case 'sellers-not-read':
+    case 'offers-incomplete':
+      // why: their words ride on the pairing's own line ("from £X · sellers not read", "a cheaper seller may not have
+      // been read"), beside the price they qualify
+      return null;
+    default: {
+      const unknownRead: never = read;
+      throw new RangeError(`flightReadLine: no read ${String(unknownRead)}`);
+    }
+  }
+}
+
+/**
+ * What the board knows of its flight-lists request (21.7 prov-004): `loading` while it is pending, `failed` when it
+ * failed, `available` when it answered that flight lists are read for this search, `unavailable` when it answered they
+ * are not (or nothing was asked).
+ */
+export type ListsState = 'loading' | 'failed' | 'available' | 'unavailable';
+
+/**
+ * Spec rev 56 §6.9, §11 Board (R-heads): a calendar figure's flight read in words, with the pairing that does not lead
+ * shown beneath it; a stale verified figure's likewise (ruling 21.2); nothing for a pairing figure (its seller, times
+ * and grid price are its own lines) or a fresh verified one. Where no flight list exists the row says "flights not
+ * read" when flight lists are read for this search, and keeps it when the flight-lists request failed (21.7 prov-004:
+ * the mark is off only when that request succeeded and said they are not read here, so a search without the browser
+ * worker is not told on every row what it never asked for); "loading flights" while that request is pending. `reason`
+ * words a failed list's cause (the 21.6 ruling).
+ */
+export function flightReadLine(
+  f: DatePairFigure,
+  lists: ListsState,
+  c: typeof COPY,
+  reason: (d: StopDetail) => string,
+): FlightReadLine | null {
+  switch (f.basis) {
+    case 'pairing':
+      return null;
+    case 'verified':
+      if (f.price.stale === false) return null;
+      break;
+    case 'calendar':
+      break;
+    default: {
+      const unknownBasis: never = f.basis;
+      throw new RangeError(`flightReadLine: no basis ${String(unknownBasis)}`);
+    }
+  }
+  const read = f.pairingRead;
+  if (read === 'within' || (read === 'not-read' && lists === 'unavailable')) return null;
+  if (read === 'not-read' && lists === 'loading') return { lead: c.datesView.loadingFlights, pairing: null };
+  return { lead: leadOf(read, f, c, reason), pairing: f.pairing };
+}
+
+/**
+ * The seller of a pairing's offer (spec rev 56 §10: a seller exactly when the price is an offer's). A pairing whose
+ * price is an offer's with no seller breaks the contract, so it throws a RangeError naming the rule rather than print
+ * a seller line with no seller (21.7 code M9).
+ */
+export function sellerOf(q: Pick<DatePairPairing, 'seller'>): string {
+  if (q.seller === null) throw new RangeError('sellerOf: an offer names its seller (spec rev 56 §10)');
+  return q.seller;
+}
+
+/**
+ * The board head's seller-price count (21.7 persona coverage): of the date pairs shown, how many carry a seller's price
+ * (a pairing figure, or a pairing beneath whose price is an offer's); null when no pairing figure is shown, so a search
+ * with no seller price read says nothing.
+ */
+export function sellerCoverage(
+  rows: ReadonlyArray<{ figure: DatePairFigure | null }>,
+): { read: number; shown: number } | null {
+  if (!rows.some((p) => p.figure?.basis === 'pairing')) return null;
+  const read = rows.filter((p) => {
+    const q = p.figure?.pairing ?? null;
+    return q !== null && !q.isFrom;
+  }).length;
+  return { read, shown: rows.length };
+}
+
+/**
+ * Whether a search sets any airline or layover setting (spec rev 56 §11 Board): a pairing figure then says "airline
+ * settings not applied to flights read", since a flight read applies only the journey, stops and window limits.
+ */
+export function setsAirlineOrLayover(
+  c: Pick<
+    DefinitionResponse['constraints'],
+    'includeAirlines' | 'excludeAirlines' | 'minLayoverMinutes' | 'maxLayoverMinutes' | 'noOvernightLayover'
+  >,
+): boolean {
+  return (
+    (c.includeAirlines?.length ?? 0) > 0 ||
+    (c.excludeAirlines?.length ?? 0) > 0 ||
+    c.minLayoverMinutes !== undefined ||
+    c.maxLayoverMinutes !== undefined ||
+    c.noOvernightLayover === true
+  );
 }

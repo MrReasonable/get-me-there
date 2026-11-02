@@ -9,6 +9,7 @@ import {
   encodeDatePairs,
   provenanceKey,
 } from '../../src/datePairs/encode.js';
+import type { PairingRead } from '../../src/datePairs/pairing.js';
 import type { DatePairSpace } from '../../src/datePairs/space.js';
 import { addDays } from '../../src/dates/epochDay.js';
 import { sortedAirportPairs } from '../../src/space/generate.js';
@@ -18,11 +19,26 @@ import {
   calendarFigure,
   calendarProvenance,
   decoded,
+  figurePairing,
+  flightListProvenance,
+  pairingFigure,
   summaryOf,
   verifiedFigure,
   verifiedProvenance,
   workedExample,
 } from '../helpers/datePairs.js';
+
+/**
+ * A flight list's provenance carrying variant `i`'s FX and observed time (21.7 prov-012: a pairing beneath a figure is a
+ * flight list's), so the table still keys entries one field apart.
+ */
+function listVariant(i: number): Provenance {
+  const v = VARIANTS[i]?.[1] ?? calendarProvenance();
+  return flightListProvenance({
+    fx: v.fx,
+    ...(v.providerObservedAt === undefined ? {} : { providerObservedAt: v.providerObservedAt }),
+  });
+}
 
 /** Provenances that differ from the first in exactly one field each (spec §3: every field is provenance). */
 const VARIANTS: Array<[string, Provenance]> = [
@@ -91,21 +107,48 @@ const arbDecoded: fc.Arbitrary<DecodedDatePairs> = fc
               .record({
                 airportPair: fc.integer({ min: 0, max: a - 1 }),
                 cheaperPair: fc.integer({ min: 0, max: a - 1 }),
-                verified: fc.boolean(),
+                kind: fc.constantFrom<'verified' | 'calendar' | 'pairing'>('verified', 'calendar', 'pairing'),
+                beneath: fc.option(
+                  fc.constantFrom<PairingRead>(
+                    'over-limit',
+                    'within-other-limits',
+                    'within-older',
+                    'sellers-not-read',
+                    'offers-incomplete',
+                  ),
+                  { nil: null },
+                ),
+                readOnly: fc.constantFrom<PairingRead>(
+                  'not-read',
+                  'outbound-only',
+                  'no-pairing-read',
+                  'list-failed',
+                ),
+                isFrom: fc.boolean(),
+                fare: fc.option(fc.constantFrom('Economy Basic', 'Economy Flex'), { nil: null }),
+                which: fc.constantFrom<'cheapest' | 'next-cheapest' | 'over-limit'>(
+                  'cheapest',
+                  'next-cheapest',
+                  'over-limit',
+                ),
                 pence: fc.integer({ min: 1, max: 200_000 }),
                 provenance: fc.integer({ min: 0, max: VARIANTS.length - 1 }),
                 cheaperProvenance: fc.integer({ min: 0, max: VARIANTS.length - 1 }),
-                stale: fc.boolean(),
+                stale: fc.constantFrom<false | 'refresh' | 'setting'>(false, 'refresh', 'setting'),
                 age: fc.option(fc.nat(500), { nil: 'unknown' as const }),
                 truncated: fc.boolean(),
                 superseded: fc.boolean(),
                 notSeen: fc.option(fc.option(fc.nat(500), { nil: 'unknown' as const }), { nil: null }),
                 minutes: fc.option(fc.nat(6000), { nil: null }),
                 cheaper: fc.option(fc.integer({ min: 0, max: 199_999 }), { nil: null }),
-                cheaperFlags: fc.tuple(fc.boolean(), fc.boolean()),
+                cheaperFlags: fc.tuple(
+                  fc.constantFrom<false | 'refresh' | 'setting'>(false, 'refresh', 'setting'),
+                  fc.boolean(),
+                ),
                 earlier: fc.boolean(),
               })
               .map((f): DatePairFigure => {
+                const verified = f.kind === 'verified';
                 const pair = pairs[f.airportPair] ?? { origin: asIata('LHR'), destination: asIata('JFK') };
                 const cheaperAt = pairs[f.cheaperPair] ?? pair;
                 const price = {
@@ -113,7 +156,7 @@ const arbDecoded: fc.Arbitrary<DecodedDatePairs> = fc
                   provenance: VARIANTS[f.provenance]?.[1] ?? calendarProvenance(),
                   stale: f.stale,
                   ageHours: f.age,
-                  truncated: f.verified ? false : f.truncated,
+                  truncated: f.kind === 'calendar' ? f.truncated : false,
                 };
                 const common = {
                   price,
@@ -122,7 +165,77 @@ const arbDecoded: fc.Arbitrary<DecodedDatePairs> = fc
                   fromEarlierSearch: f.earlier,
                   journeyMinutes: f.minutes,
                 };
-                if (!f.verified) return calendarFigure({ ...common, superseded: f.superseded });
+                // why: a pairing shown beneath, as the board shows it, with its own provenance (one of the variants)
+                // and stale mark; a "from" price read no offer and is never complete (prov-001)
+                // why: Task 21.7: fromPence is the from price itself on a from price, and differs exactly on a mismatch
+                const mismatch = (isFrom: boolean) => !isFrom && f.cheaperFlags[1];
+                // why: final review B-M5: a pairing beneath says what its read says (over the limits exactly on
+                // over-limit, stale on within-older, fresh on the two seller reads, a from price when no seller was
+                // read, an offer not complete when the offers may be incomplete)
+                const pairing = (read: PairingRead) => {
+                  const isFrom =
+                    read === 'sellers-not-read' ? true : read === 'offers-incomplete' ? false : f.isFrom;
+                  const stale =
+                    read === 'within-older'
+                      ? f.cheaperFlags[0] === false
+                        ? ('refresh' as const)
+                        : f.cheaperFlags[0]
+                      : read === 'sellers-not-read' || read === 'offers-incomplete'
+                        ? false
+                        : f.cheaperFlags[0];
+                  const which =
+                    read === 'over-limit' ? 'over-limit' : f.which === 'over-limit' ? 'cheapest' : f.which;
+                  return figurePairing({
+                    pricePence: f.pence + 1,
+                    fromPence: mismatch(isFrom) ? f.pence + 2 : f.pence + 1,
+                    isFrom,
+                    seller: isFrom ? null : 'QQ Fares',
+                    fare: isFrom ? null : f.fare,
+                    ...(isFrom || read === 'offers-incomplete' ? { complete: false } : {}),
+                    ...(isFrom ? { offersRead: 0 } : {}),
+                    which,
+                    // why: 21.7 prov-012: a pairing beneath is a flight list's; the variant's fields over it keep the
+                    // table's one-field-apart entries apart
+                    provenance: listVariant(f.cheaperProvenance),
+                    stale,
+                    ageHours: f.age,
+                    mismatch: mismatch(isFrom),
+                  });
+                };
+                if (f.kind === 'pairing')
+                  // why: prov-001: a leading pairing is its figure's own words: the offer's price, the flight list's
+                  // provenance, fresh, complete and within the limits
+                  return pairingFigure({
+                    ...common,
+                    price: { ...price, provenance: flightListProvenance(), stale: false, truncated: false },
+                    pairing: figurePairing({
+                      pricePence: f.pence,
+                      fromPence: f.cheaperFlags[1] ? f.pence + 1 : f.pence,
+                      fare: f.fare,
+                      which: f.which === 'over-limit' ? 'cheapest' : f.which,
+                      provenance: flightListProvenance(),
+                      ageHours: f.age,
+                      mismatch: f.cheaperFlags[1],
+                    }),
+                    superseded: f.superseded,
+                    gridPrice: {
+                      pricePence: f.cheaper ?? f.pence,
+                      provenance: VARIANTS[f.cheaperProvenance]?.[1] ?? calendarProvenance(),
+                      stale: f.cheaperFlags[0],
+                      truncated: f.cheaperFlags[1],
+                    },
+                  });
+                if (!verified)
+                  return calendarFigure({
+                    ...common,
+                    superseded: f.superseded,
+                    ...(f.beneath === null
+                      ? {
+                          pairingRead: f.readOnly,
+                          listReason: f.readOnly === 'list-failed' ? ('network' as const) : null,
+                        }
+                      : { pairingRead: f.beneath, pairing: pairing(f.beneath) }),
+                  });
                 return verifiedFigure({
                   ...common,
                   notSeenInLatest: f.notSeen === null ? null : { ageHours: f.notSeen },
@@ -366,6 +479,13 @@ describe('encodeDatePairs and decodeDatePairs (spec §10: the provenance table i
       r[group].figure[0] = r.figures.pair.length;
       expect(() => decodeDatePairs(r), group).toThrow(new RangeError('no entry 8 in a column of 8'));
     }
+    for (const group of ['gridPrice', 'pairing', 'pairingRead'] as const) {
+      const r = encodeDatePairs(withPairings());
+      const g = r[group];
+      if (g === undefined) throw new Error(`no ${group} group`);
+      g.figure[0] = r.figures.pair.length;
+      expect(() => decodeDatePairs(r), group).toThrow(RangeError);
+    }
   });
 
   it("keys a figure's cheaper-cached price and its times by the figure's position, only where it has them", () => {
@@ -392,5 +512,123 @@ describe('encodeDatePairs and decodeDatePairs (spec §10: the provenance table i
       });
       expect(decodeDatePairs(one).pairs[1]?.figure, kept).toEqual(figure);
     }
+  });
+});
+
+/** The worked example with a pairing figure at date pair 1 and a calendar figure with a "from" pairing beneath at 3. */
+function withPairings(): DecodedDatePairs {
+  const x = workedExample();
+  return {
+    ...x,
+    pairs: x.pairs.map((p) =>
+      p.index === 1
+        ? { ...p, figure: pairingFigure({ fromEarlierSearch: true }) }
+        : p.index === 3
+          ? {
+              ...p,
+              figure: calendarFigure({
+                pairingRead: 'sellers-not-read',
+                pairing: figurePairing({
+                  pricePence: 117_000,
+                  fromPence: 117_000,
+                  isFrom: true,
+                  seller: null,
+                  fare: null,
+                  offersRead: 0,
+                  complete: false,
+                  which: 'cheapest',
+                  departOut: '09:40',
+                  arriveOut: '19:25',
+                  departBack: '19:10',
+                  arriveBack: '07:15',
+                  mismatch: false,
+                  provenance: flightListProvenance({ fetchedAt: asIsoDateTime('2027-02-27T09:30:00.000Z') }),
+                  // why: final review B-M5: sellers-not-read follows within-older, so its list is fresh
+                  stale: false,
+                  ageHours: 'unknown',
+                }),
+              }),
+            }
+          : p,
+    ),
+  };
+}
+
+describe('the pairing figure on the wire (spec rev 56 §10, R-sparse: gridPrice, pairing and pairingRead sparse)', () => {
+  it('round-trips the grid price, the pairing group and pairingRead, and parses against the contract', () => {
+    const x = withPairings();
+    const wire = encodeDatePairs(x);
+    expect(datePairsResponseSchema.safeParse(JSON.parse(JSON.stringify(wire))).error?.issues ?? []).toEqual(
+      [],
+    );
+    expect(decodeDatePairs(wire)).toEqual(x);
+    const j = wire.figures.pair.indexOf(1);
+    const k = wire.figures.pair.indexOf(3);
+    // why: R-sparse: an entry only for a read other than not-read, its code the index in PAIRING_READ (6 within,
+    // 4 sellers-not-read)
+    expect(wire.pairingRead).toEqual({ figure: [j, k], code: [6, 4] });
+    expect(wire.gridPrice?.figure).toEqual([j]);
+    expect(wire.gridPrice?.pricePence).toEqual([56_400]);
+    expect(wire.pairing?.figure).toEqual([j, k]);
+  });
+
+  it('the pairing group carries fromPence, isFrom, seller, fare, offersRead, complete, which, the four times and mismatch', () => {
+    const wire = encodeDatePairs(withPairings());
+    expect(wire.pairing).toMatchObject({
+      pricePence: [118_000, 117_000],
+      fromPence: [118_000, 117_000],
+      isFrom: [false, true],
+      seller: ['QQ Travel', null],
+      fare: [null, null],
+      offersRead: [3, 0],
+      complete: [true, false],
+      which: ['next-cheapest', 'cheapest'],
+      departOut: ['07:15', '09:40'],
+      arriveOut: ['18:05', '19:25'],
+      departBack: ['14:20', '19:10'],
+      arriveBack: ['06:25', '07:15'],
+      mismatch: [false, false],
+      stale: [false, false],
+      ageHours: [2, 'unknown'],
+    });
+    const back = decodeDatePairs(wire).pairs[3]?.figure?.pairing;
+    expect(back?.provenance.fetchedAt).toBe('2027-02-27T09:30:00.000Z');
+  });
+
+  it('the 21.6 ruling: a list-failed read round-trips with its cause in the listReason group', () => {
+    const failed = calendarFigure({ pairingRead: 'list-failed', listReason: 'blocked' });
+    const x = decoded({
+      pair: (i) => (i === 0 ? { figure: failed } : i === 1 ? { figure: calendarFigure() } : {}),
+    });
+    const wire = encodeDatePairs(x);
+    expect(datePairsResponseSchema.safeParse(JSON.parse(JSON.stringify(wire))).error?.issues ?? []).toEqual(
+      [],
+    );
+    expect(wire.pairingRead).toEqual({ figure: [0], code: [9] });
+    expect(wire.listReason).toEqual({ figure: [0], reason: ['blocked'] });
+    const back = decodeDatePairs(wire).pairs;
+    expect(back[0]?.figure).toEqual(failed);
+    expect(back[1]?.figure?.listReason).toBeNull();
+  });
+
+  it('a not-read figure with no grid price or pairing encodes with no group entry', () => {
+    const wire = encodeDatePairs(decoded({ pair: (i) => (i === 0 ? { figure: calendarFigure() } : {}) }));
+    expect(decodeDatePairs(wire).pairs[0]?.figure?.pairingRead).toBe('not-read');
+    expect([wire.gridPrice?.figure, wire.pairing?.figure, wire.pairingRead?.figure]).toEqual([[], [], []]);
+  });
+
+  it('a response without the new column and groups decodes with no grid price, no pairing and not-read', () => {
+    const {
+      gridPrice: _g,
+      pairing: _p,
+      pairingRead: _r,
+      listReason: _l,
+      ...body
+    } = encodeDatePairs(workedExample());
+    expect(datePairsResponseSchema.safeParse(body).error?.issues ?? []).toEqual([]);
+    const pairs = decodeDatePairs(body).pairs.flatMap((p) => (p.figure === null ? [] : [p.figure]));
+    expect(pairs.length).toBeGreaterThan(0);
+    for (const f of pairs)
+      expect([f.gridPrice, f.pairing, f.pairingRead, f.listReason]).toEqual([null, null, 'not-read', null]);
   });
 });

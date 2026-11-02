@@ -1,6 +1,12 @@
 import { GRID_MOVE_BUDGET_MS, GRID_MOVE_RESERVE_MS, parseConfig } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
-import { camoufoxHttpLimits, camoufoxStatusHttpLimits, pageClassOf } from '../../src/camoufox/index.js';
+import {
+  camoufoxHttpLimits,
+  camoufoxStatusHttpLimits,
+  nextStartOf,
+  pageClassOf,
+  pageCountOf,
+} from '../../src/camoufox/index.js';
 
 const env = {
   NODE_ENV: 'production',
@@ -94,5 +100,72 @@ describe('camoufoxHttpLimits (spec §5.3 rev 32; decision 69)', () => {
     );
     expect(pageClassOf({ status: 504, headers: new Headers() })).toBe('page');
     expect(pageClassOf({ status: null, headers: null })).toBe('page');
+  });
+  // why: spec rev 56 §5.3: a flights request with a return phase sends its own timeout (flightRequestSeconds); the
+  // provider's stays discovery's, the page timeout plus 15 s
+  it('requestTimeoutSeconds stays discovery’s in list mode (105 s), and the limits read pagesLoaded through pageCountOf', () => {
+    const l = camoufoxHttpLimits(camoufox(), { maxWaitSeconds: 3900 });
+    expect(l.requestTimeoutSeconds).toBe(105);
+    expect(l.pageCountOf).toBe(pageCountOf);
+  });
+  // why: spec rev 56 §5.3: http-kit holds the next start on any answer that states nextLoadNotBefore (21.4 review I1)
+  it('the limits read nextLoadNotBefore through nextStartOf; the status route’s limits read none', () => {
+    expect(camoufoxHttpLimits(camoufox(), { maxWaitSeconds: 3900 }).nextStartOf).toBe(nextStartOf);
+    expect(camoufoxStatusHttpLimits(camoufox(), { maxWaitSeconds: 3900 }).nextStartOf).toBeUndefined();
+  });
+});
+
+describe('pageCountOf (spec rev 56 §5.3: the answer’s pagesLoaded for the ledger row’s page_count)', () => {
+  it.each([
+    ['{"pagesLoaded":2}', 2],
+    ['{"pagesLoaded":1}', 1],
+    // why: R-zero: a first load the worker refused loaded nothing, and the row says 0
+    ['{"pagesLoaded":0}', 0],
+    ['{"kind":"blocked","page":"captcha","pagesLoaded":1}', 1],
+  ])('reads %s as %i', (body, n) => {
+    expect(pageCountOf(body)).toBe(n);
+  });
+  it.each([
+    ['a body without it', '{"kind":"flights"}'],
+    ['a non-JSON body', 'not json'],
+    ['an empty body', ''],
+    ['a JSON null', 'null'],
+    ['a JSON array', '[2]'],
+    ['a JSON number', '2'],
+    ['a JSON string', '"pagesLoaded"'],
+    ['a negative count', '{"pagesLoaded":-1}'],
+    ['a fraction', '{"pagesLoaded":1.5}'],
+    ['a string', '{"pagesLoaded":"2"}'],
+  ])('%s is undefined (the guard then keeps its own reading)', (_n, body) => {
+    expect(pageCountOf(body)).toBeUndefined();
+  });
+});
+
+describe('nextStartOf (spec rev 56 §5.3: the answer’s nextLoadNotBefore, which holds the next camoufox start)', () => {
+  it.each([
+    ['a flights answer', '{"kind":"flights","nextLoadNotBefore":"2026-10-14T15:00:30.000Z"}'],
+    [
+      'a not-ready answer',
+      '{"kind":"not-ready","pagesLoaded":2,"nextLoadNotBefore":"2026-10-14T15:00:30.000Z"}',
+    ],
+    [
+      'a blocked answer',
+      '{"kind":"blocked","page":"captcha","nextLoadNotBefore":"2026-10-14T15:00:30.000Z"}',
+    ],
+  ])('reads it from %s', (_n, body) => {
+    expect(nextStartOf(body)).toBe('2026-10-14T15:00:30.000Z');
+  });
+  it.each([
+    ['a body without it', '{"kind":"flights","pagesLoaded":2}'],
+    ['a non-JSON body', 'not json'],
+    ['an empty body', ''],
+    ['a JSON null', 'null'],
+    ['a JSON string', '"2026-10-14T15:00:30.000Z"'],
+    ['a number', '{"nextLoadNotBefore":1792000000000}'],
+    ['a date without a time', '{"nextLoadNotBefore":"2026-10-14"}'],
+    ['a time not in toISOString form', '{"nextLoadNotBefore":"2026-10-14T15:00:30Z"}'],
+    ['an impossible date', '{"nextLoadNotBefore":"2026-13-14T15:00:30.000Z"}'],
+  ])('%s holds nothing (undefined)', (_n, body) => {
+    expect(nextStartOf(body)).toBeUndefined();
   });
 });

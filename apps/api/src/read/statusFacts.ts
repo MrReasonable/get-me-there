@@ -71,8 +71,11 @@ export interface DataFacts {
   definitionId: string;
   /** The definition's name: the card's label, never part of its summary. */
   name: string;
-  /** A disabled definition is shown as off, so a parked search never nags the bar. */
-  enabled: boolean;
+  /**
+   * Revision 55 §7 (data-004): whether the search is scheduled (`isScheduled`). An unscheduled search's card is judged by
+   * its latest run like any other and notes "not scheduled"; a card is off only for a deleted search, which has none.
+   */
+  scheduled: boolean;
   /** The newest parent row that is not pending or running, whatever its status (a skipped firing included), or null. */
   latest: RunFacts | null;
   /** The newest such row that actually ran (not a skipped firing): the coverage and ages below are its. */
@@ -109,6 +112,11 @@ export interface WorkerStatusFacts {
   /** What the worker will do with the next page request, judged by the one rule the preflight uses (V5). */
   finding: WorkerFinding | null;
   formVerified: boolean;
+  /**
+   * Spec rev 56 §8.1: the worker's reported verification flags as it stated them; the report sets the engine's copy
+   * from them (the plan's return phase), and words none of them beyond `formVerified`.
+   */
+  flags: Readonly<Record<string, boolean>>;
   appInstances: number | null;
   monthly: { pages: number; scrolls: number; readable: boolean } | null;
   /** The captured record; `mark` null from a worker that does not report it (one before review X1). */

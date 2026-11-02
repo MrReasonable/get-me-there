@@ -5,6 +5,7 @@ import {
   type Iata,
   type IsoDate,
   type ResultBasis,
+  resultBasisOf,
 } from '@gmt/core';
 import { oneOf } from './oneOf.js';
 import { int, nightsRange, type SortDir, sortToken, uniqueIataList } from './parse.js';
@@ -142,7 +143,8 @@ export function detailPatchOf(
 
 /** A date pair's detail patch, opening on its figure's basis (WP19 §5). */
 export function detailPatch(pair: DatePair): Record<string, string | null> {
-  return detailPatchOf(pair, pair.figure?.basis ?? null);
+  // why: spec rev 56 §6.9: a pairing figure opens its detail on the calendar basis, the row it replaced
+  return detailPatchOf(pair, pair.figure === null ? null : resultBasisOf(pair.figure.basis));
 }
 
 /** The detail's href from the current URL (WP19 §5). */

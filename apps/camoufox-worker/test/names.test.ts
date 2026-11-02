@@ -25,7 +25,68 @@ describe('parseOptionName (dated grammar)', () => {
       interstitials: [],
       durationMinutes: 760,
       operatedBy: null,
+      departsAt: '12:25',
+      arrivesAt: '20:05',
+      arrivesOn: { month: 11, day: 5 },
     });
+  });
+  // why: spec rev 55 §2 (Task 20.7): the leg sentence's times and arrival date, as the name states them (the worked
+  // name above, a synthetic copy of the feasibility form with its times and dates changed)
+  it('reads the departure and arrival times and the arrival date, times as HH:MM', () => {
+    const overnight = ONE_STOP.replace(
+      'at 12:25 on Thursday, November 5',
+      'at 9:05 on Thursday, November 5',
+    ).replace('at 20:05 on Thursday, November 5', 'at 6:40 on Friday, November 6');
+    expect(parseOptionName(overnight)).toMatchObject({
+      departsOn: { month: 11, day: 5 },
+      departsAt: '09:05',
+      arrivesAt: '06:40',
+      arrivesOn: { month: 11, day: 6 },
+    });
+  });
+  // why: the groups are optional, so a name without the times or the arrival date still parses (list mode cannot
+  // regress: test/recorded.test.ts pins every recorded page's read)
+  it('a leg sentence without the times and the arrival date still parses, the three fields null', () => {
+    const bare = ONE_STOP.replace(' at 12:25 on Thursday, November 5', ' on Thursday, November 5').replace(
+      ' at 20:05 on Thursday, November 5.',
+      '.',
+    );
+    expect(parseOptionName(bare)).toMatchObject({
+      amountMinor: 47800,
+      departsOn: { month: 11, day: 5 },
+      from: 'Heathrow Airport',
+      to: 'John F. Kennedy International Airport',
+      departsAt: null,
+      arrivesAt: null,
+      arrivesOn: null,
+    });
+    const timeOnly = ONE_STOP.replace(' at 20:05 on Thursday, November 5.', ' at 20:05.');
+    expect(parseOptionName(timeOnly)).toMatchObject({ arrivesAt: '20:05', arrivesOn: null });
+  });
+  it('an arrival month the grammar does not know leaves the arrival date null, never the name unparsed', () => {
+    const odd = ONE_STOP.replace('at 20:05 on Thursday, November 5', 'at 20:05 on Thursday, Novembre 5');
+    expect(parseOptionName(odd)).toMatchObject({
+      arrivesAt: '20:05',
+      arrivesOn: null,
+      departsOn: { month: 11, day: 5 },
+    });
+  });
+  // why: 20.7 review finding 1: the optional groups must never let an airport field swallow a time or date the grammar
+  // does not read; such a name is unparsed (counted), never an option for another cell
+  it.each([
+    ['a 12-hour departure time', ONE_STOP.replace('at 12:25 on', 'at 12:25 PM on')],
+    ['a 12-hour arrival time', ONE_STOP.replace('at 20:05 on', 'at 8:05 PM on')],
+    [
+      'a day-first departure date',
+      ONE_STOP.replace('on Thursday, November 5 and', 'on Thursday, 5 November and'),
+    ],
+    [
+      'a day-first arrival date',
+      ONE_STOP.replace('on Thursday, November 5. Total', 'on Thursday, 5 November. Total'),
+    ],
+  ])('a name with %s is unparsed, the airports never absorbing it', (_l, name) => {
+    expect(name).not.toBe(ONE_STOP);
+    expect(parseOptionName(name)).toBeNull();
   });
   it('thousands separators are exact', () => {
     expect(parseOptionName(ONE_STOP.replace('From 478', 'From 1,204'))?.amountMinor).toBe(120400);
@@ -197,6 +258,29 @@ describe('parseOptionName (dated grammar)', () => {
     expect(parseOptionName(name, table)).toMatchObject({ amountMinor: 47800, interstitials: [sentence] });
     expect(parseOptionName(ONE_STOP, table)?.interstitials).toEqual([]);
   });
+  it('of two listed interstitials, only the one the name holds is reported', () => {
+    const table = [
+      { sentence: 'This price does not include overhead bin access.', recorded: '2026-10-20' },
+      { sentence: 'Prices include required taxes and fees.', recorded: '2026-10-21' },
+    ];
+    for (const { sentence } of table) {
+      const name = ONE_STOP.replace('total. 1 stop', `total. ${sentence} 1 stop`);
+      expect(parseOptionName(name, table)).toMatchObject({ amountMinor: 47800, interstitials: [sentence] });
+    }
+  });
+  it('with no interstitial listed, a second space after the price clause is refused', () => {
+    expect(parseOptionName(ONE_STOP.replace('total. 1 stop', 'total.  1 stop'), [])).toBeNull();
+  });
+  it('a listed sentence of no words is never reported for a name holding none', () => {
+    expect(parseOptionName(ONE_STOP, [{ sentence: '', recorded: '2026-10-20' }])?.interstitials).toEqual([]);
+  });
+  it('a one-hour duration reads as sixty minutes', () => {
+    const name = ONE_STOP.replace('Total duration 12 hrs 40 min.', 'Total duration 1 hr 5 min.');
+    expect(parseOptionName(name)?.durationMinutes).toBe(65);
+    expect(
+      parseOptionName(name.replace('Total duration 1 hr 5 min.', 'Total duration 1 hr.'))?.durationMinutes,
+    ).toBe(60);
+  });
   it('a group missing on a match is a grammar bug, thrown, never a fallback (TS2-04)', () => {
     const m = /x/.exec('x');
     if (m === null) throw new Error('no match');
@@ -204,6 +288,8 @@ describe('parseOptionName (dated grammar)', () => {
   });
   it('is dated', () => {
     expect(GRAMMAR_VERSION).toMatch(/^\d{4}-\d{2}-\d{2}/);
+    // why: spec rev 55 §2: re-dated when the grammar gained the times and the arrival date
+    expect(GRAMMAR_VERSION).toBe('2026-10-31-times');
   });
 });
 

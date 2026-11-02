@@ -1,15 +1,28 @@
-import { asIsoDate, asIsoMonth, type Buckets, type DatePair, decodeDatePairs } from '@gmt/core';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import {
+  asIsoDate,
+  asIsoMonth,
+  type Buckets,
+  type DatePair,
+  datePairSearched,
+  decodeDatePairs,
+  reducedMark,
+} from '@gmt/core';
 import { describe, expect, it } from 'vitest';
 import {
   type BucketName,
   bandsOf,
   bucketOf,
+  CELL_MARKS,
   cellModel,
   columnsFor,
-  GLYPH_ORDER,
+  KEY_MARKS,
+  keyCounts,
   MARK_ORDER,
   markCounts,
   monthsOf,
+  noPriceParts,
   pairsAt,
   weeksOf,
 } from '../../../../src/views/Dates/overview.js';
@@ -20,6 +33,7 @@ import {
   DATES_SPACE,
   datePairOf,
   datesResponse,
+  pairingFig,
   priced,
   verifiedFig,
 } from '../../../fixtures.dates.js';
@@ -159,34 +173,47 @@ const tenPrices = Array.from({ length: 10 }, (_x, i) =>
 const banded = shadeScale(tenPrices);
 
 describe('cellModel: marks never read as no flights (spec §11, §9)', () => {
-  it('each unpriced bucket alone is its own mark, never shaded', () => {
-    for (const b of ['empty', 'no_data', 'error', 'skipped'] as const) {
+  it('each unpriced bucket alone is its own one of the five marks, never shaded', () => {
+    const cases = [
+      ['empty', 'no-price-shown'],
+      ['no_data', 'no-price-shown'],
+      ['error', 'couldnt-read'],
+      ['skipped', 'not-reached'],
+    ] as const;
+    for (const [b, mark] of cases) {
       const m = cellModel([p({ buckets: bucketsOf({ [b]: 4 }) })], new Map(), banded);
-      expect(m.marks, b).toEqual([b]);
+      expect(m.marks, b).toEqual([mark]);
+      expect(m.mark, b).toBe(mark);
       expect(m.shade, b).toBeNull();
     }
   });
   it('a date pair whose every airport pair is not searched is "not searched", never shaded', () => {
     expect(cellModel([p({ buckets: bucketsOf({}) })], new Map(), banded)).toMatchObject({
-      marks: ['not_run'],
+      marks: ['not-searched'],
+      mark: 'not-searched',
       shade: null,
     });
   });
-  it('some airport pairs not searched and no price: the striped mark, not "not searched"', () => {
+  it('one empty and three not searched is not searched with the stripes, never "no price shown" (§6.6)', () => {
+    expect(cellModel([p({ buckets: bucketsOf({ empty: 1 }) })], new Map(), banded)).toMatchObject({
+      marks: ['not-searched', 'partly'],
+      mark: 'not-searched',
+    });
     expect(cellModel([p({ buckets: bucketsOf({ no_data: 3 }) })], new Map(), banded).marks).toEqual([
+      'not-searched',
       'partly',
     ]);
   });
   it('mixed buckets take §6.6’s precedence, and the stripes when some are not searched', () => {
     expect(
       cellModel([p({ buckets: bucketsOf({ error: 1, empty: 3, not_run: 0 }) })], new Map(), banded).marks,
-    ).toEqual(['error']);
+    ).toEqual(['couldnt-read']);
     expect(
       cellModel([p({ buckets: bucketsOf({ empty: 1, no_data: 3, not_run: 0 }) })], new Map(), banded).marks,
-    ).toEqual(['empty']);
+    ).toEqual(['no-price-shown']);
     expect(
       cellModel([p({ buckets: bucketsOf({ skipped: 1, no_data: 3, not_run: 0 }) })], new Map(), banded).marks,
-    ).toEqual(['no_data']);
+    ).toEqual(['no-price-shown']);
   });
   it('a price found but none that can be the figure (partially verified, unconfirmed) says so, never a shade', () => {
     expect(
@@ -197,6 +224,7 @@ describe('cellModel: marks never read as no flights (spec §11, §9)', () => {
       ),
     ).toMatchObject({
       marks: ['unshown'],
+      mark: 'priced',
       shade: null,
     });
   });
@@ -211,11 +239,43 @@ describe('cellModel: marks never read as no flights (spec §11, §9)', () => {
     ).toEqual(['noneWithin', 'partly']);
   });
   it('no airport pair in scope: no mark', () => {
-    expect(cellModel([p({ buckets: bucketsOf({}, 0) })], new Map(), banded).marks).toEqual([]);
+    expect(cellModel([p({ buckets: bucketsOf({}, 0) })], new Map(), banded)).toMatchObject({
+      marks: [],
+      mark: null,
+    });
+  });
+});
+
+describe('the five marks are core’s reducedMark, imported and not re-implemented (spec rev 55 §6.6, ruling A8)', () => {
+  it('a cell’s mark is reducedMark of its buckets for every mix of up to two airport pairs in each bucket', () => {
+    const names: BucketName[] = ['priced', 'empty', 'no_data', 'error', 'skipped', 'not_run'];
+    for (let code = 1; code < 3 ** 6; code += 1) {
+      const counts = names.map((_n, i) => Math.floor(code / 3 ** i) % 3);
+      const b: Buckets = {
+        priced: counts[0] ?? 0,
+        empty: counts[1] ?? 0,
+        no_data: counts[2] ?? 0,
+        error: counts[3] ?? 0,
+        skipped: counts[4] ?? 0,
+        not_run: counts[5] ?? 0,
+        reused: 0,
+      };
+      expect(cellModel([p({ buckets: b })], new Map(), banded).mark, JSON.stringify(b)).toBe(reducedMark(b));
+    }
+  });
+  it('overview.ts imports reducedMark from core and spells no precedence of its own for the marks', () => {
+    const source = readFileSync(join(import.meta.dirname, '../../../../src/views/Dates/overview.ts'), 'utf8');
+    expect(source).toMatch(/import \{[^}]*\breducedMark\b[^}]*\} from '@gmt\/core'/s);
+    expect(source).not.toMatch(/function reducedMark/);
   });
 });
 
 describe('cellModel: shading (spec §11, revision 50)', () => {
+  it('spec rev 56 §11: a pairing figure is shaded on the one scale and carries "not checked"', () => {
+    const pair = p({ index: 100, figure: pairingFig(), buckets: bucketsOf({ priced: 4 }) });
+    expect(cellModel([pair], ranks(pair), banded)).toMatchObject({ marks: ['notChecked'] });
+    expect(cellModel([pair], ranks(pair), banded).shade).not.toBeNull();
+  });
   it('a current calendar figure is shaded and carries "not checked"; a verified one does not', () => {
     const cal = p({ index: 100, figure: priced(30_000), buckets: bucketsOf({ priced: 4 }) });
     expect(cellModel([cal], ranks(cal), banded)).toMatchObject({ shade: 0, marks: ['notChecked'] });
@@ -265,19 +325,60 @@ describe('cellModel: shading (spec §11, revision 50)', () => {
   });
 });
 
-describe('markCounts and the mark order', () => {
-  it('counts each date pair’s marks', () => {
-    const counts = markCounts(
-      [p({ buckets: bucketsOf({}) }), p({ buckets: bucketsOf({}) }), p({ buckets: bucketsOf({ empty: 4 }) })],
-      new Map(),
-      banded,
-    );
-    expect(counts).toMatchObject({ not_run: 2, empty: 1, no_data: 0, partly: 0 });
-    expect(Object.keys(counts).sort()).toEqual([...MARK_ORDER].sort());
+describe('the key’s counts (spec rev 55 §11 Overview legend)', () => {
+  const inView = [
+    p({ index: 1, buckets: bucketsOf({}) }),
+    p({ index: 2, buckets: bucketsOf({ empty: 1 }) }),
+    p({ index: 3, buckets: bucketsOf({ empty: 4 }) }),
+    p({ index: 4, buckets: bucketsOf({ empty: 2, no_data: 2 }) }),
+    p({ index: 5, buckets: bucketsOf({ no_data: 2, skipped: 2 }) }),
+    p({ index: 6, buckets: bucketsOf({ error: 1, empty: 3 }) }),
+    p({ index: 7, buckets: bucketsOf({ skipped: 4 }) }),
+    p({ index: 8, buckets: bucketsOf({ priced: 1, empty: 3 }), figure: priced(30_000) }),
+    p({ index: 9, buckets: bucketsOf({ priced: 1, not_run: 3 }), figure: priced(31_000) }),
+  ];
+  it('the five marks, each date pair once by reducedMark, the same counts the header and the card read', () => {
+    expect(keyCounts(inView)).toEqual({
+      priced: 2,
+      'no-price-shown': 3,
+      'couldnt-read': 1,
+      'not-reached': 1,
+      'not-searched': 2,
+    });
+    // the searched count of the cards and the header line is the priced and no-price-shown marks together
+    expect(inView.filter((x) => datePairSearched(x.buckets))).toHaveLength(5);
   });
-  it('the legend lists the unpriced buckets first, in the Calendar’s glyph order', () => {
-    expect(GLYPH_ORDER).toEqual(['empty', 'no_data', 'error', 'skipped', 'not_run']);
-    expect(MARK_ORDER.slice(0, 5)).toEqual(GLYPH_ORDER);
+  it('"no price shown" names its parts by the precedence bucket: no fares before no cached data', () => {
+    expect(noPriceParts(inView)).toEqual({ empty: 2, no_data: 1 });
+    // a date pair not searched is never one of its parts, even with an empty airport pair
+    expect(noPriceParts([p({ buckets: bucketsOf({ empty: 1 }) })])).toEqual({ empty: 0, no_data: 0 });
+  });
+  it('markCounts counts the cell marks besides, each date pair once', () => {
+    const counts = markCounts(inView, new Map(), banded);
+    expect(counts).toMatchObject({
+      'not-searched': 2,
+      'no-price-shown': 3,
+      partly: 2,
+      notChecked: 2,
+    });
+    expect(Object.keys(counts).sort()).toEqual([...CELL_MARKS].sort());
+  });
+  it('the key lists the five marks first, priced first; then the cell marks besides, every glyph mark once', () => {
+    expect(KEY_MARKS).toEqual(['priced', 'no-price-shown', 'couldnt-read', 'not-reached', 'not-searched']);
+    expect(MARK_ORDER.slice(0, 5)).toEqual(KEY_MARKS);
+    expect(MARK_ORDER.slice(5)).toEqual([
+      'partly',
+      'notChecked',
+      'superseded',
+      'notSeen',
+      'noneWithin',
+      'unshown',
+    ]);
+    expect(CELL_MARKS).toEqual(MARK_ORDER.slice(1));
     expect(new Set(MARK_ORDER).size).toBe(11);
+  });
+  it('no mark is named for the old six buckets', () => {
+    for (const old of ['empty', 'no_data', 'error', 'skipped', 'not_run'])
+      expect(MARK_ORDER, old).not.toContain(old);
   });
 });

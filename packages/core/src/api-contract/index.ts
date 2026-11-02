@@ -26,6 +26,12 @@ import {
   verifyCellRequestSchema,
 } from './executions.js';
 import {
+  flightListsQuerySchema,
+  flightListsResponseSchema,
+  readFlightListRequestSchema,
+  readFlightListResponseSchema,
+} from './flights.js';
+import {
   calendarGapResponseSchema,
   cellDetailResponseSchema,
   coverageResponseSchema,
@@ -35,6 +41,11 @@ import {
   routeHistoryQuerySchema,
   routeHistoryResponseSchema,
 } from './results.js';
+import {
+  createAndStartRequestSchema,
+  createAndStartResponseSchema,
+  searchCardsResponseSchema,
+} from './searches.js';
 import {
   budgetResponseSchema,
   healthResponseSchema,
@@ -55,7 +66,10 @@ export * from './common.js';
 export * from './datePairs.js';
 export * from './definitions.js';
 export * from './executions.js';
+export * from './flights.js';
 export * from './results.js';
+export * from './searches.js';
+export * from './stopCause.js';
 export * from './system.js';
 
 export interface RouteDef {
@@ -79,7 +93,9 @@ const route = (
   auth: 'required',
   ...extra,
 });
-const deleted = definitionResponseSchema.pick({ id: true, deletedAt: true });
+/** `DELETE /definitions/:id`'s answer (the id and the deletion instant); exported so the web client passes the route's own schema. */
+export const definitionDeletedResponseSchema = definitionResponseSchema.pick({ id: true, deletedAt: true });
+const deleted = definitionDeletedResponseSchema;
 /** One entry per spec §10 row; api mounts these, web derives its client from them. */
 export const ROUTES: readonly RouteDef[] = [
   route('GET', '/health', healthResponseSchema, { auth: 'public' }),
@@ -91,10 +107,19 @@ export const ROUTES: readonly RouteDef[] = [
   route('POST', '/definitions/coverage-check', coverageCheckResponseSchema, {
     request: coverageCheckRequestSchema,
   }),
+  // why: spec revision 55 §10 — before '/definitions/:id', so the static paths are never read as a definition id
+  route('GET', '/definitions/cards', searchCardsResponseSchema),
+  route('POST', '/definitions/create-and-start', createAndStartResponseSchema, {
+    request: createAndStartRequestSchema,
+  }),
   route('GET', '/definitions/:id', definitionResponseSchema),
   route('PUT', '/definitions/:id', definitionResponseSchema, { request: definitionUpdateRequestSchema }),
   route('DELETE', '/definitions/:id', deleted),
-  route('POST', '/definitions/:id/estimate', estimateResponseSchema),
+  route('POST', '/definitions/:id/restore', definitionResponseSchema),
+  // why: spec rev 55 §10 (WP20 Task 20.5 R2) — with a draft body, that draft is estimated as this search, by its id
+  route('POST', '/definitions/:id/estimate', estimateResponseSchema, {
+    request: definitionCreateOptionalSchema,
+  }),
   route('POST', '/definitions/:id/executions', startExecutionResponseSchema, {
     request: startExecutionRequestSchema,
   }),
@@ -107,6 +132,11 @@ export const ROUTES: readonly RouteDef[] = [
   route('GET', '/definitions/:id/results', resultsResponseSchema, { query: resultsQuerySchema }),
   // why: spec §10 (WP19): the Dates view's source; its query is the wire form the api parses and answers 422 for itself
   route('GET', '/definitions/:id/date-pairs', datePairsResponseSchema, { query: datePairsQuerySchema }),
+  // why: spec revision 55 §10 — the flights on a search's page, and one date pair's read on demand
+  route('GET', '/definitions/:id/flight-lists', flightListsResponseSchema, { query: flightListsQuerySchema }),
+  route('POST', '/definitions/:id/flight-lists', readFlightListResponseSchema, {
+    request: readFlightListRequestSchema,
+  }),
   route('GET', '/definitions/:id/coverage', coverageResponseSchema),
   route('GET', '/definitions/:id/calendar-gap', calendarGapResponseSchema),
   route(

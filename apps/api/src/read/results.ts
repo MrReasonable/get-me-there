@@ -13,6 +13,7 @@ import type { Ports } from '../wiring.js';
 import { datePairFigures } from './datePairs.js';
 import { executionSummary } from './executions.js';
 import { type Loaded, loadRows, partiallyVerifiedCells } from './load.js';
+import { pairingsFor } from './pairings.js';
 import type { Basis } from './rows.js';
 import { classifyCells, parentFacts, parseScope, summariseCells } from './scope.js';
 import { currentSpace } from './space.js';
@@ -116,7 +117,13 @@ export function assembleResults(def: SearchDefinition, q: ResultsQuery, ports: P
   let datePairFigure: ResultsResponse['datePairFigure'] = null;
   if (scope.datePair !== null) {
     const index = datePairIndex(scope.space, scope.datePair.departureDate, scope.datePair.returnDate);
-    const figure = index === null ? undefined : datePairFigures(loaded, scope, loaded.rc).figures.get(index);
+    // why: spec rev 56 §6.9: the board's one pairings map, so the detail and the board agree on the figure
+    const figure =
+      index === null
+        ? undefined
+        : datePairFigures(loaded, scope, loaded.rc, (asked) =>
+            pairingsFor(ports, def, loaded.executionIds, asked),
+          ).figures.get(index);
     if (figure !== undefined) {
       const { airportPair: _airportPair, ...rest } = figure;
       datePairFigure = rest;

@@ -19,19 +19,19 @@ import {
 import { type ClassifyRule, classifyPageWithRule, type PageFacts } from './classify.js';
 import { type Blocked, type Facts, panelOf, type Skipped, settle, snapshotOf, soft } from './dialogSettle.js';
 import {
-  CheapestStepFailed,
   CLICK_TIMEOUT_MS,
   clickTimeoutOf,
   countOf,
   type Driver,
   LOOKUP_TIMEOUT_MS,
   type LocatorLike,
-  nameOf,
+  namesOf,
   type PageLike,
   POLL_TIMEOUT_MS,
   runStep,
+  StepFailed,
   type StepOptions,
-  timeoutOf,
+  textsOf,
 } from './driver.js';
 import { gridControls, stillDrawing } from './gridView.js';
 import { parseOptionName } from './names.js';
@@ -152,11 +152,11 @@ export interface GridOptions {
   nextFor: (ms: number) => Deadline;
 }
 
+// why: WP21 Task 21.3 fix round 2: the panel re-renders on every scroll, so its lines and names are read in one page
+// call each (textsOf, namesOf), never counted and then read one node at a time
 async function texts(l: LocatorLike, d: Deadline): Promise<{ count: number; texts: string[] }> {
-  const count = await countOf(l, d);
-  const out: string[] = [];
-  for (let i = 0; i < count; i++) out.push((await d.race(l.nth(i).textContent(timeoutOf(d)))) ?? '');
-  return { count, texts: out };
+  const out = (await textsOf(l, d)).map((t) => t ?? '');
+  return { count: out.length, texts: out };
 }
 
 /** The departures and the returns as their day tokens: from the two lines when the page prints lines, else the labels. */
@@ -230,7 +230,7 @@ export async function exploreGrid(
   );
   const button = page.getByRole('button', { name: S.results.priceGraphButton, exact: true });
   const found = await runStep('find-graph-button', LOOKUP_TIMEOUT_MS, d, steps, (st) => countOf(button, st));
-  if (found !== 1) throw new CheapestStepFailed('find-graph-button', 'not-found');
+  if (found !== 1) throw new StepFailed('find-graph-button', 'not-found', steps.flow);
   // why: as the Cheapest flow: the dialog has its own budget from the first click, within twice the page timeout
   const dd = o.next();
   const click = (name: string, l: LocatorLike, target: string, st0: Deadline) =>
@@ -249,7 +249,7 @@ export async function exploreGrid(
   if (opened.kind === 'blocked') return opened;
   const tab = dialog.getByRole('tab', { name: G.datesTab, exact: true });
   const tabs = await runStep('find-dates-tab', LOOKUP_TIMEOUT_MS, dd, steps, (st) => countOf(tab, st));
-  if (tabs !== 1) throw new CheapestStepFailed('find-dates-tab', 'not-found');
+  if (tabs !== 1) throw new StepFailed('find-dates-tab', 'not-found', steps.flow);
   await click('click-dates-tab', tab.nth(0), `tab:${G.datesTab}`, dd);
 
   /** One view after a click: settled (after a scroll, only once changed), then read. */
@@ -292,12 +292,9 @@ export async function exploreGrid(
     const r0 = timers.now();
     const panel = s.value;
     const read = await runStep('read-view', READ_VIEW_MS, st0, steps, async (st): Promise<ViewRead> => {
-      const buttons = panel.getByRole('button');
-      const candidates: Array<string | null> = [];
-      for (let i = 0, n = await countOf(buttons, st); i < n; i++) {
-        const nm = await nameOf(buttons.nth(i), st);
-        if (nm === null || !scrollNames.includes(nm)) candidates.push(nm);
-      }
+      const candidates = (await namesOf(panel.getByRole('button'), st)).filter(
+        (nm) => nm === null || !scrollNames.includes(nm),
+      );
       let scrollButtons = 0;
       for (const nm of scrollNames)
         if ((await countOf(panel.getByRole('button', { name: nm, exact: true }), st)) === 1) scrollButtons++;

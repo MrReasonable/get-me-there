@@ -3,6 +3,9 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import {
   ANSWER_STATUS,
   APP_INSTANCE_HEADER,
+  FLIGHT_LIST_ENDPOINT_PATH,
+  type FlightsRequest,
+  flightsRequestSchema,
   GOOGLE_CONTACTED_HEADER,
   type Logger,
   type PageRequest,
@@ -14,8 +17,9 @@ import {
 import type { PageResult } from './session.js';
 
 /**
- * The worker's HTTP API (brief §6; spec §2; decision 69; SEC-012, TS-15). It binds 127.0.0.1 only (Docker Desktop
- * forwards host.docker.internal to it). Every request carries `x-gmt-worker-key`, compared in constant time over
+ * The worker's HTTP API (brief §6; spec §2; decision 69; SEC-012, TS-15): `POST /v1/page` (a list or grid page),
+ * `POST /v1/flights` (spec revision 55 §2: a flights page, mode `flights` only) and `GET /v1/status`. It binds
+ * 127.0.0.1 only (Docker Desktop forwards host.docker.internal to it). Every request carries `x-gmt-worker-key`, compared in constant time over
  * equal-length buffers; a missing, mismatched or wrong-length key is 401 with no body. Every answer states
  * `x-gmt-google-contacted`. One JSON log line per request: route, status, answer kind, duration; never the key, a
  * cookie or a page name.
@@ -26,7 +30,7 @@ export const MAX_BODY_BYTES = 4096;
 export interface ServerDeps {
   key: Secret;
   log: Logger;
-  page(req: PageRequest): Promise<PageResult>;
+  page(req: PageRequest | FlightsRequest): Promise<PageResult>;
   status(): Promise<WorkerStatus>;
   /** Called after an answer whose result was fatal (the cool-down store failed): main exits 70. */
   onFatal(): void;
@@ -95,7 +99,15 @@ export function createWorkerServer(d: ServerDeps): Server {
         send(res, 200, await d.status(), false);
         return done(200, 'status');
       }
-      if (route !== 'POST /v1/page') {
+      // why: spec rev 55 §2: each page route admits only its own requests, so /v1/page never reads a flights page
+      // and /v1/flights reads nothing else, both under the one body cap
+      const schema =
+        route === 'POST /v1/page'
+          ? pageRequestSchema
+          : route === `POST ${FLIGHT_LIST_ENDPOINT_PATH}`
+            ? flightsRequestSchema
+            : null;
+      if (schema === null) {
         send(res, 404, undefined, false);
         return done(404, 'not-found');
       }
@@ -107,7 +119,7 @@ export function createWorkerServer(d: ServerDeps): Server {
       } catch {
         parsed = undefined;
       }
-      const r = pageRequestSchema.safeParse(parsed);
+      const r = schema.safeParse(parsed);
       if (!r.success) {
         send(res, 400, { kind: 'bad-request' }, false);
         return done(400, 'bad-request');

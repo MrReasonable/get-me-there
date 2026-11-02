@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { type Clock, type IsoDateTime, isoDateTimeSchema } from '@gmt/core';
 import { writePrivateFile } from './privateFile.js';
+import { type Deadline, DeadlineExceeded, type Timers } from './timers.js';
 
 /**
  * The start-to-start pacer (spec §2 "at least CAMOUFOX_MIN_SPACING_SECONDS from the start of one page load to the start
@@ -17,7 +18,11 @@ export type Claim = { ok: true } | { ok: false; retryAfterSeconds: number };
 
 export class Pacer {
   private readonly path: string;
-  private readonly spacingMs: number;
+  /**
+   * The spacing in ms (CAMOUFOX_MIN_SPACING_SECONDS), read-only (WP21 Task 21.0, preflight P6): a page that may load
+   * further documents budgets one spacing for each from it.
+   */
+  readonly spacingMs: number;
   private readonly clock: Clock;
   private busy = false;
 
@@ -66,6 +71,25 @@ export class Pacer {
     // why: busy only once the record is written, so a failed write never wedges the pacer (CodeRabbit, fix round 1)
     this.busy = true;
     return { ok: true };
+  }
+
+  /**
+   * WP21 Task 21.0 (spec §2: the spacing runs from the start of one document load to the start of the next): for the
+   * page in flight, before it loads a further document (the list page again, or a selection that may load one). Waits
+   * until `spacing − TOLERANCE_MS` after the last recorded start, under `d`, then records the new start; with spacing
+   * 0 it records and returns at once. A wait that would reach `d`'s end throws DeadlineExceeded at once and records
+   * nothing, so the caller ends that step as the spacing's, with the page's own deadline untouched.
+   */
+  async reclaim(d: Deadline, timers: Timers): Promise<void> {
+    const last = this.lastPageAt();
+    if (last !== null && this.spacingMs > 0) {
+      const wait = Date.parse(last) + this.spacingMs - TOLERANCE_MS - Date.parse(this.clock.now());
+      // why: a wait the step's budget cannot cover would only idle the open page; it ends the step now instead (a wait of
+      // exactly what is left would end with the deadline, so it is refused too)
+      if (wait >= d.remaining()) throw new DeadlineExceeded('the spacing outlasts the step budget');
+      if (wait > 0) await d.race(timers.sleep(wait, d.signal));
+    }
+    writePrivateFile(this.path, JSON.stringify({ lastPageAt: this.clock.now() }));
   }
 
   /** Ends the page in flight; the spacing still runs from its start. */

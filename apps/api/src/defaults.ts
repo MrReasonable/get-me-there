@@ -10,7 +10,9 @@ import {
 
 /**
  * The default definition for the configured plan (spec §8.2 policy preset, §11 form defaults).
- * No airports (spec §1, §15). Disabled, so no schedule fires on a draft. No confirmation: `confirmedCostPence` and
+ * No airports (spec §1, §15). Revision 55 §8.2: no schedule and `enabled` false (a new search runs only when pressed),
+ * no arrival window, and every configured free source (Travelpayouts, the browser worker); the paid rule is unchanged.
+ * No confirmation: `confirmedCostPence` and
  * `confirmedCalls` are not part of DefinitionInput and are set only from an explicit confirmation (spec §7, decision 37).
  */
 export function defaultDefinitionInput(
@@ -22,6 +24,9 @@ export function defaultDefinitionInput(
   const fixture = configured.has('fixture');
   const discovery: ProviderId[] = [];
   if (configured.has('travelpayouts')) discovery.push('travelpayouts');
+  // why: spec revision 55 §2, §8.2 — a new search names every free source the install has configured and enabled: the
+  // browser worker is registered only with CAMOUFOX_ENABLED, its worker URL and its key (wiring.ts)
+  if (configured.has('camoufox')) discovery.push('camoufox');
   if (paid) discovery.push('searchapi');
   if (fixture) discovery.push('fixture');
   // why: on trial the 100 credits are for the spike and smoke (spec §2 fact 7), so the preset never verifies with them.

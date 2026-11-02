@@ -5,6 +5,7 @@ export {
   BLOCKED_WORDS,
   CAMOUFOX_DISCOVERY_INFO,
   CAMOUFOX_DISPLAY_NAME,
+  CAMOUFOX_FLIGHT_LIST_INFO, // WP20: the flight list's provenance, for the engine's and the api's readers
   CAMOUFOX_GRID_INFO,
   camoufoxHttpLimits,
   camoufoxProvider,

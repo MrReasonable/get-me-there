@@ -8,15 +8,16 @@ import { createHash } from 'node:crypto';
 import type { BlockedPage } from '@gmt/core';
 import { type ClassifyRule, classifyPageWithRule, type PageFacts } from './classify.js';
 import {
-  CheapestStepFailed,
+  capped,
   countOf,
   type Driver,
   LOOKUP_TIMEOUT_MS,
   type LocatorLike,
-  nameOf,
+  namesOf,
   POLL_TIMEOUT_MS,
   runStep,
   type SettleFacts,
+  StepFailed,
   type StepOptions,
 } from './driver.js';
 import { STABLE_MS } from './ready.js';
@@ -52,7 +53,7 @@ export async function soft<T>(
   try {
     return { ok: true, value: await fn() };
   } catch (e) {
-    if (!(e instanceof CheapestStepFailed)) throw e;
+    if (!(e instanceof StepFailed)) throw e;
     return { ok: false, skipped: { step: e.step, reason: e.reason, timedOut: e.reason === 'timed-out' } };
   }
 }
@@ -61,11 +62,10 @@ export async function soft<T>(
 export async function readCells(panel: LocatorLike, d: Deadline, S: Selectors): Promise<Control[]> {
   const out: Control[] = [];
   for (const role of ['button', 'gridcell'] as const) {
-    const l = panel.getByRole(role);
-    for (let i = 0, n = Math.min(await countOf(l, d), MAX_CONTROLS_PER_ROLE); i < n; i++) {
-      const name = await nameOf(l.nth(i), d);
-      out.push({ role, name: name === null || name.length > S.maxNameLength ? null : name });
-    }
+    // why: WP21 Task 21.3 fix round 2: the panel re-renders on every scroll, so its names are read in one page call
+    // (namesOf), never counted and then read one node at a time
+    const names = await namesOf(panel.getByRole(role), d);
+    for (const name of names.slice(0, MAX_CONTROLS_PER_ROLE)) out.push({ role, name: capped(name, S) });
   }
   return out;
 }
@@ -141,7 +141,7 @@ export async function settle<T>(
   for (let polls = 1; ; polls++) {
     if (d.remaining() < o.reserveMs) {
       if (held !== null) return held;
-      throw new CheapestStepFailed(`${name}-settle`, 'timed-out');
+      throw new StepFailed(`${name}-settle`, 'timed-out', steps.flow);
     }
     // why: the page is classified before the container is looked for, so a challenge that replaced the dialog is that
     // stop, never a failed lookup
@@ -156,7 +156,7 @@ export async function settle<T>(
     if (kind.kind === 'blocked' && kind.page !== 'unrecognised')
       return { kind: 'blocked', page: kind.page, rule, facts };
     const poll = step.found;
-    if (poll === null) throw new CheapestStepFailed(`${name}-poll`, 'failed');
+    if (poll === null) throw new StepFailed(`${name}-poll`, 'failed', steps.flow);
     const key = `${poll.id}:${createHash('sha256').update(poll.snapshot).digest('hex')}`;
     const at = o.timers.now();
     const moved = differsFrom === undefined || poll.changeKey !== differsFrom;

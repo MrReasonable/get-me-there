@@ -3,7 +3,6 @@ import { takeStrays } from '@gmt/providers/testing';
 import { describe, expect, it, vi } from 'vitest';
 import { buildContext } from '../../src/context.js';
 import { createEngine } from '../../src/index.js';
-import { NEVER_STARTED, SUPERSEDED } from '../../src/resume.js';
 import { buildSnapshot } from '../../src/snapshot.js';
 import type { Engine } from '../../src/types.js';
 import { frankfurterBody, stubFrankfurter } from '../support/fx.js';
@@ -21,12 +20,18 @@ import {
   withVerification,
 } from '../support/harness.js';
 
+/** Revision 55 §8.1: the sentence a stale run is stored with (`superseded 'stale'`). */
+const SUPERSEDED = 'Too old to carry on; a fresh run replaced it.';
+
 // why: every test here runs croner, http-kit and the engine on faked timers set to T0, so the process clock and the
 // engine clock agree and no job fires on the real clock (test-strategy-reviewer-004)
 const fake = { fakeTimers: true } as const;
 const engine = (h: Harness, opts = h.options): Engine => h.track(createEngine(h.deps, opts));
 const twoPairs = (h: Harness, patch = {}) =>
   h.createDefinition({ origins: [LHR, LGW], destinations: [JFK], ...patch });
+// why: revision 55 §8.1 (Ian's ruling 2) — boot auto-resumes and one-shot jobs only for a scheduled search; a yearly
+// firing (1 January) keeps these tests' runs scheduled without a firing, or a catch-up of one, inside them
+const YEARLY = { scheduleCron: '0 5 1 1 *' } as const;
 const kinds = (h: Harness) => h.notifications.map((m) => m.kind);
 const executions = (h: Harness, defId: string) =>
   h.repos.executions.listForDefinition(defId, { limit: 100, includeChildren: true });
@@ -50,7 +55,7 @@ async function interrupted(h: Harness): Promise<string> {
   h.onTileCommit((n) => {
     if (n === 1) void first.shutdown();
   });
-  const r = await first.start(twoPairs(h).id, { trigger: 'manual' });
+  const r = await first.start(twoPairs(h, YEARLY).id, { trigger: 'manual' });
   if (!r.ok) throw new Error(r.message);
   await h.waitForSettled(r.executionId);
   h.clearHooks();
@@ -91,7 +96,7 @@ describe('boot (spec §8.1 "Boot order")', () => {
     ]);
     const paused = await h.runToCompletion(
       engine(h),
-      h.createDefinition({ origins: [LGW], destinations: [EWR] }).id,
+      h.createDefinition({ origins: [LGW], destinations: [EWR], ...YEARLY }).id,
     );
     expect(paused.status).toBe('paused_error');
     const scheduled = h.createDefinition({ scheduleCron: '0 5 * * 1' });
@@ -110,16 +115,21 @@ describe('boot (spec §8.1 "Boot order")', () => {
       oneShots: 1,
       superseded: 0,
     });
-    expect(e2.scheduler.jobs()).toEqual([
-      expect.objectContaining({
-        kind: 'definition',
-        definitionId: scheduled.id,
-        cron: '0 5 * * 1',
-        tz: 'Europe/London',
-        nextRun: '2026-10-19T04:00:00.000Z',
-      }),
-      expect.objectContaining({ kind: 'resume', executionId: paused.id, nextRun: paused.resumeAfter }),
-    ]);
+    const jobs = e2.scheduler.jobs();
+    expect(jobs.filter((j) => j.kind === 'definition')).toHaveLength(3);
+    expect(jobs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'definition',
+          definitionId: scheduled.id,
+          cron: '0 5 * * 1',
+          tz: 'Europe/London',
+          nextRun: '2026-10-19T04:00:00.000Z',
+        }),
+        expect.objectContaining({ kind: 'resume', executionId: paused.id, nextRun: paused.resumeAfter }),
+      ]),
+    );
+    expect(jobs.filter((j) => j.kind === 'resume')).toHaveLength(1);
     expect((await h.waitForSettled(id)).status).toBe('completed');
   });
 
@@ -188,10 +198,14 @@ describe('boot (spec §8.1 "Boot order")', () => {
 
   it('an execution that was never seeded is cancelled on resume, never completed empty (ssr-07)', async () => {
     const h = createHarness(fake);
-    const pending = ghost(h, h.createDefinition());
+    const pending = ghost(h, h.createDefinition(YEARLY));
     h.clock.advance(60_000);
     await engine(h).boot();
-    expect(h.repos.executions.get(pending)).toMatchObject({ status: 'cancelled', errorText: NEVER_STARTED });
+    expect(h.repos.executions.get(pending)).toMatchObject({
+      status: 'cancelled',
+      stopCause: { kind: 'never-started' },
+      errorText: 'This run never started.',
+    });
     expect(h.logs.find((l) => l.msg === 'boot: auto-resume execution')?.fields).toMatchObject({
       executionId: pending,
       result: 'not_found',
@@ -283,7 +297,7 @@ describe('boot (spec §8.1 "Boot order")', () => {
     h.onStageStart('discovery', () =>
       h.spendLedger({ providerId: 'fixture', rows: 19, costMicroGbpEach: 0 }),
     );
-    const def = twoPairs(h); // no schedule
+    const def = twoPairs(h, YEARLY);
     const first = engine(h);
     const old = await h.runToCompletion(first, def.id, {
       trigger: 'manual',

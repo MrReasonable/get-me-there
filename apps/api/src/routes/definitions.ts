@@ -4,6 +4,7 @@ import {
   budgetScopeLabel,
   countCells,
   type DefinitionInput,
+  isScheduled,
   type SearchDefinition,
   validateSearchSpace,
 } from '@gmt/core';
@@ -16,6 +17,8 @@ import {
   inputOf,
   mergeDefinition,
   sentCovers,
+  sentCoversShown,
+  softConfirmOf,
 } from '../read/definitions.js';
 import { airportLookup, currentSpace, isDraft } from '../read/space.js';
 import { API_TEXT } from '../text.js';
@@ -34,18 +37,26 @@ interface SentConfirmation {
 
 /**
  * Spec §7, decisions 37, 43 and 54: the stored confirmation is set only from an explicit operator value carrying both
- * pence and calls that cover the worst-case figures, and what is stored is WP7's `confirmationOf(estimate)` (every
- * line, blocked ones included), never the shown totals; otherwise nothing is stored and the response carries
- * needsConfirmation.
+ * pence and calls. By default (WP8's create and PUT) they must cover the worst-case figures, and what is stored is WP7's
+ * `confirmationOf(estimate)` (every line, blocked ones included). With `shown` (spec revision 55 §10: a PUT carrying
+ * `confirmShown: true`, Repeat weekly's Save) they must cover the recomputed shown runnable totals instead, and the
+ * sent figures are stored, as create-and-start stores them: the schedule's confirmation is what its sentence showed.
+ * Otherwise nothing is stored and the response carries needsConfirmation.
  */
 function applyConfirmation(
   def: SearchDefinition,
   sent: SentConfirmation,
   ctx: RouteContext,
+  shown = false,
 ): SearchDefinition {
   const { confirmedCostPence: pence, confirmedCalls: calls } = sent;
   if (pence === undefined || calls === undefined || isDraft(def)) return def;
   const estimate = ctx.engine.estimate(def, ctx.ports.clock.todayLondon());
+  if (shown) {
+    if (!sentCoversShown({ pence, calls }, estimate)) return def;
+    ctx.ports.repos.definitions.setConfirmed(def.id, { pence, calls });
+    return { ...def, confirmedCostPence: pence, confirmedCalls: calls };
+  }
   if (!sentCovers({ pence, calls }, estimate)) return def;
   const worst = confirmationOf(estimate);
   ctx.ports.repos.definitions.setConfirmed(def.id, worst);
@@ -54,15 +65,19 @@ function applyConfirmation(
 
 /** Spec §10 estimate routes: `{ estimate, budgetFit }` so the form shows both before the create click. */
 function estimateResponse(def: DefinitionInput | SearchDefinition, ctx: RouteContext) {
+  const today = ctx.ports.clock.todayLondon();
+  const estimate = ctx.engine.estimate(def, today);
   return {
-    estimate: ctx.engine.estimate(def, ctx.ports.clock.todayLondon()),
+    estimate,
     budgetFit: ctx.engine.budgetFit(def),
+    ...ctx.engine.estimateAsk(def, today, estimate),
+    softConfirm: softConfirmOf(estimate, ctx.ports),
   };
 }
 
 /** Spec §8.2: register when enabled with a cron, otherwise unregister, in the same request. */
 export function syncSchedule(def: SearchDefinition, ctx: RouteContext): void {
-  if (def.enabled && def.scheduleCron !== null && def.deletedAt === null) ctx.engine.scheduler.register(def);
+  if (isScheduled(def)) ctx.engine.scheduler.register(def);
   else ctx.engine.scheduler.unregister(def.id);
 }
 
@@ -207,30 +222,61 @@ export const definitionHandlers: HandlerTable = {
     { request: apiContract.definitionUpdateRequestSchema, query: NO_INPUT },
     (c, input, ctx) => {
       const existing = getLiveDefinition(ctx, param(input, 'id'));
-      const { confirmedCostPence, confirmedCalls, ...patch } = input.body;
+      const { confirmedCostPence, confirmedCalls, confirmShown, ...patch } = input.body;
       const merged = validateForSave(mergeDefinition(inputOf(existing), patch), ctx, existing);
+      // why: spec rev 55 §8.2, §10 (Task 20.5 follow-up 1) — Repeat weekly's Save is all-or-nothing: a schedule turned on
+      // with the sentence's figures (`confirmShown`) is written only when those figures cover the recomputed shown
+      // totals, so a schedule is never left on without the confirmation its scheduled runs need; else nothing changes
+      // and the web asks the estimate again (no figures travel with the refusal)
+      const turnsOn = patch.enabled === true || patch.scheduleCron !== undefined;
+      if (confirmShown === true && turnsOn && merged.enabled && merged.scheduleCron !== null) {
+        const shown = ctx.engine.estimate({ ...existing, ...merged }, ctx.ports.clock.todayLondon());
+        if (
+          confirmedCostPence === undefined ||
+          confirmedCalls === undefined ||
+          !sentCoversShown({ pence: confirmedCostPence, calls: confirmedCalls }, shown)
+        )
+          throw new ApiError(409, 'confirm', API_TEXT.repeatNotConfirmed);
+      }
       const updated = applyConfirmation(
         ctx.ports.repos.definitions.update(existing.id, merged),
         { confirmedCostPence, confirmedCalls },
         ctx,
+        confirmShown === true,
       );
       syncSchedule(updated, ctx);
       return c.json(definitionResponse(updated, ctx));
     },
   ),
 
-  'DELETE /api/definitions/:id': plain((c, input, ctx) => {
+  'DELETE /api/definitions/:id': plain(async (c, input, ctx) => {
     const existing = getLiveDefinition(ctx, param(input, 'id'));
+    // why: spec revision 55 §10 (search-r2-008) — the soft delete comes first, so no firing can start a run of the
+    // search in between; then its pending, running or paused parent is cancelled with the remove's own cause. Its alert
+    // rules are left as they are (a restore brings the search back whole).
     ctx.ports.repos.definitions.softDelete(existing.id);
     ctx.engine.scheduler.unregister(existing.id);
+    const active = ctx.ports.repos.executions.activeParent(existing.id);
+    if (active !== null) await ctx.engine.cancel(active.id, { kind: 'superseded', by: 'remove' });
     return c.json(deletedResponse(existing, ctx));
   }),
 
-  'POST /api/definitions/:id/estimate': plain((c, input, ctx) => {
-    const def = getLiveDefinition(ctx, param(input, 'id'));
-    if (isDraft(def)) throw new ApiError(422, 'draft_definition', API_TEXT.draftNoEstimate);
-    return c.json(estimateResponse(def, ctx));
-  }),
+  'POST /api/definitions/:id/estimate': route(
+    { request: apiContract.definitionCreateOptionalSchema, query: NO_INPUT },
+    (c, input, ctx) => {
+      const def = getLiveDefinition(ctx, param(input, 'id'));
+      if (input.body === undefined) {
+        if (isDraft(def)) throw new ApiError(422, 'draft_definition', API_TEXT.draftNoEstimate);
+        return c.json(estimateResponse(def, ctx));
+      }
+      // why: spec rev 55 §10 (Task 20.5 R2) — an edited search, or one about to repeat, is estimated as itself: the
+      // draft's fields over the saved search's id, so its own schedule reservation is not counted against it and its
+      // own earlier prices are reused. Nothing is saved. The draft is validated as the unsaved estimate route does.
+      const { confirmedCostPence: _p, confirmedCalls: _c, ...fields } = input.body;
+      validateForSave({ ...fields, enabled: false }, ctx, null);
+      return c.json(estimateResponse({ ...def, ...fields }, ctx));
+    },
+  ),
 
   'POST /api/definitions/coverage-check': route(
     { request: apiContract.coverageCheckRequestSchema, query: NO_INPUT },

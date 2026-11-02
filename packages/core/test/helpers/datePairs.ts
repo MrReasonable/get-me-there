@@ -3,7 +3,12 @@
 
 import type { CoverageSummary } from '../../src/api-contract/common.js';
 import type { DatePairsResponse } from '../../src/api-contract/datePairs.js';
-import type { DatePair, DatePairFigure, DecodedDatePairs } from '../../src/datePairs/encode.js';
+import type {
+  DatePair,
+  DatePairFigure,
+  DatePairPairing,
+  DecodedDatePairs,
+} from '../../src/datePairs/encode.js';
 import { encodeDatePairs } from '../../src/datePairs/encode.js';
 import { type DatePairSpace, datePairAt, datePairCount } from '../../src/datePairs/space.js';
 import { asIata, asIsoDate, asIsoDateTime, type Iata } from '../../src/types/ids.js';
@@ -57,8 +62,65 @@ export function calendarFigure(over: Partial<DatePairFigure> = {}): DatePairFigu
     arriveBack: null,
     fromEarlierSearch: false,
     cheaperCached: null,
+    gridPrice: null,
+    pairing: null,
+    pairingRead: 'not-read',
+    listReason: null,
     ...over,
   };
+}
+
+/** A flight list's provenance (spec rev 56 §6.9): the browser worker's own page, fetched 09:30 on NOW's day. */
+export function flightListProvenance(over: Partial<Provenance> = {}): Provenance {
+  return calendarProvenance({
+    providerId: 'camoufox',
+    sourceKind: 'scraped-self',
+    fetchedAt: asIsoDateTime('2027-03-01T09:30:00.000Z'),
+    maxAgeHours: 0,
+    pointOfSale: 'GB',
+    ...over,
+  });
+}
+
+/** A pairing as the board shows it (spec rev 56 §10's `pairing` group): QQ Travel's £1,180 offer, the next-cheapest outbound. */
+export function figurePairing(over: Partial<DatePairPairing> = {}): DatePairPairing {
+  return {
+    pricePence: 118_000,
+    fromPence: 118_000,
+    isFrom: false,
+    seller: 'QQ Travel',
+    fare: null,
+    offersRead: 3,
+    complete: true,
+    which: 'next-cheapest',
+    departOut: '07:15',
+    arriveOut: '18:05',
+    departBack: '14:20',
+    arriveBack: '06:25',
+    mismatch: false,
+    provenance: flightListProvenance(),
+    stale: false,
+    ageHours: 2,
+    ...over,
+  };
+}
+
+/** A pairing figure on LHR→JFK (spec rev 56 §6.9): the offer's price leads, the £564 grid price it replaced beneath. */
+export function pairingFigure(over: Partial<DatePairFigure> = {}): DatePairFigure {
+  return calendarFigure({
+    price: {
+      pricePence: 118_000,
+      provenance: flightListProvenance(),
+      stale: false,
+      ageHours: 2,
+      truncated: false,
+    },
+    basis: 'pairing',
+    gridPrice: { pricePence: 56_400, provenance: calendarProvenance(), stale: false, truncated: false },
+    pairing: figurePairing(),
+    pairingRead: 'within',
+    ...over,
+  });
 }
 
 /** A verified figure on LHR→JFK with its segments' local times (an overnight outbound). */
@@ -177,7 +239,6 @@ export function decoded(o: DecodedOptions = {}): DecodedDatePairs {
     discoveryProviders: ['travelpayouts'],
     verificationProviderConfigured: true,
     staleAfterHours: 192,
-    calendarStaleAfterHours: { travelpayouts: 192 },
     space,
     scope: {
       origins,
@@ -240,7 +301,7 @@ const FIGURES: DatePairFigure[] = [
     price: {
       pricePence: 28_000,
       provenance: calendarProvenance({ maxAgeHours: 'unknown' }),
-      stale: true,
+      stale: 'refresh',
       ageHours: 'unknown',
       truncated: true,
     },

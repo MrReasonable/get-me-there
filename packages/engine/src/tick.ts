@@ -1,9 +1,9 @@
-import { type IsoDateTime, isoDateTimeOfEpochMs } from '@gmt/core';
+import { type IsoDateTime, isoDateTimeOfEpochMs, isScheduled } from '@gmt/core';
 import type { EngineContext } from './context.js';
 import type { Orchestrator } from './orchestrator.js';
 import { isStalePaused, supersede } from './resume.js';
 import { catchUpDefinition, pastGrace } from './scheduler/catchUp.js';
-import { isPausedCatchUp } from './scheduler/catchUpStart.js';
+import { isPausedCatchUp, supersededByFiring } from './scheduler/catchUpStart.js';
 import { previousFiring } from './scheduler/parseCron.js';
 
 /**
@@ -34,6 +34,8 @@ export interface Blocked {
  * schedule — recorded in `blocked` as "schedule blocked since <date>" (ssr-19); (4) otherwise a punctual tick runs the
  * pre-start checks and starts, and a late tick hands its firing to `catchUpDefinition` in place of the start, so a late
  * tick is a catch-up under the same rules (decision 79), with the run it superseded in step 1 not covering the firing.
+ * Revision 55 §8.2: between (2) and (3), a stopped parent with no `resume_after` in the future (`supersededByFiring`)
+ * does not block: the firing's start supersedes it (`superseded 'schedule'`) in the one transaction of its insert.
  * A tick that resumes clears the definition's entry; any start of the definition (the orchestrator's, the tick's own
  * included) and the blocking run's end clear it too (Orchestrator.blockedSince). A deleted or disabled definition is never scheduled
  * (decision 5), and a definition without a schedule is never ticked: a stale run's one-shot job supersedes it without a
@@ -46,7 +48,7 @@ export async function tickDefinition(
   blocked: Map<string, Blocked>,
 ): Promise<void> {
   const def = ctx.repos.definitions.get(definitionId);
-  if (def === null || def.deletedAt !== null || !def.enabled || def.scheduleCron === null) {
+  if (def === null || !isScheduled(def)) {
     blocked.delete(definitionId);
     return;
   }
@@ -74,6 +76,12 @@ export async function tickDefinition(
     } else if (isPausedCatchUp(active)) {
       // why: decision 79 — a paused catch-up never blocks the firing after it: this firing's row (its start, its
       // catch-up or its skip) supersedes it in the same immediate transaction as its own insert
+    } else if (supersededByFiring(active) !== null) {
+      // why: revision 55 §8.2 — a stopped parent with no resume_after (a page-limit stop, a manual run stopped while the
+      // search had no schedule, a stop every source's refusal caused) never blocks the firing: the firing's start (or a
+      // late tick's catch-up, for which the run does not cover the firing) cancels it (cause superseded 'schedule')
+      // inside its own insert's transaction, never "schedule blocked since"
+      replaced = active.id;
     } else if (
       (active.status === 'paused_error' || active.status === 'paused_budget') &&
       active.resumeAfter !== null &&

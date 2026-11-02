@@ -475,9 +475,15 @@ describe('recordFixtures against the vendor stand-ins (spec §9 item 7, §5.3 Re
     expect(sa.slice(0, 2).map((c) => c.status)).toEqual([401, 'aborted']);
     for (const c of sa.slice(2)) expect([c.status, c.detail]).toEqual(['skipped', 'aborted before send']);
     expect(run.seen.sa).toHaveLength(2);
-    expect(run.ports.db.raw.prepare('SELECT status, error_text AS e FROM search_executions').get()).toEqual({
+    expect(
+      run.ports.db.raw
+        .prepare('SELECT status, error_text AS e, stop_cause_json AS c FROM search_executions')
+        .get(),
+    ).toEqual({
       status: 'cancelled',
       e: 'aborted',
+      // why: R3 — a tool run stores its cause, so a NULL cause means only "written before 0011"
+      c: JSON.stringify({ kind: 'tool', ended: 'aborted' }),
     }); // why: an abort with the real kit leaves no open reservation; the aborted SA-02 is ledgered unknown and counted, so the
     // ledger line shows it (cost M-3)
     expect(
@@ -516,10 +522,13 @@ describe('recordFixtures against the vendor stand-ins (spec §9 item 7, §5.3 Re
         expect(text, path).not.toContain(SENTINEL_TP);
         expect(text, path).not.toContain(Buffer.from(SENTINEL_SA, 'utf8').toString('base64'));
       }
-      const row = setup.ports.db.raw.prepare('SELECT status, error_text AS e FROM search_executions').get();
+      const row = setup.ports.db.raw
+        .prepare('SELECT status, error_text AS e, stop_cause_json AS c FROM search_executions')
+        .get();
       expect(row).toMatchObject({
         status: 'cancelled',
         e: expect.stringContaining('record:fixtures failed'),
+        c: JSON.stringify({ kind: 'tool', ended: 'failed' }),
       });
       expect(JSON.stringify(row)).not.toContain(SENTINEL_SA);
       expect(JSON.stringify(row)).not.toContain(SENTINEL_TP);

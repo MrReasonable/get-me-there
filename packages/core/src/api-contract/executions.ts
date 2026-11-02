@@ -1,19 +1,60 @@
 import { z } from 'zod';
+import { workerRuleSchema } from '../camoufox/rule.js';
 import { SKIP_CODES } from '../types/execution.js';
 import { isoDateTimeSchema } from '../types/ids.js';
 import {
   bucketsSchema,
   cellKeySchema,
+  countSchema,
   executionStatusSchema,
   microGbpSchema,
   moneyPenceSchema,
   providerIdSchema,
   stageSchema,
+  triggerSchema,
   usageSchema,
 } from './common.js';
 import { estimateSchema } from './definitions.js';
+import { stopTextSchema } from './stopCause.js';
 
-const count = z.number().int().min(0);
+const count = countSchema;
+
+/**
+ * Spec revision 55 §7 `flight_lists_json`: the run's stored flight-list plan (`FlightListsState`), read back through
+ * this schema as `estimate_json` is through `estimateSchema`, so a stored value is judged by the rules that wrote it.
+ */
+export const flightListsStateSchema = z.strictObject({
+  planned: count,
+  cells: z.array(cellKeySchema),
+  reused: count,
+  ended: z.enum(['window', 'monthly-cap', 'stopped']).nullable(),
+  // why: spec rev 56 §7: absent in a plan stored before WP21, read as false (an older plan is outbound-only); the
+  // reader fills the defaults, so `FlightListsState` is total
+  returns: z.boolean().exactOptional(),
+  booking: z.boolean().exactOptional(),
+  // why: spec rev 56 §8.1: the rule that stopped the run's return phases (or its booking reads); absent read as null
+  returnsStopped: workerRuleSchema.nullable().exactOptional(),
+  bookingStopped: workerRuleSchema.nullable().exactOptional(),
+});
+
+/**
+ * Spec revision 55 §8.1 "What the run reports", §10 `GET /executions/:id`: the flight-list step's counts, from the
+ * stored plan (`planned`, `reused`, `ended`) and the newest row per planned cell of this execution (`read`, `failed`).
+ * Null when the run stored no plan (ruling A14: the page then says nothing about flights).
+ */
+export const executionFlightsSchema = z
+  .strictObject({
+    planned: count,
+    read: count,
+    reused: count,
+    failed: count,
+    ended: z.enum(['window', 'monthly-cap', 'stopped', 'disabled']).nullable(),
+  })
+  .refine((f) => f.read + f.reused + f.failed <= f.planned, {
+    message: 'flights read, reused and failed must not exceed flights planned',
+    path: ['read'],
+  });
+
 export const executionResponseSchema = z.object({
   id: z.string(),
   definitionId: z.string(),
@@ -21,12 +62,10 @@ export const executionResponseSchema = z.object({
   cell: cellKeySchema.nullable(),
   status: executionStatusSchema,
   stage: stageSchema.nullable(),
-  reason: z.string().nullable(),
   resumeAfter: isoDateTimeSchema.nullable(),
-  trigger: z.enum(['manual', 'schedule', 'tool']),
+  trigger: triggerSchema,
   startedAt: isoDateTimeSchema.nullable(),
   finishedAt: isoDateTimeSchema.nullable(),
-  errorText: z.string().nullable(),
   /** Review S8: the firing the row stands for and, on a missed firing, why it was not caught up, as History names them. */
   scheduledFor: isoDateTimeSchema.nullable(),
   isCatchUp: z.boolean(),
@@ -54,11 +93,27 @@ export const executionResponseSchema = z.object({
   parityBreak: z.boolean(),
   overrun: z.boolean(),
   disabledProviders: z.array(providerIdSchema),
+  /**
+   * Spec revision 55 §10: the stored cause's words (`stopText`); `NO_STOP_CAUSE_TEXT` on a stopped row with no cause
+   * (written before migration 0011, whatever its `errorText` holds); null on every other status.
+   */
+  stop: stopTextSchema.nullable(),
+  /** Spec revision 55 §10: now plus the run's remaining seconds while it is pending or running, else null. */
+  estimatedFinishAt: isoDateTimeSchema.nullable(),
+  flights: executionFlightsSchema.nullable(),
 });
-/** Decision 37: a manual start confirms the pence and the calls the operator saw; one without the other covers nothing. */
+/**
+ * Decision 37: a manual start confirms the pence and the calls the operator saw; one without the other covers nothing.
+ * Spec revision 55 §8.1 (Search again): `requireCovered` refuses `confirm` whenever the runnable estimate exceeds the
+ * confirmation in pence or calls (the press confirms exactly the figures beside the button, for that run only), and
+ * `replaceStopped` supersedes a stopped (`paused_*` or `interrupted`) latest run of the search with a fresh start, in
+ * one transaction. Both optional, so every existing caller is unchanged; the route passes them to `StartOptions`.
+ */
 export const startExecutionRequestSchema = z.object({
   confirmCostPence: moneyPenceSchema.optional(),
   confirmCalls: z.number().int().min(0).optional(),
+  requireCovered: z.boolean().optional(),
+  replaceStopped: z.boolean().optional(),
 });
 export const startExecutionResponseSchema = z.object({ executionId: z.string() });
 /** WP7: a single-cell verification above SOFT_CONFIRM needs the confirmation a start would, pence and calls together. */

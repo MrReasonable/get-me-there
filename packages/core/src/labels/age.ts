@@ -68,6 +68,94 @@ export function isStale(
   return worstCaseAgeHours(effectiveAge(p, now)) > thresholdHours;
 }
 
+/**
+ * Spec revision 55 §8.1 "Staleness per price" (design §5.5): the calendar-basis threshold of one price, built from the
+ * price's **own stored** age bound, never the currently registered provider's declared age. `override`
+ * (`CALENDAR_STALE_AFTER_HOURS`) replaces it outright; otherwise it is the search's refresh for the price's provider plus
+ * the stored `maxAgeHours` (0 when unknown). Because the effective age is the fetch age plus that same stored bound, a
+ * bounded- or unknown-age price is stale exactly when its fetch age passes the refresh ("never stale within the
+ * refresh", whichever run fetched it), while a vendor-dated price keeps its own age, so an old price the vendor dates is
+ * never hidden.
+ */
+export function calendarStaleThreshold(
+  p: Pick<Provenance, 'maxAgeHours'>,
+  refreshHours: number,
+  override: number | null,
+): number {
+  return override ?? refreshHours + (p.maxAgeHours === 'unknown' ? 0 : p.maxAgeHours);
+}
+
+/** The basis a price is judged on: an itinerary search (`verified`) or a date-grid or cache price (`calendar`). */
+export type StaleBasis = 'verified' | 'calendar';
+
+/**
+ * The thresholds the stale rule reads: the search's refresh for the price's provider, the operator's
+ * `CALENDAR_STALE_AFTER_HOURS` (null when unset) and `STALE_AFTER_HOURS` (the verified basis).
+ */
+export interface StaleThresholds {
+  refreshHours: number;
+  overrideHours: number | null;
+  staleAfterHours: number;
+}
+
+/**
+ * Spec revision 55 §3, §10 (ruling 20.6-2): the kind of threshold that judges a price: `refresh` for a calendar price
+ * under the per-price rule (the search's refresh plus the price's own age bound), `setting` for one under
+ * `CALENDAR_STALE_AFTER_HOURS` or on the verified basis (`STALE_AFTER_HOURS`).
+ */
+export const STALE_KINDS = ['refresh', 'setting'] as const;
+export type StaleKind = (typeof STALE_KINDS)[number];
+/** The stale mark as it travels: `false` when the price is not stale, else the kind of threshold it is older than. */
+export type StaleMark = false | StaleKind;
+
+/** The kind of threshold that judges a price on `basis` (spec rev 55 §3). */
+export function staleKindOf(t: { basis: StaleBasis; override: boolean }): StaleKind {
+  return t.basis === 'calendar' && !t.override ? 'refresh' : 'setting';
+}
+
+/** Spec rev 55 §3: the stale mark's words for its kind, shown only when the price is stale. */
+export function staleWords(kind: StaleKind): string {
+  return kind === 'refresh' ? "older than this search's refresh" : 'older than your stale setting';
+}
+
+/**
+ * Spec revision 55 §8.1: the one per-price staleness rule, read by the board, the date pair detail, the search cards,
+ * History, Status, the engine's alert marks and the alert email. `ageHours` is the effective age (`worstCaseAgeHours`);
+ * `stale` is `isStale` against the basis's threshold (the calendar threshold above, or `staleAfterHours` alone on the
+ * verified basis); `kind` is that threshold's kind and `mark` the stale mark the wire carries (`false`, or the kind);
+ * `markText` is the stale mark's words (`staleMarkText`), which a caller shows only when `stale`.
+ */
+export function stalenessOf(
+  row: {
+    provenance: Pick<Provenance, 'fetchedAt' | 'providerObservedAt' | 'maxAgeHours' | 'maxAgeAssumed'>;
+    basis: StaleBasis;
+  },
+  t: StaleThresholds,
+  now: IsoDateTime,
+): { ageHours: number; stale: boolean; kind: StaleKind; mark: StaleMark; markText: string } {
+  const p = row.provenance;
+  const calendar = row.basis === 'calendar';
+  const threshold = calendar ? calendarStaleThreshold(p, t.refreshHours, t.overrideHours) : t.staleAfterHours;
+  const stale = isStale(p, now, threshold);
+  const kind = staleKindOf({ basis: row.basis, override: calendar && t.overrideHours !== null });
+  return {
+    ageHours: worstCaseAgeHours(effectiveAge(p, now)),
+    stale,
+    kind,
+    mark: stale ? kind : false,
+    markText: staleWords(kind),
+  };
+}
+
+/**
+ * Spec revision 55 §3: the stale mark's words. A calendar price under the per-price rule is "older than this search's
+ * refresh"; under `CALENDAR_STALE_AFTER_HOURS`, or on the verified basis (`STALE_AFTER_HOURS`), "older than your stale
+ * setting".
+ */
+export function staleMarkText(t: { basis: StaleBasis; override: boolean }): string {
+  return staleWords(staleKindOf(t));
+}
+
 /** "just now" under an hour; hours to 47h; days to 13d; weeks after. */
 export function formatDuration(hours: number): string {
   if (hours < 1) return 'just now';

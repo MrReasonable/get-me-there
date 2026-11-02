@@ -15,8 +15,9 @@ import {
   effectiveAge,
   type IsoDateTime,
   isLoopbackHost,
-  isStale,
+  isScheduled,
   type ProviderId,
+  runModeOf,
   type SearchDefinition,
   START_REFUSAL_FILE,
   scheduledOnlyText,
@@ -32,7 +33,7 @@ import { backupsDirFor } from '../bootstrap/preflight.js';
 import { dbOk, dbSizeBytes } from '../routes/system.js';
 import type { RouteContext } from '../routes/types.js';
 import type { Ports } from '../wiring.js';
-import { calendarStaleAfterHours, type RowContext } from './rows.js';
+import { staleness } from './rows.js';
 import { type ConsentCause, consentOutcome } from './status.js';
 import type {
   AgeFacts,
@@ -72,8 +73,7 @@ export interface StatusEnv {
 }
 
 export function modeOf(ports: Pick<Ports, 'config'>): StatusMode {
-  const c = ports.config;
-  return c.inContainer ? 'container' : c.nodeEnv === 'development' ? 'dev' : 'native';
+  return runModeOf(ports.config);
 }
 
 function newestBackup(databasePath: string): IsoDateTime | null {
@@ -86,8 +86,7 @@ function newestBackup(databasePath: string): IsoDateTime | null {
 }
 
 /** The definitions an enabled schedule runs. */
-const scheduledDefinitions = (defs: readonly SearchDefinition[]) =>
-  defs.filter((d) => d.enabled && d.deletedAt === null && d.scheduleCron !== null);
+const scheduledDefinitions = (defs: readonly SearchDefinition[]) => defs.filter((d) => isScheduled(d));
 
 const registered = (ports: Ports, id: ProviderId) => ports.providers.some((p) => p.id === id);
 
@@ -179,7 +178,6 @@ function agesOf(
   now: IsoDateTime,
 ): AgeFacts | null {
   const { ports } = ctx;
-  const rc: RowContext = { def: d, now, config: ports.config, providers: ports.providers };
   const rows = ports.repos.calendarPrices
     .heldBy(executionId)
     .filter((r) => r.provenance.sourceKind !== 'synthetic' && r.provenance.providerId !== 'fixture');
@@ -189,7 +187,8 @@ function agesOf(
     const p = withAssumedBound(r.provenance, info);
     return {
       age: effectiveAge(p, now),
-      stale: isStale(p, now, calendarStaleAfterHours(rc, p.providerId)),
+      // why: revision 55 §8.1 — core's per-price rule over the stored provenance, never the declared age
+      stale: staleness(r.provenance, 'calendar', { def: d, config: ports.config, now }).stale,
     };
   });
   const sorted = aged.map((a) => a.age).sort(compareAges);
@@ -225,7 +224,7 @@ function dataFacts(ctx: RouteContext, d: SearchDefinition, now: IsoDateTime): Da
   const { ports } = ctx;
   const runs = executionsOf(ports, d);
   const { active, latest, lastRun } = pickRuns(runs);
-  const cron = d.enabled ? d.scheduleCron : null;
+  const cron = isScheduled(d) ? d.scheduleCron : null;
   let previousFiringMs: number | null = null;
   if (cron !== null && active === null) {
     const parsed = parseCron(cron, d.scheduleTz);
@@ -235,7 +234,7 @@ function dataFacts(ctx: RouteContext, d: SearchDefinition, now: IsoDateTime): Da
   return {
     definitionId: d.id,
     name: d.name,
-    enabled: d.enabled,
+    scheduled: isScheduled(d),
     latest: latest === null ? null : runFacts(latest),
     lastRun: lastRun === null ? null : runFacts(lastRun),
     coverage: lastRun === null ? null : coverageOf(ports, lastRun.id),
@@ -324,6 +323,7 @@ async function readWorkerOnce(ports: Ports): Promise<WorkerRead> {
               : undefined,
         }),
         formVerified: st.flags.FORM_VERIFIED === true,
+        flags: st.flags,
         appInstances: st.appInstances?.count ?? null,
         monthly:
           st.monthly === undefined
@@ -434,6 +434,9 @@ export async function gatherFacts(ctx: RouteContext, env: StatusEnv): Promise<St
     }
   }
   const worker = await workerFacts(ports, mode, env.home);
+  // why: spec rev 56 §8.1: the Status view's worker read is the api's one read of the worker; the engine plans the
+  // flight step's return phase from the flags it last saw (there is no boot read)
+  if (worker.read.kind === 'ok') ctx.engine.setWorkerFlags('camoufox', worker.read.status.flags);
   return {
     now,
     tz: ports.config.schedulerTimezone,

@@ -122,7 +122,8 @@ const NEVER_RETRIED: ReadonlySet<ProviderErrorKind> = new Set<ProviderErrorKind>
 /**
  * The post-step for whichever error classification produced (adapter or default), spec §5.2 rev 11:
  * the message and any reason are re-scrubbed and URL-stripped (an adapter may have copied vendor text or a key);
- * a retryable error waits `Retry-After`, else (429) `rateLimitFallbackWaitSeconds`; a wait above `maxWaitSeconds`
+ * a retryable error waits `Retry-After`, else the wait the classifier read from the body, else (429)
+ * `rateLimitFallbackWaitSeconds`; a wait above `maxWaitSeconds`
  * becomes non-retryable `limiter-timeout` carrying the wait; a retryable 429 with no wait at all becomes
  * non-retryable `rate-limit` with `retryAfterSeconds` = seconds to the limiter's hourly refresh.
  */
@@ -145,8 +146,10 @@ export function finishError(err: ProviderError, c: FinishContext): ProviderError
   };
   if (!retryable) return new ProviderError({ ...base, message });
   const is429 = c.facts.status === 429;
+  // why: final review A-I1: a wait the adapter's classifier read from the answer body stands in for a missing header
   const wait =
     parseRetryAfter(c.facts.headers.get('retry-after'), c.now) ??
+    err.retryAfterSeconds ??
     (is429 ? c.limits.rateLimitFallbackWaitSeconds : undefined);
   if (wait === undefined) {
     if (!is429) return new ProviderError({ ...base, message });

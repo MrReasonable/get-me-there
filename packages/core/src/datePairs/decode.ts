@@ -2,6 +2,7 @@ import type { DatePairsResponse } from '../api-contract/datePairs.js';
 import { addDays } from '../dates/epochDay.js';
 import type { IsoDate } from '../types/ids.js';
 import type { DatePair, DatePairFigure, DecodedDatePairs } from './encode.js';
+import { PAIRING_READ } from './pairing.js';
 import { stayCount } from './space.js';
 
 /**
@@ -14,7 +15,10 @@ export function columnAt<T>(column: readonly T[], i: number): T {
   return x;
 }
 
-/** The figure in column position `j`, with its full provenance and its airport pair; no cheaper price or times yet. */
+/**
+ * The figure in column position `j`, with its full provenance and its airport pair, read `not-read` until the
+ * `pairingRead` group says otherwise; no cheaper price, times, grid price or pairing yet.
+ */
 function figureAt(r: DatePairsResponse, j: number): DatePairFigure {
   const f = r.figures;
   const { origins, destinations } = r.scope;
@@ -43,12 +47,16 @@ function figureAt(r: DatePairsResponse, j: number): DatePairFigure {
     arriveBack: null,
     fromEarlierSearch: columnAt(f.fromEarlierSearch, j),
     cheaperCached: null,
+    gridPrice: null,
+    pairing: null,
+    pairingRead: 'not-read',
+    listReason: null,
   };
 }
 
 /**
  * One record per date pair from the route's columns (spec §10): `pairs` walked once, `figures` once and each sparse
- * group once, every figure and cheaper-cached price given its full provenance from the table. Pure; no clock. Dates come from the index, each
+ * group once, every figure, cheaper-cached price, grid price and pairing given its full provenance from the table. Pure; no clock. Dates come from the index, each
  * distinct date computed once.
  */
 export function decodeDatePairs(r: DatePairsResponse): DecodedDatePairs {
@@ -110,13 +118,56 @@ export function decodeDatePairs(r: DatePairsResponse): DecodedDatePairs {
     figure.departBack = columnAt(t.departBack, k);
     figure.arriveBack = columnAt(t.arriveBack, k);
   }
+  // why: spec rev 56 §10: a body without the two groups (an api before them) decodes with no grid price and no pairing
+  const g = r.gridPrice;
+  if (g !== undefined)
+    for (let k = 0; k < g.figure.length; k += 1)
+      columnAt(figures, columnAt(g.figure, k)).gridPrice = {
+        pricePence: columnAt(g.pricePence, k),
+        provenance: columnAt(r.provenances, columnAt(g.provenance, k)),
+        stale: columnAt(g.stale, k),
+        truncated: columnAt(g.truncated, k),
+      };
+  // why: R-sparse: a figure with no entry reads not-read (as in a body without the group)
+  const reads = r.pairingRead;
+  if (reads !== undefined)
+    for (let k = 0; k < reads.figure.length; k += 1)
+      columnAt(figures, columnAt(reads.figure, k)).pairingRead = columnAt(
+        PAIRING_READ,
+        columnAt(reads.code, k),
+      );
+  // why: the 21.6 ruling: a failed list's cause, beside its `list-failed` read
+  const why = r.listReason;
+  if (why !== undefined)
+    for (let k = 0; k < why.figure.length; k += 1)
+      columnAt(figures, columnAt(why.figure, k)).listReason = columnAt(why.reason, k);
+  const q = r.pairing;
+  if (q !== undefined)
+    for (let k = 0; k < q.figure.length; k += 1)
+      columnAt(figures, columnAt(q.figure, k)).pairing = {
+        pricePence: columnAt(q.pricePence, k),
+        fromPence: columnAt(q.fromPence, k),
+        isFrom: columnAt(q.isFrom, k),
+        seller: columnAt(q.seller, k),
+        fare: columnAt(q.fare, k),
+        offersRead: columnAt(q.offersRead, k),
+        complete: columnAt(q.complete, k),
+        which: columnAt(q.which, k),
+        departOut: columnAt(q.departOut, k),
+        arriveOut: columnAt(q.arriveOut, k),
+        departBack: columnAt(q.departBack, k),
+        arriveBack: columnAt(q.arriveBack, k),
+        mismatch: columnAt(q.mismatch, k),
+        provenance: columnAt(r.provenances, columnAt(q.provenance, k)),
+        stale: columnAt(q.stale, k),
+        ageHours: columnAt(q.ageHours, k),
+      };
   return {
     executionId: r.executionId,
     executions: r.executions,
     discoveryProviders: r.discoveryProviders,
     verificationProviderConfigured: r.verificationProviderConfigured,
     staleAfterHours: r.staleAfterHours,
-    calendarStaleAfterHours: r.calendarStaleAfterHours,
     space: {
       departureFrom: space.departureFrom,
       departureTo: space.departureTo,

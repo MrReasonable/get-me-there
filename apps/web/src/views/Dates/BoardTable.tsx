@@ -1,12 +1,15 @@
 import type { DatePair, DatePairFigure, DecodedDatePairs } from '@gmt/core';
 import {
+  Fragment,
   type MouseEvent,
   type ReactNode,
   type RefObject,
   useEffect,
   useId,
   useLayoutEffect,
+  useMemo,
   useRef,
+  useState,
 } from 'react';
 import type { DefinitionResponse } from '../../api/types.js';
 import { COPY } from '../../copy.js';
@@ -25,14 +28,39 @@ import {
   BoardCard,
   CheaperCached,
   FigurePrice,
+  FlightRead,
   Journey,
+  PairingFigureLines,
   RankFlaps,
   rowState,
   StateFlap,
 } from './BoardCard.js';
-import type { BoardModel } from './board.js';
+import {
+  type BoardModel,
+  type ListsState,
+  PAGE_SIZE,
+  sellerCoverage,
+  setsAirlineOrLayover,
+} from './board.js';
+import {
+  FlightOutcome,
+  FlightsBlock,
+  FlightsLoadFailed,
+  FlightsUnavailable,
+  useBoardFlights,
+} from './Flights.js';
+import {
+  boardGroups,
+  hasFlightsBlock,
+  limitsOf,
+  orderedGroups,
+  pairKey,
+  requestPages,
+  shownOf,
+} from './flightLines.js';
 import { type Animate, useFlip } from './flip.js';
 import { howFarChecked } from './howFar.js';
+import { TieLine } from './TieLine.js';
 
 const D = COPY.datesView;
 
@@ -73,6 +101,10 @@ export interface BoardProps {
  * Spec §11 Dates "Board": a table captioned "Best dates", rows in core's rank (the price rank whatever the sort),
  * sortable by price, departure, nights and journey time with aria-sort; 10 rows, then "Show 10 more"; each row's
  * dates a real link to the date pair detail, and a click anywhere on the row follows it. Below 900 px, stacked cards.
+ * WP20 Task 20.10 (spec rev 55 §11 Flights, Ties): the board asks for the flight lists of the tie groups that touch the
+ * shown rows, orders each tie by its flights (core's `orderWithinTie`, after the rank and before paging; the rank
+ * column stays the price rank), puts each tie's line above it, each read's outcome beside its figure and each date
+ * pair's flights block below its row (inside its phone card).
  */
 export function BoardTable(props: BoardProps) {
   const { definition, data, model, state, runActive, visible, lit, onLight, token, animate, captionRef } =
@@ -81,10 +113,55 @@ export function BoardTable(props: BoardProps) {
   const reduced = useMediaQuery(REDUCED_MOTION_QUERY);
   const region = useRef<HTMLDivElement>(null);
   const noteId = useId();
-  const rows = model.rows.slice(0, visible);
+  // why: ties are runs in the price order, so they are grouped (and reordered) only while the board is sorted by price
+  const byPrice = state.sort.key === 'price';
+  const groups = useMemo(() => boardGroups(model.rows.map(withFigure), byPrice), [model.rows, byPrice]);
+  const pages = useMemo(() => requestPages(groups, visible, PAGE_SIZE), [groups, visible]);
+  const limits = useMemo(() => limitsOf(definition), [definition]);
+  const flights = useBoardFlights(definition.id, pages, limits);
+  const available = flights.meta?.available === true;
+  const settings = setsAirlineOrLayover(definition.constraints);
+  // why: finding 9: a list that lands moves rows within a tie only while the board is not in use; while the pointer or
+  // focus is in it (the board's own hold, revision 50) the order keeps the lists it last applied, and the move is
+  // applied when they leave. The flights themselves (each block and outcome) show at once; only the order waits.
+  const [held, setHeld] = useState(false);
+  // why: finding 9 (FLIP half): `rev` counts each change of the applied lists, in the same state as the lists, so the
+  // render that moves rows within a tie also changes the transition's token (below) and the moves animate like any
+  // other reorder (none under reduced motion, as useFlip already rules)
+  const [orderBy, setOrderBy] = useState({ byKey: flights.byKey, available, rev: 0 });
+  useEffect(() => {
+    if (!held)
+      setOrderBy((o) =>
+        o.byKey === flights.byKey && o.available === available
+          ? o
+          : { byKey: flights.byKey, available, rev: o.rev + 1 },
+      );
+  }, [held, flights.byKey, available]);
+  const { rows, tieAt } = useMemo(() => {
+    const shownFor = (p: DatePair) =>
+      shownOf(orderBy.byKey.get(pairKey(p))?.list ?? null, limits, orderBy.available);
+    const ordered = orderedGroups(groups, shownFor);
+    const rows = ordered.flat().slice(0, visible);
+    // why: each tie's line stands above its first shown row (spec rev 55 §11 Ties), counting the whole tie and, when
+    // it runs past the shown rows, how many of it are shown (ruling R-tie-count)
+    const onPage = new Set(rows.map((p) => p.index));
+    const tieAt = new Map<number, { count: number; shown: number; pricePence: number; byFlights: boolean }>();
+    for (const g of ordered) {
+      const first = g[0];
+      if (g.length > 1 && first !== undefined && onPage.has(first.index))
+        tieAt.set(first.index, {
+          count: g.length,
+          shown: g.filter((p) => onPage.has(p.index)).length,
+          pricePence: first.figure.price.pricePence,
+          byFlights: g.some((p) => (shownFor(p)?.shown.length ?? 0) > 0),
+        });
+    }
+    return { rows, tieAt };
+  }, [groups, orderBy, limits, visible]);
   const airportPairs = data.scope.airportPairs;
   const filtered = state.journey !== null;
-  useFlip(region, token, animate, reduced);
+  // why: both only count up, so their sum changes whenever a read is applied or a tie's flight lists are applied
+  useFlip(region, token + orderBy.rev, animate, reduced);
   const table = useRef<HTMLTableElement>(null);
   useExplicitRoles(table);
 
@@ -107,7 +184,9 @@ export function BoardTable(props: BoardProps) {
     if (root === null) return;
     const set = (patch: Partial<{ pointer: boolean; focus: boolean }>) => {
       inside.current = { ...inside.current, ...patch };
-      onHold.current(inside.current.pointer || inside.current.focus);
+      const h = inside.current.pointer || inside.current.focus;
+      onHold.current(h);
+      setHeld(h);
     };
     const enter = () => set({ pointer: true });
     const leave = () => set({ pointer: false });
@@ -146,6 +225,8 @@ export function BoardTable(props: BoardProps) {
   // why: the rank's cells: two, or as many as the largest shown rank needs
   const digits = Math.max(2, ...rows.map((p) => String(model.rankOf.get(p.index) ?? 0).length));
 
+  // why: 21.7 persona coverage: the board says for how many of the rows shown a seller's price was read
+  const coverage = sellerCoverage(rows);
   const caption = (
     <>
       <span ref={captionRef} tabIndex={-1} className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
@@ -154,6 +235,11 @@ export function BoardTable(props: BoardProps) {
       </span>
       <span className="block">{D.boardOrderNote}</span>
       <span className="block">{D.showing(rows.length, model.rows.length)}</span>
+      {coverage !== null ? (
+        <span data-testid="seller-coverage" className="block">
+          {D.sellerCoverage(coverage.read, coverage.shown)}
+        </span>
+      ) : null}
       {model.weeks !== null ? <span className="block">{D.bestPerWeek(model.weeks)}</span> : null}
     </>
   );
@@ -164,6 +250,7 @@ export function BoardTable(props: BoardProps) {
       <span id={noteId} className="sr-only">
         {D.priceSortNote}
       </span>
+      <FlightsLoadFailed lists={flights.lists} />
       {phone ? (
         <div className="flex flex-wrap gap-x-4 text-sm">
           {SORTS.map((s) => (
@@ -199,33 +286,46 @@ export function BoardTable(props: BoardProps) {
           </tr>
         </thead>
         <tbody>
-          {rows.map((p) =>
-            phone ? (
-              <BoardCard
-                key={p.index}
-                pair={withFigure(p)}
-                rank={model.rankOf.get(p.index) ?? 0}
-                digits={digits}
-                howFar={howFarChecked(p, airportPairs, state.journey)}
-                notes={definition.destinationNotes}
-                journeyFiltered={filtered}
-                lit={lit === p.index}
-                onLight={onLight}
-              />
-            ) : (
-              <BoardRow
-                key={p.index}
-                pair={withFigure(p)}
-                rank={model.rankOf.get(p.index) ?? 0}
-                digits={digits}
-                howFar={howFarChecked(p, airportPairs, state.journey)}
-                notes={definition.destinationNotes}
-                journeyFiltered={filtered}
-                lit={lit === p.index}
-                onLight={onLight}
-              />
-            ),
-          )}
+          {rows.map((p) => {
+            const entry = flights.byKey.get(pairKey(p));
+            const tie = tieAt.get(p.index);
+            const outcome = <FlightOutcome entry={entry} available={available} />;
+            const block = hasFlightsBlock(entry, available) ? (
+              <FlightsBlock pairOf={p} entry={entry} flights={flights} limits={limits} />
+            ) : null;
+            const common = {
+              pair: p,
+              rank: model.rankOf.get(p.index) ?? 0,
+              digits,
+              howFar: howFarChecked(p, airportPairs, state.journey),
+              notes: definition.destinationNotes,
+              journeyFiltered: filtered,
+              lit: lit === p.index,
+              onLight,
+              outcome,
+              lists: flights.lists,
+              settings,
+            };
+            return (
+              <Fragment key={p.index}>
+                {tie !== undefined ? <TieLine {...tie} /> : null}
+                {phone ? (
+                  <BoardCard {...common} flights={block} />
+                ) : (
+                  <>
+                    <BoardRow {...common} />
+                    {block !== null ? (
+                      <tr className="flights-row">
+                        <td colSpan={8} data-flights-for={p.index}>
+                          {block}
+                        </td>
+                      </tr>
+                    ) : null}
+                  </>
+                )}
+              </Fragment>
+            );
+          })}
         </tbody>
       </table>
       <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-3">
@@ -238,6 +338,7 @@ export function BoardTable(props: BoardProps) {
         )}
         {props.update}
       </div>
+      <FlightsUnavailable meta={flights.meta} />
       {phone ? (
         <div data-testid="phone-key" className="space-y-1 text-xs text-fg-2">
           <p>{D.phoneKey.providers}</p>
@@ -284,6 +385,9 @@ function BoardRow({
   journeyFiltered,
   lit,
   onLight,
+  outcome,
+  lists,
+  settings,
 }: {
   pair: DatePair & { figure: DatePairFigure };
   rank: number;
@@ -293,6 +397,12 @@ function BoardRow({
   journeyFiltered: boolean;
   lit: boolean;
   onLight: (index: number | null) => void;
+  /** The flight read's outcome beside the figure (spec rev 55 §6.9; persona-003). */
+  outcome: ReactNode;
+  /** What the board knows of its flight-lists request (21.7 prov-004: "flights not read" by it). */
+  lists: ListsState;
+  /** The search sets an airline or layover setting (a pairing figure says they are not applied). */
+  settings: boolean;
 }) {
   const f = pair.figure;
   const state = rowState(f);
@@ -339,6 +449,9 @@ function BoardRow({
       <td className="board-price">
         <FigurePrice figure={f} notes={notes} flapSlot="price" />
         <CheaperCached figure={f} notes={notes} />
+        <PairingFigureLines figure={f} settings={settings} />
+        <FlightRead figure={f} lists={lists} />
+        {outcome}
       </td>
       <td className="board-howfar">
         <StateFlap state={state} />

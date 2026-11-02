@@ -618,21 +618,16 @@ describe('the data check: honest and complete (review V6)', () => {
     expect(apiContract.statusCheckSchema.safeParse(c).success).toBe(true);
   });
 
-  it('a disabled definition is off, so a parked search never nags the bar', () => {
+  it('an unscheduled search is judged by its latest run and notes "not scheduled"; it is never off (revision 55 §7, data-004)', () => {
     const c = dataOf({
-      enabled: false,
+      scheduled: false,
       ages: { newest: observed(1), oldest: observed(30 * 24), stale: true },
     });
-    expect(c).toMatchObject({ state: 'off', offReason: 'disabled', label: 'London to New York' });
-    expect(c.summary).toContain('disabled; its last run was');
-    expect(dataOf({ enabled: false, lastRun: null, latest: null }).summary).toBe(
-      'disabled; it never finished a run',
-    );
-    expect(
-      apiContract.barSummary(
-        buildChecks(healthyFacts({ data: [healthyData({ enabled: false, ages: null })] })),
-      ).kind,
-    ).toBe('clean');
+    expect(c).toMatchObject({ state: 'warn', label: 'London to New York', note: 'not scheduled' });
+    expect(c.fix).toMatchObject({ text: 'start a run for newer prices' });
+    expect(dataOf({ scheduled: false }).state).toBe('ok');
+    expect(dataOf({ scheduled: false }).note).toBe('not scheduled');
+    expect(dataOf({ scheduled: true }).note).toBeNull();
   });
 
   it.each(['paused_error', 'interrupted', 'cancelled'] as const)(

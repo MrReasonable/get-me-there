@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { Estimate } from '../types/execution.js';
 import { iataSchema, isoDateSchema, isoDateTimeSchema, isoMonthSchema } from '../types/ids.js';
+import { localTimeWindowSchema } from '../types/window.js';
 import {
   cabinSchema,
   cellKeySchema,
@@ -11,8 +12,6 @@ import {
   stageSchema,
 } from './common.js';
 
-const timeOfDay = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'HH:mm');
-const localTimeWindowSchema = z.object({ from: timeOfDay, to: timeOfDay });
 const positiveInt = z.number().int().min(0);
 
 /** Spec §6.1 windows: relative resolves at execution start; absolute is clamped to tomorrow. */
@@ -71,6 +70,8 @@ export const executionBudgetSchema = z.object({
   maxCostMicroGbp: microGbpSchema,
   /** Set by the engine at creation (camoufox's page cap, decision 69); a definition's own budget never carries it. */
   providerMaxCalls: z.partialRecord(providerIdSchema, z.number().int().min(1)).exactOptional(),
+  /** Spec rev 55 §8.1 (ruling A5): set by the engine at creation; a definition's own budget never carries it; never 0 (the guard still reads an absent or invalid one as 0, fail closed). */
+  flightListPages: z.number().int().min(1).exactOptional(),
 });
 export const providersConfigSchema = z.object({
   discovery: z.array(providerIdSchema),
@@ -78,7 +79,12 @@ export const providersConfigSchema = z.object({
   discoveryRefreshHours: z.partialRecord(providerIdSchema, z.number().int().min(1)),
 });
 
-const definitionFields = {
+/**
+ * The create body's fields, one table: the create and update requests, the stored shape and (spec revision 55 §10)
+ * create-and-start's body are all built from it, so a field added here reaches each (ruling A3: exported for
+ * `searches.ts`).
+ */
+export const definitionFields = {
   name: z.string().min(1).max(120),
   origins: z.array(iataSchema).min(1),
   destinations: z.array(iataSchema).min(1),
@@ -100,7 +106,18 @@ const definitionFields = {
   /** decision 37: the calls of that same confirmation; a confirmation covers a run only with both */
   confirmedCalls: positiveInt.optional(),
 };
-const refineDefinition = (
+/**
+ * The fields of every request body (create, update, estimate, create-and-start): `definitionFields` with a budget that
+ * drops the engine-owned allowances (`providerMaxCalls`, `flightListPages`: set on the run's snapshot at creation, spec
+ * rev 55 §8.1, ruling A5), so a definition never stores them; dropped as any unknown budget key is, never refused, so a
+ * client echoing a stored budget still saves.
+ */
+export const definitionRequestFields = {
+  ...definitionFields,
+  budget: executionBudgetSchema.omit({ providerMaxCalls: true, flightListPages: true }),
+};
+/** The save-time policy refinements of a create body, shared with create-and-start's body (ruling A3). */
+export const refineDefinition = (
   d: {
     origins: string[];
     destinations: string[];
@@ -143,10 +160,18 @@ const storedFields = {
 export const definitionShapeSchema = z
   .object(storedFields)
   .omit({ confirmedCostPence: true, confirmedCalls: true });
-export const definitionCreateRequestSchema = z.object(definitionFields).superRefine(refineDefinition);
+export const definitionCreateRequestSchema = z.object(definitionRequestFields).superRefine(refineDefinition);
 /** `POST /definitions` takes no body (the plan default, a draft) or a create body; one object, so handlers can name it. */
 export const definitionCreateOptionalSchema = definitionCreateRequestSchema.optional();
-export const definitionUpdateRequestSchema = z.object(definitionFields).partial();
+/**
+ * `PUT /definitions/:id` (spec revision 55 §10): any of the fields, and `confirmShown: true` when the sent confirmation
+ * is the estimate sentence's shown runnable totals (Repeat weekly's Save), which the route then stores when they cover
+ * its own recomputation of them; without it a sent confirmation must cover the worst case over every line (WP8).
+ */
+export const definitionUpdateRequestSchema = z
+  .object(definitionRequestFields)
+  .partial()
+  .extend({ confirmShown: z.boolean().optional() });
 
 export const budgetFitSchema = z.object({
   fits: z.boolean(),
@@ -183,9 +208,72 @@ export const estimateSchema: z.ZodType<Estimate> = z.object({
   assumptions: z.array(z.string()),
   windowClamped: z.boolean(),
   retryFactor: z.number().min(1),
+  /**
+   * Spec rev 55 §8.1 (ruling A5), revision 56 (R-estimate): the flight-list step's typical pages and seconds, and (each
+   * optional for good, so an estimate stored before WP21 still parses: ruling A3) the date pairs read, whether returns
+   * are planned, and the bound's pages and seconds; no key without camoufox. The reader fills what an older estimate
+   * lacks (Task 21.7, ruling A3): `pairs` its pages (one page a pair before WP21) and `returns` false (outbound only).
+   */
+  flightLists: z
+    .strictObject({
+      pages: positiveInt,
+      seconds: positiveInt,
+      pairs: positiveInt.exactOptional(),
+      returns: z.boolean().exactOptional(),
+      pagesMax: positiveInt.exactOptional(),
+      secondsMax: positiveInt.exactOptional(),
+    })
+    // why: ruling A3: the stored shape stays optional, the type the readers see is total
+    .transform(({ pairs, returns, ...rest }) => ({
+      ...rest,
+      pairs: pairs ?? rest.pages,
+      returns: returns ?? false,
+    }))
+    .exactOptional(),
 });
-/** Both estimate routes return the estimate with its budget fit, so the form shows both before the create click. */
-export const estimateResponseSchema = z.object({ estimate: estimateSchema, budgetFit: budgetFitSchema });
+/**
+ * Why pressing Search now confirms a run (spec §10, ruling A22): a code with its figures, never engine English; the web
+ * words it from its own copy. `cost`: the estimate is above `SOFT_CONFIRM_PENCE`. `call-share`: a provider's calls are
+ * above a fifth of its call cap (its month's, or its lifetime's on a trial).
+ */
+export const softConfirmSchema = z.discriminatedUnion('reason', [
+  z.strictObject({
+    reason: z.literal('cost'),
+    estimatePence: moneyPenceSchema,
+    thresholdPence: moneyPenceSchema,
+  }),
+  z.strictObject({
+    reason: z.literal('call-share'),
+    providerId: providerIdSchema,
+    calls: positiveInt,
+    cap: positiveInt,
+    window: z.enum(['month', 'lifetime']),
+  }),
+]);
+/** One billable-plan provider's runnable calls and the calls its window has left (null without a cap). */
+export const billedCallsSchema = z.strictObject({
+  providerId: providerIdSchema,
+  calls: positiveInt,
+  left: positiveInt.nullable(),
+  window: z.enum(['month', 'lifetime']),
+});
+/**
+ * Both estimate routes return the estimate with its budget fit, so the form shows both before the create click, and
+ * what the estimate asks (spec §10, §8.1 rev 55): the date pairs, how many the plan covers fully or partly (planned
+ * cells only) and how many are reused apart, whether the press confirms the run, the billed calls and the browser
+ * worker's month (flight pages included). The estimate carries `flightLists` when camoufox is named (Task 20.9).
+ */
+export const estimateResponseSchema = z.object({
+  estimate: estimateSchema,
+  budgetFit: budgetFitSchema,
+  datePairs: positiveInt,
+  datePairsCovered: positiveInt,
+  datePairsPartly: positiveInt,
+  datePairsReused: positiveInt,
+  softConfirm: softConfirmSchema.nullable(),
+  billedCalls: z.array(billedCallsSchema),
+  monthlyPages: z.strictObject({ planned: positiveInt, left: positiveInt }).nullable(),
+});
 export const definitionResponseSchema = z.object({
   ...storedFields,
   confirmedCostPence: moneyPenceSchema.nullable(),

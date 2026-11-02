@@ -1,5 +1,6 @@
 import { chmodSync, existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { Readable } from 'node:stream';
 import { asIsoDateTime, fixedClock } from '@gmt/core';
 import fc from 'fast-check';
 import { beforeEach, describe, expect, it } from 'vitest';
@@ -8,6 +9,7 @@ import { countsFact } from '../src/monthly.js';
 import { type EntryContext, EX_CONFIG, EX_UNAVAILABLE } from '../src/run.js';
 import {
   EX_TEMPFAIL,
+  entry,
   SESSION_LINE_MAX_BYTES,
   type SessionLine,
   sessionEntry,
@@ -205,6 +207,8 @@ describe('run.ts session merge (Task 17.8)', () => {
     });
     const t = ctx(d, ['merge']);
     expect(await sessionEntry(t.c, deps(line()))).toBe(0);
+    // why: only windows that differ are reported
+    expect(t.err).toEqual([]);
     expect(read(d, 'monthly.json')).toEqual({ ...OCT, pages: 49, scrolls: 304 });
     expect(statSync(join(d, 'monthly.json')).mode & 0o777).toBe(0o600);
     expect(read(d, 'pacer.json')).toEqual({ lastPageAt: '2027-10-03T11:58:00.000Z' });
@@ -384,5 +388,38 @@ describe('the session line on stdin (Task 17.8)', () => {
     const bad = ctx(dir(), ['export'], { CAMOUFOX_WORKER_KEY: 'short' });
     expect(await sessionEntry(bad.c, deps())).toBe(EX_CONFIG);
     expect(bad.err.join()).toContain('CAMOUFOX_WORKER_KEY');
+  });
+});
+
+// why: run.ts's own entry: the system clock and the process's standard input
+describe('the session entry run.ts calls', () => {
+  it('refuses another subcommand with the usage', async () => {
+    const t = ctx(dir(), ['other']);
+    expect(await entry(t.c)).toBe(EX_CONFIG);
+    expect(t.err.join()).toContain('usage: run.ts session export | seed | merge');
+  });
+  it('exports this window’s line from the clock', async () => {
+    const t = ctx(dir(), ['export']);
+    expect(await entry(t.c)).toBe(0);
+    expect(sessionLineSchema.parse(JSON.parse(t.out[0] ?? ''))).toMatchObject({
+      lastPageAt: null,
+      pages: 0,
+      scrolls: 0,
+      cooldown: null,
+    });
+  });
+  it('reads the session line from standard input', async () => {
+    const real = Object.getOwnPropertyDescriptor(process, 'stdin');
+    Object.defineProperty(process, 'stdin', {
+      value: Readable.from([Buffer.from(line({ lastPageAt: asIsoDateTime('2026-01-02T03:04:05.000Z') }))]),
+      configurable: true,
+    });
+    try {
+      const t = ctx(dir(), ['seed']);
+      expect(await entry(t.c)).toBe(0);
+      expect(JSON.parse(t.out[0] ?? '')).toEqual({ ok: true, lastPageAt: '2026-01-02T03:04:05.000Z' });
+    } finally {
+      if (real !== undefined) Object.defineProperty(process, 'stdin', real);
+    }
   });
 });

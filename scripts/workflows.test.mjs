@@ -524,9 +524,9 @@ describe('WP16a: the mutation workflow runs every package’s Stryker gate and t
   it('the web shard mutates its pure-logic files over the pure .test.ts files only, with StringLiteral left out', () => {
     const cfg = JSON.parse(readFileSync(join(REPO, 'apps/web', 'stryker.config.json'), 'utf8'));
     expect(cfg.commandRunner.command).toBe(
-      'pnpm exec vitest run --coverage.enabled=false --bail=1 test/views/dates/logic test/state',
+      'pnpm exec vitest run --coverage.enabled=false --bail=1 test/views/dates/logic test/state test/format test/views/searches/logic',
     );
-    for (const d of ['test/views/dates/logic', 'test/state']) {
+    for (const d of ['test/views/dates/logic', 'test/state', 'test/format', 'test/views/searches/logic']) {
       const files = readdirSync(join(REPO, 'apps/web', d));
       expect(files.length, d).toBeGreaterThan(0);
       expect(

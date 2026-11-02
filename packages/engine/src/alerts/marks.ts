@@ -6,13 +6,15 @@
 import {
   type AlertCandidate,
   type Cell,
+  calendarStaleThreshold,
   cellKeyString,
   DEFAULT_DISCOVERY_REFRESH_HOURS,
   type Firing,
-  isStale,
   isTruncated,
   type ProviderId,
   resultRowKey,
+  type StaleThresholds,
+  stalenessOf,
   type VerifiedCandidate,
 } from '@gmt/core';
 import type { AlertRunContext } from './context.js';
@@ -46,18 +48,18 @@ export function rowKeyOf(c: AlertCandidate): string {
 }
 
 /**
- * The stale threshold of a price (spec §8.1): STALE_AFTER_HOURS on the itinerary-search basis; on the calendar basis
- * CALENDAR_STALE_AFTER_HOURS, else the provider's refresh plus its declared age (0 when the vendor's age is unknown).
- * The same one-line pick as WP8's calendarThreshold (§13 item 3); the staleness rule itself is core's isStale.
+ * The thresholds the per-price stale rule reads for a candidate (spec revision 55 §8.1): the definition's refresh for the
+ * price's provider, CALENDAR_STALE_AFTER_HOURS (null when unset) and STALE_AFTER_HOURS. Never the registered provider's
+ * declared age: core's `stalenessOf` uses the price's own stored age.
  */
-function staleThresholdHours(ctx: AlertRunContext, c: AlertCandidate): number {
-  if (c.basis === 'verified') return ctx.deps.config.staleAfterHours;
-  const configured = ctx.deps.config.calendarStaleAfterHours;
-  if (configured !== null) return configured;
-  const id: ProviderId = c.provenance.providerId;
-  const refresh = ctx.snapshot.providers.discoveryRefreshHours[id] ?? DEFAULT_DISCOVERY_REFRESH_HOURS;
-  const declared = ctx.deps.providers.find((p) => p.id === id)?.discovery?.info.maxAgeHours ?? 0;
-  return refresh + (declared === 'unknown' ? 0 : declared);
+function thresholdsOf(ctx: AlertRunContext, c: AlertCandidate): StaleThresholds {
+  const id: ProviderId =
+    c.basis === 'verified' ? c.observation.provenance.providerId : c.provenance.providerId;
+  return {
+    refreshHours: ctx.snapshot.providers.discoveryRefreshHours[id] ?? DEFAULT_DISCOVERY_REFRESH_HOURS,
+    overrideHours: ctx.deps.config.calendarStaleAfterHours,
+    staleAfterHours: ctx.deps.config.staleAfterHours,
+  };
 }
 
 /**
@@ -106,12 +108,17 @@ export function marksFor(
   };
   const out = new Map<string, FiringMarks>();
   for (const { candidate: c } of firings) {
-    const threshold = staleThresholdHours(ctx, c);
     const p = c.basis === 'verified' ? c.observation.provenance : c.provenance;
+    const t = thresholdsOf(ctx, c);
+    // why: the threshold stored on the event (decision 56) is the one core's rule judged against
+    const threshold =
+      c.basis === 'verified' ? t.staleAfterHours : calendarStaleThreshold(p, t.refreshHours, t.overrideHours);
     out.set(rowKeyOf(c), {
       staleThresholdHours: threshold,
-      // why: decisions 55, 56 — core's isStale by effective age; an unknown vendor age is aged by its fetch age alone
-      stale: isStale(p, ctx.now, threshold) ? { thresholdHours: threshold } : null,
+      // why: revision 55 §8.1 — the one per-price rule, core's stalenessOf, as the board and History read it
+      stale: stalenessOf({ provenance: p, basis: c.basis }, t, ctx.now).stale
+        ? { thresholdHours: threshold }
+        : null,
       truncated:
         c.basis === 'calendar' && truncated.has(`${c.provenance.providerId}|${cellKeyString(c.cell)}`),
       notSeenInLatest: c.basis === 'verified' ? notSeenMark(ctx, c, offersOf) : null,

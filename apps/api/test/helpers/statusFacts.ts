@@ -24,7 +24,7 @@ export function healthyData(over: Partial<DataFacts> = {}): DataFacts {
   return {
     definitionId: 'def-1',
     name: 'London to New York',
-    enabled: true,
+    scheduled: true,
     latest: { status: 'completed', at: ago(2 * HOUR), isCatchUp: false, skipCode: null },
     lastRun: { status: 'completed', at: ago(2 * HOUR), isCatchUp: false, skipCode: null },
     coverage: {
@@ -44,6 +44,7 @@ export function okWorkerStatus(over: Partial<WorkerStatusFacts> = {}): WorkerSta
   return {
     finding: null,
     formVerified: true,
+    flags: { FORM_VERIFIED: true },
     appInstances: 1,
     monthly: { pages: 10, scrolls: 20, readable: true },
     consent: { kind: 'socs', expiresAt: inFuture(200 * DAY), boundedBy: 'capture', mark: 'reject' },

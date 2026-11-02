@@ -48,7 +48,7 @@ function otherDiscoveryRunning(ctx: EngineContext, run: RunState): boolean {
       return false;
     if (run.blocked.has(lineKey('discovery', id))) return false;
     const lane = run.lanes.get(`discovery|${id}`);
-    if (lane !== undefined && (lane.budgetOut || lane.intake.signal.aborted)) return false;
+    if (lane !== undefined && (lane.budgetOutScope !== null || lane.intake.signal.aborted)) return false;
     return (
       (lane?.inFlight.size ?? 0) > 0 ||
       resumableCells(ctx, run.executionId, 'discovery', id, run.manual).length > 0

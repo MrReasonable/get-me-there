@@ -3,20 +3,16 @@ import { HttpResponse, http } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { App } from '../../../src/App.js';
 import { PLAN_COPY } from '../../../src/copy/plan.js';
+import { COPY } from '../../../src/copy.js';
 import { EXAMPLE_LABEL } from '../../../src/example.js';
 import { DefinitionsView } from '../../../src/views/Definitions/DefinitionsView.js';
-import { API, coverageCheck, definition, estimate, providersResponse } from '../../fixtures.js';
+import { API, coverageCheck, definition, estimateResponse, providersResponse } from '../../fixtures.js';
 import { server } from '../../msw/server.js';
 import { renderWithProviders } from '../../render.js';
 
-const pricedEstimate = estimate({ totalCostMicroGbp: 12_345, totalCostPence: 2 });
-const estimateBody = (budgetFit = definition().budgetFit) => ({ estimate: pricedEstimate, budgetFit });
 const importButton = `Import example (${EXAMPLE_LABEL})`;
-
-async function importAndEstimate(user: ReturnType<typeof renderWithProviders>['user']) {
-  await user.click(await screen.findByRole('button', { name: importButton }));
-  await user.click(screen.getByRole('button', { name: 'Show estimate' }));
-}
+/** The coverage check, the example import and the notices belong to the Edit page (spec rev 55 §11 Edit). */
+const EDIT = '?view=definitions&edit=def-0001';
 
 describe('coverage check before saving (spec §1, §10, §11)', () => {
   it('posts the entered pairs, window and nights and shows cached cells of cells in band per pair per month', async () => {
@@ -27,7 +23,7 @@ describe('coverage check before saving (spec §1, §10, §11)', () => {
         return HttpResponse.json(coverageCheck());
       }),
     );
-    const { user } = renderWithProviders(<DefinitionsView />, { search: '?view=definitions' });
+    const { user } = renderWithProviders(<DefinitionsView />, { search: EDIT });
     await user.click(await screen.findByRole('button', { name: importButton }));
     await user.click(screen.getByRole('button', { name: 'Check free coverage' }));
     const table = await screen.findByRole('table', { name: 'Check free coverage' });
@@ -39,7 +35,7 @@ describe('coverage check before saving (spec §1, §10, §11)', () => {
     expect(
       [...(within(table).getAllByRole('row')[1]?.querySelectorAll('th, td') ?? [])].map((c) => c.textContent),
     ).toEqual(['LHR → JFK', '5 of 372', '0 of 360']);
-    expect(screen.getByText('14 free tile requests used')).toBeInTheDocument();
+    expect(screen.getByText('14 free requests used')).toBeInTheDocument();
     expect(bodies).toEqual([
       {
         origins: ['LHR', 'LGW'],
@@ -76,7 +72,7 @@ describe('coverage check before saving (spec §1, §10, §11)', () => {
         ),
       ),
     );
-    const { user } = renderWithProviders(<DefinitionsView />);
+    const { user } = renderWithProviders(<DefinitionsView />, { search: EDIT });
     await user.click(await screen.findByRole('button', { name: importButton }));
     await user.click(screen.getByRole('button', { name: 'Check free coverage' }));
     const table = await screen.findByRole('table', { name: 'Check free coverage' });
@@ -93,7 +89,7 @@ describe('coverage check before saving (spec §1, §10, §11)', () => {
   });
 
   it('a check made for other airports or dates is marked out of date', async () => {
-    const { user } = renderWithProviders(<DefinitionsView />);
+    const { user } = renderWithProviders(<DefinitionsView />, { search: EDIT });
     await user.click(await screen.findByRole('button', { name: importButton }));
     await user.click(screen.getByRole('button', { name: 'Check free coverage' }));
     await screen.findByRole('table', { name: 'Check free coverage' });
@@ -116,7 +112,7 @@ describe('coverage check before saving (spec §1, §10, §11)', () => {
         return HttpResponse.json(coverageCheck());
       }),
     );
-    const { user } = renderWithProviders(<DefinitionsView />);
+    const { user } = renderWithProviders(<DefinitionsView />, { search: EDIT });
     await user.click(await screen.findByRole('button', { name: importButton }));
     await user.click(screen.getByRole('button', { name: 'Check free coverage' }));
     await user.clear(screen.getByLabelText('Longest stay'));
@@ -140,190 +136,37 @@ describe('coverage check before saving (spec §1, §10, §11)', () => {
         }),
       ),
     );
-    renderWithProviders(<DefinitionsView />);
+    renderWithProviders(<DefinitionsView />, { search: EDIT });
     expect(await screen.findByText('The free coverage check needs TRAVELPAYOUTS_TOKEN.')).toBeInTheDocument();
   });
 });
 
-describe('estimate, then the create click as the explicit confirmation (spec §8.1, §11)', () => {
-  it('estimates the unsaved body; Create, below the estimate, names calls and pounds and POSTs both confirmation figures', async () => {
-    const estimates: unknown[] = [];
-    const creates: unknown[] = [];
+describe('the budget fit under More options (spec rev 55 §11)', () => {
+  it('a budgetFit miss is shown as an alert beside the monthly figures', async () => {
     server.use(
-      http.post(`${API}/definitions/estimate`, async ({ request }) => {
-        estimates.push(await request.json());
-        return HttpResponse.json(estimateBody());
-      }),
-      http.post(`${API}/definitions`, async ({ request }) => {
-        creates.push(await request.json());
-        return HttpResponse.json(
-          definition({ id: 'def-0002', confirmedCostPence: 2, estimate: pricedEstimate }),
-        );
-      }),
-    );
-    const { user } = renderWithProviders(<DefinitionsView />);
-    await importAndEstimate(user);
-    const panel = await screen.findByRole('region', { name: 'Estimate' });
-    expect(within(panel).getByText('126 cells')).toBeInTheDocument();
-    expect(within(panel).getByText('Travelpayouts discovery: 14 calls · £0 · about 20s')).toBeInTheDocument();
-    expect(
-      within(panel).getByText('about 154 calls (hard stop 2000), £0.02 per run · about 10m'),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText('provider-month:searchapi: 616 estimated a month, cap 10000'),
-    ).toBeInTheDocument();
-    expect(estimates[0]).toMatchObject({ origins: ['LHR', 'LGW'], enabled: false });
-    expect(estimates[0]).not.toHaveProperty('confirmedCostPence');
-    const createButton = screen.getByRole('button', {
-      name: 'Create and confirm about 154 calls (hard stop 2000), £0.02 per run',
-    });
-    // why: the operator sees the breakdown before the amount they confirm (review UI-11).
-    expect(panel.compareDocumentPosition(createButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(creates).toEqual([]);
-    await user.click(createButton);
-    await expect.poll(() => creates.length).toBe(1);
-    expect(creates[0]).toMatchObject({
-      origins: ['LHR', 'LGW'],
-      enabled: false,
-      confirmedCostPence: 2,
-      confirmedCalls: 154,
-    });
-    expect(await screen.findByRole('status')).toHaveTextContent(
-      'Created. Scheduled runs use the calls and cost you confirmed.',
-    );
-  });
-
-  it('a half-filled time window disables Create and confirm as well, with the reason beside it (ruling 6)', async () => {
-    server.use(http.post(`${API}/definitions/estimate`, () => HttpResponse.json(estimateBody())));
-    const { user } = renderWithProviders(<DefinitionsView />);
-    await importAndEstimate(user);
-    const create = await screen.findByRole('button', { name: /^Create and confirm/ });
-    expect(create).toBeEnabled();
-    await user.click(screen.getByText(PLAN_COPY.moreOptions));
-    await user.clear(screen.getByLabelText('arrival time window to'));
-    expect(create).toBeDisabled();
-    expect(create).toHaveAccessibleDescription(
-      'Cannot estimate or save: a time window needs both ends, or neither.',
-    );
-  });
-
-  it('editing after an estimate replaces Create with "show the estimate again" until re-estimated', async () => {
-    server.use(http.post(`${API}/definitions/estimate`, () => HttpResponse.json(estimateBody())));
-    const { user } = renderWithProviders(<DefinitionsView />);
-    await importAndEstimate(user);
-    await screen.findByRole('button', { name: /Create and confirm/ });
-    await user.clear(screen.getByLabelText('Longest stay'));
-    await user.type(screen.getByLabelText('Longest stay'), '14');
-    expect(screen.queryByRole('button', { name: /Create and confirm/ })).toBeNull();
-    expect(
-      screen.getByText('The draft changed since this estimate; show the estimate again before creating.'),
-    ).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Show estimate' }));
-    expect(await screen.findByRole('button', { name: /Create and confirm/ })).toBeInTheDocument();
-  });
-
-  it('editing while the estimate is in flight leaves Create hidden: the estimate is recorded for the draft that was sent', async () => {
-    let release: () => void = () => undefined;
-    const gate = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    const sent: unknown[] = [];
-    server.use(
-      http.post(`${API}/definitions/estimate`, async ({ request }) => {
-        sent.push(await request.json());
-        await gate;
-        return HttpResponse.json(estimateBody());
-      }),
-    );
-    const { user } = renderWithProviders(<DefinitionsView />);
-    await importAndEstimate(user);
-    await expect.poll(() => sent.length).toBe(1);
-    // why: the form fields stay editable while the request is in flight
-    await user.clear(screen.getByLabelText('Longest stay'));
-    await user.type(screen.getByLabelText('Longest stay'), '14');
-    release();
-    expect(
-      await screen.findByText(
-        'The draft changed since this estimate; show the estimate again before creating.',
-      ),
-    ).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Create and confirm/ })).toBeNull();
-  });
-
-  it('Create sends the body that was estimated, with the confirmation of that estimate', async () => {
-    const created: unknown[] = [];
-    server.use(
-      http.post(`${API}/definitions/estimate`, () => HttpResponse.json(estimateBody())),
-      http.post(`${API}/definitions`, async ({ request }) => {
-        created.push(await request.json());
-        return HttpResponse.json(definition());
-      }),
-    );
-    const { user } = renderWithProviders(<DefinitionsView />);
-    await importAndEstimate(user);
-    await user.click(await screen.findByRole('button', { name: /^Create and confirm/ }));
-    await expect.poll(() => created.length).toBe(1);
-    expect(created[0]).toMatchObject({ minNights: 10, maxNights: 21, confirmedCalls: 154 });
-  });
-
-  it('a budgetFit miss is shown as an alert before the create click', async () => {
-    server.use(
-      http.post(`${API}/definitions/estimate`, () =>
+      http.post(`${API}/definitions/:id/estimate`, () =>
         HttpResponse.json(
-          estimateBody({
-            fits: false,
-            runsPerMonth: 4,
-            perScope: [{ scope: 'provider-month:searchapi', estimated: 12000, cap: 10000, fits: false }],
+          estimateResponse({
+            budgetFit: {
+              fits: false,
+              runsPerMonth: 4,
+              perScope: [{ scope: 'provider-month:searchapi', estimated: 12000, cap: 10000, fits: false }],
+            },
           }),
         ),
       ),
     );
-    const { user } = renderWithProviders(<DefinitionsView />);
-    await importAndEstimate(user);
-    const alert = await screen.findByRole('alert');
-    expect(alert).toHaveTextContent('Does not fit every cap at 4 runs a month:');
-    expect(alert).toHaveTextContent(
-      'provider-month:searchapi: 12000 estimated a month, cap 10000over the cap',
+    const { user } = renderWithProviders(<DefinitionsView />, { search: EDIT });
+    await user.click(await screen.findByText(PLAN_COPY.moreOptions));
+    const alert = await screen.findByText('Does not fit every cap at 4 runs a month:');
+    expect(alert.parentElement).toHaveAttribute('role', 'alert');
+    expect(alert.parentElement).toHaveTextContent(
+      'Google Flights via SearchApi this month: about 12000, limit 10000over the cap',
     );
-    expect(screen.getByRole('button', { name: /Create and confirm/ })).toBeInTheDocument();
   });
 });
 
 describe('saved definitions (spec §8.1)', () => {
-  it('a save that raises the estimate above the confirmation asks again with calls and pounds; Confirm PUTs ceil(estimate / 10 000)', async () => {
-    const puts: unknown[] = [];
-    server.use(
-      http.put(`${API}/definitions/:id`, async ({ request }) => {
-        puts.push(await request.json());
-        return HttpResponse.json(
-          puts.length === 1
-            ? definition({
-                needsConfirmation: {
-                  estimateMicroGbp: 2_500_000,
-                  totalCalls: 300,
-                  confirmedCostPence: 100,
-                  confirmedCalls: 154,
-                },
-              })
-            : definition({ confirmedCostPence: 250, confirmedCalls: 300 }),
-        );
-      }),
-    );
-    const { user } = renderWithProviders(<DefinitionsView />, { search: '?view=definitions&edit=def-0001' });
-    await user.click(await screen.findByRole('button', { name: 'Save changes' }));
-    expect(
-      await screen.findByText(
-        'The new estimate, about 300 calls (hard stop 2000) and £2.50 per run, is above what you confirmed (154 calls, £1). Scheduled runs are skipped until you confirm.',
-      ),
-    ).toBeInTheDocument();
-    expect(puts[0]).not.toHaveProperty('confirmedCostPence');
-    await user.click(
-      screen.getByRole('button', { name: 'Confirm about 300 calls (hard stop 2000), £2.50 per run' }),
-    );
-    // why: the call trigger comes from the contract's needsConfirmation (decisions 42, 43), never from a stale estimate.
-    await expect.poll(() => puts.at(-1)).toEqual({ confirmedCostPence: 250, confirmedCalls: 300 });
-  });
-
   it("shows the definition's notices from the API", async () => {
     server.use(
       http.get(`${API}/definitions`, () =>
@@ -331,26 +174,25 @@ describe('saved definitions (spec §8.1)', () => {
       ),
     );
     renderWithProviders(<DefinitionsView />, { search: '?view=definitions&edit=def-0001' });
-    const list = await screen.findByRole('list', { name: 'Notices for this definition' });
+    const list = await screen.findByRole('list', { name: 'Notices for this search' });
     expect(within(list).getByText('alerts running on calendar basis only')).toBeInTheDocument();
   });
 
   it('an edit= link to a definition that does not exist says so instead of showing a blank create form', async () => {
     renderWithProviders(<DefinitionsView />, { search: '?view=definitions&edit=no-such-definition' });
     expect(await screen.findByRole('alert')).toHaveTextContent(PLAN_COPY.notFound);
-    // why: no create flow behind a dead link: nothing to estimate or confirm
-    expect(screen.queryByRole('button', { name: 'Show estimate' })).toBeNull();
-    expect(screen.queryByRole('button', { name: /^Create and confirm/ })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Save changes' })).toBeNull();
+    // why: no form behind a dead link: nothing to estimate, start or save
+    expect(screen.queryByRole('button', { name: /^Search now/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: COPY.editSearch.save })).toBeNull();
   });
 
   it('edit=new and an existing definition show no not-found alert', async () => {
     const first = renderWithProviders(<DefinitionsView />, { search: '?view=definitions&edit=new' });
-    await screen.findByRole('button', { name: importButton });
+    await screen.findByRole('button', { name: /^Search now/ });
     expect(screen.queryByText(PLAN_COPY.notFound)).toBeNull();
     first.unmount();
-    renderWithProviders(<DefinitionsView />, { search: '?view=definitions&edit=def-0001' });
-    await screen.findByRole('button', { name: 'Save changes' });
+    renderWithProviders(<DefinitionsView />, { search: EDIT });
+    await screen.findByRole('button', { name: COPY.editSearch.save });
     expect(screen.queryByText(PLAN_COPY.notFound)).toBeNull();
   });
 
@@ -375,10 +217,13 @@ describe('the App (spec §11 layout)', () => {
     const nav = screen.getByRole('navigation', { name: 'Views' });
     await user.click(within(nav).getByRole('link', { name: 'Providers' }));
     expect(await screen.findByRole('heading', { name: 'Providers' })).toBeInTheDocument();
-    expect(screen.getByRole('region', { name: 'Run status' })).toBeInTheDocument();
+    // why: ruling R-bar — the bar always carries the month's spend, whichever view is open
+    expect(await screen.findByRole('region', { name: COPY.monthSpendLabel })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Run now/ })).toBeNull();
-    // why: WP19 Task 19.7: the detail is not in the nav; Dates is, and a board row opens the detail again
-    await user.click(within(nav).getByRole('link', { name: 'Dates' }));
+    // why: WP19 Task 19.7: the detail is not in the nav; a card's See dates opens the search's page (WP20 Task 20.3), and a
+    // board row opens the detail again
+    await user.click(within(nav).getByRole('link', { name: 'Searches' }));
+    await user.click(await screen.findByRole('link', { name: /^See dates for / }));
     const board = await screen.findByRole('table', { name: /^Best dates/ });
     const [first] = within(board).getAllByRole('row').slice(1);
     if (first === undefined) throw new Error('the board has a row');

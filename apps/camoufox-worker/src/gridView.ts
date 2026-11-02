@@ -24,7 +24,7 @@
  *   query's dates and carry no price.
  */
 import type { GridCell, IsoDate } from '@gmt/core';
-import { countOf, type LocatorLike, nameOf, timeoutOf } from './driver.js';
+import { countOf, type LocatorLike, namesOf, textsOf } from './driver.js';
 import {
   dayLabels,
   parseCellName,
@@ -73,11 +73,10 @@ export interface RawView {
   datesGrid: DatesGridCheck;
 }
 
+// why: WP21 Task 21.3 fix round 2: the panel re-renders on every scroll, so its lines and names are read in one page
+// call each (textsOf, namesOf), never counted and then read one node at a time
 async function texts(l: LocatorLike, d: Deadline): Promise<string[]> {
-  const out: string[] = [];
-  for (let i = 0, n = await countOf(l, d); i < n; i++)
-    out.push((await d.race(l.nth(i).textContent(timeoutOf(d)))) ?? '');
-  return out;
+  return (await textsOf(l, d)).map((t) => t ?? '');
 }
 
 /**
@@ -110,10 +109,7 @@ export async function readRawView(
 ): Promise<RawView> {
   const G = S.results.dateGrid;
   const scrollNames: string[] = [G.scroll.left, G.scroll.right, G.scroll.up, G.scroll.down];
-  const buttons = panel.getByRole('button');
-  const names: Array<string | null> = [];
-  for (let i = 0, n = await countOf(buttons, d); i < n; i++) names.push(await nameOf(buttons.nth(i), d));
-  const candidates = cellCandidates(names, G);
+  const candidates = cellCandidates(await namesOf(panel.getByRole('button'), d), G);
   let scrollButtons = 0;
   for (const name of scrollNames)
     if ((await countOf(panel.getByRole('button', { name, exact: true }), d)) === 1) scrollButtons++;

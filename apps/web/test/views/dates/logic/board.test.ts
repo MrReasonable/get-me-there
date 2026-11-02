@@ -1,10 +1,17 @@
 import { asIsoDate, type DatePair, decodeDatePairs } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
+import { COPY } from '../../../../src/copy.js';
 import {
   arrival,
   boardModel,
+  calendarStyled,
+  flightReadLine,
   isSyntheticRead,
+  type ListsState,
   PAGE_SIZE,
+  sellerCoverage,
+  sellerOf,
+  setsAirlineOrLayover,
   sortBoard,
 } from '../../../../src/views/Dates/board.js';
 import {
@@ -13,9 +20,12 @@ import {
   type DatesOptions,
   datesResponse,
   decodedDates,
+  figurePairing,
+  pairingFig,
   priced,
   pricedPair,
   provCached,
+  provFlightList,
   provSearched,
   provSynthetic,
   verifiedFig,
@@ -315,6 +325,38 @@ describe('isSyntheticRead: the red banner, judged on the whole decoded read (spe
       false,
     );
   });
+  it("R-synthetic (prov-r3-008): a pairing figure's fixture-provider grid price is enough", () => {
+    const clean = pairingFig();
+    expect(isSyntheticRead(read({ pairs: { [at('2027-03-14', 10)]: pricedPair(clean) } }), undefined)).toBe(
+      false,
+    );
+    const grid = pairingFig({
+      gridPrice: { pricePence: 56_400, provenance: provSynthetic(), stale: false, truncated: false },
+    });
+    expect(isSyntheticRead(read({ pairs: { [at('2027-03-14', 10)]: pricedPair(grid) } }), undefined)).toBe(
+      true,
+    );
+  });
+  it('R-synthetic: a calendar figure whose pairing beneath names the fixture provider is enough', () => {
+    const fig = (provenance: ReturnType<typeof provSynthetic>) =>
+      calendarFig({
+        price: { ...calendarFig().price, provenance: provCached() },
+        pairingRead: 'within-older',
+        pairing: figurePairing({ provenance, stale: 'refresh' }),
+      });
+    expect(
+      isSyntheticRead(
+        read({ pairs: { [at('2027-03-14', 10)]: pricedPair(fig(provFlightList())) } }),
+        undefined,
+      ),
+    ).toBe(false);
+    expect(
+      isSyntheticRead(
+        read({ pairs: { [at('2027-03-14', 10)]: pricedPair(fig(provSynthetic())) } }),
+        undefined,
+      ),
+    ).toBe(true);
+  });
   it('the fixture among the discovery providers, with no price at all', () => {
     expect(
       isSyntheticRead(decodedDates({ discoveryProviders: ['travelpayouts', 'fixture'] }), undefined),
@@ -324,5 +366,156 @@ describe('isSyntheticRead: the red banner, judged on the whole decoded read (spe
     const run = { progress: [{ providerId: 'travelpayouts' }, { providerId: 'fixture' }] };
     expect(isSyntheticRead(read({}), run)).toBe(true);
     expect(isSyntheticRead(read({}), { progress: [{ providerId: 'travelpayouts' }] })).toBe(false);
+  });
+});
+
+describe('calendarStyled: every basis but verified is calendar-styled (spec rev 56 §6.9: resultBasisOf)', () => {
+  it('verified is not; calendar and pairing are', () => {
+    expect(calendarStyled('verified')).toBe(false);
+    expect(calendarStyled('calendar')).toBe(true);
+    expect(calendarStyled('pairing')).toBe(true);
+  });
+});
+
+describe('flightReadLine: what a figure says of its flight read (spec rev 56 §6.9, §11 Board)', () => {
+  const D = COPY.datesView;
+  const reason = (d: string) => `the words for ${d}`;
+  const line = (f: ReturnType<typeof calendarFig>, lists: ListsState = 'available') =>
+    flightReadLine(f, lists, COPY, reason);
+  it("within says nothing beneath (it is a pairing figure's own read), whatever the basis", () => {
+    expect(line(calendarFig({ pairingRead: 'within' }))).toBeNull();
+    expect(line(calendarFig({ pairingRead: 'within' }), 'unavailable')).toBeNull();
+  });
+  it('a pairing figure says nothing here (its own lines are beneath its price)', () => {
+    expect(line(pairingFig())).toBeNull();
+  });
+  it('not-read: "flights not read" where flight lists are read, nothing where they are not', () => {
+    expect(line(calendarFig())).toEqual({ lead: 'flights not read', pairing: null });
+    expect(line(calendarFig(), 'unavailable')).toBeNull();
+  });
+  it('21.7 prov-004: "loading flights" while the flight-lists request is pending; the mark kept when it failed', () => {
+    expect(line(calendarFig(), 'loading')).toEqual({ lead: 'loading flights', pairing: null });
+    expect(line(calendarFig(), 'failed')).toEqual({ lead: 'flights not read', pairing: null });
+    // why: a read the date-pairs answer carries says its own words whatever the flight-lists request did
+    expect(line(calendarFig({ pairingRead: 'outbound-only' }), 'loading')).toEqual({
+      lead: 'return leg not read',
+      pairing: null,
+    });
+  });
+  it('21.7 ui-008 / code M9: a failed list with no reason (outside the contract) has no trailing colon', () => {
+    // why: spread past the contract on purpose: the words never end in an empty cause
+    expect(
+      line({ ...calendarFig({ pairingRead: 'list-failed', listReason: 'network' }), listReason: null }),
+    ).toEqual({
+      lead: "flights couldn't be read",
+      pairing: null,
+    });
+  });
+  it('the 21.6 ruling: a failed newest list is "flights couldn\'t be read: <its reason>", never "return leg not read"', () => {
+    expect(line(calendarFig({ pairingRead: 'list-failed', listReason: 'network' }))).toEqual({
+      lead: "flights couldn't be read: the words for network",
+      pairing: null,
+    });
+  });
+  it('outbound-only "return leg not read"; no-pairing-read "no return flight read"', () => {
+    expect(line(calendarFig({ pairingRead: 'outbound-only' }))).toEqual({
+      lead: 'return leg not read',
+      pairing: null,
+    });
+    expect(line(calendarFig({ pairingRead: 'no-pairing-read' }))).toEqual({
+      lead: 'no return flight read',
+      pairing: null,
+    });
+  });
+  it('the reads with a pairing beneath, each with its lead words', () => {
+    const p = figurePairing({ stale: 'refresh', ageHours: 216 });
+    expect(line(calendarFig({ pairingRead: 'within-older', pairing: p }))).toEqual({
+      lead: "return flights read 9d ago, older than this search's refresh:",
+      pairing: p,
+    });
+    const q = figurePairing();
+    expect(line(calendarFig({ pairingRead: 'within-other-limits', pairing: q }))).toEqual({
+      lead: 'your limits have changed since these return flights were read:',
+      pairing: q,
+    });
+    const from = figurePairing({
+      isFrom: true,
+      seller: null,
+      offersRead: 0,
+      complete: false,
+      which: 'over-limit',
+      pricePence: 120_400,
+      fromPence: 120_400,
+    });
+    expect(line(calendarFig({ pairingRead: 'over-limit', pairing: from }))).toEqual({
+      lead: 'no pairing within your limits read',
+      pairing: from,
+    });
+    expect(line(calendarFig({ pairingRead: 'sellers-not-read', pairing: from }))).toEqual({
+      lead: null,
+      pairing: from,
+    });
+    const partial = figurePairing({ complete: false });
+    expect(line(calendarFig({ pairingRead: 'offers-incomplete', pairing: partial }))).toEqual({
+      lead: null,
+      pairing: partial,
+    });
+  });
+  it("a fresh verified figure says nothing; a stale one carries its date pair's read (ruling 21.2)", () => {
+    expect(line(verifiedFig())).toBeNull();
+    const stale = verifiedFig({
+      price: { ...verifiedFig().price, stale: 'setting' },
+      pairingRead: 'outbound-only',
+    });
+    expect(line(stale)).toEqual({ lead: D.pairingRead['outbound-only'], pairing: null });
+  });
+});
+
+describe('sellerCoverage (21.7 persona coverage: seller prices read for N of the M date pairs shown)', () => {
+  const from = figurePairing({ isFrom: true, seller: null, offersRead: 0, complete: false });
+  it('null without a pairing figure; else the rows with an offer (leading or beneath) of the rows shown', () => {
+    expect(sellerCoverage([])).toBeNull();
+    expect(
+      sellerCoverage([
+        { figure: null },
+        { figure: calendarFig({ pairingRead: 'within-older', pairing: figurePairing() }) },
+      ]),
+    ).toBeNull();
+    expect(
+      sellerCoverage([
+        { figure: pairingFig() },
+        {
+          figure: calendarFig({
+            pairingRead: 'offers-incomplete',
+            pairing: figurePairing({ complete: false }),
+          }),
+        },
+        { figure: calendarFig({ pairingRead: 'sellers-not-read', pairing: from }) },
+        { figure: calendarFig() },
+        { figure: null },
+      ]),
+    ).toEqual({ read: 2, shown: 5 });
+  });
+});
+
+describe('sellerOf (21.7 code M9: an offer always names its seller; the contract says so)', () => {
+  it("the offer's seller; a RangeError naming the broken rule when an offer has none", () => {
+    expect(sellerOf(figurePairing())).toBe('QQ Travel');
+    expect(() => sellerOf(figurePairing({ seller: null }))).toThrow(RangeError);
+    expect(() => sellerOf(figurePairing({ seller: null }))).toThrow(/an offer names its seller/);
+  });
+});
+
+describe('setsAirlineOrLayover (spec rev 56 §11 Board: "airline settings not applied to flights read")', () => {
+  it('any airline list, layover bound or the overnight-layover rule; nothing else', () => {
+    expect(setsAirlineOrLayover({})).toBe(false);
+    expect(setsAirlineOrLayover({ includeAirlines: [] })).toBe(false);
+    expect(setsAirlineOrLayover({ excludeAirlines: [] })).toBe(false);
+    expect(setsAirlineOrLayover({ includeAirlines: ['VS'] })).toBe(true);
+    expect(setsAirlineOrLayover({ excludeAirlines: ['VS'] })).toBe(true);
+    expect(setsAirlineOrLayover({ minLayoverMinutes: 60 })).toBe(true);
+    expect(setsAirlineOrLayover({ maxLayoverMinutes: 240 })).toBe(true);
+    expect(setsAirlineOrLayover({ noOvernightLayover: true })).toBe(true);
+    expect(setsAirlineOrLayover({ noOvernightLayover: false })).toBe(false);
   });
 });

@@ -1,6 +1,11 @@
 import { asIsoDateTime, fixedClock } from '@gmt/core';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { ACCOUNT_COOKIE_NAMES, accountCookiesIn, checkAccountCookies } from '../src/accountCookies.js';
+import {
+  ACCOUNT_COOKIE_NAMES,
+  ACCOUNT_COOKIES_DATED,
+  accountCookiesIn,
+  checkAccountCookies,
+} from '../src/accountCookies.js';
 import { FakeContext } from './support/fakeContext.js';
 
 // Brief §6, verbatim and independent of the module's list (so a mutated name in the module is caught).
@@ -41,6 +46,7 @@ beforeEach(() => {
 describe('account cookies (spec §2; brief §6; ruling 8, PIE-R2-08, SEC-R2-002)', () => {
   it('the dated set is exactly the 21 names of brief §6', () => {
     expect([...ACCOUNT_COOKIE_NAMES].sort()).toEqual([...BRIEF_NAMES].sort());
+    expect(ACCOUNT_COOKIES_DATED).toBe('2026-10-18');
   });
   it.each(BRIEF_NAMES)('%s on .google.com is a signed-in profile', (name) => {
     expect(accountCookiesIn([c(name, '.google.com')])).toEqual({ found: true, names: [name] });

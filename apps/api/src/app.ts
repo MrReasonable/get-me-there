@@ -74,6 +74,7 @@ export function createApp(ports: Ports, engine: Engine, options: AppOptions = {}
     engine,
     tools: options.tools ?? {},
     busy: new Set(),
+    creates: new Map(),
     status: {
       home: null,
       version: 'unknown',

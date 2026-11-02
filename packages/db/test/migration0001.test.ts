@@ -51,6 +51,8 @@ describe('migration 0001: search_definitions.confirmed_calls (decision 37)', () 
       '0008_wp18_error_kind',
       '0009_wp19_latest_price_idx',
       '0010_airport_kind',
+      '0011_wp20_flight_lists',
+      '0012_wp21_return_leg',
     ]);
     expect(applyMigrations(db, MIGRATIONS_DIR)).toEqual({
       applied: [
@@ -64,6 +66,8 @@ describe('migration 0001: search_definitions.confirmed_calls (decision 37)', () 
         '0008_wp18_error_kind',
         '0009_wp19_latest_price_idx',
         '0010_airport_kind',
+        '0011_wp20_flight_lists',
+        '0012_wp21_return_leg',
       ],
     });
     expect(new DefinitionsRepo(db, fixedClock(T0)).get(created.id)).toEqual({

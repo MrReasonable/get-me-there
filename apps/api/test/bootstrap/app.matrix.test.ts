@@ -139,7 +139,13 @@ describe('injected-config boot matrix (spec §5.5)', { timeout: BOOT_TIMEOUT_MS 
       const env = envFor({});
       const dir = dirname(String(env.DATABASE_PATH));
       chmodSync(dir, 0o500);
-      await expect(bootWith(env)).rejects.toMatchObject({ exitCode: 73 });
+      const booted = bootWith(env);
+      try {
+        await expect(booted).rejects.toMatchObject({ exitCode: 73 });
+      } finally {
+        // why: a host that ignores the mode (Windows) boots; the app is closed so its database file can be removed
+        await (await booted.catch(() => null))?.close();
+      }
     },
   );
 

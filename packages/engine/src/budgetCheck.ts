@@ -1,5 +1,5 @@
-import type { BudgetScopeKind, ExecutionBudget, ProviderId, Stage } from '@gmt/core';
-import { monthlyLoad, otherSchedules, scheduleLoad } from './budgetFit.js';
+import type { BudgetScopeKind, ExecutionBudget, ProviderId, Stage, Usage } from '@gmt/core';
+import { otherSchedules, scheduleLoad, storedScheduleLoad, withScheduleLoads } from './budgetFit.js';
 import type { EngineContext } from './context.js';
 import { type LineKey, lineKey } from './lines.js';
 import { countFirings } from './scheduler/parseCron.js';
@@ -42,6 +42,33 @@ export function spendOf(e: Pick<Estimate, 'perProvider'>): PlannedSpend[] {
 }
 
 /**
+ * A provider's cap window as `checkBudget` reads it: its scope kind, the guard's usage and, on a monthly window, the
+ * calls other scheduled searches have reserved (ruling 5). The one reading shared by the pre-start check and the
+ * estimate's "calls left", so the two can never disagree about what a month has left.
+ */
+export function providerWindow(
+  ctx: EngineContext,
+  providerId: ProviderId,
+  definitionId: string | null,
+): { kind: 'provider-month' | 'provider-lifetime'; usage: Usage; reserved: number } {
+  const kind = ctx.limitsOf(providerId).capKind;
+  const usage = ctx.budget.usage({ kind, providerId });
+  const reserved =
+    kind === 'provider-month' ? reservedForSchedules(ctx, providerId, definitionId, usage.windowEnd) : 0;
+  return { kind, usage, reserved };
+}
+
+/** The calls a provider's window still allows once other schedules' reservations are set aside; null without a cap. */
+export function callsLeftIn(
+  ctx: EngineContext,
+  providerId: ProviderId,
+  definitionId: string | null,
+): number | null {
+  const { usage, reserved } = providerWindow(ctx, providerId, definitionId);
+  return usage.cap === null ? null : Math.max(0, usage.cap - usage.calls - reserved);
+}
+
+/**
  * Ruling 5: the calls the other enabled scheduled definitions will need from `providerId` before the cap window
  * closes, so one run cannot take the headroom the schedules were sized against. Each schedule's need is budgetFit's
  * model over the rest of the window (scheduleLoad, cost-r2-002): verification on each firing until `windowEnd`,
@@ -66,7 +93,7 @@ export function reservedForSchedules(
       new Date(Date.parse(windowEnd) - 1),
     );
     if (firings === 0) continue;
-    const m = monthlyLoad(ctx, d);
+    const m = storedScheduleLoad(ctx, d);
     reserved += scheduleLoad(ctx, m.perRun, m.snapshot, firings, hours).get(providerId)?.calls ?? 0;
   }
   return Math.ceil(reserved);
@@ -163,21 +190,22 @@ export function checkBudget(
       lines,
     );
   }
-  for (const id of ids(spend)) {
-    const kind = ctx.limitsOf(id).capKind;
-    const u = ctx.budget.usage({ kind, providerId: id });
-    const reserved = kind === 'provider-month' ? reservedForSchedules(ctx, id, definitionId, u.windowEnd) : 0;
-    const lines = spend.filter((s) => s.providerId === id);
-    check(
-      kind,
-      id,
-      u.cap,
-      u.calls,
-      reserved,
-      total(lines, (s) => s.calls),
-      lines,
-    );
-  }
+  // why: one read of each other schedule's load for every provider window of this check (storedScheduleLoad's memo)
+  withScheduleLoads(ctx, new Map(), () => {
+    for (const id of ids(spend)) {
+      const { kind, usage: u, reserved } = providerWindow(ctx, id, definitionId);
+      const lines = spend.filter((s) => s.providerId === id);
+      check(
+        kind,
+        id,
+        u.cap,
+        u.calls,
+        reserved,
+        total(lines, (s) => s.calls),
+        lines,
+      );
+    }
+  });
   const g = ctx.budget.usage({ kind: 'global-month' });
   check(
     'global-month',

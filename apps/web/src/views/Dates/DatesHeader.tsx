@@ -1,4 +1,12 @@
-import { cellKeyString, type DecodedDatePairs, formatAgo, type IsoDateTime } from '@gmt/core';
+import {
+  cellKeyString,
+  type DecodedDatePairs,
+  IN_FLIGHT_STATUSES,
+  type IsoDateTime,
+  RESUMABLE_ACTIVE_STATUSES,
+  type StartRefusalCode,
+  staleWords,
+} from '@gmt/core';
 import { useCalendarGap } from '../../api/queries.js';
 import type { DefinitionResponse, ExecutionResponse } from '../../api/types.js';
 import { LoadError } from '../../components/LoadState.js';
@@ -7,47 +15,48 @@ import { PriceCell } from '../../components/PriceCell.js';
 import { COPY } from '../../copy.js';
 import { Flaps } from '../../flaps/Flaps.js';
 import { formatIsoDate } from '../../format.js';
-import { coverageLineText } from '../../lib/coverageLine.js';
 import { isThinCoverage } from '../../lib/thinCoverage.js';
-import { instantMs } from '../../lib/time.js';
-import { type DatesUiState, datesPatch, detailPatchOf } from '../../state/datesState.js';
+import { type DatesUiState, detailPatchOf } from '../../state/datesState.js';
 import { hrefWith, navigateTo } from '../../state/urlState.js';
+import { suggestedName, useAirportDetails } from '../Definitions/airports.js';
 import type { BoardModel } from './board.js';
+import { PageState } from './PageState.js';
+import { RepeatWeekly } from './RepeatWeekly.js';
+import { SearchAgainButton } from './SearchAgainButton.js';
+import { SearchedLine } from './SearchedLine.js';
+import {
+  bucketsUnder,
+  reusedDatePairs,
+  runSources,
+  type StateLine,
+  searchedLine,
+  stateLine,
+  type WholeCount,
+  wholeOf,
+} from './stateLines.js';
 import { countsOf, isFullStay, stayRange } from './stayScope.js';
 
 const D = COPY.datesView;
-const RUNNING: ReadonlySet<string> = new Set(['pending', 'running']);
-const PAUSED: ReadonlySet<string> = new Set(['paused_budget', 'paused_error']);
+const P = COPY.searchPage;
+const IN_FLIGHT: ReadonlySet<string> = new Set(IN_FLIGHT_STATUSES);
+/** The stopped statuses the api resumes: core's one set, the status bar's too (Resume also needs the fix to name it). */
+const RESUMABLE: ReadonlySet<string> = new Set(RESUMABLE_ACTIVE_STATUSES);
 
-/** "40 min ago" under an hour (the run line of spec §11), else core's "2h ago" / "3d ago". */
-export function runAgo(at: IsoDateTime, now: IsoDateTime): string {
-  const minutes = Math.max(0, Math.floor((instantMs(now) - instantMs(at)) / 60_000));
-  if (minutes < 1) return formatAgo(0);
-  return minutes < 60 ? D.minutesAgo(minutes) : formatAgo(Math.floor(minutes / 60));
-}
+/** The latest parent run as the date-pairs read summarises it. */
+type RunSummary = DecodedDatePairs['executions'][number];
 
 /**
- * The run the view shows (the latest parent run) with its status and age (spec §11 Header line): "run finished 2h ago",
- * "run in progress, started 40 min ago", "run paused 3h ago: <reason>". The reason is the run's own, from the status
- * bar's execution query when it has answered.
+ * The window in words (spec rev 55 §11 "Header": dates as "10 Jan 2027"): a fixed window's own dates, a rolling one's
+ * offset and length with the dates it covers now (the read's space; until that answers, the offset and length alone).
  */
-export function runLine(
-  latest: DecodedDatePairs['executions'][number] | undefined,
-  run: ExecutionResponse | undefined,
-  now: IsoDateTime,
-): string {
-  if (latest === undefined) return D.noRunYet;
-  const status = run?.id === latest.id ? run.status : latest.status;
-  const at = latest.finishedAt ?? latest.startedAt;
-  if (latest.startedAt === null || at === null) return D.runNotStarted(COPY.statusName[status]);
-  if (RUNNING.has(status)) return D.runInProgress(runAgo(latest.startedAt, now));
-  if (PAUSED.has(status))
-    return D.runPaused(
-      runAgo(at, now),
-      (run?.id === latest.id ? run.reason : null) ?? COPY.statusName[status],
-    );
-  if (status === 'completed') return D.runFinished(runAgo(at, now));
-  return D.runEnded(COPY.statusName[status], runAgo(at, now));
+function windowWords(definition: DefinitionResponse, data: DecodedDatePairs | null): string {
+  const w = definition.window;
+  const span = (from: string, to: string) => P.windowSpan(formatIsoDate(from), formatIsoDate(to));
+  if (w.kind === 'absolute') return span(w.from, w.to);
+  const now = data === null ? null : span(data.space.departureFrom, data.space.departureTo);
+  return now === null
+    ? COPY.searchesView.windowRolling(w.lengthDays, w.startOffsetDays)
+    : P.windowRolling(w.lengthDays, w.startOffsetDays, now);
 }
 
 export interface DatesHeaderProps {
@@ -56,22 +65,44 @@ export interface DatesHeaderProps {
   data: DecodedDatePairs | null;
   model: BoardModel | null;
   state: DatesUiState;
+  /** The latest parent run's own read (its status, progress, stop, flights and finish), once it has answered. */
   run: ExecutionResponse | undefined;
   now: IsoDateTime;
+  /** A refused Search now (`refused=<code>`), worded while the search has no run. */
+  refused: StartRefusalCode | null;
+  /** The api's own judgement that the search's space changed after its latest run started (its card). */
+  spaceChanged: boolean;
+  /** The whole search's counts from its card, when the card describes the latest run as it stands; else null. */
+  cardWhole: WholeCount | null;
 }
 
 /**
- * Spec §11 Dates "Header line": the search's name; the run it shows with its status and age; the stale label when
- * every figure is stale; the coverage line over the cells in view, linking to the coverage section; the scope when a
- * filter narrows it; the next-move line on thin coverage; and the calendar-gap banner, kept to the scope.
+ * Spec rev 55 §11 "A search's page", top to bottom (WP20 Task 20.6): the search's name; the route, window and stay in
+ * words; the header line from the latest parent run (`searchedLine`, linking to the coverage section, with the scope a
+ * filter narrows it to and the stale mark's words when every figure is stale); the actions Search again (once the search
+ * has a run: a never-searched search offers Search now in its state line), Edit and Repeat weekly… (or the schedule in
+ * words with Change); the state line in a polite status region; the next-move line on thin coverage; and the
+ * calendar-gap banner, kept to the scope.
  */
-export function DatesHeader({ definition, data, model, state, run, now }: DatesHeaderProps) {
-  const openCoverage = datesPatch({ coverageOpen: true });
+export function DatesHeader({
+  definition,
+  data,
+  model,
+  state,
+  run,
+  now,
+  refused,
+  spaceChanged,
+  cardWhole,
+}: DatesHeaderProps) {
+  const details = useAirportDetails([...definition.origins, ...definition.destinations]);
   const allPairs = definition.origins.length * definition.destinations.length;
   const counts = model === null ? null : countsOf(model.inView);
-  const latest = data?.executions.find((e) => !e.isChild);
+  const latest: RunSummary | undefined = data?.executions.find((e) => !e.isChild);
+  const own = run !== undefined && latest !== undefined && run.id === latest.id ? run : undefined;
   const figures = model?.ranked ?? [];
-  const stale = figures.length > 0 && figures.every((p) => p.figure?.price.stale === true);
+  const marks = figures.map((p) => p.figure?.price.stale ?? false);
+  const stale = marks.length > 0 && marks.every((m) => m !== false);
   const range = data === null ? null : stayRange(data.space, state.nights);
   const scope = [
     ...(data !== null && data.scope.airportPairs < allPairs
@@ -81,8 +112,64 @@ export function DatesHeader({ definition, data, model, state, run, now }: DatesH
       ? [D.scopeNights(range.min, range.max)]
       : []),
   ];
+  const pairs = model?.inView ?? [];
+  const providers = runSources(own);
+  const reused = reusedDatePairs(pairs);
+  const buckets = bucketsUnder(pairs, COPY);
+  // why: ruling R-scope — the running, reading and stopped lines count the whole search: the card's counts, else every
+  // stay of the read (the stay filter is the page's own); their buckets only when the read covers every airport pair
+  const whole = cardWhole ?? wholeOf(data?.pairs ?? []);
+  const wholeBuckets =
+    data !== null && data.scope.airportPairs === allPairs ? bucketsUnder(data.pairs, COPY) : null;
+  // why: the line is known once the read and (for a run) the run's own read are in: until then nothing is guessed
+  const line: StateLine | null =
+    data === null || model === null
+      ? null
+      : latest === undefined
+        ? stateLine({
+            latest: null,
+            pairs,
+            whole,
+            providers,
+            reused,
+            spaceChanged: false,
+            noSource:
+              definition.providers.discovery.length === 0 && definition.providers.verification.length === 0,
+            now,
+            c: COPY,
+          })
+        : own === undefined
+          ? null
+          : stateLine({
+              latest: own,
+              pairs,
+              whole,
+              providers,
+              reused,
+              spaceChanged,
+              noSource: false,
+              now,
+              c: COPY,
+            });
+  // why: the header line has one place (so a link in it is never swapped for another under the pointer): for a searched
+  // run it is the state line's own words, flights clause included; for a stopped one the state line below says why
+  const status = own?.status ?? latest?.status;
+  const header =
+    line?.kind === 'searched'
+      ? line.text
+      : latest !== undefined && latest.startedAt !== null && status !== undefined && !IN_FLIGHT.has(status)
+        ? searchedLine({ run: latest, pairs, providers, reused, now, c: COPY })
+        : null;
+  // why: the stale mark's words by the kind the api gives each figure (ruling 20.6-2), each kind said once
+  const stateMarks = [...new Set(marks.flatMap((m) => (m === false ? [] : [staleWords(m)])))];
+  const cities = suggestedName(definition.origins, definition.destinations, details.rows);
+  const codes = COPY.searchesView.codes(definition.origins.join(', '), definition.destinations.join(', '));
+  // why: minor 6 — until the airports' names are in (or when that read failed) the cities are only the codes again, so
+  // the route says the codes once
+  const route = cities === codes || cities === '' ? codes : P.route(cities, codes);
+  const edit = { view: 'definitions', edit: definition.id, def: null };
   return (
-    <div className="dates-head space-y-2">
+    <div className="dates-head space-y-2" data-testid="dates-head">
       <h2 className="name-board">
         <span className="sr-only">{definition.name}</span>
         {/* why: the search's name in large flaps, a word to a group so a long name wraps between words */}
@@ -92,35 +179,43 @@ export function DatesHeader({ definition, data, model, state, run, now }: DatesH
           ))}
         </span>
       </h2>
-      {data !== null ? (
-        <p className="run-line" data-testid="dates-run">
-          {runLine(latest, run, now)}
-        </p>
-      ) : null}
+      <p className="search-route" data-testid="dates-route">
+        {route}
+      </p>
+      <p className="search-facts text-fg-2">
+        {[windowWords(definition, data), D.scopeNights(definition.minNights, definition.maxNights)].join(
+          ' · ',
+        )}
+      </p>
+      {header !== null ? <SearchedLine text={header} scope={scope} buckets={buckets} /> : null}
       {stale ? (
         <p className="text-sm">
-          <span className="tag tag-warn mr-2">{COPY.stale}</span>
-          {D.staleAll}
+          <span aria-hidden="true" className="tag tag-warn mr-2">
+            {COPY.priceMarkGlyph.stale}
+          </span>
+          {P.staleAll(stateMarks.join(P.or))}
         </p>
       ) : null}
-      {data !== null && counts !== null ? (
-        <p className="text-[15px] text-fg-2">
-          <a href={hrefWith(openCoverage)} onClick={navigateTo(openCoverage)} className="underline">
-            {coverageLineText(counts, data.verificationProviderConfigured, latest)}
-          </a>
-          {scope.length > 0 ? (
-            <span className="ml-1 font-bold text-fg">{` · ${scope.join(' · ')}`}</span>
-          ) : null}
-        </p>
-      ) : null}
+      <fieldset className="dates-actions flex flex-wrap items-center gap-2">
+        <legend className="sr-only">{P.actionsLabel}</legend>
+        {latest !== undefined ? <SearchAgainButton definitionId={definition.id} /> : null}
+        <a href={hrefWith(edit)} onClick={navigateTo(edit)} className="btn btn-sm min-h-11">
+          {COPY.searchesView.edit}
+        </a>
+        <RepeatWeekly definition={definition} />
+      </fieldset>
+      <PageState
+        definition={definition}
+        line={line}
+        refused={latest === undefined ? refused : null}
+        executionId={latest?.id ?? null}
+        resumable={own !== undefined && RESUMABLE.has(own.status)}
+        buckets={wholeBuckets}
+      />
       {counts !== null && isThinCoverage(counts.buckets.no_data, counts.total) ? (
         <p className="text-sm">
-          {COPY.thinCoverage}{' '}
-          <a
-            href={hrefWith({ view: 'definitions', def: definition.id })}
-            onClick={navigateTo({ view: 'definitions', def: definition.id })}
-            className="underline"
-          >
+          {P.thinCoverage}{' '}
+          <a href={hrefWith(edit)} onClick={navigateTo(edit)} className="underline">
             {D.coverageCheckLink}
           </a>
         </p>
@@ -161,14 +256,14 @@ function DatesGap({
   if (cells.length === 0) return null;
   const cv = g.cheapestVerified;
   return (
-    <section aria-label={COPY.calendarGapList} className="plate notice gap-plate text-sm">
-      {/* why: the list can run to dozens of cells; it folds under its lead line so the board stays near the top */}
+    <section aria-label={P.gapList} className="plate notice gap-plate text-sm">
+      {/* why: the list can run to dozens of date pairs; it folds under its lead line so the board stays near the top */}
       <details className="fold gap-fold">
         <summary className="flex flex-wrap items-center gap-x-2 gap-y-1">
           <span aria-hidden="true" className="tag tag-warn">
             ▲
           </span>
-          <span className="gap-lead">{COPY.calendarGapLead(cells.length)}</span>
+          <span className="gap-lead">{P.gapLead(cells.length)}</span>
           {/* why: the reference's label and its price stay together on one line */}
           <span className="gap-ref inline-flex flex-wrap items-baseline gap-x-2">
             <span>{D.gapReference}</span>

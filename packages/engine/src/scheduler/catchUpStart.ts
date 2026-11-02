@@ -10,9 +10,6 @@ import { withoutDiscovery } from '../snapshot.js';
 import { applyReuse } from '../stages/reuse.js';
 import { loadsBrowserPages } from './browserWindow.js';
 
-/** error_text of a paused catch-up superseded by a later firing's row (spec §8.2 rev 36). */
-export const SUPERSEDED_BY_FIRING = 'superseded: a later scheduled firing replaced this catch-up';
-
 /**
  * A paused catch-up: a catch-up whose pass is not running (paused for a cap or an error, or interrupted). It never
  * covers a later firing; that firing's row supersedes it in the same immediate transaction as its insert.
@@ -40,13 +37,37 @@ export class FiringTaken extends Error {}
 export class CatchUpResumed extends Error {}
 
 /**
- * Inside a firing row's immediate transaction, before its insert: cancels `supersedes`, the paused catch-up the row
- * replaces, as superseded by this firing; when the guarded cancel finds it no longer paused (a resume claimed it), throws
- * CatchUpResumed so the transaction writes nothing. A lost insert (FiringTaken) rolls the cancel back with it.
+ * Inside a start's or a firing row's immediate transaction, before its insert: cancels `supersedes`, the stopped run the
+ * row replaces (a paused catch-up or a stopped parent a firing replaces, cause `superseded 'schedule'`; a stopped run
+ * Search again replaces, `superseded 'search-again'`, revision 55 §8.1, §8.2); when the guarded cancel finds it no longer
+ * stopped (a resume claimed it), throws CatchUpResumed so the transaction writes nothing. A lost insert (FiringTaken)
+ * rolls the cancel back with it.
  */
-export function replacePausedCatchUp(ctx: EngineContext, supersedes: Execution | null): void {
-  if (supersedes !== null && !ctx.repos.executions.cancelPaused(supersedes.id, SUPERSEDED_BY_FIRING))
+export function replacePausedCatchUp(
+  ctx: EngineContext,
+  supersedes: Execution | null,
+  by: 'schedule' | 'search-again' = 'schedule',
+): void {
+  if (supersedes !== null && !ctx.repos.executions.cancelPaused(supersedes.id, { kind: 'superseded', by }))
     throw new CatchUpResumed();
+}
+
+/**
+ * Spec revision 55 §8.2: the stopped parent a scheduled firing supersedes: a paused catch-up, or the definition's
+ * `paused_*` or `interrupted` latest parent with no `resume_after` (a page-limit stop, a manual run stopped while the
+ * search had no schedule, a stop every source's refusal caused). A paused run with a `resume_after` is left to its
+ * resume: its one-shot job while it is in the future, the tick's resume once it is due (the tick's step before this
+ * one), and any other active run is not replaced (null).
+ */
+export function supersededByFiring(active: Execution | null): Execution | null {
+  if (active === null || !PAUSED_STATUSES.includes(active.status)) return null;
+  if (active.isCatchUp) return active;
+  return active.resumeAfter === null ? active : null;
+}
+
+/** Spec revision 55 §8.1 (Ian's ruling 1): the stopped latest parent a manual `replaceStopped` start cancels. */
+export function stoppedParent(active: Execution | null): Execution | null {
+  return active !== null && PAUSED_STATUSES.includes(active.status) ? active : null;
 }
 
 /** After the transaction that superseded it: the catch-up's one-shot job goes too, and the log says by what. */
@@ -54,7 +75,9 @@ export function supersededCatchUp(ctx: EngineContext, supersedes: Execution, by:
   ctx.hooks.cancelResume(supersedes.id); // why: spec §8.1 one-shot job "cancelled on cancel"
   ctx.log.info(
     { executionId: supersedes.id, definitionId: by.definitionId, by: by.id, scheduledFor: by.scheduledFor },
-    'execution: superseded a paused catch-up',
+    by.isCatchUp || supersedes.isCatchUp
+      ? 'execution: superseded a paused catch-up'
+      : 'execution: superseded a stopped run',
   );
 }
 

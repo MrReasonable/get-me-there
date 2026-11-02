@@ -178,6 +178,7 @@ describe('fetchTile pagination (spec §5.2: one tile, every page ledgered under 
         return res;
       },
       stats: () => kit.stats(),
+      holdUntil: (id, at) => kit.holdUntil(id, at),
     };
     const d = discoveryOf(makeProvider(h));
     const q = query();
@@ -221,6 +222,7 @@ describe('fetchTile pagination (spec §5.2: one tile, every page ledgered under 
         return res;
       },
       stats: () => kit.stats(),
+      holdUntil: (id, at) => kit.holdUntil(id, at),
     };
     const d = discoveryOf(makeProvider(h));
     const q = query();

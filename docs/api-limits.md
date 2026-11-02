@@ -48,8 +48,8 @@ How to read it:
 - A billed provider whose calls cost money, enabled under a spend cap of 0, makes boot log a
   warning, and the Providers page says verification will not run. On the `trial` and `40usd`
   plans calls cost £0 at the margin, so the spend cap cannot stop a call: the Providers page
-  names the call cap that does, and that call cap and each definition's call cap (Max billed
-  calls per run) are the stops; on the trial preset a new definition's call cap is 0, so it
+  names the call cap that does, and that call cap and each search's call cap (Max billed
+  calls per run) are the stops; on the trial preset a new search's call cap is 0, so it
   cannot verify a cell on demand until that cap is raised. A `MONTHLY_SPEND_CAP_PENCE`
   below the subscription fees it counts makes boot log a warning naming the variable.
 - `docs/scheduling.md` turns these caps into calls a run and a month for the worked example.
@@ -78,8 +78,8 @@ window's start and end with calls and cost so far.
 - The vendor ignores `market` (point of sale is recorded as unknown) and `trip_class`
   (economy only; other cabins return no data with a note).
 - Coverage depends on what users searched: a thin long-haul route measured zero cached rows
-  over eight months, busy gateways four to six a month. Run the coverage check on the
-  Definitions form before relying on it.
+  over eight months, busy gateways four to six a month. Run the coverage check (More options
+  on a saved search's Edit page) before relying on it.
 - The token travels in the `X-Access-Token` header, never in a URL.
 
 ### SearchApi (Google Flights engines): scraping-derived, opt-in
@@ -102,14 +102,16 @@ window's start and end with calls and cost so far.
 
 ### Camoufox (own Google Flights pages): self-scraped, opt-in, free
 
-- Off by default (`CAMOUFOX_ENABLED=false`); a definition must also name it. Discovery only, `list` mode: one page per
+- Off by default (`CAMOUFOX_ENABLED=false`); once it is enabled a new search names it by default (a search saved
+  before then names it only if you add it in its Edit page, More options). Discovery only, `list` mode: one page per
   day pair, through the host-side worker on the machine running it (macOS or Linux; docs/setup.md section 14).
 - Caps: `CAMOUFOX_EXECUTION_PAGE_CAP` (default 100, 1 to 400) pages a run and `CAMOUFOX_MONTHLY_PAGE_CAP` (default 1,500)
   pages a calendar month from `CAMOUFOX_BILLING_DAY`. The app's ledger enforces both; the worker reports its own month's
   counts, and enforces the monthly caps across every caller. The run's cap is frozen into the execution's snapshot when it is
   created; the guard reads it from there, never from the configuration, and only a manual resume refreshes it with the
   rest of the budget. Reaching it skips the remaining camoufox cells for budget (`provider-execution`) while other
-  providers continue, or pauses the run for a manual resume when none remains.
+  providers continue, or stops the run when none remains; that stop is never resumed: Search again starts a fresh run
+  that reuses the prices already found.
 - Spacing: at least `CAMOUFOX_MIN_SPACING_SECONDS` (default 30, 0 to 600) from the start of one page to the start of the
   next; the app's limiter uses it directly as its minimum interval and the worker allows 2 seconds of arrival jitter. The
   derived rates are display figures: `max(1, floor(60 / spacing))` a minute and `floor(3600 / spacing)` an hour (2 and

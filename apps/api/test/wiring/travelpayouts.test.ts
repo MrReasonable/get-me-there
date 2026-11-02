@@ -44,6 +44,7 @@ function spyKit(): { http: HttpKit; seen: HttpKitRequest[] } {
       });
     },
     stats: () => ({ inFlight: 0 }),
+    holdUntil: () => undefined,
   };
   return { http, seen };
 }

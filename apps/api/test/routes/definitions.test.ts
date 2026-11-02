@@ -8,6 +8,7 @@ import { errorOf, expectContract } from '../helpers/contract.js';
 import { SENTINEL_TP } from '../helpers/env.js';
 import { exampleDefinitionInput, SMALL_WINDOW } from '../helpers/examples.js';
 import { createHarness, type Harness } from '../helpers/harness.js';
+import { at, seeder } from '../helpers/seed.js';
 
 let h: Harness | undefined;
 afterEach(async () => {
@@ -166,6 +167,8 @@ describe('PUT / DELETE /api/definitions/:id and the schedule (spec §8.2)', () =
       '/api/definitions',
       DEF,
     );
+    // why: spec rev 55 §8.2: the default search has no schedule, so enabling it below also gives it the weekly one
+    expect(d.scheduleCron).toBeNull();
     expect(
       (await x.request(`/api/definitions/${d.id}`, { method: 'PUT', json: { name: 'renamed' } })).status,
     ).toBe(200);
@@ -174,7 +177,7 @@ describe('PUT / DELETE /api/definitions/:id and the schedule (spec §8.2)', () =
     expect((await errorOf(res)).code).toBe('draft_cannot_enable');
     const ok = await x.request(`/api/definitions/${d.id}`, {
       method: 'PUT',
-      json: { origins: ['lhr'], destinations: ['JFK'], enabled: true },
+      json: { origins: ['lhr'], destinations: ['JFK'], enabled: true, scheduleCron: '0 5 * * 1' },
     });
     expect((await expectContract(ok, 'PUT', '/api/definitions/:id', DEF)).origins).toEqual(['LHR']);
     expect(jobIds(x)).toContain(d.id);
@@ -260,6 +263,89 @@ describe('PUT / DELETE /api/definitions/:id and the schedule (spec §8.2)', () =
     });
   });
 
+  it("Repeat weekly's Save (confirmShown: true) stores the shown runnable totals the sent figures cover (rev 55 §7, §10; ruling A13)", async () => {
+    const x = await harness();
+    // a runnable 300p / 30-call line and a 200p / 10-call line a cap blocks today: the sentence shows 300p and 30 calls
+    vi.spyOn(x.engine, 'estimate').mockReturnValue({
+      ...estimateOf(3_000_000, 30, [line(2_000_000, 10, 'provider-month')]),
+    });
+    const created = await create(x, exampleDefinitionInput({ scheduleCron: null, enabled: false }));
+    const put = (json: unknown) =>
+      x
+        .request(`/api/definitions/${created.id}`, { method: 'PUT', json })
+        .then((r) => expectContract(r, 'PUT', '/api/definitions/:id', DEF));
+    const stored = () => {
+      const d = x.ports.repos.definitions.get(created.id);
+      return [d?.confirmedCostPence, d?.confirmedCalls];
+    };
+    // figures short of the shown totals, in pence or in calls, store nothing
+    await put({ confirmedCostPence: 299, confirmedCalls: 30, confirmShown: true });
+    await put({ confirmedCostPence: 300, confirmedCalls: 29, confirmShown: true });
+    expect(stored()).toEqual([null, null]);
+    // the same shown figures without confirmShown are judged against the worst case (WP8's PUT), so nothing is stored
+    await put({ confirmedCostPence: 300, confirmedCalls: 30 });
+    expect(stored()).toEqual([null, null]);
+    const saved = await put({
+      scheduleCron: '0 5 * * 1',
+      enabled: true,
+      confirmedCostPence: 300,
+      confirmedCalls: 30,
+      confirmShown: true,
+    });
+    expect([saved.confirmedCostPence, saved.confirmedCalls]).toEqual([300, 30]);
+    expect(stored()).toEqual([300, 30]);
+    expect(jobIds(x)).toContain(created.id);
+  });
+
+  it("Repeat weekly's Save is all-or-nothing: figures short of the shown totals turn no schedule on (409 confirm)", async () => {
+    const x = await harness();
+    vi.spyOn(x.engine, 'estimate').mockReturnValue({
+      ...estimateOf(3_000_000, 30, [line(2_000_000, 10, 'provider-month')]),
+    });
+    const created = await create(x, exampleDefinitionInput({ scheduleCron: null, enabled: false }));
+    const before = x.ports.repos.definitions.get(created.id);
+    for (const json of [
+      {
+        scheduleCron: '0 5 * * 1',
+        enabled: true,
+        confirmedCostPence: 299,
+        confirmedCalls: 30,
+        confirmShown: true,
+      },
+      {
+        scheduleCron: '0 5 * * 1',
+        enabled: true,
+        confirmedCostPence: 300,
+        confirmedCalls: 29,
+        confirmShown: true,
+      },
+      // a schedule turned on with no figures at all is no confirmation either
+      { scheduleCron: '0 5 * * 1', enabled: true, confirmShown: true },
+    ]) {
+      const res = await x.request(`/api/definitions/${created.id}`, { method: 'PUT', json });
+      expect(res.status).toBe(409);
+      const err = await errorOf(res);
+      expect(err.code).toBe('confirm');
+      // no figures travel with the refusal: the web asks the estimate again
+      expect(err.details).toBeUndefined();
+      // nothing was written: no schedule, no enabled flag, no confirmation, no job
+      const after = x.ports.repos.definitions.get(created.id);
+      expect([after?.scheduleCron, after?.enabled, after?.confirmedCostPence, after?.confirmedCalls]).toEqual(
+        [null, false, null, null],
+      );
+      expect(after?.updatedAt).toBe(before?.updatedAt);
+      expect(jobIds(x)).not.toContain(created.id);
+    }
+    // enabling alone (the stored cron kept) is held to the same rule
+    await x.request(`/api/definitions/${created.id}`, { method: 'PUT', json: { scheduleCron: '0 5 * * 1' } });
+    const enableOnly = await x.request(`/api/definitions/${created.id}`, {
+      method: 'PUT',
+      json: { enabled: true, confirmedCostPence: 1, confirmedCalls: 1, confirmShown: true },
+    });
+    expect(enableOnly.status).toBe(409);
+    expect(x.ports.repos.definitions.get(created.id)?.enabled).toBe(false);
+  });
+
   it('with the real engine: an over-threshold run needs a confirmation, and a confirmation of its figures clears it', async () => {
     // why: review TS-1: the rule runs against a real estimate, not a mocked one (the fixture billed at 10p a call)
     const x = await harness({ FIXTURE_COST_MICRO_GBP: '100000' });
@@ -308,7 +394,7 @@ describe('estimates and the coverage check', () => {
   it('POST /api/definitions/:id/estimate estimates a saved definition; refuses a draft', async () => {
     const x = await harness();
     const d = await create(x, exampleDefinitionInput());
-    const res = await x.request(`/api/definitions/${d.id}/estimate`, { method: 'POST', json: {} });
+    const res = await x.request(`/api/definitions/${d.id}/estimate`, { method: 'POST' });
     await expectContract(res, 'POST', '/api/definitions/:id/estimate', apiContract.estimateResponseSchema);
     const draft = await expectContract(
       await x.request('/api/definitions', { method: 'POST' }),
@@ -316,9 +402,136 @@ describe('estimates and the coverage check', () => {
       '/api/definitions',
       DEF,
     );
-    const refused = await x.request(`/api/definitions/${draft.id}/estimate`, { method: 'POST', json: {} });
+    const refused = await x.request(`/api/definitions/${draft.id}/estimate`, { method: 'POST' });
     expect(refused.status).toBe(422);
     expect((await errorOf(refused)).code).toBe('draft_definition');
+  });
+
+  it('POST /api/definitions/:id/estimate with a draft body estimates that draft as this search, by its id (Task 20.5 R2)', async () => {
+    const x = await harness();
+    const d = await create(x, exampleDefinitionInput({ window: SMALL_WINDOW, minNights: 10, maxNights: 10 }));
+    const ask = vi.spyOn(x.engine, 'estimateAsk');
+    const stored = await expectContract(
+      await x.request(`/api/definitions/${d.id}/estimate`, { method: 'POST' }),
+      'POST',
+      '/api/definitions/:id/estimate',
+      apiContract.estimateResponseSchema,
+    );
+    const draft = exampleDefinitionInput({ window: SMALL_WINDOW, minNights: 10, maxNights: 11 });
+    const edited = await expectContract(
+      await x.request(`/api/definitions/${d.id}/estimate`, { json: draft }),
+      'POST',
+      '/api/definitions/:id/estimate',
+      apiContract.estimateResponseSchema,
+    );
+    // the draft's space, not the stored one's: one more stay length is more date pairs
+    expect(edited.datePairs).toBeGreaterThan(stored.datePairs);
+    // why: it is estimated as the saved search, so its own reservation and its reuse are its own (the engine keys both
+    // off the id), never as an unsaved stranger's
+    expect(ask.mock.calls.at(-1)?.[0]).toMatchObject({ id: d.id, maxNights: 11 });
+    // nothing is saved by an estimate
+    expect(x.ports.repos.definitions.get(d.id)?.maxNights).toBe(10);
+    const bad = await x.request(`/api/definitions/${d.id}/estimate`, {
+      json: { ...draft, minNights: 12, maxNights: 11 },
+    });
+    expect(bad.status).toBe(400);
+    // why: a body with no airports (a draft) never reaches the estimate: the request schema needs one of each, so the
+    // body path refuses it before any engine call, as the no-body path refuses a stored draft
+    for (const airports of [{ origins: [] }, { destinations: [] }]) {
+      const none = await x.request(`/api/definitions/${d.id}/estimate`, { json: { ...draft, ...airports } });
+      expect(none.status).toBe(400);
+      expect((await errorOf(none)).code).toBe('validation');
+    }
+  });
+
+  // Task 20.4 (spec §10 estimate response): what the estimate asks, beside the estimate and budgetFit
+  describe('the estimate response states what it asks', () => {
+    const bothRoutes = async (x: Harness) => {
+      const d = await create(x, exampleDefinitionInput());
+      const unsaved = await expectContract(
+        await x.request('/api/definitions/estimate', { json: exampleDefinitionInput() }),
+        'POST',
+        '/api/definitions/estimate',
+        apiContract.estimateResponseSchema,
+      );
+      const saved = await expectContract(
+        await x.request(`/api/definitions/${d.id}/estimate`, { method: 'POST' }),
+        'POST',
+        '/api/definitions/:id/estimate',
+        apiContract.estimateResponseSchema,
+      );
+      return { unsaved, saved };
+    };
+
+    it('counts the date pairs the plan asks about: the example is covered in full by the fixture provider', async () => {
+      const x = await harness();
+      const { unsaved, saved } = await bothRoutes(x);
+      for (const r of [unsaved, saved]) {
+        expect(r.datePairs).toBeGreaterThan(0);
+        expect(r.datePairsCovered).toBe(r.datePairs);
+        expect([r.datePairsPartly, r.datePairsReused]).toEqual([0, 0]);
+      }
+    });
+
+    it('softConfirm is the cost code with its figures for both routes when the estimate is above the threshold', async () => {
+      const x = await harness();
+      vi.spyOn(x.engine, 'estimate').mockReturnValue(estimateOf(5_000_000, 40)); // 500p, threshold 100p
+      const { unsaved, saved } = await bothRoutes(x);
+      for (const r of [unsaved, saved])
+        expect(r.softConfirm).toEqual({ reason: 'cost', estimatePence: 500, thresholdPence: 100 });
+    });
+
+    it('softConfirm is the call-share code with the provider, calls, cap and window when calls pass a fifth of the cap', async () => {
+      const x = await harness();
+      const cap = x.ports.budget.usage({ kind: 'provider-month', providerId: 'fixture' }).cap ?? 0;
+      const calls = Math.floor(SOFT_CONFIRM_CALL_SHARE * cap) + 1;
+      vi.spyOn(x.engine, 'estimate').mockReturnValue(estimateOf(0, calls));
+      const { unsaved, saved } = await bothRoutes(x);
+      for (const r of [unsaved, saved])
+        expect(r.softConfirm).toEqual({
+          reason: 'call-share',
+          providerId: 'fixture',
+          calls,
+          cap,
+          window: 'month',
+        });
+    });
+
+    it('softConfirm is null for a free search within its caps', async () => {
+      const x = await harness();
+      vi.spyOn(x.engine, 'estimate').mockReturnValue(estimateOf(0, 1));
+      const { unsaved, saved } = await bothRoutes(x);
+      expect([unsaved.softConfirm, saved.softConfirm]).toEqual([null, null]);
+    });
+
+    it('billedCalls lists each runnable line of a billable-plan provider with its calls and the month’s calls left', async () => {
+      const x = await harness();
+      const cap = x.ports.budget.usage({ kind: 'provider-month', providerId: 'fixture' }).cap;
+      vi.spyOn(x.engine, 'estimate').mockReturnValue(estimateOf(0, 7));
+      const { unsaved } = await bothRoutes(x);
+      expect(unsaved.billedCalls).toEqual([{ providerId: 'fixture', calls: 7, left: cap, window: 'month' }]);
+      // a line a cap blocks is not runnable, so it is not listed
+      vi.spyOn(x.engine, 'estimate').mockReturnValue({
+        ...estimateOf(0, 0),
+        perProvider: [line(0, 7, 'provider-month')],
+      });
+      expect((await bothRoutes(x)).unsaved.billedCalls).toEqual([]);
+    });
+
+    it('both routes hand estimateAsk the very estimate they answer with, so the date pairs come from the same plan', async () => {
+      const x = await harness();
+      const estimate = vi.spyOn(x.engine, 'estimate');
+      const ask = vi.spyOn(x.engine, 'estimateAsk');
+      await bothRoutes(x);
+      const made = estimate.mock.results.map((r) => r.value);
+      // why: the create's own estimate is among the calls; the two estimate routes are the last two
+      expect(ask.mock.calls.slice(-2).map((c) => c[2])).toEqual(made.slice(-2));
+    });
+
+    it('monthlyPages is null when camoufox is not a runnable line', async () => {
+      const x = await harness();
+      expect((await bothRoutes(x)).unsaved.monthlyPages).toBeNull();
+    });
   });
 
   const coverageBody = {
@@ -379,4 +592,51 @@ describe('estimates and the coverage check', () => {
     expect((await first).status).toBe(200);
     expect((await x.request('/api/definitions/coverage-check', { json: coverageBody })).status).toBe(200);
   });
+});
+
+describe('DELETE stops the search it removes (revision 55 §10)', () => {
+  it.each(['running', 'paused_error'] as const)(
+    'a %s parent: the soft delete comes first (a tick in the gap starts nothing), then the cancel stores superseded remove; alert rules stay',
+    async (status) => {
+      const x = await harness();
+      const def = x.ports.repos.definitions.create({
+        ...exampleDefinitionInput({ window: SMALL_WINDOW }),
+        scheduleCron: '0 * * * *',
+        enabled: true,
+      });
+      const rule = x.ports.repos.alerts.create({
+        definitionId: def.id,
+        type: 'absolute',
+        thresholdPence: 50_000,
+        pct: null,
+        basis: 'verified',
+        requireAllVerified: true,
+        cooldownHours: 336,
+        enabled: true,
+      });
+      const s = seeder(x.ports);
+      s.execution('A', { def, status, startedAt: at(-1) });
+      const active = s.id('A');
+      const real = x.engine.cancel.bind(x.engine);
+      let deletedFirst = false;
+      const cancel = vi.spyOn(x.engine, 'cancel').mockImplementation(async (id, cause) => {
+        deletedFirst = x.ports.repos.definitions.get(def.id)?.deletedAt !== null;
+        // why: a firing between the two steps: the search is already deleted, so it starts nothing
+        await x.engine.scheduler.tick(def.id);
+        return real(id, cause);
+      });
+      const del = await x.request(`/api/definitions/${def.id}`, { method: 'DELETE' });
+      expect(del.status).toBe(200);
+      expect(deletedFirst).toBe(true);
+      expect(cancel).toHaveBeenCalledWith(active, { kind: 'superseded', by: 'remove' });
+      expect(x.ports.repos.executions.get(active)).toMatchObject({
+        status: 'cancelled',
+        stopCause: { kind: 'superseded', by: 'remove' },
+      });
+      expect(
+        x.ports.repos.executions.listForDefinition(def.id, { limit: 10, includeChildren: true }),
+      ).toHaveLength(1);
+      expect(x.ports.repos.alerts.rules(def.id).map((r) => r.id)).toEqual([rule.id]);
+    },
+  );
 });

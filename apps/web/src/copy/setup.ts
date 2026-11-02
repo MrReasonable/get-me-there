@@ -8,7 +8,7 @@
 const noun = (n: number, one: string, many: string): string => (n === 1 ? one : many);
 
 /** Monday first, as a UK week reads; index = cron day-of-week (0 = Sunday). */
-const DAY_PLURAL = [
+export const DAY_PLURAL = [
   'Sundays',
   'Mondays',
   'Tuesdays',
@@ -20,24 +20,23 @@ const DAY_PLURAL = [
 const DAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
 
 /** "A", "A and B", "A, B and C". */
-function listText(items: readonly string[]): string {
+export function listText(items: readonly string[]): string {
   if (items.length <= 1) return items.join('');
   return `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`;
 }
 
 export const SETUP_COPY = {
-  // --- Definitions: hints under plain labels (spec §11 terms kept in brackets where they are bound) ---
+  // --- The Edit page's More options (spec rev 55 §3, §11: main-path words; each set-up term that stays carries its
+  // one-line explanation, WP20 Task 20.6) ---
   definitions: {
-    estimateCellsHint: '(a cell is one departure date and return date pair)',
-    runTakes: (time: string) => `A run of this search takes about ${time}.`,
-    policyHeading: 'Checking fares (itinerary search)',
+    policyHeading: 'Checking fares',
     policyIntro:
-      'Discovery is the first pass: it prices date pairs across the whole window from the cheaper sources. Itinerary search then looks up full itineraries, with booking options, for the cheapest of those date pairs. These settings choose which date pairs it checks.',
+      'The first pass prices date pairs across your dates from the cheaper sources. Checking fares then looks up the flights, with booking options, for the cheapest of those date pairs. These settings choose which date pairs it checks.',
     maxCells: 'Date pairs to check per run, at most',
     maxCellsHint:
-      'Each date pair (cell) is one departure date and one return date. The hard limit on itinerary searches.',
+      'Each date pair is one departure date and one return date, on one airport pair. A run checks the fares of no more than this many.',
     topN: 'Cheapest date pairs to check',
-    topNHint: 'Ranked by their discovery price; no more than the limit above.',
+    topNHint: 'Ranked by their first-pass price; no more than the limit above.',
     priceCeilingHint: 'Also check any other date pair priced at or under this, up to the limit.',
     perDepartureDateBest: 'Most date pairs per departure date (optional)',
     perDepartureDateBestHint: 'Spreads the checks across departure dates instead of one cheap date.',
@@ -45,13 +44,34 @@ export const SETUP_COPY = {
     expandTopHint: (calls: number) =>
       `SearchApi prices this many of the cheapest outbound flights with their returns: ${calls} ${noun(calls, 'call', 'calls')} per date pair.`,
     providersHeading: 'Price sources',
-    discoveryProviders: 'Discovery (first pass across the window)',
-    verificationProviders: 'Itinerary search (checks the cheapest date pairs)',
+    discoveryProviders: 'The first pass across your dates',
+    verificationProviders: 'Checking fares (the cheapest date pairs)',
+    /** A source's tick, by its main-path name ("The Aviasales cache"). */
+    sourceLabel: (name: string) => `${name.charAt(0).toUpperCase()}${name.slice(1)}`,
+    refreshLabel: (source: string) => `How often to ask ${source} again (hours)`,
+    refreshHint:
+      "A price older than this is asked for again by the next run, and until then reads as older than this search's refresh.",
     maxCallsZero:
-      '0 allows no billed calls: SearchApi does not run for this search, so its date grid and itinerary search are skipped. Raise this number to let it run. New searches start from EXECUTION_MAX_CALLS in .env.',
+      '0 allows no billed calls: SearchApi does not run for this search, so its date grid and its fare checks are skipped. Raise this number to let it run. New searches start from EXECUTION_MAX_CALLS in .env.',
     maxCallsHint: 'Calls to paid sources (SearchApi). New searches start from EXECUTION_MAX_CALLS in .env.',
-    hardStopZero: (calls: number) =>
-      `Hard stop 0: this search allows no billed calls, so SearchApi's ${calls} estimated ${noun(calls, 'call', 'calls')} will not run and no itinerary search checks these prices. To let them run, raise Max billed calls per run (More options, Run budget) to at least ${calls}.`,
+    maxFreeCallsHint:
+      "Requests to free sources (the Aviasales cache, the browser worker's pages) a run may make before it stops.",
+    maxCostHint: 'A run stops before it would spend more than this. 0 means it spends nothing.',
+    constraintsHint:
+      'Limits on the flights a fare check keeps. A calendar price is never checked against them, and says so.',
+    // the budget fit, each limit in words (spec rev 55 §11: no variable names on the main path)
+    fitScope: {
+      'execution-calls': 'billed calls a run',
+      'execution-free-calls': 'free requests a run',
+      'execution-cost': 'cost a run',
+      'global-month': "this month's spending",
+    } satisfies Record<string, string>,
+    fitProviderMonth: (source: string) => `${source} this month`,
+    fitProviderLifetime: (source: string) => `${source} over its trial`,
+    fitScrolls: (source: string) => `${source}: date grid scrolls this month`,
+    fitCellsPerRefresh: (source: string) =>
+      `${source}: date pairs on airport pairs each refresh, against its pages a month`,
+    fitLine: (what: string, estimated: string, cap: string) => `${what}: about ${estimated}, limit ${cap}`,
     journeyHours: 'hours',
     journeyMinutes: 'minutes',
     journeyPart: (label: string, part: string) => `${label}, ${part}`,
@@ -61,7 +81,7 @@ export const SETUP_COPY = {
   schedule: {
     repeat: 'Repeat',
     mode: {
-      none: 'No schedule (Run now only)',
+      none: 'No schedule (it runs when you press Search again)',
       daily: 'Every day',
       weekly: 'Weekly, on chosen days',
       custom: 'Custom (cron)',
@@ -75,7 +95,7 @@ export const SETUP_COPY = {
     noTime: 'Enter a time, for example 05:00.',
     blocked: 'Cannot estimate or save: the schedule needs at least one day and a time.',
     reads: 'Runs:',
-    none: 'No scheduled runs; start one with Run now.',
+    none: 'No scheduled runs; start one with Search again.',
     daily: (time: string, tz: string) => `Every day at ${time} (${tz})`,
     weekly: (days: readonly number[], time: string, tz: string) =>
       days.length === 7

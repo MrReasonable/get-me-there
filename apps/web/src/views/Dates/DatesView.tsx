@@ -1,14 +1,26 @@
-import type { DecodedDatePairs, IsoDateTime } from '@gmt/core';
+import {
+  apiContract,
+  type DecodedDatePairs,
+  IN_FLIGHT_STATUSES,
+  type IsoDateTime,
+  type StartRefusalCode,
+} from '@gmt/core';
 import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { ApiError } from '../../api/client.js';
-import { DATES_DRAWN_MARK, useDatePairs, useExecutionWatch, useProvidersWatch } from '../../api/queries.js';
+import {
+  DATES_DRAWN_MARK,
+  useCards,
+  useDatePairs,
+  useLatestRun,
+  useProvidersWatch,
+} from '../../api/queries.js';
 import type { DefinitionResponse, ExecutionResponse } from '../../api/types.js';
 import { LoadError } from '../../components/LoadState.js';
 import { SyntheticBanner } from '../../components/SyntheticBanner.js';
 import { COPY } from '../../copy.js';
-import { coverageLineText } from '../../lib/coverageLine.js';
 import { useNow } from '../../now.js';
 import { type DatesUiState, filtersActive, parseDatesState, scopeQuery } from '../../state/datesState.js';
+import { writeLastSearch } from '../../state/lastSearch.js';
 import { useSearchParams } from '../../state/urlState.js';
 import { BoardTable } from './BoardTable.js';
 import { type BoardModel, boardModel, isSyntheticRead, PAGE_SIZE } from './board.js';
@@ -18,14 +30,12 @@ import { Filters } from './Filters.js';
 import { type Animate, browserAnimate } from './flip.js';
 import { Overview } from './OverviewGrid.js';
 import { changeCount, IDLE, onProgress, onTerminal, onTimer, type Reread, readDecision } from './refresh.js';
-import { NeverRun, NoPriceInFilters, NoSearch, Paused, TooManyCells } from './States.js';
-import { countsOf } from './stayScope.js';
+import { NoPriceInFilters, NoSearch, TooManyCells } from './States.js';
+import { bucketsUnder, countsClauses } from './stateLines.js';
 import { UpdateBoard } from './UpdateBoard.js';
 
 const D = COPY.datesView;
-const RUNNING: ReadonlySet<string> = new Set(['pending', 'running']);
-const PAUSED: ReadonlySet<string> = new Set(['paused_budget', 'paused_error']);
-const RESUMABLE: ReadonlySet<string> = new Set(['paused_budget', 'paused_error', 'interrupted']);
+const RUNNING: ReadonlySet<string> = new Set(IN_FLIGHT_STATUSES);
 
 /** A clock and a timer the run re-reads go through; tests inject both (WP19 §0: no fixed waits, injected clocks). */
 export interface RereadClock {
@@ -84,7 +94,12 @@ function DatesOf({
   clock: RereadClock;
 }) {
   const params = useSearchParams();
+  // why: spec rev 55 §11 — opening a search's page remembers it as the search last opened (the nav names it)
+  useEffect(() => writeLastSearch(definition.id), [definition.id]);
   const state = useMemo(() => parseDatesState(params, definition), [params, definition]);
+  // why: spec rev 55 §11 URLs — a refused Search now opens the new search's page with `refused=<code>`; a value that is
+  // no refusal code is ignored, never an error
+  const refused = refusalOf(params.get('refused'));
   const scope = scopeQuery(state);
   const scopeKey = JSON.stringify(scope);
   const query = useDatePairs(definition.id, scope);
@@ -109,11 +124,24 @@ function DatesOf({
   );
 
   const executionId = (track.shown ?? track.pending)?.data.executionId ?? null;
-  const watch = useExecutionWatch(executionId);
+  // why: spec rev 55 §11 — the latest run, polled while it is going (the bar's poll of the same run is the same query)
+  const watch = useLatestRun(executionId);
   const run: ExecutionResponse | undefined = watch.data?.id === executionId ? watch.data : undefined;
   const latest = track.shown?.data.executions.find((e) => !e.isChild);
   const status = run?.status ?? latest?.status;
   const runActive = status !== undefined && RUNNING.has(status);
+  // why: the card answers two things the page's scoped read cannot: whether the space changed since that run started
+  // (the api's own `spaceChangedSince`, never the search's updatedAt, which a Repeat weekly save also moves), and the
+  // whole search's counts while the run goes (ruling R-scope), so the cards are re-read only while it is going
+  const card = useCards({ poll: runActive }).data?.cards.find((c) => c.id === definition.id);
+  const cardRun = card?.latestRun ?? null;
+  const sameRun = cardRun !== null && cardRun.id === executionId;
+  const spaceChanged = sameRun && card?.spaceChangedSince === true;
+  // why: the card's counts only while it describes this run as it now stands (a card read before the run moved is not)
+  const cardWhole =
+    cardRun !== null && sameRun && cardRun.status === status
+      ? { searched: cardRun.datePairsSearched, total: cardRun.datePairs }
+      : null;
 
   // why: a new read is placed while rendering (React's "adjust state when a prop changes"), so a filtered read is
   // never drawn for one frame under the previous scope, and a held read never touches the board
@@ -179,18 +207,27 @@ function DatesOf({
       {data !== null && providers.data?.synthetic !== true && isSyntheticRead(data, run) ? (
         <SyntheticBanner />
       ) : null}
-      <DatesHeader definition={definition} data={data} model={model} state={state} run={run} now={now} />
+      {/* why: the refusal speaks only while the search has no run: once a press starts one, the page shows that run */}
+      <DatesHeader
+        definition={definition}
+        data={data}
+        model={model}
+        state={state}
+        run={run}
+        now={now}
+        refused={refused}
+        spaceChanged={spaceChanged}
+        cardWhole={cardWhole}
+      />
       <Filters definition={definition} state={state} />
       <p role="status" className="sr-only">
         {track.message}
       </p>
       <Body
-        definition={definition}
         query={query}
         data={data}
         model={model}
         state={state}
-        run={run}
         runActive={runActive}
         board={(m, d) => (
           <BoardTable
@@ -231,23 +268,28 @@ function DatesOf({
   );
 }
 
-/** The board's place: the state the read is in (spec §11 States), or the board itself. */
+/** The `refused=` value as a start refusal code, or null when it is absent or names none (spec rev 55 §11 URLs). */
+function refusalOf(v: string | null): StartRefusalCode | null {
+  return apiContract.startRefusalCodes.find((c) => c === v) ?? null;
+}
+
+/**
+ * The board's place: the state the read is in (spec §11 States), or the board itself. A never-searched search shows no
+ * board (its state line says so, with Search now, and the overview marks every date pair not searched); a stopped run's
+ * board shows the prices found before the stop (its state line says why).
+ */
 function Body({
-  definition,
   query,
   data,
   model,
   state,
-  run,
   runActive,
   board,
 }: {
-  definition: DefinitionResponse;
   query: ReturnType<typeof useDatePairs>;
   data: DecodedDatePairs | null;
   model: BoardModel | null;
   state: DatesUiState;
-  run: ExecutionResponse | undefined;
   runActive: boolean;
   board: (m: BoardModel, d: DecodedDatePairs) => ReactNode;
 }) {
@@ -265,10 +307,7 @@ function Body({
       </p>
     );
   }
-  if (data.executions.length === 0) return <NeverRun definition={definition} />;
-  const latest = data.executions.find((e) => !e.isChild);
-  const status = run?.status ?? latest?.status;
-  const counts = countsOf(model.inView);
+  if (data.executions.length === 0) return null;
   const onDemand = data.executions.filter((e) => e.isChild).length;
   return (
     <>
@@ -276,19 +315,12 @@ function Body({
       {data.executionId === null ? (
         <p className="plate notice font-semibold">{D.onDemandOnly(onDemand)}</p>
       ) : null}
-      {latest !== undefined && status !== undefined && PAUSED.has(status) ? (
-        <Paused
-          executionId={latest.id}
-          reason={run?.reason ?? COPY.statusName[status]}
-          notSearched={counts.buckets.not_run}
-          canResume={RESUMABLE.has(status)}
-        />
-      ) : null}
       {model.ranked.length > 0 ? (
         board(model, data)
       ) : filtersActive(state) ? (
         <NoPriceInFilters
-          coverageLine={coverageLineText(counts, data.verificationProviderConfigured, latest)}
+          counts={countsClauses(model.inView, COPY)}
+          buckets={bucketsUnder(model.inView, COPY)}
         />
       ) : (
         <p className="plate notice font-semibold">{runActive ? D.partial : D.noPricesInRun}</p>

@@ -20,11 +20,13 @@ export function view(o: Partial<PageView> = {}): PageView {
       challenge: false,
       noFlights: false,
       landingHeading: true,
+      returnHeading: false,
     },
     accountControl: false,
     cheapestTabs: [],
     dateGridButtons: 0,
     resultLinks: 0,
+    outboundLinks: 0,
     headings: ['Flights'],
     ...o,
   };

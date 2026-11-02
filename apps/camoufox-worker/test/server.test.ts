@@ -1,5 +1,12 @@
 import type { Server } from 'node:http';
-import { asIsoDateTime, type PageRequest, Secret, type WorkerAnswer, type WorkerStatus } from '@gmt/core';
+import {
+  asIsoDateTime,
+  type FlightsRequest,
+  type PageRequest,
+  Secret,
+  type WorkerAnswer,
+  type WorkerStatus,
+} from '@gmt/core';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createWorkerServer, MAX_BODY_BYTES, portOf } from '../src/server.js';
 import type { PageResult } from '../src/session.js';
@@ -47,11 +54,11 @@ beforeEach(() => {
 });
 
 async function start(
-  result: PageResult | ((req: PageRequest) => Promise<PageResult>),
+  result: PageResult | ((req: PageRequest | FlightsRequest) => Promise<PageResult>),
   status: WorkerStatus = STATUS,
 ) {
   const log = memoryLog();
-  const seen: PageRequest[] = [];
+  const seen: Array<PageRequest | FlightsRequest> = [];
   let fatal = 0;
   const s = createWorkerServer({
     key: new Secret(KEY),
@@ -69,8 +76,8 @@ async function start(
   await new Promise<void>((r) => s.listen(0, '127.0.0.1', () => r()));
   server = s;
   const base = `http://127.0.0.1:${portOf(s)}`;
-  const post = (body: unknown, o: { key?: string | null; type?: string; raw?: string } = {}) =>
-    fetch(`${base}/v1/page`, {
+  const post = (body: unknown, o: { key?: string | null; type?: string; raw?: string; path?: string } = {}) =>
+    fetch(`${base}${o.path ?? '/v1/page'}`, {
       method: 'POST',
       headers: {
         'content-type': o.type ?? 'application/json',
@@ -250,5 +257,115 @@ describe('the worker server (brief §6 table, one it per row)', () => {
       onFatal: () => undefined,
     });
     expect(() => portOf(s)).toThrow(/not listening/);
+  });
+});
+
+// Spec revision 55 §2 "The flight-list read" (WP20 Task 20.7): POST /v1/flights admits only a flights request, under
+// the same key, body cap and contacted header as /v1/page; the session reads the page.
+describe('POST /v1/flights (spec rev 55 §2)', () => {
+  const FLIGHTS = { ...BODY, mode: 'flights' };
+  // A synthetic flight (no recording's).
+  const flights: WorkerAnswer = {
+    kind: 'flights',
+    fetchedAt: AT,
+    currency: 'GBP',
+    pointOfSale: 'GB',
+    listed: 'flights',
+    flights: [
+      {
+        departsLocal: '09:05',
+        arrivesLocal: '12:10',
+        arrivesDayOffset: 0,
+        durationMinutes: 485,
+        stops: 0,
+        carriers: ['QQ Air'],
+        operatedBy: null,
+        amountMinor: 47_800,
+      },
+    ],
+    minMinor: 47_800,
+    tabMinor: 45_100,
+    cheapestView: null,
+    optionsUnparsed: 0,
+    optionsOtherCell: 0,
+    resultsStated: 1,
+    notes: [],
+    versions,
+  };
+  it('answers 200 kind flights for a valid body, Google contacted, the request passed as parsed', async () => {
+    const t = await start({ answer: flights, googleContacted: true });
+    const r = await t.post(FLIGHTS, { path: '/v1/flights' });
+    expect(r.status).toBe(200);
+    expect(r.headers.get('x-gmt-google-contacted')).toBe('1');
+    expect(await r.json()).toEqual(flights);
+    expect(t.seen).toEqual([FLIGHTS]);
+    expect(t.log.lines.map((l) => l.o)).toEqual([
+      { route: 'POST /v1/flights', status: 200, kind: 'flights', durationMs: 0 },
+    ]);
+  });
+  it('states the contacted header exactly as /v1/page does, each answer', async () => {
+    for (const result of [
+      { answer: { kind: 'cooling-down', cause: 'captcha', cooldownUntil: AT }, googleContacted: false },
+      {
+        answer: { kind: 'blocked', page: 'unrecognised', cooldownUntil: AT, rule: 'currency' },
+        googleContacted: true,
+      },
+      { answer: { kind: 'spacing', retryAfterSeconds: 9 }, googleContacted: false },
+    ] satisfies PageResult[]) {
+      const t = await start(result);
+      const a = await t.post(FLIGHTS, { path: '/v1/flights' });
+      const b = await t.post(BODY);
+      expect([a.status, a.headers.get('x-gmt-google-contacted'), a.headers.get('retry-after')]).toEqual([
+        b.status,
+        b.headers.get('x-gmt-google-contacted'),
+        b.headers.get('retry-after'),
+      ]);
+      expect(a.headers.get('x-gmt-google-contacted')).toBe(result.googleContacted ? '1' : '0');
+      await new Promise((r) => server?.close(r));
+      server = null;
+    }
+  });
+  it.each([
+    ['a list body', { raw: JSON.stringify(BODY) }],
+    ['a grid body', { raw: JSON.stringify({ ...BODY, mode: 'grid' }) }],
+    ['a wrong content type', { type: 'text/plain' }],
+    ['not JSON', { raw: '{not json' }],
+  ])('400 for %s, nothing paged', async (_n, o) => {
+    const t = await start({ answer: flights, googleContacted: true });
+    const r = await t.post(FLIGHTS, { ...o, path: '/v1/flights' });
+    expect(r.status).toBe(400);
+    expect(await r.json()).toEqual({ kind: 'bad-request' });
+    expect(r.headers.get('x-gmt-google-contacted')).toBe('0');
+    expect(t.seen).toEqual([]);
+  });
+  // why: 20.7 review finding 6: a body the schema accepts, padded with JSON whitespace, isolates the byte cap: one byte
+  // over is refused before parsing, and the same body at the cap is read
+  it('refuses a valid body one byte over the 4,096-byte cap, and reads it at the cap', async () => {
+    const text = JSON.stringify(FLIGHTS);
+    const padded = (size: number) => `{${' '.repeat(size - text.length)}${text.slice(1)}`;
+    expect(JSON.parse(padded(MAX_BODY_BYTES + 1))).toEqual(FLIGHTS);
+    const t = await start({ answer: flights, googleContacted: true });
+    const over = await t.post(FLIGHTS, { path: '/v1/flights', raw: padded(MAX_BODY_BYTES + 1) });
+    expect([over.status, over.headers.get('x-gmt-google-contacted')]).toEqual([400, '0']);
+    expect(t.seen).toEqual([]);
+    const at = await t.post(FLIGHTS, { path: '/v1/flights', raw: padded(MAX_BODY_BYTES) });
+    expect(at.status).toBe(200);
+    expect(t.seen).toEqual([FLIGHTS]);
+  });
+  it('/v1/page refuses a flights body, 400, nothing paged', async () => {
+    const t = await start({ answer: flights, googleContacted: true });
+    expect((await t.post(FLIGHTS)).status).toBe(400);
+    expect(t.seen).toEqual([]);
+  });
+  it('401 without the key, no body', async () => {
+    const t = await start({ answer: flights, googleContacted: true });
+    const r = await t.post(FLIGHTS, { path: '/v1/flights', key: null });
+    expect(r.status).toBe(401);
+    expect(await r.text()).toBe('');
+    expect(t.seen).toEqual([]);
+  });
+  it('404 for GET /v1/flights', async () => {
+    const t = await start({ answer: flights, googleContacted: true });
+    expect((await fetch(`${t.base}/v1/flights`, { headers: { 'x-gmt-worker-key': KEY } })).status).toBe(404);
   });
 });

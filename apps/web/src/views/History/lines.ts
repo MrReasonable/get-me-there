@@ -7,6 +7,7 @@ import {
   type Provenance,
   type ProviderId,
   type SourceKind,
+  type StaleMark,
 } from '@gmt/core';
 import type { ExecutionSummary, ItineraryHistoryResponse, RouteHistoryResponse } from '../../api/types.js';
 import { COPY } from '../../copy.js';
@@ -30,7 +31,8 @@ export type PlotPoint =
       executionId: string;
       pricePence: number;
       provenance: Provenance;
-      stale: boolean;
+      /** The api's stale mark: false, or the kind of threshold the point is older than (ruling 20.6-2). */
+      stale: StaleMark;
       truncated: boolean;
       /** The pair's cheapest cell at that run (calendar series); null for offers. */
       cell: Cell | null;
@@ -327,5 +329,5 @@ export function newestAllStale(lines: readonly PlotLine[]): boolean {
     const n = priced[priced.length - 1];
     return n === undefined ? [] : [n];
   });
-  return newest.length > 0 && newest.every((p) => p.stale);
+  return newest.length > 0 && newest.every((p) => p.stale !== false);
 }

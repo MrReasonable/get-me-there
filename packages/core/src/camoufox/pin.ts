@@ -71,6 +71,11 @@ const FLAGS = {
       // why: grid/2026-10-26/7 and 8 (the operator's Mac): every unpriced cell of ten views read as "no flights, <d>
       // <Mon> to <d> <Mon>" or "price unknown, <d> <Mon> to <d> <Mon>", each a button naming its pair
       GRID_UNPRICED_VERIFIED: true,
+      // why: WP21 Task 21.3: select-outbound/2026-11-01/3 and 4 and select-return/2026-11-01/1 to 4 dated the return
+      // and booking views; the end-to-end select-return/2026-11-02/1 ran the full served path, one reload the only
+      // extra document, every activation in-app and no gate refusal (the worker's PROOFS name each)
+      RETURN_SELECT_VERIFIED: true,
+      BOOKING_SELECT_VERIFIED: true,
     },
   },
   // why: WP17 Task 17.8's darwin-x64 session of 2026-10-26 (the operator's Mac under Rosetta, an x86_64 Node, a
@@ -93,6 +98,8 @@ const FLAGS = {
       LANDING_VERIFIED: true,
       // why: no grid recording of this entry shows an unpriced cell (its pages were all priced)
       GRID_UNPRICED_VERIFIED: false,
+      RETURN_SELECT_VERIFIED: false,
+      BOOKING_SELECT_VERIFIED: false,
     },
   },
   // why: WP17 Task 17.8's linux-arm64 session of 2026-10-26 (a Linux arm64 container on the operator's Mac, headless,
@@ -111,6 +118,8 @@ const FLAGS = {
       LANDING_VERIFIED: true,
       // why: no grid recording of this entry shows an unpriced cell (its pages were all priced)
       GRID_UNPRICED_VERIFIED: false,
+      RETURN_SELECT_VERIFIED: false,
+      BOOKING_SELECT_VERIFIED: false,
     },
   },
   // why: WP17 Task 17.8's linux-x64 session of 2026-10-26 (a Linux x86_64 container under emulation on the operator's
@@ -129,6 +138,8 @@ const FLAGS = {
       LANDING_VERIFIED: true,
       // why: no grid recording of this entry shows an unpriced cell (its pages were all priced)
       GRID_UNPRICED_VERIFIED: false,
+      RETURN_SELECT_VERIFIED: false,
+      BOOKING_SELECT_VERIFIED: false,
     },
   },
 } as const;

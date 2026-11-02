@@ -7,34 +7,30 @@
 
 const noun = (n: number, one: string, many: string): string => (n === 1 ? one : many);
 
-/** The departure-window presets: a rolling window of this many months, from the start offset (spec §11 relative window). */
-export const WINDOW_PRESET_MONTHS = [3, 6, 9, 12] as const;
-export type WindowPresetMonths = (typeof WINDOW_PRESET_MONTHS)[number];
-
 export const PLAN_COPY = {
   // --- The view ---
   viewHeading: 'Searches',
-  searchList: 'Searches to edit',
-  newSearch: 'New search',
-  editSearch: (name: string) => `Edit ${name}`,
-  notFound: 'The search in this link no longer exists. Pick another one above.',
+  notFound: 'The search in this link no longer exists. See your searches:',
 
   // --- The short form ---
   heading: 'Plan a search',
-  lead: 'Where from, where to and when. Everything else starts from sensible defaults under More options.',
   from: 'From',
   to: 'To',
   fromPlaceholder: 'City, airport or code',
   toPlaceholder: 'City, airport or code',
-  departing: 'Departing between',
+  // WP20 Task 20.5 (spec rev 55 §11): the new-search form's dates, shown and entered as "10 Jan 2027"
+  leaveBetween: 'Leave between',
+  datePlaceholder: '10 Jan 2027',
+  rollingDates: (from: string, to: string) =>
+    `Rolling dates: ${from} to ${to} as of today. Change them under More options.`,
+  rollingSwitch: 'Rolling dates instead of fixed ones',
+  rollingLine: (start: number, length: number) =>
+    `starts in ${start} ${noun(start, 'day', 'days')}, lasts ${length} ${noun(length, 'day', 'days')}`,
+  rollingResolved: (line: string, resolved: string) => `${line}: ${resolved}`,
+  onlyIfSet: 'only if you set one',
+  moreOptionsNew: 'Journey limit, cabin, rolling dates, price sources, name and run budget.',
   earliest: 'Earliest departure',
   latest: 'Latest departure',
-  presets: 'Quick choices for the departure window',
-  preset: (months: number) => `Next ${months} months`,
-  rolling: (startDays: number, lengthDays: number) =>
-    `Rolling window: each run searches departures from ${startDays} ${noun(startDays, 'day', 'days')} ahead, for ${lengthDays} ${noun(lengthDays, 'day', 'days')}. Change a date to fix the window instead.`,
-  fixed:
-    'Fixed dates: runs search these dates until you change them. Pick a quick choice to roll with today again.',
   stay: 'Stay',
   shortest: 'Shortest stay',
   longest: 'Longest stay',

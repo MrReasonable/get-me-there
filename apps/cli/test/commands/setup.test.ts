@@ -169,7 +169,7 @@ describe('setup on a clean machine (brief Task 16b.6)', () => {
     expect(await runCli(['setup'], m.deps)).toBe(0);
     expect(parseEnv(m.fs.read(ENV) ?? '').TRAVELPAYOUTS_TOKEN).toBe('tp-token-0123456789');
     expect(m.io.stdout).not.toContain('No price source is set up yet');
-    expect(m.io.stdout).toContain('Next: open http://127.0.0.1:3000, choose Definitions and add a search');
+    expect(m.io.stdout).toContain('Next: open http://127.0.0.1:3000 and use the new-search form on Searches');
   });
 });
 
@@ -190,7 +190,7 @@ describe('the closing screen (brief §6)', () => {
       'docs/setup.md section 3',
       'plain HTTP',
       'Scheduled searches run while this machine is awake; a missed one is caught up once when it wakes, without the browser provider.',
-      'Next: open http://127.0.0.1:3000, choose Definitions and add a search with your airports and dates',
+      'Next: open http://127.0.0.1:3000 and use the new-search form on Searches: enter From, To and the dates, review what the search will use, then press Search now.',
       'Nothing runs on a schedule until you give a search one',
     ])
       expect(closing).toContain(s);

@@ -4,6 +4,7 @@ import type {
   AlertRuleBody,
   Basis,
   CoverageCheckBody,
+  CreateAndStartBody,
   DatePairsScope,
   DefinitionBody,
   DefinitionUpdateBody,
@@ -20,12 +21,27 @@ export const api = {
   providers: () => call(c.providersResponseSchema, 'GET', '/api/providers'),
   // WP18 (spec §10): the one report of what works, shown by the Status view and the bar's link
   status: () => call(c.statusResponseSchema, 'GET', '/api/status'),
+  // spec §10: the month's spend and each provider's window, for the status bar's always-on month line
+  budget: () => call(c.budgetResponseSchema, 'GET', '/api/budget'),
   testEmail: () => call(c.testEmailResponseSchema, 'POST', '/api/alerts/test-email'),
   definitions: () => call(c.definitionResponseSchema.array(), 'GET', '/api/definitions'),
+  // WP20 (spec §10): the first screen's cards in the order the api owns; remove (soft delete, then cancel) and undo
+  cards: () => call(c.searchCardsResponseSchema, 'GET', '/api/definitions/cards'),
+  removeDefinition: (id: string) =>
+    call(c.definitionDeletedResponseSchema, 'DELETE', '/api/definitions/:id', { params: { id } }),
+  restoreDefinition: (id: string) =>
+    call(c.definitionResponseSchema, 'POST', '/api/definitions/:id/restore', { params: { id } }),
   estimateDraft: (body: DefinitionBody) =>
     call(c.estimateResponseSchema, 'POST', '/api/definitions/estimate', { body }),
-  createDefinition: (body: DefinitionBody) =>
-    call(c.definitionResponseSchema, 'POST', '/api/definitions', { body }),
+  // WP20 Task 20.5 (spec rev 55 §10): a saved search's estimate, for Search again's second look and its page after a
+  // refused Search now (ruling A24: the page asks it again rather than carrying figures in the URL)
+  // Task 20.5 R2: with the draft body, so an edited search or one about to repeat is estimated as itself (its own
+  // schedule reservation and earlier prices are its own)
+  estimateDefinition: (id: string, body: DefinitionBody) =>
+    call(c.estimateResponseSchema, 'POST', '/api/definitions/:id/estimate', { params: { id }, body }),
+  // Search now's one press: save the search, start its run with the shown figures; a refusal is in the body
+  createAndStart: (body: CreateAndStartBody) =>
+    call(c.createAndStartResponseSchema, 'POST', '/api/definitions/create-and-start', { body }),
   updateDefinition: (id: string, body: DefinitionUpdateBody) =>
     call(c.definitionResponseSchema, 'PUT', '/api/definitions/:id', { params: { id }, body }),
   coverageCheck: (body: CoverageCheckBody) =>

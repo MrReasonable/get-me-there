@@ -180,21 +180,22 @@ describe('ExecutionsRepo firing insert (spec §7 firing unique index)', () => {
   });
 
   it.each(['paused_budget', 'paused_error', 'interrupted'] as const)(
-    'cancelPaused cancels a %s run with its finish time and why, and nothing that is running or finished',
+    'cancelPaused cancels a %s run with its finish time, its cause and its sentence, and nothing that is running or finished',
     (status) => {
       const { repo, input } = setup();
       const e = repo.create(input({ status: 'running', trigger: 'manual' }));
       repo.setStatus(e.id, status, { resumeAfter: asIsoDateTime('2027-04-01T00:00:00.000Z') });
-      expect(repo.cancelPaused(e.id, 'superseded by the next firing')).toBe(true);
+      expect(repo.cancelPaused(e.id, { kind: 'superseded', by: 'schedule' })).toBe(true);
       expect(repo.get(e.id)).toMatchObject({
         status: 'cancelled',
         finishedAt: T0,
         resumeAfter: null,
-        errorText: 'superseded by the next firing',
+        errorText: 'Replaced by a scheduled run.',
+        stopCause: { kind: 'superseded', by: 'schedule' },
       });
-      expect(repo.cancelPaused(e.id, 'again')).toBe(false);
+      expect(repo.cancelPaused(e.id, { kind: 'cancelled' })).toBe(false);
       const running = repo.create(input({ status: 'running', trigger: 'manual' }));
-      expect(repo.cancelPaused(running.id, 'no')).toBe(false);
+      expect(repo.cancelPaused(running.id, { kind: 'cancelled' })).toBe(false);
       expect(repo.get(running.id)?.status).toBe('running');
     },
   );

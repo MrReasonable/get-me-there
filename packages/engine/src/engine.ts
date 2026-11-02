@@ -1,12 +1,30 @@
-import type { DefinitionInput, SearchDefinition } from '@gmt/core';
+import {
+  type DefinitionInput,
+  type Estimate,
+  FLIGHT_LIST_PAGES_PER_PAIR_MAX,
+  flightPagesPerPair,
+  isScheduled,
+  type ProviderId,
+  type SearchDefinition,
+} from '@gmt/core';
 import { bootEngine } from './boot.js';
 import { checkBudget, spendOf } from './budgetCheck.js';
-import { budgetFitFor } from './budgetFit.js';
+import { budgetFitFor, type ScheduleLoads, withScheduleLoads } from './budgetFit.js';
 import { childCapPreview } from './child.js';
 import { runConsentNoticeSafely } from './consentNotice.js';
 import { buildContext, type EngineContext } from './context.js';
 import { coverageCheckFor } from './coverageCheck.js';
-import { estimateRemainingFor, estimateStart, withBlocked } from './estimate.js';
+import {
+  askedPairs,
+  billedCallsOf,
+  estimateRemainingFor,
+  estimateStart,
+  monthlyPagesOf,
+  type PlanMemo,
+  withBlocked,
+} from './estimate.js';
+import { createFlightReader, flightListFresh } from './flightRead.js';
+import { lineKey } from './lines.js';
 import { runSystemJob } from './maintenance.js';
 import { SMTP_TIMEOUTS } from './notifiers/email.js';
 import { createOrchestrator, type Orchestrator } from './orchestrator.js';
@@ -16,6 +34,8 @@ import { parseCron } from './scheduler/parseCron.js';
 import { createScheduler, type Scheduler } from './scheduler/scheduler.js';
 import { buildSnapshot } from './snapshot.js';
 import { browserLeftFor } from './stages/browserGate.js';
+import type { PlannedTile } from './stages/discovery.js';
+import { FLIGHT_LIST_PROVIDER } from './stages/flightLists.js';
 import type { Engine, EngineDeps, EngineOptions } from './types.js';
 import { HOUR_MS } from './units.js';
 
@@ -35,13 +55,7 @@ export function statusOf(
   const now = Date.parse(ctx.clock.now());
   const defs = ctx.repos.definitions
     .list()
-    .filter(
-      (d) =>
-        d.enabled &&
-        d.deletedAt === null &&
-        d.scheduleCron !== null &&
-        parseCron(d.scheduleCron, d.scheduleTz).ok,
-    );
+    .filter((d) => isScheduled(d) && parseCron(d.scheduleCron, d.scheduleTz).ok);
   const running = orch.running();
   const stuck = running.some((id) => {
     const e = ctx.repos.executions.get(id);
@@ -95,7 +109,14 @@ function asDefinition(
 /** The plan's "Engine" contract over the modules of this package. Spec §8. */
 export function createEngine(deps: EngineDeps, options: EngineOptions = {}): Engine {
   const ctx = buildContext(deps, options);
+  // why: the plan each estimate made, by the estimate object itself, for estimateAsk (collected with the estimate)
+  const memo = new WeakMap<Estimate, PlanMemo>();
+  // why: the other schedules' monthly loads an estimate read for its reservations, so its estimateAsk (the same route,
+  // the same moment) sets the same reservations aside without planning every other schedule again
+  const loadsOf = new WeakMap<Estimate, ScheduleLoads>();
   const orch = createOrchestrator(ctx);
+  // why: revision 55 §8.1 — one on-demand flight read at a time, through the context's one browser lease
+  const flights = createFlightReader(ctx);
   const sched = createScheduler(
     {
       onTick: (id) => orch.tick(id),
@@ -145,14 +166,16 @@ export function createEngine(deps: EngineDeps, options: EngineOptions = {}): Eng
       sched.stopAll();
       ctx.heartbeat.stop();
       const settled = orch.shutdown();
-      await Promise.all([sched.drain(SHUTDOWN_DRAIN_MS), settled]);
+      // why: revision 55 §8.1 — a flight read in flight is aborted and waited for within the drain, and writes nothing
+      // once the engine is closed
+      await Promise.all([sched.drain(SHUTDOWN_DRAIN_MS), settled, flights.stop()]);
       markClosed();
       ctx.log.info({}, 'engine: shut down');
     },
     markClosed,
     start: (id, opts) => orch.start(id, opts),
     resume: (id, opts) => orch.resume(id, opts),
-    cancel: (id) => orch.cancel(id),
+    cancel: (id, cause) => orch.cancel(id, cause),
     verifyCell: (id, cell, opts) => orch.verifyCell(id, cell, opts),
     childCapPreview: (id, cell) => childCapPreview(ctx, id, cell),
     browserLeftFor: (def) => browserLeftFor(ctx, def),
@@ -160,12 +183,51 @@ export function createEngine(deps: EngineDeps, options: EngineOptions = {}): Eng
       // why: ruling 9 — the save-time estimate is the worst case without reuse; confirmationOf(it), every line
       // included, is what setConfirmed records (cost M-2)
       const { def } = asDefinition(ctx, input);
-      const b = buildSnapshot(ctx, def, 'manual', today);
-      const est = estimateStart(ctx, b.snapshot, b.cells, null);
-      // why: cost-r1-014 — the form shows beforehand which provider the caps would leave out
-      const check = checkBudget(ctx, spendOf(est), b.snapshot.budget, null, 'id' in input ? input.id : null);
-      return withBlocked(est, check.blockedBy);
+      const loads: ScheduleLoads = new Map();
+      return withScheduleLoads(ctx, loads, () => {
+        const b = buildSnapshot(ctx, def, 'manual', today);
+        const plans = new Map<ProviderId, readonly PlannedTile[]>();
+        const est = estimateStart(ctx, b.snapshot, b.cells, null, plans);
+        // why: cost-r1-014 — the form shows beforehand which provider the caps would leave out
+        const check = checkBudget(
+          ctx,
+          spendOf(est),
+          b.snapshot.budget,
+          null,
+          'id' in input ? input.id : null,
+        );
+        const out = withBlocked(est, check.blockedBy);
+        // why: estimateAsk reads the date pairs from this snapshot and these tiles, so the route plans once
+        memo.set(out, { snapshot: b.snapshot, cells: b.cells, plans });
+        loadsOf.set(out, loads);
+        return out;
+      });
     },
+    estimateAsk: (input, today, est) => {
+      // why: a saved definition's reusable prices are not asked again (spec §8.1 rev 55); the estimate itself stays the
+      // worst case without reuse (ruling 9), so this is the only place reuse shows
+      const { def, definitionId } = asDefinition(ctx, input);
+      // an estimate this engine did not make (a test double) has no memo: snapshot and plan are made here
+      const m = memo.get(est) ?? { ...buildSnapshot(ctx, def, 'manual', today), plans: new Map() };
+      const blocked = new Set(
+        est.perProvider.filter((p) => p.blocked !== null).map((p) => lineKey(p.stage, p.providerId)),
+      );
+      return withScheduleLoads(ctx, loadsOf.get(est) ?? new Map(), () => ({
+        ...askedPairs(ctx, m.snapshot, m.cells, definitionId, blocked, m.plans),
+        billedCalls: billedCallsOf(ctx, est, definitionId),
+        monthlyPages: monthlyPagesOf(ctx, est, definitionId),
+      }));
+    },
+    readFlightList: (id, pair) => flights.read(id, pair),
+    flightReadInFlight: () => flights.inFlight(),
+    setWorkerFlags: (id, f) => ctx.workerFlags.set(id, f),
+    // why: prov-008: with the flags unread the on-demand read's own preflight may set them and load 2 pages, so the
+    // button states the bound; once read, the pages the flags plan
+    flightPagesPlanned: () => {
+      const flags = ctx.workerFlags.get(FLIGHT_LIST_PROVIDER);
+      return flags === null ? FLIGHT_LIST_PAGES_PER_PAIR_MAX : flightPagesPerPair(flags);
+    },
+    flightListFresh: (def, newest) => flightListFresh(ctx, def, newest),
     estimateRemaining: (id) => {
       const e = ctx.repos.executions.get(id);
       if (e === null) throw new Error(`execution ${id} not found`);
@@ -173,7 +235,7 @@ export function createEngine(deps: EngineDeps, options: EngineOptions = {}): Eng
     },
     budgetFit: (input) => {
       const { def, definitionId } = asDefinition(ctx, input);
-      return budgetFitFor(ctx, def, definitionId);
+      return withScheduleLoads(ctx, new Map(), () => budgetFitFor(ctx, def, definitionId));
     },
     coverageCheck: (req) => coverageCheckFor(ctx, req),
     scheduler: {

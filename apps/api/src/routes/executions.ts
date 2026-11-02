@@ -58,8 +58,19 @@ export const executionHandlers: HandlerTable = {
     { request: apiContract.startExecutionRequestSchema, query: NO_INPUT },
     (c, input, ctx) => {
       const def = getLiveDefinition(ctx, param(input, 'id'));
+      // why: revision 55 §8.1, §10 — a search whose `enabled` is 0 starts; `requireCovered` and `replaceStopped`
+      // travel from the button to the engine
+      const b = input.body;
       return oneAtATime(ctx, def.id, async () =>
-        accepted(c, await ctx.engine.start(def.id, { trigger: 'manual', ...confirmation(input.body) })),
+        accepted(
+          c,
+          await ctx.engine.start(def.id, {
+            trigger: 'manual',
+            ...confirmation(b),
+            ...(b.requireCovered === undefined ? {} : { requireCovered: b.requireCovered }),
+            ...(b.replaceStopped === undefined ? {} : { replaceStopped: b.replaceStopped }),
+          }),
+        ),
       );
     },
   ),
@@ -67,14 +78,15 @@ export const executionHandlers: HandlerTable = {
   'GET /api/executions/active': plain((c, _input, ctx) => c.json(activeExecution(ctx.ports, ctx.engine))),
 
   'GET /api/executions/:id': plain((c, input, ctx) =>
-    c.json(executionResponse(ctx.ports, getExecution(ctx, param(input, 'id')))),
+    c.json(executionResponse(ctx.ports, getExecution(ctx, param(input, 'id')), ctx.engine)),
   ),
 
   'POST /api/executions/:id/cancel': plain(async (c, input, ctx) => {
     const e = getExecution(ctx, param(input, 'id'));
-    if (!(await ctx.engine.cancel(e.id)))
+    // why: revision 55 §8.1 — the operator's cancel stores its own cause
+    if (!(await ctx.engine.cancel(e.id, { kind: 'cancelled' })))
       throw new ApiError(409, 'not_cancellable', API_TEXT.notCancellable(e.status));
-    return c.json(executionResponse(ctx.ports, getExecution(ctx, e.id)));
+    return c.json(executionResponse(ctx.ports, getExecution(ctx, e.id), ctx.engine));
   }),
 
   'POST /api/executions/:id/resume': plain((c, input, ctx) => {
@@ -83,7 +95,7 @@ export const executionHandlers: HandlerTable = {
       // why: the API's resume is the operator's manual resume (spec §8.1): it re-enables disabled providers.
       const r = await ctx.engine.resume(e.id, { manual: true });
       if (!r.ok) throw startError(r);
-      return c.json(executionResponse(ctx.ports, getExecution(ctx, r.executionId)));
+      return c.json(executionResponse(ctx.ports, getExecution(ctx, r.executionId), ctx.engine));
     });
   }),
 

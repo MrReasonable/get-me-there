@@ -90,6 +90,19 @@ export interface ProviderHttpLimits {
    * `scroll_count`; undefined when the body states none.
    */
   scrollCountOf?: (bodyText: string) => number | undefined;
+  /**
+   * Spec rev 56 §5.3 "Per-request pages, timeout and hold" (camoufox flight lists): the documents an answer states it
+   * loaded (`pagesLoaded`, 0 admitted), read from its body text, for the attempt's `finalise` (`pageCount`, the ledger
+   * row's `page_count`); undefined when the body states none, so the guard keeps its own reading.
+   */
+  pageCountOf?: (bodyText: string) => number | undefined;
+  /**
+   * Spec rev 56 §5.3 "Per-request pages, timeout and hold" (camoufox): when the provider's next start may be, as an
+   * answer's body states it (`nextLoadNotBefore`); http-kit holds the provider's next start until then for every answer
+   * with a body, 2xx or not, inside the attempt (before the limiter's slot is released and before a retry); undefined
+   * when the body states none.
+   */
+  nextStartOf?: (bodyText: string) => IsoDateTime | undefined;
 }
 
 /** What createHttpKit needs (spec §5.3 rev 11). */
@@ -132,6 +145,16 @@ export interface HttpKitRequest {
   /** Spec §2 rev 34 (camoufox grid): the page's planned scrolls, which the reservation checks against the scroll caps. */
   scrolls?: number;
   /**
+   * Spec rev 56 §5.1, §5.3: the request's planned page count, passed to `budget.reserve` (absent: the guard's 1); a
+   * camoufox flights request with a return phase plans `FLIGHT_LIST_PAGES_PER_PAIR_MAX`.
+   */
+  pages?: number;
+  /**
+   * Spec rev 56 §5.3: this request's own timeout, in place of the provider's `requestTimeoutSeconds` for its attempts
+   * only (a flights request with a return phase sends `flightRequestSeconds`; every other request keeps the provider's).
+   */
+  requestTimeoutSeconds?: number;
+  /**
    * ProviderContext.beforeSend (decision 83): run after the limiter admits each attempt and before its reservation and
    * fetch; an AbortedError thrown from it ends the request with nothing reserved or sent.
    */
@@ -151,6 +174,14 @@ export interface HttpKitResponse {
 export interface HttpKit {
   request(r: HttpKitRequest): Promise<HttpKitResponse>;
   stats(): { inFlight: number };
+  /**
+   * Spec rev 56 §5.3 (R-spacing; arch-r3-018): makes the next start for `providerId` wait until `at`. The hold is
+   * awaited before a request joins the limiter's queue, under the request's signal, and does not count toward the
+   * queue's maximum wait (a longer hold still waits, never a limiter timeout); an `at` in the past does nothing, and an
+   * earlier `at` never shortens a later one. http-kit itself holds the next start during the request, inside the attempt
+   * (`nextStartOf` over the answer's `nextLoadNotBefore`); the smoke tool calls it directly.
+   */
+  holdUntil(providerId: HttpProviderId, at: IsoDateTime): void;
 }
 
 /** Writes one attempt as a dated, hashed, redacted fixture (spec §5.3 "Recorder"); resolves to the path written. */

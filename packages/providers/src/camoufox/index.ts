@@ -1,7 +1,15 @@
 // The camoufox adapter's public names (brief WP14 §5): the provider, its constants, tiling and HTTP limits.
-export { BLOCKED_WORDS, classifyWorkerAnswer, coolingDownWords } from './answer.js';
+export { BLOCKED_WORDS, classifyWorkerAnswer, coolingDownWords, throwIfMonthly } from './answer.js';
+export { CAMOUFOX_FLIGHT_LIST_INFO, flightListCapability } from './flights.js';
 export { gridBlocks, gridTileEstimate, planGridTiles } from './grid.js';
-export { camoufoxHttpLimits, camoufoxStatusHttpLimits, pageClassOf, scrollCountOf } from './limits.js';
+export {
+  camoufoxHttpLimits,
+  camoufoxStatusHttpLimits,
+  nextStartOf,
+  pageClassOf,
+  pageCountOf,
+  scrollCountOf,
+} from './limits.js';
 export {
   GRID_NOT_VERIFIED,
   readWorkerStatus,

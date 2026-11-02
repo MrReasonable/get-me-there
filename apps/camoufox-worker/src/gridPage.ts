@@ -24,7 +24,6 @@ import {
 import type { PageBudget } from './budget.js';
 import { panelOf, settle, snapshotOf } from './dialogSettle.js';
 import {
-  CheapestStepFailed,
   CLICK_TIMEOUT_MS,
   clickTimeoutOf,
   countOf,
@@ -33,6 +32,7 @@ import {
   type LocatorLike,
   type PageLike,
   runStep,
+  StepFailed,
   type StepOptions,
 } from './driver.js';
 import {
@@ -258,7 +258,7 @@ export async function gridPage(
     try {
       next = await view(`move-${i + 1}`, dm, prevKey, false);
     } catch (e) {
-      if (e instanceof CheapestStepFailed) return { kind: 'grid', views, ended: 'scroll-not-settled', notes };
+      if (e instanceof StepFailed) return { kind: 'grid', views, ended: 'scroll-not-settled', notes };
       throw e;
     }
     if (next.kind === 'blocked') return blocked(next);

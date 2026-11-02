@@ -1,4 +1,12 @@
-import { effectiveAge, formatAgeFull, formatAgeShort, formatFetchedAgo, sourceLabel } from '@gmt/core';
+import {
+  effectiveAge,
+  formatAgeFull,
+  formatAgeShort,
+  formatFetchedAgo,
+  type StaleMark,
+  sourceLabel,
+  staleWords,
+} from '@gmt/core';
 import { COPY } from '../copy.js';
 import { Flaps } from '../flaps/Flaps.js';
 import { formatPence } from '../format.js';
@@ -10,7 +18,11 @@ export interface PriceCellProps {
   /** Validated before anything renders; typed unknown because validation is this component's job. */
   provenance: unknown;
   calendar: boolean;
-  stale: boolean;
+  /**
+   * The api's stale mark (ruling 20.6-2): `false`, or the kind of threshold the price is older than, which picks its
+   * words. `true` is a stale flag of no known kind (an alert event's stored threshold), shown as the plain label.
+   */
+  stale: StaleMark | true;
   /** The price is the cheapest of the rows a truncated tile read (decision 36). */
   truncated?: boolean;
   /** A newer parent search found this cell empty or without data (decision 57): marked, never hidden. */
@@ -48,6 +60,11 @@ export interface PriceCellProps {
    */
   flaps?: boolean;
   flapSlot?: string | undefined;
+  /**
+   * Replaces the source's words on every face (the title, the compact detail and the provenance line), for a price
+   * whose source has a name of its own (a flight list's, WP20 Task 20.10). The provenance is validated all the same.
+   */
+  sourceLabel?: string;
 }
 
 // why: a badge is a state tag, a black flap chip carrying its own ink (white, amber or red), so it reads the same on
@@ -57,8 +74,9 @@ const badge = 'tag ml-1';
 /**
  * The only component that prints a price (spec §11, §9 item 6); wrap it in PriceBoundary. The "≈"
  * sits on the amount, so a converted price can never be read as exact. An unconfirmed price says so
- * first; a stale one says "stale"; a price whose vendor age is unknown is labelled, not called stale
- * (decision 44: staleness is by fetch age).
+ * first; a stale one carries the stale mark's words, only when it is stale (spec rev 55 §3: core's `staleMarkText`,
+ * "older than this search's refresh" on a calendar price, "older than your stale setting" on the verified basis); a
+ * price whose vendor age is unknown is labelled, not called stale (decision 44: staleness is by fetch age).
  */
 export function PriceCell(props: PriceCellProps) {
   const now = useNow();
@@ -69,9 +87,12 @@ export function PriceCell(props: PriceCellProps) {
   const notSeen = props.notSeenInLatestHours ?? null;
   const compact = props.compact === true;
   const calendar = isCalendarPrice(p, props.calendar);
+  // why: spec rev 55 §3 — the stale mark's words, only when true, from the kind of threshold the api judged it by
+  const staleText =
+    props.stale === false ? null : props.stale === true ? COPY.stale : staleWords(props.stale);
   const detail = [
     COPY.provider[p.providerId],
-    sourceLabel(p),
+    props.sourceLabel ?? sourceLabel(p),
     formatAgeFull(age),
     ...(calendar ? [COPY.constraintsNotChecked] : []),
   ];
@@ -79,7 +100,7 @@ export function PriceCell(props: PriceCellProps) {
     const G = COPY.priceMarkGlyph;
     const marks = [
       ...(props.unconfirmed === true ? [{ glyph: G.unconfirmed, words: COPY.priceNotConfirmed }] : []),
-      ...(props.stale ? [{ glyph: G.stale, words: COPY.stale }] : []),
+      ...(staleText !== null ? [{ glyph: G.stale, words: staleText }] : []),
       ...(props.truncated === true ? [{ glyph: G.truncated, words: COPY.truncatedNote }] : []),
       ...(props.superseded === true ? [{ glyph: G.superseded, words: COPY.superseded }] : []),
       ...(notSeen !== null ? [{ glyph: G.notSeen, words: COPY.notSeenInLatest(COPY.agoOf(notSeen)) }] : []),
@@ -122,7 +143,10 @@ export function PriceCell(props: PriceCellProps) {
             {COPY.notChecked}
           </span>
         ) : null}
-        <span className="sr-only">{spoken}</span>
+        {/* why: the provenance note in words, read out with the face; the main-path sweep leaves it to provenance */}
+        <span className="sr-only" data-provenance-note="">
+          {spoken}
+        </span>
       </span>
     );
   }
@@ -165,7 +189,7 @@ export function PriceCell(props: PriceCellProps) {
         {props.unconfirmed === true ? (
           <span className={`${badge} tag-bad`}>{COPY.priceNotConfirmed}</span>
         ) : null}
-        {props.stale ? <span className={`${badge} tag-warn`}>{COPY.stale}</span> : null}
+        {staleText !== null ? <span className={`${badge} tag-warn`}>{staleText}</span> : null}
         {age.kind === 'unknown' ? <span className={`${badge} tag-dim`}>{COPY.vendorAgeUnknown}</span> : null}
       </span>
       {compact ? (
@@ -191,6 +215,7 @@ export function PriceCell(props: PriceCellProps) {
           destinationNote={props.destinationNote}
           showProvider={props.besideColumns !== true}
           fullAge={props.fullAge === true}
+          {...(props.sourceLabel === undefined ? {} : { sourceLabel: props.sourceLabel })}
         />
       )}
       {props.superseded === true ? <span className="text-xs font-medium">{COPY.superseded}</span> : null}

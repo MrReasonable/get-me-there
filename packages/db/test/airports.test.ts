@@ -60,7 +60,7 @@ describe('airports seed and sanity check (spec §7 airports)', () => {
     seedAirports(db, many(AIRPORTS_MIN_ROWS));
     expect(sanityCheckAirports(db, [asIata('AAA'), asIata('ZZZ'), asIata('ZZY'), asIata('ZZZ')])).toEqual({
       ok: false,
-      reason: 'airports referenced by enabled definitions are missing: ZZY, ZZZ',
+      reason: 'airports referenced by live definitions are missing: ZZY, ZZZ',
     });
   });
 
@@ -89,12 +89,12 @@ describe('airports seed and sanity check (spec §7 airports)', () => {
     const db = freshDb();
     seedAirports(db, loadAirportsDataset(AIRPORTS_DATA_DIR));
     const repo = new AirportsRepo(db);
-    const codes = (q: string) => repo.search(q, 20).map((a) => a.iata);
+    const codes = (q: string) => repo.search(q, 20, null).map((a) => a.iata);
     expect(codes('heath')[0]).toBe('LHR');
     expect(codes('new y').slice(0, 3)).toEqual(expect.arrayContaining(['JFK', 'EWR']));
     expect(codes('lond').slice(0, 6)).toEqual(expect.arrayContaining(['LHR', 'LGW']));
     for (const q of ['lond', 'new y', 'heath', 'airport'])
-      expect(repo.search(q, 20).filter((a) => a.scheduled === false)).toEqual([]);
+      expect(repo.search(q, 20, null).filter((a) => a.scheduled === false)).toEqual([]);
     expect(repo.get(LHR)).toMatchObject({ kind: 'large', scheduled: true });
   });
 
@@ -287,13 +287,13 @@ describe('AirportsRepo', () => {
       ],
       { QQX: ['QQQ', 'QQR'] },
     );
-    expect(repo.search('aaa', 10).map((a) => a.iata)).toEqual(['AAA']);
-    expect(repo.search('QQX', 10).map((a) => a.iata)).toEqual(['QQQ', 'QQR']); // po-003: a metro code lists its airports
-    expect(repo.search('AA', 10).map((a) => a.iata)).toEqual(['AAA', 'AAB', 'BAA']);
-    expect(repo.search('alpha', 10).map((a) => a.iata)).toEqual(['AAB']);
-    expect(repo.search('%', 10).map((a) => a.iata)).toEqual(['CCC']);
-    expect(repo.search('  ', 10)).toEqual([]);
-    expect(repo.search('field', 1)).toHaveLength(1);
+    expect(repo.search('aaa', 10, null).map((a) => a.iata)).toEqual(['AAA']);
+    expect(repo.search('QQX', 10, null).map((a) => a.iata)).toEqual(['QQQ', 'QQR']); // po-003: a metro code lists its airports
+    expect(repo.search('AA', 10, null).map((a) => a.iata)).toEqual(['AAA', 'AAB', 'BAA']);
+    expect(repo.search('alpha', 10, null).map((a) => a.iata)).toEqual(['AAB']);
+    expect(repo.search('%', 10, null).map((a) => a.iata)).toEqual(['CCC']);
+    expect(repo.search('  ', 10, null)).toEqual([]);
+    expect(repo.search('field', 1, null)).toHaveLength(1);
   });
 
   it('search returns every airport of a matched metro as one block, metros first in a band, text matches first inside', () => {
@@ -320,7 +320,7 @@ describe('AirportsRepo', () => {
       ],
       { LON: ['LHR', 'LGW', 'QQS'], NYC: ['EWR', 'JFK'], QAR: ['QQC', 'QQO', 'QQV'] },
     );
-    const codes = (q: string) => repo.search(q, 20).map((a) => a.iata);
+    const codes = (q: string) => repo.search(q, 20, null).map((a) => a.iata);
     expect(codes('lond')).toEqual(['LGW', 'LHR', 'QQS', 'QQB', 'QQD', 'QQE']);
     expect(codes('new y')).toEqual(['JFK', 'EWR', 'QQN']);
     expect(codes('york')).toEqual(['JFK', 'EWR', 'QQN']);
@@ -332,6 +332,67 @@ describe('AirportsRepo', () => {
     // a code comes first, then the rest of its metro
     expect(codes('lhr')).toEqual(['LHR', 'LGW', 'QQS']);
     expect(codes('LON')).toEqual(['LGW', 'LHR', 'QQS', 'QQB', 'QQD', 'QQE']);
+  });
+
+  it("revision 55 §10: the install's country leads inside a band, never across one, and null keeps today's order", () => {
+    // why: two invented airports share a name (as Birmingham, England and Birmingham, Alabama do); a third, the city's
+    // own airport in another country, sits in a better band (city word) and stays first whatever the country
+    const repo = seeded([
+      row('QQA', {
+        name: 'Birmingham Airport',
+        city: 'Elsewhere',
+        country: 'GB',
+        kind: 'large',
+        scheduled: true,
+      }),
+      row('QQB', {
+        name: 'Birmingham Airport',
+        city: 'Elsewhere',
+        country: 'US',
+        kind: 'large',
+        scheduled: true,
+      }),
+    ]);
+    const codes = (country: string | null) => repo.search('Birmingham', 20, country).map((a) => a.iata);
+    expect(codes('GB')).toEqual(['QQA', 'QQB']);
+    expect(codes('US')).toEqual(['QQB', 'QQA']);
+    expect(codes(null)).toEqual(['QQA', 'QQB']);
+    const banded = seeded([
+      row('QQA', {
+        name: 'Birmingham Airport',
+        city: 'Elsewhere',
+        country: 'GB',
+        kind: 'large',
+        scheduled: true,
+      }),
+      row('QQC', {
+        name: 'Shuttlesworth',
+        city: 'Birmingham',
+        country: 'US',
+        kind: 'medium',
+        scheduled: true,
+      }),
+    ]);
+    expect(banded.search('Birmingham', 20, 'GB').map((a) => a.iata)).toEqual(['QQC', 'QQA']);
+    // why: the country comes before OurAirports' rank inside a band: a medium home airport before a large foreign one
+    const ranked = seeded([
+      row('QQA', {
+        name: 'Birmingham Airport',
+        city: 'Elsewhere',
+        country: 'US',
+        kind: 'large',
+        scheduled: true,
+      }),
+      row('QQB', {
+        name: 'Birmingham Airport',
+        city: 'Elsewhere',
+        country: 'GB',
+        kind: 'medium',
+        scheduled: true,
+      }),
+    ]);
+    expect(ranked.search('Birmingham', 20, 'GB').map((a) => a.iata)).toEqual(['QQB', 'QQA']);
+    expect(ranked.search('Birmingham', 20, null).map((a) => a.iata)).toEqual(['QQA', 'QQB']);
   });
 
   it('rejects a malformed country, an unknown time zone and a malformed metro code, writing nothing', () => {

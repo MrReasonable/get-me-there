@@ -21,19 +21,17 @@ import { loadWorkerConfig, type WorkerConfig } from './config.js';
 import { type ConsentDriver, createConsentDriver, type DisplayEnv } from './consentDriver.js';
 import { CooldownStore } from './cooldown.js';
 import {
-  CheapestStepFailed,
   type ContextLike,
+  classifyAfterFailedStep,
   createDriver,
   type Driver,
-  LOOKUP_TIMEOUT_MS,
   type PageLike,
-  POLL_TIMEOUT_MS,
   type ProbePage,
   pollUntilSettled,
   probePage,
   type RequestLike,
-  runStep,
   type Settled,
+  StepFailed,
   type StepOptions,
 } from './driver.js';
 import { type GuardState, installGuard, installProbeGuard, onAllowlist } from './guard.js';
@@ -46,7 +44,7 @@ import {
 } from './launch.js';
 import { acquireLock, LockHeld, sweepProbeProfiles } from './lock.js';
 import { debugLogging, stderrLog } from './log.js';
-import { MonthlyCounter } from './monthly.js';
+import { type Admission, MonthlyCounter } from './monthly.js';
 import { Pacer } from './pacer.js';
 import { claim } from './pageClaim.js';
 import { profileDir } from './paths.js';
@@ -60,6 +58,12 @@ import {
   RecordingRefused,
 } from './recordArgs.js';
 import { type Outcome, recordGraph, recordGrid, type Seen } from './recordDialogs.js';
+import {
+  recordSelectOutbound,
+  selectForceSecondCapMs,
+  selectOutboundCapMs,
+  selectReturnCapMs,
+} from './recordSelect.js';
 import {
   type StopFacts,
   stopRecord,
@@ -114,6 +118,22 @@ export { assertClean, writeRecording } from './recordWrite.js';
 export const DEFAULT_ROOT = fileURLToPath(new URL('../fixtures/recorded/', import.meta.url));
 /** The bound on the read-back and the page close after a page (the session's own, brief §7 "Deadlines"). */
 const FINALLY_MS = 5000;
+/**
+ * WP21 Task 21.0, Task 21.3 (R-worst): the documents a `--select-outbound` page may load: the first view and the list
+ * page again (each selection runs under the guard's activation gate, so it loads none), reserved in the month before
+ * the first load, held to it by the guard's reservation stop, and settled to the documents the guard counted. Pinned
+ * equal to core's FLIGHT_LIST_PAGES_PER_PAIR_MAX.
+ */
+export const RECORD_SELECT_PAGES = 2;
+/**
+ * Ian's rulings of 2026-11-01, WP21 Task 21.3 (R-worst): the documents a `--select-return` page may load: the first
+ * view, and the list page again with `--force-second`; the outbound's selection, the return's and the expansion load
+ * none under the gate. Reserved whole before the first load and settled to the documents the guard counted.
+ */
+export const RECORD_SELECT_RETURN_PAGES = 2;
+/** The research kinds that select an option, which share the select-outbound rules (reservation, cap, open page). */
+const isSelectKind = (k: RecordingKind): k is 'select-outbound' | 'select-return' =>
+  k === 'select-outbound' || k === 'select-return';
 
 export interface RecordDeps {
   /** process.platform: on Linux the research's headed window needs a display. */
@@ -145,6 +165,14 @@ export async function record(ctx: EntryContext, cfg: WorkerConfig, deps: RecordD
     args = parseRecordArgs(ctx.args);
   } catch (e) {
     ctx.err(e instanceof Error ? e.message : String(e));
+    return EX_CONFIG;
+  }
+  // why: WP21 Task 21.0 review: the kind records the sequence the page session serves; on an entry whose session also
+  // clicks View more (VIEW_MORE_ADDS_CHEAPER) that sequence is one this kind does not run, so it is refused, not recorded
+  if (isSelectKind(args.kind) && deps.selectors.VIEW_MORE_ADDS_CHEAPER) {
+    ctx.err(
+      `record --${args.kind} records the served sequence without View more; this entry sets VIEW_MORE_ADDS_CHEAPER, so it is refused`,
+    );
     return EX_CONFIG;
   }
   let lock: { release(): void };
@@ -204,7 +232,9 @@ export async function record(ctx: EntryContext, cfg: WorkerConfig, deps: RecordD
     }
     const secrets = [cfg.key.reveal(), capture.value];
     const profile = profileDir(ctx.dataDir);
-    let context: ContextLike | null = await deps.launch(profile);
+    // why: WP21 Task 21.0 review: a select-outbound page launches only once its whole reservation is admitted, so a
+    // refusal for the month's headroom launches nothing; every other kind launches first, as before
+    let context: ContextLike | null = isSelectKind(args.kind) ? null : await deps.launch(profile);
     const readBacks: ReadBack[] = [];
     try {
       for (let i = 0; i < args.pages; i++) {
@@ -217,8 +247,35 @@ export async function record(ctx: EntryContext, cfg: WorkerConfig, deps: RecordD
               ? null
               : pageUrl({ ...req, gl: cfg.pointOfSale });
         if (url === null) throw new RecordingRefused('no request');
-        await claim(pacer, monthly, args.moves.length, deps, ctx);
-        const c: ContextLike = context ?? (await deps.launch(profile));
+        const select = isSelectKind(args.kind);
+        const selectPages = args.kind === 'select-return' ? RECORD_SELECT_RETURN_PAGES : RECORD_SELECT_PAGES;
+        // why: WP21 Task 21.0 review: a select-outbound page needs its whole worst case; claim refuses one that would
+        // reserve less before the pacer or the counts are touched, and the admission it returns is the one checked here
+        const admitted: Extract<Admission, { kind: 'ok' }> = await claim(
+          pacer,
+          monthly,
+          args.moves.length,
+          deps,
+          ctx,
+          select ? selectPages : 1,
+          select,
+        );
+        if (select && admitted.pagesReserved !== selectPages) {
+          monthly.settle(admitted.reserved, admitted.scrollAllowance, 0, admitted.pagesReserved, 0);
+          pacer.release();
+          throw new RecordingRefused(`the month admitted fewer pages than --${args.kind} may load`);
+        }
+        let c: ContextLike;
+        try {
+          c = context ?? (await deps.launch(profile));
+        } catch (e) {
+          // why: nothing loaded: the select-outbound reservation is given back whole and the pacer released
+          if (select) {
+            monthly.settle(admitted.reserved, admitted.scrollAllowance, 0, admitted.pagesReserved, 0);
+            pacer.release();
+          }
+          throw e;
+        }
         context = c;
         // why: ruling of 2026-10-18: the first view has the page timeout; the Cheapest flow the same again from its click,
         // within twice that from the start (budget.next in interact); `budget.d` is the current deadline
@@ -226,13 +283,22 @@ export async function record(ctx: EntryContext, cfg: WorkerConfig, deps: RecordD
         const pageMs = cfg.pageTimeoutSeconds * 1000;
         // why: WP15 ruling 10: a grid page's overall cap is the first view's budget plus, per move, the spacing and the
         // move's own budget
+        // why: WP21 Task 21.0 (ruling D7): a select-outbound page's cap is six page timeouts and three spacings, a
+        // select-return page's four and two (recordSelect.ts)
         const budget = pageBudget(
           deps.timers,
           pageMs,
           pageStart,
-          2 * pageMs +
-            args.moves.length *
-              (GRID_MIN_SCROLL_SPACING_SECONDS * 1000 + GRID_MOVE_BUDGET_MS + GRID_MOVE_RESERVE_MS),
+          select
+            ? args.forceSecond
+              ? // why: ruling A18: the end-to-end recording runs the full served path under the session's own budget
+                selectForceSecondCapMs(pageMs, pacer.spacingMs)
+              : args.kind === 'select-return'
+                ? selectReturnCapMs(pageMs, pacer.spacingMs)
+                : selectOutboundCapMs(pageMs, pacer.spacingMs)
+            : 2 * pageMs +
+                args.moves.length *
+                  (GRID_MIN_SCROLL_SPACING_SECONDS * 1000 + GRID_MOVE_BUDGET_MS + GRID_MOVE_RESERVE_MS),
         );
         const d = budget.d;
         let outcome: Outcome | null = null;
@@ -259,14 +325,21 @@ export async function record(ctx: EntryContext, cfg: WorkerConfig, deps: RecordD
           } else {
             const p = await d.race(c.newPage());
             page = p;
-            // why: --no-flights and --landing read what appeared once the deadline passes, so their page stays open
-            if (args.kind !== 'no-flights' && args.kind !== 'landing')
+            // why: --no-flights and --landing read what appeared once the deadline passes, so their page stays open; so
+            // does --select-outbound, whose steps each read once more after their own deadline (WP21 Task 21.0)
+            if (args.kind !== 'no-flights' && args.kind !== 'landing' && !select)
               budget.onExpire(() => void p.close().catch(() => undefined));
             guard = await d.race(installGuard(c, p, deps.log, deps.selectors));
+            // why: WP21 Task 21.3 (cost-r3-002): a select page's documents never pass what it reserved
+            if (select) guard.reservation = admitted.pagesReserved;
             const driver = createDriver(p, guard, deps.selectors);
             outcome = await interact(driver, p, guard, budget, pageStart, deps, args.kind, url, {
               moves: args.moves,
               anchor: req?.departureDate ?? null,
+              request: req,
+              pacer,
+              pageMs,
+              forceSecond: args.forceSecond,
             });
           }
         } catch (e) {
@@ -285,6 +358,27 @@ export async function record(ctx: EntryContext, cfg: WorkerConfig, deps: RecordD
           await bounded(() => p.close(), FINALLY_MS, deps.timers);
         }
         pacer.release();
+        // why: WP21 Task 21.0: the select-outbound kind settles its reservation to the documents the guard counted (0
+        // when nothing loaded), never above it; every other kind's one page stays reserved
+        if (select)
+          monthly.settle(
+            admitted.reserved,
+            admitted.scrollAllowance,
+            0,
+            admitted.pagesReserved,
+            guard?.documentLoads ?? 0,
+          );
+        /**
+         * Every recording's meta states the documents its page loaded (WP21 Task 21.0) and, by the controller's ruling on
+         * review I2 (WP21 Task 21.3), the main-frame documents the page started (counted by the guard before the gate)
+         * and the documents the gate aborted: the totals of the steps' own counts.
+         */
+        const documentLoads = guard?.documentLoads ?? 0;
+        const pageCounts = {
+          documentLoads,
+          documentStarts: guard?.documentStarts ?? 0,
+          gateRefusals: guard?.gateRefusals ?? 0,
+        };
         if (back !== 'overran') readBacks.push(back);
         if (failure !== null && !(outcome?.kind === 'stop')) {
           if (failure instanceof DeadlineExceeded)
@@ -387,7 +481,7 @@ export async function record(ctx: EntryContext, cfg: WorkerConfig, deps: RecordD
                   hops: (outcome.kind === 'stop' ? outcome.hops : late).map(stripQuery),
                   socsReadBack: back,
                 },
-                meta: meta(deps, args.kind, back, outcome.stepMs, { failure: stopKind }),
+                meta: meta(deps, args.kind, back, outcome.stepMs, { failure: stopKind, ...pageCounts }),
               },
               secrets,
             );
@@ -410,6 +504,7 @@ export async function record(ctx: EntryContext, cfg: WorkerConfig, deps: RecordD
               // why: ruling 7: the fixed window the grid's layout was read at
               window: deps.launchOptions.window,
               socsReadBack: back,
+              ...pageCounts,
               versions: {
                 selectors: SELECTORS_VERSION,
                 camoufoxJs: CAMOUFOX_JS_VERSION,
@@ -442,10 +537,11 @@ export async function record(ctx: EntryContext, cfg: WorkerConfig, deps: RecordD
           day,
           {
             facts: { ...outcome.data, socsReadBack: back },
-            meta: meta(deps, args.kind, back, outcome.stepMs, {}),
+            meta: meta(deps, args.kind, back, outcome.stepMs, pageCounts),
           },
           secrets,
         );
+        if (outcome.summary !== undefined) ctx.out(outcome.summary);
         ctx.out(`recorded ${path}`);
       }
     } finally {
@@ -483,8 +579,19 @@ async function interact(
   deps: RecordDeps,
   kind: RecordingKind,
   url: string,
-  /** A `--grid` page's moves, and its query's departure (each line date's year; null for a kind with no request). */
-  grid: { moves: readonly GridDirection[]; anchor: IsoDate | null },
+  /** What the kinds beyond one page read need (named for what it carries after the WP21 Task 21.0 review). */
+  kindArgs: {
+    /** A `--grid` page's moves. */
+    moves: readonly GridDirection[];
+    /** The query's departure (each grid line date's year; null for a kind with no request). */
+    anchor: IsoDate | null;
+    /** WP21 Task 21.0: `--select-outbound`'s request, the shared pacer, and each step's own page timeout in ms. */
+    request: RecordArgs['request'];
+    pacer: Pacer;
+    pageMs: number;
+    /** WP21 Task 21.3 (R-e2e): `--select-return --force-second`. */
+    forceSecond: boolean;
+  },
 ): Promise<Outcome> {
   let d = budget.d;
   const poll = (S: Selectors, view: View) =>
@@ -524,6 +631,33 @@ async function interact(
   }
   stepMs.goto = deps.timers.now() - t0;
   if (kind === 'landing') return await readLanding(driver, page, guard, d, deps, stepMs, t0, stop);
+  if (isSelectKind(kind)) {
+    if (kindArgs.request === null) throw new RecordingRefused(`--${kind} needs --depart and --return`);
+    return await recordSelectOutbound(
+      {
+        driver,
+        page,
+        guard,
+        budget,
+        pageStart,
+        deps,
+        // why: the recorder reads the view after a selection with the return and booking branches on (as --no-flights
+        // reads with its line on), so the recording shows how the dated classifier reads them before the entry's flags
+        // are set (WP21 Task 21.3: the booking branch too, for the end-to-end recording)
+        returnsS: { ...deps.selectors, RETURN_SELECT_VERIFIED: true, BOOKING_SELECT_VERIFIED: true },
+        pacer: kindArgs.pacer,
+        pageMs: kindArgs.pageMs,
+        url,
+        request: kindArgs.request,
+        stepMs,
+        clicked,
+        stop,
+        // why: R-e2e: the served path spaces only the reload, never an activation
+        ...(kindArgs.forceSecond ? { forceSecond: true, spaceActivations: false } : {}),
+      },
+      kind,
+    );
+  }
   let settled: Settled;
   try {
     settled = await poll(reading(deps.selectors), 'best');
@@ -554,24 +688,11 @@ async function interact(
   if (settled.kind.kind === 'blocked') return await stop(settled.kind.page, settled.rule, settled.facts);
   stepMs.settle = deps.timers.now() - t0;
   // why: a failed step may be a page that is no results page at all (a challenge after the click): it is classified
-  // once, under its own step, and a blocked kind is that stop, with its cool-down; otherwise null (end plainly)
-  const classifyAfterFailedStep = async (
-    cur: Deadline,
-    steps: StepOptions,
-    view: View,
-  ): Promise<Outcome | null> => {
-    const lookups = { timers: deps.timers, lookupMs: LOOKUP_TIMEOUT_MS };
-    const seen = await runStep('classify-after-failed-step', POLL_TIMEOUT_MS, cur, steps, (st) =>
-      driver.readFacts(st, lookups),
-    ).catch((err: unknown) => {
-      if (err instanceof DeadlineExceeded || cur.expired()) throw err;
-      return null;
-    });
-    if (seen === null) return null;
-    const k = classifyPageWithRule(seen.page, deps.selectors, view);
-    if (k.kind.kind === 'blocked' && k.kind.page !== 'unrecognised')
-      return await stop(k.kind.page, k.rule, { page: seen.page, settle: seen.settle });
-    return null;
+  // once, under its own step (driver.ts's classifyAfterFailedStep), and a blocked kind is that stop, with its
+  // cool-down; otherwise null (end plainly)
+  const afterFailedStep = async (cur: Deadline, steps: StepOptions, view: View): Promise<Outcome | null> => {
+    const blocked = await classifyAfterFailedStep(driver, cur, steps, deps.selectors, view);
+    return blocked === null ? null : await stop(blocked.page, blocked.rule, blocked.facts);
   };
   if (kind === 'grid' || kind === 'graph-explore') {
     // why: no-flights and results are the only kinds left after the blocked stop above
@@ -588,10 +709,10 @@ async function interact(
       stepMs,
       clicked,
       stop,
-      classifyAfterFailedStep,
+      classifyAfterFailedStep: afterFailedStep,
       settled,
     };
-    return kind === 'grid' ? await recordGrid(c, shown, grid) : await recordGraph(c, shown);
+    return kind === 'grid' ? await recordGrid(c, shown, kindArgs) : await recordGraph(c, shown);
   }
   // why: rule 5: only --cheapest and --view-more click these controls before their flags are set.
   if (kind === 'cheapest' || kind === 'view-more') {
@@ -605,13 +726,13 @@ async function interact(
         settled = await poll(deps.selectors, 'cheapest');
       } catch (e) {
         if (e instanceof DeadlineExceeded) throw e;
-        const blocked = await classifyAfterFailedStep(d, steps, 'cheapest');
+        const blocked = await afterFailedStep(d, steps, 'cheapest');
         if (blocked !== null) return blocked;
         // why: otherwise the step ends the recording plainly, naming it; no cool-down (nothing stopped the page)
-        const step = e instanceof CheapestStepFailed ? `${e.step} (${e.reason})` : 'click';
+        const step = e instanceof StepFailed ? `${e.step} (${e.reason})` : 'click';
         // why: the budget's end is the view not settling, said as such; any other step is the click flow
         throw new RecordingRefused(
-          e instanceof CheapestStepFailed && e.step === 'cheapest-poll'
+          e instanceof StepFailed && e.step === 'cheapest-poll'
             ? `the Cheapest view did not settle within its budget (${step}); the debug log has the poll lines`
             : `the Cheapest tab could not be clicked: the ${step} step; the debug log has the step lines`,
         );
@@ -814,7 +935,12 @@ async function consentProbe(
             'consent-probe',
             'missing',
             { settle: deps.timers.now() - t0 },
-            { profile: 'throwaway' },
+            {
+              profile: 'throwaway',
+              documentLoads: guard.documentLoads,
+              documentStarts: guard.documentStarts,
+              gateRefusals: guard.gateRefusals,
+            },
           ),
         },
         [cfg.key.reveal()],

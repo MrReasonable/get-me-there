@@ -1,6 +1,7 @@
 import { parseConfig } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
 import { buildContext } from '../src/context.js';
+import { engineWith, stubCamoufox } from './support/camoufox.js';
 import { createHarness } from './support/harness.js';
 
 describe('buildContext: the engine-level synthetic gate (spec §5.5; prov-wp07-012)', () => {
@@ -39,5 +40,42 @@ describe('ProviderRunLimits.capKind (code-architect review 8)', () => {
     };
     expect(kindFor('40usd')).toBe('provider-month');
     expect(kindFor('trial')).toBe('provider-lifetime');
+  });
+});
+
+// Spec rev 56 §8.1, §8.2 (arch-r3-006; ruling P19): the flights request's own seconds, from core's one computation over
+// the shared page timeout and spacing, for camoufox only; and the worker's last reported flags, kept in memory.
+describe('ProviderRunLimits.flightRequestSeconds and EngineContext.workerFlags (spec rev 56 §8.1)', () => {
+  it("limitsOf('camoufox') carries 780 / 600 s (and an outbound-only request's 210 s) at the defaults; another provider null", () => {
+    const e = engineWith([stubCamoufox({ cells: 1 })]);
+    expect(e.ctx.limitsOf('camoufox').flightRequestSeconds).toEqual({
+      booking: 780,
+      returnsOnly: 600,
+      outboundOnly: 210,
+    });
+    const slow = engineWith([stubCamoufox({ cells: 1 })], {
+      env: { CAMOUFOX_PAGE_TIMEOUT_SECONDS: '120', CAMOUFOX_MIN_SPACING_SECONDS: '45' },
+    });
+    expect(slow.ctx.limitsOf('camoufox').flightRequestSeconds).toEqual({
+      booking: 1035,
+      returnsOnly: 795,
+      outboundOnly: 270,
+    });
+    const h = createHarness();
+    expect(buildContext(h.deps, h.options).limitsOf('fixture').flightRequestSeconds).toBeNull();
+  });
+
+  it('workerFlags: null before any read, the last set afterwards, per provider, shared by every copy of the context', () => {
+    const h = createHarness();
+    const ctx = buildContext(h.deps, h.options);
+    expect(ctx.workerFlags.get('camoufox')).toBeNull();
+    ctx.workerFlags.set('camoufox', { RETURN_SELECT_VERIFIED: true });
+    const copy = { ...ctx };
+    copy.workerFlags.set('camoufox', { RETURN_SELECT_VERIFIED: false, BOOKING_SELECT_VERIFIED: false });
+    expect(ctx.workerFlags.get('camoufox')).toEqual({
+      RETURN_SELECT_VERIFIED: false,
+      BOOKING_SELECT_VERIFIED: false,
+    });
+    expect(ctx.workerFlags.get('fixture')).toBeNull();
   });
 });

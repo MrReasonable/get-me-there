@@ -19,6 +19,7 @@ const http: HttpKit = {
     throw new Error('no network in this test');
   },
   stats: () => ({ inFlight: 0 }),
+  holdUntil: () => undefined,
 };
 const clock = fixedClock(asIsoDateTime('2026-10-14T12:00:00.000Z'));
 // why: providersFor takes { http, log, clock } on main (plan decision 34 removed the airports dependency).

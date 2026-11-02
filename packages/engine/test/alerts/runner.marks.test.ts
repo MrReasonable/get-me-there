@@ -84,15 +84,17 @@ describe('staleness by effective age through core isStale (spec §3, §8.1; deci
     ]);
   });
 
-  it('the calendar threshold defaults to the refresh plus the declared age', async () => {
+  it("the calendar threshold defaults to the refresh plus the price's own stored age (revision 55 §8.1)", async () => {
     const f = fixture();
-    const def = seedDefinition(f); // travelpayouts refresh 168 h; no provider registered here, so declared age 0
+    // why: travelpayouts refresh 168 h and the seeded row's stored age 48 h; no provider is registered here, so the old
+    // rule (the registered provider's declared age) would have given 168
+    const def = seedDefinition(f);
     const ex = seedExecution(f, def);
     seedCalendar(f, ex, [{ cell: cellAt(cells(1), 0), pricePence: 40000, providerId: 'travelpayouts' }]);
     seedRule(f, def, { thresholdPence: 45000, basis: 'calendar' });
     await runAlerts(f.deps, ex);
     const [event] = f.repos.alerts.events({ definitionId: def.id, limit: 1 });
-    expect(event === undefined ? null : payloadOf(event).staleThresholdHours).toBe(168);
+    expect(event === undefined ? null : payloadOf(event).staleThresholdHours).toBe(216);
   });
 
   it('itinerary-search basis: STALE_AFTER_HOURS for a known age, and for an unknown vendor age by its fetch age alone (review TS-15, PA-8)', async () => {

@@ -136,7 +136,100 @@ describe('LedgerRepo (spec §5.3, §7, §8.1 parity)', () => {
       tiles: 0,
       cacheHits: 0,
       perProvider: [],
+      flightLists: [],
     });
+  });
+
+  // Spec rev 55 §8.1 (ruling A32): no new stage value; a flight-list page is told apart by its endpoint path and counted
+  // on its own line, so it is never read as a verification call (it has no tile, like one).
+  it('countsFor: /v1/flights rows are their own flight-list line, never verification, and still count in the totals', () => {
+    const db = freshDb();
+    const { executionId } = rawExecution(db, {
+      maxCalls: 100,
+      maxFreeCalls: 100,
+      maxCostMicroGbp: 100_000,
+      flightListPages: 10,
+    });
+    const guard = new SqliteBudgetGuard(
+      db,
+      budgetConfig({ camoufox: limits({ billable: false, monthlyCallCap: 1500, pagesOnly: true }) }),
+      fixedClock(T0),
+    );
+    const reserve = (endpointPath: string, tileIndex: number | null) =>
+      guard
+        .reserve({
+          providerId: 'camoufox',
+          executionId,
+          tileIndex,
+          costMicroGbp: 0,
+          httpAttempt: 1,
+          endpointPath,
+        })
+        .finalise({ ...ok, pageClass: 'page' });
+    reserve('/v1/page', 0);
+    reserve('/v1/page', 1);
+    reserve('/v1/flights', null);
+    reserve('/v1/flights', null);
+    reserve('/v1/flights', null);
+    guard.recordCacheHit({
+      providerId: 'camoufox',
+      executionId,
+      tileIndex: null,
+      endpointPath: '/v1/flights',
+    });
+    const c = new LedgerRepo(db).countsFor(executionId);
+    expect([c.calls, c.tiles]).toEqual([5, 2]);
+    expect(c.perProvider).toEqual([
+      {
+        providerId: 'camoufox',
+        stage: 'discovery',
+        calls: 2,
+        costMicroGbp: 0,
+        tiles: 2,
+        cacheHits: 0,
+        scrolls: 0,
+      },
+    ]);
+    expect(c.flightLists).toEqual([{ providerId: 'camoufox', calls: 3, costMicroGbp: 0, cacheHits: 1 }]);
+  });
+
+  it("countsFor: a camoufox page row counts its pages, as the guard's usage sums them (spec rev 56 §5.3, §7)", () => {
+    const db = freshDb();
+    const { executionId } = rawExecution(db, {
+      maxCalls: 100,
+      maxFreeCalls: 100,
+      maxCostMicroGbp: 100_000,
+      flightListPages: 20,
+      providerMaxCalls: { camoufox: 100 },
+    });
+    const guard = new SqliteBudgetGuard(
+      db,
+      budgetConfig({ camoufox: limits({ billable: false, monthlyCallCap: 1500, pagesOnly: true }) }),
+      fixedClock(T0),
+    );
+    const reserve = (endpointPath: string, tileIndex: number | null, pages?: number) =>
+      guard.reserve({
+        providerId: 'camoufox',
+        executionId,
+        tileIndex,
+        costMicroGbp: 0,
+        httpAttempt: 1,
+        endpointPath,
+        ...(pages === undefined ? {} : { pages }),
+      });
+    reserve('/v1/page', 0).finalise({ ...ok, pageClass: 'page' });
+    reserve('/v1/flights', null, 2).finalise({ ...ok, pageClass: 'page', pageCount: 2 });
+    reserve('/v1/flights', null, 2).finalise({ ...ok, pageClass: 'page', pageCount: 0 });
+    reserve('/v1/flights', null, 2).finalise({ ...ok, pageClass: 'page' });
+    reserve('/v1/flights', null, 2).finalise({ outcome: 'unknown', durationMs: 1 });
+    const c = new LedgerRepo(db).countsFor(executionId);
+    const usage = guard.usage({ kind: 'provider-execution', executionId, providerId: 'camoufox' });
+    expect(c.flightLists).toEqual([{ providerId: 'camoufox', calls: 5, costMicroGbp: 0, cacheHits: 0 }]);
+    // why: 21.6 review I2: the run's flight allowance leaves out the request cut off before any answer (its pair is read
+    // again on resume); the actuals and the month count it at its plan
+    expect(usage.flightLists?.calls).toBe(3);
+    expect(c.perProvider[0]?.calls).toBe(usage.calls);
+    expect(c.calls).toBe(guard.usage({ kind: 'provider-month', providerId: 'camoufox' }).calls);
   });
 
   it('pruneCacheHits removes only cache_hit rows older than the cutoff for the named providers', () => {
@@ -168,6 +261,33 @@ describe('LedgerRepo (spec §5.3, §7, §8.1 parity)', () => {
       { p: 'travelpayouts', o: 'ok' },
     ]);
     expect(new LedgerRepo(db).pruneCacheHits(T0, [])).toBe(0);
+  });
+});
+
+describe('LedgerRepo.rowCount (WP20 final review: the api keeps a run finish estimate until a new row)', () => {
+  it("counts every row of the execution, pending, finalised and cache hits alike, and no other execution's", () => {
+    const db = freshDb();
+    const { executionId } = rawExecution(db, { maxCalls: 100, maxFreeCalls: 100, maxCostMicroGbp: 100_000 });
+    const guard = new SqliteBudgetGuard(db, cfg, fixedClock(T0));
+    const ledger = new LedgerRepo(db);
+    expect(ledger.rowCount(executionId)).toBe(0);
+    const reserve = (exec: string | null) =>
+      guard.reserve({
+        providerId: 'travelpayouts',
+        executionId: exec,
+        tileIndex: 0,
+        costMicroGbp: 0,
+        httpAttempt: 1,
+        endpointPath: '/p',
+      });
+    const pending = reserve(executionId);
+    expect(ledger.rowCount(executionId)).toBe(1);
+    pending.finalise(ok);
+    expect(ledger.rowCount(executionId)).toBe(1);
+    guard.recordCacheHit({ providerId: 'travelpayouts', executionId, tileIndex: 1, endpointPath: '/p' });
+    reserve(null).finalise(ok);
+    expect(ledger.rowCount(executionId)).toBe(2);
+    expect(ledger.rowCount('no-such-execution')).toBe(0);
   });
 });
 

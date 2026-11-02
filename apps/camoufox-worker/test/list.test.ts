@@ -1,6 +1,6 @@
 import { asIata, asIsoDate } from '@gmt/core';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { readList, tabPriceMinor } from '../src/list.js';
+import { readList, readOptions, tabPriceMinor } from '../src/list.js';
 
 const REQ = {
   mode: 'list' as const,
@@ -111,5 +111,35 @@ describe('readList (spec §2 list mode)', () => {
     // why: CodeRabbit on PR #33: the first price, right after "Cheapest from", never one later in the pop-up's text
     expect(tabPriceMinor('Cheapest from £451Close dialogueSave 100 British pounds')).toBe(45100);
     expect(readList(facts([name(451)], { tab: 'Cheapest' }), REQ).tabMinor).toBeNull();
+  });
+});
+
+// why: 20.7 review finding 1: a time or date the grammar does not read is an unparsed option, never another cell's
+describe('readList: unread times and dates count as unparsed (spec rev 55 §2)', () => {
+  it('a 12-hour time or a day-first date is optionsUnparsed, not optionsOtherCell', () => {
+    const r = readList(
+      facts([
+        name(478),
+        name(300).replace('at 12:25 on', 'at 12:25 PM on'),
+        name(310).replace('at 20:05 on', 'at 8:05 PM on'),
+        name(320).replace('on Thursday, November 5 and', 'on Thursday, 5 November and'),
+        name(330).replace('on Thursday, November 5. Total', 'on Thursday, 5 November. Total'),
+      ]),
+      REQ,
+    );
+    expect([r.optionsUnparsed, r.optionsOtherCell, r.parsedForThisCell, r.minMinor]).toEqual([
+      4, 0, 1, 47_800,
+    ]);
+  });
+});
+
+// why: spec rev 56 §2 (WP21 Task 21.3): the return phase activates an option by its own name, so the cell's options keep it
+describe('readOptions keeps each option’s name (spec rev 56 §2)', () => {
+  it('returns each parsed option of the cell with the name it was read from, in page order; readList is unchanged', () => {
+    const names = [name(478), null, name(300, { on: 'Friday, November 6' }), name(451)];
+    const r = readOptions(facts(names), REQ);
+    expect(r.mine.map((m) => m.name)).toEqual([name(478), name(451)]);
+    expect(r.mine.map((m) => m.option.amountMinor)).toEqual([47_800, 45_100]);
+    expect(readList(facts(names), REQ)).toEqual(r.list);
   });
 });

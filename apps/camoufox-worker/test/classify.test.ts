@@ -20,11 +20,13 @@ const facts = (o: Partial<PageFacts> = {}): PageFacts => ({
     challenge: false,
     noFlights: false,
     landingHeading: false,
+    returnHeading: false,
   },
   accountControl: false,
   cheapestTabs: [{ name: 'Cheapest from 451 British pounds', inTablist: true }],
   dateGridButtons: 1,
   resultLinks: 3,
+  outboundLinks: 3,
   ...o,
 });
 const t = (o: Partial<PageFacts['text']>) => ({ ...facts().text, ...o });
@@ -286,6 +288,7 @@ describe('classify by view (ruling of 2026-10-18)', () => {
         challenge: false,
         noFlights: true,
         landingHeading: false,
+        returnHeading: false,
       },
       accountControl: false,
       cheapestTabs: [
@@ -297,6 +300,7 @@ describe('classify by view (ruling of 2026-10-18)', () => {
       ],
       dateGridButtons: 0,
       resultLinks: 21,
+      outboundLinks: 21,
     };
     expect(classifyPageWithRule(record, SELECTORS, 'cheapest')).toEqual({
       kind: { kind: 'results' },
@@ -465,5 +469,178 @@ describe('the Cheapest tab carrying its information pop-up', () => {
         'cheapest',
       ).rule,
     ).toBe('cheapest-tab-unpriced');
+  });
+});
+
+// why: WP21 Task 21.0, dated in Task 21.3 from select-outbound/2026-11-01/3 and 4: the view after an outbound's
+// selection. The blocked rules come first, as on every view; then, only where RETURN_SELECT_VERIFIED is set, a return
+// view is results from its recorded facts (the heading, a return link, no Cheapest tab, no Date grid button), and
+// anything else is unrecognised, never a block with a cool-down (the session ends the return phase on it)
+describe('classify the return view (spec rev 56 §2: the recorded conditions)', () => {
+  const on = { ...SELECTORS, RETURN_SELECT_VERIFIED: true };
+  const off = { ...SELECTORS, RETURN_SELECT_VERIFIED: false };
+  const returnView = (o: Partial<PageFacts> = {}) =>
+    facts({
+      text: t({ returnHeading: true }),
+      cheapestTabs: [],
+      dateGridButtons: 0,
+      resultLinks: 3,
+      outboundLinks: 3,
+      ...o,
+    });
+  const unrecognised = { kind: { kind: 'blocked', page: 'unrecognised' }, rule: 'not-return-view' };
+  it('with the flag off is not-return-view, whatever the facts', () => {
+    for (const f of [returnView(), facts(), facts({ text: t({ noFlights: true }), resultLinks: 0 })])
+      expect(classifyPageWithRule(f, off, 'returns')).toEqual(unrecognised);
+  });
+  it('with the flag on: results with the heading, a link, no Cheapest tab and no Date grid button', () => {
+    expect(classifyPageWithRule(returnView(), on, 'returns')).toEqual({
+      kind: { kind: 'results' },
+      rule: 'returns',
+    });
+    expect(classifyPage(returnView(), on, 'returns')).toEqual({ kind: 'results' });
+  });
+  it('outboundLinks and the link counts are not consulted (4 and 15 both pass; the outbound pattern reads every return)', () => {
+    for (const [links, outbound] of [
+      [4, 4],
+      [15, 15],
+      [4, 0],
+      [1, 40],
+    ] as const)
+      expect(
+        classifyPageWithRule(returnView({ resultLinks: links, outboundLinks: outbound }), on, 'returns').rule,
+      ).toBe('returns');
+  });
+  it('a Cheapest tab, a Date grid button, no heading or no return link is not-return-view', () => {
+    for (const f of [
+      returnView({ cheapestTabs: [{ name: 'Cheapest from 451 British pounds', inTablist: true }] }),
+      returnView({ dateGridButtons: 1 }),
+      returnView({ text: t({ returnHeading: false }) }),
+      returnView({ resultLinks: 0 }),
+      facts(),
+    ])
+      expect(classifyPageWithRule(f, on, 'returns')).toEqual(unrecognised);
+  });
+  // why: the 21.1 ruling (spec rev 56 §2): the return view's own no-flights line was never recorded, so it is no status
+  // of its own: such a view never settles (ready.ts) and, read after a failed step, is no return view
+  it('Google’s no-flights line is no rule of its own on the return view', () => {
+    for (const f of [
+      returnView({ text: t({ returnHeading: true, noFlights: true }), resultLinks: 0, outboundLinks: 0 }),
+      returnView({ text: t({ noFlights: true }), resultLinks: 0, outboundLinks: 0 }),
+    ])
+      expect(classifyPageWithRule(f, on, 'returns')).toEqual(unrecognised);
+    // why: the status line beside the return links (three of four recorded return views) never changes the decision
+    expect(
+      classifyPageWithRule(returnView({ text: t({ returnHeading: true, noFlights: true }) }), on, 'returns')
+        .rule,
+    ).toBe('returns');
+  });
+  it.each([
+    [
+      'captcha',
+      returnView({ frameUrls: ['https://www.google.com/recaptcha/api2/anchor?k=x'] }),
+      'captcha-frame',
+    ],
+    ['consent-unhandled', returnView({ hops: ['https://consent.google.com/ml'] }), 'consent-host'],
+    ['sign-in', returnView({ text: t({ returnHeading: true, signInHeading: true }) }), 'sign-in-heading'],
+    ['signed-in', returnView({ accountControl: true }), 'account-control'],
+    [
+      'unusual-traffic',
+      returnView({ text: t({ returnHeading: true, unusualTraffic: true }) }),
+      'unusual-traffic-text',
+    ],
+  ] as const)('the blocked rules come first, flag on or off: %s', (page, f, rule) => {
+    for (const S of [on, off])
+      expect(classifyPageWithRule(f, S, 'returns')).toEqual({ kind: { kind: 'blocked', page }, rule });
+  });
+  it('the Best and Cheapest classifications are unchanged by the return facts; the Cheapest status line never changes them', () => {
+    const cheapest = facts({
+      cheapestTabs: [{ name: 'Cheapest from 451 British pounds', inTablist: true, selected: true }],
+      dateGridButtons: 0,
+    });
+    for (const S of [on, off]) {
+      expect(classifyPageWithRule(facts(), S, 'best')).toEqual({
+        kind: { kind: 'results' },
+        rule: 'results',
+      });
+      expect(classifyPageWithRule(cheapest, S, 'cheapest')).toEqual({
+        kind: { kind: 'results' },
+        rule: 'results',
+      });
+      // why: the status line matching the no-flights pattern beside the Cheapest view's links (every recording)
+      expect(classifyPageWithRule({ ...cheapest, text: t({ noFlights: true }) }, S, 'cheapest').rule).toBe(
+        'results',
+      );
+      expect(classifyPageWithRule(facts({ text: t({ returnHeading: true }) }), S).rule).toBe('results');
+      expect(classifyPageWithRule(facts({ dateGridButtons: 0 }), S).rule).toBe('date-grid-buttons');
+    }
+  });
+});
+
+// why: WP21 Task 21.3, from select-return/2026-11-01/1–4 and select-return/2026-11-02/1: the booking view is recognised
+// from its recorded facts only where BOOKING_SELECT_VERIFIED is set; anything else, and every view with the flag off, is
+// the unrecognised not-booking-view, never a block with a cool-down. The page's price-comparison note is no fact: its
+// wording follows the fare (the controller's ruling of 2026-11-02)
+describe('classify the booking view (spec rev 56 §2: the recorded conditions)', () => {
+  const on = { ...SELECTORS, RETURN_SELECT_VERIFIED: true, BOOKING_SELECT_VERIFIED: true };
+  const BOOKING = 'https://www.google.com/travel/flights/booking?tfs=x';
+  const bookingView = (o: Partial<PageFacts> = {}, text: Partial<PageFacts['text']> = {}) =>
+    facts({
+      url: BOOKING,
+      text: t(text),
+      cheapestTabs: [],
+      dateGridButtons: 0,
+      resultLinks: 6,
+      outboundLinks: 0,
+      ...o,
+    });
+  const notBooking = { kind: { kind: 'blocked', page: 'unrecognised' }, rule: 'not-booking-view' };
+  it('with the flag on: results on the booking path, no return heading, no outbound link, no tab, no Date grid button and an offer', () => {
+    expect(classifyPageWithRule(bookingView(), on, 'booking')).toEqual({
+      kind: { kind: 'results' },
+      rule: 'booking',
+    });
+    expect(classifyPageWithRule(bookingView({ resultLinks: 1 }), on, 'booking').rule).toBe('booking');
+  });
+  it.each([
+    ['off the booking path', bookingView({ url: RESULTS })],
+    [
+      'under another booking-like path',
+      bookingView({ url: 'https://www.google.com/travel/flights/bookingx' }),
+    ],
+    ['a return heading', bookingView({}, { returnHeading: true })],
+    ['an outbound link', bookingView({ outboundLinks: 1 })],
+    [
+      'a Cheapest tab',
+      bookingView({ cheapestTabs: [{ name: 'Cheapest from 451 British pounds', inTablist: true }] }),
+    ],
+    ['a Date grid button', bookingView({ dateGridButtons: 1 })],
+    ['no offer on the booking path', bookingView({ resultLinks: 0 })],
+    ['an unparsable URL', bookingView({ url: 'not a url' })],
+  ])('%s is not-booking-view', (_what, f) => {
+    // why: an unparsable URL is the off-allowlist block, as on every view (the blocked rules first)
+    const want = f.url === 'not a url' ? 'off-allowlist' : 'not-booking-view';
+    expect(classifyPageWithRule(f, on, 'booking').rule).toBe(want);
+  });
+  it('with the flag off: always not-booking-view', () => {
+    for (const S of [
+      { ...SELECTORS, RETURN_SELECT_VERIFIED: false, BOOKING_SELECT_VERIFIED: false },
+      { ...SELECTORS, RETURN_SELECT_VERIFIED: true, BOOKING_SELECT_VERIFIED: false },
+    ])
+      expect(classifyPageWithRule(bookingView(), S, 'booking')).toEqual(notBooking);
+  });
+  it('the blocked rules first, flag on or off', () => {
+    for (const S of [{ ...SELECTORS, BOOKING_SELECT_VERIFIED: false }, on]) {
+      expect(classifyPageWithRule(bookingView({}, { challenge: true }), S, 'booking')).toEqual({
+        kind: { kind: 'blocked', page: 'captcha' },
+        rule: 'challenge-text',
+      });
+      expect(
+        classifyPageWithRule(bookingView({ url: 'https://www.example-airline.test/' }), S, 'booking').rule,
+      ).toBe('off-allowlist');
+      expect(classifyPageWithRule(bookingView({ accountControl: true }), S, 'booking').rule).toBe(
+        'account-control',
+      );
+    }
   });
 });

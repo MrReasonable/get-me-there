@@ -250,3 +250,112 @@
     content: "#";
   }
 }
+
+/* WP20 Task 20.10 (spec rev 55 §11 Flights, Ties): a tie's line above its run, the read's outcome beside the figure,
+   and each date pair's flights block below its row (inside its card on a phone). The block is words on the board, in
+   the board's second ink; it wraps within the row at 375 px and never scrolls sideways. */
+@layer components {
+  .board tbody tr.tie-row,
+  .board tbody tr.flights-row {
+    cursor: auto;
+  }
+  .board tbody tr.tie-row:hover,
+  .board tbody tr.flights-row:hover {
+    background: none;
+  }
+  .board tbody tr.tie-row > td {
+    padding-bottom: 2px;
+    font: 600 13.5px / 1.4 var(--font-ui);
+    color: var(--flap-ink);
+  }
+  .board tbody tr.flights-row > td {
+    padding-top: 0;
+    border-top: 0;
+  }
+  /* the tie line heads its run: the divider stays above the line, and the run's first row has none under it */
+  .board tbody tr.tie-row + tr > * {
+    border-top: 0;
+  }
+  .flight-outcome {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: flex-end;
+    gap: 4px;
+    margin-top: 6px;
+    font: 400 12.5px / 1.4 var(--font-ui);
+    color: var(--flap-ink-2);
+  }
+  .flights-block {
+    display: grid;
+    gap: 4px;
+    max-width: 72rem;
+    font: 400 13.5px / 1.45 var(--font-ui);
+    color: var(--flap-ink-2);
+    overflow-wrap: anywhere;
+  }
+  .flights-head {
+    color: var(--flap-ink);
+  }
+  .flights-list {
+    display: grid;
+    gap: 4px;
+    margin: 2px 0;
+    padding: 0;
+    list-style: none;
+  }
+  .flight {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 2px 6px;
+  }
+  .flight-price {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 4px;
+  }
+  /* 21.7 ui-001: the shown pairing's price is the block's answer, so it alone is heavier, larger and in the board's
+     first ink; every other price keeps the block's weight (the class sits on that one price's .flight-price only) */
+  .flight-price-lead {
+    font-weight: 700;
+    font-size: 1.15em;
+    color: var(--flap-ink);
+  }
+  .flight-mark {
+    flex-basis: 100%;
+    font-size: 12.5px;
+  }
+  /* 21.7 code M4: what the shown Back price is for, on its own lines under that return's line and marks */
+  .flight-after {
+    flex-basis: 100%;
+  }
+  .flights-other {
+    display: grid;
+    gap: 4px;
+    margin-top: 4px;
+  }
+  .flights-block a {
+    text-decoration: underline;
+    color: var(--flap-ink);
+  }
+}
+
+@media (max-width: 899px) {
+  .board .card-flights {
+    grid-column: 1 / -1;
+  }
+  /* finding 11: a tie's line is one full-width line between the cards, never a card of its own */
+  .board tbody tr.tie-row {
+    display: block;
+    padding: 10px 2px 0;
+  }
+  .board tbody tr.tie-row + tr {
+    border-top: 0;
+    padding-top: 6px;
+  }
+  .flight-outcome {
+    justify-content: flex-end;
+  }
+}

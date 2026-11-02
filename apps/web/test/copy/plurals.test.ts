@@ -19,17 +19,12 @@ const cases: ReadonlyArray<[string, string, string]> = [
     COPY.spendProviderLifetime('P', 0, '1'),
     COPY.spendProviderLifetime('P', 0, '10'),
   ],
-  ['runNow', COPY.runNow(1, 5, '£1'), COPY.runNow(2, 5, '£1')],
   ['requestRow', COPY.requestRow(1, '1', 1, '£1'), COPY.requestRow(2, '2', 2, '£1')],
   ['requestRowTiles', COPY.requestRowTiles(1, '1', 1, 1, '£1'), COPY.requestRowTiles(2, '2', 2, 2, '£1')],
   ['usageWindow', COPY.usageWindow(0, '1', 'a', 'b'), COPY.usageWindow(0, '5', 'a', 'b')],
   ['usageLifetime', COPY.usageLifetime(0, '1'), COPY.usageLifetime(0, '5')],
   ['usageNoWindow', COPY.usageNoWindow(0, '1'), COPY.usageNoWindow(0, '5')],
   ['coverageCheckCalls', COPY.coverageCheckCalls(1), COPY.coverageCheckCalls(14)],
-  ['createConfirm', COPY.createConfirm(1, 5, '£1'), COPY.createConfirm(2, 5, '£1')],
-  ['estimateCells', COPY.estimateCells(1), COPY.estimateCells(126)],
-  ['estimateRow', COPY.estimateRow('P', 's', 1, '£1', '1m'), COPY.estimateRow('P', 's', 2, '£1', '1m')],
-  ['estimateTotal', COPY.estimateTotal(1, 5, '£1', '1m'), COPY.estimateTotal(2, 5, '£1', '1m')],
   ['budgetFitOk', COPY.budgetFitOk(1), COPY.budgetFitOk(4)],
   ['budgetFitWarn', COPY.budgetFitWarn(1), COPY.budgetFitWarn(4)],
   [
@@ -68,11 +63,10 @@ describe('user-facing counts agree with their noun', () => {
     [
       'coverageCheckCalls',
       COPY.coverageCheckCalls(1),
-      '1 free tile request used',
+      '1 free request used',
       COPY.coverageCheckCalls(14),
-      '14 free tile requests used',
+      '14 free requests used',
     ],
-    ['estimateCells', COPY.estimateCells(1), '1 cell', COPY.estimateCells(126), '126 cells'],
     [
       'requestRow',
       COPY.requestRow(1, '1', 1, '£1'),
@@ -88,13 +82,6 @@ describe('user-facing counts agree with their noun', () => {
       '2 of 5 planned tiles (3 calls) · 2 cache hits · ledger cost £1, from configured rates',
     ],
 
-    [
-      'estimateTotal',
-      COPY.estimateTotal(1, 5, '£1', '1m'),
-      'about 1 call (hard stop 5), £1 per run · about 1m',
-      COPY.estimateTotal(2, 5, '£1', '1m'),
-      'about 2 calls (hard stop 5), £1 per run · about 1m',
-    ],
     [
       'budgetFitOk',
       COPY.budgetFitOk(1),

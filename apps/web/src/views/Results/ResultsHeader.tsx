@@ -1,4 +1,4 @@
-import { priceUnconfirmed } from '@gmt/core';
+import { priceUnconfirmed, resultBasisOf } from '@gmt/core';
 import type { ResultRow, ResultsResponse } from '../../api/types.js';
 import { PriceBoundary } from '../../components/PriceBoundary.js';
 import { PriceCell } from '../../components/PriceCell.js';
@@ -75,14 +75,14 @@ function BoardFigure({ figure }: { figure: BoardFigureData }) {
   return (
     <div
       data-testid="board-figure"
-      className={`flex flex-wrap items-start gap-x-2 gap-y-1 text-sm ${figure.basis === 'calendar' ? 'rounded border border-dashed border-line-strong px-2 py-1' : ''}`}
+      className={`flex flex-wrap items-start gap-x-2 gap-y-1 text-sm ${resultBasisOf(figure.basis) === 'calendar' ? 'rounded border border-dashed border-line-strong px-2 py-1' : ''}`}
     >
       <span>{D.boardPriceLead}</span>
       <PriceBoundary>
         <PriceCell
           pricePence={figure.price.pricePence}
           provenance={figure.price.provenance}
-          calendar={figure.basis === 'calendar'}
+          calendar={resultBasisOf(figure.basis) === 'calendar'}
           stale={figure.price.stale}
           truncated={figure.price.truncated}
           superseded={figure.superseded}
@@ -93,10 +93,14 @@ function BoardFigure({ figure }: { figure: BoardFigureData }) {
       <span>
         {D.boardPriceRest(
           COPY.datesView.airports(figure.origin, figure.destination),
+          // why: spec rev 56 §6.9, §11 (arch-r3-003): a pairing figure is named for what it is, the cheapest of the
+          // sellers read, not checked with the airline (it opens the detail on the calendar basis, resultBasisOf)
           COPY.basisName[figure.basis],
         )}
       </span>
-      <span className="w-full text-fg-2">{D.boardDiffers}</span>
+      {/* why: 21.7 prov-002: a pairing figure is a seller's offer from a flight list, never one of these rows, so it
+      differs for what it is; the recency reason is for a verified or calendar figure */}
+      <span className="w-full text-fg-2">{figure.basis === 'pairing' ? D.boardPairing : D.boardDiffers}</span>
     </div>
   );
 }

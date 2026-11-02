@@ -38,9 +38,19 @@ export const API_TEXT = {
   datePairIncomplete: 'give both the departure date and the return date, or neither',
   invalidDatePair: 'a date of the date pair is not a calendar date (YYYY-MM-DD)',
   datePairOutsideSpace: 'that date pair is outside the current window or nights range of this definition',
+  // why: spec rev 55 §10 (Task 20.9): the flight-list routes' refusals, each named by its code
+  invalidPairs: (most: number) =>
+    `pairs must be 1 to ${most} date pairs as departure_return (YYYY-MM-DD_YYYY-MM-DD), comma separated`,
+  browserBusy: 'the browser worker is busy with a search or another flight list; try again when it finishes',
+  flightsFresh: "this date pair's flights were read recently; they are shown as they are",
+  flightsNotAvailable: 'flight lists cannot be read for this search',
+  flightsNoPrice: 'this date pair has no price yet, so there is no airport pair to read flights for',
+  shuttingDown: 'the app is shutting down; nothing new starts',
   draftNotice: 'Set at least one origin and one destination before running or scheduling this search.',
   draftCannotEnable: 'a definition without origins and destinations cannot be enabled',
   draftNoEstimate: 'set origins and destinations before asking for an estimate',
+  repeatNotConfirmed:
+    'the figures sent do not cover the estimate as it stands now; nothing was changed, ask the estimate again',
   deletedNotice: 'definition deleted; its schedule is removed',
   invalidDefinition: 'the definition is not valid',
   zeroCells: 'the window and nights range resolve to zero cells; widen the window or the nights range',

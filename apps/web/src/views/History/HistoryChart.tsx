@@ -46,9 +46,11 @@ const AXIS = '#50565a';
 const INK_2 = '#2c3236';
 const TICK = { fill: INK_2, fontSize: 12 } as const;
 
-/** True for a plotted fetch point whose price is stale (decision 54's flag from the api). */
+/** True for a plotted fetch point whose price is stale (decision 54's flag; the api's mark is its kind, ruling 20.6-2). */
 function isStalePoint(payload: unknown): boolean {
-  return typeof payload === 'object' && payload !== null && 'stale' in payload && payload.stale === true;
+  return (
+    typeof payload === 'object' && payload !== null && 'stale' in payload && typeof payload.stale === 'string'
+  );
 }
 
 /**

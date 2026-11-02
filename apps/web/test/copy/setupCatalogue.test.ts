@@ -6,10 +6,15 @@ import { SETUP_COPY } from '../../src/copy/setup.js';
 
 /** Sample arguments for every function entry, keyed by dotted path. A missing key fails the test. */
 const SAMPLES: Record<string, unknown[][]> = {
-  'definitions.runTakes': [['45m']],
   'definitions.expandTopHint': [[1], [5]],
-  'definitions.hardStopZero': [[1], [140]],
   'definitions.journeyPart': [['max journey time', 'hours']],
+  'definitions.sourceLabel': [['the Aviasales cache']],
+  'definitions.refreshLabel': [['the browser worker']],
+  'definitions.fitProviderMonth': [['Google Flights via SearchApi']],
+  'definitions.fitProviderLifetime': [['Google Flights via SearchApi']],
+  'definitions.fitScrolls': [['the browser worker']],
+  'definitions.fitCellsPerRefresh': [['the browser worker']],
+  'definitions.fitLine': [['billed calls a run', '154', '2000']],
   'schedule.daily': [['05:00', 'Europe/London']],
   'schedule.weekly': [
     [[1], '05:00', 'Europe/London'],
@@ -77,6 +82,17 @@ describe('SETUP_COPY catalogue (spec §11 banned words)', () => {
   it('"verified" as a whole word appears in none of them', () => {
     const VERIFIED = /(?<![\p{L}])verified(?![\p{L}])/u;
     expect(collected.strings.filter(({ text }) => VERIFIED.test(text))).toEqual([]);
+  });
+
+  it('the Edit page’s More options speak in main-path words (spec rev 55 §3, §11; WP20 Task 20.6)', () => {
+    const SET_UP = /\b(definitions?|cells?|discovery|hard stop|tiles?|itinerar(y|ies)|camoufox)\b/i;
+    expect(
+      collected.strings.filter(({ path, text }) => path.startsWith('definitions.') && SET_UP.test(text)),
+    ).toEqual([]);
+    expect(SETUP_COPY.definitions.sourceLabel('the Aviasales cache')).toBe('The Aviasales cache');
+    expect(SETUP_COPY.definitions.fitLine('billed calls a run', '154', '2000')).toBe(
+      'billed calls a run: about 154, limit 2000',
+    );
   });
 
   it('the plain readings read as intended', () => {

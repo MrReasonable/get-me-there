@@ -11,7 +11,17 @@ import type { BoardModel } from './board.js';
 import { type Layout, moveTo, type Pos } from './keys.js';
 import { Legend } from './Legend.js';
 import { type CellView, OverviewMonth } from './OverviewMonth.js';
-import { bandsOf, type Column, cellModel, columnsFor, markCounts, monthsOf, pairsAt } from './overview.js';
+import {
+  bandsOf,
+  type Column,
+  cellModel,
+  columnsFor,
+  keyCounts,
+  markCounts,
+  monthsOf,
+  noPriceParts,
+  pairsAt,
+} from './overview.js';
 import { cellWords, Readout } from './Readout.js';
 import { shadeScale } from './shade.js';
 import { stayRange } from './stayScope.js';
@@ -58,7 +68,15 @@ export function Overview({ definition, data, model, state, ringed, lit, onLight 
   const range = stayRange(data.space, state.nights);
   const bands = useMemo(() => bandsOf(range), [range?.min, range?.max]);
   const months = useMemo(() => monthsOf(data.space), [data.space]);
-  const counts = useMemo(() => markCounts(model.inView, model.rankOf, scale), [model, scale]);
+  // why: spec rev 55 §11 — the key's five counts are core's reducedMark over the date pairs in view, as the header's
+  const counts = useMemo(
+    () => ({
+      key: keyCounts(model.inView),
+      noPrice: noPriceParts(model.inView),
+      cells: markCounts(model.inView, model.rankOf, scale),
+    }),
+    [model, scale],
+  );
 
   // why: every cell is computed once per read, filter or opened band, never on a hover or a focus (WP19 §6: 1.5 s
   // for 50,000 cells and 200 ms for a stay-filter change)

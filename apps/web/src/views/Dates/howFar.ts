@@ -2,8 +2,9 @@ import type { DatePair } from '@gmt/core';
 import { COPY } from '../../copy.js';
 import { formatMinutes } from '../../format.js';
 
-// Spec §11 "How far checked", from the date pair's own counts: whether its figure is class verified or a calendar
-// price; whether its cells were itinerary-searched, selected but not reached, or not selected; its partially-verified
+// Spec §11 "How far checked", from the date pair's own counts, in spec rev 55 §3's main-path words: whether its figure
+// is class verified (checked fares) or a calendar price (and from which source); whether its airport pairs had their
+// fares checked, were selected but not reached, or not selected; its partially-verified
 // and unconfirmed prices; its airport pairs without a price, by bucket; "price from an earlier search" exactly when
 // the figure says so (revision 50); a truncated read. Never the "searched" umbrella and never a word claiming
 // completeness; "verified" only beside a class-verified figure. Pure: words from the catalogue, no DOM.
@@ -14,6 +15,26 @@ const H = COPY.datesView.howFar;
 const UNPRICED = ['empty', 'no_data', 'error', 'skipped'] as const;
 
 /**
+ * The figure's own words (spec rev 55 §3, rev 56 §6.9): checked fares for a class-verified figure; a calendar price's
+ * source (no "calendar basis" on the main path); a pairing figure's, the browser worker's flight list, never checked
+ * with the airline.
+ */
+function figureWords(f: NonNullable<DatePair['figure']>): string {
+  switch (f.basis) {
+    case 'verified':
+      return H.verified;
+    case 'calendar':
+      return H.calendar(H.calendarFrom[f.price.provenance.providerId]);
+    case 'pairing':
+      return H.pairing;
+    default: {
+      const unknownBasis: never = f.basis;
+      throw new RangeError(`howFarChecked: no basis ${String(unknownBasis)}`);
+    }
+  }
+}
+
+/**
  * One line's parts for a date pair, over `airportPairs` in scope. A date pair without a figure says why: "none within
  * <limit>" when every price it had was left out for a known journey time (`journeyLeftOut`), then its marks.
  */
@@ -21,7 +42,7 @@ export function howFarChecked(pair: DatePair, airportPairs: number, journeyLimit
   const out: string[] = [];
   const f = pair.figure;
   if (f !== null) {
-    out.push(f.basis === 'verified' ? H.verified : H.calendar);
+    out.push(figureWords(f));
     if (f.price.truncated) out.push(H.cutShort);
     if (f.fromEarlierSearch) out.push(H.earlierSearch);
   } else if (pair.journeyLeftOut > 0 && journeyLimit !== null) {

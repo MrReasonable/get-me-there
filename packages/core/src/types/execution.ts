@@ -1,3 +1,4 @@
+import type { StopCause } from '../api-contract/stopCause.js';
 import type { NormalisationReason, ProviderErrorKind } from '../errors.js';
 import type { CellKey, DefinitionSnapshot } from './definition.js';
 import type { IsoDateTime } from './ids.js';
@@ -28,6 +29,22 @@ export const ACTIVE_STATUSES: readonly ExecutionStatus[] = [
  * "paused catch-up", which never covers a later firing and is superseded by it (spec §8.2 rev 36, decision 79).
  */
 export const PAUSED_STATUSES: readonly ExecutionStatus[] = ['paused_budget', 'paused_error', 'interrupted'];
+/** Spec rev 55 §10: a run with a pass going or about to (pending or running); the cards poll and the bar cancels. */
+export const IN_FLIGHT_STATUSES: readonly ExecutionStatus[] = ['pending', 'running'];
+/**
+ * Spec rev 55 §10: the statuses a run stops or is skipped in, the ones whose `stop` the api fills. A completed row (even
+ * one that was once paused) has none.
+ */
+export const STOPPED_STATUSES: readonly ExecutionStatus[] = [
+  'paused_budget',
+  'paused_error',
+  'interrupted',
+  'cancelled',
+  'skipped_budget',
+  'skipped_confirm',
+  'skipped_window',
+  'skipped_missed',
+];
 export const RESUMABLE_STATUSES: readonly ExecutionStatus[] = [
   'interrupted',
   'paused_budget',
@@ -35,6 +52,14 @@ export const RESUMABLE_STATUSES: readonly ExecutionStatus[] = [
   'cancelled',
   'completed',
 ];
+/**
+ * The stopped statuses a run can be resumed from (WP20 Task 20.6 review, minor 11): the active ones `/resume` accepts,
+ * a paused or interrupted run. The status bar and a search's page offer Resume only on one of these, and only when the
+ * stop's fix names Resume.
+ */
+export const RESUMABLE_ACTIVE_STATUSES: readonly ExecutionStatus[] = ACTIVE_STATUSES.filter((s) =>
+  RESUMABLE_STATUSES.includes(s),
+);
 export type Stage = 'discovery' | 'verification';
 /** Spec §3 cell outcome statuses. */
 export type CellOutcomeStatus = 'not_run' | 'priced' | 'empty' | 'no_data' | 'error' | 'skipped';
@@ -122,6 +147,46 @@ export interface Estimate {
   assumptions: string[];
   windowClamped: boolean;
   retryFactor: number;
+  /**
+   * Spec revision 55 §8.1 "Estimate" (ruling A5): with camoufox in discovery, the flight-list step's pages and seconds
+   * (`pages` the least of 10 less the reusable date pairs, the monthly pages left after the grid plan and the run's
+   * free calls left; `seconds` pages × (spacing + 40)). Its seconds count in `seconds`; its pages never in `totalCalls`.
+   * Absent (no key) without camoufox. Revision 56 (R-estimate): `pages` and `seconds` are the typical figures; `pairs`
+   * the date pairs read and `returns` whether at least one of them goes out and back (21.7 code I1: false when the
+   * month's pages leave none a return phase; both required on the engine's producer type since Task 21.7), and
+   * `pagesMax`/`secondsMax` the bound, present whenever the plan reads the return leg where the pages allow (absent on
+   * an outbound-only plan); `estimateSchema` keeps
+   * every one of them optional for good, so an estimate stored before WP21 still parses (ruling A3).
+   */
+  flightLists?: {
+    pages: number;
+    seconds: number;
+    pairs: number;
+    returns: boolean;
+    pagesMax?: number;
+    secondsMax?: number;
+  };
+}
+
+/**
+ * Spec revision 55 §7 `search_executions.flight_lists_json`, §8.1 "The flight-list step": the run's flight-list plan,
+ * written once when the step selects at least one date pair to read or to reuse. `cells` are the planned cells (one
+ * airport pair per date pair, the figure's), `reused` how many of them a fresh enough list covered with no page, and
+ * `ended` why the step ended early (null while it has not, or when it read every planned cell). A resume never changes
+ * `planned` or `cells`. The `disabled` end the execution response can report is derived at read time, never stored.
+ * Revision 56 §7, §8.1: `returns` and `booking`, whether the plan reads returns and the shown pairing's booking options
+ * (from the worker's flags), and `returnsStopped` and `bookingStopped`, the rule that stopped the run's return phases or
+ * booking reads; a plan stored before WP21 has none of the four, and the reader fills false, false, null, null.
+ */
+export interface FlightListsState {
+  planned: number;
+  cells: CellKey[];
+  reused: number;
+  ended: 'window' | 'monthly-cap' | 'stopped' | null;
+  returns: boolean;
+  booking: boolean;
+  returnsStopped: string | null;
+  bookingStopped: string | null;
 }
 
 /** Spec §7 `search_executions` as read back. */
@@ -159,6 +224,14 @@ export interface Execution {
    * rows. The coverage read uses it to tell a catch-up paused at a firing from one in flight there.
    */
   pausedAt: IsoDateTime | null;
+  /**
+   * Spec revision 55 §7 (migration 0011): why the run stopped or was skipped, stored by every status write that stops
+   * or skips one and cleared by the write that makes it pending, running or completed (the resume claim included).
+   * Null on a stopped row means it was written before 0011, and it reads `NO_STOP_CAUSE_TEXT`, never `errorText`.
+   */
+  stopCause: StopCause | null;
+  /** Spec revision 55 §7 (migration 0011): the run's flight-list plan, or null when the step selected nothing. */
+  flightLists: FlightListsState | null;
 }
 
 /** Spec §3: the six coverage buckets plus the reused count shown beside them. */

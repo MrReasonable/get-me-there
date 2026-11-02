@@ -18,7 +18,10 @@ import { CAMOUFOX_BUILDS, FLAG_NAMES, type FlagName, flagsFor, type OsArch } fro
 
 export { FLAG_NAMES, type FlagName };
 
-export const SELECTORS_VERSION = '2026-10-27-tab-price';
+// why: re-dated 2026-11-01 (WP21 Task 21.3): the return view and the booking view as select-outbound/2026-11-01/3–4 and
+// select-return/2026-11-01/1–4 recorded them (the return link the "From" form only; the booking view's path, offers and
+// grouped control)
+export const SELECTORS_VERSION = '2026-11-01-returns';
 
 /**
  * The module's default flags: the operator's Mac (darwin-arm64) on its pinned build, the 2026-10-18 recordings' values
@@ -47,6 +50,8 @@ export type Role =
   | 'slider'
   | 'option'
   | 'tabpanel'
+  // why: the booking research counts rows in the booking view (researchNames.ts roleCounts)
+  | 'row'
   | 'grid'
   | 'gridcell'
   | 'img';
@@ -110,6 +115,20 @@ export interface Selectors {
     noFlights: RegExp;
   };
   /**
+   * Spec rev 56 §2 "The return view" (WP21 Task 21.0, dated in Task 21.3 from select-outbound/2026-11-01/3 and 4): the
+   * view after an outbound's "Select flight". `heading` names the return list's heading; `resultLink` a return option's
+   * link by its own name (the outbound's "From" form: 38 of 38 recorded return names).
+   */
+  returns: { heading: RegExp; resultLink: RegExp };
+  /**
+   * Spec rev 56 §2 "The booking read" (Ian's rulings of 2026-11-01; dated in Task 21.3 from select-return/2026-11-01/1–4):
+   * the booking view after a return's selection. `offer` names one seller's offer, a button in `main` (never activated:
+   * it leads to the seller); `moreOptions` the one in-page expansion; `path` the view's in-app path; `grouped` the
+   * grouped "View <seller>, …" control (counted, never activated, its fares never read). The view's price-comparison
+   * note has no selector: its wording follows the fare, and it is never read.
+   */
+  booking: { offer: RegExp; moreOptions: RegExp; path: string; grouped: RegExp };
+  /**
    * The search form (decision 69: round trip, one adult, the query's dates). The brief's hypothesis from round 1,
    * replaced by Task 14.2's recording; FORM_VERIFIED is false until then, and the server refuses to start.
    */
@@ -132,6 +151,17 @@ export interface Selectors {
   LANDING_VERIFIED: boolean;
   /** The date grid's unpriced cells, "no flights, …" and "price unknown, …" (spec §2 "Cells by name"). */
   GRID_UNPRICED_VERIFIED: boolean;
+  /**
+   * WP21 Task 21.0: the outbound's selection and the return view after it; false on every entry until a recording of
+   * the served sequence sets it on that entry. Only then does the worker click an outbound's link.
+   */
+  RETURN_SELECT_VERIFIED: boolean;
+  /**
+   * Ian's rulings of 2026-11-01 (read the booking options; open "more booking options"): the cheapest return's selection,
+   * the booking view after it and its in-page expansion; one flag for the whole booking read, false on every entry until a
+   * recording of that sequence sets it.
+   */
+  BOOKING_SELECT_VERIFIED: boolean;
 }
 
 export const SELECTORS: Selectors = {
@@ -194,6 +224,26 @@ export const SELECTORS: Selectors = {
     },
     noFlights: /^No (?:results|flights) (?:returned|found)/,
   },
+  // why: observed 2026-11-01 (select-outbound/2026-11-01/3 and 4): the heading in its plain, Top and Other forms; every
+  // return name opens with the outbound's "From" price clause (38 of 38), so the link is that form only (the total
+  // alone, the 21.0 hypothesis's other form, was never recorded)
+  returns: {
+    heading: /^(?:Top |Other )?[Rr]eturning flights$/,
+    resultLink: /^From [\d,]+ [A-Za-z ]+ round trip total\. /,
+  },
+  // why: observed 2026-11-01 (select-return/2026-11-01/1 and 2): every offer a button "Continue to book with <seller>[,
+  // <fare>] for <price> <currency>", the price stated, never "From"
+  // why: observed 2026-11-01 (both): the in-page expansion is one button "<count> more booking options"; Ian's ruling of
+  // 2026-11-01: it is pressed (never an offer or a grouped seller control), then every offer read
+  booking: {
+    offer: /^Continue to book with .+ for [\d,]+ [A-Za-z ]+$/,
+    moreOptions: /^\d+ more booking options?$/,
+    // why: observed 2026-11-01 (select-return 1–4): the booking view is an in-app change to this path
+    path: '/travel/flights/booking',
+    // why: observed 2026-11-01 (select-return 1 and 3): "View <seller>, <seller> <price> <currency> <word>", a button
+    // that probably opens that seller's fares; it begins "View", so it can never name an offer or the expansion
+    grouped: /^View [^,]+, .+ [\d,]+ [A-Za-z ]+$/,
+  },
   form: {
     tripType: /^Change ticket type\./,
     passengers: /passengers?, change number of passengers\.$/,
@@ -222,7 +272,8 @@ export function selectorsFor(
 /**
  * The recording that proved each true flag (TS-13), per `<os>-<arch>` entry (decision 75: a flag counts only on the
  * entry and build it was recorded under): its date and what it was. The recordings are local-only (decision 61), named
- * here by kind, date and number.
+ * here by kind, date and number; a proof with no recording key cites the operator ruling that set the flag ("operator
+ * ruling of <date>"), and a key is never written for a recording no backup holds (flagsProofs.test.ts).
  */
 export const PROOFS: Readonly<Record<OsArch, Partial<Record<FlagName, string>>>> = {
   'darwin-arm64': {
@@ -242,6 +293,10 @@ export const PROOFS: Readonly<Record<OsArch, Partial<Record<FlagName, string>>>>
       '2026-10-18 grid/2026-10-18/1–4 (every cell name parses, each view’s cells name its lines’ dates, one scroll moves one day on its axis, SOCS same) and the renamed 0-explore',
     GRID_UNPRICED_VERIFIED:
       '2026-10-26 grid/2026-10-26/7 and 8 (a sparse route, ten views of 49 cells, every view drawn: each pair shown without a price a button named "no flights, <d> <Mon> to <d> <Mon>" or "price unknown, <d> <Mon> to <d> <Mon>", 14 to 19 of them a view, every other name priced and parsed, each view’s cells name its lines’ dates, SOCS same)',
+    RETURN_SELECT_VERIFIED:
+      '2026-11-01 select-outbound/2026-11-01/3 and select-outbound/2026-11-01/4 (each selection by the keyboard activation, in-app; the reload one document; every return name parses, the minimum return price equals the selected outbound’s From price, SOCS same) and select-return/2026-11-02/1 (the full served path end to end: one reload the only extra document, every activation in-app, no gate refusal)',
+    BOOKING_SELECT_VERIFIED:
+      '2026-11-01 select-return/2026-11-01/1, select-return/2026-11-01/2, select-return/2026-11-01/3 and select-return/2026-11-01/4 (the return’s selection and the expansion in-app, every offer read by the offer grammar, the cheapest expanded offer equal to the return’s From price) and select-return/2026-11-02/1 (the full served path end to end: one reload the only extra document, every activation in-app, no gate refusal)',
   },
   // why: WP17 Task 17.8's recording sessions fill these, one commit per entry
   // why: WP17 Task 17.8, the operator's Mac under Rosetta (an official x86_64 Node 22, a throwaway HOME,
@@ -305,5 +360,7 @@ export function flagsOf(S: Selectors = SELECTORS): Record<FlagName, boolean> {
     GRID_VERIFIED: S.GRID_VERIFIED,
     LANDING_VERIFIED: S.LANDING_VERIFIED,
     GRID_UNPRICED_VERIFIED: S.GRID_UNPRICED_VERIFIED,
+    RETURN_SELECT_VERIFIED: S.RETURN_SELECT_VERIFIED,
+    BOOKING_SELECT_VERIFIED: S.BOOKING_SELECT_VERIFIED,
   };
 }

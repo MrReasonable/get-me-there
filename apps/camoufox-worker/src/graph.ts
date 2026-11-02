@@ -22,17 +22,18 @@ import {
   soft,
 } from './dialogSettle.js';
 import {
-  CheapestStepFailed,
   CLICK_TIMEOUT_MS,
+  capped,
   clickTimeoutOf,
   countOf,
   type Driver,
   LOOKUP_TIMEOUT_MS,
   type LocatorLike,
-  nameOf,
+  namesOf,
   type PageLike,
   POLL_TIMEOUT_MS,
   runStep,
+  StepFailed,
   type StepOptions,
   timeoutOf,
 } from './driver.js';
@@ -61,9 +62,10 @@ export interface RegionRef {
 async function listRegions(page: PageLike, d: Deadline): Promise<RegionRef[]> {
   const out: RegionRef[] = [];
   for (const role of REGION_ROLES) {
-    const l = page.getByRole(role);
-    for (let i = 0, n = await countOf(l, d); i < n; i++)
-      out.push({ role, index: i, name: (await nameOf(l.nth(i), d)) ?? '' });
+    // why: WP21 Task 21.3 fix round 2: a dialog opening re-renders the page's regions, so their names are read in one
+    // page call (namesOf), never counted and then read one node at a time
+    for (const [index, name] of (await namesOf(page.getByRole(role), d)).entries())
+      out.push({ role, index, name: name ?? '' });
   }
   return out;
 }
@@ -95,13 +97,10 @@ async function readControls(
   const controls: Control[] = [];
   const unnamed: Record<string, number> = {};
   for (const role of CONTROL_ROLES) {
-    const l = region.getByRole(role);
-    const n = await countOf(l, d);
-    for (let i = 0; i < Math.min(n, MAX_CONTROLS_PER_ROLE); i++) {
-      const name = await nameOf(l.nth(i), d);
-      controls.push({ role, name: name === null || name.length > S.maxNameLength ? null : name });
-    }
-    if (n > MAX_CONTROLS_PER_ROLE) unnamed[role] = n - MAX_CONTROLS_PER_ROLE;
+    // why: WP21 Task 21.3 fix round 2: as listRegions, the region's names in one page call
+    const names = await namesOf(region.getByRole(role), d);
+    for (const name of names.slice(0, MAX_CONTROLS_PER_ROLE)) controls.push({ role, name: capped(name, S) });
+    if (names.length > MAX_CONTROLS_PER_ROLE) unnamed[role] = names.length - MAX_CONTROLS_PER_ROLE;
   }
   return { controls, unnamed };
 }
@@ -227,7 +226,7 @@ async function readChart(region: LocatorLike, d: Deadline, steps: StepOptions): 
 }
 
 /**
- * The exploration under the deadline `d`. A step that overruns or fails throws CheapestStepFailed naming it; the
+ * The exploration under the deadline `d`. A step that overruns or fails throws StepFailed naming it; the
  * deadline's own expiry surfaces as DeadlineExceeded. A poll the classifier reads as a blocked kind (other than
  * unrecognised, which a graph over the results may well read as) returns that stop at once.
  */
@@ -243,7 +242,7 @@ export async function exploreGraph(
   const button = page.getByRole('button', { name: S.results.priceGraphButton, exact: true });
   // why: page locators reach the main frame only; exactly one button by its exact name, or nothing is clicked
   const found = await runStep('find-graph-button', LOOKUP_TIMEOUT_MS, d, steps, (st) => countOf(button, st));
-  if (found !== 1) throw new CheapestStepFailed('find-graph-button', 'not-found');
+  if (found !== 1) throw new StepFailed('find-graph-button', 'not-found', steps.flow);
   const before = await runStep('list-regions', LOOKUP_TIMEOUT_MS, d, steps, (st) => listRegions(page, st));
   const clickAt = timers.now();
   await runStep('click-graph', CLICK_TIMEOUT_MS, d, steps, async (st) => {

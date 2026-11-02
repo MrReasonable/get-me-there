@@ -5,6 +5,7 @@
  * no-page rule are the guard's own. The worked example only: London Heathrow → New York JFK.
  */
 import {
+  AbortedError,
   asIsoDate,
   type BlockedPage,
   type Cabin,
@@ -12,14 +13,20 @@ import {
   type DiscoveryQuery,
   type DiscoveryTileResult,
   type Execution,
+  FLIGHT_LIST_PAGES_PER_PAIR_MAX,
+  type FlightListQuery,
+  type FlightListResult,
   type FlightProvider,
   fixedClock,
+  flightRequestSeconds,
   GRID_HORIZON_DAYS,
   GRID_STEP_DAYS,
   GRID_TIMES,
   type IsoDateTime,
+  listRequestSeconds,
   type OperatorMessage,
   type PreflightResult,
+  type ProviderContext,
   ProviderError,
   type ProviderId,
   parseConfig,
@@ -50,7 +57,7 @@ import type { ProviderLimiter } from '@gmt/providers/testing';
 import { vi } from 'vitest';
 import { buildContext, type EngineContext } from '../../src/context.js';
 import { createOrchestrator, type Orchestrator } from '../../src/orchestrator.js';
-import type { EngineDeps } from '../../src/types.js';
+import type { EngineDeps, EngineOptions, RankedDatePair } from '../../src/types.js';
 import {
   baseDefinition,
   capturingLogger,
@@ -105,6 +112,72 @@ export interface Stub extends FlightProvider {
   queries: DiscoveryQuery[];
   cells: number;
   bind(ctx: () => EngineContext): void;
+  /** Spec rev 55 §8.1: each flight-list read the engine asked for, in order (camoufox only). */
+  flightCalls: FlightCall[];
+  /** The flight pages that reached the worker: reserved in the ledger and answered (after the gate and the guard). */
+  flightRequests: () => number;
+}
+
+/** One flight-list read as the stub saw it. */
+export interface FlightCall {
+  query: FlightListQuery;
+  executionId: string | null;
+  /** Whether the signal the engine passed was already aborted when the read began. */
+  signalAborted: boolean;
+  signal: AbortSignal;
+  /** Whether the engine passed a gate (`beforeSend`). */
+  gated: boolean;
+  /** Whether the engine asked for the answer to be recorded as a fixture (never, for a flight list). */
+  recordFixtures: boolean;
+}
+
+/** Options of the stub flight-list capability (Task 20.9). */
+export interface FlightStubOptions {
+  /** The answer of the n-th read (1-based); a thrown value is thrown by the read; undefined: a list of one flight. */
+  answer?: (q: FlightListQuery, n: number) => FlightListResult | undefined;
+  /** Holds the n-th read after its ledger row is reserved until `until` settles or the signal aborts (AbortedError). */
+  holdCall?: { call: number; until: Promise<void> };
+  /** Called as the n-th read starts (before its gate), so a test can act while a page is in flight. */
+  onStart?: (n: number) => void;
+  /** Called as the n-th read's page settles (its answer about to be returned), so a test can record the order. */
+  onEnd?: (n: number) => void;
+  /** The cabins the capability reads (default economy). */
+  cabins?: Cabin[];
+  /**
+   * Spec rev 56 §5.3: the pages the n-th read's answer states it loaded (`pagesLoaded`, finalised as the row's
+   * `page_count`); default the pages reserved (2 with `returnLimits`, else 1), as the provider plans them.
+   */
+  pagesLoaded?: (q: FlightListQuery, n: number) => number;
+}
+
+/** The default answer: one flight read for the pair, priced as the worked example's grid price. */
+export function listAnswer(at: IsoDateTime): Extract<FlightListResult, { kind: 'list' }> {
+  return {
+    kind: 'list',
+    fetchedAt: at,
+    pointOfSale: 'GB',
+    listed: 'flights',
+    flights: [
+      {
+        departsLocal: '10:15',
+        arrivesLocal: '13:20',
+        arrivesDayOffset: 0,
+        durationMinutes: 485,
+        stops: 0,
+        carriers: ['Virgin Atlantic'],
+        operatedBy: null,
+        amountMinor: 45_100,
+      },
+    ],
+    minMinor: 45_100,
+    tabMinor: 45_100,
+    cheapestView: 'cheapest',
+    optionsUnparsed: 0,
+    optionsOtherCell: 0,
+    resultsStated: 1,
+    notes: [],
+    returns: null,
+  };
 }
 
 function stub(
@@ -134,6 +207,10 @@ function stub(
     preflights?: PreflightResult[];
     /** Spec §2 rev 34: plan grid pages with the run's allowances (the real planner), not one page per cell. */
     grid?: { pageAllowance: number; scrollAllowance: number; scrollSeconds?: number };
+    /** Spec rev 55 §5.1 (Task 20.9): a flight-list capability (camoufox only); absent: the provider has none. */
+    flights?: FlightStubOptions;
+    /** Task 20.9: called as the n-th grid or list page starts (before the engine's gate), to record the order of pages. */
+    onTile?: (n: number) => void;
   },
 ): Stub {
   let ctxOf: () => EngineContext = () => {
@@ -146,6 +223,7 @@ function stub(
     q: DiscoveryQuery,
     pctx: { executionId: string | null; beforeSend?: () => void },
   ): Promise<DiscoveryTileResult> => {
+    o.onTile?.(calls.length + 1);
     // why: as http-kit does, the engine's last check (ProviderContext.beforeSend) runs once the limiter admits the page
     // and before it is sent; an AbortedError from it means the worker is never asked
     if (o.limiter !== undefined) {
@@ -210,6 +288,62 @@ function stub(
       notes: [],
     };
   };
+  const flightCalls: FlightCall[] = [];
+  let flightRequests = 0;
+  // why: as http-kit orders a call: the gate (beforeSend) once admitted, then the reservation (the guard's caps), then
+  // the request; a hold models a page in flight, which an abort of the engine's signal ends with AbortedError
+  const readFlights = async (q: FlightListQuery, pctx: ProviderContext): Promise<FlightListResult> => {
+    const f = o.flights ?? {};
+    const n = flightCalls.length + 1;
+    flightCalls.push({
+      query: q,
+      executionId: pctx.executionId,
+      signalAborted: pctx.signal.aborted,
+      signal: pctx.signal,
+      gated: pctx.beforeSend !== undefined,
+      recordFixtures: pctx.recordFixtures,
+    });
+    f.onStart?.(n);
+    pctx.beforeSend?.();
+    // why: spec rev 56 §5.3: as the provider plans it, a request with a return phase reserves the worst case (2 pages)
+    const pages =
+      q.returnLimits === undefined || q.returnLimits === null ? 1 : FLIGHT_LIST_PAGES_PER_PAIR_MAX;
+    const r = ctxOf().budget.reserve({
+      providerId: id,
+      executionId: pctx.executionId,
+      tileIndex: null,
+      costMicroGbp: 0,
+      httpAttempt: 1,
+      endpointPath: '/v1/flights',
+      pages,
+    });
+    if (f.holdCall !== undefined && f.holdCall.call === n) {
+      const signal = pctx.signal;
+      await Promise.race([
+        f.holdCall.until,
+        new Promise<void>((_, reject) => {
+          if (signal.aborted) reject(new AbortedError());
+          signal.addEventListener('abort', () => reject(new AbortedError()), { once: true });
+        }),
+      ]).catch((err: unknown) => {
+        // why: as http-kit finalises an abort (attempt.ts): `unknown`, no status, no stated pages (the guard keeps the
+        // planned 2), and the page class camoufox's `pageClassOf` gives with no response, `page` (21.6 review I2)
+        r.finalise({ outcome: 'unknown', durationMs: 1, pageClass: 'page' });
+        throw err;
+      });
+    }
+    const answer = f.answer?.(q, n) ?? listAnswer(ctxOf().clock.now());
+    f.onEnd?.(n);
+    r.finalise({
+      outcome: answer.kind === 'list' ? 'ok' : 'error',
+      httpStatus: 200,
+      durationMs: 1,
+      pageClass: 'page',
+      pageCount: f.pagesLoaded?.(q, n) ?? pages,
+    });
+    flightRequests += 1;
+    return answer;
+  };
   const preflights = [...(o.preflights ?? [])];
   const preflight =
     o.preflight !== undefined
@@ -225,9 +359,24 @@ function stub(
     calls,
     queries,
     cells: o.cells,
+    flightCalls,
+    flightRequests: () => flightRequests,
     bind: (f) => {
       ctxOf = f;
     },
+    ...(o.flights === undefined
+      ? {}
+      : {
+          flightLists: {
+            info: {
+              sourceKind: 'scraped-self' as const,
+              maxAgeHours: 0,
+              provenanceNote: 'camoufox flight-list stub',
+            },
+            cabins: o.flights.cabins ?? ['economy'],
+            read: readFlights,
+          },
+        }),
     discovery: {
       info: { sourceKind, maxAgeHours: sourceKind === 'scraped-self' ? 0 : 48, provenanceNote: `${id} stub` },
       plan:
@@ -277,6 +426,8 @@ export function stubSearchApiVerification(): Stub {
     calls: [],
     queries: [],
     cells: 0,
+    flightCalls: [],
+    flightRequests: () => 0,
     bind: () => undefined,
     verification: {
       info: { sourceKind: 'scraped-search', maxAgeHours: 0, provenanceNote: 'searchapi stub' },
@@ -343,6 +494,8 @@ export function realCamoufox(
       return { status: 200, body: a.body, fetchedAt: ctxOf().clock.now(), fromCache: false, cacheKey: '' };
     },
     stats: () => ({ inFlight: 0 }),
+    // why: spec rev 56 §5.3: the stub answers at once; no flights answer here states nextLoadNotBefore (Task 21.6's)
+    holdUntil: () => undefined,
   };
   const calls: TilePlan[] = [];
   const queries: DiscoveryQuery[] = [];
@@ -353,6 +506,12 @@ export function realCamoufox(
     key: new Secret(KEY),
     workerUrl: 'http://127.0.0.1:8090',
     pointOfSale: 'GB',
+    // why: spec rev 56 §12: core's computation at the defaults (90 s page timeout, 30 s spacing)
+    flightRequestSeconds: {
+      booking: flightRequestSeconds(90, 30, true),
+      returnsOnly: flightRequestSeconds(90, 30, false),
+      outboundOnly: listRequestSeconds(90),
+    },
     ...(grid === undefined
       ? {}
       : {
@@ -373,6 +532,8 @@ export function realCamoufox(
     calls,
     queries,
     cells,
+    flightCalls: [],
+    flightRequests: () => 0,
     bind: (f) => {
       ctxOf = f;
     },
@@ -436,6 +597,15 @@ export function engineWith(
     createdAt?: IsoDateTime;
     /** WP16a: the clock's start (default T0). */
     now?: IsoDateTime;
+    /**
+     * Task 20.9: the board's ranking the flight-list step reads (EngineOptions.rankedDatePairs); `rankedPairs` builds
+     * one over the definition's own space.
+     */
+    rankedDatePairs?: EngineOptions['rankedDatePairs'];
+    /** Task 20.9: the definition's cabin (default economy). */
+    cabin?: Cabin;
+    /** Spec rev 56 §8.1: freeze this flight allowance into each new execution's snapshot (an older snapshot's 10). */
+    flightListPages?: number;
   } = {},
 ): CamoufoxEngine {
   const parsed = parseConfig(
@@ -483,6 +653,15 @@ export function engineWith(
         },
       });
   }
+  if (o.flightListPages !== undefined) {
+    const pages = o.flightListPages;
+    const create = repos.executions.create.bind(repos.executions);
+    repos.executions.create = (input) =>
+      create({
+        ...input,
+        snapshot: { ...input.snapshot, budget: { ...input.snapshot.budget, flightListPages: pages } },
+      });
+  }
   const budget = new SqliteBudgetGuard(db, budgetConfigFromConfig(config), clock);
   const cache = new SqliteResponseCache(db, clock);
   const logs: LogLine[] = [];
@@ -505,7 +684,10 @@ export function engineWith(
     clock,
     log,
   };
-  const ctx = buildContext(deps);
+  const ctx = buildContext(
+    deps,
+    o.rankedDatePairs === undefined ? {} : { rankedDatePairs: o.rankedDatePairs },
+  );
   for (const s of stubs) s.bind(() => ctx);
   const orch = createOrchestrator(ctx);
   const cells = Math.max(...stubs.map((s) => s.cells));
@@ -522,6 +704,7 @@ export function engineWith(
     window: o.window ?? { kind: 'absolute', from: first, to: last },
     minNights: 10,
     maxNights: 10,
+    ...(o.cabin === undefined ? {} : { cabin: o.cabin }),
     providers: {
       discovery: ids.filter((i) => stubs.find((s) => s.id === i)?.discovery !== undefined),
       verification: o.verification ?? [],
@@ -594,4 +777,84 @@ export function outcomes(
 /** Keeps vitest's fake timers out of these tests (the stubs answer at once). */
 export function realTime(): void {
   vi.useRealTimers();
+}
+
+/**
+ * Task 20.9: a ranking of the first `n` date pairs of the engineWith definition's space (one departure a day from
+ * 2 Nov 2026, ten nights, London Heathrow to New York JFK), cheapest first, priced by camoufox; `calls` records each ask.
+ */
+export function rankedPairs(
+  n: number,
+  calls: Array<Parameters<NonNullable<EngineOptions['rankedDatePairs']>>[0]> = [],
+): NonNullable<EngineOptions['rankedDatePairs']> {
+  return (q) => {
+    calls.push(q);
+    return Array.from({ length: n }, (_, i): RankedDatePair => {
+      const dep = Date.parse('2026-11-02T00:00:00.000Z') + i * 86_400_000;
+      return {
+        departureDate: asIsoDate(new Date(dep).toISOString().slice(0, 10)),
+        returnDate: asIsoDate(new Date(dep + 10 * 86_400_000).toISOString().slice(0, 10)),
+        origin: LHR,
+        destination: JFK,
+        pricePence: 40_000 + i,
+        providerId: 'camoufox',
+        sourceKind: 'scraped-self',
+      };
+    });
+  };
+}
+
+/** A promise with its settlers, for holding a page or a read in flight (event-driven tests: never a timer). */
+export function deferred<T = void>(): {
+  promise: Promise<T>;
+  resolve: (v: T) => void;
+  reject: (e: unknown) => void;
+} {
+  let resolve: (v: T) => void = () => undefined;
+  let reject: (e: unknown) => void = () => undefined;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+/** The flight-list rows of an execution (spec rev 55 §7 `flight_lists`), oldest first. */
+export function flightRows(
+  e: CamoufoxEngine,
+  executionId: string | null,
+): Array<{
+  status: string;
+  reason: string | null;
+  departureDate: string;
+  executionId: string | null;
+  listed: string | null;
+}> {
+  return e.ctx.db.raw
+    .prepare<
+      [string | null],
+      {
+        status: string;
+        reason: string | null;
+        departureDate: string;
+        executionId: string | null;
+        listed: string | null;
+      }
+    >(
+      `SELECT status, reason, departure_date AS departureDate, execution_id AS executionId, listed FROM flight_lists
+        WHERE execution_id IS ? ORDER BY id`,
+    )
+    .all(executionId);
+}
+
+/** The `/v1/flights` page rows of an execution (an aborted request's no-page row is not a page, as the guard counts). */
+export function flightLedger(e: CamoufoxEngine, executionId: string | null): number {
+  return (
+    e.ctx.db.raw
+      .prepare<[string | null], { n: number }>(
+        `SELECT count(*) AS n FROM provider_requests
+          WHERE endpoint_path = '/v1/flights' AND page_class = 'page' AND execution_id IS ?`,
+      )
+      .get(executionId)?.n ?? 0
+  );
 }

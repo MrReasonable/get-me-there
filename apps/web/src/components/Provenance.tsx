@@ -39,8 +39,16 @@ export function assertProvenance(p: unknown): ProvenanceT {
   return r.data;
 }
 
-/** Source kinds that only ever carry calendar prices (spec §2): they always get the calendar marker. */
-const CALENDAR_SOURCES: ReadonlySet<SourceKind> = new Set(['authorised-cached', 'scraped-aggregate']);
+/**
+ * Source kinds that only ever carry calendar prices (spec §2): they always get the calendar marker. Spec rev 56 §6.9:
+ * the browser worker's own pages (`scraped-self`: its date grid, its flight lists and the sellers it read) are never
+ * checked with the airline either, whatever basis a caller names.
+ */
+const CALENDAR_SOURCES: ReadonlySet<SourceKind> = new Set([
+  'authorised-cached',
+  'scraped-aggregate',
+  'scraped-self',
+]);
 
 /** True for a price the caller marks as calendar basis or whose source kind only carries calendar prices. */
 export function isCalendarPrice(p: ProvenanceT, calendar: boolean): boolean {
@@ -58,6 +66,8 @@ export interface ProvenanceProps {
   showProvider?: boolean;
   /** Headers show the full age form visibly (spec §3, §11); rows show the compact form with the full one as title. */
   fullAge?: boolean;
+  /** Replaces the source's words (`sourceLabel(p)`), e.g. a flight list's own source name; the provenance is still validated. */
+  sourceLabel?: string;
 }
 
 /** Spec §11 provenance block, visible without hover. */
@@ -68,6 +78,7 @@ export function Provenance({
   destinationNote,
   showProvider = true,
   fullAge = false,
+  sourceLabel: sourceWords,
 }: ProvenanceProps) {
   const now = useNow();
   const p = assertProvenance(provenance);
@@ -79,7 +90,7 @@ export function Provenance({
       className={`inline-flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-fg-2 ${isCalendar ? 'rounded border border-dashed border-line-strong px-1' : ''}`}
     >
       {showProvider ? <span className="chip">{COPY.provider[p.providerId]}</span> : null}
-      <span>{sourceLabel(p)}</span>
+      <span>{sourceWords ?? sourceLabel(p)}</span>
       <span data-testid="point-of-sale">{pointOfSaleLabel(p)}</span>
       {fullAge ? (
         <span>{formatAgeFull(age)}</span>

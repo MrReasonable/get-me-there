@@ -8,14 +8,23 @@ export { DEFAULT_DISCOVERY_REFRESH_HOURS, evaluateAlertRules } from './alerts/ev
 export type {
   AlertEventPayload,
   BudgetFit,
+  BudgetUnit,
   CoverageCheckRequest,
   CoverageCheckResponse,
+  CreateAndStartRequest,
+  CreateAndStartResponse,
   DatePairsResponse,
   DefinitionResponse,
   HistoryPoint,
   ResultRow,
   RouteSeriesPoint,
   SchedulerJob,
+  SearchCard,
+  SearchCardsResponse,
+  StartRefusalCode,
+  StopCause,
+  StopDetail,
+  StopText,
 } from './api-contract/index.js';
 export * as apiContract from './api-contract/index.js';
 export * from './budget/window.js';
@@ -27,6 +36,7 @@ export { CAMOUFOX_PIN } from './camoufox/pin.js';
 export * from './camoufox/protocol.js';
 export * from './camoufox/settings.js';
 export * from './camoufox/start.js';
+export * from './camoufox/url.js';
 export * from './camoufox/workerPort.js';
 export * from './config/presets.js';
 export * from './config/schema.js';
@@ -41,7 +51,9 @@ export * from './datePairs/index.js';
 export * from './dates/epochDay.js';
 export * from './errors.js';
 export { EXIT } from './exit.js';
+export * from './flights/index.js';
 export * from './labels/age.js';
+export { MAIN_PATH_SOURCE, mainPathSource } from './labels/mainPath.js';
 export { pointOfSaleLabel } from './labels/pointOfSale.js';
 export { PROVIDER_NAMES } from './labels/providers.js';
 export {
@@ -54,7 +66,8 @@ export {
   scheduledOnlyPastText,
   scheduledOnlyText,
 } from './labels/skip.js';
-export { GRID_SOURCE_LABEL, SOURCE_LABELS, sourceLabel } from './labels/source.js';
+export { FLIGHT_LIST_SOURCE_LABEL, GRID_SOURCE_LABEL, SOURCE_LABELS, sourceLabel } from './labels/source.js';
+export { NO_STOP_CAUSE_TEXT, type StopTextFacts, stopDetailClause, stopText } from './labels/stopCause.js';
 export { isTruncated, TRUNCATED_NOTE } from './labels/truncated.js';
 export { MOVED_MARKER, movedMarkerText, parseMovedMarker } from './local/movedMarker.js';
 export { camoufoxRootDir, workerDataDir } from './local/paths.js';
@@ -94,4 +107,5 @@ export * from './types/definitionDefaults.js';
 export * from './types/execution.js';
 export * from './types/ids.js';
 export * from './types/itinerary.js';
+export { mapNonEmpty, type NonEmpty, nonEmpty } from './types/nonEmpty.js';
 export * from './types/provenance.js';

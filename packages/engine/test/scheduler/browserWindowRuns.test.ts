@@ -351,7 +351,7 @@ describe('under any (decision 83)', () => {
       w.e.clock.set(plus(end, 3 * 3_600_000));
       if (how === 'manual') await w.e.resume(run.id, { manual: true });
       else await resumeThroughEngine(w, run.id, how, end);
-      expect(w.camoufox.calls).toHaveLength(8);
+      expect([how, w.camoufox.calls.length]).toEqual([how, 8]);
       expect(outcomes(w.e, run.id, 'camoufox').every((o) => o.status === 'priced')).toBe(true);
       vi.useRealTimers();
     }

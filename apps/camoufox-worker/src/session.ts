@@ -1,13 +1,18 @@
 import { rmSync } from 'node:fs';
 import {
+  asIsoDateTime,
   type BlockedPage,
   type Clock,
+  FLIGHT_LIST_PAGES_PER_PAIR_MAX,
+  type FlightsRequest,
   GRID_MOVE_BUDGET_MS,
   GRID_MOVE_RESERVE_MS,
   type IsoDateTime,
   type ListRequest,
   type Logger,
   type PageRequest,
+  RETURN_PAGE_PERIODS,
+  RETURN_SPACED_LOADS,
   stripUrlsInText,
   type Versions,
   type WorkerAnswer,
@@ -15,27 +20,25 @@ import {
 } from '@gmt/core';
 import { checkAccountCookies } from './accountCookies.js';
 import { type PageBudget, pageBudget } from './budget.js';
-import { classifyPageWithRule } from './classify.js';
 import type { CooldownStore } from './cooldown.js';
 import {
   type ContextLike,
   createDriver,
   type Driver,
-  LOOKUP_TIMEOUT_MS,
   type PageLike,
-  POLL_TIMEOUT_MS,
   pollUntilSettled,
-  runStep,
   type Settled,
 } from './driver.js';
-import { checkForm } from './form.js';
+import { type FlightsRead, readFlights } from './flights.js';
 import { readGrid } from './gridSession.js';
-import { installGuard } from './guard.js';
+import { type GuardState, installGuard } from './guard.js';
 import { readList } from './list.js';
 import type { MonthlyCounter } from './monthly.js';
 import type { Pacer } from './pacer.js';
 import type { Refusal } from './refusal.js';
+import { returnPhase, unverifiedReturns } from './returnPhase.js';
 import { SELECTORS, type Selectors } from './selectors.js';
+import { servedSequence } from './served.js';
 import { readBack, type SocsCapture, socsCookie } from './socs.js';
 import { bounded, DeadlineExceeded, type Timers } from './timers.js';
 import { pageUrl } from './url.js';
@@ -91,6 +94,81 @@ export interface SessionDeps {
 
 type Stage = 'launch' | 'navigate' | 'read';
 
+/** How a list or flights read ended: the answer, the stop and its rule, and a flights answer's outbound read. */
+interface ReadEnd {
+  answer: WorkerAnswer;
+  stop: BlockedPage | null;
+  rule?: string;
+  /** A flights answer's outbound read (null: Google's no-flights line) and the view it stood on (the return phase's). */
+  outbound?: { read: FlightsRead | null; view: 'cheapest' | 'best-fallback' | null };
+}
+
+/** A flights request that asks for the return phase (spec rev 56 §2: `returnLimits` present). */
+type PhaseRequest = FlightsRequest & { returnLimits: NonNullable<FlightsRequest['returnLimits']> };
+function asksForReturns(r: PageRequest | FlightsRequest): r is PhaseRequest {
+  return r.mode === 'flights' && r.returnLimits !== undefined;
+}
+
+/**
+ * The page's overall cap in ms (ruling of 2026-10-18; WP15 ruling 10; spec rev 56 §2, ruling D7): two page timeouts
+ * (the first view and its Cheapest flow); a grid page adds, per move, the scroll spacing and the move's own budget; a
+ * flights request with a return phase on a verified entry has RETURN_PAGE_PERIODS page periods (8 with a booking read:
+ * 750,000 ms at the defaults; 6 without: 570,000) and one spacing (the reload's, RETURN_SPACED_LOADS).
+ */
+export function pageCapMs(
+  req: PageRequest | FlightsRequest,
+  S: Pick<Selectors, 'RETURN_SELECT_VERIFIED' | 'BOOKING_SELECT_VERIFIED'>,
+  pageTimeoutMs: number,
+  spacingMs: number,
+  gridSpacingMs = 0,
+): number {
+  if (req.mode === 'grid')
+    return (
+      2 * pageTimeoutMs + req.moves.length * (gridSpacingMs + GRID_MOVE_BUDGET_MS + GRID_MOVE_RESERVE_MS)
+    );
+  if (asksForReturns(req) && S.RETURN_SELECT_VERIFIED) {
+    const periods =
+      RETURN_PAGE_PERIODS[req.booking === true && S.BOOKING_SELECT_VERIFIED ? 'booking' : 'returnsOnly'];
+    return periods * pageTimeoutMs + RETURN_SPACED_LOADS * spacingMs;
+  }
+  return 2 * pageTimeoutMs;
+}
+
+/**
+ * Spec rev 56 §2 (R-zero, R-spacing): every answer kind that may answer a return-phase request states the documents it
+ * loaded and, once the reload started (its pacer start recorded), when the next load may start; the kinds that answer no such request (cells,
+ * grid, mode-unavailable) are returned as they are.
+ */
+function withPageCounts(a: WorkerAnswer, pagesLoaded: number, next: IsoDateTime | null): WorkerAnswer {
+  const counts = { pagesLoaded, ...(next === null ? {} : { nextLoadNotBefore: next }) };
+  switch (a.kind) {
+    case 'cells':
+    case 'grid':
+    case 'mode-unavailable':
+      return a;
+    case 'flights':
+      return { ...a, ...counts };
+    case 'blocked':
+      return { ...a, ...counts };
+    case 'cooling-down':
+      return { ...a, ...counts };
+    case 'spacing':
+      return { ...a, ...counts };
+    case 'not-ready':
+      return { ...a, ...counts };
+    case 'browser-error':
+      return { ...a, ...counts };
+    case 'monthly-cap':
+      return { ...a, ...counts };
+    case 'counts-unreadable':
+      return { ...a, ...counts };
+    default: {
+      const never: never = a;
+      return never;
+    }
+  }
+}
+
 function detailOf(e: unknown): string {
   return stripUrlsInText(e instanceof Error ? e.message : String(e)).slice(0, 200);
 }
@@ -104,6 +182,8 @@ export class PageSession {
   private readonly finallyMs: number;
   private readonly pollMs: number;
   private busySince: IsoDateTime | null = null;
+  /** timers.now() at which the page in flight reaches its overall cap (final review A-I1), null when none is. */
+  private busyUntil: number | null = null;
 
   constructor(private readonly d: SessionDeps) {
     this.S = d.selectors ?? SELECTORS;
@@ -145,7 +225,52 @@ export class PageSession {
     if (wipe) rmSync(this.d.profileDir, { recursive: true, force: true });
   }
 
-  async page(asked: PageRequest): Promise<PageResult> {
+  /**
+   * One page: a list or grid page (`POST /v1/page`) or a flights page (`POST /v1/flights`, spec revision 55 §2 "The
+   * flight-list read"). A flights page is a list page under every rule of one; only its reader and answer differ.
+   */
+  async page(asked: PageRequest | FlightsRequest): Promise<PageResult> {
+    // why: spec rev 56 §2: a request carrying returnLimits on a verified entry states its page counts on every answer
+    const phase = asksForReturns(asked) && this.S.RETURN_SELECT_VERIFIED;
+    const counts = { loads: 0, reclaimed: false };
+    const r = await this.run(asked, phase, counts);
+    if (!phase) return r;
+    // why: review M5: the pacer's last start moves when the reload re-claims it, whether or not that document then
+    // loaded (held, or its load failed), so the next start is stated from the re-claim, not only from a second load
+    const next = counts.loads > 1 || counts.reclaimed ? this.nextLoad() : null;
+    return { ...r, answer: withPageCounts(r.answer, counts.loads, next) };
+  }
+
+  /**
+   * Final review A-I1: the wait a spacing answer states. While a page is in flight it is the rest of that page's overall
+   * cap plus its bounded close (the SOCS read-back and the page's close, each `finallyMs`), never less than the pacer's
+   * own wait, so the app's retry (http-kit waits the stated Retry-After) comes once the page can have ended instead of
+   * spending its attempts while the browser is still busy; otherwise the pacer's wait as it stands.
+   */
+  private busyWait(pacerSeconds: number): number {
+    // why: the page's close runs after the pacer is released; a refusal then is the spacing's alone
+    if (this.busyUntil === null || !this.d.pacer.isBusy()) return pacerSeconds;
+    const left = this.busyUntil + 2 * this.finallyMs - this.d.timers.now();
+    return Math.max(pacerSeconds, Math.ceil(left / 1000));
+  }
+
+  /** R-spacing: the last document load's start (the pacer's record) plus the spacing; null when it cannot be read. */
+  private nextLoad(): IsoDateTime | null {
+    try {
+      const last = this.d.pacer.lastPageAt();
+      return last === null
+        ? null
+        : asIsoDateTime(new Date(Date.parse(last) + this.d.pacer.spacingMs).toISOString());
+    } catch {
+      return null;
+    }
+  }
+
+  private async run(
+    asked: PageRequest | FlightsRequest,
+    phase: boolean,
+    counts: { loads: number; reclaimed: boolean },
+  ): Promise<PageResult> {
     let req = asked;
     // why: decision 70: grid pages only once the selectors module verifies the grid and worker.env asks for it
     if (req.mode === 'grid' && (!this.S.GRID_VERIFIED || this.d.grid?.mode !== 'grid'))
@@ -188,7 +313,12 @@ export class PageSession {
       };
     // why: decision 82: the month's page cap for every caller, before anything opens; a refusal leaves the counts as
     // they are, and a counts file that cannot be read refuses every page as itself (W3), never as a cap reached
-    const admission = this.d.monthly.check(req.mode === 'grid' ? req.scrollAllowance : 0);
+    // why: R-reserve (P3): a return-phase request reserves its worst case (FLIGHT_LIST_PAGES_PER_PAIR_MAX) when the month
+    // leaves it, else one page, and the phase is then skipped (monthly-headroom)
+    const admission = this.d.monthly.check(
+      req.mode === 'grid' ? req.scrollAllowance : 0,
+      phase ? FLIGHT_LIST_PAGES_PER_PAIR_MAX : 1,
+    );
     if (admission.kind === 'monthly-cap')
       return {
         answer: {
@@ -204,7 +334,7 @@ export class PageSession {
     const claim = this.d.pacer.claim();
     if (!claim.ok)
       return {
-        answer: { kind: 'spacing', retryAfterSeconds: claim.retryAfterSeconds },
+        answer: { kind: 'spacing', retryAfterSeconds: this.busyWait(claim.retryAfterSeconds) },
         googleContacted: false,
       };
     // why: the page and its clamped scroll allowance are on disk before the load, so a crash over-counts, never under
@@ -226,14 +356,16 @@ export class PageSession {
     // why: ruling of 2026-10-18: the first view has CAMOUFOX_PAGE_TIMEOUT_SECONDS; the Cheapest flow gets the same again
     // from its click (budget.next), never past twice that from the start. `budget.d` is whichever deadline is current.
     // why: WP15 ruling 10: a grid page's overall cap adds, per move, the scroll spacing and the move's own budget
-    const moves = req.mode === 'grid' ? req.moves.length : 0;
-    const budget = pageBudget(
-      this.d.timers,
+    // why: spec rev 56 §2 (ruling D7): a return-phase request's cap covers every page period of its served path
+    const cap = pageCapMs(
+      req,
+      this.S,
       this.d.pageTimeoutMs,
-      started,
-      2 * this.d.pageTimeoutMs +
-        moves * ((this.d.grid?.spacingMs ?? 0) + GRID_MOVE_BUDGET_MS + GRID_MOVE_RESERVE_MS),
+      this.d.pacer.spacingMs,
+      this.d.grid?.spacingMs ?? 0,
     );
+    const budget = pageBudget(this.d.timers, this.d.pageTimeoutMs, started, cap);
+    this.busyUntil = started + cap;
     const counter = { scrolls: 0 };
     const scrolls = (): { scrolls?: number } => (req.mode === 'grid' ? { scrolls: counter.scrolls } : {});
     const deadline = budget.d;
@@ -250,6 +382,7 @@ export class PageSession {
     // why: fix round 1 (prov-int I1): every call before goto races the page deadline (rule 9), so a stalled browser
     // answers not-ready instead of holding the pacer for good; a failure here discards the context
     let preGotoFailed = false;
+    let guardState: GuardState | null = null;
     try {
       const c = await deadline.race(this.currentContext());
       context = c;
@@ -267,6 +400,9 @@ export class PageSession {
           void p.close().catch(() => undefined);
         });
         const guard = await deadline.race(installGuard(c, p, this.d.log, this.S));
+        guardState = guard;
+        // why: cost-r3-002 (D8: return-phase requests only): the documents never pass what the month reserved
+        if (phase) guard.reservation = admission.pagesReserved;
         const driver = (this.d.driverFor ?? createDriver)(p, guard, this.S);
         stage = 'navigate';
         contacted = true;
@@ -296,6 +432,7 @@ export class PageSession {
           rule = `guard-refused:${refused}`;
           answer = this.blockedPlaceholder(refused);
         } else {
+          let ob: ReadEnd['outbound'];
           const r =
             req.mode === 'grid'
               ? await readGrid(
@@ -311,10 +448,58 @@ export class PageSession {
                   },
                   this.d,
                 )
-              : await this.read(driver, req, budget, started);
+              : await this.read(driver, req, budget, started).then((x) => {
+                  ob = x.outbound;
+                  return x;
+                });
           answer = r.answer;
           stop = r.stop;
           rule = r.rule ?? 'read';
+          // why: spec rev 56 §2: the return phase, after the outbound read of a request carrying returnLimits
+          if (asksForReturns(req) && stop === null && answer.kind === 'flights' && ob !== undefined) {
+            const a = answer;
+            if (!phase) answer = { ...a, returns: unverifiedReturns(req, ob.read) };
+            else {
+              const ph = await returnPhase({
+                driver,
+                guard,
+                budget,
+                // why: review M5: the re-claim is recorded once it wrote the pacer's start (a refused wait records nothing)
+                pacer: {
+                  spacingMs: this.d.pacer.spacingMs,
+                  reclaim: async (d, t) => {
+                    await this.d.pacer.reclaim(d, t);
+                    counts.reclaimed = true;
+                  },
+                },
+                url: pageUrl(req),
+                req,
+                outbound: ob.read,
+                view: ob.view,
+                S: this.S,
+                timers: this.d.timers,
+                log: this.d.log,
+                pollMs: this.pollMs,
+                startedAt: started,
+                admitted: admission.pagesReserved,
+                pageTimeoutMs: this.d.pageTimeoutMs,
+              });
+              if ('stop' in ph) {
+                stop = ph.stop;
+                rule = ph.rule;
+                answer = this.blockedPlaceholder(ph.stop);
+              } else
+                answer = {
+                  ...a,
+                  flights: ph.flights,
+                  returns: ph.returns,
+                  // why: the answer is as of the phase's end
+                  fetchedAt: this.d.clock.now(),
+                  versions:
+                    ph.offerGrammar === null ? a.versions : { ...a.versions, offerGrammar: ph.offerGrammar },
+                };
+            }
+          }
         }
       }
     } catch (e) {
@@ -335,7 +520,7 @@ export class PageSession {
       const back = await bounded(() => c.cookies(), this.finallyMs, this.d.timers);
       if (back.overran) {
         discard = true;
-        if (answer.kind === 'cells' || answer.kind === 'grid')
+        if (answer.kind === 'cells' || answer.kind === 'grid' || answer.kind === 'flights')
           answer = { kind: 'browser-error', stage: 'read', detail: 'SOCS read-back overran', ...scrolls() };
       } else if (readBack(back.value, this.d.socs) !== 'same') {
         wipe = true;
@@ -352,15 +537,27 @@ export class PageSession {
       const closed = await bounded(() => p.close(), this.finallyMs, this.d.timers);
       if (closed.overran) {
         discard = true;
-        if (answer.kind === 'cells' || answer.kind === 'grid')
+        if (answer.kind === 'cells' || answer.kind === 'grid' || answer.kind === 'flights')
           answer = { kind: 'browser-error', stage: 'read', detail: 'page close overran', ...scrolls() };
       }
     }
     if (stop === 'consent-unhandled') wipe = true;
     if (wipe || discard) await this.discard(wipe);
     this.busySince = null;
+    this.busyUntil = null;
+    counts.loads = guardState?.documentLoads ?? 0;
     try {
-      this.d.monthly.settle(admission.reserved, admission.scrollAllowance, counter.scrolls);
+      // why: spec rev 56 §2: a return-phase request settles to the documents it loaded (0 when the first was refused),
+      // never above the reservation (the guard's reservation stop); every other page keeps its one page
+      if (phase)
+        this.d.monthly.settle(
+          admission.reserved,
+          admission.scrollAllowance,
+          counter.scrolls,
+          admission.pagesReserved,
+          counts.loads,
+        );
+      else this.d.monthly.settle(admission.reserved, admission.scrollAllowance, counter.scrolls);
     } catch (e) {
       // why: the reservation stays on disk, which over-counts; the page's own answer is unchanged
       this.d.log.warn({ error: detailOf(e) }, 'monthly counts not settled');
@@ -410,86 +607,65 @@ export class PageSession {
 
   private async read(
     driver: Driver,
-    req: ListRequest,
+    req: ListRequest | FlightsRequest,
     budget: PageBudget,
     started: number,
-  ): Promise<{ answer: WorkerAnswer; stop: BlockedPage | null; rule?: string }> {
+  ): Promise<ReadEnd> {
     const S = this.S;
-    let d = budget.d;
-    const poll = (view: 'best' | 'cheapest') =>
-      pollUntilSettled(driver, d, this.d.timers, this.pollMs, S, {
-        view,
+    // why: WP21 Task 21.3: the served sequence is one module (served.ts), run alike by this first view, the return
+    // phase's reload and the recorder; its Cheapest flow takes `budget.next` here (ruling of 2026-10-18: the same page
+    // timeout again from the click, never past twice that from the start)
+    const served = await servedSequence(
+      {
+        driver,
+        S,
+        timers: this.d.timers,
+        log: this.d.log,
+        pollMs: this.pollMs,
+        startedAt: started,
+        request: req,
+      },
+      budget.d,
+      () => budget.next(),
+    );
+    if (served.kind === 'stop')
+      return { answer: this.blockedPlaceholder(served.page), stop: served.page, rule: served.rule };
+    // why: ruling B8: Google's own no-flights line is answered here, before any reader runs; on a flights page it is
+    // a flights answer, listed 'no-flights', with no flight and nothing else read
+    if (served.kind === 'no-flights')
+      return req.mode === 'flights'
+        ? { answer: this.noFlightsAnswer(), stop: null, outbound: { read: null, view: null } }
+        : { answer: this.cells({ status: 'no-flights' }, 'unknown'), stop: null };
+    const d = served.d;
+    let settled: Settled = served.shown;
+    // why: spec rev 55 §2: a flights answer names the view it read: the Cheapest view, the Best view after the
+    // Cheapest flow failed, or (null) the Best view where no Cheapest flow ran
+    const view = served.view;
+    const fellBack = view === 'best-fallback';
+    // why: the worker clicks only flows its selectors module marks verified (PIE-09), re-reading the facts after each.
+    const after = async (
+      v: 'best' | 'cheapest',
+    ): Promise<{ answer: WorkerAnswer; stop: BlockedPage; rule: string } | null> => {
+      settled = await pollUntilSettled(driver, d, this.d.timers, this.pollMs, S, {
+        view: v,
         log: this.d.log,
         startedAt: started,
       });
-    let settled: Settled = await poll('best');
-    let fellBack = false;
-    if (settled.kind.kind === 'blocked')
-      return {
-        answer: this.blockedPlaceholder(settled.kind.page),
-        stop: settled.kind.page,
-        rule: settled.rule,
-      };
-    if (settled.kind.kind === 'no-flights')
-      return { answer: this.cells({ status: 'no-flights' }, 'unknown'), stop: null };
-    const form = checkForm(await driver.formFacts(d), req);
-    if (form !== 'ok')
-      return {
-        answer: this.blockedPlaceholder('unrecognised'),
-        stop: 'unrecognised',
-        rule: `search-form:${form}`,
-      };
-    // why: the worker clicks only flows its selectors module marks verified (PIE-09), re-reading the facts after each.
-    const after = async (
-      view: 'best' | 'cheapest',
-    ): Promise<{ answer: WorkerAnswer; stop: BlockedPage; rule: string } | null> => {
-      settled = await poll(view);
       if (settled.kind.kind === 'results') return null;
       const page = settled.kind.kind === 'blocked' ? settled.kind.page : 'unrecognised';
       // why: a no-flights page after a click names that, as the recorder does (`no-flights-after-click`)
       const rule = settled.kind.kind === 'blocked' ? settled.rule : `${settled.kind.kind}-after-click`;
       return { answer: this.blockedPlaceholder(page), stop: page, rule };
     };
-    if (S.CHEAPEST_FLOW_VERIFIED && settled.facts.page.cheapestTabs.length === 1) {
-      d = budget.next();
-      const steps = { timers: this.d.timers, log: this.d.log, startedAt: started };
-      const lookups = { timers: this.d.timers, lookupMs: LOOKUP_TIMEOUT_MS };
-      let cheapStop: Awaited<ReturnType<typeof after>> = null;
-      fellBack = false;
-      try {
-        await driver.clickCheapest(d, steps);
-        // why: rulings of 2026-10-18: every Cheapest poll is a 20 s step with 5 s lookups inside it; one that overruns
-        // is polled again, and only the budget's end fails the flow (then it falls back)
-        cheapStop = await after('cheapest');
-      } catch (e) {
-        // why: the honesty rule (rulings of 2026-10-18): a Cheapest flow whose step fails or times out is read as the
-        // Best view stands, and the tab's lower price goes with it, so the adapter marks the cell partial; the page
-        // deadline still ends the page as not-ready
-        if (e instanceof DeadlineExceeded || d.expired()) throw e;
-        fellBack = true;
-        // why: a failed step may be a page that is no results page at all (a challenge after the click): it is
-        // classified once, under its own step, and a blocked kind stops the page with its cool-down, as on any poll
-        const cur = d;
-        const seen = await runStep('classify-after-failed-step', POLL_TIMEOUT_MS, cur, steps, (st) =>
-          driver.readFacts(st, lookups),
-        ).catch((err: unknown) => {
-          if (err instanceof DeadlineExceeded || cur.expired()) throw err;
-          return null;
-        });
-        if (seen !== null) {
-          const k = classifyPageWithRule(seen.page, S, 'cheapest');
-          if (k.kind.kind === 'blocked' && k.kind.page !== 'unrecognised')
-            return { answer: this.blockedPlaceholder(k.kind.page), stop: k.kind.page, rule: k.rule };
-        }
-      }
-      if (cheapStop !== null) return cheapStop;
-    }
     if (S.VIEW_MORE_ADDS_CHEAPER) {
       await driver.click('button', S.results.viewMoreButton, d);
       const stop = await after(settled.facts.settle.cheapestSelected ? 'cheapest' : 'best');
       if (stop !== null) return stop;
     }
-    const list = readList(await driver.listFacts(d), req);
+    // why: spec rev 55 §2: the one branch a flights page makes, at the reader; every check below is the list page's
+    const facts = await driver.listFacts(d);
+    const flights = req.mode === 'flights' ? readFlights(facts, req) : null;
+    const list = flights ?? readList(facts, req);
     // why: ruling of 2026-10-18: a Cheapest view that never settled and left no list to read is a page that did not
     // settle (not-ready, no cool-down), never an unrecognised page
     if (fellBack && list.minMinor === null && list.optionsOtherCell === 0)
@@ -506,6 +682,24 @@ export class PageSession {
         answer: this.blockedPlaceholder('unrecognised'),
         stop: 'unrecognised',
         rule: 'no-options-read',
+      };
+    if (flights !== null)
+      return {
+        answer: this.flights(
+          {
+            listed: flights.listed,
+            flights: flights.flights,
+            minMinor: flights.minMinor,
+            tabMinor: flights.tabMinor,
+            optionsUnparsed: flights.optionsUnparsed,
+            optionsOtherCell: flights.optionsOtherCell,
+            resultsStated: flights.resultsStated,
+            pointOfSale: flights.pointOfSale,
+          },
+          view,
+        ),
+        stop: null,
+        outbound: { read: flights, view },
       };
     if (list.minMinor === null)
       return {
@@ -532,6 +726,52 @@ export class PageSession {
         list.pointOfSale,
       ),
       stop: null,
+    };
+  }
+
+  /**
+   * Ruling B8: a flights page that showed Google's own no-flights line: listed 'no-flights', no flight, nothing else
+   * read (no minimum, tab price, counts or view), the point of sale unknown as the list page's no-flights answer says.
+   */
+  private noFlightsAnswer(): WorkerAnswer {
+    return this.flights(
+      {
+        listed: 'no-flights',
+        flights: [],
+        minMinor: null,
+        tabMinor: null,
+        optionsUnparsed: 0,
+        optionsOtherCell: 0,
+        resultsStated: null,
+        pointOfSale: 'unknown',
+      },
+      null,
+    );
+  }
+
+  /** A flights answer (spec rev 55 §2) from what the page listed and the view read. */
+  private flights(
+    read: Pick<
+      Extract<WorkerAnswer, { kind: 'flights' }>,
+      | 'listed'
+      | 'flights'
+      | 'minMinor'
+      | 'tabMinor'
+      | 'optionsUnparsed'
+      | 'optionsOtherCell'
+      | 'resultsStated'
+      | 'pointOfSale'
+    >,
+    cheapestView: 'cheapest' | 'best-fallback' | null,
+  ): WorkerAnswer {
+    return {
+      kind: 'flights',
+      fetchedAt: this.d.clock.now(),
+      currency: 'GBP',
+      ...read,
+      cheapestView,
+      notes: [],
+      versions: this.d.versions,
     };
   }
 

@@ -322,7 +322,9 @@ export function camoufoxChecks(
       ? 'no status'
       : `selectors ${s.versions.selectors}, grammar ${s.versions.grammar}; ${falseFlags.length > 0 ? `still unverified: ${falseFlags.join(', ')}` : 'every flag verified'}`,
   );
-  const link = run.cell === null ? null : searchLinkFor('camoufox', run.cell, 'economy');
+  // why: spec rev 55 §2 (prov-int-017): the link is the page the worker loads, at the install's point of sale
+  const link =
+    run.cell === null ? null : searchLinkFor('camoufox', run.cell, 'economy', ports.config.pointOfSale);
   add(
     'camoufox compare',
     tile === null ? 'skip' : 'look',

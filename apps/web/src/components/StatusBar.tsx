@@ -1,21 +1,40 @@
-import { ACTIVE_STATUSES, apiContract, budgetScopeLabel, capWarn, RESUMABLE_STATUSES } from '@gmt/core';
+import {
+  ACTIVE_STATUSES,
+  apiContract,
+  budgetScopeLabel,
+  capWarn,
+  IN_FLIGHT_STATUSES,
+  mainPathSource,
+  RESUMABLE_ACTIVE_STATUSES,
+  STOPPED_STATUSES,
+} from '@gmt/core';
 import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
-import { useCoverage, useExecution, useExecutionActions, useResults } from '../api/queries.js';
+import {
+  useBudget,
+  useCards,
+  useCoverage,
+  useExecution,
+  useExecutionActions,
+  useResults,
+} from '../api/queries.js';
 import { failureOf, useStatus } from '../api/statusQuery.js';
 import type { DefinitionResponse, ExecutionResponse, UsageRow } from '../api/types.js';
 import { COPY } from '../copy.js';
 import { formatIsoDate, formatMicroGbp, formatRunInstant } from '../format.js';
 import { useCheckedWords } from '../hooks/useCheckedWords.js';
+import { CLEARED_FILTERS, datesPatch } from '../state/datesState.js';
 import { BASIS_PARAM, DATES_COVERAGE, parseBasis } from '../state/resultsState.js';
 import { hrefWith, navigateTo, useSearchParams } from '../state/urlState.js';
 import { LoadError } from './LoadState.js';
+import { fixNamesResume, StopSentence, stopOrNone } from './StopWords.js';
 
 const ACTIVE: ReadonlySet<string> = new Set(ACTIVE_STATUSES);
-/** Active runs the API will resume: the paused two and an interrupted one (spec §7; derived, never hand-listed). */
-const RESUMABLE_ACTIVE: ReadonlySet<string> = new Set(
-  ACTIVE_STATUSES.filter((s) => RESUMABLE_STATUSES.includes(s)),
-);
+/** A run that has stopped or been skipped: the statuses whose `stop` the api fills (spec rev 55 §10). */
+const STOPPED: ReadonlySet<string> = new Set(STOPPED_STATUSES);
+const isStopped = (status: string): boolean => STOPPED.has(status);
+/** Active runs the API will resume: the paused two and an interrupted one (core's one set, shared with a search's page). */
+const RESUMABLE_ACTIVE: ReadonlySet<string> = new Set(RESUMABLE_ACTIVE_STATUSES);
 
 /**
  * Spec §11 progress, one line per stage × provider (never summed across providers). Ruling 4 (decision 67): the line
@@ -27,8 +46,9 @@ const RESUMABLE_ACTIVE: ReadonlySet<string> = new Set(
 function progressLines(e: ExecutionResponse, selected: number | null) {
   return e.progress.map((p) => {
     const l = {
-      stage: COPY.stageName[p.stage],
-      provider: COPY.provider[p.providerId],
+      stage: COPY.barStageName[p.stage],
+      // why: spec rev 55 §3 — the bar names a source by its main-path name, from core's one table
+      provider: mainPathSource(p.providerId),
       buckets: p.buckets,
       total: p.total,
     };
@@ -36,6 +56,7 @@ function progressLines(e: ExecutionResponse, selected: number | null) {
     return {
       ...l,
       key: `${p.stage}-${p.providerId}`,
+      detail: COPY.progressBuckets(p.buckets),
       done: p.buckets.priced + p.buckets.empty + p.buckets.no_data + p.buckets.error,
       max: bySelection ? selected : p.total,
       text: bySelection ? COPY.progressSelected({ ...l, selected }) : COPY.progress(l),
@@ -144,80 +165,117 @@ export function StatusLink() {
   );
 }
 
-/**
- * "Run now" with the estimate it will spend (spec §11: the status bar on Results and Definitions, and the Dates view's
- * never-run state), confirmed by the definition's stored calls and pence (decision 43); blocked, with the reason, while
- * the estimate is above what was confirmed. The caller owns the mutation, so its error shows where it was pressed.
- */
-export function RunNowButton({
-  definition,
-  start,
-}: {
-  definition: DefinitionResponse;
-  start: ReturnType<typeof useExecutionActions>['start'];
-}) {
-  const est = definition.estimate;
-  return (
-    <>
-      <button
-        type="button"
-        data-cost=""
-        className="btn btn-primary btn-sm min-h-11"
-        disabled={definition.needsConfirmation !== null || start.isPending}
-        aria-busy={start.isPending ? true : undefined}
-        onClick={() =>
-          start.mutate({
-            id: definition.id,
-            confirmCostPence: definition.confirmedCostPence,
-            confirmCalls: definition.confirmedCalls,
-          })
-        }
-      >
-        {start.isPending
-          ? COPY.working
-          : est === null
-            ? COPY.runNowUnestimated
-            : COPY.runNow(est.totalCalls, definition.budget.maxCalls, formatMicroGbp(est.totalCostMicroGbp))}
-      </button>
-      {definition.needsConfirmation !== null ? <span>{COPY.runNowBlocked}</span> : null}
-    </>
-  );
-}
-
 export interface StatusBarProps {
-  definition: DefinitionResponse | null;
-  /** "Run now" appears only on Dates and Definitions (review UI-10; WP19 Task 19.7: Dates replaced Results). */
-  showRunNow: boolean;
   /**
-   * The view shows its own Run now while the search has never run (the Dates view's never-run state), so the bar leaves
-   * it out until a run exists: the action is offered once, as that state's primary action.
+   * The search the view shows (its page, the date pair detail, its Edit page): the bar follows that search's run and
+   * offers Cancel and Resume. Null on every other view, where the bar follows any search's run instead (`AnyRun`).
    */
-  viewOwnsFirstRun?: boolean;
+  definition: Pick<DefinitionResponse, 'id'> | null;
+  /**
+   * The view shows a search that is not known yet (its definitions are loading): the run part waits, so another
+   * search's run is never shown in its place for a moment; only the month's spend shows.
+   */
+  hold?: boolean;
 }
 
 /**
- * Spec §11 status bar, on every view: the link to the Status view, then the run's stage, progress, spend, paused reason
- * + Resume, blocked schedule and Cancel. The link needs no definition; the run's part does.
+ * Spec rev 55 §11 status bar, on every view: the link to the Status view, the run's pass, progress, a stopped run's
+ * sentence + fix (+ Resume when the fix says so) and Cancel, and always the month's spend. Which run it shows is a visible
+ * rule (ruling R-bar): the run of the search the view shows (`definition`, with Cancel and Resume); on every other view the
+ * active run of any search, else the latest stopped run of any search, with its search named and a link to its page and
+ * no controls; with none, only the month's spend. There is no Run now: every run action lives on the search it acts on.
  */
-export function StatusBar(props: StatusBarProps) {
+export function StatusBar({ definition, hold = false }: StatusBarProps) {
   return (
     <>
       <StatusLink />
-      <RunStatus {...props} />
+      {hold ? null : definition !== null ? (
+        <RunStatus definitionId={definition.id} name={null} executionId={null} controls />
+      ) : (
+        <AnyRun />
+      )}
+      <MonthSpend />
     </>
   );
 }
 
-/** The run's part of the bar: stage, progress, spend, paused reason + Resume, blocked schedule, Cancel. */
-function RunStatus({ definition, showRunNow, viewOwnsFirstRun = false }: StatusBarProps) {
+/** The statuses whose run `AnyRun` prefers, then the ones it falls back to (cards, newest start first when stopped). */
+const IN_FLIGHT: ReadonlySet<string> = new Set(IN_FLIGHT_STATUSES);
+
+/**
+ * The bar on a view that shows no one search (Searches, Providers, Alerts, Status, History, a new search's form): the
+ * active run of any search, else the latest stopped run of any search, with that search named and no Cancel or Resume
+ * (those belong to a view that shows the search); the name links to its page. Nothing when no search has either.
+ */
+function AnyRun() {
+  const cards = useCards();
+  const all = cards.data?.cards ?? [];
+  const active = all.find((c) => c.latestRun !== null && IN_FLIGHT.has(c.latestRun.status));
+  const stopped = all
+    .filter((c) => c.latestRun !== null && isStopped(c.latestRun.status) && c.latestRun.startedAt !== null)
+    .sort((a, b) => (b.latestRun?.startedAt ?? '').localeCompare(a.latestRun?.startedAt ?? ''))[0];
+  const card = active ?? stopped;
+  if (card === undefined || card.latestRun === null) return null;
+  return (
+    <RunStatus
+      key={card.id}
+      definitionId={card.id}
+      name={card.name}
+      executionId={card.latestRun.id}
+      controls={false}
+    />
+  );
+}
+
+/** The month's spend against its cap, from `GET /budget`, on every view and whether or not a run is shown. */
+function MonthSpend() {
+  const budget = useBudget();
+  const month =
+    budget.data?.scopes.find((u) => u.scope === budgetScopeLabel({ kind: 'global-month' })) ?? null;
+  if (month === null) return null;
+  return (
+    <section aria-label={COPY.monthSpendLabel} className="statusline">
+      <Spend
+        text={COPY.spendMonth(formatMicroGbp(month.costMicroGbp), capText(month.cap, formatMicroGbp))}
+        used={month.costMicroGbp}
+        cap={month.cap}
+      />
+    </section>
+  );
+}
+
+/**
+ * The run's part of the bar: the search's name (when the bar is not on that search's view), stage, progress, spend, a
+ * stopped run's sentence + fix, blocked schedule and, with `controls`, Resume and Cancel. `executionId` names the run
+ * directly (the cards' latest run); without it the run is the newest parent run of the search's results.
+ */
+function RunStatus({
+  definitionId,
+  name,
+  executionId,
+  controls,
+}: {
+  definitionId: string;
+  name: string | null;
+  executionId: string | null;
+  controls: boolean;
+}) {
   const params = useSearchParams();
-  const results = useResults(definition?.id ?? null, parseBasis(params.get(BASIS_PARAM)));
+  const results = useResults(executionId === null ? definitionId : null, parseBasis(params.get(BASIS_PARAM)));
   const executions = results.data?.executions ?? [];
   // why: lists are newest first; the bar follows the newest parent run, and a one-cell child is a separate line.
-  const latestId = executions.find((x) => !x.isChild)?.id ?? null;
+  const latestId = executionId ?? executions.find((x) => !x.isChild)?.id ?? null;
   const child = executions.find((x) => x.isChild && ACTIVE.has(x.status)) ?? null;
   const execution = useExecution(latestId);
-  const coverage = useCoverage(definition?.id ?? null);
+  const coverage = useCoverage(executionId === null ? definitionId : null);
+  // why: ruling R-bar — the bar may show another search's run than the URL's (or a run on a view with no search); its
+  // coverage link opens that run's own search, and the URL's Dates filters travel only when they are that search's
+  // own, so one search's coverage is never read as, or scoped by, another's
+  const coverageLink = {
+    ...DATES_COVERAGE,
+    ...(params.get('def') === definitionId ? {} : datesPatch(CLEARED_FILTERS)),
+    def: definitionId,
+  };
   const actions = useExecutionActions();
   const qc = useQueryClient();
   // why: the confirmation is bound to the run it was opened for; if the bar moves to another run, it must be asked again.
@@ -241,7 +299,6 @@ function RunStatus({ definition, showRunNow, viewOwnsFirstRun = false }: StatusB
     previous.current = status;
   }, [status, qc]);
 
-  if (definition === null) return null;
   const blockedSince = coverage.data?.scheduleBlockedSince ?? null;
   const e = execution.data;
   const failure = actions.cancel.error ?? actions.resume.error ?? actions.start.error;
@@ -250,8 +307,8 @@ function RunStatus({ definition, showRunNow, viewOwnsFirstRun = false }: StatusB
     ? usageOf(e, budgetScopeLabel({ kind: 'execution-free-calls', executionId: e.id }))
     : null;
   const runCost = e ? usageOf(e, budgetScopeLabel({ kind: 'execution-cost', executionId: e.id })) : null;
-  const month = e ? usageOf(e, budgetScopeLabel({ kind: 'global-month' })) : null;
   const active = e !== undefined && ACTIVE.has(e.status);
+  const canCancel = controls && active;
 
   const loadError = results.error ?? execution.error;
   const retryLoad = () => {
@@ -259,7 +316,9 @@ function RunStatus({ definition, showRunNow, viewOwnsFirstRun = false }: StatusB
     if (execution.error) void execution.refetch();
   };
   const confirmingCancel = e !== undefined && confirmingCancelId === e.id;
-  const canResume = e !== undefined && RESUMABLE_ACTIVE.has(e.status);
+  // why: Resume belongs with a sentence only when its fix names it (a browser page limit offers a fresh search instead)
+  const canResume =
+    controls && e !== undefined && RESUMABLE_ACTIVE.has(e.status) && fixNamesResume(stopOrNone(e.stop));
   const busy = (m: { isPending: boolean }) => (m.isPending ? true : undefined);
 
   return (
@@ -267,6 +326,15 @@ function RunStatus({ definition, showRunNow, viewOwnsFirstRun = false }: StatusB
       <div className="flex flex-wrap items-center gap-3">
         {/* why: only the status words are announced as they change; the child-run line and the numbers are not. */}
         <span aria-live="polite" className="flex flex-wrap items-center gap-x-3">
+          {name === null ? null : (
+            <a
+              href={hrefWith({ view: 'dates', def: definitionId })}
+              onClick={navigateTo({ view: 'dates', def: definitionId })}
+              className="inline-flex min-h-11 items-center font-semibold underline"
+            >
+              {COPY.barSearchName(name)}
+            </a>
+          )}
           {e === undefined ? (
             loadError ? null : (
               <span>{results.data !== undefined && latestId === null ? COPY.noExecution : COPY.loading}</span>
@@ -274,12 +342,14 @@ function RunStatus({ definition, showRunNow, viewOwnsFirstRun = false }: StatusB
           ) : (
             <>
               <span className="status-word" data-status={e.status}>
-                {COPY.statusName[e.status]}
+                {COPY.barStatusName[e.status]}
               </span>
-              {e.stage !== null ? <span>{COPY.stageName[e.stage]}</span> : null}
-              {e.status === 'paused_budget' || e.status === 'paused_error' ? (
+              {e.stage !== null ? <span>{COPY.barStageName[e.stage]}</span> : null}
+              {/* why: spec rev 55 §8.1, §11 — a stopped run's sentence as-is with its fix, `NO_STOP_CAUSE_TEXT` for a row
+              with no stored cause; never a stored status word and never a prefix of ours */}
+              {isStopped(e.status) ? (
                 <span className="warn-text">
-                  {COPY.paused(e.reason ?? COPY.statusName[e.status])}
+                  <StopSentence stop={stopOrNone(e.stop)} />
                   {e.resumeAfter !== null ? ` · ${COPY.resumesAt(formatRunInstant(e.resumeAfter))}` : null}
                 </span>
               ) : null}
@@ -287,7 +357,7 @@ function RunStatus({ definition, showRunNow, viewOwnsFirstRun = false }: StatusB
           )}
         </span>
         {loadError ? <LoadError error={loadError} retry={retryLoad} /> : null}
-        {child !== null ? <span>{COPY.childRun(COPY.statusName[child.status])}</span> : null}
+        {child !== null ? <span>{COPY.childRun(COPY.barStatusName[child.status])}</span> : null}
         {blockedSince !== null ? (
           <span className="warn-text">{COPY.scheduleBlocked(formatIsoDate(blockedSince.slice(0, 10)))}</span>
         ) : null}
@@ -302,12 +372,12 @@ function RunStatus({ definition, showRunNow, viewOwnsFirstRun = false }: StatusB
             {actions.resume.isPending ? COPY.working : COPY.resume}
           </button>
         ) : null}
-        {e && active && !confirmingCancel ? (
+        {e && canCancel && !confirmingCancel ? (
           <button type="button" className="btn btn-sm min-h-11" onClick={() => setConfirmingCancelId(e.id)}>
             {COPY.cancel}
           </button>
         ) : null}
-        {e && active && confirmingCancel ? (
+        {e && canCancel && confirmingCancel ? (
           <>
             <button
               type="button"
@@ -325,12 +395,6 @@ function RunStatus({ definition, showRunNow, viewOwnsFirstRun = false }: StatusB
               {COPY.keepRunning}
             </button>
           </>
-        ) : null}
-        {showRunNow &&
-        !active &&
-        results.data !== undefined &&
-        !(viewOwnsFirstRun && executions.length === 0) ? (
-          <RunNowButton definition={definition} start={actions.start} />
         ) : null}
       </div>
       {e !== undefined ? (
@@ -351,10 +415,12 @@ function RunStatus({ definition, showRunNow, viewOwnsFirstRun = false }: StatusB
                 aria-valuetext={l.text}
               >
                 {l.text}
+                {/* why: spec rev 55 §11 — the six buckets under the count */}
+                <span className="block text-xs">{l.detail}</span>
               </span>
             ))}
             {/* why: spec §11: the progress breakdown links to the Dates view's coverage section (WP19 Task 19.7) */}
-            <a href={hrefWith(DATES_COVERAGE)} onClick={navigateTo(DATES_COVERAGE)} className="link">
+            <a href={hrefWith(coverageLink)} onClick={navigateTo(coverageLink)} className="link">
               {COPY.progressCoverageLink}
             </a>
             {runCalls ? (
@@ -379,13 +445,6 @@ function RunStatus({ definition, showRunNow, viewOwnsFirstRun = false }: StatusB
                 )}
                 used={runCost.costMicroGbp}
                 cap={runCost.cap}
-              />
-            ) : null}
-            {month ? (
-              <Spend
-                text={COPY.spendMonth(formatMicroGbp(month.costMicroGbp), capText(month.cap, formatMicroGbp))}
-                used={month.costMicroGbp}
-                cap={month.cap}
               />
             ) : null}
             <ProviderWindows e={e} />

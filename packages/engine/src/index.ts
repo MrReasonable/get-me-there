@@ -12,7 +12,14 @@ export {
 export { noAlerts } from './alertsStep.js';
 export { capKindOf } from './context.js';
 export { createEngine } from './engine.js';
-export { confirmationOf } from './estimate.js';
+export { browserPagesPlanned, confirmationOf } from './estimate.js';
+export {
+  type DatePairAsk,
+  type FlightReadMark,
+  type FlightReadStart,
+  type FlightReadUnavailable,
+  flightReadUnavailable,
+} from './flightRead.js';
 export { fxHttpLimits } from './fx/limits.js';
 export { type LineKey, lineKey } from './lines.js';
 export {
@@ -36,11 +43,14 @@ export {
 } from './scheduler/browserWindow.js';
 export { parseCron } from './scheduler/parseCron.js';
 export { windowSetting } from './stages/browserGate.js';
+export { FLIGHT_LIST_PROVIDER } from './stages/flightLists.js';
+export { REUSE_TOLERANCE, refreshHoursOf } from './stages/reuse.js';
 export {
   type Confirmation,
   type ConfirmationContext,
   confirmationNeeded,
   SOFT_CONFIRM_CALL_SHARE,
+  type SoftConfirmWhy,
 } from './start.js';
 export type {
   AlertsPass,
@@ -53,6 +63,9 @@ export type {
   EngineDeps,
   EngineOptions,
   Estimate,
+  EstimateAsk,
+  RankedDatePair,
+  RankedDatePairsReader,
   SchedulerJob,
   StartOptions,
   StartResult,

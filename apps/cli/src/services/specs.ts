@@ -70,7 +70,12 @@ export function backupServiceSpec(i: SpecInput): ServiceSpec {
   };
 }
 
-/** How long a stop waits for the worker: the longest page plus 30 s to close the browser (W7). */
+/**
+ * How long a stop waits for the worker: the page timeout's maximum plus 30 s to close the browser (W7). A page that
+ * runs longer (a grid page, or a return phase of up to eight page periods) is ended by the stop; the worker counted
+ * its pages when it started, so the month over-counts, the safe side, rather than a stop being held for up to 13
+ * minutes (final ruling A-M5).
+ */
 export const WORKER_STOP_SECONDS = PAGE_TIMEOUT_MAX_SECONDS + 30;
 
 /**

@@ -1,17 +1,22 @@
-import { fireEvent, screen, within } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { HttpResponse, http } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { SMOKE } from '../../e2e/selectors.js';
 import { Nav } from '../../src/components/Nav.js';
+import { PLAN_COPY } from '../../src/copy/plan.js';
 import { COPY } from '../../src/copy.js';
 import { MARK_ORDER } from '../../src/views/Dates/overview.js';
 import { ResultsView } from '../../src/views/Results/ResultsView.js';
+import { SearchesView } from '../../src/views/Searches/SearchesView.js';
 import { workedDates } from '../fixtures.dates.js';
 import { API, DETAIL_PAIR, DETAIL_SEARCH, definition, resultsResponse, verifiedRow } from '../fixtures.js';
+import { flightList, flightPair, pairingList, searchCard } from '../fixtures.searches.js';
+import { serveCards, serveFlightLists } from '../msw/searchesHandlers.js';
 import { server } from '../msw/server.js';
 import { renderWithProviders } from '../render.js';
 import { setViewportWidth } from '../viewport.js';
 import { findBoard, renderDates } from '../views/dates/render.js';
+import { renderInShell } from '../views/searches/support.js';
 
 // The Playwright smoke needs WP8's api and a browser, so `pnpm test` cannot run it; this proves its selectors match
 // the markup the Dates view, the date pair detail and the nav render (review arch2-001, ui-r2-002; WP19 Task 19.9),
@@ -43,14 +48,20 @@ describe('the Playwright smoke’s Dates selectors match the rendered view', () 
     expect(one(SMOKE.litCell)).toHaveAttribute('data-ringed');
     expect(one(SMOKE.litCell).dataset.cell).toBe('2027-03-14|10');
     // an unpriced cell carries its glyphs
-    expect(one(`${SMOKE.overviewCell}[data-marks~="empty"] ${SMOKE.cellGlyphs}`)).toHaveTextContent(
-      COPY.datesView.marks.glyph.empty,
+    expect(one(`${SMOKE.overviewCell}[data-marks~="no-price-shown"] ${SMOKE.cellGlyphs}`)).toHaveTextContent(
+      COPY.datesView.marks.glyph['no-price-shown'],
     );
 
     expect(one(SMOKE.legend)).toBeVisible();
     const marks = document.querySelectorAll(SMOKE.legendMark);
     expect([...marks].map((m) => m.getAttribute('data-mark'))).toEqual([...MARK_ORDER]);
-    for (const m of marks) expect(m.querySelector(SMOKE.legendGlyph)?.textContent).not.toBe('');
+    // the five marks first (spec rev 55 §11): priced is its shade, every other mark has its glyph
+    for (const m of marks)
+      if (m.getAttribute('data-mark') !== 'priced')
+        expect(m.querySelector(SMOKE.legendGlyph)?.textContent, m.getAttribute('data-mark') ?? '').not.toBe(
+          '',
+        );
+    expect(marks[0]?.querySelector(SMOKE.legendGlyph)?.className).toContain('lamp-lit');
 
     fireEvent.pointerOver(one(SMOKE.overviewTabStop));
     expect(one(SMOKE.readout)).toHaveTextContent('14 Mar 2027');
@@ -85,12 +96,14 @@ describe('the Playwright smoke’s Dates selectors match the rendered view', () 
 
 describe('the Playwright smoke’s nav and detail selectors match the rendered markup', () => {
   it('the nav: two tiers labelled by their names, the current entry with its non-colour cue, 44 px links', () => {
-    renderWithProviders(<Nav current="dates" />, { search: '?view=dates&def=def-0001' });
+    renderWithProviders(<Nav current="dates" search={{ id: 'def-0001', name: 'Worked example' }} />, {
+      search: '?view=dates&def=def-0001',
+    });
     const nav = screen.getByRole('navigation', { name: SMOKE.nav });
     const lists = SMOKE.navTiers.map((name) => within(nav).getByRole('list', { name }));
     expect(lists).toHaveLength(2);
     const current = one(SMOKE.navCurrent);
-    expect(current).toHaveTextContent(COPY.nav.dates);
+    expect(current).toHaveTextContent('Worked example');
     expect(current.className).toContain('border-b-4');
     for (const link of within(nav).getAllByRole('link')) expect(link.className).toContain('min-h-11');
   });
@@ -109,5 +122,68 @@ describe('the Playwright smoke’s nav and detail selectors match the rendered m
     expect(one(SMOKE.backToDates)).toHaveAttribute('href', expect.stringContaining('view=dates'));
     expect((await screen.findAllByTestId('airport-pair-panel')).length).toBeGreaterThan(0);
     expect(document.querySelectorAll(SMOKE.airportPairPanel).length).toBeGreaterThan(0);
+  });
+});
+
+describe('the Playwright smoke’s WP20 selectors match the rendered markup (Task 20.11)', () => {
+  it('Searches: the new-search form holds From and its Search now button, one card per search with its actions', async () => {
+    server.use(serveCards([searchCard()]));
+    renderInShell(<SearchesView />);
+    const form = await waitFor(() => one(SMOKE.newSearchForm));
+    expect(within(form).getByRole('combobox', { name: PLAN_COPY.from })).toBeInTheDocument();
+    expect(within(form).getByRole('button', { name: SMOKE.searchNow })).toBeInTheDocument();
+    await waitFor(() => expect(document.querySelectorAll(SMOKE.searchCard)).toHaveLength(1));
+    // a card's See dates, Search again, Edit and Remove
+    expect(document.querySelectorAll(SMOKE.cardAction).length).toBeGreaterThanOrEqual(4);
+    // the form is above the list in the DOM, which is what puts it first below 900 px (spec rev 55 §11)
+    expect(
+      form.compareDocumentPosition(one(SMOKE.searchCard)) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it('a search’s page: the state line is a status named "Search state", reading "Searched"', async () => {
+    renderDates({ body: workedDates() });
+    await findBoard();
+    // why: the status is empty until the search state is read from the latest run, so the smoke waits on its text
+    const status = await screen.findByRole('status', { name: SMOKE.stateLine });
+    await waitFor(() => expect(status).toHaveTextContent(COPY.searchPage.stateKind.searched));
+  });
+
+  it('flights: the unavailable line where lists cannot be read (no block), the block where one was read', async () => {
+    server.use(
+      serveFlightLists((dep, ret) => flightPair(dep, ret, { link: null }), {
+        available: false,
+        unavailableReason: 'not-configured',
+      }),
+    );
+    renderDates({ body: workedDates() });
+    await findBoard();
+    expect(await screen.findByTestId('flights-unavailable')).toBe(one(SMOKE.flightsUnavailable));
+    expect(document.querySelector(SMOKE.flightsBlock)).toBeNull();
+    expect(screen.queryByRole('link', { name: /^Open in Google Flights/ })).toBeNull();
+  });
+
+  it('flights: a read list draws the block with its Google Flights link', async () => {
+    server.use(
+      serveFlightLists((dep, ret) =>
+        flightPair(dep, ret, { list: flightList({ departureDate: dep, returnDate: ret }) }),
+      ),
+    );
+    renderDates({ body: workedDates() });
+    await findBoard();
+    await waitFor(() => expect(document.querySelector(SMOKE.flightsBlock)).not.toBeNull());
+    expect(screen.getAllByRole('link', { name: /^Open in Google Flights/ }).length).toBeGreaterThan(0);
+  });
+
+  it('flights: a list with returns draws the pairing section the smoke names (WP21 Task 21.8)', async () => {
+    server.use(
+      serveFlightLists((dep, ret) =>
+        flightPair(dep, ret, { list: pairingList({ departureDate: dep, returnDate: ret }) }),
+      ),
+    );
+    renderDates({ body: workedDates() });
+    await findBoard();
+    await waitFor(() => expect(document.querySelector(SMOKE.pairing)).not.toBeNull());
+    expect(document.querySelector(SMOKE.flightsBlock)?.contains(one(SMOKE.pairing))).toBe(true);
   });
 });

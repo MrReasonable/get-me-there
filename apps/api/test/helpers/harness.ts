@@ -14,6 +14,7 @@ import { createEngine, type Engine, LogNotifier } from '@gmt/engine';
 import type { Hono } from 'hono';
 import { afterEach } from 'vitest';
 import { type AppOptions, createApp } from '../../src/app.js';
+import { engineFor } from '../../src/bootstrap/engine.js';
 import { createLogger } from '../../src/logger.js';
 import type { AppEnv } from '../../src/routes/types.js';
 import { buildPorts, collectSecrets, loadConfigFromEnv, type Ports } from '../../src/wiring.js';
@@ -103,6 +104,11 @@ export async function createHarness(
     app?: AppOptions;
     /** WP19: a harness a file builds once in `beforeAll` and closes in `afterAll` itself (not after each test). */
     persistent?: boolean;
+    /**
+     * The app's own engine wiring (`engineFor`: the board's ranking for the flight-list step and the on-demand read),
+     * for a test that drives a read through a route; the default engine has no ranking.
+     */
+    wired?: boolean;
   } = {},
 ): Promise<Harness> {
   const config = loadConfigFromEnv(harnessEnv(opts.env));
@@ -117,7 +123,9 @@ export async function createHarness(
     ports.repos.fx.upsert([
       { date: clock.todayLondon(), currency: 'EUR', rateNano: 850_000_000, source: 'test' },
     ]);
-  const engine = createEngine({ ...ports, notifiers: [new LogNotifier(log)] });
+  const notifiers = [new LogNotifier(log)];
+  const engine =
+    opts.wired === true ? engineFor(ports, log, { notifiers }) : createEngine({ ...ports, notifiers });
   await engine.boot();
   const app = createApp(ports, engine, { webRoot: null, ...opts.app });
   let closed = false;

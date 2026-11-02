@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { camoufoxProvider } from '../../src/camoufox/index.js';
 import { readWorkerStatus } from '../../src/camoufox/preflight.js';
 import { hangUntilAborted } from '../../src/testing/network.js';
-import { makeKit, SENTINELS, testLimits } from '../fakes.js';
+import { FLIGHT_REQUEST_SECONDS, makeKit, SENTINELS, testLimits } from '../fakes.js';
 import { server } from '../support/msw.js';
 import { drive, driveError, useFakeTime } from '../support/time.js';
 
@@ -144,10 +144,20 @@ describe('readWorkerStatus (decision 76): one read, four kinds, never a ledger r
 
 describe('a refusal keeps the classifier’s kind (R33)', () => {
   it.each([
-    [401, 'provider_disabled', 'the worker refused CAMOUFOX_WORKER_KEY (the app and worker.env differ)'],
-    [403, 'provider_disabled', 'the worker refused CAMOUFOX_WORKER_KEY (the app and worker.env differ)'],
-    [503, 'provider_unavailable', 'the browser worker answered HTTP 503'],
-  ] as const)('HTTP %i: %s', async (code, skip, detail) => {
+    [
+      401,
+      'provider_disabled',
+      'the worker refused CAMOUFOX_WORKER_KEY (the app and worker.env differ)',
+      'auth',
+    ],
+    [
+      403,
+      'provider_disabled',
+      'the worker refused CAMOUFOX_WORKER_KEY (the app and worker.env differ)',
+      'auth',
+    ],
+    [503, 'provider_unavailable', 'the browser worker answered HTTP 503', 'provider-unavailable'],
+  ] as const)('HTTP %i: %s', async (code, skip, detail, reason) => {
     useFakeTime();
     server.use(http.get(STATUS_URL, () => new HttpResponse(null, { status: code })));
     const { kit, log, clock } = makeKit();
@@ -158,13 +168,15 @@ describe('a refusal keeps the classifier’s kind (R33)', () => {
       key: SENTINELS.camoufox,
       workerUrl: WORKER,
       pointOfSale: 'GB',
+      flightRequestSeconds: FLIGHT_REQUEST_SECONDS,
       sharedSettings: effectiveSharedSettings({}),
       appInstance: 'd'.repeat(36),
     });
-    expect(await preflightOf(p)).toEqual({ ok: false, skip, detail });
+    expect(await preflightOf(p)).toEqual({ ok: false, skip, detail, reason });
   });
 });
 
+// why: spec rev 56 §5.1: every read that returned a status carries the worker's flags (status() reports none: {})
 describe('the preflight compares the shared settings through sharedSettingDiffs (spec §12)', () => {
   const app = effectiveSharedSettings({});
   function provider(mode: 'list' | 'grid', sharedSettings: SharedSettings = app) {
@@ -176,6 +188,7 @@ describe('the preflight compares the shared settings through sharedSettingDiffs 
       key: SENTINELS.camoufox,
       workerUrl: WORKER,
       pointOfSale: 'GB',
+      flightRequestSeconds: FLIGHT_REQUEST_SECONDS,
       sharedSettings,
       appInstance: 'a'.repeat(64),
       grid: {
@@ -206,6 +219,8 @@ describe('the preflight compares the shared settings through sharedSettingDiffs 
         ok: false,
         skip: 'provider_disabled',
         detail: 'settings differ: CAMOUFOX_MONTHLY_PAGE_CAP, POINT_OF_SALE',
+        reason: 'settings-differ',
+        flags: {},
       });
       expect(budget.rows).toEqual([]);
     },
@@ -221,6 +236,8 @@ describe('the preflight compares the shared settings through sharedSettingDiffs 
         ok: false,
         skip: 'provider_disabled',
         detail: 'settings differ: CAMOUFOX_MIN_SPACING_SECONDS',
+        reason: 'settings-differ',
+        flags: {},
       });
       expect(budget.rows).toEqual([]);
     },
@@ -229,18 +246,20 @@ describe('the preflight compares the shared settings through sharedSettingDiffs 
     useFakeTime();
     const zero = effectiveSharedSettings({ CAMOUFOX_MIN_SPACING_SECONDS: '0' });
     server.use(http.get(STATUS_URL, () => HttpResponse.json(status({ ...grid, sharedSettings: zero }))));
-    expect(await preflightOf(provider(mode, zero).p)).toEqual({ ok: true });
+    expect(await preflightOf(provider(mode, zero).p)).toEqual({ ok: true, flags: {} });
   });
 
   it('the grid-only two differ only in grid mode', async () => {
     useFakeTime();
     const worker = effectiveSharedSettings({ CAMOUFOX_GRID_SCROLL_CAP: '12' });
     server.use(http.get(STATUS_URL, () => HttpResponse.json(status({ ...grid, sharedSettings: worker }))));
-    expect(await preflightOf(provider('list').p)).toEqual({ ok: true });
+    expect(await preflightOf(provider('list').p)).toEqual({ ok: true, flags: {} });
     expect(await preflightOf(provider('grid').p)).toEqual({
       ok: false,
       skip: 'provider_disabled',
       detail: 'settings differ: CAMOUFOX_GRID_SCROLL_CAP',
+      reason: 'settings-differ',
+      flags: {},
     });
   });
 
@@ -262,14 +281,14 @@ describe('the preflight compares the shared settings through sharedSettingDiffs 
       });
       const appSide = effectiveSharedSettings(mode === 'grid' ? { CAMOUFOX_MODE: 'grid' } : {});
       server.use(http.get(STATUS_URL, () => HttpResponse.json(status({ ...grid, sharedSettings: worker }))));
-      expect(await preflightOf(provider(mode, appSide).p)).toEqual({ ok: true });
+      expect(await preflightOf(provider(mode, appSide).p)).toEqual({ ok: true, flags: {} });
     },
   );
 
   it('a worker too old to report sharedSettings falls back to the grid-only comparison', async () => {
     useFakeTime();
     server.use(http.get(STATUS_URL, () => HttpResponse.json(status({ ...grid, gridScrollCap: 12 }))));
-    expect(await preflightOf(provider('list').p)).toEqual({ ok: true });
+    expect(await preflightOf(provider('list').p)).toEqual({ ok: true, flags: {} });
     expect(await preflightOf(provider('grid').p)).toMatchObject({
       ok: false,
       skip: 'provider_disabled',
@@ -296,6 +315,7 @@ describe('the app-instance header (decision 82)', () => {
       key: SENTINELS.camoufox,
       workerUrl: WORKER,
       pointOfSale: 'GB',
+      flightRequestSeconds: FLIGHT_REQUEST_SECONDS,
       sharedSettings: effectiveSharedSettings({}),
       appInstance: 'b'.repeat(64),
     });

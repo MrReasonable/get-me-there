@@ -201,11 +201,11 @@ describe('the status bar link (spec §11)', () => {
 
   it('is part of the bar on every view, with or without a definition', async () => {
     serve(statusReport([failing('app')]));
-    const first = renderWithProviders(<StatusBar definition={null} showRunNow={false} />);
+    const first = renderWithProviders(<StatusBar definition={null} />);
     expect(await screen.findByRole('link', { name: 'Status: app failing' })).toBeInTheDocument();
     // why: CodeRabbit — unmount the first render, or its link would satisfy the second assertion by itself
     first.unmount();
-    renderWithProviders(<StatusBar definition={definition()} showRunNow />);
+    renderWithProviders(<StatusBar definition={definition()} />);
     expect(await screen.findByRole('link', { name: 'Status: app failing' })).toBeInTheDocument();
     expect(screen.getAllByRole('link', { name: 'Status: app failing' })).toHaveLength(1);
   });

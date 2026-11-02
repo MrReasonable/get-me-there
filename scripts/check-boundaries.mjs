@@ -206,6 +206,20 @@ for (const [name, dir] of Object.entries(dirs)) {
         console.error(`${f} imports ${spec}; only apps/camoufox-worker/src/launch.ts and driver.ts may`);
         bad++;
       }
+    // why: WP21 (A20; test-r3-002): core's shared synthetic fixture is for tests only, by name in any package's src and
+    // by a relative path from core's own src outside src/testing/
+    for (const spec of specs) {
+      const byName = spec === '@gmt/core/testing' || spec?.startsWith('@gmt/core/testing/');
+      const relative =
+        name === '@gmt/core' &&
+        spec?.startsWith('.') &&
+        !f.startsWith(`${dir}/src/testing/`) &&
+        ruleForm(join(dirname(f), spec)).startsWith(`${dir}/src/testing/`);
+      if (byName || relative) {
+        console.error(`${f} imports ${spec}; only tests may`);
+        bad++;
+      }
+    }
     // why: plan decision 7 — @gmt/providers/testing is the only production-tree module that imports msw, in every package
     if (
       !(name === '@gmt/providers' && f.includes('/src/testing/')) &&

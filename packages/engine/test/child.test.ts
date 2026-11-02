@@ -138,7 +138,7 @@ describe('single-cell verification (spec §8.1 "Single-cell verification", §6.7
     expect((await h.waitForSettled(first.executionId)).status).toBe('completed');
   });
 
-  it('never pauses: a cap breach ends the child cancelled with "child cap reached", its cell skipped:budget, and a new child can start', async () => {
+  it('never pauses: a cap breach ends the child cancelled with its child-cap cause, its cell skipped:budget, and a new child can start', async () => {
     const h = createHarness();
     const def = verifying(h);
     // why: the child's cap is the floor of 6; spending all 6 before its first call makes that call breach
@@ -148,7 +148,13 @@ describe('single-cell verification (spec §8.1 "Single-cell verification", §6.7
     const r = await h.orch().verifyCell(def.id, cell);
     if (!r.ok) throw new Error(r.message);
     const e = await h.waitForSettled(r.executionId);
-    expect(e).toMatchObject({ status: 'cancelled', errorText: 'child cap reached', resumeAfter: null });
+    // why: revision 55 §8.1 — the child's cap stop stores its cause and that cause's sentence
+    expect(e).toMatchObject({
+      status: 'cancelled',
+      stopCause: { kind: 'child-cap' },
+      errorText: "Stopped at the on-demand search's limit.",
+      resumeAfter: null,
+    });
     expect(h.outcomes(e.id, { stage: 'verification' })).toEqual([
       expect.objectContaining({ status: 'skipped', reason: 'budget' }),
     ]);

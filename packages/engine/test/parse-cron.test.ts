@@ -1,5 +1,5 @@
 import { isValidTimeZone } from '@gmt/core';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   countFirings,
   firingsBetween,
@@ -69,6 +69,8 @@ describe('parseCron (spec §8.2: the sole semantic validator; sub-hourly rejecte
     ['0 5 * *', 'five fields'],
     ['0 0 5 * * 1', 'five fields'],
     ['0 25 * * *', 'not a valid schedule'],
+    ['0 0 30 2 *', 'never fires'],
+    ['0 6 31 4 *', 'never fires'],
   ])('rejects %s', (expr, why) => {
     expect(reason(expr)).toContain(why);
   });
@@ -85,6 +87,18 @@ describe('previousFiring and runsPerMonth', () => {
       previousFiring('0 5 * * 1', 'Europe/London', new Date('2026-10-14T09:00:00.000Z'))?.toISOString(),
     ).toBe('2026-10-12T04:00:00.000Z');
     expect(previousFiring('*/5 * * * *', 'Europe/London', new Date('2026-10-14T09:00:00.000Z'))).toBeNull();
+  });
+  it('the last firing is strictly before the whole second of the instant', () => {
+    const before = (at: string) => previousFiring('0 5 * * 1', 'Europe/London', new Date(at))?.toISOString();
+    expect(before('2026-10-12T04:00:00.999Z')).toBe('2026-10-05T04:00:00.000Z');
+    expect(before('2026-10-12T04:00:01.000Z')).toBe('2026-10-12T04:00:00.000Z');
+  });
+  it('a 29 February schedule finds its last firing however many years back, 2100 being no leap year', () => {
+    const before = (at: string) => previousFiring('0 6 29 2 *', 'Europe/London', new Date(at))?.toISOString();
+    expect(before('2027-03-01T00:00:00.000Z')).toBe('2024-02-29T06:00:00.000Z');
+    expect(before('2024-01-15T00:00:00.000Z')).toBe('2020-02-29T06:00:00.000Z');
+    expect(before('2024-03-01T00:00:00.000Z')).toBe('2024-02-29T06:00:00.000Z');
+    expect(before('2103-03-01T00:00:00.000Z')).toBe('2096-02-29T06:00:00.000Z');
   });
   it('is firings over the next 365 days ÷ 12, unrounded (ruling 12: weekly ≈ 4.33, as the spec §8.2 cadence table)', () => {
     const from = new Date('2026-10-14T09:00:00.000Z');
@@ -243,5 +257,103 @@ describe('the cron text a count and a parse accept (review T2 kills)', () => {
     const to = new Date('2026-12-14T09:00:00.000Z');
     expect(firingsBetween('*/5 * * * *', 'Europe/London', from, to)).toEqual([]);
     expect(countFirings('0 6 * * *', 'No/Such_Zone', from, to)).toBe(0);
+  });
+});
+
+describe('countFirings and firingsBetween at their edges (the work a count takes, and croner’s last firing)', () => {
+  const at = (x: string) => new Date(x);
+
+  it('the list and the count end where croner computes no next firing (none from the year 3000)', () => {
+    expect(
+      iso(firingsBetween('0 * * * *', 'UTC', at('2999-12-31T21:30:00.000Z'), at('3000-01-01T02:00:00.000Z'))),
+    ).toEqual(['2999-12-31T22:00:00.000Z', '2999-12-31T23:00:00.000Z']);
+    expect(
+      countFirings('0 * * * *', 'UTC', at('2999-12-31T00:00:00.000Z'), at('2999-12-31T23:59:59.999Z')),
+    ).toBe(24);
+  });
+
+  it('a whole day after the first is counted without stepping its firings: from midnight to the last millisecond, each further day costs one croner step', () => {
+    const stepsOver = (days: number) => {
+      const meter = { steps: 0 };
+      const from = at('2027-01-04T00:00:00.000Z');
+      const n = countFirings(
+        '0 * * * *',
+        'Europe/London',
+        from,
+        new Date(from.getTime() + days * 86_400_000 - 1),
+        meter,
+      );
+      expect(n).toBe(24 * days);
+      return meter.steps;
+    };
+    const one = stepsOver(1);
+    expect(stepsOver(2)).toBe(one + 1);
+    expect(stepsOver(3)).toBe(one + 2);
+  });
+
+  it('a range inside the 3 h round a clock change is stepped in the zone itself: one croner step a firing, and one that finds none after', () => {
+    const meter = { steps: 0 };
+    // why: London springs forward at 01:00Z on 28 March 2027; 00:00Z (00:00 GMT), 01:00Z and 02:00Z (02:00, 03:00 BST)
+    const n = countFirings(
+      '0 * * * *',
+      'Europe/London',
+      at('2027-03-28T00:00:00.000Z'),
+      at('2027-03-28T02:00:00.000Z'),
+      meter,
+    );
+    expect(n).toBe(3);
+    expect(meter.steps).toBe(n + 1);
+  });
+
+  it('a firing exactly 3 h before a clock change is counted once, by the stepped side', () => {
+    const f = at('2027-03-27T00:00:00.000Z');
+    const t = at('2027-03-28T01:30:00.000Z');
+    expect(iso(firingsBetween('0 22 * * *', 'Europe/London', f, t))).toEqual(['2027-03-27T22:00:00.000Z']);
+    expect(countFirings('0 22 * * *', 'Europe/London', f, t)).toBe(1);
+  });
+
+  it('a range that ends half a minute after a clock change finds the change and counts as firingsBetween does', () => {
+    const f = at('2027-03-28T00:00:00.000Z');
+    const t = at('2027-03-28T01:00:30.000Z');
+    expect(iso(firingsBetween('0 * * * *', 'Europe/London', f, t))).toEqual([
+      '2027-03-28T00:00:00.000Z',
+      '2027-03-28T01:00:00.000Z',
+    ]);
+    expect(countFirings('0 * * * *', 'Europe/London', f, t)).toBe(2);
+  });
+});
+
+describe('a zero offset printed as bare "GMT" (older CLDR data)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+  it('is counted at the fixed zero offset, a day at a time, as "GMT+00:00" is', () => {
+    const parts = Intl.DateTimeFormat.prototype.formatToParts;
+    vi.spyOn(Intl.DateTimeFormat.prototype, 'formatToParts').mockImplementation(function (
+      this: Intl.DateTimeFormat,
+      date,
+    ) {
+      return parts
+        .call(this, date)
+        .map((p) => (p.type === 'timeZoneName' && p.value === 'GMT+00:00' ? { ...p, value: 'GMT' } : p));
+    });
+    const meter = { steps: 0 };
+    const from = new Date('2027-01-04T00:00:00.000Z');
+    const to = new Date(from.getTime() + 10 * 86_400_000 - 1);
+    expect(countFirings('0 * * * *', 'Europe/London', from, to, meter)).toBe(240);
+    // why: stepped firing by firing it would take 241 steps; at the fixed offset the first day is stepped, then one a day
+    expect(meter.steps).toBeLessThan(40);
+  });
+});
+
+describe('a zone whose offset has seconds (Africa/Monrovia, GMT−00:44:30 until 1972)', () => {
+  it('counts as firingsBetween lists, to the half minute', () => {
+    const from = new Date('1970-01-01T00:00:00.000Z');
+    // why: local midnight is 00:44:30 UTC, so the tenth day's firing falls just after this end and counts not at all
+    const to = new Date('1970-01-10T00:44:15.000Z');
+    const listed = firingsBetween('0 0 * * *', 'Africa/Monrovia', from, to);
+    expect(listed.map((d) => d.toISOString()).slice(0, 1)).toEqual(['1970-01-01T00:44:30.000Z']);
+    expect(listed).toHaveLength(9);
+    expect(countFirings('0 0 * * *', 'Africa/Monrovia', from, to)).toBe(9);
   });
 });

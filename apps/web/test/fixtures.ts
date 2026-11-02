@@ -7,6 +7,7 @@ import type {
   CoverageResponse,
   DefinitionResponse,
   Estimate,
+  EstimateResponse,
   ExecutionResponse,
   ExecutionSummary,
   ProvidersResponse,
@@ -293,6 +294,31 @@ export function resultsResponse(
   });
 }
 
+/**
+ * The estimate routes' answer (spec §10): the estimate, its budget fit and what it asks: 126 date pairs all covered, no
+ * confirmation needed, no billed calls and no browser pages (the fixture's lines are Travelpayouts and SearchApi).
+ */
+export function estimateResponse(
+  over: Partial<In<typeof apiContract.estimateResponseSchema>> = {},
+): EstimateResponse {
+  return apiContract.estimateResponseSchema.parse({
+    estimate: estimate(),
+    budgetFit: {
+      fits: true,
+      runsPerMonth: 4,
+      perScope: [{ scope: 'provider-month:searchapi', estimated: 616, cap: 10000, fits: true }],
+    },
+    datePairs: 126,
+    datePairsCovered: 126,
+    datePairsPartly: 0,
+    datePairsReused: 0,
+    softConfirm: null,
+    billedCalls: [],
+    monthlyPages: null,
+    ...over,
+  });
+}
+
 export function estimate(over: Partial<In<typeof apiContract.estimateSchema>> = {}): Estimate {
   return apiContract.estimateSchema.parse({
     cells: 126,
@@ -393,6 +419,20 @@ export function usage(
 
 const OCTOBER = ['2026-10-01T00:00:00.000Z', '2026-11-01T00:00:00.000Z'] as const;
 
+/** `GET /budget`: the status bar's always-on month line (£32 of £35 by default). */
+export function budgetResponse(
+  over: Partial<In<typeof apiContract.budgetResponseSchema>> = {},
+): z.output<typeof apiContract.budgetResponseSchema> {
+  return apiContract.budgetResponseSchema.parse({
+    scopes: [usage('global-month', 0, 35_000_000, 32_000_000)],
+    monthlyCapMicroGbp: 35_000_000,
+    monthlyCapPence: 3500,
+    fixedFeesMicroGbp: 0,
+    ceilingNote: 'a note',
+    ...over,
+  });
+}
+
 export function providersResponse(
   over: Partial<In<typeof apiContract.providersResponseSchema>> = {},
 ): ProvidersResponse {
@@ -468,12 +508,10 @@ export function execution(
     cell: null,
     status: 'running',
     stage: 'discovery',
-    reason: null,
     resumeAfter: null,
     trigger: 'manual',
     startedAt: '2026-10-14T14:00:00.000Z',
     finishedAt: null,
-    errorText: null,
     scheduledFor: null,
     isCatchUp: false,
     skipCode: null,
@@ -499,6 +537,10 @@ export function execution(
     parityBreak: false,
     overrun: false,
     disabledProviders: [],
+    // why: revision 55 §10 — no stop on a running row, no flight plan stored, no estimate of the finish here
+    stop: null,
+    estimatedFinishAt: null,
+    flights: null,
     ...over,
   });
 }
@@ -684,6 +726,10 @@ export function datePairFigure(
     arriveBack: '2027-03-29T07:00',
     fromEarlierSearch: false,
     cheaperCached: null,
+    gridPrice: null,
+    pairing: null,
+    pairingRead: 'not-read',
+    listReason: null,
     ...over,
   });
 }

@@ -7,6 +7,8 @@ import {
   type IsoDateTime,
   PAUSED_STATUSES,
   RESUMABLE_STATUSES,
+  type StopCause,
+  stopText,
   stripUrlsInText,
 } from '@gmt/core';
 import Database from 'better-sqlite3';
@@ -18,11 +20,19 @@ import {
   oneOf,
   readDate,
   readEstimate,
+  readFlightLists,
   readIata,
   readNullableTime,
+  readStopCause,
   readTime,
 } from '../internal/read.js';
-import { assertIsoDateTime, assertNullableIsoDateTime, RowRejected } from '../internal/validate.js';
+import {
+  assertIsoDateTime,
+  assertNullableIsoDateTime,
+  encodeFlightLists,
+  encodeStopCause,
+  RowRejected,
+} from '../internal/validate.js';
 import { ACTIVE_STATUS_SQL } from '../schema/checks.js';
 import type { ExecutionCreateInput, ExecutionPatch } from '../types.js';
 
@@ -51,6 +61,8 @@ interface ExecutionDbRow {
   browser_window_end: string | null;
   skip_code: string | null;
   paused_at: string | null;
+  stop_cause_json: string | null;
+  flight_lists_json: string | null;
 }
 
 function toExecution(r: ExecutionDbRow): Execution {
@@ -90,15 +102,37 @@ function toExecution(r: ExecutionDbRow): Execution {
     browserWindowEnd: readNullableTime(`${c}.browser_window_end`, r.browser_window_end),
     skipCode: nullableOneOf(`${c}.skip_code`, SKIP_CODES, r.skip_code),
     pausedAt: readNullableTime(`${c}.paused_at`, r.paused_at),
+    stopCause: r.stop_cause_json === null ? null : readStopCause(`${c}.stop_cause_json`, r.stop_cause_json),
+    flightLists:
+      r.flight_lists_json === null ? null : readFlightLists(`${c}.flight_lists_json`, r.flight_lists_json),
   };
 }
 
 /**
+ * The causes whose sentence states no fact of the run or the install (`stopText` words them the same for every zone,
+ * mode and schedule), so the repository can write their `error_text` itself: the cancels and supersedes `cancelPaused`
+ * makes, and the boot sweep's `interrupted`.
+ */
+export type FixedStopCause = Extract<
+  StopCause,
+  { kind: 'cancelled' | 'superseded' | 'interrupted' | 'never-started' }
+>;
+
+/** The sentence a fixed cause is stored with in `error_text` (spec revision 55 §8.1: the cause's own sentence). */
+export function fixedStopSentence(cause: FixedStopCause): string {
+  return stopText(cause, { tz: 'UTC', mode: 'container', scheduled: false }).sentence;
+}
+
+/** The boot sweep's cause (spec revision 55 §8.1 "Boot order": the sweep's UPDATE writes it). */
+const INTERRUPTED: FixedStopCause = { kind: 'interrupted' };
+
+/**
  * Spec §8.1 "Resume is a compare-and-set": the tick, the one-shot job, boot auto-resume and `/resume` all run this one
  * statement; exactly one caller sees `changes = 1`. It also clears the one-shot schedule, a stale cancel flag and the
- * finish time in the same step (dm-004), so a resumed run is never both running and cancel-requested.
+ * finish time in the same step (dm-004), so a resumed run is never both running and cancel-requested. Revision 55 §7: it
+ * clears the stop cause too, so a run paused, resumed and completed shows none.
  */
-export const CLAIM_RESUME_SQL = `UPDATE search_executions SET status = 'running', resume_after = NULL, cancel_requested = 0, finished_at = NULL, paused_at = NULL WHERE id = ? AND status IN (${RESUMABLE_STATUSES.map((s) => `'${s}'`).join(', ')})`;
+export const CLAIM_RESUME_SQL = `UPDATE search_executions SET status = 'running', resume_after = NULL, cancel_requested = 0, finished_at = NULL, paused_at = NULL, stop_cause_json = NULL WHERE id = ? AND status IN (${RESUMABLE_STATUSES.map((s) => `'${s}'`).join(', ')})`;
 
 /** ExecutionsRepo.oldestInFlight's read, exported so a test can pin its query plan to the in-flight index. */
 export const OLDEST_IN_FLIGHT_SQL = `SELECT id, definition_id, is_child, started_at, created_at FROM search_executions
@@ -115,6 +149,8 @@ const PATCH_COLUMNS = [
   ['estimate', 'estimate_json'],
   ['snapshot', 'definition_snapshot_json'],
   ['browserWindowEnd', 'browser_window_end'],
+  ['stopCause', 'stop_cause_json'],
+  ['flightLists', 'flight_lists_json'],
 ] as const satisfies ReadonlyArray<readonly [keyof ExecutionPatch, string]>;
 
 function encode(key: keyof ExecutionPatch, patch: ExecutionPatch): unknown {
@@ -141,8 +177,15 @@ function encode(key: keyof ExecutionPatch, patch: ExecutionPatch): unknown {
       return JSON.stringify(patch.snapshot);
     case 'stage':
       return patch.stage ?? null;
+    case 'stopCause':
+      return encodeStopCause('stop_cause_json', patch.stopCause);
+    case 'flightLists':
+      return encodeFlightLists('flight_lists_json', patch.flightLists);
   }
 }
+
+/** Revision 55 §7: the statuses whose write clears the stored stop cause (a run that is not stopped has none). */
+const UNSTOPPED: readonly ExecutionStatus[] = ['pending', 'running', 'completed'];
 
 const PAUSED_SQL = PAUSED_STATUSES.map((st) => `'${st}'`).join(', ');
 
@@ -187,6 +230,10 @@ export class ExecutionsRepo {
   private insert(input: ExecutionCreateInput, firing: IsoDateTime | null): Execution | null {
     if (input.isChild !== (input.cell !== null))
       throw new RowRejected('child-cell', 'a child execution carries a cell and a parent does not');
+    // why: revision 55 §8.1 — a skipped row is written with its cause (the engine's skips always pass one); a pending or
+    // running row is not stopped, so it can carry none
+    if (input.stopCause !== undefined && input.stopCause !== null && !SKIPPED.includes(input.status))
+      throw new RowRejected('stop-cause', 'only a skipped row is written with a stop cause');
     assertNullableIsoDateTime('scheduledFor', firing);
     assertNullableIsoDateTime('browserWindowEnd', input.browserWindowEnd ?? null);
     const id = randomUUID();
@@ -201,8 +248,8 @@ export class ExecutionsRepo {
     try {
       changes = this.db.raw
         .prepare(
-          `INSERT INTO search_executions (id, definition_id, is_child, child_origin, child_destination, child_departure_date, child_return_date, definition_snapshot_json, trigger, status, estimate_json, created_at, started_at, finished_at, scheduled_for, is_catch_up, browser_window_end, skip_code)
-           VALUES (@id, @definitionId, @isChild, @o, @d, @dep, @ret, @snapshot, @trigger, @status, @estimate, @now, @startedAt, @finishedAt, @scheduledFor, @isCatchUp, @windowEnd, @skipCode)${onConflict}`,
+          `INSERT INTO search_executions (id, definition_id, is_child, child_origin, child_destination, child_departure_date, child_return_date, definition_snapshot_json, trigger, status, estimate_json, created_at, started_at, finished_at, scheduled_for, is_catch_up, browser_window_end, skip_code, stop_cause_json, error_text)
+           VALUES (@id, @definitionId, @isChild, @o, @d, @dep, @ret, @snapshot, @trigger, @status, @estimate, @now, @startedAt, @finishedAt, @scheduledFor, @isCatchUp, @windowEnd, @skipCode, @stopCause, @errorText)${onConflict}`,
         )
         .run({
           id,
@@ -223,6 +270,11 @@ export class ExecutionsRepo {
           isCatchUp: input.isCatchUp === true ? 1 : 0,
           windowEnd: input.browserWindowEnd ?? null,
           skipCode: input.skipCode ?? null,
+          stopCause: encodeStopCause('stop_cause_json', input.stopCause),
+          errorText:
+            input.errorText === null || input.errorText === undefined
+              ? null
+              : stripUrlsInText(input.errorText),
         }).changes;
     } catch (err) {
       // why: the partial unique indexes (spec §7 one active parent per definition, one active child per cell) are the
@@ -405,16 +457,40 @@ export class ExecutionsRepo {
   /**
    * Spec §8.2 rev 36: cancels a run whose pass is not running (paused or interrupted, PAUSED_STATUSES) in one guarded
    * statement, with its finish time and why; false when it is no longer in one of them (a resume claimed it first). The
-   * scheduled start that supersedes a paused catch-up runs it inside its own immediate transaction.
+   * scheduled start that supersedes a paused catch-up or a stopped run (revision 55 §8.2), and a fresh start over a
+   * stopped run (Search again's `replaceStopped`), run it inside their own immediate transaction. Revision 55 §8.1: the
+   * cause is stored in `stop_cause_json` and its sentence in `error_text`.
    */
-  cancelPaused(id: string, errorText: string): boolean {
+  cancelPaused(id: string, cause: Extract<StopCause, { kind: 'cancelled' | 'superseded' }>): boolean {
     return (
       this.db.raw
         .prepare(
-          `UPDATE search_executions SET status = 'cancelled', finished_at = @now, resume_after = NULL, error_text = @errorText WHERE id = @id AND status IN (${PAUSED_SQL})`,
+          `UPDATE search_executions SET status = 'cancelled', finished_at = @now, resume_after = NULL, error_text = @errorText,
+             stop_cause_json = @cause WHERE id = @id AND status IN (${PAUSED_SQL})`,
         )
-        .run({ id, now: this.clock.now(), errorText: stripUrlsInText(errorText) }).changes === 1
+        .run({
+          id,
+          now: this.clock.now(),
+          errorText: fixedStopSentence(cause),
+          cause: encodeStopCause('stop_cause_json', cause),
+        }).changes === 1
     );
+  }
+
+  /**
+   * Spec revision 55 §10 (the cards): the newest parent run of every definition (by `created_at`, then rowid), children
+   * and tool runs left out, in one statement (ROW_NUMBER over the parents of each definition).
+   */
+  latestParentPerDefinition(): Map<string, Execution> {
+    const rows = this.db.raw
+      .prepare<[], ExecutionDbRow>(
+        `SELECT * FROM (
+           SELECT e.*, ROW_NUMBER() OVER (PARTITION BY definition_id ORDER BY created_at DESC, rowid DESC) AS rn
+           FROM search_executions e WHERE is_child = 0 AND trigger <> 'tool'
+         ) WHERE rn = 1`,
+      )
+      .all();
+    return new Map(rows.map((r) => [r.definition_id, toExecution(r)]));
   }
 
   setStatus(id: string, status: ExecutionStatus, patch: ExecutionPatch = {}): void {
@@ -429,20 +505,24 @@ export class ExecutionsRepo {
     this.apply(id, null, { cancelRequested: true });
   }
 
-  /** Spec §8.1 "Boot order": `running` and `pending` created before this boot become `interrupted`, counting a crash restart. */
+  /**
+   * Spec §8.1 "Boot order": `running` and `pending` created before this boot become `interrupted`, counting a crash
+   * restart; revision 55 §8.1: the UPDATE itself writes the `interrupted` cause and its sentence.
+   */
   bootSweep(bootAt: IsoDateTime): { interrupted: string[] } {
     assertIsoDateTime('bootAt', bootAt);
     const rows = this.db.raw
-      .prepare<[string], { id: string }>(
+      .prepare<Record<string, unknown>, { id: string }>(
         // why: decision 79 (review S1) — a run the process lost stopped running at its last recorded activity (its
         // newest ledger row, else its start), not at this boot, so a firing during the outage finds it paused there
         `UPDATE search_executions SET status = 'interrupted', auto_resume_count = auto_resume_count + 1,
+           stop_cause_json = @cause, error_text = @errorText,
            paused_at = COALESCE(paused_at,
              (SELECT MAX(COALESCE(r.finished_at, r.started_at)) FROM provider_requests r WHERE r.execution_id = search_executions.id),
              started_at, created_at)
-         WHERE status = 'running' OR (status = 'pending' AND created_at < ?) RETURNING id`,
+         WHERE status = 'running' OR (status = 'pending' AND created_at < @bootAt) RETURNING id`,
       )
-      .all(bootAt);
+      .all({ bootAt, cause: JSON.stringify(INTERRUPTED), errorText: fixedStopSentence(INTERRUPTED) });
     return { interrupted: rows.map((r) => r.id) };
   }
 
@@ -477,6 +557,9 @@ export class ExecutionsRepo {
         sets.push('paused_at = COALESCE(paused_at, @pausedNow)');
         params.pausedNow = this.clock.now();
       } else if (status === 'running' || status === 'pending') sets.push('paused_at = NULL');
+      // why: revision 55 §7 — a row that is not stopped has no cause: the write that makes it pending, running or
+      // completed clears whatever an earlier stop stored
+      if (UNSTOPPED.includes(status) && !('stopCause' in patch)) sets.push('stop_cause_json = NULL');
     }
     for (const [key, column] of PATCH_COLUMNS) {
       if (!(key in patch)) continue;

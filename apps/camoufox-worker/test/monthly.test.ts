@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { asIsoDate, asIsoDateTime, billingMonthWindow, fixedClock, type IsoDateTime } from '@gmt/core';
 import { beforeEach, describe, expect, it } from 'vitest';
@@ -65,6 +65,7 @@ describe('admit and settle (pure)', () => {
     expect(admit(counts(MARCH, 1499, 0), CAPS, NOW, 0)).toEqual({
       kind: 'ok',
       scrollAllowance: 0,
+      pagesReserved: 1,
       reserved: counts(MARCH, 1500, 0),
     });
     expect(admit(counts(MARCH, 0, 0), { ...CAPS, pages: 0 }, NOW, 0)).toEqual(capReached(0, undefined, 0));
@@ -74,12 +75,14 @@ describe('admit and settle (pure)', () => {
     expect(admit(counts(MARCH, 3, 5990), CAPS, NOW, 30)).toEqual({
       kind: 'ok',
       scrollAllowance: 10,
+      pagesReserved: 1,
       reserved: counts(MARCH, 4, 6000),
     });
     expect(admit(counts(MARCH, 3, 100), CAPS, NOW, 30)).toMatchObject({ scrollAllowance: 30 });
     expect(admit(counts(MARCH, 3, 6000), CAPS, NOW, 30)).toEqual({
       kind: 'ok',
       scrollAllowance: 0,
+      pagesReserved: 1,
       reserved: counts(MARCH, 4, 6000),
     });
     expect(admit(counts(MARCH, 3, 6100), CAPS, NOW, 30)).toMatchObject({ scrollAllowance: 0 });
@@ -104,6 +107,15 @@ describe('admit and settle (pure)', () => {
     // why: a window that ended no later than now's start is over: zero
     expect(admit(october, caps15, at('2027-11-15T00:00:00.000Z'), 0)).toMatchObject({
       reserved: { windowStart: '2027-11-15T00:00:00.000Z', pages: 1 },
+    });
+  });
+  it('stored counts with this window’s start but an earlier end carry on to this window’s end', () => {
+    const short = counts(MARCH, 5, 7, '2027-03-15T00:00:00.000Z');
+    expect(admit(short, CAPS, NOW, 0)).toEqual({
+      kind: 'ok',
+      scrollAllowance: 0,
+      pagesReserved: 1,
+      reserved: counts(MARCH, 6, 7),
     });
   });
   it('a clock stepped back across a boundary keeps the later window’s counts and its end', () => {
@@ -137,6 +149,36 @@ describe('admit and settle (pure)', () => {
     expect(settle(r, 10, 99)).toEqual(r);
     expect(settle(r, 10, -3)).toEqual(counts(MARCH, 4, 5990));
     expect(settle(r, 0, 0)).toEqual(r);
+  });
+  // why: WP21 Task 21.0 (preflight P3, ruling): a request that may load several documents reserves its whole worst case
+  // when the cap leaves it, otherwise one page (the first view still loads; the further loads are skipped)
+  it('a request for several pages reserves them all when they fit, otherwise one, and refuses only at the cap', () => {
+    const cap = (used: number) => counts(MARCH, used, 0);
+    expect(admit(cap(1496), CAPS, NOW, 0, 4)).toEqual({
+      kind: 'ok',
+      scrollAllowance: 0,
+      pagesReserved: 4,
+      reserved: counts(MARCH, 1500, 0),
+    });
+    expect(admit(cap(1498), CAPS, NOW, 0, 2)).toMatchObject({ pagesReserved: 2, reserved: { pages: 1500 } });
+    expect(admit(cap(1498), CAPS, NOW, 0, 4)).toMatchObject({ pagesReserved: 1, reserved: { pages: 1499 } });
+    expect(admit(cap(1497), CAPS, NOW, 0, 4)).toMatchObject({ pagesReserved: 1, reserved: { pages: 1498 } });
+    expect(admit(cap(1499), CAPS, NOW, 0, 4)).toMatchObject({ pagesReserved: 1, reserved: { pages: 1500 } });
+    expect(admit(cap(1500), CAPS, NOW, 0, 4)).toEqual(capReached(1500));
+    expect(admit(cap(3), CAPS, NOW, 0)).toMatchObject({ pagesReserved: 1, reserved: { pages: 4 } });
+  });
+  // why: WP21 Task 21.0 (preflight P4): the pages a request did not load are given back, never more than it reserved
+  it('settle gives back the reserved pages not loaded, never above the reservation', () => {
+    const r = counts(MARCH, 10, 40);
+    expect(settle(r, 0, 0, 4, 1)).toEqual(counts(MARCH, 7, 40));
+    expect(settle(r, 0, 0, 4, 2)).toEqual(counts(MARCH, 8, 40));
+    expect(settle(r, 0, 0, 4, 4)).toEqual(r);
+    expect(settle(r, 0, 0, 4, 6)).toEqual(r);
+    expect(settle(r, 0, 0, 4, 0)).toEqual(counts(MARCH, 6, 40));
+    expect(settle(r, 0, 0, 4, -1)).toEqual(counts(MARCH, 6, 40));
+    // why: the default is one page reserved and loaded, the settle of every list and grid page today
+    expect(settle(r, 0, 0)).toEqual(r);
+    expect(settle(r, 10, 4, 4, 1)).toEqual(counts(MARCH, 7, 34));
   });
 });
 
@@ -247,6 +289,31 @@ describe('the counts file (fail closed)', () => {
     counter(empty).settle(a.reserved, 30, 0);
     expect(existsSync(join(empty, MONTHLY_FILE))).toBe(false);
   });
+  it('check(0, 4) reserves 4 with 4 left, 1 with 2 or 1 left, and refuses with none (WP21 Task 21.0)', () => {
+    const left = (n: number) => {
+      const d = tmpDir();
+      writeFileSync(join(d, MONTHLY_FILE), JSON.stringify(counts('2027-03-01T00:00:00.000Z', 1500 - n, 0)), {
+        mode: 0o600,
+      });
+      return counter(d);
+    };
+    expect(left(4).check(0, 4)).toMatchObject({ kind: 'ok', pagesReserved: 4, reserved: { pages: 1500 } });
+    expect(left(2).check(0, 2)).toMatchObject({ kind: 'ok', pagesReserved: 2, reserved: { pages: 1500 } });
+    expect(left(2).check(0, 4)).toMatchObject({ kind: 'ok', pagesReserved: 1, reserved: { pages: 1499 } });
+    expect(left(1).check(0, 4)).toMatchObject({ kind: 'ok', pagesReserved: 1, reserved: { pages: 1500 } });
+    expect(left(0).check(0, 4)).toMatchObject({ kind: 'monthly-cap', cap: 1500, used: 1500 });
+  });
+  it('settles the pages loaded, only over its own window (WP21 Task 21.0)', async () => {
+    const d = tmpDir();
+    const c = counter(d);
+    const a = await c.admit(0, 4);
+    if (a.kind !== 'ok') throw new Error('admitted');
+    expect(await readCounts(d)).toEqual(counts('2027-03-01T00:00:00.000Z', 4, 0));
+    c.settle(a.reserved, a.scrollAllowance, 0, a.pagesReserved, 2);
+    expect(await readCounts(d)).toEqual(counts('2027-03-01T00:00:00.000Z', 2, 0));
+    c.settle(counts('2027-02-01T00:00:00.000Z', 4, 0), 0, 0, 4, 1);
+    expect(await readCounts(d)).toEqual(counts('2027-03-01T00:00:00.000Z', 2, 0));
+  });
   it('counts of an earlier window report zero for this one, and the next page starts it afresh', async () => {
     const d = tmpDir();
     writeFileSync(join(d, MONTHLY_FILE), JSON.stringify(counts('2027-02-01T00:00:00.000Z', 1500, 6000)), {
@@ -279,6 +346,10 @@ describe('the counts file (fail closed)', () => {
       scrolls: 0,
       readable: true,
     });
+  });
+  it('the counter reports the caps it admits by', () => {
+    const caps = { pages: 40, scrolls: 300, billingDay: 15 };
+    expect(counter(tmpDir(), caps).caps).toEqual(caps);
   });
   it('a rewrite replaces the file with this window’s figures, 0600, whatever it held', () => {
     const d = tmpDir();
@@ -337,7 +408,10 @@ describe('the counts and instances files’ shapes (fail closed)', () => {
     const d = tmpDir();
     writeFileSync(join(d, MONTHLY_FILE), text, { mode: 0o600 });
     expect(await readCounts(d)).toEqual({ refused: 'unreadable' });
-    expect(new MonthlyCounter({ dir: d, caps: CAPS, clock }).status().readable).toBe(false);
+    expect(new MonthlyCounter({ dir: d, caps: CAPS, clock }).status()).toEqual({
+      ...counts('2027-03-01T00:00:00.000Z', 0, 0),
+      readable: false,
+    });
   });
   it('a 0400 file is read (no wider than 0600), and a new install’s first window is this one', async () => {
     const d = tmpDir();
@@ -349,6 +423,7 @@ describe('the counts and instances files’ shapes (fail closed)', () => {
     expect(fresh.check(4)).toEqual({
       kind: 'ok',
       scrollAllowance: 4,
+      pagesReserved: 1,
       reserved: counts('2027-03-01T00:00:00.000Z', 1, 4),
     });
   });
@@ -366,6 +441,7 @@ describe('the counts and instances files’ shapes (fail closed)', () => {
       `{"windowStart":"2027-03-01T00:00:00.000Z","ids":["${'c'.repeat(64)}",7]}`,
       `{"windowStart":"2027-03-01T00:00:00.000Z","ids":["${'c'.repeat(64)}","x${'c'.repeat(64)}"]}`,
       `{"windowStart":"2027-03-01T00:00:00.000Z","ids":["${'c'.repeat(65)}"]}`,
+      `{"windowStart":"2027-03-01T00:00:00.000Z","ids":["${'c'.repeat(64)}",["${'d'.repeat(64)}"]]}`,
     ]) {
       writeFileSync(join(d, 'app-instances.json'), text);
       expect(i.status().count, text).toBe(0);
@@ -390,6 +466,10 @@ describe('a new install’s first page', () => {
     writeFileSync(join(d, 'pacer.json'), '{}', { mode: 0o600 });
     expect(c.check(0)).toMatchObject({ kind: 'ok' });
     expect(c.status().readable).toBe(true);
+    // why: a counts file that turns up unreadable is refused, whatever the counter saw before
+    writeFileSync(join(d, MONTHLY_FILE), 'zeros', { mode: 0o600 });
+    expect(c.check(0)).toEqual({ kind: 'counts-unreadable', problem: 'unreadable' });
+    rmSync(join(d, MONTHLY_FILE));
     // why: another counter (another process) that never saw the new install reads an upgrade's missing file
     expect(
       new MonthlyCounter({ dir: d, caps: CAPS, clock: fixedClock(at('2027-03-10T12:00:00.000Z')) }).check(0),

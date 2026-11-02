@@ -1,4 +1,4 @@
-import type { IsoDateTime, ProviderId, Stage } from '@gmt/core';
+import { FLIGHT_LIST_ENDPOINT_PATH, type IsoDateTime, type ProviderId, type Stage } from '@gmt/core';
 import type { Db } from '../client.js';
 import { PROVIDER_IDS, STAGES } from '../internal/enums.js';
 import { oneOf, readTime } from '../internal/read.js';
@@ -6,7 +6,14 @@ import { assertIsoDateTime } from '../internal/validate.js';
 
 /** Distinct tiles fetched upstream on a first attempt (ruling 7); cache hits are counted separately so parity = tiles + cacheHits. */
 const TILE_EXPR = `COUNT(DISTINCT CASE WHEN tile_index IS NOT NULL AND http_attempt = 1 AND outcome <> 'cache_hit' THEN provider_id || ':' || tile_index END)`;
-const COUNTS = `COALESCE(SUM(outcome <> 'cache_hit'), 0) AS calls, COALESCE(SUM(cost_micro_gbp), 0) AS cost, ${TILE_EXPR} AS tiles, COALESCE(SUM(outcome = 'cache_hit'), 0) AS cacheHits, COALESCE(SUM(scroll_count), 0) AS scrolls`;
+/**
+ * `calls`: each upstream attempt counts 1, except a camoufox page row, which counts its pages (`COALESCE(page_count, 1)`,
+ * spec rev 56 §7, as the guard's page scopes count it). A `no-page` row (page_count NULL) still counts 1 here, where the
+ * guard counts it 0, so a camoufox line equals the guard's page usage only when the run has no `no-page` rows; neither
+ * a pages nor an attempts figure should be read from it alone.
+ */
+const CALLS = `COALESCE(SUM(CASE WHEN outcome = 'cache_hit' THEN 0 ELSE COALESCE(page_count, 1) END), 0)`;
+const COUNTS = `${CALLS} AS calls, COALESCE(SUM(cost_micro_gbp), 0) AS cost, ${TILE_EXPR} AS tiles, COALESCE(SUM(outcome = 'cache_hit'), 0) AS cacheHits, COALESCE(SUM(scroll_count), 0) AS scrolls`;
 interface CountsRow {
   calls: number;
   cost: number;
@@ -20,8 +27,25 @@ export class LedgerRepo {
   constructor(private readonly db: Db) {}
 
   /**
-   * Actuals for one execution, total and per (provider, stage). `calls` are upstream attempts, not cap usage
-   * (cap usage comes from `BudgetGuard.usage`); spec §8.1 parity is `tiles + cacheHits`.
+   * How many ledger rows one execution has, of any outcome (pending, finalised, cache hits): one indexed count, which
+   * moves with every call the run makes. The api keys its kept finish estimate of a running execution by it (WP20 final
+   * review), so a poll with no new row does not re-estimate the run's remaining work.
+   */
+  rowCount(executionId: string): number {
+    return (
+      this.db.raw
+        .prepare<[string], { n: number }>(
+          'SELECT COUNT(*) AS n FROM provider_requests WHERE execution_id = ?',
+        )
+        .get(executionId)?.n ?? 0
+    );
+  }
+
+  /**
+   * Actuals for one execution, total and per (provider, stage). `calls` is not cap usage (that comes from
+   * `BudgetGuard.usage`): each upstream attempt counts 1, except a camoufox page row, which counts its pages
+   * (`COALESCE(page_count, 1)`), so it equals the guard's page usage only when the run has no `no-page` rows; neither a
+   * pages nor an attempts figure should be read from it alone. Spec §8.1 parity is `tiles + cacheHits`.
    */
   countsFor(executionId: string): {
     calls: number;
@@ -38,16 +62,30 @@ export class LedgerRepo {
       /** camoufox grid pages' scroll clicks (spec §7 rev 34); 0 for every other provider. */
       scrolls: number;
     }>;
+    /**
+     * Spec rev 55 §8.1 (ruling A32): the flight-list pages (`/v1/flights` rows), one line per provider. They are in
+     * `calls` and the totals, but in no `perProvider` line, whose stage would mislabel them as verification. `calls` is
+     * the same mix as above: a page row counts its pages (up to 2 for a flights request with a return phase, spec rev 56)
+     * and a `no-page` row counts 1, so neither a pages nor an attempts figure should be read from it alone. A request
+     * cut off before any answer counts here at its plan, though the run's flight allowance leaves it out (21.6 I2).
+     */
+    flightLists: Array<{ providerId: ProviderId; calls: number; costMicroGbp: number; cacheHits: number }>;
   } {
     const total = this.db.raw
       .prepare<[string], CountsRow>(`SELECT ${COUNTS} FROM provider_requests WHERE execution_id = ?`)
       .get(executionId);
     const rows = this.db.raw
-      .prepare<[string], CountsRow & { providerId: string; stage: string }>(
+      .prepare<[string, string], CountsRow & { providerId: string; stage: string }>(
         `SELECT provider_id AS providerId, CASE WHEN tile_index IS NULL THEN 'verification' ELSE 'discovery' END AS stage, ${COUNTS}
-         FROM provider_requests WHERE execution_id = ? GROUP BY providerId, stage ORDER BY providerId, stage`,
+         FROM provider_requests WHERE execution_id = ? AND endpoint_path <> ? GROUP BY providerId, stage ORDER BY providerId, stage`,
       )
-      .all(executionId);
+      .all(executionId, FLIGHT_LIST_ENDPOINT_PATH);
+    const flights = this.db.raw
+      .prepare<[string, string], { providerId: string; calls: number; cost: number; cacheHits: number }>(
+        `SELECT provider_id AS providerId, ${CALLS} AS calls, COALESCE(SUM(cost_micro_gbp), 0) AS cost, COALESCE(SUM(outcome = 'cache_hit'), 0) AS cacheHits
+         FROM provider_requests WHERE execution_id = ? AND endpoint_path = ? GROUP BY providerId ORDER BY providerId`,
+      )
+      .all(executionId, FLIGHT_LIST_ENDPOINT_PATH);
     return {
       calls: total?.calls ?? 0,
       costMicroGbp: total?.cost ?? 0,
@@ -61,6 +99,12 @@ export class LedgerRepo {
         tiles: r.tiles,
         cacheHits: r.cacheHits,
         scrolls: r.scrolls,
+      })),
+      flightLists: flights.map((r) => ({
+        providerId: oneOf('provider_id', PROVIDER_IDS, r.providerId),
+        calls: r.calls,
+        costMicroGbp: r.cost,
+        cacheHits: r.cacheHits,
       })),
     };
   }

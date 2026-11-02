@@ -85,7 +85,8 @@ describe('history routes (spec §10, §7)', () => {
     expect(body.series[0]).toMatchObject({ providerId: 'fixture', seller: 'BA', cabin: 'economy' });
     expect(body.series[0]?.points.map((p) => [p.pricePence, p.stale, p.truncated, p.priceConfirmed])).toEqual(
       [
-        [60_000, true, false, true],
+        // the itinerary series is on the verified basis: its threshold is the stale setting (ruling 20.6-2)
+        [60_000, 'setting', false, true],
         [59_000, false, false, false],
       ],
     );
@@ -113,7 +114,7 @@ describe('history routes (spec §10, §7)', () => {
         .find((c) => c.providerId === 'fixture')
         ?.points.map((p) => [p.pricePence, p.executionId, p.stale, p.truncated]),
     ).toEqual([
-      [45_000, s.id('E1'), true, false],
+      [45_000, s.id('E1'), 'refresh', false],
       [47_000, s.id('E2'), false, true],
     ]);
     // why: ruling 6: the series belongs to the searched trip and its cabin, and every point is vendor-stated GBP.
@@ -138,7 +139,7 @@ describe('history routes (spec §10, §7)', () => {
       ROUTE,
     );
     expect(later.routeSeries.find((r) => r.providerId === 'fixture')?.points.map((p) => p.stale)).toEqual([
-      true,
+      'refresh',
     ]);
   });
 

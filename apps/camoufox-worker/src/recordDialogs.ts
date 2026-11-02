@@ -8,7 +8,7 @@
 import type { BlockedPage, IsoDate, Logger } from '@gmt/core';
 import type { PageBudget } from './budget.js';
 import type { ClassifyRule, PageFacts } from './classify.js';
-import { CheapestStepFailed, type Driver, type PageLike, type StepOptions } from './driver.js';
+import { type Driver, type PageLike, StepFailed, type StepOptions } from './driver.js';
 import { exploreGraph, stripSnapshotQueries } from './graph.js';
 import { exploreGrid, tabCounts } from './gridRecord.js';
 import type { GuardState } from './guard.js';
@@ -31,6 +31,8 @@ export type Outcome =
       data: Record<string, unknown>;
       noFlights: boolean;
       stepMs: Record<string, number>;
+      /** WP21 Task 21.0: a console line for the page (counts, booleans and rule words only), printed by the recorder. */
+      summary?: string;
     } & Seen)
   | { kind: 'appeared'; data: Record<string, unknown>; stepMs: Record<string, number> }
   | ({
@@ -124,7 +126,7 @@ export async function recordGrid(
     if (e instanceof DeadlineExceeded) throw e;
     const blocked = await c.classifyAfterFailedStep(d, steps, 'best');
     if (blocked !== null) return blocked;
-    const step = e instanceof CheapestStepFailed ? `${e.step} (${e.reason})` : 'grid';
+    const step = e instanceof StepFailed ? `${e.step} (${e.reason})` : 'grid';
     throw new RecordingRefused(
       `the date grid recording ended at the ${step} step; the debug log has the step lines`,
     );
@@ -196,9 +198,9 @@ export async function recordGraph(c: DialogPage, settled: 'results' | 'no-flight
     const blocked = await c.classifyAfterFailedStep(d, steps, 'best');
     if (blocked !== null) return blocked;
     // why: the step ends the recording plainly, naming it; no cool-down (nothing stopped the page)
-    const step = e instanceof CheapestStepFailed ? `${e.step} (${e.reason})` : 'graph';
+    const step = e instanceof StepFailed ? `${e.step} (${e.reason})` : 'graph';
     throw new RecordingRefused(
-      e instanceof CheapestStepFailed && e.step === 'graph-settle'
+      e instanceof StepFailed && e.step === 'graph-settle'
         ? `the Price graph did not settle within its budget (${step}); the debug log has the poll lines`
         : `the Price graph exploration ended at the ${step} step; the debug log has the step lines`,
     );

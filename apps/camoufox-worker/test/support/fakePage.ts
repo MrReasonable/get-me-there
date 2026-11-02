@@ -1,7 +1,7 @@
 // A fake Playwright page shaped like playwright-core 1.59.1's (PageLike): a synthetic accessibility tree of roles,
 // accessible names and text that locators query, scripted navigation (hops, the route guard, framenavigated), and a
 // record of every call's timeout. Synthetic only; nothing here is copied from a recording.
-import type { FrameLike, HeadedPageLike, LocatorLike, PageLike, RequestLike } from '../../src/driver.js';
+import type { FrameLike, HeadedPageLike, LocatorLike, NamedElement, RequestLike } from '../../src/driver.js';
 import type { Role } from '../../src/selectors.js';
 import type { FakeContext } from './fakeContext.js';
 
@@ -23,6 +23,28 @@ export interface FakeNode {
   selected?: boolean;
   /** A click on this node never resolves (every other read answers). */
   clickHang?: boolean;
+  /** WP21 Task 21.0: a key press on this node never resolves. */
+  pressHang?: boolean;
+  /** A heading's level (Playwright's `getByRole('heading', { level })`). */
+  level?: number;
+  /** WP21 Task 21.0: the node's box (null: not rendered); a 100 × 40 box by default. */
+  box?: { x: number; y: number; width: number; height: number } | null;
+  /** WP21 Task 21.0: the node is disabled (`isEnabled()` false). */
+  disabled?: boolean;
+  /**
+   * WP21 Task 21.0: what the page's hit test at this node's centre answers (the fake runs no page script, so the test
+   * scripts it); the node itself, in the viewport, by default.
+   */
+  hit?: {
+    tag: string | null;
+    role: string | null;
+    relation: string;
+    inViewport: boolean;
+    sameRow: boolean | null;
+    coversTarget: boolean | null;
+    pointerEvents: string | null;
+    position: string | null;
+  };
   /** A `selected: true` role query that would match this node never answers (a re-rendering tab). */
   selectedQueryHang?: boolean;
   /** Any locator whose matches include this node never answers its count (a lookup that overruns). */
@@ -52,13 +74,38 @@ export const RESULTS_URL = 'https://www.google.com/travel/flights/search?tfs=x';
 /** One result option's accessible name in the feasibility grammar (synthetic airline). */
 export function optionName(
   pounds: number | string,
-  o: { on?: string; from?: string; to?: string } = {},
+  o: { on?: string; from?: string; to?: string; duration?: string; carrier?: string } = {},
 ): string {
   const on = o.on ?? 'Thursday, November 5';
-  return `From ${pounds} British pounds round trip total. 1 stop flight with Example Air. Leaves ${o.from ?? 'Heathrow Airport'} at 12:25 on ${on} and arrives at ${o.to ?? 'John F. Kennedy International Airport'} at 20:05 on ${on}. Total duration 12 hrs 40 min. Select flight`;
+  return `From ${pounds} British pounds round trip total. 1 stop flight with ${o.carrier ?? 'Example Air'}. Leaves ${o.from ?? 'Heathrow Airport'} at 12:25 on ${on} and arrives at ${o.to ?? 'John F. Kennedy International Airport'} at 20:05 on ${on}. Total duration ${o.duration ?? '12 hrs 40 min'}. Select flight`;
 }
-export const option = (pounds: number, o: { on?: string; from?: string; to?: string } = {}): FakeNode =>
-  n('listitem', '', [n('link', optionName(pounds, o))]);
+export const option = (
+  pounds: number,
+  o: { on?: string; from?: string; to?: string; duration?: string; carrier?: string } = {},
+): FakeNode => n('listitem', '', [n('link', optionName(pounds, o))]);
+
+/**
+ * WP21 Task 21.0: one return option's accessible name in the hypothesis form (synthetic airline): the leg leaves the
+ * destination and arrives at the origin on the return day; `priceForm` 'total' states the round-trip total alone,
+ * 'from' the outbound list's "From" form, so the recorder's research can be tested against either.
+ */
+export function returnOptionName(
+  o: {
+    pounds?: number | string;
+    from?: string;
+    to?: string;
+    on?: string;
+    duration?: string;
+    carrier?: string;
+    priceForm?: 'total' | 'from';
+  } = {},
+): string {
+  const on = o.on ?? 'Sunday, November 15';
+  const price = `${o.pounds ?? 478} British pounds round trip total.`;
+  return `${o.priceForm === 'from' ? `From ${price}` : price} Nonstop flight with ${o.carrier ?? 'Example Air'}. Leaves ${o.from ?? 'John F. Kennedy International Airport'} at 18:30 on ${on} and arrives at ${o.to ?? 'Heathrow Airport'} at 06:45 on ${on}. Total duration ${o.duration ?? '7 hrs 15 min'}. Select flight`;
+}
+/** The View more button (resultsTree carries one unless told not to; a return view takes it as an extra). */
+export const viewMore = (): FakeNode => n('button', 'View more flights');
 
 /** The search form's controls (the brief's round-1 hypothesis; Task 14.2's recording replaces the names). */
 export function formNodes(
@@ -81,6 +128,8 @@ export function resultsTree(
     extra?: FakeNode[];
     count?: number;
     form?: FakeNode[];
+    /** WP21 Task 21.0: false leaves the View more button out (listFacts reports its presence). */
+    viewMore?: boolean;
   } = {},
 ): FakeNode {
   const top = o.top ?? [option(478)];
@@ -96,7 +145,7 @@ export function resultsTree(
       n('heading', 'Other departing flights'),
       n('list', '', other),
     ]),
-    n('button', 'View more flights'),
+    ...(o.viewMore === false ? [] : [viewMore()]),
     n('button', 'Date grid'),
     n('button', 'Currency GBP'),
     n('button', 'Location·United Kingdom'),
@@ -125,6 +174,11 @@ const never = <T>(): Promise<T> => new Promise<T>(() => undefined);
 export interface Calls {
   timeouts: number[];
   clicks: string[];
+  /** WP21 Task 21.0 (the keyboard activation): every focused node and every key pressed, as `role:name` / `key:role:name`. */
+  focuses: string[];
+  presses: string[];
+  /** Focus and key actions in order, each press marked `focused` when it went to the node last focused. */
+  actions: string[];
   gotos: Array<{ url: string; timeout: number | undefined; waitUntil: string | undefined }>;
   closed: number;
 }
@@ -144,7 +198,12 @@ export class FakeLocator implements LocatorLike {
     if (this.page.isClosed())
       return Promise.reject(new Error('Target page, context or browser has been closed'));
     const x = this.node();
-    if (x === undefined) return Promise.reject(new Error('locator resolved to no element'));
+    // why: WP21 Task 21.3 fix round 2: as Playwright's, a read of a node no longer there waits for it when the page
+    // says so (to its timeout; here, until the page closes)
+    if (x === undefined)
+      return this.page.missingWaits
+        ? this.page.hangUntilClosed<T>()
+        : Promise.reject(new Error('locator resolved to no element'));
     if (x.hang === true || this.page.hangAll) return this.page.hangUntilClosed<T>();
     return Promise.resolve(f(x));
   }
@@ -153,7 +212,9 @@ export class FakeLocator implements LocatorLike {
       return Promise.reject(new Error('Target page, context or browser has been closed'));
     if (this.page.hangAll || this.countHangs() || this.find().some((x) => x.countHang === true))
       return this.page.hangUntilClosed<number>();
-    return Promise.resolve(this.find().length);
+    const found = this.find().length;
+    this.page.afterCount(found);
+    return Promise.resolve(found);
   }
   nth(index: number): FakeLocator {
     return new FakeLocator(this.page, () => {
@@ -162,23 +223,46 @@ export class FakeLocator implements LocatorLike {
     });
   }
   getAttribute(name: string, o?: { timeout?: number }): Promise<string | null> {
-    return this.read(o, (x) =>
-      name === 'aria-label'
-        ? x.ariaLabel === undefined
-          ? (x.name ?? null)
-          : x.ariaLabel
-        : name === 'aria-selected'
-          ? (x.ariaSelectedAttr ?? String(x.selected === true))
-          : name === 'role'
-            ? (x.role ?? null)
-            : null,
-    );
+    return this.read(o, (x) => attributeOf(x, name));
   }
   textContent(o?: { timeout?: number }): Promise<string | null> {
-    return this.read(o, (x) => (x.text === undefined ? (x.name ?? null) : x.text));
+    return this.read(o, (x) => textOf(x));
+  }
+  /**
+   * WP21 Task 21.3 fix round 2: the page function run over every node matched now (an empty list when none is), each as
+   * the element the page would hand it: its attributes and its text. A hanging node or page never answers.
+   */
+  evaluateAll<R>(fn: (elements: NamedElement[]) => R): Promise<R> {
+    if (this.page.isClosed())
+      return Promise.reject(new Error('Target page, context or browser has been closed'));
+    const nodes = this.find();
+    if (this.page.hangAll || nodes.some((x) => x.hang === true)) return this.page.hangUntilClosed<R>();
+    return Promise.resolve(
+      fn(
+        nodes.map((x) => ({ getAttribute: (name: string) => attributeOf(x, name), textContent: textOf(x) })),
+      ),
+    );
   }
   inputValue(o?: { timeout?: number }): Promise<string> {
     return this.read(o, (x) => x.value ?? '');
+  }
+  focus(o?: { timeout?: number }): Promise<void> {
+    return this.read(o, (x) => {
+      this.page.calls.focuses.push(`${x.role ?? ''}:${x.name ?? ''}`);
+      this.page.calls.actions.push(`focus:${x.role ?? ''}:${x.name ?? ''}`);
+      this.page.focused = x;
+    });
+  }
+  /** A key on the node; Enter activates it as a click would (the page's own handler: `onClick`). */
+  press(key: string, o?: { timeout?: number }): Promise<void> {
+    if (this.node()?.pressHang === true) return this.page.hangUntilClosed<void>();
+    return this.read(o, (x) => {
+      this.page.calls.presses.push(`${key}:${x.role ?? ''}:${x.name ?? ''}`);
+      this.page.calls.actions.push(
+        `press:${key}:${x.role ?? ''}:${x.name ?? ''}:${this.page.focused === x ? 'focused' : 'unfocused'}`,
+      );
+      if (key === 'Enter') this.page.onClick(x);
+    });
   }
   click(o?: { timeout?: number }): Promise<void> {
     if (this.node()?.clickHang === true) return this.page.hangUntilClosed<void>();
@@ -191,7 +275,7 @@ export class FakeLocator implements LocatorLike {
   }
   getByRole(
     role: Role,
-    o: { name?: string | RegExp; exact?: boolean; selected?: boolean } = {},
+    o: { name?: string | RegExp; exact?: boolean; selected?: boolean; level?: number } = {},
   ): FakeLocator {
     const all = () => descendants(this.find()).filter((x) => roleMatches(x, role, o));
     return new FakeLocator(
@@ -221,10 +305,74 @@ export class FakeLocator implements LocatorLike {
   ariaSnapshot(o?: { timeout?: number }): Promise<string> {
     return this.read(o, (x) => printed(x, 0).join('\n'));
   }
+  boundingBox(o?: {
+    timeout?: number;
+  }): Promise<{ x: number; y: number; width: number; height: number } | null> {
+    return this.read(o, (x) => (x.box === undefined ? { x: 0, y: 0, width: 100, height: 40 } : x.box));
+  }
+  isEnabled(o?: { timeout?: number }): Promise<boolean> {
+    return this.read(o, (x) => x.disabled !== true);
+  }
+  /** The page script is not run: the node's scripted hit test answers (the script is unit-tested on its own). */
+  evaluate<R>(_fn: (element: never) => R, _arg?: undefined, o?: { timeout?: number }): Promise<R> {
+    return this.read(o, (x) => {
+      const hit = x.hit ?? {
+        tag: x.role === 'link' ? 'a' : 'div',
+        role: x.role ?? null,
+        relation: 'self',
+        inViewport: true,
+        sameRow: true,
+        coversTarget: true,
+        pointerEvents: 'auto',
+        position: 'static',
+      };
+      // why: the fake has no typed bridge from the scripted value to the page function's result; a copy through JSON
+      // is untyped, as a value back from the page is
+      return JSON.parse(JSON.stringify(hit));
+    });
+  }
   isVisible(): Promise<boolean> {
     const x = this.node();
     return Promise.resolve(x !== undefined && x.hidden !== true);
   }
+}
+
+/** An attribute as the page states it: `aria-label` (the name unless set), `aria-selected` and `role`; else null. */
+function attributeOf(x: FakeNode, name: string): string | null {
+  return name === 'aria-label'
+    ? x.ariaLabel === undefined
+      ? (x.name ?? null)
+      : x.ariaLabel
+    : name === 'aria-selected'
+      ? (x.ariaSelectedAttr ?? String(x.selected === true))
+      : name === 'role'
+        ? (x.role ?? null)
+        : null;
+}
+/** The node's text: `text` when set (null included), else the name. */
+const textOf = (x: FakeNode): string | null => (x.text === undefined ? (x.name ?? null) : x.text);
+
+/**
+ * WP21 Task 21.3 fix round 2: the list a selection or a reload re-renders. Once the `occurrence`-th count answering
+ * `whenCount` has answered, `parent` keeps only its first `keep` children, and from then on a read of a node no longer
+ * there waits for it, as Playwright's does (until the page closes). Returns a promise that answers 'hung' when any read
+ * starts waiting, so a test races the read under test against that event, never a timer.
+ */
+export function shrinkAfterCount(
+  page: FakePage,
+  parent: FakeNode,
+  o: { whenCount: number; keep: number; occurrence?: number },
+): Promise<'hung'> {
+  let left = o.occurrence ?? 1;
+  page.missingWaits = true;
+  page.afterCount = (found) => {
+    if (found !== o.whenCount || --left > 0) return;
+    page.afterCount = () => undefined;
+    parent.children = (parent.children ?? []).slice(0, o.keep);
+  };
+  return new Promise((resolve) => {
+    page.onHang = () => resolve('hung');
+  });
 }
 
 /** A synthetic printed snapshot in Playwright's YAML-like shape: `- role "name":`, children indented, a link's `/url:`. */
@@ -243,9 +391,10 @@ function printed(x: FakeNode, depth: number): string[] {
 function roleMatches(
   x: FakeNode,
   role: Role,
-  o: { name?: string | RegExp; exact?: boolean; selected?: boolean },
+  o: { name?: string | RegExp; exact?: boolean; selected?: boolean; level?: number },
 ): boolean {
   if (x.role !== role || !nameMatches(x.name ?? '', o.name, o.exact)) return false;
+  if (o.level !== undefined && x.level !== o.level) return false;
   return o.selected === undefined || (x.selected === true) === o.selected;
 }
 /** True when a node the query would consider is marked to make a selected-state query hang. */
@@ -283,13 +432,30 @@ export interface Navigation {
 
 /** A scripted page. `trees` are what successive `readFacts` polls see (the last repeats). */
 export class FakePage implements HeadedPageLike {
-  readonly calls: Calls = { timeouts: [], clicks: [], gotos: [], closed: 0 };
+  readonly calls: Calls = {
+    timeouts: [],
+    clicks: [],
+    gotos: [],
+    closed: 0,
+    focuses: [],
+    presses: [],
+    actions: [],
+  };
+  /** The node the last `focus()` focused (a key press goes to whatever is focused in a browser). */
+  focused: FakeNode | null = null;
   /** Whether the page was closed; read through `isClosed()` as Playwright's page is. */
   shut = false;
   isClosed(): boolean {
     return this.shut;
   }
   hangAll = false;
+  /**
+   * WP21 Task 21.3 fix round 2: a read of a node no longer matched waits for it, as Playwright's does (to its timeout;
+   * here, until the page closes), instead of failing at once.
+   */
+  missingWaits = false;
+  /** Told after every count answers, with its answer (a test re-renders the page between a count and the reads after it). */
+  afterCount: (found: number) => void = () => undefined;
   closeThrows = false;
   closeHangs = false;
   private current = 'about:blank';
@@ -312,7 +478,13 @@ export class FakePage implements HeadedPageLike {
   setUrl(url: string): void {
     this.current = url;
   }
+  /**
+   * WP21 Task 21.3: told whenever a call starts hanging (a press, a lookup), so a test can run the fake clock out on
+   * that event instead of guessing when it happens.
+   */
+  onHang: () => void = () => undefined;
   hangUntilClosed<T>(): Promise<T> {
+    this.onHang();
     return new Promise<T>((_resolve, reject) => {
       this.closers.push(() => reject(new Error('Target page, context or browser has been closed')));
     });
@@ -387,7 +559,7 @@ export class FakePage implements HeadedPageLike {
   }
   getByRole(
     role: Role,
-    o: { name?: string | RegExp; exact?: boolean; selected?: boolean } = {},
+    o: { name?: string | RegExp; exact?: boolean; selected?: boolean; level?: number } = {},
   ): FakeLocator {
     return new FakeLocator(
       this,

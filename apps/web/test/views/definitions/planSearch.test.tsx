@@ -1,16 +1,17 @@
 import { asIata } from '@gmt/core';
-// "Plan a search": the short form leads the Searches view and sets up a whole search (from, to, when, how long,
-// journey time, cabin and a suggested name) through the estimate and Create without opening More options.
+// "Plan a search" (spec rev 55 §11, WP20 Task 20.5): the new-search form sets up a whole search from From, To, Leave
+// between and Stay, through the estimate sentence and Search now, without opening More options.
 import { act, screen, within } from '@testing-library/react';
 import { HttpResponse, http } from 'msw';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { ESTIMATE_DEBOUNCE_MS } from '../../../src/api/queries.js';
 import type { AirportsResponse } from '../../../src/api/types.js';
 import { PLAN_COPY } from '../../../src/copy/plan.js';
-import { EXAMPLE_DEFINITION, EXAMPLE_LABEL } from '../../../src/example.js';
+import { COPY } from '../../../src/copy.js';
 import { AIRPORT_DEBOUNCE_MS } from '../../../src/views/Definitions/AirportListInput.js';
-import { DefinitionForm } from '../../../src/views/Definitions/DefinitionForm.js';
 import { DefinitionsView } from '../../../src/views/Definitions/DefinitionsView.js';
-import { API, definition, estimate, providersResponse } from '../../fixtures.js';
+import { NewSearchForm } from '../../../src/views/Searches/NewSearchForm.js';
+import { API, definition, estimate, estimateResponse, providersResponse } from '../../fixtures.js';
 import { server } from '../../msw/server.js';
 import { renderWithProviders } from '../../render.js';
 
@@ -43,7 +44,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-/** The worked example's airports, a recorder for the estimate and create bodies, all on the fake clock. */
+/** The worked example's airports, a recorder for the estimate and Search now bodies, all on the fake clock. */
 function setUp() {
   const estimates: unknown[] = [];
   const creates: unknown[] = [];
@@ -53,17 +54,20 @@ function setUp() {
     ),
     http.post(`${API}/definitions/estimate`, async ({ request }) => {
       estimates.push(await request.json());
-      return HttpResponse.json({ estimate: estimate(), budgetFit: definition().budgetFit });
+      return HttpResponse.json(estimateResponse());
     }),
-    http.post(`${API}/definitions`, async ({ request }) => {
+    http.post(`${API}/definitions/create-and-start`, async ({ request }) => {
       creates.push(await request.json());
-      return HttpResponse.json(definition({ id: 'def-0002' }));
+      return HttpResponse.json(
+        { definition: definition({ id: 'def-0002' }), executionId: 'exec-9', refusal: null },
+        { status: 201 },
+      );
     }),
   );
   // why: fake the clear functions too, or a cleared debounce timer still fires on the real clock.
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
   vi.stubGlobal('jest', { advanceTimersByTime: (ms: number) => vi.advanceTimersByTime(ms) });
-  const rendered = renderWithProviders(<DefinitionForm existing={null} providers={providersResponse()} />, {
+  const rendered = renderWithProviders(<NewSearchForm providers={providersResponse()} />, {
     fakeTimers: true,
   });
   return { ...rendered, estimates, creates };
@@ -90,57 +94,61 @@ const fieldValue = (label: string) => {
   return el.value;
 };
 
-describe('Plan a search (the short form)', () => {
-  it('leads with from, to, when, stay, journey, cabin and name; More options stays closed', () => {
+describe('Plan a search (the new-search form)', () => {
+  it('leads with From, To, Leave between and Stay; More options stays closed; the press comes after them', () => {
     setUp();
     const plan = screen.getByRole('region', { name: PLAN_COPY.heading });
-    for (const name of ['From', 'To', PLAN_COPY.departing, PLAN_COPY.stay, PLAN_COPY.journey])
+    for (const name of ['From', 'To', PLAN_COPY.leaveBetween, PLAN_COPY.stay])
       expect(within(plan).getByRole('group', { name })).toBeInTheDocument();
-    expect(within(plan).getByLabelText('Cabin')).toBeInTheDocument();
-    expect(within(plan).getByLabelText(PLAN_COPY.name)).toHaveAccessibleDescription(PLAN_COPY.nameHint);
+    // the journey limit, cabin and name are filled in under More options
+    expect(within(plan).queryByLabelText('Cabin')).toBeNull();
+    expect(within(plan).queryByLabelText(PLAN_COPY.name)).toBeNull();
+    expect(screen.getByLabelText(PLAN_COPY.name)).toHaveAccessibleDescription(PLAN_COPY.nameHint);
     expect(screen.getByText(PLAN_COPY.moreOptions).closest('details')).not.toHaveAttribute('open');
-    // the estimate follows the short form and More options, so it is the last thing to press
-    const estimateButton = screen.getByRole('button', { name: 'Show estimate' });
-    expect(plan.compareDocumentPosition(estimateButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const press = screen.getByRole('button', { name: /^Search now/ });
+    expect(plan.compareDocumentPosition(press) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it('sets up a whole search by places, through the estimate and Create, without opening More options', async () => {
+  it('sets up a whole search by places, through the estimate sentence and Search now, without opening More options', async () => {
     const { user, estimates, creates } = setUp();
     await pickPlace(user, 'From', 'lond');
     await vi.waitFor(() => expect(chipCodes('From')).toEqual(['LGW', 'LHR']));
     await pickPlace(user, 'To', 'new y');
     await vi.waitFor(() => expect(chipCodes('To')).toEqual(['EWR', 'JFK']));
-    await user.click(screen.getByRole('button', { name: 'Next 9 months' }));
+    await user.type(screen.getByLabelText(PLAN_COPY.earliest), '1 Mar 2027');
+    await user.type(screen.getByLabelText(PLAN_COPY.latest), '30 Apr 2027');
     await user.clear(screen.getByLabelText(PLAN_COPY.shortest));
     await user.type(screen.getByLabelText(PLAN_COPY.shortest), '7');
     await user.clear(screen.getByLabelText(PLAN_COPY.longest));
     await user.type(screen.getByLabelText(PLAN_COPY.longest), '14');
-    await user.clear(screen.getByLabelText(`${PLAN_COPY.journey}, hours`));
-    await user.type(screen.getByLabelText(`${PLAN_COPY.journey}, hours`), '18');
-    await user.selectOptions(screen.getByLabelText('Cabin'), 'premium_economy');
     // the name follows the places, one per metro, until the operator types one
     await vi.waitFor(() => expect(fieldValue(PLAN_COPY.name)).toBe('London → New York'));
-    await user.click(screen.getByRole('button', { name: 'Show estimate' }));
-    await screen.findByRole('region', { name: 'Estimate' });
-    await user.click(screen.getByRole('button', { name: /^Create and confirm about/ }));
+    await act(() => vi.advanceTimersByTimeAsync(ESTIMATE_DEBOUNCE_MS));
+    const press = screen.getByRole('button', { name: /^Search now/ });
+    await vi.waitFor(() => expect(press).not.toHaveAttribute('aria-disabled'));
+    await user.click(press);
     await vi.waitFor(() => expect(creates).toHaveLength(1));
     const expected = {
       name: 'London → New York',
       origins: ['LGW', 'LHR'],
       destinations: ['EWR', 'JFK'],
-      window: { kind: 'relative', startOffsetDays: 7, lengthDays: 273 },
+      window: { kind: 'absolute', from: '2027-03-01', to: '2027-04-30' },
       minNights: 7,
       maxNights: 14,
-      cabin: 'premium_economy',
-      constraints: { maxJourneyMinutes: 1080 },
-      // the defaults More options would show: the plan preset's sources and budget, the default schedule, disabled
+      cabin: 'economy',
+      constraints: { maxJourneyMinutes: 1500 },
+      // the defaults More options would show: the plan preset's sources and budget, no schedule (spec rev 55 §8.2)
       providers: providersResponse().presets.providers,
       budget: providersResponse().presets.budget,
-      scheduleCron: '0 5 * * 1',
+      scheduleCron: null,
       enabled: false,
     };
-    expect(estimates[0]).toMatchObject(expected);
-    expect(creates[0]).toMatchObject({ ...expected, confirmedCalls: estimate().totalCalls });
+    expect(estimates.at(-1)).toMatchObject(expected);
+    expect(creates[0]).toMatchObject({
+      ...expected,
+      confirmCalls: estimate().totalCalls,
+      confirmCostPence: 0,
+    });
     expect(screen.getByText(PLAN_COPY.moreOptions).closest('details')).not.toHaveAttribute('open');
   });
 
@@ -149,6 +157,7 @@ describe('Plan a search (the short form)', () => {
     await pickPlace(user, 'From', 'lond');
     await pickPlace(user, 'To', 'new y');
     await vi.waitFor(() => expect(fieldValue(PLAN_COPY.name)).toBe('London → New York'));
+    await user.click(screen.getByText(PLAN_COPY.moreOptions));
     await user.clear(screen.getByLabelText(PLAN_COPY.name));
     await user.type(screen.getByLabelText(PLAN_COPY.name), 'Family visit');
     await user.click(screen.getByRole('button', { name: 'Remove LGW' }));
@@ -160,15 +169,8 @@ describe('Plan a search (the short form)', () => {
     expect(fieldValue(PLAN_COPY.name)).toBe('London → New York');
   });
 
-  it('Import example keeps the example name rather than suggesting one', async () => {
-    const { user } = setUp();
-    await user.click(screen.getByRole('button', { name: `Import example (${EXAMPLE_LABEL})` }));
-    await vi.waitFor(() => expect(chipCodes('To')).toEqual(['JFK', 'EWR']));
-    expect(fieldValue(PLAN_COPY.name)).toBe(EXAMPLE_DEFINITION.name);
-  });
-
-  it('an API error on the journey time stays in the short form; one on a destination note opens More options', async () => {
-    let field = 'constraints.maxJourneyMinutes';
+  it('an API error on the stay stays in the short form; one on the name opens More options', async () => {
+    let field = 'maxNights';
     server.use(
       http.post(`${API}/definitions/estimate`, () =>
         HttpResponse.json(
@@ -177,29 +179,39 @@ describe('Plan a search (the short form)', () => {
         ),
       ),
     );
-    const { user } = renderWithProviders(<DefinitionForm existing={null} providers={providersResponse()} />);
-    await user.click(screen.getByRole('button', { name: 'Show estimate' }));
+    const { user } = renderWithProviders(<NewSearchForm providers={providersResponse()} debounceMs={0} />);
+    await user.type(screen.getByLabelText('From'), 'LHR{Enter}');
+    await user.type(screen.getByLabelText('To'), 'JFK{Enter}');
+    await user.type(screen.getByLabelText(PLAN_COPY.earliest), '1 Mar 2027');
+    await user.type(screen.getByLabelText(PLAN_COPY.latest), '30 Apr 2027');
     await screen.findByText(`${field}: bad`);
     expect(screen.getByText(PLAN_COPY.moreOptions).closest('details')).not.toHaveAttribute('open');
-    field = 'destinationNotes.JFK';
-    await user.click(screen.getByRole('button', { name: 'Show estimate' }));
+    field = 'name';
+    await user.clear(screen.getByLabelText(PLAN_COPY.longest));
+    await user.type(screen.getByLabelText(PLAN_COPY.longest), '14');
     await screen.findByText(`${field}: bad`);
     expect(screen.getByText(PLAN_COPY.moreOptions).closest('details')).toHaveAttribute('open');
   });
 });
 
-describe('the Searches view', () => {
-  it('is headed Searches, offers a new search and names the saved ones to edit', async () => {
-    renderWithProviders(<DefinitionsView />, { search: '?view=definitions' });
-    expect(await screen.findByRole('heading', { level: 2, name: PLAN_COPY.viewHeading })).toBeInTheDocument();
-    const list = screen.getByRole('list', { name: PLAN_COPY.searchList });
-    expect(within(list).getByRole('link', { name: PLAN_COPY.newSearch })).toHaveAttribute(
-      'aria-current',
-      'page',
-    );
+describe('the Edit page (spec rev 55 §11 Edit)', () => {
+  it('is headed by the search’s name, with its fields and its two presses', async () => {
+    renderWithProviders(<DefinitionsView />, { search: '?view=definitions&edit=def-0001' });
     expect(
-      within(list).getByRole('link', { name: PLAN_COPY.editSearch(definition().name) }),
+      await screen.findByRole('heading', { level: 2, name: COPY.editSearch.heading(definition().name) }),
     ).toBeInTheDocument();
-    expect(screen.getByRole('heading', { level: 3, name: PLAN_COPY.heading })).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: PLAN_COPY.heading })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: COPY.editSearch.save })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Save and search again/ })).toBeInTheDocument();
+  });
+
+  it('an edit= link to a search that does not exist says so, with the way back to Searches', async () => {
+    renderWithProviders(<DefinitionsView />, { search: '?view=definitions&edit=nope' });
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(PLAN_COPY.notFound);
+    expect(within(alert).getByRole('link', { name: PLAN_COPY.viewHeading }).getAttribute('href')).toContain(
+      'view=searches',
+    );
+    expect(screen.queryByRole('button', { name: COPY.editSearch.save })).toBeNull();
   });
 });

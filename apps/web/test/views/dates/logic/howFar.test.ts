@@ -1,7 +1,14 @@
-import { BANNED_WORD_ALLOWLIST, type DatePair, findBannedWords } from '@gmt/core';
+import { BANNED_WORD_ALLOWLIST, type DatePair, findBannedWords, type Provenance } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
 import { howFarChecked } from '../../../../src/views/Dates/howFar.js';
-import { bucketsOf, calendarFig, datePairOf, verifiedFig } from '../../../fixtures.dates.js';
+import {
+  bucketsOf,
+  calendarFig,
+  datePairOf,
+  pairingFig,
+  provSynthetic,
+  verifiedFig,
+} from '../../../fixtures.dates.js';
 
 // Spec §11 "How far checked": from the date pair's own counts, never the "searched" umbrella, never a word claiming
 // completeness, and "verified" only beside a class-verified figure. Pure; Stryker runs it (revision 50).
@@ -13,14 +20,31 @@ function pair(over: Partial<DatePair>): DatePair {
 const words = (p: DatePair, airportPairs = 4, limit: number | null = null) =>
   howFarChecked(p, airportPairs, limit);
 
-describe('the figure: class verified or a calendar price', () => {
-  it('a class-verified figure says verified', () => {
-    expect(words(pair({ figure: verifiedFig(), buckets: bucketsOf({ priced: 4 }) }))[0]).toBe('verified');
-  });
-  it('a calendar figure says it is a calendar price whose constraints are not checked', () => {
-    expect(words(pair({ figure: calendarFig(), buckets: bucketsOf({ priced: 4 }) }))[0]).toBe(
-      'calendar price, constraints not checked',
+describe('the figure: checked fares, or a calendar price from its source (spec rev 55 §3 word table)', () => {
+  it('a class-verified figure says checked fares, verified', () => {
+    expect(words(pair({ figure: verifiedFig(), buckets: bucketsOf({ priced: 4 }) }))[0]).toBe(
+      'checked fares, verified',
     );
+  });
+  it('a calendar figure says where it came from and that its constraints are not checked', () => {
+    const from = (providerId: Provenance['providerId']) =>
+      words(
+        pair({
+          figure: calendarFig({
+            price: { ...calendarFig().price, provenance: provSynthetic({ providerId }) },
+          }),
+          buckets: bucketsOf({ priced: 4 }),
+        }),
+      )[0];
+    expect(from('searchapi')).toBe("from Google's date grid, constraints not checked");
+    expect(from('camoufox')).toBe("from Google's date grid, constraints not checked");
+    expect(from('travelpayouts')).toBe('from the Aviasales cache, constraints not checked');
+    expect(from('fixture')).toBe('from the test source, constraints not checked');
+  });
+  it("spec rev 56 §6.9: a pairing figure is worded as the browser worker's flight list, not checked with the airline", () => {
+    const all = words(pair({ figure: pairingFig(), buckets: bucketsOf({ priced: 4 }) }));
+    expect(all[0]).toBe("from the browser worker's flight list, not checked with the airline");
+    expect(all.some((w) => /(?<!\p{L})verified/u.test(w))).toBe(false);
   });
   it('"verified" never stands beside a calendar figure', () => {
     const all = words(
@@ -30,14 +54,14 @@ describe('the figure: class verified or a calendar price', () => {
   });
 });
 
-describe('the itinerary stage: itinerary-searched, selected but not reached, or not selected', () => {
+describe('checking fares: fares checked, selected but not reached, or not selected', () => {
   const priced = { figure: calendarFig(), buckets: bucketsOf({ priced: 4 }) };
-  it('itinerary-searched cells, of the airport pairs', () => {
+  it('fares checked, of the airport pairs', () => {
     expect(words(pair({ ...priced, selected: 2, itinerarySearched: 2 }))).toContain(
-      'itinerary-searched 2 of 4 airport pairs',
+      'fares checked for 2 of 4 airport pairs',
     );
     expect(words(pair({ ...priced, selected: 1, itinerarySearched: 1 }), 1)).toContain(
-      'itinerary-searched 1 of 1 airport pair',
+      'fares checked for 1 of 1 airport pair',
     );
   });
   it('selected but not reached, by its own count', () => {
@@ -45,22 +69,22 @@ describe('the itinerary stage: itinerary-searched, selected but not reached, or 
   });
   it('a selected cell in error is worded as an error, never "not reached"', () => {
     const w = words(pair({ ...priced, selected: 1 }));
-    expect(w).toContain('1 selected, itinerary search error or skipped');
+    expect(w).toContain('1 selected, fares not checked (an error, or skipped)');
     expect(w.join(' ')).not.toContain('not reached');
   });
   it('the three together, each by its count', () => {
     expect(words(pair({ ...priced, selected: 4, itinerarySearched: 1, notReached: 2 }))).toEqual(
       expect.arrayContaining([
-        'itinerary-searched 1 of 4 airport pairs',
+        'fares checked for 1 of 4 airport pairs',
         '2 selected but not reached',
-        '1 selected, itinerary search error or skipped',
+        '1 selected, fares not checked (an error, or skipped)',
       ]),
     );
   });
   it('nothing selected says so; on-demand searches are counted apart', () => {
-    expect(words(pair(priced))).toContain('not selected for itinerary search');
+    expect(words(pair(priced))).toContain('not selected for checking fares');
     expect(words(pair({ ...priced, onDemand: 1 }))).toEqual(
-      expect.arrayContaining(['not selected for itinerary search', '+1 on demand']),
+      expect.arrayContaining(['not selected for checking fares', '+1 on demand']),
     );
   });
 });
@@ -166,9 +190,7 @@ describe('never the umbrella, never a banned word', () => {
       ),
       words(pair({ figure: null, journeyLeftOut: 1, buckets: bucketsOf({ priced: 1, skipped: 3 }) }), 4, 900),
     ].flat();
-    expect(
-      all.filter((w) => /(?<![\p{L}-])searched\b/u.test(w) && !/not searched|itinerary-searched/.test(w)),
-    ).toEqual([]);
+    expect(all.filter((w) => /(?<![\p{L}-])searched\b/u.test(w) && !/not searched/.test(w))).toEqual([]);
     expect(findBannedWords(all.join('\n'), BANNED_WORD_ALLOWLIST)).toEqual([]);
   });
 });
@@ -176,8 +198,8 @@ describe('never the umbrella, never a banned word', () => {
 describe('exact lines (each part only when its count is non-zero)', () => {
   it('a calendar figure on a date pair nothing selected, all priced, reads exactly two parts', () => {
     expect(words(pair({ figure: calendarFig(), buckets: bucketsOf({ priced: 4 }) }))).toEqual([
-      'calendar price, constraints not checked',
-      'not selected for itinerary search',
+      'from the test source, constraints not checked',
+      'not selected for checking fares',
     ]);
   });
   it('a fully itinerary-searched selection reads its count and nothing else of the stage', () => {
@@ -185,7 +207,7 @@ describe('exact lines (each part only when its count is non-zero)', () => {
       words(
         pair({ figure: verifiedFig(), buckets: bucketsOf({ priced: 4 }), selected: 2, itinerarySearched: 2 }),
       ),
-    ).toEqual(['verified', 'itinerary-searched 2 of 4 airport pairs']);
+    ).toEqual(['checked fares, verified', 'fares checked for 2 of 4 airport pairs']);
   });
   it('without a journey limit, a left-out count never reads "none within"', () => {
     expect(

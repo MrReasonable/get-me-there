@@ -86,7 +86,8 @@ describe('the date-pairs shape over the worked world (spec §10, §11 "The figur
     expect(d.executionId).toBe(s.id('E2'));
     // ported from the calendar route's "per day" test (WP19 Task 19.8): the stale thresholds the view labels by, the
     // definition's verified one and each discovery provider's own
-    expect([d.staleAfterHours, d.calendarStaleAfterHours]).toEqual([192, { fixture: 168 }]);
+    expect(d.staleAfterHours).toBe(192);
+    expect(d).not.toHaveProperty('calendarStaleAfterHours');
     expect(d.pairs.map((p) => p.index)).toEqual(d.pairs.map((_, i) => i));
     expect(d.pairs).toHaveLength(4 * 12);
     expect([d.pairs[0]?.departureDate, d.pairs[0]?.nights, d.pairs[12]?.departureDate]).toEqual([
@@ -233,10 +234,10 @@ describe('the date-pairs shape over the worked world (spec §10, §11 "The figur
     s.tile('E1', W.W1, { status: 'priced', pricePence: 30_000, fetchedAt: at(-20) }); // 20 h + 24 h > 10 h
     s.verified('E1', W.J1, [{ hash: 'hV', pricePence: 60_000, fetchedAt: at(-2) }]);
     const d = await datesOf(x, def.id);
-    expect(pairOf(d, '2026-11-02', '2026-11-12').figure?.cheaperCached).toMatchObject({ stale: true });
+    expect(pairOf(d, '2026-11-02', '2026-11-12').figure?.cheaperCached).toMatchObject({ stale: 'setting' });
     // the same price as a figure is stale by the same rule
     const alone = await datesOf(x, def.id, '?destinations=EWR');
-    expect(pairOf(alone, '2026-11-02', '2026-11-12').figure?.price.stale).toBe(true);
+    expect(pairOf(alone, '2026-11-02', '2026-11-12').figure?.price.stale).toBe('setting');
   });
 
   it('an overnight return keeps its arrival as the source states it; an on-demand price after the latest run is a figure and counts once', async () => {
@@ -577,7 +578,8 @@ describe('ported: calendar selection rules (plan decisions 53, 54; review prov-0
     s.verified('E1', C1b, [{ hash: 'hFresh', pricePence: 58_000, fetchedAt: at(-1) }]);
     const d = await datesOf(x, def.id);
     expect(day(d, C1b).figure).toMatchObject({ price: { pricePence: 58_000, stale: false } });
-    expect(day(d, C1).figure).toMatchObject({ price: { pricePence: 50_000, stale: true } });
+    // a verified price: judged by the stale setting (ruling 20.6-2)
+    expect(day(d, C1).figure).toMatchObject({ price: { pricePence: 50_000, stale: 'setting' } });
   });
 
   it('a fresh offer from another seller is shown before a cheaper stale offer of the same itinerary (decision 58)', async () => {

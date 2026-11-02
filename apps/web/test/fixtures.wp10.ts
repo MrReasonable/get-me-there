@@ -12,6 +12,7 @@ import {
   type ProviderId,
   provenanceSchema,
   type SourceKind,
+  type StaleMark,
   worstCaseAgeHours,
 } from '@gmt/core';
 import type { z } from 'zod';
@@ -84,7 +85,7 @@ export interface Marks {
 export function priceAt(
   pricePence: number,
   provenance: Provenance,
-  stale: boolean,
+  stale: StaleMark,
   at: Cell,
   truncated = false,
   marks: Partial<Marks> = {},

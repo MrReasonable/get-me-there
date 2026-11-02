@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
+import { classifyPageWithRule, type PageFacts } from '../src/classify.js';
 import type { FrameLike, RequestLike } from '../src/driver.js';
 import {
   decideProbeRoute,
@@ -8,6 +9,7 @@ import {
   onAllowlist,
   refusalKind,
 } from '../src/guard.js';
+import { SELECTORS } from '../src/selectors.js';
 import { FakeContext } from './support/fakeContext.js';
 import { FakePage } from './support/fakePage.js';
 import { memoryLog } from './support/log.js';
@@ -58,6 +60,7 @@ describe('decideRoute (brief §6 allowlist)', () => {
     ['https://www.google.com:8443/travel/flights', 'off-allowlist'],
     ['https://user@www.google.com/travel/flights', 'off-allowlist'],
     ['https://u:p@www.google.com/travel/flights', 'off-allowlist'],
+    ['https://:p@www.google.com/travel/flights', 'off-allowlist'],
   ])('%s is aborted as %s', (u, kind) => {
     expect(decideRoute(u, true)).toEqual({ action: 'abort', kind });
   });
@@ -182,7 +185,17 @@ describe('installGuard (ruling 3: route, framenavigated and request guards)', ()
     await ctx.routeRequest(req('not a url'));
     expect(state.refused).toBe('consent-unhandled');
     const next = await installGuard(ctx, new FakePage(ctx), log);
-    expect(next).toEqual({ hops: [], frameUrls: [], refused: null });
+    expect(next).toEqual({
+      hops: [],
+      frameUrls: [],
+      refused: null,
+      documentLoads: 0,
+      documentStarts: 0,
+      activationGate: false,
+      gateRefusals: 0,
+      reservation: null,
+      held: null,
+    });
   });
   // why: fix round 1 (prov-int M6): a refused sub-frame never names the page; only a main-frame refusal does
   it('a refused sub-frame navigation is aborted but leaves refused null; a main-frame one sets it', async () => {
@@ -214,6 +227,128 @@ describe('installGuard (ruling 3: route, framenavigated and request guards)', ()
     await page.goto('https://consent.google.com/ml?continue=x');
     expect(state.refused).toBeNull();
     expect(state.hops).toEqual(['https://consent.google.com/ml?continue=x']);
+  });
+});
+
+// why: WP21 Task 21.0 (spec §2 "a page is one document load"): the guard counts the main frame's document loads, so a
+// selection that loads a new document is told apart from an in-app change (a History API change fires
+// framenavigated with no request, and so adds a hop but no load)
+describe('the document-load count (WP21 Task 21.0)', () => {
+  it('a main-frame navigation request the route lets through counts once', async () => {
+    const ctx = new FakeContext();
+    const state = await installGuard(ctx, new FakePage(ctx), log);
+    expect(state.documentLoads).toBe(0);
+    expect(await ctx.routeRequest(req('https://www.google.com/travel/flights?q=x'))).toBe('continued');
+    expect(state.documentLoads).toBe(1);
+    // why: a subresource is never a document
+    expect(await ctx.routeRequest(req('https://www.google.com/x.js', { nav: false }))).toBe('continued');
+    expect(state.documentLoads).toBe(1);
+  });
+  it('a goto through the fake page counts its one navigation, however many redirect hops it has', async () => {
+    const ctx = new FakeContext();
+    const page = new FakePage(ctx, {
+      hops: ['https://www.google.com/travel/flights?q=x', 'https://www.google.com/travel/flights/search'],
+    });
+    const state = await installGuard(ctx, page, log);
+    await page.goto('https://www.google.com/travel/flights?q=x');
+    expect(state.documentLoads).toBe(1);
+    expect(state.hops).toHaveLength(2);
+  });
+  it('a framenavigated with a new URL and no request adds a hop and no load', async () => {
+    const ctx = new FakeContext();
+    const page = new FakePage(ctx);
+    const state = await installGuard(ctx, page, log);
+    page.emitFrameNavigated({
+      url: () => 'https://www.google.com/travel/flights/search?tfs=y',
+      parentFrame: () => null,
+    });
+    expect(state.hops).toEqual(['https://www.google.com/travel/flights/search?tfs=y']);
+    expect(state.documentLoads).toBe(0);
+  });
+  it('a sub-frame navigation changes neither the hops nor the count', async () => {
+    const ctx = new FakeContext();
+    const state = await installGuard(ctx, new FakePage(ctx), log);
+    expect(
+      await ctx.routeRequest(req('https://www.google.com/_/FlightsFrontendUi/bscframe', { frame: sub })),
+    ).toBe('continued');
+    expect(state).toMatchObject({ hops: [], documentLoads: 0 });
+  });
+  it('a refused main-frame navigation counts nothing and sets refused', async () => {
+    const ctx = new FakeContext();
+    const state = await installGuard(ctx, new FakePage(ctx), log);
+    expect(await ctx.routeRequest(req('https://www.example.test/'))).toBe('aborted');
+    expect(state).toMatchObject({ refused: 'off-allowlist', documentLoads: 0 });
+  });
+  it('the next page’s install resets the count to 0', async () => {
+    const ctx = new FakeContext();
+    const state = await installGuard(ctx, new FakePage(ctx), log);
+    await ctx.routeRequest(req('https://www.google.com/travel/flights?q=x'));
+    await ctx.routeRequest(req('https://www.google.com/travel/flights?q=y'));
+    expect(state.documentLoads).toBe(2);
+    expect((await installGuard(ctx, new FakePage(ctx), log)).documentLoads).toBe(0);
+  });
+  // why: Ian's ruling of 2026-11-01: the booking view's controls lead off the results page (a seller's site, or the
+  // results host's own redirect path outside /travel/flights); the recorder never activates one, and a navigation to
+  // either is refused and loads nothing
+  it('a booking control’s navigation is refused and counted as no load', async () => {
+    const ctx = new FakeContext();
+    const state = await installGuard(ctx, new FakePage(ctx), log);
+    expect(await ctx.routeRequest(req('https://www.google.com/travel/clk/f?u=x'))).toBe('aborted');
+    expect(state).toMatchObject({ refused: 'off-allowlist', documentLoads: 0 });
+    expect(await ctx.routeRequest(req('https://www.example-airline.test/booking?fare=x'))).toBe('aborted');
+    expect(state.documentLoads).toBe(0);
+  });
+  // why: the review: the route sees a redirect's first URL only (Playwright), so an allowlisted URL that redirects off
+  // the allowlist is let through and counted; the request listener records the whole chain as hops, and the classifier
+  // reads that hop as off-allowlist on the next poll: the post-hoc catch every page relies on
+  it('a redirect from an allowlisted URL to a seller is caught after the fact, from the hops', async () => {
+    const ctx = new FakeContext();
+    const page = new FakePage(ctx, {
+      hops: ['https://www.google.com/travel/flights/booking?x', 'https://www.example-airline.test/book'],
+    });
+    const state = await installGuard(ctx, page, log);
+    await page.goto('https://www.google.com/travel/flights/booking?x');
+    expect(state).toMatchObject({ refused: null, documentLoads: 1 });
+    expect(state.hops).toContain('https://www.example-airline.test/book');
+    const facts: PageFacts = {
+      url: 'https://www.example-airline.test/book',
+      hops: [...state.hops],
+      frameUrls: [],
+      text: {
+        unusualTraffic: false,
+        consentHeading: false,
+        signInHeading: false,
+        challenge: false,
+        noFlights: false,
+        landingHeading: false,
+        returnHeading: false,
+      },
+      accountControl: false,
+      cheapestTabs: [],
+      dateGridButtons: 0,
+      resultLinks: 0,
+      outboundLinks: 0,
+    };
+    expect(classifyPageWithRule(facts, SELECTORS, 'booking')).toEqual({
+      kind: { kind: 'blocked', page: 'off-allowlist' },
+      rule: 'off-allowlist',
+    });
+  });
+  it('decideRoute’s allowlist is unchanged', () => {
+    expect(decideRoute('https://www.google.com/travel/flights', true)).toEqual({ action: 'continue' });
+    expect(decideRoute('https://www.google.com/travel/flights/search?tfs=x', true)).toEqual({
+      action: 'continue',
+    });
+    expect(decideRoute('https://www.google.com/travel/flightsevil', true)).toEqual({
+      action: 'abort',
+      kind: 'off-allowlist',
+    });
+    expect(decideRoute('https://consent.google.com/ml', true)).toEqual({
+      action: 'abort',
+      kind: 'consent-unhandled',
+    });
+    expect(decideRoute('https://accounts.google.com/', true)).toEqual({ action: 'abort', kind: 'sign-in' });
+    expect(decideRoute('https://www.example.test/x.js', false)).toEqual({ action: 'continue' });
   });
 });
 
@@ -250,6 +385,23 @@ describe('the Flights front-end sub-frame (ruling of 2026-10-18)', () => {
     expect(await ctx.routeRequest(captcha)).toBe('aborted');
     expect(state.frameUrls).toContain('https://www.google.com/recaptcha/api2/anchor?k=x');
   });
+  it('an unparsable sub-frame URL is refused, never read as the front-end frame', () => {
+    expect(decideRoute('not a url', true, false)).toEqual({ action: 'abort', kind: 'off-allowlist' });
+  });
+  it('the probe’s route is the main frame’s unless told otherwise: the front-end path is refused', () => {
+    expect(decideProbeRoute(BSC, true)).toEqual({ action: 'abort', kind: 'off-allowlist' });
+    expect(decideProbeRoute(BSC, true, 'GET', false)).toEqual({ action: 'continue' });
+  });
+  it('a refusal is aborted as blocked by the client, and an unparsable URL is logged as such', async () => {
+    const ctx = new FakeContext();
+    await installGuard(ctx, new FakePage(ctx), log);
+    expect(await ctx.routeRequest(req('not a url'))).toBe('aborted');
+    expect(ctx.abortCodes).toEqual(['blockedbyclient']);
+    expect(logs.map((l) => [l.level, l.o, l.msg])).toEqual([
+      ['warn', { kind: 'off-allowlist', host: 'unparsable' }, 'navigation refused'],
+      ['debug', { kind: 'off-allowlist', path: 'unparsable' }, 'navigation refused (path)'],
+    ]);
+  });
   it('a frameless request with the bscframe path is treated as the main frame (refused)', async () => {
     const ctx = new FakeContext();
     await installGuard(ctx, new FakePage(ctx), log);
@@ -264,5 +416,129 @@ describe('the Flights front-end sub-frame (ruling of 2026-10-18)', () => {
       ['warn', { kind: 'off-allowlist', host: 'www.google.com' }],
       ['debug', { kind: 'off-allowlist', path: '/_/OtherUi/x' }],
     ]);
+  });
+});
+
+// why: WP21 Task 21.3 (R-worst, cost-r3-002, D8): while an activation settles the guard aborts every main-frame document
+// navigation, allowlisted or not, so an activation never loads a document; and a return-phase request's documents never
+// pass its reservation. Both are worker-side refusals (`held`), never a cool-down; a navigation off the allowlist keeps
+// its own kind (the consent and sign-in hosts their stop), so its rule says where it was going
+describe('the activation gate and the reservation stop (WP21 Task 21.3)', () => {
+  const BOOKING = 'https://www.google.com/travel/flights/booking?tfs=x';
+  it('an allowlisted booking-path navigation is aborted while the gate is on and admitted with it off', async () => {
+    const ctx = new FakeContext();
+    const state = await installGuard(ctx, new FakePage(ctx), log);
+    state.activationGate = true;
+    expect(await ctx.routeRequest(req(BOOKING))).toBe('aborted');
+    expect(state).toMatchObject({
+      held: 'unexpected-navigation',
+      refused: null,
+      documentLoads: 0,
+      gateRefusals: 1,
+    });
+    state.activationGate = false;
+    expect(await ctx.routeRequest(req(BOOKING))).toBe('continued');
+    expect(state).toMatchObject({ documentLoads: 1, gateRefusals: 1 });
+    // why: the warn line names the refusal and the host only, as every refusal does
+    expect(logs.filter((l) => l.level === 'warn').map((l) => l.o)).toEqual([
+      { kind: 'unexpected-navigation', host: 'www.google.com' },
+    ]);
+  });
+  it('the gate holds only the main frame’s documents: a subresource and a sub-frame pass', async () => {
+    const ctx = new FakeContext();
+    const state = await installGuard(ctx, new FakePage(ctx), log);
+    state.activationGate = true;
+    expect(await ctx.routeRequest(req('https://www.google.com/x.js', { nav: false }))).toBe('continued');
+    expect(
+      await ctx.routeRequest(req('https://www.google.com/_/FlightsFrontendUi/bscframe', { frame: sub })),
+    ).toBe('continued');
+    expect(state).toMatchObject({ held: null, gateRefusals: 0, documentLoads: 0 });
+  });
+  it('off the allowlist under the gate keeps its kind: a seller’s host and a non-flights path off-allowlist, the consent host its own', async () => {
+    const ctx = new FakeContext();
+    const state = await installGuard(ctx, new FakePage(ctx), log);
+    state.activationGate = true;
+    expect(await ctx.routeRequest(req('https://www.example-airline.test/book'))).toBe('aborted');
+    expect(await ctx.routeRequest(req('https://www.google.com/travel/clk/f?u=x'))).toBe('aborted');
+    expect(state).toMatchObject({ refused: 'off-allowlist', held: null, gateRefusals: 2, documentLoads: 0 });
+    const ctx2 = new FakeContext();
+    const s2 = await installGuard(ctx2, new FakePage(ctx2), log);
+    s2.activationGate = true;
+    expect(await ctx2.routeRequest(req('https://consent.google.com/ml'))).toBe('aborted');
+    expect(s2.refused).toBe('consent-unhandled');
+  });
+  it('a seller redirect cannot reach the hops any more: the gate aborts the redirect’s first URL', async () => {
+    const ctx = new FakeContext();
+    const page = new FakePage(ctx, { hops: [BOOKING, 'https://www.example-airline.test/book'] });
+    const state = await installGuard(ctx, page, log);
+    state.activationGate = true;
+    await expect(page.goto(BOOKING)).rejects.toThrow(/aborted/);
+    expect(state.documentLoads).toBe(0);
+    expect(state.held).toBe('unexpected-navigation');
+    // why: the fake's goto emits the first request only before the route aborts it
+    expect(state.hops).not.toContain('https://www.example-airline.test/book');
+  });
+  it('with a reservation of 1 or 2, a main-frame navigation past it is aborted (page-reservation), nothing loaded', async () => {
+    for (const reservation of [1, 2]) {
+      const ctx = new FakeContext();
+      const state = await installGuard(ctx, new FakePage(ctx), log);
+      state.reservation = reservation;
+      for (let i = 0; i < reservation; i++)
+        expect(await ctx.routeRequest(req('https://www.google.com/travel/flights?q=x'))).toBe('continued');
+      expect(await ctx.routeRequest(req('https://www.google.com/travel/flights?q=x'))).toBe('aborted');
+      expect(state).toMatchObject({ documentLoads: reservation, held: 'page-reservation', refused: null });
+    }
+  });
+  it('the reservation stop comes before the gate; the first held refusal is kept', async () => {
+    const ctx = new FakeContext();
+    const state = await installGuard(ctx, new FakePage(ctx), log);
+    state.reservation = 1;
+    await ctx.routeRequest(req('https://www.google.com/travel/flights?q=x'));
+    state.activationGate = true;
+    expect(await ctx.routeRequest(req(BOOKING))).toBe('aborted');
+    expect(state.held).toBe('page-reservation');
+    state.reservation = null;
+    expect(await ctx.routeRequest(req(BOOKING))).toBe('aborted');
+    expect(state.held).toBe('page-reservation');
+  });
+  it('without a reservation (a list or grid page: D8) no navigation is held for its count', async () => {
+    const ctx = new FakeContext();
+    const state = await installGuard(ctx, new FakePage(ctx), log);
+    for (let i = 0; i < 3; i++)
+      expect(await ctx.routeRequest(req('https://www.google.com/travel/flights?q=x'))).toBe('continued');
+    expect(state).toMatchObject({ documentLoads: 3, held: null });
+  });
+  it('the next page’s install resets the gate, the reservation and the held refusal', async () => {
+    const ctx = new FakeContext();
+    const state = await installGuard(ctx, new FakePage(ctx), log);
+    state.activationGate = true;
+    state.reservation = 1;
+    await ctx.routeRequest(req(BOOKING));
+    const next = await installGuard(ctx, new FakePage(ctx), log);
+    expect(next).toMatchObject({
+      activationGate: false,
+      reservation: null,
+      held: null,
+      gateRefusals: 0,
+      documentStarts: 0,
+    });
+  });
+  // why: the controller's ruling on review I2: the recorder's evidence that an activation is in-app must be able to
+  // fail under the gate, so the guard counts every main-frame document the page starts, before any decision: one the
+  // gate aborted, one past the reservation, one off the allowlist and one let through alike
+  it('documentStarts counts every main-frame document the page started, before the gate, the reservation or the allowlist', async () => {
+    const ctx = new FakeContext();
+    const state = await installGuard(ctx, new FakePage(ctx), log);
+    await ctx.routeRequest(req('https://www.google.com/travel/flights?q=x'));
+    state.activationGate = true;
+    await ctx.routeRequest(req(BOOKING));
+    await ctx.routeRequest(req('https://www.example-airline.test/book'));
+    state.activationGate = false;
+    state.reservation = 1;
+    await ctx.routeRequest(req('https://www.google.com/travel/flights?q=y'));
+    // a subresource and a sub-frame's document are no main-frame documents
+    await ctx.routeRequest(req('https://www.google.com/x.js', { nav: false }));
+    await ctx.routeRequest(req('https://www.google.com/_/FlightsFrontendUi/bscframe', { frame: sub }));
+    expect(state).toMatchObject({ documentStarts: 4, documentLoads: 1, gateRefusals: 2 });
   });
 });

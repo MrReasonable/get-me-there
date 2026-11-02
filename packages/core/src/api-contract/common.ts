@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { STALE_KINDS } from '../labels/age.js';
 import { LINK_ALLOWLIST, validateVendorUrl } from '../normalise/vendorUrl.js';
 import type { Buckets } from '../types/execution.js';
 import { SKIP_CODES } from '../types/execution.js';
@@ -18,6 +19,12 @@ export const moneyPenceSchema = z.number().int().min(0);
 export const microGbpSchema = z.number().int().min(0);
 export const ageHoursSchema = z.union([z.number().int().min(0), z.literal('unknown')]);
 /**
+ * Spec rev 55 §3, §10 (ruling 20.6-2): a price's stale mark: `false` when it is not stale, else the kind of threshold
+ * it is older than (`'refresh'`: this search's refresh; `'setting'`: the operator's stale setting), from core's
+ * `stalenessOf`, so the web words the mark without knowing the install's settings. A bare `true` is refused.
+ */
+export const staleMarkSchema = z.union([z.literal(false), z.enum(STALE_KINDS)]);
+/**
  * Every price on the wire: amount, provenance, staleness, effective age, and `truncated`: true when
  * the price came from a discovery tile the pagination cap stopped early, so it is only the
  * cheapest of the rows read (decisions 30 and 36; WP8 derives it from the outcome's `last_error`
@@ -26,11 +33,13 @@ export const ageHoursSchema = z.union([z.number().int().min(0), z.literal('unkno
 export const priceCellSchema = z.object({
   pricePence: moneyPenceSchema,
   provenance: provenanceSchema,
-  stale: z.boolean(),
+  stale: staleMarkSchema,
   ageHours: ageHoursSchema,
   truncated: z.boolean(),
 });
-const count = z.number().int().min(0);
+/** A non-negative integer count: the one shape every count on the wire shares. */
+export const countSchema = z.number().int().min(0);
+const count = countSchema;
 export const bucketsSchema: z.ZodType<Buckets> = z.object({
   priced: count,
   empty: count,
@@ -95,6 +104,8 @@ export const executionStatusSchema = z.enum([
   'skipped_missed',
 ]);
 export const stageSchema = z.enum(['discovery', 'verification']);
+/** What started an execution (spec §7 `search_executions.trigger`): an operator, the scheduler, or a tool run. */
+export const triggerSchema = z.enum(['manual', 'schedule', 'tool']);
 /** Lists are newest first. */
 export const executionSummarySchema = z.object({
   id: z.string(),
@@ -125,6 +136,11 @@ export const usageSchema = z.object({
   windowEnd: isoDateTimeSchema.nullable(),
   /** W3: a provider-month window's scroll clicks, for a provider with a monthly scroll cap (camoufox) only. */
   scrolls: count.exactOptional(),
+  /**
+   * Spec rev 55 §8.1 (the 20.8 ruling): on a `provider-execution` scope, the flight-list pages beside the page cap,
+   * counted against the run's own flight allowance (`calls` are its `/v1/flights` rows, never read as grid pages).
+   */
+  flightLists: z.strictObject({ calls: count, cap: count }).exactOptional(),
 });
 export const cellKeySchema = z.object({
   origin: iataSchema,

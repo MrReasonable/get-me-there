@@ -10,7 +10,10 @@ import type {
   FxInfo,
   HistoryPoint,
   Iata,
+  IsoDate,
   IsoDateTime,
+  Listed,
+  ListedFlight,
   NormalisedItinerary,
   Observation,
   ObservationFields,
@@ -19,8 +22,11 @@ import type {
   Provenance,
   ProviderId,
   ReturnDateSource,
+  ReturnRead,
   SkipCode,
   SourceKind,
+  StopCause,
+  StopDetail,
   SuppliedField,
   VendorPriceMark,
 } from '@gmt/core';
@@ -76,6 +82,12 @@ export type ExecutionCreateInput = {
   browserWindowEnd?: IsoDateTime | null;
   /** Spec §8.2: only on a `skipped_missed` row. */
   skipCode?: SkipCode | null;
+  /**
+   * Spec revision 55 §8.1 "Stop causes": a `skipped_*` row is written with its cause and that cause's sentence (the
+   * scheduler's skips); a pending or running row carries none.
+   */
+  stopCause?: StopCause | null;
+  errorText?: string | null;
 };
 export type ExecutionPatch = Partial<
   Pick<
@@ -89,6 +101,8 @@ export type ExecutionPatch = Partial<
     | 'estimate'
     | 'snapshot'
     | 'browserWindowEnd'
+    | 'stopCause'
+    | 'flightLists'
   >
 >;
 /** One discovery tile's write (spec §7 atomic unit). `discards` is validated and reported by the engine, not stored. */
@@ -190,3 +204,62 @@ export interface OfferHistoryPoint extends HistoryPoint {
   suppliedFields: SuppliedField[];
   executionId: string;
 }
+
+/**
+ * Spec revision 55 §7 `flight_lists`: one flight-list page to store. `providerId` and `sourceKind` are carried so the
+ * repository can refuse a fixture or synthetic list by name (data-002); only `camoufox` / `scraped-self` is written. A
+ * `read` list has a `listed` word and no reason; a `failed` one has a `reason` and neither a `listed` word nor flights.
+ */
+export interface FlightListInsert {
+  definitionId: string;
+  /** NULL for an on-demand read (spec §8.1). */
+  executionId: string | null;
+  providerId: ProviderId;
+  sourceKind: SourceKind;
+  cabin: Cabin;
+  origin: Iata;
+  destination: Iata;
+  departureDate: IsoDate;
+  returnDate: IsoDate;
+  fetchedAt: IsoDateTime;
+  pointOfSale: PointOfSale;
+  status: 'read' | 'failed';
+  reason: StopDetail | null;
+  listed: Listed | null;
+  minMinor: number | null;
+  tabMinor: number | null;
+  cheapestView: 'cheapest' | 'best-fallback' | null;
+  optionsUnparsed: number;
+  optionsOtherCell: number;
+  resultsStated: number | null;
+  /** In page order; at most `FLIGHT_LIST_MAX_FLIGHTS`. */
+  flights: ListedFlight[];
+  /**
+   * Spec revision 56 §5.1, §7: the return read the worker answered with (its attempts, returns and the booking read of
+   * the shown pairing, with its offers), parsed through core's `returnReadSchema` on insert; null (or absent) for a
+   * list read without a return phase, and always for a `failed` list. Optional for good (preflight ruling A4: an
+   * input, absent ≡ null); the engine's flight step and on-demand read always state it (Task 21.6).
+   */
+  returns?: ReturnRead | null;
+}
+
+/**
+ * A stored flight list with its flights in page order (spec rev 55 §7) and its return read (spec rev 56 §7; null for a
+ * list read without one, and for every list stored before migration 0012); the API adds the age, stale mark and
+ * provenance.
+ */
+export interface StoredFlightList extends FlightListInsert {
+  id: number;
+  returns: ReturnRead | null;
+}
+
+/**
+ * Spec revision 56 §7, §8.1 (R-retry): how many of a cell's two newest lists ended with a return or booking status
+ * that is read again (core's `RETURN_TRANSIENT`, `BOOKING_REREAD`: a skipped booking read too, ruling 21.6 I1), newest
+ * first, stopping at the first that did not: 2 means the pair was read again once and ended so again, so the step
+ * reuses it as finished until its refresh.
+ */
+export type TransientStreak = 0 | 1 | 2;
+
+/** The newest list of a cell as the reads return it (spec rev 56 §7; preflight A25): the list and its streak. */
+export type NewestFlightList = StoredFlightList & { transientStreak: TransientStreak };

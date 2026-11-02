@@ -204,6 +204,9 @@ async function preflightPasses(
     signal: run.controller.signal,
     recordFixtures: false,
   });
+  // why: spec rev 56 §8.1 "The plan": every read that returned a status carries the worker's flags, refused or not; the
+  // flight-list step plans its return phase from the last ones reported
+  if (r.flags !== undefined) ctx.workerFlags.set(providerId, r.flags);
   if (r.ok) return true;
   ctx.repos.cells.setOutcomesForProvider(run.executionId, 'discovery', providerId, ['not_run'], {
     status: 'skipped',
@@ -212,6 +215,13 @@ async function preflightPasses(
   });
   run.disabled.add(providerId);
   run.disabledReason.set(providerId, r.skip);
+  // why: revision 55 §8.1 — the cause stores the refusal's class word only, never the provider's sentence (`detail`
+  // stays in last_error and the log): the provider's own word, else one from how it was left out
+  run.disabledDetail.set(providerId, {
+    skip: r.skip,
+    detail: r.reason ?? (r.skip === 'provider_unavailable' ? 'provider-unavailable' : 'blocked'),
+    until: r.until ?? null,
+  });
   run.log.child({ providerId }).warn({ skip: r.skip, detail: r.detail }, 'discovery: preflight refused');
   if (r.until !== undefined)
     run.notices.push({
@@ -241,6 +251,9 @@ async function fetchTiles(
     const keys = tile.plan.coveredCells.map(cellKeyString);
     for (const k of keys) lane.inFlight.add(k);
     try {
+      // why: revision 55 §8.1 — an on-demand flight read holds the browser lease; a browser page of this pass (a run
+      // that went pending while the read was in flight) waits for it; a cancel or SIGTERM ends the wait (abort)
+      if (loadsBrowserPages(providerId) && !run.isChild) await ctx.lease.whenFree(run.controller.signal);
       const result = await cap.fetchTile(tile.plan, tile.query, {
         executionId: run.executionId,
         signal: run.controller.signal,

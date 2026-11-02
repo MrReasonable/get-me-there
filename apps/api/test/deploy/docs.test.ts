@@ -142,14 +142,24 @@ describe('docs/setup.md operations rules (plan decision 63; round-1 review)', ()
     expect(section1).toContain(AUTH_MISSING);
   });
 
-  it('explains that trial definitions allow 0 billed calls and how to verify a cell anyway (N3, ruling 9; WP19: the date pair detail’s verify)', () => {
+  it('explains that trial searches allow 0 billed calls and how to verify a cell anyway (N3, ruling 9; WP19: the date pair detail’s verify)', () => {
     expect(flat).toContain(
-      'On the trial plan new definitions allow 0 billed calls per run, so a date pair\'s "Search <cell> for itineraries" (in its detail, opened from the Dates view) is unavailable until you raise the definition\'s call cap in Definitions → Run budget (Max billed calls per run); 6 covers one cell.',
+      'On the trial plan new searches allow 0 billed calls per run, so a date pair\'s "Search <cell> for itineraries" (in its detail, opened from the Dates view) is unavailable until you raise the search\'s call cap in its Edit page → More options → Run budget (Max billed calls per run); 6 covers one cell.',
     );
     const limits = read('docs/api-limits.md').replace(/\s+/g, ' ');
     expect(limits).not.toContain('that call cap is the only stop');
     expect(limits).toContain(
-      "that call cap and each definition's call cap (Max billed calls per run) are the stops",
+      "that call cap and each search's call cap (Max billed calls per run) are the stops",
+    );
+  });
+
+  it('api-limits says search, not definition, in its operator prose, and that a new search names camoufox by default (WP20 final review)', () => {
+    const limits = read('docs/api-limits.md').replace(/\s+/g, ' ');
+    expect(limits).not.toMatch(/\bdefinitions?\b/i);
+    expect(limits).toContain('once it is enabled a new search names it by default');
+    expect(limits).not.toContain('pauses the run for a manual resume');
+    expect(limits).toContain(
+      'that stop is never resumed: Search again starts a fresh run that reuses the prices already found',
     );
   });
 

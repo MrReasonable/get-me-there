@@ -10,10 +10,10 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import { asIsoDateTime, type BlockedPage, CONSENT_FIX } from '@gmt/core';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { loadWorkerConfig } from '../src/config.js';
 import { CooldownStore } from '../src/cooldown.js';
-import { createDriver, probePage } from '../src/driver.js';
+import { createDriver, type NamedElement, probePage } from '../src/driver.js';
 import { buildLaunchOptions, launchOptionsForMeta, prepareLaunch } from '../src/launch.js';
 import { acquireLock } from '../src/lock.js';
 import { debugLogging } from '../src/log.js';
@@ -41,6 +41,7 @@ import {
 import { FakeContext } from './support/fakeContext.js';
 import {
   descendants,
+  FakeLocator,
   type FakeNode,
   FakePage,
   formNodes,
@@ -477,7 +478,19 @@ describe('the recorder (brief Task 14.2 rules)', () => {
   });
   it('rule 3: the probe page has no click method, and another blocked kind cools down as usual', async () => {
     const page = new FakePage(null);
-    const probe = probePage(createDriver(page, { hops: [], frameUrls: [], refused: null }));
+    const probe = probePage(
+      createDriver(page, {
+        hops: [],
+        frameUrls: [],
+        refused: null,
+        documentLoads: 0,
+        documentStarts: 0,
+        activationGate: false,
+        gateRefusals: 0,
+        reservation: null,
+        held: null,
+      }),
+    );
     expect('click' in probe).toBe(false);
     expect('clickCheapest' in probe).toBe(false);
     const t = setup({
@@ -1762,6 +1775,39 @@ describe('record --grid', () => {
       { total: 1, inTablist: 0 },
     ]);
   });
+  // why: WP21 Task 21.3 fix round 2: the lines are read in one page call, so an element replaced as it is read answers no
+  // text; it is recorded as no text
+  it('a line whose text reads as null is recorded as no text', async () => {
+    let nullTexts = true;
+    const { t, deps } = gridRun({
+      onScroll: () => {
+        nullTexts = false;
+      },
+    });
+    const elements: (
+      this: FakeLocator,
+      fn: (els: NamedElement[]) => NamedElement[],
+    ) => Promise<NamedElement[]> = FakeLocator.prototype.evaluateAll;
+    const spy = vi.spyOn(FakeLocator.prototype, 'evaluateAll').mockImplementation(async function <R>(
+      this: FakeLocator,
+      fn: (els: NamedElement[]) => R,
+    ): Promise<R> {
+      const els = await elements.call(this, (all) => all);
+      return fn(
+        nullTexts
+          ? els.map((e) => ({ getAttribute: (a: string) => e.getAttribute(a), textContent: null }))
+          : els,
+      );
+    });
+    try {
+      expect(await record(t.ctx([...G, '--moves', 'right']), cfg, deps)).toBe(0);
+    } finally {
+      spy.mockRestore();
+    }
+    const rec = recOf(t);
+    expect(rec.views[0].lines.texts).toEqual(['', '']);
+    expect(rec.views[1].lines.texts[0]).toMatch(/^0000Thu 18 Mar/);
+  });
   // why: the recordings of 2026-10-18: one scroll moves one day, and the page rotates its elements after a scroll
   it('measures a one-day step from rotated lines', async () => {
     let n0 = 0;
@@ -1941,6 +1987,7 @@ describe('parseRecordArgs', () => {
       request: null,
       pages: 1,
       moves: [],
+      forceSecond: false,
     });
     expect(parseRecordArgs([...Q, '--stability']).pages).toBe(3);
     expect(parseRecordArgs([...Q, '--no-flights']).kind).toBe('no-flights');
@@ -2029,7 +2076,13 @@ describe('record --landing (Task 17.8)', () => {
   const cooldownOf = (t: ReturnType<typeof setup>) =>
     new CooldownStore({ dir: t.dataDir, challengeHours: 48, clock: t.timers.clock }).active();
   it('parses with no query, one page', () => {
-    expect(parseRecordArgs(['--landing'])).toEqual({ kind: 'landing', request: null, pages: 1, moves: [] });
+    expect(parseRecordArgs(['--landing'])).toEqual({
+      kind: 'landing',
+      request: null,
+      pages: 1,
+      moves: [],
+      forceSecond: false,
+    });
     expect(() => parseRecordArgs(['--landing', '--grid'])).toThrow(/at most one of .*--landing/);
   });
   it('loads the landing page with SOCS set, clicks nothing and records the view, the flag still off', async () => {

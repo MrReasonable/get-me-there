@@ -13,19 +13,19 @@ import {
   cellKeyString,
   DEFAULT_DISCOVERY_REFRESH_HOURS,
   daysBetween,
-  effectiveAge,
   evaluateConstraints,
   type FlightProvider,
   hoursSince,
   type IsoDateTime,
-  isStale,
   type Provenance,
   type ProviderId,
   type SearchDefinition,
+  type StaleMark,
+  type StaleThresholds,
+  stalenessOf,
   unverifiedNames,
   verdictClass,
   withAssumedBound,
-  worstCaseAgeHours,
 } from '@gmt/core';
 import type { CalendarPriceRow, ObservationRow } from '@gmt/db';
 import type { z } from 'zod';
@@ -47,44 +47,34 @@ export function refreshHoursFor(def: SearchDefinition, providerId: ProviderId): 
 }
 
 /**
- * The calendar-basis stale threshold of a provider (spec §8.1): `CALENDAR_STALE_AFTER_HOURS` when set, else the
- * discovery refresh plus the provider's declared cache age (0 when the vendor's age is unknown).
+ * The thresholds core's per-price stale rule reads for a price of `providerId` under the row context's definition (spec
+ * revision 55 §8.1): its discovery refresh for that provider, `CALENDAR_STALE_AFTER_HOURS` (null when unset) and
+ * `STALE_AFTER_HOURS`. The price's own stored age does the rest (`stalenessOf`); the registered provider's declared age
+ * is never read.
  */
-export function calendarThreshold(
-  config: Config,
-  providers: readonly FlightProvider[],
+export function staleThresholds(
+  rc: Pick<RowContext, 'def' | 'config'>,
   providerId: ProviderId,
-  refreshHours: number,
-): number {
-  if (config.calendarStaleAfterHours !== null) return config.calendarStaleAfterHours;
-  const declared = providers.find((p) => p.id === providerId)?.discovery?.info.maxAgeHours ?? 0;
-  return refreshHours + (declared === 'unknown' ? 0 : declared);
-}
-
-/** The calendar threshold for a provider of the row context's definition; the calendar route reports it per provider. */
-export function calendarStaleAfterHours(rc: RowContext, providerId: ProviderId): number {
-  return calendarThreshold(rc.config, rc.providers, providerId, refreshHoursFor(rc.def, providerId));
-}
-
-/** The threshold a price of this basis is judged against (spec §8.1). */
-export function thresholdFor(basis: Basis, providerId: ProviderId, rc: RowContext): number {
-  return basis === 'verified' ? rc.config.staleAfterHours : calendarStaleAfterHours(rc, providerId);
+): StaleThresholds {
+  return {
+    refreshHours: refreshHoursFor(rc.def, providerId),
+    overrideHours: rc.config.calendarStaleAfterHours,
+    staleAfterHours: rc.config.staleAfterHours,
+  };
 }
 
 /**
- * Spec §3 and §8.1 at revision 24 (plan decisions 44, 53, 54). `ageHours` is the effective age from core: the observed
- * age when the vendor dates the price, else the fetch age plus a known `maxAgeHours`, else the fetch age alone (the web
- * labels that case "vendor's cache age unknown" from `provenance.maxAgeHours`). A price is stale when its effective age
- * exceeds the threshold, so an unknown vendor age is never stale on that account alone: core's `isStale`, the one copy
- * of the rule (decision 55).
+ * Spec revision 55 §3, §8.1: a price's effective age and staleness by core's one per-price rule (`stalenessOf`) over its
+ * stored provenance, on its basis (decisions 44, 55: an unknown vendor age is aged by its fetch age alone). `mark` is
+ * the stale mark the wire carries (`false`, or the kind of threshold the price is older than: ruling 20.6-2).
  */
 export function staleness(
   p: Provenance,
-  thresholdHours: number,
-  now: IsoDateTime,
-): { ageHours: number; stale: boolean } {
-  const ageHours = worstCaseAgeHours(effectiveAge(p, now));
-  return { ageHours, stale: isStale(p, now, thresholdHours) };
+  basis: Basis,
+  rc: Pick<RowContext, 'def' | 'config' | 'now'>,
+): { ageHours: number; stale: boolean; mark: StaleMark } {
+  const s = stalenessOf({ provenance: p, basis }, staleThresholds(rc, p.providerId), rc.now);
+  return { ageHours: s.ageHours, stale: s.stale, mark: s.mark };
 }
 
 /** A price on the wire: amount, provenance, staleness, age, truncation (decisions 36, 44). */
@@ -95,7 +85,7 @@ export function priceCell(
   rc: RowContext,
   truncated: boolean,
 ): PriceCell {
-  const s = staleness(provenance, thresholdFor(basis, provenance.providerId, rc), rc.now);
+  const s = staleness(provenance, basis, rc);
   // why: N4 (pie-007): a calendar bound the app assumed (its provider's capability says so) is labelled "assumed".
   const p =
     basis === 'calendar'
@@ -104,7 +94,7 @@ export function priceCell(
           rc.providers.find((x) => x.id === provenance.providerId)?.discovery?.info,
         )
       : provenance;
-  return { pricePence, provenance: p, stale: s.stale, ageHours: s.ageHours, truncated };
+  return { pricePence, provenance: p, stale: s.mark, ageHours: s.ageHours, truncated };
 }
 
 /** The price part of a row, for the views that show a row's price as a PriceCell. */
@@ -180,7 +170,7 @@ export function calendarRow(
     fareConditions: null,
     selfTransfer: null,
     booking: { kind: 'none' },
-    searchLink: safeSearchLink(r.providerId, r.cell, rc.def, r.vendorLink),
+    searchLink: safeSearchLink(r.providerId, r.cell, rc.def, r.vendorLink, rc.config.pointOfSale),
     otherOffers: [],
     notSeenInLatest: null,
     superseded,
@@ -228,7 +218,7 @@ export function verifiedRow(
     fareConditions: o.fareConditions,
     selfTransfer: o.selfTransfer,
     booking: safeBooking(o.booking, o.offer.providerId),
-    searchLink: safeSearchLink(o.offer.providerId, o.cell, rc.def),
+    searchLink: safeSearchLink(o.offer.providerId, o.cell, rc.def, null, rc.config.pointOfSale),
     otherOffers: [],
     notSeenInLatest,
     superseded: false,

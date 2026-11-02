@@ -1,4 +1,10 @@
-import { AbortedError, BudgetExceeded, isoDateTimeOfEpochMs, ProviderError } from '@gmt/core';
+import {
+  AbortedError,
+  BudgetExceeded,
+  type IsoDateTime,
+  isoDateTimeOfEpochMs,
+  ProviderError,
+} from '@gmt/core';
 import pRetry from 'p-retry';
 import { type AttemptResult, raceAbort, runAttempt } from './attempt.js';
 import { canonicalCacheKey } from './cacheKey.js';
@@ -53,7 +59,9 @@ interface Flight {
  *   egress → cache lookup ─hit─▶ recordCacheHit → { body, fetchedAt: storedAt }
  *     │miss
  *   in-flight dedup (joiners ledger a cache hit, own their abort) → p-retry (3 attempts) {
- *       limiter (queue age, abort) → budget.reserve → fetch → reservation.finalise → classify
+ *       holdUntil wait (spec rev 56 §5.3: a provider's hold, under the signal, outside the queue's wait)
+ *       → limiter (queue age, abort; the hold again once the slot is granted) → budget.reserve → fetch
+ *       → reservation.finalise → the answer's stated next start held (`nextStartOf`) → classify
  *   } → cache.set when cacheable → { body, fetchedAt: now }
  *
  * Throws ProviderError (classified), BudgetExceeded (from reserve, before any fetch), AbortedError.
@@ -102,6 +110,7 @@ export function createHttpKit(deps: HttpKitDeps): HttpKit {
             return runAttempt(deps, r, limits, {
               attempt,
               secondsToHourRefresh: () => limiter.secondsToHourRefresh(),
+              hold: (at) => limiter.holdUntil(Date.parse(at)),
             });
           }, run),
         {
@@ -220,5 +229,16 @@ export function createHttpKit(deps: HttpKitDeps): HttpKit {
     return promise;
   }
 
-  return { request, stats: () => ({ inFlight: inFlight.size }) };
+  /**
+   * Spec rev 56 §5.3 (R-spacing): the provider's next start waits until `at` (the limiter awaits it before the queue
+   * and again once a job's slot is granted). Each attempt sets it itself from an answer that states it (`nextStartOf`);
+   * this is the public seam for any other caller. why the epoch from `Date.parse`: the limiter times its waits on
+   * `Date.now()`, as every duration here is (fake timers drive them in tests); an id without limits has no limiter and
+   * nothing to hold.
+   */
+  function holdUntil(providerId: HttpProviderId, at: IsoDateTime): void {
+    limiters.get(providerId)?.holdUntil(Date.parse(at));
+  }
+
+  return { request, stats: () => ({ inFlight: inFlight.size }), holdUntil };
 }

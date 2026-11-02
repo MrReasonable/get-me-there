@@ -2,14 +2,22 @@ import { describe, expect, it } from 'vitest';
 import {
   alertRuleInputSchema,
   alertRuleUpdateRequestSchema,
+  billedCallsSchema,
   cronSchema,
   definitionCreateRequestSchema,
+  estimateResponseSchema,
+  executionBudgetSchema,
+  executionFlightsSchema,
+  executionResponseSchema,
+  flightListsStateSchema,
   healthResponseSchema,
   priceCellSchema,
   ROUTES,
   resultRowSchema,
   resultsQuerySchema,
   resultsResponseSchema,
+  softConfirmSchema,
+  startExecutionRequestSchema,
 } from '../../src/api-contract/index.js';
 import { verifiedFigure } from '../helpers/datePairs.js';
 
@@ -89,7 +97,11 @@ describe('api-contract (spec §10)', () => {
     expect(priceCellSchema.safeParse(bare).success).toBe(false);
     expect(priceCellSchema.safeParse(cell).success).toBe(true);
     expect(priceCellSchema.safeParse({ ...cell, pricePence: 412.5 }).success).toBe(false);
-    expect(priceCellSchema.safeParse({ ...cell, stale: true, ageHours: 'unknown' }).success).toBe(true);
+    // ruling 20.6-2: the stale mark carries its threshold's kind; a bare `true` says nothing of which, and is refused
+    expect(priceCellSchema.safeParse({ ...cell, stale: 'refresh', ageHours: 'unknown' }).success).toBe(true);
+    expect(priceCellSchema.safeParse({ ...cell, stale: 'setting' }).success).toBe(true);
+    expect(priceCellSchema.safeParse({ ...cell, stale: true }).success).toBe(false);
+    expect(priceCellSchema.safeParse({ ...cell, stale: 'stale' }).success).toBe(false);
   });
   it('a result row without provenance is rejected', () => {
     const row = {
@@ -352,5 +364,103 @@ describe('/results scope parameters and datePairFigure (WP19; spec §10)', () =>
     expect(
       resultsResponseSchema.safeParse({ ...base, datePairFigure: { ...figure, airportPair } }).success,
     ).toBe(false);
+  });
+});
+
+describe("startExecutionRequestSchema (spec rev 55 §8.1: Search again's start flags)", () => {
+  it('accepts and keeps requireCovered and replaceStopped beside the confirmation', () => {
+    const body = { confirmCostPence: 120, confirmCalls: 3, requireCovered: true, replaceStopped: true };
+    expect(startExecutionRequestSchema.parse(body)).toEqual(body);
+    expect(startExecutionRequestSchema.parse({ requireCovered: false, replaceStopped: false })).toEqual({
+      requireCovered: false,
+      replaceStopped: false,
+    });
+  });
+  it('leaves both out when not sent, and refuses a flag that is not a boolean', () => {
+    expect(startExecutionRequestSchema.parse({})).toEqual({});
+    expect(startExecutionRequestSchema.safeParse({ requireCovered: 'yes' }).success).toBe(false);
+    expect(startExecutionRequestSchema.safeParse({ replaceStopped: 1 }).success).toBe(false);
+  });
+});
+
+describe('executionResponseSchema (spec rev 55 §10: stop, estimatedFinishAt and flights)', () => {
+  const flights = { planned: 10, read: 6, reused: 2, failed: 2, ended: null };
+  it('carries the three fields, each nullable', () => {
+    for (const k of ['stop', 'estimatedFinishAt', 'flights'] as const)
+      expect(executionResponseSchema.shape[k].safeParse(null).success, k).toBe(true);
+    expect(
+      executionResponseSchema.shape.stop.parse({
+        sentence: 'Stopped by you.',
+        fix: { text: 'Search again', command: null },
+      }),
+    ).toEqual({ sentence: 'Stopped by you.', fix: { text: 'Search again', command: null } });
+    expect(executionResponseSchema.shape.estimatedFinishAt.parse('2026-10-14T15:00:00.000Z')).toBe(
+      '2026-10-14T15:00:00.000Z',
+    );
+  });
+  it('flights: read + reused + failed never above planned, and an end word of the four only', () => {
+    expect(executionFlightsSchema.parse(flights)).toEqual(flights);
+    for (const ended of ['window', 'monthly-cap', 'stopped', 'disabled'])
+      expect(executionFlightsSchema.safeParse({ ...flights, ended }).success, ended).toBe(true);
+    expect(executionFlightsSchema.safeParse({ ...flights, failed: 3 }).success).toBe(false);
+    expect(executionFlightsSchema.safeParse({ ...flights, ended: 'gate' }).success).toBe(false);
+  });
+  it('the stored flight-list plan is strict', () => {
+    const plan = { planned: 1, cells: [], reused: 0, ended: 'window' };
+    expect(flightListsStateSchema.parse(plan)).toEqual(plan);
+    expect(flightListsStateSchema.safeParse({ ...plan, ended: 'disabled' }).success).toBe(false);
+    expect(flightListsStateSchema.safeParse({ ...plan, note: 'x' }).success).toBe(false);
+  });
+});
+
+describe('estimateResponseSchema (spec rev 55 §10: what the estimate asks)', () => {
+  const asks = {
+    datePairs: 2184,
+    datePairsCovered: 1288,
+    datePairsPartly: 0,
+    datePairsReused: 0,
+    softConfirm: null,
+    billedCalls: [],
+    monthlyPages: null,
+  };
+  it('the fields are required: a response without them is refused', () => {
+    expect(estimateResponseSchema.shape.datePairs.safeParse(undefined).success).toBe(false);
+    expect(estimateResponseSchema.shape.softConfirm.safeParse(undefined).success).toBe(false);
+    expect(estimateResponseSchema.shape.billedCalls.safeParse(undefined).success).toBe(false);
+    expect(estimateResponseSchema.shape.monthlyPages.safeParse(undefined).success).toBe(false);
+    expect(estimateResponseSchema.shape.monthlyPages.parse(asks.monthlyPages)).toBeNull();
+  });
+  it('softConfirm is a code with its figures and no English', () => {
+    const cost = { reason: 'cost', estimatePence: 120, thresholdPence: 100 };
+    const share = {
+      reason: 'call-share',
+      providerId: 'searchapi',
+      calls: 2001,
+      cap: 10_000,
+      window: 'month',
+    };
+    expect(softConfirmSchema.parse(cost)).toEqual(cost);
+    expect(softConfirmSchema.parse(share)).toEqual(share);
+    expect(softConfirmSchema.safeParse({ ...cost, message: 'above your check' }).success).toBe(false);
+    expect(softConfirmSchema.safeParse({ ...share, window: 'week' }).success).toBe(false);
+    expect(softConfirmSchema.safeParse({ reason: 'other' }).success).toBe(false);
+  });
+  it('billedCalls entries carry the provider, calls, the calls left (null without a cap) and the window', () => {
+    const entry = { providerId: 'searchapi', calls: 120, left: 9880, window: 'month' };
+    expect(billedCallsSchema.parse(entry)).toEqual(entry);
+    expect(billedCallsSchema.parse({ ...entry, left: null }).left).toBeNull();
+    expect(billedCallsSchema.safeParse({ ...entry, left: -1 }).success).toBe(false);
+  });
+});
+
+describe('executionBudgetSchema.flightListPages (spec rev 55 §8.1, ruling A5)', () => {
+  const base = { maxCalls: 2000, maxFreeCalls: 2000, maxCostMicroGbp: 0 };
+  it('accepts a flight allowance of 10 and a budget without one (older runs parse)', () => {
+    expect(executionBudgetSchema.parse({ ...base, flightListPages: 10 }).flightListPages).toBe(10);
+    expect(executionBudgetSchema.safeParse(base).success).toBe(true);
+  });
+  it('refuses 0, and the key present as undefined', () => {
+    expect(executionBudgetSchema.safeParse({ ...base, flightListPages: 0 }).success).toBe(false);
+    expect(executionBudgetSchema.safeParse({ ...base, flightListPages: undefined }).success).toBe(false);
   });
 });

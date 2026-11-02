@@ -1,10 +1,42 @@
 import type { z } from 'zod';
 import type { CoverageSummary, ExecutionSummary, priceCellSchema } from '../api-contract/common.js';
 import type { DatePairsResponse } from '../api-contract/datePairs.js';
+import type { StopDetail } from '../api-contract/stopCause.js';
+import type { StaleMark } from '../labels/age.js';
 import type { Buckets } from '../types/execution.js';
 import type { Iata, IsoDate } from '../types/ids.js';
 import type { Provenance, ProviderId } from '../types/provenance.js';
+import type { GridPrice } from './figure.js';
+import { type FigureBasis, PAIRING_READ, type PairingRead } from './pairing.js';
 import type { DatePairSpace } from './space.js';
+
+/**
+ * A pairing as the board shows it (spec rev 56 §10's `pairing` group, its provenance in full): the cheapest offer's
+ * stated price, or the return's "from" price when `isFrom` (then no seller and no fare); the offers read and whether
+ * they are complete; which outbound the pairing used; the two legs' local times (`HH:MM`); whether the cheapest offer
+ * differs from the "from" price; and the flight list's provenance, stale mark and age. A pairing figure's own words, and
+ * the pairing shown beneath a calendar figure (within-older, within-other-limits, over-limit, sellers-not-read,
+ * offers-incomplete).
+ */
+export interface DatePairPairing {
+  pricePence: number;
+  /** the return's "from" price (Task 21.7): `pricePence` itself when `isFrom`; it differs exactly when `mismatch` */
+  fromPence: number;
+  isFrom: boolean;
+  seller: string | null;
+  fare: string | null;
+  offersRead: number;
+  complete: boolean;
+  which: 'cheapest' | 'next-cheapest' | 'over-limit';
+  departOut: string;
+  arriveOut: string;
+  departBack: string;
+  arriveBack: string;
+  mismatch: boolean;
+  provenance: Provenance;
+  stale: StaleMark;
+  ageHours: number | 'unknown';
+}
 
 /**
  * A date pair's figure as the web reads it (spec §10, §11): a full price cell with its complete provenance, its airport
@@ -14,7 +46,8 @@ import type { DatePairSpace } from './space.js';
 export interface DatePairFigure {
   /** pricePence, provenance, stale, ageHours, truncated */
   price: z.output<typeof priceCellSchema>;
-  basis: 'verified' | 'calendar';
+  /** spec rev 56 §6.9: a pairing figure's price is its cheapest offer's, its provenance the flight list's */
+  basis: FigureBasis;
   origin: Iata;
   destination: Iata;
   airportPair: number;
@@ -33,11 +66,22 @@ export interface DatePairFigure {
   cheaperCached: {
     pricePence: number;
     provenance: Provenance;
-    stale: boolean;
+    stale: StaleMark;
     truncated: boolean;
     origin: Iata;
     destination: Iata;
   } | null;
+  /**
+   * Spec rev 56 §6.9: the calendar price a pairing figure replaced, shown beneath it; null on every other basis.
+   * Required since Task 21.7 (R-order); the decoder always fills it.
+   */
+  gridPrice: GridPrice | null;
+  /** Spec rev 56 §6.9: a pairing figure's own words, or the pairing beneath a calendar figure; else null. */
+  pairing: DatePairPairing | null;
+  /** Spec rev 56 §6.9: the cell's flight read; `within` exactly on a pairing figure; `not-read` with no list. */
+  pairingRead: PairingRead;
+  /** The 21.6 ruling: why the cell's newest flight list failed, exactly on a `list-failed` read; else null. */
+  listReason: StopDetail | null;
 }
 
 /** One date pair of the space: its dates, its six buckets and counts over the airport pairs in scope, its figure. */
@@ -65,7 +109,6 @@ export interface DecodedDatePairs {
   discoveryProviders: ProviderId[];
   verificationProviderConfigured: boolean;
   staleAfterHours: number;
-  calendarStaleAfterHours: Partial<Record<ProviderId, number>>;
   space: DatePairSpace;
   scope: DatePairsResponse['scope'];
   summary: CoverageSummary;
@@ -99,8 +142,10 @@ function indexOf(at: ReadonlyMap<string, number>, code: Iata): number {
 
 /**
  * The route's body from the decoded form, in one pass over the date pairs: every column written as it goes, each
- * distinct provenance entered once in the table (keyed by `provenanceKey`), and a figure's cheaper-cached price and
- * local times in their sparse groups, keyed by the figure's position. `decodeDatePairs` is its inverse.
+ * distinct provenance entered once in the table (keyed by `provenanceKey`), and a figure's cheaper-cached price, local
+ * times, grid price, pairing, `pairingRead` and a failed list's reason in their sparse groups, keyed by the figure's position (spec rev
+ * 56 §10; ruling R-sparse: an entry only for a read other than `not-read`, an absent one written `not-read`).
+ * `decodeDatePairs` is its inverse.
  */
 export function encodeDatePairs(d: DecodedDatePairs): DatePairsResponse {
   const originAt = new Map(d.scope.origins.map((c, i) => [c, i]));
@@ -144,6 +189,34 @@ export function encodeDatePairs(d: DecodedDatePairs): DatePairsResponse {
     notSeenInLatestAgeHours: [],
     journeyMinutes: [],
     fromEarlierSearch: [],
+  };
+  const pairingRead: NonNullable<DatePairsResponse['pairingRead']> = { figure: [], code: [] };
+  const listReason: NonNullable<DatePairsResponse['listReason']> = { figure: [], reason: [] };
+  const grid: NonNullable<DatePairsResponse['gridPrice']> = {
+    figure: [],
+    pricePence: [],
+    provenance: [],
+    stale: [],
+    truncated: [],
+  };
+  const pairing: NonNullable<DatePairsResponse['pairing']> = {
+    figure: [],
+    pricePence: [],
+    fromPence: [],
+    isFrom: [],
+    seller: [],
+    fare: [],
+    offersRead: [],
+    complete: [],
+    which: [],
+    departOut: [],
+    arriveOut: [],
+    departBack: [],
+    arriveBack: [],
+    mismatch: [],
+    provenance: [],
+    stale: [],
+    ageHours: [],
   };
   const cheaper: DatePairsResponse['cheaperCached'] = {
     figure: [],
@@ -193,6 +266,17 @@ export function encodeDatePairs(d: DecodedDatePairs): DatePairsResponse {
     f.notSeenInLatestAgeHours.push(x.notSeenInLatest === null ? null : x.notSeenInLatest.ageHours);
     f.journeyMinutes.push(x.journeyMinutes);
     f.fromEarlierSearch.push(x.fromEarlierSearch);
+    // why: R-sparse: an entry only for a read other than not-read, its code the read's index in PAIRING_READ
+    const read: PairingRead = x.pairingRead;
+    if (read !== 'not-read') {
+      pairingRead.figure.push(figure);
+      pairingRead.code.push(PAIRING_READ.indexOf(read));
+    }
+    const why = x.listReason;
+    if (why !== null) {
+      listReason.figure.push(figure);
+      listReason.reason.push(why);
+    }
     const c = x.cheaperCached;
     if (c !== null) {
       cheaper.figure.push(figure);
@@ -210,6 +294,34 @@ export function encodeDatePairs(d: DecodedDatePairs): DatePairsResponse {
       times.departBack.push(x.departBack);
       times.arriveBack.push(x.arriveBack);
     }
+    const g = x.gridPrice;
+    if (g !== null) {
+      grid.figure.push(figure);
+      grid.pricePence.push(g.pricePence);
+      grid.provenance.push(entry(g.provenance));
+      grid.stale.push(g.stale);
+      grid.truncated.push(g.truncated);
+    }
+    const q = x.pairing;
+    if (q !== null) {
+      pairing.figure.push(figure);
+      pairing.pricePence.push(q.pricePence);
+      pairing.fromPence.push(q.fromPence);
+      pairing.isFrom.push(q.isFrom);
+      pairing.seller.push(q.seller);
+      pairing.fare.push(q.fare);
+      pairing.offersRead.push(q.offersRead);
+      pairing.complete.push(q.complete);
+      pairing.which.push(q.which);
+      pairing.departOut.push(q.departOut);
+      pairing.arriveOut.push(q.arriveOut);
+      pairing.departBack.push(q.departBack);
+      pairing.arriveBack.push(q.arriveBack);
+      pairing.mismatch.push(q.mismatch);
+      pairing.provenance.push(entry(q.provenance));
+      pairing.stale.push(q.stale);
+      pairing.ageHours.push(q.ageHours);
+    }
   }
   const { space, scope } = d;
   return {
@@ -218,7 +330,6 @@ export function encodeDatePairs(d: DecodedDatePairs): DatePairsResponse {
     discoveryProviders: d.discoveryProviders,
     verificationProviderConfigured: d.verificationProviderConfigured,
     staleAfterHours: d.staleAfterHours,
-    calendarStaleAfterHours: d.calendarStaleAfterHours,
     // why: copied field by field, so a caller passing a whole ResolvedSpace never puts its airports on the wire
     space: {
       departureFrom: space.departureFrom,
@@ -239,5 +350,9 @@ export function encodeDatePairs(d: DecodedDatePairs): DatePairsResponse {
     figures: f,
     cheaperCached: cheaper,
     times,
+    gridPrice: grid,
+    pairing,
+    pairingRead,
+    listReason,
   };
 }

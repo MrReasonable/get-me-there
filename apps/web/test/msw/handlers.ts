@@ -2,17 +2,19 @@ import { HttpResponse, http, type JsonBodyType } from 'msw';
 import {
   API,
   airports,
+  budgetResponse,
   calendarGap,
   coverageCheck,
   coverageResponse,
   definition,
-  estimate,
+  estimateResponse,
   execution,
   providersResponse,
   resultsResponse,
   statusReport,
 } from '../fixtures.js';
 import { datesHandlers } from './datesHandlers.js';
+import { searchesHandlers } from './searchesHandlers.js';
 import { wp10Handlers } from './wp10Handlers.js';
 
 /** A valid response body for each mutation the views send. */
@@ -24,8 +26,10 @@ const MUTATIONS: ReadonlyArray<{ method: 'POST' | 'PUT'; path: string; body: Jso
   {
     method: 'POST',
     path: '/api/definitions/estimate',
-    body: { estimate: estimate(), budgetFit: definition().budgetFit },
+    body: estimateResponse(),
   },
+  // WP20 Task 20.5 R2: a saved search's estimate, of its draft or as stored
+  { method: 'POST', path: '/api/definitions/:id/estimate', body: estimateResponse() },
   { method: 'POST', path: '/api/definitions/coverage-check', body: coverageCheck() },
   { method: 'POST', path: '/api/definitions', body: definition({ id: 'def-0002' }) },
   { method: 'PUT', path: '/api/definitions/:id', body: definition() },
@@ -46,8 +50,11 @@ export const handlers = [
   ...wp10Handlers,
   // WP19: the Dates view's route, the worked example
   ...datesHandlers,
+  // WP20: the first screen's cards, Remove and Undo
+  ...searchesHandlers,
   http.get(url('/api/alerts'), () => HttpResponse.json([])),
   http.get(url('/api/alerts/events'), () => HttpResponse.json([])),
+  http.get(url('/api/budget'), () => HttpResponse.json(budgetResponse())),
   http.get(url('/api/providers'), () => HttpResponse.json(providersResponse())),
   // WP18: a clean report, so the status bar's link shows nothing unless a test says otherwise
   http.get(url('/api/status'), () => HttpResponse.json(statusReport())),
@@ -55,7 +62,13 @@ export const handlers = [
   http.get(url('/api/definitions/:id/results'), () => HttpResponse.json(resultsResponse())),
   http.get(url('/api/executions/:id'), () =>
     HttpResponse.json(
-      execution({ status: 'completed', stage: 'verification', finishedAt: '2026-10-14T13:00:00.000Z' }),
+      // why: the run the date-pairs fixtures summarise (runSummary): started 12:00, finished 13:00 (UTC)
+      execution({
+        status: 'completed',
+        stage: 'verification',
+        startedAt: '2026-10-14T12:00:00.000Z',
+        finishedAt: '2026-10-14T13:00:00.000Z',
+      }),
     ),
   ),
   http.get(url('/api/definitions/:id/coverage'), () => HttpResponse.json(coverageResponse())),

@@ -1,13 +1,6 @@
 // A fake Playwright BrowserContext (ContextLike): scripted cookies, recorded addCookies calls, the route handler and
 // request listeners the guard registers, and pages the test scripts. Synthetic values only.
-import type {
-  ContextLike,
-  CookieInput,
-  CookieLike,
-  PageLike,
-  RequestLike,
-  RouteLike,
-} from '../../src/driver.js';
+import type { ContextLike, CookieInput, CookieLike, RequestLike, RouteLike } from '../../src/driver.js';
 import { FakePage, type Navigation } from './fakePage.js';
 
 export class FakeContext implements ContextLike {
@@ -18,6 +11,8 @@ export class FakeContext implements ContextLike {
   readonly requestListeners: Array<(r: RequestLike) => void> = [];
   readonly pages: FakePage[] = [];
   readonly seen: string[] = [];
+  /** The error code of every route abort, in order. */
+  readonly abortCodes: Array<string | undefined> = [];
   closed = 0;
   addCookiesThrows = false;
   newPageThrows = false;
@@ -70,7 +65,8 @@ export class FakeContext implements ContextLike {
       let fellBack = false;
       const route: RouteLike = {
         request: () => r,
-        abort: () => {
+        abort: (errorCode?: string) => {
+          this.abortCodes.push(errorCode);
           outcome = 'aborted';
           return Promise.resolve();
         },

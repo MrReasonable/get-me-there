@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isMailbox, parseConfig, smtpPlaintextAllowed } from '../../src/config/schema.js';
+import { isMailbox, parseConfig, runModeOf, smtpPlaintextAllowed } from '../../src/config/schema.js';
 
 // Spec §8.3, §12; decision 56 and the WP11 round-1 review (sec-001, sec-004, arch-wp11-007).
 const realpath = (p: string) => p;
@@ -96,5 +96,17 @@ describe('smtpPlaintextAllowed: the one SMTP_TLS=none rule (spec §8.3)', () => 
     ['smtp.example.com', 'development', false],
   ] as const)('%s under %s → %s', (host, env, allowed) => {
     expect(smtpPlaintextAllowed(host, env)).toBe(allowed);
+  });
+});
+
+describe('runModeOf: how the app runs, the one rule Status and the stop sentences read (revision 55 §8.1)', () => {
+  it.each([
+    [true, 'production', 'container'],
+    [true, 'development', 'container'],
+    [false, 'development', 'dev'],
+    [false, 'production', 'native'],
+    [false, 'test', 'native'],
+  ] as const)('inContainer %s, NODE_ENV %s → %s', (inContainer, nodeEnv, mode) => {
+    expect(runModeOf({ inContainer, nodeEnv })).toBe(mode);
   });
 });

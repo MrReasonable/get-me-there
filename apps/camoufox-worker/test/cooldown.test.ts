@@ -80,6 +80,7 @@ describe('CooldownStore (spec §2: cool-down by cause, persisted, fail closed)',
   it.each([
     ['not json', '{not json'],
     ['not an object', '42'],
+    ['null', 'null'],
     ['a non-date until', JSON.stringify({ until: 'tomorrow', cause: 'captcha' })],
     ['an unknown cause', JSON.stringify({ until: '2026-10-19T00:00:00.000Z', cause: 'x' })],
     ['a missing cause', JSON.stringify({ until: '2026-10-19T00:00:00.000Z' })],

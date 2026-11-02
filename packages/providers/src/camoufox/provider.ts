@@ -1,12 +1,12 @@
 /**
- * The camoufox adapter (spec §2, §5.1, §5.2 rev 32; decisions 68, 69; brief Task 14.8). Discovery only: one list-mode
+ * The camoufox adapter (spec §2, §5.1, §5.2 rev 32; decisions 68, 69; brief Task 14.8). Discovery: one list-mode
  * page per cell through the host-side worker (POST /v1/page, the key in `x-gmt-worker-key`), parsed with core's one
  * copy of the wire contract. A price is one RawCalendarPrice with its return date labelled as the date asked for; a
  * "no flights" page leaves the cell out of prices and noFares, so the engine writes `no_data`; every other answer is a
- * tile-error (answer.ts). No airport is named here (spec §1).
+ * tile-error (answer.ts). Spec revision 55 §2: also the flight lists (`flightLists`, flights.ts; POST /v1/flights).
+ * No airport is named here (spec §1).
  */
 import {
-  APP_INSTANCE_HEADER,
   BudgetExceeded,
   billingMonthWindow,
   CAMOUFOX_CLOCK_SKEW_MS,
@@ -25,7 +25,7 @@ import {
   type Logger,
   type PageRequest,
   type ProviderContext,
-  ProviderError,
+  type ProviderError,
   pageRequestSchema,
   type Secret,
   SHARED_WORKER_DEFAULTS,
@@ -33,13 +33,14 @@ import {
   type SuppliedField,
   sharedInt,
   type TilePlan,
-  WORKER_KEY_HEADER,
   workerAnswerSchema,
 } from '@gmt/core';
 import type { HttpKit } from '../http/types.js';
 import { parseError } from '../shared/errors.js';
+import { flightListCapability } from './flights.js';
 import { gridTileEstimate, planGridTiles } from './grid.js';
 import { gridTile } from './gridTile.js';
+import { fetchedAtWithinRequest, postToWorker } from './post.js';
 import { camoufoxPreflight } from './preflight.js';
 import { planSingleCells } from './tiles.js';
 
@@ -70,7 +71,6 @@ const WHERE = { providerId: 'camoufox' as const, endpointPath: PAGE_PATH };
 export const RETURN_DATE_LABEL = 'return date: the date asked for';
 /** The clock difference tolerated between the app and the host worker: core's one value. */
 export const CLOCK_SKEW_MS = CAMOUFOX_CLOCK_SKEW_MS;
-const shifted = (at: string, ms: number): string => new Date(Date.parse(at) + ms).toISOString();
 
 export interface CamoufoxProviderOptions {
   http: HttpKit;
@@ -105,6 +105,15 @@ export interface CamoufoxProviderOptions {
    * null for no cap. A grid page asks for, and reserves, no more than that.
    */
   scrollsLeft?: (executionId: string | null) => number | null;
+  /**
+   * Spec rev 56 §2 "The return phase", §12 (ruling A6): the timeout of a flights request with a return phase, core's
+   * `flightRequestSeconds` of the app's page timeout and spacing, computed once by the wiring: with the booking read
+   * (780 s at the defaults) and without it (600 s); and a flights request without a return phase, core's
+   * `listRequestSeconds` (210 s: two page periods plus 30 s; 21.6 review M7, final review A-I1; the engine's gate holds it
+   * to the same). Every other request keeps the
+   * provider's own timeout.
+   */
+  flightRequestSeconds: { booking: number; returnsOnly: number; outboundOnly: number };
 }
 
 /** The detail and dropped count stored on a priced cell (prov-001, prov-003, prov-005). */
@@ -147,21 +156,6 @@ export function camoufoxProvider(o: CamoufoxProviderOptions): FlightProvider {
   if (o.key.reveal().length < 32)
     throw new Error('camoufoxProvider: CAMOUFOX_WORKER_KEY must be at least 32 characters');
   const log = o.log.child({ providerId: 'camoufox' });
-  // why: decision 82, W3: the worker's own monthly page cap, as BudgetExceeded at provider-month (the ledger's scope)
-  // with the worker's own figures and window end, never the app's settings copied in
-  const throwIfMonthly = (e: ProviderError): void => {
-    const m = e.monthlyCap;
-    if (e.reason !== 'monthly-cap' || m === undefined) return;
-    throw new BudgetExceeded({
-      scope: 'provider-month',
-      providerId: 'camoufox',
-      cap: m.cap,
-      current: m.used,
-      requested: 1,
-      counter: 'worker',
-      windowEnd: m.windowEnd,
-    });
-  };
   /**
    * W3 (cb-b1-001, pa-b1-001): the executions whose last grid page met the worker's monthly scroll cap, each with the
    * end of the worker's window then (its billing day, a shared setting): their next grid tile stops at provider-month
@@ -194,7 +188,6 @@ export function camoufoxProvider(o: CamoufoxProviderOptions): FlightProvider {
       windowEnd: until,
     });
   };
-  const instanceHeader = o.appInstance === undefined ? {} : { [APP_INSTANCE_HEADER]: o.appInstance };
 
   async function fetchTile(
     plan: TilePlan,
@@ -225,45 +218,15 @@ export function camoufoxProvider(o: CamoufoxProviderOptions): FlightProvider {
     if (request === null)
       return fail(parseError('no-airport-names', 'the query carries no valid airport names', WHERE));
     const started = o.clock.now();
-    let body: unknown;
-    try {
-      const res = await o.http.request({
-        providerId: 'camoufox',
-        executionId: ctx.executionId,
-        tileIndex: plan.index,
-        endpointPath: PAGE_PATH,
-        method: 'POST',
-        url: new URL(PAGE_PATH, o.workerUrl),
-        headers: {
-          [WORKER_KEY_HEADER]: o.key.reveal(),
-          'content-type': 'application/json',
-          accept: 'application/json',
-          ...instanceHeader,
-        },
-        body: JSON.stringify(request),
-        cache: 'never',
-        signal: ctx.signal,
-        recordFixtures: ctx.recordFixtures,
-        ...(ctx.beforeSend === undefined ? {} : { beforeSend: ctx.beforeSend }),
-      });
-      body = res.body;
-    } catch (e) {
-      if (e instanceof ProviderError) {
-        throwIfMonthly(e);
-        return fail(e);
-      }
-      throw e;
-    }
+    const sent = await postToWorker(o, { path: PAGE_PATH, body: request, tileIndex: plan.index, ctx });
+    if (!sent.ok) return fail(sent.error);
+    const body = sent.body;
     const a = workerAnswerSchema.safeParse(body);
     if (!a.success || a.data.kind !== 'cells')
       return fail(parseError('unknown-answer', 'the worker answered what this build cannot read', WHERE));
     const answer = a.data;
-    // why: prov-010: the page was read between this request's start and now; anything else is not this request's page.
-    // The app may run in a container whose clock differs a little from the host worker's: CLOCK_SKEW_MS either way.
-    if (
-      answer.fetchedAt < shifted(started, -CLOCK_SKEW_MS) ||
-      answer.fetchedAt > shifted(o.clock.now(), CLOCK_SKEW_MS)
-    )
+    // why: prov-010: the page was read between this request's start and now (post.ts's one rule, clock skew included)
+    if (!fetchedAtWithinRequest(answer.fetchedAt, started, o.clock.now()))
       return fail(
         parseError('fetched-at-out-of-range', `fetchedAt ${answer.fetchedAt} is outside this request`, WHERE),
       );
@@ -328,44 +291,20 @@ export function camoufoxProvider(o: CamoufoxProviderOptions): FlightProvider {
     if (!request.success)
       return fail(parseError('bad-grid-path', 'the grid path is not a valid request', WHERE));
     const started = o.clock.now();
-    let body: unknown;
-    try {
-      const res = await o.http.request({
-        providerId: 'camoufox',
-        executionId: ctx.executionId,
-        tileIndex: plan.index,
-        endpointPath: PAGE_PATH,
-        method: 'POST',
-        url: new URL(PAGE_PATH, o.workerUrl),
-        headers: {
-          [WORKER_KEY_HEADER]: o.key.reveal(),
-          'content-type': 'application/json',
-          accept: 'application/json',
-          ...instanceHeader,
-        },
-        body: JSON.stringify(request.data),
-        cache: 'never',
-        signal: ctx.signal,
-        recordFixtures: ctx.recordFixtures,
-        // why: ruling 12: the reservation checks the page's allowed scrolls against the run's and the month's caps
-        scrolls: allowance,
-        ...(ctx.beforeSend === undefined ? {} : { beforeSend: ctx.beforeSend }),
-      });
-      body = res.body;
-    } catch (e) {
-      if (e instanceof ProviderError) {
-        throwIfMonthly(e);
-        return fail(e);
-      }
-      throw e;
-    }
+    // why: ruling 12: the reservation checks the page's allowed scrolls against the run's and the month's caps
+    const sent = await postToWorker(o, {
+      path: PAGE_PATH,
+      body: request.data,
+      tileIndex: plan.index,
+      ctx,
+      scrolls: allowance,
+    });
+    if (!sent.ok) return fail(sent.error);
+    const body = sent.body;
     const a = workerAnswerSchema.safeParse(body);
     if (!a.success || a.data.kind !== 'grid')
       return fail(parseError('unknown-answer', 'the worker answered what this build cannot read', WHERE));
-    if (
-      a.data.fetchedAt < shifted(started, -CLOCK_SKEW_MS) ||
-      a.data.fetchedAt > shifted(o.clock.now(), CLOCK_SKEW_MS)
-    )
+    if (!fetchedAtWithinRequest(a.data.fetchedAt, started, o.clock.now()))
       return fail(
         parseError('fetched-at-out-of-range', `fetchedAt ${a.data.fetchedAt} is outside this request`, WHERE),
       );
@@ -435,6 +374,8 @@ export function camoufoxProvider(o: CamoufoxProviderOptions): FlightProvider {
           ctx,
         ),
     },
+    // why: spec rev 55 §2 "The flight-list read": the same worker, its own route; its preflight is discovery's
+    flightLists: flightListCapability(o),
     // why: decision 24: healthchecks probe nothing; the preflight is the engine's only call that asks the worker.
     healthcheck: async () => ({
       ok: true,

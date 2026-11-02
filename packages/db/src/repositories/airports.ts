@@ -82,9 +82,11 @@ export class AirportsRepo {
    * Every listed airport of a metro any hit belongs to is returned (a metro's outlying airport may name a neighbouring
    * town as its city), as one block at its best member's band and rank, ahead of single airports that tie with it;
    * inside a block, a typed exact code leads, then text matches, then rank, then code. The limit counts blocks by where they start, so a metro is
-   * never cut short: the picker offers it whole.
+   * never cut short: the picker offers it whole. Revision 55 §10 (builder's choice): `country`, the install's point of
+   * sale when it is a country code, puts that country's airports first inside each band, before OurAirports' rank (a
+   * metro block counts as that country's when any member is); null keeps every airport equal on this key.
    */
-  search(q: string, limit: number): Airport[] {
+  search(q: string, limit: number, country: string | null): Airport[] {
     const needle = q.trim();
     if (needle.length === 0) return [];
     // why: the operator's text is matched literally; % and _ are escaped for LIKE (case-insensitive for ASCII).
@@ -110,19 +112,23 @@ export class AirportsRepo {
                WHEN kind = 'medium' AND scheduled = 1 THEN 1
                ELSE 2
              END AS importance,
-             coalesce(scheduled = 0, 0) AS unscheduled
+             coalesce(scheduled = 0, 0) AS unscheduled,
+             -- why: revision 55 §10: the install's own country first inside a band; equal for every row when none is given
+             CASE WHEN @country IS NULL OR country = @country THEN 0 ELSE 1 END AS foreign_r
            FROM airports
          ),
          hits AS (
-           SELECT iata, metro, text_r, importance, min(code_r, text_r) AS r FROM banded
+           SELECT iata, metro, text_r, importance, foreign_r, min(code_r, text_r) AS r FROM banded
            WHERE min(code_r, text_r) < 9 AND (NOT unscheduled OR code_r = 0)
          ),
          metro_hits AS (
-           SELECT metro, min(r) AS r, min(importance) AS importance FROM hits WHERE metro IS NOT NULL GROUP BY metro
+           SELECT metro, min(r) AS r, min(foreign_r) AS foreign_r, min(importance) AS importance FROM hits
+           WHERE metro IS NOT NULL GROUP BY metro
          ),
          listed AS (
            SELECT a.*, row_number() OVER (
-             ORDER BY coalesce(m.r, h.r), coalesce(m.importance, h.importance), a.metro IS NULL, a.metro,
+             ORDER BY coalesce(m.r, h.r), coalesce(m.foreign_r, h.foreign_r), coalesce(m.importance, h.importance),
+               a.metro IS NULL, a.metro,
                coalesce(h.r, 9) <> 0, coalesce(h.text_r, 9), b.importance, coalesce(h.r, 9), a.iata
            ) AS pos
            FROM airports a
@@ -137,7 +143,7 @@ export class AirportsRepo {
          WHERE block_start <= @limit
          ORDER BY pos`,
       )
-      .all({ q: needle, e, limit: Math.max(1, Math.trunc(limit)) })
+      .all({ q: needle, e, limit: Math.max(1, Math.trunc(limit)), country })
       .map(toAirport);
   }
 

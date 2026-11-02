@@ -1,5 +1,5 @@
 /** Shared types of the route table (spec §10). */
-import type { apiContract, IsoDateTime } from '@gmt/core';
+import type { apiContract, CreateAndStartResponse, IsoDateTime } from '@gmt/core';
 import type { Engine } from '@gmt/engine';
 import type { Context } from 'hono';
 import type { z } from 'zod';
@@ -49,6 +49,11 @@ export interface RouteContext {
   status: StatusEnv;
   /** The configured email notifier (its test send), or null when email is not set up. */
   email: EmailPort | null;
+  /**
+   * Spec revision 55 §10 `POST /definitions/create-and-start`: each `requestKey` mapped to its request's pending answer
+   * from the moment it arrives, the last 100 kept and a rejected one evicted, so a repeat creates nothing more.
+   */
+  creates: Map<string, Promise<CreateAndStartResponse>>;
 }
 /**
  * One route's handler with the schemas it validates against: the ROUTES entry's own `request` and `query` objects

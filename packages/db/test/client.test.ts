@@ -143,6 +143,8 @@ describe('migrations against the first real migration (spec §7 "Migrations", §
       '0008_wp18_error_kind',
       '0009_wp19_latest_price_idx',
       '0010_airport_kind',
+      '0011_wp20_flight_lists',
+      '0012_wp21_return_leg',
     ]);
     expect(applyMigrations(db, MIGRATIONS_DIR)).toEqual({
       applied: [
@@ -157,13 +159,15 @@ describe('migrations against the first real migration (spec §7 "Migrations", §
         '0008_wp18_error_kind',
         '0009_wp19_latest_price_idx',
         '0010_airport_kind',
+        '0011_wp20_flight_lists',
+        '0012_wp21_return_leg',
       ],
     });
     const before = schemaOf(db);
     expect(applyMigrations(db, MIGRATIONS_DIR)).toEqual({ applied: [] });
     expect(schemaOf(db)).toEqual(before);
     expect(pendingMigrations(db, MIGRATIONS_DIR)).toEqual([]);
-    expect(count(db, '__drizzle_migrations')).toBe(11);
+    expect(count(db, '__drizzle_migrations')).toBe(13);
   });
 
   it('a missing migrations directory fails naming the directory', () => {

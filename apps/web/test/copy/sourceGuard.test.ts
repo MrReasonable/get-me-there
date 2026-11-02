@@ -42,6 +42,9 @@ const MONEY_FILES = new Set([
   'src/views/Dates/Legend.tsx',
   'src/views/Definitions/Confirmation.tsx',
   'src/views/Definitions/EstimatePanel.tsx',
+  // WP20 Task 20.5 (spec rev 55 §11): the estimate sentence, the tie line's sibling, formats money only through the
+  // estimate panel's one cost formatter, which every caller passes in (checked below)
+  'src/views/Searches/estimateLine.ts',
   // WP10 (plan decision 52): the indicative route-level series, which spec §11 exempts from full provenance
   // ([data-indicative] rows). The charts print fares only through PriceCell and their axes without "£"
   // (format.ts formatAxisPounds), so they are not here. (WP19 retired the heatmap legend with the Calendar view.)
@@ -198,6 +201,46 @@ describe('source guards (spec §11 copy, spec §9 item 6 prices)', () => {
   it('every allowlisted file exists, so a mistyped or removed entry cannot silently exempt a future file', () => {
     const files = new Set(src.map((s) => s.file));
     expect([...MONEY_FILES, ...POUND_FILES].filter((f) => !files.has(f))).toEqual([]);
+  });
+
+  // why: spec rev 55 §11 — the estimate sentence and its notes format money only through the estimate panel's cost
+  // formatter: estimateLine.ts calls and imports none itself, and every call of estimateSentence hands it that one
+  it('the estimate sentence formats money only through the estimate panel’s formatter', () => {
+    const line = src.find((s) => s.file === 'src/views/Searches/estimateLine.ts');
+    expect(line).toBeDefined();
+    expect(moneyOffenders('src/views/Elsewhere.ts', line?.text ?? '')).toEqual([]);
+    const calls: Array<{ file: string; money: string }> = [];
+    for (const s of src) {
+      const visit = (n: ts.Node): void => {
+        if (
+          ts.isCallExpression(n) &&
+          ts.isIdentifier(n.expression) &&
+          n.expression.text === 'estimateSentence'
+        )
+          calls.push({ file: s.file, money: n.arguments[3]?.getText() ?? '' });
+        ts.forEachChild(n, visit);
+      };
+      visit(parse(s.file, s.text));
+    }
+    expect(calls.length).toBeGreaterThan(0); // why: a renamed function must not make this vacuous
+    expect(calls.filter((c) => c.money !== 'estimateMoney')).toEqual([]);
+    const panel = src.find((s) => s.file === 'src/views/Definitions/EstimatePanel.tsx')?.text ?? '';
+    expect(panel).toMatch(/export const estimateMoney = /);
+  });
+
+  // why: spec rev 55 §11 — the tie line formats its price only through the same cost formatter (WP20 Task 20.10), and
+  // the flights block's own words format none: every flight amount is a PriceCell (ruling C3)
+  it('the tie line formats money only through the estimate panel’s formatter; the flights block formats none', () => {
+    const tie = src.find((s) => s.file === 'src/views/Dates/TieLine.tsx');
+    expect(tie).toBeDefined();
+    expect(moneyOffenders('src/views/Elsewhere.tsx', tie?.text ?? '')).toEqual([]);
+    expect(tie?.text).toMatch(/estimateMoney\(pricePence, \{ wholePounds: true \}\)/);
+    for (const f of ['Flights.tsx', 'FlightRow.tsx', 'flightLines.ts']) {
+      const file = src.find((s) => s.file === `src/views/Dates/${f}`);
+      expect(file, f).toBeDefined();
+      expect(moneyOffenders('src/views/Elsewhere.tsx', file?.text ?? '')).toEqual([]);
+      expect(file?.text).not.toMatch(/estimateMoney/);
+    }
   });
 
   it('the guards catch planted offenders, multi-line and conditional ones included', () => {

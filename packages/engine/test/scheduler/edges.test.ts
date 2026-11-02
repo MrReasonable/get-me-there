@@ -7,17 +7,20 @@ import {
   type ExecutionStatus,
   ProviderError,
   type SearchDefinition,
+  stopText,
 } from '@gmt/core';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildContext } from '../../src/context.js';
 import { createOrchestrator } from '../../src/orchestrator.js';
 import { laneFor, newRun } from '../../src/run.js';
 import { windowAnchor } from '../../src/scheduler/browserWindow.js';
-import { catchUpDefinition, findMissedFiring } from '../../src/scheduler/catchUp.js';
+import { autoResume, catchUpDefinition, findMissedFiring } from '../../src/scheduler/catchUp.js';
 import {
+  pausedCatchUp,
   plannedSnapshot,
-  SUPERSEDED_BY_FIRING,
   seedCatchUpBrowser,
+  stoppedParent,
+  supersededCatchUp,
 } from '../../src/scheduler/catchUpStart.js';
 import { buildSnapshot } from '../../src/snapshot.js';
 import {
@@ -28,6 +31,7 @@ import {
   mayLoadPage,
   pageGate,
 } from '../../src/stages/browserGate.js';
+import { tickDefinition } from '../../src/tick.js';
 import {
   engineWith,
   outcomes,
@@ -36,6 +40,9 @@ import {
   stubTravelpayouts,
 } from '../support/camoufox.js';
 import { createHarness, type Harness, HOUR } from '../support/harness.js';
+
+/** Revision 55 §8.1: the sentence a run its firing replaced is stored with (`superseded 'schedule'`). */
+const SUPERSEDED_BY_FIRING = 'Replaced by a scheduled run.';
 
 beforeEach(() => {
   expect.hasAssertions();
@@ -66,8 +73,16 @@ function world() {
 }
 
 describe('the start side of the catch-up (catchUpStart.ts)', () => {
-  it('SUPERSEDED_BY_FIRING is the words the operator reads on the replaced row', () => {
-    expect(SUPERSEDED_BY_FIRING).toBe('superseded: a later scheduled firing replaced this catch-up');
+  it("a catch-up its firing replaces reads the firing's supersede, worded once by core", () => {
+    // why: read from core's own wording, so the test fails if core's sentence changes (it compared a constant with itself)
+    for (const facts of [
+      { tz: 'Europe/London', mode: 'container', scheduled: true },
+      { tz: 'Europe/London', mode: 'native', scheduled: false },
+    ] as const)
+      expect(stopText({ kind: 'superseded', by: 'schedule' }, facts)).toEqual({
+        sentence: SUPERSEDED_BY_FIRING,
+        fix: null,
+      });
   });
 
   it('a catch-up plans without its browser provider; any other start plans its snapshot as it is', () => {
@@ -107,6 +122,20 @@ describe('the start side of the catch-up (catchUpStart.ts)', () => {
       manual: false,
     };
     seedCatchUpBrowser({ ...e.ctx, providers: new Map() }, scope, 'camoufox');
+    expect(outcomes(e, run.id, 'camoufox').map((o) => [o.status, o.reason, o.skipDetail])).toEqual(
+      Array(4).fill(['skipped', 'scheduled_only', 'catch-up-no-browser']),
+    );
+    // a browser provider registered without a discovery capability reuses nothing either, and the cells are left alike
+    const cam = e.ctx.providers.get('camoufox');
+    if (cam === undefined) throw new Error('no camoufox');
+    const { discovery: _none, ...noDiscovery } = cam;
+    for (const o of outcomes(e, run.id, 'camoufox'))
+      e.ctx.repos.cells.setOutcome(run.id, o, 'discovery', 'camoufox', {
+        status: 'not_run',
+        reason: null,
+        skipDetail: null,
+      });
+    seedCatchUpBrowser({ ...e.ctx, providers: new Map([['camoufox', noDiscovery]]) }, scope, 'camoufox');
     expect(outcomes(e, run.id, 'camoufox').map((o) => [o.status, o.reason, o.skipDetail])).toEqual(
       Array(4).fill(['skipped', 'scheduled_only', 'catch-up-no-browser']),
     );
@@ -244,7 +273,7 @@ describe('the browser gate’s own refusals, notice and logs', () => {
     const disabled = pendingRun();
     disabled.disabled.add('travelpayouts');
     const capped = pendingRun();
-    laneFor(capped, 'discovery', 'travelpayouts').budgetOut = true;
+    laneFor(capped, 'discovery', 'travelpayouts').budgetOutScope = 'provider-month';
     const cabin = pendingRun();
     const business = { ...cabin, snapshot: { ...cabin.snapshot, cabin: 'business' as const } };
     for (const r of [stopped, blocked, disabled, capped, business]) expect(pendingNotice(r)).toBe(STOPS);
@@ -359,6 +388,9 @@ describe('the tick’s guards, blocked record, resume arguments and log lines', 
     const def = h.createDefinition({ scheduleCron: '0 * * * *', window: RELATIVE });
     return { ...def, ...patch };
   }
+  // why: revision 55 §8.2 — a stopped run with no resume_after never blocks a firing (the firing supersedes it), so a
+  // run that blocks is one whose resume is still ahead
+  const LATER = '2026-10-15T09:00:00.000Z';
   /** A parent run of `def` left in `status`, with `resumeAfter`, as an earlier pass would have left it. */
   function leftIn(h: Harness, def: SearchDefinition, status: ExecutionStatus, resumeAfter: string | null) {
     const ctx = buildContext(h.deps, h.options);
@@ -387,7 +419,7 @@ describe('the tick’s guards, blocked record, resume arguments and log lines', 
       const h = createHarness();
       const def = hourly(h);
       const o = h.orch();
-      leftIn(h, def, 'paused_error', null);
+      leftIn(h, def, 'paused_error', LATER);
       await o.tick(def.id); // blocked by the paused run
       expect(o.blockedSince()).toBe(h.clock.now());
       h.repos.definitions.update(
@@ -462,7 +494,7 @@ describe('the tick’s guards, blocked record, resume arguments and log lines', 
     const h = createHarness();
     const def = hourly(h);
     const o = h.orch();
-    const blocker = leftIn(h, def, 'paused_error', null);
+    const blocker = leftIn(h, def, 'paused_error', LATER);
     await o.tick(def.id);
     expect(o.blockedSince()).toBe(h.clock.now());
     h.repos.executions.setStatus(blocker.id, 'cancelled', { finishedAt: h.clock.now() });
@@ -478,10 +510,10 @@ describe('the tick’s guards, blocked record, resume arguments and log lines', 
     const h = createHarness();
     const def = hourly(h);
     const o = h.orch();
-    const first = leftIn(h, def, 'paused_error', null);
+    const first = leftIn(h, def, 'paused_error', LATER);
     await o.tick(def.id); // blocked by the first run at 09:00
     h.repos.executions.setStatus(first.id, 'cancelled', { finishedAt: h.clock.now() });
-    leftIn(h, def, 'interrupted', null);
+    leftIn(h, def, 'interrupted', LATER);
     h.clock.advance(HOUR);
     await o.tick(def.id); // blocked by another run at 10:00, with no read of blockedSince in between
     expect(o.blockedSince()).toBe(h.clock.now());
@@ -494,7 +526,7 @@ describe('the tick’s guards, blocked record, resume arguments and log lines', 
     const h = createHarness();
     const def = hourly(h);
     const o = h.orch();
-    const blocker = leftIn(h, def, 'paused_error', null);
+    const blocker = leftIn(h, def, 'paused_error', LATER);
     await o.tick(def.id);
     expect(o.blockedSince()).toBe(h.clock.now());
     h.repos.executions.setStatus(blocker.id, 'cancelled', { finishedAt: h.clock.now() });
@@ -505,5 +537,183 @@ describe('the tick’s guards, blocked record, resume arguments and log lines', 
     expect(h.logs.filter((l) => l.msg === 'tick: start').map((l) => l.fields)).toEqual([
       { firing: '2026-10-14T10:00:00.000Z', result: 'cap', executionId: null },
     ]);
+  });
+});
+
+describe('the stopped run a start replaces, and the line that says so (catchUpStart.ts)', () => {
+  /** A definition on a daily schedule with one parent run, a catch-up or a manual run, left in `status`. */
+  function runIn(h: Harness, catchUp: boolean, status: ExecutionStatus) {
+    const ctx = buildContext(h.deps, h.options);
+    const def = h.createDefinition({ scheduleCron: '0 6 * * *', window: RELATIVE });
+    const snapshot = buildSnapshot(ctx, def, catchUp ? 'schedule' : 'manual').snapshot;
+    const row = catchUp
+      ? h.repos.executions.createForFiring({
+          definitionId: def.id,
+          isChild: false,
+          cell: null,
+          snapshot,
+          estimate: null,
+          trigger: 'schedule',
+          status: 'running',
+          scheduledFor: at('2027-03-01T06:00:00.000Z'),
+          isCatchUp: true,
+        })
+      : h.repos.executions.create({
+          definitionId: def.id,
+          isChild: false,
+          cell: null,
+          snapshot,
+          estimate: null,
+          trigger: 'manual',
+          status: 'running',
+        });
+    if (row === null) throw new Error('not written');
+    if (status !== 'running') h.repos.executions.setStatus(row.id, status, {});
+    const e = h.repos.executions.get(row.id);
+    if (e === null) throw new Error('not read');
+    return { ctx, def, e };
+  }
+
+  it('no run is replaced by nobody; a running run never; a stopped catch-up by a firing; any stopped run by a manual replace', () => {
+    const h = createHarness();
+    h.clock.set(at('2027-03-01T08:00:00.000Z'));
+    expect(pausedCatchUp(null)).toBeNull();
+    expect(stoppedParent(null)).toBeNull();
+    const running = runIn(h, true, 'running').e;
+    expect(pausedCatchUp(running)).toBeNull();
+    expect(stoppedParent(running)).toBeNull();
+    const catchUp = runIn(h, true, 'paused_budget').e;
+    expect(pausedCatchUp(catchUp)).toBe(catchUp);
+    expect(stoppedParent(catchUp)).toBe(catchUp);
+    const manual = runIn(h, false, 'paused_error').e;
+    expect(pausedCatchUp(manual)).toBeNull();
+    expect(stoppedParent(manual)).toBe(manual);
+    const interrupted = runIn(h, false, 'interrupted').e;
+    expect(stoppedParent(interrupted)).toBe(interrupted);
+  });
+
+  it('a stopped run that is not a catch-up, replaced by a run that is not one either, is logged as a stopped run', () => {
+    const h = createHarness();
+    h.clock.set(at('2027-03-01T08:00:00.000Z'));
+    const { ctx, e: stopped } = runIn(h, false, 'paused_error');
+    const { e: by } = runIn(h, false, 'running');
+    supersededCatchUp(ctx, stopped, by);
+    expect(h.logs.filter((l) => l.msg?.startsWith('execution: superseded'))).toEqual([
+      {
+        level: 'info',
+        bindings: {},
+        fields: { executionId: stopped.id, definitionId: by.definitionId, by: by.id, scheduledFor: null },
+        msg: 'execution: superseded a stopped run',
+      },
+    ]);
+  });
+});
+
+describe('the catch-up rule at the end of what croner computes', () => {
+  it('a missed firing with no next firing to measure its gap against is caught up (croner computes none from the year 3000)', () => {
+    const h = createHarness();
+    h.clock.set(at('2027-03-01T00:00:00.000Z'));
+    const def = h.createDefinition({ scheduleCron: '0 6 1 1 *', window: RELATIVE });
+    expect(findMissedFiring(buildContext(h.deps, h.options), def, at('2999-06-01T00:00:00.000Z'))).toEqual({
+      kind: 'catch-up',
+      firing: '2999-01-01T06:00:00.000Z',
+    });
+  });
+});
+
+describe('autoResume of a run whose search has no schedule now (revision 55 §8.1, ruling 2)', () => {
+  it('leaves it for the operator and logs that with the run and the search; a scheduled search resumes it, unlogged', async () => {
+    const h = createHarness();
+    h.clock.set(at('2027-03-01T08:00:00.000Z'));
+    const ctx = buildContext(h.deps, h.options);
+    const def = h.createDefinition({ window: RELATIVE });
+    const row = h.repos.executions.create({
+      definitionId: def.id,
+      isChild: false,
+      cell: null,
+      snapshot: buildSnapshot(ctx, def, 'manual').snapshot,
+      estimate: null,
+      trigger: 'manual',
+      status: 'running',
+    });
+    h.repos.executions.setStatus(row.id, 'paused_error', { resumeAfter: at('2027-03-01T07:00:00.000Z') });
+    const run = h.repos.executions.get(row.id);
+    if (run === null) throw new Error('not read');
+    const resumed: string[] = [];
+    const orch = {
+      start: async () => {
+        throw new Error('no start is asked for');
+      },
+      resume: async (id: string) => {
+        resumed.push(id);
+        return { ok: false as const, code: 'cap' as const, message: 'cap', details: null };
+      },
+    };
+    const lines = () =>
+      h.logs.filter((l) => l.msg === 'auto-resume: the search is not scheduled; left for the operator');
+    expect(await autoResume(ctx, orch, run)).toBeNull();
+    expect(resumed).toEqual([]);
+    expect(lines()).toEqual([
+      {
+        level: 'info',
+        bindings: { executionId: run.id, definitionId: def.id },
+        fields: {},
+        msg: 'auto-resume: the search is not scheduled; left for the operator',
+      },
+    ]);
+    h.repos.definitions.update(def.id, { scheduleCron: '0 6 * * *' });
+    expect(await autoResume(ctx, orch, run)).toMatchObject({ ok: false, code: 'cap' });
+    expect(resumed).toEqual([run.id]);
+    expect(lines()).toHaveLength(1);
+  });
+});
+
+describe('the tick before it reads a firing', () => {
+  it('a definition that no longer exists starts nothing and loses its blocked entry', async () => {
+    const h = createHarness();
+    const ctx = buildContext(h.deps, h.options);
+    const blocked = new Map([['no-such-definition', { since: h.clock.now(), executionId: 'gone' }]]);
+    await tickDefinition(ctx, h.orch(), 'no-such-definition', blocked);
+    expect(blocked.size).toBe(0);
+  });
+
+  it('a stored schedule the parser refuses has no firing: the tick hands nothing on and starts nothing', async () => {
+    const h = createHarness();
+    const def = h.createDefinition({ scheduleCron: '0 * * * *', window: RELATIVE });
+    // why: a schedule written before today's rule (sub-hourly), which isScheduled still reads as a schedule
+    h.db.raw
+      .prepare('UPDATE search_definitions SET schedule_cron = ? WHERE id = ?')
+      .run('*/5 * * * *', def.id);
+    await h.orch().tick(def.id);
+    expect(h.logs.filter((l) => l.msg?.startsWith('tick:')).map((l) => [l.msg, l.fields])).toEqual([
+      ['tick: late, handed to the catch-up', { firing: null, replaced: null }],
+    ]);
+    expect(h.repos.executions.listForDefinition(def.id, { limit: 5, includeChildren: true })).toEqual([]);
+  });
+
+  it('a late tick over a paused catch-up replaces nothing itself: the catch-up rule’s row supersedes it', async () => {
+    const h = createHarness();
+    const def = h.createDefinition({ scheduleCron: '0 * * * *', window: RELATIVE });
+    const ctx = buildContext(h.deps, h.options);
+    const row = h.repos.executions.createForFiring({
+      definitionId: def.id,
+      isChild: false,
+      cell: null,
+      snapshot: buildSnapshot(ctx, def, 'schedule').snapshot,
+      estimate: null,
+      trigger: 'schedule',
+      status: 'running',
+      scheduledFor: at('2026-10-14T08:00:00.000Z'),
+      isCatchUp: true,
+    });
+    if (row === null) throw new Error('not written');
+    h.repos.executions.setStatus(row.id, 'paused_error', { resumeAfter: at('2026-10-15T09:00:00.000Z') });
+    h.clock.advance(HOUR / 2); // 09:30: late for the 09:00 firing
+    await h.orch().tick(def.id);
+    expect(h.logs.filter((l) => l.msg === 'tick: late, handed to the catch-up').map((l) => l.fields)).toEqual(
+      [{ firing: '2026-10-14T09:00:00.000Z', replaced: null }],
+    );
+    const [fresh] = h.repos.executions.listForDefinition(def.id, { limit: 1, includeChildren: false });
+    if (fresh !== undefined && fresh.id !== row.id) await h.waitForSettled(fresh.id);
   });
 });

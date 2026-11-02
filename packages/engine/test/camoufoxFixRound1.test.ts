@@ -101,6 +101,11 @@ describe('a manual resume of paused_budget keeps the camoufox page cap (arch I2)
     e.ctx.repos.definitions.update(e.definition.id, {
       budget: { ...e.definition.budget, maxCostMicroGbp: 999 },
     });
+    // why: revision 55 §8.1 — a stop stored with its cause (camoufox's per-run page cap) is never resumed: refused `cap`
+    expect(await e.resumeResult(ex.id, { manual: true })).toMatchObject({ ok: false, code: 'cap' });
+    // why: a row stopped before migration 0011 has no cause and still resumes, so the refreshed-snapshot rule this test
+    // pins is still reached through it
+    e.ctx.db.raw.prepare('UPDATE search_executions SET stop_cause_json = NULL WHERE id = ?').run(ex.id);
     const r = await e.resumeResult(ex.id, { manual: true });
     expect(r.ok ? 'ok' : `${r.code}: ${r.message}`).toBe('ok');
     // why: the final review of 2026-10-18: wait through the harness's bounded settle, which fails loudly, never a loop

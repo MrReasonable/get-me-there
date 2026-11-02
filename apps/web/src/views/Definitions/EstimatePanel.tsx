@@ -1,73 +1,49 @@
-import type { BudgetFit, Estimate } from '../../api/types.js';
+import { mainPathSource, providerIdSchema } from '@gmt/core';
+import type { BudgetFit } from '../../api/types.js';
 import { SETUP_COPY } from '../../copy/setup.js';
 import { COPY } from '../../copy.js';
-import { Flaps } from '../../flaps/Flaps.js';
-import { formatMicroGbp, formatSeconds } from '../../format.js';
+import { formatMicroGbp, formatPence } from '../../format.js';
 
-/** Spec §11: the estimate shown before the operator confirms (POST /api/definitions/estimate for an unsaved body). */
-/** `hardStop` is the run budget's call cap, the runtime limit beside the estimate (decision 44). */
-export function EstimatePanel({ estimate, hardStop }: { estimate: Estimate; hardStop: number }) {
-  const e = estimate;
-  // why: with a 0 call cap the billed source's estimated calls never run; say how many, and the number to raise it to.
-  const billed = e.perProvider.filter((p) => p.providerId === 'searchapi').reduce((a, p) => a + p.calls, 0);
-  return (
-    <section data-cost="" aria-label={COPY.estimateHeading} className="inset estimate grid gap-2 text-sm">
-      <h3 className="h-sub">{COPY.estimateHeading}</h3>
-      {/* why: the departure board's estimate strip: the run's size and its billed cost on flaps, each carrying its own
-      unit; decorative, so the sentences below stay the words a reader hears */}
-      <span className="flap-strip estimate-strip" aria-hidden="true">
-        <Flaps text={COPY.estimateCells(e.cells)} />
-        <Flaps text={formatMicroGbp(e.totalCostMicroGbp)} />
-      </span>
-      {/* why: a run whose every line a cap blocks estimates 0 s; "takes about 0s" would read as a real duration */}
-      {e.seconds > 0 ? (
-        <p className="font-bold">{SETUP_COPY.definitions.runTakes(formatSeconds(e.seconds))}</p>
-      ) : null}
-      <p>
-        <span>{COPY.estimateCells(e.cells)}</span>{' '}
-        <span className="text-fg-2">{SETUP_COPY.definitions.estimateCellsHint}</span>
-      </p>
-      <ul className="space-y-1">
-        {e.perProvider.map((p) => (
-          <li key={`${p.providerId}-${p.stage}`}>
-            {COPY.estimateRow(
-              COPY.provider[p.providerId],
-              COPY.stageName[p.stage],
-              p.calls,
-              formatMicroGbp(p.costMicroGbp),
-              formatSeconds(p.seconds),
-            )}
-            {p.blocked !== null ? (
-              <span className="tag tag-warn ml-1">{COPY.estimateBlocked(p.blocked)}</span>
-            ) : null}
-          </li>
-        ))}
-      </ul>
-      <p className="font-bold">
-        {COPY.estimateTotal(
-          e.totalCalls,
-          hardStop,
-          formatMicroGbp(e.totalCostMicroGbp),
-          formatSeconds(e.seconds),
-        )}
-      </p>
-      {hardStop === 0 && billed > 0 ? (
-        <p className="def-warn">{SETUP_COPY.definitions.hardStopZero(billed)}</p>
-      ) : null}
-      {e.windowClamped ? <p>{COPY.windowClamped}</p> : null}
-      {e.assumptions.length > 0 ? (
-        <div>
-          <p>{COPY.assumptions}</p>
-          <ul className="list-disc pl-5">
-            {e.assumptions.map((a) => (
-              <li key={a}>{a}</li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
-    </section>
-  );
+const F = SETUP_COPY.definitions;
+const FIT_SCOPE: Readonly<Record<string, string | undefined>> = F.fitScope;
+/** The scopes counted in micro-GBP, worded as money; every other scope counts calls, pages or scrolls. */
+const MONEY_SCOPES: ReadonlySet<string> = new Set(['execution-cost', 'global-month']);
+
+/**
+ * A budget-fit scope's wire label in words (spec rev 55 §11: no variable names on the main path, where Repeat weekly
+ * and More options show the fit): "the Aviasales cache this month", "billed calls a run", "this month's spending". A
+ * label this list does not know is shown as it came, so a new scope is never hidden.
+ */
+export function scopeWords(label: string): string {
+  const fixed = FIT_SCOPE[label];
+  if (fixed !== undefined) return fixed;
+  const [kind = '', id = ''] = label.split(':');
+  const provider = providerIdSchema.safeParse(id);
+  if (!provider.success) return label;
+  const source = mainPathSource(provider.data);
+  switch (kind) {
+    case 'provider-month':
+      return F.fitProviderMonth(source);
+    case 'provider-lifetime':
+      return F.fitProviderLifetime(source);
+    case 'scrolls-per-month':
+      return F.fitScrolls(source);
+    case 'cells-per-refresh':
+      return F.fitCellsPerRefresh(source);
+    default:
+      return label;
+  }
 }
+
+/**
+ * The estimate panel's one cost formatter (spec rev 55 §11): the estimate sentence beside Search now, its notes and the
+ * press's label format money through this alone, and so does a search's tie line (`sourceGuard.test.ts`). By default
+ * pounds and pence always ("about £1.20", "your £1.00 check"), so an amount beside another with pence reads alike;
+ * `wholePounds` leaves the pence off a whole-pound amount ("£86", but "£86.50"), the tie line's form (ruling R-pounds,
+ * WP20 Task 20.10).
+ */
+export const estimateMoney = (pence: number, o: { wholePounds?: boolean } = {}): string =>
+  formatPence(pence, { showPence: o.wholePounds !== true });
 
 /**
  * Spec §8.2 budgetFit: runs per month × estimate against every cap, every scope listed whether it
@@ -85,7 +61,20 @@ export function BudgetFitPanel({ fit }: { fit: BudgetFit }) {
       <ul>
         {fit.perScope.map((s) => (
           <li key={s.scope}>
-            {COPY.budgetScope(s.scope, s.estimated, s.cap === null ? COPY.noCap : String(s.cap))}
+            {/* why: data-cost marks a cost or cap figure, never a fare (the rendered sweep's rule for "£") */}
+            <span data-cost="">
+              {MONEY_SCOPES.has(s.scope)
+                ? F.fitLine(
+                    scopeWords(s.scope),
+                    formatMicroGbp(s.estimated),
+                    s.cap === null ? COPY.noCap : formatMicroGbp(s.cap),
+                  )
+                : F.fitLine(
+                    scopeWords(s.scope),
+                    String(s.estimated),
+                    s.cap === null ? COPY.noCap : String(s.cap),
+                  )}
+            </span>
             {s.fits ? null : <span className="tag tag-bad ml-1">{COPY.overCap}</span>}
           </li>
         ))}

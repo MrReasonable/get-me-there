@@ -230,3 +230,17 @@ describe('buildDigest (spec §6.8)', () => {
     expect(() => buildDigest(cal, [synthetic], DCTX)).toThrow(/synthetic/);
   });
 });
+
+// Spec revision 55 §2 (prov-int-017; 20.7 review finding 2): a camoufox price's search link is the worker's page at the
+// point of sale its provenance states.
+describe('buildDigest camoufox search link (spec rev 55 §2)', () => {
+  it('takes gl from the price’s own point of sale', () => {
+    const c = calendar({
+      provenance: { providerId: 'camoufox', sourceKind: 'scraped-self', pointOfSale: 'US', cabin: 'economy' },
+    });
+    const d = buildDigest(cal, evaluateAlertRules([cal], [c], [], CTX), DCTX);
+    const url = new URL(d?.items[0]?.searchLink?.url ?? 'https://x.invalid/');
+    expect(url.searchParams.get('gl')).toBe('US');
+    expect(url.searchParams.get('hl')).toBe('en-GB');
+  });
+});

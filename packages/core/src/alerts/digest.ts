@@ -47,7 +47,8 @@ function item(f: Firing): DigestItem {
     bookingExpiresAt: verified ? c.observation.bookingExpiresAt : null,
     outbound: verified ? c.itinerary.outbound : null,
     inbound: verified ? c.itinerary.inbound : null,
-    searchLink: searchLinkFor(provenance.providerId, cell, provenance.cabin),
+    // why: spec rev 55 §2 (prov-int-017): a camoufox link is the worker's page at the point of sale the price states
+    searchLink: searchLinkFor(provenance.providerId, cell, provenance.cabin, provenance.pointOfSale),
     rowKey: resultRowKey({
       itineraryHash: verified ? c.itinerary.hash : null,
       calendarPriceId: verified ? null : c.calendarPriceId,

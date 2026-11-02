@@ -13,13 +13,20 @@ beforeEach(() => {
 describe('migration 0010', () => {
   it('adds nullable kind and scheduled and leaves an airport seeded at 0009 unknown in both', () => {
     const db = openTracked(tmpDbPath());
-    applyMigrations(db, migrationsWithout(['0010_airport_kind']));
+    applyMigrations(
+      db,
+      migrationsWithout(['0010_airport_kind', '0011_wp20_flight_lists', '0012_wp21_return_leg']),
+    );
     db.raw
       .prepare(
         `INSERT INTO airports (iata, icao, name, city, country, tz, lat, lon, metro, source, dataset_version) VALUES ('AAA', NULL, 'Synthetic', 'Nowhere', 'ZZ', 'UTC', 0, 0, NULL, 's', 'v')`,
       )
       .run();
-    expect(applyMigrations(db, MIGRATIONS_DIR).applied).toEqual(['0010_airport_kind']);
+    expect(applyMigrations(db, MIGRATIONS_DIR).applied).toEqual([
+      '0010_airport_kind',
+      '0011_wp20_flight_lists',
+      '0012_wp21_return_leg',
+    ]);
     expect(db.raw.prepare('SELECT kind, scheduled FROM airports').all()).toEqual([
       { kind: null, scheduled: null },
     ]);

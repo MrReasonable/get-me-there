@@ -87,6 +87,13 @@ export interface ExecutionBudget {
    * created and read by the budget guard from the snapshot, never from config at reserve time. Absent: no such cap.
    */
   providerMaxCalls?: Partial<Record<ProviderId, number>>;
+  /**
+   * Spec revision 55 §8.1 (ruling A5): the browser pages one run may spend on flight lists, outside
+   * `providerMaxCalls` (CAMOUFOX_EXECUTION_PAGE_CAP) and inside the provider's monthly cap. Set by the engine when the
+   * execution is created (Task 20.9); optional so a run stored before WP20 still parses, and a snapshot without it
+   * allows no flight page (the guard fails closed).
+   */
+  flightListPages?: number;
 }
 
 export interface ProvidersConfig {
@@ -120,6 +127,18 @@ export interface SearchDefinition {
   createdAt: IsoDateTime;
   updatedAt: IsoDateTime;
   deletedAt: IsoDateTime | null;
+}
+
+/**
+ * Spec revision 55 §8.1 and §8.2: a search is scheduled exactly when it is enabled, has a cron and is not deleted. The
+ * engine's one schedule predicate: the tick, the scheduler's registration, boot, `finish` (read live, for the automatic
+ * resume rule) and `autoResume` all ask this, so `enabled` means "scheduled runs happen" and nothing else. A type
+ * guard, so a caller reads the cron of a scheduled search with no second check.
+ */
+export function isScheduled<T extends Pick<SearchDefinition, 'enabled' | 'scheduleCron' | 'deletedAt'>>(
+  d: T,
+): d is T & { scheduleCron: string } {
+  return d.enabled && d.scheduleCron !== null && d.deletedAt === null;
 }
 
 export type DefinitionInput = Omit<

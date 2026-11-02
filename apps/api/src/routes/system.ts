@@ -132,6 +132,11 @@ export function budgetResponse(ctx: RouteContext): BudgetResponse {
   };
 }
 
+/** The install's point of sale as a country code, or null when it is not one (`unknown`). */
+function countryOf(pointOfSale: string): string | null {
+  return /^[A-Z]{2}$/.test(pointOfSale) ? pointOfSale : null;
+}
+
 export const systemHandlers: HandlerTable = {
   /**
    * One public route with two shapes: the HEALTHCHECK gets the minimal one; the detail goes only to a caller with
@@ -148,7 +153,9 @@ export const systemHandlers: HandlerTable = {
     { request: NO_INPUT, query: apiContract.airportsQuerySchema },
     (c, { query }, ctx) =>
       c.json(
-        ctx.ports.repos.airports.search(query.q, 20).map((a) => ({
+        // why: revision 55 §10 (builder's choice) — the install's own market ranks first inside a band; a point of sale
+        // that is not a country code ('unknown') ranks by OurAirports' facts alone
+        ctx.ports.repos.airports.search(query.q, 20, countryOf(ctx.ports.config.pointOfSale)).map((a) => ({
           iata: a.iata,
           name: a.name,
           city: a.city,

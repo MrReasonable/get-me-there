@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { createHarness, FIXTURE_RULES, JFK, LGW, LHR, tileRule } from './support/harness.js';
 
 describe('Review Focus 5: SQLite busy or full during a tile write', () => {
-  it('→ paused_error with the SQLite message, URL-free, in error_text; the sibling in flight → not_run; operator notified; no crash loop', async () => {
+  it('→ paused_error with the SQLite message, URL-free, in the log and notice (error_text the sentence of the fatal cause); the sibling in flight → not_run; operator notified; no crash loop', async () => {
     const h = createHarness({ fixtureConcurrency: 2 });
     await h.fixtureScenario([tileRule('LHR', '2026-11-09', FIXTURE_RULES.hold, 1)]);
     h.beforeTileWrite((attempt) => {
@@ -21,7 +21,17 @@ describe('Review Focus 5: SQLite busy or full during a tile write', () => {
     const e = await h.waitForSettled(r.executionId);
     expect(e.status).toBe('paused_error');
     expect(e.resumeAfter).toBeNull();
-    expect(e.errorText).toBe('database or disk is full (see https://sqlite.example/full)');
+    // why: revision 55 §8.1 — the row stores the fatal cause and its sentence; the engine's message stays in the log and
+    // the operator's notice, URL-free
+    expect(e).toMatchObject({
+      stopCause: { kind: 'fatal' },
+      errorText: 'The app hit an error and stopped this search.',
+    });
+    expect(
+      h.logs.some((l) =>
+        JSON.stringify(l).includes('database or disk is full (see https://sqlite.example/full)'),
+      ),
+    ).toBe(true);
     const all = h.outcomes(e.id);
     expect(all).toHaveLength(56);
     // why: this pins the engine's handling (classify fatal, pause, abort the held sibling, URL-free error_text); the error

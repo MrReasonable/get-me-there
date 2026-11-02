@@ -168,6 +168,10 @@ export function workerFinding(
   return null;
 }
 
+/**
+ * The discovery preflight (spec §2, rev 56 §5.1): one unledgered status read, judged as `workerFinding` judges it, with
+ * the worker's reported verification flags on the result whenever the read returned a status.
+ */
 export async function camoufoxPreflight(
   o: {
     http: HttpKit;
@@ -189,10 +193,19 @@ export async function camoufoxPreflight(
     signal: ctx.signal,
     ...(o.appInstance === undefined ? {} : { appInstance: o.appInstance }),
   });
+  const judged = judgeStatus(read, o);
+  // why: spec rev 56 §5.1, §8.1: the engine plans the return phase from the flags the worker last reported, so every
+  // read that returned a status carries them, whether the preflight passes or refuses on it; a read with no status
+  // body (no worker, an HTTP refusal, a body this build cannot read) has none to report
+  return read.kind === 'ok' ? { ...judged, flags: read.status.flags } : judged;
+}
+
+/** The preflight's verdict on one status read (the spec §2 order), before the worker's flags are attached. */
+function judgeStatus(read: WorkerStatusRead, o: Parameters<typeof camoufoxPreflight>[0]): PreflightResult {
   // why: a refused key (the classifier's auth: 401 or 403) is a configuration fault: provider_disabled, which a resume
   // does not retry on every run
   if (read.kind === 'refused' && read.errorKind === 'auth')
-    return { ok: false, skip: 'provider_disabled', detail: KEY_REFUSED };
+    return { ok: false, skip: 'provider_disabled', detail: KEY_REFUSED, reason: 'auth' };
   if (read.kind === 'refused')
     return {
       ok: false,
@@ -201,9 +214,12 @@ export async function camoufoxPreflight(
         read.httpStatus === null
           ? `the browser worker refused the status read (${read.errorKind})`
           : `the browser worker answered HTTP ${read.httpStatus}`,
+      reason: 'provider-unavailable',
     };
-  if (read.kind === 'unreachable') return { ok: false, skip: 'provider_unavailable', detail: UNREACHABLE };
-  if (read.kind === 'unreadable') return { ok: false, skip: 'provider_unavailable', detail: UNREADABLE };
+  if (read.kind === 'unreachable')
+    return { ok: false, skip: 'provider_unavailable', detail: UNREACHABLE, reason: 'provider-unavailable' };
+  if (read.kind === 'unreadable')
+    return { ok: false, skip: 'provider_unavailable', detail: UNREADABLE, reason: 'provider-unavailable' };
   const found = workerFinding(read.status, o);
   if (found === null) return { ok: true };
   switch (found.kind) {
@@ -213,20 +229,28 @@ export async function camoufoxPreflight(
         skip: 'provider_disabled',
         detail: `cooling down until ${found.until} (${found.cause ?? 'unknown'})`,
         until: found.until,
+        // why: revision 55 §8.1 — the cause stores a class word: the blocked page the cool-down began on, when known
+        reason: found.cause ?? 'blocked',
       };
     case 'signed-in':
-      return { ok: false, skip: 'provider_disabled', detail: SIGNED_IN_REFUSED };
+      return { ok: false, skip: 'provider_disabled', detail: SIGNED_IN_REFUSED, reason: 'signed-in' };
     case 'counts-unreadable':
-      return { ok: false, skip: 'provider_disabled', detail: COUNTS_UNREADABLE };
+      return { ok: false, skip: 'provider_disabled', detail: COUNTS_UNREADABLE, reason: 'counts-unreadable' };
     case 'settings':
-      return { ok: false, skip: 'provider_disabled', detail: settingsDiffer(found.names) };
+      return {
+        ok: false,
+        skip: 'provider_disabled',
+        detail: settingsDiffer(found.names),
+        reason: 'settings-differ',
+      };
     case 'grid-unverified':
-      return { ok: false, skip: 'provider_disabled', detail: GRID_NOT_VERIFIED };
+      return { ok: false, skip: 'provider_disabled', detail: GRID_NOT_VERIFIED, reason: 'grid-unverified' };
     case 'grid-setting':
       return {
         ok: false,
         skip: 'provider_disabled',
         detail: gridSettingDiffers(found.name, found.worker, found.app),
+        reason: 'settings-differ',
       };
   }
 }

@@ -1,20 +1,32 @@
-import { type ExecutionStatus, formatInstant, type IsoDateTime, type OperatorMessageKind } from '@gmt/core';
+import {
+  type ExecutionStatus,
+  formatInstant,
+  type IsoDateTime,
+  isScheduled,
+  type OperatorMessageKind,
+  type StopCause,
+} from '@gmt/core';
 import type { ExecutionPatch } from '@gmt/db';
 import type { EngineContext } from './context.js';
 import { errorText } from './errors.js';
 import { notifyOperator } from './notify.js';
 import { type RunState, type StopReason, stopRun } from './run.js';
 import { runDiscovery } from './stages/discovery.js';
+import { runFlightLists } from './stages/flightLists.js';
 import { runVerification } from './stages/verification.js';
+import { isBrowserPageLimit, stopCauseOf, stopPatch } from './stopCause.js';
 import { budgetText } from './text.js';
 
 /**
- * Runs one pass: discovery, verification (spec §8.1 order), the alerts step, then finish. A stage error that escapes
- * stops the pass as fatal.
+ * Runs one pass: discovery, the flight-list step, verification (spec §8.1 order, revision 55), the alerts step, then
+ * finish. A stage error that escapes stops the pass as fatal.
  */
 export async function execute(ctx: EngineContext, run: RunState): Promise<void> {
   try {
     await runDiscovery(ctx, run);
+    // why: revision 55 §8.1 (ruling 20.0 concern 1) — the flight-list step runs after discovery and before
+    // verification, and before finish, so a budget stop's cause carries its counts
+    await runFlightLists(ctx, run);
     if (run.stop === null) await runVerification(ctx, run);
   } catch (err) {
     stopRun(run, { kind: 'fatal', message: errorText(err) });
@@ -30,6 +42,8 @@ export async function execute(ctx: EngineContext, run: RunState): Promise<void> 
  * never repeats one. A failing hook is logged and never pauses a finished search. Returns whether the step ran.
  */
 export async function alertsStep(ctx: EngineContext, run: RunState): Promise<boolean> {
+  // why: revision 55 §8.1 — a cancel or SIGTERM during the flight-list step after a budget stop ends the run as that
+  if (run.flightStop !== null) return false;
   if (run.stop !== null && run.stop.kind !== 'budget') return false;
   try {
     const r = await ctx.alertsStep(ctx.deps, run.executionId, {
@@ -68,11 +82,22 @@ export interface Notice {
   key?: string;
 }
 
-/** Maps a stop reason to the execution status, patch and operator notice of spec §8.1. Pure; `tz` renders instants. */
+/** The run state `finalStatus` reads to build a stop's cause (revision 55 §8.1). */
+export type CauseRun = Parameters<typeof stopCauseOf>[1];
+
+/**
+ * Maps a stop reason to the execution status, patch and operator notice of spec §8.1. Pure; `tz` renders instants.
+ * Revision 55 §8.1: every non-null stop stores its cause (`stopCauseOf`) with its sentence as `error_text` (a fatal
+ * stop's own message stays in the log), and its `resumeAfter` is the cause's: null when the search is not scheduled
+ * (`scheduled`, `isScheduled` read live at finish; Ian's ruling 2) or the stop is the browser worker's monthly or
+ * per-run page limit, so no one-shot job is registered for either.
+ */
 export function finalStatus(
   stop: StopReason | null,
   now: IsoDateTime,
   tz: string,
+  run: CauseRun,
+  scheduled: boolean,
 ): { status: ExecutionStatus; patch: ExecutionPatch; notice: Notice | null } {
   if (stop === null)
     return {
@@ -80,77 +105,126 @@ export function finalStatus(
       patch: { finishedAt: now, resumeAfter: null, errorText: null },
       notice: null,
     };
+  const cause = stopCauseOf(stop, run, scheduled);
+  const stored = stopPatch(cause, tz, scheduled);
+  const resumeAfter = 'resumeAfter' in cause ? cause.resumeAfter : null;
   switch (stop.kind) {
     case 'sigterm':
       // why: spec §8.1 "SIGTERM: … status interrupted without incrementing the counter"
       return {
         status: 'interrupted',
-        patch: {},
+        patch: { ...stored },
         notice: {
           kind: 'interrupted',
           detail: 'The app stopped during this run; cells that were in flight went back to not searched.',
         },
       };
     case 'cancel':
-      return { status: 'cancelled', patch: { finishedAt: now, resumeAfter: null }, notice: null };
+      return { status: 'cancelled', patch: { finishedAt: now, resumeAfter: null, ...stored }, notice: null };
     case 'limiter-timeout':
       return {
         status: 'paused_error',
-        patch: { resumeAfter: stop.resumeAfter },
+        patch: { resumeAfter, ...stored },
         notice: {
           kind: 'paused_error',
           detail:
-            stop.resumeAfter === null
-              ? 'A provider rate window is full and its reopening time is not known; resume the run manually.'
-              : `A provider rate window is full; the run resumes automatically on ${formatInstant(stop.resumeAfter, tz)}.`,
+            resumeAfter === null
+              ? stop.resumeAfter === null
+                ? 'A provider rate window is full and its reopening time is not known; resume the run manually.'
+                : 'A provider rate window is full; this search has no schedule, so resume the run when you are ready.'
+              : `A provider rate window is full; the run resumes automatically on ${formatInstant(resumeAfter, tz)}.`,
         },
       };
-    case 'budget': {
-      const e = stop.error;
-      const when =
-        stop.resumeAfter === null
-          ? 'It needs a cap change, or a manual resume after editing the definition.'
-          : `It resumes automatically on ${formatInstant(stop.resumeAfter, tz)}, when the cap window reopens; if by then it is older than its discovery refresh allows, it is cancelled instead and the next run starts with fresh prices.`;
+    case 'budget':
       return {
         status: 'paused_budget',
-        patch: { resumeAfter: stop.resumeAfter },
+        patch: { resumeAfter, ...stored },
         notice: {
           kind: 'paused_budget',
-          detail: `The cap was reached: ${budgetText(e, 'the next call needed')}. ${when}`,
+          detail: `The cap was reached: ${budgetText(stop.error, 'the next call needed')}. ${budgetNext(cause, tz, scheduled)}`,
         },
       };
-    }
     case 'child-cap':
-      // why: ruling 7 — a child never pauses on a cap; it ends, with the scope in the log and this text on the row
+      // why: ruling 7 — a child never pauses on a cap; it ends, with the scope in the log and its cause on the row
       return {
         status: 'cancelled',
-        patch: { finishedAt: now, resumeAfter: null, errorText: CHILD_CAP_REACHED },
+        patch: { finishedAt: now, resumeAfter: null, ...stored },
         notice: null,
       };
     case 'all-disabled':
       return {
         status: 'paused_error',
-        patch: { resumeAfter: null },
+        patch: { resumeAfter: null, ...stored },
         notice: {
           kind: 'paused_error',
-          detail: `Every ${stop.stage} provider was disabled after errors; resume manually once the cause is fixed.`,
+          // why: the page's fix for these sources is Search again (§8.1 "Stop causes"), so the notice never offers Resume
+          detail: `Every ${stop.stage} provider was disabled after errors; once the cause is fixed, Search again.`,
         },
       };
     case 'fatal':
       return {
         status: 'paused_error',
-        patch: { resumeAfter: null, errorText: stop.message },
+        patch: { resumeAfter: null, ...stored },
         notice: { kind: 'paused_error', detail: `The run stopped on an internal error: ${stop.message}` },
       };
   }
 }
 
 /**
+ * What a paused_budget notice (email, Status) tells the operator to do next (spec revision 55 §8.1 "Stop causes", WP20
+ * final review): the same offer, in the same order of cases, as the stop's fix on the search's page (`stopText`'s
+ * budget head), so the notice never offers a Resume the page refuses or leaves out one it offers. A run's own cap is a
+ * cap change in Edit, then Resume (no schedule resumes it); a browser page limit, per run or monthly, and any other
+ * provider's own per-run cap, is never resumed: Search again carries on; a plan with no calls left is Check Providers;
+ * a scheduled run that stored a resume says when; anything else is Search again or Resume, and an unscheduled search is
+ * told it has no schedule to carry it on.
+ */
+function budgetNext(cause: StopCause, tz: string, scheduled: boolean): string {
+  // why: finish builds a budget stop's cause from that stop, so any other kind here is an internal slip; it gets the
+  // plainest offer the page always makes
+  if (cause.kind !== 'budget') return 'Search again when you are ready.';
+  switch (cause.scope) {
+    case 'execution-calls':
+    case 'execution-free-calls':
+    case 'execution-cost':
+      return 'Raise the limit in Edit, then Resume.';
+    case 'provider-execution':
+      return CARRY_ON;
+    case 'provider-lifetime':
+      return 'Check Providers.';
+    case 'provider-month':
+    case 'global-month':
+      break;
+  }
+  if (isBrowserPageLimit(cause))
+    return cause.resetsAt === null
+      ? CARRY_ON
+      : `Search again after ${formatInstant(cause.resetsAt, tz)} carries on with the prices already found.`;
+  if (cause.resumeAfter !== null)
+    return `It resumes automatically on ${formatInstant(cause.resumeAfter, tz)}, when the cap window reopens; if by then it is older than its discovery refresh allows, it is cancelled instead and the next run starts with fresh prices.`;
+  return scheduled
+    ? 'Search again, or Resume when you are ready.'
+    : 'This search has no schedule; Search again, or Resume when you are ready.';
+}
+
+/** A never-resumed budget stop's next step (revision 55 §8.1): a fresh run, which reuses what this one found. */
+const CARRY_ON = 'Search again carries on with the prices already found.';
+
+/**
  * Writes the pass's final status after sending its notices. The status write is the last act, so anyone who observes a
  * final status also observes every write and notification of the pass.
  */
 export async function finish(ctx: EngineContext, run: RunState, alertsRan: boolean): Promise<void> {
-  const { status, patch, notice } = finalStatus(run.stop, ctx.clock.now(), run.snapshot.scheduleTz);
+  // why: revision 55 §8.1 — a cancel or SIGTERM during the flight-list step after a budget stop wins over that stop
+  const stop = run.flightStop ?? run.stop;
+  const scheduled = scheduledNow(ctx, run.definitionId);
+  const { status, patch, notice } = finalStatus(
+    stop,
+    ctx.clock.now(),
+    run.snapshot.scheduleTz,
+    run,
+    scheduled,
+  );
   const notices = notice === null ? [...run.notices] : [...run.notices, notice];
   const parity = parityNotice(ctx, run);
   if (parity !== null) notices.push(parity);
@@ -191,7 +265,7 @@ export function parityNotice(ctx: EngineContext, run: RunState): Notice | null {
     if (
       planned === 0 ||
       run.disabled.has(providerId) ||
-      lane?.budgetOut === true ||
+      (lane !== undefined && lane.budgetOutScope !== null) ||
       (lane !== undefined && lane.windowOut !== null)
     )
       continue;
@@ -207,5 +281,11 @@ export function parityNotice(ctx: EngineContext, run: RunState): Notice | null {
   return { kind: 'parity_break', detail: `${breaks.join('. ')}.` };
 }
 
-/** The error_text of a child execution that reached a cap (ruling 7). */
-export const CHILD_CAP_REACHED = 'child cap reached';
+/**
+ * Revision 55 §7, §8.1: whether the run's search is scheduled now (`isScheduled` over the live definition): the one
+ * schedule predicate finish and `autoResume` read. A deleted or missing definition is not.
+ */
+export function scheduledNow(ctx: Pick<EngineContext, 'repos'>, definitionId: string): boolean {
+  const def = ctx.repos.definitions.get(definitionId);
+  return def !== null && isScheduled(def);
+}

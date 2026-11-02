@@ -29,9 +29,10 @@ journey duration, stops) in view. Watching a chosen itinerary's price over time 
 alerts) supports that decision; it does not replace it. The app never books: the operator books
 with the airline or an agent.
 
-Success: scheduled searches keep the Dates view's board of best date pairs and its overview of
-months current for the configured search, within budgets the operator sets, and an email arrives
-when an itinerary that meets the operator's constraints drops under their threshold.
+Success: one press of Search now on a new search gives the board of best date pairs and its
+overview of months for it, within budgets the operator sets; scheduled searches keep them
+current, and an email arrives when an itinerary that meets the operator's constraints drops
+under their threshold.
 
 ## Positioning
 
@@ -44,7 +45,7 @@ Honest coverage and provenance, within a hard budget the operator controls.
   airport pair on one date pair; coverage is stated per date pair over its airport pairs, so "not
   searched" or "no cached data" can never be mistaken for "no flights".
 - The operator sets caps on vendor calls, spend and browser pages, per run and per month, sees
-  the estimate before saving or running a search, and the app stops at the caps.
+  the estimate beside the button that runs a search, and the app stops at the caps.
 
 ## Operating Context
 
@@ -67,12 +68,37 @@ the operator's own machine, which must be awake for it. Setup and operation happ
 
 ## Capabilities and Constraints
 
-- **Views:** in two tiers. Decide: Dates (a ranked board of the best date pairs, an overview of
-  months with a strip of stay lengths per day, and a coverage section saying what was and was
-  not searched) and History (price over time for a route or an itinerary). Set up: Definitions
-  (setting up a search, with its estimate and budget fit shown before saving), Providers, Alerts
-  and Status. A date pair's detail (its itineraries and calendar prices, one panel per airport
-  pair) opens from the Dates board, the overview or an alert email, not from the nav.
+- **Views:** in two tiers. Decide: Searches (the first screen: the operator's searches as cards,
+  and the new-search form with From, To, Leave between and Stay, everything else under More
+  options; one press of **Search now** shows its estimate beforehand and runs it), a search's
+  page (the nav names the search last opened: its state line, a ranked board of the best date
+  pairs, an overview of months with a strip of stay lengths per day whose key says "brighter is
+  cheaper", the flights read for the cheapest date pairs, Search again, Edit and Repeat weekly…,
+  and a coverage section saying what was and was not searched) and History (price over time for a
+  route or an itinerary). Set up: Providers, Alerts and Status. A search's Edit page (reached
+  from a card or the page, not from the nav) holds the full set of fields, the estimate and
+  budget fit. A date pair's detail (its itineraries and calendar prices, one panel per airport
+  pair) opens from the board, the overview or an alert email, not from the nav.
+- **Flight lists:** for the cheapest date pairs the browser worker reads Google Flights' own
+  list of outbound flights (times, changes, airline, the lowest round trip listed with each),
+  selects the cheapest outbound within the search's journey, stops and time limits, and reads the
+  return flights Google lists with it (and the next outbound's, from a fresh load of the page,
+  when none fits), each priced as Google words it ("from"). It then opens the booking options of
+  the shown pairing and reads the offers Google listed. The cheapest of the sellers read leads
+  the date pair, on the board and on the search's page alike, only when both flights are within
+  the search's limits, the list is fresh, it was read under the search's current limits and the
+  offers are complete, with the grid price beside it; otherwise the grid price leads and the
+  pairing shows beneath it, saying why. When no return fits on either outbound tried, the pairing
+  whose sellers were read is shown with its offers, marked over the limits. A read that did not
+  finish says when it is read again: at the next search while a read would go now (the Read
+  flights button beside it), else once the list is older than the search's refresh. It is not a
+  fare check, and the app does not know which price is bookable: economy only,
+  one or two outbounds' returns, not every pairing, and booking stays on Google (the app opens no
+  seller). Return flights and sellers are read only on worker machines whose recording session
+  set the flags (the operator's Mac at present). Coverage and the buckets never change. Each read
+  counts against the browser's page allowance: up to 2 pages a date pair (a second outbound loads
+  the page again), 20 a run on an allowance of its own, inside the month's page cap. Without the worker the page says flight times
+  need it.
 - **Price sources:**
   - Aviasales cache (Travelpayouts): free, cached prices up to 48 hours old.
   - Google Flights via SearchApi: paid per call; date grid and itinerary search with booking
@@ -82,6 +108,11 @@ the operator's own machine, which must be awake for it. Setup and operation happ
 - **Two stages:** discovery (wide and cheap, across the whole window) and verification
   (itinerary search of selected cells).
 - **Coverage buckets per cell:** priced, no fares, no cached data, error, skipped, not searched.
+  On the main path these are worded as searched, "not searched", "not reached" and "couldn't be
+  read"; the six buckets stay in the coverage section.
+- **Main-path words:** Search now, Search again, Searching, Searched, Reading flights, Repeat
+  weekly, More options; set-up terms (stages, cells, discovery, verification) stay in the
+  coverage section and the Providers view.
 - **Budgets:** caps per run and per month on calls, spend and pages; estimates before spending;
   a ledger of every call.
 - **Route-agnostic:** any airports in the airports table; nothing in the product is tied to a

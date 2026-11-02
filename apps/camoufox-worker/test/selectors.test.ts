@@ -20,8 +20,104 @@ describe('the dated selectors module (spec §2; brief §9)', () => {
       LANDING_VERIFIED: true,
       // why: grid/2026-10-26/7 and 8 showed the date grid's unpriced cells on the operator's Mac
       GRID_UNPRICED_VERIFIED: true,
+      // why: WP21 Task 21.3: the 2026-11-01 recordings and the end-to-end select-return/2026-11-02/1
+      RETURN_SELECT_VERIFIED: true,
+      BOOKING_SELECT_VERIFIED: true,
     });
     expect(Object.keys(flagsOf())).toEqual([...FLAG_NAMES]);
+  });
+  // why: WP21 Task 21.3: the outbound and the return are selected only on an entry a recording of the served sequence
+  // set them on: darwin-arm64 alone (select-return/2026-11-02/1, end to end), PROOFS naming it; every other entry
+  // reports both false, with no proof named
+  it('RETURN_SELECT_VERIFIED and BOOKING_SELECT_VERIFIED are true on darwin-arm64 only, named by the end-to-end recording', () => {
+    for (const k of OS_ARCHES) {
+      const on = k === 'darwin-arm64';
+      const flags = flagsOf(selectorsFor(k, CAMOUFOX_BUILDS[k].build));
+      for (const f of ['RETURN_SELECT_VERIFIED', 'BOOKING_SELECT_VERIFIED'] as const) {
+        expect(flags[f], `${k} ${f}`).toBe(on);
+        if (on) expect(PROOFS[k][f], `${k} ${f}`).toContain('select-return/2026-11-02/1');
+        else expect(PROOFS[k][f], `${k} ${f}`).toBeUndefined();
+      }
+    }
+  });
+  // why: WP21 Task 21.0: the return view's patterns are a hypothesis the recording checks (Task 21.3 dates them); both
+  // price forms are admitted so the research can see whichever the page uses
+  // why: select-return/2026-11-01/1 and 2 (the booking research): each offer is a button named by this pattern; a
+  // hypothesis for the build until BOOKING_SELECT_VERIFIED is set on an entry
+  it('the booking view hypothesis: an offer button names the seller, an optional fare and the stated price', () => {
+    const { offer } = SELECTORS.booking;
+    for (const ok of [
+      'Continue to book with QQ Air for 451 British pounds',
+      'Continue to book with QQ Air, Economy Light for 1,204 British pounds',
+    ])
+      expect(offer.test(ok), ok).toBe(true);
+    for (const no of [
+      'Continue to book with QQ Air for From 451 British pounds',
+      'More booking options',
+      'View QQ Air, 451 British pounds',
+    ])
+      expect(offer.test(no), no).toBe(false);
+  });
+  // why: select-return/2026-11-01/1 and 2: the expansion control is a button named by a count and the fixed phrase
+  it('the booking view’s expansion control: a count, then more booking option(s); never an offer', () => {
+    const { moreOptions, offer } = SELECTORS.booking;
+    for (const ok of ['3 more booking options', '1 more booking option', '12 more booking options'])
+      expect(moreOptions.test(ok), ok).toBe(true);
+    for (const no of [
+      'More booking options',
+      'Continue to book with QQ Air for 451 British pounds',
+      'View QQ Air, 451 British pounds options',
+      '3 more booking options for 451 British pounds',
+    ])
+      expect(moreOptions.test(no), no).toBe(false);
+    expect(offer.test('3 more booking options')).toBe(false);
+  });
+  // why: WP21 Task 21.3: dated from select-outbound/2026-11-01/3 and 4 (every return name in the "From" form; the
+  // heading in its plain, Top and Other forms)
+  it('the return view as recorded: a returning-flights heading, and return links in the "From" form only', () => {
+    const { heading, resultLink } = SELECTORS.returns;
+    for (const h of [
+      'Returning flights',
+      'returning flights',
+      'Top returning flights',
+      'Other returning flights',
+    ])
+      expect(heading.test(h), h).toBe(true);
+    for (const h of ['Top departing flights', 'Returning flights soon', 'Best returning flights'])
+      expect(heading.test(h), h).toBe(false);
+    expect(resultLink.test('From 478 British pounds round trip total. Nonstop flight with QQ Air.')).toBe(
+      true,
+    );
+    // why: the total alone was never recorded (0 of 38 return names), so it is no return link
+    expect(resultLink.test('1,204 British pounds round trip total. Nonstop flight with QQ Air.')).toBe(false);
+    expect(resultLink.test('Select flight')).toBe(false);
+    expect(resultLink.source).toBe(SELECTORS.results.resultLink.source);
+  });
+  // why: WP21 Task 21.3: select-return/2026-11-01/1 and 3 showed the grouped "View <seller>, …" control; the view's
+  // price-comparison note has no selector (the controller's ruling of 2026-11-02: its wording follows the fare)
+  it('the booking view as recorded: the path, offer, expansion and grouped patterns only, the grouped control never naming an offer or the expansion', () => {
+    const { grouped, offer, moreOptions } = SELECTORS.booking;
+    expect(Object.keys(SELECTORS.booking).sort()).toEqual(['grouped', 'moreOptions', 'offer', 'path']);
+    for (const ok of [
+      'View QQ Travel, QQ Fares 1,250 British pounds options',
+      'View QQ Travel, QQ Air 478 British pounds more',
+    ])
+      expect(grouped.test(ok), ok).toBe(true);
+    for (const no of [
+      'Continue to book with QQ Travel for 1,180 British pounds',
+      'Continue to book with QQ Travel, Economy Basic for 1,180 British pounds',
+      '17 more booking options',
+      'View more flights',
+      'View QQ Travel',
+    ]) {
+      expect(grouped.test(no), no).toBe(false);
+    }
+    // why: the grouped control is counted, never pressed: neither the offer pattern nor the expansion's names it
+    for (const g of ['View QQ Travel, QQ Fares 1,250 British pounds options']) {
+      expect(offer.test(g), g).toBe(false);
+      expect(moreOptions.test(g), g).toBe(false);
+    }
+    expect(SELECTORS_VERSION).toBe('2026-11-01-returns');
   });
   it('each true flag of every entry names its proving recording’s date, and no false flag names one (TS-13)', () => {
     for (const k of OS_ARCHES) {

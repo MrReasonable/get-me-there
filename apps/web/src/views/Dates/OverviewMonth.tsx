@@ -2,7 +2,7 @@ import type { IsoDate, IsoMonth } from '@gmt/core';
 import { memo } from 'react';
 import { COPY } from '../../copy.js';
 import { formatDayOfMonth, formatIsoMonth, formatWeekday, WEEK_HEADERS, weekdayIndex } from '../../format.js';
-import { type CellModel, type Column, type Mark, weeksOf } from './overview.js';
+import { type CellMark, type CellModel, type Column, weeksOf } from './overview.js';
 import { BAND_CLASSES, FLAT_CLASS } from './shade.js';
 import './dates.css';
 
@@ -12,12 +12,11 @@ const M = COPY.datesView.marks;
  * Each mark's pattern beside its glyph (spec §11: no mark by colour alone). Only "partly not searched" is a pattern
  * (stripes in the cell's own text colour, so it keeps the text's contrast on every shade); every mark has its glyph.
  */
-export const MARK_CLASS: Readonly<Record<Mark, string>> = {
-  empty: '',
-  no_data: '',
-  error: '',
-  skipped: '',
-  not_run: '',
+export const MARK_CLASS: Readonly<Record<CellMark, string>> = {
+  'no-price-shown': '',
+  'couldnt-read': '',
+  'not-reached': '',
+  'not-searched': '',
   partly: 'dates-partly',
   notChecked: '',
   superseded: '',

@@ -30,7 +30,7 @@ describe('test harness (reviews tsr-004, tsr-006, tsr2-006, tsr2-010)', () => {
       pricePence: 1,
       provenance: fx.provSearch,
       booking: { kind: 'none' as const },
-      stale: false,
+      stale: false as const,
       ageHours: 1,
       verdictClass: 'verified' as const,
       unverified: [],

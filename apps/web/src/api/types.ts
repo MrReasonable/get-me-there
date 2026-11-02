@@ -16,6 +16,7 @@ export type CalendarGapResponse = z.output<typeof apiContract.calendarGapRespons
 export type AirportsResponse = z.output<typeof apiContract.airportsResponseSchema>;
 export type PriceCellData = z.output<typeof apiContract.priceCellSchema>;
 export type UsageRow = z.output<typeof apiContract.usageSchema>;
+export type SearchCard = z.output<typeof apiContract.searchCardSchema>;
 export type Basis = ResultBasis;
 
 /**
@@ -27,6 +28,11 @@ export type DefinitionUpdateBody = z.input<typeof apiContract.definitionUpdateRe
 export type CoverageCheckBody = z.input<typeof apiContract.coverageCheckRequestSchema>;
 export type VerifyCellBody = z.input<typeof apiContract.verifyCellRequestSchema>;
 export type StartExecutionBody = z.input<typeof apiContract.startExecutionRequestSchema>;
+/** Search now's one press (spec rev 55 §10 `POST /definitions/create-and-start`), in the schema's input shape. */
+export type CreateAndStartBody = z.input<typeof apiContract.createAndStartRequestSchema>;
+export type CreateAndStartResponse = z.output<typeof apiContract.createAndStartResponseSchema>;
+/** A refused start in the create-and-start answer: its code (worded by the web) and the figures the words need. */
+export type StartRefusal = NonNullable<CreateAndStartResponse['refusal']>;
 
 // WP10 routes (plan "API contract", results.ts, with WP10's additions of decisions 38, 42 and 48).
 export type CellDetailResponse = z.output<typeof apiContract.cellDetailResponseSchema>;
@@ -55,3 +61,7 @@ export interface ResultsScope extends DatePairsScope {
 
 /** An alert rule as the form sends it: the schema's input shape (cooldownHours may be left to its default of 336). */
 export type AlertRuleBody = z.input<typeof apiContract.alertRuleInputSchema>;
+
+/** WP20 Task 20.10 (spec rev 55 §10): a search's page's flight lists, and one stored list. */
+export type FlightListsResponse = z.output<typeof apiContract.flightListsResponseSchema>;
+export type FlightList = z.output<typeof apiContract.flightListSchema>;

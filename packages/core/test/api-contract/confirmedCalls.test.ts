@@ -23,4 +23,15 @@ describe('confirmed calls beside confirmed pence (decision 37)', () => {
     expect(definitionResponseSchema.shape.confirmedCalls.safeParse(12).success).toBe(true);
     expect(definitionResponseSchema.shape.confirmedCalls.safeParse(-1).success).toBe(false);
   });
+  it('an update may say its confirmation is the shown runnable totals (spec rev 55 §10: Repeat weekly’s Save)', () => {
+    const save = { scheduleCron: '0 5 * * 1', enabled: true, confirmedCostPence: 120, confirmedCalls: 300 };
+    expect(definitionUpdateRequestSchema.parse({ ...save, confirmShown: true })).toEqual({
+      ...save,
+      confirmShown: true,
+    });
+    expect(definitionUpdateRequestSchema.parse(save)).not.toHaveProperty('confirmShown');
+    expect(definitionUpdateRequestSchema.safeParse({ ...save, confirmShown: 'yes' }).success).toBe(false);
+    // why: a stored row never carries it; it is a property of one request
+    expect(Object.keys(definitionShapeSchema.shape)).not.toContain('confirmShown');
+  });
 });

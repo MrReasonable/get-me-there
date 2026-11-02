@@ -69,4 +69,49 @@ describe('@gmt/core barrel', () => {
     // why: columnAt is the decoder's own guard, not part of the package's surface
     expect(core).not.toHaveProperty('columnAt');
   });
+  it('re-exports the WP20 Task 20.1 surface, and the contract its schemas', () => {
+    for (const name of [
+      'definitionDefaults',
+      'isScheduled',
+      'PROVIDER_ERROR_KINDS',
+      'BUDGET_SCOPE_KINDS',
+      'formatInstantShort',
+      'MAIN_PATH_SOURCE',
+      'mainPathSource',
+      'stopText',
+      'NO_STOP_CAUSE_TEXT',
+      'calendarStaleThreshold',
+      'stalenessOf',
+      'staleMarkText',
+      'reducedMark',
+      'datePairSearched',
+      'datePairBuckets',
+      'searchedDatePairCount',
+      'runModeOf',
+      'LISTED',
+      'nonEmpty',
+      'mapNonEmpty',
+    ]) {
+      expect(core, name).toHaveProperty(name);
+    }
+    expect(core.LISTED).toEqual(['flights', 'no-flights', 'none-for-cell']);
+    for (const name of [
+      'STOP_DETAILS',
+      'BUDGET_UNITS',
+      'budgetUnitsFor',
+      'countSchema',
+      'triggerSchema',
+      'stopCauseSchema',
+      'stopTextSchema',
+      'searchCardSchema',
+      'searchCardsResponseSchema',
+      'createAndStartRequestSchema',
+      'createAndStartResponseSchema',
+      'startRefusalCodes',
+      'definitionFields',
+      'refineDefinition',
+    ]) {
+      expect(core.apiContract, name).toHaveProperty(name);
+    }
+  });
 });
