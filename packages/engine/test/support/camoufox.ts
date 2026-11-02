@@ -175,7 +175,6 @@ export function listAnswer(at: IsoDateTime): Extract<FlightListResult, { kind: '
     resultsStated: 1,
     notes: [],
     returns: null,
-    nextLoadNotBefore: null,
   };
 }
 

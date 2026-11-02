@@ -243,9 +243,9 @@ export const ALL_SECRETS: Secret[] = [
 /**
  * Spec rev 56 §2, §12 (ruling A6): a camoufox provider's flights request timeouts with a return phase, as the wiring
  * computes them with core's `flightRequestSeconds` at the defaults (page timeout 90 s, spacing 30 s), and without one
- * (core's `listRequestSeconds`, 105 s).
+ * (core's `listRequestSeconds`, 210 s).
  */
-export const FLIGHT_REQUEST_SECONDS = { booking: 780, returnsOnly: 600, outboundOnly: 105 } as const;
+export const FLIGHT_REQUEST_SECONDS = { booking: 780, returnsOnly: 600, outboundOnly: 210 } as const;
 
 export const SEARCH = 'https://www.searchapi.io/api/v1/search';
 export const TP = 'https://api.travelpayouts.com/aviasales/v3/prices_for_dates';

@@ -80,7 +80,17 @@ export function classifyWorkerAnswer(f: ResponseFacts): ProviderError {
         answer.cooldownUntil,
       );
     case 'spacing':
-      return error(f, 'rate-limit', 'the worker asked to wait for its spacing', 'spacing', true);
+      // why: final review A-I1: the wait the worker stated (the rest of a page in flight, or the spacing) goes on the
+      // error, so http-kit's retry waits that long even with no Retry-After header
+      return new ProviderError({
+        kind: 'rate-limit',
+        retryable: true,
+        httpStatus: f.status,
+        providerId: 'camoufox',
+        message: `camoufox ${f.endpointPath}: the worker asked to wait ${answer.retryAfterSeconds} s for its spacing [spacing]`,
+        reason: 'spacing',
+        retryAfterSeconds: answer.retryAfterSeconds,
+      });
     case 'mode-unavailable':
       return error(
         f,

@@ -542,6 +542,17 @@ describe('PageSession (spec §2; brief Task 14.4)', () => {
     });
     expect(ctx0(t).pages).toHaveLength(1);
   });
+  // why: final review A-I1: a request that arrives while a page is in flight waits for that page's whole cap and its
+  // bounded close (two finally bounds), never only the spacing, so the app's retry does not spend its attempts early
+  it('a request while a page is in flight → spacing for the rest of that page’s cap and its close', async () => {
+    const t = setup();
+    const first = t.session.page(REQ);
+    expect(await t.session.page(REQ)).toEqual({
+      answer: { kind: 'spacing', retryAfterSeconds: 190 },
+      googleContacted: false,
+    });
+    await first;
+  });
   it('an active cool-down → cooling-down, nothing opened', async () => {
     const t = setup();
     t.cooldown.start('captcha');

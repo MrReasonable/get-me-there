@@ -230,7 +230,6 @@ describe('camoufox flightLists (spec rev 55 §2, §5.1)', () => {
       resultsStated: 4,
       notes: [],
       returns: null,
-      nextLoadNotBefore: null,
     });
   });
   it('keeps the other outcomes and the page’s own point of sale', async () => {
@@ -386,6 +385,32 @@ describe('camoufox flightLists (spec rev 55 §2, §5.1)', () => {
     expect(await drive(lists.read(Q, ctx))).toMatchObject({ kind: 'list', listed: 'flights' });
     expect(budget.rowsOf('camoufox').map((r) => r.pageClass)).toEqual(['no-page', 'page']);
   });
+  // why: final review A-I1: the busy worker states its wait on the answer; the retry waits that long (the header is
+  // the same figure from the worker, but the answer's own is enough), so it never spends its attempts while it is busy
+  it('429 spacing with the wait only on the answer: the retry waits the stated 200 s, then the page', async () => {
+    useFakeTime();
+    const { lists, budget } = setup();
+    const at: number[] = [];
+    const answers = [
+      HttpResponse.json(
+        { kind: 'spacing', retryAfterSeconds: 200 },
+        { status: 429, headers: { 'x-gmt-google-contacted': '0' } },
+      ),
+      HttpResponse.json(answer(), contacted(true)),
+    ];
+    server.use(
+      http.post(URL_, () => {
+        at.push(Date.now());
+        return answers.shift() ?? HttpResponse.error();
+      }),
+    );
+    expect(await drive(lists.read(Q, ctx), { stepMs: 1000 })).toMatchObject({
+      kind: 'list',
+      listed: 'flights',
+    });
+    expect(budget.rowsOf('camoufox').map((r) => r.pageClass)).toEqual(['no-page', 'page']);
+    expect((at[1] ?? 0) - (at[0] ?? 0)).toBeGreaterThanOrEqual(200_000);
+  });
   it('a spacing answer that never ends is a rate-limit list-error, through classifyWorkerAnswer', async () => {
     useFakeTime();
     const { lists } = setup();
@@ -489,22 +514,23 @@ describe('camoufox flightLists: the return phase (spec rev 56 §2 "The return ph
     ]);
     for (const b of bodies) expect(flightsRequestSchema.safeParse(b).success).toBe(true);
   });
-  it('a request plans its pages and its own timeout: 780 s with the booking read, 600 s without, 105 s outbound-only', async () => {
+  it('a request plans its pages and its own timeout: 780 s with the booking read, 600 s without, 210 s outbound-only', async () => {
     const { lists, sent, events } = setup();
     server.use(capture(() => HttpResponse.json(answer(), contacted(true))));
     await lists.read({ ...Q, returnLimits: LIMITS, booking: true }, ctx);
     await lists.read({ ...Q, returnLimits: LIMITS, booking: false }, ctx);
     await lists.read(Q, ctx);
-    // why: 21.6 review M7: the outbound-only request's timeout is the list page's (the engine's gate holds it to the
-    // same 105 s), never the provider's default, which in grid mode is a whole grid page's
+    // why: 21.6 review M7, final review A-I1: the outbound-only request's timeout is core's listRequestSeconds (the
+    // worker's two page periods plus 30 s; the engine's gate holds it to the same 210 s), never the provider's default,
+    // which in grid mode is a whole grid page's
     expect(sent.map((r) => [r.pages, r.requestTimeoutSeconds])).toEqual([
       [2, 780],
       [2, 600],
-      [1, 105],
+      [1, 210],
     ]);
     expect(reserves(events).map((r) => r.pages)).toEqual([2, 2, 1]);
   });
-  it('maps returns and nextLoadNotBefore field for field, and the page count reaches the ledger only', async () => {
+  it('maps returns field for field; the page count reaches the ledger only and nextLoadNotBefore only http-kit (A-M3)', async () => {
     const { lists, budget } = setup();
     server.use(
       capture(() =>
@@ -529,19 +555,18 @@ describe('camoufox flightLists: the return phase (spec rev 56 §2 "The return ph
       resultsStated: 4,
       notes: [],
       returns: RETURNS,
-      nextLoadNotBefore: NEXT_LOAD,
     });
+    expect('nextLoadNotBefore' in r).toBe(false);
     // why: arch-r3-014: pagesLoaded is never on the result; it reaches the ledger row's page_count through pageCountOf
     expect('pagesLoaded' in r).toBe(false);
     expect(budget.rowsOf('camoufox').map((x) => [x.pages, x.pageCount])).toEqual([[2, 2]]);
   });
-  it('an answer without the keys maps to returns null and nextLoadNotBefore null', async () => {
+  it('an answer without the keys maps to returns null', async () => {
     const { lists } = setup();
     server.use(capture(() => HttpResponse.json(answer({ pagesLoaded: 1 }), contacted(true))));
     expect(await lists.read({ ...Q, returnLimits: LIMITS, booking: true }, ctx)).toMatchObject({
       kind: 'list',
       returns: null,
-      nextLoadNotBefore: null,
     });
   });
   it('an attempt whose outboundIndex is past the flights is list-error parse unknown-answer', async () => {
@@ -560,6 +585,28 @@ describe('camoufox flightLists: the return phase (spec rev 56 §2 "The return ph
       error: { kind: 'parse', reason: 'parse', retryable: false },
     });
     if (r.kind === 'list-error') expect(r.error.message).toContain('[unknown-answer]');
+  });
+  // why: final review A-M2: the protocol states `returns` exactly on an answer to a request carrying returnLimits, with
+  // those limits; any other return block is refused before it is stored, never judged under limits the run never sent
+  it.each([
+    ['a return block on a request sent without returnLimits', null, LIMITS],
+    ['a return block whose limits differ from those sent', LIMITS, { ...LIMITS, maxStops: 0 }],
+  ] as const)('%s is list-error parse returns-mismatch', async (_name, sentLimits, answered) => {
+    const { lists } = setup();
+    server.use(
+      capture(() =>
+        HttpResponse.json(
+          answer({ returns: { ...RETURNS, limits: answered }, pagesLoaded: 2, nextLoadNotBefore: NEXT_LOAD }),
+          contacted(true),
+        ),
+      ),
+    );
+    const r = await lists.read({ ...Q, returnLimits: sentLimits, booking: true }, ctx);
+    expect(r).toMatchObject({
+      kind: 'list-error',
+      error: { kind: 'parse', reason: 'parse', retryable: false },
+    });
+    if (r.kind === 'list-error') expect(r.error.message).toContain('[returns-mismatch]');
   });
   it('a held next read waits for nextLoadNotBefore before it is sent (R-spacing: no refused round trip)', async () => {
     useFakeTime();

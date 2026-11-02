@@ -270,8 +270,8 @@ Five conditions the plan implies and no section states outright; each is pinned 
   the return and booking views positively recognised by the classifier and the settle rules (changed from the view
   before, then stable; never on the status line alone), the return reader (fitting returns kept first), the offer
   reader and grammar, the return phase module (selection, reload, second selection, the return's selection, the
-  expansion, the offers), `pagesLoaded` and `nextLoadNotBefore` on the answers, `versions.returnGrammar` and
-  `offerGrammar`.
+  expansion, the offers), `pagesLoaded` and `nextLoadNotBefore` on the answers, and `versions.offerGrammar` (the return
+  names use the one option grammar: no second grammar version; final ruling A-M4).
 - `providers`: the limits, the page plan and the flights request's own timeout through http-kit, `returns`,
   `pageCountOf`, the limiter hold from `nextLoadNotBefore`, the preflight's flags.
 - `db`: migration 0012 (additive), the repository's returns, offers and stored limits, `newestWithReturns`, the
@@ -559,8 +559,9 @@ export const PAIRING_READ = ['not-read', 'outbound-only', 'no-pairing-read', 'ov
 //   superRefine checks every attempt's outboundIndex < flights.length and the booking's indices (the provider maps a breach to list-error parse
 //   unknown-answer); versionsSchema gains offerGrammar: z.string().min(1).exactOptional() (return names use the one grammar: no returnGrammar)
 // // ports/provider.ts: FlightListQuery gains returnLimits?: FlightLimits | null and booking?: boolean (required in Task 21.6; booking sent only with returnLimits);
-//   FlightListResult's `list` gains returns?: ReturnRead | null and nextLoadNotBefore?: IsoDateTime | null (required in Task 21.6; pagesLoaded travels only
-//   on the answer → http-kit → page_count path, never on the result, the row or the wire: arch-r3-014); PreflightResult gains flags?: Readonly<Record<string, boolean>>
+//   FlightListResult's `list` gains returns?: ReturnRead | null (required in Task 21.6; pagesLoaded travels only on the answer → http-kit → page_count
+//   path, never on the result, the row or the wire: arch-r3-014; nextLoadNotBefore stays off the result too: http-kit holds the next start from the
+//   answer inside the attempt and nothing past the provider reads it, final ruling A-M3); PreflightResult gains flags?: Readonly<Record<string, boolean>>
 // ports/budget.ts: ReserveParams gains pages?: number (the planned page count, default 1); finalise's parameter gains pageCount?: number (the answer's, 0 admitted;
 //   absent keeps the plan on an unknown attempt, else 1 on a contacted page); for a camoufox page scope the guard's `calls` IS the page sum (usageSchema, the
 //   Usage type, the api's usage read, ProvidersView and `gmt browser counts` are unchanged: arch-r2-006)
@@ -647,10 +648,10 @@ export const PAIRING_READ = ['not-read', 'outbound-only', 'no-pairing-read', 'ov
 // ---------- providers (Task 21.4) ----------
 // // camoufox/flights.ts: the request carries returnLimits when q.returnLimits is non-null and, only then, booking: q.booking; the post passes pages:
 //   FLIGHT_LIST_PAGES_PER_PAIR_MAX and requestTimeoutSeconds: flightRequestSeconds(c.pageTimeoutSeconds, c.minSpacingSeconds, q.booking) (780 / 600 at the
-//   defaults) for such a request (pages 1 and the provider's timeout otherwise); the result carries returns: answer.returns ?? null and nextLoadNotBefore:
-//   answer.nextLoadNotBefore ?? null (pagesLoaded goes to finalise through pageCountOf only); after an
-//   answer with nextLoadNotBefore the capability calls o.http.holdUntil('camoufox', at) so the limiter's next start waits for it (R-spacing: no refused
-//   round trip, no retry spent)
+//   defaults) for such a request (pages 1 and listRequestSeconds, 210 s, otherwise: final ruling A-I1); the result carries returns: answer.returns ??
+//   null, refused as parse returns-mismatch when the request sent no returnLimits or other limits (final ruling A-M2) (pagesLoaded goes to finalise
+//   through pageCountOf only); http-kit holds its next start from an answer's nextLoadNotBefore inside the attempt (nextStartOf; ruling 21.4) so the
+//   limiter's next start waits for it (R-spacing: no refused round trip, no retry spent)
 // http/types.ts: HttpKitRequest gains pages?: number and requestTimeoutSeconds?: number (a per-request override of the provider's; discovery keeps its own);
 //   HttpKit gains holdUntil(providerId, at: IsoDateTime): void (the hold is awaited in run() before the request is submitted to the limiter's queue, under
 //   the request's signal, and does not count toward maxWaitMs: a hold longer than maxWaitMs still waits; arch-r3-018); ProviderHttpLimits gains
@@ -959,7 +960,11 @@ value below is the recorded literal; nothing is left to a decision rule.
     settled to the documents loaded, each counted on the answer as `pagesLoaded` and in the ledger as `page_count`;
     after such a request the answer states when the next load may start and the app waits for it"; the Limits
     paragraph's spacing sentence says the same; the page budget (eight page periods plus one spacing: 750 s at the defaults; six periods without a
-    booking read) and the app's flights request timeout, `flightRequestSeconds` (780 s / 600 s at the defaults), discovery keeping its own; "the worker opens only the URL form above" gains "and, in the return phase, the views the page's own
+    booking read) and the app's flights request timeout, `flightRequestSeconds` (780 s / 600 s at the defaults), and without a return
+    phase `listRequestSeconds`, two page periods plus 30 s (210 s; final ruling A-I1), discovery keeping its own; a request arriving while a
+    page is in flight is answered `spacing` with the rest of that page's cap and its close as its wait, which the app's retry waits (final
+    ruling A-I1); the browser's own error inside a step ends that step `<step>:browser-error`, keeping the outbound and every return read
+    before it (final ruling A-M1); "the worker opens only the URL form above" gains "and, in the return phase, the views the page's own
     selected-flight controls and its booking-options expansion show in place, each on the allowlist, and that same
     URL form again for a second outbound". Revise "the return
     flight is neither chosen nor read" to "where no outbound was selected"; the provenance note of §5 verbatim; the
@@ -970,7 +975,7 @@ value below is the recorded literal; nothing is left to a decision rule.
   - **§3**: "Flight list" gains the attempts, the pairing and the booking read; "pairing": one outbound and one
     return; "from price": what the list words "From", the cheapest seller's price; "offer": one seller's stated price
     for a pairing, with its fare name when stated; "sellers read".
-  - **§5.1**: `FlightListQuery.returnLimits`, `FlightListResult.returns`, `pagesLoaded` and `nextLoadNotBefore`,
+  - **§5.1**: `FlightListQuery.returnLimits`, `FlightListResult.returns` (never `pagesLoaded` or `nextLoadNotBefore`),
     `PreflightResult.flags`, `ReserveParams.pages`, `finalise`'s `pageCount`, the camoufox page scopes' `calls` as the
     page sum, http-kit's `holdUntil` and per-request timeout.
   - **§6.2**: the limits a flight read is judged against: the longest journey and `maxStops` per leg, the windows on
@@ -1009,7 +1014,8 @@ value below is the recorded literal; nothing is left to a decision rule.
     request's own seconds (no page starts past the window end); the window is sized from the estimate's typical seconds with the bound as a note.
   - **§9**: the recorded suites (`selectRecorded`, `bookingRecorded`, `returnsRecorded` and `offersRecorded` skip
     without their recordings) and the CI-run proof check (a true flag names recording keys in `PROOFS`).
-  - **§10**: `flightListSchema.returns` (its `booking` included) and `pagesLoaded`; the date-pair response's basis
+  - **§10**: `flightListSchema.returns` (its `booking` included; `pagesLoaded` stays off the result, the row and the
+    app's API: ruling A5, final ruling A-M4) and `readNow` (final ruling B-I3); the date-pair response's basis
     `pairing`, `gridPrice` and `pairing` groups (the pairing group's seller, fare, `offersRead`, `complete`, `which`, the times, `mismatch` and `isFrom`) and
     `pairingRead` column (nine values); the scoped `/results` figure the same; the card's `cheapest.basis`;
     `GET /executions/:id` unchanged; `usage` unchanged in shape, `calls` on the camoufox page scopes being the page sum.
@@ -1129,7 +1135,7 @@ field optional as §5 marks it, so every present consumer typechecks unchanged.
     `datePairFigureSchema` accepts basis `'pairing'` with `gridPrice` and `pairingRead` and a figure without them;
     `searches.test.ts`: a card's `cheapest.basis 'pairing'`; the redaction sweeps' shape lists gain `returns`,
     `pagesLoaded`, `nextLoadNotBefore`, `gridPrice` and `pairing`.
-  - `ports`: `expectTypeOf` cases for `ReserveParams.pages?`, `finalise`'s `pageCount?`, `FlightListQuery.returnLimits?`/`booking?`, `FlightListResult`'s `returns?`/`nextLoadNotBefore?`, `PreflightResult.flags?`, `Estimate.flightLists.pairs?`,
+  - `ports`: `expectTypeOf` cases for `ReserveParams.pages?`, `finalise`'s `pageCount?`, `FlightListQuery.returnLimits?`/`booking?`, `FlightListResult`'s `returns?` (and no `nextLoadNotBefore`), `PreflightResult.flags?`, `Estimate.flightLists.pairs?`,
     `DatePairFigure.gridPrice?`, under `pnpm --filter @gmt/core typecheck`.
 - [ ] **Run to verify they fail**: `pnpm --filter @gmt/core exec vitest run test/flights test/datePairs test/camoufox test/api-contract`; `pnpm --filter @gmt/core typecheck`.
 - [ ] **Implement** as §5 (every constant the literal the findings fixed). `workerRuleSchema` moves to `camoufox/rule.ts`
@@ -1198,7 +1204,7 @@ worker items.
       options name>', 'press:Enter']` and no `click` of any link, offer or grouped control (the fake's `calls.clicks` holds `tab:Cheapest`
       only); `selectOutbound(answer.flights, limits).index === answer.returns.attempts[0].outboundIndex` and the activated name is
       `names[2]` (Review Focus 1); the guard's activation gate is on from each press until its settle and off between; `pagesLoaded` is the literal 1 and the
-      month settles to 1 of the 2 reserved; `nextLoadNotBefore` absent; `fetchedAt` is after the phase; `versions.returnGrammar` and `offerGrammar` are set;
+      month settles to 1 of the 2 reserved; `nextLoadNotBefore` absent; `fetchedAt` is after the phase; `versions.offerGrammar` is set (one grammar: no `returnGrammar`, final ruling A-M4);
     - **a pick outside the 30**: 31 parsed outbound flights where only the dearest fits → `flights` holds 30 with the
       pick inside, `outboundIndex` names it, the dropped flight is the dearest non-pick, and the counts the page shows
       come from the 31 read (prov-r2-010);
@@ -1342,9 +1348,9 @@ preflight}.test.ts`, `test/http/{attempt,limiter}.test.ts`. **Consumes**: Task 2
   - `flightList.test.ts` (extend; msw): `read({ cell, airportNames, returnLimits: {…} })` posts a body carrying
     `returnLimits` exactly (and `booking` only with it) and omits the keys for `null`; the fake http-kit sees `pages: 2` and `requestTimeoutSeconds: 780`
     (`booking true`; 600 with it false; the literals for `pageTimeoutSeconds 90`, `minSpacingSeconds 30`) for a request with limits and `pages: 1` with no
-    override without; a `flights` answer with `returns`, `pagesLoaded 2` and `nextLoadNotBefore` maps to `{ kind: 'list', …, returns, nextLoadNotBefore }` field for field
-    (no `pagesLoaded` on the result) and `holdUntil('camoufox', at)` is called with it; one without the keys maps to `returns: null`,
-    `nextLoadNotBefore: null` and no hold;
+    override without; a `flights` answer with `returns`, `pagesLoaded 2` and `nextLoadNotBefore` maps to `{ kind: 'list', …, returns }` field for field
+    (no `pagesLoaded` or `nextLoadNotBefore` on the result; http-kit holds the next start); one without the keys maps to `returns: null`
+    and no hold; a return block on a request sent without `returnLimits`, or under other limits, is `list-error` `parse` `returns-mismatch`;
     an answer whose attempt's `outboundIndex` is out of range is `list-error` `parse` `unknown-answer`;
     `CAMOUFOX_FLIGHT_LIST_INFO.provenanceNote` is §5's text verbatim; the sentinel key never appears in the answer,
     the error or the posted body.
@@ -1412,7 +1418,7 @@ ledger,barrel,client}.test.ts`. **Consumes**: Task 21.2. **Produces**: §5's db 
 engine}.ts`, `packages/engine/stryker.config.json`, `test/support/harness.ts`; `apps/api/src/read/{flightLists,datePairs,results,ranked,cards}.ts`, `src/wiring.ts`,
 `src/bootstrap/engine.ts`; tests `packages/engine/test/stages/{flightLists,flightListsSelect,flightListsResume,discoveryPreflight}.test.ts`, `test/{estimate,
 budgetFit,flightRead,snapshot}.test.ts`, `apps/api/test/routes/{flightLists,datePairs,results,cards,ranked}.test.ts`. **Consumes**: Tasks 21.4, 21.5. Makes
-required: `FlightListQuery.returnLimits`, `FlightListResult`'s `returns`/`pagesLoaded`/`nextLoadNotBefore`, `FlightListInsert.returns`.
+required: `FlightListQuery.returnLimits`, `FlightListResult`'s `returns`, `FlightListInsert.returns`.
 
 - [ ] **Write the failing tests** (expected to fail as: `workerFlags` and `flightRequestSeconds` absent; `returnLimits`
   never sent; `returns` dropped by the on-demand write; the figure's basis never `'pairing'`; the estimate's clause

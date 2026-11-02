@@ -986,7 +986,7 @@ describe('the step plans and sends the return leg (spec rev 56 §8.1)', () => {
     };
   }
 
-  it('R-window: a window holding 700 s sends outbound-only requests (105 s each), not a 780 s return phase', async () => {
+  it('R-window: a window holding 700 s sends outbound-only requests (210 s each), not a 780 s return phase', async () => {
     const cam = stubCamoufox({ cells: 15, flights: {} });
     const e: CamoufoxEngine = engineWith([cam], { rankedDatePairs: (q) => reader(q) });
     const reader = windowAt(e, 700);

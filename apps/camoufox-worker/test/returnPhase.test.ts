@@ -1536,6 +1536,82 @@ describe('the guard after an activation (R-refused: the refusal read before clas
   });
 });
 
+// Final review A-M1: the browser's own error inside a step (not a deadline end, not a guard refusal) ends that step
+// with its transient status and the rule `<step>:browser-error`; the outbound read and every return read before it are
+// kept in a flights answer, never a whole-answer browser-error.
+describe('a browser error inside the return phase keeps what was read (final review A-M1)', () => {
+  const CLOSED = 'Target page, context or browser has been closed';
+  /** A driver whose `method` throws the browser's error on its `nth` call (1-based); every other call passes. */
+  const failing =
+    (method: 'listFacts' | 'bookingFacts', nth: number) =>
+    (d: Driver): Driver => {
+      let calls = 0;
+      const real = d[method].bind(d);
+      const wrapped: Driver[typeof method] = async (...args: Parameters<Driver[typeof method]>) => {
+        calls++;
+        if (calls === nth) throw new Error(CLOSED);
+        // why: the real reader, untouched, for every other call
+        return Reflect.apply(real, d, args);
+      };
+      return { ...d, [method]: wrapped };
+    };
+  it('the return view’s read fails: unrecognised select-outbound:browser-error, the outbound flights kept', async () => {
+    // why: listFacts call 1 is the outbound read, call 2 the return view's
+    const t = setup({ driver: failing('listFacts', 2) });
+    const a = expectTransient(t, (await t.session.page(REQ)).answer, 1);
+    expect(a.flights).toEqual(FOUR);
+    expect(a.returns).toMatchObject({
+      status: 'unrecognised',
+      rule: 'select-outbound:browser-error',
+      attempts: [],
+      booking: { status: 'skipped', rule: 'select-outbound:browser-error' },
+    });
+  });
+  it('the reload’s read fails: read, rule reload:browser-error, attempt 0’s returns kept, the booking skipped', async () => {
+    const R2S1 = rt('1,300', { stops: '2 stops' });
+    const t = setup({
+      press: {
+        [PICK]: { trees: [returnTree([R2S1])], url: RETURN_URL },
+        [R2S1]: { trees: [bookingTree()], url: BOOKING_URL },
+      },
+      // why: call 3 is the reloaded list page's read
+      driver: failing('listFacts', 3),
+    });
+    const a = expectTransient(t, (await t.session.page(REQ)).answer, 2);
+    expect(a.returns).toMatchObject({
+      status: 'read',
+      rule: 'reload:browser-error',
+      booking: { status: 'skipped', rule: 'reload:browser-error' },
+    });
+    expect(a.returns?.attempts).toHaveLength(1);
+    expect(a.returns?.attempts[0]?.returns).toHaveLength(1);
+  });
+  it('the booking view’s read fails: the returns read, the booking unrecognised select-return:browser-error', async () => {
+    const t = setup({ driver: failing('bookingFacts', 1) });
+    const a = expectTransient(t, (await t.session.page(REQ)).answer, 1);
+    expect(a.returns?.status).toBe('read');
+    expect(a.returns?.attempts[0]?.returns).toHaveLength(3);
+    expect(a.returns?.booking).toMatchObject({
+      status: 'unrecognised',
+      rule: 'select-return:browser-error',
+      attempt: 0,
+      returnIndex: 1,
+      offers: [],
+    });
+  });
+  it('the read after the expansion fails: expand-failed select-more-options:browser-error, the offers before it kept', async () => {
+    const t = setup({ driver: failing('bookingFacts', 2) });
+    const a = expectTransient(t, (await t.session.page(REQ)).answer, 1);
+    expect(a.returns?.booking).toMatchObject({
+      status: 'expand-failed',
+      rule: 'select-more-options:browser-error',
+      expanded: false,
+    });
+    expect(a.returns?.booking?.offers.map((o) => o.priceMinor)).toEqual([119_500, 121_000]);
+    expect(a.versions.offerGrammar).toBe(OFFER_GRAMMAR_VERSION);
+  });
+});
+
 describe('budgets (spec rev 56 §2: the page budget, the admission, the spacing before the reload only)', () => {
   it('the page budget is the literal 750,000 ms for a booking read, 570,000 without, 180,000 without returnLimits', () => {
     const { returnLimits: _l, booking: _b, ...plain } = REQ;
@@ -1544,6 +1620,14 @@ describe('budgets (spec rev 56 §2: the page budget, the admission, the spacing 
     expect(pageCapMs(plain, VERIFIED, 90_000, 30_000)).toBe(180_000);
     expect(pageCapMs(REQ, { ...VERIFIED, RETURN_SELECT_VERIFIED: false }, 90_000, 30_000)).toBe(180_000);
     expect(pageCapMs(REQ, { ...VERIFIED, BOOKING_SELECT_VERIFIED: false }, 90_000, 30_000)).toBe(570_000);
+  });
+  // why: final review A-I1: a request arriving during a return phase waits for the phase's whole cap (750 s) and the
+  // page's bounded close, not one spacing
+  it('a request while a return phase is in flight is answered spacing for the rest of its 750 s cap and its close', async () => {
+    const t = setup();
+    const first = t.session.page(REQ);
+    expect((await t.session.page(REQ)).answer).toMatchObject({ kind: 'spacing', retryAfterSeconds: 760 });
+    await first;
   });
   it('the monthly admission asks for the literal 2 (core’s FLIGHT_LIST_PAGES_PER_PAIR_MAX)', async () => {
     const check = vi.spyOn(MonthlyCounter.prototype, 'check');

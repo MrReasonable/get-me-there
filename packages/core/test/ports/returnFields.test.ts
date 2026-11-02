@@ -7,7 +7,6 @@ import type { ReturnRead } from '../../src/flights/returns.js';
 import type { Reservation, ReserveParams } from '../../src/ports/budget.js';
 import type { FlightListQuery, FlightListResult, PreflightResult } from '../../src/ports/provider.js';
 import type { Estimate, FlightListsState } from '../../src/types/execution.js';
-import type { IsoDateTime } from '../../src/types/ids.js';
 
 type ListResult = Extract<FlightListResult, { kind: 'list' }>;
 type Finalise = Parameters<Reservation['finalise']>[0];
@@ -23,9 +22,10 @@ describe('the ports gain their return-phase fields, optional (spec rev 56 §5.1)
     expectTypeOf<FlightListQuery['returnLimits']>().toEqualTypeOf<FlightLimits | null | undefined>();
     expectTypeOf<FlightListQuery['booking']>().toEqualTypeOf<boolean | undefined>();
   });
-  it("FlightListResult's returns and nextLoadNotBefore are required since Task 21.6 (the engine stores them)", () => {
+  it("FlightListResult's returns is required since Task 21.6 (the engine stores it); nextLoadNotBefore is not on it", () => {
     expectTypeOf<ListResult['returns']>().toEqualTypeOf<ReturnRead | null>();
-    expectTypeOf<ListResult['nextLoadNotBefore']>().toEqualTypeOf<IsoDateTime | null>();
+    // why: final review A-M3: http-kit holds the next start from the answer; nothing past the provider read it
+    expectTypeOf<ListResult>().not.toHaveProperty('nextLoadNotBefore');
   });
   it('PreflightResult.flags?', () => {
     expectTypeOf<{ ok: true }>().toMatchTypeOf<PreflightResult>();

@@ -63,8 +63,8 @@ export interface ProviderRunLimits {
   /**
    * Spec rev 56 §8.1, §8.2 (arch-r3-006; ruling P19): camoufox's flights request seconds, core's `flightRequestSeconds`
    * over the shared page timeout and spacing: with a return phase and the booking read (780 s at the defaults), with a
-   * return phase only (600 s), and an outbound-only request's, the list page's request timeout (page timeout + 15 s,
-   * 105 s). The step's gate holds a request to its own; null for every other provider.
+   * return phase only (600 s), and an outbound-only request's, core's `listRequestSeconds` (two page timeouts + 30 s,
+   * 210 s; final review A-I1). The step's gate holds a request to its own; null for every other provider.
    */
   flightRequestSeconds: { booking: number; returnsOnly: number; outboundOnly: number } | null;
 }

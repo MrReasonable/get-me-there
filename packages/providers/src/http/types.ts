@@ -178,7 +178,8 @@ export interface HttpKit {
    * Spec rev 56 §5.3 (R-spacing; arch-r3-018): makes the next start for `providerId` wait until `at`. The hold is
    * awaited before a request joins the limiter's queue, under the request's signal, and does not count toward the
    * queue's maximum wait (a longer hold still waits, never a limiter timeout); an `at` in the past does nothing, and an
-   * earlier `at` never shortens a later one. The flight-list capability calls it with an answer's `nextLoadNotBefore`.
+   * earlier `at` never shortens a later one. http-kit itself holds the next start during the request, inside the attempt
+   * (`nextStartOf` over the answer's `nextLoadNotBefore`); the smoke tool calls it directly.
    */
   holdUntil(providerId: HttpProviderId, at: IsoDateTime): void;
 }

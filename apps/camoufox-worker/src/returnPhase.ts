@@ -13,6 +13,7 @@ import {
   type ReturnRead,
   type ReturnStatus,
   selectOutbound,
+  stripUrlsInText,
 } from '@gmt/core';
 import type { PageBudget } from './budget.js';
 import {
@@ -48,7 +49,9 @@ import { type Deadline, DeadlineExceeded, type Timers } from './timers.js';
  * options" control is activated and every offer read again. No offer, grouped control or anything else on the booking
  * view is ever activated. After every activation and every poll the guard's refusal is read before classifying
  * (R-refused). Every deadline end inside the phase (`timedOut`) is a transient status, never rethrown; a genuine block is the
- * page's stop. Only session.ts imports this module (rules.test.ts pins that); it is the only importer of returns.ts and
+ * page's stop; any other error a step meets (the browser's own: a closed target, a destroyed context, an unwritable
+ * pacer record) ends that step with its transient status and the rule `<step>:browser-error` (final review A-M1), so
+ * the outbound read and every return read before it are kept. Only session.ts imports this module (rules.test.ts pins that); it is the only importer of returns.ts and
  * offers.ts.
  */
 export interface ReturnPhaseInput {
@@ -104,6 +107,32 @@ interface Attempt {
  */
 function timedOut(e: unknown, budget: Pick<PageBudget, 'd'>): boolean {
   return e instanceof DeadlineExceeded || budget.d.expired();
+}
+
+/**
+ * Final review A-M1: runs one step of the phase; an error the step did not end itself (neither the deadline's end nor
+ * a refusal, which every step reads where it can happen) is the guard's refusal when one was recorded, else the step's
+ * `unrecognised` end with the rule `<flow>:browser-error` (a bounded token; the error's text is logged only).
+ */
+async function guarded<T>(
+  p: Pick<ReturnPhaseInput, 'guard' | 'log'>,
+  flow: string,
+  run: () => Promise<T | StepEnd>,
+  // why: the expansion's failure keeps the offers read before it (A10), which its caller reads from a status other
+  // than `unrecognised`; every other step ends `unrecognised`
+  status: 'unrecognised' | 'not-settled' = 'unrecognised',
+): Promise<T | StepEnd> {
+  try {
+    return await run();
+  } catch (e) {
+    const refused = refusalOf(p.guard);
+    if (refused !== null) return refused;
+    p.log.warn(
+      { flow, error: stripUrlsInText(e instanceof Error ? e.message : String(e)).slice(0, 200) },
+      'return phase step failed in the browser',
+    );
+    return { kind: 'end', status, rule: `${flow}:browser-error` };
+  }
 }
 
 /** A booking read with nothing selected, of a status that names no pairing. */
@@ -236,7 +265,7 @@ export async function returnPhase(p: ReturnPhaseInput): Promise<ReturnPhaseResul
 
   const flightsOf = parsed.map((x) => x.flight);
   const first = selectOutbound(flightsOf, limits);
-  const a0 = await selectAndRead(p, first.index, first.fits, steps);
+  const a0 = await guarded(p, 'select-outbound', () => selectAndRead(p, first.index, first.fits, steps));
   if (a0.kind === 'stop') return { stop: a0.page, rule: a0.rule };
   tried.push(first.index);
   if (a0.kind === 'end') return none(a0.status, a0.rule, 'skipped');
@@ -252,14 +281,14 @@ export async function returnPhase(p: ReturnPhaseInput): Promise<ReturnPhaseResul
       ? selectOutbound(flightsOf, limits, new Set(tried))
       : null;
   if (next?.fits === true) {
-    const reload = await reloadList(p);
+    const reload = await guarded(p, 'reload', () => reloadList(p));
     if (reload.kind === 'stop') return { stop: reload.page, rule: reload.rule };
     if (reload.kind === 'end') {
       rule = reload.rule;
       // why: only the spacing end leaves the phase on attempt 0's view; a reload that began stands on no return view
       if (reload.rule !== 'spacing') bookingSkip = reload.rule;
     } else {
-      const a1 = await selectAndRead(p, next.index, next.fits, steps);
+      const a1 = await guarded(p, 'select-outbound', () => selectAndRead(p, next.index, next.fits, steps));
       if (a1.kind === 'stop') return { stop: a1.page, rule: a1.rule };
       tried.push(next.index);
       if (a1.kind === 'end') {
@@ -495,16 +524,21 @@ async function readBooking(
       ? { stop: e.page, rule: e.rule }
       : { read: selected(e.status, e.rule), offerGrammar: read };
   const d = budget.nextFor(p.pageTimeoutMs);
-  const a = await activate(p, d, 'select-return', 'booking', steps, (o) => driver.clickReturn(name, d, o));
-  if (a.kind !== 'settled') return ended(a, false);
-  let facts: Awaited<ReturnType<Driver['bookingFacts']>>;
-  try {
-    facts = await driver.bookingFacts(d);
-  } catch (e) {
-    if (timedOut(e, budget))
-      return { read: selected('not-settled', 'select-return:booking-facts'), offerGrammar: false };
-    throw e;
-  }
+  // why: final review A-M1: the browser's own error in the return's selection or the booking view's read ends the
+  // booking `unrecognised` (select-return:browser-error), the returns read before it kept
+  const viewed = await guarded(p, 'select-return', async () => {
+    const a = await activate(p, d, 'select-return', 'booking', steps, (o) => driver.clickReturn(name, d, o));
+    if (a.kind !== 'settled') return a;
+    try {
+      return { kind: 'facts' as const, facts: await driver.bookingFacts(d) };
+    } catch (e) {
+      if (timedOut(e, budget))
+        return { kind: 'end' as const, status: 'not-settled' as const, rule: 'select-return:booking-facts' };
+      throw e;
+    }
+  });
+  if (viewed.kind !== 'facts') return ended(viewed, false);
+  const facts = viewed.facts;
   // why: review M3: a navigation refused between the settle and this read ends it, as after listFacts (R-refused)
   const r0 = refusalOf(p.guard);
   if (r0 !== null) return ended(r0, true);
@@ -531,19 +565,30 @@ async function readBooking(
       : selected('expand-failed', rule, { ...first, expanded: false });
   const d2 = budget.nextFor(p.pageTimeoutMs);
   const flow = 'select-more-options';
-  const x = await activate(p, d2, flow, 'booking', steps, (o) => driver.clickMoreOptions(d2, o));
+  // why: final review A-M1: the browser's own error in the expansion or the read after it is the expansion's failure
+  // (expand-failed, select-more-options:browser-error), the offers read before it kept (A10)
+  const x = await guarded(
+    p,
+    flow,
+    async () => {
+      const act = await activate(p, d2, flow, 'booking', steps, (o) => driver.clickMoreOptions(d2, o));
+      if (act.kind !== 'settled') return act;
+      try {
+        return { kind: 'offers' as const, after: readOffers(await driver.bookingFacts(d2)) };
+      } catch (e) {
+        if (timedOut(e, budget))
+          return { kind: 'end' as const, status: 'not-settled' as const, rule: `${flow}:booking-facts` };
+        throw e;
+      }
+    },
+    'not-settled',
+  );
   if (x.kind === 'stop') return { stop: x.page, rule: x.rule };
   if (x.kind === 'end')
     return x.status === 'unrecognised'
       ? { read: unrecognised(x.rule, first, false), offerGrammar: true }
       : { read: failed(x.rule), offerGrammar: true };
-  let after: OffersRead;
-  try {
-    after = readOffers(await driver.bookingFacts(d2));
-  } catch (e) {
-    if (timedOut(e, budget)) return { read: failed(`${flow}:booking-facts`), offerGrammar: true };
-    throw e;
-  }
+  const after = x.after;
   const r1 = refusalOf(p.guard);
   if (r1 !== null) return ended(r1, true);
   if (!after.allGbp) return { read: unrecognised('currency', after, true), offerGrammar: true };

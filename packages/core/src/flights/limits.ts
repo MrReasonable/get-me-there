@@ -73,16 +73,14 @@ export function flightRequestSeconds(
   );
 }
 
-/** The read-back and round trip a list page's request adds to its page timeout, in seconds. */
-const LIST_REQUEST_EXTRA_SECONDS = 15;
-
 /**
- * Spec rev 56 §8.1 (R-window; 21.6 review M7): the app's timeout for one flights request without a return phase, the
- * list page's: the page timeout plus 15 s (105 s at the default 90 s). The engine's gate and the provider's request
- * both read this one value (A24).
+ * Spec rev 56 §8.1 (R-window; 21.6 review M7; final review A-I1): the app's timeout for one flights request without a
+ * return phase: the worker's own budget for it, two page periods (the first view and its Cheapest flow, which the worker
+ * gives a period of its own), plus the answer's and the round trip's bounds (210 s at the default 90 s). The engine's
+ * gate and the provider's request both read this one value (A24).
  */
 export function listRequestSeconds(pageTimeoutSeconds: number): number {
-  return pageTimeoutSeconds + LIST_REQUEST_EXTRA_SECONDS;
+  return 2 * pageTimeoutSeconds + ANSWER_SECONDS + ROUND_TRIP_SECONDS;
 }
 
 /**

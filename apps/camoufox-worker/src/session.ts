@@ -182,6 +182,8 @@ export class PageSession {
   private readonly finallyMs: number;
   private readonly pollMs: number;
   private busySince: IsoDateTime | null = null;
+  /** timers.now() at which the page in flight reaches its overall cap (final review A-I1), null when none is. */
+  private busyUntil: number | null = null;
 
   constructor(private readonly d: SessionDeps) {
     this.S = d.selectors ?? SELECTORS;
@@ -237,6 +239,19 @@ export class PageSession {
     // loaded (held, or its load failed), so the next start is stated from the re-claim, not only from a second load
     const next = counts.loads > 1 || counts.reclaimed ? this.nextLoad() : null;
     return { ...r, answer: withPageCounts(r.answer, counts.loads, next) };
+  }
+
+  /**
+   * Final review A-I1: the wait a spacing answer states. While a page is in flight it is the rest of that page's overall
+   * cap plus its bounded close (the SOCS read-back and the page's close, each `finallyMs`), never less than the pacer's
+   * own wait, so the app's retry (http-kit waits the stated Retry-After) comes once the page can have ended instead of
+   * spending its attempts while the browser is still busy; otherwise the pacer's wait as it stands.
+   */
+  private busyWait(pacerSeconds: number): number {
+    // why: the page's close runs after the pacer is released; a refusal then is the spacing's alone
+    if (this.busyUntil === null || !this.d.pacer.isBusy()) return pacerSeconds;
+    const left = this.busyUntil + 2 * this.finallyMs - this.d.timers.now();
+    return Math.max(pacerSeconds, Math.ceil(left / 1000));
   }
 
   /** R-spacing: the last document load's start (the pacer's record) plus the spacing; null when it cannot be read. */
@@ -319,7 +334,7 @@ export class PageSession {
     const claim = this.d.pacer.claim();
     if (!claim.ok)
       return {
-        answer: { kind: 'spacing', retryAfterSeconds: claim.retryAfterSeconds },
+        answer: { kind: 'spacing', retryAfterSeconds: this.busyWait(claim.retryAfterSeconds) },
         googleContacted: false,
       };
     // why: the page and its clamped scroll allowance are on disk before the load, so a crash over-counts, never under
@@ -342,12 +357,15 @@ export class PageSession {
     // from its click (budget.next), never past twice that from the start. `budget.d` is whichever deadline is current.
     // why: WP15 ruling 10: a grid page's overall cap adds, per move, the scroll spacing and the move's own budget
     // why: spec rev 56 §2 (ruling D7): a return-phase request's cap covers every page period of its served path
-    const budget = pageBudget(
-      this.d.timers,
+    const cap = pageCapMs(
+      req,
+      this.S,
       this.d.pageTimeoutMs,
-      started,
-      pageCapMs(req, this.S, this.d.pageTimeoutMs, this.d.pacer.spacingMs, this.d.grid?.spacingMs ?? 0),
+      this.d.pacer.spacingMs,
+      this.d.grid?.spacingMs ?? 0,
     );
+    const budget = pageBudget(this.d.timers, this.d.pageTimeoutMs, started, cap);
+    this.busyUntil = started + cap;
     const counter = { scrolls: 0 };
     const scrolls = (): { scrolls?: number } => (req.mode === 'grid' ? { scrolls: counter.scrolls } : {});
     const deadline = budget.d;
@@ -526,6 +544,7 @@ export class PageSession {
     if (stop === 'consent-unhandled') wipe = true;
     if (wipe || discard) await this.discard(wipe);
     this.busySince = null;
+    this.busyUntil = null;
     counts.loads = guardState?.documentLoads ?? 0;
     try {
       // why: spec rev 56 §2: a return-phase request settles to the documents it loaded (0 when the first was refused),

@@ -8,10 +8,10 @@
  * With the search's limits (`returnLimits`) the request also asks for the return phase, and, only then, `booking`
  * (read the shown pairing's booking options). Such a request plans `FLIGHT_LIST_PAGES_PER_PAIR_MAX` pages on its
  * reservation and carries its own timeout (`flightRequestSeconds`, 780 s with the booking read, 600 s without, at the
- * defaults); every other request plans one page under the provider's timeout. The result carries the worker's return
- * read (`returns`) and `nextLoadNotBefore`; http-kit itself holds its next camoufox start until then, from any answer
- * that states it (`nextStartOf`, a failed or refused one too), and the answer's `pagesLoaded` reaches only the ledger
- * (`pageCountOf`). A flight list builds no price and no
+ * defaults); every other request plans one page under core's `listRequestSeconds`. The result carries the worker's
+ * return read (`returns`); http-kit itself holds its next camoufox start until the answer's `nextLoadNotBefore`, from
+ * any answer that states it (`nextStartOf`, a failed or refused one too), and the answer's `pagesLoaded` reaches only
+ * the ledger (`pageCountOf`); neither is on the result. A flight list builds no price and no
  * verdict; it never says "verified". Every non-2xx answer is a `list-error` through `classifyWorkerAnswer`, but the
  * worker's monthly cap, which is thrown as BudgetExceeded, as `fetchTile` throws it.
  */
@@ -25,6 +25,7 @@ import {
   flightsRequestSchema,
   type ProviderContext,
   ProviderError,
+  sameFlightLimits,
   workerAnswerSchema,
 } from '@gmt/core';
 import { parseError } from '../shared/errors.js';
@@ -85,8 +86,9 @@ export function flightListCapability(o: CamoufoxProviderOptions): FlightListCapa
     const started = o.clock.now();
     // why: spec rev 56 §5.1, §5.3 (R-worst): a return phase may load the first view and the second outbound's fresh
     // load, so its reservation plans both and its timeout is the request's own (the page budget plus the read-back and
-    // the round trip); a list read is one page under the list page's timeout (21.6 review M7: never the provider's,
-    // which in grid mode is a grid page's), the seconds the engine's gate holds it to
+    // the round trip); a list read is one page under core's `listRequestSeconds` (the worker's two page periods plus
+    // 30 s; 21.6 review M7, final review A-I1: never the provider's, which in grid mode is a grid page's), the seconds
+    // the engine's gate holds it to
     const plan =
       limits === null
         ? { pages: 1, requestTimeoutSeconds: o.flightRequestSeconds.outboundOnly }
@@ -109,6 +111,19 @@ export function flightListCapability(o: CamoufoxProviderOptions): FlightListCapa
     if (!a.success || a.data.kind !== 'flights')
       return fail(parseError('unknown-answer', 'the worker answered what this build cannot read', WHERE));
     const answer = a.data;
+    // why: final review A-M2: the protocol states `returns` exactly on an answer to a request that carried returnLimits,
+    // under those limits; a block on any other answer (a worker bug, a build mismatch) is refused, never stored to be
+    // judged under limits the run never sent. An absent block with limits stays allowed (an older worker).
+    if (answer.returns !== undefined && (limits === null || !sameFlightLimits(answer.returns.limits, limits)))
+      return fail(
+        parseError(
+          'returns-mismatch',
+          limits === null
+            ? 'the worker answered a return read the request did not ask for'
+            : 'the worker answered a return read under other limits than the request sent',
+          WHERE,
+        ),
+      );
     // why: R-spacing needs nothing here: http-kit held the next camoufox start from the answer's body (`nextStartOf`)
     // inside the attempt, whatever its status or this parse's verdict (ruling 21.4)
     // why: prov-010: the page was read between this request's start and now, within the clock skew either way
@@ -131,7 +146,6 @@ export function flightListCapability(o: CamoufoxProviderOptions): FlightListCapa
       notes: answer.notes,
       // why: arch-r3-014: `pagesLoaded` is not mapped; it reached the ledger row through pageCountOf
       returns: answer.returns ?? null,
-      nextLoadNotBefore: answer.nextLoadNotBefore ?? null,
     };
   }
 

@@ -1000,8 +1000,9 @@ changes it later.
   `RestartPreventExitStatus=78`; on macOS a 600 s throttle, and `pnpm gmt start`, `status` and `update` boot a refused
   agent out and say "refused, not retrying: …" with the fix). `pnpm gmt start`, `restart`, `update`, `setup` and
   `browser install` run the worker's start check first and do not start it while the check reports a reason. A stop
-  waits up to 270 s (the longest page, 240 s, and 30 s to close the browser) before it ends the worker, so a page in
-  flight finishes; the app's stop waits 30 s. `pnpm gmt restart` starts the worker again only once the old process has
+  waits up to 270 s (the longest page timeout, 240 s, and 30 s to close the browser) before it ends the worker, so a
+  list page in flight finishes; a longer page (a grid page, or a flight-list read with its return flights) is ended,
+  and its pages stay counted for the month; the app's stop waits 30 s. `pnpm gmt restart` starts the worker again only once the old process has
   exited (the launchd agent gone or the systemd unit inactive) and no running process holds `worker.lock`, each wait
   at most 285 s, and then only if its start check passes. When the check refuses, the worker stays stopped and the
   restart says why with the fix and exits non-zero (78 for a refusal) instead of reporting done. Every command that
@@ -1284,8 +1285,8 @@ shows it listening on `127.0.0.1` only. To see which navigation a stopped page r
 - Stop the worker alone with `pnpm gmt stop --only worker` (the app keeps running; `pnpm gmt start --only worker`
   starts it again after its start check), or by hand with
   `launchctl bootout gui/$(id -u)/local.get-me-there.camoufox-worker` on macOS or
-  `systemctl --user stop get-me-there-camoufox-worker.service` on Linux. A page in flight finishes before the worker
-  exits (its stop waits up to 270 s). `stop --only worker` and `restart --only worker` ask a native app about a running
+  `systemctl --user stop get-me-there-camoufox-worker.service` on Linux. A list page in flight finishes before the
+  worker exits (its stop waits up to 270 s); a longer page is ended and stays counted. `stop --only worker` and `restart --only worker` ask a native app about a running
   search first, as `stop` does.
 - After a signed-in refusal: `pnpm --filter @gmt/camoufox-worker clear-signed-in` (it wipes the profile first).
 - Deleting the cool-down record ends a pause early, which defeats its purpose.

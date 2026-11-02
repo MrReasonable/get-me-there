@@ -707,7 +707,14 @@ rule `monthly-headroom`, before any activation, the first view still read
   stops nothing). Every end that is not finished keeps everything read before
   it (the outbound flights, earlier attempts, the offers where said), answers
   `kind 'flights'`, starts no cool-down and never answers `blocked` or
-  `not-ready` (no deadline of the phase is rethrown). The run sends no further
+  `not-ready` (no deadline of the phase is rethrown). The browser's own error
+  inside a step (a closed target, a destroyed context, an unwritable pacer
+  record), neither a deadline end nor a refusal, ends that step the same way
+  with the rule `<step>:browser-error` (`select-outbound`, `reload`,
+  `select-return`: `unrecognised`, or the reload's `read` with that rule;
+  `select-more-options`: `expand-failed`, the offers read before it kept),
+  never a whole-answer `browser-error`, so the outbound read and every
+  return read before it are kept. The run sends no further
   return phase after a return view's own end (a return status
   `select-failed`, `not-settled` or `unrecognised`, or a `read` whose second
   attempt ended other than at the spacing wait), and no further booking read
@@ -737,8 +744,14 @@ rule `monthly-headroom`, before any activation, the first view still read
   booking read (a flights request without `returnLimits` keeps two periods,
   180 s); the app's flights request timeout for it is `flightRequestSeconds`,
   that budget plus 15 s to read back and close and 15 s for the round trip
-  (780 s, or 600 s without a booking read, at the defaults), discovery
-  keeping its own.
+  (780 s, or 600 s without a booking read, at the defaults), and for a
+  flights request without a return phase `listRequestSeconds`, its two
+  periods plus the same 30 s (210 s at the defaults), discovery keeping its
+  own. The provider refuses (a `list-error`, parse `returns-mismatch`) a
+  `returns` block on an answer to a request sent without `returnLimits`, or
+  one whose limits differ from those sent, so a list is never stored under
+  limits the run never asked for; an absent block with limits is allowed (an
+  older worker).
 
 The flags are dated per entry. `darwin-arm64`'s `RETURN_SELECT_VERIFIED` and
 `BOOKING_SELECT_VERIFIED` rest on the recordings of 2026-11-01
@@ -780,7 +793,11 @@ between request starts, and after an answer stating `nextLoadNotBefore` it
 holds its next camoufox start until then (§5.3); the worker enforces the
 spacing per document load with a fixed 2 s tolerance for arrival jitter,
 re-claiming its pacer before a reload, so documents per hour stay at most
-`floor(3600 / spacing)`. An activation (an outbound's, a return's, the
+`floor(3600 / spacing)`. A request that arrives while a page is in flight is
+answered `spacing` with the rest of that page's overall cap plus its bounded
+close (twice the 5 s finally bound) as its wait, never less than the
+pacer's own (its `retryAfterSeconds` and `Retry-After`), and the app's retry
+waits that long, so its attempts are not spent while the browser is busy. An activation (an outbound's, a return's, the
 booking view's expansion) loads no document and, like the Cheapest tab's
 click, waits for no spacing and counts as no page. The last page time is persisted, so a
 restart keeps the spacing. A value of 0 means no pause: pages go back to
@@ -1559,12 +1576,12 @@ export interface FlightListQuery { cell: CellKey; airportNames: CellAirportNames
 export type FlightListResult =
   | { kind: 'list'; fetchedAt: IsoDateTime; pointOfSale: PointOfSale; listed: Listed; flights: ListedFlight[]; minMinor: number | null; tabMinor: number | null;
       cheapestView: 'cheapest' | 'best-fallback' | null; optionsUnparsed: number; optionsOtherCell: number; resultsStated: number | null; notes: string[];
-      returns: ReturnRead | null;              // the worker's return read, null when the request had no return phase (or an older worker answered without one)
-      nextLoadNotBefore: IsoDateTime | null }  // when the next camoufox load may start (after a request that started the reload); http-kit holds its next camoufox start until then
+      returns: ReturnRead | null }             // the worker's return read, null when the request had no return phase (or an older worker answered without one); a block the request did not ask for, or under other limits, is a list-error (§2)
   | { kind: 'list-error'; error: ProviderError };   // BudgetExceeded is thrown, as fetchTile throws it; a query without airport names fails closed (parse, reason no-airport-names) before any request
 export interface FlightListCapability { info: CapabilityInfo; read(q: FlightListQuery, ctx: ProviderContext): Promise<FlightListResult> }   // camoufox only; its preflight is discovery's
 // The worker answer's pagesLoaded is never on the result, a stored row or the wire: it reaches only the ledger (http-kit's pageCountOf → finalise's
-// pageCount → provider_requests.page_count, §5.3, §7).
+// pageCount → provider_requests.page_count, §5.3, §7). Its nextLoadNotBefore is not on the result either: http-kit holds the next camoufox start
+// from it inside the attempt (nextStartOf, §5.3), and nothing past the provider reads it.
 // core/flights (returns.ts, choose.ts, limits.ts; §2 "The return phase", §6.2, §6.9), every shape a strict zod schema:
 export interface FlightLimits { maxJourneyMinutes: number | null; maxStops: number | null; departureWindowLocal: LocalTimeWindow | null; arrivalWindowLocal: LocalTimeWindow | null }
 export interface ListedReturn { departsLocal: string; arrivesLocal: string; arrivesDayOffset: number; durationMinutes: number; stops: number;   // HH:MM local times;
@@ -1689,7 +1706,8 @@ export class AbortedError extends Error {}
   vendors**; limiter deadline → `limiter-timeout`. The `camoufox` worker's answers map
   as follows: 423 `blocked` and `cooling-down` → `blocked`, non-retryable;
   409 `mode-unavailable` → `parse`, non-retryable; 401 → `auth`; 429
-  `spacing` → `rate-limit` with its `Retry-After`; 5xx, a timeout or a dropped
+  `spacing` → `rate-limit` with its `Retry-After` (or, without the header,
+  the answer's own `retryAfterSeconds`); 5xx, a timeout or a dropped
   socket → `upstream` or `network`, **never retried for camoufox** (a retry
   could load Google twice for one tile); a refused connection →
   `provider-unavailable`, non-retryable. `signal.aborted` →
@@ -2974,7 +2992,7 @@ finish: completed, or the stop's status with its stored cause ("Stop causes" bel
   re-reads the browser window and the heartbeat's suspension mark (checks (a)
   and (c) of §8.2) against the request's own seconds (`flightRequestSeconds`
   with a return phase, the list page's request timeout without: the page
-  timeout plus 15 s, `listRequestSeconds`, 105 s at the defaults, which the
+  timeouts plus 30 s, `listRequestSeconds`, 210 s at the defaults, which the
   provider also sends as an outbound-only request's own timeout, so the gate
   and the request hold one value), inside
   http-kit's `beforeSend`, after the browser lease (below) and the limiter's
@@ -5020,7 +5038,7 @@ CAMOUFOX_EXECUTION_PAGE_CAP=100          # discovery page loads per execution (B
 CAMOUFOX_MONTHLY_PAGE_CAP=1500           # page loads per billing month (provider-month; no-page rows not counted); the app's ledger enforces it; the worker enforces it too
 CAMOUFOX_BILLING_DAY=1                   # 1–28: the month starts 00:00 UTC that day, for both monthly caps, in the ledger and the worker
 CAMOUFOX_COOLDOWN_HOURS=48               # pause after a challenge, sign-in or consent page; 24–100000 (an unrecognised page pauses a fixed 1 h)
-CAMOUFOX_PAGE_TIMEOUT_SECONDS=90         # the worker's whole-page deadline (load, settle, read), 30–240; the app's request timeout is this + 15 s (grid: 2 × this + scroll cap × (scroll spacing + 60 s) + 15 s; a flights request with a return phase: flightRequestSeconds, §2)
+CAMOUFOX_PAGE_TIMEOUT_SECONDS=90         # the worker's whole-page deadline (load, settle, read), 30–240; the app's request timeout is this + 15 s (grid: 2 × this + scroll cap × (scroll spacing + 60 s) + 15 s; a flights request with a return phase: flightRequestSeconds, §2; without one: 2 × this + 30 s, listRequestSeconds)
 CAMOUFOX_MODE=list                       # list (one day pair a page) or grid (the Dates tab's date grid, once the worker reports GRID_VERIFIED and its measured step)
 CAMOUFOX_GRID_SCROLL_SPACING_SECONDS=5   # grid: scroll clicks start to start; 0–30 (0 means no pause: scrolls go back to back); never randomised
 CAMOUFOX_GRID_SCROLL_CAP=30              # grid: scrolls a page may make; 0–60
@@ -5223,8 +5241,11 @@ writes that file (0600, inside its 0700 data directory; `{ reason, at }` in
 settings or files included (reason `config`, its words on standard error,
 which `gmt start` prints), and clears it on a successful start. The worker's
 service waits up to 270 s on a stop (launchd `ExitTimeOut`, systemd
-`TimeoutStopSec`: the longest page timeout, 240 s, plus 30 s), so a page in
-flight finishes; `stop --only worker` and `restart --only worker` ask the app
+`TimeoutStopSec`: the longest page timeout, 240 s, plus 30 s), so a list
+page in flight finishes; a longer page (a grid page, or a return phase of up
+to eight page periods) is ended by the stop, and its pages, counted when it
+started, stay counted (an over-count, the safe side, rather than a stop held
+for up to 13 minutes); `stop --only worker` and `restart --only worker` ask the app
 about an active run first, as `stop` does. A restart starts the worker again
 only after the old process has exited: the launchd label gone (or the systemd
 unit reading inactive, the wait every systemd stop ends with) and then no live

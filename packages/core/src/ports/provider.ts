@@ -301,12 +301,9 @@ export type FlightListResult =
        * answered without one). Required since Task 21.6 (R-order: the engine stores it).
        */
       returns: ReturnRead | null;
-      /**
-       * Spec rev 56 §5.1 (R-spacing): when the next camoufox load may start, after a request that started the reload; the
-       * capability holds http-kit's next start until then. Required since Task 21.6. The answer's `pagesLoaded` is
-       * never here: it reaches only the ledger (arch-r3-014).
-       */
-      nextLoadNotBefore: IsoDateTime | null;
+      // why: final review A-M3: the answer's `nextLoadNotBefore` is not here: http-kit holds the next camoufox start
+      // from it inside the attempt (`nextStartOf`), and nothing past the provider reads it; `pagesLoaded` reaches only
+      // the ledger (arch-r3-014)
     }
   | { kind: 'list-error'; error: ProviderError };
 /**

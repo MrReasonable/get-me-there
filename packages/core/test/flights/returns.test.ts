@@ -269,9 +269,12 @@ describe('the return phase constants (spec rev 56 §12; the 21.0 findings)', () 
     expect(RETURN_SECOND_OUTBOUND_RATE).toBe(0.5);
     expect(BOOKING_OFFERS_MAX).toBe(40);
   });
-  it('listRequestSeconds: an outbound-only flights request, the page timeout and 15 s (105 s at the defaults)', () => {
-    expect(listRequestSeconds(90)).toBe(105);
-    expect(listRequestSeconds(120)).toBe(135);
+  // why: final review A-I1: the worker gives a flights request without a return phase two page periods (the first view
+  // and its Cheapest flow), so the app's timeout is that budget plus the answer's and the round trip's 30 s
+  it('listRequestSeconds: an outbound-only flights request, two page timeouts and 30 s (210 s at the defaults)', () => {
+    expect(listRequestSeconds(90)).toBe(210);
+    expect(listRequestSeconds(120)).toBe(270);
+    expect(listRequestSeconds(30)).toBe(90);
   });
   it('flightRequestSeconds: 780 / 600 at the defaults, 1,035 at 120 s and 45 s', () => {
     expect(flightRequestSeconds(90, 30, true)).toBe(780);

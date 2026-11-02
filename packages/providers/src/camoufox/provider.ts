@@ -109,7 +109,8 @@ export interface CamoufoxProviderOptions {
    * Spec rev 56 §2 "The return phase", §12 (ruling A6): the timeout of a flights request with a return phase, core's
    * `flightRequestSeconds` of the app's page timeout and spacing, computed once by the wiring: with the booking read
    * (780 s at the defaults) and without it (600 s); and a flights request without a return phase, core's
-   * `listRequestSeconds` (105 s; 21.6 review M7, the engine's gate holds it to the same). Every other request keeps the
+   * `listRequestSeconds` (210 s: two page periods plus 30 s; 21.6 review M7, final review A-I1; the engine's gate holds it
+   * to the same). Every other request keeps the
    * provider's own timeout.
    */
   flightRequestSeconds: { booking: number; returnsOnly: number; outboundOnly: number };

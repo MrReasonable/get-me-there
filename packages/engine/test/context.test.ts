@@ -46,12 +46,12 @@ describe('ProviderRunLimits.capKind (code-architect review 8)', () => {
 // Spec rev 56 §8.1, §8.2 (arch-r3-006; ruling P19): the flights request's own seconds, from core's one computation over
 // the shared page timeout and spacing, for camoufox only; and the worker's last reported flags, kept in memory.
 describe('ProviderRunLimits.flightRequestSeconds and EngineContext.workerFlags (spec rev 56 §8.1)', () => {
-  it("limitsOf('camoufox') carries 780 / 600 s (and the list page's 105 s) at the defaults; another provider null", () => {
+  it("limitsOf('camoufox') carries 780 / 600 s (and an outbound-only request's 210 s) at the defaults; another provider null", () => {
     const e = engineWith([stubCamoufox({ cells: 1 })]);
     expect(e.ctx.limitsOf('camoufox').flightRequestSeconds).toEqual({
       booking: 780,
       returnsOnly: 600,
-      outboundOnly: 105,
+      outboundOnly: 210,
     });
     const slow = engineWith([stubCamoufox({ cells: 1 })], {
       env: { CAMOUFOX_PAGE_TIMEOUT_SECONDS: '120', CAMOUFOX_MIN_SPACING_SECONDS: '45' },
@@ -59,7 +59,7 @@ describe('ProviderRunLimits.flightRequestSeconds and EngineContext.workerFlags (
     expect(slow.ctx.limitsOf('camoufox').flightRequestSeconds).toEqual({
       booking: 1035,
       returnsOnly: 795,
-      outboundOnly: 135,
+      outboundOnly: 270,
     });
     const h = createHarness();
     expect(buildContext(h.deps, h.options).limitsOf('fixture').flightRequestSeconds).toBeNull();
