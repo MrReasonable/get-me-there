@@ -58,7 +58,12 @@ import {
   RecordingRefused,
 } from './recordArgs.js';
 import { type Outcome, recordGraph, recordGrid, type Seen } from './recordDialogs.js';
-import { recordSelectOutbound, selectOutboundCapMs, selectReturnCapMs } from './recordSelect.js';
+import {
+  recordSelectOutbound,
+  selectForceSecondCapMs,
+  selectOutboundCapMs,
+  selectReturnCapMs,
+} from './recordSelect.js';
 import {
   type StopFacts,
   stopRecord,
@@ -114,18 +119,18 @@ export const DEFAULT_ROOT = fileURLToPath(new URL('../fixtures/recorded/', impor
 /** The bound on the read-back and the page close after a page (the session's own, brief §7 "Deadlines"). */
 const FINALLY_MS = 5000;
 /**
- * WP21 Task 21.0: the documents a `--select-outbound` page may load (the first view, a selection, the list page
- * again, a selection), reserved in the month before the first load and settled to the documents the guard counted.
- * A worker literal; Task 21.3 pins it equal to core's FLIGHT_LIST_PAGES_PER_PAIR_MAX.
+ * WP21 Task 21.0, Task 21.3 (R-worst): the documents a `--select-outbound` page may load: the first view and the list
+ * page again (each selection runs under the guard's activation gate, so it loads none), reserved in the month before
+ * the first load, held to it by the guard's reservation stop, and settled to the documents the guard counted. Pinned
+ * equal to core's FLIGHT_LIST_PAGES_PER_PAIR_MAX.
  */
-export const RECORD_SELECT_PAGES = 4;
+export const RECORD_SELECT_PAGES = 2;
 /**
- * Ian's rulings of 2026-11-01 (read the booking options; open "more booking options"): the documents a
- * `--select-return` page may load at worst (the first view, the outbound's selection, the return's selection, the
- * booking view's expansion: each activation assumed a document, though the recordings show them in-app), reserved
- * whole before the first load and settled to the documents the guard counted.
+ * Ian's rulings of 2026-11-01, WP21 Task 21.3 (R-worst): the documents a `--select-return` page may load: the first
+ * view, and the list page again with `--force-second`; the outbound's selection, the return's and the expansion load
+ * none under the gate. Reserved whole before the first load and settled to the documents the guard counted.
  */
-export const RECORD_SELECT_RETURN_PAGES = 4;
+export const RECORD_SELECT_RETURN_PAGES = 2;
 /** The research kinds that select an option, which share the select-outbound rules (reservation, cap, open page). */
 const isSelectKind = (k: RecordingKind): k is 'select-outbound' | 'select-return' =>
   k === 'select-outbound' || k === 'select-return';
@@ -285,9 +290,12 @@ export async function record(ctx: EntryContext, cfg: WorkerConfig, deps: RecordD
           pageMs,
           pageStart,
           select
-            ? args.kind === 'select-return'
-              ? selectReturnCapMs(pageMs, pacer.spacingMs)
-              : selectOutboundCapMs(pageMs, pacer.spacingMs)
+            ? args.forceSecond
+              ? // why: ruling A18: the end-to-end recording runs the full served path under the session's own budget
+                selectForceSecondCapMs(pageMs, pacer.spacingMs)
+              : args.kind === 'select-return'
+                ? selectReturnCapMs(pageMs, pacer.spacingMs)
+                : selectOutboundCapMs(pageMs, pacer.spacingMs)
             : 2 * pageMs +
                 args.moves.length *
                   (GRID_MIN_SCROLL_SPACING_SECONDS * 1000 + GRID_MOVE_BUDGET_MS + GRID_MOVE_RESERVE_MS),
@@ -322,6 +330,8 @@ export async function record(ctx: EntryContext, cfg: WorkerConfig, deps: RecordD
             if (args.kind !== 'no-flights' && args.kind !== 'landing' && !select)
               budget.onExpire(() => void p.close().catch(() => undefined));
             guard = await d.race(installGuard(c, p, deps.log, deps.selectors));
+            // why: WP21 Task 21.3 (cost-r3-002): a select page's documents never pass what it reserved
+            if (select) guard.reservation = admitted.pagesReserved;
             const driver = createDriver(p, guard, deps.selectors);
             outcome = await interact(driver, p, guard, budget, pageStart, deps, args.kind, url, {
               moves: args.moves,
@@ -329,6 +339,7 @@ export async function record(ctx: EntryContext, cfg: WorkerConfig, deps: RecordD
               request: req,
               pacer,
               pageMs,
+              forceSecond: args.forceSecond,
             });
           }
         } catch (e) {
@@ -569,6 +580,8 @@ async function interact(
     request: RecordArgs['request'];
     pacer: Pacer;
     pageMs: number;
+    /** WP21 Task 21.3 (R-e2e): `--select-return --force-second`. */
+    forceSecond: boolean;
   },
 ): Promise<Outcome> {
   let d = budget.d;
@@ -619,9 +632,10 @@ async function interact(
         budget,
         pageStart,
         deps,
-        // why: the recorder reads the view after a selection with the return-view hypothesis on (as --no-flights reads
-        // with its line on), so the recording shows it before RETURN_SELECT_VERIFIED is set for this entry
-        returnsS: { ...deps.selectors, RETURN_SELECT_VERIFIED: true },
+        // why: the recorder reads the view after a selection with the return and booking branches on (as --no-flights
+        // reads with its line on), so the recording shows how the dated classifier reads them before the entry's flags
+        // are set (WP21 Task 21.3: the booking branch too, for the end-to-end recording)
+        returnsS: { ...deps.selectors, RETURN_SELECT_VERIFIED: true, BOOKING_SELECT_VERIFIED: true },
         pacer: kindArgs.pacer,
         pageMs: kindArgs.pageMs,
         url,
@@ -629,6 +643,8 @@ async function interact(
         stepMs,
         clicked,
         stop,
+        // why: R-e2e: the served path spaces only the reload, never an activation
+        ...(kindArgs.forceSecond ? { forceSecond: true, spaceActivations: false } : {}),
       },
       kind,
     );

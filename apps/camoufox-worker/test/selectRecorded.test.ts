@@ -10,7 +10,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { type ParsedOption, parseOptionName } from '../src/names.js';
 import { SELECTORS } from '../src/selectors.js';
-import { pinOf, RECORDED_ROOT } from './support/recordedList.js';
+import { pinOf, RECORDED_ROOT, RECORDINGS_REQUIRED } from './support/recordedList.js';
 
 const KIND = 'select-outbound';
 const QUERY = /^Flights from ([A-Z]{3}) to ([A-Z]{3}) on (\d{4}-\d{2}-\d{2}) returning (\d{4}-\d{2}-\d{2})$/;
@@ -57,6 +57,7 @@ const factsSchema = z
         .loose(),
     ),
     socsReadBack: z.string(),
+    forceSecond: z.boolean().optional(),
   })
   .loose();
 const metaSchema = z.object({ contentSha256: z.string(), documentLoads: z.number() }).loose();
@@ -82,6 +83,9 @@ function recorded(): Recorded[] {
       .filter((x) => x.endsWith('.facts.json'))
       .sort()) {
       const facts = factsSchema.parse(JSON.parse(readFileSync(join(dir, day, f), 'utf8')));
+      // why: WP21 Task 21.3 (R-e2e): the end-to-end recording of the served path is returnsRecorded's and
+      // offersRecorded's, never this research suite's
+      if (facts.forceSecond === true) continue;
       if (!facts.steps.some((s) => s.activation === 'keyboard')) continue;
       const meta = metaSchema.parse(
         JSON.parse(readFileSync(join(dir, day, f.replace(/\.facts\.json$/, '.meta.json')), 'utf8')),
@@ -123,109 +127,114 @@ beforeEach(() => {
 });
 
 const present = recordingsPresentForKind(RECORDED_ROOT, KIND);
-describe.skipIf(!present)(skipTitle('recorded select-outbound pages (WP21 Task 21.0)', present), () => {
-  const all = recorded();
-  it('the pinned recordings are there, each with its counts and picks as pinned', () => {
-    for (const [key, pin] of Object.entries(PINS)) {
-      const r = all.find((x) => x.key === key);
-      expect(r, key).toBeDefined();
-      if (r === undefined) continue;
-      expect(r.facts.best.page.resultLinks, key).toBe(pin.best);
-      expect(r.facts.cheapest?.page.resultLinks, key).toBe(pin.cheapest);
-      expect(
-        r.facts.steps.filter((s) => s.step !== 'reload').map((s) => s.after?.names.length),
-        key,
-      ).toEqual(pin.returns);
-      expect(
-        pinOf(
-          r.contentSha256,
-          r.facts.picks.map((p) => p.name),
-        ),
-        key,
-      ).toBe(pin.picks);
-    }
-  });
-  it('every recording ran the whole sequence: two selections in-app, the reload one document, SOCS the same', () => {
-    for (const r of all) {
-      const steps = r.facts.steps;
-      expect(
-        steps.map((s) => s.step),
-        r.key,
-      ).toEqual(['first-selection', 'reload', 'second-selection']);
-      const [first, reload, second] = steps.map((s) => s.after);
-      expect(first && reload && second, r.key).toBeTruthy();
-      if (first === undefined || reload === undefined || second === undefined) continue;
-      // why: finding 1 (navigation): the first view is one document; a selection loads none; the reload loads one
-      expect([first.documentLoadsBefore, first.documentLoads], r.key).toEqual([1, 1]);
-      expect([reload.documentLoadsBefore, reload.documentLoads], r.key).toEqual([1, 2]);
-      expect([second.documentLoadsBefore, second.documentLoads], r.key).toEqual([2, 2]);
-      expect(r.documentLoads, r.key).toBe(2);
-      for (const a of [first, second]) {
-        expect([a.settled, a.changedFromPreClick, a.urlChanged], r.key).toEqual([true, true, true]);
-        expect(a.classification, r.key).toEqual({ kind: 'results', rule: 'returns' });
-      }
-      expect([reload.settled, reload.view], r.key).toEqual([true, 'cheapest']);
-      expect(
-        steps.filter((s) => s.step !== 'reload').map((s) => s.activation),
-        r.key,
-      ).toEqual(['keyboard', 'keyboard']);
-      expect(r.facts.socsReadBack, r.key).toBe('same');
-    }
-  });
-  it('the return view: a returning heading, no tab, no Date grid, View more, no stated count, no form read', () => {
-    for (const r of all)
-      for (const s of r.facts.steps.filter((x) => x.step !== 'reload')) {
-        const a = s.after;
-        if (a === undefined) continue;
-        expect(a.page.text.returnHeading, r.key).toBe(true);
+describe.skipIf(!present && !RECORDINGS_REQUIRED)(
+  skipTitle('recorded select-outbound pages (WP21 Task 21.0)', present),
+  () => {
+    const all = recorded();
+    it('the pinned recordings are there, each with its counts and picks as pinned', () => {
+      // why: test-r3-003: with RECORDINGS_REQUIRED=1 an absent kind fails here instead of skipping
+      expect(present).toBe(true);
+      for (const [key, pin] of Object.entries(PINS)) {
+        const r = all.find((x) => x.key === key);
+        expect(r, key).toBeDefined();
+        if (r === undefined) continue;
+        expect(r.facts.best.page.resultLinks, key).toBe(pin.best);
+        expect(r.facts.cheapest?.page.resultLinks, key).toBe(pin.cheapest);
         expect(
-          a.headings.some((h) => SELECTORS.returns.heading.test(h)),
-          r.key,
-        ).toBe(true);
+          r.facts.steps.filter((s) => s.step !== 'reload').map((s) => s.after?.names.length),
+          key,
+        ).toEqual(pin.returns);
         expect(
-          a.headings.some((h) => /departing/i.test(h)),
-          r.key,
-        ).toBe(false);
-        expect([a.page.cheapestTabs.length, a.page.dateGridButtons], r.key).toEqual([0, 0]);
-        expect([a.list.viewMore, a.list.resultsStated, a.form], r.key).toEqual([true, null, null]);
-        // why: every return link reads by the outbound pattern too (finding 4: one price form)
-        expect(a.page.outboundLinks, r.key).toBe(a.page.resultLinks);
+          pinOf(
+            r.contentSha256,
+            r.facts.picks.map((p) => p.name),
+          ),
+          key,
+        ).toBe(pin.picks);
       }
-  });
-  it('every return name: the outbound grammar reads it, "From" priced, from the destination to the origin on the return date', () => {
-    for (const r of all) {
-      const picks = r.facts.picks.map((p) => parseOptionName(p.name));
-      r.facts.steps
-        .filter((x) => x.step !== 'reload')
-        .forEach((s, i) => {
-          const pick: ParsedOption | null | undefined = picks[i];
-          const names = (s.after?.names ?? []).filter((x): x is string => x !== null);
-          expect(pick, r.key).not.toBeNull();
-          expect(names.length, r.key).toBeGreaterThan(0);
-          const parsed = names.map((x) => parseOptionName(x));
+    });
+    it('every recording ran the whole sequence: two selections in-app, the reload one document, SOCS the same', () => {
+      for (const r of all) {
+        const steps = r.facts.steps;
+        expect(
+          steps.map((s) => s.step),
+          r.key,
+        ).toEqual(['first-selection', 'reload', 'second-selection']);
+        const [first, reload, second] = steps.map((s) => s.after);
+        expect(first && reload && second, r.key).toBeTruthy();
+        if (first === undefined || reload === undefined || second === undefined) continue;
+        // why: finding 1 (navigation): the first view is one document; a selection loads none; the reload loads one
+        expect([first.documentLoadsBefore, first.documentLoads], r.key).toEqual([1, 1]);
+        expect([reload.documentLoadsBefore, reload.documentLoads], r.key).toEqual([1, 2]);
+        expect([second.documentLoadsBefore, second.documentLoads], r.key).toEqual([2, 2]);
+        expect(r.documentLoads, r.key).toBe(2);
+        for (const a of [first, second]) {
+          expect([a.settled, a.changedFromPreClick, a.urlChanged], r.key).toEqual([true, true, true]);
+          expect(a.classification, r.key).toEqual({ kind: 'results', rule: 'returns' });
+        }
+        expect([reload.settled, reload.view], r.key).toEqual([true, 'cheapest']);
+        expect(
+          steps.filter((s) => s.step !== 'reload').map((s) => s.activation),
+          r.key,
+        ).toEqual(['keyboard', 'keyboard']);
+        expect(r.facts.socsReadBack, r.key).toBe('same');
+      }
+    });
+    it('the return view: a returning heading, no tab, no Date grid, View more, no stated count, no form read', () => {
+      for (const r of all)
+        for (const s of r.facts.steps.filter((x) => x.step !== 'reload')) {
+          const a = s.after;
+          if (a === undefined) continue;
+          expect(a.page.text.returnHeading, r.key).toBe(true);
           expect(
-            parsed.every((p) => p !== null),
+            a.headings.some((h) => SELECTORS.returns.heading.test(h)),
             r.key,
           ).toBe(true);
-          // why: finding 5's stop condition: every return name carries the "From" price clause
           expect(
-            names.every((x) => x.startsWith('From ')),
+            a.headings.some((h) => /departing/i.test(h)),
             r.key,
-          ).toBe(true);
-          expect(
-            names.every((x) => SELECTORS.returns.resultLink.test(x)),
-            r.key,
-          ).toBe(true);
-          for (const p of parsed) {
-            if (p === null || pick === null || pick === undefined) continue;
-            expect([p.from === pick.to, p.to === pick.from], r.key).toEqual([true, true]);
-            expect(onDay(p.departsOn, r.returnDate), r.key).toBe(true);
-          }
-          // why: finding 5: the cheapest return's price equals the selected outbound's own "From" price
-          const min = Math.min(...parsed.map((p) => p?.amountMinor ?? Number.POSITIVE_INFINITY));
-          expect(min, r.key).toBe(pick?.amountMinor);
-          expect(onDay(pick?.departsOn ?? null, r.departureDate), r.key).toBe(true);
-        });
-    }
-  });
-});
+          ).toBe(false);
+          expect([a.page.cheapestTabs.length, a.page.dateGridButtons], r.key).toEqual([0, 0]);
+          expect([a.list.viewMore, a.list.resultsStated, a.form], r.key).toEqual([true, null, null]);
+          // why: every return link reads by the outbound pattern too (finding 4: one price form)
+          expect(a.page.outboundLinks, r.key).toBe(a.page.resultLinks);
+        }
+    });
+    it('every return name: the outbound grammar reads it, "From" priced, from the destination to the origin on the return date', () => {
+      for (const r of all) {
+        const picks = r.facts.picks.map((p) => parseOptionName(p.name));
+        r.facts.steps
+          .filter((x) => x.step !== 'reload')
+          .forEach((s, i) => {
+            const pick: ParsedOption | null | undefined = picks[i];
+            const names = (s.after?.names ?? []).filter((x): x is string => x !== null);
+            expect(pick, r.key).not.toBeNull();
+            expect(names.length, r.key).toBeGreaterThan(0);
+            const parsed = names.map((x) => parseOptionName(x));
+            expect(
+              parsed.every((p) => p !== null),
+              r.key,
+            ).toBe(true);
+            // why: finding 5's stop condition: every return name carries the "From" price clause
+            expect(
+              names.every((x) => x.startsWith('From ')),
+              r.key,
+            ).toBe(true);
+            expect(
+              names.every((x) => SELECTORS.returns.resultLink.test(x)),
+              r.key,
+            ).toBe(true);
+            for (const p of parsed) {
+              if (p === null || pick === null || pick === undefined) continue;
+              expect([p.from === pick.to, p.to === pick.from], r.key).toEqual([true, true]);
+              expect(onDay(p.departsOn, r.returnDate), r.key).toBe(true);
+            }
+            // why: finding 5: the cheapest return's price equals the selected outbound's own "From" price
+            const min = Math.min(...parsed.map((p) => p?.amountMinor ?? Number.POSITIVE_INFINITY));
+            expect(min, r.key).toBe(pick?.amountMinor);
+            expect(onDay(pick?.departsOn ?? null, r.departureDate), r.key).toBe(true);
+          });
+      }
+    });
+  },
+);

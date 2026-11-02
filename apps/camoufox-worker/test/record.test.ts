@@ -477,7 +477,18 @@ describe('the recorder (brief Task 14.2 rules)', () => {
   });
   it('rule 3: the probe page has no click method, and another blocked kind cools down as usual', async () => {
     const page = new FakePage(null);
-    const probe = probePage(createDriver(page, { hops: [], frameUrls: [], refused: null, documentLoads: 0 }));
+    const probe = probePage(
+      createDriver(page, {
+        hops: [],
+        frameUrls: [],
+        refused: null,
+        documentLoads: 0,
+        activationGate: false,
+        gateRefusals: 0,
+        reservation: null,
+        held: null,
+      }),
+    );
     expect('click' in probe).toBe(false);
     expect('clickCheapest' in probe).toBe(false);
     const t = setup({
@@ -1941,6 +1952,7 @@ describe('parseRecordArgs', () => {
       request: null,
       pages: 1,
       moves: [],
+      forceSecond: false,
     });
     expect(parseRecordArgs([...Q, '--stability']).pages).toBe(3);
     expect(parseRecordArgs([...Q, '--no-flights']).kind).toBe('no-flights');
@@ -2029,7 +2041,13 @@ describe('record --landing (Task 17.8)', () => {
   const cooldownOf = (t: ReturnType<typeof setup>) =>
     new CooldownStore({ dir: t.dataDir, challengeHours: 48, clock: t.timers.clock }).active();
   it('parses with no query, one page', () => {
-    expect(parseRecordArgs(['--landing'])).toEqual({ kind: 'landing', request: null, pages: 1, moves: [] });
+    expect(parseRecordArgs(['--landing'])).toEqual({
+      kind: 'landing',
+      request: null,
+      pages: 1,
+      moves: [],
+      forceSecond: false,
+    });
     expect(() => parseRecordArgs(['--landing', '--grid'])).toThrow(/at most one of .*--landing/);
   });
   it('loads the landing page with SOCS set, clicks nothing and records the view, the flag still off', async () => {

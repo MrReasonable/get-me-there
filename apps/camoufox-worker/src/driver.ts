@@ -154,6 +154,16 @@ export interface ListFacts {
    */
   viewMore?: boolean;
 }
+/** What the driver reads of a booking view (`bookingFacts`; offers.ts reads it): the offer buttons' names and two control counts. */
+export interface BookingFacts {
+  /** Each offer button's name in page order (`S.booking.offer` in main); null when unreadable or over the length cap. */
+  offerNames: Array<string | null>;
+  /** The "<count> more booking options" controls in main (`S.booking.moreOptions`; pressed only when exactly one). */
+  moreOptions: number;
+  /** The grouped "View <seller>, …" controls (`S.booking.grouped`): counted, never activated, their fares never read. */
+  grouped: number;
+}
+
 /** The search form's fields as the page shows them (brief Task 14.3), or null when the controls are absent. */
 export type FormFacts = { tripType: string; passengers: string; departure: string; return: string } | null;
 
@@ -202,6 +212,13 @@ export interface Driver {
    * `press-more-options`, flow `select-more-options`. Never an offer or any other control.
    */
   clickMoreOptions(d: Deadline, o: StepOptions, onActivate?: () => void): Promise<string[]>;
+  /**
+   * WP21 Task 21.3 (spec rev 56 §2 "The booking read"): the booking view's offer buttons' names in page order (in main,
+   * by `S.booking.offer`; null when unreadable or over the length cap, counted unparsed upstream), the "more booking
+   * options" controls in main (`S.booking.moreOptions`) and the grouped "View <seller>, …" controls
+   * (`S.booking.grouped`). A read only: nothing here is ever activated.
+   */
+  bookingFacts(d: Deadline): Promise<BookingFacts>;
 }
 
 /** How a timed step runs: the timers, the debug log, and the page's start (for elapsed times). */
@@ -573,6 +590,12 @@ export function createDriver(page: PageLike, guard: GuardState, S: Selectors = S
       const outboundLinks = await countOf(resultLinks(), d);
       const links =
         view === 'returns' || view === 'booking' ? await countOf(resultLinks(view), d) : outboundLinks;
+      // why: WP21 Task 21.3: the booking view's price-range heading, read on that view only (the classifier's fact)
+      at('price-range-heading');
+      const priceRangeHeading =
+        view === 'booking'
+          ? await has(page.getByRole('heading', { name: S.booking.priceRangeHeading }), d)
+          : null;
       const facts: PageFacts = {
         url,
         hops: [...guard.hops],
@@ -585,6 +608,7 @@ export function createDriver(page: PageLike, guard: GuardState, S: Selectors = S
           noFlights,
           landingHeading,
           returnHeading,
+          ...(priceRangeHeading === null ? {} : { priceRangeHeading }),
         },
         accountControl: accountButtons + accountLinks > 0,
         cheapestTabs,
@@ -645,6 +669,22 @@ export function createDriver(page: PageLike, guard: GuardState, S: Selectors = S
       const more = page.getByRole('main').getByRole('button', { name: S.booking.moreOptions });
       await activateOne(more, 'more-options', 'select-more-options', d, o, onActivate);
       return ['button:more-options'];
+    },
+
+    async bookingFacts(d) {
+      const inMain = page.getByRole('main');
+      const offers = inMain.getByRole('button', { name: S.booking.offer });
+      const offerNames: Array<string | null> = [];
+      for (let i = 0, n = await countOf(offers, d); i < n; i++) {
+        const name = await nameOf(offers.nth(i), d);
+        // why: PIE-R2-10, as a result link: a name too long is counted unparsed upstream, never parsed and never dropped
+        offerNames.push(name === null || name.length > S.maxNameLength ? null : name);
+      }
+      return {
+        offerNames,
+        moreOptions: await countOf(inMain.getByRole('button', { name: S.booking.moreOptions }), d),
+        grouped: await countOf(inMain.getByRole('button', { name: S.booking.grouped }), d),
+      };
     },
 
     async formFacts(d) {
@@ -716,7 +756,7 @@ async function firstText(l: LocatorLike, d: Deadline): Promise<string | null> {
  */
 export type ProbePage = Omit<
   Driver,
-  'click' | 'clickCheapest' | 'clickOutbound' | 'clickReturn' | 'clickMoreOptions'
+  'click' | 'clickCheapest' | 'clickOutbound' | 'clickReturn' | 'clickMoreOptions' | 'bookingFacts'
 >;
 export function probePage(d: Driver): ProbePage {
   return {
@@ -787,6 +827,21 @@ export interface PollOptions {
   changedFrom?: { signature: string; documentLoads: number };
   /** The guard's document loads now (`guard.documentLoads`); with `changedFrom`. */
   loads?: () => number;
+  /**
+   * WP21 Task 21.3 (R-refused): read before every poll's classification; true ends the polling with PollStopped (the
+   * return phase passes "the guard refused or held a navigation", so a refused hop is never classified as a block).
+   */
+  stopWhen?: () => boolean;
+  /** WP21 Task 21.3: set `changed` once any poll saw the view changed from `changedFrom` (no-activation vs not-settled). */
+  track?: { changed: boolean };
+}
+
+/** WP21 Task 21.3: pollUntilSettled stopped by its `stopWhen` before classifying a poll. */
+export class PollStopped extends Error {
+  constructor() {
+    super('the poll was stopped before its classification');
+    this.name = 'PollStopped';
+  }
 }
 
 /** The first 60 characters of each name present in one poll's links and absent from the other's. */
@@ -847,6 +902,8 @@ export async function pollUntilSettled(
     }
     const pollDurationMs = timers.now() - pollStart;
     const facts = { page: read.page, settle: read.settle };
+    // why: R-refused: the guard's refusal is read before this poll is classified
+    if (o.stopWhen?.() === true) throw new PollStopped();
     const { kind, rule } = classifyPageWithRule(facts.page, S, view);
     if (kind.kind === 'no-flights' || (kind.kind === 'blocked' && kind.page !== 'unrecognised'))
       return { kind, rule, facts, polls };
@@ -864,6 +921,7 @@ export async function pollUntilSettled(
         // one, so there it is no change (Ian's ruling of 2026-11-01)
         (view === 'returns' && facts.page.text.returnHeading) ||
         (o.loads?.() ?? changedFrom.documentLoads) > changedFrom.documentLoads);
+    if (changed && o.track !== undefined) o.track.changed = true;
     const settled = isSettled(facts.page, facts.settle, view, changed);
     // why: ruling of 2026-10-18: settled means stable content: the same links across two polls at least 2 s apart
     const stable = settled && stableAcross(previous, current);

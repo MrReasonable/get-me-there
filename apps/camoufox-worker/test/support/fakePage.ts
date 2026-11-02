@@ -421,7 +421,13 @@ export class FakePage implements HeadedPageLike {
   setUrl(url: string): void {
     this.current = url;
   }
+  /**
+   * WP21 Task 21.3: told whenever a call starts hanging (a press, a lookup), so a test can run the fake clock out on
+   * that event instead of guessing when it happens.
+   */
+  onHang: () => void = () => undefined;
   hangUntilClosed<T>(): Promise<T> {
+    this.onHang();
     return new Promise<T>((_resolve, reject) => {
       this.closers.push(() => reject(new Error('Target page, context or browser has been closed')));
     });

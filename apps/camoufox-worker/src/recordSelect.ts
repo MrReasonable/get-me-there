@@ -30,7 +30,7 @@ import {
   StepFailed,
   type StepOptions,
 } from './driver.js';
-import type { GuardState } from './guard.js';
+import type { GuardState, HeldRefusal } from './guard.js';
 import { parseOptionName } from './names.js';
 import type { Pacer } from './pacer.js';
 import { currencyOf, minorOf } from './pence.js';
@@ -61,6 +61,16 @@ export function selectReturnCapMs(pageTimeoutMs: number, spacingMs: number): num
 }
 
 /**
+ * WP21 Task 21.3 (ruling A18, R-e2e): `--select-return --force-second`'s cap, the session's own budget for the full
+ * served path: eight page timeouts (the first view, its Cheapest flow, the first selection, the reload, its Cheapest
+ * flow, the second selection, the return's selection, the expansion) and one spacing (the reload's): 750,000 ms at the
+ * defaults.
+ */
+export function selectForceSecondCapMs(pageTimeoutMs: number, spacingMs: number): number {
+  return 8 * pageTimeoutMs + 1 * spacingMs;
+}
+
+/**
  * The bound on the one more read after a step's deadline, and on a step's research reads after its settle (twice the
  * recorder's finally bound, the --no-flights pattern).
  */
@@ -84,6 +94,16 @@ export interface SelectPage {
   stepMs: Record<string, number>;
   clicked: string[];
   stop(p: BlockedPage, rule: string, facts?: StopFacts | null): Promise<Outcome>;
+  /**
+   * WP21 Task 21.3 (R-e2e): the first outbound's returns treated as not fitting, so the reload and the second
+   * selection run before the return's selection and the expansion (`--select-return --force-second`).
+   */
+  forceSecond?: boolean;
+  /**
+   * WP21 Task 21.3 (R-worst): whether a spacing wait precedes each activation, as the research kinds of Task 21.0 did
+   * (true by default); the end-to-end recording runs the served path, which spaces only the reload.
+   */
+  spaceActivations?: boolean;
 }
 
 /** One view's facts as the results kinds record them. */
@@ -195,6 +215,8 @@ interface StepRecord {
   after?: After;
   /** The step's deadline passed and the one more read overran too. */
   lastReadOverran?: true;
+  /** WP21 Task 21.3 (R-worst): a navigation the guard held back during the step (the gate, or past the reservation). */
+  held?: HeldRefusal;
 }
 
 type StepResult = { record: StepRecord; end: boolean } | { stop: Outcome };
@@ -457,11 +479,15 @@ async function selection(
   sel: Selection = outboundSelection(c),
 ): Promise<StepResult> {
   let target: TargetProbe | undefined;
+  const refusalsBefore = c.guard.gateRefusals;
   const r = await selectionSteps(c, step, pick, sel, (t) => {
     target = t;
   });
   // why: the probe goes with the step's record however the step ended
   if ('record' in r && target !== undefined) r.record.target = target;
+  // why: WP21 Task 21.3: a navigation the gate held back during this step is recorded with it (a word, never a URL)
+  if ('record' in r && c.guard.gateRefusals > refusalsBefore && c.guard.held !== null)
+    r.record.held = c.guard.held;
   if ('record' in r) {
     const rec = r.record;
     // why: the controller's ruling after recording 2: an Enter that left the view as it was within the step is a
@@ -484,7 +510,8 @@ async function selectionSteps(
   probed: (t: TargetProbe) => void,
 ): Promise<StepResult> {
   const { timers, log, pollMs } = c.deps;
-  const spaced = await spacing(c);
+  // why: R-worst: an activation loads no document, so the served path spaces none; the 21.0 research kinds still do
+  const spaced = c.spaceActivations === false ? { waitMs: 0, timedOut: false } : await spacing(c);
   const waitMs = spaced.waitMs;
   if (spaced.timedOut) return { record: { step, waitTimedOut: true, waitMs }, end: true };
   const d = c.budget.nextFor(c.pageMs);
@@ -502,6 +529,9 @@ async function selectionSteps(
     if (sel.probe) probed(await probeTarget(c.page, pick.name, timers));
     started = timers.now();
     const steps: StepOptions = { timers, log, startedAt: c.pageStart, flow: `select-${sel.what}` };
+    // why: WP21 Task 21.3 (R-worst): the recorder's activations run under the session's gate, from the press until the
+    // view settles (Task 21.0's research ran before it)
+    c.guard.activationGate = true;
     try {
       c.clicked.push(
         ...(await sel.activate(pick.name, d, steps, () => {
@@ -509,6 +539,7 @@ async function selectionSteps(
         })),
       );
     } catch (e) {
+      c.guard.activationGate = false;
       if (e instanceof DeadlineExceeded || d.expired()) throw e;
       // why: a failed click may have left a page that is no results page at all: classified once, a block is its stop
       const blocked = await classifyAfterFailedStep(c.driver, d, steps, c.returnsS, sel.view);
@@ -532,6 +563,8 @@ async function selectionSteps(
       startedAt: c.pageStart,
       changedFrom: { signature: pre.settle.linkSignature, documentLoads: before.loads },
       loads: () => c.guard.documentLoads,
+    }).finally(() => {
+      c.guard.activationGate = false;
     });
     if (settled.kind.kind === 'blocked' && settled.kind.page !== 'unrecognised')
       return { stop: await c.stop(settled.kind.page, settled.rule, settled.facts) };
@@ -568,6 +601,9 @@ async function reload(c: SelectPage, before: Before): Promise<StepResult & { sho
     try {
       await c.driver.goto(c.url, d);
     } catch (e) {
+      // why: WP21 Task 21.3: a load the guard held back (past the reservation) loaded nothing: recorded, never a stop
+      if (c.guard.refused === null && c.guard.held !== null)
+        return { record: { step, waitMs, held: c.guard.held }, end: true };
       if (c.guard.refused === null) throw e;
       return { stop: await c.stop(c.guard.refused, `guard-refused:${c.guard.refused}`) };
     }
@@ -668,6 +704,9 @@ export async function recordSelectOutbound(
         clicked: c.clicked,
         picks,
         steps,
+        // why: WP21 Task 21.3 (R-e2e): the end-to-end recording names itself, so the research suites leave it out and the
+        // served-path suites find it
+        ...(c.forceSecond === true ? { forceSecond: true } : {}),
       },
       noFlights: s.kind === 'no-flights',
       stepMs: c.stepMs,
@@ -701,69 +740,70 @@ export async function recordSelectOutbound(
   if ('stop' in r1) return r1.stop;
   if (!keep(r1) || r1.record.after === undefined) return finish();
   const a1 = r1.record.after;
-  if (kind === 'select-return') {
-    // why: Ian's ruling of 2026-11-01: the cheapest return on the return date, picked as the outbound was, selected the
-    // same way, and the booking view after it recorded; nothing on the booking view is activated
-    // why: the review: a return is picked only from a view the classifier read as the return view
-    if (a1.classification.kind !== 'results' || a1.classification.rule !== 'returns') {
-      steps.push({ step: 'return-selection', selectFailed: 'not-return-view' });
+  /** The return view the return is picked from: the first selection's, or (forced) the second's. */
+  let at = a1;
+  // why: --select-outbound always reloads for a second selection; --select-return does only with --force-second (R-e2e:
+  // the first outbound's returns treated as not fitting, as the served path does when none fits)
+  if (kind === 'select-outbound' || c.forceSecond === true) {
+    const r2 = await reload(c, {
+      url: a1.page.url,
+      loads: a1.documentLoads,
+      signature: a1.settle.linkSignature,
+    });
+    if ('stop' in r2) return r2.stop;
+    if (!keep(r2) || r2.shown === undefined) return finish();
+    const second = pickOf(r2.shown.list, c.request.departureDate, first.name);
+    if (second === null) {
+      steps.push({ step: 'second-selection', selectFailed: 'no-pick' });
       return finish();
     }
-    const ret = a1.names === null ? null : pickOf({ names: a1.names }, c.request.returnDate, null);
-    if (ret === null) {
-      steps.push({ step: 'return-selection', selectFailed: 'no-pick' });
-      return finish();
-    }
-    picks.push(ret);
-    const rr = await selection(c, 'return-selection', ret, returnSelection(c));
-    if ('stop' in rr) return rr.stop;
-    const fromMinor = parseOptionName(ret.name)?.amountMinor ?? null;
-    if (rr.record.after !== undefined) rr.record.after.expansion = expansionOf(c, rr.record.after, fromMinor);
-    if (!keep(rr) || rr.record.after === undefined) return finish();
-    const b = rr.record.after;
-    // why: Ian's ruling of 2026-11-01 (open "more booking options"): only from a settled booking view with offers
-    const onBookingPath = ((): boolean => {
-      try {
-        return new URL(b.page.url).pathname === c.deps.selectors.booking.path;
-      } catch {
-        return false;
-      }
-    })();
-    if (
-      !b.settled ||
-      b.classification.rule !== 'booking-view' ||
-      b.page.resultLinks === 0 ||
-      !onBookingPath
-    ) {
-      steps.push({ step: 'more-options', selectFailed: 'not-booking-view' });
-      return finish();
-    }
-    const rm = await selection(
-      c,
-      'more-options',
-      { name: 'more-options', linkIndex: -1 },
-      moreOptionsSelection(c),
-    );
-    if ('stop' in rm) return rm.stop;
-    if (rm.record.after !== undefined) rm.record.after.expansion = expansionOf(c, rm.record.after, fromMinor);
-    keep(rm);
+    picks.push(second);
+    const r3 = await selection(c, 'second-selection', second);
+    if ('stop' in r3) return r3.stop;
+    if (!keep(r3) || r3.record.after === undefined) return finish();
+    at = r3.record.after;
+  }
+  if (kind === 'select-outbound') return finish();
+  // why: Ian's ruling of 2026-11-01: the cheapest return on the return date, picked as the outbound was, selected the
+  // same way, and the booking view after it recorded; nothing on the booking view is activated
+  // why: the review: a return is picked only from a view the classifier read as the return view
+  if (at.classification.kind !== 'results' || at.classification.rule !== 'returns') {
+    steps.push({ step: 'return-selection', selectFailed: 'not-return-view' });
     return finish();
   }
-  const r2 = await reload(c, {
-    url: a1.page.url,
-    loads: a1.documentLoads,
-    signature: a1.settle.linkSignature,
-  });
-  if ('stop' in r2) return r2.stop;
-  if (!keep(r2) || r2.shown === undefined) return finish();
-  const second = pickOf(r2.shown.list, c.request.departureDate, first.name);
-  if (second === null) {
-    steps.push({ step: 'second-selection', selectFailed: 'no-pick' });
+  const ret = at.names === null ? null : pickOf({ names: at.names }, c.request.returnDate, null);
+  if (ret === null) {
+    steps.push({ step: 'return-selection', selectFailed: 'no-pick' });
     return finish();
   }
-  picks.push(second);
-  const r3 = await selection(c, 'second-selection', second);
-  if ('stop' in r3) return r3.stop;
-  keep(r3);
+  picks.push(ret);
+  const rr = await selection(c, 'return-selection', ret, returnSelection(c));
+  if ('stop' in rr) return rr.stop;
+  const fromMinor = parseOptionName(ret.name)?.amountMinor ?? null;
+  if (rr.record.after !== undefined) rr.record.after.expansion = expansionOf(c, rr.record.after, fromMinor);
+  if (!keep(rr) || rr.record.after === undefined) return finish();
+  const b = rr.record.after;
+  // why: Ian's ruling of 2026-11-01 (open "more booking options"): only from a settled booking view with offers, on
+  // the booking path (the classification, under the dated booking branch, is recorded beside it)
+  const onBookingPath = ((): boolean => {
+    try {
+      return new URL(b.page.url).pathname === c.deps.selectors.booking.path;
+    } catch {
+      return false;
+    }
+  })();
+  if (!b.settled || b.page.resultLinks === 0 || !onBookingPath) {
+    steps.push({ step: 'more-options', selectFailed: 'not-booking-view' });
+    return finish();
+  }
+  const rm = await selection(
+    c,
+    'more-options',
+    { name: 'more-options', linkIndex: -1 },
+    moreOptionsSelection(c),
+  );
+  if ('stop' in rm) return rm.stop;
+  if (rm.record.after !== undefined) rm.record.after.expansion = expansionOf(c, rm.record.after, fromMinor);
+  keep(rm);
   return finish();
 }

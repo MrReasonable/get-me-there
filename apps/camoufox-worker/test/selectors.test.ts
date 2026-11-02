@@ -69,7 +69,9 @@ describe('the dated selectors module (spec §2; brief §9)', () => {
       expect(moreOptions.test(no), no).toBe(false);
     expect(offer.test('3 more booking options')).toBe(false);
   });
-  it('the return view hypothesis: a returning-flights heading, and return links in either price form', () => {
+  // why: WP21 Task 21.3: dated from select-outbound/2026-11-01/3 and 4 (every return name in the "From" form; the
+  // heading in its plain, Top and Other forms)
+  it('the return view as recorded: a returning-flights heading, and return links in the "From" form only', () => {
     const { heading, resultLink } = SELECTORS.returns;
     for (const h of [
       'Returning flights',
@@ -80,11 +82,49 @@ describe('the dated selectors module (spec §2; brief §9)', () => {
       expect(heading.test(h), h).toBe(true);
     for (const h of ['Top departing flights', 'Returning flights soon', 'Best returning flights'])
       expect(heading.test(h), h).toBe(false);
-    expect(resultLink.test('1,204 British pounds round trip total. Nonstop flight with QQ Air.')).toBe(true);
     expect(resultLink.test('From 478 British pounds round trip total. Nonstop flight with QQ Air.')).toBe(
       true,
     );
+    // why: the total alone was never recorded (0 of 38 return names), so it is no return link
+    expect(resultLink.test('1,204 British pounds round trip total. Nonstop flight with QQ Air.')).toBe(false);
     expect(resultLink.test('Select flight')).toBe(false);
+    expect(resultLink.source).toBe(SELECTORS.results.resultLink.source);
+  });
+  // why: WP21 Task 21.3: select-return/2026-11-01/1–4 showed one heading of this shape on every booking view (its first
+  // price the return's "From" price), and the grouped "View <seller>, …" control on two of them
+  it('the booking view as recorded: the price-range heading and the grouped control, which never names an offer or the expansion', () => {
+    const { priceRangeHeading, grouped, offer, moreOptions } = SELECTORS.booking;
+    for (const ok of [
+      '£1,180 lowest total price – £1,450 highest total price',
+      '£478 cheapest – £520 dearest',
+    ])
+      expect(priceRangeHeading.test(ok), ok).toBe(true);
+    for (const no of [
+      '£1,180 lowest total price',
+      'Booking options',
+      'Continue to book with QQ Travel for 478 British pounds',
+    ])
+      expect(priceRangeHeading.test(no), no).toBe(false);
+    for (const ok of [
+      'View QQ Travel, QQ Fares 1,250 British pounds options',
+      'View QQ Travel, QQ Air 478 British pounds more',
+    ])
+      expect(grouped.test(ok), ok).toBe(true);
+    for (const no of [
+      'Continue to book with QQ Travel for 1,180 British pounds',
+      'Continue to book with QQ Travel, Economy Basic for 1,180 British pounds',
+      '17 more booking options',
+      'View more flights',
+      'View QQ Travel',
+    ]) {
+      expect(grouped.test(no), no).toBe(false);
+    }
+    // why: the grouped control is counted, never pressed: neither the offer pattern nor the expansion's names it
+    for (const g of ['View QQ Travel, QQ Fares 1,250 British pounds options']) {
+      expect(offer.test(g), g).toBe(false);
+      expect(moreOptions.test(g), g).toBe(false);
+    }
+    expect(SELECTORS_VERSION).toBe('2026-11-01-returns');
   });
   it('each true flag of every entry names its proving recording’s date, and no false flag names one (TS-13)', () => {
     for (const k of OS_ARCHES) {

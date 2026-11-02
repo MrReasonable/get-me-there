@@ -1280,3 +1280,31 @@ describe('PageSession in flights mode (spec rev 55 §2)', () => {
     expect(t.cooldown.active()).toBeNull();
   });
 });
+
+// why: WP21 Task 21.3 (spec rev 56 §2, R-zero, A5): `pagesLoaded` is stated only on an answer to a request carrying
+// returnLimits on a verified entry; a list, grid or plain flights page carries none, as before
+describe('page counts only on a return-phase request (WP21 Task 21.3)', () => {
+  it('a list page and a flights page without returnLimits carry no pagesLoaded, with the select flags on', async () => {
+    const S = {
+      ...SELECTORS,
+      CHEAPEST_FLOW_VERIFIED: false,
+      RETURN_SELECT_VERIFIED: true,
+      BOOKING_SELECT_VERIFIED: true,
+    };
+    const t = setup({ selectors: S });
+    const list = (await t.session.page(REQ)).answer;
+    expect(list.kind).toBe('cells');
+    expect('pagesLoaded' in list).toBe(false);
+    t.clock.advance(30_000);
+    const flights = (await t.session.page({ ...REQ, mode: 'flights' })).answer;
+    expect(flights.kind).toBe('flights');
+    expect('pagesLoaded' in flights).toBe(false);
+    expect('returns' in flights).toBe(false);
+  });
+  it('a blocked list page carries no pagesLoaded either', async () => {
+    const t = setup({ tree: n('document', '', [text('please show you are not a robot')]) });
+    const a = (await t.session.page(REQ)).answer;
+    expect(a).toMatchObject({ kind: 'blocked', page: 'captcha' });
+    expect('pagesLoaded' in a).toBe(false);
+  });
+});

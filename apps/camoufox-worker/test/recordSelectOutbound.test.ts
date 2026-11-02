@@ -4,7 +4,7 @@
 // worst case and settled to the documents loaded. Synthetic trees only; no value here comes from a recording.
 import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { asIsoDate, type BlockedPage, CAMOUFOX_BUILDS } from '@gmt/core';
+import { asIsoDate, type BlockedPage, CAMOUFOX_BUILDS, FLIGHT_LIST_PAGES_PER_PAIR_MAX } from '@gmt/core';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as budget from '../src/budget.js';
 import { loadWorkerConfig } from '../src/config.js';
@@ -13,7 +13,12 @@ import { createDriver, type Driver, type FrameLike, type RequestLike } from '../
 import { buildLaunchOptions, launchOptionsForMeta } from '../src/launch.js';
 import { Pacer } from '../src/pacer.js';
 import { RECORD_SELECT_PAGES, type RecordDeps, record } from '../src/record.js';
-import { recordSelectOutbound, selectOutboundCapMs, selectReturnCapMs } from '../src/recordSelect.js';
+import {
+  recordSelectOutbound,
+  selectForceSecondCapMs,
+  selectOutboundCapMs,
+  selectReturnCapMs,
+} from '../src/recordSelect.js';
 import { type EntryContext, EX_CONFIG, EX_UNAVAILABLE } from '../src/run.js';
 import { SELECTORS } from '../src/selectors.js';
 import { DeadlineExceeded } from '../src/timers.js';
@@ -73,15 +78,16 @@ const P478B = optionName(478, { duration: '10 hrs', carrier: 'QQ Atlantic' });
 const P520 = optionName(520, { duration: '11 hrs 40 min' });
 const OUT = [OTHER_DAY, UNPARSABLE, P451, P478, P478B, P520];
 const TAB = 'Cheapest from 451 British pounds';
+// why: WP21 Task 21.3: the return names in the recorded form (the outbound's "From" clause: 38 of 38 recorded)
 const RET1 = [
-  returnOptionName({ pounds: 451 }),
-  returnOptionName({ pounds: 470, carrier: 'QQ Air' }),
-  returnOptionName({ pounds: 512 }),
+  returnOptionName({ pounds: 451, priceForm: 'from' }),
+  returnOptionName({ pounds: 470, carrier: 'QQ Air', priceForm: 'from' }),
+  returnOptionName({ pounds: 512, priceForm: 'from' }),
 ];
 const RET2 = [
-  returnOptionName({ pounds: 478 }),
-  returnOptionName({ pounds: 490, carrier: 'QQ Air' }),
-  returnOptionName({ pounds: 530 }),
+  returnOptionName({ pounds: 478, priceForm: 'from' }),
+  returnOptionName({ pounds: 490, carrier: 'QQ Air', priceForm: 'from' }),
+  returnOptionName({ pounds: 530, priceForm: 'from' }),
 ];
 
 const items = (names: readonly string[]): FakeNode[] => names.map((x) => n('listitem', '', [n('link', x)]));
@@ -94,10 +100,12 @@ const cheapestTree = (names: readonly string[] = OUT): FakeNode => {
   v.children = (v.children ?? []).filter((c) => !/results returned/.test(c.name ?? ''));
   return v;
 };
-/** The view after a selection, in the hypothesis form: its heading, the return options, View more, no outbound list. */
+/**
+ * The view after a selection, in the recorded form (select-outbound/2026-11-01/3 and 4): its heading, the return options,
+ * View more, no outbound list, no tab and no Date grid button.
+ */
 const returnTree = (names: readonly string[], extra: FakeNode[] = []): FakeNode =>
   n('document', 'Google Flights', [
-    n('tablist', '', [n('tab', 'Best'), n('tab', TAB)]),
     n('main', '', [n('heading', 'Returning flights'), n('list', '', items(names)), ...extra]),
     viewMore(),
     n('button', 'Currency GBP'),
@@ -361,7 +369,8 @@ describe('record --select-outbound: the served sequence, two selections and a fr
       list: { names: RET1, viewMore: true },
       linkNames: RET1,
       headings: ['Returning flights'],
-      tabNames: ['Best', TAB],
+      // why: the return view as recorded shows no tab
+      tabNames: [],
       settled: true,
       // why: three unchanged polls and two of the return view, 2 s apart, from the click; the spacing apart
       stepMs: 8000,
@@ -401,16 +410,21 @@ describe('record --select-outbound: the served sequence, two selections and a fr
     expect(cfg.pageTimeoutSeconds * 1000).toBe(90_000);
     expect(cfg.minSpacingSeconds * 1000).toBe(30_000);
   });
-  it('claims RECORD_SELECT_PAGES before the first load and settles to the documents loaded', async () => {
-    expect(RECORD_SELECT_PAGES).toBe(4);
+  // why: WP21 Task 21.3 (R-worst): each selection runs under the guard's activation gate, so a page loads the first view
+  // and the reload only: RECORD_SELECT_PAGES is core's FLIGHT_LIST_PAGES_PER_PAIR_MAX, and a selection's document
+  // navigation is aborted (held, recorded with its step), never loaded
+  it('claims RECORD_SELECT_PAGES before the first load, the gate holding every selection’s document back', async () => {
+    expect(RECORD_SELECT_PAGES).toBe(FLIGHT_LIST_PAGES_PER_PAIR_MAX);
+    expect(RECORD_SELECT_PAGES).toBe(2);
     const doc = setup({ ...DEFAULT, documentPerSelection: true });
     expect(await record(doc.ctx(SELECT), cfg, doc.deps)).toBe(0);
-    expect(doc.seen[0]).toMatchObject({ at: 'goto-1', pages: 4 });
-    expect(doc.months()).toBe(4);
+    expect(doc.seen[0]).toMatchObject({ at: 'goto-1', pages: 2 });
+    expect(doc.months()).toBe(2);
     const [first, reload, second] = doc.facts().steps;
     expect([first.after.documentLoads, reload.after.documentLoads, second.after.documentLoads]).toEqual([
-      2, 3, 4,
+      1, 2, 2,
     ]);
+    expect([first.held, second.held]).toEqual(['unexpected-navigation', 'unexpected-navigation']);
     const inApp = setup();
     expect(await record(inApp.ctx(SELECT), cfg, inApp.deps)).toBe(0);
     expect(inApp.months()).toBe(2);
@@ -778,18 +792,18 @@ describe('record --select-outbound: review fixes (WP21 Task 21.0)', () => {
     expect(await record(r.ctx(Q), cfg, r.deps)).toBe(0);
     expect(vi.mocked(budget.pageBudget).mock.calls.map((c) => [c[1], c[3]])).toEqual([[90_000, 180_000]]);
   });
-  it('with 3 pages left it is refused before anything: no launch, no load, no pacer start, the counts unchanged', async () => {
+  it('with 1 page left it is refused before anything: no launch, no load, no pacer start, the counts unchanged', async () => {
     const t = setup();
     const counts = JSON.stringify({
       windowStart: '2026-10-01T00:00:00.000Z',
       windowEnd: '2026-11-01T00:00:00.000Z',
-      pages: 1497,
+      pages: 1499,
       scrolls: 0,
     });
     writeFileSync(join(t.dataDir, 'monthly.json'), counts, { mode: 0o600 });
     expect(await record(t.ctx(SELECT), cfg, t.deps)).toBe(EX_CONFIG);
     expect(t.err.join()).toContain(
-      "the worker's monthly page cap leaves fewer than the 4 pages this recording may load",
+      "the worker's monthly page cap leaves fewer than the 2 pages this recording may load",
     );
     expect(t.contexts).toEqual([]);
     expect(t.seen).toEqual([]);
@@ -805,12 +819,8 @@ describe('record --select-outbound: review fixes (WP21 Task 21.0)', () => {
     expect(existsSync(join(t.dataDir, 'monthly.json'))).toBe(false);
   });
   it('a research read that overruns its own bound keeps a settled view settled', async () => {
-    // why: the return view's Best tab never answers a name read: only tabNames reads it, after the settle
-    const slowTab = () => {
-      const v = returnTree(RET1);
-      for (const c of descendants([v])) if (c.role === 'tab' && c.name === 'Best') c.hang = true;
-      return v;
-    };
+    // why: a tab on the return view that never answers a name read: only tabNames reads it, after the settle
+    const slowTab = () => returnTree(RET1, [n('tab', 'Best', [], { hang: true })]);
     const t = setup({
       ...DEFAULT,
       onLink: (name) => (name === P451 ? [slowTab()] : name === P478 ? [returnTree(RET2)] : null),
@@ -981,7 +991,16 @@ describe('recordSelectOutbound: the activation recorded through the deadline pat
     page.onClick = (x) => {
       if (x.role === 'tab') page.setTrees([cheapestTree()]);
     };
-    const guard = { hops: [], frameUrls: [], refused: null, documentLoads: 1 };
+    const guard = {
+      hops: [],
+      frameUrls: [],
+      refused: null,
+      documentLoads: 1,
+      activationGate: false,
+      gateRefusals: 0,
+      reservation: null,
+      held: null,
+    };
     const real = createDriver(page, guard, SELECTORS);
     const driver: Driver = {
       ...real,
@@ -1093,7 +1112,9 @@ describe('record --select-return: the return selected, the booking view recorded
         changedFromPreClick: true,
         documentLoadsBefore: 1,
         documentLoads: 1,
-        classification: { kind: 'blocked', rule: 'booking-view' },
+        // why: WP21 Task 21.3: the recorder reads the booking view with the dated booking branch on; this synthetic view
+        // shows no price-range heading, so it reads as no booking view (the expansion's own gate is the path and offers)
+        classification: { kind: 'blocked', rule: 'not-booking-view' },
         headings: ['Booking options'],
         names: [OFFER_1, OFFER_2],
         linkNames: ['Booking options help'],
@@ -1143,15 +1164,21 @@ describe('record --select-return: the return selected, the booking view recorded
       documentLoads: 1,
     });
   });
-  it('claims 4 pages before the first load and settles to the documents loaded', async () => {
+  it('claims 2 pages before the first load and settles to the documents loaded; the gate holds every activation’s document', async () => {
     const t = setup(script());
     expect(await record(t.ctx(SELECT_RETURN), cfg, t.deps)).toBe(0);
-    expect(t.seen[0]).toMatchObject({ at: 'goto-1', pages: 4 });
+    expect(t.seen[0]).toMatchObject({ at: 'goto-1', pages: 2 });
     expect(t.months()).toBe(1);
     const doc = setup({ ...script(), documentPerSelection: true });
     expect(await record(doc.ctx(SELECT_RETURN), cfg, doc.deps)).toBe(0);
-    // why: the fake loads a document for each link activation (the outbound, the return); the expansion is in-page
-    expect(doc.months()).toBe(3);
+    // why: R-worst: the fake starts a document for each link activation; the gate aborts both, so none loads
+    expect(doc.months()).toBe(1);
+    // the expansion (a button, in-page) starts no document, so its step names none
+    expect(facts(doc).steps.map((x: { held?: string }) => x.held ?? null)).toEqual([
+      'unexpected-navigation',
+      'unexpected-navigation',
+      null,
+    ]);
   });
   it('passes a cap of 5 page timeouts and 3 spacings (540,000 ms) to the page budget', async () => {
     const t = setup(script());
@@ -1160,21 +1187,56 @@ describe('record --select-return: the return selected, the booking view recorded
     expect(vi.mocked(budget.pageBudget).mock.calls.map((c) => [c[1], c[3]])).toEqual([[90_000, 540_000]]);
     expect(selectReturnCapMs(90_000, 30_000)).toBe(540_000);
   });
-  it('with 3 pages left it is refused before anything loads', async () => {
+  // why: WP21 Task 21.3 (R-e2e, ruling A18): the end-to-end recording of the full served path before the flags flip
+  it('--force-second runs the full served path: the reload, the second outbound, its return, the booking view, the expansion', async () => {
+    const t = setup({
+      ...script(),
+      onLink: (name, _c, pg) => {
+        if (name === P451 || name === P478) return [returnTree(RETURNS)];
+        if (name !== RET_CHEAP) return null;
+        pg.setUrl(BOOKING_URL);
+        return [booking()];
+      },
+    });
+    vi.mocked(budget.pageBudget).mockClear();
+    expect(await record(t.ctx([...SELECT_RETURN, '--force-second']), cfg, t.deps)).toBe(0);
+    expect(t.err).toEqual([]);
+    const f = facts(t);
+    expect(f.forceSecond).toBe(true);
+    expect(f.steps.map((x: { step: string }) => x.step)).toEqual([
+      'first-selection',
+      'reload',
+      'second-selection',
+      'return-selection',
+      'more-options',
+    ]);
+    expect(f.picks.map((x: { name: string }) => x.name)).toEqual([P451, P478, RET_CHEAP]);
+    // why: the served path spaces only the reload; no activation waits (R-worst)
+    expect(f.steps.map((x: { waitMs?: number }) => x.waitMs)).toEqual([0, 22_000, 0, 0, 0]);
+    expect(t.contexts[0]?.pages[0]?.calls.gotos).toHaveLength(2);
+    expect(t.months()).toBe(2);
+    expect(vi.mocked(budget.pageBudget).mock.calls.map((c) => [c[1], c[3]])).toEqual([[90_000, 750_000]]);
+    expect(selectForceSecondCapMs(90_000, 30_000)).toBe(750_000);
+    // why: the research suites leave this recording out by its mark; the plain kind carries none
+    const plain = setup(script());
+    expect(await record(plain.ctx(SELECT_RETURN), cfg, plain.deps)).toBe(0);
+    expect('forceSecond' in facts(plain)).toBe(false);
+  });
+  it('with 1 page left it is refused before anything loads', async () => {
     const t = setup(script());
     writeFileSync(
       join(t.dataDir, 'monthly.json'),
       JSON.stringify({
         windowStart: '2026-10-01T00:00:00.000Z',
         windowEnd: '2026-11-01T00:00:00.000Z',
-        pages: 1497,
+        pages: 1499,
         scrolls: 0,
       }),
       { mode: 0o600 },
     );
     expect(await record(t.ctx(SELECT_RETURN), cfg, t.deps)).toBe(EX_CONFIG);
     expect(t.err.join()).toContain(
-      "the worker's monthly page cap leaves fewer than the 4 pages this recording may load",
+      "the worker's monthly page cap leaves fewer than the 2 pages this recording may load",
     );
     expect(t.contexts).toEqual([]);
   });

@@ -38,6 +38,10 @@ const guard = (o: Partial<GuardState> = {}): GuardState => ({
   frameUrls: [],
   refused: null,
   documentLoads: 0,
+  activationGate: false,
+  gateRefusals: 0,
+  reservation: null,
+  held: null,
   ...o,
 });
 function setup(trees = [resultsTree()]) {
@@ -912,15 +916,17 @@ describe('the return view’s facts (WP21 Task 21.0)', () => {
     const selected = n('listitem', '', [n('link', optionName(451))]);
     const { driver, d, timers } = setup([returnTree({ extra: [selected] })]);
     const r = await driver.readFacts(d, { timers, lookupMs: LOOKUP_TIMEOUT_MS }, 'returns');
-    // why: the hypothesis reads both price forms, so the one outbound link left on the page matches it too
-    expect(r.page.resultLinks).toBe(4);
+    // why: WP21 Task 21.3: the return pattern is the recorded "From" form only, the outbound's, so it reads the one
+    // "From"-form return link and the outbound link left on the page; the total form (never recorded) is no link
+    expect(r.page.resultLinks).toBe(2);
     expect(r.page.outboundLinks).toBe(2);
-    expect(r.names).toHaveLength(4);
-    expect(r.names[0]).toBe(returnOptionName({ pounds: 451 }));
+    expect(r.names).toEqual([returnOptionName({ pounds: 512, priceForm: 'from' }), optionName(451)]);
     const best = await driver.readFacts(d);
     expect(best.page.resultLinks).toBe(2);
     expect(best.page.outboundLinks).toBe(2);
-    expect(best.settle.linkSignature).not.toBe(r.settle.linkSignature);
+    // why: preflight P5: the two patterns are one form now, so the view before a selection and the polls after it hash
+    // the same names alike (a change is a change of names, never of pattern)
+    expect(best.settle.linkSignature).toBe(r.settle.linkSignature);
   });
   it('the return heading is true exactly when a heading matches the hypothesis', async () => {
     for (const [heading, want] of [
@@ -939,11 +945,7 @@ describe('the return view’s facts (WP21 Task 21.0)', () => {
   it('listFacts(d, "returns") reads the return view’s links; viewMore is true exactly when the button exists', async () => {
     const { driver, d, page } = setup([returnTree()]);
     const l = await driver.listFacts(d, 'returns');
-    expect(l.names).toEqual([
-      returnOptionName({ pounds: 451 }),
-      returnOptionName({ pounds: 470, carrier: 'QQ Air' }),
-      returnOptionName({ pounds: 512, priceForm: 'from' }),
-    ]);
+    expect(l.names).toEqual([returnOptionName({ pounds: 512, priceForm: 'from' })]);
     expect(l.viewMore).toBe(true);
     // why: the outbound pattern reads only the "From" form
     expect((await driver.listFacts(d)).names).toEqual([returnOptionName({ pounds: 512, priceForm: 'from' })]);
@@ -1292,6 +1294,60 @@ describe('the booking view’s reads (the booking research)', () => {
         'Continue to book with QQ Atlantic, Economy Light for 470 British pounds',
       ],
     ]);
+  });
+});
+
+// why: WP21 Task 21.3 (spec rev 56 §2): the booking read's own facts: the offer buttons' names, the expansion controls and
+// the grouped controls, each counted in main; and the price-range heading the classifier recognises the view by
+describe('bookingFacts and the booking view’s heading (WP21 Task 21.3)', () => {
+  const OFFER = 'Continue to book with QQ Travel for 1,180 British pounds';
+  const tree = (o: { main?: FakeNode[]; outside?: FakeNode[] } = {}) =>
+    n('document', '', [
+      ...(o.outside ?? []),
+      n(
+        'main',
+        '',
+        o.main ?? [
+          n('heading', '£1,180 lowest total price – £1,450 highest total price'),
+          n('button', OFFER),
+          n('button', 'Continue to book with QQ Fares, Economy Basic for 1,195 British pounds'),
+          n('button', 'View QQ Travel, QQ Fares 1,250 British pounds options'),
+          n('button', '17 more booking options'),
+        ],
+      ),
+    ]);
+  it('reads the offer buttons’ names in page order, the expansion controls and the grouped controls in main', async () => {
+    const { driver, d } = setup([
+      tree({
+        outside: [
+          n('button', 'Continue to book with QQ Air for 9 British pounds'),
+          n('button', '2 more booking options'),
+        ],
+      }),
+    ]);
+    expect(await driver.bookingFacts(d)).toEqual({
+      offerNames: [OFFER, 'Continue to book with QQ Fares, Economy Basic for 1,195 British pounds'],
+      moreOptions: 1,
+      grouped: 1,
+    });
+  });
+  it('an offer name over the length cap reads as null (counted unparsed upstream, never parsed)', async () => {
+    const long = `Continue to book with ${'Q'.repeat(SELECTORS.maxNameLength)} for 1 British pounds`;
+    const { driver, d } = setup([tree({ main: [n('button', long), n('button', OFFER)] })]);
+    expect((await driver.bookingFacts(d)).offerNames).toEqual([null, OFFER]);
+  });
+  it('readFacts on the booking view states the price-range heading; other views leave it unread', async () => {
+    const { driver, d, page } = setup([tree()]);
+    expect((await driver.readFacts(d, undefined, 'booking')).page.text.priceRangeHeading).toBe(true);
+    page.setTrees([tree({ main: [n('heading', 'Booking options'), n('button', OFFER)] })]);
+    expect((await driver.readFacts(d, undefined, 'booking')).page.text.priceRangeHeading).toBe(false);
+    expect((await driver.readFacts(d)).page.text.priceRangeHeading).toBeUndefined();
+  });
+  it('the probe page has no booking read and no activation', () => {
+    const { driver } = setup();
+    expect(Object.keys(probePage(driver)).sort()).toEqual(
+      ['formFacts', 'goto', 'headingNames', 'listFacts', 'readFacts', 'resultNames'].sort(),
+    );
   });
 });
 

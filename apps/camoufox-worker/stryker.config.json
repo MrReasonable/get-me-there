@@ -22,7 +22,10 @@
     "src/monthly.ts",
     "src/consentLine.ts",
     "src/socsMark.ts",
-    "src/sessionLine.ts"
+    "src/sessionLine.ts",
+    "src/returns.ts",
+    "src/offers.ts",
+    "src/returnPhase.ts"
   ],
   "thresholds": {
     "high": 90,

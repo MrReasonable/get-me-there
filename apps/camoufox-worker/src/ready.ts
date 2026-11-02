@@ -14,8 +14,7 @@ export type View = 'best' | 'cheapest' | 'returns' | 'booking';
  * shows none, and needs its tab selected instead. The links must also hold still across two polls (stableAcross).
  */
 export function isSettled(
-  page: Pick<PageFacts, 'resultLinks'> &
-    Partial<Pick<PageFacts, 'outboundLinks'>> & { text?: Pick<PageFacts['text'], 'noFlights'> },
+  page: Pick<PageFacts, 'resultLinks'> & Partial<Pick<PageFacts, 'outboundLinks'>>,
   settle: Pick<SettleFacts, 'resultsReturned' | 'fetching' | 'cheapestPriced' | 'cheapestSelected'>,
   view: View = 'best',
   /**
@@ -24,17 +23,16 @@ export function isSettled(
    */
   changed = false,
 ): boolean {
-  // why: R-settle: the return view needs only a change and something read by either pattern (or Google's own line);
-  // never the results line, the selected tab or the heading, which its classifier judges, not its settle
+  // why: R-settle: the return view needs only a change and a link read by either pattern; never the results line, the
+  // selected tab or the heading, which its classifier judges, not its settle
+  // why: WP21 Task 21.3 (the 21.0 note, the 21.1 ruling): the Cheapest view's status line that matches the no-flights
+  // pattern shows on three of four recorded return views, so the line never settles a view on its own: a changed view
+  // with no link settles only through its deadline (the return phase's not-settled)
   // why: Ian's ruling of 2026-11-01, tightened from select-return/2026-11-01/1 and 2: the booking view has changed from
   // the return view, nothing is fetching, and at least one offer (by the offer pattern) shows; then it holds still
   if (view === 'booking') return changed && !settle.fetching && page.resultLinks > 0;
   if (view === 'returns')
-    return (
-      changed &&
-      !settle.fetching &&
-      (page.resultLinks > 0 || (page.outboundLinks ?? 0) > 0 || page.text?.noFlights === true)
-    );
+    return changed && !settle.fetching && (page.resultLinks > 0 || (page.outboundLinks ?? 0) > 0);
   const common = !settle.fetching && settle.cheapestPriced && page.resultLinks > 0;
   return common && (view === 'best' ? settle.resultsReturned : settle.cheapestSelected);
 }

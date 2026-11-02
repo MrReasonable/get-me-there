@@ -54,15 +54,24 @@ export interface RecordArgs {
   pages: number;
   /** The scrolls a `--grid` page makes, in order; empty for every other kind. */
   moves: GridDirection[];
+  /**
+   * WP21 Task 21.3 (R-e2e): `--select-return --force-second` records the full served path once: the first outbound's
+   * returns treated as not fitting, the reload, the second outbound, its return, the booking view and the expansion.
+   */
+  forceSecond: boolean;
 }
 
 /** Parses the recorder's flags; throws RecordingRefused naming what is wrong. */
 export function parseRecordArgs(args: readonly string[]): RecordArgs {
   const flags = new Set<string>();
   const values = new Map<string, string>();
+  let forceSecond = false;
   for (let i = 0; i < args.length; i++) {
     const a = args[i] ?? '';
-    if (['--origin', '--destination', '--depart', '--return', '--pages', '--moves'].includes(a)) {
+    if (a === '--force-second') {
+      // why: an option of --select-return, never a mode flag of its own
+      forceSecond = true;
+    } else if (['--origin', '--destination', '--depart', '--return', '--pages', '--moves'].includes(a)) {
       const v = args[i + 1];
       if (v === undefined) throw new RecordingRefused(`${a} needs a value`);
       values.set(a, v);
@@ -89,6 +98,8 @@ export function parseRecordArgs(args: readonly string[]): RecordArgs {
     throw new RecordingRefused(
       'pass at most one of --cheapest, --view-more, --stability, --consent-probe, --consent-research, --no-flights, --graph-explore, --grid, --landing, --select-outbound, --select-return',
     );
+  if (forceSecond && !flags.has('--select-return'))
+    throw new RecordingRefused('--force-second needs --select-return');
   const movesRaw = values.get('--moves');
   if (movesRaw !== undefined && !flags.has('--grid')) throw new RecordingRefused('--moves needs --grid');
   const moveNames = movesRaw === undefined ? [...DEFAULT_GRID_MOVES] : movesRaw.split(',');
@@ -125,7 +136,7 @@ export function parseRecordArgs(args: readonly string[]): RecordArgs {
   if ((kind === 'select-outbound' || kind === 'select-return') && pages > SELECT_MAX_PAGES)
     throw new RecordingRefused(`--pages must be 1 to ${SELECT_MAX_PAGES} for --${kind}`);
   if (kind === 'consent-probe' || kind === 'consent-research' || kind === 'landing')
-    return { kind, request: null, pages: 1, moves: [] };
+    return { kind, request: null, pages: 1, moves: [], forceSecond: false };
   const origin = iataSchema.safeParse(values.get('--origin') ?? '');
   const destination = iataSchema.safeParse(values.get('--destination') ?? '');
   const departureDate = isoDateSchema.safeParse(values.get('--depart') ?? '');
@@ -144,5 +155,6 @@ export function parseRecordArgs(args: readonly string[]): RecordArgs {
     },
     pages,
     moves: kind === 'grid' ? moves : [],
+    forceSecond,
   };
 }

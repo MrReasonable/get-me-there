@@ -12,6 +12,13 @@ import { SELECTORS, type Selectors } from './selectors.js';
  */
 export type RouteDecision = { action: 'continue' } | { action: 'abort'; kind: BlockedPage };
 
+/**
+ * WP21 Task 21.3 (spec rev 56 §2, R-worst, cost-r3-002): a main-frame navigation the guard held back for the worker's
+ * own reason, beside the BlockedPage kinds: one while an activation settled (`unexpected-navigation`), or one past the
+ * request's page reservation (`page-reservation`). Never a cool-down: nothing loaded, and the step ends transient.
+ */
+export type HeldRefusal = 'unexpected-navigation' | 'page-reservation';
+
 /** What the guard saw on one page: main-frame hops and sub-frame navigation URLs, plus the first refused main-frame navigation. */
 export interface GuardState {
   hops: string[];
@@ -23,6 +30,23 @@ export interface GuardState {
    * API change: a hop and no request) is told apart from a new document; reset with the hops for each page.
    */
   documentLoads: number;
+  /**
+   * WP21 Task 21.3 (R-worst): set by the return phase (and the recorder's selections) from an activation's press until
+   * its view settles: while on, every main-frame document navigation is aborted, allowlisted or not, and counts no load,
+   * so an activation never loads a document. An off-allowlist one keeps its kind in `refused` (a seller's host is
+   * `off-allowlist`; the consent and sign-in hosts their stop); an allowlisted one is held as `unexpected-navigation`.
+   */
+  activationGate: boolean;
+  /** Main-frame navigations aborted while the gate was on (any reason), on this page. */
+  gateRefusals: number;
+  /**
+   * WP21 Task 21.3 (cost-r3-002; D8: return-phase requests only, null on every other page): the documents this request
+   * reserved in the month. Once `documentLoads` reaches it, every further main-frame navigation is aborted and held as
+   * `page-reservation`, so the month's settle never needs to clamp.
+   */
+  reservation: number | null;
+  /** The first navigation held back for one of the worker's own reasons (`HeldRefusal`), or null. */
+  held: HeldRefusal | null;
 }
 
 export function urlOf(s: string): URL | null {
@@ -136,7 +160,16 @@ export function installWith(
 ): Promise<GuardState> {
   let entry = installed.get(context);
   if (entry === undefined) {
-    const state: GuardState = { hops: [], frameUrls: [], refused: null, documentLoads: 0 };
+    const state: GuardState = {
+      hops: [],
+      frameUrls: [],
+      refused: null,
+      documentLoads: 0,
+      activationGate: false,
+      gateRefusals: 0,
+      reservation: null,
+      held: null,
+    };
     context.on('request', (r: RequestLike) => {
       if (!r.isNavigationRequest()) return;
       const chain: string[] = [];
@@ -146,6 +179,13 @@ export function installWith(
       if (frame !== null && !isMainFrame(frame)) state.frameUrls.push(...chain);
       else for (const u of chain) if (!state.hops.includes(u)) state.hops.push(u);
     });
+    /** Why the next main-frame document would be held back: past the reservation, or under the gate; null to admit it. */
+    const heldFor = (): HeldRefusal | null =>
+      state.reservation !== null && state.documentLoads >= state.reservation
+        ? 'page-reservation'
+        : state.activationGate
+          ? 'unexpected-navigation'
+          : null;
     const ready = context.route('**/*', async (route: RouteLike) => {
       const req = route.request();
       // why: a frameless request counts as the main frame's, failing closed (ruling of 2026-10-18)
@@ -155,22 +195,36 @@ export function installWith(
       // allowlist (a seller's booking link through the results host, say) is let through and counted here. The request
       // listener above records the whole chain as hops, and the classifier reads such a hop as off-allowlist on the
       // next poll, so the page stops then (guard.test.ts pins the post-hoc catch)
+      /** Aborts the request, logging the host at warn and the path without its query at debug (never the URL). */
+      const refuse = (kind: BlockedPage | HeldRefusal): Promise<void> => {
+        const u = urlOf(req.url());
+        log.warn({ kind, host: u?.hostname ?? 'unparsable' }, 'navigation refused');
+        log.debug({ kind, path: u?.pathname ?? 'unparsable' }, 'navigation refused (path)');
+        return route.abort('blockedbyclient');
+      };
       const navigation = req.isNavigationRequest();
       const d = decide(req.url(), navigation, req.method(), main);
+      const document = navigation && main;
+      // why: WP21 Task 21.3 (R-worst): under the gate every main-frame document is aborted, whatever its reason
+      if (document && state.activationGate) state.gateRefusals += 1;
       if (d.action === 'continue') {
+        // why: the reservation first (the stricter bound), then the gate: an allowlisted document the route would let
+        // through is held back for the worker's own reason, counts no load and names itself (never a cool-down)
+        const held = document ? heldFor() : null;
+        if (held !== null) {
+          state.held ??= held;
+          return refuse(held);
+        }
         // why: WP21 Task 21.0: a main-frame document the route lets through is one document load (a redirect's later
         // hops never reach the route, so a redirected load counts once); a refused one never loaded and counts nothing
-        if (navigation && main) state.documentLoads += 1;
+        if (document) state.documentLoads += 1;
         return route.fallback();
       }
       // why: the first main-frame refusal names the page kind the session answers with (a refused sub-frame is aborted
       // but never names the page, fix round 1 prov-int M6); the host at warn, never the URL (spec §14), and the path
       // without its query at debug only, so a refusal is diagnosable without a code change
       if (main) state.refused ??= d.kind;
-      const u = urlOf(req.url());
-      log.warn({ kind: d.kind, host: u?.hostname ?? 'unparsable' }, 'navigation refused');
-      log.debug({ kind: d.kind, path: u?.pathname ?? 'unparsable' }, 'navigation refused (path)');
-      return route.abort('blockedbyclient');
+      return refuse(d.kind);
     });
     entry = { state, ready };
     installed.set(context, entry);
@@ -180,6 +234,10 @@ export function installWith(
   state.frameUrls = [];
   state.refused = null;
   state.documentLoads = 0;
+  state.activationGate = false;
+  state.gateRefusals = 0;
+  state.reservation = null;
+  state.held = null;
   page.on('framenavigated', (frame: FrameLike) => {
     if (!isMainFrame(frame)) state.frameUrls.push(frame.url());
     else if (!state.hops.includes(frame.url())) state.hops.push(frame.url());

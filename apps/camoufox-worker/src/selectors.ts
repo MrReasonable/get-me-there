@@ -18,7 +18,10 @@ import { CAMOUFOX_BUILDS, FLAG_NAMES, type FlagName, flagsFor, type OsArch } fro
 
 export { FLAG_NAMES, type FlagName };
 
-export const SELECTORS_VERSION = '2026-10-27-tab-price';
+// why: re-dated 2026-11-01 (WP21 Task 21.3): the return view and the booking view as select-outbound/2026-11-01/3–4 and
+// select-return/2026-11-01/1–4 recorded them (the return link the "From" form only; the booking view's price-range heading
+// and grouped control)
+export const SELECTORS_VERSION = '2026-11-01-returns';
 
 /**
  * The module's default flags: the operator's Mac (darwin-arm64) on its pinned build, the 2026-10-18 recordings' values
@@ -112,17 +115,19 @@ export interface Selectors {
     noFlights: RegExp;
   };
   /**
-   * WP21 Task 21.0 (spec §2 rev 55, the return leg): the view after an outbound's "Select flight", a hypothesis until
-   * a recording of the served sequence shows it (Task 21.3 dates it and sets RETURN_SELECT_VERIFIED on that entry).
-   * `heading` names the return list's heading; `resultLink` a return option's link by its own name.
+   * Spec rev 56 §2 "The return view" (WP21 Task 21.0, dated in Task 21.3 from select-outbound/2026-11-01/3 and 4): the
+   * view after an outbound's "Select flight". `heading` names the return list's heading; `resultLink` a return option's
+   * link by its own name (the outbound's "From" form: 38 of 38 recorded return names).
    */
   returns: { heading: RegExp; resultLink: RegExp };
   /**
-   * Ian's ruling of 2026-11-01 (read the booking options): the booking view after a return's selection. `offer` names
-   * one seller's offer, a button in `main` (never activated: it leads to the seller). Observed in select-return/2026-11-01/1
-   * and 2; a hypothesis for the build until BOOKING_SELECT_VERIFIED is set on an entry.
+   * Spec rev 56 §2 "The booking read" (Ian's rulings of 2026-11-01; dated in Task 21.3 from select-return/2026-11-01/1–4):
+   * the booking view after a return's selection. `offer` names one seller's offer, a button in `main` (never activated:
+   * it leads to the seller); `moreOptions` the one in-page expansion; `path` the view's in-app path;
+   * `priceRangeHeading` the heading stating the view's price range (one on every booking recording); `grouped` the
+   * grouped "View <seller>, …" control (counted, never activated, its fares never read).
    */
-  booking: { offer: RegExp; moreOptions: RegExp; path: string };
+  booking: { offer: RegExp; moreOptions: RegExp; path: string; priceRangeHeading: RegExp; grouped: RegExp };
   /**
    * The search form (decision 69: round trip, one adult, the query's dates). The brief's hypothesis from round 1,
    * replaced by Task 14.2's recording; FORM_VERIFIED is false until then, and the server refuses to start.
@@ -219,12 +224,12 @@ export const SELECTORS: Selectors = {
     },
     noFlights: /^No (?:results|flights) (?:returned|found)/,
   },
-  // why: a hypothesis until select-outbound/<date> records the view (Task 21.3 dates it). The heading as the outbound
-  // list's ("Top departing flights") would read on the return list; the link in both price forms, the total alone or
-  // the outbound list's "From" form, so the research sees whichever the page uses
+  // why: observed 2026-11-01 (select-outbound/2026-11-01/3 and 4): the heading in its plain, Top and Other forms; every
+  // return name opens with the outbound's "From" price clause (38 of 38), so the link is that form only (the total
+  // alone, the 21.0 hypothesis's other form, was never recorded)
   returns: {
     heading: /^(?:Top |Other )?[Rr]eturning flights$/,
-    resultLink: /^[\d,]+ [A-Za-z ]+ round trip total\. |^From [\d,]+ [A-Za-z ]+ round trip total\. /,
+    resultLink: /^From [\d,]+ [A-Za-z ]+ round trip total\. /,
   },
   // why: observed 2026-11-01 (select-return/2026-11-01/1 and 2): every offer a button "Continue to book with <seller>[,
   // <fare>] for <price> <currency>", the price stated, never "From"
@@ -235,6 +240,12 @@ export const SELECTORS: Selectors = {
     moreOptions: /^\d+ more booking options?$/,
     // why: observed 2026-11-01 (select-return 1–4): the booking view is an in-app change to this path
     path: '/travel/flights/booking',
+    // why: observed 2026-11-01 (select-return 1–4): one heading a booking view, "£<price> <words> – £<price> <words>",
+    // its first price the selected return's "From" price
+    priceRangeHeading: /^£[\d,]+ [^£–]+ – £[\d,]+ [^£–]+$/,
+    // why: observed 2026-11-01 (select-return 1 and 3): "View <seller>, <seller> <price> <currency> <word>", a button
+    // that probably opens that seller's fares; it begins "View", so it can never name an offer or the expansion
+    grouped: /^View [^,]+, .+ [\d,]+ [A-Za-z ]+$/,
   },
   form: {
     tripType: /^Change ticket type\./,
@@ -276,8 +287,9 @@ export const PROOFS: Readonly<Record<OsArch, Partial<Record<FlagName, string>>>>
       '2026-10-18 cheapest/2026-10-18/1 (21 links after the tab click; their minimum equals the tab price, SOCS same)',
     NO_FLIGHTS_VERIFIED:
       '2026-10-18 no-flights/2026-10-18/1 (a date beyond the sale window: the line visible with 0 links, form as asked)',
+    // why: WP21 Task 21.3 (flagsProofs): named by its recording key, as every other proof is
     SOCS_STABLE:
-      '2026-10-18 socs-stability recording, passes 1–3 all read back same (operator ruling of 2026-10-18)',
+      '2026-10-18 socs-stability/2026-10-18/1 (passes 1–3 all read back same; operator ruling of 2026-10-18)',
     LANDING_VERIFIED:
       '2026-10-25 consent-research/2026-10-25/1 (both sessions’ views after the choice: /travel/flights?hl=en-GB&gl=GB with no query, the heading "Flights", no tab, Date grid button or result link)',
     GRID_VERIFIED:

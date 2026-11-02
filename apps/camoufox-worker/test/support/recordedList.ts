@@ -35,6 +35,12 @@ const datasetSchema = z.object({
 /** The one query form the worker loads (`src/url.ts`): codes and both dates, read back from the recorded URL. */
 const QUERY = /^Flights from ([A-Z]{3}) to ([A-Z]{3}) on (\d{4}-\d{2}-\d{2}) returning (\d{4}-\d{2}-\d{2})$/;
 
+/**
+ * WP21 Task 21.3 (test-r3-003): with RECORDINGS_REQUIRED=1 a recorded suite whose recordings are absent fails instead
+ * of skipping (the controller's run before the select flags flip); otherwise it skips, naming itself skipped.
+ */
+export const RECORDINGS_REQUIRED = process.env.RECORDINGS_REQUIRED === '1';
+
 /** The airports dataset's name for each code, as `airportNamesOf` gives the engine (one name a code). */
 function datasetNames(): Map<string, string> {
   const files = readdirSync(DATA_DIR).filter((f) => /^airports\..+\.json$/.test(f));
@@ -101,4 +107,20 @@ export function pinOf(contentSha256: string, value: unknown): string {
     .update(`${contentSha256}:${JSON.stringify(value)}`)
     .digest('hex')
     .slice(0, 16);
+}
+
+/**
+ * WP21 Task 21.3: a recording's request airport names from the dataset (one name a code), as the engine sends them;
+ * nothing of a recording is written into a test.
+ */
+export function airportNamesOf(
+  origin: string,
+  destination: string,
+): { origin: string[]; destination: string[] } {
+  const names = datasetNames();
+  const own = (code: string): string[] => {
+    const n = names.get(code);
+    return n === undefined ? [] : [n];
+  };
+  return { origin: own(origin), destination: own(destination) };
 }

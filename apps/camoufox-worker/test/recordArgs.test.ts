@@ -21,6 +21,7 @@ describe('parseRecordArgs --select-outbound (WP21 Task 21.0)', () => {
       },
       pages: 1,
       moves: [],
+      forceSecond: false,
     });
   });
   it('accepts --pages 2 and refuses 3, though the other kinds keep their bound of 3', () => {
@@ -73,5 +74,27 @@ describe('parseRecordArgs --select-return', () => {
     expect(() => parseRecordArgs(['--select-return', ...Q.slice(2)])).toThrow(
       '--origin and --destination must be IATA codes',
     );
+  });
+});
+
+// why: WP21 Task 21.3 (R-e2e): the end-to-end recording of the full served path before the flags flip: the first
+// outbound's returns treated as not fitting, the reload, the second outbound, its return, the booking view, the expansion
+describe('parseRecordArgs --force-second (WP21 Task 21.3)', () => {
+  it('is an option of --select-return only', () => {
+    expect(parseRecordArgs(['--select-return', '--force-second', ...Q])).toMatchObject({
+      kind: 'select-return',
+      forceSecond: true,
+    });
+    expect(parseRecordArgs(['--select-return', ...Q]).forceSecond).toBe(false);
+    for (const other of [[], ['--select-outbound'], ['--cheapest']])
+      expect(() => parseRecordArgs([...other, '--force-second', ...Q]), other.join(' ')).toThrow(
+        '--force-second needs --select-return',
+      );
+  });
+  it('is no mode flag: it never counts as a second one', () => {
+    expect(() => parseRecordArgs(['--select-return', '--force-second', '--cheapest', ...Q])).toThrow(
+      /at most one/,
+    );
+    expect(parseRecordArgs(['--force-second', '--select-return', ...Q]).kind).toBe('select-return');
   });
 });

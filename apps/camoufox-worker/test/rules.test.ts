@@ -11,10 +11,11 @@ import { buildLaunchOptions } from '../src/launch.js';
 import { MonthlyCounter } from '../src/monthly.js';
 import { Pacer } from '../src/pacer.js';
 import { Refusal } from '../src/refusal.js';
+import { SELECTORS } from '../src/selectors.js';
 import { PageSession } from '../src/session.js';
 import { loadSocs, socsCookie } from '../src/socs.js';
 import { FakeContext } from './support/fakeContext.js';
-import { n, resultsTree } from './support/fakePage.js';
+import { descendants, type FakeNode, type FakePage, n, resultsTree } from './support/fakePage.js';
 import { memoryLog } from './support/log.js';
 import { SYNTHETIC_REJECT } from './support/socsValues.js';
 import { fakeTimers } from './support/timers.js';
@@ -218,6 +219,164 @@ describe('worker rules: a full page session sets only SOCS and clicks nothing on
   });
 });
 
+// why: WP21 Task 21.3: with the select flags as the flip sets them, a flights page with returnLimits clicks the Cheapest tab
+// and otherwise only focuses and presses Enter: one result link, the one return link and the one expansion control,
+// never an offer, a grouped control or a pointer click on any link; with the module's own flags it activates nothing
+describe('worker rules: a flights page with returnLimits activates only the verified names', () => {
+  const name = (pounds: number, o: { stops?: string; ret?: boolean } = {}) =>
+    o.ret === true
+      ? `From ${pounds} British pounds round trip total. ${o.stops ?? '1 stop'} flight with QQ Air. Leaves John F. Kennedy International Airport at 18:30 on Sunday, November 15 and arrives at Heathrow Airport at 9:45 on Monday, November 16. Total duration 10 hrs 15 min. Select flight`
+      : `From ${pounds} British pounds round trip total. ${o.stops ?? '1 stop'} flight with QQ Air. Leaves Heathrow Airport at 9:05 on Thursday, November 5 and arrives at John F. Kennedy International Airport at 19:05 on Thursday, November 5. Total duration 10 hrs. Select flight`;
+  const OFFER = 'Continue to book with QQ Travel for 1,180 British pounds';
+  const GROUPED = 'View QQ Travel, QQ Fares 1,250 British pounds options';
+  const run = async (flags: { RETURN_SELECT_VERIFIED: boolean; BOOKING_SELECT_VERIFIED: boolean } | null) => {
+    const dir = tmpDir();
+    writeFileSync(
+      join(dir, 'socs.json'),
+      JSON.stringify({
+        value: SYNTHETIC_REJECT,
+        domain: '.google.com',
+        path: '/',
+        expires: 1_800_000_000,
+        secure: true,
+        sameSite: 'Lax',
+        capturedAt: '2026-10-18T04:00:00.000Z',
+      }),
+      { mode: 0o600 },
+    );
+    const timers = fakeTimers();
+    const pages: FakePage[] = [];
+    const cheapest = () => {
+      const t = resultsTree({ top: [n('listitem', '', [n('link', name(478))])], other: [] });
+      for (const c of descendants([t]))
+        if (c.role === 'tab' && c.name?.startsWith('Cheapest')) c.selected = true;
+      t.children = (t.children ?? []).filter((c) => !/results returned/.test(c.name ?? ''));
+      return t;
+    };
+    const session = new PageSession({
+      launch: async () => {
+        const c = new FakeContext();
+        c.navigations = [
+          {
+            hops: ['https://www.google.com/travel/flights?q=x'],
+            tree: resultsTree({ top: [n('listitem', '', [n('link', name(478))])], other: [] }),
+          },
+        ];
+        c.onNewPage = (p) => {
+          pages.push(p);
+          p.onClick = (x) => {
+            const keep = (t: FakeNode) => p.setTrees([t, t, t]);
+            if (x.role === 'tab') p.setTrees([cheapest()]);
+            else if (x.name === name(478)) {
+              p.setUrl('https://www.google.com/travel/flights/search?tfs=r');
+              p.setTrees([
+                cheapest(),
+                n('document', '', [
+                  n('main', '', [
+                    n('heading', 'Returning flights'),
+                    n('list', '', [n('listitem', '', [n('link', name(1180, { ret: true }))])]),
+                  ]),
+                  n('button', 'Currency GBP'),
+                ]),
+              ]);
+            } else if (x.name === name(1180, { ret: true })) {
+              p.setUrl('https://www.google.com/travel/flights/booking?tfs=b');
+              keep(
+                n('document', '', [
+                  n('main', '', [
+                    n('heading', '£1,180 lowest total price – £1,450 highest total price'),
+                    n('button', OFFER),
+                    n('button', GROUPED),
+                    n('button', '2 more booking options'),
+                  ]),
+                ]),
+              );
+            } else if (x.name === '2 more booking options')
+              keep(
+                n('document', '', [
+                  n('main', '', [
+                    n('heading', '£1,180 lowest total price – £1,450 highest total price'),
+                    n('button', OFFER),
+                    n('button', 'Continue to book with QQ Fares for 1,190 British pounds'),
+                    n('button', GROUPED),
+                  ]),
+                ]),
+              );
+          };
+        };
+        return c;
+      },
+      profileDir: join(dir, 'profile'),
+      socs: loadSocs(dir, timers.clock),
+      cooldown: new CooldownStore({ dir, challengeHours: 48, clock: timers.clock }),
+      pacer: new Pacer({ dir, minSpacingSeconds: 30, clock: timers.clock }),
+      monthly: new MonthlyCounter({
+        dir,
+        caps: { pages: 1500, scrolls: 6000, billingDay: 1 },
+        clock: timers.clock,
+      }),
+      refusal: new Refusal({ dir, clock: timers.clock }),
+      clock: timers.clock,
+      timers,
+      ...(flags === null ? {} : { selectors: { ...SELECTORS, ...flags } }),
+      pageTimeoutMs: 90_000,
+      log: memoryLog(),
+      versions: { selectors: 's', grammar: 'g', camoufoxJs: '0.11.5', binary: 'b' },
+    });
+    const a = await session.page({
+      mode: 'flights',
+      origin: asIata('LHR'),
+      destination: asIata('JFK'),
+      departureDate: asIsoDate('2026-11-05'),
+      returnDate: asIsoDate('2026-11-15'),
+      gl: 'GB',
+      airportNames: {
+        origin: ['London Heathrow Airport'],
+        destination: ['John F Kennedy International Airport'],
+      },
+      returnLimits: {
+        maxJourneyMinutes: null,
+        maxStops: null,
+        departureWindowLocal: null,
+        arrivalWindowLocal: null,
+      },
+      booking: true,
+    });
+    return { a, page: pages[0] };
+  };
+  it('the flags as the flip sets them: the tab clicked, one result link, one return link, one expansion control, all by keyboard', async () => {
+    const { a, page } = await run({ RETURN_SELECT_VERIFIED: true, BOOKING_SELECT_VERIFIED: true });
+    expect(a.answer).toMatchObject({
+      kind: 'flights',
+      returns: { status: 'read', booking: { status: 'read' } },
+    });
+    for (const click of page?.calls.clicks ?? []) expect(click).toMatch(/^tab:Cheapest/);
+    expect(page?.calls.focuses).toEqual([
+      `link:${name(478)}`,
+      `link:${name(1180, { ret: true })}`,
+      'button:2 more booking options',
+    ]);
+    expect(page?.calls.presses).toEqual([
+      `Enter:link:${name(478)}`,
+      `Enter:link:${name(1180, { ret: true })}`,
+      'Enter:button:2 more booking options',
+    ]);
+    // why: never an offer, a grouped control or any pointer click of a link
+    const touched = [
+      ...(page?.calls.clicks ?? []),
+      ...(page?.calls.focuses ?? []),
+      ...(page?.calls.presses ?? []),
+    ];
+    expect(touched.some((x) => x.includes('Continue to book') || x.includes('View QQ'))).toBe(false);
+    expect((page?.calls.clicks ?? []).some((x) => x.startsWith('link:'))).toBe(false);
+  });
+  it('with the module’s own flags (both false until the flip) nothing is activated', async () => {
+    const { a, page } = await run(null);
+    expect(a.answer).toMatchObject({ kind: 'flights', returns: { status: 'not-verified' } });
+    expect([page?.calls.focuses, page?.calls.presses]).toEqual([[], []]);
+  });
+});
+
 describe('worker rules: source facts through the compiler API', () => {
   it('no Math.random and no crypto.random* anywhere in src/', () => {
     const hits: string[] = [];
@@ -314,12 +473,25 @@ describe('worker rules: source facts through the compiler API', () => {
   });
   // why: WP21 Task 21.0: the outbound selection's research is the recorder's alone; the server never loads it, and the
   // one new click (clickOutbound) is reached from the recorder's flow only until Task 21.3's return phase
-  it('the select-outbound recorder is reached only from record.ts, and clickOutbound only from it', () => {
+  // why: WP21 Task 21.3: the activations are reached from the recorder's flow and the return phase only, and the phase
+  // (with its two readers) only from the page session
+  it('the select-outbound recorder is reached only from record.ts; the activations only from it and the return phase', () => {
     expect(moduleImporters('./recordSelect.js')).toEqual(['record.ts']);
-    expect(referencesTo('clickOutbound')).toEqual(['driver.ts', 'recordSelect.ts']);
-    // why: Ian's ruling of 2026-11-01: the return's selection (the booking research) is the recorder's alone too
-    expect(referencesTo('clickReturn')).toEqual(['driver.ts', 'recordSelect.ts']);
-    expect(referencesTo('clickMoreOptions')).toEqual(['driver.ts', 'recordSelect.ts']);
+    expect(referencesTo('clickOutbound')).toEqual(['driver.ts', 'recordSelect.ts', 'returnPhase.ts']);
+    expect(referencesTo('clickReturn')).toEqual(['driver.ts', 'recordSelect.ts', 'returnPhase.ts']);
+    expect(referencesTo('clickMoreOptions')).toEqual(['driver.ts', 'recordSelect.ts', 'returnPhase.ts']);
+    expect(moduleImporters('./returnPhase.js')).toEqual(['session.ts']);
+    expect(moduleImporters('./returns.js')).toEqual(['returnPhase.ts']);
+    expect(moduleImporters('./offers.js')).toEqual(['returnPhase.ts']);
+    // why: the session's Cheapest catch is driver.ts's one classify-after-failed-step (through served.ts)
+    expect(importersOf(['classifyAfterFailedStep'])).toEqual([
+      'record.ts',
+      'recordSelect.ts',
+      'returnPhase.ts',
+      'served.ts',
+    ]);
+    // why: session.ts no longer classifies a failed Cheapest step itself (its inline copy is gone)
+    expect(referencesTo('classifyPageWithRule')).not.toContain('session.ts');
     // why: the research reads (every link, button and tab name) are the recorder's alone, in their own module
     expect(moduleImporters('./researchNames.js')).toEqual(['recordSelect.ts']);
     // why: after recording 1: the target's probe (its page function included) is the recorder's alone too
@@ -328,7 +500,7 @@ describe('worker rules: source facts through the compiler API', () => {
   // why: WP21 Task 21.3 (preflight rows T21.3 and A16): the served sequence is one module, run alike by the page
   // session and the recorder; the one pence helper is a leaf shared by every price grammar
   it('the served sequence and the pence helper are leaves with their pinned importers', () => {
-    expect(moduleImporters('./served.js')).toEqual(['recordSelect.ts', 'session.ts']);
+    expect(moduleImporters('./served.js')).toEqual(['recordSelect.ts', 'returnPhase.ts', 'session.ts']);
     expect(moduleImporters('./pence.js')).toEqual([
       'classify.ts',
       'names.ts',

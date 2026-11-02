@@ -1,4 +1,5 @@
 import { BOOKING_OFFERS_MAX, type BookingOffer, offerSchema } from '@gmt/core';
+import type { BookingFacts } from './driver.js';
 import { cleanName } from './flights.js';
 import { currencyOf, minorOf } from './pence.js';
 
@@ -51,16 +52,6 @@ export function parseOfferName(name: string): ParsedOffer | null {
   // why: the contract's shape decides the seller's and fare's text (FLIGHT_TEXT, trimmed and collapsed), once
   if (!offerSchema.safeParse({ seller, fare, priceMinor: amountMinor }).success) return null;
   return { seller, fare, amountMinor, currency };
-}
-
-/** What the driver reads of a booking view (driver.ts `bookingFacts`): the offer buttons' names and two control counts. */
-export interface BookingFacts {
-  /** Each offer button's name in page order (`S.booking.offer` in main); null when unreadable or over the length cap. */
-  offerNames: Array<string | null>;
-  /** The "<count> more booking options" controls in main (`S.booking.moreOptions`; pressed only when exactly one). */
-  moreOptions: number;
-  /** The grouped "View <seller>, …" controls (`S.booking.grouped`): counted, never activated, their fares never read. */
-  grouped: number;
 }
 
 /** The offers one booking view showed, as the booking read keeps them (core's `bookingReadSchema` fields, and `allGbp`). */
