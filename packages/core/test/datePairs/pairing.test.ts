@@ -101,6 +101,29 @@ describe('the shared fixture (src/testing/pairing.ts, `@gmt/core/testing`)', () 
     expect(PAIRING_LIMITS.maxStops).toBe(1);
   });
 
+  it('is deep-frozen, so no test can change what another reads', () => {
+    const r = PAIRING_FIXTURE.returns;
+    for (const v of [
+      PAIRING_FIXTURE,
+      PAIRING_FIXTURE.flights,
+      PAIRING_FIXTURE.flights[3],
+      PAIRING_FIXTURE.flights[3]?.carriers,
+      r,
+      r.limits,
+      r.attempts,
+      r.attempts[1]?.returns,
+      r.attempts[1]?.returns[0],
+      r.booking,
+      r.booking?.offers[0],
+      PAIRING_LIMITS,
+      PAIRING_CHEAPEST,
+      PAIRING_OFFER,
+      PAIRING_OFFER.offer,
+      PAIRING_BOOKING_RETURN,
+    ])
+      expect(Object.isFrozen(v)).toBe(true);
+  });
+
   it('under maxStops 1: cheapestPairing, cheapestOffer and bookingReturnOf are the pinned literals', () => {
     const { flights, returns } = PAIRING_FIXTURE;
     expect(cheapestPairing(returns, flights, PAIRING_LIMITS)).toEqual({
@@ -183,9 +206,36 @@ describe('cheapestPairing (spec rev 56 §6.9: the cheapest fitting pairing over 
     expect(cheapestPairing(r, [out(500)], limits)).toMatchObject({ returnIndex: 1, returnFits: true });
   });
 
+  it('an outbound outside the departure window: outboundFits false (the windows apply to the outbound)', () => {
+    const limits = { ...NO_LIMITS, departureWindowLocal: { from: '08:00', to: '20:00' } };
+    const r = readOf(limits, [attempt(0, [back(1180, { departsLocal: '06:10' })], false)]);
+    const flights = [out(500, { departsLocal: '06:10' })];
+    expect(cheapestPairing(r, flights, limits)).toEqual({
+      attempt: 0,
+      returnIndex: 0,
+      fromMinor: 118_000,
+      outboundFits: false,
+      returnFits: true,
+    });
+    expect(bookingReturnOf(r, flights)).toEqual({ attempt: 0, returnIndex: 0 });
+    expect(cheapestPairing(r, [out(500)], limits)).toMatchObject({ outboundFits: true });
+  });
+
+  it('a tie across attempts goes to attempt 0; a three-way tie to the lowest index', () => {
+    const limits = { ...NO_LIMITS, maxStops: 0 };
+    const over = back(1180, { stops: 1 });
+    const r = readOf(limits, [attempt(0, [over]), attempt(1, [over])]);
+    expect(cheapestPairing(r, [out(500), out(520)], limits)).toMatchObject({ attempt: 0, returnIndex: 0 });
+    const three = readOf(NO_LIMITS, [attempt(0, [back(1250), back(1180), back(1180), back(1180)])]);
+    expect(cheapestPairing(three, [out(500)], NO_LIMITS)).toMatchObject({ returnIndex: 1 });
+    expect(bookingReturnOf(three, [out(500)])).toEqual({ attempt: 0, returnIndex: 1 });
+  });
+
   it('an outbound index past the flights is a caller error (the contract refuses it)', () => {
     const r = readOf(NO_LIMITS, [attempt(1, [back(1180)])]);
-    expect(() => cheapestPairing(r, [out(500)], NO_LIMITS)).toThrow(RangeError);
+    expect(() => cheapestPairing(r, [out(500)], NO_LIMITS)).toThrow(
+      new RangeError('no outbound 1 in 1 flights'),
+    );
   });
 });
 
@@ -318,8 +368,18 @@ describe('pairingLeads and pairingReadOf (spec rev 56 §6.9 "When it leads"; R-l
     expect(pairingReadOf(candidate({ complete: false }))).toBe('offers-incomplete');
     expect(pairingReadOf(candidate({}))).toBe('within');
   });
-  it('PAIRING_READ has its nine values; FIGURE_BASES its three', () => {
-    expect(PAIRING_READ).toHaveLength(9);
+  it('PAIRING_READ is pinned: its order is the wire code (ruling R-sparse); FIGURE_BASES its three', () => {
+    expect(PAIRING_READ).toEqual([
+      'not-read',
+      'outbound-only',
+      'no-pairing-read',
+      'over-limit',
+      'sellers-not-read',
+      'offers-incomplete',
+      'within',
+      'within-older',
+      'within-other-limits',
+    ]);
     expect(FIGURE_BASES).toEqual(['verified', 'calendar', 'pairing']);
   });
 });

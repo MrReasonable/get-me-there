@@ -4,7 +4,13 @@ import type { ResultRow } from '../results/types.js';
 import type { CellKey, ResolvedSpace } from '../types/definition.js';
 import type { IsoDateTime } from '../types/ids.js';
 import type { Provenance } from '../types/provenance.js';
-import { type PairingCandidate, type PairingRead, pairingLeads, pairingReadOf } from './pairing.js';
+import {
+  type ListPairingRead,
+  type PairingCandidate,
+  type PairingRead,
+  pairingLeads,
+  pairingReadOf,
+} from './pairing.js';
 import { datePairIndexer } from './space.js';
 
 /**
@@ -66,11 +72,14 @@ export type Figure<T extends FigureCandidate> =
     };
 
 /**
- * The api's read of a cell's newest flight list (spec rev 56 §6.9): `read` tells apart the list-based values
- * (`not-read`, `outbound-only`, `no-pairing-read`), and `candidate` is the cell's pairing when one was read, from which
- * core derives the rest (`pairingReadOf`) and whether it leads (`pairingLeads`).
+ * The api's read of a cell's newest flight list (spec rev 56 §6.9): with no pairing read, `read` tells apart the
+ * list-based values (`not-read`, `outbound-only`, `no-pairing-read`); with one, the `candidate`, from which core derives
+ * the rest (`pairingReadOf`) and whether it leads (`pairingLeads`). A union, so no lookup names a candidate-based read
+ * without its candidate (review finding 5).
  */
-export type PairingOf = (cell: CellKey) => { read: PairingRead; candidate: PairingCandidate | null };
+export type PairingOf = (
+  cell: CellKey,
+) => { read: ListPairingRead; candidate: null } | { candidate: PairingCandidate };
 /** No flight read for any cell: every figure as it was before the pairing figure (the flight-list step's ranking). */
 const NO_PAIRINGS: PairingOf = () => ({ read: 'not-read', candidate: null });
 
@@ -160,32 +169,57 @@ export interface FigureScope {
   maxJourneyMinutes: number | null;
 }
 
+/** The pairing figure that replaces a figure: the leading candidate's offer over the calendar price `c`. */
+function pairingFigure<T extends FigureCandidate>(
+  c: T,
+  candidate: PairingCandidate,
+  priceMinor: number,
+): Figure<T> {
+  return {
+    basis: 'pairing',
+    chosen: c,
+    cheaperCached: null,
+    pricePence: priceMinor,
+    grid: { pricePence: c.pricePence, provenance: c.provenance, stale: c.stale, truncated: c.truncated },
+    pairing: candidate,
+    pairingRead: 'within',
+  };
+}
+
 /**
  * Spec rev 56 §6.9: a calendar figure with its cell's flight read: the pairing figure when the cell's candidate leads
- * (`pairingLeads`; a verified figure is never asked, so it still wins, §11's precedence), else the calendar figure with
- * its `pairingRead` (left absent for `not-read`, so a cell with no flight read gives the figure exactly as before) and
- * the candidate shown beneath it.
+ * (`pairingLeads`), else the calendar figure with its `pairingRead` (left absent for `not-read`, so a cell with no flight
+ * read gives the figure exactly as before) and the candidate shown beneath it.
  */
 function withPairing<T extends FigureCandidate>(
   f: Extract<Figure<T>, { basis: 'calendar' }>,
   pairingOf: PairingOf,
 ): Figure<T> {
-  const { read, candidate } = pairingOf(f.chosen.cell);
-  if (candidate === null) return read === 'not-read' ? f : { ...f, pairingRead: read };
+  const lookup = pairingOf(f.chosen.cell);
+  if (lookup.candidate === null) return lookup.read === 'not-read' ? f : { ...f, pairingRead: lookup.read };
+  const { candidate } = lookup;
   const offer = candidate.offer;
   // why: `pairingLeads` requires the offer; reading it first narrows it here without an assertion
   if (offer === null || !pairingLeads(candidate))
     return { ...f, pairingRead: pairingReadOf(candidate), pairing: candidate };
-  const c = f.chosen;
-  return {
-    basis: 'pairing',
-    chosen: c,
-    cheaperCached: null,
-    pricePence: offer.priceMinor,
-    grid: { pricePence: c.pricePence, provenance: c.provenance, stale: c.stale, truncated: c.truncated },
-    pairing: candidate,
-    pairingRead: 'within',
-  };
+  return pairingFigure(f.chosen, candidate, offer.priceMinor);
+}
+
+/**
+ * Ruling R-stale-verified (spec rev 56 §6.9, §11): a stale verified figure gives way to a pairing that leads in the cell
+ * of the date pair's best calendar price (`calendar`, which it keeps as its grid price); with no calendar price, or no
+ * pairing that leads, the stale verified figure stays as it was. A fresh verified figure is never asked.
+ */
+function overStaleVerified<T extends FigureCandidate>(
+  f: Extract<Figure<T>, { basis: 'verified' }>,
+  calendar: T | null,
+  pairingOf: PairingOf,
+): Figure<T> {
+  if (calendar === null) return f;
+  const { candidate } = pairingOf(calendar.cell);
+  // why: `pairingLeads` requires the offer; testing it first narrows it here without an assertion
+  if (candidate === null || candidate.offer === null || !pairingLeads(candidate)) return f;
+  return pairingFigure(calendar, candidate, candidate.offer.priceMinor);
 }
 
 /**
@@ -231,7 +265,18 @@ export function figuresByDatePair<T extends FigureCandidate>(
   const figures = new Map<number, Figure<T>>();
   for (const [index, group] of groups) {
     const f = pickFigure(group, now);
-    if (f !== null) figures.set(index, f.basis === 'calendar' ? withPairing(f, pairingOf) : f);
+    if (f === null) continue;
+    if (f.basis === 'calendar') figures.set(index, withPairing(f, pairingOf));
+    else if (f.chosen.stale === false) figures.set(index, f);
+    else
+      figures.set(
+        index,
+        overStaleVerified(
+          f,
+          pickCalendarFigure(group.filter((x) => x.verdictClass === 'unchecked')),
+          pairingOf,
+        ),
+      );
   }
   const journeyLeftOut = new Map<number, number>();
   for (const [key, kept] of eligible) {

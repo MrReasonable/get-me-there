@@ -6,7 +6,7 @@ import type { Buckets } from '../types/execution.js';
 import type { Iata, IsoDate } from '../types/ids.js';
 import type { Provenance, ProviderId } from '../types/provenance.js';
 import type { GridPrice } from './figure.js';
-import type { FigureBasis, PairingRead } from './pairing.js';
+import { type FigureBasis, PAIRING_READ, type PairingRead } from './pairing.js';
 import type { DatePairSpace } from './space.js';
 
 /**
@@ -138,9 +138,9 @@ function indexOf(at: ReadonlyMap<string, number>, code: Iata): number {
 /**
  * The route's body from the decoded form, in one pass over the date pairs: every column written as it goes, each
  * distinct provenance entered once in the table (keyed by `provenanceKey`), and a figure's cheaper-cached price, local
- * times, grid price and pairing in their sparse groups, keyed by the figure's position, its `pairingRead` dense (spec rev
- * 56 §10; an absent one written `not-read`, and the column left out when every figure is `not-read`). `decodeDatePairs`
- * is its inverse.
+ * times, grid price, pairing and `pairingRead` in their sparse groups, keyed by the figure's position (spec rev
+ * 56 §10; ruling R-sparse: an entry only for a read other than `not-read`, an absent one written `not-read`).
+ * `decodeDatePairs` is its inverse.
  */
 export function encodeDatePairs(d: DecodedDatePairs): DatePairsResponse {
   const originAt = new Map(d.scope.origins.map((c, i) => [c, i]));
@@ -185,8 +185,7 @@ export function encodeDatePairs(d: DecodedDatePairs): DatePairsResponse {
     journeyMinutes: [],
     fromEarlierSearch: [],
   };
-  // why: kept apart from `f` (where the column is optional on the wire until Task 21.6) so each push is unconditional
-  const pairingRead: PairingRead[] = [];
+  const pairingRead: NonNullable<DatePairsResponse['pairingRead']> = { figure: [], code: [] };
   const grid: NonNullable<DatePairsResponse['gridPrice']> = {
     figure: [],
     pricePence: [],
@@ -260,7 +259,12 @@ export function encodeDatePairs(d: DecodedDatePairs): DatePairsResponse {
     f.notSeenInLatestAgeHours.push(x.notSeenInLatest === null ? null : x.notSeenInLatest.ageHours);
     f.journeyMinutes.push(x.journeyMinutes);
     f.fromEarlierSearch.push(x.fromEarlierSearch);
-    pairingRead.push(x.pairingRead ?? 'not-read');
+    // why: R-sparse: an entry only for a read other than not-read, its code the read's index in PAIRING_READ
+    const read: PairingRead = x.pairingRead ?? 'not-read';
+    if (read !== 'not-read') {
+      pairingRead.figure.push(figure);
+      pairingRead.code.push(PAIRING_READ.indexOf(read));
+    }
     const c = x.cheaperCached;
     if (c !== null) {
       cheaper.figure.push(figure);
@@ -330,12 +334,11 @@ export function encodeDatePairs(d: DecodedDatePairs): DatePairsResponse {
     summary: d.summary,
     provenances,
     pairs,
-    // why: spec rev 56 §10: a body without the column reads every figure `not-read`, so a board with no flight read for
-    // any figure leaves it out: 36,400 "not-read" entries (about 400 KB) would take the worst case past §10's 4 MiB
-    figures: pairingRead.every((r) => r === 'not-read') ? f : { ...f, pairingRead },
+    figures: f,
     cheaperCached: cheaper,
     times,
     gridPrice: grid,
     pairing,
+    pairingRead,
   };
 }

@@ -16,13 +16,25 @@ import { type ListedFlight, listedFlightSchema } from '../flights/types.js';
 /** Every fixture module says so (spec rev 56 §0: synthetic, never a recording's). */
 export const SYNTHETIC = true as const;
 
+/**
+ * Freezes `v` and everything it holds (review finding 9): the fixture is shared by the core, api and web tests, so a
+ * test that changed it would change what the next one reads; a write to a frozen value throws in strict mode.
+ */
+function deepFreeze<T>(v: T): T {
+  if (typeof v === 'object' && v !== null) {
+    for (const x of Object.values(v)) deepFreeze(x);
+    Object.freeze(v);
+  }
+  return v;
+}
+
 /** The limits the fixture was read under, and under which its expected picks hold: 25 h a leg, at most 1 stop. */
-export const PAIRING_LIMITS: FlightLimits = {
+export const PAIRING_LIMITS: FlightLimits = deepFreeze({
   maxJourneyMinutes: 1500,
   maxStops: 1,
   departureWindowLocal: null,
   arrivalWindowLocal: null,
-};
+});
 
 const outbound = (o: Omit<ListedFlight, 'carriers' | 'operatedBy'> & Partial<ListedFlight>): ListedFlight =>
   listedFlightSchema.parse({ carriers: ['QQ Air'], operatedBy: null, ...o });
@@ -158,23 +170,23 @@ const RETURNS: ReturnRead = returnReadSchema.parse({
 });
 
 /** The shared list: its outbounds and the return read the worker answered with (Tasks 21.6 and 21.7 read it). */
-export const PAIRING_FIXTURE: { flights: ListedFlight[]; returns: ReturnRead } = {
+export const PAIRING_FIXTURE: { flights: ListedFlight[]; returns: ReturnRead } = deepFreeze({
   flights: FLIGHTS,
   returns: RETURNS,
-};
+});
 
 /** `cheapestPairing(PAIRING_FIXTURE.returns, PAIRING_FIXTURE.flights, PAIRING_LIMITS)`. */
-export const PAIRING_CHEAPEST = {
+export const PAIRING_CHEAPEST = deepFreeze({
   attempt: 1,
   returnIndex: 0,
   fromMinor: 118_000,
   outboundFits: true,
   returnFits: true,
-} as const;
+} as const);
 /** `cheapestOffer(PAIRING_FIXTURE.returns.booking)`. */
-export const PAIRING_OFFER: { index: number; offer: Offer } = {
+export const PAIRING_OFFER: { index: number; offer: Offer } = deepFreeze({
   index: 0,
   offer: { seller: 'QQ Travel', fare: null, priceMinor: 118_000 },
-};
+});
 /** `bookingReturnOf(PAIRING_FIXTURE.returns, PAIRING_FIXTURE.flights)`. */
-export const PAIRING_BOOKING_RETURN = { attempt: 1, returnIndex: 0 } as const;
+export const PAIRING_BOOKING_RETURN = deepFreeze({ attempt: 1, returnIndex: 0 } as const);

@@ -2,6 +2,7 @@ import type { DatePairsResponse } from '../api-contract/datePairs.js';
 import { addDays } from '../dates/epochDay.js';
 import type { IsoDate } from '../types/ids.js';
 import type { DatePair, DatePairFigure, DecodedDatePairs } from './encode.js';
+import { PAIRING_READ } from './pairing.js';
 import { stayCount } from './space.js';
 
 /**
@@ -15,8 +16,8 @@ export function columnAt<T>(column: readonly T[], i: number): T {
 }
 
 /**
- * The figure in column position `j`, with its full provenance, its airport pair and its `pairingRead` (`not-read` when
- * the body has no such column: an api before spec rev 56); no cheaper price, times, grid price or pairing yet.
+ * The figure in column position `j`, with its full provenance and its airport pair, read `not-read` until the
+ * `pairingRead` group says otherwise; no cheaper price, times, grid price or pairing yet.
  */
 function figureAt(r: DatePairsResponse, j: number): DatePairFigure {
   const f = r.figures;
@@ -48,7 +49,7 @@ function figureAt(r: DatePairsResponse, j: number): DatePairFigure {
     cheaperCached: null,
     gridPrice: null,
     pairing: null,
-    pairingRead: f.pairingRead === undefined ? 'not-read' : columnAt(f.pairingRead, j),
+    pairingRead: 'not-read',
   };
 }
 
@@ -126,6 +127,14 @@ export function decodeDatePairs(r: DatePairsResponse): DecodedDatePairs {
         stale: columnAt(g.stale, k),
         truncated: columnAt(g.truncated, k),
       };
+  // why: R-sparse: a figure with no entry reads not-read (as in a body without the group)
+  const reads = r.pairingRead;
+  if (reads !== undefined)
+    for (let k = 0; k < reads.figure.length; k += 1)
+      columnAt(figures, columnAt(reads.figure, k)).pairingRead = columnAt(
+        PAIRING_READ,
+        columnAt(reads.code, k),
+      );
   const q = r.pairing;
   if (q !== undefined)
     for (let k = 0; k < q.figure.length; k += 1)

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { HHMM } from '../types/window.js';
 
 /**
  * Spec revision 55 §7 `flight_lists.listed` and §8.1 (the flight-list step): what a browser flight list showed for a
@@ -25,7 +26,7 @@ export const flightTextSchema = z
   .regex(FLIGHT_TEXT)
   .refine((s) => s === s.trim() && !/\s{2,}/.test(s), { message: 'trimmed, whitespace collapsed' });
 /** A local wall-clock time as the page states it, `HH:MM` on the 24-hour clock (`24:00` is refused). */
-const hhmm = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/);
+const hhmm = z.string().regex(HHMM);
 
 /**
  * Spec revision 56 §5.1: the leg fields an outbound and a return share, with their checks (module-private; spread by

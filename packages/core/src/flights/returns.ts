@@ -6,7 +6,7 @@
  */
 import { z } from 'zod';
 import { workerRuleSchema } from '../camoufox/rule.js';
-import { type FlightLimits, flightLimitsSchema, withinLimits } from './choose.js';
+import { type FlightLimits, fitsLimits, flightLimitsSchema } from './choose.js';
 import { BOOKING_OFFERS_MAX, FLIGHT_LIST_MAX_FLIGHTS, RETURN_ATTEMPTS_MAX } from './limits.js';
 import { flightTextSchema, type ListedReturn, listedReturnSchema } from './types.js';
 
@@ -165,15 +165,16 @@ export function cheapestOffer(b: BookingRead | null): { index: number; offer: Of
 }
 
 /**
- * R-sellers with ruling A8 (spec rev 56 §6.9): whether a booking read's offers are complete for a return whose "from"
- * price is `fromMinor`: its cheapest offer equals that price, or, on a `read` booking, no further expansion control and
- * no grouped seller control remained. An `expand-failed` booking is complete only by the first test. A read that is not
- * complete never leads and is shown "a cheaper seller may not have been read".
+ * R-sellers with rulings A8 and R-unread (spec rev 56 §6.9): whether a booking read's offers are complete for a return
+ * whose "from" price is `fromMinor`: its cheapest offer equals that price, or, on a `read` booking, no further expansion
+ * control, no grouped seller control and no offer left unread remained (none the grammar refused, `unparsed`, and none
+ * priced in another currency, `nonGbp`). An `expand-failed` booking is complete only by the first test. A read that is
+ * not complete never leads and is shown "a cheaper seller may not have been read".
  */
 export function offersComplete(b: BookingRead, fromMinor: number): boolean {
   const cheapest = cheapestOffer(b);
   if (cheapest !== null && cheapest.offer.priceMinor === fromMinor) return true;
-  return b.status === 'read' && !b.moreControl && b.grouped === 0;
+  return b.status === 'read' && !b.moreControl && b.grouped === 0 && b.unparsed === 0 && b.nonGbp === 0;
 }
 
 /**
@@ -201,7 +202,7 @@ export type ReturnAttempt = z.infer<typeof returnAttemptSchema>;
 
 /** Whether any of an attempt's returns fits the limits on the return leg. */
 const anyFits = (returns: readonly ListedReturn[], l: FlightLimits): boolean =>
-  returns.some((r) => Object.values(withinLimits(r, l, 'return')).every(Boolean));
+  returns.some((r) => fitsLimits(r, l, 'return'));
 
 /**
  * The return read of one flights request (spec rev 56 §5.1): the limits the selection used (stored: reuse and the
@@ -229,6 +230,9 @@ export const returnReadSchema = z
       fail(['rule'], 'no-outbound and not-verified carry no rule');
     const [first, second] = r.attempts;
     if (first !== undefined && second !== undefined) {
+      // why: an outbound over the limits is selected only when none fits, so no fitting outbound remains to try
+      if (!first.outboundFits)
+        fail(['attempts', 0, 'outboundFits'], 'a second attempt follows a first outbound within the limits');
       if (!second.outboundFits) fail(['attempts', 1, 'outboundFits'], 'a second outbound fits the limits');
       if (anyFits(first.returns, r.limits))
         fail(['attempts', 1], 'a second attempt only when the first has no return within the limits');

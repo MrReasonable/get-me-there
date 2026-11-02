@@ -86,6 +86,7 @@ describe('chooseReturnsToShow (spec rev 56 §6.2: the outbound chooser mirrored 
     expect(compareReturns(ret(600, 999), base)).toBeLessThan(0);
     expect(compareReturns(ret(599, 1000), base)).toBeLessThan(0);
     expect(compareReturns(ret(600, 1000, { stops: 1 }), base)).toBeGreaterThan(0);
+    expect(compareReturns(base, ret(600, 1000, { stops: 1 }))).toBeLessThan(0);
     expect(compareReturns(ret(600, 1000, { departsLocal: '14:19' }), base)).toBeLessThan(0);
     expect(compareReturns(ret(600, 1000, { carriers: ['QQ Air'] }), base)).toBe(0);
   });

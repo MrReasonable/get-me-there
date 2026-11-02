@@ -1,5 +1,5 @@
 import fc from 'fast-check';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, expectTypeOf, it } from 'vitest';
 import {
   type FigureCandidate,
   figuresByDatePair,
@@ -8,7 +8,7 @@ import {
   pickFigure,
   pickVerifiedFigure,
 } from '../../src/datePairs/figure.js';
-import type { PairingCandidate, PairingRead } from '../../src/datePairs/pairing.js';
+import type { ListPairingRead, PairingCandidate, PairingRead } from '../../src/datePairs/pairing.js';
 import { addDays } from '../../src/dates/epochDay.js';
 import type { ResultRow } from '../../src/results/types.js';
 import { asIata, asIsoDate, asIsoDateTime } from '../../src/types/ids.js';
@@ -509,12 +509,15 @@ describe('figuresByDatePair with the pairing figure (spec rev 56 §6.9; Ian ruli
     ...over,
   });
   const only =
-    (read: PairingRead, c: PairingCandidate | null): PairingOf =>
-    () => ({ read, candidate: c });
+    (read: ListPairingRead): PairingOf =>
+    () => ({ read, candidate: null });
+  const withCandidate =
+    (c: PairingCandidate): PairingOf =>
+    () => ({ candidate: c });
 
   it("a candidate that leads gives basis pairing: the offer's price, the grid price it replaced, pairingRead within", () => {
     const c = candidate();
-    const f = figuresByDatePair([grid], scope, NOW, only('within', c)).figures.get(0);
+    const f = figuresByDatePair([grid], scope, NOW, withCandidate(c)).figures.get(0);
     expect(f).toEqual({
       basis: 'pairing',
       chosen: grid,
@@ -535,10 +538,10 @@ describe('figuresByDatePair with the pairing figure (spec rev 56 §6.9; Ian ruli
     expect(asked).toEqual([`LHR-JFK-${grid.cell.departureDate}-${grid.cell.returnDate}`]);
   });
 
-  it.each<PairingRead>(['not-read', 'outbound-only', 'no-pairing-read'])(
+  it.each<ListPairingRead>(['not-read', 'outbound-only', 'no-pairing-read'])(
     'read %s with no candidate passes through on the calendar figure',
     (read) => {
-      const f = figuresByDatePair([grid], scope, NOW, only(read, null)).figures.get(0);
+      const f = figuresByDatePair([grid], scope, NOW, only(read)).figures.get(0);
       expect(f?.basis).toBe('calendar');
       // why: an absent pairingRead is 'not-read' (so the default leaves today's figures as they were)
       expect(f?.basis === 'calendar' ? (f.pairingRead ?? 'not-read') : null).toBe(read);
@@ -554,7 +557,7 @@ describe('figuresByDatePair with the pairing figure (spec rev 56 §6.9; Ian ruli
     ['over the limits', { fits: false }, 'over-limit'],
   ])('%s: the calendar figure stays, with the pairing beside it', (_name, over, read) => {
     const c = candidate(over);
-    const f = figuresByDatePair([grid], scope, NOW, only('within', c)).figures.get(0);
+    const f = figuresByDatePair([grid], scope, NOW, withCandidate(c)).figures.get(0);
     expect(f).toEqual({
       basis: 'calendar',
       chosen: grid,
@@ -569,9 +572,48 @@ describe('figuresByDatePair with the pairing figure (spec rev 56 §6.9; Ian ruli
     let asked = 0;
     const f = figuresByDatePair([grid, v], scope, NOW, () => {
       asked += 1;
-      return { read: 'within', candidate: candidate() };
+      return { candidate: candidate() };
     }).figures.get(0);
     expect(f?.basis).toBe('verified');
+    expect(asked).toBe(0);
+  });
+
+  it('a fresh, complete pairing replaces a stale verified figure (ruling R-stale-verified), keyed by the calendar price', () => {
+    // the stale verified price is 2 h old, the calendar one 50 h: the verified one is the figure until a pairing leads
+    const v = stale(60_000, { cell: at('LGW', 'EWR') });
+    expect(figuresByDatePair([grid, v], scope, NOW).figures.get(0)?.basis).toBe('verified');
+    const asked: string[] = [];
+    const c = candidate();
+    const f = figuresByDatePair([grid, v], scope, NOW, (cell) => {
+      asked.push(`${cell.origin}-${cell.destination}`);
+      return { candidate: c };
+    }).figures.get(0);
+    expect(asked).toEqual(['LHR-JFK']);
+    expect(f).toEqual({
+      basis: 'pairing',
+      chosen: grid,
+      cheaperCached: null,
+      pricePence: 118_000,
+      grid: { pricePence: 56_400, provenance: grid.provenance, stale: false, truncated: false },
+      pairing: c,
+      pairingRead: 'within',
+    });
+  });
+
+  it('a stale verified figure stays when its pairing does not lead, and when no calendar price exists to key one', () => {
+    const v = stale(60_000, { cell: at('LGW', 'EWR') });
+    const notLeading = figuresByDatePair([grid, v], scope, NOW, withCandidate(candidate({ fresh: false })));
+    expect(notLeading.figures.get(0)).toEqual(pickFigure([grid, v], NOW));
+    for (const lookup of [only('outbound-only'), withCandidate(candidate({ offer: null }))])
+      expect(figuresByDatePair([grid, v], scope, NOW, lookup).figures.get(0)).toEqual(
+        pickFigure([grid, v], NOW),
+      );
+    let asked = 0;
+    const alone = figuresByDatePair([v], scope, NOW, () => {
+      asked += 1;
+      return { candidate: candidate() };
+    });
+    expect(alone.figures.get(0)?.basis).toBe('verified');
     expect(asked).toBe(0);
   });
 
@@ -592,5 +634,12 @@ describe('figuresByDatePair with the pairing figure (spec rev 56 §6.9; Ian ruli
       );
       expect(f).toEqual(pickFigure(group, NOW));
     }
+  });
+});
+
+describe('PairingOf (review finding 5: a lookup with a candidate derives its read; one without names a list read)', () => {
+  it("admits no 'within' read without a candidate", () => {
+    expectTypeOf<{ read: 'within'; candidate: null }>().not.toMatchTypeOf<ReturnType<PairingOf>>();
+    expectTypeOf<{ read: 'outbound-only'; candidate: null }>().toMatchTypeOf<ReturnType<PairingOf>>();
   });
 });

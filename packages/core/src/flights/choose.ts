@@ -6,7 +6,7 @@
 import { z } from 'zod';
 import { inWindow } from '../constraints/evaluate.js';
 import type { Constraints } from '../types/definition.js';
-import { localTimeWindowSchema } from '../types/window.js';
+import { strictLocalTimeWindowSchema } from '../types/window.js';
 import { FLIGHTS_SHOWN, RETURNS_SHOWN } from './limits.js';
 import type { LegTimes, ListedFlight, ListedReturn } from './types.js';
 
@@ -19,8 +19,8 @@ export const flightLimitsSchema = z.strictObject({
   maxJourneyMinutes: z.number().int().min(1).nullable(),
   // why: R-order: optional until Task 21.7 (the web's limitsOf is its last consumer); absent is met, as null is
   maxStops: z.number().int().min(0).nullable().exactOptional(),
-  departureWindowLocal: localTimeWindowSchema.nullable(),
-  arrivalWindowLocal: localTimeWindowSchema.nullable(),
+  departureWindowLocal: strictLocalTimeWindowSchema.nullable(),
+  arrivalWindowLocal: strictLocalTimeWindowSchema.nullable(),
 });
 export type FlightLimits = z.infer<typeof flightLimitsSchema>;
 
@@ -66,7 +66,7 @@ export function withinLimits<T extends LegTimes>(
   leg: Leg = 'outbound',
 ): { journey: boolean; stops: boolean; arrival: boolean; departure: boolean } {
   // why: the definition has no return windows, so the page says "windows apply to the outbound" (spec rev 56 §6.2)
-  const windows = leg === 'outbound';
+  const windows = leg !== 'return';
   return {
     journey: l.maxJourneyMinutes === null || f.durationMinutes <= l.maxJourneyMinutes,
     stops: l.maxStops === undefined || l.maxStops === null || f.stops <= l.maxStops,
@@ -84,11 +84,14 @@ export function clockOf(t: string): number {
   return Number(t.replace(':', ''));
 }
 
-/** Every limit met on that leg. */
-const fits = (f: LegTimes, l: FlightLimits, leg: Leg): boolean => {
+/**
+ * Spec rev 56 §6.2: every limit met on that leg (`withinLimits`, all four). The one rule the selection, the choosers,
+ * the return read's refinement and the pairing rules apply.
+ */
+export function fitsLimits(f: LegTimes, l: FlightLimits, leg: Leg = 'outbound'): boolean {
   const w = withinLimits(f, l, leg);
   return w.journey && w.stops && w.arrival && w.departure;
-};
+}
 
 /**
  * Spec rev 55 §11's order of flights read: cheapest first, then shortest, then fewer stops, then the earlier departure. Returns a
@@ -131,7 +134,7 @@ export function selectOutbound<T extends ListedFlight>(
   let best: { index: number; flight: T; fits: boolean } | null = null;
   for (const [index, flight] of flights.entries()) {
     if (skip.has(index)) continue;
-    const ok = fits(flight, l, 'outbound');
+    const ok = fitsLimits(flight, l, 'outbound');
     // why: a fitting flight beats any that does not; then the order; a tie keeps the earlier index (strictly lower only)
     if (best === null || (ok && !best.fits) || (ok === best.fits && compareFlights(flight, best.flight) < 0))
       best = { index, flight, fits: ok };
@@ -156,7 +159,7 @@ function chooseToShow<T extends LegTimes>(
   // why: one entry per position, so the same object given twice is still two flights read
   const all = items.map((f) => ({ f }));
   const order = (a: { f: T }, b: { f: T }) => compare(a.f, b.f);
-  const within = all.filter((e) => fits(e.f, l, leg)).sort(order);
+  const within = all.filter((e) => fitsLimits(e.f, l, leg)).sort(order);
   const overLimit = within.length === 0 && items.length > 0;
   const shown = (overLimit ? [...all].sort(order) : within).slice(0, count);
   // why: ruling persona-010: the shortest flight within the limits is always among those shown; `sort` is stable, so
@@ -168,7 +171,7 @@ function chooseToShow<T extends LegTimes>(
     shown: shown.map((e) => e.f),
     overLimit,
     moreRead: rest.length,
-    moreOutside: rest.filter((e) => !fits(e.f, l, leg)).length,
+    moreOutside: rest.filter((e) => !fitsLimits(e.f, l, leg)).length,
   };
 }
 

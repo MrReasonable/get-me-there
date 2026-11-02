@@ -4,9 +4,9 @@
  * (`cheapestPairing`), the one return-pick rule the worker books and the app expects (`bookingReturnOf`), the cheapest
  * offer of its booking read (`cheapestOffer`), and when it leads a date pair's figure (`pairingLeads`, `pairingReadOf`).
  */
-import { compareReturns, type FlightLimits, type Leg, withinLimits } from '../flights/choose.js';
+import { compareReturns, type FlightLimits, fitsLimits } from '../flights/choose.js';
 import { cheapestOffer, type Offer, type ReturnRead } from '../flights/returns.js';
-import type { LegTimes, ListedFlight, ListedReturn } from '../flights/types.js';
+import type { ListedFlight, ListedReturn } from '../flights/types.js';
 import type { StaleMark } from '../labels/age.js';
 import type { IsoDateTime } from '../types/ids.js';
 import type { ResultBasis } from '../types/itinerary.js';
@@ -42,6 +42,8 @@ export const PAIRING_READ = [
   'within-other-limits',
 ] as const;
 export type PairingRead = (typeof PAIRING_READ)[number];
+/** The three reads the api tells apart from the newest list itself, where there is no candidate (spec rev 56 §6.9). */
+export type ListPairingRead = Extract<PairingRead, 'not-read' | 'outbound-only' | 'no-pairing-read'>;
 
 /**
  * A list's pairing (spec rev 56 §6.9): the attempt and the return (into `attempts[attempt].returns`), its "from" price,
@@ -55,19 +57,18 @@ export interface Pairing {
   returnFits: boolean;
 }
 
-/** Every limit met on that leg. */
-const fitsLeg = (f: LegTimes, l: FlightLimits, leg: Leg): boolean =>
-  Object.values(withinLimits(f, l, leg)).every(Boolean);
-
 /** One return of one attempt, with its fits flags under the limits judged. */
 interface Entry extends Pairing {
   ret: ListedReturn;
 }
 
 /**
- * The pairings of `attempts` (each tagged with its index in the read's attempts, `from`), the fitting ones first:
- * the cheapest by `fromMinor`, then `compareReturns` (duration, stops, departure), then attempt, then index, among those
- * whose outbound and return both fit; with none fitting, the first of all by the same order. Null with no return.
+ * The pairing of `attempts` (each tagged with its index in the read's attempts, `at`): the first by `compareReturns`
+ * (the "from" price, then duration, stops and departure) among those whose outbound and return both fit; with none
+ * fitting, the first of all by the same order. Null with no return.
+ *
+ * why: one scan in attempt then index order keeps the first of equals (a strict `<` only), so a tie goes to the earlier
+ * attempt, then the lower index, without a tie-break that could never decide (review finding 2)
  */
 function pick(
   attempts: ReadonlyArray<{ at: number; a: ReturnRead['attempts'][number] }>,
@@ -80,21 +81,21 @@ function pick(
     // why: the contract refuses an outbound index past the list's flights, so this is a caller's bug, never a page's
     if (outbound === undefined)
       throw new RangeError(`no outbound ${a.outboundIndex} in ${flights.length} flights`);
-    const outboundFits = fitsLeg(outbound, l, 'outbound');
+    const outboundFits = fitsLimits(outbound, l, 'outbound');
     for (const [returnIndex, ret] of a.returns.entries())
       entries.push({
         attempt: at,
         returnIndex,
         fromMinor: ret.fromMinor,
         outboundFits,
-        returnFits: fitsLeg(ret, l, 'return'),
+        returnFits: fitsLimits(ret, l, 'return'),
         ret,
       });
   }
-  const order = (x: Entry, y: Entry) =>
-    compareReturns(x.ret, y.ret) || x.attempt - y.attempt || x.returnIndex - y.returnIndex;
   const fitting = entries.filter((e) => e.outboundFits && e.returnFits);
-  const best = [...(fitting.length > 0 ? fitting : entries)].sort(order)[0];
+  let best: Entry | undefined;
+  for (const e of fitting.length > 0 ? fitting : entries)
+    if (best === undefined || compareReturns(e.ret, best.ret) < 0) best = e;
   if (best === undefined) return null;
   return {
     attempt: best.attempt,

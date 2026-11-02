@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { z } from 'zod';
 import {
   BOOKING_OFFERS_MAX,
   FLIGHT_LIST_PAGES_PER_PAIR_MAX,
@@ -100,7 +101,15 @@ function read(over: Record<string, unknown> = {}) {
   };
 }
 
-const accepts = (v: unknown) => returnReadSchema.safeParse(v).success;
+/** The paths of a value's issues under `schema` ([] when it parses), so each refusal names the rule it broke. */
+const pathsOf = (schema: z.ZodType, v: unknown): string[] => {
+  const r = schema.safeParse(v);
+  if (r.success) return [];
+  // why: each rule says what is wrong (zod puts "Invalid input" in place of an empty message)
+  for (const i of r.error.issues) expect(i.message, i.path.join('.')).toMatch(/^(?!Invalid input$).*\w{4,}/);
+  return r.error.issues.map((i) => i.path.join('.'));
+};
+const issues = (v: unknown) => pathsOf(returnReadSchema, v);
 
 describe('listedReturnSchema (spec rev 56 §5.1: the leg fields, a day offset from the return date, the "from" price)', () => {
   it('accepts a day offset of −1 (a date-line return); refuses −2 and 4', () => {
@@ -116,7 +125,9 @@ describe('listedReturnSchema (spec rev 56 §5.1: the leg fields, a day offset fr
     expect(listedReturnSchema.safeParse(ret(1180, { departsLocal: '014:20' })).success).toBe(false);
     expect(listedReturnSchema.safeParse(ret(1180, { arrivesLocal: '06:255' })).success).toBe(false);
   });
-  it('holds carrier names to the flight text: trimmed, whitespace collapsed', () => {
+  it('holds carrier names to the flight text: trimmed, whitespace collapsed (and says so)', () => {
+    const r = listedReturnSchema.safeParse(ret(1180, { carriers: ['QQ  Atlantic'] }));
+    expect(r.error?.issues.map((i) => i.message)).toEqual(['trimmed, whitespace collapsed']);
     expect(listedReturnSchema.safeParse(ret(1180, { carriers: [' QQ Atlantic'] })).success).toBe(false);
     expect(listedReturnSchema.safeParse(ret(1180, { carriers: ['QQ  Atlantic'] })).success).toBe(false);
     expect(listedReturnSchema.safeParse(ret(1180, { operatedBy: 'QQ Air ' })).success).toBe(false);
@@ -125,78 +136,89 @@ describe('listedReturnSchema (spec rev 56 §5.1: the leg fields, a day offset fr
 
 describe('returnReadSchema (spec rev 56 §5.1 refinements)', () => {
   it('accepts a finished read, and a read whose second attempt could not start (its rule)', () => {
-    expect(accepts(read())).toBe(true);
-    expect(accepts(read({ rule: 'spacing' }))).toBe(true);
+    expect(issues(read())).toEqual([]);
+    expect(issues(read({ rule: 'spacing' }))).toEqual([]);
   });
 
   it('refuses read with no attempt, no-outbound with an attempt, unrecognised without a rule, read with rule "Select"', () => {
-    expect(accepts(read({ attempts: [] }))).toBe(false);
-    expect(accepts(read({ status: 'no-outbound' }))).toBe(false);
-    expect(accepts(read({ status: 'no-outbound', attempts: [] }))).toBe(true);
-    expect(accepts(read({ status: 'unrecognised', attempts: [], rule: null }))).toBe(false);
-    expect(accepts(read({ status: 'unrecognised', attempts: [], rule: 'not-return-view' }))).toBe(true);
-    expect(accepts(read({ rule: 'Select' }))).toBe(false);
+    expect(issues(read({ attempts: [] }))).toEqual(['attempts']);
+    expect(issues(read({ status: 'no-outbound' }))).toEqual(['attempts']);
+    expect(issues(read({ status: 'no-outbound', attempts: [] }))).toEqual([]);
+    expect(issues(read({ status: 'unrecognised', attempts: [], rule: null }))).toEqual(['rule']);
+    expect(issues(read({ status: 'unrecognised', attempts: [], rule: 'not-return-view' }))).toEqual([]);
+    expect(issues(read({ rule: 'Select' }))).toEqual(['rule']);
   });
 
   it('a rule exactly for skipped, select-failed, not-settled and unrecognised; none for no-outbound and not-verified', () => {
     for (const status of ['skipped', 'select-failed', 'not-settled', 'unrecognised']) {
-      expect(accepts(read({ status, attempts: [], rule: 'monthly-headroom' })), status).toBe(true);
-      expect(accepts(read({ status, attempts: [], rule: null })), status).toBe(false);
+      expect(issues(read({ status, attempts: [], rule: 'monthly-headroom' })), status).toEqual([]);
+      expect(issues(read({ status, attempts: [], rule: null })), status).toEqual(['rule']);
     }
     for (const status of ['no-outbound', 'not-verified']) {
-      expect(accepts(read({ status, attempts: [], rule: null })), status).toBe(true);
-      expect(accepts(read({ status, attempts: [], rule: 'spacing' })), status).toBe(false);
+      expect(issues(read({ status, attempts: [], rule: null })), status).toEqual([]);
+      expect(issues(read({ status, attempts: [], rule: 'spacing' })), status).toEqual(['rule']);
     }
   });
 
   it("refuses an attempt listing 'returns' with none, and 'none-for-cell' with one", () => {
-    expect(returnAttemptSchema.safeParse(attempt([], { listed: 'returns' })).success).toBe(false);
-    expect(returnAttemptSchema.safeParse(attempt([ret(1180)], { listed: 'none-for-cell' })).success).toBe(
-      false,
-    );
-    expect(accepts(read({ attempts: [attempt([], { listed: 'returns' })] }))).toBe(false);
+    const paths = (v: unknown) => pathsOf(returnAttemptSchema, v);
+    expect(paths(attempt([], { listed: 'returns' }))).toEqual(['returns']);
+    expect(paths(attempt([ret(1180)], { listed: 'none-for-cell' }))).toEqual(['returns']);
+    expect(issues(read({ attempts: [attempt([], { listed: 'returns' })] }))).toEqual(['attempts.0.returns']);
   });
 
-  it('a second attempt only when the first has no return within the limits, and only with outboundFits true', () => {
+  it('a second attempt only after a fitting first outbound with no return within the limits, and itself fitting', () => {
     const over = ret(1204, { stops: 2 });
     const second = attempt([ret(1180)], { outboundIndex: 1 });
-    expect(accepts(read({ attempts: [attempt([over]), second] }))).toBe(true);
-    expect(accepts(read({ attempts: [attempt([ret(1204)]), second] }))).toBe(false);
-    expect(accepts(read({ attempts: [attempt([over]), { ...second, outboundFits: false }] }))).toBe(false);
-    expect(accepts(read({ attempts: [attempt([]), second] }))).toBe(true);
-    expect(accepts(read({ attempts: [attempt([over]), second, second] }))).toBe(false);
+    expect(issues(read({ attempts: [attempt([over]), second] }))).toEqual([]);
+    expect(issues(read({ attempts: [attempt([ret(1204)]), second] }))).toEqual(['attempts.1']);
+    expect(issues(read({ attempts: [attempt([over]), { ...second, outboundFits: false }] }))).toEqual([
+      'attempts.1.outboundFits',
+    ]);
+    // why: an outbound over the limits is picked only when none fits, so no fitting outbound is left to try second
+    expect(issues(read({ attempts: [attempt([over], { outboundFits: false }), second] }))).toEqual([
+      'attempts.0.outboundFits',
+    ]);
+    expect(issues(read({ attempts: [attempt([]), second] }))).toEqual([]);
+    // why: a return is judged on the return leg (no window), so one departing outside the outbound's window still fits
+    const windowed = { ...LIMITS, departureWindowLocal: { from: '08:00', to: '20:00' } };
+    const early = attempt([ret(1180, { departsLocal: '06:10' })]);
+    expect(issues(read({ limits: windowed, attempts: [early, second] }))).toEqual(['attempts.1']);
+    expect(issues(read({ attempts: [attempt([over]), second, second] }))).toEqual(['attempts']);
     expect(RETURN_ATTEMPTS_MAX).toBe(2);
   });
 
   it('accepts two attempts of 30 returns each (the first all over the limits) and refuses 31', () => {
     const thirtyOver = Array.from({ length: 30 }, (_x, i) => ret(1200 + i, { stops: 1 }));
     const thirty = Array.from({ length: 30 }, (_x, i) => ret(1200 + i));
-    expect(accepts(read({ attempts: [attempt(thirtyOver), attempt(thirty, { outboundIndex: 1 })] }))).toBe(
-      true,
+    expect(issues(read({ attempts: [attempt(thirtyOver), attempt(thirty, { outboundIndex: 1 })] }))).toEqual(
+      [],
     );
-    expect(accepts(read({ attempts: [attempt([...thirty, ret(1300)])] }))).toBe(false);
+    expect(issues(read({ attempts: [attempt([...thirty, ret(1300)])] }))).toEqual(['attempts.0.returns']);
   });
 
   it('a booking names the LAST attempt and a return inside it; booking: null is accepted', () => {
     const over = ret(1204, { stops: 2 });
     const two = [attempt([over]), attempt([ret(1180), ret(1250)], { outboundIndex: 1 })];
-    expect(accepts(read({ attempts: two, booking: booking({ attempt: 1, returnIndex: 1 }) }))).toBe(true);
-    expect(accepts(read({ attempts: two, booking: booking({ attempt: 0, returnIndex: 0 }) }))).toBe(false);
-    expect(accepts(read({ attempts: two, booking: booking({ attempt: 1, returnIndex: 2 }) }))).toBe(false);
-    expect(accepts(read({ booking: null }))).toBe(true);
-    expect(
-      accepts(
-        read({
-          booking: booking({
-            status: 'no-pairing',
-            rule: null,
-            attempt: null,
-            returnIndex: null,
-            offers: [],
-          }),
-        }),
-      ),
-    ).toBe(true);
+    expect(issues(read({ attempts: two, booking: booking({ attempt: 1, returnIndex: 1 }) }))).toEqual([]);
+    expect(issues(read({ attempts: two, booking: booking({ attempt: 0, returnIndex: 0 }) }))).toEqual([
+      'booking.attempt',
+    ]);
+    expect(issues(read({ attempts: two, booking: booking({ attempt: 1, returnIndex: 2 }) }))).toEqual([
+      'booking.returnIndex',
+    ]);
+    expect(issues(read({ booking: null }))).toEqual([]);
+    // why: a booking without its return index is the booking's own refusal, reported once (not again by the read)
+    const none = read({ attempts: [attempt([])], booking: booking({ attempt: 0, returnIndex: null }) });
+    expect(issues(none)).toEqual(['booking.returnIndex']);
+    const noPairing = booking({
+      status: 'no-pairing',
+      rule: null,
+      attempt: null,
+      returnIndex: null,
+      offers: [],
+    });
+    expect(issues(read({ booking: noPairing }))).toEqual([]);
   });
 });
 
@@ -266,52 +288,51 @@ describe('offerSchema and bookingReadSchema (spec rev 56 §5.1; test-r3-001)', (
     expect(offerSchema.safeParse({ ...offer, fare: 'Economy‮Basic' }).success).toBe(false);
   });
 
-  const ok = (v: unknown) => bookingReadSchema.safeParse(v).success;
+  const bk = (v: unknown) => pathsOf(bookingReadSchema, v);
   it('refuses read with no offer, no-pairing with an attempt, expand-failed without a rule, 41 offers, not-settled with an offer', () => {
-    expect(ok(booking())).toBe(true);
-    expect(ok(booking({ offers: [] }))).toBe(false);
-    expect(ok(booking({ status: 'no-pairing', attempt: 0, returnIndex: 0, offers: [] }))).toBe(false);
-    expect(ok(booking({ status: 'expand-failed', rule: null, expanded: false }))).toBe(false);
+    expect(bk(booking())).toEqual([]);
+    expect(bk(booking({ offers: [] }))).toEqual(['offers']);
+    expect(bk(booking({ status: 'no-pairing', attempt: 0, returnIndex: 0, offers: [] }))).toEqual([
+      'attempt',
+      'returnIndex',
+    ]);
+    expect(bk(booking({ status: 'expand-failed', rule: null, expanded: false }))).toEqual(['rule']);
     const many = Array.from({ length: 41 }, (_x, i) => ({
       seller: 'QQ Fares',
       fare: null,
       priceMinor: 118_000 + i,
     }));
-    expect(ok(booking({ offers: many }))).toBe(false);
-    expect(ok(booking({ offers: many.slice(0, 40), offersStated: 41 }))).toBe(true);
-    expect(ok(booking({ status: 'not-settled', rule: 'booking-view' }))).toBe(false);
+    expect(bk(booking({ offers: many }))).toEqual(['offers']);
+    expect(bk(booking({ offers: many.slice(0, 40), offersStated: 41 }))).toEqual([]);
+    expect(bk(booking({ status: 'not-settled', rule: 'booking-view' }))).toEqual(['offers']);
   });
   it('accepts expand-failed with two offers (the offers read before the expansion kept)', () => {
-    expect(ok(booking({ status: 'expand-failed', rule: 'more-options', expanded: false }))).toBe(true);
+    expect(bk(booking({ status: 'expand-failed', rule: 'more-options', expanded: false }))).toEqual([]);
   });
   it('attempt and returnIndex set exactly for read and the transient ends; a rule exactly for the stopped ones', () => {
     for (const status of ['select-failed', 'not-settled', 'unrecognised']) {
-      expect(ok(booking({ status, rule: 'booking-view', offers: [] })), status).toBe(true);
+      expect(bk(booking({ status, rule: 'booking-view', offers: [] })), status).toEqual([]);
       expect(
-        ok(booking({ status, rule: 'booking-view', offers: [], attempt: null, returnIndex: null })),
+        bk(booking({ status, rule: 'booking-view', offers: [], attempt: null, returnIndex: null })),
         status,
-      ).toBe(false);
+      ).toEqual(['attempt', 'returnIndex']);
     }
-    expect(
-      ok(booking({ status: 'skipped', rule: 'spacing', attempt: null, returnIndex: null, offers: [] })),
-    ).toBe(true);
-    expect(ok(booking({ status: 'skipped', rule: null, attempt: null, returnIndex: null, offers: [] }))).toBe(
-      false,
-    );
-    expect(ok(booking({ status: 'skipped', rule: 'spacing', offers: [] }))).toBe(false);
-    expect(
-      ok(booking({ status: 'not-verified', rule: null, attempt: null, returnIndex: null, offers: [] })),
-    ).toBe(true);
-    expect(
-      ok(booking({ status: 'not-verified', rule: 'x', attempt: null, returnIndex: null, offers: [] })),
-    ).toBe(false);
-    expect(ok(booking({ rule: 'more-options' }))).toBe(false);
-    expect(ok(booking({ attempt: 0, returnIndex: null }))).toBe(false);
-    expect(ok(booking({ attempt: null, returnIndex: 0 }))).toBe(false);
+    const none = { attempt: null, returnIndex: null, offers: [] };
+    expect(bk(booking({ status: 'skipped', rule: 'spacing', ...none }))).toEqual([]);
+    expect(bk(booking({ status: 'skipped', rule: null, ...none }))).toEqual(['rule']);
+    expect(bk(booking({ status: 'skipped', rule: 'spacing', offers: [] }))).toEqual([
+      'attempt',
+      'returnIndex',
+    ]);
+    expect(bk(booking({ status: 'not-verified', rule: null, ...none }))).toEqual([]);
+    expect(bk(booking({ status: 'not-verified', rule: 'x', ...none }))).toEqual(['rule']);
+    expect(bk(booking({ rule: 'more-options' }))).toEqual(['rule']);
+    expect(bk(booking({ attempt: 0, returnIndex: null }))).toEqual(['returnIndex']);
+    expect(bk(booking({ attempt: null, returnIndex: 0 }))).toEqual(['attempt']);
   });
   it('offersStated, when set, is above the offers kept', () => {
-    expect(ok(booking({ offersStated: 2 }))).toBe(false);
-    expect(ok(booking({ offersStated: 41 }))).toBe(true);
+    expect(bk(booking({ offersStated: 2 }))).toEqual(['offersStated']);
+    expect(bk(booking({ offersStated: 41 }))).toEqual([]);
   });
 });
 
@@ -335,6 +356,15 @@ describe('offersComplete (spec rev 56 §6.9, R-sellers, A8)', () => {
       false,
     ],
     ['not-settled: no offer', { status: 'not-settled', rule: 'booking-view', offers: [] }, 118_000, false],
+    // R-unread: an offer the grammar refused, or priced in another currency, is an offer not read
+    ['read: no control left, but an offer unparsed', { unparsed: 1 }, 117_000, false],
+    ['read: no control left, but an offer not in GBP', { nonGbp: 2 }, 117_000, false],
+    [
+      'read: an offer unparsed, the cheapest equal to the "from" price',
+      { unparsed: 1, nonGbp: 1 },
+      118_000,
+      true,
+    ],
   ])('%s', (_name, over, fromMinor, want) => {
     expect(offersComplete(b(over), fromMinor)).toBe(want);
   });

@@ -2,11 +2,12 @@ import { z } from 'zod';
 import { columnAt } from '../datePairs/decode.js';
 import { FIGURE_BASES, PAIRING_READ, type PairingRead } from '../datePairs/pairing.js';
 import { stayCount } from '../datePairs/space.js';
-import { FLIGHT_TEXT } from '../flights/types.js';
+import { flightTextSchema } from '../flights/types.js';
 import { windowDays } from '../space/generate.js';
 import { DEFAULT_MAX_CELLS, MAX_DATE_PAIRS } from '../space/limits.js';
 import { iataSchema, isoDateSchema } from '../types/ids.js';
 import { provenanceSchema } from '../types/provenance.js';
+import { HHMM } from '../types/window.js';
 import {
   ageHoursSchema,
   coverageSummarySchema,
@@ -57,9 +58,9 @@ const BENEATH: ReadonlySet<PairingRead> = new Set<PairingRead>([
   'offers-incomplete',
 ]);
 /** A local time on the 24-hour clock as a list page states it (a pairing's legs). */
-const hhmm = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/);
+const hhmm = z.string().regex(HHMM);
 /** Page text (a seller's, a fare's) held to the flight list's rule (spec rev 56 §5.1), rendered as text only. */
-const pageText = z.string().regex(FLIGHT_TEXT);
+const pageText = flightTextSchema;
 const WHICH = ['cheapest', 'next-cheapest', 'over-limit'] as const;
 
 /** One entry per date pair, in index order: the six buckets over the airport pairs in scope and the cell counts. */
@@ -117,11 +118,6 @@ const figuresSchema = z.strictObject({
   journeyMinutes: z.array(count.nullable()),
   /** fetched by an execution created before the latest parent run (revision 50) */
   fromEarlierSearch: z.array(z.boolean()),
-  /**
-   * Spec rev 56 §6.9, §10: dense, one per figure; `within` exactly on a pairing figure. Optional until Task 21.6 fills
-   * it (R-order); a body without it reads every figure `not-read`.
-   */
-  pairingRead: z.array(pairingReadSchema).exactOptional(),
 });
 const FIGURE_COLUMNS = [
   'pair',
@@ -248,6 +244,27 @@ const PAIRING_COLUMNS = [
   'ageHours',
 ] as const satisfies ReadonlyArray<keyof typeof pairingGroupSchema.shape>;
 
+/**
+ * Spec rev 56 §10 (ruling R-sparse): one entry per figure whose read is not `not-read`, `figure` strictly ascending,
+ * `code` the read's index in `PAIRING_READ` (pinned in its order; 0, `not-read`, is never sent); a figure with no entry
+ * reads `not-read`. Sparse because a dense column of 36,400 reads (about 400 KB) took §10's worst case past 4 MiB.
+ */
+const pairingReadGroupSchema = z.strictObject({
+  figure: counts,
+  code: z.array(
+    z
+      .number()
+      .int()
+      .min(1)
+      .max(PAIRING_READ.length - 1),
+  ),
+});
+const PAIRING_READ_COLUMNS = ['figure', 'code'] as const satisfies ReadonlyArray<
+  keyof typeof pairingReadGroupSchema.shape
+>;
+/** `within`'s code: exactly a pairing figure's. */
+const WITHIN_CODE = PAIRING_READ.indexOf('within');
+
 const datePairsBodySchema = z.strictObject({
   /** the latest parent run; null before the first */
   executionId: z.string().nullable(),
@@ -289,6 +306,8 @@ const datePairsBodySchema = z.strictObject({
   gridPrice: gridPriceSchema.exactOptional(),
   /** spec rev 56: optional until Task 21.6 fills it (R-order); a body without it decodes with no pairing */
   pairing: pairingGroupSchema.exactOptional(),
+  /** spec rev 56 (R-sparse): optional until Task 21.6 fills it; a body without it reads every figure `not-read` */
+  pairingRead: pairingReadGroupSchema.exactOptional(),
 });
 type DatePairsBody = z.output<typeof datePairsBodySchema>;
 
@@ -420,16 +439,6 @@ function sameLengths<C extends string>(
 function refineFigures(v: DatePairsBody, datePairs: number, fail: Fail): boolean {
   const f = v.figures;
   if (!sameLengths(f, FIGURE_COLUMNS, 'figures', fail)) return false;
-  // why: spec rev 56 §10: the column is dense; a body without it reads every figure `not-read`
-  const reads = f.pairingRead;
-  if (reads !== undefined && reads.length !== f.pair.length) {
-    fail(
-      'length.figures.pairingRead',
-      ['figures', 'pairingRead'],
-      `figures.pairingRead has ${reads.length} entries; figures.pair has ${f.pair.length}`,
-    );
-    return false;
-  }
   const provenances = v.provenances.length;
   const origins = v.scope.origins.length;
   const destinations = v.scope.destinations.length;
@@ -444,8 +453,6 @@ function refineFigures(v: DatePairsBody, datePairs: number, fail: Fail): boolean
     if (columnAt(f.destination, j) >= destinations)
       fail('destination', ['figures', 'destination', j], 'no such destination in scope');
     const basis = columnAt(f.basis, j);
-    if ((basis === 'pairing') !== ((reads === undefined ? 'not-read' : columnAt(reads, j)) === 'within'))
-      fail('pairingRead', ['figures', 'pairingRead', j], 'pairingRead is within exactly on a pairing figure');
     if (basis === 'verified') {
       if (columnAt(f.superseded, j))
         fail('superseded', ['figures', 'superseded', j], 'superseded is for calendar figures');
@@ -510,6 +517,49 @@ function groupFigureOf(
 }
 
 /**
+ * Spec rev 56 §10 (R-sparse): the `pairingRead` group's rules: lengths; figure order and range; `within` exactly on a
+ * pairing figure, every pairing figure with an entry. Returns each entry's read by figure (an absent figure reads
+ * `not-read`), for the pairing group's rule; null when its columns differ in length.
+ */
+function refinePairingRead(
+  v: DatePairsBody,
+  pairingFigures: readonly number[],
+  fail: Fail,
+): Map<number, PairingRead> | null {
+  const reads = new Map<number, PairingRead>();
+  const g = v.pairingRead;
+  if (g === undefined) {
+    if (pairingFigures.length > 0) fail('readMissing', ['pairingRead'], 'a pairing figure reads within');
+    return reads;
+  }
+  // why: columns of different lengths cannot be read across, so the pairing group is not judged by them either
+  if (!sameLengths(g, PAIRING_READ_COLUMNS, 'pairingRead', fail)) return null;
+  let inOrder = true;
+  let valid = true;
+  for (let k = 0; k < g.figure.length; k += 1) {
+    const at = groupFigureOf(g.figure, 'pairingRead', v.figures.pair.length, k, fail);
+    if (at === null) {
+      inOrder = false;
+      continue;
+    }
+    const code = columnAt(g.code, k);
+    // why: zod runs this refinement even when a code failed the column's own check (which reports it), so such a code
+    // is read as nothing here, and the pairing group is then not judged by the reads
+    const read = Number.isInteger(code) && code > 0 ? PAIRING_READ[code] : undefined;
+    if (read === undefined) {
+      valid = false;
+      continue;
+    }
+    reads.set(at, read);
+    if ((columnAt(v.figures.basis, at) === 'pairing') !== (code === WITHIN_CODE))
+      fail('readWithin', ['pairingRead', 'code', k], 'pairingRead is within exactly on a pairing figure');
+  }
+  if (inOrder && pairingFigures.some((j) => !reads.has(j)))
+    fail('readMissing', ['pairingRead', 'figure'], 'a pairing figure reads within');
+  return valid ? reads : null;
+}
+
+/**
  * Spec rev 56 §10: the grid price and pairing groups' rules: lengths; figure order and range; the grid prices exactly
  * the pairing figures; a pairing figure has a pairing entry that is not a "from" price; a pairing entry beneath a calendar
  * figure only for the five "beneath" reads, never on a verified figure; a seller exactly when the price is an offer's
@@ -519,8 +569,8 @@ function refinePairingGroups(v: DatePairsBody, fail: Fail): void {
   const f = v.figures;
   const figures = f.pair.length;
   const pairingFigures = f.basis.flatMap((b, j) => (b === 'pairing' ? [j] : []));
-  const readOf = (j: number): PairingRead =>
-    f.pairingRead === undefined ? 'not-read' : columnAt(f.pairingRead, j);
+  const reads = refinePairingRead(v, pairingFigures, fail);
+  const readOf = (j: number): PairingRead | null => (reads === null ? null : (reads.get(j) ?? 'not-read'));
   const g = v.gridPrice;
   if (g === undefined && pairingFigures.length > 0)
     fail('gridExact', ['gridPrice'], 'a pairing figure needs its grid price');
@@ -554,7 +604,8 @@ function refinePairingGroups(v: DatePairsBody, fail: Fail): void {
     named.add(at);
     const basis = columnAt(f.basis, at);
     const isFrom = columnAt(q.isFrom, k);
-    if (basis === 'verified' || (basis === 'calendar' && !BENEATH.has(readOf(at))))
+    const read = readOf(at);
+    if (basis === 'verified' || (basis === 'calendar' && read !== null && !BENEATH.has(read)))
       fail(
         'pairingBasis',
         ['pairing', 'figure', k],

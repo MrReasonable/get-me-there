@@ -424,7 +424,7 @@ describe('encodeDatePairs and decodeDatePairs (spec §10: the provenance table i
       r[group].figure[0] = r.figures.pair.length;
       expect(() => decodeDatePairs(r), group).toThrow(new RangeError('no entry 8 in a column of 8'));
     }
-    for (const group of ['gridPrice', 'pairing'] as const) {
+    for (const group of ['gridPrice', 'pairing', 'pairingRead'] as const) {
       const r = encodeDatePairs(withPairings());
       const g = r[group];
       if (g === undefined) throw new Error(`no ${group} group`);
@@ -496,7 +496,7 @@ function withPairings(): DecodedDatePairs {
   };
 }
 
-describe('the pairing figure on the wire (spec rev 56 §10: gridPrice and pairing sparse, pairingRead dense)', () => {
+describe('the pairing figure on the wire (spec rev 56 §10, R-sparse: gridPrice, pairing and pairingRead sparse)', () => {
   it('round-trips the grid price, the pairing group and pairingRead, and parses against the contract', () => {
     const x = withPairings();
     const wire = encodeDatePairs(x);
@@ -504,11 +504,11 @@ describe('the pairing figure on the wire (spec rev 56 §10: gridPrice and pairin
       [],
     );
     expect(decodeDatePairs(wire)).toEqual(x);
-    expect(wire.figures.pairingRead).toHaveLength(wire.figures.pair.length);
     const j = wire.figures.pair.indexOf(1);
     const k = wire.figures.pair.indexOf(3);
-    expect(wire.figures.pairingRead?.[j]).toBe('within');
-    expect(wire.figures.pairingRead?.[k]).toBe('sellers-not-read');
+    // why: R-sparse: an entry only for a read other than not-read, its code the index in PAIRING_READ (6 within,
+    // 4 sellers-not-read)
+    expect(wire.pairingRead).toEqual({ figure: [j, k], code: [6, 4] });
     expect(wire.gridPrice?.figure).toEqual([j]);
     expect(wire.gridPrice?.pricePence).toEqual([56_400]);
     expect(wire.pairing?.figure).toEqual([j, k]);
@@ -539,16 +539,12 @@ describe('the pairing figure on the wire (spec rev 56 §10: gridPrice and pairin
   it('a figure without the new fields (an api before Task 21.6) encodes as not-read, with no group entry', () => {
     const { gridPrice: _g, pairing: _p, pairingRead: _r, ...older } = calendarFigure();
     const wire = encodeDatePairs(decoded({ pair: (i) => (i === 0 ? { figure: older } : {}) }));
-    // why: every figure not-read, so the dense column is left out (§10's bound); it decodes as not-read
-    expect(wire.figures.pairingRead).toBeUndefined();
     expect(decodeDatePairs(wire).pairs[0]?.figure?.pairingRead).toBe('not-read');
-    expect([wire.gridPrice?.figure, wire.pairing?.figure]).toEqual([[], []]);
+    expect([wire.gridPrice?.figure, wire.pairing?.figure, wire.pairingRead?.figure]).toEqual([[], [], []]);
   });
 
   it('a response without the new column and groups decodes with no grid price, no pairing and not-read', () => {
-    const { gridPrice: _g, pairing: _p, ...older } = encodeDatePairs(workedExample());
-    const { pairingRead: _r, ...figures } = older.figures;
-    const body = { ...older, figures };
+    const { gridPrice: _g, pairing: _p, pairingRead: _r, ...body } = encodeDatePairs(workedExample());
     expect(datePairsResponseSchema.safeParse(body).error?.issues ?? []).toEqual([]);
     const pairs = decodeDatePairs(body).pairs.flatMap((p) => (p.figure === null ? [] : [p.figure]));
     expect(pairs.length).toBeGreaterThan(0);

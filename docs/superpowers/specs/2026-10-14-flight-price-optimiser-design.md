@@ -2215,10 +2215,15 @@ the web share):
   stored limits equal today's `flightLimitsOf` (deep equality), and the
   booking read of that pairing kept offers that are complete: `read` with its
   cheapest offer equal to the return's "from" price, or with no further
-  expansion control and no grouped seller control left (`offersComplete`), or
-  `expand-failed` with its cheapest offer read equal to the return's "from"
-  price. A fresh verified figure still wins (§11's precedence holds above
-  it). The figure's price is then the cheapest offer's stated price, shown
+  expansion control, no grouped seller control and no offer left unread
+  (none the grammar refused, `unparsed`, and none priced in another currency,
+  `nonGbp`: ruling R-unread) (`offersComplete`), or `expand-failed` with its
+  cheapest offer read equal to the return's "from" price. Only a fresh
+  verified figure still wins (§11's precedence): a fresh, complete pairing
+  replaces a stale verified figure as it replaces a calendar one (ruling
+  R-stale-verified), keyed by the cell of the date pair's best calendar price,
+  which it keeps as its grid price; with no calendar price the stale verified
+  figure stays. The figure's price is then the cheapest offer's stated price, shown
   through `PriceCell` with the flight list's provenance (source "the browser
   worker's flight list", its fetch time, "the lowest seller price read for
   these two flights", "not checked with the airline", the calendar style,
@@ -3873,9 +3878,12 @@ datePairsResponseSchema = {
     journeyMinutes: (number | null)[];   // total travel time when the figure's source states it
     fromEarlierSearch: boolean[];   // fetched by an execution created before the latest parent run (a pairing: the list's fetchedAt
                                 // before the latest parent run's startedAt)
-    pairingRead: PairingRead[];   // dense, one per figure: 'not-read' | 'outbound-only' | 'no-pairing-read' | 'over-limit' |
-                                // 'sellers-not-read' | 'offers-incomplete' | 'within' | 'within-older' | 'within-other-limits' (§6.9);
-                                // 'within' exactly on a pairing figure
+  };
+  pairingRead: {                // sparse: one entry per figure whose read is not 'not-read' (absent: 'not-read')
+    figure: number[];           // index into the figures columns, strictly ascending
+    code: number[];             // the index in PAIRING_READ, pinned in this order: 0 'not-read' (never sent), 1 'outbound-only',
+                                // 2 'no-pairing-read', 3 'over-limit', 4 'sellers-not-read', 5 'offers-incomplete', 6 'within',
+                                // 7 'within-older', 8 'within-other-limits' (§6.9); 'within' exactly on a pairing figure
   };
   gridPrice: {                  // sparse: one entry per pairing figure, the calendar price it replaced
     figure: number[];           // index into the figures columns, strictly ascending
@@ -3912,13 +3920,13 @@ datePairsResponseSchema = {
 
 The contract's refinement rejects any response whose `pairs` columns are not
 all `days × stays` long, whose `figures` columns differ in length or whose
-`cheaperCached`, `times`, `gridPrice` or `pairing` columns do, whose
-`pairingRead` column is not the figures' length, whose `pair` indices or any
+`cheaperCached`, `times`, `gridPrice`, `pairing` or `pairingRead` columns do, whose
+`pairingRead` group holds a `not-read` code or one outside `PAIRING_READ`, whose `pair` indices or any
 sparse group's `figure` indices are not strictly ascending and in range, whose
 `gridPrice` entries are not exactly the pairing figures, whose pairing figure
 has no `pairing` entry or a pairing entry with `isFrom` true, whose
 `pairingRead` is `within` on any other basis or other than `within` on a
-pairing figure, whose provenance,
+pairing figure (a figure with no entry reads `not-read`), whose provenance,
 origin or destination index is out of range, any of whose six bucket
 counts or `reused`, `selected`, `itinerarySearched`, `onDemand`,
 `unconfirmed` or `partiallyVerified` values for a date pair is not an
@@ -3938,7 +3946,7 @@ record per date pair (departure and return dates, nights, buckets,
 verification counts, and the figure as a full price cell with its complete
 provenance and its airport pair, its grid price and its pairing each as a full
 price cell of their own, and its `pairingRead`; a response without the new
-column and groups decodes with no grid price, no pairing and `not-read`),
+groups decodes with no grid price, no pairing and `not-read`),
 and the web reads only the decoder's output, so no amount reaches
 `PriceCell` without its provenance (§11). The scoped `/results` read's
 `datePairFigure` carries the same basis, grid price and `pairingRead` from
@@ -3965,9 +3973,11 @@ documentation in the work brief). Measured on synthetic responses
 the worked example (182 days × 12 nights × 4 airport pairs, 60% priced),
 about 3.5 MiB (180 KiB compressed) for 36,400 date pairs every one with a
 calendar figure, about 3.6 MiB (192 KiB compressed) for the same with about
-300 verified figures carrying times and a cheaper cached price (the
-`pairingRead` column, one short value a figure, and the two sparse groups of
-at most a few hundred entries add little), and about
+300 verified figures carrying times and a cheaper cached price (the three
+sparse groups of the pairing figure, `gridPrice`, `pairing` and
+`pairingRead`, hold entries only for figures with a flight read, a few hundred
+at most, and add little; a dense `pairingRead` column would add about 400 KB at
+36,400 figures, ruling R-sparse), and about
 1.4 MiB (80 KiB compressed) for 50,000 cells (250 days × 50 nights × 4
 airport pairs, every cell priced, 20 runs deep); the bound the route's test
 holds is **4 MiB uncompressed and 512 KiB compressed**.
@@ -4303,11 +4313,13 @@ merged into price.
     by the precedence the calendar day had: the cheapest class-verified price
     that is not stale (`STALE_AFTER_HOURS`), else the fresher of the
     cheapest stale verified price and the cheapest calendar price (unknown
-    age loses to known; ties go to verified), else none; a calendar figure
-    whose cell has a pairing that leads (§6.9: the cheapest offer read for a
+    age loses to known; ties go to verified), else none; a calendar figure,
+    or a stale verified figure, whose date pair's best calendar price has a
+    pairing that leads in its cell (§6.9: the cheapest offer read for a
     pairing within the limits, fresh, read under the current limits, its
-    offers complete) is replaced by that **pairing figure**, its grid price
-    kept beneath it. A
+    offers complete) is replaced by that **pairing figure**, the calendar
+    price kept beneath it as its grid price; only a fresh verified figure
+    stays above a pairing (ruling R-stale-verified). A
     partially-verified price is never the figure (its count shows under how
     far checked) and a `failed` one never is (§6.9). A verified figure that
     hides a cheaper current (not superseded) calendar price says "cached from
@@ -5509,7 +5521,11 @@ coupling CHECK compares each pair on its own (§7); the browser window carries o
 (§8.2); the monthly bound plans what the pages allow (§8.1); the guard's reservation stop applies to return-phase
 requests only (§2); `pairingRead` has nine values (§6.9, §10); and the Capabilities row reads the sellers' offers
 (§2). Plan decision 69's "until a recording confirms the flow the worker clicks nothing" is superseded beyond the
-Cheapest flow by the verified activations of §2.
+Cheapest flow by the verified activations of §2. On Task 21.2's review: `pairingRead` is a sparse group keyed by
+figure, its codes pinned in `PAIRING_READ`'s order (R-sparse, §10); an offer the grammar refused or priced in another
+currency counts as unread, so such a booking is complete only when its cheapest offer equals the return's "from" price
+(R-unread, §6.9); and a fresh, complete pairing replaces a stale verified figure, only a fresh verified one staying
+above it (R-stale-verified, §6.9, §11).
 
 **Builder's choices.** The outbound is selected over every flight read for the cell, and the pick is kept among the
 30 the answer carries (§2). The step's candidates stay ranked by the calendar figures, so which pairs are read does

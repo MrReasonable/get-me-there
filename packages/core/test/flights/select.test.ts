@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   compareFlights,
   type FlightLimits,
+  fitsLimits,
   flightLimitsOf,
   flightLimitsSchema,
   selectOutbound,
@@ -78,6 +79,13 @@ describe('selectOutbound (spec rev 56 §6.2: the first fitting flight in compare
     const b = flight(600, 90, { carriers: ['QQ Air'] });
     expect(selectOutbound([b, a], LIMITS)).toMatchObject({ index: 0, flight: b });
     expect(selectOutbound([a, b], LIMITS)).toMatchObject({ index: 0, flight: a });
+  });
+
+  it('equal on price and duration: fewer stops first, in either order', () => {
+    const one = flight(600, 90, { stops: 1 });
+    const direct = flight(600, 90);
+    expect(selectOutbound([one, direct], { ...LIMITS, maxStops: null })).toMatchObject({ index: 1 });
+    expect(selectOutbound([direct, one], { ...LIMITS, maxStops: null })).toMatchObject({ index: 0 });
   });
 
   it('returns the very flight object at the index it names', () => {
@@ -169,11 +177,30 @@ describe('flightLimitsOf and flightLimitsSchema (spec rev 56 §6.2, §5.1)', () 
       flightLimitsSchema.safeParse({ ...ok, departureWindowLocal: { from: '6:00', to: '20:00' } }).success,
     ).toBe(false);
     expect(flightLimitsSchema.safeParse({ ...ok, extra: 1 }).success).toBe(false);
+    // why: strict under the limits, so a stored or sent window carries nothing else (review finding 7)
+    const window = { from: '06:00', to: '23:00' };
+    expect(flightLimitsSchema.safeParse({ ...ok, arrivalWindowLocal: window }).success).toBe(true);
+    expect(flightLimitsSchema.safeParse({ ...ok, arrivalWindowLocal: { ...window, tz: 'x' } }).success).toBe(
+      false,
+    );
   });
 
   it('accepts a body without maxStops (optional until Task 21.7), refuses maxStops: undefined', () => {
     const { maxStops: _m, ...without } = LIMITS;
     expect(flightLimitsSchema.parse(without)).toEqual(without);
     expect(flightLimitsSchema.safeParse({ ...without, maxStops: undefined }).success).toBe(false);
+  });
+});
+
+describe('fitsLimits (spec rev 56 §6.2: every limit met on that leg; the one rule pairing.ts and returns.ts share)', () => {
+  it('is every withinLimits flag, on either leg', () => {
+    const l: FlightLimits = { ...LIMITS, departureWindowLocal: { from: '08:00', to: '20:00' } };
+    const early = flight(600, 90, { departsLocal: '06:10' });
+    expect(fitsLimits(early, l)).toBe(false);
+    expect(fitsLimits(early, l, 'outbound')).toBe(false);
+    expect(fitsLimits(early, l, 'return')).toBe(true);
+    expect(fitsLimits(flight(600, 90, { stops: 2 }), l, 'return')).toBe(false);
+    expect(fitsLimits(flight(1501, 90), l, 'return')).toBe(false);
+    expect(fitsLimits(flight(600, 90), l)).toBe(true);
   });
 });

@@ -36,6 +36,7 @@ export {
   cheapestPairing,
   FIGURE_BASES,
   type FigureBasis,
+  type ListPairingRead,
   PAIRING_READ,
   type Pairing,
   type PairingCandidate,
