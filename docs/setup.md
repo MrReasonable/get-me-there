@@ -171,7 +171,8 @@ the interruption does.
 
 `pnpm gmt smoke` spends: before it sends anything it prints the route's worst case per
 provider from the app (with today's settings, up to 4 SearchApi credits and one browser page,
-with the longest that page may take)
+with the longest that page may take; the flight-list read of a date pair costs 1 page, or 2 with a
+second outbound, each spaced like any page, and is not part of this smoke)
 and the SearchApi credits tool runs have already used in this window, refuses when the SearchApi
 trial has fewer credits left, and asks you to type `yes` for the running total. In scripts `--yes`
 skips the question, and once earlier tool runs have used credits in the window it also needs
@@ -1187,7 +1188,11 @@ differing, which a re-run repairs. No key is ever printed.
 ### Recordings
 
 The search-form check is mandatory: the worker refuses to start while `FORM_VERIFIED` is false. The 2026-10-18
-recordings set it, with the results, Cheapest and no-flights flags. A page change that needs new recordings sets them
+recordings set it, with the results, Cheapest and no-flights flags. A recording session also records the
+`select-outbound` kind (`record --select-outbound`, which chooses the cheapest outbound on a results page and records what
+follows; `--select-return` goes on to the booking options), and only a machine whose session set
+`RETURN_SELECT_VERIFIED` and `BOOKING_SELECT_VERIFIED` reads return flights and sellers (the operator's Mac at present;
+the other entries keep them false). A page change that needs new recordings sets them
 back. Record with the default data directory (never a `CAMOUFOX_DATA_DIR` override): the
 lock, the spacing and the cool-down are kept there, so a recording and a running worker can never load pages at once.
 

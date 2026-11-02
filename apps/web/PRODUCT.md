@@ -80,10 +80,18 @@ the operator's own machine, which must be awake for it. Setup and operation happ
   budget fit. A date pair's detail (its itineraries and calendar prices, one panel per airport
   pair) opens from the board, the overview or an alert email, not from the nav.
 - **Flight lists:** for the cheapest date pairs the browser worker reads Google Flights' own
-  list of outbound flights (times, changes, airline, the lowest round trip listed with each) and
-  the page links to the same search in Google Flights. It is not a fare check: outbound only,
-  economy only, no return leg, and it never changes a price, rank or coverage. Each read counts
-  against the browser's page allowance. Without the worker the page says flight times need it.
+  list of outbound flights (times, changes, airline, the lowest round trip listed with each),
+  selects the cheapest outbound within the search's journey, stops and time limits, and reads the
+  return flights Google lists with it (and the next outbound's, from a fresh load of the page,
+  when none fits), each priced as Google words it ("from"). It then opens the booking options of
+  the shown pairing and reads the offers Google listed. The cheapest of the sellers read leads
+  the date pair while the list is fresh and the offers are complete, with the grid price beside
+  it. It is not a fare check, and the app does not know which price is bookable: economy only,
+  one or two outbounds' returns, not every pairing, and booking stays on Google (the app opens no
+  seller). Return flights and sellers are read only on worker machines whose recording session
+  set the flags (the operator's Mac at present). Coverage and the buckets never change. Each read
+  counts against the browser's page allowance. Without the worker the page says flight times
+  need it.
 - **Price sources:**
   - Aviasales cache (Travelpayouts): free, cached prices up to 48 hours old.
   - Google Flights via SearchApi: paid per call; date grid and itinerary search with booking

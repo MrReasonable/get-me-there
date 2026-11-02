@@ -58,6 +58,12 @@ export const SMOKE = {
   cardAction: '[data-card] [data-testid="card-actions"] :is(a, button)',
   /** The flights block of a date pair on a search's page (absent where flight lists cannot be read). */
   flightsBlock: '[data-testid="flights-block"]',
+  /**
+   * The pairing section of a read list: the Back line, the other returns and the seller's price (WP21 Task 21.8). The
+   * fixture-only smoke cannot show one (the fixture provider has no flight lists), so no e2e run uses it; the jsdom
+   * test pins that it matches a rendered block with returns.
+   */
+  pairing: '[data-testid="flights-pairing"]',
   /** The one line under the board when flight lists cannot be read here. */
   flightsUnavailable: '[data-testid="flights-unavailable"]',
 } as const;

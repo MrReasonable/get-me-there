@@ -81,6 +81,8 @@ test('fixture mode: a new search, Search now, then Dates, the date pair detail a
   );
   // test-013: the fixture provider has no flight lists, so the page says so and offers neither a read nor a Google
   // Flights link beside synthetic prices
+  // (WP21 Task 21.8: the same holds with the return leg. No e2e run can show a pairing, so SMOKE.pairing is pinned by
+  // the jsdom selectors test, and the @phone project asserts only what it can see.)
   await expect(page.locator(SMOKE.flightsUnavailable)).toHaveText(COPY.flights.unavailable);
   await expect(page.locator(SMOKE.flightsBlock)).toHaveCount(0);
   await expect(page.getByRole('link', { name: OPEN_LINK })).toHaveCount(0);
@@ -372,6 +374,8 @@ test('at 375px a search’s page with a flights block does not scroll sideways @
           optionsUnparsed: 0,
           optionsOtherCell: 0,
           resultsStated: null,
+          // why: WP21 (spec rev 56 §10): a list read before the return leg existed has no return read
+          returns: null,
         },
         listOtherPair: null,
       };
@@ -385,6 +389,8 @@ test('at 375px a search’s page with a flights block does not scroll sideways @
         refreshHours: 24,
         monthlyPagesLeft: 1390,
         runPages: 110,
+        // why: WP21 Task 21.7: required; the pages one on-demand read plans (2 while the worker's flags are unread)
+        pagesPlanned: 2,
         reading: null,
         pairs,
       }),

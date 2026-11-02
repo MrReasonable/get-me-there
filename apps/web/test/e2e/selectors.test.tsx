@@ -10,7 +10,7 @@ import { ResultsView } from '../../src/views/Results/ResultsView.js';
 import { SearchesView } from '../../src/views/Searches/SearchesView.js';
 import { workedDates } from '../fixtures.dates.js';
 import { API, DETAIL_PAIR, DETAIL_SEARCH, definition, resultsResponse, verifiedRow } from '../fixtures.js';
-import { flightList, flightPair, searchCard } from '../fixtures.searches.js';
+import { flightList, flightPair, pairingList, searchCard } from '../fixtures.searches.js';
 import { serveCards, serveFlightLists } from '../msw/searchesHandlers.js';
 import { server } from '../msw/server.js';
 import { renderWithProviders } from '../render.js';
@@ -173,5 +173,17 @@ describe('the Playwright smoke’s WP20 selectors match the rendered markup (Tas
     await findBoard();
     await waitFor(() => expect(document.querySelector(SMOKE.flightsBlock)).not.toBeNull());
     expect(screen.getAllByRole('link', { name: /^Open in Google Flights/ }).length).toBeGreaterThan(0);
+  });
+
+  it('flights: a list with returns draws the pairing section the smoke names (WP21 Task 21.8)', async () => {
+    server.use(
+      serveFlightLists((dep, ret) =>
+        flightPair(dep, ret, { list: pairingList({ departureDate: dep, returnDate: ret }) }),
+      ),
+    );
+    renderDates({ body: workedDates() });
+    await findBoard();
+    await waitFor(() => expect(document.querySelector(SMOKE.pairing)).not.toBeNull());
+    expect(document.querySelector(SMOKE.flightsBlock)?.contains(one(SMOKE.pairing))).toBe(true);
   });
 });

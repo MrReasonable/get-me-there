@@ -55,7 +55,9 @@ that's all we can get", with flight details "with whatever we can get".
 - Changing what the engine searches or how it pages Google's date grid.
 - Removing the set-up views (Providers, Alerts, Status, History) or the budget machinery; they stay, off the
   main path.
-- The return leg's flight details (§6.3).
+- As first designed, the return leg's flight details (§6.3). Superseded: spec revision 56 (WP21) reads the return
+  flights of the one or two selected outbounds and the sellers' offers for the shown pairing, and the main spec is
+  current; what this document says of an outbound-only read is the first build.
 
 **Anti-goals (a failure even if it works)**
 
@@ -212,7 +214,11 @@ generated link (`core/results/searchLink.ts`, re-checked against the allowlist o
 URL form the worker loads (returning, `hl=en-GB`, `gl=` the point of sale) so the page opened is the page read,
 with the search-link label beside it (*ruled on the brief's review*). The flight read's outcome is stated on the
 date pair's main line beside its price ("Google's list: from £92, 11:44" / "not in Google's list" / "Google's
-list showed no flights"); rank, price and coverage stay unchanged (*ruled on the brief's review*).
+list showed no flights"); rank, price and coverage stay unchanged (*ruled on the brief's review*). **Superseded by
+spec revision 56 (WP21):** where the worker's recording session set the return and booking flags (the operator's Mac at
+present), the block also shows the return flights and the sellers' offers for the selected outbound, the cheapest of
+the sellers read leads the date pair while the list is fresh and the offers are complete, and the read costs 1 page,
+or 2 with a second outbound; the main spec is current and this paragraph mirrors it.
 
 **Ties** are stated once: "4 date pairs tie at £86, listed by shortest flight time". Within a tie, pairs with
 flights read sort by shortest outbound flight time, then fewest changes, then earliest departure; pairs
@@ -302,10 +308,10 @@ names the table*), not a fare offer and not an itinerary.
 
 ### 6.3 What it is not
 
-It is not verification. It has no flight numbers, no airport codes per segment and, as first built, **no return
-leg** (the list shows outbound flights priced as round trips; spec revision 56, WP21, adds the return flights
-listed with at most two selected outbounds, each with the round-trip total the page stated for that pairing, and
-the main spec is current), so it cannot build a `RawOffer` or an itinerary identity (§2 l.449, §6.4). Therefore:
+It is not verification. It has no flight numbers and no airport codes per segment. As first built it had **no return
+leg** (the list shows outbound flights priced as round trips); spec revision 56, WP21, adds the return flights
+listed with the one or two selected outbounds (not every pairing), each with the round-trip total the page stated for that pairing
+(the main spec is current). Still, it cannot build a `RawOffer` or an itinerary identity (§2 l.449, §6.4). Therefore:
 
 - it carries no verdict class and never says "verified";
 - constraints are shown against it only where the read covers them, and say what they cover: "outbound 26h:
