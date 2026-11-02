@@ -1,3 +1,5 @@
+import { poundsMinor } from './pence.js';
+
 /**
  * The grammar of one result's accessible name (spec §2 "parsed by one dated grammar"; brief Task 14.3; PIE-10,
  * PIE-R2-10, TS2-04), dated like the selectors. A strict whole-name match drops anything Google rewords instead of
@@ -15,6 +17,8 @@
 // airports in its city; re-dated 2026-10-31 (spec rev 55 §2, WP20 Task 20.7): the leg sentence's times and arrival
 // date are captured, in optional groups, so a name without them reads as before (test/recorded.test.ts pins list mode)
 export const GRAMMAR_VERSION = '2026-10-31-times';
+// why: spec rev 56 §2: a return option's name is read by this same grammar (its price clause is the outbound's "From
+// <price> British pounds round trip total.", 38 of 38 recorded return names): no alias and no second version
 
 export interface Interstitial {
   sentence: string;
@@ -155,7 +159,8 @@ export function parseOptionName(
   const stops = group(m, 'stops');
   const inter = group(m, 'inter');
   return {
-    amountMinor: Number(group(m, 'price').replaceAll(',', '')) * 100,
+    // why: the 21.0 Lows: minor units by the currency's ISO 4217 exponent (the grammar's phrase is pounds), one helper
+    amountMinor: poundsMinor(group(m, 'price')),
     stops: /^Non-?stop$/.test(stops) ? 0 : Number.parseInt(stops, 10),
     carriers: group(m, 'carriers'),
     departsOn: { month, day: Number(group(m, 'day')) },

@@ -1325,6 +1325,26 @@ describe('record --select-return: the more-booking-options expansion', () => {
     expect(await record(t.ctx(['--select-return', ...Q]), cfg, t.deps)).toBe(0);
     expect(facts(t).steps[2].after.expansion.cheapestVsFrom).toBe('unknown');
   });
+  // why: the 21.0 Lows (carried into Task 21.3): the currency is read from each offer's own phrase, never assumed, so a
+  // mixed page (pounds and euros) is unknown even when its cheapest pound offer equals the return's price
+  it('a mixed-currency expansion (pounds beside euros) is compared as unknown, never as pounds', async () => {
+    const t = setup(
+      script({
+        first: offers(ABOVE, true),
+        onMore: () => [
+          offers(
+            [
+              'Continue to book with QQ Air for 451 British pounds',
+              'Continue to book with QQ Air for 400 Euros',
+            ],
+            false,
+          ),
+        ],
+      }),
+    );
+    expect(await record(t.ctx(['--select-return', ...Q]), cfg, t.deps)).toBe(0);
+    expect(facts(t).steps[2].after.expansion.cheapestVsFrom).toBe('unknown');
+  });
   it('a further expansion control and a cheapest offer below the return’s price are recorded as such', async () => {
     const below = [
       'Continue to book with QQ Air for 470 British pounds',

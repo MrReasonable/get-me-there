@@ -1,6 +1,6 @@
 import { asIata, asIsoDate } from '@gmt/core';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { readList, tabPriceMinor } from '../src/list.js';
+import { readList, readOptions, tabPriceMinor } from '../src/list.js';
 
 const REQ = {
   mode: 'list' as const,
@@ -130,5 +130,16 @@ describe('readList: unread times and dates count as unparsed (spec rev 55 §2)',
     expect([r.optionsUnparsed, r.optionsOtherCell, r.parsedForThisCell, r.minMinor]).toEqual([
       4, 0, 1, 47_800,
     ]);
+  });
+});
+
+// why: spec rev 56 §2 (WP21 Task 21.3): the return phase activates an option by its own name, so the cell's options keep it
+describe('readOptions keeps each option’s name (spec rev 56 §2)', () => {
+  it('returns each parsed option of the cell with the name it was read from, in page order; readList is unchanged', () => {
+    const names = [name(478), null, name(300, { on: 'Friday, November 6' }), name(451)];
+    const r = readOptions(facts(names), REQ);
+    expect(r.mine.map((m) => m.name)).toEqual([name(478), name(451)]);
+    expect(r.mine.map((m) => m.option.amountMinor)).toEqual([47_800, 45_100]);
+    expect(readList(facts(names), REQ)).toEqual(r.list);
   });
 });

@@ -121,6 +121,19 @@ describe('readFlights (spec rev 55 §2: the 30 cheapest of the cell’s options,
       r.flights.length + r.optionsUnparsed + r.optionsOtherCell + (r.parsedForThisCell - r.flights.length),
     ).toBe(names.length);
   });
+  // why: spec rev 56 §2 (WP21 Task 21.3): the return phase selects among every flight read for the cell and activates it
+  // by its own name, so the reader keeps both, never in the answer
+  it('reports every flight read with its name (parsed, before the cut) and the kept flights’ names aligned', () => {
+    const r = readFlights(f, REQ);
+    expect(r.parsed).toHaveLength(35);
+    expect(r.parsed.map((p) => p.flight.amountMinor)).toEqual(cellPounds.map((p) => p * 100));
+    expect(r.parsed[30]?.name).toBe(names[32]);
+    expect(r.names).toHaveLength(30);
+    r.flights.forEach((fl, i) => {
+      const at = r.parsed.findIndex((p) => p.name === r.names[i]);
+      expect(r.parsed[at]?.flight).toEqual(fl);
+    });
+  });
   it('each flight carries its pence, times, day offset, duration, stops, carriers and operator', () => {
     const r = readFlights(
       facts([

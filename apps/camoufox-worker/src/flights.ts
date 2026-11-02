@@ -28,6 +28,16 @@ export interface FlightsRead extends ListRead {
   listed: Listed;
   /** The 30 cheapest of the cell's flights, in page order. */
   flights: ListedFlight[];
+  /**
+   * Spec rev 56 §2 (WP21 Task 21.3): each kept flight's link name, aligned with `flights`. Never in an answer: the
+   * return phase activates the selected outbound by it.
+   */
+  names: string[];
+  /**
+   * Every flight read for the cell, before the 30-cut, in page order, each with its name: the return phase's selection
+   * runs over these (a pick outside the 30 replaces the dearest kept non-pick), and the counts come from their number.
+   */
+  parsed: Array<{ flight: ListedFlight; name: string }>;
 }
 
 const DAY_MS = 86_400_000;
@@ -61,9 +71,10 @@ export function dayOffset(
  * One name as a flight list stores it (spec rev 55 §2; sec-004): every format character (bidi overrides, zero-width
  * marks, U+FEFF) removed first, so none is ever read as a space; then every whitespace run (tabs and line breaks
  * included) a single space, any remaining control character removed, spaces collapsed again and the name trimmed. The
- * length cap and the character rule are the schema's, which refuses rather than truncates.
+ * length cap and the character rule are the schema's, which refuses rather than truncates. Spec rev 56 §2: the return
+ * reader and the offer reader clean their names by this one rule.
  */
-function clean(s: string): string {
+export function cleanName(s: string): string {
   return s
     .replace(/\p{Cf}/gu, '')
     .replace(/\s+/gu, ' ')
@@ -74,7 +85,7 @@ function clean(s: string): string {
 
 /** The marketing carriers as the name lists them: split on ", " and " and ", each cleaned. */
 export function splitCarriers(s: string): string[] {
-  return s.split(/, | and /).map(clean);
+  return s.split(/, | and /).map(cleanName);
 }
 
 /** One option as a flight, or null when the flight schema refuses it (counted unparsed). */
@@ -88,7 +99,7 @@ function flightOf(p: ParsedOption, departureDate: IsoDate): ListedFlight | null 
     durationMinutes: p.durationMinutes,
     stops: p.stops,
     carriers: splitCarriers(p.carriers),
-    operatedBy: p.operatedBy === null ? null : clean(p.operatedBy),
+    operatedBy: p.operatedBy === null ? null : cleanName(p.operatedBy),
     amountMinor: p.amountMinor,
   });
   return f.success ? f.data : null;
@@ -100,23 +111,24 @@ export function readFlights(
   interstitials: readonly Interstitial[] = INTERSTITIALS,
 ): FlightsRead {
   const { list, mine } = readOptions(f, req, interstitials);
-  const read: Array<{ at: number; flight: ListedFlight }> = [];
+  const read: Array<{ at: number; flight: ListedFlight; name: string }> = [];
   for (const p of mine) {
-    const flight = flightOf(p, req.departureDate);
-    if (flight !== null) read.push({ at: read.length, flight });
+    const flight = flightOf(p.option, req.departureDate);
+    if (flight !== null) read.push({ at: read.length, flight, name: p.name });
   }
   // why: the 30 cheapest, ties in page order, then shown in page order (spec rev 55 §2)
   const kept = [...read]
     .sort((a, b) => a.flight.amountMinor - b.flight.amountMinor || a.at - b.at)
     .slice(0, FLIGHT_LIST_MAX_FLIGHTS)
-    .sort((a, b) => a.at - b.at)
-    .map((x) => x.flight);
+    .sort((a, b) => a.at - b.at);
   const failed = mine.length - read.length;
   return {
     ...list,
     optionsUnparsed: list.optionsUnparsed + failed,
     parsedForThisCell: read.length,
     listed: kept.length > 0 ? 'flights' : 'none-for-cell',
-    flights: kept,
+    flights: kept.map((x) => x.flight),
+    names: kept.map((x) => x.name),
+    parsed: read.map((x) => ({ flight: x.flight, name: x.name })),
   };
 }

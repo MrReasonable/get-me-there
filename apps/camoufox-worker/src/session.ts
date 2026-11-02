@@ -16,21 +16,16 @@ import {
 } from '@gmt/core';
 import { checkAccountCookies } from './accountCookies.js';
 import { type PageBudget, pageBudget } from './budget.js';
-import { classifyPageWithRule } from './classify.js';
 import type { CooldownStore } from './cooldown.js';
 import {
   type ContextLike,
   createDriver,
   type Driver,
-  LOOKUP_TIMEOUT_MS,
   type PageLike,
-  POLL_TIMEOUT_MS,
   pollUntilSettled,
-  runStep,
   type Settled,
 } from './driver.js';
 import { readFlights } from './flights.js';
-import { checkForm } from './form.js';
 import { readGrid } from './gridSession.js';
 import { installGuard } from './guard.js';
 import { readList } from './list.js';
@@ -38,6 +33,7 @@ import type { MonthlyCounter } from './monthly.js';
 import type { Pacer } from './pacer.js';
 import type { Refusal } from './refusal.js';
 import { SELECTORS, type Selectors } from './selectors.js';
+import { servedSequence } from './served.js';
 import { readBack, type SocsCapture, socsCookie } from './socs.js';
 import { bounded, DeadlineExceeded, type Timers } from './timers.js';
 import { pageUrl } from './url.js';
@@ -421,86 +417,53 @@ export class PageSession {
     started: number,
   ): Promise<{ answer: WorkerAnswer; stop: BlockedPage | null; rule?: string }> {
     const S = this.S;
-    let d = budget.d;
-    const poll = (view: 'best' | 'cheapest') =>
-      pollUntilSettled(driver, d, this.d.timers, this.pollMs, S, {
-        view,
+    // why: WP21 Task 21.3: the served sequence is one module (served.ts), run alike by this first view, the return
+    // phase's reload and the recorder; its Cheapest flow takes `budget.next` here (ruling of 2026-10-18: the same page
+    // timeout again from the click, never past twice that from the start)
+    const served = await servedSequence(
+      {
+        driver,
+        S,
+        timers: this.d.timers,
         log: this.d.log,
+        pollMs: this.pollMs,
         startedAt: started,
-      });
-    let settled: Settled = await poll('best');
-    let fellBack = false;
-    if (settled.kind.kind === 'blocked')
-      return {
-        answer: this.blockedPlaceholder(settled.kind.page),
-        stop: settled.kind.page,
-        rule: settled.rule,
-      };
+        request: req,
+      },
+      budget.d,
+      () => budget.next(),
+    );
+    if (served.kind === 'stop')
+      return { answer: this.blockedPlaceholder(served.page), stop: served.page, rule: served.rule };
     // why: ruling B8: Google's own no-flights line is answered here, before any reader runs; on a flights page it is
     // a flights answer, listed 'no-flights', with no flight and nothing else read
-    if (settled.kind.kind === 'no-flights')
+    if (served.kind === 'no-flights')
       return {
         answer:
           req.mode === 'flights' ? this.noFlightsAnswer() : this.cells({ status: 'no-flights' }, 'unknown'),
         stop: null,
       };
-    const form = checkForm(await driver.formFacts(d), req);
-    if (form !== 'ok')
-      return {
-        answer: this.blockedPlaceholder('unrecognised'),
-        stop: 'unrecognised',
-        rule: `search-form:${form}`,
-      };
+    const d = served.d;
+    let settled: Settled = served.shown;
+    // why: spec rev 55 §2: a flights answer names the view it read: the Cheapest view, the Best view after the
+    // Cheapest flow failed, or (null) the Best view where no Cheapest flow ran
+    const view = served.view;
+    const fellBack = view === 'best-fallback';
     // why: the worker clicks only flows its selectors module marks verified (PIE-09), re-reading the facts after each.
     const after = async (
-      view: 'best' | 'cheapest',
+      v: 'best' | 'cheapest',
     ): Promise<{ answer: WorkerAnswer; stop: BlockedPage; rule: string } | null> => {
-      settled = await poll(view);
+      settled = await pollUntilSettled(driver, d, this.d.timers, this.pollMs, S, {
+        view: v,
+        log: this.d.log,
+        startedAt: started,
+      });
       if (settled.kind.kind === 'results') return null;
       const page = settled.kind.kind === 'blocked' ? settled.kind.page : 'unrecognised';
       // why: a no-flights page after a click names that, as the recorder does (`no-flights-after-click`)
       const rule = settled.kind.kind === 'blocked' ? settled.rule : `${settled.kind.kind}-after-click`;
       return { answer: this.blockedPlaceholder(page), stop: page, rule };
     };
-    // why: spec rev 55 §2: a flights answer names the view it read: the Cheapest view, the Best view after the
-    // Cheapest flow failed, or (null) the Best view where no Cheapest flow ran
-    let view: 'cheapest' | 'best-fallback' | null = null;
-    if (S.CHEAPEST_FLOW_VERIFIED && settled.facts.page.cheapestTabs.length === 1) {
-      view = 'cheapest';
-      d = budget.next();
-      const steps = { timers: this.d.timers, log: this.d.log, startedAt: started };
-      const lookups = { timers: this.d.timers, lookupMs: LOOKUP_TIMEOUT_MS };
-      let cheapStop: Awaited<ReturnType<typeof after>> = null;
-      fellBack = false;
-      try {
-        await driver.clickCheapest(d, steps);
-        // why: rulings of 2026-10-18: every Cheapest poll is a 20 s step with 5 s lookups inside it; one that overruns
-        // is polled again, and only the budget's end fails the flow (then it falls back)
-        cheapStop = await after('cheapest');
-      } catch (e) {
-        // why: the honesty rule (rulings of 2026-10-18): a Cheapest flow whose step fails or times out is read as the
-        // Best view stands, and the tab's lower price goes with it, so the adapter marks the cell partial; the page
-        // deadline still ends the page as not-ready
-        if (e instanceof DeadlineExceeded || d.expired()) throw e;
-        fellBack = true;
-        view = 'best-fallback';
-        // why: a failed step may be a page that is no results page at all (a challenge after the click): it is
-        // classified once, under its own step, and a blocked kind stops the page with its cool-down, as on any poll
-        const cur = d;
-        const seen = await runStep('classify-after-failed-step', POLL_TIMEOUT_MS, cur, steps, (st) =>
-          driver.readFacts(st, lookups),
-        ).catch((err: unknown) => {
-          if (err instanceof DeadlineExceeded || cur.expired()) throw err;
-          return null;
-        });
-        if (seen !== null) {
-          const k = classifyPageWithRule(seen.page, S, 'cheapest');
-          if (k.kind.kind === 'blocked' && k.kind.page !== 'unrecognised')
-            return { answer: this.blockedPlaceholder(k.kind.page), stop: k.kind.page, rule: k.rule };
-        }
-      }
-      if (cheapStop !== null) return cheapStop;
-    }
     if (S.VIEW_MORE_ADDS_CHEAPER) {
       await driver.click('button', S.results.viewMoreButton, d);
       const stop = await after(settled.facts.settle.cheapestSelected ? 'cheapest' : 'best');

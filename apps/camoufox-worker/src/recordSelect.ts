@@ -16,7 +16,7 @@
  * activation or the reload is the stop it always is, with its cool-down. Nothing is clicked but the Cheapest flow's
  * names, and nothing activated but an option's own link. Only record.ts imports this module (rules.test.ts pins that).
  */
-import { type BlockedPage, type IsoDate, type Logger, MINOR_EXPONENT } from '@gmt/core';
+import type { BlockedPage, IsoDate, Logger } from '@gmt/core';
 import type { PageBudget } from './budget.js';
 import { type ClassifyRule, classifyPageWithRule, type PageFacts, type PageKind } from './classify.js';
 import {
@@ -30,16 +30,17 @@ import {
   StepFailed,
   type StepOptions,
 } from './driver.js';
-import { checkForm } from './form.js';
 import type { GuardState } from './guard.js';
 import { parseOptionName } from './names.js';
 import type { Pacer } from './pacer.js';
+import { currencyOf, minorOf } from './pence.js';
 import type { View } from './ready.js';
 import type { Outcome } from './recordDialogs.js';
 import { type StopFacts, stripQuery } from './recordWrite.js';
 import { buttonNames, headingLevels, linkNames, roleCounts, tabNames } from './researchNames.js';
 import { probeTarget, type TargetProbe } from './researchProbe.js';
 import type { Selectors } from './selectors.js';
+import { servedSequence } from './served.js';
 import { type Deadline, DeadlineExceeded, type Timers } from './timers.js';
 
 /**
@@ -258,52 +259,58 @@ async function readView(c: SelectPage, facts: StopFacts, d: Deadline): Promise<V
 }
 
 /**
- * The served sequence, as PageSession.read runs it (spec §2 rev 55): the Best view polled until settled (a blocked
- * kind is the stop; Google's no-flights line ends it), the search form checked (a mismatch is `unrecognised`, as the
- * session's), then the Cheapest flow where the entry verified it: its clicks and its poll, a failed step classified
- * once (a blocked kind is the stop), otherwise the Best view as it stands. `cheapestDeadline` starts the flow's own
- * page timeout. The view-more click the session makes only under VIEW_MORE_ADDS_CHEAPER is false on every entry and
- * is not made.
+ * The served sequence (served.ts, the one the page session and the return phase run: WP21 Task 21.3 replaced this
+ * module's copy), with each view read the moment it settles: the Best view (its form read there and handed back, so it
+ * is read once), and the Cheapest view; a stop is recorded through the recorder's own stop handling. On a failed
+ * Cheapest flow the Best view as it stands is read again (the session's honesty rule). The view-more click the session
+ * makes only under VIEW_MORE_ADDS_CHEAPER is false on every entry and is not made.
  */
 async function served(c: SelectPage, d0: Deadline, cheapestDeadline: () => Deadline): Promise<Served> {
   const { timers, log, pollMs } = c.deps;
-  const S = c.deps.selectors;
-  let d = d0;
-  const poll = (view: 'best' | 'cheapest') =>
-    pollUntilSettled(c.driver, d, timers, pollMs, S, { view, log, startedAt: c.pageStart });
-  const stop = async (page: BlockedPage, rule: string, facts: StopFacts): Promise<Served> => ({
-    kind: 'stop',
-    outcome: await c.stop(page, rule, facts),
-  });
-  const first = await poll('best');
-  if (first.kind.kind === 'blocked') return stop(first.kind.page, first.rule, first.facts);
-  const best = await readView(c, first.facts, d);
-  if (first.kind.kind === 'no-flights') return { kind: 'no-flights', best };
-  const form = checkForm(best.form, c.request);
-  if (form !== 'ok') return stop('unrecognised', `search-form:${form}`, first.facts);
-  if (!S.CHEAPEST_FLOW_VERIFIED || first.facts.page.cheapestTabs.length !== 1)
-    return { kind: 'read', best, cheapest: null, view: null, shown: best };
-  d = cheapestDeadline();
-  const steps: StepOptions = { timers, log, startedAt: c.pageStart };
-  try {
-    c.clicked.push(...(await c.driver.clickCheapest(d, steps)));
-    const after = await poll('cheapest');
-    if (after.kind.kind !== 'results')
-      return stop(
-        after.kind.kind === 'blocked' ? after.kind.page : 'unrecognised',
-        after.kind.kind === 'blocked' ? after.rule : `${after.kind.kind}-after-click`,
-        after.facts,
-      );
-    const cheapest = await readView(c, after.facts, d);
-    return { kind: 'read', best, cheapest, view: 'cheapest', shown: cheapest };
-  } catch (e) {
-    if (e instanceof DeadlineExceeded || d.expired()) throw e;
-    const blocked = await classifyAfterFailedStep(c.driver, d, steps, S, 'cheapest');
-    if (blocked !== null) return stop(blocked.page, blocked.rule, blocked.facts);
+  // why: assigned inside the hooks, so held in an object (a plain `let` would read as never assigned after the call)
+  const views: { best: ViewRead | null; cheapest: ViewRead | null } = { best: null, cheapest: null };
+  const end = await servedSequence(
+    {
+      driver: c.driver,
+      S: c.deps.selectors,
+      timers,
+      log,
+      pollMs,
+      startedAt: c.pageStart,
+      request: c.request,
+    },
+    d0,
+    cheapestDeadline,
+    {
+      afterBest: async (s, d) => {
+        views.best = await readView(c, s.facts, d);
+        return views.best.form;
+      },
+      afterCheapest: async (s, d) => {
+        views.cheapest = await readView(c, s.facts, d);
+      },
+      clicked: (names) => {
+        c.clicked.push(...names);
+      },
+    },
+  );
+  if (end.kind === 'stop') return { kind: 'stop', outcome: await c.stop(end.page, end.rule, end.facts) };
+  const best = views.best;
+  // why: the sequence calls afterBest on every Best view it settles before any other end, so it is set here
+  if (best === null) throw new Error('the served sequence ended without its Best view');
+  if (end.kind === 'no-flights') return { kind: 'no-flights', best };
+  if (end.view === 'cheapest' && views.cheapest !== null)
+    return { kind: 'read', best, cheapest: views.cheapest, view: 'cheapest', shown: views.cheapest };
+  if (end.view === 'best-fallback') {
     // why: the session's honesty rule: a failed Cheapest flow reads the Best view as it stands
-    const shown = { ...best, names: await c.driver.resultNames(d), list: await c.driver.listFacts(d) };
+    const shown = {
+      ...best,
+      names: await c.driver.resultNames(end.d),
+      list: await c.driver.listFacts(end.d),
+    };
     return { kind: 'read', best, cheapest: null, view: 'best-fallback', shown };
   }
+  return { kind: 'read', best, cheapest: null, view: null, shown: best };
 }
 
 /** R-settle's rule, as pollUntilSettled applies it; null when the view before the step was not read. */
@@ -595,12 +602,15 @@ async function reload(c: SelectPage, before: Before): Promise<StepResult & { sho
 function expansionOf(c: SelectPage, a: After, fromMinor: number | null): NonNullable<After['expansion']> {
   const buttons = a.buttonNames ?? [];
   const offers = buttons.filter((b) => c.deps.selectors.booking.offer.test(b));
-  // why: the review: prices compare in the currency's own minor units (ISO 4217 exponent, core's table), and only in
-  // the currency the return's price is stated in; an offer in any other currency makes the comparison unknown
-  const exponent = MINOR_EXPONENT.GBP ?? 2;
+  // why: the review and the 21.0 Lows: each offer's currency is read from its own phrase (pence.ts, never assumed),
+  // prices compare in that currency's minor units (core's ISO 4217 table), and only in the return's currency, which its
+  // grammar states as pounds; an offer in any other currency, or one the helper does not know, makes it unknown
   const parsed = offers.map((b) => /for ([\d,]+) ([A-Za-z ]+)$/.exec(b));
-  const known = parsed.every((m) => m !== null && m[2] === 'British pounds');
-  const prices = known ? parsed.map((m) => Number((m?.[1] ?? '').replaceAll(',', '')) * 10 ** exponent) : [];
+  const read = parsed.map((m) => {
+    const code = m === null ? null : currencyOf(m[2] ?? '');
+    return code === 'GBP' ? minorOf(m?.[1] ?? '', code) : null;
+  });
+  const prices = read.every((x) => x !== null) ? read.filter((x) => x !== null) : [];
   const cheapest = prices.length === 0 ? null : Math.min(...prices);
   return {
     offers: a.page.resultLinks,

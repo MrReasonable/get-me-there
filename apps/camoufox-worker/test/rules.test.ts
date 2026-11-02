@@ -325,6 +325,30 @@ describe('worker rules: source facts through the compiler API', () => {
     // why: after recording 1: the target's probe (its page function included) is the recorder's alone too
     expect(moduleImporters('./researchProbe.js')).toEqual(['recordSelect.ts']);
   });
+  // why: WP21 Task 21.3 (preflight rows T21.3 and A16): the served sequence is one module, run alike by the page
+  // session and the recorder; the one pence helper is a leaf shared by every price grammar
+  it('the served sequence and the pence helper are leaves with their pinned importers', () => {
+    expect(moduleImporters('./served.js')).toEqual(['recordSelect.ts', 'session.ts']);
+    expect(moduleImporters('./pence.js')).toEqual([
+      'classify.ts',
+      'names.ts',
+      'offers.ts',
+      'recordSelect.ts',
+    ]);
+    const leafImports = (f: string): string[] =>
+      (sources.find((x) => x.f === f)?.sf.statements ?? [])
+        .flatMap((st) =>
+          ts.isImportDeclaration(st) && ts.isStringLiteral(st.moduleSpecifier)
+            ? [st.moduleSpecifier.text]
+            : [],
+        )
+        .filter((m) => m.startsWith('./'));
+    expect(leafImports('pence.ts')).toEqual([]);
+    // why: the served sequence reaches only the driver, the form check, the classifier's types and the timers
+    expect(leafImports('served.ts').sort()).toEqual(
+      ['./classify.js', './driver.js', './form.js', './selectors.js', './timers.js'].sort(),
+    );
+  });
   it('no route.continue with a URL option', () => {
     const bad = callsTo('continue').filter((c) =>
       c.call.arguments.some(

@@ -1,5 +1,6 @@
 import type { BlockedPage } from '@gmt/core';
 import { onAllowlist } from './guard.js';
+import { poundsMinor } from './pence.js';
 import type { View } from './ready.js';
 import { SELECTORS, type Selectors } from './selectors.js';
 
@@ -83,7 +84,8 @@ export type ClassifyRule =
 export function cheapestTabPriceMinor(name: string, S: Selectors = SELECTORS): number | null {
   const m = S.results.cheapestTabPrice.exec(name);
   const digits = m?.[1] ?? m?.[2];
-  return digits === undefined ? null : Number(digits.replaceAll(',', '')) * 100;
+  // why: the 21.0 Lows: both spellings state pounds; minor units by the ISO 4217 exponent, through the one helper
+  return digits === undefined ? null : poundsMinor(digits);
 }
 
 export function classifyPage(f: PageFacts, S: Selectors = SELECTORS, view: View = 'best'): PageKind {
