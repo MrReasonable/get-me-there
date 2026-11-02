@@ -90,21 +90,11 @@ describe('the dated selectors module (spec §2; brief §9)', () => {
     expect(resultLink.test('Select flight')).toBe(false);
     expect(resultLink.source).toBe(SELECTORS.results.resultLink.source);
   });
-  // why: WP21 Task 21.3: select-return/2026-11-01/1–4 showed one heading of this shape on every booking view (its first
-  // price the return's "From" price), and the grouped "View <seller>, …" control on two of them
-  it('the booking view as recorded: the price-range heading and the grouped control, which never names an offer or the expansion', () => {
-    const { priceRangeHeading, grouped, offer, moreOptions } = SELECTORS.booking;
-    for (const ok of [
-      '£1,180 lowest total price – £1,450 highest total price',
-      '£478 cheapest – £520 dearest',
-    ])
-      expect(priceRangeHeading.test(ok), ok).toBe(true);
-    for (const no of [
-      '£1,180 lowest total price',
-      'Booking options',
-      'Continue to book with QQ Travel for 478 British pounds',
-    ])
-      expect(priceRangeHeading.test(no), no).toBe(false);
+  // why: WP21 Task 21.3: select-return/2026-11-01/1 and 3 showed the grouped "View <seller>, …" control; the view's
+  // price-comparison note has no selector (the controller's ruling of 2026-11-02: its wording follows the fare)
+  it('the booking view as recorded: the path, offer, expansion and grouped patterns only, the grouped control never naming an offer or the expansion', () => {
+    const { grouped, offer, moreOptions } = SELECTORS.booking;
+    expect(Object.keys(SELECTORS.booking).sort()).toEqual(['grouped', 'moreOptions', 'offer', 'path']);
     for (const ok of [
       'View QQ Travel, QQ Fares 1,250 British pounds options',
       'View QQ Travel, QQ Air 478 British pounds more',

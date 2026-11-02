@@ -655,9 +655,10 @@ rule `monthly-headroom`, before any activation, the first view still read
   `/travel/flights/booking`, an in-app change as recorded) settles once
   changed, with no node fetching and at least one offer, and is recognised from
   the recorded conditions: that path, no return heading, no outbound link, no
-  tab, no Date grid button, a heading stating a price range and at least one
-  offer button by the offer pattern (else `unrecognised`,
-  `not-booking-view`). The worker reads its offers, then activates its one
+  tab, no Date grid button and at least one offer button by the offer pattern
+  (else `unrecognised`, `not-booking-view`). The view's price-comparison note
+  is no condition and is never read for a price: its wording follows the fare.
+  The worker reads its offers, then activates its one
   "<count> more booking options" control from the keyboard (in place: no
   document, the URL unchanged, as recorded), lets the view settle again and
   reads every offer once more. No control leaves `read` with `expanded` false
@@ -5483,10 +5484,11 @@ Enter selected it every time, with nothing to dismiss. The return view has a hea
 pattern in three forms, at least one result link, no tab, no Date grid button, no search form and a control for more
 results with no stated count. Every return name (38 of 38) carries the outbound grammar's "From" price clause, and
 the cheapest return's price equalled the selected outbound's on all four selections. The booking view, at the
-booking path, lists each seller's offer as a button stating an exact price under a price-range heading, and on one
-route its cheapest listed offer was 3.5% above the return's "From" price until its one expansion control was
-activated, after which every offer (23 and 19) was read and the cheapest equalled it on both recordings. The largest
-step, the reload's settle, took 27.9 s, so every step is bounded at 40 s.
+booking path, lists each seller's offer as a button stating an exact price under a price-comparison note whose
+wording follows the fare (so it is no condition of the view), and on one route its cheapest listed offer was 3.5%
+above the return's "From" price until its one expansion control was activated, after which every offer (23 and
+19) was read and the cheapest equalled it on both recordings. The largest step, the reload's settle, took 27.9 s, so
+every step is bounded at 40 s.
 
 **Rulings on the brief's reviews** (the orchestrator's). The page rule: a page is one document load, an activation
 loads none, every load is spaced from the last whatever its request, and the window's worst case bounds a request

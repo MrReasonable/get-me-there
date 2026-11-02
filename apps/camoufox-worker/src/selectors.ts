@@ -19,8 +19,8 @@ import { CAMOUFOX_BUILDS, FLAG_NAMES, type FlagName, flagsFor, type OsArch } fro
 export { FLAG_NAMES, type FlagName };
 
 // why: re-dated 2026-11-01 (WP21 Task 21.3): the return view and the booking view as select-outbound/2026-11-01/3–4 and
-// select-return/2026-11-01/1–4 recorded them (the return link the "From" form only; the booking view's price-range heading
-// and grouped control)
+// select-return/2026-11-01/1–4 recorded them (the return link the "From" form only; the booking view's path, offers and
+// grouped control)
 export const SELECTORS_VERSION = '2026-11-01-returns';
 
 /**
@@ -123,11 +123,11 @@ export interface Selectors {
   /**
    * Spec rev 56 §2 "The booking read" (Ian's rulings of 2026-11-01; dated in Task 21.3 from select-return/2026-11-01/1–4):
    * the booking view after a return's selection. `offer` names one seller's offer, a button in `main` (never activated:
-   * it leads to the seller); `moreOptions` the one in-page expansion; `path` the view's in-app path;
-   * `priceRangeHeading` the heading stating the view's price range (one on every booking recording); `grouped` the
-   * grouped "View <seller>, …" control (counted, never activated, its fares never read).
+   * it leads to the seller); `moreOptions` the one in-page expansion; `path` the view's in-app path; `grouped` the
+   * grouped "View <seller>, …" control (counted, never activated, its fares never read). The view's price-comparison
+   * note has no selector: its wording follows the fare, and it is never read.
    */
-  booking: { offer: RegExp; moreOptions: RegExp; path: string; priceRangeHeading: RegExp; grouped: RegExp };
+  booking: { offer: RegExp; moreOptions: RegExp; path: string; grouped: RegExp };
   /**
    * The search form (decision 69: round trip, one adult, the query's dates). The brief's hypothesis from round 1,
    * replaced by Task 14.2's recording; FORM_VERIFIED is false until then, and the server refuses to start.
@@ -240,9 +240,6 @@ export const SELECTORS: Selectors = {
     moreOptions: /^\d+ more booking options?$/,
     // why: observed 2026-11-01 (select-return 1–4): the booking view is an in-app change to this path
     path: '/travel/flights/booking',
-    // why: observed 2026-11-01 (select-return 1–4): one heading a booking view, "£<price> <words> – £<price> <words>",
-    // its first price the selected return's "From" price
-    priceRangeHeading: /^£[\d,]+ [^£–]+ – £[\d,]+ [^£–]+$/,
     // why: observed 2026-11-01 (select-return 1 and 3): "View <seller>, <seller> <price> <currency> <word>", a button
     // that probably opens that seller's fares; it begins "View", so it can never name an offer or the expansion
     grouped: /^View [^,]+, .+ [\d,]+ [A-Za-z ]+$/,

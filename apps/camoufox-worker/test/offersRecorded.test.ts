@@ -44,7 +44,6 @@ const pageSchema: z.ZodType<PageFacts> = z
         noFlights: z.boolean(),
         landingHeading: z.boolean(),
         returnHeading: z.boolean(),
-        priceRangeHeading: z.boolean().exactOptional(),
       })
       .loose(),
     accountControl: z.boolean(),
@@ -59,6 +58,8 @@ const pageSchema: z.ZodType<PageFacts> = z
 const afterSchema = z
   .object({
     page: pageSchema,
+    // why: kept readable for the recordings that name them; the booking view is never recognised by a heading (the
+    // controller's ruling of 2026-11-02: the price-comparison note's wording follows the fare)
     headings: z.array(z.string()).nullable(),
     buttonNames: z.array(z.string()).nullable(),
     // why: review M9: the booking view's buttons in main (the driver's scope), recorded from WP21 Task 21.3 on
@@ -120,19 +121,6 @@ const PINS: Readonly<Record<string, { grouped: number; moreControl: boolean; che
 };
 const ON = { ...SELECTORS, RETURN_SELECT_VERIFIED: true, BOOKING_SELECT_VERIFIED: true };
 
-/**
- * A booking view's facts as the driver now reads them: the recordings predate the price-range fact, so it is derived
- * from the recorded heading names by the dated pattern (the driver's own read).
- */
-function bookingPage(a: z.infer<typeof afterSchema>): PageFacts {
-  return {
-    ...a.page,
-    text: {
-      ...a.page.text,
-      priceRangeHeading: (a.headings ?? []).some((h) => SELECTORS.booking.priceRangeHeading.test(h)),
-    },
-  };
-}
 /** What the three booking patterns read of a list of button names (offers by name, the two controls counted). */
 function patterns(buttons: readonly string[]) {
   return {
@@ -172,7 +160,7 @@ describe.skipIf(!present && !RECORDINGS_REQUIRED)(
         for (const step of ['return-selection', 'more-options']) {
           const a = after(r, step);
           if (a === undefined) continue;
-          expect(classifyPageWithRule(bookingPage(a), ON, 'booking'), `${r.key} ${step}`).toEqual({
+          expect(classifyPageWithRule(a.page, ON, 'booking'), `${r.key} ${step}`).toEqual({
             kind: { kind: 'results' },
             rule: 'booking',
           });

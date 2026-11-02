@@ -577,16 +577,17 @@ describe('classify the return view (spec rev 56 §2: the recorded conditions)', 
   });
 });
 
-// why: WP21 Task 21.3, from select-return/2026-11-01/1–4: the booking view is recognised from its recorded facts only
-// where BOOKING_SELECT_VERIFIED is set; anything else, and every view with the flag off, is the unrecognised
-// not-booking-view, never a block with a cool-down
+// why: WP21 Task 21.3, from select-return/2026-11-01/1–4 and select-return/2026-11-02/1: the booking view is recognised
+// from its recorded facts only where BOOKING_SELECT_VERIFIED is set; anything else, and every view with the flag off, is
+// the unrecognised not-booking-view, never a block with a cool-down. The page's price-comparison note is no fact: its
+// wording follows the fare (the controller's ruling of 2026-11-02)
 describe('classify the booking view (spec rev 56 §2: the recorded conditions)', () => {
   const on = { ...SELECTORS, RETURN_SELECT_VERIFIED: true, BOOKING_SELECT_VERIFIED: true };
   const BOOKING = 'https://www.google.com/travel/flights/booking?tfs=x';
   const bookingView = (o: Partial<PageFacts> = {}, text: Partial<PageFacts['text']> = {}) =>
     facts({
       url: BOOKING,
-      text: t({ priceRangeHeading: true, ...text }),
+      text: t(text),
       cheapestTabs: [],
       dateGridButtons: 0,
       resultLinks: 6,
@@ -594,7 +595,7 @@ describe('classify the booking view (spec rev 56 §2: the recorded conditions)',
       ...o,
     });
   const notBooking = { kind: { kind: 'blocked', page: 'unrecognised' }, rule: 'not-booking-view' };
-  it('with the flag on: results on the booking path, no return heading, no outbound link, no tab, no Date grid button, the price-range heading and an offer', () => {
+  it('with the flag on: results on the booking path, no return heading, no outbound link, no tab, no Date grid button and an offer', () => {
     expect(classifyPageWithRule(bookingView(), on, 'booking')).toEqual({
       kind: { kind: 'results' },
       rule: 'booking',
@@ -614,12 +615,7 @@ describe('classify the booking view (spec rev 56 §2: the recorded conditions)',
       bookingView({ cheapestTabs: [{ name: 'Cheapest from 451 British pounds', inTablist: true }] }),
     ],
     ['a Date grid button', bookingView({ dateGridButtons: 1 })],
-    ['no price-range heading', bookingView({}, { priceRangeHeading: false })],
-    [
-      'a price-range heading never read',
-      facts({ url: BOOKING, cheapestTabs: [], dateGridButtons: 0, outboundLinks: 0 }),
-    ],
-    ['no offer', bookingView({ resultLinks: 0 })],
+    ['no offer on the booking path', bookingView({ resultLinks: 0 })],
     ['an unparsable URL', bookingView({ url: 'not a url' })],
   ])('%s is not-booking-view', (_what, f) => {
     // why: an unparsable URL is the off-allowlist block, as on every view (the blocked rules first)

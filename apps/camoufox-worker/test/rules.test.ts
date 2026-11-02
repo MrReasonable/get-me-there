@@ -284,7 +284,7 @@ describe('worker rules: a flights page with returnLimits activates only the veri
               keep(
                 n('document', '', [
                   n('main', '', [
-                    n('heading', '£1,180 lowest total price – £1,450 highest total price'),
+                    n('heading', '£1,180 is low for Economy – £270 cheaper than usual'),
                     n('button', OFFER),
                     n('button', GROUPED),
                     n('button', '2 more booking options'),
@@ -295,7 +295,7 @@ describe('worker rules: a flights page with returnLimits activates only the veri
               keep(
                 n('document', '', [
                   n('main', '', [
-                    n('heading', '£1,180 lowest total price – £1,450 highest total price'),
+                    n('heading', '£1,180 is typical for economy'),
                     n('button', OFFER),
                     n('button', 'Continue to book with QQ Fares for 1,190 British pounds'),
                     n('button', GROUPED),

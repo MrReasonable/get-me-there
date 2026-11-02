@@ -623,12 +623,6 @@ export function createDriver(page: PageLike, guard: GuardState, S: Selectors = S
       const outboundLinks = await countOf(resultLinks(), d);
       const links =
         view === 'returns' || view === 'booking' ? await countOf(resultLinks(view), d) : outboundLinks;
-      // why: WP21 Task 21.3: the booking view's price-range heading, read on that view only (the classifier's fact)
-      at('price-range-heading');
-      const priceRangeHeading =
-        view === 'booking'
-          ? await has(page.getByRole('heading', { name: S.booking.priceRangeHeading }), d)
-          : null;
       const facts: PageFacts = {
         url,
         hops: [...guard.hops],
@@ -641,7 +635,6 @@ export function createDriver(page: PageLike, guard: GuardState, S: Selectors = S
           noFlights,
           landingHeading,
           returnHeading,
-          ...(priceRangeHeading === null ? {} : { priceRangeHeading }),
         },
         accountControl: accountButtons + accountLinks > 0,
         cheapestTabs,

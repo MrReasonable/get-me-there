@@ -1162,8 +1162,9 @@ describe('record --select-return: the return selected, the booking view recorded
         documentLoadsBefore: 1,
         documentLoads: 1,
         // why: WP21 Task 21.3: the recorder reads the booking view with the dated booking branch on; this synthetic view
-        // shows no price-range heading, so it reads as no booking view (the expansion's own gate is the path and offers)
-        classification: { kind: 'blocked', rule: 'not-booking-view' },
+        // is on the booking path with two offers and no list control, so it is the booking view (no heading is read:
+        // the controller's ruling of 2026-11-02)
+        classification: { kind: 'results', rule: 'booking' },
         headings: ['Booking options'],
         names: [OFFER_1, OFFER_2],
         linkNames: ['Booking options help'],

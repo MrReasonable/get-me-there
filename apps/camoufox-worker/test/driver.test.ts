@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
+import { classifyPageWithRule } from '../src/classify.js';
 import {
   CLICK_LOG_MARGIN_MS,
   CLICK_TIMEOUT_MS,
@@ -1405,8 +1406,9 @@ describe('the booking view’s reads (the booking research)', () => {
 });
 
 // why: WP21 Task 21.3 (spec rev 56 §2): the booking read's own facts: the offer buttons' names, the expansion controls and
-// the grouped controls, each counted in main; and the price-range heading the classifier recognises the view by
-describe('bookingFacts and the booking view’s heading (WP21 Task 21.3)', () => {
+// the grouped controls, each counted in main; and the facts the classifier recognises the view by
+describe('bookingFacts and the booking view’s facts (WP21 Task 21.3)', () => {
+  const BOOKING_ON = { ...SELECTORS, RETURN_SELECT_VERIFIED: true, BOOKING_SELECT_VERIFIED: true };
   const OFFER = 'Continue to book with QQ Travel for 1,180 British pounds';
   const tree = (o: { main?: FakeNode[]; outside?: FakeNode[] } = {}) =>
     n('document', '', [
@@ -1415,7 +1417,7 @@ describe('bookingFacts and the booking view’s heading (WP21 Task 21.3)', () =>
         'main',
         '',
         o.main ?? [
-          n('heading', '£1,180 lowest total price – £1,450 highest total price'),
+          n('heading', '£1,180 is low for Economy – £270 cheaper than usual'),
           n('button', OFFER),
           n('button', 'Continue to book with QQ Fares, Economy Basic for 1,195 British pounds'),
           n('button', 'View QQ Travel, QQ Fares 1,250 British pounds options'),
@@ -1473,12 +1475,30 @@ describe('bookingFacts and the booking view’s heading (WP21 Task 21.3)', () =>
     expect(pathOf('https://www.google.com/travel/flights/booking?tfs=b')).toBe('/travel/flights/booking');
     expect(pathOf('not a url')).toBeNull();
   });
-  it('readFacts on the booking view states the price-range heading; other views leave it unread', async () => {
-    const { driver, d, page } = setup([tree()]);
-    expect((await driver.readFacts(d, undefined, 'booking')).page.text.priceRangeHeading).toBe(true);
-    page.setTrees([tree({ main: [n('heading', 'Booking options'), n('button', OFFER)] })]);
-    expect((await driver.readFacts(d, undefined, 'booking')).page.text.priceRangeHeading).toBe(false);
-    expect((await driver.readFacts(d)).page.text.priceRangeHeading).toBeUndefined();
+  // why: the controller's ruling of 2026-11-02 (fix round 3): the heading the booking view showed is the page's
+  // price-comparison note, whose wording follows the fare ("… is low for Economy – … cheaper than usual" on 2026-11-01,
+  // "… is typical for economy" on 2026-11-02); the view is recognised without it, and it is never read
+  it.each([
+    ['the note absent', []],
+    ['the note’s low form', [n('heading', '£1,180 is low for Economy – £270 cheaper than usual')]],
+    ['the note’s typical form', [n('heading', '£1,180 is typical for economy')]],
+  ])('readFacts on the booking path, classified, with %s: the booking view', async (_what, note) => {
+    const { driver, d, page } = setup([tree({ main: [...note, n('button', OFFER)] })]);
+    page.setUrl('https://www.google.com/travel/flights/booking?tfs=b');
+    const f = (await driver.readFacts(d, undefined, 'booking')).page;
+    expect(Object.keys(f.text)).not.toContain('priceRangeHeading');
+    expect(classifyPageWithRule(f, BOOKING_ON, 'booking')).toEqual({
+      kind: { kind: 'results' },
+      rule: 'booking',
+    });
+  });
+  it('readFacts on the booking path with no offer, classified: not the booking view, the note shown or not', async () => {
+    for (const note of [[], [n('heading', '£1,180 is typical for economy')]]) {
+      const { driver, d, page } = setup([tree({ main: [...note, n('button', 'Booking options help')] })]);
+      page.setUrl('https://www.google.com/travel/flights/booking?tfs=b');
+      const f = (await driver.readFacts(d, undefined, 'booking')).page;
+      expect(classifyPageWithRule(f, BOOKING_ON, 'booking').rule).toBe('not-booking-view');
+    }
   });
   it('the probe page has no booking read and no activation', () => {
     const { driver } = setup();

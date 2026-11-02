@@ -163,15 +163,20 @@ const returnTree = (
     n('button', `Currency ${o.currency ?? 'GBP'}`),
     n('button', 'Location·United Kingdom'),
   ]);
+/** The price-comparison note's two recorded forms (2026-11-01, 2026-11-02), or none. */
+const NOTES = {
+  low: ['£1,180 is low for Economy – £270 cheaper than usual'],
+  typical: ['£1,180 is typical for economy'],
+  none: [],
+} as const satisfies Record<string, readonly string[]>;
 const bookingTree = (
   offers: string[] = INITIAL,
-  o: { more?: string[]; grouped?: number; heading?: boolean; outbound?: string[] } = {},
+  o: { more?: string[]; grouped?: number; note?: keyof typeof NOTES; outbound?: string[] } = {},
 ) =>
   n('document', 'Google Flights', [
     n('main', '', [
-      ...(o.heading === false
-        ? []
-        : [n('heading', '£1,180 lowest total price – £1,450 highest total price')]),
+      // why: the page's price-comparison note, whose wording follows the fare; never a fact the view is recognised by
+      ...NOTES[o.note ?? 'low'].map((x) => n('heading', x)),
       ...offers.map((x) => n('button', x)),
       ...Array.from({ length: o.grouped ?? 1 }, () => n('button', GROUPED)),
       ...(o.more ?? [MORE]).map((x) => n('button', x)),
@@ -1178,14 +1183,23 @@ describe('transient ends of the booking step (the returns intact, returns read)'
   });
   it.each([
     ['off the booking path', { trees: [bookingTree()], url: RETURN_URL }],
-    [
-      'without the price-range heading',
-      { trees: [bookingTree(INITIAL, { heading: false })], url: BOOKING_URL },
-    ],
+    ['with an outbound link', { trees: [bookingTree(INITIAL, { outbound: [O451] })], url: BOOKING_URL }],
   ])('a changed view %s: unrecognised not-booking-view', async (_what, shows) => {
     const t = setup({ press: withPress({ [R1180]: shows }) });
     expect(await booked(t)).toMatchObject({ status: 'unrecognised', rule: 'not-booking-view', offers: [] });
   });
+  // why: the controller's ruling of 2026-11-02: the view is recognised without the price-comparison note
+  it.each(['none', 'typical'] as const)(
+    'the booking view with the note %s: read, every offer',
+    async (note) => {
+      const t = setup({
+        press: withPress({
+          [R1180]: { trees: [bookingTree(INITIAL, { more: [], note })], url: BOOKING_URL },
+        }),
+      });
+      expect(await booked(t)).toMatchObject({ status: 'read', rule: null, expanded: false });
+    },
+  );
   // why: review M1 (ruled): the URL moving to the booking path is the activation's change, so a booking view without
   // an offer changed, and never settles (the booking settle needs an offer): it ends at its deadline as not-settled
   it('a view without an offer: not-settled select-return:not-settled, never unrecognised', async () => {

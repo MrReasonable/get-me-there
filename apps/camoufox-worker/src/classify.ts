@@ -22,11 +22,6 @@ export interface PageFacts {
     landingHeading: boolean;
     /** WP21 Task 21.0: a heading matching the return view's (`S.returns.heading`). */
     returnHeading: boolean;
-    /**
-     * WP21 Task 21.3: a heading matching the booking view's price range (`S.booking.priceRangeHeading`), read on the
-     * booking view only (absent elsewhere: optional, so every other view's facts stand as they were).
-     */
-    priceRangeHeading?: boolean;
   };
   accountControl: boolean;
   /** `selected`: the tab is the selected one (aria-selected), read for the tabs in the tablist. */
@@ -152,11 +147,12 @@ function classifyReturnView(f: PageFacts, S: Selectors): { kind: PageKind; rule:
 }
 
 /**
- * Spec rev 56 §2 "The booking read" (WP21 Task 21.3, from select-return/2026-11-01/1–4, all agreeing): the view after
- * the return's selection, once the blocked kinds are ruled out. Only where BOOKING_SELECT_VERIFIED is set, it is
- * results when the URL's path is the booking path, no return heading and no outbound link show, no Cheapest tab and no
- * Date grid button, the price-range heading shows and at least one offer button (`resultLinks` on this view); anything
- * else, and every view with the flag off, is `not-booking-view`, unrecognised, never a cool-down.
+ * Spec rev 56 §2 "The booking read" (WP21 Task 21.3, from select-return/2026-11-01/1–4 and select-return/2026-11-02/1,
+ * all agreeing): the view after the return's selection, once the blocked kinds are ruled out. Only where
+ * BOOKING_SELECT_VERIFIED is set, it is results when the URL's path is the booking path, no return heading and no
+ * outbound link show, no Cheapest tab and no Date grid button, and at least one offer button by the offer pattern
+ * (`resultLinks` on this view); anything else, and every view with the flag off, is `not-booking-view`, unrecognised,
+ * never a cool-down. The page's price-comparison note is no condition: its wording follows the fare.
  */
 function classifyBookingView(f: PageFacts, S: Selectors): { kind: PageKind; rule: ClassifyRule } {
   const recognised =
@@ -167,7 +163,6 @@ function classifyBookingView(f: PageFacts, S: Selectors): { kind: PageKind; rule
     f.outboundLinks === 0 &&
     f.cheapestTabs.length === 0 &&
     f.dateGridButtons === 0 &&
-    f.text.priceRangeHeading === true &&
     f.resultLinks >= 1;
   return recognised
     ? { kind: { kind: 'results' }, rule: 'booking' }
