@@ -881,8 +881,8 @@ interception by a row overlay) that led to the keyboard activation ruling; they 
 4. the cheapest return's "From" price equals the selected outbound's "From" price on every selection (4 of 4), and the two
    selections of a pair list disjoint returns; **stop-and-ask 5 held** ("From" on every return) and Ian ruled: read the booking options;
 5. the booking view: reached in-app; offers are buttons `Continue to book with <seller>[, <fare name>] for <price> British pounds`, the
-   price stated, never "From" (11 of 11, then 42 of 42 after the expansion); a price-range heading whose first figure is the return's
-   "From" price; one `<count> more booking options` control in `main`; on one recording the cheapest listed offer was 3.5 % above the
+   price stated, never "From" (11 of 11, then 42 of 42 after the expansion); a price-comparison note above the offers whose wording changes with the fare
+   (never read); one `<count> more booking options` control in `main`; on one recording the cheapest listed offer was 3.5 % above the
    "From" price (**stop-and-ask held** and Ian ruled: open the expansion); after the expansion (in-app, the URL unchanged, offers 6 → 23
    and 5 → 19) the cheapest offer equals the return's "From" price on both; a grouped `View <seller>, …` control on one recording,
    never activated; no dialog, nothing to dismiss, one passenger and both dates persist; the form controls are not read on the
@@ -932,7 +932,7 @@ value below is the recorded literal; nothing is left to a decision rule.
     return names read by the one grammar ("From <price> British pounds round trip total.", the cheapest seller's price
     for that pairing, a lower bound); fitting returns kept first; the second attempt by a fresh load of the worker's own
     list URL, the served sequence again, when it is made; then, behind `BOOKING_SELECT_VERIFIED`, the shown pairing's
-    return activated, the booking view (the path `/travel/flights/booking`, a price-range heading, offer buttons
+    return activated, the booking view (the path `/travel/flights/booking`, offer buttons
     "Continue to book with <seller>[, <fare>] for <price> British pounds", the price stated) settled, its one "<count>
     more booking options" control activated (in-page; never a seller's offer, a grouped "View <seller>, …" control or
     a seller's host, which the guard refuses), and every offer read (`OFFER_GRAMMAR_VERSION`, reported as
@@ -1164,7 +1164,7 @@ worker items.
     added; `grouped` never matches an offer or the expansion control), `SELECTORS_VERSION` re-dated; the return branch: the
     heading, a link, no Cheapest tab and no Date grid button pass; one Cheapest tab, or one Date grid button, or no heading, or no link is
     `not-return-view`; `outboundLinks` and the link counts are not consulted (4 and 15 both pass); the booking branch with the flag on: the
-    booking path, no return heading, `outboundLinks 0`, no tab, no Date grid button, the price-range heading and one offer pass (`booking`);
+    booking path, no return heading, `outboundLinks 0`, no tab, no Date grid button and one offer pass (`booking`);
     each fact missing is `not-booking-view`; the flag off → always `not-booking-view`; the blocked rules first on both; `isSettled(…,
     'returns', true)` is false for a changed view with the no-flights line and no link, true with a link; the Cheapest view's status line
     beside links never changes its classification.
@@ -1227,8 +1227,8 @@ worker items.
       `pagesLoaded` stays 1, and the phase ends `unrecognised` rule `unexpected-navigation` (R-worst; pinned in `guard.test.ts` too: an allowlisted booking
       path URL aborted while the gate is on and admitted with it off);
       the booking step's own ends (the returns intact, `returns.status 'read'`): the return's press changes nothing → `booking.status
-      'not-settled'` rule `select-return:no-activation`; the changed view is off the booking path or lacks an offer or the price-range
-      heading → `booking.status 'unrecognised'` rule `not-booking-view`; two links of the return's name → `'select-failed'` rule
+      'not-settled'` rule `select-return:no-activation`; the changed view is off the booking path or lacks an offer
+      → `booking.status 'unrecognised'` rule `not-booking-view`; two links of the return's name → `'select-failed'` rule
       `select-return:find-return`; the expansion control absent → `booking.status 'read'` with `expanded false` and the offers read before it; two or more expansion controls →
       `'unrecognised'` rule `more-options-count`, nothing pressed, the offers read kept (prov-int-r3-006); the expansion's press changes nothing, or its
       settle runs out → `'expand-failed'` rule `select-more-options:no-activation` / `:not-settled`, `expanded false`, the offers read before it kept (the
