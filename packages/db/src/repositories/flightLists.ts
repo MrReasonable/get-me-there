@@ -29,7 +29,7 @@ import {
 } from '../internal/read.js';
 import { assertInt, assertIsoDate, assertIsoDateTime, RowRejected } from '../internal/validate.js';
 import { sqlList } from '../schema/checks.js';
-import type { FlightListInsert, NewestFlightList, TransientStreak } from '../types.js';
+import type { FlightListInsert, NewestFlightList, StoredFlightList, TransientStreak } from '../types.js';
 
 const INSERT_LIST_SQL = `
 INSERT INTO flight_lists (definition_id, execution_id, provider_id, source_kind, cabin, origin, destination, departure_date, return_date,
@@ -113,9 +113,10 @@ JOIN flight_lists l ON l.id = (
 LEFT JOIN flight_list_flights f ON f.list_id = l.id
 ORDER BY a.ord, f.position`;
 
-// why: spec rev 56 §6.9, §7: the newest list per cell of the definition (scoped to the asked executions when given),
-// kept only when it finished its return phase: an older finished list under a newer transient one is never returned.
-// `ord` is the list's id (one per cell); the cells come in date, then airport order.
+// why: spec rev 56 §6.9, §7: the newest list per cell of the definition (scoped to the asked executions when given: the
+// newest among those executions' lists), kept only when it finished its return phase: an older finished list under a
+// newer transient one is never returned. `ord` is the list's id (one per cell); the cells come in date, then airport
+// order. No streak: that is the step's reuse rule (`newestPerCell`), not this read's (21.5 review M1).
 const WITH_RETURNS_SQL = `
 WITH ranked AS (
   SELECT n.id, ROW_NUMBER() OVER (
@@ -123,7 +124,7 @@ WITH ranked AS (
   FROM flight_lists n
   WHERE n.definition_id = @definitionId AND n.cabin = @cabin AND n.point_of_sale = @pointOfSale
     AND (@executionIds IS NULL OR n.execution_id IN (SELECT value FROM json_each(@executionIds))))
-SELECT l.id AS ord, l.*, ${STREAK}, ${FLIGHT_COLUMNS}
+SELECT l.id AS ord, l.*, ${FLIGHT_COLUMNS}
 FROM ranked r
 JOIN flight_lists l ON l.id = r.id
 LEFT JOIN flight_list_flights f ON f.list_id = l.id
@@ -199,7 +200,6 @@ interface JoinedRow {
   booking_unparsed: number | null;
   booking_non_gbp: number | null;
   booking_offers_stated: number | null;
-  transient_streak: number;
   position: number | null;
   departs_local: string | null;
   arrives_local: string | null;
@@ -209,6 +209,11 @@ interface JoinedRow {
   carriers_json: string | null;
   operated_by: string | null;
   price_pence: number | null;
+}
+
+/** A joined row of the per-cell and per-date-pair statements, which add the chosen list's streak. */
+interface StreakRow extends JoinedRow {
+  transient_streak: number;
 }
 
 /** An attempt row joined to one of its returns (`position` NULL when the attempt listed none). */
@@ -382,7 +387,7 @@ function readList(
   flights: ListedFlight[],
   attempts: readonly RawAttempt[],
   offers: readonly unknown[],
-): NewestFlightList {
+): StoredFlightList {
   const c = 'flight_lists';
   return {
     id: first.id,
@@ -413,14 +418,19 @@ function readList(
     resultsStated: first.results_stated,
     flights,
     returns: readReturns(first, flights, attempts, offers),
-    transientStreak: streakOf(first.transient_streak),
   };
 }
 
+/** A list with the streak its statement computed (the per-cell and per-date-pair reads). */
+const withStreak = ({ first, list }: { first: StreakRow; list: StoredFlightList }): NewestFlightList => ({
+  ...list,
+  transientStreak: streakOf(first.transient_streak),
+});
+
 /** Folds the joined rows (ordered by ask, then flight position) into one list per ask, in ask order. */
-function foldLists(rows: readonly JoinedRow[]): Array<{ first: JoinedRow; flights: ListedFlight[] }> {
-  const out: Array<{ first: JoinedRow; flights: ListedFlight[] }> = [];
-  let current: { ord: number; first: JoinedRow; flights: ListedFlight[] } | null = null;
+function foldLists<R extends JoinedRow>(rows: readonly R[]): Array<{ first: R; flights: ListedFlight[] }> {
+  const out: Array<{ first: R; flights: ListedFlight[] }> = [];
+  let current: { ord: number; first: R; flights: ListedFlight[] } | null = null;
   for (const r of rows) {
     if (current === null || current.ord !== r.ord) {
       current = { ord: r.ord, first: r, flights: [] };
@@ -619,7 +629,12 @@ export class FlightListsRepo {
     pointOfSale: PointOfSale,
   ): NewestFlightList[] {
     if (cells.length === 0) return [];
-    return this.lookup(PER_CELL_SQL, { definitionId, cells: asCells(cells), cabin, pointOfSale });
+    return this.lookup<StreakRow>(PER_CELL_SQL, {
+      definitionId,
+      cells: asCells(cells),
+      cabin,
+      pointOfSale,
+    }).map(withStreak);
   }
 
   /**
@@ -636,51 +651,56 @@ export class FlightListsRepo {
     pointOfSale: PointOfSale,
   ): NewestFlightList[] {
     if (pairs.length === 0) return [];
-    return this.lookup(PER_DATE_PAIR_SQL, {
+    return this.lookup<StreakRow>(PER_DATE_PAIR_SQL, {
       definitionId,
       pairs: JSON.stringify(pairs.map((p) => ({ departureDate: p.departureDate, returnDate: p.returnDate }))),
       origins: JSON.stringify(space.origins),
       destinations: JSON.stringify(space.destinations),
       cabin,
       pointOfSale,
-    });
+    }).map(withStreak);
   }
 
   /**
    * Spec rev 56 §6.9, §7: the newest list per cell of the definition, for one cabin and point of sale (the list
    * `newestPerCell` gives for that cell, never an older one), returned only when it is `read` and its return phase
-   * finished (`read` or `no-outbound`), with its returns and offers. Under an `executionIds` scope only the lists of
-   * those executions are read (an on-demand list, of no execution, is in no scope). Three statements, one transaction;
-   * the cells come in date, then airport order.
+   * finished (`read` or `no-outbound`), with its returns and offers. Under an `executionIds` scope the list is the
+   * newest among those executions' lists for the cell (an on-demand list, of no execution, is in no scope), so a newer
+   * list outside the scope never hides it. A stored list, without a `transientStreak` (the step's reuse rule, read by
+   * `newestPerCell`). Three statements, one transaction; the cells come in date, then airport order.
    */
   newestWithReturns(
     definitionId: string,
     cabin: Cabin,
     pointOfSale: PointOfSale,
     scope: { executionIds: readonly string[] } | null,
-  ): NewestFlightList[] {
-    return this.lookup(WITH_RETURNS_SQL, {
+  ): StoredFlightList[] {
+    return this.lookup<JoinedRow>(WITH_RETURNS_SQL, {
       definitionId,
       cabin,
       pointOfSale,
       executionIds: scope === null ? null : JSON.stringify(scope.executionIds),
-    });
+    }).map((l) => l.list);
   }
 
   /**
    * One lookup (spec rev 56 §7): the lists statement, then the attempts with their returns and the offers of the lists
    * it chose, one statement each, inside one read transaction so the three see the same lists.
    */
-  private lookup(listsSql: string, params: Record<string, unknown>): NewestFlightList[] {
+  private lookup<R extends JoinedRow>(
+    listsSql: string,
+    params: Record<string, unknown>,
+  ): Array<{ first: R; list: StoredFlightList }> {
     return this.db.transaction(() => {
-      const lists = foldLists(this.db.raw.prepare<Record<string, unknown>, JoinedRow>(listsSql).all(params));
+      const lists = foldLists(this.db.raw.prepare<Record<string, unknown>, R>(listsSql).all(params));
       if (lists.length === 0) return [];
       const ids = JSON.stringify(lists.map((l) => l.first.id));
       const attempts = attemptsByList(this.db.raw.prepare<[string], AttemptRow>(ATTEMPTS_SQL).all(ids));
       const offers = offersByList(this.db.raw.prepare<[string], OfferRow>(OFFERS_SQL).all(ids));
-      return lists.map((l) =>
-        readList(l.first, l.flights, attempts.get(l.first.id) ?? [], offers.get(l.first.id) ?? []),
-      );
+      return lists.map((l) => ({
+        first: l.first,
+        list: readList(l.first, l.flights, attempts.get(l.first.id) ?? [], offers.get(l.first.id) ?? []),
+      }));
     });
   }
 

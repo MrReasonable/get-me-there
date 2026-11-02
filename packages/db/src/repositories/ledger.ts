@@ -7,9 +7,10 @@ import { assertIsoDateTime } from '../internal/validate.js';
 /** Distinct tiles fetched upstream on a first attempt (ruling 7); cache hits are counted separately so parity = tiles + cacheHits. */
 const TILE_EXPR = `COUNT(DISTINCT CASE WHEN tile_index IS NOT NULL AND http_attempt = 1 AND outcome <> 'cache_hit' THEN provider_id || ':' || tile_index END)`;
 /**
- * Upstream attempts, a camoufox page row counting its pages (spec rev 56 §7: the guard's page scopes sum
- * COALESCE(page_count, 1) likewise, so a run's camoufox lines agree with its usage); every other row, `no-page` rows
- * included (whose page_count is NULL), counts 1.
+ * `calls`: each upstream attempt counts 1, except a camoufox page row, which counts its pages (`COALESCE(page_count, 1)`,
+ * spec rev 56 §7, as the guard's page scopes count it). A `no-page` row (page_count NULL) still counts 1 here, where the
+ * guard counts it 0, so a camoufox line equals the guard's page usage only when the run has no `no-page` rows; neither
+ * a pages nor an attempts figure should be read from it alone.
  */
 const CALLS = `COALESCE(SUM(CASE WHEN outcome = 'cache_hit' THEN 0 ELSE COALESCE(page_count, 1) END), 0)`;
 const COUNTS = `${CALLS} AS calls, COALESCE(SUM(cost_micro_gbp), 0) AS cost, ${TILE_EXPR} AS tiles, COALESCE(SUM(outcome = 'cache_hit'), 0) AS cacheHits, COALESCE(SUM(scroll_count), 0) AS scrolls`;
@@ -41,8 +42,10 @@ export class LedgerRepo {
   }
 
   /**
-   * Actuals for one execution, total and per (provider, stage). `calls` are upstream attempts, not cap usage
-   * (cap usage comes from `BudgetGuard.usage`); spec §8.1 parity is `tiles + cacheHits`.
+   * Actuals for one execution, total and per (provider, stage). `calls` is not cap usage (that comes from
+   * `BudgetGuard.usage`): each upstream attempt counts 1, except a camoufox page row, which counts its pages
+   * (`COALESCE(page_count, 1)`), so it equals the guard's page usage only when the run has no `no-page` rows; neither a
+   * pages nor an attempts figure should be read from it alone. Spec §8.1 parity is `tiles + cacheHits`.
    */
   countsFor(executionId: string): {
     calls: number;
@@ -61,9 +64,9 @@ export class LedgerRepo {
     }>;
     /**
      * Spec rev 55 §8.1 (ruling A32): the flight-list pages (`/v1/flights` rows), one line per provider. They are in
-     * `calls` and the totals, but in no `perProvider` line, whose stage would mislabel them as verification. `calls` counts
-     * every upstream attempt, `no-page` rows included, so it is attempts and not pages: a pages figure must not read it
-     * (spec rev 56: a page row counts its pages, up to 2 for a flights request with a return phase).
+     * `calls` and the totals, but in no `perProvider` line, whose stage would mislabel them as verification. `calls` is
+     * the same mix as above: a page row counts its pages (up to 2 for a flights request with a return phase, spec rev 56)
+     * and a `no-page` row counts 1, so neither a pages nor an attempts figure should be read from it alone.
      */
     flightLists: Array<{ providerId: ProviderId; calls: number; costMicroGbp: number; cacheHits: number }>;
   } {

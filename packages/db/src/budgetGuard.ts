@@ -62,13 +62,14 @@ VALUES (@providerId, @executionId, @endpointPath, @tileIndex, @startedAt, 'pendi
 // why: spec §7 rev 34 (CB-4): a finalised row holds the scrolls the answer stated; an `unknown` attempt with no answer
 // (a timeout or an abort after the request left) keeps its planned scrolls, so the scroll caps never undercount
 // (CodeRabbit on PR #9); any other attempt with no answer holds NULL
-// why: spec rev 56 §7 (R-zero): likewise a finalised row holds the pages the answer stated (0 admitted), an `unknown`
-// attempt that stated none keeps its plan, and a `no-page` row, or an answer that stated none, holds NULL (counting 1
-// as a page row, nothing as a no-page one)
+// why: spec rev 56 §7 (R-zero): likewise a finalised row holds the pages the answer stated (0 admitted); an attempt that
+// stated none keeps its plan when it is `unknown` or ended with no response (no status: a socket failure after the
+// worker was reached, which http-kit finalises `error` with no body, 21.5 review I1); a `no-page` row (a refused
+// connection, nothing sent) or an answer that stated none holds NULL (counting 1 as a page row, nothing as a no-page one)
 const FINALISE_SQL = `
 UPDATE provider_requests SET outcome = @outcome, http_status = @httpStatus, duration_ms = @durationMs, finished_at = @finishedAt, billable = @billable, page_class = @pageClass,
   scroll_count = CASE WHEN @scrollCount IS NULL AND @outcome = 'unknown' THEN scroll_count ELSE @scrollCount END,
-  page_count = CASE WHEN @pageClass = 'no-page' THEN NULL WHEN @pageCount IS NULL AND @outcome = 'unknown' THEN page_count ELSE @pageCount END,
+  page_count = CASE WHEN @pageClass = 'no-page' THEN NULL WHEN @pageCount IS NULL AND (@outcome = 'unknown' OR @httpStatus IS NULL) THEN page_count ELSE @pageCount END,
   cost_micro_gbp = CASE WHEN @zeroCost = 1 THEN 0 ELSE cost_micro_gbp END
 WHERE id = @id AND outcome = 'pending'`;
 const CLASSIFY_SQL = `UPDATE provider_requests SET error_kind = @kind WHERE id = @id`;

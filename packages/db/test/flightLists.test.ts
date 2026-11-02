@@ -13,7 +13,7 @@ import {
 import { describe, expect, it } from 'vitest';
 import type { Db } from '../src/client.js';
 import { FlightListsRepo } from '../src/repositories/flightLists.js';
-import type { FlightListInsert } from '../src/types.js';
+import type { FlightListInsert, NewestFlightList, StoredFlightList } from '../src/types.js';
 import { freshDb } from './helpers/db.js';
 import { EWR, JFK, LGW, LHR, rawExecution } from './helpers/factories.js';
 import { statementsOf } from './helpers/history.js';
@@ -630,6 +630,36 @@ describe('FlightListsRepo.insert with returns (spec rev 56 §7, migration 0012)'
   });
 });
 
+describe('the lookups with nothing to read (spec rev 56 §7)', () => {
+  it('no ask runs no statement, a lookup that chooses no list runs one, and a booking that kept no offer reads back with none', () => {
+    const { db, repo, list, definitionId } = setup();
+    const space = { origins: [LHR], destinations: [JFK] };
+    expect(statementsOf(db, () => repo.newestPerCell(definitionId, [], 'economy', 'GB'))).toEqual({
+      result: [],
+      statements: 0,
+    });
+    expect(statementsOf(db, () => repo.newestPerDatePair(definitionId, [], space, 'economy', 'GB'))).toEqual({
+      result: [],
+      statements: 0,
+    });
+    expect(statementsOf(db, () => repo.newestWithReturns(definitionId, 'economy', 'GB', null))).toEqual({
+      result: [],
+      statements: 1,
+    });
+    const none = returnRead({
+      booking: booking({
+        status: 'expand-failed',
+        rule: 'more-options',
+        expanded: false,
+        offersStated: null,
+        offers: [],
+      }),
+    });
+    repo.insert(list({ returns: none }));
+    expect(repo.newestWithReturns(definitionId, 'economy', 'GB', null)[0]?.returns).toEqual(none);
+  });
+});
+
 describe('transientStreak (spec rev 56 §7, §8.1 reuse: one retry, then refresh)', () => {
   it('counts the cell’s two newest lists that ended transient, newest first, stopping at the first finished one', () => {
     const { db, repo, list, definitionId } = setup();
@@ -689,6 +719,21 @@ describe('transientStreak (spec rev 56 §7, §8.1 reuse: one retry, then refresh
   });
 });
 
+/** A list as `newestWithReturns` returns it: the stored list, without the streak `newestPerCell` adds. */
+function storedOf(l: NewestFlightList | undefined): StoredFlightList | undefined {
+  if (l === undefined) return undefined;
+  const { transientStreak: _streak, ...stored } = l;
+  return stored;
+}
+/** A second completed execution of the definition, for the scope tests. */
+function insertExecution(db: Db, definitionId: string, id: string): void {
+  db.raw
+    .prepare(
+      `INSERT INTO search_executions (id, definition_id, definition_snapshot_json, trigger, status, created_at) VALUES (?, ?, '{}', 'manual', 'completed', ?)`,
+    )
+    .run(id, definitionId, hoursAt(8));
+}
+
 describe('FlightListsRepo.newestWithReturns (spec rev 56 §6.9, §7)', () => {
   it('returns the newest list per cell, only when it is read with a finished return phase, with its returns and offers, in three statements', () => {
     const { db, repo, list, definitionId } = setup();
@@ -722,22 +767,50 @@ describe('FlightListsRepo.newestWithReturns (spec rev 56 §6.9, §7)', () => {
     expect(statements).toBe(3);
     expect(result.map((l) => l.id).sort()).toEqual([newest, none].sort());
     const byId = new Map(result.map((l) => [l.id, l]));
-    // the same list newestPerCell gives, field for field
+    // the same list newestPerCell gives, field for field, less the streak that read adds
     const [cell, cellD2] = repo.newestPerCell(definitionId, [c(), c(LHR, JFK, D2)], 'economy', 'GB');
-    expect(byId.get(newest)).toEqual(cell);
-    expect(byId.get(none)).toEqual(cellD2);
+    expect(byId.get(newest)).toEqual(storedOf(cell));
+    expect(byId.get(none)).toEqual(storedOf(cellD2));
     expect(byId.get(newest)?.returns).toEqual(returnRead({ triedAll: false }));
     expect(repo.newestWithReturns(rawExecution(db, budget).definitionId, 'economy', 'GB', null)).toEqual([]);
+  });
+
+  // why: 21.5 review M1: the streak is the step's reuse rule (newestPerCell); this read carries none, scoped or not, so
+  // no caller reads a streak built partly from another execution's list
+  it('returns stored lists without a transientStreak, scoped or not', () => {
+    const { db, repo, list, definitionId, executionId } = setup();
+    insertExecution(db, definitionId, 'e-other');
+    repo.insert(list({ executionId: 'e-other', fetchedAt: hoursAt(8), returns: bookingTransient() }));
+    const mine = repo.insert(list({ fetchedAt: hoursAt(9), returns: bookingTransient() }));
+    repo.insert(list({ executionId: 'e-other', fetchedAt: hoursAt(10), returns: bookingTransient() }));
+    const scoped = repo.newestWithReturns(definitionId, 'economy', 'GB', { executionIds: [executionId] });
+    expect(scoped.map((l) => l.id)).toEqual([mine]);
+    expect(scoped[0]).not.toHaveProperty('transientStreak');
+    const all = repo.newestWithReturns(definitionId, 'economy', 'GB', null);
+    expect(all).toHaveLength(1);
+    expect(all[0]).not.toHaveProperty('transientStreak');
+  });
+
+  // why: 21.5 review M2: "never an older finished list under a newer transient one" holds inside a scope too, and a
+  // list outside the scope (an on-demand one here), however new, never hides the scope's own newest
+  it('within a scope: a newer transient list hides an older read one; a newer list outside the scope does not', () => {
+    const { repo, list, definitionId, executionId } = setup();
+    const scope = { executionIds: [executionId] };
+    repo.insert(list({ fetchedAt: hoursAt(9), returns: returnRead() }));
+    repo.insert(list({ fetchedAt: hoursAt(10), returns: ended('not-settled', 'not-settled') }));
+    expect(repo.newestWithReturns(definitionId, 'economy', 'GB', scope)).toEqual([]);
+    const scopedD2 = repo.insert(list({ ...D2, fetchedAt: hoursAt(9), returns: returnRead() }));
+    const onDemand = repo.insert(
+      list({ ...D2, executionId: null, fetchedAt: hoursAt(11), returns: returnRead() }),
+    );
+    expect(repo.newestWithReturns(definitionId, 'economy', 'GB', scope).map((l) => l.id)).toEqual([scopedD2]);
+    expect(repo.newestWithReturns(definitionId, 'economy', 'GB', null).map((l) => l.id)).toEqual([onDemand]);
   });
 
   it('under an executionIds scope reads only lists of those executions; an on-demand list is in no scope', () => {
     const { db, repo, list, definitionId, executionId } = setup();
     const other = { executionId: 'e-other' };
-    db.raw
-      .prepare(
-        `INSERT INTO search_executions (id, definition_id, definition_snapshot_json, trigger, status, created_at) VALUES ('e-other', ?, '{}', 'manual', 'completed', ?)`,
-      )
-      .run(definitionId, hoursAt(8));
+    insertExecution(db, definitionId, other.executionId);
     const mine = repo.insert(list({ fetchedAt: hoursAt(9), returns: returnRead() }));
     const theirs = repo.insert(
       list({ executionId: other.executionId, fetchedAt: hoursAt(10), returns: returnRead() }),

@@ -1099,9 +1099,11 @@ other rows. A page row counts its pages: `page_count` (§7) is the plan while
 the row is pending (`FLIGHT_LIST_PAGES_PER_PAIR_MAX` for a flights request
 with a return phase, reserved as `ReserveParams.pages`, else 1), the
 answer's `pagesLoaded` once finalised (0 admitted: a first load refused), the
-plan on an `unknown` attempt, and NULL on a `no-page` row and on every row
-whose answer states no page count (an older worker, a list or grid page),
-which counts 1; the camoufox page scopes sum `COALESCE(page_count, 1)` over
+plan on an `unknown` attempt and on one that ended with no response (a socket
+failure after the worker was reached, finalised `error` with no status), and
+NULL on a `no-page` row (a refused connection included: nothing was sent) and
+on every row whose answer states no page count (an older worker, a list or
+grid page), which counts 1; the camoufox page scopes sum `COALESCE(page_count, 1)` over
 page rows and report that sum as their `calls`, so the usage read, the
 Providers page and `gmt browser counts` keep their shape. The reservation
 checks the planned pages against the caps, so a return-phase request needs
@@ -2503,8 +2505,10 @@ are `toISOString()` text; booleans are integers 0/1.
   pointOfSale, scope)` returns the same newest list per cell as the newest
   read does, only when it is `read` with a return status of `read` or
   `no-outbound` (never an older finished list under a newer transient one),
-  with its returns and offers, and under an `executionIds` scope only lists
-  of those executions; three statements, one transaction. The page shows the
+  with its returns and offers; under an `executionIds` scope the list is the
+  newest among those executions' lists for the cell (a newer list outside
+  the scope never hides it, and the rule holds within the scope), and it
+  carries no streak; three statements, one transaction. The page shows the
   newest list, `read` or `failed`; a list stored before 0012 has no return
   read and reads as today.
 - `flight_list_flights` (migration 0011): list_id NOT NULL FK
@@ -2573,12 +2577,14 @@ are `toISOString()` text; booleans are integers 0/1.
   answer; NULL on every other row, camoufox `list` included, and on a grid
   call refused before any page; migration 0006), page_count NULL (migration
   0012, camoufox only, an integer ≥ 0: the pages the row stands for, the plan
-  while pending and on an `unknown` attempt, the answer's `pagesLoaded` once
-  finalised, 0 admitted; NULL on every earlier row, on a `no-page` row and
-  when the answer states none, each such page row counting 1)). Inserted at
-  reserve. The guard's camoufox page scopes sum `COALESCE(page_count, 1)`
-  over page rows and report it as their `calls`, and the ledger's counts do
-  the same. A camoufox flight-list request is a row with `endpoint_path` `/v1/flights`
+  while pending, on an `unknown` attempt and on one that ended with no
+  response, the answer's `pagesLoaded` once finalised, 0 admitted; NULL on
+  every earlier row, on a `no-page` row and when the answer states none, each
+  such page row counting 1)). Inserted at reserve. The guard's camoufox page
+  scopes sum `COALESCE(page_count, 1)` over page rows and report it as their
+  `calls`; the ledger's counts sum it over every row, a `no-page` row
+  counting 1 there, so they are neither a pages nor an attempts figure alone.
+  A camoufox flight-list request is a row with `endpoint_path` `/v1/flights`
   (`FLIGHT_LIST_ENDPOINT_PATH`), a grid or list page one with `/v1/page`.
   Index (provider_id, started_at, outcome, billable), (execution_id).
 - `provider_cache` (key PK, provider_id NULL, body_json, stored_at,

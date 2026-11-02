@@ -19,7 +19,8 @@ const page = (executionId: string | null, endpointPath: string, tileIndex: numbe
 });
 const grid = (executionId: string | null, i: number) => page(executionId, '/v1/page', i);
 const flights = (executionId: string | null) => page(executionId, '/v1/flights');
-const done = { outcome: 'ok', durationMs: 1, pageClass: 'page' } as const;
+// why: an answer always carries its status (http-kit finalises `ok` with it); a row with none is a response-less attempt
+const done = { outcome: 'ok', httpStatus: 200, durationMs: 1, pageClass: 'page' } as const;
 
 function scopeOf(f: () => unknown): string | undefined {
   try {
@@ -189,6 +190,37 @@ describe('page counts on the ledger (spec rev 56 §5.3, §7)', () => {
       pageCount: 0,
     });
     expect(pageCounts(db)).toEqual([1, 0, 2, 1, null, null, null]);
+  });
+
+  // why: spec rev 56 §7 and providers' http-kit (attempt.ts): a socket failure after the worker was reached finalises
+  // `error` with no status, no body and `pageClass 'page'`; with no answer it keeps the plan, never the guard's 1
+  it('a 2-page request that reached the page and then failed on the socket keeps its plan of 2', () => {
+    const { g, db } = guardWithLedger({ ...caps, monthlyCap: 1500 });
+    g.reserve({ ...flights('e1'), pages: 2 }).finalise({
+      outcome: 'error',
+      durationMs: 1,
+      pageClass: 'page',
+    });
+    expect(pageCounts(db)).toEqual([2]);
+    expect(g.usage({ kind: 'provider-month', providerId: 'camoufox' }).calls).toBe(2);
+    expect(
+      g.usage({ kind: 'provider-execution', providerId: 'camoufox', executionId: 'e1' }).flightLists?.calls,
+    ).toBe(2);
+  });
+
+  // why: http-kit marks a refused connection `no-page` (nothing was sent): no page is recorded and none is counted
+  it('a 2-page request that never connected records no page', () => {
+    const { g, db } = guardWithLedger({ ...caps, monthlyCap: 1500 });
+    g.reserve({ ...flights('e1'), pages: 2 }).finalise({
+      outcome: 'error',
+      durationMs: 1,
+      pageClass: 'no-page',
+    });
+    expect(pageCounts(db)).toEqual([null]);
+    expect(g.usage({ kind: 'provider-month', providerId: 'camoufox' }).calls).toBe(0);
+    expect(
+      g.usage({ kind: 'provider-execution', providerId: 'camoufox', executionId: 'e1' }).flightLists?.calls,
+    ).toBe(0);
   });
 
   it('a reserve without pages plans 1 on a camoufox row; a row of another provider holds NULL, pages asked or not', () => {
