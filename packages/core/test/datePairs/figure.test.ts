@@ -546,8 +546,27 @@ describe('figuresByDatePair with the pairing figure (spec rev 56 §6.9; Ian ruli
       // why: an absent pairingRead is 'not-read' (so the default leaves today's figures as they were)
       expect(f?.basis === 'calendar' ? (f.pairingRead ?? 'not-read') : null).toBe(read);
       expect(f !== undefined && 'pairing' in f).toBe(false);
+      // why: only a failed list carries a reason
+      expect(f !== undefined && 'listReason' in f).toBe(false);
     },
   );
+
+  it('the 21.6 ruling: a failed newest list reads list-failed with its cause, on a calendar or stale verified figure', () => {
+    const failed: PairingOf = () => ({ read: 'list-failed', reason: 'network', candidate: null });
+    expect(figuresByDatePair([grid], scope, NOW, failed).figures.get(0)).toEqual({
+      basis: 'calendar',
+      chosen: grid,
+      cheaperCached: null,
+      pairingRead: 'list-failed',
+      listReason: 'network',
+    });
+    const v = stale(60_000, { cell: at('LGW', 'EWR') });
+    expect(figuresByDatePair([grid, v], scope, NOW, failed).figures.get(0)).toEqual({
+      ...pickFigure([grid, v], NOW),
+      pairingRead: 'list-failed',
+      listReason: 'network',
+    });
+  });
 
   it.each<[string, Partial<PairingCandidate>, PairingRead]>([
     ['offers not complete', { complete: false }, 'offers-incomplete'],
@@ -655,5 +674,7 @@ describe('PairingOf (review finding 5: a lookup with a candidate derives its rea
   it("admits no 'within' read without a candidate", () => {
     expectTypeOf<{ read: 'within'; candidate: null }>().not.toMatchTypeOf<ReturnType<PairingOf>>();
     expectTypeOf<{ read: 'outbound-only'; candidate: null }>().toMatchTypeOf<ReturnType<PairingOf>>();
+    // why: the 21.6 ruling: a failed list names its cause
+    expectTypeOf<{ read: 'list-failed'; candidate: null }>().not.toMatchTypeOf<ReturnType<PairingOf>>();
   });
 });

@@ -2,7 +2,14 @@
 // order, the figure's airport pair, its search link, the newest list for the figure's cell (`list`) or else the newest
 // for another airport pair of the space (`listOtherPair`); `POST` starts a read on demand and maps the engine's
 // refusals to their codes; `GET /executions/:id` reports `flights` from the stored plan and the execution's rows.
-import { apiContract, asIsoDate, type CellKey, type DefinitionInput, type SearchDefinition } from '@gmt/core';
+import {
+  apiContract,
+  asIsoDate,
+  type CellKey,
+  type DefinitionInput,
+  ProviderError,
+  type SearchDefinition,
+} from '@gmt/core';
 import { PAIRING_FIXTURE } from '@gmt/core/testing';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
@@ -42,12 +49,15 @@ const B_OTHER = cell(LHR, JFK, '2026-11-03', '2026-11-13');
 const PAIRS = '2026-11-02_2026-11-12,2026-11-03_2026-11-13';
 
 /** A search naming camoufox beside the fixture, with fixture prices: A cheapest on LHR–JFK, B on LGW–EWR. */
-async function setup(o: { env?: Record<string, string> } = {}) {
-  h = await createHarness({ env: { ...WORKER_ENV, ...o.env } });
+async function setup(
+  o: { env?: Record<string, string>; constraints?: DefinitionInput['constraints']; wired?: boolean } = {},
+) {
+  h = await createHarness({ env: { ...WORKER_ENV, ...o.env }, wired: o.wired === true });
   const x = h;
   const def = x.ports.repos.definitions.create(
     exampleDefinitionInput({
       ...SPACE,
+      ...(o.constraints === undefined ? {} : { constraints: o.constraints }),
       providers: {
         discovery: ['fixture', 'camoufox'],
         verification: [],
@@ -374,29 +384,51 @@ describe('the return leg on the flight-lists wire (spec rev 56 §10)', () => {
     expect('pagesLoaded' in (b?.list ?? {})).toBe(false);
   });
 
-  it('pagesPlanned is 1 before the worker is read and with its flag off, 2 once it reports RETURN_SELECT_VERIFIED', async () => {
+  it('pagesPlanned is 2 before the worker is read (prov-008: the read may then load 2), 1 with its flag off, 2 with it on', async () => {
     const { x, def } = await setup();
     const planned = async () =>
       apiContract.flightListsResponseSchema.parse(await (await get(x, def.id, PAIRS)).json()).pagesPlanned;
-    expect(await planned()).toBe(1);
+    expect(await planned()).toBe(2);
     x.engine.setWorkerFlags('camoufox', { RETURN_SELECT_VERIFIED: false });
     expect(await planned()).toBe(1);
     x.engine.setWorkerFlags('camoufox', { RETURN_SELECT_VERIFIED: true, BOOKING_SELECT_VERIFIED: true });
     expect(await planned()).toBe(2);
   });
 
-  it('POST refuses a body carrying returnLimits (the read takes the definition limits) before any read', async () => {
-    const { x, def } = await setup();
-    const read = vi.spyOn(x.engine, 'readFlightList');
-    const res = await x.request(`/api/definitions/${def.id}/flight-lists`, {
-      json: {
-        departureDate: '2026-11-02',
-        returnDate: '2026-11-12',
-        returnLimits: PAIRING_FIXTURE.returns.limits,
-      },
+  // why: 21.6 review M10: the read's limits are the definition's, sent by the engine to the worker; a body carrying its
+  // own would be refused by the strict body schema before this commit too, so the case drives the read itself
+  it("POST reads with the definition's limits: the worker request carries them, the body names none", async () => {
+    const { x, def } = await setup({ constraints: { maxStops: 1 }, wired: true });
+    const camoufox = x.ports.providers.find((p) => p.id === 'camoufox');
+    const preflight = camoufox?.discovery?.preflight;
+    const cap = camoufox?.flightLists;
+    if (camoufox?.discovery === undefined || preflight === undefined || cap === undefined)
+      throw new Error('the camoufox provider and its capabilities');
+    vi.spyOn(camoufox.discovery, 'preflight').mockResolvedValue({
+      ok: true,
+      flags: { RETURN_SELECT_VERIFIED: true, BOOKING_SELECT_VERIFIED: true },
     });
-    // why: the body schema is strict: an unknown key is the api's invalid-body refusal
-    expect(res.status).toBe(400);
-    expect(read).not.toHaveBeenCalled();
+    const sent = vi.spyOn(cap, 'read').mockResolvedValue({
+      kind: 'list-error',
+      error: new ProviderError({ kind: 'network', retryable: false, message: 'stub' }),
+    });
+    const started = vi.spyOn(x.engine, 'readFlightList');
+    const res = await x.request(`/api/definitions/${def.id}/flight-lists`, {
+      json: { departureDate: '2026-11-02', returnDate: '2026-11-12' },
+    });
+    expect(res.status, await res.clone().text()).toBe(202);
+    const r = await started.mock.results[0]?.value;
+    if (r === undefined || !r.ok) throw new Error('the read started');
+    await r.done;
+    expect(sent).toHaveBeenCalledTimes(1);
+    expect(sent.mock.calls[0]?.[0]).toMatchObject({
+      returnLimits: {
+        maxJourneyMinutes: null,
+        maxStops: 1,
+        departureWindowLocal: null,
+        arrivalWindowLocal: null,
+      },
+      booking: true,
+    });
   });
 });

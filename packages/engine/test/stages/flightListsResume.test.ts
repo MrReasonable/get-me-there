@@ -81,8 +81,9 @@ describe('a resumed flight-list step', () => {
     const rows = flightRows(e, id);
     expect(rows).toHaveLength(10);
     expect(new Set(rows.map((r2) => r2.departureDate)).size).toBe(10);
-    // why: 4 pages before the SIGTERM and 6 after; the held page was aborted before it was answered (a no-page row)
-    expect(flightLedger(e, id)).toBe(10);
+    // why: 4 requests before the SIGTERM, the held one (cut off before any answer, ledgered at its plan as http-kit
+    // does, 21.6 review I2) and 6 after
+    expect(flightLedger(e, id)).toBe(11);
     const counts = p.ctx.repos.flightLists.forExecution(id, done.flightLists?.cells ?? []);
     expect(counts.read + counts.failed + (done.flightLists?.reused ?? 0)).toBeLessThanOrEqual(10);
     expect(apiContract.flightListsStateSchema.parse(done.flightLists)).toBeTruthy();
@@ -100,8 +101,8 @@ describe('a resumed flight-list step', () => {
     expect(cam2.flightCalls.map((c) => c.query.cell)).toEqual(plan?.cells.slice(5));
     const rows = flightRows(e, id);
     expect(rows).toHaveLength(9);
-    // why: 4 pages before the SIGTERM, 5 after it (the departed fifth cell sends none)
-    expect(flightLedger(e, id)).toBe(9);
+    // why: 4 requests before the SIGTERM, the held one, 5 after it (the departed fifth cell sends none)
+    expect(flightLedger(e, id)).toBe(10);
     expect(rows.some((r) => r.departureDate === plan?.cells[4]?.departureDate)).toBe(false);
     const counts = p.ctx.repos.flightLists.forExecution(id, done.flightLists?.cells ?? []);
     expect(counts.read + counts.failed + (done.flightLists?.reused ?? 0)).toBeLessThanOrEqual(
@@ -189,8 +190,11 @@ describe('a resumed flight-list step', () => {
 
   it('spec rev 56: a page cancelled in its return phase writes no row; the resumed pass reads that pair once, with returns', async () => {
     const both = { RETURN_SELECT_VERIFIED: true, BOOKING_SELECT_VERIFIED: true };
-    const { e, id, cam2, plan } = await interruptedAt(5, {}, both);
+    const { e, id, plan } = await interruptedAt(5, {}, both);
     expect(plan).toMatchObject({ returns: true, booking: true });
+    // why: 21.6 review I2, the worst case: every request loads its 2 pages (the four before the SIGTERM did too, at their
+    // plan) and the cancelled one is ledgered at its planned 2; the tenth pair is still read, never refused
+    const cam2 = stubCamoufox({ cells: 15, flights: { pagesLoaded: () => 2 } });
     // why: the new process has read no worker yet; the stored plan, not the flags, decides the resumed pass
     const p = restart(e, [cam2]);
     expect((await p.orch.resume(id, { manual: false })).ok).toBe(true);
@@ -202,7 +206,17 @@ describe('a resumed flight-list step', () => {
     const rows = flightRows(e, id);
     expect(rows).toHaveLength(10);
     expect(rows.filter((r) => r.departureDate === plan?.cells[4]?.departureDate)).toHaveLength(1);
+    expect(rows.every((r) => r.status === 'read')).toBe(true);
+    expect(rows.some((r) => r.reason === 'execution-cap')).toBe(false);
     expect(done.flightLists).toEqual(plan);
+    // the month counts all 11 requests at 2 pages (22); the run's flight allowance leaves out the cancelled one (20)
+    expect(
+      e.ctx.budget.usage({ kind: 'provider-month', providerId: 'camoufox' }).calls,
+    ).toBeGreaterThanOrEqual(22);
+    expect(
+      e.ctx.budget.usage({ kind: 'provider-execution', executionId: id, providerId: 'camoufox' }).flightLists
+        ?.calls,
+    ).toBe(20);
     await p.orch.shutdown();
   });
 });

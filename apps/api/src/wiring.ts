@@ -15,6 +15,7 @@ import {
   type FlightProvider,
   flightRequestSeconds,
   type Logger,
+  listRequestSeconds,
   parseConfig,
   type ResponseCache,
   type Secret,
@@ -269,6 +270,7 @@ export function providersFor(
         flightRequestSeconds: {
           booking: flightRequestSeconds(cf.pageTimeoutSeconds, cf.minSpacingSeconds, true),
           returnsOnly: flightRequestSeconds(cf.pageTimeoutSeconds, cf.minSpacingSeconds, false),
+          outboundOnly: listRequestSeconds(cf.pageTimeoutSeconds),
         },
       }),
     );

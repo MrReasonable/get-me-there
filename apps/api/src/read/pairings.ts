@@ -1,8 +1,8 @@
 /**
  * Spec revision 56 §6.9 "Flight lists and the date pair's figure" (WP21 Task 21.6): the one pairings map the board, the
- * scoped `/results` read and the cards share, so the detail and the board agree. For each figure's cell the newest
- * flight list is read (`newestWithReturns` for a finished return phase, under the read's execution scope; `newestPerCell`
- * for the rest), and core's rules judge it under today's limits (`flightLimitsOf` of the definition's constraints):
+ * scoped `/results` read and the cards share, so the detail and the board agree. For each asked cell the newest flight
+ * list under the read's execution scope is read (`newestOfCells`, whatever its status), and core's rules judge it under
+ * today's limits (`flightLimitsOf` of the definition's constraints):
  * `cheapestPairing`, the booking's offers only when they are `bookingReturnOf`'s and the pairing's (`cheapestOffer`,
  * `offersComplete`), and the stored limits against today's (`sameFlightLimits`). A list never changes coverage.
  */
@@ -28,6 +28,8 @@ import {
 import type { StoredFlightList } from '@gmt/db';
 import { FLIGHT_LIST_PROVIDER, refreshHoursOf } from '@gmt/engine';
 import type { Ports } from '../wiring.js';
+
+const HOUR_MS = 3_600_000;
 
 /** A flight list's provenance, as narrow as `flightListSchema` holds it (and a `Provenance`). */
 export type FlightListProvenance = Provenance & {
@@ -86,6 +88,9 @@ export function candidateOf(
     b.returnIndex === p.returnIndex;
   const offer = forPairing ? (cheapestOffer(b)?.offer ?? null) : null;
   const ageHours = hoursSince(l.fetchedAt, now);
+  // why: prov-007: freshness is judged on the elapsed milliseconds, as the engine's reuse rule is; `hoursSince` floors to
+  // whole hours and is for display only (a list 168 h 59 m old under refresh 168 is past it)
+  const fresh = Date.parse(now) - Date.parse(l.fetchedAt) <= refreshHours * HOUR_MS;
   const fits = p.outboundFits && p.returnFits;
   return {
     fromMinor: p.fromMinor,
@@ -101,11 +106,11 @@ export function candidateOf(
     },
     mismatch: offer !== null && offer.priceMinor !== p.fromMinor,
     provenance: flightListProvenance(l),
-    // why: spec rev 55 §10: a list is judged against the camoufox refresh only, by the per-price rule
-    stale: ageHours > refreshHours ? 'refresh' : false,
+    // why: spec rev 55 §10: a list is judged against the camoufox refresh only; stale exactly when not fresh
+    stale: fresh ? false : 'refresh',
     ageHours,
     fits,
-    fresh: ageHours <= refreshHours,
+    fresh,
     underCurrentLimits: sameFlightLimits(r.limits, limits),
     fetchedAt: l.fetchedAt,
     executionId: l.executionId,
@@ -141,10 +146,11 @@ const NOT_READ = { read: 'not-read', candidate: null } as const;
 
 /**
  * The pairings of `def` for the cells `asked` (the cells whose figure may take a pairing, from a first pass), under
- * the read's execution scope (null: every list, on-demand ones included; else only those executions' lists). Two
- * repository reads: the finished lists (`newestWithReturns`, whole definition) and the newest list of every other
- * asked cell (`newestPerCell`), which tells `outbound-only` (a list with no finished return phase, or failed) from
- * `not-read` (no list).
+ * the read's execution scope (null: every list, on-demand ones included; else only those executions' lists). One
+ * repository read over the asked cells only (21.6 review M6): the newest list of each in the scope, whatever its status
+ * (prov-002, so a newer list outside the scope never makes a cell the scoped run read look unread). No list is
+ * `not-read`; a failed one is `list-failed` with its reason (the 21.6 ruling: it read nothing, the outbound included); a
+ * list with no finished return phase is `outbound-only`; a finished one gives its candidate, or `no-pairing-read`.
  */
 export function pairingsFor(
   ports: Ports,
@@ -152,30 +158,25 @@ export function pairingsFor(
   executionIds: readonly string[] | null,
   asked: readonly CellKey[],
 ): PairingOf {
-  const pointOfSale = ports.config.pointOfSale;
   const now = ports.clock.now();
   const limits = flightLimitsOf(def.constraints);
   const refreshHours = refreshHoursOf(def, FLIGHT_LIST_PROVIDER);
-  const finished = new Map(
+  const newest = new Map(
     ports.repos.flightLists
-      .newestWithReturns(def.id, def.cabin, pointOfSale, executionIds === null ? null : { executionIds })
-      .map((l) => [cellKeyString(l), l]),
-  );
-  const rest = asked.filter((c) => !finished.has(cellKeyString(c)));
-  const scope = executionIds === null ? null : new Set(executionIds);
-  // why: under an execution scope only those executions' lists count; a newer list outside it reads as none here
-  // (the finished ones come from newestWithReturns, which takes the newest inside the scope)
-  const others = new Map(
-    ports.repos.flightLists
-      .newestPerCell(def.id, rest, def.cabin, pointOfSale)
-      .filter((l) => scope === null || (l.executionId !== null && scope.has(l.executionId)))
+      .newestOfCells(
+        def.id,
+        asked,
+        def.cabin,
+        ports.config.pointOfSale,
+        executionIds === null ? null : { executionIds },
+      )
       .map((l) => [cellKeyString(l), l]),
   );
   return (cell) => {
-    const key = cellKeyString(cell);
-    const l = finished.get(key);
-    if (l === undefined) return others.has(key) ? { read: 'outbound-only', candidate: null } : NOT_READ;
-    // why: newestWithReturns returns only a read list whose return phase finished (read or no-outbound)
+    const l = newest.get(cellKeyString(cell));
+    if (l === undefined) return NOT_READ;
+    // why: a list has a reason exactly when it failed (flight_lists_failed_reason_ck)
+    if (l.reason !== null) return { read: 'list-failed', reason: l.reason, candidate: null };
     if (l.returns === null || !RETURN_FINISHED.has(l.returns.status))
       return { read: 'outbound-only', candidate: null };
     const candidate = candidateOf(l, limits, now, refreshHours);

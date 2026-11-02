@@ -500,7 +500,7 @@ export async function startExecution(
         browserWindowEnd: browserWindowEndFrom(
           windowAnchor(e.scheduledFor, e.startedAt ?? e.createdAt),
           estimate.seconds,
-          flightWindowMarginSeconds(ctx, estimate),
+          flightWindowMarginSeconds(ctx, estimate, null),
         ),
       });
       ctx.repos.cells.seed(e.id, cells, discovery);

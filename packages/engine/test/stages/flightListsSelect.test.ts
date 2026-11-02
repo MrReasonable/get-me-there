@@ -230,6 +230,14 @@ describe('selectFlightPairs with a return phase planned (spec rev 56 §8.1 "Reus
     expect(outcome(read(ago(152), { ...transient, transientStreak: 2 }), BOOKING)).toBe('read');
   });
 
+  it('ruling 21.6 I1: a read return whose booking ended skipped is read once more (streak 1), then reused (streak 2)', () => {
+    // why: the streak comes from the repository (BOOKING_REREAD counts a skipped booking, pinned in db's test); a
+    // structural skip (not-cheapest-view) would otherwise be read again every run
+    const skipped = young({ bookingStatus: 'skipped' });
+    expect(outcome({ ...skipped, transientStreak: 1 }, BOOKING)).toBe('read');
+    expect(outcome({ ...skipped, transientStreak: 2 }, BOOKING)).toBe('reused');
+  });
+
   it('no return phase planned: every young read list is reused whatever its statuses, not-verified included', () => {
     for (const s of [...RETURN_STATUS, null])
       expect(outcome(young({ returnStatus: s, limits: null }), OUTBOUND_ONLY)).toBe('reused');

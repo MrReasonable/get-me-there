@@ -521,6 +521,17 @@ describe('readFlightList with the return leg (spec rev 56 §8.1)', () => {
     expect(two.cam.flightCalls[0]?.query.returnLimits).toEqual(LIMITS);
   });
 
+  it('21.6 review M12: a preflight that states no flags leaves the flags as they were; the read still carries the limits', async () => {
+    const s = setup({}, {}, { preflight: { ok: true } });
+    s.e.ctx.repos.definitions.update(s.e.definition.id, {
+      constraints: { maxJourneyMinutes: 1500, maxStops: 1 },
+    });
+    s.e.ctx.workerFlags.set('camoufox', BOTH);
+    await readOnce(s);
+    expect(s.e.ctx.workerFlags.get('camoufox')).toEqual(BOTH);
+    expect(s.cam.flightCalls[0]?.query).toMatchObject({ returnLimits: LIMITS, booking: true });
+  });
+
   /** Seeds the cell's newest lists (oldest first), each `hoursAgo` old with return read `returns`. */
   function seed(e: CamoufoxEngine, lists: Array<{ hoursAgo: number; returns: ReturnRead | null }>) {
     for (const l of lists)
@@ -621,6 +632,30 @@ describe('readFlightList with the return leg (spec rev 56 §8.1)', () => {
     expect(await askWith(BOTH, [{ hoursAgo: 1, returns: null }])).toBe('read');
   });
 
+  it('with no booking read planned (the booking flag off) a read return with an expand-failed booking is fresh', async () => {
+    const expandFailed = returnsOf(
+      {},
+      { status: 'expand-failed', rule: 'more-options:not-settled', expanded: false },
+    );
+    expect(
+      await askWith({ RETURN_SELECT_VERIFIED: true, BOOKING_SELECT_VERIFIED: false }, [
+        { hoursAgo: 1, returns: expandFailed },
+      ]),
+    ).toBe('fresh');
+    expect(await askWith(BOTH, [{ hoursAgo: 1, returns: expandFailed }])).toBe('read');
+  });
+
+  it('21.6 review M8: with 1 page of headroom a young outbound-only list is fresh (the read would be outbound-only too)', async () => {
+    const s = flagged(BOTH, {}, { monthlyCap: 1 });
+    s.e.ctx.workerFlags.set('camoufox', BOTH);
+    seed(s.e, [{ hoursAgo: 1, returns: null }]);
+    const r = await s.reader.read(s.e.definition.id, PAIR);
+    expect(r).toEqual({ ok: false, code: 'fresh' });
+    expect(s.cam.flightCalls).toHaveLength(0);
+    // with 2 pages the same list is read again (a return phase is planned)
+    expect(await askWith(BOTH, [{ hoursAgo: 1, returns: null }])).toBe('read');
+  });
+
   it('the boundary: a finished list exactly 0.9 × refresh old (151.2 h) is read; one just younger is fresh', async () => {
     expect(await askWith(BOTH, [{ hoursAgo: 151.2, returns: returnsOf() }])).toBe('read');
     expect(await askWith(BOTH, [{ hoursAgo: 151.1, returns: returnsOf() }])).toBe('fresh');
@@ -628,10 +663,10 @@ describe('readFlightList with the return leg (spec rev 56 §8.1)', () => {
 });
 
 describe('the engine contract: setWorkerFlags and flightPagesPlanned (spec rev 56 §10, ruling D3)', () => {
-  it('plans 1 page before any read and with the flag off, 2 once the worker reports RETURN_SELECT_VERIFIED', () => {
+  it('plans 2 pages before any read (prov-008: the read may set the flag and load 2), 1 with the flag off, 2 with it on', () => {
     const { e } = setup();
     const engine = createEngine(e.deps, { rankedDatePairs: rankedPairs(5) });
-    expect(engine.flightPagesPlanned()).toBe(1);
+    expect(engine.flightPagesPlanned()).toBe(2);
     engine.setWorkerFlags('camoufox', { RETURN_SELECT_VERIFIED: false });
     expect(engine.flightPagesPlanned()).toBe(1);
     engine.setWorkerFlags('camoufox', { RETURN_SELECT_VERIFIED: true });

@@ -1015,26 +1015,128 @@ describe('the step plans and sends the return leg (spec rev 56 §8.1)', () => {
     }
   });
 
-  it('R-window: the gate, run after a held lease is released, refuses a return phase the window no longer holds', async () => {
+  /** A step whose first request waits on a held lease while the clock moves `advanceMs` on (an on-demand read in flight). */
+  async function heldLease(windowSeconds: number, advanceMs: number) {
     const cam = stubCamoufox({ cells: 15, flights: {} });
     const e: CamoufoxEngine = engineWith([cam], { rankedDatePairs: (q) => reader(q) });
     const held = deferred();
-    const reader = windowAt(e, 800, () => {
-      // why: the plan sees 800 s (a 780 s return phase fits); the lease is held until the clock has moved 100 s on
+    const reader = windowAt(e, windowSeconds, () => {
       e.ctx.lease.hold(held.promise);
       void Promise.resolve().then(() => {
-        e.clock.advance(100_000);
+        e.clock.advance(advanceMs);
         held.resolve();
       });
     });
     e.ctx.workerFlags.set('camoufox', BOTH);
     const id = await start(e);
-    const done = await e.settled(id);
+    return { e, cam, id, done: await e.settled(id) };
+  }
+
+  it('R-window (21.6 review M1): the request is shaped after a held lease: 800 s less 100 s waited sends outbound-only', async () => {
+    // why: at planning 800 s holds a 780 s return phase; after the wait 700 s holds only an outbound-only read
+    const { e, cam, id, done } = await heldLease(800, 100_000);
+    expect(cam.flightCalls).toHaveLength(10);
+    expect(cam.flightCalls.every((c) => c.query.returnLimits === undefined)).toBe(true);
+    expect(flightRows(e, id)).toHaveLength(10);
+    expect(done.flightLists).toMatchObject({ returns: true, returnsStopped: null, ended: null });
+  });
+
+  it('R-window: a window that holds 50 s after a held lease holds no request; the gate refuses it, ended window', async () => {
+    const { e, cam, id, done } = await heldLease(800, 750_000);
     expect(cam.flightCalls).toHaveLength(1);
-    expect(cam.flightCalls[0]?.query.returnLimits).toEqual(NONE);
+    expect(cam.flightCalls[0]?.query.returnLimits).toBeUndefined();
     expect(cam.flightRequests()).toBe(0);
     expect(flightRows(e, id)).toHaveLength(0);
     expect(done.flightLists?.ended).toBe('window');
+  });
+
+  it("the step's gate asks the heartbeat for a suspension before every flight page (check c)", async () => {
+    let flightPhase = false;
+    let checks = 0;
+    const cam = stubCamoufox({
+      cells: 15,
+      flights: {
+        onStart: () => {
+          flightPhase = true;
+        },
+      },
+    });
+    const e = engineWith([cam], { rankedDatePairs: rankedPairs(15) });
+    const check = e.ctx.heartbeat.checkBeforePage.bind(e.ctx.heartbeat);
+    e.ctx.heartbeat.checkBeforePage = () => {
+      if (flightPhase) checks += 1;
+      check();
+    };
+    const done = await e.settled(await start(e));
+    expect(cam.flightRequests()).toBe(10);
+    expect(checks).toBe(10);
+    expect(done.flightLists?.ended).toBeNull();
+  });
+
+  it('21.6 review M11: a run row the gate cannot read refuses the request (fail closed): no page, ended window', async () => {
+    let unreadable = false;
+    const cam = stubCamoufox({
+      cells: 15,
+      flights: {
+        // why: after the request is shaped (a return phase), the gate's own read of the run's row finds none
+        onStart: () => {
+          unreadable = true;
+        },
+      },
+    });
+    const e = engineWith([cam], { rankedDatePairs: rankedPairs(15) });
+    const executions = e.ctx.repos.executions;
+    const get = executions.get.bind(executions);
+    executions.get = (id) => {
+      if (!unreadable) return get(id);
+      unreadable = false;
+      return null;
+    };
+    e.ctx.workerFlags.set('camoufox', BOTH);
+    const id = await start(e);
+    const done = await e.settled(id);
+    expect(cam.flightCalls).toHaveLength(1);
+    expect(cam.flightCalls[0]?.query.returnLimits).toBeDefined();
+    expect(cam.flightRequests()).toBe(0);
+    expect(flightRows(e, id)).toHaveLength(0);
+    expect(done.flightLists?.ended).toBe('window');
+    expect(done.status).not.toBe('failed');
+  });
+
+  it('R-low-pages (21.6 review M1): the month is read after a held lease: an on-demand page spent meanwhile sends outbound-only', async () => {
+    // why: 15 grid pages of a 17-page month leave 2 at planning; the read holding the lease spends 1 of them
+    const cam = stubCamoufox({ cells: 15, flights: {} });
+    const ranking = rankedPairs(15);
+    const held = deferred();
+    let planned = false;
+    const e: CamoufoxEngine = engineWith([cam], {
+      monthlyCap: 17,
+      rankedDatePairs: (q) => {
+        // why: only the step's own planning read (the start's estimate reads the ranking too, before the run exists)
+        if (planned || e.ctx.repos.executions.activeParent(q.definitionId) === null) return ranking(q);
+        planned = true;
+        e.ctx.lease.hold(held.promise);
+        void Promise.resolve().then(() => {
+          e.ctx.budget
+            .reserve({
+              providerId: 'camoufox',
+              executionId: null,
+              tileIndex: null,
+              costMicroGbp: 0,
+              httpAttempt: 1,
+              endpointPath: '/v1/flights',
+            })
+            .finalise({ outcome: 'ok', httpStatus: 200, durationMs: 1, pageClass: 'page', pageCount: 1 });
+          held.resolve();
+        });
+        return ranking(q);
+      },
+    });
+    e.ctx.workerFlags.set('camoufox', BOTH);
+    const done = await e.settled(await start(e));
+    expect(planned).toBe(true);
+    expect(cam.flightCalls[0]?.query.returnLimits).toBeUndefined();
+    expect(done.flightLists).toMatchObject({ returns: true, returnsStopped: null });
   });
 });
 

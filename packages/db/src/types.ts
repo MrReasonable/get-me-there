@@ -254,9 +254,10 @@ export interface StoredFlightList extends FlightListInsert {
 }
 
 /**
- * Spec revision 56 §7, §8.1 (R-retry): how many of a cell's two newest lists ended with a transient return or booking
- * status (core's `RETURN_TRANSIENT`, `BOOKING_TRANSIENT`), newest first, stopping at the first that did not: 2 means
- * the pair was read again once and ended transient again, so the step reuses it as finished until its refresh.
+ * Spec revision 56 §7, §8.1 (R-retry): how many of a cell's two newest lists ended with a return or booking status
+ * that is read again (core's `RETURN_TRANSIENT`, `BOOKING_REREAD`: a skipped booking read too, ruling 21.6 I1), newest
+ * first, stopping at the first that did not: 2 means the pair was read again once and ended so again, so the step
+ * reuses it as finished until its refresh.
  */
 export type TransientStreak = 0 | 1 | 2;
 

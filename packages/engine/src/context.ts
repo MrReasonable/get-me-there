@@ -6,6 +6,7 @@ import {
   flightRequestSeconds,
   type IsoDateTime,
   type Logger,
+  listRequestSeconds,
   type Notifier,
   type PointOfSale,
   type ProviderId,
@@ -212,8 +213,6 @@ export function buildContext(deps: EngineDeps, options: EngineOptions = {}): Eng
 }
 
 /** The list page's request timeout over its page timeout (spec §12: the read-back and close bounds). */
-const LIST_REQUEST_EXTRA_SECONDS = 15;
-
 /**
  * Spec rev 56 §8.1, §12: camoufox's flights request seconds from the shared settings, core's one computation (the
  * provider's own copy is the wiring's, from the same function and the same settings: A24); null when it is not
@@ -225,6 +224,6 @@ function camoufoxRequestSeconds(config: Config): ProviderRunLimits['flightReques
   return {
     booking: flightRequestSeconds(cf.pageTimeoutSeconds, cf.minSpacingSeconds, true),
     returnsOnly: flightRequestSeconds(cf.pageTimeoutSeconds, cf.minSpacingSeconds, false),
-    outboundOnly: cf.pageTimeoutSeconds + LIST_REQUEST_EXTRA_SECONDS,
+    outboundOnly: listRequestSeconds(cf.pageTimeoutSeconds),
   };
 }

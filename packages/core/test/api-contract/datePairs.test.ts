@@ -9,7 +9,7 @@ import {
 } from '../../src/api-contract/datePairs.js';
 import { type DatePairFigure, encodeDatePairs } from '../../src/datePairs/encode.js';
 import { PAIRING_READ } from '../../src/datePairs/pairing.js';
-import { asIsoDate } from '../../src/types/ids.js';
+import { asIsoDate, asIsoDateTime } from '../../src/types/ids.js';
 import {
   calendarFigure,
   decoded,
@@ -55,6 +55,12 @@ function resum(r: DatePairsResponse): DatePairsResponse {
   };
   return r;
 }
+/** Entry `i` of a column, or the test's own error. */
+const columnOf = <T>(xs: readonly T[], i: number): T => {
+  const x = xs[i];
+  if (x === undefined) throw new Error(`no entry ${i}`);
+  return x;
+};
 const verifiedAt = (r: DatePairsResponse) => firstWhere(r.figures.basis, (b) => b === 'verified');
 const calendarAt = (r: DatePairsResponse) => firstWhere(r.figures.basis, (b) => b === 'calendar');
 
@@ -464,7 +470,7 @@ const withPairing = (lead: Partial<DatePairFigure> = {}): DatePairsResponse => {
   return structuredClone(encodeDatePairs(x));
 };
 /** The response's sparse group, which the codec always writes. */
-function groupOf<K extends 'gridPrice' | 'pairing' | 'pairingRead'>(
+function groupOf<K extends 'gridPrice' | 'pairing' | 'pairingRead' | 'listReason'>(
   r: DatePairsResponse,
   k: K,
 ): NonNullable<DatePairsResponse[K]> {
@@ -487,7 +493,7 @@ describe('datePairsResponseSchema: the pairing figure (spec rev 56 §10)', () =>
     const { gridPrice: _g, pairing: _p, pairingRead: _r, ...older } = body();
     expect(issuePaths(older)).toEqual([]);
   });
-  it('pairingRead (sparse): columns of one length, figure ascending and in range, a code of 1 to 8', () => {
+  it('pairingRead (sparse): columns of one length, figure ascending and in range, a code of 1 to 9', () => {
     const ragged = withPairing();
     groupOf(ragged, 'pairingRead').code.pop();
     expect(issuePaths(ragged)).toEqual(['pairingRead.code']);
@@ -502,7 +508,7 @@ describe('datePairsResponseSchema: the pairing figure (spec rev 56 §10)', () =>
     groupOf(notRead, 'pairingRead').code[1] = 0;
     expect(issuePaths(notRead)).toEqual(['pairingRead.code.1']);
     const unknown = withPairing();
-    groupOf(unknown, 'pairingRead').code[1] = 9;
+    groupOf(unknown, 'pairingRead').code[1] = 10;
     expect(issuePaths(unknown)).toEqual(['pairingRead.code.1']);
     const fraction = withPairing();
     groupOf(fraction, 'pairingRead').code[1] = 6.5;
@@ -563,6 +569,8 @@ describe('datePairsResponseSchema: the pairing figure (spec rev 56 §10)', () =>
     const isFrom = withPairing();
     groupOf(isFrom, 'pairing').isFrom[0] = true;
     groupOf(isFrom, 'pairing').seller[0] = null;
+    groupOf(isFrom, 'pairing').offersRead[0] = 0;
+    groupOf(isFrom, 'pairing').complete[0] = false;
     expect(issuePaths(isFrom)).toEqual(['pairing.isFrom.0']);
     const onVerified = withPairing();
     groupOf(onVerified, 'pairing').figure[1] = 2;
@@ -570,6 +578,116 @@ describe('datePairsResponseSchema: the pairing figure (spec rev 56 §10)', () =>
     const order = withPairing();
     groupOf(order, 'pairing').figure = [1, 0];
     expect(issuePaths(order)).toContain('pairing.figure.1');
+  });
+  it('prov-001: a pairing figure is complete, within the limits, fresh, read from an offer, priced and sourced as its figure', () => {
+    const pairingAt = (r: DatePairsResponse) => groupOf(r, 'pairing');
+    const incomplete = withPairing();
+    pairingAt(incomplete).complete[0] = false;
+    expect(issuePaths(incomplete)).toEqual(['pairing.complete.0']);
+    const overLimit = withPairing();
+    pairingAt(overLimit).which[0] = 'over-limit';
+    expect(issuePaths(overLimit)).toEqual(['pairing.which.0']);
+    const stale = withPairing();
+    pairingAt(stale).stale[0] = 'refresh';
+    expect(issuePaths(stale)).toEqual(['pairing.stale.0']);
+    const staleFigure = withPairing();
+    staleFigure.figures.stale[0] = 'refresh';
+    expect(issuePaths(staleFigure)).toEqual(['pairing.stale.0']);
+    const noOffers = withPairing();
+    pairingAt(noOffers).offersRead[0] = 0;
+    expect(issuePaths(noOffers)).toEqual(['pairing.offersRead.0']);
+    const priced = withPairing();
+    pairingAt(priced).pricePence[0] = 117_999;
+    expect(issuePaths(priced)).toEqual(['pairing.pricePence.0']);
+    // why: the figure's provenance is the flight list's, the pairing's one table entry
+    const sourced = withPairing();
+    const calendarProvenance = columnOf(sourced.figures.provenance, 1);
+    pairingAt(sourced).provenance[0] = calendarProvenance;
+    expect(issuePaths(sourced)).toEqual(['pairing.provenance.0']);
+    const notList = withPairing();
+    notList.figures.provenance[0] = calendarProvenance;
+    pairingAt(notList).provenance[0] = calendarProvenance;
+    expect(issuePaths(notList)).toEqual(['pairing.provenance.0']);
+    // why: another flight list's provenance is still not the figure's own
+    const otherList = withPairing();
+    const own = columnOf(otherList.provenances, columnOf(otherList.figures.provenance, 0));
+    pairingAt(otherList).provenance[0] =
+      otherList.provenances.push({ ...own, fetchedAt: asIsoDateTime('2027-03-01T08:00:00.000Z') }) - 1;
+    expect(issuePaths(otherList)).toEqual(['pairing.provenance.0']);
+    // why: both halves of "a flight list": the browser worker's, and its own page (never a synthetic copy)
+    for (const over of [{ sourceKind: 'synthetic' as const }, { providerId: 'fixture' as const }]) {
+      const half = withPairing();
+      const at = half.provenances.push({ ...own, ...over }) - 1;
+      half.figures.provenance[0] = at;
+      pairingAt(half).provenance[0] = at;
+      expect(issuePaths(half), JSON.stringify(over)).toEqual(['pairing.provenance.0']);
+    }
+    const one = withPairing();
+    pairingAt(one).offersRead[0] = 1;
+    expect(issuePaths(one)).toEqual([]);
+    // why: an index just past the table is the group's own refusal, never also a source mismatch
+    const past = withPairing();
+    pairingAt(past).provenance[0] = past.provenances.length;
+    expect(issuePaths(past)).toEqual(['pairing.provenance.0']);
+  });
+  it('prov-001: a "from" price read no offer and is never complete', () => {
+    const offers = withPairing();
+    groupOf(offers, 'pairing').isFrom[1] = true;
+    groupOf(offers, 'pairing').seller[1] = null;
+    groupOf(offers, 'pairing').complete[1] = false;
+    expect(issuePaths(offers)).toEqual(['pairing.offersRead.1']);
+    const complete = withPairing();
+    groupOf(complete, 'pairing').isFrom[1] = true;
+    groupOf(complete, 'pairing').seller[1] = null;
+    groupOf(complete, 'pairing').offersRead[1] = 0;
+    expect(issuePaths(complete)).toEqual(['pairing.complete.1']);
+  });
+  it('the 21.6 ruling: a failed list reads list-failed with its cause, an entry exactly for each such figure', () => {
+    const failed = (): DatePairsResponse =>
+      structuredClone(
+        encodeDatePairs(
+          decoded({
+            pair: (i, a) =>
+              i === 3
+                ? {
+                    buckets: {
+                      priced: 1,
+                      empty: 0,
+                      no_data: 0,
+                      error: 0,
+                      skipped: 0,
+                      not_run: a - 1,
+                      reused: 0,
+                    },
+                    figure: calendarFigure({ pairingRead: 'list-failed', listReason: 'network' }),
+                  }
+                : {},
+          }),
+        ),
+      );
+    const r = failed();
+    expect(issuePaths(r)).toEqual([]);
+    expect(r.pairingRead).toEqual({ figure: [0], code: [9] });
+    expect(r.listReason).toEqual({ figure: [0], reason: ['network'] });
+    const { listReason: _l, ...noGroup } = failed();
+    expect(issuePaths(noGroup)).toEqual(['listReason']);
+    const missing = failed();
+    groupOf(missing, 'listReason').figure = [];
+    groupOf(missing, 'listReason').reason = [];
+    expect(issuePaths(missing)).toEqual(['listReason.figure']);
+    const notFailed = failed();
+    groupOf(notFailed, 'pairingRead').code[0] = 1;
+    expect(issuePaths(notFailed)).toEqual(['listReason.figure']);
+    const ragged = failed();
+    groupOf(ragged, 'listReason').reason = [];
+    expect(issuePaths(ragged)).toEqual(['listReason.reason']);
+    const word = failed();
+    Reflect.set(groupOf(word, 'listReason').reason, 0, 'the page said no');
+    expect(issuePaths(word)).toEqual(['listReason.reason.0']);
+    const past = failed();
+    groupOf(past, 'listReason').figure[0] = 5;
+    // why: an entry that names no figure is its own refusal, never also an inexact set
+    expect(issuePaths(past)).toEqual(['listReason.figure.0']);
   });
   it('ruling 21.2: a pairing beneath a stale verified figure for the five reads; never beneath a fresh one', () => {
     const staleVerified = (stale: false | 'refresh'): DatePairsResponse =>
@@ -610,8 +728,14 @@ describe('datePairsResponseSchema: the pairing figure (spec rev 56 §10)', () =>
     expect(issuePaths(r)).toEqual(['pairing.figure.1']);
   });
   it('a seller exactly when the price is not a "from" price; the seller is bounded page text; times are HH:MM', () => {
-    const fromWithSeller = withPairing();
-    groupOf(fromWithSeller, 'pairing').isFrom[1] = true;
+    /** Entry 1 made a "from" price that read no offer, so a case breaks only the rule it names. */
+    const asFrom = (r: DatePairsResponse): DatePairsResponse => {
+      groupOf(r, 'pairing').isFrom[1] = true;
+      groupOf(r, 'pairing').offersRead[1] = 0;
+      groupOf(r, 'pairing').complete[1] = false;
+      return r;
+    };
+    const fromWithSeller = asFrom(withPairing());
     expect(issuePaths(fromWithSeller)).toEqual(['pairing.seller.1']);
     const noSeller = withPairing();
     groupOf(noSeller, 'pairing').seller[1] = null;
@@ -619,8 +743,7 @@ describe('datePairsResponseSchema: the pairing figure (spec rev 56 §10)', () =>
     const long = withPairing();
     groupOf(long, 'pairing').seller[1] = 'Q'.repeat(81);
     expect(issuePaths(long)).toEqual(['pairing.seller.1']);
-    const fare = withPairing();
-    groupOf(fare, 'pairing').isFrom[1] = true;
+    const fare = asFrom(withPairing());
     groupOf(fare, 'pairing').seller[1] = null;
     groupOf(fare, 'pairing').fare[1] = 'Economy Basic';
     expect(issuePaths(fare)).toEqual(['pairing.fare.1']);
@@ -699,15 +822,65 @@ describe("datePairFigureSchema: basis 'pairing', gridPrice, pairing and pairingR
     expect(r(older).success).toBe(true);
     expect(r({ ...calendar, pairingRead: 'within-older', pairing: figurePairing() }).success).toBe(true);
   });
+  it('prov-001: a pairing figure is complete, within the limits, fresh, read from an offer, priced and sourced as its figure', () => {
+    expect(paths({ ...pairing, pairing: figurePairing({ complete: false }) })).toEqual(['pairing.complete']);
+    expect(paths({ ...pairing, pairing: figurePairing({ which: 'over-limit' }) })).toEqual(['pairing.which']);
+    expect(paths({ ...pairing, pairing: figurePairing({ stale: 'refresh' }) })).toEqual(['pairing.stale']);
+    expect(paths({ ...pairing, price: { ...pairing.price, stale: 'refresh' } })).toEqual(['pairing.stale']);
+    expect(paths({ ...pairing, pairing: figurePairing({ offersRead: 0 }) })).toEqual(['pairing.offersRead']);
+    expect(paths({ ...pairing, pairing: figurePairing({ offersRead: 1 }) })).toEqual([]);
+    expect(paths({ ...pairing, pairing: figurePairing({ pricePence: 117_999 }) })).toEqual([
+      'pairing.pricePence',
+    ]);
+    const other = { ...pairing.price.provenance, fetchedAt: asIsoDateTime('2027-03-01T09:31:00.000Z') };
+    expect(paths({ ...pairing, pairing: figurePairing({ provenance: other }) })).toEqual([
+      'pairing.provenance',
+    ]);
+    const grid = calendar.price.provenance;
+    expect(
+      paths({
+        ...pairing,
+        price: { ...pairing.price, provenance: grid },
+        pairing: figurePairing({ provenance: grid }),
+      }),
+    ).toEqual(['pairing.provenance']);
+  });
+  it('prov-001: a "from" price read no offer and is never complete', () => {
+    const from = { isFrom: true, seller: null } as const;
+    const beneath = { ...calendar, pairingRead: 'sellers-not-read' as const };
+    expect(
+      paths({ ...beneath, pairing: figurePairing({ ...from, offersRead: 0, complete: false }) }),
+    ).toEqual([]);
+    expect(
+      paths({ ...beneath, pairing: figurePairing({ ...from, offersRead: 2, complete: false }) }),
+    ).toEqual(['pairing.offersRead']);
+    expect(paths({ ...beneath, pairing: figurePairing({ ...from, offersRead: 0, complete: true }) })).toEqual(
+      ['pairing.complete'],
+    );
+  });
+  it('the 21.6 ruling: a list reason exactly on a list-failed read', () => {
+    expect(paths({ ...calendar, pairingRead: 'list-failed', listReason: 'network' })).toEqual([]);
+    expect(paths({ ...calendar, pairingRead: 'list-failed', listReason: null })).toEqual(['listReason']);
+    expect(paths({ ...calendar, pairingRead: 'list-failed' })).toEqual(['listReason']);
+    expect(paths({ ...calendar, pairingRead: 'outbound-only', listReason: 'network' })).toEqual([
+      'listReason',
+    ]);
+    expect(paths({ ...calendar, pairingRead: 'list-failed', listReason: 'no reason' })).toEqual([
+      'listReason',
+    ]);
+  });
   it('a grid price exactly on a pairing figure; within exactly on one; its pairing never a "from" price', () => {
     expect(paths({ ...pairing, gridPrice: null })).toEqual(['gridPrice']);
     expect(paths({ ...calendar, gridPrice: pairing.gridPrice })).toEqual(['gridPrice']);
     expect(paths({ ...pairing, pairingRead: 'within-older' })).toEqual(['pairingRead']);
     expect(paths({ ...calendar, pairingRead: 'within' })).toEqual(['pairingRead']);
     expect(paths({ ...pairing, pairing: null })).toEqual(['pairing']);
-    expect(paths({ ...pairing, pairing: figurePairing({ isFrom: true, seller: null }) })).toEqual([
-      'pairing.isFrom',
-    ]);
+    expect(
+      paths({
+        ...pairing,
+        pairing: figurePairing({ isFrom: true, seller: null, offersRead: 0, complete: false }),
+      }),
+    ).toEqual(['pairing.isFrom']);
     expect(paths({ ...calendar, pairing: figurePairing() })).toEqual(['pairing']);
     expect(
       paths({ ...calendar, pairingRead: 'offers-incomplete', pairing: figurePairing({ seller: null }) }),
@@ -716,7 +889,13 @@ describe("datePairFigureSchema: basis 'pairing', gridPrice, pairing and pairingR
       paths({
         ...calendar,
         pairingRead: 'sellers-not-read',
-        pairing: figurePairing({ isFrom: true, seller: null, fare: 'Economy Basic' }),
+        pairing: figurePairing({
+          isFrom: true,
+          seller: null,
+          fare: 'Economy Basic',
+          offersRead: 0,
+          complete: false,
+        }),
       }),
     ).toEqual(['pairing.fare']);
     // why: the seller is page text held to flightTextSchema's rule, trimmed and whitespace collapsed (finding 6)

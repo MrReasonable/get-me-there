@@ -272,16 +272,18 @@ describe('apps/api wiring: camoufox flights request timeout (spec rev 56 §2, §
       await expect(lists.read({ ...q, ...extra }, ctx)).rejects.toThrow('captured');
     return sent;
   }
-  it('core’s flightRequestSeconds of the shared settings: 780 / 600 s at the defaults; a list read keeps the provider’s', async () => {
+  // why: 21.6 review M7: an outbound-only read carries the list page's own timeout (the page timeout plus 15 s), the
+  // engine gate's value, never the provider's grid-mode default
+  it('core’s flightRequestSeconds of the shared settings: 780 / 600 s at the defaults; a list read the list page’s 105 s', async () => {
     expect(await sentWith({})).toEqual([
       [2, 780],
       [2, 600],
-      [1, undefined],
+      [1, 105],
     ]);
   });
-  it('follows CAMOUFOX_PAGE_TIMEOUT_SECONDS and CAMOUFOX_MIN_SPACING_SECONDS (1,035 s and 795 s at 120 s and 45 s)', async () => {
+  it('follows CAMOUFOX_PAGE_TIMEOUT_SECONDS and CAMOUFOX_MIN_SPACING_SECONDS (1,035 s, 795 s and 135 s at 120 s and 45 s)', async () => {
     const sent = await sentWith({ CAMOUFOX_PAGE_TIMEOUT_SECONDS: '120', CAMOUFOX_MIN_SPACING_SECONDS: '45' });
     // why: §12's recomputed values as literals, so a wrong change to the formula cannot pass in both places
-    expect(sent.map(([, t]) => t)).toEqual([1035, 795, undefined]);
+    expect(sent.map(([, t]) => t)).toEqual([1035, 795, 135]);
   });
 });

@@ -4,12 +4,16 @@
 // The statement counts and byte sizes are exact gates; only the time is multiplied, and no test is retried.
 import { gzipSync } from 'node:zlib';
 import {
+  apiContract,
   type CellKey,
   type DefinitionInput,
+  flightLimitsOf,
   generateCells,
   isoDateTimeOfEpochMs,
+  returnReadSchema,
   type SearchDefinition,
 } from '@gmt/core';
+import { PAIRING_FIXTURE } from '@gmt/core/testing';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { currentSpace } from '../../src/read/space.js';
 import { errorOf } from '../helpers/contract.js';
@@ -140,6 +144,50 @@ function verifiedCells(x: Harness, s: Seeder, name: string, cells: readonly Cell
   });
 }
 
+/**
+ * Finished flight lists (the shared pairing fixture, its booking read with three offers) on every `every`-th cell, read
+ * an hour ago under the definition's own limits, so their pairings lead or show beneath (spec rev 56 §6.9; 21.6 review
+ * M6, departure 14). Returns how many were stored.
+ */
+function flightLists(x: Harness, def: SearchDefinition, cells: readonly CellKey[], every: number): number {
+  // why: the fixture's second attempt alone (its booking read with it), a one-attempt read under today's limits
+  const r = PAIRING_FIXTURE.returns;
+  const returns = returnReadSchema.parse({
+    ...r,
+    limits: flightLimitsOf(def.constraints),
+    attempts: r.attempts.slice(1),
+    booking: r.booking === null ? null : { ...r.booking, attempt: 0 },
+  });
+  const flights = PAIRING_FIXTURE.flights;
+  let n = 0;
+  cells.forEach((c, i) => {
+    if (i % every !== 0) return;
+    x.ports.repos.flightLists.insert({
+      definitionId: def.id,
+      executionId: null,
+      providerId: 'camoufox',
+      sourceKind: 'scraped-self',
+      cabin: 'economy',
+      ...c,
+      fetchedAt: at(-1),
+      pointOfSale: x.ports.config.pointOfSale,
+      status: 'read',
+      reason: null,
+      listed: 'flights',
+      minMinor: Math.min(...flights.map((f) => f.amountMinor)),
+      tabMinor: null,
+      cheapestView: 'cheapest',
+      optionsUnparsed: 0,
+      optionsOtherCell: 0,
+      resultsStated: flights.length,
+      flights,
+      returns,
+    });
+    n += 1;
+  });
+  return n;
+}
+
 /** The statements each read prepares: the date pairs, `/results` whole, one date pair, and the oldest run's. */
 async function statementCounts(x: Harness, def: SearchDefinition, oldest: string | null) {
   const count = async (path: string) => {
@@ -177,7 +225,13 @@ const small = (days: number): DefinitionInput =>
     maxNights: 19,
   });
 
-async function smallWorld(o: { days?: number; runs?: number; verified?: number; children?: number }) {
+async function smallWorld(o: {
+  days?: number;
+  runs?: number;
+  verified?: number;
+  children?: number;
+  lists?: number;
+}) {
   const x = await createHarness();
   const s = seeder(x.ports);
   const def = x.ports.repos.definitions.create(small(o.days ?? 50));
@@ -193,6 +247,8 @@ async function smallWorld(o: { days?: number; runs?: number; verified?: number; 
     s.cells(`K${k}`, [c], { selected: [{ cell: c, reason: 'always_include' }] });
     s.verified(`K${k}`, c, [{ hash: `k${k}`, pricePence: 61_000, fetchedAt: at(-1) }]);
   }
+  // why: one list per date pair's cell (one airport pair), the first `lists` of them
+  if (o.lists !== undefined) flightLists(x, def, cells.slice(0, o.lists), 1);
   return { x, def, oldest: runs[0] ?? null };
 }
 
@@ -213,6 +269,20 @@ describe('statements are constant on every axis that grows (spec §10 bounds)', 
     );
   });
 
+  // why: 21.6 review M6: the pairings map reads the asked cells only, in a fixed number of statements, however many
+  // flight lists the search has
+  it('(e) 1 against 300 finished flight lists', async () => {
+    const one = await smallWorld({ verified: 5, lists: 1 });
+    const many = await smallWorld({ verified: 5, lists: 300 });
+    const body = apiContract.datePairsResponseSchema.parse(
+      await (await many.x.request(`/api/definitions/${many.def.id}/date-pairs`)).json(),
+    );
+    expect(body.pairing?.figure.length).toBeGreaterThan(250);
+    expect(await statementCounts(many.x, many.def, many.oldest)).toEqual(
+      await statementCounts(one.x, one.def, one.oldest),
+    );
+  });
+
   it('(c) 0 against 20 completed children', async () => {
     const none = await smallWorld({ children: 0, verified: 5 });
     const twenty = await smallWorld({ children: 20, verified: 5 });
@@ -227,6 +297,7 @@ describe('the 50,000-cell bound: time, size and the scope in the SQL (spec §9, 
   // need a code outside the example); 20 parent runs deep, every cell priced.
   let big: { x: Harness; def: SearchDefinition; oldest: string };
   let wide: { x: Harness; def: SearchDefinition };
+  let wideLists = 0;
   let raised: { x: Harness; def: SearchDefinition };
 
   beforeAll(async () => {
@@ -265,7 +336,11 @@ describe('the 50,000-cell bound: time, size and the scope in the SQL (spec §9, 
           maxNights: 90,
         }),
       );
-      bulkRun(x, s, 'E0', def, cellsOf(x, def), 0);
+      const cells = cellsOf(x, def);
+      bulkRun(x, s, 'E0', def, cells, 0);
+      // why: departure 14 (21.6 review): a few hundred finished lists, so the bound holds with pairing figures, their
+      // grid prices and pairing groups on the wire
+      wideLists = flightLists(x, def, cells, 120);
       wide = { x, def };
     }
     {
@@ -320,11 +395,14 @@ describe('the 50,000-cell bound: time, size and the scope in the SQL (spec §9, 
     expect(gzipSync(Buffer.from(JSON.stringify(m.body))).byteLength).toBeGreaterThan(0);
   });
 
-  it('36,400 date pairs (400 × 91, one airport pair, every one with a figure) within the same bounds', {
+  it('36,400 date pairs (400 × 91, one airport pair, every one with a figure, a few hundred with a pairing) within the same bounds', {
     timeout: 60_000,
   }, async () => {
     const m = await measure(wide.x, `/api/definitions/${wide.def.id}/date-pairs`);
     expect([m.body.scope.cells, m.body.figures.pair.length]).toEqual([36_400, 36_400]);
+    // the seeded lists are on the wire: each date pair with one leads with its pairing figure and grid price
+    expect(wideLists).toBeGreaterThan(300);
+    expect([m.body.pairing.figure.length, m.body.gridPrice.figure.length]).toEqual([wideLists, wideLists]);
     expect(m.ms).toBeLessThan(3_000 * timingFactor);
     expect(m.bytes).toBeLessThanOrEqual(4 * MiB);
     expect(m.gzip).toBeLessThanOrEqual(512 * KiB);

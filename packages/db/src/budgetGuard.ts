@@ -90,13 +90,17 @@ WHERE execution_id = @executionId AND provider_id IN (SELECT value FROM json_eac
  * Spec rev 55 §8.1 (ruling A32): the rows are split by endpoint path into two allowances, `@flights = 0` the grid or list
  * pages (this cap) and `@flights = 1` the flight-list pages (`$.budget.flightListPages`); each keeps the `no-page` filter.
  * Spec rev 56 §7: each row counts its pages (`PAGES`), so a flights request with a return phase counts up to 2.
+ * Spec rev 56 §8.1 (21.6 review I2): the flight allowance leaves out a flights request cut off before any answer (a
+ * cancel, a SIGTERM, or a pending row the boot sweep marked: `unknown`, no status, no class word), because its pair has
+ * no row and the resumed pass reads it again; a timeout is classified, so it counts. The monthly cap counts them all.
  */
 export const PROVIDER_EXECUTION_USAGE_SQL = `
 SELECT ${PAGES} AS calls, COALESCE(SUM(cost_micro_gbp), 0) AS cost
 FROM provider_requests
 WHERE execution_id = @executionId AND provider_id = @providerId AND outcome <> 'cache_hit'
   AND (@pagesOnly = 0 OR page_class IS NOT 'no-page')
-  AND ((endpoint_path = @flightPath) = @flights)`;
+  AND ((endpoint_path = @flightPath) = @flights)
+  AND NOT (@flights = 1 AND outcome = 'unknown' AND http_status IS NULL AND error_kind IS NULL)`;
 /** Spec §2 rev 34: a provider's scroll clicks in one execution, and in a window (pending rows count their plan). */
 const SCROLLS_EXECUTION_SQL = `
 SELECT COALESCE(SUM(scroll_count), 0) AS n FROM provider_requests WHERE provider_id = @providerId AND execution_id = @executionId`;

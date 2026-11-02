@@ -1,12 +1,13 @@
 import { z } from 'zod';
 import { columnAt } from '../datePairs/decode.js';
+import { provenanceKey } from '../datePairs/encode.js';
 import { FIGURE_BASES, PAIRING_READ, type PairingRead } from '../datePairs/pairing.js';
 import { stayCount } from '../datePairs/space.js';
 import { flightTextSchema } from '../flights/types.js';
 import { windowDays } from '../space/generate.js';
 import { DEFAULT_MAX_CELLS, MAX_DATE_PAIRS } from '../space/limits.js';
 import { iataSchema, isoDateSchema } from '../types/ids.js';
-import { provenanceSchema } from '../types/provenance.js';
+import { type Provenance, provenanceSchema } from '../types/provenance.js';
 import { HHMM } from '../types/window.js';
 import {
   ageHoursSchema,
@@ -17,6 +18,7 @@ import {
   providerIdSchema,
   staleMarkSchema,
 } from './common.js';
+import { STOP_DETAILS } from './stopCause.js';
 
 // why: the one home of the space's limits is space/limits.ts; the contract re-exports the two its bounds use.
 export { DEFAULT_MAX_CELLS, MAX_DATE_PAIRS } from '../space/limits.js';
@@ -262,6 +264,18 @@ const pairingReadGroupSchema = z.strictObject({
 const PAIRING_READ_COLUMNS = ['figure', 'code'] as const satisfies ReadonlyArray<
   keyof typeof pairingReadGroupSchema.shape
 >;
+/**
+ * The 21.6 ruling: one entry per figure whose cell's newest flight list failed (`pairingRead` `list-failed`), with the
+ * list's reason (one STOP_DETAILS word, never free text), so the board words it "flights couldn't be read: <cause>";
+ * `figure` strictly ascending. Sparse: most cells have no failed list.
+ */
+const listReasonGroupSchema = z.strictObject({
+  figure: counts,
+  reason: z.array(z.enum(STOP_DETAILS)),
+});
+const LIST_REASON_COLUMNS = ['figure', 'reason'] as const satisfies ReadonlyArray<
+  keyof typeof listReasonGroupSchema.shape
+>;
 /** `within`'s code: exactly a pairing figure's. */
 const WITHIN_CODE = PAIRING_READ.indexOf('within');
 
@@ -308,6 +322,8 @@ const datePairsBodySchema = z.strictObject({
   pairing: pairingGroupSchema.exactOptional(),
   /** spec rev 56 (R-sparse): optional until Task 21.6 fills it; a body without it reads every figure `not-read` */
   pairingRead: pairingReadGroupSchema.exactOptional(),
+  /** the 21.6 ruling: a failed list's reason; a body without it (an older api) has no `list-failed` read */
+  listReason: listReasonGroupSchema.exactOptional(),
 });
 type DatePairsBody = z.output<typeof datePairsBodySchema>;
 
@@ -560,6 +576,74 @@ function refinePairingRead(
 }
 
 /**
+ * The 21.6 ruling: the `listReason` group's rules: lengths; figure order and range; an entry exactly for each figure
+ * whose read is `list-failed` (`reads`, by figure).
+ */
+function refineListReason(v: DatePairsBody, reads: ReadonlyMap<number, PairingRead>, fail: Fail): void {
+  // why: `reads` holds only entries that named a figure in order, so its keys ascend
+  const failed = [...reads].flatMap(([j, read]) => (read === 'list-failed' ? [j] : []));
+  const g = v.listReason;
+  if (g === undefined) {
+    if (failed.length > 0) fail('listReasonMissing', ['listReason'], 'a list-failed read needs its reason');
+    return;
+  }
+  if (!sameLengths(g, LIST_REASON_COLUMNS, 'listReason', fail)) return;
+  const named: number[] = [];
+  for (let k = 0; k < g.figure.length; k += 1) {
+    const at = groupFigureOf(g.figure, 'listReason', v.figures.pair.length, k, fail);
+    if (at !== null) named.push(at);
+  }
+  // why: both lists ascend, so equal lists are equal sets; checked only when every entry named a figure in order
+  if (named.length === g.figure.length && named.join() !== failed.join())
+    fail('listReasonExact', ['listReason', 'figure'], 'a reason exactly for each list-failed read');
+}
+
+/** A provenance a flight list carries (spec rev 56 §6.9): the browser worker's own page. */
+const isFlightList = (p: Provenance | undefined): boolean =>
+  p?.providerId === 'camoufox' && p.sourceKind === 'scraped-self';
+
+/**
+ * Spec rev 56 §6.9 "When it leads" (prov-001): a pairing figure's entry `k` (figure `at`) is the leading pairing's own
+ * words: an offer's price (never a "from" price), equal to the figure's, of a complete read of at least one offer, within
+ * the limits, fresh (the figure too), and the figure's own flight-list provenance. So a regression in the api's lead rule
+ * cannot put a headline seller price on the board that the rules forbid.
+ */
+function refineLeading(
+  v: DatePairsBody,
+  q: NonNullable<DatePairsBody['pairing']>,
+  k: number,
+  at: number,
+  fail: Fail,
+): void {
+  const f = v.figures;
+  if (columnAt(q.isFrom, k)) {
+    fail(
+      'pairingFrom',
+      ['pairing', 'isFrom', k],
+      "a pairing figure's price is an offer's, never a from price",
+    );
+    return;
+  }
+  if (!columnAt(q.complete, k))
+    fail('pairingComplete', ['pairing', 'complete', k], "a pairing figure's offers are complete");
+  if (columnAt(q.offersRead, k) < 1)
+    fail('pairingOffers', ['pairing', 'offersRead', k], 'a pairing figure read at least one offer');
+  if (columnAt(q.which, k) === 'over-limit')
+    fail('pairingLimits', ['pairing', 'which', k], 'a pairing figure is within the limits');
+  if (columnAt(q.stale, k) !== false || columnAt(f.stale, at) !== false)
+    fail('pairingStale', ['pairing', 'stale', k], 'a pairing figure is fresh');
+  if (columnAt(q.pricePence, k) !== columnAt(f.pricePence, at))
+    fail('pairingPrice', ['pairing', 'pricePence', k], "a pairing figure's price is its offer's");
+  const provenance = columnAt(q.provenance, k);
+  // why: an index past the table is the group's own refusal (`pairingProvenance`), not reported twice
+  if (
+    provenance < v.provenances.length &&
+    (provenance !== columnAt(f.provenance, at) || !isFlightList(v.provenances[provenance]))
+  )
+    fail('pairingSource', ['pairing', 'provenance', k], "a pairing figure's provenance is its flight list's");
+}
+
+/**
  * Spec rev 56 §10: the grid price and pairing groups' rules: lengths; figure order and range; the grid prices exactly
  * the pairing figures; a pairing figure has a pairing entry that is not a "from" price; a pairing entry beneath a calendar
  * figure, or a stale verified one (ruling 21.2), only for the five "beneath" reads, never on a fresh verified figure; a
@@ -572,6 +656,7 @@ function refinePairingGroups(v: DatePairsBody, fail: Fail): void {
   const pairingFigures = f.basis.flatMap((b, j) => (b === 'pairing' ? [j] : []));
   const reads = refinePairingRead(v, pairingFigures, fail);
   const readOf = (j: number): PairingRead | null => (reads === null ? null : (reads.get(j) ?? 'not-read'));
+  if (reads !== null) refineListReason(v, reads, fail);
   const g = v.gridPrice;
   if (g === undefined && pairingFigures.length > 0)
     fail('gridExact', ['gridPrice'], 'a pairing figure needs its grid price');
@@ -614,12 +699,13 @@ function refinePairingGroups(v: DatePairsBody, fail: Fail): void {
         ['pairing', 'figure', k],
         'a pairing entry is for a pairing figure or a pairing shown beneath',
       );
-    if (basis === 'pairing' && isFrom)
-      fail(
-        'pairingFrom',
-        ['pairing', 'isFrom', k],
-        "a pairing figure's price is an offer's, never a from price",
-      );
+    if (basis === 'pairing') refineLeading(v, q, k, at, fail);
+    // why: prov-001: a "from" price is shown when no offer was read for the pairing, so it counts none and is never
+    // complete
+    if (isFrom && columnAt(q.offersRead, k) !== 0)
+      fail('pairingFromOffers', ['pairing', 'offersRead', k], 'a from price reads no offer');
+    if (isFrom && columnAt(q.complete, k))
+      fail('pairingFromComplete', ['pairing', 'complete', k], 'a from price is never complete');
     if (isFrom === (columnAt(q.seller, k) !== null))
       fail('pairingSeller', ['pairing', 'seller', k], "a seller exactly when the price is an offer's");
     if (isFrom && columnAt(q.fare, k) !== null)
@@ -734,6 +820,8 @@ export const datePairFigureSchema = z
     pairing: pairingCellSchema.nullable().exactOptional(),
     /** spec rev 56 §6.9: absent reads as `not-read`; `within` exactly on a pairing figure */
     pairingRead: pairingReadSchema.exactOptional(),
+    /** the 21.6 ruling: why the cell's newest list failed, non-null exactly on a `list-failed` read */
+    listReason: z.enum(STOP_DETAILS).nullable().exactOptional(),
   })
   .superRefine((f, ctx) => {
     const fail = (path: Array<string | number>, message: string) =>
@@ -758,6 +846,8 @@ export const datePairFigureSchema = z
       fail(['gridPrice'], 'a grid price exactly on a pairing figure');
     if (pairingBasis !== (read === 'within'))
       fail(['pairingRead'], 'pairingRead is within exactly on a pairing figure');
+    if ((read === 'list-failed') !== ((f.listReason ?? null) !== null))
+      fail(['listReason'], 'a reason exactly on a list-failed read');
     // why: ruling 21.2: a pairing is shown beneath a calendar figure, or a stale verified one, as the board allows
     const beneath = f.basis === 'calendar' || (f.basis === 'verified' && f.price.stale !== false);
     if (pairingBasis ? p === null : p !== null && (!beneath || !BENEATH.has(read)))
@@ -766,8 +856,23 @@ export const datePairFigureSchema = z
         'a pairing for a pairing figure, or shown beneath a calendar or stale verified figure',
       );
     if (p === null) return;
-    if (pairingBasis && p.isFrom)
-      fail(['pairing', 'isFrom'], "a pairing figure's price is an offer's, never a from price");
+    if (pairingBasis) {
+      // why: prov-001: the leading pairing's own words, the board's `refineLeading` figure by figure
+      if (p.isFrom) fail(['pairing', 'isFrom'], "a pairing figure's price is an offer's, never a from price");
+      else {
+        if (!p.complete) fail(['pairing', 'complete'], "a pairing figure's offers are complete");
+        if (p.offersRead < 1) fail(['pairing', 'offersRead'], 'a pairing figure read at least one offer');
+      }
+      if (p.which === 'over-limit') fail(['pairing', 'which'], 'a pairing figure is within the limits');
+      if (p.stale !== false || f.price.stale !== false)
+        fail(['pairing', 'stale'], 'a pairing figure is fresh');
+      if (p.pricePence !== f.price.pricePence)
+        fail(['pairing', 'pricePence'], "a pairing figure's price is its offer's");
+      if (provenanceKey(p.provenance) !== provenanceKey(f.price.provenance) || !isFlightList(p.provenance))
+        fail(['pairing', 'provenance'], "a pairing figure's provenance is its flight list's");
+    }
+    if (p.isFrom && p.offersRead !== 0) fail(['pairing', 'offersRead'], 'a from price reads no offer');
+    if (p.isFrom && p.complete) fail(['pairing', 'complete'], 'a from price is never complete');
     if (p.isFrom === (p.seller !== null))
       fail(['pairing', 'seller'], "a seller exactly when the price is an offer's");
     if (p.isFrom && p.fare !== null) fail(['pairing', 'fare'], 'no fare on a from price');

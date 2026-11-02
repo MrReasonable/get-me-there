@@ -8,6 +8,7 @@ import {
   type Execution,
   FLIGHT_LIST_COUNT,
   FLIGHT_LIST_PAGES_PER_PAIR_MAX,
+  type FlightListsState,
   flightLimitsOf,
   microGbpToPence,
   type ProviderId,
@@ -90,18 +91,19 @@ function flightsApply(ctx: EngineContext, snapshot: DefinitionSnapshot): boolean
 }
 
 /**
- * The date pairs a fresh step would read for a saved search: the first 10 of the space less those whose newest list is
- * reusable (the step's own selection over the board's ranking, under the return phase it would plan); an unsaved
- * search, or an engine without the ranking, reuses none.
+ * The date pairs a fresh step would read for a saved search (`wanted`): the first 10 of the space less those whose
+ * newest list is reusable (the step's own selection over the board's ranking, under the return phase it would plan);
+ * an unsaved search, or an engine without the ranking, reuses none. `candidates` is the count the step's plan judges
+ * the return phase over (`planOf`: the not-departed first 10 of the ranking, reused ones included; 21.6 review M5).
  */
 function flightPairsWanted(
   ctx: EngineContext,
   snapshot: DefinitionSnapshot,
   definitionId: string | null,
-): number {
+): { wanted: number; candidates: number } {
   const most = Math.min(FLIGHT_LIST_COUNT, datePairCount(snapshot.resolved));
   const reader = ctx.rankedDatePairs;
-  if (definitionId === null || reader === undefined) return most;
+  if (definitionId === null || reader === undefined) return { wanted: most, candidates: most };
   const now = ctx.clock.now();
   const today = ctx.clock.todayLondon();
   const ranked = reader({
@@ -129,7 +131,7 @@ function flightPairsWanted(
       current: flightLimitsOf(snapshot.constraints),
     },
   ).reused;
-  return Math.max(0, most - reused.length);
+  return { wanted: Math.max(0, most - reused.length), candidates: ranked.length };
 }
 
 /** The return phase a flight line plans (spec rev 56 §8.1): from the worker's flags, or a stored plan's. */
@@ -228,7 +230,9 @@ function withFlights(
             `${FLIGHT_NOTE}, out and back, for up to ${datePairs(planned)}: usually about ${pages} pages and ${minutes(seconds)}, at most ${pagesMax} pages and ${minutes(secondsMax)}`,
           ]
         : [`${FLIGHT_NOTE} for up to ${datePairs(planned)}, about ${minutes(seconds)}`];
-  const monthCut = phase.returns ? outAndBack < pairs : planned < pairs;
+  // why: without returns, the old order (21.6 review M4): the month is named when it cut the pairs and it is no larger
+  // than the free calls left, a tie included
+  const monthCut = phase.returns ? outAndBack < pairs : planned < wanted && monthLeft <= freeLeft;
   if (monthCut) {
     const which =
       outAndBack === 0
@@ -252,16 +256,24 @@ function withFlights(
 /**
  * Spec rev 56 §8.2 (ruling D5): the margin the browser window carries beyond 1.5 × the estimate's seconds when its
  * flight line plans the return leg: one return-phase request's `flightRequestSeconds` (780 s with the booking read,
- * 600 s without, at the defaults), so the last pairs of a typical run are not refused at the gate; 0 otherwise.
+ * 600 s without, at the defaults), so the last pairs of a typical run are not refused at the gate; 0 otherwise. The
+ * booking read is the one the line was estimated with (21.6 review M2): a stored plan's (less what a transient end
+ * stopped), as a resume's remaining estimate reads it, else the worker's flags, as a fresh estimate reads them.
  */
-export function flightWindowMarginSeconds(ctx: EngineContext, est: Pick<Estimate, 'flightLists'>): number {
+export function flightWindowMarginSeconds(
+  ctx: EngineContext,
+  est: Pick<Estimate, 'flightLists'>,
+  plan: FlightListsState | null,
+): number {
   const f = est.flightLists;
   if (f?.returns !== true || (f.pairs ?? f.pages) === 0) return 0;
   const seconds = ctx.limitsOf(FLIGHT_LIST_PROVIDER).flightRequestSeconds;
   if (seconds === null) return 0;
-  return ctx.workerFlags.get(FLIGHT_LIST_PROVIDER)?.BOOKING_SELECT_VERIFIED === true
-    ? seconds.booking
-    : seconds.returnsOnly;
+  const booking =
+    plan === null
+      ? ctx.workerFlags.get(FLIGHT_LIST_PROVIDER)?.BOOKING_SELECT_VERIFIED === true
+      : plan.booking && plan.bookingStopped === null;
+  return booking ? seconds.booking : seconds.returnsOnly;
 }
 
 interface Line {
@@ -556,8 +568,16 @@ export function estimateStart(
   if (snapshot.windowClamped) notes.push('window clamped to start tomorrow');
   const est = assemble(ctx, lines, cells.length, snapshot.windowClamped, notes);
   if (!flightsApply(ctx, snapshot)) return est;
-  const wanted = flightPairsWanted(ctx, snapshot, definitionId);
-  return withFlights(ctx, est, snapshot, definitionId, wanted, null, returnPhaseOf(ctx, snapshot, wanted));
+  const { wanted, candidates } = flightPairsWanted(ctx, snapshot, definitionId);
+  return withFlights(
+    ctx,
+    est,
+    snapshot,
+    definitionId,
+    wanted,
+    null,
+    returnPhaseOf(ctx, snapshot, candidates),
+  );
 }
 
 function firstCellOf(ctx: EngineContext, executionId: string): CellKey | undefined {
@@ -611,18 +631,17 @@ export function estimateRemainingFor(ctx: EngineContext, exec: Execution, manual
   const plan = exec.flightLists;
   const today = ctx.clock.todayLondon();
   const done = new Set(ctx.repos.flightLists.cellsOfExecution(exec.id).map(cellKeyString));
-  const wanted =
-    plan === null
-      ? flightPairsWanted(ctx, snapshot, exec.definitionId)
-      : plan.cells.filter((c) => !done.has(cellKeyString(c)) && c.departureDate > today).length;
+  if (plan === null) {
+    const { wanted, candidates } = flightPairsWanted(ctx, snapshot, exec.definitionId);
+    const phase = returnPhaseOf(ctx, snapshot, candidates);
+    return withFlights(ctx, est, snapshot, exec.definitionId, wanted, exec.id, phase);
+  }
+  const wanted = plan.cells.filter((c) => !done.has(cellKeyString(c)) && c.departureDate > today).length;
   // why: a resumed pass keeps the stored plan's return phase, less what a transient end has stopped
-  const phase =
-    plan === null
-      ? returnPhaseOf(ctx, snapshot, wanted)
-      : {
-          returns: plan.returns && plan.returnsStopped === null,
-          booking: plan.booking && plan.returnsStopped === null && plan.bookingStopped === null,
-        };
+  const phase = {
+    returns: plan.returns && plan.returnsStopped === null,
+    booking: plan.booking && plan.returnsStopped === null && plan.bookingStopped === null,
+  };
   return withFlights(ctx, est, snapshot, exec.definitionId, wanted, exec.id, phase);
 }
 

@@ -82,6 +82,15 @@ export const BOOKING_TRANSIENT: ReadonlySet<BookingStatus> = new Set<BookingStat
   'unrecognised',
   'expand-failed',
 ]);
+/**
+ * Spec rev 56 §8.1 (R-retry; ruling 21.6 I1): the booking ends after which a list is read again, once, then waits for
+ * the refresh (its `transientStreak`): the transient ends and `skipped` (any rule). Not `BOOKING_TRANSIENT`: a skipped
+ * booking (the month's pages, the spacing, a structural rule) never stops the pass's booking reads.
+ */
+export const BOOKING_REREAD: ReadonlySet<BookingStatus> = new Set<BookingStatus>([
+  ...BOOKING_TRANSIENT,
+  'skipped',
+]);
 /** The booking statuses that carry a rule. */
 const BOOKING_RULED: ReadonlySet<BookingStatus> = new Set<BookingStatus>([
   'skipped',

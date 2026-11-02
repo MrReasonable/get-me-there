@@ -1,6 +1,7 @@
 import {
   type DefinitionInput,
   type Estimate,
+  FLIGHT_LIST_PAGES_PER_PAIR_MAX,
   flightPagesPerPair,
   isScheduled,
   type ProviderId,
@@ -220,7 +221,12 @@ export function createEngine(deps: EngineDeps, options: EngineOptions = {}): Eng
     readFlightList: (id, pair) => flights.read(id, pair),
     flightReadInFlight: () => flights.inFlight(),
     setWorkerFlags: (id, f) => ctx.workerFlags.set(id, f),
-    flightPagesPlanned: () => flightPagesPerPair(ctx.workerFlags.get(FLIGHT_LIST_PROVIDER)),
+    // why: prov-008: with the flags unread the on-demand read's own preflight may set them and load 2 pages, so the
+    // button states the bound; once read, the pages the flags plan
+    flightPagesPlanned: () => {
+      const flags = ctx.workerFlags.get(FLIGHT_LIST_PROVIDER);
+      return flags === null ? FLIGHT_LIST_PAGES_PER_PAIR_MAX : flightPagesPerPair(flags);
+    },
     estimateRemaining: (id) => {
       const e = ctx.repos.executions.get(id);
       if (e === null) throw new Error(`execution ${id} not found`);

@@ -5,6 +5,7 @@ import {
   FLIGHT_LIST_PAGES_PER_PAIR_MAX,
   flightPagesPerPair,
   flightRequestSeconds,
+  listRequestSeconds,
   RETURN_ATTEMPTS_MAX,
   RETURN_PAGE_PERIODS,
   RETURN_PHASE_SECONDS_MAX,
@@ -14,6 +15,7 @@ import {
 } from '../../src/flights/limits.js';
 import {
   BOOKING_FINISHED,
+  BOOKING_REREAD,
   BOOKING_STATUS,
   BOOKING_TRANSIENT,
   type BookingRead,
@@ -239,6 +241,9 @@ describe('the statuses and their sets (spec rev 56 §2, §5.1)', () => {
   it('BOOKING_FINISHED holds exactly read and no-pairing; BOOKING_TRANSIENT the four transient ends', () => {
     expect([...BOOKING_FINISHED]).toEqual(['read', 'no-pairing']);
     expect([...BOOKING_TRANSIENT]).toEqual(['select-failed', 'not-settled', 'unrecognised', 'expand-failed']);
+    // why: ruling 21.6 I1: a skipped booking is read again once (the streak), but never stops the pass
+    expect([...BOOKING_REREAD]).toEqual([...BOOKING_TRANSIENT, 'skipped']);
+    expect(BOOKING_TRANSIENT.has('skipped')).toBe(false);
     expect(BOOKING_STATUS).toEqual([
       'read',
       'no-pairing',
@@ -263,6 +268,10 @@ describe('the return phase constants (spec rev 56 §12; the 21.0 findings)', () 
     expect(RETURN_PHASE_SECONDS_MAX.returnsOnly).toBe(120);
     expect(RETURN_SECOND_OUTBOUND_RATE).toBe(0.5);
     expect(BOOKING_OFFERS_MAX).toBe(40);
+  });
+  it('listRequestSeconds: an outbound-only flights request, the page timeout and 15 s (105 s at the defaults)', () => {
+    expect(listRequestSeconds(90)).toBe(105);
+    expect(listRequestSeconds(120)).toBe(135);
   });
   it('flightRequestSeconds: 780 / 600 at the defaults, 1,035 at 120 s and 45 s', () => {
     expect(flightRequestSeconds(90, 30, true)).toBe(780);

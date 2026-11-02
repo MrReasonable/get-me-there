@@ -172,21 +172,23 @@ interface RequestPlan {
 
 /**
  * Reads one page under the step's error table. The lease is awaited first (an on-demand read in flight), then the
- * step's own allowance is checked against the request's pages (`used + pages > flightListPages`, so a request it cannot
- * hold is refused at `provider-execution` before any call), then the capability reads with the run's controller signal
- * and the step's gate held to the request's own seconds.
+ * request is shaped (`requestOf`: the window and the month's pages as they are after that wait, 21.6 review M1), then
+ * the step's own allowance is checked against the request's pages (`used + pages > flightListPages`, so a request it
+ * cannot hold is refused at `provider-execution` before any call), then the capability reads with the run's controller
+ * signal and the step's gate held to the request's own seconds.
  */
 async function readPage(
   ctx: EngineContext,
   run: RunState,
   cap: FlightListCapability,
   cell: CellKey,
-  req: RequestPlan,
+  plan: FlightListsState,
   gate: (requestSeconds: number) => () => void,
 ): Promise<PageOutcome> {
   const names = airportNamesOf(ctx);
   try {
     await ctx.lease.whenFree(run.controller.signal);
+    const req = requestOf(ctx, run, plan);
     const allowance = ctx.budget.usage({
       kind: 'provider-execution',
       executionId: run.executionId,
@@ -520,7 +522,7 @@ export async function runFlightLists(ctx: EngineContext, run: RunState): Promise
     for (let i = 0; i < toRead.length && !intake.signal.aborted; i++) {
       const cell = toRead[i];
       if (cell === undefined) break;
-      const o = await readPage(ctx, run, cap, cell, requestOf(ctx, run, plan), gate);
+      const o = await readPage(ctx, run, cap, cell, plan, gate);
       if (o.kind === 'abort') {
         intake.abort();
         break;

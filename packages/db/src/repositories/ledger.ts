@@ -66,7 +66,8 @@ export class LedgerRepo {
      * Spec rev 55 §8.1 (ruling A32): the flight-list pages (`/v1/flights` rows), one line per provider. They are in
      * `calls` and the totals, but in no `perProvider` line, whose stage would mislabel them as verification. `calls` is
      * the same mix as above: a page row counts its pages (up to 2 for a flights request with a return phase, spec rev 56)
-     * and a `no-page` row counts 1, so neither a pages nor an attempts figure should be read from it alone.
+     * and a `no-page` row counts 1, so neither a pages nor an attempts figure should be read from it alone. A request
+     * cut off before any answer counts here at its plan, though the run's flight allowance leaves it out (21.6 I2).
      */
     flightLists: Array<{ providerId: ProviderId; calls: number; costMicroGbp: number; cacheHits: number }>;
   } {

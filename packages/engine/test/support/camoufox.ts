@@ -23,6 +23,7 @@ import {
   GRID_STEP_DAYS,
   GRID_TIMES,
   type IsoDateTime,
+  listRequestSeconds,
   type OperatorMessage,
   type PreflightResult,
   type ProviderContext,
@@ -323,7 +324,9 @@ function stub(
           signal.addEventListener('abort', () => reject(new AbortedError()), { once: true });
         }),
       ]).catch((err: unknown) => {
-        r.finalise({ outcome: 'unknown', durationMs: 1, pageClass: 'no-page' });
+        // why: as http-kit finalises an abort (attempt.ts): `unknown`, no status, no stated pages (the guard keeps the
+        // planned 2), and the page class camoufox's `pageClassOf` gives with no response, `page` (21.6 review I2)
+        r.finalise({ outcome: 'unknown', durationMs: 1, pageClass: 'page' });
         throw err;
       });
     }
@@ -505,6 +508,7 @@ export function realCamoufox(
     flightRequestSeconds: {
       booking: flightRequestSeconds(90, 30, true),
       returnsOnly: flightRequestSeconds(90, 30, false),
+      outboundOnly: listRequestSeconds(90),
     },
     ...(grid === undefined
       ? {}

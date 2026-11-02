@@ -185,13 +185,17 @@ describe('the new routes behind the gate (revision 55 §10, sec-001)', () => {
     );
     const cards = await x.request('/api/definitions/cards');
     const texts = await Promise.all([lists, board, detail, cards].map((r) => r.text()));
-    const [listText, boardText, detailText] = texts;
+    const [listText, boardText, detailText, cardsText] = texts;
     // the shapes the sweep covers are really there
     expect(listText).toContain('"booking":{');
     expect(listText).toContain('"offers":[');
     expect(boardText).toContain('"gridPrice":{');
     expect(boardText).toContain('"pairing":{');
     expect(detailText).toContain('"basis":"pairing"');
+    // why: M9/prov-005: the card's cheapest is the pairing figure, with the flight list's provenance, so the sweep
+    // really covers the cards' shape
+    expect(cardsText).toContain('"basis":"pairing"');
+    expect(cardsText).toContain('"providerId":"camoufox"');
     for (const text of texts)
       for (const leak of [
         'test-worker-key',

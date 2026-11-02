@@ -65,6 +65,7 @@ export function calendarFigure(over: Partial<DatePairFigure> = {}): DatePairFigu
     gridPrice: null,
     pairing: null,
     pairingRead: 'not-read',
+    listReason: null,
     ...over,
   };
 }

@@ -436,3 +436,116 @@ describe('the pairing figure on the board (spec rev 56 §6.9)', () => {
     });
   });
 });
+
+describe('the pairing figure: Task 21.6 fix round 1', () => {
+  // why: the 21.6 ruling (prov-003): a failed list read nothing, so it is worded as not read with its cause, never as
+  // "return leg not read" (outbound-only); a failed newest list hides the finished one beneath it
+  it('a failed newest list reads list-failed with its reason, on the board and the scoped /results read', async () => {
+    const { x, def } = await setup();
+    store(x, def, A, PAIRING_FIXTURE.returns, { hoursAgo: 2 });
+    x.ports.repos.flightLists.insert({
+      definitionId: def.id,
+      executionId: null,
+      providerId: 'camoufox',
+      sourceKind: 'scraped-self',
+      cabin: 'economy',
+      ...A,
+      fetchedAt: at(-1),
+      pointOfSale: 'GB',
+      status: 'failed',
+      reason: 'network',
+      listed: null,
+      minMinor: null,
+      tabMinor: null,
+      cheapestView: null,
+      optionsUnparsed: 0,
+      optionsOtherCell: 0,
+      resultsStated: null,
+      flights: [],
+      returns: null,
+    });
+    const board = await figureA(x, def);
+    expect(board).toMatchObject({
+      basis: 'calendar',
+      price: { pricePence: 40_000 },
+      pairingRead: 'list-failed',
+      listReason: 'network',
+      pairing: null,
+    });
+    const r = await resultsOf(x, def.id, '?departureDate=2026-11-02&returnDate=2026-11-12');
+    expect(r.datePairFigure).toMatchObject({ pairingRead: 'list-failed', listReason: 'network' });
+  });
+
+  // why: prov-002: under ?executionId= the scoped run's own newest list counts, whatever its status, so a newer list
+  // outside the scope (an on-demand read) never makes a cell the run did read look unread
+  it('under ?executionId= an in-scope outbound-only list reads outbound-only beside a newer on-demand list', async () => {
+    const { x, def, e } = await setup();
+    store(x, def, A, null, { hoursAgo: 2, executionId: e });
+    store(x, def, A, PAIRING_FIXTURE.returns, { hoursAgo: 1 });
+    const scoped = await resultsOf(
+      x,
+      def.id,
+      `?executionId=${e}&departureDate=2026-11-02&returnDate=2026-11-12`,
+    );
+    expect(scoped.datePairFigure).toMatchObject({ basis: 'calendar', pairingRead: 'outbound-only' });
+    // the unscoped read takes the newest list overall: the on-demand one leads
+    expect((await figureA(x, def))?.basis).toBe('pairing');
+  });
+
+  // why: prov-007: freshness is judged on elapsed time, not whole hours, so a list one minute past the refresh no
+  // longer leads (the engine's reuse rule compares milliseconds too)
+  it('a list one minute past the refresh keeps the grid price (within-older); one exactly at it leads', async () => {
+    const past = await setup();
+    store(past.x, past.def, A, PAIRING_FIXTURE.returns, { hoursAgo: 168 + 1 / 60 });
+    expect(await figureA(past.x, past.def)).toMatchObject({
+      basis: 'calendar',
+      pairingRead: 'within-older',
+      pairing: { stale: 'refresh', ageHours: 168 },
+    });
+    await h?.close();
+    h = undefined;
+    const on = await setup();
+    store(on.x, on.def, A, PAIRING_FIXTURE.returns, { hoursAgo: 168 });
+    expect(await figureA(on.x, on.def)).toMatchObject({ basis: 'pairing', pairing: { stale: false } });
+  });
+
+  // why: prov-004: a fresh verified figure is never asked for a pairing, through the api's dry pass too: the board, the
+  // scoped /results read and the card keep it, with no pairing and no read
+  it('a fresh verified figure stays verified beside a leading pairing in its best calendar cell', async () => {
+    h = await createHarness({ env: WORKER_ENV });
+    const x = h;
+    const def = x.ports.repos.definitions.create(
+      exampleDefinitionInput({
+        ...SPACE,
+        providers: {
+          discovery: ['fixture', 'camoufox'],
+          verification: ['fixture'],
+          discoveryRefreshHours: { fixture: 168, camoufox: 168 },
+        },
+      }),
+    );
+    const s = seeder(x.ports);
+    const e = s.execution('E', { def, status: 'completed', startedAt: at(-2), finishedAt: at(-1) });
+    s.cells('E', ALL, { discovery: ['fixture'], selected: [{ cell: A, reason: 'always_include' }] });
+    s.tile('E', A, { status: 'priced', fetchedAt: at(-2), pricePence: 40_000 });
+    s.tile('E', B, { status: 'priced', fetchedAt: at(-2), pricePence: 200_000, tileIndex: 1 });
+    s.verified('E', A, [{ hash: 'v1', pricePence: 39_000, fetchedAt: at(-1) }]);
+    store(x, def, A, PAIRING_FIXTURE.returns, { executionId: e });
+    const board = await figureA(x, def);
+    expect(board).toMatchObject({
+      basis: 'verified',
+      price: { pricePence: 39_000, stale: false },
+      gridPrice: null,
+      pairing: null,
+      pairingRead: 'not-read',
+      listReason: null,
+    });
+    const r = await resultsOf(x, def.id, '?departureDate=2026-11-02&returnDate=2026-11-12');
+    expect(r.datePairFigure).toMatchObject({ basis: 'verified', pairing: null, pairingRead: 'not-read' });
+    const res = await x.request('/api/definitions/cards');
+    const card = apiContract.searchCardsResponseSchema
+      .parse(await res.json())
+      .cards.find((c) => c.id === def.id);
+    expect(card?.cheapest).toMatchObject({ pricePence: 39_000, basis: 'verified' });
+  });
+});

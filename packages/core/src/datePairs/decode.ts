@@ -50,6 +50,7 @@ function figureAt(r: DatePairsResponse, j: number): DatePairFigure {
     gridPrice: null,
     pairing: null,
     pairingRead: 'not-read',
+    listReason: null,
   };
 }
 
@@ -135,6 +136,11 @@ export function decodeDatePairs(r: DatePairsResponse): DecodedDatePairs {
         PAIRING_READ,
         columnAt(reads.code, k),
       );
+  // why: the 21.6 ruling: a failed list's cause, beside its `list-failed` read
+  const why = r.listReason;
+  if (why !== undefined)
+    for (let k = 0; k < why.figure.length; k += 1)
+      columnAt(figures, columnAt(why.figure, k)).listReason = columnAt(why.reason, k);
   const q = r.pairing;
   if (q !== undefined)
     for (let k = 0; k < q.figure.length; k += 1)

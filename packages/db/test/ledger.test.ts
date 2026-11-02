@@ -225,7 +225,9 @@ describe('LedgerRepo (spec §5.3, §7, §8.1 parity)', () => {
     const c = new LedgerRepo(db).countsFor(executionId);
     const usage = guard.usage({ kind: 'provider-execution', executionId, providerId: 'camoufox' });
     expect(c.flightLists).toEqual([{ providerId: 'camoufox', calls: 5, costMicroGbp: 0, cacheHits: 0 }]);
-    expect(c.flightLists[0]?.calls).toBe(usage.flightLists?.calls);
+    // why: 21.6 review I2: the run's flight allowance leaves out the request cut off before any answer (its pair is read
+    // again on resume); the actuals and the month count it at its plan
+    expect(usage.flightLists?.calls).toBe(3);
     expect(c.perProvider[0]?.calls).toBe(usage.calls);
     expect(c.calls).toBe(guard.usage({ kind: 'provider-month', providerId: 'camoufox' }).calls);
   });

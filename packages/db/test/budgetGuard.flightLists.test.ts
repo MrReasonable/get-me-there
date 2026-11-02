@@ -305,6 +305,35 @@ describe('page counts on the ledger (spec rev 56 §5.3, §7)', () => {
     expect(g.usage({ kind: 'execution-free-calls', executionId: 'e1' }).calls).toBe(7);
   });
 
+  it('21.6 review I2: a flights request cut off before any answer is out of the run allowance but in the month; a timeout is in both', () => {
+    const g = guardFor({ ...caps, monthlyCap: 1500 });
+    const flightsOf = () =>
+      g.usage({ kind: 'provider-execution', executionId: 'e1', providerId: 'camoufox' }).flightLists?.calls;
+    const month = () => g.usage({ kind: 'provider-month', providerId: 'camoufox' }).calls;
+    g.reserve({ ...flights('e1'), pages: 2 }).finalise({ ...done, pageCount: 2 });
+    // a cancel: http-kit finalises `unknown` with no status, no stated pages and no class word (AbortedError)
+    g.reserve({ ...flights('e1'), pages: 2 }).finalise({
+      outcome: 'unknown',
+      durationMs: 1,
+      pageClass: 'page',
+    });
+    expect(flightsOf()).toBe(2);
+    expect(month()).toBe(4);
+    // a timeout: the same, but classified (http-kit's requestTimeout is a `network` error), so it counts in both (its
+    // pair has a failed row and is not read again this run)
+    const timedOut = g.reserve({ ...flights('e1'), pages: 2 });
+    timedOut.finalise({ outcome: 'unknown', durationMs: 1, pageClass: 'page' });
+    timedOut.classify('network');
+    expect(flightsOf()).toBe(4);
+    expect(month()).toBe(6);
+    // a grid page cut off the same way still counts against the page cap (only the flight allowance leaves it out)
+    g.reserve(grid('e1', 0)).finalise({ outcome: 'unknown', durationMs: 1, pageClass: 'page' });
+    expect(g.usage({ kind: 'provider-execution', executionId: 'e1', providerId: 'camoufox' }).calls).toBe(1);
+    // the check reads the same sum: 8 more requests of 2 fit 20 with the cancelled one left out (ten pairs answered)
+    for (let i = 0; i < 8; i++) g.reserve({ ...flights('e1'), pages: 2 }).finalise({ ...done, pageCount: 2 });
+    expect(scopeOf(() => g.reserve({ ...flights('e1'), pages: 2 }))).toBe('provider-execution');
+  });
+
   it('scrollsThisMonth is unchanged by page counts', () => {
     const g = guardFor(caps);
     g.reserve({ ...flights('e1'), pages: 2 }).finalise({ ...done, pageCount: 2 });

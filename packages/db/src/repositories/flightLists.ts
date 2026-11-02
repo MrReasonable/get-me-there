@@ -1,5 +1,5 @@
 import {
-  BOOKING_TRANSIENT,
+  BOOKING_REREAD,
   type Cabin,
   type CellKey,
   FLIGHT_LIST_MAX_FLIGHTS,
@@ -9,7 +9,6 @@ import {
   listedFlightSchema,
   type PointOfSale,
   pointOfSaleSchema,
-  RETURN_FINISHED,
   RETURN_TRANSIENT,
   type ReturnRead,
   returnReadSchema,
@@ -59,12 +58,13 @@ INSERT INTO flight_list_offers (list_id, position, seller, fare, price_pence) VA
 const NEWEST = 'ORDER BY n.fetched_at DESC, n.id DESC LIMIT 1';
 
 /**
- * Spec rev 56 §7, §8.1 (R-retry): whether list `t` ended with a transient return or booking status (core's two sets;
- * a list with neither, an outbound-only read or a `failed` one, did not). `IN` on a NULL status is NULL, hence the
- * COALESCEs.
+ * Spec rev 56 §7, §8.1 (R-retry): whether list `t` ended with a return or booking status that is read again (core's
+ * `RETURN_TRANSIENT` and `BOOKING_REREAD`: the transient ends, and a `skipped` booking read whatever its rule, ruling
+ * 21.6 I1; a list with neither, an outbound-only read or a `failed` one, did not). `IN` on a NULL status is NULL, hence
+ * the COALESCEs.
  */
 const transientOf = (t: string) =>
-  `(COALESCE(${t}.return_status IN (${sqlList([...RETURN_TRANSIENT])}), 0) OR COALESCE(${t}.booking_status IN (${sqlList([...BOOKING_TRANSIENT])}), 0))`;
+  `(COALESCE(${t}.return_status IN (${sqlList([...RETURN_TRANSIENT])}), 0) OR COALESCE(${t}.booking_status IN (${sqlList([...BOOKING_REREAD])}), 0))`;
 /**
  * The chosen list `l`'s `transientStreak`: 0 when it did not end transient, else 1 plus whether the list before it in
  * its own cell (the second newest, by the order `NEWEST` reads) did too. One more probe of the cell index per list.
@@ -113,23 +113,25 @@ JOIN flight_lists l ON l.id = (
 LEFT JOIN flight_list_flights f ON f.list_id = l.id
 ORDER BY a.ord, f.position`;
 
-// why: spec rev 56 §6.9, §7: the newest list per cell of the definition (scoped to the asked executions when given: the
-// newest among those executions' lists), kept only when it finished its return phase: an older finished list under a
-// newer transient one is never returned. `ord` is the list's id (one per cell); the cells come in date, then airport
-// order. No streak: that is the step's reuse rule (`newestPerCell`), not this read's (21.5 review M1).
-const WITH_RETURNS_SQL = `
-WITH ranked AS (
-  SELECT n.id, ROW_NUMBER() OVER (
-    PARTITION BY n.origin, n.destination, n.departure_date, n.return_date ORDER BY n.fetched_at DESC, n.id DESC) AS rn
-  FROM flight_lists n
-  WHERE n.definition_id = @definitionId AND n.cabin = @cabin AND n.point_of_sale = @pointOfSale
-    AND (@executionIds IS NULL OR n.execution_id IN (SELECT value FROM json_each(@executionIds))))
-SELECT l.id AS ord, l.*, ${FLIGHT_COLUMNS}
-FROM ranked r
-JOIN flight_lists l ON l.id = r.id
+// why: spec rev 56 §6.9, §7 (21.6 review M6, prov-002): the newest list of each asked cell, whatever its status, scoped
+// to the asked executions when given (the newest among those executions' lists, so a newer list outside the scope never
+// hides the scope's own); only the asked cells are probed, never every list the search has had. One ordered index read
+// per cell, as PER_CELL_SQL. No streak: that is the step's reuse rule (`newestPerCell`), not this read's (21.5 review M1).
+const OF_CELLS_SQL = `
+WITH asked AS (
+  SELECT CAST(j.key AS INTEGER) AS ord, json_extract(j.value, '$.origin') AS origin, json_extract(j.value, '$.destination') AS destination,
+    json_extract(j.value, '$.departureDate') AS departureDate, json_extract(j.value, '$.returnDate') AS returnDate
+  FROM json_each(@cells) j)
+SELECT a.ord AS ord, l.*, ${FLIGHT_COLUMNS}
+FROM asked a
+JOIN flight_lists l ON l.id = (
+  SELECT n.id FROM flight_lists n
+  WHERE n.definition_id = @definitionId AND n.origin = a.origin AND n.destination = a.destination
+    AND n.departure_date = a.departureDate AND n.return_date = a.returnDate AND n.cabin = @cabin AND n.point_of_sale = @pointOfSale
+    AND (@executionIds IS NULL OR n.execution_id IN (SELECT value FROM json_each(@executionIds)))
+  ${NEWEST})
 LEFT JOIN flight_list_flights f ON f.list_id = l.id
-WHERE r.rn = 1 AND l.status = 'read' AND l.return_status IN (${sqlList([...RETURN_FINISHED])})
-ORDER BY l.departure_date, l.return_date, l.origin, l.destination, f.position`;
+ORDER BY a.ord, f.position`;
 
 // why: spec rev 56 §7: one probe of each primary key for the lists a lookup chose (no new index), ordered so each list's
 // attempts, and each attempt's returns, arrive in order; an attempt with no return (listed none-for-cell) has one row
@@ -662,21 +664,24 @@ export class FlightListsRepo {
   }
 
   /**
-   * Spec rev 56 §6.9, §7: the newest list per cell of the definition, for one cabin and point of sale (the list
-   * `newestPerCell` gives for that cell, never an older one), returned only when it is `read` and its return phase
-   * finished (`read` or `no-outbound`), with its returns and offers. Under an `executionIds` scope the list is the
-   * newest among those executions' lists for the cell (an on-demand list, of no execution, is in no scope), so a newer
-   * list outside the scope never hides it. A stored list, without a `transientStreak` (the step's reuse rule, read by
-   * `newestPerCell`). Three statements, one transaction; the cells come in date, then airport order.
+   * Spec rev 56 §6.9, §7 (21.6 review M6, prov-002): the newest list of each requested cell, of any status, for one cabin
+   * and point of sale, in request order, with its returns and offers; the api tells a failed list, an outbound-only one
+   * and a finished return phase apart. Under an `executionIds` scope the list is the newest among those executions'
+   * lists for the cell (an on-demand list, of no execution, is in no scope), so a newer list outside the scope never hides
+   * it. A stored list, without a `transientStreak` (the step's reuse rule, read by `newestPerCell`). Three statements in
+   * one transaction (none with no cell asked); a cell with no list in scope has no entry.
    */
-  newestWithReturns(
+  newestOfCells(
     definitionId: string,
+    cells: readonly CellKey[],
     cabin: Cabin,
     pointOfSale: PointOfSale,
     scope: { executionIds: readonly string[] } | null,
   ): StoredFlightList[] {
-    return this.lookup<JoinedRow>(WITH_RETURNS_SQL, {
+    if (cells.length === 0) return [];
+    return this.lookup<JoinedRow>(OF_CELLS_SQL, {
       definitionId,
+      cells: asCells(cells),
       cabin,
       pointOfSale,
       executionIds: scope === null ? null : JSON.stringify(scope.executionIds),

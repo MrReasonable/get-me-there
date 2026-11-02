@@ -1,3 +1,4 @@
+import type { StopDetail } from '../api-contract/stopCause.js';
 import { compareAges, effectiveAge, type StaleMark } from '../labels/age.js';
 import { resultRowKey } from '../results/rowKey.js';
 import type { ResultRow } from '../results/types.js';
@@ -61,6 +62,8 @@ export type Figure<T extends FigureCandidate> =
       /** a stale verified figure's cell read and the pairing beneath it (ruling 21.2); absent on a fresh one */
       pairingRead?: PairingRead;
       pairing?: PairingCandidate;
+      /** the 21.6 ruling: why the cell's newest list failed, exactly with `pairingRead` `list-failed` */
+      listReason?: StopDetail;
     }
   | {
       basis: 'calendar';
@@ -68,6 +71,7 @@ export type Figure<T extends FigureCandidate> =
       cheaperCached: null;
       pairingRead?: PairingRead;
       pairing?: PairingCandidate;
+      listReason?: StopDetail;
     }
   | {
       basis: 'pairing';
@@ -81,13 +85,27 @@ export type Figure<T extends FigureCandidate> =
 
 /**
  * The api's read of a cell's newest flight list (spec rev 56 §6.9): with no pairing read, `read` tells apart the
- * list-based values (`not-read`, `outbound-only`, `no-pairing-read`); with one, the `candidate`, from which core derives
- * the rest (`pairingReadOf`) and whether it leads (`pairingLeads`). A union, so no lookup names a candidate-based read
- * without its candidate (review finding 5).
+ * list-based values (`not-read`, `outbound-only`, `no-pairing-read`, and `list-failed` with the failed list's `reason`,
+ * the 21.6 ruling); with one, the `candidate`, from which core derives the rest (`pairingReadOf`) and whether it leads
+ * (`pairingLeads`). A union, so no lookup names a candidate-based read without its candidate (review finding 5), nor a
+ * failed list without its cause.
  */
 export type PairingOf = (
   cell: CellKey,
-) => { read: ListPairingRead; candidate: null } | { candidate: PairingCandidate };
+) =>
+  | { read: ListPairingRead; candidate: null }
+  | { read: 'list-failed'; reason: StopDetail; candidate: null }
+  | { candidate: PairingCandidate };
+
+/** A figure with a lookup that has no candidate: as it was for `not-read`, else with its read (and a failed list's cause). */
+function withListRead<F extends { pairingRead?: PairingRead; listReason?: StopDetail }>(
+  f: F,
+  lookup: { read: ListPairingRead } | { read: 'list-failed'; reason: StopDetail },
+): F {
+  if (lookup.read === 'not-read') return f;
+  if (lookup.read === 'list-failed') return { ...f, pairingRead: lookup.read, listReason: lookup.reason };
+  return { ...f, pairingRead: lookup.read };
+}
 /** No flight read for any cell: every figure as it was before the pairing figure (the flight-list step's ranking). */
 const NO_PAIRINGS: PairingOf = () => ({ read: 'not-read', candidate: null });
 
@@ -204,7 +222,7 @@ function withPairing<T extends FigureCandidate>(
   pairingOf: PairingOf,
 ): Figure<T> {
   const lookup = pairingOf(f.chosen.cell);
-  if (lookup.candidate === null) return lookup.read === 'not-read' ? f : { ...f, pairingRead: lookup.read };
+  if (lookup.candidate === null) return withListRead(f, lookup);
   const { candidate } = lookup;
   const offer = candidate.offer;
   // why: `pairingLeads` requires the offer; reading it first narrows it here without an assertion
@@ -226,7 +244,7 @@ function overStaleVerified<T extends FigureCandidate>(
 ): Figure<T> {
   if (calendar === null) return f;
   const lookup = pairingOf(calendar.cell);
-  if (lookup.candidate === null) return lookup.read === 'not-read' ? f : { ...f, pairingRead: lookup.read };
+  if (lookup.candidate === null) return withListRead(f, lookup);
   const { candidate } = lookup;
   // why: `pairingLeads` requires the offer; testing it first narrows it here without an assertion
   if (candidate.offer === null || !pairingLeads(candidate))

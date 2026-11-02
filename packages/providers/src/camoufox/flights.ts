@@ -85,10 +85,11 @@ export function flightListCapability(o: CamoufoxProviderOptions): FlightListCapa
     const started = o.clock.now();
     // why: spec rev 56 §5.1, §5.3 (R-worst): a return phase may load the first view and the second outbound's fresh
     // load, so its reservation plans both and its timeout is the request's own (the page budget plus the read-back and
-    // the round trip); a list read is one page under the provider's timeout, discovery's
+    // the round trip); a list read is one page under the list page's timeout (21.6 review M7: never the provider's,
+    // which in grid mode is a grid page's), the seconds the engine's gate holds it to
     const plan =
       limits === null
-        ? { pages: 1 }
+        ? { pages: 1, requestTimeoutSeconds: o.flightRequestSeconds.outboundOnly }
         : {
             pages: FLIGHT_LIST_PAGES_PER_PAIR_MAX,
             requestTimeoutSeconds: booking

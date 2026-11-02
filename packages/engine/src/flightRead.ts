@@ -240,15 +240,15 @@ export function createFlightReader(ctx: EngineContext): FlightReader {
         def.cabin,
         ctx.pointOfSaleOf(FLIGHT_LIST_PROVIDER),
       );
-      // why: spec rev 56 §8.1: the step's reuse rule, under the return phase the worker's last reported flags plan (a
-      // young transient, not-verified, other-limit or phase-less list is read); the date pair departs after today here
-      const flags = ctx.workerFlags.get(FLIGHT_LIST_PROVIDER);
-      const returns = flightPagesPerPair(flags) === FLIGHT_LIST_PAGES_PER_PAIR_MAX;
+      // why: spec rev 56 §8.1: the step's reuse rule, under the return phase this read would send (`phaseOf`: the
+      // worker's last reported flags, outbound-only below 2 pages of the month, 21.6 review M8), so a young transient,
+      // not-verified, other-limit or phase-less list is read; the date pair departs after today here
+      const phase = phaseOf(ctx, def);
       const fresh =
         newest !== undefined &&
         listReusable(newestListOf(newest), ctx.clock.now(), refreshHoursOf(def, FLIGHT_LIST_PROVIDER), {
-          returns,
-          booking: returns && flags?.BOOKING_SELECT_VERIFIED === true,
+          returns: phase.returnLimits !== undefined,
+          booking: phase.booking === true,
           current: flightLimitsOf(def.constraints),
         });
       if (fresh) return { ok: false, code: 'fresh' };

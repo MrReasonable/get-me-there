@@ -287,7 +287,7 @@ function reanchor(ctx: EngineContext, exec: Execution, opts: ResumeOptions): Exe
   const end = browserWindowEndFrom(
     windowAnchor(firing, ctx.clock.now()),
     remaining.seconds,
-    flightWindowMarginSeconds(ctx, remaining),
+    flightWindowMarginSeconds(ctx, remaining, exec.flightLists),
   );
   return { ...exec, scheduledFor: firing, browserWindowEnd: end };
 }

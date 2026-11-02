@@ -229,8 +229,9 @@ export interface Engine {
    */
   setWorkerFlags(providerId: ProviderId, flags: Readonly<Record<string, boolean>>): void;
   /**
-   * Spec rev 56 §10 (ruling D3): the pages one flights request plans now, `flightPagesPerPair` of the browser worker's
-   * last reported flags: 2 with `RETURN_SELECT_VERIFIED`, else 1 (none read yet: 1).
+   * Spec rev 56 §10 (ruling D3; prov-008): the pages an on-demand flights read may load now: 2 while the browser
+   * worker's flags are unread (the read's own preflight may report `RETURN_SELECT_VERIFIED`), else `flightPagesPerPair`
+   * of its last reported flags (2 with `RETURN_SELECT_VERIFIED`, else 1).
    */
   flightPagesPlanned(): 1 | 2;
   budgetFit(definition: DefinitionInput | SearchDefinition): BudgetFit;

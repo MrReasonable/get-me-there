@@ -23,8 +23,9 @@ export const FIGURE_BASES = ['verified', 'calendar', 'pairing'] as const;
 export type FigureBasis = (typeof FIGURE_BASES)[number];
 
 /**
- * What a calendar figure says of its cell's flight read when it does not lead (spec rev 56 §6.9; nine values, the first
- * that holds): `not-read` (no flight list for the cell), `outbound-only` (a list whose return phase read no return view),
+ * What a calendar figure says of its cell's flight read when it does not lead (spec rev 56 §6.9; ten values, the first
+ * that holds): `not-read` (no flight list for the cell), `list-failed` (the newest list failed: nothing was read, and its
+ * cause is sent beside it; the 21.6 ruling), `outbound-only` (a list whose return phase read no return view),
  * `no-pairing-read` (a finished return phase with no return listed or read), `over-limit` (returns read, none fitting),
  * `within-other-limits` (read under other limits), `within-older` (older than the refresh), `sellers-not-read` (no
  * booking read of that pairing kept offers), `offers-incomplete` (offers kept but not complete); and `within`, exactly on
@@ -40,6 +41,8 @@ export const PAIRING_READ = [
   'within',
   'within-older',
   'within-other-limits',
+  // why: appended, so every earlier value keeps its wire code (R-sparse)
+  'list-failed',
 ] as const;
 export type PairingRead = (typeof PAIRING_READ)[number];
 /** The three reads the api tells apart from the newest list itself, where there is no candidate (spec rev 56 §6.9). */

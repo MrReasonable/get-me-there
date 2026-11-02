@@ -144,6 +144,7 @@ export function datePairFigures(
           gridPrice: f.grid,
           pairing: pairingGroupOf(f.pairing),
           pairingRead: 'within',
+          listReason: null,
         };
       case 'calendar':
       case 'verified':
@@ -155,6 +156,7 @@ export function datePairFigures(
           gridPrice: null,
           pairing: f.pairing === undefined ? null : pairingGroupOf(f.pairing),
           pairingRead: f.pairingRead ?? 'not-read',
+          listReason: f.listReason ?? null,
         };
       default: {
         // why: the exhaustive switch's never default (spec rev 56 §0: a branch on a figure's basis)

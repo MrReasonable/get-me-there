@@ -379,6 +379,7 @@ describe('pairingLeads and pairingReadOf (spec rev 56 §6.9 "When it leads"; R-l
       'within',
       'within-older',
       'within-other-limits',
+      'list-failed',
     ]);
     expect(FIGURE_BASES).toEqual(['verified', 'calendar', 'pairing']);
   });

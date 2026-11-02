@@ -1,6 +1,7 @@
 import type { z } from 'zod';
 import type { CoverageSummary, ExecutionSummary, priceCellSchema } from '../api-contract/common.js';
 import type { DatePairsResponse } from '../api-contract/datePairs.js';
+import type { StopDetail } from '../api-contract/stopCause.js';
 import type { StaleMark } from '../labels/age.js';
 import type { Buckets } from '../types/execution.js';
 import type { Iata, IsoDate } from '../types/ids.js';
@@ -77,6 +78,8 @@ export interface DatePairFigure {
   pairing?: DatePairPairing | null;
   /** Spec rev 56 §6.9: the cell's flight read; `within` exactly on a pairing figure; absent reads as `not-read`. */
   pairingRead?: PairingRead;
+  /** The 21.6 ruling: why the cell's newest flight list failed, exactly on a `list-failed` read; else null (decoder fills). */
+  listReason?: StopDetail | null;
 }
 
 /** One date pair of the space: its dates, its six buckets and counts over the airport pairs in scope, its figure. */
@@ -138,7 +141,7 @@ function indexOf(at: ReadonlyMap<string, number>, code: Iata): number {
 /**
  * The route's body from the decoded form, in one pass over the date pairs: every column written as it goes, each
  * distinct provenance entered once in the table (keyed by `provenanceKey`), and a figure's cheaper-cached price, local
- * times, grid price, pairing and `pairingRead` in their sparse groups, keyed by the figure's position (spec rev
+ * times, grid price, pairing, `pairingRead` and a failed list's reason in their sparse groups, keyed by the figure's position (spec rev
  * 56 §10; ruling R-sparse: an entry only for a read other than `not-read`, an absent one written `not-read`).
  * `decodeDatePairs` is its inverse.
  */
@@ -186,6 +189,7 @@ export function encodeDatePairs(d: DecodedDatePairs): DatePairsResponse {
     fromEarlierSearch: [],
   };
   const pairingRead: NonNullable<DatePairsResponse['pairingRead']> = { figure: [], code: [] };
+  const listReason: NonNullable<DatePairsResponse['listReason']> = { figure: [], reason: [] };
   const grid: NonNullable<DatePairsResponse['gridPrice']> = {
     figure: [],
     pricePence: [],
@@ -265,6 +269,11 @@ export function encodeDatePairs(d: DecodedDatePairs): DatePairsResponse {
       pairingRead.figure.push(figure);
       pairingRead.code.push(PAIRING_READ.indexOf(read));
     }
+    const why = x.listReason ?? null;
+    if (why !== null) {
+      listReason.figure.push(figure);
+      listReason.reason.push(why);
+    }
     const c = x.cheaperCached;
     if (c !== null) {
       cheaper.figure.push(figure);
@@ -340,5 +349,6 @@ export function encodeDatePairs(d: DecodedDatePairs): DatePairsResponse {
     gridPrice: grid,
     pairing,
     pairingRead,
+    listReason,
   };
 }

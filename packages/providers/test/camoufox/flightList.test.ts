@@ -12,6 +12,7 @@ import {
   type FlightLimits,
   flightRequestSeconds,
   flightsRequestSchema,
+  listRequestSeconds,
   ProviderError,
   returnReadSchema,
 } from '@gmt/core';
@@ -153,6 +154,7 @@ function setup() {
     flightRequestSeconds: {
       booking: flightRequestSeconds(90, 30, true),
       returnsOnly: flightRequestSeconds(90, 30, false),
+      outboundOnly: listRequestSeconds(90),
     },
   });
   const lists = p.flightLists;
@@ -487,19 +489,19 @@ describe('camoufox flightLists: the return phase (spec rev 56 §2 "The return ph
     ]);
     for (const b of bodies) expect(flightsRequestSchema.safeParse(b).success).toBe(true);
   });
-  it('a request with limits plans 2 pages and its own timeout: 780 s with the booking read, 600 s without', async () => {
+  it('a request plans its pages and its own timeout: 780 s with the booking read, 600 s without, 105 s outbound-only', async () => {
     const { lists, sent, events } = setup();
     server.use(capture(() => HttpResponse.json(answer(), contacted(true))));
     await lists.read({ ...Q, returnLimits: LIMITS, booking: true }, ctx);
     await lists.read({ ...Q, returnLimits: LIMITS, booking: false }, ctx);
     await lists.read(Q, ctx);
+    // why: 21.6 review M7: the outbound-only request's timeout is the list page's (the engine's gate holds it to the
+    // same 105 s), never the provider's default, which in grid mode is a whole grid page's
     expect(sent.map((r) => [r.pages, r.requestTimeoutSeconds])).toEqual([
       [2, 780],
       [2, 600],
-      [1, undefined],
+      [1, 105],
     ]);
-    // why: without limits the provider's own timeout applies: no override key at all
-    expect('requestTimeoutSeconds' in (sent[2] ?? {})).toBe(false);
     expect(reserves(events).map((r) => r.pages)).toEqual([2, 2, 1]);
   });
   it('maps returns and nextLoadNotBefore field for field, and the page count reaches the ledger only', async () => {
