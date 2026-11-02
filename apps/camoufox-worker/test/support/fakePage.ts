@@ -1,14 +1,7 @@
 // A fake Playwright page shaped like playwright-core 1.59.1's (PageLike): a synthetic accessibility tree of roles,
 // accessible names and text that locators query, scripted navigation (hops, the route guard, framenavigated), and a
 // record of every call's timeout. Synthetic only; nothing here is copied from a recording.
-import type {
-  FrameLike,
-  HeadedPageLike,
-  LocatorLike,
-  NamedElement,
-  PageLike,
-  RequestLike,
-} from '../../src/driver.js';
+import type { FrameLike, HeadedPageLike, LocatorLike, NamedElement, RequestLike } from '../../src/driver.js';
 import type { Role } from '../../src/selectors.js';
 import type { FakeContext } from './fakeContext.js';
 

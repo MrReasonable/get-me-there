@@ -1,7 +1,7 @@
 import { AbortedError, asIsoDateTime, BudgetExceeded } from '@gmt/core';
 import { HttpResponse, http } from 'msw/http';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createLimiter } from '../../src/http/limiter.js';
+import { createLimiter, HOLD_MAX_MS, HOUR_MS } from '../../src/http/limiter.js';
 import { FakeBudget, makeKit, req, SEARCH, TP, testLimits } from '../fakes.js';
 import { asProviderError } from '../support/guards.js';
 import { respondAfter, server } from '../support/msw.js';
@@ -272,6 +272,19 @@ describe('holdUntil: the next start waits for the worker’s nextLoadNotBefore (
     kit.holdUntil('searchapi', inMs(60_000));
     await drive(waiting);
     expect(fetchTimes(events, t0)[0] ?? 0).toBeGreaterThanOrEqual(70_000);
+  });
+  // why: CodeRabbit (WP21): a far-future `at` (a corrupt pacer record) would hold the provider without end; the worker
+  // states at most a page in flight and its spacing, well inside the hour, so a later `at` is cut to HOLD_MAX_MS
+  it('holds at most HOLD_MAX_MS (1 h) past now: a later `at` starts the fetch at the hour', async () => {
+    expect(HOLD_MAX_MS).toBe(HOUR_MS);
+    const { kit, events } = makeKit();
+    ok();
+    const t0 = Date.now();
+    kit.holdUntil('searchapi', inMs(365 * 24 * HOUR_MS));
+    await drive(kit.request(nth(1)), { stepMs: 500, maxMs: 2 * HOUR_MS });
+    const [at] = fetchTimes(events, t0);
+    expect(at ?? 0).toBeGreaterThanOrEqual(HOUR_MS);
+    expect(at ?? Number.POSITIVE_INFINITY).toBeLessThan(HOUR_MS + 1000);
   });
   it('a hold for an id without limits (no limiter) does nothing', () => {
     const { kit } = makeKit({ limits: { searchapi: testLimits().searchapi } });

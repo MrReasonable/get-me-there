@@ -21,7 +21,7 @@ export interface ProviderLimiter {
    * Spec rev 56 §5.3 (R-spacing; arch-r3-018): no job starts before `atMs` (epoch ms, `Date.now()`'s scale). `run`
    * waits for the hold before the job joins the queue, under the job's signal, and the queue's maximum wait starts only
    * after it; a job already queued when the hold is set waits for it once its slot is granted. A time already past does
-   * nothing; an earlier time never shortens a later hold.
+   * nothing; an earlier time never shortens a later hold; a time more than HOLD_MAX_MS ahead holds HOLD_MAX_MS.
    */
   holdUntil(atMs: number): void;
 }
@@ -40,6 +40,12 @@ export class NotSent extends Error {
 
 export const MINUTE_MS = 60_000;
 export const HOUR_MS = 3_600_000;
+/**
+ * The furthest past now a hold reaches (spec rev 56 §5.3): the camoufox worker states at most the rest of a page in
+ * flight and its spacing, well inside the hour, so a later `at` is a corrupt record, cut to this bound rather than
+ * dropped (dropping it would start the next load early). It also keeps each wait inside setTimeout's range.
+ */
+export const HOLD_MAX_MS = HOUR_MS;
 const HEARTBEAT_MS = 5_000;
 
 /**
@@ -182,7 +188,7 @@ export function createLimiter(l: ProviderHttpLimits, seed: { usedThisHour: numbe
     secondsToHourRefresh: () => secondsTo(HOUR_MS),
     reservoirs,
     holdUntil(atMs: number): void {
-      heldUntil = Math.max(heldUntil, atMs);
+      heldUntil = Math.max(heldUntil, Math.min(atMs, Date.now() + HOLD_MAX_MS));
     },
     async run<T>(fn: () => Promise<T>, o: LimiterRunOptions): Promise<T> {
       // why: arch-r3-018: the hold is outside the queue, so a hold longer than maxWaitMs is waited out, never a timeout
