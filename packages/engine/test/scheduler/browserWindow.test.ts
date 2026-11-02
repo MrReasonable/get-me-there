@@ -66,6 +66,8 @@ describe('browserWindowEndFrom (decision 83: anchor + 1.5 × the estimate second
     expect(browserWindowEndFrom(at('2027-03-01T06:00:00.000Z'), 1200)).toBe('2027-03-01T06:30:00.000Z');
     expect(browserWindowEndFrom(at('2027-03-01T06:00:00.000Z'), 0)).toBe('2027-03-01T06:00:00.000Z');
     expect(browserWindowEndFrom(at('2027-03-01T06:00:00.000Z'), 0.0005)).toBe('2027-03-01T06:00:00.001Z');
+    // why: spec rev 56 §8.2 (ruling D5): a plan reading returns adds one flights request's seconds as margin, unscaled
+    expect(browserWindowEndFrom(at('2027-03-01T06:00:00.000Z'), 1200, 780)).toBe('2027-03-01T06:43:00.000Z');
   });
 });
 

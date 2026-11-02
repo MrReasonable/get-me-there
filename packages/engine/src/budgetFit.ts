@@ -2,6 +2,8 @@ import {
   type BudgetScope,
   budgetScopeLabel,
   type DefinitionSnapshot,
+  FLIGHT_LIST_COUNT,
+  FLIGHT_LIST_PAGES_PER_PAIR_MAX,
   isScheduled,
   type ProviderId,
   type SearchDefinition,
@@ -66,14 +68,25 @@ export function scheduleLoad(
 }
 
 /**
- * Spec rev 55 §8.1 (ruling R-load): the flight-list pages a scheduled run of `snapshot` needs, its full allowance
- * (`flightListPages`, 10) whenever its estimate carries a flight line, whatever the current month has left.
+ * Spec rev 56 §8.1 (ruling R-load; R-estimate): the flight-list pages a scheduled run of `snapshot` needs, the bound of
+ * its full allowance whenever its estimate carries a flight line, whatever the current month has left: 2 pages a pair
+ * with the return leg (20), 1 without (10), never above the snapshot's `flightListPages`.
  */
 export function flightAllowanceOf(
   perRun: Pick<Estimate, 'flightLists'>,
   snapshot: Pick<DefinitionSnapshot, 'budget'>,
 ): number {
-  return perRun.flightLists === undefined ? 0 : (snapshot.budget.flightListPages ?? 0);
+  if (perRun.flightLists === undefined) return 0;
+  const perPair = perRun.flightLists.returns === true ? FLIGHT_LIST_PAGES_PER_PAIR_MAX : 1;
+  return Math.min(FLIGHT_LIST_COUNT * perPair, snapshot.budget.flightListPages ?? 0);
+}
+
+/**
+ * Spec rev 56 §8.1: the flight-list requests a run of `perRun` makes, which count toward its free calls (one a pair,
+ * whatever pages each loads): FLIGHT_LIST_COUNT (10) whenever its estimate carries a flight line.
+ */
+export function flightRequestsOf(perRun: Pick<Estimate, 'flightLists'>): number {
+  return perRun.flightLists === undefined ? 0 : FLIGHT_LIST_COUNT;
 }
 
 /** Spec §8.2 monthly load of a schedule: scheduleLoad over runsPerMonth firings in an average month (730 h). */
@@ -164,11 +177,11 @@ export function budgetFitFor(
   );
   scope(
     { kind: 'execution-free-calls', executionId: NO_EXECUTION },
-    // why: spec rev 55 §8.1 — the flight-list pages count toward the run's free calls
-    // why: the step stops at the run's free-call limit itself, so its allowance counts up to what the lines leave
+    // why: spec rev 56 §8.1 — the flight-list requests (one a pair, never its pages) count toward the run's free calls
+    // why: the step stops at the run's free-call limit itself, so its requests count up to what the lines leave
     sum(free, (p) => p.calls) +
       Math.min(
-        flightAllowanceOf(own.perRun, own.snapshot),
+        flightRequestsOf(own.perRun),
         Math.max(0, def.budget.maxFreeCalls - sum(free, (p) => p.calls)),
       ),
     def.budget.maxFreeCalls,

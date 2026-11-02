@@ -13,7 +13,7 @@ import {
 import { RowRejected } from '@gmt/db';
 import { type Breach, breachMessage, checkBudget, spendOf } from './budgetCheck.js';
 import type { EngineContext } from './context.js';
-import { estimateStart, withBlocked } from './estimate.js';
+import { estimateStart, flightWindowMarginSeconds, withBlocked } from './estimate.js';
 import { execute } from './execute.js';
 import { type LineKey, lineKey } from './lines.js';
 import { notifyOperator } from './notify.js';
@@ -247,9 +247,9 @@ export function confirmationNeeded(
   const totalCalls = runnable.reduce((a, p) => a + p.calls, 0);
   const calls = new Map<ProviderId, number>();
   for (const p of runnable) calls.set(p.providerId, (calls.get(p.providerId) ?? 0) + p.calls);
-  // why: spec rev 55 §8.1 — the flight-list pages count in camoufox's calls for the soft confirmation (never in
-  // totalCalls, which is what a confirmation covers)
-  const flightPages = estimate.flightLists?.pages ?? 0;
+  // why: spec rev 56 §8.1 — the flight-list pages count in camoufox's calls for the soft confirmation at their bound
+  // (never in totalCalls, which is what a confirmation covers)
+  const flightPages = estimate.flightLists?.pagesMax ?? estimate.flightLists?.pages ?? 0;
   const browser = calls.get('camoufox');
   if (flightPages > 0 && browser !== undefined) calls.set('camoufox', browser + flightPages);
   const heavy = [...calls].flatMap(([id, n]) => {
@@ -500,6 +500,7 @@ export async function startExecution(
         browserWindowEnd: browserWindowEndFrom(
           windowAnchor(e.scheduledFor, e.startedAt ?? e.createdAt),
           estimate.seconds,
+          flightWindowMarginSeconds(ctx, estimate),
         ),
       });
       ctx.repos.cells.seed(e.id, cells, discovery);

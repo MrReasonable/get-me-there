@@ -1,6 +1,7 @@
 import {
   type DefinitionInput,
   type Estimate,
+  flightPagesPerPair,
   isScheduled,
   type ProviderId,
   type SearchDefinition,
@@ -33,6 +34,7 @@ import { createScheduler, type Scheduler } from './scheduler/scheduler.js';
 import { buildSnapshot } from './snapshot.js';
 import { browserLeftFor } from './stages/browserGate.js';
 import type { PlannedTile } from './stages/discovery.js';
+import { FLIGHT_LIST_PROVIDER } from './stages/flightLists.js';
 import type { Engine, EngineDeps, EngineOptions } from './types.js';
 import { HOUR_MS } from './units.js';
 
@@ -217,6 +219,8 @@ export function createEngine(deps: EngineDeps, options: EngineOptions = {}): Eng
     },
     readFlightList: (id, pair) => flights.read(id, pair),
     flightReadInFlight: () => flights.inFlight(),
+    setWorkerFlags: (id, f) => ctx.workerFlags.set(id, f),
+    flightPagesPlanned: () => flightPagesPerPair(ctx.workerFlags.get(FLIGHT_LIST_PROVIDER)),
     estimateRemaining: (id) => {
       const e = ctx.repos.executions.get(id);
       if (e === null) throw new Error(`execution ${id} not found`);

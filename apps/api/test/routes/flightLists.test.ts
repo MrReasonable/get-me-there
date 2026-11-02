@@ -3,6 +3,7 @@
 // for another airport pair of the space (`listOtherPair`); `POST` starts a read on demand and maps the engine's
 // refusals to their codes; `GET /executions/:id` reports `flights` from the stored plan and the execution's rows.
 import { apiContract, asIsoDate, type CellKey, type DefinitionInput, type SearchDefinition } from '@gmt/core';
+import { PAIRING_FIXTURE } from '@gmt/core/testing';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import { EWR, exampleDefinitionInput, JFK, LGW, LHR } from '../helpers/examples.js';
@@ -335,5 +336,67 @@ describe('GET /executions/:id flights (revision 55 §8.1 "What the run reports")
       calls: 0,
       cap: 0,
     });
+  });
+});
+
+// Spec rev 56 §10 (WP21 Task 21.6): a list carries its return read on the wire (null for a list read without one, or
+// stored before 0012); the response carries the pages one read plans (ruling D3); the POST body never carries limits.
+describe('the return leg on the flight-lists wire (spec rev 56 §10)', () => {
+  it('list.returns field for field, null for a list without a return read', async () => {
+    const { x, def } = await setup();
+    list(x, def, A, { fetchedAt: at(-1) });
+    x.ports.repos.flightLists.insert({
+      definitionId: def.id,
+      executionId: null,
+      providerId: 'camoufox',
+      sourceKind: 'scraped-self',
+      cabin: 'economy',
+      ...B,
+      fetchedAt: at(-1),
+      pointOfSale: 'GB',
+      status: 'read',
+      reason: null,
+      listed: 'flights',
+      minMinor: 48_000,
+      tabMinor: null,
+      cheapestView: 'cheapest',
+      optionsUnparsed: 0,
+      optionsOtherCell: 0,
+      resultsStated: 4,
+      flights: PAIRING_FIXTURE.flights,
+      returns: PAIRING_FIXTURE.returns,
+    });
+    const body = apiContract.flightListsResponseSchema.parse(await (await get(x, def.id, PAIRS)).json());
+    const [a, b] = body.pairs;
+    expect(a?.list?.returns).toBeNull();
+    expect(b?.list?.returns).toEqual(PAIRING_FIXTURE.returns);
+    expect(b?.list?.flights).toEqual(PAIRING_FIXTURE.flights);
+    expect('pagesLoaded' in (b?.list ?? {})).toBe(false);
+  });
+
+  it('pagesPlanned is 1 before the worker is read and with its flag off, 2 once it reports RETURN_SELECT_VERIFIED', async () => {
+    const { x, def } = await setup();
+    const planned = async () =>
+      apiContract.flightListsResponseSchema.parse(await (await get(x, def.id, PAIRS)).json()).pagesPlanned;
+    expect(await planned()).toBe(1);
+    x.engine.setWorkerFlags('camoufox', { RETURN_SELECT_VERIFIED: false });
+    expect(await planned()).toBe(1);
+    x.engine.setWorkerFlags('camoufox', { RETURN_SELECT_VERIFIED: true, BOOKING_SELECT_VERIFIED: true });
+    expect(await planned()).toBe(2);
+  });
+
+  it('POST refuses a body carrying returnLimits (the read takes the definition limits) before any read', async () => {
+    const { x, def } = await setup();
+    const read = vi.spyOn(x.engine, 'readFlightList');
+    const res = await x.request(`/api/definitions/${def.id}/flight-lists`, {
+      json: {
+        departureDate: '2026-11-02',
+        returnDate: '2026-11-12',
+        returnLimits: PAIRING_FIXTURE.returns.limits,
+      },
+    });
+    // why: the body schema is strict: an unknown key is the api's invalid-body refusal
+    expect(res.status).toBe(400);
+    expect(read).not.toHaveBeenCalled();
   });
 });

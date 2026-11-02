@@ -323,6 +323,7 @@ async function readWorkerOnce(ports: Ports): Promise<WorkerRead> {
               : undefined,
         }),
         formVerified: st.flags.FORM_VERIFIED === true,
+        flags: st.flags,
         appInstances: st.appInstances?.count ?? null,
         monthly:
           st.monthly === undefined
@@ -433,6 +434,9 @@ export async function gatherFacts(ctx: RouteContext, env: StatusEnv): Promise<St
     }
   }
   const worker = await workerFacts(ports, mode, env.home);
+  // why: spec rev 56 §8.1: the Status view's worker read is the api's one read of the worker; the engine plans the
+  // flight step's return phase from the flags it last saw (there is no boot read)
+  if (worker.read.kind === 'ok') ctx.engine.setWorkerFlags('camoufox', worker.read.status.flags);
   return {
     now,
     tz: ports.config.schedulerTimezone,

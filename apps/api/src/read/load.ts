@@ -31,6 +31,8 @@ export interface Loaded {
   all: Execution[];
   /** The executions the rows come from (all, or the one `executionId`). */
   scoped: Execution[];
+  /** The execution scope asked for (`executionIds`), or null for every execution (spec rev 56 §6.9's pairings too). */
+  executionIds: readonly string[] | null;
   latestParent: Execution | null;
   /** One row per offer inside the current space, verdicts evaluated now; not deduped. */
   verified: ResultRow[];
@@ -123,6 +125,7 @@ export function loadRows(def: SearchDefinition, ports: Ports, opts: LoadOptions 
     rc,
     all,
     scoped,
+    executionIds: wanted === null ? null : ids,
     latestParent,
     verified: inSpace.map((o) => verifiedRow(o, rc, notSeen(o))),
     unconfirmed: new Set(inSpace.filter((o) => !o.suppliedFields.includes('price')).map((o) => o.id)),

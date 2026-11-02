@@ -30,11 +30,19 @@ export function windowAnchor(firing: IsoDateTime | null, startedAt: IsoDateTime)
 
 /**
  * The end the start transaction writes (decision 83): the run's anchor (`windowAnchor`) plus 1.5 × the estimate's total
- * seconds, in whole milliseconds. A live-tick resume writes it again from its own anchor (the later of its firing and
- * the resume) and the estimate of the cells still resumable.
+ * seconds, plus `marginSeconds` unscaled (spec rev 56 §8.2, ruling D5: one flights request's `flightRequestSeconds` when
+ * the plan reads returns, so the last date pairs of a typical run are not refused at the gate), in whole milliseconds.
+ * A live-tick resume writes it again from its own anchor (the later of its firing and the resume) and the estimate of
+ * the cells still resumable.
  */
-export function browserWindowEndFrom(anchor: IsoDateTime, estimateSeconds: number): IsoDateTime {
-  return isoDateTimeOfEpochMs(Date.parse(anchor) + Math.ceil(BROWSER_WINDOW_FACTOR * estimateSeconds * 1000));
+export function browserWindowEndFrom(
+  anchor: IsoDateTime,
+  estimateSeconds: number,
+  marginSeconds = 0,
+): IsoDateTime {
+  return isoDateTimeOfEpochMs(
+    Date.parse(anchor) + Math.ceil((BROWSER_WINDOW_FACTOR * estimateSeconds + marginSeconds) * 1000),
+  );
 }
 
 /**

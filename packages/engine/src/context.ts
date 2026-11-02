@@ -3,6 +3,7 @@ import {
   type Clock,
   type Config,
   type FlightProvider,
+  flightRequestSeconds,
   type IsoDateTime,
   type Logger,
   type Notifier,
@@ -58,6 +59,13 @@ export interface ProviderRunLimits {
   /** Spec §2 rev 34: camoufox grid's scroll caps (a run's and its month's), or null for a provider without them. */
   executionScrollCap: number | null;
   monthlyScrollCap: number | null;
+  /**
+   * Spec rev 56 §8.1, §8.2 (arch-r3-006; ruling P19): camoufox's flights request seconds, core's `flightRequestSeconds`
+   * over the shared page timeout and spacing: with a return phase and the booking read (780 s at the defaults), with a
+   * return phase only (600 s), and an outbound-only request's, the list page's request timeout (page timeout + 15 s,
+   * 105 s). The step's gate holds a request to its own; null for every other provider.
+   */
+  flightRequestSeconds: { booking: number; returnsOnly: number; outboundOnly: number } | null;
 }
 
 /**
@@ -107,6 +115,29 @@ export interface EngineContext {
   readonly lease: BrowserLease;
   /** Spec revision 55 §8.1: the board's ranking (EngineOptions.rankedDatePairs), or undefined when the app passes none. */
   readonly rankedDatePairs: RankedDatePairsReader | undefined;
+  /**
+   * Spec rev 56 §8.1 "The plan": each provider's last reported verification flags, in memory, set by the discovery
+   * preflight, the on-demand read's preflight and the api's Status read (there is no boot read, so before the first of
+   * them `get` is null and every plan is outbound-only). Shared by every copy of the context (one per engine).
+   */
+  readonly workerFlags: WorkerFlags;
+}
+
+/** The workers' reported flags (spec rev 56 §8.1), one entry per provider, the last read kept. */
+export interface WorkerFlags {
+  get(providerId: ProviderId): Readonly<Record<string, boolean>> | null;
+  set(providerId: ProviderId, flags: Readonly<Record<string, boolean>>): void;
+}
+
+/** The engine's one store of the workers' flags (spec rev 56 §8.1): a copy of each set is kept, so a caller's later edit is not. */
+export function createWorkerFlags(): WorkerFlags {
+  const flags = new Map<ProviderId, Readonly<Record<string, boolean>>>();
+  return {
+    get: (id) => flags.get(id) ?? null,
+    set: (id, f) => {
+      flags.set(id, Object.freeze({ ...f }));
+    },
+  };
 }
 
 /**
@@ -142,6 +173,7 @@ export function buildContext(deps: EngineDeps, options: EngineOptions = {}): Eng
       monthlyCallCap: b.monthlyCallCap,
       executionScrollCap: b.executionScrollCap ?? null,
       monthlyScrollCap: b.monthlyScrollCap ?? null,
+      flightRequestSeconds: id === 'camoufox' ? camoufoxRequestSeconds(config) : null,
     };
   };
   for (const id of providers.keys()) limitsOf(id); // why: a missing limit is a wiring bug; fail at construction, not mid-run
@@ -175,5 +207,24 @@ export function buildContext(deps: EngineDeps, options: EngineOptions = {}): Eng
     lifecycle: { closing: false, closed: false, abort: new AbortController() },
     lease: createBrowserLease(),
     rankedDatePairs: options.rankedDatePairs,
+    workerFlags: createWorkerFlags(),
+  };
+}
+
+/** The list page's request timeout over its page timeout (spec §12: the read-back and close bounds). */
+const LIST_REQUEST_EXTRA_SECONDS = 15;
+
+/**
+ * Spec rev 56 §8.1, §12: camoufox's flights request seconds from the shared settings, core's one computation (the
+ * provider's own copy is the wiring's, from the same function and the same settings: A24); null when it is not
+ * configured.
+ */
+function camoufoxRequestSeconds(config: Config): ProviderRunLimits['flightRequestSeconds'] {
+  const cf = config.providers.camoufox;
+  if (cf === null) return null;
+  return {
+    booking: flightRequestSeconds(cf.pageTimeoutSeconds, cf.minSpacingSeconds, true),
+    returnsOnly: flightRequestSeconds(cf.pageTimeoutSeconds, cf.minSpacingSeconds, false),
+    outboundOnly: cf.pageTimeoutSeconds + LIST_REQUEST_EXTRA_SECONDS,
   };
 }

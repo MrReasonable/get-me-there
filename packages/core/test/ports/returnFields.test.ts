@@ -23,9 +23,9 @@ describe('the ports gain their return-phase fields, optional (spec rev 56 §5.1)
     expectTypeOf<FlightListQuery['returnLimits']>().toEqualTypeOf<FlightLimits | null | undefined>();
     expectTypeOf<FlightListQuery['booking']>().toEqualTypeOf<boolean | undefined>();
   });
-  it("FlightListResult's returns? and nextLoadNotBefore?", () => {
-    expectTypeOf<ListResult['returns']>().toEqualTypeOf<ReturnRead | null | undefined>();
-    expectTypeOf<ListResult['nextLoadNotBefore']>().toEqualTypeOf<IsoDateTime | null | undefined>();
+  it("FlightListResult's returns and nextLoadNotBefore are required since Task 21.6 (the engine stores them)", () => {
+    expectTypeOf<ListResult['returns']>().toEqualTypeOf<ReturnRead | null>();
+    expectTypeOf<ListResult['nextLoadNotBefore']>().toEqualTypeOf<IsoDateTime | null>();
   });
   it('PreflightResult.flags?', () => {
     expectTypeOf<{ ok: true }>().toMatchTypeOf<PreflightResult>();

@@ -2,6 +2,8 @@
 // planned cells with no row of this execution, skips (no row) one that has since departed, never writes a pair twice;
 // a retry-errors resume of a completed run re-reads nothing; a resume past the run's browser window reads no flight
 // page and leaves `ended 'window'`; a pass whose preflight disabled camoufox froze no plan, so a manual Resume reads 10.
+// Spec rev 56 §8.1: a resumed pass keeps the plan's `returns` and `booking` (a plan stored before WP21 reads as
+// outbound-only), and a page cancelled during its return phase writes no row and is read once by the resumed pass.
 import { apiContract, asIsoDateTime } from '@gmt/core';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { buildContext } from '../../src/context.js';
@@ -39,7 +41,11 @@ function restart(e: CamoufoxEngine, stubs: Stub[]) {
 }
 
 /** A scheduled camoufox-only search whose run is stopped by SIGTERM while its `call`-th flight page is in flight. */
-async function interruptedAt(call: number, env: Record<string, string> = {}) {
+async function interruptedAt(
+  call: number,
+  env: Record<string, string> = {},
+  flags: Record<string, boolean> | null = null,
+) {
   const inFlight = deferred();
   const cam = stubCamoufox({
     cells: 15,
@@ -49,6 +55,7 @@ async function interruptedAt(call: number, env: Record<string, string> = {}) {
     },
   });
   const e = engineWith([cam], { rankedDatePairs: rankedPairs(15), scheduleCron: '0 5 * * 1', env });
+  if (flags !== null) e.ctx.workerFlags.set('camoufox', flags);
   const id = await start(e);
   await inFlight.promise;
   await e.orch.shutdown();
@@ -161,5 +168,41 @@ describe('a resumed flight-list step', () => {
     expect(cam.calls).toHaveLength(15);
     expect(cam.flightCalls).toHaveLength(10);
     expect(done.flightLists?.planned).toBe(10);
+  });
+
+  it('spec rev 56: a pre-WP21 plan (no returns key) resumes outbound-only whatever the worker now reports', async () => {
+    const { e, id, cam2, plan } = await interruptedAt(5);
+    if (plan === null) throw new Error('a plan was stored');
+    const { returns: _r, booking: _b, returnsStopped: _s, bookingStopped: _t, ...older } = plan;
+    e.ctx.db.raw
+      .prepare('UPDATE search_executions SET flight_lists_json = ? WHERE id = ?')
+      .run(JSON.stringify(older), id);
+    const p = restart(e, [cam2]);
+    p.ctx.workerFlags.set('camoufox', { RETURN_SELECT_VERIFIED: true, BOOKING_SELECT_VERIFIED: true });
+    expect((await p.orch.resume(id, { manual: false })).ok).toBe(true);
+    const done = await e.settled(id);
+    expect(cam2.flightCalls).toHaveLength(6);
+    expect(cam2.flightCalls.every((c) => c.query.returnLimits === undefined)).toBe(true);
+    expect(done.flightLists).toMatchObject({ returns: false, booking: false });
+    await p.orch.shutdown();
+  });
+
+  it('spec rev 56: a page cancelled in its return phase writes no row; the resumed pass reads that pair once, with returns', async () => {
+    const both = { RETURN_SELECT_VERIFIED: true, BOOKING_SELECT_VERIFIED: true };
+    const { e, id, cam2, plan } = await interruptedAt(5, {}, both);
+    expect(plan).toMatchObject({ returns: true, booking: true });
+    // why: the new process has read no worker yet; the stored plan, not the flags, decides the resumed pass
+    const p = restart(e, [cam2]);
+    expect((await p.orch.resume(id, { manual: false })).ok).toBe(true);
+    const done = await e.settled(id);
+    expect(cam2.flightCalls.map((c) => c.query.cell)).toEqual(plan?.cells.slice(4));
+    expect(
+      cam2.flightCalls.every((c) => c.query.returnLimits !== undefined && c.query.booking === true),
+    ).toBe(true);
+    const rows = flightRows(e, id);
+    expect(rows).toHaveLength(10);
+    expect(rows.filter((r) => r.departureDate === plan?.cells[4]?.departureDate)).toHaveLength(1);
+    expect(done.flightLists).toEqual(plan);
+    await p.orch.shutdown();
   });
 });

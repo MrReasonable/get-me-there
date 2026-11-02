@@ -30,6 +30,7 @@ import { ApiError } from '../errors.js';
 import { API_TEXT } from '../text.js';
 import type { Ports } from '../wiring.js';
 import { safeSearchLink } from './links.js';
+import { flightListProvenance } from './pairings.js';
 import { rankedFigures } from './ranked.js';
 import { currentSpace } from './space.js';
 
@@ -59,8 +60,9 @@ export function parsePairs(raw: string): DatePairAsk[] {
 
 /**
  * One stored list on the wire (spec §10 `flightListSchema`): its age in whole hours, `stale` `'refresh'` once older
- * than the search's camoufox refresh, and the provenance the database holds it to (the browser worker's own page,
- * economy, GBP, `maxAgeHours` 0, the point of sale the page stated).
+ * than the search's camoufox refresh, the provenance the database holds it to (the browser worker's own page,
+ * economy, GBP, `maxAgeHours` 0, the point of sale the page stated), and (spec rev 56) its return read, with the
+ * booking read and its offers, or null for a list read without one. Its pages travel only to the ledger (A5).
  */
 export function toFlightList(l: StoredFlightList, now: IsoDateTime, refreshHours: number): FlightList {
   const ageHours = hoursSince(l.fetchedAt, now);
@@ -75,15 +77,7 @@ export function toFlightList(l: StoredFlightList, now: IsoDateTime, refreshHours
     ageHours,
     // why: spec rev 55 §10 — the stale mark, never a bare true; a list is judged against the camoufox refresh only
     stale: ageHours > refreshHours ? 'refresh' : false,
-    provenance: {
-      providerId: 'camoufox',
-      sourceKind: 'scraped-self',
-      fetchedAt: l.fetchedAt,
-      maxAgeHours: 0,
-      fx: { converted: false },
-      pointOfSale: l.pointOfSale,
-      cabin: 'economy',
-    },
+    provenance: flightListProvenance(l),
     status: l.status,
     reason: l.reason,
     listed: l.listed,
@@ -94,6 +88,7 @@ export function toFlightList(l: StoredFlightList, now: IsoDateTime, refreshHours
     optionsUnparsed: l.optionsUnparsed,
     optionsOtherCell: l.optionsOtherCell,
     resultsStated: l.resultsStated,
+    returns: l.returns,
   };
 }
 
@@ -133,12 +128,13 @@ const runPagesCaches = new WeakMap<object, Map<string, number | null>>();
 function runPagesOf(
   def: SearchDefinition,
   ports: Ports,
-  engine: Pick<Engine, 'estimate'>,
+  engine: Pick<Engine, 'estimate' | 'flightPagesPlanned'>,
   windowStart: string | null,
 ): number | null {
   const cache = runPagesCaches.get(engine) ?? new Map<string, number | null>();
   runPagesCaches.set(engine, cache);
-  const key = `${def.id}|${def.updatedAt}|${windowStart ?? 'no-window'}`;
+  // why: spec rev 56 §8.1: the flight pages a run plans follow the worker's reported flags, so a change recomputes
+  const key = `${def.id}|${def.updatedAt}|${windowStart ?? 'no-window'}|${engine.flightPagesPlanned()}`;
   if (cache.has(key)) {
     const kept = cache.get(key) ?? null;
     // why: a hit moves to the newest end, so the map drops the search read longest ago
@@ -166,7 +162,7 @@ export function assembleFlightLists(
   def: SearchDefinition,
   pairs: readonly DatePairAsk[],
   ports: Ports,
-  engine: Pick<Engine, 'flightReadInFlight' | 'estimate'>,
+  engine: Pick<Engine, 'flightReadInFlight' | 'estimate' | 'flightPagesPlanned'>,
 ): FlightListsResponse {
   const now = ports.clock.now();
   const space = currentSpace(def, ports.clock.todayLondon());
@@ -222,6 +218,9 @@ export function assembleFlightLists(
     // why: ruling R-pages: one run's browser pages from the search's own estimate (its camoufox lines and flight pages),
     // asked only when flight lists can be read here, so a search without the worker estimates nothing more
     runPages: unavailable === null ? runPagesOf(def, ports, engine, browserWindowStart(ports)) : null,
+    // why: ruling D3: the pages one read plans (2 with the worker's RETURN_SELECT_VERIFIED, else 1, none read yet: 1);
+    // the read button and its refusal use it, never a hard number
+    pagesPlanned: engine.flightPagesPlanned(),
     reading:
       mark === null || mark.definitionId !== def.id
         ? null

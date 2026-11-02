@@ -1,21 +1,27 @@
 /**
- * Spec revision 55 §8.1 "Reading one date pair's flights" (WP20 Task 20.9; `POST /definitions/:id/flight-lists`, §10):
+ * Spec revision 56 §8.1 "Reading one date pair's flights" (WP20 Task 20.9, WP21 Task 21.6; `POST /definitions/:id/flight-lists`, §10):
  * the figure's airport pair of one date pair of the current space, read on demand by the browser worker, against the
  * monthly page cap only (no execution), one row with `execution_id` NULL.
  *
  * Every refusal comes before any worker call or ledger row. The busy query and the taking of the browser lease run in
  * one synchronous turn (nothing before `lease.hold` is awaited), so a start admitted in that same turn sees the lease
  * held and its first browser page waits for the read (`BrowserLease.whenFree`). The read runs camoufox's discovery
- * preflight first (a refusal records `failed` with its class word), ignores CAMOUFOX_BROWSER_WINDOW (it is its own
- * anchor, like a manual start: no gate is passed), and a throw inside it records `failed` reason `fatal`. Shutdown
- * aborts a read in flight and waits for it within the drain; nothing is written once the engine is closed.
+ * preflight first (a refusal records `failed` with its class word; its result sets the worker's flags), sends the
+ * definition's own limits (`returnLimits`) and `booking` when those flags say so and the month's headroom holds 2 pages
+ * (else an outbound-only read of one page, never a refusal: R-low-pages), ignores CAMOUFOX_BROWSER_WINDOW (it is its
+ * own anchor, like a manual start: no gate is passed), stores the return read on its row (one read-row builder shared
+ * with the step), and a throw inside it records `failed` reason `fatal`. Shutdown aborts a read in flight and waits for
+ * it within the drain; nothing is written once the engine is closed.
  */
 import {
   AbortedError,
   BudgetExceeded,
   type CellKey,
-  cellKeyString,
   datePairIndex,
+  FLIGHT_LIST_PAGES_PER_PAIR_MAX,
+  type FlightListQuery,
+  flightLimitsOf,
+  flightPagesPerPair,
   type IsoDate,
   ProviderError,
   resolveSpace,
@@ -26,8 +32,14 @@ import type { EngineContext } from './context.js';
 import { errorText } from './errors.js';
 import { loadsBrowserPages } from './scheduler/browserWindow.js';
 import { airportNamesOf } from './stages/discovery.js';
-import { selectFlightPairs } from './stages/flightLists/select.js';
-import { FLIGHT_LIST_PROVIDER } from './stages/flightLists.js';
+import { listReusable, newestListOf } from './stages/flightLists/select.js';
+import {
+  FLIGHT_LIST_PROVIDER,
+  type FlightRowBase,
+  failedRowOf,
+  monthHeadroom,
+  readRowOf,
+} from './stages/flightLists.js';
 import { refreshHoursOf } from './stages/reuse.js';
 import { toStopDetail } from './stopCause.js';
 
@@ -87,28 +99,35 @@ function browserRunActive(ctx: EngineContext): boolean {
     .some((e) => !e.isChild && e.snapshot.providers.discovery.some(loadsBrowserPages));
 }
 
-/** The read's own failure row: nothing listed, the reason one STOP_DETAILS word. */
-function failedRow(ctx: EngineContext, def: SearchDefinition, cell: CellKey, reason: StopDetail) {
+/** What every row of an on-demand read carries (spec rev 55 §8.1: `execution_id` NULL). */
+function baseOf(def: SearchDefinition, cell: CellKey): FlightRowBase {
   return {
     definitionId: def.id,
     executionId: null,
     providerId: FLIGHT_LIST_PROVIDER,
-    sourceKind: 'scraped-self' as const,
+    sourceKind: 'scraped-self',
     cabin: def.cabin,
-    ...cell,
-    fetchedAt: ctx.clock.now(),
-    pointOfSale: ctx.pointOfSaleOf(FLIGHT_LIST_PROVIDER),
-    status: 'failed' as const,
-    reason,
-    listed: null,
-    minMinor: null,
-    tabMinor: null,
-    cheapestView: null,
-    optionsUnparsed: 0,
-    optionsOtherCell: 0,
-    resultsStated: null,
-    flights: [],
+    origin: cell.origin,
+    destination: cell.destination,
+    departureDate: cell.departureDate,
+    returnDate: cell.returnDate,
   };
+}
+
+/**
+ * Spec rev 56 §8.1 "Reading one date pair's flights": the return phase the read plans from the worker's flags (just
+ * read by its preflight) and the definition's own limits: with `RETURN_SELECT_VERIFIED`, the limits and `booking` per
+ * `BOOKING_SELECT_VERIFIED`, unless the month's headroom is below the 2 pages a return phase may load (R-low-pages: an
+ * outbound-only read of one page then, never a refusal).
+ */
+function phaseOf(
+  ctx: EngineContext,
+  def: SearchDefinition,
+): Pick<FlightListQuery, 'returnLimits' | 'booking'> {
+  const flags = ctx.workerFlags.get(FLIGHT_LIST_PROVIDER);
+  if (flightPagesPerPair(flags) !== FLIGHT_LIST_PAGES_PER_PAIR_MAX) return {};
+  if (monthHeadroom(ctx) < FLIGHT_LIST_PAGES_PER_PAIR_MAX) return {};
+  return { returnLimits: flightLimitsOf(def.constraints), booking: flags?.BOOKING_SELECT_VERIFIED === true };
 }
 
 /** The reader the engine owns (one per engine): one read at a time, through the engine's one browser lease. */
@@ -128,6 +147,7 @@ export function createFlightReader(ctx: EngineContext): FlightReader {
     const write = (row: Parameters<typeof ctx.repos.flightLists.insert>[0]): void => {
       if (!ctx.lifecycle.closed && !signal.aborted) ctx.repos.flightLists.insert(row);
     };
+    const base = baseOf(def, cell);
     if (cap === undefined) return;
     try {
       const pre = await provider?.discovery?.preflight?.({
@@ -135,36 +155,28 @@ export function createFlightReader(ctx: EngineContext): FlightReader {
         signal,
         recordFixtures: false,
       });
+      // why: spec rev 56 §8.1: the read's preflight result sets the worker's flags, refused or not
+      if (pre?.flags !== undefined) ctx.workerFlags.set(FLIGHT_LIST_PROVIDER, pre.flags);
       if (pre !== undefined && !pre.ok) {
         const word = pre.reason ?? (pre.skip === 'provider_unavailable' ? 'provider-unavailable' : 'blocked');
         log.warn({ skip: pre.skip, detail: pre.detail }, 'flight read: preflight refused');
-        write(failedRow(ctx, def, cell, word));
+        write(failedRowOf(ctx, base, word));
         return;
       }
       const names = airportNamesOf(ctx);
       const r = await cap.read(
-        { cell, airportNames: { origin: names(cell.origin), destination: names(cell.destination) } },
+        {
+          cell,
+          airportNames: { origin: names(cell.origin), destination: names(cell.destination) },
+          ...phaseOf(ctx, def),
+        },
         { executionId: null, signal, recordFixtures: false },
       );
       if (r.kind === 'list-error') {
-        write(failedRow(ctx, def, cell, toStopDetail(r.error.reason ?? null, r.error.kind)));
+        write(failedRowOf(ctx, base, toStopDetail(r.error.reason ?? null, r.error.kind)));
         return;
       }
-      write({
-        ...failedRow(ctx, def, cell, 'fatal'),
-        fetchedAt: r.fetchedAt,
-        pointOfSale: r.pointOfSale,
-        status: 'read',
-        reason: null,
-        listed: r.listed,
-        minMinor: r.minMinor,
-        tabMinor: r.tabMinor,
-        cheapestView: r.cheapestView,
-        optionsUnparsed: r.optionsUnparsed,
-        optionsOtherCell: r.optionsOtherCell,
-        resultsStated: r.resultsStated,
-        flights: r.flights,
-      });
+      write(readRowOf(base, r));
     } catch (err) {
       // why: shutdown aborts the read; an aborted read writes nothing, as an aborted tile writes no outcome
       if (signal.aborted || err instanceof AbortedError) return;
@@ -178,11 +190,11 @@ export function createFlightReader(ctx: EngineContext): FlightReader {
       // why: every write here is guarded (20.9 review finding 4), so `done` never rejects: a failure row that cannot be
       // written is logged and recorded as `fatal` instead, and when even that fails it is logged only
       try {
-        write(failedRow(ctx, def, cell, word));
+        write(failedRowOf(ctx, base, word));
       } catch (first) {
         log.error({ err: errorText(first), reason: word }, 'flight read: its failure could not be recorded');
         try {
-          if (word !== 'fatal') write(failedRow(ctx, def, cell, 'fatal'));
+          if (word !== 'fatal') write(failedRowOf(ctx, base, 'fatal'));
         } catch (second) {
           log.error({ err: errorText(second) }, 'flight read: no failure row could be written');
         }
@@ -228,20 +240,17 @@ export function createFlightReader(ctx: EngineContext): FlightReader {
         def.cabin,
         ctx.pointOfSaleOf(FLIGHT_LIST_PROVIDER),
       );
+      // why: spec rev 56 §8.1: the step's reuse rule, under the return phase the worker's last reported flags plan (a
+      // young transient, not-verified, other-limit or phase-less list is read); the date pair departs after today here
+      const flags = ctx.workerFlags.get(FLIGHT_LIST_PROVIDER);
+      const returns = flightPagesPerPair(flags) === FLIGHT_LIST_PAGES_PER_PAIR_MAX;
       const fresh =
         newest !== undefined &&
-        selectFlightPairs(
-          [figure],
-          new Map([
-            [
-              cellKeyString(newest),
-              { fetchedAt: newest.fetchedAt, status: newest.status, listed: newest.listed },
-            ],
-          ]),
-          ctx.clock.now(),
-          refreshHoursOf(def, FLIGHT_LIST_PROVIDER),
-          today,
-        ).reused.length === 1;
+        listReusable(newestListOf(newest), ctx.clock.now(), refreshHoursOf(def, FLIGHT_LIST_PROVIDER), {
+          returns,
+          booking: returns && flags?.BOOKING_SELECT_VERIFIED === true,
+          current: flightLimitsOf(def.constraints),
+        });
       if (fresh) return { ok: false, code: 'fresh' };
       // Review Focus 2: the busy query and the lease in one synchronous turn
       if (current !== null || browserRunActive(ctx)) return { ok: false, code: 'busy' };

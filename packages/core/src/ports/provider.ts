@@ -298,15 +298,15 @@ export type FlightListResult =
       notes: string[];
       /**
        * Spec rev 56 §5.1: the worker's return read, null when the request had no return phase (or an older worker
-       * answered without one). Optional until Task 21.6 (R-order).
+       * answered without one). Required since Task 21.6 (R-order: the engine stores it).
        */
-      returns?: ReturnRead | null;
+      returns: ReturnRead | null;
       /**
        * Spec rev 56 §5.1 (R-spacing): when the next camoufox load may start, after a request that started the reload; the
-       * capability holds http-kit's next start until then. Optional until Task 21.6. The answer's `pagesLoaded` is never
-       * here: it reaches only the ledger (arch-r3-014).
+       * capability holds http-kit's next start until then. Required since Task 21.6. The answer's `pagesLoaded` is
+       * never here: it reaches only the ledger (arch-r3-014).
        */
-      nextLoadNotBefore?: IsoDateTime | null;
+      nextLoadNotBefore: IsoDateTime | null;
     }
   | { kind: 'list-error'; error: ProviderError };
 /**

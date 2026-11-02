@@ -2,9 +2,27 @@
 // ranking, departed pairs out, one airport pair each; a pair whose newest list for the same cell is `read` and younger
 // than 0.9 × the camoufox refresh is reused (counted in the 10, no page); a failed newest list of any age is read
 // again. Pure: no repository, no clock.
-import { asIata, asIsoDate, asIsoDateTime, cellKeyString, type IsoDateTime } from '@gmt/core';
+import {
+  asIata,
+  asIsoDate,
+  asIsoDateTime,
+  BOOKING_STATUS,
+  type BookingStatus,
+  cellKeyString,
+  type FlightLimits,
+  type IsoDateTime,
+  RETURN_STATUS,
+  type ReturnStatus,
+} from '@gmt/core';
 import { describe, expect, it } from 'vitest';
-import { cellKeyOf, type NewestList, selectFlightPairs } from '../../src/stages/flightLists/select.js';
+import {
+  cellKeyOf,
+  listReusable,
+  type NewestList,
+  OUTBOUND_ONLY,
+  type ReusePlan,
+  selectFlightPairs,
+} from '../../src/stages/flightLists/select.js';
 import type { RankedDatePair } from '../../src/types.js';
 
 const LHR = asIata('LHR');
@@ -32,7 +50,21 @@ function pair(i: number, over: Partial<RankedDatePair> = {}): RankedDatePair {
   };
 }
 const ranked = (n: number): RankedDatePair[] => Array.from({ length: n }, (_, i) => pair(i));
-const read = (fetchedAt: IsoDateTime): NewestList => ({ fetchedAt, status: 'read', listed: 'flights' });
+const read = (fetchedAt: IsoDateTime, over: Partial<NewestList> = {}): NewestList => ({
+  fetchedAt,
+  status: 'read',
+  listed: 'flights',
+  returnStatus: null,
+  bookingStatus: null,
+  limits: null,
+  transientStreak: 0,
+  ...over,
+});
+const failedList = (fetchedAt: IsoDateTime): NewestList => ({
+  ...read(fetchedAt),
+  status: 'failed',
+  listed: null,
+});
 
 describe('selectFlightPairs', () => {
   it('reads the first 10 of 15 ranked pairs, in the ranking order', () => {
@@ -75,7 +107,7 @@ describe('selectFlightPairs', () => {
   it('reads again a pair whose newest list failed, whatever its age', () => {
     const [first] = ranked(1);
     if (first === undefined) throw new Error('fixture');
-    const failed: NewestList = { fetchedAt: ago(0), status: 'failed', listed: null };
+    const failed = failedList(ago(0));
     const out = selectFlightPairs([first], new Map([[cellKeyOf(first), failed]]), NOW, 168, TODAY);
     expect(out.read).toEqual([first]);
   });
@@ -89,7 +121,7 @@ describe('selectFlightPairs', () => {
   });
 
   it('honours a smaller count', () => {
-    expect(selectFlightPairs(ranked(5), new Map(), NOW, 168, TODAY, 2).read).toHaveLength(2);
+    expect(selectFlightPairs(ranked(5), new Map(), NOW, 168, TODAY, OUTBOUND_ONLY, 2).read).toHaveLength(2);
   });
 
   it('cellKeyOf is cellKeyString over origin, destination, departure and return', () => {
@@ -116,12 +148,7 @@ describe('selectFlightPairs', () => {
       const newest = new Map<string, NewestList>();
       for (const p of r)
         if (rand(3) === 0)
-          newest.set(
-            cellKeyOf(p),
-            rand(2) === 0
-              ? read(ago(rand(200)))
-              : { fetchedAt: ago(rand(200)), status: 'failed', listed: null },
-          );
+          newest.set(cellKeyOf(p), rand(2) === 0 ? read(ago(rand(200))) : failedList(ago(rand(200))));
       const out = selectFlightPairs(r, newest, NOW, 168, TODAY);
       const expected = r.filter((p) => p.departureDate > TODAY).slice(0, 10);
       expect(out.read.length + out.reused.length).toBeLessThanOrEqual(10);
@@ -131,5 +158,92 @@ describe('selectFlightPairs', () => {
       expect(out.reused).toEqual(expected.filter((p) => out.reused.includes(p)));
       for (const p of out.reused) expect(newest.get(cellKeyOf(p))?.status).toBe('read');
     }
+  });
+});
+
+// Spec rev 56 §8.1 "Reuse" (Review Focus 3; R-retry; R-unverified): with a return phase planned, a young read list is
+// reused only when its return phase finished under the current limits (and, with the booking read planned, its booking
+// did too, or no outbound was listed), or when its two newest lists both ended transient; else it is read once more.
+describe('selectFlightPairs with a return phase planned (spec rev 56 §8.1 "Reuse")', () => {
+  const CURRENT: FlightLimits = {
+    maxJourneyMinutes: 1500,
+    maxStops: 0,
+    departureWindowLocal: null,
+    arrivalWindowLocal: { from: '06:00', to: '23:00' },
+  };
+  const RETURNS: ReusePlan = { returns: true, booking: false, current: CURRENT };
+  const BOOKING: ReusePlan = { returns: true, booking: true, current: CURRENT };
+  const [first] = ranked(1);
+  if (first === undefined) throw new Error('fixture');
+  const outcome = (n: NewestList, plan: ReusePlan): 'reused' | 'read' =>
+    selectFlightPairs([first], new Map([[cellKeyOf(first), n]]), NOW, 168, TODAY, plan).reused.length === 1
+      ? 'reused'
+      : 'read';
+  const young = (over: Partial<NewestList>): NewestList =>
+    read(ago(150), { limits: CURRENT, returnStatus: 'read', bookingStatus: 'read', ...over });
+
+  it.each(RETURN_STATUS.map((s) => [s]))(
+    'return status %s, 150 h old, the same limits',
+    (s: ReturnStatus) => {
+      const finished = s === 'read' || s === 'no-outbound';
+      expect(outcome(young({ returnStatus: s, bookingStatus: null }), RETURNS)).toBe(
+        finished ? 'reused' : 'read',
+      );
+    },
+  );
+
+  it('a list with no return read (stored before 0012, or read outbound-only) is read again', () => {
+    expect(outcome(young({ returnStatus: null, limits: null, bookingStatus: null }), RETURNS)).toBe('read');
+  });
+
+  it('a finished list read under other limits (maxStops 1 against 0), or with none stored, is read again', () => {
+    expect(outcome(young({ limits: { ...CURRENT, maxStops: 1 } }), RETURNS)).toBe('read');
+    expect(outcome(young({ limits: null }), RETURNS)).toBe('read');
+    expect(outcome(young({ limits: { ...CURRENT } }), RETURNS)).toBe('reused');
+  });
+
+  it.each(BOOKING_STATUS.map((s) => [s]))(
+    'booking planned: a read return with booking %s',
+    (s: BookingStatus) => {
+      const finished = s === 'read' || s === 'no-pairing';
+      expect(outcome(young({ bookingStatus: s }), BOOKING)).toBe(finished ? 'reused' : 'read');
+    },
+  );
+
+  it('booking planned: a no-outbound list needs no booking read; a read one with no booking is read again', () => {
+    expect(outcome(young({ returnStatus: 'no-outbound', bookingStatus: null }), BOOKING)).toBe('reused');
+    expect(outcome(young({ bookingStatus: null }), BOOKING)).toBe('read');
+  });
+
+  it('booking not planned: the booking status is not consulted', () => {
+    for (const s of [...BOOKING_STATUS, null])
+      expect(outcome(young({ bookingStatus: s }), RETURNS)).toBe('reused');
+  });
+
+  it('R-retry: transientStreak 2 is reused whatever its statuses, until 0.9 × refresh; streak 1 is read once more', () => {
+    const transient = { returnStatus: 'not-settled' as const, bookingStatus: null, limits: CURRENT };
+    expect(outcome(read(ago(2), { ...transient, transientStreak: 1 }), BOOKING)).toBe('read');
+    expect(outcome(read(ago(2), { ...transient, transientStreak: 2 }), BOOKING)).toBe('reused');
+    expect(outcome(read(ago(150), { ...transient, transientStreak: 2, limits: null }), BOOKING)).toBe(
+      'reused',
+    );
+    expect(outcome(read(ago(152), { ...transient, transientStreak: 2 }), BOOKING)).toBe('read');
+  });
+
+  it('no return phase planned: every young read list is reused whatever its statuses, not-verified included', () => {
+    for (const s of [...RETURN_STATUS, null])
+      expect(outcome(young({ returnStatus: s, limits: null }), OUTBOUND_ONLY)).toBe('reused');
+  });
+
+  it('a failed newest list is read always, whatever the plan or the streak', () => {
+    for (const plan of [OUTBOUND_ONLY, RETURNS, BOOKING])
+      expect(outcome({ ...failedList(ago(1)), transientStreak: 2 }, plan)).toBe('read');
+  });
+
+  it('listReusable is the rule selectFlightPairs applies (the on-demand read shares it)', () => {
+    const n = young({});
+    expect(listReusable(n, NOW, 168, BOOKING)).toBe(true);
+    expect(listReusable({ ...n, bookingStatus: 'expand-failed' }, NOW, 168, BOOKING)).toBe(false);
+    expect(listReusable({ ...n, fetchedAt: ago(151.2) }, NOW, 168, OUTBOUND_ONLY)).toBe(false);
   });
 });

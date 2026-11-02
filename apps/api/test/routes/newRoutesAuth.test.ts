@@ -3,6 +3,7 @@
 // or path (the redaction sweep), a flight list's `reason` being one STOP_DETAILS word only.
 import { randomUUID } from 'node:crypto';
 import { asIsoDate } from '@gmt/core';
+import { PAIRING_FIXTURE } from '@gmt/core/testing';
 import { afterEach, describe, expect, it } from 'vitest';
 import { SENTINEL_AUTH } from '../helpers/env.js';
 import { exampleDefinitionInput, JFK, LHR, SMALL_WINDOW } from '../helpers/examples.js';
@@ -120,5 +121,89 @@ describe('the new routes behind the gate (revision 55 §10, sec-001)', () => {
       '127.0.0.1',
     ])
       expect(text).not.toContain(leak);
+  });
+
+  // why: spec rev 56 §0 (the 21.2 note): the sweep gains every new answer shape: a list's returns, its booking read and
+  // offers, and the board's pairing figure with its grid price; pagesLoaded and nextLoadNotBefore never reach the wire
+  it('the return leg on the wire (returns, booking, offers, the pairing figure and its grid price) leaks nothing', async () => {
+    h = await createHarness({
+      env: {
+        CAMOUFOX_ENABLED: 'true',
+        CAMOUFOX_WORKER_URL: 'http://127.0.0.1:8090',
+        CAMOUFOX_WORKER_KEY: 'test-worker-key-0123456789abcdef0123456789abcdef',
+      },
+    });
+    const x = h;
+    const def = x.ports.repos.definitions.create(
+      exampleDefinitionInput({
+        window: SMALL_WINDOW,
+        minNights: 1,
+        maxNights: 1,
+        constraints: { maxJourneyMinutes: 1500, maxStops: 1 },
+        providers: { discovery: ['fixture', 'camoufox'], verification: [], discoveryRefreshHours: {} },
+      }),
+    );
+    const c = {
+      origin: LHR,
+      destination: JFK,
+      departureDate: SMALL_WINDOW.from,
+      returnDate: asIsoDate('2026-11-03'),
+    };
+    const s = seeder(x.ports);
+    s.execution('E', { def, status: 'completed', startedAt: at(-3), finishedAt: at(-2) });
+    s.cells('E', [c], { discovery: ['fixture'] });
+    s.tile('E', c, { status: 'priced', fetchedAt: at(-3), pricePence: 40_000 });
+    x.ports.repos.executions.patch(s.id('E'), {
+      errorText:
+        'worker said test-worker-key-0123456789abcdef0123456789abcdef at /home/operator/.local/state/db',
+    });
+    x.ports.repos.flightLists.insert({
+      definitionId: def.id,
+      executionId: null,
+      providerId: 'camoufox',
+      sourceKind: 'scraped-self',
+      cabin: 'economy',
+      ...c,
+      fetchedAt: at(-1),
+      pointOfSale: 'GB',
+      status: 'read',
+      reason: null,
+      listed: 'flights',
+      minMinor: 48_000,
+      tabMinor: null,
+      cheapestView: 'cheapest',
+      optionsUnparsed: 0,
+      optionsOtherCell: 0,
+      resultsStated: 4,
+      flights: PAIRING_FIXTURE.flights,
+      returns: PAIRING_FIXTURE.returns,
+    });
+    const lists = await x.request(`/api/definitions/${def.id}/flight-lists?pairs=2026-11-02_2026-11-03`);
+    const board = await x.request(`/api/definitions/${def.id}/date-pairs`);
+    const detail = await x.request(
+      `/api/definitions/${def.id}/results?departureDate=2026-11-02&returnDate=2026-11-03`,
+    );
+    const cards = await x.request('/api/definitions/cards');
+    const texts = await Promise.all([lists, board, detail, cards].map((r) => r.text()));
+    const [listText, boardText, detailText] = texts;
+    // the shapes the sweep covers are really there
+    expect(listText).toContain('"booking":{');
+    expect(listText).toContain('"offers":[');
+    expect(boardText).toContain('"gridPrice":{');
+    expect(boardText).toContain('"pairing":{');
+    expect(detailText).toContain('"basis":"pairing"');
+    for (const text of texts)
+      for (const leak of [
+        'test-worker-key',
+        SENTINEL_AUTH,
+        '/home/',
+        'errorText',
+        'error_text',
+        'lastError',
+        '127.0.0.1',
+        'pagesLoaded',
+        'nextLoadNotBefore',
+      ])
+        expect(text).not.toContain(leak);
   });
 });

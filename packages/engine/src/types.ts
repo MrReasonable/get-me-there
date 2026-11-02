@@ -223,6 +223,16 @@ export interface Engine {
   readFlightList(definitionId: string, pair: DatePairAsk): Promise<FlightReadStart>;
   /** The date pair a read in flight is reading (spec §10 `reading`), or null. */
   flightReadInFlight(): FlightReadMark | null;
+  /**
+   * Spec rev 56 §8.1 "The plan": records a worker's reported verification flags (the api's Status read sets them; the
+   * discovery preflight and the on-demand read's preflight set them inside the engine).
+   */
+  setWorkerFlags(providerId: ProviderId, flags: Readonly<Record<string, boolean>>): void;
+  /**
+   * Spec rev 56 §10 (ruling D3): the pages one flights request plans now, `flightPagesPerPair` of the browser worker's
+   * last reported flags: 2 with `RETURN_SELECT_VERIFIED`, else 1 (none read yet: 1).
+   */
+  flightPagesPlanned(): 1 | 2;
   budgetFit(definition: DefinitionInput | SearchDefinition): BudgetFit;
   coverageCheck(req: CoverageCheckRequest): Promise<CoverageCheckResponse>;
   scheduler: {

@@ -562,7 +562,8 @@ function refinePairingRead(
 /**
  * Spec rev 56 §10: the grid price and pairing groups' rules: lengths; figure order and range; the grid prices exactly
  * the pairing figures; a pairing figure has a pairing entry that is not a "from" price; a pairing entry beneath a calendar
- * figure only for the five "beneath" reads, never on a verified figure; a seller exactly when the price is an offer's
+ * figure, or a stale verified one (ruling 21.2), only for the five "beneath" reads, never on a fresh verified figure; a
+ * seller exactly when the price is an offer's
  * (no seller and no fare on a "from" price); every provenance index in the table.
  */
 function refinePairingGroups(v: DatePairsBody, fail: Fail): void {
@@ -605,7 +606,9 @@ function refinePairingGroups(v: DatePairsBody, fail: Fail): void {
     const basis = columnAt(f.basis, at);
     const isFrom = columnAt(q.isFrom, k);
     const read = readOf(at);
-    if (basis === 'verified' || (basis === 'calendar' && read !== null && !BENEATH.has(read)))
+    // why: ruling 21.2: beneath a calendar figure, or a stale verified one, only for the five "beneath" reads
+    const beneath = basis === 'calendar' || (basis === 'verified' && columnAt(f.stale, at) !== false);
+    if (basis !== 'pairing' && (!beneath || (read !== null && !BENEATH.has(read))))
       fail(
         'pairingBasis',
         ['pairing', 'figure', k],
@@ -755,8 +758,13 @@ export const datePairFigureSchema = z
       fail(['gridPrice'], 'a grid price exactly on a pairing figure');
     if (pairingBasis !== (read === 'within'))
       fail(['pairingRead'], 'pairingRead is within exactly on a pairing figure');
-    if (pairingBasis ? p === null : p !== null && (f.basis === 'verified' || !BENEATH.has(read)))
-      fail(['pairing'], 'a pairing for a pairing figure, or shown beneath a calendar figure');
+    // why: ruling 21.2: a pairing is shown beneath a calendar figure, or a stale verified one, as the board allows
+    const beneath = f.basis === 'calendar' || (f.basis === 'verified' && f.price.stale !== false);
+    if (pairingBasis ? p === null : p !== null && (!beneath || !BENEATH.has(read)))
+      fail(
+        ['pairing'],
+        'a pairing for a pairing figure, or shown beneath a calendar or stale verified figure',
+      );
     if (p === null) return;
     if (pairingBasis && p.isFrom)
       fail(['pairing', 'isFrom'], "a pairing figure's price is an offer's, never a from price");

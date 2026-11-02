@@ -571,6 +571,39 @@ describe('datePairsResponseSchema: the pairing figure (spec rev 56 §10)', () =>
     groupOf(order, 'pairing').figure = [1, 0];
     expect(issuePaths(order)).toContain('pairing.figure.1');
   });
+  it('ruling 21.2: a pairing beneath a stale verified figure for the five reads; never beneath a fresh one', () => {
+    const staleVerified = (stale: false | 'refresh'): DatePairsResponse =>
+      structuredClone(
+        encodeDatePairs(
+          decoded({
+            pair: (i, a) =>
+              i === 5
+                ? {
+                    buckets: {
+                      priced: 1,
+                      empty: 0,
+                      no_data: 0,
+                      error: 0,
+                      skipped: 0,
+                      not_run: a - 1,
+                      reused: 0,
+                    },
+                    figure: verifiedFigure({
+                      price: { ...verifiedFigure().price, stale },
+                      pairingRead: 'within-older',
+                      pairing: figurePairing({ stale: 'refresh' }),
+                    }),
+                  }
+                : {},
+          }),
+        ),
+      );
+    expect(issuePaths(staleVerified('refresh'))).toEqual([]);
+    expect(issuePaths(staleVerified(false))).toEqual(['pairing.figure.0']);
+    const notBeneath = staleVerified('refresh');
+    groupOf(notBeneath, 'pairingRead').code[0] = 1;
+    expect(issuePaths(notBeneath)).toEqual(['pairing.figure.0']);
+  });
   it('pairing beneath a calendar figure only for the five "shown beneath" reads', () => {
     const r = withPairing();
     groupOf(r, 'pairingRead').code[1] = 1;
@@ -695,5 +728,17 @@ describe("datePairFigureSchema: basis 'pairing', gridPrice, pairing and pairingR
     ]);
     const { airportPair: _v, ...verified } = verifiedFigure();
     expect(paths({ ...verified, pairing: figurePairing() })).toEqual(['pairing']);
+    // why: ruling 21.2: a stale verified figure whose pairing does not lead shows it beneath, as a calendar one does
+    const beneath = { pairingRead: 'within-older' as const, pairing: figurePairing({ stale: 'refresh' }) };
+    expect(paths({ ...verified, ...beneath })).toEqual(['pairing']);
+    expect(paths({ ...verified, price: { ...verified.price, stale: 'refresh' }, ...beneath })).toEqual([]);
+    expect(
+      paths({
+        ...verified,
+        price: { ...verified.price, stale: 'refresh' },
+        ...beneath,
+        pairingRead: 'outbound-only',
+      }),
+    ).toEqual(['pairing']);
   });
 });

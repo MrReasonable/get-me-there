@@ -1,8 +1,12 @@
 /**
- * Spec revision 55 §8.1 "The flight-list step" (WP20 Task 20.9): after discovery and before verification (ruling 20.0
- * concern 1; the execution's stage stays `discovery`), in `camoufox` only, the browser worker reads the flight list of
- * the 10 cheapest date pairs on the search's board, one page each, on an allowance of its own (the snapshot's
- * `flightListPages`, outside CAMOUFOX_EXECUTION_PAGE_CAP, inside the monthly page cap and EXECUTION_MAX_FREE_CALLS).
+ * Spec revision 56 §8.1 "The flight-list step" (WP20 Task 20.9; WP21 Task 21.6): after discovery and before
+ * verification (ruling 20.0 concern 1; the execution's stage stays `discovery`), in `camoufox` only, the browser worker
+ * reads the flight list of the 10 cheapest date pairs on the search's board, one request each, on an allowance of its
+ * own (the snapshot's `flightListPages`, 20 pages, outside CAMOUFOX_EXECUTION_PAGE_CAP, inside the monthly page cap and
+ * EXECUTION_MAX_FREE_CALLS). When the worker last reported `RETURN_SELECT_VERIFIED` (and `BOOKING_SELECT_VERIFIED`) the
+ * plan reads each pair's return leg (and the shown pairing's booking options) too: up to 2 pages a request, the search's
+ * limits sent with it, an outbound-only request instead when the month or the window cannot hold that, and no further
+ * return phase (or booking read) after one ends transient.
  *
  * The step has its own error table (below), its own gate (`flightPageGate`) and its own intake; it never routes a page
  * through discovery's `onFailure`, `pageGate`'s `leaveLane` or the shared budget handler, so no flight page changes a
@@ -13,27 +17,35 @@
  */
 import {
   AbortedError,
+  BOOKING_TRANSIENT,
   BudgetExceeded,
   type BudgetScopeKind,
   type CellKey,
   cellKeyString,
   cooldownNoticeKey,
   FLIGHT_LIST_COUNT,
+  FLIGHT_LIST_PAGES_PER_PAIR_MAX,
+  type FlightLimits,
   type FlightListCapability,
+  type FlightListQuery,
   type FlightListResult,
   type FlightListsState,
+  flightLimitsOf,
+  flightPagesPerPair,
   ProviderError,
   type ProviderId,
+  type ReturnRead,
   type StopDetail,
 } from '@gmt/core';
+import type { FlightListInsert } from '@gmt/db';
 import type { EngineContext } from '../context.js';
 import { errorText } from '../errors.js';
 import { lineKey } from '../lines.js';
 import { disableProvider, type RunState, stopRun } from '../run.js';
 import { toStopDetail } from '../stopCause.js';
 import { airportNamesOf } from './discovery.js';
-import { flightPageGate } from './flightLists/gate.js';
-import { selectFlightPairs } from './flightLists/select.js';
+import { flightPageGate, windowSecondsLeft } from './flightLists/gate.js';
+import { newestListOf, type ReusePlan, selectFlightPairs } from './flightLists/select.js';
 import { refreshHoursOf } from './reuse.js';
 
 /** The one provider whose flight lists the step reads (spec §2: the browser worker's own pages). */
@@ -147,16 +159,30 @@ function errorOutcome(run: RunState, e: ProviderError): PageOutcome {
 }
 
 /**
+ * One request's shape (spec rev 56 §8.1 "Each request"): with a return phase, the search's limits and whether to read
+ * the booking options, the 2 pages it may load and the seconds it may take (`flightRequestSeconds`); without one, 1 page
+ * and the list page's request timeout.
+ */
+interface RequestPlan {
+  returnLimits: FlightLimits | null;
+  booking: boolean;
+  pages: number;
+  seconds: number;
+}
+
+/**
  * Reads one page under the step's error table. The lease is awaited first (an on-demand read in flight), then the
- * step's own allowance is checked (so an eleventh page is refused at `provider-execution` before any call), then the
- * capability reads with the run's controller signal and the step's gate.
+ * step's own allowance is checked against the request's pages (`used + pages > flightListPages`, so a request it cannot
+ * hold is refused at `provider-execution` before any call), then the capability reads with the run's controller signal
+ * and the step's gate held to the request's own seconds.
  */
 async function readPage(
   ctx: EngineContext,
   run: RunState,
   cap: FlightListCapability,
   cell: CellKey,
-  gate: () => void,
+  req: RequestPlan,
+  gate: (requestSeconds: number) => () => void,
 ): Promise<PageOutcome> {
   const names = airportNamesOf(ctx);
   try {
@@ -169,23 +195,25 @@ async function readPage(
     // why: fail closed: a guard that states no flight allowance gives none (the guard itself reads an absent one as 0)
     const pages = allowance?.cap ?? 0;
     const used = allowance?.calls ?? 0;
-    if (used + 1 > pages)
+    if (used + req.pages > pages)
       throw new BudgetExceeded({
         scope: 'provider-execution',
         providerId: FLIGHT_LIST_PROVIDER,
         cap: pages,
         current: used,
-        requested: 1,
+        requested: req.pages,
       });
-    const r = await cap.read(
-      { cell, airportNames: { origin: names(cell.origin), destination: names(cell.destination) } },
-      {
-        executionId: run.executionId,
-        signal: run.controller.signal,
-        recordFixtures: false,
-        beforeSend: gate,
-      },
-    );
+    const query: FlightListQuery = {
+      cell,
+      airportNames: { origin: names(cell.origin), destination: names(cell.destination) },
+      ...(req.returnLimits === null ? {} : { returnLimits: req.returnLimits, booking: req.booking }),
+    };
+    const r = await cap.read(query, {
+      executionId: run.executionId,
+      signal: run.controller.signal,
+      recordFixtures: false,
+      beforeSend: gate(req.seconds),
+    });
     return r.kind === 'list' ? { kind: 'read', list: r } : errorOutcome(run, r.error);
   } catch (err) {
     // why: a cancel, SIGTERM or fatal stop aborts the run's controller; whatever the page then threw, nothing is written
@@ -198,49 +226,54 @@ async function readPage(
   }
 }
 
-/** One flight-list row (spec §7 `flight_lists`): `read` with every field, or `failed` with its reason and nothing listed. */
-function writeRow(
-  ctx: EngineContext,
-  run: RunState,
-  cell: CellKey,
-  o: Extract<PageOutcome, { kind: 'read' | 'failed' }>,
-): void {
-  const base = {
-    definitionId: run.definitionId,
-    executionId: run.executionId,
-    providerId: FLIGHT_LIST_PROVIDER,
-    sourceKind: 'scraped-self' as const,
-    cabin: run.snapshot.cabin,
-    origin: cell.origin,
-    destination: cell.destination,
-    departureDate: cell.departureDate,
-    returnDate: cell.returnDate,
+/** What every flight-list row of a cell carries, read or failed (spec §7 `flight_lists`). */
+export type FlightRowBase = Pick<
+  FlightListInsert,
+  | 'definitionId'
+  | 'executionId'
+  | 'providerId'
+  | 'sourceKind'
+  | 'cabin'
+  | 'origin'
+  | 'destination'
+  | 'departureDate'
+  | 'returnDate'
+>;
+
+/**
+ * The one read-row builder (spec rev 56 §8.1: shared by the step and the on-demand read): a `read` row with every field
+ * of the list, its return read (with the booking read and its offers) included.
+ */
+export function readRowOf(
+  base: FlightRowBase,
+  l: Extract<FlightListResult, { kind: 'list' }>,
+): FlightListInsert {
+  return {
+    ...base,
+    fetchedAt: l.fetchedAt,
+    pointOfSale: l.pointOfSale,
+    status: 'read',
+    reason: null,
+    listed: l.listed,
+    minMinor: l.minMinor,
+    tabMinor: l.tabMinor,
+    cheapestView: l.cheapestView,
+    optionsUnparsed: l.optionsUnparsed,
+    optionsOtherCell: l.optionsOtherCell,
+    resultsStated: l.resultsStated,
+    flights: l.flights,
+    returns: l.returns,
   };
-  if (o.kind === 'read') {
-    const l = o.list;
-    ctx.repos.flightLists.insert({
-      ...base,
-      fetchedAt: l.fetchedAt,
-      pointOfSale: l.pointOfSale,
-      status: 'read',
-      reason: null,
-      listed: l.listed,
-      minMinor: l.minMinor,
-      tabMinor: l.tabMinor,
-      cheapestView: l.cheapestView,
-      optionsUnparsed: l.optionsUnparsed,
-      optionsOtherCell: l.optionsOtherCell,
-      resultsStated: l.resultsStated,
-      flights: l.flights,
-    });
-    return;
-  }
-  ctx.repos.flightLists.insert({
+}
+
+/** The one failed-row builder: nothing listed, the reason one STOP_DETAILS word, no return read (data-005). */
+export function failedRowOf(ctx: EngineContext, base: FlightRowBase, reason: StopDetail): FlightListInsert {
+  return {
     ...base,
     fetchedAt: ctx.clock.now(),
     pointOfSale: ctx.pointOfSaleOf(FLIGHT_LIST_PROVIDER),
     status: 'failed',
-    reason: o.reason,
+    reason,
     listed: null,
     minMinor: null,
     tabMinor: null,
@@ -249,7 +282,31 @@ function writeRow(
     optionsOtherCell: 0,
     resultsStated: null,
     flights: [],
-  });
+    returns: null,
+  };
+}
+
+/** One flight-list row (spec §7 `flight_lists`): `read` with every field, or `failed` with its reason and nothing listed. */
+function writeRow(
+  ctx: EngineContext,
+  run: RunState,
+  cell: CellKey,
+  o: Extract<PageOutcome, { kind: 'read' | 'failed' }>,
+): void {
+  const base: FlightRowBase = {
+    definitionId: run.definitionId,
+    executionId: run.executionId,
+    providerId: FLIGHT_LIST_PROVIDER,
+    sourceKind: 'scraped-self',
+    cabin: run.snapshot.cabin,
+    origin: cell.origin,
+    destination: cell.destination,
+    departureDate: cell.departureDate,
+    returnDate: cell.returnDate,
+  };
+  ctx.repos.flightLists.insert(
+    o.kind === 'read' ? readRowOf(base, o.list) : failedRowOf(ctx, base, o.reason),
+  );
 }
 
 const cellOf = (c: CellKey): CellKey => ({
@@ -260,10 +317,28 @@ const cellOf = (c: CellKey): CellKey => ({
 });
 
 /**
- * The plan this pass works from, and the cells it still reads. A resumed pass keeps the stored plan (`planned` and
- * `cells` fixed) and reads only planned cells with no row of this execution, skipping (no row) one that has departed;
- * a pass with no stored plan selects one from the board's ranking (`selectFlightPairs`) and writes it once, before
- * its first page, only when at least one date pair was selected to read or reuse.
+ * Spec rev 56 §8.1 "The plan": the return phase a fresh plan reads, from the worker's last reported flags (none read:
+ * outbound-only) and the snapshot's allowance, which must hold `FLIGHT_LIST_PAGES_PER_PAIR_MAX` pages for every pair
+ * that could be planned (an older snapshot, with 10, plans outbound-only); the booking read only with returns.
+ */
+export function returnPhaseOf(
+  ctx: Pick<EngineContext, 'workerFlags'>,
+  snapshot: RunState['snapshot'],
+  pairs: number,
+): { returns: boolean; booking: boolean } {
+  const flags = ctx.workerFlags.get(FLIGHT_LIST_PROVIDER);
+  const returns =
+    flightPagesPerPair(flags) === FLIGHT_LIST_PAGES_PER_PAIR_MAX &&
+    (snapshot.budget.flightListPages ?? 0) >= pairs * FLIGHT_LIST_PAGES_PER_PAIR_MAX;
+  return { returns, booking: returns && flags?.BOOKING_SELECT_VERIFIED === true };
+}
+
+/**
+ * The plan this pass works from, and the cells it still reads. A resumed pass keeps the stored plan (`planned`,
+ * `cells`, `returns` and `booking` fixed) and reads only planned cells with no row of this execution, skipping (no row)
+ * one that has departed; a pass with no stored plan selects one from the board's ranking (`selectFlightPairs`, reuse
+ * judged under the return phase it plans) and writes it once, before its first page, only when at least one date pair
+ * was selected to read or reuse.
  */
 function planOf(ctx: EngineContext, run: RunState): { plan: FlightListsState; toRead: CellKey[] } | null {
   const today = ctx.clock.todayLondon();
@@ -285,6 +360,8 @@ function planOf(ctx: EngineContext, run: RunState): { plan: FlightListsState; to
   });
   // why: only the first 10 not departed can be chosen, so only their newest lists are read (one statement)
   const candidates = ranked.filter((p) => p.departureDate > today).slice(0, FLIGHT_LIST_COUNT);
+  const phase = returnPhaseOf(ctx, run.snapshot, candidates.length);
+  const reuse: ReusePlan = { ...phase, current: flightLimitsOf(run.snapshot.constraints) };
   const newest = new Map(
     ctx.repos.flightLists
       .newestPerCell(
@@ -293,7 +370,7 @@ function planOf(ctx: EngineContext, run: RunState): { plan: FlightListsState; to
         run.snapshot.cabin,
         ctx.pointOfSaleOf(FLIGHT_LIST_PROVIDER),
       )
-      .map((l) => [cellKeyString(l), { fetchedAt: l.fetchedAt, status: l.status, listed: l.listed }]),
+      .map((l) => [cellKeyString(l), newestListOf(l)]),
   );
   const sel = selectFlightPairs(
     candidates,
@@ -301,18 +378,16 @@ function planOf(ctx: EngineContext, run: RunState): { plan: FlightListsState; to
     now,
     refreshHoursOf(run.snapshot, FLIGHT_LIST_PROVIDER),
     today,
+    reuse,
   );
   const planned = sel.read.length + sel.reused.length;
   if (planned === 0) return null;
-  // why: spec rev 56 §8.1: the return phase is planned from the worker's flags in Task 21.6; until then every plan is
-  // outbound-only, as a plan stored before WP21 reads back
   const plan: FlightListsState = {
     planned,
     cells: sel.read.map(cellOf),
     reused: sel.reused.length,
     ended: null,
-    returns: false,
-    booking: false,
+    ...phase,
     returnsStopped: null,
     bookingStopped: null,
   };
@@ -336,9 +411,78 @@ function markLeftByWindow(ctx: EngineContext, run: RunState): void {
 }
 
 /**
- * Spec revision 55 §8.1 "The flight-list step": selects (or resumes) the plan, reads its date pairs one at a time
- * (concurrency 1) under the error table, and records its counts on the run (`run.flightLists`, which the budget cause
- * it runs after carries). A failure outside the error table (the database itself) stops the run fatal (R-dberror).
+ * The month's pages left for camoufox (spec rev 56 §8.1 R-low-pages: the monthly cap less the pages used, from the
+ * guard); Infinity without a cap.
+ */
+export function monthHeadroom(ctx: EngineContext): number {
+  const u = ctx.budget.usage({
+    kind: ctx.limitsOf(FLIGHT_LIST_PROVIDER).capKind,
+    providerId: FLIGHT_LIST_PROVIDER,
+  });
+  return u.cap === null ? Number.POSITIVE_INFINITY : u.cap - u.calls;
+}
+
+/**
+ * Spec rev 56 §8.1 "Each request": the next request's shape. The plan's return phase is sent (the current limits, and
+ * `booking` until `bookingStopped`) while the plan reads returns and `returnsStopped` is null, unless the month's page
+ * headroom is below `FLIGHT_LIST_PAGES_PER_PAIR_MAX` (R-low-pages) or the run's window no longer holds a return-phase
+ * request's seconds (R-window, cost-r3-007): then an outbound-only request of 1 page, `returnsStopped` left null.
+ */
+function requestOf(ctx: EngineContext, run: RunState, plan: FlightListsState): RequestPlan {
+  const seconds = ctx.limitsOf(FLIGHT_LIST_PROVIDER).flightRequestSeconds;
+  const outboundOnly: RequestPlan = {
+    returnLimits: null,
+    booking: false,
+    pages: 1,
+    seconds: seconds?.outboundOnly ?? 0,
+  };
+  if (!plan.returns || plan.returnsStopped !== null) return outboundOnly;
+  if (monthHeadroom(ctx) < FLIGHT_LIST_PAGES_PER_PAIR_MAX) return outboundOnly;
+  const booking = plan.booking && plan.bookingStopped === null;
+  const phaseSeconds = (booking ? seconds?.booking : seconds?.returnsOnly) ?? 0;
+  // why: a window that cannot hold the return phase may still hold an outbound-only read (one that holds neither is
+  // refused by the gate, ending the step `window`)
+  if (windowSecondsLeft(ctx, run) < phaseSeconds) return outboundOnly;
+  return {
+    returnLimits: flightLimitsOf(run.snapshot.constraints),
+    booking,
+    pages: FLIGHT_LIST_PAGES_PER_PAIR_MAX,
+    seconds: phaseSeconds,
+  };
+}
+
+/**
+ * Spec rev 56 §8.1 (Review Focus 2; ruling P23/A12): the rule after which the pass sends no further return phase: a
+ * return read that ended `select-failed`, `not-settled` or `unrecognised`, or `read` with its second attempt ended
+ * transiently (a rule other than the month's or the spacing's); null when nothing stops it (`skipped`, `no-outbound`,
+ * a clean `read`).
+ */
+export function returnsStopOf(r: ReturnRead | null): string | null {
+  if (r === null) return null;
+  switch (r.status) {
+    case 'select-failed':
+    case 'not-settled':
+    case 'unrecognised':
+      return r.rule ?? r.status;
+    case 'read':
+      // why: the month's pages and the spacing wait are not a wrong view; the next request may well have them
+      return r.rule === null || r.rule === 'spacing' || r.rule === 'monthly-headroom' ? null : r.rule;
+    default:
+      return null;
+  }
+}
+
+/** Spec rev 56 §8.1: the rule after which the pass reads no further booking options: a transient booking status. */
+export function bookingStopOf(r: ReturnRead | null): string | null {
+  const b = r?.booking ?? null;
+  return b !== null && BOOKING_TRANSIENT.has(b.status) ? (b.rule ?? b.status) : null;
+}
+
+/**
+ * Spec revision 56 §8.1 "The flight-list step": selects (or resumes) the plan, reads its date pairs one at a time
+ * (concurrency 1) under the error table, each request shaped by `requestOf`, stops the pass's return phases (or booking
+ * reads) after a transient end, and records its counts on the run (`run.flightLists`, which the budget cause it runs
+ * after carries). A failure outside the error table (the database itself) stops the run fatal (R-dberror).
  */
 export async function runFlightLists(ctx: EngineContext, run: RunState): Promise<void> {
   if (!flightStepEntry(ctx, run)) {
@@ -352,11 +496,23 @@ export async function runFlightLists(ctx: EngineContext, run: RunState): Promise
   try {
     const p = planOf(ctx, run);
     if (p === null) return;
-    const { plan, toRead } = p;
+    const { toRead } = p;
+    let plan = p.plan;
     // why: a resumed pass that reads again what an earlier pass left clears that pass's early end; it sets its own
-    if (toRead.length > 0 && plan.ended !== null)
-      ctx.repos.executions.patch(run.executionId, { flightLists: { ...plan, ended: null } });
-    log.info({ planned: plan.planned, reused: plan.reused, toRead: toRead.length }, 'flight lists: planned');
+    if (toRead.length > 0 && plan.ended !== null) {
+      plan = { ...plan, ended: null };
+      ctx.repos.executions.patch(run.executionId, { flightLists: plan });
+    }
+    log.info(
+      {
+        planned: plan.planned,
+        reused: plan.reused,
+        toRead: toRead.length,
+        returns: plan.returns,
+        booking: plan.booking,
+      },
+      'flight lists: planned',
+    );
     // why: the step's own intake (never run.intake or a lane's, both aborted by a budget stop): it stops taking pages
     const intake = new AbortController();
     const gate = flightPageGate(ctx, run);
@@ -364,7 +520,7 @@ export async function runFlightLists(ctx: EngineContext, run: RunState): Promise
     for (let i = 0; i < toRead.length && !intake.signal.aborted; i++) {
       const cell = toRead[i];
       if (cell === undefined) break;
-      const o = await readPage(ctx, run, cap, cell, gate);
+      const o = await readPage(ctx, run, cap, cell, requestOf(ctx, run, plan), gate);
       if (o.kind === 'abort') {
         intake.abort();
         break;
@@ -375,6 +531,19 @@ export async function runFlightLists(ctx: EngineContext, run: RunState): Promise
         break;
       }
       writeRow(ctx, run, cell, o);
+      if (o.kind === 'read') {
+        // why: Review Focus 2 — a wrong return or booking view is not repeated: the pass sends no further one
+        const returnsStopped = plan.returnsStopped ?? returnsStopOf(o.list.returns);
+        const bookingStopped = plan.bookingStopped ?? bookingStopOf(o.list.returns);
+        if (returnsStopped !== plan.returnsStopped || bookingStopped !== plan.bookingStopped) {
+          plan = { ...plan, returnsStopped, bookingStopped };
+          ctx.repos.executions.patch(run.executionId, { flightLists: plan });
+          log.info(
+            { returnsStopped, bookingStopped },
+            'flight lists: a transient end stops the rest of the pass',
+          );
+        }
+      }
       if (o.kind === 'failed' && o.end) {
         // why: the rest fail with the same reason and no request is sent (the error table's "the rest" column)
         for (const rest of toRead.slice(i + 1)) writeRow(ctx, run, rest, o);

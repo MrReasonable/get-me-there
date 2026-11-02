@@ -204,6 +204,9 @@ async function preflightPasses(
     signal: run.controller.signal,
     recordFixtures: false,
   });
+  // why: spec rev 56 §8.1 "The plan": every read that returned a status carries the worker's flags, refused or not; the
+  // flight-list step plans its return phase from the last ones reported
+  if (r.flags !== undefined) ctx.workerFlags.set(providerId, r.flags);
   if (r.ok) return true;
   ctx.repos.cells.setOutcomesForProvider(run.executionId, 'discovery', providerId, ['not_run'], {
     status: 'skipped',

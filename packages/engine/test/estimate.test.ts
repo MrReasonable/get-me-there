@@ -7,6 +7,7 @@ import {
   browserPagesPlanned,
   estimateRemainingFor,
   estimateStart,
+  flightWindowMarginSeconds,
   monthlyPagesOf,
   withBlocked,
 } from '../src/estimate.js';
@@ -306,12 +307,17 @@ describe('the estimate flight line (spec rev 55 §8.1)', () => {
 
   it('reads 10 date pairs at spacing + 40 s a page (700 s at the defaults): in seconds, never in totalCalls', () => {
     const { est } = flightEstimate(15);
-    expect(est.flightLists).toEqual({ pages: 10, seconds: 700 });
+    expect(est.flightLists).toEqual({ pairs: 10, pages: 10, seconds: 700, returns: false });
     const grid = est.perProvider.find((p) => p.providerId === 'camoufox');
     expect(est.totalCalls).toBe(grid?.calls);
     expect(est.seconds).toBe((grid?.seconds ?? 0) + 700);
     expect(est.assumptions).toContain('+ flights for up to 10 date pairs, about 12 minutes');
-    expect(apiContract.estimateSchema.parse(est).flightLists).toEqual({ pages: 10, seconds: 700 });
+    expect(apiContract.estimateSchema.parse(est).flightLists).toEqual({
+      pairs: 10,
+      pages: 10,
+      seconds: 700,
+      returns: false,
+    });
   });
 
   it('leaves out the reusable date pairs of a saved search', () => {
@@ -346,6 +352,7 @@ describe('the estimate flight line (spec rev 55 §8.1)', () => {
         optionsOtherCell: 0,
         resultsStated: null,
         flights: [],
+        returns: null,
       });
     const b = buildSnapshot(e.ctx, e.definition);
     expect(estimateStart(e.ctx, b.snapshot, b.cells, e.definition.id).flightLists?.pages).toBe(7);
@@ -367,13 +374,13 @@ describe('the estimate flight line (spec rev 55 §8.1)', () => {
   it('is carried through withBlocked (zero when the browser line is blocked) and addPass', () => {
     const { est } = flightEstimate(15);
     const blockedTp = withBlocked(est, new Map());
-    expect(blockedTp.flightLists).toEqual({ pages: 10, seconds: 700 });
+    expect(blockedTp.flightLists).toEqual({ pairs: 10, pages: 10, seconds: 700, returns: false });
     expect(blockedTp.seconds).toBe(est.seconds);
     const blocked = withBlocked(est, new Map([[lineKey('discovery', 'camoufox'), 'provider-month']]));
-    expect(blocked.flightLists).toEqual({ pages: 0, seconds: 0 });
+    expect(blocked.flightLists).toEqual({ pairs: 0, pages: 0, seconds: 0, returns: false });
     expect(blocked.seconds).toBe(0);
     const twice = addPass(est, est);
-    expect(twice.flightLists).toEqual({ pages: 20, seconds: 1400 });
+    expect(twice.flightLists).toEqual({ pairs: 20, pages: 20, seconds: 1400, returns: false });
     expect(twice.seconds).toBe(2 * est.seconds);
   });
 
@@ -465,7 +472,7 @@ describe('the estimate flight line (spec rev 55 §8.1)', () => {
 
   it('never says "+ flights for up to 0 date pairs"; a cap that leaves none is still named', () => {
     const { est } = flightEstimate(15, { monthlyCap: 15 });
-    expect(est.flightLists).toEqual({ pages: 0, seconds: 0 });
+    expect(est.flightLists).toEqual({ pairs: 0, pages: 0, seconds: 0, returns: false });
     expect(est.assumptions.some((a) => a.startsWith('+ flights'))).toBe(false);
     expect(est.assumptions).toContain("flights for 0 date pairs: the browser worker's monthly page cap");
   });
@@ -483,5 +490,189 @@ describe('the estimate flight line (spec rev 55 §8.1)', () => {
     const est = estimateStart(e.ctx, b.snapshot, b.cells, null);
     expect('flightLists' in est).toBe(false);
     expect('flightLists' in apiContract.estimateSchema.parse(est)).toBe(false);
+  });
+});
+
+// Spec rev 56 §8.1 "Estimate" (R-estimate; ruling D6; R-low-pages): with the worker's RETURN_SELECT_VERIFIED the flight
+// line plans each pair out and back: typically 1.5 pages and 245 s (165 s without the booking read), at most 2 pages and
+// 300 s (220 s); the month's pages bound the pairs planned out and back (floor(M / 2)), the rest outbound-only up to
+// what the pages allow; free calls count requests (one a pair). Exact fits at the defaults (90 s page, 30 s spacing).
+describe('the estimate flight line with the return leg (spec rev 56 §8.1)', () => {
+  const BOTH = { RETURN_SELECT_VERIFIED: true, BOOKING_SELECT_VERIFIED: true };
+  function returnsEstimate(
+    cells: number,
+    flags: Record<string, boolean> | null,
+    o: Parameters<typeof engineWith>[1] = {},
+  ) {
+    const e = engineWith([stubCamoufox({ cells, flights: {} })], { rankedDatePairs: rankedPairs(15), ...o });
+    if (flags !== null) e.ctx.workerFlags.set('camoufox', flags);
+    const b = buildSnapshot(e.ctx, e.definition);
+    return { e, b, est: estimateStart(e.ctx, b.snapshot, b.cells, null) };
+  }
+
+  it('both flags: 10 pairs, usually 15 pages and 2,450 s, at most 20 pages and 3,000 s', () => {
+    const { est } = returnsEstimate(15, BOTH);
+    expect(est.flightLists).toEqual({
+      pairs: 10,
+      pages: 15,
+      seconds: 2450,
+      pagesMax: 20,
+      secondsMax: 3000,
+      returns: true,
+    });
+    expect(est.assumptions).toContain(
+      '+ flights, out and back, for up to 10 date pairs: usually about 15 pages and 41 minutes, at most 20 pages and 50 minutes',
+    );
+    expect(est.assumptions.some((a) => a.startsWith('+ flights for up to'))).toBe(false);
+    const grid = est.perProvider.find((p) => p.providerId === 'camoufox');
+    expect(est.seconds).toBe((grid?.seconds ?? 0) + 2450);
+    expect(apiContract.estimateSchema.parse(est).flightLists).toEqual(est.flightLists);
+  });
+
+  it('without the booking flag: 165 s a pair (1,650 s), at most 220 s (2,200 s)', () => {
+    const { est } = returnsEstimate(15, { RETURN_SELECT_VERIFIED: true, BOOKING_SELECT_VERIFIED: false });
+    expect(est.flightLists).toEqual({
+      pairs: 10,
+      pages: 15,
+      seconds: 1650,
+      pagesMax: 20,
+      secondsMax: 2200,
+      returns: true,
+    });
+    expect(est.assumptions).toContain(
+      '+ flights, out and back, for up to 10 date pairs: usually about 15 pages and 28 minutes, at most 20 pages and 37 minutes',
+    );
+  });
+
+  it('with the return flag false or unread: outbound-only, 10 pages and 700 s', () => {
+    for (const flags of [null, { RETURN_SELECT_VERIFIED: false, BOOKING_SELECT_VERIFIED: true }]) {
+      const { est } = returnsEstimate(15, flags);
+      expect(est.flightLists).toEqual({ pairs: 10, pages: 10, seconds: 700, returns: false });
+      expect(est.assumptions).toContain('+ flights for up to 10 date pairs, about 12 minutes');
+    }
+  });
+
+  it('D6: the month bounds the pairs out and back; at 1, 2 and 3 pages left 0 + 1, 1 + 0 and 1 + 1 pairs', () => {
+    // why: 15 grid pages of a 16-, 17- and 18-page month leave 1, 2 and 3 pages for flights
+    const one = returnsEstimate(15, BOTH, { monthlyCap: 16 }).est;
+    expect(one.flightLists).toEqual({
+      pairs: 1,
+      pages: 1,
+      seconds: 70,
+      pagesMax: 1,
+      secondsMax: 70,
+      returns: true,
+    });
+    expect(one.assumptions).toContain('+ flights for up to 1 date pair, about 1 minute');
+    expect(one.assumptions).toContain("flights for 1 date pair: the browser worker's monthly page cap");
+    const two = returnsEstimate(15, BOTH, { monthlyCap: 17 }).est;
+    expect(two.flightLists).toEqual({
+      pairs: 1,
+      pages: 2,
+      seconds: 245,
+      pagesMax: 2,
+      secondsMax: 300,
+      returns: true,
+    });
+    expect(two.assumptions).toContain(
+      "flights for 1 date pair out and back: the browser worker's monthly page cap",
+    );
+    const three = returnsEstimate(15, BOTH, { monthlyCap: 18 }).est;
+    expect(three.flightLists).toEqual({
+      pairs: 2,
+      pages: 3,
+      seconds: 315,
+      pagesMax: 3,
+      secondsMax: 370,
+      returns: true,
+    });
+    expect(three.assumptions).toContain(
+      "flights for 1 date pair out and back, 1 outbound only: the browser worker's monthly page cap",
+    );
+  });
+
+  it('the free-call bound counts requests: maxFreeCalls 105 after 100 grid pages plans 5 pairs out and back', () => {
+    const { est } = returnsEstimate(100, BOTH, { maxFreeCalls: 105 });
+    expect(est.flightLists).toEqual({
+      pairs: 5,
+      pages: 8,
+      seconds: 1225,
+      pagesMax: 10,
+      secondsMax: 1500,
+      returns: true,
+    });
+    expect(est.assumptions).toContain("flights for 5 date pairs: the run's free-call limit");
+  });
+
+  it('a blocked browser line drops the out-and-back clause and the cap note', () => {
+    const { est } = returnsEstimate(15, BOTH, { monthlyCap: 18 });
+    expect(est.assumptions.filter((a) => a.includes('flights'))).toHaveLength(2);
+    const blocked = withBlocked(est, new Map([[lineKey('discovery', 'camoufox'), 'provider-month']]));
+    expect(blocked.assumptions.filter((a) => a.includes('flights'))).toEqual([]);
+    expect(blocked.flightLists).toEqual({
+      pairs: 0,
+      pages: 0,
+      seconds: 0,
+      pagesMax: 0,
+      secondsMax: 0,
+      returns: true,
+    });
+  });
+
+  it('addPass sums every figure; the bound counts in the soft confirmation and the monthly pages', () => {
+    const { e, est } = returnsEstimate(15, BOTH);
+    expect(addPass(est, est).flightLists).toEqual({
+      pairs: 20,
+      pages: 30,
+      seconds: 4900,
+      pagesMax: 40,
+      secondsMax: 6000,
+      returns: true,
+    });
+    expect(browserPagesPlanned(est)).toBe(35);
+    expect(monthlyPagesOf(e.ctx, est, null)?.planned).toBe(35);
+  });
+
+  it('D5: the browser window carries one return-phase request (780 s, 600 s without the booking read) as margin', () => {
+    expect(flightWindowMarginSeconds(returnsEstimate(15, BOTH).e.ctx, returnsEstimate(15, BOTH).est)).toBe(
+      780,
+    );
+    const returnsOnly = returnsEstimate(15, { RETURN_SELECT_VERIFIED: true });
+    expect(flightWindowMarginSeconds(returnsOnly.e.ctx, returnsOnly.est)).toBe(600);
+    const outbound = returnsEstimate(15, null);
+    expect(flightWindowMarginSeconds(outbound.e.ctx, outbound.est)).toBe(0);
+    const none = returnsEstimate(15, BOTH, { monthlyCap: 15 });
+    expect(flightWindowMarginSeconds(none.e.ctx, none.est)).toBe(0);
+  });
+
+  it('estimateRemaining plans the same per planned flight cell left, from the stored plan', async () => {
+    const cam = stubCamoufox({
+      cells: 15,
+      preflight: { ok: true, flags: BOTH },
+      flights: {
+        answer: (_q, n) => {
+          if (n > 4) throw new AbortedError();
+          return undefined;
+        },
+      },
+    });
+    const e = engineWith([cam], { rankedDatePairs: rankedPairs(15) });
+    const r = await e.orch.start(e.definition.id, {
+      trigger: 'manual',
+      confirmCostPence: 1_000_000,
+      confirmCalls: 1_000_000,
+    });
+    if (!r.ok) throw new Error(r.message);
+    const done = await e.settled(r.executionId);
+    expect(done.flightLists?.returns).toBe(true);
+    expect(flightRows(e, r.executionId)).toHaveLength(4);
+    expect(estimateRemainingFor(e.ctx, done, true).flightLists).toEqual({
+      pairs: 6,
+      pages: 9,
+      seconds: 1470,
+      pagesMax: 12,
+      secondsMax: 1800,
+      returns: true,
+    });
   });
 });

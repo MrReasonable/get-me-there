@@ -2278,7 +2278,10 @@ the web share):
   may not have been read"); `within` (the pairing leads, above). A pairing
   shown beneath carries its own provenance, age and stale mark, and is worded
   "from" whenever its price is the return's "from" price rather than an
-  offer's.
+  offer's. A stale verified figure that stays (the pairing of its date pair's
+  best calendar price does not lead) carries that cell's `pairingRead` and
+  shows the pairing beneath it in the same way (ruling 21.2); a fresh verified
+  figure carries none.
 - **Reading a pairing figure elsewhere.** The board, the cards' cheapest and
   the scoped `/results` read's `datePairFigure` take the figure from one
   pairings map, so the detail and the board agree; the detail of a pairing
@@ -3909,7 +3912,7 @@ datePairsResponseSchema = {
     figure: number[];           // index into the figures columns, strictly ascending
     pricePence: number[]; provenance: number[]; stale: (false | 'refresh' | 'setting')[]; truncated: boolean[];
   };
-  pairing: {                    // sparse: one entry per pairing figure (its own words) and per calendar figure shown with a pairing beneath
+  pairing: {                    // sparse: one entry per pairing figure (its own words) and per calendar or stale verified figure shown with a pairing beneath
                                 // (within-older, within-other-limits, over-limit, sellers-not-read, offers-incomplete)
     figure: number[];           // index into the figures columns, strictly ascending
     pricePence: number[];       // the cheapest offer's stated price, or the return's "from" price when isFrom

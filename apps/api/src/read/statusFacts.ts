@@ -112,6 +112,11 @@ export interface WorkerStatusFacts {
   /** What the worker will do with the next page request, judged by the one rule the preflight uses (V5). */
   finding: WorkerFinding | null;
   formVerified: boolean;
+  /**
+   * Spec rev 56 §8.1: the worker's reported verification flags as it stated them; the report sets the engine's copy
+   * from them (the plan's return phase), and words none of them beyond `formVerified`.
+   */
+  flags: Readonly<Record<string, boolean>>;
   appInstances: number | null;
   monthly: { pages: number; scrolls: number; readable: boolean } | null;
   /** The captured record; `mark` null from a worker that does not report it (one before review X1). */

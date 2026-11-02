@@ -834,3 +834,28 @@ describe('the worker read, through the real facts (V5)', () => {
     expect(log.urls).toHaveLength(2);
   });
 });
+
+// Spec rev 56 §8.1 "The plan": the Status view's worker read sets the engine's flags for camoufox (there is no boot
+// read); before any read the flights response plans 1 page and the estimate words outbound-only.
+describe("the Status read sets the worker's flags (spec rev 56 §8.1)", () => {
+  it('before any read pagesPlanned is 1 and the estimate is outbound-only; after the read 2 and out and back', async () => {
+    stubWorker(() =>
+      Response.json(
+        workerBody({
+          flags: { FORM_VERIFIED: true, RETURN_SELECT_VERIFIED: true, BOOKING_SELECT_VERIFIED: true },
+        }),
+      ),
+    );
+    const x = await harness(WORKER_ENV);
+    const def = x.ports.repos.definitions.create(
+      exampleDefinitionInput({
+        providers: { discovery: ['camoufox'], verification: [], discoveryRefreshHours: { camoufox: 168 } },
+      }),
+    );
+    expect(x.engine.flightPagesPlanned()).toBe(1);
+    expect(x.engine.estimate(def, x.clock.todayLondon()).flightLists?.returns).toBe(false);
+    expect((await get(x)).status).toBe(200);
+    expect(x.engine.flightPagesPlanned()).toBe(2);
+    expect(x.engine.estimate(def, x.clock.todayLondon()).flightLists?.returns).toBe(true);
+  });
+});

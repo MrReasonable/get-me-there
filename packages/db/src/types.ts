@@ -237,8 +237,8 @@ export interface FlightListInsert {
   /**
    * Spec revision 56 §5.1, §7: the return read the worker answered with (its attempts, returns and the booking read of
    * the shown pairing, with its offers), parsed through core's `returnReadSchema` on insert; null (or absent) for a
-   * list read without a return phase, and always for a `failed` list. Optional until Task 21.6 (the engine's flight
-   * step and the on-demand read, its last producers), so every consumer builds alone (R-order).
+   * list read without a return phase, and always for a `failed` list. Optional for good (preflight ruling A4: an
+   * input, absent ≡ null); the engine's flight step and on-demand read always state it (Task 21.6).
    */
   returns?: ReturnRead | null;
 }

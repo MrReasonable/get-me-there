@@ -6,6 +6,7 @@ import {
   fitsLimits,
   flightLimitsOf,
   flightLimitsSchema,
+  sameFlightLimits,
   selectOutbound,
   withinLimits,
 } from '../../src/flights/choose.js';
@@ -189,6 +190,39 @@ describe('flightLimitsOf and flightLimitsSchema (spec rev 56 §6.2, §5.1)', () 
     const { maxStops: _m, ...without } = LIMITS;
     expect(flightLimitsSchema.parse(without)).toEqual(without);
     expect(flightLimitsSchema.safeParse({ ...without, maxStops: undefined }).success).toBe(false);
+  });
+});
+
+describe('sameFlightLimits (spec rev 56 §6.9, §8.1: stored limits deep-equal the current ones)', () => {
+  const base: FlightLimits = {
+    maxJourneyMinutes: 1500,
+    maxStops: 1,
+    departureWindowLocal: null,
+    arrivalWindowLocal: { from: '06:00', to: '23:00' },
+  };
+  it('is true for equal limits, an absent maxStops equal to null', () => {
+    expect(sameFlightLimits(base, { ...base, arrivalWindowLocal: { from: '06:00', to: '23:00' } })).toBe(
+      true,
+    );
+    const { maxStops: _m, ...without } = base;
+    expect(sameFlightLimits(without, { ...base, maxStops: null })).toBe(true);
+    expect(sameFlightLimits({ ...base, maxStops: null }, without)).toBe(true);
+  });
+  it('is false when any limit differs', () => {
+    expect(sameFlightLimits(base, { ...base, maxJourneyMinutes: 1440 })).toBe(false);
+    expect(sameFlightLimits(base, { ...base, maxStops: 0 })).toBe(false);
+    expect(sameFlightLimits(base, { ...base, maxStops: null })).toBe(false);
+    expect(sameFlightLimits(base, { ...base, departureWindowLocal: { from: '06:00', to: '23:00' } })).toBe(
+      false,
+    );
+    expect(sameFlightLimits(base, { ...base, arrivalWindowLocal: null })).toBe(false);
+    expect(sameFlightLimits(base, { ...base, arrivalWindowLocal: { from: '07:00', to: '23:00' } })).toBe(
+      false,
+    );
+    expect(sameFlightLimits(base, { ...base, arrivalWindowLocal: { from: '06:00', to: '22:00' } })).toBe(
+      false,
+    );
+    expect(sameFlightLimits({ ...base, arrivalWindowLocal: null }, base)).toBe(false);
   });
 });
 

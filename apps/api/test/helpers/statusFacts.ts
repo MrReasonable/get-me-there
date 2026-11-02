@@ -44,6 +44,7 @@ export function okWorkerStatus(over: Partial<WorkerStatusFacts> = {}): WorkerSta
   return {
     finding: null,
     formVerified: true,
+    flags: { FORM_VERIFIED: true },
     appInstances: 1,
     monthly: { pages: 10, scrolls: 20, readable: true },
     consent: { kind: 'socs', expiresAt: inFuture(200 * DAY), boundedBy: 'capture', mark: 'reject' },

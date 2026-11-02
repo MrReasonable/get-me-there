@@ -8,7 +8,7 @@ import {
 } from '@gmt/core';
 import { breachMessage, checkBudget, spendOf } from './budgetCheck.js';
 import type { EngineContext } from './context.js';
-import { addPass, estimateRemainingFor, withBlocked } from './estimate.js';
+import { addPass, estimateRemainingFor, flightWindowMarginSeconds, withBlocked } from './estimate.js';
 import { execute } from './execute.js';
 import { lineKey } from './lines.js';
 import type { Orchestrator } from './orchestrator.js';
@@ -283,9 +283,11 @@ function reanchor(ctx: EngineContext, exec: Execution, opts: ResumeOptions): Exe
     );
     return exec;
   }
+  const remaining = estimateRemainingFor(ctx, exec, opts.manual);
   const end = browserWindowEndFrom(
     windowAnchor(firing, ctx.clock.now()),
-    estimateRemainingFor(ctx, exec, opts.manual).seconds,
+    remaining.seconds,
+    flightWindowMarginSeconds(ctx, remaining),
   );
   return { ...exec, scheduledFor: firing, browserWindowEnd: end };
 }

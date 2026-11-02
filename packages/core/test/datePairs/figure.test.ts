@@ -600,14 +600,28 @@ describe('figuresByDatePair with the pairing figure (spec rev 56 §6.9; Ian ruli
     });
   });
 
-  it('a stale verified figure stays when its pairing does not lead, and when no calendar price exists to key one', () => {
+  it('a stale verified figure stays when its pairing does not lead, the pairing beneath it with its read (ruling 21.2)', () => {
     const v = stale(60_000, { cell: at('LGW', 'EWR') });
-    const notLeading = figuresByDatePair([grid, v], scope, NOW, withCandidate(candidate({ fresh: false })));
-    expect(notLeading.figures.get(0)).toEqual(pickFigure([grid, v], NOW));
-    for (const lookup of [only('outbound-only'), withCandidate(candidate({ offer: null }))])
-      expect(figuresByDatePair([grid, v], scope, NOW, lookup).figures.get(0)).toEqual(
-        pickFigure([grid, v], NOW),
-      );
+    const older = candidate({ fresh: false });
+    const notLeading = figuresByDatePair([grid, v], scope, NOW, withCandidate(older));
+    expect(notLeading.figures.get(0)).toEqual({
+      ...pickFigure([grid, v], NOW),
+      pairingRead: 'within-older',
+      pairing: older,
+    });
+    const unread = candidate({ offer: null });
+    expect(figuresByDatePair([grid, v], scope, NOW, withCandidate(unread)).figures.get(0)).toEqual({
+      ...pickFigure([grid, v], NOW),
+      pairingRead: 'sellers-not-read',
+      pairing: unread,
+    });
+    expect(figuresByDatePair([grid, v], scope, NOW, only('outbound-only')).figures.get(0)).toEqual({
+      ...pickFigure([grid, v], NOW),
+      pairingRead: 'outbound-only',
+    });
+    expect(figuresByDatePair([grid, v], scope, NOW, only('not-read')).figures.get(0)).toEqual(
+      pickFigure([grid, v], NOW),
+    );
     let asked = 0;
     const alone = figuresByDatePair([v], scope, NOW, () => {
       asked += 1;

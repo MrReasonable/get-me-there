@@ -47,13 +47,21 @@ export interface GridPrice {
 
 /**
  * A chosen figure: a class-verified price (with the cheaper current calendar price it hides), a calendar price, or
- * (spec rev 56 §6.9) a pairing's cheapest offer. A calendar figure carries its cell's `pairingRead` (absent: `not-read`)
+ * (spec rev 56 §6.9) a pairing's cheapest offer. A calendar figure, and a stale verified one whose date pair's best
+ * calendar price has a pairing that does not lead (ruling 21.2), carries its cell's `pairingRead` (absent: `not-read`)
  * and the pairing shown beneath it when one exists; a pairing figure keeps the calendar candidate it replaced as
  * `chosen` (its "current" keys and its cell), the offer's stated price as `pricePence`, and that candidate's price as
  * `grid`.
  */
 export type Figure<T extends FigureCandidate> =
-  | { basis: 'verified'; chosen: T; cheaperCached: T | null }
+  | {
+      basis: 'verified';
+      chosen: T;
+      cheaperCached: T | null;
+      /** a stale verified figure's cell read and the pairing beneath it (ruling 21.2); absent on a fresh one */
+      pairingRead?: PairingRead;
+      pairing?: PairingCandidate;
+    }
   | {
       basis: 'calendar';
       chosen: T;
@@ -207,8 +215,9 @@ function withPairing<T extends FigureCandidate>(
 
 /**
  * Ruling R-stale-verified (spec rev 56 §6.9, §11): a stale verified figure gives way to a pairing that leads in the cell
- * of the date pair's best calendar price (`calendar`, which it keeps as its grid price); with no calendar price, or no
- * pairing that leads, the stale verified figure stays as it was. A fresh verified figure is never asked.
+ * of the date pair's best calendar price (`calendar`, which it keeps as its grid price); with no calendar price the
+ * stale verified figure stays as it was. With a pairing that does not lead (ruling 21.2), it stays and carries that
+ * cell's read and the pairing beneath it, as a calendar figure does. A fresh verified figure is never asked.
  */
 function overStaleVerified<T extends FigureCandidate>(
   f: Extract<Figure<T>, { basis: 'verified' }>,
@@ -216,9 +225,12 @@ function overStaleVerified<T extends FigureCandidate>(
   pairingOf: PairingOf,
 ): Figure<T> {
   if (calendar === null) return f;
-  const { candidate } = pairingOf(calendar.cell);
+  const lookup = pairingOf(calendar.cell);
+  if (lookup.candidate === null) return lookup.read === 'not-read' ? f : { ...f, pairingRead: lookup.read };
+  const { candidate } = lookup;
   // why: `pairingLeads` requires the offer; testing it first narrows it here without an assertion
-  if (candidate === null || candidate.offer === null || !pairingLeads(candidate)) return f;
+  if (candidate.offer === null || !pairingLeads(candidate))
+    return { ...f, pairingRead: pairingReadOf(candidate), pairing: candidate };
   return pairingFigure(calendar, candidate, candidate.offer.priceMinor);
 }
 

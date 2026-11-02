@@ -6,10 +6,15 @@
 import {
   asIsoDate,
   asIsoDateTime,
+  type BookingRead,
   BudgetExceeded,
+  type FlightLimits,
+  type FlightListQuery,
   type FlightListResult,
   type IsoDate,
   ProviderError,
+  type ReturnRead,
+  returnReadSchema,
 } from '@gmt/core';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { buildContext } from '../src/context.js';
@@ -17,6 +22,7 @@ import { createEngine } from '../src/engine.js';
 import { createFlightReader } from '../src/flightRead.js';
 import { createOrchestrator } from '../src/orchestrator.js';
 import { buildSnapshot } from '../src/snapshot.js';
+import { readRowOf } from '../src/stages/flightLists.js';
 import {
   type CamoufoxEngine,
   deferred,
@@ -24,12 +30,13 @@ import {
   type FlightStubOptions,
   flightLedger,
   flightRows,
+  listAnswer,
   rankedPairs,
   realTime,
   stubCamoufox,
   stubTravelpayouts,
 } from './support/camoufox.js';
-import { baseDefinition } from './support/harness.js';
+import { baseDefinition, JFK, LHR } from './support/harness.js';
 
 beforeEach(realTime);
 afterEach(realTime);
@@ -383,5 +390,252 @@ describe('readFlightList reads', () => {
     expect(engine.flightReadInFlight()).toBeNull();
     expect(flightRows(e, null)).toHaveLength(0);
     expect(await engine.readFlightList(e.definition.id, PAIR)).toEqual({ ok: false, code: 'shutting-down' });
+  });
+});
+
+// Spec rev 56 §8.1 "Reading one date pair's flights" (WP21 Task 21.6): the read's preflight sets the worker's flags; the
+// read sends the definition's limits and the booking ask as they say, outbound-only when the month cannot hold 2 pages
+// (R-low-pages); it stores the return read on its row (failed: none, data-005); `fresh` is the step's reuse rule.
+describe('readFlightList with the return leg (spec rev 56 §8.1)', () => {
+  const BOTH = { RETURN_SELECT_VERIFIED: true, BOOKING_SELECT_VERIFIED: true };
+  const LIMITS: FlightLimits = {
+    maxJourneyMinutes: 1500,
+    maxStops: 1,
+    departureWindowLocal: null,
+    arrivalWindowLocal: null,
+  };
+  /** A return read of the stub's one flight, its booking `booking` (null: none asked). */
+  const returnsOf = (over: Partial<ReturnRead> = {}, booking: Partial<BookingRead> = {}): ReturnRead =>
+    returnReadSchema.parse({
+      limits: LIMITS,
+      status: 'read',
+      rule: null,
+      attempts: [
+        {
+          outboundIndex: 0,
+          outboundFits: true,
+          listed: 'returns',
+          moreListed: false,
+          returns: [
+            {
+              departsLocal: '14:20',
+              arrivesLocal: '06:25',
+              arrivesDayOffset: 1,
+              durationMinutes: 725,
+              stops: 1,
+              carriers: ['QQ Atlantic'],
+              operatedBy: null,
+              fromMinor: 118_000,
+            },
+          ],
+          optionsUnparsed: 0,
+          optionsOtherCell: 0,
+          resultsStated: null,
+        },
+      ],
+      triedAll: true,
+      booking: {
+        status: 'read',
+        rule: null,
+        attempt: 0,
+        returnIndex: 0,
+        expanded: true,
+        moreControl: false,
+        grouped: 0,
+        offers: [{ seller: 'QQ Travel', fare: null, priceMinor: 118_000 }],
+        unparsed: 0,
+        nonGbp: 0,
+        offersStated: null,
+        ...booking,
+      },
+      ...over,
+    });
+  const withReturns =
+    (r: ReturnRead) =>
+    (q: FlightListQuery): FlightListResult => ({
+      ...listAnswerAt(),
+      returns: q.returnLimits === undefined ? null : r,
+    });
+  const listAnswerAt = () => listAnswer(asIsoDateTime('2026-10-15T09:00:00.000Z'));
+
+  /** A camoufox engine whose preflight reports `flags`, over a definition limited to 25 h and 1 stop. */
+  function flagged(flags: Record<string, boolean> | null, flights: FlightStubOptions = {}, o = {}) {
+    const s = setup(flights, o, flags === null ? {} : { preflight: { ok: true, flags } });
+    s.e.ctx.repos.definitions.update(s.e.definition.id, {
+      constraints: { maxJourneyMinutes: 1500, maxStops: 1 },
+    });
+    return s;
+  }
+  const readOnce = async (s: ReturnType<typeof flagged>) => {
+    const r = await s.reader.read(s.e.definition.id, PAIR);
+    if (!r.ok) throw new Error(`refused: ${r.code}`);
+    await r.done;
+  };
+  const stored = (e: CamoufoxEngine) =>
+    e.ctx.repos.flightLists
+      .newestPerCell(e.definition.id, [{ origin: LHR, destination: JFK, ...PAIR }], 'economy', 'GB')
+      .at(0);
+  const pageCounts = (e: CamoufoxEngine) =>
+    e.ctx.db.raw
+      .prepare<[], { n: number | null }>(
+        "SELECT page_count AS n FROM provider_requests WHERE endpoint_path = '/v1/flights' ORDER BY id",
+      )
+      .all()
+      .map((r) => r.n);
+
+  it('runs the preflight first and sets the flags; sends the limits and booking as they say, none otherwise', async () => {
+    const both = flagged(BOTH, { answer: withReturns(returnsOf()) });
+    expect(both.e.ctx.workerFlags.get('camoufox')).toBeNull();
+    await readOnce(both);
+    expect(both.e.ctx.workerFlags.get('camoufox')).toEqual(BOTH);
+    expect(both.cam.flightCalls[0]?.query).toMatchObject({ returnLimits: LIMITS, booking: true });
+    const noBooking = flagged({ RETURN_SELECT_VERIFIED: true, BOOKING_SELECT_VERIFIED: false });
+    await readOnce(noBooking);
+    expect(noBooking.cam.flightCalls[0]?.query).toMatchObject({ returnLimits: LIMITS, booking: false });
+    for (const flags of [null, { RETURN_SELECT_VERIFIED: false, BOOKING_SELECT_VERIFIED: true }]) {
+      const off = flagged(flags);
+      await readOnce(off);
+      expect('returnLimits' in (off.cam.flightCalls[0]?.query ?? {})).toBe(false);
+      expect('booking' in (off.cam.flightCalls[0]?.query ?? {})).toBe(false);
+    }
+  });
+
+  it('stores the return read with its booking, and the ledger row the pages it loaded; a failed read stores none', async () => {
+    const ok = flagged(BOTH, { answer: withReturns(returnsOf()) });
+    await readOnce(ok);
+    expect(stored(ok.e)?.returns).toEqual(returnsOf());
+    expect(pageCounts(ok.e)).toEqual([2]);
+    const failed = flagged(BOTH, { answer: () => listErrorOf('upstream') });
+    await readOnce(failed);
+    expect(stored(failed.e)).toMatchObject({ status: 'failed', returns: null });
+  });
+
+  it('R-low-pages: with 1 page of headroom the read goes out outbound-only, never refused', async () => {
+    // why: a 1-page month (nothing else spent) leaves 1 page: below the 2 a return phase may load
+    const low = flagged(BOTH, {}, { monthlyCap: 1 });
+    await readOnce(low);
+    expect(low.cam.flightCalls[0]?.query.returnLimits).toBeUndefined();
+    expect(stored(low.e)?.status).toBe('read');
+    const two = flagged(BOTH, {}, { monthlyCap: 2 });
+    await readOnce(two);
+    expect(two.cam.flightCalls[0]?.query.returnLimits).toEqual(LIMITS);
+  });
+
+  /** Seeds the cell's newest lists (oldest first), each `hoursAgo` old with return read `returns`. */
+  function seed(e: CamoufoxEngine, lists: Array<{ hoursAgo: number; returns: ReturnRead | null }>) {
+    for (const l of lists)
+      e.ctx.repos.flightLists.insert(
+        readRowOf(
+          {
+            definitionId: e.definition.id,
+            executionId: null,
+            providerId: 'camoufox',
+            sourceKind: 'scraped-self',
+            cabin: 'economy',
+            origin: LHR,
+            destination: JFK,
+            ...PAIR,
+          },
+          {
+            ...listAnswerAt(),
+            fetchedAt: asIsoDateTime(
+              new Date(Date.parse(e.clock.now()) - l.hoursAgo * 3_600_000).toISOString(),
+            ),
+            returns: l.returns,
+          },
+        ),
+      );
+  }
+  const askWith = async (
+    flags: Record<string, boolean> | null,
+    lists: Array<{ hoursAgo: number; returns: ReturnRead | null }>,
+  ) => {
+    const s = flagged(flags);
+    if (flags !== null) s.e.ctx.workerFlags.set('camoufox', flags);
+    seed(s.e, lists);
+    const r = await s.reader.read(s.e.definition.id, PAIR);
+    if (r.ok) await r.done;
+    return r.ok ? 'read' : r.code;
+  };
+  const notSettled = () =>
+    returnReadSchema.parse({
+      limits: LIMITS,
+      status: 'not-settled',
+      rule: 'select-outbound:not-settled',
+      attempts: [],
+      triedAll: false,
+      booking: null,
+    });
+
+  it('fresh: a young finished list under the same limits with a finished booking, or a streak of 2', async () => {
+    expect(await askWith(BOTH, [{ hoursAgo: 150, returns: returnsOf() }])).toBe('fresh');
+    expect(
+      await askWith(BOTH, [
+        {
+          hoursAgo: 1,
+          returns: returnsOf(
+            {},
+            { status: 'no-pairing', attempt: null, returnIndex: null, offers: [], expanded: false },
+          ),
+        },
+      ]),
+    ).toBe('fresh');
+    expect(
+      await askWith(BOTH, [
+        { hoursAgo: 3, returns: notSettled() },
+        { hoursAgo: 2, returns: notSettled() },
+      ]),
+    ).toBe('fresh');
+    // no return phase planned for this worker: any young read list, not-verified or phase-less included
+    expect(await askWith(null, [{ hoursAgo: 1, returns: null }])).toBe('fresh');
+    expect(await askWith({ RETURN_SELECT_VERIFIED: false }, [{ hoursAgo: 1, returns: notSettled() }])).toBe(
+      'fresh',
+    );
+  });
+
+  it('read again: a young transient (streak 1), not-verified, expand-failed, other-limit or phase-less list', async () => {
+    expect(await askWith(BOTH, [{ hoursAgo: 2, returns: notSettled() }])).toBe('read');
+    const notVerified = returnReadSchema.parse({
+      limits: LIMITS,
+      status: 'not-verified',
+      rule: null,
+      attempts: [],
+      triedAll: false,
+      booking: null,
+    });
+    expect(await askWith(BOTH, [{ hoursAgo: 1, returns: notVerified }])).toBe('read');
+    expect(
+      await askWith(BOTH, [
+        {
+          hoursAgo: 1,
+          returns: returnsOf(
+            {},
+            { status: 'expand-failed', rule: 'more-options:not-settled', expanded: false },
+          ),
+        },
+      ]),
+    ).toBe('read');
+    expect(
+      await askWith(BOTH, [{ hoursAgo: 1, returns: returnsOf({ limits: { ...LIMITS, maxStops: 0 } }) }]),
+    ).toBe('read');
+    expect(await askWith(BOTH, [{ hoursAgo: 1, returns: null }])).toBe('read');
+  });
+
+  it('the boundary: a finished list exactly 0.9 × refresh old (151.2 h) is read; one just younger is fresh', async () => {
+    expect(await askWith(BOTH, [{ hoursAgo: 151.2, returns: returnsOf() }])).toBe('read');
+    expect(await askWith(BOTH, [{ hoursAgo: 151.1, returns: returnsOf() }])).toBe('fresh');
+  });
+});
+
+describe('the engine contract: setWorkerFlags and flightPagesPlanned (spec rev 56 §10, ruling D3)', () => {
+  it('plans 1 page before any read and with the flag off, 2 once the worker reports RETURN_SELECT_VERIFIED', () => {
+    const { e } = setup();
+    const engine = createEngine(e.deps, { rankedDatePairs: rankedPairs(5) });
+    expect(engine.flightPagesPlanned()).toBe(1);
+    engine.setWorkerFlags('camoufox', { RETURN_SELECT_VERIFIED: false });
+    expect(engine.flightPagesPlanned()).toBe(1);
+    engine.setWorkerFlags('camoufox', { RETURN_SELECT_VERIFIED: true });
+    expect(engine.flightPagesPlanned()).toBe(2);
+    engine.markClosed();
   });
 });

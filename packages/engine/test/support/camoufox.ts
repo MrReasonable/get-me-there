@@ -13,6 +13,7 @@ import {
   type DiscoveryQuery,
   type DiscoveryTileResult,
   type Execution,
+  FLIGHT_LIST_PAGES_PER_PAIR_MAX,
   type FlightListQuery,
   type FlightListResult,
   type FlightProvider,
@@ -139,10 +140,15 @@ export interface FlightStubOptions {
   onEnd?: (n: number) => void;
   /** The cabins the capability reads (default economy). */
   cabins?: Cabin[];
+  /**
+   * Spec rev 56 §5.3: the pages the n-th read's answer states it loaded (`pagesLoaded`, finalised as the row's
+   * `page_count`); default the pages reserved (2 with `returnLimits`, else 1), as the provider plans them.
+   */
+  pagesLoaded?: (q: FlightListQuery, n: number) => number;
 }
 
 /** The default answer: one flight read for the pair, priced as the worked example's grid price. */
-export function listAnswer(at: IsoDateTime): FlightListResult {
+export function listAnswer(at: IsoDateTime): Extract<FlightListResult, { kind: 'list' }> {
   return {
     kind: 'list',
     fetchedAt: at,
@@ -167,6 +173,8 @@ export function listAnswer(at: IsoDateTime): FlightListResult {
     optionsOtherCell: 0,
     resultsStated: 1,
     notes: [],
+    returns: null,
+    nextLoadNotBefore: null,
   };
 }
 
@@ -294,6 +302,9 @@ function stub(
     });
     f.onStart?.(n);
     pctx.beforeSend?.();
+    // why: spec rev 56 §5.3: as the provider plans it, a request with a return phase reserves the worst case (2 pages)
+    const pages =
+      q.returnLimits === undefined || q.returnLimits === null ? 1 : FLIGHT_LIST_PAGES_PER_PAIR_MAX;
     const r = ctxOf().budget.reserve({
       providerId: id,
       executionId: pctx.executionId,
@@ -301,6 +312,7 @@ function stub(
       costMicroGbp: 0,
       httpAttempt: 1,
       endpointPath: '/v1/flights',
+      pages,
     });
     if (f.holdCall !== undefined && f.holdCall.call === n) {
       const signal = pctx.signal;
@@ -322,6 +334,7 @@ function stub(
       httpStatus: 200,
       durationMs: 1,
       pageClass: 'page',
+      pageCount: f.pagesLoaded?.(q, n) ?? pages,
     });
     flightRequests += 1;
     return answer;
@@ -585,6 +598,8 @@ export function engineWith(
     rankedDatePairs?: EngineOptions['rankedDatePairs'];
     /** Task 20.9: the definition's cabin (default economy). */
     cabin?: Cabin;
+    /** Spec rev 56 §8.1: freeze this flight allowance into each new execution's snapshot (an older snapshot's 10). */
+    flightListPages?: number;
   } = {},
 ): CamoufoxEngine {
   const parsed = parseConfig(
@@ -630,6 +645,15 @@ export function engineWith(
           ...input.snapshot,
           budget: { ...input.snapshot.budget, providerMaxCalls: { camoufox: cap } },
         },
+      });
+  }
+  if (o.flightListPages !== undefined) {
+    const pages = o.flightListPages;
+    const create = repos.executions.create.bind(repos.executions);
+    repos.executions.create = (input) =>
+      create({
+        ...input,
+        snapshot: { ...input.snapshot, budget: { ...input.snapshot.budget, flightListPages: pages } },
       });
   }
   const budget = new SqliteBudgetGuard(db, budgetConfigFromConfig(config), clock);

@@ -39,6 +39,30 @@ export function flightLimitsOf(
   };
 }
 
+/** Two optional local-time windows equal, field by field (null only equals null). */
+function sameWindow(
+  a: FlightLimits['departureWindowLocal'],
+  b: FlightLimits['departureWindowLocal'],
+): boolean {
+  return a === null || b === null ? a === b : a.from === b.from && a.to === b.to;
+}
+
+/**
+ * Spec rev 56 §6.9 "When it leads" and §8.1 "Reuse": whether limits a list was read under deep-equal the current ones
+ * (`flightLimitsOf` of today's constraints). An absent `maxStops` equals null (both are "not set"); the windows compare
+ * field by field. The one comparison the engine's reuse rule, the on-demand read's `fresh` rule and the api's pairing
+ * figure share.
+ */
+export function sameFlightLimits(a: FlightLimits, b: FlightLimits): boolean {
+  return (
+    a.maxJourneyMinutes === b.maxJourneyMinutes &&
+    // why: the stored shape may omit maxStops (optional until Task 21.7); absent and null both mean "not set"
+    (a.maxStops ?? null) === (b.maxStops ?? null) &&
+    sameWindow(a.departureWindowLocal, b.departureWindowLocal) &&
+    sameWindow(a.arrivalWindowLocal, b.arrivalWindowLocal)
+  );
+}
+
 /** Which leg a flight is: the windows apply to the outbound only (spec rev 56 §6.2). */
 export type Leg = 'outbound' | 'return';
 

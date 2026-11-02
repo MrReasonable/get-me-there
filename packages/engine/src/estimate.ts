@@ -7,8 +7,14 @@ import {
   datePairCount,
   type Execution,
   FLIGHT_LIST_COUNT,
+  FLIGHT_LIST_PAGES_PER_PAIR_MAX,
+  flightLimitsOf,
   microGbpToPence,
   type ProviderId,
+  RETURN_PHASE_SECONDS_MAX,
+  RETURN_SECOND_OUTBOUND_RATE,
+  RETURN_SPACED_LOADS,
+  RETURN_STEP_SECONDS,
   type SourceKind,
   type Stage,
 } from '@gmt/core';
@@ -17,8 +23,8 @@ import type { EngineContext } from './context.js';
 import { type LineKey, lineKey } from './lines.js';
 import { disabledFor, resumableCells } from './run.js';
 import { type PlannedTile, planTiles } from './stages/discovery.js';
-import { selectFlightPairs } from './stages/flightLists/select.js';
-import { FLIGHT_LIST_PROVIDER } from './stages/flightLists.js';
+import { newestListOf, selectFlightPairs } from './stages/flightLists/select.js';
+import { FLIGHT_LIST_PROVIDER, returnPhaseOf } from './stages/flightLists.js';
 import { refreshHoursOf, reusableFor, reuseCriteriaFor } from './stages/reuse.js';
 import { itineraryQuery } from './stages/verification.js';
 import type { Estimate } from './types.js';
@@ -52,11 +58,25 @@ function totalsOf(
   };
 }
 
-/** The flight line's assumption, "+ flights for up to N date pairs, about M minutes" (spec rev 55 §8.1). */
-const FLIGHT_NOTE = '+ flights for up to';
-/** Whether an assumption is one of the flight line's: its clause, or the cap that cut it ("flights for N date pairs: …"). */
+/**
+ * The flight line's assumption (spec rev 56 §8.1): "+ flights, out and back, for up to N date pairs: …" with the return
+ * leg, "+ flights for up to N date pairs, about M minutes" without.
+ */
+const FLIGHT_NOTE = '+ flights';
+/**
+ * Whether an assumption is one of the flight line's: its clause, or the cap that cut it ("flights for N date pairs: …",
+ * "flights for 1 date pair out and back: …"; preflight A21: the singular and the out-and-back forms too).
+ */
 const isFlightNote = (a: string): boolean =>
-  a.startsWith(FLIGHT_NOTE) || /^flights for \d+ date pairs: /.test(a);
+  a.startsWith(FLIGHT_NOTE) || /^flights for \d+ date pairs?\b/.test(a);
+
+/** "1 date pair", "4 date pairs". */
+const datePairs = (n: number): string => `${n} date pair${n === 1 ? '' : 's'}`;
+/** Whole minutes of `seconds`, rounded, with their noun ("41 minutes", "1 minute"). */
+const minutes = (seconds: number): string => {
+  const m = Math.round(seconds / 60);
+  return `${m} minute${m === 1 ? '' : 's'}`;
+};
 
 /**
  * Spec revision 55 §8.1: whether a pass over `snapshot` runs the flight-list step at all, as far as an estimate can
@@ -71,8 +91,8 @@ function flightsApply(ctx: EngineContext, snapshot: DefinitionSnapshot): boolean
 
 /**
  * The date pairs a fresh step would read for a saved search: the first 10 of the space less those whose newest list is
- * reusable (the step's own selection over the board's ranking); an unsaved search, or an engine without the ranking,
- * reuses none.
+ * reusable (the step's own selection over the board's ranking, under the return phase it would plan); an unsaved
+ * search, or an engine without the ranking, reuses none.
  */
 function flightPairsWanted(
   ctx: EngineContext,
@@ -96,7 +116,7 @@ function flightPairsWanted(
   const newest = new Map(
     ctx.repos.flightLists
       .newestPerCell(definitionId, ranked, snapshot.cabin, ctx.pointOfSaleOf(FLIGHT_LIST_PROVIDER))
-      .map((l) => [cellKeyString(l), { fetchedAt: l.fetchedAt, status: l.status, listed: l.listed }]),
+      .map((l) => [cellKeyString(l), newestListOf(l)]),
   );
   const reused = selectFlightPairs(
     ranked,
@@ -104,16 +124,48 @@ function flightPairsWanted(
     now,
     refreshHoursOf(snapshot, FLIGHT_LIST_PROVIDER),
     today,
+    {
+      ...returnPhaseOf(ctx, snapshot, ranked.length),
+      current: flightLimitsOf(snapshot.constraints),
+    },
   ).reused;
   return Math.max(0, most - reused.length);
 }
 
+/** The return phase a flight line plans (spec rev 56 §8.1): from the worker's flags, or a stored plan's. */
+interface FlightPhase {
+  returns: boolean;
+  booking: boolean;
+}
+
 /**
- * Spec revision 55 §8.1 "Estimate": adds the flight-list step's line to an assembled estimate. `wanted` is the date
- * pairs the step would read; `pages` is the least of it, the monthly pages left after the grid plan (other schedules'
- * reservations set aside, as the pre-start check reads it) and the run's free calls left after every free line (less
- * what the execution has already spent, on a resume); `seconds` is pages × (CAMOUFOX_MIN_SPACING_SECONDS + 40). The
- * assumptions say so, and name a cap that binds.
+ * Spec rev 56 §8.1 "Estimate" (R-estimate): one pair's seconds and pages, typical and at most. Out and back: the first
+ * view (spacing + 40 s), the return steps (`RETURN_STEP_SECONDS` × 3 with the booking read, × 1 without) and, for the
+ * share of pairs needing the second outbound, its spaced reload and two steps; at most the phase's own bound and the
+ * one spaced reload. Outbound-only: the first view, 1 page.
+ */
+function perPair(spacing: number, booking: boolean) {
+  const view = spacing + 40;
+  return {
+    outbound: view,
+    typical:
+      view +
+      RETURN_STEP_SECONDS * (booking ? 3 : 1) +
+      RETURN_SECOND_OUTBOUND_RATE * (spacing + 2 * RETURN_STEP_SECONDS),
+    bound:
+      view + RETURN_PHASE_SECONDS_MAX[booking ? 'booking' : 'returnsOnly'] + RETURN_SPACED_LOADS * spacing,
+  };
+}
+
+/**
+ * Spec revision 56 §8.1 "Estimate": adds the flight-list step's line to an assembled estimate. `wanted` is the date
+ * pairs the step would read; `pairs` the least of it and the run's free calls left after every free line (less what the
+ * execution has already spent, on a resume; free calls count requests, one a pair). The monthly pages left after the
+ * grid plan (other schedules' reservations set aside, as the pre-start check reads it), M, cut them: with the return
+ * leg `min(pairs, floor(M / 2))` pairs out and back and the rest outbound-only up to what M allows (ruling D6); without
+ * it `min(pairs, M)` outbound-only. `pages` and `seconds` are the typical figures (1.5 pages and 245 s a pair out and
+ * back at the defaults; 1 page and spacing + 40 s outbound-only), `pagesMax` and `secondsMax` the bound (2 pages and
+ * 300 s). The assumptions say so, and name a cap that binds, compared in pairs.
  */
 function withFlights(
   ctx: EngineContext,
@@ -122,6 +174,7 @@ function withFlights(
   definitionId: string | null,
   wanted: number,
   executionId: string | null,
+  phase: FlightPhase,
 ): Estimate {
   const grid = est.perProvider
     .filter((p) => p.providerId === FLIGHT_LIST_PROVIDER)
@@ -149,25 +202,66 @@ function withFlights(
     .filter((p) => !ctx.limitsOf(p.providerId).billed)
     .reduce((a, p) => a + p.calls, 0);
   const freeLeft = Math.max(0, snapshot.budget.maxFreeCalls - freeUsed - freeLines);
-  const pages = Math.max(0, Math.min(wanted, monthLeft, freeLeft));
-  const seconds = pages * ((ctx.limitsOf(FLIGHT_LIST_PROVIDER).minSpacingSeconds ?? 0) + 40);
+  const pairs = Math.max(0, Math.min(wanted, freeLeft));
+  const per = perPair(ctx.limitsOf(FLIGHT_LIST_PROVIDER).minSpacingSeconds ?? 0, phase.booking);
+  // why: ruling D6 — the month's pages first hold whole pairs out and back (2 pages at most each), then the rest of the
+  // pairs outbound-only (1 page each) as far as the pages left allow
+  const outAndBack = phase.returns
+    ? Math.min(pairs, Math.floor(monthLeft / FLIGHT_LIST_PAGES_PER_PAIR_MAX))
+    : 0;
+  const outbound = Math.max(
+    0,
+    Math.min(pairs - outAndBack, monthLeft - FLIGHT_LIST_PAGES_PER_PAIR_MAX * outAndBack),
+  );
+  const planned = outAndBack + outbound;
+  const pages = Math.ceil(outAndBack * (1 + RETURN_SECOND_OUTBOUND_RATE)) + outbound;
+  const seconds = Math.ceil(outAndBack * per.typical + outbound * per.outbound);
+  const pagesMax = outAndBack * FLIGHT_LIST_PAGES_PER_PAIR_MAX + outbound;
+  const secondsMax = Math.ceil(outAndBack * per.bound + outbound * per.outbound);
   // why: no "+ flights" clause when no date pair is read (20.9 review finding 6); a cap that cut the pairs, to none or
   // to some, is still named, the monthly page cap first when both would (it is the browser worker's)
   const notes =
-    pages === 0 ? [] : [`${FLIGHT_NOTE} ${pages} date pairs, about ${Math.round(seconds / 60)} minutes`];
-  if (pages < wanted)
-    notes.push(
-      monthLeft <= freeLeft
-        ? `flights for ${pages} date pairs: the browser worker's monthly page cap`
-        : `flights for ${pages} date pairs: the run's free-call limit`,
-    );
-  const flightLists = { pages, seconds };
+    planned === 0
+      ? []
+      : outAndBack > 0
+        ? [
+            `${FLIGHT_NOTE}, out and back, for up to ${datePairs(planned)}: usually about ${pages} pages and ${minutes(seconds)}, at most ${pagesMax} pages and ${minutes(secondsMax)}`,
+          ]
+        : [`${FLIGHT_NOTE} for up to ${datePairs(planned)}, about ${minutes(seconds)}`];
+  const monthCut = phase.returns ? outAndBack < pairs : planned < pairs;
+  if (monthCut) {
+    const which =
+      outAndBack === 0
+        ? datePairs(planned)
+        : outbound === 0
+          ? `${datePairs(outAndBack)} out and back`
+          : `${datePairs(outAndBack)} out and back, ${outbound} outbound only`;
+    notes.push(`flights for ${which}: the browser worker's monthly page cap`);
+  } else if (pairs < wanted) notes.push(`flights for ${datePairs(pairs)}: the run's free-call limit`);
+  const flightLists = phase.returns
+    ? { pairs: planned, pages, seconds, pagesMax, secondsMax, returns: true }
+    : { pairs: planned, pages, seconds, returns: false };
   return {
     ...est,
     seconds: est.seconds + seconds,
     flightLists,
     assumptions: [...est.assumptions, ...notes],
   };
+}
+
+/**
+ * Spec rev 56 §8.2 (ruling D5): the margin the browser window carries beyond 1.5 × the estimate's seconds when its
+ * flight line plans the return leg: one return-phase request's `flightRequestSeconds` (780 s with the booking read,
+ * 600 s without, at the defaults), so the last pairs of a typical run are not refused at the gate; 0 otherwise.
+ */
+export function flightWindowMarginSeconds(ctx: EngineContext, est: Pick<Estimate, 'flightLists'>): number {
+  const f = est.flightLists;
+  if (f?.returns !== true || (f.pairs ?? f.pages) === 0) return 0;
+  const seconds = ctx.limitsOf(FLIGHT_LIST_PROVIDER).flightRequestSeconds;
+  if (seconds === null) return 0;
+  return ctx.workerFlags.get(FLIGHT_LIST_PROVIDER)?.BOOKING_SELECT_VERIFIED === true
+    ? seconds.booking
+    : seconds.returnsOnly;
 }
 
 interface Line {
@@ -461,9 +555,9 @@ export function estimateStart(
   if (definitionId === null) notes.push('every cell is planned: no reuse of earlier prices is assumed');
   if (snapshot.windowClamped) notes.push('window clamped to start tomorrow');
   const est = assemble(ctx, lines, cells.length, snapshot.windowClamped, notes);
-  return flightsApply(ctx, snapshot)
-    ? withFlights(ctx, est, snapshot, definitionId, flightPairsWanted(ctx, snapshot, definitionId), null)
-    : est;
+  if (!flightsApply(ctx, snapshot)) return est;
+  const wanted = flightPairsWanted(ctx, snapshot, definitionId);
+  return withFlights(ctx, est, snapshot, definitionId, wanted, null, returnPhaseOf(ctx, snapshot, wanted));
 }
 
 function firstCellOf(ctx: EngineContext, executionId: string): CellKey | undefined {
@@ -521,7 +615,43 @@ export function estimateRemainingFor(ctx: EngineContext, exec: Execution, manual
     plan === null
       ? flightPairsWanted(ctx, snapshot, exec.definitionId)
       : plan.cells.filter((c) => !done.has(cellKeyString(c)) && c.departureDate > today).length;
-  return withFlights(ctx, est, snapshot, exec.definitionId, wanted, exec.id);
+  // why: a resumed pass keeps the stored plan's return phase, less what a transient end has stopped
+  const phase =
+    plan === null
+      ? returnPhaseOf(ctx, snapshot, wanted)
+      : {
+          returns: plan.returns && plan.returnsStopped === null,
+          booking: plan.booking && plan.returnsStopped === null && plan.bookingStopped === null,
+        };
+  return withFlights(ctx, est, snapshot, exec.definitionId, wanted, exec.id, phase);
+}
+
+type FlightLine = NonNullable<Estimate['flightLists']>;
+
+/** Two flight lines summed (spec rev 56 §8.1): the bound kept when either carries one, `returns` when either plans it. */
+function sumFlights(a: FlightLine | undefined, b: FlightLine | undefined): FlightLine {
+  const sum = (f: (x: FlightLine) => number) => (a === undefined ? 0 : f(a)) + (b === undefined ? 0 : f(b));
+  const returns = a?.returns === true || b?.returns === true;
+  const base = {
+    pairs: sum((x) => x.pairs ?? x.pages),
+    pages: sum((x) => x.pages),
+    seconds: sum((x) => x.seconds),
+  };
+  return returns
+    ? {
+        ...base,
+        pagesMax: sum((x) => x.pagesMax ?? x.pages),
+        secondsMax: sum((x) => x.secondsMax ?? x.seconds),
+        returns,
+      }
+    : { ...base, returns };
+}
+
+/** A flight line with every figure zeroed (a blocked browser line runs no flight step), its plan kept. */
+function zeroFlights(f: FlightLine): FlightLine {
+  return f.returns === true
+    ? { pairs: 0, pages: 0, seconds: 0, pagesMax: 0, secondsMax: 0, returns: true }
+    : { pairs: 0, pages: 0, seconds: 0, returns: false };
 }
 
 /**
@@ -542,14 +672,12 @@ export function addPass(stored: Estimate | null, pass: Estimate): Estimate {
       l.seconds += p.seconds;
     }
   }
-  // why: spec rev 55 §8.1 — the flight pages of every pass, as the lines are summed
+  // why: spec rev 56 §8.1 — the flight figures of every pass, as the lines are summed (an older stored line, with only
+  // pages and seconds, reads pairs = pages and its bound = its typical figures)
   const flights =
     stored.flightLists === undefined && pass.flightLists === undefined
       ? undefined
-      : {
-          pages: (stored.flightLists?.pages ?? 0) + (pass.flightLists?.pages ?? 0),
-          seconds: (stored.flightLists?.seconds ?? 0) + (pass.flightLists?.seconds ?? 0),
-        };
+      : sumFlights(stored.flightLists, pass.flightLists);
   return {
     ...stored,
     perProvider: lines,
@@ -571,7 +699,7 @@ export function withBlocked(e: Estimate, blockedBy: ReadonlyMap<LineKey, string>
   const runs = perProvider.filter((p) => p.blocked === null);
   // why: spec rev 55 §8.1 — a pass whose browser discovery line is blocked runs no flight-list step (its entry rule)
   const noFlights = e.flightLists !== undefined && blockedBy.has(lineKey('discovery', FLIGHT_LIST_PROVIDER));
-  const flights = noFlights ? { pages: 0, seconds: 0 } : e.flightLists;
+  const flights = noFlights && e.flightLists !== undefined ? zeroFlights(e.flightLists) : e.flightLists;
   // why: 20.9 review finding 6 — a zeroed flight line keeps none of its words ("+ flights for up to 10 …" would be untrue)
   const kept = noFlights ? e.assumptions.filter((a) => !isFlightNote(a)) : e.assumptions;
   return {
@@ -741,5 +869,7 @@ export function monthlyPagesOf(
 export function browserPagesPlanned(estimate: Pick<Estimate, 'perProvider' | 'flightLists'>): number | null {
   const lines = estimate.perProvider.filter((p) => p.providerId === 'camoufox' && p.blocked === null);
   if (lines.length === 0) return null;
-  return lines.reduce((a, p) => a + p.calls, 0) + (estimate.flightLists?.pages ?? 0);
+  // why: spec rev 56 §8.1 — the bound's pages (20 a run with the return leg), never the typical 15
+  const f = estimate.flightLists;
+  return lines.reduce((a, p) => a + p.calls, 0) + (f?.pagesMax ?? f?.pages ?? 0);
 }
