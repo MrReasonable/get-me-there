@@ -537,8 +537,7 @@ so a first pass that used its whole page cap still reads
 its flights (§8.1 "The flight-list step"). On demand one date pair's list is
 read against the monthly cap only, refused while any run that names the
 provider is pending or running or another read is in flight, and refused as
-`fresh` while its newest list is finished and younger than 0.9 × the search's camoufox
-refresh (§8.1 "Reading one date pair's flights"). Source label "Google
+`fresh` by the rule of §8.1 "Reading one date pair's flights". Source label "Google
 Flights flight list via Camoufox" (the main path names it "the browser
 worker's flight list", §3); `sourceKind` `scraped-self`, `maxAgeHours` 0, fx
 not converted, the point of sale as the page stated it; `provenanceNote`:
@@ -634,7 +633,8 @@ rule `monthly-headroom`, before any activation, the first view still read
   fits the limits on its leg and `selectOutbound` over the flights not yet
   tried gives a further fitting outbound, the worker waits out the spacing
   (the pacer re-claimed under the step's own budget; a wait that runs out
-  leaves the status `read` with rule `spacing`), then loads its own list URL
+  leaves the status `read` with rule `spacing`, makes no second attempt, and
+  the booking read is then made on attempt 0), then loads its own list URL
   again (a fresh, spaced, counted document: the reload, the one spaced step,
   `RETURN_SPACED_LOADS`), runs the served sequence again (Best settled, the
   form checked, the Cheapest flow with a full page period of its own), and
@@ -685,21 +685,31 @@ rule `monthly-headroom`, before any activation, the first view still read
   `skipped` (no attempt made, rule `monthly-headroom`, `spacing` or
   `not-cheapest-view`), `select-failed`, `not-settled`, `unrecognised` (the
   first attempt's transient end, with its rule naming the step) or
-  `not-verified`; a `read` whose second attempt ended early carries that end's
-  rule. `booking.status` is `read` (the expansion made, or no control present,
-  and at least one offer read), `no-pairing` (no return listed on the last
-  attempt, nothing selected), `skipped` (no booking step made, with its rule,
-  among them `reload:<end>`, `spacing` keeping attempt 0's booking read
-  instead, and `second-selection` when the second selection failed),
-  `select-failed`, `not-settled`, `unrecognised`, `expand-failed` or
-  `not-verified`; `booking` is null when the request asked for none.
-  `read` and `no-outbound` (`no-pairing` for the booking) are finished; the
-  failed, unsettled, unrecognised and skipped ends are transient (§8.1 reads
-  their pairs again). Every transient end keeps everything read before it
-  (the outbound flights, earlier attempts, the offers where said), answers
+  `not-verified`; a `read` whose second attempt ended early, or could not
+  start (`spacing`), carries that end's rule. `booking.status` is `read` (the
+  expansion made, or no control present, and at least one offer read),
+  `no-pairing` (no return listed on the last attempt, nothing selected),
+  `skipped` (no booking step made, with its rule: `monthly-headroom` and
+  `not-cheapest-view` as the returns', `reload:<end>` after a reload that did
+  not reach a settled Cheapest view, and `second-selection` when the second
+  selection failed; a `spacing` end makes no second attempt, and the booking
+  is then read on attempt 0), `select-failed`, `not-settled`,
+  `unrecognised`, `expand-failed` or `not-verified`; `booking` is null when
+  the request asked for none. `read` and `no-outbound` (`read` and
+  `no-pairing` for the booking) are finished; every other status is not, and
+  §8.1 reads its pair again. **Transient** names two fixed sets only:
+  `RETURN_TRANSIENT` (`select-failed`, `not-settled`, `unrecognised`,
+  `skipped`) and `BOOKING_TRANSIENT` (`select-failed`, `not-settled`,
+  `unrecognised`, `expand-failed`; a `skipped` booking is not transient, so it
+  stops nothing). Every end that is not finished keeps everything read before
+  it (the outbound flights, earlier attempts, the offers where said), answers
   `kind 'flights'`, starts no cool-down and never answers `blocked` or
-  `not-ready` (no deadline of the phase is rethrown), and the run sends no
-  further return phase (or booking read) after it. After every activation and
+  `not-ready` (no deadline of the phase is rethrown). The run sends no further
+  return phase after a return view's own end (a return status
+  `select-failed`, `not-settled` or `unrecognised`, or a `read` whose second
+  attempt ended other than at the spacing wait), and no further booking read
+  after a booking status in `BOOKING_TRANSIENT`; a `skipped` end, the
+  month's, the spacing's or the view's, stops nothing (§8.1). After every activation and
   every poll the worker reads the guard's refusal before classifying: a
   navigation refused while an activation settled, past the request's
   reservation (`page-reservation`) or off the allowlist (a seller's host, or
@@ -726,12 +736,14 @@ rule `monthly-headroom`, before any activation, the first view still read
   (780 s, or 600 s without a booking read, at the defaults), discovery
   keeping its own.
 
-The flags are dated per entry: `darwin-arm64`'s `RETURN_SELECT_VERIFIED` and
-`BOOKING_SELECT_VERIFIED` are set by the recordings of 2026-11-01
-(`select-outbound` and `select-return`) and one end-to-end recording of the
-full served path (both outbounds, the reload, the return's selection and the
-expansion); every other entry keeps them false until its own recording
-session, and the docs promise returns and sellers only where they are set.
+The flags are dated per entry. `darwin-arm64`'s `RETURN_SELECT_VERIFIED` and
+`BOOKING_SELECT_VERIFIED` rest on the recordings of 2026-11-01
+(`select-outbound` and `select-return`) and are set only after one
+end-to-end recording of the full served path on that entry (both outbounds,
+the reload, the return's selection and the expansion; "Recordings first",
+below) and its recorded suites' required run; until then they stay false.
+Every other entry keeps them false until its own recording session, and the
+docs promise returns and sellers only where they are set.
 
 *Limits (operator rulings of 2026-10-18, plan decisions 68 and 69).* Camoufox
 is the browser as the operator installed it; the worker adds no
@@ -1054,13 +1066,16 @@ two apart), which settles the rejection mark. Work package 21 recorded on
 `darwin-arm64`, on 2026-11-01 and under the worker's rules, the outbound's
 selection and the reload (`record --select-outbound`) and the return's
 selection, the booking view and its "more booking options" expansion (`record
---select-return`), activating nothing on the booking view but the expansion,
-and then one end-to-end recording of the full served path (`record
---select-return --force-second`: the first outbound's returns treated as not
-fitting, the reload, the second outbound, its return, the booking view and
-the expansion) before that entry's `RETURN_SELECT_VERIFIED` and
-`BOOKING_SELECT_VERIFIED` were set; each other entry's recording session
-records the same kinds before its own are.
+--select-return`), activating nothing on the booking view but the expansion.
+Before that entry's `RETURN_SELECT_VERIFIED` and `BOOKING_SELECT_VERIFIED`
+are set, the operator records one end-to-end run of the full served path
+(`record --select-return --force-second`: the first outbound's returns
+treated as not fitting, the reload, the second outbound, its return, the
+booking view and the expansion), under the activation gate, a reservation of
+two pages and the served path's full page budget as its cap (eight page
+periods plus one spacing, 750,000 ms at the defaults), and the recorded
+suites then run with `RECORDINGS_REQUIRED=1` (§9); each other entry's
+recording session records the same kinds before its own flags are set.
 
 *Ledger and caps.* Every worker call through the adapter is one
 `provider_requests` row under the **free-provider rules** (never billable,
@@ -1299,8 +1314,9 @@ verification as a free history source (§7 `route_price_history`).
   it has no itinerary identity and is never verified.
 - **Offers read** — the offers this app read on one booking view after its
   "more booking options" were opened, said as "cheapest of N offers read";
-  never "each seller" or "every seller". "Sellers not read" says a pairing has
-  no finished booking read.
+  never "each seller" or "every seller". "Sellers not read" says no booking
+  read of that pairing kept offers (an `expand-failed` read that kept offers
+  is either the figure or "a cheaper seller may not have been read", §6.9).
 - **Search execution** — one run over a resolved space with a definition
   snapshot, stages, seeded per-cell-per-provider outcomes, an estimate and
   a ledger. Resumable. A **child execution** verifies one cell on demand.
@@ -1529,12 +1545,15 @@ export type FlightListResult =
       cheapestView: 'cheapest' | 'best-fallback' | null; optionsUnparsed: number; optionsOtherCell: number; resultsStated: number | null; notes: string[];
       returns: ReturnRead | null;              // the worker's return read, null when the request had no return phase (or an older worker answered without one)
       nextLoadNotBefore: IsoDateTime | null }  // when the next camoufox load may start (after a request that loaded the reload); the capability holds http-kit's next start until then
+  | { kind: 'list-error'; error: ProviderError };   // BudgetExceeded is thrown, as fetchTile throws it; a query without airport names fails closed (parse, reason no-airport-names) before any request
+export interface FlightListCapability { info: CapabilityInfo; read(q: FlightListQuery, ctx: ProviderContext): Promise<FlightListResult> }   // camoufox only; its preflight is discovery's
 // The worker answer's pagesLoaded is never on the result, a stored row or the wire: it reaches only the ledger (http-kit's pageCountOf → finalise's
 // pageCount → provider_requests.page_count, §5.3, §7).
 // core/flights (returns.ts, choose.ts, limits.ts; §2 "The return phase", §6.2, §6.9), every shape a strict zod schema:
 export interface FlightLimits { maxJourneyMinutes: number | null; maxStops: number | null; departureWindowLocal: LocalTimeWindow | null; arrivalWindowLocal: LocalTimeWindow | null }
-export interface ListedReturn { departsLocal; arrivesLocal; arrivesDayOffset: number; durationMinutes; stops; carriers; operatedBy;   // ListedFlight's leg fields;
-  fromMinor: number }   // the day offset from the RETURN date, −1 to 3; fromMinor the return's "From" price in GBP pence, ≥ 1 (the cheapest seller's for the pairing)
+export interface ListedReturn { departsLocal: string; arrivesLocal: string; arrivesDayOffset: number; durationMinutes: number; stops: number;   // HH:MM local times;
+  carriers: string[]; operatedBy: string | null; fromMinor: number }   // ListedFlight's leg fields and checks; the day offset from the RETURN date, −1 to 3;
+                                                                       // fromMinor the return's "From" price in GBP pence, ≥ 1 (the cheapest seller's for the pairing)
 export interface ReturnAttempt { outboundIndex: number; outboundFits: boolean; listed: 'returns' | 'none-for-cell'; moreListed: boolean;
   returns: ListedReturn[]; optionsUnparsed: number; optionsOtherCell: number; resultsStated: number | null }   // returns ≤ 30, non-empty exactly when listed is 'returns'
 export interface Offer { seller: string; fare: string | null; priceMinor: number }   // a seller's stated price, GBP pence ≥ 1; seller and fare page text ≤ 80 characters
@@ -1547,12 +1566,9 @@ export const BOOKING_STATUS = ['read', 'no-pairing', 'skipped', 'select-failed',
 // BOOKING_TRANSIENT { select-failed, not-settled, unrecognised, expand-failed }. The refinements: attempts non-empty exactly when status is read (at most
 // RETURN_ATTEMPTS_MAX); a second attempt only with outboundFits true and only when the first has no return within `limits`; every outboundIndex inside
 // the list's flights; rule non-null exactly for skipped, select-failed, not-settled, unrecognised and a read whose second attempt ended early or could
-// not start (returns),
-// and for skipped, select-failed, not-settled, unrecognised and expand-failed (booking); a read booking has an offer, and offers only on read and
+// not start (returns), and for skipped, select-failed, not-settled, unrecognised and expand-failed (booking); a read booking has an offer, and offers only on read and
 // expand-failed; booking.attempt is the last attempt, booking.returnIndex inside its returns; attempt and returnIndex set exactly for read,
 // select-failed, not-settled, unrecognised and expand-failed. The contract refuses a return or an offer without a price above 0.
-  | { kind: 'list-error'; error: ProviderError };   // BudgetExceeded is thrown, as fetchTile throws it; a query without airport names fails closed (parse, reason no-airport-names) before any request
-export interface FlightListCapability { info: CapabilityInfo; read(q: FlightListQuery, ctx: ProviderContext): Promise<FlightListResult> }   // camoufox only; its preflight is discovery's
 export interface FlightProvider {
   readonly id: ProviderId; readonly displayName: string;
   readonly suppliedFields: readonly SuppliedField[]; readonly cabins: readonly Cabin[];
@@ -2885,8 +2901,7 @@ finish: completed, or the stop's status with its stored cause ("Stop causes" bel
   allowance check is `used + (returnLimits ? FLIGHT_LIST_PAGES_PER_PAIR_MAX :
   1) > flightListPages`, which refuses before any call. After a `list`
   result whose return status is `select-failed`, `not-settled` or
-  `unrecognised`, or `read` with a rule other than `spacing` or
-  `monthly-headroom`, the step sets `returnsStopped` to its rule, and after
+  `unrecognised`, or `read` with a rule other than `spacing`, the step sets `returnsStopped` to its rule, and after
   one whose booking status is transient it sets `bookingStopped`, so the
   pass sends no further return phase (or booking read); `skipped`,
   `no-outbound` and a clean `read` stop nothing. The step reads its date
@@ -4401,7 +4416,7 @@ merged into price.
     listed with it · read 3d ago, 12 Mar 11:44 · prices from Google Flights,
     not checked with the airline", and it never mentions return flights. The
     block shows up to
-    three flights (`FLIGHTS_SHOWN`), each "depart 07:15, arrive 18:05 +1 · 10h
+    three flights (`FLIGHTS_SHOWN`), each "depart 07:15, arrive 18:05 · 14h
     50m · 1 change · Virgin Atlantic · from £478 round trip", the amount
     through `PriceCell`'s compact face with the main-path flight-list source
     label, the calendar style (dashed outline, "not checked") and the list's
@@ -4832,7 +4847,7 @@ CAMOUFOX_EXECUTION_PAGE_CAP=100          # discovery page loads per execution (B
 CAMOUFOX_MONTHLY_PAGE_CAP=1500           # page loads per billing month (provider-month; no-page rows not counted); the app's ledger enforces it; the worker enforces it too
 CAMOUFOX_BILLING_DAY=1                   # 1–28: the month starts 00:00 UTC that day, for both monthly caps, in the ledger and the worker
 CAMOUFOX_COOLDOWN_HOURS=48               # pause after a challenge, sign-in or consent page; 24–100000 (an unrecognised page pauses a fixed 1 h)
-CAMOUFOX_PAGE_TIMEOUT_SECONDS=90         # the worker's whole-page deadline (load, settle, read), 30–240; the app's request timeout is this + 15 s (grid: 2 × this + scroll cap × (scroll spacing + 60 s) + 15 s)
+CAMOUFOX_PAGE_TIMEOUT_SECONDS=90         # the worker's whole-page deadline (load, settle, read), 30–240; the app's request timeout is this + 15 s (grid: 2 × this + scroll cap × (scroll spacing + 60 s) + 15 s; a flights request with a return phase: flightRequestSeconds, §2)
 CAMOUFOX_MODE=list                       # list (one day pair a page) or grid (the Dates tab's date grid, once the worker reports GRID_VERIFIED and its measured step)
 CAMOUFOX_GRID_SCROLL_SPACING_SECONDS=5   # grid: scroll clicks start to start; 0–30 (0 means no pause: scrolls go back to back); never randomised
 CAMOUFOX_GRID_SCROLL_CAP=30              # grid: scrolls a page may make; 0–60
@@ -5441,20 +5456,18 @@ read"), never "verified" and not checked with the airline; booking stays on Goog
 visits a seller (§2, §3, §6.9, §11).
 
 **What the recording showed** (Task 21.0, `darwin-arm64`, select-outbound/2026-11-01/3 and 4 and
-select-return/2026-11-01/1 to 4, 13 of the month's 1,500 pages, no cool-down; structural facts only, no page text).
-Every activation (the outbound's selection, the return's selection and the booking view's expansion) changed the view
-in place without loading a document, and only the reload for a second outbound loaded one, so a pair costs one page,
-or two with a second outbound. A pointer click on a result link was intercepted by an element over its row, while
-focusing the link and pressing Enter selected it every time, with nothing to dismiss. The return view is recognised
-by its "Returning flights" heading in three forms, at least one result link, no tab and no Date grid button; it
-shows a "View more" control with no stated count and no search form. Every return name (38 of 38) opens with the
-outbound grammar's "From" price clause, and the cheapest return's figure equalled the selected outbound's "From"
-price on all four selections. The booking view, reached in place at the booking path, lists each seller's offer as
-a button stating its exact price, never "From", under a heading stating a price range, and on one route its cheapest
-listed offer was 3.5% above the return's "From" price until the expansion. After its one "more booking options"
-control was activated, every offer (23 and 19) was read by the offer grammar and the cheapest equalled the return's
-"From" price on both recordings; the largest step, the reload's settle, took 27.9 s, so every step is bounded at
-40 s.
+select-return/2026-11-01/1 to 4, 13 of the month's 1,500 pages, no cool-down; structure only). Every activation (the
+outbound's selection, the return's selection and the booking view's expansion) changed the view in place, and only
+the reload for a second outbound loaded a document, so a pair costs one page, or two with a second outbound. A
+pointer click on a result link was intercepted by an element over its row, while focusing the link and pressing
+Enter selected it every time, with nothing to dismiss. The return view has a heading of the returning-flights
+pattern in three forms, at least one result link, no tab, no Date grid button, no search form and a control for more
+results with no stated count. Every return name (38 of 38) carries the outbound grammar's "From" price clause, and
+the cheapest return's price equalled the selected outbound's on all four selections. The booking view, at the
+booking path, lists each seller's offer as a button stating an exact price under a price-range heading, and on one
+route its cheapest listed offer was 3.5% above the return's "From" price until its one expansion control was
+activated, after which every offer (23 and 19) was read and the cheapest equalled it on both recordings. The largest
+step, the reload's settle, took 27.9 s, so every step is bounded at 40 s.
 
 **Rulings on the brief's reviews** (the orchestrator's). The page rule: a page is one document load, an activation
 loads none, every load is spaced from the last whatever its request, and the window's worst case bounds a request
@@ -5505,7 +5518,7 @@ the outbound's, so no second grammar or version exists (§2). The return phase i
 (§2). A `no-returns` status is left out until the return view's own no-flights line is recorded (§2). A return's day
 offset admits −1, a date-line arrival the previous calendar day (§2, §7). The camoufox page scopes report the page sum
 as their `calls`, so the usage read, the Providers page and `gmt browser counts` keep their shape (§2, §7). The offer
-grammar reads "Continue to book with <seller>[, <fare>] for <price> <currency>" into a seller, a fare and a price
+grammar reads "Continue to book with <seller>[, <fare>] for <price> British pounds" into a seller, a fare and a price
 (§2). The booking read is of the last attempt's chosen return, the view the phase stands on (§2, §6.9).
 
 What changed. Header: revision 56. §1: the success line and the headline. §2: the provider row, the page rule, the
