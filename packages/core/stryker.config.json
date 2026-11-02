@@ -43,6 +43,10 @@
     "src/datePairs/marks.ts",
     "src/flights/choose.ts",
     "src/flights/ties.ts",
+    "src/flights/types.ts",
+    "src/flights/limits.ts",
+    "src/flights/returns.ts",
+    "src/datePairs/pairing.ts",
     "src/api-contract/datePairs.ts"
   ],
   "thresholds": {

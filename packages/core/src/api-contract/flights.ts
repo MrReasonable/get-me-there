@@ -5,6 +5,7 @@
  */
 import { z } from 'zod';
 import { FLIGHT_LIST_MAX_FLIGHTS } from '../flights/limits.js';
+import { returnReadSchema, returnsOutboundIssue } from '../flights/returns.js';
 import { LISTED, listedFlightSchema } from '../flights/types.js';
 import { iataSchema, isoDateSchema, isoDateTimeSchema } from '../types/ids.js';
 import { pointOfSaleSchema } from '../types/provenance.js';
@@ -63,6 +64,11 @@ export const flightListSchema = z
     optionsUnparsed: countSchema,
     optionsOtherCell: countSchema,
     resultsStated: countSchema.nullable(),
+    /**
+     * Spec rev 56 §10: the return read with its attempts, returns and booking read with its offers; null for a list read
+     * without a return phase or stored before migration 0012. Optional until Task 21.7 makes it required (R-order).
+     */
+    returns: returnReadSchema.nullable().exactOptional(),
   })
   .superRefine((l, ctx) => {
     // why: §7's CHECKs: (status = 'failed') = (reason IS NOT NULL) and (status = 'read') = (listed IS NOT NULL)
@@ -79,6 +85,17 @@ export const flightListSchema = z
         code: 'custom',
         path: ['flights'],
         message: "listed 'flights' exactly when a flight was read",
+      });
+    // why: spec rev 56 §10: an outbound index past the flights is refused (the booking's indices: returnReadSchema)
+    const breach =
+      l.returns === undefined || l.returns === null
+        ? null
+        : returnsOutboundIssue(l.returns, l.flights.length);
+    if (breach !== null)
+      ctx.addIssue({
+        code: 'custom',
+        path: ['returns', 'attempts', breach, 'outboundIndex'],
+        message: "an attempt's outbound is one of the list's flights",
       });
   });
 export type FlightList = z.infer<typeof flightListSchema>;
@@ -115,6 +132,12 @@ export const flightListsResponseSchema = z.strictObject({
   // estimate; the read button adds "N pages left this month" only when `monthlyPagesLeft` is below it. Null when no
   // camoufox line of the search can run (or flight lists are not available here).
   runPages: countSchema.nullable(),
+  /**
+   * Ruling D3 (spec rev 56 §10): the pages one on-demand read plans, `flightPagesPerPair` of the worker's last reported
+   * flags (2 with a return phase, else 1); the read button and its words use it, never a hard number. Optional until
+   * Task 21.6 fills it.
+   */
+  pagesPlanned: countSchema.exactOptional(),
   reading: z.strictObject({ departureDate: isoDateSchema, returnDate: isoDateSchema }).nullable(),
   pairs: z.array(
     z.strictObject({

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { Estimate } from '../types/execution.js';
 import { iataSchema, isoDateSchema, isoDateTimeSchema, isoMonthSchema } from '../types/ids.js';
+import { localTimeWindowSchema } from '../types/window.js';
 import {
   cabinSchema,
   cellKeySchema,
@@ -11,8 +12,6 @@ import {
   stageSchema,
 } from './common.js';
 
-const timeOfDay = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'HH:mm');
-const localTimeWindowSchema = z.object({ from: timeOfDay, to: timeOfDay });
 const positiveInt = z.number().int().min(0);
 
 /** Spec §6.1 windows: relative resolves at execution start; absolute is clamped to tomorrow. */
@@ -209,8 +208,21 @@ export const estimateSchema: z.ZodType<Estimate> = z.object({
   assumptions: z.array(z.string()),
   windowClamped: z.boolean(),
   retryFactor: z.number().min(1),
-  /** Spec rev 55 §8.1 (ruling A5): the flight-list step's pages and seconds; no key without camoufox. */
-  flightLists: z.strictObject({ pages: positiveInt, seconds: positiveInt }).exactOptional(),
+  /**
+   * Spec rev 55 §8.1 (ruling A5), revision 56 (R-estimate): the flight-list step's typical pages and seconds, and (each
+   * optional for good, so an estimate stored before WP21 still parses: ruling A3) the date pairs read, whether returns
+   * are planned, and the bound's pages and seconds; no key without camoufox.
+   */
+  flightLists: z
+    .strictObject({
+      pages: positiveInt,
+      seconds: positiveInt,
+      pairs: positiveInt.exactOptional(),
+      returns: z.boolean().exactOptional(),
+      pagesMax: positiveInt.exactOptional(),
+      secondsMax: positiveInt.exactOptional(),
+    })
+    .exactOptional(),
 });
 /**
  * Why pressing Search now confirms a run (spec §10, ruling A22): a code with its figures, never engine English; the web

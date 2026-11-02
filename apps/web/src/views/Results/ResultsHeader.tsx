@@ -1,4 +1,4 @@
-import { priceUnconfirmed } from '@gmt/core';
+import { priceUnconfirmed, resultBasisOf } from '@gmt/core';
 import type { ResultRow, ResultsResponse } from '../../api/types.js';
 import { PriceBoundary } from '../../components/PriceBoundary.js';
 import { PriceCell } from '../../components/PriceCell.js';
@@ -93,7 +93,8 @@ function BoardFigure({ figure }: { figure: BoardFigureData }) {
       <span>
         {D.boardPriceRest(
           COPY.datesView.airports(figure.origin, figure.destination),
-          COPY.basisName[figure.basis],
+          // why: spec rev 56 §6.9: a pairing figure is named by the calendar basis it opens on (Task 21.7 words it)
+          COPY.basisName[resultBasisOf(figure.basis)],
         )}
       </span>
       <span className="w-full text-fg-2">{D.boardDiffers}</span>

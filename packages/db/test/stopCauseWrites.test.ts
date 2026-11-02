@@ -140,7 +140,17 @@ describe('ExecutionsRepo stop causes (spec revision 55 §7)', () => {
     );
     expect(repo.get(id)?.status).toBe('running');
     expect(causeOf(db, id)?.stop_cause_json).toBeNull();
-    const plan = { planned: 1, cells: [], reused: 0, ended: null, note: 'free text' };
+    const plan = {
+      planned: 1,
+      cells: [],
+      reused: 0,
+      ended: null,
+      returns: false,
+      booking: false,
+      returnsStopped: null,
+      bookingStopped: null,
+      note: 'free text',
+    };
     expect(() => repo.patch(id, { flightLists: plan })).toThrow(RowRejected);
     expect(repo.get(id)?.flightLists).toBeNull();
     const skippedWith = { kind: 'skipped-window', note: 'free text' } as const;

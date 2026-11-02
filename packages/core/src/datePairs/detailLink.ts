@@ -1,5 +1,5 @@
 import type { IsoDate } from '../types/ids.js';
-import type { ResultBasis } from '../types/itinerary.js';
+import { type FigureBasis, resultBasisOf } from './pairing.js';
 
 /**
  * The date pair detail's URL parameters (spec §8.3, §11 URLs): the one place their names live. The engine's alert
@@ -16,13 +16,14 @@ export const DETAIL_LINK_PARAMS = {
 
 /**
  * The detail URL's query, without the leading `?`: `view=results&def=…&depart=…&return=…&basis=…[&row=…]`, in
- * §8.3's order, each value encoded as a query component.
+ * §8.3's order, each value encoded as a query component. A figure's basis is written as the `/results` basis it opens on
+ * (spec rev 56 §6.9: a pairing figure opens on `calendar`, the row it replaced; `resultBasisOf`).
  */
 export function detailLinkQuery(p: {
   definitionId: string;
   departureDate: IsoDate;
   returnDate: IsoDate;
-  basis: ResultBasis;
+  basis: FigureBasis;
   row?: string;
 }): string {
   const q = new URLSearchParams([
@@ -30,7 +31,7 @@ export function detailLinkQuery(p: {
     [DETAIL_LINK_PARAMS.def, p.definitionId],
     [DETAIL_LINK_PARAMS.depart, p.departureDate],
     [DETAIL_LINK_PARAMS.return, p.returnDate],
-    [DETAIL_LINK_PARAMS.basis, p.basis],
+    [DETAIL_LINK_PARAMS.basis, resultBasisOf(p.basis)],
   ]);
   if (p.row !== undefined) q.append(DETAIL_LINK_PARAMS.row, p.row);
   return q.toString();

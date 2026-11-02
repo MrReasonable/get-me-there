@@ -3,13 +3,15 @@ import { describe, expect, it } from 'vitest';
 import {
   type FigureCandidate,
   figuresByDatePair,
+  type PairingOf,
   pickCalendarFigure,
   pickFigure,
   pickVerifiedFigure,
 } from '../../src/datePairs/figure.js';
+import type { PairingCandidate, PairingRead } from '../../src/datePairs/pairing.js';
 import { addDays } from '../../src/dates/epochDay.js';
 import type { ResultRow } from '../../src/results/types.js';
-import { asIata, asIsoDate } from '../../src/types/ids.js';
+import { asIata, asIsoDate, asIsoDateTime } from '../../src/types/ids.js';
 import { calendarRow, NOW, row } from '../helpers/rows.js';
 
 // why: the row helpers take the schema's input shape, so the cell is plain strings and needs no brand helper.
@@ -473,5 +475,122 @@ describe('figuresByDatePair (spec §10 maxJourneyMinutes; decision 53)', () => {
   it('keeps the candidate type it was given (FigureCandidate is a Pick of ResultRow)', () => {
     const c: FigureCandidate = cal(1, { cell: at('LHR', 'JFK') });
     expect(figuresByDatePair([c], withLimit(null), NOW).figures.get(0)?.chosen).toBe(c);
+  });
+});
+
+describe('figuresByDatePair with the pairing figure (spec rev 56 §6.9; Ian ruling 1; R-lead; R-sellers)', () => {
+  const space = scopeOf(['LGW', 'LHR']).space;
+  const scope = { space, maxJourneyMinutes: null };
+  const grid = cal(56_400, { cell: at('LHR', 'JFK') });
+  const candidate = (over: Partial<PairingCandidate> = {}): PairingCandidate => ({
+    fromMinor: 118_000,
+    offer: { seller: 'QQ Travel', fare: null, priceMinor: 118_000 },
+    offersRead: 3,
+    complete: true,
+    which: 'next-cheapest',
+    times: { departOut: '07:15', arriveOut: '18:05', departBack: '14:20', arriveBack: '06:25' },
+    mismatch: false,
+    provenance: {
+      providerId: 'camoufox',
+      sourceKind: 'scraped-self',
+      fetchedAt: asIsoDateTime('2027-03-01T09:30:00.000Z'),
+      maxAgeHours: 0,
+      fx: { converted: false },
+      pointOfSale: 'GB',
+      cabin: 'economy',
+    },
+    stale: false,
+    ageHours: 2,
+    fits: true,
+    fresh: true,
+    underCurrentLimits: true,
+    fetchedAt: asIsoDateTime('2027-03-01T09:30:00.000Z'),
+    executionId: 'ex-2',
+    ...over,
+  });
+  const only =
+    (read: PairingRead, c: PairingCandidate | null): PairingOf =>
+    () => ({ read, candidate: c });
+
+  it("a candidate that leads gives basis pairing: the offer's price, the grid price it replaced, pairingRead within", () => {
+    const c = candidate();
+    const f = figuresByDatePair([grid], scope, NOW, only('within', c)).figures.get(0);
+    expect(f).toEqual({
+      basis: 'pairing',
+      chosen: grid,
+      cheaperCached: null,
+      pricePence: 118_000,
+      grid: { pricePence: 56_400, provenance: grid.provenance, stale: false, truncated: false },
+      pairing: c,
+      pairingRead: 'within',
+    });
+  });
+
+  it("asks for the calendar figure's own cell", () => {
+    const asked: string[] = [];
+    figuresByDatePair([grid], scope, NOW, (cell) => {
+      asked.push(`${cell.origin}-${cell.destination}-${cell.departureDate}-${cell.returnDate}`);
+      return { read: 'not-read', candidate: null };
+    });
+    expect(asked).toEqual([`LHR-JFK-${grid.cell.departureDate}-${grid.cell.returnDate}`]);
+  });
+
+  it.each<PairingRead>(['not-read', 'outbound-only', 'no-pairing-read'])(
+    'read %s with no candidate passes through on the calendar figure',
+    (read) => {
+      const f = figuresByDatePair([grid], scope, NOW, only(read, null)).figures.get(0);
+      expect(f?.basis).toBe('calendar');
+      // why: an absent pairingRead is 'not-read' (so the default leaves today's figures as they were)
+      expect(f?.basis === 'calendar' ? (f.pairingRead ?? 'not-read') : null).toBe(read);
+      expect(f !== undefined && 'pairing' in f).toBe(false);
+    },
+  );
+
+  it.each<[string, Partial<PairingCandidate>, PairingRead]>([
+    ['offers not complete', { complete: false }, 'offers-incomplete'],
+    ['no booking offer', { offer: null }, 'sellers-not-read'],
+    ['older than the refresh', { fresh: false }, 'within-older'],
+    ['read under other limits', { underCurrentLimits: false }, 'within-other-limits'],
+    ['over the limits', { fits: false }, 'over-limit'],
+  ])('%s: the calendar figure stays, with the pairing beside it', (_name, over, read) => {
+    const c = candidate(over);
+    const f = figuresByDatePair([grid], scope, NOW, only('within', c)).figures.get(0);
+    expect(f).toEqual({
+      basis: 'calendar',
+      chosen: grid,
+      cheaperCached: null,
+      pairingRead: read,
+      pairing: c,
+    });
+  });
+
+  it('a fresh verified candidate still wins (no pairing asked for)', () => {
+    const v = fresh(60_000, { cell: at('LGW', 'EWR') });
+    let asked = 0;
+    const f = figuresByDatePair([grid, v], scope, NOW, () => {
+      asked += 1;
+      return { read: 'within', candidate: candidate() };
+    }).figures.get(0);
+    expect(f?.basis).toBe('verified');
+    expect(asked).toBe(0);
+  });
+
+  it("the default pairingOf gives today's figures unchanged", () => {
+    const rows = [
+      cal(29_000, { cell: at('LHR', 'JFK') }),
+      fresh(41_200, { cell: at('LGW', 'EWR') }),
+      cal(33_000, { cell: at('LGW', 'JFK', '2027-03-15', 10) }),
+      stale(32_000, { cell: at('LHR', 'EWR', '2027-03-15', 11) }),
+    ];
+    const { figures } = figuresByDatePair(rows, scope, NOW);
+    expect(figures.size).toBeGreaterThan(0);
+    for (const [, f] of figures) {
+      const group = rows.filter(
+        (r) =>
+          r.cell.departureDate === f.chosen.cell.departureDate &&
+          r.cell.returnDate === f.chosen.cell.returnDate,
+      );
+      expect(f).toEqual(pickFigure(group, NOW));
+    }
   });
 });

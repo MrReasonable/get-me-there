@@ -5,7 +5,35 @@ import type { StaleMark } from '../labels/age.js';
 import type { Buckets } from '../types/execution.js';
 import type { Iata, IsoDate } from '../types/ids.js';
 import type { Provenance, ProviderId } from '../types/provenance.js';
+import type { GridPrice } from './figure.js';
+import type { FigureBasis, PairingRead } from './pairing.js';
 import type { DatePairSpace } from './space.js';
+
+/**
+ * A pairing as the board shows it (spec rev 56 §10's `pairing` group, its provenance in full): the cheapest offer's
+ * stated price, or the return's "from" price when `isFrom` (then no seller and no fare); the offers read and whether
+ * they are complete; which outbound the pairing used; the two legs' local times (`HH:MM`); whether the cheapest offer
+ * differs from the "from" price; and the flight list's provenance, stale mark and age. A pairing figure's own words, and
+ * the pairing shown beneath a calendar figure (within-older, within-other-limits, over-limit, sellers-not-read,
+ * offers-incomplete).
+ */
+export interface DatePairPairing {
+  pricePence: number;
+  isFrom: boolean;
+  seller: string | null;
+  fare: string | null;
+  offersRead: number;
+  complete: boolean;
+  which: 'cheapest' | 'next-cheapest' | 'over-limit';
+  departOut: string;
+  arriveOut: string;
+  departBack: string;
+  arriveBack: string;
+  mismatch: boolean;
+  provenance: Provenance;
+  stale: StaleMark;
+  ageHours: number | 'unknown';
+}
 
 /**
  * A date pair's figure as the web reads it (spec §10, §11): a full price cell with its complete provenance, its airport
@@ -15,7 +43,8 @@ import type { DatePairSpace } from './space.js';
 export interface DatePairFigure {
   /** pricePence, provenance, stale, ageHours, truncated */
   price: z.output<typeof priceCellSchema>;
-  basis: 'verified' | 'calendar';
+  /** spec rev 56 §6.9: a pairing figure's price is its cheapest offer's, its provenance the flight list's */
+  basis: FigureBasis;
   origin: Iata;
   destination: Iata;
   airportPair: number;
@@ -39,6 +68,15 @@ export interface DatePairFigure {
     origin: Iata;
     destination: Iata;
   } | null;
+  /**
+   * Spec rev 56 §6.9: the calendar price a pairing figure replaced, shown beneath it; null on every other basis. Optional
+   * until Task 21.7 (R-order); the decoder always fills it.
+   */
+  gridPrice?: GridPrice | null;
+  /** Spec rev 56 §6.9: a pairing figure's own words, or the pairing beneath a calendar figure; else null (decoder fills). */
+  pairing?: DatePairPairing | null;
+  /** Spec rev 56 §6.9: the cell's flight read; `within` exactly on a pairing figure; absent reads as `not-read`. */
+  pairingRead?: PairingRead;
 }
 
 /** One date pair of the space: its dates, its six buckets and counts over the airport pairs in scope, its figure. */
@@ -99,8 +137,10 @@ function indexOf(at: ReadonlyMap<string, number>, code: Iata): number {
 
 /**
  * The route's body from the decoded form, in one pass over the date pairs: every column written as it goes, each
- * distinct provenance entered once in the table (keyed by `provenanceKey`), and a figure's cheaper-cached price and
- * local times in their sparse groups, keyed by the figure's position. `decodeDatePairs` is its inverse.
+ * distinct provenance entered once in the table (keyed by `provenanceKey`), and a figure's cheaper-cached price, local
+ * times, grid price and pairing in their sparse groups, keyed by the figure's position, its `pairingRead` dense (spec rev
+ * 56 §10; an absent one written `not-read`, and the column left out when every figure is `not-read`). `decodeDatePairs`
+ * is its inverse.
  */
 export function encodeDatePairs(d: DecodedDatePairs): DatePairsResponse {
   const originAt = new Map(d.scope.origins.map((c, i) => [c, i]));
@@ -144,6 +184,33 @@ export function encodeDatePairs(d: DecodedDatePairs): DatePairsResponse {
     notSeenInLatestAgeHours: [],
     journeyMinutes: [],
     fromEarlierSearch: [],
+  };
+  // why: kept apart from `f` (where the column is optional on the wire until Task 21.6) so each push is unconditional
+  const pairingRead: PairingRead[] = [];
+  const grid: NonNullable<DatePairsResponse['gridPrice']> = {
+    figure: [],
+    pricePence: [],
+    provenance: [],
+    stale: [],
+    truncated: [],
+  };
+  const pairing: NonNullable<DatePairsResponse['pairing']> = {
+    figure: [],
+    pricePence: [],
+    isFrom: [],
+    seller: [],
+    fare: [],
+    offersRead: [],
+    complete: [],
+    which: [],
+    departOut: [],
+    arriveOut: [],
+    departBack: [],
+    arriveBack: [],
+    mismatch: [],
+    provenance: [],
+    stale: [],
+    ageHours: [],
   };
   const cheaper: DatePairsResponse['cheaperCached'] = {
     figure: [],
@@ -193,6 +260,7 @@ export function encodeDatePairs(d: DecodedDatePairs): DatePairsResponse {
     f.notSeenInLatestAgeHours.push(x.notSeenInLatest === null ? null : x.notSeenInLatest.ageHours);
     f.journeyMinutes.push(x.journeyMinutes);
     f.fromEarlierSearch.push(x.fromEarlierSearch);
+    pairingRead.push(x.pairingRead ?? 'not-read');
     const c = x.cheaperCached;
     if (c !== null) {
       cheaper.figure.push(figure);
@@ -209,6 +277,33 @@ export function encodeDatePairs(d: DecodedDatePairs): DatePairsResponse {
       times.arriveOut.push(x.arriveOut);
       times.departBack.push(x.departBack);
       times.arriveBack.push(x.arriveBack);
+    }
+    const g = x.gridPrice ?? null;
+    if (g !== null) {
+      grid.figure.push(figure);
+      grid.pricePence.push(g.pricePence);
+      grid.provenance.push(entry(g.provenance));
+      grid.stale.push(g.stale);
+      grid.truncated.push(g.truncated);
+    }
+    const q = x.pairing ?? null;
+    if (q !== null) {
+      pairing.figure.push(figure);
+      pairing.pricePence.push(q.pricePence);
+      pairing.isFrom.push(q.isFrom);
+      pairing.seller.push(q.seller);
+      pairing.fare.push(q.fare);
+      pairing.offersRead.push(q.offersRead);
+      pairing.complete.push(q.complete);
+      pairing.which.push(q.which);
+      pairing.departOut.push(q.departOut);
+      pairing.arriveOut.push(q.arriveOut);
+      pairing.departBack.push(q.departBack);
+      pairing.arriveBack.push(q.arriveBack);
+      pairing.mismatch.push(q.mismatch);
+      pairing.provenance.push(entry(q.provenance));
+      pairing.stale.push(q.stale);
+      pairing.ageHours.push(q.ageHours);
     }
   }
   const { space, scope } = d;
@@ -235,8 +330,12 @@ export function encodeDatePairs(d: DecodedDatePairs): DatePairsResponse {
     summary: d.summary,
     provenances,
     pairs,
-    figures: f,
+    // why: spec rev 56 §10: a body without the column reads every figure `not-read`, so a board with no flight read for
+    // any figure leaves it out: 36,400 "not-read" entries (about 400 KB) would take the worst case past §10's 4 MiB
+    figures: pairingRead.every((r) => r === 'not-read') ? f : { ...f, pairingRead },
     cheaperCached: cheaper,
     times,
+    gridPrice: grid,
+    pairing,
   };
 }

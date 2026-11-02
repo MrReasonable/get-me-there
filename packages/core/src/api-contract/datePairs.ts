@@ -1,6 +1,8 @@
 import { z } from 'zod';
 import { columnAt } from '../datePairs/decode.js';
+import { FIGURE_BASES, PAIRING_READ, type PairingRead } from '../datePairs/pairing.js';
 import { stayCount } from '../datePairs/space.js';
+import { FLIGHT_TEXT } from '../flights/types.js';
 import { windowDays } from '../space/generate.js';
 import { DEFAULT_MAX_CELLS, MAX_DATE_PAIRS } from '../space/limits.js';
 import { iataSchema, isoDateSchema } from '../types/ids.js';
@@ -12,7 +14,6 @@ import {
   moneyPenceSchema,
   priceCellSchema,
   providerIdSchema,
-  resultBasisSchema,
   staleMarkSchema,
 } from './common.js';
 
@@ -39,6 +40,27 @@ export const datePairsQuerySchema = z.strictObject({
 
 const count = z.number().int().min(0);
 const counts = z.array(count);
+
+/**
+ * Spec rev 56 §6.5, §10: a date pair figure's basis: class verified, a calendar price (class unchecked), or the cheapest
+ * offer read for a pairing (§6.9). The board, the scoped `/results` read's `datePairFigure` and a card's cheapest take it.
+ */
+export const figureBasisSchema = z.enum(FIGURE_BASES);
+/** Spec rev 56 §6.9: a calendar figure's flight read, `within` exactly on a pairing figure. */
+export const pairingReadSchema = z.enum(PAIRING_READ);
+/** The `pairingRead` values a calendar figure shows a pairing beneath (spec rev 56 §10's `pairing` group). */
+const BENEATH: ReadonlySet<PairingRead> = new Set<PairingRead>([
+  'over-limit',
+  'within-other-limits',
+  'within-older',
+  'sellers-not-read',
+  'offers-incomplete',
+]);
+/** A local time on the 24-hour clock as a list page states it (a pairing's legs). */
+const hhmm = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/);
+/** Page text (a seller's, a fare's) held to the flight list's rule (spec rev 56 §5.1), rendered as text only. */
+const pageText = z.string().regex(FLIGHT_TEXT);
+const WHICH = ['cheapest', 'next-cheapest', 'over-limit'] as const;
 
 /** One entry per date pair, in index order: the six buckets over the airport pairs in scope and the cell counts. */
 const pairsSchema = z.strictObject({
@@ -85,7 +107,7 @@ const figuresSchema = z.strictObject({
   ageHours: z.array(ageHoursSchema),
   /** "cheapest of the rows read" (decisions 30, 36); calendar figures only */
   truncated: z.array(z.boolean()),
-  basis: z.array(resultBasisSchema),
+  basis: z.array(figureBasisSchema),
   origin: counts,
   destination: counts,
   /** decision 54, calendar figures only */
@@ -95,6 +117,11 @@ const figuresSchema = z.strictObject({
   journeyMinutes: z.array(count.nullable()),
   /** fetched by an execution created before the latest parent run (revision 50) */
   fromEarlierSearch: z.array(z.boolean()),
+  /**
+   * Spec rev 56 §6.9, §10: dense, one per figure; `within` exactly on a pairing figure. Optional until Task 21.6 fills
+   * it (R-order); a body without it reads every figure `not-read`.
+   */
+  pairingRead: z.array(pairingReadSchema).exactOptional(),
 });
 const FIGURE_COLUMNS = [
   'pair',
@@ -159,6 +186,68 @@ const TIME_COLUMNS = ['figure', ...TIME_KEYS] as const satisfies ReadonlyArray<
   keyof typeof timesSchema.shape
 >;
 
+/**
+ * Spec rev 56 §10: one entry per pairing figure, the calendar price it replaced (shown beneath it with its own source,
+ * age, "not checked" and stale mark); `figure` strictly ascending. Sparse, as `cheaperCached` is (§10's 4 MiB bound).
+ */
+const gridPriceSchema = z.strictObject({
+  figure: counts,
+  pricePence: z.array(moneyPenceSchema),
+  provenance: counts,
+  stale: z.array(staleMarkSchema),
+  truncated: z.array(z.boolean()),
+});
+const GRID_COLUMNS = [
+  'figure',
+  'pricePence',
+  'provenance',
+  'stale',
+  'truncated',
+] as const satisfies ReadonlyArray<keyof typeof gridPriceSchema.shape>;
+
+/**
+ * Spec rev 56 §10: one entry per pairing figure (its own words: seller, fare, times, `which`, mismatch; R-board) and per
+ * calendar figure shown with a pairing beneath (within-older, within-other-limits, over-limit, sellers-not-read,
+ * offers-incomplete); `figure` strictly ascending. `pricePence` is the cheapest offer's stated price, or the return's
+ * "from" price when `isFrom` (then no seller and no fare); the provenance, stale mark and age are the flight list's.
+ */
+const pairingGroupSchema = z.strictObject({
+  figure: counts,
+  pricePence: z.array(moneyPenceSchema),
+  isFrom: z.array(z.boolean()),
+  seller: z.array(pageText.nullable()),
+  fare: z.array(pageText.nullable()),
+  offersRead: counts,
+  complete: z.array(z.boolean()),
+  which: z.array(z.enum(WHICH)),
+  departOut: z.array(hhmm),
+  arriveOut: z.array(hhmm),
+  departBack: z.array(hhmm),
+  arriveBack: z.array(hhmm),
+  mismatch: z.array(z.boolean()),
+  provenance: counts,
+  stale: z.array(staleMarkSchema),
+  ageHours: z.array(ageHoursSchema),
+});
+const PAIRING_COLUMNS = [
+  'figure',
+  'pricePence',
+  'isFrom',
+  'seller',
+  'fare',
+  'offersRead',
+  'complete',
+  'which',
+  'departOut',
+  'arriveOut',
+  'departBack',
+  'arriveBack',
+  'mismatch',
+  'provenance',
+  'stale',
+  'ageHours',
+] as const satisfies ReadonlyArray<keyof typeof pairingGroupSchema.shape>;
+
 const datePairsBodySchema = z.strictObject({
   /** the latest parent run; null before the first */
   executionId: z.string().nullable(),
@@ -196,6 +285,10 @@ const datePairsBodySchema = z.strictObject({
   figures: figuresSchema,
   cheaperCached: cheaperCachedSchema,
   times: timesSchema,
+  /** spec rev 56: optional until Task 21.6 fills it (R-order); a body without it decodes with no grid price */
+  gridPrice: gridPriceSchema.exactOptional(),
+  /** spec rev 56: optional until Task 21.6 fills it (R-order); a body without it decodes with no pairing */
+  pairing: pairingGroupSchema.exactOptional(),
 });
 type DatePairsBody = z.output<typeof datePairsBodySchema>;
 
@@ -327,6 +420,16 @@ function sameLengths<C extends string>(
 function refineFigures(v: DatePairsBody, datePairs: number, fail: Fail): boolean {
   const f = v.figures;
   if (!sameLengths(f, FIGURE_COLUMNS, 'figures', fail)) return false;
+  // why: spec rev 56 §10: the column is dense; a body without it reads every figure `not-read`
+  const reads = f.pairingRead;
+  if (reads !== undefined && reads.length !== f.pair.length) {
+    fail(
+      'length.figures.pairingRead',
+      ['figures', 'pairingRead'],
+      `figures.pairingRead has ${reads.length} entries; figures.pair has ${f.pair.length}`,
+    );
+    return false;
+  }
   const provenances = v.provenances.length;
   const origins = v.scope.origins.length;
   const destinations = v.scope.destinations.length;
@@ -340,7 +443,10 @@ function refineFigures(v: DatePairsBody, datePairs: number, fail: Fail): boolean
     if (columnAt(f.origin, j) >= origins) fail('origin', ['figures', 'origin', j], 'no such origin in scope');
     if (columnAt(f.destination, j) >= destinations)
       fail('destination', ['figures', 'destination', j], 'no such destination in scope');
-    if (columnAt(f.basis, j) === 'verified') {
+    const basis = columnAt(f.basis, j);
+    if ((basis === 'pairing') !== ((reads === undefined ? 'not-read' : columnAt(reads, j)) === 'within'))
+      fail('pairingRead', ['figures', 'pairingRead', j], 'pairingRead is within exactly on a pairing figure');
+    if (basis === 'verified') {
       if (columnAt(f.superseded, j))
         fail('superseded', ['figures', 'superseded', j], 'superseded is for calendar figures');
       if (columnAt(f.truncated, j))
@@ -380,8 +486,100 @@ function verifiedFigureOf(
   return null;
 }
 
+/**
+ * The figure a revision 56 group's entry `k` names (`gridPrice`, `pairing`): reports an index that is not strictly
+ * ascending or not a figure, and returns it when it is one (the caller checks the basis), else null.
+ */
+function groupFigureOf(
+  figure: readonly number[],
+  name: string,
+  figures: number,
+  k: number,
+  fail: Fail,
+): number | null {
+  const at = columnAt(figure, k);
+  if (k > 0 && at <= columnAt(figure, k - 1)) {
+    fail(`${name}.order`, [name, 'figure', k], `${name}.figure must be strictly ascending`);
+    return null;
+  }
+  if (at >= figures) {
+    fail(`${name}.range`, [name, 'figure', k], `${name}.figure must name one of the figures`);
+    return null;
+  }
+  return at;
+}
+
+/**
+ * Spec rev 56 §10: the grid price and pairing groups' rules: lengths; figure order and range; the grid prices exactly
+ * the pairing figures; a pairing figure has a pairing entry that is not a "from" price; a pairing entry beneath a calendar
+ * figure only for the five "beneath" reads, never on a verified figure; a seller exactly when the price is an offer's
+ * (no seller and no fare on a "from" price); every provenance index in the table.
+ */
+function refinePairingGroups(v: DatePairsBody, fail: Fail): void {
+  const f = v.figures;
+  const figures = f.pair.length;
+  const pairingFigures = f.basis.flatMap((b, j) => (b === 'pairing' ? [j] : []));
+  const readOf = (j: number): PairingRead =>
+    f.pairingRead === undefined ? 'not-read' : columnAt(f.pairingRead, j);
+  const g = v.gridPrice;
+  if (g === undefined && pairingFigures.length > 0)
+    fail('gridExact', ['gridPrice'], 'a pairing figure needs its grid price');
+  if (g !== undefined && sameLengths(g, GRID_COLUMNS, 'gridPrice', fail)) {
+    const named: number[] = [];
+    for (let k = 0; k < g.figure.length; k += 1) {
+      const at = groupFigureOf(g.figure, 'gridPrice', figures, k, fail);
+      if (at !== null) named.push(at);
+      if (columnAt(g.provenance, k) >= v.provenances.length)
+        fail('gridProvenance', ['gridPrice', 'provenance', k], 'no such provenance');
+    }
+    // why: both lists ascend, so equal lists are equal sets; checked only when every entry named a figure in order
+    if (named.length === g.figure.length && named.join() !== pairingFigures.join())
+      fail('gridExact', ['gridPrice', 'figure'], 'gridPrice entries must be exactly the pairing figures');
+  }
+  const q = v.pairing;
+  if (q === undefined) {
+    if (pairingFigures.length > 0)
+      fail('pairingMissing', ['pairing'], 'a pairing figure needs its pairing entry');
+    return;
+  }
+  if (!sameLengths(q, PAIRING_COLUMNS, 'pairing', fail)) return;
+  const named = new Set<number>();
+  let inOrder = true;
+  for (let k = 0; k < q.figure.length; k += 1) {
+    const at = groupFigureOf(q.figure, 'pairing', figures, k, fail);
+    if (at === null) {
+      inOrder = false;
+      continue;
+    }
+    named.add(at);
+    const basis = columnAt(f.basis, at);
+    const isFrom = columnAt(q.isFrom, k);
+    if (basis === 'verified' || (basis === 'calendar' && !BENEATH.has(readOf(at))))
+      fail(
+        'pairingBasis',
+        ['pairing', 'figure', k],
+        'a pairing entry is for a pairing figure or a pairing shown beneath',
+      );
+    if (basis === 'pairing' && isFrom)
+      fail(
+        'pairingFrom',
+        ['pairing', 'isFrom', k],
+        "a pairing figure's price is an offer's, never a from price",
+      );
+    if (isFrom === (columnAt(q.seller, k) !== null))
+      fail('pairingSeller', ['pairing', 'seller', k], "a seller exactly when the price is an offer's");
+    if (isFrom && columnAt(q.fare, k) !== null)
+      fail('pairingFare', ['pairing', 'fare', k], 'no fare on a from price');
+    if (columnAt(q.provenance, k) >= v.provenances.length)
+      fail('pairingProvenance', ['pairing', 'provenance', k], 'no such provenance');
+  }
+  if (inOrder && pairingFigures.some((j) => !named.has(j)))
+    fail('pairingMissing', ['pairing', 'figure'], 'a pairing figure needs its pairing entry');
+}
+
 /** The sparse groups' rules: lengths, figure order and basis, the cheaper price below its figure's, indices. */
 function refineGroups(v: DatePairsBody, fail: Fail): void {
+  refinePairingGroups(v, fail);
   const c = v.cheaperCached;
   if (sameLengths(c, CHEAPER_COLUMNS, 'cheaperCached', fail))
     for (let k = 0; k < c.figure.length; k += 1) {
@@ -431,6 +629,32 @@ const cheaperCachedPriceSchema = z.strictObject({
   destination: iataSchema,
 });
 
+/** Spec rev 56 §6.9: the calendar price a pairing figure replaced, its provenance inline. */
+const gridPriceCellSchema = z.strictObject({
+  pricePence: moneyPenceSchema,
+  provenance: provenanceSchema,
+  stale: staleMarkSchema,
+  truncated: z.boolean(),
+});
+/** Spec rev 56 §10: one pairing as the `pairing` group carries it, its provenance inline. */
+const pairingCellSchema = z.strictObject({
+  pricePence: moneyPenceSchema,
+  isFrom: z.boolean(),
+  seller: pageText.nullable(),
+  fare: pageText.nullable(),
+  offersRead: count,
+  complete: z.boolean(),
+  which: z.enum(WHICH),
+  departOut: hhmm,
+  arriveOut: hhmm,
+  departBack: hhmm,
+  arriveBack: hhmm,
+  mismatch: z.boolean(),
+  provenance: provenanceSchema,
+  stale: staleMarkSchema,
+  ageHours: ageHoursSchema,
+});
+
 /**
  * The figure the Dates board shows for one date pair, as the scoped `/results` read sends it (`datePairFigure`): the
  * decoder's `DatePairFigure` less its airport-pair index, each provenance inline, with the board's per-figure rules.
@@ -438,7 +662,7 @@ const cheaperCachedPriceSchema = z.strictObject({
 export const datePairFigureSchema = z
   .strictObject({
     price: priceCellSchema,
-    basis: resultBasisSchema,
+    basis: figureBasisSchema,
     origin: iataSchema,
     destination: iataSchema,
     superseded: z.boolean(),
@@ -450,6 +674,12 @@ export const datePairFigureSchema = z
     arriveBack: z.string().nullable(),
     fromEarlierSearch: z.boolean(),
     cheaperCached: cheaperCachedPriceSchema.nullable(),
+    /** spec rev 56 §6.9: non-null exactly on a pairing figure; optional until Task 21.7 (R-order) */
+    gridPrice: gridPriceCellSchema.nullable().exactOptional(),
+    /** spec rev 56 §6.9: a pairing figure's own words, or the pairing beneath a calendar figure */
+    pairing: pairingCellSchema.nullable().exactOptional(),
+    /** spec rev 56 §6.9: absent reads as `not-read`; `within` exactly on a pairing figure */
+    pairingRead: pairingReadSchema.exactOptional(),
   })
   .superRefine((f, ctx) => {
     const fail = (path: Array<string | number>, message: string) =>
@@ -466,4 +696,20 @@ export const datePairFigureSchema = z
     }
     if (f.cheaperCached !== null && f.cheaperCached.pricePence >= f.price.pricePence)
       fail(['cheaperCached', 'pricePence'], "a cheaper cached price must be below the figure's");
+    // why: spec rev 56 §10: the board's refinement, figure by figure, so the two encodings accept the same shapes
+    const pairingBasis = f.basis === 'pairing';
+    const read = f.pairingRead ?? 'not-read';
+    const p = f.pairing ?? null;
+    if (pairingBasis !== ((f.gridPrice ?? null) !== null))
+      fail(['gridPrice'], 'a grid price exactly on a pairing figure');
+    if (pairingBasis !== (read === 'within'))
+      fail(['pairingRead'], 'pairingRead is within exactly on a pairing figure');
+    if (pairingBasis ? p === null : p !== null && (f.basis === 'verified' || !BENEATH.has(read)))
+      fail(['pairing'], 'a pairing for a pairing figure, or shown beneath a calendar figure');
+    if (p === null) return;
+    if (pairingBasis && p.isFrom)
+      fail(['pairing', 'isFrom'], "a pairing figure's price is an offer's, never a from price");
+    if (p.isFrom === (p.seller !== null))
+      fail(['pairing', 'seller'], "a seller exactly when the price is an offer's");
+    if (p.isFrom && p.fare !== null) fail(['pairing', 'fare'], 'no fare on a from price');
   });

@@ -7,9 +7,17 @@ import {
   datePairsResponseSchema,
   MAX_DATE_PAIRS,
 } from '../../src/api-contract/datePairs.js';
-import { encodeDatePairs } from '../../src/datePairs/encode.js';
+import { type DatePairFigure, encodeDatePairs } from '../../src/datePairs/encode.js';
+import { PAIRING_READ } from '../../src/datePairs/pairing.js';
 import { asIsoDate } from '../../src/types/ids.js';
-import { decoded, verifiedFigure, workedExampleResponse } from '../helpers/datePairs.js';
+import {
+  calendarFigure,
+  decoded,
+  figurePairing,
+  pairingFigure,
+  verifiedFigure,
+  workedExampleResponse,
+} from '../helpers/datePairs.js';
 
 /** A deep copy of the worked example's wire body to break one rule on. */
 const body = (): DatePairsResponse => structuredClone(workedExampleResponse());
@@ -426,5 +434,223 @@ describe("datePairFigureSchema (the detail's figure, the board's less its airpor
     expect(r.success ? [] : r.error.issues.map((i) => i.path.join('.'))).toEqual([path]);
     // why: zod puts "Invalid input" in place of an empty message; each rule says what is wrong
     for (const i of r.error?.issues ?? []) expect(i.message).toMatch(/^(?!Invalid input$).*\w{4,}/);
+  });
+});
+
+/** The worked example with a pairing figure at date pair 1 and a calendar figure with a pairing beneath at 3. */
+const withPairing = (lead: Partial<DatePairFigure> = {}): DatePairsResponse => {
+  const x = decoded({
+    pair: (i, a) =>
+      i === 1
+        ? {
+            buckets: { priced: 1, empty: 0, no_data: 0, error: 0, skipped: 0, not_run: a - 1, reused: 0 },
+            figure: pairingFigure(lead),
+          }
+        : i === 3
+          ? {
+              buckets: { priced: 1, empty: 0, no_data: 0, error: 0, skipped: 0, not_run: a - 1, reused: 0 },
+              figure: calendarFigure({
+                pairingRead: 'within-older',
+                pairing: figurePairing({ stale: 'refresh' }),
+              }),
+            }
+          : i === 5
+            ? {
+                buckets: { priced: 1, empty: 0, no_data: 0, error: 0, skipped: 0, not_run: a - 1, reused: 0 },
+                figure: verifiedFigure(),
+              }
+            : {},
+  });
+  return structuredClone(encodeDatePairs(x));
+};
+/** The response's sparse group, which the codec always writes. */
+function groupOf<K extends 'gridPrice' | 'pairing'>(
+  r: DatePairsResponse,
+  k: K,
+): NonNullable<DatePairsResponse[K]> {
+  const g = r[k];
+  if (g === undefined || g === null) throw new Error(`no ${k} group`);
+  return g;
+}
+
+describe('datePairsResponseSchema: the pairing figure (spec rev 56 §10)', () => {
+  it("takes basis 'pairing', a gridPrice entry for it and a pairing entry for it and for a calendar figure beneath", () => {
+    const r = withPairing();
+    expect(issuePaths(r)).toEqual([]);
+    expect(r.figures.basis).toEqual(['pairing', 'calendar', 'verified']);
+    expect(r.figures.pairingRead).toEqual(['within', 'within-older', 'not-read']);
+    expect(groupOf(r, 'gridPrice').figure).toEqual([0]);
+    expect(groupOf(r, 'pairing').figure).toEqual([0, 1]);
+  });
+  it('a body without the new column and groups parses (an older api)', () => {
+    const { gridPrice: _g, pairing: _p, ...older } = body();
+    const { pairingRead: _r, ...figures } = older.figures;
+    expect(issuePaths({ ...older, figures })).toEqual([]);
+  });
+  it('pairingRead is dense, one of the nine, and within exactly on a pairing figure', () => {
+    const short = withPairing();
+    short.figures.pairingRead?.pop();
+    expect(issuePaths(short)).toEqual(['figures.pairingRead']);
+    // why: a value the type refuses, built through JSON so no cast is needed
+    const odd: { figures: { pairingRead: string[] } } = JSON.parse(JSON.stringify(withPairing()));
+    odd.figures.pairingRead[1] = 'unknown';
+    expect(issuePaths(odd)).toEqual(['figures.pairingRead.1']);
+    const within = withPairing();
+    if (within.figures.pairingRead !== undefined) within.figures.pairingRead[2] = 'within';
+    expect(issuePaths(within)).toEqual(['figures.pairingRead.2']);
+    const notWithin = withPairing();
+    if (notWithin.figures.pairingRead !== undefined) notWithin.figures.pairingRead[0] = 'within-older';
+    expect(issuePaths(notWithin)).toEqual(['figures.pairingRead.0']);
+    expect(PAIRING_READ).toContain('within');
+  });
+  it('a pairing figure in a body without the gridPrice or the pairing group is refused', () => {
+    const { gridPrice: _g, ...noGrid } = withPairing();
+    expect(issuePaths(noGrid)).toEqual(['gridPrice']);
+    const { pairing: _p, ...noPairing } = withPairing();
+    expect(issuePaths(noPairing)).toEqual(['pairing']);
+  });
+  it('a pairing figure without the column is refused (an absent column reads as not-read)', () => {
+    const { pairingRead: _r, ...figures } = withPairing().figures;
+    // why: read as not-read, the calendar figure's pairing beneath (within-older) has no read to stand on either
+    expect(issuePaths({ ...withPairing(), figures })).toEqual(['figures.pairingRead.0', 'pairing.figure.1']);
+  });
+  it('gridPrice: exactly the pairing figures, figure strictly ascending, in range, its provenance in the table', () => {
+    const none = withPairing();
+    groupOf(none, 'gridPrice').figure = [];
+    for (const k of ['pricePence', 'provenance', 'stale', 'truncated'] as const)
+      groupOf(none, 'gridPrice')[k] = [];
+    expect(issuePaths(none)).toEqual(['gridPrice.figure']);
+    const onCalendar = withPairing();
+    groupOf(onCalendar, 'gridPrice').figure = [1];
+    expect(issuePaths(onCalendar)).toEqual(['gridPrice.figure']);
+    const past = withPairing();
+    groupOf(past, 'gridPrice').figure = [3];
+    expect(issuePaths(past)).toEqual(['gridPrice.figure.0']);
+    const provenance = withPairing();
+    groupOf(provenance, 'gridPrice').provenance = [99];
+    expect(issuePaths(provenance)).toEqual(['gridPrice.provenance.0']);
+    const ragged = withPairing();
+    groupOf(ragged, 'gridPrice').stale = [];
+    expect(issuePaths(ragged)).toEqual(['gridPrice.stale']);
+    const raggedPairing = withPairing();
+    groupOf(raggedPairing, 'pairing').mismatch = [];
+    expect(issuePaths(raggedPairing)).toEqual(['pairing.mismatch']);
+  });
+  it('pairing: the pairing figure has an entry that is not a "from" price; none on a verified figure', () => {
+    expect(issuePaths(withPairing({ pairing: null }))).toEqual(['pairing.figure']);
+    const isFrom = withPairing();
+    groupOf(isFrom, 'pairing').isFrom[0] = true;
+    groupOf(isFrom, 'pairing').seller[0] = null;
+    expect(issuePaths(isFrom)).toEqual(['pairing.isFrom.0']);
+    const onVerified = withPairing();
+    groupOf(onVerified, 'pairing').figure[1] = 2;
+    expect(issuePaths(onVerified)).toEqual(['pairing.figure.1']);
+    const order = withPairing();
+    groupOf(order, 'pairing').figure = [1, 0];
+    expect(issuePaths(order)).toContain('pairing.figure.1');
+  });
+  it('pairing beneath a calendar figure only for the five "shown beneath" reads', () => {
+    const r = withPairing();
+    if (r.figures.pairingRead !== undefined) r.figures.pairingRead[1] = 'outbound-only';
+    expect(issuePaths(r)).toEqual(['pairing.figure.1']);
+  });
+  it('a seller exactly when the price is not a "from" price; the seller is bounded page text; times are HH:MM', () => {
+    const fromWithSeller = withPairing();
+    groupOf(fromWithSeller, 'pairing').isFrom[1] = true;
+    expect(issuePaths(fromWithSeller)).toEqual(['pairing.seller.1']);
+    const noSeller = withPairing();
+    groupOf(noSeller, 'pairing').seller[1] = null;
+    expect(issuePaths(noSeller)).toEqual(['pairing.seller.1']);
+    const long = withPairing();
+    groupOf(long, 'pairing').seller[1] = 'Q'.repeat(81);
+    expect(issuePaths(long)).toEqual(['pairing.seller.1']);
+    const fare = withPairing();
+    groupOf(fare, 'pairing').isFrom[1] = true;
+    groupOf(fare, 'pairing').seller[1] = null;
+    groupOf(fare, 'pairing').fare[1] = 'Economy Basic';
+    expect(issuePaths(fare)).toEqual(['pairing.fare.1']);
+    const time = withPairing();
+    groupOf(time, 'pairing').departOut[0] = '7:15';
+    expect(issuePaths(time)).toEqual(['pairing.departOut.0']);
+    const provenance = withPairing();
+    groupOf(provenance, 'pairing').provenance[0] = 99;
+    expect(issuePaths(provenance)).toEqual(['pairing.provenance.0']);
+  });
+  it("the times group stays for verified figures (a pairing figure's times ride in its pairing entry)", () => {
+    const r = withPairing();
+    r.times = {
+      figure: [0],
+      departOut: ['07:15'],
+      arriveOut: [null],
+      departBack: [null],
+      arriveBack: [null],
+    };
+    expect(issuePaths(r)).toEqual(['times.figure.0']);
+  });
+  it('36,400 date pairs, every one with a figure, the column and a few hundred pairing figures stay within 4 MiB', () => {
+    const space = {
+      departureFrom: asIsoDate('2027-01-01'),
+      departureTo: asIsoDate('2028-02-04'),
+      minNights: 0,
+      maxNights: 90,
+    };
+    const priced = { priced: 1, empty: 0, no_data: 0, error: 0, skipped: 0, not_run: 0, reused: 0 };
+    const x = decoded({
+      space,
+      origins: ['LHR'],
+      destinations: ['JFK'],
+      pair: (i) => ({
+        buckets: priced,
+        figure:
+          i % 120 === 0
+            ? pairingFigure({ airportPair: 0 })
+            : i % 120 === 1
+              ? calendarFigure({ airportPair: 0, pairingRead: 'offers-incomplete', pairing: figurePairing() })
+              : calendarFigure({ airportPair: 0, pairingRead: 'outbound-only' }),
+      }),
+    });
+    expect(x.pairs).toHaveLength(MAX_DATE_PAIRS);
+    const wire = encodeDatePairs(x);
+    expect(issuePaths(wire)).toEqual([]);
+    expect(new TextEncoder().encode(JSON.stringify(wire)).length).toBeLessThanOrEqual(4 * 1024 * 1024);
+  });
+});
+
+describe("datePairFigureSchema: basis 'pairing', gridPrice, pairing and pairingRead (spec rev 56 §10)", () => {
+  const { airportPair: _p, ...pairing } = pairingFigure();
+  const { airportPair: _c, ...calendar } = calendarFigure();
+  const r = (v: unknown) => datePairFigureSchema.safeParse(v);
+  const paths = (v: unknown) => {
+    const x = r(v);
+    return x.success ? [] : x.error.issues.map((i) => i.path.join('.'));
+  };
+  it('accepts a pairing figure with its grid price, pairing and pairingRead, and a figure without them', () => {
+    expect(r(pairing).error?.issues ?? []).toEqual([]);
+    const { gridPrice: _g, pairing: _q, pairingRead: _r, ...older } = calendar;
+    expect(r(older).success).toBe(true);
+    expect(r({ ...calendar, pairingRead: 'within-older', pairing: figurePairing() }).success).toBe(true);
+  });
+  it('a grid price exactly on a pairing figure; within exactly on one; its pairing never a "from" price', () => {
+    expect(paths({ ...pairing, gridPrice: null })).toEqual(['gridPrice']);
+    expect(paths({ ...calendar, gridPrice: pairing.gridPrice })).toEqual(['gridPrice']);
+    expect(paths({ ...pairing, pairingRead: 'within-older' })).toEqual(['pairingRead']);
+    expect(paths({ ...calendar, pairingRead: 'within' })).toEqual(['pairingRead']);
+    expect(paths({ ...pairing, pairing: null })).toEqual(['pairing']);
+    expect(paths({ ...pairing, pairing: figurePairing({ isFrom: true, seller: null }) })).toEqual([
+      'pairing.isFrom',
+    ]);
+    expect(paths({ ...calendar, pairing: figurePairing() })).toEqual(['pairing']);
+    expect(
+      paths({ ...calendar, pairingRead: 'offers-incomplete', pairing: figurePairing({ seller: null }) }),
+    ).toEqual(['pairing.seller']);
+    expect(
+      paths({
+        ...calendar,
+        pairingRead: 'sellers-not-read',
+        pairing: figurePairing({ isFrom: true, seller: null, fare: 'Economy Basic' }),
+      }),
+    ).toEqual(['pairing.fare']);
+    const { airportPair: _v, ...verified } = verifiedFigure();
+    expect(paths({ ...verified, pairing: figurePairing() })).toEqual(['pairing']);
   });
 });

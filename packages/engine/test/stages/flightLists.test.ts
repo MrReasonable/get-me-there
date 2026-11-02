@@ -111,14 +111,23 @@ describe('the flight-list step after discovery', () => {
       expect(c.gated).toBe(true);
     });
     // why: the plan is written once, before the first page, and the 10 cells are the selected ones
+    // why: spec rev 56 §7: until Task 21.6 plans returns from the worker's flags every plan is outbound-only
+    const outboundOnly = { returns: false, booking: false, returnsStopped: null, bookingStopped: null };
     expect(seenPlan).toEqual([
-      { planned: 10, cells: cam.flightCalls.map((c) => c.query.cell), reused: 0, ended: null },
+      {
+        planned: 10,
+        cells: cam.flightCalls.map((c) => c.query.cell),
+        reused: 0,
+        ended: null,
+        ...outboundOnly,
+      },
     ]);
     expect(done.flightLists).toEqual({
       planned: 10,
       cells: cam.flightCalls.map((c) => c.query.cell),
       reused: 0,
       ended: null,
+      ...outboundOnly,
     });
     const rows = flightRows(e, id);
     expect(rows).toHaveLength(10);
@@ -143,7 +152,16 @@ describe('the flight-list step after discovery', () => {
     // a second run at once: every one of the 10 is reused, none read
     const second = await e.settled(await start(e));
     expect(cam.flightCalls).toHaveLength(10);
-    expect(second.flightLists).toEqual({ planned: 10, cells: [], reused: 10, ended: null });
+    expect(second.flightLists).toEqual({
+      planned: 10,
+      cells: [],
+      reused: 10,
+      ended: null,
+      returns: false,
+      booking: false,
+      returnsStopped: null,
+      bookingStopped: null,
+    });
   });
 
   it('a camoufox + Travelpayouts run whose browser lane hit its page cap still reads 10 and ends completed', async () => {

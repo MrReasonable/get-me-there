@@ -284,3 +284,43 @@ describe('bestPerWeek (revision 50: the first-ranked date pair of each Monday-st
     );
   });
 });
+
+describe('rankDatePairs with a pairing figure (spec rev 56 §6.5: verified, then pairing, then calendar at equal price)', () => {
+  /** A pairing figure on a date pair of SPACE: the offer's price, the flight list's provenance, 2 h old. */
+  const pairingPair = (pence: number, depart: string, nights = 10): DatePair => {
+    const at = asIsoDate(depart);
+    const index = datePairIndex(SPACE, at, addDays(at, nights));
+    if (index === null) throw new Error('outside SPACE');
+    const provenance = calendarProvenance({
+      providerId: 'camoufox',
+      sourceKind: 'scraped-self',
+      fetchedAt: hoursAgo(2),
+      maxAgeHours: 0,
+      pointOfSale: 'GB',
+    });
+    return datePair(SPACE, index, 1, {
+      figure: calendarFigure({
+        basis: 'pairing',
+        price: { pricePence: pence, provenance, stale: false, ageHours: 2, truncated: false },
+        pairingRead: 'within',
+      }),
+    });
+  };
+  it('at an equal price and age: verified first, then pairing, then calendar, whatever the index', () => {
+    const calendar = pairOf({ pence: 50_000, basis: 'calendar', depart: '2027-03-14' });
+    const pairing = pairingPair(50_000, '2027-03-15');
+    const verified = pairOf({ pence: 50_000, basis: 'verified', depart: '2027-03-16' });
+    expect(rankDatePairs([calendar, pairing, verified], NOW).map((p) => p.figure?.basis)).toEqual([
+      'verified',
+      'pairing',
+      'calendar',
+    ]);
+  });
+  it('price first: a £1,204 pairing ranks after an £86 calendar figure', () => {
+    const pairing = pairingPair(120_400, '2027-03-14');
+    const calendar = pairOf({ pence: 8_600, basis: 'calendar', depart: '2027-03-20' });
+    expect(rankDatePairs([pairing, calendar], NOW).map((p) => p.figure?.price.pricePence)).toEqual([
+      8_600, 120_400,
+    ]);
+  });
+});

@@ -208,3 +208,52 @@ describe('flightListsQuerySchema and the on-demand read (spec rev 55 §10)', () 
     expect(readFlightListResponseSchema.safeParse({ accepted: false }).success).toBe(false);
   });
 });
+
+describe("flightListSchema's returns and the response's pagesPlanned (spec rev 56 §10)", () => {
+  const ret = {
+    departsLocal: '14:20',
+    arrivesLocal: '06:25',
+    arrivesDayOffset: 1,
+    durationMinutes: 725,
+    stops: 1,
+    carriers: ['QQ Atlantic'],
+    operatedBy: null,
+    fromMinor: 118_000,
+  };
+  const returns = (outboundIndex: number) => ({
+    limits: { maxJourneyMinutes: 1500, maxStops: 1, departureWindowLocal: null, arrivalWindowLocal: null },
+    status: 'read',
+    rule: null,
+    attempts: [
+      {
+        outboundIndex,
+        outboundFits: true,
+        listed: 'returns',
+        moreListed: true,
+        returns: [ret],
+        optionsUnparsed: 0,
+        optionsOtherCell: 0,
+        resultsStated: null,
+      },
+    ],
+    triedAll: false,
+    booking: null,
+  });
+  it('accepts a list without returns, with returns: null, and with a read of outbound 0 of one flight', () => {
+    expect(flightListSchema.safeParse(list()).success).toBe(true);
+    expect(flightListSchema.safeParse(list({ returns: null })).success).toBe(true);
+    expect(flightListSchema.safeParse(list({ returns: returns(0) })).error?.issues ?? []).toEqual([]);
+  });
+  it('refuses outboundIndex 1 with one flight, returns: undefined, and a return read the contract refuses', () => {
+    expect(flightListSchema.safeParse(list({ returns: returns(1) })).success).toBe(false);
+    expect(flightListSchema.safeParse(list({ returns: undefined })).success).toBe(false);
+    expect(flightListSchema.safeParse(list({ returns: { ...returns(0), attempts: [] } })).success).toBe(
+      false,
+    );
+  });
+  it('the response takes pagesPlanned (a count) and goes without it', () => {
+    expect(flightListsResponseSchema.safeParse({ ...response([]), pagesPlanned: 2 }).success).toBe(true);
+    expect(flightListsResponseSchema.safeParse(response([])).success).toBe(true);
+    expect(flightListsResponseSchema.safeParse({ ...response([]), pagesPlanned: -1 }).success).toBe(false);
+  });
+});

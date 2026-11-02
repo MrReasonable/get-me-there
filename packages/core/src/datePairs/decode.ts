@@ -14,7 +14,10 @@ export function columnAt<T>(column: readonly T[], i: number): T {
   return x;
 }
 
-/** The figure in column position `j`, with its full provenance and its airport pair; no cheaper price or times yet. */
+/**
+ * The figure in column position `j`, with its full provenance, its airport pair and its `pairingRead` (`not-read` when
+ * the body has no such column: an api before spec rev 56); no cheaper price, times, grid price or pairing yet.
+ */
 function figureAt(r: DatePairsResponse, j: number): DatePairFigure {
   const f = r.figures;
   const { origins, destinations } = r.scope;
@@ -43,12 +46,15 @@ function figureAt(r: DatePairsResponse, j: number): DatePairFigure {
     arriveBack: null,
     fromEarlierSearch: columnAt(f.fromEarlierSearch, j),
     cheaperCached: null,
+    gridPrice: null,
+    pairing: null,
+    pairingRead: f.pairingRead === undefined ? 'not-read' : columnAt(f.pairingRead, j),
   };
 }
 
 /**
  * One record per date pair from the route's columns (spec §10): `pairs` walked once, `figures` once and each sparse
- * group once, every figure and cheaper-cached price given its full provenance from the table. Pure; no clock. Dates come from the index, each
+ * group once, every figure, cheaper-cached price, grid price and pairing given its full provenance from the table. Pure; no clock. Dates come from the index, each
  * distinct date computed once.
  */
 export function decodeDatePairs(r: DatePairsResponse): DecodedDatePairs {
@@ -110,6 +116,36 @@ export function decodeDatePairs(r: DatePairsResponse): DecodedDatePairs {
     figure.departBack = columnAt(t.departBack, k);
     figure.arriveBack = columnAt(t.arriveBack, k);
   }
+  // why: spec rev 56 §10: a body without the two groups (an api before them) decodes with no grid price and no pairing
+  const g = r.gridPrice;
+  if (g !== undefined)
+    for (let k = 0; k < g.figure.length; k += 1)
+      columnAt(figures, columnAt(g.figure, k)).gridPrice = {
+        pricePence: columnAt(g.pricePence, k),
+        provenance: columnAt(r.provenances, columnAt(g.provenance, k)),
+        stale: columnAt(g.stale, k),
+        truncated: columnAt(g.truncated, k),
+      };
+  const q = r.pairing;
+  if (q !== undefined)
+    for (let k = 0; k < q.figure.length; k += 1)
+      columnAt(figures, columnAt(q.figure, k)).pairing = {
+        pricePence: columnAt(q.pricePence, k),
+        isFrom: columnAt(q.isFrom, k),
+        seller: columnAt(q.seller, k),
+        fare: columnAt(q.fare, k),
+        offersRead: columnAt(q.offersRead, k),
+        complete: columnAt(q.complete, k),
+        which: columnAt(q.which, k),
+        departOut: columnAt(q.departOut, k),
+        arriveOut: columnAt(q.arriveOut, k),
+        departBack: columnAt(q.departBack, k),
+        arriveBack: columnAt(q.arriveBack, k),
+        mismatch: columnAt(q.mismatch, k),
+        provenance: columnAt(r.provenances, columnAt(q.provenance, k)),
+        stale: columnAt(q.stale, k),
+        ageHours: columnAt(q.ageHours, k),
+      };
   return {
     executionId: r.executionId,
     executions: r.executions,

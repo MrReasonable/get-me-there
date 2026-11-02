@@ -151,9 +151,18 @@ export interface Estimate {
    * Spec revision 55 §8.1 "Estimate" (ruling A5): with camoufox in discovery, the flight-list step's pages and seconds
    * (`pages` the least of 10 less the reusable date pairs, the monthly pages left after the grid plan and the run's
    * free calls left; `seconds` pages × (spacing + 40)). Its seconds count in `seconds`; its pages never in `totalCalls`.
-   * Absent (no key) without camoufox.
+   * Absent (no key) without camoufox. Revision 56 (R-estimate): `pages` and `seconds` are the typical figures; `pairs`
+   * the date pairs read, `returns` whether a return phase is planned, and `pagesMax`/`secondsMax` the bound (each
+   * optional until Task 21.7's estimateLine, the last reader; `estimateSchema` keeps them optional for good, ruling A3).
    */
-  flightLists?: { pages: number; seconds: number };
+  flightLists?: {
+    pages: number;
+    seconds: number;
+    pairs?: number;
+    returns?: boolean;
+    pagesMax?: number;
+    secondsMax?: number;
+  };
 }
 
 /**
@@ -162,12 +171,19 @@ export interface Estimate {
  * airport pair per date pair, the figure's), `reused` how many of them a fresh enough list covered with no page, and
  * `ended` why the step ended early (null while it has not, or when it read every planned cell). A resume never changes
  * `planned` or `cells`. The `disabled` end the execution response can report is derived at read time, never stored.
+ * Revision 56 §7, §8.1: `returns` and `booking`, whether the plan reads returns and the shown pairing's booking options
+ * (from the worker's flags), and `returnsStopped` and `bookingStopped`, the rule that stopped the run's return phases or
+ * booking reads; a plan stored before WP21 has none of the four, and the reader fills false, false, null, null.
  */
 export interface FlightListsState {
   planned: number;
   cells: CellKey[];
   reused: number;
   ended: 'window' | 'monthly-cap' | 'stopped' | null;
+  returns: boolean;
+  booking: boolean;
+  returnsStopped: string | null;
+  bookingStopped: string | null;
 }
 
 /** Spec §7 `search_executions` as read back. */

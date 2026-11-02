@@ -19,6 +19,28 @@ import {
   searchCard,
 } from '../helpers/searches.js';
 
+describe("a card's cheapest figure takes the board's three bases (spec rev 56 §10)", () => {
+  it("accepts basis 'pairing' (an offer's price, the flight list's provenance), refuses another word", () => {
+    const pairing = cardCheapest({
+      basis: 'pairing',
+      pricePence: 118_000,
+      provenance: {
+        providerId: 'camoufox',
+        sourceKind: 'scraped-self',
+        fetchedAt: '2027-02-28T09:30:00.000Z',
+        maxAgeHours: 0,
+        fx: { converted: false },
+        pointOfSale: 'GB',
+        cabin: 'economy',
+      },
+    });
+    expect(searchCardSchema.safeParse(searchCard({ cheapest: pairing })).success).toBe(true);
+    expect(
+      searchCardSchema.safeParse(searchCard({ cheapest: cardCheapest({ basis: 'offer' }) })).success,
+    ).toBe(false);
+  });
+});
+
 describe('searchCardsResponseSchema (spec rev 55 §10 GET /definitions/cards)', () => {
   it('parses the worked-example card, and one never run', () => {
     expect(searchCardsResponseSchema.safeParse({ cards: [searchCard()] }).success).toBe(true);

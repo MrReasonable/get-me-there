@@ -12,6 +12,7 @@ import {
   staleMarkSchema,
   triggerSchema,
 } from './common.js';
+import { figureBasisSchema } from './datePairs.js';
 import { definitionRequestFields, definitionResponseSchema, refineDefinition } from './definitions.js';
 import { executionFlightsSchema } from './executions.js';
 import { stopTextSchema } from './stopCause.js';
@@ -93,7 +94,8 @@ const cardCheapestSchema = z
     stale: staleMarkSchema,
     ageHours: ageHoursSchema,
     truncated: z.boolean(),
-    basis: z.enum(['verified', 'calendar']),
+    // why: spec rev 56 §10: a card's cheapest takes the board's three bases (a pairing figure is the cheapest offer read)
+    basis: figureBasisSchema,
     departureDate: isoDateSchema,
     returnDate: isoDateSchema,
     origin: iataSchema,

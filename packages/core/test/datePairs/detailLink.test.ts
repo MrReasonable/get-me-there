@@ -41,6 +41,17 @@ describe('detailLinkQuery (spec §8.3: the date pair detail URL, in its order)',
     ).toBe('view=results&def=my+def&depart=2027-03-14&return=2027-03-28&basis=calendar&row=calendar%3A7');
   });
 
+  it("opens a 'pairing' figure on the 'calendar' results basis (resultBasisOf: the row the pairing replaced)", () => {
+    expect(
+      detailLinkQuery({
+        definitionId: 'def-1',
+        departureDate: asIsoDate('2027-03-14'),
+        returnDate: asIsoDate('2027-03-24'),
+        basis: 'pairing',
+      }),
+    ).toBe('view=results&def=def-1&depart=2027-03-14&return=2027-03-24&basis=calendar');
+  });
+
   it('names its parameters once, for the engine and the web', () => {
     expect(DETAIL_LINK_PARAMS).toEqual({
       view: 'view',

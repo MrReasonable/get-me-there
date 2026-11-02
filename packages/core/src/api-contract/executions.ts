@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { workerRuleSchema } from '../camoufox/rule.js';
 import { SKIP_CODES } from '../types/execution.js';
 import { isoDateTimeSchema } from '../types/ids.js';
 import {
@@ -27,6 +28,13 @@ export const flightListsStateSchema = z.strictObject({
   cells: z.array(cellKeySchema),
   reused: count,
   ended: z.enum(['window', 'monthly-cap', 'stopped']).nullable(),
+  // why: spec rev 56 §7: absent in a plan stored before WP21, read as false (an older plan is outbound-only); the
+  // reader fills the defaults, so `FlightListsState` is total
+  returns: z.boolean().exactOptional(),
+  booking: z.boolean().exactOptional(),
+  // why: spec rev 56 §8.1: the rule that stopped the run's return phases (or its booking reads); absent read as null
+  returnsStopped: workerRuleSchema.nullable().exactOptional(),
+  bookingStopped: workerRuleSchema.nullable().exactOptional(),
 });
 
 /**

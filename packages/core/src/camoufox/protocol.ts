@@ -5,13 +5,20 @@
  * flights, mode `flights` only) and `GET /v1/status`; every answer carries GOOGLE_CONTACTED_HEADER.
  */
 import { z } from 'zod';
+import { flightLimitsSchema } from '../flights/choose.js';
 import { FLIGHT_LIST_MAX_FLIGHTS } from '../flights/limits.js';
+import { returnReadSchema, returnsOutboundIssue } from '../flights/returns.js';
 import { LISTED, listedFlightSchema } from '../flights/types.js';
 import { iataSchema, isoDateSchema, isoDateTimeSchema } from '../types/ids.js';
 import { vendorPriceMarkSchema } from '../types/provenance.js';
 import { OS_ARCHES } from './builds.js';
 import { GRID_MAX_SCROLLS_PER_PAGE } from './grid.js';
+import { workerRuleSchema } from './rule.js';
 import { sharedSettingsSchema } from './settings.js';
+
+// why: the rule's one home is the leaf rule.ts (spec rev 56: returns.ts and the stored plan name it too); the
+// protocol's importers keep reading it from here
+export { workerRuleSchema } from './rule.js';
 
 /** On every worker answer: `1` when the worker loaded a Google page for it, `0` when it did not (decision 69). */
 export const GOOGLE_CONTACTED_HEADER = 'x-gmt-google-contacted';
@@ -39,16 +46,6 @@ export const BLOCKED_PAGES = [
 ] as const;
 export const blockedPageSchema = z.enum(BLOCKED_PAGES);
 export type BlockedPage = z.infer<typeof blockedPageSchema>;
-
-/**
- * The rule that stopped a page (spec §2 "Navigation and the stops"): the classifier's rule (`cheapest-tab-count`), a
- * check's (`search-form:mismatch`, `currency`) or a grid step's (`grid:first-view:price`). A bounded token of lower-case
- * words joined by `:`, so it can never carry page text, a name or a URL; the app shows it in `last_error`.
- */
-export const workerRuleSchema = z
-  .string()
-  .max(80)
-  .regex(/^[a-z][a-z0-9-]*(?::[a-z0-9-]+)*$/);
 
 // why: names from the airports dataset; bounded so a body stays well under the worker's 4 KiB limit.
 // why: fix round 1 (prov M2): at least one name, or no option could ever match and every page would read as unrecognised
@@ -87,10 +84,22 @@ export type ListRequest = z.infer<typeof listRequestSchema>;
 /**
  * Spec revision 55 §2 "The flight-list read": the same list page as a `list` request, read for its flights; served only
  * by `POST /v1/flights`, which admits nothing else (and `POST /v1/page` refuses it: `pageRequestSchema` is unchanged).
+ * Revision 56 "The return phase": `returnLimits` (the search's limits, `flightLimitsOf`) asks for the return phase
+ * (absent: none, and no `returns` on the answer; a `/v1/page` request carrying it is refused, its list schema being
+ * strict), and `booking` (true: read the shown pairing's booking options; absent read as false; refused without
+ * `returnLimits`).
  */
 export const flightsRequestSchema = oneCell(
-  z.strictObject({ mode: z.literal('flights'), ...cellPageFields }),
-);
+  z.strictObject({
+    mode: z.literal('flights'),
+    ...cellPageFields,
+    returnLimits: flightLimitsSchema.exactOptional(),
+    booking: z.boolean().exactOptional(),
+  }),
+).refine((r) => r.booking === undefined || r.returnLimits !== undefined, {
+  message: 'booking is asked only with returnLimits',
+  path: ['booking'],
+});
 export type FlightsRequest = z.infer<typeof flightsRequestSchema>;
 
 /** The grid's four scroll directions (spec §2 rev 34): left and right move the departures, up and down the returns. */
@@ -145,6 +154,8 @@ export const versionsSchema = z.strictObject({
   binary: z.string().min(1),
   /** The grid's cell grammar date, on grid answers (PIE-15). */
   gridGrammar: z.string().min(1).exactOptional(),
+  /** Spec rev 56: the offer grammar's date, on a flights answer with a booking read (return names use the one grammar). */
+  offerGrammar: z.string().min(1).exactOptional(),
 });
 export type Versions = z.infer<typeof versionsSchema>;
 
@@ -220,6 +231,18 @@ export type GridView = z.infer<typeof gridViewSchema>;
 /** How a grid page ended: every move made, a scroll that did not settle, an off-plan view, the allowance, no flights. */
 export const GRID_ENDS = ['complete', 'scroll-not-settled', 'off-plan', 'allowance', 'no-flights'] as const;
 
+/**
+ * Spec rev 56 §2 (R-zero, R-spacing): on every answer kind that may answer a flights request carrying `returnLimits`:
+ * `pagesLoaded`, the documents that request loaded (0 when the first load was refused or the browser failed first;
+ * stated on a verified entry, absent otherwise: a list or grid page, or an older worker, whose ledger counts the page
+ * class as before), and `nextLoadNotBefore`, the worker's last document load's start plus the spacing, stated when the
+ * phase loaded a further document.
+ */
+const pageCounts = {
+  pagesLoaded: count.exactOptional(),
+  nextLoadNotBefore: isoDateTimeSchema.exactOptional(),
+};
+
 /** Every answer of `POST /v1/page`, discriminated on `kind`; the status codes are brief §6's table. */
 export const workerAnswerSchema = z.discriminatedUnion('kind', [
   z.strictObject({
@@ -265,11 +288,27 @@ export const workerAnswerSchema = z.discriminatedUnion('kind', [
       resultsStated: count.nullable(),
       notes: z.array(z.string()),
       versions: versionsSchema,
+      ...pageCounts,
+      /** Spec rev 56: the return read, present exactly on an answer to a request that carried `returnLimits`. */
+      returns: returnReadSchema.exactOptional(),
     })
-    // why: `flights` means at least one flight was read; the other two outcomes carry none (spec rev 55 §7 LISTED)
-    .refine((a) => (a.listed === 'flights') === a.flights.length > 0, {
-      message: "listed 'flights' exactly when a flight was read",
-      path: ['flights'],
+    .superRefine((a, ctx) => {
+      // why: `flights` means at least one flight was read; the other two outcomes carry none (spec rev 55 §7 LISTED)
+      if ((a.listed === 'flights') !== a.flights.length > 0)
+        ctx.addIssue({
+          code: 'custom',
+          path: ['flights'],
+          message: "listed 'flights' exactly when a flight was read",
+        });
+      // why: spec rev 56 §5.1: every attempt's outbound is one of the answer's flights (the provider maps a breach to
+      // list-error parse unknown-answer); the booking's indices are returnReadSchema's
+      const breach = a.returns === undefined ? null : returnsOutboundIssue(a.returns, a.flights.length);
+      if (breach !== null)
+        ctx.addIssue({
+          code: 'custom',
+          path: ['returns', 'attempts', breach, 'outboundIndex'],
+          message: "an attempt's outbound is one of the answer's flights",
+        });
     }),
   // why: CB-4: an answer to a grid request that reached Google carries the scroll clicks it made
   z.strictObject({
@@ -280,27 +319,45 @@ export const workerAnswerSchema = z.discriminatedUnion('kind', [
     // why: the grid runs of 2026-10-26 stopped as unrecognised with nothing to say why; optional, so an app reads a
     // worker built before it
     rule: workerRuleSchema.exactOptional(),
+    ...pageCounts,
   }),
   z.strictObject({
     kind: z.literal('cooling-down'),
     cause: blockedPageSchema,
     cooldownUntil: isoDateTimeSchema,
+    ...pageCounts,
   }),
-  z.strictObject({ kind: z.literal('spacing'), retryAfterSeconds: z.number().int().min(1) }),
+  z.strictObject({ kind: z.literal('spacing'), retryAfterSeconds: z.number().int().min(1), ...pageCounts }),
   z.strictObject({ kind: z.literal('mode-unavailable'), mode: z.literal('grid') }),
-  z.strictObject({ kind: z.literal('not-ready'), elapsedMs: count, scrolls: count.exactOptional() }),
+  z.strictObject({
+    kind: z.literal('not-ready'),
+    elapsedMs: count,
+    scrolls: count.exactOptional(),
+    ...pageCounts,
+  }),
   z.strictObject({
     kind: z.literal('browser-error'),
     stage: z.enum(['launch', 'navigate', 'read']),
     detail: z.string().max(500),
     scrolls: count.exactOptional(),
+    ...pageCounts,
   }),
   // why: decision 82: the worker's own monthly page cap, for every caller together over the ledger's billing month;
   // nothing was loaded, and the adapter maps it to BudgetExceeded at provider-month with the worker's own figures
-  z.strictObject({ kind: z.literal('monthly-cap'), cap: count, used: count, windowEnd: isoDateTimeSchema }),
+  z.strictObject({
+    kind: z.literal('monthly-cap'),
+    cap: count,
+    used: count,
+    windowEnd: isoDateTimeSchema,
+    ...pageCounts,
+  }),
   // why: W3: the counts file is missing or unreadable, so no page is admitted; it is not a cap reached, and waiting
   // does not repair it (`pnpm gmt browser counts` does)
-  z.strictObject({ kind: z.literal('counts-unreadable'), problem: z.enum(['missing', 'unreadable']) }),
+  z.strictObject({
+    kind: z.literal('counts-unreadable'),
+    problem: z.enum(['missing', 'unreadable']),
+    ...pageCounts,
+  }),
 ]);
 export type WorkerAnswer = z.infer<typeof workerAnswerSchema>;
 

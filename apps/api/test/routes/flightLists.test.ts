@@ -313,7 +313,16 @@ describe('GET /executions/:id flights (revision 55 §8.1 "What the run reports")
     const planned = Array.from({ length: 9 }, (_, i) => cell(LHR, JFK, day(2 + i), day(12 + i)));
     const id = s.id('E');
     x.ports.repos.executions.patch(id, {
-      flightLists: { planned: 10, cells: planned, reused: 1, ended: null },
+      flightLists: {
+        planned: 10,
+        cells: planned,
+        reused: 1,
+        ended: null,
+        returns: false,
+        booking: false,
+        returnsStopped: null,
+        bookingStopped: null,
+      },
     });
     for (const [i, c] of planned.entries())
       list(x, def, c, { fetchedAt: at(-1), executionId: id, failed: i === 0 });

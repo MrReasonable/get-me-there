@@ -304,11 +304,17 @@ function planOf(ctx: EngineContext, run: RunState): { plan: FlightListsState; to
   );
   const planned = sel.read.length + sel.reused.length;
   if (planned === 0) return null;
+  // why: spec rev 56 §8.1: the return phase is planned from the worker's flags in Task 21.6; until then every plan is
+  // outbound-only, as a plan stored before WP21 reads back
   const plan: FlightListsState = {
     planned,
     cells: sel.read.map(cellOf),
     reused: sel.reused.length,
     ended: null,
+    returns: false,
+    booking: false,
+    returnsStopped: null,
+    bookingStopped: null,
   };
   ctx.repos.executions.patch(run.executionId, { flightLists: plan });
   return { plan, toRead: plan.cells };

@@ -1,8 +1,10 @@
-import { compareAges, effectiveAge } from '../labels/age.js';
+import { compareAges, effectiveAge, type StaleMark } from '../labels/age.js';
 import { resultRowKey } from '../results/rowKey.js';
 import type { ResultRow } from '../results/types.js';
 import type { CellKey, ResolvedSpace } from '../types/definition.js';
 import type { IsoDateTime } from '../types/ids.js';
+import type { Provenance } from '../types/provenance.js';
+import { type PairingCandidate, type PairingRead, pairingLeads, pairingReadOf } from './pairing.js';
 import { datePairIndexer } from './space.js';
 
 /**
@@ -29,10 +31,48 @@ export type FigureCandidate = Pick<
   | 'executionId'
 >;
 
-/** A chosen figure: a class-verified price (with the cheaper current calendar price it hides), or a calendar price. */
+/** The calendar price a pairing figure replaced (spec rev 56 §6.9 "The grid price beside it"), shown beneath it. */
+export interface GridPrice {
+  pricePence: number;
+  provenance: Provenance;
+  stale: StaleMark;
+  truncated: boolean;
+}
+
+/**
+ * A chosen figure: a class-verified price (with the cheaper current calendar price it hides), a calendar price, or
+ * (spec rev 56 §6.9) a pairing's cheapest offer. A calendar figure carries its cell's `pairingRead` (absent: `not-read`)
+ * and the pairing shown beneath it when one exists; a pairing figure keeps the calendar candidate it replaced as
+ * `chosen` (its "current" keys and its cell), the offer's stated price as `pricePence`, and that candidate's price as
+ * `grid`.
+ */
 export type Figure<T extends FigureCandidate> =
   | { basis: 'verified'; chosen: T; cheaperCached: T | null }
-  | { basis: 'calendar'; chosen: T; cheaperCached: null };
+  | {
+      basis: 'calendar';
+      chosen: T;
+      cheaperCached: null;
+      pairingRead?: PairingRead;
+      pairing?: PairingCandidate;
+    }
+  | {
+      basis: 'pairing';
+      chosen: T;
+      cheaperCached: null;
+      pricePence: number;
+      grid: GridPrice;
+      pairing: PairingCandidate;
+      pairingRead: 'within';
+    };
+
+/**
+ * The api's read of a cell's newest flight list (spec rev 56 §6.9): `read` tells apart the list-based values
+ * (`not-read`, `outbound-only`, `no-pairing-read`), and `candidate` is the cell's pairing when one was read, from which
+ * core derives the rest (`pairingReadOf`) and whether it leads (`pairingLeads`).
+ */
+export type PairingOf = (cell: CellKey) => { read: PairingRead; candidate: PairingCandidate | null };
+/** No flight read for any cell: every figure as it was before the pairing figure (the flight-list step's ranking). */
+const NO_PAIRINGS: PairingOf = () => ({ read: 'not-read', candidate: null });
 
 /** Ascending order of two strings by UTF-16 code units (locale-independent, as `generateCells` sorts airports). */
 function order(x: string, y: string): number {
@@ -88,12 +128,13 @@ export function pickCalendarFigure<T extends FigureCandidate>(rows: readonly T[]
 
 /**
  * Spec §11: the cheapest class-verified price that is not stale; else the fresher of the best stale verified price and
- * the best calendar price (unknown age loses to known; a tie goes to verified); else none.
+ * the best calendar price (unknown age loses to known; a tie goes to verified); else none. The pairing figure is
+ * `figuresByDatePair`'s, over the calendar figure this chooses.
  */
 export function pickFigure<T extends FigureCandidate>(
   candidates: readonly T[],
   now: IsoDateTime,
-): Figure<T> | null {
+): Extract<Figure<T>, { basis: 'verified' | 'calendar' }> | null {
   // why: §11: partially-verified and failed prices are never the figure; 'unchecked' is a calendar price.
   const v = pickVerifiedFigure(candidates.filter((x) => x.verdictClass === 'verified'));
   const calendar = candidates.filter((x) => x.verdictClass === 'unchecked');
@@ -120,7 +161,36 @@ export interface FigureScope {
 }
 
 /**
- * Every date pair's figure over a scope, keyed by date-pair index (`datePairIndex` of the scope's space), and, under a
+ * Spec rev 56 §6.9: a calendar figure with its cell's flight read: the pairing figure when the cell's candidate leads
+ * (`pairingLeads`; a verified figure is never asked, so it still wins, §11's precedence), else the calendar figure with
+ * its `pairingRead` (left absent for `not-read`, so a cell with no flight read gives the figure exactly as before) and
+ * the candidate shown beneath it.
+ */
+function withPairing<T extends FigureCandidate>(
+  f: Extract<Figure<T>, { basis: 'calendar' }>,
+  pairingOf: PairingOf,
+): Figure<T> {
+  const { read, candidate } = pairingOf(f.chosen.cell);
+  if (candidate === null) return read === 'not-read' ? f : { ...f, pairingRead: read };
+  const offer = candidate.offer;
+  // why: `pairingLeads` requires the offer; reading it first narrows it here without an assertion
+  if (offer === null || !pairingLeads(candidate))
+    return { ...f, pairingRead: pairingReadOf(candidate), pairing: candidate };
+  const c = f.chosen;
+  return {
+    basis: 'pairing',
+    chosen: c,
+    cheaperCached: null,
+    pricePence: offer.priceMinor,
+    grid: { pricePence: c.pricePence, provenance: c.provenance, stale: c.stale, truncated: c.truncated },
+    pairing: candidate,
+    pairingRead: 'within',
+  };
+}
+
+/**
+ * Every date pair's figure over a scope, keyed by date-pair index (`datePairIndex` of the scope's space), each calendar
+ * figure joined with its cell's flight read through `pairingOf` (spec rev 56 §6.9), and, under a
  * journey limit, how many airport pairs of each date pair had every figure-eligible price left out for a known journey
  * time above it (spec §10 `journeyLeftOut`; only non-zero counts are in the map, and it is empty without a limit).
  * Figure-eligible is class verified or a calendar price; the caller has already kept only confirmed offers.
@@ -132,6 +202,9 @@ export function figuresByDatePair<T extends FigureCandidate>(
   candidates: readonly T[],
   scope: FigureScope,
   now: IsoDateTime,
+  // why: defaulted, so the flight-list step's ranking (§8.1: by the calendar figures alone) and every present caller
+  // compile and read as before
+  pairingOf: PairingOf = NO_PAIRINGS,
 ): { figures: Map<number, Figure<T>>; journeyLeftOut: Map<number, number> } {
   const { space, maxJourneyMinutes: limit } = scope;
   const origins = new Set<string>(space.origins);
@@ -158,7 +231,7 @@ export function figuresByDatePair<T extends FigureCandidate>(
   const figures = new Map<number, Figure<T>>();
   for (const [index, group] of groups) {
     const f = pickFigure(group, now);
-    if (f !== null) figures.set(index, f);
+    if (f !== null) figures.set(index, f.basis === 'calendar' ? withPairing(f, pairingOf) : f);
   }
   const journeyLeftOut = new Map<number, number>();
   for (const [key, kept] of eligible) {

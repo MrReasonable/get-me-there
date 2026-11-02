@@ -274,6 +274,33 @@ describe('scripts/check-boundaries.mjs import-graph, process.env and msw rules (
       ).status,
     ).toBe(0);
   });
+  // why: WP21 (A20; test-r3-002): the shared synthetic fixture is reached through @gmt/core/testing by tests only
+  it('WP21: @gmt/core/testing in any src file fails (relative or by name); in a test file it passes', () => {
+    const r = run(
+      tree({
+        'apps/api/src/read/x.ts': "import { PAIRING_FIXTURE } from '@gmt/core/testing';\n",
+        'apps/web/src/y.ts': "export { SYNTHETIC } from '@gmt/core/testing';\n",
+        'packages/core/src/datePairs/z.ts': "import { PAIRING_FIXTURE } from '../testing/pairing.js';\n",
+      }),
+    );
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('apps/api/src/read/x.ts imports @gmt/core/testing; only tests may');
+    expect(r.stderr).toContain('apps/web/src/y.ts imports @gmt/core/testing; only tests may');
+    expect(r.stderr).toContain(
+      'packages/core/src/datePairs/z.ts imports ../testing/pairing.js; only tests may',
+    );
+    expect(
+      run(
+        tree({
+          'apps/api/test/a.test.ts': "import { PAIRING_FIXTURE } from '@gmt/core/testing';\n",
+          'apps/web/test/b.test.ts': "import { PAIRING_FIXTURE } from '@gmt/core/testing';\n",
+          'packages/core/src/testing/index.ts': "export * from './pairing.js';\n",
+          'packages/core/src/testing/pairing.ts':
+            "import { returnReadSchema } from '../flights/returns.js';\n",
+        }),
+      ).status,
+    ).toBe(0);
+  });
   // why: WP14 fix round 1 (arch M10): worker tests reach no other workspace package but core and the testing export
   it('WP14: a worker test importing @gmt/db or @gmt/engine fails; @gmt/core passes', () => {
     const r = run(

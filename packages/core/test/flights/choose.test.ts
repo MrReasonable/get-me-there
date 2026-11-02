@@ -33,10 +33,11 @@ const FIVE = [flight(600, 92), flight(700, 86), flight(1560, 80), flight(900, 86
 
 const view = (f: ListedFlight) => `£${f.amountMinor / 100} at ${f.durationMinutes}`;
 
-describe('withinLimits (spec rev 55 §11: the longest journey on the outbound duration, and the two windows)', () => {
+describe('withinLimits (spec rev 56 §6.2: the longest journey and the stops on each leg, the two windows on the outbound)', () => {
   it('judges the outbound duration against the longest journey, inclusive', () => {
     expect(withinLimits(flight(1500, 1), LIMIT_25H)).toEqual({
       journey: true,
+      stops: true,
       arrival: true,
       departure: true,
     });
@@ -46,6 +47,7 @@ describe('withinLimits (spec rev 55 §11: the longest journey on the outbound du
     const l: FlightLimits = { ...NONE, arrivalWindowLocal: { from: '06:00', to: '23:00' } };
     expect(withinLimits(flight(600, 1, { arrivesLocal: '03:10' }), l)).toEqual({
       journey: true,
+      stops: true,
       arrival: false,
       departure: true,
     });
@@ -55,10 +57,46 @@ describe('withinLimits (spec rev 55 §11: the longest journey on the outbound du
     const l: FlightLimits = { ...NONE, departureWindowLocal: { from: '08:00', to: '20:00' } };
     expect(withinLimits(flight(600, 1, { departsLocal: '06:10' }), l)).toEqual({
       journey: true,
+      stops: true,
       arrival: true,
       departure: false,
     });
     expect(withinLimits(flight(600, 1, { departsLocal: '08:00' }), l).departure).toBe(true);
+  });
+  it("the stops limit is met at or under maxStops, and when maxStops is absent or null (today's result plus stops)", () => {
+    const twoStops = flight(600, 1, { stops: 2 });
+    expect(withinLimits(twoStops, { ...NONE, maxStops: 1 })).toEqual({
+      journey: true,
+      stops: false,
+      arrival: true,
+      departure: true,
+    });
+    expect(withinLimits(twoStops, { ...NONE, maxStops: 2 }).stops).toBe(true);
+    expect(withinLimits(twoStops, { ...NONE, maxStops: null }).stops).toBe(true);
+    expect(withinLimits(twoStops, NONE).stops).toBe(true);
+    expect(withinLimits(flight(600, 1), { ...NONE, maxStops: 0 }).stops).toBe(true);
+  });
+  it("on the 'return' leg both windows are ignored; the journey and the stops still apply", () => {
+    const l: FlightLimits = {
+      maxJourneyMinutes: 600,
+      maxStops: 0,
+      arrivalWindowLocal: { from: '06:00', to: '23:00' },
+      departureWindowLocal: { from: '08:00', to: '20:00' },
+    };
+    const back = flight(700, 1, { stops: 1, departsLocal: '06:10', arrivesLocal: '03:10' });
+    expect(withinLimits(back, l, 'return')).toEqual({
+      journey: false,
+      stops: false,
+      arrival: true,
+      departure: true,
+    });
+    expect(withinLimits(back, l)).toEqual({ journey: false, stops: false, arrival: false, departure: false });
+    expect(withinLimits(flight(600, 1), l, 'return')).toEqual({
+      journey: true,
+      stops: true,
+      arrival: true,
+      departure: true,
+    });
   });
   it('a window that wraps midnight is read as one span', () => {
     const l: FlightLimits = { ...NONE, departureWindowLocal: { from: '22:00', to: '02:00' } };
@@ -146,6 +184,15 @@ describe('chooseFlightsToShow (spec rev 55 §11 Which flights)', () => {
     expect(chooseFlightsToShow([early, late2, late1], NONE).shown).toEqual([early, late2, late1]);
   });
 
+  it('applies the stops limit too: a flight with 2 stops under maxStops 1 is outside (spec rev 56 §6.2)', () => {
+    const r = chooseFlightsToShow([flight(600, 50, { stops: 2 }), flight(700, 99, { stops: 1 })], {
+      ...LIMIT_25H,
+      maxStops: 1,
+    });
+    expect(r.shown.map(view)).toEqual(['£99 at 700']);
+    expect(r).toMatchObject({ overLimit: false, moreRead: 1, moreOutside: 1 });
+  });
+
   it('does not reorder or change the flights it is given', () => {
     const input = [...FIVE];
     chooseFlightsToShow(input, LIMIT_25H);
@@ -165,6 +212,7 @@ describe('chooseFlightsToShow (spec rev 55 §11 Which flights)', () => {
     );
     const limits = fc.record({
       maxJourneyMinutes: fc.option(fc.integer({ min: 1, max: 3000 }), { nil: null }),
+      maxStops: fc.option(fc.integer({ min: 0, max: 3 }), { nil: null }),
       arrivalWindowLocal: fc.constantFrom(null, { from: '06:00', to: '23:00' }),
       departureWindowLocal: fc.constantFrom(null, { from: '08:00', to: '20:00' }),
     });

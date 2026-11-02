@@ -101,6 +101,11 @@ export function datePairFigures(
               origin: c.cell.origin,
               destination: c.cell.destination,
             },
+      // why: spec rev 56 §6.9: no pairings are passed to figuresByDatePair until Task 21.6 builds the map, so every
+      // figure is verified or calendar with no flight read; the board and the scoped /results read agree on these
+      gridPrice: null,
+      pairing: null,
+      pairingRead: 'not-read',
     };
   };
   const figures = new Map<number, DatePairFigure>();

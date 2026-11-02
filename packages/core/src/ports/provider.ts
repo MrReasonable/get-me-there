@@ -1,6 +1,8 @@
 import type { StopDetail } from '../api-contract/stopCause.js';
 import type { GridMove } from '../camoufox/protocol.js';
 import type { ProviderError } from '../errors.js';
+import type { FlightLimits } from '../flights/choose.js';
+import type { ReturnRead } from '../flights/returns.js';
 import type { Listed, ListedFlight } from '../flights/types.js';
 import type { CellKey } from '../types/definition.js';
 import type { ErrorReason } from '../types/execution.js';
@@ -220,7 +222,7 @@ export interface CostEstimate {
  * class word, the only part of it a stop cause stores (`detail` is the provider's own sentence, kept in `last_error` and
  * the log); a provider that states none is classed by the engine from `skip` and `until`.
  */
-export type PreflightResult =
+export type PreflightResult = (
   | { ok: true }
   | {
       ok: false;
@@ -228,7 +230,14 @@ export type PreflightResult =
       detail: string;
       until?: IsoDateTime;
       reason?: StopDetail;
-    };
+    }
+) & {
+  /**
+   * Spec rev 56 §5.1, §8.1: camoufox: the worker's reported verification flags, on every read that returned a status
+   * (ok or refused); the engine keeps them per provider and plans the return phase from them.
+   */
+  flags?: Readonly<Record<string, boolean>>;
+};
 export interface DiscoveryCapability {
   info: CapabilityInfo;
   plan(q: DiscoveryQuery): TilePlan[];
@@ -259,6 +268,13 @@ export interface VerificationCapability {
 export interface FlightListQuery {
   cell: CellKey;
   airportNames: CellAirportNames;
+  /**
+   * Spec rev 56 §5.1: the search's limits (`flightLimitsOf`, §6.2), sent only when the plan reads returns; absent or null:
+   * no return phase. Optional for good (ruling A4: an input, absent ≡ null).
+   */
+  returnLimits?: FlightLimits | null;
+  /** Spec rev 56 §5.1: read the shown pairing's booking options; sent only with `returnLimits`; absent read as false. */
+  booking?: boolean;
 }
 /**
  * What the read gave (spec rev 55 §5.1): the list (`listed`, the 30 cheapest flights in page order, the page's own
@@ -280,6 +296,17 @@ export type FlightListResult =
       optionsOtherCell: number;
       resultsStated: number | null;
       notes: string[];
+      /**
+       * Spec rev 56 §5.1: the worker's return read, null when the request had no return phase (or an older worker
+       * answered without one). Optional until Task 21.6 (R-order).
+       */
+      returns?: ReturnRead | null;
+      /**
+       * Spec rev 56 §5.1 (R-spacing): when the next camoufox load may start, after a request that loaded the reload; the
+       * capability holds http-kit's next start until then. Optional until Task 21.6. The answer's `pagesLoaded` is never
+       * here: it reaches only the ledger (arch-r3-014).
+       */
+      nextLoadNotBefore?: IsoDateTime | null;
     }
   | { kind: 'list-error'; error: ProviderError };
 /**
