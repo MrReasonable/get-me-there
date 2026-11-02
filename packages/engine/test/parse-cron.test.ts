@@ -1,5 +1,5 @@
 import { isValidTimeZone } from '@gmt/core';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   countFirings,
   firingsBetween,
@@ -320,6 +320,29 @@ describe('countFirings and firingsBetween at their edges (the work a count takes
       '2027-03-28T01:00:00.000Z',
     ]);
     expect(countFirings('0 * * * *', 'Europe/London', f, t)).toBe(2);
+  });
+});
+
+describe('a zero offset printed as bare "GMT" (older CLDR data)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+  it('is counted at the fixed zero offset, a day at a time, as "GMT+00:00" is', () => {
+    const parts = Intl.DateTimeFormat.prototype.formatToParts;
+    vi.spyOn(Intl.DateTimeFormat.prototype, 'formatToParts').mockImplementation(function (
+      this: Intl.DateTimeFormat,
+      date,
+    ) {
+      return parts
+        .call(this, date)
+        .map((p) => (p.type === 'timeZoneName' && p.value === 'GMT+00:00' ? { ...p, value: 'GMT' } : p));
+    });
+    const meter = { steps: 0 };
+    const from = new Date('2027-01-04T00:00:00.000Z');
+    const to = new Date(from.getTime() + 10 * 86_400_000 - 1);
+    expect(countFirings('0 * * * *', 'Europe/London', from, to, meter)).toBe(240);
+    // why: stepped firing by firing it would take 241 steps; at the fixed offset the first day is stepped, then one a day
+    expect(meter.steps).toBeLessThan(40);
   });
 });
 

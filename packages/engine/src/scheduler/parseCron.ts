@@ -98,8 +98,9 @@ const TRANSITION_MARGIN_MS = 3 * 3_600_000;
 
 const offsetFormats = new Map<string, Intl.DateTimeFormat>();
 /**
- * The zone's UTC offset in minutes at `ms` (Intl's longOffset, "GMT+05:45"), or null for any other form: an offset with
- * seconds ("GMT-00:44:30", some zones before 1972) matches no whole-minute fixed offset.
+ * The zone's UTC offset in minutes at `ms` (Intl's longOffset, "GMT+05:45"; a zero offset is "GMT+00:00" with CLDR 48,
+ * as Node 22 and 26 ship it, and bare "GMT" with older data, e.g. a Node built on the system's ICU), or null for any
+ * other form: an offset with seconds ("GMT-00:44:30", some zones before 1972) matches no whole-minute fixed offset.
  */
 function offsetMinutes(tz: string, ms: number): number | null {
   let f = offsetFormats.get(tz);
@@ -108,6 +109,7 @@ function offsetMinutes(tz: string, ms: number): number | null {
     offsetFormats.set(tz, f);
   }
   const name = f.formatToParts(ms).find((p) => p.type === 'timeZoneName')?.value ?? '';
+  if (name === 'GMT') return 0;
   const m = /^GMT([+-])(\d{2}):(\d{2})$/.exec(name);
   if (m === null) return null;
   return (m[1] === '-' ? -1 : 1) * (Number(m[2]) * 60 + Number(m[3]));
