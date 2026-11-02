@@ -800,8 +800,15 @@ export const COPY = {
     // with returns, naming the outbound the pairing used; each "from" price says itself what it is, so the head names
     // only the seller's stated price, and only when the first Back line shows one (`seller`); after a limit edit the
     // outbound is named as selected under the limits when read, never "within your limits"
-    headPairing: (which: 'cheapest' | 'next-cheapest', seller: boolean, ago: string, when: string | null) =>
-      `Outbound flights, and the return flights for the ${which} outbound read within your limits${seller ? SELLER_SHOWN : ''} · read ${ago}${when === null ? '' : `, ${when}`} · prices from Google Flights, not checked with the airline`,
+    // why: 21.7 re-review N3: `returnsFit` false says no return of that outbound is within the limits, beside it
+    headPairing: (
+      which: 'cheapest' | 'next-cheapest',
+      seller: boolean,
+      ago: string,
+      when: string | null,
+      returnsFit = true,
+    ) =>
+      `Outbound flights, and the return flights for the ${which} outbound read within your limits${returnsFit ? '' : ' (none of its return flights is within your limits)'}${seller ? SELLER_SHOWN : ''} · read ${ago}${when === null ? '' : `, ${when}`} · prices from Google Flights, not checked with the airline`,
     headPairingOver: (seller: boolean, ago: string, when: string | null) =>
       `Outbound flights, and the return flights for the cheapest outbound read, which is over your limits${seller ? SELLER_SHOWN : ''} · read ${ago}${when === null ? '' : `, ${when}`} · prices from Google Flights, not checked with the airline`,
     headPairingWhenRead: (

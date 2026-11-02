@@ -227,7 +227,9 @@ function headOf(list: FlightList, p: PairingView | null, now: ReturnType<typeof 
   const seller = p.offer !== null;
   if (!p.selectedNow || !p.underCurrentLimits)
     return F.headPairingWhenRead(p.outboundFits ? p.which : 'over', seller, ago, when);
-  return p.outboundFits ? F.headPairing(p.which, seller, ago, when) : F.headPairingOver(seller, ago, when);
+  return p.outboundFits
+    ? F.headPairing(p.which, seller, ago, when, p.fits)
+    : F.headPairingOver(seller, ago, when);
 }
 
 /**

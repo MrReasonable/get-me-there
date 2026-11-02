@@ -4479,8 +4479,10 @@ merged into price.
     exists, and only on a search whose flight lists are read, so a search
     without the browser worker is not told it on every row; the mark stays
     when the flight-lists request failed, and is "loading flights" while
-    that request is pending; a failed request also puts one line above the
-    board, "flights couldn't be loaded; prices shown without flights"), and a
+    that request is pending; a failed request with no answer held also puts
+    one line above the board, "flights couldn't be loaded; prices shown
+    without flights", while a failed poll after an answer keeps that answer
+    and says nothing), and a
     pairing that does not lead is shown beneath its grid price through
     `PriceCell` with its own age: "return flights read 9d ago, older than
     this search's refresh:", "return flights read under earlier limits:",
@@ -4588,7 +4590,9 @@ merged into price.
     pairing read anyway, its Back line keeping the seller's price with the
     return's over-limit mark, never leading), "No return flight within your
     limits for this outbound; the cheapest pairing read is shown, over your
-    limits:"; when the search's limits changed after the
+    limits:", and the block's head says it beside the outbound, "… for the
+    cheapest outbound read within your limits (none of its return flights is
+    within your limits) …"; when the search's limits changed after the
     read (the stored limits differ, or the outbound the limits would select
     today is another), "With the cheapest outbound read, selected under your
     limits when read, 3d ago:" ("With the cheapest outbound read, over your
@@ -4603,7 +4607,9 @@ merged into price.
     Basic" where the offer names a fare), through `PriceCell`'s compact face
     with the list's provenance, the calendar style, the stale mark and the
     age, the block's one emphasised price (heavier and larger, by a class on
-    that price alone; every return price sits in the inline `.flight-price`
+    that price alone, and only on a seller's stated price within the limits:
+    a "from" price and an over-limit pairing's price are not emphasised;
+    every return price sits in the inline `.flight-price`
     the outbound row uses), and directly under it "this price is for the
     Out: and Back: flights shown" and "to book, search these dates on Google
     Flights (the link below); this app opens no seller; Google may show

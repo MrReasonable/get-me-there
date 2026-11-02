@@ -27,6 +27,20 @@ export const flightListsApi = {
 export const flightListsKey = (id: string) => ['flight-lists', id] as const;
 
 /**
+ * The board's flight-lists state from its page queries (spec rev 56 §11, 21.7 prov-004): `failed` only when a page
+ * failed with no answer held (re-review N1: a failed background poll keeps the earlier answer, and the board its
+ * flights), `loading` while a page has no answer yet, else `ready`; `idle` when no page is asked.
+ */
+export function listsStatusOf(
+  results: ReadonlyArray<{ isError: boolean; isPending: boolean; data: unknown }>,
+): 'idle' | 'loading' | 'failed' | 'ready' {
+  if (results.length === 0) return 'idle';
+  if (results.some((r) => r.isError && r.data === undefined)) return 'failed';
+  if (results.some((r) => r.isPending)) return 'loading';
+  return 'ready';
+}
+
+/**
  * One query per page of asked date pairs (`pages`, from `requestPages`), so "Show 10 more" adds one request and keeps
  * the earlier answers. A page is re-read every POLL_MS while `polling` says so (a read on demand is going), and never
  * otherwise. Returns every page's answer that has arrived, in page order.
@@ -49,14 +63,7 @@ export function useFlightLists(
       // why: the newest answer's time, so a read on demand knows when an answer came after its press
       fetchedAt: Math.max(0, ...results.map((r) => r.dataUpdatedAt)),
       // why: 21.7 prov-004: the board says the request is pending, or that it failed, rather than drop it silently
-      status:
-        results.length === 0
-          ? ('idle' as const)
-          : results.some((r) => r.isError)
-            ? ('failed' as const)
-            : results.some((r) => r.isPending)
-              ? ('loading' as const)
-              : ('ready' as const),
+      status: listsStatusOf(results),
     }),
   });
 }

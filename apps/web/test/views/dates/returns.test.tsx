@@ -325,6 +325,8 @@ describe("the pairing section's notes (spec rev 56 §11)", () => {
     expect(within(block()).queryByTestId('pairing-applies')).toBeNull();
     // why: 21.7 prov-001: no seller's price is shown, so the head names none
     expect(within(block()).getByTestId('flights-head')).not.toHaveTextContent(/seller/);
+    // why: 21.7 re-review N2: a "from" price is a weaker claim than a seller's stated one: no lead emphasis
+    expect(block().querySelectorAll('.flight-price-lead')).toHaveLength(0);
   });
 
   it('an expansion that failed after some offers keeps its note and its offer', async () => {
@@ -467,6 +469,12 @@ describe("the pairing section's notes (spec rev 56 §11)", () => {
       /^Back: £1,210 round trip · QQ Travel · cheapest of 1 offer read · depart 17:30/,
     );
     expect(lines('return-mark')[0]).toBe('return 2 changes: over your 1-change limit');
+    // why: 21.7 re-review N3: the block head says no return fits, beside the outbound that does
+    expect(within(block()).getByTestId('flights-head')).toHaveTextContent(
+      'the return flights for the cheapest outbound read within your limits (none of its return flights is within your limits)',
+    );
+    // why: 21.7 re-review N2: an over-limit pairing's price is not the lead claim, so it carries no lead emphasis
+    expect(block().querySelectorAll('.flight-price-lead')).toHaveLength(0);
   });
 
   it("21.7 code M1 / prov-010: the read clauses are the shown pairing's attempt's, not the last attempt's", async () => {

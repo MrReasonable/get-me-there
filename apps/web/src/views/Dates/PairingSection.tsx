@@ -143,7 +143,8 @@ export function PairingSection({
             ret={ret}
             list={list}
             limits={limits}
-            lead={ret === p.ret}
+            // why: 21.7 re-review N2: only a seller's stated price within the limits is the lead claim
+            lead={ret === p.ret && p.offer !== null && p.fits}
             price={
               ret === p.ret && p.offer !== null
                 ? { kind: 'offer', offer: p.offer }

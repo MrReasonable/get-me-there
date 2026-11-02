@@ -1536,7 +1536,7 @@ the copy tests. **Consumes**: Task 21.6. Makes required: `flightListSchema.retur
     limits):" with the line "Out: depart 07:15, arrive 18:05 +1 · 10h 50m · 1 change · QQ Air" for `flights[3]` (its mark; no price on this
     line); the shown "Back:" line with the offer's price FIRST ("Back: £1,180 round trip · QQ Travel · cheapest of 3 offers read · depart 14:20, arrive 06:25 +1 · 12h 05m ·
     1 change · QQ Air") through `PriceCell` compact with the list's provenance, the calendar style, the stale mark and the age, the block's one emphasised price
-    (the class `flight-price-lead` on its `.flight-price`; every return price inside the inline `.flight-price`: 21.7 ui-001/002), then directly under it (before
+    (the class `flight-price-lead` on its `.flight-price`, only for a seller's stated price within the limits: 21.7 re-review N2; every return price inside the inline `.flight-price`: 21.7 ui-001/002), then directly under it (before
     the other returns: 21.7 code M4) the line "this price is for the Out: and Back: flights shown" and "to book, search these dates on Google Flights (the link below); this app opens no
     seller; Google may show different flights or prices when you search"; an incomplete booking (`moreControl true` with the cheapest offer above the "from") adds "· a cheaper seller may not have been read" on the
     shown line itself (21.7 prov-006) and the row does not lead;
