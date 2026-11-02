@@ -9,6 +9,7 @@ import {
   LOOKUP_TIMEOUT_MS,
   POLL_TIMEOUT_MS,
   type ProbePage,
+  pathOf,
   pollUntilSettled,
   probePage,
   runStep,
@@ -38,6 +39,7 @@ const guard = (o: Partial<GuardState> = {}): GuardState => ({
   frameUrls: [],
   refused: null,
   documentLoads: 0,
+  documentStarts: 0,
   activationGate: false,
   gateRefusals: 0,
   reservation: null,
@@ -1335,6 +1337,36 @@ describe('bookingFacts and the booking view’s heading (WP21 Task 21.3)', () =>
     const long = `Continue to book with ${'Q'.repeat(SELECTORS.maxNameLength)} for 1 British pounds`;
     const { driver, d } = setup([tree({ main: [n('button', long), n('button', OFFER)] })]);
     expect((await driver.bookingFacts(d)).offerNames).toEqual([null, OFFER]);
+  });
+  // why: review M1: the return's selection moves the URL to the booking path; that move is a change on the booking
+  // view only, and an unknown path (none passed, or an unparsable URL) is no change
+  it.each([
+    ['the path moved, on the booking view', 'booking', '/travel/flights/search', true],
+    ['the same path, on the booking view', 'booking', '/travel/flights/booking', false],
+    ['no path passed', 'booking', undefined, false],
+    ['the path moved, on the return view', 'returns', '/travel/flights/search', false],
+  ] as const)('pollUntilSettled: %s → changed %s', async (_what, view, path, changed) => {
+    const { driver, page, timers } = setup([tree()]);
+    page.setUrl('https://www.google.com/travel/flights/booking?tfs=b');
+    const pre = await driver.readFacts(timers.deadline(90_000), undefined, view);
+    const track = { changed: false };
+    const run = pollUntilSettled(driver, timers.deadline(10_000), timers, 2000, SELECTORS, {
+      view,
+      changedFrom: {
+        signature: pre.settle.linkSignature,
+        documentLoads: 0,
+        ...(path === undefined ? {} : { path }),
+      },
+      loads: () => 0,
+      track,
+    });
+    // why: an unchanged view never settles; the poll's own deadline ends it
+    await run.catch(() => undefined);
+    expect(track.changed).toBe(changed);
+  });
+  it('pathOf: a URL’s path, null when unparsable', () => {
+    expect(pathOf('https://www.google.com/travel/flights/booking?tfs=b')).toBe('/travel/flights/booking');
+    expect(pathOf('not a url')).toBeNull();
   });
   it('readFacts on the booking view states the price-range heading; other views leave it unread', async () => {
     const { driver, d, page } = setup([tree()]);

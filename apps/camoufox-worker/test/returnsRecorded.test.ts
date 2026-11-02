@@ -14,7 +14,15 @@ import { classifyPageWithRule, type PageFacts } from '../src/classify.js';
 import { parseOptionName } from '../src/names.js';
 import { readReturns, returnDayOffset } from '../src/returns.js';
 import { SELECTORS } from '../src/selectors.js';
-import { airportNamesOf, pinOf, RECORDED_ROOT, RECORDINGS_REQUIRED } from './support/recordedList.js';
+import {
+  airportNamesOf,
+  IN_APP_E2E,
+  inAppEvidence,
+  metaOf,
+  pinOf,
+  RECORDED_ROOT,
+  RECORDINGS_REQUIRED,
+} from './support/recordedList.js';
 
 const QUERY = /^Flights from ([A-Z]{3}) to ([A-Z]{3}) on (\d{4}-\d{2}-\d{2}) returning (\d{4}-\d{2}-\d{2})$/;
 /** The keyboard recordings of the research kind this suite reads (1 and 2 were pointer clicks). */
@@ -42,7 +50,19 @@ const factsSchema = z
   .object({
     hops: z.array(z.string()),
     picks: z.array(z.object({ name: z.string() })),
-    steps: z.array(z.object({ step: z.string(), after: afterSchema.optional() }).loose()),
+    // why: review I2: the step's held word and the guard's counts are named, so their shape is checked where present
+    // (the end-to-end recording's evidence requires them: inAppEvidence)
+    steps: z.array(
+      z
+        .object({
+          step: z.string(),
+          after: afterSchema.optional(),
+          held: z.enum(['unexpected-navigation', 'page-reservation']).optional(),
+          gateRefusals: z.number().optional(),
+          documentStarts: z.number().optional(),
+        })
+        .loose(),
+    ),
     forceSecond: z.boolean().optional(),
   })
   .loose();
@@ -206,6 +226,13 @@ describe.skipIf(!present && !RECORDINGS_REQUIRED)(
         ).toBe(pin.otherCell);
         expect(minAtOutbound, r.key).toEqual(pin.minAtOutbound);
       }
+    });
+    // why: the controller's ruling on review I2: under the gate a selection's document growth is 0 by construction, so
+    // the evidence that every activation is in-app is what the guard saw before the gate: no document started and none
+    // aborted on any activation, the reload the one document started, nothing held
+    it('the end-to-end recording: no gate refusal and no held navigation on any step; only the reload started a document', () => {
+      expect(e2e.length > 0 || !RECORDINGS_REQUIRED, 'the end-to-end recording').toBe(true);
+      for (const r of e2e) expect(inAppEvidence(r.raw, metaOf(r.key)), r.key).toEqual(IN_APP_E2E);
     });
     it('every selection’s view classifies as the return view with the dated selectors; a selection loads no document and the reload one', () => {
       for (const r of all) {

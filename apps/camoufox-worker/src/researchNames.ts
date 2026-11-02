@@ -1,6 +1,6 @@
 /**
  * The recorder's research reads (WP21 Task 21.0; moved out of the served driver after the task's review): every link
- * name in `main`, every button name and every tab name on the page, each with its `https://…` runs replaced by `<url>`
+ * name in `main`, every button name and every tab name on the page (and every button name in `main`, on a booking view), each with its `https://…` runs replaced by `<url>`
  * (no page URL is ever stored), at most NAMES_MAX of each. Only the select-outbound recorder reads them
  * (rules.test.ts pins that), so the page session's driver carries none. A leaf: it imports types only.
  */
@@ -37,6 +37,12 @@ export const linkNames = (page: PageLike, d: Deadline): Promise<string[]> =>
 /** Every button name on the page. */
 export const buttonNames = (page: PageLike, d: Deadline): Promise<string[]> =>
   namesOf(page.getByRole('button'), d);
+/**
+ * WP21 Task 21.3 (review M9): every button name in `main`, the scope the driver's `bookingFacts` reads the offers and
+ * controls in, so a recorded booking view replays exactly as the driver reads it.
+ */
+export const mainButtonNames = (page: PageLike, d: Deadline): Promise<string[]> =>
+  namesOf(page.getByRole('main').getByRole('button'), d);
 /** Every tab name on the page. */
 export const tabNames = (page: PageLike, d: Deadline): Promise<string[]> => namesOf(page.getByRole('tab'), d);
 

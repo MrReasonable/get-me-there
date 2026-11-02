@@ -124,3 +124,65 @@ export function airportNamesOf(
   };
   return { origin: own(origin), destination: own(destination) };
 }
+
+/**
+ * WP21 Task 21.3 (the controller's ruling on review I2): the end-to-end recording's in-app evidence as the recorder
+ * writes it. Each step states the documents the gate aborted (`gateRefusals`) and the main-frame documents the page
+ * started (`documentStarts`, counted by the guard before the gate), 0 included, and a held navigation by its word; the
+ * meta states the page's totals. Every field is required here, so a renamed field fails the parse instead of passing.
+ */
+const e2eStepSchema = z
+  .object({
+    step: z.string(),
+    gateRefusals: z.number().int().nonnegative(),
+    documentStarts: z.number().int().nonnegative(),
+    held: z.enum(['unexpected-navigation', 'page-reservation']).optional(),
+  })
+  .loose();
+// why: the meta's other fields are stripped: the evidence is these three counts only
+const e2eMetaSchema = z.object({
+  documentLoads: z.number().int().nonnegative(),
+  documentStarts: z.number().int().nonnegative(),
+  gateRefusals: z.number().int().nonnegative(),
+});
+
+/** One step's evidence: its name, the gate's refusals, the documents started, and its held word (null: none). */
+export type StepEvidence = [step: string, gateRefusals: number, documentStarts: number, held: string | null];
+
+/** The evidence of one end-to-end recording, from its facts' steps and its meta. */
+export function inAppEvidence(
+  facts: unknown,
+  meta: unknown,
+): {
+  steps: StepEvidence[];
+  meta: z.infer<typeof e2eMetaSchema>;
+} {
+  const steps = z
+    .object({ steps: z.array(e2eStepSchema) })
+    .loose()
+    .parse(facts).steps;
+  return {
+    steps: steps.map((s) => [s.step, s.gateRefusals, s.documentStarts, s.held ?? null]),
+    meta: e2eMetaSchema.parse(meta),
+  };
+}
+
+/**
+ * What the full served path's evidence must be (R-e2e): every activation in-app (no document started, none aborted,
+ * nothing held), the reload the one document started, and the page's two documents, both loaded.
+ */
+export const IN_APP_E2E: { steps: StepEvidence[]; meta: z.infer<typeof e2eMetaSchema> } = {
+  steps: [
+    ['first-selection', 0, 0, null],
+    ['reload', 0, 1, null],
+    ['second-selection', 0, 0, null],
+    ['return-selection', 0, 0, null],
+    ['more-options', 0, 0, null],
+  ],
+  meta: { documentLoads: 2, documentStarts: 2, gateRefusals: 0 },
+};
+
+/** A recording's meta, read beside its facts (`<key>.meta.json` under RECORDED_ROOT). */
+export function metaOf(key: string): unknown {
+  return JSON.parse(readFileSync(join(RECORDED_ROOT, `${key}.meta.json`), 'utf8'));
+}

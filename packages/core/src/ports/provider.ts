@@ -302,7 +302,7 @@ export type FlightListResult =
        */
       returns?: ReturnRead | null;
       /**
-       * Spec rev 56 §5.1 (R-spacing): when the next camoufox load may start, after a request that loaded the reload; the
+       * Spec rev 56 §5.1 (R-spacing): when the next camoufox load may start, after a request that started the reload; the
        * capability holds http-kit's next start until then. Optional until Task 21.6. The answer's `pagesLoaded` is never
        * here: it reaches only the ledger (arch-r3-014).
        */

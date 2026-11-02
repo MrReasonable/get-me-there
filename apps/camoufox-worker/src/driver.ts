@@ -17,7 +17,7 @@ import {
   type PageFacts,
   type PageKind,
 } from './classify.js';
-import { type GuardState, onAllowlist } from './guard.js';
+import { type GuardState, onAllowlist, urlOf } from './guard.js';
 import { isSettled, type Previous, stableAcross, type View } from './ready.js';
 import { type Role, SELECTORS, type Selectors } from './selectors.js';
 import { type Deadline, DeadlineExceeded, type Timers } from './timers.js';
@@ -822,9 +822,13 @@ export interface PollOptions {
   /**
    * WP21 Task 21.0 (R-settle), the return view: the view the selection was made on (its link signature, read by the
    * return pattern, and the guard's document loads then). A poll counts as changed when its signature differs, a return
-   * heading shows, or `loads()` has grown; an unchanged view never settles, so it runs to the deadline.
+   * heading shows, or `loads()` has grown; an unchanged view never settles, so it runs to the deadline. `path`
+   * (WP21 Task 21.3, review M1): the URL path the activation was made on; on the booking view a poll whose URL path
+   * differs counts as changed (the return's selection moves the URL to the booking path, recorded), so a booking view
+   * with no offer is a changed view that never settles, not an activation that did nothing. The expansion's polls start
+   * on the booking path and stay there, so for them the path is no change.
    */
-  changedFrom?: { signature: string; documentLoads: number };
+  changedFrom?: { signature: string; documentLoads: number; path?: string };
   /** The guard's document loads now (`guard.documentLoads`); with `changedFrom`. */
   loads?: () => number;
   /**
@@ -834,6 +838,23 @@ export interface PollOptions {
   stopWhen?: () => boolean;
   /** WP21 Task 21.3: set `changed` once any poll saw the view changed from `changedFrom` (no-activation vs not-settled). */
   track?: { changed: boolean };
+}
+
+/** WP21 Task 21.3 (review M1): a URL's path, or null when it cannot be parsed (then never equal to a path read). */
+export function pathOf(url: string): string | null {
+  return urlOf(url)?.pathname ?? null;
+}
+
+/** Whether `url`'s path differs from `from` (review M1); false when either is unknown. */
+export function pathMoved(url: string, from: string | null | undefined): boolean {
+  const path = pathOf(url);
+  return from !== undefined && from !== null && path !== null && path !== from;
+}
+
+/** `changedFrom.path` for the URL an activation is made on: absent when it cannot be parsed (then nothing compares). */
+export function pathField(url: string): { path?: string } {
+  const path = pathOf(url);
+  return path === null ? {} : { path };
 }
 
 /** WP21 Task 21.3: pollUntilSettled stopped by its `stopWhen` before classifying a poll. */
@@ -920,6 +941,7 @@ export async function pollUntilSettled(
         // why: a return heading is the change to the return view; the booking view is selected from a view that has
         // one, so there it is no change (Ian's ruling of 2026-11-01)
         (view === 'returns' && facts.page.text.returnHeading) ||
+        (view === 'booking' && pathMoved(facts.page.url, changedFrom.path)) ||
         (o.loads?.() ?? changedFrom.documentLoads) > changedFrom.documentLoads);
     if (changed && o.track !== undefined) o.track.changed = true;
     const settled = isSettled(facts.page, facts.settle, view, changed);

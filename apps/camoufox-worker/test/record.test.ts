@@ -483,6 +483,7 @@ describe('the recorder (brief Task 14.2 rules)', () => {
         frameUrls: [],
         refused: null,
         documentLoads: 0,
+        documentStarts: 0,
         activationGate: false,
         gateRefusals: 0,
         reservation: null,

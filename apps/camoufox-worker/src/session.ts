@@ -136,7 +136,7 @@ export function pageCapMs(
 
 /**
  * Spec rev 56 §2 (R-zero, R-spacing): every answer kind that may answer a return-phase request states the documents it
- * loaded and, after a further document, when the next load may start; the kinds that answer no such request (cells,
+ * loaded and, once the reload started (its pacer start recorded), when the next load may start; the kinds that answer no such request (cells,
  * grid, mode-unavailable) are returned as they are.
  */
 function withPageCounts(a: WorkerAnswer, pagesLoaded: number, next: IsoDateTime | null): WorkerAnswer {
@@ -230,13 +230,13 @@ export class PageSession {
   async page(asked: PageRequest | FlightsRequest): Promise<PageResult> {
     // why: spec rev 56 §2: a request carrying returnLimits on a verified entry states its page counts on every answer
     const phase = asksForReturns(asked) && this.S.RETURN_SELECT_VERIFIED;
-    const counts = { loads: 0 };
+    const counts = { loads: 0, reclaimed: false };
     const r = await this.run(asked, phase, counts);
     if (!phase) return r;
-    return {
-      ...r,
-      answer: withPageCounts(r.answer, counts.loads, counts.loads > 1 ? this.nextLoad() : null),
-    };
+    // why: review M5: the pacer's last start moves when the reload re-claims it, whether or not that document then
+    // loaded (held, or its load failed), so the next start is stated from the re-claim, not only from a second load
+    const next = counts.loads > 1 || counts.reclaimed ? this.nextLoad() : null;
+    return { ...r, answer: withPageCounts(r.answer, counts.loads, next) };
   }
 
   /** R-spacing: the last document load's start (the pacer's record) plus the spacing; null when it cannot be read. */
@@ -254,7 +254,7 @@ export class PageSession {
   private async run(
     asked: PageRequest | FlightsRequest,
     phase: boolean,
-    counts: { loads: number },
+    counts: { loads: number; reclaimed: boolean },
   ): Promise<PageResult> {
     let req = asked;
     // why: decision 70: grid pages only once the selectors module verifies the grid and worker.env asks for it
@@ -446,7 +446,14 @@ export class PageSession {
                 driver,
                 guard,
                 budget,
-                pacer: this.d.pacer,
+                // why: review M5: the re-claim is recorded once it wrote the pacer's start (a refused wait records nothing)
+                pacer: {
+                  spacingMs: this.d.pacer.spacingMs,
+                  reclaim: async (d, t) => {
+                    await this.d.pacer.reclaim(d, t);
+                    counts.reclaimed = true;
+                  },
+                },
                 url: pageUrl(req),
                 req,
                 outbound: ob.read,

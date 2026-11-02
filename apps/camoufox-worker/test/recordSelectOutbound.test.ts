@@ -36,6 +36,7 @@ import {
   viewMore,
 } from './support/fakePage.js';
 import { memoryLog } from './support/log.js';
+import { IN_APP_E2E, inAppEvidence } from './support/recordedList.js';
 import { SYNTHETIC_REJECT } from './support/socsValues.js';
 import { fakeTimers } from './support/timers.js';
 
@@ -425,9 +426,54 @@ describe('record --select-outbound: the served sequence, two selections and a fr
       1, 2, 2,
     ]);
     expect([first.held, second.held]).toEqual(['unexpected-navigation', 'unexpected-navigation']);
+    // why: the ruling on review I2: every step states the gate's refusals and the documents the page started (counted
+    // before the gate), 0 included, so a selection that tried to load a document shows it though nothing loaded
+    expect(
+      doc
+        .facts()
+        .steps.map((x: { gateRefusals: number; documentStarts: number }) => [
+          x.gateRefusals,
+          x.documentStarts,
+        ]),
+    ).toEqual([
+      [1, 1],
+      [0, 1],
+      [1, 1],
+    ]);
+    expect(doc.meta()).toMatchObject({ documentLoads: 2, documentStarts: 4, gateRefusals: 2 });
     const inApp = setup();
     expect(await record(inApp.ctx(SELECT), cfg, inApp.deps)).toBe(0);
     expect(inApp.months()).toBe(2);
+    expect(
+      inApp
+        .facts()
+        .steps.map((x: { gateRefusals: number; documentStarts: number; held?: string }) => [
+          x.gateRefusals,
+          x.documentStarts,
+          x.held ?? null,
+        ]),
+    ).toEqual([
+      [0, 0, null],
+      [0, 1, null],
+      [0, 0, null],
+    ]);
+    expect(inApp.meta()).toMatchObject({ documentLoads: 2, documentStarts: 2, gateRefusals: 0 });
+  });
+  // why: review M7: `held` is the page's first held navigation and stays set; a reload whose load fails for another
+  // reason after an earlier step's held navigation is that failure, never blamed on the older hold
+  it('a reload that fails for another reason after a held selection is not recorded as held', async () => {
+    const t = setup({ ...DEFAULT, documentPerSelection: true });
+    const deps = withPage(t, (pg) => {
+      const goto = pg.goto.bind(pg);
+      let k = 0;
+      pg.goto = async (u, o) => {
+        k += 1;
+        if (k === 2) throw new Error('net::ERR_CONNECTION_RESET');
+        return goto(u, o);
+      };
+    });
+    expect(await record(t.ctx(SELECT), cfg, deps)).not.toBe(0);
+    expect(existsSync(join(t.root, 'select-outbound/2026-10-18/1.facts.json'))).toBe(false);
   });
   it('re-claims the pacer before each selection and the reload: its last start moves each time', async () => {
     const t = setup();
@@ -518,6 +564,8 @@ describe('record --select-outbound: steps that do not complete end the page plai
         selectFailed: 'find-outbound:ambiguous',
         waitMs: 24_000,
         target: expect.objectContaining({ matches: 2 }),
+        gateRefusals: 0,
+        documentStarts: 0,
       },
     ]);
     expect(f.clicked).toEqual(['tab:Cheapest']);
@@ -562,7 +610,9 @@ describe('record --select-outbound: steps that do not complete end the page plai
       },
     });
     expect(await record(t.ctx(SELECT), cfg, t.deps)).toBe(0);
-    expect(t.facts().steps).toEqual([{ step: 'first-selection', waitTimedOut: true, waitMs: 0 }]);
+    expect(t.facts().steps).toEqual([
+      { step: 'first-selection', waitTimedOut: true, waitMs: 0, gateRefusals: 0, documentStarts: 0 },
+    ]);
     expect(t.facts().clicked).toEqual(['tab:Cheapest']);
     expect(t.err.join()).not.toMatch(/did not settle/);
   });
@@ -738,7 +788,13 @@ describe('record --select-outbound: the served sequence’s other ends, and the 
       },
     });
     expect(await record(t.ctx(SELECT), cfg, t.deps)).toBe(0);
-    expect(t.facts().steps.at(-1)).toEqual({ step: 'reload', waitTimedOut: true, waitMs: 0 });
+    expect(t.facts().steps.at(-1)).toEqual({
+      step: 'reload',
+      waitTimedOut: true,
+      waitMs: 0,
+      gateRefusals: 0,
+      documentStarts: 0,
+    });
   });
   it('an Enter that never answers ends the step as select-failed press-outbound:timed-out', async () => {
     const hang = () => {
@@ -775,6 +831,8 @@ describe('record --select-outbound: the served sequence’s other ends, and the 
         activation: 'keyboard',
         waitMs: 24_000,
         target: expect.objectContaining({ matches: 1, visible: true }),
+        gateRefusals: 0,
+        documentStarts: 0,
       },
     ]);
   });
@@ -996,6 +1054,7 @@ describe('recordSelectOutbound: the activation recorded through the deadline pat
       frameUrls: [],
       refused: null,
       documentLoads: 1,
+      documentStarts: 1,
       activationGate: false,
       gateRefusals: 0,
       reservation: null,
@@ -1213,6 +1272,14 @@ describe('record --select-return: the return selected, the booking view recorded
     expect(f.picks.map((x: { name: string }) => x.name)).toEqual([P451, P478, RET_CHEAP]);
     // why: the served path spaces only the reload; no activation waits (R-worst)
     expect(f.steps.map((x: { waitMs?: number }) => x.waitMs)).toEqual([0, 22_000, 0, 0, 0]);
+    // why: the ruling on review I2: the evidence the recorded suites assert: no gate refusal on any step, and only the
+    // reload started a document
+    expect(f.steps.map((x: { gateRefusals: number }) => x.gateRefusals)).toEqual([0, 0, 0, 0, 0]);
+    expect(f.steps.map((x: { documentStarts: number }) => x.documentStarts)).toEqual([0, 1, 0, 0, 0]);
+    expect(f.steps.some((x: { held?: string }) => x.held !== undefined)).toBe(false);
+    // why: the recorded suites parse the end-to-end recording with the one schema; what the recorder writes is it
+    const meta = JSON.parse(readFileSync(join(t.root, 'select-return/2026-10-18/1.meta.json'), 'utf8'));
+    expect(inAppEvidence(f, meta)).toEqual(IN_APP_E2E);
     expect(t.contexts[0]?.pages[0]?.calls.gotos).toHaveLength(2);
     expect(t.months()).toBe(2);
     expect(vi.mocked(budget.pageBudget).mock.calls.map((c) => [c[1], c[3]])).toEqual([[90_000, 750_000]]);
@@ -1241,7 +1308,8 @@ describe('record --select-return: the return selected, the booking view recorded
     expect(t.contexts).toEqual([]);
   });
   it('an Enter on the return that changes nothing within the step is press-return:no-activation', async () => {
-    const t = setup(script({ onReturn: () => null }));
+    // why: nothing changes, the URL included (review M1: the URL's move to the booking path is a change)
+    const t = setup(script({ onReturn: () => null, booking: false }));
     expect(await record(t.ctx(SELECT_RETURN), cfg, t.deps)).toBe(0);
     expect(facts(t).steps[1]).toMatchObject({
       step: 'return-selection',
@@ -1255,6 +1323,19 @@ describe('record --select-return: the return selected, the booking view recorded
       `focus:link:${RET_CHEAP}`,
       `press:Enter:link:${RET_CHEAP}:focused`,
     ]);
+  });
+  // why: review M1, as the session's poll: the URL's move to the booking path is the return selection's change, so a
+  // booking view with no offer changed and never settled (the booking settle needs an offer), never no-activation
+  it('a booking view with no offer on the booking path: changed, not settled, no select failure', async () => {
+    const t = setup(script({ onReturn: () => [booking({ offers: [], more: false })] }));
+    expect(await record(t.ctx(SELECT_RETURN), cfg, t.deps)).toBe(0);
+    const ret = facts(t).steps[1];
+    expect(ret).toMatchObject({
+      step: 'return-selection',
+      activation: 'keyboard',
+      after: { settled: false, changedFromPreClick: true, urlChanged: true },
+    });
+    expect(ret.selectFailed).toBeUndefined();
   });
   // why: the review: a return is picked only from a view the classifier read as the return view
   it('a settled view that is not the return view gives the return selection nothing to pick', async () => {
@@ -1337,6 +1418,8 @@ describe('record --select-return: the more-booking-options expansion', () => {
       step: 'more-options',
       waitMs: expect.any(Number),
       selectFailed: 'find-more-options:not-found',
+      gateRefusals: 0,
+      documentStarts: 0,
     });
     expect(t.contexts[0]?.pages[0]?.calls.presses).toEqual([`Enter:link:${P451}`, `Enter:link:${RET_CHEAP}`]);
   });
@@ -1423,5 +1506,30 @@ describe('record --select-return: the more-booking-options expansion', () => {
     });
     // why: the expansion is opened once; a further control is recorded, never pressed
     expect(t.contexts[0]?.pages[0]?.calls.presses.filter((x) => x.includes(MORE))).toHaveLength(1);
+  });
+  // why: review M9: the driver's bookingFacts counts buttons in main only; the recorder reads the booking view's button
+  // names in main too (`mainButtonNames`), so the recorded suites replay the offers exactly as the driver reads them,
+  // and its expansion counts come from them; a button outside main (an offer-like name) is in buttonNames only
+  it('a booking view records the button names in main beside the page’s; the expansion counts read main only', async () => {
+    const OUTSIDE = 'Continue to book with QQ Elsewhere for 1 British pounds';
+    const withOutside = (t: FakeNode): FakeNode =>
+      n('document', '', [n('button', OUTSIDE), ...(t.children ?? [])]);
+    const t = setup(
+      script({
+        first: withOutside(offers(ABOVE, true)),
+        onMore: () => [withOutside(offers(ABOVE, false))],
+      }),
+    );
+    expect(await record(t.ctx(['--select-return', ...Q]), cfg, t.deps)).toBe(0);
+    const [, ret, more] = facts(t).steps;
+    for (const a of [ret.after, more.after]) {
+      expect(a.buttonNames).toContain(OUTSIDE);
+      expect(a.mainButtonNames).not.toContain(OUTSIDE);
+      expect(a.mainButtonNames).toContain(ABOVE[0]);
+    }
+    expect(ret.after.mainButtonNames).toContain(MORE);
+    expect(more.after.expansion).toMatchObject({ offerGrammar: 1, furtherMore: 0, cheapestVsFrom: 'above' });
+    // a return view records no main-scoped button names (only booking views do)
+    expect('mainButtonNames' in facts(t).steps[0].after).toBe(false);
   });
 });

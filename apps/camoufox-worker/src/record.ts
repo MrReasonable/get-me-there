@@ -368,8 +368,17 @@ export async function record(ctx: EntryContext, cfg: WorkerConfig, deps: RecordD
             admitted.pagesReserved,
             guard?.documentLoads ?? 0,
           );
-        /** Every recording's meta states the documents its page loaded (WP21 Task 21.0). */
+        /**
+         * Every recording's meta states the documents its page loaded (WP21 Task 21.0) and, by the controller's ruling on
+         * review I2 (WP21 Task 21.3), the main-frame documents the page started (counted by the guard before the gate)
+         * and the documents the gate aborted: the totals of the steps' own counts.
+         */
         const documentLoads = guard?.documentLoads ?? 0;
+        const pageCounts = {
+          documentLoads,
+          documentStarts: guard?.documentStarts ?? 0,
+          gateRefusals: guard?.gateRefusals ?? 0,
+        };
         if (back !== 'overran') readBacks.push(back);
         if (failure !== null && !(outcome?.kind === 'stop')) {
           if (failure instanceof DeadlineExceeded)
@@ -472,7 +481,7 @@ export async function record(ctx: EntryContext, cfg: WorkerConfig, deps: RecordD
                   hops: (outcome.kind === 'stop' ? outcome.hops : late).map(stripQuery),
                   socsReadBack: back,
                 },
-                meta: meta(deps, args.kind, back, outcome.stepMs, { failure: stopKind, documentLoads }),
+                meta: meta(deps, args.kind, back, outcome.stepMs, { failure: stopKind, ...pageCounts }),
               },
               secrets,
             );
@@ -495,7 +504,7 @@ export async function record(ctx: EntryContext, cfg: WorkerConfig, deps: RecordD
               // why: ruling 7: the fixed window the grid's layout was read at
               window: deps.launchOptions.window,
               socsReadBack: back,
-              documentLoads,
+              ...pageCounts,
               versions: {
                 selectors: SELECTORS_VERSION,
                 camoufoxJs: CAMOUFOX_JS_VERSION,
@@ -528,7 +537,7 @@ export async function record(ctx: EntryContext, cfg: WorkerConfig, deps: RecordD
           day,
           {
             facts: { ...outcome.data, socsReadBack: back },
-            meta: meta(deps, args.kind, back, outcome.stepMs, { documentLoads }),
+            meta: meta(deps, args.kind, back, outcome.stepMs, pageCounts),
           },
           secrets,
         );
@@ -926,7 +935,12 @@ async function consentProbe(
             'consent-probe',
             'missing',
             { settle: deps.timers.now() - t0 },
-            { profile: 'throwaway', documentLoads: guard.documentLoads },
+            {
+              profile: 'throwaway',
+              documentLoads: guard.documentLoads,
+              documentStarts: guard.documentStarts,
+              gateRefusals: guard.gateRefusals,
+            },
           ),
         },
         [cfg.key.reveal()],

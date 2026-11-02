@@ -235,8 +235,8 @@ export const GRID_ENDS = ['complete', 'scroll-not-settled', 'off-plan', 'allowan
  * Spec rev 56 §2 (R-zero, R-spacing): on every answer kind that may answer a flights request carrying `returnLimits`:
  * `pagesLoaded`, the documents that request loaded (0 when the first load was refused or the browser failed first;
  * stated on a verified entry, absent otherwise: a list or grid page, or an older worker, whose ledger counts the page
- * class as before), and `nextLoadNotBefore`, the worker's last document load's start plus the spacing, stated when the
- * phase loaded a further document.
+ * class as before), and `nextLoadNotBefore`, the worker's last document load's start plus the spacing, stated once the
+ * phase started the reload (its start recorded, whether or not that document then loaded).
  */
 const pageCounts = {
   pagesLoaded: count.exactOptional(),

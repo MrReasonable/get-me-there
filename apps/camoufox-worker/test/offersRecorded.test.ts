@@ -12,7 +12,13 @@ import { classifyPageWithRule, type PageFacts } from '../src/classify.js';
 import { parseOptionName } from '../src/names.js';
 import { readOffers } from '../src/offers.js';
 import { SELECTORS } from '../src/selectors.js';
-import { RECORDED_ROOT, RECORDINGS_REQUIRED } from './support/recordedList.js';
+import {
+  IN_APP_E2E,
+  inAppEvidence,
+  metaOf,
+  RECORDED_ROOT,
+  RECORDINGS_REQUIRED,
+} from './support/recordedList.js';
 
 const KIND = 'select-return';
 const RESEARCH = [
@@ -55,12 +61,25 @@ const afterSchema = z
     page: pageSchema,
     headings: z.array(z.string()).nullable(),
     buttonNames: z.array(z.string()).nullable(),
+    // why: review M9: the booking view's buttons in main (the driver's scope), recorded from WP21 Task 21.3 on
+    mainButtonNames: z.array(z.string()).nullable().optional(),
   })
   .loose();
 const factsSchema = z
   .object({
     picks: z.array(z.object({ name: z.string() })),
-    steps: z.array(z.object({ step: z.string(), after: afterSchema.optional() }).loose()),
+    // why: review I2: the step's held word and the guard's counts are named (inAppEvidence requires them)
+    steps: z.array(
+      z
+        .object({
+          step: z.string(),
+          after: afterSchema.optional(),
+          held: z.enum(['unexpected-navigation', 'page-reservation']).optional(),
+          gateRefusals: z.number().optional(),
+          documentStarts: z.number().optional(),
+        })
+        .loose(),
+    ),
     forceSecond: z.boolean().optional(),
   })
   .loose();
@@ -68,6 +87,7 @@ const factsSchema = z
 interface Recorded {
   key: string;
   facts: z.infer<typeof factsSchema>;
+  raw: unknown;
 }
 function recorded(): Recorded[] {
   const dir = join(RECORDED_ROOT, KIND);
@@ -78,11 +98,14 @@ function recorded(): Recorded[] {
     .sort())
     for (const f of readdirSync(join(dir, day))
       .filter((x) => x.endsWith('.facts.json'))
-      .sort())
+      .sort()) {
+      const raw: unknown = JSON.parse(readFileSync(join(dir, day, f), 'utf8'));
       out.push({
         key: `${KIND}/${day}/${f.replace(/\.facts\.json$/, '')}`,
-        facts: factsSchema.parse(JSON.parse(readFileSync(join(dir, day, f), 'utf8'))),
+        facts: factsSchema.parse(raw),
+        raw,
       });
+    }
   return out;
 }
 
@@ -110,14 +133,21 @@ function bookingPage(a: z.infer<typeof afterSchema>): PageFacts {
     },
   };
 }
-/** The booking view's offers as `bookingFacts` reads them, from the recorded button names. */
-function bookingFacts(a: z.infer<typeof afterSchema>) {
-  const buttons = a.buttonNames ?? [];
+/** What the three booking patterns read of a list of button names (offers by name, the two controls counted). */
+function patterns(buttons: readonly string[]) {
   return {
     offerNames: buttons.filter((b) => SELECTORS.booking.offer.test(b)),
     moreOptions: buttons.filter((b) => SELECTORS.booking.moreOptions.test(b)).length,
     grouped: buttons.filter((b) => SELECTORS.booking.grouped.test(b)).length,
   };
+}
+/**
+ * The booking view's offers as `bookingFacts` reads them (buttons in main, review M9): from the recorded main-scoped
+ * names where the recording has them (the end-to-end recording on), else from the page's (the research recordings of
+ * 2026-11-01, which predate the main-scoped read).
+ */
+function bookingFacts(a: z.infer<typeof afterSchema>) {
+  return patterns(a.mainButtonNames ?? a.buttonNames ?? []);
 }
 
 beforeEach(() => {
@@ -146,6 +176,24 @@ describe.skipIf(!present && !RECORDINGS_REQUIRED)(
             kind: { kind: 'results' },
             rule: 'booking',
           });
+        }
+    });
+    // why: the controller's ruling on review I2, as in returnsRecorded: the activations' in-app evidence can fail
+    it('the end-to-end recording: no gate refusal and no held navigation on any step; only the reload started a document', () => {
+      expect(e2e.length > 0 || !RECORDINGS_REQUIRED, 'the end-to-end recording').toBe(true);
+      for (const r of e2e) expect(inAppEvidence(r.raw, metaOf(r.key)), r.key).toEqual(IN_APP_E2E);
+    });
+    // why: review M9: on the end-to-end recording the replay reads main as the driver does, and no button outside main
+    // matches an offer, expansion or grouped pattern (the page's and main's pattern reads agree)
+    it('the end-to-end recording’s booking views: the main-scoped names recorded, no pattern match outside main', () => {
+      expect(e2e.length > 0 || !RECORDINGS_REQUIRED, 'the end-to-end recording').toBe(true);
+      for (const r of e2e)
+        for (const step of ['return-selection', 'more-options']) {
+          const a = after(r, step);
+          expect(a?.mainButtonNames, `${r.key} ${step}`).toBeTruthy();
+          expect(patterns(a?.buttonNames ?? []), `${r.key} ${step}`).toEqual(
+            patterns(a?.mainButtonNames ?? []),
+          );
         }
     });
     it('readOffers over each expanded view: every offer read, none "From", the controls and the cheapest as pinned', () => {

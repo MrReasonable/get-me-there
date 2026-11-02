@@ -275,7 +275,8 @@ export function selectorsFor(
 /**
  * The recording that proved each true flag (TS-13), per `<os>-<arch>` entry (decision 75: a flag counts only on the
  * entry and build it was recorded under): its date and what it was. The recordings are local-only (decision 61), named
- * here by kind, date and number.
+ * here by kind, date and number; a proof with no recording key cites the operator ruling that set the flag ("operator
+ * ruling of <date>"), and a key is never written for a recording no backup holds (flagsProofs.test.ts).
  */
 export const PROOFS: Readonly<Record<OsArch, Partial<Record<FlagName, string>>>> = {
   'darwin-arm64': {
@@ -287,9 +288,8 @@ export const PROOFS: Readonly<Record<OsArch, Partial<Record<FlagName, string>>>>
       '2026-10-18 cheapest/2026-10-18/1 (21 links after the tab click; their minimum equals the tab price, SOCS same)',
     NO_FLIGHTS_VERIFIED:
       '2026-10-18 no-flights/2026-10-18/1 (a date beyond the sale window: the line visible with 0 links, form as asked)',
-    // why: WP21 Task 21.3 (flagsProofs): named by its recording key, as every other proof is
     SOCS_STABLE:
-      '2026-10-18 socs-stability/2026-10-18/1 (passes 1–3 all read back same; operator ruling of 2026-10-18)',
+      '2026-10-18 socs-stability recording, passes 1–3 all read back same (operator ruling of 2026-10-18)',
     LANDING_VERIFIED:
       '2026-10-25 consent-research/2026-10-25/1 (both sessions’ views after the choice: /travel/flights?hl=en-GB&gl=GB with no query, the heading "Flights", no tab, Date grid button or result link)',
     GRID_VERIFIED:

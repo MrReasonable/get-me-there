@@ -131,6 +131,7 @@ describe('pollUntilSettled with changedFrom (the return view)', () => {
       frameUrls: [],
       refused: null,
       documentLoads: 1,
+      documentStarts: 0,
       activationGate: false,
       gateRefusals: 0,
       reservation: null,

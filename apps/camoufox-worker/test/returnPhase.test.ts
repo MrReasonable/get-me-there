@@ -17,7 +17,7 @@ import {
 } from '@gmt/core';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { CooldownStore } from '../src/cooldown.js';
-import { createDriver, type RequestLike } from '../src/driver.js';
+import { createDriver, type Driver, type RequestLike } from '../src/driver.js';
 import type { FlightsRead } from '../src/flights.js';
 import type { GuardState } from '../src/guard.js';
 import { type MonthlyCaps, MonthlyCounter } from '../src/monthly.js';
@@ -28,6 +28,7 @@ import { flightsWithPicks, refusalOf, unverifiedReturns } from '../src/returnPha
 import { SELECTORS, type Selectors } from '../src/selectors.js';
 import { PageSession, pageCapMs } from '../src/session.js';
 import { loadSocs } from '../src/socs.js';
+import type { Deadline } from '../src/timers.js';
 import { FakeContext } from './support/fakeContext.js';
 import {
   descendants,
@@ -200,6 +201,8 @@ interface Opts {
   hops?: string[];
   shape?: (c: FakeContext) => void;
   page?: (p: FakePage, c: FakeContext) => void;
+  /** Wraps the session's driver (a call that lets the page start a navigation at a chosen read). */
+  driver?: (d: Driver, c: FakeContext) => Driver;
 }
 const DEFAULT_PRESS = (): Record<string, Shows> => ({
   [PICK]: { trees: [returnTree()], url: RETURN_URL },
@@ -294,7 +297,9 @@ function setup(o: Opts = {}) {
     versions,
     driverFor: (p, g, S) => {
       seen.guard = g;
-      return createDriver(p, g, S);
+      const d = createDriver(p, g, S);
+      const c = contexts.at(-1);
+      return o.driver === undefined || c === undefined ? d : o.driver(d, c);
     },
   });
   const page0 = (): FakePage => {
@@ -742,6 +747,94 @@ describe('the second attempt (Ian’s ruling 2: the next outbound, from a fresh 
     expect(a.returns?.booking).toMatchObject({ status: 'read', attempt: 0 });
     expect(t.page0().calls.gotos).toHaveLength(1);
   });
+  // why: review I1: a reload whose load fails for any reason but a refusal or the deadline keeps everything read
+  it('a reload whose load fails with a network error: read, rule reload:goto, one attempt, the booking skipped, nextLoadNotBefore stated (M5)', async () => {
+    let gotos = 0;
+    const t = setup({
+      ...second(),
+      page: (p) => {
+        const goto = p.goto.bind(p);
+        p.goto = async (u, o) => {
+          gotos++;
+          // why: the second load fails before any request reaches the guard, so nothing is counted
+          if (gotos === 2) throw new Error('net::ERR_CONNECTION_RESET');
+          return goto(u, o);
+        };
+      },
+    });
+    const a = expectTransient(t, (await t.session.page(REQ)).answer, 1);
+    expect(a.returns).toMatchObject({
+      status: 'read',
+      rule: 'reload:goto',
+      booking: { status: 'skipped', rule: 'reload:goto' },
+    });
+    expect(a.returns?.attempts).toHaveLength(1);
+    // why: review M5: the pacer was re-claimed for the reload, so the next load waits from that start
+    const last = t.pacer.lastPageAt();
+    expect(a.nextLoadNotBefore).toBe(new Date(Date.parse(last ?? '') + 30_000).toISOString());
+  });
+  it('a reload whose load fails with a plain error as the deadline expires: reload:not-settled, never not-ready', async () => {
+    let gotos = 0;
+    const t = setup({
+      ...second(),
+      page: (p) => {
+        const goto = p.goto.bind(p);
+        p.goto = async (u, o) => {
+          gotos++;
+          if (gotos === 2) {
+            // why: the error the browser gives at the same moment as the step's own deadline (its own timeout)
+            t.timers.runOut();
+            throw new Error('Timeout exceeded while navigating');
+          }
+          return goto(u, o);
+        };
+      },
+    });
+    // why: the browser's own error reaches the phase first: the deadline's race passes the call through untouched
+    const deadline = t.timers.deadline.bind(t.timers);
+    t.timers.deadline = (ms) => {
+      const d = deadline(ms);
+      return { ...d, race: (x) => x };
+    };
+    const a = expectTransient(t, (await t.session.page(REQ)).answer, 1);
+    expect(a.returns).toMatchObject({
+      status: 'read',
+      rule: 'reload:not-settled',
+      booking: { status: 'skipped', rule: 'reload:not-settled' },
+    });
+  });
+  // why: review M4: a second outbound whose selection failed is no attempt: it is not placed among the 30 (no flight
+  // the list kept is dropped for it), and it still counts as untried for triedAll
+  it('a failed second selection of an outbound outside the 30: the kept 30 unchanged, triedAll false', async () => {
+    const many = Array.from({ length: 29 }, (_, i) => ob(400 + i, { stops: '2 stops' }));
+    const DEAR = ob(900);
+    const names = [...many, PICK, DEAR];
+    const t = setup(
+      second(
+        {
+          loads: [
+            { best: [best(names)], cheapest: [cheapest(names)] },
+            { best: [best(names)], cheapest: [cheapest(names)] },
+          ],
+        },
+        // why: DEAR's press changes nothing
+        {},
+      ),
+    );
+    const a = expectTransient(t, (await t.session.page(REQ)).answer, 2);
+    expect(a.returns).toMatchObject({
+      status: 'read',
+      rule: 'select-outbound:no-activation',
+      booking: { status: 'skipped', rule: 'second-selection' },
+    });
+    expect(t.page0().calls.presses).toContain(`Enter:link:${DEAR}`);
+    expect(a.returns?.attempts).toHaveLength(1);
+    expect(a.flights).toHaveLength(30);
+    expect(a.flights.map((f) => f.amountMinor)).not.toContain(90_000);
+    expect(a.flights.map((f) => f.amountMinor)).toContain(42_800);
+    expect(a.flights[a.returns?.attempts[0]?.outboundIndex ?? -1]?.amountMinor).toBe(47_800);
+    expect(a.returns?.triedAll).toBe(false);
+  });
   it('a second selection that fails: read with its rule, one attempt, the booking skipped second-selection (A13)', async () => {
     const t = setup(second({}, { [O520]: { trees: [cheapest()] } }));
     // why: the second outbound's press changes nothing
@@ -1006,6 +1099,39 @@ describe('transient ends of the return step (each through the shared helper)', (
     const a = expectTransient(t, (await t.session.page(REQ)).answer, 1);
     expect(a.returns).toMatchObject({ status: 'not-settled', rule: 'select-outbound:list-facts' });
   });
+  // why: review I1: an activation's call that fails with the browser's own error as the step's deadline expires is the
+  // deadline's end (not-settled), never the page's not-ready
+  it('the press fails with a plain error as the deadline expires: not-settled select-outbound:activate', async () => {
+    const t = setup({
+      press: press({
+        [PICK]: {
+          trees: [returnTree()],
+          url: RETURN_URL,
+          also: () => {
+            // why: the selection's own page period (the last 90 s deadline) expires: the press step's shorter
+            // deadline ends first, then that one (each fire is synchronous; no time is waited)
+            const period = periods.at(-1);
+            for (let i = 0; i < 5 && period?.expired() === false; i++) t.timers.runOut();
+            expect(period?.expired()).toBe(true);
+            throw new Error('Target page, context or browser has been closed');
+          },
+        },
+      }),
+    });
+    const periods: Deadline[] = [];
+    const deadline = t.timers.deadline.bind(t.timers);
+    t.timers.deadline = (ms) => {
+      const d = deadline(ms);
+      if (ms === 90_000) periods.push(d);
+      return { ...d, race: (x) => x };
+    };
+    const a = expectTransient(t, (await t.session.page(REQ)).answer, 1);
+    expect(a.returns).toMatchObject({
+      status: 'not-settled',
+      rule: 'select-outbound:activate',
+      attempts: [],
+    });
+  });
   it('the return view in another currency: unrecognised currency', async () => {
     const t = setup({
       press: press({ [PICK]: { trees: [returnTree(RETURNS, { currency: 'USD' })], url: RETURN_URL } }),
@@ -1060,11 +1186,11 @@ describe('transient ends of the booking step (the returns intact, returns read)'
     const t = setup({ press: withPress({ [R1180]: shows }) });
     expect(await booked(t)).toMatchObject({ status: 'unrecognised', rule: 'not-booking-view', offers: [] });
   });
-  // why: the booking view's change is its offers' signature (preflight P5), so a view without an offer reads as no
-  // change at all, and never settles (the booking settle needs an offer): it ends at its deadline as no-activation
-  it('a view without an offer: not-settled select-return:no-activation, never unrecognised', async () => {
+  // why: review M1 (ruled): the URL moving to the booking path is the activation's change, so a booking view without
+  // an offer changed, and never settles (the booking settle needs an offer): it ends at its deadline as not-settled
+  it('a view without an offer: not-settled select-return:not-settled, never unrecognised', async () => {
     const t = setup({ press: withPress({ [R1180]: { trees: [bookingTree([])], url: BOOKING_URL } }) });
-    expect(await booked(t)).toMatchObject({ status: 'not-settled', rule: 'select-return:no-activation' });
+    expect(await booked(t)).toMatchObject({ status: 'not-settled', rule: 'select-return:not-settled' });
   });
   it('two links of the return’s name: select-failed select-return:find-return', async () => {
     const t = setup({
@@ -1098,7 +1224,17 @@ describe('transient ends of the booking step (the returns intact, returns read)'
         },
       }),
     });
-    expect(await booked(t)).toMatchObject({ status: 'unrecognised', rule: 'more-options-count', offers: [] });
+    // why: review M2: the end keeps no offer (A9), but its counts as read
+    expect(await booked(t)).toMatchObject({
+      status: 'unrecognised',
+      rule: 'more-options-count',
+      offers: [],
+      offersStated: null,
+      grouped: 1,
+      moreControl: true,
+      unparsed: 0,
+      nonGbp: 0,
+    });
     expect(t.page0().calls.actions).toHaveLength(4);
   });
   it('the expansion’s press changes nothing: expand-failed select-more-options:no-activation, the offers read before it kept', async () => {
@@ -1136,11 +1272,39 @@ describe('transient ends of the booking step (the returns intact, returns read)'
           },
         }),
       });
+      const b = await booked(t);
+      expect(b).toMatchObject({ status: 'unrecognised', rule: 'unexpected-navigation', offers: [] });
+      // why: review M2: the expansion's end keeps the counts of the view read before it; the return's read none
+      expect([b?.grouped, b?.moreControl]).toEqual(name === MORE ? [1, true] : [0, false]);
+    },
+  );
+  // why: review M3: a seller's navigation refused between the booking view's settle and its read ends the read with
+  // that refusal (never a `read` booking over a page the guard refused), before and after the expansion
+  it.each([
+    [1, 'the first read', 4],
+    [2, 'the read after the expansion', 6],
+  ])(
+    'a navigation refused during booking read %i (%s): unrecognised guard-refused:off-allowlist',
+    async (at, _what, actions) => {
+      let reads = 0;
+      const t = setup({
+        driver: (d, c) => ({
+          ...d,
+          bookingFacts: async (dl) => {
+            const f = await d.bookingFacts(dl);
+            reads++;
+            if (reads === at) navigate(c, 'https://seller.example/checkout');
+            return f;
+          },
+        }),
+      });
       expect(await booked(t)).toMatchObject({
         status: 'unrecognised',
-        rule: 'unexpected-navigation',
+        rule: 'guard-refused:off-allowlist',
         offers: [],
       });
+      expect(t.page0().calls.actions).toHaveLength(actions);
+      expect(t.cooldown.active()).toBeNull();
     },
   );
   it('an offer in another currency before the expansion: unrecognised currency, nothing pressed after', async () => {
@@ -1152,7 +1316,16 @@ describe('transient ends of the booking step (the returns intact, returns read)'
         },
       }),
     });
-    expect(await booked(t)).toMatchObject({ status: 'unrecognised', rule: 'currency', offers: [] });
+    expect(await booked(t)).toMatchObject({
+      status: 'unrecognised',
+      rule: 'currency',
+      offers: [],
+      nonGbp: 1,
+      unparsed: 0,
+      grouped: 1,
+      moreControl: true,
+      expanded: false,
+    });
     expect(t.page0().calls.actions).toHaveLength(4);
   });
   it('an offer in another currency: unrecognised currency (prov-int-r3-008)', async () => {
@@ -1165,7 +1338,58 @@ describe('transient ends of the booking step (the returns intact, returns read)'
         },
       }),
     });
-    expect(await booked(t)).toMatchObject({ status: 'unrecognised', rule: 'currency', offers: [] });
+    expect(await booked(t)).toMatchObject({
+      status: 'unrecognised',
+      rule: 'currency',
+      offers: [],
+      nonGbp: 1,
+      moreControl: false,
+      expanded: true,
+    });
+  });
+  // why: review M2: a view whose every offer the grammar refused keeps the count of what it refused
+  const REFUSED = [
+    offer('QQ Travel', '1,180', undefined, 'Galleons'),
+    offer('QQ Fares', '1,195', undefined, 'Sickles'),
+  ];
+  it('every offer refused, no expansion control: unrecognised no-offers-read, the refused counted', async () => {
+    const t = setup({
+      press: withPress({ [R1180]: { trees: [bookingTree(REFUSED, { more: [] })], url: BOOKING_URL } }),
+    });
+    expect(await booked(t)).toMatchObject({
+      status: 'unrecognised',
+      rule: 'no-offers-read',
+      offers: [],
+      unparsed: 2,
+      nonGbp: 0,
+      grouped: 1,
+      expanded: false,
+    });
+  });
+  it('every offer refused after the expansion: unrecognised no-offers-read, expanded, the refused counted', async () => {
+    const t = setup({
+      press: withPress({ [MORE]: { trees: [bookingTree([...REFUSED, REFUSED[0] ?? ''], { more: [] })] } }),
+    });
+    expect(await booked(t)).toMatchObject({
+      status: 'unrecognised',
+      rule: 'no-offers-read',
+      offers: [],
+      unparsed: 3,
+      expanded: true,
+    });
+  });
+  it('every initial offer refused and the expansion failing: unrecognised no-offers-read, the refused counted', async () => {
+    const t = setup({
+      press: withPress({ [R1180]: { trees: [bookingTree(REFUSED)], url: BOOKING_URL }, [MORE]: undefined }),
+    });
+    expect(await booked(t)).toMatchObject({
+      status: 'unrecognised',
+      rule: 'no-offers-read',
+      offers: [],
+      unparsed: 2,
+      moreControl: true,
+      expanded: false,
+    });
   });
 });
 

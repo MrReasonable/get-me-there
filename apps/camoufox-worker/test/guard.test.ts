@@ -189,6 +189,7 @@ describe('installGuard (ruling 3: route, framenavigated and request guards)', ()
       frameUrls: [],
       refused: null,
       documentLoads: 0,
+      documentStarts: 0,
       activationGate: false,
       gateRefusals: 0,
       reservation: null,
@@ -496,6 +497,30 @@ describe('the activation gate and the reservation stop (WP21 Task 21.3)', () => 
     state.reservation = 1;
     await ctx.routeRequest(req(BOOKING));
     const next = await installGuard(ctx, new FakePage(ctx), log);
-    expect(next).toMatchObject({ activationGate: false, reservation: null, held: null, gateRefusals: 0 });
+    expect(next).toMatchObject({
+      activationGate: false,
+      reservation: null,
+      held: null,
+      gateRefusals: 0,
+      documentStarts: 0,
+    });
+  });
+  // why: the controller's ruling on review I2: the recorder's evidence that an activation is in-app must be able to
+  // fail under the gate, so the guard counts every main-frame document the page starts, before any decision: one the
+  // gate aborted, one past the reservation, one off the allowlist and one let through alike
+  it('documentStarts counts every main-frame document the page started, before the gate, the reservation or the allowlist', async () => {
+    const ctx = new FakeContext();
+    const state = await installGuard(ctx, new FakePage(ctx), log);
+    await ctx.routeRequest(req('https://www.google.com/travel/flights?q=x'));
+    state.activationGate = true;
+    await ctx.routeRequest(req(BOOKING));
+    await ctx.routeRequest(req('https://www.example-airline.test/book'));
+    state.activationGate = false;
+    state.reservation = 1;
+    await ctx.routeRequest(req('https://www.google.com/travel/flights?q=y'));
+    // a subresource and a sub-frame's document are no main-frame documents
+    await ctx.routeRequest(req('https://www.google.com/x.js', { nav: false }));
+    await ctx.routeRequest(req('https://www.google.com/_/FlightsFrontendUi/bscframe', { frame: sub }));
+    expect(state).toMatchObject({ documentStarts: 4, documentLoads: 1, gateRefusals: 2 });
   });
 });

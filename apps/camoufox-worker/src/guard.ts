@@ -31,6 +31,13 @@ export interface GuardState {
    */
   documentLoads: number;
   /**
+   * WP21 Task 21.3 (the controller's ruling on review I2): every main-frame document navigation the route saw on this
+   * page, counted before any decision (the gate, the reservation, the allowlist), so a document the page tried to load
+   * under the gate still counts here though it loaded nothing. The recorder states it per step and per recording: an
+   * in-app activation starts none, which the recorded suites assert (the e2e recording's evidence can fail).
+   */
+  documentStarts: number;
+  /**
    * WP21 Task 21.3 (R-worst): set by the return phase (and the recorder's selections) from an activation's press until
    * its view settles: while on, every main-frame document navigation is aborted, allowlisted or not, and counts no load,
    * so an activation never loads a document. An off-allowlist one keeps its kind in `refused` (a seller's host is
@@ -165,6 +172,7 @@ export function installWith(
       frameUrls: [],
       refused: null,
       documentLoads: 0,
+      documentStarts: 0,
       activationGate: false,
       gateRefusals: 0,
       reservation: null,
@@ -205,6 +213,8 @@ export function installWith(
       const navigation = req.isNavigationRequest();
       const d = decide(req.url(), navigation, req.method(), main);
       const document = navigation && main;
+      // why: the ruling on review I2: every main-frame document the page started, before anything decides its fate
+      if (document) state.documentStarts += 1;
       // why: WP21 Task 21.3 (R-worst): under the gate every main-frame document is aborted, whatever its reason
       if (document && state.activationGate) state.gateRefusals += 1;
       if (d.action === 'continue') {
@@ -234,6 +244,7 @@ export function installWith(
   state.frameUrls = [];
   state.refused = null;
   state.documentLoads = 0;
+  state.documentStarts = 0;
   state.activationGate = false;
   state.gateRefusals = 0;
   state.reservation = null;

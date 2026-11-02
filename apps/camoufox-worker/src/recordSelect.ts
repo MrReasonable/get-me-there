@@ -25,6 +25,9 @@ import {
   type FormFacts,
   type ListFacts,
   type PageLike,
+  pathField,
+  pathMoved,
+  pathOf,
   pollUntilSettled,
   type SettleFacts,
   StepFailed,
@@ -37,7 +40,14 @@ import { currencyOf, minorOf } from './pence.js';
 import type { View } from './ready.js';
 import type { Outcome } from './recordDialogs.js';
 import { type StopFacts, stripQuery } from './recordWrite.js';
-import { buttonNames, headingLevels, linkNames, roleCounts, tabNames } from './researchNames.js';
+import {
+  buttonNames,
+  headingLevels,
+  linkNames,
+  mainButtonNames,
+  roleCounts,
+  tabNames,
+} from './researchNames.js';
 import { probeTarget, type TargetProbe } from './researchProbe.js';
 import type { Selectors } from './selectors.js';
 import { servedSequence } from './served.js';
@@ -184,6 +194,11 @@ interface After {
    */
   booking?: { headingLevels: number[]; roleCounts: Record<string, number> } | null;
   /**
+   * WP21 Task 21.3 (review M9), on a booking view: every button name in `main`, the scope the driver's `bookingFacts`
+   * reads (the page-wide `buttonNames` may hold buttons outside it); null when the reads' bound ran out before it.
+   */
+  mainButtonNames?: string[] | null;
+  /**
    * Ian's ruling of 2026-11-01 (open "more booking options"), on a booking view: the offers counted, the buttons the offer
    * pattern reads, further expansion controls, the cheapest offer against the return's "From" price as a word, and the
    * dialogs in main (counts and words only).
@@ -217,6 +232,17 @@ interface StepRecord {
   lastReadOverran?: true;
   /** WP21 Task 21.3 (R-worst): a navigation the guard held back during the step (the gate, or past the reservation). */
   held?: HeldRefusal;
+  /**
+   * WP21 Task 21.3 (the controller's ruling on review I2): the main-frame documents the gate aborted during the step,
+   * 0 included; an in-app activation has none, which the recorded suites assert.
+   */
+  gateRefusals?: number;
+  /**
+   * The same ruling: the main-frame documents the page started during the step, counted by the guard before the gate
+   * (`documentStarts`), 0 included: 0 for an in-app activation, 1 for the reload. Unlike `documentLoads`, which the gate
+   * keeps at 0 by construction, this can show an activation that tried to load a document.
+   */
+  documentStarts?: number;
 }
 
 type StepResult = { record: StepRecord; end: boolean } | { stop: Outcome };
@@ -342,6 +368,8 @@ function changedOf(facts: StopFacts, before: Before, loads: number, view: View):
     facts.settle.linkSignature !== before.signature ||
     // why: as pollUntilSettled: the return heading is a change only into the return view
     (view === 'returns' && facts.page.text.returnHeading) ||
+    // why: as pollUntilSettled (review M1): on the booking view the URL's move off the path before the step
+    (view === 'booking' && before.url !== null && pathMoved(facts.page.url, pathOf(before.url))) ||
     loads > before.loads
   );
 }
@@ -373,6 +401,7 @@ async function afterOf(
   let buttons: string[] | null = null;
   let tabs: string[] | null = null;
   let booking: After['booking'] = null;
+  let mainButtons: string[] | null = null;
   let readsOverran = false;
   try {
     list = await c.driver.listFacts(h, o.listView);
@@ -381,8 +410,10 @@ async function afterOf(
     headings = await c.driver.headingNames(h);
     buttons = await buttonNames(c.page, h);
     tabs = await tabNames(c.page, h);
-    if (o.listView === 'booking')
+    if (o.listView === 'booking') {
       booking = { headingLevels: await headingLevels(c.page, h), roleCounts: await roleCounts(c.page, h) };
+      mainButtons = await mainButtonNames(c.page, h);
+    }
   } catch (e) {
     if (!(e instanceof DeadlineExceeded)) throw e;
     readsOverran = true;
@@ -407,7 +438,7 @@ async function afterOf(
     buttonNames: buttons,
     tabNames: tabs,
     readsOverran,
-    ...(o.listView === 'booking' ? { booking } : {}),
+    ...(o.listView === 'booking' ? { booking, mainButtonNames: mainButtons } : {}),
     stepMs: o.stepMs,
     waitMs: o.waitMs,
     settled: o.settled,
@@ -471,6 +502,42 @@ async function unsettled(
   }
 }
 
+/** The guard's counters a step's record states the growth of (the ruling on review I2, M7). */
+interface GuardCounts {
+  gateRefusals: number;
+  documentStarts: number;
+  documentLoads: number;
+  held: HeldRefusal | null;
+}
+function countsOf(g: GuardState): GuardCounts {
+  return {
+    gateRefusals: g.gateRefusals,
+    documentStarts: g.documentStarts,
+    documentLoads: g.documentLoads,
+    held: g.held,
+  };
+}
+/** Sets the step's `gateRefusals` and `documentStarts` to their growth since `before` (0 included); returns it. */
+function withCounts(
+  r: StepRecord,
+  g: GuardState,
+  before: GuardCounts,
+): { gateRefusals: number; documentStarts: number } {
+  r.gateRefusals = g.gateRefusals - before.gateRefusals;
+  r.documentStarts = g.documentStarts - before.documentStarts;
+  return { gateRefusals: r.gateRefusals, documentStarts: r.documentStarts };
+}
+/**
+ * Review M7: whether the guard held a navigation since `before`: its first held refusal was set now, or a document
+ * started that neither loaded nor was refused (the guard keeps only the page's first held kind, so a later hold shows
+ * only in the counts). Never an older step's hold.
+ */
+function heldSince(g: GuardState, before: GuardCounts): boolean {
+  if (g.held === null || g.refused !== null) return false;
+  if (before.held === null) return true;
+  return g.documentStarts - before.documentStarts > g.documentLoads - before.documentLoads;
+}
+
 /** One selection: spaced, the pre-click view read, the option's link activated, the view after it polled and read. */
 async function selection(
   c: SelectPage,
@@ -479,15 +546,17 @@ async function selection(
   sel: Selection = outboundSelection(c),
 ): Promise<StepResult> {
   let target: TargetProbe | undefined;
-  const refusalsBefore = c.guard.gateRefusals;
+  const before = countsOf(c.guard);
   const r = await selectionSteps(c, step, pick, sel, (t) => {
     target = t;
   });
   // why: the probe goes with the step's record however the step ended
   if ('record' in r && target !== undefined) r.record.target = target;
-  // why: WP21 Task 21.3: a navigation the gate held back during this step is recorded with it (a word, never a URL)
-  if ('record' in r && c.guard.gateRefusals > refusalsBefore && c.guard.held !== null)
-    r.record.held = c.guard.held;
+  if ('record' in r) {
+    const grew = withCounts(r.record, c.guard, before);
+    // why: WP21 Task 21.3: a navigation the gate held back during this step is recorded with it (a word, never a URL)
+    if (grew.gateRefusals > 0 && c.guard.held !== null) r.record.held = c.guard.held;
+  }
   if ('record' in r) {
     const rec = r.record;
     // why: the controller's ruling after recording 2: an Enter that left the view as it was within the step is a
@@ -561,7 +630,12 @@ async function selectionSteps(
       view: sel.view,
       log,
       startedAt: c.pageStart,
-      changedFrom: { signature: pre.settle.linkSignature, documentLoads: before.loads },
+      changedFrom: {
+        signature: pre.settle.linkSignature,
+        documentLoads: before.loads,
+        // why: review M1, as the session's poll: the booking view's change includes the URL's move to its path
+        ...pathField(pre.page.url),
+      },
       loads: () => c.guard.documentLoads,
     }).finally(() => {
       c.guard.activationGate = false;
@@ -589,6 +663,13 @@ async function selectionSteps(
 
 /** The list page loaded afresh (the worker's own URL), spaced, and the served sequence run on it again. */
 async function reload(c: SelectPage, before: Before): Promise<StepResult & { shown?: ViewRead }> {
+  const counts = countsOf(c.guard);
+  const r = await reloadSteps(c, before);
+  if ('record' in r) withCounts(r.record, c.guard, counts);
+  return r;
+}
+
+async function reloadSteps(c: SelectPage, before: Before): Promise<StepResult & { shown?: ViewRead }> {
   const { timers } = c.deps;
   const step: StepName = 'reload';
   const spaced = await spacing(c);
@@ -597,12 +678,14 @@ async function reload(c: SelectPage, before: Before): Promise<StepResult & { sho
   const d = c.budget.nextFor(c.pageMs);
   const b: Before = { ...before, loads: c.guard.documentLoads };
   const started = timers.now();
+  // why: review M7: the guard's state before the load, so only a hold this load met is recorded as one
+  const pre = countsOf(c.guard);
   try {
     try {
       await c.driver.goto(c.url, d);
     } catch (e) {
       // why: WP21 Task 21.3: a load the guard held back (past the reservation) loaded nothing: recorded, never a stop
-      if (c.guard.refused === null && c.guard.held !== null)
+      if (heldSince(c.guard, pre) && c.guard.held !== null)
         return { record: { step, waitMs, held: c.guard.held }, end: true };
       if (c.guard.refused === null) throw e;
       return { stop: await c.stop(c.guard.refused, `guard-refused:${c.guard.refused}`) };
@@ -636,7 +719,8 @@ async function reload(c: SelectPage, before: Before): Promise<StepResult & { sho
 
 /** A booking view's offers as the expansion step records them (counts and a word; never a name or a price). */
 function expansionOf(c: SelectPage, a: After, fromMinor: number | null): NonNullable<After['expansion']> {
-  const buttons = a.buttonNames ?? [];
+  // why: review M9: the driver's own scope (main), where it was read; the page's buttons only when it was not
+  const buttons = a.mainButtonNames ?? a.buttonNames ?? [];
   const offers = buttons.filter((b) => c.deps.selectors.booking.offer.test(b));
   // why: the review and the 21.0 Lows: each offer's currency is read from its own phrase (pence.ts, never assumed),
   // prices compare in that currency's minor units (core's ISO 4217 table), and only in the return's currency, which its

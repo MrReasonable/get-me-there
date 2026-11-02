@@ -691,9 +691,11 @@ rule `monthly-headroom`, before any activation, the first view still read
   `no-pairing` (no return listed on the last attempt, nothing selected),
   `skipped` (no booking step made, with its rule: `monthly-headroom` and
   `not-cheapest-view` as the returns', `reload:<end>` after a reload that did
-  not reach a settled Cheapest view, and `second-selection` when the second
-  selection failed; a `spacing` end makes no second attempt, and the booking
-  is then read on attempt 0), `select-failed`, `not-settled`,
+  not reach a settled Cheapest view, `second-selection` when the second
+  selection failed, and the return's own rule when the first attempt ended
+  before any return view or the phase began on a refusal the guard read; a
+  `spacing` end makes no second attempt, and the booking is then read on
+  attempt 0), `select-failed`, `not-settled`,
   `unrecognised`, `expand-failed` or `not-verified`; `booking` is null when
   the request asked for none. `read` and `no-outbound` (`read` and
   `no-pairing` for the booking) are finished; every other status is not, and
@@ -723,9 +725,10 @@ rule `monthly-headroom`, before any activation, the first view still read
   its fit, what was listed, `moreListed` and the returns, `triedAll`, and the
   booking read with its offers); every answer kind to a request with
   `returnLimits` on a verified entry states `pagesLoaded` (0 when the first
-  load was refused), and, after a request that loaded the reload,
-  `nextLoadNotBefore` (that load's start plus the spacing), which the app's
-  next request waits for. The page budget for such a request is
+  load was refused), and, after a request that started the reload (its
+  spacing waited out and its start recorded, whether or not the document
+  then loaded), `nextLoadNotBefore` (that start plus the spacing), which the
+  app's next request waits for. The page budget for such a request is
   `RETURN_PAGE_PERIODS` page periods (8 with a booking read: the first view,
   the Cheapest flow, the selection, the reload, its Cheapest flow, the second
   selection, the return's selection and the expansion; 6 without) plus one
@@ -741,7 +744,11 @@ The flags are dated per entry. `darwin-arm64`'s `RETURN_SELECT_VERIFIED` and
 (`select-outbound` and `select-return`) and are set only after one
 end-to-end recording of the full served path on that entry (both outbounds,
 the reload, the return's selection and the expansion; "Recordings first",
-below) and its recorded suites' required run; until then they stay false.
+below) and its recorded suites' required run, which asserts from the guard's
+counts recorded with each step (the main-frame documents the page started,
+counted before the activation gate, and the documents the gate aborted)
+that no activation started or was refused a document and that only the
+reload started one; until then they stay false.
 Every other entry keeps them false until its own recording session, and the
 docs promise returns and sellers only where they are set.
 
@@ -1544,7 +1551,7 @@ export type FlightListResult =
   | { kind: 'list'; fetchedAt: IsoDateTime; pointOfSale: PointOfSale; listed: Listed; flights: ListedFlight[]; minMinor: number | null; tabMinor: number | null;
       cheapestView: 'cheapest' | 'best-fallback' | null; optionsUnparsed: number; optionsOtherCell: number; resultsStated: number | null; notes: string[];
       returns: ReturnRead | null;              // the worker's return read, null when the request had no return phase (or an older worker answered without one)
-      nextLoadNotBefore: IsoDateTime | null }  // when the next camoufox load may start (after a request that loaded the reload); the capability holds http-kit's next start until then
+      nextLoadNotBefore: IsoDateTime | null }  // when the next camoufox load may start (after a request that started the reload); the capability holds http-kit's next start until then
   | { kind: 'list-error'; error: ProviderError };   // BudgetExceeded is thrown, as fetchTile throws it; a query without airport names fails closed (parse, reason no-airport-names) before any request
 export interface FlightListCapability { info: CapabilityInfo; read(q: FlightListQuery, ctx: ProviderContext): Promise<FlightListResult> }   // camoufox only; its preflight is discovery's
 // The worker answer's pagesLoaded is never on the result, a stored row or the wire: it reaches only the ledger (http-kit's pageCountOf → finalise's

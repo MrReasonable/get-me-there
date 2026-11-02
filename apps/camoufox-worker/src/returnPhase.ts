@@ -19,6 +19,7 @@ import {
   classifyAfterFailedStep,
   type Driver,
   PollStopped,
+  pathField,
   pollUntilSettled,
   type Settled,
   StepFailed,
@@ -46,7 +47,7 @@ import { type Deadline, DeadlineExceeded, type Timers } from './timers.js';
  * phase stands on, its link is activated the same way, the booking view's offers are read, its one "more booking
  * options" control is activated and every offer read again. No offer, grouped control or anything else on the booking
  * view is ever activated. After every activation and every poll the guard's refusal is read before classifying
- * (R-refused). Every DeadlineExceeded inside the phase is a transient status, never rethrown; a genuine block is the
+ * (R-refused). Every deadline end inside the phase (`timedOut`) is a transient status, never rethrown; a genuine block is the
  * page's stop. Only session.ts imports this module (rules.test.ts pins that); it is the only importer of returns.ts and
  * offers.ts.
  */
@@ -93,6 +94,16 @@ interface Attempt {
   parsedIndex: number;
   fits: boolean;
   read: ReturnsRead;
+}
+
+/**
+ * Whether `e` ended its step at the deadline (review I1): DeadlineExceeded, or any error that reached the phase once the
+ * budget's current deadline had expired (the browser's own timeout firing with it, or a call the page's close at expiry
+ * rejected), as served.ts and the session read the deadline's end. Such an end is the step's transient one, never
+ * rethrown (spec rev 56 §2: the phase never answers `not-ready`).
+ */
+function timedOut(e: unknown, budget: Pick<PageBudget, 'd'>): boolean {
+  return e instanceof DeadlineExceeded || budget.d.expired();
 }
 
 /** A booking read with nothing selected, of a status that names no pairing. */
@@ -174,13 +185,19 @@ export async function returnPhase(p: ReturnPhaseInput): Promise<ReturnPhaseResul
   const attempts: Attempt[] = [];
   let offerGrammar: string | null = null;
 
+  /**
+   * The outbounds of the attempts made (review M4): only these are placed among the 30 and count as tried; `tried`
+   * also holds a selection that failed, so the next selection never picks it again.
+   */
+  const picked = (): number[] => attempts.map((a) => a.parsedIndex);
   /** The answer: the attempts' outbounds placed in the flights, the rule and the booking given. */
   const done = (
     status: ReturnStatus,
     rule: string | null,
     bookingRead: BookingRead | null,
   ): ReturnPhaseResult => {
-    const { flights, indexOf } = flightsWithPicks(parsed, kept, tried);
+    const made = picked();
+    const { flights, indexOf } = flightsWithPicks(parsed, kept, made);
     const out: ReturnAttempt[] = attempts.map((a) => ({
       outboundIndex: indexOf(a.parsedIndex),
       outboundFits: a.fits,
@@ -191,8 +208,9 @@ export async function returnPhase(p: ReturnPhaseInput): Promise<ReturnPhaseResul
       optionsOtherCell: a.read.optionsOtherCell,
       resultsStated: a.read.resultsStated,
     }));
-    // why: "no further outbound within the limits remained untried", over every flight read for the cell
-    const triedAll = !parsed.some((x, i) => !tried.includes(i) && fitsLimits(x.flight, limits, 'outbound'));
+    // why: "no further outbound within the limits remained untried", over every flight read for the cell; an outbound
+    // whose selection failed was not tried (review M4: triedAll follows the attempts made)
+    const triedAll = !parsed.some((x, i) => !made.includes(i) && fitsLimits(x.flight, limits, 'outbound'));
     return {
       returns: { limits, status, rule, attempts: out, triedAll, booking: bookingRead },
       flights: attempts.length === 0 ? kept : flights,
@@ -256,7 +274,7 @@ export async function returnPhase(p: ReturnPhaseInput): Promise<ReturnPhaseResul
   if (!S.BOOKING_SELECT_VERIFIED) return done('read', rule, bookingOf('not-verified', null));
   if (bookingSkip !== null) return done('read', rule, bookingOf('skipped', bookingSkip));
   // R-pick: core's one return-pick rule over the attempts so far, restricted to the last (the view the phase stands on)
-  const { flights } = flightsWithPicks(parsed, kept, tried);
+  const { flights } = flightsWithPicks(parsed, kept, picked());
   const placed = done('read', rule, null);
   if (!('returns' in placed)) return placed;
   const pick = bookingReturnOf(placed.returns, flights);
@@ -295,7 +313,7 @@ async function activate(
   try {
     pre = await driver.readFacts(d, undefined, view);
   } catch (e) {
-    if (e instanceof DeadlineExceeded) return notSettled('pre-read');
+    if (timedOut(e, p.budget)) return notSettled('pre-read');
     throw e;
   }
   const loads = guard.documentLoads;
@@ -307,14 +325,14 @@ async function activate(
     try {
       await press(o);
     } catch (e) {
-      if (e instanceof DeadlineExceeded) return refusalOf(guard) ?? notSettled('activate');
+      if (timedOut(e, p.budget)) return refusalOf(guard) ?? notSettled('activate');
       if (!(e instanceof StepFailed)) throw e;
       guard.activationGate = false;
       const refused = refusalOf(guard);
       if (refused !== null) return refused;
       // why: a failed step may have left a page that is no results page at all: classified once, a block is the stop
       const blocked = await classifyAfterFailedStep(driver, d, o, S, view).catch((err: unknown) => {
-        if (err instanceof DeadlineExceeded) return null;
+        if (timedOut(err, p.budget)) return null;
         throw err;
       });
       if (blocked !== null) return { kind: 'stop', page: blocked.page, rule: blocked.rule };
@@ -326,13 +344,18 @@ async function activate(
         view,
         log,
         startedAt: p.startedAt,
-        changedFrom: { signature: pre.settle.linkSignature, documentLoads: loads },
+        // why: review M1: on the booking view the URL's path moving is the return selection's change
+        changedFrom: {
+          signature: pre.settle.linkSignature,
+          documentLoads: loads,
+          ...pathField(pre.page.url),
+        },
         loads: () => guard.documentLoads,
         stopWhen: () => guard.refused !== null || guard.held !== null,
         track,
       });
     } catch (e) {
-      if (e instanceof PollStopped || e instanceof DeadlineExceeded) {
+      if (e instanceof PollStopped || timedOut(e, p.budget)) {
         const refused = refusalOf(guard);
         if (refused !== null) return refused;
         if (e instanceof PollStopped) throw new Error('a poll stopped with no refusal');
@@ -370,8 +393,7 @@ async function selectAndRead(
   try {
     read = readReturns(await p.driver.listFacts(d, 'returns'), p.req);
   } catch (e) {
-    if (e instanceof DeadlineExceeded)
-      return { kind: 'end', status: 'not-settled', rule: `${flow}:list-facts` };
+    if (timedOut(e, p.budget)) return { kind: 'end', status: 'not-settled', rule: `${flow}:list-facts` };
     throw e;
   }
   const refused = refusalOf(p.guard);
@@ -395,7 +417,7 @@ async function reloadList(
   try {
     await p.pacer.reclaim(budget.nextFor(p.pacer.spacingMs), timers);
   } catch (e) {
-    if (e instanceof DeadlineExceeded) return end('spacing');
+    if (timedOut(e, budget)) return end('spacing');
     throw e;
   }
   const d = budget.nextFor(p.pageTimeoutMs);
@@ -408,9 +430,11 @@ async function reloadList(
     try {
       await driver.goto(p.url, d);
     } catch (e) {
+      // why: review I1: a load the guard refused names its refusal; one the deadline ended is not-settled; any other
+      // failure (a network error, the browser's own error) is the load's own end, never the page's
       const r = refusedEnd();
       if (r !== null) return r;
-      throw e;
+      return end(timedOut(e, budget) ? 'reload:not-settled' : 'reload:goto');
     }
     const served = await servedSequence(
       { driver, S: p.S, timers, log: p.log, pollMs: p.pollMs, startedAt: p.startedAt, request: p.req },
@@ -430,7 +454,7 @@ async function reloadList(
     if (list.listed !== 'flights') return end('reload:no-options-read');
     return { kind: 'loaded' };
   } catch (e) {
-    if (e instanceof DeadlineExceeded) return refusedEnd() ?? end('reload:not-settled');
+    if (timedOut(e, budget)) return refusedEnd() ?? end('reload:not-settled');
     throw e;
   }
 }
@@ -477,24 +501,33 @@ async function readBooking(
   try {
     facts = await driver.bookingFacts(d);
   } catch (e) {
-    if (e instanceof DeadlineExceeded)
+    if (timedOut(e, budget))
       return { read: selected('not-settled', 'select-return:booking-facts'), offerGrammar: false };
     throw e;
   }
+  // why: review M3: a navigation refused between the settle and this read ends it, as after listFacts (R-refused)
+  const r0 = refusalOf(p.guard);
+  if (r0 !== null) return ended(r0, true);
+  /**
+   * An `unrecognised` end over a view read (review M2): no offer kept (A9, the contract: offers only on read and
+   * expand-failed), but the counts that view showed (refused, other currencies, grouped, the control) as read.
+   */
+  const unrecognised = (rule: string, o: OffersRead, expanded: boolean): BookingRead =>
+    selected('unrecognised', rule, { ...o, offers: [], offersStated: null, expanded });
   const first = readOffers(facts);
-  if (!first.allGbp) return { read: selected('unrecognised', 'currency'), offerGrammar: true };
+  if (!first.allGbp) return { read: unrecognised('currency', first, false), offerGrammar: true };
   if (facts.moreOptions >= 2)
-    return { read: selected('unrecognised', 'more-options-count'), offerGrammar: true };
+    return { read: unrecognised('more-options-count', first, false), offerGrammar: true };
   const finished = (o: OffersRead, expanded: boolean): BookingRead =>
     // why: a view whose every offer the grammar refused read none: no `read` booking without an offer
     o.offers.length === 0
-      ? selected('unrecognised', 'no-offers-read')
+      ? unrecognised('no-offers-read', o, expanded)
       : selected('read', null, { ...o, expanded });
   if (facts.moreOptions === 0) return { read: finished(first, false), offerGrammar: true };
   // the expansion: kept offers on its failure are the ones read before it (A10)
   const failed = (rule: string): BookingRead =>
     first.offers.length === 0
-      ? selected('unrecognised', 'no-offers-read')
+      ? unrecognised('no-offers-read', first, false)
       : selected('expand-failed', rule, { ...first, expanded: false });
   const d2 = budget.nextFor(p.pageTimeoutMs);
   const flow = 'select-more-options';
@@ -502,16 +535,18 @@ async function readBooking(
   if (x.kind === 'stop') return { stop: x.page, rule: x.rule };
   if (x.kind === 'end')
     return x.status === 'unrecognised'
-      ? { read: selected('unrecognised', x.rule), offerGrammar: true }
+      ? { read: unrecognised(x.rule, first, false), offerGrammar: true }
       : { read: failed(x.rule), offerGrammar: true };
   let after: OffersRead;
   try {
     after = readOffers(await driver.bookingFacts(d2));
   } catch (e) {
-    if (e instanceof DeadlineExceeded) return { read: failed(`${flow}:booking-facts`), offerGrammar: true };
+    if (timedOut(e, budget)) return { read: failed(`${flow}:booking-facts`), offerGrammar: true };
     throw e;
   }
-  if (!after.allGbp) return { read: selected('unrecognised', 'currency'), offerGrammar: true };
+  const r1 = refusalOf(p.guard);
+  if (r1 !== null) return ended(r1, true);
+  if (!after.allGbp) return { read: unrecognised('currency', after, true), offerGrammar: true };
   return { read: finished(after, true), offerGrammar: true };
 }
 
