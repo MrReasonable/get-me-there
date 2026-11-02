@@ -99,7 +99,28 @@ describe('the subject comes from the cause, not the state (V2)', () => {
   it('a check with no fix still sends, with no "What to do" line', async () => {
     const { sent, ctx } = setup({ check: check('fail', 'expired', null) });
     await runConsentNotice(ctx, { force: true });
-    expect(sent[0]?.body).not.toContain('What to do');
+    expect(sent[0]?.body).toBe(
+      'consent rejected, expires 2026-11-01 (capture).\n\n' +
+        'Browser prices stop when consent lapses; the other price sources are unaffected.\n\n' +
+        'The Status view shows the same check; so does pnpm gmt status --only consent.',
+    );
+  });
+
+  it('the state decides whether to send and the cause what to say: an ok or off check naming a cause, or a warn or fail naming none, sends nothing', async () => {
+    const cases = [
+      ['ok', 'expiring'],
+      ['off', 'expired'],
+      ['warn', 'none'],
+      ['fail', 'none'],
+    ] as const;
+    for (const [state, cause] of cases) {
+      const { h, sent, ctx } = setup({
+        check: async () => ({ state, cause, summary: 'consent check (synthetic)', fix: null }),
+      });
+      expect(await runConsentNotice(ctx, { force: true })).toBe(false);
+      expect(sent).toEqual([]);
+      expect(count(h, 'operator_notice_keys')).toBe(0);
+    }
   });
 });
 
@@ -195,9 +216,18 @@ describe('when nothing is sent', () => {
     }
     const off = setup({ check: check('fail', 'expired'), env: { CAMOUFOX_ENABLED: 'false' } });
     expect(await runConsentNotice(off.ctx, { force: true })).toBe(false);
-    const none = setup({ check: check('fail', 'expired'), notifiers: [] });
+    // why: with nobody to tell, the worker's consent is not even read
+    let reads = 0;
+    const none = setup({
+      check: async () => {
+        reads += 1;
+        return check('fail', 'expired')();
+      },
+      notifiers: [],
+    });
     expect(await runConsentNotice(none.ctx, { force: true })).toBe(false);
     expect(count(none.h, 'operator_notice_keys')).toBe(0);
+    expect(reads).toBe(0);
   });
 
   it('an engine without a consent check never sends one', async () => {

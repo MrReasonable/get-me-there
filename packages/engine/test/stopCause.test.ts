@@ -315,6 +315,41 @@ describe('the readers a pass seeds itself with (revision 55 §8.1, §6.6)', () =
       detail: 'blocked',
       until: null,
     });
+    // why: a later row naming the provider another way (the worker not reachable) changes nothing
+    const [, , c] = cells;
+    if (c === undefined) throw new Error('no cells');
+    h.repos.cells.setOutcome(e.id, c, 'discovery', 'fixture', {
+      status: 'skipped',
+      reason: 'provider_unavailable',
+    });
+    expect(disabledDetailBefore(ctx, e.id).get('fixture')).toEqual({
+      skip: 'provider_disabled',
+      detail: 'blocked',
+      until: null,
+    });
+  });
+
+  it('disabledDetailBefore: a disabled skip first names the first class word of its errors, a block before an auth', () => {
+    const { h, ctx, e, cells } = seeded(['fixture']);
+    const [a, b, c] = cells;
+    if (a === undefined || b === undefined || c === undefined) throw new Error('no cells');
+    h.repos.cells.setOutcome(e.id, a, 'discovery', 'fixture', {
+      status: 'skipped',
+      reason: 'provider_disabled',
+    });
+    h.repos.cells.setOutcome(e.id, b, 'discovery', 'fixture', {
+      status: 'error',
+      reason: 'blocked',
+      lastError: 'x',
+    });
+    h.repos.cells.setOutcome(e.id, c, 'discovery', 'fixture', {
+      status: 'error',
+      reason: 'auth',
+      lastError: 'x',
+    });
+    expect(disabledDetailBefore(ctx, e.id)).toEqual(
+      new Map([['fixture', { skip: 'provider_disabled', detail: 'blocked', until: null }]]),
+    );
   });
 
   it('searchedDatePairsOf reads a cell the run never seeded as not run', () => {

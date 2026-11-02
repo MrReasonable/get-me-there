@@ -245,3 +245,66 @@ describe('the cron text a count and a parse accept (review T2 kills)', () => {
     expect(countFirings('0 6 * * *', 'No/Such_Zone', from, to)).toBe(0);
   });
 });
+
+describe('countFirings and firingsBetween at their edges (the work a count takes, and croner’s last firing)', () => {
+  const at = (x: string) => new Date(x);
+
+  it('the list and the count end where croner computes no next firing (none from the year 3000)', () => {
+    expect(
+      iso(firingsBetween('0 * * * *', 'UTC', at('2999-12-31T21:30:00.000Z'), at('3000-01-01T02:00:00.000Z'))),
+    ).toEqual(['2999-12-31T22:00:00.000Z', '2999-12-31T23:00:00.000Z']);
+    expect(
+      countFirings('0 * * * *', 'UTC', at('2999-12-31T00:00:00.000Z'), at('2999-12-31T23:59:59.999Z')),
+    ).toBe(24);
+  });
+
+  it('a whole day after the first is counted without stepping its firings: from midnight to the last millisecond, each further day costs one croner step', () => {
+    const stepsOver = (days: number) => {
+      const meter = { steps: 0 };
+      const from = at('2027-01-04T00:00:00.000Z');
+      const n = countFirings(
+        '0 * * * *',
+        'Europe/London',
+        from,
+        new Date(from.getTime() + days * 86_400_000 - 1),
+        meter,
+      );
+      expect(n).toBe(24 * days);
+      return meter.steps;
+    };
+    const one = stepsOver(1);
+    expect(stepsOver(2)).toBe(one + 1);
+    expect(stepsOver(3)).toBe(one + 2);
+  });
+
+  it('a range inside the 3 h round a clock change is stepped in the zone itself: one croner step a firing, and one that finds none after', () => {
+    const meter = { steps: 0 };
+    // why: London springs forward at 01:00Z on 28 March 2027; 00:00Z (00:00 GMT), 01:00Z and 02:00Z (02:00, 03:00 BST)
+    const n = countFirings(
+      '0 * * * *',
+      'Europe/London',
+      at('2027-03-28T00:00:00.000Z'),
+      at('2027-03-28T02:00:00.000Z'),
+      meter,
+    );
+    expect(n).toBe(3);
+    expect(meter.steps).toBe(n + 1);
+  });
+
+  it('a firing exactly 3 h before a clock change is counted once, by the stepped side', () => {
+    const f = at('2027-03-27T00:00:00.000Z');
+    const t = at('2027-03-28T01:30:00.000Z');
+    expect(iso(firingsBetween('0 22 * * *', 'Europe/London', f, t))).toEqual(['2027-03-27T22:00:00.000Z']);
+    expect(countFirings('0 22 * * *', 'Europe/London', f, t)).toBe(1);
+  });
+
+  it('a range that ends half a minute after a clock change finds the change and counts as firingsBetween does', () => {
+    const f = at('2027-03-28T00:00:00.000Z');
+    const t = at('2027-03-28T01:00:30.000Z');
+    expect(iso(firingsBetween('0 * * * *', 'Europe/London', f, t))).toEqual([
+      '2027-03-28T00:00:00.000Z',
+      '2027-03-28T01:00:00.000Z',
+    ]);
+    expect(countFirings('0 * * * *', 'Europe/London', f, t)).toBe(2);
+  });
+});

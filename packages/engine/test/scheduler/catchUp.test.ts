@@ -1006,6 +1006,19 @@ describe('a paused catch-up and the firing after it (R7, R9; decision 79)', () =
     expect(executions(h, def.id).map((x) => [x.id, x.status])).toEqual([[paused.id, 'paused_budget']]);
   });
 
+  it('S1: a run that is not there once the firing’s rule has decided is not resumed: it yields', async () => {
+    const h = createHarness({ fixtureConcurrency: 1 });
+    const { def, paused } = await pausedCatchUp(h);
+    const ctx = buildContext(h.deps, h.options);
+    h.clock.set(at('2027-03-02T09:00:00.000Z'));
+    const e = h.repos.executions.get(paused.id);
+    if (e === null) throw new Error('no catch-up');
+    // why: an execution handed in for a row the store does not hold (the decision reads the row again after the rule)
+    expect(await autoResumeYields(ctx, h.orch(), { ...e, id: 'no-such-run' })).toBe('yielded');
+    const runs = executions(h, def.id);
+    for (const r of runs) if (r.id !== paused.id) await h.waitForSettled(r.id);
+  });
+
   it('S1: a deferred resume logs the firing it waits for and when it will look again', async () => {
     const h = createHarness({ fixtureConcurrency: 1 });
     const { paused } = await pausedCatchUp(h);

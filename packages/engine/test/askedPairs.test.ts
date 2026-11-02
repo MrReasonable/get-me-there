@@ -1,7 +1,9 @@
 // Task 20.4 (spec §8.1 rev 55, §10 estimate response): the date pairs an estimate asks about. Every expected number is
 // written out from the layout rule, never read back from the plan under test.
-import { asIsoDate } from '@gmt/core';
+import { asIsoDate, asIsoDateTime, type BudgetGuard } from '@gmt/core';
 import { beforeEach, describe, expect, it } from 'vitest';
+import { callsLeftIn } from '../src/budgetCheck.js';
+import { buildContext } from '../src/context.js';
 import { askedPairs, billedCallsOf, monthlyPagesOf } from '../src/estimate.js';
 import { type LineKey, lineKey } from '../src/lines.js';
 import { buildSnapshot } from '../src/snapshot.js';
@@ -12,7 +14,7 @@ import {
   stubSearchApiVerification,
   stubTravelpayouts,
 } from './support/camoufox.js';
-import { EWR, JFK, LGW, LHR } from './support/harness.js';
+import { createHarness, EWR, JFK, LGW, LHR } from './support/harness.js';
 
 beforeEach(() => {
   expect.hasAssertions();
@@ -174,6 +176,69 @@ describe('the billed calls and the browser worker’s month of an estimate', () 
     expect(billedCallsOf(w.e.ctx, { perProvider: [line('searchapi', 120, 'provider-month')] }, null)).toEqual(
       [],
     );
+  });
+});
+
+/** The guard as it is, except that each answer it gives is passed through `over`. */
+function guardWith(
+  g: BudgetGuard,
+  over: (u: ReturnType<BudgetGuard['usage']>) => ReturnType<BudgetGuard['usage']>,
+): BudgetGuard {
+  return {
+    reserve: (p) => g.reserve(p),
+    recordCacheHit: (p) => g.recordCacheHit(p),
+    usage: (s) => over(g.usage(s)),
+    recentCalls: (id, since) => g.recentCalls(id, since),
+    scrollsLeft: (id, executionId) => g.scrollsLeft(id, executionId),
+    scrollsThisMonth: (id) => g.scrollsThisMonth(id),
+  };
+}
+
+describe('the calls a provider window has left (callsLeftIn, ruling 5)', () => {
+  it('a billable-plan provider whose guard states no cap has no calls-left figure, never 0', () => {
+    const w = worked([stubCamoufox({ cells: 1 }), stubSearchApiVerification()], {
+      env: { SEARCHAPI_KEY: 'test-searchapi-key-0123456789abcdef', SEARCHAPI_PLAN: '40usd' },
+    });
+    const ctx = { ...w.e.ctx, budget: guardWith(w.e.ctx.budget, (u) => ({ ...u, cap: null })) };
+    const line = {
+      providerId: 'searchapi' as const,
+      stage: 'verification' as const,
+      calls: 120,
+      planCalls: 120,
+      costMicroGbp: 0,
+      costPence: 0,
+      seconds: 1,
+      blocked: null,
+    };
+    expect(billedCallsOf(ctx, { perProvider: [line] }, null)).toEqual([
+      { providerId: 'searchapi', calls: 120, left: null, window: 'month' },
+    ]);
+  });
+
+  it('other schedules hold calls back from a monthly cap only: a lifetime cap keeps them all, whatever window end its guard states', () => {
+    // why: a daily schedule's reservation over the month to 1 November is 9 calls (the prestart test derives it)
+    const month = createHarness({ fixtureMonthlyCallCap: 20 });
+    const own = month.createDefinition();
+    month.createDefinition({ destinations: [EWR], scheduleCron: '0 5 * * *' });
+    expect(callsLeftIn(buildContext(month.deps, month.options), 'fixture', own.id)).toBe(11);
+    const lifetime = createHarness({ fixtureMonthlyCallCap: 20, fixtureWindow: 'lifetime' });
+    const def = lifetime.createDefinition();
+    lifetime.createDefinition({ destinations: [EWR], scheduleCron: '0 5 * * *' });
+    const ctx = buildContext(lifetime.deps, lifetime.options);
+    // why: the harness sets the lifetime window on the guard's entry only; the context reads its cap kind from config
+    const kinds = {
+      ...ctx,
+      limitsOf: (id: Parameters<typeof ctx.limitsOf>[0]) => ({
+        ...ctx.limitsOf(id),
+        capKind: 'provider-lifetime' as const,
+      }),
+    };
+    expect(callsLeftIn(kinds, 'fixture', def.id)).toBe(20);
+    const ended = guardWith(ctx.budget, (u) => ({
+      ...u,
+      windowEnd: asIsoDateTime('2026-11-01T00:00:00.000Z'),
+    }));
+    expect(callsLeftIn({ ...kinds, budget: ended }, 'fixture', def.id)).toBe(20);
   });
 });
 

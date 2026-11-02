@@ -4,6 +4,7 @@
 // while a read is in flight waits for the lease before its first browser page; shutdown aborts a read and awaits it.
 // Event-driven throughout: deferred promises, never timers.
 import {
+  AbortedError,
   asIsoDate,
   asIsoDateTime,
   type BookingRead,
@@ -19,10 +20,11 @@ import {
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { buildContext } from '../src/context.js';
 import { createEngine } from '../src/engine.js';
-import { createFlightReader, flightListFresh } from '../src/flightRead.js';
+import { createFlightReader, flightListFresh, flightReadUnavailable } from '../src/flightRead.js';
 import { createOrchestrator } from '../src/orchestrator.js';
 import { buildSnapshot } from '../src/snapshot.js';
 import { readRowOf } from '../src/stages/flightLists.js';
+import type { RankedDatePair, RankedDatePairsReader } from '../src/types.js';
 import {
   type CamoufoxEngine,
   deferred,
@@ -196,6 +198,11 @@ describe('readFlightList reads', () => {
     expect(cam.flightCalls).toHaveLength(1);
     expect(cam.flightCalls[0]?.executionId).toBeNull();
     expect(cam.flightCalls[0]?.gated).toBe(false);
+    expect(cam.flightCalls[0]?.recordFixtures).toBe(false);
+    expect(cam.flightCalls[0]?.query.airportNames).toEqual({
+      origin: ['London Heathrow Airport'],
+      destination: ['John F Kennedy International Airport'],
+    });
     expect(flightRows(e, null)).toEqual([
       {
         status: 'read',
@@ -236,6 +243,14 @@ describe('readFlightList reads', () => {
     await r.done;
     expect(flightRows(e, null).map((x) => [x.status, x.reason])).toEqual([['failed', 'fatal']]);
     expect(reader.inFlight()).toBeNull();
+    expect(e.logs.filter((l) => l.level === 'error')).toEqual([
+      {
+        level: 'error',
+        bindings: { definitionId: e.definition.id, providerId: 'camoufox', step: 'flight-read' },
+        fields: { err: 'synthetic failure inside the read' },
+        msg: 'flight read: failed',
+      },
+    ]);
   });
 
   it('a failing insert in a failure branch never rejects done: the failure is logged and recorded as fatal', async () => {
@@ -261,9 +276,12 @@ describe('readFlightList reads', () => {
     if (!r.ok) throw new Error('started');
     await expect(r.done).resolves.toBeUndefined();
     expect(flightRows(e, null).map((x) => [x.status, x.reason])).toEqual([['failed', 'fatal']]);
-    expect(e.logs.some((l) => l.level === 'error' && String(l.msg).includes('could not be recorded'))).toBe(
-      true,
-    );
+    expect(e.logs.filter((l) => l.level === 'error').map((l) => [l.msg, l.fields])).toEqual([
+      [
+        'flight read: its failure could not be recorded',
+        { err: 'SQLITE_BUSY: database is locked (synthetic)', reason: 'monthly-cap' },
+      ],
+    ]);
     expect(reader.inFlight()).toBeNull();
   });
 
@@ -675,6 +693,26 @@ describe('readFlightList with the return leg (spec rev 56 §8.1)', () => {
     expect(await s.reader.read(s.e.definition.id, PAIR)).toEqual({ ok: false, code: 'fresh' });
   });
 
+  it('with the flags unread the booking read is planned too: a young list whose booking expand failed is read again', async () => {
+    const expandFailed = returnsOf(
+      {},
+      { status: 'expand-failed', rule: 'more-options:not-settled', expanded: false },
+    );
+    expect(await askWith(null, [{ hoursAgo: 1, returns: expandFailed }])).toBe('read');
+  });
+
+  it('with the flags unread, exactly 2 pages of headroom still plan the return phase: a young outbound-only list is read', async () => {
+    const s = flagged(null, {}, { monthlyCap: 2 });
+    seed(s.e, [{ hoursAgo: 1, returns: null }]);
+    const def = s.e.ctx.repos.definitions.get(s.e.definition.id);
+    const newest = stored(s.e);
+    if (def === null || newest === undefined) throw new Error('seeded');
+    expect(flightListFresh(s.e.ctx, def, newest)).toBe(false);
+    const r = await s.reader.read(s.e.definition.id, PAIR);
+    if (!r.ok) throw new Error(`refused: ${r.code}`);
+    await r.done;
+  });
+
   it('the boundary: a finished list exactly 0.9 × refresh old (151.2 h) is read; one just younger is fresh', async () => {
     expect(await askWith(BOTH, [{ hoursAgo: 151.2, returns: returnsOf() }])).toBe('read');
     expect(await askWith(BOTH, [{ hoursAgo: 151.1, returns: returnsOf() }])).toBe('fresh');
@@ -726,5 +764,289 @@ describe('the engine contract: setWorkerFlags and flightPagesPlanned (spec rev 5
     engine.setWorkerFlags('camoufox', { RETURN_SELECT_VERIFIED: false });
     expect(engine.flightListFresh(def, newest)).toBe(true);
     engine.markClosed();
+  });
+});
+
+describe('readFlightList at its edges (refusals, the provider’s answers and the rows they leave)', () => {
+  const ask = async (r: ReturnType<typeof setup>['reader'], definitionId: string, pair = PAIR) => {
+    const started = await r.read(definitionId, pair);
+    if (!started.ok) return started.code;
+    await started.done;
+    return 'read';
+  };
+
+  it('a search naming camoufox on an install that registers no camoufox at all: not-configured', () => {
+    const { e } = setup();
+    expect(flightReadUnavailable({ providers: new Map() }, e.definition)).toBe('not-configured');
+  });
+
+  it('not_found for a deleted search', async () => {
+    const { e, cam, reader } = setup();
+    e.ctx.repos.definitions.softDelete(e.definition.id);
+    expect(await reader.read(e.definition.id, PAIR)).toEqual({ ok: false, code: 'not_found' });
+    expect(cam.flightCalls).toHaveLength(0);
+  });
+
+  it('a one-day window holds its own date pairs: the read goes ahead', async () => {
+    const { e, cam, reader } = setup();
+    e.ctx.repos.definitions.update(e.definition.id, {
+      window: { kind: 'absolute', from: PAIR.departureDate, to: PAIR.departureDate },
+    });
+    expect(await ask(reader, e.definition.id)).toBe('read');
+    expect(cam.flightCalls).toHaveLength(1);
+  });
+
+  it('no_price without the board’s ranking', async () => {
+    const cam = stubCamoufox({ cells: 15, flights: {} });
+    const e = engineWith([cam, stubTravelpayouts({ cells: 15 })]);
+    expect(await createFlightReader(e.ctx).read(e.definition.id, PAIR)).toEqual({
+      ok: false,
+      code: 'no_price',
+    });
+    expect(cam.flightCalls).toHaveLength(0);
+  });
+
+  it('asks the ranking for the search’s current space, cabin, journey limit and now', async () => {
+    const calls: Array<Parameters<RankedDatePairsReader>[0]> = [];
+    const { e, reader } = setup({}, { rankedDatePairs: rankedPairs(5, calls) });
+    e.ctx.repos.definitions.update(e.definition.id, { constraints: { maxJourneyMinutes: 1500 } });
+    expect(await ask(reader, e.definition.id)).toBe('read');
+    expect(calls).toEqual([
+      {
+        definitionId: e.definition.id,
+        space: {
+          origins: [LHR],
+          destinations: [JFK],
+          departureFrom: '2026-11-02',
+          departureTo: '2026-11-16',
+          minNights: 10,
+          maxNights: 10,
+        },
+        cabin: 'economy',
+        maxJourneyMinutes: 1500,
+        now: e.clock.now(),
+      },
+    ]);
+  });
+
+  it('the figure is the ranked pair with both dates: one sharing only its departure or only its return is no price', async () => {
+    // why: stays of 10 to 12 nights, and a ranking holding only 2 Nov to 13 Nov (11 nights)
+    const ranked: RankedDatePair = {
+      departureDate: asIsoDate('2026-11-02'),
+      returnDate: asIsoDate('2026-11-13'),
+      origin: LHR,
+      destination: JFK,
+      pricePence: 40_000,
+      providerId: 'camoufox',
+      sourceKind: 'scraped-self',
+    };
+    const { e, cam, reader } = setup({}, { rankedDatePairs: () => [ranked] });
+    e.ctx.repos.definitions.update(e.definition.id, { minNights: 10, maxNights: 12 });
+    const pair = (d: string, r: string) => ({ departureDate: asIsoDate(d), returnDate: asIsoDate(r) });
+    expect(await ask(reader, e.definition.id, pair('2026-11-02', '2026-11-14'))).toBe('no_price');
+    expect(await ask(reader, e.definition.id, pair('2026-11-03', '2026-11-13'))).toBe('no_price');
+    expect(cam.flightCalls).toHaveLength(0);
+    expect(await ask(reader, e.definition.id, pair('2026-11-02', '2026-11-13'))).toBe('read');
+  });
+
+  it('busy while another reader of the same engine holds the browser lease', async () => {
+    const release = deferred();
+    const { e, cam, reader } = setup({ holdCall: { call: 1, until: release.promise } });
+    const first = await reader.read(e.definition.id, PAIR);
+    if (!first.ok) throw new Error('the first read started');
+    expect(await createFlightReader(e.ctx).read(e.definition.id, pairAt(1))).toEqual({
+      ok: false,
+      code: 'busy',
+    });
+    release.resolve();
+    await first.done;
+    expect(cam.flightCalls).toHaveLength(1);
+  });
+
+  it('a preflight refusal with no class word is blocked unless the worker is unreachable, and it is logged with the search', async () => {
+    const { e, cam, reader } = setup(
+      {},
+      {},
+      {
+        preflight: { ok: false, skip: 'provider_disabled', detail: 'the consent record is missing' },
+      },
+    );
+    expect(await ask(reader, e.definition.id)).toBe('read');
+    expect(cam.flightCalls).toHaveLength(0);
+    expect(flightRows(e, null).map((x) => [x.status, x.reason])).toEqual([['failed', 'blocked']]);
+    expect(e.logs.filter((l) => l.msg?.startsWith('flight read'))).toEqual([
+      {
+        level: 'warn',
+        bindings: { definitionId: e.definition.id, providerId: 'camoufox', step: 'flight-read' },
+        fields: { skip: 'provider_disabled', detail: 'the consent record is missing' },
+        msg: 'flight read: preflight refused',
+      },
+    ]);
+  });
+
+  it('runs the preflight with no execution, the read’s own signal and no fixture recording', async () => {
+    const cam = stubCamoufox({ cells: 15, flights: {} });
+    const discovery = cam.discovery;
+    if (discovery === undefined) throw new Error('no discovery');
+    const seen: Array<{ executionId: string | null; aborted: boolean; recordFixtures: boolean }> = [];
+    const recording = {
+      ...cam,
+      discovery: {
+        ...discovery,
+        preflight: async (p: {
+          executionId: string | null;
+          signal: AbortSignal;
+          recordFixtures: boolean;
+        }) => {
+          seen.push({
+            executionId: p.executionId,
+            aborted: p.signal.aborted,
+            recordFixtures: p.recordFixtures,
+          });
+          return { ok: true as const };
+        },
+      },
+    };
+    const e = engineWith([cam], { rankedDatePairs: rankedPairs(5) });
+    const ctx = buildContext({ ...e.deps, providers: [recording] }, { rankedDatePairs: rankedPairs(5) });
+    cam.bind(() => ctx);
+    const r = await createFlightReader(ctx).read(e.definition.id, PAIR);
+    if (!r.ok) throw new Error(`refused: ${r.code}`);
+    await r.done;
+    expect(seen).toEqual([{ executionId: null, aborted: false, recordFixtures: false }]);
+    expect(flightRows(e, null).map((x) => x.status)).toEqual(['read']);
+  });
+
+  it('a browser provider with a flight-list capability and no discovery capability reads without a preflight', async () => {
+    const cam = stubCamoufox({ cells: 15, flights: {} });
+    const { discovery: _none, ...flightsOnly } = cam;
+    const e = engineWith([cam], { rankedDatePairs: rankedPairs(5) });
+    const ctx = buildContext({ ...e.deps, providers: [flightsOnly] }, { rankedDatePairs: rankedPairs(5) });
+    cam.bind(() => ctx);
+    const r = await createFlightReader(ctx).read(e.definition.id, PAIR);
+    if (!r.ok) throw new Error(`refused: ${r.code}`);
+    await r.done;
+    expect(flightRows(e, null).map((x) => [x.status, x.reason])).toEqual([['read', null]]);
+  });
+
+  it('a read stopped while its page is out writes nothing, even when the page answers', async () => {
+    let stop: () => void = () => undefined;
+    const s = setup({ onStart: () => stop() });
+    stop = () => {
+      void s.reader.stop();
+    };
+    expect(await ask(s.reader, s.e.definition.id)).toBe('read');
+    expect(s.cam.flightCalls).toHaveLength(1);
+    expect(flightRows(s.e, null)).toEqual([]);
+  });
+
+  it.each<[string, () => FlightListResult, string]>([
+    [
+      'a list error with its own class word stores that word',
+      () => ({
+        kind: 'list-error',
+        error: new ProviderError({
+          kind: 'parse',
+          retryable: false,
+          providerId: 'camoufox',
+          message: 'synthetic',
+          reason: 'no-airport-names',
+        }),
+      }),
+      'no-airport-names',
+    ],
+    ['a list error without one stores its kind', () => listErrorOf('upstream'), 'upstream'],
+    [
+      'a thrown provider error with a class word stores that word',
+      () => {
+        throw new ProviderError({
+          kind: 'parse',
+          retryable: false,
+          providerId: 'camoufox',
+          message: 'synthetic',
+          reason: 'no-airport-names',
+        });
+      },
+      'no-airport-names',
+    ],
+    [
+      'a thrown cap stores monthly-cap',
+      () => {
+        throw new BudgetExceeded({
+          scope: 'provider-month',
+          providerId: 'camoufox',
+          cap: 10,
+          current: 10,
+          requested: 1,
+        });
+      },
+      'monthly-cap',
+    ],
+  ])('%s, and logs no error', async (_n, answer, reason) => {
+    const { e, reader } = setup({ answer });
+    expect(await ask(reader, e.definition.id)).toBe('read');
+    expect(flightRows(e, null).map((x) => [x.status, x.reason])).toEqual([['failed', reason]]);
+    expect(e.logs.filter((l) => l.level === 'error')).toEqual([]);
+  });
+
+  it('a read the provider gives up on (AbortedError) with the read not stopped writes nothing and logs no error', async () => {
+    const { e, reader } = setup({
+      answer: () => {
+        throw new AbortedError();
+      },
+    });
+    expect(await ask(reader, e.definition.id)).toBe('read');
+    expect(flightRows(e, null)).toEqual([]);
+    expect(e.logs.filter((l) => l.level === 'error')).toEqual([]);
+  });
+
+  it('a fatal failure whose row cannot be written is logged and not written again', async () => {
+    const { e, reader } = setup({
+      answer: () => {
+        throw new Error('synthetic failure inside the read');
+      },
+    });
+    const insert = e.ctx.repos.flightLists.insert.bind(e.ctx.repos.flightLists);
+    let n = 0;
+    e.ctx.repos.flightLists.insert = (row) => {
+      n += 1;
+      if (n === 1) throw new Error('SQLITE_BUSY: database is locked (synthetic)');
+      return insert(row);
+    };
+    expect(await ask(reader, e.definition.id)).toBe('read');
+    expect(n).toBe(1);
+    expect(flightRows(e, null)).toEqual([]);
+    expect(e.logs.filter((l) => l.level === 'error').map((l) => [l.msg, l.fields])).toEqual([
+      ['flight read: failed', { err: 'synthetic failure inside the read' }],
+      [
+        'flight read: its failure could not be recorded',
+        { err: 'SQLITE_BUSY: database is locked (synthetic)', reason: 'fatal' },
+      ],
+    ]);
+  });
+
+  it('when neither its failure row nor the fatal one can be written, both are logged and done still resolves', async () => {
+    const { e, reader } = setup({
+      answer: () => {
+        throw new BudgetExceeded({
+          scope: 'provider-month',
+          providerId: 'camoufox',
+          cap: 10,
+          current: 10,
+          requested: 1,
+        });
+      },
+    });
+    e.ctx.repos.flightLists.insert = () => {
+      throw new Error('SQLITE_IOERR: disk I/O error (synthetic)');
+    };
+    expect(await ask(reader, e.definition.id)).toBe('read');
+    expect(e.logs.filter((l) => l.level === 'error').map((l) => [l.msg, l.fields])).toEqual([
+      [
+        'flight read: its failure could not be recorded',
+        { err: 'SQLITE_IOERR: disk I/O error (synthetic)', reason: 'monthly-cap' },
+      ],
+      ['flight read: no failure row could be written', { err: 'SQLITE_IOERR: disk I/O error (synthetic)' }],
+    ]);
   });
 });

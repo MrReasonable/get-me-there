@@ -127,6 +127,8 @@ export interface FlightCall {
   signal: AbortSignal;
   /** Whether the engine passed a gate (`beforeSend`). */
   gated: boolean;
+  /** Whether the engine asked for the answer to be recorded as a fixture (never, for a flight list). */
+  recordFixtures: boolean;
 }
 
 /** Options of the stub flight-list capability (Task 20.9). */
@@ -299,6 +301,7 @@ function stub(
       signalAborted: pctx.signal.aborted,
       signal: pctx.signal,
       gated: pctx.beforeSend !== undefined,
+      recordFixtures: pctx.recordFixtures,
     });
     f.onStart?.(n);
     pctx.beforeSend?.();
