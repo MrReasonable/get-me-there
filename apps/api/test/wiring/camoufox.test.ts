@@ -31,6 +31,7 @@ function config(extra: Record<string, string> = {}): Config {
 const http: HttpKit = {
   request: () => Promise.reject(new Error('no request in this test')),
   stats: () => ({ inFlight: 0 }),
+  holdUntil: () => undefined,
 };
 const INSTANCE = '6f1d4c1e-2b7a-4c5e-9a43-0d8e7f1b2c3d';
 const deps = {
@@ -102,6 +103,7 @@ describe('apps/api wiring: camoufox grid mode (fix round 1, CA 1)', () => {
         return Promise.reject(new Error('captured'));
       },
       stats: () => ({ inFlight: 0 }),
+      holdUntil: () => undefined,
     };
     const asked: Array<[string, string | null]> = [];
     const p = providersFor(c, {
@@ -152,6 +154,7 @@ describe('apps/api wiring: camoufox shared settings and app instance (WP16a, spe
         return Promise.reject(new Error('captured'));
       },
       stats: () => ({ inFlight: 0 }),
+      holdUntil: () => undefined,
     };
     const d = providersFor(c, { ...deps, http: capture }).find((x) => x.id === 'camoufox')?.discovery;
     if (d === undefined) throw new Error('camoufox discovery');
@@ -205,6 +208,7 @@ describe('apps/api wiring: camoufox shared settings and app instance (WP16a, spe
         cacheKey: '',
       }),
       stats: () => ({ inFlight: 0 }),
+      holdUntil: () => undefined,
     };
     const d = providersFor(c, { ...deps, http: answer }).find((x) => x.id === 'camoufox')?.discovery;
     expect(
@@ -218,6 +222,65 @@ describe('apps/api wiring: camoufox shared settings and app instance (WP16a, spe
       skip: 'provider_disabled',
       detail: 'settings differ: CAMOUFOX_MONTHLY_PAGE_CAP',
       reason: 'settings-differ',
+      // why: spec rev 56 §5.1: a read that returned a status carries the worker's flags
+      flags: {},
     });
+  });
+});
+
+describe('apps/api wiring: camoufox flights request timeout (spec rev 56 §2, §12; ruling A6)', () => {
+  const LIMITS = {
+    maxJourneyMinutes: 900,
+    maxStops: 1,
+    departureWindowLocal: null,
+    arrivalWindowLocal: null,
+  };
+  async function sentWith(
+    env: Record<string, string>,
+  ): Promise<Array<[number | undefined, number | undefined]>> {
+    const sent: Array<[number | undefined, number | undefined]> = [];
+    const capture: HttpKit = {
+      request: (r) => {
+        sent.push([r.pages, r.requestTimeoutSeconds]);
+        return Promise.reject(new Error('captured'));
+      },
+      stats: () => ({ inFlight: 0 }),
+      holdUntil: () => undefined,
+    };
+    const lists = providersFor(config({ ...ON, ...env }), { ...deps, http: capture }).find(
+      (x) => x.id === 'camoufox',
+    )?.flightLists;
+    if (lists === undefined) throw new Error('camoufox flight lists');
+    const q = {
+      cell: {
+        origin: asIata('LHR'),
+        destination: asIata('JFK'),
+        departureDate: asIsoDate('2027-03-14'),
+        returnDate: asIsoDate('2027-03-24'),
+      },
+      airportNames: {
+        origin: ['London Heathrow Airport'],
+        destination: ['John F Kennedy International Airport'],
+      },
+    };
+    const ctx = { executionId: 'e1', signal: new AbortController().signal, recordFixtures: false };
+    for (const extra of [
+      { returnLimits: LIMITS, booking: true },
+      { returnLimits: LIMITS, booking: false },
+      {},
+    ])
+      await expect(lists.read({ ...q, ...extra }, ctx)).rejects.toThrow('captured');
+    return sent;
+  }
+  it('core’s flightRequestSeconds of the shared settings: 780 / 600 s at the defaults; a list read keeps the provider’s', async () => {
+    expect(await sentWith({})).toEqual([
+      [2, 780],
+      [2, 600],
+      [1, undefined],
+    ]);
+  });
+  it('follows CAMOUFOX_PAGE_TIMEOUT_SECONDS and CAMOUFOX_MIN_SPACING_SECONDS (1,035 s at 120 s and 45 s)', async () => {
+    const sent = await sentWith({ CAMOUFOX_PAGE_TIMEOUT_SECONDS: '120', CAMOUFOX_MIN_SPACING_SECONDS: '45' });
+    expect(sent.map(([, t]) => t)).toEqual([1035, 6 * 120 + 45 + 30, undefined]);
   });
 });

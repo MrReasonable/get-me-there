@@ -1,6 +1,11 @@
 import { GRID_MOVE_BUDGET_MS, GRID_MOVE_RESERVE_MS, parseConfig } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
-import { camoufoxHttpLimits, camoufoxStatusHttpLimits, pageClassOf } from '../../src/camoufox/index.js';
+import {
+  camoufoxHttpLimits,
+  camoufoxStatusHttpLimits,
+  pageClassOf,
+  pageCountOf,
+} from '../../src/camoufox/index.js';
 
 const env = {
   NODE_ENV: 'production',
@@ -94,5 +99,36 @@ describe('camoufoxHttpLimits (spec §5.3 rev 32; decision 69)', () => {
     );
     expect(pageClassOf({ status: 504, headers: new Headers() })).toBe('page');
     expect(pageClassOf({ status: null, headers: null })).toBe('page');
+  });
+  // why: spec rev 56 §5.3: a flights request with a return phase sends its own timeout (flightRequestSeconds); the
+  // provider's stays discovery's, the page timeout plus 15 s
+  it('requestTimeoutSeconds stays discovery’s in list mode (105 s), and the limits read pagesLoaded through pageCountOf', () => {
+    const l = camoufoxHttpLimits(camoufox(), { maxWaitSeconds: 3900 });
+    expect(l.requestTimeoutSeconds).toBe(105);
+    expect(l.pageCountOf).toBe(pageCountOf);
+  });
+});
+
+describe('pageCountOf (spec rev 56 §5.3: the answer’s pagesLoaded for the ledger row’s page_count)', () => {
+  it.each([
+    ['{"pagesLoaded":2}', 2],
+    ['{"pagesLoaded":1}', 1],
+    // why: R-zero: a first load the worker refused loaded nothing, and the row says 0
+    ['{"pagesLoaded":0}', 0],
+    ['{"kind":"blocked","page":"captcha","pagesLoaded":1}', 1],
+  ])('reads %s as %i', (body, n) => {
+    expect(pageCountOf(body)).toBe(n);
+  });
+  it.each([
+    ['a body without it', '{"kind":"flights"}'],
+    ['a non-JSON body', 'not json'],
+    ['an empty body', ''],
+    ['a JSON null', 'null'],
+    ['a JSON array', '[2]'],
+    ['a negative count', '{"pagesLoaded":-1}'],
+    ['a fraction', '{"pagesLoaded":1.5}'],
+    ['a string', '{"pagesLoaded":"2"}'],
+  ])('%s is undefined (the guard then keeps its own reading)', (_n, body) => {
+    expect(pageCountOf(body)).toBeUndefined();
   });
 });

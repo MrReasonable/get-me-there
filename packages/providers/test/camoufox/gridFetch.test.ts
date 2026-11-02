@@ -15,7 +15,7 @@ import {
 import { HttpResponse, http } from 'msw/http';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { camoufoxProvider } from '../../src/camoufox/index.js';
-import { makeKit, SENTINELS, testLimits } from '../fakes.js';
+import { FLIGHT_REQUEST_SECONDS, makeKit, SENTINELS, testLimits } from '../fakes.js';
 import { server } from '../support/msw.js';
 
 const URL_ = 'http://127.0.0.1:8090/v1/page';
@@ -122,6 +122,7 @@ function setup(
     key: SENTINELS.camoufox,
     workerUrl: 'http://127.0.0.1:8090',
     pointOfSale: 'GB',
+    flightRequestSeconds: FLIGHT_REQUEST_SECONDS,
     grid: { mode: 'grid', scrollSpacingSeconds: 5, pageTimeoutSeconds: 90, ...grid },
     ...(o.scrollsLeft === undefined ? {} : { scrollsLeft: o.scrollsLeft }),
   });
@@ -180,7 +181,7 @@ describe('camoufox grid mode', () => {
     server.use(http.get(STATUS, () => HttpResponse.json(status({ departures: 7, returns: 7 }))));
     expect(await d.preflight?.(ctx)).toMatchObject({ ok: false, skip: 'provider_disabled' });
     server.use(http.get(STATUS, () => HttpResponse.json(status({ departures: 1, returns: 1 }))));
-    expect(await d.preflight?.(ctx)).toEqual({ ok: true });
+    expect(await d.preflight?.(ctx)).toEqual({ ok: true, flags: {} });
   });
   it('preflight refuses grid mode when the worker’s scroll cap or spacing differs from the app’s (CA 9)', async () => {
     const { d } = setup();

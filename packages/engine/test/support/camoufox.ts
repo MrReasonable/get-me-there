@@ -17,6 +17,7 @@ import {
   type FlightListResult,
   type FlightProvider,
   fixedClock,
+  flightRequestSeconds,
   GRID_HORIZON_DAYS,
   GRID_STEP_DAYS,
   GRID_TIMES,
@@ -475,6 +476,8 @@ export function realCamoufox(
       return { status: 200, body: a.body, fetchedAt: ctxOf().clock.now(), fromCache: false, cacheKey: '' };
     },
     stats: () => ({ inFlight: 0 }),
+    // why: spec rev 56 §5.3: the stub answers at once; no flights answer here states nextLoadNotBefore (Task 21.6's)
+    holdUntil: () => undefined,
   };
   const calls: TilePlan[] = [];
   const queries: DiscoveryQuery[] = [];
@@ -485,6 +488,11 @@ export function realCamoufox(
     key: new Secret(KEY),
     workerUrl: 'http://127.0.0.1:8090',
     pointOfSale: 'GB',
+    // why: spec rev 56 §12: core's computation at the defaults (90 s page timeout, 30 s spacing)
+    flightRequestSeconds: {
+      booking: flightRequestSeconds(90, 30, true),
+      returnsOnly: flightRequestSeconds(90, 30, false),
+    },
     ...(grid === undefined
       ? {}
       : {

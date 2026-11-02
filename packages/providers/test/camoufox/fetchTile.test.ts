@@ -4,7 +4,7 @@ import { passthrough } from 'msw';
 import { HttpResponse, http } from 'msw/http';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { camoufoxProvider, planSingleCells } from '../../src/camoufox/index.js';
-import { makeKit, SENTINELS, testLimits } from '../fakes.js';
+import { FLIGHT_REQUEST_SECONDS, makeKit, SENTINELS, testLimits } from '../fakes.js';
 import { allowLoopbackLookup } from '../support/loopback.js';
 import { respondAfter, server } from '../support/msw.js';
 import { drive, useFakeTime } from '../support/time.js';
@@ -66,6 +66,7 @@ function setup(port = 8090) {
     key: SENTINELS.camoufox,
     workerUrl: `http://127.0.0.1:${port}`,
     pointOfSale: 'GB',
+    flightRequestSeconds: FLIGHT_REQUEST_SECONDS,
   });
   const tile = planSingleCells(Q)[0];
   if (tile === undefined) throw new Error('no tile');
@@ -245,6 +246,7 @@ describe('camoufox fetchTile (spec §2, §5.2)', () => {
       key: SENTINELS.camoufox,
       workerUrl: 'http://127.0.0.1:8090',
       pointOfSale: 'GB',
+      flightRequestSeconds: FLIGHT_REQUEST_SECONDS,
       sharedSettings: effectiveSharedSettings({ CAMOUFOX_MONTHLY_PAGE_CAP: '1500' }),
     });
     const r = p.discovery?.fetchTile(tile, Q, ctx);
@@ -398,6 +400,7 @@ describe('camoufox fetchTile (spec §2, §5.2)', () => {
         key: new Secret(k),
         workerUrl: 'http://127.0.0.1:8090',
         pointOfSale: 'GB',
+        flightRequestSeconds: FLIGHT_REQUEST_SECONDS,
       });
     expect(make('k'.repeat(31))).toThrow(/at least 32/);
     expect(make('k'.repeat(32))).not.toThrow();
@@ -578,6 +581,7 @@ describe('camoufox fetchTile (spec §2, §5.2)', () => {
         key: new Secret('short-worker-key'),
         workerUrl: 'http://127.0.0.1:8090',
         pointOfSale: 'GB',
+        flightRequestSeconds: FLIGHT_REQUEST_SECONDS,
       }),
     ).toThrow(/32 characters/);
   });

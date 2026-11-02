@@ -3,7 +3,9 @@
  * port; never billable, cost 0, concurrency 1; the start-to-start spacing as the limiter's minimum interval; the
  * request timeout is the worker's page timeout plus 15 s; transport failures are never retried; a refused connection is
  * `provider-unavailable`; each attempt's page class comes from `x-gmt-google-contacted` (absent → `page`, the
- * conservative reading). `camoufox-status` is the unledgered preflight's id, GET /v1/status only.
+ * conservative reading); a flights answer's `pagesLoaded` is the attempt's page count (spec rev 56 §5.3), while the
+ * request timeout stays discovery's (a flights request with a return phase sends its own). `camoufox-status` is the
+ * unledgered preflight's id, GET /v1/status only.
  */
 import { type Config, GOOGLE_CONTACTED_HEADER, GRID_MOVE_BUDGET_MS, GRID_MOVE_RESERVE_MS } from '@gmt/core';
 import type { ProviderHttpLimits } from '../http/types.js';
@@ -19,16 +21,30 @@ function workerOrigin(c: CamoufoxConfig): { host: string; port: number; scheme: 
   return { host: u.hostname, port: Number(u.port), scheme: u.protocol === 'https:' ? 'https:' : 'http:' };
 }
 
-/** The scroll clicks a worker answer states (spec §7 rev 34, CB-4); undefined for an answer that states none. */
-export function scrollCountOf(bodyText: string): number | undefined {
+/** A count a worker answer states under `key` (a whole number, 0 admitted); undefined when absent or not a count. */
+function statedCount(bodyText: string, key: 'scrolls' | 'pagesLoaded'): number | undefined {
   try {
     const body: unknown = JSON.parse(bodyText);
-    if (typeof body !== 'object' || body === null || !('scrolls' in body)) return undefined;
-    const n = body.scrolls;
+    if (typeof body !== 'object' || body === null || !(key in body)) return undefined;
+    const n: unknown = Reflect.get(body, key);
     return typeof n === 'number' && Number.isInteger(n) && n >= 0 ? n : undefined;
   } catch {
     return undefined;
   }
+}
+
+/** The scroll clicks a worker answer states (spec §7 rev 34, CB-4); undefined for an answer that states none. */
+export function scrollCountOf(bodyText: string): number | undefined {
+  return statedCount(bodyText, 'scrolls');
+}
+
+/**
+ * Spec rev 56 §5.3 (R-zero): the documents a worker answer states it loaded (`pagesLoaded`, 0 when its first load was
+ * refused), for the ledger row's `page_count`; undefined for an answer that states none (the guard then writes 1 on a
+ * contacted page) or a body that is not one.
+ */
+export function pageCountOf(bodyText: string): number | undefined {
+  return statedCount(bodyText, 'pagesLoaded');
 }
 
 /** `page` unless the worker states it contacted no Google page. */
@@ -62,6 +78,7 @@ export function camoufoxHttpLimits(
     connectRefusedKind: 'provider-unavailable',
     pageClass: pageClassOf,
     scrollCountOf,
+    pageCountOf,
     classifyError: classifyWorkerAnswer,
   };
 }

@@ -2,7 +2,13 @@
 export { BLOCKED_WORDS, classifyWorkerAnswer, coolingDownWords, throwIfMonthly } from './answer.js';
 export { CAMOUFOX_FLIGHT_LIST_INFO, flightListCapability } from './flights.js';
 export { gridBlocks, gridTileEstimate, planGridTiles } from './grid.js';
-export { camoufoxHttpLimits, camoufoxStatusHttpLimits, pageClassOf, scrollCountOf } from './limits.js';
+export {
+  camoufoxHttpLimits,
+  camoufoxStatusHttpLimits,
+  pageClassOf,
+  pageCountOf,
+  scrollCountOf,
+} from './limits.js';
 export {
   GRID_NOT_VERIFIED,
   readWorkerStatus,

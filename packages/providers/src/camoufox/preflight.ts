@@ -168,6 +168,10 @@ export function workerFinding(
   return null;
 }
 
+/**
+ * The discovery preflight (spec §2, rev 56 §5.1): one unledgered status read, judged as `workerFinding` judges it, with
+ * the worker's reported verification flags on the result whenever the read returned a status.
+ */
 export async function camoufoxPreflight(
   o: {
     http: HttpKit;
@@ -189,6 +193,15 @@ export async function camoufoxPreflight(
     signal: ctx.signal,
     ...(o.appInstance === undefined ? {} : { appInstance: o.appInstance }),
   });
+  const judged = judgeStatus(read, o);
+  // why: spec rev 56 §5.1, §8.1: the engine plans the return phase from the flags the worker last reported, so every
+  // read that returned a status carries them, whether the preflight passes or refuses on it; a read with no status
+  // body (no worker, an HTTP refusal, a body this build cannot read) has none to report
+  return read.kind === 'ok' ? { ...judged, flags: read.status.flags } : judged;
+}
+
+/** The preflight's verdict on one status read (the spec §2 order), before the worker's flags are attached. */
+function judgeStatus(read: WorkerStatusRead, o: Parameters<typeof camoufoxPreflight>[0]): PreflightResult {
   // why: a refused key (the classifier's auth: 401 or 403) is a configuration fault: provider_disabled, which a resume
   // does not retry on every run
   if (read.kind === 'refused' && read.errorKind === 'auth')

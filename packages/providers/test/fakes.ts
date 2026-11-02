@@ -14,7 +14,7 @@ import {
   type Usage,
 } from '@gmt/core';
 import { classifyWorkerAnswer } from '../src/camoufox/answer.js';
-import { pageClassOf, scrollCountOf } from '../src/camoufox/limits.js';
+import { pageClassOf, pageCountOf, scrollCountOf } from '../src/camoufox/limits.js';
 import { createHttpKit } from '../src/http/httpKit.js';
 import type {
   FixtureRecorder,
@@ -52,6 +52,9 @@ interface Row {
   /** camoufox grid (spec §7 rev 34): the planned scrolls at reserve, then the scrolls the answer stated (or none). */
   scrolls: number | undefined;
   scrollCount: number | undefined;
+  /** Spec rev 56 §5.1: the planned pages at reserve (absent: 1), then the documents the answer stated loaded (or none). */
+  pages: number | undefined;
+  pageCount: number | undefined;
   /** The adapters' class of a failed call (WP18 V3), as http-kit recorded it after finalising. */
   errorKind: ProviderErrorKind | undefined;
 }
@@ -93,6 +96,8 @@ export class FakeBudget implements BudgetGuard {
       pageClass: undefined,
       scrolls: p.scrolls,
       scrollCount: undefined,
+      pages: p.pages,
+      pageCount: undefined,
       errorKind: undefined,
     };
     this.rows.push(row);
@@ -105,6 +110,7 @@ export class FakeBudget implements BudgetGuard {
         row.httpStatus = r.httpStatus;
         row.pageClass = r.pageClass;
         row.scrollCount = r.scrollCount;
+        row.pageCount = r.pageCount;
         this.events.push({ type: 'finalise', at: Date.now(), ...r });
       },
       classify: (kind) => {
@@ -234,6 +240,12 @@ export const ALL_SECRETS: Secret[] = [
   SENTINELS.camoufox,
 ];
 
+/**
+ * Spec rev 56 §2, §12 (ruling A6): a camoufox provider's flights request timeouts with a return phase, as the wiring
+ * computes them with core's `flightRequestSeconds` at the defaults (page timeout 90 s, spacing 30 s).
+ */
+export const FLIGHT_REQUEST_SECONDS = { booking: 780, returnsOnly: 600 } as const;
+
 export const SEARCH = 'https://www.searchapi.io/api/v1/search';
 export const TP = 'https://api.travelpayouts.com/aviasales/v3/prices_for_dates';
 
@@ -278,6 +290,7 @@ export function testLimits(over: LimitOverrides = {}): Record<HttpProviderId, Pr
       connectRefusedKind: 'provider-unavailable',
       pageClass: pageClassOf,
       scrollCountOf,
+      pageCountOf,
       classifyError: classifyWorkerAnswer,
       ...over.camoufox,
     },

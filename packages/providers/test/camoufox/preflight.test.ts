@@ -1,7 +1,7 @@
 import { HttpResponse, http } from 'msw/http';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { camoufoxProvider } from '../../src/camoufox/index.js';
-import { makeKit, SENTINELS } from '../fakes.js';
+import { FLIGHT_REQUEST_SECONDS, makeKit, SENTINELS } from '../fakes.js';
 import { server } from '../support/msw.js';
 import { drive, useFakeTime } from '../support/time.js';
 
@@ -33,6 +33,7 @@ function setup() {
     key: SENTINELS.camoufox,
     workerUrl: 'http://127.0.0.1:8090',
     pointOfSale: 'GB',
+    flightRequestSeconds: FLIGHT_REQUEST_SECONDS,
   });
   return { p, budget, events };
 }
@@ -55,17 +56,30 @@ describe('camoufox preflight (spec §2; decision 69; cost-015): unledgered', () 
         detail: 'cooling down until 2026-10-20T05:00:00.000Z (captcha)',
         until: '2026-10-20T05:00:00.000Z',
         reason: 'captcha',
+        flags: {},
       },
     ],
     [
       'a signed-in refusal',
       status({ ok: false, signedInRefusal: true }),
-      { ok: false, skip: 'provider_disabled', detail: 'signed-in profile refused', reason: 'signed-in' },
+      {
+        ok: false,
+        skip: 'provider_disabled',
+        detail: 'signed-in profile refused',
+        reason: 'signed-in',
+        flags: {},
+      },
     ],
     [
       'an account cookie',
       status({ ok: false, accountCookie: { found: true, names: ['SID'], checkedAt: AT } }),
-      { ok: false, skip: 'provider_disabled', detail: 'signed-in profile refused', reason: 'signed-in' },
+      {
+        ok: false,
+        skip: 'provider_disabled',
+        detail: 'signed-in profile refused',
+        reason: 'signed-in',
+        flags: {},
+      },
     ],
     [
       'a counts file the worker cannot read (W3)',
@@ -85,6 +99,7 @@ describe('camoufox preflight (spec §2; decision 69; cost-015): unledgered', () 
         detail:
           "the browser worker's monthly counts file cannot be read, so it refuses every page (pnpm gmt browser counts rewrites it)",
         reason: 'counts-unreadable',
+        flags: {},
       },
     ],
     [
@@ -98,9 +113,9 @@ describe('camoufox preflight (spec §2; decision 69; cost-015): unledgered', () 
           readable: true,
         },
       }),
-      { ok: true },
+      { ok: true, flags: {} },
     ],
-    ['healthy', status(), { ok: true }],
+    ['healthy', status(), { ok: true, flags: {} }],
     [
       'an unreadable status',
       { ok: true },
@@ -124,6 +139,45 @@ describe('camoufox preflight (spec §2; decision 69; cost-015): unledgered', () 
     expect(budget.rows).toEqual([]);
     expect(budget.count('cache-hit')).toBe(0);
     expect(events.filter((e) => e.type === 'fetch')).toHaveLength(1);
+  });
+  // why: spec rev 56 §5.1, §8.1: the engine plans the return phase from the flags the worker last reported, so every read
+  // that returned a status carries them, whether the preflight passes or refuses on it
+  const FLAGS = { GRID_VERIFIED: true, RETURN_SELECT_VERIFIED: true, BOOKING_SELECT_VERIFIED: false };
+  it('an ok status read puts the worker’s flags on the result', async () => {
+    const { p } = setup();
+    server.use(http.get(STATUS_URL, () => HttpResponse.json(status({ flags: FLAGS }))));
+    expect(await p.discovery?.preflight?.(ctx)).toEqual({ ok: true, flags: FLAGS });
+  });
+  it('a preflight refused on a status body carries the flags too', async () => {
+    const { p } = setup();
+    server.use(
+      http.get(STATUS_URL, () =>
+        HttpResponse.json(
+          status({
+            ok: false,
+            flags: FLAGS,
+            coolingDownUntil: '2026-10-20T05:00:00.000Z',
+            cooldownCause: 'captcha',
+          }),
+        ),
+      ),
+    );
+    expect(await p.discovery?.preflight?.(ctx)).toMatchObject({
+      ok: false,
+      skip: 'provider_disabled',
+      flags: FLAGS,
+    });
+  });
+  it.each([
+    ['an unreadable status', () => HttpResponse.json({ ok: true, flags: FLAGS })],
+    ['an HTTP refusal', () => HttpResponse.json({ flags: FLAGS }, { status: 401 })],
+    ['no worker', () => HttpResponse.error()],
+  ])('%s gives no flags', async (_n, answer) => {
+    const { p } = setup();
+    server.use(http.get(STATUS_URL, answer));
+    const r = await p.discovery?.preflight?.(ctx);
+    expect(r?.ok).toBe(false);
+    expect(r !== undefined && 'flags' in r).toBe(false);
   });
   it('worker down → provider_unavailable, no row', async () => {
     const { p, budget } = setup();

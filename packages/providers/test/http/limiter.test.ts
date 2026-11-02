@@ -1,4 +1,4 @@
-import { AbortedError, BudgetExceeded } from '@gmt/core';
+import { AbortedError, asIsoDateTime, BudgetExceeded } from '@gmt/core';
 import { HttpResponse, http } from 'msw/http';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createLimiter } from '../../src/http/limiter.js';
@@ -193,5 +193,105 @@ describe('dead jobs and refused reservations do not hold limiter capacity (cost 
     const at = fetchTimes(events, t0);
     expect(at).toHaveLength(3);
     expect(at[2] ?? Number.POSITIVE_INFINITY).toBeLessThan(3_612_000);
+  });
+});
+
+// Spec rev 56 §5.3 (R-spacing; arch-r3-018): `holdUntil(providerId, at)` makes that provider's next start wait until
+// `at`: awaited before the request joins the limiter's queue, under its signal, outside the queue's maximum wait.
+describe('holdUntil: the next start waits for the worker’s nextLoadNotBefore (spec rev 56 §5.3)', {
+  timeout: 60_000,
+}, () => {
+  beforeEach(useFakeTime);
+  afterEach(() => vi.useRealTimers());
+  const inMs = (ms: number) => asIsoDateTime(new Date(Date.now() + ms).toISOString());
+
+  it('the held provider’s next fetch starts at `at`, not before', async () => {
+    const { kit, events } = makeKit();
+    ok();
+    const t0 = Date.now();
+    kit.holdUntil('searchapi', inMs(50_000));
+    await drive(kit.request(nth(1)));
+    const [at] = fetchTimes(events, t0);
+    expect(at ?? 0).toBeGreaterThanOrEqual(50_000);
+    expect(at ?? Number.POSITIVE_INFINITY).toBeLessThan(51_000);
+  });
+  it('an `at` in the past does nothing', async () => {
+    const { kit, events } = makeKit();
+    ok();
+    const t0 = Date.now();
+    kit.holdUntil('searchapi', inMs(-60_000));
+    await drive(kit.request(nth(1)));
+    expect(fetchTimes(events, t0)[0] ?? Number.POSITIVE_INFINITY).toBeLessThan(1000);
+  });
+  it('holds only that provider', async () => {
+    const { kit, events } = makeKit();
+    server.use(http.get(TP, () => HttpResponse.json({ success: true })));
+    const t0 = Date.now();
+    kit.holdUntil('searchapi', inMs(50_000));
+    await drive(kit.request(req({ url: TP, providerId: 'travelpayouts', headers: {} })));
+    expect(fetchTimes(events, t0)[0] ?? Number.POSITIVE_INFINITY).toBeLessThan(1000);
+  });
+  it('a hold longer than maxWaitSeconds still waits, and is no limiter timeout', async () => {
+    const { kit, events } = makeKit({ overrides: { searchapi: { maxWaitSeconds: 30 } } });
+    ok();
+    const t0 = Date.now();
+    kit.holdUntil('searchapi', inMs(120_000));
+    const res = await drive(kit.request(nth(1)));
+    expect(res.status).toBe(200);
+    expect(fetchTimes(events, t0)[0] ?? 0).toBeGreaterThanOrEqual(120_000);
+  });
+  it('an abort during the hold → AbortedError, nothing reserved or sent', async () => {
+    const { kit, budget } = makeKit();
+    ok();
+    kit.holdUntil('searchapi', inMs(120_000));
+    const ac = new AbortController();
+    const held = kit.request(req({ url: SEARCH, signal: ac.signal }));
+    setTimeout(() => ac.abort(), 5000);
+    expect(await driveError(held)).toBeInstanceOf(AbortedError);
+    await idle(130_000, 5000);
+    expect(budget.reserveCalls).toBe(0);
+    expect(budget.count('fetch')).toBe(0);
+  });
+  it('a later hold extends an earlier one; an earlier one never shortens a later one', async () => {
+    const { kit, events } = makeKit();
+    ok();
+    const t0 = Date.now();
+    kit.holdUntil('searchapi', inMs(30_000));
+    kit.holdUntil('searchapi', inMs(90_000));
+    kit.holdUntil('searchapi', inMs(10_000));
+    await drive(kit.request(nth(1)));
+    expect(fetchTimes(events, t0)[0] ?? 0).toBeGreaterThanOrEqual(90_000);
+  });
+  it('a hold set while a request already waits on an earlier one holds it to the later `at`', async () => {
+    const { kit, events } = makeKit();
+    ok();
+    const t0 = Date.now();
+    kit.holdUntil('searchapi', inMs(30_000));
+    const waiting = kit.request(nth(1));
+    await idle(10_000, 5000);
+    kit.holdUntil('searchapi', inMs(60_000));
+    await drive(waiting);
+    expect(fetchTimes(events, t0)[0] ?? 0).toBeGreaterThanOrEqual(70_000);
+  });
+  it('createLimiter: run waits for the hold before the job joins the queue', async () => {
+    const limiter = createLimiter(testLimits().searchapi, { usedThisHour: 0 });
+    const t0 = Date.now();
+    limiter.holdUntil(t0 + 40_000);
+    let startedAt = Number.NaN;
+    await drive(
+      limiter.run(
+        async () => {
+          startedAt = Date.now() - t0;
+        },
+        {
+          signal: new AbortController().signal,
+          maxWaitMs: 1000,
+          providerId: 'searchapi',
+          endpointPath: '/api/v1/search',
+        },
+      ),
+    );
+    expect(startedAt).toBeGreaterThanOrEqual(40_000);
+    expect(startedAt).toBeLessThan(41_000);
   });
 });

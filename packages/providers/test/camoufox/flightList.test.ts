@@ -1,19 +1,26 @@
 // Spec revision 55 §2 "The flight-list read" and §5.1 (WP20 Task 20.7): the camoufox adapter's flight-list capability,
 // against msw as fetchTile.test.ts. The answers carry the real provenance shape (the contract refuses any provider but
-// camoufox) with synthetic flights; the worked example's airports only.
+// camoufox) with synthetic flights; the worked example's airports only. Revision 56 "The return phase" (WP21 Task
+// 21.4): the limits, the booking ask, the page plan and the request's own timeout; the returns, the page count and the
+// spacing hold. The http-kit is the real one behind a spy, so the test sees each request and each hold it was given.
 import {
   asIata,
   asIsoDate,
   BudgetExceeded,
   FLIGHT_LIST_ENDPOINT_PATH,
+  type FlightLimits,
+  flightRequestSeconds,
   flightsRequestSchema,
+  type IsoDateTime,
   ProviderError,
+  returnReadSchema,
 } from '@gmt/core';
 import { HttpResponse, http } from 'msw/http';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CAMOUFOX_FLIGHT_LIST_INFO, camoufoxProvider } from '../../src/camoufox/index.js';
 import { fixtureProvider } from '../../src/fixture/provider.js';
-import { makeKit, SENTINELS, testLimits } from '../fakes.js';
+import type { HttpKit, HttpKitRequest, HttpProviderId } from '../../src/http/types.js';
+import { FLIGHT_REQUEST_SECONDS, makeKit, SENTINELS, testLimits } from '../fakes.js';
 import { server } from '../support/msw.js';
 import { drive, useFakeTime } from '../support/time.js';
 
@@ -63,25 +70,98 @@ const answer = (o: Record<string, unknown> = {}) => ({
   versions,
   ...o,
 });
-// The spec rev 55 §2 provenance note, copied here so a change to either is a visible diff.
+// The spec rev 56 §2 Labels provenance note, copied here so a change to either is a visible diff.
 const SPEC_PROVENANCE_NOTE =
-  "Google Flights flight list via Camoufox: the outbound flights Google Flights listed for this day pair, each with the lowest round-trip total Google listed with that outbound (its \"From\" price; the return flight is neither chosen nor read), when this app's own Camoufox browser read the page on the machine running this app's browser worker, from that machine's address, in the currency the page states. Times are the page's local times. Flight numbers, seller and baggage are not read; nothing is checked with the airline.";
+  "Google Flights flight list via Camoufox: the outbound flights Google Flights listed for this day pair, each with the lowest round-trip total Google listed with that outbound (its \"From\" price), and, where this app's worker selected the cheapest of the outbound flights it read that was within the search's longest journey, stops and time windows (or, when none was, the cheapest it read; or, when none of that outbound's returns was within them, the next-cheapest within them, from a fresh load of the same page), the return flights Google listed with that outbound, each with the lowest round-trip total Google listed for that outbound and that return (its \"From\" price), and, for the one return this app then selected, the booking options Google listed after its \"more booking options\" were opened: the sellers' stated prices for those two flights that this app read, of which the lowest is the pairing's price shown, the lowest seller price read for these two flights; where no outbound was selected the return flight is neither chosen nor read; when this app's own Camoufox browser read the page on the machine running this app's browser worker, from that machine's address, in the currency the page states. Times are the page's local times. Flight numbers, fare conditions and baggage are not read, no seller is visited; nothing is checked with the airline or the seller.";
+// The search's limits (flightLimitsOf's shape): 15 h a leg, at most 1 stop, no windows.
+const LIMITS: FlightLimits = {
+  maxJourneyMinutes: 900,
+  maxStops: 1,
+  departureWindowLocal: null,
+  arrivalWindowLocal: null,
+};
+// A synthetic return read (no recording's): one attempt of outbound 0, one return, its booking read with two offers.
+const RETURNS = returnReadSchema.parse({
+  limits: LIMITS,
+  status: 'read',
+  rule: null,
+  attempts: [
+    {
+      outboundIndex: 0,
+      outboundFits: true,
+      listed: 'returns',
+      moreListed: true,
+      returns: [
+        {
+          departsLocal: '19:10',
+          arrivesLocal: '07:15',
+          arrivesDayOffset: 1,
+          durationMinutes: 485,
+          stops: 0,
+          carriers: ['QQ Atlantic'],
+          operatedBy: null,
+          fromMinor: 61_200,
+        },
+      ],
+      optionsUnparsed: 0,
+      optionsOtherCell: 0,
+      resultsStated: null,
+    },
+  ],
+  triedAll: false,
+  booking: {
+    status: 'read',
+    rule: null,
+    attempt: 0,
+    returnIndex: 0,
+    expanded: true,
+    moreControl: false,
+    grouped: 0,
+    offers: [
+      { seller: 'QQ Travel', fare: null, priceMinor: 61_200 },
+      { seller: 'QQ Fares', fare: 'Economy Basic', priceMinor: 63_000 },
+    ],
+    unparsed: 0,
+    nonGbp: 0,
+    offersStated: null,
+  },
+});
+const NEXT_LOAD = '2026-10-14T15:00:30.000Z';
 
 function setup() {
   const { kit, budget, log, clock, events } = makeKit({
     limits: testLimits({ camoufox: { workerPort: 8090 }, 'camoufox-status': { workerPort: 8090 } }),
   });
+  // why: the spy hands every call to the real kit, so the ledger, the limiter and the hold still run
+  const sent: HttpKitRequest[] = [];
+  const holds: Array<[HttpProviderId, IsoDateTime]> = [];
+  const http_: HttpKit = {
+    request: (r) => {
+      sent.push(r);
+      return kit.request(r);
+    },
+    stats: () => kit.stats(),
+    holdUntil: (id, at) => {
+      holds.push([id, at]);
+      kit.holdUntil(id, at);
+    },
+  };
   const p = camoufoxProvider({
-    http: kit,
+    http: http_,
     log,
     clock,
     key: SENTINELS.camoufox,
     workerUrl: 'http://127.0.0.1:8090',
     pointOfSale: 'GB',
+    // why: core's one computation at the defaults (CAMOUFOX_PAGE_TIMEOUT_SECONDS 90, CAMOUFOX_MIN_SPACING_SECONDS 30)
+    flightRequestSeconds: {
+      booking: flightRequestSeconds(90, 30, true),
+      returnsOnly: flightRequestSeconds(90, 30, false),
+    },
   });
   const lists = p.flightLists;
   if (lists === undefined) throw new Error('camoufox has no flightLists');
-  return { p, lists, budget, events, log };
+  return { p, lists, budget, events, log, sent, holds };
 }
 const reserves = (events: ReturnType<typeof setup>['events']) => events.filter((e) => e.type === 'reserve');
 const bodies: unknown[] = [];
@@ -151,6 +231,8 @@ describe('camoufox flightLists (spec rev 55 §2, §5.1)', () => {
       optionsOtherCell: 2,
       resultsStated: 4,
       notes: [],
+      returns: null,
+      nextLoadNotBefore: null,
     });
   });
   it('keeps the other outcomes and the page’s own point of sale', async () => {
@@ -223,6 +305,7 @@ describe('camoufox flightLists (spec rev 55 §2, §5.1)', () => {
       key: SENTINELS.camoufox,
       workerUrl: 'http://127.0.0.1:8090',
       pointOfSale: 'gb',
+      flightRequestSeconds: FLIGHT_REQUEST_SECONDS,
     });
     expect(await bad.flightLists?.read(Q, ctx)).toMatchObject({
       kind: 'list-error',
@@ -354,15 +437,25 @@ describe('camoufox flightLists (spec rev 55 §2, §5.1)', () => {
     await lists.read(Q, ctx);
     expect(pageHits).toBe(0);
   });
-  it('the sentinel key never appears in the answer, the error or the log', async () => {
+  it('the sentinel key never appears in the answer, the error, the posted body or the log', async () => {
     const ok = setup();
-    server.use(capture(() => HttpResponse.json(answer(), contacted(true))));
-    const a = await ok.lists.read(Q, ctx);
+    server.use(
+      capture(() =>
+        HttpResponse.json(
+          answer({ returns: RETURNS, pagesLoaded: 2, nextLoadNotBefore: NEXT_LOAD }),
+          contacted(true),
+        ),
+      ),
+    );
+    const a = await ok.lists.read({ ...Q, returnLimits: LIMITS, booking: true }, ctx);
+    expect(a.kind).toBe('list');
     const bad = setup();
     server.use(http.post(URL_, () => HttpResponse.json({}, { status: 401, ...contacted(false) })));
     const b = await bad.lists.read(Q, ctx);
     const key = SENTINELS.camoufox.reveal();
     expect(JSON.stringify(a)).not.toContain(key);
+    expect(bodies).toHaveLength(1);
+    expect(JSON.stringify(bodies)).not.toContain(key);
     expect(b.kind === 'list-error' ? `${b.error.message}${JSON.stringify(b.error)}` : 'x').not.toContain(key);
     expect(JSON.stringify(ok.log.lines)).not.toContain(key);
     expect(JSON.stringify(bad.log.lines)).not.toContain(key);
@@ -377,5 +470,125 @@ describe('camoufox flightLists (spec rev 55 §2, §5.1)', () => {
       costMicroGbp: 0,
     });
     expect(f.flightLists).toBeUndefined();
+  });
+});
+
+describe('camoufox flightLists: the return phase (spec rev 56 §2 "The return phase", §5.1, §5.3)', () => {
+  it('posts returnLimits exactly, and booking only with them; null limits omit both keys', async () => {
+    const { lists } = setup();
+    server.use(capture(() => HttpResponse.json(answer(), contacted(true))));
+    await lists.read({ ...Q, returnLimits: LIMITS, booking: true }, ctx);
+    await lists.read({ ...Q, returnLimits: LIMITS, booking: false }, ctx);
+    // why: absent is read as false, and the request states it
+    await lists.read({ ...Q, returnLimits: LIMITS }, ctx);
+    await lists.read({ ...Q, returnLimits: null, booking: true }, ctx);
+    const base = { mode: 'flights', ...CELL, gl: 'GB', airportNames: NAMES };
+    expect(bodies).toEqual([
+      { ...base, returnLimits: LIMITS, booking: true },
+      { ...base, returnLimits: LIMITS, booking: false },
+      { ...base, returnLimits: LIMITS, booking: false },
+      base,
+    ]);
+    for (const b of bodies) expect(flightsRequestSchema.safeParse(b).success).toBe(true);
+  });
+  it('a request with limits plans 2 pages and its own timeout: 780 s with the booking read, 600 s without', async () => {
+    const { lists, sent, events } = setup();
+    server.use(capture(() => HttpResponse.json(answer(), contacted(true))));
+    await lists.read({ ...Q, returnLimits: LIMITS, booking: true }, ctx);
+    await lists.read({ ...Q, returnLimits: LIMITS, booking: false }, ctx);
+    await lists.read(Q, ctx);
+    expect(sent.map((r) => [r.pages, r.requestTimeoutSeconds])).toEqual([
+      [2, 780],
+      [2, 600],
+      [1, undefined],
+    ]);
+    // why: without limits the provider's own timeout applies: no override key at all
+    expect('requestTimeoutSeconds' in (sent[2] ?? {})).toBe(false);
+    expect(reserves(events).map((r) => r.pages)).toEqual([2, 2, 1]);
+  });
+  it('maps returns and nextLoadNotBefore field for field, holds the next start, and the page count reaches the ledger only', async () => {
+    const { lists, holds, budget } = setup();
+    server.use(
+      capture(() =>
+        HttpResponse.json(
+          answer({ returns: RETURNS, pagesLoaded: 2, nextLoadNotBefore: NEXT_LOAD }),
+          contacted(true),
+        ),
+      ),
+    );
+    const r = await lists.read({ ...Q, returnLimits: LIMITS, booking: true }, ctx);
+    expect(r).toEqual({
+      kind: 'list',
+      fetchedAt: '2026-10-14T15:00:00.000Z',
+      pointOfSale: 'GB',
+      listed: 'flights',
+      flights: [FLIGHT],
+      minMinor: 47_800,
+      tabMinor: 45_100,
+      cheapestView: 'cheapest',
+      optionsUnparsed: 1,
+      optionsOtherCell: 2,
+      resultsStated: 4,
+      notes: [],
+      returns: RETURNS,
+      nextLoadNotBefore: NEXT_LOAD,
+    });
+    // why: arch-r3-014: pagesLoaded is never on the result; it reaches the ledger row's page_count through pageCountOf
+    expect('pagesLoaded' in r).toBe(false);
+    expect(holds).toEqual([['camoufox', NEXT_LOAD]]);
+    expect(budget.rowsOf('camoufox').map((x) => [x.pages, x.pageCount])).toEqual([[2, 2]]);
+  });
+  it('an answer without the keys maps to returns null, nextLoadNotBefore null, and no hold', async () => {
+    const { lists, holds } = setup();
+    server.use(capture(() => HttpResponse.json(answer({ pagesLoaded: 1 }), contacted(true))));
+    expect(await lists.read({ ...Q, returnLimits: LIMITS, booking: true }, ctx)).toMatchObject({
+      kind: 'list',
+      returns: null,
+      nextLoadNotBefore: null,
+    });
+    expect(holds).toEqual([]);
+  });
+  it('an attempt whose outboundIndex is past the flights is list-error parse unknown-answer, with no hold', async () => {
+    const { lists, holds } = setup();
+    const attempt = RETURNS.attempts[0];
+    if (attempt === undefined) throw new Error('fixture');
+    const bad = { ...RETURNS, attempts: [{ ...attempt, outboundIndex: 1 }] };
+    server.use(
+      capture(() =>
+        HttpResponse.json(answer({ returns: bad, nextLoadNotBefore: NEXT_LOAD }), contacted(true)),
+      ),
+    );
+    const r = await lists.read({ ...Q, returnLimits: LIMITS, booking: true }, ctx);
+    expect(r).toMatchObject({
+      kind: 'list-error',
+      error: { kind: 'parse', reason: 'parse', retryable: false },
+    });
+    if (r.kind === 'list-error') expect(r.error.message).toContain('[unknown-answer]');
+    expect(holds).toEqual([]);
+  });
+  it('a held next read waits for nextLoadNotBefore before it is sent (R-spacing: no refused round trip)', async () => {
+    useFakeTime();
+    const { lists, events } = setup();
+    // why: under fake time the clock port stays fixed while Date moves; the hold is absolute, 30 s from now
+    const at = new Date(Date.now() + 30_000).toISOString();
+    server.use(
+      capture(() =>
+        HttpResponse.json(
+          answer({
+            fetchedAt: '2026-10-14T15:00:00.000Z',
+            returns: RETURNS,
+            pagesLoaded: 2,
+            nextLoadNotBefore: at,
+          }),
+          contacted(true),
+        ),
+      ),
+    );
+    const t0 = Date.now();
+    await drive(lists.read({ ...Q, returnLimits: LIMITS, booking: true }, ctx));
+    await drive(lists.read(Q, ctx));
+    const fetches = events.flatMap((e) => (e.type === 'fetch' ? [e.at - t0] : []));
+    expect(fetches).toHaveLength(2);
+    expect(fetches[1] ?? 0).toBeGreaterThanOrEqual(30_000);
   });
 });

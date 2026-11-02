@@ -80,6 +80,7 @@ export function makeHarness(
       return k.kit.request(r);
     },
     stats: () => k.kit.stats(),
+    holdUntil: (id, at) => k.kit.holdUntil(id, at),
   };
   return { ...k, http, requests };
 }

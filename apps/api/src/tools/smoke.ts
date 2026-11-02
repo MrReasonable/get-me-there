@@ -316,6 +316,7 @@ export async function runSmoke(
       return res;
     },
     stats: () => kit.stats(),
+    holdUntil: (providerId, at) => kit.holdUntil(providerId, at),
   };
   const wired = providersFor(ports.config, {
     http,

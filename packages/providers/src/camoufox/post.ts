@@ -25,6 +25,10 @@ export interface WorkerPost {
   ctx: ProviderContext;
   /** A grid page's allowed scrolls, which the reservation checks against the caps (ruling 12). */
   scrolls?: number;
+  /** Spec rev 56 §5.1: a flight list's planned pages, which the reservation checks against the page caps. */
+  pages?: number;
+  /** Spec rev 56 §5.3: a flights request's own timeout, in place of the provider's (a return phase only). */
+  requestTimeoutSeconds?: number;
 }
 
 export async function postToWorker(
@@ -50,6 +54,8 @@ export async function postToWorker(
       signal: p.ctx.signal,
       recordFixtures: p.ctx.recordFixtures,
       ...(p.scrolls === undefined ? {} : { scrolls: p.scrolls }),
+      ...(p.pages === undefined ? {} : { pages: p.pages }),
+      ...(p.requestTimeoutSeconds === undefined ? {} : { requestTimeoutSeconds: p.requestTimeoutSeconds }),
       ...(p.ctx.beforeSend === undefined ? {} : { beforeSend: p.ctx.beforeSend }),
     });
     return { ok: true, body: res.body };

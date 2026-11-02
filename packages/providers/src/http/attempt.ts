@@ -88,10 +88,13 @@ function scrubbedHeaders(h: Headers, deps: HttpKitDeps): Headers {
 /**
  * One attempt of spec §5.3's retry body: budget.reserve → fetch → reservation.finalise → classify.
  * - reserve runs before the request leaves the process (BudgetExceeded propagates, nothing is sent);
- * - fetch uses `redirect: 'error'` and the per-request timeout combined with the caller's signal;
+ * - reserve is asked the request's planned `pages` when it states them (spec rev 56 §5.1);
+ * - fetch uses `redirect: 'error'` and the request's own timeout when it sets one, else the provider's, combined with
+ *   the caller's signal;
  * - finalise runs exactly once per reserve: `ok` for 2xx (even a malformed body: the vendor billed it), `error`
  *   for any other status or a socket failure, `unknown` for timeout and abort and for a billed 200 whose body
- *   then fails; an abort finalises `unknown` before AbortedError propagates.
+ *   then fails; an abort finalises `unknown` before AbortedError propagates; a body's stated scrolls and pages loaded
+ *   (`scrollCountOf`, `pageCountOf`) go with it.
  */
 export async function runAttempt(
   deps: HttpKitDeps,
@@ -114,6 +117,8 @@ export async function runAttempt(
           httpAttempt: ctx.attempt,
           endpointPath: r.endpointPath,
           ...(r.scrolls === undefined ? {} : { scrolls: r.scrolls }),
+          // why: spec rev 56 §5.1: the caps judge the request's planned pages (a return phase's 2), not one
+          ...(r.pages === undefined ? {} : { pages: r.pages }),
         });
   // why: durations use Date.now() so vitest fake timers drive them; instants (fetchedAt) use the Clock port.
   const started = Date.now();
@@ -127,14 +132,18 @@ export async function runAttempt(
   ): void => {
     const pageClass =
       limits.pageClass === undefined ? undefined : (classOverride ?? limits.pageClass(responseFacts));
-    const scrollCount =
-      bodyText === undefined || bodyText === null ? undefined : limits.scrollCountOf?.(bodyText);
+    const stated = bodyText === undefined || bodyText === null ? undefined : bodyText;
+    const scrollCount = stated === undefined ? undefined : limits.scrollCountOf?.(stated);
+    // why: spec rev 56 §5.3 (R-zero): the documents the answer states it loaded, 0 included; an attempt with no body (a
+    // timeout, an abort) passes none, so the guard keeps the plan
+    const pageCount = stated === undefined ? undefined : limits.pageCountOf?.(stated);
     reservation?.finalise({
       outcome,
       durationMs: Date.now() - started,
       ...(httpStatus === undefined ? {} : { httpStatus }),
       ...(pageClass === undefined ? {} : { pageClass }),
       ...(scrollCount === undefined ? {} : { scrollCount }),
+      ...(pageCount === undefined ? {} : { pageCount }),
     });
   };
   // why: WP18 V3: the class http-kit gives a failed call is kept on its ledger row, the one classification the Status
@@ -144,8 +153,11 @@ export async function runAttempt(
     return e;
   };
   // why: setTimeout + AbortController rather than AbortSignal.timeout, whose Node-internal timer vitest cannot fake.
+  // why: spec rev 56 §5.3: a request's own timeout (a flights request with a return phase) replaces the provider's for
+  // this attempt only; every other request keeps the provider's
   const timeout = new AbortController();
-  const timer = setTimeout(() => timeout.abort(), limits.requestTimeoutSeconds * 1000);
+  const timeoutSeconds = r.requestTimeoutSeconds ?? limits.requestTimeoutSeconds;
+  const timer = setTimeout(() => timeout.abort(), timeoutSeconds * 1000);
   const signal = AbortSignal.any([r.signal, timeout.signal]);
   // why: path, never URL; no headers, no body (spec §14).
   const logFailure = (stage: 'request' | 'body'): void =>

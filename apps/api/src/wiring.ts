@@ -13,6 +13,7 @@ import {
   type Config,
   type ConfigError,
   type FlightProvider,
+  flightRequestSeconds,
   type Logger,
   parseConfig,
   type ResponseCache,
@@ -262,6 +263,13 @@ export function providersFor(
               scrollsLeft: (executionId: string | null) =>
                 deps.scrollsLeft?.('camoufox', executionId) ?? null,
             }),
+        // why: spec rev 56 §2, §12 (ruling A6): a flights request with a return phase carries its own timeout, core's one
+        // computation from the shared page timeout and spacing (780 s with the booking read, 600 s without, at the
+        // defaults); discovery keeps camoufoxHttpLimits' own
+        flightRequestSeconds: {
+          booking: flightRequestSeconds(cf.pageTimeoutSeconds, cf.minSpacingSeconds, true),
+          returnsOnly: flightRequestSeconds(cf.pageTimeoutSeconds, cf.minSpacingSeconds, false),
+        },
       }),
     );
   return out;

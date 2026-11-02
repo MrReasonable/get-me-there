@@ -105,6 +105,12 @@ export interface CamoufoxProviderOptions {
    * null for no cap. A grid page asks for, and reserves, no more than that.
    */
   scrollsLeft?: (executionId: string | null) => number | null;
+  /**
+   * Spec rev 56 §2 "The return phase", §12 (ruling A6): the timeout of a flights request with a return phase, core's
+   * `flightRequestSeconds` of the app's page timeout and spacing, computed once by the wiring: with the booking read
+   * (780 s at the defaults) and without it (600 s). Every other request keeps the provider's own timeout.
+   */
+  flightRequestSeconds: { booking: number; returnsOnly: number };
 }
 
 /** The detail and dropped count stored on a priced cell (prov-001, prov-003, prov-005). */
