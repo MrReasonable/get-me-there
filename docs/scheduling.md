@@ -9,7 +9,8 @@ which new definitions take from `SCHEDULER_TIMEZONE`, default `Europe/London`), 
 
 Five fields: minute, hour, day of month, month, day of week. The minute must be a single
 number, so a schedule runs at most once an hour; anything more frequent is rejected when you
-save.
+save. So is a schedule that never runs, such as the 30th of February or the 31st of April. A
+schedule for the 29th of February runs in leap years only.
 
 | Cron | Meaning |
 |---|---|

@@ -3482,7 +3482,9 @@ api names each point's catch-up), and lists a skipped firing with the time it
 was due and its reason. Cron is
 a bounded string in `core/api-contract`; the single `parseCron` wrapper in
 `engine` (over `croner`) is the **sole** semantic validator, imported by
-`api` (sub-hourly rejected, tz validated); `core` has no cron parser.
+`api` (sub-hourly rejected, a schedule that never fires rejected, tz validated); its
+previous firing is found by stepping `nextRun`, so a 29 February schedule answers in any
+year; `core` has no cron parser.
 
 **Cadence arithmetic** (and `docs/scheduling.md`), from the same functions
 as the estimate, for the worked example's 4 pairs over a 182-day window,

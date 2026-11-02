@@ -18,12 +18,42 @@ function validated(expr: string, tz: string): { ok: true; job: Cron } | { ok: fa
       ok: false,
       reason: 'schedules may run at most once an hour: the minute field must be a single number 0–59',
     };
+  let job: Cron;
   try {
     // why: no callback, so croner schedules nothing; paused for clarity; mode '5-part' refuses seconds and years
-    return { ok: true, job: new Cron(fields.join(' '), { timezone: tz, paused: true, mode: '5-part' }) };
+    job = new Cron(fields.join(' '), { timezone: tz, paused: true, mode: '5-part' });
   } catch (err) {
     return { ok: false, reason: `not a valid schedule: ${err instanceof Error ? err.message : String(err)}` };
   }
+  // why: a day no month has (30 February, 31 April) parses but never fires; five fields have no year, so a schedule
+  // with no firing after 2000-01-01 (a leap year's start) has none at all
+  if (job.nextRun(NEVER_FROM) === null)
+    return { ok: false, reason: 'this schedule never fires: no month it names has that day' };
+  return { ok: true, job };
+}
+
+const NEVER_FROM = new Date('2000-01-01T00:00:00.000Z');
+const HOUR_MS = 3_600_000;
+/** A five-field schedule that fires at all fires within 8 years (29 February, with 2100 no leap year). */
+const LOOKBACK_MAX_MS = 9 * 366 * 86_400_000;
+
+/**
+ * The last firing strictly before the whole second of `before`, found with `nextRun` from ever earlier starts (an
+ * hour, then doubling): croner 10.0.1's `previousRuns` throws when the year before has no matching day (a 29 February
+ * schedule in a non-leap year), and stepping forward lists the firings as `firingsBetween` does.
+ */
+function previousOf(job: Cron, before: Date): Date | null {
+  const end = Math.floor(before.getTime() / 1000) * 1000;
+  for (let span = HOUR_MS; span <= 2 * LOOKBACK_MAX_MS; span *= 2) {
+    let last = job.nextRun(new Date(end - span));
+    if (last === null || last.getTime() >= end) continue;
+    for (let n = job.nextRun(new Date(last.getTime() + 1000)); n !== null && n.getTime() < end; ) {
+      last = n;
+      n = job.nextRun(new Date(n.getTime() + 1000));
+    }
+    return last;
+  }
+  return null;
 }
 
 /**
@@ -38,7 +68,7 @@ export function parseCron(expr: string, tz: string): ParsedCron {
   return {
     ok: true,
     next: (from) => job.nextRun(from),
-    previous: (before) => job.previousRuns(1, before)[0] ?? null,
+    previous: (before) => previousOf(job, before),
   };
 }
 
@@ -67,16 +97,19 @@ const DAY_MS = 86_400_000;
 const TRANSITION_MARGIN_MS = 3 * 3_600_000;
 
 const offsetFormats = new Map<string, Intl.DateTimeFormat>();
-/** The zone's UTC offset in minutes at `ms` (Intl's longOffset, "GMT+05:45"; "GMT" is zero). */
-function offsetMinutes(tz: string, ms: number): number {
+/**
+ * The zone's UTC offset in minutes at `ms` (Intl's longOffset, "GMT+05:45"), or null for any other form: an offset with
+ * seconds ("GMT-00:44:30", some zones before 1972) matches no whole-minute fixed offset.
+ */
+function offsetMinutes(tz: string, ms: number): number | null {
   let f = offsetFormats.get(tz);
   if (f === undefined) {
     f = new Intl.DateTimeFormat('en-US', { timeZone: tz, timeZoneName: 'longOffset' });
     offsetFormats.set(tz, f);
   }
-  const name = f.formatToParts(ms).find((p) => p.type === 'timeZoneName')?.value ?? 'GMT';
+  const name = f.formatToParts(ms).find((p) => p.type === 'timeZoneName')?.value ?? '';
   const m = /^GMT([+-])(\d{2}):(\d{2})$/.exec(name);
-  if (m === null) return 0;
+  if (m === null) return null;
   return (m[1] === '-' ? -1 : 1) * (Number(m[2]) * 60 + Number(m[3]));
 }
 
@@ -179,21 +212,26 @@ export function countFirings(
     }
     return job;
   };
+  // why: an offset no whole-minute fixed offset matches (offsetMinutes null) is stepped in the zone itself
+  const steady = (from: number, to: number): number => {
+    const offset = offsetMinutes(tz, from);
+    return offset === null
+      ? stepCount(zoned, from, to, meter)
+      : dayCount(atOffset(offset), offset, from, to, meter);
+  };
   let n = 0;
   let cursor = f;
   for (const change of offsetChanges(tz, f, t)) {
     const zoneFrom = Math.max(cursor, change - TRANSITION_MARGIN_MS);
     if (zoneFrom > cursor) {
-      const offset = offsetMinutes(tz, cursor);
-      n += dayCount(atOffset(offset), offset, cursor, zoneFrom - 1, meter);
+      n += steady(cursor, zoneFrom - 1);
     }
     const zoneTo = Math.min(t, change + TRANSITION_MARGIN_MS);
     if (zoneTo >= zoneFrom) n += stepCount(zoned, zoneFrom, zoneTo, meter);
     cursor = Math.max(cursor, zoneTo + 1);
   }
   if (cursor <= t) {
-    const offset = offsetMinutes(tz, cursor);
-    n += dayCount(atOffset(offset), offset, cursor, t, meter);
+    n += steady(cursor, t);
   }
   return n;
 }

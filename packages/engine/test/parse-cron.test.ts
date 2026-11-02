@@ -69,6 +69,8 @@ describe('parseCron (spec §8.2: the sole semantic validator; sub-hourly rejecte
     ['0 5 * *', 'five fields'],
     ['0 0 5 * * 1', 'five fields'],
     ['0 25 * * *', 'not a valid schedule'],
+    ['0 0 30 2 *', 'never fires'],
+    ['0 6 31 4 *', 'never fires'],
   ])('rejects %s', (expr, why) => {
     expect(reason(expr)).toContain(why);
   });
@@ -85,6 +87,18 @@ describe('previousFiring and runsPerMonth', () => {
       previousFiring('0 5 * * 1', 'Europe/London', new Date('2026-10-14T09:00:00.000Z'))?.toISOString(),
     ).toBe('2026-10-12T04:00:00.000Z');
     expect(previousFiring('*/5 * * * *', 'Europe/London', new Date('2026-10-14T09:00:00.000Z'))).toBeNull();
+  });
+  it('the last firing is strictly before the whole second of the instant', () => {
+    const before = (at: string) => previousFiring('0 5 * * 1', 'Europe/London', new Date(at))?.toISOString();
+    expect(before('2026-10-12T04:00:00.999Z')).toBe('2026-10-05T04:00:00.000Z');
+    expect(before('2026-10-12T04:00:01.000Z')).toBe('2026-10-12T04:00:00.000Z');
+  });
+  it('a 29 February schedule finds its last firing however many years back, 2100 being no leap year', () => {
+    const before = (at: string) => previousFiring('0 6 29 2 *', 'Europe/London', new Date(at))?.toISOString();
+    expect(before('2027-03-01T00:00:00.000Z')).toBe('2024-02-29T06:00:00.000Z');
+    expect(before('2024-01-15T00:00:00.000Z')).toBe('2020-02-29T06:00:00.000Z');
+    expect(before('2024-03-01T00:00:00.000Z')).toBe('2024-02-29T06:00:00.000Z');
+    expect(before('2103-03-01T00:00:00.000Z')).toBe('2096-02-29T06:00:00.000Z');
   });
   it('is firings over the next 365 days ÷ 12, unrounded (ruling 12: weekly ≈ 4.33, as the spec §8.2 cadence table)', () => {
     const from = new Date('2026-10-14T09:00:00.000Z');
@@ -306,5 +320,17 @@ describe('countFirings and firingsBetween at their edges (the work a count takes
       '2027-03-28T01:00:00.000Z',
     ]);
     expect(countFirings('0 * * * *', 'Europe/London', f, t)).toBe(2);
+  });
+});
+
+describe('a zone whose offset has seconds (Africa/Monrovia, GMT−00:44:30 until 1972)', () => {
+  it('counts as firingsBetween lists, to the half minute', () => {
+    const from = new Date('1970-01-01T00:00:00.000Z');
+    // why: local midnight is 00:44:30 UTC, so the tenth day's firing falls just after this end and counts not at all
+    const to = new Date('1970-01-10T00:44:15.000Z');
+    const listed = firingsBetween('0 0 * * *', 'Africa/Monrovia', from, to);
+    expect(listed.map((d) => d.toISOString()).slice(0, 1)).toEqual(['1970-01-01T00:44:30.000Z']);
+    expect(listed).toHaveLength(9);
+    expect(countFirings('0 0 * * *', 'Africa/Monrovia', from, to)).toBe(9);
   });
 });
