@@ -370,10 +370,18 @@ describe('worker rules: a flights page with returnLimits activates only the veri
     expect(touched.some((x) => x.includes('Continue to book') || x.includes('View QQ'))).toBe(false);
     expect((page?.calls.clicks ?? []).some((x) => x.startsWith('link:'))).toBe(false);
   });
-  it('with the module’s own flags (both false until the flip) nothing is activated', async () => {
-    const { a, page } = await run(null);
+  it('with both flags false nothing is activated', async () => {
+    const { a, page } = await run({ RETURN_SELECT_VERIFIED: false, BOOKING_SELECT_VERIFIED: false });
     expect(a.answer).toMatchObject({ kind: 'flights', returns: { status: 'not-verified' } });
     expect([page?.calls.focuses, page?.calls.presses]).toEqual([[], []]);
+  });
+  // why: WP21 Task 21.3: the module's own flags are darwin-arm64's, both set by select-return/2026-11-02/1
+  it('with the module’s own flags (both true since the flip) the returns and the booking options are read', async () => {
+    const { a } = await run(null);
+    expect(a.answer).toMatchObject({
+      kind: 'flights',
+      returns: { status: 'read', booking: { status: 'read' } },
+    });
   });
 });
 

@@ -742,14 +742,14 @@ rule `monthly-headroom`, before any activation, the first view still read
 
 The flags are dated per entry. `darwin-arm64`'s `RETURN_SELECT_VERIFIED` and
 `BOOKING_SELECT_VERIFIED` rest on the recordings of 2026-11-01
-(`select-outbound` and `select-return`) and are set only after one
-end-to-end recording of the full served path on that entry (both outbounds,
-the reload, the return's selection and the expansion; "Recordings first",
-below) and its recorded suites' required run, which asserts from the guard's
-counts recorded with each step (the main-frame documents the page started,
-counted before the activation gate, and the documents the gate aborted)
-that no activation started or was refused a document and that only the
-reload started one; until then they stay false.
+(`select-outbound` and `select-return`) and on one end-to-end recording of
+the full served path on that entry, `select-return/2026-11-02/1` (both
+outbounds, the reload, the return's selection and the expansion;
+"Recordings first", below), and its recorded suites' required run, which
+asserts from the guard's counts recorded with each step (the main-frame
+documents the page started, counted before the activation gate, and the
+documents the gate aborted) that no activation started or was refused a
+document and that only the reload started one; both are set on that entry.
 Every other entry keeps them false until its own recording session, and the
 docs promise returns and sellers only where they are set.
 
@@ -1082,8 +1082,10 @@ treated as not fitting, the reload, the second outbound, its return, the
 booking view and the expansion), under the activation gate, a reservation of
 two pages and the served path's full page budget as its cap (eight page
 periods plus one spacing, 750,000 ms at the defaults), and the recorded
-suites then run with `RECORDINGS_REQUIRED=1` (§9); each other entry's
-recording session records the same kinds before its own flags are set.
+suites then run with `RECORDINGS_REQUIRED=1` (§9). That run is
+`select-return/2026-11-02/1`, which set both flags on `darwin-arm64`; each
+other entry's recording session records the same kinds before its own flags
+are set.
 
 *Ledger and caps.* Every worker call through the adapter is one
 `provider_requests` row under the **free-provider rules** (never billable,

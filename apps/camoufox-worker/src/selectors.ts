@@ -293,6 +293,10 @@ export const PROOFS: Readonly<Record<OsArch, Partial<Record<FlagName, string>>>>
       '2026-10-18 grid/2026-10-18/1–4 (every cell name parses, each view’s cells name its lines’ dates, one scroll moves one day on its axis, SOCS same) and the renamed 0-explore',
     GRID_UNPRICED_VERIFIED:
       '2026-10-26 grid/2026-10-26/7 and 8 (a sparse route, ten views of 49 cells, every view drawn: each pair shown without a price a button named "no flights, <d> <Mon> to <d> <Mon>" or "price unknown, <d> <Mon> to <d> <Mon>", 14 to 19 of them a view, every other name priced and parsed, each view’s cells name its lines’ dates, SOCS same)',
+    RETURN_SELECT_VERIFIED:
+      '2026-11-01 select-outbound/2026-11-01/3 and select-outbound/2026-11-01/4 (each selection by the keyboard activation, in-app; the reload one document; every return name parses, the minimum return price equals the selected outbound’s From price, SOCS same) and select-return/2026-11-02/1 (the full served path end to end: one reload the only extra document, every activation in-app, no gate refusal)',
+    BOOKING_SELECT_VERIFIED:
+      '2026-11-01 select-return/2026-11-01/1, select-return/2026-11-01/2, select-return/2026-11-01/3 and select-return/2026-11-01/4 (the return’s selection and the expansion in-app, every offer read by the offer grammar, the cheapest expanded offer equal to the return’s From price) and select-return/2026-11-02/1 (the full served path end to end: one reload the only extra document, every activation in-app, no gate refusal)',
   },
   // why: WP17 Task 17.8's recording sessions fill these, one commit per entry
   // why: WP17 Task 17.8, the operator's Mac under Rosetta (an official x86_64 Node 22, a throwaway HOME,

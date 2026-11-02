@@ -20,21 +20,24 @@ describe('the dated selectors module (spec §2; brief §9)', () => {
       LANDING_VERIFIED: true,
       // why: grid/2026-10-26/7 and 8 showed the date grid's unpriced cells on the operator's Mac
       GRID_UNPRICED_VERIFIED: true,
-      // why: WP21 Task 21.0: no recording of the return view yet
-      RETURN_SELECT_VERIFIED: false,
-      BOOKING_SELECT_VERIFIED: false,
+      // why: WP21 Task 21.3: the 2026-11-01 recordings and the end-to-end select-return/2026-11-02/1
+      RETURN_SELECT_VERIFIED: true,
+      BOOKING_SELECT_VERIFIED: true,
     });
     expect(Object.keys(flagsOf())).toEqual([...FLAG_NAMES]);
   });
-  // why: WP21 Task 21.0: the outbound selection is clicked only on an entry a recording of the served sequence set it
-  // on; none has yet, so every entry reports it false, and PROOFS names no recording for it
-  it('RETURN_SELECT_VERIFIED is false on every entry for its pinned build, with no proof named', () => {
+  // why: WP21 Task 21.3: the outbound and the return are selected only on an entry a recording of the served sequence
+  // set them on: darwin-arm64 alone (select-return/2026-11-02/1, end to end), PROOFS naming it; every other entry
+  // reports both false, with no proof named
+  it('RETURN_SELECT_VERIFIED and BOOKING_SELECT_VERIFIED are true on darwin-arm64 only, named by the end-to-end recording', () => {
     for (const k of OS_ARCHES) {
-      expect(flagsOf(selectorsFor(k, CAMOUFOX_BUILDS[k].build)).RETURN_SELECT_VERIFIED, k).toBe(false);
-      expect(PROOFS[k].RETURN_SELECT_VERIFIED, k).toBeUndefined();
-      // why: Ian's ruling of 2026-11-01: the return's selection and the booking view, false until recorded
-      expect(flagsOf(selectorsFor(k, CAMOUFOX_BUILDS[k].build)).BOOKING_SELECT_VERIFIED, k).toBe(false);
-      expect(PROOFS[k].BOOKING_SELECT_VERIFIED, k).toBeUndefined();
+      const on = k === 'darwin-arm64';
+      const flags = flagsOf(selectorsFor(k, CAMOUFOX_BUILDS[k].build));
+      for (const f of ['RETURN_SELECT_VERIFIED', 'BOOKING_SELECT_VERIFIED'] as const) {
+        expect(flags[f], `${k} ${f}`).toBe(on);
+        if (on) expect(PROOFS[k][f], `${k} ${f}`).toContain('select-return/2026-11-02/1');
+        else expect(PROOFS[k][f], `${k} ${f}`).toBeUndefined();
+      }
     }
   });
   // why: WP21 Task 21.0: the return view's patterns are a hypothesis the recording checks (Task 21.3 dates them); both

@@ -624,13 +624,13 @@ describe('classify the booking view (spec rev 56 §2: the recorded conditions)',
   });
   it('with the flag off: always not-booking-view', () => {
     for (const S of [
-      SELECTORS,
+      { ...SELECTORS, RETURN_SELECT_VERIFIED: false, BOOKING_SELECT_VERIFIED: false },
       { ...SELECTORS, RETURN_SELECT_VERIFIED: true, BOOKING_SELECT_VERIFIED: false },
     ])
       expect(classifyPageWithRule(bookingView(), S, 'booking')).toEqual(notBooking);
   });
   it('the blocked rules first, flag on or off', () => {
-    for (const S of [SELECTORS, on]) {
+    for (const S of [{ ...SELECTORS, BOOKING_SELECT_VERIFIED: false }, on]) {
       expect(classifyPageWithRule(bookingView({}, { challenge: true }), S, 'booking')).toEqual({
         kind: { kind: 'blocked', page: 'captcha' },
         rule: 'challenge-text',

@@ -18,6 +18,11 @@ const keysOf = (proof: string): Array<{ kind: string; day: string; n: string }> 
   [...proof.matchAll(KEY)].map((m) => ({ kind: m[1] ?? '', day: m[2] ?? '', n: m[3] ?? '' }));
 /** A proof that rests on an operator ruling instead of a recording key (the controller's ruling of WP21 Task 21.3). */
 const RULING = /operator ruling of \d{4}-\d{2}-\d{2}/;
+/**
+ * A range of recordings ("1–4", or "1-4" after a key's number), which A19 rules out for the return-select and
+ * booking-select proofs. A key's own date ("2026-11-02") is no range: its hyphens sit between date parts.
+ */
+const RANGE = /\d–\d|\/\d{4}-\d{2}-\d{2}\/\d+\s*-\s*\d/;
 /** A proof names its recording by key, or cites the operator ruling that set the flag. */
 const proven = (proof: string): boolean => keysOf(proof).length > 0 || RULING.test(proof);
 
@@ -62,9 +67,18 @@ describe('every true flag names its recording by key (R-e2e)', () => {
           expect(flagsFor(entry, CAMOUFOX_BUILDS[entry].build)[flag], `${entry} ${flag}`).toBe(false);
           continue;
         }
-        expect(proof, `${entry} ${flag}`).not.toMatch(/\d[–-]\d/);
+        expect(proof, `${entry} ${flag}`).not.toMatch(RANGE);
         expect(keysOf(proof).length, `${entry} ${flag}`).toBeGreaterThan(0);
       }
+  });
+  it('the range pattern reads a range of recordings, never a key’s own date', () => {
+    for (const r of ['grid/2026-10-18/1–4', 'select-return/2026-11-01/1-4', 'passes 1–3'])
+      expect(RANGE.test(r), r).toBe(true);
+    for (const k of [
+      'select-return/2026-11-02/1',
+      '2026-11-01 select-outbound/2026-11-01/3 and select-outbound/2026-11-01/4',
+    ])
+      expect(RANGE.test(k), k).toBe(false);
   });
   it('the darwin-arm64 SOCS_STABLE proof is the operator ruling of 2026-10-18, naming no recording key', () => {
     const proof = PROOFS['darwin-arm64'].SOCS_STABLE ?? '';

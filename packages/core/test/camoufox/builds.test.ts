@@ -135,11 +135,12 @@ const WORKER_FLAGS: Readonly<Record<FlagName, boolean>> = {
   LANDING_VERIFIED: true,
   // why: grid/2026-10-26/7 and 8: the date grid's unpriced cells ("no flights", "price unknown") on the operator's Mac
   GRID_UNPRICED_VERIFIED: true,
-  // why: WP21 Task 21.0: the return view after an outbound's selection, false until a recording of the served
-  // sequence sets it (Task 21.3)
-  RETURN_SELECT_VERIFIED: false,
-  // why: Ian's ruling of 2026-11-01 (read the booking options): the return's selection and the booking view after it
-  BOOKING_SELECT_VERIFIED: false,
+  // why: WP21 Task 21.3: the return view after an outbound's selection, set by the end-to-end recording of the served
+  // sequence (select-return/2026-11-02/1)
+  RETURN_SELECT_VERIFIED: true,
+  // why: Ian's ruling of 2026-11-01 (read the booking options): the return's selection and the booking view after it,
+  // set by the same recording
+  BOOKING_SELECT_VERIFIED: true,
 };
 
 describe('FLAGS and flagsFor (spec §2 rev 36: flags per <os>-<arch>, bound to their build)', () => {
@@ -159,15 +160,16 @@ describe('FLAGS and flagsFor (spec §2 rev 36: flags per <os>-<arch>, bound to t
     ]);
   });
 
-  // why: WP21 Task 21.0: the outbound selection is clicked only where a recording of the served sequence set the flag;
-  // none has yet, so every entry, and the all-false set, carry it false
-  it('RETURN_SELECT_VERIFIED is false on every entry and on any other build', () => {
+  // why: WP21 Task 21.3: the outbound and the return are selected only where a recording of the served sequence set
+  // the flags: darwin-arm64 alone, on its pinned build; every other entry, and any other build, carries them false
+  it('RETURN_SELECT_VERIFIED and BOOKING_SELECT_VERIFIED are true on darwin-arm64 only, for its pinned build', () => {
     for (const k of OS_ARCHES) {
-      expect(FLAGS[k].flags.RETURN_SELECT_VERIFIED, k).toBe(false);
-      expect(flagsFor(k, CAMOUFOX_BUILDS[k].build).RETURN_SELECT_VERIFIED, k).toBe(false);
-      expect(flagsFor(k, '152.0.4-beta.27').RETURN_SELECT_VERIFIED, k).toBe(false);
-      expect(FLAGS[k].flags.BOOKING_SELECT_VERIFIED, k).toBe(false);
-      expect(flagsFor(k, CAMOUFOX_BUILDS[k].build).BOOKING_SELECT_VERIFIED, k).toBe(false);
+      const on = k === 'darwin-arm64';
+      for (const f of ['RETURN_SELECT_VERIFIED', 'BOOKING_SELECT_VERIFIED'] as const) {
+        expect(FLAGS[k].flags[f], `${k} ${f}`).toBe(on);
+        expect(flagsFor(k, CAMOUFOX_BUILDS[k].build)[f], `${k} ${f}`).toBe(on);
+        expect(flagsFor(k, '152.0.4-beta.27')[f], `${k} ${f}`).toBe(false);
+      }
     }
   });
 
@@ -184,13 +186,14 @@ describe('FLAGS and flagsFor (spec §2 rev 36: flags per <os>-<arch>, bound to t
       expect(FLAGS[k].flags.FORM_VERIFIED, k).toBe(true);
     }
     // why: darwin-x64's grid mode came on with its re-recorded pages (grid/2026-10-26/5 and 6, spec §2 rev 46); every
-    // entry has every flag but VIEW_MORE_ADDS_CHEAPER, and GRID_UNPRICED_VERIFIED only where a grid recording showed an
-    // unpriced cell (darwin-arm64's grid/2026-10-26/7 and 8)
+    // entry has every flag but VIEW_MORE_ADDS_CHEAPER, GRID_UNPRICED_VERIFIED only where a grid recording showed an
+    // unpriced cell (darwin-arm64's grid/2026-10-26/7 and 8), and the return-select and booking-select flags only where
+    // the end-to-end recording ran (darwin-arm64's select-return/2026-11-02/1)
     for (const k of OS_ARCHES) {
       const off = FLAG_NAMES.filter((f) => !FLAGS[k].flags[f]);
       expect(off, k).toEqual(
         k === 'darwin-arm64'
-          ? ['VIEW_MORE_ADDS_CHEAPER', 'RETURN_SELECT_VERIFIED', 'BOOKING_SELECT_VERIFIED']
+          ? ['VIEW_MORE_ADDS_CHEAPER']
           : [
               'VIEW_MORE_ADDS_CHEAPER',
               'GRID_UNPRICED_VERIFIED',
