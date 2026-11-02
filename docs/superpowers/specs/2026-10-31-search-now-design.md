@@ -272,11 +272,17 @@ count (10), **outside** the run's grid page cap (`CAMOUFOX_EXECUTION_PAGE_CAP`),
 whole cap still leaves the flights to read. They count against the camoufox **monthly** page cap like any
 other page, and a flight read that would pass it is not made (§6.4). No new setting. The estimate shows both
 ("+ flights for up to 10 date pairs, about 12 minutes": one page at a time, each `CAMOUFOX_MIN_SPACING_SECONDS`
-plus 40 seconds, 700 seconds at the defaults), and the budget snapshot records the allowance.
+plus 40 seconds, 700 seconds at the defaults), and the budget snapshot records the allowance. **Superseded by
+spec revision 56 (WP21):** a date pair's read may load up to 2 pages (a second outbound loads the list page again),
+so the per-run allowance is twenty pages (ten date pairs at up to 2 each), still outside the grid page cap and inside
+the monthly one, and the estimate states the return leg's typical and largest pages and time ("+ flights, out and
+back, for up to 10 date pairs: usually about 15 pages and 41 minutes, at most 20 pages and 50 minutes"); the main spec
+is current and this paragraph mirrors it.
 
 **On demand while a run is going (*my call*).** "Read flights for this date" is refused while any run is using
 the browser worker, with the reason in words ("The browser worker is busy with a search; try again when it
-finishes"). Otherwise it is a one-page read counted against the monthly cap only.
+finishes"). Otherwise it is a one-page read counted against the monthly cap only. **Superseded by spec revision 56
+(WP21):** it is a read of up to 2 pages (1 without a return phase), against the monthly cap only.
 
 ### 6.2 What is read and stored
 

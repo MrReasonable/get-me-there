@@ -301,6 +301,9 @@ describe('the estimate flight line (spec rev 55 §8.1)', () => {
   /** A camoufox engine over `cells` one-page cells (with a flight capability) and its start-time estimate. */
   function flightEstimate(cells: number, o: Parameters<typeof engineWith>[1] = {}, saved = false) {
     const e = engineWith([stubCamoufox({ cells, flights: {} })], { rankedDatePairs: rankedPairs(15), ...o });
+    // why: revision 55's outbound-only line: a worker that reported no return flag (final review B-M3: while the flags
+    // are unread the estimate counts the return phase)
+    e.ctx.workerFlags.set('camoufox', { RETURN_SELECT_VERIFIED: false });
     const b = buildSnapshot(e.ctx, e.definition);
     return { e, b, est: estimateStart(e.ctx, b.snapshot, b.cells, saved ? e.definition.id : null) };
   }
@@ -599,16 +602,25 @@ describe('the estimate flight line with the return leg (spec rev 56 §8.1)', () 
     expect(est.flightLists).toEqual({ pairs: 5, pages: 5, seconds: 350, returns: false });
   });
 
-  it('with the return flag false or unread: outbound-only, 10 pages and 700 s', () => {
-    for (const flags of [null, { RETURN_SELECT_VERIFIED: false, BOOKING_SELECT_VERIFIED: true }]) {
-      const { est } = returnsEstimate(15, flags);
-      expect(est.flightLists).toEqual({ pairs: 10, pages: 10, seconds: 700, returns: false });
-      expect(est.assumptions).toContain('+ flights for up to 10 date pairs, about 12 minutes');
-    }
+  it('with the return flag false: outbound-only, 10 pages and 700 s', () => {
+    const { est } = returnsEstimate(15, { RETURN_SELECT_VERIFIED: false, BOOKING_SELECT_VERIFIED: true });
+    expect(est.flightLists).toEqual({ pairs: 10, pages: 10, seconds: 700, returns: false });
+    expect(est.assumptions).toContain('+ flights for up to 10 date pairs, about 12 minutes');
   });
 
-  it('D6: the month bounds the pairs out and back; at 1, 2 and 3 pages left 0 + 1, 1 + 0 and 1 + 1 pairs', () => {
-    // why: 15 grid pages of a 16-, 17- and 18-page month leave 1, 2 and 3 pages for flights
+  // why: final review B-M3 (prov-008, 21.6 N2): the run's own preflight may set the flags and plan 2 pages a pair, so
+  // while they are unread the estimate counts the whole return phase, booking read included: it never understates
+  it('with the flags unread: the return phase with the booking read assumed (the bound), as with both flags', () => {
+    const { est } = returnsEstimate(15, null);
+    expect(est.flightLists).toEqual(returnsEstimate(15, BOTH).est.flightLists);
+    expect(est.flightLists).toMatchObject({ pairs: 10, pagesMax: 20, secondsMax: 3000, returns: true });
+  });
+
+  // why: final review B-M4: the engine sends a return phase while the month leaves 2 pages, and a phase that needs no
+  // second outbound loads 1, so M pages left read up to M date pairs: all but the last out and back, the pages still at
+  // most M (D6's pairs at 2 pages each understated the pairs a run can read)
+  it('the month bounds the pages, not the pairs: at 1, 2, 3 and 5 pages left, up to 1, 2, 3 and 5 date pairs', () => {
+    // why: 15 grid pages of a 16-, 17-, 18- and 20-page month leave 1, 2, 3 and 5 pages for flights
     const one = returnsEstimate(15, BOTH, { monthlyCap: 16 }).est;
     // why: 21.7 code I1: with no pair out and back the line states no return leg (`returns: outAndBack > 0`); the bound
     // stays, since the plan still reads the return leg wherever the pages allow (R-load reads it)
@@ -624,27 +636,32 @@ describe('the estimate flight line with the return leg (spec rev 56 §8.1)', () 
     expect(one.assumptions).toContain("flights for 1 date pair: the browser worker's monthly page cap");
     const two = returnsEstimate(15, BOTH, { monthlyCap: 17 }).est;
     expect(two.flightLists).toEqual({
-      pairs: 1,
-      pages: 2,
-      seconds: 245,
-      pagesMax: 2,
-      secondsMax: 300,
-      returns: true,
-    });
-    expect(two.assumptions).toContain(
-      "flights for 1 date pair out and back: the browser worker's monthly page cap",
-    );
-    const three = returnsEstimate(15, BOTH, { monthlyCap: 18 }).est;
-    expect(three.flightLists).toEqual({
       pairs: 2,
-      pages: 3,
+      pages: 2,
       seconds: 315,
-      pagesMax: 3,
+      pagesMax: 2,
       secondsMax: 370,
       returns: true,
     });
-    expect(three.assumptions).toContain(
+    expect(two.assumptions).toContain(
       "flights for 1 date pair out and back, 1 outbound only: the browser worker's monthly page cap",
+    );
+    const three = returnsEstimate(15, BOTH, { monthlyCap: 18 }).est;
+    expect(three.flightLists).toEqual({
+      pairs: 3,
+      pages: 3,
+      seconds: 560,
+      pagesMax: 3,
+      secondsMax: 670,
+      returns: true,
+    });
+    expect(three.assumptions).toContain(
+      "flights for 2 date pairs out and back, 1 outbound only: the browser worker's monthly page cap",
+    );
+    const five = returnsEstimate(15, BOTH, { monthlyCap: 20 }).est;
+    expect(five.flightLists).toMatchObject({ pairs: 5, pagesMax: 5, returns: true });
+    expect(five.assumptions.find((a) => a.startsWith('+ flights, out and back'))).toMatch(
+      /^\+ flights, out and back, for up to 5 date pairs: usually about 5 pages and \d+ minutes, at most 5 pages and/,
     );
   });
 
@@ -682,7 +699,7 @@ describe('the estimate flight line with the return leg (spec rev 56 §8.1)', () 
     expect(est.flightLists?.returns).toBe(false);
     // why: the load is the schedule's full allowance, whatever this month has left: 2 pages a pair with the return leg
     expect(flightAllowanceOf(est, b.snapshot)).toBe(Math.min(20, b.snapshot.budget.flightListPages ?? 0));
-    expect(flightAllowanceOf(returnsEstimate(15, null).est, b.snapshot)).toBe(
+    expect(flightAllowanceOf(returnsEstimate(15, { RETURN_SELECT_VERIFIED: false }).est, b.snapshot)).toBe(
       Math.min(10, b.snapshot.budget.flightListPages ?? 0),
     );
   });
@@ -719,8 +736,11 @@ describe('the estimate flight line with the return leg (spec rev 56 §8.1)', () 
     ).toBe(780);
     const returnsOnly = returnsEstimate(15, { RETURN_SELECT_VERIFIED: true });
     expect(flightWindowMarginSeconds(returnsOnly.e.ctx, returnsOnly.est, null)).toBe(600);
-    const outbound = returnsEstimate(15, null);
+    const outbound = returnsEstimate(15, { RETURN_SELECT_VERIFIED: false });
     expect(flightWindowMarginSeconds(outbound.e.ctx, outbound.est, null)).toBe(0);
+    // why: final review B-M3: with the flags unread the margin is the bound's, the booking read included
+    const unread = returnsEstimate(15, null);
+    expect(flightWindowMarginSeconds(unread.e.ctx, unread.est, null)).toBe(780);
     const none = returnsEstimate(15, BOTH, { monthlyCap: 15 });
     expect(flightWindowMarginSeconds(none.e.ctx, none.est, null)).toBe(0);
   });
@@ -745,8 +765,8 @@ describe('the estimate flight line with the return leg (spec rev 56 §8.1)', () 
     expect(flightWindowMarginSeconds(returnsEstimate(15, BOTH).e.ctx, est, { ...plan, booking: false })).toBe(
       600,
     );
-    // with no stored plan the flags decide: none read yet reads no booking options
-    expect(flightWindowMarginSeconds(restarted, est, null)).toBe(600);
+    // with no stored plan the flags decide: none read yet assumes the booking read (final review B-M3: the bound)
+    expect(flightWindowMarginSeconds(restarted, est, null)).toBe(780);
     // a provider with no flights request seconds has no margin
     const noSeconds = {
       ...restarted,

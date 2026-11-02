@@ -32,8 +32,9 @@ const editPatch = (id: string) => ({ view: 'definitions', edit: id });
  * Spec rev 55 §11 "Searches": one saved search as a plate in layout B's main column. The route in words from the
  * airports' cities with the codes beside it, the window, the stay and (only when scheduled) "repeats Mondays 05:00"; its
  * state line in a polite status region; "N of M date pairs never searched" whenever non-zero; the cheapest found, always
- * through `PriceCell`'s compact face so its own source and age show (a pairing figure calendar-styled, worded "lowest
- * seller price read, not checked with the airline": spec rev 56 §11, prov-006); and the actions, with Remove visually apart from
+ * through `PriceCell`'s compact face so its own source and age show (a pairing figure calendar-styled, worded "cheapest
+ * of the sellers read, not checked with the airline" through `basisName.pairing`: spec rev 56 §11, prov-006, 21.7
+ * persona H1); and the actions, with Remove visually apart from
  * Search again. The card owns no mutation of its search: Remove's request, the undo line and the re-read live in the
  * view.
  */

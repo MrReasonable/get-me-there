@@ -19,7 +19,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { buildContext } from '../src/context.js';
 import { createEngine } from '../src/engine.js';
-import { createFlightReader } from '../src/flightRead.js';
+import { createFlightReader, flightListFresh } from '../src/flightRead.js';
 import { createOrchestrator } from '../src/orchestrator.js';
 import { buildSnapshot } from '../src/snapshot.js';
 import { readRowOf } from '../src/stages/flightLists.js';
@@ -566,8 +566,14 @@ describe('readFlightList with the return leg (spec rev 56 §8.1)', () => {
     const s = flagged(flags);
     if (flags !== null) s.e.ctx.workerFlags.set('camoufox', flags);
     seed(s.e, lists);
+    // why: final review B-I3: the api's readNow reads the same rule as the read's own refusal, before the read
+    const def = s.e.ctx.repos.definitions.get(s.e.definition.id);
+    const newest = stored(s.e);
+    if (def === null || newest === undefined) throw new Error('seeded');
+    const freshBefore = flightListFresh(s.e.ctx, def, newest);
     const r = await s.reader.read(s.e.definition.id, PAIR);
     if (r.ok) await r.done;
+    expect(freshBefore).toBe(!r.ok && r.code === 'fresh');
     return r.ok ? 'read' : r.code;
   };
   const notSettled = () =>
@@ -684,6 +690,41 @@ describe('the engine contract: setWorkerFlags and flightPagesPlanned (spec rev 5
     expect(engine.flightPagesPlanned()).toBe(1);
     engine.setWorkerFlags('camoufox', { RETURN_SELECT_VERIFIED: true });
     expect(engine.flightPagesPlanned()).toBe(2);
+    engine.markClosed();
+  });
+  it('final review B-I3: flightListFresh is the read’s fresh rule over the engine’s own flags', () => {
+    const { e } = setup();
+    const engine = createEngine(e.deps, { rankedDatePairs: rankedPairs(5) });
+    e.ctx.repos.definitions.update(e.definition.id, {
+      constraints: { maxJourneyMinutes: 1500, maxStops: 1 },
+    });
+    e.ctx.repos.flightLists.insert(
+      readRowOf(
+        {
+          definitionId: e.definition.id,
+          executionId: null,
+          providerId: 'camoufox',
+          sourceKind: 'scraped-self',
+          cabin: 'economy',
+          origin: LHR,
+          destination: JFK,
+          ...PAIR,
+        },
+        { ...listAnswer(asIsoDateTime('2026-10-15T09:00:00.000Z')), fetchedAt: e.clock.now(), returns: null },
+      ),
+    );
+    const def = e.ctx.repos.definitions.get(e.definition.id);
+    const [newest] = e.ctx.repos.flightLists.newestPerCell(
+      e.definition.id,
+      [{ origin: LHR, destination: JFK, ...PAIR }],
+      'economy',
+      'GB',
+    );
+    if (def === null || newest === undefined) throw new Error('seeded');
+    // why: a young outbound-only list: read again while the flags are unread or plan returns, fresh once they do not
+    expect(engine.flightListFresh(def, newest)).toBe(false);
+    engine.setWorkerFlags('camoufox', { RETURN_SELECT_VERIFIED: false });
+    expect(engine.flightListFresh(def, newest)).toBe(true);
     engine.markClosed();
   });
 });

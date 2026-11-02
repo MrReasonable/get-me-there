@@ -69,6 +69,14 @@ function itineraryLine(c: { searched: number; selected: number; onDemand: number
 
 /** 21.7 prov-001: the head's clause when the first Back line shows a seller's stated price (spec rev 56 §11). */
 const SELLER_SHOWN = "; the first Back price is a seller's stated price";
+// final review B-M2 (ruling ui-006): the one lead phrase of a limit edit, on the board and the search's page block alike
+const LIMITS_CHANGED = 'your limits have changed since these return flights were read';
+// final review B-I3: what happens to a read that did not finish: tried again while a read would go now (the button
+// shown beside the note), else once the list is older than the refresh (two transient ends in a row: R-retry)
+const NEXT_READ = (readNow: boolean): string =>
+  readNow
+    ? 'tried again at the next search, or press Read flights for this date now'
+    : "read again once older than this search's refresh";
 
 export const COPY = {
   appTitle: 'get-me-there',
@@ -872,7 +880,7 @@ export const COPY = {
     // shown anyway, over the limits, and never leads
     pairingHeadNoReturnFits:
       'No return flight within your limits for this outbound; the cheapest pairing read is shown, over your limits:',
-    limitsChanged: 'your limits have changed since; the returns are read again at the next search',
+    limitsChanged: `${LIMITS_CHANGED}; they are read again at the next search`,
     noOutboundFits: (n: number) =>
       `none of the ${n} outbound ${noun(n, 'flight', 'flights')} read is within your limits; the cheapest one's returns are shown`,
     selectedMark: 'selected for the returns above',
@@ -918,13 +926,11 @@ export const COPY = {
     triedSomeWhenRead: (tried: number, within: number) =>
       `${tried} of the ${within} ${noun(within, 'outbound', 'outbounds')} within your limits when read were tried; other outbounds not tried`,
     // status notes, with what happens next (spec rev 56 §11 "Status notes")
-    returnTransient:
-      'return flights not read: tried again at the next search, or press Read flights for this date now',
+    returnTransient: (readNow: boolean) => `return flights not read: ${NEXT_READ(readNow)}`,
     returnSkipped: (why: string) => `return flights not read: ${why}`,
     returnNotVerified:
       'return flights are not yet read on this kind of machine; see the recording session in docs/setup.md',
-    bookingTransient:
-      'sellers not read: tried again at the next search, or press Read flights for this date now',
+    bookingTransient: (readNow: boolean) => `sellers not read: ${NEXT_READ(readNow)}`,
     bookingExpandFailed: 'sellers read before the list could be expanded; the cheapest may be missing',
     bookingSkipped: (why: string) => `sellers not read: ${why}`,
     bookingNotVerified: 'sellers are not yet read on this kind of machine',
@@ -1064,7 +1070,7 @@ export const COPY = {
     gridShowedAt: (when: string) => `· ${when}`,
     fromPrice: 'from',
     pairingBeneath: (ago: string) => `return flights read ${ago}, older than this search's refresh:`,
-    pairingOtherLimits: 'return flights read under earlier limits:',
+    pairingOtherLimits: `${LIMITS_CHANGED}:`,
     pairingRead: {
       'not-read': 'flights not read',
       'outbound-only': 'return leg not read',

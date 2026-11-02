@@ -23,7 +23,7 @@ import {
   type PlanMemo,
   withBlocked,
 } from './estimate.js';
-import { createFlightReader } from './flightRead.js';
+import { createFlightReader, flightListFresh } from './flightRead.js';
 import { lineKey } from './lines.js';
 import { runSystemJob } from './maintenance.js';
 import { SMTP_TIMEOUTS } from './notifiers/email.js';
@@ -227,6 +227,7 @@ export function createEngine(deps: EngineDeps, options: EngineOptions = {}): Eng
       const flags = ctx.workerFlags.get(FLIGHT_LIST_PROVIDER);
       return flags === null ? FLIGHT_LIST_PAGES_PER_PAIR_MAX : flightPagesPerPair(flags);
     },
+    flightListFresh: (def, newest) => flightListFresh(ctx, def, newest),
     estimateRemaining: (id) => {
       const e = ctx.repos.executions.get(id);
       if (e === null) throw new Error(`execution ${id} not found`);

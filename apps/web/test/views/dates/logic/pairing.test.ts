@@ -315,26 +315,31 @@ describe('returnNote (spec rev 56 §11 "Status notes", with what happens next)',
   it('each non-read status in words; no-outbound says nothing beyond the outbound line', () => {
     const next =
       'return flights not read: tried again at the next search, or press Read flights for this date now';
-    expect(returnNote(status('select-failed', 'select-outbound:not-found'), COPY)).toBe(next);
-    expect(returnNote(status('not-settled', 'returns:not-settled'), COPY)).toBe(next);
-    expect(returnNote(status('unrecognised', 'returns:shape'), COPY)).toBe(next);
-    expect(returnNote(status('not-verified'), COPY)).toBe(
+    expect(returnNote(status('select-failed', 'select-outbound:not-found'), COPY, true)).toBe(next);
+    expect(returnNote(status('not-settled', 'returns:not-settled'), COPY, true)).toBe(next);
+    expect(returnNote(status('unrecognised', 'returns:shape'), COPY, true)).toBe(next);
+    // why: final review B-I3: with no read to go now (two transient ends in a row wait for the refresh), the note says
+    // so and names no button
+    expect(returnNote(status('not-settled', 'returns:not-settled'), COPY, false)).toBe(
+      "return flights not read: read again once older than this search's refresh",
+    );
+    expect(returnNote(status('not-verified'), COPY, true)).toBe(
       'return flights are not yet read on this kind of machine; see the recording session in docs/setup.md',
     );
-    expect(returnNote(status('skipped', 'monthly-headroom'), COPY)).toBe(
+    expect(returnNote(status('skipped', 'monthly-headroom'), COPY, true)).toBe(
       'return flights not read: fewer than 2 browser pages left this month',
     );
-    expect(returnNote(status('skipped', 'spacing'), COPY)).toBe(
+    expect(returnNote(status('skipped', 'spacing'), COPY, true)).toBe(
       'return flights not read: the wait between pages ran past its time',
     );
-    expect(returnNote(status('skipped', 'something-new'), COPY)).toBe(
+    expect(returnNote(status('skipped', 'something-new'), COPY, true)).toBe(
       'return flights not read: a step before them was not made',
     );
-    expect(returnNote(status('no-outbound'), COPY)).toBeNull();
+    expect(returnNote(status('no-outbound'), COPY, true)).toBeNull();
   });
   it('the more-listed clause: a stated count above the options read; else the control alone; else nothing', () => {
     const note = (o: Parameters<typeof returnAttempt>[0]) =>
-      returnNote(flightList({ returns: returnRead({ attempts: [returnAttempt(o)] }) }), COPY);
+      returnNote(flightList({ returns: returnRead({ attempts: [returnAttempt(o)] }) }), COPY, true);
     expect(note({ resultsStated: 2 })).toBe('Google listed 2 return flights; this app read the first 1');
     expect(note({ resultsStated: 1, moreListed: true })).toBe(
       'Google listed more return flights than this app read',
@@ -350,7 +355,7 @@ describe('returnNote (spec rev 56 §11 "Status notes", with what happens next)',
     ).toBe(false);
   });
   it('21.7 code M6: nothing for a list read without a return phase (or stored before them): it shows as the outbound list', () => {
-    expect(returnNote(flightList(), COPY)).toBeNull();
+    expect(returnNote(flightList(), COPY, true)).toBeNull();
   });
   it("21.7 code M1 / prov-010: the read clauses of the attempt asked for (the shown pairing's), the last one by default", () => {
     const two = flightList({
@@ -366,8 +371,8 @@ describe('returnNote (spec rev 56 §11 "Status notes", with what happens next)',
         ],
       }),
     });
-    expect(returnNote(two, COPY, 0)).toBe('Google listed 12 return flights; this app read the first 2');
-    expect(returnNote(two, COPY)).toBe('1 return option unread');
+    expect(returnNote(two, COPY, true, 0)).toBe('Google listed 12 return flights; this app read the first 2');
+    expect(returnNote(two, COPY, true)).toBe('1 return option unread');
   });
   it('a read: the counts clause and the more-listed clause, each only when it applies; null for a clean read', () => {
     const counts = returnRead({
@@ -376,32 +381,40 @@ describe('returnNote (spec rev 56 §11 "Status notes", with what happens next)',
       ],
     });
     // why: 1 return + 2 unread + 1 for another cell = the first 4 options the view stated
-    expect(returnNote(flightList({ returns: counts }), COPY)).toBe(
+    expect(returnNote(flightList({ returns: counts }), COPY, true)).toBe(
       '2 return options unread, 1 for other airports or days · Google listed 12 return flights; this app read the first 4',
     );
     const more = returnRead({ attempts: [returnAttempt({ moreListed: true })] });
-    expect(returnNote(flightList({ returns: more }), COPY)).toBe(
+    expect(returnNote(flightList({ returns: more }), COPY, true)).toBe(
       'Google listed more return flights than this app read',
     );
     const unread = returnRead({ attempts: [returnAttempt({ optionsUnparsed: 2 })] });
-    expect(returnNote(flightList({ returns: unread }), COPY)).toBe('2 return options unread');
+    expect(returnNote(flightList({ returns: unread }), COPY, true)).toBe('2 return options unread');
     const other = returnRead({ attempts: [returnAttempt({ optionsOtherCell: 1 })] });
-    expect(returnNote(flightList({ returns: other }), COPY)).toBe(
+    expect(returnNote(flightList({ returns: other }), COPY, true)).toBe(
       '1 return option for other airports or days',
     );
-    expect(returnNote(flightList({ returns: returnRead() }), COPY)).toBeNull();
+    expect(returnNote(flightList({ returns: returnRead() }), COPY, true)).toBeNull();
     // the fixture's last attempt showed a "View more" control and stated no count
-    expect(returnNote(FIXTURE, COPY)).toBe('Google listed more return flights than this app read');
+    expect(returnNote(FIXTURE, COPY, true)).toBe('Google listed more return flights than this app read');
   });
 });
 
 describe('bookingNote (spec rev 56 §11: a booking read that did not finish, with what happens next)', () => {
-  const note = (over: Partial<BookingRead>) => bookingNote(withBooking(over), COPY);
+  const note = (over: Partial<BookingRead>) => bookingNote(withBooking(over), COPY, true);
   it('each of the seven non-read statuses in words; null for read and for no booking read', () => {
     const next = 'sellers not read: tried again at the next search, or press Read flights for this date now';
     expect(note({ status: 'select-failed', rule: 'select-return:not-found', offers: [] })).toBe(next);
     expect(note({ status: 'not-settled', rule: 'booking:not-settled', offers: [] })).toBe(next);
     expect(note({ status: 'unrecognised', rule: 'currency', offers: [] })).toBe(next);
+    // why: final review B-I3: with no read to go now, after the refresh and no button named
+    expect(
+      bookingNote(
+        withBooking({ status: 'not-settled', rule: 'booking:not-settled', offers: [] }),
+        COPY,
+        false,
+      ),
+    ).toBe("sellers not read: read again once older than this search's refresh");
     expect(note({ status: 'expand-failed', rule: 'more-options' })).toBe(
       'sellers read before the list could be expanded; the cheapest may be missing',
     );
@@ -425,19 +438,19 @@ describe('bookingNote (spec rev 56 §11: a booking read that did not finish, wit
     expect(note({ status: 'no-pairing', rule: null, ...SKIPPED })).toBe(
       'no return flight to read sellers for',
     );
-    expect(bookingNote(FIXTURE, COPY)).toBeNull();
-    expect(bookingNote(withReturns({ booking: null }), COPY)).toBeNull();
-    expect(bookingNote(flightList(), COPY)).toBeNull();
+    expect(bookingNote(FIXTURE, COPY, true)).toBeNull();
+    expect(bookingNote(withReturns({ booking: null }), COPY, true)).toBeNull();
+    expect(bookingNote(flightList(), COPY, true)).toBeNull();
   });
 });
 
 describe('readDoneWords: what the live region says when a pressed read lands (spec rev 56 §11)', () => {
   const dates = '14 → 24 Mar';
   it('"Flights read for 14 → 24 Mar, 2 return flights" with returns; the status note for a non-read status', () => {
-    expect(readDoneWords(FIXTURE, dates, COPY, PAIRING_LIMITS)).toBe(
+    expect(readDoneWords(FIXTURE, dates, COPY, PAIRING_LIMITS, true)).toBe(
       'Flights read for 14 → 24 Mar, 2 return flights',
     );
-    expect(readDoneWords(flightList({ returns: returnRead() }), dates, COPY, PAIRING_LIMITS)).toBe(
+    expect(readDoneWords(flightList({ returns: returnRead() }), dates, COPY, PAIRING_LIMITS, true)).toBe(
       'Flights read for 14 → 24 Mar, 1 return flight',
     );
     expect(
@@ -446,6 +459,7 @@ describe('readDoneWords: what the live region says when a pressed read lands (sp
         dates,
         COPY,
         PAIRING_LIMITS,
+        true,
       ),
     ).toBe(F.returnNotVerified);
     expect(
@@ -454,11 +468,14 @@ describe('readDoneWords: what the live region says when a pressed read lands (sp
         dates,
         COPY,
         PAIRING_LIMITS,
+        true,
       ),
-    ).toBe(F.returnTransient);
+    ).toBe(F.returnTransient(true));
   });
   it("21.7 code M1: the count is the shown pairing's attempt's returns, not the last attempt's", () => {
-    // why: both attempts over the stops limit; the cheapest of all is attempt 0's, which listed 3 returns
+    // why: both attempts over the stops limit they were read under (so a second was made); judged under today's limits,
+    // 2 changes, attempt 0's returns fit and are the cheapest, and it listed 3 (final review B-I2: with none fitting the
+    // last attempt's is shown, so the shown attempt differs from the last only after a limit edit)
     const over = (fromMinor: number) => listedReturn({ stops: 2, fromMinor });
     const list = flightList({
       flights: PAIRING_FIXTURE.flights,
@@ -469,18 +486,21 @@ describe('readDoneWords: what the live region says when a pressed read lands (sp
         ],
       }),
     });
-    expect(readDoneWords(list, dates, COPY, PAIRING_LIMITS)).toBe(
+    expect(readDoneWords(list, dates, COPY, { ...PAIRING_LIMITS, maxStops: 2 }, true)).toBe(
       'Flights read for 14 → 24 Mar, 3 return flights',
     );
   });
   it("WP20's words for a list with no return read, a no-outbound read and a failed list", () => {
-    expect(readDoneWords(flightList(), dates, COPY, PAIRING_LIMITS)).toBe('Flights read for 14 → 24 Mar');
+    expect(readDoneWords(flightList(), dates, COPY, PAIRING_LIMITS, true)).toBe(
+      'Flights read for 14 → 24 Mar',
+    );
     expect(
       readDoneWords(
         withReturns({ status: 'no-outbound', rule: null, attempts: [], booking: null }),
         dates,
         COPY,
         PAIRING_LIMITS,
+        true,
       ),
     ).toBe('Flights read for 14 → 24 Mar');
     expect(
@@ -489,6 +509,7 @@ describe('readDoneWords: what the live region says when a pressed read lands (sp
         dates,
         COPY,
         PAIRING_LIMITS,
+        true,
       ),
     ).toBe('Flights not read for 14 → 24 Mar');
   });

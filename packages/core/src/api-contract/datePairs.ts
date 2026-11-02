@@ -602,6 +602,34 @@ function refineListReason(v: DatePairsBody, reads: ReadonlyMap<number, PairingRe
     fail('listReasonExact', ['listReason', 'figure'], 'a reason exactly for each list-failed read');
 }
 
+/**
+ * Final review B-M5: what a pairing shown beneath its figure must say for its read (the api's `pairingReadOf` order):
+ * over the limits when it reads `over-limit`, and only then or under other limits (`within-other-limits`, B-M2); stale when it reads `within-older`, fresh when it reads
+ * `sellers-not-read` or `offers-incomplete`; a "from" price when no seller was read; an offer that is not complete when
+ * the offers may be incomplete. The column breached first, with its message, or null.
+ */
+function beneathBreach(
+  read: PairingRead,
+  p: { which: string; stale: unknown; isFrom: boolean; complete: boolean },
+): { column: 'which' | 'stale' | 'isFrom' | 'complete'; message: string } | null {
+  // why: B-M2: a list read under other limits reads within-other-limits whether or not it is over today's limits
+  const over = p.which === 'over-limit';
+  if (read === 'over-limit' ? !over : over && read !== 'within-other-limits')
+    return { column: 'which', message: 'a pairing beneath is over the limits exactly when it reads so' };
+  if (read === 'within-older' && p.stale === false)
+    return { column: 'stale', message: 'a pairing older than the refresh is stale' };
+  if ((read === 'sellers-not-read' || read === 'offers-incomplete') && p.stale !== false)
+    return { column: 'stale', message: 'a pairing within the refresh is fresh' };
+  if (read === 'sellers-not-read' && !p.isFrom)
+    return { column: 'isFrom', message: 'a pairing whose sellers were not read shows its from price' };
+  if (read === 'offers-incomplete' && (p.isFrom || p.complete))
+    return {
+      column: 'complete',
+      message: 'a pairing whose offers may be incomplete shows an offer not complete',
+    };
+  return null;
+}
+
 /** A provenance a flight list carries (spec rev 56 §6.9): the browser worker's own page. */
 const isFlightList = (p: Provenance | undefined): boolean =>
   p?.providerId === 'camoufox' && p.sourceKind === 'scraped-self';
@@ -704,6 +732,17 @@ function refinePairingGroups(v: DatePairsBody, fail: Fail): void {
         'a pairing entry is for a pairing figure or a pairing shown beneath',
       );
     if (basis === 'pairing') refineLeading(v, q, k, at, fail);
+    // why: final review B-M5: a pairing beneath says what its read says
+    const breach =
+      basis === 'pairing' || read === null
+        ? null
+        : beneathBreach(read, {
+            which: columnAt(q.which, k),
+            stale: columnAt(q.stale, k),
+            isFrom,
+            complete: columnAt(q.complete, k),
+          });
+    if (breach !== null) fail('pairingBeneath', ['pairing', breach.column, k], breach.message);
     // why: prov-001: a "from" price is shown when no offer was read for the pairing, so it counts none and is never
     // complete
     if (isFrom && columnAt(q.offersRead, k) !== 0)
@@ -736,6 +775,19 @@ function refinePairingGroups(v: DatePairsBody, fail: Fail): void {
   }
   if (inOrder && pairingFigures.some((j) => !named.has(j)))
     fail('pairingMissing', ['pairing', 'figure'], 'a pairing figure needs its pairing entry');
+  // why: final review B-M5: a "beneath" read names the pairing shown beneath it, so its entry is there
+  const r = v.pairingRead;
+  if (inOrder && reads !== null && r !== undefined)
+    for (let k = 0; k < r.figure.length; k += 1) {
+      const at = columnAt(r.figure, k);
+      const read = reads.get(at);
+      if (read !== undefined && BENEATH.has(read) && !named.has(at))
+        fail(
+          'beneathMissing',
+          ['pairingRead', 'code', k],
+          'a pairing read beneath its figure needs its pairing entry',
+        );
+    }
 }
 
 /** The sparse groups' rules: lengths, figure order and basis, the cheaper price below its figure's, indices. */
@@ -877,6 +929,9 @@ export const datePairFigureSchema = z
         ['pairing'],
         'a pairing for a pairing figure, or shown beneath a calendar or stale verified figure',
       );
+    // why: final review B-M5: a "beneath" read names the pairing shown beneath it
+    if (p === null && BENEATH.has(read))
+      fail(['pairing'], 'a pairing read beneath its figure needs its pairing');
     if (p === null) return;
     if (pairingBasis) {
       // why: prov-001: the leading pairing's own words, the board's `refineLeading` figure by figure
@@ -892,10 +947,14 @@ export const datePairFigureSchema = z
         fail(['pairing', 'pricePence'], "a pairing figure's price is its offer's");
       if (provenanceKey(p.provenance) !== provenanceKey(f.price.provenance) || !isFlightList(p.provenance))
         fail(['pairing', 'provenance'], "a pairing figure's provenance is its flight list's");
+    } else {
+      // why: 21.7 prov-012: a pairing beneath a figure is a flight list's too, as the board's group requires
+      if (!isFlightList(p.provenance))
+        fail(['pairing', 'provenance'], "a pairing's provenance is a flight list's");
+      // why: final review B-M5: as the board's group, figure by figure
+      const breach = beneathBreach(read, p);
+      if (breach !== null) fail(['pairing', breach.column], breach.message);
     }
-    // why: 21.7 prov-012: a pairing beneath a figure is a flight list's too, as the board's group requires
-    else if (!isFlightList(p.provenance))
-      fail(['pairing', 'provenance'], "a pairing's provenance is a flight list's");
     if (p.isFrom && p.offersRead !== 0) fail(['pairing', 'offersRead'], 'a from price reads no offer');
     if (p.isFrom && p.complete) fail(['pairing', 'complete'], 'a from price is never complete');
     if (p.isFrom === (p.seller !== null))

@@ -28,6 +28,7 @@ import {
   type SearchDefinition,
   type StopDetail,
 } from '@gmt/core';
+import type { NewestFlightList } from '@gmt/db';
 import type { EngineContext } from './context.js';
 import { errorText } from './errors.js';
 import { loadsBrowserPages } from './scheduler/browserWindow.js';
@@ -145,6 +146,24 @@ function freshPhaseOf(
   return { returnLimits: flightLimitsOf(def.constraints), booking: true };
 }
 
+/**
+ * Spec rev 56 §8.1 (final review B-I3): whether an on-demand read would refuse `newest` as `fresh` now: the step's
+ * reuse rule (`listReusable`) under the return phase this read would send (`freshPhaseOf`). The read's own refusal and
+ * the api's `readNow` (whether the read button is offered) read this one rule.
+ */
+export function flightListFresh(
+  ctx: EngineContext,
+  def: SearchDefinition,
+  newest: NewestFlightList,
+): boolean {
+  const phase = freshPhaseOf(ctx, def);
+  return listReusable(newestListOf(newest), ctx.clock.now(), refreshHoursOf(def, FLIGHT_LIST_PROVIDER), {
+    returns: phase.returnLimits !== undefined,
+    booking: phase.booking === true,
+    current: flightLimitsOf(def.constraints),
+  });
+}
+
 /** The reader the engine owns (one per engine): one read at a time, through the engine's one browser lease. */
 export function createFlightReader(ctx: EngineContext): FlightReader {
   let current: { mark: FlightReadMark; done: Promise<void>; abort: AbortController } | null = null;
@@ -259,15 +278,7 @@ export function createFlightReader(ctx: EngineContext): FlightReader {
       // worker's last reported flags, the whole phase while they are unread, outbound-only below 2 pages of the month,
       // 21.6 review M8), so a young transient, not-verified, other-limit or phase-less list is read; the date pair
       // departs after today here
-      const phase = freshPhaseOf(ctx, def);
-      const fresh =
-        newest !== undefined &&
-        listReusable(newestListOf(newest), ctx.clock.now(), refreshHoursOf(def, FLIGHT_LIST_PROVIDER), {
-          returns: phase.returnLimits !== undefined,
-          booking: phase.booking === true,
-          current: flightLimitsOf(def.constraints),
-        });
-      if (fresh) return { ok: false, code: 'fresh' };
+      if (newest !== undefined && flightListFresh(ctx, def, newest)) return { ok: false, code: 'fresh' };
       // Review Focus 2: the busy query and the lease in one synchronous turn
       if (current !== null || browserRunActive(ctx)) return { ok: false, code: 'busy' };
       const abort = new AbortController();

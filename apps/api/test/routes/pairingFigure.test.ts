@@ -344,6 +344,46 @@ describe('the pairing figure on the board (spec rev 56 §6.9)', () => {
     });
   });
 
+  // why: final review B-I2: two attempts with no return within the limits on either: the worker booked the last
+  // attempt's cheapest (bookingReturnOf); the board shows that pairing with its offer, over the limits, never leading
+  it('two attempts, none fitting: the booked pairing of the last attempt with its offer, over-limit', async () => {
+    const { x, def } = await setup();
+    const [first, second] = PAIRING_FIXTURE.returns.attempts;
+    const r0 = second?.returns[0];
+    if (first === undefined || second === undefined || r0 === undefined) throw new Error('fixture');
+    const over = (fromMinor: number, departsLocal: string) => ({ ...r0, departsLocal, stops: 2, fromMinor });
+    store(
+      x,
+      def,
+      A,
+      fixture(
+        {
+          attempt: 1,
+          returnIndex: 1,
+          offers: [
+            { seller: 'QQ Travel', fare: null, priceMinor: 127_000 },
+            { seller: 'QQ Fares', fare: null, priceMinor: 128_000 },
+          ],
+        },
+        { attempts: [first, { ...second, returns: [over(130_000, '12:00'), over(126_000, '15:30')] }] },
+      ),
+    );
+    expect(await figureA(x, def)).toMatchObject({
+      basis: 'calendar',
+      pairingRead: 'over-limit',
+      pairing: {
+        pricePence: 127_000,
+        fromPence: 126_000,
+        isFrom: false,
+        seller: 'QQ Travel',
+        offersRead: 2,
+        which: 'over-limit',
+        departOut: '07:15',
+        departBack: '15:30',
+      },
+    });
+  });
+
   it('no-outbound is no-pairing-read; not-verified or no return read is outbound-only; no list is not-read', async () => {
     const reads: Array<[ReturnRead | null, string]> = [
       [

@@ -836,14 +836,14 @@ describe('the worker read, through the real facts (V5)', () => {
 });
 
 // Spec rev 56 §8.1 "The plan": the Status view's worker read sets the engine's flags for camoufox (there is no boot
-// read); before any read the estimate words outbound-only and the flights response states the bound, 2 pages (prov-008:
-// the on-demand read's own preflight may report the flag and load 2).
+// read); before any read the estimate and the flights response both state the bound, out and back at 2 pages
+// (prov-008; final review B-M3: an estimate never understates), and the read then plans what the worker reported.
 describe("the Status read sets the worker's flags (spec rev 56 §8.1)", () => {
-  it('before any read pagesPlanned is 2 (the bound) and the estimate is outbound-only; after the read 2 and out and back', async () => {
+  it('before any read pagesPlanned is 2 and the estimate out and back (the bound); after a read with the flag off, 1 and outbound-only', async () => {
     stubWorker(() =>
       Response.json(
         workerBody({
-          flags: { FORM_VERIFIED: true, RETURN_SELECT_VERIFIED: true, BOOKING_SELECT_VERIFIED: true },
+          flags: { FORM_VERIFIED: true, RETURN_SELECT_VERIFIED: false, BOOKING_SELECT_VERIFIED: false },
         }),
       ),
     );
@@ -854,9 +854,9 @@ describe("the Status read sets the worker's flags (spec rev 56 §8.1)", () => {
       }),
     );
     expect(x.engine.flightPagesPlanned()).toBe(2);
-    expect(x.engine.estimate(def, x.clock.todayLondon()).flightLists?.returns).toBe(false);
-    expect((await get(x)).status).toBe(200);
-    expect(x.engine.flightPagesPlanned()).toBe(2);
     expect(x.engine.estimate(def, x.clock.todayLondon()).flightLists?.returns).toBe(true);
+    expect((await get(x)).status).toBe(200);
+    expect(x.engine.flightPagesPlanned()).toBe(1);
+    expect(x.engine.estimate(def, x.clock.todayLondon()).flightLists?.returns).toBe(false);
   });
 });

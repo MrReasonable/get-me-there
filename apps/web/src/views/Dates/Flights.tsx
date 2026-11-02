@@ -16,7 +16,6 @@ import {
   hasFlightsBlock,
   headLine,
   listNote,
-  offersRead,
   outcomeOf,
   pairKey,
   readButtonWords,
@@ -112,6 +111,8 @@ export function useBoardFlights(
   const apiReading = lists.answers.find((a) => a.reading !== null)?.reading ?? null;
   const readingKey = pressed?.key ?? (apiReading === null ? null : pairKey(apiReading));
   const pressedList = pressed === null ? null : (byKey.get(pressed.key)?.list ?? null);
+  // why: final review B-I3: the pressed pair's own readNow, so its live words say what happens next as its note does
+  const pressedReadNow = pressed === null ? false : (byKey.get(pressed.key)?.readNow ?? false);
   useEffect(() => setPolling(readingKey !== null), [readingKey]);
   useEffect(() => {
     if (pressed === null || pressed.acceptedAt === null) return;
@@ -124,11 +125,11 @@ export function useBoardFlights(
       // why: spec rev 56 §11: the read's returns in the live region ("…, 2 return flights"), or its status note's words
       words:
         landed && pressedList !== null
-          ? readDoneWords(pressedList, dates, COPY, limits)
+          ? readDoneWords(pressedList, dates, COPY, limits, pressedReadNow)
           : F.readNotDone(dates),
     });
     setPressed(null);
-  }, [pressed, pressedList, lists.fetchedAt, apiReading, limits]);
+  }, [pressed, pressedList, pressedReadNow, lists.fetchedAt, apiReading, limits]);
   const meta =
     newest === null
       ? null
@@ -241,11 +242,14 @@ function ListSection({
   list,
   limits,
   own,
+  readNow,
 }: {
   list: FlightList;
   limits: FlightLimits;
   /** The figure's own airport pair's list (its lower fare is said); false for another airport pair's list. */
   own: boolean;
+  /** Final review B-I3: whether a read of this date pair would go now (the api's `readNow`; false for another pair's). */
+  readNow: boolean;
 }) {
   const now = useNow();
   const [all, setAll] = useState(false);
@@ -261,7 +265,7 @@ function ListSection({
   const first = list.returns?.attempts[0];
   // why: spec rev 56 §11 "Status notes": a return read that did not finish says so after the outbound lines; a list
   // read without a return phase (or stored before them) shows as the outbound list, its limits line saying so
-  const status = list.returns === null || read ? null : returnNote(list, COPY);
+  const status = list.returns === null || read ? null : returnNote(list, COPY, readNow);
   const selectedOf = (f: (typeof list.flights)[number]): string | null => {
     if (p === null) return null;
     if (f === list.flights[p.outboundIndex]) return F.selectedMark;
@@ -286,7 +290,7 @@ function ListSection({
         </p>
       ) : null}
       {own ? <LowerFareLine list={list} /> : null}
-      {p !== null ? <PairingSection list={list} p={p} limits={limits} /> : null}
+      {p !== null ? <PairingSection list={list} p={p} limits={limits} readNow={readNow} /> : null}
       <ul id={outboundId} className="flights-list">
         {flights.map((f, i) => (
           // why: a list's flights have no id; their place in the shown order is stable for one list
@@ -411,17 +415,18 @@ export function FlightsBlock({
           {flights.said?.key === key ? flights.said.words : null}
         </p>
       ) : null}
-      {available && list !== null ? <ListSection list={list} limits={limits} own /> : null}
-      {available && list === null ? <p className="flights-line">{F.notReadYet}</p> : null}
-      {meta?.available && offersRead(list) ? (
-        <ReadButton pairOf={pairOf} flights={flights} meta={meta} />
+      {available && list !== null ? (
+        <ListSection list={list} limits={limits} own readNow={entry.readNow} />
       ) : null}
+      {available && list === null ? <p className="flights-line">{F.notReadYet}</p> : null}
+      {/* why: final review B-I3: the button shows exactly when the api says a read would go now (`readNow`) */}
+      {meta?.available && entry.readNow ? <ReadButton pairOf={pairOf} flights={flights} meta={meta} /> : null}
       {available && list === null && entry.listOtherPair !== null ? (
         <div className="flights-other">
           <p className="flights-head">
             {F.otherPair(entry.listOtherPair.origin, entry.listOtherPair.destination)}
           </p>
-          <ListSection list={entry.listOtherPair} limits={limits} own={false} />
+          <ListSection list={entry.listOtherPair} limits={limits} own={false} readNow={false} />
         </div>
       ) : null}
       {href !== null && entry.link !== null ? (

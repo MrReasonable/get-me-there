@@ -31,11 +31,19 @@ describe('budgetFit with the return leg (spec rev 56 §8.1, §8.2)', () => {
   });
 
   it('without the return flag the month line counts 1 page a pair (10 a run)', () => {
-    const e = scheduled(15, '0 5 * * 1', null);
+    const e = scheduled(15, '0 5 * * 1', { RETURN_SELECT_VERIFIED: false });
     const fit = budgetFitFor(e.ctx, e.definition, e.definition.id);
     expect(line(fit, 'execution-free-calls')).toBe(15 + 10);
     const runs = runsPerMonth('0 5 * * 1', 'Europe/London', new Date(T0));
     expect(line(fit, 'provider-month:camoufox')).toBe(Math.ceil(runs * (15 + 10)));
+  });
+
+  // why: final review B-M3: flags not yet read count the bound, as the read button does (prov-008)
+  it('with the flags unread the month line counts the page bound (20 a run)', () => {
+    const e = scheduled(15, '0 5 * * 1', null);
+    const fit = budgetFitFor(e.ctx, e.definition, e.definition.id);
+    const runs = runsPerMonth('0 5 * * 1', 'Europe/London', new Date(T0));
+    expect(line(fit, 'provider-month:camoufox')).toBe(Math.ceil(runs * (15 + 20)));
   });
 
   it('cost-r3-001: two daily 168 h schedules of 100 grid pages each plan 600 pages a month and both fit 1,500', () => {

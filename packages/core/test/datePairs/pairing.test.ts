@@ -4,6 +4,7 @@ import {
   cheapestOffer,
   cheapestPairing,
   FIGURE_BASES,
+  listFresh,
   PAIRING_READ,
   type PairingCandidate,
   pairingLeads,
@@ -222,15 +223,38 @@ describe('cheapestPairing (spec rev 56 §6.9: the cheapest fitting pairing over 
   });
 
   it('a tie across attempts goes to attempt 0; a three-way tie to the lowest index', () => {
-    const limits = { ...NO_LIMITS, maxStops: 0 };
+    // why: read under maxStops 0 (so a second attempt was made), judged under no limits (so both fit, and tie)
     const over = back(1180, { stops: 1 });
-    const r = readOf(limits, [attempt(0, [over]), attempt(1, [over])]);
-    expect(cheapestPairing(r, [out(500), out(520)], limits)).toMatchObject({ attempt: 0, returnIndex: 0 });
+    const r = readOf({ ...NO_LIMITS, maxStops: 0 }, [attempt(0, [over]), attempt(1, [over])]);
+    expect(cheapestPairing(r, [out(500), out(520)], NO_LIMITS)).toMatchObject({ attempt: 0, returnIndex: 0 });
     const three = readOf(NO_LIMITS, [attempt(0, [back(1250), back(1180), back(1180), back(1180)])]);
     expect(cheapestPairing(three, [out(500)], NO_LIMITS)).toMatchObject({ returnIndex: 1 });
     expect(bookingReturnOf(three, [out(500)])).toEqual({ attempt: 0, returnIndex: 1 });
   });
 
+  // why: final review B-I2: with no fitting return on either outbound, the pairing shown is the one whose sellers were
+  // read (the worker books the last attempt's cheapest, bookingReturnOf), never attempt 0's cheaper "from" return
+  it('two attempts, no return fitting on either: the last attempt’s cheapest, the one bookingReturnOf booked', () => {
+    const limits = { ...NO_LIMITS, maxStops: 0 };
+    const r = readOf(limits, [
+      attempt(0, [back(1140, { stops: 1 }), back(1160, { stops: 1 })]),
+      attempt(1, [back(1250, { stops: 1 }), back(1210, { stops: 2 })]),
+    ]);
+    const flights = [out(500), out(520)];
+    expect(cheapestPairing(r, flights, limits)).toEqual({
+      attempt: 1,
+      returnIndex: 1,
+      fromMinor: 121_000,
+      outboundFits: true,
+      returnFits: false,
+    });
+    expect(bookingReturnOf(r, flights)).toEqual({ attempt: 1, returnIndex: 1 });
+  });
+  it('two attempts, none fitting, the last listing no return: the cheapest of all', () => {
+    const limits = { ...NO_LIMITS, maxStops: 0 };
+    const r = readOf(limits, [attempt(0, [back(1140, { stops: 1 })]), attempt(1, [])]);
+    expect(cheapestPairing(r, [out(500), out(520)], limits)).toMatchObject({ attempt: 0, returnIndex: 0 });
+  });
   it('an outbound index past the flights is a caller error (the contract refuses it)', () => {
     const r = readOf(NO_LIMITS, [attempt(1, [back(1180)])]);
     expect(() => cheapestPairing(r, [out(500)], NO_LIMITS)).toThrow(
@@ -360,7 +384,30 @@ describe('pairingLeads and pairingReadOf (spec rev 56 §6.9 "When it leads"; R-l
               expect(pairingReadOf(c) === 'within').toBe(want);
             }
   });
+  // why: final review B-I1: the web's block reads the same predicate from the facts it holds (an offer of its own shape)
+  it('pairingLeads reads only the five facts, so the block and the api share it', () => {
+    const facts = {
+      fits: true,
+      fresh: true,
+      underCurrentLimits: true,
+      offer: { seller: 'QQ Travel' },
+      complete: true,
+    };
+    expect(pairingLeads(facts)).toBe(true);
+    expect(pairingLeads({ ...facts, offer: null })).toBe(false);
+    expect(pairingLeads({ ...facts, fresh: false })).toBe(false);
+  });
+  // why: final review B-M1: one elapsed-time rule for the list's stale mark and the pairing's freshness
+  it('listFresh: within the refresh by elapsed milliseconds, never whole hours', () => {
+    const at = asIsoDateTime('2027-03-01T00:00:00.000Z');
+    expect(listFresh(at, asIsoDateTime('2027-03-08T00:00:00.000Z'), 168)).toBe(true);
+    expect(listFresh(at, asIsoDateTime('2027-03-08T00:00:00.001Z'), 168)).toBe(false);
+    expect(listFresh(at, asIsoDateTime('2027-03-08T00:30:00.000Z'), 168)).toBe(false);
+  });
   it("names why it does not lead, in the spec's order", () => {
+    // why: final review B-M2: a list read under other limits says so first, over today's limits or not, as the search's
+    // page block does after a limit edit
+    expect(pairingReadOf(candidate({ underCurrentLimits: false, fits: false }))).toBe('within-other-limits');
     expect(pairingReadOf(candidate({ fits: false, fresh: false, offer: null }))).toBe('over-limit');
     expect(pairingReadOf(candidate({ underCurrentLimits: false, fresh: false }))).toBe('within-other-limits');
     expect(pairingReadOf(candidate({ fresh: false, offer: null }))).toBe('within-older');

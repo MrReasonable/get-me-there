@@ -105,7 +105,18 @@ const cardCheapestSchema = z
   .refine((c) => !c.truncated || c.basis === 'calendar', {
     message: 'truncated is for calendar figures',
     path: ['truncated'],
-  });
+  })
+  // why: final review B-M5: a card's pairing figure is the board's leading one (refineLeading): fresh, from a flight list
+  .refine((c) => c.basis !== 'pairing' || c.stale === false, {
+    message: 'a pairing figure is fresh',
+    path: ['stale'],
+  })
+  .refine(
+    (c) =>
+      c.basis !== 'pairing' ||
+      (c.provenance.providerId === 'camoufox' && c.provenance.sourceKind === 'scraped-self'),
+    { message: "a pairing figure's provenance is its flight list's", path: ['provenance'] },
+  );
 
 /**
  * Spec revision 55 §10 `GET /definitions/cards`: one card of the first screen. `schedule` is non-null only when the

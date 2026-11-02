@@ -127,7 +127,7 @@ function flightPairsWanted(
     refreshHoursOf(snapshot, FLIGHT_LIST_PROVIDER),
     today,
     {
-      ...returnPhaseOf(ctx, snapshot, ranked.length),
+      ...estimatePhaseOf(ctx, snapshot, ranked.length),
       current: flightLimitsOf(snapshot.constraints),
     },
   ).reused;
@@ -138,6 +138,18 @@ function flightPairsWanted(
 interface FlightPhase {
   returns: boolean;
   booking: boolean;
+}
+
+/**
+ * The return phase an estimate counts (final review B-M3; prov-008, 21.6 N2: an estimate never understates): the
+ * step's own (`returnPhaseOf`) once the worker's flags are read; while they are unread (no preflight since the app
+ * started) the bound, the return phase with the booking read, since the run's own discovery preflight may set them
+ * and the step then plans 2 pages a pair, within the run's allowance as ever.
+ */
+function estimatePhaseOf(ctx: EngineContext, snapshot: DefinitionSnapshot, pairs: number): FlightPhase {
+  if (ctx.workerFlags.get(FLIGHT_LIST_PROVIDER) !== null) return returnPhaseOf(ctx, snapshot, pairs);
+  const returns = (snapshot.budget.flightListPages ?? 0) >= pairs * FLIGHT_LIST_PAGES_PER_PAIR_MAX;
+  return { returns, booking: returns };
 }
 
 /**
@@ -164,7 +176,8 @@ function perPair(spacing: number, booking: boolean) {
  * pairs the step would read; `pairs` the least of it and the run's free calls left after every free line (less what the
  * execution has already spent, on a resume; free calls count requests, one a pair). The monthly pages left after the
  * grid plan (other schedules' reservations set aside, as the pre-start check reads it), M, cut them: with the return
- * leg `min(pairs, floor(M / 2))` pairs out and back and the rest outbound-only up to what M allows (ruling D6); without
+ * leg and fewer than 2 pages a pair, up to `min(pairs, M)` pairs, all but the last out and back (`M − 1`) and the rest
+ * outbound-only, at most M pages (ruling D6 as final review B-M4 revised it); without
  * it `min(pairs, M)` outbound-only. `pages` and `seconds` are the typical figures (1.5 pages and 245 s a pair out and
  * back at the defaults; 1 page and spacing + 40 s outbound-only), `pagesMax` and `secondsMax` the bound (2 pages and
  * 300 s). The assumptions say so, and name a cap that binds, compared in pairs.
@@ -206,19 +219,24 @@ function withFlights(
   const freeLeft = Math.max(0, snapshot.budget.maxFreeCalls - freeUsed - freeLines);
   const pairs = Math.max(0, Math.min(wanted, freeLeft));
   const per = perPair(ctx.limitsOf(FLIGHT_LIST_PROVIDER).minSpacingSeconds ?? 0, phase.booking);
-  // why: ruling D6 — the month's pages first hold whole pairs out and back (2 pages at most each), then the rest of the
-  // pairs outbound-only (1 page each) as far as the pages left allow
-  const outAndBack = phase.returns
-    ? Math.min(pairs, Math.floor(monthLeft / FLIGHT_LIST_PAGES_PER_PAIR_MAX))
-    : 0;
-  const outbound = Math.max(
-    0,
-    Math.min(pairs - outAndBack, monthLeft - FLIGHT_LIST_PAGES_PER_PAIR_MAX * outAndBack),
-  );
+  // why: the month cuts the return leg when its pages cannot hold every pair at its worst case (2 pages)
+  const monthCutsReturns = phase.returns && Math.floor(monthLeft / FLIGHT_LIST_PAGES_PER_PAIR_MAX) < pairs;
+  // why: final review B-M4 (ruling D6 revised): the step sends a return phase while the month leaves 2 pages, and a
+  // phase that needs no second outbound loads 1, so M pages left read up to M date pairs: every one out and back while
+  // at least 2 pages remain before it (all but the last when M pairs are read), the rest outbound-only; the pages stay
+  // at most M. With the month holding every pair at 2 pages, every pair goes out and back; without the return leg,
+  // outbound-only as far as the pages allow
+  const upTo = Math.min(pairs, monthLeft);
+  const outAndBack = !phase.returns
+    ? 0
+    : monthCutsReturns
+      ? Math.min(upTo, Math.max(0, monthLeft - 1))
+      : pairs;
+  const outbound = !phase.returns ? upTo : monthCutsReturns ? upTo - outAndBack : 0;
   const planned = outAndBack + outbound;
-  const pages = Math.ceil(outAndBack * (1 + RETURN_SECOND_OUTBOUND_RATE)) + outbound;
+  const pagesMax = Math.min(outAndBack * FLIGHT_LIST_PAGES_PER_PAIR_MAX + outbound, monthLeft);
+  const pages = Math.min(Math.ceil(outAndBack * (1 + RETURN_SECOND_OUTBOUND_RATE)) + outbound, pagesMax);
   const seconds = Math.ceil(outAndBack * per.typical + outbound * per.outbound);
-  const pagesMax = outAndBack * FLIGHT_LIST_PAGES_PER_PAIR_MAX + outbound;
   const secondsMax = Math.ceil(outAndBack * per.bound + outbound * per.outbound);
   // why: no "+ flights" clause when no date pair is read (20.9 review finding 6); a cap that cut the pairs, to none or
   // to some, is still named, the monthly page cap first when both would (it is the browser worker's)
@@ -232,7 +250,7 @@ function withFlights(
         : [`${FLIGHT_NOTE} for up to ${datePairs(planned)}, about ${minutes(seconds)}`];
   // why: without returns, the old order (21.6 review M4): the month is named when it cut the pairs and it is no larger
   // than the free calls left, a tie included
-  const monthCut = phase.returns ? outAndBack < pairs : planned < wanted && monthLeft <= freeLeft;
+  const monthCut = phase.returns ? monthCutsReturns : planned < wanted && monthLeft <= freeLeft;
   if (monthCut) {
     const which =
       outAndBack === 0
@@ -261,7 +279,8 @@ function withFlights(
  * flight line plans the return leg: one return-phase request's `flightRequestSeconds` (780 s with the booking read,
  * 600 s without, at the defaults), so the last pairs of a typical run are not refused at the gate; 0 otherwise. The
  * booking read is the one the line was estimated with (21.6 review M2): a stored plan's (less what a transient end
- * stopped), as a resume's remaining estimate reads it, else the worker's flags, as a fresh estimate reads them.
+ * stopped), as a resume's remaining estimate reads it, else the worker's flags, as a fresh estimate reads them (the
+ * booking read while they are unread: final review B-M3).
  */
 export function flightWindowMarginSeconds(
   ctx: EngineContext,
@@ -272,9 +291,11 @@ export function flightWindowMarginSeconds(
   if (f?.returns !== true || (f.pairs ?? f.pages) === 0) return 0;
   const seconds = ctx.limitsOf(FLIGHT_LIST_PROVIDER).flightRequestSeconds;
   if (seconds === null) return 0;
+  // why: final review B-M3: flags not yet read count as the bound (the booking read), as the estimate's own line does
+  const flags = ctx.workerFlags.get(FLIGHT_LIST_PROVIDER);
   const booking =
     plan === null
-      ? ctx.workerFlags.get(FLIGHT_LIST_PROVIDER)?.BOOKING_SELECT_VERIFIED === true
+      ? flags === null || flags.BOOKING_SELECT_VERIFIED === true
       : plan.booking && plan.bookingStopped === null;
   return booking ? seconds.booking : seconds.returnsOnly;
 }
@@ -579,7 +600,7 @@ export function estimateStart(
     definitionId,
     wanted,
     null,
-    returnPhaseOf(ctx, snapshot, candidates),
+    estimatePhaseOf(ctx, snapshot, candidates),
   );
 }
 
@@ -636,7 +657,7 @@ export function estimateRemainingFor(ctx: EngineContext, exec: Execution, manual
   const done = new Set(ctx.repos.flightLists.cellsOfExecution(exec.id).map(cellKeyString));
   if (plan === null) {
     const { wanted, candidates } = flightPairsWanted(ctx, snapshot, exec.definitionId);
-    const phase = returnPhaseOf(ctx, snapshot, candidates);
+    const phase = estimatePhaseOf(ctx, snapshot, candidates);
     return withFlights(ctx, est, snapshot, exec.definitionId, wanted, exec.id, phase);
   }
   const wanted = plan.cells.filter((c) => !done.has(cellKeyString(c)) && c.departureDate > today).length;

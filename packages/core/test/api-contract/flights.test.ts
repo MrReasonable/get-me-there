@@ -74,6 +74,7 @@ const pair = (link: unknown, l: unknown = list()) => ({
   link,
   list: l,
   listOtherPair: null,
+  readNow: false,
 });
 const response = (pairs: unknown[]) => ({
   available: true,
@@ -251,6 +252,18 @@ describe("flightListSchema's returns and the response's pagesPlanned (spec rev 5
     expect(flightListSchema.safeParse(list({ returns: returns(1) })).success).toBe(false);
     expect(flightListSchema.safeParse(list({ returns: undefined })).success).toBe(false);
     expect(flightListSchema.safeParse(list({ returns: { ...returns(0), attempts: [] } })).success).toBe(
+      false,
+    );
+  });
+  // why: final review B-I3: whether a read now would go, per date pair (the read button shows exactly then)
+  it('each pair states readNow, a boolean, required', () => {
+    expect(flightListsResponseSchema.safeParse(response([pair(LINK)])).success).toBe(true);
+    expect(flightListsResponseSchema.safeParse(response([{ ...pair(LINK), readNow: true }])).success).toBe(
+      true,
+    );
+    const { readNow: _r, ...without } = pair(LINK);
+    expect(flightListsResponseSchema.safeParse(response([without])).success).toBe(false);
+    expect(flightListsResponseSchema.safeParse(response([{ ...pair(LINK), readNow: 'yes' }])).success).toBe(
       false,
     );
   });

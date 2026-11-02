@@ -270,17 +270,6 @@ export function datesShort(departure: string, back: string, c: FlightCopy): stri
   return c.datesShort(month !== undefined && to.endsWith(` ${month}`) ? (day ?? from) : from, to);
 }
 
-/** The failed-list reasons that offer no read again (ruling R-failed-read): a monthly or per-run limit stopped it. */
-const NO_READ_AGAIN: ReadonlySet<string> = new Set(['monthly-cap', 'execution-cap']);
-
-/**
- * Whether the block offers "Read flights for this date" (spec rev 55 §11; ruling R-failed-read): for a date pair with
- * no list of its own, and for a failed list, unless a monthly or per-run limit stopped it (its note says the limit).
- */
-export function offersRead(list: FlightList | null): boolean {
-  return list === null || (list.status === 'failed' && !NO_READ_AGAIN.has(list.reason ?? ''));
-}
-
 /**
  * Whether a date pair has a flights block (spec rev 55 §11): it was answered, and either flight lists are available
  * here or it has a search link to show (every date pair row has its link, whatever the availability).

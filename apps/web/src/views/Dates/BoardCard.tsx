@@ -188,7 +188,7 @@ export function PairingFigureLines({ figure, settings }: { figure: DatePairFigur
  * read: …", "return flights read 9d ago, older than this search's refresh:", …) and the pairing that does not lead,
  * through PriceCell with its own age: an offer with its seller ("a cheaper seller may not have been read" when its offers
  * may be incomplete; an over-limit pairing's offer too, as the search's page block shows it: 21.7 code I3), or a "from"
- * price ("from £1,180 · sellers not read" when no seller was read for it); "Google listed from £1,180" beneath an offer
+ * price, always with "· sellers not read" ("from £1,180 · sellers not read": final review B-M2); "Google listed from £1,180" beneath an offer
  * that differs from its return's "from" price (21.7 code M12, prov-008). Nothing for a pairing figure or a fresh
  * verified one; "flights not read" by `lists` (21.7 prov-004), "loading flights" while the request is pending.
  */
@@ -206,12 +206,11 @@ export function FlightRead({ figure, lists }: { figure: DatePairFigure; lists: L
             <>
               <span>{D.fromPrice}</span>
               <PairingPrice pairing={q} pence={q.pricePence} />
-              {figure.pairingRead === 'sellers-not-read' ? (
-                <span>
-                  {F.separator}
-                  {F.sellersNotRead}
-                </span>
-              ) : null}
+              {/* why: final review B-M2: every "from" price says no seller was read for it, as the block's Back line */}
+              <span>
+                {F.separator}
+                {F.sellersNotRead}
+              </span>
             </>
           ) : (
             <>

@@ -163,6 +163,17 @@ export function flightList(over: Partial<FlightListIn> = {}): z.output<typeof ap
 export const failedList = (reason: FlightListIn['reason'], over: Partial<FlightListIn> = {}) =>
   flightList({ status: 'failed', reason, listed: null, minMinor: null, flights: [], ...over });
 
+/**
+ * Whether a read would go now when the test does not say (final review B-I3: the api's `readNow`): a date pair with no
+ * list, or a failed one that no monthly or per-run limit stopped, as the read button showed before `readNow`.
+ */
+function readNowOf(list: FlightPairIn['list']): boolean {
+  return (
+    list === null ||
+    (list.status === 'failed' && list.reason !== 'monthly-cap' && list.reason !== 'execution-cap')
+  );
+}
+
 /** One asked date pair's entry: its figure's airports, its search link, its list and else another pair's list. */
 export function flightPair(
   departureDate: string,
@@ -181,6 +192,7 @@ export function flightPair(
     },
     list: null,
     listOtherPair: null,
+    readNow: readNowOf(over.list ?? null),
     ...over,
   };
 }

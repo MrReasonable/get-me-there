@@ -378,6 +378,8 @@ test('at 375px a search’s page with a flights block does not scroll sideways @
           returns: null,
         },
         listOtherPair: null,
+        // why: final review B-I3: required; a young read list is not read again on demand
+        readNow: false,
       };
     });
     return route.fulfill({

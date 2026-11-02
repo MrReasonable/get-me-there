@@ -68,7 +68,8 @@ interface Entry extends Pairing {
 /**
  * The pairing of `attempts` (each tagged with its index in the read's attempts, `at`): the first by `compareReturns`
  * (the "from" price, then duration, stops and departure) among those whose outbound and return both fit; with none
- * fitting, the first of all by the same order. Null with no return.
+ * fitting, the first by the same order of the last attempt's returns (the view the worker booked on: final review
+ * B-I2), or of all when the last attempt listed none. Null with no return.
  *
  * why: one scan in attempt then index order keeps the first of equals (a strict `<` only), so a tie goes to the earlier
  * attempt, then the lower index, without a tie-break that could never decide (review finding 2)
@@ -96,8 +97,13 @@ function pick(
       });
   }
   const fitting = entries.filter((e) => e.outboundFits && e.returnFits);
+  // why: final review B-I2: with nothing fitting, the pairing shown is the one whose sellers were read (the worker's
+  // bookingReturnOf, over the last attempt), so its offers are kept and shown over the limits, never attempt 0's
+  // cheaper "from" return with "sellers not read"
+  const lastAt = attempts.at(-1)?.at;
+  const last = entries.filter((e) => e.attempt === lastAt);
   let best: Entry | undefined;
-  for (const e of fitting.length > 0 ? fitting : entries)
+  for (const e of fitting.length > 0 ? fitting : last.length > 0 ? last : entries)
     if (best === undefined || compareReturns(e.ret, best.ret) < 0) best = e;
   if (best === undefined) return null;
   return {
@@ -111,8 +117,9 @@ function pick(
 
 /**
  * Spec rev 56 §6.9 "Which pairing": over every attempt's returns, the cheapest by `fromMinor`, then `compareReturns`,
- * then attempt, then index, among those whose outbound and return both fit `l`; with none fitting, the cheapest of all
- * by the same order with its fits flags; null with no return at all. Judged under the limits passed (the current
+ * then attempt, then index, among those whose outbound and return both fit `l`; with none fitting, the cheapest of the
+ * last attempt's returns (the one the worker booked; of all when it listed none) by the same order with its fits flags;
+ * null with no return at all. Judged under the limits passed (the current
  * search's); the stored limits decide reuse and whether the pairing may lead.
  */
 export function cheapestPairing(
@@ -172,25 +179,47 @@ export interface PairingCandidate {
   executionId: string | null;
 }
 
+/** The hour in milliseconds. */
+const HOUR_MS = 3_600_000;
+
+/**
+ * Spec rev 56 §6.9, §10 (prov-007; final review B-M1): whether a flight list read at `fetchedAt` is within the search's
+ * camoufox refresh at `now`, judged on the elapsed milliseconds (never whole hours, which `hoursSince` floors for
+ * display), as the engine's reuse rule is. The list's stale mark and the pairing's freshness both read it.
+ */
+export function listFresh(fetchedAt: IsoDateTime, now: IsoDateTime, refreshHours: number): boolean {
+  return Date.parse(now) - Date.parse(fetchedAt) <= refreshHours * HOUR_MS;
+}
+
+/**
+ * The facts the lead rule reads (final review B-I1): a `PairingCandidate`'s, or the search page's own (the web's
+ * pairing with an offer of its own shape), so the board and the block share one predicate.
+ */
+export type LeadFacts = Pick<PairingCandidate, 'fits' | 'fresh' | 'underCurrentLimits' | 'complete'> & {
+  offer: object | null;
+};
+
 /**
  * R-lead with R-sellers (spec rev 56 §6.9 "When it leads"): the pairing leads its date pair exactly when it fits the
  * current limits, the list is fresh and was read under the current limits, and a booking read of it kept offers that
  * are complete (A8: an expand-failed booking only when its cheapest offer equals the return's "from" price, which
- * `offersComplete` decides).
+ * `offersComplete` decides). The api's figure and the search page's emphasis both read it (final review B-I1).
  */
-export function pairingLeads(p: PairingCandidate): boolean {
+export function pairingLeads(p: LeadFacts): boolean {
   return p.fits && p.fresh && p.underCurrentLimits && p.offer !== null && p.complete;
 }
 
 /**
- * Spec rev 56 §6.9 (the 21.1 concern-2 ruling): the candidate-based `pairingRead`, the first that holds in the spec's
- * order: `over-limit`, `within-other-limits`, `within-older`, `sellers-not-read`, `offers-incomplete`, else `within`
- * (exactly when `pairingLeads`). The three list-based values (`not-read`, `outbound-only`, `no-pairing-read`) come before
- * these and are the api's to tell apart, from the newest list, where there is no candidate.
+ * Spec rev 56 §6.9 (the 21.1 concern-2 ruling; final review B-M2): the candidate-based `pairingRead`, the first that
+ * holds in the spec's order: `within-other-limits` (read under other limits, over today's or not: the board then words
+ * the limit edit as the search's page block does), `over-limit`, `within-older`, `sellers-not-read`,
+ * `offers-incomplete`, else `within` (exactly when `pairingLeads`). The three list-based values (`not-read`,
+ * `outbound-only`, `no-pairing-read`) come before these and are the api's to tell apart, from the newest list, where
+ * there is no candidate.
  */
 export function pairingReadOf(p: PairingCandidate): PairingRead {
-  if (!p.fits) return 'over-limit';
   if (!p.underCurrentLimits) return 'within-other-limits';
+  if (!p.fits) return 'over-limit';
   if (!p.fresh) return 'within-older';
   if (p.offer === null) return 'sellers-not-read';
   if (!p.complete) return 'offers-incomplete';

@@ -14,6 +14,7 @@ import {
   type IsoDate,
   type IsoDateTime,
   isoDateSchema,
+  listFresh,
   MAX_FLIGHT_LIST_PAIRS,
   type SearchDefinition,
 } from '@gmt/core';
@@ -75,8 +76,9 @@ export function toFlightList(l: StoredFlightList, now: IsoDateTime, refreshHours
     returnDate: l.returnDate,
     fetchedAt: l.fetchedAt,
     ageHours,
-    // why: spec rev 55 §10 — the stale mark, never a bare true; a list is judged against the camoufox refresh only
-    stale: ageHours > refreshHours ? 'refresh' : false,
+    // why: spec rev 55 §10 — the stale mark, never a bare true; a list is judged against the camoufox refresh only, on
+    // the elapsed milliseconds (final review B-M1: `listFresh`, the pairing's own rule, never the whole hours shown)
+    stale: listFresh(l.fetchedAt, now, refreshHours) ? false : 'refresh',
     provenance: flightListProvenance(l),
     status: l.status,
     reason: l.reason,
@@ -112,6 +114,12 @@ function monthlyPagesLeft(ports: Ports): number | null {
   const u = ports.budget.usage({ kind: 'provider-month', providerId: FLIGHT_LIST_PROVIDER });
   return u.cap === null ? null : Math.max(0, u.cap - u.calls);
 }
+
+/**
+ * The failed-list reasons that offer no read again (ruling R-failed-read): a monthly or per-run limit stopped it, and
+ * the block's note says the limit instead.
+ */
+const NO_READ_AGAIN: ReadonlySet<string> = new Set(['monthly-cap', 'execution-cap']);
 
 /** The searches whose one-run pages are kept (a page polls one search; a few tabs, a few searches). */
 const RUN_PAGES_KEPT = 32;
@@ -162,9 +170,10 @@ export function assembleFlightLists(
   def: SearchDefinition,
   pairs: readonly DatePairAsk[],
   ports: Ports,
-  engine: Pick<Engine, 'flightReadInFlight' | 'estimate' | 'flightPagesPlanned'>,
+  engine: Pick<Engine, 'flightReadInFlight' | 'estimate' | 'flightPagesPlanned' | 'flightListFresh'>,
 ): FlightListsResponse {
   const now = ports.clock.now();
+  const today = ports.clock.todayLondon();
   const space = currentSpace(def, ports.clock.todayLondon());
   const refreshHours = refreshHoursOf(def, FLIGHT_LIST_PROVIDER);
   const unavailable = flightReadUnavailable(
@@ -218,8 +227,8 @@ export function assembleFlightLists(
     // why: ruling R-pages: one run's browser pages from the search's own estimate (its camoufox lines and flight pages),
     // asked only when flight lists can be read here, so a search without the worker estimates nothing more
     runPages: unavailable === null ? runPagesOf(def, ports, engine, browserWindowStart(ports)) : null,
-    // why: ruling D3: the pages one read plans (2 with the worker's RETURN_SELECT_VERIFIED, else 1, none read yet: 1);
-    // the read button and its refusal use it, never a hard number
+    // why: ruling D3: the pages one read plans (2 with the worker's RETURN_SELECT_VERIFIED, else 1; 2 while none is
+    // read yet, prov-008); the read button and its refusal use it, never a hard number
     pagesPlanned: engine.flightPagesPlanned(),
     reading:
       mark === null || mark.definitionId !== def.id
@@ -243,6 +252,17 @@ export function assembleFlightLists(
         link,
         list: list === undefined ? null : toFlightList(list, now, refreshHours),
         listOtherPair: elsewhere === undefined ? null : toFlightList(elsewhere, now, refreshHours),
+        // why: final review B-I3: the read button and the status notes' "what happens next" follow the on-demand read's
+        // own rule (`flightListFresh`: the step's reuse rule under the phase the read would send), never a second one
+        readNow:
+          unavailable === null &&
+          c !== null &&
+          c.departureDate > today &&
+          (list === undefined
+            ? true
+            : list.status === 'failed'
+              ? !NO_READ_AGAIN.has(list.reason ?? '')
+              : !engine.flightListFresh(def, list)),
       };
     }),
   };

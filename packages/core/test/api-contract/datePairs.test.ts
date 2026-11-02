@@ -7,7 +7,7 @@ import {
   datePairsResponseSchema,
   MAX_DATE_PAIRS,
 } from '../../src/api-contract/datePairs.js';
-import { type DatePairFigure, encodeDatePairs } from '../../src/datePairs/encode.js';
+import { type DatePairFigure, type DatePairPairing, encodeDatePairs } from '../../src/datePairs/encode.js';
 import { PAIRING_READ } from '../../src/datePairs/pairing.js';
 import { asIsoDate, asIsoDateTime } from '../../src/types/ids.js';
 import {
@@ -574,7 +574,8 @@ describe('datePairsResponseSchema: the pairing figure (spec rev 56 §10)', () =>
     expect(issuePaths(isFrom)).toEqual(['pairing.isFrom.0']);
     const onVerified = withPairing();
     groupOf(onVerified, 'pairing').figure[1] = 2;
-    expect(issuePaths(onVerified)).toEqual(['pairing.figure.1']);
+    // why: final review B-M5: figure 1's within-older read then names a pairing the group no longer holds
+    expect(issuePaths(onVerified)).toEqual(['pairing.figure.1', 'pairingRead.code.1']);
     const order = withPairing();
     groupOf(order, 'pairing').figure = [1, 0];
     expect(issuePaths(order)).toContain('pairing.figure.1');
@@ -759,6 +760,18 @@ describe('datePairsResponseSchema: the pairing figure (spec rev 56 §10)', () =>
     groupOf(notBeneath, 'pairingRead').code[0] = 1;
     expect(issuePaths(notBeneath)).toEqual(['pairing.figure.0']);
   });
+  // why: final review B-M5: the board's group, as datePairFigureSchema: entry 1 (within-older) must be stale, and a
+  // beneath read needs its pairing entry
+  it('a pairing entry beneath agrees with its read; a beneath read needs its entry', () => {
+    const fresh = withPairing();
+    groupOf(fresh, 'pairing').stale[1] = false;
+    expect(issuePaths(fresh)).toEqual(['pairing.stale.1']);
+    // why: figure 1's entry (the calendar figure's pairing beneath, read within-older) taken out of every column
+    const missing = withPairing();
+    const q = groupOf(missing, 'pairing');
+    for (const column of Object.values(q)) column.splice(1, 1);
+    expect(issuePaths(missing)).toEqual(['pairingRead.code.1']);
+  });
   it('pairing beneath a calendar figure only for the five "shown beneath" reads', () => {
     const r = withPairing();
     groupOf(r, 'pairingRead').code[1] = 1;
@@ -825,7 +838,7 @@ describe('datePairsResponseSchema: the pairing figure (spec rev 56 §10)', () =>
                 ? calendarFigure({
                     airportPair: 0,
                     pairingRead: 'offers-incomplete',
-                    pairing: figurePairing(),
+                    pairing: figurePairing({ complete: false }),
                   })
                 : i % 120 === 2
                   ? calendarFigure({ airportPair: 0, pairingRead: 'outbound-only' })
@@ -859,7 +872,9 @@ describe("datePairFigureSchema: basis 'pairing', gridPrice, pairing and pairingR
     expect(r(older).success).toBe(false);
     const { listReason: _l, ...noReason } = calendar;
     expect(r(noReason).success).toBe(false);
-    expect(r({ ...calendar, pairingRead: 'within-older', pairing: figurePairing() }).success).toBe(true);
+    expect(
+      r({ ...calendar, pairingRead: 'within-older', pairing: figurePairing({ stale: 'refresh' }) }).success,
+    ).toBe(true);
   });
   it('prov-001: a pairing figure is complete, within the limits, fresh, read from an offer, priced and sourced as its figure', () => {
     expect(paths({ ...pairing, pairing: figurePairing({ complete: false }) })).toEqual(['pairing.complete']);
@@ -897,19 +912,46 @@ describe("datePairFigureSchema: basis 'pairing', gridPrice, pairing and pairingR
       ['pairing.complete'],
     );
   });
+  // why: final review B-M5: a pairing shown beneath its figure says what its read says, and a "beneath" read has one
+  it('a pairing beneath agrees with its read; a beneath read needs its pairing', () => {
+    const under = (read: string, over: Partial<DatePairPairing>) =>
+      paths({ ...calendar, pairingRead: read, pairing: figurePairing(over) });
+    const from = { isFrom: true, seller: null, offersRead: 0, complete: false } as const;
+    expect(under('over-limit', { which: 'over-limit' })).toEqual([]);
+    expect(under('over-limit', {})).toEqual(['pairing.which']);
+    // why: a list read under other limits reads within-other-limits whether or not it is over today's (B-M2)
+    expect(under('within-other-limits', { which: 'over-limit' })).toEqual([]);
+    expect(under('within-older', { which: 'over-limit', stale: 'refresh' })).toEqual(['pairing.which']);
+    expect(under('within-older', { stale: 'refresh' })).toEqual([]);
+    expect(under('within-older', {})).toEqual(['pairing.stale']);
+    expect(under('sellers-not-read', from)).toEqual([]);
+    expect(under('sellers-not-read', { complete: false })).toEqual(['pairing.isFrom']);
+    expect(under('sellers-not-read', { ...from, stale: 'refresh' })).toEqual(['pairing.stale']);
+    expect(under('offers-incomplete', { complete: false })).toEqual([]);
+    expect(under('offers-incomplete', {})).toEqual(['pairing.complete']);
+    expect(paths({ ...calendar, pairingRead: 'over-limit', pairing: null })).toEqual(['pairing']);
+  });
   it("21.7 prov-012: a pairing shown beneath a figure carries a flight list's provenance", () => {
     const beneath = { ...calendar, pairingRead: 'offers-incomplete' as const };
-    expect(paths({ ...beneath, pairing: figurePairing({ provenance: calendar.price.provenance }) })).toEqual([
-      'pairing.provenance',
-    ]);
+    expect(
+      paths({
+        ...beneath,
+        pairing: figurePairing({ complete: false, provenance: calendar.price.provenance }),
+      }),
+    ).toEqual(['pairing.provenance']);
   });
   it('Task 21.7: fromPence is the return\'s "from" price, the figure\'s own when isFrom, unlike it exactly on a mismatch', () => {
     const beneath = { ...calendar, pairingRead: 'offers-incomplete' as const };
-    expect(paths({ ...beneath, pairing: figurePairing({ fromPence: 117_500, mismatch: true }) })).toEqual([]);
-    expect(paths({ ...beneath, pairing: figurePairing({ fromPence: 117_500 }) })).toEqual([
+    const incomplete = { complete: false };
+    expect(
+      paths({ ...beneath, pairing: figurePairing({ ...incomplete, fromPence: 117_500, mismatch: true }) }),
+    ).toEqual([]);
+    expect(paths({ ...beneath, pairing: figurePairing({ ...incomplete, fromPence: 117_500 }) })).toEqual([
       'pairing.mismatch',
     ]);
-    expect(paths({ ...beneath, pairing: figurePairing({ mismatch: true }) })).toEqual(['pairing.mismatch']);
+    expect(paths({ ...beneath, pairing: figurePairing({ ...incomplete, mismatch: true }) })).toEqual([
+      'pairing.mismatch',
+    ]);
     const from = { isFrom: true, seller: null, offersRead: 0, complete: false } as const;
     expect(
       paths({
@@ -944,7 +986,11 @@ describe("datePairFigureSchema: basis 'pairing', gridPrice, pairing and pairingR
     ).toEqual(['pairing.isFrom']);
     expect(paths({ ...calendar, pairing: figurePairing() })).toEqual(['pairing']);
     expect(
-      paths({ ...calendar, pairingRead: 'offers-incomplete', pairing: figurePairing({ seller: null }) }),
+      paths({
+        ...calendar,
+        pairingRead: 'offers-incomplete',
+        pairing: figurePairing({ seller: null, complete: false }),
+      }),
     ).toEqual(['pairing.seller']);
     expect(
       paths({

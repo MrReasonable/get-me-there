@@ -145,6 +145,14 @@ export const flightListsResponseSchema = z.strictObject({
       link: flightListLinkSchema.nullable(),
       list: flightListSchema.nullable(),
       listOtherPair: flightListSchema.nullable(),
+      /**
+       * Final review B-I3 (spec rev 56 §10, §11): whether a read of this date pair would go now: flight lists can be
+       * read here, the date pair is the board's and departs after today, and its newest list is none, one the
+       * on-demand read would not refuse as `fresh` (the engine's one rule, `flightListFresh`), and not a failed list a
+       * monthly or per-run limit stopped. The read button shows exactly when it is true; the status notes word what
+       * happens next by it.
+       */
+      readNow: z.boolean(),
     }),
   ),
 });

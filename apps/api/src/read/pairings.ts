@@ -17,6 +17,7 @@ import {
   flightLimitsOf,
   hoursSince,
   type IsoDateTime,
+  listFresh,
   offersComplete,
   type PairingCandidate,
   type PairingOf,
@@ -28,8 +29,6 @@ import {
 import type { StoredFlightList } from '@gmt/db';
 import { FLIGHT_LIST_PROVIDER, refreshHoursOf } from '@gmt/engine';
 import type { Ports } from '../wiring.js';
-
-const HOUR_MS = 3_600_000;
 
 /** A flight list's provenance, as narrow as `flightListSchema` holds it (and a `Provenance`). */
 export type FlightListProvenance = Provenance & {
@@ -89,8 +88,9 @@ export function candidateOf(
   const offer = forPairing ? (cheapestOffer(b)?.offer ?? null) : null;
   const ageHours = hoursSince(l.fetchedAt, now);
   // why: prov-007: freshness is judged on the elapsed milliseconds, as the engine's reuse rule is; `hoursSince` floors to
-  // whole hours and is for display only (a list 168 h 59 m old under refresh 168 is past it)
-  const fresh = Date.parse(now) - Date.parse(l.fetchedAt) <= refreshHours * HOUR_MS;
+  // whole hours and is for display only (a list 168 h 59 m old under refresh 168 is past it); core's one rule, which
+  // the list's own stale mark reads too (final review B-M1)
+  const fresh = listFresh(l.fetchedAt, now, refreshHours);
   const fits = p.outboundFits && p.returnFits;
   return {
     fromMinor: p.fromMinor,

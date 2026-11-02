@@ -991,7 +991,11 @@ value below is the recorded literal; nothing is left to a decision rule.
     the flight list is still not a results basis for alerts, History or verification; the detail opens on the calendar
     row; the mismatch (the cheapest offer against the return's "from" price) and more-listed lines; the difference
     line of revision 55 is replaced by the grid-price line; the synthetic banner judges the grid price too; no seller
-    is ever linked (booking stays on Google: the date pair's link).
+    is ever linked (booking stays on Google: the date pair's link). Final rulings B-I2, B-M1, B-M2, B-M5: with no return fitting
+    on either outbound the pairing shown is the last attempt's (the one the worker booked, its offers kept, over the limits,
+    the first outbound marked tried); freshness and the list's stale mark read one elapsed-time rule (`listFresh`);
+    `pairingRead`'s candidate order puts `within-other-limits` first, worded with the block's limit-edit phrase; a pairing
+    beneath agrees with its read on both wire encodings, and a card's pairing figure is fresh and a flight list's.
   - **§7**: migration 0012's columns and tables (§5's text: the attempts, the returns with their "from" prices, the
     booking columns and the offers), additive, NULL on every existing row; `provider_requests.page_count` (0 admitted)
     and what the guard sums; the repository's attempts, returns and offers statements inside one read transaction;
@@ -1009,7 +1013,9 @@ value below is the recorded literal; nothing is left to a decision rule.
     pairs (10 pairs at the defaults: usually about 15 pages and 41 minutes, at most 20 pages and 50 minutes; 700 s without returns); the per-schedule
     monthly arithmetic (a daily schedule with a 168 h refresh makes about 5 discovery runs a month, at most 5 × (100 grid + 10 × 2) = 600 of the 1,500
     pages, so two such schedules fit, and typically 5 × (100 + 15) = 575, the settle returning the unused pages); the on-demand read's `fresh` rule and its return phase under the preflight's flag; the error table
-    unchanged (a return status is inside a `read` row).
+    unchanged (a return status is inside a `read` row). Final rulings B-M3, B-M4: while the worker's flags are unread the
+    estimate counts the bound (the return phase with the booking read); with fewer than 2 pages a pair left in the month, up
+    to `min(pairs, M)` date pairs, all but the last out and back, at most M pages.
   - **§8.2**: a run's pages end inside its window: the gate's check runs after the lease and limiter waits, immediately before the load, against the
     request's own seconds (no page starts past the window end); the window is sized from the estimate's typical seconds with the bound as a note.
   - **§9**: the recorded suites (`selectRecorded`, `bookingRecorded`, `returnsRecorded` and `offersRecorded` skip
@@ -1036,7 +1042,10 @@ value below is the recorded literal; nothing is left to a decision rule.
     what happens next; "none of the N outbound flights read is within your limits; the cheapest one's returns are shown";
     "2 of the N outbounds within your limits were tried" / "other outbounds not tried"; the counts clause; the limits
     line; a list stored before 0012 shows as today; the tie order unchanged; the read button's "up to N pages" and its
-    refusal below that many pages left.
+    refusal below that many pages left. Final rulings B-I1, B-I3: the shown seller's price is emphasised exactly when it leads
+    its date pair (core's `pairingLeads`, the board's rule); the read button shows exactly when the pair's `readNow` is true,
+    and a transient note says "tried again at the next search, or press Read flights for this date now" only then, else
+    "read again once older than this search's refresh".
   - **§12**: the constants of `core/flights/limits.ts` (`FLIGHT_LIST_PAGES_PER_PAIR_MAX` 2, `RETURN_SPACED_LOADS` 1, `RETURN_PAGE_PERIODS` 8 / 6,
     `RETURN_STEP_SECONDS` 40, `RETURN_SECOND_OUTBOUND_RATE` 0.5, `RETURNS_SHOWN` 3, `RETURN_ATTEMPTS_MAX` 2, `BOOKING_OFFERS_MAX` 40), not settings.
   - **§16**: row 21 with this brief's scope and first failing test ("`selectOutbound` picks the first fitting flight in `compareFlights` order, ties by index").

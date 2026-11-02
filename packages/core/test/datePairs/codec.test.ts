@@ -169,22 +169,39 @@ const arbDecoded: fc.Arbitrary<DecodedDatePairs> = fc
                 // and stale mark; a "from" price read no offer and is never complete (prov-001)
                 // why: Task 21.7: fromPence is the from price itself on a from price, and differs exactly on a mismatch
                 const mismatch = (isFrom: boolean) => !isFrom && f.cheaperFlags[1];
-                const pairing = (isFrom: boolean) =>
-                  figurePairing({
+                // why: final review B-M5: a pairing beneath says what its read says (over the limits exactly on
+                // over-limit, stale on within-older, fresh on the two seller reads, a from price when no seller was
+                // read, an offer not complete when the offers may be incomplete)
+                const pairing = (read: PairingRead) => {
+                  const isFrom =
+                    read === 'sellers-not-read' ? true : read === 'offers-incomplete' ? false : f.isFrom;
+                  const stale =
+                    read === 'within-older'
+                      ? f.cheaperFlags[0] === false
+                        ? ('refresh' as const)
+                        : f.cheaperFlags[0]
+                      : read === 'sellers-not-read' || read === 'offers-incomplete'
+                        ? false
+                        : f.cheaperFlags[0];
+                  const which =
+                    read === 'over-limit' ? 'over-limit' : f.which === 'over-limit' ? 'cheapest' : f.which;
+                  return figurePairing({
                     pricePence: f.pence + 1,
                     fromPence: mismatch(isFrom) ? f.pence + 2 : f.pence + 1,
                     isFrom,
                     seller: isFrom ? null : 'QQ Fares',
                     fare: isFrom ? null : f.fare,
-                    ...(isFrom ? { offersRead: 0, complete: false } : {}),
-                    which: f.which,
+                    ...(isFrom || read === 'offers-incomplete' ? { complete: false } : {}),
+                    ...(isFrom ? { offersRead: 0 } : {}),
+                    which,
                     // why: 21.7 prov-012: a pairing beneath is a flight list's; the variant's fields over it keep the
                     // table's one-field-apart entries apart
                     provenance: listVariant(f.cheaperProvenance),
-                    stale: f.cheaperFlags[0],
+                    stale,
                     ageHours: f.age,
                     mismatch: mismatch(isFrom),
                   });
+                };
                 if (f.kind === 'pairing')
                   // why: prov-001: a leading pairing is its figure's own words: the offer's price, the flight list's
                   // provenance, fresh, complete and within the limits
@@ -217,7 +234,7 @@ const arbDecoded: fc.Arbitrary<DecodedDatePairs> = fc
                           pairingRead: f.readOnly,
                           listReason: f.readOnly === 'list-failed' ? ('network' as const) : null,
                         }
-                      : { pairingRead: f.beneath, pairing: pairing(f.isFrom) }),
+                      : { pairingRead: f.beneath, pairing: pairing(f.beneath) }),
                   });
                 return verifiedFigure({
                   ...common,
@@ -526,7 +543,8 @@ function withPairings(): DecodedDatePairs {
                   arriveBack: '07:15',
                   mismatch: false,
                   provenance: flightListProvenance({ fetchedAt: asIsoDateTime('2027-02-27T09:30:00.000Z') }),
-                  stale: 'refresh',
+                  // why: final review B-M5: sellers-not-read follows within-older, so its list is fresh
+                  stale: false,
                   ageHours: 'unknown',
                 }),
               }),
@@ -570,7 +588,7 @@ describe('the pairing figure on the wire (spec rev 56 §10, R-sparse: gridPrice,
       departBack: ['14:20', '19:10'],
       arriveBack: ['06:25', '07:15'],
       mismatch: [false, false],
-      stale: [false, 'refresh'],
+      stale: [false, false],
       ageHours: [2, 'unknown'],
     });
     const back = decodeDatePairs(wire).pairs[3]?.figure?.pairing;

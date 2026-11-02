@@ -269,6 +269,8 @@ const SAMPLES: Record<string, unknown[]> = {
   'flights.moreListed': [12, 10],
   'flights.triedSome': [1, 5],
   'flights.returnSkipped': ['fewer than 2 browser pages left this month'],
+  'flights.returnTransient': [false],
+  'flights.bookingTransient': [true],
   'flights.bookingSkipped': ['the list was not on its Cheapest view'],
   'flights.readOutboundOnly': [2],
   'flights.readDoneReturns': ['14 → 24 Mar', 2],

@@ -77,7 +77,7 @@ function list(
   x: Harness,
   def: SearchDefinition,
   c: CellKey,
-  o: { fetchedAt: string; executionId?: string | null; failed?: boolean },
+  o: { fetchedAt: string; executionId?: string | null; failed?: boolean; reason?: 'network' | 'monthly-cap' },
 ) {
   return x.ports.repos.flightLists.insert({
     definitionId: def.id,
@@ -89,7 +89,7 @@ function list(
     fetchedAt: apiContract.flightListSchema.shape.fetchedAt.parse(o.fetchedAt),
     pointOfSale: 'GB',
     status: o.failed === true ? 'failed' : 'read',
-    reason: o.failed === true ? 'network' : null,
+    reason: o.failed === true ? (o.reason ?? 'network') : null,
     listed: o.failed === true ? null : 'flights',
     minMinor: o.failed === true ? null : 40_000,
     tabMinor: o.failed === true ? null : 40_000,
@@ -171,7 +171,9 @@ describe('GET /definitions/:id/flight-lists (revision 55 §10)', () => {
       .reduce((a, p) => a + p.calls, 0);
     expect(grid).toBeGreaterThan(0);
     expect(est.flightLists?.pages ?? 0).toBeGreaterThan(0);
-    expect(body.runPages).toBe(grid + (est.flightLists?.pages ?? 0));
+    // why: the bound's pages (spec rev 56 §8.1), which the estimate states while the worker's flags are unread (final
+    // review B-M3)
+    expect(body.runPages).toBe(grid + (est.flightLists?.pagesMax ?? est.flightLists?.pages ?? 0));
   });
 
   it("estimates the search once for its runPages until it is edited or the browser worker's month turns (ruling)", async () => {
@@ -246,6 +248,8 @@ describe('GET /definitions/:id/flight-lists (revision 55 §10)', () => {
     expect(body.unavailableReason).toBe('not-configured');
     expect(body.monthlyPagesLeft).toBeNull();
     expect(body.runPages).toBeNull();
+    // why: final review B-I3: no read can go where flight lists cannot be read
+    expect(body.pairs.map((p) => p.readNow)).toEqual([false, false]);
   });
 
   it.each([
@@ -384,6 +388,33 @@ describe('the return leg on the flight-lists wire (spec rev 56 §10)', () => {
     expect('pagesLoaded' in (b?.list ?? {})).toBe(false);
   });
 
+  // why: final review B-M1: the list's stale mark is judged on the elapsed milliseconds, as the pairing's freshness is
+  it('a list 168 h 30 m old under a 168 h refresh is stale (never whole hours)', async () => {
+    const { x, def } = await setup();
+    list(x, def, A, { fetchedAt: at(-168.5) });
+    const body = apiContract.flightListsResponseSchema.parse(await (await get(x, def.id, PAIRS)).json());
+    expect(body.pairs[0]?.list).toMatchObject({ ageHours: 168, stale: 'refresh' });
+  });
+
+  // why: final review B-I3: readNow is the on-demand read's own rule (no list, or one it would not refuse as fresh),
+  // less a failed list a monthly or per-run limit stopped; false where flight lists cannot be read
+  it('readNow: true with no list, a list the read would not reuse, a failed one; false when fresh or limit-stopped', async () => {
+    const { x, def } = await setup();
+    const readNow = async () =>
+      apiContract.flightListsResponseSchema
+        .parse(await (await get(x, def.id, PAIRS)).json())
+        .pairs.map((p) => p.readNow);
+    expect(await readNow()).toEqual([true, true]);
+    // a young list with no return read: read again while the flags are unread (the read may plan the return phase)
+    list(x, def, A, { fetchedAt: at(-1) });
+    list(x, def, B, { fetchedAt: at(-1), failed: true, reason: 'monthly-cap' });
+    expect(await readNow()).toEqual([true, false]);
+    // with the return flag off the young list is fresh
+    x.engine.setWorkerFlags('camoufox', { RETURN_SELECT_VERIFIED: false });
+    expect(await readNow()).toEqual([false, false]);
+    list(x, def, B, { fetchedAt: at(0), failed: true });
+    expect(await readNow()).toEqual([false, true]);
+  });
   it('pagesPlanned is 2 before the worker is read (prov-008: the read may then load 2), 1 with its flag off, 2 with it on', async () => {
     const { x, def } = await setup();
     const planned = async () =>

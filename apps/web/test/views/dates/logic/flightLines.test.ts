@@ -8,13 +8,12 @@ import {
   hoursText,
   legMarks,
   limitsOf,
-  offersRead,
   pagesLeftClause,
   readButtonWords,
 } from '../../../../src/views/Dates/flightLines.js';
 import { londonDaysAgo } from '../../../../src/views/Dates/stateLines.js';
 import { definition } from '../../../fixtures.js';
-import { failedList, flightList, listedFlight, listedReturn } from '../../../fixtures.searches.js';
+import { flightList, listedFlight, listedReturn } from '../../../fixtures.searches.js';
 import { NOW } from '../../../render.js';
 
 // Spec rev 55 §11 Flights (WP20 Task 20.10 fix round): the block's pure lines. NOW is 2026-10-14T15:00Z, 16:00 London.
@@ -50,17 +49,6 @@ describe('pagesLeftClause (ruling R-pages)', () => {
     expect(pagesLeftClause(110, 110)).toBeNull();
     expect(pagesLeftClause(null, 110)).toBeNull();
     expect(pagesLeftClause(5, null)).toBeNull();
-  });
-});
-
-describe('offersRead (ruling R-failed-read)', () => {
-  it('no list, or a failed one not stopped by a monthly or per-run limit', () => {
-    expect(offersRead(null)).toBe(true);
-    expect(offersRead(failedList('network'))).toBe(true);
-    expect(offersRead(failedList('free-call-cap'))).toBe(true);
-    expect(offersRead(failedList('monthly-cap'))).toBe(false);
-    expect(offersRead(failedList('execution-cap'))).toBe(false);
-    expect(offersRead(flightList())).toBe(false);
   });
 });
 

@@ -435,7 +435,7 @@ describe('flightReadLine: what a figure says of its flight read (spec rev 56 §6
     });
     const q = figurePairing();
     expect(line(calendarFig({ pairingRead: 'within-other-limits', pairing: q }))).toEqual({
-      lead: 'return flights read under earlier limits:',
+      lead: 'your limits have changed since these return flights were read:',
       pairing: q,
     });
     const from = figurePairing({

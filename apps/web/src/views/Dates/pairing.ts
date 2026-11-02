@@ -210,12 +210,13 @@ function readClauses(r: ReturnRead, c: FlightCopy, at?: number): string[] {
 /**
  * Spec rev 56 §11 "Status notes": what a list's return read says beyond its lines, with what happens next. A list read
  * without a return phase (or stored before them) says nothing: it shows as the outbound list, its limits line saying
- * "return leg not read" (21.7 code M6); a transient end says it is tried again; a skipped one its rule in words;
- * `not-verified` where the recording session is; `no-outbound` nothing beyond the outbound's own line; a `read` the
- * counts and more-listed clauses of attempt `at` (the shown pairing's; the last attempt when not named), or null when
- * clean.
+ * "return leg not read" (21.7 code M6); a transient end says when it is read again by `readNow` (final review B-I3: the
+ * api's word for whether a read would go now, which also shows the button the note then names); a skipped one its rule
+ * in words; `not-verified` where the recording session is; `no-outbound` nothing beyond the outbound's own line; a
+ * `read` the counts and more-listed clauses of attempt `at` (the shown pairing's; the last attempt when not named), or
+ * null when clean.
  */
-export function returnNote(list: FlightList, c: typeof COPY, at?: number): string | null {
+export function returnNote(list: FlightList, c: typeof COPY, readNow: boolean, at?: number): string | null {
   const F = c.flights;
   const r = list.returns;
   if (r === null) return null;
@@ -233,7 +234,7 @@ export function returnNote(list: FlightList, c: typeof COPY, at?: number): strin
     case 'select-failed':
     case 'not-settled':
     case 'unrecognised':
-      return F.returnTransient;
+      return F.returnTransient(readNow);
     default: {
       const unknownStatus: never = r.status;
       throw new RangeError(`returnNote: no status ${String(unknownStatus)}`);
@@ -242,10 +243,11 @@ export function returnNote(list: FlightList, c: typeof COPY, at?: number): strin
 }
 
 /**
- * Spec rev 56 §11 "Status notes": what a booking read that did not finish says, with what happens next; null for a
- * `read` one and for a list with no booking read (none was asked: the "Back:" line then says "sellers not read").
+ * Spec rev 56 §11 "Status notes": what a booking read that did not finish says, with what happens next by `readNow`
+ * (final review B-I3); null for a `read` one and for a list with no booking read (none was asked: the "Back:" line then
+ * says "sellers not read").
  */
-export function bookingNote(list: FlightList, c: typeof COPY): string | null {
+export function bookingNote(list: FlightList, c: typeof COPY, readNow: boolean): string | null {
   const F = c.flights;
   const b: BookingRead | null = list.returns?.booking ?? null;
   if (b === null) return null;
@@ -255,7 +257,7 @@ export function bookingNote(list: FlightList, c: typeof COPY): string | null {
     case 'expand-failed':
       // why: 21.7 prov-014: an expansion that failed before any offer read none, so it says only that the sellers were
       // not read and are tried again (it is a transient end), never "sellers read before …"
-      return b.offers.length === 0 ? F.bookingTransient : F.bookingExpandFailed;
+      return b.offers.length === 0 ? F.bookingTransient(readNow) : F.bookingExpandFailed;
     case 'skipped':
       return F.bookingSkipped(skippedWords(b.rule, F));
     case 'not-verified':
@@ -265,7 +267,7 @@ export function bookingNote(list: FlightList, c: typeof COPY): string | null {
     case 'select-failed':
     case 'not-settled':
     case 'unrecognised':
-      return F.bookingTransient;
+      return F.bookingTransient(readNow);
     default: {
       const unknownStatus: never = b.status;
       throw new RangeError(`bookingNote: no status ${String(unknownStatus)}`);
@@ -287,7 +289,13 @@ export function returnsWereRead(list: FlightList): boolean {
  * attempt's), the status note's words for a return read that did not finish, WP20's "Flights read for …" for a list
  * with no return read (or no outbound), and "Flights not read for …" for a failed list.
  */
-export function readDoneWords(list: FlightList, dates: string, c: typeof COPY, limits: FlightLimits): string {
+export function readDoneWords(
+  list: FlightList,
+  dates: string,
+  c: typeof COPY,
+  limits: FlightLimits,
+  readNow: boolean,
+): string {
   const F = c.flights;
   if (list.status !== 'read') return F.readNotDone(dates);
   const r = list.returns;
@@ -297,5 +305,5 @@ export function readDoneWords(list: FlightList, dates: string, c: typeof COPY, l
     const a = p === null ? r.attempts.at(-1) : r.attempts[p.attempt];
     return F.readDoneReturns(dates, a?.returns.length ?? 0);
   }
-  return returnNote(list, c) ?? F.readDone(dates);
+  return returnNote(list, c, readNow) ?? F.readDone(dates);
 }

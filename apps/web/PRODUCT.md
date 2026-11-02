@@ -85,12 +85,19 @@ the operator's own machine, which must be awake for it. Setup and operation happ
   return flights Google lists with it (and the next outbound's, from a fresh load of the page,
   when none fits), each priced as Google words it ("from"). It then opens the booking options of
   the shown pairing and reads the offers Google listed. The cheapest of the sellers read leads
-  the date pair while the list is fresh and the offers are complete, with the grid price beside
-  it. It is not a fare check, and the app does not know which price is bookable: economy only,
+  the date pair, on the board and on the search's page alike, only when both flights are within
+  the search's limits, the list is fresh, it was read under the search's current limits and the
+  offers are complete, with the grid price beside it; otherwise the grid price leads and the
+  pairing shows beneath it, saying why. When no return fits on either outbound tried, the pairing
+  whose sellers were read is shown with its offers, marked over the limits. A read that did not
+  finish says when it is read again: at the next search while a read would go now (the Read
+  flights button beside it), else once the list is older than the search's refresh. It is not a
+  fare check, and the app does not know which price is bookable: economy only,
   one or two outbounds' returns, not every pairing, and booking stays on Google (the app opens no
   seller). Return flights and sellers are read only on worker machines whose recording session
   set the flags (the operator's Mac at present). Coverage and the buckets never change. Each read
-  counts against the browser's page allowance. Without the worker the page says flight times
+  counts against the browser's page allowance: up to 2 pages a date pair (a second outbound loads
+  the page again), 20 a run on an allowance of its own, inside the month's page cap. Without the worker the page says flight times
   need it.
 - **Price sources:**
   - Aviasales cache (Travelpayouts): free, cached prices up to 48 hours old.

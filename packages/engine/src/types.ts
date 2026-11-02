@@ -24,7 +24,7 @@ import type {
   SourceKind,
   StopCause,
 } from '@gmt/core';
-import type { Db, Repos } from '@gmt/db';
+import type { Db, NewestFlightList, Repos } from '@gmt/db';
 import type { HttpKit } from '@gmt/providers';
 
 // why: core already exports these five as types (plan decisions 16 and 17); the engine re-exports core's, never its own copies
@@ -234,6 +234,11 @@ export interface Engine {
    * of its last reported flags (2 with `RETURN_SELECT_VERIFIED`, else 1).
    */
   flightPagesPlanned(): 1 | 2;
+  /**
+   * Spec rev 56 §8.1, §10 (final review B-I3): whether an on-demand read of `newest`'s date pair would be refused as
+   * `fresh` now (`flightListFresh`: the step's reuse rule under the phase the read would send); the api's `readNow`.
+   */
+  flightListFresh(definition: SearchDefinition, newest: NewestFlightList): boolean;
   budgetFit(definition: DefinitionInput | SearchDefinition): BudgetFit;
   coverageCheck(req: CoverageCheckRequest): Promise<CoverageCheckResponse>;
   scheduler: {

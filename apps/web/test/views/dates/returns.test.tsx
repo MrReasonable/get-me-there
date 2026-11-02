@@ -60,22 +60,33 @@ const BOOKING: BookingRead = (() => {
 const withBooking = (over: Partial<BookingRead>): FlightList =>
   withReturns({ booking: { ...BOOKING, ...over } });
 
-/** Serves `list` as the 14 → 24 Mar date pair's own list, the answer planning 2 pages a read unless `over` says. */
-function serve(list: FlightList | null, over: Parameters<typeof serveFlightLists>[1] = {}) {
+/**
+ * Serves `list` as the 14 → 24 Mar date pair's own list, the answer planning 2 pages a read unless `over` says;
+ * `readNow` as given (final review B-I3), else the fixture's default.
+ */
+function serve(
+  list: FlightList | null,
+  over: Parameters<typeof serveFlightLists>[1] = {},
+  readNow?: boolean,
+) {
   server.use(
-    serveFlightLists((d, r) => flightPair(d, r, d === '2027-03-14' && list !== null ? { list } : {}), {
-      pagesPlanned: 2,
-      ...over,
-    }),
+    serveFlightLists(
+      (d, r) =>
+        flightPair(d, r, {
+          ...(d === '2027-03-14' && list !== null ? { list } : {}),
+          ...(d === '2027-03-14' && readNow !== undefined ? { readNow } : {}),
+        }),
+      { pagesPlanned: 2, ...over },
+    ),
   );
 }
 
 /** Renders the board with `list` and waits for the date pair's flights block. */
 async function renderList(
   list: FlightList | null,
-  o: { over?: Parameters<typeof serveFlightLists>[1]; def?: typeof DEF } = {},
+  o: { over?: Parameters<typeof serveFlightLists>[1]; def?: typeof DEF; readNow?: boolean } = {},
 ) {
-  serve(list, o.over);
+  serve(list, o.over, o.readNow);
   const r = renderDates({ body: BOARD, def: o.def ?? DEF });
   await findBoard();
   await waitFor(() => expect(document.querySelector('[data-flights-for="0"]')).not.toBeNull());
@@ -282,6 +293,43 @@ describe('the block with a pairing (spec rev 56 §11; Review Focus 1 and 5)', ()
   });
 });
 
+// Final review B-I1: the block emphasises the shown seller's price as the answer exactly when the board leads with it
+// (core's pairingLeads: within the limits, fresh, read under today's limits, complete offers), never in another state.
+describe('the lead emphasis follows the one leading rule (final review B-I1)', () => {
+  const leads = () => block().querySelectorAll('.flight-price-lead').length;
+  it("fresh, under today's limits, complete: the shown seller's price leads", async () => {
+    await renderList(FIXTURE);
+    expect(leads()).toBe(1);
+  });
+  it('a list older than the refresh: no lead emphasis', async () => {
+    await renderList(pairingList({ stale: 'refresh' }));
+    expect(lines('return-line')[0]).toMatch(/^Back: £1,180/);
+    expect(lines('return-line')[0]).toContain('QQ Travel · cheapest of 3 offers read');
+    expect(leads()).toBe(0);
+  });
+  it('a list read under other limits: no lead emphasis', async () => {
+    await renderList(FIXTURE, {
+      def: definition({ constraints: { maxJourneyMinutes: 1_600, maxStops: 1 } }),
+    });
+    expect(within(block()).getByTestId('pairing-limits-changed')).toBeInTheDocument();
+    expect(leads()).toBe(0);
+  });
+  it('offers that may be incomplete: no lead emphasis', async () => {
+    await renderList(
+      withBooking({
+        status: 'expand-failed',
+        rule: 'more-options',
+        expanded: false,
+        offers: [{ seller: 'QQ Fares', fare: null, priceMinor: 119_500 }],
+      }),
+    );
+    expect(within(block()).getAllByTestId('return-line')[0]).toHaveTextContent(
+      'a cheaper seller may not have been read',
+    );
+    expect(leads()).toBe(0);
+  });
+});
+
 describe("the pairing section's notes (spec rev 56 §11)", () => {
   it('the mismatch line names both figures through PriceCell when the cheapest offer differs from the "from" price', async () => {
     await renderList(
@@ -314,14 +362,17 @@ describe("the pairing section's notes (spec rev 56 §11)", () => {
   it('sellers not read (an expansion that failed before any offer): "Back: from £1,180 · sellers not read" with its note', async () => {
     await renderList(
       withBooking({ status: 'expand-failed', rule: 'more-options', expanded: false, offers: [] }),
+      { readNow: true },
     );
     expect(lines('return-line')[0]).toBe(
       'Back: from £1,180 round trip · sellers not read · depart 14:20, arrive 06:25 +1 · 12h 05m · 1 change · QQ Atlantic',
     );
-    // why: 21.7 prov-014: one note, a sellers read that failed before any offer: never "sellers read before …"
+    // why: 21.7 prov-014: one note, a sellers read that failed before any offer: never "sellers read before …"; final
+    // review B-I3: "or press …" only beside the button it names
     expect(within(block()).getByTestId('pairing-booking-note')).toHaveTextContent(
       'sellers not read: tried again at the next search, or press Read flights for this date now',
     );
+    expect(within(block()).getByRole('button', { name: /^Read flights for this date/ })).toBeInTheDocument();
     expect(within(block()).queryByTestId('pairing-applies')).toBeNull();
     // why: 21.7 prov-001: no seller's price is shown, so the head names none
     expect(within(block()).getByTestId('flights-head')).not.toHaveTextContent(/seller/);
@@ -418,7 +469,7 @@ describe("the pairing section's notes (spec rev 56 §11)", () => {
       'With the next-cheapest outbound read, selected under your limits when read, 3d ago:',
     );
     expect(within(block()).getByTestId('pairing-limits-changed')).toHaveTextContent(
-      'your limits have changed since; the returns are read again at the next search',
+      'your limits have changed since these return flights were read; they are read again at the next search',
     );
     // why: 21.7 code I2 / prov-005: the block head follows the section head, never claiming today's limits
     const head = within(block()).getByTestId('flights-head');
@@ -477,8 +528,45 @@ describe("the pairing section's notes (spec rev 56 §11)", () => {
     expect(block().querySelectorAll('.flight-price-lead')).toHaveLength(0);
   });
 
+  // why: final review B-I2: with no return within the limits on either outbound, the block shows the pairing whose
+  // sellers were read (the last attempt's, which the worker booked) with its offer, over the limits, never leading, and
+  // marks the first outbound tried
+  it('two attempts, no return fitting on either: the booked pairing with its offer, the first outbound marked tried', async () => {
+    const [first, second] = PAIRING_FIXTURE.returns.attempts;
+    const r0 = second?.returns[0];
+    if (first === undefined || second === undefined || r0 === undefined) throw new Error('fixture');
+    const over = (fromMinor: number, departsLocal: string) => ({ ...r0, departsLocal, stops: 2, fromMinor });
+    await renderList(
+      withReturns({
+        attempts: [first, { ...second, returns: [over(130_000, '12:00'), over(126_000, '15:30')] }],
+        booking: {
+          ...BOOKING,
+          attempt: 1,
+          returnIndex: 1,
+          offers: [{ seller: 'QQ Travel', fare: null, priceMinor: 127_000 }],
+        },
+      }),
+    );
+    expect(lines('return-line')[0]).toMatch(
+      /^Back: £1,270 round trip · QQ Travel · cheapest of 1 offer read · depart 15:30/,
+    );
+    expect(within(block()).getByTestId('pairing-head')).toHaveTextContent(
+      'No return flight within your limits for this outbound; the cheapest pairing read is shown, over your limits:',
+    );
+    const flights = within(block()).getAllByTestId('flight');
+    const markOf = (departs: string) =>
+      flights
+        .find((f) => plain(f).startsWith(`depart ${departs}`))
+        ?.querySelector('[data-testid="flight-mark"]')?.textContent;
+    expect(markOf('07:15')).toMatch(/^selected for the returns above;/);
+    expect(markOf('09:40')).toMatch(/^tried first: its returns were all over your limits;/);
+    expect(block().querySelectorAll('.flight-price-lead')).toHaveLength(0);
+  });
+
   it("21.7 code M1 / prov-010: the read clauses are the shown pairing's attempt's, not the last attempt's", async () => {
-    // why: both attempts over the stops limit; the cheapest of all is attempt 0's, whose view stated 12 returns
+    // why: both attempts over the stops limit they were read under (so a second was made); under today's 2 changes
+    // attempt 0's returns fit and are the cheapest, and its view stated 12 returns (final review B-I2: with none fitting
+    // the last attempt's is shown, so the two differ only after a limit edit)
     const over = (fromMinor: number) => listedReturn({ stops: 2, fromMinor });
     await renderList(
       flightList({
@@ -490,6 +578,7 @@ describe("the pairing section's notes (spec rev 56 §11)", () => {
           ],
         }),
       }),
+      { def: definition({ constraints: { maxJourneyMinutes: 1_500, maxStops: 2 } }) },
     );
     expect(within(block()).getByTestId('pairing-read-note')).toHaveTextContent(
       'Google listed 12 return flights; this app read the first 2',
@@ -639,7 +728,10 @@ describe('a list with no return read, or one that did not finish (spec rev 56 §
   };
   for (const status of RETURN_STATUS.filter((s) => s !== 'read'))
     it(`${status}: WP20's head, which never mentions return flights, and its note`, async () => {
-      await renderList(withReturns({ status, rule: RULE[status], attempts: [], booking: null }));
+      // why: final review B-I3: a list the read would take again (readNow), as a transient one at streak 1 is
+      await renderList(withReturns({ status, rule: RULE[status], attempts: [], booking: null }), {
+        readNow: status !== 'no-outbound' && status !== 'skipped',
+      });
       const head = within(block()).getByTestId('flights-head');
       expect(head).toHaveTextContent(/^Outbound flights only · /);
       expect(head).not.toHaveTextContent(/return/i);
@@ -655,6 +747,37 @@ describe('a list with no return read, or one that did not finish (spec rev 56 §
       );
       expect(within(block()).queryByTestId('flights-pairing')).toBeNull();
     });
+
+  // why: final review B-I3: the note words what will happen: tried again while a read would go (the button beside it),
+  // else after the refresh (two transient ends in a row: R-retry), and never names a button that is not shown
+  it('a transient end the read would not take again: "read again once older than this search\'s refresh", no button', async () => {
+    await renderList(
+      withReturns({ status: 'not-settled', rule: 'returns:not-settled', attempts: [], booking: null }),
+      { readNow: false },
+    );
+    expect(within(block()).getByTestId('flights-return-note')).toHaveTextContent(
+      "return flights not read: read again once older than this search's refresh",
+    );
+    expect(within(block()).queryByRole('button', { name: /^Read flights/ })).toBeNull();
+  });
+  it('a read list whose booking read ended transient offers the read when readNow, and its note names the button', async () => {
+    await renderList(withBooking({ status: 'not-settled', rule: 'select-return:not-settled', offers: [] }), {
+      readNow: true,
+    });
+    expect(within(block()).getByTestId('pairing-booking-note')).toHaveTextContent(
+      'sellers not read: tried again at the next search, or press Read flights for this date now',
+    );
+    expect(within(block()).getByRole('button', { name: /^Read flights for this date/ })).toBeInTheDocument();
+  });
+  it('the same booking end the read would not take again: "read again once older …", no button', async () => {
+    await renderList(withBooking({ status: 'not-settled', rule: 'select-return:not-settled', offers: [] }), {
+      readNow: false,
+    });
+    expect(within(block()).getByTestId('pairing-booking-note')).toHaveTextContent(
+      "sellers not read: read again once older than this search's refresh",
+    );
+    expect(within(block()).queryByRole('button', { name: /^Read flights/ })).toBeNull();
+  });
 
   it('returns: null renders WP20\'s block: its head, "; return not read" on a mark, no pairing, no note', async () => {
     await renderList(flightList({ flights: PAIRING_FIXTURE.flights, minMinor: 48_000 }));

@@ -1,4 +1,4 @@
-import { addDays, type FlightLimits, fitsLimits } from '@gmt/core';
+import { addDays, type FlightLimits, fitsLimits, pairingLeads } from '@gmt/core';
 import { useId, useState } from 'react';
 import type { FlightList } from '../../api/types.js';
 import { COPY } from '../../copy.js';
@@ -89,10 +89,13 @@ export function PairingSection({
   list,
   p,
   limits,
+  readNow,
 }: {
   list: FlightList;
   p: PairingView;
   limits: FlightLimits;
+  /** Final review B-I3: whether a read of this date pair would go now; the notes word what happens next by it. */
+  readNow: boolean;
 }) {
   const [all, setAll] = useState(false);
   // why: 21.7 ui-007: the live region says nothing until the toggle is pressed, then how many returns are shown
@@ -102,9 +105,18 @@ export function PairingSection({
   const returns =
     all && attempt !== undefined ? allReturnsInOrder(attempt.returns, p, limits) : p.returns.shown;
   const mismatch = mismatchOf(p);
-  const note = bookingNote(list, COPY);
+  const note = bookingNote(list, COPY, readNow);
   // why: 21.7 code M1, prov-010: the counts and more-listed clauses of the view the shown returns come from
-  const readNote = returnNote(list, COPY, p.attempt);
+  const readNote = returnNote(list, COPY, readNow, p.attempt);
+  // why: final review B-I1: the shown seller's price is emphasised as the answer exactly when the board leads with it,
+  // by core's one predicate (within the limits, fresh, read under today's limits, complete offers)
+  const leads = pairingLeads({
+    fits: p.fits,
+    fresh: list.stale === false,
+    underCurrentLimits: p.underCurrentLimits,
+    offer: p.offer,
+    complete: p.offer?.complete === true,
+  });
   const changed = !p.selectedNow || !p.underCurrentLimits;
   const tried = triedLine(list, changed);
   // why: the price-applies and book lines say what the shown seller's price is for, so they follow its line
@@ -143,8 +155,8 @@ export function PairingSection({
             ret={ret}
             list={list}
             limits={limits}
-            // why: 21.7 re-review N2: only a seller's stated price within the limits is the lead claim
-            lead={ret === p.ret && p.offer !== null && p.fits}
+            // why: 21.7 re-review N2, final review B-I1: only the price the board leads with is the lead claim
+            lead={ret === p.ret && leads}
             price={
               ret === p.ret && p.offer !== null
                 ? { kind: 'offer', offer: p.offer }

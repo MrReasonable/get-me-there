@@ -493,7 +493,7 @@ describe('a pairing figure on the board (spec rev 56 §6.9, §11 Board; R-board,
         discoveryProviders: ['travelpayouts', 'camoufox'],
         pairs: {
           [at('2027-03-14', 10)]: pricedPair(
-            calendarFig({ pairingRead: 'within-older', pairing: figurePairing() }),
+            calendarFig({ pairingRead: 'within-older', pairing: figurePairing({ stale: 'refresh' }) }),
           ),
         },
       },
@@ -535,10 +535,11 @@ describe('a calendar figure says its flight read (spec rev 56 §6.9, §11 Board;
     expect(beneath).toHaveTextContent('Out: 07:15 · Back: 14:20');
   });
 
-  it('within-other-limits: "return flights read under earlier limits:" with the pairing beneath', async () => {
+  // why: final review B-M2: the board leads with the block's own words for a limit edit
+  it('within-other-limits: "your limits have changed since these return flights were read:" with the pairing beneath', async () => {
     const row = await figureRow({ pairingRead: 'within-other-limits', pairing: figurePairing() });
     const beneath = within(row).getByTestId('flight-read');
-    expect(beneath).toHaveTextContent(/^return flights read under earlier limits:/);
+    expect(beneath).toHaveTextContent(/^your limits have changed since these return flights were read:/);
     expect(within(beneath).getByTestId('price-cell')).toHaveTextContent('£1,180');
   });
 
@@ -590,7 +591,8 @@ describe('a calendar figure says its flight read (spec rev 56 §6.9, §11 Board;
     });
     const beneath = within(row).getByTestId('flight-read');
     expect(beneath).toHaveTextContent(/^no pairing within your limits read/);
-    expect(within(beneath).getByTestId('flight-read-pairing')).toHaveTextContent(/^from/);
+    // why: final review B-M2: "sellers not read" on every "from" price, as the block's Back line says it
+    expect(within(beneath).getByTestId('flight-read-pairing')).toHaveTextContent(/^from.*· sellers not read/);
     expect(within(beneath).getByTestId('price-cell')).toHaveTextContent('£1,204');
   });
 
