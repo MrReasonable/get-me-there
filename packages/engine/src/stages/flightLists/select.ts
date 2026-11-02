@@ -77,8 +77,8 @@ export const OUTBOUND_ONLY: ReusePlan = Object.freeze({
  * `fresh` share: a newest list is reusable when it is `read` and younger than 0.9 × `refreshHours`, and either no
  * return phase is planned, or its return status is finished (`read` or `no-outbound`) under stored limits equal to the
  * current ones and, with the booking read planned, its return status is `no-outbound` or its booking status is finished
- * (`read` or `no-pairing`), or its `transientStreak` is 2 (its two newest lists both ended transient: it waits for its
- * refresh). A `failed` list, an older one, and a phase-less, transient, `not-verified` or other-limit one are read.
+ * (`read` or `no-pairing`), or its `transientStreak` is 2 (its two newest lists both ended with a return or booking status
+ * that is read again: it waits for its refresh). A `failed` list, an older one, and a phase-less, transient, `not-verified` or other-limit one are read.
  */
 export function listReusable(
   n: NewestList,

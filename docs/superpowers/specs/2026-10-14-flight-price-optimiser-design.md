@@ -3030,7 +3030,9 @@ finish: completed, or the stop's status with its stored cause ("Stop causes" bel
   (`not-configured`) or the cabin is not economy (`cabin`); `fresh` when the
   newest list for that cell is `read`, younger than 0.9 × the refresh, and,
   under the phase the read would send (none with fewer than
-  `FLIGHT_LIST_PAGES_PER_PAIR_MAX` pages of month headroom), either no return
+  `FLIGHT_LIST_PAGES_PER_PAIR_MAX` pages of month headroom; the whole return
+  phase, booking read included, while no worker flags have been read since
+  boot, since the read's own preflight may report them), either no return
   phase is planned for this worker, or its return status is
   finished under limits equal to the current ones and, when a booking read is
   planned, its return status is `no-outbound` or its booking status is

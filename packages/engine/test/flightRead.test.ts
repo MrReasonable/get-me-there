@@ -156,7 +156,9 @@ describe('readFlightList refusals (before any worker call or ledger row)', () =>
   });
 
   it('fresh when the newest list for the figure cell is read and younger than 0.9 × refresh', async () => {
-    const { e, cam, reader } = setup();
+    // why: the worker's preflight states its flags (none verified here), so the second read is judged by them; with
+    // the flags unread a young outbound-only list is read again (21.6 re-review N2, the return-leg block below)
+    const { e, cam, reader } = setup({}, {}, { preflight: { ok: true, flags: {} } });
     const r = await reader.read(e.definition.id, PAIR);
     if (!r.ok) throw new Error('started');
     await r.done;
@@ -597,8 +599,8 @@ describe('readFlightList with the return leg (spec rev 56 §8.1)', () => {
         { hoursAgo: 2, returns: notSettled() },
       ]),
     ).toBe('fresh');
-    // no return phase planned for this worker: any young read list, not-verified or phase-less included
-    expect(await askWith(null, [{ hoursAgo: 1, returns: null }])).toBe('fresh');
+    // no return phase planned for this worker (its flags read, the return flag off): any young read list, not-verified
+    // or phase-less included
     expect(await askWith({ RETURN_SELECT_VERIFIED: false }, [{ hoursAgo: 1, returns: notSettled() }])).toBe(
       'fresh',
     );
@@ -654,6 +656,17 @@ describe('readFlightList with the return leg (spec rev 56 §8.1)', () => {
     expect(s.cam.flightCalls).toHaveLength(0);
     // with 2 pages the same list is read again (a return phase is planned)
     expect(await askWith(BOTH, [{ hoursAgo: 1, returns: null }])).toBe('read');
+  });
+
+  it('21.6 re-review N2: with the flags unread (no preflight since the app started) a young outbound-only list is read', async () => {
+    // why: the read's own preflight may report the return flags, so it is judged as planning the whole return phase,
+    // as the read button states 2 pages then (prov-008)
+    expect(await askWith(null, [{ hoursAgo: 1, returns: null }])).toBe('read');
+    expect(await askWith(null, [{ hoursAgo: 1, returns: returnsOf() }])).toBe('fresh');
+    // with 1 page of headroom the read would be outbound-only whatever the flags say: fresh
+    const s = flagged(null, {}, { monthlyCap: 1 });
+    seed(s.e, [{ hoursAgo: 1, returns: null }]);
+    expect(await s.reader.read(s.e.definition.id, PAIR)).toEqual({ ok: false, code: 'fresh' });
   });
 
   it('the boundary: a finished list exactly 0.9 × refresh old (151.2 h) is read; one just younger is fresh', async () => {

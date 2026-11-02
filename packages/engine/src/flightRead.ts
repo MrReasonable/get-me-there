@@ -130,6 +130,21 @@ function phaseOf(
   return { returnLimits: flightLimitsOf(def.constraints), booking: flags?.BOOKING_SELECT_VERIFIED === true };
 }
 
+/**
+ * The return phase the on-demand `fresh` check judges a list by (21.6 re-review N2). With the worker's flags unread (no
+ * preflight since the app started) the read's own preflight may report the return flags, so the read is judged as
+ * planning the whole return phase, as the read button states 2 pages then (prov-008): a young outbound-only list is
+ * read again rather than refused as fresh. With the flags read, the phase the read would send (`phaseOf`).
+ */
+function freshPhaseOf(
+  ctx: EngineContext,
+  def: SearchDefinition,
+): Pick<FlightListQuery, 'returnLimits' | 'booking'> {
+  if (ctx.workerFlags.get(FLIGHT_LIST_PROVIDER) !== null) return phaseOf(ctx, def);
+  if (monthHeadroom(ctx) < FLIGHT_LIST_PAGES_PER_PAIR_MAX) return {};
+  return { returnLimits: flightLimitsOf(def.constraints), booking: true };
+}
+
 /** The reader the engine owns (one per engine): one read at a time, through the engine's one browser lease. */
 export function createFlightReader(ctx: EngineContext): FlightReader {
   let current: { mark: FlightReadMark; done: Promise<void>; abort: AbortController } | null = null;
@@ -240,10 +255,11 @@ export function createFlightReader(ctx: EngineContext): FlightReader {
         def.cabin,
         ctx.pointOfSaleOf(FLIGHT_LIST_PROVIDER),
       );
-      // why: spec rev 56 §8.1: the step's reuse rule, under the return phase this read would send (`phaseOf`: the
-      // worker's last reported flags, outbound-only below 2 pages of the month, 21.6 review M8), so a young transient,
-      // not-verified, other-limit or phase-less list is read; the date pair departs after today here
-      const phase = phaseOf(ctx, def);
+      // why: spec rev 56 §8.1: the step's reuse rule, under the return phase this read would send (`freshPhaseOf`: the
+      // worker's last reported flags, the whole phase while they are unread, outbound-only below 2 pages of the month,
+      // 21.6 review M8), so a young transient, not-verified, other-limit or phase-less list is read; the date pair
+      // departs after today here
+      const phase = freshPhaseOf(ctx, def);
       const fresh =
         newest !== undefined &&
         listReusable(newestListOf(newest), ctx.clock.now(), refreshHoursOf(def, FLIGHT_LIST_PROVIDER), {

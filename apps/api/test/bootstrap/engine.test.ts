@@ -124,6 +124,9 @@ describe('engineFor: the ranking for the flight lists (spec rev 55 §8.1)', () =
     const pair = { departureDate: one.departureDate, returnDate: one.returnDate };
     // why: the harness's own engine is built without the ranking; the app's engine is built by engineFor
     expect(await h.engine.readFlightList(def.id, pair)).toEqual({ ok: false, code: 'no_price' });
+    // why: the worker's flags read (none verified), so the young outbound-only list is fresh; with them unread it is
+    // read again (21.6 re-review N2)
+    app.setWorkerFlags('camoufox', {});
     expect(await app.readFlightList(def.id, pair)).toEqual({ ok: false, code: 'fresh' });
     await app.shutdown();
   });
