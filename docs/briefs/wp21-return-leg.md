@@ -584,15 +584,14 @@ export const PAIRING_READ = ['not-read', 'outbound-only', 'no-pairing-read', 'ov
 //   S.returns (confirmed) and S.booking (the hypothesis), both flags false, reclaim, check(…, pages), settle(…, pagesReserved, pagesLoaded), claim(…, pages,
 //   whole), the recorder kinds and their recorded suites
 // selectors.ts (Task 21.3): S.returns dated (the hypothesis as recorded: heading /^(?:Top |Other )?[Rr]eturning flights$/; resultLink the outbound's "From"
-//   form only); S.booking dated and gains priceRangeHeading: RegExp (a heading of the shape "£<price> <words> – £<price> <words>", observed on both booking
-//   recordings) and grouped: RegExp (the grouped "View <seller>, …" control, counted, never activated); SELECTORS_VERSION re-dated;
+//   form only); S.booking dated and gains grouped: RegExp (the grouped "View <seller>, …" control, counted, never activated); SELECTORS_VERSION re-dated;
 //   PROOFS['darwin-arm64'].RETURN_SELECT_VERIFIED and .BOOKING_SELECT_VERIFIED; the Lows deferred from 21.0: the price comparison's currency read from the
 //   offer name's currency phrase against the request's (never a GBP fallback), one pence helper shared by names.ts, classify.ts and offers.ts over core's
 //   MINOR_EXPONENT, a mixed-currency test
-// // classify.ts (Task 21.3): PageFacts.text gains priceRangeHeading?: boolean (filled by readFacts on 'booking'; optional so the existing literals stand); the
-//   return branch's recorded conditions: text.returnHeading && resultLinks > 0 && cheapestTabs.length === 0 && dateGridButtons === 0 (results, rule
+// // classify.ts (Task 21.3): the return branch's recorded conditions: text.returnHeading && resultLinks > 0 && cheapestTabs.length === 0 && dateGridButtons === 0 (results, rule
 //   'returns'); the booking branch: when S.BOOKING_SELECT_VERIFIED, results (rule 'booking') when the URL's path is S.booking.path, no return heading,
-//   outboundLinks === 0, cheapestTabs.length === 0, dateGridButtons === 0, text.priceRangeHeading and offers ≥ 1, else blocked unrecognised
+//   outboundLinks === 0, cheapestTabs.length === 0, dateGridButtons === 0 and offers ≥ 1 (the page's price-comparison note above the offers is
+//   never read: its wording changes with the fare, select-return/2026-11-01 and 2026-11-02), else blocked unrecognised
 //   'not-booking-view' (the flag off → always 'not-booking-view'); the blocked rules first on both; the Cheapest view's status line that matches the
 //   no-flights pattern (recorded on every Cheapest view and three of four return views) never classifies a changed view that has links
 // guard.ts (Task 21.3; R-worst): GuardState gains activationGate: boolean and gateRefusals: number; while the gate is on (from an activation's press until its
@@ -614,8 +613,7 @@ export const PAIRING_READ = ['not-read', 'outbound-only', 'no-pairing-read', 'ov
 //   the list readers end a page: prov-int-r3-008); the cheapest BOOKING_OFFERS_MAX kept by price then page order, offersStated the count before the cut
 //   when above the cut, else null
 // // driver.ts (Task 21.3): bookingFacts(d): Promise<BookingFacts { offerNames: Array<string | null>; moreOptions: number; grouped: number }> (offer buttons in
-//   main by S.booking.offer; the expansion controls in main; grouped buttons by S.booking.grouped, never activated); readFacts on 'booking' fills
-//   text.priceRangeHeading
+//   main by S.booking.offer; the expansion controls in main; grouped buttons by S.booking.grouped, never activated)
 // served.ts (Task 21.3; a leaf: the served sequence — settle on Best, checkForm, the Cheapest flow with the session's fallback — as one exported function
 //   servedSequence(driver, S, deps, cheapestDeadline: () => Deadline, …) taking its Cheapest deadline as a parameter: `budget.next` on the first view,
 //   `() => budget.nextFor(pageTimeoutMs)` on the reload (prov-int-r3-004); imported by session.ts, returnPhase.ts and recordSelect.ts (rules.test.ts pins
@@ -1162,8 +1160,8 @@ worker items.
     unparsed + other, false otherwise.
   - `flights.test.ts` (extend): `readFlights` reports `parsed` (35 of them, each with its name) and `names` aligned
     with the 30 kept; the recorded parity suites unchanged.
-  - `selectors.test.ts`, `classify.test.ts` and `ready.test.ts` (extend): `S.returns` and `S.booking` are the dated values (`priceRangeHeading`
-    and `grouped` added; `grouped` never matches an offer or the expansion control), `SELECTORS_VERSION` re-dated; the return branch: the
+  - `selectors.test.ts`, `classify.test.ts` and `ready.test.ts` (extend): `S.returns` and `S.booking` are the dated values (`grouped`
+    added; `grouped` never matches an offer or the expansion control), `SELECTORS_VERSION` re-dated; the return branch: the
     heading, a link, no Cheapest tab and no Date grid button pass; one Cheapest tab, or one Date grid button, or no heading, or no link is
     `not-return-view`; `outboundLinks` and the link counts are not consulted (4 and 15 both pass); the booking branch with the flag on: the
     booking path, no return heading, `outboundLinks 0`, no tab, no Date grid button, the price-range heading and one offer pass (`booking`);
