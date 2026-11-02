@@ -16,6 +16,7 @@ import {
   workerAnswerSchema,
 } from '@gmt/core';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { pageBudget } from '../src/budget.js';
 import { CooldownStore } from '../src/cooldown.js';
 import { createDriver, type Driver, type RequestLike } from '../src/driver.js';
 import type { FlightsRead } from '../src/flights.js';
@@ -24,21 +25,13 @@ import { type MonthlyCaps, MonthlyCounter } from '../src/monthly.js';
 import { OFFER_GRAMMAR_VERSION } from '../src/offers.js';
 import { Pacer } from '../src/pacer.js';
 import { Refusal } from '../src/refusal.js';
-import { flightsWithPicks, refusalOf, unverifiedReturns } from '../src/returnPhase.js';
+import { flightsWithPicks, refusalOf, returnPhase, unverifiedReturns } from '../src/returnPhase.js';
 import { SELECTORS, type Selectors } from '../src/selectors.js';
 import { PageSession, pageCapMs } from '../src/session.js';
 import { loadSocs } from '../src/socs.js';
-import type { Deadline } from '../src/timers.js';
+import { type Deadline, DeadlineExceeded } from '../src/timers.js';
 import { FakeContext } from './support/fakeContext.js';
-import {
-  descendants,
-  type FakeNode,
-  type FakePage,
-  n,
-  resultsTree,
-  text,
-  viewMore,
-} from './support/fakePage.js';
+import { descendants, type FakeNode, FakePage, n, resultsTree, text, viewMore } from './support/fakePage.js';
 import { memoryLog } from './support/log.js';
 import { SYNTHETIC_REJECT } from './support/socsValues.js';
 import { fakeTimers, flush } from './support/timers.js';
@@ -231,6 +224,7 @@ function setup(o: Opts = {}) {
     clock,
   });
   const refusal = new Refusal({ dir: dataDir, clock });
+  const log = memoryLog();
   const loads = o.loads ?? [
     { best: [best()], cheapest: [cheapest()] },
     { best: [best()], cheapest: [cheapest()] },
@@ -298,7 +292,7 @@ function setup(o: Opts = {}) {
     timers,
     selectors: o.selectors ?? VERIFIED,
     pageTimeoutMs: 90_000,
-    log: memoryLog(),
+    log,
     versions,
     driverFor: (p, g, S) => {
       seen.guard = g;
@@ -325,6 +319,7 @@ function setup(o: Opts = {}) {
     session,
     seen,
     page0,
+    log,
   };
 }
 type Setup = ReturnType<typeof setup>;
@@ -345,6 +340,16 @@ function navigate(c: FakeContext, url: string): void {
   };
   c.emitRequest(r);
   void c.routeRequest(r);
+}
+/** A main-frame navigation the route alone sees (no request event, so no hop): the guard's refusal is its only record. */
+function routeOnly(c: FakeContext, url: string): void {
+  void c.routeRequest({
+    url: () => url,
+    method: () => 'GET',
+    isNavigationRequest: () => true,
+    redirectedFrom: () => null,
+    frame: () => ({ url: () => '', parentFrame: () => null }),
+  });
 }
 const flight = (pounds: number, o: { stops?: number; minutes?: number; offset?: number } = {}) => ({
   departsLocal: '09:05',
@@ -489,6 +494,20 @@ describe('the whole phase (spec rev 56 §2: the outbound, its returns, the shown
     expect(a.minMinor).toBe(40_000);
     expect(t.page0().calls.presses[0]).toBe(`Enter:link:${DEAR}`);
   });
+  it('the return view’s links are read by the return pattern, never the outbound one', async () => {
+    // why: an outbound pattern that reads only the departing leg's names, so a read by it would find no return
+    const S: Selectors = {
+      ...VERIFIED,
+      results: {
+        ...VERIFIED.results,
+        resultLink: /^From [\d,]+ [A-Za-z ]+ round trip total\. .* Leaves Heathrow Airport /,
+      },
+    };
+    const t = setup({ selectors: S });
+    const a = flightsOf((await t.session.page(REQ)).answer);
+    expect(a.returns?.attempts[0]?.returns.map((x) => x.fromMinor)).toEqual([120_400, 118_000, 125_000]);
+    expect(a.returns?.booking?.status).toBe('read');
+  });
 });
 
 describe('the second attempt (Ian’s ruling 2: the next outbound, from a fresh load of the list page)', () => {
@@ -626,9 +645,38 @@ describe('the second attempt (Ian’s ruling 2: the next outbound, from a fresh 
     expect(a.returns?.triedAll).toBe(true);
     expect(t.page0().calls.gotos).toHaveLength(1);
   });
+  it('two flights read, the first’s returns all over a limit: the second, the one left untried, is selected', async () => {
+    const names = [PICK, O520];
+    const t = setup({
+      ...second(),
+      loads: [
+        { best: [best(names)], cheapest: [cheapest(names)] },
+        { best: [best(names)], cheapest: [cheapest(names)] },
+      ],
+    });
+    const a = flightsOf((await t.session.page(REQ)).answer);
+    expect(a.returns?.attempts.map((x) => x.outboundIndex)).toEqual([0, 1]);
+    expect(a.returns?.triedAll).toBe(true);
+    expect(t.page0().calls.gotos).toHaveLength(2);
+  });
+  it('a return outside the departure window still fits (the windows apply to the outbound only): no second attempt', async () => {
+    const t = setup();
+    const window = { from: '08:00', to: '10:00' };
+    const a = flightsOf(
+      (await t.session.page({ ...REQ, returnLimits: { ...LIMITS, departureWindowLocal: window } })).answer,
+    );
+    expect(a.returns).toMatchObject({
+      status: 'read',
+      rule: null,
+      booking: { status: 'read', attempt: 0, returnIndex: 1 },
+    });
+    expect(a.returns?.attempts).toHaveLength(1);
+    expect(t.page0().calls.gotos).toHaveLength(1);
+  });
   it('a request with booking false makes the same second attempt and no booking read', async () => {
     const t = setup(second());
     const a = flightsOf((await t.session.page({ ...REQ, booking: false })).answer);
+    expect(a.returns?.status).toBe('read');
     expect(a.returns?.attempts).toHaveLength(2);
     expect(a.returns?.booking).toBeNull();
     expect(t.page0().calls.actions).toHaveLength(4);
@@ -727,6 +775,8 @@ describe('the second attempt (Ian’s ruling 2: the next outbound, from a fresh 
     const r = await t.session.page(REQ);
     expect(r.answer).toMatchObject({ kind: 'blocked', page: 'unusual-traffic', pagesLoaded: 2 });
     expect(t.cooldown.active()?.cause).toBe('unusual-traffic');
+    // the stop is the reload's own: no second outbound is selected on the blocked page
+    expect(t.page0().calls.actions).toEqual([`focus:link:${PICK}`, `press:Enter:link:${PICK}:focused`]);
   });
   it('the spacing wait running out of its own budget: read, rule spacing, one attempt, the booking read of attempt 0', async () => {
     const t = setup(
@@ -807,6 +857,85 @@ describe('the second attempt (Ian’s ruling 2: the next outbound, from a fresh 
       rule: 'reload:not-settled',
       booking: { status: 'skipped', rule: 'reload:not-settled' },
     });
+  });
+  it('the reloaded list’s read at its deadline: read, rule reload:not-settled, the booking skipped', async () => {
+    let lists = 0;
+    const t = setup({
+      ...second(),
+      driver: (d) => ({
+        ...d,
+        listFacts: async (...args: Parameters<Driver['listFacts']>) => {
+          lists++;
+          // why: read 3 is the reloaded list page's
+          if (lists === 3) throw new DeadlineExceeded();
+          return d.listFacts(...args);
+        },
+      }),
+    });
+    const a = expectTransient(t, (await t.session.page(REQ)).answer, 2);
+    expect(a.returns).toMatchObject({
+      status: 'read',
+      rule: 'reload:not-settled',
+      booking: { status: 'skipped', rule: 'reload:not-settled' },
+    });
+    expect(a.returns?.attempts).toHaveLength(1);
+  });
+  it('a reload the guard refuses (its load sent off the allowlist): read, rule reload:guard-refused:off-allowlist', async () => {
+    let gotos = 0;
+    const t = setup({
+      ...second(),
+      page: (p, c) => {
+        const goto = p.goto.bind(p);
+        p.goto = async (u, o) => {
+          gotos++;
+          if (gotos === 2) {
+            navigate(c, 'https://seller.example/checkout');
+            throw new Error('net::ERR_BLOCKED_BY_CLIENT');
+          }
+          return goto(u, o);
+        };
+      },
+    });
+    const a = expectTransient(t, (await t.session.page(REQ)).answer, 1);
+    expect(a.returns).toMatchObject({
+      status: 'read',
+      rule: 'reload:guard-refused:off-allowlist',
+      booking: { status: 'skipped', rule: 'reload:guard-refused:off-allowlist' },
+    });
+  });
+  it('a consent refusal during the reload is the page’s stop, never a reload end', async () => {
+    let gotos = 0;
+    const t = setup({
+      ...second(),
+      shape: (c) => {
+        c.afterGoto = (jar) => {
+          gotos++;
+          if (gotos === 2) routeOnly(c, 'https://consent.google.com/ml');
+          return jar;
+        };
+      },
+    });
+    const r = await t.session.page(REQ);
+    expect(r.answer).toMatchObject({
+      kind: 'blocked',
+      page: 'consent-unhandled',
+      rule: 'guard-refused:consent-unhandled',
+    });
+  });
+  it('a spacing wait that fails with an error of its own (an unwritable pacer record): read, rule reload:browser-error', async () => {
+    const reclaim = vi
+      .spyOn(Pacer.prototype, 'reclaim')
+      .mockRejectedValueOnce(new Error('EACCES: permission denied'));
+    const t = setup(second());
+    const a = expectTransient(t, (await t.session.page(REQ)).answer, 1);
+    expect(a.returns).toMatchObject({
+      status: 'read',
+      rule: 'reload:browser-error',
+      booking: { status: 'skipped', rule: 'reload:browser-error' },
+    });
+    expect(a.returns?.attempts).toHaveLength(1);
+    expect(t.page0().calls.gotos).toHaveLength(1);
+    reclaim.mockRestore();
   });
   // why: review M4: a second outbound whose selection failed is no attempt: it is not placed among the 30 (no flight
   // the list kept is dropped for it), and it still counts as untried for triedAll
@@ -904,6 +1033,7 @@ describe('the phase’s other ends', () => {
       },
     });
     expect(t.page0().calls.actions).toEqual([]);
+    expect(a.flights).toEqual([]);
     expect(a.pagesLoaded).toBe(1);
   });
   it('a read attempt whose returns are all another cell’s: listed none-for-cell, the booking no-pairing', async () => {
@@ -915,7 +1045,11 @@ describe('the phase’s other ends', () => {
     });
     const a = flightsOf((await t.session.page(REQ)).answer);
     expect(a.returns?.attempts[0]).toMatchObject({ listed: 'none-for-cell', returns: [] });
-    expect(a.returns?.booking?.status).toBe('no-pairing');
+    expect(a.returns).toMatchObject({
+      status: 'read',
+      rule: null,
+      booking: { status: 'no-pairing', rule: null },
+    });
     expect(t.page0().calls.actions).toHaveLength(2);
   });
   it.each([
@@ -971,7 +1105,7 @@ describe('the phase’s other ends', () => {
   it('booking false: booking null, nothing activated after the returns', async () => {
     const t = setup();
     const a = flightsOf((await t.session.page({ ...REQ, booking: false })).answer);
-    expect(a.returns?.booking).toBeNull();
+    expect(a.returns).toMatchObject({ status: 'read', rule: null, booking: null });
     expect(t.page0().calls.actions).toHaveLength(2);
   });
   it('a request without returnLimits: nothing activated, no returns, no pagesLoaded key', async () => {
@@ -1154,6 +1288,149 @@ describe('transient ends of the return step (each through the shared helper)', (
     expect(a.returns).toMatchObject({ status: 'unrecognised', rule: 'unexpected-navigation', attempts: [] });
     expect(t.seen.guard?.gateRefusals).toBe(1);
   });
+  // why: the route alone (no hop for the classifier to read), so only the guard's record can end the poll
+  it.each([
+    ['an allowlisted one, held by the gate', BOOKING_URL, 'unexpected-navigation'],
+    ['one off the allowlist, refused', 'https://seller.example/checkout', 'guard-refused:off-allowlist'],
+  ])(
+    'a navigation at a press that changes nothing (%s): the poll ends at once with it, the gate off after',
+    async (_what, url, rule) => {
+      const t = setup({ press: { [PICK]: { trees: [], also: (_p, c) => routeOnly(c, url) } } });
+      const start = t.timers.now();
+      const a = expectTransient(t, (await t.session.page(REQ)).answer, 1);
+      expect(a.returns).toMatchObject({ status: 'unrecognised', rule, attempts: [] });
+      // why: the poll that saw the navigation ends the step, never the step's 90 s deadline
+      expect(Date.parse(a.fetchedAt) - start).toBeLessThan(90_000);
+      expect(t.seen.guard?.activationGate).toBe(false);
+    },
+  );
+  it.each([
+    ['the view before the press, read at its deadline', 1, false, 'not-settled', 'select-outbound:pre-read'],
+    [
+      'the view before the press, read with the browser’s own error',
+      1,
+      true,
+      'unrecognised',
+      'select-outbound:browser-error',
+    ],
+    [
+      'a poll after the press, read with the browser’s own error',
+      2,
+      true,
+      'unrecognised',
+      'select-outbound:browser-error',
+    ],
+  ])('%s: the step’s end, the outbound flights kept', async (_what, nth, browser, status, rule) => {
+    let reads = 0;
+    const t = setup({
+      driver: (d) => ({
+        ...d,
+        readFacts: async (...args: Parameters<Driver['readFacts']>) => {
+          if (args[2] === 'returns') {
+            reads++;
+            if (reads === nth)
+              throw browser
+                ? new Error('Target page, context or browser has been closed')
+                : new DeadlineExceeded();
+          }
+          return d.readFacts(...args);
+        },
+      }),
+    });
+    const a = expectTransient(t, (await t.session.page(REQ)).answer, 1);
+    expect(a.flights).toEqual(FOUR);
+    expect(a.returns).toMatchObject({ status, rule, attempts: [] });
+  });
+  it('a navigation refused while the return view is read: that refusal, never a read attempt (R-refused)', async () => {
+    let lists = 0;
+    const t = setup({
+      driver: (d, c) => ({
+        ...d,
+        listFacts: async (...args: Parameters<Driver['listFacts']>) => {
+          const f = await d.listFacts(...args);
+          lists++;
+          // why: read 1 is the outbound list's, read 2 the return view's
+          if (lists === 2) navigate(c, 'https://seller.example/checkout');
+          return f;
+        },
+      }),
+    });
+    const a = expectTransient(t, (await t.session.page(REQ)).answer, 1);
+    expect(a.returns).toMatchObject({
+      status: 'unrecognised',
+      rule: 'guard-refused:off-allowlist',
+      attempts: [],
+    });
+    expect(t.page0().calls.actions).toHaveLength(2);
+  });
+});
+
+describe('a selection that fails as a step (two links of the pick’s name: find-outbound)', () => {
+  const twice = [...OUT, PICK];
+  const loads = [{ best: [best(twice)], cheapest: [cheapest(twice)] }];
+  it('the failed step’s page is classified once, with the gate off', async () => {
+    const gates: boolean[] = [];
+    const t = setup({
+      loads,
+      driver: (d) => ({
+        ...d,
+        readFacts: async (...args: Parameters<Driver['readFacts']>) => {
+          if (args[2] === 'returns') gates.push(t.seen.guard?.activationGate ?? true);
+          return d.readFacts(...args);
+        },
+      }),
+    });
+    const a = expectTransient(t, (await t.session.page(REQ)).answer, 1);
+    expect(a.returns).toMatchObject({ status: 'select-failed', rule: 'select-outbound:find-outbound' });
+    // the view before the press, then the failed step's one classification
+    expect(gates).toEqual([false, false]);
+  });
+  it('a navigation refused as the selection fails: that refusal, never select-failed', async () => {
+    const t = setup({
+      loads,
+      driver: (d, c) => ({
+        ...d,
+        clickOutbound: async (...args: Parameters<Driver['clickOutbound']>) => {
+          navigate(c, 'https://seller.example/checkout');
+          return d.clickOutbound(...args);
+        },
+      }),
+    });
+    const a = expectTransient(t, (await t.session.page(REQ)).answer, 1);
+    expect(a.returns).toMatchObject({
+      status: 'unrecognised',
+      rule: 'guard-refused:off-allowlist',
+      attempts: [],
+    });
+  });
+  it('the failed step’s classification meeting the deadline: select-failed with the selection’s step, never an error', async () => {
+    const periods: Deadline[] = [];
+    let reads = 0;
+    const t = setup({
+      loads,
+      driver: (d) => ({
+        ...d,
+        readFacts: async (...args: Parameters<Driver['readFacts']>) => {
+          if (args[2] === 'returns') {
+            reads++;
+            // why: read 2 is the classification: the selection's page period expires as it starts
+            const period = periods.at(-1);
+            if (reads === 2) for (let i = 0; i < 10 && period?.expired() === false; i++) t.timers.runOut();
+          }
+          return d.readFacts(...args);
+        },
+      }),
+    });
+    const deadline = t.timers.deadline.bind(t.timers);
+    t.timers.deadline = (ms) => {
+      const dl = deadline(ms);
+      if (ms === 90_000) periods.push(dl);
+      return dl;
+    };
+    const a = expectTransient(t, (await t.session.page(REQ)).answer, 1);
+    expect(periods.at(-1)?.expired()).toBe(true);
+    expect(a.returns).toMatchObject({ status: 'select-failed', rule: 'select-outbound:find-outbound' });
+  });
 });
 
 describe('transient ends of the booking step (the returns intact, returns read)', () => {
@@ -1165,21 +1442,46 @@ describe('transient ends of the booking step (the returns intact, returns read)'
     }
     return out;
   };
-  const booked = async (t: Setup) => {
+  const answered = async (t: Setup) => {
     const a = expectTransient(t, (await t.session.page(REQ)).answer, 1);
     expect(a.returns?.status).toBe('read');
     expect(a.returns?.attempts[0]?.returns).toHaveLength(3);
-    return a.returns?.booking;
+    return a;
   };
+  const booked = async (t: Setup) => (await answered(t)).returns?.booking;
+  /** The answer's versions once the offer reader ran: the offer grammar's date stated. */
+  const withGrammar = { ...versions, offerGrammar: OFFER_GRAMMAR_VERSION };
   it('the return’s press changes nothing: not-settled select-return:no-activation', async () => {
     const t = setup({ press: withPress({ [R1180]: undefined }) });
-    expect(await booked(t)).toMatchObject({
+    const a = await answered(t);
+    expect(a.returns?.booking).toMatchObject({
       status: 'not-settled',
       rule: 'select-return:no-activation',
       attempt: 0,
       returnIndex: 1,
+      expanded: false,
       offers: [],
     });
+    // why: no booking view was read, so the offer reader never ran
+    expect(a.versions).toEqual(versions);
+  });
+  it.each([
+    [1, 'the booking view’s read', 'not-settled', 'select-return:booking-facts', 4],
+    [2, 'the read after the expansion', 'expand-failed', 'select-more-options:booking-facts', 6],
+  ])('booking read %i (%s) at its deadline: %s %s', async (at, _what, status, rule, actions) => {
+    let reads = 0;
+    const t = setup({
+      driver: (d) => ({
+        ...d,
+        bookingFacts: async (dl) => {
+          reads++;
+          if (reads === at) throw new DeadlineExceeded();
+          return d.bookingFacts(dl);
+        },
+      }),
+    });
+    expect(await booked(t)).toMatchObject({ status, rule, expanded: false });
+    expect(t.page0().calls.actions).toHaveLength(actions);
   });
   it.each([
     ['off the booking path', { trees: [bookingTree()], url: RETURN_URL }],
@@ -1217,7 +1519,8 @@ describe('transient ends of the booking step (the returns intact, returns read)'
     const t = setup({
       press: withPress({ [R1180]: { trees: [bookingTree(INITIAL, { more: [] })], url: BOOKING_URL } }),
     });
-    expect(await booked(t)).toMatchObject({
+    const a = await answered(t);
+    expect(a.returns?.booking).toMatchObject({
       status: 'read',
       rule: null,
       expanded: false,
@@ -1227,6 +1530,7 @@ describe('transient ends of the booking step (the returns intact, returns read)'
         { seller: 'QQ Travel', fare: null, priceMinor: 121_000 },
       ],
     });
+    expect(a.versions).toEqual(withGrammar);
     expect(t.page0().calls.actions).toHaveLength(4);
   });
   it('two or more expansion controls: unrecognised more-options-count, nothing pressed, no offer kept (A9)', async () => {
@@ -1239,9 +1543,12 @@ describe('transient ends of the booking step (the returns intact, returns read)'
       }),
     });
     // why: review M2: the end keeps no offer (A9), but its counts as read
-    expect(await booked(t)).toMatchObject({
+    const a = await answered(t);
+    expect(a.versions).toEqual(withGrammar);
+    expect(a.returns?.booking).toMatchObject({
       status: 'unrecognised',
       rule: 'more-options-count',
+      expanded: false,
       offers: [],
       offersStated: null,
       grouped: 1,
@@ -1286,20 +1593,28 @@ describe('transient ends of the booking step (the returns intact, returns read)'
           },
         }),
       });
-      const b = await booked(t);
-      expect(b).toMatchObject({ status: 'unrecognised', rule: 'unexpected-navigation', offers: [] });
+      const a = await answered(t);
+      const b = a.returns?.booking;
+      expect(b).toMatchObject({
+        status: 'unrecognised',
+        rule: 'unexpected-navigation',
+        expanded: false,
+        offers: [],
+      });
       // why: review M2: the expansion's end keeps the counts of the view read before it; the return's read none
       expect([b?.grouped, b?.moreControl]).toEqual(name === MORE ? [1, true] : [0, false]);
+      // the offer reader ran on the booking view before the expansion; never before the return's view was read
+      expect(a.versions).toEqual(name === MORE ? withGrammar : versions);
     },
   );
   // why: review M3: a seller's navigation refused between the booking view's settle and its read ends the read with
   // that refusal (never a `read` booking over a page the guard refused), before and after the expansion
   it.each([
-    [1, 'the first read', 4],
-    [2, 'the read after the expansion', 6],
+    [1, 'the first read', 4, false],
+    [2, 'the read after the expansion', 6, true],
   ])(
     'a navigation refused during booking read %i (%s): unrecognised guard-refused:off-allowlist',
-    async (at, _what, actions) => {
+    async (at, _what, actions, grammar) => {
       let reads = 0;
       const t = setup({
         driver: (d, c) => ({
@@ -1312,11 +1627,14 @@ describe('transient ends of the booking step (the returns intact, returns read)'
           },
         }),
       });
-      expect(await booked(t)).toMatchObject({
+      const a = await answered(t);
+      expect(a.returns?.booking).toMatchObject({
         status: 'unrecognised',
         rule: 'guard-refused:off-allowlist',
         offers: [],
       });
+      // the offer grammar is stated only once the offer reader ran (after the first read, before the expansion)
+      expect(a.versions).toEqual(grammar ? withGrammar : versions);
       expect(t.page0().calls.actions).toHaveLength(actions);
       expect(t.cooldown.active()).toBeNull();
     },
@@ -1330,7 +1648,9 @@ describe('transient ends of the booking step (the returns intact, returns read)'
         },
       }),
     });
-    expect(await booked(t)).toMatchObject({
+    const a = await answered(t);
+    expect(a.versions).toEqual(withGrammar);
+    expect(a.returns?.booking).toMatchObject({
       status: 'unrecognised',
       rule: 'currency',
       offers: [],
@@ -1352,7 +1672,9 @@ describe('transient ends of the booking step (the returns intact, returns read)'
         },
       }),
     });
-    expect(await booked(t)).toMatchObject({
+    const a = await answered(t);
+    expect(a.versions).toEqual(withGrammar);
+    expect(a.returns?.booking).toMatchObject({
       status: 'unrecognised',
       rule: 'currency',
       offers: [],
@@ -1543,13 +1865,13 @@ describe('a browser error inside the return phase keeps what was read (final rev
   const CLOSED = 'Target page, context or browser has been closed';
   /** A driver whose `method` throws the browser's error on its `nth` call (1-based); every other call passes. */
   const failing =
-    (method: 'listFacts' | 'bookingFacts', nth: number) =>
+    (method: 'listFacts' | 'bookingFacts', nth: number, message = CLOSED) =>
     (d: Driver): Driver => {
       let calls = 0;
       const real = d[method].bind(d);
       const wrapped: Driver[typeof method] = async (...args: Parameters<Driver[typeof method]>) => {
         calls++;
-        if (calls === nth) throw new Error(CLOSED);
+        if (calls === nth) throw new Error(message);
         // why: the real reader, untouched, for every other call
         return Reflect.apply(real, d, args);
       };
@@ -1566,6 +1888,75 @@ describe('a browser error inside the return phase keeps what was read (final rev
       attempts: [],
       booking: { status: 'skipped', rule: 'select-outbound:browser-error' },
     });
+  });
+  it('the failed step and the error’s text logged at warn, without a URL’s query, cut to 200 characters', async () => {
+    const long = `${CLOSED} while reading https://www.google.com/travel/flights/search?tfs=r ${'x'.repeat(300)}`;
+    const t = setup({ driver: failing('listFacts', 2, long) });
+    expectTransient(t, (await t.session.page(REQ)).answer, 1);
+    const line = t.log.lines.find((l) => l.msg === 'return phase step failed in the browser');
+    expect(line).toMatchObject({ level: 'warn', o: { flow: 'select-outbound' } });
+    const o = line?.o ?? {};
+    expect(Object.keys(o).sort()).toEqual(['error', 'flow']);
+    const error = 'error' in o ? String(o.error) : '';
+    expect(error).toHaveLength(200);
+    expect(error.startsWith(`${CLOSED} while reading `)).toBe(true);
+    expect(error).not.toContain('tfs=');
+  });
+  it('a browser error after a navigation the guard refused is that refusal: unrecognised guard-refused:off-allowlist', async () => {
+    let lists = 0;
+    const t = setup({
+      driver: (d, c) => ({
+        ...d,
+        listFacts: async (...args: Parameters<Driver['listFacts']>) => {
+          lists++;
+          if (lists === 2) {
+            navigate(c, 'https://seller.example/checkout');
+            throw new Error(CLOSED);
+          }
+          return d.listFacts(...args);
+        },
+      }),
+    });
+    const a = expectTransient(t, (await t.session.page(REQ)).answer, 1);
+    expect(a.returns).toMatchObject({
+      status: 'unrecognised',
+      rule: 'guard-refused:off-allowlist',
+      attempts: [],
+    });
+    expect(t.log.lines.some((l) => l.msg === 'return phase step failed in the browser')).toBe(false);
+  });
+  it('the selection’s press fails with the browser’s own error: unrecognised select-outbound:browser-error', async () => {
+    const t = setup({
+      driver: (d) => ({
+        ...d,
+        clickOutbound: async () => {
+          throw new Error(CLOSED);
+        },
+      }),
+    });
+    const a = expectTransient(t, (await t.session.page(REQ)).answer, 1);
+    expect(a.returns).toMatchObject({
+      status: 'unrecognised',
+      rule: 'select-outbound:browser-error',
+      attempts: [],
+    });
+  });
+  it('the second selection’s return view read fails: read, rule select-outbound:browser-error, the booking skipped second-selection', async () => {
+    const t = setup({
+      press: {
+        [PICK]: { trees: [returnTree([rt('1,300', { stops: '2 stops' })])], url: RETURN_URL },
+        [O520]: { trees: [returnTree()], url: RETURN_URL },
+      },
+      // why: read 4 is the second selection's return view (1 the list, 2 the first return view, 3 the reloaded list)
+      driver: failing('listFacts', 4),
+    });
+    const a = expectTransient(t, (await t.session.page(REQ)).answer, 2);
+    expect(a.returns).toMatchObject({
+      status: 'read',
+      rule: 'select-outbound:browser-error',
+      booking: { status: 'skipped', rule: 'second-selection' },
+    });
+    expect(a.returns?.attempts).toHaveLength(1);
   });
   it('the reload’s read fails: read, rule reload:browser-error, attempt 0’s returns kept, the booking skipped', async () => {
     const R2S1 = rt('1,300', { stops: '2 stops' });
@@ -1685,6 +2076,90 @@ describe('the phase’s pure helpers', () => {
     expect(both.flights).not.toContain(many[5]?.flight);
     // a short list takes the pick without dropping any
     expect(flightsWithPicks(parsed, kept.slice(0, 2), [3]).flights).toHaveLength(3);
+  });
+  it('flightsWithPicks: a pick outside a full list drops the dearest non-pick wherever it sits, never growing the list', () => {
+    // 31 read; the dearest (index 1, £999) left out of the 30 kept and picked: the dearest kept flight (£800) goes
+    const many = Array.from({ length: 31 }, (_, i) => ({
+      flight: f(i === 1 ? 999 : i === 7 ? 800 : 100 + i),
+    }));
+    const r = flightsWithPicks(
+      many,
+      many.filter((_, i) => i !== 1).map((p) => p.flight),
+      [1],
+    );
+    expect(r.flights).toHaveLength(30);
+    expect(r.flights).not.toContain(many[7]?.flight);
+    expect(r.indexOf(1)).toBe(1);
+    // the dearest kept flight first in page order (index 0) is the one dropped
+    const first = Array.from({ length: 31 }, (_, i) => ({
+      flight: f(i === 0 ? 800 : i === 30 ? 999 : 100 + i),
+    }));
+    const r0 = flightsWithPicks(
+      first,
+      first.slice(0, 30).map((p) => p.flight),
+      [30],
+    );
+    expect(r0.flights).toEqual(first.slice(1).map((p) => p.flight));
+  });
+  it('flightsWithPicks: the flights in page order, a pick before the kept flights placed first; an index no flight has never placed', () => {
+    const parsed = [f(900), f(400), f(500), f(300)].map((flight) => ({ flight }));
+    const kept = parsed.slice(1).map((p) => p.flight);
+    const r = flightsWithPicks(parsed, kept, [0]);
+    expect(r.flights).toEqual(parsed.map((p) => p.flight));
+    expect([0, 1, 2, 3].map((i) => r.indexOf(i))).toEqual([0, 1, 2, 3]);
+    expect(flightsWithPicks(parsed, kept, [9]).flights).toEqual(kept);
+  });
+  it('returnPhase: no outbound unless the read lists flights and parsed one; nothing activated, the kept flights as they are', async () => {
+    const timers = fakeTimers();
+    const page = new FakePage(null);
+    const guard: GuardState = {
+      hops: [],
+      frameUrls: [],
+      refused: null,
+      documentLoads: 1,
+      documentStarts: 1,
+      activationGate: false,
+      gateRefusals: 0,
+      reservation: 2,
+      held: null,
+    };
+    const run = (outbound: FlightsRead) =>
+      returnPhase({
+        driver: createDriver(page, guard, VERIFIED),
+        guard,
+        budget: pageBudget(timers, 90_000, timers.now()),
+        pacer: { reclaim: async () => undefined, spacingMs: 30_000 },
+        url: URL0,
+        req: REQ,
+        outbound,
+        view: 'cheapest',
+        S: VERIFIED,
+        timers,
+        log: memoryLog(),
+        pollMs: 2000,
+        startedAt: timers.now(),
+        admitted: FLIGHT_LIST_PAGES_PER_PAIR_MAX,
+        pageTimeoutMs: 90_000,
+      });
+    const kept = f(478);
+    const none = (triedAll: boolean) => ({
+      limits: LIMITS,
+      status: 'no-outbound',
+      rule: null,
+      attempts: [],
+      triedAll,
+      booking: expect.objectContaining({ status: 'no-pairing', rule: null, attempt: null }),
+    });
+    // a read listing flights with none parsed, and one with a flight parsed but none listed for the cell
+    expect(await run({ ...emptyRead(), flights: [kept] })).toEqual({
+      returns: none(true),
+      flights: [kept],
+      offerGrammar: null,
+    });
+    expect(
+      await run({ ...emptyRead(), listed: 'none-for-cell', parsed: [{ flight: kept, name: PICK }] }),
+    ).toEqual({ returns: none(false), flights: [], offerGrammar: null });
+    expect(page.calls.actions).toEqual([]);
   });
   it('unverifiedReturns: not-verified, no attempt, the booking not-verified or null, triedAll by the limits', () => {
     const outbound = { ...emptyRead(), parsed: [{ flight: f(400), name: 'x' }] };

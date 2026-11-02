@@ -2,7 +2,7 @@
   "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
   "testRunner": "command",
   "commandRunner": {
-    "command": "pnpm exec vitest run --coverage.enabled=false --bail=1 test/scheduler test/parse-cron.test.ts test/consentNotice.test.ts test/stopCause.test.ts test/stopWrites.test.ts test/execute.test.ts test/askedPairs.test.ts test/askedPairs.engine.test.ts test/stages/flightListsSelect.test.ts test/estimate.test.ts test/stages/flightLists.test.ts test/stages/flightListsResume.test.ts test/flightRead.test.ts test/budgetFit.test.ts"
+    "command": "pnpm exec vitest run --coverage.enabled=false --bail=1 test/scheduler test/parse-cron.test.ts test/consentNotice.test.ts test/stopCause.test.ts test/stopWrites.test.ts test/execute.test.ts test/askedPairs.test.ts test/askedPairs.engine.test.ts test/stages/flightListsSelect.test.ts test/estimate.test.ts test/estimateLines.test.ts test/stages/flightLists.test.ts test/stages/flightListsResume.test.ts test/flightRead.test.ts test/budgetFit.test.ts"
   },
   "incremental": true,
   "incrementalFile": "reports/stryker-incremental.json",

@@ -541,7 +541,8 @@ async function readBooking(
   const facts = viewed.facts;
   // why: review M3: a navigation refused between the settle and this read ends it, as after listFacts (R-refused)
   const r0 = refusalOf(p.guard);
-  if (r0 !== null) return ended(r0, true);
+  // why: the offer reader has not run on this view yet, so no offer grammar is stated (OffersAnswer.offerGrammar)
+  if (r0 !== null) return ended(r0, false);
   /**
    * An `unrecognised` end over a view read (review M2): no offer kept (A9, the contract: offers only on read and
    * expand-failed), but the counts that view showed (refused, other currencies, grouped, the control) as read.

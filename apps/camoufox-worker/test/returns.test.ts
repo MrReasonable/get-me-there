@@ -26,18 +26,21 @@ function ret(
     pounds?: number | string;
     stops?: string;
     on?: string;
-    arrivesOn?: string;
+    /** The arrival date; null leaves it out of the name (the grammar's optional group). */
+    arrivesOn?: string | null;
     from?: string;
     to?: string;
     operator?: string;
+    departs?: string;
   } = {},
 ): string {
   const op = o.operator === undefined ? '' : ` Operated by ${o.operator}.`;
+  const arrivesOn = o.arrivesOn === null ? '' : ` on ${o.arrivesOn ?? 'Tuesday, November 16'}`;
   return (
     `From ${o.pounds ?? 1180} British pounds round trip total. ${o.stops ?? '1 stop'} flight with QQ Air.${op} ` +
-    `Leaves ${o.from ?? 'John F. Kennedy International Airport'} at 18:30 on ${o.on ?? 'Monday, November 15'} and ` +
-    `arrives at ${o.to ?? 'Heathrow Airport'} at 9:45 on ${o.arrivesOn ?? 'Tuesday, November 16'}. Total duration ` +
-    '10 hrs 15 min.   Select flight'
+    `Leaves ${o.from ?? 'John F. Kennedy International Airport'} at ${o.departs ?? '18:30'} on ` +
+    `${o.on ?? 'Monday, November 15'} and arrives at ${o.to ?? 'Heathrow Airport'} at 9:45${arrivesOn}. Total ` +
+    'duration 10 hrs 15 min.   Select flight'
   );
 }
 const facts = (names: Array<string | null>, o: Partial<ListFacts> = {}): ListFacts => ({
@@ -76,6 +79,16 @@ describe('returnDayOffset (spec rev 56 §2: calendar days from the return date, 
       returnDayOffset({ month: 11, day: 15 }, { month: 2, day: 30 }, asIsoDate('2027-11-15')),
     ).toBeNull();
     expect(returnDayOffset({ month: 2, day: 30 }, { month: 3, day: 1 }, asIsoDate('2027-02-28'))).toBeNull();
+  });
+  it('is null for a departure whose month or day no calendar has, even one that rolls over a whole year', () => {
+    // why: month 13 rolls over to January of the next year, day 366 of January to 1 January of the next year; neither
+    // is a date, so neither is 0 days before a 1 January arrival
+    expect(returnDayOffset({ month: 13, day: 1 }, { month: 1, day: 1 }, asIsoDate('2027-12-31'))).toBeNull();
+    expect(returnDayOffset({ month: 1, day: 366 }, { month: 1, day: 1 }, asIsoDate('2027-12-31'))).toBeNull();
+  });
+  it('is null when either date is none, whatever the year (the first day of 1970 included)', () => {
+    expect(returnDayOffset({ month: 2, day: 30 }, { month: 1, day: 1 }, asIsoDate('1970-01-01'))).toBeNull();
+    expect(returnDayOffset({ month: 1, day: 1 }, { month: 2, day: 30 }, asIsoDate('1970-01-01'))).toBeNull();
   });
 });
 
@@ -159,6 +172,32 @@ describe('readReturns (spec rev 56 §2: the pair’s returns, fitting ones first
     );
     expect(r).toMatchObject({ listed: 'none-for-cell', returns: [], names: [], optionsOtherCell: 2 });
   });
+  it('an option on the return day of another month is another cell’s; one with no arrival date counts unparsed', () => {
+    const r = readReturns(
+      facts([
+        ret({ on: 'Friday, October 15', arrivesOn: 'Saturday, October 16' }),
+        ret({ arrivesOn: null }),
+        null,
+        '',
+        ret({ pounds: 1250 }),
+      ]),
+      REQ,
+    );
+    expect(r).toMatchObject({ optionsOtherCell: 1, optionsUnparsed: 3, parsedForThisCell: 1 });
+    expect(r.returns.map((x) => x.fromMinor)).toEqual([125_000]);
+  });
+  it('the cut keeps the 30 cheapest whatever the page order, and the outbound windows never apply to a return', () => {
+    // the dearest return first on the page and the only one inside the departure window; 30 cheaper ones after it
+    const dearest = ret({ pounds: 2000, departs: '8:00' });
+    const rest = Array.from({ length: 30 }, (_, i) => ret({ pounds: 1000 + i * 10 }));
+    const r = readReturns(facts([dearest, ...rest]), {
+      ...REQ,
+      returnLimits: { ...LIMITS, maxStops: null, departureWindowLocal: { from: '06:00', to: '12:00' } },
+    });
+    expect(r.returns.map((x) => x.fromMinor)).toEqual(rest.map((_, i) => (1000 + i * 10) * 100));
+    expect(r.names).toEqual(rest);
+    expect(r.parsedForThisCell).toBe(31);
+  });
   it('moreListed: a View more control, or more results stated than were read; false otherwise', () => {
     const two = [ret(), ret({ pounds: 1250 })];
     expect(readReturns(facts(two, { viewMore: true }), REQ).moreListed).toBe(true);
@@ -171,5 +210,11 @@ describe('readReturns (spec rev 56 §2: the pair’s returns, fitting ones first
   it('the currency as the page states it, null when it states none', () => {
     expect(readReturns(facts([ret()], { currencyName: 'Currency USD' }), REQ).currency).toBe('USD');
     expect(readReturns(facts([ret()], { currencyName: null }), REQ).currency).toBeNull();
+    // the whole name or nothing: no code, text before it, text after it
+    expect(
+      ['Currency pounds', 'Change Currency GBP', 'Currency GBP (£)'].map(
+        (currencyName) => readReturns(facts([ret()], { currencyName }), REQ).currency,
+      ),
+    ).toEqual([null, null, null]);
   });
 });

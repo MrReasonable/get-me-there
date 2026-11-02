@@ -55,8 +55,18 @@ describe('parseOfferName (spec rev 56 §2: "Continue to book with <seller>[, <fa
     ['an 81-character fare', offer('QQ Travel', '1,180', 'E'.repeat(81))],
     ['a malformed price', offer('QQ Travel', '1,18,0')],
     ['another sentence form', 'Book with QQ Travel for 1,180 British pounds'],
+    ['text before the form', `Or: ${offer('QQ Travel', '1,180')}`],
   ])('%s is null', (_what, name) => {
     expect(parseOfferName(name)).toBeNull();
+  });
+  it('reads a figure of one or several thousands groups, and the least amount a currency states (one yen)', () => {
+    expect(
+      [
+        offer('QQ Travel', '123,456', undefined, 'Japanese yen'),
+        offer('QQ Travel', '1,234,567', undefined, 'Japanese yen'),
+        offer('QQ Travel', '1', undefined, 'Japanese yen'),
+      ].map((x) => parseOfferName(x)?.amountMinor),
+    ).toEqual([123_456, 1_234_567, 1]);
   });
   it('keeps every parsed offer inside the contract’s offer shape', () => {
     const p = parseOfferName(offer('Q'.repeat(80), '1', 'F'.repeat(80)));
@@ -143,6 +153,14 @@ describe('readOffers (spec rev 56 §2: the offers read, the cheapest kept first)
     });
     expect(r.offers).toEqual([{ seller: 'QQ Travel', fare: null, priceMinor: 118_000 }]);
     expect([r.nonGbp, r.allGbp]).toEqual([1, false]);
+  });
+  it('exactly 40 GBP offers: every one kept, offersStated null (the cut did not apply)', () => {
+    const names = Array.from({ length: BOOKING_OFFERS_MAX }, (_, i) =>
+      offer(`QQ Seller ${i}`, String(1000 + i)),
+    );
+    const r = readOffers({ offerNames: names, moreOptions: 0, grouped: 0 });
+    expect(r.offers).toHaveLength(BOOKING_OFFERS_MAX);
+    expect(r.offersStated).toBeNull();
   });
   it('no button: no offer, nothing dropped', () => {
     expect(readOffers({ offerNames: [], moreOptions: 0, grouped: 0 })).toEqual({
