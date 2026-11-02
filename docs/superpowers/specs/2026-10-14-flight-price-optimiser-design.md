@@ -1767,7 +1767,9 @@ cache.set when cacheable  →  return { body, fetchedAt: now }
   attempt, from any camoufox answer whose body states `nextLoadNotBefore`
   (the limits' `nextStartOf(bodyText)`), 2xx or not and whether or not the
   capability then accepts the answer, so no refused round trip and no retry
-  is spent on the spacing.
+  is spent on the spacing; a hold more than an hour ahead (the limiter's
+  `HOLD_MAX_MS`: the worker states at most a page in flight and its spacing)
+  holds only that hour, never nothing.
 - **Billable rule**: `searchapi` iff upstream HTTP 200 **and** the plan is
   a per-call plan (on subscription plans every call is billable for the
   call cap but costs 0 micro-GBP); `travelpayouts`, `camoufox` and `fx` never (a `camoufox` row
@@ -4700,19 +4702,16 @@ merged into price.
     did not finish says so directly under the block's head, with what
     happens next:
     a transient status (`select-failed`, `not-settled`, `unrecognised`)
-    "return flights not read: tried again at the next search, or press Read
-    flights for this date now" while a read would go now (the response's
+    "return flights not read: tried again at the next search while among its 10 cheapest date pairs, or press Read flights for this date now" while a read would go now (the response's
     `readNow`, with the button shown beside it), else "return flights not
-    read: read again once older than this search's refresh" (two transient
+    read: read again once the read is nearly as old as this search's refresh" (two transient
     ends in a row wait for the refresh, R-retry; no button is named),
     `skipped` its rule in words ("fewer than 2
     browser pages left this month", …), `not-verified` "return flights are not
     yet read on this kind of machine; see the recording session in
     docs/setup.md", and `no-outbound` nothing beyond the outbound's own line;
     a booking read that did not finish likewise: transient "sellers not read:
-    tried again at the next search, or press Read flights for this date
-    now" (or "sellers not read: read again once older than this search's
-    refresh" without `readNow`), `expand-failed` "sellers read before the list could be expanded;
+    tried again at the next search while among its 10 cheapest date pairs, or press Read flights for this date now" (or "sellers not read: read again once the read is nearly as old as this search's refresh" without `readNow`), `expand-failed` "sellers read before the list could be expanded;
     the cheapest may be missing" (the transient words when it read no offer
     before the expansion failed: one note, never both), `skipped` its rule
     in words,

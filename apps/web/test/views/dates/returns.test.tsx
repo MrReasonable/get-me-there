@@ -370,7 +370,7 @@ describe("the pairing section's notes (spec rev 56 §11)", () => {
     // why: 21.7 prov-014: one note, a sellers read that failed before any offer: never "sellers read before …"; final
     // review B-I3: "or press …" only beside the button it names
     expect(within(block()).getByTestId('pairing-booking-note')).toHaveTextContent(
-      'sellers not read: tried again at the next search, or press Read flights for this date now',
+      'sellers not read: tried again at the next search while among its 10 cheapest date pairs, or press Read flights for this date now',
     );
     expect(within(block()).getByRole('button', { name: /^Read flights for this date/ })).toBeInTheDocument();
     expect(within(block()).queryByTestId('pairing-applies')).toBeNull();
@@ -710,11 +710,11 @@ describe('a list with no return read, or one that did not finish (spec rev 56 §
     'no-outbound': null,
     skipped: 'return flights not read: fewer than 2 browser pages left this month',
     'select-failed':
-      'return flights not read: tried again at the next search, or press Read flights for this date now',
+      'return flights not read: tried again at the next search while among its 10 cheapest date pairs, or press Read flights for this date now',
     'not-settled':
-      'return flights not read: tried again at the next search, or press Read flights for this date now',
+      'return flights not read: tried again at the next search while among its 10 cheapest date pairs, or press Read flights for this date now',
     unrecognised:
-      'return flights not read: tried again at the next search, or press Read flights for this date now',
+      'return flights not read: tried again at the next search while among its 10 cheapest date pairs, or press Read flights for this date now',
     'not-verified':
       'return flights are not yet read on this kind of machine; see the recording session in docs/setup.md',
   };
@@ -756,7 +756,7 @@ describe('a list with no return read, or one that did not finish (spec rev 56 §
       { readNow: false },
     );
     expect(within(block()).getByTestId('flights-return-note')).toHaveTextContent(
-      "return flights not read: read again once older than this search's refresh",
+      "return flights not read: read again once the read is nearly as old as this search's refresh",
     );
     expect(within(block()).queryByRole('button', { name: /^Read flights/ })).toBeNull();
   });
@@ -765,7 +765,7 @@ describe('a list with no return read, or one that did not finish (spec rev 56 §
       readNow: true,
     });
     expect(within(block()).getByTestId('pairing-booking-note')).toHaveTextContent(
-      'sellers not read: tried again at the next search, or press Read flights for this date now',
+      'sellers not read: tried again at the next search while among its 10 cheapest date pairs, or press Read flights for this date now',
     );
     expect(within(block()).getByRole('button', { name: /^Read flights for this date/ })).toBeInTheDocument();
   });
@@ -774,7 +774,7 @@ describe('a list with no return read, or one that did not finish (spec rev 56 §
       readNow: false,
     });
     expect(within(block()).getByTestId('pairing-booking-note')).toHaveTextContent(
-      "sellers not read: read again once older than this search's refresh",
+      "sellers not read: read again once the read is nearly as old as this search's refresh",
     );
     expect(within(block()).queryByRole('button', { name: /^Read flights/ })).toBeNull();
   });

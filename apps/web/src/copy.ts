@@ -8,6 +8,7 @@ import {
   type ErrorReason,
   type ExecutionStatus,
   type FigureBasis,
+  FLIGHT_LIST_COUNT,
   FLIGHT_LIST_PAGES_PER_PAIR_MAX,
   formatAgo,
   type MIXED_ERROR_REASON,
@@ -72,11 +73,12 @@ const SELLER_SHOWN = "; the first Back price is a seller's stated price";
 // final review B-M2 (ruling ui-006): the one lead phrase of a limit edit, on the board and the search's page block alike
 const LIMITS_CHANGED = 'your limits have changed since these return flights were read';
 // final review B-I3: what happens to a read that did not finish: tried again while a read would go now (the button
-// shown beside the note), else once the list is older than the refresh (two transient ends in a row: R-retry)
+// shown beside the note; the step reads only the run's FLIGHT_LIST_COUNT cheapest date pairs: final re-review), else
+// once the list is past 0.9 × the refresh, the reuse limit (two transient ends in a row: R-retry)
 const NEXT_READ = (readNow: boolean): string =>
   readNow
-    ? 'tried again at the next search, or press Read flights for this date now'
-    : "read again once older than this search's refresh";
+    ? `tried again at the next search while among its ${FLIGHT_LIST_COUNT} cheapest date pairs, or press Read flights for this date now`
+    : "read again once the read is nearly as old as this search's refresh";
 
 export const COPY = {
   appTitle: 'get-me-there',

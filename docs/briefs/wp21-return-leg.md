@@ -1044,8 +1044,8 @@ value below is the recorded literal; nothing is left to a decision rule.
     line; a list stored before 0012 shows as today; the tie order unchanged; the read button's "up to N pages" and its
     refusal below that many pages left. Final rulings B-I1, B-I3: the shown seller's price is emphasised exactly when it leads
     its date pair (core's `pairingLeads`, the board's rule); the read button shows exactly when the pair's `readNow` is true,
-    and a transient note says "tried again at the next search, or press Read flights for this date now" only then, else
-    "read again once older than this search's refresh".
+    and a transient note says "tried again at the next search while among its 10 cheapest date pairs, or press Read flights for this date now" only then, else
+    "read again once the read is nearly as old as this search's refresh".
   - **§12**: the constants of `core/flights/limits.ts` (`FLIGHT_LIST_PAGES_PER_PAIR_MAX` 2, `RETURN_SPACED_LOADS` 1, `RETURN_PAGE_PERIODS` 8 / 6,
     `RETURN_STEP_SECONDS` 40, `RETURN_SECOND_OUTBOUND_RATE` 0.5, `RETURNS_SHOWN` 3, `RETURN_ATTEMPTS_MAX` 2, `BOOKING_OFFERS_MAX` 40), not settings.
   - **§16**: row 21 with this brief's scope and first failing test ("`selectOutbound` picks the first fitting flight in `compareFlights` order, ties by index").
@@ -1257,7 +1257,7 @@ worker items.
       'not-settled'` rule `select-return:no-activation`; the changed view is off the booking path or lacks an offer
       → `booking.status 'unrecognised'` rule `not-booking-view`; two links of the return's name → `'select-failed'` rule
       `select-return:find-return`; the expansion control absent → `booking.status 'read'` with `expanded false` and the offers read before it; two or more expansion controls →
-      `'unrecognised'` rule `more-options-count`, nothing pressed, the offers read kept (prov-int-r3-006); the expansion's press changes nothing, or its
+      `'unrecognised'` rule `more-options-count`, nothing pressed, no offer kept (the contract allows offers only on `read` and `expand-failed`; prov-int-r3-006); the expansion's press changes nothing, or its
       settle runs out → `'expand-failed'` rule `select-more-options:no-activation` / `:not-settled`, `expanded false`, the offers read before it kept (the
       answer parses: test-r3-001); a navigation during the return's or the expansion's activation → `'unrecognised'` rule `unexpected-navigation`, nothing
       loaded; any parsed offer in another currency → `'unrecognised'` rule `currency` (prov-int-r3-008); in every case the page is closed and the SOCS
@@ -1521,7 +1521,7 @@ the copy tests. **Consumes**: Task 21.6. Makes required: `flightListSchema.retur
     "return 26h: over your 25h limit", "return 2 changes: over your 1-change limit", "return 12h 05m, within your 25h
     limit" (no window mark on a return; no "; return not read" suffix on either leg); `legMarks('outbound', …)` is
     WP20's outbound marks plus the stops mark; `returnNote` gives each of the six non-read statuses' words (the
-    transient ones "tried again at the next search, or press Read flights for this date now"; `not-verified` "return
+    transient ones "tried again at the next search while among its 10 cheapest date pairs, or press Read flights for this date now"; `not-verified` "return
     flights are not yet read on this kind of machine; see the recording session in docs/setup.md"; `skipped` the
     rule's words; `no-outbound` nothing more than the outbound's own line), null for null returns (the list shows as the
     outbound list; 21.7 code M6), the counts clause
@@ -1531,8 +1531,7 @@ the copy tests. **Consumes**: Task 21.6. Makes required: `flightListSchema.retur
     underCurrentLimits: true, offer: { seller: 'QQ Travel', fare: null, priceMinor: 118000, offersRead: 3, complete: true } }` for the fixture (the same
     literals as the api test), `offer null` when the booking is not `read` or is of another attempt or return than `bookingReturnOf`'s; `bookingNote` gives each of
     the seven non-read booking statuses' words (`not-verified` "sellers are not yet read on this kind of machine", `expand-failed` "sellers
-    read before the list could be expanded; the cheapest may be missing" (the transient words when it kept no offer: 21.7 prov-014), the transient ones "tried again at the next search, or press Read
-    flights for this date now", `skipped` the rule's words, `no-pairing` "no return flight to read sellers for"), null for read; `which
+    read before the list could be expanded; the cheapest may be missing" (the transient words when it kept no offer: 21.7 prov-014), the transient ones "tried again at the next search while among its 10 cheapest date pairs, or press Read flights for this date now", `skipped` the rule's words, `no-pairing` "no return flight to read sellers for"), null for read; `which
     'cheapest'` for a one-attempt read, `selectedNow false` when `selectOutbound(list.flights, limitsOf(d))` differs
     from the stored index after a limit edit, `underCurrentLimits false` when the stored limits differ, and null for
     every status but read and for a read whose attempts listed no return; `mismatchOf` is non-null exactly when the cheapest offer's price differs from the shown return's "from" price; `limitsOf(d)` equals the literal

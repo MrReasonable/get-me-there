@@ -314,14 +314,14 @@ describe('returnNote (spec rev 56 §11 "Status notes", with what happens next)',
     withReturns({ status: s, rule, attempts: [], booking: null });
   it('each non-read status in words; no-outbound says nothing beyond the outbound line', () => {
     const next =
-      'return flights not read: tried again at the next search, or press Read flights for this date now';
+      'return flights not read: tried again at the next search while among its 10 cheapest date pairs, or press Read flights for this date now';
     expect(returnNote(status('select-failed', 'select-outbound:not-found'), COPY, true)).toBe(next);
     expect(returnNote(status('not-settled', 'returns:not-settled'), COPY, true)).toBe(next);
     expect(returnNote(status('unrecognised', 'returns:shape'), COPY, true)).toBe(next);
     // why: final review B-I3: with no read to go now (two transient ends in a row wait for the refresh), the note says
     // so and names no button
     expect(returnNote(status('not-settled', 'returns:not-settled'), COPY, false)).toBe(
-      "return flights not read: read again once older than this search's refresh",
+      "return flights not read: read again once the read is nearly as old as this search's refresh",
     );
     expect(returnNote(status('not-verified'), COPY, true)).toBe(
       'return flights are not yet read on this kind of machine; see the recording session in docs/setup.md',
@@ -403,7 +403,8 @@ describe('returnNote (spec rev 56 §11 "Status notes", with what happens next)',
 describe('bookingNote (spec rev 56 §11: a booking read that did not finish, with what happens next)', () => {
   const note = (over: Partial<BookingRead>) => bookingNote(withBooking(over), COPY, true);
   it('each of the seven non-read statuses in words; null for read and for no booking read', () => {
-    const next = 'sellers not read: tried again at the next search, or press Read flights for this date now';
+    const next =
+      'sellers not read: tried again at the next search while among its 10 cheapest date pairs, or press Read flights for this date now';
     expect(note({ status: 'select-failed', rule: 'select-return:not-found', offers: [] })).toBe(next);
     expect(note({ status: 'not-settled', rule: 'booking:not-settled', offers: [] })).toBe(next);
     expect(note({ status: 'unrecognised', rule: 'currency', offers: [] })).toBe(next);
@@ -414,7 +415,7 @@ describe('bookingNote (spec rev 56 §11: a booking read that did not finish, wit
         COPY,
         false,
       ),
-    ).toBe("sellers not read: read again once older than this search's refresh");
+    ).toBe("sellers not read: read again once the read is nearly as old as this search's refresh");
     expect(note({ status: 'expand-failed', rule: 'more-options' })).toBe(
       'sellers read before the list could be expanded; the cheapest may be missing',
     );
