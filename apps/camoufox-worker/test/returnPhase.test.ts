@@ -1088,8 +1088,8 @@ describe('transient ends of the return step (each through the shared helper)', (
   });
   it('the deadline expires during the return view’s listFacts: not-settled select-outbound:list-facts', async () => {
     const view = returnTree();
-    for (const c of descendants([view]))
-      if (c.role === 'button' && c.name === 'Currency GBP') c.countHang = true;
+    // why: fix round 2: listFacts reads the button's name in one page call with no count before it, so the read hangs
+    for (const c of descendants([view])) if (c.role === 'button' && c.name === 'Currency GBP') c.hang = true;
     const t = setup({
       press: press({ [PICK]: { trees: [view], url: RETURN_URL } }),
       page: (p) => {

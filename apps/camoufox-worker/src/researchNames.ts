@@ -4,7 +4,7 @@
  * (no page URL is ever stored), at most NAMES_MAX of each. Only the select-outbound recorder reads them
  * (rules.test.ts pins that), so the page session's driver carries none. A leaf: it imports types only.
  */
-import type { LocatorLike, PageLike } from './driver.js';
+import type { LocatorLike, NamedElement, PageLike } from './driver.js';
 import type { Deadline } from './timers.js';
 
 /** The most names each read returns. */
@@ -15,20 +15,20 @@ function urlStripped(name: string): string {
   return name.replace(/https?:\/\/\S+/g, '<url>');
 }
 
+/** Run in the page: each element's `aria-label`, else its text, else empty (self-contained, as a page function must be). */
+function namesInPage(elements: NamedElement[]): string[] {
+  return elements.map((e) => e.getAttribute('aria-label') ?? e.textContent ?? '');
+}
+
 /**
- * Up to NAMES_MAX accessible names of the locator's matches, each under `d`: `aria-label`, else the text (the driver's
- * own reading, repeated here so this module stays a leaf); an unreadable name is empty.
+ * Up to NAMES_MAX accessible names of the locator's matches: `aria-label`, else the text (the driver's own reading,
+ * repeated here so this module stays a leaf); an unreadable name is empty.
  */
+// why: ruling of 2026-10-18 ("never getAttribute on a node the page may have replaced") as WP21 Task 21.3 fix round 2
+// applies it: the recorder reads these right after a selection, while the view re-renders, so every name is read in
+// one page call (the matches of one moment), never counted and then read one node at a time
 async function namesOf(l: LocatorLike, d: Deadline): Promise<string[]> {
-  const out: string[] = [];
-  for (let i = 0, n = Math.min(NAMES_MAX, await d.race(l.count())); i < n; i++) {
-    const one = l.nth(i);
-    const timeout = { timeout: Math.max(1, d.remaining()) };
-    const label = await d.race(one.getAttribute('aria-label', timeout));
-    const name = label ?? (await d.race(one.textContent(timeout)));
-    out.push(urlStripped(name ?? ''));
-  }
-  return out;
+  return (await d.race(l.evaluateAll(namesInPage))).slice(0, NAMES_MAX).map(urlStripped);
 }
 
 /** Every link name in `main`. */

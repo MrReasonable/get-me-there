@@ -22,6 +22,15 @@ import { isSettled, type Previous, stableAcross, type View } from './ready.js';
 import { type Role, SELECTORS, type Selectors } from './selectors.js';
 import { type Deadline, DeadlineExceeded, type Timers } from './timers.js';
 
+/**
+ * The page's element as a one-call name read sees it (a structural subset of the DOM's Element): its attributes and its
+ * text. Only page functions handed to `evaluateAll` read it.
+ */
+export interface NamedElement {
+  getAttribute(name: string): string | null;
+  readonly textContent: string | null;
+}
+
 export interface LocatorLike {
   count(): Promise<number>;
   nth(index: number): LocatorLike;
@@ -44,6 +53,11 @@ export interface LocatorLike {
     arg?: undefined,
     options?: { timeout?: number },
   ): Promise<R>;
+  /**
+   * WP21 Task 21.3 fix round 2: a page function run once over every element matched at that moment (a consistent
+   * snapshot; Playwright waits for no element, and none matched is an empty list). The name reads use it.
+   */
+  evaluateAll<R>(pageFunction: (elements: NamedElement[]) => R): Promise<R>;
   /** The printed accessibility snapshot: stored by the graph exploration only, never parsed (graph.ts). */
   ariaSnapshot(options?: { timeout?: number }): Promise<string>;
   /** The rendered text (the graph exploration's chart region only; never HTML). */
@@ -422,6 +436,36 @@ export async function nameOf(l: LocatorLike, d: Deadline): Promise<string | null
   return d.race(l.textContent(timeoutOf(d)));
 }
 
+/**
+ * Run in the page: each element's `aria-label`, else its text, else null (`nameOf`'s reading). Self-contained, as a
+ * page function must be: Playwright sends its source to the page.
+ */
+export function namesInPage(elements: NamedElement[]): Array<string | null> {
+  return elements.map((e) => e.getAttribute('aria-label') ?? e.textContent);
+}
+/** Run in the page: each element's text, else null. Self-contained, as `namesInPage`. */
+export function textsInPage(elements: NamedElement[]): Array<string | null> {
+  return elements.map((e) => e.textContent);
+}
+
+/**
+ * Every match's accessible name, as `nameOf` reads one, in one page call: the matches of one moment, so a list the page
+ * re-renders (a selection, a reload) can never hold a read on a node that is gone.
+ */
+// why: ruling of 2026-10-18 ("never getAttribute on a node the page may have replaced") and its application in WP21
+// Task 21.3 fix round 2: counting and then reading nth(i) one at a time waited the whole deadline on a link the
+// re-rendered list no longer had (the end-to-end recording's attempt 2, 2026-11-02)
+export async function namesOf(l: LocatorLike, d: Deadline): Promise<Array<string | null>> {
+  return d.race(l.evaluateAll(namesInPage));
+}
+/** Every match's text in one page call (as `namesOf`, for the lines a view prints). */
+export async function textsOf(l: LocatorLike, d: Deadline): Promise<Array<string | null>> {
+  return d.race(l.evaluateAll(textsInPage));
+}
+/** A name within the length cap, else null (PIE-R2-10: counted unparsed upstream, never parsed and never dropped). */
+export const capped = (name: string | null, S: Selectors): string | null =>
+  name === null || name.length > S.maxNameLength ? null : name;
+
 export async function countOf(l: LocatorLike, d: Deadline): Promise<number> {
   return d.race(l.count());
 }
@@ -445,19 +489,13 @@ export function createDriver(page: PageLike, guard: GuardState, S: Selectors = S
     for (let i = 0, n = await countOf(l, d); i < n; i++) if (await d.race(l.nth(i).isVisible())) v++;
     return v;
   };
+  // why: fix round 2: the first match's name from the one-call read, so no count comes before a read that could wait
   const firstName = async (l: LocatorLike, d: Deadline): Promise<string | null> =>
-    (await countOf(l, d)) === 0 ? null : nameOf(l.nth(0), d);
+    (await namesOf(l, d))[0] ?? null;
 
   async function resultNames(d: Deadline, view: View = 'best'): Promise<Array<string | null>> {
-    const links = resultLinks(view);
-    const n = await countOf(links, d);
-    const names: Array<string | null> = [];
-    for (let i = 0; i < n; i++) {
-      const name = await nameOf(links.nth(i), d);
-      // why: PIE-R2-10: a name too long is counted as unparsed upstream, never parsed and never dropped.
-      names.push(name === null || name.length > S.maxNameLength ? null : name);
-    }
-    return names;
+    // why: PIE-R2-10: a name too long is counted as unparsed upstream, never parsed and never dropped.
+    return (await namesOf(resultLinks(view), d)).map((name) => capped(name, S));
   }
 
   /**
@@ -522,10 +560,7 @@ export function createDriver(page: PageLike, guard: GuardState, S: Selectors = S
 
   return {
     async headingNames(d) {
-      const h = page.getByRole('heading');
-      const out: string[] = [];
-      for (let i = 0, n = await countOf(h, d); i < n; i++) out.push((await nameOf(h.nth(i), d)) ?? '');
-      return out;
+      return (await namesOf(page.getByRole('heading'), d)).map((name) => name ?? '');
     },
 
     async goto(url, d) {
@@ -557,12 +592,10 @@ export function createDriver(page: PageLike, guard: GuardState, S: Selectors = S
       const oneSelected = inList === 1 && selectedInList === 1;
       const cheapestTabs: PageFacts['cheapestTabs'] = [];
       at('cheapest-tab-name');
+      // why: fix round 2: the names in one page call; a tab the page replaced after the count reads as empty
+      const tabNames = await namesOf(tabsInList, d);
       for (let i = 0; i < inList; i++)
-        cheapestTabs.push({
-          name: (await nameOf(tabsInList.nth(i), d)) ?? '',
-          inTablist: true,
-          selected: oneSelected,
-        });
+        cheapestTabs.push({ name: tabNames[i] ?? '', inTablist: true, selected: oneSelected });
       for (let i = inList; i < total; i++) cheapestTabs.push({ name: '', inTablist: false });
       at('unusual-traffic-text');
       const unusualTraffic = await has(page.getByText(S.blocked.unusualTraffic), d);
@@ -674,14 +707,9 @@ export function createDriver(page: PageLike, guard: GuardState, S: Selectors = S
     async bookingFacts(d) {
       const inMain = page.getByRole('main');
       const offers = inMain.getByRole('button', { name: S.booking.offer });
-      const offerNames: Array<string | null> = [];
-      for (let i = 0, n = await countOf(offers, d); i < n; i++) {
-        const name = await nameOf(offers.nth(i), d);
-        // why: PIE-R2-10, as a result link: a name too long is counted unparsed upstream, never parsed and never dropped
-        offerNames.push(name === null || name.length > S.maxNameLength ? null : name);
-      }
       return {
-        offerNames,
+        // why: PIE-R2-10, as a result link: a name too long is counted unparsed upstream, never parsed and never dropped
+        offerNames: (await namesOf(offers, d)).map((name) => capped(name, S)),
         moreOptions: await countOf(inMain.getByRole('button', { name: S.booking.moreOptions }), d),
         grouped: await countOf(inMain.getByRole('button', { name: S.booking.grouped }), d),
       };
@@ -744,9 +772,9 @@ export function createDriver(page: PageLike, guard: GuardState, S: Selectors = S
   };
 }
 
+// why: fix round 2: the first match's text from the one-call read, so no count comes before a read that could wait
 async function firstText(l: LocatorLike, d: Deadline): Promise<string | null> {
-  if ((await countOf(l, d)) === 0) return null;
-  return d.race(l.nth(0).textContent(timeoutOf(d)));
+  return (await textsOf(l, d))[0] ?? null;
 }
 
 /**

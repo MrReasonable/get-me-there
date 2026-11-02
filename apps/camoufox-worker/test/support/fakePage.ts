@@ -1,7 +1,14 @@
 // A fake Playwright page shaped like playwright-core 1.59.1's (PageLike): a synthetic accessibility tree of roles,
 // accessible names and text that locators query, scripted navigation (hops, the route guard, framenavigated), and a
 // record of every call's timeout. Synthetic only; nothing here is copied from a recording.
-import type { FrameLike, HeadedPageLike, LocatorLike, PageLike, RequestLike } from '../../src/driver.js';
+import type {
+  FrameLike,
+  HeadedPageLike,
+  LocatorLike,
+  NamedElement,
+  PageLike,
+  RequestLike,
+} from '../../src/driver.js';
 import type { Role } from '../../src/selectors.js';
 import type { FakeContext } from './fakeContext.js';
 
@@ -198,7 +205,12 @@ export class FakeLocator implements LocatorLike {
     if (this.page.isClosed())
       return Promise.reject(new Error('Target page, context or browser has been closed'));
     const x = this.node();
-    if (x === undefined) return Promise.reject(new Error('locator resolved to no element'));
+    // why: WP21 Task 21.3 fix round 2: as Playwright's, a read of a node no longer there waits for it when the page
+    // says so (to its timeout; here, until the page closes)
+    if (x === undefined)
+      return this.page.missingWaits
+        ? this.page.hangUntilClosed<T>()
+        : Promise.reject(new Error('locator resolved to no element'));
     if (x.hang === true || this.page.hangAll) return this.page.hangUntilClosed<T>();
     return Promise.resolve(f(x));
   }
@@ -207,7 +219,9 @@ export class FakeLocator implements LocatorLike {
       return Promise.reject(new Error('Target page, context or browser has been closed'));
     if (this.page.hangAll || this.countHangs() || this.find().some((x) => x.countHang === true))
       return this.page.hangUntilClosed<number>();
-    return Promise.resolve(this.find().length);
+    const found = this.find().length;
+    this.page.afterCount(found);
+    return Promise.resolve(found);
   }
   nth(index: number): FakeLocator {
     return new FakeLocator(this.page, () => {
@@ -216,20 +230,25 @@ export class FakeLocator implements LocatorLike {
     });
   }
   getAttribute(name: string, o?: { timeout?: number }): Promise<string | null> {
-    return this.read(o, (x) =>
-      name === 'aria-label'
-        ? x.ariaLabel === undefined
-          ? (x.name ?? null)
-          : x.ariaLabel
-        : name === 'aria-selected'
-          ? (x.ariaSelectedAttr ?? String(x.selected === true))
-          : name === 'role'
-            ? (x.role ?? null)
-            : null,
-    );
+    return this.read(o, (x) => attributeOf(x, name));
   }
   textContent(o?: { timeout?: number }): Promise<string | null> {
-    return this.read(o, (x) => (x.text === undefined ? (x.name ?? null) : x.text));
+    return this.read(o, (x) => textOf(x));
+  }
+  /**
+   * WP21 Task 21.3 fix round 2: the page function run over every node matched now (an empty list when none is), each as
+   * the element the page would hand it: its attributes and its text. A hanging node or page never answers.
+   */
+  evaluateAll<R>(fn: (elements: NamedElement[]) => R): Promise<R> {
+    if (this.page.isClosed())
+      return Promise.reject(new Error('Target page, context or browser has been closed'));
+    const nodes = this.find();
+    if (this.page.hangAll || nodes.some((x) => x.hang === true)) return this.page.hangUntilClosed<R>();
+    return Promise.resolve(
+      fn(
+        nodes.map((x) => ({ getAttribute: (name: string) => attributeOf(x, name), textContent: textOf(x) })),
+      ),
+    );
   }
   inputValue(o?: { timeout?: number }): Promise<string> {
     return this.read(o, (x) => x.value ?? '');
@@ -325,6 +344,44 @@ export class FakeLocator implements LocatorLike {
   }
 }
 
+/** An attribute as the page states it: `aria-label` (the name unless set), `aria-selected` and `role`; else null. */
+function attributeOf(x: FakeNode, name: string): string | null {
+  return name === 'aria-label'
+    ? x.ariaLabel === undefined
+      ? (x.name ?? null)
+      : x.ariaLabel
+    : name === 'aria-selected'
+      ? (x.ariaSelectedAttr ?? String(x.selected === true))
+      : name === 'role'
+        ? (x.role ?? null)
+        : null;
+}
+/** The node's text: `text` when set (null included), else the name. */
+const textOf = (x: FakeNode): string | null => (x.text === undefined ? (x.name ?? null) : x.text);
+
+/**
+ * WP21 Task 21.3 fix round 2: the list a selection or a reload re-renders. Once the `occurrence`-th count answering
+ * `whenCount` has answered, `parent` keeps only its first `keep` children, and from then on a read of a node no longer
+ * there waits for it, as Playwright's does (until the page closes). Returns a promise that answers 'hung' when any read
+ * starts waiting, so a test races the read under test against that event, never a timer.
+ */
+export function shrinkAfterCount(
+  page: FakePage,
+  parent: FakeNode,
+  o: { whenCount: number; keep: number; occurrence?: number },
+): Promise<'hung'> {
+  let left = o.occurrence ?? 1;
+  page.missingWaits = true;
+  page.afterCount = (found) => {
+    if (found !== o.whenCount || --left > 0) return;
+    page.afterCount = () => undefined;
+    parent.children = (parent.children ?? []).slice(0, o.keep);
+  };
+  return new Promise((resolve) => {
+    page.onHang = () => resolve('hung');
+  });
+}
+
 /** A synthetic printed snapshot in Playwright's YAML-like shape: `- role "name":`, children indented, a link's `/url:`. */
 function printed(x: FakeNode, depth: number): string[] {
   const pad = '  '.repeat(depth);
@@ -399,6 +456,13 @@ export class FakePage implements HeadedPageLike {
     return this.shut;
   }
   hangAll = false;
+  /**
+   * WP21 Task 21.3 fix round 2: a read of a node no longer matched waits for it, as Playwright's does (to its timeout;
+   * here, until the page closes), instead of failing at once.
+   */
+  missingWaits = false;
+  /** Told after every count answers, with its answer (a test re-renders the page between a count and the reads after it). */
+  afterCount: (found: number) => void = () => undefined;
   closeThrows = false;
   closeHangs = false;
   private current = 'about:blank';

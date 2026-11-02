@@ -888,19 +888,9 @@ describe('record --select-outbound: review fixes (WP21 Task 21.0)', () => {
       tabsRead = r;
     });
     const deps = withPage(t, (pg) => {
-      const byRole = pg.getByRole.bind(pg);
-      pg.getByRole = (role, o) => {
-        const l = byRole(role, o);
-        // why: the research's tab-name read is the one unnamed tab query that reads each tab (readFacts only counts)
-        if (role === 'tab' && o === undefined) {
-          const nth = l.nth.bind(l);
-          l.nth = (i) => {
-            tabsRead();
-            return nth(i);
-          };
-        }
-        return l;
-      };
+      // why: the research's tab-name read is the one read of the hanging tab (readFacts reads the Cheapest tabs only),
+      // so the page's first waiting read is that one (fix round 2: the names are one page call, no longer nth(i))
+      pg.onHang = tabsRead;
     });
     const run = record(t.ctx(SELECT), cfg, deps);
     await reading;

@@ -28,6 +28,7 @@ import {
   RESULTS_URL,
   resultsTree,
   returnOptionName,
+  shrinkAfterCount,
   text,
   viewMore,
 } from './support/fakePage.js';
@@ -205,6 +206,108 @@ describe('createDriver.resultNames reads aria-label before the text', () => {
   });
 });
 
+// why: WP21 Task 21.3 fix round 2 (the end-to-end recording's attempt 2): a list the page re-renders between a count
+// and the reads after it (a selection, a reload) must never hold a read on a node that is gone; each list is read in one
+// page call. Every test races the read against the fake's first waiting read (an event), never a timer.
+describe('names read in one page call: a list that shrinks after its count holds no read (fix round 2)', () => {
+  const many = (k: number) => Array.from({ length: k }, (_, i) => option(400 + i));
+  const namesOf = (k: number) => Array.from({ length: k }, (_, i) => optionName(400 + i));
+  async function raced<T>(page: FakePage, hung: Promise<'hung'>, read: Promise<T>): Promise<T | 'hung'> {
+    read.catch(() => undefined);
+    const out = await Promise.race([read, hung]);
+    // releases a read still waiting (the old code's), so nothing is left pending
+    await page.close();
+    return out;
+  }
+  it('resultNames answers the links the page held at once', async () => {
+    const list = n('list', '', many(14));
+    const { driver, d, page } = setup([n('document', '', [n('main', '', [list])])]);
+    const hung = shrinkAfterCount(page, list, { whenCount: 14, keep: 12 });
+    expect(await raced(page, hung, driver.resultNames(d))).toEqual(namesOf(14));
+  });
+  it('a settle poll over a list that shrank reads it as changed, then settles on the shorter list', async () => {
+    const list = n('list', '', many(14));
+    const tree = resultsTree({ top: [], other: [] });
+    const main = descendants([tree]).find((x) => x.role === 'main');
+    main?.children?.push(list);
+    const { driver, d, page, timers } = setup([tree]);
+    // the second count of the 14 links (the next poll's) is followed by the re-render
+    const hung = shrinkAfterCount(page, list, { whenCount: 14, keep: 12, occurrence: 2 });
+    const out = await raced(page, hung, pollUntilSettled(driver, d, timers, 2000, SELECTORS));
+    expect(out).not.toBe('hung');
+    if (out === 'hung') return;
+    // poll 1: 14 links; poll 2: counted 14, then the 12 names (changed); poll 3: 12 and 12 (a new run); poll 4: stable
+    expect(out.polls).toBe(4);
+    expect(out.facts.page.resultLinks).toBe(12);
+  });
+  it('bookingFacts answers the offers the page held at once', async () => {
+    const offer = (k: number) =>
+      n('button', `Continue to book with QQ Travel for 1,${100 + k} British pounds`);
+    const main = n('main', '', [0, 1, 2, 3, 4].map(offer));
+    const { driver, d, page } = setup([n('document', '', [main])]);
+    const hung = shrinkAfterCount(page, main, { whenCount: 5, keep: 3 });
+    const out = await raced(page, hung, driver.bookingFacts(d));
+    expect(out).not.toBe('hung');
+    if (out === 'hung') return;
+    expect(out.offerNames).toEqual([0, 1, 2, 3, 4].map((k) => offer(k).name));
+  });
+  it('headingNames answers the headings the page held at once', async () => {
+    const main = n(
+      'main',
+      '',
+      ['A', 'B', 'C', 'D', 'E', 'F'].map((h) => n('heading', h)),
+    );
+    const { driver, d, page } = setup([n('document', '', [main])]);
+    const hung = shrinkAfterCount(page, main, { whenCount: 6, keep: 4 });
+    expect(await raced(page, hung, driver.headingNames(d))).toEqual(['A', 'B', 'C', 'D', 'E', 'F']);
+  });
+  it('headingNames reads a heading with neither label nor text as empty', async () => {
+    const { driver, d } = setup([
+      n('document', '', [n('heading', 'A'), n('heading', 'B', [], { ariaLabel: null, text: null })]),
+    ]);
+    expect(await driver.headingNames(d)).toEqual(['A', '']);
+  });
+  it('readFacts reads the Cheapest tabs’ names in one call: a tab gone after the count reads as empty', async () => {
+    const list = n('tablist', '', [
+      n('tab', 'Cheapest from 451 British pounds'),
+      n('tab', 'Cheapest from 452 British pounds'),
+    ]);
+    const { driver, d, page } = setup([n('document', '', [list])]);
+    // counts: the account controls (0, 0), every Cheapest tab (2), those in the tablist (2): then the re-render
+    const hung = shrinkAfterCount(page, list, { whenCount: 2, keep: 1, occurrence: 2 });
+    const out = await raced(page, hung, driver.readFacts(d));
+    expect(out).not.toBe('hung');
+    if (out === 'hung') return;
+    expect(out.page.cheapestTabs).toEqual([
+      { name: 'Cheapest from 451 British pounds', inTablist: true, selected: false },
+      { name: '', inTablist: true, selected: false },
+    ]);
+  });
+  it('listFacts reads the Cheapest tab’s name with no count before it', async () => {
+    const tree = resultsTree();
+    const list = descendants([tree]).find((x) => x.role === 'tablist');
+    const { driver, d, page } = setup([tree]);
+    const hung =
+      list === undefined
+        ? Promise.resolve<'hung'>('hung')
+        : shrinkAfterCount(page, list, { whenCount: 1, keep: 1 });
+    const out = await raced(page, hung, driver.listFacts(d));
+    expect(out).not.toBe('hung');
+    if (out === 'hung') return;
+    expect(out.cheapestTabName).toBe('Cheapest from 451 British pounds');
+  });
+  it('listFacts reads the results line with no count before it', async () => {
+    const tree = resultsTree();
+    const { driver, d, page } = setup([tree]);
+    // the document's first five children are the form and the tablist; the results line is the sixth
+    const hung = shrinkAfterCount(page, tree, { whenCount: 1, keep: 5, occurrence: 2 });
+    const out = await raced(page, hung, driver.listFacts(d));
+    expect(out).not.toBe('hung');
+    if (out === 'hung') return;
+    expect(out.resultsStated).toBe(2);
+  });
+});
+
 describe('createDriver list, form and click', () => {
   it('listFacts reads the tab, the stated count, currency and location', async () => {
     const { driver, d } = setup();
@@ -276,7 +379,9 @@ describe('deadlines (ruling 6, PIE-R2-06)', () => {
   it('every call passes timeout equal to the remaining deadline', async () => {
     const { driver, d, page, timers } = setup();
     timers.clock.advance(10_000);
-    await driver.resultNames(d);
+    // why: fix round 2: the name lists are one page call with no timeout of their own (raced against the deadline), so
+    // the form's reads stand for the calls that take one
+    await driver.formFacts(d);
     expect(page.calls.timeouts.length).toBeGreaterThan(0);
     expect(new Set(page.calls.timeouts)).toEqual(new Set([80_000]));
   });

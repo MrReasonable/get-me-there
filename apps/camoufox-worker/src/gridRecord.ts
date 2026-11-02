@@ -25,13 +25,13 @@ import {
   type Driver,
   LOOKUP_TIMEOUT_MS,
   type LocatorLike,
-  nameOf,
+  namesOf,
   type PageLike,
   POLL_TIMEOUT_MS,
   runStep,
   StepFailed,
   type StepOptions,
-  timeoutOf,
+  textsOf,
 } from './driver.js';
 import { gridControls, stillDrawing } from './gridView.js';
 import { parseOptionName } from './names.js';
@@ -152,11 +152,11 @@ export interface GridOptions {
   nextFor: (ms: number) => Deadline;
 }
 
+// why: WP21 Task 21.3 fix round 2: the panel re-renders on every scroll, so its lines and names are read in one page
+// call each (textsOf, namesOf), never counted and then read one node at a time
 async function texts(l: LocatorLike, d: Deadline): Promise<{ count: number; texts: string[] }> {
-  const count = await countOf(l, d);
-  const out: string[] = [];
-  for (let i = 0; i < count; i++) out.push((await d.race(l.nth(i).textContent(timeoutOf(d)))) ?? '');
-  return { count, texts: out };
+  const out = (await textsOf(l, d)).map((t) => t ?? '');
+  return { count: out.length, texts: out };
 }
 
 /** The departures and the returns as their day tokens: from the two lines when the page prints lines, else the labels. */
@@ -292,12 +292,9 @@ export async function exploreGrid(
     const r0 = timers.now();
     const panel = s.value;
     const read = await runStep('read-view', READ_VIEW_MS, st0, steps, async (st): Promise<ViewRead> => {
-      const buttons = panel.getByRole('button');
-      const candidates: Array<string | null> = [];
-      for (let i = 0, n = await countOf(buttons, st); i < n; i++) {
-        const nm = await nameOf(buttons.nth(i), st);
-        if (nm === null || !scrollNames.includes(nm)) candidates.push(nm);
-      }
+      const candidates = (await namesOf(panel.getByRole('button'), st)).filter(
+        (nm) => nm === null || !scrollNames.includes(nm),
+      );
       let scrollButtons = 0;
       for (const nm of scrollNames)
         if ((await countOf(panel.getByRole('button', { name: nm, exact: true }), st)) === 1) scrollButtons++;
