@@ -1,4 +1,11 @@
-import { apiContract } from '@gmt/core';
+import {
+  apiContract,
+  listedReturnSchema,
+  type ReturnRead,
+  returnAttemptSchema,
+  returnReadSchema,
+} from '@gmt/core';
+import { PAIRING_FIXTURE, PAIRING_LIMITS } from '@gmt/core/testing';
 import type { z } from 'zod';
 import type { SearchCard } from '../src/api/types.js';
 import { type ProvenanceInput, provCalendar, provSearch } from './fixtures.js';
@@ -147,6 +154,7 @@ export function flightList(over: Partial<FlightListIn> = {}): z.output<typeof ap
     optionsUnparsed: 0,
     optionsOtherCell: 0,
     resultsStated: null,
+    returns: null,
     ...over,
   });
 }
@@ -191,8 +199,77 @@ export function flightListsResponse(
     refreshHours: 24,
     monthlyPagesLeft: 1390,
     runPages: 110,
+    // why: ruling D3: an outbound-only worker plans 1 page a read; the return-leg tests pass 2 (or rely on prov-008)
+    pagesPlanned: 1,
     reading: null,
     pairs,
+    ...over,
+  });
+}
+
+// --- WP21 Task 21.7: the return read on a search's page (spec rev 56 §10 `flightListSchema.returns`) ---
+// why: synthetic returns and offers only (carriers QQ Air and QQ Atlantic, sellers QQ Travel and QQ Fares); every
+// builder ends in its schema's parse, so a shape the contract refuses fails here, not in a component
+
+type ReturnIn = z.input<typeof listedReturnSchema>;
+type AttemptIn = z.input<typeof returnAttemptSchema>;
+type ReturnReadIn = z.input<typeof returnReadSchema>;
+
+/** One return a return view listed: 14:20 → 06:25 the next day, 12h 05m, one change, from £1,180 round-trip total. */
+export function listedReturn(over: Partial<ReturnIn> = {}) {
+  return listedReturnSchema.parse({
+    departsLocal: '14:20',
+    arrivesLocal: '06:25',
+    arrivesDayOffset: 1,
+    durationMinutes: 725,
+    stops: 1,
+    carriers: ['QQ Atlantic'],
+    operatedBy: null,
+    fromMinor: 118_000,
+    ...over,
+  });
+}
+
+/** One attempt: outbound 0 selected within the limits, its return view listing one return, nothing more listed. */
+export function returnAttempt(over: Partial<AttemptIn> = {}) {
+  return returnAttemptSchema.parse({
+    outboundIndex: 0,
+    outboundFits: true,
+    listed: 'returns',
+    moreListed: false,
+    returns: [listedReturn()],
+    optionsUnparsed: 0,
+    optionsOtherCell: 0,
+    resultsStated: null,
+    ...over,
+  });
+}
+
+/** A finished one-attempt return read under the shared fixture's limits (25 h, 1 stop), with no booking read. */
+export function returnRead(over: Partial<ReturnReadIn> = {}): ReturnRead {
+  return returnReadSchema.parse({
+    limits: PAIRING_LIMITS,
+    status: 'read',
+    rule: null,
+    attempts: [returnAttempt()],
+    triedAll: true,
+    booking: null,
+    ...over,
+  });
+}
+
+/**
+ * The shared pairing fixture (`@gmt/core/testing`) as a stored list: LHR → JFK, 14 → 24 Mar 2027, read 3 days before
+ * NOW at 11:44 London, its four outbounds and its two attempts (attempt 1, return 0 booked: QQ Travel £1,180 of 3
+ * offers). The core and api tests assert the same literals over the same fixture (Review Focus 1).
+ */
+export function pairingList(over: Partial<FlightListIn> = {}) {
+  return flightList({
+    fetchedAt: '2026-10-11T10:44:00.000Z',
+    ageHours: 76,
+    minMinor: 48_000,
+    flights: PAIRING_FIXTURE.flights,
+    returns: PAIRING_FIXTURE.returns,
     ...over,
   });
 }

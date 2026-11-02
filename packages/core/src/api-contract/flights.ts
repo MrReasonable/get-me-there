@@ -66,9 +66,9 @@ export const flightListSchema = z
     resultsStated: countSchema.nullable(),
     /**
      * Spec rev 56 §10: the return read with its attempts, returns and booking read with its offers; null for a list read
-     * without a return phase or stored before migration 0012. Optional until Task 21.7 makes it required (R-order).
+     * without a return phase or stored before migration 0012. Required since Task 21.7 (R-order).
      */
-    returns: returnReadSchema.nullable().exactOptional(),
+    returns: returnReadSchema.nullable(),
   })
   .superRefine((l, ctx) => {
     // why: §7's CHECKs: (status = 'failed') = (reason IS NOT NULL) and (status = 'read') = (listed IS NOT NULL)
@@ -87,10 +87,7 @@ export const flightListSchema = z
         message: "listed 'flights' exactly when a flight was read",
       });
     // why: spec rev 56 §10: an outbound index past the flights is refused (the booking's indices: returnReadSchema)
-    const breach =
-      l.returns === undefined || l.returns === null
-        ? null
-        : returnsOutboundIssue(l.returns, l.flights.length);
+    const breach = l.returns === null ? null : returnsOutboundIssue(l.returns, l.flights.length);
     if (breach !== null)
       ctx.addIssue({
         code: 'custom',
@@ -134,10 +131,10 @@ export const flightListsResponseSchema = z.strictObject({
   runPages: countSchema.nullable(),
   /**
    * Ruling D3 (spec rev 56 §10): the pages one on-demand read plans, `flightPagesPerPair` of the worker's last reported
-   * flags (2 with a return phase, else 1); the read button and its words use it, never a hard number. Optional until
-   * Task 21.6 fills it.
+   * flags (2 with a return phase, or while the flags are unread: prov-008; else 1); the read button and its words use
+   * it, never a hard number. Required since Task 21.7 (R-order: filled in 21.6, read by the web).
    */
-  pagesPlanned: countSchema.exactOptional(),
+  pagesPlanned: countSchema,
   reading: z.strictObject({ departureDate: isoDateSchema, returnDate: isoDateSchema }).nullable(),
   pairs: z.array(
     z.strictObject({

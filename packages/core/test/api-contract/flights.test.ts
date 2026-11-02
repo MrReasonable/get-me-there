@@ -50,6 +50,7 @@ const list = (o: Record<string, unknown> = {}) => ({
   optionsUnparsed: 0,
   optionsOtherCell: 0,
   resultsStated: 23,
+  returns: null,
   ...o,
 });
 const failed = (o: Record<string, unknown> = {}) =>
@@ -80,6 +81,7 @@ const response = (pairs: unknown[]) => ({
   refreshHours: 168,
   monthlyPagesLeft: 1390,
   runPages: 110,
+  pagesPlanned: 1,
   reading: null,
   pairs,
 });
@@ -239,8 +241,9 @@ describe("flightListSchema's returns and the response's pagesPlanned (spec rev 5
     triedAll: false,
     booking: null,
   });
-  it('accepts a list without returns, with returns: null, and with a read of outbound 0 of one flight', () => {
-    expect(flightListSchema.safeParse(list()).success).toBe(true);
+  it('accepts a list with returns: null and with a read of outbound 0 of one flight; refuses one without returns (Task 21.7)', () => {
+    const { returns: _r, ...without } = list();
+    expect(flightListSchema.safeParse(without).success).toBe(false);
     expect(flightListSchema.safeParse(list({ returns: null })).success).toBe(true);
     expect(flightListSchema.safeParse(list({ returns: returns(0) })).error?.issues ?? []).toEqual([]);
   });
@@ -251,9 +254,10 @@ describe("flightListSchema's returns and the response's pagesPlanned (spec rev 5
       false,
     );
   });
-  it('the response takes pagesPlanned (a count) and goes without it', () => {
+  it('the response takes pagesPlanned (a count), required since Task 21.7', () => {
     expect(flightListsResponseSchema.safeParse({ ...response([]), pagesPlanned: 2 }).success).toBe(true);
-    expect(flightListsResponseSchema.safeParse(response([])).success).toBe(true);
+    const { pagesPlanned: _p, ...without } = response([]);
+    expect(flightListsResponseSchema.safeParse(without).success).toBe(false);
     expect(flightListsResponseSchema.safeParse({ ...response([]), pagesPlanned: -1 }).success).toBe(false);
   });
 });

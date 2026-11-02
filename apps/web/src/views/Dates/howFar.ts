@@ -15,6 +15,26 @@ const H = COPY.datesView.howFar;
 const UNPRICED = ['empty', 'no_data', 'error', 'skipped'] as const;
 
 /**
+ * The figure's own words (spec rev 55 §3, rev 56 §6.9): checked fares for a class-verified figure; a calendar price's
+ * source (no "calendar basis" on the main path); a pairing figure's, the browser worker's flight list, never checked
+ * with the airline.
+ */
+function figureWords(f: NonNullable<DatePair['figure']>): string {
+  switch (f.basis) {
+    case 'verified':
+      return H.verified;
+    case 'calendar':
+      return H.calendar(H.calendarFrom[f.price.provenance.providerId]);
+    case 'pairing':
+      return H.pairing;
+    default: {
+      const unknownBasis: never = f.basis;
+      throw new RangeError(`howFarChecked: no basis ${String(unknownBasis)}`);
+    }
+  }
+}
+
+/**
  * One line's parts for a date pair, over `airportPairs` in scope. A date pair without a figure says why: "none within
  * <limit>" when every price it had was left out for a known journey time (`journeyLeftOut`), then its marks.
  */
@@ -22,8 +42,7 @@ export function howFarChecked(pair: DatePair, airportPairs: number, journeyLimit
   const out: string[] = [];
   const f = pair.figure;
   if (f !== null) {
-    // why: spec rev 55 §3 — no "calendar basis" on the main path: a calendar price names the source it came from
-    out.push(f.basis === 'verified' ? H.verified : H.calendar(H.calendarFrom[f.price.provenance.providerId]));
+    out.push(figureWords(f));
     if (f.price.truncated) out.push(H.cutShort);
     if (f.fromEarlierSearch) out.push(H.earlierSearch);
   } else if (pair.journeyLeftOut > 0 && journeyLimit !== null) {

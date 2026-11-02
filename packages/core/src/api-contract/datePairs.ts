@@ -207,11 +207,14 @@ const GRID_COLUMNS = [
  * Spec rev 56 §10: one entry per pairing figure (its own words: seller, fare, times, `which`, mismatch; R-board) and per
  * calendar figure shown with a pairing beneath (within-older, within-other-limits, over-limit, sellers-not-read,
  * offers-incomplete); `figure` strictly ascending. `pricePence` is the cheapest offer's stated price, or the return's
- * "from" price when `isFrom` (then no seller and no fare); the provenance, stale mark and age are the flight list's.
+ * "from" price when `isFrom` (then no seller and no fare); `fromPence` is always the return's "from" price (Task 21.7:
+ * the board's mismatch mark names it, "Google listed from £1,180"); the provenance, stale mark and age are the flight
+ * list's.
  */
 const pairingGroupSchema = z.strictObject({
   figure: counts,
   pricePence: z.array(moneyPenceSchema),
+  fromPence: z.array(moneyPenceSchema),
   isFrom: z.array(z.boolean()),
   seller: z.array(pageText.nullable()),
   fare: z.array(pageText.nullable()),
@@ -230,6 +233,7 @@ const pairingGroupSchema = z.strictObject({
 const PAIRING_COLUMNS = [
   'figure',
   'pricePence',
+  'fromPence',
   'isFrom',
   'seller',
   'fare',
@@ -710,6 +714,18 @@ function refinePairingGroups(v: DatePairsBody, fail: Fail): void {
       fail('pairingSeller', ['pairing', 'seller', k], "a seller exactly when the price is an offer's");
     if (isFrom && columnAt(q.fare, k) !== null)
       fail('pairingFare', ['pairing', 'fare', k], 'no fare on a from price');
+    // why: Task 21.7: the "from" price beside the entry is honest: a from price is its own, and the mismatch mark says
+    // exactly that an offer's price differs from it (spec rev 56 §6.9: the page names both figures)
+    const from = columnAt(q.fromPence, k);
+    const price = columnAt(q.pricePence, k);
+    if (isFrom && from !== price)
+      fail('pairingFromPrice', ['pairing', 'fromPence', k], "a from price is the return's own from price");
+    if (columnAt(q.mismatch, k) !== (!isFrom && from !== price))
+      fail(
+        'pairingMismatch',
+        ['pairing', 'mismatch', k],
+        'a mismatch exactly when an offer differs from the from price',
+      );
     if (columnAt(q.provenance, k) >= v.provenances.length)
       fail('pairingProvenance', ['pairing', 'provenance', k], 'no such provenance');
   }
@@ -779,6 +795,7 @@ const gridPriceCellSchema = z.strictObject({
 /** Spec rev 56 §10: one pairing as the `pairing` group carries it, its provenance inline. */
 const pairingCellSchema = z.strictObject({
   pricePence: moneyPenceSchema,
+  fromPence: moneyPenceSchema,
   isFrom: z.boolean(),
   seller: pageText.nullable(),
   fare: pageText.nullable(),
@@ -814,14 +831,14 @@ export const datePairFigureSchema = z
     arriveBack: z.string().nullable(),
     fromEarlierSearch: z.boolean(),
     cheaperCached: cheaperCachedPriceSchema.nullable(),
-    /** spec rev 56 §6.9: non-null exactly on a pairing figure; optional until Task 21.7 (R-order) */
-    gridPrice: gridPriceCellSchema.nullable().exactOptional(),
+    /** spec rev 56 §6.9: non-null exactly on a pairing figure (required since Task 21.7, R-order) */
+    gridPrice: gridPriceCellSchema.nullable(),
     /** spec rev 56 §6.9: a pairing figure's own words, or the pairing beneath a calendar figure */
-    pairing: pairingCellSchema.nullable().exactOptional(),
-    /** spec rev 56 §6.9: absent reads as `not-read`; `within` exactly on a pairing figure */
-    pairingRead: pairingReadSchema.exactOptional(),
+    pairing: pairingCellSchema.nullable(),
+    /** spec rev 56 §6.9: `not-read` with no list; `within` exactly on a pairing figure */
+    pairingRead: pairingReadSchema,
     /** the 21.6 ruling: why the cell's newest list failed, non-null exactly on a `list-failed` read */
-    listReason: z.enum(STOP_DETAILS).nullable().exactOptional(),
+    listReason: z.enum(STOP_DETAILS).nullable(),
   })
   .superRefine((f, ctx) => {
     const fail = (path: Array<string | number>, message: string) =>
@@ -840,13 +857,13 @@ export const datePairFigureSchema = z
       fail(['cheaperCached', 'pricePence'], "a cheaper cached price must be below the figure's");
     // why: spec rev 56 §10: the board's refinement, figure by figure, so the two encodings accept the same shapes
     const pairingBasis = f.basis === 'pairing';
-    const read = f.pairingRead ?? 'not-read';
-    const p = f.pairing ?? null;
-    if (pairingBasis !== ((f.gridPrice ?? null) !== null))
+    const read = f.pairingRead;
+    const p = f.pairing;
+    if (pairingBasis !== (f.gridPrice !== null))
       fail(['gridPrice'], 'a grid price exactly on a pairing figure');
     if (pairingBasis !== (read === 'within'))
       fail(['pairingRead'], 'pairingRead is within exactly on a pairing figure');
-    if ((read === 'list-failed') !== ((f.listReason ?? null) !== null))
+    if ((read === 'list-failed') !== (f.listReason !== null))
       fail(['listReason'], 'a reason exactly on a list-failed read');
     // why: ruling 21.2: a pairing is shown beneath a calendar figure, or a stale verified one, as the board allows
     const beneath = f.basis === 'calendar' || (f.basis === 'verified' && f.price.stale !== false);
@@ -876,4 +893,9 @@ export const datePairFigureSchema = z
     if (p.isFrom === (p.seller !== null))
       fail(['pairing', 'seller'], "a seller exactly when the price is an offer's");
     if (p.isFrom && p.fare !== null) fail(['pairing', 'fare'], 'no fare on a from price');
+    // why: Task 21.7: as the board's group (refinePairingGroups), figure by figure
+    if (p.isFrom && p.fromPence !== p.pricePence)
+      fail(['pairing', 'fromPence'], "a from price is the return's own from price");
+    if (p.mismatch !== (!p.isFrom && p.fromPence !== p.pricePence))
+      fail(['pairing', 'mismatch'], 'a mismatch exactly when an offer differs from the from price');
   });

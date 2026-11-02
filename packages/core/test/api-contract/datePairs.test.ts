@@ -598,6 +598,8 @@ describe('datePairsResponseSchema: the pairing figure (spec rev 56 §10)', () =>
     expect(issuePaths(noOffers)).toEqual(['pairing.offersRead.0']);
     const priced = withPairing();
     pairingAt(priced).pricePence[0] = 117_999;
+    // why: Task 21.7: the offer then differs from the return's "from" price, which the mismatch mark must say
+    pairingAt(priced).mismatch[0] = true;
     expect(issuePaths(priced)).toEqual(['pairing.pricePence.0']);
     // why: the figure's provenance is the flight list's, the pairing's one table entry
     const sourced = withPairing();
@@ -641,6 +643,23 @@ describe('datePairsResponseSchema: the pairing figure (spec rev 56 §10)', () =>
     groupOf(complete, 'pairing').seller[1] = null;
     groupOf(complete, 'pairing').offersRead[1] = 0;
     expect(issuePaths(complete)).toEqual(['pairing.complete.1']);
+  });
+  it('Task 21.7: the pairing group carries the return\'s "from" price; a mismatch exactly when an offer differs from it', () => {
+    const ok = withPairing();
+    expect(groupOf(ok, 'pairing').fromPence).toEqual([118_000, 118_000]);
+    expect(issuePaths(ok)).toEqual([]);
+    const differs = withPairing();
+    groupOf(differs, 'pairing').fromPence[1] = 117_500;
+    expect(issuePaths(differs)).toEqual(['pairing.mismatch.1']);
+    groupOf(differs, 'pairing').mismatch[1] = true;
+    expect(issuePaths(differs)).toEqual([]);
+    const from = withPairing();
+    groupOf(from, 'pairing').isFrom[1] = true;
+    groupOf(from, 'pairing').seller[1] = null;
+    groupOf(from, 'pairing').offersRead[1] = 0;
+    groupOf(from, 'pairing').complete[1] = false;
+    groupOf(from, 'pairing').fromPence[1] = 117_500;
+    expect(issuePaths(from)).toEqual(['pairing.fromPence.1']);
   });
   it('the 21.6 ruling: a failed list reads list-failed with its cause, an entry exactly for each such figure', () => {
     const failed = (): DatePairsResponse =>
@@ -816,10 +835,12 @@ describe("datePairFigureSchema: basis 'pairing', gridPrice, pairing and pairingR
     const x = r(v);
     return x.success ? [] : x.error.issues.map((i) => i.path.join('.'));
   };
-  it('accepts a pairing figure with its grid price, pairing and pairingRead, and a figure without them', () => {
+  it('accepts a pairing figure with its grid price, pairing and pairingRead; refuses a figure without them (Task 21.7)', () => {
     expect(r(pairing).error?.issues ?? []).toEqual([]);
     const { gridPrice: _g, pairing: _q, pairingRead: _r, ...older } = calendar;
-    expect(r(older).success).toBe(true);
+    expect(r(older).success).toBe(false);
+    const { listReason: _l, ...noReason } = calendar;
+    expect(r(noReason).success).toBe(false);
     expect(r({ ...calendar, pairingRead: 'within-older', pairing: figurePairing() }).success).toBe(true);
   });
   it('prov-001: a pairing figure is complete, within the limits, fresh, read from an offer, priced and sourced as its figure', () => {
@@ -829,7 +850,7 @@ describe("datePairFigureSchema: basis 'pairing', gridPrice, pairing and pairingR
     expect(paths({ ...pairing, price: { ...pairing.price, stale: 'refresh' } })).toEqual(['pairing.stale']);
     expect(paths({ ...pairing, pairing: figurePairing({ offersRead: 0 }) })).toEqual(['pairing.offersRead']);
     expect(paths({ ...pairing, pairing: figurePairing({ offersRead: 1 }) })).toEqual([]);
-    expect(paths({ ...pairing, pairing: figurePairing({ pricePence: 117_999 }) })).toEqual([
+    expect(paths({ ...pairing, pairing: figurePairing({ pricePence: 117_999, mismatch: true }) })).toEqual([
       'pairing.pricePence',
     ]);
     const other = { ...pairing.price.provenance, fetchedAt: asIsoDateTime('2027-03-01T09:31:00.000Z') };
@@ -857,6 +878,22 @@ describe("datePairFigureSchema: basis 'pairing', gridPrice, pairing and pairingR
     expect(paths({ ...beneath, pairing: figurePairing({ ...from, offersRead: 0, complete: true }) })).toEqual(
       ['pairing.complete'],
     );
+  });
+  it('Task 21.7: fromPence is the return\'s "from" price, the figure\'s own when isFrom, unlike it exactly on a mismatch', () => {
+    const beneath = { ...calendar, pairingRead: 'offers-incomplete' as const };
+    expect(paths({ ...beneath, pairing: figurePairing({ fromPence: 117_500, mismatch: true }) })).toEqual([]);
+    expect(paths({ ...beneath, pairing: figurePairing({ fromPence: 117_500 }) })).toEqual([
+      'pairing.mismatch',
+    ]);
+    expect(paths({ ...beneath, pairing: figurePairing({ mismatch: true }) })).toEqual(['pairing.mismatch']);
+    const from = { isFrom: true, seller: null, offersRead: 0, complete: false } as const;
+    expect(
+      paths({
+        ...calendar,
+        pairingRead: 'sellers-not-read',
+        pairing: figurePairing({ ...from, fromPence: 1 }),
+      }),
+    ).toEqual(['pairing.fromPence']);
   });
   it('the 21.6 ruling: a list reason exactly on a list-failed read', () => {
     expect(paths({ ...calendar, pairingRead: 'list-failed', listReason: 'network' })).toEqual([]);

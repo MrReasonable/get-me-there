@@ -189,7 +189,19 @@ export function cellModel(
     // why: a current figure is always on the scale it was built from, so a scale that is not banded is flat
     if (isCurrent(f)) shade = scale.mode === 'quintile' ? scale.band(f.price.pricePence) : 'flat';
     else marks.push(f.superseded ? 'superseded' : 'notSeen');
-    if (f.basis === 'calendar') marks.push('notChecked');
+    // why: spec rev 56 §11: a pairing figure is never checked with the airline either (an exhaustive switch: R-order)
+    switch (f.basis) {
+      case 'calendar':
+      case 'pairing':
+        marks.push('notChecked');
+        break;
+      case 'verified':
+        break;
+      default: {
+        const unknownBasis: never = f.basis;
+        throw new RangeError(`cellModel: no basis ${String(unknownBasis)}`);
+      }
+    }
     if (partly) marks.push('partly');
     return { pairs: [...pairs], lead, shade, mark, marks, buckets };
   }

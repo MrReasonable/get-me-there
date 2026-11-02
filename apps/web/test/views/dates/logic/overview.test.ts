@@ -33,6 +33,7 @@ import {
   DATES_SPACE,
   datePairOf,
   datesResponse,
+  pairingFig,
   priced,
   verifiedFig,
 } from '../../../fixtures.dates.js';
@@ -270,6 +271,11 @@ describe('the five marks are core’s reducedMark, imported and not re-implement
 });
 
 describe('cellModel: shading (spec §11, revision 50)', () => {
+  it('spec rev 56 §11: a pairing figure is shaded on the one scale and carries "not checked"', () => {
+    const pair = p({ index: 100, figure: pairingFig(), buckets: bucketsOf({ priced: 4 }) });
+    expect(cellModel([pair], ranks(pair), banded)).toMatchObject({ marks: ['notChecked'] });
+    expect(cellModel([pair], ranks(pair), banded).shade).not.toBeNull();
+  });
   it('a current calendar figure is shaded and carries "not checked"; a verified one does not', () => {
     const cal = p({ index: 100, figure: priced(30_000), buckets: bucketsOf({ priced: 4 }) });
     expect(cellModel([cal], ranks(cal), banded)).toMatchObject({ shade: 0, marks: ['notChecked'] });

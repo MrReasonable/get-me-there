@@ -38,9 +38,15 @@ describe('flightListsStateSchema (spec rev 56 §7: returns, booking, returnsStop
 });
 
 describe("estimateSchema.flightLists (spec rev 56 §8.1: pairs, returns, and the bound's pages and seconds)", () => {
-  it('accepts the new figures and an older estimate without them', () => {
+  it('accepts the new figures and an older estimate without them, read with pairs = pages and returns false (A3)', () => {
     const older = { ...estimate, flightLists: { pages: 10, seconds: 700 } };
-    expect(estimateSchema.parse(older)).toEqual(older);
+    expect(estimateSchema.parse(older)).toEqual({
+      ...estimate,
+      flightLists: { pages: 10, seconds: 700, pairs: 10, returns: false },
+    });
+    // why: the reader fills only what is absent; a stored outbound-only plan keeps its own pairs
+    const outbound = { ...estimate, flightLists: { pages: 4, seconds: 280, pairs: 4, returns: false } };
+    expect(estimateSchema.parse(outbound)).toEqual(outbound);
     const now = {
       ...estimate,
       flightLists: { pages: 15, seconds: 2450, pairs: 10, returns: true, pagesMax: 20, secondsMax: 3000 },

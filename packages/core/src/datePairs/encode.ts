@@ -20,6 +20,8 @@ import type { DatePairSpace } from './space.js';
  */
 export interface DatePairPairing {
   pricePence: number;
+  /** the return's "from" price (Task 21.7): `pricePence` itself when `isFrom`; it differs exactly when `mismatch` */
+  fromPence: number;
   isFrom: boolean;
   seller: string | null;
   fare: string | null;
@@ -70,16 +72,16 @@ export interface DatePairFigure {
     destination: Iata;
   } | null;
   /**
-   * Spec rev 56 §6.9: the calendar price a pairing figure replaced, shown beneath it; null on every other basis. Optional
-   * until Task 21.7 (R-order); the decoder always fills it.
+   * Spec rev 56 §6.9: the calendar price a pairing figure replaced, shown beneath it; null on every other basis.
+   * Required since Task 21.7 (R-order); the decoder always fills it.
    */
-  gridPrice?: GridPrice | null;
-  /** Spec rev 56 §6.9: a pairing figure's own words, or the pairing beneath a calendar figure; else null (decoder fills). */
-  pairing?: DatePairPairing | null;
-  /** Spec rev 56 §6.9: the cell's flight read; `within` exactly on a pairing figure; absent reads as `not-read`. */
-  pairingRead?: PairingRead;
-  /** The 21.6 ruling: why the cell's newest flight list failed, exactly on a `list-failed` read; else null (decoder fills). */
-  listReason?: StopDetail | null;
+  gridPrice: GridPrice | null;
+  /** Spec rev 56 §6.9: a pairing figure's own words, or the pairing beneath a calendar figure; else null. */
+  pairing: DatePairPairing | null;
+  /** Spec rev 56 §6.9: the cell's flight read; `within` exactly on a pairing figure; `not-read` with no list. */
+  pairingRead: PairingRead;
+  /** The 21.6 ruling: why the cell's newest flight list failed, exactly on a `list-failed` read; else null. */
+  listReason: StopDetail | null;
 }
 
 /** One date pair of the space: its dates, its six buckets and counts over the airport pairs in scope, its figure. */
@@ -200,6 +202,7 @@ export function encodeDatePairs(d: DecodedDatePairs): DatePairsResponse {
   const pairing: NonNullable<DatePairsResponse['pairing']> = {
     figure: [],
     pricePence: [],
+    fromPence: [],
     isFrom: [],
     seller: [],
     fare: [],
@@ -264,12 +267,12 @@ export function encodeDatePairs(d: DecodedDatePairs): DatePairsResponse {
     f.journeyMinutes.push(x.journeyMinutes);
     f.fromEarlierSearch.push(x.fromEarlierSearch);
     // why: R-sparse: an entry only for a read other than not-read, its code the read's index in PAIRING_READ
-    const read: PairingRead = x.pairingRead ?? 'not-read';
+    const read: PairingRead = x.pairingRead;
     if (read !== 'not-read') {
       pairingRead.figure.push(figure);
       pairingRead.code.push(PAIRING_READ.indexOf(read));
     }
-    const why = x.listReason ?? null;
+    const why = x.listReason;
     if (why !== null) {
       listReason.figure.push(figure);
       listReason.reason.push(why);
@@ -291,7 +294,7 @@ export function encodeDatePairs(d: DecodedDatePairs): DatePairsResponse {
       times.departBack.push(x.departBack);
       times.arriveBack.push(x.arriveBack);
     }
-    const g = x.gridPrice ?? null;
+    const g = x.gridPrice;
     if (g !== null) {
       grid.figure.push(figure);
       grid.pricePence.push(g.pricePence);
@@ -299,10 +302,11 @@ export function encodeDatePairs(d: DecodedDatePairs): DatePairsResponse {
       grid.stale.push(g.stale);
       grid.truncated.push(g.truncated);
     }
-    const q = x.pairing ?? null;
+    const q = x.pairing;
     if (q !== null) {
       pairing.figure.push(figure);
       pairing.pricePence.push(q.pricePence);
+      pairing.fromPence.push(q.fromPence);
       pairing.isFrom.push(q.isFrom);
       pairing.seller.push(q.seller);
       pairing.fare.push(q.fare);

@@ -3969,6 +3969,8 @@ datePairsResponseSchema = {
                                 // (within-older, within-other-limits, over-limit, sellers-not-read, offers-incomplete)
     figure: number[];           // index into the figures columns, strictly ascending
     pricePence: number[];       // the cheapest offer's stated price, or the return's "from" price when isFrom
+    fromPence: number[];        // the return's "from" price itself (pricePence when isFrom; the board's mismatch mark
+                                // names it: "Google listed from £1,180")
     isFrom: boolean[];
     seller: (string | null)[]; fare: (string | null)[];   // the cheapest offer's (page text, rendered as text only); null when isFrom
     offersRead: number[]; complete: boolean[];
@@ -3978,7 +3980,9 @@ datePairsResponseSchema = {
     provenance: number[]; stale: (false | 'refresh' | 'setting')[]; ageHours: (number | 'unknown')[];
                                 // on a pairing figure: not isFrom, complete, offersRead >= 1, which not 'over-limit',
                                 // stale false (the figure's too), pricePence the figure's, provenance the figure's own
-                                // flight list's index; on any entry, isFrom only with offersRead 0 and complete false
+                                // flight list's index; on any entry, isFrom only with offersRead 0 and complete false,
+                                // fromPence equal to pricePence when isFrom, and mismatch exactly when an offer's
+                                // pricePence differs from fromPence
   };
   cheaperCached: {              // sparse: one entry per verified figure hiding a cheaper current calendar price
     figure: number[];           // index into the figures columns, strictly ascending
@@ -4449,7 +4453,8 @@ merged into price.
     list exists ("return leg not read" for an outbound-only list only, "no return flight
     read", "no pairing within your limits read", …; a failed newest list
     "flights couldn't be read: <its reason in words>", never "return leg not
-    read"; "flights not read" only when no list exists), and a pairing that does not lead is shown beneath its grid price
+    read"; "flights not read" only when no list exists, and only on a search whose flight lists are read, so a search
+    without the browser worker is not told it on every row), and a pairing that does not lead is shown beneath its grid price
     through `PriceCell` with its own age: "return flights read 9d ago, older
     than this search's refresh:", "return flights read under earlier
     limits:", the over-limit pairing as its "from" price, "from £1,180 ·

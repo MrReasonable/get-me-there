@@ -23,10 +23,16 @@ function flight(durationMinutes: number, pounds: number, over: Partial<ListedFli
 
 const LIMIT_25H: FlightLimits = {
   maxJourneyMinutes: 1500,
+  maxStops: null,
   arrivalWindowLocal: null,
   departureWindowLocal: null,
 };
-const NONE: FlightLimits = { maxJourneyMinutes: null, arrivalWindowLocal: null, departureWindowLocal: null };
+const NONE: FlightLimits = {
+  maxJourneyMinutes: null,
+  maxStops: null,
+  arrivalWindowLocal: null,
+  departureWindowLocal: null,
+};
 
 /** The brief's five flights: 600/700/1,560/900/800 minutes at £92/£86/£80/£86/£95. */
 const FIVE = [flight(600, 92), flight(700, 86), flight(1560, 80), flight(900, 86), flight(800, 95)];
@@ -121,6 +127,7 @@ describe('chooseFlightsToShow (spec rev 55 §11 Which flights)', () => {
   it('a flight outside the arrival window or the departure window is not shown and is counted outside', () => {
     const l: FlightLimits = {
       maxJourneyMinutes: 1500,
+      maxStops: null,
       arrivalWindowLocal: { from: '06:00', to: '23:00' },
       departureWindowLocal: { from: '08:00', to: '20:00' },
     };

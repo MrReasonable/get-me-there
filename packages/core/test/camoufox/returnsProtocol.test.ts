@@ -131,9 +131,8 @@ beforeEach(() => {
 });
 
 describe('flightsRequestSchema: returnLimits and booking (spec rev 56 §2, §5.1)', () => {
-  it('accepts returnLimits (all null; with maxStops and windows; without maxStops), with and without booking', () => {
-    const { maxStops: _m, ...noStops } = LIMITS;
-    for (const returnLimits of [NULL_LIMITS, LIMITS, noStops]) {
+  it('accepts returnLimits (all null; with maxStops and windows), with and without booking', () => {
+    for (const returnLimits of [NULL_LIMITS, LIMITS]) {
       expect(req({ returnLimits })).toBe(true);
       expect(req({ returnLimits, booking: true })).toBe(true);
       expect(req({ returnLimits, booking: false })).toBe(true);
@@ -145,6 +144,9 @@ describe('flightsRequestSchema: returnLimits and booking (spec rev 56 §2, §5.1
     expect(req({ booking: true })).toBe(false);
     expect(req({ booking: false })).toBe(false);
     expect(req({ returnLimits: { ...LIMITS, maxStops: -1 } })).toBe(false);
+    // why: maxStops is required since Task 21.7 (R-order); the app always sends flightLimitsOf's null for "not set"
+    const { maxStops: _m, ...noStops } = LIMITS;
+    expect(req({ returnLimits: noStops })).toBe(false);
   });
   it('pageRequestSchema refuses a list request carrying returnLimits', () => {
     expect(pageRequestSchema.safeParse({ mode: 'list', ...fields }).success).toBe(true);

@@ -20,7 +20,8 @@
     "src/state/landing.ts",
     "src/format.ts:46-113",
     "src/views/Searches/estimateLine.ts",
-    "src/views/Dates/stateLines.ts"
+    "src/views/Dates/stateLines.ts",
+    "src/views/Dates/pairing.ts"
   ],
   "thresholds": {
     "high": 90,

@@ -1,4 +1,5 @@
 import { BANNED_WORD_ALLOWLIST, findBannedWords } from '@gmt/core';
+import { PAIRING_FIXTURE } from '@gmt/core/testing';
 import { screen, waitFor } from '@testing-library/react';
 import { HttpResponse, http } from 'msw';
 import { describe, expect, it } from 'vitest';
@@ -6,6 +7,15 @@ import { App } from '../../src/App.js';
 import { PLAN_COPY } from '../../src/copy/plan.js';
 import { COPY } from '../../src/copy.js';
 import { VIEWS } from '../../src/state/view.js';
+import {
+  at,
+  calendarFig,
+  type DatesOptions,
+  figurePairing,
+  pairingFig,
+  pricedPair,
+  provCached,
+} from '../fixtures.dates.js';
 import {
   API,
   calendarGap,
@@ -17,7 +27,10 @@ import {
   resultsResponse,
   verifiedRow,
 } from '../fixtures.js';
+import { flightPair, pairingList } from '../fixtures.searches.js';
 import { poundsOutsidePrices, renderedCopy } from '../guards.js';
+import { serveDates } from '../msw/datesHandlers.js';
+import { serveFlightLists } from '../msw/searchesHandlers.js';
 import { server } from '../msw/server.js';
 import { drawn, renderWithProviders } from '../render.js';
 import { jargonIn, mainPathWords } from '../views/dates/jargon.js';
@@ -116,4 +129,69 @@ describe('the main path in the shell says no set-up term (spec rev 55 §3, §11;
       expect(jargonIn(mainPathWords())).toEqual([]);
     });
   }
+});
+
+describe('a search\'s page with the return leg read says no banned word, no set-up term, no "£" outside a price (Task 21.7)', () => {
+  it('view=dates: a pairing figure, a calendar figure with its pairing beneath, the pairing section', async () => {
+    const board: DatesOptions = {
+      discoveryProviders: ['travelpayouts', 'camoufox'],
+      pairs: {
+        [at('2027-03-14', 10)]: pricedPair(
+          pairingFig({
+            pairing: figurePairing({ pricePence: 119_500, mismatch: true }),
+            price: { ...pairingFig().price, pricePence: 119_500 },
+          }),
+        ),
+        [at('2027-03-15', 10)]: pricedPair(
+          calendarFig({
+            price: { ...calendarFig().price, pricePence: 130_000, provenance: provCached() },
+            pairingRead: 'offers-incomplete',
+            pairing: figurePairing({ complete: false }),
+          }),
+        ),
+        [at('2027-03-16', 10)]: pricedPair(
+          calendarFig({
+            price: { ...calendarFig().price, pricePence: 131_000, provenance: provCached() },
+            pairingRead: 'list-failed',
+            listReason: 'network',
+          }),
+        ),
+      },
+    };
+    server.use(
+      serveDates(board),
+      serveFlightLists(
+        (d, r) =>
+          flightPair(
+            d,
+            r,
+            d === '2027-03-14'
+              ? {
+                  list: pairingList({
+                    returns: {
+                      ...PAIRING_FIXTURE.returns,
+                      booking:
+                        PAIRING_FIXTURE.returns.booking === null
+                          ? null
+                          : {
+                              ...PAIRING_FIXTURE.returns.booking,
+                              moreControl: true,
+                              offers: [{ seller: 'QQ Fares', fare: 'Economy Basic', priceMinor: 119_500 }],
+                            },
+                    },
+                  }),
+                }
+              : {},
+          ),
+        { pagesPlanned: 2 },
+      ),
+    );
+    renderWithProviders(<App />, { search: '?view=dates&def=def-0001' });
+    await screen.findByRole('table', { name: /^Best dates/ });
+    await waitFor(() => expect(document.querySelector('[data-testid="flights-pairing"]')).not.toBeNull());
+    expect(findBannedWords(renderedCopy(), BANNED_WORD_ALLOWLIST).map((h) => h.word)).toEqual([]);
+    expect(poundsOutsidePrices()).toEqual([]);
+    expect(jargonIn(mainPathWords())).toEqual([]);
+    expect(renderedCopy()).not.toMatch(/each seller|every seller|verified/i);
+  });
 });

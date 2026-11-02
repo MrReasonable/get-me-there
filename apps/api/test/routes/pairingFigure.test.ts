@@ -131,6 +131,7 @@ const listProvenance = (hoursAgo: number) => ({
 /** The pairing group of the fixture's pairing (attempt 1, return 0), 1 h old, with the cheapest offer read. */
 const PAIRING = {
   pricePence: 118_000,
+  fromPence: 118_000,
   isFrom: false,
   seller: 'QQ Travel',
   fare: null,
@@ -245,6 +246,8 @@ describe('the pairing figure on the board (spec rev 56 §6.9)', () => {
       price: { pricePence: 119_500 },
       pairing: {
         pricePence: 119_500,
+        // why: Task 21.7: the board's mismatch mark names the return's "from" price ("Google listed from £1,180")
+        fromPence: 118_000,
         seller: 'QQ Fares',
         fare: 'Economy Basic',
         offersRead: 2,
@@ -300,7 +303,7 @@ describe('the pairing figure on the board (spec rev 56 §6.9)', () => {
     expect(await figureA(x, def)).toMatchObject({
       basis: 'calendar',
       pairingRead: 'over-limit',
-      pairing: { pricePence: 120_400, isFrom: true, seller: null, which: 'over-limit' },
+      pairing: { pricePence: 120_400, fromPence: 120_400, isFrom: true, seller: null, which: 'over-limit' },
     });
   });
 

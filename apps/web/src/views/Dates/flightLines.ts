@@ -4,8 +4,10 @@ import {
   type DatePair,
   type DatePairFigure,
   type FlightLimits,
+  flightLimitsOf,
   groupThousands,
   type IsoDateTime,
+  type LegTimes,
   type ListedFlight,
   MAX_FLIGHT_LIST_PAIRS,
   mainPathSource,
@@ -40,14 +42,13 @@ export const listStale = (list: FlightList): StaleMark => list.stale;
 export const pairKey = (p: { departureDate: string; returnDate: string }): string =>
   `${p.departureDate}_${p.returnDate}`;
 
-/** The search's limits a flight is judged against (spec rev 55 §11): its longest journey and its two windows. */
+/**
+ * The search's limits a flight is judged against (spec rev 56 §6.2): core's `flightLimitsOf` of its constraints, the
+ * longest journey and the stops on each leg and the two windows on the outbound, the one set the worker's selection,
+ * the choosers and the pairing figure apply.
+ */
 export function limitsOf(d: DefinitionResponse): FlightLimits {
-  const c = d.constraints;
-  return {
-    maxJourneyMinutes: c.maxJourneyMinutes ?? null,
-    arrivalWindowLocal: c.arrivalWindowLocal ?? null,
-    departureWindowLocal: c.departureWindowLocal ?? null,
-  };
+  return flightLimitsOf(d.constraints);
 }
 
 /**
@@ -130,25 +131,41 @@ export function hoursText(minutes: number): string {
 }
 
 /**
- * A flight's marks against the search's limits (spec rev 55 §11; persona-010): over the longest journey, outside the
- * arrival window, outside the departure window, each said; a flight within every limit says "within your 25h limit;
- * return not read" when a longest journey is set, and nothing more when none is.
+ * A leg's marks against the search's limits (spec rev 56 §6.2, §11; persona-010): over the longest journey, over the
+ * stops limit, and on the outbound only outside the arrival or the departure window, each said; a leg within every
+ * limit says "outbound 10h 50m, within your 25h limit" when a longest journey is set (and nothing when none is), the
+ * outbound adding "; return not read" only when no return was read for its list (`returnsRead` false).
  */
-export function flightMarks(f: ListedFlight, limits: FlightLimits, c: FlightCopy): string[] {
-  const w = withinLimits(f, limits);
+export function legMarks(
+  leg: 'outbound' | 'return',
+  f: LegTimes,
+  limits: FlightLimits,
+  c: FlightCopy,
+  returnsRead = false,
+): string[] {
+  const w = withinLimits(f, limits, leg);
+  const name = c.legs[leg];
   const duration = hoursText(f.durationMinutes);
   const limit = limits.maxJourneyMinutes === null ? null : hoursText(limits.maxJourneyMinutes);
   const marks = [
-    ...(!w.journey && limit !== null ? [c.overLimit(duration, limit)] : []),
+    ...(!w.journey && limit !== null ? [c.overLimitLeg(name, duration, limit)] : []),
+    ...(!w.stops && limits.maxStops !== null ? [c.stopsOver(name, f.stops, limits.maxStops)] : []),
     ...(!w.arrival ? [c.arrivesOutside(f.arrivesLocal)] : []),
     ...(!w.departure ? [c.departsOutside(f.departsLocal)] : []),
   ];
-  if (marks.length === 0 && limit !== null) return [c.within(duration, limit)];
-  return marks;
+  if (marks.length > 0 || limit === null) return marks;
+  return [
+    leg === 'outbound' && !returnsRead ? c.within(duration, limit) : c.withinLeg(name, duration, limit),
+  ];
+}
+
+/** An outbound's marks for a list with no return read (spec rev 55 §11): `legMarks('outbound', …)`. */
+export function flightMarks(f: ListedFlight, limits: FlightLimits, c: FlightCopy): string[] {
+  return legMarks('outbound', f, limits, c);
 }
 
 /** A flight's carriers in words: "Virgin Atlantic", or "…, operated by …" when the page names the operator. */
-export function carriersText(f: ListedFlight, c: FlightCopy): string {
+export function carriersText(f: Pick<ListedFlight, 'carriers' | 'operatedBy'>, c: FlightCopy): string {
   const carriers = f.carriers.join(', ');
   return f.operatedBy === null ? carriers : c.operatedBy(carriers, f.operatedBy);
 }
@@ -231,6 +248,24 @@ export function pagesLeftClause(monthlyPagesLeft: number | null, runPages: numbe
   return monthlyPagesLeft !== null && runPages !== null && monthlyPagesLeft < runPages
     ? groupThousands(monthlyPagesLeft)
     : null;
+}
+
+/**
+ * The read button's words (spec rev 56 §11; rulings D3, prov-008, R-low-pages): the pages one read plans, as the
+ * flight-lists response states them (`pagesPlanned`: 2 with a return phase or while the worker's flags are unread, else
+ * 1), never a hard number; with fewer pages left this month than it plans (but at least one) the read is outbound-only,
+ * said as such and never refused (the month's clause is then that note); else the "; N pages left this month" clause
+ * when the month is short of one run (`pagesLeftClause`).
+ */
+export function readButtonWords(
+  pagesPlanned: number,
+  monthlyPagesLeft: number | null,
+  runPages: number | null,
+  c: FlightCopy,
+): string {
+  if (monthlyPagesLeft !== null && monthlyPagesLeft >= 1 && monthlyPagesLeft < pagesPlanned)
+    return c.readOutboundOnly(pagesPlanned);
+  return c.readButton(pagesPlanned, pagesLeftClause(monthlyPagesLeft, runPages));
 }
 
 /** "14 → 24 Mar", or "28 Mar → 7 Apr" across a month end: the link's name (spec rev 55 §11). */

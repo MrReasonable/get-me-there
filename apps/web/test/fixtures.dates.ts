@@ -1,12 +1,13 @@
 import {
   addDays,
-  type apiContract,
+  apiContract,
   asIata,
   asIsoDate,
   asIsoDateTime,
   type Buckets,
   type DatePair,
   type DatePairFigure,
+  type DatePairPairing,
   type DatePairSpace,
   type DecodedDatePairs,
   datePairAt,
@@ -97,8 +98,90 @@ export function calendarFig(over: Partial<DatePairFigure> = {}): DatePairFigure 
     arriveBack: null,
     fromEarlierSearch: false,
     cheaperCached: null,
+    gridPrice: null,
+    pairing: null,
+    pairingRead: 'not-read',
+    listReason: null,
     ...over,
   };
+}
+
+// --- WP21 Task 21.7: the pairing figure (spec rev 56 §6.9, §10) ---
+
+/** The browser worker's flight-list provenance (camoufox, its own page, GBP, UK point of sale), read at `fetchedAt`. */
+export function provFlightList(fetchedAt = '2026-10-14T10:44:00.000Z'): Provenance {
+  return {
+    providerId: 'camoufox',
+    sourceKind: 'scraped-self',
+    fetchedAt: asIsoDateTime(fetchedAt),
+    maxAgeHours: 0,
+    fx: { converted: false },
+    pointOfSale: 'GB',
+    cabin: 'economy',
+  };
+}
+
+/** The browser worker's date-grid price provenance, fetched 10 Oct 09:30 London ("the date grid", spec rev 55 §6.9). */
+export function provGrid(over: Partial<Provenance> = {}): Provenance {
+  return {
+    ...provFlightList('2026-10-10T08:30:00.000Z'),
+    maxAgeHours: 0,
+    returnDateSource: 'grid-cell',
+    ...over,
+  };
+}
+
+/**
+ * The pairing group of the shared fixture's pairing (spec rev 56 §10): QQ Travel's £1,180, the cheapest of 3 offers
+ * read, for the next-cheapest outbound (07:15 → 18:05) and its return (14:20 → 06:25), equal to the return's "from"
+ * price, read 4 h before NOW.
+ */
+export function figurePairing(over: Partial<DatePairPairing> = {}): DatePairPairing {
+  return {
+    pricePence: 118_000,
+    fromPence: 118_000,
+    isFrom: false,
+    seller: 'QQ Travel',
+    fare: null,
+    offersRead: 3,
+    complete: true,
+    which: 'next-cheapest',
+    departOut: '07:15',
+    arriveOut: '18:05',
+    departBack: '14:20',
+    arriveBack: '06:25',
+    mismatch: false,
+    provenance: provFlightList(),
+    stale: false,
+    ageHours: 4,
+    ...over,
+  };
+}
+
+/**
+ * A pairing figure on LHR → JFK (spec rev 56 §6.9): the cheapest offer's £1,180 leads with the flight list's
+ * provenance, the £564 date-grid price it replaced beneath. Checked by the scoped `/results` contract's
+ * `datePairFigureSchema` (the board's per-figure rules), so a figure the api could never send fails here.
+ */
+export function pairingFig(over: Partial<DatePairFigure> = {}): DatePairFigure {
+  const pairing = over.pairing ?? figurePairing();
+  const f = calendarFig({
+    price: {
+      pricePence: pairing.pricePence,
+      provenance: pairing.provenance,
+      stale: false,
+      ageHours: 4,
+      truncated: false,
+    },
+    basis: 'pairing',
+    gridPrice: { pricePence: 56_400, provenance: provGrid(), stale: false, truncated: false },
+    pairing,
+    pairingRead: 'within',
+    ...over,
+  });
+  const { airportPair: _a, ...wire } = f;
+  apiContract.datePairFigureSchema.parse(wire);
+  return f;
 }
 
 /** A verified figure on LHR→JFK with its segments' local times: an overnight outbound arriving the next day. */

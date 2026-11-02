@@ -726,6 +726,10 @@ export function datePairFigure(
     arriveBack: '2027-03-29T07:00',
     fromEarlierSearch: false,
     cheaperCached: null,
+    gridPrice: null,
+    pairing: null,
+    pairingRead: 'not-read',
+    listReason: null,
     ...over,
   });
 }

@@ -146,6 +146,10 @@ export function decodedRead(c: PerfCase, seed: number): DecodedDatePairs {
             arriveBack: null,
             fromEarlierSearch: false,
             cheaperCached: null,
+            gridPrice: null,
+            pairing: null,
+            pairingRead: 'not-read',
+            listReason: null,
           };
     // why: an unpriced date pair carries each unpriced bucket in turn, so the overview draws every mark
     const partly = c.partly === true && !unpriced && airportPairs > 1 && i % 5 === 0;

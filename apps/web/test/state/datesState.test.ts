@@ -12,7 +12,7 @@ import {
   parseDatesState,
   scopeQuery,
 } from '../../src/state/datesState.js';
-import { datePairOf } from '../fixtures.dates.js';
+import { datePairOf, pairingFig } from '../fixtures.dates.js';
 
 // Spec §11 URLs and Filters: the Dates view's state lives in the URL under d.*, parsed strictly against the
 // definition's own airports (decision 53), and the detail link carries the date pair and the figure's basis while
@@ -182,6 +182,13 @@ describe('detailHref (spec §11 Board: each row opens the date pair detail, carr
       [DETAIL_LINK_PARAMS.basis]: 'verified',
       [DETAIL_LINK_PARAMS.row]: null,
     });
+  });
+  it('spec rev 56 §6.9: a pairing figure opens its detail on the calendar basis, the row it replaced (resultBasisOf)', () => {
+    const pair = {
+      ...datePairOf({ departureDate: '2027-03-14', nights: 10, basis: null }),
+      figure: pairingFig(),
+    };
+    expect(detailPatch(pair)[DETAIL_LINK_PARAMS.basis]).toBe('calendar');
   });
   it('a date pair with no figure opens its detail on the default basis (no basis parameter)', () => {
     const pair = datePairOf({ departureDate: '2027-03-14', nights: 10, basis: null });

@@ -24,6 +24,15 @@ const SAMPLES: Record<string, unknown[][]> = {
     ['1', 'under a minute'],
     ['10', 'about 12 minutes'],
   ],
+  'estimate.minutes': [[1], [41]],
+  'estimate.hours': [
+    [1, false],
+    [2, true],
+  ],
+  'estimate.flightsOutAndBack': [
+    ['10', '15', '41 minutes', '20', '50 minutes'],
+    ['1', '1', 'under a minute', '1', '2 minutes'],
+  ],
   'estimate.billed': [
     ['120', '9,880', 'SearchApi', 'month'],
     ['12', '91', 'SearchApi', 'lifetime'],

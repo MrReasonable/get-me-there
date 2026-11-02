@@ -119,7 +119,8 @@ export function candidateOf(
 
 /**
  * Spec rev 56 §10's `pairing` group from a candidate: the cheapest offer's stated price with its seller and fare, or the
- * return's "from" price (`isFrom`, no seller) when no offer was read for it or it is over the limits; the offers read,
+ * return's "from" price (`isFrom`, no seller) when no offer was read for it or it is over the limits; the return's
+ * "from" price itself (`fromPence`, Task 21.7); the offers read,
  * whether complete, which outbound, the four times, the mismatch mark, and the list's provenance, stale mark and age.
  */
 export function pairingGroupOf(c: PairingCandidate): DatePairPairing {
@@ -127,6 +128,8 @@ export function pairingGroupOf(c: PairingCandidate): DatePairPairing {
   const offer = c.fits ? c.offer : null;
   return {
     pricePence: offer?.priceMinor ?? c.fromMinor,
+    // why: Task 21.7: the return's "from" price rides beside the offer's, so the board's mismatch mark can name it
+    fromPence: c.fromMinor,
     isFrom: offer === null,
     seller: offer?.seller ?? null,
     fare: offer?.fare ?? null,

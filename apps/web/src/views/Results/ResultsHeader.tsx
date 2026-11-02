@@ -75,14 +75,14 @@ function BoardFigure({ figure }: { figure: BoardFigureData }) {
   return (
     <div
       data-testid="board-figure"
-      className={`flex flex-wrap items-start gap-x-2 gap-y-1 text-sm ${figure.basis === 'calendar' ? 'rounded border border-dashed border-line-strong px-2 py-1' : ''}`}
+      className={`flex flex-wrap items-start gap-x-2 gap-y-1 text-sm ${resultBasisOf(figure.basis) === 'calendar' ? 'rounded border border-dashed border-line-strong px-2 py-1' : ''}`}
     >
       <span>{D.boardPriceLead}</span>
       <PriceBoundary>
         <PriceCell
           pricePence={figure.price.pricePence}
           provenance={figure.price.provenance}
-          calendar={figure.basis === 'calendar'}
+          calendar={resultBasisOf(figure.basis) === 'calendar'}
           stale={figure.price.stale}
           truncated={figure.price.truncated}
           superseded={figure.superseded}
@@ -93,8 +93,9 @@ function BoardFigure({ figure }: { figure: BoardFigureData }) {
       <span>
         {D.boardPriceRest(
           COPY.datesView.airports(figure.origin, figure.destination),
-          // why: spec rev 56 §6.9: a pairing figure is named by the calendar basis it opens on (Task 21.7 words it)
-          COPY.basisName[resultBasisOf(figure.basis)],
+          // why: spec rev 56 §6.9, §11 (arch-r3-003): a pairing figure is named for what it is, the lowest seller price
+          // read, not checked with the airline (it opens the detail on the calendar basis, resultBasisOf)
+          COPY.basisName[figure.basis],
         )}
       </span>
       <span className="w-full text-fg-2">{D.boardDiffers}</span>

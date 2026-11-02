@@ -28,12 +28,14 @@ import {
   BoardCard,
   CheaperCached,
   FigurePrice,
+  FlightRead,
   Journey,
+  PairingFigureLines,
   RankFlaps,
   rowState,
   StateFlap,
 } from './BoardCard.js';
-import { type BoardModel, PAGE_SIZE } from './board.js';
+import { type BoardModel, PAGE_SIZE, setsAirlineOrLayover } from './board.js';
 import { FlightOutcome, FlightsBlock, FlightsUnavailable, useBoardFlights } from './Flights.js';
 import {
   boardGroups,
@@ -106,6 +108,7 @@ export function BoardTable(props: BoardProps) {
   const flights = useBoardFlights(definition.id, pages);
   const limits = useMemo(() => limitsOf(definition), [definition]);
   const available = flights.meta?.available === true;
+  const settings = setsAirlineOrLayover(definition.constraints);
   // why: finding 9: a list that lands moves rows within a tie only while the board is not in use; while the pointer or
   // focus is in it (the board's own hold, revision 50) the order keeps the lists it last applied, and the move is
   // applied when they leave. The flights themselves (each block and outcome) show at once; only the order waits.
@@ -268,7 +271,7 @@ export function BoardTable(props: BoardProps) {
             const tie = tieAt.get(p.index);
             const outcome = <FlightOutcome entry={entry} available={available} />;
             const block = hasFlightsBlock(entry, available) ? (
-              <FlightsBlock pairOf={p} figure={p.figure} entry={entry} flights={flights} limits={limits} />
+              <FlightsBlock pairOf={p} entry={entry} flights={flights} limits={limits} />
             ) : null;
             const common = {
               pair: p,
@@ -280,6 +283,8 @@ export function BoardTable(props: BoardProps) {
               lit: lit === p.index,
               onLight,
               outcome,
+              available,
+              settings,
             };
             return (
               <Fragment key={p.index}>
@@ -361,6 +366,8 @@ function BoardRow({
   lit,
   onLight,
   outcome,
+  available,
+  settings,
 }: {
   pair: DatePair & { figure: DatePairFigure };
   rank: number;
@@ -372,6 +379,10 @@ function BoardRow({
   onLight: (index: number | null) => void;
   /** The flight read's outcome beside the figure (spec rev 55 §6.9; persona-003). */
   outcome: ReactNode;
+  /** Flight lists are read for this search (spec rev 56 §11: "flights not read" is said only then). */
+  available: boolean;
+  /** The search sets an airline or layover setting (a pairing figure says they are not applied). */
+  settings: boolean;
 }) {
   const f = pair.figure;
   const state = rowState(f);
@@ -418,6 +429,8 @@ function BoardRow({
       <td className="board-price">
         <FigurePrice figure={f} notes={notes} flapSlot="price" />
         <CheaperCached figure={f} notes={notes} />
+        <PairingFigureLines figure={f} settings={settings} />
+        <FlightRead figure={f} available={available} />
         {outcome}
       </td>
       <td className="board-howfar">

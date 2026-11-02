@@ -28,7 +28,12 @@ const LIMIT_25H: FlightLimits = {
   arrivalWindowLocal: null,
   departureWindowLocal: null,
 };
-const NONE: FlightLimits = { maxJourneyMinutes: null, arrivalWindowLocal: null, departureWindowLocal: null };
+const NONE: FlightLimits = {
+  maxJourneyMinutes: null,
+  maxStops: null,
+  arrivalWindowLocal: null,
+  departureWindowLocal: null,
+};
 
 /** Five returns of 600/700/1,560/900/800 minutes from £1,292/£1,286/£1,280/£1,286/£1,295. */
 const FIVE = [ret(600, 1292), ret(700, 1286), ret(1560, 1280), ret(900, 1286), ret(800, 1295)];

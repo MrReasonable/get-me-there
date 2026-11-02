@@ -1,5 +1,5 @@
 // Spec revision 56 §5.1 (R-order): the ports' new fields, each optional until the task that fills its last consumer, so
-// every present caller typechecks unchanged. Type-level claims, pinned by `pnpm --filter @gmt/core typecheck`.
+// every present caller typechecks unchanged; Task 21.7 made the last of them required. Type-level claims, pinned by `pnpm --filter @gmt/core typecheck`.
 import { describe, expectTypeOf, it } from 'vitest';
 import type { DatePairFigure } from '../../src/datePairs/encode.js';
 import type { FlightLimits } from '../../src/flights/choose.js';
@@ -31,18 +31,23 @@ describe('the ports gain their return-phase fields, optional (spec rev 56 §5.1)
     expectTypeOf<{ ok: true }>().toMatchTypeOf<PreflightResult>();
     expectTypeOf<PreflightResult['flags']>().toEqualTypeOf<Readonly<Record<string, boolean>> | undefined>();
   });
-  it('Estimate.flightLists.pairs? (with returns?, pagesMax?, secondsMax?)', () => {
+  it('Estimate.flightLists.pairs and returns are required since Task 21.7 (pagesMax?, secondsMax? stay optional)', () => {
     type F = NonNullable<Estimate['flightLists']>;
-    expectTypeOf<F['pairs']>().toEqualTypeOf<number | undefined>();
-    expectTypeOf<F['returns']>().toEqualTypeOf<boolean | undefined>();
+    expectTypeOf<F['pairs']>().toEqualTypeOf<number>();
+    expectTypeOf<F['returns']>().toEqualTypeOf<boolean>();
     expectTypeOf<F['pagesMax']>().toEqualTypeOf<number | undefined>();
     expectTypeOf<F['secondsMax']>().toEqualTypeOf<number | undefined>();
-    expectTypeOf<{ pages: 1; seconds: 1 }>().toMatchTypeOf<F>();
+    expectTypeOf<{ pages: 1; seconds: 1 }>().not.toMatchTypeOf<F>();
   });
-  it('DatePairFigure.gridPrice? (with pairing? and pairingRead?)', () => {
+  it('DatePairFigure.gridPrice, pairing, pairingRead and listReason are required since Task 21.7', () => {
     expectTypeOf<DatePairFigure['basis']>().toEqualTypeOf<'verified' | 'calendar' | 'pairing'>();
-    expectTypeOf<undefined>().toMatchTypeOf<DatePairFigure['gridPrice']>();
-    expectTypeOf<undefined>().toMatchTypeOf<DatePairFigure['pairingRead']>();
+    expectTypeOf<undefined>().not.toMatchTypeOf<DatePairFigure['gridPrice']>();
+    expectTypeOf<undefined>().not.toMatchTypeOf<DatePairFigure['pairing']>();
+    expectTypeOf<undefined>().not.toMatchTypeOf<DatePairFigure['pairingRead']>();
+    expectTypeOf<undefined>().not.toMatchTypeOf<DatePairFigure['listReason']>();
+  });
+  it('FlightLimits.maxStops is required since Task 21.7', () => {
+    expectTypeOf<FlightLimits['maxStops']>().toEqualTypeOf<number | null>();
   });
   it('FlightListsState is total (the reader fills the defaults)', () => {
     expectTypeOf<FlightListsState['returns']>().toEqualTypeOf<boolean>();

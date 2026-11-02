@@ -39,8 +39,16 @@ export function assertProvenance(p: unknown): ProvenanceT {
   return r.data;
 }
 
-/** Source kinds that only ever carry calendar prices (spec §2): they always get the calendar marker. */
-const CALENDAR_SOURCES: ReadonlySet<SourceKind> = new Set(['authorised-cached', 'scraped-aggregate']);
+/**
+ * Source kinds that only ever carry calendar prices (spec §2): they always get the calendar marker. Spec rev 56 §6.9:
+ * the browser worker's own pages (`scraped-self`: its date grid, its flight lists and the sellers it read) are never
+ * checked with the airline either, whatever basis a caller names.
+ */
+const CALENDAR_SOURCES: ReadonlySet<SourceKind> = new Set([
+  'authorised-cached',
+  'scraped-aggregate',
+  'scraped-self',
+]);
 
 /** True for a price the caller marks as calendar basis or whose source kind only carries calendar prices. */
 export function isCalendarPrice(p: ProvenanceT, calendar: boolean): boolean {

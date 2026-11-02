@@ -243,7 +243,36 @@ const SAMPLES: Record<string, unknown[]> = {
   'flights.notRead': ['its monthly limit is used up'],
   'flights.noFlightsWhen': ['11:44'],
   'flights.noneForCell': [2, 1],
-  'flights.readButton': ['90'],
+  'flights.readButton': [2, '90'],
+  // WP21 Task 21.7: the return leg on a search's page (spec rev 56 §11)
+  'flights.headPairing': ['next-cheapest', '3d ago', '12 Mar 11:44'],
+  'flights.headPairingOver': ['3d ago', null],
+  'flights.withinLeg': ['return', '12h 05m', '25h'],
+  'flights.overLimitLeg': ['return', '26h', '25h'],
+  'flights.stopsOver': ['return', 2, 1],
+  'flights.limitsWithReturns': [
+    'airline settings not applied to flights read',
+    'windows apply to the outbound',
+  ],
+  'flights.limitsOutboundOnly': ['return leg not read', 'airline settings not applied to flights read'],
+  'flights.pairingHead': ['next-cheapest'],
+  'flights.pairingHeadWhenRead': ['cheapest', '3d ago'],
+  'flights.noOutboundFits': [4],
+  'flights.returnTimes': ['14:20', '06:25', -1],
+  'flights.sellerLine': ['QQ Fares', 'Economy Basic', 3],
+  'flights.returnMore': [2, 1],
+  'flights.returnCounts': [2, 1],
+  'flights.moreListed': [12, 10],
+  'flights.triedSome': [1, 5],
+  'flights.returnSkipped': ['fewer than 2 browser pages left this month'],
+  'flights.bookingSkipped': ['the list was not on its Cheapest view'],
+  'flights.readOutboundOnly': [2],
+  'flights.readDoneReturns': ['14 → 24 Mar', 2],
+  'datesView.pairingLabel': [3, 'cheapest outbound read within your limits'],
+  'datesView.pairingTimes': ['07:15', '14:20'],
+  'datesView.gridShowedAt': ['the date grid', '10 Mar 09:30'],
+  'datesView.pairingBeneath': ['9d ago'],
+  'datesView.listFailed': ["the browser worker's monthly limit is used up"],
   'flights.differenceCheapest': ['12 Mar 11:44'],
   'flights.differenceSource': ['the Aviasales cache'],
   'flights.differenceAt': ['10 Mar 09:30'],
@@ -588,3 +617,62 @@ function mainPathKeys(): Set<string> {
   }
   return out;
 }
+
+describe('the return leg in words (spec rev 56 §11, §1 "What a price is"; WP21 Task 21.7)', () => {
+  const F = COPY.flights;
+  const D = COPY.datesView;
+  it('every return-price template words a return\'s price "from" (the lowest Google listed), an offer\'s never', () => {
+    // the head names a Back price a "from" price, the shown one a seller's stated price
+    expect(F.headPairing('cheapest', '3d ago', null)).toContain(
+      'each Back price is the lowest round-trip price Google listed for that outbound and that return (from)',
+    );
+    expect(F.headPairingOver('3d ago', null)).toContain("the shown one is a seller's stated price");
+    // the mismatch line: "from" before the return's price only
+    expect(`${F.mismatchOffer} £1,195${F.mismatchFrom} ${F.from} £1,180`).toBe(
+      "the cheapest offer read is £1,195; Google's list showed from £1,180",
+    );
+    expect(F.mismatchOffer).not.toMatch(/\bfrom\b/);
+    expect(D.mismatchMark).toMatch(/from$/);
+    expect(D.fromPrice).toBe('from');
+    // an offer's line names its seller and count, never "from"
+    expect(F.sellerLine('QQ Travel', null, 3)).toBe('QQ Travel · cheapest of 3 offers read');
+    expect(F.sellerLine('QQ Fares', 'Economy Basic', 1)).toBe(
+      'QQ Fares, Economy Basic · cheapest of 1 offer read',
+    );
+    expect(F.sellerLine('QQ Travel', null, 3)).not.toMatch(/\bfrom\b/);
+  });
+  it('never "each seller" or "every seller"; "offers read" always', () => {
+    const all = JSON.stringify(COPY);
+    expect(all).not.toMatch(/each seller|every seller/i);
+    expect(D.pairingLabel(3, D.pairingWhich.cheapest)).toBe(
+      'cheapest of 3 offers read, cheapest outbound read within your limits',
+    );
+  });
+  it('"round-trip total" is spelt one way: the key, and never "round trip total" anywhere', () => {
+    expect(F.total).toBe('round-trip total');
+    expect(JSON.stringify(COPY)).not.toMatch(/round trip total|roundtrip total/i);
+  });
+  it("the read button's pages from the response, the outbound-only read, the limits lines", () => {
+    expect(F.readButton(2, null)).toBe('Read flights for this date (free, up to 2 pages)');
+    expect(F.readButton(1, '90')).toBe('Read flights for this date (free, 1 page; 90 pages left this month)');
+    expect(F.readOutboundOnly(2)).toBe(
+      'Read flights for this date (free, 1 page; return leg not read: fewer than 2 pages left)',
+    );
+    expect(F.limitsWithReturns(F.settingsNotApplied, F.windowsOutboundOnly)).toBe(
+      'airline settings not applied to flights read · windows apply to the outbound',
+    );
+    expect(F.limitsOutboundOnly(F.returnNotRead, F.settingsNotApplied)).toBe(
+      'return leg not read; airline settings not applied to flights read',
+    );
+  });
+  it('the counts clause and the marks', () => {
+    expect(F.returnCounts(2, 1)).toBe('2 return options unread, 1 for other airports or days');
+    expect(F.returnCounts(1, 0)).toBe('1 return option unread');
+    expect(F.returnCounts(0, 3)).toBe('3 return options for other airports or days');
+    expect(F.stopsOver('return', 2, 1)).toBe('return 2 changes: over your 1-change limit');
+    expect(F.stopsOver('outbound', 1, 0)).toBe('outbound 1 change: over your direct-only limit');
+    expect(F.returnTimes('14:20', '06:25', 1)).toBe('depart 14:20, arrive 06:25 +1');
+    expect(F.returnTimes('22:00', '23:50', -1)).toBe('depart 22:00, arrive 23:50 −1');
+    expect(F.returnTimes('09:00', '11:00', 0)).toBe('depart 09:00, arrive 11:00');
+  });
+});

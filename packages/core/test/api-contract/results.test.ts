@@ -30,15 +30,15 @@ describe('resultsResponseSchema.datePairFigure (spec rev 56 §10)', () => {
     const { airportPair: _a, ...figure } = pairingFigure();
     expect(resultsResponseSchema.parse({ ...base, datePairFigure: figure }).datePairFigure).toEqual(figure);
   });
-  it('accepts a calendar figure with a pairing beneath, and one without the new fields', () => {
+  it('accepts a calendar figure with a pairing beneath; refuses one without the new fields (required since Task 21.7)', () => {
     const { airportPair: _a, ...beneath } = calendarFigure({
       pairingRead: 'over-limit',
       pairing: figurePairing({ which: 'over-limit' }),
     });
     expect(resultsResponseSchema.safeParse({ ...base, datePairFigure: beneath }).success).toBe(true);
     const { airportPair: _b, gridPrice: _g, pairing: _p, pairingRead: _r, ...older } = calendarFigure();
-    expect(datePairFigureSchema.safeParse(older).success).toBe(true);
-    expect(resultsResponseSchema.safeParse({ ...base, datePairFigure: older }).success).toBe(true);
+    expect(datePairFigureSchema.safeParse(older).success).toBe(false);
+    expect(resultsResponseSchema.safeParse({ ...base, datePairFigure: older }).success).toBe(false);
   });
   it('refuses a pairing figure without its grid price', () => {
     const { airportPair: _a, gridPrice: _g, ...figure } = pairingFigure();

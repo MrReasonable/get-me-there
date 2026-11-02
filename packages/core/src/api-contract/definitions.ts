@@ -211,7 +211,8 @@ export const estimateSchema: z.ZodType<Estimate> = z.object({
   /**
    * Spec rev 55 §8.1 (ruling A5), revision 56 (R-estimate): the flight-list step's typical pages and seconds, and (each
    * optional for good, so an estimate stored before WP21 still parses: ruling A3) the date pairs read, whether returns
-   * are planned, and the bound's pages and seconds; no key without camoufox.
+   * are planned, and the bound's pages and seconds; no key without camoufox. The reader fills what an older estimate
+   * lacks (Task 21.7, ruling A3): `pairs` its pages (one page a pair before WP21) and `returns` false (outbound only).
    */
   flightLists: z
     .strictObject({
@@ -222,6 +223,12 @@ export const estimateSchema: z.ZodType<Estimate> = z.object({
       pagesMax: positiveInt.exactOptional(),
       secondsMax: positiveInt.exactOptional(),
     })
+    // why: ruling A3: the stored shape stays optional, the type the readers see is total
+    .transform(({ pairs, returns, ...rest }) => ({
+      ...rest,
+      pairs: pairs ?? rest.pages,
+      returns: returns ?? false,
+    }))
     .exactOptional(),
 });
 /**

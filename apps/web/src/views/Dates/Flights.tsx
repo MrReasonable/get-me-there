@@ -1,10 +1,8 @@
-import { type DatePairFigure, type FlightLimits, stopDetailClause } from '@gmt/core';
+import { type FlightLimits, stopDetailClause } from '@gmt/core';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ApiError } from '../../api/client.js';
 import { useFlightLists, useFlightRead } from '../../api/flights.js';
 import type { FlightList, FlightListsResponse } from '../../api/types.js';
-import { PriceBoundary } from '../../components/PriceBoundary.js';
-import { PriceCell } from '../../components/PriceCell.js';
 import { COPY } from '../../copy.js';
 import { useNow } from '../../now.js';
 import { FlightPrice, FlightRow } from './FlightRow.js';
@@ -13,23 +11,25 @@ import {
   cheapestRead,
   datesShort,
   type FlightPair,
-  figureSource,
   googleFlightsHref,
   hasFlightsBlock,
   headLine,
   listNote,
   offersRead,
   outcomeOf,
-  pagesLeftClause,
   pairKey,
+  readButtonWords,
   shownOf,
 } from './flightLines.js';
-import { readAt } from './stateLines.js';
+import { PairingSection } from './PairingSection.js';
+import { type PairingView, pairingOf, readDoneWords, returnNote, returnsWereRead } from './pairing.js';
+import { londonDaysAgo, readAt } from './stateLines.js';
 
 // Spec rev 55 §11 "Flights", §6.9 and §2 (WP20 Task 20.10): a search's page's flights. The board asks for the flight
 // lists of the date pairs it shows (useBoardFlights), states each read's outcome beside the figure (FlightOutcome) and
-// shows each date pair's flights block below its row (FlightsBlock). A flight read never changes a date pair's price,
-// rank or coverage: nothing here touches the figure.
+// shows each date pair's flights block below its row (FlightsBlock). Spec rev 56 (WP21 Task 21.7): a list whose returns
+// were read shows its pairing section (PairingSection), both legs' marks and its status notes; the date pair's figure is
+// the api's (a leading pairing is its own basis), so nothing here changes a price, a rank or the coverage.
 
 const F = COPY.flights;
 
@@ -114,7 +114,8 @@ export function useBoardFlights(definitionId: string, pages: readonly (readonly 
     const dates = datesShort(pressed.pair.departureDate, pressed.pair.returnDate, F);
     setSaid({
       key: pressed.key,
-      words: landed && pressedList?.status === 'read' ? F.readDone(dates) : F.readNotDone(dates),
+      // why: spec rev 56 §11: the read's returns in the live region ("…, 2 return flights"), or its status note's words
+      words: landed && pressedList !== null ? readDoneWords(pressedList, dates, COPY) : F.readNotDone(dates),
     });
     setPressed(null);
   }, [pressed, pressedList, lists.fetchedAt, apiReading]);
@@ -127,6 +128,7 @@ export function useBoardFlights(definitionId: string, pages: readonly (readonly 
           refreshHours: newest.refreshHours,
           monthlyPagesLeft: newest.monthlyPagesLeft,
           runPages: newest.runPages,
+          pagesPlanned: newest.pagesPlanned,
           reading: apiReading,
         };
   const read = (of: { departureDate: string; returnDate: string }) => {
@@ -174,57 +176,49 @@ export function FlightOutcome({ entry, available }: { entry: FlightPair | undefi
 }
 
 /**
- * The difference line (spec rev 55 §6.9; po-012, prov-r2-005): when the list's cheapest flight read differs from the
- * figure, both amounts through PriceCell, both instants in the one form, the figure's side named from its own
- * provenance; and when Google's Cheapest tab showed less than was read, that it showed a lower fare it could not read.
+ * Google's lower fare (spec rev 55 §6.9, §11): when the page's Cheapest-tab price is below the cheapest flight read,
+ * "Google shows a lower fare it could not read (£x)", through PriceCell. Spec rev 56 §6.9 retired revision 55's
+ * difference line around it: the figure's own price now names its source, and a pairing figure's grid price is the
+ * line beneath it on the board.
  */
-function DifferenceLine({ list, figure }: { list: FlightList; figure: DatePairFigure }) {
-  const now = useNow();
+function LowerFareLine({ list }: { list: FlightList }) {
   const min = cheapestRead(list);
-  if (min === null || min === figure.price.pricePence) return null;
-  const p = figure.price.provenance;
+  if (min === null || list.tabMinor === null || list.tabMinor >= min) return null;
   return (
-    <p data-testid="flights-difference" className="flights-line">
-      {F.differenceRead} <FlightPrice list={list} pence={min} />{' '}
-      {F.differenceCheapest(readAt(list.fetchedAt, now, COPY))} {F.differenceSource(figureSource(p, F))}{' '}
-      <PriceBoundary>
-        <PriceCell
-          pricePence={figure.price.pricePence}
-          provenance={p}
-          calendar={figure.basis === 'calendar'}
-          stale={figure.price.stale}
-          truncated={figure.price.truncated}
-          destination={figure.destination}
-          compact
-        />
-      </PriceBoundary>
-      {F.differenceAt(readAt(p.fetchedAt, now, COPY))}
-      {list.tabMinor !== null && list.tabMinor < min ? (
-        <>
-          {' '}
-          {F.lowerFare}
-          <FlightPrice list={list} pence={list.tabMinor} />
-          {F.lowerFareEnd}
-        </>
-      ) : null}
+    <p data-testid="flights-lower-fare" className="flights-line">
+      {F.lowerFare}
+      <FlightPrice list={list} pence={list.tabMinor} />
+      {F.lowerFareEnd}
     </p>
   );
 }
 
 /**
- * One list's flights (spec rev 55 §11): its provenance note, the difference line (the figure's own pair only), up to
- * three flights, "N more read, M outside your limits · show all" and the line saying what was not read; or, for a list
+ * The block's head (spec rev 56 §11): for a list with a pairing, the outbound it used and that a Back price is the
+ * lowest round-trip price Google listed ("from"), the shown one a seller's stated price; else WP20's "Outbound flights
+ * only · …", which never mentions return flights.
+ */
+function headOf(list: FlightList, p: PairingView | null, now: ReturnType<typeof useNow>): string {
+  if (p === null) return headLine(list, now, COPY);
+  const ago = COPY.agoOf(list.ageHours);
+  const when = londonDaysAgo(list.fetchedAt, now) === 0 ? null : readAt(list.fetchedAt, now, COPY);
+  return p.outboundFits ? F.headPairing(p.which, ago, when) : F.headPairingOver(ago, when);
+}
+
+/**
+ * One list's flights (spec rev 55 §11, rev 56): its head, the lower fare (the figure's own pair only), the pairing
+ * section when its returns were read, up to three flights, "N more read, M outside your limits · show all" and the line saying what was not read; or, for a list
  * that holds no flight, what it says instead.
  */
 function ListSection({
   list,
   limits,
-  figure,
+  own,
 }: {
   list: FlightList;
   limits: FlightLimits;
-  /** The figure, for the difference line; null for another airport pair's list (no difference line). */
-  figure: DatePairFigure | null;
+  /** The figure's own airport pair's list (its lower fare is said); false for another airport pair's list. */
+  own: boolean;
 }) {
   const now = useNow();
   const [all, setAll] = useState(false);
@@ -234,36 +228,71 @@ function ListSection({
   const shown = shownOf(list, limits, true);
   if (note !== null || shown === null) return note === null ? null : <p className="flights-line">{note}</p>;
   const flights = all ? allInOrder(list.flights, limits) : shown.shown;
+  const p = pairingOf(list, limits);
+  const read = returnsWereRead(list);
+  const first = list.returns?.attempts[0];
+  // why: spec rev 56 §11 "Status notes": a return read that did not finish says so after the outbound lines; a list
+  // read without a return phase (or stored before them) shows as the outbound list, its limits line saying so
+  const status = list.returns === null || read ? null : returnNote(list, COPY);
+  const selectedOf = (f: (typeof list.flights)[number]): string | null => {
+    if (p === null) return null;
+    if (f === list.flights[p.outboundIndex]) return F.selectedMark;
+    return p.attempt > 0 && first !== undefined && f === list.flights[first.outboundIndex]
+      ? F.triedFirstMark
+      : null;
+  };
   return (
     <>
       <p data-testid="flights-head" className="flights-head">
-        {headLine(list, now, COPY)}
+        {headOf(list, p, now)}
       </p>
-      {figure !== null ? <DifferenceLine list={list} figure={figure} /> : null}
+      {read && p === null ? (
+        <p data-testid="flights-returns-none" className="flights-line">
+          {F.returnsNone}
+        </p>
+      ) : null}
+      {own ? <LowerFareLine list={list} /> : null}
+      {p !== null ? <PairingSection list={list} p={p} limits={limits} /> : null}
       <ul className="flights-list">
         {flights.map((f, i) => (
           // why: a list's flights have no id; their place in the shown order is stable for one list
-          <FlightRow key={i} flight={f} list={list} limits={limits} />
+          <FlightRow
+            key={i}
+            flight={f}
+            list={list}
+            limits={limits}
+            returnsRead={read}
+            selectedMark={selectedOf(f)}
+          />
         ))}
       </ul>
       {shown.moreRead > 0 ? (
         <p data-testid="flights-more" className="flights-line">
           {all ? null : F.more(shown.moreRead, shown.moreOutside)}
           {all ? null : F.separator}
-          <button type="button" className="btn-text" onClick={() => setAll((a) => !a)}>
-            {all ? F.showFewer : F.showAll}
+          <button type="button" className="btn-text" aria-expanded={all} onClick={() => setAll((a) => !a)}>
+            {/* why: spec rev 56 §11: beside "show all return flights" the outbound toggle names its own flights */}
+            {p === null ? (all ? F.showFewer : F.showAll) : all ? F.showFewerOutbound : F.showAllOutbound}
           </button>
         </p>
       ) : null}
+      {status !== null ? (
+        <p data-testid="flights-return-note" className="flights-line">
+          {status}
+        </p>
+      ) : null}
       <p data-testid="flights-limits" className="flights-line">
-        {F.limits}
+        {read
+          ? F.limitsWithReturns(F.settingsNotApplied, F.windowsOutboundOnly)
+          : F.limitsOutboundOnly(F.returnNotRead, F.settingsNotApplied)}
       </p>
     </>
   );
 }
 
 /**
- * "Read flights for this date (free, 1 page)" (spec rev 55 §11; ui-009). While this date pair is read the same button
+ * "Read flights for this date (free, up to 2 pages)" (spec rev 56 §11; ui-009; ruling D3: the response's `pagesPlanned`).
+ * While this date pair is read the same button
  * stays mounted, saying "Reading flights…" with `aria-disabled`, so a press never loses its focus (finding 3); every
  * other read button is disabled meanwhile.
  */
@@ -288,8 +317,12 @@ function ReadButton({
       >
         {reading
           ? F.reading
-          : F.readButton(
-              pagesLeftClause(flights.meta?.monthlyPagesLeft ?? null, flights.meta?.runPages ?? null),
+          : readButtonWords(
+              // why: ruling D3, prov-008: the pages the response plans, never a hard number (1 before any answer)
+              flights.meta?.pagesPlanned ?? 1,
+              flights.meta?.monthlyPagesLeft ?? null,
+              flights.meta?.runPages ?? null,
+              F,
             )}
       </button>
     </p>
@@ -305,13 +338,11 @@ function ReadButton({
  */
 export function FlightsBlock({
   pairOf,
-  figure,
   entry,
   flights,
   limits,
 }: {
   pairOf: { departureDate: string; returnDate: string };
-  figure: DatePairFigure;
   entry: FlightPair | undefined;
   flights: BoardFlights;
   limits: FlightLimits;
@@ -339,7 +370,7 @@ export function FlightsBlock({
           {flights.said?.key === key ? flights.said.words : null}
         </p>
       ) : null}
-      {available && list !== null ? <ListSection list={list} limits={limits} figure={figure} /> : null}
+      {available && list !== null ? <ListSection list={list} limits={limits} own /> : null}
       {available && list === null ? <p className="flights-line">{F.notReadYet}</p> : null}
       {available && offersRead(list) ? <ReadButton pairOf={pairOf} flights={flights} /> : null}
       {available && list === null && entry.listOtherPair !== null ? (
@@ -347,7 +378,7 @@ export function FlightsBlock({
           <p className="flights-head">
             {F.otherPair(entry.listOtherPair.origin, entry.listOtherPair.destination)}
           </p>
-          <ListSection list={entry.listOtherPair} limits={limits} figure={null} />
+          <ListSection list={entry.listOtherPair} limits={limits} own={false} />
         </div>
       ) : null}
       {href !== null && entry.link !== null ? (

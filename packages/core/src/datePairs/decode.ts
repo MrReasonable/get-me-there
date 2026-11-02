@@ -146,6 +146,7 @@ export function decodeDatePairs(r: DatePairsResponse): DecodedDatePairs {
     for (let k = 0; k < q.figure.length; k += 1)
       columnAt(figures, columnAt(q.figure, k)).pairing = {
         pricePence: columnAt(q.pricePence, k),
+        fromPence: columnAt(q.fromPence, k),
         isFrom: columnAt(q.isFrom, k),
         seller: columnAt(q.seller, k),
         fare: columnAt(q.fare, k),

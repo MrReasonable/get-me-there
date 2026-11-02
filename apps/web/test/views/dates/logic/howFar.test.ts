@@ -1,7 +1,14 @@
 import { BANNED_WORD_ALLOWLIST, type DatePair, findBannedWords, type Provenance } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
 import { howFarChecked } from '../../../../src/views/Dates/howFar.js';
-import { bucketsOf, calendarFig, datePairOf, provSynthetic, verifiedFig } from '../../../fixtures.dates.js';
+import {
+  bucketsOf,
+  calendarFig,
+  datePairOf,
+  pairingFig,
+  provSynthetic,
+  verifiedFig,
+} from '../../../fixtures.dates.js';
 
 // Spec §11 "How far checked": from the date pair's own counts, never the "searched" umbrella, never a word claiming
 // completeness, and "verified" only beside a class-verified figure. Pure; Stryker runs it (revision 50).
@@ -33,6 +40,11 @@ describe('the figure: checked fares, or a calendar price from its source (spec r
     expect(from('camoufox')).toBe("from Google's date grid, constraints not checked");
     expect(from('travelpayouts')).toBe('from the Aviasales cache, constraints not checked');
     expect(from('fixture')).toBe('from the test source, constraints not checked');
+  });
+  it("spec rev 56 §6.9: a pairing figure is worded as the browser worker's flight list, not checked with the airline", () => {
+    const all = words(pair({ figure: pairingFig(), buckets: bucketsOf({ priced: 4 }) }));
+    expect(all[0]).toBe("from the browser worker's flight list, not checked with the airline");
+    expect(all.some((w) => /(?<!\p{L})verified/u.test(w))).toBe(false);
   });
   it('"verified" never stands beside a calendar figure', () => {
     const all = words(

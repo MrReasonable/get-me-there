@@ -3,7 +3,11 @@ import { describe, expect, it } from 'vitest';
 import type { EstimateResponse } from '../../../../src/api/types.js';
 import { ESTIMATE_COPY } from '../../../../src/copy/estimate.js';
 import { COPY } from '../../../../src/copy.js';
-import { aboutDuration, estimateSentence } from '../../../../src/views/Searches/estimateLine.js';
+import {
+  aboutDuration,
+  estimateSentence,
+  plainDuration,
+} from '../../../../src/views/Searches/estimateLine.js';
 import { estimate, estimateResponse } from '../../../fixtures.js';
 
 // Spec rev 55 §11 "The estimate sentence" (WP20 Task 20.5): one sentence beside Search now, built from the estimate
@@ -31,7 +35,14 @@ function resp(o: {
   billed?: EstimateResponse['billedCalls'];
   monthlyPages?: EstimateResponse['monthlyPages'];
   softConfirm?: EstimateResponse['softConfirm'];
-  flightLists?: { pages: number; seconds: number };
+  flightLists?: {
+    pages: number;
+    seconds: number;
+    pairs?: number;
+    returns?: boolean;
+    pagesMax?: number;
+    secondsMax?: number;
+  };
 }): EstimateResponse {
   const lines = (o.lines ?? [{ providerId: 'camoufox' }]).map((l) => ({
     providerId: l.providerId,
@@ -299,6 +310,39 @@ describe('estimateSentence: the notes under it', () => {
     );
   });
 
+  // why: spec rev 56 §8.1 "Estimate" (R-estimate): the date pairs and the pages are two figures; out and back states
+  // the typical pages and minutes and the bound
+  it('out and back: "+ flights, out and back, for up to 10 date pairs: usually about 15 pages and 41 minutes, at most 20 pages and 50 minutes"', () => {
+    const e = resp({
+      flightLists: { pairs: 10, pages: 15, seconds: 2450, pagesMax: 20, secondsMax: 3000, returns: true },
+    });
+    expect(sentence(e).line).toBe(
+      'About 2½ hours · free · asks about all 405 date pairs · + flights, out and back, for up to 10 date pairs: usually about 15 pages and 41 minutes, at most 20 pages and 50 minutes',
+    );
+    // one date pair, one page at most: the singulars
+    const one = resp({
+      flightLists: { pairs: 1, pages: 1, seconds: 70, pagesMax: 1, secondsMax: 110, returns: true },
+    });
+    expect(sentence(one).line).toContain(
+      '+ flights, out and back, for up to 1 date pair: usually about 1 page and 1 minute, at most 1 page and 2 minutes',
+    );
+  });
+  it('outbound only: "+ flights for up to 10 date pairs, about 12 minutes", the pairs from pairs, never the pages', () => {
+    const e = resp({ flightLists: { pairs: 10, pages: 10, seconds: 700, returns: false } });
+    expect(sentence(e).line).toContain('+ flights for up to 10 date pairs, about 12 minutes');
+    // why: a plan of 6 pairs out and back that the month cut to 6 pages: the pairs are said, the pages are its own
+    const fewer = resp({
+      flightLists: { pairs: 6, pages: 9, seconds: 1470, pagesMax: 12, secondsMax: 1800, returns: true },
+    });
+    expect(sentence(fewer).line).toContain('for up to 6 date pairs: usually about 9 pages');
+  });
+  it('out and back with no bound stated (an older line) states the typical figures as the bound', () => {
+    const e = resp({ flightLists: { pairs: 4, pages: 6, seconds: 980, returns: true } });
+    expect(sentence(e).line).toContain(
+      '+ flights, out and back, for up to 4 date pairs: usually about 6 pages and 16 minutes, at most 6 pages and 16 minutes',
+    );
+  });
+
   it('nothing new to ask keeps the flights clause: the browser worker still reads them (20.9 review finding 7)', () => {
     const e = resp({ covered: 0, reused: 405, flightLists: { pages: 10, seconds: 700 } });
     expect(sentence(e).line).toBe(
@@ -440,5 +484,19 @@ describe('aboutDuration (lower case; the sentence capitalises its first letter)'
     [100_000, 'about 28 hours'],
   ])('%i s is "%s"', (seconds, words) => {
     expect(aboutDuration(seconds)).toBe(words);
+  });
+});
+
+describe('plainDuration: a length without "about", by aboutDuration\'s rounding (spec rev 56 §8.1 R-estimate)', () => {
+  it('under a minute below 60 s; whole minutes under an hour; the nearest half hour from an hour', () => {
+    expect(plainDuration(59)).toBe('under a minute');
+    expect(plainDuration(60)).toBe('1 minute');
+    expect(plainDuration(2450)).toBe('41 minutes');
+    expect(plainDuration(3569)).toBe('59 minutes');
+    expect(plainDuration(3570)).toBe('1 hour');
+    expect(plainDuration(5400)).toBe('1½ hours');
+    expect(plainDuration(9000)).toBe('2½ hours');
+    expect(plainDuration(7200)).toBe('2 hours');
+    expect(plainDuration(10_740)).toBe('3 hours');
   });
 });

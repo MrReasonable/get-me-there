@@ -6,7 +6,7 @@ import { join, resolve } from 'node:path';
  * hands them to Node's resolver, which reads the `default` (dist) export, so the `@gmt/source`
  * condition alone is not enough; tsc honours it through `customConditions`, the test runner uses
  * these aliases instead. Subpath exports (`@gmt/providers/testing`, `@gmt/providers/fixture`,
- * `@gmt/providers/recording`) map to their own index files.
+ * `@gmt/providers/recording`, `@gmt/core/testing`) map to their own index files.
  */
 export function gmtAliases(repoRoot: string): Array<{ find: RegExp; replacement: string }> {
   const r = (p: string) => resolve(repoRoot, p);
@@ -15,6 +15,8 @@ export function gmtAliases(repoRoot: string): Array<{ find: RegExp; replacement:
       find: /^@gmt\/providers\/(testing|fixture|recording)$/,
       replacement: r('packages/providers/src/$1/index.ts'),
     },
+    // why: Task 21.7: the shared pairing fixture from source, as the package's own `@gmt/source` export gives it to tsc
+    { find: /^@gmt\/core\/testing$/, replacement: r('packages/core/src/testing/index.ts') },
     { find: /^@gmt\/(core|db|providers|engine)$/, replacement: r('packages/$1/src/index.ts') },
     { find: /^@gmt\/api$/, replacement: r('apps/api/src/index.ts') },
   ];

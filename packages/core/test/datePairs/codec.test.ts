@@ -155,9 +155,12 @@ const arbDecoded: fc.Arbitrary<DecodedDatePairs> = fc
                 };
                 // why: a pairing shown beneath, as the board shows it, with its own provenance (one of the variants)
                 // and stale mark; a "from" price read no offer and is never complete (prov-001)
+                // why: Task 21.7: fromPence is the from price itself on a from price, and differs exactly on a mismatch
+                const mismatch = (isFrom: boolean) => !isFrom && f.cheaperFlags[1];
                 const pairing = (isFrom: boolean) =>
                   figurePairing({
                     pricePence: f.pence + 1,
+                    fromPence: mismatch(isFrom) ? f.pence + 2 : f.pence + 1,
                     isFrom,
                     seller: isFrom ? null : 'QQ Fares',
                     fare: isFrom ? null : f.fare,
@@ -166,7 +169,7 @@ const arbDecoded: fc.Arbitrary<DecodedDatePairs> = fc
                     provenance: VARIANTS[f.cheaperProvenance]?.[1] ?? calendarProvenance(),
                     stale: f.cheaperFlags[0],
                     ageHours: f.age,
-                    mismatch: f.cheaperFlags[1],
+                    mismatch: mismatch(isFrom),
                   });
                 if (f.kind === 'pairing')
                   // why: prov-001: a leading pairing is its figure's own words: the offer's price, the flight list's
@@ -176,6 +179,7 @@ const arbDecoded: fc.Arbitrary<DecodedDatePairs> = fc
                     price: { ...price, provenance: flightListProvenance(), stale: false, truncated: false },
                     pairing: figurePairing({
                       pricePence: f.pence,
+                      fromPence: f.cheaperFlags[1] ? f.pence + 1 : f.pence,
                       fare: f.fare,
                       which: f.which === 'over-limit' ? 'cheapest' : f.which,
                       provenance: flightListProvenance(),
@@ -495,6 +499,7 @@ function withPairings(): DecodedDatePairs {
                 pairingRead: 'sellers-not-read',
                 pairing: figurePairing({
                   pricePence: 117_000,
+                  fromPence: 117_000,
                   isFrom: true,
                   seller: null,
                   fare: null,
@@ -505,7 +510,7 @@ function withPairings(): DecodedDatePairs {
                   arriveOut: '19:25',
                   departBack: '19:10',
                   arriveBack: '07:15',
-                  mismatch: true,
+                  mismatch: false,
                   provenance: flightListProvenance({ fetchedAt: asIsoDateTime('2027-02-27T09:30:00.000Z') }),
                   stale: 'refresh',
                   ageHours: 'unknown',
@@ -535,10 +540,11 @@ describe('the pairing figure on the wire (spec rev 56 §10, R-sparse: gridPrice,
     expect(wire.pairing?.figure).toEqual([j, k]);
   });
 
-  it('the pairing group carries isFrom, seller, fare, offersRead, complete, which, the four times and mismatch', () => {
+  it('the pairing group carries fromPence, isFrom, seller, fare, offersRead, complete, which, the four times and mismatch', () => {
     const wire = encodeDatePairs(withPairings());
     expect(wire.pairing).toMatchObject({
       pricePence: [118_000, 117_000],
+      fromPence: [118_000, 117_000],
       isFrom: [false, true],
       seller: ['QQ Travel', null],
       fare: [null, null],
@@ -549,7 +555,7 @@ describe('the pairing figure on the wire (spec rev 56 §10, R-sparse: gridPrice,
       arriveOut: ['18:05', '19:25'],
       departBack: ['14:20', '19:10'],
       arriveBack: ['06:25', '07:15'],
-      mismatch: [false, true],
+      mismatch: [false, false],
       stale: [false, 'refresh'],
       ageHours: [2, 'unknown'],
     });
@@ -573,9 +579,8 @@ describe('the pairing figure on the wire (spec rev 56 §10, R-sparse: gridPrice,
     expect(back[1]?.figure?.listReason).toBeNull();
   });
 
-  it('a figure without the new fields (an api before Task 21.6) encodes as not-read, with no group entry', () => {
-    const { gridPrice: _g, pairing: _p, pairingRead: _r, ...older } = calendarFigure();
-    const wire = encodeDatePairs(decoded({ pair: (i) => (i === 0 ? { figure: older } : {}) }));
+  it('a not-read figure with no grid price or pairing encodes with no group entry', () => {
+    const wire = encodeDatePairs(decoded({ pair: (i) => (i === 0 ? { figure: calendarFigure() } : {}) }));
     expect(decodeDatePairs(wire).pairs[0]?.figure?.pairingRead).toBe('not-read');
     expect([wire.gridPrice?.figure, wire.pairing?.figure, wire.pairingRead?.figure]).toEqual([[], [], []]);
   });

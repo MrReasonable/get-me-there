@@ -17,8 +17,8 @@ import type { LegTimes, ListedFlight, ListedReturn } from './types.js';
  */
 export const flightLimitsSchema = z.strictObject({
   maxJourneyMinutes: z.number().int().min(1).nullable(),
-  // why: R-order: optional until Task 21.7 (the web's limitsOf is its last consumer); absent is met, as null is
-  maxStops: z.number().int().min(0).nullable().exactOptional(),
+  // why: required since Task 21.7 (R-order: the web's limitsOf was its last consumer); null is "not set"
+  maxStops: z.number().int().min(0).nullable(),
   departureWindowLocal: strictLocalTimeWindowSchema.nullable(),
   arrivalWindowLocal: strictLocalTimeWindowSchema.nullable(),
 });
@@ -49,15 +49,13 @@ function sameWindow(
 
 /**
  * Spec rev 56 §6.9 "When it leads" and §8.1 "Reuse": whether limits a list was read under deep-equal the current ones
- * (`flightLimitsOf` of today's constraints). An absent `maxStops` equals null (both are "not set"); the windows compare
- * field by field. The one comparison the engine's reuse rule, the on-demand read's `fresh` rule and the api's pairing
+ * (`flightLimitsOf` of today's constraints). The windows compare field by field. The one comparison the engine's reuse rule, the on-demand read's `fresh` rule and the api's pairing
  * figure share.
  */
 export function sameFlightLimits(a: FlightLimits, b: FlightLimits): boolean {
   return (
     a.maxJourneyMinutes === b.maxJourneyMinutes &&
-    // why: the stored shape may omit maxStops (optional until Task 21.7); absent and null both mean "not set"
-    (a.maxStops ?? null) === (b.maxStops ?? null) &&
+    a.maxStops === b.maxStops &&
     sameWindow(a.departureWindowLocal, b.departureWindowLocal) &&
     sameWindow(a.arrivalWindowLocal, b.arrivalWindowLocal)
   );
@@ -80,7 +78,7 @@ export interface ShownFlights<T> {
 
 /**
  * Spec rev 56 §6.2: a leg against each limit. `journey`: its duration is no longer than the longest journey
- * (inclusive); `stops`: its stops are at most `maxStops` (absent or null is met); `arrival` and `departure`: its local
+ * (inclusive); `stops`: its stops are at most `maxStops` (null is met); `arrival` and `departure`: its local
  * arrival or departure time is inside that window (inclusive; a window whose start is later than its end wraps midnight,
  * as §6.2 reads it), always met on the `'return'` leg. A limit not set is met.
  */
@@ -93,7 +91,7 @@ export function withinLimits<T extends LegTimes>(
   const windows = leg !== 'return';
   return {
     journey: l.maxJourneyMinutes === null || f.durationMinutes <= l.maxJourneyMinutes,
-    stops: l.maxStops === undefined || l.maxStops === null || f.stops <= l.maxStops,
+    stops: l.maxStops === null || f.stops <= l.maxStops,
     arrival: !windows || l.arrivalWindowLocal === null || inWindow(f.arrivesLocal, l.arrivalWindowLocal),
     departure:
       !windows || l.departureWindowLocal === null || inWindow(f.departsLocal, l.departureWindowLocal),

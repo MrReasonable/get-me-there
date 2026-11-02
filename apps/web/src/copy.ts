@@ -7,6 +7,8 @@ import {
   type ConstraintName,
   type ErrorReason,
   type ExecutionStatus,
+  type FigureBasis,
+  FLIGHT_LIST_PAGES_PER_PAIR_MAX,
   formatAgo,
   type MIXED_ERROR_REASON,
   mainPathSource,
@@ -160,7 +162,13 @@ export const COPY = {
     unchecked: 'constraints not checked',
   } satisfies Record<VerdictClass | 'unchecked', string>,
   classSpoken: 'verdict class:',
-  basisName: { verified: 'itinerary-search basis', calendar: 'calendar basis' },
+  // why: spec rev 56 §6.9, §11 (prov-006): a pairing figure is the lowest seller price read for one outbound and one
+  // return, never checked with the airline; a card and the detail's header word it so, carrying no seller or count
+  basisName: {
+    verified: 'itinerary-search basis',
+    calendar: 'calendar basis',
+    pairing: 'lowest seller price read, not checked with the airline',
+  } satisfies Record<FigureBasis, string>,
   basisSwitchLabel: 'Price basis',
   // why: core's CONSTRAINT_LABELS is the one set of plain-English constraint names (web and email); kept
   // under COPY so the catalogue test sweeps it for banned words like every other string.
@@ -784,6 +792,13 @@ export const COPY = {
     // the block's provenance note (spec rev 55 §2): the age, and the date and time when not read today
     head: (ago: string, when: string | null) =>
       `Outbound flights only · each price is the lowest round trip listed with it · read ${ago}${when === null ? '' : `, ${when}`} · prices from Google Flights, not checked with the airline`,
+    // spec rev 56 §11: the head of a list whose return read is `read` with returns, naming the outbound the pairing used;
+    // a return's price is the lowest round-trip price Google listed (a "from" price), the shown one a seller's
+    headPairing: (which: 'cheapest' | 'next-cheapest', ago: string, when: string | null) =>
+      `Outbound flights, and the return flights for the ${which} outbound read within your limits · each Back price is the lowest round-trip price Google listed for that outbound and that return (from); the shown one is a seller's stated price · read ${ago}${when === null ? '' : `, ${when}`} · prices from Google Flights, not checked with the airline`,
+    headPairingOver: (ago: string, when: string | null) =>
+      `Outbound flights, and the return flights for the cheapest outbound read, which is over your limits · each Back price is the lowest round-trip price Google listed for that outbound and that return (from); the shown one is a seller's stated price · read ${ago}${when === null ? '' : `, ${when}`} · prices from Google Flights, not checked with the airline`,
+    returnsNone: 'Google listed return flights, none this app could read for these airports and dates',
     otherPair: (origin: string, destination: string) =>
       `Flights read for ${origin} → ${destination}, not the priced airports`,
     // one flight: "depart 07:15, arrive 18:05 +1 · 10h 50m · 1 change · Virgin Atlantic · from £478 round trip"
@@ -800,6 +815,14 @@ export const COPY = {
     within: (duration: string, limit: string) =>
       `outbound ${duration}, within your ${limit} limit; return not read`,
     overLimit: (duration: string, limit: string) => `outbound ${duration}: over your ${limit} limit`,
+    // spec rev 56 §6.2, §11: both legs' marks (no window on a return: the definition has none)
+    legs: { outbound: 'outbound', return: 'return' } satisfies Record<'outbound' | 'return', string>,
+    withinLeg: (leg: string, duration: string, limit: string) =>
+      `${leg} ${duration}, within your ${limit} limit`,
+    overLimitLeg: (leg: string, duration: string, limit: string) =>
+      `${leg} ${duration}: over your ${limit} limit`,
+    stopsOver: (leg: string, n: number, max: number) =>
+      `${leg} ${n === 0 ? 'direct' : `${n} ${noun(n, 'change', 'changes')}`}: over your ${max === 0 ? 'direct-only' : `${max}-change`} limit`,
     arrivesOutside: (time: string) => `arrives ${time}, outside your window`,
     departsOutside: (time: string) => `departs ${time}, outside your window`,
     markJoin: '; ',
@@ -807,6 +830,82 @@ export const COPY = {
       `${n} more read${outside > 0 ? `, ${outside} outside your limits` : ''}`,
     showAll: 'show all',
     showFewer: 'show fewer',
+    // spec rev 56 §11: one line per list says which limits apply to the flights read
+    settingsNotApplied: 'airline settings not applied to flights read',
+    windowsOutboundOnly: 'windows apply to the outbound',
+    returnNotRead: 'return leg not read',
+    limitsWithReturns: (settings: string, windows: string) => `${settings} · ${windows}`,
+    limitsOutboundOnly: (returnNotRead: string, settings: string) => `${returnNotRead}; ${settings}`,
+    // --- spec rev 56 §11 "The pairing section" (WP21 Task 21.7) ---
+    out: 'Out:',
+    back: 'Back:',
+    total: 'round-trip total',
+    pairingHead: (which: 'cheapest' | 'next-cheapest') =>
+      which === 'cheapest'
+        ? 'With the cheapest outbound read within your limits:'
+        : "With the next-cheapest outbound read within your limits (the cheapest one's returns were all over your limits):",
+    pairingHeadOver: 'With the cheapest outbound read (over your limits):',
+    pairingHeadWhenRead: (which: 'cheapest' | 'next-cheapest', ago: string) =>
+      `With the ${which} outbound read, selected under your limits when read, ${ago}:`,
+    limitsChanged: 'your limits have changed since; the returns are read again at the next search',
+    noOutboundFits: (n: number) =>
+      `none of the ${n} outbound ${noun(n, 'flight', 'flights')} read is within your limits; the cheapest one's returns are shown`,
+    selectedMark: 'selected for the returns above',
+    triedFirstMark: 'tried first: its returns were all over your limits',
+    // a return's times: its arrival may be the day before its departure date's (−1, a date-line crossing)
+    returnTimes: (departs: string, arrives: string, dayOffset: number) =>
+      `depart ${departs}, arrive ${arrives}${dayOffset > 0 ? ` +${dayOffset}` : dayOffset < 0 ? ` −${-dayOffset}` : ''}`,
+    sellerLine: (seller: string, fare: string | null, n: number) =>
+      `${fare === null ? seller : `${seller}, ${fare}`} · cheapest of ${n} ${noun(n, 'offer', 'offers')} read`,
+    sellersNotRead: 'sellers not read',
+    offersIncomplete: 'a cheaper seller may not have been read',
+    priceAppliesTo: 'this price is for the Out: and Back: flights shown',
+    bookOnGoogle: 'to book, search these dates on Google Flights (the link below); this app opens no seller',
+    // the mismatch line: both figures through PriceCell, nothing reconciled (spec rev 56 §6.9)
+    mismatchOffer: 'the cheapest offer read is',
+    mismatchFrom: "; Google's list showed",
+    returnMore: (n: number, outside: number) =>
+      `${n} more ${noun(n, 'return', 'returns')} read${outside > 0 ? `, ${outside} outside your limits` : ''}`,
+    showAllReturns: 'show all return flights',
+    showFewerReturns: 'show fewer return flights',
+    showAllOutbound: 'show all outbound flights',
+    showFewerOutbound: 'show fewer outbound flights',
+    // "2 return options unread, 1 for other airports or days"; the noun goes with the first count said
+    returnCounts: (unread: number, other: number) => {
+      const first = unread > 0 ? unread : other;
+      const rest = [
+        ...(unread > 0 ? ['unread'] : []),
+        ...(other > 0 ? [`${unread > 0 ? `${other} ` : ''}for other airports or days`] : []),
+      ];
+      return `${first} return ${noun(first, 'option', 'options')} ${rest.join(', ')}`;
+    },
+    moreListed: (stated: number, read: number) =>
+      `Google listed ${stated} return flights; this app read the first ${read}`,
+    moreListedNoCount: 'Google listed more return flights than this app read',
+    triedSome: (tried: number, within: number) =>
+      `${tried} of the ${within} ${noun(within, 'outbound', 'outbounds')} within your limits were tried; other outbounds not tried`,
+    // status notes, with what happens next (spec rev 56 §11 "Status notes")
+    returnsOld: 'return flights not read with this list',
+    returnTransient:
+      'return flights not read: tried again at the next search, or press Read flights for this date now',
+    returnSkipped: (why: string) => `return flights not read: ${why}`,
+    returnNotVerified:
+      'return flights are not yet read on this kind of machine; see the recording session in docs/setup.md',
+    bookingTransient:
+      'sellers not read: tried again at the next search, or press Read flights for this date now',
+    bookingExpandFailed: 'sellers read before the list could be expanded; the cheapest may be missing',
+    bookingSkipped: (why: string) => `sellers not read: ${why}`,
+    bookingNotVerified: 'sellers are not yet read on this kind of machine',
+    bookingNoPairing: 'no return flight to read sellers for',
+    // a skipped step's rule in words (the worker's bounded rule tokens; an unknown one is worded generally)
+    skippedRule: {
+      'monthly-headroom': `fewer than ${FLIGHT_LIST_PAGES_PER_PAIR_MAX} browser pages left this month`,
+      spacing: 'the wait between pages ran past its time',
+      'not-cheapest-view': 'the list was not on its Cheapest view',
+      'second-selection': 'the second outbound could not be selected',
+      reload: 'the list could not be loaded again',
+    },
+    skippedOther: 'a step before them was not made',
     limits: 'return leg not read; stops and airline settings not applied to flights read',
     // a list that is not a list of flights
     notRead: (clause: string) => `Flights not read: ${clause}`,
@@ -820,11 +919,16 @@ export const COPY = {
     },
     // no list yet, and the read on demand (spec rev 55 §8.1, §11)
     notReadYet: 'Flights not read yet',
-    readButton: (pagesLeft: string | null) =>
-      `Read flights for this date (free, 1 page${pagesLeft === null ? '' : `; ${pagesLeft} ${noun(pagesLeft, 'page', 'pages')} left this month`})`,
+    readButton: (pages: number, pagesLeft: string | null) =>
+      `Read flights for this date (free, ${pages === 1 ? '1 page' : `up to ${pages} pages`}${pagesLeft === null ? '' : `; ${pagesLeft} ${noun(pagesLeft, 'page', 'pages')} left this month`})`,
+    // R-low-pages: with fewer pages left this month than a read plans, the read is outbound-only, never refused
+    readOutboundOnly: (planned: number) =>
+      `Read flights for this date (free, 1 page; return leg not read: fewer than ${planned} pages left)`,
     reading: 'Reading flights…',
     // what the block's live region says when a read here ends (finding 3)
     readDone: (dates: string) => `Flights read for ${dates}`,
+    readDoneReturns: (dates: string, n: number) =>
+      `Flights read for ${dates}, ${n} return ${noun(n, 'flight', 'flights')}`,
     readNotDone: (dates: string) => `Flights not read for ${dates}`,
     // a refused read, worded from the api's code (and, for not_available, its reason; ruling A33), never its text
     busy: 'The browser worker is busy with a search; try again when it finishes',
@@ -914,10 +1018,36 @@ export const COPY = {
     airports: (origin: string, destination: string) => `${origin} → ${destination}`,
     cachedFrom: 'cached from',
     cachedFromPair: (origin: string, destination: string) => `(${origin} → ${destination})`,
+    // --- spec rev 56 §6.9, §11 Board: the pairing figure and the flight read beneath a calendar figure (Task 21.7) ---
+    pairingSource: `${mainPathSource('camoufox')}'s flight list, the lowest seller price read for these two flights`,
+    pairingWhich: {
+      cheapest: 'cheapest outbound read within your limits',
+      'next-cheapest':
+        "next-cheapest outbound read within your limits (the cheapest one's returns were all over your limits)",
+      'over-limit': 'cheapest outbound read, over your limits',
+    } satisfies Record<'cheapest' | 'next-cheapest' | 'over-limit', string>,
+    pairingLabel: (n: number, which: string) =>
+      `cheapest of ${n} ${noun(n, 'offer', 'offers')} read, ${which}`,
+    pairingTimes: (out: string, back: string) => `Out ${out} · Back ${back}`,
+    mismatchMark: 'Google listed from',
+    gridShowed: 'date grid showed',
+    gridShowedAt: (source: string, when: string) => `· ${source}, ${when}`,
+    fromPrice: 'from',
+    pairingBeneath: (ago: string) => `return flights read ${ago}, older than this search's refresh:`,
+    pairingOtherLimits: 'return flights read under earlier limits:',
+    pairingRead: {
+      'not-read': 'flights not read',
+      'outbound-only': 'return leg not read',
+      'no-pairing-read': 'no return flight read',
+      'over-limit': 'no pairing within your limits read',
+    },
+    listFailed: (reason: string) => `flights couldn't be read: ${reason}`,
     // spec rev 55 §3 word table: a verified basis reads "checked fares", a calendar one says where it came from
     howFar: {
       verified: 'checked fares, verified',
       calendar: (from: string) => `${from}, constraints not checked`,
+      // spec rev 56 §6.9: a pairing figure's price is the lowest seller price read from the browser worker's list
+      pairing: `from ${mainPathSource('camoufox')}'s flight list, not checked with the airline`,
       calendarFrom: {
         searchapi: "from Google's date grid",
         camoufox: "from Google's date grid",

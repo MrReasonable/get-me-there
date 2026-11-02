@@ -342,8 +342,10 @@ describe('the flights block (spec rev 55 §11 Flights)', () => {
     expect(all.map((f) => within(f).getByTestId('flight-mark').textContent)).toContain(
       'outbound 26h: over your 25h limit',
     );
+    // why: spec rev 56 §6.2: the stops limit now applies to the flights read (the chooser and the marks), so the line
+    // names only the airline settings; with no return read it says so first
     expect(within(block).getByTestId('flights-limits')).toHaveTextContent(
-      'return leg not read; stops and airline settings not applied to flights read',
+      'return leg not read; airline settings not applied to flights read',
     );
   });
 
@@ -551,57 +553,47 @@ describe('the flights block (spec rev 55 §11 Flights)', () => {
   });
 });
 
-describe('the difference line (spec rev 55 §6.9; rulings po-012, prov-r2-005)', () => {
-  it('says the cheapest flight read and the figure, each through PriceCell, each instant in the one form', async () => {
+// why: spec rev 56 §6.9: the grid-price line beneath a pairing figure (board.test.tsx) replaces revision 55's difference
+// line; Google's lower fare it could not read stays, a line of its own
+describe('the difference line retired; the lower fare its own line (spec rev 56 §6.9; rulings po-012, prov-r2-005)', () => {
+  it('no block carries the difference line; the lower fare reads "Google shows a lower fare it could not read (£80)"', async () => {
     await renderWorked();
-    const line = within(blockOf(0)).getByTestId('flights-difference');
-    expect(line).toHaveTextContent(
-      /^Google's flight list showed.*as the cheapest read, 11:44; the Aviasales cache showed.*, 12 Oct 09:30/,
-    );
-    const cells = within(line).getAllByTestId('price-cell');
-    expect(cells.map((c) => c.querySelector('.figure')?.textContent)).toEqual(['£92', '£86', '£80']);
-    expect(line).toHaveTextContent(/Google shows a lower fare it could not read \(.*\)$/);
+    expect(document.querySelector('[data-testid="flights-difference"]')).toBeNull();
+    const line = within(blockOf(0)).getByTestId('flights-lower-fare');
+    expect(line).toHaveTextContent(/^Google shows a lower fare it could not read \(.*\)$/);
+    expect(
+      within(line)
+        .getAllByTestId('price-cell')
+        .map((c) => c.querySelector('.figure')?.textContent),
+    ).toEqual(['£80']);
+    // a list whose Cheapest tab showed nothing lower says nothing of it
+    expect(within(blockOf(18)).queryByTestId('flights-lower-fare')).toBeNull();
   });
 
-  it('names a date-grid figure "the date grid", and none appears when the cheapest read equals the figure', async () => {
-    const grid = {
-      ...CACHED,
-      providerId: 'camoufox' as const,
-      sourceKind: 'scraped-self' as const,
-      maxAgeHours: 0,
-      returnDateSource: 'grid-cell' as const,
-    };
-    const board: DatesOptions = {
-      ...BOARD,
-      pairs: {
-        ...(typeof BOARD.pairs === 'object' ? BOARD.pairs : {}),
-        [at('2027-03-14', 10)]: pricedPair(
-          priced(8_600, { price: { ...priced(8_600).price, provenance: grid } }),
-        ),
-      },
-    };
-    await renderWorked({ board });
-    expect(within(blockOf(0)).getByTestId('flights-difference')).toHaveTextContent(/; the date grid showed/);
-    expect(within(blockOf(18)).queryByTestId('flights-difference')).toBeNull();
-  });
-
-  it('a reused list’s day is on both sides of the line', async () => {
+  it('another airport pair’s list never says the lower fare (it is not the figure’s)', async () => {
     server.use(
       serveFlightLists((d, r) =>
         flightPair(
           d,
           r,
           d === '2027-03-14'
-            ? { list: flightList({ fetchedAt: '2026-10-10T10:44:00.000Z', ageHours: 100, minMinor: 9_200 }) }
+            ? {
+                listOtherPair: flightList({
+                  origin: 'LGW',
+                  destination: 'EWR',
+                  minMinor: 9_200,
+                  tabMinor: 8_000,
+                }),
+              }
             : {},
         ),
       ),
     );
     renderDates({ body: BOARD });
-    await waitFor(() => expect(document.querySelector('[data-testid="flights-difference"]')).not.toBeNull());
-    expect(screen.getByTestId('flights-difference')).toHaveTextContent(
-      /as the cheapest read, 10 Oct 11:44; the Aviasales cache showed.*, 12 Oct 09:30$/,
+    await waitFor(() =>
+      expect(document.querySelector('[data-flights-for="0"] .flights-other')).not.toBeNull(),
     );
+    expect(within(blockOf(0)).queryByTestId('flights-lower-fare')).toBeNull();
   });
 });
 

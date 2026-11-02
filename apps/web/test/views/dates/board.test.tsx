@@ -1,14 +1,29 @@
 import { decodeDatePairs } from '@gmt/core';
-import { screen, within } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import { createRef } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { COPY } from '../../../src/copy.js';
 import { parseDatesState } from '../../../src/state/datesState.js';
 import { BoardTable } from '../../../src/views/Dates/BoardTable.js';
 import { boardModel } from '../../../src/views/Dates/board.js';
-import { at, datesResponse, priced, pricedPair, verifiedFig, workedDates } from '../../fixtures.dates.js';
+import {
+  at,
+  calendarFig,
+  datesResponse,
+  figurePairing,
+  pairingFig,
+  priced,
+  pricedPair,
+  provCached,
+  provGrid,
+  verifiedFig,
+  workedDates,
+} from '../../fixtures.dates.js';
 import { definition } from '../../fixtures.js';
+import { flightPair } from '../../fixtures.searches.js';
 import { expectConsoleErrors, poundsOutsidePrices } from '../../guards.js';
+import { serveFlightLists } from '../../msw/searchesHandlers.js';
+import { server } from '../../msw/server.js';
 import { NOW, renderWithProviders } from '../../render.js';
 import { setViewportWidth } from '../../viewport.js';
 import { boardRows, cellsOf, findBoard, renderDates } from './render.js';
@@ -289,5 +304,289 @@ describe('a verified figure without a cheaper calendar price shows none', () => 
     const table = await findBoard();
     expect(within(table).queryByTestId('cheaper-cached')).toBeNull();
     expect(cellsOf(boardRows(table)[0] ?? table)[5]).toMatch(/^checked fares, verified/);
+  });
+});
+
+// --- WP21 Task 21.7: the pairing figure and the flight read beneath a calendar figure (spec rev 56 §6.9, §11 Board) ---
+
+describe('a pairing figure on the board (spec rev 56 §6.9, §11 Board; R-board, R-grid)', () => {
+  /** One date pair (14 → 24 Mar, index 0) with `figure`, a real cached figure's neighbour cheaper below it. */
+  const board = (figure: ReturnType<typeof pairingFig>, def = definition()) => {
+    renderDates({
+      body: {
+        discoveryProviders: ['travelpayouts', 'camoufox'],
+        pairs: {
+          [at('2027-03-14', 10)]: pricedPair(figure),
+          [at('2027-03-15', 10)]: pricedPair(
+            priced(130_000, { price: { ...priced(130_000).price, provenance: provCached() } }),
+          ),
+        },
+      },
+      def,
+    });
+    return findBoard();
+  };
+  const rowOf = (table: HTMLElement) => {
+    const row = table.querySelector<HTMLElement>('tr[data-pair="0"]');
+    if (row === null) throw new Error('no row');
+    return row;
+  };
+
+  it('its price through PriceCell with the flight-list source, its age and "not checked"; the seller line and times beneath', async () => {
+    const row = rowOf(await board(pairingFig()));
+    const price = within(row).getAllByTestId('price-cell')[0];
+    if (price === undefined) throw new Error('no price');
+    expect(price).toHaveTextContent('£1,180');
+    expect(within(price).getByTestId('provenance')).toHaveTextContent(
+      "the browser worker's flight list, the lowest seller price read for these two flights",
+    );
+    expect(within(price).getByTestId('provenance')).toHaveTextContent('constraints not checked');
+    expect(within(price).getByTestId('provenance')).toHaveTextContent(/4h/);
+    expect(within(row).getByTestId('pairing-seller')).toHaveTextContent(
+      'QQ Travel · cheapest of 3 offers read',
+    );
+    expect(within(row).getByTestId('pairing-times')).toHaveTextContent('Out 07:15 · Back 14:20');
+    expect(row).not.toHaveTextContent(/verified/i);
+  });
+
+  it('labelled once by which outbound the pairing used: next-cheapest for the fixture, cheapest for a one-attempt read', async () => {
+    const row = rowOf(await board(pairingFig()));
+    const label =
+      "cheapest of 3 offers read, next-cheapest outbound read within your limits (the cheapest one's returns were all over your limits)";
+    expect(within(row).getByRole('group', { name: label })).toBeInTheDocument();
+    expect(within(row).getAllByRole('group', { name: /^cheapest of \d+ offers read/ })).toHaveLength(1);
+  });
+
+  it('the one-attempt wording', async () => {
+    const row = rowOf(await board(pairingFig({ pairing: figurePairing({ which: 'cheapest' }) })));
+    expect(
+      within(row).getByRole('group', {
+        name: 'cheapest of 3 offers read, cheapest outbound read within your limits',
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it('"Google listed from £1,180" through PriceCell when the group says the offer differs from the "from" price', async () => {
+    const p = figurePairing({ pricePence: 119_500, mismatch: true });
+    const row = rowOf(await board(pairingFig({ pairing: p })));
+    const mark = within(row).getByTestId('pairing-mismatch');
+    expect(mark).toHaveTextContent(/^Google listed from/);
+    expect(within(mark).getByTestId('price-cell')).toHaveTextContent('£1,180');
+  });
+
+  it('no mismatch mark when they agree', async () => {
+    const row = rowOf(await board(pairingFig()));
+    expect(within(row).queryByTestId('pairing-mismatch')).toBeNull();
+  });
+
+  it('the grid price beneath through PriceCell compact, with its own source, time, age and stale mark', async () => {
+    const row = rowOf(
+      await board(
+        pairingFig({
+          gridPrice: { pricePence: 56_400, provenance: provGrid(), stale: 'refresh', truncated: false },
+        }),
+      ),
+    );
+    const grid = within(row).getByTestId('pairing-grid');
+    expect(grid).toHaveTextContent(/^date grid showed/);
+    expect(grid).toHaveTextContent(/· the date grid, 10 Oct 09:30$/);
+    const cell = within(grid).getByTestId('price-cell');
+    expect(cell).toHaveTextContent('£564');
+    expect(cell).toHaveTextContent("older than this search's refresh");
+    expect(within(cell).getByTestId('face-age')).toHaveTextContent('not checked');
+  });
+
+  it('a grid price from another source names it ("the Aviasales cache")', async () => {
+    const row = rowOf(
+      await board(
+        pairingFig({
+          gridPrice: { pricePence: 56_400, provenance: provCached(), stale: false, truncated: false },
+        }),
+      ),
+    );
+    expect(within(row).getByTestId('pairing-grid')).toHaveTextContent(/· the Aviasales cache, 14:00$/);
+  });
+
+  it('"airline settings not applied to flights read" when the search sets airlines or layovers, nothing when none', async () => {
+    const airlines = definition({
+      constraints: { maxJourneyMinutes: 1500, includeAirlines: ['VS'] },
+    });
+    expect(
+      within(rowOf(await board(pairingFig(), airlines))).getByTestId('pairing-settings'),
+    ).toHaveTextContent('airline settings not applied to flights read');
+  });
+
+  it('a layover setting says it too', async () => {
+    const layovers = definition({ constraints: { maxJourneyMinutes: 1500, maxLayoverMinutes: 240 } });
+    expect(
+      within(rowOf(await board(pairingFig(), layovers))).getByTestId('pairing-settings'),
+    ).toBeInTheDocument();
+  });
+
+  it('no airline or layover setting: no settings line', async () => {
+    expect(within(rowOf(await board(pairingFig()))).queryByTestId('pairing-settings')).toBeNull();
+  });
+
+  it('the rank follows the response order: the pairing figure (£1,180) ranks below a cheaper calendar one', async () => {
+    renderDates({
+      body: {
+        discoveryProviders: ['travelpayouts', 'camoufox'],
+        pairs: {
+          [at('2027-03-14', 10)]: pricedPair(pairingFig()),
+          [at('2027-03-15', 10)]: pricedPair(
+            priced(100_000, { price: { ...priced(100_000).price, provenance: provCached() } }),
+          ),
+        },
+      },
+    });
+    const table = await findBoard();
+    expect(boardRows(table).map((r) => [cellsOf(r)[0], cellsOf(r)[1]])).toEqual([
+      ['1', '15 Mar 2027'],
+      ['2', '14 Mar 2027'],
+    ]);
+  });
+
+  it('the phone card says the same: the seller line, the times, the grid price beneath', async () => {
+    setViewportWidth(375);
+    try {
+      const table = await board(pairingFig());
+      const card = rowOf(table);
+      expect(card).toHaveAttribute('data-testid', 'board-card');
+      expect(within(card).getByTestId('pairing-seller')).toHaveTextContent(
+        'QQ Travel · cheapest of 3 offers read',
+      );
+      expect(within(card).getByTestId('pairing-times')).toHaveTextContent('Out 07:15 · Back 14:20');
+      expect(within(within(card).getByTestId('pairing-grid')).getByTestId('price-cell')).toHaveTextContent(
+        '£564',
+      );
+      expect(within(card).getAllByTestId('price-cell')[0]).toHaveTextContent('not checked');
+    } finally {
+      setViewportWidth(1280);
+    }
+  });
+
+  it('every amount in the row renders inside a PriceCell', async () => {
+    await board(pairingFig({ pairing: figurePairing({ pricePence: 119_500, mismatch: true }) }));
+    expect(poundsOutsidePrices()).toEqual([]);
+  });
+});
+
+describe('a calendar figure says its flight read (spec rev 56 §6.9, §11 Board; R-heads)', () => {
+  const D = COPY.datesView;
+  const figureRow = async (over: Parameters<typeof calendarFig>[0], available = false) => {
+    if (available) server.use(serveFlightLists((d, r) => flightPair(d, r), { pagesPlanned: 2 }));
+    renderDates({
+      body: {
+        discoveryProviders: ['travelpayouts', 'camoufox'],
+        pairs: {
+          [at('2027-03-14', 10)]: pricedPair(
+            calendarFig({ price: { ...calendarFig().price, provenance: provCached() }, ...over }),
+          ),
+        },
+      },
+    });
+    const table = await findBoard();
+    const row = table.querySelector<HTMLElement>('tr[data-pair="0"]');
+    if (row === null) throw new Error('no row');
+    return row;
+  };
+  const older = figurePairing({ stale: 'refresh', ageHours: 216 });
+
+  it('within-older: "return flights read 9d ago, older than this search\'s refresh:" and the pairing beneath with its age', async () => {
+    const row = await figureRow({ pairingRead: 'within-older', pairing: older });
+    const beneath = within(row).getByTestId('flight-read');
+    expect(beneath).toHaveTextContent("return flights read 9d ago, older than this search's refresh:");
+    const cell = within(beneath).getByTestId('price-cell');
+    expect(cell).toHaveTextContent('£1,180');
+    expect(cell).toHaveTextContent("older than this search's refresh");
+    expect(beneath).toHaveTextContent('QQ Travel · cheapest of 3 offers read');
+    expect(beneath).toHaveTextContent('Out 07:15 · Back 14:20');
+  });
+
+  it('within-other-limits: "return flights read under earlier limits:" with the pairing beneath', async () => {
+    const row = await figureRow({ pairingRead: 'within-other-limits', pairing: figurePairing() });
+    const beneath = within(row).getByTestId('flight-read');
+    expect(beneath).toHaveTextContent(/^return flights read under earlier limits:/);
+    expect(within(beneath).getByTestId('price-cell')).toHaveTextContent('£1,180');
+  });
+
+  const from = figurePairing({
+    pricePence: 118_000,
+    fromPence: 118_000,
+    isFrom: true,
+    seller: null,
+    offersRead: 0,
+    complete: false,
+  });
+
+  it('over-limit: "no pairing within your limits read" with the pairing beneath as its "from" price', async () => {
+    const row = await figureRow({
+      pairingRead: 'over-limit',
+      pairing: { ...from, which: 'over-limit', pricePence: 120_400, fromPence: 120_400 },
+    });
+    const beneath = within(row).getByTestId('flight-read');
+    expect(beneath).toHaveTextContent(/^no pairing within your limits read/);
+    expect(within(beneath).getByTestId('flight-read-pairing')).toHaveTextContent(/^from/);
+    expect(within(beneath).getByTestId('price-cell')).toHaveTextContent('£1,204');
+  });
+
+  it('sellers-not-read: "from £1,180 · sellers not read" beneath the grid price', async () => {
+    const row = await figureRow({ pairingRead: 'sellers-not-read', pairing: from });
+    const line = within(row).getByTestId('flight-read-pairing');
+    expect(line).toHaveTextContent(/^from.*£1,180.*· sellers not read/);
+    // the grid price leads: the row's first PriceCell is the calendar figure's own
+    expect(within(row).getAllByTestId('price-cell')[0]).toHaveTextContent('£312');
+  });
+
+  it('offers-incomplete: the offer beneath with "a cheaper seller may not have been read"', async () => {
+    const row = await figureRow({
+      pairingRead: 'offers-incomplete',
+      pairing: figurePairing({ complete: false }),
+    });
+    const line = within(row).getByTestId('flight-read-pairing');
+    expect(line).toHaveTextContent(
+      'QQ Travel · cheapest of 3 offers read · a cheaper seller may not have been read',
+    );
+    expect(line).not.toHaveTextContent(/^from/);
+  });
+
+  it.each([
+    ['no-pairing-read', 'no return flight read'],
+    ['outbound-only', 'return leg not read'],
+  ] as const)('%s: "%s"', async (read, words) => {
+    const row = await figureRow({ pairingRead: read });
+    expect(within(row).getByTestId('flight-read')).toHaveTextContent(words);
+    expect(within(within(row).getByTestId('flight-read')).queryByTestId('price-cell')).toBeNull();
+  });
+
+  it('the 21.6 ruling: a failed newest list reads "flights couldn\'t be read: <its reason in words>", never "return leg not read"', async () => {
+    const row = await figureRow({ pairingRead: 'list-failed', listReason: 'monthly-cap' });
+    const line = within(row).getByTestId('flight-read');
+    expect(line).toHaveTextContent(/^flights couldn't be read: /);
+    expect(line).toHaveTextContent("flights couldn't be read: the browser worker's monthly limit is used up");
+    expect(line).not.toHaveTextContent(D.pairingRead['outbound-only']);
+  });
+
+  it('not-read: "flights not read" where flight lists are read for this search, nothing where they are not', async () => {
+    const row = await figureRow({}, true);
+    await waitFor(() => expect(within(row).getByTestId('flight-read')).toHaveTextContent('flights not read'));
+  });
+
+  it('not-read where flight lists are not read here says nothing', async () => {
+    const row = await figureRow({});
+    expect(within(row).queryByTestId('flight-read')).toBeNull();
+  });
+
+  it('the phone card says the same', async () => {
+    setViewportWidth(375);
+    try {
+      const row = await figureRow({ pairingRead: 'within-older', pairing: older });
+      expect(row).toHaveAttribute('data-testid', 'board-card');
+      expect(within(row).getByTestId('flight-read')).toHaveTextContent(
+        "return flights read 9d ago, older than this search's refresh:",
+      );
+    } finally {
+      setViewportWidth(1280);
+    }
   });
 });

@@ -4,7 +4,7 @@ import { PriceBoundary } from '../../components/PriceBoundary.js';
 import { PriceCell } from '../../components/PriceCell.js';
 import { COPY } from '../../copy.js';
 import { formatIsoDateWords, formatMinutes } from '../../format.js';
-import { carriersText, flightMarks, listStale } from './flightLines.js';
+import { carriersText, legMarks, listStale } from './flightLines.js';
 
 // Spec rev 55 §11 "Flights" (WP20 Task 20.10): one flight a list read, and every amount a list carries, through
 // PriceCell (ruling C3) with the list's complete provenance.
@@ -35,18 +35,27 @@ export function FlightPrice({ list, pence }: { list: FlightList; pence: number }
 /**
  * One flight (spec rev 55 §11): "depart 07:15, arrive 18:05 +1 · 10h 50m · 1 change · Virgin Atlantic · from £478 round
  * trip", the arrival's full date for assistive technology when it is a later day, then its marks against the search's
- * limits. Carrier names are text only (React escapes them; nothing here sets HTML).
+ * limits (spec rev 56: `legMarks('outbound', …)`, without "; return not read" once its list's returns were read, and the
+ * pairing's own mark, "selected for the returns above" or "tried first: …", when it is one of the outbounds selected).
+ * Carrier names are text only (React escapes them; nothing here sets HTML).
  */
 export function FlightRow({
   flight: f,
   list,
   limits,
+  returnsRead = false,
+  selectedMark = null,
 }: {
   flight: ListedFlight;
   list: FlightList;
   limits: FlightLimits;
+  returnsRead?: boolean;
+  selectedMark?: string | null;
 }) {
-  const marks = flightMarks(f, limits, F);
+  const marks = [
+    ...(selectedMark === null ? [] : [selectedMark]),
+    ...legMarks('outbound', f, limits, F, returnsRead),
+  ];
   return (
     <li data-testid="flight" className="flight">
       <span data-testid="flight-line">

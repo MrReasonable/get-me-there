@@ -86,6 +86,7 @@ export function flightListProvenance(over: Partial<Provenance> = {}): Provenance
 export function figurePairing(over: Partial<DatePairPairing> = {}): DatePairPairing {
   return {
     pricePence: 118_000,
+    fromPence: 118_000,
     isFrom: false,
     seller: 'QQ Travel',
     fare: null,
