@@ -96,6 +96,13 @@ export interface ProviderHttpLimits {
    * row's `page_count`); undefined when the body states none, so the guard keeps its own reading.
    */
   pageCountOf?: (bodyText: string) => number | undefined;
+  /**
+   * Spec rev 56 §5.3 "Per-request pages, timeout and hold" (camoufox): when the provider's next start may be, as an
+   * answer's body states it (`nextLoadNotBefore`); http-kit holds the provider's next start until then for every answer
+   * with a body, 2xx or not, inside the attempt (before the limiter's slot is released and before a retry); undefined
+   * when the body states none.
+   */
+  nextStartOf?: (bodyText: string) => IsoDateTime | undefined;
 }
 
 /** What createHttpKit needs (spec §5.3 rev 11). */

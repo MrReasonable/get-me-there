@@ -3,11 +3,18 @@
  * port; never billable, cost 0, concurrency 1; the start-to-start spacing as the limiter's minimum interval; the
  * request timeout is the worker's page timeout plus 15 s; transport failures are never retried; a refused connection is
  * `provider-unavailable`; each attempt's page class comes from `x-gmt-google-contacted` (absent → `page`, the
- * conservative reading); a flights answer's `pagesLoaded` is the attempt's page count (spec rev 56 §5.3), while the
- * request timeout stays discovery's (a flights request with a return phase sends its own). `camoufox-status` is the
- * unledgered preflight's id, GET /v1/status only.
+ * conservative reading); a flights answer's `pagesLoaded` is the attempt's page count (spec rev 56 §5.3), and any
+ * answer's `nextLoadNotBefore` holds the provider's next start, while the request timeout stays discovery's (a flights
+ * request with a return phase sends its own). `camoufox-status` is the unledgered preflight's id, GET /v1/status only.
  */
-import { type Config, GOOGLE_CONTACTED_HEADER, GRID_MOVE_BUDGET_MS, GRID_MOVE_RESERVE_MS } from '@gmt/core';
+import {
+  type Config,
+  GOOGLE_CONTACTED_HEADER,
+  GRID_MOVE_BUDGET_MS,
+  GRID_MOVE_RESERVE_MS,
+  type IsoDateTime,
+  isoDateTimeSchema,
+} from '@gmt/core';
 import type { ProviderHttpLimits } from '../http/types.js';
 import { classifyWorkerAnswer } from './answer.js';
 
@@ -21,17 +28,22 @@ function workerOrigin(c: CamoufoxConfig): { host: string; port: number; scheme: 
   return { host: u.hostname, port: Number(u.port), scheme: u.protocol === 'https:' ? 'https:' : 'http:' };
 }
 
-/** A count a worker answer states under `key` (a whole number, 0 admitted); undefined when absent or not a count. */
-function statedCount(bodyText: string, key: 'scrolls' | 'pagesLoaded'): number | undefined {
+/** What a worker answer states under `key`, still unnarrowed; undefined for a body that is no JSON object. */
+function stated(bodyText: string, key: 'scrolls' | 'pagesLoaded' | 'nextLoadNotBefore'): unknown {
   let body: unknown;
   try {
     body = JSON.parse(bodyText);
   } catch {
     return undefined;
   }
-  // why: only an object states a count; an absent key reads as undefined, which is no count
+  // why: only an object states a value; an absent key reads as undefined, which states nothing
   if (typeof body !== 'object' || body === null) return undefined;
-  const n: unknown = Reflect.get(body, key);
+  return Reflect.get(body, key);
+}
+
+/** A count a worker answer states under `key` (a whole number, 0 admitted); undefined when absent or not a count. */
+function statedCount(bodyText: string, key: 'scrolls' | 'pagesLoaded'): number | undefined {
+  const n = stated(bodyText, key);
   return typeof n === 'number' && Number.isInteger(n) && n >= 0 ? n : undefined;
 }
 
@@ -47,6 +59,16 @@ export function scrollCountOf(bodyText: string): number | undefined {
  */
 export function pageCountOf(bodyText: string): number | undefined {
   return statedCount(bodyText, 'pagesLoaded');
+}
+
+/**
+ * Spec rev 56 §5.3 (R-spacing; ruling 21.4): when the worker's next document load may start, as any answer states it
+ * once the phase started the reload (`nextLoadNotBefore`), 2xx or not; http-kit holds the provider's next start until
+ * then. Undefined for an answer that states none or a value `isoDateTimeSchema` refuses.
+ */
+export function nextStartOf(bodyText: string): IsoDateTime | undefined {
+  const at = isoDateTimeSchema.safeParse(stated(bodyText, 'nextLoadNotBefore'));
+  return at.success ? at.data : undefined;
 }
 
 /** `page` unless the worker states it contacted no Google page. */
@@ -81,6 +103,7 @@ export function camoufoxHttpLimits(
     pageClass: pageClassOf,
     scrollCountOf,
     pageCountOf,
+    nextStartOf,
     classifyError: classifyWorkerAnswer,
   };
 }

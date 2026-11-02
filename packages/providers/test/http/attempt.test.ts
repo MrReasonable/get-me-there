@@ -1,10 +1,12 @@
 // Spec rev 56 §5.3 "Per-request pages, timeout and hold" (WP21 Task 21.4): one attempt passes the request's planned
 // pages to `budget.reserve`, takes the request's own timeout in place of the provider's for that attempt only, and
 // passes the answer's `pagesLoaded` (through the provider's `pageCountOf`) to `finalise` as `pageCount`. msw answers on
-// the worker's own origin; fake timers drive every timeout (no real waits).
+// the worker's own origin; fake timers drive every timeout (no real waits). An answer whose body states
+// `nextLoadNotBefore` (through the provider's `nextStartOf`) holds the provider's next start, whatever its status.
 import { HttpResponse, http } from 'msw/http';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { pageCountOf } from '../../src/camoufox/limits.js';
+import { nextStartOf, pageCountOf } from '../../src/camoufox/limits.js';
+import { MAX_BODY_BYTES } from '../../src/http/attempt.js';
 import type { HttpKitRequest } from '../../src/http/types.js';
 import { type LedgerEvent, makeKit, SENTINELS, testLimits } from '../fakes.js';
 import { hangUntilAborted, respondAfter, server } from '../support/msw.js';
@@ -32,7 +34,8 @@ function workerReq(url: string, over: Partial<HttpKitRequest> = {}): HttpKitRequ
   };
 }
 // why: the camoufox limits at their list-mode values (105 s: the page timeout plus 15 s), reading pagesLoaded
-const kitWith = () => makeKit({ overrides: { camoufox: { requestTimeoutSeconds: 105, pageCountOf } } });
+const kitWith = () =>
+  makeKit({ overrides: { camoufox: { requestTimeoutSeconds: 105, pageCountOf, nextStartOf } } });
 const reserves = (events: LedgerEvent[]) => events.flatMap((e) => (e.type === 'reserve' ? [e] : []));
 const finals = (events: LedgerEvent[]) => events.flatMap((e) => (e.type === 'finalise' ? [e] : []));
 const contacted = { 'x-gmt-google-contacted': '1' };
@@ -140,5 +143,138 @@ describe('runAttempt: the answer’s pagesLoaded is the attempt’s pageCount (s
     await kit.request(workerReq(FLIGHTS));
     const [f] = finals(events);
     expect(f !== undefined && 'pageCount' in f).toBe(false);
+  });
+});
+
+describe('runAttempt: a response whose body cannot be read is ledgered at the plan (21.4 review M2)', () => {
+  it('a 200 whose body is over the cap, with pages 2 → finalise carries pageCount 2', async () => {
+    const { kit, events } = kitWith();
+    server.use(
+      http.post(
+        FLIGHTS,
+        () => new HttpResponse('a'.repeat(MAX_BODY_BYTES + 1), { status: 200, headers: contacted }),
+      ),
+    );
+    expect(await kit.request(workerReq(FLIGHTS, { pages: 2 })).catch((e: unknown) => e)).toMatchObject({
+      message: expect.stringContaining('[body-too-large]'),
+    });
+    expect(finals(events).map((f) => [f.outcome, f.pageCount])).toEqual([['ok', 2]]);
+  });
+  it('a body that fails after the status line, with pages 2 → finalise error carries pageCount 2', async () => {
+    // why: msw rejects the fetch itself when a mocked body stream errors, so the failure goes through the in-process
+    // seam, which hands the stream to the reader untouched (as inProcess.test.ts)
+    const broken = () =>
+      new ReadableStream<Uint8Array>({
+        start(c) {
+          c.enqueue(new TextEncoder().encode('{"kind": "fl'));
+          c.error(new Error('connection reset'));
+        },
+      });
+    const { kit, events } = makeKit({
+      // why: not billable and not retried, as camoufox: one attempt, finalised `error` with the status
+      overrides: { fixture: { billable: 'never', retryTransport: false } },
+      inProcessHosts: { 'fixture.local': async () => new Response(broken(), { status: 200 }) },
+    });
+    const r = workerReq('http://fixture.local/calendar', { providerId: 'fixture', headers: {}, pages: 2 });
+    expect(await kit.request(r).catch((e: unknown) => e)).toMatchObject({
+      message: expect.stringContaining('[body-read-failed]'),
+    });
+    expect(finals(events).map((x) => [x.outcome, x.httpStatus, x.pageCount])).toEqual([['error', 200, 2]]);
+  });
+  it('a body over the cap on a request without pages carries no pageCount (the guard’s own reading)', async () => {
+    const { kit, events } = kitWith();
+    server.use(
+      http.post(
+        FLIGHTS,
+        () => new HttpResponse('a'.repeat(MAX_BODY_BYTES + 1), { status: 200, headers: contacted }),
+      ),
+    );
+    await kit.request(workerReq(FLIGHTS)).catch(() => undefined);
+    const [f] = finals(events);
+    expect(f !== undefined && 'pageCount' in f).toBe(false);
+  });
+});
+
+describe('runAttempt: an answer that states nextLoadNotBefore holds the next start, whatever its status (21.4 review I1)', () => {
+  beforeEach(useFakeTime);
+  const inMs = (ms: number) => new Date(Date.now() + ms).toISOString();
+  const fetchTimes = (events: LedgerEvent[], t0: number) =>
+    events.flatMap((e) => (e.type === 'fetch' ? [e.at - t0] : []));
+
+  it.each([
+    ['a 200 flights answer', 200, { kind: 'flights', pagesLoaded: 2 }],
+    ['a 504 not-ready answer', 504, { kind: 'not-ready', elapsedMs: 90_000, pagesLoaded: 2 }],
+    [
+      'a 423 blocked answer',
+      423,
+      { kind: 'blocked', page: 'captcha', cooldownUntil: '2026-10-20T05:00:00.000Z', pagesLoaded: 2 },
+    ],
+  ])('%s: the next camoufox request is sent at or after `at`', async (_n, status, body) => {
+    const { kit, events } = kitWith();
+    server.use(
+      http.post(FLIGHTS, () =>
+        HttpResponse.json({ ...body, nextLoadNotBefore: inMs(30_000) }, { status, headers: contacted }),
+      ),
+      http.post(PAGE, () => HttpResponse.json({ ok: true }, { headers: contacted })),
+    );
+    const t0 = Date.now();
+    await drive(kit.request(workerReq(FLIGHTS, { pages: 2 }))).catch(() => undefined);
+    await drive(kit.request(workerReq(PAGE)));
+    const [first, next] = fetchTimes(events, t0);
+    expect(first ?? Number.POSITIVE_INFINITY).toBeLessThan(1000);
+    expect(next ?? 0).toBeGreaterThanOrEqual(30_000);
+    expect(next ?? Number.POSITIVE_INFINITY).toBeLessThan(31_000);
+  });
+  it('a 429 spacing answer that states it holds p-retry’s own next attempt, past its Retry-After', async () => {
+    const { kit, events } = kitWith();
+    const answers = [
+      HttpResponse.json(
+        { kind: 'spacing', retryAfterSeconds: 1, nextLoadNotBefore: inMs(30_000) },
+        { status: 429, headers: { 'retry-after': '1', 'x-gmt-google-contacted': '0' } },
+      ),
+      HttpResponse.json({ kind: 'flights' }, { headers: contacted }),
+    ];
+    server.use(http.post(FLIGHTS, () => answers.shift() ?? HttpResponse.error()));
+    const t0 = Date.now();
+    expect((await drive(kit.request(workerReq(FLIGHTS)))).status).toBe(200);
+    const [first, retry] = fetchTimes(events, t0);
+    expect(first ?? Number.POSITIVE_INFINITY).toBeLessThan(1000);
+    expect(retry ?? 0).toBeGreaterThanOrEqual(30_000);
+  });
+  it('an answer without it holds nothing, and leaves a later answer’s hold intact', async () => {
+    const { kit, events } = kitWith();
+    const answers = [
+      HttpResponse.json({ kind: 'flights', pagesLoaded: 2 }, { headers: contacted }),
+      HttpResponse.json(
+        { kind: 'flights', pagesLoaded: 2, nextLoadNotBefore: inMs(30_000) },
+        { headers: contacted },
+      ),
+    ];
+    server.use(
+      http.post(FLIGHTS, () => answers.shift() ?? HttpResponse.error()),
+      http.post(PAGE, () => HttpResponse.json({ ok: true }, { headers: contacted })),
+    );
+    const t0 = Date.now();
+    await drive(kit.request(workerReq(FLIGHTS)));
+    await drive(kit.request(workerReq(PAGE)));
+    await drive(kit.request(workerReq(`${FLIGHTS}?n=2`)));
+    await drive(kit.request(workerReq(`${PAGE}?n=2`)));
+    const [, unheld, , held] = fetchTimes(events, t0);
+    expect(unheld ?? Number.POSITIVE_INFINITY).toBeLessThan(1000);
+    expect(held ?? 0).toBeGreaterThanOrEqual(30_000);
+  });
+  it('a provider without nextStartOf holds nothing, whatever the body says', async () => {
+    const { nextStartOf: _reader, ...camoufox } = testLimits().camoufox;
+    const { kit, events } = makeKit({ limits: { ...testLimits(), camoufox } });
+    server.use(
+      http.post(FLIGHTS, () =>
+        HttpResponse.json({ kind: 'flights', nextLoadNotBefore: inMs(30_000) }, { headers: contacted }),
+      ),
+      http.post(PAGE, () => HttpResponse.json({ ok: true }, { headers: contacted })),
+    );
+    const t0 = Date.now();
+    await drive(kit.request(workerReq(FLIGHTS)));
+    await drive(kit.request(workerReq(PAGE)));
+    expect(fetchTimes(events, t0)[1] ?? Number.POSITIVE_INFINITY).toBeLessThan(1000);
   });
 });

@@ -2,7 +2,8 @@
 // against msw as fetchTile.test.ts. The answers carry the real provenance shape (the contract refuses any provider but
 // camoufox) with synthetic flights; the worked example's airports only. Revision 56 "The return phase" (WP21 Task
 // 21.4): the limits, the booking ask, the page plan and the request's own timeout; the returns, the page count and the
-// spacing hold. The http-kit is the real one behind a spy, so the test sees each request and each hold it was given.
+// spacing hold, which http-kit sets from any answer that states it (21.4 review I1). The http-kit is the real one behind
+// a spy, so the test sees each request it was given and, under fake time, when the next one was sent.
 import {
   asIata,
   asIsoDate,
@@ -11,7 +12,6 @@ import {
   type FlightLimits,
   flightRequestSeconds,
   flightsRequestSchema,
-  type IsoDateTime,
   ProviderError,
   returnReadSchema,
 } from '@gmt/core';
@@ -19,7 +19,7 @@ import { HttpResponse, http } from 'msw/http';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CAMOUFOX_FLIGHT_LIST_INFO, camoufoxProvider } from '../../src/camoufox/index.js';
 import { fixtureProvider } from '../../src/fixture/provider.js';
-import type { HttpKit, HttpKitRequest, HttpProviderId } from '../../src/http/types.js';
+import type { HttpKit, HttpKitRequest } from '../../src/http/types.js';
 import { FLIGHT_REQUEST_SECONDS, makeKit, SENTINELS, testLimits } from '../fakes.js';
 import { server } from '../support/msw.js';
 import { drive, useFakeTime } from '../support/time.js';
@@ -134,17 +134,13 @@ function setup() {
   });
   // why: the spy hands every call to the real kit, so the ledger, the limiter and the hold still run
   const sent: HttpKitRequest[] = [];
-  const holds: Array<[HttpProviderId, IsoDateTime]> = [];
   const http_: HttpKit = {
     request: (r) => {
       sent.push(r);
       return kit.request(r);
     },
     stats: () => kit.stats(),
-    holdUntil: (id, at) => {
-      holds.push([id, at]);
-      kit.holdUntil(id, at);
-    },
+    holdUntil: (id, at) => kit.holdUntil(id, at),
   };
   const p = camoufoxProvider({
     http: http_,
@@ -161,7 +157,7 @@ function setup() {
   });
   const lists = p.flightLists;
   if (lists === undefined) throw new Error('camoufox has no flightLists');
-  return { p, lists, budget, events, log, sent, holds };
+  return { p, lists, budget, events, log, sent };
 }
 const reserves = (events: ReturnType<typeof setup>['events']) => events.filter((e) => e.type === 'reserve');
 const bodies: unknown[] = [];
@@ -506,8 +502,8 @@ describe('camoufox flightLists: the return phase (spec rev 56 §2 "The return ph
     expect('requestTimeoutSeconds' in (sent[2] ?? {})).toBe(false);
     expect(reserves(events).map((r) => r.pages)).toEqual([2, 2, 1]);
   });
-  it('maps returns and nextLoadNotBefore field for field, holds the next start, and the page count reaches the ledger only', async () => {
-    const { lists, holds, budget } = setup();
+  it('maps returns and nextLoadNotBefore field for field, and the page count reaches the ledger only', async () => {
+    const { lists, budget } = setup();
     server.use(
       capture(() =>
         HttpResponse.json(
@@ -535,21 +531,19 @@ describe('camoufox flightLists: the return phase (spec rev 56 §2 "The return ph
     });
     // why: arch-r3-014: pagesLoaded is never on the result; it reaches the ledger row's page_count through pageCountOf
     expect('pagesLoaded' in r).toBe(false);
-    expect(holds).toEqual([['camoufox', NEXT_LOAD]]);
     expect(budget.rowsOf('camoufox').map((x) => [x.pages, x.pageCount])).toEqual([[2, 2]]);
   });
-  it('an answer without the keys maps to returns null, nextLoadNotBefore null, and no hold', async () => {
-    const { lists, holds } = setup();
+  it('an answer without the keys maps to returns null and nextLoadNotBefore null', async () => {
+    const { lists } = setup();
     server.use(capture(() => HttpResponse.json(answer({ pagesLoaded: 1 }), contacted(true))));
     expect(await lists.read({ ...Q, returnLimits: LIMITS, booking: true }, ctx)).toMatchObject({
       kind: 'list',
       returns: null,
       nextLoadNotBefore: null,
     });
-    expect(holds).toEqual([]);
   });
-  it('an attempt whose outboundIndex is past the flights is list-error parse unknown-answer, with no hold', async () => {
-    const { lists, holds } = setup();
+  it('an attempt whose outboundIndex is past the flights is list-error parse unknown-answer', async () => {
+    const { lists } = setup();
     const attempt = RETURNS.attempts[0];
     if (attempt === undefined) throw new Error('fixture');
     const bad = { ...RETURNS, attempts: [{ ...attempt, outboundIndex: 1 }] };
@@ -564,7 +558,6 @@ describe('camoufox flightLists: the return phase (spec rev 56 §2 "The return ph
       error: { kind: 'parse', reason: 'parse', retryable: false },
     });
     if (r.kind === 'list-error') expect(r.error.message).toContain('[unknown-answer]');
-    expect(holds).toEqual([]);
   });
   it('a held next read waits for nextLoadNotBefore before it is sent (R-spacing: no refused round trip)', async () => {
     useFakeTime();
@@ -590,5 +583,69 @@ describe('camoufox flightLists: the return phase (spec rev 56 §2 "The return ph
     const fetches = events.flatMap((e) => (e.type === 'fetch' ? [e.at - t0] : []));
     expect(fetches).toHaveLength(2);
     expect(fetches[1] ?? 0).toBeGreaterThanOrEqual(30_000);
+  });
+  // why: ruling 21.4 (progress.md): any answer that states nextLoadNotBefore holds the next start, a failed one too;
+  // http-kit sets the hold from the body, so a 2xx the capability then refuses holds as well (21.4 review I1)
+  const outOfRange = () => {
+    const attempt = RETURNS.attempts[0];
+    if (attempt === undefined) throw new Error('fixture');
+    return { ...RETURNS, attempts: [{ ...attempt, outboundIndex: 1 }] };
+  };
+  it.each([
+    ['a 200 list', 200, () => answer({ returns: RETURNS, pagesLoaded: 2 }), 'list', null],
+    [
+      'a 200 the contract refuses (outboundIndex past the flights)',
+      200,
+      () => answer({ returns: outOfRange(), pagesLoaded: 2 }),
+      'list-error',
+      'parse',
+    ],
+    [
+      'a 504 not-ready',
+      504,
+      () => ({ kind: 'not-ready', elapsedMs: 90_000, pagesLoaded: 2 }),
+      'list-error',
+      'parse',
+    ],
+    [
+      'a 423 blocked',
+      423,
+      () => ({ kind: 'blocked', page: 'captcha', cooldownUntil: '2026-10-20T05:00:00.000Z', pagesLoaded: 2 }),
+      'list-error',
+      'blocked',
+    ],
+  ])(
+    '%s that states nextLoadNotBefore holds the next read until then',
+    async (_n, status, body, kind, errorKind) => {
+      useFakeTime();
+      const { lists, events } = setup();
+      const at = new Date(Date.now() + 30_000).toISOString();
+      const answers = [
+        HttpResponse.json({ ...body(), nextLoadNotBefore: at }, { status, ...contacted(true) }),
+        HttpResponse.json(answer(), contacted(true)),
+      ];
+      server.use(capture(() => answers.shift() ?? HttpResponse.error()));
+      const t0 = Date.now();
+      const r = await drive(lists.read({ ...Q, returnLimits: LIMITS, booking: true }, ctx));
+      expect(r.kind).toBe(kind);
+      if (r.kind === 'list-error') expect(r.error.kind).toBe(errorKind);
+      expect(await drive(lists.read(Q, ctx))).toMatchObject({ kind: 'list' });
+      const fetches = events.flatMap((e) => (e.type === 'fetch' ? [e.at - t0] : []));
+      expect(fetches).toHaveLength(2);
+      expect(fetches[0] ?? Number.POSITIVE_INFINITY).toBeLessThan(1000);
+      expect(fetches[1] ?? 0).toBeGreaterThanOrEqual(30_000);
+      expect(fetches[1] ?? Number.POSITIVE_INFINITY).toBeLessThan(31_000);
+    },
+  );
+  it('an answer that states no nextLoadNotBefore holds nothing: the next read goes at the limiter’s own pace', async () => {
+    useFakeTime();
+    const { lists, events } = setup();
+    server.use(capture(() => HttpResponse.json(answer({ pagesLoaded: 1 }), contacted(true))));
+    const t0 = Date.now();
+    await drive(lists.read({ ...Q, returnLimits: LIMITS, booking: true }, ctx));
+    await drive(lists.read(Q, ctx));
+    const fetches = events.flatMap((e) => (e.type === 'fetch' ? [e.at - t0] : []));
+    expect(fetches).toHaveLength(2);
+    expect(fetches[1] ?? Number.POSITIVE_INFINITY).toBeLessThan(1000);
   });
 });

@@ -1554,7 +1554,7 @@ export type FlightListResult =
   | { kind: 'list'; fetchedAt: IsoDateTime; pointOfSale: PointOfSale; listed: Listed; flights: ListedFlight[]; minMinor: number | null; tabMinor: number | null;
       cheapestView: 'cheapest' | 'best-fallback' | null; optionsUnparsed: number; optionsOtherCell: number; resultsStated: number | null; notes: string[];
       returns: ReturnRead | null;              // the worker's return read, null when the request had no return phase (or an older worker answered without one)
-      nextLoadNotBefore: IsoDateTime | null }  // when the next camoufox load may start (after a request that started the reload); the capability holds http-kit's next start until then
+      nextLoadNotBefore: IsoDateTime | null }  // when the next camoufox load may start (after a request that started the reload); http-kit holds its next camoufox start until then
   | { kind: 'list-error'; error: ProviderError };   // BudgetExceeded is thrown, as fetchTile throws it; a query without airport names fails closed (parse, reason no-airport-names) before any request
 export interface FlightListCapability { info: CapabilityInfo; read(q: FlightListQuery, ctx: ProviderContext): Promise<FlightListResult> }   // camoufox only; its preflight is discovery's
 // The worker answer's pagesLoaded is never on the result, a stored row or the wire: it reaches only the ledger (http-kit's pageCountOf → finalise's
@@ -1733,13 +1733,17 @@ cache.set when cacheable  →  return { body, fetchedAt: now }
   own). The provider's limits may name `pageCountOf(bodyText)`, which reads
   the answer's `pagesLoaded` (0 admitted, undefined without it) for the
   attempt's `finalise` (`pageCount`; an unknown attempt with no body passes
-  none, keeping the plan). `holdUntil(providerId, at)` makes the next start
+  none, keeping the plan; a response whose body cannot be read passes the
+  planned `pages`). `holdUntil(providerId, at)` makes the next start
   for that provider wait until `at`: the hold is awaited before the request
   joins the limiter's queue, under the request's signal, and does not count
   toward the queue's maximum wait (a hold longer than it still waits, never
-  a limiter timeout); an `at` in the past does nothing. The flight-list
-  capability calls it with an answer's `nextLoadNotBefore`, so no refused
-  round trip and no retry is spent on the spacing.
+  a limiter timeout), and again once a queued request's slot is granted; an
+  `at` in the past does nothing. http-kit sets the hold itself, inside the
+  attempt, from any camoufox answer whose body states `nextLoadNotBefore`
+  (the limits' `nextStartOf(bodyText)`), 2xx or not and whether or not the
+  capability then accepts the answer, so no refused round trip and no retry
+  is spent on the spacing.
 - **Billable rule**: `searchapi` iff upstream HTTP 200 **and** the plan is
   a per-call plan (on subscription plans every call is billable for the
   call cap but costs 0 micro-GBP); `travelpayouts`, `camoufox` and `fx` never (a `camoufox` row

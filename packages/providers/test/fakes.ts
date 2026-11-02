@@ -14,7 +14,7 @@ import {
   type Usage,
 } from '@gmt/core';
 import { classifyWorkerAnswer } from '../src/camoufox/answer.js';
-import { pageClassOf, pageCountOf, scrollCountOf } from '../src/camoufox/limits.js';
+import { nextStartOf, pageClassOf, pageCountOf, scrollCountOf } from '../src/camoufox/limits.js';
 import { createHttpKit } from '../src/http/httpKit.js';
 import type {
   FixtureRecorder,
@@ -291,6 +291,7 @@ export function testLimits(over: LimitOverrides = {}): Record<HttpProviderId, Pr
       pageClass: pageClassOf,
       scrollCountOf,
       pageCountOf,
+      nextStartOf,
       classifyError: classifyWorkerAnswer,
       ...over.camoufox,
     },

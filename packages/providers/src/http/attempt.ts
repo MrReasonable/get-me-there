@@ -33,6 +33,8 @@ export interface AttemptResult {
 export interface AttemptContext {
   attempt: number;
   secondsToHourRefresh: () => number;
+  /** Holds the provider's next start until `at` (the limiter's `holdUntil`; spec rev 56 §5.3). */
+  hold: (at: IsoDateTime) => void;
 }
 
 /** Rejects with the signal's reason as soon as it aborts, whether or not `p` itself honours the signal. */
@@ -94,7 +96,10 @@ function scrubbedHeaders(h: Headers, deps: HttpKitDeps): Headers {
  * - finalise runs exactly once per reserve: `ok` for 2xx (even a malformed body: the vendor billed it), `error`
  *   for any other status or a socket failure, `unknown` for timeout and abort and for a billed 200 whose body
  *   then fails; an abort finalises `unknown` before AbortedError propagates; a body's stated scrolls and pages loaded
- *   (`scrollCountOf`, `pageCountOf`) go with it.
+ *   (`scrollCountOf`, `pageCountOf`) go with it, and a response whose body cannot be read (over the cap, or failed
+ *   after the status line) is finalised at the request's planned `pages`, the conservative reading;
+ * - every answer with a body, 2xx or not, whose body states the provider's next start (`nextStartOf`) holds that
+ *   provider's next start until then, inside the limiter's job: before its slot is released and before a retry.
  */
 export async function runAttempt(
   deps: HttpKitDeps,
@@ -125,6 +130,7 @@ export async function runAttempt(
   // why: spec §5.3 rev 32: a pages-only provider states, per attempt, whether a page was loaded (`page_class`).
   let classOverride: 'no-page' | undefined;
   let responseFacts: { status: number | null; headers: Headers | null } = { status: null, headers: null };
+  /** `bodyText`: undefined when no body was read (no response, a timeout, an abort); null when one arrived unreadable. */
   const finalise = (
     outcome: 'ok' | 'error' | 'unknown',
     httpStatus?: number,
@@ -135,8 +141,10 @@ export async function runAttempt(
     const stated = bodyText === undefined || bodyText === null ? undefined : bodyText;
     const scrollCount = stated === undefined ? undefined : limits.scrollCountOf?.(stated);
     // why: spec rev 56 §5.3 (R-zero): the documents the answer states it loaded, 0 included; an attempt with no body (a
-    // timeout, an abort) passes none, so the guard keeps the plan
-    const pageCount = stated === undefined ? undefined : limits.pageCountOf?.(stated);
+    // timeout, an abort) passes none, so the guard keeps the plan; a response whose body could not be read states
+    // nothing, so it is ledgered at the plan, never at the guard's 1 (21.4 review M2)
+    const pageCount =
+      stated === undefined ? (bodyText === null ? r.pages : undefined) : limits.pageCountOf?.(stated);
     reservation?.finalise({
       outcome,
       durationMs: Date.now() - started,
@@ -224,7 +232,7 @@ export async function runAttempt(
       finalise('unknown', status);
       throw classified(requestTimeout(w, limits.billable, limits.retryTransport !== false));
     }
-    finalise(billed200 ? 'unknown' : 'error', status);
+    finalise(billed200 ? 'unknown' : 'error', status, null);
     throw classified(bodyReadFailed(w, status, billed200, limits.retryTransport !== false));
   } finally {
     clearTimeout(timer);
@@ -233,6 +241,11 @@ export async function runAttempt(
   const ok = status >= 200 && status < 300;
   const fetchedAt = deps.clock.now();
   finalise(ok ? 'ok' : 'error', status, text);
+  // why: spec rev 56 §5.3 (R-spacing; ruling 21.4): any answer that states the next start holds it, a failed or refused
+  // one too, set here inside the limiter's job so neither a queued request nor p-retry's next attempt meets the
+  // worker's spacing refusal
+  const nextStart = text === null ? undefined : limits.nextStartOf?.(text);
+  if (nextStart !== undefined) ctx.hold(nextStart);
   deps.log.debug(
     {
       providerId: r.providerId,

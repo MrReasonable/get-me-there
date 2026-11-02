@@ -279,8 +279,9 @@ describe('apps/api wiring: camoufox flights request timeout (spec rev 56 §2, §
       [1, undefined],
     ]);
   });
-  it('follows CAMOUFOX_PAGE_TIMEOUT_SECONDS and CAMOUFOX_MIN_SPACING_SECONDS (1,035 s at 120 s and 45 s)', async () => {
+  it('follows CAMOUFOX_PAGE_TIMEOUT_SECONDS and CAMOUFOX_MIN_SPACING_SECONDS (1,035 s and 795 s at 120 s and 45 s)', async () => {
     const sent = await sentWith({ CAMOUFOX_PAGE_TIMEOUT_SECONDS: '120', CAMOUFOX_MIN_SPACING_SECONDS: '45' });
-    expect(sent.map(([, t]) => t)).toEqual([1035, 6 * 120 + 45 + 30, undefined]);
+    // why: §12's recomputed values as literals, so a wrong change to the formula cannot pass in both places
+    expect(sent.map(([, t]) => t)).toEqual([1035, 795, undefined]);
   });
 });

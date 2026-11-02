@@ -5,6 +5,7 @@ export { gridBlocks, gridTileEstimate, planGridTiles } from './grid.js';
 export {
   camoufoxHttpLimits,
   camoufoxStatusHttpLimits,
+  nextStartOf,
   pageClassOf,
   pageCountOf,
   scrollCountOf,

@@ -277,6 +277,66 @@ describe('holdUntil: the next start waits for the worker’s nextLoadNotBefore (
     const { kit } = makeKit({ limits: { searchapi: testLimits().searchapi } });
     expect(() => kit.holdUntil('camoufox', inMs(50_000))).not.toThrow();
   });
+  // why: 21.4 review M1: a job already queued when the hold is set has passed the wait before the queue; it waits
+  // again once its slot is granted, so the hold an answer sets inside a running job holds the job queued behind it
+  it('createLimiter: a job already queued when a running job sets the hold starts at or after `at`', async () => {
+    const limiter = createLimiter(testLimits({ searchapi: { concurrency: 1 } }).searchapi, {
+      usedThisHour: 0,
+    });
+    const t0 = Date.now();
+    // why: the second job queues for the first one's 10 s, within its maximum wait; the hold itself is outside it
+    const o = {
+      signal: new AbortController().signal,
+      maxWaitMs: 20_000,
+      providerId: 'searchapi' as const,
+      endpointPath: '/api/v1/search',
+    };
+    const starts: number[] = [];
+    const first = limiter.run(async () => {
+      starts.push(Date.now() - t0);
+      await new Promise<void>((resolve) => setTimeout(resolve, 10_000));
+      limiter.holdUntil(t0 + 60_000);
+    }, o);
+    const second = limiter.run(async () => {
+      starts.push(Date.now() - t0);
+    }, o);
+    await drive(Promise.all([first, second]));
+    expect(starts[0] ?? Number.POSITIVE_INFINITY).toBeLessThan(1000);
+    expect(starts[1] ?? 0).toBeGreaterThanOrEqual(60_000);
+    expect(starts[1] ?? Number.POSITIVE_INFINITY).toBeLessThan(61_000);
+  });
+  it('createLimiter: an abort while a granted job waits for the hold → AbortedError, the job never runs, its tokens back', async () => {
+    const limiter = createLimiter(testLimits({ searchapi: { concurrency: 1 } }).searchapi, {
+      usedThisHour: 0,
+    });
+    const t0 = Date.now();
+    const base = { maxWaitMs: 20_000, providerId: 'searchapi' as const, endpointPath: '/api/v1/search' };
+    const ac = new AbortController();
+    let ran = false;
+    const first = limiter.run(
+      async () => {
+        await new Promise<void>((resolve) => setTimeout(resolve, 10_000));
+        limiter.holdUntil(t0 + 60_000);
+      },
+      { ...base, signal: new AbortController().signal },
+    );
+    const second = limiter.run(
+      async () => {
+        ran = true;
+      },
+      { ...base, signal: ac.signal },
+    );
+    setTimeout(() => ac.abort(), 30_000);
+    await drive(first);
+    expect(await driveError(second)).toBeInstanceOf(AbortedError);
+    expect(ran).toBe(false);
+    // why: both jobs took a token; the aborted one sent nothing and hands both of its tokens back
+    const l = testLimits().searchapi;
+    expect(await drive(limiter.reservoirs())).toEqual({
+      minute: l.ratePerMinute - 1,
+      hour: l.ratePerHour - 1,
+    });
+  });
   it('createLimiter: run waits for the hold before the job joins the queue', async () => {
     const limiter = createLimiter(testLimits().searchapi, { usedThisHour: 0 });
     const t0 = Date.now();

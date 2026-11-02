@@ -20,7 +20,8 @@ export interface ProviderLimiter {
   /**
    * Spec rev 56 §5.3 (R-spacing; arch-r3-018): no job starts before `atMs` (epoch ms, `Date.now()`'s scale). `run`
    * waits for the hold before the job joins the queue, under the job's signal, and the queue's maximum wait starts only
-   * after it. A time already past does nothing; an earlier time never shortens a later hold.
+   * after it; a job already queued when the hold is set waits for it once its slot is granted. A time already past does
+   * nothing; an earlier time never shortens a later hold.
    */
   holdUntil(atMs: number): void;
 }
@@ -150,6 +151,16 @@ export function createLimiter(l: ProviderHttpLimits, seed: { usedThisHour: numbe
             state = 'running';
             clearTimeout(timer);
             o.signal.removeEventListener('abort', onAbort);
+            // why: 21.4 review M1: a hold set after this job passed `run`'s wait (the answer of the job before it, set
+            // inside that job) still holds it; the slot is held, so nothing overtakes it, and the queue's maximum wait
+            // no longer applies. An abort here sent nothing, so both tokens go back.
+            try {
+              await awaitHold(o.signal);
+            } catch {
+              await refund();
+              reject(new AbortedError());
+              return;
+            }
             try {
               resolve(await fn());
             } catch (e) {

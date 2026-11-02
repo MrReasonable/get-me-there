@@ -9,8 +9,9 @@
  * (read the shown pairing's booking options). Such a request plans `FLIGHT_LIST_PAGES_PER_PAIR_MAX` pages on its
  * reservation and carries its own timeout (`flightRequestSeconds`, 780 s with the booking read, 600 s without, at the
  * defaults); every other request plans one page under the provider's timeout. The result carries the worker's return
- * read (`returns`) and `nextLoadNotBefore`, and the capability holds http-kit's next camoufox start until then; the
- * answer's `pagesLoaded` reaches only the ledger (http-kit's `pageCountOf`). A flight list builds no price and no
+ * read (`returns`) and `nextLoadNotBefore`; http-kit itself holds its next camoufox start until then, from any answer
+ * that states it (`nextStartOf`, a failed or refused one too), and the answer's `pagesLoaded` reaches only the ledger
+ * (`pageCountOf`). A flight list builds no price and no
  * verdict; it never says "verified". Every non-2xx answer is a `list-error` through `classifyWorkerAnswer`, but the
  * worker's monthly cap, which is thrown as BudgetExceeded, as `fetchTile` throws it.
  */
@@ -107,10 +108,8 @@ export function flightListCapability(o: CamoufoxProviderOptions): FlightListCapa
     if (!a.success || a.data.kind !== 'flights')
       return fail(parseError('unknown-answer', 'the worker answered what this build cannot read', WHERE));
     const answer = a.data;
-    // why: R-spacing: the worker started the reload, so the next camoufox load waits for the spacing in this app's
-    // limiter, not in a refused round trip or a spent retry; held before the fetchedAt check, since the start happened
-    // whatever the page's time says
-    if (answer.nextLoadNotBefore !== undefined) o.http.holdUntil('camoufox', answer.nextLoadNotBefore);
+    // why: R-spacing needs nothing here: http-kit held the next camoufox start from the answer's body (`nextStartOf`)
+    // inside the attempt, whatever its status or this parse's verdict (ruling 21.4)
     // why: prov-010: the page was read between this request's start and now, within the clock skew either way
     if (!fetchedAtWithinRequest(answer.fetchedAt, started, o.clock.now()))
       return fail(
