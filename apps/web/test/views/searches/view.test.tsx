@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { act, screen, waitFor, within } from '@testing-library/react';
 import { HttpResponse, http } from 'msw';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -384,7 +385,10 @@ describe('the side column (ruling A18)', () => {
   });
 
   it('the stylesheet places the form in the right column from 900 px and in the single column below, with one DOM order', () => {
-    const css = readFileSync(join(process.cwd(), 'src/views/Searches/searches.css'), 'utf8');
+    const css = readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), '../../../src/views/Searches/searches.css'),
+      'utf8',
+    );
     expect(css).toMatch(/\.searches-side\s*\{\s*grid-column: 2;\s*grid-row: 1;/);
     expect(css).toMatch(/\.searches-main\s*\{\s*grid-column: 1;\s*grid-row: 1;/);
     expect(css).toMatch(

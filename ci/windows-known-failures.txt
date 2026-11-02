@@ -20,7 +20,9 @@
 # The grid's reset control (spec rev 54) adds two grid-page tests that share that file's POSIX-mode setup
 # (https://github.com/MrReasonable/get-me-there/actions/runs/41145793523).
 # WP21 Task 21.0's select-outbound recorder and its two counts-file tests share those files' POSIX-mode setup (socs.json
-# and monthly.json read wider than 0600 there); listed from the tests' own names, for the PR's Windows run to confirm.
+# and monthly.json read wider than 0600 there). WP21's return-phase, session and rules tests share that setup too, and
+# two more source-guard tests share the listed one's backslash paths; recorded from
+# https://github.com/MrReasonable/get-me-there/actions/runs/41487718973, less four renamed recorder tests.
 apps/api/test/bootstrap/app.backup.test.ts > backup preflight (spec §7 Migrations, §13 Backup) backs up into <db dir>/backups before applying pending migrations; the backup has the old schema
 apps/api/test/bootstrap/app.matrix.test.ts > injected-config boot matrix (spec §5.5) an unwritable data directory fails boot with exit code 73
 apps/api/test/bootstrap/app.spawn.test.ts > production boot lacks fixture (spec §5.5, §9 item 5) the real bootstrap under NODE_ENV=production never offers or accepts synthetic data
@@ -275,12 +277,12 @@ apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-outboun
 apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-outbound: review fixes (WP21 Task 21.0) a pre-click read that never answers leaves urlChanged and changedFromPreClick unknown, never true
 apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-outbound: review fixes (WP21 Task 21.0) a research read that overruns its own bound keeps a settled view settled
 apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-outbound: review fixes (WP21 Task 21.0) passes the cap of 6 page timeouts and 3 spacings to the page budget (630,000 ms at the defaults)
-apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-outbound: review fixes (WP21 Task 21.0) with 3 pages left it is refused before anything: no launch, no load, no pacer start, the counts unchanged
+apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-outbound: review fixes (WP21 Task 21.0) with 1 page left it is refused before anything: no launch, no load, no pacer start, the counts unchanged
 apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-outbound: steps that do not complete end the page plainly a re-claim that runs out of its own budget records waitTimedOut and ends plainly (never not-ready)
 apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-outbound: steps that do not complete end the page plainly a view that never changes from the Cheapest view: settled false, changed false, the last read, then the end
 apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-outbound: steps that do not complete end the page plainly two links of the pick’s name: selectFailed find-outbound:ambiguous, no after, nothing more
 apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-outbound: the served sequence, two selections and a fresh load (WP21 Task 21.0) a --results and a --cheapest recording’s meta carry documentLoads too
-apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-outbound: the served sequence, two selections and a fresh load (WP21 Task 21.0) claims RECORD_SELECT_PAGES before the first load and settles to the documents loaded
+apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-outbound: the served sequence, two selections and a fresh load (WP21 Task 21.0) claims RECORD_SELECT_PAGES before the first load, the gate holding every selection’s document back
 apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-outbound: the served sequence, two selections and a fresh load (WP21 Task 21.0) nothing is written when a page holds the worker key (the fail-closed scan)
 apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-outbound: the served sequence, two selections and a fresh load (WP21 Task 21.0) re-claims the pacer before each selection and the reload: its last start moves each time
 apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-outbound: the served sequence, two selections and a fresh load (WP21 Task 21.0) records the Best and Cheapest views, both picks, and what each step showed
@@ -302,8 +304,10 @@ apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-outboun
 apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-outbound: the served sequence’s other ends, and the later steps’ (WP21 Task 21.0) with the Cheapest flow unverified, the Best view is read and its pick selected
 apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-outbound: the target and the click’s failure (WP21 Task 21.0, after recording 1) a click Playwright refuses records the call log’s reason as one word, and the page ends plainly
 apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-outbound: the target and the click’s failure (WP21 Task 21.0, after recording 1) records the target’s probe before each selection
+apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-return: the more-booking-options expansion a booking view records the button names in main beside the page’s; the expansion counts read main only
 apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-return: the more-booking-options expansion a booking view with no expansion control records find-more-options:not-found, nothing pressed
 apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-return: the more-booking-options expansion a further expansion control and a cheapest offer below the return’s price are recorded as such
+apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-return: the more-booking-options expansion a mixed-currency expansion (pounds beside euros) is compared as unknown, never as pounds
 apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-return: the more-booking-options expansion a settled offers view off the booking path is not-booking-view: nothing more is pressed
 apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-return: the more-booking-options expansion account after the expansion: its cool-down and rule
 apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-return: the more-booking-options expansion account after the return’s activation: its cool-down and rule
@@ -317,19 +321,117 @@ apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-return:
 apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-return: the more-booking-options expansion sign-in after the return’s activation: its cool-down and rule
 apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-return: the more-booking-options expansion unusual-traffic after the expansion: its cool-down and rule
 apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-return: the more-booking-options expansion unusual-traffic after the return’s activation: its cool-down and rule
+apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-return: the return selected, the booking view recorded --force-second runs the full served path: the reload, the second outbound, its return, the booking view, the expansion
+apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-return: the return selected, the booking view recorded a booking view with no offer on the booking path: changed, not settled, no select failure
 apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-return: the return selected, the booking view recorded a challenge after the return’s activation is that stop
 apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-return: the return selected, the booking view recorded a settled view that is not the return view gives the return selection nothing to pick
 apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-return: the return selected, the booking view recorded an Enter on the return that changes nothing within the step is press-return:no-activation
-apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-return: the return selected, the booking view recorded claims 4 pages before the first load and settles to the documents loaded
+apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-return: the return selected, the booking view recorded claims 2 pages before the first load and settles to the documents loaded; the gate holds every activation’s document
 apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-return: the return selected, the booking view recorded no return on the return date: the return selection has no pick, and nothing more is activated
 apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-return: the return selected, the booking view recorded passes a cap of 5 page timeouts and 3 spacings (540,000 ms) to the page budget
 apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-return: the return selected, the booking view recorded selects the cheapest return on the return date by keyboard and records the booking view, activating nothing on it
-apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-return: the return selected, the booking view recorded with 3 pages left it is refused before anything loads
+apps/camoufox-worker/test/recordSelectOutbound.test.ts > record --select-return: the return selected, the booking view recorded with 1 page left it is refused before anything loads
 apps/camoufox-worker/test/recordings.test.ts > backupRecordings a second backup the same day adds what is new and keeps what was there
 apps/camoufox-worker/test/recordings.test.ts > backupRecordings copies every recording but .gitkeep, directories 0700 and files 0600, and never follows a link
 apps/camoufox-worker/test/recordings.test.ts > recordingsMain backs up into ~/.local/share/get-me-there/private/fixtures/camoufox-<date>/ and restores the latest backup
 apps/camoufox-worker/test/recordings.test.ts > restoreRecordings copies a backup into an empty tree (only .gitkeep files), directories 0700 and files 0600
 apps/camoufox-worker/test/recordings.test.ts > restoreRecordings refuses a tree that already holds a recording, and a backup that does not exist
+apps/camoufox-worker/test/returnPhase.test.ts > a browser error inside the return phase keeps what was read (final review A-M1) the booking view’s read fails: the returns read, the booking unrecognised select-return:browser-error
+apps/camoufox-worker/test/returnPhase.test.ts > a browser error inside the return phase keeps what was read (final review A-M1) the read after the expansion fails: expand-failed select-more-options:browser-error, the offers before it kept
+apps/camoufox-worker/test/returnPhase.test.ts > a browser error inside the return phase keeps what was read (final review A-M1) the reload’s read fails: read, rule reload:browser-error, attempt 0’s returns kept, the booking skipped
+apps/camoufox-worker/test/returnPhase.test.ts > a browser error inside the return phase keeps what was read (final review A-M1) the return view’s read fails: unrecognised select-outbound:browser-error, the outbound flights kept
+apps/camoufox-worker/test/returnPhase.test.ts > a refusal or a block the phase meets before or around an activation a consent refusal during the outbound read (no hop) is the page’s stop when the phase starts
+apps/camoufox-worker/test/returnPhase.test.ts > a refusal or a block the phase meets before or around an activation a press that never resolves on a page that turned into a challenge: the failed step is classified, the stop its cool-down
+apps/camoufox-worker/test/returnPhase.test.ts > budgets (spec rev 56 §2: the page budget, the admission, the spacing before the reload only) a request while a return phase is in flight is answered spacing for the rest of its 750 s cap and its close
+apps/camoufox-worker/test/returnPhase.test.ts > budgets (spec rev 56 §2: the page budget, the admission, the spacing before the reload only) no spacing wait precedes an activation: only the reload is spaced
+apps/camoufox-worker/test/returnPhase.test.ts > budgets (spec rev 56 §2: the page budget, the admission, the spacing before the reload only) the monthly admission asks for the literal 2 (core’s FLIGHT_LIST_PAGES_PER_PAIR_MAX)
+apps/camoufox-worker/test/returnPhase.test.ts > genuine blocks after an activation are the page’s stop (as on a Best-view poll) a consent host after an activation (a hop, no request) is consent-unhandled with its cool-down and wipe
+apps/camoufox-worker/test/returnPhase.test.ts > genuine blocks after an activation are the page’s stop (as on a Best-view poll) after the activation of 2 more booking opt…: account control
+apps/camoufox-worker/test/returnPhase.test.ts > genuine blocks after an activation are the page’s stop (as on a Best-view poll) after the activation of 2 more booking opt…: captcha
+apps/camoufox-worker/test/returnPhase.test.ts > genuine blocks after an activation are the page’s stop (as on a Best-view poll) after the activation of 2 more booking opt…: sign-in heading
+apps/camoufox-worker/test/returnPhase.test.ts > genuine blocks after an activation are the page’s stop (as on a Best-view poll) after the activation of 2 more booking opt…: unusual traffic
+apps/camoufox-worker/test/returnPhase.test.ts > genuine blocks after an activation are the page’s stop (as on a Best-view poll) after the activation of From 1,180 British…: account control
+apps/camoufox-worker/test/returnPhase.test.ts > genuine blocks after an activation are the page’s stop (as on a Best-view poll) after the activation of From 1,180 British…: captcha
+apps/camoufox-worker/test/returnPhase.test.ts > genuine blocks after an activation are the page’s stop (as on a Best-view poll) after the activation of From 1,180 British…: sign-in heading
+apps/camoufox-worker/test/returnPhase.test.ts > genuine blocks after an activation are the page’s stop (as on a Best-view poll) after the activation of From 1,180 British…: unusual traffic
+apps/camoufox-worker/test/returnPhase.test.ts > genuine blocks after an activation are the page’s stop (as on a Best-view poll) after the activation of From 478 British p…: account control
+apps/camoufox-worker/test/returnPhase.test.ts > genuine blocks after an activation are the page’s stop (as on a Best-view poll) after the activation of From 478 British p…: captcha
+apps/camoufox-worker/test/returnPhase.test.ts > genuine blocks after an activation are the page’s stop (as on a Best-view poll) after the activation of From 478 British p…: sign-in heading
+apps/camoufox-worker/test/returnPhase.test.ts > genuine blocks after an activation are the page’s stop (as on a Best-view poll) after the activation of From 478 British p…: unusual traffic
+apps/camoufox-worker/test/returnPhase.test.ts > the guard after an activation (R-refused: the refusal read before classifying) a non-flights path on the allowlisted host: aborted, nothing fetched, unrecognised guard-refused:off-allowlist, no cool-down (sec-002)
+apps/camoufox-worker/test/returnPhase.test.ts > the guard after an activation (R-refused: the refusal read before classifying) a refusal of kind consent-unhandled is the page’s stop with its cool-down
+apps/camoufox-worker/test/returnPhase.test.ts > the guard after an activation (R-refused: the refusal read before classifying) a refusal of kind sign-in is the page’s stop with its cool-down
+apps/camoufox-worker/test/returnPhase.test.ts > the guard after an activation (R-refused: the refusal read before classifying) a seller’s host: aborted, nothing fetched, unrecognised guard-refused:off-allowlist, no cool-down (sec-002)
+apps/camoufox-worker/test/returnPhase.test.ts > the month’s headroom and the reservation (R-reserve, P3, cost-r3-002) 1 page left: the admission reserves 1 and the phase is skipped monthly-headroom before any activation
+apps/camoufox-worker/test/returnPhase.test.ts > the month’s headroom and the reservation (R-reserve, P3, cost-r3-002) a refused first load: blocked with pagesLoaded 0, the month settled to 0 (R-zero)
+apps/camoufox-worker/test/returnPhase.test.ts > the month’s headroom and the reservation (R-reserve, P3, cost-r3-002) a reservation of 1: a further main-frame navigation past it is aborted (page-reservation), the phase unrecognised
+apps/camoufox-worker/test/returnPhase.test.ts > the month’s headroom and the reservation (R-reserve, P3, cost-r3-002) a reservation of 2: a further main-frame navigation past it is aborted (page-reservation), the phase unrecognised
+apps/camoufox-worker/test/returnPhase.test.ts > the month’s headroom and the reservation (R-reserve, P3, cost-r3-002) answers before any load state pagesLoaded 0: the spacing, a cool-down
+apps/camoufox-worker/test/returnPhase.test.ts > the month’s headroom and the reservation (R-reserve, P3, cost-r3-002) exactly 2 left: it reserves 2 and runs (the exact fit)
+apps/camoufox-worker/test/returnPhase.test.ts > the phase’s other ends BOOKING_SELECT_VERIFIED false alone: the returns read, nothing activated after them, the booking not-verified
+apps/camoufox-worker/test/returnPhase.test.ts > the phase’s other ends RETURN_SELECT_VERIFIED false: nothing activated, not-verified both, no page counts, the list page’s budget and admission
+apps/camoufox-worker/test/returnPhase.test.ts > the phase’s other ends a read attempt whose returns are all another cell’s: listed none-for-cell, the booking no-pairing
+apps/camoufox-worker/test/returnPhase.test.ts > the phase’s other ends a request without returnLimits: nothing activated, no returns, no pagesLoaded key
+apps/camoufox-worker/test/returnPhase.test.ts > the phase’s other ends booking false: booking null, nothing activated after the returns
+apps/camoufox-worker/test/returnPhase.test.ts > the phase’s other ends no outbound fits: one attempt on the cheapest flight, outboundFits false, no second attempt, the booking of bookingReturnOf’s pick
+apps/camoufox-worker/test/returnPhase.test.ts > the phase’s other ends no-outbound (Google's no-flights line): nothing activated, the booking no-pairing, one page
+apps/camoufox-worker/test/returnPhase.test.ts > the phase’s other ends no-outbound (every option for another cell): nothing activated, the booking no-pairing, one page
+apps/camoufox-worker/test/returnPhase.test.ts > the phase’s other ends not the Cheapest view (no Cheapest flow (null), R-view): nothing activated, skipped not-cheapest-view, the flights intact
+apps/camoufox-worker/test/returnPhase.test.ts > the phase’s other ends not the Cheapest view (the Best fallback, R-view): nothing activated, skipped not-cheapest-view, the flights intact
+apps/camoufox-worker/test/returnPhase.test.ts > the second attempt (Ian’s ruling 2: the next outbound, from a fresh load of the list page) a failed second selection of an outbound outside the 30: the kept 30 unchanged, triedAll false
+apps/camoufox-worker/test/returnPhase.test.ts > the second attempt (Ian’s ruling 2: the next outbound, from a fresh load of the list page) a genuine block after the second selection is the page’s stop
+apps/camoufox-worker/test/returnPhase.test.ts > the second attempt (Ian’s ruling 2: the next outbound, from a fresh load of the list page) a genuine blocked kind on the reload is the page’s stop, with its cool-down
+apps/camoufox-worker/test/returnPhase.test.ts > the second attempt (Ian’s ruling 2: the next outbound, from a fresh load of the list page) a navigation past the reservation during the reload’s served sequence: read, rule reload:page-reservation
+apps/camoufox-worker/test/returnPhase.test.ts > the second attempt (Ian’s ruling 2: the next outbound, from a fresh load of the list page) a reload that ends other than on a settled Cheapest view (Google's no-flights line): read, one attempt, no cool-down, the booking skipped
+apps/camoufox-worker/test/returnPhase.test.ts > the second attempt (Ian’s ruling 2: the next outbound, from a fresh load of the list page) a reload that ends other than on a settled Cheapest view (a Best fallback (the reload’s Cheapest view never settles)): read, one attempt, no cool-down, the booking skipped
+apps/camoufox-worker/test/returnPhase.test.ts > the second attempt (Ian’s ruling 2: the next outbound, from a fresh load of the list page) a reload that ends other than on a settled Cheapest view (a form mismatch): read, one attempt, no cool-down, the booking skipped
+apps/camoufox-worker/test/returnPhase.test.ts > the second attempt (Ian’s ruling 2: the next outbound, from a fresh load of the list page) a reload that ends other than on a settled Cheapest view (no option read): read, one attempt, no cool-down, the booking skipped
+apps/camoufox-worker/test/returnPhase.test.ts > the second attempt (Ian’s ruling 2: the next outbound, from a fresh load of the list page) a reload whose load fails with a network error: read, rule reload:goto, one attempt, the booking skipped, nextLoadNotBefore stated (M5)
+apps/camoufox-worker/test/returnPhase.test.ts > the second attempt (Ian’s ruling 2: the next outbound, from a fresh load of the list page) a reload whose load fails with a plain error as the deadline expires: reload:not-settled, never not-ready
+apps/camoufox-worker/test/returnPhase.test.ts > the second attempt (Ian’s ruling 2: the next outbound, from a fresh load of the list page) a reloaded list in another currency: read, rule reload:currency
+apps/camoufox-worker/test/returnPhase.test.ts > the second attempt (Ian’s ruling 2: the next outbound, from a fresh load of the list page) a request with booking false makes the same second attempt and no booking read
+apps/camoufox-worker/test/returnPhase.test.ts > the second attempt (Ian’s ruling 2: the next outbound, from a fresh load of the list page) a second selection that fails: read with its rule, one attempt, the booking skipped second-selection (A13)
+apps/camoufox-worker/test/returnPhase.test.ts > the second attempt (Ian’s ruling 2: the next outbound, from a fresh load of the list page) no return of the first fits and a second outbound does: the spaced reload, the second selection, the booking on attempt 1
+apps/camoufox-worker/test/returnPhase.test.ts > the second attempt (Ian’s ruling 2: the next outbound, from a fresh load of the list page) no second attempt when no further outbound fits: one attempt, the booking of bookingReturnOf’s pick (none fitting)
+apps/camoufox-worker/test/returnPhase.test.ts > the second attempt (Ian’s ruling 2: the next outbound, from a fresh load of the list page) one flight read, its returns all over a limit: one attempt, no second selection attempted
+apps/camoufox-worker/test/returnPhase.test.ts > the second attempt (Ian’s ruling 2: the next outbound, from a fresh load of the list page) the reload’s Cheapest flow gets a full page period even when fake time is past 180 s at the reload
+apps/camoufox-worker/test/returnPhase.test.ts > the second attempt (Ian’s ruling 2: the next outbound, from a fresh load of the list page) the spacing wait running out of its own budget: read, rule spacing, one attempt, the booking read of attempt 0
+apps/camoufox-worker/test/returnPhase.test.ts > the second attempt (Ian’s ruling 2: the next outbound, from a fresh load of the list page) triedAll is false when a third fitting outbound remains
+apps/camoufox-worker/test/returnPhase.test.ts > the whole phase (spec rev 56 §2: the outbound, its returns, the shown pairing’s booking options) R-pick: two fitting returns tied on the "from" price, the later shorter: the shorter is booked
+apps/camoufox-worker/test/returnPhase.test.ts > the whole phase (spec rev 56 §2: the outbound, its returns, the shown pairing’s booking options) a pick outside the 30: only the dearest fits; it is kept, replacing the dearest non-pick, and the counts come from the 31 read
+apps/camoufox-worker/test/returnPhase.test.ts > the whole phase (spec rev 56 §2: the outbound, its returns, the shown pairing’s booking options) selects the right outbound, reads its returns, books bookingReturnOf’s pick, opens the expansion and reads every offer
+apps/camoufox-worker/test/returnPhase.test.ts > transient ends of the booking step (the returns intact, returns read) a changed view off the booking path: unrecognised not-booking-view
+apps/camoufox-worker/test/returnPhase.test.ts > transient ends of the booking step (the returns intact, returns read) a changed view with an outbound link: unrecognised not-booking-view
+apps/camoufox-worker/test/returnPhase.test.ts > transient ends of the booking step (the returns intact, returns read) a navigation during the activation of 2 more booking options: unrecognised unexpected-navigation, nothing loaded
+apps/camoufox-worker/test/returnPhase.test.ts > transient ends of the booking step (the returns intact, returns read) a navigation during the activation of From 1,180 British pounds round trip total. 1 stop flight with QQ Air. Leaves John F. Kennedy International Airport at 18:30 on Sunday, November 15 and arrives at Heathrow Airport at 9:45 on Monday, November 16. Total duration 10 hrs 15 min. Select flight: unrecognised unexpected-navigation, nothing loaded
+apps/camoufox-worker/test/returnPhase.test.ts > transient ends of the booking step (the returns intact, returns read) a navigation refused during booking read 1 (the first read): unrecognised guard-refused:off-allowlist
+apps/camoufox-worker/test/returnPhase.test.ts > transient ends of the booking step (the returns intact, returns read) a navigation refused during booking read 2 (the read after the expansion): unrecognised guard-refused:off-allowlist
+apps/camoufox-worker/test/returnPhase.test.ts > transient ends of the booking step (the returns intact, returns read) a view without an offer: not-settled select-return:not-settled, never unrecognised
+apps/camoufox-worker/test/returnPhase.test.ts > transient ends of the booking step (the returns intact, returns read) an offer in another currency before the expansion: unrecognised currency, nothing pressed after
+apps/camoufox-worker/test/returnPhase.test.ts > transient ends of the booking step (the returns intact, returns read) an offer in another currency: unrecognised currency (prov-int-r3-008)
+apps/camoufox-worker/test/returnPhase.test.ts > transient ends of the booking step (the returns intact, returns read) every initial offer refused and the expansion failing: unrecognised no-offers-read, the refused counted
+apps/camoufox-worker/test/returnPhase.test.ts > transient ends of the booking step (the returns intact, returns read) every offer refused after the expansion: unrecognised no-offers-read, expanded, the refused counted
+apps/camoufox-worker/test/returnPhase.test.ts > transient ends of the booking step (the returns intact, returns read) every offer refused, no expansion control: unrecognised no-offers-read, the refused counted
+apps/camoufox-worker/test/returnPhase.test.ts > transient ends of the booking step (the returns intact, returns read) the booking view with the note none: read, every offer
+apps/camoufox-worker/test/returnPhase.test.ts > transient ends of the booking step (the returns intact, returns read) the booking view with the note typical: read, every offer
+apps/camoufox-worker/test/returnPhase.test.ts > transient ends of the booking step (the returns intact, returns read) the expansion control absent: read, expanded false, the offers read before it
+apps/camoufox-worker/test/returnPhase.test.ts > transient ends of the booking step (the returns intact, returns read) the expansion’s press changes nothing: expand-failed select-more-options:no-activation, the offers read before it kept
+apps/camoufox-worker/test/returnPhase.test.ts > transient ends of the booking step (the returns intact, returns read) the expansion’s settle runs out after a change: expand-failed select-more-options:not-settled
+apps/camoufox-worker/test/returnPhase.test.ts > transient ends of the booking step (the returns intact, returns read) the return’s press changes nothing: not-settled select-return:no-activation
+apps/camoufox-worker/test/returnPhase.test.ts > transient ends of the booking step (the returns intact, returns read) two links of the return’s name: select-failed select-return:find-return
+apps/camoufox-worker/test/returnPhase.test.ts > transient ends of the booking step (the returns intact, returns read) two or more expansion controls: unrecognised more-options-count, nothing pressed, no offer kept (A9)
+apps/camoufox-worker/test/returnPhase.test.ts > transient ends of the return step (each through the shared helper) a changed view with the no-flights line and no link: not-settled, never settled on the line
+apps/camoufox-worker/test/returnPhase.test.ts > transient ends of the return step (each through the shared helper) a main-frame navigation during the activation (allowlisted): aborted by the gate, nothing fetched, unrecognised unexpected-navigation (R-worst)
+apps/camoufox-worker/test/returnPhase.test.ts > transient ends of the return step (each through the shared helper) the deadline expires during the return view’s listFacts: not-settled select-outbound:list-facts
+apps/camoufox-worker/test/returnPhase.test.ts > transient ends of the return step (each through the shared helper) the press fails with a plain error as the deadline expires: not-settled select-outbound:activate
+apps/camoufox-worker/test/returnPhase.test.ts > transient ends of the return step (each through the shared helper) the press never resolves (fake time past CLICK_TIMEOUT_MS): select-failed select-outbound:press-outbound
+apps/camoufox-worker/test/returnPhase.test.ts > transient ends of the return step (each through the shared helper) the return view in another currency: unrecognised currency
+apps/camoufox-worker/test/returnPhase.test.ts > transient ends of the return step (each through the shared helper) the tree changes but lacks the heading: unrecognised not-return-view
+apps/camoufox-worker/test/returnPhase.test.ts > transient ends of the return step (each through the shared helper) the view never changes (Enter changed nothing): not-settled select-outbound:no-activation
+apps/camoufox-worker/test/returnPhase.test.ts > transient ends of the return step (each through the shared helper) two links of the pick’s name: select-failed select-outbound:find-outbound, nothing activated
+apps/camoufox-worker/test/rules.test.ts > worker rules: a flights page with returnLimits activates only the verified names the flags as the flip sets them: the tab clicked, one result link, one return link, one expansion control, all by keyboard
+apps/camoufox-worker/test/rules.test.ts > worker rules: a flights page with returnLimits activates only the verified names with both flags false nothing is activated
+apps/camoufox-worker/test/rules.test.ts > worker rules: a flights page with returnLimits activates only the verified names with the module’s own flags (both true since the flip) the returns and the booking options are read
 apps/camoufox-worker/test/rules.test.ts > worker rules: a full page session sets only SOCS and clicks nothing on a consent page every addCookies call is exactly [socsCookie(capture)]; the consent page is never clicked
 apps/camoufox-worker/test/run.test.ts > a refusal before any entry runs explains itself (W1, dev-b1-003) main leaves a config refusal in its data directory; check prints one; other commands write nothing
 apps/camoufox-worker/test/run.test.ts > run.ts (SEC-R2-006: one env file, its mode checked on the file loaded) DEBUG or PWDEBUG in the environment refuses (playwright-core would log protocol traffic, the SOCS value)
@@ -372,6 +474,7 @@ apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14
 apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) a page that turns into a block after a verified click is that block
 apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) a refusal by the spacing writes no reservation
 apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) a request inside the spacing → spacing, nothing opened
+apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) a request while a page is in flight → spacing for the rest of that page’s cap and its close
 apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) a signed-in control → signed-in, refusal persisted; a new session over the same directory answers cooling-down without opening
 apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) a signed-in stop leaves the profile directory in place
 apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) addCookies throws → browser-error launch, Google not contacted
@@ -426,6 +529,17 @@ apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14
 apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) two pages in a row, each preceded by addCookies with SOCS
 apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) with CHEAPEST_FLOW_VERIFIED injected true the Cheapest tab is clicked once; false, nothing is clicked
 apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) with the Cheapest flow verified, the tab’s pop-up is closed and the tab clicked
+apps/camoufox-worker/test/session.test.ts > PageSession in flights mode (spec rev 55 §2) Google's no-flights line, once verified, is listed 'no-flights' with no flight
+apps/camoufox-worker/test/session.test.ts > PageSession in flights mode (spec rev 55 §2) a Cheapest view that never settles with no list read is not-ready, as in list mode
+apps/camoufox-worker/test/session.test.ts > PageSession in flights mode (spec rev 55 §2) a never-resolving SOCS read-back on a flights page → browser-error read, context discarded
+apps/camoufox-worker/test/session.test.ts > PageSession in flights mode (spec rev 55 §2) a page close that never resolves on a flights page → browser-error read, context discarded
+apps/camoufox-worker/test/session.test.ts > PageSession in flights mode (spec rev 55 §2) a page in another currency is blocked unrecognised, rule currency, with its cool-down
+apps/camoufox-worker/test/session.test.ts > PageSession in flights mode (spec rev 55 §2) a second request during a page answers spacing, nothing more opened
+apps/camoufox-worker/test/session.test.ts > PageSession in flights mode (spec rev 55 §2) every option for another day is listed 'none-for-cell', no cool-down
+apps/camoufox-worker/test/session.test.ts > PageSession in flights mode (spec rev 55 §2) options no grammar reads are blocked no-options-read, as in list mode
+apps/camoufox-worker/test/session.test.ts > PageSession in flights mode (spec rev 55 §2) runs every gate a list page runs, in order, before the load: grid gate skipped, cool-down, month, pacer, reservation
+apps/camoufox-worker/test/session.test.ts > PageSession in flights mode (spec rev 55 §2) settled results → a flights answer: the cell’s flights in page order, the minimum, the tab price, no Cheapest view
+apps/camoufox-worker/test/session.test.ts > PageSession in flights mode (spec rev 55 §2) the Cheapest flow read is named cheapest; a failed one falls back to the Best view, named so, with the tab price
 apps/camoufox-worker/test/session.test.ts > every stop names the rule that made it SOCS changed on a settled page: the answer names its page kind and rule
 apps/camoufox-worker/test/session.test.ts > every stop names the rule that made it a form on other dates: the answer names its page kind and rule
 apps/camoufox-worker/test/session.test.ts > every stop names the rule that made it a reCAPTCHA frame: the answer names its page kind and rule
@@ -435,6 +549,8 @@ apps/camoufox-worker/test/session.test.ts > every stop names the rule that made 
 apps/camoufox-worker/test/session.test.ts > every stop names the rule that made it another currency: the answer names its page kind and rule
 apps/camoufox-worker/test/session.test.ts > every stop names the rule that made it no search form: the answer names its page kind and rule
 apps/camoufox-worker/test/session.test.ts > every stop names the rule that made it two Date grid buttons: the answer names its page kind and rule
+apps/camoufox-worker/test/session.test.ts > page counts only on a return-phase request (WP21 Task 21.3) a blocked list page carries no pagesLoaded either
+apps/camoufox-worker/test/session.test.ts > page counts only on a return-phase request (WP21 Task 21.3) a list page and a flights page without returnLimits carry no pagesLoaded, with the select flags on
 apps/camoufox-worker/test/sessionLine.test.ts > run.ts session export (Task 17.8) counts of an ended window export as this window’s zero; an ended cool-down exports as none
 apps/camoufox-worker/test/sessionLine.test.ts > run.ts session export (Task 17.8) prints one JSON line: the last page, this window’s counts and the cool-down in force; writes nothing
 apps/camoufox-worker/test/sessionLine.test.ts > run.ts session merge (Task 17.8) a new host directory whose window differs gets this window’s zero counts beside the carried time
@@ -476,6 +592,8 @@ apps/camoufox-worker/test/startRefusal.test.ts > run.ts check --json (decision 7
 apps/camoufox-worker/test/startRefusal.test.ts > the refusal file (decision 75) is { reason, at } only, 0600, for every reason; cleared by a start
 apps/web/test/copy/sourceGuard.test.ts > source guards (spec §11 copy, spec §9 item 6 prices) every allowlisted file exists, so a mistyped or removed entry cannot silently exempt a future file
 apps/web/test/copy/sourceGuard.test.ts > source guards (spec §11 copy, spec §9 item 6 prices) money is formatted only by PriceCell and the cost and cap views
+apps/web/test/copy/sourceGuard.test.ts > source guards (spec §11 copy, spec §9 item 6 prices) the estimate sentence formats money only through the estimate panel’s formatter
+apps/web/test/copy/sourceGuard.test.ts > source guards (spec §11 copy, spec §9 item 6 prices) the tie line formats money only through the estimate panel’s formatter; the flights block formats none
 packages/db/test/backup.test.ts > backupDatabase (spec §7 "Migrations", §13 "Backup", decision 14) a really corrupted copy fails the production integrity check, which throws and removes the file (test-strategy M3)
 packages/db/test/backup.test.ts > backupDatabase (spec §7 "Migrations", §13 "Backup", decision 14) an integrity failure throws and removes the file it created (test-009)
 packages/db/test/backup.test.ts > backupDatabase (spec §7 "Migrations", §13 "Backup", decision 14) copies committed rows still in the WAL while the writer is open (sec-004, test-009)
