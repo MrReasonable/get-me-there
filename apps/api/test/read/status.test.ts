@@ -6,6 +6,7 @@ import {
   consentFixText,
   type ExecutionStatus,
   findBannedWords,
+  formatInstant,
   START_REFUSAL_REASONS,
 } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
@@ -803,6 +804,25 @@ describe('the worker check', () => {
       );
       for (const f of [ok, warn, fail, off]) expect(noteOf(f)).toContain(words);
     }
+  });
+  // why: spec §2 "The keep-awake lease": the card says when the worker is holding the machine awake, in any state it
+  // answers in, and says nothing when it is not
+  it('notes a lease the worker holds, until when; nothing when it holds none', () => {
+    const until = inFuture(5 * 60_000);
+    const holding = (over: Parameters<typeof okWorkerStatus>[0] = {}) =>
+      withWorker(
+        healthyWorker({ read: { kind: 'ok', status: okWorkerStatus({ awakeUntil: until, ...over }) } }),
+      );
+    const ok = holding();
+    const cooling = holding({ finding: { kind: 'cooling', until: inFuture(HOUR), cause: 'captcha' } });
+    for (const f of [ok, cooling]) {
+      expect(noteOf(f)).toContain(
+        `keeping the machine awake until ${formatInstant(until, f.tz)} while a search runs`,
+      );
+      expect(noteOf(f)).toContain("browser pages: only inside a run's window");
+    }
+    expect(checkOf(ok, 'worker').state).toBe('ok');
+    expect(noteOf(withWorker(healthyWorker()))).not.toContain('awake');
   });
   it('maps each refusal reason through the shared words: flags-unset is off, never fail; a build mismatch names its fix', () => {
     const mismatch = checkOf(

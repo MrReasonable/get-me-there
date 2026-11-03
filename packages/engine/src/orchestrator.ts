@@ -43,7 +43,8 @@ export interface Orchestrator {
 }
 
 export function createOrchestrator(ctx: EngineContext): Orchestrator {
-  const reg = createRegistry(ctx.log);
+  // why: spec §2 "The keep-awake lease": the machine is held awake while any run of this engine is in progress
+  const reg = createRegistry(ctx.log, ctx.awake);
   const blocked = new Map<string, Blocked>();
   // why: decision 83 — after a detected suspension every run in flight checks its browser window before its next page
   ctx.heartbeat.onSuspension(() => {

@@ -12,6 +12,7 @@ import {
   type WorkerStatus,
 } from '@gmt/core';
 import { checkAccountCookies } from './accountCookies.js';
+import { type AwakeKeeper, realAwakeKeeper } from './awake.js';
 import { loadWorkerConfig, type WorkerConfig } from './config.js';
 import { CooldownStore } from './cooldown.js';
 import type { ContextLike } from './driver.js';
@@ -64,6 +65,8 @@ export interface MainDeps {
   /** The port to bind; the configured one in production, 0 in tests. */
   port?: number;
   pid: number;
+  /** Spec §2 "The keep-awake lease": the machine's idle-sleep hold, ended at shutdown. */
+  keepAwake: AwakeKeeper;
 }
 
 export interface RunningWorker {
@@ -273,6 +276,8 @@ export async function startWorker(ctx: EntryContext, deps: MainDeps): Promise<Ru
       consent: consentStatusOf(record),
       monthly: counts,
       appInstances: instances.status(),
+      // why: spec §2 "The keep-awake lease": whether this worker is holding the machine awake now
+      awake: deps.keepAwake.state(),
     };
   };
   let server: Server;
@@ -280,6 +285,8 @@ export async function startWorker(ctx: EntryContext, deps: MainDeps): Promise<Ru
   const stop = (code: number): Promise<number> => {
     stopping ??= (async () => {
       exitCode = code;
+      // why: spec §2 "The keep-awake lease": the hold never outlives the worker
+      deps.keepAwake.stop();
       await new Promise<void>((r) => server.close(() => r()));
       await inFlight.catch(() => undefined);
       await session.discard(false);
@@ -299,6 +306,7 @@ export async function startWorker(ctx: EntryContext, deps: MainDeps): Promise<Ru
       return p;
     },
     status,
+    awake: (seconds) => deps.keepAwake.hold(seconds),
     seen: (id) => {
       try {
         instances.seen(id);
@@ -329,12 +337,13 @@ export async function startWorker(ctx: EntryContext, deps: MainDeps): Promise<Ru
 
 /** The command. */
 export const entry: Entry = async (ctx) => {
+  const log = stderrLog(ctx.err, debugLogging(ctx.env));
   const w = await startWorker(ctx, {
     platform: process.platform,
     arch: process.arch,
     clock: systemClock,
     timers: realTimers,
-    log: stderrLog(ctx.err, debugLogging(ctx.env)),
+    log,
     prepare: prepareLaunch,
     launch: launchContext,
     onShutdown: (h) => {
@@ -342,6 +351,13 @@ export const entry: Entry = async (ctx) => {
       process.once('SIGINT', h);
     },
     pid: process.pid,
+    keepAwake: realAwakeKeeper({
+      platform: process.platform,
+      pid: process.pid,
+      log,
+      // why: the same PATH the settings fall back to (config.ts), where systemd-inhibit lives on Linux
+      path: ctx.env.PATH ?? '/usr/bin:/bin',
+    }),
   });
   return typeof w === 'number' ? w : w.done;
 };

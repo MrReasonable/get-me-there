@@ -11,10 +11,17 @@ export interface RunRegistry {
   settleAll(): Promise<void>;
 }
 
-export function createRegistry(log: Logger): RunRegistry {
+/** Told when a pass starts and when it settles (spec §2 "The keep-awake lease": the engine's AwakeKeeper). */
+export interface RunWatch {
+  started(): void;
+  ended(): void;
+}
+
+export function createRegistry(log: Logger, watch?: RunWatch): RunRegistry {
   const runs = new Map<string, { run: RunState; done: Promise<void> }>();
   return {
     launch(run, body) {
+      watch?.started();
       const done = body()
         .catch((err: unknown) => {
           // why: execute() catches every stage error itself; reaching here means finish() threw, which is a bug worth a loud line
@@ -25,6 +32,7 @@ export function createRegistry(log: Logger): RunRegistry {
         })
         .finally(() => {
           runs.delete(run.executionId);
+          watch?.ended();
         });
       runs.set(run.executionId, { run, done });
     },

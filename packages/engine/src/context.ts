@@ -16,6 +16,7 @@ import { budgetConfigFromConfig, type Db, type Repos } from '@gmt/db';
 import type { HttpKit } from '@gmt/providers';
 import { noAlerts } from './alertsStep.js';
 import { type BrowserLease, createBrowserLease } from './browserLease.js';
+import { type AwakeKeeper, createAwakeKeeper } from './keepAwake.js';
 import { createHeartbeat, type Heartbeat } from './scheduler/heartbeat.js';
 import type {
   AlertsStepHook,
@@ -122,6 +123,11 @@ export interface EngineContext {
    * them `get` is null and every plan is outbound-only). Shared by every copy of the context (one per engine).
    */
   readonly workerFlags: WorkerFlags;
+  /**
+   * Spec §2 "The keep-awake lease": the machine held awake through the browser worker while any run is in progress
+   * (the run registry tells it); nothing is held when no provider can hold it. Shared by every copy of the context.
+   */
+  readonly awake: AwakeKeeper;
 }
 
 /** The workers' reported flags (spec rev 56 §8.1), one entry per provider, the last read kept. */
@@ -178,6 +184,7 @@ export function buildContext(deps: EngineDeps, options: EngineOptions = {}): Eng
     };
   };
   for (const id of providers.keys()) limitsOf(id); // why: a missing limit is a wiring bug; fail at construction, not mid-run
+  const lifecycle = { closing: false, closed: false, abort: new AbortController() };
   return {
     deps,
     config,
@@ -205,10 +212,15 @@ export function buildContext(deps: EngineDeps, options: EngineOptions = {}): Eng
     },
     // why: the heartbeat reads the Clock port, as the window check it feeds does, so one decision never mixes clocks
     heartbeat: createHeartbeat(deps.log, () => Date.parse(deps.clock.now())),
-    lifecycle: { closing: false, closed: false, abort: new AbortController() },
+    lifecycle,
     lease: createBrowserLease(),
     rankedDatePairs: options.rankedDatePairs,
     workerFlags: createWorkerFlags(),
+    awake: createAwakeKeeper({
+      holds: deps.providers.flatMap((p) => (p.keepAwake === undefined ? [] : [p.keepAwake])),
+      log: deps.log,
+      signal: lifecycle.abort.signal,
+    }),
   };
 }
 

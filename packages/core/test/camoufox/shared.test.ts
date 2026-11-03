@@ -289,7 +289,7 @@ describe('workerStatusSchema: every field WP17’s worker will emit, optional, s
   });
   it('parses the current worker’s status, which has none of them', () => {
     const today = full();
-    for (const k of ['sharedSettings', 'osArch', 'build', 'consent', 'monthly', 'appInstances'])
+    for (const k of ['sharedSettings', 'osArch', 'build', 'consent', 'monthly', 'appInstances', 'awake'])
       delete today[k];
     expect(workerStatusSchema.safeParse(today).success).toBe(true);
   });

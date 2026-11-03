@@ -56,5 +56,6 @@
     "scrolls": 340,
     "readable": true
   },
-  "appInstances": { "windowStart": "2027-03-01T00:00:00.000Z", "count": 1 }
+  "appInstances": { "windowStart": "2027-03-01T00:00:00.000Z", "count": 1 },
+  "awake": { "held": true, "until": "2027-03-01T06:05:00.000Z", "mechanism": "caffeinate" }
 }

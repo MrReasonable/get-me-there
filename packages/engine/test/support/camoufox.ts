@@ -6,6 +6,7 @@
  */
 import {
   AbortedError,
+  AWAKE_ENDPOINT_PATH,
   asIsoDate,
   type BlockedPage,
   type Cabin,
@@ -465,6 +466,15 @@ export function realCamoufox(
   const queue = [...answers];
   const http: HttpKit = {
     request: async (r) => {
+      // why: spec §2 "The keep-awake lease": the lease route is unledgered and takes no scripted page answer
+      if (r.endpointPath === AWAKE_ENDPOINT_PATH)
+        return {
+          status: 200,
+          body: { held: false, until: null, mechanism: 'none' },
+          fetchedAt: ctxOf().clock.now(),
+          fromCache: false,
+          cacheKey: '',
+        };
       const a = queue.shift() ?? { status: 599, body: {} };
       const res = ctxOf().budget.reserve({
         providerId: 'camoufox',
