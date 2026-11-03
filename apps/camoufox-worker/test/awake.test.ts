@@ -25,6 +25,8 @@ interface FakeChild {
   command: string;
   args: readonly string[];
   killed: boolean;
+  /** How many times the child was killed (each replaced child is killed exactly once). */
+  kills: number;
   end(e: AwakeEnd): void;
 }
 
@@ -48,11 +50,12 @@ function world(o: { platform?: string; onPath?: boolean; spawnThrows?: boolean }
     },
     spawn: (command, args, onEnd) => {
       if (o.spawnThrows === true) throw new Error('spawn refused');
-      const c: FakeChild = { command, args, killed: false, end: onEnd };
+      const c: FakeChild = { command, args, killed: false, kills: 0, end: onEnd };
       children.push(c);
       return {
         kill: () => {
           c.killed = true;
+          c.kills += 1;
         },
       };
     },
@@ -135,6 +138,20 @@ describe('the lease', () => {
     expect(w.keeper.state().held).toBe(true);
     expect(AWAKE_OVERLAP_MS).toBe(5000);
   });
+  // why: CodeRabbit on PR #41: renewals inside one overlap never stack children; the one still retiring is killed at
+  // once (the current one has started by then), so at most two are alive
+  it('a renewal during an overlap kills the child still retiring: never more than two alive', () => {
+    const w = world();
+    for (let i = 0; i < 5; i++) {
+      w.keeper.hold(300);
+      expect(w.live().length).toBeLessThanOrEqual(2);
+      w.advance(1000);
+    }
+    expect(w.live()).toHaveLength(2);
+    w.advance(AWAKE_OVERLAP_MS);
+    expect(w.live()).toHaveLength(1);
+    expect(w.children.map((c) => c.kills)).toEqual([1, 1, 1, 1, 0]);
+  });
   it('a release or shutdown during the overlap kills both children at once', () => {
     for (const end of ['release', 'stop'] as const) {
       const w = world();
@@ -144,6 +161,9 @@ describe('the lease', () => {
       if (end === 'release') w.keeper.release();
       else w.keeper.stop();
       expect(w.live()).toHaveLength(0);
+      // why: CodeRabbit on PR #41: the overlap's timer was cancelled, so nothing is killed twice
+      w.advance(AWAKE_OVERLAP_MS);
+      expect(w.children.map((c) => c.kills)).toEqual([1, 1]);
       // why: the overlap's own timer kills nothing later
       w.keeper.hold(300);
       w.advance(AWAKE_OVERLAP_MS);

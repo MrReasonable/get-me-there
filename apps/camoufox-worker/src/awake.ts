@@ -137,7 +137,10 @@ export class AwakeKeeper {
     }
     // why: a child that ended before spawn returned is no hold
     if (held.ended) return this.state();
-    // why: the old child keeps holding AWAKE_OVERLAP_MS after the new one starts, so a renewal leaves no gap
+    // why: the old child keeps holding AWAKE_OVERLAP_MS after the new one starts, so a renewal leaves no gap; one still
+    // retiring from an earlier renewal is killed now (the old one has started by then), so at most two are alive
+    // (CodeRabbit on PR #41)
+    this.retireNow();
     const old = this.current;
     this.current = held;
     if (old !== null)
@@ -169,15 +172,20 @@ export class AwakeKeeper {
   private end(): void {
     this.cancelExpiry?.();
     this.cancelExpiry = null;
+    this.retireNow();
+    if (this.current !== null) this.kill(this.current);
+    this.current = null;
+    this.until = null;
+    this.warned = false;
+  }
+
+  /** Kills every child a renewal replaced, cancelling its overlap timer. */
+  private retireNow(): void {
     for (const [h, cancel] of this.retiring) {
       cancel();
       this.kill(h);
     }
     this.retiring.clear();
-    if (this.current !== null) this.kill(this.current);
-    this.current = null;
-    this.until = null;
-    this.warned = false;
   }
 
   private kill(h: Held): void {
