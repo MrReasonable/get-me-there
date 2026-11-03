@@ -1,6 +1,6 @@
 # get-me-there — Flight Price Intelligence & Flexible-Date Optimiser
 
-**Design spec, revision 57.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
+**Design spec, revision 58.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
 four full-roster reviews (145, 140, 126 and 101 findings; zero Critical since
 revision 2) and the provider spike. Revision 9 folds in the three decisions
 taken at approval (the self-scraping fallback in §2, the dashboard readings in
@@ -246,9 +246,11 @@ lease of that many seconds from now, replacing any lease held; `seconds: 0`
 releases it. It answers `{ held, until, mechanism }` (`until` the lease's end
 while a hold is held, else null; `mechanism` `caffeinate`, `systemd-inhibit`
 or `none`), and `/v1/status` reports the same as `awake`. The worker holds the
-machine's idle sleep off only while it holds a live lease: on macOS with
-`caffeinate -i -w <worker pid> -t <seconds>` (idle sleep only; the display may
-still sleep), on Linux with `systemd-inhibit --what=idle:sleep
+machine's sleep off only while it holds a live lease: on macOS with
+`caffeinate -i -s -w <worker pid> -t <seconds>` (`-i` holds idle sleep; `-s`
+holds sleep itself while on AC power, which is what holds a Mac whose display
+has slept in dark wake, where an idle-sleep hold has no effect; on battery only
+idle sleep is held; the display may still sleep), on Linux with `systemd-inhibit --what=idle:sleep
 --who=get-me-there --why="a search is running" --mode=block sleep <seconds>`
 when `systemd-inhibit` is on the worker's `PATH` (else it logs once that it is
 unavailable and holds nothing), and on any other platform not at all. It keeps
@@ -264,8 +266,8 @@ progress, and releases it when the last run ends (§8.2), so four renewals can
 be missed before it runs out. It is a lease, never a latch: an app that dies,
 or a container or machine that is suspended, stops renewing, and the machine
 may sleep again once the lease runs out, at most five minutes later. A held
-assertion cannot stop a sleep the operator asks for: closing a laptop's lid
-still sleeps it. With the provider off there is no worker and nothing is
+assertion cannot stop a sleep the operator asks for from the system's menu,
+and closing a laptop's lid may still sleep it. With the provider off there is no worker and nothing is
 held, so a long run then needs the machine kept awake by hand. **The page
 rule.** One worker call makes at most one document load, or for a flights
 request with a return phase at most `FLIGHT_LIST_PAGES_PER_PAIR_MAX` (2: the
@@ -5708,6 +5710,15 @@ as specified in §5.3; no secrets, no full URLs.
 ---
 
 ## 17. Changelog
+
+### Revision 58: holding a Mac in dark wake (2026-11-03)
+
+The first run under the lease still broke: the Mac's display had slept two hours before, so the system was in dark
+wake (kept up only by its own background tasks), and Apple's documentation says an idle-sleep hold has no effect
+there. When the last background task ended at 14:12 the Mac slept for seven minutes with `caffeinate -i` held, a page
+timed out across the sleep, and the container's clock came back seven minutes slow, so the next page's fetch time
+fell outside its request and the provider was turned off for the run. §2 "The keep-awake lease" adds `-s` on macOS,
+which holds sleep itself while on AC power; on battery only idle sleep is held. Lid-close and menu sleep are as before.
 
 ### Revision 57: the keep-awake lease (2026-11-03)
 

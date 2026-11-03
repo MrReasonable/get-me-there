@@ -78,11 +78,11 @@ beforeEach(() => {
 });
 
 describe('the platform’s hold (spec §2 "The keep-awake lease")', () => {
-  it('macOS: caffeinate holding idle sleep only, tied to the worker’s pid, for the lease', () => {
+  it('macOS: caffeinate holding idle sleep and, on AC power, sleep itself, tied to the worker’s pid, for the lease', () => {
     expect(awakeCommand('darwin', 4242, 300, () => null)).toEqual({
       mechanism: 'caffeinate',
       command: '/usr/bin/caffeinate',
-      args: ['-i', '-w', '4242', '-t', '300'],
+      args: ['-i', '-s', '-w', '4242', '-t', '300'],
     });
   });
   it('Linux: systemd-inhibit blocking idle and sleep around a sleep of the lease, when it is on the PATH', () => {
@@ -115,7 +115,7 @@ describe('the lease', () => {
     const a = w.keeper.hold(300);
     expect(a).toEqual({ held: true, until: iso(T0 + 300_000), mechanism: 'caffeinate' });
     expect(awakeAnswerSchema.safeParse(a).success).toBe(true);
-    expect(w.children.map((c) => c.args)).toEqual([['-i', '-w', '4242', '-t', '300']]);
+    expect(w.children.map((c) => c.args)).toEqual([['-i', '-s', '-w', '4242', '-t', '300']]);
     expect(w.keeper.state()).toEqual(a);
   });
   // why: the live run of 2026-11-03: the old child killed at once left the machine unheld while the new one started,

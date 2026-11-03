@@ -342,7 +342,9 @@ describe('the worker’s start checks and shutdown (brief Task 14.5)', () => {
     const held = { held: true, until: '2026-10-18T05:05:00.000Z', mechanism: 'caffeinate' };
     expect(await r.json()).toEqual(held);
     expect(await statusOf()).toMatchObject({ awake: held });
-    expect(t.holds.map((h) => [h.args, h.killed])).toEqual([[['-i', '-w', '4242', '-t', '300'], false]]);
+    expect(t.holds.map((h) => [h.args, h.killed])).toEqual([
+      [['-i', '-s', '-w', '4242', '-t', '300'], false],
+    ]);
     t.shutdown();
     expect(await w.done).toBe(0);
     expect(t.holds.map((h) => h.killed)).toEqual([true]);

@@ -406,7 +406,7 @@ export const AWAKE_MAX_SECONDS = 600;
 export const AWAKE_LEASE_SECONDS = 300;
 /** How often the engine renews the lease while a run is in progress. */
 export const AWAKE_RENEW_SECONDS = 60;
-/** What holds it: macOS's `caffeinate -i`, Linux's `systemd-inhibit`, or nothing on this machine. */
+/** What holds it: macOS's `caffeinate -i -s`, Linux's `systemd-inhibit`, or nothing on this machine. */
 export const AWAKE_MECHANISMS = ['caffeinate', 'systemd-inhibit', 'none'] as const;
 export type AwakeMechanism = (typeof AWAKE_MECHANISMS)[number];
 

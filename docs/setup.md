@@ -108,13 +108,14 @@ once, when you press the button; nothing runs on a schedule until you add one fr
 page (**Repeat weekly…**, which registers the schedule when you press Save). Setup offers to open the browser.
 
 Scheduled searches run while the machine is awake; a missed one is caught up once, without the
-browser provider. Once a search is running, the app keeps the machine from idle sleep until the
-last run ends, through the browser worker: `caffeinate -i` on macOS (the display may still
-sleep), `systemd-inhibit` on Linux where it is installed. It is a lease the app renews every
+browser provider. Once a search is running, the app keeps the machine from sleeping until the
+last run ends, through the browser worker: `caffeinate -i -s` on macOS (the display may still
+sleep; plugged in, the Mac stays awake even with its display off; on battery only idle sleep
+is held), `systemd-inhibit` on Linux where it is installed. It is a lease the app renews every
 minute, so if the app stops or is suspended the machine may sleep again within five minutes.
-It cannot stop a sleep you ask for: closing a laptop's lid still sleeps it, and the run then
-breaks off. Without the browser provider there is no worker to hold it, so keep the machine
-awake by hand for a long run (on macOS, `caffeinate -i` in a terminal while it runs). The native service speaks plain HTTP on `127.0.0.1`: only if you want to reach
+It cannot stop a sleep you ask for from the menu, and closing a laptop's lid may still sleep
+it; the run then breaks off. Without the browser provider there is no worker to hold it, so keep the machine
+awake by hand for a long run (on macOS, `caffeinate -i -s` in a terminal while it runs). The native service speaks plain HTTP on `127.0.0.1`: only if you want to reach
 it from another device, use an `ssh` tunnel (`ssh -L 3000:127.0.0.1:3000 <this machine>`), or
 section 3 for Tailscale and TLS.
 

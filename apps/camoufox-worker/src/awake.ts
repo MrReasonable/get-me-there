@@ -54,11 +54,14 @@ export function awakeCommand(
   findOnPath: (name: string) => string | null,
 ): { mechanism: Exclude<AwakeMechanism, 'none'>; command: string; args: string[] } | null {
   if (platform === 'darwin')
-    // why: -i holds idle sleep only (the display may still sleep); -w ends it with the worker; -t ends it with the lease
+    // why: -i holds idle sleep (the display may still sleep); -s holds sleep itself while on AC power, which is what keeps
+    // a Mac whose display has slept in "dark wake" awake: an idle-sleep hold alone has no effect there, and such a Mac
+    // slept mid-run on 2026-11-03 the moment the system's own background task let go; -w ends it with the worker; -t
+    // ends it with the lease
     return {
       mechanism: 'caffeinate',
       command: '/usr/bin/caffeinate',
-      args: ['-i', '-w', String(pid), '-t', String(seconds)],
+      args: ['-i', '-s', '-w', String(pid), '-t', String(seconds)],
     };
   const inhibit = platform === 'linux' ? findOnPath('systemd-inhibit') : null;
   if (inhibit !== null)
