@@ -206,6 +206,8 @@ describe('readFlights (spec rev 55 §2: the 30 cheapest of the cell’s options,
     );
     expect(r.flights.map((x) => x.amountMinor)).toEqual([47_800]);
     expect(r.optionsUnparsed).toBe(5);
+    // why: the five the grammar read for the cell but that are no flight are named for the worker's log, in page order
+    expect(r.rejected.map((n) => /^From (\d+)/.exec(n)?.[1])).toEqual(['300', '310', '320', '330', '340']);
     expect(r.parsedForThisCell).toBe(1);
     expect(r.listed).toBe('flights');
     // why: the minimum is the list read's, over every option the grammar read for the cell

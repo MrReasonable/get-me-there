@@ -181,6 +181,44 @@ describe('logSkippedOptions (the worker log only)', () => {
       },
     ]);
   });
+  it('logs page text without a URL’s user, password, query or fragment (CodeRabbit on PR #43)', () => {
+    const log = memoryLog();
+    logSkippedOptions(
+      log,
+      facts(['From 1 British pounds see https://u:p@example.com/a?k=v#f now'], {
+        location: 'Location·https://example.com/b?x=1',
+      }),
+      REQ,
+    );
+    expect(log.lines.map((l) => l.o)).toEqual([
+      {
+        location: 'Location·https://example.com/b',
+        pointOfSale: 'unknown',
+        skipped: [{ why: 'unparsed', name: 'From 1 British pounds see https://example.com/a now' }],
+        more: 0,
+      },
+    ]);
+  });
+  it('a flights page’s options that parsed but were not a flight are logged after the page’s own, as not-a-flight', () => {
+    const log = memoryLog();
+    logSkippedOptions(log, facts([name(451), 'Reworded by Google']), REQ, ['an option that is no flight']);
+    expect(log.lines.map((l) => l.o)).toEqual([
+      {
+        location: 'Location·United Kingdom',
+        pointOfSale: 'GB',
+        skipped: [
+          { why: 'unparsed', name: 'Reworded by Google' },
+          { why: 'not-a-flight', name: 'an option that is no flight' },
+        ],
+        more: 0,
+      },
+    ]);
+  });
+  it('a not-a-flight option alone is enough to log', () => {
+    const log = memoryLog();
+    logSkippedOptions(log, facts([name(451)]), REQ, ['an option that is no flight']);
+    expect(log.lines).toHaveLength(1);
+  });
   it('logs nothing when every option is the cell’s and the location gives a point of sale', () => {
     const log = memoryLog();
     logSkippedOptions(log, facts([name(451), name(478)]), REQ);

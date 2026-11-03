@@ -676,7 +676,7 @@ export class PageSession {
     const facts = await driver.listFacts(d);
     const flights = req.mode === 'flights' ? readFlights(facts, req) : null;
     const list = flights ?? readList(facts, req);
-    logSkippedOptions(this.d.log, facts, req);
+    logSkippedOptions(this.d.log, facts, req, flights?.rejected ?? []);
     // why: ruling of 2026-10-18: a Cheapest view that never settled and left no list to read is a page that did not
     // settle (not-ready, no cool-down), never an unrecognised page
     if (fellBack && list.minMinor === null && list.optionsOtherCell === 0)

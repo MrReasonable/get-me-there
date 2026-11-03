@@ -2238,5 +2238,6 @@ function emptyRead(): FlightsRead {
     flights: [],
     names: [],
     parsed: [],
+    rejected: [],
   };
 }

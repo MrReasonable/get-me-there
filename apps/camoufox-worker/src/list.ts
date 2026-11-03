@@ -3,7 +3,7 @@ import { airportMatches } from './airports.js';
 import { cheapestTabPriceMinor } from './classify.js';
 import type { ListFacts } from './driver.js';
 import { INTERSTITIALS, type Interstitial, type ParsedOption, parseOptionName } from './names.js';
-import { PAGE_ERROR_TEXT_MAX } from './pageErrors.js';
+import { PAGE_ERROR_TEXT_MAX, withoutQueries } from './pageErrors.js';
 import { pointOfSaleOf } from './pointOfSale.js';
 
 /**
@@ -107,28 +107,36 @@ export function readList(
 /** How many skipped options one log line names; the rest are counted in `more`. */
 export const SKIPPED_LOGGED_MAX = 30;
 
-const cut = (text: string | null): string | null =>
-  text === null ? null : text.slice(0, PAGE_ERROR_TEXT_MAX);
+// why: page text is logged without a URL's user, password, query or fragment (CodeRabbit on PR #43), as page errors are
+const clean = (text: string | null): string | null => (text === null ? null : withoutQueries(text));
+const cut = (text: string | null): string | null => clean(text)?.slice(0, PAGE_ERROR_TEXT_MAX) ?? null;
 
 /**
  * Logs at debug the options a list page did not count for its cell, and the page's stated location, when any option was
  * skipped or the location gave no point of sale (2026-11-03: a run's ten lists each found nothing for their cell and
- * stored no market, and nothing said why). The location is cut to PAGE_ERROR_TEXT_MAX characters; each name is whole,
- * already bounded by the driver. The worker's own log only: an answer never carries a name.
+ * stored no market, and nothing said why). A flights page also passes `rejected`, the cell's options that parsed but
+ * were not a flight (`not-a-flight`, after the page's own skipped ones). Text is logged without a URL's credentials,
+ * query or fragment; the location is cut to PAGE_ERROR_TEXT_MAX characters; each name is whole, already bounded by the
+ * driver. The worker's own log only: an answer never carries a name.
  */
 export function logSkippedOptions(
   log: Logger,
   f: ListFacts,
   req: Pick<ListRequest, 'departureDate' | 'airportNames'>,
+  rejected: readonly string[] = [],
 ): void {
-  const { list, skipped } = readOptions(f, req);
+  const { list, skipped: own } = readOptions(f, req);
+  const skipped: Array<{ why: SkippedOption['why'] | 'not-a-flight'; name: string | null }> = [
+    ...own,
+    ...rejected.map((name) => ({ why: 'not-a-flight' as const, name })),
+  ];
   if (skipped.length === 0 && list.pointOfSale !== 'unknown') return;
   log.debug(
     {
       location: cut(f.locationName),
       pointOfSale: list.pointOfSale,
       // why: a name is whole (the driver already bounds it by maxNameLength): what refuses it is often near its end
-      skipped: skipped.slice(0, SKIPPED_LOGGED_MAX),
+      skipped: skipped.slice(0, SKIPPED_LOGGED_MAX).map((s) => ({ why: s.why, name: clean(s.name) })),
       more: Math.max(0, skipped.length - SKIPPED_LOGGED_MAX),
     },
     'options skipped',
