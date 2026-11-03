@@ -34,6 +34,6 @@ describe('a return name through parseOptionName (spec rev 56 §2: one grammar)',
   });
   it('has no alias and no second version (no parseReturnName; the outbound grammar’s date stands)', () => {
     expect(Object.keys(names)).not.toContain('parseReturnName');
-    expect(GRAMMAR_VERSION).toBe('2026-10-31-times');
+    expect(GRAMMAR_VERSION).toBe('2026-11-03-emissions');
   });
 });

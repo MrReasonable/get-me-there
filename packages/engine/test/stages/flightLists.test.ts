@@ -72,6 +72,25 @@ function camoufoxOnly(
 }
 
 describe('the flight-list step after discovery', () => {
+  it('sends the operator’s AIRPORT_NAMES beside the dataset’s name, in order, for the codes they name (spec §2)', async () => {
+    const { e, cam } = camoufoxOnly({
+      env: {
+        AIRPORT_NAMES: 'JFK=Kennedy Example Airport; LGW=Gatwick Example Airport; JFK=New York JFK Airport',
+      },
+    });
+    const id = await start(e);
+    expect((await e.settled(id)).status).toBe('completed');
+    expect(cam.flightCalls.length).toBeGreaterThan(0);
+    for (const c of cam.flightCalls)
+      expect(c.query.airportNames).toEqual({
+        origin: ['London Heathrow Airport'],
+        destination: [
+          'John F Kennedy International Airport',
+          'Kennedy Example Airport',
+          'New York JFK Airport',
+        ],
+      });
+  });
   it('reads the 10 cheapest pairs one at a time with the run signal, the gate, the figure cells and airport names', async () => {
     const seenPlan: Array<unknown> = [];
     let id = '';

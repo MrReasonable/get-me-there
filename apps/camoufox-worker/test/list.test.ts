@@ -172,7 +172,7 @@ describe('logSkippedOptions (the worker log only)', () => {
             { why: 'unparsed', name: 'Reworded by Google' },
             {
               why: 'other-cell',
-              name: name(300, { to: 'Newark Liberty International Airport' }).slice(0, PAGE_ERROR_TEXT_MAX),
+              name: name(300, { to: 'Newark Liberty International Airport' }),
             },
             { why: 'unparsed', name: null },
           ],
@@ -193,7 +193,7 @@ describe('logSkippedOptions (the worker log only)', () => {
       { location: 'Location·Atlantis', pointOfSale: 'unknown', skipped: [], more: 0 },
     ]);
   });
-  it('cuts a long location and names at most SKIPPED_LOGGED_MAX options, counting the rest', () => {
+  it('cuts a long location, keeps names whole and names at most SKIPPED_LOGGED_MAX options, counting the rest', () => {
     const log = memoryLog();
     const long = `Location·${'x'.repeat(300)}`;
     const names = Array.from({ length: SKIPPED_LOGGED_MAX + 2 }, (_v, i) => `odd ${i}`);

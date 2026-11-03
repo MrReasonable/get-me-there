@@ -113,8 +113,8 @@ const cut = (text: string | null): string | null =>
 /**
  * Logs at debug the options a list page did not count for its cell, and the page's stated location, when any option was
  * skipped or the location gave no point of sale (2026-11-03: a run's ten lists each found nothing for their cell and
- * stored no market, and nothing said why). Each text is cut to PAGE_ERROR_TEXT_MAX characters. The worker's own log
- * only: an answer never carries a name.
+ * stored no market, and nothing said why). The location is cut to PAGE_ERROR_TEXT_MAX characters; each name is whole,
+ * already bounded by the driver. The worker's own log only: an answer never carries a name.
  */
 export function logSkippedOptions(
   log: Logger,
@@ -127,7 +127,8 @@ export function logSkippedOptions(
     {
       location: cut(f.locationName),
       pointOfSale: list.pointOfSale,
-      skipped: skipped.slice(0, SKIPPED_LOGGED_MAX).map((s) => ({ why: s.why, name: cut(s.name) })),
+      // why: a name is whole (the driver already bounds it by maxNameLength): what refuses it is often near its end
+      skipped: skipped.slice(0, SKIPPED_LOGGED_MAX),
       more: Math.max(0, skipped.length - SKIPPED_LOGGED_MAX),
     },
     'options skipped',
