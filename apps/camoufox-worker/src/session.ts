@@ -458,6 +458,8 @@ export class PageSession {
                 })
               : await this.read(driver, req, budget, started).then((x) => {
                   ob = x.outbound;
+                  // why: CodeRabbit on PR #39: a list or flights page read between two grid pages breaks the row
+                  this.gridNotDrawn = false;
                   return x;
                 });
           answer = r.answer;

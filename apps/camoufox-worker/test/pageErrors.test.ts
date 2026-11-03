@@ -91,6 +91,13 @@ describe('what fails inside a page is logged (the grid of 2026-11-03, whose pric
     );
     expect(withoutQueries('no url? here # none')).toBe('no url? here # none');
     expect(withoutQueries('https://c.example/s')).toBe('https://c.example/s');
+    // why: CodeRabbit on PR #39: a URL's user and password never reach the log either, whatever the scheme's case
+    expect(withoutQueries('see https://user:secret@d.example/p?q=1 there')).toBe(
+      'see https://d.example/p there',
+    );
+    expect(withoutQueries('HTTPS://E.example/p?token=1#f and Http://u@f.example/')).toBe(
+      'HTTPS://E.example/p and Http://f.example/',
+    );
   });
 
   it('the guard installs it once per browser context, so every page and the recorder log what failed', async () => {

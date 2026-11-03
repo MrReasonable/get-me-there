@@ -720,6 +720,57 @@ describe('grid pages: a view still drawing its cells', () => {
     expect(ends).toEqual(['first-not-drawn', 'complete', 'first-not-drawn']);
     expect(t.cooldown.active()).toBeNull();
   });
+  // why: CodeRabbit on PR #39: the selected pair named "price unknown" and every other cell undrawn reads as a view, not
+  // as unrecognised; with no price anywhere it is still a grid whose prices never arrived
+  // why: CodeRabbit on PR #39: "in a row" means pages in a row; a list page between two such grid pages starts the count again
+  it('a list page between two such pages starts the count again: the second is not refused', async () => {
+    const t = setup({
+      view: (d, r) => [dialogPage(gridTree({ depart: d, ret: r, undrawn: () => true }))],
+    });
+    const list: PageRequest = {
+      mode: 'list',
+      origin: asIata('LHR'),
+      destination: asIata('JFK'),
+      departureDate: asIsoDate('2027-03-14'),
+      returnDate: asIsoDate('2027-03-24'),
+      gl: 'GB',
+      airportNames: { origin: ['Heathrow'], destination: ['John F. Kennedy'] },
+    };
+    const ends: unknown[] = [];
+    for (const q of [req(['down']), list, req(['down'])]) {
+      t.timers.clock.set(asIsoDateTime(new Date(Date.parse(t.timers.clock.now()) + 600_000).toISOString()));
+      const a = (await t.session.page(q)).answer;
+      ends.push(a.kind === 'grid' ? a.ended : a.kind);
+    }
+    expect(ends[0]).toBe('first-not-drawn');
+    expect(ends[1]).not.toBe('grid');
+    expect(ends[2]).toBe('first-not-drawn');
+    expect(t.cooldown.active()).toBeNull();
+  });
+  it('a first view whose only drawn cell is the selected pair with no price is a grid that never filled in', async () => {
+    const dm = (s: string) =>
+      new Date(`${s}T00:00:00Z`).toLocaleDateString('en-GB', {
+        day: 'numeric',
+        month: 'short',
+        timeZone: 'UTC',
+      });
+    const t = setup({
+      view: (d, r) => [
+        dialogPage(
+          gridTree({
+            depart: d,
+            ret: r,
+            undrawn: (dd, rr) => !(dd === d && rr === r),
+            names: (dd, rr) => `price unknown, ${dm(dd)} to ${dm(rr)}, selected`,
+            selectedPrice: '',
+          }),
+        ),
+      ],
+    });
+    const r = await t.session.page(req(['down']));
+    expect(r.answer).toMatchObject({ kind: 'grid', views: [], ended: 'first-not-drawn', scrolls: 0 });
+    expect(t.cooldown.active()).toBeNull();
+  });
   it('a first view still drawing with a price on it is refused as it is: unrecognised', async () => {
     const log = memoryLog();
     const t = setup({

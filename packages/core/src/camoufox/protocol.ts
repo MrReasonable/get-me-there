@@ -265,17 +265,23 @@ export const workerAnswerSchema = z.discriminatedUnion('kind', [
     notes: z.array(z.string()),
     versions: versionsSchema,
   }),
-  z.strictObject({
-    kind: z.literal('grid'),
-    fetchedAt: isoDateTimeSchema,
-    currency: z.literal('GBP'),
-    pointOfSale: z.string().regex(/^([A-Z]{2}|unknown)$/),
-    views: z.array(gridViewSchema),
-    scrolls: count,
-    ended: z.enum(GRID_ENDS),
-    notes: z.array(z.string()),
-    versions: versionsSchema,
-  }),
+  z
+    .strictObject({
+      kind: z.literal('grid'),
+      fetchedAt: isoDateTimeSchema,
+      currency: z.literal('GBP'),
+      pointOfSale: z.string().regex(/^([A-Z]{2}|unknown)$/),
+      views: z.array(gridViewSchema),
+      scrolls: count,
+      ended: z.enum(GRID_ENDS),
+      notes: z.array(z.string()),
+      versions: versionsSchema,
+    })
+    // why: CodeRabbit on PR #39: a grid whose prices never arrived read no view, so its answer carries none to price from
+    .refine((a) => a.ended !== 'first-not-drawn' || a.views.length === 0, {
+      message: 'a page whose first view never drew a price reads no view',
+      path: ['views'],
+    }),
   /**
    * Spec revision 55 §2 "The flight-list read": what a flights page listed for the cell: `listed` (LISTED), the 30
    * cheapest of the cell's flights in page order, and, as the list read keeps them, the minimum over every parsed option

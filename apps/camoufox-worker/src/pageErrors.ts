@@ -13,9 +13,10 @@ function urlOf(s: string): URL | null {
 /** The longest console or error text logged; the rest is cut. */
 export const PAGE_ERROR_TEXT_MAX = 200;
 
-/** A URL's query is never logged (spec §14): each `http(s)://…?…` in a text keeps its path and loses its query. */
-const QUERY = /(https?:\/\/[^\s?#]+)[?#]\S*/g;
-export const withoutQueries = (text: string): string => text.replace(QUERY, '$1');
+/** A URL's query and credentials are never logged (spec §14): each `http(s)://` URL in a text keeps its host and path. */
+// why: CodeRabbit on PR #39: a URL's user and password are dropped too, and the scheme matches in any case
+const URL_IN_TEXT = /(https?:\/\/)(?:[^\s/?#@]*@)?([^\s?#]*)(?:[?#]\S*)?/gi;
+export const withoutQueries = (text: string): string => text.replace(URL_IN_TEXT, '$1$2');
 const cut = (text: string): string => withoutQueries(text).slice(0, PAGE_ERROR_TEXT_MAX);
 
 /**

@@ -76,6 +76,8 @@ apps/camoufox-worker/test/fonts.test.ts > Linux fonts (spec ยง2 "Method"; WP17 ย
 apps/camoufox-worker/test/gridPage.test.ts > grid pages: a view still drawing its cells a first view still drawing with a price on it is refused as it is: unrecognised
 apps/camoufox-worker/test/gridPage.test.ts > grid pages: a view still drawing its cells a first view that has drawn no cell yet is waited on and read once it has
 apps/camoufox-worker/test/gridPage.test.ts > grid pages: a view still drawing its cells a first view that never draws a price is reloaded once, and a reload still empty ends the page with no view: no cool-down
+apps/camoufox-worker/test/gridPage.test.ts > grid pages: a view still drawing its cells a first view whose only drawn cell is the selected pair with no price is a grid that never filled in
+apps/camoufox-worker/test/gridPage.test.ts > grid pages: a view still drawing its cells a list page between two such pages starts the count again: the second is not refused
 apps/camoufox-worker/test/gridPage.test.ts > grid pages: a view still drawing its cells a page read whole between two such pages starts the count again: neither is refused
 apps/camoufox-worker/test/gridPage.test.ts > grid pages: a view still drawing its cells a page whose grid fills only on its reload does not count toward the second in a row
 apps/camoufox-worker/test/gridPage.test.ts > grid pages: a view still drawing its cells a reload the guard refuses is that stop, with its cool-down
