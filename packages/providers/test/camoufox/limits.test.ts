@@ -26,7 +26,7 @@ function camoufox(over: Record<string, string> = {}) {
 }
 
 describe('camoufoxHttpLimits (spec §5.3 rev 32; decision 69)', () => {
-  it('in grid mode the timeout is twice the page timeout plus, per allowed scroll, the spacing and the move budget (CA M6)', () => {
+  it('in grid mode the timeout is four page timeouts and the page spacing (the first load and its one reload) plus, per allowed scroll, the spacing and the move budget (CA M6)', () => {
     const c = camoufox({
       CAMOUFOX_MODE: 'grid',
       CAMOUFOX_GRID_SCROLL_CAP: '30',
@@ -35,7 +35,7 @@ describe('camoufoxHttpLimits (spec §5.3 rev 32; decision 69)', () => {
     const move = (GRID_MOVE_BUDGET_MS + GRID_MOVE_RESERVE_MS) / 1000;
     expect(move).toBe(60);
     expect(camoufoxHttpLimits(c, { maxWaitSeconds: 3900 }).requestTimeoutSeconds).toBe(
-      2 * 90 + 30 * (5 + move) + 15,
+      4 * 90 + 45 + 30 * (5 + move) + 15,
     );
   });
   it('page spacing 0 gives minIntervalMs 0 and a limiter with no rate limit (operator, 2026-10-25)', () => {
@@ -54,7 +54,7 @@ describe('camoufoxHttpLimits (spec §5.3 rev 32; decision 69)', () => {
       }),
       { maxWaitSeconds: 3900 },
     );
-    expect(grid.requestTimeoutSeconds).toBe(2 * 90 + 30 * 60 + 15);
+    expect(grid.requestTimeoutSeconds).toBe(4 * 90 + 45 + 30 * 60 + 15);
   });
   it('the worker’s origin, never billable, concurrency 1, spacing as minIntervalMs, page timeout + 15 s, no transport retries', () => {
     const l = camoufoxHttpLimits(camoufox(), { maxWaitSeconds: 3900 });

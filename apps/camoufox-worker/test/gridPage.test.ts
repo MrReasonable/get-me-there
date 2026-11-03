@@ -7,6 +7,7 @@ import {
   asIsoDate,
   asIsoDateTime,
   GRID_MOVE_BUDGET_MS,
+  GRID_MOVE_RESERVE_MS,
   type GridMove,
   type PageRequest,
 } from '@gmt/core';
@@ -16,7 +17,7 @@ import { MonthlyCounter } from '../src/monthly.js';
 import { Pacer } from '../src/pacer.js';
 import { Refusal } from '../src/refusal.js';
 import { SELECTORS, type Selectors } from '../src/selectors.js';
-import { type GridSettings, PageSession } from '../src/session.js';
+import { type GridSettings, PageSession, pageCapMs } from '../src/session.js';
 import { loadSocs } from '../src/socs.js';
 import { FakeContext } from './support/fakeContext.js';
 import { type FakeNode, type FakePage, formNodes, n, resultsTree, text } from './support/fakePage.js';
@@ -74,8 +75,10 @@ interface Run {
   monthlyScrolls?: number;
   grid?: GridSettings;
   selectors?: Selectors;
-  /** The trees a view at (first departure, first return) shows, by its index. */
-  view?: (dep: string, ret: string, index: number) => FakeNode[];
+  /** The trees a view at (first departure, first return) shows, by its index and the page's loads so far (1 first). */
+  view?: (dep: string, ret: string, index: number, load: number) => FakeNode[];
+  /** Where the page's second load goes instead (a host the guard refuses, say): the load is aborted there. */
+  reloadTo?: string;
   /** Days a scroll actually moves (the synthetic page's step). */
   step?: number;
   onScroll?: (at: number) => void;
@@ -105,10 +108,12 @@ function setup(o: Run = {}) {
   });
   let at = { dep: '2027-03-11', ret: '2027-03-21' };
   let index = 0;
+  /** The fake time of each document load the page started. */
+  const loads: number[] = [];
   const step = o.step ?? 1;
   const show = (pg: FakePage) =>
     pg.setTrees(
-      o.view?.(at.dep, at.ret, index) ?? [
+      o.view?.(at.dep, at.ret, index, loads.length) ?? [
         dialogPage(gridTree({ depart: at.dep, ret: at.ret, rotate: index })),
       ],
     );
@@ -119,6 +124,23 @@ function setup(o: Run = {}) {
         { hops: ['https://www.google.com/travel/flights?q=x', LANDED], tree: o.tree ?? best() },
       ];
       c.onNewPage = (pg) => {
+        const goto = pg.goto.bind(pg);
+        pg.goto = async (u, opts) => {
+          loads.push(timers.now());
+          const to = o.reloadTo;
+          if (loads.length === 2 && to !== undefined) {
+            const r = {
+              url: () => to,
+              isNavigationRequest: () => true,
+              method: () => 'GET',
+              redirectedFrom: () => null,
+              frame: () => ({ url: () => to, parentFrame: () => null }),
+            };
+            if ((await c.routeRequest(r)) === 'aborted')
+              throw new Error('NS_ERROR_FAILURE: navigation aborted (blockedbyclient)');
+          }
+          return goto(u, opts);
+        };
         pg.onClick = (x) => {
           if (x.role === 'button' && x.name === 'Price graph')
             pg.setTrees([o.graph ?? dialogPage(gridTree({ depart: at.dep, ret: at.ret, tab: 'graph' }))]);
@@ -156,7 +178,7 @@ function setup(o: Run = {}) {
     grid: o.grid ?? GRID,
     ...(o.pollMs === undefined ? {} : { pollMs: o.pollMs }),
   });
-  return { session, timers, cooldown, contexts, pacer, profileDir, dataDir, monthly };
+  return { session, timers, cooldown, contexts, pacer, profileDir, dataDir, monthly, loads };
 }
 const clicksOf = (t: ReturnType<typeof setup>) => t.contexts[0]?.pages[0]?.calls.clicks ?? [];
 const decisions = (log: ReturnType<typeof memoryLog>) =>
@@ -176,6 +198,15 @@ describe('grid pages: gating', () => {
     const t = setup({ grid: { ...GRID, scrollCap: 2 } });
     const r = await t.session.page(req(['down', 'down', 'down']));
     expect([r.rejected, r.googleContacted, t.contexts.length]).toEqual([true, false, 0]);
+  });
+});
+
+describe('grid pages: the overall cap', () => {
+  it('holds the first view and its dialog, the reload’s spacing and its own two page periods, and every move', () => {
+    const move = GRID_MOVE_BUDGET_MS + GRID_MOVE_RESERVE_MS;
+    expect(pageCapMs(req(['down', 'right']), SELECTORS, 90_000, 30_000, 5000)).toBe(
+      4 * 90_000 + 30_000 + 2 * (5000 + move),
+    );
   });
 });
 
@@ -566,8 +597,9 @@ describe('grid pages: a view still drawing its cells', () => {
     expect((at[1] ?? 0) - (at[0] ?? 0)).toBeGreaterThanOrEqual(GRID_MOVE_BUDGET_MS);
   });
   // why: Ian's ruling of 2026-11-03 (that morning's run: 85 s of a grid with no price): a first view with no price on it
-  // at its bound is a grid whose prices never arrived; the page ends with no view read and no cool-down
-  it('a first view that never draws a price is waited on to its bound, then ends the page with no view: no cool-down', async () => {
+  // at its bound is a grid whose prices never arrived; the page is loaded again once, and a reload still empty ends the
+  // page with no view read and no cool-down
+  it('a first view that never draws a price is reloaded once, and a reload still empty ends the page with no view: no cool-down', async () => {
     const log = memoryLog();
     const t = setup({
       log,
@@ -579,14 +611,78 @@ describe('grid pages: a view still drawing its cells', () => {
       views: [],
       ended: 'first-not-drawn',
       scrolls: 0,
-      notes: ['first-view-not-drawn'],
+      notes: ['grid-reloaded', 'first-view-not-drawn'],
     });
     expect(t.cooldown.active()).toBeNull();
     expect(decisions(log)).toEqual([]);
     expect(log.lines.filter((l) => l.msg === 'grid not drawn').map((l) => l.o)).toEqual([
       expect.objectContaining({ ended: 'first-not-drawn', candidates: 0, pricedLooking: 0, prices: 0 }),
+      expect.objectContaining({ ended: 'first-not-drawn', candidates: 0, pricedLooking: 0, prices: 0 }),
     ]);
     expect(pollsOf(log, 'dates').length).toBeGreaterThan(2);
+    // why: the same page, the same URL, loaded twice; the Price graph and the Dates tab clicked again after the reload
+    const gotos = t.contexts[0]?.pages[0]?.calls.gotos.map((g) => g.url) ?? [];
+    expect(gotos).toHaveLength(2);
+    expect(gotos[1]).toBe(gotos[0]);
+    expect(clicksOf(t)).toEqual(['button:Price graph', 'tab:Dates', 'button:Price graph', 'tab:Dates']);
+  });
+  it('a reloaded page whose grid fills is read as normal, moves and all; the reload waits the pacer’s spacing', async () => {
+    const t = setup({
+      view: (d, r, i, load) => [
+        dialogPage(gridTree({ depart: d, ret: r, rotate: i, ...(load < 2 ? { undrawn: () => true } : {}) })),
+      ],
+    });
+    const r = await t.session.page(req(['down']));
+    expect(r.answer).toMatchObject({ kind: 'grid', ended: 'complete', scrolls: 1, notes: ['grid-reloaded'] });
+    expect(r.answer.kind === 'grid' && r.answer.views.map((v) => [v.cells.length, v.structural])).toEqual([
+      [49, 'ok'],
+      [49, 'ok'],
+    ]);
+    expect(t.cooldown.active()).toBeNull();
+    // why: the pacer's spacing (30 s, less its 2 s tolerance) from the first load's start to the reload's
+    const [first, second] = t.loads;
+    expect(t.loads).toHaveLength(2);
+    expect((second ?? 0) - (first ?? 0)).toBeGreaterThanOrEqual(28_000);
+    // the pacer's record is the reload's start
+    expect(Date.parse(t.pacer.lastPageAt() ?? '')).toBe(second);
+  });
+  it('a reload the guard refuses is that stop, with its cool-down', async () => {
+    const t = setup({
+      reloadTo: 'https://consent.google.com/ml?continue=x',
+      view: (d, r) => [dialogPage(gridTree({ depart: d, ret: r, undrawn: () => true }))],
+    });
+    const r = await t.session.page(req(['down']));
+    expect(r.answer).toMatchObject({
+      kind: 'blocked',
+      page: 'consent-unhandled',
+      rule: 'guard-refused:consent-unhandled',
+    });
+    expect(t.cooldown.active()?.cause).toBe('consent-unhandled');
+  });
+  it('a page whose grid fills only on its reload does not count toward the second in a row', async () => {
+    const empty = new Set([0, 2]);
+    let k = 0;
+    const t = setup({
+      view: (d, r, _i, load) => [
+        dialogPage(
+          gridTree({
+            depart: d,
+            ret: r,
+            // why: page 1 (k 0) never fills; page 2 fills on its reload; page 3 never fills
+            ...(empty.has(k) || load < 2 ? { undrawn: () => true } : {}),
+          }),
+        ),
+      ],
+    });
+    const ends: unknown[] = [];
+    for (k = 0; k < 3; k++) {
+      t.loads.length = 0;
+      t.timers.clock.set(asIsoDateTime(new Date(Date.parse(t.timers.clock.now()) + 60_000).toISOString()));
+      const a = (await t.session.page(req(['down']))).answer;
+      ends.push(a.kind === 'grid' ? a.ended : a.kind);
+    }
+    expect(ends).toEqual(['first-not-drawn', 'complete', 'first-not-drawn']);
+    expect(t.cooldown.active()).toBeNull();
   });
   it('a second such page in a row is refused as unrecognised, with its cool-down', async () => {
     const log = memoryLog();

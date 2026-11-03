@@ -424,7 +424,10 @@ the name: a tab with none there is unpriced.
   refuses it as it refuses any view short of cells (a later view structurally
   unparsed, a first view with no selected cell `unrecognised`), never priced in
   part. A first view still drawing at its bound with no price on it at all is
-  a grid whose prices never arrived, not a page that changed: the page ends
+  a grid whose prices never arrived, not a page that changed: the worker loads
+  the same page once more inside the request, after the page spacing, and
+  reads it again from its Best view (its moves and all, when it fills); a
+  reload still empty ends the page
   `first-not-drawn` with no view read and no cool-down, and its cells are left
   unread (`grid-not-drawn`); the worker refuses a second such page in a row as
   `unrecognised` (`grid:first-view:not-drawn-again`), with its cool-down, since
@@ -440,7 +443,8 @@ the name: a tab with none there is unpriced.
   bound as not drawn. Every poll is classified.
   Each move has its own bounded budget (45 s for the click, settle and read,
   plus a 15 s reserve) inside the page's overall cap (the first view's page
-  budget plus one move budget and spacing per planned move). A stop discards
+  budget, the same again and the page spacing for the one reload, plus one
+  move budget and spacing per planned move). A stop discards
   the whole page, the views already read included. A scroll that does not
   settle in its budget ends the page: the views read so far are kept, and the
   covered cells of the blocks not reached are `error` (`parse`, detail
@@ -5084,7 +5088,7 @@ CAMOUFOX_EXECUTION_PAGE_CAP=100          # discovery page loads per execution (B
 CAMOUFOX_MONTHLY_PAGE_CAP=1500           # page loads per billing month (provider-month; no-page rows not counted); the app's ledger enforces it; the worker enforces it too
 CAMOUFOX_BILLING_DAY=1                   # 1–28: the month starts 00:00 UTC that day, for both monthly caps, in the ledger and the worker
 CAMOUFOX_COOLDOWN_HOURS=48               # pause after a challenge, sign-in or consent page; 24–100000 (an unrecognised page pauses a fixed 1 h)
-CAMOUFOX_PAGE_TIMEOUT_SECONDS=90         # the worker's whole-page deadline (load, settle, read), 30–240; the app's request timeout is this + 15 s (grid: 2 × this + scroll cap × (scroll spacing + 60 s) + 15 s; a flights request with a return phase: flightRequestSeconds, §2; without one: 2 × this + 30 s, listRequestSeconds)
+CAMOUFOX_PAGE_TIMEOUT_SECONDS=90         # the worker's whole-page deadline (load, settle, read), 30–240; the app's request timeout is this + 15 s (grid: 4 × this + page spacing + scroll cap × (scroll spacing + 60 s) + 15 s; a flights request with a return phase: flightRequestSeconds, §2; without one: 2 × this + 30 s, listRequestSeconds)
 CAMOUFOX_MODE=list                       # list (one day pair a page) or grid (the Dates tab's date grid, once the worker reports GRID_VERIFIED and its measured step)
 CAMOUFOX_GRID_SCROLL_SPACING_SECONDS=5   # grid: scroll clicks start to start; 0–30 (0 means no pause: scrolls go back to back); never randomised
 CAMOUFOX_GRID_SCROLL_CAP=30              # grid: scrolls a page may make; 0–60
@@ -5497,8 +5501,9 @@ vendors' stages, the worker's status, a margin) plus, when the browser
 provider is configured, the page's bound the plan route states
 (`pageBoundSeconds`), so the CLI never gives up on a page the app is still
 allowed to finish: a list page's is the page timeout plus 15 s, a grid page's
-twice the page timeout, plus the scroll cap times (the scroll spacing plus a
-move's 60 s), plus 15 s (2,145 s at the default settings). The app states it
+four page timeouts and the page spacing (its first load and its one reload),
+plus the scroll cap times (the scroll spacing plus a move's 60 s), plus 15 s
+(2,355 s at the default settings). The app states it
 because only the app holds the settings it computes it from (in a container,
 compose's environment and the app's own defaults). `update`
 refuses a checkout with local changes or not on `main`; runs `git fetch` and

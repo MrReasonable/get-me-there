@@ -111,7 +111,8 @@ function asksForReturns(r: PageRequest | FlightsRequest): r is PhaseRequest {
 
 /**
  * The page's overall cap in ms (ruling of 2026-10-18; WP15 ruling 10; spec rev 56 §2, ruling D7): two page timeouts
- * (the first view and its Cheapest flow); a grid page adds, per move, the scroll spacing and the move's own budget; a
+ * (the first view and its Cheapest flow); a grid page has two more and the spacing (its one reload after a first view
+ * that never drew a price: Ian's ruling of 2026-11-03) and, per move, the scroll spacing and the move's own budget; a
  * flights request with a return phase on a verified entry has RETURN_PAGE_PERIODS page periods (8 with a booking read:
  * 750,000 ms at the defaults; 6 without: 570,000) and one spacing (the reload's, RETURN_SPACED_LOADS).
  */
@@ -124,7 +125,9 @@ export function pageCapMs(
 ): number {
   if (req.mode === 'grid')
     return (
-      2 * pageTimeoutMs + req.moves.length * (gridSpacingMs + GRID_MOVE_BUDGET_MS + GRID_MOVE_RESERVE_MS)
+      4 * pageTimeoutMs +
+      spacingMs +
+      req.moves.length * (gridSpacingMs + GRID_MOVE_BUDGET_MS + GRID_MOVE_RESERVE_MS)
     );
   if (asksForReturns(req) && S.RETURN_SELECT_VERIFIED) {
     const periods =
@@ -409,21 +412,19 @@ export class PageSession {
         stage = 'navigate';
         contacted = true;
         let refused: BlockedPage | null = null;
+        const url = pageUrl(
+          req.mode === 'grid'
+            ? {
+                origin: req.origin,
+                destination: req.destination,
+                departureDate: req.start.departureDate,
+                returnDate: req.start.returnDate,
+                gl: req.gl,
+              }
+            : req,
+        );
         try {
-          await driver.goto(
-            pageUrl(
-              req.mode === 'grid'
-                ? {
-                    origin: req.origin,
-                    destination: req.destination,
-                    departureDate: req.start.departureDate,
-                    returnDate: req.start.returnDate,
-                    gl: req.gl,
-                  }
-                : req,
-            ),
-            deadline,
-          );
+          await driver.goto(url, deadline);
         } catch (e) {
           if (guard.refused === null) throw e;
           refused = guard.refused;
@@ -448,6 +449,7 @@ export class PageSession {
                     S: this.S,
                     pollMs: this.pollMs,
                     notDrawnBefore: this.gridNotDrawn,
+                    reload: { url, guard, pacer: this.d.pacer, pageTimeoutMs: this.d.pageTimeoutMs },
                   },
                   this.d,
                 ).then((x) => {

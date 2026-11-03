@@ -91,11 +91,16 @@ export function camoufoxHttpLimits(
     billable: 'never',
     costPerCallMicroGbp: 0,
     maxWaitSeconds: cfg.maxWaitSeconds,
-    // why: spec §2 rev 34 (ruling 10): a grid page may run its first view's budget (twice the page timeout) and, per
-    // scroll, the spacing and a move's own budget with its reserve (core's GRID_MOVE_*, 60 s)
+    // why: spec §2 rev 34 (ruling 10): a grid page may run its first view's budget (twice the page timeout), its one
+    // reload after a first view that never drew a price (the page spacing and twice the page timeout again: Ian's
+    // ruling of 2026-11-03) and, per scroll, the spacing and a move's own budget with its reserve (core's GRID_MOVE_*,
+    // 60 s), as the worker's own overall cap does
     requestTimeoutSeconds:
       c.mode === 'grid'
-        ? 2 * c.pageTimeoutSeconds + c.gridScrollCap * (c.gridScrollSpacingSeconds + MOVE_SECONDS) + 15
+        ? 4 * c.pageTimeoutSeconds +
+          c.minSpacingSeconds +
+          c.gridScrollCap * (c.gridScrollSpacingSeconds + MOVE_SECONDS) +
+          15
         : c.pageTimeoutSeconds + 15,
     minIntervalMs: c.minSpacingSeconds * 1000,
     retryTransport: false,

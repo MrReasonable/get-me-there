@@ -75,8 +75,11 @@ apps/camoufox-worker/test/fonts.test.ts > Linux fonts (spec §2 "Method"; WP17 �
 apps/camoufox-worker/test/fonts.test.ts > Linux fonts (spec §2 "Method"; WP17 §0) writes <workerData>/fonts.conf 0600 from the bundle’s fontconfig/macos/fonts.conf, outside the bundle
 apps/camoufox-worker/test/gridPage.test.ts > grid pages: a view still drawing its cells a first view still drawing with a price on it is refused as it is: unrecognised
 apps/camoufox-worker/test/gridPage.test.ts > grid pages: a view still drawing its cells a first view that has drawn no cell yet is waited on and read once it has
-apps/camoufox-worker/test/gridPage.test.ts > grid pages: a view still drawing its cells a first view that never draws a price is waited on to its bound, then ends the page with no view: no cool-down
+apps/camoufox-worker/test/gridPage.test.ts > grid pages: a view still drawing its cells a first view that never draws a price is reloaded once, and a reload still empty ends the page with no view: no cool-down
 apps/camoufox-worker/test/gridPage.test.ts > grid pages: a view still drawing its cells a page read whole between two such pages starts the count again: neither is refused
+apps/camoufox-worker/test/gridPage.test.ts > grid pages: a view still drawing its cells a page whose grid fills only on its reload does not count toward the second in a row
+apps/camoufox-worker/test/gridPage.test.ts > grid pages: a view still drawing its cells a reload the guard refuses is that stop, with its cool-down
+apps/camoufox-worker/test/gridPage.test.ts > grid pages: a view still drawing its cells a reloaded page whose grid fills is read as normal, moves and all; the reload waits the pacer’s spacing
 apps/camoufox-worker/test/gridPage.test.ts > grid pages: a view still drawing its cells a second such page in a row is refused as unrecognised, with its cool-down
 apps/camoufox-worker/test/gridPage.test.ts > grid pages: a view still drawing its cells a view after a scroll whose new column draws late is waited on and read whole
 apps/camoufox-worker/test/gridPage.test.ts > grid pages: a view still drawing its cells a view that names more cells than its lines call for is not waited on: refused as it is

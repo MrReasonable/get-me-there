@@ -156,7 +156,8 @@ export async function gridPage(
   const d0 = budget.d;
   if ((await runStep('find-graph-button', LOOKUP_TIMEOUT_MS, d0, steps, (st) => countOf(button, st))) !== 1)
     return unrecognised('no-price-graph-button');
-  // why: as the Cheapest flow: the dialog has its own budget from the first click, within twice the page timeout
+  // why: as the Cheapest flow: the dialog has its own budget from the first click, within twice the page timeout (a
+  // reloaded page's: a page period of its own inside the overall cap, gridSession.ts)
   const d = budget.next();
   await click('click-graph', button.nth(0), d);
   // why: PIE M3: the check counts every "Price insights" dialog, so a second one fails it; the flow reads the first
