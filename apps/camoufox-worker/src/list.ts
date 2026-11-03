@@ -1,8 +1,9 @@
-import type { ListRequest } from '@gmt/core';
+import type { ListRequest, Logger } from '@gmt/core';
 import { airportMatches } from './airports.js';
 import { cheapestTabPriceMinor } from './classify.js';
 import type { ListFacts } from './driver.js';
 import { INTERSTITIALS, type Interstitial, type ParsedOption, parseOptionName } from './names.js';
+import { PAGE_ERROR_TEXT_MAX } from './pageErrors.js';
 import { pointOfSaleOf } from './pointOfSale.js';
 
 /**
@@ -40,6 +41,16 @@ export interface MyOption {
 }
 
 /**
+ * One option that was not counted for the cell, with its whole name (null when the link had none): `unparsed` when the
+ * grammar refused the name, `other-cell` when it was read for another day or another airport. Only the worker's own
+ * debug log carries these, so a list that finds nothing for its cell can be diagnosed (2026-11-03); never an answer.
+ */
+export interface SkippedOption {
+  why: 'unparsed' | 'other-cell';
+  name: string | null;
+}
+
+/**
  * The list read with the cell's own parsed options, in page order (spec rev 55 §2: the flights reader, `flights.ts`,
  * reuses this cell filter and minimum, then keeps the 30 cheapest of `mine`). Spec rev 56 §2 (WP21 Task 21.3): each
  * option keeps its name, so the return phase can activate the one it selects; `readList` reads the same list.
@@ -48,15 +59,14 @@ export function readOptions(
   f: ListFacts,
   req: Pick<ListRequest, 'departureDate' | 'airportNames'>,
   interstitials: readonly Interstitial[] = INTERSTITIALS,
-): { list: ListRead; mine: MyOption[] } {
+): { list: ListRead; mine: MyOption[]; skipped: SkippedOption[] } {
   const dep = new Date(`${req.departureDate}T00:00:00.000Z`);
   const mine: MyOption[] = [];
-  let unparsed = 0;
-  let other = 0;
+  const skipped: SkippedOption[] = [];
   for (const name of f.names) {
     const p = name === null || name === '' ? null : parseOptionName(name, interstitials);
     // why: `name === null` narrows the name kept below (a null or empty name never parses)
-    if (name === null || p === null) unparsed++;
+    if (name === null || p === null) skipped.push({ why: 'unparsed', name });
     else if (
       p.departsOn.month === dep.getUTCMonth() + 1 &&
       p.departsOn.day === dep.getUTCDate() &&
@@ -64,7 +74,7 @@ export function readOptions(
       airportMatches(p.to, req.airportNames.destination)
     )
       mine.push({ option: p, name });
-    else other++;
+    else skipped.push({ why: 'other-cell', name });
   }
   const prices = mine.map((p) => p.option.amountMinor).sort((a, b) => a - b);
   const currency =
@@ -73,8 +83,8 @@ export function readOptions(
     list: {
       minMinor: prices[0] ?? null,
       tabMinor: tabPriceMinor(f.cheapestTabName),
-      optionsUnparsed: unparsed,
-      optionsOtherCell: other,
+      optionsUnparsed: skipped.filter((s) => s.why === 'unparsed').length,
+      optionsOtherCell: skipped.filter((s) => s.why === 'other-cell').length,
       parsedForThisCell: mine.length,
       resultsStated: f.resultsStated,
       resultsSeen: f.names.length,
@@ -82,6 +92,7 @@ export function readOptions(
       pointOfSale: pointOfSaleOf(f.locationName),
     },
     mine,
+    skipped,
   };
 }
 
@@ -91,4 +102,34 @@ export function readList(
   interstitials: readonly Interstitial[] = INTERSTITIALS,
 ): ListRead {
   return readOptions(f, req, interstitials).list;
+}
+
+/** How many skipped options one log line names; the rest are counted in `more`. */
+export const SKIPPED_LOGGED_MAX = 30;
+
+const cut = (text: string | null): string | null =>
+  text === null ? null : text.slice(0, PAGE_ERROR_TEXT_MAX);
+
+/**
+ * Logs at debug the options a list page did not count for its cell, and the page's stated location, when any option was
+ * skipped or the location gave no point of sale (2026-11-03: a run's ten lists each found nothing for their cell and
+ * stored no market, and nothing said why). Each text is cut to PAGE_ERROR_TEXT_MAX characters. The worker's own log
+ * only: an answer never carries a name.
+ */
+export function logSkippedOptions(
+  log: Logger,
+  f: ListFacts,
+  req: Pick<ListRequest, 'departureDate' | 'airportNames'>,
+): void {
+  const { list, skipped } = readOptions(f, req);
+  if (skipped.length === 0 && list.pointOfSale !== 'unknown') return;
+  log.debug(
+    {
+      location: cut(f.locationName),
+      pointOfSale: list.pointOfSale,
+      skipped: skipped.slice(0, SKIPPED_LOGGED_MAX).map((s) => ({ why: s.why, name: cut(s.name) })),
+      more: Math.max(0, skipped.length - SKIPPED_LOGGED_MAX),
+    },
+    'options skipped',
+  );
 }

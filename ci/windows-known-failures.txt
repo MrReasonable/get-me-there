@@ -564,6 +564,8 @@ apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14
 apps/camoufox-worker/test/session.test.ts > PageSession (spec §2; brief Task 14.4) with the Cheapest flow verified, the tab’s pop-up is closed and the tab clicked
 apps/camoufox-worker/test/session.test.ts > PageSession in flights mode (spec rev 55 §2) Google's no-flights line, once verified, is listed 'no-flights' with no flight
 apps/camoufox-worker/test/session.test.ts > PageSession in flights mode (spec rev 55 §2) a Cheapest view that never settles with no list read is not-ready, as in list mode
+apps/camoufox-worker/test/session.test.ts > PageSession in flights mode (spec rev 55 §2) a flights page whose options are all another cell’s logs them at debug, with the page’s location (2026-11-03)
+apps/camoufox-worker/test/session.test.ts > PageSession in flights mode (spec rev 55 §2) a flights page whose options are all the cell’s logs no skipped options
 apps/camoufox-worker/test/session.test.ts > PageSession in flights mode (spec rev 55 §2) a never-resolving SOCS read-back on a flights page → browser-error read, context discarded
 apps/camoufox-worker/test/session.test.ts > PageSession in flights mode (spec rev 55 §2) a page close that never resolves on a flights page → browser-error read, context discarded
 apps/camoufox-worker/test/session.test.ts > PageSession in flights mode (spec rev 55 §2) a page in another currency is blocked unrecognised, rule currency, with its cool-down

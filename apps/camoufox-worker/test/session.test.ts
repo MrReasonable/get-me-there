@@ -1099,6 +1099,30 @@ describe('PageSession in flights mode (spec rev 55 §2)', () => {
     amountMinor: pounds * 100,
   });
 
+  it('a flights page whose options are all another cell’s logs them at debug, with the page’s location (2026-11-03)', async () => {
+    const log = memoryLog();
+    const t = setup({ log });
+    const r = await t.session.page({
+      ...FREQ,
+      airportNames: { ...FREQ.airportNames, origin: ['London Gatwick Airport'] },
+    });
+    expect(r.answer).toMatchObject({ kind: 'flights', listed: 'none-for-cell', optionsOtherCell: 2 });
+    const skipped = log.lines.filter((l) => l.msg === 'options skipped');
+    expect(skipped.map((l) => l.level)).toEqual(['debug']);
+    expect(skipped[0]?.o).toMatchObject({
+      pointOfSale: 'GB',
+      skipped: [{ why: 'other-cell' }, { why: 'other-cell' }],
+      more: 0,
+    });
+  });
+  it('a flights page whose options are all the cell’s logs no skipped options', async () => {
+    const log = memoryLog();
+    const t = setup({ log });
+    const r = await t.session.page(FREQ);
+    expect(r.answer).toMatchObject({ kind: 'flights', listed: 'flights' });
+    expect(log.lines.filter((l) => l.msg === 'options skipped')).toEqual([]);
+  });
+
   it('settled results → a flights answer: the cell’s flights in page order, the minimum, the tab price, no Cheapest view', async () => {
     const t = setup();
     const r = await t.session.page(FREQ);
