@@ -6,6 +6,7 @@ import { delimiter, join } from 'node:path';
 import { AWAKE_MAX_SECONDS, awakeAnswerSchema } from '@gmt/core';
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
+  AWAKE_OVERLAP_MS,
   type AwakeDeps,
   type AwakeEnd,
   AwakeKeeper,
@@ -114,18 +115,40 @@ describe('the lease', () => {
     expect(w.children.map((c) => c.args)).toEqual([['-i', '-w', '4242', '-t', '300']]);
     expect(w.keeper.state()).toEqual(a);
   });
-  it('renews without a gap: the new child starts before the old one is killed, and only one stays', () => {
+  // why: the live run of 2026-11-03: the old child killed at once left the machine unheld while the new one started,
+  // and an idle Mac slept in that gap; the two now overlap for AWAKE_OVERLAP_MS
+  it('renews without a gap: the old child is killed only AWAKE_OVERLAP_MS after the new one starts', () => {
     const w = world();
     w.keeper.hold(300);
     w.advance(60_000);
     const a = w.keeper.hold(300);
     expect(a.until).toBe(iso(T0 + 360_000));
     expect(w.children).toHaveLength(2);
+    expect(w.live()).toHaveLength(2);
+    w.advance(AWAKE_OVERLAP_MS - 1);
+    expect(w.children[0]?.killed).toBe(false);
+    w.advance(1);
     expect(w.children[0]?.killed).toBe(true);
     expect(w.live()).toHaveLength(1);
     // why: the old child's end (its kill) never clears the new one
     w.children[0]?.end({ error: null, code: null });
     expect(w.keeper.state().held).toBe(true);
+    expect(AWAKE_OVERLAP_MS).toBe(5000);
+  });
+  it('a release or shutdown during the overlap kills both children at once', () => {
+    for (const end of ['release', 'stop'] as const) {
+      const w = world();
+      w.keeper.hold(300);
+      w.keeper.hold(300);
+      expect(w.live()).toHaveLength(2);
+      if (end === 'release') w.keeper.release();
+      else w.keeper.stop();
+      expect(w.live()).toHaveLength(0);
+      // why: the overlap's own timer kills nothing later
+      w.keeper.hold(300);
+      w.advance(AWAKE_OVERLAP_MS);
+      expect(w.live()).toHaveLength(end === 'release' ? 1 : 0);
+    }
   });
   it('expires: the child is killed at the lease’s end and nothing is held', () => {
     const w = world();

@@ -78,6 +78,13 @@ export function awakeCommand(
 }
 
 /** One child and what became of it; `ended` once it ended or was killed (Node may report one end twice). */
+/**
+ * How long a renewal's old child keeps holding after the new one starts. A child holds only once it has started and
+ * made its assertion, so killing the old one at once left the machine unheld for that moment, and an idle Mac slept in
+ * it (the live run of 2026-11-03).
+ */
+export const AWAKE_OVERLAP_MS = 5000;
+
 interface Held {
   child: AwakeChild | null;
   ended: boolean;
@@ -85,6 +92,8 @@ interface Held {
 
 export class AwakeKeeper {
   private current: Held | null = null;
+  /** Children a renewal replaced, still holding through the overlap; each with its kill's cancel. */
+  private readonly retiring = new Map<Held, () => void>();
   private until: number | null = null;
   private cancelExpiry: (() => void) | null = null;
   /** One warning per lease, so a hold that keeps failing does not warn at every renewal. */
@@ -128,10 +137,17 @@ export class AwakeKeeper {
     }
     // why: a child that ended before spawn returned is no hold
     if (held.ended) return this.state();
-    // why: the new child holds before the old one is killed, so a renewal leaves no gap
+    // why: the old child keeps holding AWAKE_OVERLAP_MS after the new one starts, so a renewal leaves no gap
     const old = this.current;
     this.current = held;
-    if (old !== null) this.kill(old);
+    if (old !== null)
+      this.retiring.set(
+        old,
+        this.d.later(() => {
+          this.retiring.delete(old);
+          this.kill(old);
+        }, AWAKE_OVERLAP_MS),
+      );
     this.until = this.d.now() + s * 1000;
     this.cancelExpiry?.();
     this.cancelExpiry = this.d.later(() => this.end(), s * 1000);
@@ -153,6 +169,11 @@ export class AwakeKeeper {
   private end(): void {
     this.cancelExpiry?.();
     this.cancelExpiry = null;
+    for (const [h, cancel] of this.retiring) {
+      cancel();
+      this.kill(h);
+    }
+    this.retiring.clear();
     if (this.current !== null) this.kill(this.current);
     this.current = null;
     this.until = null;
