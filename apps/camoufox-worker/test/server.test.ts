@@ -59,6 +59,7 @@ async function start(
 ) {
   const log = memoryLog();
   const seen: Array<PageRequest | FlightsRequest> = [];
+  const awakeAsked: number[] = [];
   let fatal = 0;
   const s = createWorkerServer({
     key: new Secret(KEY),
@@ -69,6 +70,12 @@ async function start(
       return typeof result === 'function' ? result(req) : result;
     },
     status: async () => status,
+    awake: (seconds) => {
+      awakeAsked.push(seconds);
+      return seconds === 0
+        ? { held: false, until: null, mechanism: 'caffeinate' }
+        : { held: true, until: AT, mechanism: 'caffeinate' };
+    },
     onFatal: () => {
       fatal += 1;
     },
@@ -85,7 +92,7 @@ async function start(
       },
       body: o.raw ?? JSON.stringify(body),
     });
-  return { base, post, log, seen, fatalCount: () => fatal };
+  return { base, post, log, seen, awakeAsked, fatalCount: () => fatal };
 }
 const cells: WorkerAnswer = {
   kind: 'cells',
@@ -254,6 +261,7 @@ describe('the worker server (brief §6 table, one it per row)', () => {
       now: () => 0,
       page: async () => ({ answer: cells, googleContacted: true }),
       status: async () => STATUS,
+      awake: () => ({ held: false, until: null, mechanism: 'none' }),
       onFatal: () => undefined,
     });
     expect(() => portOf(s)).toThrow(/not listening/);
@@ -367,5 +375,58 @@ describe('POST /v1/flights (spec rev 55 §2)', () => {
   it('404 for GET /v1/flights', async () => {
     const t = await start({ answer: flights, googleContacted: true });
     expect((await fetch(`${t.base}/v1/flights`, { headers: { 'x-gmt-worker-key': KEY } })).status).toBe(404);
+  });
+});
+
+// Spec §2 "The keep-awake lease": POST /v1/awake under the same key, body cap and contacted header; no page is loaded.
+describe('POST /v1/awake (spec §2 "The keep-awake lease")', () => {
+  const awake = { path: '/v1/awake' };
+  it('200 with what is held for a lease, and 0 releases; the contacted header 0, no page asked', async () => {
+    const t = await start({ answer: cells, googleContacted: true });
+    const r = await t.post({ seconds: 300 }, awake);
+    expect(r.status).toBe(200);
+    expect(r.headers.get('x-gmt-google-contacted')).toBe('0');
+    expect(await r.json()).toEqual({ held: true, until: AT, mechanism: 'caffeinate' });
+    const off = await t.post({ seconds: 0 }, awake);
+    expect(await off.json()).toEqual({ held: false, until: null, mechanism: 'caffeinate' });
+    expect(t.awakeAsked).toEqual([300, 0]);
+    expect(t.seen).toEqual([]);
+    expect(t.log.lines.map((l) => l.o)).toEqual([
+      { route: 'POST /v1/awake', status: 200, kind: 'awake', durationMs: 0 },
+      { route: 'POST /v1/awake', status: 200, kind: 'awake', durationMs: 0 },
+    ]);
+  });
+  it.each([
+    ['past the bound', { raw: JSON.stringify({ seconds: 601 }) }],
+    ['negative', { raw: JSON.stringify({ seconds: -1 }) }],
+    ['not whole', { raw: JSON.stringify({ seconds: 1.5 }) }],
+    ['missing', { raw: '{}' }],
+    ['an extra field', { raw: JSON.stringify({ seconds: 300, mode: 'list' }) }],
+    ['a page request', { raw: JSON.stringify(BODY) }],
+    ['a wrong content type', { type: 'text/plain', raw: JSON.stringify({ seconds: 300 }) }],
+    ['not JSON', { raw: '{not json' }],
+    ['an oversize body', { raw: JSON.stringify({ seconds: 300, pad: 'x'.repeat(MAX_BODY_BYTES) }) }],
+  ])('400 for %s, nothing held', async (_n, o) => {
+    const t = await start({ answer: cells, googleContacted: true });
+    const r = await t.post(undefined, { ...awake, ...o });
+    expect(r.status).toBe(400);
+    expect(await r.json()).toEqual({ kind: 'bad-request' });
+    expect(t.awakeAsked).toEqual([]);
+  });
+  it.each([
+    ['no header', null],
+    ['a wrong key', 'synthetic-worker-key-0123456789abcdeX'],
+  ])('401 with %s, nothing held', async (_n, key) => {
+    const t = await start({ answer: cells, googleContacted: true });
+    const r = await t.post({ seconds: 300 }, { ...awake, key });
+    expect(r.status).toBe(401);
+    expect(await r.text()).toBe('');
+    expect(t.awakeAsked).toEqual([]);
+  });
+  it('404 for GET /v1/awake; /v1/page refuses an awake body', async () => {
+    const t = await start({ answer: cells, googleContacted: true });
+    expect((await fetch(`${t.base}/v1/awake`, { headers: { 'x-gmt-worker-key': KEY } })).status).toBe(404);
+    expect((await t.post({ seconds: 300 })).status).toBe(400);
+    expect(t.awakeAsked).toEqual([]);
   });
 });

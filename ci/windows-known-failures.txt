@@ -121,6 +121,7 @@ apps/camoufox-worker/test/launch.test.ts > prepareLaunch (brief WP17 Task 17.2: 
 apps/camoufox-worker/test/launch.test.ts > prepareLaunch (brief WP17 Task 17.2: the checks before camoufox-js is imported) macOS: the install directory run.ts set, the layout and the camoufox-js pin, then the options; the launch env unchanged
 apps/camoufox-worker/test/launch.test.ts > prepareLaunch (brief WP17 Task 17.2: the checks before camoufox-js is imported) refuses an install directory other than this machine’s, before reading the layout
 apps/camoufox-worker/test/launch.test.ts > prepareLaunch (brief WP17 Task 17.2: the checks before camoufox-js is imported) refuses another camoufox-js version (0.11.6) naming the pin
+apps/camoufox-worker/test/main.test.ts > the worker’s start checks and shutdown (brief Task 14.5) POST /v1/awake holds the machine awake, the status reports it, and SIGTERM ends the hold
 apps/camoufox-worker/test/main.test.ts > the worker’s start checks and shutdown (brief Task 14.5) SIGTERM mid-page answers that page, then exits 0
 apps/camoufox-worker/test/main.test.ts > the worker’s start checks and shutdown (brief Task 14.5) Windows exits 78 as flags-unset, writing the refusal file, launching nothing
 apps/camoufox-worker/test/main.test.ts > the worker’s start checks and shutdown (brief Task 14.5) a build-mismatch refusal exits 78 with its file, the layout’s own words and core’s fix, launching nothing

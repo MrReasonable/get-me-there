@@ -50,14 +50,23 @@ describe('egress for the camoufox worker (arch-012: camoufoxWorkerUrlOk’s acce
       ),
     ).toMatch(/egress denied/);
   });
-  it('the status id is GET /v1/status only', () => {
+  // why: spec §2 "The keep-awake lease": the unledgered id also renews and releases the lease, and nothing else
+  it('the status id is GET /v1/status and POST /v1/awake only', () => {
     const l = camoufoxLimits('127.0.0.1', 8090, 'http:')['camoufox-status'];
     expect(
-      denied(() => assertEgress(at('http://127.0.0.1:8090/v1/page', 'camoufox-status', 'GET'), l, [])),
-    ).toMatch(/GET \/v1\/status only/);
-    expect(
-      denied(() => assertEgress(at('http://127.0.0.1:8090/v1/status', 'camoufox-status', 'POST'), l, [])),
-    ).toMatch(/GET \/v1\/status only/);
+      denied(() => assertEgress(at('http://127.0.0.1:8090/v1/awake', 'camoufox-status', 'POST'), l, [])),
+    ).toBe('allowed');
+    for (const [path, method] of [
+      ['/v1/page', 'GET'],
+      ['/v1/page', 'POST'],
+      ['/v1/flights', 'POST'],
+      ['/v1/status', 'POST'],
+      ['/v1/awake', 'GET'],
+    ] as const)
+      expect(
+        denied(() => assertEgress(at(`http://127.0.0.1:8090${path}`, 'camoufox-status', method), l, [])),
+        `${method} ${path}`,
+      ).toMatch(/GET \/v1\/status and POST \/v1\/awake only/);
   });
   it('a worker id without a configured port is refused', () => {
     const { workerPort: _p, ...noPort } = testLimits().camoufox;

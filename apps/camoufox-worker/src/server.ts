@@ -3,6 +3,9 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import {
   ANSWER_STATUS,
   APP_INSTANCE_HEADER,
+  AWAKE_ENDPOINT_PATH,
+  type AwakeAnswer,
+  awakeRequestSchema,
   FLIGHT_LIST_ENDPOINT_PATH,
   type FlightsRequest,
   flightsRequestSchema,
@@ -18,7 +21,8 @@ import type { PageResult } from './session.js';
 
 /**
  * The worker's HTTP API (brief §6; spec §2; decision 69; SEC-012, TS-15): `POST /v1/page` (a list or grid page),
- * `POST /v1/flights` (spec revision 55 §2: a flights page, mode `flights` only) and `GET /v1/status`. It binds
+ * `POST /v1/flights` (spec revision 55 §2: a flights page, mode `flights` only), `POST /v1/awake` (spec §2 "The
+ * keep-awake lease": `{ seconds }`, 0 releasing; it loads no page) and `GET /v1/status`. It binds
  * 127.0.0.1 only (Docker Desktop forwards host.docker.internal to it). Every request carries `x-gmt-worker-key`, compared in constant time over
  * equal-length buffers; a missing, mismatched or wrong-length key is 401 with no body. Every answer states
  * `x-gmt-google-contacted`. One JSON log line per request: route, status, answer kind, duration; never the key, a
@@ -32,6 +36,8 @@ export interface ServerDeps {
   log: Logger;
   page(req: PageRequest | FlightsRequest): Promise<PageResult>;
   status(): Promise<WorkerStatus>;
+  /** Spec §2 "The keep-awake lease": starts or renews the lease for `seconds` (0 releases it); what is held now. */
+  awake(seconds: number): AwakeAnswer;
   /** Called after an answer whose result was fatal (the cool-down store failed): main exits 70. */
   onFatal(): void;
   /** Decision 82: each authorised request's APP_INSTANCE_HEADER, for the month's count of calling apps. */
@@ -80,6 +86,17 @@ function readBody(req: IncomingMessage): Promise<string | null> {
   });
 }
 
+/** A JSON request body, or undefined when it is over the cap, not JSON, or not sent as application/json. */
+async function jsonBody(req: IncomingMessage): Promise<unknown> {
+  const type = req.headers['content-type'] ?? '';
+  const body = await readBody(req);
+  try {
+    return body === null || !/^application\/json\b/.test(type) ? undefined : JSON.parse(body);
+  } catch {
+    return undefined;
+  }
+}
+
 export function createWorkerServer(d: ServerDeps): Server {
   return createServer((req, res) => {
     const started = d.now();
@@ -99,6 +116,17 @@ export function createWorkerServer(d: ServerDeps): Server {
         send(res, 200, await d.status(), false);
         return done(200, 'status');
       }
+      const badRequest = (): void => {
+        send(res, 400, { kind: 'bad-request' }, false);
+        done(400, 'bad-request');
+      };
+      // why: spec §2 "The keep-awake lease": the lease route loads no page, under the same key and body cap
+      if (route === `POST ${AWAKE_ENDPOINT_PATH}`) {
+        const a = awakeRequestSchema.safeParse(await jsonBody(req));
+        if (!a.success) return badRequest();
+        send(res, 200, d.awake(a.data.seconds), false);
+        return done(200, 'awake');
+      }
       // why: spec rev 55 §2: each page route admits only its own requests, so /v1/page never reads a flights page
       // and /v1/flights reads nothing else, both under the one body cap
       const schema =
@@ -111,19 +139,8 @@ export function createWorkerServer(d: ServerDeps): Server {
         send(res, 404, undefined, false);
         return done(404, 'not-found');
       }
-      const type = req.headers['content-type'] ?? '';
-      const body = await readBody(req);
-      let parsed: unknown;
-      try {
-        parsed = body === null || !/^application\/json\b/.test(type) ? undefined : JSON.parse(body);
-      } catch {
-        parsed = undefined;
-      }
-      const r = schema.safeParse(parsed);
-      if (!r.success) {
-        send(res, 400, { kind: 'bad-request' }, false);
-        return done(400, 'bad-request');
-      }
+      const r = schema.safeParse(await jsonBody(req));
+      if (!r.success) return badRequest();
       pageCalled = true;
       const result = await d.page(r.data);
       // why: spec §2 rev 34: a grid page asking for more scrolls than this worker allows is refused, nothing loaded

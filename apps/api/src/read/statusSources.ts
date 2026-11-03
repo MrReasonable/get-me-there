@@ -339,6 +339,7 @@ async function readWorkerOnce(ports: Ports): Promise<WorkerRead> {
                 mark: st.consent.mark ?? null,
               },
         socsCapturedAt: st.socsCapturedAt,
+        awakeUntil: st.awake?.until ?? null,
       },
     };
   } catch {

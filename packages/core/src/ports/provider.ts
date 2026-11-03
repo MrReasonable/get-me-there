@@ -316,6 +316,15 @@ export interface FlightListCapability {
   cabins: readonly Cabin[];
   read(q: FlightListQuery, ctx: ProviderContext): Promise<FlightListResult>;
 }
+/**
+ * Spec §2 "The keep-awake lease" (camoufox only): asks the browser worker to hold the machine's idle sleep off. `hold`
+ * starts or renews a lease of `seconds` from now; `release` ends it. Neither ever throws: a worker that cannot be
+ * reached, or refuses, is logged at warn, and the run goes on (the lease then runs out on its own).
+ */
+export interface KeepAwakeCapability {
+  hold(seconds: number, signal: AbortSignal): Promise<void>;
+  release(signal: AbortSignal): Promise<void>;
+}
 export interface FlightProvider {
   readonly id: ProviderId;
   readonly displayName: string;
@@ -325,5 +334,7 @@ export interface FlightProvider {
   readonly verification?: VerificationCapability;
   /** Spec rev 55 §5.1: camoufox only. */
   readonly flightLists?: FlightListCapability;
+  /** Spec §2 "The keep-awake lease": camoufox only; the engine holds it while any run is in progress. */
+  readonly keepAwake?: KeepAwakeCapability;
   healthcheck(ctx: ProviderContext): Promise<{ ok: boolean; detail: string }>;
 }

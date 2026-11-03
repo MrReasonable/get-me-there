@@ -169,6 +169,9 @@ export function createEngine(deps: EngineDeps, options: EngineOptions = {}): Eng
       // why: revision 55 §8.1 — a flight read in flight is aborted and waited for within the drain, and writes nothing
       // once the engine is closed
       await Promise.all([sched.drain(SHUTDOWN_DRAIN_MS), settled, flights.stop()]);
+      // why: spec §2 "The keep-awake lease": the last run's end sent the release; it is waited for (http-kit's 10 s
+      // status timeout bounds it), and a lease it could not release runs out on the worker by itself
+      await ctx.awake.settled();
       markClosed();
       ctx.log.info({}, 'engine: shut down');
     },
