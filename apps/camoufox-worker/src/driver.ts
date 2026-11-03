@@ -122,11 +122,34 @@ export interface CookieInput {
   httpOnly: boolean;
   sameSite: 'Strict' | 'Lax' | 'None';
 }
+/** A request that failed (Playwright's `requestfailed`): its URL and why. */
+export interface FailedRequestLike {
+  url(): string;
+  failure(): { errorText: string } | null;
+}
+/** A response (Playwright's `response`): its URL and HTTP status. */
+export interface ResponseLike {
+  url(): string;
+  status(): number;
+}
+/** A console message from a page (Playwright's `console`): its kind ('error', 'warning'…) and text. */
+export interface ConsoleMessageLike {
+  type(): string;
+  text(): string;
+}
+/** An error a page threw and did not catch (Playwright's `weberror`). */
+export interface WebErrorLike {
+  error(): Error;
+}
 export interface ContextLike {
   cookies(urls?: string | string[]): Promise<CookieLike[]>;
   addCookies(cookies: CookieInput[]): Promise<void>;
   route(url: string, handler: (route: RouteLike, request: RequestLike) => unknown): Promise<void>;
   on(event: 'request', listener: (request: RequestLike) => void): unknown;
+  on(event: 'requestfailed', listener: (request: FailedRequestLike) => void): unknown;
+  on(event: 'response', listener: (response: ResponseLike) => void): unknown;
+  on(event: 'console', listener: (message: ConsoleMessageLike) => void): unknown;
+  on(event: 'weberror', listener: (error: WebErrorLike) => void): unknown;
   newPage(): Promise<PageLike>;
   close(): Promise<void>;
 }
@@ -138,6 +161,10 @@ export interface HeadedPageLike extends PageLike {
 /** A headed context (the consent window): a person may close it, which the consent driver observes. */
 export interface HeadedContextLike extends ContextLike {
   on(event: 'request', listener: (request: RequestLike) => void): unknown;
+  on(event: 'requestfailed', listener: (request: FailedRequestLike) => void): unknown;
+  on(event: 'response', listener: (response: ResponseLike) => void): unknown;
+  on(event: 'console', listener: (message: ConsoleMessageLike) => void): unknown;
+  on(event: 'weberror', listener: (error: WebErrorLike) => void): unknown;
   on(event: 'close', listener: () => void): unknown;
   newPage(): Promise<HeadedPageLike>;
 }
