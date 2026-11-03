@@ -330,3 +330,38 @@ describe('parseConfig (spec §12)', () => {
     expect(errors({ ...minimal, SCHEDULER_TIMEZONE: 'Mars/Olympus' })).toContain('SCHEDULER_TIMEZONE');
   });
 });
+
+// Spec §2 "Airport names": the operator's own extra names for an airport, kept out of the repository.
+describe('AIRPORT_NAMES', () => {
+  it('unset or blank is no names', () => {
+    expect(ok(minimal).airportNames).toEqual(new Map());
+    expect(ok({ ...minimal, AIRPORT_NAMES: ' ; ' }).airportNames).toEqual(new Map());
+  });
+  it('reads CODE=Name entries, trimmed, a repeated code keeping every name in order', () => {
+    expect(
+      ok({
+        ...minimal,
+        AIRPORT_NAMES: ' LHR = Heathrow Example Airport ;JFK=Kennedy; LHR=London LHR Airport;',
+      }).airportNames,
+    ).toEqual(
+      new Map([
+        ['LHR', ['Heathrow Example Airport', 'London LHR Airport']],
+        ['JFK', ['Kennedy']],
+      ]),
+    );
+  });
+  it.each([
+    ['no equals sign', 'LHR Heathrow'],
+    ['a lower-case code', 'lhr=Heathrow'],
+    ['a four-letter code', 'EGLL=Heathrow'],
+    ['an empty name', 'LHR='],
+    ['a name over 120 characters', `LHR=${'x'.repeat(121)}`],
+  ])('%s fails boot naming the field', (_n, v) => {
+    expect(errors({ ...minimal, AIRPORT_NAMES: v })).toEqual(['AIRPORT_NAMES']);
+  });
+  it('a name of exactly 120 characters is read', () => {
+    expect(ok({ ...minimal, AIRPORT_NAMES: `LHR=${'x'.repeat(120)}` }).airportNames.get('LHR')).toEqual([
+      'x'.repeat(120),
+    ]);
+  });
+});

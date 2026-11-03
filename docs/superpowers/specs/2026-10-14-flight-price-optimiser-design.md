@@ -1,6 +1,6 @@
 # get-me-there — Flight Price Intelligence & Flexible-Date Optimiser
 
-**Design spec, revision 58.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
+**Design spec, revision 59.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
 four full-roster reviews (145, 140, 126 and 101 findings; zero Critical since
 revision 2) and the provider spike. Revision 9 folds in the three decisions
 taken at approval (the self-scraping fallback in §2, the dashboard readings in
@@ -312,7 +312,8 @@ the name: a tab with none there is unpriced.
   every result link on the page, parses each accessible name ("From 478
   British pounds round trip total. 1 stop flight with …"), keeps the options
   whose departure date and whose departure and arrival airports (matched to
-  the queried codes through the airports dataset's names) are the cell's,
+  the queried codes through the airports dataset's names, and any extra
+  names the operator gives a code in `AIRPORT_NAMES`) are the cell's,
   and takes the minimum itself. An option whose name does not parse is
   dropped and counted (`offers-dropped:n`); options for another day or
   airport are counted on the cell as such; a "Cheapest from £X" tab price
@@ -1221,6 +1222,23 @@ the page that was read.
 `pointOfSale` is the ISO country of the page's stated location, through a
 dated table, or `'unknown'` when the page states none; it is stored as
 stated, so a page that ignored `gl` never passes for the requested market.
+Spaces and invisible format characters (a zero-width space, seen 2026-11-03)
+may separate the "Location" label from the place.
+**Airport names.** Google names airports, never codes, and its name can differ
+from the airports dataset's ("<City> <Name> Airport" where the dataset says
+"<City> Airport"). No general rule closes that gap safely: one that let a
+shorter dataset name match a longer page name would confuse 28 pairs of airports
+in the same city in the 2026-10-01 dataset (Brussels and Brussels South
+Charleroi among them), so an option would be counted for the wrong airport.
+The operator names the gap instead: `AIRPORT_NAMES`, `CODE=Name` entries
+separated by `;` (a three-letter upper-case code, a name of 1 to 120
+characters; a code may repeat), adds each name beside the dataset's for that
+code when the engine sends a page its airport names; an invalid value fails
+boot naming the field. It lives in the operator's environment, never in the
+repository. The worker logs at debug, to its own log only, each option a list
+page did not count for its cell (unparsed or another cell's, the name whole,
+at most 30 a page) with the page's location text, so the name to add can be
+read there.
 
 *Coverage, stated plainly.* In `list` mode a page prices one day pair, so a
 run prices at most `CAMOUFOX_EXECUTION_PAGE_CAP` day pairs and a month at
@@ -5086,6 +5104,7 @@ ALLOW_UNAUTHENTICATED=false              # only for Tailscale-only hosts
 TRUST_PROXY=false                        # read the client IP from X-Forwarded-For (reverse-proxy deployments)
 LOG_LEVEL=info
 POINT_OF_SALE=GB                         # ISO 3166 country for the vendors' point-of-sale parameters; base currency is fixed at GBP in this build
+AIRPORT_NAMES=                           # optional extra airport names for the browser's flight lists: CODE=Name entries separated by ';'
 STALE_AFTER_HOURS=192                    # verified basis: one weekly cycle + 24 h
 CALENDAR_STALE_AFTER_HOURS=              # optional override, replacing the threshold outright; default per price = discoveryRefreshHours + the price's own stored max_age_hours (§8.1)
 STUCK_AFTER_HOURS=12
@@ -5710,6 +5729,17 @@ as specified in §5.3; no secrets, no full URLs.
 ---
 
 ## 17. Changelog
+
+### Revision 59: flight lists the first live run could not read (2026-11-03)
+
+The first live run's flights step read ten date pairs and every list found nothing for its airport pair and stored no
+market, so the search's page showed no flights at all. A debug log of the options each page skipped showed three
+causes. The page named the origin airport differently from the airports dataset, so every option counted as another
+cell's; §2 adds `AIRPORT_NAMES`, the operator's own extra names for a code, after a general name rule was shown to
+confuse 28 same-city airport pairs. The page separated "Location" from the place with a zero-width space, so the point
+of sale read `'unknown'`; §2 lets invisible format characters sit in the separator. Some names ended with "Unknown
+emissions." before "Select flight", which the grammar refused; the grammar (re-dated `2026-11-03-emissions`) reads that
+one sentence and no other emissions sentence.
 
 ### Revision 58: holding a Mac in dark wake (2026-11-03)
 

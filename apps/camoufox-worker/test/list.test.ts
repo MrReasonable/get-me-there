@@ -1,6 +1,8 @@
 import { asIata, asIsoDate } from '@gmt/core';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { readList, readOptions, tabPriceMinor } from '../src/list.js';
+import { logSkippedOptions, readList, readOptions, SKIPPED_LOGGED_MAX, tabPriceMinor } from '../src/list.js';
+import { PAGE_ERROR_TEXT_MAX } from '../src/pageErrors.js';
+import { memoryLog } from './support/log.js';
 
 const REQ = {
   mode: 'list' as const,
@@ -141,5 +143,103 @@ describe('readOptions keeps each option’s name (spec rev 56 §2)', () => {
     expect(r.mine.map((m) => m.name)).toEqual([name(478), name(451)]);
     expect(r.mine.map((m) => m.option.amountMinor)).toEqual([47_800, 45_100]);
     expect(readList(facts(names), REQ)).toEqual(r.list);
+  });
+});
+
+// 2026-11-03: a run's lists each found nothing for their cell and stored no market, and nothing said why. The skipped
+// options and the page's location now go to the worker's own debug log.
+describe('logSkippedOptions (the worker log only)', () => {
+  it('names each skipped option with why, in page order, and the page’s location', () => {
+    const log = memoryLog();
+    logSkippedOptions(
+      log,
+      facts([
+        name(451),
+        'Reworded by Google',
+        name(300, { to: 'Newark Liberty International Airport' }),
+        null,
+      ]),
+      REQ,
+    );
+    expect(log.lines).toEqual([
+      {
+        level: 'debug',
+        msg: 'options skipped',
+        o: {
+          location: 'Location·United Kingdom',
+          pointOfSale: 'GB',
+          skipped: [
+            { why: 'unparsed', name: 'Reworded by Google' },
+            {
+              why: 'other-cell',
+              name: name(300, { to: 'Newark Liberty International Airport' }),
+            },
+            { why: 'unparsed', name: null },
+          ],
+          more: 0,
+        },
+      },
+    ]);
+  });
+  it('logs page text without a URL’s user, password, query or fragment (CodeRabbit on PR #43)', () => {
+    const log = memoryLog();
+    logSkippedOptions(
+      log,
+      facts(['From 1 British pounds see https://u:p@example.com/a?k=v#f now'], {
+        location: 'Location·https://example.com/b?x=1',
+      }),
+      REQ,
+    );
+    expect(log.lines.map((l) => l.o)).toEqual([
+      {
+        location: 'Location·https://example.com/b',
+        pointOfSale: 'unknown',
+        skipped: [{ why: 'unparsed', name: 'From 1 British pounds see https://example.com/a now' }],
+        more: 0,
+      },
+    ]);
+  });
+  it('a flights page’s options that parsed but were not a flight are logged after the page’s own, as not-a-flight', () => {
+    const log = memoryLog();
+    logSkippedOptions(log, facts([name(451), 'Reworded by Google']), REQ, ['an option that is no flight']);
+    expect(log.lines.map((l) => l.o)).toEqual([
+      {
+        location: 'Location·United Kingdom',
+        pointOfSale: 'GB',
+        skipped: [
+          { why: 'unparsed', name: 'Reworded by Google' },
+          { why: 'not-a-flight', name: 'an option that is no flight' },
+        ],
+        more: 0,
+      },
+    ]);
+  });
+  it('a not-a-flight option alone is enough to log', () => {
+    const log = memoryLog();
+    logSkippedOptions(log, facts([name(451)]), REQ, ['an option that is no flight']);
+    expect(log.lines).toHaveLength(1);
+  });
+  it('logs nothing when every option is the cell’s and the location gives a point of sale', () => {
+    const log = memoryLog();
+    logSkippedOptions(log, facts([name(451), name(478)]), REQ);
+    expect(log.lines).toEqual([]);
+  });
+  it('logs the location when it gives no point of sale, even with nothing skipped', () => {
+    const log = memoryLog();
+    logSkippedOptions(log, facts([name(451)], { location: 'Location·Atlantis' }), REQ);
+    expect(log.lines.map((l) => l.o)).toEqual([
+      { location: 'Location·Atlantis', pointOfSale: 'unknown', skipped: [], more: 0 },
+    ]);
+  });
+  it('cuts a long location, keeps names whole and names at most SKIPPED_LOGGED_MAX options, counting the rest', () => {
+    const log = memoryLog();
+    const long = `Location·${'x'.repeat(300)}`;
+    const names = Array.from({ length: SKIPPED_LOGGED_MAX + 2 }, (_v, i) => `odd ${i}`);
+    logSkippedOptions(log, facts(names, { location: long }), REQ);
+    const o = log.lines[0]?.o;
+    expect(o).toMatchObject({ location: long.slice(0, PAGE_ERROR_TEXT_MAX), more: 2 });
+    expect(o !== undefined && 'skipped' in o && Array.isArray(o.skipped) ? o.skipped.length : -1).toBe(
+      SKIPPED_LOGGED_MAX,
+    );
   });
 });

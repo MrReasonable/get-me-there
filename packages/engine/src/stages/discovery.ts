@@ -50,11 +50,15 @@ export function normaliseDeps(ctx: EngineContext): RepoDeps {
 /** The airports dataset's names for a code (spec §5.1 rev 32 `airportNames`); none when the code is unknown. */
 export type AirportNames = (iata: Iata) => string[];
 
-/** Names from the airports repository, the engine's one source of them. */
-export function airportNamesOf(ctx: Pick<EngineContext, 'repos'>): AirportNames {
+/**
+ * Names from the airports repository, the engine's one source of them, then the operator's own extra names for the
+ * code (spec §2 "Airport names": AIRPORT_NAMES, for an airport a page names differently from the dataset). An unknown
+ * code has none, extra names or not.
+ */
+export function airportNamesOf(ctx: Pick<EngineContext, 'repos' | 'config'>): AirportNames {
   return (iata) => {
     const a = ctx.repos.airports.get(iata);
-    return a === null ? [] : [a.name];
+    return a === null ? [] : [a.name, ...(ctx.config.airportNames.get(iata) ?? [])];
   };
 }
 

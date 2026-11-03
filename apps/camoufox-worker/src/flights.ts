@@ -38,6 +38,8 @@ export interface FlightsRead extends ListRead {
    * runs over these (a pick outside the 30 replaces the dearest kept non-pick), and the counts come from their number.
    */
   parsed: Array<{ flight: ListedFlight; name: string }>;
+  /** The names of the cell's options that parsed but were not a flight (counted in `optionsUnparsed`); the log's only. */
+  rejected: string[];
 }
 
 const DAY_MS = 86_400_000;
@@ -112,23 +114,25 @@ export function readFlights(
 ): FlightsRead {
   const { list, mine } = readOptions(f, req, interstitials);
   const read: Array<{ at: number; flight: ListedFlight; name: string }> = [];
+  const rejected: string[] = [];
   for (const p of mine) {
     const flight = flightOf(p.option, req.departureDate);
     if (flight !== null) read.push({ at: read.length, flight, name: p.name });
+    else rejected.push(p.name);
   }
   // why: the 30 cheapest, ties in page order, then shown in page order (spec rev 55 §2)
   const kept = [...read]
     .sort((a, b) => a.flight.amountMinor - b.flight.amountMinor || a.at - b.at)
     .slice(0, FLIGHT_LIST_MAX_FLIGHTS)
     .sort((a, b) => a.at - b.at);
-  const failed = mine.length - read.length;
   return {
     ...list,
-    optionsUnparsed: list.optionsUnparsed + failed,
+    optionsUnparsed: list.optionsUnparsed + rejected.length,
     parsedForThisCell: read.length,
     listed: kept.length > 0 ? 'flights' : 'none-for-cell',
     flights: kept.map((x) => x.flight),
     names: kept.map((x) => x.name),
     parsed: read.map((x) => ({ flight: x.flight, name: x.name })),
+    rejected,
   };
 }

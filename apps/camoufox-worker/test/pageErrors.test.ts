@@ -95,6 +95,10 @@ describe('what fails inside a page is logged (the grid of 2026-11-03, whose pric
     expect(withoutQueries('see https://user:secret@d.example/p?q=1 there')).toBe(
       'see https://d.example/p there',
     );
+    // why: userinfo runs to the last @ before the host (CodeRabbit on PR #43), so no part of it is left
+    expect(withoutQueries('see https://user@part:secret@e.example/p there')).toBe(
+      'see https://e.example/p there',
+    );
     expect(withoutQueries('HTTPS://E.example/p?token=1#f and Http://u@f.example/')).toBe(
       'HTTPS://E.example/p and Http://f.example/',
     );

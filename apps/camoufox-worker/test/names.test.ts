@@ -177,6 +177,25 @@ describe('parseOptionName (dated grammar)', () => {
       durationMinutes: 760,
     });
   });
+  // why: observed 2026-11-03 (a live flights page, from the worker's debug log): "Unknown emissions." after the
+  // stopovers, before the run of spaces and "Select flight"; with or without a stopover, a transfer one included
+  it.each([
+    ['after a stopover', ONE_STOP.replace(AT, `${AT} Unknown emissions.`)],
+    ['after a transfer stopover', ONE_STOP.replace(AT, `${TRANSFER} Unknown emissions.`)],
+    [
+      'with no stopover, after the run of spaces',
+      ONE_STOP.replace('1 stop flight', 'Nonstop flight').replace(` ${AT}`, '  Unknown emissions.'),
+    ],
+  ])('reads a name with "Unknown emissions." %s', (_n, name) => {
+    expect(parseOptionName(name)).toMatchObject({ amountMinor: 47800, durationMinutes: 760 });
+  });
+  it.each([
+    ['another emissions sentence', ONE_STOP.replace(AT, `${AT} Emissions estimate: 640 kg CO2e.`)],
+    ['the sentence twice', ONE_STOP.replace(AT, `${AT} Unknown emissions. Unknown emissions.`)],
+    ['the sentence before a stopover', ONE_STOP.replace(AT, `Unknown emissions. ${AT}`)],
+  ])('%s stays unparsed', (_n, name) => {
+    expect(parseOptionName(name)).toBeNull();
+  });
   it('reads a transfer stopover beside a stopover at one airport, either order', () => {
     const second = 'Stopover (2 of 2) is a 55 min overnight stopover at Example Airport in Example City.';
     const firstTransfer = TRANSFER.replace('(1 of 1)', '(1 of 2)');
@@ -288,8 +307,8 @@ describe('parseOptionName (dated grammar)', () => {
   });
   it('is dated', () => {
     expect(GRAMMAR_VERSION).toMatch(/^\d{4}-\d{2}-\d{2}/);
-    // why: spec rev 55 §2: re-dated when the grammar gained the times and the arrival date
-    expect(GRAMMAR_VERSION).toBe('2026-10-31-times');
+    // why: re-dated 2026-11-03 when the grammar gained the "Unknown emissions." sentence
+    expect(GRAMMAR_VERSION).toBe('2026-11-03-emissions');
   });
 });
 

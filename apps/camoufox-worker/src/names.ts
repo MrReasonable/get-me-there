@@ -16,7 +16,9 @@ import { poundsMinor } from './pence.js';
 // and runs of spaces between the closing sentences; re-dated 2026-10-27 (results/2026-10-27/1): a stopover that changes
 // airports in its city; re-dated 2026-10-31 (spec rev 55 §2, WP20 Task 20.7): the leg sentence's times and arrival
 // date are captured, in optional groups, so a name without them reads as before (test/recorded.test.ts pins list mode)
-export const GRAMMAR_VERSION = '2026-10-31-times';
+// re-dated 2026-11-03 (a live flights page, from the worker's debug log): an "Unknown emissions." sentence after the
+// stopovers
+export const GRAMMAR_VERSION = '2026-11-03-emissions';
 // why: spec rev 56 §2: a return option's name is read by this same grammar (its price clause is the outbound's "From
 // <price> British pounds round trip total.", 38 of 38 recorded return names): no alias and no second version
 
@@ -107,7 +109,9 @@ function grammarFor(interstitials: readonly Interstitial[]): RegExp {
       '(?: on [A-Z][a-z]+, (?<arrivesMonth>[A-Z][a-z]+) (?<arrivesDay>[0-9]{1,2}))?\\. ' +
       // why: observed 2026-10-18: a name with no stopover sentence carries a run of spaces before "Select flight"; only
       // spaces may sit between the sentences, never other text
-      `Total duration (?<duration>${DURATION})\\.(?<tail>(?: +${STOPOVER})*) +Select flight$`,
+      `Total duration (?<duration>${DURATION})\\.(?<tail>(?: +${STOPOVER})*)` +
+      // why: observed 2026-11-03: "Unknown emissions." after the stopovers, the only emissions sentence seen so far
+      '(?: +Unknown emissions\\.)? +Select flight$',
   );
 }
 const cache = new WeakMap<readonly Interstitial[], RegExp>();
