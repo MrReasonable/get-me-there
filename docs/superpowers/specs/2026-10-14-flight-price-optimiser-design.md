@@ -252,9 +252,10 @@ still sleep), on Linux with `systemd-inhibit --what=idle:sleep
 --who=get-me-there --why="a search is running" --mode=block sleep <seconds>`
 when `systemd-inhibit` is on the worker's `PATH` (else it logs once that it is
 unavailable and holds nothing), and on any other platform not at all. It keeps
-at most one such child: a renewal starts the new child before it kills the old
-one, so there is no gap, and the child is killed at the lease's end, on
-release and at the worker's shutdown. The child's own time limit is the lease,
+one such child, and two only while a renewal overlaps them: the old child is
+killed 5 s after the new one starts (a child holds only once it has started,
+and an idle Mac slept in the moment between on 2026-11-03), and every child is
+killed at the lease's end, on release and at the worker's shutdown. The child's own time limit is the lease,
 so a hold never outlives its lease, and on macOS `-w` also ends it with the
 worker. A child that cannot be started or fails is logged at warn (once per
 lease) and never fails a page or a request. The engine asks for a lease of
