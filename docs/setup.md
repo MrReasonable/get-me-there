@@ -967,7 +967,7 @@ sets the flag back, and empty routes then read as not searched again.
 - Google names airports, not codes, and sometimes not as the app's airport list does. If a search's flights say none
   were found for its airports while the date grid has prices, add `CAMOUFOX_LOG_DEBUG=true` to `worker.env`, restart
   the worker and read that date's flights again. The worker's log then has an `options skipped` line that lists each
-  flight the page did not count, with Google's airport names. Add Google's name for your airport to the app's
+  option the page did not count and why, with Google's airport names where the option states them. Add Google's name for your airport to the app's
   settings as `AIRPORT_NAMES=XXX=Google's Name` (several entries separated by `;`) and restart the app.
 
 ### Set it up
