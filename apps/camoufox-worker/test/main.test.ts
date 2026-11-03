@@ -3,6 +3,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { CONSENT_FIX, effectiveSharedSettings, flagsFor, workerStatusSchema } from '@gmt/core';
 import { beforeEach, describe, expect, it } from 'vitest';
+import { type AwakeEnd, AwakeKeeper } from '../src/awake.js';
 import { InstallRefused } from '../src/install.js';
 import { buildLaunchOptions } from '../src/launch.js';
 import { acquireLock } from '../src/lock.js';
@@ -70,6 +71,25 @@ function setup(
   const contexts: FakeContext[] = [];
   let shutdown: () => void = () => undefined;
   const timers = fakeTimers();
+  // why: spec §2 "The keep-awake lease": a fake spawn, so no test runs the platform's hold
+  const holds: Array<{ args: readonly string[]; killed: boolean; end: (e: AwakeEnd) => void }> = [];
+  const keepAwake = new AwakeKeeper({
+    platform: 'darwin',
+    pid: 4242,
+    log: memoryLog(),
+    now: () => timers.now(),
+    later: () => () => undefined,
+    spawn: (_command, args, end) => {
+      const h = { args, killed: false, end };
+      holds.push(h);
+      return {
+        kill: () => {
+          h.killed = true;
+        },
+      };
+    },
+    findOnPath: () => null,
+  });
   const deps: MainDeps = {
     platform: 'darwin',
     arch: 'arm64',
@@ -94,9 +114,10 @@ function setup(
     },
     port: 0,
     pid: 4242,
+    keepAwake,
     ...o.deps,
   };
-  return { dataDir, ctx, out, err, contexts, deps, shutdown: () => shutdown() };
+  return { dataDir, ctx, out, err, contexts, deps, holds, shutdown: () => shutdown() };
 }
 async function running(t: ReturnType<typeof setup>): Promise<RunningWorker> {
   const w = await startWorker(t.ctx, t.deps);
@@ -306,6 +327,25 @@ describe('the worker’s start checks and shutdown (brief Task 14.5)', () => {
     t.shutdown();
     expect(await w.done).toBe(0);
     expect(() => acquireLock(t.dataDir).release()).not.toThrow();
+  });
+  it('POST /v1/awake holds the machine awake, the status reports it, and SIGTERM ends the hold', async () => {
+    const t = setup();
+    const w = await running(t);
+    const statusOf = async (): Promise<unknown> =>
+      (await fetch(`http://127.0.0.1:${w.port}/v1/status`, { headers: { 'x-gmt-worker-key': KEY } })).json();
+    expect(await statusOf()).toMatchObject({ awake: { held: false, until: null, mechanism: 'caffeinate' } });
+    const r = await fetch(`http://127.0.0.1:${w.port}/v1/awake`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-gmt-worker-key': KEY },
+      body: JSON.stringify({ seconds: 300 }),
+    });
+    const held = { held: true, until: '2026-10-18T05:05:00.000Z', mechanism: 'caffeinate' };
+    expect(await r.json()).toEqual(held);
+    expect(await statusOf()).toMatchObject({ awake: held });
+    expect(t.holds.map((h) => [h.args, h.killed])).toEqual([[['-i', '-w', '4242', '-t', '300'], false]]);
+    t.shutdown();
+    expect(await w.done).toBe(0);
+    expect(t.holds.map((h) => h.killed)).toEqual([true]);
   });
   it('the status reports the worker’s effective shared settings (spec §12), worker.env lines and defaults alike', async () => {
     const t = setup({ env: { CAMOUFOX_MONTHLY_PAGE_CAP: '900', CAMOUFOX_BILLING_DAY: '15' } });

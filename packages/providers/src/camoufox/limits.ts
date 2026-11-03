@@ -5,7 +5,7 @@
  * `provider-unavailable`; each attempt's page class comes from `x-gmt-google-contacted` (absent → `page`, the
  * conservative reading); a flights answer's `pagesLoaded` is the attempt's page count (spec rev 56 §5.3), and any
  * answer's `nextLoadNotBefore` holds the provider's next start, while the request timeout stays discovery's (a flights
- * request with a return phase sends its own). `camoufox-status` is the unledgered preflight's id, GET /v1/status only.
+ * request with a return phase sends its own). `camoufox-status` is the unledgered id of GET /v1/status and POST /v1/awake (the keep-awake lease) only.
  */
 import {
   type Config,

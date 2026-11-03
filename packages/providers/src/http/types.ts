@@ -11,7 +11,8 @@ import type {
 
 /**
  * Every id http-kit serves: the providers plus the never-ledgered FX refresh (spec §4, §5.3) and the camoufox worker's
- * status route (`camoufox-status`, spec §5.3 rev 32: the unledgered preflight, GET /v1/status only).
+ * status and keep-awake routes (`camoufox-status`, spec §5.3: the unledgered preflight's GET /v1/status and the lease's
+ * POST /v1/awake only).
  */
 export type HttpProviderId = ProviderId | 'fx' | 'camoufox-status';
 /** The ids http-kit never ledgers: no reservation, no cache-hit row, no hourly seed from the ledger. */

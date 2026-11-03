@@ -436,6 +436,20 @@ describe('the report never spends, waits on a vendor or loads a page (spec §10)
     expect(body.checks.find((c) => c.id === 'worker')?.note).toBe('browser pages: also when a run resumes');
   });
 
+  // why: spec §2 "The keep-awake lease": the worker's own `awake` reaches the card's note
+  it('the worker card notes a lease the worker is holding', async () => {
+    stubWorker(() =>
+      Response.json(
+        workerBody({ awake: { held: true, until: '2026-10-14T09:05:00.000Z', mechanism: 'caffeinate' } }),
+      ),
+    );
+    const x = await harness(WORKER_ENV);
+    const body = await expectContract(await get(x), 'GET', '/api/status', STATUS);
+    expect(body.checks.find((c) => c.id === 'worker')?.note).toMatch(
+      /^browser pages: only inside a run's window; keeping the machine awake until .+ while a search runs$/,
+    );
+  });
+
   describe('a provider card reads the adapters’ class of the newest completed call, never an HTTP status (V3, V4)', () => {
     const insert = (
       x: Harness,

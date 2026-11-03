@@ -1,6 +1,6 @@
 # get-me-there — Flight Price Intelligence & Flexible-Date Optimiser
 
-**Design spec, revision 56.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
+**Design spec, revision 57.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
 four full-roster reviews (145, 140, 126 and 101 findings; zero Critical since
 revision 2) and the provider spike. Revision 9 folds in the three decisions
 taken at approval (the self-scraping fallback in §2, the dashboard readings in
@@ -234,7 +234,38 @@ server's automatic consent acceptance, shared access key, bootstrap cookies
 and crash telemetry do not apply. The app's adapter calls the worker over
 HTTP at `CAMOUFOX_WORKER_URL` (`http://127.0.0.1:8090` for `pnpm dev`,
 `http://host.docker.internal:8090` for the app in Docker), sending
-`CAMOUFOX_WORKER_KEY`; the app image carries no browser (§13). **The page
+`CAMOUFOX_WORKER_KEY`; the app image carries no browser (§13). **The
+keep-awake lease.** A run of a couple of hours breaks when the machine
+idle-sleeps under it (browser errors, time-outs, pages that never settle), so
+while any run is in progress the app keeps the machine awake through the
+worker, which always runs on the host (a Docker app cannot hold the host
+awake). `POST /v1/awake` takes `{ seconds }`, whole seconds from 0 to 600,
+under the same key, 4,096-byte body cap and validation as the page routes; it
+loads no page, answers `x-gmt-google-contacted: 0`, and starts or renews a
+lease of that many seconds from now, replacing any lease held; `seconds: 0`
+releases it. It answers `{ held, until, mechanism }` (`until` the lease's end
+while a hold is held, else null; `mechanism` `caffeinate`, `systemd-inhibit`
+or `none`), and `/v1/status` reports the same as `awake`. The worker holds the
+machine's idle sleep off only while it holds a live lease: on macOS with
+`caffeinate -i -w <worker pid> -t <seconds>` (idle sleep only; the display may
+still sleep), on Linux with `systemd-inhibit --what=idle:sleep
+--who=get-me-there --why="a search is running" --mode=block sleep <seconds>`
+when `systemd-inhibit` is on the worker's `PATH` (else it logs once that it is
+unavailable and holds nothing), and on any other platform not at all. It keeps
+at most one such child: a renewal starts the new child before it kills the old
+one, so there is no gap, and the child is killed at the lease's end, on
+release and at the worker's shutdown. The child's own time limit is the lease,
+so a hold never outlives its lease, and on macOS `-w` also ends it with the
+worker. A child that cannot be started or fails is logged at warn (once per
+lease) and never fails a page or a request. The engine asks for a lease of
+300 s at the first run's start, renews it every 60 s while any run is in
+progress, and releases it when the last run ends (§8.2), so four renewals can
+be missed before it runs out. It is a lease, never a latch: an app that dies,
+or a container or machine that is suspended, stops renewing, and the machine
+may sleep again once the lease runs out, at most five minutes later. A held
+assertion cannot stop a sleep the operator asks for: closing a laptop's lid
+still sleeps it. With the provider off there is no worker and nothing is
+held, so a long run then needs the machine kept awake by hand. **The page
 rule.** One worker call makes at most one document load, or for a flights
 request with a return phase at most `FLIGHT_LIST_PAGES_PER_PAIR_MAX` (2: the
 first view and the second outbound's reload; an activation never loads a
@@ -1618,8 +1649,11 @@ export interface FlightProvider {
   readonly suppliedFields: readonly SuppliedField[]; readonly cabins: readonly Cabin[];
   readonly discovery?: DiscoveryCapability; readonly verification?: VerificationCapability;
   readonly flightLists?: FlightListCapability;
+  readonly keepAwake?: KeepAwakeCapability;   // camoufox only (§2 "The keep-awake lease")
   healthcheck(ctx: ProviderContext): Promise<{ ok: boolean; detail: string }>;
 }
+export interface KeepAwakeCapability { hold(seconds: number, signal: AbortSignal): Promise<void>; release(signal: AbortSignal): Promise<void> }
+// POST /v1/awake under the unledgered camoufox-status id; neither ever throws: a failure is logged at warn
 export interface CostEstimate { calls: number; costMicroGbp: number; seconds: number; notes: string[] }
 
 export interface Reservation { id: string; finalise(r: { outcome: 'ok' | 'error' | 'unknown'; httpStatus?: number; durationMs: number;
@@ -1815,7 +1849,7 @@ cache.set when cacheable  →  return { body, fetchedAt: now }
   `host.docker.internal` with an explicit port, with `CAMOUFOX_WORKER_KEY` in
   the `x-gmt-worker-key` header (a credential header by name); the never-
   ledgered id `camoufox-status` (like `fx`) reaches only that origin's
-  `/v1/status`; the worker, not http-kit, holds the Google allowlist (§2). Every credential travels in a
+  `GET /v1/status` and `POST /v1/awake` (§2 "The keep-awake lease"); the worker, not http-kit, holds the Google allowlist (§2). Every credential travels in a
   header, so http-kit refuses a query parameter named like one (`api_key`,
   `key`, `token`, `access_token`, `password`, `secret` and the like) whatever
   its value, before the ledger or the network; SearchApi's `departure_token`
@@ -3456,7 +3490,13 @@ suspended, so it records `suspendedAt` (the previous beat) and `resumedAt`,
 logs one line, and marks every execution in flight as needing a window
 check. Before each `camoufox` page starts, a last beat older than 120 s also
 counts as a detected suspension, which closes the up to 30 s after a wake
-before the next beat arrives. A page in flight during the suspension finishes, its result kept with
+before the next beat arrives. Beside the heartbeat, while any run of the
+engine is in progress (the run registry counts them), a second unreferenced
+timer renews the browser worker's keep-awake lease every 60 s, a lease of
+300 s asked for at once when the first run starts and released when the last
+run ends; the engine's shutdown waits for that release. A renewal or release
+that fails is logged at warn and never fails a run (§2 "The keep-awake
+lease"). A page in flight during the suspension finishes, its result kept with
 its provenance unchanged, and the check runs before that run's next page. A
 run is never otherwise cut mid-flight, so runs sharing the worker,
 interleaving page by page and each taking longer than its estimate, keep
@@ -3930,7 +3970,7 @@ points alike; a bare `true` is refused.
 | Route | Purpose |
 |---|---|
 | `GET /health` | unauthenticated and exempt from the Host allowlist: `{ ok, degraded }` where `degraded` = job count ≠ the number of scheduled definitions (`isScheduled`: enabled, a cron set, not deleted), or an execution running past `STUCK_AFTER_HOURS`, with no detail; authenticated detail `{ db, providers, scheduler: { jobCount, nextRun, lastExecutionAt, degraded } }` |
-| `GET /status` | authenticated; never spends, never waits on a vendor, never loads a page: `{ generatedAt, mode: 'native' \| 'container' \| 'dev', version, checks }`, each check `{ id, area, providerId, label, state: 'ok' \| 'warn' \| 'fail' \| 'off', summary, note, offReason, fix: { text, command } \| null }` (`label` names a card among several of its area, a search's name; `note` an aside on any check, such as "caught up the run missed at 01:30, ran 07:02", which never counts toward the status bar; `offReason` ∈ `not-set-up`, `not-visible`, `awaiting-verification`, `disabled` (a removed search's card only: an unscheduled search is judged by its latest run and notes "not scheduled", so a search without a schedule never nags the bar for having none), only when `off`; nothing a state rests on is ever truncated), worst first; `command` is a `pnpm gmt …` line in native mode and always null in container and dev mode, where the text names the compose action or the docs section; areas `app`, `database`, `backups`, `schedule`, `data` (per live definition, scheduled or not, its latest finished parent run's discovery coverage per cell in the six buckets with their spec labels, both ends of its priced observations' effective ages, never "fresh", "complete" or "all"), `provider` (one per provider plus `price-sources`, which warns "no usable price source" unless a non-synthetic provider can price a scheduled search), `worker` (whose card also states the app's `CAMOUFOX_BROWSER_WINDOW`; a worker that answers but will refuse pages is `fail`, judged by the same rule as the engine's preflight: a signed-in profile, shared settings that differ, an unverified or differing grid setup), `consent` ("consent rejected" only for a stored value whose mark is `reject`, any other mark a `fail` with the fix; a worker that does not report the mark cannot be checked, its capture's latest expiry stated as an upper bound, "expires by … at the latest"), `email` (the newest send of any kind since the app started: alert digest, notice or test; `fail` when it failed); a provider card's auth or quota class is the adapters' own, recorded on the ledger row where the call is classified (migration 0008, `error_kind`), and a 2xx whose body was rejected is not a success; summaries come from fixed templates and error classes, never from vendor, worker or SMTP text; the worker check reads the worker's `/v1/status` through http-kit with a 2 s timeout and picks named fields (`workerStatusSchema` gains a field one work package before any worker emits it, so an app parses the status of a worker one package newer); no field carries a key, password, database path or `SOCS` value |
+| `GET /status` | authenticated; never spends, never waits on a vendor, never loads a page: `{ generatedAt, mode: 'native' \| 'container' \| 'dev', version, checks }`, each check `{ id, area, providerId, label, state: 'ok' \| 'warn' \| 'fail' \| 'off', summary, note, offReason, fix: { text, command } \| null }` (`label` names a card among several of its area, a search's name; `note` an aside on any check, such as "caught up the run missed at 01:30, ran 07:02", which never counts toward the status bar; `offReason` ∈ `not-set-up`, `not-visible`, `awaiting-verification`, `disabled` (a removed search's card only: an unscheduled search is judged by its latest run and notes "not scheduled", so a search without a schedule never nags the bar for having none), only when `off`; nothing a state rests on is ever truncated), worst first; `command` is a `pnpm gmt …` line in native mode and always null in container and dev mode, where the text names the compose action or the docs section; areas `app`, `database`, `backups`, `schedule`, `data` (per live definition, scheduled or not, its latest finished parent run's discovery coverage per cell in the six buckets with their spec labels, both ends of its priced observations' effective ages, never "fresh", "complete" or "all"), `provider` (one per provider plus `price-sources`, which warns "no usable price source" unless a non-synthetic provider can price a scheduled search), `worker` (whose card also states the app's `CAMOUFOX_BROWSER_WINDOW`, and in its note, while the worker holds the keep-awake lease (§2), "keeping the machine awake until <time> while a search runs"; a worker that answers but will refuse pages is `fail`, judged by the same rule as the engine's preflight: a signed-in profile, shared settings that differ, an unverified or differing grid setup), `consent` ("consent rejected" only for a stored value whose mark is `reject`, any other mark a `fail` with the fix; a worker that does not report the mark cannot be checked, its capture's latest expiry stated as an upper bound, "expires by … at the latest"), `email` (the newest send of any kind since the app started: alert digest, notice or test; `fail` when it failed); a provider card's auth or quota class is the adapters' own, recorded on the ledger row where the call is classified (migration 0008, `error_kind`), and a 2xx whose body was rejected is not a success; summaries come from fixed templates and error classes, never from vendor, worker or SMTP text; the worker check reads the worker's `/v1/status` through http-kit with a 2 s timeout and picks named fields (`workerStatusSchema` gains a field one work package before any worker emits it, so an app parses the status of a worker one package newer); no field carries a key, password, database path or `SOCS` value |
 | `GET /executions/active` | authenticated: `{ execution: { id, definitionId, definitionName, kind: 'run' \| 'cell-verification', startedAt, estimatedFinishAt } \| null }`, the oldest execution with a pass in flight (pending or running), a parent run or a single-cell verification (which spends credits too), read as one row; its estimated finish is now plus the seconds its remaining cells are estimated to take (so a resumed run never reads as finished in the past), or null without an estimate; `gmt update` reads it |
 | `POST /alerts/test-email` | sends one fixed test message through the configured email notifier, apart from `ALERT_EMAIL_MAX_PER_HOUR` (a test has its own limit of one a minute and an in-flight guard, so pressing it never crowds out an alert; 429 past it); 409 when email is not configured; the class of the send (sent, failed; never the server's text) is kept in the notifier and shown as "since the app started" |
 | `GET /airports?q=` | airport-table autocomplete: up to 20 rows `{ iata, name, city, country, tz, metro }`, a matched metro never cut short. Bands: exact code, a metro code's members, code prefix, a city word, a name word, any other substring; inside a band an airport in the install's own country (`POINT_OF_SALE`, when it is a code; the point of sale is the install's market, where a browser locale varies by viewer) first, then a large airport with scheduled service, then a medium one, then the rest, so Birmingham GB lists before Birmingham US on a GB install; every listed airport of a metro any row belongs to is returned as one block at its best member's place; an airport OurAirports lists with no scheduled service is left out unless its exact code is typed (§7) |
@@ -5583,7 +5623,7 @@ profile holds a Google account cookie, when the `SOCS` capture is missing,
 stale or future-dated, when the record says no consent page was shown (this
 build serves pages on a captured rejection only), when its monthly counts
 file is missing beside an earlier worker's files or cannot be read, or when
-another worker holds the data directory's lock. It listens on `127.0.0.1` port 8090 only; Docker
+another worker holds the data directory's lock. Its keep-awake hold (§2) ends when it stops. It listens on `127.0.0.1` port 8090 only; Docker
 Desktop forwards `host.docker.internal` to it. On Linux it serves the native
 app only: a container there cannot reach the host's loopback, so the Docker
 path on Linux leaves the provider off. The worker persists its
@@ -5667,6 +5707,17 @@ as specified in §5.3; no secrets, no full URLs.
 ---
 
 ## 17. Changelog
+
+### Revision 57: the keep-awake lease (2026-11-03)
+
+A manual run of about 2.5 hours on 2026-11-03 broke because the Mac idle-slept a minute after the operator stepped
+away: every error lined up with the sleep and the wake (browser errors, time-outs, pages that did not settle), and the
+heartbeat noticed the suspension. The operator ruled that the app keeps the machine awake while it runs. §2 "The
+keep-awake lease" adds the worker's `POST /v1/awake` and the hold it keeps (`caffeinate -i` on macOS,
+`systemd-inhibit` on Linux, nothing elsewhere), always as a lease the engine renews every 60 s for 300 s while any run
+is in progress and releases at the last run's end (§8.2), never a latch; §5.1 adds `FlightProvider.keepAwake`, §5.3
+lets the unledgered `camoufox-status` id reach the route, §10's worker card notes the hold, and §13 ends it with the
+worker. A held assertion cannot stop a lid-close sleep, and `docs/setup.md` says so.
 
 ### Revision 56: the return leg (2026-11-02)
 

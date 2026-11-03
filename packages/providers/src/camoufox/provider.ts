@@ -37,6 +37,7 @@ import {
 } from '@gmt/core';
 import type { HttpKit } from '../http/types.js';
 import { parseError } from '../shared/errors.js';
+import { camoufoxKeepAwake } from './awake.js';
 import { flightListCapability } from './flights.js';
 import { gridTileEstimate, planGridTiles } from './grid.js';
 import { gridTile } from './gridTile.js';
@@ -376,6 +377,8 @@ export function camoufoxProvider(o: CamoufoxProviderOptions): FlightProvider {
     },
     // why: spec rev 55 §2 "The flight-list read": the same worker, its own route; its preflight is discovery's
     flightLists: flightListCapability(o),
+    // why: spec §2 "The keep-awake lease": the engine holds the machine awake through the worker while a run is in progress
+    keepAwake: camoufoxKeepAwake({ ...o, log }),
     // why: decision 24: healthchecks probe nothing; the preflight is the engine's only call that asks the worker.
     healthcheck: async () => ({
       ok: true,

@@ -1,4 +1,4 @@
-import { ProviderError, type Secret } from '@gmt/core';
+import { AWAKE_ENDPOINT_PATH, ProviderError, type Secret } from '@gmt/core';
 import { FIXTURE_HOST } from '../fixture/constants.js';
 import { CREDENTIAL_HEADERS } from './cacheKey.js';
 import { containsSecret } from './scrub.js';
@@ -126,8 +126,15 @@ export function assertEgress(
     if (limits.workerPort === undefined || u.port !== String(limits.workerPort))
       deny('port is not the worker’s');
     if (u.protocol !== limits.workerScheme) deny(`scheme ${u.protocol} is not the worker’s`);
-    if (r.providerId === 'camoufox-status' && (r.method !== 'GET' || u.pathname !== '/v1/status'))
-      deny('camoufox-status is GET /v1/status only');
+    // why: spec §5.3: the unledgered id reads the status and (spec §2 "The keep-awake lease") renews or releases the
+    // lease; it never reaches a page route
+    const route = `${r.method} ${u.pathname}`;
+    if (
+      r.providerId === 'camoufox-status' &&
+      route !== 'GET /v1/status' &&
+      route !== `POST ${AWAKE_ENDPOINT_PATH}`
+    )
+      deny(`camoufox-status is GET /v1/status and POST ${AWAKE_ENDPOINT_PATH} only`);
   } else {
     if (u.port !== '') deny('explicit port');
     const schemeOk =

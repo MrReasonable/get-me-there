@@ -608,7 +608,12 @@ function workerCheckOf(f: StatusFacts, w: WorkerFacts): StatusCheck {
   const r = w.read;
   if (r.kind === 'disabled')
     return check({ ...base, state: 'off', offReason: 'not-set-up', summary: 'browser provider not enabled' });
-  const note: string = STATUS_TEXT.browserWindow[w.browserWindow];
+  // why: spec §2 "The keep-awake lease": a worker holding the machine awake says so, whatever else the card says
+  const awake = r.kind === 'ok' ? r.status.awakeUntil : null;
+  const note: string =
+    awake === null
+      ? STATUS_TEXT.browserWindow[w.browserWindow]
+      : `${STATUS_TEXT.browserWindow[w.browserWindow]}; keeping the machine awake until ${at(f, awake)} while a search runs`;
   if (r.kind === 'keys-differ')
     return check({
       ...base,

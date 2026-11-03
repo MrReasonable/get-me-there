@@ -2,7 +2,8 @@
  * The camoufox worker's wire contract (spec §2, §5.2 rev 32; brief WP14 §5 and §6): pure zod, the one copy both the
  * host-side worker (`apps/camoufox-worker`) and the app's adapter (`@gmt/providers` camoufox) parse with (arch-011).
  * The worker serves `POST /v1/page`, `POST /v1/flights` (spec revision 55 §2 "The flight-list read": a list page's
- * flights, mode `flights` only) and `GET /v1/status`; every answer carries GOOGLE_CONTACTED_HEADER.
+ * flights, mode `flights` only), `POST /v1/awake` (the keep-awake lease) and `GET /v1/status`; every answer carries
+ * GOOGLE_CONTACTED_HEADER.
  */
 import { z } from 'zod';
 import { flightLimitsSchema } from '../flights/choose.js';
@@ -394,6 +395,40 @@ export const ANSWER_STATUS: Readonly<Record<WorkerAnswer['kind'], number>> = {
 };
 
 /**
+ * Spec §2 "The keep-awake lease": `POST /v1/awake` asks the worker to hold the machine's idle sleep off for `seconds`
+ * from now, replacing any lease it holds; `seconds: 0` releases it. The worker holds it only while the lease is live,
+ * so an app that dies or is suspended stops renewing and the machine may sleep again once the lease runs out.
+ */
+export const AWAKE_ENDPOINT_PATH = '/v1/awake';
+/** The longest lease one request may ask for (10 minutes), so no hold outlives a silent app by long. */
+export const AWAKE_MAX_SECONDS = 600;
+/** The lease the engine asks for: five minutes, which outlasts four missed renewals. */
+export const AWAKE_LEASE_SECONDS = 300;
+/** How often the engine renews the lease while a run is in progress. */
+export const AWAKE_RENEW_SECONDS = 60;
+/** What holds it: macOS's `caffeinate -i`, Linux's `systemd-inhibit`, or nothing on this machine. */
+export const AWAKE_MECHANISMS = ['caffeinate', 'systemd-inhibit', 'none'] as const;
+export type AwakeMechanism = (typeof AWAKE_MECHANISMS)[number];
+
+export const awakeRequestSchema = z.strictObject({
+  seconds: z.number().int().min(0).max(AWAKE_MAX_SECONDS),
+});
+export type AwakeRequest = z.infer<typeof awakeRequestSchema>;
+
+/** The worker's answer, and its status's `awake`: `until` is the lease's end while a hold is held, else null. */
+export const awakeAnswerSchema = z
+  .strictObject({
+    held: z.boolean(),
+    until: isoDateTimeSchema.nullable(),
+    mechanism: z.enum(AWAKE_MECHANISMS),
+  })
+  .refine((a) => a.held === (a.until !== null), {
+    message: 'a held lease states its end, and only a held one',
+    path: ['until'],
+  });
+export type AwakeAnswer = z.infer<typeof awakeAnswerSchema>;
+
+/**
  * Decision 82: the header the adapter sends on every request (the database's app-instance id, a random id stored with
  * the ledger), so the worker can report a second app, a second ledger, in a month.
  */
@@ -461,5 +496,7 @@ export const workerStatusSchema = z.strictObject({
   appInstances: z
     .strictObject({ windowStart: isoDateTimeSchema, count: z.number().int().min(0) })
     .exactOptional(),
+  /** Spec §2 "The keep-awake lease": whether the worker is holding the machine awake now, until when, and by what. */
+  awake: awakeAnswerSchema.exactOptional(),
 });
 export type WorkerStatus = z.infer<typeof workerStatusSchema>;

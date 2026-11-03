@@ -108,7 +108,13 @@ once, when you press the button; nothing runs on a schedule until you add one fr
 page (**Repeat weekly…**, which registers the schedule when you press Save). Setup offers to open the browser.
 
 Scheduled searches run while the machine is awake; a missed one is caught up once, without the
-browser provider. The native service speaks plain HTTP on `127.0.0.1`: only if you want to reach
+browser provider. Once a search is running, the app keeps the machine from idle sleep until the
+last run ends, through the browser worker: `caffeinate -i` on macOS (the display may still
+sleep), `systemd-inhibit` on Linux where it is installed. It is a lease the app renews every
+minute, so if the app stops or is suspended the machine may sleep again within five minutes.
+It cannot stop a sleep you ask for: closing a laptop's lid still sleeps it, and the run then
+breaks off. Without the browser provider there is no worker to hold it, so keep the machine
+awake by hand for a long run (on macOS, `caffeinate -i` in a terminal while it runs). The native service speaks plain HTTP on `127.0.0.1`: only if you want to reach
 it from another device, use an `ssh` tunnel (`ssh -L 3000:127.0.0.1:3000 <this machine>`), or
 section 3 for Tailscale and TLS.
 
@@ -762,12 +768,14 @@ failing check.
   no bound). It warns when errors, skipped and not searched cells are over a fifth of the cells, when the oldest price
   is past its stale threshold, when there is no price yet, or when the last firing was skipped (with the stored reason).
   A catch-up loads no browser pages, so a search that only the browser provider can run warns: keep the machine awake
-  at the scheduled time, or move the schedule.
+  at the scheduled time (once a run starts, the app keeps it from idle sleep, but it cannot wake a sleeping machine), or
+  move the schedule.
 - **Providers.** One card per price source with its last successful call and its use against its cap (the Providers
   view's wording, linked), and **price sources**, which warns when no usable source is set up.
 - **Browser worker and consent.** Whether the worker answers, its monthly pages and scrolls against the caps, any
   cool-down, a setting that differs between the app and the worker (named, never its value), and the app's browser
-  window: "browser pages: only inside a run's window" or "also when a run resumes". The consent card gives the
+  window: "browser pages: only inside a run's window" or "also when a run resumes"; while a search runs, its note also
+  says "keeping the machine awake until <time>". The consent card gives the
   record's expiry and warns for its last 30 days. While it warns or fails (not while it is off or ok) and the browser
   provider is on, the app emails you at most once a London day (a plain notice from the app, with no separate reminder
   service). A check that cannot be made, because the worker is down, sends nothing: the worker card says that.

@@ -127,6 +127,8 @@ export interface WorkerStatusFacts {
     mark: 'reject' | 'accept' | 'unknown' | null;
   } | null;
   socsCapturedAt: IsoDateTime | null;
+  /** Spec §2 "The keep-awake lease": the end of the lease the worker is holding the machine awake for, or null. */
+  awakeUntil: IsoDateTime | null;
 }
 
 export type WorkerRead =
