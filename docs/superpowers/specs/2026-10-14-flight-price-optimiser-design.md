@@ -423,7 +423,14 @@ the name: a tab with none there is unpriced.
   a view still drawing when that bound comes is taken as it is, so the reading
   refuses it as it refuses any view short of cells (a later view structurally
   unparsed, a first view with no selected cell `unrecognised`), never priced in
-  part. The `darwin-x64` recordings of 2026-10-26 showed why: under Rosetta a
+  part. A first view still drawing at its bound with no price on it at all is
+  a grid whose prices never arrived, not a page that changed: the page ends
+  `first-not-drawn` with no view read and no cool-down, and its cells are left
+  unread (`grid-not-drawn`); the worker refuses a second such page in a row as
+  `unrecognised` (`grid:first-view:not-drawn-again`), with its cool-down, since
+  prices withheld page after page look the same (Ian's ruling of 2026-11-03,
+  after a live run stopped on its first page, a grid that showed no price for
+  85 s). The `darwin-x64` recordings of 2026-10-26 showed why: under Rosetta a
   view held still across two polls with 42 of its 49 cells drawn, or none,
   each undrawn cell printing "0000" in its place. An unpriced cell is a named
   button, so it counts as drawn and is never waited on; only an undrawn

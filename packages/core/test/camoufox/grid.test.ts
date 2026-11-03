@@ -108,7 +108,7 @@ describe('the grid answer', () => {
   it('is 200 and parses with its views, scrolls and end', () => {
     expect(ANSWER_STATUS.grid).toBe(200);
     expect(workerAnswerSchema.parse(answer)).toEqual(answer);
-    for (const ended of ['scroll-not-settled', 'off-plan', 'allowance', 'no-flights'])
+    for (const ended of ['scroll-not-settled', 'off-plan', 'allowance', 'no-flights', 'first-not-drawn'])
       expect(workerAnswerSchema.safeParse({ ...answer, ended }).success).toBe(true);
   });
   it.each([

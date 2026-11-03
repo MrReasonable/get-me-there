@@ -182,6 +182,8 @@ export class PageSession {
   private readonly finallyMs: number;
   private readonly pollMs: number;
   private busySince: IsoDateTime | null = null;
+  /** The last grid page ended `first-not-drawn` (gridSession.ts: a second one in a row is refused). */
+  private gridNotDrawn = false;
   /** timers.now() at which the page in flight reaches its overall cap (final review A-I1), null when none is. */
   private busyUntil: number | null = null;
 
@@ -445,9 +447,13 @@ export class PageSession {
                     counter,
                     S: this.S,
                     pollMs: this.pollMs,
+                    notDrawnBefore: this.gridNotDrawn,
                   },
                   this.d,
-                )
+                ).then((x) => {
+                  this.gridNotDrawn = x.answer.kind === 'grid' && x.answer.ended === 'first-not-drawn';
+                  return x;
+                })
               : await this.read(driver, req, budget, started).then((x) => {
                   ob = x.outbound;
                   return x;

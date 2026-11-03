@@ -23,6 +23,8 @@ export interface GridRead {
   counter: { scrolls: number };
   S: Selectors;
   pollMs: number;
+  /** The worker's previous grid page ended `first-not-drawn` (Ian's ruling of 2026-11-03: a second one in a row stops). */
+  notDrawnBefore: boolean;
 }
 
 /** A blocked answer whose end the session's stop handling fills in. */
@@ -98,6 +100,14 @@ export async function readGrid(
       answer: blockedPlaceholderOf(r.page),
       stop: r.page,
       rule: r.rule,
+    };
+  // why: Ian's ruling of 2026-11-03: one grid whose prices never arrived loses its page; two in a row may be prices
+  // withheld, so the second is refused as unrecognised, with its cool-down
+  if (r.ended === 'first-not-drawn' && o.notDrawnBefore)
+    return {
+      answer: blockedPlaceholderOf('unrecognised'),
+      stop: 'unrecognised',
+      rule: 'grid:first-view:not-drawn-again',
     };
   return { answer: grid(r.views, r.ended, r.notes, pointOfSaleOf(list.locationName)), stop: null };
 }

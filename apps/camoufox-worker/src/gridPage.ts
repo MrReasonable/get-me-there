@@ -66,7 +66,7 @@ export type GridPageResult =
   | {
       kind: 'grid';
       views: GridView[];
-      ended: 'complete' | 'scroll-not-settled' | 'off-plan' | 'allowance';
+      ended: 'complete' | 'scroll-not-settled' | 'off-plan' | 'allowance' | 'first-not-drawn';
       notes: string[];
     }
   | {
@@ -201,7 +201,7 @@ export async function gridPage(
       first ? { dep: req.start.departureDate, ret: req.start.returnDate } : undefined,
       { unpriced: S.GRID_UNPRICED_VERIFIED },
     );
-    return { kind: 'read' as const, read, key: changeKeyOf(s.value), raw: s.value };
+    return { kind: 'read' as const, read, key: changeKeyOf(s.value), raw: s.value, drawing: s.drawing };
   };
   const toView = (r: Read, index: number, offPlan: GridView['offPlan']): GridView => ({
     index,
@@ -215,7 +215,25 @@ export async function gridPage(
 
   const firstRead = await view('dates', d, undefined, true);
   if (firstRead.kind === 'blocked') return blocked(firstRead);
-  if (firstRead.read.kind === 'unrecognised') return rejected(firstRead.read, firstRead.raw);
+  if (firstRead.read.kind === 'unrecognised') {
+    // why: Ian's ruling of 2026-11-03: a first view still drawing at its bound with no price on it is a grid whose prices
+    // never arrived (that morning's run, 85 s of an empty grid), not a page that changed: the page ends with no view
+    // read and no cool-down; a second such page in a row is refused as unrecognised (gridSession.ts)
+    const counts = viewCounts(firstRead.raw);
+    if (firstRead.drawing && counts.pricedLooking === 0 && counts.prices === 0) {
+      notes.push('first-view-not-drawn');
+      o.steps.log?.debug(
+        {
+          ended: 'first-not-drawn',
+          elapsedMs: timers.now() - (o.steps.startedAt ?? timers.now()),
+          ...counts,
+        },
+        'grid not drawn',
+      );
+      return { kind: 'grid', views: [], ended: 'first-not-drawn', notes };
+    }
+    return rejected(firstRead.read, firstRead.raw);
+  }
   const views: GridView[] = [];
   let prev = firstRead.read;
   let prevKey = firstRead.key;

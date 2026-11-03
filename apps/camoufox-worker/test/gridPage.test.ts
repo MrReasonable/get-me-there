@@ -565,20 +565,85 @@ describe('grid pages: a view still drawing its cells', () => {
     // why: the next scroll waits for the move's settle to reach its bound, never the 5 s spacing alone
     expect((at[1] ?? 0) - (at[0] ?? 0)).toBeGreaterThanOrEqual(GRID_MOVE_BUDGET_MS);
   });
-  it('a first view that never draws is waited on to its bound, then refused as it is: unrecognised', async () => {
+  // why: Ian's ruling of 2026-11-03 (that morning's run: 85 s of a grid with no price): a first view with no price on it
+  // at its bound is a grid whose prices never arrived; the page ends with no view read and no cool-down
+  it('a first view that never draws a price is waited on to its bound, then ends the page with no view: no cool-down', async () => {
     const log = memoryLog();
     const t = setup({
       log,
       view: (d, r) => [dialogPage(gridTree({ depart: d, ret: r, undrawn: () => true }))],
     });
     const r = await t.session.page(req(['down']));
-    expect(r.answer).toMatchObject({ kind: 'blocked', page: 'unrecognised', scrolls: 0 });
-    expect(decisions(log)[0]).toMatchObject({
-      rule: 'grid:first-view:selected-cell',
-      check: 'selected-cell',
-      candidates: 0,
+    expect(r.answer).toMatchObject({
+      kind: 'grid',
+      views: [],
+      ended: 'first-not-drawn',
+      scrolls: 0,
+      notes: ['first-view-not-drawn'],
     });
+    expect(t.cooldown.active()).toBeNull();
+    expect(decisions(log)).toEqual([]);
+    expect(log.lines.filter((l) => l.msg === 'grid not drawn').map((l) => l.o)).toEqual([
+      expect.objectContaining({ ended: 'first-not-drawn', candidates: 0, pricedLooking: 0, prices: 0 }),
+    ]);
     expect(pollsOf(log, 'dates').length).toBeGreaterThan(2);
+  });
+  it('a second such page in a row is refused as unrecognised, with its cool-down', async () => {
+    const log = memoryLog();
+    const t = setup({
+      log,
+      view: (d, r) => [dialogPage(gridTree({ depart: d, ret: r, undrawn: () => true }))],
+    });
+    expect((await t.session.page(req(['down']))).answer).toMatchObject({
+      kind: 'grid',
+      ended: 'first-not-drawn',
+    });
+    const second = await t.session.page(req(['down']));
+    expect(second.answer).toMatchObject({
+      kind: 'blocked',
+      page: 'unrecognised',
+      rule: 'grid:first-view:not-drawn-again',
+    });
+    expect(t.cooldown.active()?.cause).toBe('unrecognised');
+  });
+  it('a page read whole between two such pages starts the count again: neither is refused', async () => {
+    let drawn = false;
+    const t = setup({
+      view: (d, r) => [
+        dialogPage(gridTree({ depart: d, ret: r, ...(drawn ? {} : { undrawn: () => true }) })),
+      ],
+    });
+    const ends: unknown[] = [];
+    for (let k = 0; k < 3; k++) {
+      drawn = k === 1;
+      // why: each page starts past the pacer's spacing after the one before
+      t.timers.clock.set(asIsoDateTime(new Date(Date.parse(t.timers.clock.now()) + 60_000).toISOString()));
+      const a = (await t.session.page(req(['down']))).answer;
+      ends.push(a.kind === 'grid' ? a.ended : a.kind);
+    }
+    expect(ends).toEqual(['first-not-drawn', 'complete', 'first-not-drawn']);
+    expect(t.cooldown.active()).toBeNull();
+  });
+  it('a first view still drawing with a price on it is refused as it is: unrecognised', async () => {
+    const log = memoryLog();
+    const t = setup({
+      log,
+      view: (d, r) => [
+        // why: no cell drawn, but a price shows on the panel: no grid whose prices never arrived
+        dialogPage(
+          gridTree({
+            depart: d,
+            ret: r,
+            undrawn: () => true,
+            extra: [n('button', '£450, 12 Mar to 21 Mar')],
+          }),
+        ),
+      ],
+    });
+    const r = await t.session.page(req(['down']));
+    expect(r.answer).toMatchObject({ kind: 'blocked', page: 'unrecognised', scrolls: 0 });
+    expect(decisions(log)[0]).toMatchObject({ rule: expect.stringMatching(/^grid:first-view/) });
+    expect(t.cooldown.active()?.cause).toBe('unrecognised');
   });
   it('a view that names more cells than its lines call for is not waited on: refused as it is', async () => {
     const log = memoryLog();

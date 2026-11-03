@@ -228,8 +228,19 @@ export const gridViewSchema = z.strictObject({
   offPlan: z.enum(['near-today', 'sale-window-end', 'shifted', 'short-move']).nullable(),
 });
 export type GridView = z.infer<typeof gridViewSchema>;
-/** How a grid page ended: every move made, a scroll that did not settle, an off-plan view, the allowance, no flights. */
-export const GRID_ENDS = ['complete', 'scroll-not-settled', 'off-plan', 'allowance', 'no-flights'] as const;
+/**
+ * How a grid page ended: every move made, a scroll that did not settle, an off-plan view, the allowance, no flights, or
+ * a first view whose prices had not arrived when its time ran out (`first-not-drawn`, Ian's ruling of 2026-11-03: no
+ * view read, and the worker stops on a second such page in a row).
+ */
+export const GRID_ENDS = [
+  'complete',
+  'scroll-not-settled',
+  'off-plan',
+  'allowance',
+  'no-flights',
+  'first-not-drawn',
+] as const;
 
 /**
  * Spec rev 56 §2 (R-zero, R-spacing): on every answer kind that may answer a flights request carrying `returnLimits`:

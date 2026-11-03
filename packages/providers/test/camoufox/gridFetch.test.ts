@@ -457,6 +457,8 @@ describe('camoufox grid mode', () => {
     ['scroll-not-settled', 'page-not-ready'],
     ['off-plan', 'off-plan-view'],
     ['allowance', 'scroll-allowance'],
+    // why: Ian's ruling of 2026-11-03: a grid whose prices never arrived leaves its page's cells unread
+    ['first-not-drawn', 'grid-not-drawn'],
   ])('a page that ended %s leaves its unread cells as %s issues, resumable', async (ended, detail) => {
     const { d } = setup();
     const [tile] = d.plan(Q);
