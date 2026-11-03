@@ -1,5 +1,6 @@
 import type { BlockedPage, Logger } from '@gmt/core';
 import type { ContextLike, FrameLike, PageLike, RequestLike, RouteLike } from './driver.js';
+import { logPageErrors } from './pageErrors.js';
 import { SELECTORS, type Selectors } from './selectors.js';
 
 /**
@@ -178,6 +179,9 @@ export function installWith(
       reservation: null,
       held: null,
     };
+    // why: a page that never finishes (the grid of 2026-11-03, whose prices never arrived) is diagnosable only from what
+    // failed inside it: the requests, responses, console errors and thrown errors every page of this context logs
+    logPageErrors(context, log);
     context.on('request', (r: RequestLike) => {
       if (!r.isNavigationRequest()) return;
       const chain: string[] = [];

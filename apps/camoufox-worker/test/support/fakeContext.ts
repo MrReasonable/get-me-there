@@ -1,6 +1,16 @@
 // A fake Playwright BrowserContext (ContextLike): scripted cookies, recorded addCookies calls, the route handler and
 // request listeners the guard registers, and pages the test scripts. Synthetic values only.
-import type { ContextLike, CookieInput, CookieLike, RequestLike, RouteLike } from '../../src/driver.js';
+import type {
+  ConsoleMessageLike,
+  ContextLike,
+  CookieInput,
+  CookieLike,
+  FailedRequestLike,
+  RequestLike,
+  ResponseLike,
+  RouteLike,
+  WebErrorLike,
+} from '../../src/driver.js';
 import { FakePage, type Navigation } from './fakePage.js';
 
 export class FakeContext implements ContextLike {
@@ -50,9 +60,43 @@ export class FakeContext implements ContextLike {
     if (this.routeHangs) return new Promise(() => undefined);
     return Promise.resolve();
   }
-  on(event: 'request', listener: (r: RequestLike) => void): unknown {
+  /** The listeners of the page events the worker logs (pageErrors.ts), by event. */
+  readonly failedListeners: Array<(r: FailedRequestLike) => void> = [];
+  readonly responseListeners: Array<(r: ResponseLike) => void> = [];
+  readonly consoleListeners: Array<(m: ConsoleMessageLike) => void> = [];
+  readonly webErrorListeners: Array<(e: WebErrorLike) => void> = [];
+  on(event: 'request', listener: (r: RequestLike) => void): unknown;
+  on(event: 'requestfailed', listener: (r: FailedRequestLike) => void): unknown;
+  on(event: 'response', listener: (r: ResponseLike) => void): unknown;
+  on(event: 'console', listener: (m: ConsoleMessageLike) => void): unknown;
+  on(event: 'weberror', listener: (e: WebErrorLike) => void): unknown;
+  on(
+    event: 'request' | 'requestfailed' | 'response' | 'console' | 'weberror',
+    // why: each overload passes the one listener its event takes; the implementation stores it in that event's list
+    listener: ((r: RequestLike) => void) &
+      ((r: FailedRequestLike) => void) &
+      ((r: ResponseLike) => void) &
+      ((m: ConsoleMessageLike) => void) &
+      ((e: WebErrorLike) => void),
+  ): unknown {
     if (event === 'request') this.requestListeners.push(listener);
+    else if (event === 'requestfailed') this.failedListeners.push(listener);
+    else if (event === 'response') this.responseListeners.push(listener);
+    else if (event === 'console') this.consoleListeners.push(listener);
+    else this.webErrorListeners.push(listener);
     return this;
+  }
+  emitRequestFailed(r: FailedRequestLike): void {
+    for (const l of this.failedListeners) l(r);
+  }
+  emitResponse(r: ResponseLike): void {
+    for (const l of this.responseListeners) l(r);
+  }
+  emitConsole(m: ConsoleMessageLike): void {
+    for (const l of this.consoleListeners) l(m);
+  }
+  emitWebError(e: WebErrorLike): void {
+    for (const l of this.webErrorListeners) l(e);
   }
   emitRequest(r: RequestLike): void {
     this.seen.push(r.url());

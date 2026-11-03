@@ -229,8 +229,19 @@ export const gridViewSchema = z.strictObject({
   offPlan: z.enum(['near-today', 'sale-window-end', 'shifted', 'short-move']).nullable(),
 });
 export type GridView = z.infer<typeof gridViewSchema>;
-/** How a grid page ended: every move made, a scroll that did not settle, an off-plan view, the allowance, no flights. */
-export const GRID_ENDS = ['complete', 'scroll-not-settled', 'off-plan', 'allowance', 'no-flights'] as const;
+/**
+ * How a grid page ended: every move made, a scroll that did not settle, an off-plan view, the allowance, no flights, or
+ * a first view whose prices had not arrived when its time ran out (`first-not-drawn`, Ian's ruling of 2026-11-03: no
+ * view read, and the worker stops on a second such page in a row).
+ */
+export const GRID_ENDS = [
+  'complete',
+  'scroll-not-settled',
+  'off-plan',
+  'allowance',
+  'no-flights',
+  'first-not-drawn',
+] as const;
 
 /**
  * Spec rev 56 §2 (R-zero, R-spacing): on every answer kind that may answer a flights request carrying `returnLimits`:
@@ -255,17 +266,23 @@ export const workerAnswerSchema = z.discriminatedUnion('kind', [
     notes: z.array(z.string()),
     versions: versionsSchema,
   }),
-  z.strictObject({
-    kind: z.literal('grid'),
-    fetchedAt: isoDateTimeSchema,
-    currency: z.literal('GBP'),
-    pointOfSale: z.string().regex(/^([A-Z]{2}|unknown)$/),
-    views: z.array(gridViewSchema),
-    scrolls: count,
-    ended: z.enum(GRID_ENDS),
-    notes: z.array(z.string()),
-    versions: versionsSchema,
-  }),
+  z
+    .strictObject({
+      kind: z.literal('grid'),
+      fetchedAt: isoDateTimeSchema,
+      currency: z.literal('GBP'),
+      pointOfSale: z.string().regex(/^([A-Z]{2}|unknown)$/),
+      views: z.array(gridViewSchema),
+      scrolls: count,
+      ended: z.enum(GRID_ENDS),
+      notes: z.array(z.string()),
+      versions: versionsSchema,
+    })
+    // why: CodeRabbit on PR #39: a grid whose prices never arrived read no view, so its answer carries none to price from
+    .refine((a) => a.ended !== 'first-not-drawn' || a.views.length === 0, {
+      message: 'a page whose first view never drew a price reads no view',
+      path: ['views'],
+    }),
   /**
    * Spec revision 55 §2 "The flight-list read": what a flights page listed for the cell: `listed` (LISTED), the 30
    * cheapest of the cell's flights in page order, and, as the list read keeps them, the minimum over every parsed option

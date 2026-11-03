@@ -35,6 +35,7 @@ const UNREACHED: Readonly<Record<GridAnswer['ended'], string>> = {
   'scroll-not-settled': 'page-not-ready',
   'off-plan': 'off-plan-view',
   allowance: 'scroll-allowance',
+  'first-not-drawn': 'grid-not-drawn',
 };
 const WORDS: Readonly<Record<string, string>> = {
   'cell-unparsed': 'the date grid showed this day pair, but its cell could not be read',
@@ -45,6 +46,8 @@ const WORDS: Readonly<Record<string, string>> = {
   'no-flights-unseen':
     'the page answered no flights for the pair it asked; this day pair was not shown, so it is not searched yet',
   'scroll-allowance': 'the run’s scroll allowance ended before the grid reached this day pair',
+  'grid-not-drawn':
+    'the date grid had not filled in its prices when the page’s time ran out, so none of it was read',
 };
 
 export const issueOf = (cell: CellKey, code: string): CellIssue => ({

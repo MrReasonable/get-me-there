@@ -111,6 +111,17 @@ describe('the grid answer', () => {
     for (const ended of ['scroll-not-settled', 'off-plan', 'allowance', 'no-flights'])
       expect(workerAnswerSchema.safeParse({ ...answer, ended }).success).toBe(true);
   });
+  // why: CodeRabbit on PR #39: a grid whose prices never arrived read no view, so its answer holds none to price from
+  it('a first-not-drawn answer holds no view: none is accepted, any is refused', () => {
+    expect(workerAnswerSchema.safeParse({ ...answer, ended: 'first-not-drawn', views: [] }).success).toBe(
+      true,
+    );
+    const r = workerAnswerSchema.safeParse({ ...answer, ended: 'first-not-drawn' });
+    expect(r.success).toBe(false);
+    expect(r.error?.issues.map((i) => [i.path.join('.'), i.message])).toEqual([
+      ['views', 'a page whose first view never drew a price reads no view'],
+    ]);
+  });
   it.each([
     ['a cell whose return is before its departure', { ...cell, returnDate: '2027-03-10' }],
     ['a mark outside the three', { ...cell, mark: 'great' }],

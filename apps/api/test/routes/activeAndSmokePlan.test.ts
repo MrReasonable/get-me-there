@@ -179,19 +179,19 @@ describe('GET /api/tools/smoke/plan (spec §10; ledgers nothing)', () => {
       { searchApi: null, travelpayouts: null, camoufox: { pages: 1, scrolls: 0, pageBoundSeconds: 105 } },
     ],
     [
-      // why: 2 × 90 + 12 × (5 + 60) + 15
+      // why: 4 × 90 + 30 + 12 × (5 + 60) + 15 (the first load, its one reload after the page spacing, the scrolls)
       'camoufox in grid mode',
       { ...CAMOUFOX, CAMOUFOX_MODE: 'grid', CAMOUFOX_GRID_SCROLL_CAP: '12' },
-      { searchApi: null, travelpayouts: null, camoufox: { pages: 1, scrolls: 12, pageBoundSeconds: 975 } },
+      { searchApi: null, travelpayouts: null, camoufox: { pages: 1, scrolls: 12, pageBoundSeconds: 1185 } },
     ],
     [
-      // why: 2 × 90 + 30 × (5 + 60) + 15 at the default settings (spec §2), past the CLI's 600 s for the rest
+      // why: 4 × 90 + 30 + 30 × (5 + 60) + 15 at the default settings (spec §2), past the CLI's 600 s for the rest
       'camoufox in grid mode at the default settings',
       { ...CAMOUFOX, CAMOUFOX_MODE: 'grid' },
-      { searchApi: null, travelpayouts: null, camoufox: { pages: 1, scrolls: 30, pageBoundSeconds: 2145 } },
+      { searchApi: null, travelpayouts: null, camoufox: { pages: 1, scrolls: 30, pageBoundSeconds: 2355 } },
     ],
     [
-      // why: 2 × 240 + 60 × (30 + 60) + 15 at each setting's maximum
+      // why: 4 × 240 + 30 + 60 × (30 + 60) + 15 at each setting's maximum (the page spacing at its default)
       'camoufox in grid mode at the longest settings',
       {
         ...CAMOUFOX,
@@ -200,7 +200,7 @@ describe('GET /api/tools/smoke/plan (spec §10; ledgers nothing)', () => {
         CAMOUFOX_GRID_SCROLL_CAP: '60',
         CAMOUFOX_GRID_SCROLL_SPACING_SECONDS: '30',
       },
-      { searchApi: null, travelpayouts: null, camoufox: { pages: 1, scrolls: 60, pageBoundSeconds: 5895 } },
+      { searchApi: null, travelpayouts: null, camoufox: { pages: 1, scrolls: 60, pageBoundSeconds: 6405 } },
     ],
   ] as const)('%s: the worst case smokeWorstCase states, split per stage', async (_label, env, expected) => {
     const x = await harness(env);

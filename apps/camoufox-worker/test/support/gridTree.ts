@@ -54,6 +54,8 @@ export interface GridTreeOptions {
    * selected cell is one of them, its price line is not drawn either.
    */
   undrawn?: (d: string, r: string) => boolean;
+  /** The selected pair's price line in place of its price (an unpriced selected pair prints none: ''). */
+  selectedPrice?: string;
 }
 
 function selectedLines(range: string, price: string, form: 'shared' | 'separate' | 'spaced'): FakeNode[] {
@@ -139,9 +141,10 @@ export function gridTree(o: GridTreeOptions): FakeNode {
           ...(scroll ? [n('button', 'Scroll up'), n('button', 'Scroll down')] : []),
           ...selectedLines(
             selectedRange(sel[0], sel[1], o.thisYear),
-            o.undrawn?.(sel[0], sel[1]) === true
-              ? ''
-              : `£${price(sel[0], sel[1]).toLocaleString('en-GB')} · Round trip`,
+            o.selectedPrice ??
+              (o.undrawn?.(sel[0], sel[1]) === true
+                ? ''
+                : `£${price(sel[0], sel[1]).toLocaleString('en-GB')} · Round trip`),
             o.selectedForm ?? 'shared',
           ),
           ...(o.extra ?? []),

@@ -6,7 +6,14 @@ import { createConsentDriver, headedEnv, NO_DISPLAY, NoDisplay } from '../src/co
 import { decideConsentCaptureRoute } from '../src/consentGuard.js';
 import { observe, RESEARCH_NOTE, type ResearchSession, researchRecord } from '../src/consentResearch.js';
 import { SOCS_CAPTURE_LIMIT_MS, watchConsentWindow } from '../src/consentWatch.js';
-import type { HeadedContextLike, RequestLike } from '../src/driver.js';
+import type {
+  ConsoleMessageLike,
+  FailedRequestLike,
+  HeadedContextLike,
+  RequestLike,
+  ResponseLike,
+  WebErrorLike,
+} from '../src/driver.js';
 import { decideProbeRoute, decideRoute } from '../src/guard.js';
 import { buildLaunchOptions } from '../src/launch.js';
 import { SELECTORS } from '../src/selectors.js';
@@ -116,11 +123,26 @@ describe('the display variables (decision 74)', () => {
 class HeadedFake extends FakeContext implements HeadedContextLike {
   readonly closeListeners: Array<() => void> = [];
   override on(event: 'request', listener: (r: RequestLike) => void): unknown;
+  override on(event: 'requestfailed', listener: (r: FailedRequestLike) => void): unknown;
+  override on(event: 'response', listener: (r: ResponseLike) => void): unknown;
+  override on(event: 'console', listener: (m: ConsoleMessageLike) => void): unknown;
+  override on(event: 'weberror', listener: (e: WebErrorLike) => void): unknown;
   override on(event: 'close', listener: () => void): unknown;
-  override on(event: 'request' | 'close', listener: (r: RequestLike) => void): unknown {
+  override on(
+    event: 'request' | 'requestfailed' | 'response' | 'console' | 'weberror' | 'close',
+    listener: ((r: RequestLike) => void) &
+      ((r: FailedRequestLike) => void) &
+      ((r: ResponseLike) => void) &
+      ((m: ConsoleMessageLike) => void) &
+      ((e: WebErrorLike) => void),
+  ): unknown {
     // why: a close listener takes no argument; it is called with a stand-in that it ignores
     if (event === 'close') this.closeListeners.push(() => listener(request({ url: 'about:blank' })));
-    else super.on('request', listener);
+    else if (event === 'request') super.on('request', listener);
+    else if (event === 'requestfailed') super.on('requestfailed', listener);
+    else if (event === 'response') super.on('response', listener);
+    else if (event === 'console') super.on('console', listener);
+    else super.on('weberror', listener);
     return this;
   }
 }
