@@ -48,9 +48,11 @@ export const BLOCKED_PAGES = [
 export const blockedPageSchema = z.enum(BLOCKED_PAGES);
 export type BlockedPage = z.infer<typeof blockedPageSchema>;
 
-// why: names from the airports dataset; bounded so a body stays well under the worker's 4 KiB limit.
+// why: names from the airports dataset (one a code); bounded so a body stays well under the worker's 8 KiB limit.
 // why: fix round 1 (prov M2): at least one name, or no option could ever match and every page would read as unrecognised
-const airportNameList = z.array(z.string().min(1).max(120)).min(1).max(8);
+const airportNameList = z.array(z.string().min(1).max(120)).min(1).max(2);
+// why: spec §2 "Airport names": the search's other chosen airports on one side, at most a metro's worth (Moscow: six)
+const otherAirportNames = z.array(airportNameList).max(8);
 
 /**
  * The one cell a list or flights page loads (spec revision 55 §2: one shared field shape and one shared refinement pair
@@ -62,7 +64,12 @@ const cellPageFields = {
   departureDate: isoDateSchema,
   returnDate: isoDateSchema,
   gl: z.string().regex(/^[A-Z]{2}$/),
-  airportNames: z.strictObject({ origin: airportNameList, destination: airportNameList }),
+  airportNames: z.strictObject({
+    origin: airportNameList,
+    destination: airportNameList,
+    otherOrigins: otherAirportNames,
+    otherDestinations: otherAirportNames,
+  }),
 };
 type CellPage = { origin: string; destination: string; departureDate: string; returnDate: string };
 /** The two refinements every cell page request carries: one cell (the return follows the departure), two airports. */

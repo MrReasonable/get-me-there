@@ -70,8 +70,8 @@ export function readOptions(
     else if (
       p.departsOn.month === dep.getUTCMonth() + 1 &&
       p.departsOn.day === dep.getUTCDate() &&
-      airportMatches(p.from, req.airportNames.origin) &&
-      airportMatches(p.to, req.airportNames.destination)
+      airportMatches(p.from, req.airportNames.origin, req.airportNames.otherOrigins) &&
+      airportMatches(p.to, req.airportNames.destination, req.airportNames.otherDestinations)
     )
       mine.push({ option: p, name });
     else skipped.push({ why: 'other-cell', name });

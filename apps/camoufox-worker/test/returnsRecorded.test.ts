@@ -101,7 +101,12 @@ interface Recorded {
   raw: unknown;
   req: {
     returnDate: ReturnType<typeof asIsoDate>;
-    airportNames: { origin: string[]; destination: string[] };
+    airportNames: {
+      origin: string[];
+      destination: string[];
+      otherOrigins: string[][];
+      otherDestinations: string[][];
+    };
   };
 }
 

@@ -60,7 +60,15 @@ export interface RecordedList {
    */
   contentSha256: string;
   facts: ListFacts;
-  req: { departureDate: IsoDate; airportNames: { origin: string[]; destination: string[] } };
+  req: {
+    departureDate: IsoDate;
+    airportNames: {
+      origin: string[];
+      destination: string[];
+      otherOrigins: string[][];
+      otherDestinations: string[][];
+    };
+  };
 }
 
 /** Every recording of `kind` whose page URL states the query (the first view's load), in path order. */
@@ -94,7 +102,12 @@ export function recordedLists(kind: 'results' | 'cheapest' | 'view-more'): Recor
         facts: rec.list,
         req: {
           departureDate: asIsoDate(departure),
-          airportNames: { origin: own(origin), destination: own(destination) },
+          airportNames: {
+            origin: own(origin),
+            destination: own(destination),
+            otherOrigins: [],
+            otherDestinations: [],
+          },
         },
       });
     }
@@ -116,13 +129,14 @@ export function pinOf(contentSha256: string, value: unknown): string {
 export function airportNamesOf(
   origin: string,
   destination: string,
-): { origin: string[]; destination: string[] } {
+): { origin: string[]; destination: string[]; otherOrigins: string[][]; otherDestinations: string[][] } {
   const names = datasetNames();
   const own = (code: string): string[] => {
     const n = names.get(code);
     return n === undefined ? [] : [n];
   };
-  return { origin: own(origin), destination: own(destination) };
+  // why: a recording is one pair's page: no other chosen airport
+  return { origin: own(origin), destination: own(destination), otherOrigins: [], otherDestinations: [] };
 }
 
 /**

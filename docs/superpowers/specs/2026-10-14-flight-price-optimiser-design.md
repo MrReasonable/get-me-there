@@ -1,6 +1,6 @@
 # get-me-there — Flight Price Intelligence & Flexible-Date Optimiser
 
-**Design spec, revision 59.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
+**Design spec, revision 60.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
 four full-roster reviews (145, 140, 126 and 101 findings; zero Critical since
 revision 2) and the provider spike. Revision 9 folds in the three decisions
 taken at approval (the self-scraping fallback in §2, the dashboard readings in
@@ -240,7 +240,7 @@ idle-sleeps under it (browser errors, time-outs, pages that never settle), so
 while any run is in progress the app keeps the machine awake through the
 worker, which always runs on the host (a Docker app cannot hold the host
 awake). `POST /v1/awake` takes `{ seconds }`, whole seconds from 0 to 600,
-under the same key, 4,096-byte body cap and validation as the page routes; it
+under the same key, 8,192-byte body cap and validation as the page routes; it
 loads no page, answers `x-gmt-google-contacted: 0`, and starts or renews a
 lease of that many seconds from now, replacing any lease held; `seconds: 0`
 releases it. It answers `{ held, until, mechanism }` (`until` the lease's end
@@ -311,9 +311,9 @@ the name: a tab with none there is unpriced.
   confirms the "Cheapest" tab's flow, the worker clicks nothing: it reads
   every result link on the page, parses each accessible name ("From 478
   British pounds round trip total. 1 stop flight with …"), keeps the options
-  whose departure date and whose departure and arrival airports (matched to
-  the queried codes through the airports dataset's names, and any extra
-  names the operator gives a code in `AIRPORT_NAMES`) are the cell's,
+  whose departure date and whose departure and arrival airports (matched
+  among the airports the operator chose, through the airports dataset's
+  names; see "Airport names" below) are the cell's,
   and takes the minimum itself. An option whose name does not parse is
   dropped and counted (`offers-dropped:n`); options for another day or
   airport are counted on the cell as such; a "Cheapest from £X" tab price
@@ -540,7 +540,7 @@ cell, economy only, it opens the same list page a `list` tile opens, in the
 worker's verified URL form (`core/camoufox/url.ts`'s `pageUrl`: returning,
 `hl=en-GB`, `gl=` the point of sale), through the worker's own route
 `POST /v1/flights` (it admits only a `mode: 'flights'` request, under the same
-4,096-byte body cap as `/v1/page`; a `/v1/page` request carrying `returnLimits`
+8,192-byte body cap as `/v1/page`; a `/v1/page` request carrying `returnLimits`
 is refused, and so is a `booking` ask without `returnLimits`), and answers what
 the page showed for the
 pair (`listed`: `flights`, at least one flight read for the pair;
@@ -1226,19 +1226,26 @@ Spaces and invisible format characters (a zero-width space, seen 2026-11-03)
 may separate the "Location" label from the place.
 **Airport names.** Google names airports, never codes, and its name can differ
 from the airports dataset's ("<City> <Name> Airport" where the dataset says
-"<City> Airport"). No general rule closes that gap safely: one that let a
-shorter dataset name match a longer page name would confuse 28 pairs of airports
-in the same city in the 2026-10-01 dataset (Brussels and Brussels South
-Charleroi among them), so an option would be counted for the wrong airport.
-The operator names the gap instead: `AIRPORT_NAMES`, `CODE=Name` entries
-separated by `;` (a three-letter upper-case code, a name of 1 to 120
-characters; a code may repeat), adds each name beside the dataset's for that
-code when the engine sends a page its airport names; an invalid value fails
-boot naming the field. It lives in the operator's environment, never in the
-repository. The worker logs at debug, to its own log only, each option a list
-page did not count for its cell (unparsed or another cell's, the name whole,
-at most 30 a page) with the page's location text, so the name to add can be
-read there.
+"<City> Airport"). A page loads only airports the operator chose, so an
+option's airport is matched among those, never the whole dataset: the engine
+sends each page its cell's two codes' dataset names and, apart, the names of
+the search's other chosen airports on each side (with "London (all)" chosen,
+every London airport; a chosen code the dataset does not know is left out).
+A name fits an airport closely when it is equal after folding case and
+punctuation, when one is a word-suffix of the other and the shorter keeps a
+word that is not generic ("airport", "international", "intl", "regional",
+"municipal", "airfield", "the", "of"), or through a dated alias added only from
+a recording; failing that, its fit is the number of its non-generic words the
+airport's name shares. An option's airport is the cell's only when the cell's
+airport fits (closely, or by at least one shared word) and fits strictly better
+than every other chosen airport on that side, a close fit beating any number of
+shared words; a tie is no match. So with only one airport chosen a side,
+a page's longer "<City> <Name> Airport" matches the dataset's "<City> Airport", and with Brussels and
+Brussels South Charleroi both chosen, "Brussels South Charleroi Airport" is
+Charleroi's and "Brussels Airport" is Brussels'. The worker logs at debug, to
+its own log only, each option a list page did not count for its cell
+(unparsed or another cell's, the name whole, at most 30 a page) with the page's
+location text.
 
 *Coverage, stated plainly.* In `list` mode a page prices one day pair, so a
 run prices at most `CAMOUFOX_EXECUTION_PAGE_CAP` day pairs and a month at
@@ -1591,7 +1598,7 @@ export interface DiscoveryQuery {
   cells?: CellKey[];     // when set, discovery.plan RE-PLANS over this subset (fewer calls); tiles still partition it
   airportNames?: CellAirportNames;   // names from the airports dataset, set by the engine for a provider that matches airports by name (camoufox)
 }
-export interface CellAirportNames { origin: string[]; destination: string[] }
+export interface CellAirportNames { origin: string[]; destination: string[]; otherOrigins: string[][]; otherDestinations: string[][] }   // the cell's codes' names, then the search's other chosen airports', one list an airport
 export interface TilePlan { index: number; coveredCells: CellKey[]; request: TileRequest }   // vendor-neutral, typed
 export type TileRequest =
   | { kind: 'month'; month: IsoMonth }                                   // Travelpayouts month tiles
@@ -5104,7 +5111,6 @@ ALLOW_UNAUTHENTICATED=false              # only for Tailscale-only hosts
 TRUST_PROXY=false                        # read the client IP from X-Forwarded-For (reverse-proxy deployments)
 LOG_LEVEL=info
 POINT_OF_SALE=GB                         # ISO 3166 country for the vendors' point-of-sale parameters; base currency is fixed at GBP in this build
-AIRPORT_NAMES=                           # optional extra airport names for the browser's flight lists: CODE=Name entries separated by ';'
 STALE_AFTER_HOURS=192                    # verified basis: one weekly cycle + 24 h
 CALENDAR_STALE_AFTER_HOURS=              # optional override, replacing the threshold outright; default per price = discoveryRefreshHours + the price's own stored max_age_hours (§8.1)
 STUCK_AFTER_HOURS=12
@@ -5729,6 +5735,15 @@ as specified in §5.3; no secrets, no full URLs.
 ---
 
 ## 17. Changelog
+
+### Revision 60: airports matched among the ones chosen (2026-11-04)
+
+Ian ruled that an option's airport is matched against the airports the operator chose, never a name typed into a
+setting: §2 "Airport names" matches it among the search's chosen airports on each side, the engine sending their names
+beside the cell's, and `AIRPORT_NAMES` is withdrawn. The same-city confusion that ruled out a general rule in
+revision 59 comes only from matching against the whole dataset: with one airport chosen a side, a page's longer name
+for it matches; with several chosen, the best fit wins and a tie is no match. A request's airport names grow by the
+other chosen airports', so the worker's body cap is 8,192 bytes.
 
 ### Revision 59: flight lists the first live run could not read (2026-11-03)
 

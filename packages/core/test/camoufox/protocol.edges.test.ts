@@ -19,6 +19,8 @@ beforeEach(() => {
 const NAMES = {
   origin: ['London Heathrow Airport'],
   destination: ['John F Kennedy International Airport'],
+  otherOrigins: [],
+  otherDestinations: [],
 };
 const LIST = {
   mode: 'list',

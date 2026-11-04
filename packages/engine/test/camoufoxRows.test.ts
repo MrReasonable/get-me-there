@@ -158,6 +158,8 @@ describe('spec §8.1 rev 32: camoufox rows', () => {
     expect(s.queries[0]?.airportNames).toEqual({
       origin: ['London Heathrow Airport'],
       destination: ['John F Kennedy International Airport'],
+      otherOrigins: [],
+      otherDestinations: [],
     });
   });
 });

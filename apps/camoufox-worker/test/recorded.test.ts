@@ -588,11 +588,13 @@ const LIST_PARITY: Readonly<
     resultsSeen: 23,
     resultsStated: 23,
   },
+  // why: spec §2 "Airport names": this page names its origin longer than the dataset does; matched among the chosen
+  // airports, its 8 options are the cell's (it pinned 8 other-cell, 0 for the cell, before)
   'results/2026-10-27/1': {
     optionsUnparsed: 0,
-    optionsOtherCell: 8,
-    parsedForThisCell: 0,
-    prices: 'f828d46a9d9cc697',
+    optionsOtherCell: 0,
+    parsedForThisCell: 8,
+    prices: 'e6c4a9d79a09a2f5',
     resultsSeen: 8,
     resultsStated: 9,
   },

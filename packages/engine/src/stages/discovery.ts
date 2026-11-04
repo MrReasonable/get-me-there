@@ -1,5 +1,6 @@
 import {
   type CapabilityInfo,
+  type CellAirportNames,
   type CellIssue,
   type CellKey,
   cellKeyString,
@@ -50,15 +51,35 @@ export function normaliseDeps(ctx: EngineContext): RepoDeps {
 /** The airports dataset's names for a code (spec §5.1 rev 32 `airportNames`); none when the code is unknown. */
 export type AirportNames = (iata: Iata) => string[];
 
-/**
- * Names from the airports repository, the engine's one source of them, then the operator's own extra names for the
- * code (spec §2 "Airport names": AIRPORT_NAMES, for an airport a page names differently from the dataset). An unknown
- * code has none, extra names or not.
- */
-export function airportNamesOf(ctx: Pick<EngineContext, 'repos' | 'config'>): AirportNames {
+/** Names from the airports repository, the engine's one source of them; an unknown code has none. */
+export function airportNamesOf(ctx: Pick<EngineContext, 'repos'>): AirportNames {
   return (iata) => {
     const a = ctx.repos.airports.get(iata);
-    return a === null ? [] : [a.name, ...(ctx.config.airportNames.get(iata) ?? [])];
+    return a === null ? [] : [a.name];
+  };
+}
+
+/**
+ * A cell's airport names (spec §2 "Airport names"): its two codes' names, and those of the search's other chosen
+ * airports on each side, so a page's options are matched among the airports the operator chose. An other airport the
+ * dataset does not know is left out: no option could match it.
+ */
+export function cellAirportNames(
+  names: AirportNames,
+  chosen: { origins: readonly Iata[]; destinations: readonly Iata[] },
+  origin: Iata,
+  destination: Iata,
+): CellAirportNames {
+  const others = (codes: readonly Iata[], own: Iata): string[][] =>
+    codes
+      .filter((c) => c !== own)
+      .map(names)
+      .filter((n) => n.length > 0);
+  return {
+    origin: names(origin),
+    destination: names(destination),
+    otherOrigins: others(chosen.origins, origin),
+    otherDestinations: others(chosen.destinations, destination),
   };
 }
 
@@ -75,9 +96,7 @@ export function discoveryQuery(
 ): DiscoveryQuery {
   const r = snapshot.resolved;
   return {
-    ...(names === undefined
-      ? {}
-      : { airportNames: { origin: names(origin), destination: names(destination) } }),
+    ...(names === undefined ? {} : { airportNames: cellAirportNames(names, r, origin, destination) }),
     origin,
     destination,
     departureFrom: r.departureFrom,

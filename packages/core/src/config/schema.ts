@@ -33,12 +33,6 @@ export interface Config {
   trustProxy: boolean;
   logLevel: 'trace' | 'debug' | 'info' | 'warn' | 'error';
   pointOfSale: string;
-  /**
-   * Spec §2 "Airport names": the operator's own extra names for an airport, by code (AIRPORT_NAMES), matched beside the
-   * airports dataset's name when a flight list's options are matched to the queried codes. Empty when unset. It lives
-   * in the operator's environment, never in the repository.
-   */
-  airportNames: ReadonlyMap<string, readonly string[]>;
   staleAfterHours: number;
   calendarStaleAfterHours: number | null;
   stuckAfterHours: number;
@@ -427,10 +421,6 @@ export function parseConfig(env: Env, opts: ParseConfigOptions): ConfigResult {
 
   // why: POINT_OF_SALE is a shared setting (the worker loads its pages with it), read by the one rule set
   const pointOfSale = shared.POINT_OF_SALE;
-  const parsedAirportNames = parseAirportNames(r.str('AIRPORT_NAMES'));
-  if (parsedAirportNames === null) r.fail('AIRPORT_NAMES', AIRPORT_NAMES_MESSAGE);
-  // why: a failed value fails boot above, so this empty map is never a parsed config's
-  const airportNames = parsedAirportNames ?? new Map<string, string[]>();
   const schedulerTimezone = r.str('SCHEDULER_TIMEZONE') ?? 'Europe/London';
   if (!isValidTimeZone(schedulerTimezone))
     r.fail('SCHEDULER_TIMEZONE', `unknown IANA time zone: ${schedulerTimezone}`);
@@ -556,7 +546,6 @@ export function parseConfig(env: Env, opts: ParseConfigOptions): ConfigResult {
       trustProxy,
       logLevel,
       pointOfSale,
-      airportNames,
       staleAfterHours,
       calendarStaleAfterHours,
       stuckAfterHours,
@@ -577,27 +566,4 @@ export function parseConfig(env: Env, opts: ParseConfigOptions): ConfigResult {
       allowFixtureProvider,
     },
   };
-}
-
-/** Spec §2 "Airport names": the longest extra name AIRPORT_NAMES may give. */
-export const AIRPORT_NAME_MAX = 120;
-export const AIRPORT_NAMES_MESSAGE =
-  'must be CODE=Name entries separated by ";" (a three-letter upper-case code, a name of 1 to 120 characters)';
-
-/**
- * AIRPORT_NAMES, "LGW=Gatwick; LHR=Heathrow Terminal Airport", into each code's extra names in order (a code may repeat);
- * an empty or unset value is no names; null when any entry is not `CODE=Name`.
- */
-export function parseAirportNames(raw: string | undefined): Map<string, string[]> | null {
-  const names = new Map<string, string[]>();
-  if (raw === undefined) return names;
-  for (const entry of raw.split(';')) {
-    if (entry.trim() === '') continue;
-    const m = /^\s*([A-Z]{3})\s*=\s*(.*\S)\s*$/.exec(entry);
-    const code = m?.[1];
-    const name = m?.[2];
-    if (code === undefined || name === undefined || name.length > AIRPORT_NAME_MAX) return null;
-    names.set(code, [...(names.get(code) ?? []), name]);
-  }
-  return names;
 }

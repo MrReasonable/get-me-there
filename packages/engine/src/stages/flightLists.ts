@@ -43,7 +43,7 @@ import { errorText } from '../errors.js';
 import { lineKey } from '../lines.js';
 import { disableProvider, type RunState, stopRun } from '../run.js';
 import { toStopDetail } from '../stopCause.js';
-import { airportNamesOf } from './discovery.js';
+import { airportNamesOf, cellAirportNames } from './discovery.js';
 import { flightPageGate, windowSecondsLeft } from './flightLists/gate.js';
 import { newestListOf, type ReusePlan, selectFlightPairs } from './flightLists/select.js';
 import { refreshHoursOf } from './reuse.js';
@@ -207,7 +207,7 @@ async function readPage(
       });
     const query: FlightListQuery = {
       cell,
-      airportNames: { origin: names(cell.origin), destination: names(cell.destination) },
+      airportNames: cellAirportNames(names, run.snapshot.resolved, cell.origin, cell.destination),
       ...(req.returnLimits === null ? {} : { returnLimits: req.returnLimits, booking: req.booking }),
     };
     const r = await cap.read(query, {

@@ -204,6 +204,8 @@ describe('worker rules: a full page session sets only SOCS and clicks nothing on
       airportNames: {
         origin: ['London Heathrow Airport'],
         destination: ['John F Kennedy International Airport'],
+        otherOrigins: [],
+        otherDestinations: [],
       },
     };
     expect((await session.page(req)).answer.kind).toBe('cells');
@@ -333,6 +335,8 @@ describe('worker rules: a flights page with returnLimits activates only the veri
       airportNames: {
         origin: ['London Heathrow Airport'],
         destination: ['John F Kennedy International Airport'],
+        otherOrigins: [],
+        otherDestinations: [],
       },
       returnLimits: {
         maxJourneyMinutes: null,

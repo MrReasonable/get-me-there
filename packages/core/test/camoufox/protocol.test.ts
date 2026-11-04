@@ -44,6 +44,8 @@ const request = {
   airportNames: {
     origin: ['London Heathrow Airport'],
     destination: ['John F Kennedy International Airport'],
+    otherOrigins: [],
+    otherDestinations: [],
   },
 };
 
@@ -207,14 +209,41 @@ describe('worker protocol (core/src/camoufox/protocol.ts; brief §5, §6)', () =
     for (const pos of ['gb', 'GBR', 'G', 'Unknown', ''])
       expect(workerAnswerSchema.safeParse({ ...a, pointOfSale: pos }).success, pos).toBe(false);
   });
-  it('airport names: one to eight names of 1 to 120 characters each (the 4 KiB body bound)', () => {
+  it('airport names: one or two names of 1 to 120 characters each', () => {
     const names = (origin: string[]) => ({ ...request, airportNames: { ...request.airportNames, origin } });
     expect(pageRequestSchema.safeParse(names([])).success).toBe(false);
-    expect(pageRequestSchema.safeParse(names(Array(8).fill('A'))).success).toBe(true);
-    expect(pageRequestSchema.safeParse(names(Array(9).fill('A'))).success).toBe(false);
+    expect(pageRequestSchema.safeParse(names(Array(2).fill('A'))).success).toBe(true);
+    expect(pageRequestSchema.safeParse(names(Array(3).fill('A'))).success).toBe(false);
     expect(pageRequestSchema.safeParse(names(['A'.repeat(120)])).success).toBe(true);
     expect(pageRequestSchema.safeParse(names(['A'.repeat(121)])).success).toBe(false);
     expect(pageRequestSchema.safeParse(names([''])).success).toBe(false);
+  });
+  it('other chosen airports (spec §2 "Airport names"): none to eight a side, each with one or two names', () => {
+    const others = (otherOrigins: string[][], otherDestinations: string[][] = []) => ({
+      ...request,
+      airportNames: { ...request.airportNames, otherOrigins, otherDestinations },
+    });
+    expect(pageRequestSchema.safeParse(others([])).success).toBe(true);
+    expect(pageRequestSchema.safeParse(others(Array(8).fill(['A']))).success).toBe(true);
+    expect(pageRequestSchema.safeParse(others(Array(9).fill(['A']))).success).toBe(false);
+    expect(pageRequestSchema.safeParse(others([], Array(9).fill(['A']))).success).toBe(false);
+    expect(pageRequestSchema.safeParse(others([[]])).success).toBe(false);
+    expect(pageRequestSchema.safeParse(others([['A', 'B', 'C']])).success).toBe(false);
+    const { otherOrigins: _o, ...noOthers } = request.airportNames;
+    expect(pageRequestSchema.safeParse({ ...request, airportNames: noOthers }).success).toBe(false);
+    // why: the largest request the schema takes still fits the worker's 8,192-byte body cap (server.ts MAX_BODY_BYTES)
+    const long = ['A'.repeat(120), 'B'.repeat(120)];
+    const largest = {
+      ...request,
+      airportNames: {
+        origin: long,
+        destination: long,
+        otherOrigins: Array(8).fill(long),
+        otherDestinations: Array(8).fill(long),
+      },
+    };
+    expect(pageRequestSchema.safeParse(largest).success).toBe(true);
+    expect(JSON.stringify(largest).length).toBeLessThan(8192);
   });
   it('status: cooldownHours from 24, pageTimeoutSeconds 30 to 240', () => {
     expect(workerStatusSchema.safeParse({ ...status, cooldownHours: 24 }).success).toBe(true);

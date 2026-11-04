@@ -33,7 +33,12 @@ const CELL = {
   departureDate: asIsoDate('2027-03-14'),
   returnDate: asIsoDate('2027-03-24'),
 };
-const NAMES = { origin: ['London Heathrow Airport'], destination: ['John F Kennedy International Airport'] };
+const NAMES = {
+  origin: ['London Heathrow Airport'],
+  destination: ['John F Kennedy International Airport'],
+  otherOrigins: [],
+  otherDestinations: [],
+};
 const Q = { cell: CELL, airportNames: NAMES };
 const ctx = { executionId: 'exec-1', signal: new AbortController().signal, recordFixtures: false };
 const contacted = (yes: boolean) => ({ headers: { 'x-gmt-google-contacted': yes ? '1' : '0' } });
@@ -261,8 +266,8 @@ describe('camoufox flightLists (spec rev 55 §2, §5.1)', () => {
     const { lists, events } = setup();
     server.use(capture(() => HttpResponse.json(answer(), contacted(true))));
     for (const names of [
-      { origin: [], destination: NAMES.destination },
-      { origin: NAMES.origin, destination: [] },
+      { ...NAMES, origin: [] },
+      { ...NAMES, destination: [] },
     ]) {
       const r = await lists.read({ cell: CELL, airportNames: names }, ctx);
       expect(r.kind).toBe('list-error');
@@ -284,6 +289,8 @@ describe('camoufox flightLists (spec rev 55 §2, §5.1)', () => {
         airportNames: {
           origin: Array.from({ length: 9 }, () => 'QQ Airport'),
           destination: NAMES.destination,
+          otherOrigins: [],
+          otherDestinations: [],
         },
       },
       { cell: { ...CELL, returnDate: CELL.departureDate }, airportNames: NAMES },

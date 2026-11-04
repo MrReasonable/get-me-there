@@ -46,6 +46,8 @@ const REQ: PageRequest = {
   airportNames: {
     origin: ['London Heathrow Airport'],
     destination: ['John F Kennedy International Airport'],
+    otherOrigins: [],
+    otherDestinations: [],
   },
 };
 const URL0 =
@@ -1085,6 +1087,8 @@ describe('PageSession in flights mode (spec rev 55 §2)', () => {
     airportNames: {
       origin: ['London Heathrow Airport'],
       destination: ['John F Kennedy International Airport'],
+      otherOrigins: [],
+      otherDestinations: [],
     },
   };
   // The fake page's option (test/support/fakePage.ts): 12:25 → 20:05 the same day, one stop, 12 hrs 40 min.

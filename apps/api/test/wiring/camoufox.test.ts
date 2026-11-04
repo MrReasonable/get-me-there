@@ -128,6 +128,8 @@ describe('apps/api wiring: camoufox grid mode (fix round 1, CA 1)', () => {
       airportNames: {
         origin: ['London Heathrow Airport'],
         destination: ['John F Kennedy International Airport'],
+        otherOrigins: [],
+        otherDestinations: [],
       },
     };
     const [tile] = d.plan(q);
@@ -172,6 +174,8 @@ describe('apps/api wiring: camoufox shared settings and app instance (WP16a, spe
       airportNames: {
         origin: ['London Heathrow Airport'],
         destination: ['John F Kennedy International Airport'],
+        otherOrigins: [],
+        otherDestinations: [],
       },
     };
     const [tile] = d.plan(q);
@@ -261,6 +265,8 @@ describe('apps/api wiring: camoufox flights request timeout (spec rev 56 §2, §
       airportNames: {
         origin: ['London Heathrow Airport'],
         destination: ['John F Kennedy International Airport'],
+        otherOrigins: [],
+        otherDestinations: [],
       },
     };
     const ctx = { executionId: 'e1', signal: new AbortController().signal, recordFixtures: false };

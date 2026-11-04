@@ -22,6 +22,8 @@ const Q = {
   airportNames: {
     origin: ['London Heathrow Airport'],
     destination: ['John F Kennedy International Airport'],
+    otherOrigins: [],
+    otherDestinations: [],
   },
 };
 const ctx = { executionId: 'exec-1', signal: new AbortController().signal, recordFixtures: false };
@@ -539,11 +541,19 @@ describe('camoufox fetchTile (spec §2, §5.2)', () => {
       kind: 'tile-error',
     });
     expect(
-      await p.discovery?.fetchTile(tile, { ...Q, airportNames: { origin: [''], destination: [] } }, ctx),
+      await p.discovery?.fetchTile(
+        tile,
+        { ...Q, airportNames: { origin: [''], destination: [], otherOrigins: [], otherDestinations: [] } },
+        ctx,
+      ),
     ).toMatchObject({ kind: 'tile-error' });
     // why: fix round 1 (prov M2, CodeRabbit): two empty lists are no names at all
     expect(
-      await p.discovery?.fetchTile(tile, { ...Q, airportNames: { origin: [], destination: [] } }, ctx),
+      await p.discovery?.fetchTile(
+        tile,
+        { ...Q, airportNames: { origin: [], destination: [], otherOrigins: [], otherDestinations: [] } },
+        ctx,
+      ),
     ).toMatchObject({ kind: 'tile-error', error: { kind: 'parse' } });
     expect(budget.rowsOf('camoufox')).toEqual([]);
   });
