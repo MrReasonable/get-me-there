@@ -3,7 +3,7 @@ import { airportMatches, fold } from '../src/airports.js';
 
 const HEATHROW = ['London Heathrow Airport'];
 const GATWICK = ['London Gatwick Airport'];
-const CITY = ['London City Airport'];
+const THIRD = ['London Qqthird Airport'];
 const JFK = ['John F Kennedy International Airport'];
 const NEWARK = ['Newark Liberty International Airport'];
 
@@ -26,12 +26,12 @@ describe('airportMatches (prov-006; spec §2 "Airport names")', () => {
     expect(airportMatches('Newark Liberty International Airport', JFK, [])).toBe(false);
     expect(airportMatches('International Airport', JFK, [])).toBe(false);
   });
-  it('among the chosen airports the best fit wins: London (all) tells Heathrow from Gatwick and City', () => {
-    const others = [GATWICK, CITY];
+  it('among the chosen airports the best fit wins: London (all) tells Heathrow from Gatwick and a third London airport', () => {
+    const others = [GATWICK, THIRD];
     expect(airportMatches('Heathrow Airport', HEATHROW, others)).toBe(true);
     expect(airportMatches('London Heathrow Airport', HEATHROW, others)).toBe(true);
     expect(airportMatches('Gatwick Airport', HEATHROW, others)).toBe(false);
-    expect(airportMatches('Gatwick Airport', GATWICK, [HEATHROW, CITY])).toBe(true);
+    expect(airportMatches('Gatwick Airport', GATWICK, [HEATHROW, THIRD])).toBe(true);
   });
   it('a close fit beats a shared word: with both chosen, the longer name is its own airport, the shorter its own', () => {
     const plain = ['Qqcity Airport'];

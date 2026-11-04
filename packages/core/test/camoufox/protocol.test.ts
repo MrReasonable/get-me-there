@@ -218,7 +218,7 @@ describe('worker protocol (core/src/camoufox/protocol.ts; brief §5, §6)', () =
     expect(pageRequestSchema.safeParse(names(['A'.repeat(121)])).success).toBe(false);
     expect(pageRequestSchema.safeParse(names([''])).success).toBe(false);
   });
-  it('other chosen airports (spec §2 "Airport names"): none to eight a side, each with one or two names', () => {
+  it('other chosen airports (spec §2 "Airport names"): none to eight a side (all chosen but the cell’s), one or two names each', () => {
     const others = (otherOrigins: string[][], otherDestinations: string[][] = []) => ({
       ...request,
       airportNames: { ...request.airportNames, otherOrigins, otherDestinations },

@@ -7,6 +7,12 @@ export type WindowSpec =
   | { kind: 'absolute'; from: IsoDate; to: IsoDate }
   | { kind: 'relative'; startOffsetDays: number; lengthDays: number };
 
+/**
+ * Spec §3 "Search definition": the most airports a search names on one side ("Moscow (all)", the largest metro, is six).
+ * A page request names the other chosen airports beside the cell's (spec §2 "Airport names"), so this bounds its size.
+ */
+export const MAX_AIRPORTS_A_SIDE = 9;
+
 /** The resolved space an execution runs over; frozen into the snapshot. */
 export interface ResolvedSpace {
   origins: Iata[];

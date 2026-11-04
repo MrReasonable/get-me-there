@@ -1381,8 +1381,9 @@ verification as a free history source (§7 `route_price_history`).
 
 ## 3. Core concepts and vocabulary
 
-- **Search definition** — the operator's intent: origins, destinations,
-  window (absolute or **relative**), nights range, cabin, constraints,
+- **Search definition** — the operator's intent: origins, destinations
+  (one to nine airports a side, `MAX_AIRPORTS_A_SIDE`; "Moscow (all)", the
+  largest metro, is six), window (absolute or **relative**), nights range, cabin, constraints,
   verification policy, budget, providers, optional schedule, optional
   standing cost confirmation, optional onward-cost estimates. On the main
   path (below) it is a **search**; "definition" stays a code and set-up
@@ -5743,7 +5744,8 @@ setting: §2 "Airport names" matches it among the search's chosen airports on ea
 beside the cell's, and `AIRPORT_NAMES` is withdrawn. The same-city confusion that ruled out a general rule in
 revision 59 comes only from matching against the whole dataset: with one airport chosen a side, a page's longer name
 for it matches; with several chosen, the best fit wins and a tie is no match. A request's airport names grow by the
-other chosen airports', so the worker's body cap is 8,192 bytes.
+other chosen airports', so a search names at most nine airports a side (a request then names at most eight others a
+side) and the worker's body cap is 8,192 bytes.
 
 ### Revision 59: flight lists the first live run could not read (2026-11-03)
 

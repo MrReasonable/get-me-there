@@ -19,6 +19,7 @@ import {
   softConfirmSchema,
   startExecutionRequestSchema,
 } from '../../src/api-contract/index.js';
+import { MAX_AIRPORTS_A_SIDE } from '../../src/types/definition.js';
 import { verifiedFigure } from '../helpers/datePairs.js';
 
 const provenance = {
@@ -200,6 +201,14 @@ describe('api-contract (spec §10)', () => {
       'LHR',
     ]);
     expect(definitionCreateRequestSchema.safeParse({ ...okDef, destinations: ['LHR'] }).success).toBe(false); // not disjoint
+    // why: spec §3: at most MAX_AIRPORTS_A_SIDE airports a side, so a page request can name the others (§2 "Airport names")
+    const codes = (n: number) => Array.from({ length: n }, (_, i) => `Q${String.fromCharCode(65 + i)}A`);
+    expect(MAX_AIRPORTS_A_SIDE).toBe(9);
+    expect(definitionCreateRequestSchema.safeParse({ ...okDef, origins: codes(9) }).success).toBe(true);
+    expect(definitionCreateRequestSchema.safeParse({ ...okDef, origins: codes(10) }).success).toBe(false);
+    expect(definitionCreateRequestSchema.safeParse({ ...okDef, destinations: codes(10) }).success).toBe(
+      false,
+    );
   });
   it('rejects topN above maxCells, startOffsetDays 0 and an absolute window ending before it starts', () => {
     const base = {

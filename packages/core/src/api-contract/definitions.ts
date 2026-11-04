@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { MAX_AIRPORTS_A_SIDE } from '../types/definition.js';
 import type { Estimate } from '../types/execution.js';
 import { iataSchema, isoDateSchema, isoDateTimeSchema, isoMonthSchema } from '../types/ids.js';
 import { localTimeWindowSchema } from '../types/window.js';
@@ -86,8 +87,8 @@ export const providersConfigSchema = z.object({
  */
 export const definitionFields = {
   name: z.string().min(1).max(120),
-  origins: z.array(iataSchema).min(1),
-  destinations: z.array(iataSchema).min(1),
+  origins: z.array(iataSchema).min(1).max(MAX_AIRPORTS_A_SIDE),
+  destinations: z.array(iataSchema).min(1).max(MAX_AIRPORTS_A_SIDE),
   window: windowSpecSchema,
   minNights: z.number().int().min(0).max(90),
   maxNights: z.number().int().min(0).max(90),
@@ -295,8 +296,8 @@ export const definitionResponseSchema = z.object({
   notices: z.array(z.string()),
 });
 export const coverageCheckRequestSchema = z.object({
-  origins: z.array(iataSchema).min(1),
-  destinations: z.array(iataSchema).min(1),
+  origins: z.array(iataSchema).min(1).max(MAX_AIRPORTS_A_SIDE),
+  destinations: z.array(iataSchema).min(1).max(MAX_AIRPORTS_A_SIDE),
   window: windowSpecSchema,
   minNights: z.number().int().min(0).max(90),
   maxNights: z.number().int().min(0).max(90),

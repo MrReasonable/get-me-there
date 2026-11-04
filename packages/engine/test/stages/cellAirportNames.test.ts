@@ -4,15 +4,15 @@ import { type AirportNames, cellAirportNames } from '../../src/stages/discovery.
 
 const LHR = asIata('LHR');
 const LGW = asIata('LGW');
-const LCY = asIata('LCY');
+const QQY = asIata('QQY');
 const JFK = asIata('JFK');
 const EWR = asIata('EWR');
 const QQX = asIata('QQX');
-// why: QQX stands for a chosen code the airports dataset does not know
+// why: QQY stands for a third chosen airport; QQX for a chosen code the airports dataset does not know
 const DATASET: Partial<Record<string, string>> = {
   LHR: 'London Heathrow Airport',
   LGW: 'London Gatwick Airport',
-  LCY: 'London City Airport',
+  QQY: 'London Qqthird Airport',
   JFK: 'John F Kennedy International Airport',
   EWR: 'Newark Liberty International Airport',
 };
@@ -23,11 +23,11 @@ const names: AirportNames = (iata) => {
 
 describe('cellAirportNames (spec §2 "Airport names")', () => {
   it('names the cell’s two airports and, apart, the search’s other chosen airports on each side', () => {
-    expect(cellAirportNames(names, { origins: [LHR, LGW, LCY], destinations: [JFK, EWR] }, LGW, JFK)).toEqual(
+    expect(cellAirportNames(names, { origins: [LHR, LGW, QQY], destinations: [JFK, EWR] }, LGW, JFK)).toEqual(
       {
         origin: ['London Gatwick Airport'],
         destination: ['John F Kennedy International Airport'],
-        otherOrigins: [['London Heathrow Airport'], ['London City Airport']],
+        otherOrigins: [['London Heathrow Airport'], ['London Qqthird Airport']],
         otherDestinations: [['Newark Liberty International Airport']],
       },
     );
