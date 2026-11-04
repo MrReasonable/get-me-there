@@ -29,7 +29,9 @@ import type { PageResult } from './session.js';
  * cookie or a page name.
  */
 export const BIND_HOST = '127.0.0.1';
-export const MAX_BODY_BYTES = 4096;
+// why: a request names the search's other chosen airports too (spec §2 "Airport names"), up to eight a side, each name
+// up to 120 characters of up to 3 UTF-8 bytes
+export const MAX_BODY_BYTES = 16_384;
 
 export interface ServerDeps {
   key: Secret;

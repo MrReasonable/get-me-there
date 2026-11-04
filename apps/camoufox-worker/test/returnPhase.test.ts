@@ -62,6 +62,8 @@ const REQ: FlightsRequest & { returnLimits: FlightLimits } = {
   airportNames: {
     origin: ['London Heathrow Airport'],
     destination: ['John F Kennedy International Airport'],
+    otherOrigins: [],
+    otherDestinations: [],
   },
   returnLimits: LIMITS,
   booking: true,

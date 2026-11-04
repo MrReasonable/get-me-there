@@ -105,7 +105,13 @@ export async function camoufoxStage(
   };
   const query: DiscoveryQuery = {
     ...q,
-    airportNames: { origin: names(q.origin), destination: names(q.destination) },
+    // why: a smoke read is one pair: no other chosen airport
+    airportNames: {
+      origin: names(q.origin),
+      destination: names(q.destination),
+      otherOrigins: [],
+      otherDestinations: [],
+    },
   };
   const plan = cap.plan(query)[0];
   if (plan === undefined) return { status, statusError, ...none, info: cap.info };

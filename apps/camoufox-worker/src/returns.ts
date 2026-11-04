@@ -105,8 +105,8 @@ export function readReturns(
     else if (
       p.departsOn.month === ret.getUTCMonth() + 1 &&
       p.departsOn.day === ret.getUTCDate() &&
-      airportMatches(p.from, req.airportNames.destination) &&
-      airportMatches(p.to, req.airportNames.origin)
+      airportMatches(p.from, req.airportNames.destination, req.airportNames.otherDestinations) &&
+      airportMatches(p.to, req.airportNames.origin, req.airportNames.otherOrigins)
     ) {
       const r = returnOf(p, req.returnDate);
       if (r === null) unparsed++;

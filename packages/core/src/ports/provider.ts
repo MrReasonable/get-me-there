@@ -39,13 +39,17 @@ export interface CapabilityInfo {
 }
 
 /**
- * Spec §5.1 rev 32, revision 55 §8.1: the airports dataset's names for a cell's two codes, which a provider that matches
- * airports by name (camoufox reads names, never codes) uses to tell a cell's options apart. Discovery's query carries
- * it, and the flight-list read's query (Task 20.7) carries the same shape.
+ * Spec §5.1 rev 32, revision 55 §8.1, §2 "Airport names": the airports dataset's names for a cell's two codes, which a
+ * provider that matches airports by name (camoufox reads names, never codes) uses to tell a cell's options apart, and
+ * the names of the search's other chosen airports on each side, one list an airport, so an option is matched among the
+ * airports the operator chose ("London (all)": every London airport chosen). Discovery's query carries it, and the
+ * flight-list read's query (Task 20.7) carries the same shape.
  */
 export interface CellAirportNames {
   origin: string[];
   destination: string[];
+  otherOrigins: string[][];
+  otherDestinations: string[][];
 }
 
 export interface DiscoveryQuery {
@@ -262,8 +266,8 @@ export interface VerificationCapability {
 }
 /**
  * Spec revision 55 §2 "The flight-list read" and §5.1: one cell's flight list, economy only (the capability's `cabins`),
- * read in the adapter's own point of sale. The engine fills `airportNames` as
- * `{ origin: names(cell.origin), destination: names(cell.destination) }` from `airportNamesOf(ctx)`.
+ * read in the adapter's own point of sale. The engine fills `airportNames` with `cellAirportNames`, from the cell's codes
+ * and the search's chosen airports.
  */
 export interface FlightListQuery {
   cell: CellKey;

@@ -19,6 +19,8 @@ const fields = {
   airportNames: {
     origin: ['London Heathrow Airport'],
     destination: ['John F Kennedy International Airport'],
+    otherOrigins: [],
+    otherDestinations: [],
   },
 };
 const versions = { selectors: 's', grammar: '2026-10-31-times', camoufoxJs: '0.11.5', binary: 'b' };
@@ -73,7 +75,7 @@ describe('flightsRequestSchema (spec rev 55 §2: POST /v1/flights admits only mo
       flightsRequestSchema.safeParse({
         mode: 'flights',
         ...fields,
-        airportNames: { origin: [], destination: ['x'] },
+        airportNames: { origin: [], destination: ['x'], otherOrigins: [], otherDestinations: [] },
       }).success,
     ).toBe(false);
   });

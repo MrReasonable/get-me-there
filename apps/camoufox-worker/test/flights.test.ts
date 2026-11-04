@@ -11,6 +11,8 @@ const REQ = {
   airportNames: {
     origin: ['London Heathrow Airport'],
     destination: ['John F Kennedy International Airport'],
+    otherOrigins: [],
+    otherDestinations: [],
   },
 };
 

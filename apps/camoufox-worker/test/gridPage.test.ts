@@ -734,7 +734,12 @@ describe('grid pages: a view still drawing its cells', () => {
       departureDate: asIsoDate('2027-03-14'),
       returnDate: asIsoDate('2027-03-24'),
       gl: 'GB',
-      airportNames: { origin: ['Heathrow'], destination: ['John F. Kennedy'] },
+      airportNames: {
+        origin: ['Heathrow'],
+        destination: ['John F. Kennedy'],
+        otherOrigins: [],
+        otherDestinations: [],
+      },
     };
     const ends: unknown[] = [];
     for (const q of [req(['down']), list, req(['down'])]) {

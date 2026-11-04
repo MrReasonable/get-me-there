@@ -32,6 +32,8 @@ const Q = {
   airportNames: {
     origin: ['London Heathrow Airport'],
     destination: ['John F Kennedy International Airport'],
+    otherOrigins: [],
+    otherDestinations: [],
   },
 };
 const ctx = { executionId: 'exec-1', signal: new AbortController().signal, recordFixtures: false };

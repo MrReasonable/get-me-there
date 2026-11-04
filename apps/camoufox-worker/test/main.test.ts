@@ -44,6 +44,8 @@ const BODY = {
   airportNames: {
     origin: ['London Heathrow Airport'],
     destination: ['John F Kennedy International Airport'],
+    otherOrigins: [],
+    otherDestinations: [],
   },
 };
 const URL0 =

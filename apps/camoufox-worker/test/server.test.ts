@@ -2,6 +2,8 @@ import type { Server } from 'node:http';
 import {
   asIsoDateTime,
   type FlightsRequest,
+  flightsRequestSchema,
+  MAX_AIRPORTS_A_SIDE,
   type PageRequest,
   Secret,
   type WorkerAnswer,
@@ -24,6 +26,8 @@ const BODY = {
   airportNames: {
     origin: ['London Heathrow Airport'],
     destination: ['John F Kennedy International Airport'],
+    otherOrigins: [],
+    otherDestinations: [],
   },
 };
 const versions = { selectors: 's', grammar: 'g', camoufoxJs: '0.11.5', binary: '152.0.4-beta.28' };
@@ -346,9 +350,29 @@ describe('POST /v1/flights (spec rev 55 §2)', () => {
     expect(r.headers.get('x-gmt-google-contacted')).toBe('0');
     expect(t.seen).toEqual([]);
   });
+  // why: spec §2 "Airport names" (CodeRabbit on PR #44): the largest flights request the schema takes, every chosen
+  // airport named twice in 120 three-byte characters, fits the worker's own cap in UTF-8 bytes
+  it('the largest valid flights request fits MAX_BODY_BYTES', () => {
+    const long = ['空'.repeat(120), '港'.repeat(120)];
+    const others = Array.from({ length: MAX_AIRPORTS_A_SIDE - 1 }, () => long);
+    const window = { from: '06:00', to: '23:59' };
+    const largest = {
+      ...FLIGHTS,
+      airportNames: { origin: long, destination: long, otherOrigins: others, otherDestinations: others },
+      returnLimits: {
+        maxJourneyMinutes: 1500,
+        maxStops: 2,
+        departureWindowLocal: window,
+        arrivalWindowLocal: window,
+      },
+      booking: true,
+    };
+    expect(flightsRequestSchema.safeParse(largest).success).toBe(true);
+    expect(new TextEncoder().encode(JSON.stringify(largest)).length).toBeLessThanOrEqual(MAX_BODY_BYTES);
+  });
   // why: 20.7 review finding 6: a body the schema accepts, padded with JSON whitespace, isolates the byte cap: one byte
   // over is refused before parsing, and the same body at the cap is read
-  it('refuses a valid body one byte over the 4,096-byte cap, and reads it at the cap', async () => {
+  it('refuses a valid body one byte over the byte cap, and reads it at the cap', async () => {
     const text = JSON.stringify(FLIGHTS);
     const padded = (size: number) => `{${' '.repeat(size - text.length)}${text.slice(1)}`;
     expect(JSON.parse(padded(MAX_BODY_BYTES + 1))).toEqual(FLIGHTS);

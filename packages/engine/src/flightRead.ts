@@ -32,7 +32,7 @@ import type { NewestFlightList } from '@gmt/db';
 import type { EngineContext } from './context.js';
 import { errorText } from './errors.js';
 import { loadsBrowserPages } from './scheduler/browserWindow.js';
-import { airportNamesOf } from './stages/discovery.js';
+import { airportNamesOf, cellAirportNames } from './stages/discovery.js';
 import { listReusable, newestListOf } from './stages/flightLists/select.js';
 import {
   FLIGHT_LIST_PROVIDER,
@@ -201,7 +201,7 @@ export function createFlightReader(ctx: EngineContext): FlightReader {
       const r = await cap.read(
         {
           cell,
-          airportNames: { origin: names(cell.origin), destination: names(cell.destination) },
+          airportNames: cellAirportNames(names, def, cell.origin, cell.destination),
           ...phaseOf(ctx, def),
         },
         { executionId: null, signal, recordFixtures: false },

@@ -10,6 +10,7 @@ import { flightLimitsSchema } from '../flights/choose.js';
 import { FLIGHT_LIST_MAX_FLIGHTS } from '../flights/limits.js';
 import { returnReadSchema, returnsOutboundIssue } from '../flights/returns.js';
 import { LISTED, listedFlightSchema } from '../flights/types.js';
+import { MAX_AIRPORTS_A_SIDE } from '../types/definition.js';
 import { iataSchema, isoDateSchema, isoDateTimeSchema } from '../types/ids.js';
 import { vendorPriceMarkSchema } from '../types/provenance.js';
 import { OS_ARCHES } from './builds.js';
@@ -48,9 +49,11 @@ export const BLOCKED_PAGES = [
 export const blockedPageSchema = z.enum(BLOCKED_PAGES);
 export type BlockedPage = z.infer<typeof blockedPageSchema>;
 
-// why: names from the airports dataset; bounded so a body stays well under the worker's 4 KiB limit.
+// why: names from the airports dataset (one a code); bounded so a body stays under the worker's 16 KiB limit.
 // why: fix round 1 (prov M2): at least one name, or no option could ever match and every page would read as unrecognised
-const airportNameList = z.array(z.string().min(1).max(120)).min(1).max(8);
+const airportNameList = z.array(z.string().min(1).max(120)).min(1).max(2);
+// why: spec §2 "Airport names": the search's other chosen airports on one side, every chosen airport but the cell's
+const otherAirportNames = z.array(airportNameList).max(MAX_AIRPORTS_A_SIDE - 1);
 
 /**
  * The one cell a list or flights page loads (spec revision 55 §2: one shared field shape and one shared refinement pair
@@ -62,7 +65,12 @@ const cellPageFields = {
   departureDate: isoDateSchema,
   returnDate: isoDateSchema,
   gl: z.string().regex(/^[A-Z]{2}$/),
-  airportNames: z.strictObject({ origin: airportNameList, destination: airportNameList }),
+  airportNames: z.strictObject({
+    origin: airportNameList,
+    destination: airportNameList,
+    otherOrigins: otherAirportNames,
+    otherDestinations: otherAirportNames,
+  }),
 };
 type CellPage = { origin: string; destination: string; departureDate: string; returnDate: string };
 /** The two refinements every cell page request carries: one cell (the return follows the departure), two airports. */

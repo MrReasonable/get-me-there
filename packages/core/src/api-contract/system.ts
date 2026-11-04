@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { MAX_AIRPORTS_A_SIDE } from '../types/definition.js';
 import { iataSchema, isoDateTimeSchema, isoMonthSchema } from '../types/ids.js';
 import {
   capabilityInfoSchema,
@@ -81,8 +82,8 @@ export const schedulerJobSchema = z.object({
 export const schedulerJobsResponseSchema = z.object({ jobs: z.array(schedulerJobSchema) });
 export const toolRecordRequestSchema = z.object({
   budget: z.number().int().min(1),
-  origins: z.array(iataSchema).min(1),
-  destinations: z.array(iataSchema).min(1),
+  origins: z.array(iataSchema).min(1).max(MAX_AIRPORTS_A_SIDE),
+  destinations: z.array(iataSchema).min(1).max(MAX_AIRPORTS_A_SIDE),
   month: isoMonthSchema,
 });
 /**

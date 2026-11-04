@@ -202,6 +202,8 @@ describe('readFlightList reads', () => {
     expect(cam.flightCalls[0]?.query.airportNames).toEqual({
       origin: ['London Heathrow Airport'],
       destination: ['John F Kennedy International Airport'],
+      otherOrigins: [],
+      otherDestinations: [],
     });
     expect(flightRows(e, null)).toEqual([
       {
