@@ -49,7 +49,7 @@ export const BLOCKED_PAGES = [
 export const blockedPageSchema = z.enum(BLOCKED_PAGES);
 export type BlockedPage = z.infer<typeof blockedPageSchema>;
 
-// why: names from the airports dataset (one a code); bounded so a body stays well under the worker's 8 KiB limit.
+// why: names from the airports dataset (one a code); bounded so a body stays under the worker's 16 KiB limit.
 // why: fix round 1 (prov M2): at least one name, or no option could ever match and every page would read as unrecognised
 const airportNameList = z.array(z.string().min(1).max(120)).min(1).max(2);
 // why: spec §2 "Airport names": the search's other chosen airports on one side, every chosen airport but the cell's

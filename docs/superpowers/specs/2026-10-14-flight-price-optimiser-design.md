@@ -240,7 +240,7 @@ idle-sleeps under it (browser errors, time-outs, pages that never settle), so
 while any run is in progress the app keeps the machine awake through the
 worker, which always runs on the host (a Docker app cannot hold the host
 awake). `POST /v1/awake` takes `{ seconds }`, whole seconds from 0 to 600,
-under the same key, 8,192-byte body cap and validation as the page routes; it
+under the same key, 16,384-byte body cap and validation as the page routes; it
 loads no page, answers `x-gmt-google-contacted: 0`, and starts or renews a
 lease of that many seconds from now, replacing any lease held; `seconds: 0`
 releases it. It answers `{ held, until, mechanism }` (`until` the lease's end
@@ -540,7 +540,7 @@ cell, economy only, it opens the same list page a `list` tile opens, in the
 worker's verified URL form (`core/camoufox/url.ts`'s `pageUrl`: returning,
 `hl=en-GB`, `gl=` the point of sale), through the worker's own route
 `POST /v1/flights` (it admits only a `mode: 'flights'` request, under the same
-8,192-byte body cap as `/v1/page`; a `/v1/page` request carrying `returnLimits`
+16,384-byte body cap as `/v1/page`; a `/v1/page` request carrying `returnLimits`
 is refused, and so is a `booking` ask without `returnLimits`), and answers what
 the page showed for the
 pair (`listed`: `flights`, at least one flight read for the pair;
@@ -5745,7 +5745,7 @@ beside the cell's, and `AIRPORT_NAMES` is withdrawn. The same-city confusion tha
 revision 59 comes only from matching against the whole dataset: with one airport chosen a side, a page's longer name
 for it matches; with several chosen, the best fit wins and a tie is no match. A request's airport names grow by the
 other chosen airports', so a search names at most nine airports a side (a request then names at most eight others a
-side) and the worker's body cap is 8,192 bytes.
+side) and the worker's body cap is 16,384 bytes.
 
 ### Revision 59: flight lists the first live run could not read (2026-11-03)
 

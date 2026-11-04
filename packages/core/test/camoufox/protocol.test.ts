@@ -231,8 +231,9 @@ describe('worker protocol (core/src/camoufox/protocol.ts; brief §5, §6)', () =
     expect(pageRequestSchema.safeParse(others([['A', 'B', 'C']])).success).toBe(false);
     const { otherOrigins: _o, ...noOthers } = request.airportNames;
     expect(pageRequestSchema.safeParse({ ...request, airportNames: noOthers }).success).toBe(false);
-    // why: the largest request the schema takes still fits the worker's 8,192-byte body cap (server.ts MAX_BODY_BYTES)
-    const long = ['A'.repeat(120), 'B'.repeat(120)];
+    // why: the largest request the schema takes, in UTF-8 bytes with three-byte (CJK) names, still fits the worker's
+    // 16,384-byte body cap (server.ts MAX_BODY_BYTES)
+    const long = ['空'.repeat(120), '港'.repeat(120)];
     const largest = {
       ...request,
       airportNames: {
@@ -243,7 +244,7 @@ describe('worker protocol (core/src/camoufox/protocol.ts; brief §5, §6)', () =
       },
     };
     expect(pageRequestSchema.safeParse(largest).success).toBe(true);
-    expect(JSON.stringify(largest).length).toBeLessThan(8192);
+    expect(new TextEncoder().encode(JSON.stringify(largest)).length).toBeLessThanOrEqual(16_384);
   });
   it('status: cooldownHours from 24, pageTimeoutSeconds 30 to 240', () => {
     expect(workerStatusSchema.safeParse({ ...status, cooldownHours: 24 }).success).toBe(true);
