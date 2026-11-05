@@ -1,6 +1,6 @@
 # get-me-there — Flight Price Intelligence & Flexible-Date Optimiser
 
-**Design spec, revision 60.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
+**Design spec, revision 61.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
 four full-roster reviews (145, 140, 126 and 101 findings; zero Critical since
 revision 2) and the provider spike. Revision 9 folds in the three decisions
 taken at approval (the self-scraping fallback in §2, the dashboard readings in
@@ -4342,6 +4342,15 @@ header and per-airport-pair panel, History and the
 alert events table, and on the alert email's provenance line, because the same
 flight can be priced differently by market. It is not a face item: the phone
 board card leaves it out, so the 375px widths do not change.
+The compact face is one inline box (the amount and its marks, the source
+mark, the short age and "not checked" on a calendar price, wrapping inside
+the box), so a price sits in its sentence ("Google's list: from £583 CF ·
+2d old · not checked, 06:45") instead of breaking it at 375px. Where a line
+just above a group of prices already says the stale mark's words (a flights
+block's head, the board's "return flights read 9d ago, older than this
+search's refresh:"), each compact price in that group shows the stale glyph
+(◷) instead of the words, the words kept in its title and its spoken text;
+a compact price with no such line says the words itself.
 An overview cell is no price display at all: it prints no amount (Dates, below).
 It is one install-wide setting (§12 `POINT_OF_SALE`), or `'unknown'` where the
 vendor ignores it. Each row also carries the operator's per-destination note from
@@ -4684,7 +4693,10 @@ merged into price.
     50m · 1 change · Virgin Atlantic · from £478 round trip", the amount
     through `PriceCell`'s compact face with the main-path flight-list source
     label, the calendar style (dashed outline, "not checked") and the list's
-    stale mark, "+1" with the arrival's full date for assistive technology.
+    stale mark (its glyph: the head says the words, below), "+1" with the
+    arrival's full date for assistive technology. A list older than the
+    search's refresh ends its head with "· older than this search's
+    refresh", said once for every price in the block.
     **Which flights** (`core`'s `chooseFlightsToShow`, §6.2): those within the
     search's longest journey (on the outbound duration), its stops limit and,
     when set, its
@@ -4960,7 +4972,10 @@ merged into price.
   - **Phone** (narrower than 900 px): the board becomes stacked cards, each a
     link to the detail: the dates and the price lead (`PriceCell` phone
     face: provider mark, destination, short age, "not checked" on a calendar
-    price), then how far checked, then journey time and airports. The
+    price), then how far checked, then journey time ("journey time not
+    known" when it is not, the card having no column head) and airports.
+    The nav's one row cuts a long search name to one line with an
+    ellipsis, the whole name in its title and in the page's heading. The
     overview follows, one month at a time, with Previous and Next month
     buttons and a swipe; each day is a row with its strip across the width
     and every cell at least 24 px square; the flights block wraps within the
@@ -5736,6 +5751,16 @@ as specified in §5.3; no secrets, no full URLs.
 ---
 
 ## 17. Changelog
+
+### Revision 61: prices that fit a phone's sentence (2026-11-05)
+
+At 375px a search's page broke its flight lines around each price: the compact face stacked its amount, its stale words,
+its source mark and its age on three lines, so "Google's list: from" and ", 06:45" sat on lines of their own, and one
+date pair's flights repeated "older than this search's refresh" on every price. §11 makes the compact face one inline
+box and says the stale words once per group: a flights block's head ends with them, and the prices under that head or
+under the board's "return flights read 9d ago, older than this search's refresh:" show the stale glyph, the words kept
+in their title and spoken text. The phone's nav cuts a long search name to one line, and a phone card words an unknown
+journey time "journey time not known", having no column head.
 
 ### Revision 60: airports matched among the ones chosen (2026-11-04)
 

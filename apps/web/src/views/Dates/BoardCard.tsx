@@ -94,8 +94,19 @@ export function CheaperCached({
   );
 }
 
-/** A price a pairing carries, through PriceCell's compact face with the flight list's provenance (its stale mark, age). */
-function PairingPrice({ pairing, pence }: { pairing: DatePairPairing; pence: number }) {
+/**
+ * A price a pairing carries, through PriceCell's compact face with the flight list's provenance (its stale mark, age);
+ * `staleSaid` where the line it sits in already says the stale mark's words.
+ */
+function PairingPrice({
+  pairing,
+  pence,
+  staleSaid = false,
+}: {
+  pairing: DatePairPairing;
+  pence: number;
+  staleSaid?: boolean;
+}) {
   return (
     <PriceBoundary>
       <PriceCell
@@ -105,6 +116,7 @@ function PairingPrice({ pairing, pence }: { pairing: DatePairPairing; pence: num
         stale={pairing.stale}
         sourceLabel={F.sourceLabel}
         compact
+        staleSaid={staleSaid}
       />
     </PriceBoundary>
   );
@@ -197,6 +209,8 @@ export function FlightRead({ figure, lists }: { figure: DatePairFigure; lists: L
   const line = flightReadLine(figure, lists, COPY, (d) => stopDetailClause(d, 'camoufox', true));
   if (line === null) return null;
   const q = line.pairing;
+  // why: an older pairing's lead says "older than this search's refresh:" (board.ts), so its prices show the glyph
+  const said = figure.pairingRead === 'within-older';
   return (
     <span data-testid="flight-read" className="mt-1.5 block text-xs text-fg-2">
       {line.lead}
@@ -205,7 +219,7 @@ export function FlightRead({ figure, lists }: { figure: DatePairFigure; lists: L
           {q.isFrom ? (
             <>
               <span>{D.fromPrice}</span>
-              <PairingPrice pairing={q} pence={q.pricePence} />
+              <PairingPrice pairing={q} pence={q.pricePence} staleSaid={said} />
               {/* why: final review B-M2: every "from" price says no seller was read for it, as the block's Back line */}
               <span>
                 {F.separator}
@@ -214,7 +228,7 @@ export function FlightRead({ figure, lists }: { figure: DatePairFigure; lists: L
             </>
           ) : (
             <>
-              <PairingPrice pairing={q} pence={q.pricePence} />
+              <PairingPrice pairing={q} pence={q.pricePence} staleSaid={said} />
               <span>
                 {F.separator}
                 {F.sellerLine(sellerOf(q), q.fare, q.offersRead)}
@@ -228,7 +242,7 @@ export function FlightRead({ figure, lists }: { figure: DatePairFigure; lists: L
       {q?.mismatch ? (
         <span data-testid="flight-read-mismatch" className="flex flex-wrap items-baseline gap-1">
           <span>{D.mismatchMark}</span>
-          <PairingPrice pairing={q} pence={q.fromPence} />
+          <PairingPrice pairing={q} pence={q.fromPence} staleSaid={said} />
         </span>
       ) : null}
     </span>
@@ -259,8 +273,19 @@ export function Arrives({
   );
 }
 
-/** Journey time (the figure's own, else "not known") and the arrivals the figure's segments state. */
-export function Journey({ figure, filtered }: { figure: DatePairFigure; filtered: boolean }) {
+/**
+ * Journey time (the figure's own, else "not known") and the arrivals the figure's segments state. The phone card
+ * (`card`) has no column head, so its unknown time is worded "journey time not known", as a filtered board's is.
+ */
+export function Journey({
+  figure,
+  filtered,
+  card = false,
+}: {
+  figure: DatePairFigure;
+  filtered: boolean;
+  card?: boolean;
+}) {
   const m = figure.journeyMinutes;
   return (
     <>
@@ -270,7 +295,9 @@ export function Journey({ figure, filtered }: { figure: DatePairFigure; filtered
           <Flaps text={formatMinutes(m)} cells={7} align="right" slot="journey" />
         </span>
       ) : (
-        <span className="block text-fg-2">{filtered ? D.journeyNotKnownFiltered : D.journeyNotKnown}</span>
+        <span className="block text-fg-2">
+          {filtered || card ? D.journeyNotKnownFiltered : D.journeyNotKnown}
+        </span>
       )}
       <Arrives label={D.directionOut} depart={figure.departOut} arrive={figure.arriveOut} />
       <Arrives label={D.directionBack} depart={figure.departBack} arrive={figure.arriveBack} />
@@ -424,7 +451,7 @@ export function BoardCard({
           {howFar.join(' · ')}
         </span>
         <span className="mt-1 block">
-          <Journey figure={f} filtered={journeyFiltered} />
+          <Journey figure={f} filtered={journeyFiltered} card />
         </span>
         <span className="mt-1 block">{D.airports(f.origin, f.destination)}</span>
       </td>

@@ -1,4 +1,4 @@
-import { type FlightLimits, stopDetailClause } from '@gmt/core';
+import { type FlightLimits, staleWords, stopDetailClause } from '@gmt/core';
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ApiError } from '../../api/client.js';
 import { useFlightLists, useFlightRead } from '../../api/flights.js';
@@ -6,7 +6,7 @@ import type { FlightList, FlightListsResponse } from '../../api/types.js';
 import { COPY } from '../../copy.js';
 import { useNow } from '../../now.js';
 import type { ListsState } from './board.js';
-import { FlightPrice, FlightRow } from './FlightRow.js';
+import { FlightPrice, FlightRow, StaleSaid } from './FlightRow.js';
 import {
   allInOrder,
   cheapestRead,
@@ -184,8 +184,12 @@ export function FlightOutcome({ entry, available }: { entry: FlightPair | undefi
     <span data-testid="flight-outcome" className="flight-outcome">
       {o.kind === 'from' ? (
         <>
-          {F.outcomeFrom} <FlightPrice list={list} pence={o.minMinor} />
-          {F.outcomeAt(o.when)}
+          {F.outcomeFrom}{' '}
+          {/* why: the price and its time wrap as one, so ", 06:45" never starts a line on its own */}
+          <span className="whitespace-nowrap">
+            <FlightPrice list={list} pence={o.minMinor} />
+            {F.outcomeAt(o.when)}
+          </span>
         </>
       ) : o.kind === 'not-in' ? (
         F.notInList
@@ -273,10 +277,13 @@ function ListSection({
       ? F.triedFirstMark
       : null;
   };
+  // why: the stale mark's words once, on the head, for every price of this one list (each then shows the glyph)
+  const stale = list.stale === false ? null : staleWords(list.stale);
   return (
-    <>
+    <StaleSaid.Provider value={stale !== null}>
       <p data-testid="flights-head" className="flights-head">
         {headOf(list, p, now)}
+        {stale !== null ? `${F.separator}${stale}` : null}
       </p>
       {/* why: 21.7 ui-006: a return read that did not finish says so directly under the head it explains */}
       {status !== null ? (
@@ -326,7 +333,7 @@ function ListSection({
           ? F.limitsWithReturns(F.settingsNotApplied, F.windowsOutboundOnly)
           : F.limitsOutboundOnly(F.returnNotRead, F.settingsNotApplied)}
       </p>
-    </>
+    </StaleSaid.Provider>
   );
 }
 

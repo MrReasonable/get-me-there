@@ -101,7 +101,11 @@ export function Nav({ current, search }: { current: ViewId; search: NavSearch | 
       {tier !== null ? (
         <span className="flex min-w-0 items-center gap-1">
           <span className="nav-tier-name">{COPY.navTier[tier.id]}</span>
-          <span className="nav-link border-b-4 border-current font-bold nav-here">
+          {/* why: the phone cuts a long search name to one line (board.css .nav-here); the title shows it whole */}
+          <span
+            className="nav-link border-b-4 border-current font-bold nav-here"
+            title={current === 'dates' && search !== null ? search.name : undefined}
+          >
             {current === 'dates' && search !== null ? search.name : COPY.nav[current]}
           </span>
         </span>
