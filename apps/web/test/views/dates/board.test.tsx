@@ -246,6 +246,14 @@ describe('the phone board (spec §11 Phone: below 900 px)', () => {
     expect(poundsOutsidePrices()).toEqual([]);
   });
 
+  it('a card, which has no column heads, words an unknown journey time "journey time not known"', async () => {
+    setViewportWidth(375);
+    renderDates({ body: workedDates() });
+    const cards = await screen.findAllByTestId('board-card');
+    const card = cards.find((c) => c.textContent?.includes('22 Mar 2027'));
+    expect(card).toHaveTextContent('journey time not known');
+  });
+
   it('a truncated figure’s card says "cheapest of the rows read" and that the read was cut short', async () => {
     setViewportWidth(375);
     renderDates({ body: workedDates() });
@@ -530,7 +538,9 @@ describe('a calendar figure says its flight read (spec rev 56 §6.9, §11 Board;
     expect(beneath).toHaveTextContent("return flights read 9d ago, older than this search's refresh:");
     const cell = within(beneath).getByTestId('price-cell');
     expect(cell).toHaveTextContent('£1,180');
-    expect(cell).toHaveTextContent("older than this search's refresh");
+    // why: the lead says the stale words, so the price beneath it carries the glyph (its words for screen readers)
+    expect(within(cell).getByTestId('stale-glyph')).toBeInTheDocument();
+    expect(within(cell).getByText("older than this search's refresh")).toHaveClass('sr-only');
     expect(beneath).toHaveTextContent('QQ Travel · cheapest of 3 offers read');
     expect(beneath).toHaveTextContent('Out: 07:15 · Back: 14:20');
   });

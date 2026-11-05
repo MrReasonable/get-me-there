@@ -323,11 +323,18 @@ describe('the flights block (spec rev 55 §11 Flights)', () => {
     expect(poundsOutsidePrices()).toEqual([]);
   });
 
-  it('a stale list carries the stale mark on each flight’s price', async () => {
+  it('a stale list says the stale mark once on its head, and each flight’s price carries its glyph', async () => {
     await renderWorked();
-    expect(within(blockOf(18)).getByTestId('price-cell')).toHaveTextContent(
-      "older than this search's refresh",
+    const block = blockOf(18);
+    expect(within(block).getByTestId('flights-head')).toHaveTextContent(
+      /· older than this search's refresh$/,
     );
+    const cell = within(block).getByTestId('price-cell');
+    expect(within(cell).getByTestId('stale-glyph')).toBeInTheDocument();
+    // why: the words stay with the price for screen readers, but are not printed again on every price
+    expect(within(cell).getByText("older than this search's refresh")).toHaveClass('sr-only');
+    expect(cell.querySelector('.tag-warn')).toBeNull();
+    expect(within(blockOf(0)).getByTestId('flights-head')).not.toHaveTextContent('older than');
     expect(within(blockOf(0)).getAllByTestId('price-cell')[0]).not.toHaveTextContent('older than');
   });
 

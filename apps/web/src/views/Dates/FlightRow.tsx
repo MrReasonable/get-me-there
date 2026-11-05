@@ -1,4 +1,5 @@
 import { addDays, type FlightLimits, type IsoDate, type ListedFlight } from '@gmt/core';
+import { createContext, useContext } from 'react';
 import type { FlightList } from '../../api/types.js';
 import { PriceBoundary } from '../../components/PriceBoundary.js';
 import { PriceCell } from '../../components/PriceCell.js';
@@ -13,11 +14,18 @@ const F = COPY.flights;
 const D = COPY.datesView;
 
 /**
+ * Whether the stale mark's words are said once above the prices within (a flights block's head says them for its one
+ * list), so each price there shows the stale glyph instead of the words again. Outside a block: false.
+ */
+export const StaleSaid = createContext(false);
+
+/**
  * An amount a flight list read, through PriceCell's compact face (spec rev 55 §11): the list's provenance, the
  * main-path flight-list source name, the calendar style (dashed outline, "not checked": no airline checked it) and the
- * list's stale mark (older than this search's refresh).
+ * list's stale mark (older than this search's refresh), as its glyph where the block's head says the words (`StaleSaid`).
  */
 export function FlightPrice({ list, pence }: { list: FlightList; pence: number }) {
+  const staleSaid = useContext(StaleSaid);
   return (
     <PriceBoundary>
       <PriceCell
@@ -27,6 +35,7 @@ export function FlightPrice({ list, pence }: { list: FlightList; pence: number }
         stale={listStale(list)}
         sourceLabel={F.sourceLabel}
         compact
+        staleSaid={staleSaid}
       />
     </PriceBoundary>
   );

@@ -644,6 +644,16 @@
     font-size: 12px;
     letter-spacing: 0.06em;
   }
+  /* The current view's name on one line, cut with an ellipsis: a long search name otherwise wraps past its tile and
+  under the menu button. The page's own heading and the tile's title carry the whole name. */
+  .topbar .nav-here {
+    display: block;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    line-height: 40px;
+  }
   .nav-menu-button {
     flex: none;
     padding: 2px 8px;

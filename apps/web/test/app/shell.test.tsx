@@ -13,6 +13,7 @@ import { datesError, serveDates } from '../msw/datesHandlers.js';
 import { serveCards } from '../msw/searchesHandlers.js';
 import { server } from '../msw/server.js';
 import { renderWithProviders } from '../render.js';
+import { setViewportWidth } from '../viewport.js';
 
 describe('shell (spec §11 layout)', () => {
   it('the nav has two tiers, each a list headed by its name: Decide (Searches, History) and Set up (Providers, Alerts, Status); no search is named until one has been opened', async () => {
@@ -117,6 +118,20 @@ describe('shell (spec §11 layout)', () => {
     expect(skip).toHaveFocus();
     expect(skip).toHaveAttribute('href', '#main');
     expect(screen.getByRole('main')).toHaveAttribute('id', 'main');
+  });
+
+  it('on a phone the current view’s tile names the search, its whole name in the title (the tile cuts it to one line)', async () => {
+    setViewportWidth(375);
+    renderWithProviders(<App />, { search: '?view=dates&def=def-0001' });
+    const nav = await screen.findByRole('navigation', { name: 'Views' });
+    const here = await waitFor(() => {
+      const el = nav.querySelector<HTMLElement>('.nav-here');
+      if (el === null || el.textContent === COPY.nav.dates) throw new Error('no search name yet');
+      return el;
+    });
+    const name = definition().name;
+    expect(here).toHaveTextContent(name);
+    expect(here).toHaveAttribute('title', name);
   });
 
   it('alerts renders the Alerts view for the selected definition', async () => {

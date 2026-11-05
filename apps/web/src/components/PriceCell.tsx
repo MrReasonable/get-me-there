@@ -65,6 +65,12 @@ export interface PriceCellProps {
    * whose source has a name of its own (a flight list's, WP20 Task 20.10). The provenance is validated all the same.
    */
   sourceLabel?: string;
+  /**
+   * The compact face only: the stale mark's words are already said once in a line nearby (a flights block's head, the
+   * board's "return flights read 9d ago, older than this search's refresh:"), so this price shows the stale glyph, its
+   * words kept for screen readers and in the title, instead of repeating the words on every price of the group.
+   */
+  staleSaid?: boolean;
 }
 
 // why: a badge is a state tag, a black flap chip carrying its own ink (white, amber or red), so it reads the same on
@@ -85,7 +91,6 @@ export function PriceCell(props: PriceCellProps) {
   const age = effectiveAge(p, now);
   const fxTitle = p.fx.converted ? COPY.fxTitle(p.fx.rateDate, p.fx.source) : null;
   const notSeen = props.notSeenInLatestHours ?? null;
-  const compact = props.compact === true;
   const calendar = isCalendarPrice(p, props.calendar);
   // why: spec rev 55 §3 — the stale mark's words, only when true, from the kind of threshold the api judged it by
   const staleText =
@@ -150,16 +155,68 @@ export function PriceCell(props: PriceCellProps) {
       </span>
     );
   }
+  if (props.compact === true) {
+    const glyph = staleText !== null && props.staleSaid === true;
+    const note = props.destinationNote ? [props.destinationNote] : [];
+    // why: one inline box that wraps inside itself, so a price sits in its sentence ("from £540 ◷ CF · 2d old · not
+    // checked, 3 Nov 19:40") instead of a three-line block breaking the sentence around it at phone width
+    return (
+      <span
+        data-testid="price-cell"
+        title={[...(glyph ? [staleText] : []), ...detail, ...note].join(' · ')}
+        className={`inline-flex max-w-full flex-wrap items-baseline gap-x-1 align-baseline ${calendar ? 'rounded border border-dashed border-current px-1' : ''}`}
+      >
+        <span className="figure inline-flex flex-wrap items-center gap-x-1">
+          {/* why: the "≈" and the amount never wrap apart, so a converted price can never read as exact */}
+          <span data-testid="compact-amount" className="whitespace-nowrap">
+            {fxTitle !== null ? (
+              <>
+                <span aria-hidden="true" title={fxTitle}>
+                  {COPY.fxApprox}
+                </span>
+                <span className="sr-only">{COPY.fxSpoken(fxTitle)}</span>
+              </>
+            ) : null}
+            {formatPence(props.pricePence)}
+          </span>
+          {props.qualifier !== undefined ? (
+            <span className="ml-1 text-xs font-normal">{props.qualifier}</span>
+          ) : null}
+          {props.unconfirmed === true ? (
+            <span className={`${badge} tag-bad`}>{COPY.priceNotConfirmed}</span>
+          ) : null}
+          {staleText !== null && glyph ? (
+            <>
+              <span aria-hidden="true" data-testid="stale-glyph">
+                {COPY.priceMarkGlyph.stale}
+              </span>
+              <span className="sr-only">{staleText}</span>
+            </>
+          ) : null}
+          {staleText !== null && !glyph ? <span className={`${badge} tag-warn`}>{staleText}</span> : null}
+          {age.kind === 'unknown' ? (
+            <span className={`${badge} tag-dim`}>{COPY.vendorAgeUnknown}</span>
+          ) : null}
+        </span>
+        <span className="chip">{COPY.providerShort[p.providerId]}</span>
+        {props.destination !== undefined ? <span>{props.destination}</span> : null}
+        {/* why: ruling 3: the short age line is always on the face; an unknown vendor age is the badge above, and the line then says when the price was fetched, which no hover is needed to read */}
+        <span data-testid="face-age" className="text-[11px]">
+          {[
+            age.kind !== 'unknown' ? formatAgeShort(age) : formatFetchedAgo(age),
+            ...(calendar ? [COPY.notChecked] : []),
+          ].join(' · ')}
+        </span>
+        {props.superseded === true ? <span className="text-xs font-medium">{COPY.superseded}</span> : null}
+        {props.truncated === true ? <span className="text-xs font-medium">{COPY.truncatedNote}</span> : null}
+        {notSeen !== null ? (
+          <span className="text-xs">{COPY.notSeenInLatest(COPY.agoOf(notSeen))}</span>
+        ) : null}
+      </span>
+    );
+  }
   return (
-    <span
-      data-testid="price-cell"
-      title={
-        compact
-          ? [...detail, ...(props.destinationNote ? [props.destinationNote] : [])].join(' · ')
-          : undefined
-      }
-      className={`flex flex-col gap-0.5 ${compact && calendar ? 'rounded border border-dashed border-current px-1' : ''}`}
-    >
+    <span data-testid="price-cell" className="flex flex-col gap-0.5">
       <span className="figure inline-flex flex-wrap items-center gap-x-1">
         {fxTitle !== null ? (
           <>
@@ -192,32 +249,15 @@ export function PriceCell(props: PriceCellProps) {
         {staleText !== null ? <span className={`${badge} tag-warn`}>{staleText}</span> : null}
         {age.kind === 'unknown' ? <span className={`${badge} tag-dim`}>{COPY.vendorAgeUnknown}</span> : null}
       </span>
-      {compact ? (
-        <span className="inline-flex gap-1 text-xs">
-          <span className="chip">{COPY.providerShort[p.providerId]}</span>
-          {props.destination !== undefined ? <span>{props.destination}</span> : null}
-        </span>
-      ) : null}
-      {/* why: ruling 3: the short age line is always on the face; an unknown vendor age is the badge above, and the line then says when the price was fetched, which no hover is needed to read */}
-      {compact ? (
-        <span data-testid="face-age" className="text-[11px]">
-          {[
-            age.kind !== 'unknown' ? formatAgeShort(age) : formatFetchedAgo(age),
-            ...(calendar ? [COPY.notChecked] : []),
-          ].join(' · ')}
-        </span>
-      ) : null}
-      {compact ? null : (
-        <Provenance
-          provenance={p}
-          calendar={props.calendar}
-          destination={props.besideColumns === true ? undefined : props.destination}
-          destinationNote={props.destinationNote}
-          showProvider={props.besideColumns !== true}
-          fullAge={props.fullAge === true}
-          {...(props.sourceLabel === undefined ? {} : { sourceLabel: props.sourceLabel })}
-        />
-      )}
+      <Provenance
+        provenance={p}
+        calendar={props.calendar}
+        destination={props.besideColumns === true ? undefined : props.destination}
+        destinationNote={props.destinationNote}
+        showProvider={props.besideColumns !== true}
+        fullAge={props.fullAge === true}
+        {...(props.sourceLabel === undefined ? {} : { sourceLabel: props.sourceLabel })}
+      />
       {props.superseded === true ? <span className="text-xs font-medium">{COPY.superseded}</span> : null}
       {props.truncated === true ? <span className="text-xs font-medium">{COPY.truncatedNote}</span> : null}
       {notSeen !== null ? <span className="text-xs">{COPY.notSeenInLatest(COPY.agoOf(notSeen))}</span> : null}
