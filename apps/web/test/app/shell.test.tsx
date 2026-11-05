@@ -129,7 +129,9 @@ describe('shell (spec §11 layout)', () => {
       if (el === null || el.textContent === COPY.nav.dates) throw new Error('no search name yet');
       return el;
     });
-    expect(here).toHaveAttribute('title', here.textContent);
+    const name = definition().name;
+    expect(here).toHaveTextContent(name);
+    expect(here).toHaveAttribute('title', name);
   });
 
   it('alerts renders the Alerts view for the selected definition', async () => {

@@ -2,7 +2,7 @@ import { screen, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { PriceCell } from '../../src/components/PriceCell.js';
 import { COPY } from '../../src/copy.js';
-import { provSearch } from '../fixtures.js';
+import { fxConverted, provSearch } from '../fixtures.js';
 import { renderWithProviders } from '../render.js';
 
 // The compact face at phone width: one inline box (amount, marks, provider mark, short age) that sits in its sentence,
@@ -83,5 +83,22 @@ describe('PriceCell compact face: every mark stays in the box', () => {
     expect(cell).toHaveTextContent(COPY.superseded);
     expect(cell).toHaveTextContent(COPY.truncatedNote);
     expect(cell).toHaveTextContent(COPY.notSeenInLatest(COPY.agoOf(30)));
+  });
+});
+
+describe('PriceCell compact face: a converted price', () => {
+  it('keeps "≈" and the amount in one unbreakable group, so the amount never reads as exact on its own', () => {
+    renderWithProviders(
+      <PriceCell
+        compact
+        pricePence={8600}
+        provenance={{ ...provSearch, fx: fxConverted }}
+        calendar={false}
+        stale={false}
+      />,
+    );
+    const amount = screen.getByTestId('compact-amount');
+    expect(amount).toHaveClass('whitespace-nowrap');
+    expect(amount).toHaveTextContent(new RegExp(`^${COPY.fxApprox}.*£86$`));
   });
 });

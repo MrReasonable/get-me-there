@@ -167,15 +167,18 @@ export function PriceCell(props: PriceCellProps) {
         className={`inline-flex max-w-full flex-wrap items-baseline gap-x-1 align-baseline ${calendar ? 'rounded border border-dashed border-current px-1' : ''}`}
       >
         <span className="figure inline-flex flex-wrap items-center gap-x-1">
-          {fxTitle !== null ? (
-            <>
-              <span aria-hidden="true" title={fxTitle}>
-                {COPY.fxApprox}
-              </span>
-              <span className="sr-only">{COPY.fxSpoken(fxTitle)}</span>
-            </>
-          ) : null}
-          {formatPence(props.pricePence)}
+          {/* why: the "≈" and the amount never wrap apart, so a converted price can never read as exact */}
+          <span data-testid="compact-amount" className="whitespace-nowrap">
+            {fxTitle !== null ? (
+              <>
+                <span aria-hidden="true" title={fxTitle}>
+                  {COPY.fxApprox}
+                </span>
+                <span className="sr-only">{COPY.fxSpoken(fxTitle)}</span>
+              </>
+            ) : null}
+            {formatPence(props.pricePence)}
+          </span>
           {props.qualifier !== undefined ? (
             <span className="ml-1 text-xs font-normal">{props.qualifier}</span>
           ) : null}

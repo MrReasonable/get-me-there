@@ -185,8 +185,9 @@ export function FlightOutcome({ entry, available }: { entry: FlightPair | undefi
       {o.kind === 'from' ? (
         <>
           {F.outcomeFrom}{' '}
-          {/* why: the price and its time wrap as one, so ", 06:45" never starts a line on its own */}
-          <span className="whitespace-nowrap">
+          {/* why: the price and its time move to a new line together, so ", 06:45" never starts a line beside
+          "Google's list: from"; the group still wraps and shrinks within its column (long amounts, text zoom) */}
+          <span className="inline-flex min-w-0 max-w-full flex-wrap items-baseline">
             <FlightPrice list={list} pence={o.minMinor} />
             {F.outcomeAt(o.when)}
           </span>
