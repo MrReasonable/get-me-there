@@ -6,6 +6,7 @@ import {
   boardModel,
   calendarStyled,
   flightReadLine,
+  gridFetchedAtOf,
   isSyntheticRead,
   type ListsState,
   PAGE_SIZE,
@@ -517,5 +518,17 @@ describe('setsAirlineOrLayover (spec rev 56 §11 Board: "airline settings not ap
     expect(setsAirlineOrLayover({ maxLayoverMinutes: 240 })).toBe(true);
     expect(setsAirlineOrLayover({ noOvernightLayover: true })).toBe(true);
     expect(setsAirlineOrLayover({ noOvernightLayover: false })).toBe(false);
+  });
+});
+
+// why: spec rev 63: the block weighs an older pairing against the same grid price the board's figure does
+describe('gridFetchedAtOf', () => {
+  it("names a pairing figure's grid price, a calendar figure's own, and none for a verified figure or none", () => {
+    const pairing = pairingFig();
+    expect(gridFetchedAtOf(pairing)).toBe(pairing.gridPrice?.provenance.fetchedAt);
+    const calendar = calendarFig();
+    expect(gridFetchedAtOf(calendar)).toBe(calendar.price.provenance.fetchedAt);
+    expect(gridFetchedAtOf(verifiedFig())).toBeNull();
+    expect(gridFetchedAtOf(null)).toBeNull();
   });
 });

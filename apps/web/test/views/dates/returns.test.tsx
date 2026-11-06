@@ -13,7 +13,15 @@ import { HttpResponse, http } from 'msw';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { POLL_MS } from '../../../src/api/queries.js';
 import type { FlightList } from '../../../src/api/types.js';
-import { at, type DatesOptions, priced, pricedPair, provCached } from '../../fixtures.dates.js';
+import {
+  at,
+  type DatesOptions,
+  priced,
+  pricedPair,
+  provCached,
+  provSearched,
+  verifiedFig,
+} from '../../fixtures.dates.js';
 import { definition } from '../../fixtures.js';
 import {
   flightList,
@@ -84,10 +92,15 @@ function serve(
 /** Renders the board with `list` and waits for the date pair's flights block. */
 async function renderList(
   list: FlightList | null,
-  o: { over?: Parameters<typeof serveFlightLists>[1]; def?: typeof DEF; readNow?: boolean } = {},
+  o: {
+    over?: Parameters<typeof serveFlightLists>[1];
+    def?: typeof DEF;
+    readNow?: boolean;
+    board?: DatesOptions;
+  } = {},
 ) {
   serve(list, o.over, o.readNow);
-  const r = renderDates({ body: BOARD, def: o.def ?? DEF });
+  const r = renderDates({ body: o.board ?? BOARD, def: o.def ?? DEF });
   await findBoard();
   await waitFor(() => expect(document.querySelector('[data-flights-for="0"]')).not.toBeNull());
   return r;
@@ -302,9 +315,9 @@ describe('the lead emphasis follows the one leading rule (final review B-I1)', (
     expect(leads()).toBe(1);
   });
   // why: spec rev 62 (Ian, 2026-11-06): an older pairing still leads the board, so the block emphasises it as the board's
-  // answer; its price carries the list's stale mark
+  // answer; its price carries the list's stale mark (the list read after the board's grid price, 13:00 on 14 Oct)
   it('a list older than the refresh: still the lead emphasis, the price marked older', async () => {
-    await renderList(pairingList({ stale: 'refresh' }));
+    await renderList(pairingList({ stale: 'refresh', fetchedAt: '2026-10-14T14:00:00.000Z' }));
     expect(lines('return-line')[0]).toMatch(/^Back: £1,180/);
     expect(lines('return-line')[0]).toContain('QQ Travel · cheapest of 3 offers read');
     expect(leads()).toBe(1);
@@ -312,6 +325,65 @@ describe('the lead emphasis follows the one leading rule (final review B-I1)', (
       /older than this search's refresh$/,
     );
   });
+  // why: spec rev 63: a grid price read after an older list re-priced the date, so the board leads with the grid price
+  // and the block does not emphasise the old seller's price as the answer
+  it('a list older than the refresh and than the board grid price: no lead emphasis', async () => {
+    await renderList(pairingList({ stale: 'refresh' }));
+    expect(lines('return-line')[0]).toContain('QQ Travel · cheapest of 3 offers read');
+    expect(leads()).toBe(0);
+  });
+  // why: CodeRabbit on PR #47: a verified figure keeps the board (a fresh one always; a stale one beside an older
+  // pairing), so the block never emphasises the seller's price as the answer beneath it
+  it('beneath a fresh verified figure: no lead emphasis', async () => {
+    const verified = (stale: false | 'refresh'): DatesOptions => ({
+      ...BOARD,
+      pairs: {
+        [at('2027-03-14', 10)]: pricedPair(
+          verifiedFig({ price: { ...verifiedFig().price, provenance: provSearched(), stale } }),
+        ),
+      },
+    });
+    await renderList(FIXTURE, { board: verified(false) });
+    expect(within(block()).getAllByTestId('return-line')[0]).toHaveTextContent('QQ Travel');
+    expect(leads()).toBe(0);
+  });
+  it('beneath a stale verified figure, an older list: no lead emphasis', async () => {
+    await renderList(pairingList({ stale: 'refresh', fetchedAt: '2026-10-14T14:00:00.000Z' }), {
+      board: {
+        ...BOARD,
+        pairs: {
+          [at('2027-03-14', 10)]: pricedPair(
+            verifiedFig({ price: { ...verifiedFig().price, provenance: provSearched(), stale: 'setting' } }),
+          ),
+        },
+      },
+    });
+    expect(within(block()).getAllByTestId('return-line')[0]).toHaveTextContent('QQ Travel');
+    expect(leads()).toBe(0);
+  });
+
+  // why: CodeRabbit on PR #47: another airport pair's list is never the board's figure, so a complete pairing that
+  // would otherwise lead gets no lead emphasis there
+  it("another airport pair's list: no lead emphasis, though its pairing would lead its own pair", async () => {
+    server.use(
+      serveFlightLists(
+        (d, r) =>
+          flightPair(d, r, {
+            ...(d === '2027-03-14'
+              ? { list: null, listOtherPair: pairingList({ origin: 'LGW', destination: 'EWR' }) }
+              : {}),
+          }),
+        { pagesPlanned: 2 },
+      ),
+    );
+    renderDates({ body: BOARD, def: DEF });
+    await findBoard();
+    await waitFor(() =>
+      expect(within(block()).getAllByTestId('return-line')[0]).toHaveTextContent('QQ Travel'),
+    );
+    expect(leads()).toBe(0);
+  });
+
   it('a list read under other limits: no lead emphasis', async () => {
     await renderList(FIXTURE, {
       def: definition({ constraints: { maxJourneyMinutes: 1_600, maxStops: 1 } }),

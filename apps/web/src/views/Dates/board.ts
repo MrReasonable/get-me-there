@@ -294,3 +294,21 @@ export function setsAirlineOrLayover(
     c.noOvernightLayover === true
   );
 }
+
+/**
+ * Spec rev 63 §6.9: the read time of the grid price an older pairing is weighed against: a pairing figure's grid price,
+ * a calendar figure's own price; null for a verified figure or none (an older pairing never displaces a checked fare,
+ * and there is no grid price to compare). The search page's block reads `pairingLeads` with it, as the board's figure
+ * does, so the block emphasises a seller's price exactly when the board leads with it.
+ */
+export function gridFetchedAtOf(f: DatePairFigure | null): IsoDateTime | null {
+  if (f === null) return null;
+  switch (f.basis) {
+    case 'pairing':
+      return f.gridPrice?.provenance.fetchedAt ?? null;
+    case 'calendar':
+      return f.price.provenance.fetchedAt;
+    case 'verified':
+      return null;
+  }
+}

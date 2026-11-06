@@ -1,4 +1,4 @@
-import { addDays, type FlightLimits, fitsLimits, pairingLeads } from '@gmt/core';
+import { addDays, type FlightLimits, fitsLimits, type IsoDateTime, pairingLeads } from '@gmt/core';
 import { useId, useState } from 'react';
 import type { FlightList } from '../../api/types.js';
 import { COPY } from '../../copy.js';
@@ -90,12 +90,18 @@ export function PairingSection({
   p,
   limits,
   readNow,
+  gridFetchedAt,
+  mayLead,
 }: {
   list: FlightList;
   p: PairingView;
   limits: FlightLimits;
   /** Final review B-I3: whether a read of this date pair would go now; the notes word what happens next by it. */
   readNow: boolean;
+  /** Spec rev 63: when the date pair's grid price was read (null: none to compare), as the board's lead rule reads it. */
+  gridFetchedAt: IsoDateTime | null;
+  /** Whether the board could lead with this pairing at all (false under a verified figure, as the board keeps it). */
+  mayLead: boolean;
 }) {
   const [all, setAll] = useState(false);
   // why: 21.7 ui-007: the live region says nothing until the toggle is pressed, then how many returns are shown
@@ -109,13 +115,21 @@ export function PairingSection({
   // why: 21.7 code M1, prov-010: the counts and more-listed clauses of the view the shown returns come from
   const readNote = returnNote(list, COPY, readNow, p.attempt);
   // why: final review B-I1: the shown seller's price is emphasised as the answer exactly when the board leads with it,
-  // by core's one predicate (within the limits, read under today's limits, complete offers; spec rev 62: at any age)
-  const leads = pairingLeads({
-    fits: p.fits,
-    underCurrentLimits: p.underCurrentLimits,
-    offer: p.offer,
-    complete: p.offer?.complete === true,
-  });
+  // by core's one predicate (within the limits, read under today's limits, complete offers; spec rev 62/63: at any age
+  // unless a grid price was read after an older list)
+  const leads =
+    mayLead &&
+    pairingLeads(
+      {
+        fits: p.fits,
+        underCurrentLimits: p.underCurrentLimits,
+        offer: p.offer,
+        complete: p.offer?.complete === true,
+        fresh: list.stale === false,
+        fetchedAt: list.fetchedAt,
+      },
+      gridFetchedAt,
+    );
   const changed = !p.selectedNow || !p.underCurrentLimits;
   const tried = triedLine(list, changed);
   // why: the price-applies and book lines say what the shown seller's price is for, so they follow its line

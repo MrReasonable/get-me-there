@@ -27,7 +27,7 @@ export type FigureBasis = (typeof FIGURE_BASES)[number];
  * that holds): `not-read` (no flight list for the cell), `list-failed` (the newest list failed: nothing was read, and its
  * cause is sent beside it; the 21.6 ruling), `outbound-only` (a list whose return phase read no return view),
  * `no-pairing-read` (a finished return phase with no return listed or read), `over-limit` (returns read, none fitting),
- * `within-other-limits` (read under other limits), `within-older` (older than the refresh, with no complete offers: a complete one leads at any age), `sellers-not-read` (no
+ * `within-other-limits` (read under other limits), `within-older` (older than the refresh and not leading: no complete offers, or a newer grid price read since), `sellers-not-read` (no
  * booking read of that pairing kept offers), `offers-incomplete` (offers kept but not complete); and `within`, exactly on
  * a pairing figure (the pairing leads).
  */
@@ -195,34 +195,41 @@ export function listFresh(fetchedAt: IsoDateTime, now: IsoDateTime, refreshHours
  * The facts the lead rule reads (final review B-I1): a `PairingCandidate`'s, or the search page's own (the web's
  * pairing with an offer of its own shape), so the board and the block share one predicate.
  */
-export type LeadFacts = Pick<PairingCandidate, 'fits' | 'underCurrentLimits' | 'complete'> & {
+export type LeadFacts = Pick<
+  PairingCandidate,
+  'fits' | 'underCurrentLimits' | 'complete' | 'fresh' | 'fetchedAt'
+> & {
   offer: object | null;
 };
 
 /**
- * R-lead with R-sellers (spec rev 62 §6.9 "When it leads"): the pairing leads its date pair exactly when it fits the
- * current limits, the list was read under the current limits, and a booking read of it kept offers that are complete
- * (A8: an expand-failed booking only when its cheapest offer equals the return's "from" price, which `offersComplete`
- * decides). Its age does not stop it leading (Ian, 2026-11-06: a date keeps its last real round trip rather than falling
- * back to the grid's price); a list older than the refresh carries its stale mark onto the figure. The api's figure and
- * the search page's emphasis both read it (final review B-I1).
+ * R-lead with R-sellers (spec rev 63 §6.9 "When it leads"): the pairing leads its date pair exactly when it fits the
+ * current limits, the list was read under the current limits, a booking read of it kept offers that are complete (A8:
+ * an expand-failed booking only when its cheapest offer equals the return's "from" price, which `offersComplete`
+ * decides), and it is not outdated. Its age alone does not stop it leading (Ian, 2026-11-06: a date keeps its last real
+ * round trip rather than falling back to the grid's price; a list older than the refresh carries its stale mark onto
+ * the figure), but a list older than the refresh gives way once a newer grid price was read for its cell (`gridFetchedAt`,
+ * the calendar price it would replace; null when there is none to compare): a later search re-priced the date, so the
+ * old round trip no longer leads it. The api's figure and the search page's emphasis both read it (final review B-I1).
  */
-export function pairingLeads(p: LeadFacts): boolean {
-  return p.fits && p.underCurrentLimits && p.offer !== null && p.complete;
+export function pairingLeads(p: LeadFacts, gridFetchedAt: IsoDateTime | null): boolean {
+  const outdated = gridFetchedAt !== null && Date.parse(p.fetchedAt) < Date.parse(gridFetchedAt);
+  return p.fits && p.underCurrentLimits && p.offer !== null && p.complete && (p.fresh || !outdated);
 }
 
 /**
  * Spec rev 62 §6.9 (the 21.1 concern-2 ruling; final review B-M2): the candidate-based `pairingRead`, the first that
  * holds in the spec's order: `within-other-limits` (read under other limits, over today's or not: the board then words
- * the limit edit as the search's page block does), `over-limit`, `within` (exactly when `pairingLeads`, at any age),
- * `within-older` (older than the refresh, with no complete offers), `sellers-not-read`, else `offers-incomplete`. The
+ * the limit edit as the search's page block does), `over-limit`, `within` (exactly when `pairingLeads`, at any age
+ * unless outdated by a newer grid price), `within-older` (older than the refresh and not leading: no complete offers, or
+ * outdated), `sellers-not-read`, else `offers-incomplete`. The
  * three list-based values (`not-read`, `outbound-only`, `no-pairing-read`) come before these and are the api's to tell
  * apart, from the newest list, where there is no candidate.
  */
-export function pairingReadOf(p: PairingCandidate): PairingRead {
+export function pairingReadOf(p: PairingCandidate, gridFetchedAt: IsoDateTime | null): PairingRead {
   if (!p.underCurrentLimits) return 'within-other-limits';
   if (!p.fits) return 'over-limit';
-  if (pairingLeads(p)) return 'within';
+  if (pairingLeads(p, gridFetchedAt)) return 'within';
   if (!p.fresh) return 'within-older';
   if (p.offer === null) return 'sellers-not-read';
   return 'offers-incomplete';

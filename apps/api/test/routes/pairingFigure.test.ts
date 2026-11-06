@@ -51,7 +51,9 @@ const A = cell(LHR, JFK, '2026-11-02', '2026-11-12');
 const B = cell(LGW, EWR, '2026-11-03', '2026-11-13');
 
 /** A search naming camoufox beside the fixture; run E started 2 h ago and priced A at £400 and B at `bPence`. */
-async function setup(o: { constraints?: DefinitionInput['constraints']; bPence?: number } = {}) {
+async function setup(
+  o: { constraints?: DefinitionInput['constraints']; bPence?: number; gridHoursAgo?: number } = {},
+) {
   h = await createHarness({ env: WORKER_ENV });
   const x = h;
   const def = x.ports.repos.definitions.create(
@@ -66,10 +68,12 @@ async function setup(o: { constraints?: DefinitionInput['constraints']; bPence?:
     }),
   );
   const s = seeder(x.ports);
-  const e = s.execution('E', { def, status: 'completed', startedAt: at(-2), finishedAt: at(-1) });
+  // why: spec rev 63: the grid's read time decides whether an older list still leads; by default 2 h ago
+  const g = o.gridHoursAgo ?? 2;
+  const e = s.execution('E', { def, status: 'completed', startedAt: at(-g), finishedAt: at(-(g - 1)) });
   s.cells('E', ALL, { discovery: ['fixture', 'travelpayouts'] });
-  s.tile('E', A, { status: 'priced', fetchedAt: at(-2), pricePence: 40_000 });
-  s.tile('E', B, { status: 'priced', fetchedAt: at(-2), pricePence: o.bPence ?? 41_000, tileIndex: 1 });
+  s.tile('E', A, { status: 'priced', fetchedAt: at(-g), pricePence: 40_000 });
+  s.tile('E', B, { status: 'priced', fetchedAt: at(-g), pricePence: o.bPence ?? 41_000, tileIndex: 1 });
   return { x, def, e };
 }
 
@@ -266,7 +270,8 @@ describe('the pairing figure on the board (spec rev 56 §6.9)', () => {
 
   // why: spec rev 62 (Ian, 2026-11-06): a date keeps its last real round trip, marked older, not the grid's price
   it('a list older than the refresh (200 h of 168) still leads, the figure marked older than the refresh', async () => {
-    const { x, def } = await setup();
+    // the grid price was read 250 h ago, before the list
+    const { x, def } = await setup({ gridHoursAgo: 250 });
     store(x, def, A, PAIRING_FIXTURE.returns, { hoursAgo: 200 });
     expect(await figureA(x, def)).toMatchObject({
       basis: 'pairing',
@@ -274,6 +279,19 @@ describe('the pairing figure on the board (spec rev 56 §6.9)', () => {
       pairingRead: 'within',
       pairing: { ...PAIRING, provenance: listProvenance(200), stale: 'refresh', ageHours: 200 },
       gridPrice: { pricePence: 40_000 },
+    });
+  });
+
+  // why: spec rev 63: a later search re-priced the date (its grid price read 2 h ago), so the 200 h old round trip no
+  // longer leads it: the grid price leads, the pairing beneath, until the date's flights are read again
+  it('a list older than the refresh, with a grid price read after it, gives way: within-older, the pairing beneath', async () => {
+    const { x, def } = await setup();
+    store(x, def, A, PAIRING_FIXTURE.returns, { hoursAgo: 200 });
+    expect(await figureA(x, def)).toMatchObject({
+      basis: 'calendar',
+      price: { pricePence: 40_000 },
+      pairingRead: 'within-older',
+      pairing: { ...PAIRING, provenance: listProvenance(200), stale: 'refresh', ageHours: 200 },
     });
   });
 
@@ -588,7 +606,7 @@ describe('the pairing figure: Task 21.6 fix round 1', () => {
   // why: prov-007: freshness is judged on elapsed time, not whole hours, so a list one minute past the refresh is
   // marked older (the engine's reuse rule compares milliseconds too); spec rev 62: it still leads
   it('a list one minute past the refresh leads marked older; one exactly at it leads fresh', async () => {
-    const past = await setup();
+    const past = await setup({ gridHoursAgo: 200 });
     store(past.x, past.def, A, PAIRING_FIXTURE.returns, { hoursAgo: 168 + 1 / 60 });
     expect(await figureA(past.x, past.def)).toMatchObject({
       basis: 'pairing',

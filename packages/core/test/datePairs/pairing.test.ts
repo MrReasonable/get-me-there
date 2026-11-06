@@ -363,39 +363,51 @@ describe('pairingLeads and pairingReadOf (spec rev 56 §6.9 "When it leads"; R-l
     ...over,
   });
   const flags = [true, false];
-  // why: spec rev 62 (Ian, 2026-11-06): its age never stops it leading; a list older than the refresh still leads
-  it('leads only with fits, under current limits, complete and an offer, at any age (every combination)', () => {
+  // the list was read at 09:30; a grid price read before it, after it, or none to compare
+  const EARLIER = asIsoDateTime('2027-03-01T09:00:00.000Z');
+  const LATER = asIsoDateTime('2027-03-01T10:00:00.000Z');
+  // why: spec rev 62/63 (Ian, 2026-11-06): its age alone never stops it leading; an older one gives way only to a grid
+  // price read after it for the same cell
+  it('leads only with fits, under current limits, complete and an offer, and fresh or not outdated (every combination)', () => {
     for (const fits of flags)
       for (const fresh of flags)
         for (const underCurrentLimits of flags)
           for (const complete of flags)
-            for (const hasOffer of flags) {
-              const c = candidate({
-                fits,
-                fresh,
-                underCurrentLimits,
-                complete,
-                ...(hasOffer ? {} : { offer: null }),
-              });
-              const want = fits && underCurrentLimits && complete && hasOffer;
-              expect(
-                pairingLeads(c),
-                JSON.stringify({ fits, fresh, underCurrentLimits, complete, hasOffer }),
-              ).toBe(want);
-              expect(pairingReadOf(c) === 'within').toBe(want);
-            }
+            for (const hasOffer of flags)
+              for (const grid of [null, EARLIER, LATER]) {
+                const c = candidate({
+                  fits,
+                  fresh,
+                  underCurrentLimits,
+                  complete,
+                  ...(hasOffer ? {} : { offer: null }),
+                });
+                const want = fits && underCurrentLimits && complete && hasOffer && (fresh || grid !== LATER);
+                expect(
+                  pairingLeads(c, grid),
+                  JSON.stringify({ fits, fresh, underCurrentLimits, complete, hasOffer, grid }),
+                ).toBe(want);
+                expect(pairingReadOf(c, grid) === 'within').toBe(want);
+              }
   });
   // why: final review B-I1: the web's block reads the same predicate from the facts it holds (an offer of its own shape)
-  it('pairingLeads reads only the four facts, so the block and the api share it', () => {
+  it('pairingLeads reads only the six facts and the grid time, so the block and the api share it', () => {
     const facts = {
       fits: true,
       underCurrentLimits: true,
       offer: { seller: 'QQ Travel' },
       complete: true,
+      fresh: false,
+      fetchedAt: asIsoDateTime('2027-03-01T09:30:00.000Z'),
     };
-    expect(pairingLeads(facts)).toBe(true);
-    expect(pairingLeads({ ...facts, offer: null })).toBe(false);
-    expect(pairingLeads({ ...facts, complete: false })).toBe(false);
+    expect(pairingLeads(facts, null)).toBe(true);
+    expect(pairingLeads(facts, EARLIER)).toBe(true);
+    // a grid price read at the same instant is not newer
+    expect(pairingLeads(facts, facts.fetchedAt)).toBe(true);
+    expect(pairingLeads(facts, LATER)).toBe(false);
+    expect(pairingLeads({ ...facts, fresh: true }, LATER)).toBe(true);
+    expect(pairingLeads({ ...facts, offer: null }, null)).toBe(false);
+    expect(pairingLeads({ ...facts, complete: false }, null)).toBe(false);
   });
   // why: final review B-M1: one elapsed-time rule for the list's stale mark and the pairing's freshness
   it('listFresh: within the refresh by elapsed milliseconds, never whole hours', () => {
@@ -407,16 +419,23 @@ describe('pairingLeads and pairingReadOf (spec rev 56 §6.9 "When it leads"; R-l
   it("names why it does not lead, in the spec's order", () => {
     // why: final review B-M2: a list read under other limits says so first, over today's limits or not, as the search's
     // page block does after a limit edit
-    expect(pairingReadOf(candidate({ underCurrentLimits: false, fits: false }))).toBe('within-other-limits');
-    expect(pairingReadOf(candidate({ fits: false, fresh: false, offer: null }))).toBe('over-limit');
-    expect(pairingReadOf(candidate({ underCurrentLimits: false, fresh: false }))).toBe('within-other-limits');
-    // why: spec rev 62: a complete pairing leads at any age, so within-older is an older one with no complete offers
-    expect(pairingReadOf(candidate({ fresh: false }))).toBe('within');
-    expect(pairingReadOf(candidate({ fresh: false, offer: null }))).toBe('within-older');
-    expect(pairingReadOf(candidate({ fresh: false, complete: false }))).toBe('within-older');
-    expect(pairingReadOf(candidate({ offer: null, complete: false }))).toBe('sellers-not-read');
-    expect(pairingReadOf(candidate({ complete: false }))).toBe('offers-incomplete');
-    expect(pairingReadOf(candidate({}))).toBe('within');
+    expect(pairingReadOf(candidate({ underCurrentLimits: false, fits: false }), null)).toBe(
+      'within-other-limits',
+    );
+    expect(pairingReadOf(candidate({ fits: false, fresh: false, offer: null }), null)).toBe('over-limit');
+    expect(pairingReadOf(candidate({ underCurrentLimits: false, fresh: false }), null)).toBe(
+      'within-other-limits',
+    );
+    // why: spec rev 62/63: a complete pairing leads at any age until a newer grid price; within-older is an older one
+    // that does not lead
+    expect(pairingReadOf(candidate({ fresh: false }), EARLIER)).toBe('within');
+    expect(pairingReadOf(candidate({ fresh: false }), LATER)).toBe('within-older');
+    expect(pairingReadOf(candidate({}), LATER)).toBe('within');
+    expect(pairingReadOf(candidate({ fresh: false, offer: null }), null)).toBe('within-older');
+    expect(pairingReadOf(candidate({ fresh: false, complete: false }), null)).toBe('within-older');
+    expect(pairingReadOf(candidate({ offer: null, complete: false }), null)).toBe('sellers-not-read');
+    expect(pairingReadOf(candidate({ complete: false }), null)).toBe('offers-incomplete');
+    expect(pairingReadOf(candidate({}), null)).toBe('within');
   });
   it('PAIRING_READ is pinned: its order is the wire code (ruling R-sparse); FIGURE_BASES its three', () => {
     expect(PAIRING_READ).toEqual([

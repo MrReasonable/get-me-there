@@ -1,6 +1,6 @@
 # get-me-there — Flight Price Intelligence & Flexible-Date Optimiser
 
-**Design spec, revision 62.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
+**Design spec, revision 63.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
 four full-roster reviews (145, 140, 126 and 101 findings; zero Critical since
 revision 2) and the provider spike. Revision 9 folds in the three decisions
 taken at approval (the self-scraping fallback in §2, the dashboard readings in
@@ -67,8 +67,8 @@ and its coverage section make it impossible to mistake "not searched" for
 The headline number is the **cheapest round trip found** and always carries
 its basis, verdict class, provider and age. A date pair whose return flights
 and booking options the browser worker read leads, at any age (marked older
-once past the search's refresh), when that read was made under the search's
-current limits, with the cheapest seller's
+once past the search's refresh) until a later search re-prices the date,
+when that read was made under the search's current limits, with the cheapest seller's
 stated price read for one outbound and one return, worded as "cheapest of N
 offers read", never "verified" and not checked with the airline (§6.9).
 Never "cheapest bookable". The
@@ -2344,7 +2344,14 @@ the web share):
   search's camoufox refresh by the per-price rule (judged on the elapsed
   time and never on whole hours, so a list one minute past the refresh is
   older; its age in whole hours is for display only) still leads, and the
-  figure carries the list's stale mark, "older than this search's refresh".
+  figure carries the list's stale mark, "older than this search's refresh",
+  until a grid price is read for its cell after the list (a later search
+  re-priced the date: the calendar price it would replace was fetched after
+  the list's `fetchedAt`); it then gives way to that grid price until the
+  date's flights are read again. A list within the refresh leads whatever
+  the grid's read time. The search page's block weighs the same grid price
+  (the figure's own, or a pairing figure's grid price), so it emphasises a
+  seller's price exactly when the board leads with it.
   Only a fresh verified figure still wins (§11's precedence): a fresh,
   complete pairing replaces a stale verified figure as it replaces a calendar
   one (ruling R-stale-verified), keyed by the cell of the date pair's best
@@ -2399,8 +2406,10 @@ the web share):
   `within-other-limits` (read under other limits, over today's or not: "your
   limits have changed since these return flights were read:", the search's
   page block's own lead phrase, the pairing beneath); `within-older`
-  (older than the refresh, and not leading: its offers not complete or not
-  read, or a complete one beside a stale verified figure: "return flights
+  (older than the refresh, and not leading, in one of three cases: (a) its
+  offers not complete or not read; (b) complete, but outdated by a grid price
+  read after it; (c) complete, beside a stale verified figure, which an older
+  pairing never displaces: "return flights
   read <ago>, older than this search's refresh:", the pairing beneath with
   its age);
   `sellers-not-read` (no booking read of that pairing kept offers, the grid
@@ -2408,7 +2417,7 @@ the web share):
   (offers kept but not complete: the offer beneath with "a cheaper seller
   may not have been read"); `within` (the pairing leads, above). The order
   of the candidate-based values is `within-other-limits`, `over-limit`,
-  `within` (a leading pairing, at any age), `within-older`,
+  `within` (a leading pairing, at any age unless outdated), `within-older`,
   `sellers-not-read`, `offers-incomplete`, so a limit edit is worded the
   same on the board and on the search's page. A
   pairing shown beneath carries its own provenance (always a flight list's:
@@ -5760,6 +5769,15 @@ as specified in §5.3; no secrets, no full URLs.
 ---
 
 ## 17. Changelog
+
+### Revision 63: an old round trip gives way to a newer grid price (2026-11-06)
+
+Revision 62 let an older pairing lead at any age, and the board ranks it by price like a current one. A later search
+reads flights only for the dates its grid shows cheapest, so a date whose grid price rose might never be read again and
+its old round trip could stay at the top for weeks. Ian agreed: an older pairing leads only until a grid price is read
+for its cell after its list; it then gives way to that newer grid price (`within-older`, the pairing beneath) until the
+date's flights are read again. With no newer search, as between runs, the older round trip keeps leading. `pairingLeads`
+takes the grid price's read time, which the api's figure and the search page's block both pass, so they agree.
 
 ### Revision 62: a date keeps its last real round trip (2026-11-06)
 
