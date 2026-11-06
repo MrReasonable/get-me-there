@@ -264,14 +264,27 @@ describe('the pairing figure on the board (spec rev 56 §6.9)', () => {
     expect((await figureA(x, def))?.fromEarlierSearch).toBe(false);
   });
 
-  it('a list older than the refresh (200 h of 168) keeps the grid price: within-older, the pairing beneath with its age', async () => {
+  // why: spec rev 62 (Ian, 2026-11-06): a date keeps its last real round trip, marked older, not the grid's price
+  it('a list older than the refresh (200 h of 168) still leads, the figure marked older than the refresh', async () => {
     const { x, def } = await setup();
     store(x, def, A, PAIRING_FIXTURE.returns, { hoursAgo: 200 });
+    expect(await figureA(x, def)).toMatchObject({
+      basis: 'pairing',
+      price: { pricePence: 118_000, provenance: listProvenance(200), stale: 'refresh', ageHours: 200 },
+      pairingRead: 'within',
+      pairing: { ...PAIRING, provenance: listProvenance(200), stale: 'refresh', ageHours: 200 },
+      gridPrice: { pricePence: 40_000 },
+    });
+  });
+
+  it('a list older than the refresh with no seller read keeps the grid price: within-older, the pairing beneath', async () => {
+    const { x, def } = await setup();
+    store(x, def, A, fixture(null), { hoursAgo: 200 });
     expect(await figureA(x, def)).toMatchObject({
       basis: 'calendar',
       price: { pricePence: 40_000 },
       pairingRead: 'within-older',
-      pairing: { ...PAIRING, provenance: listProvenance(200), stale: 'refresh', ageHours: 200 },
+      pairing: { isFrom: true, seller: null, stale: 'refresh', ageHours: 200 },
     });
   });
 
@@ -572,14 +585,14 @@ describe('the pairing figure: Task 21.6 fix round 1', () => {
     expect((await figureA(x, def))?.basis).toBe('pairing');
   });
 
-  // why: prov-007: freshness is judged on elapsed time, not whole hours, so a list one minute past the refresh no
-  // longer leads (the engine's reuse rule compares milliseconds too)
-  it('a list one minute past the refresh keeps the grid price (within-older); one exactly at it leads', async () => {
+  // why: prov-007: freshness is judged on elapsed time, not whole hours, so a list one minute past the refresh is
+  // marked older (the engine's reuse rule compares milliseconds too); spec rev 62: it still leads
+  it('a list one minute past the refresh leads marked older; one exactly at it leads fresh', async () => {
     const past = await setup();
     store(past.x, past.def, A, PAIRING_FIXTURE.returns, { hoursAgo: 168 + 1 / 60 });
     expect(await figureA(past.x, past.def)).toMatchObject({
-      basis: 'calendar',
-      pairingRead: 'within-older',
+      basis: 'pairing',
+      price: { stale: 'refresh' },
       pairing: { stale: 'refresh', ageHours: 168 },
     });
     await h?.close();

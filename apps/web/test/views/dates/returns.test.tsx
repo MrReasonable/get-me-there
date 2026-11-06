@@ -301,11 +301,16 @@ describe('the lead emphasis follows the one leading rule (final review B-I1)', (
     await renderList(FIXTURE);
     expect(leads()).toBe(1);
   });
-  it('a list older than the refresh: no lead emphasis', async () => {
+  // why: spec rev 62 (Ian, 2026-11-06): an older pairing still leads the board, so the block emphasises it as the board's
+  // answer; its price carries the list's stale mark
+  it('a list older than the refresh: still the lead emphasis, the price marked older', async () => {
     await renderList(pairingList({ stale: 'refresh' }));
     expect(lines('return-line')[0]).toMatch(/^Back: £1,180/);
     expect(lines('return-line')[0]).toContain('QQ Travel · cheapest of 3 offers read');
-    expect(leads()).toBe(0);
+    expect(leads()).toBe(1);
+    expect(within(block()).getByTestId('flights-head')).toHaveTextContent(
+      /older than this search's refresh$/,
+    );
   });
   it('a list read under other limits: no lead emphasis', async () => {
     await renderList(FIXTURE, {

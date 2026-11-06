@@ -232,10 +232,12 @@ function withPairing<T extends FigureCandidate>(
 }
 
 /**
- * Ruling R-stale-verified (spec rev 56 §6.9, §11): a stale verified figure gives way to a pairing that leads in the cell
- * of the date pair's best calendar price (`calendar`, which it keeps as its grid price); with no calendar price the
- * stale verified figure stays as it was. With a pairing that does not lead (ruling 21.2), it stays and carries that
- * cell's read and the pairing beneath it, as a calendar figure does. A fresh verified figure is never asked.
+ * Ruling R-stale-verified (spec rev 56 §6.9, §11): a stale verified figure gives way to a fresh pairing that leads in the
+ * cell of the date pair's best calendar price (`calendar`, which it keeps as its grid price); with no calendar price the
+ * stale verified figure stays as it was. With a pairing that does not lead (ruling 21.2), or one that leads but is older
+ * than the refresh (spec rev 62: an older pairing replaces a calendar price, never a checked fare), it stays and carries
+ * that cell's read (`within-older` for the older one) and the pairing beneath it, as a calendar figure does. A fresh
+ * verified figure is never asked.
  */
 function overStaleVerified<T extends FigureCandidate>(
   f: Extract<Figure<T>, { basis: 'verified' }>,
@@ -249,6 +251,7 @@ function overStaleVerified<T extends FigureCandidate>(
   // why: `pairingLeads` requires the offer; testing it first narrows it here without an assertion
   if (candidate.offer === null || !pairingLeads(candidate))
     return { ...f, pairingRead: pairingReadOf(candidate), pairing: candidate };
+  if (!candidate.fresh) return { ...f, pairingRead: 'within-older', pairing: candidate };
   return pairingFigure(calendar, candidate, candidate.offer.priceMinor);
 }
 

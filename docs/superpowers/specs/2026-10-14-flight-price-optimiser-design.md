@@ -1,6 +1,6 @@
 # get-me-there — Flight Price Intelligence & Flexible-Date Optimiser
 
-**Design spec, revision 61.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
+**Design spec, revision 62.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
 four full-roster reviews (145, 140, 126 and 101 findings; zero Critical since
 revision 2) and the provider spike. Revision 9 folds in the three decisions
 taken at approval (the self-scraping fallback in §2, the dashboard readings in
@@ -66,8 +66,9 @@ and its coverage section make it impossible to mistake "not searched" for
 
 The headline number is the **cheapest round trip found** and always carries
 its basis, verdict class, provider and age. A date pair whose return flights
-and booking options the browser worker read leads, while that read is fresh
-and was made under the search's current limits, with the cheapest seller's
+and booking options the browser worker read leads, at any age (marked older
+once past the search's refresh), when that read was made under the search's
+current limits, with the cheapest seller's
 stated price read for one outbound and one return, worded as "cheapest of N
 offers read", never "verified" and not checked with the airline (§6.9).
 Never "cheapest bookable". The
@@ -2330,22 +2331,27 @@ the web share):
   is `cheapest` (the first attempt, its outbound within the limits),
   `next-cheapest` (the second attempt) or `over-limit`.
 - **When it leads** (basis `pairing`). A pairing leads exactly when its
-  outbound and return both fit the current limits, the list is not stale by
-  the per-price rule (its age within the search's camoufox refresh, judged
-  on the elapsed time and never on whole hours, so a list one minute past
-  the refresh no longer leads; its age in whole hours is for display only), its
+  outbound and return both fit the current limits, its
   stored limits equal today's `flightLimitsOf` (deep equality), and the
   booking read of that pairing kept offers that are complete: `read` with its
   cheapest offer equal to the return's "from" price, or with no further
   expansion control, no grouped seller control and no offer left unread
   (none the grammar refused, `unparsed`, and none priced in another currency,
   `nonGbp`: ruling R-unread) (`offersComplete`), or `expand-failed` with its
-  cheapest offer read equal to the return's "from" price. Only a fresh
-  verified figure still wins (§11's precedence): a fresh, complete pairing
-  replaces a stale verified figure as it replaces a calendar one (ruling
-  R-stale-verified), keyed by the cell of the date pair's best calendar price,
-  which it keeps as its grid price; with no calendar price the stale verified
-  figure stays. The figure's price is then the cheapest offer's stated price, shown
+  cheapest offer read equal to the return's "from" price. Its age does not
+  stop it leading (Ian, 2026-11-06: a date keeps its last real round trip
+  rather than falling back to the grid's price): a list older than the
+  search's camoufox refresh by the per-price rule (judged on the elapsed
+  time and never on whole hours, so a list one minute past the refresh is
+  older; its age in whole hours is for display only) still leads, and the
+  figure carries the list's stale mark, "older than this search's refresh".
+  Only a fresh verified figure still wins (§11's precedence): a fresh,
+  complete pairing replaces a stale verified figure as it replaces a calendar
+  one (ruling R-stale-verified), keyed by the cell of the date pair's best
+  calendar price, which it keeps as its grid price; with no calendar price the
+  stale verified figure stays. An older complete pairing replaces a calendar
+  price only: beside a stale verified figure it reads `within-older`, the
+  verified figure staying with the pairing beneath it. The figure's price is then the cheapest offer's stated price, shown
   through `PriceCell` with the flight list's provenance (source "the browser
   worker's flight list", its fetch time, "the cheapest of the sellers read
   for these two flights" (never "the lowest seller price": only the sellers
@@ -2362,8 +2368,8 @@ the web share):
   `startedAt` (an on-demand list read after that start counts as from the
   latest search). Both wire contracts (§10) refuse a pairing figure whose
   pairing is not that: a "from" price, offers not complete, no offer read,
-  over the limits, stale (or on a stale figure), a price other than the
-  figure's, or a provenance other than the figure's own flight list's; and
+  over the limits, a stale mark other than the figure's (the two are the
+  list's own), a price other than the figure's, or a provenance other than the figure's own flight list's; and
   they refuse a "from" price that counts an offer read or is complete.
 - **The grid price beside it.** The calendar price a pairing figure replaced
   is carried as its `gridPrice` and shown beneath it through `PriceCell` with
@@ -2393,15 +2399,18 @@ the web share):
   `within-other-limits` (read under other limits, over today's or not: "your
   limits have changed since these return flights were read:", the search's
   page block's own lead phrase, the pairing beneath); `within-older`
-  (older than the refresh: "return flights read <ago>, older than this
-  search's refresh:", the pairing beneath with its age);
+  (older than the refresh, and not leading: its offers not complete or not
+  read, or a complete one beside a stale verified figure: "return flights
+  read <ago>, older than this search's refresh:", the pairing beneath with
+  its age);
   `sellers-not-read` (no booking read of that pairing kept offers, the grid
   price leading: "from £X, sellers not read" beneath it); `offers-incomplete`
   (offers kept but not complete: the offer beneath with "a cheaper seller
   may not have been read"); `within` (the pairing leads, above). The order
   of the candidate-based values is `within-other-limits`, `over-limit`,
-  `within-older`, `sellers-not-read`, `offers-incomplete`, `within`, so a
-  limit edit is worded the same on the board and on the search's page. A
+  `within` (a leading pairing, at any age), `within-older`,
+  `sellers-not-read`, `offers-incomplete`, so a limit edit is worded the
+  same on the board and on the search's page. A
   pairing shown beneath carries its own provenance (always a flight list's:
   both contracts refuse another), age and stale mark, and says what its read
   says (both contracts refuse otherwise: over the limits when it reads
@@ -5751,6 +5760,15 @@ as specified in §5.3; no secrets, no full URLs.
 ---
 
 ## 17. Changelog
+
+### Revision 62: a date keeps its last real round trip (2026-11-06)
+
+A pairing led its date pair only while its flight list was within the search's camoufox refresh, so a day after Ian
+read 246 date pairs the board fell back to the grid's prices, most of them for flights over his journey limit. Ian
+ruled that a date keeps its last real price, marked as older. §6.9 lets a complete pairing within the limits lead at
+any age, the figure carrying the list's stale mark; `within-older` now names an older pairing that does not lead (its
+offers not complete or not read, or a complete one beside a stale verified figure, which an older pairing never
+displaces). Both wire contracts and the card's cheapest accept an older pairing figure whose stale mark is its list's.
 
 ### Revision 61: prices that fit a phone's sentence (2026-11-05)
 

@@ -637,7 +637,7 @@ const isFlightList = (p: Provenance | undefined): boolean =>
 /**
  * Spec rev 56 §6.9 "When it leads" (prov-001): a pairing figure's entry `k` (figure `at`) is the leading pairing's own
  * words: an offer's price (never a "from" price), equal to the figure's, of a complete read of at least one offer, within
- * the limits, fresh (the figure too), and the figure's own flight-list provenance. So a regression in the api's lead rule
+ * the limits, the figure carrying its stale mark (spec rev 62: at any age), and the figure's own flight-list provenance. So a regression in the api's lead rule
  * cannot put a headline seller price on the board that the rules forbid.
  */
 function refineLeading(
@@ -662,8 +662,9 @@ function refineLeading(
     fail('pairingOffers', ['pairing', 'offersRead', k], 'a pairing figure read at least one offer');
   if (columnAt(q.which, k) === 'over-limit')
     fail('pairingLimits', ['pairing', 'which', k], 'a pairing figure is within the limits');
-  if (columnAt(q.stale, k) !== false || columnAt(f.stale, at) !== false)
-    fail('pairingStale', ['pairing', 'stale', k], 'a pairing figure is fresh');
+  // why: spec rev 62: a pairing leads at any age, and the figure carries its list's stale mark, never another
+  if (columnAt(q.stale, k) !== columnAt(f.stale, at))
+    fail('pairingStale', ['pairing', 'stale', k], "a pairing figure's stale mark is its pairing's");
   if (columnAt(q.pricePence, k) !== columnAt(f.pricePence, at))
     fail('pairingPrice', ['pairing', 'pricePence', k], "a pairing figure's price is its offer's");
   const provenance = columnAt(q.provenance, k);
@@ -941,8 +942,8 @@ export const datePairFigureSchema = z
         if (p.offersRead < 1) fail(['pairing', 'offersRead'], 'a pairing figure read at least one offer');
       }
       if (p.which === 'over-limit') fail(['pairing', 'which'], 'a pairing figure is within the limits');
-      if (p.stale !== false || f.price.stale !== false)
-        fail(['pairing', 'stale'], 'a pairing figure is fresh');
+      if (p.stale !== f.price.stale)
+        fail(['pairing', 'stale'], "a pairing figure's stale mark is its pairing's");
       if (p.pricePence !== f.price.pricePence)
         fail(['pairing', 'pricePence'], "a pairing figure's price is its offer's");
       if (provenanceKey(p.provenance) !== provenanceKey(f.price.provenance) || !isFlightList(p.provenance))

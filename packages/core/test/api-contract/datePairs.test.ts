@@ -580,7 +580,7 @@ describe('datePairsResponseSchema: the pairing figure (spec rev 56 §10)', () =>
     groupOf(order, 'pairing').figure = [1, 0];
     expect(issuePaths(order)).toContain('pairing.figure.1');
   });
-  it('prov-001: a pairing figure is complete, within the limits, fresh, read from an offer, priced and sourced as its figure', () => {
+  it('prov-001: a pairing figure is complete, within the limits, carries its stale mark, read from an offer, priced and sourced as its figure', () => {
     const pairingAt = (r: DatePairsResponse) => groupOf(r, 'pairing');
     const incomplete = withPairing();
     pairingAt(incomplete).complete[0] = false;
@@ -594,6 +594,11 @@ describe('datePairsResponseSchema: the pairing figure (spec rev 56 §10)', () =>
     const staleFigure = withPairing();
     staleFigure.figures.stale[0] = 'refresh';
     expect(issuePaths(staleFigure)).toEqual(['pairing.stale.0']);
+    // why: spec rev 62: an older pairing still leads, the figure carrying the list's stale mark
+    const older = withPairing();
+    pairingAt(older).stale[0] = 'refresh';
+    older.figures.stale[0] = 'refresh';
+    expect(issuePaths(older)).toEqual([]);
     const noOffers = withPairing();
     pairingAt(noOffers).offersRead[0] = 0;
     expect(issuePaths(noOffers)).toEqual(['pairing.offersRead.0']);
@@ -876,11 +881,19 @@ describe("datePairFigureSchema: basis 'pairing', gridPrice, pairing and pairingR
       r({ ...calendar, pairingRead: 'within-older', pairing: figurePairing({ stale: 'refresh' }) }).success,
     ).toBe(true);
   });
-  it('prov-001: a pairing figure is complete, within the limits, fresh, read from an offer, priced and sourced as its figure', () => {
+  it('prov-001: a pairing figure is complete, within the limits, carries its stale mark, read from an offer, priced and sourced as its figure', () => {
     expect(paths({ ...pairing, pairing: figurePairing({ complete: false }) })).toEqual(['pairing.complete']);
     expect(paths({ ...pairing, pairing: figurePairing({ which: 'over-limit' }) })).toEqual(['pairing.which']);
     expect(paths({ ...pairing, pairing: figurePairing({ stale: 'refresh' }) })).toEqual(['pairing.stale']);
     expect(paths({ ...pairing, price: { ...pairing.price, stale: 'refresh' } })).toEqual(['pairing.stale']);
+    // why: spec rev 62: an older pairing still leads, the figure carrying the list's stale mark
+    expect(
+      paths({
+        ...pairing,
+        price: { ...pairing.price, stale: 'refresh' },
+        pairing: figurePairing({ stale: 'refresh' }),
+      }),
+    ).toEqual([]);
     expect(paths({ ...pairing, pairing: figurePairing({ offersRead: 0 }) })).toEqual(['pairing.offersRead']);
     expect(paths({ ...pairing, pairing: figurePairing({ offersRead: 1 }) })).toEqual([]);
     expect(paths({ ...pairing, pairing: figurePairing({ pricePence: 117_999, mismatch: true }) })).toEqual([
@@ -1251,10 +1264,10 @@ describe('datePairFigureSchema: each rule says what is wrong', () => {
       'a pairing figure is within the limits',
     ],
     [
-      'a leading pairing stale',
+      'a leading pairing stale beside a fresh figure',
       { ...pairing, pairing: figurePairing({ stale: 'refresh' }) },
       'pairing.stale',
-      'a pairing figure is fresh',
+      "a pairing figure's stale mark is its pairing's",
     ],
     [
       "a leading pairing priced off its figure's price",

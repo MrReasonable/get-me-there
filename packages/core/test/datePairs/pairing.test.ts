@@ -363,7 +363,8 @@ describe('pairingLeads and pairingReadOf (spec rev 56 §6.9 "When it leads"; R-l
     ...over,
   });
   const flags = [true, false];
-  it('leads only with fits, fresh, under current limits, complete and an offer (every combination)', () => {
+  // why: spec rev 62 (Ian, 2026-11-06): its age never stops it leading; a list older than the refresh still leads
+  it('leads only with fits, under current limits, complete and an offer, at any age (every combination)', () => {
     for (const fits of flags)
       for (const fresh of flags)
         for (const underCurrentLimits of flags)
@@ -376,7 +377,7 @@ describe('pairingLeads and pairingReadOf (spec rev 56 §6.9 "When it leads"; R-l
                 complete,
                 ...(hasOffer ? {} : { offer: null }),
               });
-              const want = fits && fresh && underCurrentLimits && complete && hasOffer;
+              const want = fits && underCurrentLimits && complete && hasOffer;
               expect(
                 pairingLeads(c),
                 JSON.stringify({ fits, fresh, underCurrentLimits, complete, hasOffer }),
@@ -385,17 +386,16 @@ describe('pairingLeads and pairingReadOf (spec rev 56 §6.9 "When it leads"; R-l
             }
   });
   // why: final review B-I1: the web's block reads the same predicate from the facts it holds (an offer of its own shape)
-  it('pairingLeads reads only the five facts, so the block and the api share it', () => {
+  it('pairingLeads reads only the four facts, so the block and the api share it', () => {
     const facts = {
       fits: true,
-      fresh: true,
       underCurrentLimits: true,
       offer: { seller: 'QQ Travel' },
       complete: true,
     };
     expect(pairingLeads(facts)).toBe(true);
     expect(pairingLeads({ ...facts, offer: null })).toBe(false);
-    expect(pairingLeads({ ...facts, fresh: false })).toBe(false);
+    expect(pairingLeads({ ...facts, complete: false })).toBe(false);
   });
   // why: final review B-M1: one elapsed-time rule for the list's stale mark and the pairing's freshness
   it('listFresh: within the refresh by elapsed milliseconds, never whole hours', () => {
@@ -410,7 +410,10 @@ describe('pairingLeads and pairingReadOf (spec rev 56 §6.9 "When it leads"; R-l
     expect(pairingReadOf(candidate({ underCurrentLimits: false, fits: false }))).toBe('within-other-limits');
     expect(pairingReadOf(candidate({ fits: false, fresh: false, offer: null }))).toBe('over-limit');
     expect(pairingReadOf(candidate({ underCurrentLimits: false, fresh: false }))).toBe('within-other-limits');
+    // why: spec rev 62: a complete pairing leads at any age, so within-older is an older one with no complete offers
+    expect(pairingReadOf(candidate({ fresh: false }))).toBe('within');
     expect(pairingReadOf(candidate({ fresh: false, offer: null }))).toBe('within-older');
+    expect(pairingReadOf(candidate({ fresh: false, complete: false }))).toBe('within-older');
     expect(pairingReadOf(candidate({ offer: null, complete: false }))).toBe('sellers-not-read');
     expect(pairingReadOf(candidate({ complete: false }))).toBe('offers-incomplete');
     expect(pairingReadOf(candidate({}))).toBe('within');
