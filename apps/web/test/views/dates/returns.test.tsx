@@ -362,6 +362,28 @@ describe('the lead emphasis follows the one leading rule (final review B-I1)', (
     expect(leads()).toBe(0);
   });
 
+  // why: CodeRabbit on PR #47: another airport pair's list is never the board's figure, so a complete pairing that
+  // would otherwise lead gets no lead emphasis there
+  it("another airport pair's list: no lead emphasis, though its pairing would lead its own pair", async () => {
+    server.use(
+      serveFlightLists(
+        (d, r) =>
+          flightPair(d, r, {
+            ...(d === '2027-03-14'
+              ? { list: null, listOtherPair: pairingList({ origin: 'LGW', destination: 'EWR' }) }
+              : {}),
+          }),
+        { pagesPlanned: 2 },
+      ),
+    );
+    renderDates({ body: BOARD, def: DEF });
+    await findBoard();
+    await waitFor(() =>
+      expect(within(block()).getAllByTestId('return-line')[0]).toHaveTextContent('QQ Travel'),
+    );
+    expect(leads()).toBe(0);
+  });
+
   it('a list read under other limits: no lead emphasis', async () => {
     await renderList(FIXTURE, {
       def: definition({ constraints: { maxJourneyMinutes: 1_600, maxStops: 1 } }),
