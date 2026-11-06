@@ -649,6 +649,13 @@ describe('figuresByDatePair with the pairing figure (spec rev 56 §6.9; Ian ruli
       pairingRead: 'within-older',
       pairing: olderUnread,
     });
+    // why: an offer read but not complete does not lead either, so the stale verified figure stays above it
+    const incomplete = candidate({ complete: false });
+    expect(figuresByDatePair([grid, v], scope, NOW, withCandidate(incomplete)).figures.get(0)).toEqual({
+      ...pickFigure([grid, v], NOW),
+      pairingRead: 'offers-incomplete',
+      pairing: incomplete,
+    });
     const unread = candidate({ offer: null });
     expect(figuresByDatePair([grid, v], scope, NOW, withCandidate(unread)).figures.get(0)).toEqual({
       ...pickFigure([grid, v], NOW),
