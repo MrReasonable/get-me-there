@@ -19,7 +19,6 @@ import {
   billedCallsOf,
   estimateRemainingFor,
   estimateStart,
-  monthlyPagesOf,
   type PlanMemo,
   withBlocked,
 } from './estimate.js';
@@ -218,7 +217,6 @@ export function createEngine(deps: EngineDeps, options: EngineOptions = {}): Eng
       return withScheduleLoads(ctx, loadsOf.get(est) ?? new Map(), () => ({
         ...askedPairs(ctx, m.snapshot, m.cells, definitionId, blocked, m.plans),
         billedCalls: billedCallsOf(ctx, est, definitionId),
-        monthlyPages: monthlyPagesOf(ctx, est, definitionId),
       }));
     },
     readFlightList: (id, pair) => flights.read(id, pair),

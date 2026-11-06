@@ -16,10 +16,10 @@ import { type AwakeKeeper, realAwakeKeeper } from './awake.js';
 import { loadWorkerConfig, type WorkerConfig } from './config.js';
 import { CooldownStore } from './cooldown.js';
 import type { ContextLike } from './driver.js';
+import { AppInstances } from './instances.js';
 import { type LaunchOptions, launchContext, prepareLaunch } from './launch.js';
 import { acquireLock, LockHeld, sweepProbeProfiles } from './lock.js';
 import { debugLogging, stderrLog } from './log.js';
-import { AppInstances, MonthlyCounter } from './monthly.js';
 import { GRAMMAR_VERSION } from './names.js';
 import { Pacer } from './pacer.js';
 import { profileDir } from './paths.js';
@@ -169,13 +169,7 @@ export async function startWorker(ctx: EntryContext, deps: MainDeps): Promise<Ru
   });
   const refusal = new Refusal({ dir: ctx.dataDir, clock: deps.clock });
   const pacer = new Pacer({ dir: ctx.dataDir, minSpacingSeconds: cfg.minSpacingSeconds, clock: deps.clock });
-  // why: decision 82: the month's caps for every caller, over the ledger's billing window
-  const monthly = new MonthlyCounter({
-    dir: ctx.dataDir,
-    caps: { pages: cfg.monthlyPageCap, scrolls: cfg.monthlyScrollCap, billingDay: cfg.billingDay },
-    clock: deps.clock,
-  });
-  const instances = new AppInstances({ dir: ctx.dataDir, billingDay: cfg.billingDay, clock: deps.clock });
+  const instances = new AppInstances({ dir: ctx.dataDir, clock: deps.clock });
   const profile = profileDir(ctx.dataDir);
   mkdirSync(profile, { recursive: true, mode: 0o700 });
   const versions: Versions = {
@@ -190,7 +184,6 @@ export async function startWorker(ctx: EntryContext, deps: MainDeps): Promise<Ru
     socs,
     cooldown,
     pacer,
-    monthly,
     refusal,
     clock: deps.clock,
     timers: deps.timers,
@@ -247,10 +240,8 @@ export async function startWorker(ctx: EntryContext, deps: MainDeps): Promise<Ru
       if (checked.overran) throw new Error('the browser did not answer the account-cookie check in time');
       account = checked.value;
     }
-    const counts = monthly.status();
     return {
-      // why: W3: a counts file that cannot be read refuses every page, so the app's preflight skips the provider
-      ok: active === null && refusal.active() === null && !account.found && counts.readable,
+      ok: active === null && refusal.active() === null && !account.found,
       coolingDownUntil: active?.until ?? null,
       cooldownCause: active?.cause ?? null,
       signedInRefusal: refusal.active() !== null,
@@ -274,7 +265,6 @@ export async function startWorker(ctx: EntryContext, deps: MainDeps): Promise<Ru
       osArch,
       build: ready.install.build,
       consent: consentStatusOf(record),
-      monthly: counts,
       appInstances: instances.status(),
       // why: spec §2 "The keep-awake lease": whether this worker is holding the machine awake now
       awake: deps.keepAwake.state(),

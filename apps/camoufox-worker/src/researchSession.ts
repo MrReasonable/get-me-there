@@ -5,7 +5,6 @@ import { type DisplayEnv, headedEnv, NoDisplay } from './consentDriver.js';
 import { type ObservedRequest, observe, type ResearchSession, researchRecord } from './consentResearch.js';
 import { watchConsentWindow } from './consentWatch.js';
 import type { CooldownStore } from './cooldown.js';
-import type { MonthlyCounter } from './monthly.js';
 import type { Pacer } from './pacer.js';
 import { claim } from './pageClaim.js';
 import type { RecordDeps } from './record.js';
@@ -24,8 +23,8 @@ export const RESEARCH_PROMPT = {
 /**
  * Research 17.0c (WP17 Task 17.4; ca-b1-019: beside the watch it shares with the `consent` command): two headed
  * sessions, each in a throwaway profile `<data>/probe-research-…` (deleted in a `finally`; the start-up sweep removes any
- * a killed run left), under the consent capture's guard, the lock, the pacer, the monthly counter and the cool-downs,
- * with one load of the landing page each. The display is checked before anything is reserved (CodeRabbit, PR #15). The
+ * a killed run left), under the consent capture's guard, the lock, the pacer and the cool-downs, with one load of the
+ * landing page each. The display is checked before any page is claimed (CodeRabbit, PR #15). The
  * person clicks the button each session asks for; the tool only observes. A blocking page, before or after the choice,
  * cools down as on the server path. A session is kept only when the person's choice was submitted to the consent host
  * exactly once and a SOCS was set or changed after it, within the 10 minutes (W8); an account cookie, a window closed
@@ -37,7 +36,7 @@ export async function consentResearch(
   ctx: EntryContext,
   cfg: WorkerConfig,
   deps: RecordDeps & { display: DisplayEnv },
-  s: { pacer: Pacer; monthly: MonthlyCounter; cooldown: CooldownStore; day: string },
+  s: { pacer: Pacer; cooldown: CooldownStore; day: string },
   meta: (extra: Record<string, unknown>) => Record<string, unknown>,
 ): Promise<number> {
   try {
@@ -57,7 +56,7 @@ export async function consentResearch(
     mkdirSync(profile, { recursive: true, mode: 0o700 });
     const requests: ObservedRequest[] = [];
     try {
-      await claim(s.pacer, s.monthly, 0, deps, ctx);
+      await claim(s.pacer, deps, ctx);
       const driver = deps.consentDriver(profile, (r) => {
         const o = observe(r);
         if (o !== null) requests.push(o);

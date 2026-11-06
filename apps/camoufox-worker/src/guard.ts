@@ -49,8 +49,8 @@ export interface GuardState {
   gateRefusals: number;
   /**
    * WP21 Task 21.3 (cost-r3-002; D8: return-phase requests only, null on every other page): the documents this request
-   * reserved in the month. Once `documentLoads` reaches it, every further main-frame navigation is aborted and held as
-   * `page-reservation`, so the month's settle never needs to clamp.
+   * may load, its worst case (the app's ledger plans the same). Once `documentLoads` reaches it, every further main-frame
+   * navigation is aborted and held as `page-reservation`, so the request never loads more than it planned.
    */
   reservation: number | null;
   /** The first navigation held back for one of the worker's own reasons (`HeldRefusal`), or null. */

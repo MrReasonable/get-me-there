@@ -8,7 +8,6 @@ import {
   hoursText,
   legMarks,
   limitsOf,
-  pagesLeftClause,
   readButtonWords,
 } from '../../../../src/views/Dates/flightLines.js';
 import { londonDaysAgo } from '../../../../src/views/Dates/stateLines.js';
@@ -39,16 +38,6 @@ describe('headLine (finding 7: the London day decides, never the words)', () => 
     expect(headLine(read('2026-10-13T22:30:00.000Z', 16), NOW, COPY)).toBe(
       F.head('16h ago', 'yesterday 23:30'),
     );
-  });
-});
-
-describe('pagesLeftClause (ruling R-pages)', () => {
-  it('only when fewer pages are left than one run uses', () => {
-    expect(pagesLeftClause(109, 110)).toBe('109');
-    expect(pagesLeftClause(1_009, 1_010)).toBe('1,009');
-    expect(pagesLeftClause(110, 110)).toBeNull();
-    expect(pagesLeftClause(null, 110)).toBeNull();
-    expect(pagesLeftClause(5, null)).toBeNull();
   });
 });
 
@@ -172,23 +161,9 @@ describe("limitsOf (spec rev 56 §6.2: flightLimitsOf of the search's constraint
   });
 });
 
-describe('readButtonWords (ruling D3, prov-008, R-low-pages: the pages from the response, never a refusal)', () => {
-  it('the planned pages as the response states them, and the outbound-only read when the month is short', () => {
-    expect(readButtonWords(2, 1390, 110, F)).toBe('Read flights for this date (free, up to 2 pages)');
-    expect(readButtonWords(1, 1390, 110, F)).toBe('Read flights for this date (free, 1 page)');
-    expect(readButtonWords(2, 1, 110, F)).toBe(
-      'Read flights for this date (free, 1 page; return leg not read: fewer than 2 pages left)',
-    );
-    expect(readButtonWords(2, 2, 110, F)).toBe(
-      'Read flights for this date (free, up to 2 pages; 2 pages left this month)',
-    );
-    expect(readButtonWords(1, 90, 110, F)).toBe(
-      'Read flights for this date (free, 1 page; 90 pages left this month)',
-    );
-    expect(readButtonWords(2, null, null, F)).toBe('Read flights for this date (free, up to 2 pages)');
-    // a month with no page left is the api's refusal to word, never an outbound-only read
-    expect(readButtonWords(2, 0, 110, F)).toBe(
-      'Read flights for this date (free, up to 2 pages; 0 pages left this month)',
-    );
+describe('readButtonWords (ruling D3, prov-008: the pages from the response, never a refusal)', () => {
+  it('the planned pages as the response states them', () => {
+    expect(readButtonWords(2, F)).toBe('Read flights for this date (free, up to 2 pages)');
+    expect(readButtonWords(1, F)).toBe('Read flights for this date (free, 1 page)');
   });
 });

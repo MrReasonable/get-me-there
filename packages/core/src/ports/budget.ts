@@ -74,8 +74,8 @@ export interface ReserveParams {
   httpAttempt: number;
   endpointPath: string;
   /**
-   * Spec §2 rev 34: a camoufox grid page's planned scrolls; they must fit what the provider's run and month scroll
-   * caps leave, and the pending row holds them until it finalises.
+   * Spec §2 rev 34: a camoufox grid page's planned scrolls; they must fit what the provider's run scroll cap leaves,
+   * and the pending row holds them until it finalises.
    */
   scrolls?: number;
   /**
@@ -102,13 +102,8 @@ export interface BudgetGuard {
   /** Upstream attempts since `since`; http-kit seeds its hourly reservoir from it after a restart. */
   recentCalls(providerId: ProviderId, since: IsoDateTime): number;
   /**
-   * Spec §2 rev 34 (fix round 1, CA 1): the scrolls a provider's run and month scroll caps leave (the lesser, never
-   * below 0), or null when no scroll cap applies; a camoufox grid page asks for no more.
+   * Spec §2 rev 34 (fix round 1, CA 1): the scrolls a provider's run scroll cap leaves (never below 0), or null when no
+   * scroll cap applies (no run scroll cap, or no execution); a camoufox grid page asks for no more.
    */
   scrollsLeft(providerId: ProviderId, executionId: string | null): number | null;
-  /**
-   * W3 (cb-b1-004): the scroll clicks the ledger counts for a provider in its current month window, or null when no
-   * monthly scroll cap applies to it; the providers view reports it, and `gmt browser counts` rewrites from it.
-   */
-  scrollsThisMonth(providerId: ProviderId): number | null;
 }

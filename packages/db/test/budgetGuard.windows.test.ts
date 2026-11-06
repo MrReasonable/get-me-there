@@ -19,7 +19,7 @@ describe('budget windows (spec §7 "Budget windows")', () => {
     expect(monthWindow(freshDb(), at(now), day)).toEqual({ windowStart: start, windowEnd: end });
   });
 
-  it('agrees with core’s billingMonthWindow, the worker’s window (decision 82), over 2,800 sampled instants and every billing day', () => {
+  it('agrees with core’s billingMonthWindow over 2,800 sampled instants and every billing day', () => {
     const db = freshDb();
     // why: a seeded generator, so the sweep is the same on every run; instants from 2026 to 2030, every millisecond
     // equally likely, with the billing-day midnights themselves mixed in
@@ -154,6 +154,9 @@ describe('budgetConfigFromConfig (spec §12 presets)', () => {
     if (over === undefined) throw new Error('fixture');
     expect(effectiveCallCap(over)).toBe(0);
     expect(effectiveCallCap(limits({ window: 'month', monthlyCallCap: 10, trialUsed: 9 }))).toBe(10); // monthly windows ignore it
+    // why: spec rev 64: a provider with no cap on its window (camoufox) has no effective cap, whatever its window
+    expect(effectiveCallCap(limits({ monthlyCallCap: null }))).toBeNull();
+    expect(effectiveCallCap(limits({ window: 'lifetime', monthlyCallCap: null, trialUsed: 9 }))).toBeNull();
   });
 
   it('fixture appears only under syntheticAllowed, billable at the configured test rate', () => {

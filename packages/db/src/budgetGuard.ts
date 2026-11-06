@@ -92,7 +92,7 @@ WHERE execution_id = @executionId AND provider_id IN (SELECT value FROM json_eac
  * Spec rev 56 §7: each row counts its pages (`PAGES`), so a flights request with a return phase counts up to 2.
  * Spec rev 56 §8.1 (21.6 review I2): the flight allowance leaves out a flights request cut off before any answer (a
  * cancel, a SIGTERM, or a pending row the boot sweep marked: `unknown`, no status, no class word), because its pair has
- * no row and the resumed pass reads it again; a timeout is classified, so it counts. The monthly cap counts them all.
+ * no row and the resumed pass reads it again; a timeout is classified, so it counts.
  */
 export const PROVIDER_EXECUTION_USAGE_SQL = `
 SELECT ${PAGES} AS calls, COALESCE(SUM(cost_micro_gbp), 0) AS cost
@@ -101,12 +101,9 @@ WHERE execution_id = @executionId AND provider_id = @providerId AND outcome <> '
   AND (@pagesOnly = 0 OR page_class IS NOT 'no-page')
   AND ((endpoint_path = @flightPath) = @flights)
   AND NOT (@flights = 1 AND outcome = 'unknown' AND http_status IS NULL AND error_kind IS NULL)`;
-/** Spec §2 rev 34: a provider's scroll clicks in one execution, and in a window (pending rows count their plan). */
+/** Spec §2 rev 34: a provider's scroll clicks in one execution (pending rows count their plan). */
 const SCROLLS_EXECUTION_SQL = `
 SELECT COALESCE(SUM(scroll_count), 0) AS n FROM provider_requests WHERE provider_id = @providerId AND execution_id = @executionId`;
-const SCROLLS_WINDOW_SQL = `
-SELECT COALESCE(SUM(scroll_count), 0) AS n FROM provider_requests
-WHERE provider_id = @providerId AND started_at >= @windowStart AND started_at < @windowEnd`;
 const PROVIDER_EXECUTION_CAP_SQL = `
 SELECT json_extract(definition_snapshot_json, '$.budget.providerMaxCalls.' || @providerId) AS cap
 FROM search_executions WHERE id = @executionId`;
@@ -144,7 +141,6 @@ interface GuardStatements {
   providerExecutionCap: Database.Statement<Record<string, unknown>, { cap: unknown }>;
   flightListCap: Database.Statement<[string], { cap: unknown }>;
   scrollsExecution: Database.Statement<Record<string, unknown>, { n: number }>;
-  scrollsWindow: Database.Statement<Record<string, unknown>, { n: number }>;
 }
 function prepareStatements(db: Db): GuardStatements {
   return {
@@ -168,7 +164,6 @@ function prepareStatements(db: Db): GuardStatements {
     ),
     flightListCap: db.raw.prepare<[string], { cap: unknown }>(FLIGHT_LIST_CAP_SQL),
     scrollsExecution: db.raw.prepare<Record<string, unknown>, { n: number }>(SCROLLS_EXECUTION_SQL),
-    scrollsWindow: db.raw.prepare<Record<string, unknown>, { n: number }>(SCROLLS_WINDOW_SQL),
   };
 }
 
@@ -301,23 +296,25 @@ export class SqliteBudgetGuard implements BudgetGuard {
     return this.sql.recentCalls.get(providerId, since)?.n ?? 0;
   }
 
-  // why: check order is provider (the vendor's hard stop), then the provider's own per-execution cap (camoufox pages,
-  // cost-010), then global (total spend), then the execution's own caps; one breach is reported and the engine's error
-  // table (spec §8.1) acts on its scope.
+  // why: check order is provider (the vendor's hard stop; none for a provider with no cap on its window, camoufox), then
+  // the provider's own per-execution cap (camoufox pages, cost-010), then global (total spend), then the execution's own
+  // caps; one breach is reported and the engine's error table (spec §8.1) acts on its scope.
   protected checkCaps(p: ReserveParams, budget: ProviderBudget, now: IsoDateTime): void {
-    const prov = this.providerUsage(p.providerId, budget, now, budget.window);
     const callCap = effectiveCallCap(budget);
     // why: spec rev 56 §5.3 (R-reserve): a camoufox request reserves its planned pages, so a return-phase request needs
     // room for 2 in both page scopes; every other row asks for one call
     const asked = pagesOf(p) ?? 1;
-    if (prov.calls + asked > callCap)
-      throw this.exceeded(
-        budget.window === 'lifetime' ? 'provider-lifetime' : 'provider-month',
-        callCap,
-        prov.calls,
-        asked,
-        p.providerId,
-      );
+    if (callCap !== null) {
+      const prov = this.providerUsage(p.providerId, budget, now, budget.window);
+      if (prov.calls + asked > callCap)
+        throw this.exceeded(
+          budget.window === 'lifetime' ? 'provider-lifetime' : 'provider-month',
+          callCap,
+          prov.calls,
+          asked,
+          p.providerId,
+        );
+    }
     if (p.executionId !== null) {
       // why: spec rev 55 §8.1 (ruling A32): a flight-list page is checked against the run's flight allowance and a grid
       // or list page against the page cap, each counting only its own endpoint's rows; both are `provider-execution`
@@ -331,7 +328,7 @@ export class SqliteBudgetGuard implements BudgetGuard {
           throw this.exceeded('provider-execution', cap, u.calls, asked, p.providerId);
       }
     }
-    if (p.scrolls !== undefined && p.scrolls > 0) this.checkScrolls(p, p.scrolls, budget, now);
+    if (p.scrolls !== undefined && p.scrolls > 0) this.checkScrolls(p, p.scrolls, budget);
     if (budget.billable) {
       const g = this.globalUsage(now);
       const cap = this.config.spend.monthlyCapMicroGbp;
@@ -354,27 +351,18 @@ export class SqliteBudgetGuard implements BudgetGuard {
   }
 
   /**
-   * Spec §2 rev 34 (ruling 12): a grid page's planned scrolls must fit what the run's and the month's scroll caps
-   * leave; a breach names the provider's own scope, with the scroll cap in its message.
+   * Spec §2 rev 34 (ruling 12): a grid page's planned scrolls must fit what the run's scroll cap leaves; a breach names
+   * the provider's own scope, with the scroll cap in its message.
    */
-  private checkScrolls(p: ReserveParams, planned: number, budget: ProviderBudget, now: IsoDateTime): void {
-    const used = this.scrollUsage(p.providerId, p.executionId, now);
+  private checkScrolls(p: ReserveParams, planned: number, budget: ProviderBudget): void {
     const run = budget.executionScrollCap;
-    if (p.executionId !== null && run !== undefined && used.execution + planned > run)
+    if (p.executionId === null || run === undefined) return;
+    const used = this.scrollsInExecution(p.providerId, p.executionId);
+    if (used + planned > run)
       throw new BudgetExceeded({
         scope: 'provider-execution',
         cap: run,
-        current: used.execution,
-        requested: planned,
-        providerId: p.providerId,
-        unit: 'scrolls',
-      });
-    const month = budget.monthlyScrollCap;
-    if (month !== undefined && used.month + planned > month)
-      throw new BudgetExceeded({
-        scope: 'provider-month',
-        cap: month,
-        current: used.month,
+        current: used,
         requested: planned,
         providerId: p.providerId,
         unit: 'scrolls',
@@ -382,39 +370,18 @@ export class SqliteBudgetGuard implements BudgetGuard {
   }
 
   /**
-   * Fix round 1 (CA 1): the scrolls the provider's run and month scroll caps leave (the lesser, never below 0), or null
-   * when neither cap applies. A grid page asks for no more than this.
+   * Fix round 1 (CA 1): the scrolls the provider's run scroll cap leaves (never below 0), or null when no run scroll
+   * cap applies (none configured, or no execution). A grid page asks for no more than this.
    */
   scrollsLeft(providerId: ProviderId, executionId: string | null): number | null {
-    const budget = this.budgetFor(providerId);
-    const used = this.scrollUsage(providerId, executionId);
-    const run = executionId === null ? undefined : budget.executionScrollCap;
-    const left = [
-      ...(run === undefined ? [] : [run - used.execution]),
-      ...(budget.monthlyScrollCap === undefined ? [] : [budget.monthlyScrollCap - used.month]),
-    ];
-    return left.length === 0 ? null : Math.max(0, Math.min(...left));
+    const run = this.budgetFor(providerId).executionScrollCap;
+    if (executionId === null || run === undefined) return null;
+    return Math.max(0, run - this.scrollsInExecution(providerId, executionId));
   }
 
-  scrollsThisMonth(providerId: ProviderId): number | null {
-    return this.budgetFor(providerId).monthlyScrollCap === undefined
-      ? null
-      : this.scrollUsage(providerId, null).month;
-  }
-
-  /** The provider's scroll clicks in the execution and in its current month window (spec §2 rev 34). */
-  scrollUsage(
-    providerId: ProviderId,
-    executionId: string | null,
-    now: IsoDateTime = this.clock.now(),
-  ): { execution: number; month: number } {
-    const budget = this.budgetFor(providerId);
-    const w = monthWindow(this.db, now, budget.billingDay);
-    return {
-      execution:
-        executionId === null ? 0 : (this.sql.scrollsExecution.get({ providerId, executionId })?.n ?? 0),
-      month: this.sql.scrollsWindow.get({ providerId, ...w })?.n ?? 0,
-    };
+  /** The provider's scroll clicks in one execution (spec §2 rev 34). */
+  scrollsInExecution(providerId: ProviderId, executionId: string): number {
+    return this.sql.scrollsExecution.get({ providerId, executionId })?.n ?? 0;
   }
 
   protected executionUsage(

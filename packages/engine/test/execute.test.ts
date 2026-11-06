@@ -1,13 +1,11 @@
 // Spec revision 55 §8.1 "Stop causes" and "Automatic resume and the unscheduled search" (Ian's ruling 2 of 2026-10-31),
 // through whole passes: what finish stores for a stop, and which pauses a timer or the boot may carry on.
-import { apiContract, asIsoDateTime, BudgetExceeded } from '@gmt/core';
+import { apiContract } from '@gmt/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { buildContext } from '../src/context.js';
-import { finalStatus } from '../src/execute.js';
 import { createOrchestrator } from '../src/orchestrator.js';
 import { autoResume } from '../src/scheduler/catchUp.js';
 import { engineWith, realTime, stubCamoufox } from './support/camoufox.js';
-import { causeRun } from './support/causeRun.js';
 import { createHarness, FIXTURE_COST_MICRO_GBP, JFK, LGW, LHR } from './support/harness.js';
 
 afterEach(() => {
@@ -135,44 +133,6 @@ describe("no automatic resume for an unscheduled search (Ian's ruling 2)", () =>
     const resume = vi.spyOn(orch, 'resume');
     expect(await autoResume(ctx, orch, e)).not.toBeNull();
     expect(resume).toHaveBeenCalledWith(e.id, { manual: false });
-  });
-
-  it("the browser worker's monthly page limit stores no resume_after even on a scheduled search", () => {
-    // why: the worker's own count refused the page and stated its window end (W3), as the guard's provider-month does
-    const resetsAt = asIsoDateTime('2026-11-01T00:00:00.000Z');
-    const error = new BudgetExceeded({
-      scope: 'provider-month',
-      providerId: 'camoufox',
-      cap: 1500,
-      current: 1500,
-      requested: 1,
-      counter: 'worker',
-      windowEnd: resetsAt,
-    });
-    const r = finalStatus(
-      { kind: 'budget', error, resumeAfter: resetsAt, resetsAt },
-      asIsoDateTime('2026-10-14T09:00:00.000Z'),
-      'Europe/London',
-      causeRun(),
-      true,
-    );
-    expect(r).toMatchObject({
-      status: 'paused_budget',
-      patch: {
-        resumeAfter: null,
-        stopCause: {
-          kind: 'budget',
-          scope: 'provider-month',
-          providerId: 'camoufox',
-          unit: 'pages',
-          resumeAfter: null,
-          resetsAt,
-        },
-      },
-    });
-    expect(r.patch.errorText).toBe(
-      "The browser worker's monthly page limit is used up; it resets on 1 Nov 00:00, and the next scheduled run picks these pages up.",
-    );
   });
 
   it("a manual resume of the browser worker's per-run page limit is refused cap (Search again is the only path)", async () => {

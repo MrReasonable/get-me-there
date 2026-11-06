@@ -16,9 +16,9 @@ const count = z.number().int().min(0);
 /**
  * How a return phase ended (spec rev 56 §2): `read`: at least one attempt's return view was read (its returns may be
  * empty: listed `none-for-cell`); `no-outbound`: the outbound page listed no flight for the pair, nothing activated;
- * `skipped`: no attempt made, rule `monthly-headroom` (the month's pages left are below the worst case) or `spacing`
- * (the spacing wait ran out of its budget); `select-failed`, `not-settled`, `unrecognised`: the first attempt's
- * transient end, with its rule; `not-verified`: the entry's RETURN_SELECT_VERIFIED is false.
+ * `skipped`: no attempt made, rule `spacing` (the spacing wait ran out of its budget) or `not-cheapest-view`;
+ * `select-failed`, `not-settled`, `unrecognised`: the first attempt's transient end, with its rule; `not-verified`: the
+ * entry's RETURN_SELECT_VERIFIED is false.
  */
 export const RETURN_STATUS = [
   'read',
@@ -37,7 +37,7 @@ export type ReturnStatus = (typeof RETURN_STATUS)[number];
 export const RETURN_FINISHED: ReadonlySet<ReturnStatus> = new Set<ReturnStatus>(['read', 'no-outbound']);
 /**
  * Read again (spec rev 56 §2, §8.1); the step stops the run's return phases after `select-failed`, `not-settled` or
- * `unrecognised`, never after `skipped` (which is the month's or the spacing's).
+ * `unrecognised`, never after `skipped` (which is the spacing's or the view's).
  */
 export const RETURN_TRANSIENT: ReadonlySet<ReturnStatus> = new Set<ReturnStatus>([
   'select-failed',
@@ -56,8 +56,7 @@ const RETURN_RULED: ReadonlySet<ReturnStatus> = new Set<ReturnStatus>([
 /**
  * How the booking read of the shown pairing ended (spec rev 56 §2): `read`: the expansion made (or no control present)
  * and at least one offer read; `no-pairing`: no return was listed on any attempt, nothing selected; `skipped`: no
- * booking step was made, with its rule (`monthly-headroom`, `spacing`, `not-cheapest-view`, `reload:<end>`,
- * `second-selection`); `select-failed`, `not-settled`, `unrecognised`: the return's activation, the booking view's settle
+ * booking step was made, with its rule (`spacing`, `not-cheapest-view`, `reload:<end>`, `second-selection`); `select-failed`, `not-settled`, `unrecognised`: the return's activation, the booking view's settle
  * or its shape (`more-options-count` when two or more expansion controls show, nothing pressed); `expand-failed`: the
  * expansion's activation failed or the expanded view did not settle (the offers read before it kept, `expanded` false);
  * `not-verified`: BOOKING_SELECT_VERIFIED false on the entry.

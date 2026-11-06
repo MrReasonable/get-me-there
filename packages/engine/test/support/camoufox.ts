@@ -589,7 +589,6 @@ export function engineWith(
   o: {
     camoufoxConfigCap?: number;
     snapshotCap?: number;
-    monthlyCap?: number;
     scheduleCron?: string;
     /** Every operator notice fails to send (fix round 1, arch M4). */
     notifierFails?: boolean;
@@ -628,7 +627,6 @@ export function engineWith(
       CAMOUFOX_WORKER_URL: 'http://127.0.0.1:8090',
       CAMOUFOX_WORKER_KEY: KEY,
       CAMOUFOX_EXECUTION_PAGE_CAP: String(o.camoufoxConfigCap ?? 100),
-      ...(o.monthlyCap === undefined ? {} : { CAMOUFOX_MONTHLY_PAGE_CAP: String(o.monthlyCap) }),
       ...o.env,
     },
     { realpath: (p) => p },

@@ -19,13 +19,7 @@ import {
   type SearchDefinition,
 } from '@gmt/core';
 import type { StoredFlightList } from '@gmt/db';
-import {
-  browserPagesPlanned,
-  type Engine,
-  FLIGHT_LIST_PROVIDER,
-  flightReadUnavailable,
-  refreshHoursOf,
-} from '@gmt/engine';
+import { type Engine, FLIGHT_LIST_PROVIDER, flightReadUnavailable, refreshHoursOf } from '@gmt/engine';
 import type { z } from 'zod';
 import { ApiError } from '../errors.js';
 import { API_TEXT } from '../text.js';
@@ -106,71 +100,18 @@ function googleLink(
 }
 
 /**
- * The browser worker's month's pages left (the guard's provider-month window, flight pages included), or null when
- * camoufox is not configured or its window has no cap.
+ * The failed-list reasons that offer no read again (ruling R-failed-read): a per-run limit stopped it, and the block's
+ * note says the limit instead. why: spec rev 64: a list a withdrawn monthly cap stopped (`monthly-cap`, in a row stored
+ * before then) may be read again, since no such cap remains.
  */
-function monthlyPagesLeft(ports: Ports): number | null {
-  if (!ports.providers.some((p) => p.id === FLIGHT_LIST_PROVIDER)) return null;
-  const u = ports.budget.usage({ kind: 'provider-month', providerId: FLIGHT_LIST_PROVIDER });
-  return u.cap === null ? null : Math.max(0, u.cap - u.calls);
-}
-
-/**
- * The failed-list reasons that offer no read again (ruling R-failed-read): a monthly or per-run limit stopped it, and
- * the block's note says the limit instead.
- */
-const NO_READ_AGAIN: ReadonlySet<string> = new Set(['monthly-cap', 'execution-cap']);
-
-/** The searches whose one-run pages are kept (a page polls one search; a few tabs, a few searches). */
-const RUN_PAGES_KEPT = 32;
-
-/**
- * One app's one-run pages per search (ruling R-pages, fix round 2): the engine's estimate of a grid search plans
- * thousands of cells, too much to redo on every flight-lists read (every 2 s while a read goes). A figure is kept per
- * definition id, its `updatedAt` (an edit recomputes) and the browser worker's billing month (a new month recomputes),
- * the last RUN_PAGES_KEPT of them, the oldest dropped first. Keyed weakly by the engine, so each app (and each test
- * harness) has its own and none outlives it.
- */
-const runPagesCaches = new WeakMap<object, Map<string, number | null>>();
-
-function runPagesOf(
-  def: SearchDefinition,
-  ports: Ports,
-  engine: Pick<Engine, 'estimate' | 'flightPagesPlanned'>,
-  windowStart: string | null,
-): number | null {
-  const cache = runPagesCaches.get(engine) ?? new Map<string, number | null>();
-  runPagesCaches.set(engine, cache);
-  // why: spec rev 56 §8.1: the flight pages a run plans follow the worker's reported flags, so a change recomputes
-  const key = `${def.id}|${def.updatedAt}|${windowStart ?? 'no-window'}|${engine.flightPagesPlanned()}`;
-  if (cache.has(key)) {
-    const kept = cache.get(key) ?? null;
-    // why: a hit moves to the newest end, so the map drops the search read longest ago
-    cache.delete(key);
-    cache.set(key, kept);
-    return kept;
-  }
-  const pages = browserPagesPlanned(engine.estimate(def, ports.clock.todayLondon()));
-  cache.set(key, pages);
-  for (const oldest of cache.keys()) {
-    if (cache.size <= RUN_PAGES_KEPT) break;
-    cache.delete(oldest);
-  }
-  return pages;
-}
-
-/** The browser worker's current billing month's start (its provider-month window), or null when it has none. */
-function browserWindowStart(ports: Ports): string | null {
-  if (!ports.providers.some((p) => p.id === FLIGHT_LIST_PROVIDER)) return null;
-  return ports.budget.usage({ kind: 'provider-month', providerId: FLIGHT_LIST_PROVIDER }).windowStart;
-}
+const NO_READ_AGAIN: ReadonlySet<string> = new Set(['execution-cap']);
 
 /** Spec revision 55 §10: the GET's answer over `def` for the asked `pairs`, in the order asked. */
 export function assembleFlightLists(
   def: SearchDefinition,
   pairs: readonly DatePairAsk[],
   ports: Ports,
-  engine: Pick<Engine, 'flightReadInFlight' | 'estimate' | 'flightPagesPlanned' | 'flightListFresh'>,
+  engine: Pick<Engine, 'flightReadInFlight' | 'flightPagesPlanned' | 'flightListFresh'>,
 ): FlightListsResponse {
   const now = ports.clock.now();
   const today = ports.clock.todayLondon();
@@ -223,10 +164,6 @@ export function assembleFlightLists(
     available: unavailable === null,
     unavailableReason: unavailable,
     refreshHours,
-    monthlyPagesLeft: monthlyPagesLeft(ports),
-    // why: ruling R-pages: one run's browser pages from the search's own estimate (its camoufox lines and flight pages),
-    // asked only when flight lists can be read here, so a search without the worker estimates nothing more
-    runPages: unavailable === null ? runPagesOf(def, ports, engine, browserWindowStart(ports)) : null,
     // why: ruling D3: the pages one read plans (2 with the worker's RETURN_SELECT_VERIFIED, else 1; 2 while none is
     // read yet, prov-008); the read button and its refusal use it, never a hard number
     pagesPlanned: engine.flightPagesPlanned(),

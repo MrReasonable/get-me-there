@@ -31,13 +31,6 @@ export interface WorkerConfig {
   /** Grid pages: scroll clicks start to start (at least 5 s, never randomised), and the scrolls a page may make. */
   gridScrollSpacingSeconds: number;
   gridScrollCap: number;
-  /**
-   * Decision 82: the monthly page and scroll caps and the billing day, with the app's defaults. This package reads and
-   * reports them; WP17's worker enforces them across every caller over the ledger's billing month.
-   */
-  monthlyPageCap: number;
-  monthlyScrollCap: number;
-  billingDay: number;
   /** Spec §12: the effective shared settings, as `/v1/status` reports them for the app's preflight to compare. */
   sharedSettings: SharedSettings;
 }
@@ -59,15 +52,7 @@ export class WorkerConfigError extends Error {
 /** What a consent capture needs: the page rules every page keeps, the market, and the browser's minimal environment. */
 export type CaptureConfig = Pick<
   WorkerConfig,
-  | 'minSpacingSeconds'
-  | 'cooldownHours'
-  | 'monthlyPageCap'
-  | 'monthlyScrollCap'
-  | 'billingDay'
-  | 'pointOfSale'
-  | 'home'
-  | 'path'
-  | 'tmp'
+  'minSpacingSeconds' | 'cooldownHours' | 'pointOfSale' | 'home' | 'path' | 'tmp'
 >;
 
 /**
@@ -85,9 +70,6 @@ export function loadCaptureConfig(env: Env): CaptureConfig {
   return {
     minSpacingSeconds: sharedInt(s, 'CAMOUFOX_MIN_SPACING_SECONDS'),
     cooldownHours: sharedInt(s, 'CAMOUFOX_COOLDOWN_HOURS'),
-    monthlyPageCap: sharedInt(s, 'CAMOUFOX_MONTHLY_PAGE_CAP'),
-    monthlyScrollCap: sharedInt(s, 'CAMOUFOX_MONTHLY_SCROLL_CAP'),
-    billingDay: sharedInt(s, 'CAMOUFOX_BILLING_DAY'),
     pointOfSale: s.POINT_OF_SALE,
     home,
     path: env.PATH ?? '/usr/bin:/bin',
@@ -102,7 +84,7 @@ export function loadWorkerConfig(env: Env): WorkerConfig {
   if (key.length < 32) bad.push('CAMOUFOX_WORKER_KEY');
   const port = workerPortOf(env.CAMOUFOX_WORKER_PORT) ?? WORKER_PORT.default;
   if (workerPortOf(env.CAMOUFOX_WORKER_PORT) === null) bad.push('CAMOUFOX_WORKER_PORT');
-  // why: spec §12, review R27 — the ten shared settings through core's one rule set, with its bounds and defaults; every
+  // why: spec §12, review R27 — the seven shared settings through core's one rule set, with its bounds and defaults; every
   // typed field below comes from that one effective record
   const shared = readSharedSettings(env);
   bad.push(...shared.invalid);
@@ -116,9 +98,6 @@ export function loadWorkerConfig(env: Env): WorkerConfig {
   const mode = sharedMode(s);
   const gridScrollSpacingSeconds = sharedInt(s, 'CAMOUFOX_GRID_SCROLL_SPACING_SECONDS');
   const gridScrollCap = sharedInt(s, 'CAMOUFOX_GRID_SCROLL_CAP');
-  const monthlyPageCap = sharedInt(s, 'CAMOUFOX_MONTHLY_PAGE_CAP');
-  const monthlyScrollCap = sharedInt(s, 'CAMOUFOX_MONTHLY_SCROLL_CAP');
-  const billingDay = sharedInt(s, 'CAMOUFOX_BILLING_DAY');
   const home = env.HOME ?? '';
   if (home === '') bad.push('HOME');
   if (bad.length > 0) throw new WorkerConfigError(bad);
@@ -135,9 +114,6 @@ export function loadWorkerConfig(env: Env): WorkerConfig {
     mode,
     gridScrollSpacingSeconds,
     gridScrollCap,
-    monthlyPageCap,
-    monthlyScrollCap,
-    billingDay,
     sharedSettings: s,
   };
 }

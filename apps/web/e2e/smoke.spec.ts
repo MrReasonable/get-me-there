@@ -389,8 +389,6 @@ test('at 375px a search’s page with a flights block does not scroll sideways @
         available: true,
         unavailableReason: null,
         refreshHours: 24,
-        monthlyPagesLeft: 1390,
-        runPages: 110,
         // why: WP21 Task 21.7: required; the pages one on-demand read plans (2 while the worker's flags are unread)
         pagesPlanned: 2,
         reading: null,

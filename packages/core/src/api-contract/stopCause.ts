@@ -23,6 +23,8 @@ export const STOP_DETAILS = [
   ...BLOCKED_PAGES,
   'settings-differ',
   'grid-unverified',
+  // why: spec rev 64: stored by runs before the browser's monthly caps were withdrawn; nothing writes either now, and
+  // both are kept so those rows still read
   'counts-unreadable',
   'no-airport-names',
   'none-for-cell',
@@ -43,7 +45,8 @@ export type BudgetUnit = (typeof BUDGET_UNITS)[number];
 /**
  * The units a budget cause may carry for its scope and provider (spec §5.1 scopes; revision 55 §8.1): the spending
  * scopes count pence; the run's call scopes and a plan's lifetime count calls; a provider's own run and month caps count
- * the browser worker's pages or scrolls, and every other provider's calls. Writers and the schema read this one rule.
+ * the browser worker's pages or scrolls (its month only in a cause stored before spec rev 64 withdrew the browser's
+ * monthly caps), and every other provider's calls. Writers and the schema read this one rule.
  */
 export function budgetUnitsFor(scope: BudgetScopeKind, providerId: ProviderId | null): NonEmpty<BudgetUnit> {
   switch (scope) {

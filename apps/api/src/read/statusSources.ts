@@ -21,7 +21,6 @@ import {
   type SearchDefinition,
   START_REFUSAL_FILE,
   scheduledOnlyText,
-  sharedInt,
   startRefusalSchema,
   withAssumedBound,
   workerDataDir,
@@ -325,10 +324,6 @@ async function readWorkerOnce(ports: Ports): Promise<WorkerRead> {
         formVerified: st.flags.FORM_VERIFIED === true,
         flags: st.flags,
         appInstances: st.appInstances?.count ?? null,
-        monthly:
-          st.monthly === undefined
-            ? null
-            : { pages: st.monthly.pages, scrolls: st.monthly.scrolls, readable: st.monthly.readable },
         consent:
           st.consent === undefined
             ? null
@@ -370,13 +365,6 @@ async function workerFacts(ports: Ports, mode: StatusMode, home: string | null):
     // why: the refusal file lives on the host; a container cannot see it
     refusal: cf === null || mode !== 'native' ? { kind: 'none' } : readRefusal(home),
     browserWindow: ports.config.camoufoxBrowserWindow,
-    caps:
-      cf === null
-        ? { pages: 0, scrolls: 0 }
-        : {
-            pages: sharedInt(cf.sharedSettings, 'CAMOUFOX_MONTHLY_PAGE_CAP'),
-            scrolls: sharedInt(cf.sharedSettings, 'CAMOUFOX_MONTHLY_SCROLL_CAP'),
-          },
   };
 }
 

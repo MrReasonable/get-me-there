@@ -527,11 +527,6 @@ describe('estimates and the coverage check', () => {
       // why: the create's own estimate is among the calls; the two estimate routes are the last two
       expect(ask.mock.calls.slice(-2).map((c) => c[2])).toEqual(made.slice(-2));
     });
-
-    it('monthlyPages is null when camoufox is not a runnable line', async () => {
-      const x = await harness();
-      expect((await bothRoutes(x)).unsaved.monthlyPages).toBeNull();
-    });
   });
 
   const coverageBody = {

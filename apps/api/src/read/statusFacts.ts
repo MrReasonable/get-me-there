@@ -118,7 +118,6 @@ export interface WorkerStatusFacts {
    */
   flags: Readonly<Record<string, boolean>>;
   appInstances: number | null;
-  monthly: { pages: number; scrolls: number; readable: boolean } | null;
   /** The captured record; `mark` null from a worker that does not report it (one before review X1). */
   consent: {
     kind: 'socs';
@@ -143,7 +142,6 @@ export interface WorkerFacts {
   refusal: RefusalRead;
   /** The app's CAMOUFOX_BROWSER_WINDOW. */
   browserWindow: 'scheduled' | 'any';
-  caps: { pages: number; scrolls: number };
 }
 
 export interface EmailFacts {

@@ -3,11 +3,11 @@ import { describe, expect, it } from 'vitest';
 import { COPY } from '../src/copy.js';
 
 describe('camoufox copy (prov-008, prov-015, ruling 11)', () => {
-  it('the Providers note says signed-out profile, own IP address and 1,500', () => {
+  it('the Providers note says signed-out profile, own IP address and the per-run page cap', () => {
     for (const w of [
       'signed-out profile',
       'own IP address',
-      '1,500',
+      'page cap of day pairs a run (100 by default',
       'Off by default',
       'not a recognised results page',
     ])

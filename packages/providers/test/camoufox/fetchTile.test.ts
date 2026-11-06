@@ -1,5 +1,5 @@
 import { createServer, type Server } from 'node:http';
-import { asIata, asIsoDate, BudgetExceeded, effectiveSharedSettings, ProviderError, Secret } from '@gmt/core';
+import { asIata, asIsoDate, BudgetExceeded, Secret } from '@gmt/core';
 import { passthrough } from 'msw';
 import { HttpResponse, http } from 'msw/http';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -227,64 +227,6 @@ describe('camoufox fetchTile (spec §2, §5.2)', () => {
       expect(classes(budget)).toEqual([cls]);
     },
   );
-  // why: decision 82 (Task 17.3): the worker's own monthly page cap is the ledger's scope, never a cell error
-  it('a monthly-cap answer raises BudgetExceeded at provider-month with the worker’s own cap, count and window end, called once, a no-page row', async () => {
-    const { tile } = setup();
-    let hits = 0;
-    server.use(
-      http.post(URL_, () => {
-        hits++;
-        return HttpResponse.json(
-          { kind: 'monthly-cap', cap: 2000, used: 2003, windowEnd: '2026-11-01T00:00:00.000Z' },
-          { status: 429, ...contacted(false) },
-        );
-      }),
-    );
-    const k = makeKit({ limits: testLimits() });
-    const p = camoufoxProvider({
-      http: k.kit,
-      log: k.log,
-      clock: k.clock,
-      key: SENTINELS.camoufox,
-      workerUrl: 'http://127.0.0.1:8090',
-      pointOfSale: 'GB',
-      flightRequestSeconds: FLIGHT_REQUEST_SECONDS,
-      sharedSettings: effectiveSharedSettings({ CAMOUFOX_MONTHLY_PAGE_CAP: '1500' }),
-    });
-    const r = p.discovery?.fetchTile(tile, Q, ctx);
-    await expect(r).rejects.toBeInstanceOf(BudgetExceeded);
-    // why: W3 (pa-b1-003, pie-b1-003, ca-b1-016): the worker's figures, never the app's settings copied in
-    await expect(r).rejects.toMatchObject({
-      scope: 'provider-month',
-      providerId: 'camoufox',
-      cap: 2000,
-      current: 2003,
-      counter: 'worker',
-      windowEnd: '2026-11-01T00:00:00.000Z',
-    });
-    expect(hits).toBe(1);
-    expect(k.budget.rowsOf('camoufox').map((x) => x.pageClass)).toEqual(['no-page']);
-  });
-
-  it('a counts-unreadable answer is a quota error naming the rewrite, never a cap reached', async () => {
-    const { p, tile } = setup();
-    server.use(
-      http.post(URL_, () =>
-        HttpResponse.json(
-          { kind: 'counts-unreadable', problem: 'missing' },
-          { status: 503, ...contacted(false) },
-        ),
-      ),
-    );
-    const r = await p.discovery?.fetchTile(tile, Q, ctx);
-    expect(r?.kind).toBe('tile-error');
-    if (r?.kind !== 'tile-error') throw new Error('tile-error');
-    expect(r.error).toBeInstanceOf(ProviderError);
-    expect(r.error).not.toBeInstanceOf(BudgetExceeded);
-    expect([r.error.kind, r.error.reason, r.error.retryable]).toEqual(['quota', 'counts-unreadable', false]);
-    expect(r.error.message).toContain('monthly counts file is missing');
-    expect(r.error.message).toContain('pnpm gmt browser counts');
-  });
   it('a blocked answer words the page kind and the cool-down end for last_error', async () => {
     const { p, tile } = setup();
     server.use(

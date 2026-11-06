@@ -95,7 +95,7 @@ describe('every gmt command the code names exists', () => {
     for (const c of named) {
       const [cmd, action] = c.split(' ');
       expect(COMMANDS, c).toContain(cmd);
-      if (cmd === 'browser') expect(['install', 'counts'], c).toContain(action);
+      if (cmd === 'browser') expect(['install'], c).toContain(action);
     }
     // why: WP17 Task 17.5: the consent fix names the guided capture, and its export and import are named too
     for (const c of ['consent', 'consent export', 'consent import']) expect(named.has(c), c).toBe(true);

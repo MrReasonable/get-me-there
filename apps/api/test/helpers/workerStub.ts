@@ -32,13 +32,6 @@ export function workerBody(over: Record<string, unknown> = {}): Record<string, u
     pageTimeoutSeconds: 90,
     sharedSettings: SHARED,
     consent: { kind: 'socs', expiresAt: '2027-10-01T10:00:00.000Z', boundedBy: 'capture', mark: 'reject' },
-    monthly: {
-      windowStart: '2026-10-01T00:00:00.000Z',
-      windowEnd: '2026-11-01T00:00:00.000Z',
-      pages: 12,
-      scrolls: 30,
-      readable: true,
-    },
     appInstances: { windowStart: '2026-10-01T00:00:00.000Z', count: 1 },
     ...over,
   };

@@ -52,8 +52,8 @@ const SEARCH_AGAIN = fix('Search again');
 const CHECK_STATUS = fix('Check Status, then Search again');
 const CHECK_PROVIDERS = fix('Check Providers, then Search again');
 const RAISE_AND_RESUME = fix('Raise the limit in Edit, then Resume');
-// why: Ian's ruling (2026-10-31): a browser page limit, monthly or per run, offers a fresh run and never Resume (a
-// resume past the run's browser window reads no browser pages); a fresh run reuses the prices already found.
+// why: Ian's ruling (2026-10-31): a browser page limit offers a fresh run and never Resume (a resume past the run's
+// browser window reads no browser pages); a fresh run reuses the prices already found.
 const CARRY_ON = fix('Search again to carry on (prices already found are reused)');
 
 /** What a source's key is called in a refused-key sentence. */
@@ -87,6 +87,7 @@ const DETAIL_REASON: Readonly<Record<StopDetail, (id: ProviderId) => string>> = 
   unrecognised: () => "a page appeared that it didn't recognise",
   'settings-differ': () => "its settings differ from the app's",
   'grid-unverified': () => "its date-grid reading hasn't been checked on this install",
+  // why: `counts-unreadable` and `monthly-cap` only in rows stored before spec rev 64 withdrew the monthly caps
   'counts-unreadable': () => "its page counts couldn't be read",
   'no-airport-names': () => 'the airports have no names it can match',
   'none-for-cell': () => 'its page listed nothing for these dates and airports',
@@ -100,10 +101,10 @@ const DETAIL_REASON: Readonly<Record<StopDetail, (id: ProviderId) => string>> = 
 };
 
 /**
- * Spec rev 55 §11: a stop detail as the end of a "because …" clause, the words the stop sentences use ("its monthly
- * limit is used up"). `named` puts the source's main-path name where the clause opens with "it" or "its" ("the browser
- * worker's monthly limit is used up"), for a line with no source before it: a failed flight list reads "Flights not
- * read: <this clause>" (WP20 Task 20.10, finding 6).
+ * Spec rev 55 §11: a stop detail as the end of a "because …" clause, the words the stop sentences use ("its settings
+ * differ from the app's"). `named` puts the source's main-path name where the clause opens with "it" or "its" ("the
+ * browser worker's settings differ from the app's"), for a line with no source before it: a failed flight list reads
+ * "Flights not read: <this clause>" (WP20 Task 20.10, finding 6).
  */
 export function stopDetailClause(d: StopDetail, id: ProviderId, named = false): string {
   const clause = DETAIL_REASON[d](id);
@@ -115,7 +116,7 @@ export function stopDetailClause(d: StopDetail, id: ProviderId, named = false): 
 
 /**
  * The details that are the browser worker's own refusal to load pages (its blocked pages, its settings and grid checks,
- * its monthly count and hours); every other detail, and every other source, reads "couldn't be used because …".
+ * its hours, and the counts and monthly cap of rows stored before spec rev 64); every other detail, and every other source, reads "couldn't be used because …".
  */
 const WORKER_REFUSALS: ReadonlySet<StopDetail> = new Set<StopDetail>([
   'blocked',

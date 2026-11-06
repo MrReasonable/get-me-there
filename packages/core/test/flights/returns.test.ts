@@ -168,7 +168,7 @@ describe('returnReadSchema (spec rev 56 §5.1 refinements)', () => {
 
   it('a rule exactly for skipped, select-failed, not-settled and unrecognised; none for no-outbound and not-verified', () => {
     for (const status of ['skipped', 'select-failed', 'not-settled', 'unrecognised']) {
-      expect(issues(read({ status, attempts: [], rule: 'monthly-headroom' })), status).toEqual([]);
+      expect(issues(read({ status, attempts: [], rule: 'spacing' })), status).toEqual([]);
       expect(issues(read({ status, attempts: [], rule: null })), status).toEqual(['rule']);
     }
     for (const status of ['no-outbound', 'not-verified']) {

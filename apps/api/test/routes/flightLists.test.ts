@@ -77,7 +77,12 @@ function list(
   x: Harness,
   def: SearchDefinition,
   c: CellKey,
-  o: { fetchedAt: string; executionId?: string | null; failed?: boolean; reason?: 'network' | 'monthly-cap' },
+  o: {
+    fetchedAt: string;
+    executionId?: string | null;
+    failed?: boolean;
+    reason?: 'network' | 'monthly-cap' | 'execution-cap';
+  },
 ) {
   return x.ports.repos.flightLists.insert({
     definitionId: def.id,
@@ -131,7 +136,6 @@ describe('GET /definitions/:id/flight-lists (revision 55 §10)', () => {
       available: true,
       unavailableReason: null,
       refreshHours: 168,
-      monthlyPagesLeft: 1500,
       reading: null,
     });
     expect(body.pairs.map((p) => [p.departureDate, p.origin, p.destination])).toEqual([
@@ -162,63 +166,6 @@ describe('GET /definitions/:id/flight-lists (revision 55 §10)', () => {
     expect(a?.link).toBeNull();
   });
 
-  it("carries this search's browser pages for one run, flight pages included, from its own estimate (ruling R-pages)", async () => {
-    const { x, def } = await setup();
-    const body = apiContract.flightListsResponseSchema.parse(await (await get(x, def.id, PAIRS)).json());
-    const est = x.engine.estimate(def, x.ports.clock.todayLondon());
-    const grid = est.perProvider
-      .filter((p) => p.providerId === 'camoufox' && p.blocked === null)
-      .reduce((a, p) => a + p.calls, 0);
-    expect(grid).toBeGreaterThan(0);
-    expect(est.flightLists?.pages ?? 0).toBeGreaterThan(0);
-    // why: the bound's pages (spec rev 56 §8.1), which the estimate states while the worker's flags are unread (final
-    // review B-M3)
-    expect(body.runPages).toBe(grid + (est.flightLists?.pagesMax ?? est.flightLists?.pages ?? 0));
-  });
-
-  it("estimates the search once for its runPages until it is edited or the browser worker's month turns (ruling)", async () => {
-    const { x, def } = await setup();
-    const estimate = vi.spyOn(x.engine, 'estimate');
-    const runPages = async () =>
-      apiContract.flightListsResponseSchema.parse(await (await get(x, def.id, PAIRS)).json()).runPages;
-    const first = await runPages();
-    expect(await runPages()).toBe(first);
-    expect(estimate).toHaveBeenCalledTimes(1);
-    // an edit gives the search a new updatedAt: estimated again
-    x.clock.advance(60_000);
-    x.ports.repos.definitions.update(def.id, { maxNights: 10 });
-    expect(await runPages()).toBe(first);
-    expect(estimate).toHaveBeenCalledTimes(2);
-    expect(await runPages()).toBe(first);
-    expect(estimate).toHaveBeenCalledTimes(2);
-    // a new billing month of the browser worker: estimated again
-    x.clock.advance(32 * 24 * 3_600_000);
-    await runPages();
-    expect(estimate).toHaveBeenCalledTimes(3);
-  });
-
-  it('keeps the last 32 searches: the search read longest ago is estimated again', async () => {
-    const { x, def } = await setup();
-    const others = Array.from({ length: 32 }, () =>
-      x.ports.repos.definitions.create(
-        exampleDefinitionInput({
-          ...SPACE,
-          providers: { discovery: ['camoufox'], verification: [], discoveryRefreshHours: { camoufox: 168 } },
-        }),
-      ),
-    );
-    const estimate = vi.spyOn(x.engine, 'estimate');
-    await get(x, def.id, PAIRS);
-    for (const o of others.slice(0, 31)) await get(x, o.id, PAIRS);
-    await get(x, def.id, PAIRS); // a hit: def becomes the newest kept
-    expect(estimate).toHaveBeenCalledTimes(32);
-    await get(x, others[31]?.id ?? '', PAIRS); // the 33rd search drops the oldest kept (others[0]), not def
-    await get(x, def.id, PAIRS);
-    expect(estimate).toHaveBeenCalledTimes(33);
-    await get(x, others[0]?.id ?? '', PAIRS);
-    expect(estimate).toHaveBeenCalledTimes(34);
-  });
-
   it('links a real figure through the allowlist with the install point of sale', async () => {
     const { x, def, s } = await setup();
     s.tile('E', A, {
@@ -246,8 +193,6 @@ describe('GET /definitions/:id/flight-lists (revision 55 §10)', () => {
     const body = apiContract.flightListsResponseSchema.parse(await (await get(h, def.id, PAIRS)).json());
     expect(body.available).toBe(false);
     expect(body.unavailableReason).toBe('not-configured');
-    expect(body.monthlyPagesLeft).toBeNull();
-    expect(body.runPages).toBeNull();
     // why: final review B-I3: no read can go where flight lists cannot be read
     expect(body.pairs.map((p) => p.readNow)).toEqual([false, false]);
   });
@@ -397,7 +342,7 @@ describe('the return leg on the flight-lists wire (spec rev 56 §10)', () => {
   });
 
   // why: final review B-I3: readNow is the on-demand read's own rule (no list, or one it would not refuse as fresh),
-  // less a failed list a monthly or per-run limit stopped; false where flight lists cannot be read
+  // less a failed list a per-run limit stopped; false where flight lists cannot be read
   it('readNow: true with no list, a list the read would not reuse, a failed one; false when fresh or limit-stopped', async () => {
     const { x, def } = await setup();
     const readNow = async () =>
@@ -407,12 +352,14 @@ describe('the return leg on the flight-lists wire (spec rev 56 §10)', () => {
     expect(await readNow()).toEqual([true, true]);
     // a young list with no return read: read again while the flags are unread (the read may plan the return phase)
     list(x, def, A, { fetchedAt: at(-1) });
-    list(x, def, B, { fetchedAt: at(-1), failed: true, reason: 'monthly-cap' });
+    list(x, def, B, { fetchedAt: at(-1), failed: true, reason: 'execution-cap' });
     expect(await readNow()).toEqual([true, false]);
     // with the return flag off the young list is fresh
     x.engine.setWorkerFlags('camoufox', { RETURN_SELECT_VERIFIED: false });
     expect(await readNow()).toEqual([false, false]);
-    list(x, def, B, { fetchedAt: at(0), failed: true });
+    // why: spec rev 64: a list the withdrawn monthly cap stopped (a row stored before then) may be read again, as any
+    // other failed list may
+    list(x, def, B, { fetchedAt: at(0), failed: true, reason: 'monthly-cap' });
     expect(await readNow()).toEqual([false, true]);
   });
   it('pagesPlanned is 2 before the worker is read (prov-008: the read may then load 2), 1 with its flag off, 2 with it on', async () => {

@@ -40,8 +40,8 @@ export type OnlyService = (typeof ONLY_SERVICES)[number];
 export const isOnlyService = (s: string): s is OnlyService => ONLY_SERVICES.some((x) => x === s);
 const ONLY_HELP = `--only <service>          act on one service only: ${ONLY_SERVICES.join(', ')}`;
 
-/** `gmt browser <action>`: install or reinstall the pinned Camoufox, or rewrite the worker's monthly counts. */
-export const BROWSER_ACTIONS = ['install', 'counts'] as const;
+/** `gmt browser <action>`: install or reinstall the pinned Camoufox. */
+export const BROWSER_ACTIONS = ['install'] as const;
 export type BrowserAction = (typeof BROWSER_ACTIONS)[number];
 export const isBrowserAction = (s: string): s is BrowserAction => BROWSER_ACTIONS.some((x) => x === s);
 
@@ -191,38 +191,19 @@ const SPEC: Record<
       'keep-archive': bool,
       wait: bool,
       force: bool,
-      'non-interactive': bool,
-      pages: str,
-      scrolls: str,
-      'other-pages': str,
     },
     positional: 'action',
-    help: 'the browser provider on this machine, whether the app runs here, in Docker or not at all: install (or reinstall) the pinned Camoufox and restart the worker; counts rewrites the worker’s monthly counts',
+    help: 'the browser provider on this machine, whether the app runs here, in Docker or not at all: install (or reinstall) the pinned Camoufox and restart the worker',
     flags: [
       'install                   download, verify and lay out the pinned Camoufox (about 313 to 663 MB), then start the worker if it is set up',
-      'counts                    rewrite an unreadable or missing monthly counts file from the app’s ledger',
       '--keep-archive            install: keep the verified download beside the install (for a cache)',
       '--wait                    wait for a running search to finish instead of refusing',
       '--force                   go ahead although a search is running (it is interrupted)',
-      '--pages <n> --scrolls <n>  counts: this month’s browser pages and scrolls, when no app here can report them',
-      '--other-pages <n>         counts: pages loaded this month outside the app’s ledger (recordings, other apps)',
-      '--non-interactive         counts: ask nothing (the figures come from the app or the flags)',
     ],
-    check: (flags, positional) => {
-      if (positional === null || !isBrowserAction(positional))
-        return `browser needs an action: ${BROWSER_ACTIONS.join(' or ')}`;
-      for (const n of ['pages', 'scrolls', 'other-pages'])
-        if (flags[n] !== undefined && !/^\d{1,7}$/.test(String(flags[n])))
-          return `--${n} takes a whole number`;
-      if (
-        positional === 'install' &&
-        ['pages', 'scrolls', 'other-pages', 'non-interactive'].some((n) => flags[n] !== undefined)
-      )
-        return 'install takes --keep-archive, --wait and --force only';
-      if (positional === 'counts' && flags['keep-archive'] !== undefined)
-        return 'counts does not take --keep-archive';
-      return null;
-    },
+    check: (_flags, positional) =>
+      positional === null || !isBrowserAction(positional)
+        ? `browser needs an action: ${BROWSER_ACTIONS.join(' or ')}`
+        : null,
   },
   consent: {
     options: { wait: bool, force: bool },

@@ -785,7 +785,7 @@ describe('the toggles (spec rev 56 §11: buttons with aria-expanded, focus kept 
 describe('a list with no return read, or one that did not finish (spec rev 56 §11 "Status notes")', () => {
   const NOTES: Record<Exclude<ReturnRead['status'], 'read'>, string | null> = {
     'no-outbound': null,
-    skipped: 'return flights not read: fewer than 2 browser pages left this month',
+    skipped: 'return flights not read: the wait between pages ran past its time',
     'select-failed':
       'return flights not read: tried again at the next search while among its 10 cheapest date pairs, or press Read flights for this date now',
     'not-settled':
@@ -797,7 +797,7 @@ describe('a list with no return read, or one that did not finish (spec rev 56 §
   };
   const RULE: Record<Exclude<ReturnRead['status'], 'read'>, string | null> = {
     'no-outbound': null,
-    skipped: 'monthly-headroom',
+    skipped: 'spacing',
     'select-failed': 'select-outbound:not-found',
     'not-settled': 'returns:not-settled',
     unrecognised: 'returns:shape',
@@ -886,15 +886,6 @@ describe('the read button and the live region (spec rev 56 §11; rulings D3, pro
     await renderList(null, { over: { pagesPlanned: 1 } });
     expect(
       within(block()).getByRole('button', { name: 'Read flights for this date (free, 1 page)' }),
-    ).toBeEnabled();
-  });
-
-  it('with 1 page left this month: an outbound-only read, never a refusal', async () => {
-    await renderList(null, { over: { monthlyPagesLeft: 1 } });
-    expect(
-      within(block()).getByRole('button', {
-        name: 'Read flights for this date (free, 1 page; return leg not read: fewer than 2 pages left)',
-      }),
     ).toBeEnabled();
   });
 

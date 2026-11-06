@@ -3,10 +3,8 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { checkBudget, spendOf } from '../src/budgetCheck.js';
 import { budgetFitFor } from '../src/budgetFit.js';
 import { estimateStart } from '../src/estimate.js';
-import { runsPerMonth } from '../src/scheduler/parseCron.js';
 import { buildSnapshot } from '../src/snapshot.js';
 import { engineWith, stubCamoufox } from './support/camoufox.js';
-import { T0 } from './support/harness.js';
 
 beforeEach(() => {
   expect.hasAssertions();
@@ -34,7 +32,7 @@ describe('the camoufox estimate (cost-004, cost-009, cost-011, prov-013)', () =>
     expect(line).toMatchObject({ planCalls: 100, calls: 100, costMicroGbp: 0 });
     expect(line?.seconds).toBe(7000);
     expect(est.assumptions).toContain(
-      'camoufox list mode prices 100 of 2184 cells this run; a full pass takes 22 runs; the month cap allows about 1500 cells',
+      'camoufox list mode prices 100 of 2184 cells this run; a full pass takes 22 runs',
     );
   });
   it('with page spacing 0 a page is estimated at 40 s, so 100 pages take 4000 s (operator, 2026-10-25)', () => {
@@ -51,27 +49,18 @@ describe('the camoufox estimate (cost-004, cost-009, cost-011, prov-013)', () =>
     expect(line).toMatchObject({ planCalls: 100, calls: 100, costMicroGbp: 0 });
     expect(line?.seconds).toBe(4000);
   });
-  it('is not blocked at start by provider-month or by the shared free-calls cap', () => {
+  it('is not blocked at start by its month, which has no cap, or by the shared free-calls cap', () => {
     const { e, def } = workedExample();
     const built = buildSnapshot(e.ctx, def);
     const est = estimateStart(e.ctx, built.snapshot, built.cells, null);
     const check = checkBudget(e.ctx, spendOf(est), built.snapshot.budget, null, def.id);
     expect(check.breaches).toEqual([]);
   });
-  it('budgetFit counts runs × the page cap a month and warns that a refresh needs more cells than the month allows', () => {
+  // why: spec rev 64: the browser worker has no monthly cap, so the fit has no month row and no coverage warning for it
+  it('budgetFit lists no month or coverage scope for camoufox, and fits', () => {
     const { e, def } = workedExample();
     const fit = budgetFitFor(e.ctx, def, def.id);
-    const runs = runsPerMonth('0 5 * * 1', 'Europe/London', new Date(T0));
-    const month = fit.perScope.find((s) => s.scope === 'provider-month:camoufox');
-    expect(month?.estimated).toBe(Math.ceil(Math.min(runs * 100, runs * 2184)));
-    expect(month?.fits).toBe(true);
-    expect(fit.perScope.find((s) => s.scope === 'cells-per-refresh:camoufox')).toEqual({
-      scope: 'cells-per-refresh:camoufox',
-      estimated: 2184,
-      cap: 1500,
-      fits: false,
-    });
-    // why: fix round 1 (CodeRabbit): the coverage line warns; it is no cap, so the overall fit stays true
+    expect(fit.perScope.map((s) => s.scope).filter((x) => x.includes('camoufox'))).toEqual([]);
     expect(fit.fits).toBe(true);
   });
   it('below the page cap the pages carry no retry factor: 5 cells are 5 pages, never 6 (ruling 13, TS 9)', () => {
@@ -122,21 +111,6 @@ describe('the camoufox grid estimate', () => {
     expect(estimateStart(quick.e.ctx, b.snapshot, b.cells, null).assumptions.join('\n')).not.toMatch(
       /STUCK_AFTER/,
     );
-  });
-  it('budgetFit counts the month’s scrolls against the monthly scroll cap, as a warning (TS 4)', () => {
-    const { e, def } = workedGrid(
-      { pageAllowance: 25, scrollAllowance: 150 },
-      { CAMOUFOX_MONTHLY_SCROLL_CAP: '500' },
-    );
-    const fit = budgetFitFor(e.ctx, def, def.id);
-    const runs = runsPerMonth('0 5 * * 1', 'Europe/London', new Date(T0));
-    // why: a weekly cron with a weekly refresh re-fetches discovery on every firing
-    expect(fit.perScope.find((s) => s.scope === 'scrolls-per-month:camoufox')).toEqual({
-      scope: 'scrolls-per-month:camoufox',
-      estimated: runs * 147,
-      cap: 500,
-      fits: runs * 147 <= 500,
-    });
   });
   it('with room for a page a block: 78 pages, no scroll, 30 s a page, and the retry factor 1.0', () => {
     const { e, def } = workedGrid({ pageAllowance: 100, scrollAllowance: 600 });

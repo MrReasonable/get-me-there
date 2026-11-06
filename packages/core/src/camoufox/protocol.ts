@@ -118,8 +118,8 @@ export type GridMove = z.infer<typeof gridMoveSchema>;
 
 /**
  * One grid page request (spec §2 rev 34; WP15 §5): the first block's centre as the page's query, the moves, which views
- * are read (`reads[0]` the first view, `reads[i + 1]` the view after `moves[i]`), and how many scrolls the run's and
- * the month's scroll caps leave (the worker never scrolls past it).
+ * are read (`reads[0]` the first view, `reads[i + 1]` the view after `moves[i]`), and how many scrolls the run's
+ * scroll cap leaves (the worker never scrolls past it).
  */
 export const gridRequestSchema = z
   .strictObject({
@@ -368,22 +368,6 @@ export const workerAnswerSchema = z.discriminatedUnion('kind', [
     scrolls: count.exactOptional(),
     ...pageCounts,
   }),
-  // why: decision 82: the worker's own monthly page cap, for every caller together over the ledger's billing month;
-  // nothing was loaded, and the adapter maps it to BudgetExceeded at provider-month with the worker's own figures
-  z.strictObject({
-    kind: z.literal('monthly-cap'),
-    cap: count,
-    used: count,
-    windowEnd: isoDateTimeSchema,
-    ...pageCounts,
-  }),
-  // why: W3: the counts file is missing or unreadable, so no page is admitted; it is not a cap reached, and waiting
-  // does not repair it (`pnpm gmt browser counts` does)
-  z.strictObject({
-    kind: z.literal('counts-unreadable'),
-    problem: z.enum(['missing', 'unreadable']),
-    ...pageCounts,
-  }),
 ]);
 export type WorkerAnswer = z.infer<typeof workerAnswerSchema>;
 
@@ -398,8 +382,6 @@ export const ANSWER_STATUS: Readonly<Record<WorkerAnswer['kind'], number>> = {
   'mode-unavailable': 409,
   'not-ready': 504,
   'browser-error': 502,
-  'monthly-cap': 429,
-  'counts-unreadable': 503,
 };
 
 /**
@@ -438,7 +420,7 @@ export type AwakeAnswer = z.infer<typeof awakeAnswerSchema>;
 
 /**
  * Decision 82: the header the adapter sends on every request (the database's app-instance id, a random id stored with
- * the ledger), so the worker can report a second app, a second ledger, in a month.
+ * the ledger), so the worker can report a second app, a second ledger, in a calendar month.
  */
 export const APP_INSTANCE_HEADER = 'x-gmt-app-instance';
 
@@ -490,17 +472,10 @@ export const workerStatusSchema = z.strictObject({
       mark: z.enum(['reject', 'accept', 'unknown']).exactOptional(),
     })
     .exactOptional(),
-  /** Decision 82: the worker's own count over the billing month; `readable` false when its counts file refused. */
-  monthly: z
-    .strictObject({
-      windowStart: isoDateTimeSchema,
-      windowEnd: isoDateTimeSchema,
-      pages: z.number().int().min(0),
-      scrolls: z.number().int().min(0),
-      readable: z.boolean(),
-    })
-    .exactOptional(),
-  /** Decision 82: how many app instances spoke to it this month (a second one is reported, never refused). */
+  /**
+   * Decision 82: how many app instances spoke to it this calendar month (from 00:00 UTC on the 1st); a second one is
+   * reported, never refused.
+   */
   appInstances: z
     .strictObject({ windowStart: isoDateTimeSchema, count: z.number().int().min(0) })
     .exactOptional(),

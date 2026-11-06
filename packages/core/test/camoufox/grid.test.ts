@@ -230,7 +230,6 @@ describe('the grid config (spec §12 rev 34)', () => {
       gridScrollSpacingSeconds: 5,
       gridScrollCap: 30,
       executionScrollCap: 600,
-      monthlyScrollCap: 6000,
     });
   });
   it('accepts grid and the bounds', () => {
@@ -240,14 +239,12 @@ describe('the grid config (spec §12 rev 34)', () => {
       CAMOUFOX_GRID_SCROLL_SPACING_SECONDS: '30',
       CAMOUFOX_GRID_SCROLL_CAP: '0',
       CAMOUFOX_EXECUTION_SCROLL_CAP: '6000',
-      CAMOUFOX_MONTHLY_SCROLL_CAP: '0',
     });
     expect(r.ok && r.config.providers.camoufox).toMatchObject({
       mode: 'grid',
       gridScrollSpacingSeconds: 30,
       gridScrollCap: 0,
       executionScrollCap: 6000,
-      monthlyScrollCap: 0,
     });
   });
   it.each([

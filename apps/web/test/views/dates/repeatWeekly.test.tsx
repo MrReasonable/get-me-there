@@ -53,7 +53,7 @@ const blocked = () =>
     budgetFit: {
       fits: true,
       runsPerMonth: 4.33,
-      perScope: [{ scope: 'provider-month:camoufox', estimated: 476, cap: 1500, fits: true }],
+      perScope: [{ scope: 'provider-month:searchapi', estimated: 476, cap: 10_000, fits: true }],
     },
     datePairs: 405,
     datePairsCovered: 300,
@@ -100,8 +100,11 @@ describe('Repeat weekly… (spec rev 55 §8.2, §11)', () => {
         'About 3 hours · about £1.20 · asks about 300 of 405 date pairs this run, the rest next Monday',
       ),
     ).toBeInTheDocument();
-    // the monthly figure: the budget fit at the schedule's runs a month (flight pages join it in Task 20.9)
-    expect(screen.getByText('the browser worker this month: about 476, limit 1500')).toBeInTheDocument();
+    // the monthly figure: the budget fit at the schedule's runs a month (spec rev 64: the browser worker has no month
+    // cap, so its month is no scope of the fit)
+    expect(
+      screen.getByText('Google Flights via SearchApi this month: about 476, limit 10000'),
+    ).toBeInTheDocument();
     expect(seen.estimates[0]).toMatchObject({ scheduleCron: DEFAULT_CRON, enabled: true });
     expect(seen.estimateIds).toEqual(['def-0001']);
     await settled(client);

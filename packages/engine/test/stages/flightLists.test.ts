@@ -184,19 +184,6 @@ describe('the flight-list step after discovery', () => {
     expect(cam.flightCalls).toHaveLength(10);
   });
 
-  it('the same lane stopped at its monthly page cap sends no flight page', async () => {
-    const cam = stubCamoufox({ cells: 120, flights: {} });
-    const tp = stubTravelpayouts({ cells: 120 });
-    // why: the estimate plans the configured 100 pages, under the 110 monthly cap; the snapshot freezes 200, so the
-    // guard stops the lane at its 111th page on the month (provider-month), mid-run, with Travelpayouts left
-    const e = engineWith([cam, tp], { rankedDatePairs: rankedPairs(15), monthlyCap: 110, snapshotCap: 200 });
-    const done = await e.settled(await start(e));
-    expect(cam.calls.length).toBeGreaterThan(100);
-    expect(done.status).toBe('completed');
-    expect(cam.flightCalls).toHaveLength(0);
-    expect(done.flightLists).toBeNull();
-  });
-
   it('Review Focus 3: a camoufox-only run stopped at its 100-page cap reads its 10 flight pages and stays paused_budget', async () => {
     const { e, cam } = camoufoxOnly({ cells: 120 });
     const done = await e.settled(await start(e));
@@ -352,18 +339,11 @@ describe("the step's error table", () => {
   }
 
   it.each([
-    ['the worker monthly cap', 'monthly-cap', 'monthly-cap'],
     ['execution-free-calls', 'free-call-cap', 'stopped'],
     ['provider-execution', 'execution-cap', 'stopped'],
   ] as const)(
     'BudgetExceeded (%s): the pair and the rest failed %s, no request, ended %s',
-    async (_n, reason, ended) => {
-      const scope =
-        reason === 'monthly-cap'
-          ? 'provider-month'
-          : reason === 'free-call-cap'
-            ? 'execution-free-calls'
-            : 'provider-execution';
+    async (scope, reason, ended) => {
       const { cam, done, rows } = await thirdPage(() => {
         throw new BudgetExceeded({ scope, providerId: 'camoufox', cap: 10, current: 10, requested: 1 });
       });
@@ -374,14 +354,6 @@ describe("the step's error table", () => {
       expect(done.status).toBe('completed');
     },
   );
-
-  it('the guard-side monthly page cap: failed monthly-cap, ended monthly-cap', async () => {
-    // why: 15 grid pages and 2 flight pages fill a 17-page month; the third flight page's reservation is refused
-    const { cam, done, rows } = await thirdPage(() => undefined, { monthlyCap: 17 });
-    expect(cam.flightRequests()).toBe(2);
-    expect(rows.slice(2).every((r) => r.status === 'failed' && r.reason === 'monthly-cap')).toBe(true);
-    expect(done.flightLists?.ended).toBe('monthly-cap');
-  });
 
   it.each(['provider-unavailable', 'auth', 'quota'] as const)(
     'list-error %s: the pair and the rest failed with the kind, no request, the step ends',
@@ -611,12 +583,7 @@ describe('flightStepEntry (the entry predicate)', () => {
     expect(flightStepEntry(e.ctx, { ...run, snapshot: { ...run.snapshot, budget } })).toBe(false);
   });
 
-  it('never after the browser lane left its window or stopped at a monthly, lifetime or global cap', async () => {
-    for (const scope of ['provider-month', 'provider-lifetime', 'global-month'] as const) {
-      const { e, run } = await base();
-      laneFor(run, 'discovery', 'camoufox').budgetOutScope = scope;
-      expect(flightStepEntry(e.ctx, run)).toBe(false);
-    }
+  it('never after the browser lane left its window; a lane stopped at its own run cap still reads', async () => {
     const { e, run } = await base();
     laneFor(run, 'discovery', 'camoufox').budgetOutScope = 'provider-execution';
     expect(flightStepEntry(e.ctx, run)).toBe(true);
@@ -638,7 +605,7 @@ describe('flightStepEntry (the entry predicate)', () => {
 
 // Spec rev 56 §8.1 "The plan" and "Each request" (WP21 Task 21.6): the return phase is planned from the worker's flags;
 // each request carries the search's limits and the booking ask while the plan reads returns, an outbound-only request
-// when the month or the window cannot hold one, and none after a transient end; the allowance counts each request's pages.
+// when the window cannot hold one, and none after a transient end; the allowance counts each request's pages.
 describe('the step plans and sends the return leg (spec rev 56 §8.1)', () => {
   const BOTH = { RETURN_SELECT_VERIFIED: true, BOOKING_SELECT_VERIFIED: true };
   const LIMITS: FlightLimits = {
@@ -836,7 +803,7 @@ describe('the step plans and sends the return leg (spec rev 56 §8.1)', () => {
       returnReadSchema.parse({
         limits: LIMITS,
         status: 'skipped',
-        rule: 'monthly-headroom',
+        rule: 'not-cheapest-view',
         attempts: [],
         triedAll: false,
         booking: null,
@@ -877,17 +844,6 @@ describe('the step plans and sends the return leg (spec rev 56 §8.1)', () => {
     expect(cam.flightCalls.filter((c) => c.query.returnLimits !== undefined)).toHaveLength(1);
   });
 
-  it("a read whose second attempt was skipped for the month's pages stops nothing", async () => {
-    const { e, cam } = withFlags(BOTH, {
-      flights: {
-        answer: answering((n) => (n === 1 ? returnsOf({ rule: 'monthly-headroom' }) : returnsOf())),
-      },
-    });
-    const done = await e.settled(await start(e));
-    expect(done.flightLists?.returnsStopped).toBeNull();
-    expect(cam.flightCalls.every((c) => c.query.returnLimits !== undefined)).toBe(true);
-  });
-
   it('with the return leg planned, a young list whose return view did not settle is read again, not reused', async () => {
     const { e, cam } = withFlags(BOTH);
     const [first] = rankedPairs(1)({
@@ -919,15 +875,22 @@ describe('the step plans and sends the return leg (spec rev 56 §8.1)', () => {
     expect(cam.flightCalls).toHaveLength(10);
   });
 
-  it('R-low-pages: with 1 page of month headroom the request goes out outbound-only; with 2 it carries the limits', async () => {
-    // why: 15 grid pages of a 16- and a 17-page month leave 1 and 2 for flights
-    const low = withFlags(BOTH, { monthlyCap: 16 });
-    const lowDone = await low.e.settled(await start(low.e));
-    expect(low.cam.flightCalls[0]?.query.returnLimits).toBeUndefined();
-    expect(lowDone.flightLists?.returnsStopped).toBeNull();
-    const two = withFlags(BOTH, { monthlyCap: 17 });
-    await two.e.settled(await start(two.e));
-    expect(two.cam.flightCalls[0]?.query.returnLimits).toEqual(LIMITS);
+  // why: spec rev 64: pages already loaded this month never send a request outbound-only
+  it('with the month holding many pages the request still carries the limits', async () => {
+    const w = withFlags(BOTH);
+    for (let i = 0; i < 2000; i++)
+      w.e.ctx.budget
+        .reserve({
+          providerId: 'camoufox',
+          executionId: null,
+          tileIndex: null,
+          costMicroGbp: 0,
+          httpAttempt: 1,
+          endpointPath: '/v1/page',
+        })
+        .finalise({ outcome: 'ok', httpStatus: 200, durationMs: 1, pageClass: 'page' });
+    await w.e.settled(await start(w.e));
+    expect(w.cam.flightCalls[0]?.query.returnLimits).toEqual(LIMITS);
   });
 
   it("the allowance counts each request's pages: 20 holds 10 pairs at 2; 19 refuses the tenth before any call", async () => {
@@ -1103,42 +1066,6 @@ describe('the step plans and sends the return leg (spec rev 56 §8.1)', () => {
     expect(flightRows(e, id)).toHaveLength(0);
     expect(done.flightLists?.ended).toBe('window');
     expect(done.status).not.toBe('failed');
-  });
-
-  it('R-low-pages (21.6 review M1): the month is read after a held lease: an on-demand page spent meanwhile sends outbound-only', async () => {
-    // why: 15 grid pages of a 17-page month leave 2 at planning; the read holding the lease spends 1 of them
-    const cam = stubCamoufox({ cells: 15, flights: {} });
-    const ranking = rankedPairs(15);
-    const held = deferred();
-    let planned = false;
-    const e: CamoufoxEngine = engineWith([cam], {
-      monthlyCap: 17,
-      rankedDatePairs: (q) => {
-        // why: only the step's own planning read (the start's estimate reads the ranking too, before the run exists)
-        if (planned || e.ctx.repos.executions.activeParent(q.definitionId) === null) return ranking(q);
-        planned = true;
-        e.ctx.lease.hold(held.promise);
-        void Promise.resolve().then(() => {
-          e.ctx.budget
-            .reserve({
-              providerId: 'camoufox',
-              executionId: null,
-              tileIndex: null,
-              costMicroGbp: 0,
-              httpAttempt: 1,
-              endpointPath: '/v1/flights',
-            })
-            .finalise({ outcome: 'ok', httpStatus: 200, durationMs: 1, pageClass: 'page', pageCount: 1 });
-          held.resolve();
-        });
-        return ranking(q);
-      },
-    });
-    e.ctx.workerFlags.set('camoufox', BOTH);
-    const done = await e.settled(await start(e));
-    expect(planned).toBe(true);
-    expect(cam.flightCalls[0]?.query.returnLimits).toBeUndefined();
-    expect(done.flightLists).toMatchObject({ returns: true, returnsStopped: null });
   });
 });
 

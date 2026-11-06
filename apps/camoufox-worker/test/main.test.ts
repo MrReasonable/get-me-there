@@ -17,13 +17,6 @@ import { SYNTHETIC_REJECT } from './support/socsValues.js';
 import { fakeTimers } from './support/timers.js';
 import { tmpDir } from './support/tmp.js';
 
-/** This test clock's billing window's counts file (billing day 1: October 2026). */
-const OCTOBER = (pages: number, scrolls: number) => ({
-  windowStart: '2026-10-01T00:00:00.000Z',
-  windowEnd: '2026-11-01T00:00:00.000Z',
-  pages,
-  scrolls,
-});
 const KEY = 'synthetic-worker-key-0123456789abcdef';
 const CAPTURE = {
   value: SYNTHETIC_REJECT,
@@ -255,17 +248,19 @@ describe('the worker’s start checks and shutdown (brief Task 14.5)', () => {
     expect(t.err.join()).toContain(`fix: ${CONSENT_FIX.command}`);
     expect(t.contexts).toEqual([]);
   });
-  // why: W3: an earlier worker's data (its pacer file, no counts) refuses to start as counts-missing, with its fix
-  it('a data directory with a pacer file and no counts refuses as counts-missing; unreadable counts as counts-unreadable', async () => {
+  // why: spec rev 64: the worker keeps no monthly count: an earlier worker's counts file, readable or not, beside its
+  // pacer file neither stops the start nor changes
+  it('starts beside an earlier worker’s pacer and counts files, and leaves the counts file as it is', async () => {
     const t = setup();
-    writeFileSync(join(t.dataDir, 'pacer.json'), JSON.stringify({ lastPageAt: AT }), { mode: 0o600 });
-    expect(await startWorker(t.ctx, t.deps)).toBe(EX_CONFIG);
-    expect(refusalFile(t)).toEqual({ reason: 'counts-missing', at: AT });
-    expect(t.err.join()).toContain('fix: pnpm gmt browser counts');
+    // why: the earlier page an hour back, so the spacing has passed and the page loads
+    const earlier = new Date(Date.parse(AT) - 3_600_000).toISOString();
+    writeFileSync(join(t.dataDir, 'pacer.json'), JSON.stringify({ lastPageAt: earlier }), { mode: 0o600 });
     writeFileSync(join(t.dataDir, 'monthly.json'), '{', { mode: 0o600 });
-    expect(await startWorker(t.ctx, t.deps)).toBe(EX_CONFIG);
-    expect(refusalFile(t)).toEqual({ reason: 'counts-unreadable', at: AT });
-    expect(t.contexts).toEqual([]);
+    const w = await running(t);
+    expect((await post(w)).status).toBe(200);
+    expect(readFileSync(join(t.dataDir, 'monthly.json'), 'utf8')).toBe('{');
+    t.shutdown();
+    await w.done;
   });
   it('an account cookie in the profile exits 78 as signed-in and closes the browser', async () => {
     const t = setup({
@@ -352,15 +347,12 @@ describe('the worker’s start checks and shutdown (brief Task 14.5)', () => {
     expect(t.holds.map((h) => h.killed)).toEqual([true]);
   });
   it('the status reports the worker’s effective shared settings (spec §12), worker.env lines and defaults alike', async () => {
-    const t = setup({ env: { CAMOUFOX_MONTHLY_PAGE_CAP: '900', CAMOUFOX_BILLING_DAY: '15' } });
+    const t = setup({ env: { CAMOUFOX_COOLDOWN_HOURS: '72', POINT_OF_SALE: 'US' } });
     const w = await running(t);
     const s = await fetch(`http://127.0.0.1:${w.port}/v1/status`, { headers: { 'x-gmt-worker-key': KEY } });
     const body: unknown = await s.json();
     expect(body).toMatchObject({
-      sharedSettings: effectiveSharedSettings({
-        CAMOUFOX_MONTHLY_PAGE_CAP: '900',
-        CAMOUFOX_BILLING_DAY: '15',
-      }),
+      sharedSettings: effectiveSharedSettings({ CAMOUFOX_COOLDOWN_HOURS: '72', POINT_OF_SALE: 'US' }),
     });
     expect(workerStatusSchema.safeParse(body).success).toBe(true);
     t.shutdown();
@@ -370,7 +362,6 @@ describe('the worker’s start checks and shutdown (brief Task 14.5)', () => {
     const t = setup();
     const at = '2026-10-18T04:59:00.000Z';
     writeFileSync(join(t.dataDir, 'pacer.json'), JSON.stringify({ lastPageAt: at }), { mode: 0o600 });
-    writeFileSync(join(t.dataDir, 'monthly.json'), JSON.stringify(OCTOBER(1, 0)), { mode: 0o600 });
     const before = readFileSync(join(t.dataDir, 'pacer.json'), 'utf8');
     const w = await running(t);
     for (let i = 0; i < 3; i++) {
@@ -381,14 +372,9 @@ describe('the worker’s start checks and shutdown (brief Task 14.5)', () => {
     t.shutdown();
     await w.done;
   });
-  // why: decision 82 (Task 17.3): the month's counts and its calling apps, reported and never changed by a status read
-  it('the status reports the month’s counts and app instances; a read leaves the counts file unchanged', async () => {
+  // why: decision 82: the month's calling apps, reported and never refused
+  it('the status reports the calendar month’s app instances; a second one is reported, not refused', async () => {
     const t = setup();
-    writeFileSync(join(t.dataDir, 'pacer.json'), JSON.stringify({ lastPageAt: '2026-10-18T04:00:00.000Z' }), {
-      mode: 0o600,
-    });
-    writeFileSync(join(t.dataDir, 'monthly.json'), JSON.stringify(OCTOBER(12, 340)), { mode: 0o600 });
-    const before = readFileSync(join(t.dataDir, 'monthly.json'), 'utf8');
     const w = await running(t);
     const read = async (instance: string) =>
       (
@@ -398,26 +384,12 @@ describe('the worker’s start checks and shutdown (brief Task 14.5)', () => {
       ).json();
     const first: unknown = await read('a'.repeat(64));
     expect(first).toMatchObject({
-      monthly: {
-        windowStart: '2026-10-01T00:00:00.000Z',
-        windowEnd: '2026-11-01T00:00:00.000Z',
-        pages: 12,
-        scrolls: 340,
-        readable: true,
-      },
+      ok: true,
       appInstances: { windowStart: '2026-10-01T00:00:00.000Z', count: 1 },
     });
-    // why: a second app instance in one window is reported, not refused
+    expect(first).not.toHaveProperty('monthly');
     expect(await read('b'.repeat(64))).toMatchObject({ appInstances: { count: 2 } });
     expect((await post(w)).status).toBe(200);
-    expect(readFileSync(join(t.dataDir, 'monthly.json'), 'utf8')).not.toBe(before);
-    const after = readFileSync(join(t.dataDir, 'monthly.json'), 'utf8');
-    await read('a'.repeat(64));
-    expect(readFileSync(join(t.dataDir, 'monthly.json'), 'utf8')).toBe(after);
-    // why: W3 (pa-b1-002): while the counts cannot be read the worker refuses every page, so its status is not ok
-    expect(await read('a'.repeat(64))).toMatchObject({ ok: true });
-    writeFileSync(join(t.dataDir, 'monthly.json'), '{', { mode: 0o600 });
-    expect(await read('a'.repeat(64))).toMatchObject({ ok: false, monthly: { readable: false } });
     t.shutdown();
     await w.done;
   });

@@ -3,6 +3,7 @@
 // Travelpayouts plans one tile per (origin airport, destination airport, month), never a metro query (decision 34);
 // runsPerMonth is the engine's, unrounded (firings in the next 365 days ÷ 12, decision 25).
 import { apiContract, asIsoDate, asIsoDateTime, type DefinitionInput, fixedClock } from '@gmt/core';
+import { budgetConfigFromConfig } from '@gmt/db';
 import { createEngine } from '@gmt/engine';
 import { seededPorts } from '../helpers/recording.js';
 import { read } from './files.js';
@@ -110,8 +111,13 @@ function computeRow(c: CadenceCase): { cells: string[]; retryFactor: number } {
   const providers = [...new Set(est.perProvider.map((p) => p.providerId))];
   const monthly = providers.map((id) => {
     const s = scopes.get(id);
+    // why: spec rev 64: a provider with no cap on its window (the browser worker) has no row in the fit
+    if (s === undefined && budgetConfigFromConfig(ports.config).providers[id]?.monthlyCallCap === null)
+      return `${label(id)}: no monthly cap`;
     if (s === undefined) return `${label(id)} 0 (scheduled runs leave it out)`;
-    return `${label(id)} ${thousands(s.estimated)} of ${s.cap === null ? 'no cap' : thousands(s.cap)}`;
+    return s.cap === null
+      ? `${label(id)} ${thousands(s.estimated)}, no cap`
+      : `${label(id)} ${thousands(s.estimated)} of ${thousands(s.cap)}`;
   });
   return {
     cells: [

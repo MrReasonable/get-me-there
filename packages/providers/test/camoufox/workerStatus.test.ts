@@ -213,12 +213,12 @@ describe('the preflight compares the shared settings through sharedSettingDiffs 
     async (mode) => {
       useFakeTime();
       const { p, budget } = provider(mode);
-      const worker = effectiveSharedSettings({ CAMOUFOX_MONTHLY_PAGE_CAP: '900', POINT_OF_SALE: 'US' });
+      const worker = effectiveSharedSettings({ CAMOUFOX_COOLDOWN_HOURS: '72', POINT_OF_SALE: 'US' });
       server.use(http.get(STATUS_URL, () => HttpResponse.json(status({ ...grid, sharedSettings: worker }))));
       expect(await preflightOf(p)).toEqual({
         ok: false,
         skip: 'provider_disabled',
-        detail: 'settings differ: CAMOUFOX_MONTHLY_PAGE_CAP, POINT_OF_SALE',
+        detail: 'settings differ: CAMOUFOX_COOLDOWN_HOURS, POINT_OF_SALE',
         reason: 'settings-differ',
         flags: {},
       });
@@ -264,7 +264,7 @@ describe('the preflight compares the shared settings through sharedSettingDiffs 
   });
 
   it.each(['list', 'grid'] as const)(
-    '%s mode: a worker.env with no monthly-cap and no billing-day lines beside an app config with none passes',
+    '%s mode: a worker.env with only its own lines beside an app config with none passes',
     async (mode) => {
       useFakeTime();
       // why: the operator's current worker.env: only the key, the port, the spacing and (for grid) the grid lines

@@ -33,7 +33,6 @@ function resp(o: {
   partly?: number;
   reused?: number;
   billed?: EstimateResponse['billedCalls'];
-  monthlyPages?: EstimateResponse['monthlyPages'];
   softConfirm?: EstimateResponse['softConfirm'];
   flightLists?: {
     pages: number;
@@ -72,7 +71,6 @@ function resp(o: {
     datePairsReused: o.reused ?? 0,
     softConfirm: o.softConfirm ?? null,
     billedCalls: o.billed ?? [],
-    monthlyPages: o.monthlyPages ?? null,
   });
 }
 
@@ -181,7 +179,7 @@ describe('estimateSentence: the line', () => {
     expect(
       sentence(
         resp({
-          lines: [{ providerId: 'travelpayouts' }, { providerId: 'camoufox', blocked: 'provider-month' }],
+          lines: [{ providerId: 'travelpayouts' }, { providerId: 'camoufox', blocked: 'provider-execution' }],
         }),
       ).line,
     ).toMatch(/cached prices only where travellers searched recently$/);
@@ -363,12 +361,6 @@ describe('estimateSentence: the notes under it', () => {
     expect(sentence(resp({})).line).not.toContain('flights');
   });
 
-  it('the browser worker’s month, flight pages included (cost-018, persona-005)', () => {
-    expect(sentence(resp({ monthlyPages: { planned: 110, left: 1400 } })).notes).toEqual([
-      'uses about 110 of your 1,400 browser pages left this month',
-    ]);
-  });
-
   it('a blocked paid line: the source not used, why, and its cost as not included', () => {
     expect(
       sentence(
@@ -402,7 +394,7 @@ describe('estimateSentence: the notes under it', () => {
       "Google Flights via SearchApi is not used: over this search's spending limit a run",
     ],
     ['provider-execution', 'camoufox', 'The browser worker is not used: over its page limit for one run'],
-    ['provider-month', 'camoufox', 'The browser worker is not used: no browser pages left this month'],
+    ['provider-month', 'searchapi', 'Google Flights via SearchApi is not used: no calls left this month'],
     ['provider-lifetime', 'searchapi', 'Google Flights via SearchApi is not used: no trial searches left'],
     [
       'global-month',

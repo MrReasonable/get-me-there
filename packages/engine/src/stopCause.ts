@@ -25,19 +25,19 @@ export function toStopDetail(word: string | null, fallback: StopDetail): StopDet
 
 /**
  * Revision 55 §8.1: whether a budget stop is never resumed by a timer, a tick or boot whatever the schedule: the browser
- * worker's monthly or per-run page limit (a resume past the run's browser window reads no browser pages; its stop
- * offers Search again).
+ * worker's per-run page limit (a resume past the run's browser window reads no browser pages; its stop offers Search
+ * again). The browser has no monthly limit (spec §2).
  */
 export function isBrowserPageLimit(
   c: Pick<Extract<StopCause, { kind: 'budget' }>, 'scope' | 'providerId'>,
 ): boolean {
-  return c.providerId === 'camoufox' && (c.scope === 'provider-month' || c.scope === 'provider-execution');
+  return c.providerId === 'camoufox' && c.scope === 'provider-execution';
 }
 
 /**
  * The cause a stop stores (spec revision 55 §8.1). `scheduled` is `isScheduled` over the live definition, read at finish:
- * an unscheduled search's pause stores no `resumeAfter` (Ian's ruling 2), and neither does the browser worker's monthly
- * or per-run page limit on any search; a budget cause keeps its window's end as `resetsAt` either way. A cancel's cause
+ * an unscheduled search's pause stores no `resumeAfter` (Ian's ruling 2), and neither does the browser worker's per-run
+ * page limit on any search; a budget cause keeps its window's end as `resetsAt` either way. A cancel's cause
  * is its own; `all-disabled` names every disabled source of its stage with its class word, at least one; a SIGTERM
  * marks `browserWindowLeft` when a lane of the pass had left its browser window.
  */

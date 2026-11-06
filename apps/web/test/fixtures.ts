@@ -314,7 +314,6 @@ export function estimateResponse(
     datePairsReused: 0,
     softConfirm: null,
     billedCalls: [],
-    monthlyPages: null,
     ...over,
   });
 }

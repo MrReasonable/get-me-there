@@ -56,11 +56,8 @@ export interface ProviderRunLimits {
   executionCallCap: number | null;
   /** The provider's own fixed spacing between call starts in seconds (camoufox), or null. */
   minSpacingSeconds: number | null;
-  /** The calls the provider may make in its cap window (CAMOUFOX_MONTHLY_PAGE_CAP for camoufox). */
-  monthlyCallCap: number;
-  /** Spec §2 rev 34: camoufox grid's scroll caps (a run's and its month's), or null for a provider without them. */
+  /** Spec §2 rev 34: camoufox grid's scroll cap for a run, or null for a provider without one. */
   executionScrollCap: number | null;
-  monthlyScrollCap: number | null;
   /**
    * Spec rev 56 §8.1, §8.2 (arch-r3-006; ruling P19): camoufox's flights request seconds, core's `flightRequestSeconds`
    * over the shared page timeout and spacing: with a return phase and the booking read (780 s at the defaults), with a
@@ -177,9 +174,7 @@ export function buildContext(deps: EngineDeps, options: EngineOptions = {}): Eng
       billed: b.billable,
       executionCallCap: b.executionCallCap ?? null,
       minSpacingSeconds: b.minSpacingSeconds ?? null,
-      monthlyCallCap: b.monthlyCallCap,
       executionScrollCap: b.executionScrollCap ?? null,
-      monthlyScrollCap: b.monthlyScrollCap ?? null,
       flightRequestSeconds: id === 'camoufox' ? camoufoxRequestSeconds(config) : null,
     };
   };

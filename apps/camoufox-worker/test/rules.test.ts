@@ -8,7 +8,6 @@ import ts from 'typescript';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { CooldownStore } from '../src/cooldown.js';
 import { buildLaunchOptions } from '../src/launch.js';
-import { MonthlyCounter } from '../src/monthly.js';
 import { Pacer } from '../src/pacer.js';
 import { Refusal } from '../src/refusal.js';
 import { SELECTORS } from '../src/selectors.js';
@@ -182,11 +181,6 @@ describe('worker rules: a full page session sets only SOCS and clicks nothing on
       socs,
       cooldown: new CooldownStore({ dir, challengeHours: 48, clock: timers.clock }),
       pacer: new Pacer({ dir, minSpacingSeconds: 30, clock: timers.clock }),
-      monthly: new MonthlyCounter({
-        dir,
-        caps: { pages: 1500, scrolls: 6000, billingDay: 1 },
-        clock: timers.clock,
-      }),
       refusal: new Refusal({ dir, clock: timers.clock }),
       clock: timers.clock,
       timers,
@@ -312,11 +306,6 @@ describe('worker rules: a flights page with returnLimits activates only the veri
       socs: loadSocs(dir, timers.clock),
       cooldown: new CooldownStore({ dir, challengeHours: 48, clock: timers.clock }),
       pacer: new Pacer({ dir, minSpacingSeconds: 30, clock: timers.clock }),
-      monthly: new MonthlyCounter({
-        dir,
-        caps: { pages: 1500, scrolls: 6000, billingDay: 1 },
-        clock: timers.clock,
-      }),
       refusal: new Refusal({ dir, clock: timers.clock }),
       clock: timers.clock,
       timers,

@@ -423,21 +423,10 @@ describe('executionResponseSchema (spec rev 55 §10: stop, estimatedFinishAt and
 });
 
 describe('estimateResponseSchema (spec rev 55 §10: what the estimate asks)', () => {
-  const asks = {
-    datePairs: 2184,
-    datePairsCovered: 1288,
-    datePairsPartly: 0,
-    datePairsReused: 0,
-    softConfirm: null,
-    billedCalls: [],
-    monthlyPages: null,
-  };
   it('the fields are required: a response without them is refused', () => {
     expect(estimateResponseSchema.shape.datePairs.safeParse(undefined).success).toBe(false);
     expect(estimateResponseSchema.shape.softConfirm.safeParse(undefined).success).toBe(false);
     expect(estimateResponseSchema.shape.billedCalls.safeParse(undefined).success).toBe(false);
-    expect(estimateResponseSchema.shape.monthlyPages.safeParse(undefined).success).toBe(false);
-    expect(estimateResponseSchema.shape.monthlyPages.parse(asks.monthlyPages)).toBeNull();
   });
   it('softConfirm is a code with its figures and no English', () => {
     const cost = { reason: 'cost', estimatePence: 120, thresholdPence: 100 };

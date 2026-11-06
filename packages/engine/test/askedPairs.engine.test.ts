@@ -3,7 +3,7 @@
 import { asIsoDate } from '@gmt/core';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createEngine } from '../src/engine.js';
-import { askedPairs, billedCallsOf, monthlyPagesOf } from '../src/estimate.js';
+import { askedPairs, billedCallsOf } from '../src/estimate.js';
 import { lineKey } from '../src/lines.js';
 import { buildSnapshot } from '../src/snapshot.js';
 import {
@@ -46,75 +46,40 @@ describe('estimateAsk through a real engine', () => {
       datePairsPartly: 0,
       datePairsReused: 0,
       billedCalls: [],
-      monthlyPages: null,
-    });
-  });
-});
-
-describe('the pages a month has left, less what other schedules reserve (ruling 5)', () => {
-  it('monthlyPagesOf subtracts the other scheduled search’s reservation, as checkBudget does: 1,500 - 200 = 1,300', () => {
-    // why: the other search runs weekly (Mondays 19 and 26 October before the month's window closes on 1 November):
-    // 2 firings; discovery runs min(2, ceil(423 h / (0.9 × 168 h))) = min(2, 3) = 2, 100 pages each = 200 reserved
-    const e = engineWith([stubCamoufox({ cells: 1 })], { monthlyCap: 1500, scheduleCron: '0 5 * * 1' });
-    widen(e); // the first search is the worked example too: 100 pages a weekly run
-    const other = e.ctx.repos.definitions.create({
-      ...baseDefinition(),
-      providers: { discovery: ['camoufox'], verification: [], discoveryRefreshHours: { camoufox: 168 } },
-      window: { kind: 'absolute', from: asIsoDate('2026-11-02'), to: asIsoDate('2027-05-02') },
-      minNights: 10,
-      maxNights: 21,
-      scheduleCron: '0 5 * * 1',
-      enabled: true,
-    });
-    const line = {
-      providerId: 'camoufox' as const,
-      stage: 'discovery' as const,
-      calls: 100,
-      planCalls: 100,
-      costMicroGbp: 0,
-      costPence: 0,
-      seconds: 7000,
-      blocked: null,
-    };
-    expect(monthlyPagesOf(e.ctx, { perProvider: [line] }, other.id)).toEqual({
-      planned: 100,
-      left: 1500 - 200,
-    });
-    // why: each of the two searches is the other's "other schedule", so both see the same 200 reserved
-    expect(monthlyPagesOf(e.ctx, { perProvider: [line] }, e.definition.id)).toEqual({
-      planned: 100,
-      left: 1500 - 200,
     });
   });
 });
 
 describe('one read of each other schedule per engine call (ruling 5 reservations, memoised)', () => {
   it('an estimate and its date-pair ask plan the other weekly search once, however many cap windows ask', () => {
-    const camoufox = stubCamoufox({ cells: 1 });
-    const e = engineWith([camoufox], { monthlyCap: 1500, scheduleCron: '0 5 * * 1' });
+    // why: Travelpayouts has a monthly call cap, so its window reads the other schedule's reservation
+    const tp = stubTravelpayouts({ cells: 1 });
+    const e = engineWith([tp], { scheduleCron: '0 5 * * 1' });
     const def = widen(e);
     // why: the other search's own window, so its plans are told apart from this search's by their first departure day
     const OTHER_FROM = asIsoDate('2026-12-07');
     e.ctx.repos.definitions.create({
       ...baseDefinition(),
-      providers: { discovery: ['camoufox'], verification: [], discoveryRefreshHours: { camoufox: 168 } },
+      providers: {
+        discovery: ['travelpayouts'],
+        verification: [],
+        discoveryRefreshHours: { travelpayouts: 168 },
+      },
       window: { kind: 'absolute', from: OTHER_FROM, to: asIsoDate('2026-12-20') },
       minNights: 10,
       maxNights: 12,
       scheduleCron: '0 5 * * 1',
       enabled: true,
     });
-    const discovery = camoufox.discovery;
-    if (discovery === undefined) throw new Error('the camoufox stub has no discovery');
+    const discovery = tp.discovery;
+    if (discovery === undefined) throw new Error('the Travelpayouts stub has no discovery');
     const plan = vi.spyOn(discovery, 'plan');
     const otherPlans = () => plan.mock.calls.filter(([q]) => q.departureFrom === OTHER_FROM).length;
     const engine = createEngine(e.deps);
     const est = engine.estimate(def, TODAY);
     // why: the other search names one airport pair (LHR → JFK), so one load of it is one plan call
     expect(otherPlans()).toBe(1);
-    const ask = engine.estimateAsk(def, TODAY, est);
-    // its pages-left figure set the reservation aside (1,500 less the other's weekly pages) from the same one load
-    expect(ask.monthlyPages?.left).toBeLessThan(1500);
+    engine.estimateAsk(def, TODAY, est);
     expect(otherPlans()).toBe(1);
     // a later estimate is another engine call: the load is read afresh, never carried over
     engine.estimate(def, TODAY);
@@ -122,10 +87,10 @@ describe('one read of each other schedule per engine call (ruling 5 reservations
   });
 });
 
-describe('the plan is cut by what other schedules leave of the month', () => {
-  it('a month of 250 pages with 200 reserved for the other search plans 50 cells: 50 date pairs partly', () => {
-    // why: same two weekly searches as above (200 pages reserved against either); 250 - 200 = 50 pages are left
-    const e = engineWith([stubCamoufox({ cells: 1 })], { monthlyCap: 250, scheduleCron: '0 5 * * 1' });
+// why: spec rev 64: the browser worker has no monthly cap, so another schedule holds none of its pages
+describe('another schedule never cuts the browser plan', () => {
+  it('with another weekly browser search saved, the plan still covers its 100 cells: 100 date pairs partly', () => {
+    const e = engineWith([stubCamoufox({ cells: 1 })], { scheduleCron: '0 5 * * 1' });
     const def = widen(e);
     e.ctx.repos.definitions.create({
       ...baseDefinition(),
@@ -139,7 +104,7 @@ describe('the plan is cut by what other schedules leave of the month', () => {
     const built = buildSnapshot(e.ctx, def);
     expect(askedPairs(e.ctx, built.snapshot, built.cells, def.id, new Set())).toMatchObject({
       datePairsCovered: 0,
-      datePairsPartly: 50,
+      datePairsPartly: 100,
     });
   });
 });
@@ -293,42 +258,16 @@ describe('lines that plan nothing', () => {
   });
 });
 
-describe('what the month has left after the pages already used', () => {
-  it('monthlyPagesOf and the plan are cut by the 3 pages a run already used: 5 - 3 = 2 left', async () => {
-    const e = engineWith([stubCamoufox({ cells: 3 })], { monthlyCap: 5 });
+describe('what the windows have left after the calls already used', () => {
+  // why: spec rev 64: pages a run already loaded leave the next plan whole (only the per-run cap bounds it)
+  it('a run that used 3 pages leaves the next plan of 3 cells whole', async () => {
+    const e = engineWith([stubCamoufox({ cells: 3 })]);
     await e.runToEnd();
-    const line = {
-      providerId: 'camoufox' as const,
-      stage: 'discovery' as const,
-      calls: 3,
-      planCalls: 3,
-      costMicroGbp: 0,
-      costPence: 0,
-      seconds: 1,
-      blocked: null,
-    };
-    expect(monthlyPagesOf(e.ctx, { perProvider: [line] }, null)).toEqual({ planned: 3, left: 2 });
     const built = buildSnapshot(e.ctx, e.definition);
-    // why: 3 cells, 2 pages left: the plan is cut at 2 cells, each its own date pair, on the one airport pair: covered 2
     expect(askedPairs(e.ctx, built.snapshot, built.cells, null, new Set())).toMatchObject({
       datePairs: 3,
-      datePairsCovered: 2,
+      datePairsCovered: 3,
     });
-  });
-
-  it('monthlyPagesOf ignores a runnable line of another provider', () => {
-    const e = engineWith([stubTravelpayouts({ cells: 3 })]);
-    const line = {
-      providerId: 'travelpayouts' as const,
-      stage: 'discovery' as const,
-      calls: 3,
-      planCalls: 3,
-      costMicroGbp: 0,
-      costPence: 0,
-      seconds: 1,
-      blocked: null,
-    };
-    expect(monthlyPagesOf(e.ctx, { perProvider: [line] }, null)).toBeNull();
   });
 
   it('billedCalls names the trial’s lifetime window and what is left of it: 100 - 9 used = 91', () => {

@@ -4,7 +4,6 @@
 import { readFileSync } from 'node:fs';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { CONSENT_FIX } from '../../src/camoufox/consentFix.js';
-import { countsRewriteSchema, MONTHLY_FILE, monthlyCountsSchema } from '../../src/camoufox/monthly.js';
 import { APP_INSTANCE_HEADER, workerStatusSchema } from '../../src/camoufox/protocol.js';
 import {
   effectiveSharedSettings,
@@ -43,16 +42,9 @@ const full = (): Record<string, unknown> => {
   if (typeof copy !== 'object' || copy === null) throw new Error('the fixture is not an object');
   return Object.fromEntries(Object.entries(copy));
 };
-const MONTHLY = {
-  windowStart: '2027-03-01T00:00:00.000Z',
-  windowEnd: '2027-04-01T00:00:00.000Z',
-  pages: 12,
-  scrolls: 340,
-  readable: true,
-};
 
 describe('SHARED_WORKER_SETTINGS and their effective values (spec §12)', () => {
-  it('names the ten settings the two sides must share, the grid-only two, and the app’s defaults', () => {
+  it('names the seven settings the two sides must share, the grid-only two, and the app’s defaults', () => {
     expect(SHARED_WORKER_SETTINGS).toEqual([
       'CAMOUFOX_COOLDOWN_HOURS',
       'CAMOUFOX_PAGE_TIMEOUT_SECONDS',
@@ -60,9 +52,6 @@ describe('SHARED_WORKER_SETTINGS and their effective values (spec §12)', () => 
       'CAMOUFOX_MODE',
       'CAMOUFOX_GRID_SCROLL_CAP',
       'CAMOUFOX_GRID_SCROLL_SPACING_SECONDS',
-      'CAMOUFOX_MONTHLY_PAGE_CAP',
-      'CAMOUFOX_MONTHLY_SCROLL_CAP',
-      'CAMOUFOX_BILLING_DAY',
       'POINT_OF_SALE',
     ]);
     expect(GRID_ONLY_SETTINGS).toEqual(['CAMOUFOX_GRID_SCROLL_CAP', 'CAMOUFOX_GRID_SCROLL_SPACING_SECONDS']);
@@ -73,9 +62,6 @@ describe('SHARED_WORKER_SETTINGS and their effective values (spec §12)', () => 
       CAMOUFOX_MODE: 'list',
       CAMOUFOX_GRID_SCROLL_CAP: '30',
       CAMOUFOX_GRID_SCROLL_SPACING_SECONDS: '5',
-      CAMOUFOX_MONTHLY_PAGE_CAP: '1500',
-      CAMOUFOX_MONTHLY_SCROLL_CAP: '6000',
-      CAMOUFOX_BILLING_DAY: '1',
       POINT_OF_SALE: 'GB',
     });
     expect(core.SHARED_WORKER_SETTINGS).toBe(SHARED_WORKER_SETTINGS);
@@ -96,8 +82,7 @@ describe('SHARED_WORKER_SETTINGS and their effective values (spec §12)', () => 
         CAMOUFOX_COOLDOWN_HOURS: '030',
         CAMOUFOX_MODE: 'grid',
         CAMOUFOX_GRID_SCROLL_CAP: '0',
-        CAMOUFOX_MONTHLY_PAGE_CAP: '0',
-        CAMOUFOX_BILLING_DAY: '28',
+        CAMOUFOX_MIN_SPACING_SECONDS: '0600',
         POINT_OF_SALE: 'US',
         UNRELATED: 'x',
       }),
@@ -106,8 +91,7 @@ describe('SHARED_WORKER_SETTINGS and their effective values (spec §12)', () => 
       CAMOUFOX_COOLDOWN_HOURS: '30',
       CAMOUFOX_MODE: 'grid',
       CAMOUFOX_GRID_SCROLL_CAP: '0',
-      CAMOUFOX_MONTHLY_PAGE_CAP: '0',
-      CAMOUFOX_BILLING_DAY: '28',
+      CAMOUFOX_MIN_SPACING_SECONDS: '600',
       POINT_OF_SALE: 'US',
     });
   });
@@ -125,10 +109,7 @@ describe('SHARED_WORKER_SETTINGS and their effective values (spec §12)', () => 
     ['CAMOUFOX_MIN_SPACING_SECONDS', '  '],
     ['CAMOUFOX_GRID_SCROLL_SPACING_SECONDS', '  '],
     ['CAMOUFOX_GRID_SCROLL_SPACING_SECONDS', '31'],
-    ['CAMOUFOX_MONTHLY_PAGE_CAP', '-1'],
-    ['CAMOUFOX_MONTHLY_SCROLL_CAP', 'lots'],
-    ['CAMOUFOX_BILLING_DAY', '0'],
-    ['CAMOUFOX_BILLING_DAY', '29'],
+    ['CAMOUFOX_GRID_SCROLL_CAP', 'lots'],
     ['POINT_OF_SALE', 'gb'],
   ])('refuses %s=%s naming the setting, never its value', (name, value) => {
     const sentinel = `${value}`;
@@ -154,27 +135,24 @@ describe('sharedSettingDiffs (names only; grid-only names in grid mode)', () => 
     expect(
       sharedSettingDiffs(
         effectiveSharedSettings({}),
-        effectiveSharedSettings({ CAMOUFOX_BILLING_DAY: '1', CAMOUFOX_MODE: 'list' }),
+        effectiveSharedSettings({ CAMOUFOX_COOLDOWN_HOURS: '48', CAMOUFOX_MODE: 'list' }),
         'list',
       ),
     ).toEqual([]);
   });
   it('names every differing setting, never a value, in SHARED_WORKER_SETTINGS order', () => {
     const worker = effectiveSharedSettings({
-      CAMOUFOX_COOLDOWN_HOURS: '99',
+      CAMOUFOX_COOLDOWN_HOURS: '98765',
       CAMOUFOX_PAGE_TIMEOUT_SECONDS: '99',
-      CAMOUFOX_MIN_SPACING_SECONDS: '99',
+      CAMOUFOX_MIN_SPACING_SECONDS: '599',
       CAMOUFOX_MODE: 'grid',
       CAMOUFOX_GRID_SCROLL_CAP: '59',
       CAMOUFOX_GRID_SCROLL_SPACING_SECONDS: '29',
-      CAMOUFOX_MONTHLY_PAGE_CAP: '1234567',
-      CAMOUFOX_MONTHLY_SCROLL_CAP: '7654321',
-      CAMOUFOX_BILLING_DAY: '27',
       POINT_OF_SALE: 'ZZ',
     });
     const diffs = sharedSettingDiffs(app, worker, 'grid');
     expect(diffs).toEqual([...SHARED_WORKER_SETTINGS]);
-    expect(JSON.stringify(diffs)).not.toMatch(/1234567|7654321|ZZ/);
+    expect(JSON.stringify(diffs)).not.toMatch(/98765|599|ZZ/);
   });
   it('agrees when both sides say 0 for the scroll spacing, and differs from a side that says 5', () => {
     const zero = effectiveSharedSettings({ CAMOUFOX_GRID_SCROLL_SPACING_SECONDS: '0' });
@@ -204,8 +182,8 @@ describe('sharedSettingDiffs (names only; grid-only names in grid mode)', () => 
       'CAMOUFOX_GRID_SCROLL_CAP',
       'CAMOUFOX_GRID_SCROLL_SPACING_SECONDS',
     ]);
-    expect(sharedSettingDiffs(app, { ...app, CAMOUFOX_MONTHLY_PAGE_CAP: '100' }, 'list')).toEqual([
-      'CAMOUFOX_MONTHLY_PAGE_CAP',
+    expect(sharedSettingDiffs(app, { ...app, CAMOUFOX_COOLDOWN_HOURS: '100' }, 'list')).toEqual([
+      'CAMOUFOX_COOLDOWN_HOURS',
     ]);
   });
 });
@@ -237,8 +215,6 @@ describe('the start refusal file and its texts (decision 76)', () => {
       'layout',
       'signed-in',
       'locked',
-      'counts-missing',
-      'counts-unreadable',
       'config',
     ]);
     expect(Object.keys(START_REFUSAL_TEXT)).toEqual([...START_REFUSAL_REASONS]);
@@ -259,8 +235,6 @@ describe('the start refusal file and its texts (decision 76)', () => {
       layout: 'pnpm gmt browser install',
       'signed-in': 'pnpm --filter @gmt/camoufox-worker clear-signed-in',
       locked: 'pnpm gmt restart',
-      'counts-missing': 'pnpm gmt browser counts',
-      'counts-unreadable': 'pnpm gmt browser counts',
       config: 'pnpm gmt start',
     });
     // why: review X5: an older record is refused by name, saying why it is not used
@@ -289,12 +263,12 @@ describe('workerStatusSchema: every field WP17’s worker will emit, optional, s
   });
   it('parses the current worker’s status, which has none of them', () => {
     const today = full();
-    for (const k of ['sharedSettings', 'osArch', 'build', 'consent', 'monthly', 'appInstances', 'awake'])
+    for (const k of ['sharedSettings', 'osArch', 'build', 'consent', 'appInstances', 'awake'])
       delete today[k];
     expect(workerStatusSchema.safeParse(today).success).toBe(true);
   });
   // why: review X1, X5: a capture with its bound and (from this version) its mark; the older kinds are never served
-  it('a captured record with each bound and each mark, or no mark (an earlier worker); monthly unreadable', () => {
+  it('a captured record with each bound and each mark, or no mark (an earlier worker)', () => {
     const at = '2028-03-01T06:00:00.000Z';
     for (const consent of [
       { kind: 'socs', expiresAt: at, boundedBy: 'cookie' },
@@ -314,9 +288,6 @@ describe('workerStatusSchema: every field WP17’s worker will emit, optional, s
       expect(workerStatusSchema.safeParse({ ...full(), consent }).success, JSON.stringify(consent)).toBe(
         false,
       );
-    expect(full().monthly).toEqual(MONTHLY);
-    const unreadable = { ...MONTHLY, readable: false };
-    expect(workerStatusSchema.safeParse({ ...full(), monthly: unreadable }).success).toBe(true);
   });
   it('still refuses an unknown field, and an unknown setting name, OS, consent kind or bound', () => {
     expect(workerStatusSchema.safeParse({ ...full(), extra: 1 }).success).toBe(false);
@@ -336,9 +307,13 @@ describe('workerStatusSchema: every field WP17’s worker will emit, optional, s
         consent: { kind: 'socs', expiresAt: '2028-03-01T06:00:00.000Z', boundedBy: 'guess' },
       }).success,
     ).toBe(false);
-    expect(workerStatusSchema.safeParse({ ...full(), monthly: { ...MONTHLY, pages: -1 } }).success).toBe(
-      false,
-    );
+    // why: spec rev 64: the worker no longer counts a month; a status still carrying the counts is refused
+    expect(
+      workerStatusSchema.safeParse({
+        ...full(),
+        monthly: { windowStart: '2027-03-01T00:00:00.000Z', windowEnd: '2027-04-01T00:00:00.000Z', pages: 1 },
+      }).success,
+    ).toBe(false);
     expect(
       workerStatusSchema.safeParse({ ...full(), appInstances: { windowStart: 'x', count: 1 } }).success,
     ).toBe(false);
@@ -377,10 +352,10 @@ describe('one rule set for both sides (R27)', () => {
     const r = readSharedSettings({
       CAMOUFOX_COOLDOWN_HOURS: '23',
       POINT_OF_SALE: 'gb',
-      CAMOUFOX_BILLING_DAY: '07',
+      CAMOUFOX_GRID_SCROLL_CAP: '07',
     });
     expect(r.invalid).toEqual(['CAMOUFOX_COOLDOWN_HOURS', 'POINT_OF_SALE']);
-    expect(r.settings).toEqual({ ...SHARED_WORKER_DEFAULTS, CAMOUFOX_BILLING_DAY: '7' });
+    expect(r.settings).toEqual({ ...SHARED_WORKER_DEFAULTS, CAMOUFOX_GRID_SCROLL_CAP: '7' });
   });
   it('the cool-down is bounded at 100,000 hours on both sides', () => {
     expect(readSharedSettings({ CAMOUFOX_COOLDOWN_HOURS: '100000' }).invalid).toEqual([]);
@@ -396,9 +371,6 @@ describe('one rule set for both sides (R27)', () => {
       'CAMOUFOX_MODE must be list or grid',
       'CAMOUFOX_GRID_SCROLL_CAP must be a whole number from 0 to 60',
       'CAMOUFOX_GRID_SCROLL_SPACING_SECONDS must be a whole number from 0 to 30',
-      'CAMOUFOX_MONTHLY_PAGE_CAP must be a whole number of at least 0',
-      'CAMOUFOX_MONTHLY_SCROLL_CAP must be a whole number of at least 0',
-      'CAMOUFOX_BILLING_DAY must be a whole number from 1 to 28',
       'POINT_OF_SALE must be an ISO 3166-1 alpha-2 code',
     ]);
   });
@@ -427,39 +399,7 @@ describe('the worker’s port', () => {
   });
 });
 
-// why: W3 (ca-b1-005): the counts file's one shape, read and written by the worker, rewritten through its entry
-describe('the monthly counts file', () => {
-  const ok = {
-    windowStart: '2027-10-01T00:00:00.000Z',
-    windowEnd: '2027-11-01T00:00:00.000Z',
-    pages: 40,
-    scrolls: 200,
-  };
-  it('is the window and its whole counts, nothing else', () => {
-    expect(MONTHLY_FILE).toBe('monthly.json');
-    expect(monthlyCountsSchema.parse(ok)).toEqual(ok);
-    for (const bad of [
-      { ...ok, pages: -1 },
-      { ...ok, scrolls: 1.5 },
-      { ...ok, extra: 1 },
-      { ...ok, windowEnd: 'x' },
-    ])
-      expect(monthlyCountsSchema.safeParse(bad).success).toBe(false);
-    const { windowEnd: _, ...old } = ok;
-    expect(monthlyCountsSchema.safeParse(old).success).toBe(false);
-  });
-  it('a rewrite carries pages and scrolls only, bounded', () => {
-    expect(countsRewriteSchema.parse({ pages: 0, scrolls: 9_999_999 })).toEqual({
-      pages: 0,
-      scrolls: 9_999_999,
-    });
-    for (const bad of [
-      { pages: 1 },
-      { pages: 1, scrolls: 10_000_000 },
-      { pages: 1, scrolls: 1, windowStart: ok.windowStart },
-    ])
-      expect(countsRewriteSchema.safeParse(bad).success).toBe(false);
-  });
+describe('the worker’s files', () => {
   it('the install root is under the home directory’s local share', () => {
     expect(camoufoxRootDir('/home/op')).toBe('/home/op/.local/share/get-me-there/camoufox');
     expect(START_REFUSAL_FILE).toBe('start-refusal.json');

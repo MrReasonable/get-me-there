@@ -372,7 +372,7 @@ describe('every start of the worker is done only once the worker answers (spec Â
     expect(m.io.stdout).not.toContain('start: done');
   });
 
-  it('workerStart (browser install and counts, consent, update, setup) ends with the wait; a refused check plans nothing', async () => {
+  it('workerStart (browser install, consent, update, setup) ends with the wait; a refused check plans nothing', async () => {
     const m = await world();
     m.state.oldAlive = false;
     const worker = workerEntry(m.deps);

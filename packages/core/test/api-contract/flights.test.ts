@@ -80,8 +80,6 @@ const response = (pairs: unknown[]) => ({
   available: true,
   unavailableReason: null,
   refreshHours: 168,
-  monthlyPagesLeft: 1390,
-  runPages: 110,
   pagesPlanned: 1,
   reading: null,
   pairs,
@@ -168,12 +166,11 @@ describe('flightListsResponseSchema links (spec rev 55 §6.9)', () => {
   });
 });
 
-describe('flightListsResponseSchema runPages (ruling R-pages)', () => {
-  it("carries one run's browser pages, or null; never absent or negative", () => {
-    expect(flightListsResponseSchema.safeParse({ ...response([]), runPages: null }).success).toBe(true);
-    expect(flightListsResponseSchema.safeParse({ ...response([]), runPages: -1 }).success).toBe(false);
-    const { runPages: _r, ...without } = response([]);
-    expect(flightListsResponseSchema.safeParse(without).success).toBe(false);
+// why: spec rev 64: no month's pages left and no run's pages beside them; an answer still carrying either is refused
+describe('flightListsResponseSchema has no monthly pages', () => {
+  it('refuses monthlyPagesLeft and runPages', () => {
+    expect(flightListsResponseSchema.safeParse({ ...response([]), monthlyPagesLeft: 1 }).success).toBe(false);
+    expect(flightListsResponseSchema.safeParse({ ...response([]), runPages: 1 }).success).toBe(false);
   });
 });
 

@@ -283,8 +283,8 @@ export interface FlightListQuery {
 /**
  * What the read gave (spec rev 55 §5.1): the list (`listed`, the 30 cheapest flights in page order, the page's own
  * minimum, Cheapest-tab price, view read and option counts), or the error that stopped it. A query without airport
- * names fails closed (`parse`, reason `no-airport-names`) before any request; a monthly cap is thrown as
- * BudgetExceeded, as `fetchTile` throws it.
+ * names fails closed (`parse`, reason `no-airport-names`) before any request; a page cap is thrown as BudgetExceeded,
+ * as `fetchTile` throws it.
  */
 export type FlightListResult =
   | {

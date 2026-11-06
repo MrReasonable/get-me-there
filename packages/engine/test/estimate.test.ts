@@ -1,18 +1,15 @@
 import { AbortedError, apiContract, type Estimate, ProviderError } from '@gmt/core';
 import { describe, expect, it } from 'vitest';
-import { budgetFitFor, flightAllowanceOf, scheduleLoad } from '../src/budgetFit.js';
+import { budgetFitFor, scheduleLoad } from '../src/budgetFit.js';
 import { buildContext } from '../src/context.js';
 import {
   addPass,
-  browserPagesPlanned,
   estimateRemainingFor,
   estimateStart,
   flightWindowMarginSeconds,
-  monthlyPagesOf,
   withBlocked,
 } from '../src/estimate.js';
 import { lineKey } from '../src/lines.js';
-import { runsPerMonth } from '../src/scheduler/parseCron.js';
 import { buildSnapshot } from '../src/snapshot.js';
 import { confirmationNeeded } from '../src/start.js';
 import { engineWith, flightRows, rankedPairs, stubCamoufox, stubTravelpayouts } from './support/camoufox.js';
@@ -293,10 +290,9 @@ describe('parity and the overrun baseline (spec §8.1)', () => {
 });
 
 // Spec revision 55 §8.1 "Estimate" (WP20 Task 20.9): with camoufox in discovery the estimate carries the flight-list
-// step's `flightLists { pages, seconds }`: pages the least of 10 less the reusable date pairs, the monthly pages left
-// after the grid plan and the run's free calls left; seconds pages × (spacing + 40). Its seconds count in the total and
-// the browser window; its pages never in totalCalls, but in camoufox's calls for the soft confirmation, the monthly
-// pages and budgetFit. Without camoufox the stored estimate has no `flightLists` key.
+// step's `flightLists { pages, seconds }`: pages the least of 10 less the reusable date pairs and the run's free calls
+// left; seconds pages × (spacing + 40). Its seconds count in the total and the browser window; its pages never in
+// totalCalls. Without camoufox the stored estimate has no `flightLists` key.
 describe('the estimate flight line (spec rev 55 §8.1)', () => {
   /** A camoufox engine over `cells` one-page cells (with a flight capability) and its start-time estimate. */
   function flightEstimate(cells: number, o: Parameters<typeof engineWith>[1] = {}, saved = false) {
@@ -362,27 +358,14 @@ describe('the estimate flight line (spec rev 55 §8.1)', () => {
     expect(estimateStart(e.ctx, b.snapshot, b.cells, null).flightLists?.pages).toBe(10);
   });
 
-  it("names the browser worker's monthly page cap when it binds (4 pages left after a 100-page grid)", () => {
-    const { est } = flightEstimate(120, { monthlyCap: 104 });
-    expect(est.flightLists?.pages).toBe(4);
-    expect(est.assumptions).toContain("flights for 4 date pairs: the browser worker's monthly page cap");
-  });
-
   it("names the run's free-call limit when maxFreeCalls 105 binds after 100 grid pages", () => {
     const { est } = flightEstimate(100, { maxFreeCalls: 105 });
     expect(est.flightLists?.pages).toBe(5);
     expect(est.assumptions).toContain("flights for 5 date pairs: the run's free-call limit");
   });
 
-  it('21.6 review M4: when the month and the free calls tie (5 each after 100 grid pages) the monthly page cap is named, as before', () => {
-    const { est } = flightEstimate(100, { monthlyCap: 105, maxFreeCalls: 105 });
-    expect(est.flightLists?.pages).toBe(5);
-    expect(est.assumptions).toContain("flights for 5 date pairs: the browser worker's monthly page cap");
-    expect(est.assumptions.some((a) => a.includes('free-call limit'))).toBe(false);
-  });
-
-  it('names no cap when the pairs wanted all fit, the month and the free calls tied above them', () => {
-    const { est } = flightEstimate(100, { monthlyCap: 120, maxFreeCalls: 120 });
+  it('names no cap when the pairs wanted all fit the free calls left', () => {
+    const { est } = flightEstimate(100, { maxFreeCalls: 120 });
     expect(est.flightLists?.pairs).toBe(10);
     expect(est.assumptions.some((a) => a.startsWith('flights for'))).toBe(false);
   });
@@ -392,7 +375,7 @@ describe('the estimate flight line (spec rev 55 §8.1)', () => {
     const blockedTp = withBlocked(est, new Map());
     expect(blockedTp.flightLists).toEqual({ pairs: 10, pages: 10, seconds: 700, returns: false });
     expect(blockedTp.seconds).toBe(est.seconds);
-    const blocked = withBlocked(est, new Map([[lineKey('discovery', 'camoufox'), 'provider-month']]));
+    const blocked = withBlocked(est, new Map([[lineKey('discovery', 'camoufox'), 'provider-execution']]));
     expect(blocked.flightLists).toEqual({ pairs: 0, pages: 0, seconds: 0, returns: false });
     expect(blocked.seconds).toBe(0);
     const twice = addPass(est, est);
@@ -400,42 +383,17 @@ describe('the estimate flight line (spec rev 55 §8.1)', () => {
     expect(twice.seconds).toBe(2 * est.seconds);
   });
 
-  it('counts the flight pages in camoufox calls for the soft confirmation: 100 + 10 of a 500 cap trips the share', () => {
-    const { e, est } = flightEstimate(120, { monthlyCap: 500 });
-    const need = confirmationNeeded(e.ctx, est, new Set(), { pence: null, calls: null });
-    expect(need?.why).toEqual({
-      reason: 'call-share',
-      providerId: 'camoufox',
-      calls: 110,
-      cap: 500,
-      window: 'month',
-    });
-    const { flightLists: _none, ...gridOnly } = est;
-    expect(confirmationNeeded(e.ctx, gridOnly, new Set(), { pence: null, calls: null })).toBeNull();
+  // why: spec rev 64: the browser worker has no monthly cap, so its pages, flight pages included, ask no confirmation
+  it('asks no soft confirmation for the browser pages, flight pages included', () => {
+    const { e, est } = flightEstimate(120);
+    expect(confirmationNeeded(e.ctx, est, new Set(), { pence: null, calls: null })).toBeNull();
   });
 
-  it("one run's browser pages are the runnable camoufox lines' pages plus the flight pages (ruling R-pages)", () => {
-    const { est } = flightEstimate(15);
-    expect(browserPagesPlanned(est)).toBe(25);
-    const { flightLists: _none, ...gridOnly } = est;
-    expect(browserPagesPlanned(gridOnly)).toBe(15);
-    // a blocked camoufox line, or none at all, plans no browser pages for the run
-    const blocked = {
-      ...est,
-      perProvider: est.perProvider.map((p) => ({ ...p, blocked: 'monthly-cap' as const })),
-    };
-    expect(browserPagesPlanned(blocked)).toBeNull();
-    expect(browserPagesPlanned({ perProvider: [] })).toBeNull();
-  });
-
-  it("counts them in the browser worker's monthly pages and in budgetFit's month", () => {
-    const { e, est } = flightEstimate(15, { scheduleCron: '0 5 * * 1' });
-    expect(monthlyPagesOf(e.ctx, est, null)?.planned).toBe(25);
+  it('budgetFit lists no month scope for the browser worker, which has no cap on its month', () => {
+    const { e } = flightEstimate(15, { scheduleCron: '0 5 * * 1' });
     const fit = budgetFitFor(e.ctx, e.definition, e.definition.id);
-    const runs = runsPerMonth('0 5 * * 1', 'Europe/London', new Date(T0));
-    expect(fit.perScope.find((x) => x.scope === 'provider-month:camoufox')?.estimated).toBe(
-      Math.ceil(runs * 25),
-    );
+    expect(fit.perScope.some((x) => x.scope === 'provider-month:camoufox')).toBe(false);
+    expect(fit.fits).toBe(true);
   });
 
   it('estimateRemaining counts the planned cells with no row yet', async () => {
@@ -472,31 +430,23 @@ describe('the estimate flight line (spec rev 55 §8.1)', () => {
     for (let i = 0; i < n; i++) insert.run(at, at);
   }
 
-  it("R-load: a schedule's load counts its full flight allowance a run, even with the month spent", () => {
-    // why: 15 of a 30-page month are spent, so this run's grid (15) leaves none for flights; a schedule still needs
-    // 10 flight pages on every run it makes
-    const { e, b } = flightEstimate(15, { monthlyCap: 30, scheduleCron: '0 5 * * 1' });
-    spendPages(e, 15);
-    expect(estimateStart(e.ctx, b.snapshot, b.cells, null).flightLists?.pages).toBe(0);
-    const fit = budgetFitFor(e.ctx, e.definition, e.definition.id);
-    const runs = runsPerMonth('0 5 * * 1', 'Europe/London', new Date(T0));
-    expect(fit.perScope.find((x) => x.scope === 'provider-month:camoufox')?.estimated).toBe(
-      Math.ceil(runs * 25),
-    );
-    expect(fit.perScope.find((x) => x.scope.startsWith('execution-free-calls'))?.estimated).toBe(25);
+  it('pages already loaded this month leave the flight line whole', () => {
+    const { e, b } = flightEstimate(15);
+    spendPages(e, 2000);
+    expect(estimateStart(e.ctx, b.snapshot, b.cells, null).flightLists?.pages).toBe(10);
   });
 
   it('never says "+ flights for up to 0 date pairs"; a cap that leaves none is still named', () => {
-    const { est } = flightEstimate(15, { monthlyCap: 15 });
+    const { est } = flightEstimate(15, { maxFreeCalls: 15 });
     expect(est.flightLists).toEqual({ pairs: 0, pages: 0, seconds: 0, returns: false });
     expect(est.assumptions.some((a) => a.startsWith('+ flights'))).toBe(false);
-    expect(est.assumptions).toContain("flights for 0 date pairs: the browser worker's monthly page cap");
+    expect(est.assumptions).toContain("flights for 0 date pairs: the run's free-call limit");
   });
 
   it('withBlocked drops the flight notes when it zeroes the flight pages', () => {
-    const { est } = flightEstimate(120, { monthlyCap: 104 });
+    const { est } = flightEstimate(120, { maxFreeCalls: 104 });
     expect(est.assumptions.filter((a) => a.includes('flights for'))).toHaveLength(2);
-    const blocked = withBlocked(est, new Map([[lineKey('discovery', 'camoufox'), 'provider-month']]));
+    const blocked = withBlocked(est, new Map([[lineKey('discovery', 'camoufox'), 'provider-execution']]));
     expect(blocked.assumptions.filter((a) => a.includes('flights for'))).toEqual([]);
   });
 
@@ -509,10 +459,9 @@ describe('the estimate flight line (spec rev 55 §8.1)', () => {
   });
 });
 
-// Spec rev 56 §8.1 "Estimate" (R-estimate; ruling D6; R-low-pages): with the worker's RETURN_SELECT_VERIFIED the flight
+// Spec rev 56 §8.1 "Estimate" (R-estimate; ruling D6): with the worker's RETURN_SELECT_VERIFIED the flight
 // line plans each pair out and back: typically 1.5 pages and 245 s (165 s without the booking read), at most 2 pages and
-// 300 s (220 s); the month's pages bound the pairs planned out and back (floor(M / 2)), the rest outbound-only up to
-// what the pages allow; free calls count requests (one a pair). Exact fits at the defaults (90 s page, 30 s spacing).
+// 300 s (220 s); free calls count requests (one a pair). Exact fits at the defaults (90 s page, 30 s spacing).
 describe('the estimate flight line with the return leg (spec rev 56 §8.1)', () => {
   const BOTH = { RETURN_SELECT_VERIFIED: true, BOOKING_SELECT_VERIFIED: true };
   function returnsEstimate(
@@ -616,55 +565,6 @@ describe('the estimate flight line with the return leg (spec rev 56 §8.1)', () 
     expect(est.flightLists).toMatchObject({ pairs: 10, pagesMax: 20, secondsMax: 3000, returns: true });
   });
 
-  // why: final review B-M4: the engine sends a return phase while the month leaves 2 pages, and a phase that needs no
-  // second outbound loads 1, so M pages left read up to M date pairs: all but the last out and back, the pages still at
-  // most M (D6's pairs at 2 pages each understated the pairs a run can read)
-  it('the month bounds the pages, not the pairs: at 1, 2, 3 and 5 pages left, up to 1, 2, 3 and 5 date pairs', () => {
-    // why: 15 grid pages of a 16-, 17-, 18- and 20-page month leave 1, 2, 3 and 5 pages for flights
-    const one = returnsEstimate(15, BOTH, { monthlyCap: 16 }).est;
-    // why: 21.7 code I1: with no pair out and back the line states no return leg (`returns: outAndBack > 0`); the bound
-    // stays, since the plan still reads the return leg wherever the pages allow (R-load reads it)
-    expect(one.flightLists).toEqual({
-      pairs: 1,
-      pages: 1,
-      seconds: 70,
-      pagesMax: 1,
-      secondsMax: 70,
-      returns: false,
-    });
-    expect(one.assumptions).toContain('+ flights for up to 1 date pair, about 1 minute');
-    expect(one.assumptions).toContain("flights for 1 date pair: the browser worker's monthly page cap");
-    const two = returnsEstimate(15, BOTH, { monthlyCap: 17 }).est;
-    expect(two.flightLists).toEqual({
-      pairs: 2,
-      pages: 2,
-      seconds: 315,
-      pagesMax: 2,
-      secondsMax: 370,
-      returns: true,
-    });
-    expect(two.assumptions).toContain(
-      "flights for 1 date pair out and back, 1 outbound only: the browser worker's monthly page cap",
-    );
-    const three = returnsEstimate(15, BOTH, { monthlyCap: 18 }).est;
-    expect(three.flightLists).toEqual({
-      pairs: 3,
-      pages: 3,
-      seconds: 560,
-      pagesMax: 3,
-      secondsMax: 670,
-      returns: true,
-    });
-    expect(three.assumptions).toContain(
-      "flights for 2 date pairs out and back, 1 outbound only: the browser worker's monthly page cap",
-    );
-    const five = returnsEstimate(15, BOTH, { monthlyCap: 20 }).est;
-    expect(five.flightLists).toMatchObject({ pairs: 5, pagesMax: 5, returns: true });
-    expect(five.assumptions.find((a) => a.startsWith('+ flights, out and back'))).toMatch(
-      /^\+ flights, out and back, for up to 5 date pairs: usually about 5 pages and \d+ minutes, at most 5 pages and/,
-    );
-  });
-
   it('the free-call bound counts requests: maxFreeCalls 105 after 100 grid pages plans 5 pairs out and back', () => {
     const { est } = returnsEstimate(100, BOTH, { maxFreeCalls: 105 });
     expect(est.flightLists).toEqual({
@@ -679,9 +579,9 @@ describe('the estimate flight line with the return leg (spec rev 56 §8.1)', () 
   });
 
   it('a blocked browser line drops the out-and-back clause and the cap note', () => {
-    const { est } = returnsEstimate(15, BOTH, { monthlyCap: 18 });
+    const { est } = returnsEstimate(15, BOTH, { maxFreeCalls: 18 });
     expect(est.assumptions.filter((a) => a.includes('flights'))).toHaveLength(2);
-    const blocked = withBlocked(est, new Map([[lineKey('discovery', 'camoufox'), 'provider-month']]));
+    const blocked = withBlocked(est, new Map([[lineKey('discovery', 'camoufox'), 'provider-execution']]));
     expect(blocked.assumptions.filter((a) => a.includes('flights'))).toEqual([]);
     // why: 21.7 code I1: a blocked line reads no pair, so none goes out and back; its bound is kept (the plan's)
     expect(blocked.flightLists).toEqual({
@@ -694,30 +594,21 @@ describe('the estimate flight line with the return leg (spec rev 56 §8.1)', () 
     });
   });
 
-  it('21.7 code I1: a schedule whose month leaves no pair out and back still loads 2 pages a pair (R-load)', () => {
-    const { b, est } = returnsEstimate(15, BOTH, { monthlyCap: 16 });
-    expect(est.flightLists?.returns).toBe(false);
-    // why: the load is the schedule's full allowance, whatever this month has left: 2 pages a pair with the return leg
-    expect(flightAllowanceOf(est, b.snapshot)).toBe(Math.min(20, b.snapshot.budget.flightListPages ?? 0));
-    expect(flightAllowanceOf(returnsEstimate(15, { RETURN_SELECT_VERIFIED: false }).est, b.snapshot)).toBe(
-      Math.min(10, b.snapshot.budget.flightListPages ?? 0),
-    );
-  });
-
   it('21.7 code I1: summing a pass with no pair out and back keeps its bound and states no return leg', () => {
-    const one = returnsEstimate(15, BOTH, { monthlyCap: 16 }).est;
-    expect(addPass(one, one).flightLists).toEqual({
-      pairs: 2,
-      pages: 2,
-      seconds: 140,
-      pagesMax: 2,
-      secondsMax: 140,
+    // why: no free call left after the 15 grid pages: no pair is read, so none goes out and back
+    const none = returnsEstimate(15, BOTH, { maxFreeCalls: 15 }).est;
+    expect(addPass(none, none).flightLists).toEqual({
+      pairs: 0,
+      pages: 0,
+      seconds: 0,
+      pagesMax: 0,
+      secondsMax: 0,
       returns: false,
     });
   });
 
-  it('addPass sums every figure; the bound counts in the soft confirmation and the monthly pages', () => {
-    const { e, est } = returnsEstimate(15, BOTH);
+  it('addPass sums every figure', () => {
+    const { est } = returnsEstimate(15, BOTH);
     expect(addPass(est, est).flightLists).toEqual({
       pairs: 20,
       pages: 30,
@@ -726,8 +617,6 @@ describe('the estimate flight line with the return leg (spec rev 56 §8.1)', () 
       secondsMax: 6000,
       returns: true,
     });
-    expect(browserPagesPlanned(est)).toBe(35);
-    expect(monthlyPagesOf(e.ctx, est, null)?.planned).toBe(35);
   });
 
   it('D5: the browser window carries one return-phase request (780 s, 600 s without the booking read) as margin', () => {
@@ -741,7 +630,7 @@ describe('the estimate flight line with the return leg (spec rev 56 §8.1)', () 
     // why: final review B-M3: with the flags unread the margin is the bound's, the booking read included
     const unread = returnsEstimate(15, null);
     expect(flightWindowMarginSeconds(unread.e.ctx, unread.est, null)).toBe(780);
-    const none = returnsEstimate(15, BOTH, { monthlyCap: 15 });
+    const none = returnsEstimate(15, BOTH, { maxFreeCalls: 15 });
     expect(flightWindowMarginSeconds(none.e.ctx, none.est, null)).toBe(0);
   });
 

@@ -2,7 +2,11 @@
 export type PlanId = 'trial' | '40usd';
 
 export interface ProviderLimits {
-  monthlyCallCap: number;
+  /**
+   * The calls the provider may make in its window, or null for none (camoufox: its pages are bounded by the per-run page
+   * cap and the page spacing, never by a month's count; spec §2).
+   */
+  monthlyCallCap: number | null;
   window: 'month' | 'lifetime';
   billingDay: number;
   ratePerMinute: number;
@@ -21,10 +25,12 @@ export interface ProviderLimits {
   minSpacingSeconds?: number;
   /** Pages-only counting (camoufox): ledger rows of class `no-page` count toward neither page cap (spec §5.3 rev 32). */
   pagesOnly?: true;
-  /** camoufox grid (spec §2 rev 34): the scroll clicks a run may make, and a calendar month; the guard sums them. */
+  /** camoufox grid (spec §2 rev 34): the scroll clicks a run may make; the guard sums them. */
   executionScrollCap?: number;
-  monthlyScrollCap?: number;
 }
+
+/** A provider's limits with a call cap on its window (SearchApi, Travelpayouts and the fixture). */
+export type CappedProviderLimits = ProviderLimits & { monthlyCallCap: number };
 
 export const PENCE_TO_MICRO = 10_000;
 
@@ -33,7 +39,7 @@ export function microGbpToPence(micro: number): number {
   return Math.ceil(micro / PENCE_TO_MICRO);
 }
 
-export type PlanPreset = ProviderLimits & {
+export type PlanPreset = CappedProviderLimits & {
   monthlySpendCapMicroGbp: number;
   executionMaxCalls: number;
   executionMaxCostMicroGbp: number;
@@ -76,7 +82,7 @@ export const PLAN_PRESETS: Record<PlanId, PlanPreset> = {
 };
 
 /** Spec §12: Travelpayouts is free; the caps are self-imposed politeness limits. */
-export const TRAVELPAYOUTS_DEFAULTS: ProviderLimits = {
+export const TRAVELPAYOUTS_DEFAULTS: CappedProviderLimits = {
   monthlyCallCap: 50_000,
   window: 'month',
   billingDay: 1,

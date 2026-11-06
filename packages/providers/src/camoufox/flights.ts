@@ -12,8 +12,7 @@
  * return read (`returns`); http-kit itself holds its next camoufox start until the answer's `nextLoadNotBefore`, from
  * any answer that states it (`nextStartOf`, a failed or refused one too), and the answer's `pagesLoaded` reaches only
  * the ledger (`pageCountOf`); neither is on the result. A flight list builds no price and no
- * verdict; it never says "verified". Every non-2xx answer is a `list-error` through `classifyWorkerAnswer`, but the
- * worker's monthly cap, which is thrown as BudgetExceeded, as `fetchTile` throws it.
+ * verdict; it never says "verified". Every non-2xx answer is a `list-error` through `classifyWorkerAnswer`.
  */
 import {
   type CapabilityInfo,

@@ -13,7 +13,6 @@ import {
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ACCOUNT_COOKIE_NAMES } from '../src/accountCookies.js';
 import { CooldownStore } from '../src/cooldown.js';
-import { type MonthlyCaps, MonthlyCounter } from '../src/monthly.js';
 import { Pacer } from '../src/pacer.js';
 import { Refusal } from '../src/refusal.js';
 import { SELECTORS, type Selectors, selectorsFor } from '../src/selectors.js';
@@ -67,8 +66,6 @@ function setup(
     /** Replaces the fake launch (fix round 1: a launch that never resolves). */
     launch?: () => Promise<FakeContext>;
     pollMs?: number;
-    /** The worker's monthly caps (decision 82); the defaults' when absent. */
-    monthly?: MonthlyCaps;
     /** The capture's value, in place of the stored one (review X1: a value that is not a rejection). */
     socsValue?: string;
   } = {},
@@ -82,11 +79,6 @@ function setup(
   const contexts: FakeContext[] = [];
   const cooldown = new CooldownStore({ dir: dataDir, challengeHours: 48, clock });
   const pacer = new Pacer({ dir: dataDir, minSpacingSeconds: 30, clock });
-  const monthly = new MonthlyCounter({
-    dir: dataDir,
-    caps: o.monthly ?? { pages: 1500, scrolls: 6000, billingDay: 1 },
-    clock,
-  });
   const refusal = new Refusal({ dir: dataDir, clock });
   const launches = { count: 0 };
   const make = (): PageSession =>
@@ -115,7 +107,6 @@ function setup(
       socs: { ...loadSocs(dataDir, clock), ...(o.socsValue === undefined ? {} : { value: o.socsValue }) },
       cooldown,
       pacer,
-      monthly,
       refusal,
       clock,
       timers,
@@ -134,7 +125,6 @@ function setup(
     contexts,
     cooldown,
     pacer,
-    monthly,
     refusal,
     launches,
     session: make(),
@@ -564,95 +554,16 @@ describe('PageSession (spec §2; brief Task 14.4)', () => {
     });
     expect(t.contexts).toEqual([]);
   });
-  // why: decision 82 (Task 17.3): the month's caps for every caller, admitted and written before anything loads
-  it('the page is reserved in monthly.json before it loads, and settles after it', async () => {
-    const seen: unknown[] = [];
-    const t = setup({
-      shape: () => {
-        seen.push(JSON.parse(readFileSync(join(t.dataDir, 'monthly.json'), 'utf8')));
-      },
-    });
-    expect((await t.session.page(REQ)).answer.kind).toBe('cells');
-    const october = {
-      windowStart: '2026-10-01T00:00:00.000Z',
-      windowEnd: '2026-11-01T00:00:00.000Z',
-      pages: 1,
-      scrolls: 0,
-    };
-    expect(seen).toEqual([october]);
-    expect(JSON.parse(readFileSync(join(t.dataDir, 'monthly.json'), 'utf8'))).toEqual(october);
-  });
-  it('a browser that fails after admission leaves the reservation on disk (a crash over-counts)', async () => {
-    const t = setup({
-      launch: async () => {
-        throw new Error('the browser died');
-      },
-    });
-    expect((await t.session.page(REQ)).answer.kind).toBe('browser-error');
-    expect(JSON.parse(readFileSync(join(t.dataDir, 'monthly.json'), 'utf8'))).toMatchObject({ pages: 1 });
-  });
-  it('the page cap refuses before any load, answering monthly-cap, the counts unchanged', async () => {
-    const t = setup({ monthly: { pages: 0, scrolls: 6000, billingDay: 1 } });
-    expect(await t.session.page(REQ)).toEqual({
-      answer: { kind: 'monthly-cap', cap: 0, used: 0, windowEnd: '2026-11-01T00:00:00.000Z' },
-      googleContacted: false,
-    });
-    expect(t.contexts).toEqual([]);
-    expect(existsSync(join(t.dataDir, 'monthly.json'))).toBe(false);
-    expect(released(t)).toBe(true);
-  });
-  // why: W3: a counts file the worker cannot read is its own answer, never a cap reached, and waiting does not end it
-  it('an unreadable or missing counts file refuses every page as counts-unreadable, nothing loads and the file is untouched', async () => {
+  // why: spec rev 64: the worker keeps no monthly count: a page loads beside an earlier worker's counts file and leaves
+  // it as it is
+  it('a page loads beside an earlier worker’s counts file, which it never reads or writes', async () => {
     const t = setup();
     writeFileSync(join(t.dataDir, 'pacer.json'), '{"lastPageAt":"2026-10-18T03:00:00.000Z"}', {
       mode: 0o600,
     });
-    expect(await t.session.page(REQ)).toEqual({
-      answer: { kind: 'counts-unreadable', problem: 'missing' },
-      googleContacted: false,
-    });
     writeFileSync(join(t.dataDir, 'monthly.json'), 'garbled', { mode: 0o600 });
-    expect(await t.session.page(REQ)).toEqual({
-      answer: { kind: 'counts-unreadable', problem: 'unreadable' },
-      googleContacted: false,
-    });
-    expect(t.contexts).toEqual([]);
+    expect((await t.session.page(REQ)).answer.kind).toBe('cells');
     expect(readFileSync(join(t.dataDir, 'monthly.json'), 'utf8')).toBe('garbled');
-  });
-  it('counts that cannot be written answer a fatal browser-error before any load; a failed settle only logs', async () => {
-    const t = setup();
-    const write = vi.spyOn(MonthlyCounter.prototype, 'write').mockImplementation(() => {
-      throw new Error('disk full');
-    });
-    try {
-      expect(await t.session.page(REQ)).toEqual({
-        answer: { kind: 'browser-error', stage: 'read', detail: 'monthly counts unwritable: disk full' },
-        googleContacted: false,
-        fatal: true,
-      });
-      expect(t.contexts).toEqual([]);
-      expect(released(t)).toBe(true);
-    } finally {
-      write.mockRestore();
-    }
-    const log = memoryLog();
-    const u = setup({ log });
-    const settle = vi.spyOn(MonthlyCounter.prototype, 'settle').mockImplementation(() => {
-      throw new Error('disk full');
-    });
-    try {
-      expect((await u.session.page(REQ)).answer.kind).toBe('cells');
-      expect(log.lines.some((l) => l.msg === 'monthly counts not settled')).toBe(true);
-    } finally {
-      settle.mockRestore();
-    }
-  });
-  it('a refusal by the spacing writes no reservation', async () => {
-    const t = setup();
-    await t.session.page(REQ);
-    const before = readFileSync(join(t.dataDir, 'monthly.json'), 'utf8');
-    expect((await t.session.page(REQ)).answer.kind).toBe('spacing');
-    expect(readFileSync(join(t.dataDir, 'monthly.json'), 'utf8')).toBe(before);
   });
   // why: decision 75 (Task 17.2): a partly verified entry runs on exactly its own flags, through selectorsFor
   it('linux-arm64 with only the form and results verified: no grid page, no no_data from a no-flights page, no Cheapest click', async () => {
@@ -1074,7 +985,7 @@ describe('every stop names the rule that made it', () => {
 });
 
 // Spec revision 55 §2 "The flight-list read" (WP20 Task 20.7): a flights page is a list page under every rule of one
-// (the cool-down, the month's admission, the pacer, the reservation before the load, the GBP check, the Cheapest flow's
+// (the cool-down, the pacer, the GBP check, the Cheapest flow's
 // fall-back and no-options-read); only its reader and its answer differ. The names are the fake page's synthetic ones.
 describe('PageSession in flights mode (spec rev 55 §2)', () => {
   const FREQ: FlightsRequest = {
@@ -1176,32 +1087,21 @@ describe('PageSession in flights mode (spec rev 55 §2)', () => {
     });
     expect(ctx0(t).closed).toBe(1);
   });
-  it('runs every gate a list page runs, in order, before the load: grid gate skipped, cool-down, month, pacer, reservation', async () => {
+  it('runs every gate a list page runs, in order, before the load: grid gate skipped, cool-down, pacer', async () => {
     // the grid gate does not apply: no grid settings, and the page still loads
-    const seen: unknown[] = [];
-    const g = setup({
-      shape: () => {
-        seen.push(JSON.parse(readFileSync(join(g.dataDir, 'monthly.json'), 'utf8')));
-      },
-    });
+    const g = setup();
     expect((await g.session.page(FREQ)).answer.kind).toBe('flights');
-    // the reservation was on disk when the browser launched
-    expect(seen).toEqual([expect.objectContaining({ pages: 1 })]);
-    // a cool-down answers before the month's cap is read
-    const a = setup({ monthly: { pages: 0, scrolls: 6000, billingDay: 1 } });
+    // a cool-down answers before the pacer claims
+    const a = setup();
     a.cooldown.start('captcha');
     expect((await a.session.page(FREQ)).answer.kind).toBe('cooling-down');
-    // the month's cap answers before the pacer claims
-    const b = setup({ monthly: { pages: 0, scrolls: 6000, billingDay: 1 } });
-    expect((await b.session.page(FREQ)).answer.kind).toBe('monthly-cap');
-    expect(b.pacer.claim().ok).toBe(true);
-    for (const x of [a, b]) expect(x.contexts).toEqual([]);
-    // the pacer refuses before the reservation: a second page inside the spacing reserves nothing and opens nothing
+    expect(a.pacer.claim().ok).toBe(true);
+    expect(a.contexts).toEqual([]);
+    // a second page inside the spacing opens nothing
     const c = setup();
     expect((await c.session.page(FREQ)).answer.kind).toBe('flights');
     c.clock.advance(5000);
     expect((await c.session.page(FREQ)).answer).toEqual({ kind: 'spacing', retryAfterSeconds: 21 });
-    expect(JSON.parse(readFileSync(join(c.dataDir, 'monthly.json'), 'utf8'))).toMatchObject({ pages: 1 });
     expect(ctx0(c).pages).toHaveLength(1);
   });
   it('a second request during a page answers spacing, nothing more opened', async () => {

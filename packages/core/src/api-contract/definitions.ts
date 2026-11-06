@@ -261,8 +261,8 @@ export const billedCallsSchema = z.strictObject({
 /**
  * Both estimate routes return the estimate with its budget fit, so the form shows both before the create click, and
  * what the estimate asks (spec §10, §8.1 rev 55): the date pairs, how many the plan covers fully or partly (planned
- * cells only) and how many are reused apart, whether the press confirms the run, the billed calls and the browser
- * worker's month (flight pages included). The estimate carries `flightLists` when camoufox is named (Task 20.9).
+ * cells only) and how many are reused apart, whether the press confirms the run and the billed calls. The estimate
+ * carries `flightLists` when camoufox is named (Task 20.9).
  */
 export const estimateResponseSchema = z.object({
   estimate: estimateSchema,
@@ -273,7 +273,6 @@ export const estimateResponseSchema = z.object({
   datePairsReused: positiveInt,
   softConfirm: softConfirmSchema.nullable(),
   billedCalls: z.array(billedCallsSchema),
-  monthlyPages: z.strictObject({ planned: positiveInt, left: positiveInt }).nullable(),
 });
 export const definitionResponseSchema = z.object({
   ...storedFields,

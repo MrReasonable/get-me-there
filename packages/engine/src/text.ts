@@ -2,7 +2,6 @@ import {
   type BudgetExceeded,
   type BudgetScopeKind,
   formatPence,
-  type IsoDateTime,
   microGbpToPence,
   type ProviderId,
   stripControlChars,
@@ -26,8 +25,8 @@ export function scopeName(
   unit: CapUnit = 'calls',
 ): string {
   const p = providerId ?? 'the provider';
-  if (unit === 'scrolls')
-    return scope === 'provider-execution' ? `${p}'s scroll cap for this run` : `${p}'s monthly scroll cap`;
+  // why: a run's own scroll cap is the only one (spec §2)
+  if (unit === 'scrolls') return `${p}'s scroll cap for this run`;
   switch (scope) {
     case 'execution-calls':
       return "this run's billed-call cap";
@@ -53,23 +52,17 @@ export function scopeAmount(scope: BudgetScopeKind, n: number, unit: CapUnit = '
   return `${n} ${n === 1 ? 'call' : 'calls'}`;
 }
 
-/**
- * A BudgetExceeded in one sentence: breachText for this app's own caps; for the browser worker's own monthly caps
- * (decision 82; W3), named as the worker's, counting every app and recording that uses it, with the worker's figures.
- */
+/** A BudgetExceeded in one sentence (breachText over its own figures). */
 export function budgetText(e: BudgetExceeded, needsLabel: string): string {
-  if (e.counter !== 'worker')
-    return breachText(
-      e.scope,
-      e.providerId ?? null,
-      e.cap,
-      e.current,
-      e.requested,
-      needsLabel,
-      e.unit ?? 'calls',
-    );
-  const unit = e.unit === 'scrolls' ? 'scrolls' : 'pages';
-  return `the browser worker's monthly ${unit === 'scrolls' ? 'scroll' : 'page'} cap, counting every app and recording that uses it, is ${e.cap.toLocaleString('en-GB')} ${unit}; the worker counts ${e.current.toLocaleString('en-GB')} ${unit} used`;
+  return breachText(
+    e.scope,
+    e.providerId ?? null,
+    e.cap,
+    e.current,
+    e.requested,
+    needsLabel,
+    e.unit ?? 'calls',
+  );
 }
 
 /** "this run's billed-call cap is 50 calls; 50 calls used; the next call needs 1 call" in one sentence. */

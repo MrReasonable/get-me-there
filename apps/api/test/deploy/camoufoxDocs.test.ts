@@ -59,7 +59,7 @@ describe('docs/setup.md section 14 (the Camoufox provider)', () => {
     expect(section).not.toMatch(/CAMOUFOX_WORKER_KEY=[0-9a-f]/);
     expect(section).not.toContain('docker0');
   });
-  it('WP17 Task 17.10: gmt setup’s browser row, its order, resuming, no display, Linux, the monthly caps, sizes and key rotation', () => {
+  it('WP17 Task 17.10: gmt setup’s browser row, its order, resuming, no display, Linux, sizes and key rotation', () => {
     const f = flat(section);
     for (const w of [
       '### Set it up',
@@ -72,7 +72,6 @@ describe('docs/setup.md section 14 (the Camoufox provider)', () => {
       '### On a machine with no display',
       '### Linux',
       '`RestartPreventExitStatus=78`',
-      '### The monthly caps across every caller',
       '### Key rotation',
       '### Appendix: the manual steps',
       'never as a command-line argument and never in a ticket',
@@ -82,7 +81,6 @@ describe('docs/setup.md section 14 (the Camoufox provider)', () => {
       '### If you set the worker up by hand before',
       '### Capture your consent choice',
       'pnpm gmt browser install',
-      'pnpm gmt browser counts',
       'rm -rf ~/.local/share/get-me-there/camoufox',
       'without linger (section 0) it stops when you log out',
       'waits up to 270 s',
@@ -114,7 +112,7 @@ describe('docs/setup.md section 14 (the Camoufox provider)', () => {
   it('states every cost, the operator’s responsibility and the coverage arithmetic', () => {
     for (const c of COSTS) expect(section, c).toContain(c);
     expect(flat(section)).toContain(TERMS);
-    expect(flat(section)).toContain('100 a run and 1,500 a month, against 2,184 day pairs');
+    expect(flat(section)).toContain('100 a run, against 2,184 day pairs');
   });
 });
 

@@ -7,7 +7,7 @@ import { budgetConfig, limits } from './helpers/factories.js';
 import { guardFor, guardWithLedger } from './helpers/guard.js';
 
 // Spec revision 55 §8.1 (ruling A32): a flight-list page (`/v1/flights`) is a browser page with an allowance of its own
-// in the run (`budget.flightListPages`, outside CAMOUFOX_EXECUTION_PAGE_CAP) and inside the provider's monthly cap.
+// in the run (`budget.flightListPages`, outside CAMOUFOX_EXECUTION_PAGE_CAP); the provider has no monthly cap.
 
 const page = (executionId: string | null, endpointPath: string, tileIndex: number | null = null) => ({
   providerId: 'camoufox' as const,
@@ -57,7 +57,6 @@ describe('flight-list pages and the guard (spec rev 55 §8.1)', () => {
   it('100 grid pages and no flight page: a /v1/flights reserve still passes (the page cap is not the flight cap)', () => {
     const g = guardFor({
       camoufoxConfigCap: 100,
-      monthlyCap: 1500,
       snapshotCaps: { e1: { camoufox: 100 } },
       snapshotFlightPages: { e1: 10 },
     });
@@ -118,24 +117,13 @@ describe('flight-list pages and the guard (spec rev 55 §8.1)', () => {
     expect(() => g.reserve(grid('e1', 0))).not.toThrow();
   });
 
-  it('a reserve with no execution and /v1/flights is checked at provider-month only', () => {
-    const g = guardFor({ camoufoxConfigCap: 100, monthlyCap: 2, snapshotCaps: { e1: { camoufox: 100 } } });
-    expect(() => g.reserve(flights(null))).not.toThrow();
-    expect(() => g.reserve(flights(null))).not.toThrow();
-    expect(scopeOf(() => g.reserve(flights(null)))).toBe('provider-month');
-  });
-
-  it('flight pages count toward the monthly cap beside grid pages', () => {
-    const g = guardFor({
-      camoufoxConfigCap: 100,
-      monthlyCap: 3,
-      snapshotCaps: { e1: { camoufox: 100 } },
-      snapshotFlightPages: { e1: 10 },
+  it('a reserve with no execution and /v1/flights checks no run allowance and no month cap', () => {
+    const g = guardFor({ camoufoxConfigCap: 100, snapshotCaps: { e1: { camoufox: 100 } } });
+    for (let i = 0; i < 30; i++) g.reserve(flights(null)).finalise(done);
+    expect(g.usage({ kind: 'provider-month', providerId: 'camoufox' })).toMatchObject({
+      calls: 30,
+      cap: null,
     });
-    g.reserve(grid('e1', 0)).finalise(done);
-    g.reserve(flights('e1')).finalise(done);
-    g.reserve(flights('e1')).finalise(done);
-    expect(scopeOf(() => g.reserve(flights('e1')))).toBe('provider-month');
   });
 
   it('flight pages count against execution-free-calls', () => {
@@ -195,7 +183,7 @@ describe('page counts on the ledger (spec rev 56 §5.3, §7)', () => {
   // why: spec rev 56 §7 and providers' http-kit (attempt.ts): a socket failure after the worker was reached finalises
   // `error` with no status, no body and `pageClass 'page'`; with no answer it keeps the plan, never the guard's 1
   it('a 2-page request that reached the page and then failed on the socket keeps its plan of 2', () => {
-    const { g, db } = guardWithLedger({ ...caps, monthlyCap: 1500 });
+    const { g, db } = guardWithLedger(caps);
     g.reserve({ ...flights('e1'), pages: 2 }).finalise({
       outcome: 'error',
       durationMs: 1,
@@ -210,7 +198,7 @@ describe('page counts on the ledger (spec rev 56 §5.3, §7)', () => {
 
   // why: http-kit marks a refused connection `no-page` (nothing was sent): no page is recorded and none is counted
   it('a 2-page request that never connected records no page', () => {
-    const { g, db } = guardWithLedger({ ...caps, monthlyCap: 1500 });
+    const { g, db } = guardWithLedger(caps);
     g.reserve({ ...flights('e1'), pages: 2 }).finalise({
       outcome: 'error',
       durationMs: 1,
@@ -271,15 +259,8 @@ describe('page counts on the ledger (spec rev 56 §5.3, §7)', () => {
     expect(scopeOf(() => g.reserve(flights('e1')))).toBe('provider-execution');
   });
 
-  it('the monthly cap checks the planned pages: with 1 page left a reserve of 2 is refused at provider-month, a reserve of 1 passes', () => {
-    const g = guardFor({ ...caps, monthlyCap: 3 });
-    g.reserve({ ...flights('e1'), pages: 2 }).finalise({ ...done, pageCount: 2 });
-    expect(scopeOf(() => g.reserve({ ...flights('e1'), pages: 2 }))).toBe('provider-month');
-    expect(() => g.reserve(flights('e1'))).not.toThrow();
-  });
-
   it('usage reports the page sums: a row of 0 counts 0, of 2 counts 2, NULL counts 1, a no-page row 0', () => {
-    const g = guardFor({ ...caps, monthlyCap: 1500 });
+    const g = guardFor(caps);
     g.reserve({ ...flights('e1'), pages: 2 }).finalise({ ...done, pageCount: 0 });
     g.reserve({ ...flights('e1'), pages: 2 }).finalise({ ...done, pageCount: 2 });
     g.reserve({ ...flights('e1'), pages: 2 }).finalise(done);
@@ -306,7 +287,7 @@ describe('page counts on the ledger (spec rev 56 §5.3, §7)', () => {
   });
 
   it('21.6 review I2: a flights request cut off before any answer is out of the run allowance but in the month; a timeout is in both', () => {
-    const g = guardFor({ ...caps, monthlyCap: 1500 });
+    const g = guardFor(caps);
     const flightsOf = () =>
       g.usage({ kind: 'provider-execution', executionId: 'e1', providerId: 'camoufox' }).flightLists?.calls;
     const month = () => g.usage({ kind: 'provider-month', providerId: 'camoufox' }).calls;
@@ -334,10 +315,10 @@ describe('page counts on the ledger (spec rev 56 §5.3, §7)', () => {
     expect(scopeOf(() => g.reserve({ ...flights('e1'), pages: 2 }))).toBe('provider-execution');
   });
 
-  it('scrollsThisMonth is unchanged by page counts', () => {
+  it('the run’s scroll count is unchanged by page counts', () => {
     const g = guardFor(caps);
     g.reserve({ ...flights('e1'), pages: 2 }).finalise({ ...done, pageCount: 2 });
     g.reserve({ ...grid('e1', 0), scrolls: 3 }).finalise({ ...done, scrollCount: 3 });
-    expect(g.scrollsThisMonth('camoufox')).toBe(3);
+    expect(g.scrollsInExecution('camoufox', 'e1')).toBe(3);
   });
 });

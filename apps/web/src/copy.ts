@@ -9,7 +9,6 @@ import {
   type ExecutionStatus,
   type FigureBasis,
   FLIGHT_LIST_COUNT,
-  FLIGHT_LIST_PAGES_PER_PAIR_MAX,
   formatAgo,
   type MIXED_ERROR_REASON,
   mainPathSource,
@@ -502,7 +501,7 @@ export const COPY = {
     } satisfies Record<BlockedPage, string>,
     coolingDown: (until: string) => `cooling down until ${until}; Google was not contacted`,
     unavailable: 'browser worker not reachable',
-    note: `Off by default. Reads Google Flights in Camoufox, a Firefox-based browser you have installed, in its own signed-out profile, from your own IP address, one day pair a page, at most one page every 30 seconds. It prices at most the monthly page cap of day pairs a month (1,500 by default; ${EXAMPLE_PAIR_CELLS}), so most cells stay unsearched or skipped. Whenever a page is not a recognised results page (a challenge or verification page, a sign-in page, a consent page, or anything unrecognised) it stops and pauses (48 hours, or 1 hour for an unrecognised page). Read the provider's terms before enabling it; the operator is responsible for how it is used.`,
+    note: `Off by default. Reads Google Flights in Camoufox, a Firefox-based browser you have installed, in its own signed-out profile, from your own IP address, one day pair a page, at most one page every 30 seconds. It prices at most its page cap of day pairs a run (100 by default; ${EXAMPLE_PAIR_CELLS}), so most cells stay unsearched or skipped until later runs. Whenever a page is not a recognised results page (a challenge or verification page, a sign-in page, a consent page, or anything unrecognised) it stops and pauses (48 hours, or 1 hour for an unrecognised page). Read the provider's terms before enabling it; the operator is responsible for how it is used.`,
   },
   providersHeading: 'Providers',
   providerEnabled: 'configured',
@@ -760,6 +759,7 @@ export const COPY = {
       `flights read for ${done} of ${planned} date ${noun(planned, 'pair', 'pairs')}`,
     flightsRest: {
       window: "the rest were left: outside this run's browser window",
+      // why: spec rev 64: only a run stored before the browser's monthly caps were withdrawn ends this way
       'monthly-cap': "the rest were not read: the browser worker's monthly page limit",
       stopped: 'the rest were not read: a limit for this run',
       disabled: 'the rest were not read: the browser worker was paused for this run',
@@ -939,7 +939,6 @@ export const COPY = {
     bookingNoPairing: 'no return flight to read sellers for',
     // a skipped step's rule in words (the worker's bounded rule tokens; an unknown one is worded generally)
     skippedRule: {
-      'monthly-headroom': `fewer than ${FLIGHT_LIST_PAGES_PER_PAIR_MAX} browser pages left this month`,
       spacing: 'the wait between pages ran past its time',
       'not-cheapest-view': 'the list was not on its Cheapest view',
       'second-selection': 'the second outbound could not be selected',
@@ -959,11 +958,8 @@ export const COPY = {
     },
     // no list yet, and the read on demand (spec rev 55 §8.1, §11)
     notReadYet: 'Flights not read yet',
-    readButton: (pages: number, pagesLeft: string | null) =>
-      `Read flights for this date (free, ${pages === 1 ? '1 page' : `up to ${pages} pages`}${pagesLeft === null ? '' : `; ${pagesLeft} ${noun(pagesLeft, 'page', 'pages')} left this month`})`,
-    // R-low-pages: with fewer pages left this month than a read plans, the read is outbound-only, never refused
-    readOutboundOnly: (planned: number) =>
-      `Read flights for this date (free, 1 page; return leg not read: fewer than ${planned} pages left)`,
+    readButton: (pages: number) =>
+      `Read flights for this date (free, ${pages === 1 ? '1 page' : `up to ${pages} pages`})`,
     reading: 'Reading flights…',
     // what the block's live region says when a read here ends (finding 3)
     readDone: (dates: string) => `Flights read for ${dates}`,

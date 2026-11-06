@@ -509,7 +509,7 @@ describe('FlightListsRepo.insert with returns (spec rev 56 §7, migration 0012)'
 
   it('a return phase that ended with no attempt, and one with a transient booking read, read back whole', () => {
     const { repo, list, definitionId } = setup();
-    const skipped = ended('skipped', 'monthly-headroom');
+    const skipped = ended('skipped', 'spacing');
     repo.insert(list({ returns: skipped }));
     const noOutbound = ended('no-outbound', null);
     repo.insert(list({ ...D2, listed: 'no-flights', flights: [], returns: noOutbound }));

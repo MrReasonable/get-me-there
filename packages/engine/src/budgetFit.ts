@@ -3,7 +3,6 @@ import {
   budgetScopeLabel,
   type DefinitionSnapshot,
   FLIGHT_LIST_COUNT,
-  FLIGHT_LIST_PAGES_PER_PAIR_MAX,
   isScheduled,
   type ProviderId,
   type SearchDefinition,
@@ -27,7 +26,7 @@ export interface MonthlyLoad {
   perRun: Estimate;
   /** The schedule's snapshot, as a scheduled run would freeze it now (its providers and refresh hours). */
   snapshot: DefinitionSnapshot;
-  perProvider: Map<ProviderId, { calls: number; costMicroGbp: number; scrolls: number }>;
+  perProvider: Map<ProviderId, { calls: number; costMicroGbp: number }>;
 }
 
 /**
@@ -42,46 +41,21 @@ export function scheduleLoad(
   snapshot: DefinitionSnapshot,
   firings: number,
   hours: number,
-): Map<ProviderId, { calls: number; costMicroGbp: number; scrolls: number }> {
-  const load = new Map<ProviderId, { calls: number; costMicroGbp: number; scrolls: number }>();
+): Map<ProviderId, { calls: number; costMicroGbp: number }> {
+  const load = new Map<ProviderId, { calls: number; costMicroGbp: number }>();
   // why: a firing re-fetches discovery in full once the last fetch is older than 0.9 × refresh, so the load counts
   // whole discovery runs, never a fraction of one (cost M-3)
   const discoveryRuns = (id: ProviderId): number =>
     Math.min(firings, Math.ceil(hours / (REUSE_TOLERANCE * refreshHoursOf(snapshot, id))));
   for (const p of perRun.perProvider) {
     const factor = p.stage === 'discovery' ? discoveryRuns(p.providerId) : firings;
-    const acc = load.get(p.providerId) ?? { calls: 0, costMicroGbp: 0, scrolls: 0 };
+    const acc = load.get(p.providerId) ?? { calls: 0, costMicroGbp: 0 };
     load.set(p.providerId, {
       calls: acc.calls + p.calls * factor,
       costMicroGbp: acc.costMicroGbp + (ctx.limitsOf(p.providerId).billed ? p.costMicroGbp * factor : 0),
-      scrolls: acc.scrolls + (p.scrolls ?? 0) * factor,
     });
   }
-  // why: spec rev 55 §8.1 — the flight-list pages are browser pages of the month too, reused within the same refresh
-  // why: ruling R-load (20.9 review) — a schedule needs its full allowance on every run it makes; the pages the
-  // current month happens to have left cap one run's estimate, never the load of the runs to come
-  const flightPages = flightAllowanceOf(perRun, snapshot);
-  const browser = load.get('camoufox');
-  if (flightPages > 0 && browser !== undefined)
-    load.set('camoufox', { ...browser, calls: browser.calls + flightPages * discoveryRuns('camoufox') });
   return load;
-}
-
-/**
- * Spec rev 56 §8.1 (ruling R-load; R-estimate): the flight-list pages a scheduled run of `snapshot` needs, the bound of
- * its full allowance whenever its estimate carries a flight line, whatever the current month has left: 2 pages a pair
- * with the return leg (20), 1 without (10), never above the snapshot's `flightListPages`. The return leg is planned when
- * the line carries a bound (`pagesMax`), even when this month's pages send no pair out and back (`returns` false:
- * 21.7 code I1), so a nearly spent month never halves the load of the runs to come.
- */
-export function flightAllowanceOf(
-  perRun: Pick<Estimate, 'flightLists'>,
-  snapshot: Pick<DefinitionSnapshot, 'budget'>,
-): number {
-  if (perRun.flightLists === undefined) return 0;
-  const f = perRun.flightLists;
-  const perPair = f.returns === true || f.pagesMax !== undefined ? FLIGHT_LIST_PAGES_PER_PAIR_MAX : 1;
-  return Math.min(FLIGHT_LIST_COUNT * perPair, snapshot.budget.flightListPages ?? 0);
 }
 
 /**
@@ -197,8 +171,11 @@ export function budgetFitFor(
   const ids = new Set([...own.perProvider.keys(), ...others.flatMap((o) => [...o.perProvider.keys()])]);
   for (const id of ids) {
     const kind = ctx.limitsOf(id).capKind;
+    const cap = ctx.budget.usage({ kind, providerId: id }).cap;
+    // why: the fit lists caps; a window with no cap (camoufox's month, spec §2) always fits and has no row
+    if (cap === null) continue;
     const calls = [own, ...others].reduce((a, l) => a + (l.perProvider.get(id)?.calls ?? 0), 0);
-    scope({ kind, providerId: id }, calls, ctx.budget.usage({ kind, providerId: id }).cap);
+    scope({ kind, providerId: id }, calls, cap);
   }
   const fixed = [...ctx.providers.keys()]
     .filter((id) => ctx.limitsOf(id).billed)
@@ -208,34 +185,6 @@ export function budgetFitFor(
     0,
   );
   scope({ kind: 'global-month' }, fixed + cost, ctx.config.spend.monthlyCapMicroGbp);
-  // why: fix round 1 (CodeRabbit): `fits` reads the cap scopes only; the coverage line below is a warning
   const fits = perScope.every((x) => x.fits);
-  // why: spec §2 rev 32 (cost-011): a page-capped provider prices at most its monthly cap of cells, so a schedule whose
-  // every refresh needs more cells than that never covers its space; the line warns (it is not a cap scope the API
-  // refuses a schedule for).
-  for (const p of own.perRun.perProvider) {
-    if (p.stage !== 'discovery' || ctx.limitsOf(p.providerId).executionCallCap === null) continue;
-    const cap = ctx.limitsOf(p.providerId).monthlyCallCap;
-    perScope.push({
-      scope: `cells-per-refresh:${p.providerId}`,
-      estimated: own.perRun.cells,
-      cap,
-      fits: own.perRun.cells <= cap,
-    });
-  }
-  // why: fix round 1 (TS 4): camoufox grid's scrolls a month, against its monthly scroll cap, with every other schedule's;
-  // a warning like the coverage line (a page asks only for the scrolls the caps leave, so the cap shortens coverage
-  // and never stops a run)
-  for (const id of ids) {
-    const cap = ctx.limitsOf(id).monthlyScrollCap;
-    const scrolls = [own, ...others].reduce((a, l) => a + (l.perProvider.get(id)?.scrolls ?? 0), 0);
-    if (cap === null || scrolls === 0) continue;
-    perScope.push({
-      scope: `scrolls-per-month:${id}`,
-      estimated: Math.ceil(scrolls),
-      cap,
-      fits: scrolls <= cap,
-    });
-  }
   return { fits, runsPerMonth: own.runsPerMonth, perScope };
 }

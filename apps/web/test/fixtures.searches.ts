@@ -165,13 +165,10 @@ export const failedList = (reason: FlightListIn['reason'], over: Partial<FlightL
 
 /**
  * Whether a read would go now when the test does not say (final review B-I3: the api's `readNow`): a date pair with no
- * list, or a failed one that no monthly or per-run limit stopped, as the read button showed before `readNow`.
+ * list, or a failed one that no per-run limit stopped, as the read button showed before `readNow`.
  */
 function readNowOf(list: FlightPairIn['list']): boolean {
-  return (
-    list === null ||
-    (list.status === 'failed' && list.reason !== 'monthly-cap' && list.reason !== 'execution-cap')
-  );
+  return list === null || (list.status === 'failed' && list.reason !== 'execution-cap');
 }
 
 /** One asked date pair's entry: its figure's airports, its search link, its list and else another pair's list. */
@@ -198,8 +195,7 @@ export function flightPair(
 }
 
 /**
- * The answer for `pairs`, parsed by the contract: the worker set up, 1,390 pages left this month, one run of the search
- * using 110 browser pages (100 grid pages and 10 flight pages), nothing reading.
+ * The answer for `pairs`, parsed by the contract: the worker set up, nothing reading.
  */
 export function flightListsResponse(
   pairs: readonly FlightPairIn[],
@@ -209,8 +205,6 @@ export function flightListsResponse(
     available: true,
     unavailableReason: null,
     refreshHours: 24,
-    monthlyPagesLeft: 1390,
-    runPages: 110,
     // why: ruling D3: an outbound-only worker plans 1 page a read; the return-leg tests pass 2 (or rely on prov-008)
     pagesPlanned: 1,
     reading: null,

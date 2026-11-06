@@ -5,7 +5,6 @@ import {
   type DatePairFigure,
   type FlightLimits,
   flightLimitsOf,
-  groupThousands,
   type IsoDateTime,
   type LegTimes,
   type ListedFlight,
@@ -235,32 +234,12 @@ export function figureSource(p: Provenance, c: FlightCopy): string {
 }
 
 /**
- * The "; N pages left this month" clause's count (spec rev 55 §11; rulings A31, R-pages), grouped ("1,390"), or null:
- * shown only when the browser worker's month has fewer pages left than one run of this search uses, flight pages
- * included (`runPages`, from the search's own estimate); never without both figures.
+ * The read button's words (spec rev 56 §11; rulings D3, prov-008): the pages one read plans, as the flight-lists
+ * response states them (`pagesPlanned`: 2 with a return phase or while the worker's flags are unread, else 1), never a
+ * hard number.
  */
-export function pagesLeftClause(monthlyPagesLeft: number | null, runPages: number | null): string | null {
-  return monthlyPagesLeft !== null && runPages !== null && monthlyPagesLeft < runPages
-    ? groupThousands(monthlyPagesLeft)
-    : null;
-}
-
-/**
- * The read button's words (spec rev 56 §11; rulings D3, prov-008, R-low-pages): the pages one read plans, as the
- * flight-lists response states them (`pagesPlanned`: 2 with a return phase or while the worker's flags are unread, else
- * 1), never a hard number; with fewer pages left this month than it plans (but at least one) the read is outbound-only,
- * said as such and never refused (the month's clause is then that note); else the "; N pages left this month" clause
- * when the month is short of one run (`pagesLeftClause`).
- */
-export function readButtonWords(
-  pagesPlanned: number,
-  monthlyPagesLeft: number | null,
-  runPages: number | null,
-  c: FlightCopy,
-): string {
-  if (monthlyPagesLeft !== null && monthlyPagesLeft >= 1 && monthlyPagesLeft < pagesPlanned)
-    return c.readOutboundOnly(pagesPlanned);
-  return c.readButton(pagesPlanned, pagesLeftClause(monthlyPagesLeft, runPages));
+export function readButtonWords(pagesPlanned: number, c: FlightCopy): string {
+  return c.readButton(pagesPlanned);
 }
 
 /** "14 → 24 Mar", or "28 Mar → 7 Apr" across a month end: the link's name (spec rev 55 §11). */

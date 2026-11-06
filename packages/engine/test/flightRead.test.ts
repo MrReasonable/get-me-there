@@ -8,7 +8,6 @@ import {
   asIsoDate,
   asIsoDateTime,
   type BookingRead,
-  BudgetExceeded,
   type FlightLimits,
   type FlightListQuery,
   type FlightListResult,
@@ -258,12 +257,11 @@ describe('readFlightList reads', () => {
   it('a failing insert in a failure branch never rejects done: the failure is logged and recorded as fatal', async () => {
     const { e, reader } = setup({
       answer: () => {
-        throw new BudgetExceeded({
-          scope: 'provider-month',
+        throw new ProviderError({
+          kind: 'upstream',
+          retryable: false,
           providerId: 'camoufox',
-          cap: 10,
-          current: 10,
-          requested: 1,
+          message: 'synthetic',
         });
       },
     });
@@ -281,7 +279,7 @@ describe('readFlightList reads', () => {
     expect(e.logs.filter((l) => l.level === 'error').map((l) => [l.msg, l.fields])).toEqual([
       [
         'flight read: its failure could not be recorded',
-        { err: 'SQLITE_BUSY: database is locked (synthetic)', reason: 'monthly-cap' },
+        { err: 'SQLITE_BUSY: database is locked (synthetic)', reason: 'upstream' },
       ],
     ]);
     expect(reader.inFlight()).toBeNull();
@@ -416,8 +414,7 @@ describe('readFlightList reads', () => {
 });
 
 // Spec rev 56 §8.1 "Reading one date pair's flights" (WP21 Task 21.6): the read's preflight sets the worker's flags; the
-// read sends the definition's limits and the booking ask as they say, outbound-only when the month cannot hold 2 pages
-// (R-low-pages); it stores the return read on its row (failed: none, data-005); `fresh` is the step's reuse rule.
+// read sends the definition's limits and the booking ask as they say; it stores the return read on its row (failed: none, data-005); `fresh` is the step's reuse rule.
 describe('readFlightList with the return leg (spec rev 56 §8.1)', () => {
   const BOTH = { RETURN_SELECT_VERIFIED: true, BOOKING_SELECT_VERIFIED: true };
   const LIMITS: FlightLimits = {
@@ -530,17 +527,6 @@ describe('readFlightList with the return leg (spec rev 56 §8.1)', () => {
     const failed = flagged(BOTH, { answer: () => listErrorOf('upstream') });
     await readOnce(failed);
     expect(stored(failed.e)).toMatchObject({ status: 'failed', returns: null });
-  });
-
-  it('R-low-pages: with 1 page of headroom the read goes out outbound-only, never refused', async () => {
-    // why: a 1-page month (nothing else spent) leaves 1 page: below the 2 a return phase may load
-    const low = flagged(BOTH, {}, { monthlyCap: 1 });
-    await readOnce(low);
-    expect(low.cam.flightCalls[0]?.query.returnLimits).toBeUndefined();
-    expect(stored(low.e)?.status).toBe('read');
-    const two = flagged(BOTH, {}, { monthlyCap: 2 });
-    await readOnce(two);
-    expect(two.cam.flightCalls[0]?.query.returnLimits).toEqual(LIMITS);
   });
 
   it('21.6 review M12: a preflight that states no flags leaves the flags as they were; the read still carries the limits', async () => {
@@ -673,26 +659,11 @@ describe('readFlightList with the return leg (spec rev 56 §8.1)', () => {
     expect(await askWith(BOTH, [{ hoursAgo: 1, returns: expandFailed }])).toBe('read');
   });
 
-  it('21.6 review M8: with 1 page of headroom a young outbound-only list is fresh (the read would be outbound-only too)', async () => {
-    const s = flagged(BOTH, {}, { monthlyCap: 1 });
-    s.e.ctx.workerFlags.set('camoufox', BOTH);
-    seed(s.e, [{ hoursAgo: 1, returns: null }]);
-    const r = await s.reader.read(s.e.definition.id, PAIR);
-    expect(r).toEqual({ ok: false, code: 'fresh' });
-    expect(s.cam.flightCalls).toHaveLength(0);
-    // with 2 pages the same list is read again (a return phase is planned)
-    expect(await askWith(BOTH, [{ hoursAgo: 1, returns: null }])).toBe('read');
-  });
-
   it('21.6 re-review N2: with the flags unread (no preflight since the app started) a young outbound-only list is read', async () => {
     // why: the read's own preflight may report the return flags, so it is judged as planning the whole return phase,
     // as the read button states 2 pages then (prov-008)
     expect(await askWith(null, [{ hoursAgo: 1, returns: null }])).toBe('read');
     expect(await askWith(null, [{ hoursAgo: 1, returns: returnsOf() }])).toBe('fresh');
-    // with 1 page of headroom the read would be outbound-only whatever the flags say: fresh
-    const s = flagged(null, {}, { monthlyCap: 1 });
-    seed(s.e, [{ hoursAgo: 1, returns: null }]);
-    expect(await s.reader.read(s.e.definition.id, PAIR)).toEqual({ ok: false, code: 'fresh' });
   });
 
   it('with the flags unread the booking read is planned too: a young list whose booking expand failed is read again', async () => {
@@ -701,18 +672,6 @@ describe('readFlightList with the return leg (spec rev 56 §8.1)', () => {
       { status: 'expand-failed', rule: 'more-options:not-settled', expanded: false },
     );
     expect(await askWith(null, [{ hoursAgo: 1, returns: expandFailed }])).toBe('read');
-  });
-
-  it('with the flags unread, exactly 2 pages of headroom still plan the return phase: a young outbound-only list is read', async () => {
-    const s = flagged(null, {}, { monthlyCap: 2 });
-    seed(s.e, [{ hoursAgo: 1, returns: null }]);
-    const def = s.e.ctx.repos.definitions.get(s.e.definition.id);
-    const newest = stored(s.e);
-    if (def === null || newest === undefined) throw new Error('seeded');
-    expect(flightListFresh(s.e.ctx, def, newest)).toBe(false);
-    const r = await s.reader.read(s.e.definition.id, PAIR);
-    if (!r.ok) throw new Error(`refused: ${r.code}`);
-    await r.done;
   });
 
   it('the boundary: a finished list exactly 0.9 × refresh old (151.2 h) is read; one just younger is fresh', async () => {
@@ -972,17 +931,16 @@ describe('readFlightList at its edges (refusals, the provider’s answers and th
       'no-airport-names',
     ],
     [
-      'a thrown cap stores monthly-cap',
+      'a thrown provider error without a class word stores its kind',
       () => {
-        throw new BudgetExceeded({
-          scope: 'provider-month',
+        throw new ProviderError({
+          kind: 'upstream',
+          retryable: false,
           providerId: 'camoufox',
-          cap: 10,
-          current: 10,
-          requested: 1,
+          message: 'synthetic',
         });
       },
-      'monthly-cap',
+      'upstream',
     ],
   ])('%s, and logs no error', async (_n, answer, reason) => {
     const { e, reader } = setup({ answer });
@@ -1030,12 +988,11 @@ describe('readFlightList at its edges (refusals, the provider’s answers and th
   it('when neither its failure row nor the fatal one can be written, both are logged and done still resolves', async () => {
     const { e, reader } = setup({
       answer: () => {
-        throw new BudgetExceeded({
-          scope: 'provider-month',
+        throw new ProviderError({
+          kind: 'upstream',
+          retryable: false,
           providerId: 'camoufox',
-          cap: 10,
-          current: 10,
-          requested: 1,
+          message: 'synthetic',
         });
       },
     });
@@ -1046,7 +1003,7 @@ describe('readFlightList at its edges (refusals, the provider’s answers and th
     expect(e.logs.filter((l) => l.level === 'error').map((l) => [l.msg, l.fields])).toEqual([
       [
         'flight read: its failure could not be recorded',
-        { err: 'SQLITE_IOERR: disk I/O error (synthetic)', reason: 'monthly-cap' },
+        { err: 'SQLITE_IOERR: disk I/O error (synthetic)', reason: 'upstream' },
       ],
       ['flight read: no failure row could be written', { err: 'SQLITE_IOERR: disk I/O error (synthetic)' }],
     ]);

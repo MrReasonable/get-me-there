@@ -2,7 +2,7 @@
  * SearchApi HTTP limits for http-kit, with the classifier they carry (spec §5.2, §5.3). The module name follows
  * travelpayouts/limits.ts; registered by apps/api httpLimitsFor (Task 5.10).
  */
-import { type Config, ProviderError, type ProviderLimits } from '@gmt/core';
+import { type CappedProviderLimits, type Config, ProviderError } from '@gmt/core';
 import { vendorMessage } from '../http/classify.js';
 import type { ProviderHttpLimits, ResponseFacts } from '../http/types.js';
 import { isRecord } from '../util.js';
@@ -59,7 +59,7 @@ export function classifySearchApiError(f: ResponseFacts): ProviderError | undefi
  * and unrecorded (plan decision 20), so that rule is the only one tested against synthetic labelled bodies.
  */
 export function searchApiHttpLimits(
-  limits: ProviderLimits,
+  limits: CappedProviderLimits,
   cfg: Pick<Config, 'maxWaitSeconds' | 'requestTimeoutSeconds'>,
 ): ProviderHttpLimits {
   return {

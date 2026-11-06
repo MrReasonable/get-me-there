@@ -14,7 +14,7 @@ import { type RunState, type StopReason, stopRun } from './run.js';
 import { runDiscovery } from './stages/discovery.js';
 import { runFlightLists } from './stages/flightLists.js';
 import { runVerification } from './stages/verification.js';
-import { isBrowserPageLimit, stopCauseOf, stopPatch } from './stopCause.js';
+import { stopCauseOf, stopPatch } from './stopCause.js';
 import { budgetText } from './text.js';
 
 /**
@@ -89,8 +89,8 @@ export type CauseRun = Parameters<typeof stopCauseOf>[1];
  * Maps a stop reason to the execution status, patch and operator notice of spec §8.1. Pure; `tz` renders instants.
  * Revision 55 §8.1: every non-null stop stores its cause (`stopCauseOf`) with its sentence as `error_text` (a fatal
  * stop's own message stays in the log), and its `resumeAfter` is the cause's: null when the search is not scheduled
- * (`scheduled`, `isScheduled` read live at finish; Ian's ruling 2) or the stop is the browser worker's monthly or
- * per-run page limit, so no one-shot job is registered for either.
+ * (`scheduled`, `isScheduled` read live at finish; Ian's ruling 2) or the stop is the browser worker's per-run page
+ * limit, so no one-shot job is registered for either.
  */
 export function finalStatus(
   stop: StopReason | null,
@@ -174,8 +174,8 @@ export function finalStatus(
  * What a paused_budget notice (email, Status) tells the operator to do next (spec revision 55 §8.1 "Stop causes", WP20
  * final review): the same offer, in the same order of cases, as the stop's fix on the search's page (`stopText`'s
  * budget head), so the notice never offers a Resume the page refuses or leaves out one it offers. A run's own cap is a
- * cap change in Edit, then Resume (no schedule resumes it); a browser page limit, per run or monthly, and any other
- * provider's own per-run cap, is never resumed: Search again carries on; a plan with no calls left is Check Providers;
+ * cap change in Edit, then Resume (no schedule resumes it); a browser page limit per run, and any other provider's own
+ * per-run cap, is never resumed: Search again carries on; a plan with no calls left is Check Providers;
  * a scheduled run that stored a resume says when; anything else is Search again or Resume, and an unscheduled search is
  * told it has no schedule to carry it on.
  */
@@ -196,10 +196,6 @@ function budgetNext(cause: StopCause, tz: string, scheduled: boolean): string {
     case 'global-month':
       break;
   }
-  if (isBrowserPageLimit(cause))
-    return cause.resetsAt === null
-      ? CARRY_ON
-      : `Search again after ${formatInstant(cause.resetsAt, tz)} carries on with the prices already found.`;
   if (cause.resumeAfter !== null)
     return `It resumes automatically on ${formatInstant(cause.resumeAfter, tz)}, when the cap window reopens; if by then it is older than its discovery refresh allows, it is cancelled instead and the next run starts with fresh prices.`;
   return scheduled

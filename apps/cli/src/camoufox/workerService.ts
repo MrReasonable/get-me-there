@@ -111,8 +111,7 @@ export function workerAnswerWait(deps: Pick<Deps, 'platform' | 'files'>, unit: s
 
 /**
  * A start of the worker's service (its start, restart or install) followed by the wait above, wherever the worker is
- * started (start, restart, update, setup, `browser install`, `browser counts`, `gmt consent`); nothing when nothing
- * starts it.
+ * started (start, restart, update, setup, `browser install`, `gmt consent`); nothing when nothing starts it.
  */
 export function workerStarted(
   deps: Pick<Deps, 'platform' | 'files'>,
@@ -136,7 +135,7 @@ export const workerLockWait = (paths: Pick<Paths, 'workerData'>): Action => ({
 
 /**
  * The worker's stop wherever it is stopped for something else to follow (restart, `stop`, update, `browser install`,
- * `browser counts`, `gmt consent`, setup's browser step): the service manager's stop and, when that stops anything, the
+ * `gmt consent`, setup's browser step): the service manager's stop and, when that stops anything, the
  * lock wait above, so whatever follows never meets the old worker's lock. Nothing when the worker is not running.
  */
 export function workerStop(deps: Pick<Deps, 'platform'>, unit: string, f: ServiceFacts): Action[] {

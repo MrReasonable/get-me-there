@@ -2,8 +2,8 @@ import { type IsoDateTime, isoDateTimeOfEpochMs } from '../types/ids.js';
 
 /**
  * Spec §7 "Budget windows" as a pure function: the month that starts 00:00 UTC on the billing day (1–28) on or before
- * `now`, and ends at the same instant a month later. The ledger's SQL (db's `monthWindow`) is tested to agree, and the
- * camoufox worker counts its monthly pages and scrolls over the same window (decision 82), never the London month.
+ * `now`, and ends at the same instant a month later, never the London month. The ledger's SQL (db's `monthWindow`) is
+ * tested to agree.
  */
 export function billingMonthWindow(
   now: IsoDateTime,

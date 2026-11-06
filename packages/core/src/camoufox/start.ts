@@ -29,8 +29,6 @@ export const START_REFUSAL_REASONS = [
   'layout',
   'signed-in',
   'locked',
-  'counts-missing',
-  'counts-unreadable',
   'config',
 ] as const;
 export type StartRefusalReason = (typeof START_REFUSAL_REASONS)[number];
@@ -84,15 +82,6 @@ export const START_REFUSAL_TEXT: Readonly<
     fixCommand: 'pnpm --filter @gmt/camoufox-worker clear-signed-in',
   },
   locked: { summary: 'another worker holds the lock', fixCommand: 'pnpm gmt restart' },
-  'counts-missing': {
-    summary:
-      'the monthly counts file is missing beside an earlier worker’s files: rewrite it from the ledger',
-    fixCommand: 'pnpm gmt browser counts',
-  },
-  'counts-unreadable': {
-    summary: 'the monthly counts file cannot be read: rewrite it from the ledger',
-    fixCommand: 'pnpm gmt browser counts',
-  },
   config: {
     summary: 'the worker’s settings or files were refused (pnpm gmt start prints the worker’s own reason)',
     fixCommand: 'pnpm gmt start',
@@ -110,8 +99,6 @@ export type StartConsent =
 
 /** What the worker's start knows about its machine, its install, its consent record, its profile and its lock. */
 export interface StartFacts {
-  /** The monthly counts file (decision 82): fine, missing beside an earlier worker's pacer file, or unreadable. */
-  counts: 'ok' | 'missing' | 'unreadable';
   /** null on a machine no build is pinned for. */
   osArch: OsArch | null;
   installedBuild: string | null;
@@ -127,8 +114,7 @@ export interface StartFacts {
  * machine's pinned build has no verified search form (FORM_VERIFIED, the one check every page needs); the install's
  * layout is broken; the installed build is not the pinned one; the profile is signed in; no consent record; one in an
  * older shape (voided, then never-shown); a capture whose value is not a rejection; an expired one (its own
- * `expiresAt`, at or before now); the monthly counts file missing or unreadable. `config` is the worker's own (its
- * settings refused before any fact). Pure.
+ * `expiresAt`, at or before now). `config` is the worker's own (its settings refused before any fact). Pure.
  */
 export function startChecks(f: StartFacts): StartRefusalReason | null {
   if (f.locked) return 'locked';
@@ -144,7 +130,5 @@ export function startChecks(f: StartFacts): StartRefusalReason | null {
   // why: review X1: the worker never applies a cookie whose value is not a rejection
   if (f.consent.mark !== 'reject') return 'consent-not-rejection';
   if (Date.parse(f.consent.expiresAt) <= Date.parse(f.now)) return 'consent-expired';
-  if (f.counts === 'missing') return 'counts-missing';
-  if (f.counts === 'unreadable') return 'counts-unreadable';
   return null;
 }

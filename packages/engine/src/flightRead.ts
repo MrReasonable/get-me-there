@@ -1,21 +1,20 @@
 /**
  * Spec revision 56 §8.1 "Reading one date pair's flights" (WP20 Task 20.9, WP21 Task 21.6; `POST /definitions/:id/flight-lists`, §10):
- * the figure's airport pair of one date pair of the current space, read on demand by the browser worker, against the
- * monthly page cap only (no execution), one row with `execution_id` NULL.
+ * the figure's airport pair of one date pair of the current space, read on demand by the browser worker outside any
+ * execution, one row with `execution_id` NULL.
  *
  * Every refusal comes before any worker call or ledger row. The busy query and the taking of the browser lease run in
  * one synchronous turn (nothing before `lease.hold` is awaited), so a start admitted in that same turn sees the lease
  * held and its first browser page waits for the read (`BrowserLease.whenFree`). The read runs camoufox's discovery
  * preflight first (a refusal records `failed` with its class word; its result sets the worker's flags), sends the
- * definition's own limits (`returnLimits`) and `booking` when those flags say so and the month's headroom holds 2 pages
- * (else an outbound-only read of one page, never a refusal: R-low-pages), ignores CAMOUFOX_BROWSER_WINDOW (it is its
+ * definition's own limits (`returnLimits`) and `booking` when those flags say so (else an outbound-only read of one
+ * page), ignores CAMOUFOX_BROWSER_WINDOW (it is its
  * own anchor, like a manual start: no gate is passed), stores the return read on its row (one read-row builder shared
  * with the step), and a throw inside it records `failed` reason `fatal`. Shutdown aborts a read in flight and waits for
  * it within the drain; nothing is written once the engine is closed.
  */
 import {
   AbortedError,
-  BudgetExceeded,
   type CellKey,
   datePairIndex,
   FLIGHT_LIST_PAGES_PER_PAIR_MAX,
@@ -34,13 +33,7 @@ import { errorText } from './errors.js';
 import { loadsBrowserPages } from './scheduler/browserWindow.js';
 import { airportNamesOf, cellAirportNames } from './stages/discovery.js';
 import { listReusable, newestListOf } from './stages/flightLists/select.js';
-import {
-  FLIGHT_LIST_PROVIDER,
-  type FlightRowBase,
-  failedRowOf,
-  monthHeadroom,
-  readRowOf,
-} from './stages/flightLists.js';
+import { FLIGHT_LIST_PROVIDER, type FlightRowBase, failedRowOf, readRowOf } from './stages/flightLists.js';
 import { refreshHoursOf } from './stages/reuse.js';
 import { toStopDetail } from './stopCause.js';
 
@@ -118,8 +111,7 @@ function baseOf(def: SearchDefinition, cell: CellKey): FlightRowBase {
 /**
  * Spec rev 56 §8.1 "Reading one date pair's flights": the return phase the read plans from the worker's flags (just
  * read by its preflight) and the definition's own limits: with `RETURN_SELECT_VERIFIED`, the limits and `booking` per
- * `BOOKING_SELECT_VERIFIED`, unless the month's headroom is below the 2 pages a return phase may load (R-low-pages: an
- * outbound-only read of one page then, never a refusal).
+ * `BOOKING_SELECT_VERIFIED`; else an outbound-only read of one page.
  */
 function phaseOf(
   ctx: EngineContext,
@@ -127,7 +119,6 @@ function phaseOf(
 ): Pick<FlightListQuery, 'returnLimits' | 'booking'> {
   const flags = ctx.workerFlags.get(FLIGHT_LIST_PROVIDER);
   if (flightPagesPerPair(flags) !== FLIGHT_LIST_PAGES_PER_PAIR_MAX) return {};
-  if (monthHeadroom(ctx) < FLIGHT_LIST_PAGES_PER_PAIR_MAX) return {};
   return { returnLimits: flightLimitsOf(def.constraints), booking: flags?.BOOKING_SELECT_VERIFIED === true };
 }
 
@@ -142,7 +133,6 @@ function freshPhaseOf(
   def: SearchDefinition,
 ): Pick<FlightListQuery, 'returnLimits' | 'booking'> {
   if (ctx.workerFlags.get(FLIGHT_LIST_PROVIDER) !== null) return phaseOf(ctx, def);
-  if (monthHeadroom(ctx) < FLIGHT_LIST_PAGES_PER_PAIR_MAX) return {};
   return { returnLimits: flightLimitsOf(def.constraints), booking: true };
 }
 
@@ -214,12 +204,10 @@ export function createFlightReader(ctx: EngineContext): FlightReader {
     } catch (err) {
       // why: shutdown aborts the read; an aborted read writes nothing, as an aborted tile writes no outcome
       if (signal.aborted || err instanceof AbortedError) return;
+      // why: outside an execution no cap applies to the browser's pages (spec §2), so anything but a provider error
+      // here is fatal
       const word: StopDetail =
-        err instanceof BudgetExceeded
-          ? 'monthly-cap'
-          : err instanceof ProviderError
-            ? toStopDetail(err.reason ?? null, err.kind)
-            : 'fatal';
+        err instanceof ProviderError ? toStopDetail(err.reason ?? null, err.kind) : 'fatal';
       if (word === 'fatal') log.error({ err: errorText(err) }, 'flight read: failed');
       // why: every write here is guarded (20.9 review finding 4), so `done` never rejects: a failure row that cannot be
       // written is logged and recorded as `fatal` instead, and when even that fails it is logged only
@@ -275,8 +263,7 @@ export function createFlightReader(ctx: EngineContext): FlightReader {
         ctx.pointOfSaleOf(FLIGHT_LIST_PROVIDER),
       );
       // why: spec rev 56 §8.1: the step's reuse rule, under the return phase this read would send (`freshPhaseOf`: the
-      // worker's last reported flags, the whole phase while they are unread, outbound-only below 2 pages of the month,
-      // 21.6 review M8), so a young transient, not-verified, other-limit or phase-less list is read; the date pair
+      // worker's last reported flags, the whole phase while they are unread), so a young transient, not-verified, other-limit or phase-less list is read; the date pair
       // departs after today here
       if (newest !== undefined && flightListFresh(ctx, def, newest)) return { ok: false, code: 'fresh' };
       // Review Focus 2: the busy query and the lease in one synchronous turn

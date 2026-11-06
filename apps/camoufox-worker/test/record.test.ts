@@ -194,54 +194,14 @@ describe('the recorder (brief Task 14.2 rules)', () => {
     expect(factsText).not.toContain(SOCS_VALUE);
     expect(factsText).not.toMatch(/- (link|tab|button) "/);
   });
-  // why: decision 82 (Task 17.3): every page the recorder loads counts in the worker's own month
-  it('each recorded page counts in monthly.json; a page past the cap, or unreadable counts, loads nothing', async () => {
+  it('waits out the spacing from the persisted last page time before its page', async () => {
     const t = setup();
-    expect(await record(t.ctx(Q), cfg, t.deps)).toBe(0);
-    expect(JSON.parse(readFileSync(join(t.dataDir, 'monthly.json'), 'utf8'))).toEqual({
-      windowStart: '2026-10-01T00:00:00.000Z',
-      windowEnd: '2026-11-01T00:00:00.000Z',
-      pages: 1,
-      scrolls: 0,
-    });
-    const full = setup();
-    expect(await record(full.ctx(Q), { ...cfg, monthlyPageCap: 0 }, full.deps)).toBe(EX_CONFIG);
-    expect(full.err.join()).toContain(
-      "the worker's monthly page cap (0) is reached until 2026-11-01T00:00:00.000Z",
-    );
-    expect(full.contexts.flatMap((c) => c.pages)).toEqual([]);
-    const garbled = setup();
-    writeFileSync(join(garbled.dataDir, 'pacer.json'), '{}', { mode: 0o600 });
-    writeFileSync(join(garbled.dataDir, 'monthly.json'), 'x', { mode: 0o600 });
-    expect(await record(garbled.ctx(Q), cfg, garbled.deps)).toBe(EX_CONFIG);
-    expect(garbled.err.join()).toContain(
-      "the worker's monthly counts file is unreadable; rewrite it with pnpm gmt browser counts",
-    );
-    expect(readFileSync(join(garbled.dataDir, 'monthly.json'), 'utf8')).toBe('x');
-  });
-  // why: cb-b1-005: a wait for the spacing that crosses the window's end counts the page in the window it loads in
-  it('the caps are checked again after the spacing wait: a page loaded in the next window counts there', async () => {
-    const t = setup();
-    writeFileSync(
-      join(t.dataDir, 'monthly.json'),
-      JSON.stringify({
-        windowStart: '2026-10-01T00:00:00.000Z',
-        windowEnd: '2026-11-01T00:00:00.000Z',
-        pages: 7,
-        scrolls: 0,
-      }),
-      { mode: 0o600 },
-    );
     t.timers.clock.set(asIsoDateTime('2026-10-31T23:59:50.000Z'));
     writeFileSync(join(t.dataDir, 'pacer.json'), JSON.stringify({ lastPageAt: '2026-10-31T23:59:45.000Z' }), {
       mode: 0o600,
     });
     expect(await record(t.ctx(Q), cfg, t.deps)).toBe(0);
     expect(t.out.join()).toMatch(/waiting \d+ s for the spacing/);
-    expect(JSON.parse(readFileSync(join(t.dataDir, 'monthly.json'), 'utf8'))).toMatchObject({
-      windowStart: '2026-11-01T00:00:00.000Z',
-      pages: 1,
-    });
   });
   // why: WP17 Task 17.4: research 17.0c's two headed sessions, observed only, one recording of names and the mark
   describe('--consent-research', () => {
@@ -303,7 +263,6 @@ describe('the recorder (brief Task 14.2 rules)', () => {
       expect(
         t.profiles.every((p) => p.startsWith(join(t.dataDir, 'probe-research-')) && !existsSync(p)),
       ).toBe(true);
-      expect(JSON.parse(readFileSync(join(t.dataDir, 'monthly.json'), 'utf8'))).toMatchObject({ pages: 2 });
     });
     it('Linux: the display run.ts passed reaches the window', async () => {
       const { t, drivers } = research([session('reject'), session('accept')], {
@@ -356,7 +315,7 @@ describe('the recorder (brief Task 14.2 rules)', () => {
       expect(await record(none.t.ctx(['--consent-research']), cfg, none.t.deps)).toBe(EX_CONFIG);
       expect(none.t.err.join()).toContain(CONSENT_FIX.command);
       expect(none.drivers).toEqual([]);
-      expect(existsSync(join(none.t.dataDir, 'monthly.json'))).toBe(false);
+      expect(existsSync(join(none.t.dataDir, 'pacer.json'))).toBe(false);
       expect(written(none.t.root)).toEqual([]);
     });
   });
@@ -2109,7 +2068,6 @@ describe('record --landing (Task 17.8)', () => {
     expect(meta).toMatchObject({ kind: 'landing', osArch: 'darwin-arm64', socsReadBack: 'same' });
     expect(t.out.join()).toContain('recorded ');
     expect(cooldownOf(t)).toBeNull();
-    expect(JSON.parse(readFileSync(join(t.dataDir, 'monthly.json'), 'utf8')).pages).toBe(1);
   });
   it('a view the landing rule never recognises is what appeared: unrecorded, no pause, the flag stays off', async () => {
     const t = setup({ navigations: [{ hops: [LANDING], tree: resultsTree() }] });

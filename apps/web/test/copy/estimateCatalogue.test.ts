@@ -40,7 +40,6 @@ const SAMPLES: Record<string, unknown[][]> = {
   'estimate.billedNoCap': [['120', 'SearchApi']],
   'estimate.searchesTag': [['120', 'SearchApi']],
   'estimate.withTag': [['Search now', 'about £1.20']],
-  'estimate.monthlyPages': [['110', '1,400']],
   'estimate.notUsed': [
     ['Google Flights via SearchApi', 'no calls left this month', '£3.40'],
     ['The browser worker', 'over its page limit for one run', null],
