@@ -5,7 +5,7 @@ owner: opus
 depends_on: [20]
 spec_sections: ["§2 camoufox", "§3", "§5.1", "§6.5", "§6.9", "§7", "§8.1", "§9", "§10", "§11", "§12", "§16", "§17 revision 56"]
 reviewers: [product-owner, provenance-auditor, provider-integration-expert, cost-and-budget-reviewer, data-model-reviewer, search-strategy-reviewer, ui-reviewer, code-architect, test-strategy-reviewer, security-reviewer]
-mutate: {"@gmt/core": ["src/flights/choose.ts", "src/datePairs/rank.ts", "src/datePairs/figure.ts", "src/flights/types.ts", "src/flights/limits.ts", "src/flights/returns.ts", "src/datePairs/pairing.ts"], "@gmt/camoufox-worker": ["src/classify.ts", "src/ready.ts", "src/names.ts", "src/flights.ts", "src/monthly.ts", "src/guard.ts", "src/returns.ts", "src/offers.ts", "src/returnPhase.ts"], "@gmt/engine": ["src/stages/flightLists/select.ts", "src/estimate.ts", "src/stages/flightLists.ts", "src/flightRead.ts"]}
+mutate: {"@gmt/core": ["src/flights/choose.ts", "src/datePairs/rank.ts", "src/datePairs/figure.ts", "src/flights/types.ts", "src/flights/limits.ts", "src/flights/returns.ts", "src/datePairs/pairing.ts"], "@gmt/camoufox-worker": ["src/classify.ts", "src/ready.ts", "src/names.ts", "src/flights.ts", "src/guard.ts", "src/returns.ts", "src/offers.ts", "src/returnPhase.ts"], "@gmt/engine": ["src/stages/flightLists/select.ts", "src/estimate.ts", "src/stages/flightLists.ts", "src/flightRead.ts"]}
 pending: {}
 status: reviewed
 ---

@@ -21,7 +21,6 @@ import { CooldownStore } from '../src/cooldown.js';
 import { createDriver, type Driver, type RequestLike } from '../src/driver.js';
 import type { FlightsRead } from '../src/flights.js';
 import type { GuardState } from '../src/guard.js';
-import { type MonthlyCaps, MonthlyCounter } from '../src/monthly.js';
 import { OFFER_GRAMMAR_VERSION } from '../src/offers.js';
 import { Pacer } from '../src/pacer.js';
 import { Refusal } from '../src/refusal.js';
@@ -192,7 +191,6 @@ interface Shows {
 interface Opts {
   selectors?: Selectors;
   req?: FlightsRequest;
-  caps?: MonthlyCaps;
   /** Each load's Best tree and the Cheapest trees after its tab click (the first load's, then the reload's). */
   loads?: Array<{ best: FakeNode[]; cheapest: FakeNode[] }>;
   /** What each activated name shows next; a name absent here changes nothing. */
@@ -220,11 +218,6 @@ function setup(o: Opts = {}) {
   const contexts: FakeContext[] = [];
   const cooldown = new CooldownStore({ dir: dataDir, challengeHours: 48, clock });
   const pacer = new Pacer({ dir: dataDir, minSpacingSeconds: 30, clock });
-  const monthly = new MonthlyCounter({
-    dir: dataDir,
-    caps: o.caps ?? { pages: 1500, scrolls: 6000, billingDay: 1 },
-    clock,
-  });
   const refusal = new Refusal({ dir: dataDir, clock });
   const log = memoryLog();
   const loads = o.loads ?? [
@@ -288,7 +281,6 @@ function setup(o: Opts = {}) {
     socs: loadSocs(dataDir, clock),
     cooldown,
     pacer,
-    monthly,
     refusal,
     clock,
     timers,
@@ -316,7 +308,6 @@ function setup(o: Opts = {}) {
     contexts,
     cooldown,
     pacer,
-    monthly,
     refusal,
     session,
     seen,
@@ -372,7 +363,7 @@ const FOUR = [
 
 /**
  * The one helper every transient end is asserted through: a flights answer with the outbound flights intact (never
- * not-ready or blocked), no cool-down, `pagesLoaded` the literal loaded, the month settled to it, the page closed and the
+ * not-ready or blocked), no cool-down, `pagesLoaded` the literal loaded, the page closed and the
  * SOCS read-back run after.
  */
 function expectTransient(t: Setup, a: WorkerAnswer, loaded: number): Flights {
@@ -381,7 +372,6 @@ function expectTransient(t: Setup, a: WorkerAnswer, loaded: number): Flights {
   expect(f.flights.length).toBeGreaterThan(0);
   expect(f.pagesLoaded).toBe(loaded);
   expect(t.cooldown.active()).toBeNull();
-  expect(t.monthly.status().pages).toBe(loaded);
   expect(t.page0().calls.closed).toBeGreaterThan(0);
   expect(t.contexts[0]?.cookieCalls.length).toBeGreaterThan(1);
   return f;
@@ -453,7 +443,6 @@ describe('the whole phase (spec rev 56 §2: the outbound, its returns, the shown
     expect(t.seen.guard?.activationGate).toBe(false);
     expect(a.pagesLoaded).toBe(1);
     expect('nextLoadNotBefore' in a).toBe(false);
-    expect(t.monthly.status().pages).toBe(1);
     expect(a.versions).toEqual({ ...versions, offerGrammar: OFFER_GRAMMAR_VERSION });
     expect(Date.parse(a.fetchedAt)).toBe(t.timers.now());
     expect(t.cooldown.active()).toBeNull();
@@ -561,7 +550,6 @@ describe('the second attempt (Ian’s ruling 2: the next outbound, from a fresh 
     // no third fitting outbound: £451 and the two-stop £478 are over a limit
     expect(a.returns?.triedAll).toBe(true);
     expect(a.pagesLoaded).toBe(2);
-    expect(t.monthly.status().pages).toBe(2);
     expect(t.seen.gateAtGoto).toEqual([false, false]);
     // why: R-spacing: the reload's start plus the spacing
     const last = t.pacer.lastPageAt();
@@ -1101,8 +1089,7 @@ describe('the phase’s other ends', () => {
       expect(t.page0().calls.actions).toEqual([]);
     },
   );
-  it('RETURN_SELECT_VERIFIED false: nothing activated, not-verified both, no page counts, the list page’s budget and admission', async () => {
-    const check = vi.spyOn(MonthlyCounter.prototype, 'check');
+  it('RETURN_SELECT_VERIFIED false: nothing activated, not-verified both, no page counts, the list page’s budget', async () => {
     const t = setup({ selectors: { ...VERIFIED, RETURN_SELECT_VERIFIED: false } });
     const a = flightsOf((await t.session.page(REQ)).answer);
     expect(a.returns).toMatchObject({
@@ -1113,8 +1100,6 @@ describe('the phase’s other ends', () => {
     });
     expect('pagesLoaded' in a).toBe(false);
     expect(t.page0().calls.actions).toEqual([]);
-    expect(check).toHaveBeenLastCalledWith(0, 1);
-    check.mockRestore();
   });
   it('BOOKING_SELECT_VERIFIED false alone: the returns read, nothing activated after them, the booking not-verified', async () => {
     const t = setup({ selectors: { ...VERIFIED, BOOKING_SELECT_VERIFIED: false } });
@@ -1140,53 +1125,30 @@ describe('the phase’s other ends', () => {
   });
 });
 
-describe('the month’s headroom and the reservation (R-reserve, P3, cost-r3-002)', () => {
-  it('1 page left: the admission reserves 1 and the phase is skipped monthly-headroom before any activation', async () => {
-    const t = setup({ caps: { pages: 1, scrolls: 6000, billingDay: 1 } });
-    const a = flightsOf((await t.session.page(REQ)).answer);
-    expect(a.flights).toEqual(FOUR);
-    expect(a.returns).toMatchObject({
-      status: 'skipped',
-      rule: 'monthly-headroom',
-      booking: { status: 'skipped', rule: 'monthly-headroom' },
+describe('the reservation (cost-r3-002)', () => {
+  it('a main-frame navigation past the request’s 2 pages is aborted (page-reservation), the phase unrecognised', async () => {
+    const t = setup({
+      shape: (c) => {
+        let first = true;
+        c.afterGoto = (jar) => {
+          if (first) {
+            first = false;
+            for (let i = 0; i < FLIGHT_LIST_PAGES_PER_PAIR_MAX; i++)
+              navigate(c, 'https://www.google.com/travel/flights?q=again');
+          }
+          return jar;
+        };
+      },
     });
-    expect(a.pagesLoaded).toBe(1);
+    const a = expectTransient(t, (await t.session.page(REQ)).answer, FLIGHT_LIST_PAGES_PER_PAIR_MAX);
+    expect(a.returns).toMatchObject({ status: 'unrecognised', rule: 'page-reservation', attempts: [] });
     expect(t.page0().calls.actions).toEqual([]);
-    expect(t.monthly.status().pages).toBe(1);
+    expect(t.seen.guard?.reservation).toBe(2);
   });
-  it('exactly 2 left: it reserves 2 and runs (the exact fit)', async () => {
-    const t = setup({ caps: { pages: 2, scrolls: 6000, billingDay: 1 } });
-    const a = flightsOf((await t.session.page(REQ)).answer);
-    expect(a.returns?.status).toBe('read');
-    expect(t.monthly.status().pages).toBe(1);
-  });
-  it.each([1, 2])(
-    'a reservation of %i: a further main-frame navigation past it is aborted (page-reservation), the phase unrecognised',
-    async (reservation) => {
-      const t = setup({
-        caps: { pages: reservation, scrolls: 6000, billingDay: 1 },
-        shape: (c) => {
-          let first = true;
-          c.afterGoto = (jar) => {
-            if (first) {
-              first = false;
-              for (let i = 0; i < reservation; i++)
-                navigate(c, 'https://www.google.com/travel/flights?q=again');
-            }
-            return jar;
-          };
-        },
-      });
-      const a = expectTransient(t, (await t.session.page(REQ)).answer, reservation);
-      expect(a.returns).toMatchObject({ status: 'unrecognised', rule: 'page-reservation', attempts: [] });
-      expect(t.page0().calls.actions).toEqual([]);
-    },
-  );
-  it('a refused first load: blocked with pagesLoaded 0, the month settled to 0 (R-zero)', async () => {
+  it('a refused first load: blocked with pagesLoaded 0 (R-zero)', async () => {
     const t = setup({ hops: ['https://consent.google.com/ml?continue=x'] });
     const r = await t.session.page(REQ);
     expect(r.answer).toMatchObject({ kind: 'blocked', page: 'consent-unhandled', pagesLoaded: 0 });
-    expect(t.monthly.status().pages).toBe(0);
   });
   it('answers before any load state pagesLoaded 0: the spacing, a cool-down', async () => {
     const t = setup();
@@ -2042,13 +2004,11 @@ describe('budgets (spec rev 56 §2: the page budget, the admission, the spacing 
     expect((await t.session.page(REQ)).answer).toMatchObject({ kind: 'spacing', retryAfterSeconds: 760 });
     await first;
   });
-  it('the monthly admission asks for the literal 2 (core’s FLIGHT_LIST_PAGES_PER_PAIR_MAX)', async () => {
-    const check = vi.spyOn(MonthlyCounter.prototype, 'check');
+  it('the reservation is the literal 2 (core’s FLIGHT_LIST_PAGES_PER_PAIR_MAX)', async () => {
     const t = setup();
     await t.session.page(REQ);
-    expect(check).toHaveBeenCalledWith(0, 2);
+    expect(t.seen.guard?.reservation).toBe(2);
     expect(FLIGHT_LIST_PAGES_PER_PAIR_MAX).toBe(2);
-    check.mockRestore();
   });
   it('no spacing wait precedes an activation: only the reload is spaced', async () => {
     const reclaim = vi.spyOn(Pacer.prototype, 'reclaim');
@@ -2160,7 +2120,6 @@ describe('the phase’s pure helpers', () => {
         log: memoryLog(),
         pollMs: 2000,
         startedAt: timers.now(),
-        admitted: FLIGHT_LIST_PAGES_PER_PAIR_MAX,
         pageTimeoutMs: 90_000,
       });
     const kept = f(478);

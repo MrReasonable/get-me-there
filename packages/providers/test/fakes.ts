@@ -154,9 +154,6 @@ export class FakeBudget implements BudgetGuard {
   scrollsLeft(): number | null {
     return null;
   }
-  scrollsThisMonth(): number | null {
-    return null;
-  }
   recentCalls(providerId: ProviderId, since: IsoDateTime): number {
     // why: tests seed the count directly and assert the window through recentSince (WP3 filters started_at >= since).
     this.recentSince.push(since);

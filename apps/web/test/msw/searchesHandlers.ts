@@ -96,7 +96,5 @@ export const searchesHandlers = [
   serveFlightLists((dep, ret) => flightPair(dep, ret, { link: null }), {
     available: false,
     unavailableReason: 'not-named',
-    monthlyPagesLeft: null,
-    runPages: null,
   }),
 ];

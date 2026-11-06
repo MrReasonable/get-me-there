@@ -34,7 +34,7 @@ describe('provider-execution and no-page rows (spec §2, §5.3; decision 69)', (
     });
   });
   it('no-page rows count toward neither page cap', () => {
-    const g = guardFor({ camoufoxConfigCap: 100, monthlyCap: 1, snapshotCaps: { e1: { camoufox: 1 } } });
+    const g = guardFor({ camoufoxConfigCap: 100, snapshotCaps: { e1: { camoufox: 1 } } });
     for (let i = 0; i < 5; i++)
       g.reserve(r('e1', i)).finalise({
         outcome: 'error',
@@ -50,10 +50,15 @@ describe('provider-execution and no-page rows (spec §2, §5.3; decision 69)', (
     g.reserve(r('e1', 0)).finalise({ outcome: 'ok', durationMs: 1, pageClass: 'page' });
     expect(scopeOf(() => g.reserve(r('e1', 1)))).toBe('provider-execution');
   });
-  it('provider-month is checked before provider-execution', () => {
-    const g = guardFor({ monthlyCap: 1, snapshotCaps: { e1: { camoufox: 1 } } });
-    g.reserve(r('e1', 0)).finalise({ outcome: 'ok', durationMs: 1, pageClass: 'page' });
-    expect(scopeOf(() => g.reserve(r('e1', 1)))).toBe('provider-month');
+  // why: spec rev 64: no monthly page cap; pages outside any run are never refused however many the month holds
+  it('the month never refuses a page: 2,000 pages outside any run all pass, counted with no cap', () => {
+    const g = guardFor({ snapshotCaps: {} });
+    for (let i = 0; i < 2000; i++)
+      g.reserve(r(null, i)).finalise({ outcome: 'ok', durationMs: 1, pageClass: 'page' });
+    expect(g.usage({ kind: 'provider-month', providerId: 'camoufox' })).toMatchObject({
+      calls: 2000,
+      cap: null,
+    });
   });
   it('camoufox rows are never billable and cost 0', () => {
     const g = guardFor({ camoufoxConfigCap: 100, snapshotCaps: { e1: { camoufox: 10 } } });

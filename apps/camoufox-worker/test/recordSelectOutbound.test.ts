@@ -1,7 +1,7 @@
 // `record --select-outbound` (WP21 Task 21.0) over the fake browser: the served sequence (the Best view settled, the
 // form checked, the Cheapest flow), the first pick's selection, the list page loaded again, the served sequence again
-// and a second pick's selection, each document-loading step spaced by the pacer's re-claim, the month reserved for the
-// worst case and settled to the documents loaded. Synthetic trees only; no value here comes from a recording.
+// and a second pick's selection, each document-loading step spaced by the pacer's re-claim, the page held to its worst
+// case by the guard's reservation. Synthetic trees only; no value here comes from a recording.
 import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { asIsoDate, type BlockedPage, CAMOUFOX_BUILDS, FLIGHT_LIST_PAGES_PER_PAIR_MAX } from '@gmt/core';
@@ -200,8 +200,8 @@ function setup(script: Script = DEFAULT) {
   const out: string[] = [];
   const err: string[] = [];
   const events: string[] = [];
-  /** What monthly.json and pacer.json held at each goto and each link click. */
-  const seen: Array<{ at: string; pages: number | null; lastPageAt: string | null }> = [];
+  /** What pacer.json held at each goto and each link click. */
+  const seen: Array<{ at: string; lastPageAt: string | null }> = [];
   const peek = (at: string) => {
     const read = (f: string): Record<string, unknown> | null => {
       try {
@@ -210,11 +210,9 @@ function setup(script: Script = DEFAULT) {
         return null;
       }
     };
-    const m = read('monthly.json');
     const p = read('pacer.json');
     seen.push({
       at,
-      pages: typeof m?.pages === 'number' ? m.pages : null,
       lastPageAt: typeof p?.lastPageAt === 'string' ? p.lastPageAt : null,
     });
   };
@@ -295,7 +293,11 @@ function setup(script: Script = DEFAULT) {
   });
   const facts = () => JSON.parse(readFileSync(join(root, 'select-outbound/2026-10-18/1.facts.json'), 'utf8'));
   const meta = () => JSON.parse(readFileSync(join(root, 'select-outbound/2026-10-18/1.meta.json'), 'utf8'));
-  const months = () => JSON.parse(readFileSync(join(dataDir, 'monthly.json'), 'utf8')).pages;
+  /** The documents the recording's page loaded, as its meta states them. */
+  const loaded = (): unknown => {
+    const kind = existsSync(join(root, 'select-outbound')) ? 'select-outbound' : 'select-return';
+    return JSON.parse(readFileSync(join(root, `${kind}/2026-10-18/1.meta.json`), 'utf8')).documentLoads;
+  };
   const cooldown = () =>
     new CooldownStore({ dir: dataDir, challengeHours: 48, clock: timers.clock }).active();
   return {
@@ -312,7 +314,7 @@ function setup(script: Script = DEFAULT) {
     ctx,
     facts,
     meta,
-    months,
+    loaded,
     cooldown,
   };
 }
@@ -419,8 +421,8 @@ describe('record --select-outbound: the served sequence, two selections and a fr
     expect(RECORD_SELECT_PAGES).toBe(2);
     const doc = setup({ ...DEFAULT, documentPerSelection: true });
     expect(await record(doc.ctx(SELECT), cfg, doc.deps)).toBe(0);
-    expect(doc.seen[0]).toMatchObject({ at: 'goto-1', pages: 2 });
-    expect(doc.months()).toBe(2);
+    expect(doc.seen[0]).toMatchObject({ at: 'goto-1' });
+    expect(doc.loaded()).toBe(2);
     const [first, reload, second] = doc.facts().steps;
     expect([first.after.documentLoads, reload.after.documentLoads, second.after.documentLoads]).toEqual([
       1, 2, 2,
@@ -443,7 +445,7 @@ describe('record --select-outbound: the served sequence, two selections and a fr
     expect(doc.meta()).toMatchObject({ documentLoads: 2, documentStarts: 4, gateRefusals: 2 });
     const inApp = setup();
     expect(await record(inApp.ctx(SELECT), cfg, inApp.deps)).toBe(0);
-    expect(inApp.months()).toBe(2);
+    expect(inApp.loaded()).toBe(2);
     expect(
       inApp
         .facts()
@@ -850,31 +852,13 @@ describe('record --select-outbound: review fixes (WP21 Task 21.0)', () => {
     expect(await record(r.ctx(Q), cfg, r.deps)).toBe(0);
     expect(vi.mocked(budget.pageBudget).mock.calls.map((c) => [c[1], c[3]])).toEqual([[90_000, 180_000]]);
   });
-  it('with 1 page left it is refused before anything: no launch, no load, no pacer start, the counts unchanged', async () => {
-    const t = setup();
-    const counts = JSON.stringify({
-      windowStart: '2026-10-01T00:00:00.000Z',
-      windowEnd: '2026-11-01T00:00:00.000Z',
-      pages: 1499,
-      scrolls: 0,
-    });
-    writeFileSync(join(t.dataDir, 'monthly.json'), counts, { mode: 0o600 });
-    expect(await record(t.ctx(SELECT), cfg, t.deps)).toBe(EX_CONFIG);
-    expect(t.err.join()).toContain(
-      "the worker's monthly page cap leaves fewer than the 2 pages this recording may load",
-    );
-    expect(t.contexts).toEqual([]);
-    expect(t.seen).toEqual([]);
-    expect(existsSync(join(t.dataDir, 'pacer.json'))).toBe(false);
-    expect(readFileSync(join(t.dataDir, 'monthly.json'), 'utf8')).toBe(counts);
-  });
   it('is refused on an entry whose View more click the session makes, before anything loads', async () => {
     const t = setup();
     const deps = { ...t.deps, selectors: { ...SELECTORS, VIEW_MORE_ADDS_CHEAPER: true } };
     expect(await record(t.ctx(SELECT), cfg, deps)).toBe(EX_CONFIG);
     expect(t.err.join()).toContain('VIEW_MORE_ADDS_CHEAPER');
     expect(t.contexts).toEqual([]);
-    expect(existsSync(join(t.dataDir, 'monthly.json'))).toBe(false);
+    expect(existsSync(join(t.dataDir, 'pacer.json'))).toBe(false);
   });
   it('a research read that overruns its own bound keeps a settled view settled', async () => {
     // why: a tab on the return view that never answers a name read: only tabNames reads it, after the settle
@@ -1214,15 +1198,15 @@ describe('record --select-return: the return selected, the booking view recorded
       documentLoads: 1,
     });
   });
-  it('claims 2 pages before the first load and settles to the documents loaded; the gate holds every activation’s document', async () => {
+  it('loads the documents it loaded, at most 2; the gate holds every activation’s document', async () => {
     const t = setup(script());
     expect(await record(t.ctx(SELECT_RETURN), cfg, t.deps)).toBe(0);
-    expect(t.seen[0]).toMatchObject({ at: 'goto-1', pages: 2 });
-    expect(t.months()).toBe(1);
+    expect(t.seen[0]).toMatchObject({ at: 'goto-1' });
+    expect(t.loaded()).toBe(1);
     const doc = setup({ ...script(), documentPerSelection: true });
     expect(await record(doc.ctx(SELECT_RETURN), cfg, doc.deps)).toBe(0);
     // why: R-worst: the fake starts a document for each link activation; the gate aborts both, so none loads
-    expect(doc.months()).toBe(1);
+    expect(doc.loaded()).toBe(1);
     // the expansion (a button, in-page) starts no document, so its step names none
     expect(facts(doc).steps.map((x: { held?: string }) => x.held ?? null)).toEqual([
       'unexpected-navigation',
@@ -1272,31 +1256,13 @@ describe('record --select-return: the return selected, the booking view recorded
     const meta = JSON.parse(readFileSync(join(t.root, 'select-return/2026-10-18/1.meta.json'), 'utf8'));
     expect(inAppEvidence(f, meta)).toEqual(IN_APP_E2E);
     expect(t.contexts[0]?.pages[0]?.calls.gotos).toHaveLength(2);
-    expect(t.months()).toBe(2);
+    expect(t.loaded()).toBe(2);
     expect(vi.mocked(budget.pageBudget).mock.calls.map((c) => [c[1], c[3]])).toEqual([[90_000, 750_000]]);
     expect(selectForceSecondCapMs(90_000, 30_000)).toBe(750_000);
     // why: the research suites leave this recording out by its mark; the plain kind carries none
     const plain = setup(script());
     expect(await record(plain.ctx(SELECT_RETURN), cfg, plain.deps)).toBe(0);
     expect('forceSecond' in facts(plain)).toBe(false);
-  });
-  it('with 1 page left it is refused before anything loads', async () => {
-    const t = setup(script());
-    writeFileSync(
-      join(t.dataDir, 'monthly.json'),
-      JSON.stringify({
-        windowStart: '2026-10-01T00:00:00.000Z',
-        windowEnd: '2026-11-01T00:00:00.000Z',
-        pages: 1499,
-        scrolls: 0,
-      }),
-      { mode: 0o600 },
-    );
-    expect(await record(t.ctx(SELECT_RETURN), cfg, t.deps)).toBe(EX_CONFIG);
-    expect(t.err.join()).toContain(
-      "the worker's monthly page cap leaves fewer than the 2 pages this recording may load",
-    );
-    expect(t.contexts).toEqual([]);
   });
   it('an Enter on the return that changes nothing within the step is press-return:no-activation', async () => {
     // why: nothing changes, the URL included (review M1: the URL's move to the booking path is a change)

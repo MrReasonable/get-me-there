@@ -92,7 +92,7 @@ function returnsOf(status: string): Record<string, unknown> {
   return {
     limits: LIMITS,
     status,
-    rule: ruled ? 'monthly-headroom' : null,
+    rule: ruled ? 'spacing' : null,
     attempts: read ? [attempt(0, [ret(1)])] : [],
     triedAll: false,
     booking: read
@@ -169,9 +169,7 @@ describe('the answers to a request with returnLimits (spec rev 56 §2: pagesLoad
     ['not-ready', { kind: 'not-ready', elapsedMs: 90_000 }],
     ['browser-error', { kind: 'browser-error', stage: 'navigate', detail: 'x' }],
     ['cooling-down', { kind: 'cooling-down', cause: 'captcha', cooldownUntil: '2027-10-02T10:00:00.000Z' }],
-    ['monthly-cap', { kind: 'monthly-cap', cap: 1500, used: 1500, windowEnd: '2027-11-01T00:00:00.000Z' }],
     ['spacing', { kind: 'spacing', retryAfterSeconds: 30 }],
-    ['counts-unreadable', { kind: 'counts-unreadable', problem: 'missing' }],
   ];
   it.each(kinds)(
     '%s accepts pagesLoaded (0 included) and nextLoadNotBefore, and goes without them',

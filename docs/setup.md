@@ -157,7 +157,6 @@ pnpm gmt update --dry-run               # print the update's plan and change not
 pnpm gmt uninstall                      # removes the services; keeps settings, data and state
 pnpm gmt uninstall --purge              # also deletes those three directories, after you type purge
 pnpm gmt browser install                # the browser provider's Camoufox (section 14), whatever runs the app
-pnpm gmt browser counts                 # rewrite the browser worker's monthly counts (section 14)
 pnpm gmt consent                        # capture your consent choice: a window opens, you click Reject all (section 14)
 pnpm gmt consent export                 # the same on a desktop, printed as one line for a machine with no display
 pnpm gmt consent import                 # on that machine: reads the line from standard input (a pipe)
@@ -773,8 +772,7 @@ failing check.
   move the schedule.
 - **Providers.** One card per price source with its last successful call and its use against its cap (the Providers
   view's wording, linked), and **price sources**, which warns when no usable source is set up.
-- **Browser worker and consent.** Whether the worker answers, its monthly pages and scrolls against the caps, any
-  cool-down, a setting that differs between the app and the worker (named, never its value), and the app's browser
+- **Browser worker and consent.** Whether the worker answers, any cool-down, a setting that differs between the app and the worker (named, never its value), and the app's browser
   window: "browser pages: only inside a run's window" or "also when a run resumes"; while a search runs, its note also
   says "keeping the machine awake until <time>". The consent card gives the
   record's expiry and warns for its last 30 days. While it warns or fails (not while it is off or ok) and the browser
@@ -945,8 +943,8 @@ Docker Desktop forwards `host.docker.internal` to the Mac's loopback for every c
 `CAMOUFOX_WORKER_KEY`. **Money:** none, against SearchApi's ~£32 a month.
 
 Coverage, stated plainly: in `list` mode a page prices one day pair, so a run prices at most
-`CAMOUFOX_EXECUTION_PAGE_CAP` day pairs and a month at most `CAMOUFOX_MONTHLY_PAGE_CAP`: with the defaults, 100 a run and
-1,500 a month, against 2,184 day pairs for one worked-example airport pair (8,736 for its four pairs). The estimate says
+`CAMOUFOX_EXECUTION_PAGE_CAP` day pairs: with the default, 100 a run, against 2,184 day pairs for one worked-example
+airport pair (8,736 for its four pairs), so a full pass of one pair takes 22 runs. The estimate says
 how many cells a run will price and how many runs a full pass takes; the rest of the cells read skipped or not searched
 in the Dates view's coverage section. Google's "no flights" line is verified (the 2026-10-18 recordings), so a day pair with no service reads as no data,
 with no pause, as long as the line shows and the page has no result links. A page change that needs new recordings
@@ -1016,12 +1014,12 @@ changes it later.
   agent out and say "refused, not retrying: …" with the fix). `pnpm gmt start`, `restart`, `update`, `setup` and
   `browser install` run the worker's start check first and do not start it while the check reports a reason. A stop
   waits up to 270 s (the longest page timeout, 240 s, and 30 s to close the browser) before it ends the worker, so a
-  list page in flight finishes; a longer page (a grid page, or a flight-list read with its return flights) is ended,
-  and its pages stay counted for the month; the app's stop waits 30 s. `pnpm gmt restart` starts the worker again only once the old process has
+  list page in flight finishes; a longer page (a grid page, or a flight-list read with its return flights) is ended;
+  the app's stop waits 30 s. `pnpm gmt restart` starts the worker again only once the old process has
   exited (the launchd agent gone or the systemd unit inactive) and no running process holds `worker.lock`, each wait
   at most 285 s, and then only if its start check passes. When the check refuses, the worker stays stopped and the
   restart says why with the fix and exits non-zero (78 for a refusal) instead of reporting done. Every command that
-  starts the worker (`start`, `restart`, `update`, `setup`, `browser install`, `browser counts`, `consent`) reports done
+  starts the worker (`start`, `restart`, `update`, `setup`, `browser install`, `consent`) reports done
   only once the worker answers on its port (`127.0.0.1:8090` unless worker.env sets `CAMOUFOX_WORKER_PORT`); it
   usually takes a few seconds, since the worker launches its browser before it listens. If it has not answered within
   60 s the command exits 1 and says so, naming the port, the worker's log
@@ -1044,8 +1042,8 @@ pnpm gmt consent
    state cannot be read, it refuses unless `--force`. Then it stops the worker service alone; the app keeps running.
 2. A Camoufox window opens on `https://www.google.com/travel/flights` in a new, throwaway profile, and the command says
    "Click **Reject all** in the window, wait until Google Flights shows, then close the window. Nothing else is
-   needed". That one page load counts like any other (the page spacing, the monthly page count; it refuses during a
-   cool-down and names its end).
+   needed". That one page load counts like any other (the page spacing; it refuses during a cool-down and names its
+   end).
 3. Click **Reject all** on the first page, wait for Google Flights to show, and close the window. The tool clicks,
    types and navigates nothing itself; it only watches.
 4. It keeps the `SOCS` cookie set or changed after your choice only when the cookie's own value reads as a rejection
@@ -1125,9 +1123,7 @@ reinstalled where the install now puts it; nothing is copied from the old locati
 1. `pnpm gmt browser install`: about 313 MB to download (on an Intel Mac 320 MB). It removes the two retired names
    from `worker.env`, replaces the hand-written agent with the gmt worker service (same label,
    `local.get-me-there.camoufox-worker`) and starts it once its check passes.
-2. If the worker then refuses with `counts-missing`, its data directory is an earlier worker's (a pacer file, no counts
-   file): run `pnpm gmt browser counts` (below).
-3. The old `~/Library/Caches/camoufox` is not used any more; delete it when you like.
+2. The old `~/Library/Caches/camoufox` is not used any more; delete it when you like.
 
 ### On a machine with no display
 
@@ -1172,27 +1168,16 @@ missing with its install line; on Ubuntu 24.04:
 working directory. Each `<os>-<arch>` earns its flags from recordings made under its own build; `linux-arm64` and
 `linux-x64` have theirs, recorded on 2026-10-26 in Linux containers (`apps/camoufox-worker/Dockerfile.recorder`, whose
 header has the `docker run` line, and `apps/camoufox-worker/recorder/session.sh`, which stops this machine's worker for
-a session and carries its last page, counts and any pause in and out). In Docker on Linux the app cannot reach the host's
+a session and carries its last page and any pause in and out). In Docker on Linux the app cannot reach the host's
 loopback, so the Docker path on Linux leaves the provider off; the native app reaches it.
 
-### The monthly caps across every caller
+### Every caller shares one worker
 
-The worker enforces `CAMOUFOX_MONTHLY_PAGE_CAP` and `CAMOUFOX_MONTHLY_SCROLL_CAP` itself, for every app and recorder
-that calls it together, over the ledger's billing month (from 00:00 UTC on `CAMOUFOX_BILLING_DAY`). It counts each page
-before it loads (a crash over-counts, never under-counts) in `monthly.json` beside `worker.env`, refuses a page past the
-page cap (the app names it as the browser worker's cap, counting every app and recording, with the worker's own count
-and window end, and resumes a paused run when that window ends), and gives a grid page no more scrolls than the scroll
-cap leaves. Counts start again at zero only once their own window has ended: changing `CAMOUFOX_BILLING_DAY`, or a clock
-stepped back, carries them until then.
-
-If that file is missing beside the pacer's file (an earlier worker's data) or cannot be read (invalid, or readable by
-others), the worker refuses to start (`counts-missing`, `counts-unreadable`), a running worker refuses every page and
-reports itself not ok, and the app skips the provider with that reason; the file is never rewritten with zeros. Run
-`pnpm gmt browser counts` (also offered by `pnpm gmt setup --reconfigure browser`): it takes this month's browser pages
-and scrolls from the native app's ledger, or as you give them (`--pages`, `--scrolls`; with the app in Docker its
-Providers page shows both), adds any pages loaded outside the ledger that you state (`--other-pages`: recordings, another
-app), shows the result, and on a yes stops the worker, has the worker write the file under its own lock, and starts it
-again. A second app calling the same worker in one month is reported in the status, not refused.
+Every app and recorder that calls the worker waits on its one page spacing and stops at its one cool-down. There is no
+monthly page or scroll cap: a run's pages are bounded by `CAMOUFOX_EXECUTION_PAGE_CAP` and the flight-list allowance, a
+grid page's scrolls by what `CAMOUFOX_EXECUTION_SCROLL_CAP` leaves, and every page by the spacing. The Providers page
+shows the browser's pages this calendar month, with no cap on them. A second app calling the same worker in one
+calendar month is reported in the status, not refused.
 
 ### Key rotation
 
@@ -1258,13 +1243,12 @@ verified on the worker").
   view is priced as usual. On other machines such a cell is not read until that machine's own recordings show one:
   it ends as an error you can resume, and a view in which a whole departure or return day has no price is not read
   at all.
-- **Caps.** Every page still counts one page against `CAMOUFOX_EXECUTION_PAGE_CAP` and `CAMOUFOX_MONTHLY_PAGE_CAP`.
-  Scrolls have their own caps: `CAMOUFOX_EXECUTION_SCROLL_CAP` (default 600) and `CAMOUFOX_MONTHLY_SCROLL_CAP`
-  (default 6,000), at most `CAMOUFOX_GRID_SCROLL_CAP` (default 30) a page, at least
+- **Caps.** Every page still counts one page against `CAMOUFOX_EXECUTION_PAGE_CAP`. Scrolls have their own cap,
+  `CAMOUFOX_EXECUTION_SCROLL_CAP` (default 600) a run, at most `CAMOUFOX_GRID_SCROLL_CAP` (default 30) a page, at least
   `CAMOUFOX_GRID_SCROLL_SPACING_SECONDS` (default 5, 0 to 30, never randomised; 0 means no pause, scrolls go back to back) between scroll clicks. Keep the grid settings
   equal in `worker.env` and the app's settings: the worker reports its scroll cap, spacing and page timeout, and the app
-  skips the provider, naming the setting, while any of them differs. A page asks for no more scrolls than the run's and the month's
-  scroll caps leave; with none left it still reads its first block, and the blocks it did not reach stay for the next
+  skips the provider, naming the setting, while any of them differs. A page asks for no more scrolls than the run's scroll cap
+  leaves; with none left it still reads its first block, and the blocks it did not reach stay for the next
   run.
 - **Speed and coverage.** A page opens a block in about 30 s and a scroll takes about 9.3 s (measured 2026-10-18), so
   a new page is the quicker way to a new block, and the planner opens pages until the page cap binds, then scrolls.
@@ -1320,7 +1304,7 @@ layout differs from the pinned entry.
    that file into `worker.env`, then delete `key.tmp`. A `worker.env` that still names `CAMOUFOX_BINARY_BUILD` or
    `CAMOUFOX_INSTALL_DIR` is refused (`pnpm gmt browser install` removes them): the build and its directory now come
    from the pinned entry. Copy the shared settings (the cool-down, page timeout, mode, grid
-   scroll cap and spacing, monthly caps, billing day and fare market) from `app.env`, so both sides match.
+   scroll cap and spacing, and fare market) from `app.env`, so both sides match.
 3. Install the browser and the worker service with `pnpm gmt browser install`. The worker refuses to start with
    `consent-missing` until the next step, which is expected.
 4. Capture your cookie choice with `pnpm gmt consent` (above); it starts the worker once its check passes. To try the worker in a terminal instead, stop the service (`pnpm gmt stop --only worker`) and run

@@ -243,7 +243,7 @@ const SAMPLES: Record<string, unknown[]> = {
   'flights.notRead': ['its monthly limit is used up'],
   'flights.noFlightsWhen': ['11:44'],
   'flights.noneForCell': [2, 1],
-  'flights.readButton': [2, '90'],
+  'flights.readButton': [2],
   // WP21 Task 21.7: the return leg on a search's page (spec rev 56 §11)
   'flights.headPairing': ['next-cheapest', true, '3d ago', '12 Mar 11:44'],
   'flights.headPairingOver': [true, '3d ago', null],
@@ -268,11 +268,10 @@ const SAMPLES: Record<string, unknown[]> = {
   'flights.returnCounts': [2, 1],
   'flights.moreListed': [12, 10],
   'flights.triedSome': [1, 5],
-  'flights.returnSkipped': ['fewer than 2 browser pages left this month'],
+  'flights.returnSkipped': ['the wait between pages ran past its time'],
   'flights.returnTransient': [false],
   'flights.bookingTransient': [true],
   'flights.bookingSkipped': ['the list was not on its Cheapest view'],
-  'flights.readOutboundOnly': [2],
   'flights.readDoneReturns': ['14 → 24 Mar', 2],
   'datesView.pairingTimes': ['07:15', '14:20'],
   'datesView.gridShowed': ['the date grid'],
@@ -661,12 +660,9 @@ describe('the return leg in words (spec rev 56 §11, §1 "What a price is"; WP21
     expect(F.roundTrip).toBe('round trip');
     expect(texts.filter((t) => /round[- ]trip total|roundtrip/i.test(t))).toEqual([]);
   });
-  it("the read button's pages from the response, the outbound-only read, the limits lines", () => {
-    expect(F.readButton(2, null)).toBe('Read flights for this date (free, up to 2 pages)');
-    expect(F.readButton(1, '90')).toBe('Read flights for this date (free, 1 page; 90 pages left this month)');
-    expect(F.readOutboundOnly(2)).toBe(
-      'Read flights for this date (free, 1 page; return leg not read: fewer than 2 pages left)',
-    );
+  it("the read button's pages from the response, the limits lines", () => {
+    expect(F.readButton(2)).toBe('Read flights for this date (free, up to 2 pages)');
+    expect(F.readButton(1)).toBe('Read flights for this date (free, 1 page)');
     expect(F.limitsWithReturns(F.settingsNotApplied, F.windowsOutboundOnly)).toBe(
       'airline settings not applied to flights read · windows apply to the outbound',
     );

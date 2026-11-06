@@ -1,6 +1,6 @@
 # get-me-there — Flight Price Intelligence & Flexible-Date Optimiser
 
-**Design spec, revision 63.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
+**Design spec, revision 64.** Written 2026-10-14. Every section is self-contained; nothing refers to a prior revision. Status: **approved by Ian on 2026-10-14 at revision 8** after
 four full-roster reviews (145, 140, 126 and 101 findings; zero Critical since
 revision 2) and the provider spike. Revision 9 folds in the three decisions
 taken at approval (the self-scraping fallback in §2, the dashboard readings in
@@ -281,9 +281,7 @@ Google document load, whichever request it belongs to, starts at least
 `CAMOUFOX_MIN_SPACING_SECONDS` after the last (less the 2 s tolerance), so
 documents per hour stay at most `floor(3600 / spacing)`; a flights request
 with a return phase takes up to `FLIGHT_LIST_PAGES_PER_PAIR_MAX` of them, each
-reserved in the worker's monthly counts before the first load and settled to
-the documents loaded, each counted on the answer as `pagesLoaded` and in the
-ledger as `page_count`; after such a request the answer states when the next
+counted on the answer as `pagesLoaded` and in the ledger as `page_count`; after such a request the answer states when the next
 load may start and the app waits for it. Before reading, the worker checks the
 page's own search form (round trip, one adult, departure and return dates)
 against the query, and waits, polling the page through Playwright's locators within
@@ -437,9 +435,8 @@ the name: a tab with none there is unpriced.
   are at least `CAMOUFOX_GRID_SCROLL_SPACING_SECONDS` apart start to start
   (default 5, 0 to 30, fixed, never randomised; 0 means no pause, the scrolls go
   back to back). A run makes at most
-  `CAMOUFOX_EXECUTION_SCROLL_CAP` scrolls (default 600) and a month at most
-  `CAMOUFOX_MONTHLY_SCROLL_CAP` (default 6,000); the adapter asks the budget
-  guard what the two caps leave, passes the page no more than that as its
+  `CAMOUFOX_EXECUTION_SCROLL_CAP` scrolls (default 600); the adapter asks the
+  budget guard what that cap leaves, passes the page no more than that as its
   allowance and reserves that many, and the worker never scrolls past it: a
   page with no scroll left still reads its first block, and the blocks it did
   not reach are `error` (`parse`, `scroll-allowance`), resumable. The worker
@@ -573,8 +570,7 @@ discovery page does), the consent cookie, the signed-out profile, the
 page gate and the GBP check (a page in another currency is `blocked`,
 `unrecognised`, rule `currency`); each request is one ledger row of `page_class`
 `page` with `endpoint_path` `/v1/flights` whose `page_count` is the documents
-it loaded, counted by its pages in `CAMOUFOX_MONTHLY_PAGE_CAP` and as one
-request in `EXECUTION_MAX_FREE_CALLS`, and the answer stays under 100 KB at
+it loaded, counted as one request in `EXECUTION_MAX_FREE_CALLS`, and the answer stays under 100 KB at
 the schema's limits (30 flights, two attempts of 30 returns, 40 offers). A run reads flight
 lists for the **10 cheapest date pairs on its search's board**
 (`FLIGHT_LIST_COUNT`) on an allowance of `flightListPages` = `FLIGHT_LIST_COUNT`
@@ -582,7 +578,7 @@ lists for the **10 cheapest date pairs on its search's board**
 `CAMOUFOX_EXECUTION_PAGE_CAP` and frozen into the budget snapshot,
 so a first pass that used its whole page cap still reads
 its flights (§8.1 "The flight-list step"). On demand one date pair's list is
-read against the monthly cap only, refused while any run that names the
+read outside any run's caps, refused while any run that names the
 provider is pending or running or another read is in flight, and refused as
 `fresh` by the rule of §8.1 "Reading one date pair's flights". Source label "Google
 Flights flight list via Camoufox" (the main path names it "the browser
@@ -623,11 +619,8 @@ The worker runs the phase only in `flights` mode, only when the request
 carries `returnLimits`, only on an entry whose `RETURN_SELECT_VERIFIED` is set
 (else the status is `not-verified`, nothing activated), and only from the
 Cheapest view the served sequence reached (a Best fallback, or no view, runs
-none: `skipped`, rule `not-cheapest-view`). Its admission asks the monthly
-counts for `FLIGHT_LIST_PAGES_PER_PAIR_MAX` pages; with fewer left than that
-but at least one, the request is admitted with 1 and the phase is `skipped`,
-rule `monthly-headroom`, before any activation, the first view still read
-(never a refusal). In order:
+none: `skipped`, rule `not-cheapest-view`). The request is admitted for
+`FLIGHT_LIST_PAGES_PER_PAIR_MAX` pages. In order:
 
 - **The outbound.** Core's `selectOutbound` (§6.2) picks, among every flight
   read for the cell (before the 30-cut), the first that fits every limit in
@@ -730,15 +723,14 @@ rule `monthly-headroom`, before any activation, the first view still read
 - **Statuses.** `returns.status` is `read` (at least one attempt's return view
   read; its returns may be empty, `listed` `none-for-cell`), `no-outbound`
   (the outbound page listed no flight for the pair, nothing activated),
-  `skipped` (no attempt made, rule `monthly-headroom`, `spacing` or
-  `not-cheapest-view`), `select-failed`, `not-settled`, `unrecognised` (the
+  `skipped` (no attempt made, rule `spacing` or `not-cheapest-view`), `select-failed`, `not-settled`, `unrecognised` (the
   first attempt's transient end, with its rule naming the step) or
   `not-verified`; a `read` whose second attempt ended early, or could not
   start (`spacing`), carries that end's rule. `booking.status` is `read` (the
   expansion made, or no control present, and at least one offer read),
   `no-pairing` (no return listed on the last attempt, nothing selected),
-  `skipped` (no booking step made, with its rule: `monthly-headroom` and
-  `not-cheapest-view` as the returns', `reload:<end>` after a reload that did
+  `skipped` (no booking step made, with its rule: `not-cheapest-view` as the
+  returns', `reload:<end>` after a reload that did
   not reach a settled Cheapest view, `second-selection` when the second
   selection failed, and the return's own rule when the first attempt ended
   before any return view or the phase began on a refusal the guard read; a
@@ -859,60 +851,24 @@ execution (default 100, at most 400; frozen into the execution's budget
 snapshot at creation), plus at most `flightListPages` (20: `FLIGHT_LIST_COUNT`,
 10 requests, at up to `FLIGHT_LIST_PAGES_PER_PAIR_MAX` pages each)
 flight-list pages on an allowance of their own outside it (the flight-list
-read, above), and `CAMOUFOX_MONTHLY_PAGE_CAP` per month (default 1,500),
-which counts every page of both kinds.
+read, above).
 
-*Caps across callers.* The worker enforces `CAMOUFOX_MONTHLY_PAGE_CAP` and
-`CAMOUFOX_MONTHLY_SCROLL_CAP` itself, for every caller together, over the
-ledger's own window: the month starting at 00:00 UTC on
-`CAMOUFOX_BILLING_DAY` (§7 "Budget windows"), computed by one pure function
-in `core` that the `db` window query is tested to agree with. The caps and
-the billing day are shared settings (§12), so the app's ledger and the
-worker count the same month against the same numbers. Under the default
-`CAMOUFOX_BROWSER_WINDOW=scheduled`, pages also load only inside a run's
-browser window (§8.2). The worker keeps the
-window's page and scroll counts in their own 0600 file beside its pacer's
-last-page time and counts every page it loads (the adapter's, the `consent`
-command's and the `consent-research` recorder's). Under
-its lock, before loading anything, it admits a page only while the page cap
-has room (a page past it is refused with the reason `monthly-cap`, which the
-adapter maps to `BudgetExceeded` at `provider-month`); it clamps a grid
-page's scroll allowance to what the monthly scroll cap leaves, so a page with
-no monthly scroll left still reads its first block and a page that reaches
-the clamp ends as `allowance` with the views it read kept and its row's
-`scroll_count` equal to the scrolls made; it admits a flights request with a
-return phase for `FLIGHT_LIST_PAGES_PER_PAIR_MAX` pages when they all fit,
-else for 1 (an outbound-only read: the phase is `skipped`,
-`monthly-headroom`); and it writes the pages and the clamped allowance into
-the counts file before the first load, settling to the documents loaded and
-the scrolls made afterwards (never above the reservation: for a
-return-phase request the guard aborts a main-frame navigation past it,
-refused `page-reservation`), so a crash
-over-counts and never under-counts. The
-`monthly-cap` answer carries the worker's cap, its own count and its window's
-end, and the adapter's `BudgetExceeded` carries those figures, named as the
-browser worker's cap counting every app and recording that uses it, and a
-paused run resumes at that window's end; a page that stopped short at the
-worker's scroll clamp stops that run's next grid tile at `provider-month`
-(scrolls) until the worker's window ends, then asks the worker again. The
-counts file records its window's start and end, and counts start at zero
-only once their own window has ended: a changed billing day or a clock
-stepped back carries them into the current window, never resets them. An
-absent counts file starts the window at zero only when the worker has never
-loaded a page (no pacer file either). A counts file that is missing beside
-an existing pacer file (an earlier worker's data) or cannot be read
-(invalid, or from a widened mode) is never overwritten with zeros: the worker
-refuses to start (`counts-missing`, `counts-unreadable`), a running worker
-refuses every page with its own answer `counts-unreadable` (never
-`monthly-cap`; HTTP 503) and reports `ok: false` with `readable: false`, and
-the app's preflight skips the provider with that reason. `gmt browser counts`
-(§13) rewrites the file, through the worker's own `counts` entry under its
-lock and core's schema, from the app ledger's month of camoufox pages and
-scrolls (`GET /api/providers` reports both) or the figures the operator
-states, plus the pages loaded outside the ledger the operator states.
-`/v1/status` reports the counts and the window. A second app instance
-calling the worker in one window is reported in the Status view, not
-refused.
+*Every caller shares one worker.* The page spacing, the cool-downs and the
+lock are the worker's own, so every caller (the adapter, the `consent`
+command and the `consent-research` recorder) waits on the same pacer and stops
+at the same cool-down. Under the default `CAMOUFOX_BROWSER_WINDOW=scheduled`,
+pages also load only inside a run's browser window (§8.2). There is no
+monthly page or scroll cap: the per-run page cap, the flight-list allowance,
+the run's scroll cap and the page spacing bound the browser's pages. A grid
+page's scroll allowance is what the run's scroll cap leaves; a page with none
+left still reads its first block, and a page that reaches its allowance ends
+as `allowance` with the views it read kept and its row's `scroll_count` equal
+to the scrolls made. A flights request with a return phase is admitted for
+`FLIGHT_LIST_PAGES_PER_PAIR_MAX` pages, and the guard aborts a main-frame
+navigation past them (refused `page-reservation`). The ledger still counts
+the browser's pages over the calendar month (from 00:00 UTC on the 1st) for
+the Providers view, with no cap on them. A second app instance calling the
+worker in one calendar month is reported in the Status view, not refused.
 
 *Consent: rejected, never accepted.* A fresh signed-out profile lands on
 Google's consent page ("Before you continue", "Reject all" / "Accept all";
@@ -935,8 +891,7 @@ whose window closes and whose throwaway profile is deleted) all leave the
 worker as it was and the stored record byte for byte as it was. The command
 holds the worker's lock and runs under its pacer and cool-downs: it refuses
 during a cool-down, naming its end, waits out the page spacing from the
-persisted last-page time and writes that time after its one load, which the
-monthly page count includes. It opens a visible Camoufox window in a new
+persisted last-page time and writes that time after its one load. It opens a visible Camoufox window in a new
 throwaway profile on the landing page `https://www.google.com/travel/flights?hl=en-GB&gl=<POINT_OF_SALE>`;
 on Linux it alone receives the display variables `gmt consent` passes
 through, as two groups, `DISPLAY` with `XAUTHORITY` when `DISPLAY` is set and
@@ -1125,10 +1080,9 @@ every load comes from the operator's own address like every other recording;
 each Linux session also prices one grid page through an app running in the
 same container. Because the address is the operator's, the host's worker is
 stopped for the session, the session's spacing starts from the host's last
-page, and the session's pages, scrolls and any cool-down are merged back into
+page, and the session's last-page time and any cool-down are merged back into
 the host's data directory before its worker starts again (the later last-page
-time, the counts added when the billing windows match, the longer cool-down
-kept). The containers mount only the source paths the recorder needs, never
+time and the longer cool-down kept). The containers mount only the source paths the recorder needs, never
 `.env`, `data/` or any settings file. Work package 17 also records, in throwaway
 profiles, headed, with the person clicking and under the `consent`
 command's guard above, one "Reject all" and one "Accept all" capture,
@@ -1157,9 +1111,9 @@ cost 0, never cached; engine reuse, §8.1, is the only reuse). The worker
 states on every answer whether Google was contacted; a row whose answer
 contacted no Google page (spacing 429, cooling-down 423, mode-unavailable
 409, 400, 401, a 5xx before navigation, a refused connection) carries the
-outcome class `no-page`, and the page caps (`provider-month` and
-`provider-execution` for camoufox) and every "pages" figure count only the
-other rows. A page row counts its pages: `page_count` (§7) is the plan while
+outcome class `no-page`, and the page cap (`provider-execution` for
+camoufox) and every "pages" figure (the calendar month's count included)
+count only the other rows. A page row counts its pages: `page_count` (§7) is the plan while
 the row is pending (`FLIGHT_LIST_PAGES_PER_PAIR_MAX` for a flights request
 with a return phase, reserved as `ReserveParams.pages`, else 1), the
 answer's `pagesLoaded` once finalised (0 admitted: a first load refused), the
@@ -1168,11 +1122,10 @@ failure after the worker was reached, finalised `error` with no status), and
 NULL on a `no-page` row (a refused connection included: nothing was sent) and
 on every row whose answer states no page count (an older worker, a list or
 grid page), which counts 1; the camoufox page scopes sum `COALESCE(page_count, 1)` over
-page rows and report that sum as their `calls`, so the usage read, the
-Providers page and `gmt browser counts` keep their shape. The reservation
-checks the planned pages against the caps, so a return-phase request needs
-room for 2. `provider-execution` is checked after `provider-month` and before
-`execution-free-calls`, which camoufox page rows also draw on by request;
+page rows and report that sum as their `calls`, so the usage read and the
+Providers page keep their shape. The reservation checks the planned pages
+against the run's caps, so a return-phase request needs room for 2.
+`provider-execution` is checked before `execution-free-calls`, which camoufox page rows also draw on by request;
 it splits the rows by `endpoint_path` with one predicate (keeping the
 `no-page` filter on both halves), counting `/v1/page` pages against
 `CAMOUFOX_EXECUTION_PAGE_CAP` and `/v1/flights` pages against the
@@ -1180,10 +1133,10 @@ snapshot's `flightListPages` (a snapshot without it allows no flight page,
 so the check fails closed; a `/v1/flights` row cut off before any answer, a
 cancel or SIGTERM, ledgered `unknown` with no status and no error class, is
 left out of that allowance only, since its pair is read again, §8.1, while
-`provider-month` counts it at its planned pages), and `usage` reports the two
+the month's count counts it at its planned pages), and `usage` reports the two
 as separate entries.
-An on-demand flight read (`execution_id` NULL) is checked at
-`provider-month` only. The ledger's per-execution counts report flight pages
+An on-demand flight read (`execution_id` NULL) is checked against no run's
+cap; its pages join the month's count. The ledger's per-execution counts report flight pages
 as a count of their own beside the per-stage lines (the same page sum),
 never as verification. Transport
 failures after the request was sent (a timeout, a dropped socket) are never
@@ -1192,9 +1145,9 @@ mode a scroll is not a page load: a page's row carries `scroll_count`, the
 scroll clicks it made (every answer to a grid request that reached Google
 carries them, a stop included; a timeout or an abort after the request left,
 outcome `unknown`, keeps the planned scrolls the reservation held, so the
-scroll caps never undercount; a refused connection, a `no-page` row, leaves
-it NULL), the page caps count pages (one a grid row), and the scroll caps count
-`scroll_count`. A scroll-cap breach is worded as one ("camoufox's scroll cap
+scroll cap never undercounts; a refused connection, a `no-page` row, leaves
+it NULL), the page cap counts pages (one a grid row), and the run's scroll cap
+counts `scroll_count`. A scroll-cap breach is worded as one ("camoufox's scroll cap
 for this run is 600 scrolls; …").
 
 *Labels.* Display name "Google Flights via Camoufox"; source label "Google
@@ -1249,10 +1202,10 @@ its own log only, each option a list page did not count for its cell
 location text.
 
 *Coverage, stated plainly.* In `list` mode a page prices one day pair, so a
-run prices at most `CAMOUFOX_EXECUTION_PAGE_CAP` day pairs and a month at
-most `CAMOUFOX_MONTHLY_PAGE_CAP`: with the defaults, 100 a run and 1,500 a
-month, against 2,184 day pairs for one worked-example airport pair (8,736 for
-its four pairs). The estimate says how many cells a run will price and how
+run prices at most `CAMOUFOX_EXECUTION_PAGE_CAP` day pairs: with the default,
+100 a run, against 2,184 day pairs for one worked-example airport pair (8,736
+for its four pairs), so a full pass of one pair takes ⌈2,184 / 100⌉ = 22 runs.
+The estimate says how many cells a run will price and how
 many runs a full pass takes; the rest of the cells read skipped or not
 searched in a search's coverage section. The `grid` mode changes the arithmetic: 7 × 7
 blocks laid over a 12-night band need `⌈182 / 7⌉ × ⌈18 / 7⌉ = 26 × 3 = 78`
@@ -1268,9 +1221,8 @@ run's estimate is 100 pages and 588 scrolls, about 2.4 hours, reading 5,152 of t
 pass takes 3 runs; with `CAMOUFOX_EXECUTION_PAGE_CAP` raised to 312 it is one
 run of 312 pages and no scrolls, about 2.6 hours. A scroll takes the measured
 9.3 s or the configured spacing when that is longer, and the estimate says
-when a run would pass `STUCK_AFTER_HOURS`; `budgetFit` warns when a month's
-scrolls pass the monthly scroll cap. `list` mode needs 8,736 pages for the
-same pass.
+when a run would pass `STUCK_AFTER_HOURS`. `list` mode needs 8,736 pages for
+the same pass.
 
 *Costs, stated plainly.* **Terms:** Read the provider's terms before enabling
 it; the operator is responsible for how it is used. **The operator's IP and account:** every page
@@ -2537,8 +2489,9 @@ are `toISOString()` text; booleans are integers 0/1.
   `{ planned, cells, reused, ended, returns, booking, returnsStopped,
   bookingStopped }`, the run's flight-list plan, §8.1,
   written once when the step selects at least one date pair, to read or to
-  reuse, with `ended` ∈ `window` | `monthly-cap` | `stopped` | NULL set when
-  the step ends early; `returns` and `booking` whether the plan reads returns
+  reuse, with `ended` ∈ `window` | `stopped` | NULL set when the step ends
+  early (a plan written before revision 64 may hold `monthly-cap`, which
+  still reads); `returns` and `booking` whether the plan reads returns
   and the booking options, and `returnsStopped` and `bookingStopped` the rule
   that stopped them for the rest of the run, or null; a plan written before
   0012 has none of the four and reads as `false`, `false`, null, null, an
@@ -2961,7 +2914,13 @@ finish: completed, or the stop's status with its stored cause ("Stop causes" bel
   `no-airport-names`, `none-for-cell`, `unparsed`, `monthly-cap`,
   `execution-cap`, `free-call-cap`, `outside-browser-window`, `fatal`,
   `aborted`), never free text, so no vendor or engine sentence reaches a
-  cause (a preflight's vendor detail is stored as its class word only). One
+  cause (a preflight's vendor detail is stored as its class word only).
+  Nothing writes `counts-unreadable` or `monthly-cap`, nor a camoufox
+  `provider-month` budget cause: the browser provider has no monthly cap. A
+  row written before revision 64 may hold them, and they still read and are
+  worded ("The browser worker's monthly page limit is used up; it resets on
+  1 Apr 00:00." with "Search again after 1 Apr 00:00"; such a stop keeps its
+  `resume_after` NULL and never offers Resume). One
   pure function in `core`, `stopText(cause, { tz, mode, scheduled })`, words
   every cause as a full sentence and one fix (`{ text, command }`, the
   command a `pnpm gmt …` line in native mode only) from one template table:
@@ -2980,10 +2939,7 @@ finish: completed, or the stop's status with its stored cause ("Stop causes" bel
   limit for one run." with "Raise the limit in Edit, then Resume"; "This
   search stopped at its limit of browser pages for one run; flights were read
   for 8 of 10 date pairs." with "Search again to carry on (prices already
-  found are reused)"; "The browser worker's monthly page limit is used up; it
-  resets on 1 Apr 00:00, and the next scheduled run picks these pages up." (the
-  last clause on a scheduled search only) with "Search again after 1 Apr
-  00:00"; "The Aviasales cache is limiting how fast it answers; this search
+  found are reused)"; "The Aviasales cache is limiting how fast it answers; this search
   resumes at 14 Mar 15:00." on a scheduled search only, and on an unscheduled
   one the sentence without the resume and the fix "Resume"; "Stopped by you.";
   "Replaced by a search you started."; "Replaced by a scheduled run."; "Too old
@@ -3010,21 +2966,17 @@ finish: completed, or the stop's status with its stored cause ("Stop causes" bel
   limit Search again, §8.1 "Stop causes"). The operator notice of a
   `paused_budget` stop (email and Status) offers what that fix offers, case for
   case, and never a Resume the page refuses: a run's own cap "Raise the limit in
-  Edit, then Resume."; a browser page limit, per run or monthly, and another
-  provider's own per-run cap "Search again carries on with the prices already
-  found." (after the monthly limit's reset when it has one); a plan with no
+  Edit, then Resume."; a browser page limit and another provider's own
+  per-run cap "Search again carries on with the prices already found."; a
+  plan with no
   calls left "Check Providers."; a scheduled run that stored a resume when it
   resumes; any other "Search again, or Resume when you are ready.", led on an
   unscheduled search by "This search has no schedule;". Scheduled
-  searches keep the automatic resume. Two stops follow for every search,
-  scheduled or not: a stop at the browser provider's **monthly** page limit
-  stores `resume_after` NULL and never offers Resume (a resume past the run's
-  browser window reads no browser pages, §8.2); its sentence says when the
-  limit resets and offers Search again, a fresh run, and on a scheduled search
-  adds that the next scheduled run picks the pages up; and a stop at its
-  **per-run** page limit (`provider-execution`) offers Search again, which
-  reuses the prices already found, never Resume, and a manual `/resume` of it
-  is refused `cap`. A scheduled firing supersedes a stopped run of its own
+  searches keep the automatic resume. For every search, scheduled or not, a
+  stop at the browser provider's **per-run** page limit (`provider-execution`)
+  offers Search again, which reuses the prices already found, never Resume (a
+  resume past the run's browser window reads no browser pages, §8.2), and a
+  manual `/resume` of it is refused `cap`. A scheduled firing supersedes a stopped run of its own
   search (§8.2), so adding a schedule is never blocked by an old stopped
   manual run.
 - **The flight-list step** (the browser provider's flight-list read, §2). A
@@ -3079,17 +3031,15 @@ finish: completed, or the stop's status with its stored cause ("Stop causes" bel
   `flightLimitsOf(snapshot constraints)` and `booking` the plan's `booking`,
   sent only while the plan reads returns and `returnsStopped` is null
   (`booking` false once `bookingStopped` is set); before each request,
-  once the browser lease is free (the window and the month's pages are read
-  then, so a read held behind an on-demand one is shaped by what is left
-  after it), the step sends an outbound-only one instead (no `returnLimits`, 1 page
-  reserved, `returnsStopped` left null) when the month's page headroom (the
-  monthly cap less the pages used, from the guard) is below
-  `FLIGHT_LIST_PAGES_PER_PAIR_MAX`, or when the run's window no longer holds
-  a return-phase request's seconds but holds an outbound-only one's. The
+  once the browser lease is free (the window is read then, so a read held
+  behind an on-demand one is shaped by what is left after it), the step sends
+  an outbound-only one instead (no `returnLimits`, 1 page reserved,
+  `returnsStopped` left null) when the run's window no longer holds a
+  return-phase request's seconds but holds an outbound-only one's. The
   allowance check is `used + (returnLimits ? FLIGHT_LIST_PAGES_PER_PAIR_MAX :
   1) > flightListPages`, which refuses before any call. After a `list`
   result whose return status is `select-failed`, `not-settled` or
-  `unrecognised`, or `read` with a rule other than `spacing` or `monthly-headroom`, the step
+  `unrecognised`, or `read` with a rule other than `spacing`, the step
   sets `returnsStopped` to its rule, and after
   one whose booking status is transient it sets `bookingStopped`, so the
   pass sends no further return phase (or booking read); `skipped`,
@@ -3123,7 +3073,7 @@ finish: completed, or the stop's status with its stored cause ("Stop causes" bel
 
   | The page's result | This date pair | The rest | The step |
   |---|---|---|---|
-  | `BudgetExceeded`, any scope (the worker's `monthly-cap`, the guard's `provider-month`, `execution-free-calls`, `provider-execution`) | `failed`, reason `monthly-cap`, `free-call-cap` or `execution-cap` | `failed` with the same reason, no request sent | ends, `ended 'monthly-cap'` or `'stopped'` |
+  | `BudgetExceeded`, any scope (the guard's `execution-free-calls`, `provider-execution`) | `failed`, reason `free-call-cap` or `execution-cap` | `failed` with the same reason, no request sent | ends, `ended 'stopped'` |
   | `list-error` `blocked`, `provider-unavailable`, `auth`, `quota` | `failed`, reason the error's `STOP_DETAILS` word when it has one (`no-airport-names`), else its kind | `failed` the same, no request | ends; a blocked answer also disables camoufox for the run and sends the once-per-cool-down notice, as discovery does |
   | `list-error` `limiter-timeout` | `failed`, reason `limiter-timeout` | `failed` the same | ends, never pausing the run |
   | `list-error` `parse`, `upstream`, `network`, `rate-limit` | `failed`, reason as above | continue | continues |
@@ -3139,8 +3089,8 @@ finish: completed, or the stop's status with its stored cause ("Stop causes" bel
   `execution-free-calls`. A request cut off before any answer (a cancel or
   SIGTERM: ledgered `unknown`, with no status and no error class) is left out
   of the run's flight-list allowance, since its pair has no row and the
-  resumed pass reads it again; the monthly cap still counts it at its planned
-  pages, and a timed-out request counts in both. So a resumed pass in the
+  resumed pass reads it again; the ledger's month still counts it at its
+  planned pages, and a timed-out request counts in the allowance as well. So a resumed pass in the
   worst case (four pairs at 2 pages, the fifth cut off) still reads its tenth
   pair.
   A **resumed pass** keeps `planned`, `cells`, `returns` and `booking`,
@@ -3165,10 +3115,9 @@ finish: completed, or the stop's status with its stored cause ("Stop causes" bel
   name camoufox (`not-named`), the install has not configured it
   (`not-configured`) or the cabin is not economy (`cabin`); `fresh` when the
   newest list for that cell is `read`, younger than 0.9 × the refresh, and,
-  under the phase the read would send (none with fewer than
-  `FLIGHT_LIST_PAGES_PER_PAIR_MAX` pages of month headroom; the whole return
-  phase, booking read included, while no worker flags have been read since
-  boot, since the read's own preflight may report them), either no return
+  under the phase the read would send (the whole return phase, booking read
+  included, while no worker flags have been read since boot, since the read's
+  own preflight may report them), either no return
   phase is planned for this worker, or its return status is
   finished under limits equal to the current ones and, when a booking read is
   planned, its return status is `no-outbound` or its booking status is
@@ -3185,11 +3134,9 @@ finish: completed, or the stop's status with its stored cause ("Stop causes" bel
   discovery preflight first (a refusal records `failed` with its detail word;
   its result sets the worker's flags), sends `returnLimits` (the definition's
   own limits; a request body carrying them is refused) and `booking` when
-  those flags say so and the month's headroom holds
-  `FLIGHT_LIST_PAGES_PER_PAIR_MAX` pages (else an outbound-only read of one
-  page, never a refusal),
+  those flags say so,
   ignores `CAMOUFOX_BROWSER_WINDOW` (it is its own anchor, like a manual
-  start), counts against the monthly page cap only, and writes one row with
+  start), counts against no run's cap, and writes one row with
   `execution_id` NULL and its return read (one read-row builder shared with
   the step); a throw inside it records `failed` reason `fatal`.
   Shutdown aborts a read in flight and waits for it within the drain, and
@@ -3222,11 +3169,8 @@ finish: completed, or the stop's status with its stored cause ("Stop causes" bel
   button states 2 pages then (an estimate never understates), and the
   browser window's margin is then a booking read's request.
   `returns` is whether at least one planned pair then goes out and back
-  (false when the month's pages leave none a return phase, and on a blocked
-  line, so the line is never worded "out and back" for a plan the month cut
-  to outbound-only); `pagesMax` and `secondsMax` are present whenever the
-  plan reads returns, so a schedule's monthly load counts 2 pages a pair
-  even from a month nearly spent.
+  (false on a blocked line); `pagesMax` and `secondsMax` are present whenever
+  the plan reads returns.
   The return phase is judged over the same candidates as the plan (the
   first 10 not departed of the ranking, reused ones included), so an older
   10-page snapshot is outbound-only in both. There is no boot read, so the
@@ -3236,14 +3180,8 @@ finish: completed, or the stop's status with its stored cause ("Stop causes" bel
   preflight reports, and each request falls back to outbound-only when the
   window cannot hold a return phase. `pairs` is the least of 10 less the reusable date pairs and `maxFreeCalls`
   less the plan's free calls and the other free providers' calls (free calls
-  count requests, one a pair), cut by the monthly pages left after the grid
-  or list plan, M: with returns and M holding every pair at 2 pages, every
-  pair goes out and back; with fewer, the step still sends a return phase
-  while 2 pages remain and a phase with no second outbound loads 1, so up
-  to `min(pairs, M)` date pairs are read, `min(that, M − 1)` of them out and
-  back and the rest outbound-only, at most M pages (at 1, 2, 3 and 5 pages
-  left: 0 + 1, 1 + 1, 2 + 1 and 4 + 1 pairs), and "for up to N date pairs"
-  counts those. A pair
+  count requests, one a pair); with returns every one of them goes out and
+  back, and "for up to N date pairs" counts them. A pair
   out and back is typically `CAMOUFOX_MIN_SPACING_SECONDS + 40 +
   RETURN_STEP_SECONDS × 3 + RETURN_SECOND_OUTBOUND_RATE ×
   (CAMOUFOX_MIN_SPACING_SECONDS + 2 × RETURN_STEP_SECONDS)` seconds (245 s at
@@ -3258,9 +3196,8 @@ finish: completed, or the stop's status with its stored cause ("Stop causes" bel
   2,450 s, at most 20 pages and 3,000 s (1,650 s and 2,200 s without the
   booking read; 10 pages and 700 s without returns). The typical seconds
   count in the estimate's total and in the browser window's end (§8.2), and
-  the bound's pages in camoufox's calls for the soft confirmation and in
-  `budgetFit`'s monthly pages (the per-run allowance, 20), the pairs in its
-  execution-free-calls line (10), never in `totalCalls`; the re-read of a
+  the pairs in `budgetFit`'s execution-free-calls line (10), never in
+  `totalCalls`; the re-read of a
   transient list (the reuse rule above) is inside that bound, at most one
   extra read a pair a refresh. `estimateRemaining` counts the same per
   planned flight cell with no row yet. Its assumptions say "+ flights, out
@@ -3269,20 +3206,14 @@ finish: completed, or the stop's status with its stored cause ("Stop causes" bel
   date pairs: usually about 15 pages and 41 minutes, at most 20 pages and 50
   minutes"), or "+ flights for up to N date pairs, about M minutes" without
   returns ("… 10 date pairs, about 12 minutes"), minutes rounded, and name a
-  cap that binds, compared in pairs ("flights for 4 date pairs: the browser
-  worker's monthly page cap", "flights for 1 date pair out and back: the
-  browser worker's monthly page cap", "flights for 5 date pairs: the run's
-  free-call limit"; without returns a tie between the two names the monthly
-  page cap). A schedule's monthly load counts the bound: a daily
-  schedule whose refresh is 168 h makes about 5 discovery runs a month, at
-  most 5 × (100 grid + 10 × 2) = 600 of the 1,500 pages and typically 5 ×
-  (100 + 15) = 575, the worker's settle giving back the pages not loaded,
-  so two such schedules fit a month. Without camoufox the stored estimate
+  cap that binds ("flights for 5 date pairs: the run's free-call limit").
+  Without camoufox the stored estimate
   has no `flightLists` key; an estimate stored before revision 56, holding
   only `pages` and `seconds`, reads as `pairs` = `pages` and `returns`
   false. The estimate also states what it asks, over the distinct
   planned cells of its runnable lines (each provider's plan cut at the lesser
-  of its execution cap and its monthly window's pages or calls left): the date
+  of its execution cap and, for a provider with a call cap, its window's calls
+  left): the date
   pairs of the space, those every one of whose airport pairs in scope is
   planned (covered), those some of whose are (partly), and those every one of
   whose airport pairs is reused (reused, never counted as asked); a blocked
@@ -3382,9 +3313,9 @@ any paused catch-up (the scheduled firing replaces it and starts with
 `scheduled_for` set); else if an execution is `paused_error` with `resume_after ≤ now`, or
 `paused_budget` and `estimateRemaining` now passes the cap check, **resume
 it** (through the compare-and-set), except a run stopped at the browser
-provider's monthly or per-run page limit (its stored cause a camoufox
-`provider-month` or `provider-execution` budget stop), which no tick, timer or
-boot ever resumes, even once its month has reset; else if the definition's own
+provider's per-run page limit (its stored cause a camoufox
+`provider-execution` budget stop, or a `provider-month` one stored before
+revision 64), which no tick, timer or boot ever resumes; else if the definition's own
 latest parent is `paused_*` or `interrupted` with no `resume_after` in the
 future (a page-limit stop, which this branch always takes, a manual run
 stopped while the search had no schedule, a stop every source's refusal
@@ -3551,8 +3482,8 @@ their tails. A resume checks the window
 before it prices or cap-checks anything: past the window, the provider's remaining
 cells are first written `skipped` with the reason `scheduled_only` (detail
 `outside-browser-window`), so the pass, its stored estimate and its cap check
-leave `camoufox` out, and a `camoufox` monthly cap cannot refuse a resume
-that SearchApi and Travelpayouts can run. A run past its window at check (a)
+leave `camoufox` out, and a `camoufox` cap cannot refuse a resume that
+SearchApi and Travelpayouts can run. A run past its window at check (a)
 or (c) does the same with its remaining cells; a page already loading
 finishes, and the operator is told
 once for that run, in a notice kind of its own (`browser_window`, so its
@@ -3934,9 +3865,8 @@ First-failing-test per WP in §16.
    matching CI jobs. Mutation testing (break threshold 80%, in the mutation
    workflow) covers the planners, the executors' file-mode logic, the secret
    generator, the answers schema, the Camoufox install planner, the consent
-   line codec, the status aggregation and its state rules (`core`), the
-   catch-up rule (`engine`, its own Stryker config) and the worker's monthly
-   admission; a check fails when a file a brief names for mutation is in no
+   line codec, the status aggregation and its state rules (`core`) and the
+   catch-up rule (`engine`, its own Stryker config); a check fails when a file a brief names for mutation is in no
    Stryker `mutate` glob, when a brief states no mutation scope (an empty
    one included), or when a merged brief still lists a pending one. The
    `consent` command runs against
@@ -4026,9 +3956,9 @@ points alike; a bare `true` is refused.
 | `GET /definitions/cards` | the first screen's cards (`searchCardsResponseSchema`), in the order the api owns: pending or running first (oldest start first), then by the latest run's start, newest first, then never-run searches in creation order; tool-run and deleted definitions are absent. Each card: id, name, origins, destinations, the window (absolute or relative, with its resolved dates), the stay, cabin, `schedule` (`{ cron, tz }` only when scheduled), the sources it names, `latestRun` (`{ id, status, trigger, startedAt, finishedAt, datePairs, datePairsSearched, datePairsNeverSearched, flights { planned, read } \| null, estimatedFinishAt, stop }` or null; the counts over the run's snapshot space by `datePairSearched`, §6.6, never-searched being the date pairs no run searched; `estimatedFinishAt` now plus that run's own remaining seconds while pending or running, for each such run; `stop` the stored cause's text, `NO_STOP_CAUSE_TEXT` for a stopped row without one, null on every other status), `spaceChangedSince` (the search's space changed after its latest run started), and `cheapest` (the board's first-ranked figure through the same ranking, with its full provenance, `stale` by the per-price rule, age, `truncated` as the board's figure carries it (decision 36; calendar basis only), basis, dates and airport pair, and `fromLatestRun`; the contract refuses a `pairing` basis that is stale or whose provenance is not a flight list's, as the board's leading pairing) or null; no field carries `error_text`, a key, a password or a path; read once per definition through grouped statements |
 | `POST /definitions/create-and-start` | Search now: body = the definition's fields without the stored confirmation pair, plus `confirmCostPence`, `confirmCalls` and a `requestKey` (a UUID). The route recomputes the estimate, creates the search, stores the sent figures as its confirmation only when they cover the recomputed shown runnable totals (the unblocked lines, `runnableTotalsOf`), then starts a manual run with them and `requireCovered`; a body that turns a schedule on (`enabled` with a cron) whose sent figures do not cover those shown totals is refused 409 `confirm` with no figures and nothing written, as Repeat weekly's `PUT` is, so a schedule is never saved without the confirmation its scheduled runs need; answers 201 `{ definition, executionId, refusal }`, where a refused start keeps the saved search and answers `refusal { code, estimatePence, totalCalls, resetsAt }` in the body (codes `cap`, `confirm`, `window`, `disabled`, `shutting-down`, `failed`, worded by the web; no message), never a thrown error, and a start that throws answers `failed`; a zero-cell window is 422 and creates nothing; the same `requestKey` again, while the first is pending or after it settled, creates nothing more and answers the first request's result (200), from a bounded map of the last 100 keys that evicts a rejected request's key |
 | `POST /definitions/:id/restore` | the undo of a remove: clears `deleted_at`, keeps the pre-delete `enabled` and schedule and re-registers the job when the search is scheduled, answers 200 with the live definition; a search that is already live answers 200 with its definition as it is and changes nothing (the restore is idempotent, so an Undo sent twice is not an error); 404 `definition_not_found` for an unknown or tool-only definition |
-| `GET /definitions/:id/flight-lists?pairs=` | the flights on a search's page (`flightListsResponseSchema`): `pairs` is 1 to 50 date pairs (`MAX_FLIGHT_LIST_PAIRS`) as `<departure>_<return>`, comma separated, else 422 `invalid_pairs`. Answers `available` with `unavailableReason` (`not-named`, `not-configured` or `cabin`), the camoufox `refreshHours`, `monthlyPagesLeft`, `runPages` (this search's browser pages for one run, flight pages included, from its own estimate; null when no camoufox line can run or flight lists are not available), `pagesPlanned` (the pages one on-demand read plans, `flightPagesPerPair` of the worker's last reported flags: 2 with a return phase, else 1; 2 while no flags have been read since boot, since the read's own preflight may report them and load 2; the read button and its words use it), `reading` (the date pair a read in flight is reading, or null), and per pair, in order: the figure's airport pair, its search `link` (`searchLinkFor('camoufox', cell, cabin, POINT_OF_SALE)` through the allowlist, null for a synthetic figure), `list` (the newest list for the figure's cell, cabin and point of sale, with full provenance, `ageHours` and `stale`, the stale mark against the camoufox refresh (`'refresh'` once older, judged on the elapsed time by `listFresh`, the pairing's own freshness rule, never on whole hours; else `false`), and its `returns` (the return read with its attempts, returns and booking read with its offers, `flightListSchema.returns`, null for a list read without a return phase or stored before migration 0012; the contract refuses an attempt's outbound index past the flights and a booking index past its attempt's returns); the only list that feeds the outcome beside the price, the pairing figure and the tie order) and `listOtherPair` (else the newest list for another airport pair of the current space, shown only inside the flights block), and `readNow` (whether a read of the date pair would go now: flight lists are available here, the date pair is the board's and departs after today, and its newest list is none, one the on-demand read would not refuse as `fresh` (the engine's one rule, `flightListFresh`: the step's reuse rule under the phase the read would send), or a failed one no monthly or per-run limit stopped; the read button shows exactly then, and the status notes word what happens next by it, §11) |
+| `GET /definitions/:id/flight-lists?pairs=` | the flights on a search's page (`flightListsResponseSchema`): `pairs` is 1 to 50 date pairs (`MAX_FLIGHT_LIST_PAIRS`) as `<departure>_<return>`, comma separated, else 422 `invalid_pairs`. Answers `available` with `unavailableReason` (`not-named`, `not-configured` or `cabin`), the camoufox `refreshHours`, `pagesPlanned` (the pages one on-demand read plans, `flightPagesPerPair` of the worker's last reported flags: 2 with a return phase, else 1; 2 while no flags have been read since boot, since the read's own preflight may report them and load 2; the read button and its words use it), `reading` (the date pair a read in flight is reading, or null), and per pair, in order: the figure's airport pair, its search `link` (`searchLinkFor('camoufox', cell, cabin, POINT_OF_SALE)` through the allowlist, null for a synthetic figure), `list` (the newest list for the figure's cell, cabin and point of sale, with full provenance, `ageHours` and `stale`, the stale mark against the camoufox refresh (`'refresh'` once older, judged on the elapsed time by `listFresh`, the pairing's own freshness rule, never on whole hours; else `false`), and its `returns` (the return read with its attempts, returns and booking read with its offers, `flightListSchema.returns`, null for a list read without a return phase or stored before migration 0012; the contract refuses an attempt's outbound index past the flights and a booking index past its attempt's returns); the only list that feeds the outcome beside the price, the pairing figure and the tie order) and `listOtherPair` (else the newest list for another airport pair of the current space, shown only inside the flights block), and `readNow` (whether a read of the date pair would go now: flight lists are available here, the date pair is the board's and departs after today, and its newest list is none, one the on-demand read would not refuse as `fresh` (the engine's one rule, `flightListFresh`: the step's reuse rule under the phase the read would send), or a failed one no per-run limit stopped; the read button shows exactly then, and the status notes word what happens next by it, §11) |
 | `POST /definitions/:id/flight-lists` | body `{ departureDate, returnDate }` (a body carrying `returnLimits` is refused: the read takes the definition's own limits): reads that date pair's flight list on demand (§8.1), with its return phase when the worker's flags allow; 202 `{ accepted: true }`, after which `GET` reports `reading`; 409 `browser_busy`, 409 `fresh`, 409 `not_available` with its reason, 422 `outside_space` and `no_price`, 404 `definition_not_found` |
-| `POST /definitions/estimate`, `POST /definitions/:id/estimate` | for an unsaved body or a saved definition: cells, per-provider calls (pre-factor and factored), cost (micro-GBP and pence), seconds, assumptions, `flightLists` when camoufox is named (`{ pairs, pages, seconds, pagesMax, secondsMax, returns }`, §8.1: the typical figures and the bound); beside `budgetFit`, what it asks: `datePairs`, `datePairsCovered`, `datePairsPartly` and `datePairsReused` (§8.1: planned cells only, reused apart), `softConfirm` (null, or the reason the press confirms as a code with its figures: `cost`, the estimate above `SOFT_CONFIRM_PENCE`, or `call-share`, a provider's calls above a fifth of its call cap, with that provider, its calls, the cap and the `window` it belongs to, `month` or `lifetime` (the SearchApi trial's one-off balance); never engine text), `billedCalls` (each runnable line of a billable-plan provider with its calls, the calls left in its `window` (`month`, or `lifetime` on the trial; less what other scheduled searches reserve, as the pre-start check reads it) and that `window`; `left` is null without a cap) and `monthlyPages` (`{ planned, left }` for the browser worker's month, flight pages included, when camoufox is a runnable line; else null) |
+| `POST /definitions/estimate`, `POST /definitions/:id/estimate` | for an unsaved body or a saved definition: cells, per-provider calls (pre-factor and factored), cost (micro-GBP and pence), seconds, assumptions, `flightLists` when camoufox is named (`{ pairs, pages, seconds, pagesMax, secondsMax, returns }`, §8.1: the typical figures and the bound); beside `budgetFit`, what it asks: `datePairs`, `datePairsCovered`, `datePairsPartly` and `datePairsReused` (§8.1: planned cells only, reused apart), `softConfirm` (null, or the reason the press confirms as a code with its figures: `cost`, the estimate above `SOFT_CONFIRM_PENCE`, or `call-share`, a provider's calls above a fifth of its call cap, with that provider, its calls, the cap and the `window` it belongs to, `month` or `lifetime` (the SearchApi trial's one-off balance); never engine text) and `billedCalls` (each runnable line of a billable-plan provider with its calls, the calls left in its `window` (`month`, or `lifetime` on the trial; less what other scheduled searches reserve, as the pre-start check reads it) and that `window`; `left` is null without a cap) |
 | `POST /definitions/coverage-check` | body: origins, destinations, window, nights; runs Travelpayouts month tiles (free, ledgered, subject to the free-call caps) and returns cached rows per pair per month; never calls a billed provider |
 | `POST /definitions/:id/executions` | pre-start checks; `confirmCostPence?`, `confirmCalls?`, `requireCovered?` and `replaceStopped?` (§8.1), passed through to the engine; a search whose `enabled` is 0 starts (202); 409 on active execution (a stopped one without `replaceStopped`) or cap breach naming the cap |
 | `GET /executions/:id` | status, stage, reason, `resumeAfter`, progress per stage × provider, budget usage for every scope (each provider in the one window its plan uses), estimate vs ledger (updates during run), `stop` (the stored cause's `{ sentence, fix }` from `core`'s `stopText`; `NO_STOP_CAUSE_TEXT` on a stopped row with no cause; null on every other status), `flights` (`{ planned, read, reused, failed, ended }` from the stored flight-list plan, §8.1, or null when none was stored) and `estimatedFinishAt` (now plus the run's remaining seconds while pending or running, else null; the api keeps a run's remaining seconds per execution and ledger row count for at most 30 s, so a poll with no new call does not re-estimate the run, and this route and the cards read the same kept figure) |
@@ -4346,9 +4276,9 @@ page (board, overview readout, phone cards, the flights block with every
 outbound, return, offer and pairing price, the flight read's outcome line,
 the grid-price line beneath a pairing figure and the mismatch line) and the
 date pair detail show renders
-through `PriceCell` with its complete provenance (the tie line, the estimate
-sentence and the monthly-pages note format money and counts through the
-estimate panel's one cost formatter instead), and every such face is
+through `PriceCell` with its complete provenance (the tie line and the
+estimate sentence format money and counts through the estimate panel's one
+cost formatter instead), and every such face is
 a variant of `PriceCell`, never a second price renderer: `PriceCell`
 validates the complete provenance (provider, source kind, fetched and
 observed time, point of sale, FX status) before it prints an amount, and a
@@ -4446,9 +4376,7 @@ merged into price.
   "+ flights, out and back, for up to 10 date pairs: usually about 15 pages
   and 41 minutes, at most 20 pages and 50 minutes" when the browser worker
   reads flights with their returns (its flags say so, §8.1), "+ flights for
-  up to 10 date pairs, about 12 minutes" when it reads outbound flights only. Notes under it: the browser worker's
-  month ("uses about 110 of your 1,400 browser pages left this month", flight
-  pages included), a source not used and why, a blocked paid line's cost as
+  up to 10 date pairs, about 12 minutes" when it reads outbound flights only. Notes under it: a source not used and why, a blocked paid line's cost as
   not included ("Google Flights via SearchApi is not used: no calls left this
   month (about £3.40 not included)"), and the soft confirmation in words
   ("This costs about £1.20, above your £1.00 check; pressing Search now
@@ -4540,9 +4468,11 @@ merged into price.
     flight step is done, the header line above, and when flights were read for
     fewer date pairs than planned never a bare "Searched": "… · flights read
     for 4 of 10 date pairs; the rest were left: outside this run's browser
-    window", "…; the rest were not read: the browser worker's monthly page
-    limit", "…; the rest were not read: a limit for this run" (from the stored
-    `ended`; with no stored plan the page says nothing about flights);
+    window", "…; the rest were not read: a limit for this run" (from the
+    stored `ended`; a plan stored before revision 64 with `ended`
+    `monthly-cap` reads "…; the rest were not read: the browser worker's
+    monthly page limit"; with no stored plan the page says nothing about
+    flights);
     *stopped* (the stop's sentence as-is with its fix as a button or line:
     Resume when the fix names Resume, Search again otherwise, both when it
     names both, a `pnpm gmt …` command in a code element in native mode; "0
@@ -4818,8 +4748,8 @@ merged into price.
     `readNow`, with the button shown beside it), else "return flights not
     read: read again once the read is nearly as old as this search's refresh" (two transient
     ends in a row wait for the refresh, R-retry; no button is named),
-    `skipped` its rule in words ("fewer than 2
-    browser pages left this month", …), `not-verified` "return flights are not
+    `skipped` its rule in words ("the wait between pages ran past its time",
+    …), `not-verified` "return flights are not
     yet read on this kind of machine; see the recording session in
     docs/setup.md", and `no-outbound` nothing beyond the outbound's own line;
     a booking read that did not finish likewise: transient "sellers not read:
@@ -4847,14 +4777,9 @@ merged into price.
     whose return selection is not verified); the button shows exactly when
     the date pair's `readNow` is true (§10: no list, or one the on-demand
     read would not refuse as fresh, such as a list whose return or booking
-    read ended transient once; a `failed` list unless a monthly or per-run
-    limit stopped it, whose note says the limit), and, when the month's pages left are fewer than it
-    plans, "Read flights for this date (free, 1 page; return leg not read:
-    fewer than 2 pages left)", an outbound-only read, never a refusal; it
-    adds "; N
-    pages left this month" only when the worker's monthly pages left are fewer
-    than one run of this search would use, flight pages included (the
-    answer's `runPages`); a press reads
+    read ended transient once; a `failed` list unless a per-run limit (or,
+    on a list stored before revision 64, the monthly one) stopped it, whose
+    note says the limit); a press reads
     it (§8.1), shows "Reading flights…", disables every other read button while
     one is reading, and re-reads at the poll interval until the newer list
     arrives, the live region then saying "Flights read for 14 → 24 Mar, 2
@@ -5187,15 +5112,12 @@ CAMOUFOX_WORKER_URL=                     # http://127.0.0.1:8090 (pnpm dev) or h
 CAMOUFOX_WORKER_KEY=                     # ≥ 32 chars, shared by app and worker; required when CAMOUFOX_ENABLED=true
 CAMOUFOX_MIN_SPACING_SECONDS=30          # start to start; 0–600 (0 means no pause: pages go back to back, still one at a time, from your own address); never randomised; a shared setting, kept equal in worker.env (a difference skips the provider)
 CAMOUFOX_EXECUTION_PAGE_CAP=100          # discovery page loads per execution (BudgetExceeded provider-execution), frozen into the execution's budget snapshot; 1–400; flight-list pages (10 date pairs, up to 20 pages) have their own allowance
-CAMOUFOX_MONTHLY_PAGE_CAP=1500           # page loads per billing month (provider-month; no-page rows not counted); the app's ledger enforces it; the worker enforces it too
-CAMOUFOX_BILLING_DAY=1                   # 1–28: the month starts 00:00 UTC that day, for both monthly caps, in the ledger and the worker
 CAMOUFOX_COOLDOWN_HOURS=48               # pause after a challenge, sign-in or consent page; 24–100000 (an unrecognised page pauses a fixed 1 h)
 CAMOUFOX_PAGE_TIMEOUT_SECONDS=90         # the worker's whole-page deadline (load, settle, read), 30–240; the app's request timeout is this + 15 s (grid: 4 × this + page spacing + scroll cap × (scroll spacing + 60 s) + 15 s; a flights request with a return phase: flightRequestSeconds, §2; without one: 2 × this + 30 s, listRequestSeconds)
 CAMOUFOX_MODE=list                       # list (one day pair a page) or grid (the Dates tab's date grid, once the worker reports GRID_VERIFIED and its measured step)
 CAMOUFOX_GRID_SCROLL_SPACING_SECONDS=5   # grid: scroll clicks start to start; 0–30 (0 means no pause: scrolls go back to back); never randomised
 CAMOUFOX_GRID_SCROLL_CAP=30              # grid: scrolls a page may make; 0–60
 CAMOUFOX_EXECUTION_SCROLL_CAP=600        # grid: scrolls per execution, checked before every page's scrolls; 0–6000
-CAMOUFOX_MONTHLY_SCROLL_CAP=6000         # grid: scrolls per billing month; the app's ledger enforces it; the worker enforces it too
 CAMOUFOX_BROWSER_WINDOW=scheduled        # exactly scheduled (default when unset: pages only inside a run's window, §8.2) or any (a resumed run keeps loading pages, within every cap, spacing and cool-down); any other value fails boot naming the field; app side only, not shared with the worker; a catch-up loads no browser page either way
 # worker side only (macOS and Linux; its one 0600 env file <workerData>/worker.env, written by gmt setup; docs/setup.md §14): CAMOUFOX_WORKER_KEY, CAMOUFOX_WORKER_PORT, and the shared settings named under "Where settings live" below
 # fixed, not configurable: concurrency 1, rate per hour = floor(3600 / spacing) (no rate limit at spacing 0; the page caps still bound a run), cost 0, cache never
@@ -5240,8 +5162,7 @@ and keeps the settings the two sides must share equal:
 (`CAMOUFOX_COOLDOWN_HOURS`, `CAMOUFOX_PAGE_TIMEOUT_SECONDS`,
 `CAMOUFOX_MIN_SPACING_SECONDS`, `CAMOUFOX_MODE`,
 `CAMOUFOX_GRID_SCROLL_CAP`, `CAMOUFOX_GRID_SCROLL_SPACING_SECONDS`,
-`CAMOUFOX_MONTHLY_PAGE_CAP`, `CAMOUFOX_MONTHLY_SCROLL_CAP`,
-`CAMOUFOX_BILLING_DAY`, `POINT_OF_SALE`), beside `workerDataDir(home)`, the
+`POINT_OF_SALE`), beside `workerDataDir(home)`, the
 one rule for `<workerData>` that the worker, the CLI and the app's status
 check share. One rule set in `core` holds each shared setting's bounds,
 default and refusal words (`CAMOUFOX_COOLDOWN_HOURS` 24 to 100,000 on both
@@ -5395,9 +5316,8 @@ which `gmt start` prints), and clears it on a successful start. The worker's
 service waits up to 270 s on a stop (launchd `ExitTimeOut`, systemd
 `TimeoutStopSec`: the longest page timeout, 240 s, plus 30 s), so a list
 page in flight finishes; a longer page (a grid page, or a return phase of up
-to eight page periods) is ended by the stop, and its pages, counted when it
-started, stay counted (an over-count, the safe side, rather than a stop held
-for up to 13 minutes); `stop --only worker` and `restart --only worker` ask the app
+to eight page periods) is ended by the stop, rather than a stop held for up
+to 13 minutes; `stop --only worker` and `restart --only worker` ask the app
 about an active run first, as `stop` does. A restart starts the worker again
 only after the old process has exited: the launchd label gone (or the systemd
 unit reading inactive, the wait every systemd stop ends with) and then no live
@@ -5407,8 +5327,8 @@ start check runs only then. A check that refuses leaves the worker stopped
 (its launchd agent booted out), prints the refusal with its fix and that the
 worker is stopped, and exits 78 rather than reporting the restart done.
 Every start of the worker's service (`gmt start`, `restart`, `update`,
-setup's browser step, and `browser install`, `browser counts` and `gmt
-consent` when they start it again) is done only once the worker answers:
+setup's browser step, and `browser install` and `gmt consent` when they
+start it again) is done only once the worker answers:
 its service manager reports it started before it listens, since it launches
 its browser first (about 3 s on the operator's Mac). The command asks `GET
 /v1/status` on `127.0.0.1` at worker.env's `CAMOUFOX_WORKER_PORT`, without
@@ -5499,9 +5419,10 @@ compose down`; a stopped container is a `fail` with `docker compose start
 app`, and with no published port known the credentials are sent nowhere. That report's `app` check never warns on a container's own bind (the container binds `0.0.0.0`); `gmt status` itself warns, with the same words and the fix of publishing `127.0.0.1:3000:3000`, when the address compose publishes is not loopback, and says nothing when it is. A native app keeps its `BIND_ADDRESS` check.
 With no native install and a compose state Docker cannot report (`docker
 compose ps` failing or printing what is not its JSON), the app's state is
-unknown: a `fail` saying so, the worker's facts, and no native fix. The worker enforces its
-own monthly page and scroll caps across every caller (§2) and reports a
-second app instance in a month: each app sends its database's own random
+unknown: a `fail` saying so, the worker's facts, and no native fix. Every
+caller shares the worker's spacing and cool-downs (§2), and the worker
+reports a second app instance in a calendar month, never refusing it: each
+app sends its database's own random
 `app_instance_id` (§7 `app_meta`, kept with the database's path), so a
 container recreate or a host rename is still one app, and a second ledger,
 a copied or moved database included, is a second instance. With two apps on one SearchApi key, the stop
@@ -5683,9 +5604,8 @@ macOS nor Linux, when its `<os>-<arch>` flags are not set for the running build,
 pinned one, when the install-directory entries cannot be verified, when its
 profile holds a Google account cookie, when the `SOCS` capture is missing,
 stale or future-dated, when the record says no consent page was shown (this
-build serves pages on a captured rejection only), when its monthly counts
-file is missing beside an earlier worker's files or cannot be read, or when
-another worker holds the data directory's lock. Its keep-awake hold (§2) ends when it stops. It listens on `127.0.0.1` port 8090 only; Docker
+build serves pages on a captured rejection only), or when another worker
+holds the data directory's lock. Its keep-awake hold (§2) ends when it stops. It listens on `127.0.0.1` port 8090 only; Docker
 Desktop forwards `host.docker.internal` to it. On Linux it serves the native
 app only: a container there cannot reach the host's loopback, so the Docker
 path on Linux leaves the provider off. The worker persists its
@@ -5769,6 +5689,20 @@ as specified in §5.3; no secrets, no full URLs.
 ---
 
 ## 17. Changelog
+
+### Revision 64: no monthly browser caps (2026-11-06)
+
+The operator never asked for monthly caps on the browser provider, and they are withdrawn: `CAMOUFOX_MONTHLY_PAGE_CAP`,
+`CAMOUFOX_MONTHLY_SCROLL_CAP` and `CAMOUFOX_BILLING_DAY` are no longer settings (shared or otherwise); the worker keeps no
+monthly counts file and has no `counts` entry, and `gmt browser counts` is gone; the worker has no `monthly-cap` or
+`counts-unreadable` answer and no `counts-missing` or `counts-unreadable` start refusal; a flights request with a return
+phase is always admitted for its two pages, so there is no `monthly-headroom` rule; a grid page's scroll allowance is
+what the run's scroll cap leaves. The estimate, the read button and Status no longer state pages left this month, and the
+budget fit has no coverage or monthly-scroll warning for the browser. The ledger still counts the browser's pages over the
+calendar month for the Providers view, with no cap on them, and the second-app-instance report stays. Rows stored before
+this revision may hold `monthly-cap` or `counts-unreadable`, or a flight plan ended `monthly-cap`; they still read and
+are worded. The per-run page cap, the flight-list allowance, the run's scroll cap and the page spacing remain (§2, §7,
+§8.1, §10, §11, §12, §13).
 
 ### Revision 63: an old round trip gives way to a newer grid price (2026-11-06)
 

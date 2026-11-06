@@ -68,9 +68,6 @@ export const SETUP_COPY = {
     } satisfies Record<string, string>,
     fitProviderMonth: (source: string) => `${source} this month`,
     fitProviderLifetime: (source: string) => `${source} over its trial`,
-    fitScrolls: (source: string) => `${source}: date grid scrolls this month`,
-    fitCellsPerRefresh: (source: string) =>
-      `${source}: date pairs on airport pairs each refresh, against its pages a month`,
     fitLine: (what: string, estimated: string, cap: string) => `${what}: about ${estimated}, limit ${cap}`,
     journeyHours: 'hours',
     journeyMinutes: 'minutes',
@@ -136,7 +133,7 @@ export const SETUP_COPY = {
         id: 'camoufox',
         name: 'Camoufox (Google Flights in a browser on your machine)',
         what: 'Reads Google Flights prices one date pair a page, while this machine is on. Discovery only; off by default.',
-        cost: 'Free; capped in pages a month (1,500 by default).',
+        cost: 'Free; capped in pages a run (100 by default).',
         command: 'pnpm gmt setup --reconfigure browser',
         doc: 'after reading docs/setup.md section 14.',
       },

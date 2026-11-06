@@ -44,8 +44,8 @@ Honest coverage and provenance, within a hard budget the operator controls.
 - Coverage is stated cell by cell: a date pair is a departure and a return date; a cell is one
   airport pair on one date pair; coverage is stated per date pair over its airport pairs, so "not
   searched" or "no cached data" can never be mistaken for "no flights".
-- The operator sets caps on vendor calls, spend and browser pages, per run and per month, sees
-  the estimate beside the button that runs a search, and the app stops at the caps.
+- The operator sets caps on vendor calls and spend, per run and per month, and on browser pages
+  per run, sees the estimate beside the button that runs a search, and the app stops at the caps.
 
 ## Operating Context
 
@@ -97,14 +97,14 @@ the operator's own machine, which must be awake for it. Setup and operation happ
   seller). Return flights and sellers are read only on worker machines whose recording session
   set the flags (the operator's Mac at present). Coverage and the buckets never change. Each read
   counts against the browser's page allowance: up to 2 pages a date pair (a second outbound loads
-  the page again), 20 a run on an allowance of its own, inside the month's page cap. Without the worker the page says flight times
-  need it.
+  the page again), 20 a run on an allowance of its own. Without the worker the page says flight
+  times need it.
 - **Price sources:**
   - Aviasales cache (Travelpayouts): free, cached prices up to 48 hours old.
   - Google Flights via SearchApi: paid per call; date grid and itinerary search with booking
     options.
   - Google Flights prices via Camoufox: the app's own browser worker on the operator's machine;
-    free, capped in pages a month.
+    free, capped in pages a run.
 - **Two stages:** discovery (wide and cheap, across the whole window) and verification
   (itinerary search of selected cells).
 - **Coverage buckets per cell:** priced, no fares, no cached data, error, skipped, not searched.
@@ -113,8 +113,8 @@ the operator's own machine, which must be awake for it. Setup and operation happ
 - **Main-path words:** Search now, Search again, Searching, Searched, Reading flights, Repeat
   weekly, More options; set-up terms (stages, cells, discovery, verification) stay in the
   coverage section and the Providers view.
-- **Budgets:** caps per run and per month on calls, spend and pages; estimates before spending;
-  a ledger of every call.
+- **Budgets:** caps per run and per month on calls and spend, and per run on browser pages;
+  estimates before spending; a ledger of every call.
 - **Route-agnostic:** any airports in the airports table; nothing in the product is tied to a
   route. The worked example everywhere is London → New York (LHR and LGW to JFK and EWR).
 - **One operator per install;** multi-user use is a non-goal. A sign-in (basic auth) is required

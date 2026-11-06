@@ -27,6 +27,8 @@ export const flightListsStateSchema = z.strictObject({
   planned: count,
   cells: z.array(cellKeySchema),
   reused: count,
+  // why: spec rev 64: `monthly-cap` was stored by runs before the browser's monthly caps were withdrawn; nothing writes
+  // it now, and it is kept so those rows still read
   ended: z.enum(['window', 'monthly-cap', 'stopped']).nullable(),
   // why: spec rev 56 §7: absent in a plan stored before WP21, read as false (an older plan is outbound-only); the
   // reader fills the defaults, so `FlightListsState` is total

@@ -152,7 +152,7 @@ describe('LedgerRepo (spec §5.3, §7, §8.1 parity)', () => {
     });
     const guard = new SqliteBudgetGuard(
       db,
-      budgetConfig({ camoufox: limits({ billable: false, monthlyCallCap: 1500, pagesOnly: true }) }),
+      budgetConfig({ camoufox: limits({ billable: false, monthlyCallCap: null, pagesOnly: true }) }),
       fixedClock(T0),
     );
     const reserve = (endpointPath: string, tileIndex: number | null) =>
@@ -204,7 +204,7 @@ describe('LedgerRepo (spec §5.3, §7, §8.1 parity)', () => {
     });
     const guard = new SqliteBudgetGuard(
       db,
-      budgetConfig({ camoufox: limits({ billable: false, monthlyCallCap: 1500, pagesOnly: true }) }),
+      budgetConfig({ camoufox: limits({ billable: false, monthlyCallCap: null, pagesOnly: true }) }),
       fixedClock(T0),
     );
     const reserve = (endpointPath: string, tileIndex: number | null, pages?: number) =>

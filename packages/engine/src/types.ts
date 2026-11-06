@@ -28,13 +28,12 @@ import type { Db, NewestFlightList, Repos } from '@gmt/db';
 import type { HttpKit } from '@gmt/providers';
 
 // why: core already exports these five as types (plan decisions 16 and 17); the engine re-exports core's, never its own copies
-import type { AskedPairs, BilledCalls, MonthlyPages } from './estimate.js';
+import type { AskedPairs, BilledCalls } from './estimate.js';
 import type { DatePairAsk, FlightReadMark, FlightReadStart } from './flightRead.js';
 
 /** What the estimate response states beside the estimate (spec §10). */
 export interface EstimateAsk extends AskedPairs {
   billedCalls: BilledCalls[];
-  monthlyPages: MonthlyPages | null;
 }
 
 export type {
@@ -208,7 +207,7 @@ export interface Engine {
   estimate(definition: DefinitionInput | SearchDefinition, todayLondon: IsoDate): Estimate;
   /**
    * Spec §10 estimate response, beside the estimate: the date pairs it asks about (reuse applies to a saved
-   * definition), the billed calls and the browser worker's month, all read from the estimate's runnable lines.
+   * definition) and the billed calls, both read from the estimate's runnable lines.
    */
   estimateAsk(
     definition: DefinitionInput | SearchDefinition,

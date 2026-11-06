@@ -215,28 +215,19 @@ describe('the command line (W5)', () => {
       flags: { only: 'database' },
     });
   });
-  it('browser takes one action of two, each with its own options', () => {
+  it('browser takes one action, install, with its own options', () => {
     expect(parseCommandLine(['browser']).kind).toBe('usage');
     expect(parseCommandLine(['browser', 'sideways'])).toMatchObject({
       kind: 'usage',
-      message: expect.stringContaining('browser needs an action: install or counts'),
+      message: expect.stringContaining('browser needs an action: install'),
     });
-    expect(parseCommandLine(['browser', 'install', '--pages', '3'])).toMatchObject({
-      kind: 'usage',
-      message: expect.stringContaining('install takes --keep-archive, --wait and --force only'),
-    });
-    expect(parseCommandLine(['browser', 'counts', '--keep-archive'])).toMatchObject({
-      kind: 'usage',
-      message: expect.stringContaining('counts does not take --keep-archive'),
-    });
-    expect(parseCommandLine(['browser', 'counts', '--pages', '1x'])).toMatchObject({
-      kind: 'usage',
-      message: expect.stringContaining('--pages takes a whole number'),
-    });
-    expect(parseCommandLine(['browser', 'counts', '--pages', '12', '--scrolls', '0'])).toMatchObject({
+    // why: spec rev 64: the monthly counts rewrite is withdrawn with the monthly caps
+    expect(parseCommandLine(['browser', 'counts']).kind).toBe('usage');
+    expect(parseCommandLine(['browser', 'install', '--pages', '3']).kind).toBe('usage');
+    expect(parseCommandLine(['browser', 'install', '--keep-archive', '--wait'])).toMatchObject({
       kind: 'command',
       command: 'browser',
-      positional: 'counts',
+      positional: 'install',
     });
   });
 });

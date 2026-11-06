@@ -21,7 +21,6 @@ import { InstallRefused } from './install.js';
 import { launchHeadedContext, prepareLaunch } from './launch.js';
 import { acquireLock, LockHeld, sweepProbeProfiles } from './lock.js';
 import { debugLogging, stderrLog } from './log.js';
-import { MonthlyCounter } from './monthly.js';
 import { Pacer } from './pacer.js';
 import { claim } from './pageClaim.js';
 import { RecordingRefused } from './recordArgs.js';
@@ -46,7 +45,7 @@ import { landingUrl } from './url.js';
  * command only observes (consentWatch.ts through the ConsentDriver): it keeps the SOCS cookie set or changed after the
  * choice was submitted to the consent page, only when the value itself reads as a rejection (`rejectionMark`, as
  * research 17.0c observed it) and the submission did not carry the fields only the Accept all form sent there. It holds
- * the worker's lock and loads its one page under the pacer, the monthly count and the cool-downs, as every page does.
+ * the worker's lock and loads its one page under the pacer and the cool-downs, as every page does.
  *
  * - `consent`: the capture, written to `socs.json` (0600) with its capture time.
  * - `consent export`: the same capture on a desktop that has only the pinned Camoufox installed, printed as one
@@ -227,20 +226,12 @@ async function loadAndWatch(
 
 /**
  * The capture, for `consent` (`export` false) and `consent export`. Under the worker's lock; refused during a
- * cool-down, naming its end; the one page claimed through the pacer and the monthly count; the window closed and the
- * profile deleted on every path, an interruption included.
+ * cool-down, naming its end; the one page claimed through the pacer; the window closed and the profile deleted on
+ * every path, an interruption included.
  */
 export async function consentCapture(
   ctx: EntryContext,
-  cfg: Pick<
-    CaptureConfig,
-    | 'cooldownHours'
-    | 'minSpacingSeconds'
-    | 'monthlyPageCap'
-    | 'monthlyScrollCap'
-    | 'billingDay'
-    | 'pointOfSale'
-  >,
+  cfg: Pick<CaptureConfig, 'cooldownHours' | 'minSpacingSeconds' | 'pointOfSale'>,
   deps: ConsentDeps,
   o: { export: boolean },
 ): Promise<number> {
@@ -285,15 +276,10 @@ export async function consentCapture(
       minSpacingSeconds: cfg.minSpacingSeconds,
       clock: deps.clock,
     });
-    const monthly = new MonthlyCounter({
-      dir: ctx.dataDir,
-      caps: { pages: cfg.monthlyPageCap, scrolls: cfg.monthlyScrollCap, billingDay: cfg.billingDay },
-      clock: deps.clock,
-    });
     try {
       if (interrupted()) throw new Interrupted();
       // why: CodeRabbit (PR #18): the interruption ends the spacing wait itself, so no claim runs after the command ends
-      await claim(pacer, monthly, 0, deps, { ...ctx, out: say });
+      await claim(pacer, deps, { ...ctx, out: say });
     } catch (e) {
       if (interrupted()) {
         ctx.err(`interrupted before the page loaded; ${NOTHING}`);

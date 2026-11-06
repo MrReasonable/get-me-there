@@ -3,7 +3,6 @@ import {
   type BookingRead,
   bookingReturnOf,
   FLIGHT_LIST_MAX_FLIGHTS,
-  FLIGHT_LIST_PAGES_PER_PAIR_MAX,
   type FlightLimits,
   type FlightsRequest,
   fitsLimits,
@@ -72,8 +71,6 @@ export interface ReturnPhaseInput {
   pollMs: number;
   /** timers.now() when the page started. */
   startedAt: number;
-  /** The pages the month admitted for this request (R-reserve: the phase runs only with the whole worst case). */
-  admitted: number;
   /** CAMOUFOX_PAGE_TIMEOUT_SECONDS in ms: every step's own budget. */
   pageTimeoutMs: number;
 }
@@ -260,8 +257,6 @@ export async function returnPhase(p: ReturnPhaseInput): Promise<ReturnPhaseResul
     return none('no-outbound', null, 'no-pairing');
   // R-view: the recorded sequence runs from the Cheapest view only; a Best fallback runs no phase
   if (p.view !== 'cheapest') return none('skipped', 'not-cheapest-view', 'skipped');
-  // R-reserve, P3: with fewer pages left than the worst case the request is an outbound-only read of one page
-  if (p.admitted < FLIGHT_LIST_PAGES_PER_PAIR_MAX) return none('skipped', 'monthly-headroom', 'skipped');
 
   const flightsOf = parsed.map((x) => x.flight);
   const first = selectOutbound(flightsOf, limits);

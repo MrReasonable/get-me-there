@@ -44,7 +44,6 @@ import {
 } from './launch.js';
 import { acquireLock, LockHeld, sweepProbeProfiles } from './lock.js';
 import { debugLogging, stderrLog } from './log.js';
-import { type Admission, MonthlyCounter } from './monthly.js';
 import { Pacer } from './pacer.js';
 import { claim } from './pageClaim.js';
 import { profileDir } from './paths.js';
@@ -120,15 +119,14 @@ export const DEFAULT_ROOT = fileURLToPath(new URL('../fixtures/recorded/', impor
 const FINALLY_MS = 5000;
 /**
  * WP21 Task 21.0, Task 21.3 (R-worst): the documents a `--select-outbound` page may load: the first view and the list
- * page again (each selection runs under the guard's activation gate, so it loads none), reserved in the month before
- * the first load, held to it by the guard's reservation stop, and settled to the documents the guard counted. Pinned
- * equal to core's FLIGHT_LIST_PAGES_PER_PAIR_MAX.
+ * page again (each selection runs under the guard's activation gate, so it loads none), held to it by the guard's
+ * reservation stop. Pinned equal to core's FLIGHT_LIST_PAGES_PER_PAIR_MAX.
  */
 export const RECORD_SELECT_PAGES = 2;
 /**
  * Ian's rulings of 2026-11-01, WP21 Task 21.3 (R-worst): the documents a `--select-return` page may load: the first
  * view, and the list page again with `--force-second`; the outbound's selection, the return's and the expansion load
- * none under the gate. Reserved whole before the first load and settled to the documents the guard counted.
+ * none under the gate. Held to it by the guard's reservation stop.
  */
 export const RECORD_SELECT_RETURN_PAGES = 2;
 /** The research kinds that select an option, which share the select-outbound rules (reservation, cap, open page). */
@@ -210,17 +208,10 @@ export async function record(ctx: EntryContext, cfg: WorkerConfig, deps: RecordD
       minSpacingSeconds: cfg.minSpacingSeconds,
       clock: deps.clock,
     });
-    // why: decision 82: every page the recorder loads counts in the worker's own month, as the server's do
-    const monthly = new MonthlyCounter({
-      dir: ctx.dataDir,
-      caps: { pages: cfg.monthlyPageCap, scrolls: cfg.monthlyScrollCap, billingDay: cfg.billingDay },
-      clock: deps.clock,
-    });
     const day = deps.clock.now().slice(0, 10);
-    if (args.kind === 'consent-probe')
-      return await consentProbe(ctx, cfg, deps, { pacer, monthly, cooldown, day });
+    if (args.kind === 'consent-probe') return await consentProbe(ctx, cfg, deps, { pacer, cooldown, day });
     if (args.kind === 'consent-research')
-      return await consentResearch(ctx, cfg, deps, { pacer, monthly, cooldown, day }, (extra) =>
+      return await consentResearch(ctx, cfg, deps, { pacer, cooldown, day }, (extra) =>
         meta(deps, 'consent-research', 'missing', {}, extra),
       );
     let capture: SocsCapture;
@@ -232,8 +223,8 @@ export async function record(ctx: EntryContext, cfg: WorkerConfig, deps: RecordD
     }
     const secrets = [cfg.key.reveal(), capture.value];
     const profile = profileDir(ctx.dataDir);
-    // why: WP21 Task 21.0 review: a select-outbound page launches only once its whole reservation is admitted, so a
-    // refusal for the month's headroom launches nothing; every other kind launches first, as before
+    // why: WP21 Task 21.0 review: a select page launches only once the spacing is claimed, so a refusal launches
+    // nothing; every other kind launches first, as before
     let context: ContextLike | null = isSelectKind(args.kind) ? null : await deps.launch(profile);
     const readBacks: ReadBack[] = [];
     try {
@@ -249,31 +240,13 @@ export async function record(ctx: EntryContext, cfg: WorkerConfig, deps: RecordD
         if (url === null) throw new RecordingRefused('no request');
         const select = isSelectKind(args.kind);
         const selectPages = args.kind === 'select-return' ? RECORD_SELECT_RETURN_PAGES : RECORD_SELECT_PAGES;
-        // why: WP21 Task 21.0 review: a select-outbound page needs its whole worst case; claim refuses one that would
-        // reserve less before the pacer or the counts are touched, and the admission it returns is the one checked here
-        const admitted: Extract<Admission, { kind: 'ok' }> = await claim(
-          pacer,
-          monthly,
-          args.moves.length,
-          deps,
-          ctx,
-          select ? selectPages : 1,
-          select,
-        );
-        if (select && admitted.pagesReserved !== selectPages) {
-          monthly.settle(admitted.reserved, admitted.scrollAllowance, 0, admitted.pagesReserved, 0);
-          pacer.release();
-          throw new RecordingRefused(`the month admitted fewer pages than --${args.kind} may load`);
-        }
+        await claim(pacer, deps, ctx);
         let c: ContextLike;
         try {
           c = context ?? (await deps.launch(profile));
         } catch (e) {
-          // why: nothing loaded: the select-outbound reservation is given back whole and the pacer released
-          if (select) {
-            monthly.settle(admitted.reserved, admitted.scrollAllowance, 0, admitted.pagesReserved, 0);
-            pacer.release();
-          }
+          // why: nothing loaded: the select page's pacer claim is released
+          if (select) pacer.release();
           throw e;
         }
         context = c;
@@ -330,8 +303,8 @@ export async function record(ctx: EntryContext, cfg: WorkerConfig, deps: RecordD
             if (args.kind !== 'no-flights' && args.kind !== 'landing' && !select)
               budget.onExpire(() => void p.close().catch(() => undefined));
             guard = await d.race(installGuard(c, p, deps.log, deps.selectors));
-            // why: WP21 Task 21.3 (cost-r3-002): a select page's documents never pass what it reserved
-            if (select) guard.reservation = admitted.pagesReserved;
+            // why: WP21 Task 21.3 (cost-r3-002): a select page's documents never pass its own worst case
+            if (select) guard.reservation = selectPages;
             const driver = createDriver(p, guard, deps.selectors);
             outcome = await interact(driver, p, guard, budget, pageStart, deps, args.kind, url, {
               moves: args.moves,
@@ -358,16 +331,6 @@ export async function record(ctx: EntryContext, cfg: WorkerConfig, deps: RecordD
           await bounded(() => p.close(), FINALLY_MS, deps.timers);
         }
         pacer.release();
-        // why: WP21 Task 21.0: the select-outbound kind settles its reservation to the documents the guard counted (0
-        // when nothing loaded), never above it; every other kind's one page stays reserved
-        if (select)
-          monthly.settle(
-            admitted.reserved,
-            admitted.scrollAllowance,
-            0,
-            admitted.pagesReserved,
-            guard?.documentLoads ?? 0,
-          );
         /**
          * Every recording's meta states the documents its page loaded (WP21 Task 21.0) and, by the controller's ruling on
          * review I2 (WP21 Task 21.3), the main-frame documents the page started (counted by the guard before the gate)
@@ -877,12 +840,12 @@ async function consentProbe(
   ctx: EntryContext,
   cfg: WorkerConfig,
   deps: RecordDeps,
-  s: { pacer: Pacer; monthly: MonthlyCounter; cooldown: CooldownStore; day: string },
+  s: { pacer: Pacer; cooldown: CooldownStore; day: string },
 ): Promise<number> {
   const profile = join(ctx.dataDir, `probe-${Date.parse(deps.clock.now())}-${deps.pid}`);
   mkdirSync(profile, { recursive: true, mode: 0o700 });
   try {
-    await claim(s.pacer, s.monthly, 0, deps, ctx);
+    await claim(s.pacer, deps, ctx);
     const context = await deps.launch(profile);
     const d = deps.timers.deadline(cfg.pageTimeoutSeconds * 1000);
     try {

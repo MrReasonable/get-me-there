@@ -1,5 +1,4 @@
 import type { Flags } from '../args.js';
-import { countsCommand } from '../camoufox/counts.js';
 import { installCamoufox, oldBundleRemovals } from '../camoufox/installer.js';
 import { retiredWorkerLines, workerEnvPath } from '../camoufox/workerEnv.js';
 import { workerStart, workerStop } from '../camoufox/workerService.js';
@@ -108,9 +107,9 @@ async function installAction(flags: Flags, deps: Deps): Promise<number> {
   return EXIT.ok;
 }
 
-/** `gmt browser <install|counts>`. */
-export async function browserCommand(flags: Flags, positional: string | null, deps: Deps): Promise<number> {
+/** `gmt browser install`. */
+export async function browserCommand(flags: Flags, _positional: string | null, deps: Deps): Promise<number> {
   const win = refuseOnWindows(deps);
   if (win !== null) return win;
-  return positional === 'counts' ? countsCommand(flags, deps) : installAction(flags, deps);
+  return installAction(flags, deps);
 }

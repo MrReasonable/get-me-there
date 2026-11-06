@@ -94,7 +94,6 @@ describe('stopCauseOf (revision 55 §8.1)', () => {
       40,
       false,
     ],
-    ['camoufox monthly pages', budget('provider-month', 'camoufox'), 'pages', 40, false],
     ['a monthly call cap', budget('provider-month', 'searchapi'), 'calls', 40, true],
     ['a lifetime call cap', budget('provider-lifetime', 'searchapi'), 'calls', 40, true],
     ['the run calls', budget('execution-calls', 'searchapi'), 'calls', 40, true],
@@ -135,7 +134,7 @@ describe('stopCauseOf (revision 55 §8.1)', () => {
     expect(stopCauseOf(budget('provider-execution', 'camoufox'), run, true)).toMatchObject({
       flights: { read: 8, planned: 10 },
     });
-    expect(stopCauseOf(budget('provider-month', 'camoufox'), run, true)).toMatchObject({ flights: null });
+    expect(stopCauseOf(budget('provider-month', 'searchapi'), run, true)).toMatchObject({ flights: null });
     expect(stopCauseOf(budget('provider-execution', 'camoufox'), causeRun(), true)).toMatchObject({
       flights: null,
     });
@@ -377,9 +376,9 @@ describe('the readers a pass seeds itself with (revision 55 §8.1, §6.6)', () =
 });
 
 describe('stopCauseOf edges (mutation pins)', () => {
-  it("isBrowserPageLimit: the browser worker's run and month caps only", () => {
+  it("isBrowserPageLimit: the browser worker's run cap only", () => {
     expect(isBrowserPageLimit({ scope: 'provider-execution', providerId: 'camoufox' })).toBe(true);
-    expect(isBrowserPageLimit({ scope: 'provider-month', providerId: 'camoufox' })).toBe(true);
+    expect(isBrowserPageLimit({ scope: 'provider-month', providerId: 'camoufox' })).toBe(false);
     expect(isBrowserPageLimit({ scope: 'execution-calls', providerId: 'camoufox' })).toBe(false);
     expect(isBrowserPageLimit({ scope: 'provider-execution', providerId: 'searchapi' })).toBe(false);
   });

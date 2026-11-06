@@ -42,7 +42,7 @@ export interface ServerDeps {
   awake(seconds: number): AwakeAnswer;
   /** Called after an answer whose result was fatal (the cool-down store failed): main exits 70. */
   onFatal(): void;
-  /** Decision 82: each authorised request's APP_INSTANCE_HEADER, for the month's count of calling apps. */
+  /** Decision 82: each authorised request's APP_INSTANCE_HEADER, for the calendar month's count of calling apps. */
   seen?(appInstance: string): void;
   now(): number;
 }

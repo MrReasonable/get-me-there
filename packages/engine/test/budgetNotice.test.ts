@@ -60,18 +60,6 @@ describe('the paused_budget notice offers what the page offers (revision 55 §8.
     },
   );
 
-  it.each([true, false])(
-    'a browser monthly page limit says Search again after its reset carries on, never Resume (scheduled: %s)',
-    (scheduled) => {
-      const { detail, fix } = both(stopAt('provider-month', 'camoufox', true), scheduled);
-      expect(detail).toMatch(
-        /Search again after Sun, 1 Nov 2026, 00:00 \(Europe\/London\) carries on with the prices already found\.$/,
-      );
-      expect(detail).not.toMatch(/\bresume/i);
-      expect(fix?.resume).toBeUndefined();
-    },
-  );
-
   it("an unscheduled search's window cap has no schedule: Search again, or Resume when you are ready", () => {
     for (const [scope, providerId] of [
       ['provider-month', 'searchapi'],
@@ -109,7 +97,9 @@ describe('the paused_budget notice offers what the page offers (revision 55 §8.
     const sources: Array<ProviderId | null> = ['camoufox', 'searchapi', 'travelpayouts', null];
     let cases = 0;
     for (const scope of BUDGET_SCOPE_KINDS)
-      for (const providerId of sources)
+      for (const providerId of sources) {
+        // why: spec rev 64: the browser worker has no monthly cap, so no run stops at its month any more
+        if (scope === 'provider-month' && providerId === 'camoufox') continue;
         for (const scheduled of [true, false])
           for (const windowEnd of [true, false]) {
             const { status, detail, fix } = both(stopAt(scope, providerId, windowEnd), scheduled);
@@ -126,7 +116,8 @@ describe('the paused_budget notice offers what the page offers (revision 55 §8.
             expect(detail).not.toMatch(/cap change|manual resume/);
             cases += 1;
           }
-    expect(cases).toBe(BUDGET_SCOPE_KINDS.length * 16);
+      }
+    expect(cases).toBe(BUDGET_SCOPE_KINDS.length * 16 - 4);
   });
 });
 

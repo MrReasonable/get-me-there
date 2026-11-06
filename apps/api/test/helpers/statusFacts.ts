@@ -46,7 +46,6 @@ export function okWorkerStatus(over: Partial<WorkerStatusFacts> = {}): WorkerSta
     formVerified: true,
     flags: { FORM_VERIFIED: true },
     appInstances: 1,
-    monthly: { pages: 10, scrolls: 20, readable: true },
     consent: { kind: 'socs', expiresAt: inFuture(200 * DAY), boundedBy: 'capture', mark: 'reject' },
     socsCapturedAt: ago(10 * DAY),
     awakeUntil: null,
@@ -59,7 +58,6 @@ export function healthyWorker(over: Partial<WorkerFacts> = {}): WorkerFacts {
     read: { kind: 'ok', status: okWorkerStatus() },
     refusal: { kind: 'none' },
     browserWindow: 'scheduled',
-    caps: { pages: 1500, scrolls: 6000 },
     ...over,
   };
 }

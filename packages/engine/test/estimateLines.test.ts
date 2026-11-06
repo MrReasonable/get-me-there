@@ -1,7 +1,6 @@
 import {
   AbortedError,
   asIsoDate,
-  type BudgetGuard,
   type DefinitionSnapshot,
   type Estimate,
   type FlightProvider,
@@ -17,7 +16,6 @@ import {
   estimateRemainingFor,
   estimateStart,
   flightWindowMarginSeconds,
-  monthlyPagesOf,
   withBlocked,
 } from '../src/estimate.js';
 import { lineKey } from '../src/lines.js';
@@ -160,9 +158,9 @@ describe('the discovery line waits for the slowest of the minute window, the hou
 });
 
 describe('an estimate over several providers', () => {
-  it('camoufox, Travelpayouts and SearchApi: each line, its words, and a flight line that just fits the month and the free calls', () => {
-    // why: 15 grid pages of a 35-page month leave 20 pages (10 pairs at 2 pages); the free calls (43) less the free
-    // lines (15 camoufox + 18 Travelpayouts; SearchApi is billed) leave 10 requests, one a pair. No cap binds.
+  it('camoufox, Travelpayouts and SearchApi: each line, its words, and a flight line that just fits the free calls', () => {
+    // why: the free calls (43) less the free lines (15 camoufox + 18 Travelpayouts; SearchApi is billed) leave 10
+    // requests, one a pair. No cap binds.
     const e = engineWith(
       [
         stubCamoufox({ cells: 15, flights: {} }),
@@ -174,7 +172,6 @@ describe('an estimate over several providers', () => {
         verification: ['searchapi'],
         rankedDatePairs: rankedPairs(15),
         maxFreeCalls: 43,
-        monthlyCap: 35,
       },
     );
     e.ctx.workerFlags.set('camoufox', BOTH);
@@ -221,7 +218,7 @@ describe('an estimate over several providers', () => {
         RETRY_NOTE,
         NO_RETRY_NOTE,
         'camoufox: 15 discovery tiles planned; a tile that pages spends one call a page',
-        'camoufox list mode prices 15 of 15 cells this run; a full pass takes 1 runs; the month cap allows about 35 cells',
+        'camoufox list mode prices 15 of 15 cells this run; a full pass takes 1 runs',
         'travelpayouts: 15 discovery tiles planned; a tile that pages spends one call a page',
         'searchapi: verification of up to 2 cells at 5 calls each',
         WORST_CASE_NOTE,
@@ -470,7 +467,7 @@ describe('the camoufox list line on a resume (its pages already loaded count aga
         RETRY_NOTE,
         NO_RETRY_NOTE,
         'camoufox: 5 discovery tiles planned; a tile that pages spends one call a page',
-        'camoufox list mode prices 1 of 5 cells this run; a full pass takes 1 runs; the month cap allows about 1500 cells',
+        'camoufox list mode prices 1 of 5 cells this run; a full pass takes 1 runs',
       ],
       windowClamped: false,
       retryFactor: 1.2,
@@ -495,7 +492,7 @@ describe('the camoufox list line on a resume (its pages already loaded count aga
     const est = estimateRemainingFor(e.ctx, raised, true);
     expect(est.perProvider.map((p) => [p.providerId, p.calls, p.seconds])).toEqual([['camoufox', 2, 140]]);
     expect(est.assumptions).toContain(
-      'camoufox list mode prices 2 of 5 cells this run; a full pass takes 1 runs; the month cap allows about 1500 cells',
+      'camoufox list mode prices 2 of 5 cells this run; a full pass takes 1 runs',
     );
   });
 
@@ -629,8 +626,9 @@ describe('the flight line: when it applies and which date pairs it counts (spec 
     expect(startOf(e, { saved: true }).flightLists).toMatchObject({ pairs: 10, returns: true });
   });
 
-  it("a saved search's month sets aside what other schedules reserve; the save-time estimate reads the month as it stands", () => {
-    const e = flightEngine(15, BOTH, { monthlyCap: 60 });
+  // why: spec rev 64: the browser worker has no monthly cap, so another schedule holds none of its pages
+  it("another schedule never cuts a saved search's flight line", () => {
+    const e = flightEngine(15, BOTH);
     const d = e.definition;
     e.ctx.repos.definitions.create({
       ...baseDefinition(),
@@ -641,68 +639,17 @@ describe('the flight line: when it applies and which date pairs it counts (spec 
       providers: d.providers,
       scheduleCron: '0 5 * * 1',
     });
-    const saved = startOf(e, { saved: true });
-    // why: the weekly schedule's reservation leaves no page of the 60 to this run
-    expect(monthlyPagesOf(e.ctx, saved, e.definition.id)?.left).toBe(0);
-    expect(saved.flightLists?.pairs).toBe(0);
+    expect(startOf(e, { saved: true }).flightLists?.pairs).toBe(10);
     expect(startOf(e).flightLists?.pairs).toBe(10);
-  });
-
-  it('a guard with no monthly cap leaves the flight line uncut', () => {
-    const e = flightEngine(15, BOTH);
-    const ctx = { ...e.ctx, budget: guardWithMonthCap(e.ctx.budget, null) };
-    const b = buildSnapshot(ctx, e.definition);
-    expect(estimateStart(ctx, b.snapshot, b.cells, null).flightLists?.pairs).toBe(10);
   });
 });
 
-/** The guard as it is, except that a provider's month reports `cap`. */
-function guardWithMonthCap(g: BudgetGuard, cap: number | null): BudgetGuard {
-  return {
-    reserve: (p) => g.reserve(p),
-    recordCacheHit: (p) => g.recordCacheHit(p),
-    usage: (s) => (s.kind === 'provider-month' ? { ...g.usage(s), cap } : g.usage(s)),
-    recentCalls: (id, since) => g.recentCalls(id, since),
-    scrollsLeft: (id, executionId) => g.scrollsLeft(id, executionId),
-    scrollsThisMonth: (id) => g.scrollsThisMonth(id),
-  };
-}
-
 describe("the flight line's caps and their words", () => {
-  it('11 pages left hold 10 pairs out and back but not at 2 pages each: the month is named for the 10, and blocking drops both notes only', () => {
-    // why: 15 grid pages of a 26-page month leave 11
-    const est = startOf(flightEngine(15, BOTH, { monthlyCap: 26 }));
-    expect(est.flightLists).toEqual({
-      pairs: 10,
-      pages: 11,
-      seconds: 2450,
-      pagesMax: 11,
-      secondsMax: 3000,
-      returns: true,
-    });
-    const before = [
-      RETRY_NOTE,
-      NO_RETRY_NOTE,
-      'camoufox: 15 discovery tiles planned; a tile that pages spends one call a page',
-      'camoufox list mode prices 15 of 15 cells this run; a full pass takes 1 runs; the month cap allows about 26 cells',
-      WORST_CASE_NOTE,
-    ];
-    expect(est.assumptions).toEqual([
-      ...before,
-      '+ flights, out and back, for up to 10 date pairs: usually about 11 pages and 41 minutes, at most 11 pages and 50 minutes',
-      "flights for 10 date pairs out and back: the browser worker's monthly page cap",
-    ]);
-    const blocked = withBlocked(est, new Map([[lineKey('discovery', 'camoufox'), 'provider-month']]));
-    expect(blocked.assumptions).toEqual([...before, BLOCKED_NOTE]);
-  });
-
-  it('1 page left reads 1 pair outbound-only; blocking drops its notes and zeroes the bound it keeps', () => {
-    const est = startOf(flightEngine(15, BOTH, { monthlyCap: 16 }));
-    expect(est.assumptions.slice(-2)).toEqual([
-      '+ flights for up to 1 date pair, about 1 minute',
-      "flights for 1 date pair: the browser worker's monthly page cap",
-    ]);
-    const blocked = withBlocked(est, new Map([[lineKey('discovery', 'camoufox'), 'provider-month']]));
+  it('1 free call left reads 1 pair out and back; blocking drops its notes and zeroes the bound it keeps', () => {
+    const est = startOf(flightEngine(15, BOTH, { maxFreeCalls: 16 }));
+    expect(est.assumptions.slice(-1)).toEqual(["flights for 1 date pair: the run's free-call limit"]);
+    expect(est.flightLists).toMatchObject({ pairs: 1, pagesMax: 2, returns: true });
+    const blocked = withBlocked(est, new Map([[lineKey('discovery', 'camoufox'), 'provider-execution']]));
     expect(blocked.assumptions.filter((a) => a.includes('flights'))).toEqual([]);
     expect(blocked.flightLists).toEqual({
       pairs: 0,
@@ -715,24 +662,24 @@ describe("the flight line's caps and their words", () => {
   });
 
   it('blocking keeps every note that is not the flight line’s own, even one that mentions flights later on', () => {
-    const est = startOf(flightEngine(15, BOTH, { monthlyCap: 16 }));
+    const est = startOf(flightEngine(15, BOTH, { maxFreeCalls: 16 }));
     const other = 'a note on flights for 3 date pairs from an earlier pass';
     const blocked = withBlocked(
       { ...est, assumptions: [...est.assumptions, other] },
-      new Map([[lineKey('discovery', 'camoufox'), 'provider-month']]),
+      new Map([[lineKey('discovery', 'camoufox'), 'provider-execution']]),
     );
     expect(blocked.assumptions.slice(-2)).toEqual([other, BLOCKED_NOTE]);
   });
 
-  it('no page left: no "+ flights" clause, only the cap that left none', () => {
-    const est = startOf(flightEngine(15, BOTH, { monthlyCap: 15 }));
+  it('no free call left: no "+ flights" clause, only the cap that left none', () => {
+    const est = startOf(flightEngine(15, BOTH, { maxFreeCalls: 15 }));
     expect(est.assumptions).toEqual([
       RETRY_NOTE,
       NO_RETRY_NOTE,
       'camoufox: 15 discovery tiles planned; a tile that pages spends one call a page',
-      'camoufox list mode prices 15 of 15 cells this run; a full pass takes 1 runs; the month cap allows about 15 cells',
+      'camoufox list mode prices 15 of 15 cells this run; a full pass takes 1 runs',
       WORST_CASE_NOTE,
-      "flights for 0 date pairs: the browser worker's monthly page cap",
+      "flights for 0 date pairs: the run's free-call limit",
     ]);
   });
 
@@ -1077,7 +1024,7 @@ describe('addPass, withBlocked and confirmationOf over given estimates', () => {
       seconds: 100,
       returns: true,
     });
-    const blocked = withBlocked(est, new Map([[lineKey('discovery', 'camoufox'), 'provider-month']]));
+    const blocked = withBlocked(est, new Map([[lineKey('discovery', 'camoufox'), 'provider-execution']]));
     expect(blocked.flightLists).toEqual({
       pairs: 0,
       pages: 0,
@@ -1097,24 +1044,9 @@ describe('addPass, withBlocked and confirmationOf over given estimates', () => {
     ];
     const blocked = withBlocked(
       estimateOf([cam], words),
-      new Map([[lineKey('discovery', 'camoufox'), 'provider-month']]),
+      new Map([[lineKey('discovery', 'camoufox'), 'provider-execution']]),
     );
     expect(blocked.assumptions).toEqual([...words, BLOCKED_NOTE]);
     expect('flightLists' in blocked).toBe(false);
-  });
-});
-
-describe("monthlyPagesOf reads the guard's month", () => {
-  it("the guard's own cap when it has one, else the configured monthly page cap", () => {
-    const e = flightEngine(15, BOTH);
-    const est = startOf(e);
-    expect(monthlyPagesOf({ ...e.ctx, budget: guardWithMonthCap(e.ctx.budget, 50) }, est, null)).toEqual({
-      planned: 35,
-      left: 50,
-    });
-    expect(monthlyPagesOf({ ...e.ctx, budget: guardWithMonthCap(e.ctx.budget, null) }, est, null)).toEqual({
-      planned: 35,
-      left: 1500,
-    });
   });
 });

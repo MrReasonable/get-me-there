@@ -5,7 +5,7 @@ owner: opus
 depends_on: [16a, 16b]
 spec_sections: ["§2 Method", "§2 Caps across callers", "§2 Consent", "§2 Recordings first", "§2 Labels", "§2 Costs", "§9 item 9", "§9 CI matrix", "§12 Where settings live", "§13 Native local mode", "§13 The camoufox worker", "§16", "§17 revision 36"]
 reviewers: [provenance-auditor, provider-integration-expert, security-reviewer, devops-reviewer, cost-and-budget-reviewer, test-strategy-reviewer, code-architect, product-owner]
-mutate: {"@gmt/camoufox-worker": ["src/monthly.ts", "src/consentLine.ts", "src/socsMark.ts", "src/sessionLine.ts"], "@gmt/cli": ["src/camoufox/**"]}
+mutate: {"@gmt/camoufox-worker": ["src/instances.ts", "src/consentLine.ts", "src/socsMark.ts", "src/sessionLine.ts"], "@gmt/cli": ["src/camoufox/**"]}
 pending: {}
 status: open (every task built; Task 17.8's recording sessions recorded on 2026-10-26, in review)
 ---

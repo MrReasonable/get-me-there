@@ -66,7 +66,7 @@ Labels: VERIFIED = read on an official page; REPORTED = third-party; UNKNOWN = n
 
 ### Camoufox provider (self-scraped, opt-in)
 
-**The flight-list read.** Besides discovery, the browser provider reads the flight list for the cheapest ten date pairs of a search (and one date pair on demand, from "Read flights for this date"): economy only. The worker selects the cheapest outbound within the search's limits and reads the return flights Google lists with it, then the booking options of the shown pairing and the offers Google listed (the cheapest of the sellers read, not checked with the airline); a date pair costs 1 page, or 2 with a second outbound (tried when none of the first's returns fits), each spaced like any page. Returns and offers are read only on worker machines whose recording session set the flags, at present the operator's Mac; elsewhere the read stays outbound only. A run's flight-list pages have their own allowance of twenty pages (ten date pairs at up to 2 pages each), outside the run's page cap, and count against the monthly page cap; an on-demand read is up to 2 pages (1 without a return phase) against the monthly page cap only, and is refused while a run that uses the browser is pending or running. A flights request without a return phase waits up to twice the page timeout plus 30 s (210 s at the defaults), the worker's own budget for it; one with a return phase waits its page budget plus 30 s (780 s with the booking read at the defaults). A request that finds a page in flight is told how long that page may still take, and the app waits that long before it asks again. A browser failure inside the return phase ends that step only: the outbound flights and the returns read before it are kept.
+**The flight-list read.** Besides discovery, the browser provider reads the flight list for the cheapest ten date pairs of a search (and one date pair on demand, from "Read flights for this date"): economy only. The worker selects the cheapest outbound within the search's limits and reads the return flights Google lists with it, then the booking options of the shown pairing and the offers Google listed (the cheapest of the sellers read, not checked with the airline); a date pair costs 1 page, or 2 with a second outbound (tried when none of the first's returns fits), each spaced like any page. Returns and offers are read only on worker machines whose recording session set the flags, at present the operator's Mac; elsewhere the read stays outbound only. A run's flight-list pages have their own allowance of twenty pages (ten date pairs at up to 2 pages each), outside the run's page cap; an on-demand read is up to 2 pages (1 without a return phase) outside any run's caps, and is refused while a run that uses the browser is pending or running. A flights request without a return phase waits up to twice the page timeout plus 30 s (210 s at the defaults), the worker's own budget for it; one with a return phase waits its page budget plus 30 s (780 s with the booking read at the defaults). A request that finds a page in flight is told how long that page may still take, and the app waits that long before it asks again. A browser failure inside the return phase ends that step only: the outbound flights and the returns read before it are kept.
 
 **Method.** A host-side worker (`apps/camoufox-worker`, a Node process on the machine running the worker; macOS or Linux, each
 `<os>-<arch>` offered once recordings under its pinned build set its flags: all four today, `darwin-x64` in list mode only; Windows is a later
@@ -110,7 +110,7 @@ process environment to the browser. Any other `camoufox-js` version or Camoufox 
 
 **Limits.** One page at a time; at least `CAMOUFOX_MIN_SPACING_SECONDS` (default 30, 0 to 600, never randomised; a value of 0 means no pause: pages go back to back, from your own address; scrolls do so only when `CAMOUFOX_GRID_SCROLL_SPACING_SECONDS` is 0)
 from the start of one page to the next, persisted across restarts; `CAMOUFOX_EXECUTION_PAGE_CAP` (default 100, at most
-400) pages a run, frozen into the execution's snapshot; `CAMOUFOX_MONTHLY_PAGE_CAP` (default 1,500) a month. No
+400) pages a run, frozen into the execution's snapshot; no monthly cap. No
 proxies; no challenge is ever solved, clicked through or waited out; consent is rejected, never accepted (the
 operator's saved cookie choice, Reject all, is applied before every page and compared by value after it; a consent page
 stops it). The worker stops and cools down whenever a page is not a recognised results page: a challenge or
@@ -128,9 +128,9 @@ machine running the worker: a 313 MB download on `darwin-arm64` and 320 MB on `d
 on `linux-arm64` and 663 MB on `linux-x64` (about 1.25 GB unpacked). **The worker key:** any process or container that can reach the worker (on Docker Desktop, every container on the
 Mac) is stopped only by `CAMOUFOX_WORKER_KEY`. **Money:** none.
 
-**Coverage.** In `list` mode a page prices one day pair, so a run prices at most `CAMOUFOX_EXECUTION_PAGE_CAP` day pairs
-and a month at most `CAMOUFOX_MONTHLY_PAGE_CAP`: with the defaults, 100 a run and 1,500 a month, against 2,184 day pairs
-for one worked-example airport pair (8,736 for its four pairs). The `grid` mode (work package 15, opt-in with
+**Coverage.** In `list` mode a page prices one day pair, so a run prices at most `CAMOUFOX_EXECUTION_PAGE_CAP` day pairs:
+with the default, 100 a run, against 2,184 day pairs for one worked-example airport pair (8,736 for its four pairs), so
+a full pass of one pair takes 22 runs. The `grid` mode (work package 15, opt-in with
 `CAMOUFOX_MODE=grid`) reads up to 49 day pairs per view of the Dates tab's 7 × 7 grid: for one worked-example pair, 78
 blocks on a lattice of 7 × 7 (26 departure columns × 3 return blocks for the 10–21-night band; 2,184 of their 3,822
 cells are in the band and stored), 312 for the four pairs. One scroll moves one day (measured 2026-10-18), so a

@@ -12,7 +12,6 @@ import {
 import { loadWorkerConfig } from './config.js';
 import { ensureInstallLayout, type InstallFacts, InstallRefused } from './install.js';
 import { lockHeld } from './lock.js';
-import { countsFact } from './monthly.js';
 import { installDirFor } from './paths.js';
 import { osArchOf } from './platform.js';
 import { type Entry, type EntryContext, EX_CONFIG } from './run.js';
@@ -79,7 +78,6 @@ export function gatherStart(o: {
       signedIn: false,
       locked: o.locked,
       now: o.clock.now(),
-      counts: countsFact(o.dataDir),
     },
   };
 }

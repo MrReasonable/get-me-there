@@ -9,7 +9,6 @@ import {
   apiContract,
   BACKUP_MAX_AGE_MS,
   backupState,
-  CAP_WARN_SHARE,
   capPercent,
   capWarn,
   consentBoundOf,
@@ -680,10 +679,6 @@ function workerCheckOf(f: StatusFacts, w: WorkerFacts): StatusCheck {
       summary: 'awaiting verification for this build: browser flags are unset',
       note,
     });
-  const monthly =
-    s.monthly === null || !s.monthly.readable
-      ? ''
-      : `; this month: pages ${s.monthly.pages} of ${w.caps.pages}, scrolls ${s.monthly.scrolls} of ${w.caps.scrolls}`;
   const refuses = (summary: string, fixFor: StatusCheck['fix']) =>
     check({ ...base, state: 'fail', summary: `refusing pages: ${summary}`, note, fix: fixFor });
   const found = s.finding;
@@ -693,12 +688,6 @@ function workerCheckOf(f: StatusFacts, w: WorkerFacts): StatusCheck {
         const t = START_REFUSAL_TEXT['signed-in'];
         return refuses(SIGNED_IN_REFUSED, refusalFix(fix, t.summary, t.fixCommand));
       }
-      // why: W3: the worker refuses every page while its counts cannot be read; a rewrite from the ledger repairs it
-      case 'counts-unreadable':
-        return refuses(
-          "the worker's monthly counts file cannot be read",
-          fix('rewrite the counts from the ledger', 'pnpm gmt browser counts'),
-        );
       case 'settings':
         return refuses(
           `settings differ between the app and the worker: ${found.names.join(', ')}`,
@@ -718,7 +707,7 @@ function workerCheckOf(f: StatusFacts, w: WorkerFacts): StatusCheck {
         return check({
           ...base,
           state: 'warn',
-          summary: `cooling down until ${at(f, found.until)}${found.cause === null ? '' : ` (${BLOCKED_WORDS[found.cause]})`}${monthly}`,
+          summary: `cooling down until ${at(f, found.until)}${found.cause === null ? '' : ` (${BLOCKED_WORDS[found.cause]})`}`,
           note,
           fix: fix('no action: the app tries again after the cool-down'),
         });
@@ -728,35 +717,16 @@ function workerCheckOf(f: StatusFacts, w: WorkerFacts): StatusCheck {
     return check({
       ...base,
       state: 'warn',
-      summary: `${s.appInstances} app instances called the worker this month, so its counts and the app's differ${monthly}`,
+      summary: `${s.appInstances} app instances called the worker this month, sharing its page spacing and cool-downs`,
       note,
       fix: fix('run one app against one worker'),
-    });
-  if (s.monthly !== null && !s.monthly.readable)
-    return check({
-      ...base,
-      state: 'warn',
-      summary: "the worker's monthly counts cannot be read",
-      note,
-      fix: fix('rewrite the counts from the ledger', 'pnpm gmt browser counts'),
-    });
-  if (
-    s.monthly !== null &&
-    (capWarn(s.monthly.pages, w.caps.pages) || capWarn(s.monthly.scrolls, w.caps.scrolls))
-  )
-    return check({
-      ...base,
-      state: 'warn',
-      summary: `reachable; a monthly cap is near (${CAP_WARN_SHARE * 100}% or more used)${monthly}`,
-      note,
-      fix: fix('no action: the cap stops the worker; it resets next month'),
     });
   const superseded =
     w.refusal.kind === 'refusal' && s.socsCapturedAt !== null && w.refusal.at < s.socsCapturedAt;
   return check({
     ...base,
     state: 'ok',
-    summary: `reachable${monthly}`,
+    summary: 'reachable',
     note: superseded ? `${note}; an earlier refusal was superseded by a newer consent record` : note,
   });
 }

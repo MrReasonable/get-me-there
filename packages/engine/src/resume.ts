@@ -126,7 +126,7 @@ export async function resumeExecution(
     : exec;
   const anchored = reanchor(ctx, refreshed, opts);
   // why: decision 83 check (b) — before anything is priced or cap-checked, a browser provider outside the window is
-  // left out of the pass, its estimate and its cap check, so its monthly cap cannot refuse a resume the others can run
+  // left out of the pass, its estimate and its cap check, so its caps cannot refuse a resume the others can run
   const leaving = browserLeftAtResume(ctx, anchored);
   const outside = leaving.providers;
   const current =

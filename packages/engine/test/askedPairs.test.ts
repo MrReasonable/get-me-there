@@ -4,7 +4,7 @@ import { asIsoDate, asIsoDateTime, type BudgetGuard } from '@gmt/core';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { callsLeftIn } from '../src/budgetCheck.js';
 import { buildContext } from '../src/context.js';
-import { askedPairs, billedCallsOf, monthlyPagesOf } from '../src/estimate.js';
+import { askedPairs, billedCallsOf } from '../src/estimate.js';
 import { type LineKey, lineKey } from '../src/lines.js';
 import { buildSnapshot } from '../src/snapshot.js';
 import { confirmationNeeded } from '../src/start.js';
@@ -105,13 +105,12 @@ describe('the date pairs an estimate asks about (Task 20.4)', () => {
     });
   });
 
-  it('a camoufox line with 40 monthly pages left is cut at 40, under its 100-page cap', () => {
-    const w = worked([stubCamoufox({ cells: 1 })], { monthlyCap: 40 });
-    // why: asked about as the saved search itself, so its own schedule reserves nothing against it (ruling 5)
+  it('a camoufox line is cut at its 100-page run cap, never by a month', () => {
+    const w = worked([stubCamoufox({ cells: 1 })]);
     expect(asked(w, w.def.id)).toEqual({
       datePairs: 2184,
       datePairsCovered: 0,
-      datePairsPartly: 40,
+      datePairsPartly: 100,
       datePairsReused: 0,
     });
   });
@@ -130,27 +129,7 @@ describe('the date pairs an estimate asks about (Task 20.4)', () => {
   });
 });
 
-describe('the billed calls and the browser worker’s month of an estimate', () => {
-  it('monthlyPages is this run’s camoufox pages and the pages its month has left; null without a runnable camoufox line', () => {
-    const w = worked([stubCamoufox({ cells: 1 })], { monthlyCap: 1500 });
-    const line = (blocked: string | null) => ({
-      providerId: 'camoufox' as const,
-      stage: 'discovery' as const,
-      calls: 100,
-      planCalls: 100,
-      costMicroGbp: 0,
-      costPence: 0,
-      seconds: 7000,
-      blocked,
-    });
-    expect(monthlyPagesOf(w.e.ctx, { perProvider: [line(null)] }, w.def.id)).toEqual({
-      planned: 100,
-      left: 1500,
-    });
-    expect(monthlyPagesOf(w.e.ctx, { perProvider: [line('provider-month')] }, null)).toBeNull();
-    expect(monthlyPagesOf(w.e.ctx, { perProvider: [] }, null)).toBeNull();
-  });
-
+describe('the billed calls of an estimate', () => {
   it('billedCalls lists a runnable line of a billable-plan provider with its month’s calls left; a free source has none', () => {
     // why: the $40 plan has a monthly call cap (10,000 calls, spec §5.3) and calls that cost nothing each
     const w = worked([stubCamoufox({ cells: 1 }), stubSearchApiVerification()], {
@@ -190,7 +169,6 @@ function guardWith(
     usage: (s) => over(g.usage(s)),
     recentCalls: (id, since) => g.recentCalls(id, since),
     scrollsLeft: (id, executionId) => g.scrollsLeft(id, executionId),
-    scrollsThisMonth: (id) => g.scrollsThisMonth(id),
   };
 }
 

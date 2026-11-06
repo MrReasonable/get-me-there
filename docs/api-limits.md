@@ -105,9 +105,8 @@ window's start and end with calls and cost so far.
 - Off by default (`CAMOUFOX_ENABLED=false`); once it is enabled a new search names it by default (a search saved
   before then names it only if you add it in its Edit page, More options). Discovery only, `list` mode: one page per
   day pair, through the host-side worker on the machine running it (macOS or Linux; docs/setup.md section 14).
-- Caps: `CAMOUFOX_EXECUTION_PAGE_CAP` (default 100, 1 to 400) pages a run and `CAMOUFOX_MONTHLY_PAGE_CAP` (default 1,500)
-  pages a calendar month from `CAMOUFOX_BILLING_DAY`. The app's ledger enforces both; the worker reports its own month's
-  counts, and enforces the monthly caps across every caller. The run's cap is frozen into the execution's snapshot when it is
+- Caps: `CAMOUFOX_EXECUTION_PAGE_CAP` (default 100, 1 to 400) pages a run; there is no monthly page or scroll cap (the
+  Providers page shows the calendar month's pages, with no cap on them). The run's cap is frozen into the execution's snapshot when it is
   created; the guard reads it from there, never from the configuration, and only a manual resume refreshes it with the
   rest of the budget. Reaching it skips the remaining camoufox cells for budget (`provider-execution`) while other
   providers continue, or stops the run when none remains; that stop is never resumed: Search again starts a fresh run
@@ -120,8 +119,8 @@ window's start and end with calls and cost so far.
   signed-in profile; 1 hour after a page it does not recognise. A page that never settles is a `parse` error with no cool-down.
 - Never billable, cost 0, never cached. Camoufox pages also draw on `EXECUTION_MAX_FREE_CALLS`, the free-call cap every
   free provider shares.
-- Coverage: with the defaults, 100 day pairs a run and 1,500 a month, against 2,184 day pairs for one worked-example
-  airport pair (8,736 for its four pairs), so a full pass of one pair takes 22 runs.
+- Coverage: with the defaults, 100 day pairs a run, against 2,184 day pairs for one worked-example airport pair (8,736
+  for its four pairs), so a full pass of one pair takes 22 runs.
 - Costs (the spec's §2, in full on docs/setup.md section 14): **Terms** (read the provider's terms before enabling
   it; the operator is responsible for how it is used), **The operator's IP and account**, **Brittleness**, **Speed** (50–90 s a
   page and 1½–2½ hours a run at the default 30 s page spacing), **Availability**, **Image size** (none in the app image), **The worker key**, **Money** (none).
@@ -144,7 +143,7 @@ Once a week (or before raising a cap), compare the app with SearchApi's dashboar
 6. Camoufox has no vendor dashboard; the ledger's camoufox rows are the only record of what it did. Rows of class
    `page` loaded a Google page (`200`, `423` blocked, `504`, and `502` after launch); rows of class `no-page` did not
    (`423` cooling-down, `429`, `409`, `400`, `401`, `502` at launch, and a refused connection). A `423` blocked row is a
-   block; a `423` cooling-down row is a refusal that loaded no page. Only `page` rows count toward its page caps.
+   block; a `423` cooling-down row is a refusal that loaded no page. Only `page` rows count toward its page cap.
 
 ## One app per key
 

@@ -1,5 +1,5 @@
 // The camoufox adapter's public names (brief WP14 §5): the provider, its constants, tiling and HTTP limits.
-export { BLOCKED_WORDS, classifyWorkerAnswer, coolingDownWords, throwIfMonthly } from './answer.js';
+export { BLOCKED_WORDS, classifyWorkerAnswer, coolingDownWords } from './answer.js';
 export { camoufoxKeepAwake } from './awake.js';
 export { CAMOUFOX_FLIGHT_LIST_INFO, flightListCapability } from './flights.js';
 export { gridBlocks, gridTileEstimate, planGridTiles } from './grid.js';

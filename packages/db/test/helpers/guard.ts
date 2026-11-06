@@ -7,13 +7,7 @@ import { freshDb, T0 } from './db.js';
 
 /** The app's env with camoufox on (synthetic key) and the caps the test names. */
 export function camoufoxEnv(
-  o: {
-    camoufoxConfigCap?: number;
-    monthlyCap?: number;
-    maxFreeCalls?: number;
-    executionScrollCap?: number;
-    monthlyScrollCap?: number;
-  } = {},
+  o: { camoufoxConfigCap?: number; maxFreeCalls?: number; executionScrollCap?: number } = {},
 ): Record<string, string> {
   return {
     NODE_ENV: 'production',
@@ -25,10 +19,8 @@ export function camoufoxEnv(
     CAMOUFOX_WORKER_URL: 'http://host.docker.internal:8090',
     CAMOUFOX_WORKER_KEY: 'test-camoufox-worker-key-0123456789abcdef',
     CAMOUFOX_EXECUTION_PAGE_CAP: String(o.camoufoxConfigCap ?? 100),
-    CAMOUFOX_MONTHLY_PAGE_CAP: String(o.monthlyCap ?? 1500),
     EXECUTION_MAX_FREE_CALLS: String(o.maxFreeCalls ?? 2000),
     CAMOUFOX_EXECUTION_SCROLL_CAP: String(o.executionScrollCap ?? 600),
-    CAMOUFOX_MONTHLY_SCROLL_CAP: String(o.monthlyScrollCap ?? 6000),
   };
 }
 
@@ -40,10 +32,8 @@ export function configFrom(env: Record<string, string>) {
 
 function build(o: {
   camoufoxConfigCap?: number;
-  monthlyCap?: number;
   maxFreeCalls?: number;
   executionScrollCap?: number;
-  monthlyScrollCap?: number;
   snapshotCaps: Record<string, Partial<Record<'camoufox', number>>>;
   /** Spec rev 55 §8.1: per execution, the snapshot's `budget.flightListPages`; an execution not named has none. */
   snapshotFlightPages?: Record<string, number>;

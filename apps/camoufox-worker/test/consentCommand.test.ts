@@ -66,19 +66,9 @@ const EARLIER = {
   capturedAt: '2026-10-01T08:00:00.000Z',
 };
 
-/** An earlier page: the pacer's last-page time and this window's counts beside it, as a worker leaves them. */
-function lastPage(dir: string, at: string, pages = 1): void {
+/** An earlier page: the pacer's last-page time, as a worker leaves it. */
+function lastPage(dir: string, at: string): void {
   writeFileSync(join(dir, 'pacer.json'), JSON.stringify({ lastPageAt: at }), { mode: 0o600 });
-  writeFileSync(
-    join(dir, 'monthly.json'),
-    JSON.stringify({
-      windowStart: '2026-10-01T00:00:00.000Z',
-      windowEnd: '2026-11-01T00:00:00.000Z',
-      pages,
-      scrolls: 0,
-    }),
-    { mode: 0o600 },
-  );
 }
 
 function setup(
@@ -158,10 +148,6 @@ describe('consent: the capture (the person clicks; the tool observes)', () => {
     expect(t.profiles).toHaveLength(1);
     expect(t.profiles[0]?.startsWith(join(t.dataDir, 'probe-consent-'))).toBe(true);
     expect(existsSync(t.profiles[0] ?? '')).toBe(false);
-    expect(JSON.parse(readFileSync(join(t.dataDir, 'monthly.json'), 'utf8'))).toMatchObject({
-      pages: 1,
-      scrolls: 0,
-    });
     expect(JSON.parse(readFileSync(join(t.dataDir, 'pacer.json'), 'utf8'))).toEqual({ lastPageAt: T0 });
     expect(existsSync(join(t.dataDir, 'worker.lock'))).toBe(false);
   });
@@ -200,7 +186,7 @@ describe('consent: the capture (the person clicks; the tool observes)', () => {
     expect(await capture(none)).toBe(EX_CONFIG);
     expect(none.err.join()).toContain('pnpm gmt consent export');
     expect(none.drivers).toEqual([]);
-    expect(existsSync(join(none.dataDir, 'monthly.json'))).toBe(false);
+    expect(existsSync(join(none.dataDir, 'pacer.json'))).toBe(false);
     none.kept();
   });
 
@@ -355,15 +341,6 @@ describe('consent: the capture (the person clicks; the tool observes)', () => {
     expect(cooling.drivers).toEqual([]);
     cooling.kept();
   });
-  // why: ts-b1-006: its own test, as it reads the counts file through its 0600 mode check (POSIX)
-  it('refuses at the monthly page cap, keeping the stored record', async () => {
-    const full = setup();
-    lastPage(full.dataDir, '2026-10-17T00:00:00.000Z', cfg.monthlyPageCap);
-    expect(await capture(full)).toBe(EX_UNAVAILABLE);
-    expect(full.err.join()).toContain('monthly page cap');
-    expect(full.drivers).toEqual([]);
-    full.kept();
-  });
   it('sweeps a profile a killed capture left, before it starts', async () => {
     const t = setup();
     mkdirSync(join(t.dataDir, 'probe-consent-1-1'), { mode: 0o700 });
@@ -399,7 +376,6 @@ describe('an interruption (SIGINT or SIGTERM: review X3)', () => {
     const t = setup({ interrupted: stop.signal });
     lastPage(t.dataDir, '2026-10-18T04:59:50.000Z');
     const pacerBefore = readFileSync(join(t.dataDir, 'pacer.json'));
-    const countsBefore = readFileSync(join(t.dataDir, 'monthly.json'));
     const sleep = t.timers.sleep.bind(t.timers);
     t.deps.timers = {
       ...t.timers,
@@ -413,7 +389,6 @@ describe('an interruption (SIGINT or SIGTERM: review X3)', () => {
     expect(t.drivers).toEqual([]);
     // why: CodeRabbit (PR #18): the wait itself ends, so the page is never claimed after the command returns
     expect(readFileSync(join(t.dataDir, 'pacer.json'))).toEqual(pacerBefore);
-    expect(readFileSync(join(t.dataDir, 'monthly.json'))).toEqual(countsBefore);
     expect(existsSync(join(t.dataDir, 'worker.lock'))).toBe(false);
     t.kept();
   });

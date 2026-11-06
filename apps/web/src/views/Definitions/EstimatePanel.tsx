@@ -6,7 +6,7 @@ import { formatMicroGbp, formatPence } from '../../format.js';
 
 const F = SETUP_COPY.definitions;
 const FIT_SCOPE: Readonly<Record<string, string | undefined>> = F.fitScope;
-/** The scopes counted in micro-GBP, worded as money; every other scope counts calls, pages or scrolls. */
+/** The scopes counted in micro-GBP, worded as money; every other scope counts calls or pages. */
 const MONEY_SCOPES: ReadonlySet<string> = new Set(['execution-cost', 'global-month']);
 
 /**
@@ -26,10 +26,6 @@ export function scopeWords(label: string): string {
       return F.fitProviderMonth(source);
     case 'provider-lifetime':
       return F.fitProviderLifetime(source);
-    case 'scrolls-per-month':
-      return F.fitScrolls(source);
-    case 'cells-per-refresh':
-      return F.fitCellsPerRefresh(source);
     default:
       return label;
   }

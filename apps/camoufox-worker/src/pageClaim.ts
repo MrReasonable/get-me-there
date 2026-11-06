@@ -1,61 +1,22 @@
-import type { Admission, MonthlyCounter } from './monthly.js';
 import type { Pacer } from './pacer.js';
 import { RecordingRefused } from './recordArgs.js';
 import type { EntryContext } from './run.js';
 import type { Timers } from './timers.js';
 
 /**
- * The month's caps, then the shared pacer: a page past the monthly page cap (or with fewer scrolls left than its
- * moves, or a counts file that cannot be read) is refused before anything loads; the spacing is waited out once (fake
- * timers in tests); then the caps are checked again (cb-b1-005: a wait that crossed a window's end counts the page in
- * the window it loads in) and the page and its scrolls are reserved, never settled down (an over-count), except by a
- * caller that settles to what it loaded (WP21 Task 21.0: the select-outbound kind, with the admission returned).
+ * The shared pacer before a recording's page: the spacing is waited out once (fake timers in tests), then claimed
+ * again; a spacing that still refuses is a refusal before anything loads.
  */
 export async function claim(
   pacer: Pacer,
-  monthly: MonthlyCounter,
-  scrolls: number,
   /** `interrupted` (the consent command's SIGINT or SIGTERM) ends the spacing wait at once, so nothing is claimed. */
   deps: { timers: Timers; interrupted?: AbortSignal },
   ctx: EntryContext,
-  /** WP21 Task 21.0: the documents the recording may load, reserved together (one for every other kind). */
-  pages = 1,
-  /**
-   * WP21 Task 21.0 review: only the whole of `pages` will do; an admission that would reserve fewer is refused before
-   * the pacer or the counts are touched, so the admission returned always holds all of them.
-   */
-  whole = false,
-): Promise<Extract<Admission, { kind: 'ok' }>> {
-  const admissible = (): Extract<Admission, { kind: 'ok' }> => {
-    const a = monthly.check(scrolls, pages);
-    if (a.kind === 'counts-unreadable')
-      throw new RecordingRefused(
-        `the worker's monthly counts file is ${a.problem}; rewrite it with pnpm gmt browser counts`,
-      );
-    if (a.kind === 'monthly-cap')
-      throw new RecordingRefused(`the worker's monthly page cap (${a.cap}) is reached until ${a.windowEnd}`);
-    if (whole && a.pagesReserved < pages)
-      throw new RecordingRefused(
-        `the worker's monthly page cap leaves fewer than the ${pages} pages this recording may load`,
-      );
-    if (a.scrollAllowance < scrolls)
-      throw new RecordingRefused(
-        `the worker's monthly scroll cap leaves ${a.scrollAllowance} of the ${scrolls} moves`,
-      );
-    return a;
-  };
-  admissible();
+): Promise<void> {
   const first = pacer.claim();
-  if (!first.ok) {
-    ctx.out(`waiting ${first.retryAfterSeconds} s for the spacing`);
-    await deps.timers.sleep(first.retryAfterSeconds * 1000, deps.interrupted);
-    const second = pacer.claim();
-    if (!second.ok) throw new RecordingRefused(`the spacing still refuses (${second.retryAfterSeconds} s)`);
-  }
-  // why: no await between this check and the write, and the worker's lock keeps every other caller out
-  const admitted = admissible();
-  monthly.write(admitted.reserved);
-  // why: WP21 Task 21.0: returned so the select-outbound kind settles to the documents it loaded; every other kind's
-  // page stays reserved, never settled down (an over-count)
-  return admitted;
+  if (first.ok) return;
+  ctx.out(`waiting ${first.retryAfterSeconds} s for the spacing`);
+  await deps.timers.sleep(first.retryAfterSeconds * 1000, deps.interrupted);
+  const second = pacer.claim();
+  if (!second.ok) throw new RecordingRefused(`the spacing still refuses (${second.retryAfterSeconds} s)`);
 }

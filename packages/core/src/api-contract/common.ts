@@ -134,8 +134,6 @@ export const usageSchema = z.object({
   cap: z.number().int().min(0).nullable(),
   windowStart: isoDateTimeSchema.nullable(),
   windowEnd: isoDateTimeSchema.nullable(),
-  /** W3: a provider-month window's scroll clicks, for a provider with a monthly scroll cap (camoufox) only. */
-  scrolls: count.exactOptional(),
   /**
    * Spec rev 55 §8.1 (the 20.8 ruling): on a `provider-execution` scope, the flight-list pages beside the page cap,
    * counted against the run's own flight allowance (`calls` are its `/v1/flights` rows, never read as grid pages).

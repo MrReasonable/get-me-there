@@ -9,7 +9,6 @@ import { describeResult } from '../plan/describe.js';
 import { assumedStopped, factOf, factsOf, serviceSet, workerEntry } from '../services/set.js';
 import { appEnvPath } from '../services/specs.js';
 import { readEnvText, readSettings } from '../setup/appEnv.js';
-import { rewriteCounts } from './counts.js';
 import { installCamoufox, oldBundleRemovals } from './installer.js';
 import {
   browserAvailability,
@@ -41,8 +40,8 @@ import { checkWords, workerCheck, workerStart, workerStarted, workerStop } from 
  * capture as its own step (review X5), then the worker's own start check: only once it says consent is in place does app.env gain CAMOUFOX_ENABLED=true and the worker service get installed and started.
  * Any step that stops leaves the provider off (`not-set-up`), and `pnpm gmt setup --reconfigure browser` resumes it.
  * With the provider on, `--reconfigure browser` installs a missing or changed bundle first, then offers a new key (yes
- * by default when the two files' keys differ) and, when the worker's counts file is missing or unreadable, the rewrite
- * `gmt browser counts` makes. A re-run of setup re-renders the worker's unit only once its check passes.
+ * by default when the two files' keys differ). A re-run of setup re-renders the worker's unit only once its check
+ * passes.
  */
 export type BrowserOutcome = 'unavailable' | 'off' | 'not-set-up' | 'on' | 'failed';
 
@@ -238,8 +237,7 @@ async function turnOn(deps: Deps, o: Options): Promise<BrowserOutcome> {
 
 /**
  * With the provider on: a missing or changed bundle installed first (dev-b1-001, po-b1-002: the `layout` and
- * `build-mismatch` refusals' fix works here too), then a new key on request (yes by default when the keys differ), and
- * the counts rewrite when the worker's counts file is missing or unreadable.
+ * `build-mismatch` refusals' fix works here too), then a new key on request (yes by default when the keys differ).
  */
 async function reconfigureOn(deps: Deps, o: Options): Promise<BrowserOutcome> {
   const paths = deps.platform.paths;
@@ -287,13 +285,7 @@ async function reconfigureOn(deps: Deps, o: Options): Promise<BrowserOutcome> {
       return 'failed';
     }
   }
-  const counts = await rewriteCounts(deps, {
-    interactive: o.interactive,
-    ask: o.ask,
-    flags: {},
-    command: 'setup: the worker’s counts',
-  });
-  return counts === 0 ? 'on' : 'failed';
+  return 'on';
 }
 
 /** The browser part of setup: first run (`reconfigure` false) or `--reconfigure browser`. */

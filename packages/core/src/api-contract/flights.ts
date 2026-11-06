@@ -115,7 +115,7 @@ const flightListLinkSchema = z
 
 /**
  * `GET /definitions/:id/flight-lists`'s answer (spec rev 55 §10): whether flight lists can be read here (and why not),
- * the search's camoufox refresh, the browser worker's month's pages left and one run's pages, the pair being read now, and per asked pair
+ * the search's camoufox refresh, the pages one read plans, the pair being read now, and per asked pair
  * its airports, its link, the newest list for the figure's airport pair (`list`, the only one that feeds the outcome
  * beside the price, the difference line and orderWithinTie) and else the newest list for another airport pair of the
  * current space (`listOtherPair`, shown only inside the flights block under its airport-pair label).
@@ -124,11 +124,6 @@ export const flightListsResponseSchema = z.strictObject({
   available: z.boolean(),
   unavailableReason: z.enum(['not-named', 'not-configured', 'cabin']).nullable(),
   refreshHours: countSchema,
-  monthlyPagesLeft: countSchema.nullable(),
-  // why: ruling R-pages (WP20 Task 20.10): this search's browser pages for one run, flight pages included, from its own
-  // estimate; the read button adds "N pages left this month" only when `monthlyPagesLeft` is below it. Null when no
-  // camoufox line of the search can run (or flight lists are not available here).
-  runPages: countSchema.nullable(),
   /**
    * Ruling D3 (spec rev 56 §10): the pages one on-demand read plans, `flightPagesPerPair` of the worker's last reported
    * flags (2 with a return phase, or while the flags are unread: prov-008; else 1); the read button and its words use
@@ -149,7 +144,7 @@ export const flightListsResponseSchema = z.strictObject({
        * Final review B-I3 (spec rev 56 §10, §11): whether a read of this date pair would go now: flight lists can be
        * read here, the date pair is the board's and departs after today, and its newest list is none, one the
        * on-demand read would not refuse as `fresh` (the engine's one rule, `flightListFresh`), and not a failed list a
-       * monthly or per-run limit stopped. The read button shows exactly when it is true; the status notes word what
+       * per-run limit stopped. The read button shows exactly when it is true; the status notes word what
        * happens next by it.
        */
       readNow: z.boolean(),

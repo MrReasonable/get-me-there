@@ -7,8 +7,6 @@
  * No airport is named here (spec §1).
  */
 import {
-  BudgetExceeded,
-  billingMonthWindow,
   CAMOUFOX_CLOCK_SKEW_MS,
   type Cabin,
   type CapabilityInfo,
@@ -21,17 +19,14 @@ import {
   GRID_HORIZON_DAYS,
   GRID_STEP_DAYS,
   GRID_TIMES,
-  type IsoDateTime,
   type Logger,
   type PageRequest,
   type ProviderContext,
   type ProviderError,
   pageRequestSchema,
   type Secret,
-  SHARED_WORKER_DEFAULTS,
   type SharedSettings,
   type SuppliedField,
-  sharedInt,
   type TilePlan,
   workerAnswerSchema,
 } from '@gmt/core';
@@ -157,39 +152,6 @@ export function camoufoxProvider(o: CamoufoxProviderOptions): FlightProvider {
   if (o.key.reveal().length < 32)
     throw new Error('camoufoxProvider: CAMOUFOX_WORKER_KEY must be at least 32 characters');
   const log = o.log.child({ providerId: 'camoufox' });
-  /**
-   * W3 (cb-b1-001, pa-b1-001): the executions whose last grid page met the worker's monthly scroll cap, each with the
-   * end of the worker's window then (its billing day, a shared setting): their next grid tile stops at provider-month
-   * until that end, and asks the worker again after it. A call with no execution is never remembered.
-   */
-  const shared = o.sharedSettings ?? SHARED_WORKER_DEFAULTS;
-  const scrollsSpent = new Map<string, IsoDateTime>();
-  const scrollCapReached = (executionId: string | null): void => {
-    if (executionId === null) return;
-    const day = sharedInt(shared, 'CAMOUFOX_BILLING_DAY');
-    scrollsSpent.set(executionId, billingMonthWindow(o.clock.now(), day).windowEnd);
-  };
-  const throwIfScrollsSpent = (executionId: string | null): void => {
-    const until = executionId === null ? undefined : scrollsSpent.get(executionId);
-    if (until === undefined || executionId === null) return;
-    if (Date.parse(o.clock.now()) >= Date.parse(until)) {
-      scrollsSpent.delete(executionId);
-      return;
-    }
-    // why: the page that stopped short used every scroll the worker allowed, so its count stood at the cap then
-    const cap = sharedInt(shared, 'CAMOUFOX_MONTHLY_SCROLL_CAP');
-    throw new BudgetExceeded({
-      scope: 'provider-month',
-      providerId: 'camoufox',
-      cap,
-      current: cap,
-      requested: 1,
-      unit: 'scrolls',
-      counter: 'worker',
-      windowEnd: until,
-    });
-  };
-
   async function fetchTile(
     plan: TilePlan,
     q: DiscoveryQuery,
@@ -267,11 +229,11 @@ export function camoufoxProvider(o: CamoufoxProviderOptions): FlightProvider {
     ctx: ProviderContext,
     fail: (e: ProviderError) => DiscoveryTileResult,
   ): Promise<DiscoveryTileResult> {
-    // why: fix round 1 (CA 1): spec §2 rev 34: the page asks for what the caps leave; the worker stops there (`allowance`)
-    // and the unreached cells are resumable issues, while a page with no scroll left still reads its first block
-    throwIfScrollsSpent(ctx.executionId);
+    // why: fix round 1 (CA 1): spec §2 rev 34: the page asks for what the run's scroll cap leaves; the worker stops there
+    // (`allowance`) and the unreached cells are resumable issues, while a page with no scroll left still reads its first
+    // block
     const left = o.scrollsLeft?.(ctx.executionId) ?? null;
-    // why: CodeRabbit on PR #9 and re-review N2: a page whose first read view lies past what the caps leave (a 0-night
+    // why: CodeRabbit on PR #9 and re-review N2: a page whose first read view lies past what the cap leaves (a 0-night
     // lead scroll with none left) drops its lead scrolls and reads the view it opens on, a day later on the returns;
     // the cells that view does not show stay resumable issues, and the page keeps its ledger row
     const firstRead = Math.max(0, path.reads.indexOf(true));
@@ -292,7 +254,7 @@ export function camoufoxProvider(o: CamoufoxProviderOptions): FlightProvider {
     if (!request.success)
       return fail(parseError('bad-grid-path', 'the grid path is not a valid request', WHERE));
     const started = o.clock.now();
-    // why: ruling 12: the reservation checks the page's allowed scrolls against the run's and the month's caps
+    // why: ruling 12: the reservation checks the page's allowed scrolls against the run's scroll cap
     const sent = await postToWorker(o, {
       path: PAGE_PATH,
       body: request.data,
@@ -309,9 +271,6 @@ export function camoufoxProvider(o: CamoufoxProviderOptions): FlightProvider {
       return fail(
         parseError('fetched-at-out-of-range', `fetchedAt ${a.data.fetchedAt} is outside this request`, WHERE),
       );
-    // why: decision 82: a page that stopped short of what it asked for at its allowance met the worker's monthly scroll
-    // cap; this page's views stand, and the next grid tile of the run stops at provider-month
-    if (a.data.ended === 'allowance' && a.data.scrolls < allowance) scrollCapReached(ctx.executionId);
     const mapped = gridTile(plan, a.data);
     return leadDropped && mapped.kind === 'tile'
       ? { ...mapped, notes: [...mapped.notes, 'lead-scroll-dropped'] }

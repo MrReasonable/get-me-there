@@ -90,12 +90,11 @@ function flightsClause(f: NonNullable<EstimateResponse['estimate']['flightLists'
 /** The first letter in capitals: the sentence starts with whichever clause comes first. */
 const capitalised = (s: string): string => s.charAt(0).toUpperCase() + s.slice(1);
 
-/** The words for a blocked line's scope (engine `checkBudget` names it); a browser page cap is counted in pages. */
-function blockedWhy(scope: string, providerId: ProviderId, c: Copy): string {
+/** The words for a blocked line's scope (engine `checkBudget` names it). */
+function blockedWhy(scope: string, c: Copy): string {
   const W = c.blockedWhy;
   const kind = BUDGET_SCOPE_KINDS.find((k) => k === scope);
   if (kind === undefined) return W.unknown;
-  if (kind === 'provider-month' && providerId === 'camoufox') return W['provider-month-pages'];
   return W[kind];
 }
 
@@ -146,9 +145,8 @@ function askedClause(e: EstimateResponse, schedule: SentenceSchedule | null, c: 
  *   or with the return leg "+ flights, out and back, for up to 10 date pairs: usually about 15 pages and 41 minutes, at
  *   most 20 pages and 50 minutes" (spec rev 56 §8.1, R-estimate).
  *
- * The notes: the browser worker's month ("uses about 110 of your 1,400 browser pages left this month"), each source a
- * budget cap blocks with why and its cost as not included, and the soft confirmation the press gives ("This costs about
- * £1.20, above your £1.00 check; pressing Search now confirms it").
+ * The notes: each source a budget cap blocks with why and its cost as not included, and the soft confirmation the press
+ * gives ("This costs about £1.20, above your £1.00 check; pressing Search now confirms it").
  *
  * Money goes only through `money`, the estimate panel's one cost formatter (spec §11; `sourceGuard.test.ts` holds
  * every caller to it); counts through core's `groupThousands`, the grouping money and counts share. `press` is the
@@ -216,9 +214,6 @@ export function estimateSentence(
     button: tag === null ? press : L.withTag(press, tag),
     tag,
     notes: [
-      ...(e.monthlyPages === null
-        ? []
-        : [L.monthlyPages(groupThousands(e.monthlyPages.planned), groupThousands(e.monthlyPages.left))]),
       ...notUsedNotes(lines, c, money),
       ...(e.softConfirm === null
         ? []
@@ -250,7 +245,7 @@ function notUsedNotes(lines: readonly Line[], c: Copy, money: (pence: number) =>
     const pence = microGbpToPence(b.micro);
     return c.notUsed(
       capitalised(mainPathSource(id)),
-      blockedWhy(b.scope, id, c),
+      blockedWhy(b.scope, c),
       pence > 0 ? money(pence) : null,
     );
   });

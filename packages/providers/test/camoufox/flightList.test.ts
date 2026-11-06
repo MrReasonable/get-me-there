@@ -7,7 +7,6 @@
 import {
   asIata,
   asIsoDate,
-  BudgetExceeded,
   FLIGHT_LIST_ENDPOINT_PATH,
   type FlightLimits,
   flightRequestSeconds,
@@ -317,27 +316,6 @@ describe('camoufox flightLists (spec rev 55 §2, §5.1)', () => {
     });
     expect(bodies).toEqual([]);
     expect(reserves(events)).toEqual([]);
-  });
-  it('a monthly-cap answer throws BudgetExceeded at provider-month with the worker’s own figures', async () => {
-    const { lists } = setup();
-    server.use(
-      http.post(URL_, () =>
-        HttpResponse.json(
-          { kind: 'monthly-cap', cap: 2000, used: 2003, windowEnd: '2026-11-01T00:00:00.000Z' },
-          { status: 429, ...contacted(false) },
-        ),
-      ),
-    );
-    const r = lists.read(Q, ctx);
-    await expect(r).rejects.toBeInstanceOf(BudgetExceeded);
-    await expect(r).rejects.toMatchObject({
-      scope: 'provider-month',
-      providerId: 'camoufox',
-      cap: 2000,
-      current: 2003,
-      counter: 'worker',
-      windowEnd: '2026-11-01T00:00:00.000Z',
-    });
   });
   it.each([
     [

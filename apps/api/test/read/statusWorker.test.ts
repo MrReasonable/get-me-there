@@ -66,15 +66,6 @@ describe('a worker that refuses pages is fail, whatever the reason (pa-b1-001)',
         .summary,
     ).not.toContain('(Google');
   });
-
-  it('the monthly caps use the one capWarn: 79% is fine, 80% warns, a cap of 0 never warns (ca-b1-005)', () => {
-    const monthly = (pages: number, scrolls: number) => ({ monthly: { pages, scrolls, readable: true } });
-    expect(checkOf(withStatus(monthly(1199, 4799)), 'worker').state).toBe('ok');
-    expect(checkOf(withStatus(monthly(1200, 0)), 'worker').state).toBe('warn');
-    expect(checkOf(withStatus(monthly(0, 4800)), 'worker').state).toBe('warn');
-    const zero = withStatus(monthly(0, 0), { caps: { pages: 0, scrolls: 6000 } });
-    expect(checkOf(zero, 'worker').state).toBe('ok');
-  });
 });
 
 describe('"cannot check" names its real reason (pa-b1-009)', () => {

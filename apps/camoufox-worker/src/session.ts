@@ -33,7 +33,6 @@ import { type FlightsRead, readFlights } from './flights.js';
 import { readGrid } from './gridSession.js';
 import { type GuardState, installGuard } from './guard.js';
 import { logSkippedOptions, readList } from './list.js';
-import type { MonthlyCounter } from './monthly.js';
 import type { Pacer } from './pacer.js';
 import type { Refusal } from './refusal.js';
 import { returnPhase, unverifiedReturns } from './returnPhase.js';
@@ -76,8 +75,6 @@ export interface SessionDeps {
   socs: SocsCapture;
   cooldown: CooldownStore;
   pacer: Pacer;
-  /** Decision 82: the worker's own monthly page and scroll caps, for every caller together. */
-  monthly: MonthlyCounter;
   refusal: Refusal;
   clock: Clock;
   timers: Timers;
@@ -160,10 +157,6 @@ function withPageCounts(a: WorkerAnswer, pagesLoaded: number, next: IsoDateTime 
     case 'not-ready':
       return { ...a, ...counts };
     case 'browser-error':
-      return { ...a, ...counts };
-    case 'monthly-cap':
-      return { ...a, ...counts };
-    case 'counts-unreadable':
       return { ...a, ...counts };
     default: {
       const never: never = a;
@@ -272,11 +265,10 @@ export class PageSession {
   }
 
   private async run(
-    asked: PageRequest | FlightsRequest,
+    req: PageRequest | FlightsRequest,
     phase: boolean,
     counts: { loads: number; reclaimed: boolean },
   ): Promise<PageResult> {
-    let req = asked;
     // why: decision 70: grid pages only once the selectors module verifies the grid and worker.env asks for it
     if (req.mode === 'grid' && (!this.S.GRID_VERIFIED || this.d.grid?.mode !== 'grid'))
       return { answer: { kind: 'mode-unavailable', mode: 'grid' }, googleContacted: false };
@@ -316,45 +308,12 @@ export class PageSession {
         answer: { kind: 'cooling-down', cause: active.cause, cooldownUntil: active.until },
         googleContacted: false,
       };
-    // why: decision 82: the month's page cap for every caller, before anything opens; a refusal leaves the counts as
-    // they are, and a counts file that cannot be read refuses every page as itself (W3), never as a cap reached
-    // why: R-reserve (P3): a return-phase request reserves its worst case (FLIGHT_LIST_PAGES_PER_PAIR_MAX) when the month
-    // leaves it, else one page, and the phase is then skipped (monthly-headroom)
-    const admission = this.d.monthly.check(
-      req.mode === 'grid' ? req.scrollAllowance : 0,
-      phase ? FLIGHT_LIST_PAGES_PER_PAIR_MAX : 1,
-    );
-    if (admission.kind === 'monthly-cap')
-      return {
-        answer: {
-          kind: 'monthly-cap',
-          cap: admission.cap,
-          used: admission.used,
-          windowEnd: admission.windowEnd,
-        },
-        googleContacted: false,
-      };
-    if (admission.kind === 'counts-unreadable')
-      return { answer: { kind: 'counts-unreadable', problem: admission.problem }, googleContacted: false };
     const claim = this.d.pacer.claim();
     if (!claim.ok)
       return {
         answer: { kind: 'spacing', retryAfterSeconds: this.busyWait(claim.retryAfterSeconds) },
         googleContacted: false,
       };
-    // why: the page and its clamped scroll allowance are on disk before the load, so a crash over-counts, never under
-    try {
-      this.d.monthly.write(admission.reserved);
-    } catch (e) {
-      this.d.pacer.release();
-      return {
-        answer: { kind: 'browser-error', stage: 'read', detail: `monthly counts unwritable: ${detailOf(e)}` },
-        googleContacted: false,
-        fatal: true,
-      };
-    }
-    // why: a grid page scrolls no further than the month's scroll cap leaves (it still reads its first block)
-    if (req.mode === 'grid') req = { ...req, scrollAllowance: admission.scrollAllowance };
 
     this.busySince = this.d.clock.now();
     const started = this.d.timers.now();
@@ -406,8 +365,9 @@ export class PageSession {
         });
         const guard = await deadline.race(installGuard(c, p, this.d.log, this.S));
         guardState = guard;
-        // why: cost-r3-002 (D8: return-phase requests only): the documents never pass what the month reserved
-        if (phase) guard.reservation = admission.pagesReserved;
+        // why: cost-r3-002 (D8: return-phase requests only): the documents never pass the request's own worst case,
+        // FLIGHT_LIST_PAGES_PER_PAIR_MAX, which the app's ledger planned for it
+        if (phase) guard.reservation = FLIGHT_LIST_PAGES_PER_PAIR_MAX;
         const driver = (this.d.driverFor ?? createDriver)(p, guard, this.S);
         stage = 'navigate';
         contacted = true;
@@ -491,7 +451,6 @@ export class PageSession {
                 log: this.d.log,
                 pollMs: this.pollMs,
                 startedAt: started,
-                admitted: admission.pagesReserved,
                 pageTimeoutMs: this.d.pageTimeoutMs,
               });
               if ('stop' in ph) {
@@ -556,22 +515,6 @@ export class PageSession {
     this.busySince = null;
     this.busyUntil = null;
     counts.loads = guardState?.documentLoads ?? 0;
-    try {
-      // why: spec rev 56 §2: a return-phase request settles to the documents it loaded (0 when the first was refused),
-      // never above the reservation (the guard's reservation stop); every other page keeps its one page
-      if (phase)
-        this.d.monthly.settle(
-          admission.reserved,
-          admission.scrollAllowance,
-          counter.scrolls,
-          admission.pagesReserved,
-          counts.loads,
-        );
-      else this.d.monthly.settle(admission.reserved, admission.scrollAllowance, counter.scrolls);
-    } catch (e) {
-      // why: the reservation stays on disk, which over-counts; the page's own answer is unchanged
-      this.d.log.warn({ error: detailOf(e) }, 'monthly counts not settled');
-    }
 
     if (stop !== null) {
       this.d.log.debug(

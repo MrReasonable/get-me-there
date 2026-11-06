@@ -16,9 +16,6 @@ export const SHARED_WORKER_SETTINGS = [
   'CAMOUFOX_MODE',
   'CAMOUFOX_GRID_SCROLL_CAP',
   'CAMOUFOX_GRID_SCROLL_SPACING_SECONDS',
-  'CAMOUFOX_MONTHLY_PAGE_CAP',
-  'CAMOUFOX_MONTHLY_SCROLL_CAP',
-  'CAMOUFOX_BILLING_DAY',
   'POINT_OF_SALE',
 ] as const;
 export type SharedWorkerSetting = (typeof SHARED_WORKER_SETTINGS)[number];
@@ -40,9 +37,6 @@ export const SHARED_WORKER_DEFAULTS: SharedSettings = {
   CAMOUFOX_MODE: 'list',
   CAMOUFOX_GRID_SCROLL_CAP: '30',
   CAMOUFOX_GRID_SCROLL_SPACING_SECONDS: '5',
-  CAMOUFOX_MONTHLY_PAGE_CAP: '1500',
-  CAMOUFOX_MONTHLY_SCROLL_CAP: '6000',
-  CAMOUFOX_BILLING_DAY: '1',
   POINT_OF_SALE: 'GB',
 };
 
@@ -63,9 +57,6 @@ const SHARED_RULES: Readonly<Record<SharedWorkerSetting, Rule>> = {
   CAMOUFOX_MODE: { pattern: /^(list|grid)$/, message: 'must be list or grid' },
   CAMOUFOX_GRID_SCROLL_CAP: { min: 0, max: 60 },
   CAMOUFOX_GRID_SCROLL_SPACING_SECONDS: { min: 0, max: 30 },
-  CAMOUFOX_MONTHLY_PAGE_CAP: { min: 0, max: Number.MAX_SAFE_INTEGER },
-  CAMOUFOX_MONTHLY_SCROLL_CAP: { min: 0, max: Number.MAX_SAFE_INTEGER },
-  CAMOUFOX_BILLING_DAY: { min: 1, max: 28 },
   POINT_OF_SALE: { pattern: /^[A-Z]{2}$/, message: 'must be an ISO 3166-1 alpha-2 code' },
 };
 
@@ -73,9 +64,7 @@ const SHARED_RULES: Readonly<Record<SharedWorkerSetting, Rule>> = {
 export function sharedSettingMessage(name: SharedWorkerSetting): string {
   const rule = SHARED_RULES[name];
   if ('pattern' in rule) return `${name} ${rule.message}`;
-  return rule.max === Number.MAX_SAFE_INTEGER
-    ? `${name} must be a whole number of at least ${rule.min}`
-    : `${name} must be a whole number from ${rule.min} to ${rule.max}`;
+  return `${name} must be a whole number from ${rule.min} to ${rule.max}`;
 }
 
 /** An invalid shared setting: names the settings, never their values. */

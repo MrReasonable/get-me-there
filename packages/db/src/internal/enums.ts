@@ -195,6 +195,8 @@ export const STOP_DETAILS = exhaustive<StopDetail>()([
   'unrecognised',
   'settings-differ',
   'grid-unverified',
+  // why: spec rev 64: `counts-unreadable` and `monthly-cap` are kept only so rows stored before the browser's monthly
+  // caps were withdrawn still read (and the CHECK keeps its text: no migration); nothing writes them now
   'counts-unreadable',
   'no-airport-names',
   'none-for-cell',

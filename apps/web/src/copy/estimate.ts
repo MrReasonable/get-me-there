@@ -56,8 +56,6 @@ export const ESTIMATE_COPY = {
   billedNoCap: (calls: string, name: string) => `uses about ${calls} ${name} searches`,
   searchesTag: (calls: string, name: string) => `${calls} ${name} searches`,
   withTag: (verb: string, tag: string) => `${verb} · ${tag}`,
-  monthlyPages: (planned: string, left: string) =>
-    `uses about ${planned} of your ${left} browser pages left this month`,
   notUsed: (source: string, why: string, cost: string | null) =>
     `${source} is not used: ${why}${cost === null ? '' : ` (about ${cost} not included)`}`,
   // why: a blocked line names the budget scope that blocked it (engine checkBudget); a browser page cap is pages
@@ -67,7 +65,6 @@ export const ESTIMATE_COPY = {
     'execution-cost': "over this search's spending limit a run",
     'provider-execution': 'over its page limit for one run',
     'provider-month': 'no calls left this month',
-    'provider-month-pages': 'no browser pages left this month',
     'provider-lifetime': 'no trial searches left',
     'global-month': "this month's spending limit is reached",
     unknown: 'a limit stops it this run',

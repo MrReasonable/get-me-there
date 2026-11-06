@@ -4,10 +4,10 @@ import { basename, dirname, join } from 'node:path';
 
 /**
  * The worker's one way to write its own files (ca-b1-015): the cool-down, the pacer, the refusals, the SOCS capture,
- * the monthly counts, the app instances and fonts.conf. A temporary file with a name of its own beside the target,
+ * the app instances and fonts.conf. A temporary file with a name of its own beside the target,
  * created exclusively at 0600 (so a stale or planted temporary file is never reused or widened), written, flushed to
  * disk, then renamed over the target: a reader sees the old file or the new one, never half of one, and a crash after
- * the rename keeps the new one (the monthly reservation must survive a kill).
+ * the rename keeps the new one.
  */
 export function writePrivateFile(path: string, text: string): void {
   const tmp = join(dirname(path), `.${basename(path)}.tmp-${process.pid}-${randomBytes(4).toString('hex')}`);

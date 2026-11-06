@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { addDays, asIsoDate, asIsoDateTime, FLIGHT_LIST_COUNT, SEARCH_LINK_LABEL } from '@gmt/core';
+import { addDays, asIsoDate, asIsoDateTime, SEARCH_LINK_LABEL } from '@gmt/core';
 import { act, screen, waitFor, within } from '@testing-library/react';
 import { HttpResponse, http } from 'msw';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -424,8 +424,8 @@ describe('the flights block (spec rev 55 §11 Flights)', () => {
     expect(blockOf(9)).toHaveTextContent(
       "Flights couldn't be read: the browser worker's monthly limit is used up",
     );
-    // ruling R-failed-read: a list stopped by a monthly or per-run limit offers no read; the note says the limit
-    expect(within(blockOf(9)).queryByRole('button', { name: /^Read flights/ })).toBeNull();
+    // why: spec rev 64: a list a withdrawn monthly cap stopped (stored before rev 64) offers the read again
+    expect(within(blockOf(9)).getByRole('button', { name: /^Read flights/ })).toBeEnabled();
     expect(blockOf(6)).toHaveTextContent("Google's list showed no flights for these dates when read 11:44");
     expect(blockOf(3)).toHaveTextContent(
       'Google listed flights, none this app could read for these airports and dates (2 for other airports or days, 1 unread)',
@@ -433,7 +433,7 @@ describe('the flights block (spec rev 55 §11 Flights)', () => {
     for (const i of [3, 9]) expect(blockOf(i)).not.toHaveTextContent(/no flights/);
   });
 
-  it('a failed list offers the read again unless a monthly or per-run limit stopped it (ruling R-failed-read)', async () => {
+  it('a failed list offers the read again unless a per-run limit stopped it (ruling R-failed-read)', async () => {
     const reasons: Record<string, Parameters<typeof failedList>[0]> = {
       '2027-03-14': 'network',
       '2027-03-15': 'execution-cap',
@@ -457,7 +457,8 @@ describe('the flights block (spec rev 55 §11 Flights)', () => {
       "Flights couldn't be read: this search's limit for one run is used up",
     );
     expect(within(blockOf(3)).queryByRole('button', { name: /^Read flights/ })).toBeNull();
-    expect(within(blockOf(6)).queryByRole('button', { name: /^Read flights/ })).toBeNull();
+    // why: spec rev 64: the monthly cap is withdrawn, so a list it stopped (stored before rev 64) is read again
+    expect(within(blockOf(6)).getByRole('button', { name: /^Read flights for this date/ })).toBeEnabled();
   });
 
   it('"show all" expands to every flight and, pressed again, folds back to three (one name; aria-expanded the state)', async () => {
@@ -617,34 +618,12 @@ describe('the difference line retired; the lower fare its own line (spec rev 56 
 });
 
 describe('reading one date pair’s flights (spec rev 55 §11; ruling ui-009)', () => {
-  it('a date pair with no list reads "Flights not read yet" with the read button, the pages left only when few', async () => {
+  it('a date pair with no list reads "Flights not read yet" with the read button', async () => {
     await renderWorked();
     const block = blockOf(15);
     expect(block).toHaveTextContent('Flights not read yet');
     expect(
       within(block).getByRole('button', { name: 'Read flights for this date (free, 1 page)' }),
-    ).toBeEnabled();
-  });
-
-  it('adds the pages left only when fewer are left than one run of this search uses (ruling R-pages)', async () => {
-    // why: the answer's own `runPages` (this search's grid pages and its flight pages) is the threshold
-    const runPages = 100 + FLIGHT_LIST_COUNT;
-    await renderWorked({ over: { monthlyPagesLeft: runPages - 1, runPages } });
-    expect(
-      within(blockOf(15)).getByRole('button', {
-        name: 'Read flights for this date (free, 1 page; 109 pages left this month)',
-      }),
-    ).toBeEnabled();
-  });
-
-  it.each([
-    ['as many left as one run uses', { monthlyPagesLeft: 110, runPages: 110 }],
-    ['no run figure', { monthlyPagesLeft: 5, runPages: null }],
-    ['no monthly figure', { monthlyPagesLeft: null, runPages: 110 }],
-  ])('no pages-left clause with %s', async (_name, over) => {
-    await renderWorked({ over });
-    expect(
-      within(blockOf(15)).getByRole('button', { name: 'Read flights for this date (free, 1 page)' }),
     ).toBeEnabled();
   });
 

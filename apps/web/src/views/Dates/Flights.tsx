@@ -137,8 +137,6 @@ export function useBoardFlights(
           available: newest.available,
           unavailableReason: newest.unavailableReason,
           refreshHours: newest.refreshHours,
-          monthlyPagesLeft: newest.monthlyPagesLeft,
-          runPages: newest.runPages,
           pagesPlanned: newest.pagesPlanned,
           reading: apiReading,
         };
@@ -266,7 +264,7 @@ function ListSection({
   const [all, setAll] = useState(false);
   const outboundId = useId();
   // why: finding 6: the note has no source before it, so the clause names the browser worker ("the browser worker's
-  // monthly limit is used up")
+  // settings differ from the app's")
   const note = listNote(list, now, COPY, (d) => stopDetailClause(d, 'camoufox', true));
   const shown = shownOf(list, limits, true);
   if (note !== null || shown === null) return note === null ? null : <p className="flights-line">{note}</p>;
@@ -387,8 +385,6 @@ function ReadButton({
               // why: ruling D3, prov-008: the pages the response plans, never a hard number (21.7 code M8: the button
               // exists only beside an answer, so there is no fallback that could understate them)
               meta.pagesPlanned,
-              meta.monthlyPagesLeft,
-              meta.runPages,
               F,
             )}
       </button>

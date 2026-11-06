@@ -47,7 +47,6 @@ async function world(o: { check?: string; df?: number; code?: number; stderr?: s
         stdout: `noise\n${o.check ?? '{"ok":true}'}\n`,
         ...(o.stderr === undefined ? {} : { stderr: o.stderr }),
       };
-    if (argv.includes('counts') && argv.includes('--check')) return { code: 0, stdout: '{"counts":"ok"}\n' };
     if (argv[0] === 'df') return { code: 0, stdout: `h\n/dev/disk 1 1 ${o.df ?? 99_999_999} 1% /\n` };
     if (argv[0] === 'ln') {
       m.fs.symlink(argv[3] ?? '', argv[2] ?? '');
@@ -509,28 +508,6 @@ describe('browserSetup’s outcomes and words', () => {
   });
 });
 
-describe('the counts rewrite under --reconfigure browser: its guards', () => {
-  it('a readable counts file is said once and nothing is written; a worker whose counts cannot be read fails with its words', async () => {
-    const m = await world();
-    await run(m);
-    m.executor.log.length = 0;
-    m.io.stdout = '';
-    expect(await run(m, { reconfigure: true, choice: {} })).toBe('on');
-    expect(m.io.stdout).toBe('The worker’s monthly counts file is readable; nothing to rewrite.\n');
-    const broken = await world();
-    await run(broken);
-    const inner = broken.deps.run;
-    broken.deps.run = async (argv, opts) =>
-      argv.includes('counts')
-        ? { code: 78, stdout: '', stderr: 'x\nworker.env must be mode 0600\n' }
-        : inner(argv, opts);
-    expect(await run(broken, { reconfigure: true, choice: {} })).toBe('failed');
-    expect(broken.io.stderr).toContain(
-      'the worker could not read its counts (exit 78: worker.env must be mode 0600)',
-    );
-  });
-});
-
 describe('the offer’s fixed words', () => {
   it('pins the costs, the server sentence, the questions and both consent methods', () => {
     expect(costsSummary({ bytes: 1_000_000, unpackedBytes: 2_000_000 })).toBe(
@@ -659,9 +636,6 @@ describe('the install helpers’ edges', () => {
         CAMOUFOX_MODE: 'list',
         CAMOUFOX_GRID_SCROLL_CAP: '30',
         CAMOUFOX_GRID_SCROLL_SPACING_SECONDS: '5',
-        CAMOUFOX_MONTHLY_PAGE_CAP: '1500',
-        CAMOUFOX_MONTHLY_SCROLL_CAP: '6000',
-        CAMOUFOX_BILLING_DAY: '1',
         POINT_OF_SALE: 'GB',
       },
       'export CAMOUFOX_WORKER_PORT="8091"\n  CAMOUFOX_MODE="grid"\nCAMOUFOX_WORKER_KEY="old"\n# note\n',

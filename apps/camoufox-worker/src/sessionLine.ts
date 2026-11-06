@@ -1,17 +1,8 @@
-import {
-  billingMonthWindow,
-  blockedPageSchema,
-  type Clock,
-  type IsoDateTime,
-  isoDateTimeSchema,
-  type MonthlyCounts,
-  systemClock,
-} from '@gmt/core';
+import { blockedPageSchema, type Clock, isoDateTimeSchema, systemClock } from '@gmt/core';
 import { z } from 'zod';
 import { loadWorkerConfig, type WorkerConfig } from './config.js';
 import { CooldownStore } from './cooldown.js';
 import { acquireLock, LockHeld } from './lock.js';
-import { current, MonthlyCounter, readCounts } from './monthly.js';
 import { carryLastPageAt, Pacer } from './pacer.js';
 import { type Entry, type EntryContext, EX_CONFIG, EX_UNAVAILABLE } from './run.js';
 import { readBounded } from './stdin.js';
@@ -21,32 +12,24 @@ import { readBounded } from './stdin.js';
  * another `<os>-<arch>` entry (a Linux container on the operator's Mac, or the Mac under a throwaway HOME) has its own
  * data directory, but loads its pages from the operator's own address, as the host's worker does. So:
  *
- * - `export` prints this directory's state as one JSON line: the last page start, this billing window's start and its
- *   page and scroll counts, and the cool-down in force (null when none). It writes nothing.
+ * - `export` prints this directory's state as one JSON line: the last page start and the cool-down in force (null when
+ *   none). It writes nothing.
  * - `seed` (in the session, before any page) reads the host's line on stdin and sets only this directory's last-page
- *   time, never earlier than the one it has, so the session's first page waits the spacing from the host's last (in a
- *   new directory it also starts this window's counts at zero, which the counts' fail-closed rule needs beside a
- *   pacer file); it refuses while the host's cool-down is active, naming its end.
- * - `merge` (on the host, after the session, before its worker starts again) reads the session's line on stdin and
- *   keeps the later last-page time, adds the session's pages and scrolls to this window's counts when the two windows
- *   start at the same instant (otherwise it adds none and says so, and still writes this window's counts), and carries
- *   an active cool-down whose end is later than the one in force, so a stop in the session pauses the host's worker
- *   too.
+ *   time, never earlier than the one it has, so the session's first page waits the spacing from the host's last; it
+ *   refuses while the host's cool-down is active, naming its end.
+ * - `merge` (on the host, after the session, before its worker starts again) reads the session's line on stdin, keeps
+ *   the later last-page time, and carries an active cool-down whose end is later than the one in force, so a stop in
+ *   the session pauses the host's worker too.
  *
  * Seed and merge take the worker's lock, so they refuse while that directory's worker or recorder runs, and refuse a
- * line that fails its strict schema; nothing is written then. Unreadable counts are refused as they stand (the counts
- * file's fail-closed rule).
+ * line that fails its strict schema; nothing is written then.
  */
 export const EX_TEMPFAIL = 75;
 export const SESSION_LINE_MAX_BYTES = 4096;
 const USAGE = 'usage: run.ts session export | seed | merge (seed and merge read one export line on stdin)';
 
-const count = z.number().int().nonnegative();
 export const sessionLineSchema = z.strictObject({
   lastPageAt: isoDateTimeSchema.nullable(),
-  windowStart: isoDateTimeSchema,
-  pages: count,
-  scrolls: count,
   cooldown: z.strictObject({ until: isoDateTimeSchema, cause: blockedPageSchema }).nullable(),
 });
 export type SessionLine = z.infer<typeof sessionLineSchema>;
@@ -67,17 +50,6 @@ class SessionRefused extends Error {
   }
 }
 
-/** This window's counts, from the file (a new directory: zero), or refused as they stand. */
-async function windowCounts(dir: string, cfg: WorkerConfig, now: IsoDateTime): Promise<MonthlyCounts> {
-  const read = await readCounts(dir);
-  if (typeof read === 'object' && 'refused' in read)
-    throw new SessionRefused(
-      `this directory's monthly counts are ${read.refused}: nothing is carried (pnpm gmt browser counts rewrites them)`,
-    );
-  if (read === 'absent') return { ...billingMonthWindow(now, cfg.billingDay), pages: 0, scrolls: 0 };
-  return current(read, now, cfg.billingDay);
-}
-
 async function lineFrom(d: SessionDeps): Promise<SessionLine> {
   const text = await d.stdin(SESSION_LINE_MAX_BYTES);
   if (text === 'too-long')
@@ -91,7 +63,7 @@ async function lineFrom(d: SessionDeps): Promise<SessionLine> {
     // why: not JSON at all is refused below with the schema's own words
   }
   throw new SessionRefused(
-    'the session line on stdin was refused: not one run.ts session export line (lastPageAt, windowStart, pages, scrolls, cooldown)',
+    'the session line on stdin was refused: not one run.ts session export line (lastPageAt, cooldown)',
   );
 }
 
@@ -115,17 +87,12 @@ async function withLock<T>(dir: string, f: () => T | Promise<T>): Promise<T> {
 }
 
 async function exportLine(ctx: EntryContext, cfg: WorkerConfig, d: SessionDeps): Promise<void> {
-  const now = d.clock.now();
-  const counts = await windowCounts(ctx.dataDir, cfg, now);
   const line: SessionLine = {
     lastPageAt: new Pacer({
       dir: ctx.dataDir,
       minSpacingSeconds: cfg.minSpacingSeconds,
       clock: d.clock,
     }).lastPageAt(),
-    windowStart: counts.windowStart,
-    pages: counts.pages,
-    scrolls: counts.scrolls,
     cooldown: new CooldownStore({
       dir: ctx.dataDir,
       challengeHours: cfg.cooldownHours,
@@ -135,7 +102,7 @@ async function exportLine(ctx: EntryContext, cfg: WorkerConfig, d: SessionDeps):
   ctx.out(JSON.stringify(line));
 }
 
-async function seed(ctx: EntryContext, cfg: WorkerConfig, d: SessionDeps): Promise<void> {
+async function seed(ctx: EntryContext, d: SessionDeps): Promise<void> {
   const line = await lineFrom(d);
   const now = d.clock.now();
   if (line.cooldown !== null && Date.parse(line.cooldown.until) > Date.parse(now))
@@ -143,55 +110,22 @@ async function seed(ctx: EntryContext, cfg: WorkerConfig, d: SessionDeps): Promi
       `the host is cooling down until ${line.cooldown.until} (${line.cooldown.cause}); no session page is loaded before then`,
       EX_UNAVAILABLE,
     );
-  const lastPageAt = await withLock(ctx.dataDir, async () => {
-    const read = await readCounts(ctx.dataDir);
-    if (typeof read === 'object' && 'refused' in read)
-      throw new SessionRefused(
-        `this directory's monthly counts are ${read.refused}: nothing is carried (pnpm gmt browser counts rewrites them)`,
-      );
-    // why: a pacer file with no counts file beside it reads as an earlier worker's data and refuses every page (the
-    // counts' fail-closed rule), so a new directory's counts start at zero in this window before the time is carried
-    if (read === 'absent')
-      counter(ctx.dataDir, cfg, d.clock).write({
-        ...billingMonthWindow(now, cfg.billingDay),
-        pages: 0,
-        scrolls: 0,
-      });
+  const lastPageAt = await withLock(ctx.dataDir, () => {
     const at = line.lastPageAt;
     return at === null ? null : carryLastPageAt(ctx.dataDir, at, d.clock);
   });
   ctx.out(JSON.stringify({ ok: true, lastPageAt }));
 }
 
-const counter = (dir: string, cfg: WorkerConfig, clock: Clock): MonthlyCounter =>
-  new MonthlyCounter({
-    dir,
-    caps: { pages: cfg.monthlyPageCap, scrolls: cfg.monthlyScrollCap, billingDay: cfg.billingDay },
-    clock,
-  });
-
 async function merge(ctx: EntryContext, cfg: WorkerConfig, d: SessionDeps): Promise<void> {
   const line = await lineFrom(d);
-  const now = d.clock.now();
-  const result = await withLock(ctx.dataDir, async () => {
-    const host = await windowCounts(ctx.dataDir, cfg, now);
-    const countsAdded = host.windowStart === line.windowStart;
-    const counts = countsAdded
-      ? { ...host, pages: host.pages + line.pages, scrolls: host.scrolls + line.scrolls }
-      : host;
-    if (!countsAdded)
-      ctx.err(
-        `the windows differ (this directory ${host.windowStart}, the session ${line.windowStart}): the session's ${line.pages} pages and ${line.scrolls} scrolls are not added`,
-      );
-    // why: CodeRabbit (PR #21): written either way, before the last-page time, so a new directory never holds a pacer
-    // file with no counts file beside it (which every page refuses as counts-missing)
-    counter(ctx.dataDir, cfg, d.clock).write(counts);
+  const result = await withLock(ctx.dataDir, () => {
     const pacer = new Pacer({ dir: ctx.dataDir, minSpacingSeconds: cfg.minSpacingSeconds, clock: d.clock });
     const lastPageAt =
       line.lastPageAt === null ? pacer.lastPageAt() : carryLastPageAt(ctx.dataDir, line.lastPageAt, d.clock);
     const store = new CooldownStore({ dir: ctx.dataDir, challengeHours: cfg.cooldownHours, clock: d.clock });
     const cooldown = line.cooldown === null ? store.active() : store.carry(line.cooldown);
-    return { ok: true, countsAdded, lastPageAt, ...counts, cooldown };
+    return { ok: true, lastPageAt, cooldown };
   });
   ctx.out(JSON.stringify(result));
 }
@@ -211,7 +145,7 @@ export async function sessionEntry(ctx: EntryContext, d: SessionDeps): Promise<n
   }
   try {
     if (sub === 'export') await exportLine(ctx, cfg, d);
-    else if (sub === 'seed') await seed(ctx, cfg, d);
+    else if (sub === 'seed') await seed(ctx, d);
     else await merge(ctx, cfg, d);
     return 0;
   } catch (e) {

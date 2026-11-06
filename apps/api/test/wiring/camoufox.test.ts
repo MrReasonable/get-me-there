@@ -185,8 +185,8 @@ describe('apps/api wiring: camoufox shared settings and app instance (WP16a, spe
   });
 
   it('passes the app’s effective shared settings to the preflight, which refuses a worker whose settings differ', async () => {
-    const c = config({ ...ON, CAMOUFOX_MONTHLY_PAGE_CAP: '900' });
-    expect(c.providers.camoufox?.sharedSettings.CAMOUFOX_MONTHLY_PAGE_CAP).toBe('900');
+    const c = config({ ...ON, CAMOUFOX_COOLDOWN_HOURS: '72' });
+    expect(c.providers.camoufox?.sharedSettings.CAMOUFOX_COOLDOWN_HOURS).toBe('72');
     const at = '2026-10-18T05:00:00.000Z';
     const answer: HttpKit = {
       request: async () => ({
@@ -224,7 +224,7 @@ describe('apps/api wiring: camoufox shared settings and app instance (WP16a, spe
     ).toEqual({
       ok: false,
       skip: 'provider_disabled',
-      detail: 'settings differ: CAMOUFOX_MONTHLY_PAGE_CAP',
+      detail: 'settings differ: CAMOUFOX_COOLDOWN_HOURS',
       reason: 'settings-differ',
       // why: spec rev 56 §5.1: a read that returned a status carries the worker's flags
       flags: {},

@@ -53,8 +53,11 @@ export function providerWindow(
 ): { kind: 'provider-month' | 'provider-lifetime'; usage: Usage; reserved: number } {
   const kind = ctx.limitsOf(providerId).capKind;
   const usage = ctx.budget.usage({ kind, providerId });
+  // why: a window with no cap (camoufox's month) refuses nothing, so no schedule holds anything in it
   const reserved =
-    kind === 'provider-month' ? reservedForSchedules(ctx, providerId, definitionId, usage.windowEnd) : 0;
+    kind === 'provider-month' && usage.cap !== null
+      ? reservedForSchedules(ctx, providerId, definitionId, usage.windowEnd)
+      : 0;
   return { kind, usage, reserved };
 }
 

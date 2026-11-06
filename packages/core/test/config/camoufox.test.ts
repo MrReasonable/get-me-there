@@ -53,18 +53,16 @@ describe('the app’s effective shared settings (spec §12, WP16a)', () => {
     const c = ok({
       ...ON,
       CAMOUFOX_COOLDOWN_HOURS: '0072',
-      CAMOUFOX_MONTHLY_PAGE_CAP: '900',
-      CAMOUFOX_BILLING_DAY: '15',
+      CAMOUFOX_MIN_SPACING_SECONDS: '045',
       CAMOUFOX_MODE: 'grid',
       POINT_OF_SALE: 'US',
     });
     expect([
       c.providers.camoufox?.cooldownHours,
-      c.providers.camoufox?.limits.monthlyCallCap,
-      c.providers.camoufox?.limits.billingDay,
+      c.providers.camoufox?.minSpacingSeconds,
       c.providers.camoufox?.mode,
       c.pointOfSale,
-    ]).toEqual([72, 900, 15, 'grid', 'US']);
+    ]).toEqual([72, 45, 'grid', 'US']);
     // the worker's bound, now the app's too; and still checked with camoufox off
     expect(errors({ ...ON, CAMOUFOX_COOLDOWN_HOURS: '100001' })).toEqual(['CAMOUFOX_COOLDOWN_HOURS']);
     expect(errors({ ...minimal, CAMOUFOX_COOLDOWN_HOURS: '100001' })).toEqual(['CAMOUFOX_COOLDOWN_HOURS']);
@@ -92,8 +90,9 @@ describe('CAMOUFOX_* (spec §12 rev 32)', () => {
       pageTimeoutSeconds: 90,
     });
     expect(c?.key.reveal()).toBe(ON.CAMOUFOX_WORKER_KEY);
+    // why: spec rev 64: no monthly page cap; the ledger counts the calendar month's pages with no cap on them
     expect(c?.limits).toEqual({
-      monthlyCallCap: 1500,
+      monthlyCallCap: null,
       window: 'month',
       billingDay: 1,
       ratePerMinute: 2,
@@ -107,7 +106,6 @@ describe('CAMOUFOX_* (spec §12 rev 32)', () => {
       pagesOnly: true,
       minSpacingSeconds: 30,
       executionScrollCap: 600,
-      monthlyScrollCap: 6000,
     });
   });
   it('a 45 s spacing gives 1 a minute and 80 an hour', () => {
@@ -120,14 +118,12 @@ describe('CAMOUFOX_* (spec §12 rev 32)', () => {
     const c = ok({
       ...ON,
       CAMOUFOX_EXECUTION_PAGE_CAP: '400',
-      CAMOUFOX_MONTHLY_PAGE_CAP: '900',
-      CAMOUFOX_BILLING_DAY: '15',
       CAMOUFOX_COOLDOWN_HOURS: '72',
       CAMOUFOX_PAGE_TIMEOUT_SECONDS: '240',
       CAMOUFOX_MODE: 'list',
     }).providers.camoufox;
     expect(c).toMatchObject({ executionPageCap: 400, cooldownHours: 72, pageTimeoutSeconds: 240 });
-    expect(c?.limits).toMatchObject({ monthlyCallCap: 900, billingDay: 15, executionCallCap: 400 });
+    expect(c?.limits).toMatchObject({ monthlyCallCap: null, billingDay: 1, executionCallCap: 400 });
   });
   it.each([
     ['CAMOUFOX_MIN_SPACING_SECONDS', '-1'],

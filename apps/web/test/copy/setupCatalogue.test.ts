@@ -12,8 +12,6 @@ const SAMPLES: Record<string, unknown[][]> = {
   'definitions.refreshLabel': [['the browser worker']],
   'definitions.fitProviderMonth': [['Google Flights via SearchApi']],
   'definitions.fitProviderLifetime': [['Google Flights via SearchApi']],
-  'definitions.fitScrolls': [['the browser worker']],
-  'definitions.fitCellsPerRefresh': [['the browser worker']],
   'definitions.fitLine': [['billed calls a run', '154', '2000']],
   'schedule.daily': [['05:00', 'Europe/London']],
   'schedule.weekly': [

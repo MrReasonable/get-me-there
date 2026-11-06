@@ -187,7 +187,7 @@ describe('checkMutationGlobs', () => {
     const wp17 = scopeOf(readFileSync(join(ROOT, 'docs/briefs/wp17-camoufox-install-consent.md'), 'utf8'));
     expect(wp17.pending).toEqual({});
     expect(wp17.mutate['@gmt/camoufox-worker']).toEqual([
-      'src/monthly.ts',
+      'src/instances.ts',
       'src/consentLine.ts',
       'src/socsMark.ts',
       'src/sessionLine.ts',

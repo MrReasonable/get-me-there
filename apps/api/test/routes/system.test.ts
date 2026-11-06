@@ -128,8 +128,9 @@ describe('GET /api/providers (spec §10)', () => {
       schedulerTimezone: 'Europe/London',
     });
   });
-  // why: W3 (cb-b1-004): the ledger counts a grid page's scrolls; the camoufox month reports them, the others never
-  it('the camoufox month carries the ledger’s scroll count; a provider with no scroll cap has none', async () => {
+  // why: spec rev 64: the browser has no monthly cap; its month reports the pages the ledger counted, with no cap and no
+  // scroll figure
+  it('the camoufox month counts its pages with no cap and carries no scroll count', async () => {
     const x = await harness({
       CAMOUFOX_ENABLED: 'true',
       CAMOUFOX_WORKER_URL: 'http://127.0.0.1:8090',
@@ -152,8 +153,8 @@ describe('GET /api/providers (spec §10)', () => {
       apiContract.providersResponseSchema,
     );
     const month = body.providers.find((p) => p.providerId === 'camoufox')?.usage[0];
-    expect(month).toMatchObject({ scope: 'provider-month:camoufox', calls: 1, scrolls: 5 });
-    expect(body.providers.find((p) => p.providerId === 'fixture')?.usage[0]).not.toHaveProperty('scrolls');
+    expect(month).toMatchObject({ scope: 'provider-month:camoufox', calls: 1, cap: null });
+    expect(month).not.toHaveProperty('scrolls');
   });
   it('a trial plan reports the lifetime window alone, with its cap (ruling 2, F2)', async () => {
     const x = await harness({

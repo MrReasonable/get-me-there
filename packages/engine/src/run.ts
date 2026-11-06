@@ -517,9 +517,9 @@ export function applyBudgetBreach(
       return;
     }
     const scope: BudgetScope = global ? { kind: 'global-month' } : { kind: err.scope, providerId };
-    // why: W3: a counter that states its own window (the browser worker's) resumes the run when that window ends;
-    // finish keeps that end as the cause's resetsAt and clears the resume where revision 55 §8.1 says none happens
-    const windowEnd = err.windowEnd ?? ctx.budget.usage(scope).windowEnd;
+    // why: the run resumes when the cap's window ends; finish keeps that end as the cause's resetsAt and clears the
+    // resume where revision 55 §8.1 says none happens
+    const windowEnd = ctx.budget.usage(scope).windowEnd;
     stopRun(run, { kind: 'budget', error: err, resumeAfter: windowEnd, resetsAt: windowEnd });
     return;
   }

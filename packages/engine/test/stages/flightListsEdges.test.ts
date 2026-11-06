@@ -1,5 +1,5 @@
 // Spec revision 56 §8.1 "The flight-list step" at its edges: the entry predicate's other refusals, a blocked page with
-// and without a cool-down, a guard that states no flight allowance or no monthly cap, a page that throws, a ranking that
+// and without a cool-down, a guard that states no flight allowance, a page that throws, a ranking that
 // starts with a departed pair, the early end a pass leaves (or clears) on its stored plan, the pass's log lines, what the
 // run counts as read, and the stops recorded during and after the step. Most cases run one pass of the step directly
 // (`runFlightLists` over `newRun`) on a run whose discovery is done, through the real guard and database; concurrency
@@ -125,7 +125,6 @@ function guardWith(
     usage: (s) => over(s, g.usage(s)),
     recentCalls: (id, since) => g.recentCalls(id, since),
     scrollsLeft: (id, executionId) => g.scrollsLeft(id, executionId),
-    scrollsThisMonth: (id) => g.scrollsThisMonth(id),
   };
 }
 
@@ -246,18 +245,6 @@ describe('one pass of the step, its plan and its pages', () => {
     await runFlightLists(e.ctx, run);
     expect(row(e, second.id).flightLists).toMatchObject({ planned: 10, reused: 5 });
     expect(run.flightLists).toEqual({ read: 10, planned: 10 });
-  });
-
-  it('with a guard that states no monthly cap the month never holds back the return phase', async () => {
-    const { e, cam, pass } = await discovered();
-    e.ctx.workerFlags.set('camoufox', BOTH);
-    const ctx = {
-      ...e.ctx,
-      budget: guardWith(e.ctx.budget, (s, u) => (s.kind === 'provider-month' ? { ...u, cap: null } : u)),
-    };
-    await runFlightLists(ctx, pass());
-    expect(cam.flightCalls).toHaveLength(10);
-    expect(cam.flightCalls.every((c) => c.query.returnLimits !== undefined)).toBe(true);
   });
 
   it('a guard that states no flight allowance gives none: every pair failed execution-cap before any call', async () => {
@@ -430,9 +417,9 @@ describe('the early end a pass leaves on, or clears from, its stored plan', () =
     // an unread cell under an earlier end: the earlier end stands
     const ended = await stepped();
     ended.unreadLast();
-    ended.store({ ...ended.plan, ended: 'monthly-cap' });
+    ended.store({ ...ended.plan, ended: 'stopped' });
     await runFlightLists(ended.e.ctx, outside(ended));
-    expect(row(ended.e, ended.id).flightLists?.ended).toBe('monthly-cap');
+    expect(row(ended.e, ended.id).flightLists?.ended).toBe('stopped');
     // an unread cell and no end yet: window
     const left = await stepped();
     left.unreadLast();
@@ -464,7 +451,7 @@ describe('returnsStopOf', () => {
   });
 
   it('a skipped, no-outbound or not-verified read stops nothing (null)', () => {
-    expect(returnsStopOf(read('skipped', 'monthly-headroom'))).toBeNull();
+    expect(returnsStopOf(read('skipped', 'not-cheapest-view'))).toBeNull();
     expect(returnsStopOf(read('no-outbound', null))).toBeNull();
     expect(returnsStopOf(read('not-verified', null))).toBeNull();
   });

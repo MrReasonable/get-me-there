@@ -846,19 +846,6 @@ describe('the worker check', () => {
       }
     }
   });
-  // why: W3: a worker that cannot read its counts refuses every page; the card names the rewrite
-  it('a worker whose counts cannot be read fails, naming gmt browser counts', () => {
-    const c = checkOf(
-      withWorker(
-        healthyWorker({
-          read: { kind: 'ok', status: okWorkerStatus({ finding: { kind: 'counts-unreadable' } }) },
-        }),
-      ),
-      'worker',
-    );
-    expect(c).toMatchObject({ state: 'fail', fix: { command: 'pnpm gmt browser counts' } });
-    expect(c.summary).toContain('monthly counts file cannot be read');
-  });
   it('flags unset in the worker status is off (awaiting verification), not fail', () => {
     const c = checkOf(
       withWorker(healthyWorker({ read: { kind: 'ok', status: okWorkerStatus({ formVerified: false }) } })),
@@ -892,39 +879,16 @@ describe('the worker check', () => {
     expect(c).toMatchObject({ state: 'fail', summary: 'not reachable from the container' });
     expect(c.fix?.command).toBeNull();
   });
-  it('two app instances and a near monthly cap warn; this month shows n of cap', () => {
+  it('two app instances warn, saying they share the worker; one reads reachable with no month figures', () => {
     const two = checkOf(
       withWorker(healthyWorker({ read: { kind: 'ok', status: okWorkerStatus({ appInstances: 2 }) } })),
       'worker',
     );
-    expect(two.state).toBe('warn');
-    const near = checkOf(
-      withWorker(
-        healthyWorker({
-          read: {
-            kind: 'ok',
-            status: okWorkerStatus({ monthly: { pages: 1200, scrolls: 0, readable: true } }),
-          },
-        }),
-      ),
-      'worker',
-    );
-    expect(near.state).toBe('warn');
-    expect(checkOf(healthyFacts(), 'worker').summary).toContain(
-      'this month: pages 10 of 1500, scrolls 20 of 6000',
-    );
-    const unreadable = checkOf(
-      withWorker(
-        healthyWorker({
-          read: {
-            kind: 'ok',
-            status: okWorkerStatus({ monthly: { pages: 0, scrolls: 0, readable: false } }),
-          },
-        }),
-      ),
-      'worker',
-    );
-    expect(unreadable.state).toBe('warn');
+    expect(two).toMatchObject({
+      state: 'warn',
+      summary: '2 app instances called the worker this month, sharing its page spacing and cool-downs',
+    });
+    expect(checkOf(healthyFacts(), 'worker')).toMatchObject({ state: 'ok', summary: 'reachable' });
   });
   it('a status without the optional fields builds from what is present', () => {
     const c = checkOf(
@@ -932,7 +896,7 @@ describe('the worker check', () => {
         healthyWorker({
           read: {
             kind: 'ok',
-            status: okWorkerStatus({ appInstances: null, monthly: null, consent: null }),
+            status: okWorkerStatus({ appInstances: null, consent: null }),
           },
         }),
       ),

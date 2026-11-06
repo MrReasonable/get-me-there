@@ -7,9 +7,7 @@
  */
 import {
   type BlockedPage,
-  BudgetExceeded,
   type IsoDateTime,
-  type MonthlyCapFacts,
   ProviderError,
   type ProviderErrorKind,
   workerAnswerSchema,
@@ -36,7 +34,6 @@ function error(
   code: string,
   retryable = false,
   cooldownUntil?: IsoDateTime,
-  monthlyCap?: MonthlyCapFacts,
 ): ProviderError {
   return new ProviderError({
     kind,
@@ -47,7 +44,6 @@ function error(
     // why: fix round 1 (arch I1): the code as data, so a reader never parses the message
     reason: code,
     ...(cooldownUntil === undefined ? {} : { cooldownUntil }),
-    ...(monthlyCap === undefined ? {} : { monthlyCap }),
   });
 }
 
@@ -112,46 +108,9 @@ export function classifyWorkerAnswer(f: ResponseFacts): ProviderError {
         `the worker's browser failed at ${answer.stage}`,
         `browser-error:${answer.stage}`,
       );
-    case 'monthly-cap':
-      // why: decision 82: the worker's own monthly cap, across every caller; the adapter turns it into BudgetExceeded
-      return error(
-        f,
-        'quota',
-        `the browser worker's monthly page cap (${answer.cap}, counting every app and recording that uses it) is reached until ${answer.windowEnd}; Google was not contacted`,
-        'monthly-cap',
-        false,
-        undefined,
-        { cap: answer.cap, used: answer.used, windowEnd: answer.windowEnd },
-      );
-    case 'counts-unreadable':
-      // why: W3: not a cap reached: the worker cannot read its counts, so it admits nothing until they are rewritten
-      return error(
-        f,
-        'quota',
-        `the browser worker's monthly counts file is ${answer.problem}, so it refuses every page until pnpm gmt browser counts rewrites it; Google was not contacted`,
-        'counts-unreadable',
-      );
     case 'cells':
     case 'grid':
     case 'flights':
       return error(f, 'parse', `HTTP ${f.status} with a ${answer.kind} answer`, 'unexpected-status');
   }
-}
-
-/**
- * Decision 82, W3: the worker's own monthly page cap, thrown as BudgetExceeded at provider-month (the ledger's scope)
- * with the worker's own figures and window end, never the app's settings copied in. Any other error returns.
- */
-export function throwIfMonthly(e: ProviderError): void {
-  const m = e.monthlyCap;
-  if (e.reason !== 'monthly-cap' || m === undefined) return;
-  throw new BudgetExceeded({
-    scope: 'provider-month',
-    providerId: 'camoufox',
-    cap: m.cap,
-    current: m.used,
-    requested: 1,
-    counter: 'worker',
-    windowEnd: m.windowEnd,
-  });
 }

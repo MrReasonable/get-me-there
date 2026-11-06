@@ -57,7 +57,7 @@ function world(
     camoufoxFails?: number;
     travelpayoutsFails?: number;
     env?: Record<string, string>;
-    monthlyCap?: number;
+    pageCap?: number;
     systemClock?: boolean;
     hold?: Promise<void>;
   } = {},
@@ -78,7 +78,7 @@ function world(
     window: WINDOW,
     createdAt: CREATED,
     ...(o.env === undefined ? {} : { env: o.env }),
-    ...(o.monthlyCap === undefined ? {} : { monthlyCap: o.monthlyCap }),
+    ...(o.pageCap === undefined ? {} : { camoufoxConfigCap: o.pageCap }),
     ...(o.systemClock === true ? { systemClock: true } : {}),
   });
   return { e, camoufox, travelpayouts };
@@ -209,8 +209,8 @@ describe('the stored window (decision 83)', () => {
     expect(v.camoufox.calls).toHaveLength(8);
   });
 
-  it('past the window a resume leaves camoufox out before estimateRemainingFor: its monthly cap does not refuse a resume Travelpayouts can run, and the pass adds no camoufox line', async () => {
-    const w = world({ camoufoxFails: 4, travelpayoutsFails: 4, monthlyCap: 4 });
+  it('past the window a resume leaves camoufox out before estimateRemainingFor: its run page cap does not refuse a resume Travelpayouts can run, and the pass adds no camoufox line', async () => {
+    const w = world({ camoufoxFails: 4, travelpayoutsFails: 4, pageCap: 4 });
     const run = await failedRun(w);
     const stored = run.estimate?.perProvider.find((p) => p.providerId === 'camoufox');
     w.e.clock.set(plus(endOf(w, run.id), 1));
@@ -222,7 +222,7 @@ describe('the stored window (decision 83)', () => {
 
     // positive control: inside the window the cap check sees camoufox and blocks it: no page, its cells keep their
     // errors for a later pass, never scheduled_only
-    const v = world({ camoufoxFails: 4, travelpayoutsFails: 4, monthlyCap: 4 });
+    const v = world({ camoufoxFails: 4, travelpayoutsFails: 4, pageCap: 4 });
     const inside = await failedRun(v);
     v.e.clock.set(plus(MANUAL_AT, 60_000));
     await v.e.resume(inside.id, { manual: true });
@@ -243,7 +243,7 @@ describe('a live-tick resume re-anchors the window (decision 83)', () => {
     })[0];
     if (run === undefined) throw new Error('no run');
     await w.e.settled(run.id);
-    // why: a pause whose window reopened (resume_after passed), as a provider-month cap leaves one
+    // why: a pause whose window reopened (resume_after passed), as a provider-month cap (SearchApi's) leaves one
     w.e.ctx.repos.executions.setStatus(run.id, 'paused_budget', { resumeAfter: plus(F1, 3_600_000) });
     return run;
   }

@@ -2,10 +2,10 @@
  * Spec revision 56 §8.1 "The flight-list step" (WP20 Task 20.9; WP21 Task 21.6): after discovery and before
  * verification (ruling 20.0 concern 1; the execution's stage stays `discovery`), in `camoufox` only, the browser worker
  * reads the flight list of the 10 cheapest date pairs on the search's board, one request each, on an allowance of its
- * own (the snapshot's `flightListPages`, 20 pages, outside CAMOUFOX_EXECUTION_PAGE_CAP, inside the monthly page cap and
+ * own (the snapshot's `flightListPages`, 20 pages, outside CAMOUFOX_EXECUTION_PAGE_CAP, inside
  * EXECUTION_MAX_FREE_CALLS). When the worker last reported `RETURN_SELECT_VERIFIED` (and `BOOKING_SELECT_VERIFIED`) the
  * plan reads each pair's return leg (and the shown pairing's booking options) too: up to 2 pages a request, the search's
- * limits sent with it, an outbound-only request instead when the month or the window cannot hold that, and no further
+ * limits sent with it, an outbound-only request instead when the window cannot hold that, and no further
  * return phase (or booking read) after one ends transient.
  *
  * The step has its own error table (below), its own gate (`flightPageGate`) and its own intake; it never routes a page
@@ -51,13 +51,6 @@ import { refreshHoursOf } from './reuse.js';
 /** The one provider whose flight lists the step reads (spec §2: the browser worker's own pages). */
 export const FLIGHT_LIST_PROVIDER: Extract<ProviderId, 'camoufox'> = 'camoufox';
 
-/** The monthly, lifetime and global caps: a browser lane stopped at one of them sends no flight page (spec §8.1). */
-const WINDOW_CAPS: ReadonlySet<BudgetScopeKind> = new Set([
-  'provider-month',
-  'provider-lifetime',
-  'global-month',
-]);
-
 /** The capability the step reads with, when the run's provider has one. */
 function capabilityOf(ctx: EngineContext): FlightListCapability | undefined {
   return ctx.providers.get(FLIGHT_LIST_PROVIDER)?.flightLists;
@@ -97,8 +90,9 @@ export function flightStepEntry(ctx: EngineContext, run: RunState): boolean {
     return false;
   const lane = run.lanes.get(`discovery|${FLIGHT_LIST_PROVIDER}`);
   if (lane === undefined) return true;
-  if (lane.windowOut !== null) return false;
-  return lane.budgetOutScope === null || !WINDOW_CAPS.has(lane.budgetOutScope);
+  // why: the browser lane can stop only at its own run caps (pages, scrolls, free calls), which the step's own allowance
+  // stands apart from; it has no cap on a window (spec §2)
+  return lane.windowOut === null;
 }
 
 /** What one page came to, under the step's error table. */
@@ -113,8 +107,6 @@ type PageOutcome =
 
 /** Spec rev 55 §8.1 error table, BudgetExceeded row: the reason word and the `ended` word of a cap. */
 function budgetOutcome(scope: BudgetScopeKind): PageOutcome {
-  if (WINDOW_CAPS.has(scope))
-    return { kind: 'failed', reason: 'monthly-cap', end: true, ended: 'monthly-cap' };
   if (scope === 'provider-execution')
     return { kind: 'failed', reason: 'execution-cap', end: true, ended: 'stopped' };
   return { kind: 'failed', reason: 'free-call-cap', end: true, ended: 'stopped' };
@@ -172,7 +164,7 @@ interface RequestPlan {
 
 /**
  * Reads one page under the step's error table. The lease is awaited first (an on-demand read in flight), then the
- * request is shaped (`requestOf`: the window and the month's pages as they are after that wait, 21.6 review M1), then
+ * request is shaped (`requestOf`: the window as it is after that wait, 21.6 review M1), then
  * the step's own allowance is checked against the request's pages (`used + pages > flightListPages`, so a request it
  * cannot hold is refused at `provider-execution` before any call), then the capability reads with the run's controller
  * signal and the step's gate held to the request's own seconds.
@@ -413,22 +405,10 @@ function markLeftByWindow(ctx: EngineContext, run: RunState): void {
 }
 
 /**
- * The month's pages left for camoufox (spec rev 56 §8.1 R-low-pages: the monthly cap less the pages used, from the
- * guard); Infinity without a cap.
- */
-export function monthHeadroom(ctx: EngineContext): number {
-  const u = ctx.budget.usage({
-    kind: ctx.limitsOf(FLIGHT_LIST_PROVIDER).capKind,
-    providerId: FLIGHT_LIST_PROVIDER,
-  });
-  return u.cap === null ? Number.POSITIVE_INFINITY : u.cap - u.calls;
-}
-
-/**
  * Spec rev 56 §8.1 "Each request": the next request's shape. The plan's return phase is sent (the current limits, and
- * `booking` until `bookingStopped`) while the plan reads returns and `returnsStopped` is null, unless the month's page
- * headroom is below `FLIGHT_LIST_PAGES_PER_PAIR_MAX` (R-low-pages) or the run's window no longer holds a return-phase
- * request's seconds (R-window, cost-r3-007): then an outbound-only request of 1 page, `returnsStopped` left null.
+ * `booking` until `bookingStopped`) while the plan reads returns and `returnsStopped` is null, unless the run's window
+ * no longer holds a return-phase request's seconds (R-window, cost-r3-007): then an outbound-only request of 1 page,
+ * `returnsStopped` left null.
  */
 function requestOf(ctx: EngineContext, run: RunState, plan: FlightListsState): RequestPlan {
   const seconds = ctx.limitsOf(FLIGHT_LIST_PROVIDER).flightRequestSeconds;
@@ -439,7 +419,6 @@ function requestOf(ctx: EngineContext, run: RunState, plan: FlightListsState): R
     seconds: seconds?.outboundOnly ?? 0,
   };
   if (!plan.returns || plan.returnsStopped !== null) return outboundOnly;
-  if (monthHeadroom(ctx) < FLIGHT_LIST_PAGES_PER_PAIR_MAX) return outboundOnly;
   const booking = plan.booking && plan.bookingStopped === null;
   const phaseSeconds = (booking ? seconds?.booking : seconds?.returnsOnly) ?? 0;
   // why: a window that cannot hold the return phase may still hold an outbound-only read (one that holds neither is
@@ -456,7 +435,7 @@ function requestOf(ctx: EngineContext, run: RunState, plan: FlightListsState): R
 /**
  * Spec rev 56 §8.1 (Review Focus 2; ruling P23/A12): the rule after which the pass sends no further return phase: a
  * return read that ended `select-failed`, `not-settled` or `unrecognised`, or `read` with its second attempt ended
- * transiently (a rule other than the month's or the spacing's); null when nothing stops it (`skipped`, `no-outbound`,
+ * transiently (a rule other than the spacing's); null when nothing stops it (`skipped`, `no-outbound`,
  * a clean `read`).
  */
 export function returnsStopOf(r: ReturnRead | null): string | null {
@@ -467,8 +446,8 @@ export function returnsStopOf(r: ReturnRead | null): string | null {
     case 'unrecognised':
       return r.rule ?? r.status;
     case 'read':
-      // why: the month's pages and the spacing wait are not a wrong view; the next request may well have them
-      return r.rule === null || r.rule === 'spacing' || r.rule === 'monthly-headroom' ? null : r.rule;
+      // why: the spacing wait is not a wrong view; the next request may well have it
+      return r.rule === null || r.rule === 'spacing' ? null : r.rule;
     default:
       return null;
   }

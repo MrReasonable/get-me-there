@@ -230,10 +230,9 @@ describe('startChecks (pure; the worker’s own start and the status report use 
     signedIn: false,
     locked: false,
     now: NOW,
-    counts: 'ok',
   };
 
-  it('null when every check passes (a captured rejection and readable counts)', () => {
+  it('null when every check passes (a captured rejection)', () => {
     expect(startChecks(ready)).toBeNull();
   });
 
@@ -267,8 +266,6 @@ describe('startChecks (pure; the worker’s own start and the status report use 
     ['consent-missing', { consent: null }],
     ['consent-voided', { consent: { kind: 'legacy', was: 'voided' } }],
     ['consent-expired', { consent: { kind: 'socs', expiresAt: NOW, mark: 'reject' } }],
-    ['counts-missing', { counts: 'missing' }],
-    ['counts-unreadable', { counts: 'unreadable' }],
   ] as const)('%s from %j', (reason, facts) => {
     expect(startChecks({ ...ready, ...facts })).toBe(reason);
   });
@@ -304,16 +301,9 @@ describe('startChecks (pure; the worker’s own start and the status report use 
       { consent: { kind: 'legacy' as const, was: 'not-shown' as const } },
       { consent: { kind: 'socs' as const, expiresAt: NOW, mark: 'reject' as const } },
       { consent: { kind: 'socs' as const, expiresAt: LATER, mark: 'accept' as const } },
-      { counts: 'missing' as const },
-      { counts: 'unreadable' as const },
     ])
       seen.add(String(startChecks({ ...ready, ...facts })));
     expect([...seen].sort()).toEqual(START_REFUSAL_REASONS.filter((r) => r !== 'config').sort());
-  });
-
-  it('the consent checks come before the counts: a missing record with unreadable counts says consent-missing', () => {
-    expect(startChecks({ ...ready, consent: null, counts: 'unreadable' })).toBe('consent-missing');
-    expect(startChecks({ ...ready, counts: 'missing', signedIn: true })).toBe('signed-in');
   });
 });
 

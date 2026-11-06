@@ -19,7 +19,7 @@
     "src/accountCookies.ts",
     "src/gridNames.ts",
     "src/gridView.ts",
-    "src/monthly.ts",
+    "src/instances.ts",
     "src/consentLine.ts",
     "src/socsMark.ts",
     "src/sessionLine.ts",

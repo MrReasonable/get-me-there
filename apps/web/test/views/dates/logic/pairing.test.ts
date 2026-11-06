@@ -326,8 +326,9 @@ describe('returnNote (spec rev 56 §11 "Status notes", with what happens next)',
     expect(returnNote(status('not-verified'), COPY, true)).toBe(
       'return flights are not yet read on this kind of machine; see the recording session in docs/setup.md',
     );
-    expect(returnNote(status('skipped', 'monthly-headroom'), COPY, true)).toBe(
-      'return flights not read: fewer than 2 browser pages left this month',
+    // why: spec rev 64: a rule an older stored list may hold, which no copy entry names, is worded generally
+    expect(returnNote(status('skipped', 'older-rule'), COPY, true)).toBe(
+      'return flights not read: a step before them was not made',
     );
     expect(returnNote(status('skipped', 'spacing'), COPY, true)).toBe(
       'return flights not read: the wait between pages ran past its time',
@@ -421,8 +422,8 @@ describe('bookingNote (spec rev 56 §11: a booking read that did not finish, wit
     );
     // why: 21.7 prov-014: an expansion that failed before any offer read none: one note, the transient one
     expect(note({ status: 'expand-failed', rule: 'more-options', offers: [] })).toBe(next);
-    expect(note({ status: 'skipped', rule: 'monthly-headroom', ...SKIPPED })).toBe(
-      'sellers not read: fewer than 2 browser pages left this month',
+    expect(note({ status: 'skipped', rule: 'older-rule', ...SKIPPED })).toBe(
+      'sellers not read: a step before them was not made',
     );
     expect(note({ status: 'skipped', rule: 'not-cheapest-view', ...SKIPPED })).toBe(
       'sellers not read: the list was not on its Cheapest view',

@@ -12,8 +12,12 @@ export interface BudgetConfig {
 /** One provider's entry in `BudgetConfig`. */
 export type ProviderBudget = ProviderLimits & { billable: boolean; trialUsed: number };
 
-/** Spec §12 `SEARCHAPI_TRIAL_USED` (decision 14): credits spent before this install count against a lifetime window; monthly windows ignore it. */
-export function effectiveCallCap(b: ProviderLimits & { trialUsed: number }): number {
+/**
+ * Spec §12 `SEARCHAPI_TRIAL_USED` (decision 14): credits spent before this install count against a lifetime window;
+ * monthly windows ignore it. Null when the provider has no cap on its window (camoufox, spec §2).
+ */
+export function effectiveCallCap(b: ProviderLimits & { trialUsed: number }): number | null {
+  if (b.monthlyCallCap === null) return null;
   return b.window === 'lifetime' ? Math.max(0, b.monthlyCallCap - b.trialUsed) : b.monthlyCallCap;
 }
 
@@ -52,7 +56,8 @@ export function budgetConfigFromConfig(c: Config): BudgetConfig {
       billable: true,
       trialUsed: sa.limits.window === 'lifetime' ? sa.trialUsed : 0,
     };
-  // why: cost-005: camoufox is free and never billable; its page caps come from its own limits and the snapshot.
+  // why: cost-005: camoufox is free and never billable; its per-run page cap comes from the snapshot, and it has no cap
+  // on its window (spec §2).
   const cf = c.providers.camoufox;
   if (cf !== null) providers.camoufox = { ...cf.limits, billable: false, trialUsed: 0 };
   const fixture = c.providers.fixture;
