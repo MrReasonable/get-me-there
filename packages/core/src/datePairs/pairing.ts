@@ -27,7 +27,7 @@ export type FigureBasis = (typeof FIGURE_BASES)[number];
  * that holds): `not-read` (no flight list for the cell), `list-failed` (the newest list failed: nothing was read, and its
  * cause is sent beside it; the 21.6 ruling), `outbound-only` (a list whose return phase read no return view),
  * `no-pairing-read` (a finished return phase with no return listed or read), `over-limit` (returns read, none fitting),
- * `within-other-limits` (read under other limits), `within-older` (older than the refresh), `sellers-not-read` (no
+ * `within-other-limits` (read under other limits), `within-older` (older than the refresh, with no complete offers: a complete one leads at any age), `sellers-not-read` (no
  * booking read of that pairing kept offers), `offers-incomplete` (offers kept but not complete); and `within`, exactly on
  * a pairing figure (the pairing leads).
  */
@@ -195,35 +195,37 @@ export function listFresh(fetchedAt: IsoDateTime, now: IsoDateTime, refreshHours
  * The facts the lead rule reads (final review B-I1): a `PairingCandidate`'s, or the search page's own (the web's
  * pairing with an offer of its own shape), so the board and the block share one predicate.
  */
-export type LeadFacts = Pick<PairingCandidate, 'fits' | 'fresh' | 'underCurrentLimits' | 'complete'> & {
+export type LeadFacts = Pick<PairingCandidate, 'fits' | 'underCurrentLimits' | 'complete'> & {
   offer: object | null;
 };
 
 /**
- * R-lead with R-sellers (spec rev 56 §6.9 "When it leads"): the pairing leads its date pair exactly when it fits the
- * current limits, the list is fresh and was read under the current limits, and a booking read of it kept offers that
- * are complete (A8: an expand-failed booking only when its cheapest offer equals the return's "from" price, which
- * `offersComplete` decides). The api's figure and the search page's emphasis both read it (final review B-I1).
+ * R-lead with R-sellers (spec rev 62 §6.9 "When it leads"): the pairing leads its date pair exactly when it fits the
+ * current limits, the list was read under the current limits, and a booking read of it kept offers that are complete
+ * (A8: an expand-failed booking only when its cheapest offer equals the return's "from" price, which `offersComplete`
+ * decides). Its age does not stop it leading (Ian, 2026-11-06: a date keeps its last real round trip rather than falling
+ * back to the grid's price); a list older than the refresh carries its stale mark onto the figure. The api's figure and
+ * the search page's emphasis both read it (final review B-I1).
  */
 export function pairingLeads(p: LeadFacts): boolean {
-  return p.fits && p.fresh && p.underCurrentLimits && p.offer !== null && p.complete;
+  return p.fits && p.underCurrentLimits && p.offer !== null && p.complete;
 }
 
 /**
- * Spec rev 56 §6.9 (the 21.1 concern-2 ruling; final review B-M2): the candidate-based `pairingRead`, the first that
+ * Spec rev 62 §6.9 (the 21.1 concern-2 ruling; final review B-M2): the candidate-based `pairingRead`, the first that
  * holds in the spec's order: `within-other-limits` (read under other limits, over today's or not: the board then words
- * the limit edit as the search's page block does), `over-limit`, `within-older`, `sellers-not-read`,
- * `offers-incomplete`, else `within` (exactly when `pairingLeads`). The three list-based values (`not-read`,
- * `outbound-only`, `no-pairing-read`) come before these and are the api's to tell apart, from the newest list, where
- * there is no candidate.
+ * the limit edit as the search's page block does), `over-limit`, `within` (exactly when `pairingLeads`, at any age),
+ * `within-older` (older than the refresh, with no complete offers), `sellers-not-read`, else `offers-incomplete`. The
+ * three list-based values (`not-read`, `outbound-only`, `no-pairing-read`) come before these and are the api's to tell
+ * apart, from the newest list, where there is no candidate.
  */
 export function pairingReadOf(p: PairingCandidate): PairingRead {
   if (!p.underCurrentLimits) return 'within-other-limits';
   if (!p.fits) return 'over-limit';
+  if (pairingLeads(p)) return 'within';
   if (!p.fresh) return 'within-older';
   if (p.offer === null) return 'sellers-not-read';
-  if (!p.complete) return 'offers-incomplete';
-  return 'within';
+  return 'offers-incomplete';
 }
 
 /**

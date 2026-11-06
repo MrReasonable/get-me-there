@@ -109,10 +109,9 @@ export function PairingSection({
   // why: 21.7 code M1, prov-010: the counts and more-listed clauses of the view the shown returns come from
   const readNote = returnNote(list, COPY, readNow, p.attempt);
   // why: final review B-I1: the shown seller's price is emphasised as the answer exactly when the board leads with it,
-  // by core's one predicate (within the limits, fresh, read under today's limits, complete offers)
+  // by core's one predicate (within the limits, read under today's limits, complete offers; spec rev 62: at any age)
   const leads = pairingLeads({
     fits: p.fits,
-    fresh: list.stale === false,
     underCurrentLimits: p.underCurrentLimits,
     offer: p.offer,
     complete: p.offer?.complete === true,

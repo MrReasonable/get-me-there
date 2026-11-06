@@ -106,11 +106,8 @@ const cardCheapestSchema = z
     message: 'truncated is for calendar figures',
     path: ['truncated'],
   })
-  // why: final review B-M5: a card's pairing figure is the board's leading one (refineLeading): fresh, from a flight list
-  .refine((c) => c.basis !== 'pairing' || c.stale === false, {
-    message: 'a pairing figure is fresh',
-    path: ['stale'],
-  })
+  // why: final review B-M5: a card's pairing figure is the board's leading one (refineLeading), from a flight list; spec
+  // rev 62: at any age, its stale mark its list's
   .refine(
     (c) =>
       c.basis !== 'pairing' ||

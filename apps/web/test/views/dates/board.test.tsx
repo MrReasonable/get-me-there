@@ -358,6 +358,23 @@ describe('a pairing figure on the board (spec rev 56 §6.9, §11 Board; R-board,
     expect(row).not.toHaveTextContent(/verified/i);
   });
 
+  // why: spec rev 62 (Ian, 2026-11-06): a date keeps its last real round trip after the refresh, marked older
+  it('an older pairing still leads its row, marked older than the refresh, with its seller line', async () => {
+    const older = figurePairing({ stale: 'refresh', ageHours: 40 });
+    const row = rowOf(
+      await board(
+        pairingFig({ pairing: older, price: { ...pairingFig().price, stale: 'refresh', ageHours: 40 } }),
+      ),
+    );
+    expect(row).toHaveAttribute('data-state', 'stale');
+    const price = within(row).getAllByTestId('price-cell')[0];
+    expect(price).toHaveTextContent('£1,180');
+    expect(price).toHaveTextContent("older than this search's refresh");
+    expect(within(row).getByTestId('pairing-seller')).toHaveTextContent(
+      'QQ Travel · cheapest of 3 offers read',
+    );
+  });
+
   it('21.7 persona H2 / ui-005, code M3: a short row, named once by its visible lines, the long words its description', async () => {
     const row = rowOf(await board(pairingFig()));
     // why: the name is the visible seller line and "2nd outbound tried", said once (aria-labelledby)

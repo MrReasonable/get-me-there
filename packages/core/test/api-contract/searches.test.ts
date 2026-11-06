@@ -38,12 +38,13 @@ describe("a card's cheapest figure takes the board's three bases (spec rev 56 §
     expect(
       searchCardSchema.safeParse(searchCard({ cheapest: cardCheapest({ basis: 'offer' }) })).success,
     ).toBe(false);
-    // why: final review B-M5: a card's pairing figure is the board's leading one: fresh, and a flight list's
+    // why: final review B-M5: a card's pairing figure is the board's leading one, a flight list's; spec rev 62: at any
+    // age, so an older one is stale and still the card's cheapest
     const paths = (c: unknown) => {
       const r = searchCardSchema.safeParse(searchCard({ cheapest: c }));
       return r.success ? [] : r.error.issues.map((i) => i.path.join('.'));
     };
-    expect(paths({ ...pairing, stale: 'refresh' })).toEqual(['cheapest.stale']);
+    expect(paths({ ...pairing, stale: 'refresh' })).toEqual([]);
     expect(paths({ ...pairing, provenance: cardCheapest().provenance })).toEqual(['cheapest.provenance']);
   });
 });

@@ -571,7 +571,7 @@ describe('figuresByDatePair with the pairing figure (spec rev 56 §6.9; Ian ruli
   it.each<[string, Partial<PairingCandidate>, PairingRead]>([
     ['offers not complete', { complete: false }, 'offers-incomplete'],
     ['no booking offer', { offer: null }, 'sellers-not-read'],
-    ['older than the refresh', { fresh: false }, 'within-older'],
+    ['older than the refresh, with no complete offers', { fresh: false, offer: null }, 'within-older'],
     ['read under other limits', { underCurrentLimits: false }, 'within-other-limits'],
     ['over the limits', { fits: false }, 'over-limit'],
   ])('%s: the calendar figure stays, with the pairing beside it', (_name, over, read) => {
@@ -583,6 +583,20 @@ describe('figuresByDatePair with the pairing figure (spec rev 56 §6.9; Ian ruli
       cheaperCached: null,
       pairingRead: read,
       pairing: c,
+    });
+  });
+
+  // why: spec rev 62 (Ian, 2026-11-06): a date keeps its last real round trip, marked older, rather than the grid's price
+  it('an older complete pairing still leads over the calendar price, carrying its stale mark', () => {
+    const c = candidate({ fresh: false, stale: 'refresh', ageHours: 40 });
+    expect(figuresByDatePair([grid], scope, NOW, withCandidate(c)).figures.get(0)).toEqual({
+      basis: 'pairing',
+      chosen: grid,
+      cheaperCached: null,
+      pricePence: 118_000,
+      grid: { pricePence: 56_400, provenance: grid.provenance, stale: false, truncated: false },
+      pairing: c,
+      pairingRead: 'within',
     });
   });
 
@@ -621,12 +635,26 @@ describe('figuresByDatePair with the pairing figure (spec rev 56 §6.9; Ian ruli
 
   it('a stale verified figure stays when its pairing does not lead, the pairing beneath it with its read (ruling 21.2)', () => {
     const v = stale(60_000, { cell: at('LGW', 'EWR') });
+    // why: spec rev 62: an older complete pairing replaces a calendar price, never a checked fare: it reads within-older
     const older = candidate({ fresh: false });
     const notLeading = figuresByDatePair([grid, v], scope, NOW, withCandidate(older));
     expect(notLeading.figures.get(0)).toEqual({
       ...pickFigure([grid, v], NOW),
       pairingRead: 'within-older',
       pairing: older,
+    });
+    const olderUnread = candidate({ fresh: false, offer: null });
+    expect(figuresByDatePair([grid, v], scope, NOW, withCandidate(olderUnread)).figures.get(0)).toEqual({
+      ...pickFigure([grid, v], NOW),
+      pairingRead: 'within-older',
+      pairing: olderUnread,
+    });
+    // why: an offer read but not complete does not lead either, so the stale verified figure stays above it
+    const incomplete = candidate({ complete: false });
+    expect(figuresByDatePair([grid, v], scope, NOW, withCandidate(incomplete)).figures.get(0)).toEqual({
+      ...pickFigure([grid, v], NOW),
+      pairingRead: 'offers-incomplete',
+      pairing: incomplete,
     });
     const unread = candidate({ offer: null });
     expect(figuresByDatePair([grid, v], scope, NOW, withCandidate(unread)).figures.get(0)).toEqual({
