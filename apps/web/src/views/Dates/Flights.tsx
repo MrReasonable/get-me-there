@@ -1,4 +1,4 @@
-import { type FlightLimits, staleWords, stopDetailClause } from '@gmt/core';
+import { type FlightLimits, type IsoDateTime, staleWords, stopDetailClause } from '@gmt/core';
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ApiError } from '../../api/client.js';
 import { useFlightLists, useFlightRead } from '../../api/flights.js';
@@ -248,6 +248,7 @@ function ListSection({
   limits,
   own,
   readNow,
+  gridFetchedAt,
 }: {
   list: FlightList;
   limits: FlightLimits;
@@ -255,6 +256,8 @@ function ListSection({
   own: boolean;
   /** Final review B-I3: whether a read of this date pair would go now (the api's `readNow`; false for another pair's). */
   readNow: boolean;
+  /** Spec rev 63: when the figure's grid price was read (null: none to compare), for the lead emphasis. */
+  gridFetchedAt: IsoDateTime | null;
 }) {
   const now = useNow();
   const [all, setAll] = useState(false);
@@ -298,7 +301,9 @@ function ListSection({
         </p>
       ) : null}
       {own ? <LowerFareLine list={list} /> : null}
-      {p !== null ? <PairingSection list={list} p={p} limits={limits} readNow={readNow} /> : null}
+      {p !== null ? (
+        <PairingSection list={list} p={p} limits={limits} readNow={readNow} gridFetchedAt={gridFetchedAt} />
+      ) : null}
       <ul id={outboundId} className="flights-list">
         {flights.map((f, i) => (
           // why: a list's flights have no id; their place in the shown order is stable for one list
@@ -393,11 +398,14 @@ export function FlightsBlock({
   entry,
   flights,
   limits,
+  gridFetchedAt,
 }: {
   pairOf: { departureDate: string; returnDate: string };
   entry: FlightPair | undefined;
   flights: BoardFlights;
   limits: FlightLimits;
+  /** Spec rev 63: when the date pair's grid price was read (`gridFetchedAtOf`), for the block's lead emphasis. */
+  gridFetchedAt: IsoDateTime | null;
 }) {
   const meta = flights.meta;
   const available = meta?.available === true;
@@ -424,7 +432,7 @@ export function FlightsBlock({
         </p>
       ) : null}
       {available && list !== null ? (
-        <ListSection list={list} limits={limits} own readNow={entry.readNow} />
+        <ListSection list={list} limits={limits} own readNow={entry.readNow} gridFetchedAt={gridFetchedAt} />
       ) : null}
       {available && list === null ? <p className="flights-line">{F.notReadYet}</p> : null}
       {/* why: final review B-I3: the button shows exactly when the api says a read would go now (`readNow`) */}
@@ -434,7 +442,13 @@ export function FlightsBlock({
           <p className="flights-head">
             {F.otherPair(entry.listOtherPair.origin, entry.listOtherPair.destination)}
           </p>
-          <ListSection list={entry.listOtherPair} limits={limits} own={false} readNow={false} />
+          <ListSection
+            list={entry.listOtherPair}
+            limits={limits}
+            own={false}
+            readNow={false}
+            gridFetchedAt={null}
+          />
         </div>
       ) : null}
       {href !== null && entry.link !== null ? (

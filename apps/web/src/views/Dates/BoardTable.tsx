@@ -37,6 +37,7 @@ import {
 } from './BoardCard.js';
 import {
   type BoardModel,
+  gridFetchedAtOf,
   type ListsState,
   PAGE_SIZE,
   sellerCoverage,
@@ -291,7 +292,13 @@ export function BoardTable(props: BoardProps) {
             const tie = tieAt.get(p.index);
             const outcome = <FlightOutcome entry={entry} available={available} />;
             const block = hasFlightsBlock(entry, available) ? (
-              <FlightsBlock pairOf={p} entry={entry} flights={flights} limits={limits} />
+              <FlightsBlock
+                pairOf={p}
+                entry={entry}
+                flights={flights}
+                limits={limits}
+                gridFetchedAt={gridFetchedAtOf(p.figure)}
+              />
             ) : null;
             const common = {
               pair: p,

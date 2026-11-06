@@ -302,15 +302,22 @@ describe('the lead emphasis follows the one leading rule (final review B-I1)', (
     expect(leads()).toBe(1);
   });
   // why: spec rev 62 (Ian, 2026-11-06): an older pairing still leads the board, so the block emphasises it as the board's
-  // answer; its price carries the list's stale mark
+  // answer; its price carries the list's stale mark (the list read after the board's grid price, 13:00 on 14 Oct)
   it('a list older than the refresh: still the lead emphasis, the price marked older', async () => {
-    await renderList(pairingList({ stale: 'refresh' }));
+    await renderList(pairingList({ stale: 'refresh', fetchedAt: '2026-10-14T14:00:00.000Z' }));
     expect(lines('return-line')[0]).toMatch(/^Back: £1,180/);
     expect(lines('return-line')[0]).toContain('QQ Travel · cheapest of 3 offers read');
     expect(leads()).toBe(1);
     expect(within(block()).getByTestId('flights-head')).toHaveTextContent(
       /older than this search's refresh$/,
     );
+  });
+  // why: spec rev 63: a grid price read after an older list re-priced the date, so the board leads with the grid price
+  // and the block does not emphasise the old seller's price as the answer
+  it('a list older than the refresh and than the board grid price: no lead emphasis', async () => {
+    await renderList(pairingList({ stale: 'refresh' }));
+    expect(lines('return-line')[0]).toContain('QQ Travel · cheapest of 3 offers read');
+    expect(leads()).toBe(0);
   });
   it('a list read under other limits: no lead emphasis', async () => {
     await renderList(FIXTURE, {

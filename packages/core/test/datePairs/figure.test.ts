@@ -588,7 +588,13 @@ describe('figuresByDatePair with the pairing figure (spec rev 56 §6.9; Ian ruli
 
   // why: spec rev 62 (Ian, 2026-11-06): a date keeps its last real round trip, marked older, rather than the grid's price
   it('an older complete pairing still leads over the calendar price, carrying its stale mark', () => {
-    const c = candidate({ fresh: false, stale: 'refresh', ageHours: 40 });
+    // the grid price was read at 10:00, the list after it
+    const c = candidate({
+      fresh: false,
+      stale: 'refresh',
+      ageHours: 40,
+      fetchedAt: asIsoDateTime('2027-03-01T11:00:00.000Z'),
+    });
     expect(figuresByDatePair([grid], scope, NOW, withCandidate(c)).figures.get(0)).toEqual({
       basis: 'pairing',
       chosen: grid,
@@ -598,6 +604,21 @@ describe('figuresByDatePair with the pairing figure (spec rev 56 §6.9; Ian ruli
       pairing: c,
       pairingRead: 'within',
     });
+  });
+
+  // why: spec rev 63: a later search re-priced the date (the grid price read at 10:00, the list at 09:30), so the old
+  // round trip gives way to the newer grid price until its flights are read again; a fresh one still leads
+  it('an older complete pairing gives way to a grid price read after it: within-older, the pairing beneath', () => {
+    const c = candidate({ fresh: false, stale: 'refresh', ageHours: 40 });
+    expect(figuresByDatePair([grid], scope, NOW, withCandidate(c)).figures.get(0)).toEqual({
+      basis: 'calendar',
+      chosen: grid,
+      cheaperCached: null,
+      pairingRead: 'within-older',
+      pairing: c,
+    });
+    const fresh = candidate();
+    expect(figuresByDatePair([grid], scope, NOW, withCandidate(fresh)).figures.get(0)?.basis).toBe('pairing');
   });
 
   it('a fresh verified candidate still wins (no pairing asked for)', () => {
@@ -635,14 +656,16 @@ describe('figuresByDatePair with the pairing figure (spec rev 56 §6.9; Ian ruli
 
   it('a stale verified figure stays when its pairing does not lead, the pairing beneath it with its read (ruling 21.2)', () => {
     const v = stale(60_000, { cell: at('LGW', 'EWR') });
-    // why: spec rev 62: an older complete pairing replaces a calendar price, never a checked fare: it reads within-older
-    const older = candidate({ fresh: false });
-    const notLeading = figuresByDatePair([grid, v], scope, NOW, withCandidate(older));
-    expect(notLeading.figures.get(0)).toEqual({
-      ...pickFigure([grid, v], NOW),
-      pairingRead: 'within-older',
-      pairing: older,
-    });
+    // why: spec rev 62: an older complete pairing replaces a calendar price, never a checked fare: it reads within-older,
+    // whether read after the grid price (11:00) or outdated by it (09:30, spec rev 63)
+    for (const fetchedAt of ['2027-03-01T11:00:00.000Z', '2027-03-01T09:30:00.000Z']) {
+      const older = candidate({ fresh: false, fetchedAt: asIsoDateTime(fetchedAt) });
+      expect(figuresByDatePair([grid, v], scope, NOW, withCandidate(older)).figures.get(0)).toEqual({
+        ...pickFigure([grid, v], NOW),
+        pairingRead: 'within-older',
+        pairing: older,
+      });
+    }
     const olderUnread = candidate({ fresh: false, offer: null });
     expect(figuresByDatePair([grid, v], scope, NOW, withCandidate(olderUnread)).figures.get(0)).toEqual({
       ...pickFigure([grid, v], NOW),
