@@ -303,6 +303,8 @@ describe('camoufox grid pages with no scroll left (re-review N2)', () => {
     const e = engineWith([cf], { env: { CAMOUFOX_EXECUTION_SCROLL_CAP: '0' } });
     e.ctx.repos.definitions.update(e.definition.id, { minNights: 0, maxNights: 0 });
     const ex = await e.runToEnd();
+    // why: the precondition itself: the guard has no scroll for the run, so a passing run did drop its lead scroll
+    expect(e.ctx.budget.scrollsLeft('camoufox', ex.id)).toBe(0);
     expect(cf.calls.length).toBeGreaterThan(0);
     expect(e.ledgerRows('camoufox')).toHaveLength(cf.calls.length);
     const notices = e.notifications.map((n) => n.kind);
