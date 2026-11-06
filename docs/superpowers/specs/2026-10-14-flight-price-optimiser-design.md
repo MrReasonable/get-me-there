@@ -2406,9 +2406,10 @@ the web share):
   `within-other-limits` (read under other limits, over today's or not: "your
   limits have changed since these return flights were read:", the search's
   page block's own lead phrase, the pairing beneath); `within-older`
-  (older than the refresh, and not leading: its offers not complete or not
-  read, a complete one outdated by a grid price read after it, or a complete
-  one beside a stale verified figure: "return flights
+  (older than the refresh, and not leading, in one of three cases: (a) its
+  offers not complete or not read; (b) complete, but outdated by a grid price
+  read after it; (c) complete, beside a stale verified figure, which an older
+  pairing never displaces: "return flights
   read <ago>, older than this search's refresh:", the pairing beneath with
   its age);
   `sellers-not-read` (no booking read of that pairing kept offers, the grid
