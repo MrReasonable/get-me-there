@@ -13,7 +13,15 @@ import { HttpResponse, http } from 'msw';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { POLL_MS } from '../../../src/api/queries.js';
 import type { FlightList } from '../../../src/api/types.js';
-import { at, type DatesOptions, priced, pricedPair, provCached } from '../../fixtures.dates.js';
+import {
+  at,
+  type DatesOptions,
+  priced,
+  pricedPair,
+  provCached,
+  provSearched,
+  verifiedFig,
+} from '../../fixtures.dates.js';
 import { definition } from '../../fixtures.js';
 import {
   flightList,
@@ -84,10 +92,15 @@ function serve(
 /** Renders the board with `list` and waits for the date pair's flights block. */
 async function renderList(
   list: FlightList | null,
-  o: { over?: Parameters<typeof serveFlightLists>[1]; def?: typeof DEF; readNow?: boolean } = {},
+  o: {
+    over?: Parameters<typeof serveFlightLists>[1];
+    def?: typeof DEF;
+    readNow?: boolean;
+    board?: DatesOptions;
+  } = {},
 ) {
   serve(list, o.over, o.readNow);
-  const r = renderDates({ body: BOARD, def: o.def ?? DEF });
+  const r = renderDates({ body: o.board ?? BOARD, def: o.def ?? DEF });
   await findBoard();
   await waitFor(() => expect(document.querySelector('[data-flights-for="0"]')).not.toBeNull());
   return r;
@@ -319,6 +332,36 @@ describe('the lead emphasis follows the one leading rule (final review B-I1)', (
     expect(lines('return-line')[0]).toContain('QQ Travel · cheapest of 3 offers read');
     expect(leads()).toBe(0);
   });
+  // why: CodeRabbit on PR #47: a verified figure keeps the board (a fresh one always; a stale one beside an older
+  // pairing), so the block never emphasises the seller's price as the answer beneath it
+  it('beneath a fresh verified figure: no lead emphasis', async () => {
+    const verified = (stale: false | 'refresh'): DatesOptions => ({
+      ...BOARD,
+      pairs: {
+        [at('2027-03-14', 10)]: pricedPair(
+          verifiedFig({ price: { ...verifiedFig().price, provenance: provSearched(), stale } }),
+        ),
+      },
+    });
+    await renderList(FIXTURE, { board: verified(false) });
+    expect(within(block()).getAllByTestId('return-line')[0]).toHaveTextContent('QQ Travel');
+    expect(leads()).toBe(0);
+  });
+  it('beneath a stale verified figure, an older list: no lead emphasis', async () => {
+    await renderList(pairingList({ stale: 'refresh', fetchedAt: '2026-10-14T14:00:00.000Z' }), {
+      board: {
+        ...BOARD,
+        pairs: {
+          [at('2027-03-14', 10)]: pricedPair(
+            verifiedFig({ price: { ...verifiedFig().price, provenance: provSearched(), stale: 'setting' } }),
+          ),
+        },
+      },
+    });
+    expect(within(block()).getAllByTestId('return-line')[0]).toHaveTextContent('QQ Travel');
+    expect(leads()).toBe(0);
+  });
+
   it('a list read under other limits: no lead emphasis', async () => {
     await renderList(FIXTURE, {
       def: definition({ constraints: { maxJourneyMinutes: 1_600, maxStops: 1 } }),

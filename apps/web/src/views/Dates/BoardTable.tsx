@@ -298,6 +298,7 @@ export function BoardTable(props: BoardProps) {
                 flights={flights}
                 limits={limits}
                 gridFetchedAt={gridFetchedAtOf(p.figure)}
+                mayLead={p.figure !== null && p.figure.basis !== 'verified'}
               />
             ) : null;
             const common = {

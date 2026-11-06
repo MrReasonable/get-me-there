@@ -91,6 +91,7 @@ export function PairingSection({
   limits,
   readNow,
   gridFetchedAt,
+  mayLead,
 }: {
   list: FlightList;
   p: PairingView;
@@ -99,6 +100,8 @@ export function PairingSection({
   readNow: boolean;
   /** Spec rev 63: when the date pair's grid price was read (null: none to compare), as the board's lead rule reads it. */
   gridFetchedAt: IsoDateTime | null;
+  /** Whether the board could lead with this pairing at all (false under a verified figure, as the board keeps it). */
+  mayLead: boolean;
 }) {
   const [all, setAll] = useState(false);
   // why: 21.7 ui-007: the live region says nothing until the toggle is pressed, then how many returns are shown
@@ -114,17 +117,19 @@ export function PairingSection({
   // why: final review B-I1: the shown seller's price is emphasised as the answer exactly when the board leads with it,
   // by core's one predicate (within the limits, read under today's limits, complete offers; spec rev 62/63: at any age
   // unless a grid price was read after an older list)
-  const leads = pairingLeads(
-    {
-      fits: p.fits,
-      underCurrentLimits: p.underCurrentLimits,
-      offer: p.offer,
-      complete: p.offer?.complete === true,
-      fresh: list.stale === false,
-      fetchedAt: list.fetchedAt,
-    },
-    gridFetchedAt,
-  );
+  const leads =
+    mayLead &&
+    pairingLeads(
+      {
+        fits: p.fits,
+        underCurrentLimits: p.underCurrentLimits,
+        offer: p.offer,
+        complete: p.offer?.complete === true,
+        fresh: list.stale === false,
+        fetchedAt: list.fetchedAt,
+      },
+      gridFetchedAt,
+    );
   const changed = !p.selectedNow || !p.underCurrentLimits;
   const tried = triedLine(list, changed);
   // why: the price-applies and book lines say what the shown seller's price is for, so they follow its line
