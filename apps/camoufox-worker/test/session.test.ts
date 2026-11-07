@@ -1346,6 +1346,38 @@ describe('PageSlots (pages at once)', () => {
     h.open();
     expect((await a).answer.kind).toBe('cells');
   });
+  // why: CodeRabbit on PR #49: a session closing its page is still busy; a busy answer then waits for the close's bounds
+  it('with the only session closing its page, the busy answer waits for the close, not the spacing alone', async () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    let closing: () => void = () => undefined;
+    const reachedClose = new Promise<void>((r) => {
+      closing = r;
+    });
+    const t = setup({
+      spacing: 0,
+      shape: (c) => {
+        c.onNewPage = (p) => {
+          const close = p.close.bind(p);
+          p.close = async () => {
+            closing();
+            await gate;
+            return close();
+          };
+        };
+      },
+    });
+    const slots = new PageSlots([t.session]);
+    const a = slots.page(REQ);
+    await reachedClose;
+    const busy = await slots.page(REQ);
+    // why: three close steps (SOCS read-back, page close, a discard), each under the 5 s finallyMs default
+    expect(busy.answer).toEqual({ kind: 'spacing', retryAfterSeconds: 15 });
+    release();
+    expect((await a).answer.kind).toBe('cells');
+  });
   it('with every session busy, a cool-down or a grid request is answered as a page answers it, never spacing', async () => {
     const h = held({ capacity: 1 });
     const slots = new PageSlots([h.t.session]);

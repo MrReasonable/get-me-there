@@ -683,6 +683,17 @@ describe('grid pages: a view still drawing its cells', () => {
       rule: 'grid:first-view:not-drawn-again',
     });
   });
+  // why: CodeRabbit on PR #49: two pages that end not drawn side by side make a row; the row is read as each one ends
+  it('of two such pages read at once in two page sessions, the second to end is refused', async () => {
+    const gridRow = { notDrawn: false };
+    const view = (d: string, r: string) => [dialogPage(gridTree({ depart: d, ret: r, undrawn: () => true }))];
+    const a = setup({ gridRow, view });
+    const b = setup({ gridRow, view });
+    const ends = (await Promise.all([a.session.page(req(['down'])), b.session.page(req(['down']))])).map(
+      (x) => (x.answer.kind === 'grid' ? x.answer.ended : x.answer.kind),
+    );
+    expect([...ends].sort()).toEqual(['blocked', 'first-not-drawn']);
+  });
   it('a page read whole between two such pages starts the count again: neither is refused', async () => {
     let drawn = false;
     const t = setup({

@@ -278,9 +278,9 @@ export class PageSession {
    * spending its attempts while the browser is still busy; otherwise the pacer's wait as it stands.
    */
   private busyWait(pacerSeconds: number): number {
-    // why: the page's close runs after its claim is released; a refusal then is the spacing's alone
-    if (this.busyUntil === null || !this.claimed) return pacerSeconds;
-    const left = this.busyUntil + 2 * this.finallyMs - this.d.timers.now();
+    if (this.busyUntil === null) return pacerSeconds;
+    // why: while claimed busyUntil is the page's cap (its close follows); once released it is the close's own end
+    const left = this.busyUntil + (this.claimed ? 2 * this.finallyMs : 0) - this.d.timers.now();
     return Math.max(pacerSeconds, Math.ceil(left / 1000));
   }
 
@@ -448,12 +448,14 @@ export class PageSession {
                     counter,
                     S: this.S,
                     pollMs: this.pollMs,
-                    notDrawnBefore: this.gridRow.notDrawn,
+                    row: this.gridRow,
                     reload: { url, guard, pacer: this.d.pacer, pageTimeoutMs: this.d.pageTimeoutMs },
                   },
                   this.d,
                 ).then((x) => {
-                  this.gridRow.notDrawn = x.answer.kind === 'grid' && x.answer.ended === 'first-not-drawn';
+                  // why: a page that ended not drawn set the row itself (gridSession.ts); any other end breaks it
+                  if (x.answer.kind !== 'grid' || x.answer.ended !== 'first-not-drawn')
+                    this.gridRow.notDrawn = false;
                   return x;
                 })
               : await this.read(driver, req, budget, started).then((x) => {
@@ -520,6 +522,9 @@ export class PageSession {
     } finally {
       this.claimed = false;
       this.d.pacer.release();
+      // why: CodeRabbit on PR #49: the close that follows (SOCS read-back, page close, a discard), each under finallyMs,
+      // still holds this session, so a busy answer meanwhile waits for it rather than the spacing alone
+      this.busyUntil = this.d.timers.now() + 3 * this.finallyMs;
     }
     budget.d.clear();
 
