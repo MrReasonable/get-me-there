@@ -1,4 +1,4 @@
-import { asIsoDateTime } from '@gmt/core';
+import { asIata, asIsoDate, asIsoDateTime } from '@gmt/core';
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
   authError,
@@ -156,6 +156,24 @@ describe('spec §8.1 rev 32: camoufox rows', () => {
     expect(e.ledgerRows('camoufox').filter((r) => r.pageClass === 'page')).toHaveLength(6);
     expect(new Set(s.calls.map((t) => t.coveredCells.map((c) => c.departureDate).join())).size).toBe(6);
     expect(outcomes(e, ex.id, 'camoufox').filter((o) => o.status === 'priced')).toHaveLength(6);
+  });
+  // why: spec rev 65: the browser's pages count against no per-run call cap: the operator's search (maxFreeCalls 150)
+  // must start its 156 grid pages (two airport pairs, 182 days of 10–21 nights) and read every one
+  it('a grid plan of 156 pages starts under a search whose maxFreeCalls is 150, and every page loads', async () => {
+    const cam = stubCamoufox({ cells: 1, grid: {} });
+    const e = engineWith([cam], { maxFreeCalls: 150 });
+    e.ctx.repos.definitions.update(e.definition.id, {
+      window: { kind: 'absolute', from: asIsoDate('2026-11-09'), to: asIsoDate('2027-05-09') },
+      minNights: 10,
+      maxNights: 21,
+      origins: [asIata('LHR'), asIata('LGW')],
+      destinations: [asIata('JFK')],
+    });
+    const ex = await e.runToEnd();
+    expect(ex.snapshot.budget.maxFreeCalls).toBe(150);
+    expect(e.ledgerRows('camoufox').filter((r) => r.pageClass === 'page')).toHaveLength(156);
+    expect(ex.status).toBe('completed');
+    expect(outcomes(e, ex.id, 'camoufox').filter((o) => o.status === 'priced')).toHaveLength(156);
   });
   it('the engine fills airportNames from the airports repository', async () => {
     const s = stubCamoufox({ cells: 1 });

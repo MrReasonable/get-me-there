@@ -172,28 +172,14 @@ function perPair(spacing: number, booking: boolean) {
 }
 
 /**
- * Spec revision 56 §8.1 "Estimate": adds the flight-list step's line to an assembled estimate. `wanted` is the date
- * pairs the step would read; `pairs` the least of it and the run's free calls left after every free line (less what the
- * execution has already spent, on a resume; free calls count requests, one a pair). With the return leg every pair goes
- * out and back; without it, outbound-only. `pages` and `seconds` are the typical figures (1.5 pages and 245 s a pair out
+ * Spec revision 56 §8.1 "Estimate": adds the flight-list step's line to an assembled estimate. `pairs` is the date
+ * pairs the step would read (its pages count against no free-call cap, spec rev 65; the step's own allowance holds
+ * them). With the return leg every pair goes out and back; without it, outbound-only. `pages` and `seconds` are the typical figures (1.5 pages and 245 s a pair out
  * and back at the defaults; 1 page and spacing + 40 s outbound-only), `pagesMax` and `secondsMax` the bound (2 pages
- * and 300 s). The assumptions say so, and name the free-call limit when it cuts the pairs.
+ * and 300 s). The assumptions say so.
  */
-function withFlights(
-  ctx: EngineContext,
-  est: Estimate,
-  snapshot: DefinitionSnapshot,
-  wanted: number,
-  executionId: string | null,
-  phase: FlightPhase,
-): Estimate {
-  const freeUsed =
-    executionId === null ? 0 : ctx.budget.usage({ kind: 'execution-free-calls', executionId }).calls;
-  const freeLines = est.perProvider
-    .filter((p) => !ctx.limitsOf(p.providerId).billed)
-    .reduce((a, p) => a + p.calls, 0);
-  const freeLeft = Math.max(0, snapshot.budget.maxFreeCalls - freeUsed - freeLines);
-  const pairs = Math.max(0, Math.min(wanted, freeLeft));
+function withFlights(ctx: EngineContext, est: Estimate, wanted: number, phase: FlightPhase): Estimate {
+  const pairs = Math.max(0, wanted);
   const per = perPair(ctx.limitsOf(FLIGHT_LIST_PROVIDER).minSpacingSeconds ?? 0, phase.booking);
   const outAndBack = phase.returns ? pairs : 0;
   const outbound = phase.returns ? 0 : pairs;
@@ -201,8 +187,7 @@ function withFlights(
   const pages = Math.min(Math.ceil(outAndBack * (1 + RETURN_SECOND_OUTBOUND_RATE)) + outbound, pagesMax);
   const seconds = Math.ceil(outAndBack * per.typical + outbound * per.outbound);
   const secondsMax = Math.ceil(outAndBack * per.bound + outbound * per.outbound);
-  // why: no "+ flights" clause when no date pair is read (20.9 review finding 6); the free-call limit that cut the
-  // pairs, to none or to some, is still named
+  // why: no "+ flights" clause when no date pair is read (20.9 review finding 6)
   const notes =
     pairs === 0
       ? []
@@ -211,7 +196,6 @@ function withFlights(
             `${FLIGHT_NOTE}, out and back, for up to ${datePairs(pairs)}: usually about ${pages} pages and ${minutes(seconds)}, at most ${pagesMax} pages and ${minutes(secondsMax)}`,
           ]
         : [`${FLIGHT_NOTE} for up to ${datePairs(pairs)}, about ${minutes(seconds)}`];
-  if (pairs < wanted) notes.push(`flights for ${datePairs(pairs)}: the run's free-call limit`);
   // why: 21.7 code I1: `returns` says a pair goes out and back (at least one candidate gets a return phase); the bound
   // stays whenever the plan reads the return leg
   const flightLists = phase.returns
@@ -538,7 +522,7 @@ export function estimateStart(
   const est = assemble(ctx, lines, cells.length, snapshot.windowClamped, notes);
   if (!flightsApply(ctx, snapshot)) return est;
   const { wanted, candidates } = flightPairsWanted(ctx, snapshot, definitionId);
-  return withFlights(ctx, est, snapshot, wanted, null, estimatePhaseOf(ctx, snapshot, candidates));
+  return withFlights(ctx, est, wanted, estimatePhaseOf(ctx, snapshot, candidates));
 }
 
 function firstCellOf(ctx: EngineContext, executionId: string): CellKey | undefined {
@@ -595,7 +579,7 @@ export function estimateRemainingFor(ctx: EngineContext, exec: Execution, manual
   if (plan === null) {
     const { wanted, candidates } = flightPairsWanted(ctx, snapshot, exec.definitionId);
     const phase = estimatePhaseOf(ctx, snapshot, candidates);
-    return withFlights(ctx, est, snapshot, wanted, exec.id, phase);
+    return withFlights(ctx, est, wanted, phase);
   }
   const wanted = plan.cells.filter((c) => !done.has(cellKeyString(c)) && c.departureDate > today).length;
   // why: a resumed pass keeps the stored plan's return phase, less what a transient end has stopped
@@ -603,7 +587,7 @@ export function estimateRemainingFor(ctx: EngineContext, exec: Execution, manual
     returns: plan.returns && plan.returnsStopped === null,
     booking: plan.booking && plan.returnsStopped === null && plan.bookingStopped === null,
   };
-  return withFlights(ctx, est, snapshot, wanted, exec.id, phase);
+  return withFlights(ctx, est, wanted, phase);
 }
 
 type FlightLine = NonNullable<Estimate['flightLists']>;

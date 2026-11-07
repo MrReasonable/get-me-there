@@ -944,9 +944,9 @@ Docker Desktop forwards `host.docker.internal` to the Mac's loopback for every c
 `CAMOUFOX_WORKER_KEY`. **Money:** none, against SearchApi's ~£32 a month.
 
 Coverage, stated plainly: in `list` mode a page prices one day pair, and a run has no page cap, so it loads a page for
-each day pair it has to read: 2,184 for one worked-example airport pair (8,736 for its four pairs). Its pages count as
-free calls, so a list-mode run larger than the search's `EXECUTION_MAX_FREE_CALLS` (2,000 by default) is refused at
-its start; grid mode (below) reads the same day pairs in far fewer pages. The estimate says how many pages a run
+each day pair it has to read: 2,184 for one worked-example airport pair (8,736 for its four pairs). Its pages count
+against no per-run call cap, not even the search's limit of free calls; grid mode (below) reads the same day pairs in
+far fewer pages. The estimate says how many pages a run
 loads and how long it takes. Google's "no flights" line is verified (the 2026-10-18 recordings), so a day pair with no service reads as no data,
 with no pause, as long as the line shows and the page has no result links. A page change that needs new recordings
 sets the flag back, and empty routes then read as not searched again.

@@ -6,7 +6,9 @@ import { SqliteBudgetGuard } from '../../src/budgetGuard.js';
 import { freshDb, T0 } from './db.js';
 
 /** The app's env with camoufox on (synthetic key) and the caps the test names. */
-export function camoufoxEnv(o: { maxFreeCalls?: number } = {}): Record<string, string> {
+export function camoufoxEnv(
+  o: { maxFreeCalls?: number; travelpayouts?: boolean } = {},
+): Record<string, string> {
   return {
     NODE_ENV: 'production',
     DATABASE_PATH: '/data/get-me-there.db',
@@ -17,6 +19,7 @@ export function camoufoxEnv(o: { maxFreeCalls?: number } = {}): Record<string, s
     CAMOUFOX_WORKER_URL: 'http://host.docker.internal:8090',
     CAMOUFOX_WORKER_KEY: 'test-camoufox-worker-key-0123456789abcdef',
     EXECUTION_MAX_FREE_CALLS: String(o.maxFreeCalls ?? 2000),
+    ...(o.travelpayouts === true ? { TRAVELPAYOUTS_TOKEN: 'test-travelpayouts-token-0123456789abcdef' } : {}),
   };
 }
 
@@ -28,6 +31,8 @@ export function configFrom(env: Record<string, string>) {
 
 function build(o: {
   maxFreeCalls?: number;
+  /** Travelpayouts configured beside camoufox (a free API, whose calls count against the free-call cap). */
+  travelpayouts?: boolean;
   /** Per execution, the withdrawn page cap its snapshot carries (a run stored before spec revision 65); never read. */
   snapshotCaps: Record<string, Partial<Record<'camoufox', number>>>;
   /** Spec rev 55 §8.1: per execution, the snapshot's `budget.flightListPages`; an execution not named has none. */

@@ -46,10 +46,19 @@ describe('provider-execution and no-page rows (spec §2, §5.3; decision 69; no 
     expect(g.usage({ kind: 'provider-month', providerId: 'camoufox' }).calls).toBe(1);
     expect(g.usage({ kind: 'provider-execution', executionId: 'e1', providerId: 'camoufox' }).calls).toBe(1);
   });
-  it('a page still counts as a free call: past EXECUTION_MAX_FREE_CALLS it is refused as execution-free-calls', () => {
-    const g = guardFor({ maxFreeCalls: 1, snapshotCaps: { e1: { camoufox: 100 } } });
-    g.reserve(r('e1', 0)).finalise({ outcome: 'ok', durationMs: 1, pageClass: 'page' });
-    expect(scopeOf(() => g.reserve(r('e1', 1)))).toBe('execution-free-calls');
+  // why: spec rev 65: browser pages count against no per-run call cap; a free API's calls (Travelpayouts) still do
+  it('pages never count as free calls: 156 pass a run whose free-call cap is 150, while Travelpayouts still stops at it', () => {
+    const g = guardFor({ maxFreeCalls: 150, travelpayouts: true, snapshotCaps: { e1: { camoufox: 100 } } });
+    for (let i = 0; i < 156; i++)
+      g.reserve(r('e1', i)).finalise({ outcome: 'ok', durationMs: 1, pageClass: 'page' });
+    expect(g.usage({ kind: 'execution-free-calls', executionId: 'e1' }).calls).toBe(0);
+    const tp = (i: number) => ({
+      ...r('e1', i),
+      providerId: 'travelpayouts' as const,
+      endpointPath: '/v3/prices',
+    });
+    for (let i = 0; i < 150; i++) g.reserve(tp(i)).finalise({ outcome: 'ok', durationMs: 1 });
+    expect(scopeOf(() => g.reserve(tp(150)))).toBe('execution-free-calls');
   });
   // why: spec rev 64: no monthly page cap; pages outside any run are never refused however many the month holds
   it('the month never refuses a page: 2,000 pages outside any run all pass, counted with no cap', () => {

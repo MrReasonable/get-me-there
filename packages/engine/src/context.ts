@@ -49,6 +49,11 @@ export interface ProviderRunLimits {
   planFixedMicroGbp: number;
   excludedFromSchedule: boolean;
   billed: boolean;
+  /**
+   * Whether the provider's calls count against a run's free-call cap (`maxFreeCalls`): a free provider's do; a billed
+   * one's count against the paid caps, and the browser's pages (pages-only, camoufox) against no per-run call cap.
+   */
+  countsFreeCalls: boolean;
   /** The provider's own fixed spacing between call starts in seconds (camoufox), or null. */
   minSpacingSeconds: number | null;
   /**
@@ -165,6 +170,7 @@ export function buildContext(deps: EngineDeps, options: EngineOptions = {}): Eng
       planFixedMicroGbp: b.planFixedMicroGbp,
       excludedFromSchedule: b.excludedFromSchedule,
       billed: b.billable,
+      countsFreeCalls: !b.billable && b.pagesOnly !== true,
       minSpacingSeconds: b.minSpacingSeconds ?? null,
       flightRequestSeconds: id === 'camoufox' ? camoufoxRequestSeconds(config) : null,
     };

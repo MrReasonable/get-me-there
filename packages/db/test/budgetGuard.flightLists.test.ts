@@ -109,17 +109,17 @@ describe('flight-list pages and the guard (spec rev 55 §8.1)', () => {
     });
   });
 
-  it('flight pages count against execution-free-calls', () => {
+  // why: spec rev 65: the browser's pages count against no per-run call cap; only the flight allowance bounds them
+  it('flight pages never count against execution-free-calls: only the flight allowance stops them', () => {
     const g = guardFor({
-      maxFreeCalls: 3,
+      maxFreeCalls: 1,
       snapshotCaps: { e1: { camoufox: 100 } },
-      snapshotFlightPages: { e1: 10 },
+      snapshotFlightPages: { e1: 3 },
     });
     g.reserve(grid('e1', 0)).finalise(done);
-    g.reserve(flights('e1')).finalise(done);
-    g.reserve(flights('e1')).finalise(done);
-    expect(scopeOf(() => g.reserve(flights('e1')))).toBe('execution-free-calls');
-    expect(g.usage({ kind: 'execution-free-calls', executionId: 'e1' }).calls).toBe(3);
+    for (let i = 0; i < 3; i++) g.reserve(flights('e1')).finalise(done);
+    expect(scopeOf(() => g.reserve(flights('e1')))).toBe('provider-execution');
+    expect(g.usage({ kind: 'execution-free-calls', executionId: 'e1' }).calls).toBe(0);
   });
 });
 
@@ -263,8 +263,8 @@ describe('page counts on the ledger (spec rev 56 §5.3, §7)', () => {
       g.usage({ kind: 'provider-execution', executionId: 'e1', providerId: 'camoufox' }).flightLists?.calls,
     ).toBe(5);
     expect(g.usage({ kind: 'provider-month', providerId: 'camoufox' }).calls).toBe(7);
-    // execution-free-calls still counts requests, not pages
-    expect(g.usage({ kind: 'execution-free-calls', executionId: 'e1' }).calls).toBe(7);
+    // why: spec rev 65: no browser page counts toward execution-free-calls
+    expect(g.usage({ kind: 'execution-free-calls', executionId: 'e1' }).calls).toBe(0);
   });
 
   it('21.6 review I2: a flights request cut off before any answer is out of the run allowance but in the month; a timeout is in both', () => {

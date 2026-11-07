@@ -121,7 +121,8 @@ export function checkBudget(
   const blockedBy = new Map<LineKey, string>();
   const breaches: Breach[] = [];
   const billed = spend.filter((s) => ctx.limitsOf(s.providerId).billed);
-  const free = spend.filter((s) => !ctx.limitsOf(s.providerId).billed);
+  // why: the browser's pages count against no per-run call cap (spec rev 65), so a free line is a free API provider's
+  const free = spend.filter((s) => ctx.limitsOf(s.providerId).countsFreeCalls);
   const ids = (xs: readonly PlannedSpend[]) => [...new Set(xs.map((s) => s.providerId))];
   const total = (xs: readonly PlannedSpend[], f: (s: PlannedSpend) => number) =>
     xs.reduce((a, s) => a + f(s), 0);

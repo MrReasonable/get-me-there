@@ -2,7 +2,7 @@
  * Spec revision 56 §8.1 "The flight-list step" (WP20 Task 20.9; WP21 Task 21.6): after discovery and before
  * verification (ruling 20.0 concern 1; the execution's stage stays `discovery`), in `camoufox` only, the browser worker
  * reads the flight list of the 10 cheapest date pairs on the search's board, one request each, on an allowance of its
- * own (the snapshot's `flightListPages`, 20 pages, inside EXECUTION_MAX_FREE_CALLS). When the worker last reported `RETURN_SELECT_VERIFIED` (and `BOOKING_SELECT_VERIFIED`) the
+ * own (the snapshot's `flightListPages`, 20 pages; a browser page counts against no free-call cap). When the worker last reported `RETURN_SELECT_VERIFIED` (and `BOOKING_SELECT_VERIFIED`) the
  * plan reads each pair's return leg (and the shown pairing's booking options) too: up to 2 pages a request, the search's
  * limits sent with it, an outbound-only request instead when the window cannot hold that, and no further
  * return phase (or booking read) after one ends transient.

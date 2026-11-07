@@ -85,8 +85,8 @@ export interface SmokeResult {
 }
 
 /**
- * The free calls camoufox's one tile may ledger (WP14): one page, and up to two refusals for the worker's spacing that
- * load nothing; it draws on the execution's free-call cap like any free provider.
+ * The attempts camoufox's one tile may ledger (WP14): one page, and up to two refusals for the worker's spacing that
+ * load nothing; the browser's pages count against no free-call cap (spec rev 65).
  */
 export const CAMOUFOX_SMOKE_ATTEMPTS = 3;
 
@@ -108,7 +108,7 @@ function openSmokeExecution(ports: Ports, q: DiscoveryQuery, worst: WorstCase, b
     expandTop: SMOKE_EXPAND_TOP,
     budget,
     worst,
-    maxFreeCalls: worst.freeCalls + (cf ? CAMOUFOX_SMOKE_ATTEMPTS : 0),
+    maxFreeCalls: worst.freeCalls,
     estimate: toolEstimate(
       ports,
       [

@@ -106,9 +106,9 @@ window's start and end with calls and cost so far.
   before then names it only if you add it in its Edit page, More options). Discovery only, `list` mode: one page per
   day pair, through the host-side worker on the machine running it (macOS or Linux; docs/setup.md section 14).
 - Caps: none of its own on pages or scrolls, a run's or a month's: a run loads a page for every day pair (list) or block
-  (grid) it has to read, and the Providers page shows the calendar month's pages, with no cap on them. Its pages still
-  count as free calls against the run's `EXECUTION_MAX_FREE_CALLS`, and its flight-list pages have their own allowance
-  of 20 a run. A run stopped at the per-run page cap an earlier version had is never resumed: Search again starts a
+  (grid) it has to read, and the Providers page shows the calendar month's pages, with no cap on them. Its pages count
+  against no per-run call cap (neither `EXECUTION_MAX_FREE_CALLS` nor a search's own limit of free calls); its
+  flight-list pages have their own allowance of 20 a run. A run stopped at the per-run page cap an earlier version had is never resumed: Search again starts a
   fresh run that reuses the prices already found.
 - Spacing: at least `CAMOUFOX_MIN_SPACING_SECONDS` (default 30, 0 to 600) from the start of one page to the start of the
   next; the app's limiter uses it directly as its minimum interval and the worker allows 2 seconds of arrival jitter. The
@@ -117,8 +117,8 @@ window's start and end with calls and cost so far.
 - Pages at once: `CAMOUFOX_PAGES_AT_ONCE` (default 1, 1 to 8) is the app's concurrency for camoufox and the pages the worker loads at once, each in its own browser and profile; the spacing above still runs from one page's start to the next, across every page in flight. A shared setting: a difference between the worker and the app skips the provider.
 - Cool-downs: 48 hours (`CAMOUFOX_COOLDOWN_HOURS`, 24 to 100,000) after a challenge, sign-in or consent page or a
   signed-in profile; 1 hour after a page it does not recognise. A page that never settles is a `parse` error with no cool-down.
-- Never billable, cost 0, never cached. Camoufox pages also draw on `EXECUTION_MAX_FREE_CALLS`, the free-call cap every
-  free provider shares.
+- Never billable, cost 0, never cached. Camoufox pages never draw on `EXECUTION_MAX_FREE_CALLS`, the free-call cap the
+  free API providers share.
 - Coverage: a run reads every day pair it has to, a page each in list mode (2,184 for one worked-example airport pair,
   8,736 for its four pairs) or a page a 7 × 7 block in grid mode (312 pages for the four pairs).
 - Costs (the spec's §2, in full on docs/setup.md section 14): **Terms** (read the provider's terms before enabling

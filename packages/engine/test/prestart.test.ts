@@ -79,7 +79,10 @@ describe('pre-start checks (spec §8.1 "for every scope check usage(scope) + est
     const h = createHarness();
     const ctx = buildContext(h.deps, h.options);
     // why: the fixture is billed; its limits read as a free provider's here stand in for Travelpayouts
-    const free = { ...ctx, limitsOf: (id: ProviderId) => ({ ...ctx.limitsOf(id), billed: false }) };
+    const free = {
+      ...ctx,
+      limitsOf: (id: ProviderId) => ({ ...ctx.limitsOf(id), billed: false, countsFreeCalls: true }),
+    };
     const def = h.createDefinition({
       budget: { maxCalls: 1000, maxFreeCalls: 0, maxCostMicroGbp: 1_000_000_000 },
     });

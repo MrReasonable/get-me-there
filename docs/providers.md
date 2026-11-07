@@ -110,7 +110,7 @@ process environment to the browser. Any other `camoufox-js` version or Camoufox 
 
 **Limits.** `CAMOUFOX_PAGES_AT_ONCE` pages at once (default 1, at most 8), each in its own browser and profile; at least `CAMOUFOX_MIN_SPACING_SECONDS` (default 30, 0 to 600, never randomised; a value of 0 means no pause: pages start back to back, from your own address; scrolls do so only when `CAMOUFOX_GRID_SCROLL_SPACING_SECONDS` is 0)
 from the start of one page to the next, whichever pages are in flight, persisted across restarts; no page or scroll cap, a run's or a
-month's (its pages count as the run's free calls, `EXECUTION_MAX_FREE_CALLS`). No
+month's, and its pages count against no per-run call cap (`EXECUTION_MAX_FREE_CALLS` included). No
 proxies; no challenge is ever solved, clicked through or waited out; consent is rejected, never accepted (the
 operator's saved cookie choice, Reject all, is applied before every page and compared by value after it; a consent page
 stops it). The worker stops and cools down whenever a page is not a recognised results page: a challenge or
@@ -130,8 +130,7 @@ on `linux-arm64` and 663 MB on `linux-x64` (about 1.25 GB unpacked). **The worke
 Mac) is stopped only by `CAMOUFOX_WORKER_KEY`. **Money:** none.
 
 **Coverage.** In `list` mode a page prices one day pair, so a run loads a page for each of the 2,184 day pairs of one
-worked-example airport pair (8,736 for its four pairs); a run of more pages than the search's free calls
-(`EXECUTION_MAX_FREE_CALLS`, 2,000 by default) is refused at its start. The `grid` mode (work package 15, opt-in with
+worked-example airport pair (8,736 for its four pairs), whatever the search's limit of free calls. The `grid` mode (work package 15, opt-in with
 `CAMOUFOX_MODE=grid`) reads up to 49 day pairs per view of the Dates tab's 7 × 7 grid: for one worked-example pair, 78
 blocks on a lattice of 7 × 7 (26 departure columns × 3 return blocks for the 10–21-night band; 2,184 of their 3,822
 cells are in the band and stored), 312 for the four pairs. One scroll moves one day (measured 2026-10-18), so a

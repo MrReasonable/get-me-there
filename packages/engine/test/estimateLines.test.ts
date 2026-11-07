@@ -585,10 +585,11 @@ describe('the flight line: when it applies and which date pairs it counts (spec 
 });
 
 describe("the flight line's caps and their words", () => {
-  it('1 free call left reads 1 pair out and back; blocking drops its notes and zeroes the bound it keeps', () => {
-    const est = startOf(flightEngine(15, BOTH, { maxFreeCalls: 16 }));
-    expect(est.assumptions.slice(-1)).toEqual(["flights for 1 date pair: the run's free-call limit"]);
-    expect(est.flightLists).toMatchObject({ pairs: 1, pagesMax: 2, returns: true });
+  // why: spec rev 65: the browser's pages count against no free-call cap, so a tight one never cuts the flight pairs
+  it('a free-call cap the grid pages already pass still reads all 10 pairs out and back; blocking zeroes them', () => {
+    const est = startOf(flightEngine(15, BOTH, { maxFreeCalls: 1 }));
+    expect(est.assumptions.some((a) => a.startsWith('flights for'))).toBe(false);
+    expect(est.flightLists).toMatchObject({ pairs: 10, pagesMax: 20, returns: true });
     const blocked = withBlocked(est, new Map([[lineKey('discovery', 'camoufox'), 'provider-execution']]));
     expect(blocked.assumptions.filter((a) => a.includes('flights'))).toEqual([]);
     expect(blocked.flightLists).toEqual({
@@ -602,24 +603,13 @@ describe("the flight line's caps and their words", () => {
   });
 
   it('blocking keeps every note that is not the flight line’s own, even one that mentions flights later on', () => {
-    const est = startOf(flightEngine(15, BOTH, { maxFreeCalls: 16 }));
+    const est = startOf(flightEngine(15, BOTH));
     const other = 'a note on flights for 3 date pairs from an earlier pass';
     const blocked = withBlocked(
       { ...est, assumptions: [...est.assumptions, other] },
       new Map([[lineKey('discovery', 'camoufox'), 'provider-execution']]),
     );
     expect(blocked.assumptions.slice(-2)).toEqual([other, BLOCKED_NOTE]);
-  });
-
-  it('no free call left: no "+ flights" clause, only the cap that left none', () => {
-    const est = startOf(flightEngine(15, BOTH, { maxFreeCalls: 15 }));
-    expect(est.assumptions).toEqual([
-      RETRY_NOTE,
-      NO_RETRY_NOTE,
-      'camoufox: 15 discovery tiles planned; a tile that pages spends one call a page',
-      WORST_CASE_NOTE,
-      "flights for 0 date pairs: the run's free-call limit",
-    ]);
   });
 
   it('a line marked out and back that reads no pair carries no window margin', () => {
@@ -650,18 +640,14 @@ describe('the flight line on a resume', () => {
     return { e, done: await e.runToEnd() };
   }
 
-  it("the free calls this execution has spent count against the run's free-call limit", async () => {
+  it('the remaining pairs are what the plan has left, whatever free calls the execution has spent', async () => {
     const { e, done } = await stoppedAfterFour();
     expect(estimateRemainingFor(e.ctx, done, true).flightLists?.pairs).toBe(6);
-    // why: every browser page so far (grid and flights) is a free call of this execution; 3 more are allowed
-    const spent = e.ledgerRows('camoufox').length;
     const tight = {
       ...done,
-      snapshot: { ...done.snapshot, budget: { ...done.snapshot.budget, maxFreeCalls: spent + 3 } },
+      snapshot: { ...done.snapshot, budget: { ...done.snapshot.budget, maxFreeCalls: 1 } },
     };
-    const est = estimateRemainingFor(e.ctx, tight, true);
-    expect(est.flightLists?.pairs).toBe(3);
-    expect(est.assumptions).toContain("flights for 3 date pairs: the run's free-call limit");
+    expect(estimateRemainingFor(e.ctx, tight, true).flightLists?.pairs).toBe(6);
   });
 
   it('a child or a catch-up execution runs no flight-list step, so its remaining estimate has no flight line', async () => {

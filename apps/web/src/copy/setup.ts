@@ -55,7 +55,7 @@ export const SETUP_COPY = {
       '0 allows no billed calls: SearchApi does not run for this search, so its date grid and its fare checks are skipped. Raise this number to let it run. New searches start from EXECUTION_MAX_CALLS in .env.',
     maxCallsHint: 'Calls to paid sources (SearchApi). New searches start from EXECUTION_MAX_CALLS in .env.',
     maxFreeCallsHint:
-      "Requests to free sources (the Aviasales cache, the browser worker's pages) a run may make before it stops.",
+      "Requests to free sources (the Aviasales cache) a run may make before it stops. The browser worker's pages never count.",
     maxCostHint: 'A run stops before it would spend more than this. 0 means it spends nothing.',
     constraintsHint:
       'Limits on the flights a fare check keeps. A calendar price is never checked against them, and says so.',

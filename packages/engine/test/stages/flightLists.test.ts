@@ -262,16 +262,16 @@ describe('the flight-list step after discovery', () => {
     expect(flightRows(e, id)).toHaveLength(1);
   });
 
-  it('counts its pages toward execution-free-calls: 105 after 100 grid pages lets 5 through, then free-call-cap', async () => {
-    const { e, cam } = camoufoxOnly({ cells: 100, maxFreeCalls: 105 });
+  // why: spec rev 65: the browser's pages count against no per-run call cap; only the flight allowance bounds the step
+  it('counts no page toward execution-free-calls: maxFreeCalls 5 after 100 grid pages still reads all 10', async () => {
+    const { e, cam } = camoufoxOnly({ cells: 100, maxFreeCalls: 5 });
     const done = await e.settled(await start(e));
     expect(cam.calls).toHaveLength(100);
-    expect(cam.flightRequests()).toBe(5);
-    const rows = flightRows(e, done.id);
-    expect(rows.filter((r) => r.status === 'read')).toHaveLength(5);
-    expect(rows.filter((r) => r.reason === 'free-call-cap')).toHaveLength(5);
-    expect(done.flightLists?.ended).toBe('stopped');
+    expect(cam.flightRequests()).toBe(10);
+    expect(flightRows(e, done.id).filter((r) => r.status === 'read')).toHaveLength(10);
+    expect(done.flightLists?.ended).toBeNull();
     expect(done.status).toBe('completed');
+    expect(e.ctx.budget.usage({ kind: 'execution-free-calls', executionId: done.id }).calls).toBe(0);
   });
 
   it('a run whose preflight disabled camoufox stores no plan and reads no flights', async () => {

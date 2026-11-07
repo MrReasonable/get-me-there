@@ -19,24 +19,14 @@ const line = (fit: ReturnType<typeof budgetFitFor>, prefix: string) =>
   fit.perScope.find((x) => x.scope.startsWith(prefix))?.estimated;
 
 describe('budgetFit with the return leg (spec rev 56 §8.1, §8.2)', () => {
-  it('the free-call line counts flight requests (10), one a pair, with no month line for the browser', () => {
-    const e = scheduled(15, '0 5 * * 1', BOTH);
-    const fit = budgetFitFor(e.ctx, e.definition, e.definition.id);
-    expect(line(fit, 'execution-free-calls')).toBe(15 + 10);
-    expect(line(fit, 'provider-month:camoufox')).toBeUndefined();
-  });
-
-  it('without the return flag the free-call line still counts one request a pair (10 a run)', () => {
-    const e = scheduled(15, '0 5 * * 1', { RETURN_SELECT_VERIFIED: false });
-    const fit = budgetFitFor(e.ctx, e.definition, e.definition.id);
-    expect(line(fit, 'execution-free-calls')).toBe(15 + 10);
-  });
-
-  // why: final review B-M3: flags not yet read count the return phase, as the read button does (prov-008)
-  it('with the flags unread the free-call line counts one request a pair (10 a run)', () => {
-    const e = scheduled(15, '0 5 * * 1', null);
-    const fit = budgetFitFor(e.ctx, e.definition, e.definition.id);
-    expect(line(fit, 'execution-free-calls')).toBe(15 + 10);
+  // why: spec rev 65: the browser's pages and its flight requests count against no free-call cap, whatever its flags
+  it('the free-call line counts no browser page or flight request, with no month line for the browser', () => {
+    for (const flags of [BOTH, { RETURN_SELECT_VERIFIED: false }, null]) {
+      const e = scheduled(15, '0 5 * * 1', flags);
+      const fit = budgetFitFor(e.ctx, e.definition, e.definition.id);
+      expect(line(fit, 'execution-free-calls')).toBe(0);
+      expect(line(fit, 'provider-month:camoufox')).toBeUndefined();
+    }
   });
 
   it('cost-r3-001: two daily 168 h schedules of 100 grid pages each both fit, with no month line for the browser', () => {

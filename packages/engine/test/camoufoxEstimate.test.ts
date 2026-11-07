@@ -57,14 +57,13 @@ describe('the camoufox estimate (cost-004, cost-009, cost-011, prov-013)', () =>
       [],
     );
   });
-  // why: the browser's pages still count against EXECUTION_MAX_FREE_CALLS (1,000 by default), the cap every free
-  // provider shares; it is the only cap a browser run meets
-  it('a run of more pages than the free-call cap is blocked by that shared cap, never by a browser cap', () => {
+  // why: spec rev 65: the browser's pages count against no per-run call cap, the free-call cap included
+  it('a run of more pages than the free-call cap is never blocked by it', () => {
     const { e, def } = workedExample();
     const built = buildSnapshot(e.ctx, def);
     const est = estimateStart(e.ctx, built.snapshot, built.cells, null);
-    const check = checkBudget(e.ctx, spendOf(est), built.snapshot.budget, null, def.id);
-    expect(check.breaches.map((b) => b.scope)).toEqual(['execution-free-calls']);
+    expect(built.snapshot.budget.maxFreeCalls).toBeLessThan(2184);
+    expect(checkBudget(e.ctx, spendOf(est), built.snapshot.budget, null, def.id).breaches).toEqual([]);
   });
   // why: spec rev 64: the browser worker has no monthly cap, so the fit has no month row and no coverage warning for it
   it('budgetFit lists no month, run or coverage scope for camoufox', () => {

@@ -325,8 +325,9 @@ export class SqliteBudgetGuard implements BudgetGuard {
         throw this.exceeded('execution-calls', caps.maxCalls, u.calls, 1, p.providerId);
       if (p.costMicroGbp > 0 && u.cost + p.costMicroGbp > caps.maxCostMicroGbp)
         throw this.exceeded('execution-cost', caps.maxCostMicroGbp, u.cost, p.costMicroGbp, p.providerId);
-    } else {
-      const u = this.executionRows(p.executionId, this.providersWhere(false), false);
+    } else if (budget.pagesOnly !== true) {
+      // why: spec rev 65: the browser's pages (pages-only) count against no per-run call cap; a free API's calls do
+      const u = this.executionRows(p.executionId, this.freeCallProviders(), false);
       if (u.calls + 1 > caps.maxFreeCalls)
         throw this.exceeded('execution-free-calls', caps.maxFreeCalls, u.calls, 1, p.providerId);
     }
@@ -338,7 +339,11 @@ export class SqliteBudgetGuard implements BudgetGuard {
   ): Usage {
     const caps = this.executionCaps(executionId);
     const billed = kind !== 'execution-free-calls';
-    const u = this.executionRows(executionId, this.providersWhere(billed), billed);
+    const u = this.executionRows(
+      executionId,
+      billed ? this.providersWhere(true) : this.freeCallProviders(),
+      billed,
+    );
     const cap =
       kind === 'execution-calls'
         ? caps.maxCalls
@@ -435,6 +440,11 @@ export class SqliteBudgetGuard implements BudgetGuard {
 
   protected providersWhere(billable: boolean): ProviderId[] {
     return PROVIDER_IDS.filter((id) => this.config.providers[id]?.billable === billable);
+  }
+
+  /** The providers whose calls count against a run's free-call cap: the free ones, but never the browser's pages. */
+  private freeCallProviders(): ProviderId[] {
+    return this.providersWhere(false).filter((id) => this.config.providers[id]?.pagesOnly !== true);
   }
 
   protected budgetFor(providerId: ProviderId): ProviderBudget {
